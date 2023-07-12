@@ -77,7 +77,7 @@ func getCandidates(nodeName string) ([]Candidate, error) {
 	var candidateHandlers = []CandidateHandler{
 		{
 			Name:      "",
-			Command:   echoCommand, // echoCommand or lsblkCommand
+			Command:   lsblkCommand, // echoCommand or lsblkCommand
 			ParseFunc: parseFreeBlockDev,
 		},
 	}
