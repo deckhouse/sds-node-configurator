@@ -6,9 +6,10 @@ WORKDIR /go/src/storagecontroller
 COPY . .
 RUN go mod download
 WORKDIR /go/src/storagecontroller/cmd/bc
-RUN CGO_ENABLE=0 GOOS=linux go build -a -installsuffix cgo -o stctrl
+RUN GOOS=linux GOARCH=amd64 go  build -o stctrl
 
-FROM ubuntu:latest
+FROM amd64/ubuntu:jammy-20230624
+
 WORKDIR /root/
 COPY --from=builder /go/src/storagecontroller/cmd/bc .
 

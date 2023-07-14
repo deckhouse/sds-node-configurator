@@ -3,18 +3,17 @@ package blockdev
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog"
 	"os/exec"
-	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"storage-configurator/pkg/utils/errors/scerror"
 	"strings"
 	"time"
+
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, interval int) error {
@@ -38,13 +37,15 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 				for _, cand := range candidates {
 					// seen[cand.UUID.String()+"+"+cand.Name]
 					// if duplicate
-					if _, yes := seen[cand.Name]; yes {
-						continue
-					}
+
+					//if _, yes := seen[cand.Name]; yes {
+					//	continue
+					//}
 					// seen[cand.UUID.String()+"+"+cand.Name]
 					//
 					seen[cand.Name] = struct{}{}
 					candiCh <- cand
+					//klog.Info("candidate W : ", cand)
 				}
 			case <-ctx.Done():
 				return
@@ -58,15 +59,14 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 			return ctx.Err()
 
 		case err := <-errCh:
-			return fmt.Errorf("Cannot get storage pool candidates: %w", err)
+			return fmt.Errorf("cannot get storage pool candidates: %w", err)
 
 		case cand := <-candiCh:
+			klog.Info("candidate : ", cand)
 			if cand.SkipReason != "" {
 				klog.Infof("Skip %s as it %s", cand.Name, cand.SkipReason)
 				continue
 			}
-			klog.Infof("Processing %s", cand)
-
 			// Create resource
 		}
 	}
@@ -76,32 +76,35 @@ func getCandidates(nodeName string) ([]Candidate, error) {
 	var candidates []Candidate
 	var candidateHandlers = []CandidateHandler{
 		{
-			Name:      "",
-			Command:   lsblkCommand, // echoCommand or lsblkCommand
+			Name:      "deviceX",
+			Command:   lsblkCommand,
 			ParseFunc: parseFreeBlockDev,
 		},
 	}
 	for _, handler := range candidateHandlers {
 		cmd := exec.Command(handler.Command[0], handler.Command[1:]...)
+
 		var outs, errs bytes.Buffer
 		cmd.Stdout = &outs
 		cmd.Stderr = &errs
+
 		err := cmd.Run()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf(scerror.ExeLSBLK, err, errs.String())
 		}
-		cs, err := handler.ParseFunc(nodeName, outs)
+
+		cs, err := handler.ParseFunc(nodeName, outs.Bytes())
 		if err != nil {
-			return nil, fmt.Errorf("faled to read %s devices: %s. Error was %s", handler.Name, err, errs.String())
+			return nil, fmt.Errorf("faled to read %s devices: %s. Error was %s", handler.Name, err, err.Error())
 		}
 		candidates = append(candidates, cs...)
 	}
 	return candidates, nil
 }
 
-func parseFreeBlockDev(nodeName string, out bytes.Buffer) ([]Candidate, error) {
+func parseFreeBlockDev(nodeName string, out []byte) ([]Candidate, error) {
 	var devices Devices
-	err := json.Unmarshal(out.Bytes(), &devices)
+	err := json.Unmarshal(out, &devices)
 	if err != nil {
 		return nil, fmt.Errorf(scerror.ParseOutlsblkError+"%w", err)
 	}
@@ -110,16 +113,20 @@ func parseFreeBlockDev(nodeName string, out bytes.Buffer) ([]Candidate, error) {
 	var r []Candidate
 
 	for i, j := range devices.BlockDevices {
-		tempMap[j.Kname] = i
-		if j.Mountpoint == "" && j.Hotplug == false && !strings.HasPrefix(j.Name, DRBDName) {
-			_, ok := tempMap[j.Pkname]
+		tempMap[j.KName] = i
+		if len(j.MountPoint) == 0 && !j.HotPlug && !strings.HasPrefix(j.Name, DRBDName) {
+			_, ok := tempMap[j.PkName]
 			if !ok {
 				r = append(r, Candidate{
-					NodeName: nodeName,
-					Name:     buildNameDevices(devices.BlockDevices[i].Name[1:]),
-					Path:     devices.BlockDevices[i].Name,
-					Size:     devices.BlockDevices[i].Size,
-					Model:    devices.BlockDevices[i].Model,
+					NodeName:   nodeName,
+					Name:       buildNameDevices(devices.BlockDevices[i].Name[1:]),
+					Path:       devices.BlockDevices[i].Name,
+					Size:       devices.BlockDevices[i].Size,
+					Model:      devices.BlockDevices[i].Model,
+					MountPoint: devices.BlockDevices[i].MountPoint,
+					HotPlug:    devices.BlockDevices[i].HotPlug,
+					PkName:     devices.BlockDevices[i].PkName,
+					KName:      devices.BlockDevices[i].KName,
 				})
 			}
 		}
@@ -133,13 +140,16 @@ func buildNameDevices(name string) string {
 	tempName.WriteString(strings.Replace(name, "/", "-", -1))
 	tempName.WriteString("-")
 	tempName.Write(tempBuff)
-	hash := md5.Sum(tempBuff)
-	tempName.WriteString(hex.EncodeToString(hash[:]))
 	return tempName.String()
 }
 
 func newKubernetesEvent(nodeName string, involedObject v1.ObjectReference, reason, eventType, message string) v1.Event {
 	eventTime := metav1.Now()
+
+	if eventType == "" {
+		eventType = v1.EventTypeNormal
+	}
+
 	event := v1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace:    v1.NamespaceDefault,
@@ -158,7 +168,7 @@ func newKubernetesEvent(nodeName string, involedObject v1.ObjectReference, reaso
 		Count:          1,
 		FirstTimestamp: eventTime,
 		LastTimestamp:  eventTime,
-		Type:           v1.EventTypeNormal,
+		Type:           eventType,
 	}
 	return event
 }
