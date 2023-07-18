@@ -119,20 +119,18 @@ func parseFreeBlockDev(nodeName string, out []byte) ([]Candidate, error) {
 	}
 
 	for i, j := range devices.BlockDevices {
-		if len(j.MountPoint) == 0 && !j.HotPlug && !strings.HasPrefix(j.Name, DRBDName) && j.Type != LoopDeviceType {
-			_, ok := tempMapKName[j.PkName]
+		if len(j.MountPoint) == 0 && !j.HotPlug && !strings.HasPrefix(j.Name, DRBDName) && j.Type != LoopDeviceType && len(j.FSType) == 0 {
+			_, ok := tempMapPKName[j.KName]
 			if !ok {
-				_, p := tempMapPKName[j.KName]
-				if !p {
-					r = append(r, Candidate{
-						NodeName:   nodeName,
-						Name:       buildNameDevices(devices.BlockDevices[i].Name[1:]),
-						Path:       devices.BlockDevices[i].Name,
-						Size:       devices.BlockDevices[i].Size,
-						Model:      devices.BlockDevices[i].Model,
-						MountPoint: devices.BlockDevices[i].MountPoint,
-					})
-				}
+				r = append(r, Candidate{
+					NodeName:   nodeName,
+					Name:       buildNameDevices(devices.BlockDevices[i].Name[1:]),
+					Path:       devices.BlockDevices[i].Name,
+					Size:       devices.BlockDevices[i].Size,
+					Model:      devices.BlockDevices[i].Model,
+					MountPoint: devices.BlockDevices[i].MountPoint,
+					FSType:     devices.BlockDevices[i].FSType,
+				})
 			}
 		}
 	}

@@ -12,6 +12,7 @@ type Candidate struct {
 	HotPlug    bool
 	KName      string
 	PkName     string
+	FSType     string
 }
 
 type CandidateHandler struct {
@@ -36,4 +37,5 @@ type Device struct {
 	Wwn        string `json:"wwn"`
 	KName      string `json:"kname"`
 	PkName     string `json:"pkname"`
+	FSType     string `json:"fstype"`
 }
