@@ -109,25 +109,30 @@ func parseFreeBlockDev(nodeName string, out []byte) ([]Candidate, error) {
 		return nil, fmt.Errorf(scerror.ParseOutlsblkError+"%w", err)
 	}
 
-	tempMap := make(map[string]int)
+	tempMapKName := make(map[string]int)
+	tempMapPKName := make(map[string]int)
 	var r []Candidate
 
 	for i, j := range devices.BlockDevices {
-		tempMap[j.KName] = i
-		if len(j.MountPoint) == 0 && !j.HotPlug && !strings.HasPrefix(j.Name, DRBDName) {
-			_, ok := tempMap[j.PkName]
+		tempMapKName[j.KName] = i
+		tempMapPKName[j.PkName] = i
+	}
+
+	for i, j := range devices.BlockDevices {
+		if len(j.MountPoint) == 0 && !j.HotPlug && !strings.HasPrefix(j.Name, DRBDName) && j.Type != LoopDeviceType {
+			_, ok := tempMapKName[j.PkName]
 			if !ok {
-				r = append(r, Candidate{
-					NodeName:   nodeName,
-					Name:       buildNameDevices(devices.BlockDevices[i].Name[1:]),
-					Path:       devices.BlockDevices[i].Name,
-					Size:       devices.BlockDevices[i].Size,
-					Model:      devices.BlockDevices[i].Model,
-					MountPoint: devices.BlockDevices[i].MountPoint,
-					HotPlug:    devices.BlockDevices[i].HotPlug,
-					PkName:     devices.BlockDevices[i].PkName,
-					KName:      devices.BlockDevices[i].KName,
-				})
+				_, p := tempMapPKName[j.KName]
+				if !p {
+					r = append(r, Candidate{
+						NodeName:   nodeName,
+						Name:       buildNameDevices(devices.BlockDevices[i].Name[1:]),
+						Path:       devices.BlockDevices[i].Name,
+						Size:       devices.BlockDevices[i].Size,
+						Model:      devices.BlockDevices[i].Model,
+						MountPoint: devices.BlockDevices[i].MountPoint,
+					})
+				}
 			}
 		}
 	}

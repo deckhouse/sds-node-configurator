@@ -1,0 +1,11 @@
+apiVersion: storage.deckhouse.io/v2alpha1
+kind: BlockDevice
+metadata:
+  name: my-block-device2
+status:
+    nodename: "test_test_test_node"
+    id: "8888888"
+    path: "/dev/sds"
+    size: "70Gb"
+    model: "NV-SSD-XX"
+  

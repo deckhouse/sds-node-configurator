@@ -1,8 +1,9 @@
 package blockdev
 
 const (
-	DRBDName = "/dev/drbd"
-	AppName  = "storage-configurator"
+	DRBDName       = "/dev/drbd"
+	LoopDeviceType = "loop"
+	AppName        = "storage-configurator"
 )
 
 var (
