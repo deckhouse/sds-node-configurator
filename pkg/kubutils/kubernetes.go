@@ -2,6 +2,7 @@ package kubutils
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/runtime"
 	"storage-configurator/pkg/utils/errors/scerror"
 
 	"k8s.io/client-go/rest"
@@ -9,9 +10,11 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func CreateKubernetesClient(config *rest.Config) (kclient.Client, error) {
+func CreateKubernetesClient(config *rest.Config, schema *runtime.Scheme) (kclient.Client, error) {
 	var kc kclient.Client
-	kc, err := kclient.New(config, kclient.Options{})
+	kc, err := kclient.New(config, kclient.Options{
+		Scheme: schema,
+	})
 	if err != nil {
 		return kc, fmt.Errorf(scerror.KubCreateClientError+"%w", err)
 	}

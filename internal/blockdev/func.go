@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"k8s.io/apimachinery/pkg/types"
 	"os/exec"
+	"storage-configurator/api/v2alpha1"
 	"storage-configurator/pkg/utils/errors/scerror"
 	"strings"
 	"time"
@@ -63,11 +65,50 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 
 		case cand := <-candiCh:
 			klog.Info("candidate : ", cand)
+
+			device := &v2alpha1.BlockDevice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: cand.Name + "2359345kngi365bnrvni56nbi64bn3orb",
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "v1",
+							Kind:       "Node",
+							Name:       nodeName,
+							UID:        types.UID("95b1c7ed-97f6-4817-b167-17134efe3814"),
+						},
+					},
+				},
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "BlockDevice",
+					APIVersion: "storage.deckhouse.io/v2alpha1",
+				},
+				Status: v2alpha1.BlockDeviceStatus{
+					NodeName: nodeName,
+					ID:       cand.ID,
+					Path:     cand.Path,
+					Size:     cand.Size,
+					Model:    cand.Model,
+				},
+			}
+
+			err := kc.Create(ctx, device)
+			if err != nil {
+				klog.Errorf("error create DEVICE ", err)
+				return err
+			}
+
+			klog.Infof("create DEVICE")
+
+			//todo Get NodeInfo systemUid
+			// Create --> etcd
+			// Delete -- get -> etcd --> ( NAME /dev/sda/  <=> kube get ) --> Delete CR
+			// Edit ^
+			//
+
 			if cand.SkipReason != "" {
 				klog.Infof("Skip %s as it %s", cand.Name, cand.SkipReason)
 				continue
 			}
-			// Create resource
 		}
 	}
 }

@@ -1,26 +1,32 @@
 package v2alpha1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
-// EmptyBlockDevice empty block device
+const (
+	BDKind = "BlockDevice"
+)
+
+// BlockDevice empty block device
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type EmptyBlockDevice struct {
+type BlockDevice struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Status BlockDevicesStatus `json:"status,omitempty"`
+	Status BlockDeviceStatus `json:"status,omitempty"`
 }
 
-// EmptyBlockDeviceList contains a list of empty block device
+// BlockDeviceList contains a list of empty block device
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type EmptyBlockDeviceList struct {
+type BlockDeviceList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
-	Items           []EmptyBlockDeviceList `json:"items"`
+	Items           []BlockDevice `json:"items"`
 }
 
-type BlockDevicesStatus struct {
+type BlockDeviceStatus struct {
 	NodeName string `json:"nodename"`
 	ID       string `json:"id"`
 	Path     string `json:"path"`

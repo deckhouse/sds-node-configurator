@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"os"
 	"os/signal"
+	"storage-configurator/api/v2alpha1"
 	"storage-configurator/config"
 	"storage-configurator/internal/blockdev"
 	"storage-configurator/pkg/kubutils"
@@ -12,6 +16,14 @@ import (
 	"syscall"
 
 	"k8s.io/klog"
+)
+
+var (
+	resourcesSchemeFuncs = []func(scheme *runtime.Scheme) error{
+		clientgoscheme.AddToScheme,
+		extv1.AddToScheme,
+		v2alpha1.AddToScheme,
+	}
 )
 
 func main() {
@@ -35,8 +47,18 @@ func main() {
 		klog.Fatalln(err)
 	}
 
+	// Setup scheme for all resources
+	scheme := runtime.NewScheme()
+	for _, f := range resourcesSchemeFuncs {
+		err := f(scheme)
+		if err != nil {
+			klog.Error(err, "Failed to add to scheme")
+			os.Exit(1)
+		}
+	}
+
 	// Create Kubernetes client
-	kClient, err := kubutils.CreateKubernetesClient(kConfig)
+	kClient, err := kubutils.CreateKubernetesClient(kConfig, scheme)
 	if err != nil {
 		klog.Fatalln(err)
 	}

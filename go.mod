@@ -5,6 +5,7 @@ go 1.20
 require (
 	github.com/stretchr/testify v1.8.1
 	k8s.io/api v0.27.2
+	k8s.io/apiextensions-apiserver v0.27.2
 	k8s.io/apimachinery v0.27.2
 	k8s.io/client-go v0.27.2
 	k8s.io/klog v1.0.0
