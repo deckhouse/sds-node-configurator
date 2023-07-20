@@ -1,13 +1,14 @@
 package kubutils
 
 import (
+	"context"
 	"fmt"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"storage-configurator/pkg/utils/errors/scerror"
-
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"storage-configurator/pkg/utils/errors/scerror"
 )
 
 func CreateKubernetesClient(config *rest.Config, schema *runtime.Scheme) (kclient.Client, error) {
@@ -32,4 +33,13 @@ func KubernetesDefaultConfigCreate() (*rest.Config, error) {
 		return nil, fmt.Errorf(scerror.KubConfigError+"%w", err)
 	}
 	return config, nil
+}
+
+func GetNodeUID(ctx context.Context, kc kclient.Client, nodeName string) (string, error) {
+	node := &v1.Node{}
+	err := kc.Get(ctx, kclient.ObjectKey{Name: nodeName}, node)
+	if err != nil {
+		return "", fmt.Errorf(scerror.GetNodeError+"%w", err)
+	}
+	return string(node.UID), nil
 }

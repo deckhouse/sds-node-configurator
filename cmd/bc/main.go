@@ -63,13 +63,19 @@ func main() {
 		klog.Fatalln(err)
 	}
 
+	// Get node UID
+	nodeUID, err := kubutils.GetNodeUID(ctx, kClient, cliParams.NodeName)
+	if err != nil {
+		klog.Fatalln(err)
+	}
+
 	klog.Infof("Starting main loop...")
 
 	// Main loop: searching empty block devices and creating resources in Kubernetes
 	stop := make(chan struct{})
 	go func() {
 		defer cancel()
-		err := blockdev.ScanBlockDevices(ctx, kClient, cliParams.NodeName, cliParams.ScanInterval)
+		err := blockdev.ScanBlockDevices(ctx, kClient, cliParams.NodeName, cliParams.ScanInterval, nodeUID)
 		if errors.Is(err, context.Canceled) {
 			// only occurs if the context was cancelled, and it only can be cancelled on SIGINT
 			stop <- struct{}{}

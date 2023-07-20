@@ -3,8 +3,10 @@ package blockdev
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"os/exec"
 	"storage-configurator/api/v2alpha1"
@@ -12,13 +14,11 @@ import (
 	"strings"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, interval int) error {
+func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, interval int, nodeUID string) error {
 	candiCh := make(chan Candidate)
 	errCh := make(chan error)
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
@@ -47,7 +47,6 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 					//
 					seen[cand.Name] = struct{}{}
 					candiCh <- cand
-					//klog.Info("candidate W : ", cand)
 				}
 			case <-ctx.Done():
 				return
@@ -64,46 +63,28 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 			return fmt.Errorf("cannot get storage pool candidates: %w", err)
 
 		case cand := <-candiCh:
+
 			klog.Info("candidate : ", cand)
 
-			device := &v2alpha1.BlockDevice{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: cand.Name + "2359345kngi365bnrvni56nbi64bn3orb",
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion: "v1",
-							Kind:       "Node",
-							Name:       nodeName,
-							UID:        types.UID("95b1c7ed-97f6-4817-b167-17134efe3814"),
-						},
-					},
-				},
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "BlockDevice",
-					APIVersion: "storage.deckhouse.io/v2alpha1",
-				},
-				Status: v2alpha1.BlockDeviceStatus{
-					NodeName: nodeName,
-					ID:       cand.ID,
-					Path:     cand.Path,
-					Size:     cand.Size,
-					Model:    cand.Model,
-				},
-			}
-
-			err := kc.Create(ctx, device)
+			// Get Devices
+			listBlockDevices, err := getListBlockDevices(ctx, kc)
 			if err != nil {
-				klog.Errorf("error create DEVICE ", err)
-				return err
+				klog.Errorf(err.Error())
 			}
 
-			klog.Infof("create DEVICE")
+			fmt.Println(listBlockDevices)
 
-			//todo Get NodeInfo systemUid
-			// Create --> etcd
+			// Create Device
+			//err = createBlockDeviceObject(ctx, kc, cand, nodeName, nodeUID)
+			//if err != nil {
+			//	klog.Errorf("error create DEVICE ", err)
+			//}
+			//
+			//klog.Infof("create DEVICE")
+
+			//todo
 			// Delete -- get -> etcd --> ( NAME /dev/sda/  <=> kube get ) --> Delete CR
 			// Edit ^
-			//
 
 			if cand.SkipReason != "" {
 				klog.Infof("Skip %s as it %s", cand.Name, cand.SkipReason)
@@ -187,47 +168,66 @@ func buildNameDevices(name string) string {
 	return tempName.String()
 }
 
-func newKubernetesEvent(nodeName string, involedObject v1.ObjectReference, reason, eventType, message string) v1.Event {
-	eventTime := metav1.Now()
+func createBlockDeviceObject(ctx context.Context, kc kclient.Client, can Candidate, nodeName, nodeUID string) error {
 
-	if eventType == "" {
-		eventType = v1.EventTypeNormal
-	}
+	temp := fmt.Sprintf("%s%s%s%s%s", nodeName, can.ID, can.Path, can.Size, can.Model)
+	nameDev := fmt.Sprintf("dev-%x", md5.Sum([]byte(temp)))
 
-	event := v1.Event{
+	device := &v2alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace:    v1.NamespaceDefault,
-			GenerateName: involedObject.Name + ".",
-			Labels: map[string]string{
-				"app": AppName,
+			Name: nameDev,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: v2alpha1.OwnerReferencesAPIVersion,
+					Kind:       v2alpha1.Node,
+					Name:       nodeName,
+					UID:        types.UID(nodeUID),
+				},
 			},
 		},
-		Reason:         reason,
-		Message:        message,
-		InvolvedObject: involedObject,
-		Source: v1.EventSource{
-			Component: AppName,
-			Host:      nodeName,
+		TypeMeta: metav1.TypeMeta{
+			Kind:       v2alpha1.OwnerReferencesKind,
+			APIVersion: v2alpha1.TypeMediaAPIVersion,
 		},
-		Count:          1,
-		FirstTimestamp: eventTime,
-		LastTimestamp:  eventTime,
-		Type:           eventType,
+		Status: v2alpha1.BlockDeviceStatus{
+			NodeName:  nodeName,
+			ID:        can.ID,
+			Path:      can.Path,
+			Size:      can.Size,
+			Model:     can.Model,
+			MachineID: "machine-ID",
+		},
 	}
-	return event
+
+	err := kc.Create(ctx, device)
+	if err != nil {
+		return fmt.Errorf(scerror.CreateBlockDevice+"%w", err)
+	}
+	return nil
 }
 
-// Log and send creation event to Kubernetes
-func report(ctx context.Context, kc kclient.Client, successful bool, nodeName string, involvedObject v1.ObjectReference, message string) error {
-	var eventType, reason string
-	if successful {
-		eventType = v1.EventTypeNormal
-		reason = "Created"
-	} else {
-		eventType = v1.EventTypeWarning
-		reason = "Failed"
+func getListBlockDevices(ctx context.Context, kc kclient.Client) (map[string]v2alpha1.BlockDeviceStatus, error) {
+
+	deviceList := make(map[string]v2alpha1.BlockDeviceStatus)
+
+	listDevice := &v2alpha1.BlockDeviceList{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       v2alpha1.OwnerReferencesKind,
+			APIVersion: v2alpha1.TypeMediaAPIVersion,
+		},
+		ListMeta: metav1.ListMeta{},
+		Items:    []v2alpha1.BlockDevice{},
 	}
-	klog.Info(message)
-	event := newKubernetesEvent(nodeName, involvedObject, reason, eventType, message)
-	return kc.Create(ctx, &event)
+	err := kc.List(ctx, listDevice)
+	if err != nil {
+		return nil, fmt.Errorf(scerror.GetListBlockDevices+"%w", err)
+	}
+	for _, j := range listDevice.Items {
+		deviceList[j.Name] = j.Status
+	}
+	return deviceList, nil
+}
+
+func compareListDevices() {
+
 }

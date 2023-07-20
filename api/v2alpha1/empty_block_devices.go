@@ -4,10 +4,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const (
-	BDKind = "BlockDevice"
-)
-
 // BlockDevice empty block device
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -27,9 +23,10 @@ type BlockDeviceList struct {
 }
 
 type BlockDeviceStatus struct {
-	NodeName string `json:"nodename"`
-	ID       string `json:"id"`
-	Path     string `json:"path"`
-	Size     string `json:"size"`
-	Model    string `json:"model"`
+	NodeName  string `json:"nodename"`
+	ID        string `json:"id"`
+	Path      string `json:"path"`
+	Size      string `json:"size"`
+	Model     string `json:"model"`
+	MachineID string `json:"machine-id"`
 }

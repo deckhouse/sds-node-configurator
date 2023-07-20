@@ -6,4 +6,7 @@ const (
 	KubCreateClientError   = "error create kubernetes client"
 	ParseOutlsblkError     = "parse out lsblk error"
 	ExeLSBLK               = "exec lsblk %s error out %s"
+	GetNodeError           = "get node error"
+	GetListBlockDevices    = "list block devices"
+	CreateBlockDevice      = "create block device"
 )

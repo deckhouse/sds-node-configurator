@@ -14,12 +14,14 @@ rules:
       - nodes
     verbs:
       - get
+      - list
   - apiGroups:
       - ""
     resources:
       - events
     verbs:
       - create
+      - list
   - apiGroups:
       - storage.deckhouse.io
     resources:

@@ -7,14 +7,18 @@ import (
 )
 
 const (
-	//Kind         string = "CustomResourceDefinition"
-	GroupVersion string = "apiextensions.k8s.io/v1"
-	Plural       string = "blockdevices"
-	Singular     string = "blockdevice"
-	CRDName      string = "blockdevices.storage.deckhouse.io"
-	ShortName    string = "bd"
-	APIGroup     string = "storage.deckhouse.io"
-	APIVersion   string = "v2alpha1"
+	BDKind                    = "BlockDevice"
+	GroupVersion              = "apiextensions.k8s.io/v1"
+	Plural                    = "blockdevices"
+	Singular                  = "blockdevice"
+	CRDName                   = "blockdevices.storage.deckhouse.io"
+	ShortName                 = "bd"
+	APIGroup                  = "storage.deckhouse.io"
+	APIVersion                = "v2alpha1"
+	OwnerReferencesAPIVersion = "v1"
+	OwnerReferencesKind       = "BlockDevice"
+	TypeMediaAPIVersion       = APIGroup + "/" + APIVersion
+	Node                      = "Node"
 )
 
 // SchemeGroupVersion is group version used to register these objects
