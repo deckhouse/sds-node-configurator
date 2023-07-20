@@ -3,7 +3,7 @@ package blockdev
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
+	"crypto/sha1"
 	"encoding/json"
 	"fmt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -64,23 +64,30 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 
 		case cand := <-candiCh:
 
-			klog.Info("candidate : ", cand)
+			//klog.Info("candidate : ", cand.Name)
 
-			// Get Devices
+			hashLocalDevice := createUniqNameDevice(cand, nodeName)
+			fmt.Println("---------- HASH LOCAL DEVICE ---------", hashLocalDevice, cand.Path, cand.Name)
+
+			// Get Devices Node
 			listBlockDevices, err := getListBlockDevices(ctx, kc)
 			if err != nil {
 				klog.Errorf(err.Error())
 			}
 
-			fmt.Println(listBlockDevices)
+			// Нужно уникальное имя для поиска в устройствах
+			//status := listBlockDevices[""]
+			//fmt.Println(status.Path, status.Size)
 
-			// Create Device
-			//err = createBlockDeviceObject(ctx, kc, cand, nodeName, nodeUID)
-			//if err != nil {
-			//	klog.Errorf("error create DEVICE ", err)
-			//}
-			//
-			//klog.Infof("create DEVICE")
+			fmt.Printf("%v", listBlockDevices)
+
+			//Create Device
+			err = createBlockDeviceObject(ctx, kc, cand, nodeName, nodeUID)
+			if err != nil {
+				klog.Errorf("error create DEVICE ", err)
+			}
+
+			klog.Infof("create DEVICE")
 
 			//todo
 			// Delete -- get -> etcd --> ( NAME /dev/sda/  <=> kube get ) --> Delete CR
@@ -145,8 +152,9 @@ func parseFreeBlockDev(nodeName string, out []byte) ([]Candidate, error) {
 			_, ok := tempMapPKName[j.KName]
 			if !ok {
 				r = append(r, Candidate{
-					NodeName:   nodeName,
-					Name:       buildNameDevices(devices.BlockDevices[i].Name[1:]),
+					NodeName: nodeName,
+					ID:       j.Wwn,
+					//Name:       buildNameDevices(devices.BlockDevices[i].Name[1:]),
 					Path:       devices.BlockDevices[i].Name,
 					Size:       devices.BlockDevices[i].Size,
 					Model:      devices.BlockDevices[i].Model,
@@ -169,13 +177,9 @@ func buildNameDevices(name string) string {
 }
 
 func createBlockDeviceObject(ctx context.Context, kc kclient.Client, can Candidate, nodeName, nodeUID string) error {
-
-	temp := fmt.Sprintf("%s%s%s%s%s", nodeName, can.ID, can.Path, can.Size, can.Model)
-	nameDev := fmt.Sprintf("dev-%x", md5.Sum([]byte(temp)))
-
 	device := &v2alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: nameDev,
+			Name: createUniqNameDevice(can, nodeName),
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: v2alpha1.OwnerReferencesAPIVersion,
@@ -226,6 +230,11 @@ func getListBlockDevices(ctx context.Context, kc kclient.Client) (map[string]v2a
 		deviceList[j.Name] = j.Status
 	}
 	return deviceList, nil
+}
+
+func createUniqNameDevice(can Candidate, nodeName string) string {
+	temp := fmt.Sprintf("%s%s%s%s%s", nodeName, can.ID, can.Path, can.Size, can.Model)
+	return fmt.Sprintf("dev-%x", sha1.Sum([]byte(temp)))
 }
 
 func compareListDevices() {
