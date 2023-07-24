@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"os/exec"
 	"storage-configurator/api/v2alpha1"
-	"storage-configurator/pkg/utils/errors/scerror"
-	"storage-configurator/pkg/utils/sclogs"
 	"strings"
 	"time"
 
@@ -31,7 +29,7 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 			case <-ticker.C:
 				candidates, err := getCandidates(nodeName)
 				if err != nil {
-					// only fatal error, cannot cmd
+					klog.Error("fatal error, cannot cmd  %w", err)
 					errCh <- err
 					return
 				}
@@ -87,7 +85,7 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 					if err != nil {
 						klog.Errorf(err.Error())
 					}
-					klog.Info(sclogs.CreateDevice, i)
+					klog.Info("create device: ", i)
 
 					listBlockDevices[i] = v2alpha1.BlockDeviceStatus{
 						NodeName:  nodeName,
@@ -111,7 +109,7 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 							klog.Errorf(err.Error())
 						}
 						delete(listBlockDevices, i)
-						klog.Info(sclogs.DeleteDevice, i)
+						klog.Info("delete device: ", i)
 					}
 				}
 			}
@@ -136,7 +134,7 @@ func getCandidates(nodeName string) ([]Candidate, error) {
 
 		err := cmd.Run()
 		if err != nil {
-			return nil, fmt.Errorf(scerror.ExeLSBLK, err, errs.String())
+			return nil, fmt.Errorf("exec lsblk error out %w", err)
 		}
 
 		cs, err := handler.ParseFunc(nodeName, outs.Bytes())
@@ -152,7 +150,7 @@ func parseFreeBlockDev(nodeName string, out []byte) ([]Candidate, error) {
 	var devices Devices
 	err := json.Unmarshal(out, &devices)
 	if err != nil {
-		return nil, fmt.Errorf(scerror.ParseOutlsblkError+"%w", err)
+		return nil, fmt.Errorf("parse out lsblk error %w", err)
 	}
 
 	tempMapKName := make(map[string]int)
@@ -213,7 +211,7 @@ func createBlockDeviceObject(ctx context.Context, kc kclient.Client, can Candida
 
 	err := kc.Create(ctx, device)
 	if err != nil {
-		return fmt.Errorf(scerror.CreateBlockDevice+"%w", err)
+		return fmt.Errorf("create block device %w", err)
 	}
 	return nil
 }
@@ -232,7 +230,7 @@ func getListBlockDevices(ctx context.Context, kc kclient.Client) (map[string]v2a
 	}
 	err := kc.List(ctx, listDevice)
 	if err != nil {
-		return nil, fmt.Errorf(scerror.GetListBlockDevices+"%w", err)
+		return nil, fmt.Errorf("list block devices %w", err)
 	}
 	for _, j := range listDevice.Items {
 		deviceList[j.Name] = j.Status
@@ -250,14 +248,6 @@ func deleteBlockDeviceObject(ctx context.Context, kc kclient.Client, nodeName, d
 	device := &v2alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: deviceName,
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: v2alpha1.OwnerReferencesAPIVersion,
-					Kind:       v2alpha1.Node,
-					Name:       nodeName,
-					UID:        types.UID(nodeUID),
-				},
-			},
 		},
 		TypeMeta: metav1.TypeMeta{
 			Kind:       v2alpha1.OwnerReferencesKind,
@@ -267,7 +257,7 @@ func deleteBlockDeviceObject(ctx context.Context, kc kclient.Client, nodeName, d
 
 	err := kc.Delete(ctx, device)
 	if err != nil {
-		return fmt.Errorf(scerror.DeleteBlockDevice+"%w", err)
+		return fmt.Errorf("delete block device %w", err)
 	}
 	return nil
 }

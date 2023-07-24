@@ -8,13 +8,8 @@ import (
 
 const (
 	BDKind                    = "BlockDevice"
-	GroupVersion              = "apiextensions.k8s.io/v1"
-	Plural                    = "blockdevices"
-	Singular                  = "blockdevice"
-	CRDName                   = "blockdevices.storage.deckhouse.io"
-	ShortName                 = "bd"
 	APIGroup                  = "storage.deckhouse.io"
-	APIVersion                = "v2alpha1"
+	APIVersion                = "v2alpha1" // v1alpha1
 	OwnerReferencesAPIVersion = "v1"
 	OwnerReferencesKind       = "BlockDevice"
 	TypeMediaAPIVersion       = APIGroup + "/" + APIVersion

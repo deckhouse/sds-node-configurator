@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"storage-configurator/pkg/utils/errors/scerror"
 )
 
 // ScanInterval Scan block device interval seconds
@@ -22,7 +21,7 @@ func NewConfig() (*Options, error) {
 	opts.ScanInterval = ScanInterval
 	opts.NodeName = os.Getenv(NodeName)
 	if opts.NodeName == "" {
-		return nil, fmt.Errorf(scerror.ParseConfigParamsError)
+		return nil, fmt.Errorf("required NODE_NAME env variable is not specified")
 	}
 	return &opts, nil
 }

@@ -3,18 +3,17 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"os"
 	"os/signal"
+	goruntime "runtime"
 	"storage-configurator/api/v2alpha1"
 	"storage-configurator/config"
 	"storage-configurator/internal/blockdev"
 	"storage-configurator/pkg/kubutils"
-	"storage-configurator/pkg/utils"
-	"storage-configurator/pkg/utils/errors/scerror"
-	"storage-configurator/pkg/utils/sclogs"
 	"syscall"
 
 	"k8s.io/klog"
@@ -34,7 +33,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Print Version OS and GO
-	utils.PrintVersion()
+	klog.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
+	klog.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
 	// Parse config params
 	cliParams, err := config.NewConfig()
@@ -48,31 +48,34 @@ func main() {
 	if err != nil {
 		klog.Fatalln(err)
 	}
+	klog.Info("read Kubernetes config")
 
 	// Setup scheme for all resources
 	scheme := runtime.NewScheme()
 	for _, f := range resourcesSchemeFuncs {
 		err := f(scheme)
 		if err != nil {
-			klog.Error(err, scerror.FailedAddToScheme)
+			klog.Error("failed to add to scheme", err)
 			os.Exit(1)
 		}
 	}
+	klog.Info("read scheme CR")
 
 	// Create Kubernetes client
 	kClient, err := kubutils.CreateKubernetesClient(kConfig, scheme)
 	if err != nil {
 		klog.Fatalln(err)
 	}
+	klog.Info("create kubernetes client")
 
 	// Get node UID
 	nodeUID, err := kubutils.GetNodeUID(ctx, kClient, cliParams.NodeName)
 	if err != nil {
 		klog.Fatalln(err)
 	}
+	klog.Info("get node UID ", nodeUID)
 
-	klog.Infof(sclogs.StartMainLoop)
-
+	klog.Infof("starting main loop...")
 	// Main loop: searching empty block devices and creating resources in Kubernetes
 	stop := make(chan struct{})
 	go func() {

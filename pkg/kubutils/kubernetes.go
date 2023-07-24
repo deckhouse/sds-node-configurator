@@ -8,8 +8,9 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
-	"storage-configurator/pkg/utils/errors/scerror"
 )
+
+//todo пустой класстер для тестов спросить в virt
 
 func CreateKubernetesClient(config *rest.Config, schema *runtime.Scheme) (kclient.Client, error) {
 	var kc kclient.Client
@@ -17,12 +18,13 @@ func CreateKubernetesClient(config *rest.Config, schema *runtime.Scheme) (kclien
 		Scheme: schema,
 	})
 	if err != nil {
-		return kc, fmt.Errorf(scerror.KubCreateClientError+"%w", err)
+		return kc, fmt.Errorf("error create kubernetes client %w", err)
 	}
 	return kc, err
 }
 
 func KubernetesDefaultConfigCreate() (*rest.Config, error) {
+	//todo validate empty
 	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(),
 		&clientcmd.ConfigOverrides{},
@@ -30,7 +32,7 @@ func KubernetesDefaultConfigCreate() (*rest.Config, error) {
 	// Get a config to talk to API server
 	config, err := clientConfig.ClientConfig()
 	if err != nil {
-		return nil, fmt.Errorf(scerror.KubConfigError+"%w", err)
+		return nil, fmt.Errorf("config kubernetes error %w", err)
 	}
 	return config, nil
 }
@@ -39,7 +41,7 @@ func GetNodeUID(ctx context.Context, kc kclient.Client, nodeName string) (string
 	node := &v1.Node{}
 	err := kc.Get(ctx, kclient.ObjectKey{Name: nodeName}, node)
 	if err != nil {
-		return "", fmt.Errorf(scerror.GetNodeError+"%w", err)
+		return "", fmt.Errorf("get node error %w", err)
 	}
 	return string(node.UID), nil
 }
