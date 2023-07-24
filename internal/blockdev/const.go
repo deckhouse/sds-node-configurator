@@ -3,7 +3,7 @@ package blockdev
 const (
 	DRBDName       = "/dev/drbd"
 	LoopDeviceType = "loop"
-	AppName        = "storage-configurator"
+	MachineID      = "machine-ID"
 )
 
 var (

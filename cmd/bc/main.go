@@ -13,6 +13,8 @@ import (
 	"storage-configurator/internal/blockdev"
 	"storage-configurator/pkg/kubutils"
 	"storage-configurator/pkg/utils"
+	"storage-configurator/pkg/utils/errors/scerror"
+	"storage-configurator/pkg/utils/sclogs"
 	"syscall"
 
 	"k8s.io/klog"
@@ -52,7 +54,7 @@ func main() {
 	for _, f := range resourcesSchemeFuncs {
 		err := f(scheme)
 		if err != nil {
-			klog.Error(err, "Failed to add to scheme")
+			klog.Error(err, scerror.FailedAddToScheme)
 			os.Exit(1)
 		}
 	}
@@ -69,7 +71,7 @@ func main() {
 		klog.Fatalln(err)
 	}
 
-	klog.Infof("Starting main loop...")
+	klog.Infof(sclogs.StartMainLoop)
 
 	// Main loop: searching empty block devices and creating resources in Kubernetes
 	stop := make(chan struct{})

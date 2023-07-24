@@ -8,7 +8,7 @@ import (
 
 // ScanInterval Scan block device interval seconds
 const (
-	ScanInterval = 3
+	ScanInterval = 10
 	NodeName     = "NODE_NAME"
 )
 

@@ -9,4 +9,6 @@ const (
 	GetNodeError           = "get node error"
 	GetListBlockDevices    = "list block devices"
 	CreateBlockDevice      = "create block device"
+	DeleteBlockDevice      = "delete block device"
+	FailedAddToScheme      = "failed to add to scheme"
 )

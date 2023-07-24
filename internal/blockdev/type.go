@@ -7,7 +7,6 @@ type Candidate struct {
 	Size       string
 	Model      string
 	Name       string
-	SkipReason string
 	MountPoint string
 	HotPlug    bool
 	KName      string
@@ -16,7 +15,6 @@ type Candidate struct {
 }
 
 type CandidateHandler struct {
-	Name      string
 	Command   []string
 	ParseFunc func(nodeName string, out []byte) ([]Candidate, error)
 }

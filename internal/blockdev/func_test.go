@@ -2,7 +2,6 @@ package blockdev
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -83,16 +82,23 @@ func TestParseJSONlsblkOut(t *testing.T) {
 		KName:      "/dev/dm-24",
 		PkName:     "/dev/sda",
 	}
+	device6 := Device{
+		Name:       "/dev/vda14",
+		MountPoint: "",
+		PartUUID:   "",
+		HotPlug:    false,
+		Model:      "",
+		Serial:     "",
+		Size:       "4M",
+		Type:       "part",
+		Wwn:        "",
+		KName:      "/dev/vda14",
+		PkName:     "/dev/vda",
+		FSType:     "",
+	}
 
-	devicesIN.BlockDevices = append(devicesIN.BlockDevices, device1, device2, device3, device4, device5)
+	devicesIN.BlockDevices = append(devicesIN.BlockDevices, device1, device2, device3, device4, device5, device6)
 	buff, _ := json.Marshal(devicesIN)
-
-	// ---- Test from file ----
-	//buff, err := os.ReadFile("/Users/user1/GolandProjects/test_test/02/test.json")
-	//if err != nil {
-	//	fmt.Println(err)
-	//}
-	// ------------------------
 
 	candidates, err := parseFreeBlockDev(nodeName, buff)
 	if err != nil {
@@ -100,14 +106,19 @@ func TestParseJSONlsblkOut(t *testing.T) {
 	}
 	for _, device := range candidates {
 
-		fmt.Println(device.Name)
 		assert.Equal(t, nodeName, device.NodeName, "node name equal")
 
 		if len(device.Name) < minLenName {
 			t.Errorf("device name is too short")
 		}
 
+		if len(device.FSType) != 0 {
+			t.Errorf("device fstype is not null")
+		}
+
 		assert.NotContains(t, device.Name, "drbd", "device name contains drbd")
+		assert.NotContains(t, device.FSType, "loop", "device name contains loop")
+
 		assert.Equal(t, device.HotPlug, false, "device is plugin")
 
 		if len(device.Size) < minLenSize {
@@ -115,6 +126,5 @@ func TestParseJSONlsblkOut(t *testing.T) {
 		}
 
 		assert.Equal(t, device.MountPoint, "", "mountpoint is not empty")
-
 	}
 }
