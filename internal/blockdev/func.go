@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"storage-configurator/api/v2alpha1"
+	"storage-configurator/api/v1alpha1"
 	"strings"
 	"time"
 
@@ -50,9 +50,9 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 
 		case cand := <-candiCh:
 
-			candidate := map[string]v2alpha1.BlockDeviceStatus{}
+			candidate := map[string]v1alpha1.BlockDeviceStatus{}
 			for _, j := range cand {
-				candidate[createUniqNameDevice(j, nodeName)] = v2alpha1.BlockDeviceStatus{
+				candidate[createUniqNameDevice(j, nodeName)] = v1alpha1.BlockDeviceStatus{
 					NodeName:  nodeName,
 					ID:        j.ID,
 					Path:      j.Path,
@@ -87,7 +87,7 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 					}
 					klog.Info("create device: ", i)
 
-					listBlockDevices[i] = v2alpha1.BlockDeviceStatus{
+					listBlockDevices[i] = v1alpha1.BlockDeviceStatus{
 						NodeName:  nodeName,
 						ID:        j.ID,
 						Path:      j.Path,
@@ -183,23 +183,23 @@ func parseFreeBlockDev(nodeName string, out []byte) ([]Candidate, error) {
 }
 
 func createBlockDeviceObject(ctx context.Context, kc kclient.Client, can Candidate, nodeName, deviceName, nodeUID string) error {
-	device := &v2alpha1.BlockDevice{
+	device := &v1alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: deviceName,
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion: v2alpha1.OwnerReferencesAPIVersion,
-					Kind:       v2alpha1.Node,
+					APIVersion: v1alpha1.OwnerReferencesAPIVersion,
+					Kind:       v1alpha1.Node,
 					Name:       nodeName,
 					UID:        types.UID(nodeUID),
 				},
 			},
 		},
 		TypeMeta: metav1.TypeMeta{
-			Kind:       v2alpha1.OwnerReferencesKind,
-			APIVersion: v2alpha1.TypeMediaAPIVersion,
+			Kind:       v1alpha1.OwnerReferencesKind,
+			APIVersion: v1alpha1.TypeMediaAPIVersion,
 		},
-		Status: v2alpha1.BlockDeviceStatus{
+		Status: v1alpha1.BlockDeviceStatus{
 			NodeName:  nodeName,
 			ID:        can.ID,
 			Path:      can.Path,
@@ -216,17 +216,17 @@ func createBlockDeviceObject(ctx context.Context, kc kclient.Client, can Candida
 	return nil
 }
 
-func getListBlockDevices(ctx context.Context, kc kclient.Client) (map[string]v2alpha1.BlockDeviceStatus, error) {
+func getListBlockDevices(ctx context.Context, kc kclient.Client) (map[string]v1alpha1.BlockDeviceStatus, error) {
 
-	deviceList := make(map[string]v2alpha1.BlockDeviceStatus)
+	deviceList := make(map[string]v1alpha1.BlockDeviceStatus)
 
-	listDevice := &v2alpha1.BlockDeviceList{
+	listDevice := &v1alpha1.BlockDeviceList{
 		TypeMeta: metav1.TypeMeta{
-			Kind:       v2alpha1.OwnerReferencesKind,
-			APIVersion: v2alpha1.TypeMediaAPIVersion,
+			Kind:       v1alpha1.OwnerReferencesKind,
+			APIVersion: v1alpha1.TypeMediaAPIVersion,
 		},
 		ListMeta: metav1.ListMeta{},
-		Items:    []v2alpha1.BlockDevice{},
+		Items:    []v1alpha1.BlockDevice{},
 	}
 	err := kc.List(ctx, listDevice)
 	if err != nil {
@@ -245,13 +245,13 @@ func createUniqNameDevice(can Candidate, nodeName string) string {
 }
 
 func deleteBlockDeviceObject(ctx context.Context, kc kclient.Client, nodeName, deviceName, nodeUID string) error {
-	device := &v2alpha1.BlockDevice{
+	device := &v1alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: deviceName,
 		},
 		TypeMeta: metav1.TypeMeta{
-			Kind:       v2alpha1.OwnerReferencesKind,
-			APIVersion: v2alpha1.TypeMediaAPIVersion,
+			Kind:       v1alpha1.OwnerReferencesKind,
+			APIVersion: v1alpha1.TypeMediaAPIVersion,
 		},
 	}
 

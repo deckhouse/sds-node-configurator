@@ -1,4 +1,4 @@
-apiVersion: storage.deckhouse.io/v2alpha1
+apiVersion: storage.deckhouse.io/v1alpha1
 kind: BlockDevice
 metadata:
   name: my-block-device4

@@ -1,4 +1,4 @@
-package v2alpha1
+package v1alpha1
 
 import "k8s.io/apimachinery/pkg/runtime"
 

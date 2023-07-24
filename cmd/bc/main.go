@@ -10,7 +10,7 @@ import (
 	"os"
 	"os/signal"
 	goruntime "runtime"
-	"storage-configurator/api/v2alpha1"
+	"storage-configurator/api/v1alpha1"
 	"storage-configurator/config"
 	"storage-configurator/internal/blockdev"
 	"storage-configurator/pkg/kubutils"
@@ -23,7 +23,7 @@ var (
 	resourcesSchemeFuncs = []func(scheme *runtime.Scheme) error{
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,
-		v2alpha1.AddToScheme,
+		v1alpha1.AddToScheme,
 	}
 )
 

@@ -1,4 +1,4 @@
-package v2alpha1
+package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -9,7 +9,7 @@ import (
 const (
 	BDKind                    = "BlockDevice"
 	APIGroup                  = "storage.deckhouse.io"
-	APIVersion                = "v2alpha1" // v1alpha1
+	APIVersion                = "v1alpha1" // v1alpha1
 	OwnerReferencesAPIVersion = "v1"
 	OwnerReferencesKind       = "BlockDevice"
 	TypeMediaAPIVersion       = APIGroup + "/" + APIVersion
