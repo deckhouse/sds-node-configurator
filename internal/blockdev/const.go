@@ -1,9 +1,10 @@
 package blockdev
 
 const (
-	DRBDName       = "/dev/drbd"
-	LoopDeviceType = "loop"
-	MachineID      = "machine-ID"
+	DRBDName             = "/dev/drbd"
+	LoopDeviceType       = "loop"
+	MachineID            = "machine-ID"
+	AvailableBlockDevice = "available_block_device"
 )
 
 var (

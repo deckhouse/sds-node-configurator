@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"encoding/json"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
 	"os/exec"
 	"storage-configurator/api/v1alpha1"
 	"strings"
@@ -18,7 +19,7 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, interval int, nodeUID string) error {
+func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, interval int, nodeUID string, deviceCount prometheus.GaugeVec) error {
 	candiCh := make(chan []Candidate)
 	errCh := make(chan error)
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
@@ -63,7 +64,6 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 			}
 
 			// reconciliation of local devices with an external list
-
 			// read kubernetes list device
 			listBlockDevices, err := getListBlockDevices(ctx, kc)
 			if err != nil {
@@ -104,7 +104,7 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 					continue
 				} else {
 					if j.NodeName == nodeName {
-						err = deleteBlockDeviceObject(ctx, kc, nodeName, i, nodeUID)
+						err = deleteBlockDeviceObject(ctx, kc, i)
 						if err != nil {
 							klog.Errorf(err.Error())
 						}
@@ -113,6 +113,8 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 					}
 				}
 			}
+			// metrics
+			deviceCount.With(prometheus.Labels{"device": "count"}).Set(float64(len(candidate)))
 		}
 	}
 }
@@ -244,7 +246,7 @@ func createUniqNameDevice(can Candidate, nodeName string) string {
 	return s
 }
 
-func deleteBlockDeviceObject(ctx context.Context, kc kclient.Client, nodeName, deviceName, nodeUID string) error {
+func deleteBlockDeviceObject(ctx context.Context, kc kclient.Client, deviceName string) error {
 	device := &v1alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: deviceName,
