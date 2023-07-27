@@ -140,7 +140,7 @@ func TestCreateUniqNameDevice(t *testing.T) {
 		Model:    "HARD-DRIVE",
 	}
 
-	deviceName := createUniqNameDevice(can, nodeName)
+	deviceName := CreateUniqNameDevice(can, nodeName)
 	assert.Equal(t, "dev-", deviceName[0:4], "device name does not start with dev-")
 	assert.Equal(t, len(deviceName[4:]), 40, "device name does not contains sha1 sum")
 }

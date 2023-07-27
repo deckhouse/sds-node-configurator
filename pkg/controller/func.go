@@ -53,7 +53,7 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 
 			candidate := map[string]v1alpha1.BlockDeviceStatus{}
 			for _, j := range cand {
-				candidate[createUniqNameDevice(j, nodeName)] = v1alpha1.BlockDeviceStatus{
+				candidate[CreateUniqNameDevice(j, nodeName)] = v1alpha1.BlockDeviceStatus{
 					NodeName:  nodeName,
 					ID:        j.ID,
 					Path:      j.Path,
@@ -65,7 +65,7 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 
 			// reconciliation of local devices with an external list
 			// read kubernetes list device
-			listBlockDevices, err := getListBlockDevices(ctx, kc)
+			listBlockDevices, err := GetListBlockDevices(ctx, kc)
 			if err != nil {
 				klog.Errorf(err.Error())
 			}
@@ -75,7 +75,7 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 				if _, ok := listBlockDevices[i]; ok {
 					continue
 				} else {
-					err = createBlockDeviceObject(ctx, kc, Candidate{
+					err = CreateBlockDeviceObject(ctx, kc, Candidate{
 						NodeName: nodeName,
 						ID:       j.ID,
 						Path:     j.Path,
@@ -104,7 +104,7 @@ func ScanBlockDevices(ctx context.Context, kc kclient.Client, nodeName string, i
 					continue
 				} else {
 					if j.NodeName == nodeName {
-						err = deleteBlockDeviceObject(ctx, kc, i)
+						err = DeleteBlockDeviceObject(ctx, kc, i)
 						if err != nil {
 							klog.Errorf(err.Error())
 						}
@@ -184,7 +184,7 @@ func parseFreeBlockDev(nodeName string, out []byte) ([]Candidate, error) {
 	return r, nil
 }
 
-func createBlockDeviceObject(ctx context.Context, kc kclient.Client, can Candidate, nodeName, deviceName, nodeUID string) error {
+func CreateBlockDeviceObject(ctx context.Context, kc kclient.Client, can Candidate, nodeName, deviceName, nodeUID string) error {
 	device := &v1alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: deviceName,
@@ -218,7 +218,7 @@ func createBlockDeviceObject(ctx context.Context, kc kclient.Client, can Candida
 	return nil
 }
 
-func getListBlockDevices(ctx context.Context, kc kclient.Client) (map[string]v1alpha1.BlockDeviceStatus, error) {
+func GetListBlockDevices(ctx context.Context, kc kclient.Client) (map[string]v1alpha1.BlockDeviceStatus, error) {
 
 	deviceList := make(map[string]v1alpha1.BlockDeviceStatus)
 
@@ -240,13 +240,13 @@ func getListBlockDevices(ctx context.Context, kc kclient.Client) (map[string]v1a
 	return deviceList, nil
 }
 
-func createUniqNameDevice(can Candidate, nodeName string) string {
+func CreateUniqNameDevice(can Candidate, nodeName string) string {
 	temp := fmt.Sprintf("%s%s%s%s%s", nodeName, can.ID, can.Path, can.Size, can.Model)
 	s := fmt.Sprintf("dev-%x", sha1.Sum([]byte(temp)))
 	return s
 }
 
-func deleteBlockDeviceObject(ctx context.Context, kc kclient.Client, deviceName string) error {
+func DeleteBlockDeviceObject(ctx context.Context, kc kclient.Client, deviceName string) error {
 	device := &v1alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: deviceName,
