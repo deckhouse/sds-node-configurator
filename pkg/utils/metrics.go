@@ -5,7 +5,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/klog"
 	"net/http"
-	"storage-configurator/internal/blockdev"
+	"storage-configurator/pkg/controller"
 )
 
 const (
@@ -15,7 +15,7 @@ const (
 func NewDeviceMetrics() prometheus.GaugeVec {
 
 	f := prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name:      blockdev.AvailableBlockDevice,
+		Name:      controller.AvailableBlockDevice,
 		Namespace: NameSpaceMetrics,
 	}, []string{"device"})
 

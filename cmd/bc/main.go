@@ -14,7 +14,7 @@ import (
 	goruntime "runtime"
 	"storage-configurator/api/v1alpha1"
 	"storage-configurator/config"
-	"storage-configurator/internal/blockdev"
+	"storage-configurator/pkg/controller"
 	"storage-configurator/pkg/kubutils"
 	"storage-configurator/pkg/utils"
 	"syscall"
@@ -85,7 +85,7 @@ func main() {
 	stop := make(chan struct{})
 	go func() {
 		defer cancel()
-		err := blockdev.ScanBlockDevices(ctx, kClient, cfgParams.NodeName, cfgParams.ScanInterval, nodeUID, deviceCount)
+		err := controller.ScanBlockDevices(ctx, kClient, cfgParams.NodeName, cfgParams.ScanInterval, nodeUID, deviceCount)
 		if errors.Is(err, context.Canceled) {
 			// only occurs if the context was cancelled, and it only can be cancelled on SIGINT
 			stop <- struct{}{}

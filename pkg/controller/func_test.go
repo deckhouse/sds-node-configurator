@@ -1,4 +1,4 @@
-package blockdev
+package controller
 
 import (
 	"encoding/json"
@@ -82,6 +82,7 @@ func TestParseJSONlsblkOut(t *testing.T) {
 		KName:      "/dev/dm-24",
 		PkName:     "/dev/sda",
 	}
+
 	device6 := Device{
 		Name:       "/dev/vda14",
 		MountPoint: "",
@@ -127,4 +128,19 @@ func TestParseJSONlsblkOut(t *testing.T) {
 
 		assert.Equal(t, device.MountPoint, "", "mountpoint is not empty")
 	}
+}
+
+func TestCreateUniqNameDevice(t *testing.T) {
+	nodeName := "testNode"
+	can := Candidate{
+		NodeName: nodeName,
+		ID:       "ZX128ZX128ZX128",
+		Path:     "/dev/sda",
+		Size:     "4Gb",
+		Model:    "HARD-DRIVE",
+	}
+
+	deviceName := createUniqNameDevice(can, nodeName)
+	assert.Equal(t, "dev-", deviceName[0:4], "device name does not start with dev-")
+	assert.Equal(t, len(deviceName[4:]), 40, "device name does not contains sha1 sum")
 }

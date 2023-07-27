@@ -1,4 +1,4 @@
-package blockdev
+package controller
 
 type Candidate struct {
 	NodeName   string

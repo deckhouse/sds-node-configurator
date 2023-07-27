@@ -1,4 +1,4 @@
-package blockdev
+package controller
 
 const (
 	DRBDName             = "/dev/drbd"
