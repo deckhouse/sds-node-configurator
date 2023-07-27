@@ -35,6 +35,9 @@ var _ = Describe("Storage Controller", func() {
 		//nodeUID, err := kubutils.GetNodeUID(ctx, cl, nodeName)
 		//Expect(err).NotTo(HaveOccurred())
 
+		//err := controller.ScanBlockDevices(ctx, cl, nodeName, 10, nodeName, pro)
+		//Expect(err).NotTo(HaveOccurred())
+
 		err := controller.CreateBlockDeviceObject(ctx, cl, can, nodeName, deviceName, nodeUID)
 		Expect(err).NotTo(HaveOccurred())
 

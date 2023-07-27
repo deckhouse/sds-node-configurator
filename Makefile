@@ -12,11 +12,11 @@ build: ## build docker image
 .PHONY: docker image build
 
 test: ## run go tests
-	go test $(TEST-ARGS) ./pkg/...
+	go test $(TEST-ARGS) ./...
 .PHONY: test
 
 test-cover: ## run go tests with total coverage calculating
-	go test $(TEST-ARGS) ./pkg/... -coverprofile cover.out
+	go test $(TEST-ARGS) ./... -coverprofile cover.out
 	go tool cover -func cover.out
 	rm cover.out
 
