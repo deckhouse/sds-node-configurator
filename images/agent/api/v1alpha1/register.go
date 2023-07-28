@@ -28,8 +28,8 @@ var (
 	AddToScheme = SchemeBuilder.AddToScheme
 )
 
-// BlockDeviceGVK is group version kind for BlockDevice.
-var BlockDeviceGVK = schema.GroupVersionKind{
+// ConsumableBlockDeviceGVK is group version kind for BlockDevice.
+var ConsumableBlockDeviceGVK = schema.GroupVersionKind{
 	Group:   SchemeGroupVersion.Group,
 	Version: SchemeGroupVersion.Version,
 	Kind:    BDKind,
@@ -48,8 +48,8 @@ func Resource(resource string) schema.GroupResource {
 // Adds the list of known types to Scheme.
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
-		&BlockDevice{},
-		&BlockDeviceList{},
+		&ConsumableBlockDevice{},
+		&ConsumableBlockDeviceList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil

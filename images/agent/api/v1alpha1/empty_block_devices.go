@@ -7,7 +7,7 @@ import (
 // BlockDevice empty block device
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type BlockDevice struct {
+type ConsumableBlockDevice struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
@@ -16,10 +16,10 @@ type BlockDevice struct {
 
 // BlockDeviceList contains a list of empty block device
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type BlockDeviceList struct {
+type ConsumableBlockDeviceList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
-	Items           []BlockDevice `json:"items"`
+	Items           []ConsumableBlockDevice `json:"items"`
 }
 
 type BlockDeviceStatus struct {

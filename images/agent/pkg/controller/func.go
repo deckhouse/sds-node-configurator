@@ -185,7 +185,7 @@ func parseFreeBlockDev(nodeName string, out []byte) ([]Candidate, error) {
 }
 
 func CreateBlockDeviceObject(ctx context.Context, kc kclient.Client, can Candidate, nodeName, deviceName, nodeUID string) error {
-	device := &v1alpha1.BlockDevice{
+	device := &v1alpha1.ConsumableBlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: deviceName,
 			OwnerReferences: []metav1.OwnerReference{
@@ -222,13 +222,13 @@ func GetListBlockDevices(ctx context.Context, kc kclient.Client) (map[string]v1a
 
 	deviceList := make(map[string]v1alpha1.BlockDeviceStatus)
 
-	listDevice := &v1alpha1.BlockDeviceList{
+	listDevice := &v1alpha1.ConsumableBlockDeviceList{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       v1alpha1.OwnerReferencesKind,
 			APIVersion: v1alpha1.TypeMediaAPIVersion,
 		},
 		ListMeta: metav1.ListMeta{},
-		Items:    []v1alpha1.BlockDevice{},
+		Items:    []v1alpha1.ConsumableBlockDevice{},
 	}
 	err := kc.List(ctx, listDevice)
 	if err != nil {
@@ -247,7 +247,7 @@ func CreateUniqNameDevice(can Candidate, nodeName string) string {
 }
 
 func DeleteBlockDeviceObject(ctx context.Context, kc kclient.Client, deviceName string) error {
-	device := &v1alpha1.BlockDevice{
+	device := &v1alpha1.ConsumableBlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: deviceName,
 		},

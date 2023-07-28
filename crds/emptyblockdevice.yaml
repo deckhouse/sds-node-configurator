@@ -10,9 +10,9 @@ spec:
   group: storage.deckhouse.io
   scope: Cluster
   names:
-    plural: blockdevices
-    singular: blockdevice
-    kind: BlockDevice
+    plural: сonsumableblockdevices
+    singular: сonsumableblockdevice
+    kind: ConsumableBlockDevice
     shortNames:
       - bd
   preserveUnknownFields: false
