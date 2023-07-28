@@ -1,4 +1,4 @@
-project: deckhouse-admin
+project: storage-configurator
 configVersion: 1
 
 # modules_images

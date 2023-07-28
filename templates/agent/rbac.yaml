@@ -26,7 +26,7 @@ rules:
   - apiGroups:
       - storage.deckhouse.io
     resources:
-      - blockdevices
+      - consumableblockdevices
     verbs:
       - get
       - list
