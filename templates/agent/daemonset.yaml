@@ -1,0 +1,52 @@
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: storage-configurator
+  namespace: d8-storage-configurator
+spec:
+  selector:
+    matchLabels:
+      app: storage-configurator
+  template:
+    metadata:
+      labels:
+        app: storage-configurator
+    spec:
+      imagePullSecrets:
+        - name: registry
+      serviceAccountName: storage-configurator
+      containers:
+      - name: ubuntu-container
+        image: {{ include "helm_lib_module_common_image" (list . "agent") }}
+        imagePullPolicy: Always
+        securityContext:
+          privileged: true
+          seLinuxOptions:
+            level: s0
+            type: spc_t
+        env:
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+        volumeMounts:
+        - name: host-device-dir
+          mountPath: /dev/
+        - name: host-sys-dir
+          mountPath: /sys/
+        - name: host-root
+          mountPath: /host-root/
+          mountPropagation: HostToContainer
+      volumes:
+      - name: host-device-dir
+        hostPath:
+          path: /dev
+          type: ""
+      - name: host-sys-dir
+        hostPath:
+          path: /sys/
+          type: Directory
+      - name: host-root
+        hostPath:
+          path: /
