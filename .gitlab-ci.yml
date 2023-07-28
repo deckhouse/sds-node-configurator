@@ -93,7 +93,7 @@ Dev build:
       docker build .
   parallel:
     matrix:
-      - APP: [frontend, backend]
+      - APP: [agent]
   tags:
     - tfprod-distributed-werf
   only:
