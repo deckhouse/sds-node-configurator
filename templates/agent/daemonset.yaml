@@ -18,7 +18,7 @@ spec:
       serviceAccountName: storage-configurator
       containers:
       - name: ubuntu-container
-        image: {{ include "helm_lib_module_common_image" (list . "agent") }}
+        image: {{ include "helm_lib_module_image" (list . "agent") }}
         imagePullPolicy: Always
         securityContext:
           privileged: true
