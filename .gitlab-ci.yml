@@ -1,38 +1,54 @@
+stages:
+  - build
+  - deploy
+
 .build:
   stage: build
   script:
     - |
+      set -x
       export WERF_REPO="${EXTERNAL_MODULES_DEV_REGISTRY}/deckhouse/${EDITION,,}/${EXTERNAL_MODULES_DEV_REGISTRY_PATH}/${EXTERNAL_MODULES_MODULE_NAME}"
+      export RELEASE_VERSION="$(grep -oP '^version:\s+\K(v[0-9]+\.[0-9]+\.[0-9]+[-_.a-z0-9]*)$' release.yaml)"
 
-      werf build  --report-path images_tags_werf.json
+      werf build --report-path images_tags_werf.json
+      cat images_tags_werf.json
 
       # Bundle image
-      IMAGE_SRC="$(jq -r '.Images."bundle".DockerImageName' images_tags_werf.json)"
+      IMAGE_SRC="$(jq -r '.Images.bundle.DockerImageName' images_tags_werf.json)"
       REPO="$(jq -r '.Images.bundle.DockerRepo' images_tags_werf.json)"
       docker pull ${IMAGE_SRC}
-      docker image tag ${IMAGE_SRC} ${REPO}:${CI_COMMIT_REF_NAME}
-      docker image push ${REPO}:${CI_COMMIT_REF_NAME}
-      docker image rmi ${REPO}:${CI_COMMIT_REF_NAME} || true;
+      docker image tag ${IMAGE_SRC} ${REPO}:${RELEASE_VERSION}
+      docker image push ${REPO}:${RELEASE_VERSION}
+      docker image rmi  ${REPO}:${RELEASE_VERSION} || true;
 
       # Release-channel image
       IMAGE_SRC="$(jq -r '.Images."release-channel-version".DockerImageName' images_tags_werf.json)"
       REPO="$(jq -r '.Images."release-channel-version".DockerRepo' images_tags_werf.json)"
       docker pull ${IMAGE_SRC}
-      docker image tag ${IMAGE_SRC} ${REPO}/release:${CI_COMMIT_REF_NAME}
-      docker image push ${REPO}/release:${CI_COMMIT_REF_NAME}
-      docker image rmi ${REPO}/release:${CI_COMMIT_REF_NAME} || true;
+      docker image tag ${IMAGE_SRC} ${REPO}/release:${RELEASE_VERSION}
+      docker image push ${REPO}/release:${RELEASE_VERSION}
+      docker image rmi  ${REPO}/release:${RELEASE_VERSION} || true;
+
+      # Module images for dev
+      if [[ "$ENV" == "dev" ]]; then
+        for image in $(jq -r '.Images | keys[] | select(. | startswith("images/"))' images_tags_werf.json); do
+          IMAGE_SRC="$(jq --arg i $image -r '.Images[$i].DockerImageName' images_tags_werf.json)"
+          REPO="$(jq --arg i $image -r '.Images[$i].DockerRepo' images_tags_werf.json)"
+          IMAGE_NAME=${image#"images/"}
+          docker pull ${IMAGE_SRC}
+          docker image tag ${IMAGE_SRC} ${REPO}/${IMAGE_NAME}:${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}
+          docker image push ${REPO}/${IMAGE_NAME}:${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}
+          docker image rmi  ${REPO}/${IMAGE_NAME}:${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME} || true;
+        done
+      fi
 
       # Register module
       docker pull spotify/scratch
       docker image tag spotify/scratch:latest ${EXTERNAL_MODULES_DEV_REGISTRY}/deckhouse/${EDITION,,}/${EXTERNAL_MODULES_DEV_REGISTRY_PATH}:${EXTERNAL_MODULES_MODULE_NAME}
       docker image push ${EXTERNAL_MODULES_DEV_REGISTRY}/deckhouse/${EDITION,,}/${EXTERNAL_MODULES_DEV_REGISTRY_PATH}:${EXTERNAL_MODULES_MODULE_NAME}
-      docker image rmi ${EXTERNAL_MODULES_DEV_REGISTRY}/deckhouse/${EDITION,,}/${EXTERNAL_MODULES_DEV_REGISTRY_PATH}:${EXTERNAL_MODULES_MODULE_NAME} || true
+      docker image rmi  ${EXTERNAL_MODULES_DEV_REGISTRY}/deckhouse/${EDITION,,}/${EXTERNAL_MODULES_DEV_REGISTRY_PATH}:${EXTERNAL_MODULES_MODULE_NAME} || true
   tags:
     - tfprod-distributed-werf
-  only:
-    - tags
-  except:
-    - main
 
 before_script:
   - |
@@ -42,31 +58,60 @@ before_script:
     export DOCKER_CONFIG=$(mktemp -d)
     docker login ${EXTERNAL_MODULES_DEV_REGISTRY} -u ${EXTERNAL_MODULES_DEV_REGISTRY_LOGIN} -p ${EXTERNAL_MODULES_DEV_REGISTRY_PASSWORD}
 
-stages:
-  - build_dev
-  - build_push
-  - build_ee
-  - build_fe
-  - deploy
-
-Build_EE:
-  stage: build_ee
+Build Dev:
+  stage: build
   extends: .build
-  variables:
-    EDITION: EE
-
-Build_FE:
-  stage: build_fe
-  extends: .build
+  only:
+  - merge_requests
   variables:
     EDITION: FE
+    ENV: dev
 
-Deploy:
+Build EE:
+  stage: build
+  extends: .build
+  only:
+  - tags
+  variables:
+    EDITION: EE
+    ENV: prod
+
+Build FE:
+  stage: build
+  extends: .build
+  only:
+  - tags
+  variables:
+    EDITION: FE
+    ENV: prod
+
+Deploy Dev:
   stage: deploy
   script:
     - |
       export WERF_REPO="${EXTERNAL_MODULES_DEV_REGISTRY}/deckhouse/${EDITION,,}/${EXTERNAL_MODULES_DEV_REGISTRY_PATH}/${EXTERNAL_MODULES_MODULE_NAME}"
-      IMAGE_SRC="${WERF_REPO}/release:${CI_COMMIT_REF_NAME}"
+      export RELEASE_VERSION="$(grep -oP '^version:\s+\K(v[0-9]+\.[0-9]+\.[0-9]+[-_.a-z0-9]*)$' release.yaml)"
+      export CHANNEL="${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}"
+      IMAGE_SRC="${WERF_REPO}/release:${RELEASE_VERSION}"
+      IMAGE_DST="${WERF_REPO}/release:$CHANNEL"
+      docker pull ${IMAGE_SRC}
+      docker image tag ${IMAGE_SRC} ${IMAGE_DST}
+      docker image push ${IMAGE_DST}
+      docker image rmi ${IMAGE_DST} || true;
+  tags:
+    - tfprod-distributed-werf
+  variables:
+    EDITION: FE
+  only:
+  - merge_requests
+
+Deploy Prod:
+  stage: deploy
+  script:
+    - |
+      export WERF_REPO="${EXTERNAL_MODULES_DEV_REGISTRY}/deckhouse/${EDITION,,}/${EXTERNAL_MODULES_DEV_REGISTRY_PATH}/${EXTERNAL_MODULES_MODULE_NAME}"
+      export RELEASE_VERSION="$(grep -oP '^version:\s+\K(v[0-9]+\.[0-9]+\.[0-9]+[-_.a-z0-9]*)$' release.yaml)"
+      IMAGE_SRC="${WERF_REPO}/release:${RELEASE_VERSION}"
       IMAGE_DST="${WERF_REPO}/release:$CHANNEL"
       docker pull ${IMAGE_SRC}
       docker image tag ${IMAGE_SRC} ${IMAGE_DST}
@@ -79,49 +124,5 @@ Deploy:
       - EDITION: [FE, EE]
         CHANNEL: [alpha, beta, early-access, stable]
   when: manual
-  rules:
-    - if: $EDITION == "FE" && $CHANNEL == "alpha" && $CI_COMMIT_TAG
-      when: always
-    - if: $CI_COMMIT_TAG
-      when: manual
-
-Dev build:
-  stage: build_dev
-  script:
-    - |
-      cd images/${APP}
-      docker build .
-  parallel:
-    matrix:
-      - APP: [agent]
-  tags:
-    - tfprod-distributed-werf
   only:
-    - branches
-  except:
-    - master
-
-Dev push:
-  stage: build_push
-  script:
-    - |
-      export WERF_REPO="${EXTERNAL_MODULES_DEV_REGISTRY}/deckhouse/${EDITION,,}/${EXTERNAL_MODULES_DEV_REGISTRY_PATH}/${EXTERNAL_MODULES_MODULE_NAME}"
-
-      werf build  --report-path images_tags_werf.json
-
-      # Bundle image
-      IMAGE_SRC="$(jq -r '.Images."bundle".DockerImageName' images_tags_werf.json)"
-      REPO="$(jq -r '.Images.bundle.DockerRepo' images_tags_werf.json)"
-      docker pull ${IMAGE_SRC}
-      docker image tag ${IMAGE_SRC} ${REPO}:${CI_COMMIT_REF_NAME}
-      docker image push ${REPO}:${CI_COMMIT_REF_NAME}
-      docker image rmi ${REPO}:${CI_COMMIT_REF_NAME} || true;
-  when: manual
-  variables:
-    EDITION: FE
-  tags:
-    - tfprod-distributed-werf
-  only:
-    - branches
-  except:
-    - main
+  - tags

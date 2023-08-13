@@ -37,6 +37,7 @@ func main() {
 
 	// Print Version OS and GO
 	klog.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
+	klog.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
 	klog.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
 	// Parse config params

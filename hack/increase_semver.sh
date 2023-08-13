@@ -43,25 +43,32 @@
 #
 #        $ ./increment_version.sh -Mmp 2.3.4
 #        3.1.1
+#
+#        $ ./increment_version.sh -d 2.3.4
+#        2.3.4-dev.1691718412
 
 # Parse command line options.
 
-while getopts ":Mmp" Option
+while getopts ":Mmpd" Option
 do
   case $Option in
     M ) major=true;;
     m ) minor=true;;
     p ) patch=true;;
+    d ) dev=true;;
   esac
 done
 
 shift $(($OPTIND - 1))
 
-version=$1
+# remove dev version 1.2.3-dev.321 -> 1.2.3
+version=$(sed -E 's/-.*//' <<< $1)
 
 # Build array from version string.
 
 a=( ${version//./ } )
+
+dev_version=""
 
 # If version string is missing or has the wrong number of members, show usage message.
 
@@ -91,4 +98,9 @@ then
   ((a[2]++))
 fi
 
-echo "${a[0]}.${a[1]}.${a[2]}"
+if [ ! -z $dev ]
+then
+  dev_version="-dev.$(date +%s)"
+fi
+
+echo "${a[0]}.${a[1]}.${a[2]}${dev_version}"

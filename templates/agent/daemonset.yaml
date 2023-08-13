@@ -18,7 +18,11 @@ spec:
       serviceAccountName: storage-configurator
       containers:
       - name: ubuntu-container
+{{- if .Values.deckhouseStorageConfigurator.enableDevMode }}
+        image: {{ .Values.deckhouseStorageConfigurator.registry.base }}/deckhouse-storage-configurator/agent:{{ .Values.deckhouseStorageConfigurator.internal.devChannel }}
+{{- else }}
         image: {{ include "helm_lib_module_image" (list . "agent") }}
+{{- end }}
         imagePullPolicy: Always
         securityContext:
           privileged: true
@@ -26,6 +30,8 @@ spec:
             level: s0
             type: spc_t
         env:
+          - name: AAA
+            value: BBBqqq
           - name: NODE_NAME
             valueFrom:
               fieldRef:

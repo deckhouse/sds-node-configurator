@@ -1,4 +1,7 @@
 x-config-version: 2
 type: object
 required: []
-properties: {}
+properties:
+  enableDevMode:
+    type: boolean
+    default: false

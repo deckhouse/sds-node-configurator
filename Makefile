@@ -1,5 +1,9 @@
 SHELL := /bin/bash
 
+.PHONY: update-dev
+update-dev: check-yq
+	make bump-dev version=$$(./hack/increase_semver.sh -d $$(yq .version Chart.yaml))
+
 .PHONY: update-patch
 update-patch: check-yq
 	make bump version=$$(./hack/increase_semver.sh -p $$(yq .version Chart.yaml))
@@ -12,15 +16,17 @@ update-minor: check-yq
 update-major: check-yq
 	make bump version=$$(./hack/increase_semver.sh -M $$(yq .version Chart.yaml))
 
+.PHONY: bump-dev
+bump-dev: current-version
+	yq -i '.version="$(version)"' Chart.yaml
+	yq -i '.version="v$(version)"' release.yaml
+
+	git commit -a -s -m "bump version $(version)"
+
 .PHONY: bump
 bump: current-version
 	yq -i '.version="$(version)"' Chart.yaml
 	yq -i '.version="v$(version)"' release.yaml
-
-	jq --arg now $(shell date +%FT%T%z) '.version="$(version)" | .buildDateTime=$$now' images/frontend/package.json > /tmp/frontend_package.json
-	cp /tmp/frontend_package.json images/frontend/package.json
-	# Updating version in package-lock.json to avoid future diffs on `npm i`
-	pushd images/frontend/ && npm i ; popd
 
 	git commit -a -s -m "bump version $(version)"
 	git tag "v$(version)"
