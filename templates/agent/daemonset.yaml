@@ -30,8 +30,6 @@ spec:
             level: s0
             type: spc_t
         env:
-          - name: AAA
-            value: BBBqqq
           - name: NODE_NAME
             valueFrom:
               fieldRef:

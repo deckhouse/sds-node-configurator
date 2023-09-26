@@ -1,2 +1,18 @@
 # Module version
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
 version: v0.0.15-dev.1692006087
+=======
+version: v0.0.15-dev.1695739258
+>>>>>>> 7ca0b3e (Add ensure crd)
+=======
+version: v0.0.15-dev.1695887918
+>>>>>>> a03e728 (bump version 0.0.15-dev.1695740831)
+=======
+version: v0.0.15-dev.1696413575
+>>>>>>> 21a42fc (bump version 0.0.15-dev.1695894689)
+=======
+version: v0.0.15-dev.1696948863
+>>>>>>> e40db4c (bump version 0.0.15-dev.1696599057)

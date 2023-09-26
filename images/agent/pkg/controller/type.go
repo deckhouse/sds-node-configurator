@@ -1,22 +1,25 @@
 package controller
 
 type Candidate struct {
-	NodeName   string
-	ID         string
-	Path       string
-	Size       string
-	Model      string
-	Name       string
-	MountPoint string
-	HotPlug    bool
-	KName      string
-	PkName     string
-	FSType     string
-}
-
-type CandidateHandler struct {
-	Command   []string
-	ParseFunc func(nodeName string, out []byte) ([]Candidate, error)
+	NodeName              string
+	Consumable            bool
+	PVUuid                string
+	VGUuid                string
+	LvmVolumeGroupName    string
+	ActualVGnameOnTheNode string
+	Wwn                   string
+	Serial                string
+	Path                  string
+	Size                  string
+	Rota                  bool
+	Model                 string
+	Name                  string
+	HotPlug               bool
+	KName                 string
+	PkName                string
+	Type                  string
+	FSType                string
+	MachineId             string
 }
 
 type Devices struct {
@@ -36,4 +39,22 @@ type Device struct {
 	KName      string `json:"kname"`
 	PkName     string `json:"pkname"`
 	FSType     string `json:"fstype"`
+	Rota       bool   `json:"rota"`
+}
+
+type PVReport struct {
+	Report []Report `json:"report"`
+}
+
+type Report struct {
+	PV []PV `json:"pv"`
+}
+
+type PV struct {
+	PVName string `json:"pv_name,omitempty"`
+	VGName string `json:"vg_name,omitempty"`
+	PVUsed string `json:"pv_used,omitempty"`
+	PVUuid string `json:"pv_uuid,omitempty"`
+	VGTags string `json:"vg_tags,omitempty"`
+	VGUuid string `json:"vg_uuid,omitempty"`
 }

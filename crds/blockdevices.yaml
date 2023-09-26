@@ -1,0 +1,80 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: blockdevices.storage.deckhouse.io
+  labels:
+    heritage: deckhouse
+    module: storage
+spec:
+  group: storage.deckhouse.io
+  scope: Cluster
+  names:
+    plural: blockdevices
+    singular: blockdevice
+    kind: BlockDevice
+    shortNames:
+      - bd
+  preserveUnknownFields: false
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: "empty block devices"
+          properties:
+            status:
+              type: object
+              required: [size,type,consumable,path,rota,nodeName,machineId]
+              properties:
+                type:
+                  type: string
+                  enum: [part,raid,disk]
+                  description: "Block device type"
+                fsType:
+                  type: string
+                  enum: [LVM2_member, ""]
+                  description: "File system type"
+                nodeName:
+                  type: string
+                  description: "Node's name"
+                consumable:
+                  type: boolean
+                  description: "If true, the resource will be deleted after device has gone from the node"
+                pvUUID:
+                  type: string
+                  format: uuid
+                  description: "Persistent Volume UUID. Optional: exists if only the resource is PV"
+                vgUUID:
+                  type: string
+                  format: uuid
+                  description: "VolumeGroup UUID. Optional: exists if only the resource is PV and in VG"
+                lvmVolumeGroupName:
+                  type: string
+                  description: "LVMVolumeGroup name"
+                actualVGNameOnTheNode:
+                  type: string
+                  description: "VolumeGroup name"
+                wwn:
+                  type: string
+                  description: "WWN"
+                serial:
+                  type: string
+                  description: "Serial number"
+                path:
+                  type: string
+                  description: "Storage path"
+                size:
+                  type: string
+                  description: "Storage size"
+                model:
+                  type: string
+                  description: "Storage model"
+                rota:
+                  type: boolean
+                  description: "Rota"
+                machineId:
+                  type: string
+                  description: "MachineID"

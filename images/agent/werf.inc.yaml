@@ -45,4 +45,6 @@ ansible:
     apk:
       name:
       - lsblk
+      - lvm2
+      - bash
       update_cache: yes

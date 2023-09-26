@@ -10,7 +10,7 @@ RUN GOOS=linux GOARCH=amd64 go  build -o stctrl
 
 FROM amd64/ubuntu:jammy-20230624
 
-RUN apt-get update && apt-get install -y curl
+RUN apt-get update && apt-get install -y lvm2
 
 WORKDIR /root/
 COPY --from=builder /go/src/storagecontroller/cmd/bc .

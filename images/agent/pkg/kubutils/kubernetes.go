@@ -29,6 +29,7 @@ func KubernetesDefaultConfigCreate() (*rest.Config, error) {
 		clientcmd.NewDefaultClientConfigLoadingRules(),
 		&clientcmd.ConfigOverrides{},
 	)
+
 	// Get a config to talk to API server
 	config, err := clientConfig.ClientConfig()
 	if err != nil {

@@ -16,6 +16,7 @@ rules:
     verbs:
       - get
       - list
+      - watch
   - apiGroups:
       - ""
     resources:
@@ -26,12 +27,14 @@ rules:
   - apiGroups:
       - storage.deckhouse.io
     resources:
-      - consumableblockdevices
+      - blockdevices
     verbs:
       - get
       - list
       - create
       - delete
+      - watch
+      - update
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1

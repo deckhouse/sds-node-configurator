@@ -32,7 +32,7 @@ kubernetes:
   queue: storage-configurator-dev-mode-discovery
   group: main
   apiVersion: "deckhouse.io/v1alpha1"
-  kind: "ExternalModuleSource"
+  kind: "ModuleSource"
   nameSelector:
     matchNames: [deckhouse-dev]
   jqFilter: |

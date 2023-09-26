@@ -3,10 +3,12 @@ package controller
 const (
 	DRBDName             = "/dev/drbd"
 	LoopDeviceType       = "loop"
-	MachineID            = "machine-ID"
+	LVMDeviceType        = "lvm"
+	LVMFSType            = "LVM2_member"
 	AvailableBlockDevice = "available_block_device"
 )
 
 var (
-	lsblkCommand = []string{"lsblk", "-J", "-lpf", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,TYPE,WWN,KNAME,PKNAME,FSTYPE"}
+	AllowedFSTypes     = [...]string{LVMFSType}
+	InvalidDeviceTypes = [...]string{LoopDeviceType, LVMDeviceType}
 )

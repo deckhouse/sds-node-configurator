@@ -18,16 +18,11 @@ func TestController(t *testing.T) {
 }
 
 func NewFakeClient() client.WithWatch {
-	//var objs []runtime.Object
-	//objs = append(objs, objects...)
-
 	s := scheme.Scheme
 	_ = metav1.AddMetaToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
 
-	builder := fake.NewClientBuilder().
-		WithScheme(s)
-	//WithRuntimeObjects(objs...)
+	builder := fake.NewClientBuilder().WithScheme(s)
 
 	cl := builder.Build()
 	return cl
