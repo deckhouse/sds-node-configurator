@@ -1,4 +1,4 @@
-package controller
+package internal
 
 const (
 	DRBDName             = "/dev/drbd"

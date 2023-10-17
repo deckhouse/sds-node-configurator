@@ -5,6 +5,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/api/policy/v1beta1"
+	"storage-configurator/internal"
 	"storage-configurator/pkg/controller"
 )
 
@@ -13,13 +14,13 @@ var _ = Describe("Storage Controller", func() {
 	var (
 		ctx        = context.Background()
 		deviceName = "/dev/sda"
-		candidate  = controller.Candidate{
+		candidate  = internal.Candidate{
 			NodeName:              "test-node",
 			Consumable:            true,
 			PVUuid:                "123",
 			VGUuid:                "123",
 			LvmVolumeGroupName:    "testLvm",
-			ActualVGnameOnTheNode: "testVG",
+			ActualVGNameOnTheNode: "testVG",
 			Wwn:                   "WW12345678",
 			Serial:                "test",
 			Path:                  deviceName,
@@ -46,7 +47,7 @@ var _ = Describe("Storage Controller", func() {
 		Expect(deviceStatus.PVUuid).To(Equal(candidate.PVUuid))
 		Expect(deviceStatus.VGUuid).To(Equal(candidate.VGUuid))
 		Expect(deviceStatus.LvmVolumeGroupName).To(Equal(candidate.LvmVolumeGroupName))
-		Expect(deviceStatus.ActualVGNameOnTheNode).To(Equal(candidate.ActualVGnameOnTheNode))
+		Expect(deviceStatus.ActualVGNameOnTheNode).To(Equal(candidate.ActualVGNameOnTheNode))
 		Expect(deviceStatus.Wwn).To(Equal(candidate.Wwn))
 		Expect(deviceStatus.Serial).To(Equal(candidate.Serial))
 		Expect(deviceStatus.Path).To(Equal(candidate.Path))

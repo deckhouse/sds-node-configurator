@@ -1,4 +1,4 @@
-package controller
+package internal
 
 type Candidate struct {
 	NodeName              string
@@ -6,7 +6,7 @@ type Candidate struct {
 	PVUuid                string
 	VGUuid                string
 	LvmVolumeGroupName    string
-	ActualVGnameOnTheNode string
+	ActualVGNameOnTheNode string
 	Wwn                   string
 	Serial                string
 	Path                  string

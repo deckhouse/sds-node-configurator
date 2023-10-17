@@ -1,19 +1,18 @@
 package controller
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha1"
-	"encoding/json"
 	"fmt"
 	"k8s.io/api/policy/v1beta1"
-	"os/exec"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 	"storage-configurator/api/v1alpha1"
 	"storage-configurator/config"
+	"storage-configurator/internal"
 	"storage-configurator/pkg/log"
+	"storage-configurator/pkg/utils"
 	"strings"
 	"time"
 
@@ -55,8 +54,8 @@ func RunBlockDeviceController(
 	go func() {
 		for {
 			time.Sleep(cfg.ScanInterval * time.Second)
-			log.Debug("Get candidates")
-			candidates, err := GetCandidates(cfg)
+
+			candidates, err := GetCandidates(log, cfg)
 			if err != nil {
 				log.Error(err, "Unable to GetCandidates")
 			}
@@ -120,7 +119,7 @@ func RemoveDeprecatedAPIDevices(
 	ctx context.Context,
 	cl kclient.Client,
 	log log.Logger,
-	candidates []Candidate,
+	candidates []internal.Candidate,
 	apiBlockDevices map[string]v1alpha1.BlockDeviceStatus,
 	nodeName string) {
 
@@ -148,23 +147,25 @@ func checkAPIBlockDeviceDeprecated(apiDeviceName string, actualCandidates map[st
 	return !ok
 }
 
-func GetCandidates(cfg config.Options) ([]Candidate, error) {
-	devices, err := GetBlockDevices()
+func GetCandidates(log log.Logger, cfg config.Options) ([]internal.Candidate, error) {
+	devices, cmdStr, err := utils.GetBlockDevices()
+	log.Debug(fmt.Sprintf("[GetCandidates] exec cmd: %s", cmdStr))
 	if err != nil {
 		return nil, fmt.Errorf("unable to GetBlockDevices, err: %w", err)
 	}
 
 	filteredDevices := filterDevices(devices)
 
-	pvs, err := GetPhysicalVolumes()
+	pvs, cmdStr, err := utils.GetAllPVs()
+	log.Debug(fmt.Sprintf("[GetCandidates] exec cmd: %s", cmdStr))
 	if err != nil {
-		return nil, fmt.Errorf("unable to GetPhysicalVolumes, err: %w", err)
+		return nil, fmt.Errorf("unable to GetAllPVs, err: %w", err)
 	}
 
 	// Наполняем кандидатов информацией.
-	var candidates []Candidate
+	var candidates []internal.Candidate
 	for _, device := range filteredDevices {
-		candidate := Candidate{
+		candidate := internal.Candidate{
 			NodeName:   cfg.NodeName,
 			Consumable: CheckConsumable(device),
 			Wwn:        device.Wwn,
@@ -185,14 +186,14 @@ func GetCandidates(cfg config.Options) ([]Candidate, error) {
 
 		for _, pv := range pvs {
 			if pv.PVName == device.Name {
-				candidate.ActualVGnameOnTheNode = pv.VGName
+				candidate.ActualVGNameOnTheNode = pv.VGName
 
-				if candidate.FSType == LVMFSType {
+				if candidate.FSType == internal.LVMFSType {
 					hasTag, lvmVGName := CheckTag(pv.VGTags)
 					if hasTag {
 						candidate.PVUuid = pv.PVUuid
 						candidate.VGUuid = pv.VGUuid
-						candidate.ActualVGnameOnTheNode = pv.VGName
+						candidate.ActualVGNameOnTheNode = pv.VGName
 						candidate.LvmVolumeGroupName = lvmVGName
 					}
 				}
@@ -205,78 +206,14 @@ func GetCandidates(cfg config.Options) ([]Candidate, error) {
 	return candidates, nil
 }
 
-func GetBlockDevices() ([]Device, error) {
-	var outs bytes.Buffer
-	cmd := exec.Command("lsblk", "-J", "-lpf", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA")
-	cmd.Stdout = &outs
-
-	err := cmd.Run()
-	if err != nil {
-		return nil, fmt.Errorf("unable to run lsblk cmd, err: %w", err)
-	}
-
-	devices, err := UnmarshalDevices(outs.Bytes())
-	if err != nil {
-		return nil, fmt.Errorf("unable to unmarshal devices, err: %w", err)
-	}
-
-	return devices, nil
-}
-
-func UnmarshalDevices(out []byte) ([]Device, error) {
-	var devices Devices
-	err := json.Unmarshal(out, &devices)
-	if err != nil {
-		return nil, err
-	}
-
-	return devices.BlockDevices, nil
-}
-
-func GetPhysicalVolumes() ([]PV, error) {
-	var outs bytes.Buffer
-	cmd := exec.Command("pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--reportformat", "json")
-	cmd.Stdout = &outs
-
-	err := cmd.Run()
-	if err != nil {
-		return nil, fmt.Errorf("unable to exec command, err: %w", err)
-	}
-
-	pvs, err := UnmarshalPVs(outs.Bytes())
-	if err != nil {
-		return nil, fmt.Errorf("unable to get PVs, err: %w", err)
-	}
-
-	return pvs, nil
-}
-
-func UnmarshalPVs(out []byte) ([]PV, error) {
-	var pvR PVReport
-
-	if err := json.Unmarshal(out, &pvR); err != nil {
-		return nil, err
-	}
-
-	var pvs []PV
-
-	for _, rep := range pvR.Report {
-		for _, pv := range rep.PV {
-			pvs = append(pvs, pv)
-		}
-	}
-
-	return pvs, nil
-}
-
-func filterDevices(devices []Device) []Device {
+func filterDevices(devices []internal.Device) []internal.Device {
 	pkNames := make(map[string]struct{})
 
 	for _, device := range devices {
 		pkNames[device.PkName] = struct{}{}
 	}
 
-	filtered := make([]Device, 0, len(devices))
+	filtered := make([]internal.Device, 0, len(devices))
 
 	for _, device := range devices {
 		if !isParent(device.KName, pkNames) &&
@@ -295,7 +232,7 @@ func isParent(kName string, pkNames map[string]struct{}) bool {
 }
 
 func hasValidType(deviceType string) bool {
-	for _, invalidType := range InvalidDeviceTypes {
+	for _, invalidType := range internal.InvalidDeviceTypes {
 		if deviceType == invalidType {
 			return false
 		}
@@ -309,7 +246,7 @@ func hasValidFSType(fsType string) bool {
 		return true
 	}
 
-	for _, allowedType := range AllowedFSTypes {
+	for _, allowedType := range internal.AllowedFSTypes {
 		if fsType == allowedType {
 			return true
 		}
@@ -318,7 +255,7 @@ func hasValidFSType(fsType string) bool {
 	return false
 }
 
-func CheckConsumable(device Device) bool {
+func CheckConsumable(device internal.Device) bool {
 	if device.MountPoint != "" {
 		return false
 	}
@@ -331,7 +268,7 @@ func CheckConsumable(device Device) bool {
 		return false
 	}
 
-	if strings.HasPrefix(device.Name, DRBDName) {
+	if strings.HasPrefix(device.Name, internal.DRBDName) {
 		return false
 	}
 
@@ -354,13 +291,13 @@ func CheckTag(tags string) (bool, string) {
 	return true, ""
 }
 
-func CreateUniqDeviceName(can Candidate) string {
+func CreateUniqDeviceName(can internal.Candidate) string {
 	temp := fmt.Sprintf("%s%s%s%s%s", can.NodeName, can.Wwn, can.Path, can.Size, can.Model)
 	s := fmt.Sprintf("dev-%x", sha1.Sum([]byte(temp)))
 	return s
 }
 
-func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, candidate Candidate) (*v1alpha1.BlockDeviceStatus, error) {
+func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, candidate internal.Candidate) (*v1alpha1.BlockDeviceStatus, error) {
 	device := &v1alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            candidate.Name,
@@ -378,7 +315,7 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, candidate Cand
 			PVUuid:                candidate.PVUuid,
 			VGUuid:                candidate.VGUuid,
 			LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
-			ActualVGNameOnTheNode: candidate.ActualVGnameOnTheNode,
+			ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
 			Wwn:                   candidate.Wwn,
 			Serial:                candidate.Serial,
 			Path:                  candidate.Path,
