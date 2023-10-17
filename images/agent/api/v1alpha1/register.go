@@ -7,11 +7,11 @@ import (
 )
 
 const (
-	BDKind                    = "BlockDevice"
+	BlockDeviceKind           = "BlockDevice"
+	LVMVolumeGroupKind        = "LvmVolumeGroup"
 	APIGroup                  = "storage.deckhouse.io"
 	APIVersion                = "v1alpha1" // v1alpha1
 	OwnerReferencesAPIVersion = "v1"
-	OwnerReferencesKind       = "BlockDevice"
 	TypeMediaAPIVersion       = APIGroup + "/" + APIVersion
 	Node                      = "Node"
 )
@@ -28,28 +28,13 @@ var (
 	AddToScheme = SchemeBuilder.AddToScheme
 )
 
-// ConsumableBlockDeviceGVK is group version kind for BlockDevice.
-var ConsumableBlockDeviceGVK = schema.GroupVersionKind{
-	Group:   SchemeGroupVersion.Group,
-	Version: SchemeGroupVersion.Version,
-	Kind:    BDKind,
-}
-
-// Kind takes an unqualified kind and returns back a Group qualified GroupKind
-func Kind(kind string) schema.GroupKind {
-	return SchemeGroupVersion.WithKind(kind).GroupKind()
-}
-
-// Resource takes an unqualified resource and returns a Group qualified GroupResource
-func Resource(resource string) schema.GroupResource {
-	return SchemeGroupVersion.WithResource(resource).GroupResource()
-}
-
 // Adds the list of known types to Scheme.
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
 		&BlockDevice{},
 		&BlockDeviceList{},
+		&LvmVolumeGroup{},
+		&LvmVolumeGroupList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil

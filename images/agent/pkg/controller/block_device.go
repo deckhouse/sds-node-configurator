@@ -98,7 +98,7 @@ func GetAPIBlockDevices(ctx context.Context, kc kclient.Client) (map[string]v1al
 	deviceStatuses := make(map[string]v1alpha1.BlockDeviceStatus)
 	listDevice := &v1alpha1.BlockDeviceList{
 		TypeMeta: metav1.TypeMeta{
-			Kind:       v1alpha1.OwnerReferencesKind,
+			Kind:       v1alpha1.BlockDeviceKind,
 			APIVersion: v1alpha1.TypeMediaAPIVersion,
 		},
 		ListMeta: metav1.ListMeta{},
@@ -132,7 +132,7 @@ func RemoveDeprecatedAPIDevices(
 	for name, status := range apiBlockDevices {
 		if checkAPIBlockDeviceDeprecated(name, actualCandidates) &&
 			status.NodeName == nodeName {
-			err := DeleteBlockDeviceObject(ctx, cl, name)
+			err := DeleteAPIBlockDevice(ctx, cl, name)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("Unable to delete APIBlockDevice, name: %s", name))
 				continue
@@ -367,7 +367,7 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, candidate Cand
 			OwnerReferences: []metav1.OwnerReference{},
 		},
 		TypeMeta: metav1.TypeMeta{
-			Kind:       v1alpha1.OwnerReferencesKind,
+			Kind:       v1alpha1.BlockDeviceKind,
 			APIVersion: v1alpha1.TypeMediaAPIVersion,
 		},
 		Status: v1alpha1.BlockDeviceStatus{
@@ -378,7 +378,7 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, candidate Cand
 			PVUuid:                candidate.PVUuid,
 			VGUuid:                candidate.VGUuid,
 			LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
-			ActualVGnameOnTheNode: candidate.ActualVGnameOnTheNode,
+			ActualVGNameOnTheNode: candidate.ActualVGnameOnTheNode,
 			Wwn:                   candidate.Wwn,
 			Serial:                candidate.Serial,
 			Path:                  candidate.Path,
@@ -398,13 +398,13 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, candidate Cand
 	return &device.Status, nil
 }
 
-func DeleteBlockDeviceObject(ctx context.Context, kc kclient.Client, deviceName string) error {
+func DeleteAPIBlockDevice(ctx context.Context, kc kclient.Client, deviceName string) error {
 	device := &v1alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: deviceName,
 		},
 		TypeMeta: metav1.TypeMeta{
-			Kind:       v1alpha1.OwnerReferencesKind,
+			Kind:       v1alpha1.BlockDeviceKind,
 			APIVersion: v1alpha1.TypeMediaAPIVersion,
 		},
 	}

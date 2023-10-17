@@ -3,6 +3,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 version: v0.0.15-dev.1692006087
 =======
 version: v0.0.15-dev.1695739258
@@ -16,3 +17,6 @@ version: v0.0.15-dev.1696413575
 =======
 version: v0.0.15-dev.1696948863
 >>>>>>> e40db4c (bump version 0.0.15-dev.1696599057)
+=======
+version: v0.0.15-dev.1697184750
+>>>>>>> 83847d2 (Added LvmVolumeGroup CRD and API-objects)

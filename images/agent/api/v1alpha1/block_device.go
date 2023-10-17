@@ -31,7 +31,7 @@ type BlockDeviceStatus struct {
 	PVUuid                string         `json:"pvUUID,omitempty"`
 	VGUuid                string         `json:"vgUUID,omitempty"`
 	LvmVolumeGroupName    string         `json:"lvmVolumeGroupName"`
-	ActualVGnameOnTheNode string         `json:"actualVGNameOnTheNode"`
+	ActualVGNameOnTheNode string         `json:"actualVGNameOnTheNode"`
 	Wwn                   string         `json:"wwn"`
 	Serial                string         `json:"serial"`
 	Path                  string         `json:"path"`

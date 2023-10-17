@@ -294,7 +294,3 @@ func TestGetCandidates(t *testing.T) {
 		})
 	})
 }
-
-func TestGetAPIBlockDevices(t *testing.T) {
-
-}
