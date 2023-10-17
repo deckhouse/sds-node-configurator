@@ -28,13 +28,29 @@ func GetBlockDevices() ([]internal.Device, string, error) {
 	return devices, cmd.String(), nil
 }
 
-func GetAllPVs() ([]internal.PV, string, error) {
+func GetAllVGs() ([]internal.VGData, string, error) {
+	var outs bytes.Buffer
+	cmd := exec.Command("vgs", "-o", "+uuid,tags,shared", "--reportformat", "json")
+	cmd.Stdout = &outs
+
+	if err := cmd.Run(); err != nil {
+		return nil, cmd.String(), fmt.Errorf("unable to GetAllVGs, err: %w", err)
+	}
+
+	vgs, err := unmarshalVGs(outs.Bytes())
+	if err != nil {
+		return nil, cmd.String(), fmt.Errorf("unable to GetAllVGs, err: %w", err)
+	}
+
+	return vgs, cmd.String(), nil
+}
+
+func GetAllPVs() ([]internal.PVData, string, error) {
 	var outs bytes.Buffer
 	cmd := exec.Command("pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--reportformat", "json")
 	cmd.Stdout = &outs
 
-	err := cmd.Run()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		return nil, cmd.String(), fmt.Errorf("unable to GetAllPVs, err: %w", err)
 	}
 
@@ -46,7 +62,7 @@ func GetAllPVs() ([]internal.PV, string, error) {
 	return pvs, cmd.String(), nil
 }
 
-func GetSinglePV(pVname string) (*internal.PV, string, error) {
+func GetSinglePV(pVname string) (*internal.PVData, string, error) {
 	var outs bytes.Buffer
 	cmd := exec.Command("pvs", pVname, "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--reportformat", "json")
 	cmd.Stdout = &outs
@@ -191,7 +207,7 @@ func RemovePVFromVG(pvName, vgName string) (string, error) {
 		}
 
 		if pv.PVUsed != "0 " {
-			return cmdStr, fmt.Errorf("unable to RemovePVFromVG, err: single PV has data")
+			return cmdStr, fmt.Errorf("unable to RemovePVFromVG, err: single PVData has data")
 		}
 
 		cmdStr, err = RemoveVG(pv.VGName)
@@ -208,7 +224,7 @@ func RemovePVFromVG(pvName, vgName string) (string, error) {
 	}
 
 	if !clear {
-		return cmdStr, fmt.Errorf(`unable to RemovePVFromVG, err: can't move LV segments from PV, pv name: "%s"`, pvName)
+		return cmdStr, fmt.Errorf(`unable to RemovePVFromVG, err: can't move LV segments from PVData, pv name: "%s"`, pvName)
 	}
 
 	cmd := exec.Command("vgreduce", vgName, pvName)
@@ -258,14 +274,14 @@ func unmarshalDevices(out []byte) ([]internal.Device, error) {
 	return devices.BlockDevices, nil
 }
 
-func unmarshalPVs(out []byte) ([]internal.PV, error) {
+func unmarshalPVs(out []byte) ([]internal.PVData, error) {
 	var pvR internal.PVReport
 
 	if err := json.Unmarshal(out, &pvR); err != nil {
 		return nil, err
 	}
 
-	var pvs []internal.PV
+	var pvs []internal.PVData
 
 	for _, rep := range pvR.Report {
 		for _, pv := range rep.PV {
@@ -274,4 +290,22 @@ func unmarshalPVs(out []byte) ([]internal.PV, error) {
 	}
 
 	return pvs, nil
+}
+
+func unmarshalVGs(out []byte) ([]internal.VGData, error) {
+	var vgR internal.VGReport
+
+	if err := json.Unmarshal(out, &vgR); err != nil {
+		return nil, err
+	}
+
+	var vgs []internal.VGData
+
+	for _, rep := range vgR.Report {
+		for _, vg := range rep.VG {
+			vgs = append(vgs, vg)
+		}
+	}
+
+	return vgs, nil
 }

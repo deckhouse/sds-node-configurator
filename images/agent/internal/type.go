@@ -43,18 +43,33 @@ type Device struct {
 }
 
 type PVReport struct {
-	Report []Report `json:"report"`
-}
-
-type Report struct {
-	PV []PV `json:"pv"`
+	Report []PV `json:"report"`
 }
 
 type PV struct {
+	PV []PVData `json:"pv"`
+}
+
+type PVData struct {
 	PVName string `json:"pv_name,omitempty"`
 	VGName string `json:"vg_name,omitempty"`
 	PVUsed string `json:"pv_used,omitempty"`
 	PVUuid string `json:"pv_uuid,omitempty"`
 	VGTags string `json:"vg_tags,omitempty"`
 	VGUuid string `json:"vg_uuid,omitempty"`
+}
+
+type VGReport struct {
+	Report []VG `json:"report"`
+}
+
+type VG struct {
+	VG []VGData `json:"vg"`
+}
+
+type VGData struct {
+	VGName   string `json:"vg_name"`
+	VGUuid   string `json:"vg_uuid"`
+	VGTags   string `json:"vg_tags"`
+	VGShared string `json:"vg_shared"`
 }

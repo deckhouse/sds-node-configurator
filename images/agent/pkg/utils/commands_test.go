@@ -132,7 +132,7 @@ func TestCommands(t *testing.T) {
           }
       ]
   }`
-			expectedPVs := internal.Report{PV: []internal.PV{
+			expectedPVs := internal.PV{PV: []internal.PVData{
 				{
 					PVName: "/dev/vdb",
 					VGName: "vgtest",
@@ -157,6 +157,51 @@ func TestCommands(t *testing.T) {
                   {"pv_name":"/dev/vdb", "vg_name":"vgtest", "pv_fmt":"lvm2", "pv_attr":"a--", "pv_size":"1020.00m", 
 "pv_free":"1020.00m", "pv_uuid":"BmuLLu-9ZSf-eqpf-qR3H-23rQ-fIl7-Ouyl5X", "vg_tags":"", 
 "vg_uuid":"JnCFQZ-TTfE-Ed2C-nKoH-yzPH-4fMA-CKwIv7"}
+              ]
+          }
+  }`
+
+			_, err := unmarshalPVs([]byte(js))
+			assert.Error(t, err)
+		})
+	})
+
+	t.Run("GetAllVGs", func(t *testing.T) {
+		t.Run("UnmarshalVGs_Expects_Success", func(t *testing.T) {
+			js := `{
+      "report": [
+          {
+              "vg": [
+                  {"vg_name":"test-vg", "pv_count":"1", "lv_count":"0", "snap_count":"0", "vg_attr":"wz--n-", 
+"vg_size":"<2.00g", "vg_free":"<2.00g", "vg_uuid":"P14t8J-nfUE-hryT-LiTv-JdFD-Wqxg-R8taCa", 
+"vg_tags":"test-tag", "vg_shared":"test-shared"}
+              ]
+          }
+      ]
+  }`
+			expectedVGs := internal.VG{VG: []internal.VGData{
+				{
+					VGName:   "test-vg",
+					VGUuid:   "P14t8J-nfUE-hryT-LiTv-JdFD-Wqxg-R8taCa",
+					VGTags:   "test-tag",
+					VGShared: "test-shared",
+				},
+			}}
+
+			actualVGs, err := unmarshalVGs([]byte(js))
+			if assert.NoError(t, err) {
+				assert.Equal(t, expectedVGs.VG, actualVGs)
+			}
+		})
+
+		t.Run("UnmarshalVGs_Expects_Failure", func(t *testing.T) {
+			js := `{
+      "report": 
+          {
+              "vg": [
+                  {"vg_name":"test-vg", "pv_count":"1", "lv_count":"0", "snap_count":"0", "vg_attr":"wz--n-", 
+"vg_size":"<2.00g", "vg_free":"<2.00g", "vg_uuid":"P14t8J-nfUE-hryT-LiTv-JdFD-Wqxg-R8taCa", 
+"vg_tags":"test-tag", "vg_shared":"test-shared"}
               ]
           }
   }`
