@@ -27,7 +27,7 @@ spec:
           properties:
             status:
               type: object
-              required: [size,type,consumable,path,rota,nodeName,machineId]
+              required: [size,type,consumable,path,rota,hotPlug,nodeName,machineId]
               properties:
                 type:
                   type: string
@@ -45,11 +45,9 @@ spec:
                   description: "If true, the resource will be deleted after device has gone from the node"
                 pvUUID:
                   type: string
-                  format: uuid
                   description: "Persistent Volume UUID. Optional: exists if only the resource is PV"
                 vgUUID:
                   type: string
-                  format: uuid
                   description: "VolumeGroup UUID. Optional: exists if only the resource is PV and in VG"
                 lvmVolumeGroupName:
                   type: string
@@ -75,6 +73,9 @@ spec:
                 rota:
                   type: boolean
                   description: "Rota"
+                hotPlug:
+                  type: boolean
+                  description: "HotPlug"
                 machineId:
                   type: string
                   description: "MachineID"

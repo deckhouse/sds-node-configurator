@@ -31,7 +31,7 @@ var (
 )
 
 func main() {
-	log, err := log.NewLogger(log.InfoLevel)
+	log, err := log.NewLogger(log.DebugLevel)
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)

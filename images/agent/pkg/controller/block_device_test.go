@@ -1,11 +1,11 @@
-package controller_test
+package controller
 
 import (
+	"storage-configurator/api/v1alpha1"
 	"storage-configurator/internal"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"storage-configurator/pkg/controller"
 )
 
 func TestGetCandidates(t *testing.T) {
@@ -27,7 +27,7 @@ func TestGetCandidates(t *testing.T) {
 				Rota:       false,
 			}
 
-			shouldBeTrue := controller.CheckConsumable(goodDevice)
+			shouldBeTrue := CheckConsumable(goodDevice)
 			assert.True(t, shouldBeTrue)
 		})
 
@@ -94,7 +94,7 @@ func TestGetCandidates(t *testing.T) {
 			}}
 
 			for _, badDevice := range badDevices.BlockDevices {
-				shouldBeFalse := controller.CheckConsumable(badDevice)
+				shouldBeFalse := CheckConsumable(badDevice)
 				assert.False(t, shouldBeFalse)
 			}
 		})
@@ -102,7 +102,7 @@ func TestGetCandidates(t *testing.T) {
 
 	t.Run("CreateUniqDeviceName", func(t *testing.T) {
 		nodeName := "testNode"
-		can := internal.Candidate{
+		can := internal.BlockDeviceCandidate{
 			NodeName: nodeName,
 			Wwn:      "ZX128ZX128ZX128",
 			Path:     "/dev/sda",
@@ -110,7 +110,7 @@ func TestGetCandidates(t *testing.T) {
 			Model:    "HARD-DRIVE",
 		}
 
-		deviceName := controller.CreateUniqDeviceName(can)
+		deviceName := CreateUniqDeviceName(can)
 		assert.Equal(t, "dev-", deviceName[0:4], "device name does not start with dev-")
 		assert.Equal(t, len(deviceName[4:]), 40, "device name does not contains sha1 sum")
 	})
@@ -120,7 +120,7 @@ func TestGetCandidates(t *testing.T) {
 			expectedName := "testName"
 			tags := "storage.deckhouse.io/enabled=true,storage.deckhouse.io/lvmVolumeGroupName=" + expectedName
 
-			shouldBeTrue, actualName := controller.CheckTag(tags)
+			shouldBeTrue, actualName := CheckTag(tags)
 			if assert.True(t, shouldBeTrue) {
 				assert.Equal(t, expectedName, actualName)
 			}
@@ -129,10 +129,99 @@ func TestGetCandidates(t *testing.T) {
 		t.Run("Haven't tag_Returns false and empty", func(t *testing.T) {
 			tags := "someWeirdTags=oMGwtFIsThis"
 
-			shouldBeFalse, actualName := controller.CheckTag(tags)
+			shouldBeFalse, actualName := CheckTag(tags)
 			if assert.False(t, shouldBeFalse) {
 				assert.Equal(t, "", actualName)
 			}
 		})
+	})
+
+	t.Run("hasValidSize", func(t *testing.T) {
+		sizes := []string{"2G", "1G", "1.5G", "0.9G", "100M", "1000K"}
+		expected := []bool{true, true, true, false, false, false}
+
+		for i, size := range sizes {
+			valid, err := hasValidSize(size)
+
+			if assert.NoError(t, err) {
+				assert.Equal(t, expected[i], valid)
+			}
+		}
+
+	})
+
+	t.Run("hasBlockDeviceDiff", func(t *testing.T) {
+		candidates := []internal.BlockDeviceCandidate{
+			// same state
+			{
+				NodeName:              "test_node",
+				Consumable:            false,
+				PVUuid:                "testPV",
+				VGUuid:                "testVGUID",
+				LvmVolumeGroupName:    "testLVGName",
+				ActualVGNameOnTheNode: "testNameOnNode",
+				Wwn:                   "testWWN",
+				Serial:                "testSERIAL",
+				Path:                  "testPATH",
+				Size:                  "testSIZE",
+				Rota:                  false,
+				Model:                 "testMODEL",
+				Name:                  "testNAME",
+				HotPlug:               false,
+				KName:                 "testKNAME",
+				PkName:                "testPKNAME",
+				Type:                  "testTYPE",
+				FSType:                "testFS",
+				MachineId:             "testMACHINE",
+			},
+			// diff state
+			{
+				NodeName:              "test_node",
+				Consumable:            true,
+				PVUuid:                "testPV2",
+				VGUuid:                "testVGUID2",
+				LvmVolumeGroupName:    "testLVGName2",
+				ActualVGNameOnTheNode: "testNameOnNode2",
+				Wwn:                   "testWWN2",
+				Serial:                "testSERIAL2",
+				Path:                  "testPATH2",
+				Size:                  "testSIZE2",
+				Rota:                  true,
+				Model:                 "testMODEL2",
+				Name:                  "testNAME",
+				HotPlug:               true,
+				KName:                 "testKNAME2",
+				PkName:                "testPKNAME2",
+				Type:                  "testTYPE2",
+				FSType:                "testFS2",
+				MachineId:             "testMACHINE2",
+			},
+		}
+		resourse := v1alpha1.BlockDevice{
+			Status: v1alpha1.BlockDeviceStatus{
+				Type:                  "testTYPE",
+				FsType:                "testFS",
+				NodeName:              "test_node",
+				Consumable:            false,
+				PVUuid:                "testPV",
+				VGUuid:                "testVGUID",
+				LvmVolumeGroupName:    "testLVGName",
+				ActualVGNameOnTheNode: "testNameOnNode",
+				Wwn:                   "testWWN",
+				Serial:                "testSERIAL",
+				Path:                  "testPATH",
+				Size:                  "testSIZE",
+				Model:                 "testMODEL",
+				Rota:                  false,
+				HotPlug:               false,
+				MachineID:             "testMACHINE",
+			},
+		}
+		expected := []bool{false, true}
+
+		for i, candidate := range candidates {
+			actual := hasBlockDeviceDiff(resourse.Status, candidate)
+			assert.Equal(t, expected[i], actual)
+		}
 	})
 }

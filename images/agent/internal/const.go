@@ -9,6 +9,7 @@ const (
 )
 
 var (
-	AllowedFSTypes     = [...]string{LVMFSType}
-	InvalidDeviceTypes = [...]string{LoopDeviceType, LVMDeviceType}
+	AllowedFSTypes       = [...]string{LVMFSType}
+	InvalidDeviceTypes   = [...]string{LoopDeviceType, LVMDeviceType}
+	BlockDeviceValidSize = "1G"
 )

@@ -12,7 +12,7 @@ type BlockDevice struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Status BlockDeviceStatus `json:"status,omitempty"`
+	Status BlockDeviceStatus `json:"status"`
 }
 
 // BlockDeviceList contains a list of empty block device
@@ -25,11 +25,11 @@ type BlockDeviceList struct {
 
 type BlockDeviceStatus struct {
 	Type                  string         `json:"type"`
-	FsType                v1beta1.FSType `json:"fsType,omitempty"`
+	FsType                v1beta1.FSType `json:"fsType"`
 	NodeName              string         `json:"nodeName"`
 	Consumable            bool           `json:"consumable"`
-	PVUuid                string         `json:"pvUUID,omitempty"`
-	VGUuid                string         `json:"vgUUID,omitempty"`
+	PVUuid                string         `json:"pvUUID"`
+	VGUuid                string         `json:"vgUUID"`
 	LvmVolumeGroupName    string         `json:"lvmVolumeGroupName"`
 	ActualVGNameOnTheNode string         `json:"actualVGNameOnTheNode"`
 	Wwn                   string         `json:"wwn"`
@@ -38,5 +38,6 @@ type BlockDeviceStatus struct {
 	Size                  string         `json:"size"`
 	Model                 string         `json:"model"`
 	Rota                  bool           `json:"rota"`
+	HotPlug               bool           `json:"hotPlug"`
 	MachineID             string         `json:"machineId"`
 }

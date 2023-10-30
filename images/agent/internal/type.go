@@ -1,6 +1,6 @@
 package internal
 
-type Candidate struct {
+type BlockDeviceCandidate struct {
 	NodeName              string
 	Consumable            bool
 	PVUuid                string
@@ -30,7 +30,7 @@ type Device struct {
 	Name       string `json:"name"`
 	MountPoint string `json:"mountpoint"`
 	PartUUID   string `json:"partuuid"`
-	HotPlug    bool   `json:"hotplug"`
+	HotPlug    bool   `json:"hotPlug"`
 	Model      string `json:"model"`
 	Serial     string `json:"serial"`
 	Size       string `json:"size"`
