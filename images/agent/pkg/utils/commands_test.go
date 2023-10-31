@@ -140,6 +140,7 @@ func TestCommands(t *testing.T) {
 					PVUuid: "BmuLLu-9ZSf-eqpf-qR3H-23rQ-fIl7-Ouyl5X",
 					VGTags: "",
 					VGUuid: "JnCFQZ-TTfE-Ed2C-nKoH-yzPH-4fMA-CKwIv7",
+					PVSize: "1020.00m",
 				},
 			}}
 
@@ -184,7 +185,9 @@ func TestCommands(t *testing.T) {
 					VGName:   "test-vg",
 					VGUuid:   "P14t8J-nfUE-hryT-LiTv-JdFD-Wqxg-R8taCa",
 					VGTags:   "test-tag",
+					VGSize:   "<2.00g",
 					VGShared: "test-shared",
+					VGFree:   "<2.00g",
 				},
 			}}
 
@@ -208,6 +211,43 @@ func TestCommands(t *testing.T) {
 
 			_, err := unmarshalPVs([]byte(js))
 			assert.Error(t, err)
+		})
+
+		t.Run("UnmarshalVGS_EmptyVG_ReturnsZeroLen", func(t *testing.T) {
+			js := `{
+      "report": [
+          {
+              "vg": [
+              ]
+          }
+      ]
+  }`
+
+			actualVGs, err := unmarshalVGs([]byte(js))
+			if assert.NoError(t, err) {
+				assert.Equal(t, 0, len(actualVGs))
+			}
+		})
+	})
+
+	t.Run("GetAllPVs", func(t *testing.T) {
+		t.Run("Unmarshal_LV", func(t *testing.T) {
+			js := `{
+      "report": [
+          {
+              "lv": [
+                  {"lv_name":"mythinpool", "vg_name":"test", "lv_attr":"twi---tzp-", "lv_size":"1.00g", "pool_lv":"", "origin":"", "data_percent":"", "metadata_percent":"", "move_pv":"", "mirror_log":"", "copy_percent":"", "convert_lv":""}
+              ]
+          }
+      ]
+  }`
+
+			pvs, err := unmarshalLVs([]byte(js))
+			if assert.NoError(t, err) {
+				pv := pvs[0]
+
+				assert.Equal(t, string(pv.LVAttr[0]), "t")
+			}
 		})
 	})
 }

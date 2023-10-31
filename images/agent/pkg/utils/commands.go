@@ -28,38 +28,58 @@ func GetBlockDevices() ([]internal.Device, string, error) {
 	return devices, cmd.String(), nil
 }
 
-func GetAllVGs() ([]internal.VGData, string, error) {
+func GetAllVGs() (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	cmd := exec.Command("vgs", "-o", "+uuid,tags,shared", "--reportformat", "json")
+	cmd := exec.Command("vgs", "-o", "+uuid,tags,shared", "--units", "K", "--reportformat", "json")
 	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
 
 	if err := cmd.Run(); err != nil {
-		return nil, cmd.String(), fmt.Errorf("unable to GetAllVGs, err: %w", err)
+		return nil, cmd.String(), stdErr, fmt.Errorf("unable to GetAllVGs, err: %w", err)
 	}
 
-	vgs, err := unmarshalVGs(outs.Bytes())
+	data, err = unmarshalVGs(outs.Bytes())
 	if err != nil {
-		return nil, cmd.String(), fmt.Errorf("unable to GetAllVGs, err: %w", err)
+		return nil, cmd.String(), stdErr, fmt.Errorf("unable to GetAllVGs, err: %w", err)
 	}
 
-	return vgs, cmd.String(), nil
+	return data, cmd.String(), stdErr, nil
 }
 
-func GetAllPVs() ([]internal.PVData, string, error) {
+func GetAllLVs() (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
+	var outs bytes.Buffer
+	cmd := exec.Command("lvs", "-o", "+vg_uuid", "--units", "K", "--reportformat", "json")
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	if err := cmd.Run(); err != nil {
+		return nil, cmd.String(), stdErr, fmt.Errorf("unable to GetAllLVs, err: %w", err)
+	}
+
+	lvs, err := unmarshalLVs(outs.Bytes())
+	if err != nil {
+		return nil, cmd.String(), stdErr, fmt.Errorf("unable to GetAllLVs, err: %w", err)
+	}
+
+	return lvs, cmd.String(), stdErr, nil
+}
+
+func GetAllPVs() (data []internal.PVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	cmd := exec.Command("pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--reportformat", "json")
 	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
 
 	if err := cmd.Run(); err != nil {
-		return nil, cmd.String(), fmt.Errorf("unable to GetAllPVs, err: %w", err)
+		return nil, cmd.String(), stdErr, fmt.Errorf("unable to GetAllPVs, err: %w", err)
 	}
 
-	pvs, err := unmarshalPVs(outs.Bytes())
+	data, err = unmarshalPVs(outs.Bytes())
 	if err != nil {
-		return nil, cmd.String(), fmt.Errorf("unable to GetAllPVs, err: %w", err)
+		return nil, cmd.String(), stdErr, fmt.Errorf("unable to GetAllPVs, err: %w", err)
 	}
 
-	return pvs, cmd.String(), nil
+	return data, cmd.String(), stdErr, nil
 }
 
 func GetSinglePV(pVname string) (*internal.PVData, string, error) {
@@ -96,37 +116,25 @@ func CreatePV(path string) (string, error) {
 	return cmd.String(), nil
 }
 
-func CreateVGLocal(vgName string, lvm *v1alpha1.LvmVolumeGroup) (string, error) {
-	if lvm == nil {
-		return "", fmt.Errorf("unable to CreateVGLocal, err: lvm is nil")
-	}
-
+func CreateVGLocal(vgName, lvmName string, pvNames []string) (string, error) {
 	cmd := exec.Command(
-		"vgcreate",
-		vgName,
-		strings.Join(lvm.Spec.BlockDeviceNames, " "),
-		"--addtag storage.deckhouse.io/enabled=true",
-		fmt.Sprintf("--addtag storage.deckhouse.io/lvmVolumeGroupName=%s", lvm.Name))
+		"vgcreate", vgName, strings.Join(pvNames, " "),
+		"--addtag", "storage.deckhouse.io/enabled=true", "--addtag ", fmt.Sprintf("storage.deckhouse.io/lvmVolumeGroupName=%s", lvmName))
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to CreateVGLocal, err: %w", err)
+		return cmd.String(), fmt.Errorf("unable to CreateVGLocal, err: %w , stderror = %s", err, stderr.String())
 	}
 
 	return cmd.String(), nil
 }
 
-func CreateVGShared(vgName string, lvm *v1alpha1.LvmVolumeGroup) (string, error) {
-	if lvm == nil {
-		return "", fmt.Errorf("unable to CreateVGShared, err: lvm is nil")
-	}
-
+func CreateVGShared(vgName, lvmName string, pvNames []string) (string, error) {
 	cmd := exec.Command(
-		"vgcreate",
-		"--shared",
-		vgName,
-		strings.Join(lvm.Spec.BlockDeviceNames, " "),
-		"--addtag storage.deckhouse.io/enabled=true",
-		fmt.Sprintf("--addtag storage.deckhouse.io/lvmVolumeGroupName=%s", lvm.Name))
+		"vgcreate", "--shared", vgName, strings.Join(pvNames, " "),
+		"--addtag", "storage.deckhouse.io/enabled=true", "--addtag ", fmt.Sprintf("storage.deckhouse.io/lvmVolumeGroupName=%s", lvmName))
 
 	if err := cmd.Run(); err != nil {
 		return cmd.String(), fmt.Errorf("unable to CreateVGShared, err: %w", err)
@@ -135,17 +143,10 @@ func CreateVGShared(vgName string, lvm *v1alpha1.LvmVolumeGroup) (string, error)
 	return cmd.String(), nil
 }
 
-func CreateLV(thinPool v1alpha1.ThinPool, spec *v1alpha1.LvmVolumeGroupSpec) (string, error) {
-	if spec == nil {
-		return "", fmt.Errorf("unable to CreateLV, err: spec is nil")
-	}
+func CreateLV(thinPool v1alpha1.SpecThinPool, VGName string) (string, error) {
 
 	cmd := exec.Command(
-		"lvcreate",
-		"-L",
-		thinPool.Size,
-		"-T",
-		fmt.Sprintf("%s/%s", spec.ActualVGNameOnTheNode, thinPool.Name))
+		"lvcreate", "-L", thinPool.Size, "-T", fmt.Sprintf("%s/%s", VGName, thinPool.Name))
 
 	if err := cmd.Run(); err != nil {
 		return cmd.String(), fmt.Errorf("unable to CreateLV, err: %w", err)
@@ -153,25 +154,21 @@ func CreateLV(thinPool v1alpha1.ThinPool, spec *v1alpha1.LvmVolumeGroupSpec) (st
 	return cmd.String(), nil
 }
 
-func ExtendVG(vgName string, paths ...string) (string, error) {
-	cmd := exec.Command(
-		"vgextend",
-		vgName,
-		strings.Join(paths, " "))
+func ExtendVG(vgName string, paths []string) (string, error) {
+	cmd := exec.Command("vgextend", vgName, strings.Join(paths, " "))
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to ExtendVG, err: %w", err)
+		return cmd.String(), fmt.Errorf("unable to ExtendVG, err: %w stderr = %s", err, stderr.String())
 	}
 
 	return cmd.String(), nil
 }
 
 func ExtendLV(size, vgName, lvName string) (string, error) {
-	cmd := exec.Command(
-		"lvextend",
-		"-L",
-		size,
-		fmt.Sprintf("/dev/%s/%s", vgName, lvName))
+	cmd := exec.Command("lvextend", "-L", size, fmt.Sprintf("/dev/%s/%s", vgName, lvName))
 
 	if err := cmd.Run(); err != nil {
 		return cmd.String(), fmt.Errorf("unable to ExtendLV, err: %w", err)
@@ -190,7 +187,7 @@ func ResizePV(pvName string) (string, error) {
 }
 
 func RemovePVFromVG(pvName, vgName string) (string, error) {
-	pvs, cmdStr, err := GetAllPVs()
+	pvs, cmdStr, _, err := GetAllPVs()
 	if err != nil {
 		return cmdStr, fmt.Errorf("unable to RemovePVFromVG, err: %w", err)
 	}
@@ -258,10 +255,25 @@ func MovePV(pvName string) (string, error) {
 func RemoveVG(vgName string) (string, error) {
 	cmd := exec.Command("vgremove", vgName)
 
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to RemoveVG, err: %w", err)
+		return cmd.String(), fmt.Errorf("unable to RemoveVG, err: %w stderr = %s", err, stderr.String())
 	}
 
+	return cmd.String(), nil
+}
+
+func RemovePV(pvNames []string) (string, error) {
+	cmd := exec.Command("pvremove", strings.Join(pvNames, " "))
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to RemovePV, err: %w stderr = %s", err, stderr.String())
+	}
 	return cmd.String(), nil
 }
 
@@ -308,4 +320,22 @@ func unmarshalVGs(out []byte) ([]internal.VGData, error) {
 	}
 
 	return vgs, nil
+}
+
+func unmarshalLVs(out []byte) ([]internal.LVData, error) {
+	var lvR internal.LVReport
+
+	if err := json.Unmarshal(out, &lvR); err != nil {
+		return nil, err
+	}
+
+	var lvs []internal.LVData
+
+	for _, rep := range lvR.Report {
+		for _, lv := range rep.LV {
+			lvs = append(lvs, lv)
+		}
+	}
+
+	return lvs, nil
 }

@@ -41,6 +41,7 @@ func main() {
 
 	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
 	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
+	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
 	cfgParams, err := config.NewConfig()
 	if err != nil {
@@ -49,7 +50,7 @@ func main() {
 	log.Info("CfgParams has been successfully created")
 	log.Info(fmt.Sprintf("%s = %s", config.NodeName, cfgParams.NodeName))
 	log.Info(fmt.Sprintf("%s = %s", config.MachineID, cfgParams.MachineId))
-	log.Info(fmt.Sprintf("%s = %d", config.ScanInterval, cfgParams.ScanInterval))
+	log.Info(fmt.Sprintf("%s = %d", config.ScanInterval, cfgParams.BlockDeviceScanInterval))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
@@ -88,6 +89,16 @@ func main() {
 	}
 
 	log.Info("Controller BlockDevice started")
+
+	if _, err := controller.RunLVMVolumeGroupController(ctx, mgr, cfgParams.NodeName, log); err != nil {
+		log.Error(err, "Error Run RunLVMVolumeGroupController")
+		os.Exit(1)
+	}
+
+	if _, err := controller.RunDiscoveryLVMVGController(ctx, mgr, *cfgParams, log); err != nil {
+		log.Error(err, "Unable to controller.RunDiscoveryLVMVGController")
+		os.Exit(1)
+	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "Unable to mgr.AddHealthzCheck")

@@ -14,10 +14,11 @@ const (
 )
 
 type Options struct {
-	MachineId    string
-	NodeName     string
-	MetricsPort  string
-	ScanInterval time.Duration
+	MachineId               string
+	NodeName                string
+	MetricsPort             string
+	BlockDeviceScanInterval time.Duration
+	VolumeGroupScanInterval time.Duration
 }
 
 func NewConfig() (*Options, error) {
@@ -40,13 +41,14 @@ func NewConfig() (*Options, error) {
 		opts.MetricsPort = ":8080"
 	}
 
-	opts.ScanInterval = 5
+	opts.BlockDeviceScanInterval = 5
+	opts.VolumeGroupScanInterval = 5
 
 	return &opts, nil
 }
 
 func getMachineId() (string, error) {
-	id, err := os.ReadFile("host-root/etc/machine-id")
+	id, err := os.ReadFile("/host-root/etc/machine-id")
 	if err != nil {
 		return "", err
 	}

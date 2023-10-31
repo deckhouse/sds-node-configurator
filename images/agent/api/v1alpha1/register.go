@@ -10,7 +10,7 @@ const (
 	BlockDeviceKind           = "BlockDevice"
 	LVMVolumeGroupKind        = "LvmVolumeGroup"
 	APIGroup                  = "storage.deckhouse.io"
-	APIVersion                = "v1alpha1" // v1alpha1
+	APIVersion                = "v1alpha1"
 	OwnerReferencesAPIVersion = "v1"
 	TypeMediaAPIVersion       = APIGroup + "/" + APIVersion
 	Node                      = "Node"

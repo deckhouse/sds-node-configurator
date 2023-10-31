@@ -6,8 +6,6 @@ metadata:
   labels:
     heritage: deckhouse
     module: storage
-  finalizers:
-    - storage.deckhouse.io/sds-node-configurator
 spec:
   group: storage.deckhouse.io
   scope: Cluster
@@ -17,6 +15,7 @@ spec:
     singular: lvmvolumegroup
     shortNames:
       - lvg
+  preserveUnknownFields: false
   versions:
     - name: v1alpha1
       served: true
@@ -28,7 +27,6 @@ spec:
           properties:
             spec:
               type: object
-              required: [type,blockDeviceNames,actualVGnameOnTheNode]
               properties:
                 type:
                   type: string
@@ -55,7 +53,6 @@ spec:
                         description: "Thin pool's size"
             status:
               type: object
-              required: [health,allocationType,vgUUID,vgSize,allocatedSize,nodes]
               properties:
                 health:
                   type: string
@@ -64,22 +61,28 @@ spec:
                 message:
                   type: string
                   description: "Description of the problem"
-                allocationType:
-                  type: string
-                  enum: [thin,thick]
                 vgUUID:
                   type: string
                 vgSize:
                   type: string
                 allocatedSize:
                   type: string
-                thinPoolSize:
-                  type: string
+                thinPools:
+                  type: array
+                  items:
+                    type: object
+                    required: [name,actualSize,usedSize]
+                    properties:
+                      name:
+                        type: string
+                      actualSize:
+                        type: string
+                      usedSize:
+                        type: string
                 nodes:
                   type: array
                   items:
                     type: object
-                    required: [name,devices]
                     properties:
                       name:
                         type: string
@@ -87,7 +90,6 @@ spec:
                         type: array
                         items:
                           type: object
-                          required: [path,pvSize,devSize,pvUUID,blockDevice]
                           properties:
                             path:
                               type: string

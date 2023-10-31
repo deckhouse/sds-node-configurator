@@ -122,7 +122,7 @@ var _ = Describe("Storage Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		devices, err := controller.GetAPIBlockDevices(context.Background(), cl)
-		for name, _ := range devices {
+		for name := range devices {
 			Expect(name).NotTo(Equal(deviceName))
 		}
 	})

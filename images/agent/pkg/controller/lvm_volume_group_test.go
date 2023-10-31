@@ -9,7 +9,7 @@ import (
 )
 
 func TestLvmVolumeGroupAPIObjects(t *testing.T) {
-	t.Run("Unmarshal LvmVolumeGroup json to struct", func(t *testing.T) {
+	t.Run("Unmarshal_LvmVolumeGroup_json_to_struct", func(t *testing.T) {
 		js := `{
     "apiVersion": "storage.deckhouse.io/v1alpha1",
     "kind": "LvmVolumeGroup",
@@ -36,7 +36,6 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
     },
     "status": {
         "allocatedSize": "20G",
-        "allocationType": "thin",
         "health": "operational",
         "message": "all-good",
         "nodes": [
@@ -72,7 +71,12 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
                 "name": "node2"
             }
         ],
-        "thinPoolSize": "1G",
+        "thinPools": [
+			{
+                "name": "test-name",
+                "actualSize": "1G"
+            }
+		],
         "vgSize": "test-vg-size",
         "vgUUID": "test-vg-uuid"
     }
@@ -89,7 +93,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 				Type:                  "local",
 				BlockDeviceNames:      []string{"test-bd", "test-bd2"},
 				ActualVGNameOnTheNode: "testVGname",
-				ThinPools: []v1alpha1.ThinPool{
+				ThinPools: []v1alpha1.SpecThinPool{
 					{
 						Name: "test-name",
 						Size: "10G",
@@ -101,13 +105,17 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 				},
 			},
 			Status: v1alpha1.LvmVolumeGroupStatus{
-				Health:         "operational",
-				Message:        "all-good",
-				AllocationType: "thin",
-				VGUuid:         "test-vg-uuid",
-				VGSize:         "test-vg-size",
-				AllocatedSize:  "20G",
-				ThinPoolSize:   "1G",
+				Health:        "operational",
+				Message:       "all-good",
+				VGUuid:        "test-vg-uuid",
+				VGSize:        "test-vg-size",
+				AllocatedSize: "20G",
+				ThinPools: []v1alpha1.StatusThinPool{
+					{
+						Name:       "test-name",
+						ActualSize: "1G",
+					},
+				},
 				Nodes: []v1alpha1.LvmVolumeGroupNode{
 					{
 						Name: "node1",
@@ -152,7 +160,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 		}
 	})
 
-	t.Run("Marshal LvmVolumeGroup struct to json", func(t *testing.T) {
+	t.Run("Marshal_LvmVolumeGroup_struct_to_json", func(t *testing.T) {
 		expected := `{
     "apiVersion": "storage.deckhouse.io/v1alpha1",
     "kind": "LvmVolumeGroup",
@@ -180,7 +188,6 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
     },
     "status": {
         "allocatedSize": "20G",
-        "allocationType": "thin",
         "health": "operational",
         "message": "all-good",
         "nodes": [
@@ -216,7 +223,13 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
                 "name": "node2"
             }
         ],
-        "thinPoolSize": "1G",
+        "thinPools": [
+            {
+                "name": "test-name",
+                "actualSize": "1G",
+				"usedSize": "500M"
+            }
+        ],
         "vgSize": "test-vg-size",
         "vgUUID": "test-vg-uuid"
     }
@@ -233,7 +246,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 			Spec: v1alpha1.LvmVolumeGroupSpec{
 				ActualVGNameOnTheNode: "testVGname",
 				BlockDeviceNames:      []string{"test-bd", "test-bd2"},
-				ThinPools: []v1alpha1.ThinPool{
+				ThinPools: []v1alpha1.SpecThinPool{
 					{
 						Name: "test-name",
 						Size: "10G",
@@ -246,10 +259,9 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 				Type: "local",
 			},
 			Status: v1alpha1.LvmVolumeGroupStatus{
-				AllocatedSize:  "20G",
-				AllocationType: "thin",
-				Health:         "operational",
-				Message:        "all-good",
+				AllocatedSize: "20G",
+				Health:        "operational",
+				Message:       "all-good",
 				Nodes: []v1alpha1.LvmVolumeGroupNode{
 					{
 						Devices: []v1alpha1.LvmVolumeGroupDevice{
@@ -283,9 +295,15 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 						Name: "node2",
 					},
 				},
-				ThinPoolSize: "1G",
-				VGSize:       "test-vg-size",
-				VGUuid:       "test-vg-uuid",
+				ThinPools: []v1alpha1.StatusThinPool{
+					{
+						Name:       "test-name",
+						ActualSize: "1G",
+						UsedSize:   "500M",
+					},
+				},
+				VGSize: "test-vg-size",
+				VGUuid: "test-vg-uuid",
 			},
 		}
 

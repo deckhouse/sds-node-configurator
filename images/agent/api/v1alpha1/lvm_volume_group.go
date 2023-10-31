@@ -17,16 +17,16 @@ type LvmVolumeGroup struct {
 	Status LvmVolumeGroupStatus `json:"status"`
 }
 
-type ThinPool struct {
+type SpecThinPool struct {
 	Name string `json:"name"`
 	Size string `json:"size"`
 }
 
 type LvmVolumeGroupSpec struct {
-	ActualVGNameOnTheNode string     `json:"actualVGNameOnTheNode"`
-	BlockDeviceNames      []string   `json:"blockDeviceNames"`
-	ThinPools             []ThinPool `json:"thinPools,omitempty"`
-	Type                  string     `json:"type"`
+	ActualVGNameOnTheNode string         `json:"actualVGNameOnTheNode"`
+	BlockDeviceNames      []string       `json:"blockDeviceNames"`
+	ThinPools             []SpecThinPool `json:"thinPools"`
+	Type                  string         `json:"type"`
 }
 
 type LvmVolumeGroupDevice struct {
@@ -42,13 +42,18 @@ type LvmVolumeGroupNode struct {
 	Name    string                 `json:"name"`
 }
 
+type StatusThinPool struct {
+	Name       string `json:"name"`
+	ActualSize string `json:"actualSize"`
+	UsedSize   string `json:"usedSize"`
+}
+
 type LvmVolumeGroupStatus struct {
-	AllocatedSize  string               `json:"allocatedSize"`
-	AllocationType string               `json:"allocationType"`
-	Health         string               `json:"health"`
-	Message        string               `json:"message"`
-	Nodes          []LvmVolumeGroupNode `json:"nodes"`
-	ThinPoolSize   string               `json:"thinPoolSize"`
-	VGSize         string               `json:"vgSize"`
-	VGUuid         string               `json:"vgUUID"`
+	AllocatedSize string               `json:"allocatedSize"`
+	Health        string               `json:"health"`
+	Message       string               `json:"message"`
+	Nodes         []LvmVolumeGroupNode `json:"nodes"`
+	ThinPools     []StatusThinPool     `json:"thinPools"`
+	VGSize        string               `json:"vgSize"`
+	VGUuid        string               `json:"vgUUID"`
 }

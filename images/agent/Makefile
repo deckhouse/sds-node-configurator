@@ -1,8 +1,13 @@
 export NODE_NAME=test-node
 
-APP-NAME=storage-configurator
-REGISTRY=registry.flant.com/deckhouse/$(APP-NAME)
+APP-NAME=sds-node-configurator
+REGISTRY=registry.flant.com/deckhouse/storage/$(APP-NAME)
 TEST-ARGS=-race -timeout 30s -count 1
+USER := $(shell whoami)
+DAEMONSET_NAME=storage-configurator
+NAMESPACE=d8-storage-configurator
+SYSTEM_NAMESPACE=d8-system
+PULL_SECRET_NAME=fox-registry
 
 run: ## run go
 	go run -race ./cmd/bc/main.go
@@ -33,3 +38,24 @@ remove: ## remove docker image
 .PHONY: docker image remove
 
 
+switch_to_local_dev:
+	kubectl -n $(SYSTEM_NAMESPACE) scale deployment deckhouse --replicas=0
+	kubectl -n $(NAMESPACE) patch daemonset $(DAEMONSET_NAME) -p \
+		'{"spec": {"template": {"spec": {"containers": [{"name": "ubuntu-container", "image": "$(REGISTRY):$(USER)"}]}}}}'
+	kubectl  -n $(NAMESPACE) patch daemonset $(DAEMONSET_NAME) --type='json' \
+		-p='[{"op": "add", "path": "/spec/template/spec/imagePullSecrets", "value": [{"name": "$(PULL_SECRET_NAME)"}]}]'
+.PHONY: switch_to_local_dev
+
+fox_build_and_push:
+	docker build . -t $(REGISTRY):$(USER) -f ./dev/Dockerfile
+	docker push $(REGISTRY):$(USER)
+.PHONY: fox_build_and_push
+
+switch_to_remote_dev:
+	kubectl -n $(SYSTEM_NAMESPACE) scale deployment deckhouse --replicas=1
+
+.PHONY: switch_to_remote_dev
+
+redeploy:
+	kubectl -n $(NAMESPACE) rollout restart daemonset $(DAEMONSET_NAME)
+.PHONY: redeploy
