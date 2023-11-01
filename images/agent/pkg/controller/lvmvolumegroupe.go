@@ -86,9 +86,22 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 	}
 	validation, status, err := ValidationLVMGroup(ctx, cl, group, objectNameSpace, nodeName)
 
+	if group == nil {
+		log.Error(nil, "requested LVMVG group in nil")
+		return
+	}
+
+	fmt.Println("---------------------- GROUP STATUS --------------------")
+	fmt.Println(group.Status)
+	fmt.Println("---------------------- GROUP STATUS --------------------")
+
 	if len(status.Health) != 0 {
+		fmt.Println("***********************")
 		group.Status.Health = status.Health
-		group.Status.Message = err.Error()
+		if err != nil {
+			group.Status.Message = err.Error()
+		}
+
 		err = updateLVMVolumeGroup(ctx, cl, group)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group.Name))

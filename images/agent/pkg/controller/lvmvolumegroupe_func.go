@@ -68,10 +68,10 @@ func getBlockDevice(ctx context.Context, cl client.Client, namespace, name strin
 	return obj, nil
 }
 
-func ValidationLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, namespace, nodeName string) (bool, StatusLVMVolumeGroup, error) {
+func ValidationLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, namespace, nodeName string) (bool, *StatusLVMVolumeGroup, error) {
 	status := StatusLVMVolumeGroup{}
 	if lvmVolumeGroup == nil {
-		return false, status, errors.New("lvmVolumeGroup in empty")
+		return false, nil, errors.New("lvmVolumeGroup in empty")
 	}
 
 	membership := 0
@@ -80,7 +80,7 @@ func ValidationLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGroup *v
 			device, err := getBlockDevice(ctx, cl, namespace, blockDev)
 			if err != nil {
 				status.Health = ""
-				return false, status, err
+				return false, &status, err
 			}
 			if device.Status.NodeName == nodeName {
 				membership++
@@ -88,7 +88,7 @@ func ValidationLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGroup *v
 		}
 
 		if membership == len(lvmVolumeGroup.Spec.BlockDeviceNames) {
-			return true, status, nil
+			return true, &status, nil
 		}
 
 		// TODO devices not affiliated ?
@@ -96,14 +96,14 @@ func ValidationLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGroup *v
 			status.Health = NoOperational
 			status.Phase = Failed
 			status.Message = "one or some devices not affiliated this node"
-			return false, status, nil
+			return false, &status, nil
 		}
 
 		if len(lvmVolumeGroup.Spec.BlockDeviceNames)-membership == len(lvmVolumeGroup.Spec.BlockDeviceNames) {
 			status.Health = NoOperational
 			status.Phase = Failed
 			status.Message = "no one devices not affiliated this node"
-			return false, status, nil
+			return false, &status, nil
 		}
 	}
 
@@ -112,14 +112,14 @@ func ValidationLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGroup *v
 			status.Health = NoOperational
 			status.Phase = Failed
 			status.Message = "LVMVolumeGroup Type != shared"
-			return false, status, errors.New(status.Message)
+			return false, &status, errors.New(status.Message)
 		}
 
 		if len(lvmVolumeGroup.Spec.BlockDeviceNames) == 1 && (len(lvmVolumeGroup.Spec.BlockDeviceNames)-membership) == 0 {
-			return true, status, nil
+			return true, &status, nil
 		}
 	}
-	return false, status, nil
+	return false, &status, nil
 }
 
 func ValidationTypeLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, l log.Logger) (extendPV, shrinkPV []string, err error) {

@@ -183,7 +183,7 @@ func GetBlockDeviceCandidates(log log.Logger, cfg config.Options) ([]internal.Bl
 		return nil, fmt.Errorf("unable to GetBlockDevices, err: %w", err)
 	}
 
-	filteredDevices, err := filterDevices(devices)
+	filteredDevices, err := filterDevices(log, devices)
 	if err != nil {
 		log.Error(err, "[GetBlockDeviceCandidates] unable to filter devices")
 		return nil, err
@@ -240,10 +240,9 @@ func GetBlockDeviceCandidates(log log.Logger, cfg config.Options) ([]internal.Bl
 	return candidates, nil
 }
 
-func filterDevices(devices []internal.Device) ([]internal.Device, error) {
-	pkNames := make(map[string]struct{})
-	for _, device := range devices {
-		pkNames[device.PkName] = struct{}{}
+func filterDevices(log log.Logger, devices []internal.Device) ([]internal.Device, error) {
+	for _, dev := range devices {
+		log.Debug("[filterDevices] devices before type filtration: " + dev.Name)
 	}
 
 	validTypes := make([]internal.Device, 0, len(devices))
@@ -253,12 +252,17 @@ func filterDevices(devices []internal.Device) ([]internal.Device, error) {
 		if hasValidType(device.Type) &&
 			hasValidFSType(device.FSType) {
 			validTypes = append(validTypes, device)
+			log.Debug("[filterDevice] devices after type filtration: " + device.Name)
 		}
+	}
+
+	pkNames := make(map[string]struct{}, len(validTypes))
+	for _, device := range validTypes {
+		pkNames[device.PkName] = struct{}{}
 	}
 
 	filtered := make([]internal.Device, 0, len(validTypes))
 	for _, device := range validTypes {
-
 		if !isParent(device.KName, pkNames) {
 			validSize, err := hasValidSize(device.Size)
 			if err != nil {
@@ -267,6 +271,7 @@ func filterDevices(devices []internal.Device) ([]internal.Device, error) {
 
 			if validSize {
 				filtered = append(filtered, device)
+				log.Debug("[filterDevice] final filtered device: " + device.Name)
 			}
 		}
 	}

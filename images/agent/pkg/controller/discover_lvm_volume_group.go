@@ -152,13 +152,13 @@ func hasLVMVolumeGroupDiff(resource v1alpha1.LvmVolumeGroup, candidate internal.
 		candidate.Message != resource.Status.Message ||
 		!reflect.DeepEqual(convertStatusThinPools(candidate.StatusThinPools), resource.Status.ThinPools) ||
 		candidate.VGSize != resource.Status.VGSize ||
+		candidate.VGUuid != resource.Status.VGUuid ||
 		!reflect.DeepEqual(convertLVMVGNodes(candidate.Nodes), resource.Status.Nodes)
 }
 
 func getResourceByCandidate(current map[string]v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) *v1alpha1.LvmVolumeGroup {
 	for _, lvm := range current {
-		if lvm.Spec.ActualVGNameOnTheNode == candidate.ActualVGNameOnTheNode &&
-			lvm.Status.VGUuid == candidate.VGUuid {
+		if lvm.Spec.ActualVGNameOnTheNode == candidate.ActualVGNameOnTheNode {
 			return &lvm
 		}
 	}

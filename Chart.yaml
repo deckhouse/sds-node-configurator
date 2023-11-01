@@ -1,5 +1,5 @@
 name: deckhouse-storage-configurator
-version: 0.0.15-dev.1698853127
+version: 0.0.15-dev.1698918089
 dependencies:
   - name: deckhouse_lib_helm
     version: 1.1.3
