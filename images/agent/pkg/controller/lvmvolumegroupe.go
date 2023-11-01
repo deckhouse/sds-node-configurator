@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"storage-configurator/api/v1alpha1"
 	"storage-configurator/pkg/log"
 	"storage-configurator/pkg/utils"
@@ -46,6 +47,21 @@ func RunLVMVolumeGroupController(
 		ReconcileLVMVG(ctx, e.Object.GetName(), e.Object.GetNamespace(), nodeName, log, cl)
 	}
 	updateFunc := func(ctx context.Context, updateEvent event.UpdateEvent, limitingInterface workqueue.RateLimitingInterface) {
+
+		newLVG, ok := updateEvent.ObjectNew.(*v1alpha1.LvmVolumeGroup)
+		if !ok {
+			log.Error(err, "error get  ObjectNew LinstorStoragePool")
+		}
+
+		oldLVG, ok := updateEvent.ObjectOld.(*v1alpha1.LvmVolumeGroup)
+		if !ok {
+			log.Error(err, "error get  ObjectOld LinstorStoragePool")
+		}
+
+		if !reflect.DeepEqual(oldLVG.Status, newLVG.Status) {
+			return
+		}
+
 		ReconcileLVMVG(ctx, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
 	}
 
@@ -68,7 +84,6 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 		log.Error(err, "error getLVMVolumeGroup")
 		return
 	}
-
 	validation, status, err := ValidationLVMGroup(ctx, cl, group, objectNameSpace, nodeName)
 
 	if len(status.Health) != 0 {
@@ -161,7 +176,7 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 			group.Status.Health = NoOperational
 			err = updateLVMVolumeGroup(ctx, cl, group)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group))
+				log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group.Name))
 				return
 			}
 
@@ -177,7 +192,7 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 			group.Status.Health = Operational
 			err = updateLVMVolumeGroup(ctx, cl, group)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group))
+				log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group.Name))
 				return
 			}
 		}
@@ -200,7 +215,7 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 					group.Status.Health = NoOperational
 					err = updateLVMVolumeGroup(ctx, cl, group)
 					if err != nil {
-						log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group))
+						log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group.Name))
 						return
 					}
 				}
@@ -232,6 +247,8 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 				command, err := utils.CreateLV(v, group.Spec.ActualVGNameOnTheNode)
 				log.Debug(command)
 				if err != nil {
+					group.Status.Health = NoOperational
+					err = updateLVMVolumeGroup(ctx, cl, group)
 					log.Error(err, "error CreateLV")
 					return
 				}
@@ -242,7 +259,7 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 	group.Status.Health = Operational
 	err = updateLVMVolumeGroup(ctx, cl, group)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group))
+		log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group.Name))
 		return
 	}
 

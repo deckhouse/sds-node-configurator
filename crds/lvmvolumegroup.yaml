@@ -30,7 +30,7 @@ spec:
               properties:
                 type:
                   type: string
-                  enum: [local,shared]
+                  enum: [Local,Shared]
                   description: "LVMVolumeGroup type. Immutable field"
                 blockDeviceNames:
                   type: array
@@ -56,7 +56,7 @@ spec:
               properties:
                 health:
                   type: string
-                  enum: [operational,nonoperational]
+                  enum: [Operational,Nonoperational]
                   description: "Describes if VG is actually healthy"
                 message:
                   type: string

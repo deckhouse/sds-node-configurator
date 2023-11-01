@@ -117,9 +117,11 @@ func CreatePV(path string) (string, error) {
 }
 
 func CreateVGLocal(vgName, lvmName string, pvNames []string) (string, error) {
+	tmpStr := fmt.Sprintf("storage.deckhouse.io/lvmVolumeGroupName=%s", lvmName)
+	fmt.Println("CREATE_VG_LOCAL")
 	cmd := exec.Command(
-		"vgcreate", vgName, strings.Join(pvNames, " "),
-		"--addtag", "storage.deckhouse.io/enabled=true", "--addtag ", fmt.Sprintf("storage.deckhouse.io/lvmVolumeGroupName=%s", lvmName))
+		"vgcreate", vgName, strings.Join(pvNames, ""),
+		"--addtag", "storage.deckhouse.io/enabled=true", "--addtag", tmpStr)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -148,8 +150,11 @@ func CreateLV(thinPool v1alpha1.SpecThinPool, VGName string) (string, error) {
 	cmd := exec.Command(
 		"lvcreate", "-L", thinPool.Size, "-T", fmt.Sprintf("%s/%s", VGName, thinPool.Name))
 
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to CreateLV, err: %w", err)
+		return cmd.String(), fmt.Errorf("unable to CreateLV, err: %w tderr = %s", err, stderr.String())
 	}
 	return cmd.String(), nil
 }

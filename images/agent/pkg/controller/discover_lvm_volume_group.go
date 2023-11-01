@@ -8,6 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"os/exec"
+	"reflect"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -144,14 +145,14 @@ func hasLVMVolumeGroupDiff(resource v1alpha1.LvmVolumeGroup, candidate internal.
 	//TODO: Uncomment this
 	//return strings.Join(candidate.Finalizers, "") != strings.Join(resource.Finalizers, "") ||
 	return strings.Join(candidate.BlockDevicesNames, "") != strings.Join(resource.Spec.BlockDeviceNames, "") ||
-		!EqualSpecThinPools(convertSpecThinPools(candidate.SpecThinPools), resource.Spec.ThinPools) ||
+		!reflect.DeepEqual(convertSpecThinPools(candidate.SpecThinPools), resource.Spec.ThinPools) ||
 		candidate.Type != resource.Spec.Type ||
 		candidate.AllocatedSize != resource.Status.AllocatedSize ||
 		candidate.Health != resource.Status.Health ||
 		candidate.Message != resource.Status.Message ||
-		!EqualStatusThinPools(convertStatusThinPools(candidate.StatusThinPools), resource.Status.ThinPools) ||
+		!reflect.DeepEqual(convertStatusThinPools(candidate.StatusThinPools), resource.Status.ThinPools) ||
 		candidate.VGSize != resource.Status.VGSize ||
-		!EqualLVMVolumeGroupNodes(convertLVMVGNodes(candidate.Nodes), resource.Status.Nodes)
+		!reflect.DeepEqual(convertLVMVGNodes(candidate.Nodes), resource.Status.Nodes)
 }
 
 func getResourceByCandidate(current map[string]v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) *v1alpha1.LvmVolumeGroup {
@@ -176,7 +177,7 @@ func ClearLVMVolumeGroupResources(
 ) {
 	if len(candidates) == 0 {
 		for _, lvm := range lvmVolumeGroups {
-			if &lvm.Status != nil {
+			if reflect.ValueOf(lvm.Status).IsZero() {
 				for i, node := range lvm.Status.Nodes {
 					if node.Name == currentNode {
 						// delete node
@@ -186,8 +187,8 @@ from LVMVolumeGroup, name: "%s"`, node.Name, lvm.Name))
 					}
 				}
 
-				// If current LVMVolumeGroup has no nodes left, delete it.
-				if len(lvm.Status.Nodes) == 0 {
+				// If current LVMVolumeGroup has no nodes left, and it is not cause of errors, delete it.
+				if len(lvm.Status.Nodes) == 0 && lvm.Status.Health == internal.LVMVGHealthOperational {
 					if err := DeleteLVMVolumeGroup(ctx, cl, lvm.Name); err != nil {
 						log.Error(err, fmt.Sprintf("Unable to delete LVMVolumeGroup, name: %s", lvm.Name))
 						continue
@@ -212,7 +213,6 @@ func DeleteLVMVolumeGroup(ctx context.Context, kc kclient.Client, lvmvgName stri
 	}
 
 	err := kc.Delete(ctx, lvm)
-	fmt.Println("DEGUB: I DELETED DELETED")
 	if err != nil {
 		return fmt.Errorf(
 			`[DeleteLVMVolumeGroup] unable to delete DeleteLVMVolumeGroup with name "%s", err: %w`,
@@ -270,7 +270,7 @@ func GetLVMVolumeGroupCandidates(log log.Logger, bds map[string]v1alpha1.BlockDe
 	var thinPools []internal.LVData
 	if lvs != nil && len(lvs) > 0 {
 		// Filter LV to get only thin pools as we do not support thick for now.
-		thinPools = getThinPoolLVs(lvs)
+		thinPools = getThinPools(lvs)
 	}
 
 	// If lvErrs is not empty, that means we have some problems on vgs, so we need to identify unhealthy vgs.
@@ -544,7 +544,7 @@ func getSpecThinPools(thinPools map[string][]internal.LVData, vg internal.VGData
 	return tps
 }
 
-func getThinPoolLVs(lvs []internal.LVData) []internal.LVData {
+func getThinPools(lvs []internal.LVData) []internal.LVData {
 	thinPools := make([]internal.LVData, 0, len(lvs))
 
 	for _, lv := range lvs {
