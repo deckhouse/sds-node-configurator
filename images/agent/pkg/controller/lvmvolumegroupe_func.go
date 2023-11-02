@@ -206,14 +206,14 @@ func DeleteVG(vgName string, log log.Logger) error {
 		return fmt.Errorf("error lvg contains lv ")
 	}
 
-	command, err = utils.RemoveVG(vgName)
+	pvs, command, _, err := utils.GetAllPVs()
 	log.Debug(command)
 	if err != nil {
 		log.Error(err, "RemoveVG "+command)
 		return err
 	}
 
-	pvs, command, _, err := utils.GetAllPVs()
+	command, err = utils.RemoveVG(vgName)
 	log.Debug(command)
 	if err != nil {
 		log.Error(err, "RemoveVG "+command)

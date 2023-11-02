@@ -44,9 +44,11 @@ func RunLVMVolumeGroupController(
 	}
 
 	createFunc := func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
+		log.Info("event create LVMVolumeGroup " + e.Object.GetName())
 		ReconcileLVMVG(ctx, e.Object.GetName(), e.Object.GetNamespace(), nodeName, log, cl)
 	}
 	updateFunc := func(ctx context.Context, updateEvent event.UpdateEvent, limitingInterface workqueue.RateLimitingInterface) {
+		log.Info("update create LVMVolumeGroup " + updateEvent.ObjectNew.GetName())
 
 		newLVG, ok := updateEvent.ObjectNew.(*v1alpha1.LvmVolumeGroup)
 		if !ok {
@@ -62,7 +64,9 @@ func RunLVMVolumeGroupController(
 			return
 		}
 
-		ReconcileLVMVG(ctx, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
+		if len(newLVG.Spec.BlockDeviceNames) > len(oldLVG.Spec.BlockDeviceNames) {
+			ReconcileLVMVG(ctx, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
+		}
 	}
 
 	err = c.Watch(source.Kind(cache, &v1alpha1.LvmVolumeGroup{}), &handler.Funcs{
@@ -78,7 +82,7 @@ func RunLVMVolumeGroupController(
 }
 
 func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName string, log log.Logger, cl client.Client) {
-	log.Info("event create LVMVolumeGroup " + objectName)
+
 	group, err := getLVMVolumeGroup(ctx, cl, objectNameSpace, objectName)
 	if err != nil {
 		log.Error(err, "error getLVMVolumeGroup")
@@ -91,12 +95,7 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 		return
 	}
 
-	fmt.Println("---------------------- GROUP STATUS --------------------")
-	fmt.Println(group.Status)
-	fmt.Println("---------------------- GROUP STATUS --------------------")
-
 	if len(status.Health) != 0 {
-		fmt.Println("***********************")
 		group.Status.Health = status.Health
 		if err != nil {
 			group.Status.Message = err.Error()
@@ -119,8 +118,6 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 	}
 
 	log.Info("Validation passed")
-
-	///-----------------
 
 	annotationMark := 0
 	for k, _ := range group.Annotations {

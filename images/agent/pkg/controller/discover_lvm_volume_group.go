@@ -95,11 +95,11 @@ func RunDiscoveryLVMVGController(
 			}
 
 			// If we have no candidates, that means we have no VG for current node, then we have to remove current node from every resource.
-			if len(candidates) == 0 {
-				log.Debug(fmt.Sprintf(`[RunDiscoveryLVMVGController] no any candidate on the node: "%s". 
-The node will be removed from LVMVolumeGroup.Status.Nodes`, cfg.NodeName))
-				ClearLVMVolumeGroupResources(ctx, cl, log, candidates, currentLVMVGs, cfg.NodeName)
-			}
+			//			if len(candidates) == 0 {
+			//				log.Debug(fmt.Sprintf(`[RunDiscoveryLVMVGController] no any candidate on the node: "%s".
+			//The node will be removed from LVMVolumeGroup.Status.Nodes`, cfg.NodeName))
+			//				ClearLVMVolumeGroupResources(ctx, cl, log, candidates, currentLVMVGs, cfg.NodeName)
+			//			}
 
 			for _, candidate := range candidates {
 				if resource := getResourceByCandidate(currentLVMVGs, candidate); resource != nil {
@@ -128,6 +128,8 @@ The node will be removed from LVMVolumeGroup.Status.Nodes`, cfg.NodeName))
 					log.Info(fmt.Sprintf(`[RunDiscoveryLVMVGController] created new APILVMVolumeGroup, name: "%s"`, lvm.Name))
 				}
 			}
+
+			ClearLVMVolumeGroupResources(ctx, cl, log, candidates, currentLVMVGs, cfg.NodeName)
 		}
 	}()
 
@@ -175,9 +177,14 @@ func ClearLVMVolumeGroupResources(
 	lvmVolumeGroups map[string]v1alpha1.LvmVolumeGroup,
 	currentNode string,
 ) {
-	if len(candidates) == 0 {
-		for _, lvm := range lvmVolumeGroups {
-			if reflect.ValueOf(lvm.Status).IsZero() {
+	actualVGs := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		actualVGs[candidate.ActualVGNameOnTheNode] = struct{}{}
+	}
+
+	for _, lvm := range lvmVolumeGroups {
+		if !reflect.ValueOf(lvm.Status).IsZero() {
+			if _, exist := actualVGs[lvm.Spec.ActualVGNameOnTheNode]; !exist {
 				for i, node := range lvm.Status.Nodes {
 					if node.Name == currentNode {
 						// delete node
@@ -188,7 +195,7 @@ from LVMVolumeGroup, name: "%s"`, node.Name, lvm.Name))
 				}
 
 				// If current LVMVolumeGroup has no nodes left, and it is not cause of errors, delete it.
-				if len(lvm.Status.Nodes) == 0 && lvm.Status.Health == internal.LVMVGHealthOperational {
+				if len(lvm.Status.Nodes) == 0 {
 					if err := DeleteLVMVolumeGroup(ctx, cl, lvm.Name); err != nil {
 						log.Error(err, fmt.Sprintf("Unable to delete LVMVolumeGroup, name: %s", lvm.Name))
 						continue
