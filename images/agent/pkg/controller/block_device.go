@@ -6,7 +6,12 @@ import (
 	"fmt"
 	units2 "github.com/alecthomas/units"
 	"k8s.io/api/policy/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"os"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 	"storage-configurator/api/v1alpha1"
@@ -16,11 +21,6 @@ import (
 	"storage-configurator/pkg/utils"
 	"strings"
 	"time"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kclient "sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 const (
@@ -82,14 +82,14 @@ func RunBlockDeviceController(
 						continue
 					}
 
-					log.Info(fmt.Sprintf(`[RunBlockDeviceController] updated APIBlockDevice, name: %s`, resource.Name))
+					//log.Info(fmt.Sprintf(`[RunBlockDeviceController] updated APIBlockDevice, name: %s`, resource.Name))
 				} else {
 					device, err := CreateAPIBlockDevice(ctx, cl, candidate)
 					if err != nil {
 						log.Error(err, "Unable to CreateAPIBlockDevice")
 						continue
 					}
-					log.Info("Created new APIBlockDevice: " + candidate.Name)
+					//log.Info("Created new APIBlockDevice: " + candidate.Name)
 
 					// add new api device to the map, so it won't be deleted as fantom
 					apiBlockDevices[candidate.Name] = *device
@@ -216,6 +216,13 @@ func GetBlockDeviceCandidates(log log.Logger, cfg config.Options) ([]internal.Bl
 			MachineId:  cfg.MachineId,
 		}
 
+		if len(candidate.Serial) == 0 {
+			err, serial := readSerialBlockDevice(candidate.Path)
+			if err != nil {
+				log.Error(err, "readSerialBlockDevice")
+			}
+			candidate.Serial = serial
+		}
 		candidate.Name = CreateUniqDeviceName(candidate)
 
 		for _, pv := range pvs {
@@ -241,9 +248,9 @@ func GetBlockDeviceCandidates(log log.Logger, cfg config.Options) ([]internal.Bl
 }
 
 func filterDevices(log log.Logger, devices []internal.Device) ([]internal.Device, error) {
-	for _, dev := range devices {
-		log.Debug("[filterDevices] devices before type filtration: " + dev.Name)
-	}
+	//for _, dev := range devices {
+	//	log.Debug("[filterDevices] devices before type filtration: " + dev.Name)
+	//}
 
 	validTypes := make([]internal.Device, 0, len(devices))
 
@@ -252,7 +259,7 @@ func filterDevices(log log.Logger, devices []internal.Device) ([]internal.Device
 		if hasValidType(device.Type) &&
 			hasValidFSType(device.FSType) {
 			validTypes = append(validTypes, device)
-			log.Debug("[filterDevice] devices after type filtration: " + device.Name)
+			//log.Debug("[filterDevice] devices after type filtration: " + device.Name)
 		}
 	}
 
@@ -358,9 +365,18 @@ func CheckTag(tags string) (bool, string) {
 }
 
 func CreateUniqDeviceName(can internal.BlockDeviceCandidate) string {
-	temp := fmt.Sprintf("%s%s%s%s%s", can.NodeName, can.Wwn, can.Path, can.Size, can.Model)
+	temp := fmt.Sprintf("%s%s%s%s%s", can.NodeName, can.Wwn, can.Model, can.Serial)
 	s := fmt.Sprintf("dev-%x", sha1.Sum([]byte(temp)))
 	return s
+}
+
+func readSerialBlockDevice(deviceName string) (error, string) {
+	strPath := fmt.Sprintf("/sys/block/%s/serial", deviceName[5:])
+	serial, err := os.ReadFile(strPath)
+	if err != nil {
+		return err, ""
+	}
+	return nil, string(serial)
 }
 
 func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, resource v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {

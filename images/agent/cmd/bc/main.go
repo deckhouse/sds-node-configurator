@@ -31,7 +31,7 @@ var (
 )
 
 func main() {
-	log, err := log.NewLogger(log.DebugLevel)
+	log, err := log.NewLogger(log.InfoLevel)
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)
@@ -40,7 +40,6 @@ func main() {
 	ctx := context.Background()
 
 	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
-	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
 	cfgParams, err := config.NewConfig()

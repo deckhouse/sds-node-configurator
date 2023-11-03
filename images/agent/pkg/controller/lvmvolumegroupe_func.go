@@ -39,6 +39,25 @@ func updateLVMVolumeGroup(ctx context.Context, cl client.Client, group *v1alpha1
 	return nil
 }
 
+func updateLVMVolumeGroupStatus(ctx context.Context, cl client.Client, name, namespace, message, health string) error {
+	obj := &v1alpha1.LvmVolumeGroup{}
+	err := cl.Get(ctx, client.ObjectKey{
+		Name:      name,
+		Namespace: namespace,
+	}, obj)
+	if err != nil {
+		return err
+	}
+	obj.Status.Health = health
+	obj.Status.Message = message
+
+	err = cl.Update(ctx, obj)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func deleteLVMVolumeGroup(ctx context.Context, cl client.Client, name string) error {
 	req := &v1alpha1.LvmVolumeGroup{
 		TypeMeta: metav1.TypeMeta{
@@ -137,7 +156,7 @@ func ValidationTypeLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGrou
 
 		for _, pv := range pvs {
 			if dev.Status.LvmVolumeGroupName == pv.VGName || dev.Status.Consumable == true {
-				extendPV = append(extendPV, pv.PVName)
+				extendPV = append(extendPV, dev.Status.Path)
 			}
 
 			if dev.Status.LvmVolumeGroupName != pv.PVName {
@@ -202,8 +221,11 @@ func DeleteVG(vgName string, log log.Logger) error {
 		log.Error(err, "GetAllLVs "+command)
 		return err
 	}
-	if len(lvs) >= 1 {
-		return fmt.Errorf("error lvg contains lv ")
+
+	for _, lv := range lvs {
+		if lv.VGName == vgName {
+			return fmt.Errorf(fmt.Sprintf(`[ERROR] VG "%s" contains LV "%s"`, vgName, lv.LVName))
+		}
 	}
 
 	pvs, command, _, err := utils.GetAllPVs()
@@ -300,6 +322,7 @@ func ExtendVGComplex(extendPVs []string, VGName string, l log.Logger) error {
 			return err
 		}
 	}
+
 	command, err := utils.ExtendVG(VGName, extendPVs)
 	l.Debug(command)
 	if err != nil {
@@ -333,24 +356,35 @@ func CreateVGComplex(ctx context.Context, cl client.Client, group *v1alpha1.LvmV
 			l.Error(err, "CreatePV "+p)
 			return err
 		}
+	}
 
-		if group.Spec.Type == Local {
-			cmd, err := utils.CreateVGLocal(group.Spec.ActualVGNameOnTheNode, group.Name, paths)
-			l.Debug(cmd)
-			if err != nil {
-				l.Error(err, "error CreateVGLocal")
-				return err
-			}
+	if group.Spec.Type == Local {
+		cmd, err := utils.CreateVGLocal(group.Spec.ActualVGNameOnTheNode, group.Name, paths)
+		l.Debug(cmd)
+		if err != nil {
+			l.Error(err, "error CreateVGLocal")
+			return err
 		}
+	}
 
-		if group.Spec.Type == Shared {
-			cmd, err := utils.CreateVGShared(group.Spec.ActualVGNameOnTheNode, group.Name, paths)
-			l.Debug(cmd)
-			if err != nil {
-				l.Error(err, "error CreateVGShared")
-				return err
-			}
+	if group.Spec.Type == Shared {
+		cmd, err := utils.CreateVGShared(group.Spec.ActualVGNameOnTheNode, group.Name, paths)
+		l.Debug(cmd)
+		if err != nil {
+			l.Error(err, "error CreateVGShared")
+			return err
 		}
 	}
 	return nil
+}
+
+func LvgStatusToMap(lvg v1alpha1.LvmVolumeGroupStatus) map[string]string {
+	x := make(map[string]string)
+
+	for _, node := range lvg.Nodes {
+		for _, device := range node.Devices {
+			x[device.PVUuid] = device.DevSize
+		}
+	}
+	return x
 }

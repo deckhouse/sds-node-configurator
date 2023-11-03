@@ -232,12 +232,14 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			{
 				PVName: "test_pv1",
 				PVSize: "pv_size1",
+				PVUuid: "pv_uuid1",
 				VGName: vgName,
 				VGUuid: vgUuid,
 			},
 			{
 				PVName: "test_pv2",
 				PVSize: "pv_size2",
+				PVUuid: "pv_uuid2",
 				VGUuid: vgUuid,
 				VGName: vgName,
 			},
@@ -249,8 +251,6 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Status: v1alpha1.BlockDeviceStatus{
 					Path:                  "test_pv1",
 					Size:                  "dev_size1",
-					PVUuid:                "pv_uuid1",
-					NodeName:              nodeName,
 					VGUuid:                vgUuid,
 					ActualVGNameOnTheNode: vgName,
 				},
@@ -260,8 +260,6 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Status: v1alpha1.BlockDeviceStatus{
 					Path:                  "test_pv2",
 					Size:                  "dev_size2",
-					PVUuid:                "pv_uuid2",
-					NodeName:              nodeName,
 					VGUuid:                vgUuid,
 					ActualVGNameOnTheNode: vgName,
 				},
@@ -289,7 +287,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		mp := map[string][]v1alpha1.BlockDevice{vgName + vgUuid: bds}
 		ar := map[string][]internal.PVData{vgName + vgUuid: pvs}
 
-		actual := configureCandidateNodeDevices(ar, mp, vg)
+		actual := configureCandidateNodeDevices(ar, mp, vg, nodeName)
 
 		assert.Equal(t, expected, actual)
 	})
@@ -837,13 +835,6 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 							DevSize:     "13G",
 							PVUuid:      "testUUID",
 							BlockDevice: "something",
-						},
-						{
-							Path:        "/test/ds2",
-							PVSize:      "1G",
-							DevSize:     "13G",
-							PVUuid:      "testUUID2",
-							BlockDevice: "something2",
 						},
 					},
 				}

@@ -37,6 +37,8 @@ spec:
         volumeMounts:
         - name: host-device-dir
           mountPath: /dev/
+        - name: modules-dir
+          mountPath: /lib/modules
         - name: host-sys-dir
           mountPath: /sys/
         - name: host-root
@@ -54,3 +56,8 @@ spec:
       - name: host-root
         hostPath:
           path: /
+      - name: modules-dir
+        hostPath:
+          path: /lib/modules/
+          type: DirectoryOrCreate
+
