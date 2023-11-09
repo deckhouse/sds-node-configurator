@@ -4,14 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
-	"storage-configurator/api/v1alpha1"
-	"storage-configurator/pkg/log"
-	"storage-configurator/pkg/utils"
-	"strconv"
-	"strings"
-
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/util/workqueue"
+	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -19,6 +14,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+	"storage-configurator/api/v1alpha1"
+	"storage-configurator/internal"
+	"storage-configurator/pkg/log"
+	"storage-configurator/pkg/utils"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -62,6 +63,12 @@ func RunLVMVolumeGroupController(
 			log.Error(err, "error get  ObjectOld LinstorStoragePool")
 		}
 
+		if !reflect.DeepEqual(oldLVG.Annotations, newLVG.Annotations) {
+			log.Info("annotations update")
+			ReconcileLVMVG(ctx, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
+			return
+		}
+
 		if !reflect.DeepEqual(oldLVG.Spec, newLVG.Spec) {
 			log.Info("lvg spec changed")
 			ReconcileLVMVG(ctx, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
@@ -75,33 +82,24 @@ func RunLVMVolumeGroupController(
 			for _, node := range newLVG.Status.Nodes {
 				for _, device := range node.Devices {
 
-					if len(device.DevSize) == 0 {
-						log.Error(errors.New("check dev size device.DevSize = "), device.DevSize)
+					if device.DevSize.Value() == 0 {
+						log.Warning("check dev size device.DevSize = " + device.DevSize.String())
 						return
 					}
 
-					devSize, err := strconv.ParseFloat(device.DevSize[:len(device.DevSize)-1], 64)
-					if err != nil {
-						log.Error(err, "parse devise size")
+					log.Debug("Update spec check resize device.PVSize = " + device.PVSize.String())
+
+					if device.PVSize.Value() == 0 {
+						log.Warning("check dev PV size device.PVSize = " + device.PVSize.String())
 						return
 					}
 
-					if len(device.PVSize) == 0 {
-						log.Error(errors.New("check dev PV size device.PVSize = "), device.PVSize)
-						return
-					}
+					delta, _ := utils.QuantityToBytes(internal.ResizeDelta)
 
-					if strings.HasPrefix(device.PVSize, "<") || strings.HasPrefix(device.PVSize, ">") {
-						device.PVSize = device.PVSize[1:]
-					}
+					log.Debug("---------- Update LVG event ---------------")
+					log.Debug(fmt.Sprintf("Resize flag = %t", device.DevSize.Value()-device.PVSize.Value() > delta))
 
-					pvSize, err := strconv.ParseFloat(device.PVSize[:len(device.PVSize)-1], 64)
-					if err != nil {
-						log.Error(err, "parse pv size")
-						return
-					}
-
-					if devSize != pvSize {
+					if device.DevSize.Value()-device.PVSize.Value() > delta {
 						log.Info("lvg status device and PV changed")
 						ReconcileLVMVG(ctx, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
 					}
@@ -137,6 +135,7 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 		return
 	}
 
+	// todo check NonOperation
 	if len(status.Health) != 0 {
 		health := status.Health
 		var message string
@@ -146,9 +145,9 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 
 		log.Error(err, "ValidationLVMGroup")
 		err = updateLVMVolumeGroupStatus(ctx, cl, group.Name, group.Namespace, message, health)
-		//err = updateLVMVolumeGroup(ctx, cl, group)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group.Name))
+			return
 		}
 	}
 
@@ -159,6 +158,7 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 
 	if validation == false {
 		log.Info("Validation failed")
+		log.Info("status.Message = " + status.Message)
 		return
 	}
 
@@ -170,8 +170,6 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 			annotationMark++
 		}
 	}
-
-	//ok := group.Annotations[delAnnotation]
 
 	if annotationMark != 0 {
 		// lock
@@ -257,32 +255,47 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 		for _, n := range group.Status.Nodes {
 			for _, d := range n.Devices {
 
-				if len(d.DevSize) == 0 {
-					log.Error(errors.New("check resize d.DevSize = "), d.DevSize)
-					return
-				}
-				devSize, err := strconv.ParseFloat(d.DevSize[:len(d.DevSize)-1], 64)
-				if err != nil {
-					log.Error(err, "parse devise size")
+				if d.DevSize.Value() == 0 {
+					log.Error(errors.New("check resize d.DevSize = "), d.DevSize.String())
 					return
 				}
 
-				d.PVSize = d.PVSize[1:]
-				pvSize, err := strconv.ParseFloat(d.PVSize[:len(d.PVSize)-1], 64)
-				if err != nil {
-					log.Error(err, "parse pv size")
+				//devSize, err := utils.QuantityToBytes(d.DevSize)
+				//if err != nil {
+				//	log.Error(err, "device.DevSize")
+				//	return
+				//}
+
+				log.Debug("Check Resize d.PVSize = " + d.PVSize.String())
+
+				if d.PVSize.Value() == 0 {
+					log.Warning("check dev PV size device.PVSize = " + d.PVSize.String())
 					return
 				}
 
-				if d.PVSize == d.DevSize {
+				//pvSize, err := utils.QuantityToBytes(d.PVSize)
+				//if err != nil {
+				//	log.Error(err, "device.PVSize")
+				//	return
+				//}
+
+				delta, _ := utils.QuantityToBytes(internal.ResizeDelta)
+
+				log.Debug("---------- Reconcile ---------------")
+				log.Debug(fmt.Sprintf("PVSize = %s %d", d.PVSize.String(), d.PVSize.Value()))
+				log.Debug(fmt.Sprintf("DevSize = %s %d", d.DevSize.String(), d.PVSize.Value()))
+				log.Debug(fmt.Sprintf("Resize flag = %t", d.DevSize.Value()-d.PVSize.Value() > delta))
+				log.Debug("---------- Reconcile ---------------")
+
+				if d.DevSize.Value() < d.PVSize.Value() {
 					return
 				}
 
 				log.Info("devSize changed")
-				log.Info(fmt.Sprintf("devSize %f", devSize))
-				log.Info(fmt.Sprintf("pvSize %f", pvSize))
+				log.Info(fmt.Sprintf("devSize %s ", d.DevSize.String()))
+				log.Info(fmt.Sprintf("pvSize %s ", d.DevSize.String()))
 
-				if devSize > pvSize {
+				if d.DevSize.Value()-d.PVSize.Value() > delta {
 					log.Info("create event " + EventActionResizing)
 					err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonResizing, EventActionResizing, nodeName, group)
 					if err != nil {
@@ -291,16 +304,11 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 					command, err := utils.ResizePV(d.Path)
 					log.Debug(command)
 					if err != nil {
-						log.Error(err, "ResizePV")
-					}
-				} else {
-					//group.Status.Health = NoOperational
-					log.Error(errors.New("check size error"), "devSize < pvSize")
-					err = updateLVMVolumeGroupStatus(ctx, cl, group.Name, group.Namespace, "devSize < pvSize", NoOperational)
-
-					//err = updateLVMVolumeGroup(ctx, cl, group)
-					if err != nil {
-						log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group.Name))
+						log.Error(errors.New("check size error"), "devSize <= pvSize")
+						err = updateLVMVolumeGroupStatus(ctx, cl, group.Name, group.Namespace, "devSize <= pvSize", NoOperational)
+						if err != nil {
+							log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group.Name))
+						}
 						return
 					}
 				}
@@ -317,53 +325,53 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 				log.Error(err, " error CreateEventLVMVolumeGroup")
 			}
 
-			statusThinPoolMap := make(map[string]string)
+			statusThinPoolMap := make(map[string]resource.Quantity)
 			for _, statusThinPool := range group.Status.ThinPools {
 				statusThinPoolMap[statusThinPool.Name] = statusThinPool.ActualSize
 			}
 
-			// VG size
-			vgSizeGb, err := strconv.ParseFloat(group.Status.VGSize[:len(group.Status.VGSize)-1], 64)
-			if err != nil {
-				log.Error(err, "parse spec VGSize Kb => Gb")
-				return
-			}
-			vgSizeGb = vgSizeGb / 1048576
-
 			// VG allocatedSize
-			allocatedSizeGb, err := strconv.ParseFloat(group.Status.AllocatedSize[:len(group.Status.AllocatedSize)-1], 64)
-			if err != nil {
-				log.Error(err, "parse spec AllocatedSize M => Gb")
-				return
-			}
-			allocatedSizeGb = allocatedSizeGb / 1024
+			//allocatedSizeGb, err := utils.QuantityToBytes(group.Status.AllocatedSize)
+			//if err != nil {
+			//	log.Error(err, "parse spec AllocatedSize")
+			//}
 
 			for _, pool := range group.Spec.ThinPools {
+				//specPoolSize, err := utils.QuantityToBytes(pool.Size)
+				//if err != nil {
+				//	log.Error(err, "parse spec size thin pool")
+				//	return
+				//}
 
-				specPoolSize, err := strconv.ParseFloat(pool.Size[:len(pool.Size)-1], 64)
-				if err != nil {
-					log.Error(err, "parse spec size thin pool Gb")
+				//statusPoolActualSize, err := utils.QuantityToBytes(statusThinPoolMap[pool.Name])
+				//if err != nil {
+				//	log.Error(err, "parse status size actual thin pool")
+				//	return
+				//}
+
+				statusPoolActualSize := statusThinPoolMap[pool.Name]
+
+				freeSpace := group.Status.VGSize.Value() - group.Status.AllocatedSize.Value()
+				addSize := pool.Size.Value() - statusPoolActualSize.Value()
+				if addSize <= 0 {
+					log.Error(errors.New("resize thin pool"), "add size value <= 0")
 					return
 				}
 
-				statusPoolActualSize, err := strconv.ParseFloat(statusThinPoolMap[pool.Name][:len(statusThinPoolMap[pool.Name])-1], 64)
-				if err != nil {
-					log.Error(err, "parse status size actual thin pool Kb => Gb")
-					return
-				}
+				log.Debug("-----------------------------------")
+				log.Debug("vgSizeGb " + group.Status.VGSize.String())
+				log.Debug("allocatedSizeGb " + group.Status.AllocatedSize.String())
 
-				statusPoolActualSize = statusPoolActualSize / 1048576
+				log.Debug("specPoolSize " + group.Status.VGSize.String())
+				log.Debug("statusPoolActualSize " + statusPoolActualSize.String())
 
-				freeSpace := vgSizeGb - allocatedSizeGb
-				addSize := specPoolSize - statusPoolActualSize
-				if addSize < 0.0 {
-					log.Error(errors.New("resize thin pool"), "add size value < 0")
-					return
-				}
+				log.Debug("freeSpace " + strconv.FormatInt(freeSpace, 10))
+				log.Debug("addSize " + strconv.FormatInt(addSize, 10))
+				log.Debug("------------------------------------")
 
 				if freeSpace > addSize {
-					newLVSizeStr := fmt.Sprintf("%fg", specPoolSize)
-					cmd, err := utils.ExtendLV(newLVSizeStr, group.Spec.ActualVGNameOnTheNode, pool.Name)
+					newLVSizeStr := strconv.FormatInt(pool.Size.Value()/1024, 10)
+					cmd, err := utils.ExtendLV(newLVSizeStr+"K", group.Spec.ActualVGNameOnTheNode, pool.Name)
 					log.Debug(cmd)
 					if err != nil {
 						log.Error(err, "error ExtendLV")
@@ -385,6 +393,8 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 		err := CreateVGComplex(ctx, cl, group, log)
 		if err != nil {
 			log.Error(err, "CreateVGComplex")
+			err = updateLVMVolumeGroupStatus(ctx, cl, group.Name, group.Namespace, err.Error(), NoOperational)
+			return
 		}
 
 		if len(group.Spec.ThinPools) != 0 {

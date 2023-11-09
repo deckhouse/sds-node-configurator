@@ -15,5 +15,6 @@ var (
 	AllowedFSTypes       = [...]string{LVMFSType}
 	InvalidDeviceTypes   = [...]string{LoopDeviceType, LVMDeviceType}
 	BlockDeviceValidSize = "1G"
+	ResizeDelta          = "32Mi"
 	Finalizers           = []string{SdsNodeConfigurator}
 )

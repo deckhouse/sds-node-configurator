@@ -1,5 +1,7 @@
 package internal
 
+import "k8s.io/apimachinery/pkg/api/resource"
+
 type BlockDeviceCandidate struct {
 	NodeName              string
 	Consumable            bool
@@ -10,7 +12,7 @@ type BlockDeviceCandidate struct {
 	Wwn                   string
 	Serial                string
 	Path                  string
-	Size                  string
+	Size                  resource.Quantity
 	Rota                  bool
 	Model                 string
 	Name                  string
@@ -27,27 +29,27 @@ type LVMVolumeGroupCandidate struct {
 	Finalizers            []string
 	ActualVGNameOnTheNode string
 	BlockDevicesNames     []string
-	SpecThinPools         map[string]string
+	SpecThinPools         map[string]resource.Quantity
 	Type                  string
-	AllocatedSize         string
+	AllocatedSize         resource.Quantity
 	Health                string
 	Message               string
 	StatusThinPools       []LVMVGStatusThinPool
-	VGSize                string
+	VGSize                resource.Quantity
 	VGUuid                string
 	Nodes                 map[string][]LVMVGDevice
 }
 
 type LVMVGStatusThinPool struct {
 	Name       string
-	ActualSize string
+	ActualSize resource.Quantity
 	UsedSize   string
 }
 
 type LVMVGDevice struct {
 	Path        string
-	PVSize      string
-	DevSize     string
+	PVSize      resource.Quantity
+	DevSize     resource.Quantity
 	PVUuid      string
 	BlockDevice string
 }
@@ -57,19 +59,19 @@ type Devices struct {
 }
 
 type Device struct {
-	Name       string `json:"name"`
-	MountPoint string `json:"mountpoint"`
-	PartUUID   string `json:"partuuid"`
-	HotPlug    bool   `json:"hotPlug"`
-	Model      string `json:"model"`
-	Serial     string `json:"serial"`
-	Size       string `json:"size"`
-	Type       string `json:"type"`
-	Wwn        string `json:"wwn"`
-	KName      string `json:"kname"`
-	PkName     string `json:"pkname"`
-	FSType     string `json:"fstype"`
-	Rota       bool   `json:"rota"`
+	Name       string            `json:"name"`
+	MountPoint string            `json:"mountpoint"`
+	PartUUID   string            `json:"partuuid"`
+	HotPlug    bool              `json:"hotPlug"`
+	Model      string            `json:"model"`
+	Serial     string            `json:"serial"`
+	Size       resource.Quantity `json:"size"`
+	Type       string            `json:"type"`
+	Wwn        string            `json:"wwn"`
+	KName      string            `json:"kname"`
+	PkName     string            `json:"pkname"`
+	FSType     string            `json:"fstype"`
+	Rota       bool              `json:"rota"`
 }
 
 type PVReport struct {
@@ -81,13 +83,13 @@ type PV struct {
 }
 
 type PVData struct {
-	PVName string `json:"pv_name,omitempty"`
-	VGName string `json:"vg_name,omitempty"`
-	PVSize string `json:"pv_size,omitempty"`
-	PVUsed string `json:"pv_used,omitempty"`
-	PVUuid string `json:"pv_uuid,omitempty"`
-	VGTags string `json:"vg_tags,omitempty"`
-	VGUuid string `json:"vg_uuid,omitempty"`
+	PVName string            `json:"pv_name,omitempty"`
+	VGName string            `json:"vg_name,omitempty"`
+	PVSize resource.Quantity `json:"pv_size,omitempty"`
+	PVUsed string            `json:"pv_used,omitempty"`
+	PVUuid string            `json:"pv_uuid,omitempty"`
+	VGTags string            `json:"vg_tags,omitempty"`
+	VGUuid string            `json:"vg_uuid,omitempty"`
 }
 
 type VGReport struct {
@@ -99,12 +101,12 @@ type VG struct {
 }
 
 type VGData struct {
-	VGFree   string `json:"vg_free"`
-	VGName   string `json:"vg_name"`
-	VGShared string `json:"vg_shared"`
-	VGSize   string `json:"vg_size"`
-	VGTags   string `json:"vg_tags"`
-	VGUuid   string `json:"vg_uuid"`
+	VGFree   resource.Quantity `json:"vg_free"`
+	VGName   string            `json:"vg_name"`
+	VGShared string            `json:"vg_shared"`
+	VGSize   resource.Quantity `json:"vg_size"`
+	VGTags   string            `json:"vg_tags"`
+	VGUuid   string            `json:"vg_uuid"`
 }
 
 type LVReport struct {
@@ -116,17 +118,17 @@ type LV struct {
 }
 
 type LVData struct {
-	LVName          string `json:"lv_name"`
-	VGName          string `json:"vg_name"`
-	VGUuid          string `json:"vg_uuid"`
-	LVAttr          string `json:"lv_attr"`
-	LVSize          string `json:"lv_size"`
-	PoolLv          string `json:"pool_lv"`
-	Origin          string `json:"origin"`
-	DataPercent     string `json:"data_percent"`
-	MetadataPercent string `json:"metadata_percent"`
-	MovePv          string `json:"move_pv"`
-	MirrorLog       string `json:"mirror_log"`
-	CopyPercent     string `json:"copy_percent"`
-	ConvertLv       string `json:"convert_lv"`
+	LVName          string            `json:"lv_name"`
+	VGName          string            `json:"vg_name"`
+	VGUuid          string            `json:"vg_uuid"`
+	LVAttr          string            `json:"lv_attr"`
+	LVSize          resource.Quantity `json:"lv_size"`
+	PoolLv          string            `json:"pool_lv"`
+	Origin          string            `json:"origin"`
+	DataPercent     string            `json:"data_percent"`
+	MetadataPercent string            `json:"metadata_percent"`
+	MovePv          string            `json:"move_pv"`
+	MirrorLog       string            `json:"mirror_log"`
+	CopyPercent     string            `json:"copy_percent"`
+	ConvertLv       string            `json:"convert_lv"`
 }

@@ -3,6 +3,7 @@ package controller
 import (
 	"storage-configurator/api/v1alpha1"
 	"storage-configurator/internal"
+	"storage-configurator/pkg/utils"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,7 +19,7 @@ func TestGetCandidates(t *testing.T) {
 				HotPlug:    false,
 				Model:      "",
 				Serial:     "",
-				Size:       "",
+				Size:       0,
 				Type:       "",
 				Wwn:        "",
 				KName:      "",
@@ -39,7 +40,7 @@ func TestGetCandidates(t *testing.T) {
 					HotPlug:    false,
 					Model:      "",
 					Serial:     "",
-					Size:       "",
+					Size:       0,
 					Type:       "",
 					Wwn:        "",
 					KName:      "",
@@ -53,7 +54,7 @@ func TestGetCandidates(t *testing.T) {
 					HotPlug:    false,
 					Model:      "",
 					Serial:     "",
-					Size:       "",
+					Size:       0,
 					Type:       "",
 					Wwn:        "",
 					KName:      "",
@@ -68,7 +69,7 @@ func TestGetCandidates(t *testing.T) {
 					HotPlug:    false,
 					Model:      "",
 					Serial:     "",
-					Size:       "",
+					Size:       0,
 					Type:       "",
 					Wwn:        "",
 					KName:      "",
@@ -83,7 +84,7 @@ func TestGetCandidates(t *testing.T) {
 					HotPlug:    true,
 					Model:      "",
 					Serial:     "",
-					Size:       "",
+					Size:       0,
 					Type:       "",
 					Wwn:        "",
 					KName:      "",
@@ -106,7 +107,7 @@ func TestGetCandidates(t *testing.T) {
 			NodeName: nodeName,
 			Wwn:      "ZX128ZX128ZX128",
 			Path:     "/dev/sda",
-			Size:     "4Gb",
+			Size:     4294967296,
 			Model:    "HARD-DRIVE",
 		}
 
@@ -137,17 +138,20 @@ func TestGetCandidates(t *testing.T) {
 	})
 
 	t.Run("hasValidSize", func(t *testing.T) {
-		sizes := []string{"2G", "1G", "1.5G", "0.9G", "100M", "1000K"}
+		sizes := []string{"2G", "1G", "1.5G", "0.9G", "100M"}
 		expected := []bool{true, true, true, false, false, false}
 
 		for i, size := range sizes {
-			valid, err := hasValidSize(size)
+			b, err := utils.QuantityToBytes(size)
+			if err != nil {
+				panic(err)
+			}
 
+			valid, err := hasValidSize(b)
 			if assert.NoError(t, err) {
 				assert.Equal(t, expected[i], valid)
 			}
 		}
-
 	})
 
 	t.Run("hasBlockDeviceDiff", func(t *testing.T) {
@@ -163,7 +167,7 @@ func TestGetCandidates(t *testing.T) {
 				Wwn:                   "testWWN",
 				Serial:                "testSERIAL",
 				Path:                  "testPATH",
-				Size:                  "testSIZE",
+				Size:                  0,
 				Rota:                  false,
 				Model:                 "testMODEL",
 				Name:                  "testNAME",
@@ -185,7 +189,7 @@ func TestGetCandidates(t *testing.T) {
 				Wwn:                   "testWWN2",
 				Serial:                "testSERIAL2",
 				Path:                  "testPATH2",
-				Size:                  "testSIZE2",
+				Size:                  0,
 				Rota:                  true,
 				Model:                 "testMODEL2",
 				Name:                  "testNAME",

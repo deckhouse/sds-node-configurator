@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/sha1"
 	"fmt"
-	units2 "github.com/alecthomas/units"
 	"k8s.io/api/policy/v1beta1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"os"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -219,7 +219,12 @@ func GetBlockDeviceCandidates(log log.Logger, cfg config.Options) ([]internal.Bl
 		if len(candidate.Serial) == 0 {
 			err, serial := readSerialBlockDevice(candidate.Path)
 			if err != nil {
-				log.Error(err, "readSerialBlockDevice")
+				log.Warning("readSerialBlockDevice", err.Error())
+
+				if len(candidate.Wwn) == 0 {
+					log.Warning(fmt.Sprintf("cant get wwn and serial, skip this device, path: %s", candidate.Path))
+					continue
+				}
 			}
 			candidate.Serial = serial
 		}
@@ -256,7 +261,8 @@ func filterDevices(log log.Logger, devices []internal.Device) ([]internal.Device
 
 	// We do first filtering to avoid block of devices by "isParent" condition with FSType "LVM2_member".
 	for _, device := range devices {
-		if hasValidType(device.Type) &&
+		if !strings.HasPrefix(device.Name, internal.DRBDName) &&
+			hasValidType(device.Type) &&
 			hasValidFSType(device.FSType) {
 			validTypes = append(validTypes, device)
 			//log.Debug("[filterDevice] devices after type filtration: " + device.Name)
@@ -286,17 +292,13 @@ func filterDevices(log log.Logger, devices []internal.Device) ([]internal.Device
 	return filtered, nil
 }
 
-func hasValidSize(size string) (bool, error) {
-	valid, err := units2.ParseBase2Bytes(internal.BlockDeviceValidSize + "iB")
-	if err != nil {
-		return false, err
-	}
-	metricBytes, err := units2.ParseBase2Bytes(size + "iB")
+func hasValidSize(size resource.Quantity) (bool, error) {
+	limitSize, err := resource.ParseQuantity(internal.BlockDeviceValidSize)
 	if err != nil {
 		return false, err
 	}
 
-	return metricBytes >= valid, nil
+	return size.Value() >= limitSize.Value(), nil
 }
 
 func isParent(kName string, pkNames map[string]struct{}) bool {
@@ -341,10 +343,6 @@ func CheckConsumable(device internal.Device) bool {
 		return false
 	}
 
-	if strings.HasPrefix(device.Name, internal.DRBDName) {
-		return false
-	}
-
 	return true
 }
 
@@ -365,7 +363,7 @@ func CheckTag(tags string) (bool, string) {
 }
 
 func CreateUniqDeviceName(can internal.BlockDeviceCandidate) string {
-	temp := fmt.Sprintf("%s%s%s%s%s", can.NodeName, can.Wwn, can.Model, can.Serial)
+	temp := fmt.Sprintf("%s%s%s%s", can.NodeName, can.Wwn, can.Model, can.Serial)
 	s := fmt.Sprintf("dev-%x", sha1.Sum([]byte(temp)))
 	return s
 }

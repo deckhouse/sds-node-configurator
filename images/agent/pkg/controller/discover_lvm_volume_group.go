@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/alecthomas/units"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"os/exec"
@@ -56,61 +56,6 @@ func RunDiscoveryLVMVGController(
 		for {
 			time.Sleep(cfg.VolumeGroupScanInterval * time.Second)
 
-			//if cfg.NodeName == "a-ohrimenko-worker-0" {
-			//	continue
-			//}
-			//fmt.Println(" -=-=-=- ", cfg.NodeName)
-			//
-			//if cfg.NodeName == "a-ohrimenko-worker-1" {
-			//
-			//	//fmt.Println(">>>>>>> ")
-			//	config, err := rest.InClusterConfig()
-			//	if err != nil {
-			//		fmt.Println("InClusterConfig", err.Error())
-			//	}
-			//
-			//	dynamicClient, err := dynamic.NewForConfig(config)
-			//	if err != nil {
-			//		fmt.Println("NewForConfig", err.Error())
-			//	}
-			//
-			//	gvr := schema.GroupVersionResource{
-			//		Group:    "storage.deckhouse.io",
-			//		Version:  "v1alpha1",
-			//		Resource: "lvmvolumegroups",
-			//	}
-			//
-			//	unstruct, err := dynamicClient.Resource(gvr).Get(context.TODO(), "vg-data-on-node-1", metav1.GetOptions{})
-			//	if err != nil {
-			//		fmt.Println("dynamicClient.Resource", err.Error())
-			//	}
-
-			//fmt.Println(unstruct)
-			//fmt.Println(">>>>>>> ")
-
-			//unstruct.Object["status"].(map[string]interface{})["allocatedSize"] = "777M"
-
-			//unstruct.Object["status"].(map[string]interface{})["nodes"].([]interface{})[0].(map[string]interface{})["devices"].([]interface{})[0].(map[string]interface{})["devSize"] = "12G"
-			//unstruct, _ = dynamicClient.Resource(gvr).Update(context.TODO(), unstruct, metav1.UpdateOptions{})
-			// --------------------------
-
-			//	lvg, _ := getLVMVolumeGroup(ctx, cl, "d8-storage-configurator", "vg-data-on-node-1")
-			//fmt.Println(">>>>>>> ")
-			//fmt.Println(lvg)
-			//fmt.Println(">>>>>>> ")
-
-			//	if len(lvg.Status.Nodes) != 0 {
-			//		lvg.Status.Nodes[0].Devices[0].DevSize = "12G"
-			//	}
-			//
-			//	err = updateLVMVolumeGroup(ctx, cl, lvg)
-			//	if err != nil {
-			//		fmt.Println("*** updateLVMVolumeGroup ", err.Error())
-			//	}
-			//
-			//	continue
-			//}
-
 			currentLVMVGs, err := GetAPILVMVolumeGroups(ctx, cl)
 			if err != nil {
 				log.Error(err, "[RunDiscoveryLVMVGController] unable to run GetAPILVMVolumeGroups")
@@ -138,10 +83,12 @@ func RunDiscoveryLVMVGController(
 				continue
 			}
 
+			filteredResources := filterResourcesByNode(ctx, cl, log, currentLVMVGs, blockDevices, cfg.NodeName)
+
 			candidates, err := GetLVMVolumeGroupCandidates(log, blockDevices, cfg.NodeName)
 			if err != nil {
 				log.Error(err, "[RunDiscoveryLVMVGController] unable to run GetLVMVolumeGroupCandidates")
-				for _, lvm := range currentLVMVGs {
+				for _, lvm := range filteredResources {
 					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvm, err); err != nil {
 						log.Error(err, fmt.Sprintf(`unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
 					}
@@ -150,7 +97,7 @@ func RunDiscoveryLVMVGController(
 			}
 
 			for _, candidate := range candidates {
-				if resource := getResourceByCandidate(currentLVMVGs, candidate); resource != nil {
+				if resource := getResourceByCandidate(filteredResources, candidate); resource != nil {
 					if !hasLVMVolumeGroupDiff(*resource, candidate) {
 						log.Debug(fmt.Sprintf(`No data to update for LvmVolumeGroup, name: "%s"`, resource.Name))
 						continue
@@ -177,16 +124,80 @@ func RunDiscoveryLVMVGController(
 				}
 			}
 
-			ClearLVMVolumeGroupResources(ctx, cl, log, candidates, currentLVMVGs, cfg.NodeName)
+			ClearLVMVolumeGroupResources(ctx, cl, log, candidates, filteredResources, cfg.NodeName)
 		}
 	}()
 
 	return c, err
 }
 
+func filterResourcesByNode(
+	ctx context.Context,
+	cl kclient.Client,
+	log log.Logger,
+	lvs map[string]v1alpha1.LvmVolumeGroup,
+	blockDevices map[string]v1alpha1.BlockDevice,
+	currentNode string) []v1alpha1.LvmVolumeGroup {
+
+	filtered := make([]v1alpha1.LvmVolumeGroup, 0, len(lvs))
+	blockDevicesNodes := make(map[string]string, len(blockDevices))
+
+	for _, bd := range blockDevices {
+		blockDevicesNodes[bd.Name] = bd.Status.NodeName
+	}
+
+	for _, lv := range lvs {
+		switch lv.Spec.Type {
+		case Local:
+			currentNodeDevices := 0
+			for _, bdName := range lv.Spec.BlockDeviceNames {
+				if blockDevicesNodes[bdName] == currentNode {
+					currentNodeDevices++
+				}
+			}
+
+			// If we did not add every block device of local VG, that means a mistake, and we turn the resource's health to Nonoperational.
+			if currentNodeDevices > 0 && currentNodeDevices < len(lv.Spec.BlockDeviceNames) {
+				if err := turnLVMVGHealthToNonOperational(
+					ctx, cl, lv, fmt.Errorf("there are block devices from different nodes for local volume group")); err != nil {
+					log.Error(err, `[filterResourcesByNode] unable to update resource, name: "%s"`, lv.Name)
+					continue
+				}
+			}
+
+			// If we did not find any block device for our node, we skip the resource.
+			if currentNodeDevices == 0 {
+				continue
+			}
+
+			// Otherwise, we add the resource to the filtered ones.
+			filtered = append(filtered, lv)
+		case Shared:
+			if len(lv.Spec.BlockDeviceNames) != 1 {
+				if err := turnLVMVGHealthToNonOperational(
+					ctx, cl, lv, fmt.Errorf("there are more than one block devices for shared volume group")); err != nil {
+					log.Error(err, `[filterResourcesByNode] unable to update resource, name: "%s"`, lv.Name)
+					continue
+				}
+			}
+
+			// If the only one block devices does not belong to our node, we skip the resource.
+			singleBD := lv.Spec.BlockDeviceNames[0]
+			if blockDevicesNodes[singleBD] != currentNode {
+				continue
+			}
+
+			// Otherwise, we add the resource to the filtered ones.
+			filtered = append(filtered, lv)
+		}
+	}
+
+	return filtered
+}
+
 func turnLVMVGHealthToNonOperational(ctx context.Context, cl kclient.Client, lvg v1alpha1.LvmVolumeGroup, err error) error {
 	lvg.Status.Health = internal.LVMVGHealthNonOperational
-	lvg.Status.Message = err.Error()
+	lvg.Status.Message += err.Error()
 
 	return cl.Update(ctx, &lvg)
 }
@@ -203,7 +214,7 @@ func hasLVMVolumeGroupDiff(resource v1alpha1.LvmVolumeGroup, candidate internal.
 		!reflect.DeepEqual(convertLVMVGNodes(candidate.Nodes), resource.Status.Nodes)
 }
 
-func getResourceByCandidate(current map[string]v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) *v1alpha1.LvmVolumeGroup {
+func getResourceByCandidate(current []v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) *v1alpha1.LvmVolumeGroup {
 	for _, lvm := range current {
 		if lvm.Spec.ActualVGNameOnTheNode == candidate.ActualVGNameOnTheNode {
 			return &lvm
@@ -219,7 +230,7 @@ func ClearLVMVolumeGroupResources(
 	cl kclient.Client,
 	log log.Logger,
 	candidates []internal.LVMVolumeGroupCandidate,
-	lvmVolumeGroups map[string]v1alpha1.LvmVolumeGroup,
+	lvmVolumeGroups []v1alpha1.LvmVolumeGroup,
 	currentNode string,
 ) {
 	actualVGs := make(map[string]struct{}, len(candidates))
@@ -339,10 +350,12 @@ func GetLVMVolumeGroupCandidates(log log.Logger, bds map[string]v1alpha1.BlockDe
 	sortedThinPools := sortLVsByVG(thinPools, vgWithTag)
 
 	for _, vg := range vgWithTag {
-		allocatedSize, err := getAllocatedSizeMiB(vg)
 		if err != nil {
-			log.Error(err, "[GetLVMVolumeGroupCandidates] unable to count AllocatedSize, err: %w", err)
+			log.Error(err, "[GetLVMVolumeGroupCandidates] unable to count ParseInt vgSize, err: %w", err)
 		}
+
+		allocateSize := vg.VGSize
+		allocateSize.Sub(vg.VGFree)
 
 		health, message := checkVGHealth(err, sortedBDs, vgIssues, pvIssues, lvIssues, vg)
 
@@ -353,7 +366,7 @@ func GetLVMVolumeGroupCandidates(log log.Logger, bds map[string]v1alpha1.BlockDe
 			BlockDevicesNames:     getBlockDevicesNames(sortedBDs, vg),
 			SpecThinPools:         getSpecThinPools(sortedThinPools, vg),
 			Type:                  getVgType(vg),
-			AllocatedSize:         allocatedSize,
+			AllocatedSize:         allocateSize,
 			Health:                health,
 			Message:               message,
 			StatusThinPools:       getStatusThinPools(log, sortedThinPools, vg),
@@ -564,23 +577,6 @@ func configureCandidateNodeDevices(pvs map[string][]internal.PVData, bds map[str
 	return result
 }
 
-func getAllocatedSizeMiB(vg internal.VGData) (string, error) {
-	const iB = "iB"
-	size, err := units.ParseBase2Bytes(vg.VGSize + iB)
-	if err != nil {
-		return "", err
-	}
-
-	free, err := units.ParseBase2Bytes(vg.VGFree + iB)
-	if err != nil {
-		return "", err
-	}
-
-	allocatedMiB := (size - free) / units.Mebibyte
-
-	return strconv.Itoa(int(allocatedMiB)) + "M", err
-}
-
 func getVgType(vg internal.VGData) string {
 	if vg.VGShared == "" {
 		return "Local"
@@ -589,9 +585,9 @@ func getVgType(vg internal.VGData) string {
 	return "Shared"
 }
 
-func getSpecThinPools(thinPools map[string][]internal.LVData, vg internal.VGData) map[string]string {
+func getSpecThinPools(thinPools map[string][]internal.LVData, vg internal.VGData) map[string]resource.Quantity {
 	lvs := thinPools[vg.VGName+vg.VGUuid]
-	tps := make(map[string]string, len(lvs))
+	tps := make(map[string]resource.Quantity, len(lvs))
 
 	for _, lv := range lvs {
 		tps[lv.LVName] = lv.LVSize
@@ -617,7 +613,7 @@ func getStatusThinPools(log log.Logger, thinPools map[string][]internal.LVData, 
 	tps := make([]internal.LVMVGStatusThinPool, 0, len(filtered))
 
 	for _, lv := range filtered {
-		usedSize, err := getUsedSizeMiB(lv)
+		usedSize, err := getUsedSizeMiB(lv) //todo rename
 		if err != nil {
 			log.Error(err, "[getStatusThinPools] unable to getUsedSizeMiB")
 		}
@@ -631,23 +627,21 @@ func getStatusThinPools(log log.Logger, thinPools map[string][]internal.LVData, 
 }
 
 func getUsedSizeMiB(lv internal.LVData) (string, error) {
-	size, err := units.ParseBase2Bytes(lv.LVSize + "iB")
-	if err != nil {
-		return "", err
-	}
 
+	var err error
 	var dataPercent float64
+
 	if lv.DataPercent == "" {
-		dataPercent = 0
+		dataPercent = 0.0
 	} else {
-		dataPercent, err = strconv.ParseFloat(lv.DataPercent, 32)
+		dataPercent, err = strconv.ParseFloat(lv.DataPercent, 64)
 		if err != nil {
 			return "", err
 		}
 	}
 
-	usedSize := float64(size/units.Mebibyte) * dataPercent / 100
-	return strconv.Itoa(int(usedSize)) + "M", nil
+	tmp := float64(lv.LVSize.Value()) * dataPercent
+	return utils.BytesToQuantity(int64(tmp)), nil
 }
 
 func isThinPool(lv internal.LVData) bool {
@@ -666,6 +660,7 @@ func getBlockDevicesNames(bds map[string][]v1alpha1.BlockDevice, vg internal.VGD
 }
 
 func CreateLVMVolumeGroup(ctx context.Context, kc kclient.Client, candidate internal.LVMVolumeGroupCandidate) (*v1alpha1.LvmVolumeGroup, error) {
+
 	lvmVolumeGroup := &v1alpha1.LvmVolumeGroup{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       v1alpha1.LVMVolumeGroupKind,
@@ -795,7 +790,7 @@ func convertLVMVGDevices(devices []internal.LVMVGDevice) []v1alpha1.LvmVolumeGro
 	return convertedDevices
 }
 
-func convertSpecThinPools(thinPools map[string]string) []v1alpha1.SpecThinPool {
+func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.SpecThinPool {
 	result := make([]v1alpha1.SpecThinPool, 0, len(thinPools))
 	for name, size := range thinPools {
 		result = append(result, v1alpha1.SpecThinPool{
@@ -808,8 +803,10 @@ func convertSpecThinPools(thinPools map[string]string) []v1alpha1.SpecThinPool {
 }
 
 func convertStatusThinPools(thinPools []internal.LVMVGStatusThinPool) []v1alpha1.StatusThinPool {
+
 	result := make([]v1alpha1.StatusThinPool, 0, len(thinPools))
 	for _, tp := range thinPools {
+
 		result = append(result, v1alpha1.StatusThinPool{
 			Name:       tp.Name,
 			ActualSize: tp.ActualSize,

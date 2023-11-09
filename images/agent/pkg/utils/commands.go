@@ -11,7 +11,7 @@ import (
 
 func GetBlockDevices() ([]internal.Device, string, error) {
 	var outs bytes.Buffer
-	cmd := exec.Command("lsblk", "-J", "-lpf", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA")
+	cmd := exec.Command("lsblk", "-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA")
 	cmd.Stdout = &outs
 
 	err := cmd.Run()
@@ -29,7 +29,7 @@ func GetBlockDevices() ([]internal.Device, string, error) {
 
 func GetAllVGs() (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	cmd := exec.Command("vgs", "-o", "+uuid,tags,shared", "--units", "K", "--reportformat", "json")
+	cmd := exec.Command("vgs", "-o", "+uuid,tags,shared", "--units", "B", "--nosuffix", "--reportformat", "json")
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
@@ -47,7 +47,7 @@ func GetAllVGs() (data []internal.VGData, command string, stdErr bytes.Buffer, e
 
 func GetAllLVs() (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	cmd := exec.Command("lvs", "-o", "+vg_uuid", "--units", "K", "--reportformat", "json")
+	cmd := exec.Command("lvs", "-o", "+vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json")
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
@@ -65,7 +65,7 @@ func GetAllLVs() (data []internal.LVData, command string, stdErr bytes.Buffer, e
 
 func GetAllPVs() (data []internal.PVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	cmd := exec.Command("pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--reportformat", "json")
+	cmd := exec.Command("pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json")
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
@@ -159,7 +159,7 @@ func CreateVGShared(vgName, lvmName string, pvNames []string) (string, error) {
 func CreateLV(thinPool v1alpha1.SpecThinPool, VGName string) (string, error) {
 
 	cmd := exec.Command(
-		"lvcreate", "-L", thinPool.Size, "-T", fmt.Sprintf("%s/%s", VGName, thinPool.Name))
+		"lvcreate", "-L", thinPool.Size.String(), "-T", fmt.Sprintf("%s/%s", VGName, thinPool.Name))
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

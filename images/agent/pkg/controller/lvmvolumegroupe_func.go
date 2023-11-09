@@ -48,6 +48,15 @@ func updateLVMVolumeGroupStatus(ctx context.Context, cl client.Client, name, nam
 	if err != nil {
 		return err
 	}
+
+	if obj.Status.Health == health && health == Operational {
+		return nil
+	}
+
+	if obj.Status.Health == health && obj.Status.Message == message {
+		return nil
+	}
+
 	obj.Status.Health = health
 	obj.Status.Message = message
 
@@ -376,15 +385,4 @@ func CreateVGComplex(ctx context.Context, cl client.Client, group *v1alpha1.LvmV
 		}
 	}
 	return nil
-}
-
-func LvgStatusToMap(lvg v1alpha1.LvmVolumeGroupStatus) map[string]string {
-	x := make(map[string]string)
-
-	for _, node := range lvg.Nodes {
-		for _, device := range node.Devices {
-			x[device.PVUuid] = device.DevSize
-		}
-	}
-	return x
 }

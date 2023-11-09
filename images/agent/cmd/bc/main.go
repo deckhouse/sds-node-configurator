@@ -31,22 +31,25 @@ var (
 )
 
 func main() {
-	log, err := log.NewLogger(log.InfoLevel)
-	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
-	}
 
 	ctx := context.Background()
+
+	cfgParams, err := config.NewConfig()
+	if err != nil {
+		fmt.Println("Unable to create NewConfig " + err.Error())
+	}
+
+	log, err := log.NewLogger(cfgParams.Loglevel)
+	if err != nil {
+		log.Error(err, "Unable to create NewLogger")
+		os.Exit(1)
+	}
 
 	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
 	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
-	cfgParams, err := config.NewConfig()
-	if err != nil {
-		log.Error(err, "Unable to create NewConfig")
-	}
 	log.Info("CfgParams has been successfully created")
+	log.Info(fmt.Sprintf("%s = %s", config.LogLevel, cfgParams.Loglevel))
 	log.Info(fmt.Sprintf("%s = %s", config.NodeName, cfgParams.NodeName))
 	log.Info(fmt.Sprintf("%s = %s", config.MachineID, cfgParams.MachineId))
 	log.Info(fmt.Sprintf("%s = %d", config.ScanInterval, cfgParams.BlockDeviceScanInterval))

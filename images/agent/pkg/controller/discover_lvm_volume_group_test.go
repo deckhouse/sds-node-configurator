@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"storage-configurator/api/v1alpha1"
 	"storage-configurator/internal"
+	"storage-configurator/pkg/log"
 	"testing"
 )
 
@@ -797,6 +798,121 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		}
 
 		assert.False(t, reflect.DeepEqual(convertSpecThinPools(candidate.SpecThinPools), resource.Spec.ThinPools))
+	})
+
+	t.Run("filterResourcesByNode_returns_current_node_resources", func(t *testing.T) {
+		var (
+			ctx          = context.Background()
+			cl           = NewFakeClient()
+			logger, _    = log.NewLogger(log.InfoLevel)
+			currentNode  = "test_node"
+			firstBDName  = "first_device"
+			secondBDName = "second_device"
+			firstLVName  = "first_lv"
+			secondLVName = "second_lv"
+			blockDevices = map[string]v1alpha1.BlockDevice{
+				firstBDName: {
+					ObjectMeta: metav1.ObjectMeta{
+						Name: firstBDName,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName: currentNode,
+					},
+				},
+				secondBDName: {
+					ObjectMeta: metav1.ObjectMeta{
+						Name: secondBDName,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName: "another_node",
+					},
+				},
+			}
+
+			lvs = map[string]v1alpha1.LvmVolumeGroup{
+				firstLVName: {
+					ObjectMeta: metav1.ObjectMeta{Name: firstLVName},
+					Spec: v1alpha1.LvmVolumeGroupSpec{
+						BlockDeviceNames: []string{firstBDName},
+						Type:             Local,
+					},
+				},
+				secondLVName: {
+					ObjectMeta: metav1.ObjectMeta{Name: secondLVName},
+					Spec: v1alpha1.LvmVolumeGroupSpec{
+						BlockDeviceNames: []string{secondBDName},
+						Type:             Local,
+					},
+				},
+			}
+		)
+
+		expected := []v1alpha1.LvmVolumeGroup{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: firstLVName},
+				Spec: v1alpha1.LvmVolumeGroupSpec{
+					BlockDeviceNames: []string{firstBDName},
+					Type:             Local,
+				},
+			},
+		}
+
+		actual := filterResourcesByNode(ctx, cl, logger, lvs, blockDevices, currentNode)
+
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("filterResourcesByNode_returns_no_resources_for_current_node", func(t *testing.T) {
+		var (
+			ctx          = context.Background()
+			cl           = NewFakeClient()
+			logger, _    = log.NewLogger(log.InfoLevel)
+			currentNode  = "test_node"
+			anotherNode  = "another_node"
+			firstBDName  = "first_device"
+			secondBDName = "second_device"
+			firstLVName  = "first_lv"
+			secondLVName = "second_lv"
+			blockDevices = map[string]v1alpha1.BlockDevice{
+				firstBDName: {
+					ObjectMeta: metav1.ObjectMeta{
+						Name: firstBDName,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName: anotherNode,
+					},
+				},
+				secondBDName: {
+					ObjectMeta: metav1.ObjectMeta{
+						Name: secondBDName,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName: anotherNode,
+					},
+				},
+			}
+
+			lvs = map[string]v1alpha1.LvmVolumeGroup{
+				firstLVName: {
+					ObjectMeta: metav1.ObjectMeta{Name: firstLVName},
+					Spec: v1alpha1.LvmVolumeGroupSpec{
+						BlockDeviceNames: []string{firstBDName},
+						Type:             Local,
+					},
+				},
+				secondLVName: {
+					ObjectMeta: metav1.ObjectMeta{Name: secondLVName},
+					Spec: v1alpha1.LvmVolumeGroupSpec{
+						BlockDeviceNames: []string{secondBDName},
+						Type:             Local,
+					},
+				},
+			}
+		)
+
+		actual := filterResourcesByNode(ctx, cl, logger, lvs, blockDevices, currentNode)
+
+		assert.Equal(t, 0, len(actual))
 	})
 
 	t.Run("hasLVMVolumeGroupDiff", func(t *testing.T) {

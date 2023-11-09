@@ -3,12 +3,14 @@ package config
 import (
 	"fmt"
 	"os"
+	"storage-configurator/pkg/log"
 	"time"
 )
 
 const (
 	ScanInterval = "SCAN_INTERVAL"
 	NodeName     = "NODE_NAME"
+	LogLevel     = "LOG_LEVEL"
 	MetricsPort  = "METRICS_PORT"
 	MachineID    = "MACHINE_ID"
 )
@@ -16,6 +18,7 @@ const (
 type Options struct {
 	MachineId               string
 	NodeName                string
+	Loglevel                log.Verbosity
 	MetricsPort             string
 	BlockDeviceScanInterval time.Duration
 	VolumeGroupScanInterval time.Duration
@@ -27,6 +30,13 @@ func NewConfig() (*Options, error) {
 	opts.NodeName = os.Getenv(NodeName)
 	if opts.NodeName == "" {
 		return nil, fmt.Errorf("[NewConfig] required %s env variable is not specified", NodeName)
+	}
+
+	loglevel := os.Getenv(LogLevel)
+	if loglevel == "" {
+		opts.Loglevel = log.DebugLevel
+	} else {
+		opts.Loglevel = log.InfoLevel
 	}
 
 	machId, err := getMachineId()
