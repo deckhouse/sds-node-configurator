@@ -17,7 +17,7 @@ import (
 	"storage-configurator/config"
 	"storage-configurator/pkg/controller"
 	"storage-configurator/pkg/kubutils"
-	"storage-configurator/pkg/log"
+	"storage-configurator/pkg/logger"
 )
 
 var (
@@ -36,40 +36,40 @@ func main() {
 
 	cfgParams, err := config.NewConfig()
 	if err != nil {
-		fmt.Println("Unable to create NewConfig " + err.Error())
+		fmt.Println("unable to create NewConfig " + err.Error())
 	}
 
-	log, err := log.NewLogger(cfgParams.Loglevel)
+	log, err := logger.NewLogger(cfgParams.Loglevel)
 	if err != nil {
-		log.Error(err, "Unable to create NewLogger")
+		fmt.Println(fmt.Sprintf("unable to create NewLogger, err: %v", err))
 		os.Exit(1)
 	}
 
-	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
-	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
+	log.Info(fmt.Sprintf("[main] Go Version:%s ", goruntime.Version()))
+	log.Info(fmt.Sprintf("[main] OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
-	log.Info("CfgParams has been successfully created")
-	log.Info(fmt.Sprintf("%s = %s", config.LogLevel, cfgParams.Loglevel))
-	log.Info(fmt.Sprintf("%s = %s", config.NodeName, cfgParams.NodeName))
-	log.Info(fmt.Sprintf("%s = %s", config.MachineID, cfgParams.MachineId))
-	log.Info(fmt.Sprintf("%s = %d", config.ScanInterval, cfgParams.BlockDeviceScanInterval))
+	log.Info("[main] CfgParams has been successfully created")
+	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.NodeName, cfgParams.NodeName))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.MachineID, cfgParams.MachineId))
+	log.Info(fmt.Sprintf("[main] %s = %d", config.ScanInterval, cfgParams.BlockDeviceScanInterval))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
-		log.Error(err, "Unable to KubernetesDefaultConfigCreate")
+		log.Error(err, "[main] unable to KubernetesDefaultConfigCreate")
 	}
-	log.Info("Kubernetes config has been successfully created.")
+	log.Info("[main] kubernetes config has been successfully created.")
 
 	// Setup scheme for all resources
 	scheme := runtime.NewScheme()
 	for _, f := range resourcesSchemeFuncs {
 		err := f(scheme)
 		if err != nil {
-			log.Error(err, "Unable to add scheme to func")
+			log.Error(err, "[main] unable to add scheme to func")
 			os.Exit(1)
 		}
 	}
-	log.Info("Successfully read scheme CR")
+	log.Info("[main] successfully read scheme CR")
 
 	managerOpts := manager.Options{
 		Scheme:             scheme,
@@ -79,46 +79,46 @@ func main() {
 
 	mgr, err := manager.New(kConfig, managerOpts)
 	if err != nil {
-		log.Error(err, "Unable to manager.New")
+		log.Error(err, "[main] unable to manager.New")
 		os.Exit(1)
 	}
 
-	log.Info("Successfully created kubernetes manager")
+	log.Info("[main] successfully created kubernetes manager")
 
-	if _, err := controller.RunBlockDeviceController(ctx, mgr, *cfgParams, log); err != nil {
-		log.Error(err, "Unable to controller.RunBlockDeviceController")
+	if _, err := controller.RunBlockDeviceController(ctx, mgr, *cfgParams, *log); err != nil {
+		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
 		os.Exit(1)
 	}
 
-	log.Info("Controller BlockDevice started")
+	log.Info("[main] controller BlockDevice started")
 
-	if _, err := controller.RunLVMVolumeGroupController(ctx, mgr, cfgParams.NodeName, log); err != nil {
-		log.Error(err, "Error Run RunLVMVolumeGroupController")
+	if _, err := controller.RunLVMVolumeGroupController(ctx, mgr, cfgParams.NodeName, *log); err != nil {
+		log.Error(err, "[main] error Run RunLVMVolumeGroupController")
 		os.Exit(1)
 	}
 
-	if _, err := controller.RunDiscoveryLVMVGController(ctx, mgr, *cfgParams, log); err != nil {
-		log.Error(err, "Unable to controller.RunDiscoveryLVMVGController")
+	if _, err := controller.RunDiscoveryLVMVGController(ctx, mgr, *cfgParams, *log); err != nil {
+		log.Error(err, "[main] unable to controller.RunDiscoveryLVMVGController")
 		os.Exit(1)
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		log.Error(err, "Unable to mgr.AddHealthzCheck")
+		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
 		os.Exit(1)
 	}
-	log.Info("Successfully AddHealthzCheck")
+	log.Info("[main] successfully AddHealthzCheck")
 
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		log.Error(err, "Unable to mgr.AddReadyzCheck")
+		log.Error(err, "[main] unable to mgr.AddReadyzCheck")
 		os.Exit(1)
 	}
-	log.Info("Successfully AddReadyzCheck")
+	log.Info("[main] successfully AddReadyzCheck")
 
 	err = mgr.Start(ctx)
 	if err != nil {
-		log.Error(err, "Unable to mgr.Start")
+		log.Error(err, "[main] unable to mgr.Start")
 		os.Exit(1)
 	}
 
-	log.Info("Successfully starts the manager")
+	log.Info("[main] successfully starts the manager")
 }

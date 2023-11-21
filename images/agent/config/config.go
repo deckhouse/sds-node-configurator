@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
-	"storage-configurator/pkg/log"
+	"storage-configurator/pkg/logger"
 	"time"
 )
 
@@ -18,7 +18,7 @@ const (
 type Options struct {
 	MachineId               string
 	NodeName                string
-	Loglevel                log.Verbosity
+	Loglevel                logger.Verbosity
 	MetricsPort             string
 	BlockDeviceScanInterval time.Duration
 	VolumeGroupScanInterval time.Duration
@@ -34,9 +34,9 @@ func NewConfig() (*Options, error) {
 
 	loglevel := os.Getenv(LogLevel)
 	if loglevel == "" {
-		opts.Loglevel = log.DebugLevel
+		opts.Loglevel = logger.DebugLevel
 	} else {
-		opts.Loglevel = log.InfoLevel
+		opts.Loglevel = logger.InfoLevel
 	}
 
 	machId, err := getMachineId()

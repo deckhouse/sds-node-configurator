@@ -10,7 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"storage-configurator/api/v1alpha1"
 	"storage-configurator/internal"
-	"storage-configurator/pkg/log"
+	"storage-configurator/pkg/logger"
 	"testing"
 )
 
@@ -804,7 +804,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		var (
 			ctx          = context.Background()
 			cl           = NewFakeClient()
-			logger, _    = log.NewLogger(log.InfoLevel)
+			logger, _    = logger.NewLogger(logger.InfoLevel)
 			currentNode  = "test_node"
 			firstBDName  = "first_device"
 			secondBDName = "second_device"
@@ -866,7 +866,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		var (
 			ctx          = context.Background()
 			cl           = NewFakeClient()
-			logger, _    = log.NewLogger(log.InfoLevel)
+			logger, _    = logger.NewLogger(logger.InfoLevel)
 			currentNode  = "test_node"
 			anotherNode  = "another_node"
 			firstBDName  = "first_device"

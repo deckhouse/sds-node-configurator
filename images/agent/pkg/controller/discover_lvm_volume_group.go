@@ -18,7 +18,7 @@ import (
 	"storage-configurator/api/v1alpha1"
 	"storage-configurator/config"
 	"storage-configurator/internal"
-	"storage-configurator/pkg/log"
+	"storage-configurator/pkg/logger"
 	"storage-configurator/pkg/utils"
 	"strconv"
 	"strings"
@@ -31,7 +31,7 @@ func RunDiscoveryLVMVGController(
 	ctx context.Context,
 	mgr manager.Manager,
 	cfg config.Options,
-	log log.Logger,
+	log logger.Logger,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
 	cache := mgr.GetCache()
@@ -42,13 +42,13 @@ func RunDiscoveryLVMVGController(
 		}),
 	})
 	if err != nil {
-		log.Error(err, fmt.Sprintf(`Unable to create controller: "%s"`, discoveryLVMVGCtrlName))
+		log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to create controller: "%s"`, discoveryLVMVGCtrlName))
 		return nil, err
 	}
 
 	err = c.Watch(source.Kind(cache, &v1alpha1.LvmVolumeGroup{}), &handler.EnqueueRequestForObject{})
 	if err != nil {
-		log.Error(err, fmt.Sprintf(`Unable to run "%s" controller watch`, discoveryLVMVGCtrlName))
+		log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to run "%s" controller watch`, discoveryLVMVGCtrlName))
 	}
 
 	log.Info("[RunDiscoveryLVMVGController] run discovery loop")
@@ -67,7 +67,7 @@ func RunDiscoveryLVMVGController(
 				log.Error(err, "[RunDiscoveryLVMVGController] unable to GetAPIBlockDevices")
 				for _, lvm := range currentLVMVGs {
 					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvm, err); err != nil {
-						log.Error(err, fmt.Sprintf(`unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
+						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
 					}
 				}
 				continue
@@ -77,7 +77,7 @@ func RunDiscoveryLVMVGController(
 				log.Error(fmt.Errorf("no block devices found"), "[RunDiscoveryLVMVGController] unable to get block devices")
 				for _, lvm := range currentLVMVGs {
 					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvm, fmt.Errorf("no block devices found")); err != nil {
-						log.Error(err, fmt.Sprintf(`unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
+						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
 					}
 				}
 				continue
@@ -90,7 +90,7 @@ func RunDiscoveryLVMVGController(
 				log.Error(err, "[RunDiscoveryLVMVGController] unable to run GetLVMVolumeGroupCandidates")
 				for _, lvm := range filteredResources {
 					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvm, err); err != nil {
-						log.Error(err, fmt.Sprintf(`unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
+						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
 					}
 				}
 				continue
@@ -99,7 +99,7 @@ func RunDiscoveryLVMVGController(
 			for _, candidate := range candidates {
 				if resource := getResourceByCandidate(filteredResources, candidate); resource != nil {
 					if !hasLVMVolumeGroupDiff(*resource, candidate) {
-						log.Debug(fmt.Sprintf(`No data to update for LvmVolumeGroup, name: "%s"`, resource.Name))
+						log.Debug(fmt.Sprintf(`[RunDiscoveryLVMVGController] no data to update for LvmVolumeGroup, name: "%s"`, resource.Name))
 						continue
 					}
 					//TODO: take lock
@@ -134,7 +134,7 @@ func RunDiscoveryLVMVGController(
 func filterResourcesByNode(
 	ctx context.Context,
 	cl kclient.Client,
-	log log.Logger,
+	log logger.Logger,
 	lvs map[string]v1alpha1.LvmVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 	currentNode string) []v1alpha1.LvmVolumeGroup {
@@ -228,7 +228,7 @@ func getResourceByCandidate(current []v1alpha1.LvmVolumeGroup, candidate interna
 func ClearLVMVolumeGroupResources(
 	ctx context.Context,
 	cl kclient.Client,
-	log log.Logger,
+	log logger.Logger,
 	candidates []internal.LVMVolumeGroupCandidate,
 	lvmVolumeGroups []v1alpha1.LvmVolumeGroup,
 	currentNode string,
@@ -286,11 +286,11 @@ func DeleteLVMVolumeGroup(ctx context.Context, kc kclient.Client, lvmvgName stri
 	return nil
 }
 
-func GetLVMVolumeGroupCandidates(log log.Logger, bds map[string]v1alpha1.BlockDevice, currentNode string) ([]internal.LVMVolumeGroupCandidate, error) {
+func GetLVMVolumeGroupCandidates(log logger.Logger, bds map[string]v1alpha1.BlockDevice, currentNode string) ([]internal.LVMVolumeGroupCandidate, error) {
 	var candidates []internal.LVMVolumeGroupCandidate
 
 	vgs, cmdStr, vgErrs, err := utils.GetAllVGs()
-	log.Debug(fmt.Sprintf("[GetLVMVolumeGroupCandidates] runs cmd: %s", cmdStr))
+	log.Debug(fmt.Sprintf("[GetLVMVolumeGroupCandidates] exec cmd: %s", cmdStr))
 
 	// If we can't run vgs command at all, that means we will not have important information, so we break.
 	if err != nil {
@@ -313,7 +313,7 @@ func GetLVMVolumeGroupCandidates(log log.Logger, bds map[string]v1alpha1.BlockDe
 
 	// If we can't run pvs command at all, that means we will not have important information, so we break.
 	pvs, cmdStr, pvErrs, err := utils.GetAllPVs()
-	log.Debug(fmt.Sprintf("[GetLVMVolumeGroupCandidates] runs cmd: %s", cmdStr))
+	log.Debug(fmt.Sprintf("[GetLVMVolumeGroupCandidates] exec cmd: %s", cmdStr))
 	if err != nil {
 		log.Error(err, "[GetLVMVolumeGroupCandidates] unable to GetAllPVs")
 		return nil, err
@@ -327,7 +327,7 @@ func GetLVMVolumeGroupCandidates(log log.Logger, bds map[string]v1alpha1.BlockDe
 
 	// As long as LVS data is used to fill ThinPool fields, that is optional, we won't break but log the error.
 	lvs, cmdStr, lvErrs, err := utils.GetAllLVs()
-	log.Debug(fmt.Sprintf("[GetLVMVolumeGroupCandidates] runs cmd: %s", cmdStr))
+	log.Debug(fmt.Sprintf("[GetLVMVolumeGroupCandidates] exec cmd: %s", cmdStr))
 	if err != nil {
 		log.Error(err, "[GetLVMVolumeGroupCandidates] unable to GetAllLVs")
 	}
@@ -428,7 +428,7 @@ func removeDuplicates(strList []string) []string {
 	return result
 }
 
-func sortLVIssuesByVG(log log.Logger, lvs []internal.LVData) map[string][]string {
+func sortLVIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string][]string {
 	var (
 		errs         bytes.Buffer
 		cmd          *exec.Cmd
@@ -440,7 +440,7 @@ func sortLVIssuesByVG(log log.Logger, lvs []internal.LVData) map[string][]string
 		cmd.Stderr = &errs
 
 		if err := cmd.Run(); err != nil {
-			log.Error(err, fmt.Sprintf(`unable to run lvs command for lv, name: "%s"`, lv.LVName))
+			log.Error(err, fmt.Sprintf(`[sortLVIssuesByVG] unable to run lvs command for lv, name: "%s"`, lv.LVName))
 			lvIssuesByVG[lv.VGName+lv.VGUuid] = append(lvIssuesByVG[lv.VGName+lv.VGUuid], err.Error())
 		}
 
@@ -453,7 +453,7 @@ func sortLVIssuesByVG(log log.Logger, lvs []internal.LVData) map[string][]string
 	return lvIssuesByVG
 }
 
-func sortPVIssuesByVG(log log.Logger, pvs []internal.PVData) map[string][]string {
+func sortPVIssuesByVG(log logger.Logger, pvs []internal.PVData) map[string][]string {
 	var (
 		errs         bytes.Buffer
 		cmd          *exec.Cmd
@@ -465,7 +465,7 @@ func sortPVIssuesByVG(log log.Logger, pvs []internal.PVData) map[string][]string
 		cmd.Stderr = &errs
 
 		if err := cmd.Run(); err != nil {
-			log.Error(err, fmt.Sprintf(`unable to run pvs command for pv, name: "%s"`, pv.PVName))
+			log.Error(err, fmt.Sprintf(`[sortPVIssuesByVG] unable to run pvs command for pv, name: "%s"`, pv.PVName))
 			pvIssuesByVG[pv.VGName+pv.VGUuid] = append(pvIssuesByVG[pv.VGName+pv.VGUuid], err.Error())
 		}
 
@@ -478,7 +478,7 @@ func sortPVIssuesByVG(log log.Logger, pvs []internal.PVData) map[string][]string
 	return pvIssuesByVG
 }
 
-func sortVGIssuesByVG(log log.Logger, vgs []internal.VGData) map[string]string {
+func sortVGIssuesByVG(log logger.Logger, vgs []internal.VGData) map[string]string {
 	var (
 		errs     bytes.Buffer
 		cmd      *exec.Cmd
@@ -490,7 +490,7 @@ func sortVGIssuesByVG(log log.Logger, vgs []internal.VGData) map[string]string {
 		cmd.Stderr = &errs
 
 		if err := cmd.Run(); err != nil {
-			log.Error(err, fmt.Sprintf(`unable to run vgs command for vg, name: "%s"`, vg.VGName))
+			log.Error(err, fmt.Sprintf(`[sortVGIssuesByVG] unable to run vgs command for vg, name: "%s"`, vg.VGName))
 			vgIssues[vg.VGName+vg.VGUuid] = err.Error()
 		}
 
@@ -557,8 +557,7 @@ func configureCandidateNodeDevices(pvs map[string][]internal.PVData, bds map[str
 	for _, blockDevice := range filteredBds {
 		bdPathStatus[blockDevice.Status.Path] = blockDevice
 	}
-	//1. Получаем PV для выбранной VG
-	//2. Каждую PV выбранной VG добавляем под нужную ноду
+
 	for _, pv := range filteredPV {
 		device := internal.LVMVGDevice{
 			Path:   pv.PVName,
@@ -608,7 +607,7 @@ func getThinPools(lvs []internal.LVData) []internal.LVData {
 	return thinPools
 }
 
-func getStatusThinPools(log log.Logger, thinPools map[string][]internal.LVData, vg internal.VGData) []internal.LVMVGStatusThinPool {
+func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVData, vg internal.VGData) []internal.LVMVGStatusThinPool {
 	filtered := thinPools[vg.VGName+vg.VGUuid]
 	tps := make([]internal.LVMVGStatusThinPool, 0, len(filtered))
 

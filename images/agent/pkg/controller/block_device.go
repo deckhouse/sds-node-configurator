@@ -17,7 +17,7 @@ import (
 	"storage-configurator/api/v1alpha1"
 	"storage-configurator/config"
 	"storage-configurator/internal"
-	"storage-configurator/pkg/log"
+	"storage-configurator/pkg/logger"
 	"storage-configurator/pkg/utils"
 	"strings"
 	"time"
@@ -31,7 +31,7 @@ func RunBlockDeviceController(
 	ctx context.Context,
 	mgr manager.Manager,
 	cfg config.Options,
-	log log.Logger,
+	log logger.Logger,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
 	cache := mgr.GetCache()
@@ -42,30 +42,30 @@ func RunBlockDeviceController(
 		}),
 	})
 	if err != nil {
-		log.Error(err, "Unable to create controller")
+		log.Error(err, "[RunBlockDeviceController] unable to create controller")
 		return nil, err
 	}
 
 	err = c.Watch(source.Kind(cache, &v1alpha1.BlockDevice{}), &handler.EnqueueRequestForObject{})
 	if err != nil {
-		log.Error(err, "Unable to controller watch")
+		log.Error(err, "[RunBlockDeviceController] unable to controller watch")
 	}
 
-	log.Info("Start loop scan block devices")
+	log.Info("[RunBlockDeviceController] Start loop scan block devices")
 	go func() {
 		for {
 			time.Sleep(cfg.BlockDeviceScanInterval * time.Second)
 
 			candidates, err := GetBlockDeviceCandidates(log, cfg)
 			if err != nil {
-				log.Error(err, "Unable to GetBlockDeviceCandidates")
+				log.Error(err, "[RunBlockDeviceController] unable to GetBlockDeviceCandidates")
 			}
 
 			// reconciliation of local devices with an external list
 			// read kubernetes list device
 			apiBlockDevices, err := GetAPIBlockDevices(ctx, cl)
 			if err != nil {
-				log.Error(err, "Unable to GetAPIBlockDevices")
+				log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDevices")
 				continue
 			}
 
@@ -73,23 +73,23 @@ func RunBlockDeviceController(
 			for _, candidate := range candidates {
 				if resource, exist := apiBlockDevices[candidate.Name]; exist {
 					if !hasBlockDeviceDiff(resource.Status, candidate) {
-						log.Debug(fmt.Sprintf(`No data to update for block device, name: "%s"`, candidate.Name))
+						log.Debug(fmt.Sprintf(`[RunBlockDeviceController] no data to update for block device, name: "%s"`, candidate.Name))
 						continue
 					}
 
 					if err := UpdateAPIBlockDevice(ctx, cl, resource, candidate); err != nil {
-						log.Error(err, "[RunBlockDeviceController] unable to update")
+						log.Error(err, "[RunBlockDeviceController] unable to update resource, name: %s", resource.Name)
 						continue
 					}
 
-					//log.Info(fmt.Sprintf(`[RunBlockDeviceController] updated APIBlockDevice, name: %s`, resource.Name))
+					log.Info(fmt.Sprintf(`[RunBlockDeviceController] updated APIBlockDevice, name: %s`, resource.Name))
 				} else {
 					device, err := CreateAPIBlockDevice(ctx, cl, candidate)
 					if err != nil {
-						log.Error(err, "Unable to CreateAPIBlockDevice")
+						log.Error(err, fmt.Sprintf("[RunBlockDeviceController] unable to create block device resource, name: %s", candidate.Name))
 						continue
 					}
-					//log.Info("Created new APIBlockDevice: " + candidate.Name)
+					log.Info(fmt.Sprintf("[RunBlockDeviceController] created new APIBlockDevice: %s", candidate.Name))
 
 					// add new api device to the map, so it won't be deleted as fantom
 					apiBlockDevices[candidate.Name] = *device
@@ -147,7 +147,7 @@ func GetAPIBlockDevices(ctx context.Context, kc kclient.Client) (map[string]v1al
 func RemoveDeprecatedAPIDevices(
 	ctx context.Context,
 	cl kclient.Client,
-	log log.Logger,
+	log logger.Logger,
 	candidates []internal.BlockDeviceCandidate,
 	apiBlockDevices map[string]v1alpha1.BlockDevice,
 	nodeName string) {
@@ -162,11 +162,12 @@ func RemoveDeprecatedAPIDevices(
 			device.Status.NodeName == nodeName {
 			err := DeleteAPIBlockDevice(ctx, cl, name)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("Unable to delete APIBlockDevice, name: %s", name))
+				log.Error(err, fmt.Sprintf("[RunBlockDeviceController] unable to delete APIBlockDevice, name: %s", name))
 				continue
 			}
+
 			delete(apiBlockDevices, name)
-			log.Info(fmt.Sprintf("Device deleted, name: %s", name))
+			log.Info(fmt.Sprintf("[RunBlockDeviceController] device deleted, name: %s", name))
 		}
 	}
 }
@@ -176,7 +177,7 @@ func checkAPIBlockDeviceDeprecated(apiDeviceName string, actualCandidates map[st
 	return !ok
 }
 
-func GetBlockDeviceCandidates(log log.Logger, cfg config.Options) ([]internal.BlockDeviceCandidate, error) {
+func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options) ([]internal.BlockDeviceCandidate, error) {
 	devices, cmdStr, err := utils.GetBlockDevices()
 	log.Debug(fmt.Sprintf("[GetBlockDeviceCandidates] exec cmd: %s", cmdStr))
 	if err != nil {
@@ -219,10 +220,10 @@ func GetBlockDeviceCandidates(log log.Logger, cfg config.Options) ([]internal.Bl
 		if len(candidate.Serial) == 0 {
 			err, serial := readSerialBlockDevice(candidate.Path)
 			if err != nil {
-				log.Warning("readSerialBlockDevice", err.Error())
+				log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] readSerialBlockDevice, err: %s", err.Error()))
 
 				if len(candidate.Wwn) == 0 {
-					log.Warning(fmt.Sprintf("cant get wwn and serial, skip this device, path: %s", candidate.Path))
+					log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] cant get wwn and serial, skip this device, path: %s", candidate.Path))
 					continue
 				}
 			}
@@ -252,10 +253,8 @@ func GetBlockDeviceCandidates(log log.Logger, cfg config.Options) ([]internal.Bl
 	return candidates, nil
 }
 
-func filterDevices(log log.Logger, devices []internal.Device) ([]internal.Device, error) {
-	//for _, dev := range devices {
-	//	log.Debug("[filterDevices] devices before type filtration: " + dev.Name)
-	//}
+func filterDevices(log logger.Logger, devices []internal.Device) ([]internal.Device, error) {
+	log.Trace(fmt.Sprintf("[filterDevices] devices before type filtration: %v", devices))
 
 	validTypes := make([]internal.Device, 0, len(devices))
 
@@ -265,9 +264,10 @@ func filterDevices(log log.Logger, devices []internal.Device) ([]internal.Device
 			hasValidType(device.Type) &&
 			hasValidFSType(device.FSType) {
 			validTypes = append(validTypes, device)
-			//log.Debug("[filterDevice] devices after type filtration: " + device.Name)
 		}
 	}
+
+	log.Trace(fmt.Sprintf("[filterDevices] devices after type filtration: %v", validTypes))
 
 	pkNames := make(map[string]struct{}, len(validTypes))
 	for _, device := range validTypes {
@@ -284,10 +284,11 @@ func filterDevices(log log.Logger, devices []internal.Device) ([]internal.Device
 
 			if validSize {
 				filtered = append(filtered, device)
-				log.Debug("[filterDevice] final filtered device: " + device.Name)
 			}
 		}
 	}
+
+	log.Trace(fmt.Sprintf("[filterDevices] final filtered devices: %v", filtered))
 
 	return filtered, nil
 }

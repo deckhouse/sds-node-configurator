@@ -8,7 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"storage-configurator/api/v1alpha1"
-	"storage-configurator/pkg/log"
+	"storage-configurator/pkg/logger"
 	"storage-configurator/pkg/utils"
 	"time"
 )
@@ -150,7 +150,7 @@ func ValidationLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGroup *v
 	return false, &status, nil
 }
 
-func ValidationTypeLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, l log.Logger) (extendPV, shrinkPV []string, err error) {
+func ValidationTypeLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, l logger.Logger) (extendPV, shrinkPV []string, err error) {
 	pvs, cmdStr, _, err := utils.GetAllPVs()
 	l.Debug(fmt.Sprintf("GetAllPVs exec cmd: %s", cmdStr))
 	if err != nil {
@@ -210,7 +210,7 @@ func CreateEventLVMVolumeGroup(ctx context.Context, cl client.Client, reason, ac
 	return nil
 }
 
-func DeleteVG(vgName string, log log.Logger) error {
+func DeleteVG(vgName string, log logger.Logger) error {
 	// if VG exist
 	vgs, command, _, err := utils.GetAllVGs()
 	log.Debug(command)
@@ -269,7 +269,7 @@ func DeleteVG(vgName string, log log.Logger) error {
 	return nil
 }
 
-func ExistVG(vgName string, log log.Logger) (bool, error) {
+func ExistVG(vgName string, log logger.Logger) (bool, error) {
 	vg, command, _, err := utils.GetAllVGs()
 	log.Debug(command)
 	if err != nil {
@@ -321,7 +321,7 @@ func GetPathsConsumableDevicesFromLVMVG(ctx context.Context, cl client.Client, g
 	return paths, nil
 }
 
-func ExtendVGComplex(extendPVs []string, VGName string, l log.Logger) error {
+func ExtendVGComplex(extendPVs []string, VGName string, l logger.Logger) error {
 
 	for _, pvPath := range extendPVs {
 		command, err := utils.CreatePV(pvPath)
@@ -341,7 +341,7 @@ func ExtendVGComplex(extendPVs []string, VGName string, l log.Logger) error {
 	return nil
 }
 
-func CreateVGComplex(ctx context.Context, cl client.Client, group *v1alpha1.LvmVolumeGroup, l log.Logger) error {
+func CreateVGComplex(ctx context.Context, cl client.Client, group *v1alpha1.LvmVolumeGroup, l logger.Logger) error {
 	AllConsumable, err := ConsumableAllDevices(ctx, cl, group)
 	if err != nil {
 		l.Error(err, " error ConsumableAllDevices")
