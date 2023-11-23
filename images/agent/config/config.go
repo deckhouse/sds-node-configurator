@@ -35,8 +35,6 @@ func NewConfig() (*Options, error) {
 	loglevel := os.Getenv(LogLevel)
 	if loglevel == "" {
 		opts.Loglevel = logger.DebugLevel
-	} else {
-		opts.Loglevel = logger.InfoLevel
 	}
 
 	machId, err := getMachineId()

@@ -66,18 +66,18 @@ func RunDiscoveryLVMVGController(
 			if err != nil {
 				log.Error(err, "[RunDiscoveryLVMVGController] unable to GetAPIBlockDevices")
 				for _, lvm := range currentLVMVGs {
-					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvm, err); err != nil {
-						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
+					if err = updateLVMVGHealthToNonOperational(ctx, cl, lvm, err); err != nil {
+						log.Error(err, fmt.Sprintf(`unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
 					}
 				}
 				continue
 			}
 
-			if len(blockDevices) == 0 {
+			if len(blockDevices) == 0 && len(currentLVMVGs) > 0 {
 				log.Error(fmt.Errorf("no block devices found"), "[RunDiscoveryLVMVGController] unable to get block devices")
 				for _, lvm := range currentLVMVGs {
-					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvm, fmt.Errorf("no block devices found")); err != nil {
-						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
+					if err = updateLVMVGHealthToNonOperational(ctx, cl, lvm, fmt.Errorf("no any block device found. Unable to configure any data")); err != nil {
+						log.Error(err, fmt.Sprintf(`unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
 					}
 				}
 				continue
@@ -89,8 +89,8 @@ func RunDiscoveryLVMVGController(
 			if err != nil {
 				log.Error(err, "[RunDiscoveryLVMVGController] unable to run GetLVMVolumeGroupCandidates")
 				for _, lvm := range filteredResources {
-					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvm, err); err != nil {
-						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
+					if err = updateLVMVGHealthToNonOperational(ctx, cl, lvm, err); err != nil {
+						log.Error(err, fmt.Sprintf(`unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
 					}
 				}
 				continue
@@ -104,7 +104,9 @@ func RunDiscoveryLVMVGController(
 					}
 					//TODO: take lock
 
-					log.Debug(fmt.Sprintf("[RunDiscoveryLVMVGController] run UpdateLVMVolumeGroupByCandidate, resource name: %s; candidate: %v, resource: %v", resource.Name, candidate, resource))
+					log.Debug(fmt.Sprintf("[RunDiscoveryLVMVGController] run UpdateLVMVolumeGroupByCandidate, resource name: %s", resource.Name))
+					log.Trace(fmt.Sprintf("[RunDiscoveryLVMVGController] resource state:\n %v", resource))
+					log.Trace(fmt.Sprintf("[RunDiscoveryLVMVGController] candidate state:\n %v", candidate))
 					if err = UpdateLVMVolumeGroupByCandidate(ctx, cl, *resource, candidate); err != nil {
 						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to update resource, name: "%s"`,
 							resource.Name))
@@ -140,33 +142,57 @@ func filterResourcesByNode(
 	currentNode string) []v1alpha1.LvmVolumeGroup {
 
 	filtered := make([]v1alpha1.LvmVolumeGroup, 0, len(lvs))
-	blockDevicesNodes := make(map[string]string, len(blockDevices))
-
-	for _, bd := range blockDevices {
-		blockDevicesNodes[bd.Name] = bd.Status.NodeName
-	}
 
 	for _, lv := range lvs {
+		if len(lv.Spec.BlockDeviceNames) == 0 {
+			if err := updateLVMVGHealthToNonOperational(ctx, cl, lv, fmt.Errorf("unable to configure block devices, no block devices selected in Spec.BlockDevicesNames")); err != nil {
+				log.Error(err, fmt.Sprintf(`[filterResourcesByNode] unable to update resource, name: "%s"`, lv.Name))
+			}
+
+			continue
+		}
+
 		switch lv.Spec.Type {
 		case Local:
 			currentNodeDevices := 0
+			lostBlockDevices := make([]string, 0, len(lv.Spec.BlockDeviceNames))
+
 			for _, bdName := range lv.Spec.BlockDeviceNames {
-				if blockDevicesNodes[bdName] == currentNode {
+				blockDevice, deviceExist := blockDevices[bdName]
+				if !deviceExist {
+					lostBlockDevices = append(lostBlockDevices, bdName)
+					log.Error(fmt.Errorf(`[filterResourcesByNode] unable to find block device, name: "%s"`, bdName), "")
+					continue
+				}
+
+				if blockDevice.Status.NodeName == currentNode {
 					currentNodeDevices++
 				}
 			}
 
+			if len(lostBlockDevices) > 0 {
+				if err := updateLVMVGHealthToNonOperational(
+					ctx,
+					cl,
+					lv,
+					fmt.Errorf(`selected unrecognizable block devices, names: "%s"`, strings.Join(lostBlockDevices, "\",\""))); err != nil {
+					log.Error(err, fmt.Sprintf(`[filterResourcesByNode] unable to update resource, name: "%s"`, lv.Name))
+				}
+
+				filtered = append(filtered, lv)
+				continue
+			}
+
 			// If we did not add every block device of local VG, that means a mistake, and we turn the resource's health to Nonoperational.
 			if currentNodeDevices > 0 && currentNodeDevices < len(lv.Spec.BlockDeviceNames) {
-				if err := turnLVMVGHealthToNonOperational(
-					ctx, cl, lv, fmt.Errorf("there are block devices from different nodes for local volume group")); err != nil {
-					log.Error(err, `[filterResourcesByNode] unable to update resource, name: "%s"`, lv.Name)
-					continue
-				}
+				log.Error(fmt.Errorf("[filterResourcesByNode] local volume group has block devices from different nodes"),
+					fmt.Sprintf(`[filterResourcesByNode] can not configure block devices for local volume group. Check Spec.BlockDevicesNames. LVMVolumeGroup, name: "%s"`, lv.Name))
+				continue
 			}
 
 			// If we did not find any block device for our node, we skip the resource.
 			if currentNodeDevices == 0 {
+				log.Debug(fmt.Sprintf(`[filterResourcesByNode] no block devices found for node: "%s", resource: "%s"`, currentNode, lv.Name))
 				continue
 			}
 
@@ -174,16 +200,14 @@ func filterResourcesByNode(
 			filtered = append(filtered, lv)
 		case Shared:
 			if len(lv.Spec.BlockDeviceNames) != 1 {
-				if err := turnLVMVGHealthToNonOperational(
-					ctx, cl, lv, fmt.Errorf("there are more than one block devices for shared volume group")); err != nil {
-					log.Error(err, `[filterResourcesByNode] unable to update resource, name: "%s"`, lv.Name)
-					continue
-				}
+				log.Error(fmt.Errorf("there are more than one block devices for shared volume group"),
+					fmt.Sprintf(`[filterResourcesByNode] can not configure block devices for local volume group. Check Spec.BlockDevicesNames. LVMVolumeGroup, name: "%s"`, lv.Name))
+				continue
 			}
 
 			// If the only one block devices does not belong to our node, we skip the resource.
 			singleBD := lv.Spec.BlockDeviceNames[0]
-			if blockDevicesNodes[singleBD] != currentNode {
+			if blockDevices[singleBD].Status.NodeName != currentNode {
 				continue
 			}
 
@@ -195,9 +219,9 @@ func filterResourcesByNode(
 	return filtered
 }
 
-func turnLVMVGHealthToNonOperational(ctx context.Context, cl kclient.Client, lvg v1alpha1.LvmVolumeGroup, err error) error {
+func updateLVMVGHealthToNonOperational(ctx context.Context, cl kclient.Client, lvg v1alpha1.LvmVolumeGroup, err error) error {
 	lvg.Status.Health = internal.LVMVGHealthNonOperational
-	lvg.Status.Message += err.Error()
+	lvg.Status.Message = err.Error()
 
 	return cl.Update(ctx, &lvg)
 }
@@ -659,7 +683,6 @@ func getBlockDevicesNames(bds map[string][]v1alpha1.BlockDevice, vg internal.VGD
 }
 
 func CreateLVMVolumeGroup(ctx context.Context, kc kclient.Client, candidate internal.LVMVolumeGroupCandidate) (*v1alpha1.LvmVolumeGroup, error) {
-
 	lvmVolumeGroup := &v1alpha1.LvmVolumeGroup{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       v1alpha1.LVMVolumeGroupKind,
@@ -802,10 +825,8 @@ func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.Spe
 }
 
 func convertStatusThinPools(thinPools []internal.LVMVGStatusThinPool) []v1alpha1.StatusThinPool {
-
 	result := make([]v1alpha1.StatusThinPool, 0, len(thinPools))
 	for _, tp := range thinPools {
-
 		result = append(result, v1alpha1.StatusThinPool{
 			Name:       tp.Name,
 			ActualSize: tp.ActualSize,
