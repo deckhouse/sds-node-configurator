@@ -38,23 +38,6 @@ func RunBlockDeviceController(
 
 	c, err := controller.New(blockDeviceCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-			return reconcile.Result{}, nil
-		}),
-	})
-	if err != nil {
-		log.Error(err, "[RunBlockDeviceController] unable to create controller")
-		return nil, err
-	}
-
-	err = c.Watch(source.Kind(cache, &v1alpha1.BlockDevice{}), &handler.EnqueueRequestForObject{})
-	if err != nil {
-		log.Error(err, "[RunBlockDeviceController] unable to controller watch")
-	}
-
-	log.Info("[RunBlockDeviceController] Start loop scan block devices")
-	go func() {
-		for {
-			time.Sleep(cfg.BlockDeviceScanInterval * time.Second)
 
 			candidates, err := GetBlockDeviceCandidates(log, cfg)
 			if err != nil {
@@ -66,7 +49,9 @@ func RunBlockDeviceController(
 			apiBlockDevices, err := GetAPIBlockDevices(ctx, cl)
 			if err != nil {
 				log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDevices")
-				continue
+				return reconcile.Result{
+					RequeueAfter: cfg.BlockDeviceScanInterval * time.Second,
+				}, err
 			}
 
 			// create new API devices
@@ -98,8 +83,23 @@ func RunBlockDeviceController(
 
 			// delete api device if device no longer exists, but we still have its api resource
 			RemoveDeprecatedAPIDevices(ctx, cl, log, candidates, apiBlockDevices, cfg.NodeName)
-		}
-	}()
+
+			return reconcile.Result{
+				RequeueAfter: cfg.BlockDeviceScanInterval * time.Second,
+			}, nil
+		}),
+	})
+	if err != nil {
+		log.Error(err, "[RunBlockDeviceController] unable to create controller")
+		return nil, err
+	}
+
+	err = c.Watch(source.Kind(cache, &v1alpha1.BlockDevice{}), &handler.EnqueueRequestForObject{})
+	if err != nil {
+		log.Error(err, "[RunBlockDeviceController] unable to controller watch")
+	}
+
+	log.Info("[RunBlockDeviceController] Start loop scan block devices")
 
 	return c, err
 }
@@ -233,11 +233,10 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options) ([]internal
 
 		for _, pv := range pvs {
 			if pv.PVName == device.Name {
-				candidate.ActualVGNameOnTheNode = pv.VGName
-
 				if candidate.FSType == internal.LVMFSType {
 					hasTag, lvmVGName := CheckTag(pv.VGTags)
 					if hasTag {
+						candidate.ActualVGNameOnTheNode = pv.VGName
 						candidate.PVUuid = pv.PVUuid
 						candidate.VGUuid = pv.VGUuid
 						candidate.ActualVGNameOnTheNode = pv.VGName
@@ -348,7 +347,7 @@ func CheckConsumable(device internal.Device) bool {
 }
 
 func CheckTag(tags string) (bool, string) {
-	if !strings.Contains(tags, "storage.deckhouse.io/enabled=true") {
+	if !strings.Contains(tags, internal.LVMTags[0]) {
 		return false, ""
 	}
 
@@ -469,5 +468,81 @@ func DeleteAPIBlockDevice(ctx context.Context, kc kclient.Client, deviceName str
 			"unable to delete APIBlockDevice with name \"%s\", err: %w",
 			deviceName, err)
 	}
+	return nil
+}
+
+func ReTag(log logger.Logger) error {
+	// thin pool
+	log.Debug("start ReTag LV")
+	lvs, cmdStr, _, err := utils.GetAllLVs()
+	log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+	if err != nil {
+		log.Error(err, "[ReTag] unable to GetAllLVs")
+		return err
+	}
+
+	for _, lv := range lvs {
+		tags := strings.Split(lv.LvTags, ",")
+		for _, tag := range tags {
+			if strings.Contains(tag, internal.LVMTags[0]) {
+				continue
+			}
+
+			if strings.Contains(tag, internal.LVMTags[1]) {
+				cmdStr, err = utils.LVChangeDelTag(lv, tag)
+				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+				if err != nil {
+					log.Error(err, "[ReTag] unable to LVChangeDelTag")
+					return err
+				}
+
+				cmdStr, err = utils.VGChangeAddTag(lv.VGName, internal.LVMTags[0])
+				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+				if err != nil {
+					log.Error(err, "[ReTag] unable to VGChangeAddTag")
+					return err
+				}
+			}
+		}
+	}
+	log.Debug("end ReTag LV")
+
+	log.Debug("start ReTag LVM")
+	// -------
+	// thick pool
+	vgs, cmdStr, _, err := utils.GetAllVGs()
+	log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+	if err != nil {
+		log.Error(err, "[ReTag] unable to GetAllPVs")
+		return err
+	}
+
+	for _, vg := range vgs {
+		tags := strings.Split(vg.VGTags, ",")
+		for _, tag := range tags {
+			if strings.Contains(tag, internal.LVMTags[0]) {
+				continue
+			}
+
+			if strings.Contains(tag, internal.LVMTags[1]) {
+				cmdStr, err = utils.VGChangeDelTag(vg.VGName, tag)
+				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+				if err != nil {
+					log.Error(err, "[ReTag] unable to VGChangeDelTag")
+					return err
+				}
+
+				cmdStr, err = utils.VGChangeAddTag(vg.VGName, internal.LVMTags[0])
+				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+				if err != nil {
+					log.Error(err, "[ReTag] unable to VGChangeAddTag")
+					return err
+				}
+			}
+		}
+	}
+	log.Debug("stop ReTag LVM")
+	// -------
+
 	return nil
 }

@@ -85,6 +85,13 @@ func main() {
 
 	log.Info("[main] successfully created kubernetes manager")
 
+	log.Info("[main] start reTag")
+	err = controller.ReTag(*log)
+	if err != nil {
+		log.Error(err, "[main] ReTag")
+	}
+	log.Info("[main] end reTag")
+
 	if _, err := controller.RunBlockDeviceController(ctx, mgr, *cfgParams, *log); err != nil {
 		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
 		os.Exit(1)

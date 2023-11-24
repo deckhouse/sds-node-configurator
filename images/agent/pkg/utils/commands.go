@@ -47,7 +47,7 @@ func GetAllVGs() (data []internal.VGData, command string, stdErr bytes.Buffer, e
 
 func GetAllLVs() (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	cmd := exec.Command("lvs", "-o", "+vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json")
+	cmd := exec.Command("lvs", "-o", "+vg_uuid,tags", "--units", "B", "--nosuffix", "--reportformat", "json")
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
@@ -360,4 +360,41 @@ func unmarshalLVs(out []byte) ([]internal.LVData, error) {
 	}
 
 	return lvs, nil
+}
+
+func VGChangeAddTag(vGName, tag string) (string, error) {
+	var outs, stdErr bytes.Buffer
+	cmd := exec.Command("vgchange", vGName, "--addtag", tag)
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to VGChangeAddTag, err: %w , stdErr: %s", err, stdErr.String())
+	}
+	return cmd.String(), nil
+}
+
+func VGChangeDelTag(vGName, tag string) (string, error) {
+	var outs, stdErr bytes.Buffer
+	cmd := exec.Command("vgchange", vGName, "--deltag", tag)
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to VGChangeDelTag, err: %w , stdErr: %s", err, stdErr.String())
+	}
+	return cmd.String(), nil
+}
+
+func LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
+	tmpStr := fmt.Sprintf("/dev/%s/%s", lv.VGName, lv.LVName)
+	var outs, stdErr bytes.Buffer
+	cmd := exec.Command("lvchange", tmpStr, "--deltag", tag)
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to LVChangeDelTag, err: %w , stdErr: %s", err, stdErr.String())
+	}
+	return cmd.String(), nil
 }

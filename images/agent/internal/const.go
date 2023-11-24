@@ -17,4 +17,5 @@ var (
 	BlockDeviceValidSize = "1G"
 	ResizeDelta          = "32Mi"
 	Finalizers           = []string{SdsNodeConfigurator}
+	LVMTags              = []string{"storage.deckhouse.io/enabled=true", "linstor-"}
 )

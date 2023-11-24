@@ -131,4 +131,5 @@ type LVData struct {
 	MirrorLog       string            `json:"mirror_log"`
 	CopyPercent     string            `json:"copy_percent"`
 	ConvertLv       string            `json:"convert_lv"`
+	LvTags          string            `json:"lv_tags"`
 }
