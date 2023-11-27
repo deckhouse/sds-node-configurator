@@ -103,13 +103,13 @@ func RunDiscoveryLVMVGController(
 
 			for _, candidate := range candidates {
 				if resource := getResourceByCandidate(filteredResources, candidate); resource != nil {
-					if !hasLVMVolumeGroupDiff(*resource, candidate) {
+					if !hasLVMVolumeGroupDiff(log, *resource, candidate) {
 						log.Debug(fmt.Sprintf(`[RunDiscoveryLVMVGController] no data to update for LvmVolumeGroup, name: "%s"`, resource.Name))
 						continue
 					}
 					//TODO: take lock
 
-					log.Debug(fmt.Sprintf("[RunDiscoveryLVMVGController] run UpdateLVMVolumeGroupByCandidate, resource name: %s; candidate: %v, resource: %v", resource.Name, candidate, resource))
+					log.Debug(fmt.Sprintf("[RunDiscoveryLVMVGController] run UpdateLVMVolumeGroupByCandidate, resource name: %s", resource.Name))
 					if err = UpdateLVMVolumeGroupByCandidate(ctx, cl, *resource, candidate); err != nil {
 						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to update resource, name: "%s"`,
 							resource.Name))
@@ -210,14 +210,23 @@ func turnLVMVGHealthToNonOperational(ctx context.Context, cl kclient.Client, lvg
 	return cl.Update(ctx, &lvg)
 }
 
-func hasLVMVolumeGroupDiff(resource v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
+func hasLVMVolumeGroupDiff(log logger.Logger, resource v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
+	log.Trace(fmt.Sprintf(`AllocatedSize, candidate: %d, resource: %d`, candidate.AllocatedSize.Value(), resource.Status.AllocatedSize.Value()))
+	log.Trace(fmt.Sprintf(`Health, candidate: %s, resource: %s`, candidate.Health, resource.Status.Health))
+	log.Trace(fmt.Sprintf(`Message, candidate: %s, resource: %s`, candidate.Message, resource.Status.Message))
+	log.Trace(fmt.Sprintf(`ThinPools, candidate: %v, resource: %v`, convertStatusThinPools(candidate.StatusThinPools), resource.Status.ThinPools))
+	log.Trace(fmt.Sprintf(`VGSize, candidate: %d, resource: %d`, candidate.VGSize.Value(), resource.Status.VGSize.Value()))
+	log.Trace(fmt.Sprintf(`VGUuid, candidate: %s, resource: %s`, candidate.VGUuid, resource.Status.VGUuid))
+	log.Trace(fmt.Sprintf(`VGUuid, candidate: %s, resource: %s`, candidate.VGUuid, resource.Status.VGUuid))
+	log.Trace(fmt.Sprintf(`Nodes, candidate: %v, resource: %v`, convertLVMVGNodes(candidate.Nodes), resource.Status.Nodes))
+
 	//TODO: Uncomment this
 	//return strings.Join(candidate.Finalizers, "") == strings.Join(resource.Finalizers, "") ||
-	return candidate.AllocatedSize != resource.Status.AllocatedSize ||
+	return candidate.AllocatedSize.Value() != resource.Status.AllocatedSize.Value() ||
 		candidate.Health != resource.Status.Health ||
 		candidate.Message != resource.Status.Message ||
 		!reflect.DeepEqual(convertStatusThinPools(candidate.StatusThinPools), resource.Status.ThinPools) ||
-		candidate.VGSize != resource.Status.VGSize ||
+		candidate.VGSize.Value() != resource.Status.VGSize.Value() ||
 		candidate.VGUuid != resource.Status.VGUuid ||
 		!reflect.DeepEqual(convertLVMVGNodes(candidate.Nodes), resource.Status.Nodes)
 }
