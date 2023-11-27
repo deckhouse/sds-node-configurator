@@ -29,12 +29,12 @@ configVersion: v1
 beforeHelm: 10
 kubernetes:
 - name: ems_channels
-  queue: storage-configurator-dev-mode-discovery
+  queue: sds-node-configurator-dev-mode-discovery
   group: main
   apiVersion: "deckhouse.io/v1alpha1"
   kind: "ModuleSource"
   nameSelector:
-    matchNames: [deckhouse-dev]
+    matchNames: [sds-node-configurator]
   jqFilter: |
     .spec.releaseChannel
   # We don't want to keep full custom resources in memory.
@@ -58,7 +58,7 @@ def main(ctx: hook.Context):
     # IMPORTANT: We assume that this module will be named 'echo-server' when added to Deckhouse. The
     # name of the module is used in the values reference. For now, module name in deckhouse and
     # values reference are tightly coupled.
-    v.deckhouseStorageConfigurator.internal.devChannel = channels[0]["filterResult"]
+    v.sdsNodeConfigurator.internal.devChannel = channels[0]["filterResult"]
 
     # DotMap is not JSON serializable, so we need to convert it back to dict in the end.
     ctx.values = v.toDict()

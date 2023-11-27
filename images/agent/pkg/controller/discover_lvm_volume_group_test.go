@@ -2,16 +2,17 @@ package controller
 
 import (
 	"context"
+	"reflect"
+	"sds-node-configurator/api/v1alpha1"
+	"sds-node-configurator/internal"
+	"sds-node-configurator/pkg/logger"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
-	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"storage-configurator/api/v1alpha1"
-	"storage-configurator/internal"
-	"storage-configurator/pkg/logger"
-	"testing"
 )
 
 func TestLVMVolumeGroupDiscover(t *testing.T) {

@@ -2,24 +2,24 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: storage-configurator
-  namespace: d8-storage-configurator
+  name: sds-node-configurator
+  namespace: d8-{{ .Chart.Name }}
 spec:
   selector:
     matchLabels:
-      app: storage-configurator
+      app: sds-node-configurator
   template:
     metadata:
       labels:
-        app: storage-configurator
+        app: sds-node-configurator
     spec:
       imagePullSecrets:
         - name: registry
-      serviceAccountName: storage-configurator
+      serviceAccountName: sds-node-configurator
       containers:
       - name: ubuntu-container
-{{- if .Values.deckhouseStorageConfigurator.enableDevMode }}
-        image: {{ .Values.deckhouseStorageConfigurator.registry.base }}/deckhouse-storage-configurator/agent:{{ .Values.deckhouseStorageConfigurator.internal.devChannel }}
+{{- if .Values.sdsNodeConfigurator.enableDevMode }}
+        image: {{ .Values.sdsNodeConfigurator.registry.base }}/sds-node-configurator/agent:{{ .Values.sdsNodeConfigurator.internal.devChannel }}
 {{- else }}
         image: {{ include "helm_lib_module_image" (list . "agent") }}
 {{- end }}

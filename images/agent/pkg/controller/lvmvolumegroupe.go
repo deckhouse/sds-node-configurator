@@ -4,9 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"sds-node-configurator/api/v1alpha1"
+	"sds-node-configurator/internal"
+	"sds-node-configurator/pkg/logger"
+	"sds-node-configurator/pkg/utils"
+	"strconv"
+	"strings"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/util/workqueue"
-	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -14,12 +21,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-	"storage-configurator/api/v1alpha1"
-	"storage-configurator/internal"
-	"storage-configurator/pkg/logger"
-	"storage-configurator/pkg/utils"
-	"strconv"
-	"strings"
 )
 
 const (
@@ -49,17 +50,17 @@ func RunLVMVolumeGroupController(
 		log.Info(fmt.Sprintf("[RunLVMVolumeGroupController] event create LVMVolumeGroup, name: %s", e.Object.GetName()))
 		ReconcileLVMVG(ctx, e.Object.GetName(), e.Object.GetNamespace(), nodeName, log, cl)
 	}
-	updateFunc := func(ctx context.Context, updateEvent event.UpdateEvent, limitingInterface workqueue.RateLimitingInterface) {
+	updateFunc := func(ctx context.Context, updateEvent event.UpdateEvent, q workqueue.RateLimitingInterface) {
 		log.Info(fmt.Sprintf("[RunLVMVolumeGroupController] update LVMVolumeGroupn, name: %s", updateEvent.ObjectNew.GetName()))
 
 		newLVG, ok := updateEvent.ObjectNew.(*v1alpha1.LvmVolumeGroup)
 		if !ok {
-			log.Error(err, "[RunLVMVolumeGroupController] error get  ObjectNew LinstorStoragePool")
+			log.Error(err, "[RunLVMVolumeGroupController] error get  ObjectNew LVMVolumeGroup")
 		}
 
 		oldLVG, ok := updateEvent.ObjectOld.(*v1alpha1.LvmVolumeGroup)
 		if !ok {
-			log.Error(err, "[RunLVMVolumeGroupController] error get  ObjectOld LinstorStoragePool")
+			log.Error(err, "[RunLVMVolumeGroupController] error get  ObjectOld LVMVolumeGroup")
 		}
 
 		if !reflect.DeepEqual(oldLVG.Annotations, newLVG.Annotations) {
@@ -315,11 +316,6 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 
 		if group.Spec.ThinPools != nil {
 			log.Info("[ReconcileLVMVG] reconcile thin pool")
-			log.Info(fmt.Sprintf("[ReconcileLVMVG] create event: %s", EventActionResizing))
-			err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonResizing, EventActionResizing, nodeName, group)
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, resource name: %s", group.Name))
-			}
 
 			statusThinPoolMap := make(map[string]resource.Quantity)
 			for _, statusThinPool := range group.Status.ThinPools {
@@ -333,6 +329,8 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 			//}
 
 			for _, pool := range group.Spec.ThinPools {
+				log.Debug(fmt.Sprintf("[ReconcileLVMVG] Start reconcile thin pool: %s", pool.Name))
+				log.Debug(fmt.Sprintf("[ReconcileLVMVG] thin pool size: %d", pool.Size.Value()))
 				//specPoolSize, err := utils.QuantityToBytes(pool.Size)
 				//if err != nil {
 				//	log.Error(err, "parse spec size thin pool")
@@ -345,36 +343,68 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 				//	return
 				//}
 
-				statusPoolActualSize := statusThinPoolMap[pool.Name]
+				statusPoolActualSize, ok := statusThinPoolMap[pool.Name]
+
+				if !ok {
+					log.Info(fmt.Sprintf("[ReconcileLVMVG] create event: %s", EventActionCreating))
+					err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonCreating, EventActionCreating, nodeName, group)
+					if err != nil {
+						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, resource name: %s", group.Name))
+					}
+					command, err := utils.CreateLV(pool, group.Spec.ActualVGNameOnTheNode)
+					log.Debug(command)
+					if err != nil {
+						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateLV, thin pool: %s", pool.Name))
+						if err = updateLVMVolumeGroupStatus(ctx, cl, group.Name, group.Namespace, err.Error(), NoOperational); err != nil {
+							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update LVMVolumeGroupStatus, resource name: %s", group.Name))
+						}
+						return
+					}
+					continue
+				}
 
 				freeSpace := group.Status.VGSize.Value() - group.Status.AllocatedSize.Value()
 				addSize := pool.Size.Value() - statusPoolActualSize.Value()
-				if addSize <= 0 {
-					log.Error(errors.New("resize thin pool"), "[ReconcileLVMVG] add size value <= 0")
-					return
-				}
 
 				log.Debug(fmt.Sprintf("[ReconcileLVMVG] vgSizeGb = %s", group.Status.VGSize.String()))
 				log.Debug(fmt.Sprintf("[ReconcileLVMVG] allocatedSizeGb = %s", group.Status.AllocatedSize.String()))
 
-				log.Debug(fmt.Sprintf("[ReconcileLVMVG] specPoolSize = %s", group.Status.VGSize.String()))
+				log.Debug(fmt.Sprintf("[ReconcileLVMVG] specPoolSize = %s", pool.Size.String()))
 				log.Debug(fmt.Sprintf("[ReconcileLVMVG] statusPoolActualSize = %s", statusPoolActualSize.String()))
 
-				log.Debug(fmt.Sprintf("[ReconcileLVMVG] freeSpace = %s", strconv.FormatInt(freeSpace, 10)))
-				log.Debug(fmt.Sprintf("[ReconcileLVMVG] addSize = %s", strconv.FormatInt(addSize, 10)))
+				log.Debug(fmt.Sprintf("[ReconcileLVMVG] VG freeSpace = %s", strconv.FormatInt(freeSpace, 10)))
+				log.Debug(fmt.Sprintf("[ReconcileLVMVG] thinpool addSize = %s", strconv.FormatInt(addSize, 10)))
 
-				if freeSpace > addSize {
-					newLVSizeStr := strconv.FormatInt(pool.Size.Value()/1024, 10)
-					cmd, err := utils.ExtendLV(newLVSizeStr+"K", group.Spec.ActualVGNameOnTheNode, pool.Name)
-					log.Debug(cmd)
-					if err != nil {
-						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error ExtendLV, pool name: %s", pool.Name))
-						return
+				if addSize < 0 {
+					log.Error(errors.New("resize thin pool"), "[ReconcileLVMVG] add size value < 0")
+					return
+				}
+
+				if addSize > 0 {
+					log.Debug(fmt.Sprintf("[ReconcileLVMVG] Identified a thin pool requiring resize: %s", pool.Name))
+					if freeSpace > addSize {
+						log.Info(fmt.Sprintf("[ReconcileLVMVG] create event: %s", EventActionResizing))
+						err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonResizing, EventActionResizing, nodeName, group)
+						if err != nil {
+							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, resource name: %s", group.Name))
+						}
+						newLVSizeStr := strconv.FormatInt(pool.Size.Value()/1024, 10)
+						cmd, err := utils.ExtendLV(newLVSizeStr+"K", group.Spec.ActualVGNameOnTheNode, pool.Name)
+						log.Debug(cmd)
+						if err != nil {
+							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error ExtendLV, pool name: %s", pool.Name))
+							return
+						}
+					} else {
+						log.Error(errors.New("ThinPools resize"), fmt.Sprintf("[ReconcileLVMVG] addSize > freeSize, pool name: %s", pool.Name))
 					}
 				} else {
-					log.Error(errors.New("ThinPools resize"), fmt.Sprintf("[ReconcileLVMVG] addSize > freeSize, pool name: %s", pool.Name))
+					log.Debug(fmt.Sprintf("[ReconcileLVMVG] No need to resize thin pool: %s", pool.Name))
+
 				}
+				log.Debug(fmt.Sprintf("[ReconcileLVMVG] END reconcile thin pool: %s", pool.Name))
 			}
+
 		}
 
 	} else {

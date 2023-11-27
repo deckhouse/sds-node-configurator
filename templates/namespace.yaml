@@ -2,4 +2,4 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: d8-storage-configurator
+  name: d8-{{ .Chart.Name }}

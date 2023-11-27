@@ -4,25 +4,26 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os/exec"
+	"reflect"
+	"sds-node-configurator/api/v1alpha1"
+	"sds-node-configurator/config"
+	"sds-node-configurator/internal"
+	"sds-node-configurator/pkg/logger"
+	"sds-node-configurator/pkg/utils"
+	"strconv"
+	"strings"
+	"time"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	"os/exec"
-	"reflect"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-	"storage-configurator/api/v1alpha1"
-	"storage-configurator/config"
-	"storage-configurator/internal"
-	"storage-configurator/pkg/logger"
-	"storage-configurator/pkg/utils"
-	"strconv"
-	"strings"
-	"time"
 )
 
 const discoveryLVMVGCtrlName = "discovery-lvmvg-controller"
@@ -38,14 +39,32 @@ func RunDiscoveryLVMVGController(
 
 	c, err := controller.New(discoveryLVMVGCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
+			return reconcile.Result{}, nil
+		}),
+	})
+
+	if err != nil {
+		log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to create controller: "%s"`, discoveryLVMVGCtrlName))
+		return nil, err
+	}
+
+	err = c.Watch(source.Kind(cache, &v1alpha1.LvmVolumeGroup{}), &handler.EnqueueRequestForObject{})
+	if err != nil {
+		log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to run "%s" controller watch`, discoveryLVMVGCtrlName))
+	}
+
+	log.Info("[RunDiscoveryLVMVGController] run discovery loop")
+
+	go func() {
+		for {
 			time.Sleep(cfg.VolumeGroupScanInterval * time.Second)
+
+			log.Info("[RunDiscoveryLVMVGController] START discovery loop")
 
 			currentLVMVGs, err := GetAPILVMVolumeGroups(ctx, cl)
 			if err != nil {
 				log.Error(err, "[RunDiscoveryLVMVGController] unable to run GetAPILVMVolumeGroups")
-				return reconcile.Result{
-					RequeueAfter: cfg.VolumeGroupScanInterval * time.Second,
-				}, err
+				continue
 			}
 
 			blockDevices, err := GetAPIBlockDevices(ctx, cl)
@@ -56,9 +75,7 @@ func RunDiscoveryLVMVGController(
 						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
 					}
 				}
-				return reconcile.Result{
-					RequeueAfter: cfg.VolumeGroupScanInterval * time.Second,
-				}, err
+				continue
 			}
 
 			if len(blockDevices) == 0 {
@@ -68,9 +85,7 @@ func RunDiscoveryLVMVGController(
 						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
 					}
 				}
-				return reconcile.Result{
-					RequeueAfter: cfg.VolumeGroupScanInterval * time.Second,
-				}, err
+				continue
 			}
 
 			filteredResources := filterResourcesByNode(ctx, cl, log, currentLVMVGs, blockDevices, cfg.NodeName)
@@ -83,9 +98,7 @@ func RunDiscoveryLVMVGController(
 						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
 					}
 				}
-				return reconcile.Result{
-					RequeueAfter: cfg.VolumeGroupScanInterval * time.Second,
-				}, err
+				continue
 			}
 
 			for _, candidate := range candidates {
@@ -107,7 +120,7 @@ func RunDiscoveryLVMVGController(
 
 					//TODO: release lock
 				} else {
-					lvm, err := CreateLVMVolumeGroup(ctx, cl, candidate)
+					lvm, err := CreateLVMVolumeGroup(ctx, log, cl, candidate)
 					if err != nil {
 						log.Error(err, "[RunDiscoveryLVMVGController] unable to CreateLVMVolumeGroup")
 						continue
@@ -118,24 +131,12 @@ func RunDiscoveryLVMVGController(
 
 			ClearLVMVolumeGroupResources(ctx, cl, log, candidates, filteredResources, cfg.NodeName)
 
-			return reconcile.Result{
-				RequeueAfter: cfg.VolumeGroupScanInterval * time.Second,
-			}, nil
-		}),
-	})
-	if err != nil {
-		log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to create controller: "%s"`, discoveryLVMVGCtrlName))
-		return nil, err
-	}
-
-	err = c.Watch(source.Kind(cache, &v1alpha1.LvmVolumeGroup{}), &handler.EnqueueRequestForObject{})
-	if err != nil {
-		log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to run "%s" controller watch`, discoveryLVMVGCtrlName))
-	}
-
-	log.Info("[RunDiscoveryLVMVGController] run discovery loop")
+			log.Info("[RunDiscoveryLVMVGController] END discovery loop")
+		}
+	}()
 
 	return c, err
+
 }
 
 func filterResourcesByNode(
@@ -665,7 +666,7 @@ func getBlockDevicesNames(bds map[string][]v1alpha1.BlockDevice, vg internal.VGD
 	return names
 }
 
-func CreateLVMVolumeGroup(ctx context.Context, kc kclient.Client, candidate internal.LVMVolumeGroupCandidate) (*v1alpha1.LvmVolumeGroup, error) {
+func CreateLVMVolumeGroup(ctx context.Context, log logger.Logger, kc kclient.Client, candidate internal.LVMVolumeGroupCandidate) (*v1alpha1.LvmVolumeGroup, error) {
 
 	lvmVolumeGroup := &v1alpha1.LvmVolumeGroup{
 		TypeMeta: metav1.TypeMeta{
@@ -699,7 +700,7 @@ func CreateLVMVolumeGroup(ctx context.Context, kc kclient.Client, candidate inte
 		for _, d := range node {
 			i := len(d.BlockDevice)
 			if i == 0 {
-				//log.Warning("The attempt to create the LVG resource failed because it was not possible to find a BlockDevice for it.")
+				log.Warning("The attempt to create the LVG resource failed because it was not possible to find a BlockDevice for it.")
 				return lvmVolumeGroup, nil
 			}
 		}

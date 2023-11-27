@@ -3,21 +3,22 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	goruntime "runtime"
+	"sds-node-configurator/api/v1alpha1"
+	"sds-node-configurator/config"
+	"sds-node-configurator/pkg/controller"
+	"sds-node-configurator/pkg/kubutils"
+	"sds-node-configurator/pkg/logger"
+
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"os"
-	goruntime "runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"storage-configurator/api/v1alpha1"
-	"storage-configurator/config"
-	"storage-configurator/pkg/controller"
-	"storage-configurator/pkg/kubutils"
-	"storage-configurator/pkg/logger"
 )
 
 var (
@@ -97,7 +98,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Info("[main] controller BlockDevice started")
+	// log.Info("[main] controller BlockDevice started")
 
 	if _, err := controller.RunLVMVolumeGroupController(ctx, mgr, cfgParams.NodeName, *log); err != nil {
 		log.Error(err, "[main] error Run RunLVMVolumeGroupController")

@@ -1,9 +1,9 @@
 package controller
 
 import (
-	"storage-configurator/api/v1alpha1"
-	"storage-configurator/internal"
-	"storage-configurator/pkg/utils"
+	"sds-node-configurator/api/v1alpha1"
+	"sds-node-configurator/internal"
+	"sds-node-configurator/pkg/utils"
 	"testing"
 
 	"github.com/stretchr/testify/assert"

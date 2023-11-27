@@ -1,4 +1,4 @@
-# storage-configurator
+# sds-node-configurator
 
 #### local run
 ``make run``

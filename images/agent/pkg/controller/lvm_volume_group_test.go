@@ -2,10 +2,11 @@ package controller
 
 import (
 	"encoding/json"
+	"sds-node-configurator/api/v1alpha1"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"storage-configurator/api/v1alpha1"
-	"testing"
 )
 
 func TestLvmVolumeGroupAPIObjects(t *testing.T) {

@@ -4,23 +4,24 @@ import (
 	"context"
 	"crypto/sha1"
 	"fmt"
+	"os"
+	"sds-node-configurator/api/v1alpha1"
+	"sds-node-configurator/config"
+	"sds-node-configurator/internal"
+	"sds-node-configurator/pkg/logger"
+	"sds-node-configurator/pkg/utils"
+	"strings"
+	"time"
+
 	"k8s.io/api/policy/v1beta1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"os"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-	"storage-configurator/api/v1alpha1"
-	"storage-configurator/config"
-	"storage-configurator/internal"
-	"storage-configurator/pkg/logger"
-	"storage-configurator/pkg/utils"
-	"strings"
-	"time"
 )
 
 const (
@@ -38,10 +39,32 @@ func RunBlockDeviceController(
 
 	c, err := controller.New(blockDeviceCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
+			return reconcile.Result{}, nil
+		}),
+	})
+
+	if err != nil {
+		log.Error(err, "[RunBlockDeviceController] unable to create controller")
+		return nil, err
+	}
+
+	err = c.Watch(source.Kind(cache, &v1alpha1.BlockDevice{}), &handler.EnqueueRequestForObject{})
+	if err != nil {
+		log.Error(err, "[RunBlockDeviceController] unable to controller watch")
+	}
+
+	log.Info("[RunBlockDeviceController] Start loop scan block devices")
+
+	go func() {
+		for {
+			time.Sleep(cfg.BlockDeviceScanInterval * time.Second)
+
+			log.Info("[RunBlockDeviceController] START reconcile of block devices")
 
 			candidates, err := GetBlockDeviceCandidates(log, cfg)
 			if err != nil {
 				log.Error(err, "[RunBlockDeviceController] unable to GetBlockDeviceCandidates")
+				continue
 			}
 
 			// reconciliation of local devices with an external list
@@ -49,9 +72,7 @@ func RunBlockDeviceController(
 			apiBlockDevices, err := GetAPIBlockDevices(ctx, cl)
 			if err != nil {
 				log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDevices")
-				return reconcile.Result{
-					RequeueAfter: cfg.BlockDeviceScanInterval * time.Second,
-				}, err
+				continue
 			}
 
 			// create new API devices
@@ -84,22 +105,10 @@ func RunBlockDeviceController(
 			// delete api device if device no longer exists, but we still have its api resource
 			RemoveDeprecatedAPIDevices(ctx, cl, log, candidates, apiBlockDevices, cfg.NodeName)
 
-			return reconcile.Result{
-				RequeueAfter: cfg.BlockDeviceScanInterval * time.Second,
-			}, nil
-		}),
-	})
-	if err != nil {
-		log.Error(err, "[RunBlockDeviceController] unable to create controller")
-		return nil, err
-	}
+			log.Info("[RunBlockDeviceController] END reconcile of block devices")
 
-	err = c.Watch(source.Kind(cache, &v1alpha1.BlockDevice{}), &handler.EnqueueRequestForObject{})
-	if err != nil {
-		log.Error(err, "[RunBlockDeviceController] unable to controller watch")
-	}
-
-	log.Info("[RunBlockDeviceController] Start loop scan block devices")
+		}
+	}()
 
 	return c, err
 }

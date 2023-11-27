@@ -2,11 +2,12 @@ package controller_test
 
 import (
 	"context"
+	"sds-node-configurator/internal"
+	"sds-node-configurator/pkg/controller"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/api/policy/v1beta1"
-	"storage-configurator/internal"
-	"storage-configurator/pkg/controller"
 )
 
 var _ = Describe("Storage Controller", func() {

@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sds-node-configurator/api/v1alpha1"
+	"sds-node-configurator/pkg/logger"
+	"sds-node-configurator/pkg/utils"
+	"time"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"storage-configurator/api/v1alpha1"
-	"storage-configurator/pkg/logger"
-	"storage-configurator/pkg/utils"
-	"time"
 )
 
 type StatusLVMVolumeGroup struct {

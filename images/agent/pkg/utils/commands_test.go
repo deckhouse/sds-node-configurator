@@ -1,9 +1,10 @@
 package utils
 
 import (
-	"github.com/stretchr/testify/assert"
-	"storage-configurator/internal"
+	"sds-node-configurator/internal"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCommands(t *testing.T) {

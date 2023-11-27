@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"storage-configurator/api/v1alpha1"
-	"storage-configurator/internal"
+	"sds-node-configurator/api/v1alpha1"
+	"sds-node-configurator/internal"
 )
 
 func GetBlockDevices() ([]internal.Device, string, error) {

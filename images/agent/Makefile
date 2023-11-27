@@ -4,8 +4,8 @@ APP-NAME=sds-node-configurator
 REGISTRY=registry.flant.com/deckhouse/storage/$(APP-NAME)
 TEST-ARGS=-race -timeout 30s -count 1
 USER := $(shell whoami)
-DAEMONSET_NAME=storage-configurator
-NAMESPACE=d8-storage-configurator
+DAEMONSET_NAME=sds-node-configurator
+NAMESPACE=d8-sds-node-configurator
 SYSTEM_NAMESPACE=d8-system
 PULL_SECRET_NAME=fox-registry
 

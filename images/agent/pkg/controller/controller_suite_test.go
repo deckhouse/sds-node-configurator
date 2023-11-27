@@ -1,10 +1,11 @@
 package controller_test
 
 import (
+	"sds-node-configurator/api/v1alpha1"
+	"testing"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"storage-configurator/api/v1alpha1"
-	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

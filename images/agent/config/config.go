@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
-	"storage-configurator/pkg/logger"
+	"sds-node-configurator/pkg/logger"
 	"time"
 )
 

@@ -1,4 +1,4 @@
-module storage-configurator
+module sds-node-configurator
 
 go 1.20
 

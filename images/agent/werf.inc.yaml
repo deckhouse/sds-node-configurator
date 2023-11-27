@@ -22,7 +22,7 @@ ansible:
     args:
       chdir: /src
   setup:
-  - shell: go build -o storage-configurator-agent .
+  - shell: go build -o sds-node-configurator-agent .
     args:
       chdir: /src/cmd/bc
     environment:
@@ -33,11 +33,11 @@ ansible:
 image: images/{{ .ImageName }}
 from: alpine:3.16.3
 docker:
-  ENTRYPOINT: ["/storage-configurator-agent"]
+  ENTRYPOINT: ["/sds-node-configurator-agent"]
 import:
 - artifact: agent-build
-  add: /src/cmd/bc/storage-configurator-agent
-  to: /storage-configurator-agent
+  add: /src/cmd/bc/sds-node-configurator-agent
+  to: /sds-node-configurator-agent
   before: setup
 ansible:
   install:
