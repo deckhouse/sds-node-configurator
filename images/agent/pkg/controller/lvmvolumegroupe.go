@@ -140,7 +140,7 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 			message = err.Error()
 		}
 
-		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] ValidationLVMGroup, resource name: %s", group.Name))
+		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] ValidationLVMGroup, resource name: %s, message: %s", group.Name, message))
 		err = updateLVMVolumeGroupStatus(ctx, cl, group.Name, group.Namespace, message, health)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error update LVMVolumeGroup %s", group.Name))
