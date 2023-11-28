@@ -1,6 +1,7 @@
 package internal
 
 const (
+	TypePart                  = "part"
 	DRBDName                  = "/dev/drbd"
 	LoopDeviceType            = "loop"
 	LVMDeviceType             = "lvm"

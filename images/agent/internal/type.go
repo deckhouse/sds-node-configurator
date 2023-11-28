@@ -22,6 +22,7 @@ type BlockDeviceCandidate struct {
 	Type                  string
 	FSType                string
 	MachineId             string
+	PartUUID              string
 }
 
 type LVMVolumeGroupCandidate struct {

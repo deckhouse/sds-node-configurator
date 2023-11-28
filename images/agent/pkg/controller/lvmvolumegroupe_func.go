@@ -166,7 +166,7 @@ func ValidationTypeLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGrou
 
 		for _, pv := range pvs {
 			if dev.Status.LvmVolumeGroupName == pv.VGName || dev.Status.Consumable == true {
-				extendPV = append(extendPV, dev.Status.Path)
+				extendPV = append(extendPV, pv.PVName)
 			}
 
 			if dev.Status.LvmVolumeGroupName != pv.PVName {

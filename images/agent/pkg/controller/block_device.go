@@ -224,19 +224,27 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options) ([]internal
 			Type:       device.Type,
 			FSType:     device.FSType,
 			MachineId:  cfg.MachineId,
+			PartUUID:   device.PartUUID,
 		}
 
 		if len(candidate.Serial) == 0 {
-			err, serial := readSerialBlockDevice(candidate.Path)
-			if err != nil {
-				log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] readSerialBlockDevice, err: %s", err.Error()))
-
-				if len(candidate.Wwn) == 0 {
-					log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] cant get wwn and serial, skip this device, path: %s", candidate.Path))
+			if candidate.Type == internal.TypePart {
+				if len(candidate.PartUUID) == 0 {
+					log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] candidate.Type = part and PartUUID == 0"))
 					continue
 				}
+			} else {
+				err, serial := readSerialBlockDevice(candidate.Path)
+				if err != nil {
+					log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] readSerialBlockDevice, err: %s", err.Error()))
+
+					if len(candidate.Wwn) == 0 {
+						log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] cant get wwn and serial, skip this device, path: %s", candidate.Path))
+						continue
+					}
+				}
+				candidate.Serial = serial
 			}
-			candidate.Serial = serial
 		}
 		candidate.Name = CreateUniqDeviceName(candidate)
 
@@ -372,7 +380,7 @@ func CheckTag(tags string) (bool, string) {
 }
 
 func CreateUniqDeviceName(can internal.BlockDeviceCandidate) string {
-	temp := fmt.Sprintf("%s%s%s%s", can.NodeName, can.Wwn, can.Model, can.Serial)
+	temp := fmt.Sprintf("%s%s%s%s%s", can.NodeName, can.Wwn, can.Model, can.Serial, can.PartUUID)
 	s := fmt.Sprintf("dev-%x", sha1.Sum([]byte(temp)))
 	return s
 }
