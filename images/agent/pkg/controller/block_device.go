@@ -123,7 +123,7 @@ func hasBlockDeviceDiff(resource v1alpha1.BlockDeviceStatus, candidate internal.
 		candidate.Wwn != resource.Wwn ||
 		candidate.Serial != resource.Serial ||
 		candidate.Path != resource.Path ||
-		candidate.Size != resource.Size ||
+		candidate.Size.String() != resource.Size ||
 		candidate.Rota != resource.Rota ||
 		candidate.Model != resource.Model ||
 		candidate.HotPlug != resource.HotPlug ||
@@ -394,16 +394,17 @@ func readSerialBlockDevice(deviceName string) (error, string) {
 	return nil, string(serial)
 }
 
-func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, resource v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {
+func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, res v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {
+	candidateSizeTmp := resource.NewQuantity(candidate.Size.Value(), resource.BinarySI)
 	device := &v1alpha1.BlockDevice{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       v1alpha1.BlockDeviceKind,
 			APIVersion: v1alpha1.TypeMediaAPIVersion,
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:            resource.Name,
-			ResourceVersion: resource.ResourceVersion,
-			OwnerReferences: resource.OwnerReferences,
+			Name:            res.Name,
+			ResourceVersion: res.ResourceVersion,
+			OwnerReferences: res.OwnerReferences,
 		},
 		Status: v1alpha1.BlockDeviceStatus{
 			Type:                  candidate.Type,
@@ -417,7 +418,7 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, resource v1alp
 			Wwn:                   candidate.Wwn,
 			Serial:                candidate.Serial,
 			Path:                  candidate.Path,
-			Size:                  candidate.Size,
+			Size:                  candidateSizeTmp.String(),
 			Model:                 candidate.Model,
 			Rota:                  candidate.Rota,
 			HotPlug:               candidate.HotPlug,
@@ -433,6 +434,7 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, resource v1alp
 }
 
 func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, candidate internal.BlockDeviceCandidate) (*v1alpha1.BlockDevice, error) {
+	candidateSizeTmp := resource.NewQuantity(candidate.Size.Value(), resource.BinarySI)
 	device := &v1alpha1.BlockDevice{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       v1alpha1.BlockDeviceKind,
@@ -454,7 +456,7 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, candidate inte
 			Wwn:                   candidate.Wwn,
 			Serial:                candidate.Serial,
 			Path:                  candidate.Path,
-			Size:                  candidate.Size,
+			Size:                  candidateSizeTmp.String(),
 			Model:                 candidate.Model,
 			Rota:                  candidate.Rota,
 			MachineID:             candidate.MachineId,

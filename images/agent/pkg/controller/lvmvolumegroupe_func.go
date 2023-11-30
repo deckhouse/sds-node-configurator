@@ -152,26 +152,54 @@ func ValidationLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGroup *v
 }
 
 func ValidationTypeLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, l logger.Logger) (extendPV, shrinkPV []string, err error) {
+
 	pvs, cmdStr, _, err := utils.GetAllPVs()
 	l.Debug(fmt.Sprintf("GetAllPVs exec cmd: %s", cmdStr))
 	if err != nil {
-		return nil, nil, nil
+		return nil, nil, err
 	}
 
 	for _, devName := range lvmVolumeGroup.Spec.BlockDeviceNames {
 		dev, err := getBlockDevice(ctx, cl, lvmVolumeGroup.Namespace, devName)
 		if err != nil {
-			return nil, nil, nil
+			return nil, nil, err
 		}
 
-		for _, pv := range pvs {
-			if dev.Status.LvmVolumeGroupName == pv.VGName || dev.Status.Consumable == true {
-				extendPV = append(extendPV, pv.PVName)
-			}
+		if dev.Status.Consumable == true {
+			extendPV = append(extendPV, dev.Status.Path)
+			continue
+		}
 
-			if dev.Status.LvmVolumeGroupName != pv.PVName {
-				shrinkPV = append(shrinkPV, pv.PVName)
+		if dev.Status.ActualVGNameOnTheNode != lvmVolumeGroup.Spec.ActualVGNameOnTheNode && (len(dev.Status.VGUuid) != 0) {
+			return nil, nil, nil
+			// не прошло валидацию, обновить статус LVG = ?
+		}
+
+		//for _, pv := range pvs {
+		//	if pv.VGName == lvmVolumeGroup.Spec.ActualVGNameOnTheNode {
+		//		shrinkPV = append(shrinkPV, pv.PVName)
+		//	}
+		//}
+	}
+
+	var flag bool
+
+	for _, pv := range pvs {
+		if pv.VGName == lvmVolumeGroup.Spec.ActualVGNameOnTheNode {
+			flag = false
+			for _, devName := range lvmVolumeGroup.Spec.BlockDeviceNames {
+				dev, err := getBlockDevice(ctx, cl, lvmVolumeGroup.Namespace, devName)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				if pv.PVUuid == dev.Status.PVUuid {
+					flag = true
+				}
 			}
+		}
+		if !flag {
+			shrinkPV = append(shrinkPV, pv.PVName)
 		}
 	}
 	return extendPV, shrinkPV, nil

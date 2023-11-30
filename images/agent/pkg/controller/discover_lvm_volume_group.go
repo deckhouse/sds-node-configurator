@@ -211,22 +211,22 @@ func turnLVMVGHealthToNonOperational(ctx context.Context, cl kclient.Client, lvg
 }
 
 func hasLVMVolumeGroupDiff(log logger.Logger, resource v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
-	log.Trace(fmt.Sprintf(`AllocatedSize, candidate: %d, resource: %d`, candidate.AllocatedSize.Value(), resource.Status.AllocatedSize.Value()))
+	log.Trace(fmt.Sprintf(`AllocatedSize, candidate: %d, resource: %d`, candidate.AllocatedSize.Value(), resource.Status.AllocatedSize))
 	log.Trace(fmt.Sprintf(`Health, candidate: %s, resource: %s`, candidate.Health, resource.Status.Health))
 	log.Trace(fmt.Sprintf(`Message, candidate: %s, resource: %s`, candidate.Message, resource.Status.Message))
 	log.Trace(fmt.Sprintf(`ThinPools, candidate: %v, resource: %v`, convertStatusThinPools(candidate.StatusThinPools), resource.Status.ThinPools))
-	log.Trace(fmt.Sprintf(`VGSize, candidate: %d, resource: %d`, candidate.VGSize.Value(), resource.Status.VGSize.Value()))
+	log.Trace(fmt.Sprintf(`VGSize, candidate: %d, resource: %s`, candidate.VGSize.Value(), resource.Status.VGSize))
 	log.Trace(fmt.Sprintf(`VGUuid, candidate: %s, resource: %s`, candidate.VGUuid, resource.Status.VGUuid))
 	log.Trace(fmt.Sprintf(`VGUuid, candidate: %s, resource: %s`, candidate.VGUuid, resource.Status.VGUuid))
 	log.Trace(fmt.Sprintf(`Nodes, candidate: %v, resource: %v`, convertLVMVGNodes(candidate.Nodes), resource.Status.Nodes))
 
 	//TODO: Uncomment this
 	//return strings.Join(candidate.Finalizers, "") == strings.Join(resource.Finalizers, "") ||
-	return candidate.AllocatedSize.Value() != resource.Status.AllocatedSize.Value() ||
+	return candidate.AllocatedSize.String() != resource.Status.AllocatedSize ||
 		candidate.Health != resource.Status.Health ||
 		candidate.Message != resource.Status.Message ||
 		!reflect.DeepEqual(convertStatusThinPools(candidate.StatusThinPools), resource.Status.ThinPools) ||
-		candidate.VGSize.Value() != resource.Status.VGSize.Value() ||
+		candidate.VGSize.String() != resource.Status.VGSize ||
 		candidate.VGUuid != resource.Status.VGUuid ||
 		!reflect.DeepEqual(convertLVMVGNodes(candidate.Nodes), resource.Status.Nodes)
 }
@@ -583,7 +583,7 @@ func configureCandidateNodeDevices(pvs map[string][]internal.PVData, bds map[str
 		}
 
 		if bd, exist := bdPathStatus[pv.PVName]; exist {
-			device.DevSize = bd.Status.Size
+			device.DevSize = resource.MustParse(bd.Status.Size)
 			device.BlockDevice = bd.Name
 		}
 
@@ -677,6 +677,9 @@ func getBlockDevicesNames(bds map[string][]v1alpha1.BlockDevice, vg internal.VGD
 
 func CreateLVMVolumeGroup(ctx context.Context, log logger.Logger, kc kclient.Client, candidate internal.LVMVolumeGroupCandidate) (*v1alpha1.LvmVolumeGroup, error) {
 
+	candidateVGSizeTmp := resource.NewQuantity(candidate.VGSize.Value(), resource.BinarySI)
+	candidateAllocatedSizeTmp := resource.NewQuantity(candidate.AllocatedSize.Value(), resource.BinarySI)
+
 	lvmVolumeGroup := &v1alpha1.LvmVolumeGroup{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       v1alpha1.LVMVolumeGroupKind,
@@ -695,12 +698,12 @@ func CreateLVMVolumeGroup(ctx context.Context, log logger.Logger, kc kclient.Cli
 			Type:                  candidate.Type,
 		},
 		Status: v1alpha1.LvmVolumeGroupStatus{
-			AllocatedSize: candidate.AllocatedSize,
+			AllocatedSize: candidateAllocatedSizeTmp.String(),
 			Health:        candidate.Health,
 			Message:       candidate.Message,
 			Nodes:         convertLVMVGNodes(candidate.Nodes),
 			ThinPools:     convertStatusThinPools(candidate.StatusThinPools),
-			VGSize:        candidate.VGSize,
+			VGSize:        candidateVGSizeTmp.String(),
 			VGUuid:        candidate.VGUuid,
 		},
 	}
@@ -725,13 +728,13 @@ func CreateLVMVolumeGroup(ctx context.Context, log logger.Logger, kc kclient.Cli
 func UpdateLVMVolumeGroupByCandidate(
 	ctx context.Context,
 	kc kclient.Client,
-	resource v1alpha1.LvmVolumeGroup,
+	res v1alpha1.LvmVolumeGroup,
 	candidate internal.LVMVolumeGroupCandidate,
 ) error {
 	// The resource.Status.Nodes can not be just re-written, it needs to be updated directly by node.
 	// We take all current resources nodes and convert them to map for better performance further.
-	resourceNodes := make(map[string][]v1alpha1.LvmVolumeGroupDevice, len(resource.Status.Nodes))
-	for _, node := range resource.Status.Nodes {
+	resourceNodes := make(map[string][]v1alpha1.LvmVolumeGroupDevice, len(res.Status.Nodes))
+	for _, node := range res.Status.Nodes {
 		resourceNodes[node.Name] = node.Devices
 	}
 
@@ -743,37 +746,41 @@ func UpdateLVMVolumeGroupByCandidate(
 	}
 
 	// Now we take resource's nodes, match them with our map and fill with new info.
-	for i, node := range resource.Status.Nodes {
+	for i, node := range res.Status.Nodes {
 		if devices, match := resourceNodes[node.Name]; match {
-			resource.Status.Nodes[i].Devices = devices
+			res.Status.Nodes[i].Devices = devices
 		}
 	}
 
 	// Update status.
+
+	candidateVGSizeTmp := resource.NewQuantity(candidate.VGSize.Value(), resource.BinarySI)
+	candidateAllocatedSizeTmp := resource.NewQuantity(candidate.AllocatedSize.Value(), resource.BinarySI)
+
 	lvmvg := &v1alpha1.LvmVolumeGroup{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       v1alpha1.LVMVolumeGroupKind,
 			APIVersion: v1alpha1.TypeMediaAPIVersion,
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:            resource.Name,
-			OwnerReferences: resource.OwnerReferences,
-			ResourceVersion: resource.ResourceVersion,
-			Annotations:     resource.Annotations,
+			Name:            res.Name,
+			OwnerReferences: res.OwnerReferences,
+			ResourceVersion: res.ResourceVersion,
+			Annotations:     res.Annotations,
 		},
 		Spec: v1alpha1.LvmVolumeGroupSpec{
-			ActualVGNameOnTheNode: resource.Spec.ActualVGNameOnTheNode,
-			BlockDeviceNames:      resource.Spec.BlockDeviceNames,
-			ThinPools:             resource.Spec.ThinPools,
-			Type:                  resource.Spec.Type,
+			ActualVGNameOnTheNode: res.Spec.ActualVGNameOnTheNode,
+			BlockDeviceNames:      res.Spec.BlockDeviceNames,
+			ThinPools:             res.Spec.ThinPools,
+			Type:                  res.Spec.Type,
 		},
 		Status: v1alpha1.LvmVolumeGroupStatus{
-			AllocatedSize: candidate.AllocatedSize,
+			AllocatedSize: candidateAllocatedSizeTmp.String(),
 			Health:        candidate.Health,
 			Message:       candidate.Message,
 			Nodes:         convertLVMVGNodes(candidate.Nodes),
 			ThinPools:     convertStatusThinPools(candidate.StatusThinPools),
-			VGSize:        candidate.VGSize,
+			VGSize:        candidateVGSizeTmp.String(),
 			VGUuid:        candidate.VGUuid,
 		},
 	}
@@ -804,10 +811,13 @@ func convertLVMVGDevices(devices []internal.LVMVGDevice) []v1alpha1.LvmVolumeGro
 	convertedDevices := make([]v1alpha1.LvmVolumeGroupDevice, 0, len(devices))
 
 	for _, dev := range devices {
+
+		devPVSizeTmp := resource.NewQuantity(dev.PVSize.Value(), resource.BinarySI)
+
 		convertedDevices = append(convertedDevices, v1alpha1.LvmVolumeGroupDevice{
 			BlockDevice: dev.BlockDevice,
 			DevSize:     dev.DevSize,
-			PVSize:      dev.PVSize,
+			PVSize:      devPVSizeTmp.String(),
 			PVUuid:      dev.PVUuid,
 			Path:        dev.Path,
 		})
