@@ -172,14 +172,8 @@ func ValidationTypeLVMGroup(ctx context.Context, cl client.Client, lvmVolumeGrou
 
 		if dev.Status.ActualVGNameOnTheNode != lvmVolumeGroup.Spec.ActualVGNameOnTheNode && (len(dev.Status.VGUuid) != 0) {
 			return nil, nil, nil
-			// не прошло валидацию, обновить статус LVG = ?
+			// validation fail, send message => LVG  ?
 		}
-
-		//for _, pv := range pvs {
-		//	if pv.VGName == lvmVolumeGroup.Spec.ActualVGNameOnTheNode {
-		//		shrinkPV = append(shrinkPV, pv.PVName)
-		//	}
-		//}
 	}
 
 	var flag bool

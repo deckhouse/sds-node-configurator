@@ -205,23 +205,28 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error ValidationTypeLVMGroup, name: %s", group.Name))
 		}
 
+		if err == nil && extendPVs == nil && shrinkPVs == nil {
+			log.Warning("[ReconcileLVMVG] ValidationTypeLVMGroup FAIL")
+			//todo retry and send message
+		}
+
+		log.Debug("----- extendPVs list -----")
+		for _, pvExt := range extendPVs {
+			log.Debug(pvExt)
+		}
+		log.Debug("----- extendPVs list -----")
+		log.Debug("----- shrinkPVs list -----")
+		for _, pvShr := range shrinkPVs {
+			log.Debug(pvShr)
+		}
+		log.Debug("----- shrinkPVs list -----")
+
 		if len(extendPVs) != 0 {
 			log.Info(fmt.Sprintf("[ReconcileLVMVG] CREATE event: %s", EventActionExtending))
 			err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonExtending, EventActionExtending, nodeName, group)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, name: %s", group.Name))
 			}
-
-			log.Debug("----- extendPVs list -----")
-			for _, pvExt := range extendPVs {
-				log.Debug(pvExt)
-			}
-			log.Debug("----- extendPVs list -----")
-			log.Debug("----- shrinkPVs list -----")
-			for _, pvShr := range shrinkPVs {
-				log.Debug(pvShr)
-			}
-			log.Debug("----- shrinkPVs list -----")
 
 			err := ExtendVGComplex(extendPVs, group.Spec.ActualVGNameOnTheNode, log)
 			if err != nil {
