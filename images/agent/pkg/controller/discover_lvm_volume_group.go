@@ -114,12 +114,12 @@ func RunDiscoveryLVMVGController(
 
 					log.Debug(fmt.Sprintf("[RunDiscoveryLVMVGController] run UpdateLVMVolumeGroupByCandidate, lvmVolumeGroup name: %s", lvmVolumeGroup.Name))
 					if err = UpdateLVMVolumeGroupByCandidate(ctx, cl, metrics, *lvmVolumeGroup, candidate); err != nil {
-						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to update lvmVolumeGroup, name: "%s"`,
+						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to update LvmVolumeGroup, name: "%s"`,
 							lvmVolumeGroup.Name))
 						continue
 					}
 
-					log.Info(fmt.Sprintf(`[RunDiscoveryLVMVGController] updated lvmVolumeGroup, name: "%s"`, lvmVolumeGroup.Name))
+					log.Info(fmt.Sprintf(`[RunDiscoveryLVMVGController] updated LvmVolumeGroup, name: "%s"`, lvmVolumeGroup.Name))
 
 					//TODO: release lock
 				} else {
@@ -210,30 +210,32 @@ func filterResourcesByNode(
 
 func turnLVMVGHealthToNonOperational(ctx context.Context, cl kclient.Client, lvg v1alpha1.LvmVolumeGroup, err error) error {
 	lvg.Status.Health = internal.LVMVGHealthNonOperational
-	lvg.Status.Message += err.Error()
+	lvg.Status.Message = err.Error()
 
 	return cl.Update(ctx, &lvg)
 }
 
-func hasLVMVolumeGroupDiff(log logger.Logger, resource v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
-	log.Trace(fmt.Sprintf(`AllocatedSize, candidate: %d, resource: %d`, candidate.AllocatedSize.Value(), resource.Status.AllocatedSize))
-	log.Trace(fmt.Sprintf(`Health, candidate: %s, resource: %s`, candidate.Health, resource.Status.Health))
-	log.Trace(fmt.Sprintf(`Message, candidate: %s, resource: %s`, candidate.Message, resource.Status.Message))
-	log.Trace(fmt.Sprintf(`ThinPools, candidate: %v, resource: %v`, convertStatusThinPools(candidate.StatusThinPools), resource.Status.ThinPools))
-	log.Trace(fmt.Sprintf(`VGSize, candidate: %d, resource: %s`, candidate.VGSize.Value(), resource.Status.VGSize))
-	log.Trace(fmt.Sprintf(`VGUuid, candidate: %s, resource: %s`, candidate.VGUuid, resource.Status.VGUuid))
-	log.Trace(fmt.Sprintf(`VGUuid, candidate: %s, resource: %s`, candidate.VGUuid, resource.Status.VGUuid))
-	log.Trace(fmt.Sprintf(`Nodes, candidate: %v, resource: %v`, convertLVMVGNodes(candidate.Nodes), resource.Status.Nodes))
+func hasLVMVolumeGroupDiff(log logger.Logger, res v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
+	candidateASTmp := resource.NewQuantity(candidate.AllocatedSize.Value(), resource.BinarySI)
+	candidateVGSizeTmp := resource.NewQuantity(candidate.VGSize.Value(), resource.BinarySI)
+
+	log.Trace(fmt.Sprintf(`AllocatedSize, candidate: %s, res: %s`, candidateASTmp.String(), res.Status.AllocatedSize))
+	log.Trace(fmt.Sprintf(`Health, candidate: %s, res: %s`, candidate.Health, res.Status.Health))
+	log.Trace(fmt.Sprintf(`Message, candidate: %s, res: %s`, candidate.Message, res.Status.Message))
+	log.Trace(fmt.Sprintf(`ThinPools, candidate: %v, res: %v`, convertStatusThinPools(candidate.StatusThinPools), res.Status.ThinPools))
+	log.Trace(fmt.Sprintf(`VGSize, candidate: %s, res: %s`, candidateVGSizeTmp.String(), res.Status.VGSize))
+	log.Trace(fmt.Sprintf(`VGUuid, candidate: %s, res: %s`, candidate.VGUuid, res.Status.VGUuid))
+	log.Trace(fmt.Sprintf(`Nodes, candidate: %v, res: %v`, convertLVMVGNodes(candidate.Nodes), res.Status.Nodes))
 
 	//TODO: Uncomment this
-	//return strings.Join(candidate.Finalizers, "") == strings.Join(resource.Finalizers, "") ||
-	return candidate.AllocatedSize.String() != resource.Status.AllocatedSize ||
-		candidate.Health != resource.Status.Health ||
-		candidate.Message != resource.Status.Message ||
-		!reflect.DeepEqual(convertStatusThinPools(candidate.StatusThinPools), resource.Status.ThinPools) ||
-		candidate.VGSize.String() != resource.Status.VGSize ||
-		candidate.VGUuid != resource.Status.VGUuid ||
-		!reflect.DeepEqual(convertLVMVGNodes(candidate.Nodes), resource.Status.Nodes)
+	//return strings.Join(candidate.Finalizers, "") == strings.Join(res.Finalizers, "") ||
+	return candidateASTmp.String() != res.Status.AllocatedSize ||
+		candidate.Health != res.Status.Health ||
+		candidate.Message != res.Status.Message ||
+		!reflect.DeepEqual(convertStatusThinPools(candidate.StatusThinPools), res.Status.ThinPools) ||
+		candidateVGSizeTmp.String() != res.Status.VGSize ||
+		candidate.VGUuid != res.Status.VGUuid ||
+		!reflect.DeepEqual(convertLVMVGNodes(candidate.Nodes), res.Status.Nodes)
 }
 
 func getResourceByCandidate(current []v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) *v1alpha1.LvmVolumeGroup {

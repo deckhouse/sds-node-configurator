@@ -117,23 +117,24 @@ func RunBlockDeviceController(
 	return c, err
 }
 
-func hasBlockDeviceDiff(resource v1alpha1.BlockDeviceStatus, candidate internal.BlockDeviceCandidate) bool {
-	return candidate.NodeName != resource.NodeName ||
-		candidate.Consumable != resource.Consumable ||
-		candidate.PVUuid != resource.PVUuid ||
-		candidate.VGUuid != resource.VGUuid ||
-		candidate.LvmVolumeGroupName != resource.LvmVolumeGroupName ||
-		candidate.ActualVGNameOnTheNode != resource.ActualVGNameOnTheNode ||
-		candidate.Wwn != resource.Wwn ||
-		candidate.Serial != resource.Serial ||
-		candidate.Path != resource.Path ||
-		candidate.Size.String() != resource.Size ||
-		candidate.Rota != resource.Rota ||
-		candidate.Model != resource.Model ||
-		candidate.HotPlug != resource.HotPlug ||
-		candidate.Type != resource.Type ||
-		v1beta1.FSType(candidate.FSType) != resource.FsType ||
-		candidate.MachineId != resource.MachineID
+func hasBlockDeviceDiff(res v1alpha1.BlockDeviceStatus, candidate internal.BlockDeviceCandidate) bool {
+	candSizeTmp := resource.NewQuantity(candidate.Size.Value(), resource.BinarySI)
+	return candidate.NodeName != res.NodeName ||
+		candidate.Consumable != res.Consumable ||
+		candidate.PVUuid != res.PVUuid ||
+		candidate.VGUuid != res.VGUuid ||
+		candidate.LvmVolumeGroupName != res.LvmVolumeGroupName ||
+		candidate.ActualVGNameOnTheNode != res.ActualVGNameOnTheNode ||
+		candidate.Wwn != res.Wwn ||
+		candidate.Serial != res.Serial ||
+		candidate.Path != res.Path ||
+		candSizeTmp.String() != res.Size ||
+		candidate.Rota != res.Rota ||
+		candidate.Model != res.Model ||
+		candidate.HotPlug != res.HotPlug ||
+		candidate.Type != res.Type ||
+		v1beta1.FSType(candidate.FSType) != res.FsType ||
+		candidate.MachineId != res.MachineID
 }
 
 func GetAPIBlockDevices(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics) (map[string]v1alpha1.BlockDevice, error) {

@@ -99,7 +99,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if _, err := controller.RunLVMVolumeGroupController(ctx, mgr, cfgParams.NodeName, *log, metrics); err != nil {
+	if _, err := controller.RunWatcherLVMVGController(ctx, mgr, *cfgParams, *log, metrics); err != nil {
 		log.Error(err, "[main] error Run RunLVMVolumeGroupController")
 		os.Exit(1)
 	}

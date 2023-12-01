@@ -37,14 +37,6 @@ func getLVMVolumeGroup(ctx context.Context, cl client.Client, metrics monitoring
 	return obj, nil
 }
 
-func updateLVMVolumeGroup(ctx context.Context, cl client.Client, group *v1alpha1.LvmVolumeGroup) error {
-	err := cl.Update(ctx, group)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func updateLVMVolumeGroupStatus(ctx context.Context, cl client.Client, metrics monitoring.Metrics, name, namespace, message, health string) error {
 	obj := &v1alpha1.LvmVolumeGroup{}
 
