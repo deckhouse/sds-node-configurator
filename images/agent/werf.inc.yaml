@@ -47,4 +47,5 @@ ansible:
       - lsblk
       - lvm2
       - bash
+      - curl
       update_cache: yes

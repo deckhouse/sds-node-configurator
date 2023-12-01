@@ -13,7 +13,7 @@ RUN GOOS=linux GOARCH=amd64 go  build -o stctrl
 
 FROM amd64/alpine:3.16.3
 
-RUN apk update && apk add lvm2 lsblk
+RUN apk update && apk add lvm2 lsblk curl
 
 WORKDIR /root/
 COPY --from=builder /go/src/storagecontroller/cmd/bc .

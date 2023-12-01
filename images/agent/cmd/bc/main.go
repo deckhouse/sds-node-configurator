@@ -3,6 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	v1 "k8s.io/api/core/v1"
+	sv1 "k8s.io/api/storage/v1"
+	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	apiruntime "k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"os"
 	goruntime "runtime"
 	"sds-node-configurator/api/v1alpha1"
@@ -10,13 +16,7 @@ import (
 	"sds-node-configurator/pkg/controller"
 	"sds-node-configurator/pkg/kubutils"
 	"sds-node-configurator/pkg/logger"
-
-	v1 "k8s.io/api/core/v1"
-	sv1 "k8s.io/api/storage/v1"
-	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	apiruntime "k8s.io/apimachinery/pkg/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sds-node-configurator/pkg/monitoring"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -83,29 +83,28 @@ func main() {
 		log.Error(err, "[main] unable to manager.New")
 		os.Exit(1)
 	}
-
 	log.Info("[main] successfully created kubernetes manager")
 
-	log.Info("[main] start reTag")
-	err = controller.ReTag(*log)
-	if err != nil {
-		log.Error(err, "[main] ReTag")
-	}
-	log.Info("[main] end reTag")
+	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 
-	if _, err := controller.RunBlockDeviceController(ctx, mgr, *cfgParams, *log); err != nil {
+	log.Info("[main] ReTag starts")
+	err = controller.ReTag(*log, metrics)
+	if err != nil {
+		log.Error(err, "[main] unable to run ReTag")
+	}
+	log.Info("[main] ReTag ends")
+
+	if _, err := controller.RunBlockDeviceController(ctx, mgr, *cfgParams, *log, metrics); err != nil {
 		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
 		os.Exit(1)
 	}
 
-	// log.Info("[main] controller BlockDevice started")
-
-	if _, err := controller.RunLVMVolumeGroupController(ctx, mgr, cfgParams.NodeName, *log); err != nil {
+	if _, err := controller.RunLVMVolumeGroupController(ctx, mgr, cfgParams.NodeName, *log, metrics); err != nil {
 		log.Error(err, "[main] error Run RunLVMVolumeGroupController")
 		os.Exit(1)
 	}
 
-	if _, err := controller.RunDiscoveryLVMVGController(ctx, mgr, *cfgParams, *log); err != nil {
+	if _, err := controller.RunDiscoveryLVMVGController(ctx, mgr, *cfgParams, *log, metrics); err != nil {
 		log.Error(err, "[main] unable to controller.RunDiscoveryLVMVGController")
 		os.Exit(1)
 	}

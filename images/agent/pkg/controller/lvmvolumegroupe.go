@@ -8,9 +8,11 @@ import (
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/internal"
 	"sds-node-configurator/pkg/logger"
+	"sds-node-configurator/pkg/monitoring"
 	"sds-node-configurator/pkg/utils"
 	"strconv"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/util/workqueue"
@@ -24,7 +26,7 @@ import (
 )
 
 const (
-	lvmVolumeGroupName = "lvm-volume-group-controller"
+	watcherLVMVGCtrlName = "watcher-lvmvg-controller"
 )
 
 func RunLVMVolumeGroupController(
@@ -32,11 +34,12 @@ func RunLVMVolumeGroupController(
 	mgr manager.Manager,
 	nodeName string,
 	log logger.Logger,
+	metrics monitoring.Metrics,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
 	cache := mgr.GetCache()
 
-	c, err := controller.New(lvmVolumeGroupName, mgr, controller.Options{
+	c, err := controller.New(watcherLVMVGCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 			return reconcile.Result{}, nil
 		}),
@@ -48,7 +51,7 @@ func RunLVMVolumeGroupController(
 
 	createFunc := func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
 		log.Info(fmt.Sprintf("[RunLVMVolumeGroupController] event create LVMVolumeGroup, name: %s", e.Object.GetName()))
-		ReconcileLVMVG(ctx, e.Object.GetName(), e.Object.GetNamespace(), nodeName, log, cl)
+		ReconcileLVMVG(ctx, metrics, e.Object.GetName(), e.Object.GetNamespace(), nodeName, log, cl)
 	}
 	updateFunc := func(ctx context.Context, updateEvent event.UpdateEvent, q workqueue.RateLimitingInterface) {
 		log.Info(fmt.Sprintf("[RunLVMVolumeGroupController] update LVMVolumeGroupn, name: %s", updateEvent.ObjectNew.GetName()))
@@ -65,18 +68,18 @@ func RunLVMVolumeGroupController(
 
 		if !reflect.DeepEqual(oldLVG.Annotations, newLVG.Annotations) {
 			log.Info("[RunLVMVolumeGroupController] annotations update")
-			ReconcileLVMVG(ctx, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
+			ReconcileLVMVG(ctx, metrics, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
 			return
 		}
 
 		if !reflect.DeepEqual(oldLVG.Spec, newLVG.Spec) {
 			log.Info("[RunLVMVolumeGroupController] lvg spec changed")
-			ReconcileLVMVG(ctx, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
+			ReconcileLVMVG(ctx, metrics, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
 			return
 		}
 
 		if !reflect.DeepEqual(oldLVG.Status.Nodes, newLVG.Status.Nodes) {
-			ReconcileLVMVG(ctx, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
+			ReconcileLVMVG(ctx, metrics, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
 		} else {
 			log.Info("[RunLVMVolumeGroupController] lvg check dev size")
 			for _, node := range newLVG.Status.Nodes {
@@ -101,7 +104,7 @@ func RunLVMVolumeGroupController(
 
 					if device.DevSize.Value()-dPVSizeTmp.Value() > delta {
 						log.Info("[RunLVMVolumeGroupController] lvg status device and PV changed")
-						ReconcileLVMVG(ctx, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
+						ReconcileLVMVG(ctx, metrics, updateEvent.ObjectNew.GetName(), updateEvent.ObjectNew.GetNamespace(), nodeName, log, cl)
 					}
 				}
 			}
@@ -120,14 +123,20 @@ func RunLVMVolumeGroupController(
 	return c, err
 }
 
-func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName string, log logger.Logger, cl client.Client) {
+func ReconcileLVMVG(
+	ctx context.Context,
+	metrics monitoring.Metrics,
+	objectName, objectNameSpace, nodeName string,
+	log logger.Logger,
+	cl client.Client,
+) {
 	log.Info("[ReconcileLVMVG] reconcile loop start")
-	group, err := getLVMVolumeGroup(ctx, cl, objectNameSpace, objectName)
+	group, err := getLVMVolumeGroup(ctx, cl, metrics, objectNameSpace, objectName)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error getLVMVolumeGroup, objectname: %s", objectName))
 		return
 	}
-	validation, status, err := ValidationLVMGroup(ctx, cl, group, objectNameSpace, nodeName)
+	validation, status, err := ValidationLVMGroup(ctx, cl, metrics, group, objectNameSpace, nodeName)
 
 	if group == nil {
 		log.Error(nil, "[ReconcileLVMVG] requested LVMVG group in nil")
@@ -142,7 +151,7 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 		}
 
 		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] ValidationLVMGroup, resource name: %s, message: %s", group.Name, message))
-		err = updateLVMVolumeGroupStatus(ctx, cl, group.Name, group.Namespace, message, health)
+		err = updateLVMVolumeGroupStatus(ctx, cl, metrics, group.Name, group.Namespace, message, health)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error update LVMVolumeGroup %s", group.Name))
 			return
@@ -172,12 +181,12 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 	if annotationMark != 0 {
 		// lock
 		log.Info(fmt.Sprintf("[ReconcileLVMVG] create event: %s", EventActionDeleting))
-		err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonDeleting, EventActionDeleting, nodeName, group)
+		err = CreateEventLVMVolumeGroup(ctx, cl, metrics, EventReasonDeleting, EventActionDeleting, nodeName, group)
 		if err != nil {
 			log.Error(err, "[ReconcileLVMVG] error CreateEventLVMVolumeGroup")
 		}
 
-		err := DeleteVG(group.Spec.ActualVGNameOnTheNode, log)
+		err := DeleteVG(group.Spec.ActualVGNameOnTheNode, log, metrics)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] delete VG, name: %s", group.Spec.ActualVGNameOnTheNode))
 			return
@@ -189,18 +198,18 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 
 	log.Info("[ReconcileLVMVG] start reconciliation VG process")
 	log.Info(fmt.Sprintf("[ReconcileLVMVG] create event: %s", EventActionProvisioning))
-	err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonProvisioning, EventActionProvisioning, nodeName, group)
+	err = CreateEventLVMVolumeGroup(ctx, cl, metrics, EventReasonProvisioning, EventActionProvisioning, nodeName, group)
 	if err != nil {
 		log.Error(err, "[ReconcileLVMVG] error CreateEventLVMVolumeGroup")
 	}
 
-	existVG, err := ExistVG(group.Spec.ActualVGNameOnTheNode, log)
+	existVG, err := ExistVG(group.Spec.ActualVGNameOnTheNode, log, metrics)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error ExistVG, name: %s", group.Spec.ActualVGNameOnTheNode))
 	}
 	if existVG {
 		log.Info("[ReconcileLVMVG] validation and choosing the type of operation")
-		extendPVs, shrinkPVs, err := ValidationTypeLVMGroup(ctx, cl, group, log)
+		extendPVs, shrinkPVs, err := ValidationTypeLVMGroup(ctx, cl,metrics, group, log)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error ValidationTypeLVMGroup, name: %s", group.Name))
 		}
@@ -223,12 +232,11 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 
 		if len(extendPVs) != 0 {
 			log.Info(fmt.Sprintf("[ReconcileLVMVG] CREATE event: %s", EventActionExtending))
-			err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonExtending, EventActionExtending, nodeName, group)
+			err = CreateEventLVMVolumeGroup(ctx, cl, metrics, EventReasonExtending, EventActionExtending, nodeName, group)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, name: %s", group.Name))
 			}
-
-			err := ExtendVGComplex(extendPVs, group.Spec.ActualVGNameOnTheNode, log)
+			err := ExtendVGComplex(metrics, extendPVs, group.Spec.ActualVGNameOnTheNode, log)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to ExtendVGComplex for resource, name: %s", group.Name))
 			}
@@ -304,7 +312,7 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 
 				if d.DevSize.Value()-dPVSizeTmp.Value() > delta {
 					log.Info(fmt.Sprintf("[ReconcileLVMVG] create event: %s", EventActionResizing))
-					err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonResizing, EventActionResizing, nodeName, group)
+					err = CreateEventLVMVolumeGroup(ctx, cl, metrics, EventReasonResizing, EventActionResizing, nodeName, group)
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, resource name: %s", group.Name))
 					}
@@ -312,7 +320,7 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 					log.Debug(fmt.Sprintf("[ReconcileLVMVG] exec command: %s", command))
 					if err != nil {
 						log.Error(errors.New("check size error"), fmt.Sprintf("[ReconcileLVMVG] devSize <= pvSize, block device: %s", d.BlockDevice))
-						err = updateLVMVolumeGroupStatus(ctx, cl, group.Name, group.Namespace, "devSize <= pvSize", NoOperational)
+						err = updateLVMVolumeGroupStatus(ctx, cl, metrics, group.Name, group.Namespace, "devSize <= pvSize", NoOperational)
 						if err != nil {
 							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error update LVMVolumeGroup %s", group.Name))
 						}
@@ -355,15 +363,19 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 
 				if !ok {
 					log.Info(fmt.Sprintf("[ReconcileLVMVG] create event: %s", EventActionCreating))
-					err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonCreating, EventActionCreating, nodeName, group)
+					err = CreateEventLVMVolumeGroup(ctx, cl, metrics, EventReasonCreating, EventActionCreating, nodeName, group)
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, resource name: %s", group.Name))
 					}
+					start := time.Now()
 					command, err := utils.CreateLV(pool, group.Spec.ActualVGNameOnTheNode)
+					metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "lvcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
+					metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "lvcreate").Inc()
 					log.Debug(command)
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateLV, thin pool: %s", pool.Name))
-						if err = updateLVMVolumeGroupStatus(ctx, cl, group.Name, group.Namespace, err.Error(), NoOperational); err != nil {
+						metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "lvcreate").Inc()
+						if err = updateLVMVolumeGroupStatus(ctx, cl, metrics, group.Name, group.Namespace, err.Error(), NoOperational); err != nil {
 							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update LVMVolumeGroupStatus, resource name: %s", group.Name))
 						}
 						return
@@ -395,14 +407,18 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 					log.Debug(fmt.Sprintf("[ReconcileLVMVG] Identified a thin pool requiring resize: %s", pool.Name))
 					if freeSpace > addSize {
 						log.Info(fmt.Sprintf("[ReconcileLVMVG] create event: %s", EventActionResizing))
-						err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonResizing, EventActionResizing, nodeName, group)
+						err = CreateEventLVMVolumeGroup(ctx, cl, metrics, EventReasonResizing, EventActionResizing, nodeName, group)
 						if err != nil {
 							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, resource name: %s", group.Name))
 						}
 						newLVSizeStr := strconv.FormatInt(pool.Size.Value()/1024, 10)
+						start := time.Now()
 						cmd, err := utils.ExtendLV(newLVSizeStr+"K", group.Spec.ActualVGNameOnTheNode, pool.Name)
+						metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "lvextend").Observe(metrics.GetEstimatedTimeInSeconds(start))
+						metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "lvextend").Inc()
 						log.Debug(cmd)
 						if err != nil {
+							metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "lvextend").Inc()
 							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error ExtendLV, pool name: %s", pool.Name))
 							return
 						}
@@ -420,15 +436,15 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 
 	} else {
 		log.Info(fmt.Sprintf("[ReconcileLVMVG] create event: %s", EventActionCreating))
-		err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonCreating, EventActionCreating, nodeName, group)
+		err = CreateEventLVMVolumeGroup(ctx, cl, metrics, EventReasonCreating, EventActionCreating, nodeName, group)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, resource name: %s", group.Name))
 		}
 
-		err := CreateVGComplex(ctx, cl, group, log)
+		err := CreateVGComplex(ctx, cl, metrics, group, log)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to CreateVGComplex for resource, name: %s", group.Name))
-			if err = updateLVMVolumeGroupStatus(ctx, cl, group.Name, group.Namespace, err.Error(), NoOperational); err != nil {
+			if err = updateLVMVolumeGroupStatus(ctx, cl, metrics, group.Name, group.Namespace, err.Error(), NoOperational); err != nil {
 				log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update LVMVolumeGroupStatus, resource name: %s", group.Name))
 			}
 
@@ -437,11 +453,15 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 
 		if len(group.Spec.ThinPools) != 0 {
 			for _, v := range group.Spec.ThinPools {
+				start := time.Now()
 				command, err := utils.CreateLV(v, group.Spec.ActualVGNameOnTheNode)
+				metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "lvcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
+				metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "lvcreate").Inc()
 				log.Debug(command)
 				if err != nil {
+					metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "lvcreate").Inc()
 					log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateLV, thin pool: %s", v.Name))
-					if err = updateLVMVolumeGroupStatus(ctx, cl, group.Name, group.Namespace, err.Error(), NoOperational); err != nil {
+					if err = updateLVMVolumeGroupStatus(ctx, cl, metrics, group.Name, group.Namespace, err.Error(), NoOperational); err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update LVMVolumeGroupStatus, resource name: %s", group.Name))
 					}
 					return
@@ -451,14 +471,14 @@ func ReconcileLVMVG(ctx context.Context, objectName, objectNameSpace, nodeName s
 	}
 
 	log.Info("[ReconcileLVMVG] reconcile loop end")
-	err = updateLVMVolumeGroupStatus(ctx, cl, group.Name, group.Namespace, "", Operational)
+	err = updateLVMVolumeGroupStatus(ctx, cl, metrics, group.Name, group.Namespace, "", Operational)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error update LVMVolumeGroup %s", group.Name))
 		return
 	}
 
 	log.Info(fmt.Sprintf("[ReconcileLVMVG] create event: %s", EventActionReady))
-	err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonReady, EventActionReady, nodeName, group)
+	err = CreateEventLVMVolumeGroup(ctx, cl, metrics, EventReasonReady, EventActionReady, nodeName, group)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, resource name: %s", group.Name))
 	}

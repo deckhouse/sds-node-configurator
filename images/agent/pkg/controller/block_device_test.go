@@ -119,7 +119,7 @@ func TestGetCandidates(t *testing.T) {
 	t.Run("CheckTag", func(t *testing.T) {
 		t.Run("Have tag_Returns true and tag", func(t *testing.T) {
 			expectedName := "testName"
-			tags := "storage.deckhouse.io/enabled=true,storage.deckhouse.io/lvmVolumeGroupName=" + expectedName
+			tags := "storage.deckhouse.io/enabled=true,storage.deckhouse.io/watcherLVMVGCtrlName=" + expectedName
 
 			shouldBeTrue, actualName := CheckTag(tags)
 			if assert.True(t, shouldBeTrue) {
