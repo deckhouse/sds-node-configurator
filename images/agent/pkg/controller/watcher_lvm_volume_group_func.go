@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sds-node-configurator/api/v1alpha1"
+	"sds-node-configurator/internal"
 	"sds-node-configurator/pkg/logger"
 	"sds-node-configurator/pkg/monitoring"
 	"sds-node-configurator/pkg/utils"
@@ -448,4 +449,55 @@ func CreateVGComplex(ctx context.Context, cl client.Client, metrics monitoring.M
 		}
 	}
 	return nil
+}
+
+func UpdateLVMVolumeGroupTagsName(log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
+	const tag = "storage.deckhouse.io/lvmVolumeGroupName"
+
+	start := time.Now()
+	vgs, cmd, _, err := utils.GetAllVGs()
+	metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "vgs").Inc()
+	log.Debug(fmt.Sprintf("[ReconcileLVMVG] exec cmd: %s", cmd))
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to get VG by resource, name: %s", lvg.Name))
+		metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "vgs").Inc()
+		return false, err
+	}
+
+	var vg internal.VGData
+	for _, v := range vgs {
+		if v.VGName == lvg.Spec.ActualVGNameOnTheNode {
+			vg = v
+		}
+	}
+
+	found, tagName := CheckTag(vg.VGTags)
+	if found && lvg.Name != tagName {
+		start = time.Now()
+		cmd, err = utils.VGChangeDelTag(vg.VGName, fmt.Sprintf("%s=%s", tag, tagName))
+		metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
+		metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "vgchange").Inc()
+		log.Debug(fmt.Sprintf("[UpdateLVMVolumeGroupTagsName] exec cmd: %s", cmd))
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[UpdateLVMVolumeGroupTagsName] unable to delete tag: %s=%s, vg: %s", tag, tagName, vg.VGName))
+			metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "vgchange").Inc()
+			return false, err
+		}
+
+		start = time.Now()
+		cmd, err = utils.VGChangeAddTag(vg.VGName, fmt.Sprintf("%s=%s", tag, lvg.Name))
+		metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
+		metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "vgchange").Inc()
+		log.Debug(fmt.Sprintf("[UpdateLVMVolumeGroupTagsName] exec cmd: %s", cmd))
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[UpdateLVMVolumeGroupTagsName] unable to add tag: %s=%s, vg: %s", tag, lvg.Name, vg.VGName))
+			metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "vgchange").Inc()
+			return false, err
+		}
+
+		return true, nil
+	}
+
+	return false, nil
 }

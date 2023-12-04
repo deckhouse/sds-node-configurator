@@ -262,6 +262,19 @@ func ReconcileLVMVG(
 		return true, err
 	}
 	if existVG {
+		log.Debug("[ReconcileLVMVG] tries to update ")
+		updated, err := UpdateLVMVolumeGroupTagsName(log, metrics, group)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update VG tags on VG, name: %s", group.Spec.ActualVGNameOnTheNode))
+			return true, err
+		}
+
+		if updated {
+			log.Info(fmt.Sprintf("[ReconcileLVMVG] tag storage.deckhouse.io/lvmVolumeGroupName was updated on VG, name: %s", group.Spec.ActualVGNameOnTheNode))
+		} else {
+			log.Debug(fmt.Sprintf("[ReconcileLVMVG] no need to update tag storage.deckhouse.io/lvmVolumeGroupName on VG, name: %s", group.Spec.ActualVGNameOnTheNode))
+		}
+
 		log.Info("[ReconcileLVMVG] validation and choosing the type of operation")
 		extendPVs, shrinkPVs, err := ValidationTypeLVMGroup(ctx, cl, metrics, group, log)
 		if err != nil {
