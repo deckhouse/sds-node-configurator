@@ -86,8 +86,8 @@ spec:
           description: The node thе block device is on.
         - jsonPath: .status.consumable
           name: Consumable
-          type: string
-          description: If sds-node-configurator might use this block device.
+          type: boolean
+          description: If current block device might be used by sds-node-configurator.
         - jsonPath: .status.size
           name: Size
           type: string

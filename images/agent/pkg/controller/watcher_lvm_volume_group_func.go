@@ -186,7 +186,7 @@ func ValidationTypeLVMGroup(ctx context.Context, cl client.Client, metrics monit
 				}
 			}
 		}
-		if !flag {
+		if !flag && pv.VGName == lvmVolumeGroup.Spec.ActualVGNameOnTheNode {
 			shrinkPV = append(shrinkPV, pv.PVName)
 		}
 	}
