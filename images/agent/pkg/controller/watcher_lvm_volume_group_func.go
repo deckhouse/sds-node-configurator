@@ -103,7 +103,7 @@ func ValidationLVMGroup(ctx context.Context, cl client.Client, metrics monitorin
 		for _, blockDev := range lvmVolumeGroup.Spec.BlockDeviceNames {
 			device, err := getBlockDevice(ctx, cl, metrics, namespace, blockDev)
 			if err != nil {
-				status.Health = ""
+				status.Health = NoOperational
 				return false, &status, err
 			}
 			if device.Status.NodeName == nodeName {
