@@ -225,6 +225,8 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 		return nil, err
 	}
 
+	var delFlag bool
+
 	// Наполняем кандидатов информацией.
 	var candidates []internal.BlockDeviceCandidate
 	for _, device := range filteredDevices {
@@ -272,16 +274,23 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 				if candidate.FSType == internal.LVMFSType {
 					hasTag, lvmVGName := CheckTag(pv.VGTags)
 					if hasTag {
-						candidate.ActualVGNameOnTheNode = pv.VGName
 						candidate.PVUuid = pv.PVUuid
 						candidate.VGUuid = pv.VGUuid
 						candidate.ActualVGNameOnTheNode = pv.VGName
 						candidate.LvmVolumeGroupName = lvmVGName
+					} else {
+						if len(pv.VGName) != 0 {
+							delFlag = true
+						} else {
+							candidate.PVUuid = pv.PVUuid
+						}
 					}
 				}
 			}
 		}
-
+		if delFlag {
+			continue
+		}
 		candidates = append(candidates, candidate)
 	}
 
@@ -389,7 +398,7 @@ func CheckTag(tags string) (bool, string) {
 
 	splitTags := strings.Split(tags, ",")
 	for _, tag := range splitTags {
-		if strings.HasPrefix(tag, "storage.deckhouse.io/watcherLVMVGCtrlName") {
+		if strings.HasPrefix(tag, "storage.deckhouse.io/lvmVolumeGroupName") {
 			kv := strings.Split(tag, "=")
 			return true, kv[1]
 		}
