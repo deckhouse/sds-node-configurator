@@ -79,3 +79,33 @@ spec:
                 machineId:
                   type: string
                   description: "MachineID"
+      additionalPrinterColumns:
+        - jsonPath: .status.nodeName
+          name: Node
+          type: string
+          description: The node thе block device is on.
+        - jsonPath: .status.consumable
+          name: Consumable
+          type: string
+          description: If sds-node-configurator might use this block device.
+        - jsonPath: .status.size
+          name: Size
+          type: string
+          description: Size of included device.
+        - jsonPath: .status.path
+          name: Path
+          type: string
+          description: Actual device path (name).
+          priority: 1
+        - jsonPath: .status.actualVGNameOnTheNode
+          name: VG
+          type: string
+          description: The Volume Group the block device is in.
+          priority: 1
+        - jsonPath: .status.lvmVolumeGroupName
+          name: LVMVolumeGroup
+          type: string
+          description: The LVMVolumeGroup resource the block device is in.
+          priority: 1
+
+
