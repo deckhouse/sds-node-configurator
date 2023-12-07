@@ -250,6 +250,8 @@ build_dev:
 
 deploy_ce:
   stage: deploy_prod
+  variables:
+    REGISTRY_PATH: ${EXTERNAL_MODULES_REGISTRY_PATH_CE}
   needs:
     - build_prod_ce
   extends:
@@ -268,6 +270,8 @@ deploy_ce:
 
 deploy_ee:
   stage: deploy_prod
+  variables:
+    REGISTRY_PATH: ${EXTERNAL_MODULES_REGISTRY_PATH_EE}
   needs:
     - build_prod_ee
   extends:
@@ -286,6 +290,8 @@ deploy_ee:
 
 deploy_fe:
   stage: deploy_prod
+  variables:
+    REGISTRY_PATH: ${EXTERNAL_MODULES_REGISTRY_PATH_FE}
   needs:
     - build_prod_fe
   extends:
