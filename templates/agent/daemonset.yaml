@@ -14,7 +14,7 @@ spec:
         app: sds-node-configurator
     spec:
       imagePullSecrets:
-        - name: registry
+        - name: {{ .Chart.Name }}-module-registry
       serviceAccountName: sds-node-configurator
       containers:
       - name: ubuntu-container
