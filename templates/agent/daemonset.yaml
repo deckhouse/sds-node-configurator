@@ -4,26 +4,28 @@ kind: DaemonSet
 metadata:
   name: sds-node-configurator
   namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-node-configurator")) | nindent 2 }}
 spec:
   selector:
     matchLabels:
       app: sds-node-configurator
   template:
     metadata:
-      labels:
-        app: sds-node-configurator
+      name: sds-node-configurator
+      namespace: d8-{{ .Chart.Name }}
+      {{- include "helm_lib_module_labels" (list . (dict "app" "sds-node-configurator")) | nindent 6 }}
     spec:
+      {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 6 }}
+      {{- include "helm_lib_tolerations" (tuple . "any-node" "storage-problems") | nindent 6 }}
+      nodeSelector:
+        storage.deckhouse.io/sds-drbd-node: ""
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       serviceAccountName: sds-node-configurator
       containers:
-      - name: ubuntu-container
-{{- if .Values.sdsNodeConfigurator.enableDevMode }}
-        image: {{ .Values.sdsNodeConfigurator.registry.base }}/sds-node-configurator/agent:{{ .Values.sdsNodeConfigurator.internal.devChannel }}
-{{- else }}
+      - name: sds-node-configurator-agent
         image: {{ include "helm_lib_module_image" (list . "agent") }}
-{{- end }}
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
           seLinuxOptions:
