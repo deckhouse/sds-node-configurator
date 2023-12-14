@@ -24,12 +24,9 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            BlockDevice is a Kubernetes Custom Resource that contains actual and useful information about associated devices
-            which might be used by a SDS-Node-Configurator controller to perform operations such as Volume Group creations,
-            Physical Volume extensions and so on.
+            BlockDevice is a Kubernetes Custom Resource that contains actual and useful information about associated block devices  which might be used by a SDS-Node-Configurator controller to perform operations such as Volume Group creation, Physical Volume extensions and so on.
             
-            > This kind of resources is necessary for successful and correct the controller's work-flow. The filling of 
-            resource's configuration process is fully automatic and it is done by the controller itself.
+            > This kind of resources is necessary for successful and correct the controller's work-flow. The filling of resource's configuration process is fully automatic and it is done by the controller itself.
           properties:
             status:
               type: object
@@ -39,12 +36,8 @@ spec:
               properties:
                 type:
                   type: string
-                  enum: [part,raid,disk]
                   description: |
-                    The device's type. Might be: 
-                    - part (partition)
-                    - raid
-                    - disk
+                    The device's type.
                 fsType:
                   type: string
                   enum: [LVM2_member, ""]
@@ -61,27 +54,27 @@ spec:
                 pvUUID:
                   type: string
                   description: |
-                    The Physical Volume's unique number.
+                    The Physical Volume's UUID.
                     
-                    > Optional: exists if only the device is used as Physical Volume.
+                    > Optional: exists if only the device is used as a Physical Volume.
                 vgUUID:
                   type: string
                   description: | 
-                    The Volume Group's unique number.
+                    The Volume Group's UUID.
 
-                    > Optional: exists if only the device is used as Physical Volume and included in Volume Group.
+                    > Optional: exists if only the device is used as a Physical Volume and included in a Volume Group.
                 lvmVolumeGroupName:
                   type: string
                   description: | 
                     The LVMVolumeGroup resource's name. 
                     
-                    > Optional: exists if only the device is used as Physical Volume, and included in Volume Group and LVMVolumeGroup resource.
+                    > Optional: exists if only the device is used as a Physical Volume, and included in a Volume Group and LVMVolumeGroup resource.
                 actualVGNameOnTheNode:
                   type: string
                   description: |
                     The Volume Group's name the device is included in.
                     
-                    > Optional: exists if only the device is used as Physical Volume and included in Volume Group.
+                    > Optional: exists if only the device is used as a Physical Volume and included in a Volume Group.
                 wwn:
                   type: string
                   description: |
@@ -146,5 +139,3 @@ spec:
           type: string
           description: The LVMVolumeGroup resource the block device is in.
           priority: 1
-
-

@@ -24,17 +24,12 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            LVMVolumeGroup is a Kubernetes Custom Resource that defines a desired and a current state of a Volume Group.
-            The resource allows users to manipulate with different Volume Groups and watch them from a single place using
-            declarative programming.
+            LVMVolumeGroup is a Kubernetes Custom Resource that defines a desired state and displays a current one of a Volume Group and Thin Pool.
+            The resource allows users to manipulate with different Volume Groups and Thin pools.
             
             > This kind or resources might be created both by a user and the SDS-Node-Configurator controller. 
-            To create a resource by themselves, user should fill the resource's 'Spec' field with a desired Volume Group's configuration, 
-            so the controller will create the required Volume Group and fill the resource's 'Status' field with Volume Group's 
-            current state information. 
-            The SDS-Node-Configurator controller automatically creates a LVMVolumeGroup resource, if it finds an existing Volume Group
-            on the node with the special tag 'storage.deckhouse.io/enabled=true', so the controller will fill both the 'Spec'
-            and the 'Status' fields.
+            To create a resource by themselves, user should fill the resource's 'Spec' field with a desired Volume Group's configuration, so the controller will create the required Volume Group and fill the resource's 'Status' field with Volume Group's current state information. 
+            The SDS-Node-Configurator controller automatically creates a LVMVolumeGroup resource, if it finds an existing Volume Group on the node with the special tag 'storage.deckhouse.io/enabled=true', so the controller will fill both the 'Spec' and the 'Status' fields.
           required:
             - spec
           properties:
@@ -42,28 +37,21 @@ spec:
               type: object
               description: |
                 Defines a desired state of a Volume Group. Use these parameters to create or update a Volume Group. 
-                
-                > These params are not updated by the controller.
               properties:
                 type:
                   type: string
                   description: |
                     A Volume Group's type. Might be:
                     - Local (if Volume Group's devices are on the same node)
-                    - Shared (if Volume Group's devices are on the different nodes)
-                    
-                    > Note that the controller does not support 'Shared' type for now.
                   enum:
                     - Local
-                    - Shared
                 blockDeviceNames:
                   type: array
                   description: |
                     An array of block device resources names. Selected block devices will be used by the controller to create
                     a Volume Group.
                     
-                    > Note that you have selected block devices on the same node for a Local Volume Group and a single block device
-                    for a Shared one.
+                    > Note that you have selected block devices on the same node for a Local Volume Group.
                   items:
                     type: string
                 actualVGNameOnTheNode:
@@ -75,7 +63,7 @@ spec:
                 thinPools:
                   type: array
                   description: |
-                    A desired Thin-pools configuration of a Volume Group.
+                    A desired Thin-pools configuration.
                   items:
                     type: object
                     properties:
@@ -116,7 +104,7 @@ spec:
                 vgUUID:
                   type: string
                   description: |
-                    A Volume Group's unique number.
+                    A Volume Group's UUID.
                 vgSize:
                   type: string
                   description: |
@@ -175,15 +163,15 @@ spec:
                             pvSize:
                               type: string
                               description: |
-                                A device's Physical Volume's size.
+                                A Physical Volume's size.
                             devSize:
                               type: string
                               description: |
-                                A device's actual size.
+                                A block device's actual size on the node.
                             pvUUID:
                               type: string
                               description: |
-                                A Physical Volume's unique number.
+                                A Physical Volume's UUID.
                             blockDevice:
                               type: string
                               description: |
