@@ -1,0 +1,123 @@
+spec:
+  versions:
+    - name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: |
+            LVMVolumeGroup - это пользовательский ресурс Kubernetes, который отображает желаемое и текущее состояние Volume Group'ы.
+            Данный ресурс позволяет манипулировать разными Volume Group'ами и следить за ними из одного места, используя
+            декларативный язык программирования.
+            
+            > Этот тип ресурсов может быть создан как самим пользователем, так и SDS-Node-Configurator контроллером.
+            При ручном создании ресурса пользователь указывает в поле 'Spec' желаемую конфигурацию Volume Group'ы, по которой
+            контроллер создат необходимую Volume Group'у, автоматически заполнив поле 'Status' актуальной информацией о 
+            состоянии созданной Volume Group'ы.
+            Контроллер SDS-Node-Configurator автоматически создаст LVMVolumeGroup ресурс в случае, если найдет на ноде 
+            существующую Volume Group'у со специальным тэгом 'storage.deckhouse.io/enabled=true', при этом контроллер самостоятельно
+            заполнит как 'Spec', так и 'Status' поля.
+          properties:
+            spec:
+              description: |
+                Определяет желаемое состояние Volume Group'ы. Используйте эти параметры, чтобы создать или обновить Volume Group'у.
+                
+                > Эти параметры не обновляются контроллером.
+              properties:
+                type:
+                  description: |
+                    Тип Volume Group'ы. Может быть: 
+                    - Local (т.е локальным, в случае, если используемые девайсы располагаются на одной ноде)
+                    - Shared (если используемые девайсы располагаются на разных нодах)
+                    
+                    > Обратите внимание, что контроллер не поддерживает 'Shared' тип в данный момент.
+                blockDeviceNames:
+                  description: |
+                    Список имен используемых блок-девайс ресурсов. Выбранные блок-девайсы будут использованы контроллером
+                    для создания Volume Group'ы.
+
+                    > Обратите внимание, что выбранные блок-девайсы должны принадлежать одной ноде для 'Local' Volume Group-ы, и 
+                    разным - для 'Shared'.
+                actualVGNameOnTheNode:
+                  description: |
+                    Желаемое имя для Volume Group'ы. Должно быть уникальным в рамках ноды, на которой будет располагаться.
+                    
+                    > Неизменяемое поле.
+                thinPools:
+                  description: |
+                    Желаемая конфигурация для Thin-pool'ов текущей Volume Group'ы.
+                  items:
+                    properties:
+                      name:
+                        description: |
+                          Желаемое имя Thin-pool'а.
+                          
+                          > Неизменяемое поле.
+                      size:
+                        description: |
+                          Желаемый размер Thin-pool'а.
+            status:
+              description: |
+                Определяет текущее состояние Volume Group'ы. Эти параметры не следует менять пользователям.
+                
+                > Эти параметры обновляются контроллером.
+              properties:
+                health:
+                  description: |
+                    Глобальное состояние ресурса. Может быть:
+                    - Operational (если с Volume Group'ой все в порядке)
+                    - Nooperational (если на Volume Group'е наблюдаются какие-либо проблемы)
+                message:
+                  description: |
+                    Дополнительная информация о текущем состоянии Volume Group'ы.
+                vgUUID:
+                  description: |
+                    Уникальный номер Volume Group'ы.
+                vgSize:
+                  description: |
+                    Максимальный размер Volume Group'ы.
+                allocatedSize:
+                  description: |
+                    Текущий размер Volume Group'ы.
+                thinPools:
+                  description: |
+                    Текущее состояние Thin-pool'ов в Volume Group'е.
+                    
+                    > Поле может быть пустым, в случае отсутствия Thin-pool'ов в Volume Group'е.
+                  items:
+                    properties:
+                      name:
+                        description: |
+                          Имя Thin-pool'а.
+                      actualSize:
+                        description: |
+                          Общий текущий размер Thin-pool'а.
+                      usedSize:
+                        description: |
+                          Используемый размер Thin-pool'а.
+                nodes:
+                  description: |
+                    Информация об нодах, на которых расположена Volume Group'а.
+                  items:
+                    properties:
+                      name:
+                        description: |
+                          Имя ноды.
+                      devices:
+                        description: |
+                          Информация об используемых в Volume Group'е девайсах на текущей ноде.
+                        items:
+                          properties:
+                            path:
+                              description: |
+                                Путь (имя) девайса.
+                            pvSize:
+                              description: |
+                                Размер Physical Volume'а на девайсе.
+                            devSize:
+                              description: |
+                                Размер девайса.
+                            pvUUID:
+                              description: |
+                                Уникальный номер Physical Volume'а.
+                            blockDevice:
+                              description: |
+                                Имя связанного блок-девайс ресурса.

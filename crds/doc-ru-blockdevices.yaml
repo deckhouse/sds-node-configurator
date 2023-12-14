@@ -1,0 +1,84 @@
+spec:
+  versions:
+    - name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: |
+            BlockDevice - это пользовательский ресурс Kubernetes, который отображает в себе актуальную и полезную информацию о 
+            девайсах, которые могут быть использованы SDS-Node-Configurator контроллером для совершения таких 
+            операций как создание Volume Group'ы, расширение Physical Volume'а и других.
+            
+            > Данный тип ресурсов необходим для успешной и корректной работы контроллера. Процесс заполнения конфигурации ресурса
+            полностью автоматический и осуществляется самим контроллером.
+          properties:
+            status:
+              description: |
+                Определяет текущее состояние девайса.
+              properties:
+                type:
+                  description: |
+                    Тип девайса. Может быть:
+                    - part (партиция)
+                    - raid
+                    - disk
+                fsType:
+                  description: |
+                    Тип файловой системы девайса. Контроллер поддерживает пустые (т.е. без файловой системы) или LVM2_member значения.
+                nodeName:
+                  description: |                    
+                    Имя ноды, на которой находится девайс.
+                consumable:
+                  description: |                    
+                    Специальный флаг, определяющий может ли данный девайс быть использован контроллером.
+                pvUUID:
+                  description: |                    
+                    Уникальный номер Physical Volume'а.
+                                        
+                    > Опциально: присутствует, только если девайс используется как Physical Volume.
+                vgUUID:
+                  description: |
+                    Уникальный номер Volume Group'ы.
+
+                    > Опциально: присутствует, только если девайс используется как Physical Volume и включен в Volume Group'у.
+                lvmVolumeGroupName:
+                  description: |
+                    Имя LVMVolumeGroup ресурса.
+                    
+                    > Опциально: присутствует, только если девайс используется как Physical Volume и включен в Volume Group'у и LVMVolumeGroup-ресурс.
+                actualVGNameOnTheNode:
+                  description: |
+                    Имя Volume Group-ы, в которую включен девайс.
+                    
+                    > Опциально: присутствует, только если девайс используется как Physical Volume и включен в Volume Group'у.
+                wwn:
+                  description: |
+                    Уникальный WWN (World Wide Name) идентификатор девайса.
+                    
+                    > Опционально: может отсутствовать, если WWN не было задано.
+                serial:
+                  description: |
+                    Уникальный серийный номер девайса.
+                path:
+                  description: |
+                    Путь (имя) девайса.
+                size:
+                  description: |
+                    Размер девайса.
+                model:
+                  description: |
+                    Модель девайса. 
+                    
+                    > Опционально: может отсутствовать, если модель не была задана.
+                rota:
+                  description: |
+                    Медиа-тип девайса. Может быть:
+                    - True (для HHD)
+                    - False (для SSD)
+                hotPlug:
+                  description: |
+                    Тип подключения девайса. Может быть:
+                    - True (если девайс был подключен как съемный)
+                    - False (в иных случаях)
+                machineId:
+                  description: |
+                    Уникальный идентификатор машины, на которой располагается девайс.

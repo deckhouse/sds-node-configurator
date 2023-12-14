@@ -23,62 +23,101 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: "empty block devices"
+          description: |
+            BlockDevice is a Kubernetes Custom Resource that contains actual and useful information about associated devices
+            which might be used by a SDS-Node-Configurator controller to perform operations such as Volume Group creations,
+            Physical Volume extensions and so on.
+            
+            > This kind of resources is necessary for successful and correct the controller's work-flow. The filling of 
+            resource's configuration process is fully automatic and it is done by the controller itself.
           properties:
             status:
               type: object
+              description: |
+                Defines current state of the device.
               required: [size,type,consumable,path,rota,hotPlug,nodeName,machineId]
               properties:
                 type:
                   type: string
                   enum: [part,raid,disk]
-                  description: "Block device type"
+                  description: |
+                    The device's type. Might be: 
+                    - part (partition)
+                    - raid
+                    - disk
                 fsType:
                   type: string
                   enum: [LVM2_member, ""]
-                  description: "File system type"
+                  description: |
+                    The device's file system type. The controller supports empty (without any fs) or LVM2_member values.
                 nodeName:
                   type: string
-                  description: "Node's name"
+                  description: |
+                    A node's name the device is on.
                 consumable:
                   type: boolean
-                  description: "If true, the resource will be deleted after device has gone from the node"
+                  description: |
+                    Special flag that defines if the device might be used by the controller.
                 pvUUID:
                   type: string
-                  description: "Persistent Volume UUID. Optional: exists if only the resource is PV"
+                  description: |
+                    The Physical Volume's unique number.
+                    
+                    > Optional: exists if only the device is used as Physical Volume.
                 vgUUID:
                   type: string
-                  description: "VolumeGroup UUID. Optional: exists if only the resource is PV and in VG"
+                  description: | 
+                    The Volume Group's unique number.
+
+                    > Optional: exists if only the device is used as Physical Volume and included in Volume Group.
                 lvmVolumeGroupName:
                   type: string
-                  description: "LVMVolumeGroup name"
+                  description: | 
+                    The LVMVolumeGroup resource's name. 
+                    
+                    > Optional: exists if only the device is used as Physical Volume, and included in Volume Group and LVMVolumeGroup resource.
                 actualVGNameOnTheNode:
                   type: string
-                  description: "VolumeGroup name"
+                  description: |
+                    The Volume Group's name the device is included in.
+                    
+                    > Optional: exists if only the device is used as Physical Volume and included in Volume Group.
                 wwn:
                   type: string
-                  description: "WWN"
+                  description: |
+                    The device's unique wwn (World Wide Name) identifier.
+                    
+                    > Optional: might be empty if no WWN was set.
                 serial:
                   type: string
-                  description: "Serial number"
+                  description: |
+                    The device's serial unique number.
                 path:
                   type: string
-                  description: "Storage path"
+                  description: |
+                    The device's path (name).
                 size:
                   type: string
-                  description: "Storage size"
+                  description: |
+                    The device's size.
                 model:
                   type: string
-                  description: "Storage model"
+                  description: |
+                    The device's model.
+                    
+                    > Optional: might be empty if no model was set.
                 rota:
                   type: boolean
-                  description: "Rota"
+                  description: |
+                    The device's media type. Might be 'True' for HHD and 'False' for SSD.
                 hotPlug:
                   type: boolean
-                  description: "HotPlug"
+                  description: |
+                    The device's connection type. Might be 'True' if the device had been hotPlugged, otherwise - 'False'.
                 machineId:
                   type: string
-                  description: "MachineID"
+                  description: |
+                    The machine's unique identifier the device is on.
       additionalPrinterColumns:
         - jsonPath: .status.nodeName
           name: Node
