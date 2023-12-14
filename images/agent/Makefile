@@ -8,6 +8,7 @@ DAEMONSET_NAME=sds-node-configurator
 NAMESPACE=d8-sds-node-configurator
 SYSTEM_NAMESPACE=d8-system
 PULL_SECRET_NAME=fox-registry
+CONTAINER_NAME=sds-node-configurator-agent
 
 run: ## run go
 	go run -race ./cmd/bc/main.go
@@ -41,7 +42,7 @@ remove: ## remove docker image
 switch_to_local_dev:
 	kubectl -n $(SYSTEM_NAMESPACE) scale deployment deckhouse --replicas=0
 	kubectl -n $(NAMESPACE) patch daemonset $(DAEMONSET_NAME) -p \
-		'{"spec": {"template": {"spec": {"containers": [{"name": "ubuntu-container", "image": "$(REGISTRY):$(USER)"}]}}}}'
+		'{"spec": {"template": {"spec": {"containers": [{"name": "$(CONTAINER_NAME)", "image": "$(REGISTRY):$(USER)"}]}}}}'
 	kubectl  -n $(NAMESPACE) patch daemonset $(DAEMONSET_NAME) --type='json' \
 		-p='[{"op": "add", "path": "/spec/template/spec/imagePullSecrets", "value": [{"name": "$(PULL_SECRET_NAME)"}]}]'
 .PHONY: switch_to_local_dev

@@ -230,6 +230,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 	// Наполняем кандидатов информацией.
 	var candidates []internal.BlockDeviceCandidate
 	for _, device := range filteredDevices {
+		log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Process device: %v", device))
 		candidate := internal.BlockDeviceCandidate{
 			NodeName:   cfg.NodeName,
 			Consumable: CheckConsumable(device),
@@ -248,10 +249,11 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 			PartUUID:   device.PartUUID,
 		}
 
+		log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Get following candidate: %v", candidate))
 		if len(candidate.Serial) == 0 {
 			if candidate.Type == internal.TypePart {
 				if len(candidate.PartUUID) == 0 {
-					log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] candidate.Type = part and PartUUID == 0"))
+					log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] Type = part and cannot get PartUUID; skipping this device, path: %s", candidate.Path))
 					continue
 				}
 			} else {
@@ -260,7 +262,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 					log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] readSerialBlockDevice, err: %s", err.Error()))
 
 					if len(candidate.Wwn) == 0 {
-						log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] cant get wwn and serial, skip this device, path: %s", candidate.Path))
+						log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] Cannot get WWN and serial number; skipping this device, path: %s", candidate.Path))
 						continue
 					}
 				}

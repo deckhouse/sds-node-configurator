@@ -37,29 +37,40 @@ spec:
               fieldRef:
                 fieldPath: spec.nodeName
         volumeMounts:
-        - name: host-device-dir
-          mountPath: /dev/
-        - name: modules-dir
-          mountPath: /lib/modules
-        - name: host-sys-dir
-          mountPath: /sys/
-        - name: host-root
-          mountPath: /host-root/
-          mountPropagation: HostToContainer
+        - mountPath: /dev/
+          name: host-device-dir
+          readOnly: true
+        - mountPath: /lib/modules
+          name: host-modules-dir
+          readOnly: true
+        - mountPath: /sys/
+          name: host-sys-dir
+          readOnly: true
+        - mountPath: /run/udev/
+          name: host-run-udev-dir
+          readOnly: true
+        - mountPath: /host-root/etc/machine-id
+          readOnly: true
+          name: host-machine-id
       volumes:
-      - name: host-device-dir
-        hostPath:
+      - hostPath:
           path: /dev
           type: ""
-      - name: host-sys-dir
-        hostPath:
+        name: host-device-dir
+      - hostPath:
           path: /sys/
           type: Directory
-      - name: host-root
-        hostPath:
-          path: /
-      - name: modules-dir
-        hostPath:
+        name: host-sys-dir
+      - hostPath:
+          path: /run/udev/
+          type: Directory
+        name: host-run-udev-dir
+      - hostPath:
+          path: /etc/machine-id
+          type: File
+        name: host-machine-id
+      - hostPath:
           path: /lib/modules/
           type: DirectoryOrCreate
+        name: host-modules-dir
 

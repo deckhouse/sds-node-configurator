@@ -31,7 +31,7 @@ ansible:
       CGO_ENABLED: "0"
 ---
 image: images/{{ .ImageName }}
-from: alpine:3.16.3
+from: ubuntu:jammy-20231128
 docker:
   ENTRYPOINT: ["/sds-node-configurator-agent"]
 import:
@@ -42,10 +42,8 @@ import:
 ansible:
   install:
   - name: "Install packages"
-    apk:
+    apt:
       name:
-      - lsblk
       - lvm2
-      - bash
       - curl
       update_cache: yes
