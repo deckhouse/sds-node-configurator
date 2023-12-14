@@ -1,3 +1,19 @@
+/*
+Copyright 2023 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package controller
 
 import (
@@ -32,7 +48,6 @@ const (
 )
 
 func RunWatcherLVMVGController(
-	ctx context.Context,
 	mgr manager.Manager,
 	cfg config.Options,
 	log logger.Logger,
@@ -312,38 +327,6 @@ func ReconcileLVMVG(
 			}
 		}
 
-		//ToDo shrinkPVs > 0  _test_case_4  ???
-		//if len(shrinkPVs) != 0 {
-		//	log.Info("create event " + EventActionShrinking)
-		//	err = CreateEventLVMVolumeGroup(ctx, cl, EventReasonShrinking, EventActionShrinking, nodeName, group)
-		//	if err != nil {
-		//		log.Error(err, " error CreateEventLVMVolumeGroup")
-		//	}
-		//
-		//	group.Status.Health = NoOperational
-		//	err = updateLVMVolumeGroup(ctx, cl, group)
-		//	if err != nil {
-		//		log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group.Name))
-		//		return
-		//	}
-		//
-		//	// Deleting PV from VG
-		//	for _, pvPath := range shrinkPVs {
-		//		command, err := utils.RemovePVFromVG(pvPath, group.Spec.ActualVGNameOnTheNode)
-		//		log.Debug(command)
-		//		if err != nil {
-		//			log.Error(err, "RemovePVFromVG")
-		//		}
-		//	}
-		//
-		//	group.Status.Health = Operational
-		//	err = updateLVMVolumeGroup(ctx, cl, group)
-		//	if err != nil {
-		//		log.Error(err, fmt.Sprintf("error update LVMVolumeGroup %s", group.Name))
-		//		return
-		//	}
-		//}
-
 		// Check Resize
 		for _, n := range group.Status.Nodes {
 			for _, d := range n.Devices {
@@ -408,26 +391,9 @@ func ReconcileLVMVG(
 				statusThinPoolMap[statusThinPool.Name] = statusThinPool.ActualSize
 			}
 
-			// VG allocatedSize
-			//allocatedSizeGb, err := utils.QuantityToBytes(group.Status.AllocatedSize)
-			//if err != nil {
-			//	log.Error(err, "parse spec AllocatedSize")
-			//}
-
 			for _, pool := range group.Spec.ThinPools {
 				log.Debug(fmt.Sprintf("[ReconcileLVMVG] Start reconcile thin pool: %s", pool.Name))
 				log.Debug(fmt.Sprintf("[ReconcileLVMVG] thin pool size: %d", pool.Size.Value()))
-				//specPoolSize, err := utils.QuantityToBytes(pool.Size)
-				//if err != nil {
-				//	log.Error(err, "parse spec size thin pool")
-				//	return
-				//}
-
-				//statusPoolActualSize, err := utils.QuantityToBytes(statusThinPoolMap[pool.Name])
-				//if err != nil {
-				//	log.Error(err, "parse status size actual thin pool")
-				//	return
-				//}
 
 				statusPoolActualSize, ok := statusThinPoolMap[pool.Name]
 
