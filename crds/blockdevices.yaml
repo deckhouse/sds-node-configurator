@@ -24,9 +24,9 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            BlockDevice is a Kubernetes Custom Resource that contains actual and useful information about associated block devices  which might be used by a SDS-Node-Configurator controller to perform operations such as Volume Group creation, Physical Volume extensions and so on.
+            BlockDevice is a Kubernetes Custom Resource that displays actual information about block devices, which might be used by the sds-node-configurator controller for Volume Groups creation, Physical Volumes extenstion and so on.
             
-            > This kind of resources is necessary for successful and correct the controller's work-flow. The filling of resource's configuration process is fully automatic and it is done by the controller itself.
+            > The resource is created and managed only by the controller.
           properties:
             status:
               type: object
@@ -42,37 +42,37 @@ spec:
                   type: string
                   enum: [LVM2_member, ""]
                   description: |
-                    The device's file system type. The controller supports empty (without any fs) or LVM2_member values.
+                    The device's file system type.
                 nodeName:
                   type: string
                   description: |
-                    A node's name the device is on.
+                    A kubernetes node's name the device is on.
                 consumable:
                   type: boolean
                   description: |
-                    Special flag that defines if the device might be used by the controller.
+                    A flag that determines whether this device can be used by the controller.
                 pvUUID:
                   type: string
                   description: |
                     The Physical Volume's UUID.
                     
-                    > Optional: exists if only the device is used as a Physical Volume.
+                    > Optional: exists only if the device is used as a Physical Volume.
                 vgUUID:
                   type: string
                   description: | 
                     The Volume Group's UUID.
 
-                    > Optional: exists if only the device is used as a Physical Volume and included in a Volume Group.
+                    > Optional: exists only if the device is used as a Physical Volume and included in a Volume Group.
                 lvmVolumeGroupName:
                   type: string
                   description: | 
                     The LVMVolumeGroup resource's name. 
                     
-                    > Optional: exists if only the device is used as a Physical Volume, and included in a Volume Group and LVMVolumeGroup resource.
+                    > Optional: exists only if the device is used as a Physical Volume, and included in a Volume Group and LVMVolumeGroup resource.
                 actualVGNameOnTheNode:
                   type: string
                   description: |
-                    The Volume Group's name the device is included in.
+                    The actual Volume Group's name the device is included in.
                     
                     > Optional: exists if only the device is used as a Physical Volume and included in a Volume Group.
                 wwn:
@@ -84,7 +84,7 @@ spec:
                 serial:
                   type: string
                   description: |
-                    The device's serial unique number.
+                    The device's unique serial number.
                 path:
                   type: string
                   description: |
@@ -102,15 +102,19 @@ spec:
                 rota:
                   type: boolean
                   description: |
-                    The device's media type. Might be 'True' for HHD and 'False' for SSD.
+                    The device's media type. Might be:
+                    - 'True' (for HHD)
+                    - 'False' (for SSD)
                 hotPlug:
                   type: boolean
                   description: |
-                    The device's connection type. Might be 'True' if the device had been hotPlugged, otherwise - 'False'.
+                    The device's connection type. Might be:
+                    - 'True' (if the device had been hotPlugged)
+                    - 'False' (otherwise)
                 machineId:
                   type: string
                   description: |
-                    The machine's unique identifier the device is on.
+                    The machine's unique identifier the device is on (normally, placed at /etc/machine-id)
       additionalPrinterColumns:
         - jsonPath: .status.nodeName
           name: Node

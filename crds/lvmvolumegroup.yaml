@@ -24,32 +24,27 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            LVMVolumeGroup is a Kubernetes Custom Resource that defines a desired state and displays a current one of a Volume Group and Thin Pool.
-            The resource allows users to manipulate with different Volume Groups and Thin pools.
+            LVMVolumeGroup is a Kubernetes Custom Resource for managing the Volum Groups and Thin pools on the nodes.
             
             > This kind or resources might be created both by a user and the SDS-Node-Configurator controller. 
-            To create a resource by themselves, user should fill the resource's 'Spec' field with a desired Volume Group's configuration, so the controller will create the required Volume Group and fill the resource's 'Status' field with Volume Group's current state information. 
             The SDS-Node-Configurator controller automatically creates a LVMVolumeGroup resource, if it finds an existing Volume Group on the node with the special tag 'storage.deckhouse.io/enabled=true', so the controller will fill both the 'Spec' and the 'Status' fields.
           required:
             - spec
           properties:
             spec:
               type: object
-              description: |
-                Defines a desired state of a Volume Group. Use these parameters to create or update a Volume Group. 
               properties:
                 type:
                   type: string
                   description: |
                     A Volume Group's type. Might be:
-                    - Local (if Volume Group's devices are on the same node)
+                    - Local (if Volume Group's devices are not shared)
                   enum:
                     - Local
                 blockDeviceNames:
                   type: array
                   description: |
-                    An array of block device resources names. Selected block devices will be used by the controller to create
-                    a Volume Group.
+                    An array of block device resources names for Volume Group creation.
                     
                     > Note that you have selected block devices on the same node for a Local Volume Group.
                   items:
@@ -84,7 +79,7 @@ spec:
             status:
               type: object
               description: |
-                Defines a current state of a Volume Group. These parameters should not be changed by a user.
+                Defines a current state of a Volume Group.
                 
                 > These params are updated by the controller.
               properties:
@@ -93,10 +88,10 @@ spec:
                   description: |
                     A Volume Group's global state. Might be:
                     - Operational (if everything is fine)
-                    - Nooperational (if there are some problems in the volume group)
+                    - NonOperational (if there are some problems in the volume group)
                   enum:
-                    - Operational
-                    - Nonoperational
+                    - Operational (if everything is fine with the Volume Group)
+                    - NonOperational (if there are some problems with the Volume Group)
                 message:
                   type: string
                   description: |
@@ -141,7 +136,7 @@ spec:
                 nodes:
                   type: array
                   description: |
-                   Information about nodes a Volume Group is on.
+                   Information about nodes the Volume Group is on.
                   items:
                     type: object
                     properties:
@@ -159,7 +154,7 @@ spec:
                             path:
                               type: string
                               description: |
-                                A device's path (name).
+                                A device's path (name) on the node.
                             pvSize:
                               type: string
                               description: |
@@ -167,7 +162,7 @@ spec:
                             devSize:
                               type: string
                               description: |
-                                A block device's actual size on the node.
+                                A block device's size.
                             pvUUID:
                               type: string
                               description: |
@@ -175,7 +170,7 @@ spec:
                             blockDevice:
                               type: string
                               description: |
-                                An associated block device resource's name.
+                                An corresponding block device resource's name.
       additionalPrinterColumns:
         - jsonPath: .status.health
           name: health
