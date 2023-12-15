@@ -4,31 +4,25 @@ spec:
       schema:
         openAPIV3Schema:
           description: |
-            LVMVolumeGroup - это пользовательский ресурс Kubernetes, который отображает желаемое и текущее состояние Volume Group'ы и Thin pool'а.
-            Данный ресурс позволяет манипулировать разными Volume Group'ами и Thin pool'ами.
+            LVMVolumeGroup — это ресурс для управления Volume Group'ами и Thin pool'ами на узлах.
             
-            > Этот тип ресурсов может быть создан как самим пользователем, так и SDS-Node-Configurator контроллером.
-            При ручном создании ресурса пользователь указывает в поле 'Spec' желаемую конфигурацию Volume Group'ы, по которой контроллер создат необходимую Volume Group'у, автоматически заполнив поле 'Status' актуальной информацией о состоянии созданной Volume Group'ы.
-            Контроллер SDS-Node-Configurator автоматически создаст LVMVolumeGroup ресурс в случае, если найдет на ноде существующую Volume Group'у со специальным тэгом 'storage.deckhouse.io/enabled=true', при этом контроллер самостоятельно заполнит как 'Spec', так и 'Status' поля.
+            > Этот тип ресурсов может быть создан как самим пользователем, так и контроллером SDS-Node-Configurator.
+            Контроллер sds-node-configurator автоматически создаст ресурс LVMVolumeGroup в случае, если найдет на ноде существующую Volume Group'у со специальным тэгом 'storage.deckhouse.io/enabled=true', при этом контроллер самостоятельно заполнит как `spec`, так и `status` поля.
           properties:
             spec:
-              description: |
-                Определяет желаемое состояние Volume Group'ы. Используйте эти параметры, чтобы создать или обновить Volume Group'у.
-                
-                > Эти параметры не обновляются контроллером.
               properties:
                 type:
                   description: |
                     Тип Volume Group'ы. Может быть: 
-                    - Local (т.е локальным, в случае, если используемые девайсы располагаются на одной ноде)
+                    - Local (т.е локальным, в случае, если используемые девайсы не являются распределёнными)
                 blockDeviceNames:
                   description: |
-                    Список имен используемых блок-девайс ресурсов. Выбранные блок-девайсы будут использованы контроллером для создания Volume Group'ы.
+                    Список имён ресурсов BlockDevice для создания Volume Group'ы.
 
-                    > Обратите внимание, что выбранные блок-девайсы должны принадлежать одной ноде для 'Local' Volume Group-ы.
+                    > Обратите внимание, что выбранные блок-девайсы должны принадлежать одному узлу для Volume Group-ы с типом 'Local'.
                 actualVGNameOnTheNode:
                   description: |
-                    Желаемое имя для Volume Group'ы. Должно быть уникальным в рамках ноды, на которой будет располагаться.
+                    Желаемое имя для Volume Group'ы. Должно быть уникальным в рамках узла, на котором будет располагаться.
                     
                     > Неизменяемое поле.
                 thinPools:
@@ -46,21 +40,21 @@ spec:
                           Желаемый размер Thin-pool'а.
             status:
               description: |
-                Определяет текущее состояние Volume Group'ы. Эти параметры не следует менять пользователям.
+                Отображает текущее состояние Volume Group'ы.
                 
                 > Эти параметры обновляются контроллером.
               properties:
                 health:
                   description: |
-                    Глобальное состояние ресурса. Может быть:
+                    Состояние Volume Group'ы. Может быть:
                     - Operational (если с Volume Group'ой все в порядке)
-                    - Nooperational (если на Volume Group'е наблюдаются какие-либо проблемы)
+                    - NonOperational (если на Volume Group'е наблюдаются какие-либо проблемы)
                 message:
                   description: |
                     Дополнительная информация о текущем состоянии Volume Group'ы.
                 vgUUID:
                   description: |
-                    Уникальный номер Volume Group'ы.
+                    Уникальный идентификатор Volume Group'ы.
                 vgSize:
                   description: |
                     Максимальный размер Volume Group'ы.
@@ -85,29 +79,29 @@ spec:
                           Используемый размер Thin-pool'а.
                 nodes:
                   description: |
-                    Информация об нодах, на которых расположена Volume Group'а.
+                    Информация об узлах, на которых расположена Volume Group'а.
                   items:
                     properties:
                       name:
                         description: |
-                          Имя ноды.
+                          Имя ресурса Node.
                       devices:
                         description: |
-                          Информация об используемых в Volume Group'е девайсах на текущей ноде.
+                          Информация об используемых в Volume Group'е девайсах на текущем узле.
                         items:
                           properties:
                             path:
                               description: |
-                                Путь (имя) девайса.
+                                Путь (имя) девайса на узле.
                             pvSize:
                               description: |
-                                Размер Physical Volume'а на девайсе.
+                                Размер Physical Volume'а.
                             devSize:
                               description: |
                                 Размер девайса.
                             pvUUID:
                               description: |
-                                Уникальный номер Physical Volume'а.
+                                Уникальный идентификатор Physical Volume'а.
                             blockDevice:
                               description: |
-                                Имя связанного блок-девайс ресурса.
+                                Имя связанного ресурса BlockDevice.
