@@ -1,4 +1,27 @@
 SHELL := /bin/bash
+MDLINTER_IMAGE = ghcr.io/igorshubovych/markdownlint-cli@sha256:2e22b4979347f70e0768e3fef1a459578b75d7966e4b1a6500712b05c5139476
+
+.PHONY: --lint-markdown-header lint-markdown lint-markdown-fix
+--lint-markdown-header:
+	@docker pull -q ${MDLINTER_IMAGE}
+	@echo "\n######################################################################################################################"
+	@echo '###'
+	@echo "###                   Markdown linter report (powered by https://github.com/DavidAnson/markdownlint/)\n"
+
+lint-markdown: --lint-markdown-header ## Run markdown linter.
+	@bash -c \
+   "if docker run --rm -v ${PWD}:/workdir ${MDLINTER_IMAGE} --config testing/markdownlint.yaml -p testing/.markdownlintignore '**/*.md' ; then \
+	    echo; echo 'All checks passed.'; \
+	  else \
+	    echo; \
+	    echo 'To run linter locally and fix common problems run: make lint-markdown-fix'; \
+	    echo; \
+	    exit 1; \
+	  fi"
+
+lint-markdown-fix: ## Run markdown linter and fix problems automatically.
+	@docker run --rm -v ${PWD}:/workdir ${MDLINTER_IMAGE} \
+		--config testing/markdownlint.yaml -p testing/.markdownlintignore "**/*.md" --fix && (echo 'Fixed successfully.')
 
 .PHONY: update-dev
 update-dev: check-yq
