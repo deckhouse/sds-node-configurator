@@ -24,14 +24,14 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            BlockDevice is a Kubernetes Custom Resource that displays actual information about block devices, which might be used by the sds-node-configurator controller for Volume Groups creation, Physical Volumes extenstion and so on.
+            BlockDevice is a Kubernetes Custom Resource that displays actual information about block devices, which might be used by the sds-node-configurator controller to create Volume Groups, extend Physical Volumes, and so on.
             
-            > The resource is created and managed only by the controller.
+            > The resource is created and managed by the controller only.
           properties:
             status:
               type: object
               description: |
-                Defines current state of the device.
+                Defines the current device state.
               required: [size,type,consumable,path,rota,hotPlug,nodeName,machineId]
               properties:
                 type:
@@ -46,88 +46,88 @@ spec:
                 nodeName:
                   type: string
                   description: |
-                    A kubernetes node's name the device is on.
+                    The name of the kubernetes node the device is on.
                 consumable:
                   type: boolean
                   description: |
-                    A flag that determines whether this device can be used by the controller.
+                    The flag that defines whether this device can be used by the controller.
                 pvUUID:
                   type: string
                   description: |
-                    The Physical Volume's UUID.
+                    The Physical Volume UUID.
                     
                     > Optional: exists only if the device is used as a Physical Volume.
                 vgUUID:
                   type: string
                   description: | 
-                    The Volume Group's UUID.
+                    The Volume Group UUID.
 
-                    > Optional: exists only if the device is used as a Physical Volume and included in a Volume Group.
+                    > Optional: exists only if the device is used as a Physical Volume and is included in a Volume Group.
                 lvmVolumeGroupName:
                   type: string
                   description: | 
-                    The LVMVolumeGroup resource's name. 
+                    The LVMVolumeGroup resource name. 
                     
-                    > Optional: exists only if the device is used as a Physical Volume, and included in a Volume Group and LVMVolumeGroup resource.
+                    > Optional: exists only if the device is used as a Physical Volume and is included in a Volume Group and LVMVolumeGroup resource.
                 actualVGNameOnTheNode:
                   type: string
                   description: |
-                    The actual Volume Group's name the device is included in.
+                    The actual name of the Volume Group the device is included in.
                     
-                    > Optional: exists if only the device is used as a Physical Volume and included in a Volume Group.
+                    > Optional: exists if only the device is used as a Physical Volume and is included in a Volume Group.
                 wwn:
                   type: string
                   description: |
-                    The device's unique wwn (World Wide Name) identifier.
+                    The device unique wwn (World Wide Name) identifier.
                     
                     > Optional: might be empty if no WWN was set.
                 serial:
                   type: string
                   description: |
-                    The device's unique serial number.
+                    The device unique serial number.
                 path:
                   type: string
                   description: |
-                    The device's path (name).
+                    The device path (name).
                 size:
                   type: string
                   description: |
-                    The device's size.
+                    The device size.
                 model:
                   type: string
                   description: |
-                    The device's model.
+                    The device model.
                     
                     > Optional: might be empty if no model was set.
                 rota:
                   type: boolean
                   description: |
-                    The device's media type. Might be:
+                    The device media type. Might be:
                     - 'True' (for HHD)
                     - 'False' (for SSD)
                 hotPlug:
                   type: boolean
                   description: |
-                    The device's connection type. Might be:
-                    - 'True' (if the device had been hotPlugged)
+                    The device connection type. Might be:
+                    - 'True' (if the device has been hotPlugged)
                     - 'False' (otherwise)
                 machineId:
                   type: string
                   description: |
-                    The machine's unique identifier the device is on (normally, placed at /etc/machine-id)
+                    The unique identifier of the machine the device is on (normally at /etc/machine-id)
       additionalPrinterColumns:
         - jsonPath: .status.nodeName
           name: Node
           type: string
-          description: The node thе block device is on.
+          description: The node the block device is on.
         - jsonPath: .status.consumable
           name: Consumable
           type: boolean
-          description: If current block device might be used by sds-node-configurator.
+          description: Defines whether the current block device can be used by sds-node-configurator.
         - jsonPath: .status.size
           name: Size
           type: string
-          description: Size of included device.
+          description: Size of the included device.
         - jsonPath: .status.path
           name: Path
           type: string

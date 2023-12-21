@@ -24,10 +24,10 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            LVMVolumeGroup is a Kubernetes Custom Resource for managing the Volum Groups and Thin pools on the nodes.
+            LVMVolumeGroup is a Kubernetes Custom Resource for managing the Volume Groups and Thin pools on the nodes.
             
-            > This kind or resources might be created both by a user and the SDS-Node-Configurator controller. 
-            The SDS-Node-Configurator controller automatically creates a LVMVolumeGroup resource, if it finds an existing Volume Group on the node with the special tag 'storage.deckhouse.io/enabled=true', so the controller will fill both the 'Spec' and the 'Status' fields.
+            > These resources might be created both by a user and the SDS-Node-Configurator controller. 
+            The SDS-Node-Configurator controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. The controller will fill both the 'Spec' and 'Status' fields.
           required:
             - spec
           properties:
@@ -37,16 +37,16 @@ spec:
                 type:
                   type: string
                   description: |
-                    A Volume Group's type. Might be:
-                    - Local (if Volume Group's devices are not shared)
+                    The type of a Volume Group. Might be:
+                    - Local (if Volume Group devices are not shared)
                   enum:
                     - Local
                 blockDeviceNames:
                   type: array
                   description: |
-                    An array of block device resources names for Volume Group creation.
+                    An array of block device resource names to create a Volume Group.
                     
-                    > Note that you have selected block devices on the same node for a Local Volume Group.
+                    > Note that the selected block devices must belong to the same node for a Local Volume Group.
                   items:
                     type: string
                 actualVGNameOnTheNode:
@@ -54,39 +54,39 @@ spec:
                   description: |
                     The desired name of a Volume Group. Must be unique for the node it is on.
                     
-                    > Immutable field.
+                    > This field is immutable.
                 thinPools:
                   type: array
                   description: |
-                    A desired Thin-pools configuration.
+                    The desired Thin-pool configuration.
                   items:
                     type: object
                     properties:
                       name:
                         type: string
                         description: |
-                          A desired Thin-pool's name.
+                          The desired Thin-pool name.
                           
-                          > Immutable field.
+                          > This field is immutable.
                       size:
                         type: string
                         pattern: '^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$'
                         description: |
-                          A desired Thin-pool's size.
+                          The desired Thin-pool size.
                     required:
                       - name
                       - size
             status:
               type: object
               description: |
-                Defines a current state of a Volume Group.
+                Defines the current state of the Volume Group.
                 
                 > These params are updated by the controller.
               properties:
                 health:
                   type: string
                   description: |
-                    A Volume Group's global state. Might be:
+                    The global state of the Volume Group. Might be:
                     - Operational (if everything is fine)
                     - NonOperational (if there are some problems in the volume group)
                   enum:
@@ -95,23 +95,23 @@ spec:
                 message:
                   type: string
                   description: |
-                    Additional information about a Volume Group's current state.
+                    Additional information about the Volume Group current state.
                 vgUUID:
                   type: string
                   description: |
-                    A Volume Group's UUID.
+                    The Volume Group UUID.
                 vgSize:
                   type: string
                   description: |
-                    A total Volume Group's size.
+                    The total Volume Group size.
                 allocatedSize:
                   type: string
                   description: |
-                    An actual Volume Group's size.
+                    The actual Volume Group size.
                 thinPools:
                   type: array
                   description: |
-                    A Volume Group's Thin-pool's current state.
+                    The current state of the Volume Group's Thin-pool.
                     
                     > Might be empty if there is no any Thin-pool in the Volume Group.
                   items:
@@ -124,26 +124,26 @@ spec:
                       name:
                         type: string
                         description: |
-                          A Thin-pool's name.
+                          The Thin-pool name.
                       actualSize:
                         type: string
                         description: |
-                          A Thin-pool's current total size.
+                          The Thin-pool current total size.
                       usedSize:
                         type: string
                         description: |
-                          A Thin-pool's used size.
+                          The Thin-pool used size.
                 nodes:
                   type: array
                   description: |
-                   Information about nodes the Volume Group is on.
+                   Information about the nodes the Volume Group is on.
                   items:
                     type: object
                     properties:
                       name:
                         type: string
                         description: |
-                          A node's name.
+                          The node name.
                       devices:
                         type: array
                         description: |
@@ -154,23 +154,23 @@ spec:
                             path:
                               type: string
                               description: |
-                                A device's path (name) on the node.
+                                The device path (name) on the node.
                             pvSize:
                               type: string
                               description: |
-                                A Physical Volume's size.
+                                The Physical Volume size.
                             devSize:
                               type: string
                               description: |
-                                A block device's size.
+                                The block device size.
                             pvUUID:
                               type: string
                               description: |
-                                A Physical Volume's UUID.
+                                The Physical Volume UUID.
                             blockDevice:
                               type: string
                               description: |
-                                An corresponding block device resource's name.
+                                The name of the corresponding block device resource.
       additionalPrinterColumns:
         - jsonPath: .status.health
           name: health
