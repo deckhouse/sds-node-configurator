@@ -243,7 +243,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 
 	var candidates []internal.BlockDeviceCandidate
 	for _, device := range filteredDevices {
-		log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Process device: %v", device))
+		log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Process device: %+v", device))
 		candidate := internal.BlockDeviceCandidate{
 			NodeName:   cfg.NodeName,
 			Consumable: CheckConsumable(device),
@@ -262,8 +262,9 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 			PartUUID:   device.PartUUID,
 		}
 
-		log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Get following candidate: %v", candidate))
+		log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Get following candidate: %+v", candidate))
 		if len(candidate.Serial) == 0 {
+			log.Info(fmt.Sprintf("[GetBlockDeviceCandidates] Serial is empty, trying to get it from device: %s", candidate.Path))
 			if candidate.Type == internal.TypePart {
 				if len(candidate.PartUUID) == 0 {
 					log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] Type = part and cannot get PartUUID; skipping this device, path: %s", candidate.Path))
@@ -283,9 +284,12 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 			}
 		}
 		candidate.Name = CreateUniqDeviceName(candidate)
+		log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Generated a unique candidate name: %s", candidate.Name))
 
+		delFlag = false
 		for _, pv := range pvs {
 			if pv.PVName == device.Name {
+				log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] The device is a PV. Found PV name: %s", pv.PVName))
 				if candidate.FSType == internal.LVMFSType {
 					hasTag, lvmVGName := CheckTag(pv.VGTags)
 					if hasTag {
@@ -295,6 +299,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 						candidate.LvmVolumeGroupName = lvmVGName
 					} else {
 						if len(pv.VGName) != 0 {
+							log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] The device is a PV with VG named %s that lacks our tag %s. Removing it from Kubernetes", pv.VGName, internal.LVMTags[0]))
 							delFlag = true
 						} else {
 							candidate.PVUuid = pv.PVUuid
@@ -303,9 +308,11 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 				}
 			}
 		}
+		log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] delFlag: %t", delFlag))
 		if delFlag {
 			continue
 		}
+		log.Trace("[GetBlockDeviceCandidates] Append candidate to candidates")
 		candidates = append(candidates, candidate)
 	}
 
@@ -313,7 +320,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 }
 
 func filterDevices(log logger.Logger, devices []internal.Device) ([]internal.Device, error) {
-	log.Trace(fmt.Sprintf("[filterDevices] devices before type filtration: %v", devices))
+	log.Trace(fmt.Sprintf("[filterDevices] devices before type filtration: %+v", devices))
 
 	validTypes := make([]internal.Device, 0, len(devices))
 
@@ -326,7 +333,7 @@ func filterDevices(log logger.Logger, devices []internal.Device) ([]internal.Dev
 		}
 	}
 
-	log.Trace(fmt.Sprintf("[filterDevices] devices after type filtration: %v", validTypes))
+	log.Trace(fmt.Sprintf("[filterDevices] devices after type filtration: %+v", validTypes))
 
 	pkNames := make(map[string]struct{}, len(validTypes))
 	for _, device := range validTypes {
@@ -347,7 +354,7 @@ func filterDevices(log logger.Logger, devices []internal.Device) ([]internal.Dev
 		}
 	}
 
-	log.Trace(fmt.Sprintf("[filterDevices] final filtered devices: %v", filtered))
+	log.Trace(fmt.Sprintf("[filterDevices] final filtered devices: %+v", filtered))
 
 	return filtered, nil
 }

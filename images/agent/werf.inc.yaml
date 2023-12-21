@@ -47,3 +47,5 @@ ansible:
       - lvm2
       - curl
       update_cache: yes
+  setup:
+  - shell: sed -i 's/udev_rules.*=.*/udev_rules=0/ ; s/udev_sync.*=.*/udev_sync=0/ ; s/obtain_device_list_from_udev.*=.*/obtain_device_list_from_udev=0/' /etc/lvm/lvm.conf
