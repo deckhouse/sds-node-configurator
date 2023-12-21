@@ -192,7 +192,6 @@ spec:
           name: VG
           type: string
           description: Actual VG name.
-          priority: 1
         - jsonPath: .spec.type
           name: type
           type: string
