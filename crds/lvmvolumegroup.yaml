@@ -87,11 +87,11 @@ spec:
                   type: string
                   description: |
                     The global state of the Volume Group. Might be:
-                    - Operational (if everything is fine)
-                    - NonOperational (if there are some problems in the volume group)
-                  enum:
                     - Operational (if everything is fine with the Volume Group)
-                    - NonOperational (if there are some problems with the Volume Group)
+                    - NonOperational (if there are some problems in the Volume Group)
+                  enum:
+                    - Operational
+                    - NonOperational
                 message:
                   type: string
                   description: |
