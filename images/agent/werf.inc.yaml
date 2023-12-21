@@ -1,6 +1,6 @@
 ---
 artifact: agent-build
-from: golang:1.20.4-alpine3.18
+from: registry.deckhouse.io/base_images/golang:1.20.5-alpine3.18@sha256:51a47fb0851397db2f506c15c426735bc23de31177cbdd962880c0879d1906a4
 git:
 - add: /images/agent
   to: /src
@@ -31,7 +31,7 @@ ansible:
       CGO_ENABLED: "0"
 ---
 image: images/{{ .ImageName }}
-from: ubuntu:jammy-20231128
+from: registry.deckhouse.io/base_images/ubuntu:jammy-20221130@sha256:c14c3b1242536729ce5227ff833144977b4e378723858fb73a4cf40ea6daaf6a
 docker:
   ENTRYPOINT: ["/sds-node-configurator-agent"]
 import:
