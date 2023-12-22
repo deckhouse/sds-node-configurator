@@ -15,7 +15,7 @@ jobs:
     name: Build and Push images
     steps:
       - run: |
-          MODULES_MODULE_TAG=pr$MODULES_MODULE_TAG | sed 's/\/.*//g'
+          export MODULES_MODULE_TAG="$(echo pr$MODULES_MODULE_TAG | sed 's/\/.*//g')"
           echo $MODULES_REGISTRY
           echo $MODULES_MODULE_NAME
           echo $MODULES_MODULE_SOURCE
