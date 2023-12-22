@@ -15,7 +15,7 @@ jobs:
     steps:
       - run: |
           MODULES_MODULE_TAG="$(pr${{ github.ref_name }} | sed 's/\/.*//g')"
-          echo "MODULES_MODULE_TAG=$MODULES_MODULE_TAG" >> $GITHUB_ENV
+          echo "MODULES_MODULE_TAG=$MODULES_MODULE_TAG" >> "$GITHUB_ENV"
           echo $MODULES_REGISTRY
           echo $MODULES_MODULE_NAME
           echo $MODULES_MODULE_SOURCE
