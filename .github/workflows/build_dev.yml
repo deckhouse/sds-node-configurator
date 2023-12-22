@@ -14,7 +14,7 @@ jobs:
     name: Build and Push images
     steps:
       - run: |
-          echo pr${{ github.ref_name }} | sed 's/\/.*//g' >> $MODULES_MODULE_TAG
+          set-env MODULES_MODULE_TAG="$(pr${{ github.ref_name }} | sed 's/\/.*//g')"
           echo $MODULES_REGISTRY
           echo $MODULES_MODULE_NAME
           echo $MODULES_MODULE_SOURCE
