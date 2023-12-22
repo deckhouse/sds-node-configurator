@@ -9,7 +9,7 @@ jobs:
       CI_COMMIT_REF_NAME: ${{ github.ref_name }}
       MODULES_MODULE_NAME: ${{ vars.MODULE_NAME }}
       MODULES_MODULE_SOURCE: ${{ vars.DEV_MODULE_SOURCE }}
-      MODULES_MODULE_TAG: $(echo pr${{ github.ref_name }} | sed 's/\/.*//g')
+      MODULES_MODULE_TAG: "$(echo pr${{ github.ref_name }} | sed 's/\/.*//g')"
       MODULES_REGISTRY_LOGIN: ${{ secrets.DEV_MODULES_REGISTRY_LOGIN }}
       MODULES_REGISTRY_PASSWORD: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
     name: Build and Push images
