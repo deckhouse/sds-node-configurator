@@ -14,6 +14,10 @@ jobs:
       MODULES_REGISTRY_PASSWORD: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
     name: Build and Push images
     steps:
+      - run: echo $MODULES_MODULE_NAME
+        shell: bash
+        name: Show registry
+
       - uses: actions/checkout@v4
       - uses: deckhouse/modules-actions/setup@v1
       - uses: deckhouse/modules-actions/build@v1
