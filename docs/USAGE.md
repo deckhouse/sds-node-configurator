@@ -5,7 +5,7 @@ description: Usage and examples of the SDS-Node-Configurator controller operatio
 
 {% alert level="warning" %}
 The module is guaranteed to work in the following cases only:
-- if stock kernels shipped with [supported distributions](../../supported_versions.html#linux) are used;
+- if stock kernels shipped with the [supported distributions](../../supported_versions.html#linux) are used;
 - if a 10Gbps network is used.
 
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
@@ -19,69 +19,70 @@ The controller supports two types of resources:
 
 ### Creating a `BlockDevice` resource
 
-Контроллер регулярно сканирует существующие девайсы на узле, и в случае, если девайс удовлетворяет всем необходимым
-условиям со стороны контроллера, создается `custom resource` (CR) `BlockDevice` с уникальным именем, в котором отображена
-полная и необходимая информация о соответствующем девайсе.
+The controller regularly scans the existing devices on the node. If a device meets all the conditions 
+imposed by the controller, a `BlockDevice` `custom resource` (CR) with a unique name is created. 
+It contains all the information about the device in question.
 
-#### Требования контроллера к девайсу
+#### The conditions the controller imposes on the device
 
-* Не является drbd-устройством.
-* Не является псевдодевайсом (то есть не loop device).
-* Не является `Logical Volume`.
-* Файловая система отсутствует или соответствует LVM2_MEMBER.
-* У блок-девайса отсутствуют партиции.
-* Размер блок-девайса больше 1 Gi.
-* Если девайс — виртуальный диск, у него должен быть серийный номер.
+* The device is not a drbd device.
+* The device is not a pseudo-device (i.e. not a loop device).
+* The device is not a `Logical Volume`.
+* File system is missing or matches LVM2_MEMBER.
+* The block device has no partitions.
+* The size of the block device is greater than 1 Gi.
+* If the device is a virtual disk, it must have a serial number.
 
-Информацию из полученного ресурса контроллер будет использовать для своей дальнейшей работы с ресурсами `LVMVolumeGroup`.
+The controller will use the information from the custom resource to handle `LVMVolumeGroup` resources going forward.
 
-### Обновление `BlockDevice`-ресурса
+### Updating a `BlockDevice` resource
 
-Контроллер самостоятельно обновляет информацию в ресурсе, если состояние указанного в нем блок-девайса поменялось.
+The controller updates the information in the custom resource independently if the state of the block device it refers to has changed.
 
-### Удаление `BlockDevice`-ресурса
+### Deleting a `BlockDevice` resource
 
-Контроллер автоматически удалит ресурс, если указанный в нем блок-девайс стал недоступен в следующих случаях:
-* если ресурс был в статусе Consumable;
-* если блок-девайс принадлежит `Volume Group`, у которой нет тега `storage.deckhouse.io/enabled=true` (эта `Volume Group` не управляется нашим контроллером).
+The following are the cases in which the controller will automatically delete a resource if the block device it refers to has become unavailable:
+* if the resource had a Consumable status;
+* if the block device belongs to a `Volume Group` that does not have the tag `storage.deckhouse.io/enabled=true` attached to it (this `Volume Group` is not managed by our controller).
 
-> Контроллер выполняет вышеперечисленные виды работ автоматически и не требует вмешательства со стороны пользователя.
+
+> The controller performs the above activities automatically and requires no user intervention.
 
 ## [LVMVolumeGroup](lvmVolumeGroup) resources
 
-Ресурсы `BlockDevice` необходимы для создания и обновления ресурсов `LVMVolumeGroup`.
+The `BlockDevice` resources are required to create and update `LVMVolumeGroup` resources.
 
-`LVMVolumeGroup`-ресурсы предназначены для взаимодействия с `Volume Group` и отображения актуальной информации об их состоянии.
+The `LVMVolumeGroup` resources are designed to communicate with the `Volume Group` and display up-to-date information about their state.
 
-### Создание `LVMVolumeGroup`-ресурса и `Volume Group`
+### Creating a `LVMVolumeGroup` resource and a `Volume Group`
 
-Ресурс `LVMVolumeGroup` может быть создан 2 способами:
-* Автоматическое создание:
-  * Контроллер автоматически сканирует информацию о существующих `Volume Group` на узлах и создает ресурс в случае,
-  если у `Volume Group` имеется тег `storage.deckhouse.io/enabled=true` и соответствующий ресурс по ней отсутствует.
-  * В этом случае контроллер самостоятельно заполняет все поля ресурса.
-* Пользовательское создание:
-  * Пользователь вручную создает ресурс, заполняя только поле `Spec`, в котором указывает желаемое состояние новой `Volume Group`.
-  * Информация, указанная пользователем, пройдет специальную валидацию на корректность предоставленной конфигурации и возможности ее реализации.
-  * После успешного прохождения валидации контроллер использует указанную информацию, чтобы по ней создать указанную `Volume Group` и обновить пользовательский ресурс актуальной информацией о состоянии созданной `Volume Group`.
+There are two ways to create a `LVMVolumeGroup` resource:
+* Automatically:
+  * The controller automatically scans for information about the existing `Volume Groups` on nodes and creates a resource 
+  if a `Volume Group` is tagged with `storage.deckhouse.io/enabled=true` and there is no matching resource for it.
+  * In this case, the controller populates all fields of the resource on its own.
+* By the user:
+  * The user manually creates the resource by filling in only the `Spec` field. In it, they specify the desired state of the new `Volume Group`.
+  * This information is then validated to ensure that the configuration provided is correct and can be implemented.
+  * After successful validation, the controller uses the provided information to create the specified `Volume Group` and update the user resource with the actual information about the state of the created `Volume Group`.  
 
-### Обновление `LVMVolumeGroup`-ресурса и `Volume Group`
+### Updating a `LVMVolumeGroup` resource and a `Volume Group`
 
-Контроллер в автоматическом режиме обновляет поле `Status` ресурса `LVMVolumeGroup`, отображая актуальные данные об указанной `Volume Group`.
-Пользователю **не рекомендуется** собственноручно вносить изменения в поле `Status`.
+The controller automatically updates the `Status` field of the `LVMVolumeGroup` with the current data about the `Volume Group` in question.
+We do **not recommend** making manual changes to the `Status` field.
 
-> Контроллер не обновляет поле `Spec`, так как указанное поле отображает желаемое состояние `Volume Group`. Пользователь может вносить изменения в поле `Spec`, чтобы изменить состояние указанной в ресурсе `Volume Group`.
+> The controller does not update the `Spec` field since it represents the desired state of the `Volume Group`. The user can make changes to the `Spec` field to change the state of the `Volume Group`.
 
-### Удаление `LVMVolumeGroup`-ресурса и `Volume Group`
+### Deleting a `LVMVolumeGroup` resource and a `Volume Group`
 
-Контроллер автоматически удалит ресурс, если указанная в нем `Volume Group` стала недоступна по той или иной причине.
+The controller will automatically delete a resource if the `Volume Group` it references has become unavailable.
 
-> Пользователь может удалить ресурс самостоятельно, но в том случае, если на момент удаления ресурса соответствующая `Volume Group`
-> еще будет существовать, контроллер создаст по существующей `Volume Group` ресурс *автоматически*, указав для созданного
-> ресурса новое сгенерированное имя.
+> The user may delete a resource manually. However, if the corresponding `Volume Group` still exists at the moment the resource is deleted, 
+> the controller will create a resource *automatically* based on the existing `Volume Group` 
+> and assign it a new generated name.
 
-Пользователь может удалить `Volume Group` и связанные с ним `Physical Volume`, добавив в соответствующий `LVMVolumeGroup`-ресурс аннотацию `storage.deckhouse.io/sds-delete-vg: ""`.
+To delete a `Volume Group` and its associated `Physical Volume`, append the `storage.deckhouse.io/sds-delete-vg: ""` annotation to the corresponding `LVMVolumeGroup` resource.
 
-Контроллер отреагирует на указанную аннотацию и запустит процесс удаления `Volume Group` и ее составляющих.
+The controller will detect that the annotation has been added and initiate the process of deleting the `Volume Group` and its parts.
 
-Результатом работы контроллера станет удаление `Volume Group`, связанных с ней `Physical Volume`, а также самого ресурса `LVMVolumeGroup` в случае, **если на `Volume Group` отсутствуют `Logical Volume`**. Если на `Volume Group` будет `Logical Volume`, пользователю предварительно необходимо самостоятельно удалить `Logical Volume` на узле.
+This will result in the `Volume Group` being deleted, as well as its associated `Physical Volume`, and the `LVMVolumeGroup` resource (**if there is no `Logical Volume`** on the `Volume Group`**). If there is a `Logical Volume` on the `Volume Group`, the user must first manually delete the `Logical Volume` on the node.
