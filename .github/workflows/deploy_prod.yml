@@ -36,13 +36,19 @@ jobs:
        MODULE_SOURCE_NAME: ${{ vars.PROD_MODULE_SOURCE_NAME }}
        CI_COMMIT_REF_NAME: ${{ github.ref_name }}
        MODULES_MODULE_NAME: ${{ vars.MODULE_NAME }}
-       MODULES_MODULE_SOURCE: ${{ format('{0}/{1}/{2}/modules', env.MODULES_REGISTRY, env.MODULE_SOURCE_NAME, github.event.inputs.edition ) }}
-       TEST_MODULES_MODULE_SOURCE: $MODULES_REGISTRY/$MODULE_SOURCE_NAME/${{ github.event.inputs.edition }}/modules
+       #MODULES_MODULE_SOURCE: ${{ format('{0}/{1}/{2}/modules', env.MODULES_REGISTRY, env.MODULE_SOURCE_NAME, github.event.inputs.edition ) }}
+       TESTMODULES_MODULE_SOURCE: $MODULES_REGISTRY/$MODULE_SOURCE_NAME/${{ github.event.inputs.edition }}/modules
        RELEASE_CHANNEL: ${{ github.event.inputs.version }}
        MODULES_MODULE_TAG: ${{ github.event.inputs.tag }}
+       FIRST_PART: 'first'
+       SECOND_PART: 'second'
+       FULL: ${{ format('{0}-{1}', env.FIRST_PART, env.SECOND_PART) }}
     name: Build and Push images
     steps:
       - run: |
+          echo "FIRST_PART=$FIRST_PART"
+          echo "SECOND_PART=$SECOND_PART"
+          echo "FULL=$FULL"
           echo $MODULES_REGISTRY
           echo $MODULE_SOURCE_NAME
           echo $CI_COMMIT_REF_NAME
