@@ -23,6 +23,16 @@ on:
           - "ee"
           - "fe"
 
+      ce:
+        type: boolean
+        description: CE
+      ee:
+        type: boolean
+        description: EE
+      fe:
+        type: boolean
+        description: FE
+
       tag:
         description: "Tag of the module, exapmle v1.21.1"
         type: string
@@ -55,6 +65,28 @@ jobs:
           echo $RELEASE_CHANNEL
           echo $MODULES_MODULE_TAG
         shell: bash
+        
+  job-CE:
+     name: Edition CE
+     runs-on: ubuntu-latest
+     if: github.event.inputs.ce == 'true'
+     steps:
+       - run: echo "CE"
+  
+  job-EE:
+    name: Edition EE
+    runs-on: ubuntu-latest
+    if: github.event.inputs.ee == 'true'
+    steps:
+      - run: echo "EE"
+      
+  job-FE:
+    name: Edition FE
+    runs-on: ubuntu-latest
+    if: github.event.inputs.fe == 'true'
+    steps:
+      - run: echo "FE"
+    
 
     
     # steps:
