@@ -41,9 +41,12 @@ jobs:
        MODULES_MODULE_TAG: ${{ github.event.inputs.tag }}
     name: Build and Push images
     steps:
-      - run: |
-          echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/${{ github.event.inputs.edition }}/modules" >> "$GITHUB_ENV"
-          #echo "MODULES_MODULE_TAG=$MODULES_MODULE_TAG" >> "$GITHUB_ENV"
+      - name: SET VAR
+        run: |
+         echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/${{ github.event.inputs.edition }}/modules" >> "$GITHUB_ENV"
+        
+      - name: ECHO VAR
+        run: |
           echo $MODULES_REGISTRY
           echo $MODULE_SOURCE_NAME
           echo $CI_COMMIT_REF_NAME
@@ -52,7 +55,6 @@ jobs:
           echo $RELEASE_CHANNEL
           echo $MODULES_MODULE_TAG
         shell: bash
-        name: Show vars
 
     
     # steps:
