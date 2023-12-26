@@ -1,0 +1,59 @@
+name: Deploy Prod
+
+on:
+  workflow_dispatch:
+   inputs:
+      version:
+        description: "Select version"
+        type: choice
+        default: alpha
+        options:
+          - "alpha"
+          - "beta"
+          - "early-access"
+          - "stable"
+          - "rock-solid"
+          
+      edition:
+        description: "Select edition"
+        type: choice
+        default: fe
+        options:
+          - "ce"
+          - "ee"
+          - "fe"
+
+      tag:
+        description: "Tag of the module, exapmle v1.21.1"
+        type: string
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+       MODULES_REGISTRY: ${{ vars.PROD_REGISTRY }}
+       MODULE_SOURCE_NAME: ${{ vars.PROD_MODULE_SOURCE_NAME }}
+       CI_COMMIT_REF_NAME: ${{ github.ref_name }}
+       MODULES_MODULE_NAME: ${{ vars.MODULE_NAME }}
+       MODULES_MODULE_SOURCE: $MODULES_REGISTRY/$MODULE_SOURCE_NAME/${{ github.event.inputs.edition }}/modules
+       RELEASE_CHANNEL: ${{ github.event.inputs.version }}
+       MODULES_MODULE_TAG: ${{ github.event.inputs.tag }}
+    name: Build and Push images
+    steps:
+      - run: |
+          echo $MODULES_REGISTRY
+          echo $MODULE_SOURCE_NAME
+          echo $CI_COMMIT_REF_NAME
+          echo $MODULES_MODULE_NAME
+          echo $MODULES_MODULE_SOURCE
+          echo $RELEASE_CHANNEL
+          echo $MODULES_MODULE_TAG
+        shell: bash
+        name: Show vars
+
+    
+    # steps:
+    #   - uses: actions/checkout@v4
+    #   - uses: deckhouse/modules-actions/setup@v1
+    #   - uses: deckhouse/modules-actions/deploy@v1
