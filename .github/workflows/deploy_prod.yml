@@ -19,10 +19,10 @@ on:
         default: alpha
         options:
           - "alpha"
-          # - "beta"
-          # - "early-access"
-          # - "stable"
-          # - "rock-solid"
+          - "beta"
+          - "early-access"
+          - "stable"
+          - "rock-solid"
 
       ce:
         type: boolean
@@ -42,7 +42,7 @@ on:
 jobs:
   print-vars:
     runs-on: ubuntu-latest
-    name: Build and Push images
+    name: Print vars
     steps:
       - name: PRINT VARS
         run: |
