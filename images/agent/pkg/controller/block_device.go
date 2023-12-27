@@ -192,8 +192,7 @@ func RemoveDeprecatedAPIDevices(
 	}
 
 	for name, device := range apiBlockDevices {
-		if checkAPIBlockDeviceDeprecated(name, actualCandidates) &&
-			device.Status.NodeName == nodeName {
+		if shouldDeleteBlockDevice(device, actualCandidates, nodeName) {
 			err := DeleteAPIBlockDevice(ctx, cl, metrics, name)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunBlockDeviceController] unable to delete APIBlockDevice, name: %s", name))
@@ -206,8 +205,18 @@ func RemoveDeprecatedAPIDevices(
 	}
 }
 
-func checkAPIBlockDeviceDeprecated(apiDeviceName string, actualCandidates map[string]struct{}) bool {
-	_, ok := actualCandidates[apiDeviceName]
+func shouldDeleteBlockDevice(bd v1alpha1.BlockDevice, actualCandidates map[string]struct{}, nodeName string) bool {
+	if bd.Status.NodeName == nodeName &&
+		bd.Status.Consumable &&
+		isBlockDeviceDeprecated(bd.Name, actualCandidates) {
+		return true
+	}
+
+	return false
+}
+
+func isBlockDeviceDeprecated(blockDevice string, actualCandidates map[string]struct{}) bool {
+	_, ok := actualCandidates[blockDevice]
 	return !ok
 }
 
