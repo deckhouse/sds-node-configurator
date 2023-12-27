@@ -1,3 +1,14 @@
+name: Build and push for prod
+
+env:
+  MODULES_REGISTRY: ${{ vars.PROD_REGISTRY }}
+  CI_COMMIT_REF_NAME: ${{ github.ref_name }}
+  MODULES_MODULE_NAME: ${{ vars.MODULE_NAME }}
+  MODULE_SOURCE_NAME: ${{ vars.PROD_MODULE_SOURCE_NAME }}
+  MODULES_REGISTRY_LOGIN: ${{ secrets.PROD_MODULES_REGISTRY_LOGIN }}
+  MODULES_REGISTRY_PASSWORD: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
+  MODULES_MODULE_TAG: ${{ github.ref_name }}
+
 on:
   push:
     tags:
@@ -6,15 +17,7 @@ on:
 jobs:
   prod_ce_setup_build:
     runs-on: ubuntu-latest
-    env:
-      MODULES_REGISTRY: ${{ vars.PROD_REGISTRY }}
-      CI_COMMIT_REF_NAME: ${{ github.ref_name }}
-      MODULES_MODULE_NAME: ${{ vars.MODULE_NAME }}
-      MODULES_MODULE_SOURCE: ${{ vars.PROD_CE_MODULE_SOURCE }}
-      MODULES_REGISTRY_LOGIN: ${{ secrets.PROD_MODULES_REGISTRY_LOGIN }}
-      MODULES_REGISTRY_PASSWORD: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      MODULES_MODULE_TAG: ${{ github.ref_name }}
-    name: Build and Push images
+    name: Build and Push CE
     steps:
       - name: SET VAR
         run: |
@@ -33,15 +36,7 @@ jobs:
 
   prod_ee_setup_build:
     runs-on: ubuntu-latest
-    env:
-      MODULES_REGISTRY: ${{ vars.PROD_REGISTRY }}
-      CI_COMMIT_REF_NAME: ${{ github.ref_name }}
-      MODULES_MODULE_NAME: ${{ vars.MODULE_NAME }}
-      MODULES_MODULE_SOURCE: ${{ vars.PROD_EE_MODULE_SOURCE }}
-      MODULES_REGISTRY_LOGIN: ${{ secrets.PROD_MODULES_REGISTRY_LOGIN }}
-      MODULES_REGISTRY_PASSWORD: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      MODULES_MODULE_TAG: ${{ github.ref_name }}
-    name: Build and Push images
+    name: Build and Push EE
     steps:
       - name: SET VAR
         run: |
@@ -60,15 +55,7 @@ jobs:
 
   prod_fe_setup_build:
     runs-on: ubuntu-latest
-    env:
-      MODULES_REGISTRY: ${{ vars.PROD_REGISTRY }}
-      CI_COMMIT_REF_NAME: ${{ github.ref_name }}
-      MODULES_MODULE_NAME: ${{ vars.MODULE_NAME }}
-      MODULES_MODULE_SOURCE: ${{ vars.PROD_FE_MODULE_SOURCE }}
-      MODULES_REGISTRY_LOGIN: ${{ secrets.PROD_MODULES_REGISTRY_LOGIN }}
-      MODULES_REGISTRY_PASSWORD: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      MODULES_MODULE_TAG: ${{ github.ref_name }}
-    name: Build and Push images
+    name: Build and Push FE
     steps:
       - name: SET VAR
         run: |
