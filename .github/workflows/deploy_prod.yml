@@ -13,15 +13,6 @@ on:
           - "early-access"
           - "stable"
           - "rock-solid"
-          
-      edition:
-        description: "Select edition"
-        type: choice
-        default: fe
-        options:
-          - "ce"
-          - "ee"
-          - "fe"
 
       ce:
         type: boolean
@@ -34,7 +25,7 @@ on:
         description: FE
 
       tag:
-        description: "Tag of the module, exapmle v1.21.1"
+        description: "Tag of the module, example v1.21.1"
         type: string
         required: true
 
