@@ -19,12 +19,6 @@ package main
 import (
 	"context"
 	"fmt"
-	v1 "k8s.io/api/core/v1"
-	sv1 "k8s.io/api/storage/v1"
-	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	apiruntime "k8s.io/apimachinery/pkg/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"os"
 	goruntime "runtime"
 	"sds-node-configurator/api/v1alpha1"
@@ -33,6 +27,13 @@ import (
 	"sds-node-configurator/pkg/kubutils"
 	"sds-node-configurator/pkg/logger"
 	"sds-node-configurator/pkg/monitoring"
+
+	v1 "k8s.io/api/core/v1"
+	sv1 "k8s.io/api/storage/v1"
+	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	apiruntime "k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
