@@ -30,7 +30,7 @@ on:
         required: true
 
 jobs:
-  deploy:
+  setup-vars:
     runs-on: ubuntu-latest
     env:
        MODULES_REGISTRY: ${{ vars.PROD_REGISTRY }}
@@ -42,17 +42,12 @@ jobs:
        MODULES_MODULE_TAG: ${{ github.event.inputs.tag }}
     name: Build and Push images
     steps:
-      - name: SET VAR
-        run: |
-         echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/${{ github.event.inputs.edition }}/modules" >> "$GITHUB_ENV"
-        
       - name: ECHO VAR
         run: |
           echo $MODULES_REGISTRY
           echo $MODULE_SOURCE_NAME
           echo $CI_COMMIT_REF_NAME
           echo $MODULES_MODULE_NAME
-          echo $MODULES_MODULE_SOURCE
           echo $RELEASE_CHANNEL
           echo $MODULES_MODULE_TAG
         shell: bash
@@ -63,6 +58,12 @@ jobs:
      if: github.event.inputs.ce == 'true'
      steps:
        - run: echo "CE"
+       - name: SET VAR
+         run: |
+           echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/ce/modules" >> "$GITHUB_ENV"
+       - name: ECHO VAR
+         run: |
+           echo $MODULES_MODULE_SOURCE
   
   job-EE:
     name: Edition EE
@@ -70,6 +71,12 @@ jobs:
     if: github.event.inputs.ee == 'true'
     steps:
       - run: echo "EE"
+      - name: SET VAR
+        run: |
+           echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/ee/modules" >> "$GITHUB_ENV"
+      - name: ECHO VAR
+        run: |
+           echo $MODULES_MODULE_SOURCE
       
   job-FE:
     name: Edition FE
@@ -77,8 +84,12 @@ jobs:
     if: github.event.inputs.fe == 'true'
     steps:
       - run: echo "FE"
-    
-
+      - name: SET VAR
+        run: |
+           echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/fe/modules" >> "$GITHUB_ENV"
+      - name: ECHO VAR
+        run: |
+           echo $MODULES_MODULE_SOURCE
     
     # steps:
     #   - uses: actions/checkout@v4
