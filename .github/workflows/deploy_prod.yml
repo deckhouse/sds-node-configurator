@@ -64,6 +64,9 @@ jobs:
        - name: ECHO VAR
          run: |
            echo $MODULES_MODULE_SOURCE
+       - uses: actions/checkout@v4
+       - uses: deckhouse/modules-actions/setup@v1
+       - uses: deckhouse/modules-actions/deploy@v1
   
   job-EE:
     name: Edition EE
@@ -77,6 +80,9 @@ jobs:
       - name: ECHO VAR
         run: |
            echo $MODULES_MODULE_SOURCE
+      - uses: actions/checkout@v4
+      - uses: deckhouse/modules-actions/setup@v1
+      - uses: deckhouse/modules-actions/deploy@v1
       
   job-FE:
     name: Edition FE
@@ -90,8 +96,6 @@ jobs:
       - name: ECHO VAR
         run: |
            echo $MODULES_MODULE_SOURCE
-    
-    # steps:
-    #   - uses: actions/checkout@v4
-    #   - uses: deckhouse/modules-actions/setup@v1
-    #   - uses: deckhouse/modules-actions/deploy@v1
+      - uses: actions/checkout@v4
+      - uses: deckhouse/modules-actions/setup@v1
+      - uses: deckhouse/modules-actions/deploy@v1
