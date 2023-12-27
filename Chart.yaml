@@ -1,5 +1,5 @@
 name: sds-node-configurator
-version: 0.0.25-dev.1701781997
+version: 0.0.1
 dependencies:
   - name: deckhouse_lib_helm
     version: 1.1.3
