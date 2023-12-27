@@ -25,7 +25,7 @@ const (
 	AvailableBlockDevice      = "available_block_device"
 	SdsNodeConfigurator       = "storage.deckhouse.io/sds-node-configurator"
 	LVMVGHealthOperational    = "Operational"
-	LVMVGHealthNonOperational = "Nonoperational"
+	LVMVGHealthNonOperational = "NonOperational"
 )
 
 var (

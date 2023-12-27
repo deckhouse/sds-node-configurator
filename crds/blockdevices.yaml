@@ -132,7 +132,6 @@ spec:
           name: Path
           type: string
           description: Actual device path (name).
-          priority: 1
         - jsonPath: .status.actualVGNameOnTheNode
           name: VG
           type: string

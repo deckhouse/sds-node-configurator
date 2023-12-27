@@ -22,7 +22,7 @@ const (
 
 	Failed = "Failed"
 
-	NoOperational = "Nonoperational"
+	NoOperational = "NonOperational"
 	Operational   = "Operational"
 
 	delAnnotation      = "storage.deckhouse.io/sds-delete-vg"

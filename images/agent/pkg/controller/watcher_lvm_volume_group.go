@@ -66,7 +66,7 @@ func RunWatcherLVMVGController(
 				log.Warning(fmt.Sprintf(`Added request, namespace: "%s" name: "%s", to requeue`, request.Namespace, request.Name))
 				return reconcile.Result{
 					RequeueAfter: cfg.VolumeGroupScanInterval * time.Second,
-				}, err
+				}, nil
 			}
 			log.Info(fmt.Sprintf(`Reconcile of RunWatcherLVMVGController on request, name: "%s" ends`, request.Name))
 
