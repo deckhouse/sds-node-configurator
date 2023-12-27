@@ -17,10 +17,10 @@ on:
         default: alpha
         options:
           - "alpha"
-          - "beta"
-          - "early-access"
-          - "stable"
-          - "rock-solid"
+          # - "beta"
+          # - "early-access"
+          # - "stable"
+          # - "rock-solid"
 
       ce:
         type: boolean
