@@ -1,6 +1,8 @@
 ---
 title: "Модуль SDS-Node-Configurator"
+menuTitle: "sds-node-configurator"
 description: "Модуль SDS-Node-Configurator: общие концепции и положения."
+moduleStatus: experimental
 ---
 {% alert level="warning" %}
 Работоспособность модуля гарантируется только в следующих случаях:

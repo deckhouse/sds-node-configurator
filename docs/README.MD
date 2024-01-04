@@ -1,6 +1,8 @@
 ---
 title: "The SDS-Node-Configurator module"
+menuTitle: "sds-node-configurator"
 description: "The SDS-Node-Configurator module: General Concepts and Principles."
+moduleStatus: experimental
 ---
 The `SDS-Node-Configurator` module allows you to manage `LVM Volume Group` and `LVM Thin-pool` by applying Kubernetes manifests. This module runs together with the `SDS-DRBD` module: `SDS-Node-Configurator` generates the `LVMVolumeGroup` resources that are then used to create the `DRBDStoragePool`.
 
