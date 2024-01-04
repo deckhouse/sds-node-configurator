@@ -5,7 +5,7 @@ env:
   MODULE_SOURCE_NAME: ${{ vars.PROD_MODULE_SOURCE_NAME }}
   CI_COMMIT_REF_NAME: ${{ github.ref_name }}
   MODULES_MODULE_NAME: ${{ vars.MODULE_NAME }}
-  RELEASE_CHANNEL: ${{ github.event.inputs.version }}
+  RELEASE_CHANNEL: ${{ github.event.inputs.channel }}
   MODULES_REGISTRY_LOGIN: ${{ secrets.PROD_MODULES_REGISTRY_LOGIN }}
   MODULES_REGISTRY_PASSWORD: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
   MODULES_MODULE_TAG: ${{ github.event.inputs.tag }}
@@ -13,8 +13,8 @@ env:
 on:
   workflow_dispatch:
    inputs:
-      version:
-        description: "Select version"
+      channel:
+        description: "Select release channel"
         type: choice
         default: alpha
         options:
