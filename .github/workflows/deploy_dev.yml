@@ -25,7 +25,7 @@ on:
           - "rock-solid"
 
       tag:
-        description: "The module's tag, which must include the -dev postfix. For example: v1.21.1-dev"
+        description: "The module's tag, which must include the -dev postfix. For example: v1.21.1-dev1"
         type: string
         required: true
 
@@ -45,7 +45,7 @@ jobs:
         shell: bash
       - name: Validation for tag
         run: |
-          echo ${{ github.event.inputs.tag }} | grep -P '^v\d+\.\d+\.\d+-dev$'
+          echo ${{ github.event.inputs.tag }} | grep -P '^v\d+\.\d+\.\d+-dev1$'
         shell: bash
 
       - uses: actions/checkout@v4
