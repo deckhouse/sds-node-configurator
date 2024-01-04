@@ -25,9 +25,14 @@ on:
           - "rock-solid"
 
       tag:
-        description: "The module's tag, which must include the -dev postfix. For example: v1.21.1-dev"
+        description: "The module's tag, which must include the -dev1 postfix. For example: v1.21.1-dev1"
         type: string
         required: true
+      
+      enableBuild:
+        type: boolean
+        default: true
+        description: 'Set to true if build is required'
 
 jobs:
   deploy-dev:
@@ -37,7 +42,7 @@ jobs:
       - name: PRINT VARS
         run: |
           echo MODULES_REGISTRY=$MODULES_REGISTRY
-          echo MODULE_SOURCE_NAME=$MODULE_SOURCE_NAME
+          echo MODULES_MODULE_SOURCE=$MODULES_MODULE_SOURCE
           echo CI_COMMIT_REF_NAME=$CI_COMMIT_REF_NAME
           echo MODULES_MODULE_NAME=$MODULES_MODULE_NAME
           echo RELEASE_CHANNEL=$RELEASE_CHANNEL
@@ -45,8 +50,11 @@ jobs:
         shell: bash
       - name: Validation for tag
         run: |
-          echo ${{ github.event.inputs.tag }} | grep -P '^v\d+\.\d+\.\d+-dev$'
+          echo ${{ github.event.inputs.tag }} | grep -P '^v\d+\.\d+\.\d+-dev1$'
         shell: bash
 
       - uses: actions/checkout@v4
       - uses: deckhouse/modules-actions/setup@v1
+      - if: ${{ github.event.inputs.enableBuild == 'true' }}
+        uses: deckhouse/modules-actions/build@v1
+      - uses: deckhouse/modules-actions/deploy@v1
