@@ -25,7 +25,7 @@ on:
           - "rock-solid"
 
       tag:
-        description: "The module's tag, which must include the -dev postfix. For example: v1.21.1-dev1"
+        description: "The module's tag, which must include the -dev1 postfix. For example: v1.21.1-dev1"
         type: string
         required: true
 
