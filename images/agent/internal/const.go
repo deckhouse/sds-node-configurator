@@ -22,7 +22,6 @@ const (
 	LoopDeviceType            = "loop"
 	LVMDeviceType             = "lvm"
 	LVMFSType                 = "LVM2_member"
-	AvailableBlockDevice      = "available_block_device"
 	SdsNodeConfigurator       = "storage.deckhouse.io/sds-node-configurator"
 	LVMVGHealthOperational    = "Operational"
 	LVMVGHealthNonOperational = "NonOperational"
