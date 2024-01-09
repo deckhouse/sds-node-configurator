@@ -22,8 +22,8 @@ const (
 
 	Failed = "Failed"
 
-	NoOperational = "NonOperational"
-	Operational   = "Operational"
+	NonOperational = "NonOperational"
+	Operational    = "Operational"
 
 	delAnnotation  = "storage.deckhouse.io/sds-delete-vg"
 	nameSpaceEvent = "default"
