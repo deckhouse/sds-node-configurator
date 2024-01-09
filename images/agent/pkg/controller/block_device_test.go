@@ -17,15 +17,16 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/internal"
-	"sds-node-configurator/pkg/utils"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGetCandidates(t *testing.T) {
+func TestBlockDeviceCtrl(t *testing.T) {
 	t.Run("CheckConsumable", func(t *testing.T) {
 		t.Run("Good device returns true", func(t *testing.T) {
 			goodDevice := internal.Device{
@@ -35,7 +36,7 @@ func TestGetCandidates(t *testing.T) {
 				HotPlug:    false,
 				Model:      "",
 				Serial:     "",
-				Size:       0,
+				Size:       resource.Quantity{},
 				Type:       "",
 				Wwn:        "",
 				KName:      "",
@@ -50,63 +51,20 @@ func TestGetCandidates(t *testing.T) {
 
 		t.Run("Bad devices return false", func(t *testing.T) {
 			badDevices := internal.Devices{BlockDevices: []internal.Device{
-				{Name: internal.DRBDName + "badName",
-					MountPoint: "",
-					PartUUID:   "",
-					HotPlug:    false,
-					Model:      "",
-					Serial:     "",
-					Size:       0,
-					Type:       "",
-					Wwn:        "",
-					KName:      "",
-					PkName:     "",
-					FSType:     "",
-					Rota:       false},
 				{
-					Name:       "goodName",
-					MountPoint: "badMountPoint",
-					PartUUID:   "",
-					HotPlug:    false,
-					Model:      "",
-					Serial:     "",
-					Size:       0,
-					Type:       "",
-					Wwn:        "",
-					KName:      "",
-					PkName:     "",
-					FSType:     "",
-					Rota:       false,
-				},
-				{
-					Name:       "goodName",
 					MountPoint: "",
-					PartUUID:   "",
-					HotPlug:    false,
-					Model:      "",
-					Serial:     "",
-					Size:       0,
-					Type:       "",
-					Wwn:        "",
-					KName:      "",
-					PkName:     "",
-					FSType:     "badFSType",
-					Rota:       false,
-				},
-				{
-					Name:       "goodName",
-					MountPoint: "",
-					PartUUID:   "",
 					HotPlug:    true,
-					Model:      "",
-					Serial:     "",
-					Size:       0,
-					Type:       "",
-					Wwn:        "",
-					KName:      "",
-					PkName:     "",
 					FSType:     "",
-					Rota:       false,
+				},
+				{
+					MountPoint: "bad",
+					HotPlug:    false,
+					FSType:     "",
+				},
+				{
+					MountPoint: "",
+					HotPlug:    false,
+					FSType:     "bad",
 				},
 			}}
 
@@ -123,7 +81,7 @@ func TestGetCandidates(t *testing.T) {
 			NodeName: nodeName,
 			Wwn:      "ZX128ZX128ZX128",
 			Path:     "/dev/sda",
-			Size:     4294967296,
+			Size:     resource.Quantity{},
 			Model:    "HARD-DRIVE",
 		}
 
@@ -135,7 +93,7 @@ func TestGetCandidates(t *testing.T) {
 	t.Run("CheckTag", func(t *testing.T) {
 		t.Run("Have tag_Returns true and tag", func(t *testing.T) {
 			expectedName := "testName"
-			tags := "storage.deckhouse.io/enabled=true,storage.deckhouse.io/watcherLVMVGCtrlName=" + expectedName
+			tags := fmt.Sprintf("storage.deckhouse.io/enabled=true,storage.deckhouse.io/lvmVolumeGroupName=%s", expectedName)
 
 			shouldBeTrue, actualName := CheckTag(tags)
 			if assert.True(t, shouldBeTrue) {
@@ -155,17 +113,15 @@ func TestGetCandidates(t *testing.T) {
 
 	t.Run("hasValidSize", func(t *testing.T) {
 		sizes := []string{"2G", "1G", "1.5G", "0.9G", "100M"}
-		expected := []bool{true, true, true, false, false, false}
+		expected := []bool{true, true, true, false, false}
 
 		for i, size := range sizes {
-			b, err := utils.QuantityToBytes(size)
-			if err != nil {
-				panic(err)
-			}
-
-			valid, err := hasValidSize(b)
+			s, err := resource.ParseQuantity(size)
 			if assert.NoError(t, err) {
-				assert.Equal(t, expected[i], valid)
+				valid, err := hasValidSize(s)
+				if assert.NoError(t, err) {
+					assert.Equal(t, expected[i], valid)
+				}
 			}
 		}
 	})
@@ -183,7 +139,7 @@ func TestGetCandidates(t *testing.T) {
 				Wwn:                   "testWWN",
 				Serial:                "testSERIAL",
 				Path:                  "testPATH",
-				Size:                  0,
+				Size:                  resource.Quantity{},
 				Rota:                  false,
 				Model:                 "testMODEL",
 				Name:                  "testNAME",
@@ -205,7 +161,7 @@ func TestGetCandidates(t *testing.T) {
 				Wwn:                   "testWWN2",
 				Serial:                "testSERIAL2",
 				Path:                  "testPATH2",
-				Size:                  0,
+				Size:                  resource.Quantity{},
 				Rota:                  true,
 				Model:                 "testMODEL2",
 				Name:                  "testNAME",
@@ -217,7 +173,7 @@ func TestGetCandidates(t *testing.T) {
 				MachineId:             "testMACHINE2",
 			},
 		}
-		resourse := v1alpha1.BlockDevice{
+		blockDevice := v1alpha1.BlockDevice{
 			Status: v1alpha1.BlockDeviceStatus{
 				Type:                  "testTYPE",
 				FsType:                "testFS",
@@ -230,7 +186,7 @@ func TestGetCandidates(t *testing.T) {
 				Wwn:                   "testWWN",
 				Serial:                "testSERIAL",
 				Path:                  "testPATH",
-				Size:                  "testSIZE",
+				Size:                  "0",
 				Model:                 "testMODEL",
 				Rota:                  false,
 				HotPlug:               false,
@@ -240,7 +196,7 @@ func TestGetCandidates(t *testing.T) {
 		expected := []bool{false, true}
 
 		for i, candidate := range candidates {
-			actual := hasBlockDeviceDiff(resourse.Status, candidate)
+			actual := hasBlockDeviceDiff(blockDevice.Status, candidate)
 			assert.Equal(t, expected[i], actual)
 		}
 	})

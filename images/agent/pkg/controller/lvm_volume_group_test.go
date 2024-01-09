@@ -18,6 +18,7 @@ package controller
 
 import (
 	"encoding/json"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sds-node-configurator/api/v1alpha1"
 	"testing"
 
@@ -28,76 +29,77 @@ import (
 func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 	t.Run("Unmarshal_LvmVolumeGroup_json_to_struct", func(t *testing.T) {
 		js := `{
-    "apiVersion": "storage.deckhouse.io/v1alpha1",
-    "kind": "LvmVolumeGroup",
-    "metadata": {
-        "name": "lvg-test-1"
-    },
-    "spec": {
-        "actualVGNameOnTheNode": "testVGname",
-        "blockDeviceNames": [
-            "test-bd",
-            "test-bd2"
-        ],
-        "thinPools": [
-            {
-                "name": "test-name",
-                "size": "10G"
-            },
-            {
-                "name": "test-name2",
-                "size": "1G"
-            }
-        ],
-        "type": "local"
-    },
-    "status": {
-        "allocatedSize": "20G",
-        "health": "operational",
-        "message": "all-good",
-        "nodes": [
-            {
-                "devices": [
-                    {
-                        "blockDevice": "test/BD",
-                        "devSize": "1G",
-                        "path": "test/path1",
-                        "pvSize": "1G",
-                        "pvUUID": "testPV1"
-                    },
-                    {
-                        "blockDevice": "test/BD2",
-                        "devSize": "1G",
-                        "path": "test/path2",
-                        "pvSize": "2G",
-                        "pvUUID": "testPV2"
-                    }
-                ],
-                "name": "node1"
-            },
-            {
-                "devices": [
-                    {
-                        "blockDevice": "test/DB3",
-                        "devSize": "2G",
-                        "path": "test/path3",
-                        "pvSize": "3G",
-                        "pvUUID": "testPV3"
-                    }
-                ],
-                "name": "node2"
-            }
-        ],
-        "thinPools": [
+   "apiVersion": "storage.deckhouse.io/v1alpha1",
+   "kind": "LvmVolumeGroup",
+   "metadata": {
+       "name": "lvg-test-1"
+   },
+   "spec": {
+       "actualVGNameOnTheNode": "testVGname",
+       "blockDeviceNames": [
+           "test-bd",
+           "test-bd2"
+       ],
+       "thinPools": [
+           {
+               "name": "test-name",
+               "size": "10G"
+           },
+           {
+               "name": "test-name2",
+               "size": "1G"
+           }
+       ],
+       "type": "local"
+   },
+   "status": {
+       "allocatedSize": "20G",
+       "health": "operational",
+       "message": "all-good",
+       "nodes": [
+           {
+               "devices": [
+                   {
+                       "blockDevice": "test/BD",
+                       "devSize": "1G",
+                       "path": "test/path1",
+                       "pvSize": "1G",
+                       "pvUUID": "testPV1"
+                   },
+                   {
+                       "blockDevice": "test/BD2",
+                       "devSize": "1G",
+                       "path": "test/path2",
+                       "pvSize": "2G",
+                       "pvUUID": "testPV2"
+                   }
+               ],
+               "name": "node1"
+           },
+           {
+               "devices": [
+                   {
+                       "blockDevice": "test/DB3",
+                       "devSize": "2G",
+                       "path": "test/path3",
+                       "pvSize": "3G",
+                       "pvUUID": "testPV3"
+                   }
+               ],
+               "name": "node2"
+           }
+       ],
+       "thinPools": [
 			{
-                "name": "test-name",
-                "actualSize": "1G"
-            }
+               "name": "test-name",
+               "actualSize": "1G"
+           }
 		],
-        "vgSize": "test-vg-size",
-        "vgUUID": "test-vg-uuid"
-    }
+       "vgSize": "test-vg-size",
+       "vgUUID": "test-vg-uuid"
+   }
 }`
+
 		expected := v1alpha1.LvmVolumeGroup{
 			TypeMeta: metav1.TypeMeta{
 				Kind:       "LvmVolumeGroup",
@@ -113,11 +115,11 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 				ThinPools: []v1alpha1.SpecThinPool{
 					{
 						Name: "test-name",
-						Size: "10G",
+						Size: *convertSize("10G", t),
 					},
 					{
 						Name: "test-name2",
-						Size: "1G",
+						Size: *convertSize("1G", t),
 					},
 				},
 			},
@@ -130,7 +132,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 				ThinPools: []v1alpha1.StatusThinPool{
 					{
 						Name:       "test-name",
-						ActualSize: "1G",
+						ActualSize: *convertSize("1G", t),
 					},
 				},
 				Nodes: []v1alpha1.LvmVolumeGroupNode{
@@ -140,14 +142,14 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 							{
 								Path:        "test/path1",
 								PVSize:      "1G",
-								DevSize:     "1G",
+								DevSize:     *convertSize("1G", t),
 								PVUuid:      "testPV1",
 								BlockDevice: "test/BD",
 							},
 							{
 								Path:        "test/path2",
 								PVSize:      "2G",
-								DevSize:     "1G",
+								DevSize:     *convertSize("1G", t),
 								PVUuid:      "testPV2",
 								BlockDevice: "test/BD2",
 							},
@@ -159,7 +161,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 							{
 								Path:        "test/path3",
 								PVSize:      "3G",
-								DevSize:     "2G",
+								DevSize:     *convertSize("2G", t),
 								PVUuid:      "testPV3",
 								BlockDevice: "test/DB3",
 							},
@@ -179,77 +181,77 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 
 	t.Run("Marshal_LvmVolumeGroup_struct_to_json", func(t *testing.T) {
 		expected := `{
-    "apiVersion": "storage.deckhouse.io/v1alpha1",
-    "kind": "LvmVolumeGroup",
-    "metadata": {
-        "creationTimestamp": null,
-        "name": "lvg-test-1"
-    },
-    "spec": {
-        "actualVGNameOnTheNode": "testVGname",
-        "blockDeviceNames": [
-            "test-bd",
-            "test-bd2"
-        ],
-        "thinPools": [
-            {
-                "name": "test-name",
-                "size": "10G"
-            },
-            {
-                "name": "test-name2",
-                "size": "1G"
-            }
-        ],
-        "type": "local"
-    },
-    "status": {
-        "allocatedSize": "20G",
-        "health": "operational",
-        "message": "all-good",
-        "nodes": [
-            {
-                "devices": [
-                    {
-                        "blockDevice": "test/BD",
-                        "devSize": "1G",
-                        "path": "test/path1",
-                        "pvSize": "1G",
-                        "pvUUID": "testPV1"
-                    },
-                    {
-                        "blockDevice": "test/BD2",
-                        "devSize": "1G",
-                        "path": "test/path2",
-                        "pvSize": "2G",
-                        "pvUUID": "testPV2"
-                    }
-                ],
-                "name": "node1"
-            },
-            {
-                "devices": [
-                    {
-                        "blockDevice": "test/DB3",
-                        "devSize": "2G",
-                        "path": "test/path3",
-                        "pvSize": "3G",
-                        "pvUUID": "testPV3"
-                    }
-                ],
-                "name": "node2"
-            }
-        ],
-        "thinPools": [
-            {
-                "name": "test-name",
-                "actualSize": "1G",
+   "apiVersion": "storage.deckhouse.io/v1alpha1",
+   "kind": "LvmVolumeGroup",
+   "metadata": {
+       "creationTimestamp": null,
+       "name": "lvg-test-1"
+   },
+   "spec": {
+       "actualVGNameOnTheNode": "testVGname",
+       "blockDeviceNames": [
+           "test-bd",
+           "test-bd2"
+       ],
+       "thinPools": [
+           {
+               "name": "test-name",
+               "size": "10G"
+           },
+           {
+               "name": "test-name2",
+               "size": "1G"
+           }
+       ],
+       "type": "local"
+   },
+   "status": {
+       "allocatedSize": "20G",
+       "health": "operational",
+       "message": "all-good",
+       "nodes": [
+           {
+               "devices": [
+                   {
+                       "blockDevice": "test/BD",
+                       "devSize": "1G",
+                       "path": "test/path1",
+                       "pvSize": "1G",
+                       "pvUUID": "testPV1"
+                   },
+                   {
+                       "blockDevice": "test/BD2",
+                       "devSize": "1G",
+                       "path": "test/path2",
+                       "pvSize": "2G",
+                       "pvUUID": "testPV2"
+                   }
+               ],
+               "name": "node1"
+           },
+           {
+               "devices": [
+                   {
+                       "blockDevice": "test/DB3",
+                       "devSize": "2G",
+                       "path": "test/path3",
+                       "pvSize": "3G",
+                       "pvUUID": "testPV3"
+                   }
+               ],
+               "name": "node2"
+           }
+       ],
+       "thinPools": [
+           {
+               "name": "test-name",
+               "actualSize": "1G",
 				"usedSize": "500M"
-            }
-        ],
-        "vgSize": "test-vg-size",
-        "vgUUID": "test-vg-uuid"
-    }
+           }
+       ],
+       "vgSize": "test-vg-size",
+       "vgUUID": "test-vg-uuid"
+   }
 }`
 		testObj := v1alpha1.LvmVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
@@ -266,11 +268,11 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 				ThinPools: []v1alpha1.SpecThinPool{
 					{
 						Name: "test-name",
-						Size: "10G",
+						Size: *convertSize("10G", t),
 					},
 					{
 						Name: "test-name2",
-						Size: "1G",
+						Size: *convertSize("1G", t),
 					},
 				},
 				Type: "local",
@@ -284,14 +286,14 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 						Devices: []v1alpha1.LvmVolumeGroupDevice{
 							{
 								BlockDevice: "test/BD",
-								DevSize:     "1G",
+								DevSize:     *convertSize("1G", t),
 								PVSize:      "1G",
 								PVUuid:      "testPV1",
 								Path:        "test/path1",
 							},
 							{
 								BlockDevice: "test/BD2",
-								DevSize:     "1G",
+								DevSize:     *convertSize("1G", t),
 								PVSize:      "2G",
 								PVUuid:      "testPV2",
 								Path:        "test/path2",
@@ -303,7 +305,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 						Devices: []v1alpha1.LvmVolumeGroupDevice{
 							{
 								BlockDevice: "test/DB3",
-								DevSize:     "2G",
+								DevSize:     *convertSize("2G", t),
 								PVSize:      "3G",
 								PVUuid:      "testPV3",
 								Path:        "test/path3",
@@ -315,7 +317,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 				ThinPools: []v1alpha1.StatusThinPool{
 					{
 						Name:       "test-name",
-						ActualSize: "1G",
+						ActualSize: *convertSize("1G", t),
 						UsedSize:   "500M",
 					},
 				},
@@ -330,4 +332,13 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 			assert.JSONEq(t, expected, string(actual))
 		}
 	})
+}
+
+func convertSize(size string, t *testing.T) *resource.Quantity {
+	sizeQTB, err := resource.ParseQuantity(size)
+	if err != nil {
+		t.Error(err)
+	}
+
+	return &sizeQTB
 }
