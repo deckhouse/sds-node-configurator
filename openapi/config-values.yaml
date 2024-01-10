@@ -5,3 +5,7 @@ properties:
   enableDevMode:
     type: boolean
     default: false
+  disableDs:
+    type: boolean
+    default: false
+    description: Disable sds-node-configurator daemonset

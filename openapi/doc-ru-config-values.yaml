@@ -1,1 +1,4 @@
-properties: {}
+type: object
+properties:
+  disableDs:
+    description: Выключить sds-node-configurator daemonset
