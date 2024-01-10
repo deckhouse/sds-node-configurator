@@ -1,3 +1,4 @@
+{{- if not .Values.sdsNodeConfigurator.disableDs }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -72,4 +73,4 @@ spec:
           path: /lib/modules/
           type: DirectoryOrCreate
         name: host-modules-dir
-
+{{- end }}
