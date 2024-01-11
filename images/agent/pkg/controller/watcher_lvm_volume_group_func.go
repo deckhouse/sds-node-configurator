@@ -54,7 +54,7 @@ func getLVMVolumeGroup(ctx context.Context, cl client.Client, metrics monitoring
 	return obj, nil
 }
 
-func updateLVMVolumeGroupStatus(ctx context.Context, cl client.Client, metrics monitoring.Metrics, name, namespace, message, health string) error {
+func updateLVMVolumeGroupHealthStatus(ctx context.Context, cl client.Client, metrics monitoring.Metrics, name, namespace, message, health string) error {
 	obj := &v1alpha1.LvmVolumeGroup{}
 
 	start := time.Now()
@@ -108,10 +108,10 @@ func getBlockDevice(ctx context.Context, cl client.Client, metrics monitoring.Me
 	return obj, nil
 }
 
-func ValidationLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.Metrics, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, namespace, nodeName string) (bool, *StatusLVMVolumeGroup, error) {
+func ValidateLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.Metrics, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, namespace, nodeName string) (bool, *StatusLVMVolumeGroup, error) {
 	status := StatusLVMVolumeGroup{}
 	if lvmVolumeGroup == nil {
-		return false, nil, errors.New("lvmVolumeGroup in empty")
+		return false, nil, errors.New("lvmVolumeGroup is nil")
 	}
 
 	membership := 0
@@ -119,7 +119,7 @@ func ValidationLVMGroup(ctx context.Context, cl client.Client, metrics monitorin
 		for _, blockDev := range lvmVolumeGroup.Spec.BlockDeviceNames {
 			device, err := getBlockDevice(ctx, cl, metrics, namespace, blockDev)
 			if err != nil {
-				status.Health = NoOperational
+				status.Health = NonOperational
 				return false, &status, err
 			}
 			if device.Status.NodeName == nodeName {
@@ -131,38 +131,46 @@ func ValidationLVMGroup(ctx context.Context, cl client.Client, metrics monitorin
 			return true, &status, nil
 		}
 
-		// TODO devices not affiliated ?
-		if membership != len(lvmVolumeGroup.Spec.BlockDeviceNames) {
-			status.Health = NoOperational
+		if membership > 0 {
+			status.Health = NonOperational
 			status.Phase = Failed
-			status.Message = "one or some devices not affiliated this node"
+			status.Message = "selected block devices are from different nodes for local LVMVolumeGroup"
 			return false, &status, nil
 		}
 
-		if len(lvmVolumeGroup.Spec.BlockDeviceNames)-membership == len(lvmVolumeGroup.Spec.BlockDeviceNames) {
-			status.Health = NoOperational
+		if membership == 0 {
+			status.Health = NonOperational
 			status.Phase = Failed
-			status.Message = "no one devices not affiliated this node"
+			status.Message = "selected block devices not affiliated to current Watcher's node"
 			return false, &status, nil
 		}
 	}
 
 	if lvmVolumeGroup.Spec.Type == Shared {
-		if len(lvmVolumeGroup.Spec.BlockDeviceNames) > 1 {
-			status.Health = NoOperational
+		if len(lvmVolumeGroup.Spec.BlockDeviceNames) != 1 {
+			status.Health = NonOperational
 			status.Phase = Failed
-			status.Message = "LVMVolumeGroup Type != shared"
+			status.Message = "several block devices are selected for the shared LVMVolumeGroup"
 			return false, &status, errors.New(status.Message)
 		}
 
-		if len(lvmVolumeGroup.Spec.BlockDeviceNames) == 1 && (len(lvmVolumeGroup.Spec.BlockDeviceNames)-membership) == 0 {
+		singleBD := lvmVolumeGroup.Spec.BlockDeviceNames[0]
+		bd, err := getBlockDevice(ctx, cl, metrics, namespace, singleBD)
+		if err != nil {
+			status.Health = NonOperational
+			status.Phase = Failed
+			status.Message = "selected unknown block device for the shared LVMVolumeGroup"
+			return false, &status, err
+		}
+
+		if bd.Status.NodeName == nodeName {
 			return true, &status, nil
 		}
 	}
 	return false, &status, nil
 }
 
-func ValidationTypeLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.Metrics, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, l logger.Logger) (extendPV, shrinkPV []string, err error) {
+func ValidateTypeLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.Metrics, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, l logger.Logger) (extendPV, shrinkPV []string, err error) {
 	pvs, cmdStr, _, err := utils.GetAllPVs()
 	l.Debug(fmt.Sprintf("GetAllPVs exec cmd: %s", cmdStr))
 	if err != nil {
@@ -346,32 +354,31 @@ func ExistVG(vgName string, log logger.Logger, metrics monitoring.Metrics) (bool
 	return false, nil
 }
 
-func ConsumableAllDevices(ctx context.Context, cl client.Client, metrics monitoring.Metrics, group *v1alpha1.LvmVolumeGroup) (bool, error) {
+func ValidateConsumableDevices(ctx context.Context, cl client.Client, metrics monitoring.Metrics, group *v1alpha1.LvmVolumeGroup) (bool, error) {
 	if group == nil {
-		return false, fmt.Errorf("group is empty")
+		return false, fmt.Errorf("lvmVolumeGroup is nil")
 	}
-	countConsumable := 0
+
 	for _, device := range group.Spec.BlockDeviceNames {
 		d, err := getBlockDevice(ctx, cl, metrics, group.Namespace, device)
 		if err != nil {
 			return false, err
 		}
-		if d.Status.Consumable == true {
-			countConsumable++
+
+		if d.Status.Consumable == false {
+			return false, nil
 		}
 	}
-	if len(group.Spec.BlockDeviceNames) == countConsumable {
-		return true, nil
-	}
+
 	return true, nil
 }
 
 func GetPathsConsumableDevicesFromLVMVG(ctx context.Context, cl client.Client, mertics monitoring.Metrics, group *v1alpha1.LvmVolumeGroup) ([]string, error) {
 	if group == nil {
-		return nil, fmt.Errorf("group is empty")
+		return nil, fmt.Errorf("lvmVolumeGroup is nil")
 	}
-	var paths []string
 
+	var paths []string
 	for _, device := range group.Spec.BlockDeviceNames {
 		d, err := getBlockDevice(ctx, cl, mertics, group.Namespace, device)
 		paths = append(paths, d.Status.Path)
@@ -379,6 +386,7 @@ func GetPathsConsumableDevicesFromLVMVG(ctx context.Context, cl client.Client, m
 			return nil, err
 		}
 	}
+
 	return paths, nil
 }
 
@@ -410,12 +418,12 @@ func ExtendVGComplex(metrics monitoring.Metrics, extendPVs []string, VGName stri
 }
 
 func CreateVGComplex(ctx context.Context, cl client.Client, metrics monitoring.Metrics, group *v1alpha1.LvmVolumeGroup, l logger.Logger) error {
-	AllConsumable, err := ConsumableAllDevices(ctx, cl, metrics, group)
+	allDevicesConsumable, err := ValidateConsumableDevices(ctx, cl, metrics, group)
 	if err != nil {
-		l.Error(err, " error ConsumableAllDevices")
+		l.Error(err, " error ValidateConsumableDevices")
 		return err
 	}
-	if !AllConsumable {
+	if !allDevicesConsumable {
 		l.Error(err, " error not all devices is consumable")
 		return err
 	}

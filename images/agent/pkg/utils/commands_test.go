@@ -17,6 +17,7 @@ limitations under the License.
 package utils
 
 import (
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sds-node-configurator/internal"
 	"testing"
 
@@ -59,6 +60,12 @@ func TestCommands(t *testing.T) {
       }
    ]
 }`
+
+			size30G, err := resource.ParseQuantity("30G")
+			size1M, err := resource.ParseQuantity("1M")
+			if err != nil {
+				t.Error(err)
+			}
 			expectedDevices := internal.Devices{BlockDevices: []internal.Device{
 				{
 					Name:       "/dev/vda",
@@ -67,7 +74,7 @@ func TestCommands(t *testing.T) {
 					HotPlug:    false,
 					Model:      "",
 					Serial:     "",
-					Size:       "30G",
+					Size:       size30G,
 					Type:       "disk",
 					Wwn:        "",
 					KName:      "/dev/vda",
@@ -82,7 +89,7 @@ func TestCommands(t *testing.T) {
 					HotPlug:    false,
 					Model:      "",
 					Serial:     "",
-					Size:       "1M",
+					Size:       size1M,
 					Type:       "part",
 					Wwn:        "",
 					KName:      "/dev/vda1",
@@ -142,13 +149,17 @@ func TestCommands(t *testing.T) {
       "report": [
           {
               "pv": [
-                  {"pv_name":"/dev/vdb", "vg_name":"vgtest", "pv_fmt":"lvm2", "pv_attr":"a--", "pv_size":"1020.00m", 
+                  {"pv_name":"/dev/vdb", "vg_name":"vgtest", "pv_fmt":"lvm2", "pv_attr":"a--", "pv_size":"10G", 
 "pv_free":"1020.00m", "pv_used":"0 ", "pv_uuid":"BmuLLu-9ZSf-eqpf-qR3H-23rQ-fIl7-Ouyl5X", "vg_tags":"", 
 "vg_uuid":"JnCFQZ-TTfE-Ed2C-nKoH-yzPH-4fMA-CKwIv7"}
               ]
           }
       ]
   }`
+			size10G, err := resource.ParseQuantity("10G")
+			if err != nil {
+				t.Error(err)
+			}
 			expectedPVs := internal.PV{PV: []internal.PVData{
 				{
 					PVName: "/dev/vdb",
@@ -157,7 +168,7 @@ func TestCommands(t *testing.T) {
 					PVUuid: "BmuLLu-9ZSf-eqpf-qR3H-23rQ-fIl7-Ouyl5X",
 					VGTags: "",
 					VGUuid: "JnCFQZ-TTfE-Ed2C-nKoH-yzPH-4fMA-CKwIv7",
-					PVSize: "1020.00m",
+					PVSize: size10G,
 				},
 			}}
 
@@ -191,20 +202,24 @@ func TestCommands(t *testing.T) {
           {
               "vg": [
                   {"vg_name":"test-vg", "pv_count":"1", "lv_count":"0", "snap_count":"0", "vg_attr":"wz--n-", 
-"vg_size":"<2.00g", "vg_free":"<2.00g", "vg_uuid":"P14t8J-nfUE-hryT-LiTv-JdFD-Wqxg-R8taCa", 
+"vg_size":"2G", "vg_free":"2G", "vg_uuid":"P14t8J-nfUE-hryT-LiTv-JdFD-Wqxg-R8taCa", 
 "vg_tags":"test-tag", "vg_shared":"test-shared"}
               ]
           }
       ]
   }`
+			size2G, err := resource.ParseQuantity("2G")
+			if err != nil {
+				t.Error(err)
+			}
 			expectedVGs := internal.VG{VG: []internal.VGData{
 				{
 					VGName:   "test-vg",
 					VGUuid:   "P14t8J-nfUE-hryT-LiTv-JdFD-Wqxg-R8taCa",
 					VGTags:   "test-tag",
-					VGSize:   "<2.00g",
+					VGSize:   size2G,
 					VGShared: "test-shared",
-					VGFree:   "<2.00g",
+					VGFree:   size2G,
 				},
 			}}
 
@@ -253,7 +268,7 @@ func TestCommands(t *testing.T) {
       "report": [
           {
               "lv": [
-                  {"lv_name":"mythinpool", "vg_name":"test", "lv_attr":"twi---tzp-", "lv_size":"1.00g", "pool_lv":"", "origin":"", "data_percent":"", "metadata_percent":"", "move_pv":"", "mirror_log":"", "copy_percent":"", "convert_lv":""}
+                  {"lv_name":"mythinpool", "vg_name":"test", "lv_attr":"twi---tzp-", "lv_size":"1G", "pool_lv":"", "origin":"", "data_percent":"", "metadata_percent":"", "move_pv":"", "mirror_log":"", "copy_percent":"", "convert_lv":""}
               ]
           }
       ]

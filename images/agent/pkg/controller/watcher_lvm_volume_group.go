@@ -199,7 +199,7 @@ func ReconcileLVMVG(
 		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error getLVMVolumeGroup, objectname: %s", objectName))
 		return true, err
 	}
-	validation, status, err := ValidationLVMGroup(ctx, cl, metrics, group, objectNameSpace, nodeName)
+	validation, status, err := ValidateLVMGroup(ctx, cl, metrics, group, objectNameSpace, nodeName)
 
 	if group == nil {
 		err = errors.New("nil pointer detected")
@@ -207,15 +207,15 @@ func ReconcileLVMVG(
 		return true, err
 	}
 
-	if status.Health == NoOperational {
+	if status.Health == NonOperational {
 		health := status.Health
 		var message string
 		if err != nil {
 			message = err.Error()
 		}
 
-		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] ValidationLVMGroup, resource name: %s, message: %s", group.Name, message))
-		err = updateLVMVolumeGroupStatus(ctx, cl, metrics, group.Name, group.Namespace, message, health)
+		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] ValidateLVMGroup, resource name: %s, message: %s", group.Name, message))
+		err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, group.Name, group.Namespace, message, health)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error update LVMVolumeGroup %s", group.Name))
 			return true, err
@@ -291,14 +291,14 @@ func ReconcileLVMVG(
 		}
 
 		log.Info("[ReconcileLVMVG] validation and choosing the type of operation")
-		extendPVs, shrinkPVs, err := ValidationTypeLVMGroup(ctx, cl, metrics, group, log)
+		extendPVs, shrinkPVs, err := ValidateTypeLVMGroup(ctx, cl, metrics, group, log)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error ValidationTypeLVMGroup, name: %s", group.Name))
+			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error ValidateTypeLVMGroup, name: %s", group.Name))
 			return true, err
 		}
 
 		if err == nil && extendPVs == nil && shrinkPVs == nil {
-			log.Warning("[ReconcileLVMVG] ValidationTypeLVMGroup FAIL")
+			log.Warning("[ReconcileLVMVG] ValidateTypeLVMGroup FAIL")
 			//todo retry and send message
 		}
 
@@ -373,7 +373,7 @@ func ReconcileLVMVG(
 					log.Debug(fmt.Sprintf("[ReconcileLVMVG] exec command: %s", command))
 					if err != nil {
 						log.Error(errors.New("check size error"), fmt.Sprintf("[ReconcileLVMVG] devSize <= pvSize, block device: %s", d.BlockDevice))
-						err = updateLVMVolumeGroupStatus(ctx, cl, metrics, group.Name, group.Namespace, "devSize <= pvSize", NoOperational)
+						err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, group.Name, group.Namespace, "devSize <= pvSize", NonOperational)
 						if err != nil {
 							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error update LVMVolumeGroup %s", group.Name))
 						}
@@ -411,7 +411,7 @@ func ReconcileLVMVG(
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateLV, thin pool: %s", pool.Name))
 						metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "lvcreate").Inc()
-						if err = updateLVMVolumeGroupStatus(ctx, cl, metrics, group.Name, group.Namespace, err.Error(), NoOperational); err != nil {
+						if err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, group.Name, group.Namespace, err.Error(), NonOperational); err != nil {
 							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update LVMVolumeGroupStatus, resource name: %s", group.Name))
 						}
 						return true, err
@@ -486,7 +486,7 @@ func ReconcileLVMVG(
 		err := CreateVGComplex(ctx, cl, metrics, group, log)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to CreateVGComplex for resource, name: %s", group.Name))
-			if err = updateLVMVolumeGroupStatus(ctx, cl, metrics, group.Name, group.Namespace, err.Error(), NoOperational); err != nil {
+			if err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, group.Name, group.Namespace, err.Error(), NonOperational); err != nil {
 				log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update LVMVolumeGroupStatus, resource name: %s", group.Name))
 			}
 
@@ -503,7 +503,7 @@ func ReconcileLVMVG(
 				if err != nil {
 					metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "lvcreate").Inc()
 					log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateLV, thin pool: %s", v.Name))
-					if err = updateLVMVolumeGroupStatus(ctx, cl, metrics, group.Name, group.Namespace, err.Error(), NoOperational); err != nil {
+					if err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, group.Name, group.Namespace, err.Error(), NonOperational); err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update LVMVolumeGroupStatus, resource name: %s", group.Name))
 					}
 					return true, err
@@ -513,7 +513,7 @@ func ReconcileLVMVG(
 	}
 
 	log.Info("[ReconcileLVMVG] reconcile loop end")
-	err = updateLVMVolumeGroupStatus(ctx, cl, metrics, group.Name, group.Namespace, "", Operational)
+	err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, group.Name, group.Namespace, "", Operational)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error update LVMVolumeGroup %s", group.Name))
 		return true, err

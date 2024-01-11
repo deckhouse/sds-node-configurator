@@ -18,8 +18,10 @@ package controller_test
 
 import (
 	"context"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sds-node-configurator/internal"
 	"sds-node-configurator/pkg/controller"
+	"sds-node-configurator/pkg/monitoring"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -29,9 +31,10 @@ import (
 var _ = Describe("Storage Controller", func() {
 
 	var (
-		ctx        = context.Background()
-		deviceName = "/dev/sda"
-		candidate  = internal.BlockDeviceCandidate{
+		ctx         = context.Background()
+		testMetrics = monitoring.GetMetrics("")
+		deviceName  = "/dev/sda"
+		candidate   = internal.BlockDeviceCandidate{
 			NodeName:              "test-node",
 			Consumable:            true,
 			PVUuid:                "123",
@@ -41,7 +44,7 @@ var _ = Describe("Storage Controller", func() {
 			Wwn:                   "WW12345678",
 			Serial:                "test",
 			Path:                  deviceName,
-			Size:                  0,
+			Size:                  resource.Quantity{},
 			Rota:                  false,
 			Model:                 "",
 			Name:                  "/dev/sda",
@@ -57,7 +60,7 @@ var _ = Describe("Storage Controller", func() {
 	cl := NewFakeClient()
 
 	It("CreateAPIBlockDevice", func() {
-		blockDevice, err := controller.CreateAPIBlockDevice(ctx, cl, candidate)
+		blockDevice, err := controller.CreateAPIBlockDevice(ctx, cl, testMetrics, candidate)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(blockDevice.Status.NodeName).To(Equal(candidate.NodeName))
 		Expect(blockDevice.Status.Consumable).To(Equal(candidate.Consumable))
@@ -68,7 +71,7 @@ var _ = Describe("Storage Controller", func() {
 		Expect(blockDevice.Status.Wwn).To(Equal(candidate.Wwn))
 		Expect(blockDevice.Status.Serial).To(Equal(candidate.Serial))
 		Expect(blockDevice.Status.Path).To(Equal(candidate.Path))
-		Expect(blockDevice.Status.Size).To(Equal(candidate.Size))
+		Expect(blockDevice.Status.Size).To(Equal(candidate.Size.String()))
 		Expect(blockDevice.Status.Rota).To(Equal(candidate.Rota))
 		Expect(blockDevice.Status.Model).To(Equal(candidate.Model))
 		Expect(blockDevice.Status.Type).To(Equal(candidate.Type))
@@ -77,7 +80,7 @@ var _ = Describe("Storage Controller", func() {
 	})
 
 	It("GetAPIBlockDevices", func() {
-		listDevice, err := controller.GetAPIBlockDevices(ctx, cl)
+		listDevice, err := controller.GetAPIBlockDevices(ctx, cl, testMetrics)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(listDevice).NotTo(BeNil())
 		Expect(len(listDevice)).To(Equal(1))
@@ -98,7 +101,7 @@ var _ = Describe("Storage Controller", func() {
 			Wwn:                   "WW12345678",
 			Serial:                "test",
 			Path:                  deviceName,
-			Size:                  0,
+			Size:                  resource.Quantity{},
 			Rota:                  false,
 			Model:                 "",
 			Name:                  "/dev/sda",
@@ -110,7 +113,7 @@ var _ = Describe("Storage Controller", func() {
 			MachineId:             "1234",
 		}
 
-		resources, err := controller.GetAPIBlockDevices(ctx, cl)
+		resources, err := controller.GetAPIBlockDevices(ctx, cl, testMetrics)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resources).NotTo(BeNil())
 		Expect(len(resources)).To(Equal(1))
@@ -119,10 +122,10 @@ var _ = Describe("Storage Controller", func() {
 		Expect(oldResource).NotTo(BeNil())
 		Expect(oldResource.Status.NodeName).To(Equal(candidate.NodeName))
 
-		err = controller.UpdateAPIBlockDevice(ctx, cl, oldResource, newCandidate)
+		err = controller.UpdateAPIBlockDevice(ctx, cl, testMetrics, oldResource, newCandidate)
 		Expect(err).NotTo(HaveOccurred())
 
-		resources, err = controller.GetAPIBlockDevices(ctx, cl)
+		resources, err = controller.GetAPIBlockDevices(ctx, cl, testMetrics)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resources).NotTo(BeNil())
 		Expect(len(resources)).To(Equal(1))
@@ -135,10 +138,10 @@ var _ = Describe("Storage Controller", func() {
 	})
 
 	It("DeleteAPIBlockDevice", func() {
-		err := controller.DeleteAPIBlockDevice(ctx, cl, deviceName)
+		err := controller.DeleteAPIBlockDevice(ctx, cl, testMetrics, deviceName)
 		Expect(err).NotTo(HaveOccurred())
 
-		devices, err := controller.GetAPIBlockDevices(context.Background(), cl)
+		devices, err := controller.GetAPIBlockDevices(context.Background(), cl, testMetrics)
 		for name := range devices {
 			Expect(name).NotTo(Equal(deviceName))
 		}

@@ -25,7 +25,6 @@ import (
 
 func TestNewConfig(t *testing.T) {
 	t.Run("AllValuesSet_ReturnsNoError", func(t *testing.T) {
-		machineIdFile := "./host-root/etc/machine-id"
 		expNodeName := "test-node"
 		expMetricsPort := ":0000"
 		expMachineId := "test-id"
@@ -38,33 +37,8 @@ func TestNewConfig(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
+		err = os.Setenv(MachineID, expMachineId)
 		defer os.Clearenv()
-
-		err = os.MkdirAll("./host-root/etc", 0750)
-		if err != nil {
-			t.Error(err)
-		}
-
-		file, err := os.Create(machineIdFile)
-		if err != nil {
-			t.Error(err)
-		}
-		defer func() {
-			err = file.Close()
-			if err != nil {
-				t.Error(err)
-			}
-
-			err = os.RemoveAll("./host-root")
-			if err != nil {
-				t.Error(err)
-			}
-		}()
-
-		_, err = file.Write([]byte(expMachineId))
-		if err != nil {
-			t.Error(err)
-		}
 
 		opts, err := NewConfig()
 
@@ -114,8 +88,8 @@ func TestNewConfig(t *testing.T) {
 	t.Run("MachineIdNotSet_ReturnsError", func(t *testing.T) {
 		expMetricsPort := ":0000"
 		expNodeName := "test-node"
-		expErrorMsg := fmt.Sprintf("[NewConfig] required %s env variable is not specified, error: %s",
-			MachineID, "open host-root/etc/machine-id: no such file or directory")
+		expErrorMsg := fmt.Sprintf("[NewConfig] unable to get %s, error: %s",
+			MachineID, "open /host-root/etc/machine-id: no such file or directory")
 
 		err := os.Setenv(MetricsPort, expMetricsPort)
 		if err != nil {
@@ -132,7 +106,6 @@ func TestNewConfig(t *testing.T) {
 	})
 
 	t.Run("MetricsPortNotSet_ReturnsDefaultPort", func(t *testing.T) {
-		machineIdFile := "./host-root/etc/machine-id"
 		expNodeName := "test-node"
 		expMetricsPort := ":8080"
 		expMachineId := "test-id"
@@ -141,33 +114,12 @@ func TestNewConfig(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
+		err = os.Setenv(MachineID, expMachineId)
+		if err != nil {
+			t.Error(err)
+		}
+
 		defer os.Clearenv()
-
-		err = os.MkdirAll("./host-root/etc", 0750)
-		if err != nil {
-			t.Error(err)
-		}
-
-		file, err := os.Create(machineIdFile)
-		if err != nil {
-			t.Error(err)
-		}
-		defer func() {
-			err = file.Close()
-			if err != nil {
-				t.Error(err)
-			}
-
-			err = os.RemoveAll("./host-root")
-			if err != nil {
-				t.Error(err)
-			}
-		}()
-
-		_, err = file.Write([]byte(expMachineId))
-		if err != nil {
-			t.Error(err)
-		}
 
 		opts, err := NewConfig()
 
