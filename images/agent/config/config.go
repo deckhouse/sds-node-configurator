@@ -57,8 +57,7 @@ func NewConfig() (*Options, error) {
 
 	machId, err := getMachineId()
 	if err != nil {
-		return nil, fmt.Errorf("[NewConfig] required %s env variable is not specified, error: %w",
-			MachineID, err)
+		return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", MachineID, err)
 	}
 	opts.MachineId = machId
 
@@ -74,10 +73,15 @@ func NewConfig() (*Options, error) {
 }
 
 func getMachineId() (string, error) {
-	id, err := os.ReadFile("/host-root/etc/machine-id")
-	if err != nil {
-		return "", err
+	id := os.Getenv(MachineID)
+	if id == "" {
+		byteId, err := os.ReadFile("/host-root/etc/machine-id")
+		if err != nil {
+			return "", err
+		}
+
+		id = string(byteId)
 	}
 
-	return string(id), nil
+	return id, nil
 }

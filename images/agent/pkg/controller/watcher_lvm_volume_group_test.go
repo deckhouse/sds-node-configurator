@@ -1023,7 +1023,7 @@ func TestWatcherLVMVolumeGroupCtrl(t *testing.T) {
 
 	t.Run("ValidateConsumableDevices_lvg_is_nil_validation_fails", func(t *testing.T) {
 		passed, err := ValidateConsumableDevices(ctx, cl, metrics, nil)
-		if assert.EqualError(t, err, "group is nil") {
+		if assert.EqualError(t, err, "lvmVolumeGroup is nil") {
 			assert.False(t, passed)
 		}
 	})
@@ -1031,7 +1031,7 @@ func TestWatcherLVMVolumeGroupCtrl(t *testing.T) {
 	t.Run("GetPathsConsumableDevicesFromLVMVG_lvg_is_nil_returns_error", func(t *testing.T) {
 		paths, err := GetPathsConsumableDevicesFromLVMVG(ctx, cl, metrics, nil)
 
-		if assert.EqualError(t, err, "group is empty") {
+		if assert.EqualError(t, err, "lvmVolumeGroup is nil") {
 			assert.Nil(t, paths)
 		}
 	})
