@@ -59,6 +59,12 @@ spec:
           name: host-sys-dir
         - mountPath: /run/udev/
           name: host-run-udev-dir
+        - mountPath: /run/lvm/
+          name: host-run-lvm-dir
+        - mountPath: /run/dmeventd-client
+          name: host-run-dmeventd-client
+        - mountPath: /run/dmeventd-server
+          name: host-run-dmeventd-server
         - mountPath: /host-root/etc/machine-id
           name: host-machine-id
           readOnly: true
@@ -75,6 +81,16 @@ spec:
           path: /run/udev/
           type: Directory
         name: host-run-udev-dir
+      - hostPath:
+          path: /run/lvm
+          type: Directory
+        name: host-run-lvm-dir
+      - hostPath:
+          path: /run/dmeventd-client
+        name: host-run-dmeventd-client
+      - hostPath:
+          path: /run/dmeventd-server
+        name: host-run-dmeventd-server
       - hostPath:
           path: /etc/machine-id
           type: File
