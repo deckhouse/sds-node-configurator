@@ -54,7 +54,7 @@ func NewConfig() (*Options, error) {
 
 	opts.MetricsPort = os.Getenv(MetricsPort)
 	if opts.MetricsPort == "" {
-		opts.MetricsPort = ":9695"
+		opts.MetricsPort = ":8080"
 	}
 
 	opts.HealthProbeBindAddress = os.Getenv(DefaultHealthProbeBindAddressEnvName)

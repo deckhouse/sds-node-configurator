@@ -38,7 +38,7 @@ const (
 	ThrottleInterval                     = "THROTTLER_INTERVAL"
 	CmdDeadlineDuration                  = "CMD_DEADLINE_DURATION"
 	DefaultHealthProbeBindAddressEnvName = "HEALTH_PROBE_BIND_ADDRESS"
-	DefaultHealthProbeBindAddress        = ":8081"
+	DefaultHealthProbeBindAddress        = ":4228"
 )
 
 type Options struct {
@@ -77,7 +77,7 @@ func NewConfig() (*Options, error) {
 
 	opts.MetricsPort = os.Getenv(MetricsPort)
 	if opts.MetricsPort == "" {
-		opts.MetricsPort = ":9695"
+		opts.MetricsPort = ":4202"
 	}
 
 	opts.HealthProbeBindAddress = os.Getenv(DefaultHealthProbeBindAddressEnvName)
