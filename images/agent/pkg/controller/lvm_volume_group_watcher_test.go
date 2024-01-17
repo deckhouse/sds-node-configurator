@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestWatcherLVMVolumeGroupCtrl(t *testing.T) {
+func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 	cl := NewFakeClient()
 	ctx := context.Background()
 	metrics := monitoring.GetMetrics("")
@@ -872,7 +872,7 @@ func TestWatcherLVMVolumeGroupCtrl(t *testing.T) {
 				assert.Equal(t, v1.EventTypeNormal, event.Type)
 				assert.Equal(t, EventActionDeleting, event.Action)
 				assert.Equal(t, nodeName, event.ReportingInstance)
-				assert.Equal(t, watcherLVMVGCtrlName, event.ReportingController)
+				assert.Equal(t, LVMVolumeGroupWatcherCtrlName, event.ReportingController)
 				assert.Equal(t, "Event Message", event.Message)
 
 				err = cl.Delete(ctx, &event)
