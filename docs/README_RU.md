@@ -1,6 +1,7 @@
 ---
 title: "Модуль SDS-Node-Configurator"
 description: "Модуль SDS-Node-Configurator: общие концепции и положения."
+moduleStatus: experimental
 ---
 {{< alert level="warning" >}}
 Работоспособность модуля гарантируется только при использовании стоковых ядер, поставляемых вместе с [поддерживаемыми дистрибутивами](https://deckhouse.ru/documentation/v1/supported_versions.html#linux).
