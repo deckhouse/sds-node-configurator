@@ -4,7 +4,7 @@ spec:
       schema:
         openAPIV3Schema:
           description: |
-            LVMVolumeGroup — это ресурс для управления Volume Group'ами и Thin pool'ами на узлах.
+            Интерфейс управления Volume Group'ами и Thin pool'ами на узлах.
             
             > Этот тип ресурсов может быть создан как самим пользователем, так и контроллером SDS-Node-Configurator.
             Контроллер sds-node-configurator автоматически создаст ресурс LVMVolumeGroup в случае, если найдет на узле существующую Volume Group со специальным тегом 'storage.deckhouse.io/enabled=true', при этом контроллер самостоятельно заполнит как `spec`, так и `status` поля.

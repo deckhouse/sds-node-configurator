@@ -24,20 +24,18 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            BlockDevice is a Kubernetes Custom Resource that displays actual information about block devices, which might be used by the sds-node-configurator controller to create Volume Groups, extend Physical Volumes, and so on.
+            The resource displays actual information about block devices, which might be used by the sds-node-configurator controller for operations in LVM.
             
-            > The resource is created and managed by the controller only.
+            > The resource is created and managed by the controller only. Manual modification of the resource is prohibited.
           properties:
             status:
               type: object
-              description: |
-                Defines the current device state.
               required: [size,type,consumable,path,rota,hotPlug,nodeName,machineId]
               properties:
                 type:
                   type: string
                   description: |
-                    The device's type.
+                    The device's type (disk, part, RAID, and others).
                 fsType:
                   type: string
                   enum: [LVM2_member, ""]
@@ -50,7 +48,7 @@ spec:
                 consumable:
                   type: boolean
                   description: |
-                    The flag that defines whether this device can be used by the controller.
+                    The flag that defines whether this device can be used by the controller to create an LVM Physical Volume.
                 pvUUID:
                   type: string
                   description: |
@@ -60,7 +58,7 @@ spec:
                 vgUUID:
                   type: string
                   description: | 
-                    The Volume Group UUID.
+                    The UUID of the Volume Group to which this device belongs as a Physical Volume.
 
                     > Optional: exists only if the device is used as a Physical Volume and is included in a Volume Group.
                 lvmVolumeGroupName:
@@ -68,7 +66,7 @@ spec:
                   description: | 
                     The LVMVolumeGroup resource name. 
                     
-                    > Optional: exists only if the device is used as a Physical Volume and is included in a Volume Group and LVMVolumeGroup resource.
+                    > Optional: exists only if the device is used as a Physical Volume, included in a Volume Group, and specified in an LVMVolumeGroup resource.
                 actualVGNameOnTheNode:
                   type: string
                   description: |
