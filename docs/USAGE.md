@@ -3,13 +3,12 @@ title: "The SDS-Node-Configurator module: usage examples"
 description: Usage and examples of the SDS-Node-Configurator controller operation.
 ---
 
-{% alert level="warning" %}
-The module is guaranteed to work in the following cases only:
-- if stock kernels shipped with the [supported distributions](../../supported_versions.html#linux) are used;
-- if a 10Gbps network is used.
+{{< alert level="warning" >}}
+The module is guaranteed to work only with stock kernels that are shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
 
-As for any other configurations, the module may work, but its smooth operation is not guaranteed.
-{% endalert %}
+The functionality of the module with other kernels or distributions is possible but not guaranteed.
+{{< /alert >}}
+
 
 The controller supports two types of resources:
 * `BlockDevice`;

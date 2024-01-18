@@ -2,13 +2,12 @@
 title: "The SDS-Node-Configurator module: FAQ"
 description: "Common questions and answers."
 ---
-{% alert level="warning" %}
-The module is guaranteed to work in the following cases only:
-- if stock kernels shipped with the [supported distributions](../../supported_versions.html#linux) are used;
-- if a 10Gbps network is used.
 
-As for any other configurations, the module may work, but its smooth operation is not guaranteed.
-{% endalert %}
+{{< alert level="warning" >}}
+The module is guaranteed to work only with stock kernels that are shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
+
+The functionality of the module with other kernels or distributions is possible but not guaranteed.
+{{< /alert >}}
 
 ## Why does creating `BlockDevice` and `LVMVolumeGroup` resources in a cluster fail?
 
