@@ -172,8 +172,7 @@ func CreateVGShared(vgName, lvmName string, pvNames []string) (string, error) {
 	return cmd.String(), nil
 }
 
-func CreateLV(thinPool v1alpha1.SpecThinPool, VGName string) (string, error) {
-
+func CreateThinPool(thinPool v1alpha1.SpecThinPool, VGName string) (string, error) {
 	cmd := exec.Command(
 		"lvcreate", "-L", thinPool.Size.String(), "-T", fmt.Sprintf("%s/%s", VGName, thinPool.Name))
 
@@ -181,8 +180,42 @@ func CreateLV(thinPool v1alpha1.SpecThinPool, VGName string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to CreateLV, err: %w tderr = %s", err, stderr.String())
+		return cmd.String(), fmt.Errorf("unable to CreateThinPool, err: %w tderr = %s", err, stderr.String())
 	}
+	return cmd.String(), nil
+}
+
+func CreateThinLogicalVolume(vgName, tpName, lvName, size string) (string, error) {
+	args := []string{"-T", fmt.Sprintf("%s/%s", vgName, tpName), "-n", lvName, "-V", size}
+	cmd := exec.Command("lvcreate", args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	fmt.Println("RUNS COMMAND:" + cmd.String())
+	fmt.Println("CMD IS ABOUT TO RUN")
+	err := cmd.Run()
+	fmt.Println(stderr.String())
+	fmt.Println(stdout.String())
+	if err != nil {
+		fmt.Println("CMD ERROR ALERT")
+		return cmd.String(), err
+	}
+
+	fmt.Println("CMD ALL GOOD")
+	return cmd.String(), nil
+}
+
+func CreateThickLogicalVolume(vgName, lvName, size string) (string, error) {
+	args := []string{"-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", size, "-W", "y", "-y"}
+	cmd := exec.Command("lvcreate", args...)
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), err
+	}
+
 	return cmd.String(), nil
 }
 

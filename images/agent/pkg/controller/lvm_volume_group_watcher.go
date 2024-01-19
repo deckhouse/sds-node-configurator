@@ -404,12 +404,12 @@ func ReconcileLVMVG(
 						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, resource name: %s", group.Name))
 					}
 					start := time.Now()
-					command, err := utils.CreateLV(pool, group.Spec.ActualVGNameOnTheNode)
+					command, err := utils.CreateThinPool(pool, group.Spec.ActualVGNameOnTheNode)
 					metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "lvcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
 					metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "lvcreate").Inc()
 					log.Debug(command)
 					if err != nil {
-						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateLV, thin pool: %s", pool.Name))
+						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateThinPool, thin pool: %s", pool.Name))
 						metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "lvcreate").Inc()
 						if err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, group.Name, group.Namespace, err.Error(), NonOperational); err != nil {
 							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update LVMVolumeGroupStatus, resource name: %s", group.Name))
@@ -496,13 +496,13 @@ func ReconcileLVMVG(
 		if len(group.Spec.ThinPools) != 0 {
 			for _, v := range group.Spec.ThinPools {
 				start := time.Now()
-				command, err := utils.CreateLV(v, group.Spec.ActualVGNameOnTheNode)
+				command, err := utils.CreateThinPool(v, group.Spec.ActualVGNameOnTheNode)
 				metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "lvcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
 				metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "lvcreate").Inc()
 				log.Debug(command)
 				if err != nil {
 					metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "lvcreate").Inc()
-					log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateLV, thin pool: %s", v.Name))
+					log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateThinPool, thin pool: %s", v.Name))
 					if err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, group.Name, group.Namespace, err.Error(), NonOperational); err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update LVMVolumeGroupStatus, resource name: %s", group.Name))
 					}
