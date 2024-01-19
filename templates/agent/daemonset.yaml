@@ -23,6 +23,7 @@ spec:
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       serviceAccountName: sds-node-configurator
+      hostPID: true
       containers:
       - name: sds-node-configurator-agent
         image: {{ include "helm_lib_module_image" (list . "agent") }}
@@ -49,5 +50,4 @@ spec:
 {{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
             value: "4"
 {{- end }}
-        hostPID: true
 {{- end }}
