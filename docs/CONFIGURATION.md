@@ -7,5 +7,3 @@ The module is guaranteed to work only with stock kernels that are shipped with t
 
 The functionality of the module with other kernels or distributions is possible but not guaranteed.
 {{< /alert >}}
-
-No configuration on the user's side is required
