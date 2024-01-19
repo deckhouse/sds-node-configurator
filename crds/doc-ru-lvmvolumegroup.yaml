@@ -6,15 +6,14 @@ spec:
           description: |
             Интерфейс управления Volume Group'ами и Thin pool'ами на узлах.
             
-            > Этот тип ресурсов может быть создан как самим пользователем, так и контроллером SDS-Node-Configurator.
-            Контроллер sds-node-configurator автоматически создаст ресурс LVMVolumeGroup в случае, если найдет на узле существующую Volume Group со специальным тегом 'storage.deckhouse.io/enabled=true', при этом контроллер самостоятельно заполнит как `spec`, так и `status` поля.
+            > Этот тип ресурсов может быть создан как самим пользователем, так и контроллером SDS-Node-Configurator. Контроллер sds-node-configurator автоматически создаст ресурс LVMVolumeGroup в случае, если найдет на узле существующую Volume Group со специальным тегом 'storage.deckhouse.io/enabled=true', при этом контроллер самостоятельно заполнит как `spec`, так и `status` поля.
           properties:
             spec:
               properties:
                 type:
                   description: |
                     Тип Volume Group. Может быть: 
-                    - Local (то есть локальным, если используемые девайсы не являются распределенными)
+                    - Local, то есть локальным, если используемые девайсы не являются распределенными (не Shared LUN).
                 blockDeviceNames:
                   description: |
                     Список имен ресурсов BlockDevice для создания Volume Group.
@@ -39,10 +38,6 @@ spec:
                         description: |
                           Желаемый размер Thin-pool.
             status:
-              description: |
-                Отображает текущее состояние Volume Group.
-                
-                > Эти параметры обновляются контроллером.
               properties:
                 health:
                   description: |
@@ -57,10 +52,10 @@ spec:
                     Уникальный идентификатор Volume Group.
                 vgSize:
                   description: |
-                    Максимальный размер Volume Group.
+                    Ёмкость Volume Group.
                 allocatedSize:
                   description: |
-                    Текущий размер Volume Group.
+                    Текущее занятое место на Volume Group.
                 thinPools:
                   description: |
                     Текущее состояние Thin-pool'ов в Volume Group.
@@ -73,7 +68,7 @@ spec:
                           Имя Thin-pool.
                       actualSize:
                         description: |
-                          Общий текущий размер Thin-pool.
+                          Ёмкость Thin-pool.
                       usedSize:
                         description: |
                           Используемый размер Thin-pool.
@@ -92,7 +87,7 @@ spec:
                           properties:
                             path:
                               description: |
-                                Путь (имя) девайса на узле.
+                                Путь девайса на узле (/dev/sda, например).
                             pvSize:
                               description: |
                                 Размер Physical Volume.
@@ -101,7 +96,7 @@ spec:
                                 Размер девайса.
                             pvUUID:
                               description: |
-                                Уникальный идентификатор Physical Volume.
+                                Уникальный идентификатор LVM Physical Volume.
                             blockDevice:
                               description: |
                                 Имя связанного ресурса BlockDevice.
