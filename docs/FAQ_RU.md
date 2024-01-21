@@ -55,13 +55,24 @@ description: "Распространенные вопросы и ответы н
 
 ## Как передать контроллеру управление существующей на узле `LVM Volume Group`?
 
-Достаточно добавить LVM-тег `storage.deckhouse.io/enabled=true` на `LVM Volume Group` (`vgchange myvg-0 --addtag storage.deckhouse.io/enabled=true`).
+Достаточно добавить LVM-тег `storage.deckhouse.io/enabled=true` на `LVM Volume Group` на узле: 
+
+```shell
+vgchange myvg-0 --addtag storage.deckhouse.io/enabled=true
+```
 
 ## Я хочу, чтобы контроллер перестал следить за `LVM Volume Group` на узле. Как мне это сделать?
 
-Достаточно удалить LVM-тег `storage.deckhouse.io/enabled=true` у нужной `LVM Volume Group` на узле (`vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true`). После этого контроллер перестанет отслеживать выбранную `Volume Group` и самостоятельно удалит связанный с ней ресурс `LVMVolumeGroup`.
+Достаточно удалить LVM-тег `storage.deckhouse.io/enabled=true` у нужной `LVM Volume Group` на узле:
+
+```shell
+vgchange myvg-0 --addtag storage.deckhouse.io/enabled=true
+```
+
+После этого контроллер перестанет отслеживать выбранную `Volume Group` и самостоятельно удалит связанный с ней ресурс `LVMVolumeGroup`.
 
 ## Я не вешал LVM-тег `storage.deckhouse.io/enabled=true` на `Volume Group`, но он появился. Как это возможно?
 
 Это возможно в случае, если вы создавали `LVM Volume Group` через ресурс `LVMVolumeGroup` (в таком случае контроллер автоматически вешает данный LVM-тег на созданную `LVM Volume Group`). Либо на данной `Volume Group` или ее `Thin-pool` был LVM-тег модуля `Linstor` — `linstor-*`.
+
 При миграции с встроенного модуля `Linstor` на модули `sds-node-configurator` и `sds-drbd` автоматически происходит изменение LVM-тегов `linstor-*` на LVM-тег `storage.deckhouse.io/enabled=true` в `Volume Group`. Таким образом, управление этими `Volume Group` передается модулю `sds-node-configurator`.
