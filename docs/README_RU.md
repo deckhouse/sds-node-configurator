@@ -15,9 +15,9 @@ moduleStatus: experimental
 
    > **Внимание!** Ручное создание и изменение ресурса `BlockDevice` запрещено.
 
-  - Обнаружение на узлах `LVM Volume Group` с тегом `storage.deckhouse.io/enabled=true` и `Thin-pool` на них, а также управление соответствующими [ресурсами LVMVolumeGroup](./cr.html#lvmvolumegroup). Модуль автоматически создает ресурс `LVMVolumeGroup`, если его еще не существует для обнаруженной `LVM Volume Group`.
+  - Обнаружение на узлах `LVM Volume Group` с LVM тегом `storage.deckhouse.io/enabled=true` и `Thin-pool` на них, а также управление соответствующими [ресурсами LVMVolumeGroup](./cr.html#lvmvolumegroup). Модуль автоматически создает ресурс `LVMVolumeGroup`, если его еще не существует для обнаруженной `LVM Volume Group`.
 
-  - Сканирование на узлах `LVM Physical Volumes`, которые входят в управляемые `LVM Volume Group`. В случае расширения размеров нижестоящих блочных устройств, соотвующие `LVM Physical Volumes` будут автоматически расширены (произойдёт pvresize).
+  - Сканирование на узлах `LVM Physical Volumes`, которые входят в управляемые `LVM Volume Group`. В случае расширения размеров нижестоящих блочных устройств, соотвующие `LVM Physical Volumes` будут автоматически расширены (произойдёт `pvresize`).
 
   > **Внимание!** Уменьшение размеров блочного устройства не поддерживается.
 

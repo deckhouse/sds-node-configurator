@@ -14,7 +14,7 @@ The controller supports two types of resources:
 * `BlockDevice`;
 * `LVMVolumeGroup`.
 
-## [BlockDevice](block device) resources
+## `BlockDevice` resources
 
 ### Creating a `BlockDevice` resource
 
@@ -47,7 +47,7 @@ The following are the cases in which the controller will automatically delete a 
 
 > The controller performs the above activities automatically and requires no user intervention.
 
-## [LVMVolumeGroup](lvmVolumeGroup) resources
+## `LVMVolumeGroup` resources
 
 The `BlockDevice` resources are required to create and update `LVMVolumeGroup` resources.
 

@@ -10,12 +10,16 @@ The module is guaranteed to work only with stock kernels that are shipped with t
 The functionality of the module with other kernels or distributions is possible but not guaranteed.
 {{< /alert >}}
 
-The `SDS-Node-Configurator` module allows you to manage `LVM Volume Group` and `LVM Thin-pool` by applying Kubernetes manifests. This module runs together with the `SDS-DRBD` module: `SDS-Node-Configurator` generates the `LVMVolumeGroup` resources that are then used to create the `DRBDStoragePool`.
+The module manages `LVM` on cluster nodes through [Kubernetes custom resources](./cr.html), performing the following operations:
 
-The module exctracts information from the [Kubernetes Custom Resources](resource link) and uses it to create, update, and delete `Volume Group` and `Thin-pool` resources based on them.
+  - Detecting block devices and creating/updating/deleting the corresponding [BlockDevice resources](./cr.html#blockdevice).
 
-The user can define the desired state of the `Volume Group` and `Thin-pool` in the `Spec` field of the `LVMVolumeGroup` resource. The `SDS-Node-Configurator` will then automatically perform all necessary steps to bring the resource to the desired state. The module continuously monitors the created resources to ensure that their current state matches the specified parameters.
+   > **Attention!** Manual creation and modification of the `BlockDevice` resource is prohibited.
 
-Note that the module also automatically detects the size of `Physical Volumes`. If block device sizes are expanded, the corresponding `Physical Volumes` and the `Volume Group` (VG) will be automatically expanded as well, providing dynamic support for the changes. However, keep in mind that block device **downsizing is not supported**.
+  - Detecting `LVM Volume Groups` with the `storage.deckhouse.io/enabled=true` LVM tag and `Thin-pools` on them on the nodes, as well as managing the corresponding [LVMVolumeGroup resources](./cr.html#lvmvolumegroup). The module automatically creates an `LVMVolumeGroup` resource if it does not yet exist for the discovered `LVM Volume Group`.
 
-Note that [Kubernetes Custom Resources](resource link) are cluster-scoped.
+  - Scanning `LVM Physical Volumes` on the nodes that are part of managed `LVM Volume Groups`. In case of expansion of underlying block device sizes, the corresponding `LVM Physical Volumes` will be automatically expanded (`pvresize` will occur).
+
+  > **Attention!** Reduction in the size of block devices is not supported.
+
+  - Creating/expanding/deleting `LVM Volume Groups` on the node in accordance with user changes in `LVMVolumeGroup` resources. [Usage examples](./usage.html#lvmvolumegroup-resources)
