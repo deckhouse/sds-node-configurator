@@ -36,14 +36,13 @@ description: "Распространенные вопросы и ответы н
 С конкретной причиной неработоспособности вы можете ознакомиться в самом ресурсе в поле `status.message` либо обратиться
 к логам контроллера.
 
-> Как правило, проблема кроется в некорректно указанных ресурсах `BlockDevice`. Пожалуйста, убедитесь, что выбранные
-> ресурсы удовлетворяют следующим требованиям:
-> - Поле `Consumable` имеет значение `true`.
-> - Для `Volume Group` типа `Local` указанные `BlockDevice` принадлежат одному узлу.
-<!-- > - Для `Volume Group` типа `Shared` указан единственный ресурс `BlockDevice`. -->
-> - Указаны актуальные имена ресурсов `BlockDevice`.
->
-> С полным списком ожидаемых значений вы можете ознакомиться с помощью [CR-референса](./cr.html) `LVMVolumeGroup`-ресурса.
+Как правило, проблема кроется в некорректно указанных ресурсах `BlockDevice`. Пожалуйста, убедитесь, что выбранные
+ресурсы удовлетворяют следующим требованиям:
+- Поле `Consumable` имеет значение `true`.
+- Для `Volume Group` типа `Local` указанные `BlockDevice` принадлежат одному узлу.<!-- > - Для `Volume Group` типа `Shared` указан единственный ресурс `BlockDevice`. -->
+- Указаны актуальные имена ресурсов `BlockDevice`.
+
+С полным списком ожидаемых значений вы можете ознакомиться с помощью [CR-референса](./cr.html) `LVMVolumeGroup`-ресурса.
 
 ## Что произойдет, если я отключу один из девайсов в `Volume Group`? Соответствующий ресурс `LVMVolumeGroup` удалится?
 
@@ -73,6 +72,6 @@ vgchange myvg-0 --addtag storage.deckhouse.io/enabled=true
 
 ## Я не вешал LVM-тег `storage.deckhouse.io/enabled=true` на `Volume Group`, но он появился. Как это возможно?
 
-Это возможно в случае, если вы создавали `LVM Volume Group` через ресурс `LVMVolumeGroup` (в таком случае контроллер автоматически вешает данный LVM-тег на созданную `LVM Volume Group`). Либо на данной `Volume Group` или ее `Thin-pool` был LVM-тег модуля `Linstor` — `linstor-*`.
+Это возможно в случае, если вы создавали `LVM Volume Group` через ресурс `LVMVolumeGroup` (в таком случае контроллер автоматически вешает данный LVM-тег на созданную `LVM Volume Group`). Либо на данной `Volume Group` или ее `Thin-pool` был LVM-тег модуля `linstor` — `linstor-*`.
 
-При миграции с встроенного модуля `Linstor` на модули `sds-node-configurator` и `sds-drbd` автоматически происходит изменение LVM-тегов `linstor-*` на LVM-тег `storage.deckhouse.io/enabled=true` в `Volume Group`. Таким образом, управление этими `Volume Group` передается модулю `sds-node-configurator`.
+При миграции с встроенного модуля `linstor` на модули `sds-node-configurator` и `sds-drbd` автоматически происходит изменение LVM-тегов `linstor-*` на LVM-тег `storage.deckhouse.io/enabled=true` в `Volume Group`. Таким образом, управление этими `Volume Group` передается модулю `sds-node-configurator`.

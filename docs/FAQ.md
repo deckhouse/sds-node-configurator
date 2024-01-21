@@ -35,13 +35,12 @@ Most likely, your resource fails controller validation, although it has passed t
 The exact cause of the failure can be found in the `status.message` field of the resource itself, 
 or you can refer to the controller's logs.
 
-> The problem usually stems from incorrectly defined `BlockDevice` resources. Please make sure that these resources meet the following requirements:
-> - The `Consumable` field is set to `true`.
-> - For a `Volume Group` of type `Local`, the specified `BlockDevice` belong to the same node.
-<!-- > - For a `Volume Group` of type `Shared`, the specified `BlockDevice` is the only resource. -->
-> - The current names of the `BlockDevice` resources are specified.
->
-> The full list of expected values can be found in the [CR reference](./cr.html) of the `LVMVolumeGroup` resource.
+The problem usually stems from incorrectly defined `BlockDevice` resources. Please make sure that these resources meet the following requirements:
+- The `Consumable` field is set to `true`.
+- For a `Volume Group` of type `Local`, the specified `BlockDevice` belong to the same node.<!-- > - For a `Volume Group` of type `Shared`, the specified `BlockDevice` is the only resource. -->
+- The current names of the `BlockDevice` resources are specified.
+
+The full list of expected values can be found in the [CR reference](./cr.html) of the `LVMVolumeGroup` resource.
 
 ## What happens if I unplug one of the devices in a `Volume Group`? Will the linked `LVMVolumeGroup` resource be deleted?
 
@@ -70,6 +69,6 @@ The controller will then stop tracking the selected `Volume Group` and delete th
 
 ## I haven't added the `storage.deckhouse.io/enabled=true` LVM tag to the `Volume Group`, but it is there. How is this possible?
 
-This is possible if you have created the `LVM Volume Group` using the `LVMVolumeGroup` resource, in which case the controller will automatically add this LVM tag to the created `LVM Volume Group`. Alternatively, this applies if the `Volume Group` or its `Thin-pool` already had the `linstor` module LVM tag (`linstor-*`).å
+This is possible if you have created the `LVM Volume Group` using the `LVMVolumeGroup` resource, in which case the controller will automatically add this LVM tag to the created `LVM Volume Group`. Alternatively, this applies if the `Volume Group` or its `Thin-pool` already had the `linstor` module LVM tag `linstor-*`.
 
 When you switch from the `linstor` module to the `sds-node-configurator` and `sds-drbd` modules, the `linstor-*` LVM tags are automatically replaced with the `storage.deckhouse.io/enabled=true` LVM tag in the `Volume Group`. This way, the `sds-node-configurator` gets control of these `Volume Groups`.
