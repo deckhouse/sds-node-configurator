@@ -1,6 +1,6 @@
 ---
-title: "Модуль SDS-Node-Configurator: CRs"
-description: "Референсы SDS-Node-Configurator CRs: BlockDevice и LVMVolumeGroup."
+title: "Модуль SDS-Node-Configurator: Custom Resources"
+description: "Референсы SDS-Node-Configurator Custom Resources: BlockDevice и LVMVolumeGroup."
 ---
 
 {{< alert level="warning" >}}
