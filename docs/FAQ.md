@@ -1,5 +1,5 @@
 ---
-title: "The SDS-Node-Configurator module: FAQ"
+title: "The sds-node-configurator module: FAQ"
 description: "Common questions and answers."
 ---
 

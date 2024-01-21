@@ -1,6 +1,6 @@
 ---
-title: "Модуль SDS-Node-Configurator: Custom Resources"
-description: "Референсы SDS-Node-Configurator Custom Resources: BlockDevice и LVMVolumeGroup."
+title: "Модуль sds-node-configurator: Custom Resources"
+description: "Референсы sds-node-configurator Custom Resources: BlockDevice и LVMVolumeGroup."
 ---
 
 {{< alert level="warning" >}}

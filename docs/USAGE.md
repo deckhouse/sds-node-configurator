@@ -1,6 +1,6 @@
 ---
-title: "The SDS-Node-Configurator module: usage examples"
-description: Usage and examples of the SDS-Node-Configurator controller operation.
+title: "The sds-node-configurator module: usage examples"
+description: Usage and examples of the sds-node-configurator controller operation.
 ---
 
 {{< alert level="warning" >}}

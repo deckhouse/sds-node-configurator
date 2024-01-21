@@ -1,6 +1,6 @@
 ---
-title: "The SDS-Node-Configurator module"
-description: "The SDS-Node-Configurator module: General Concepts and Principles."
+title: "The sds-node-configurator module"
+description: "The sds-node-configurator module: General Concepts and Principles."
 moduleStatus: experimental
 ---
 

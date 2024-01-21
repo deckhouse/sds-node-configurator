@@ -1,6 +1,6 @@
 ---
-title: "Модуль SDS-Node-Configurator"
-description: "Модуль SDS-Node-Configurator: общие концепции и положения."
+title: "Модуль sds-node-configurator"
+description: "Модуль sds-node-configurator: общие концепции и положения."
 moduleStatus: experimental
 ---
 {{< alert level="warning" >}}

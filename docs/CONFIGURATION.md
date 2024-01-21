@@ -1,5 +1,5 @@
 ---
-title: "The Sds-Node-Configurator module: settings"
+title: "The sds-node-configurator module: settings"
 ---
 
 {{< alert level="warning" >}}

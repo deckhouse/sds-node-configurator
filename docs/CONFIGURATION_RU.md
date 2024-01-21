@@ -1,5 +1,5 @@
 ---
-title: "Модуль Sds-Node-Configurator: настройки"
+title: "Модуль sds-node-configurator: настройки"
 ---
 
 {{< alert level="warning" >}}

@@ -1,6 +1,6 @@
 ---
-title: "Модуль SDS-Node-Configurator: примеры использования"
-description: Использование и примеры работы SDS-Node-Configurator контроллера.
+title: "Модуль sds-node-configurator: примеры использования"
+description: Использование и примеры работы sds-node-configurator контроллера.
 ---
 
 {{< alert level="warning" >}}

@@ -1,5 +1,5 @@
 ---
-title: " Модуль SDS-Node-Configurator: FAQ"
+title: " Модуль sds-node-configurator: FAQ"
 description: "Распространенные вопросы и ответы на них."
 ---
 {{< alert level="warning" >}}
