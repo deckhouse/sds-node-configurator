@@ -52,13 +52,13 @@ spec:
                 pvUUID:
                   type: string
                   description: |
-                    The Physical Volume UUID.
+                    The LVM Physical Volume UUID.
                     
-                    > Optional: exists only if the device is used as a Physical Volume.
+                    > Optional: exists only if the device is used as a LVM Physical Volume.
                 vgUUID:
                   type: string
                   description: | 
-                    The UUID of the Volume Group to which this device belongs as a Physical Volume.
+                    The UUID of the LVM Volume Group to which this device belongs as a Physical Volume.
 
                     > Optional: exists only if the device is used as a Physical Volume and is included in a Volume Group.
                 lvmVolumeGroupName:
@@ -70,7 +70,7 @@ spec:
                 actualVGNameOnTheNode:
                   type: string
                   description: |
-                    The actual name of the Volume Group the device is included in.
+                    The actual name of the LVM Volume Group the device is included in.
                     
                     > Optional: exists if only the device is used as a Physical Volume and is included in a Volume Group.
                 wwn:
@@ -78,7 +78,7 @@ spec:
                   description: |
                     The device unique wwn (World Wide Name) identifier.
                     
-                    > Optional: might be empty if no WWN was set.
+                    > Optional: might be empty if WWN is not supported for this type of disk by the manufacturer.
                 serial:
                   type: string
                   description: |
@@ -86,7 +86,7 @@ spec:
                 path:
                   type: string
                   description: |
-                    The device path (name).
+                    The device path on the node (/dev/sda).
                 size:
                   type: string
                   description: |
@@ -96,19 +96,19 @@ spec:
                   description: |
                     The device model.
                     
-                    > Optional: might be empty if no model was set.
+                    > Optional: might be empty if not supported by the manufacturer for this type of disk.
                 rota:
                   type: boolean
                   description: |
                     The device media type. Might be:
-                    - 'True' (for HHD)
-                    - 'False' (for SSD)
+                    - 'true' (for HHD)
+                    - 'false' (for SSD)
                 hotPlug:
                   type: boolean
                   description: |
                     The device connection type. Might be:
-                    - 'True' (if the device has been hotPlugged)
-                    - 'False' (otherwise)
+                    - 'true' (if the device has been hotPlugged)
+                    - 'false' (otherwise)
                 machineId:
                   type: string
                   description: |
