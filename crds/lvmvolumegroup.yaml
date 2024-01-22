@@ -26,7 +26,7 @@ spec:
           description: |
             An interface for managing Volume Groups and Thin pools on the nodes.
             
-            > These resources might be created both by a user and the sds-node-configurator controller. The sds-node-configurator controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. The controller will fill both the 'Spec' and 'Status' fields.
+            > These resources might be created both by a user and the sds-node-configurator controller. The sds-node-configurator controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. The controller will fill in both the 'spec' and 'status' fields.
           required:
             - spec
           properties:
@@ -37,7 +37,7 @@ spec:
                   type: string
                   description: |
                     The type of a Volume Group. Might be:
-                    - Local, meaning local if the used devices are not distributed (not Shared LUN).
+                    - Local, that is, local if the devices used are not distributed (not Shared LUN).
                   enum:
                     - Local
                 blockDeviceNames:
@@ -102,7 +102,7 @@ spec:
                 allocatedSize:
                   type: string
                   description: |
-                    The current space occupied on the Volume Group.
+                    The amount of space currently occupied on the Volume Group.
                 thinPools:
                   type: array
                   description: |

@@ -24,7 +24,7 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            The resource displays actual information about block devices, which might be used by the sds-node-configurator controller for operations in LVM.
+            The resource displays up-to-date information about available block devices on nodes that can be used by the sds-node-configurator controller for LVM operations.
             
             > The resource is created and managed by the controller only. Manual modification of the resource is prohibited.
           properties:
@@ -58,7 +58,7 @@ spec:
                 vgUUID:
                   type: string
                   description: | 
-                    The UUID of the LVM Volume Group to which this device belongs as a Physical Volume.
+                    The UUID of the LVM Volume Group to which this device belongs to as a Physical Volume.
 
                     > Optional: exists only if the device is used as a Physical Volume and is included in a Volume Group.
                 lvmVolumeGroupName:
@@ -66,7 +66,7 @@ spec:
                   description: | 
                     The LVMVolumeGroup resource name. 
                     
-                    > Optional: exists only if the device is used as a Physical Volume, included in a Volume Group, and specified in an LVMVolumeGroup resource.
+                    > Optional: exists only if the device is used as a Physical Volume, is included in a Volume Group, and is specified in an LVMVolumeGroup resource.
                 actualVGNameOnTheNode:
                   type: string
                   description: |
