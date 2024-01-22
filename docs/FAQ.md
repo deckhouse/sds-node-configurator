@@ -1,6 +1,6 @@
 ---
 title: "The sds-node-configurator module: FAQ"
-description: "Common questions and answers."
+description: "Deckhouse Kubernetes Platform. The sds-node-configurator module. Common questions and answers."
 ---
 
 {{< alert level="warning" >}}

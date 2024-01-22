@@ -1,6 +1,6 @@
 ---
 title: "The sds-node-configurator module: usage examples"
-description: Usage and examples of the sds-node-configurator controller operation.
+description: Usage and examples of the sds-node-configurator controller operation. Deckhouse Kubernetes Platform.
 ---
 
 {{< alert level="warning" >}}
