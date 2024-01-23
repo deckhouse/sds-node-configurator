@@ -90,6 +90,7 @@ func RunLVMVolumeGroupWatcherController(
 			log.Warning(fmt.Sprintf(`Added request, namespace: "%s" name: "%s", to requeue`, request.Namespace, request.Name))
 		}
 	}
+
 	updateFunc := func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
 		log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] update LVMVolumeGroupn, name: %s", e.ObjectNew.GetName()))
 

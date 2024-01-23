@@ -669,20 +669,20 @@ func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVDat
 	tps := make([]internal.LVMVGStatusThinPool, 0, len(filtered))
 
 	for _, lv := range filtered {
-		usedSize, err := getUsedSizeMiB(lv) //todo rename
+		usedSize, err := getLVUsedSize(lv)
 		if err != nil {
-			log.Error(err, "[getStatusThinPools] unable to getUsedSizeMiB")
+			log.Error(err, "[getStatusThinPools] unable to getLVUsedSize")
 		}
 		tps = append(tps, internal.LVMVGStatusThinPool{
 			Name:       lv.LVName,
 			ActualSize: lv.LVSize,
-			UsedSize:   usedSize,
+			UsedSize:   usedSize.String(),
 		})
 	}
 	return tps
 }
 
-func getUsedSizeMiB(lv internal.LVData) (string, error) {
+func getLVUsedSize(lv internal.LVData) (*resource.Quantity, error) {
 	var (
 		err         error
 		dataPercent float64
@@ -693,12 +693,13 @@ func getUsedSizeMiB(lv internal.LVData) (string, error) {
 	} else {
 		dataPercent, err = strconv.ParseFloat(lv.DataPercent, 64)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 
 	tmp := float64(lv.LVSize.Value()) * dataPercent
-	return utils.BytesToQuantity(int64(tmp)), nil
+
+	return resource.NewQuantity(int64(tmp), resource.BinarySI), nil
 }
 
 func isThinPool(lv internal.LVData) bool {

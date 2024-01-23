@@ -112,10 +112,10 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			DataPercent: "50",
 		}
 		expected := "97656250Ki"
-		actual, err := getUsedSizeMiB(lv)
+		actual, err := getLVUsedSize(lv)
 
 		if assert.NoError(t, err) {
-			assert.Equal(t, expected, actual)
+			assert.Equal(t, expected, actual.String())
 		}
 	})
 

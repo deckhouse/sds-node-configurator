@@ -77,17 +77,19 @@ func NewConfig() (*Options, error) {
 func getMachineId() (string, error) {
 	id := os.Getenv(MachineID)
 	if id == "" {
-		args := []string{"-m", "-u", "-i", "-n", "-p", "-t", "1", "cat", "/etc/machine-id"}
+		args := []string{"-m", "-u", "-i", "-n", "-p", "-t", "1", "cat", "./etc/machine-id"}
 
-		var stdout *bytes.Buffer
+		var stdout bytes.Buffer
 		cmd := exec.Command("/usr/bin/nsenter", args...)
-		cmd.Stdout = stdout
+		cmd.Stdout = &stdout
 		err := cmd.Run()
 		if err != nil {
 			return "", err
 		}
 
 		id = stdout.String()
+		fmt.Println("MACHINE ID " + id)
+
 	}
 
 	return id, nil
