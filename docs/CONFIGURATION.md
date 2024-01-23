@@ -1,14 +1,10 @@
 ---
-title: "The Sds-Node-Configurator module: settings"
+title: "The sds-node-configurator module: settings"
+description: "Settings of the sds-node-configurator module. Deckhouse Kubernetes Platform."
 ---
-{% alert level="warning" %}
-The module is guaranteed to work in the following cases only:
-- if stock kernels shipped with [supported distributions](../../supported_versions.html#linux) are used;
-- if a 10Gbps network is used.
 
-As for any other configurations, the module may work, but its smooth operation is not guaranteed.
-{% endalert %}
+{{< alert level="warning" >}}
+The module is guaranteed to work only with stock kernels that are shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
 
-{% include module-bundle.liquid %}
-
-No configuration on the user's side is required
+The module may work with other kernels or distributions, but its stable operation and availability of all features is not guaranteed.
+{{< /alert >}}
