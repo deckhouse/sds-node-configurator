@@ -463,6 +463,10 @@ func GetSerial(log logger.Logger, candidate internal.BlockDeviceCandidate) (stri
 }
 
 func readSerialBlockDevice(deviceName string) (string, error) {
+	if len(deviceName) < 6 {
+		return "", fmt.Errorf("device name is too short")
+	}
+
 	strPath := fmt.Sprintf("/sys/block/%s/serial", deviceName[5:])
 	serial, err := os.ReadFile(strPath)
 	if err != nil {
@@ -475,6 +479,10 @@ func readSerialBlockDevice(deviceName string) (string, error) {
 }
 
 func readUUIDmdRaidBlockDevice(deviceName string) (string, error) {
+	if len(deviceName) < 6 {
+		return "", fmt.Errorf("device name is too short")
+	}
+
 	strPath := fmt.Sprintf("/sys/block/%s/md/uuid", deviceName[5:])
 	uuid, err := os.ReadFile(strPath)
 	if err != nil {
