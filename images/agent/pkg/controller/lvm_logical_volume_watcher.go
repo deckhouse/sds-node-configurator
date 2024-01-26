@@ -88,20 +88,20 @@ func RunLVMLogicalVolumeWatcherController(
 			log.Info("[RunLVMLogicalVolumeWatcherController] UpdateFunc ends reconciliation")
 		},
 
-		DeleteFunc: func(ctx context.Context, e event.DeleteEvent, q workqueue.RateLimitingInterface) {
-			log.Info("[RunLVMLogicalVolumeWatcherController] DeleteFunc starts reconciliation")
-
-			llv, ok := e.Object.(*v1alpha1.LvmLogicalVolume)
-			if !ok {
-				err := errors.New("unable to cast event object to a given type")
-				log.Error(err, "[RunLVMLogicalVolumeWatcherController] an error occurs while handling delete event")
-				return
-			}
-
-			reconcileLLVDeleteFunc(ctx, cl, log, metrics, llv, cfg.NodeName)
-
-			log.Info("[RunLVMLogicalVolumeWatcherController] DeleteFunc ends reconciliation")
-		},
+		//DeleteFunc: func(ctx context.Context, e event.DeleteEvent, q workqueue.RateLimitingInterface) {
+		//	log.Info("[RunLVMLogicalVolumeWatcherController] DeleteFunc starts reconciliation")
+		//
+		//	llv, ok := e.Object.(*v1alpha1.LvmLogicalVolume)
+		//	if !ok {
+		//		err := errors.New("unable to cast event object to a given type")
+		//		log.Error(err, "[RunLVMLogicalVolumeWatcherController] an error occurs while handling delete event")
+		//		return
+		//	}
+		//
+		//	reconcileLLVDeleteFunc(ctx, cl, log, metrics, llv, cfg.NodeName)
+		//
+		//	log.Info("[RunLVMLogicalVolumeWatcherController] DeleteFunc ends reconciliation")
+		//},
 	})
 	if err != nil {
 		log.Error(err, "[RunLVMLogicalVolumeWatcherController] the controller is unable to watch")
@@ -167,6 +167,7 @@ func removeLLVFinalizers(ctx context.Context, cl client.Client, metrics monitori
 			llv.Finalizers = append(llv.Finalizers[:i], llv.Finalizers[i+1:]...)
 			removed = true
 			log.Debug(fmt.Sprintf("[removeLLVFinalizers] removed finalizer %s from the LVMLogicalVolume %s", internal.SdsNodeConfiguratorFinalizer, llv.Name))
+			break
 		}
 	}
 
