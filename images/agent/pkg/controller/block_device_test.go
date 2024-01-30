@@ -205,14 +205,14 @@ func TestBlockDeviceCtrl(t *testing.T) {
 	})
 
 	t.Run("validateTestLSBLKOutput", func(t *testing.T) {
-		log, err := logger.NewLogger("4")
+		log, err := logger.NewLogger("1")
 		if err != nil {
 			t.Fatal(err)
 		}
 		testLsblkOutputBytes := []byte(testLsblkOutput)
 		devices, err := utils.UnmarshalDevices(testLsblkOutputBytes)
 		if assert.NoError(t, err) {
-			assert.Equal(t, 17, len(devices))
+			assert.Equal(t, 19, len(devices))
 		}
 		filteredDevices, err := FilterDevices(*log, devices)
 
@@ -315,8 +315,8 @@ var (
 					"mountpoint": null,
 					"partuuid": null,
 					"hotplug": false,
-					"model": "Micron_7450_MTFDKCC1T9TFR",
-					"serial": "2310407BBBBB",
+					"model": "Micron",
+					"serial": "000000BBBBB",
 					"size": "1.7T",
 					"fstype": "ceph_bluestore",
 					"type": "disk",
@@ -328,12 +328,12 @@ var (
 					"mountpoint": null,
 					"partuuid": null,
 					"hotplug": false,
-					"model": "Micron_7450_MTFDKCC1T9TFR",
-					"serial": "2310407B1B12",
+					"model": "Micron",
+					"serial": "000000AAAA",
 					"size": "1.7T",
 					"fstype": null,
 					"type": "disk",
-					"wwn": "eui.000000000000000100a07523407b1b12",
+					"wwn": "eui.000000000000000100aaaab",
 					"kname": "/dev/nvme4n1",
 					"pkname": null
 			 },{
@@ -341,12 +341,12 @@ var (
 					"mountpoint": null,
 					"partuuid": null,
 					"hotplug": false,
-					"model": "Micron_7450_MTFDKCC1T9TFR",
-					"serial": "2310407AAAAA",
+					"model": "Micron",
+					"serial": "000000AAAAA",
 					"size": "1.7T",
 					"fstype": null,
 					"type": "disk",
-					"wwn": "eui.000000000000000100a07523407b1bbb",
+					"wwn": "eui.000000000000000100aaaaac",
 					"kname": "/dev/nvme5n1",
 					"pkname": null
 			 },{
@@ -354,12 +354,12 @@ var (
 					"mountpoint": null,
 					"partuuid": null,
 					"hotplug": false,
-					"model": "Micron_7450_MTFDKCC1T9TFR",
-					"serial": "2310402499EC",
+					"model": "Micron",
+					"serial": "000000AAAAAB",
 					"size": "1.7T",
 					"fstype": "ceph_bluestore",
 					"type": "disk",
-					"wwn": "eui.000000000000000100a07523402499ec",
+					"wwn": "eui.000000000000000100aaaaab",
 					"kname": "/dev/nvme0n1",
 					"pkname": null
 			 },{
@@ -367,12 +367,12 @@ var (
 					"mountpoint": null,
 					"partuuid": null,
 					"hotplug": false,
-					"model": "SAMSUNG MZQL2960HCJR-00A07",
-					"serial": "S64FNE0RB09450",
+					"model": "SAMSUNG",
+					"serial": "000000AAAAAC",
 					"size": "894.3G",
 					"fstype": null,
 					"type": "disk",
-					"wwn": "eui.3634463052b094500025384500000001",
+					"wwn": "eui.000000000000000100aaaaad",
 					"kname": "/dev/nvme2n1",
 					"pkname": null
 			 },{
@@ -380,93 +380,120 @@ var (
 					"mountpoint": null,
 					"partuuid": null,
 					"hotplug": false,
-					"model": "SAMSUNG MZQL2960HCJR-00A07",
-					"serial": "S64FNE0R601010",
+					"model": "SAMSUNG",
+					"serial": "000000AAAAAD",
 					"size": "894.3G",
 					"fstype": null,
 					"type": "disk",
-					"wwn": "eui.36344630526010100025384500000001",
+					"wwn": "eui.000000000000000100aaaaad",
 					"kname": "/dev/nvme3n1",
 					"pkname": null
 			 },{
 					"name": "/dev/nvme2n1p1",
 					"mountpoint": null,
-					"partuuid": "0fdb72e6-e2bb-47fb-8cc1-4d0083566c6b",
+					"partuuid": "11111111-e2bb-47fb-8cc1-xxxxxxx",
 					"hotplug": false,
 					"model": null,
 					"serial": null,
 					"size": "256M",
 					"fstype": "vfat",
 					"type": "part",
-					"wwn": "eui.3634463052b094500025384500000001",
+					"wwn": "eui.000000000000000100aaaaae",
 					"kname": "/dev/nvme2n1p1",
 					"pkname": "/dev/nvme2n1"
 			 },{
 					"name": "/dev/nvme2n1p2",
 					"mountpoint": null,
-					"partuuid": "4dbeebd3-d3d4-416a-ac76-f9ea30ab2540",
+					"partuuid": "11111111-d3d4-416a-ac76-xxxxxxx",
 					"hotplug": false,
 					"model": null,
 					"serial": null,
 					"size": "1G",
 					"fstype": "linux_raid_member",
 					"type": "part",
-					"wwn": "eui.3634463052b094500025384500000001",
+					"wwn": "eui.000000000000000100aaaaaf",
 					"kname": "/dev/nvme2n1p2",
 					"pkname": "/dev/nvme2n1"
 			 },{
 					"name": "/dev/nvme2n1p3",
 					"mountpoint": null,
-					"partuuid": "77371c7e-3677-4eb2-9491-5cfdfe0e47e3",
+					"partuuid": "11111111-3677-4eb2-9491-xxxxxxx",
 					"hotplug": false,
 					"model": null,
 					"serial": null,
 					"size": "893G",
 					"fstype": "linux_raid_member",
 					"type": "part",
-					"wwn": "eui.3634463052b094500025384500000001",
+					"wwn": "eui.000000000000000100aaaaag",
 					"kname": "/dev/nvme2n1p3",
 					"pkname": "/dev/nvme2n1"
 			 },{
 					"name": "/dev/nvme3n1p1",
 					"mountpoint": "/boot/efi",
-					"partuuid": "21e913d5-2965-47d3-8983-cfc17f13aae4",
+					"partuuid": "11111111-2965-47d3-8983-xxxxxxx",
 					"hotplug": false,
 					"model": null,
 					"serial": null,
 					"size": "256M",
 					"fstype": "vfat",
 					"type": "part",
-					"wwn": "eui.36344630526010100025384500000001",
+					"wwn": "eui.000000000000000100aaaaah",
 					"kname": "/dev/nvme3n1p1",
 					"pkname": "/dev/nvme3n1"
 			 },{
 					"name": "/dev/nvme3n1p2",
 					"mountpoint": null,
-					"partuuid": "81aa4d8e-7fa2-4318-91c4-85a2f03c785f",
+					"partuuid": "11111111-7fa2-4318-91c4-xxxxxxx",
 					"hotplug": false,
 					"model": null,
 					"serial": null,
 					"size": "1G",
 					"fstype": "linux_raid_member",
 					"type": "part",
-					"wwn": "eui.36344630526010100025384500000001",
+					"wwn": "eui.000000000000000100aaaaabs",
 					"kname": "/dev/nvme3n1p2",
 					"pkname": "/dev/nvme3n1"
 			 },{
 					"name": "/dev/nvme3n1p3",
 					"mountpoint": null,
-					"partuuid": "f0123e46-734d-45f4-b60e-b9666397251b",
+					"partuuid": "11111111-734d-45f4-b60e-xxxxxxx",
 					"hotplug": false,
 					"model": null,
 					"serial": null,
 					"size": "893G",
 					"fstype": "linux_raid_member",
 					"type": "part",
-					"wwn": "eui.36344630526010100025384500000001",
+					"wwn": "eui.000000000000000100aaaaaccx",
 					"kname": "/dev/nvme3n1p3",
 					"pkname": "/dev/nvme3n1"
-			 }
+			 },{
+         "name": "/dev/sda",
+         "mountpoint": null,
+         "partuuid": null,
+         "hotplug": false,
+         "model": "Virtual_Disk",
+         "serial": "6006",
+         "size": "50G",
+         "fstype": null,
+         "type": "disk",
+         "wwn": "0x6006",
+         "kname": "/dev/sda",
+         "pkname": null
+      },
+      {
+         "name": "/dev/sda1",
+         "mountpoint": "/data",
+         "partuuid": "11111-01",
+         "hotplug": false,
+         "model": null,
+         "serial": null,
+         "size": "50G",
+         "fstype": "ext4",
+         "type": "part",
+         "wwn": "0x6006",
+         "kname": "/dev/sda1",
+         "pkname": "/dev/sda"
+      }
 		]
  }`
 )
