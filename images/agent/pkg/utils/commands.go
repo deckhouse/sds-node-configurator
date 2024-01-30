@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	nsenter = "/usr/bin/nsenter"
+	nsenter = "/usr/bin/nsenter -m -u -i -n -p -t 1"
 )
 
 func GetBlockDevices() ([]internal.Device, string, error) {
