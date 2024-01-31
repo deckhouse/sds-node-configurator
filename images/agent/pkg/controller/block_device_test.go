@@ -479,7 +479,7 @@ var (
 					"wwn": "0x6006",
 					"kname": "/dev/sda",
 					"pkname": null
-			},{
+				},{
 					"name": "/dev/sda1",
 					"mountpoint": "/data",
 					"partuuid": "11111-01",
