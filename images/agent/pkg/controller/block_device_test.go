@@ -245,7 +245,7 @@ var (
 	testLsblkOutput = `
 	{
 		"blockdevices": [
-			 {
+				{
 					"name": "/dev/md0",
 					"mountpoint": "/boot",
 					"partuuid": null,
@@ -258,7 +258,7 @@ var (
 					"wwn": null,
 					"kname": "/dev/md0",
 					"pkname": "/dev/nvme3n1p2"
-			 },{
+				},{
 					"name": "/dev/md1",
 					"mountpoint": null,
 					"partuuid": null,
@@ -271,7 +271,7 @@ var (
 					"wwn": null,
 					"kname": "/dev/md1",
 					"pkname": "/dev/nvme3n1p3"
-			 },{
+				},{
 					"name": "/dev/mapper/vg0-root",
 					"mountpoint": "/",
 					"partuuid": null,
@@ -284,19 +284,19 @@ var (
 					"wwn": null,
 					"kname": "/dev/dm-0",
 					"pkname": "/dev/md1"
-			 },{
-				 "name": "/dev/md127",
-				 "mountpoint": null,
-				 "partuuid": null,
-				 "hotplug": false,
-				 "model": null,
-				 "serial": null,
-				 "size": "3.3T",
-				 "fstype": "LVM2_member",
-				 "type": "raid1",
-				 "wwn": null,
-				 "kname": "/dev/md127",
-				 "pkname": null
+				},{
+					"name": "/dev/md127",
+					"mountpoint": null,
+					"partuuid": null,
+					"hotplug": false,
+					"model": null,
+					"serial": null,
+					"size": "3.3T",
+					"fstype": "LVM2_member",
+					"type": "raid1",
+					"wwn": null,
+					"kname": "/dev/md127",
+					"pkname": null
 				},{
 					"name": "/dev/mapper/vg0-pvc--nnnn--nnnnn--nnnn--nnnn--nnnnn_00000",
 					"mountpoint": null,
@@ -310,7 +310,7 @@ var (
 					"wwn": null,
 					"kname": "/dev/dm-1",
 					"pkname": "/dev/md127"
-			 	},{
+				},{
 					"name": "/dev/nvme1n1",
 					"mountpoint": null,
 					"partuuid": null,
@@ -323,7 +323,7 @@ var (
 					"wwn": "eui.000000000000000100aaaaa",
 					"kname": "/dev/nvme1n1",
 					"pkname": null
-			 },{
+				},{
 					"name": "/dev/nvme4n1",
 					"mountpoint": null,
 					"partuuid": null,
@@ -336,7 +336,7 @@ var (
 					"wwn": "eui.000000000000000100aaaab",
 					"kname": "/dev/nvme4n1",
 					"pkname": null
-			 },{
+				},{
 					"name": "/dev/nvme5n1",
 					"mountpoint": null,
 					"partuuid": null,
@@ -349,7 +349,7 @@ var (
 					"wwn": "eui.000000000000000100aaaaac",
 					"kname": "/dev/nvme5n1",
 					"pkname": null
-			 },{
+				},{
 					"name": "/dev/nvme0n1",
 					"mountpoint": null,
 					"partuuid": null,
@@ -362,7 +362,7 @@ var (
 					"wwn": "eui.000000000000000100aaaaab",
 					"kname": "/dev/nvme0n1",
 					"pkname": null
-			 },{
+				},{
 					"name": "/dev/nvme2n1",
 					"mountpoint": null,
 					"partuuid": null,
@@ -375,7 +375,7 @@ var (
 					"wwn": "eui.000000000000000100aaaaad",
 					"kname": "/dev/nvme2n1",
 					"pkname": null
-			 },{
+				},{
 					"name": "/dev/nvme3n1",
 					"mountpoint": null,
 					"partuuid": null,
@@ -388,7 +388,7 @@ var (
 					"wwn": "eui.000000000000000100aaaaad",
 					"kname": "/dev/nvme3n1",
 					"pkname": null
-			 },{
+				},{
 					"name": "/dev/nvme2n1p1",
 					"mountpoint": null,
 					"partuuid": "11111111-e2bb-47fb-8cc1-xxxxxxx",
@@ -401,7 +401,7 @@ var (
 					"wwn": "eui.000000000000000100aaaaae",
 					"kname": "/dev/nvme2n1p1",
 					"pkname": "/dev/nvme2n1"
-			 },{
+				},{
 					"name": "/dev/nvme2n1p2",
 					"mountpoint": null,
 					"partuuid": "11111111-d3d4-416a-ac76-xxxxxxx",
@@ -414,7 +414,7 @@ var (
 					"wwn": "eui.000000000000000100aaaaaf",
 					"kname": "/dev/nvme2n1p2",
 					"pkname": "/dev/nvme2n1"
-			 },{
+				},{
 					"name": "/dev/nvme2n1p3",
 					"mountpoint": null,
 					"partuuid": "11111111-3677-4eb2-9491-xxxxxxx",
@@ -427,7 +427,7 @@ var (
 					"wwn": "eui.000000000000000100aaaaag",
 					"kname": "/dev/nvme2n1p3",
 					"pkname": "/dev/nvme2n1"
-			 },{
+				},{
 					"name": "/dev/nvme3n1p1",
 					"mountpoint": "/boot/efi",
 					"partuuid": "11111111-2965-47d3-8983-xxxxxxx",
@@ -440,7 +440,7 @@ var (
 					"wwn": "eui.000000000000000100aaaaah",
 					"kname": "/dev/nvme3n1p1",
 					"pkname": "/dev/nvme3n1"
-			 },{
+				},{
 					"name": "/dev/nvme3n1p2",
 					"mountpoint": null,
 					"partuuid": "11111111-7fa2-4318-91c4-xxxxxxx",
@@ -453,7 +453,7 @@ var (
 					"wwn": "eui.000000000000000100aaaaabs",
 					"kname": "/dev/nvme3n1p2",
 					"pkname": "/dev/nvme3n1"
-			 },{
+				},{
 					"name": "/dev/nvme3n1p3",
 					"mountpoint": null,
 					"partuuid": "11111111-734d-45f4-b60e-xxxxxxx",
@@ -466,34 +466,33 @@ var (
 					"wwn": "eui.000000000000000100aaaaaccx",
 					"kname": "/dev/nvme3n1p3",
 					"pkname": "/dev/nvme3n1"
-			 },{
-				 "name": "/dev/sda",
-				 "mountpoint": null,
-				 "partuuid": null,
-				 "hotplug": false,
-				 "model": "Virtual_Disk",
-				 "serial": "6006",
-				 "size": "50G",
-				 "fstype": null,
-				 "type": "disk",
-				 "wwn": "0x6006",
-				 "kname": "/dev/sda",
-				 "pkname": null
-			},
-			{
-				 "name": "/dev/sda1",
-				 "mountpoint": "/data",
-				 "partuuid": "11111-01",
-				 "hotplug": false,
-				 "model": null,
-				 "serial": null,
-				 "size": "50G",
-				 "fstype": "ext4",
-				 "type": "part",
-				 "wwn": "0x6006",
-				 "kname": "/dev/sda1",
-				 "pkname": "/dev/sda"
+				},{
+					"name": "/dev/sda",
+					"mountpoint": null,
+					"partuuid": null,
+					"hotplug": false,
+					"model": "Virtual_Disk",
+					"serial": "6006",
+					"size": "50G",
+					"fstype": null,
+					"type": "disk",
+					"wwn": "0x6006",
+					"kname": "/dev/sda",
+					"pkname": null
+			},{
+					"name": "/dev/sda1",
+					"mountpoint": "/data",
+					"partuuid": "11111-01",
+					"hotplug": false,
+					"model": null,
+					"serial": null,
+					"size": "50G",
+					"fstype": "ext4",
+					"type": "part",
+					"wwn": "0x6006",
+					"kname": "/dev/sda1",
+					"pkname": "/dev/sda"
 			}
 		]
- }`
+	}`
 )
