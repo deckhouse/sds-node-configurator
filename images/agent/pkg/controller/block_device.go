@@ -232,7 +232,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 		return nil, fmt.Errorf("unable to GetBlockDevices, err: %w", err)
 	}
 
-	filteredDevices, err := filterDevices(log, devices)
+	filteredDevices, err := FilterDevices(log, devices)
 	if err != nil {
 		log.Error(err, "[GetBlockDeviceCandidates] unable to filter devices")
 		return nil, err
@@ -327,12 +327,11 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 	return candidates, nil
 }
 
-func filterDevices(log logger.Logger, devices []internal.Device) ([]internal.Device, error) {
+func FilterDevices(log logger.Logger, devices []internal.Device) ([]internal.Device, error) {
 	log.Trace(fmt.Sprintf("[filterDevices] devices before type filtration: %+v", devices))
 
 	validTypes := make([]internal.Device, 0, len(devices))
 
-	// We do first filtering to avoid block of devices by "isParent" condition with FSType "LVM2_member".
 	for _, device := range devices {
 		if !strings.HasPrefix(device.Name, internal.DRBDName) &&
 			hasValidType(device.Type) &&
@@ -344,13 +343,17 @@ func filterDevices(log logger.Logger, devices []internal.Device) ([]internal.Dev
 	log.Trace(fmt.Sprintf("[filterDevices] devices after type filtration: %+v", validTypes))
 
 	pkNames := make(map[string]struct{}, len(validTypes))
-	for _, device := range validTypes {
-		pkNames[device.PkName] = struct{}{}
+	for _, device := range devices {
+		if device.PkName != "" {
+			log.Trace(fmt.Sprintf("[filterDevices] find parent %s for child : %+v.", device.PkName, device))
+			pkNames[device.PkName] = struct{}{}
+		}
 	}
+	log.Trace(fmt.Sprintf("[filterDevices] pkNames: %+v", pkNames))
 
 	filtered := make([]internal.Device, 0, len(validTypes))
 	for _, device := range validTypes {
-		if !isParent(device.KName, pkNames) {
+		if !isParent(device.KName, pkNames) || device.FSType == internal.LVMFSType {
 			validSize, err := hasValidSize(device.Size)
 			if err != nil {
 				return nil, err

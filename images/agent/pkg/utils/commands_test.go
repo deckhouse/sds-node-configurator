@@ -17,9 +17,10 @@ limitations under the License.
 package utils
 
 import (
-	"k8s.io/apimachinery/pkg/api/resource"
 	"sds-node-configurator/internal"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -99,7 +100,7 @@ func TestCommands(t *testing.T) {
 				},
 			}}
 
-			actualDevices, err := unmarshalDevices([]byte(js))
+			actualDevices, err := UnmarshalDevices([]byte(js))
 			if assert.NoError(t, err) {
 				assert.Equal(t, expectedDevices.BlockDevices, actualDevices)
 			}
@@ -138,7 +139,7 @@ func TestCommands(t *testing.T) {
       }
    ]
 }`
-			_, err := unmarshalDevices([]byte(js))
+			_, err := UnmarshalDevices([]byte(js))
 			assert.Error(t, err)
 		})
 	})
