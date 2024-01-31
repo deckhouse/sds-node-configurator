@@ -285,19 +285,19 @@ var (
 					"kname": "/dev/dm-0",
 					"pkname": "/dev/md1"
 			 },{
-         "name": "/dev/md127",
-         "mountpoint": null,
-         "partuuid": null,
-         "hotplug": false,
-         "model": null,
-         "serial": null,
-         "size": "3.3T",
-         "fstype": "LVM2_member",
-         "type": "raid1",
-         "wwn": null,
-         "kname": "/dev/md127",
-         "pkname": null
-      	},{
+				 "name": "/dev/md127",
+				 "mountpoint": null,
+				 "partuuid": null,
+				 "hotplug": false,
+				 "model": null,
+				 "serial": null,
+				 "size": "3.3T",
+				 "fstype": "LVM2_member",
+				 "type": "raid1",
+				 "wwn": null,
+				 "kname": "/dev/md127",
+				 "pkname": null
+				},{
 					"name": "/dev/mapper/vg0-pvc--nnnn--nnnnn--nnnn--nnnn--nnnnn_00000",
 					"mountpoint": null,
 					"partuuid": null,
@@ -467,33 +467,33 @@ var (
 					"kname": "/dev/nvme3n1p3",
 					"pkname": "/dev/nvme3n1"
 			 },{
-         "name": "/dev/sda",
-         "mountpoint": null,
-         "partuuid": null,
-         "hotplug": false,
-         "model": "Virtual_Disk",
-         "serial": "6006",
-         "size": "50G",
-         "fstype": null,
-         "type": "disk",
-         "wwn": "0x6006",
-         "kname": "/dev/sda",
-         "pkname": null
-      },
-      {
-         "name": "/dev/sda1",
-         "mountpoint": "/data",
-         "partuuid": "11111-01",
-         "hotplug": false,
-         "model": null,
-         "serial": null,
-         "size": "50G",
-         "fstype": "ext4",
-         "type": "part",
-         "wwn": "0x6006",
-         "kname": "/dev/sda1",
-         "pkname": "/dev/sda"
-      }
+				 "name": "/dev/sda",
+				 "mountpoint": null,
+				 "partuuid": null,
+				 "hotplug": false,
+				 "model": "Virtual_Disk",
+				 "serial": "6006",
+				 "size": "50G",
+				 "fstype": null,
+				 "type": "disk",
+				 "wwn": "0x6006",
+				 "kname": "/dev/sda",
+				 "pkname": null
+			},
+			{
+				 "name": "/dev/sda1",
+				 "mountpoint": "/data",
+				 "partuuid": "11111-01",
+				 "hotplug": false,
+				 "model": null,
+				 "serial": null,
+				 "size": "50G",
+				 "fstype": "ext4",
+				 "type": "part",
+				 "wwn": "0x6006",
+				 "kname": "/dev/sda1",
+				 "pkname": "/dev/sda"
+			}
 		]
  }`
 )
