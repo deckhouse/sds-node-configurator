@@ -212,7 +212,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		testLsblkOutputBytes := []byte(testLsblkOutput)
 		devices, err := utils.UnmarshalDevices(testLsblkOutputBytes)
 		if assert.NoError(t, err) {
-			assert.Equal(t, 19, len(devices))
+			assert.Equal(t, 26, len(devices))
 		}
 		filteredDevices, err := FilterDevices(*log, devices)
 
@@ -231,11 +231,14 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			case 3:
 				assert.Equal(t, "/dev/nvme5n1", device.Name)
 				assert.True(t, CheckConsumable(device))
+			case 4:
+				assert.Equal(t, "/dev/sda4", device.Name)
+				assert.False(t, CheckConsumable(device))
 			}
 
 		}
 		if assert.NoError(t, err) {
-			assert.Equal(t, 4, len(filteredDevices))
+			assert.Equal(t, 5, len(filteredDevices))
 		}
 	})
 
@@ -492,6 +495,97 @@ var (
 					"wwn": "0x6006",
 					"kname": "/dev/sda1",
 					"pkname": "/dev/sda"
+				},{
+					"name": "/dev/sda",
+					"mountpoint": null,
+					"partuuid": null,
+					"hotplug": false,
+					"model": "INTEL SSDSC2KB48",
+					"serial": "PHYS729000AS480BGN",
+					"size": "447.1G",
+					"fstype": null,
+					"type": "disk",
+					"wwn": "0x55cd2e414e193b8c",
+					"kname": "/dev/sda",
+					"pkname": null
+				},{
+					"name": "/dev/sda1",
+					"mountpoint": "/boot/efi",
+					"partuuid": "e2ac92cc-6a34-4402-a253-40533a3fc877",
+					"hotplug": false,
+					"model": null,
+					"serial": null,
+					"size": "1G",
+					"fstype": "vfat",
+					"type": "part",
+					"wwn": "0x55cd2e414e193b8c",
+					"kname": "/dev/sda1",
+					"pkname": "/dev/sda"
+				},{
+					"name": "/dev/sda2",
+					"mountpoint": null,
+					"partuuid": "e95db4fa-99b4-42c4-9dc4-ff5459557801",
+					"hotplug": false,
+					"model": null,
+					"serial": null,
+					"size": "1G",
+					"fstype": "linux_raid_member",
+					"type": "part",
+					"wwn": "0x55cd2e414e193b8c",
+					"kname": "/dev/sda2",
+					"pkname": "/dev/sda"
+				},{
+					"name": "/dev/sda3",
+					"mountpoint": null,
+					"partuuid": "ed7633b6-f3ef-4b4a-86f8-48c0180de78f",
+					"hotplug": false,
+					"model": null,
+					"serial": null,
+					"size": "55G",
+					"fstype": "linux_raid_member",
+					"type": "part",
+					"wwn": "0x55cd2e414e193b8c",
+					"kname": "/dev/sda3",
+					"pkname": "/dev/sda"
+				},{
+					"name": "/dev/sda4",
+					"mountpoint": null,
+					"partuuid": "6f1d599d-9f91-41c5-9616-69709cf30b9d",
+					"hotplug": false,
+					"model": null,
+					"serial": null,
+					"size": "390.1G",
+					"fstype": "LVM2_member",
+					"type": "part",
+					"wwn": "0x55cd2e414e193b8c",
+					"kname": "/dev/sda4",
+					"pkname": "/dev/sda"
+				},{
+					"name": "/dev/mapper/data--linstor-pvc--9671a7f4--8997--4630--a728--2cd6f915c19b_00000",
+					"mountpoint": null,
+					"partuuid": null,
+					"hotplug": false,
+					"model": null,
+					"serial": null,
+					"size": "30G",
+					"fstype": null,
+					"type": "lvm",
+					"wwn": null,
+					"kname": "/dev/dm-18",
+					"pkname": "/dev/sda4"
+				},{
+					"name": "/dev/drbd1028",
+					"mountpoint": null,
+					"partuuid": null,
+					"hotplug": false,
+					"model": null,
+					"serial": null,
+					"size": "50G",
+					"fstype": null,
+					"type": "disk",
+					"wwn": null,
+					"kname": "/dev/drbd1028",
+					"pkname": "/dev/dm-10"
 			}
 		]
 	}`

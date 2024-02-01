@@ -281,14 +281,18 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 					log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] Type = part and cannot get PartUUID; skipping this device, path: %s", candidate.Path))
 					continue
 				}
+				log.Info(fmt.Sprintf("[GetBlockDeviceCandidates] Type = part and PartUUID is not empty; using PartUUID as serial number, path: %s", candidate.Path))
+				candidate.Serial = candidate.PartUUID
 			} else {
 				serial, err := GetSerial(log, candidate)
 				if err != nil {
 					log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] Unable to obtain serial number or its equivalent; skipping device: %s. Error: %s", candidate.Path, err))
 					continue
 				}
+				log.Info(fmt.Sprintf("[GetBlockDeviceCandidates] Successfully obtained serial number or its equivalent: %s for device: %s", serial, candidate.Path))
 				candidate.Serial = serial
 			}
+			log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Serial number is now: %s", candidate.Serial))
 		}
 
 		candidate.Name = CreateUniqDeviceName(candidate)
@@ -453,8 +457,10 @@ func GetSerial(log logger.Logger, candidate internal.BlockDeviceCandidate) (stri
 		log.Error(err, "[GetSerial] unable to regexp.MatchString. Trying to get serial from device")
 		serial, err = readSerialBlockDevice(candidate.Path)
 	} else if matched {
+		log.Trace("[GetSerial] device is mdraid")
 		serial, err = readUUIDmdRaidBlockDevice(candidate.Path)
 	} else {
+		log.Trace("[GetSerial] device is not mdraid")
 		serial, err = readSerialBlockDevice(candidate.Path)
 	}
 
@@ -490,6 +496,9 @@ func readUUIDmdRaidBlockDevice(deviceName string) (string, error) {
 	uuid, err := os.ReadFile(strPath)
 	if err != nil {
 		return "", fmt.Errorf("unable to read uuid from mdraid block device: %s, error: %s", deviceName, err)
+	}
+	if len(uuid) == 0 {
+		return "", fmt.Errorf("uuid of mdraid block device is empty")
 	}
 	return string(uuid), nil
 }
