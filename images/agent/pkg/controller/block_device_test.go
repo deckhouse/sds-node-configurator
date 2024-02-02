@@ -218,22 +218,41 @@ func TestBlockDeviceCtrl(t *testing.T) {
 
 		for i, device := range filteredDevices {
 			println("Filtered device: ", device.Name)
+			candidate := internal.BlockDeviceCandidate{
+				NodeName:   "test-node",
+				Consumable: CheckConsumable(device),
+				Wwn:        device.Wwn,
+				Serial:     device.Serial,
+				Path:       device.Name,
+				Size:       device.Size,
+				Rota:       device.Rota,
+				Model:      device.Model,
+				HotPlug:    device.HotPlug,
+				KName:      device.KName,
+				PkName:     device.PkName,
+				Type:       device.Type,
+				FSType:     device.FSType,
+				PartUUID:   device.PartUUID,
+			}
 			switch i {
 			case 0:
 				assert.Equal(t, "/dev/md1", device.Name)
-				assert.False(t, CheckConsumable(device))
+				assert.False(t, candidate.Consumable)
 			case 1:
 				assert.Equal(t, "/dev/md127", device.Name)
-				assert.False(t, CheckConsumable(device))
+				assert.False(t, candidate.Consumable)
 			case 2:
 				assert.Equal(t, "/dev/nvme4n1", device.Name)
-				assert.True(t, CheckConsumable(device))
+				assert.True(t, candidate.Consumable)
 			case 3:
 				assert.Equal(t, "/dev/nvme5n1", device.Name)
-				assert.True(t, CheckConsumable(device))
+				assert.True(t, candidate.Consumable)
 			case 4:
 				assert.Equal(t, "/dev/sda4", device.Name)
-				assert.False(t, CheckConsumable(device))
+				assert.False(t, candidate.Consumable)
+				candidateName := CreateCandidateName(*log, candidate)
+				assert.Equal(t, "dev-377bc6adf33d84eb5932f5c89798bb6c5949ae2d", candidateName, "device name generated incorrectly")
+
 			}
 
 		}
@@ -500,68 +519,68 @@ var (
 					"mountpoint": null,
 					"partuuid": null,
 					"hotplug": false,
-					"model": "INTEL SSDSC2KB48",
-					"serial": "PHYS729000AS480BGN",
+					"model": "INTEL",
+					"serial": "PHYS729000AAAA",
 					"size": "447.1G",
 					"fstype": null,
 					"type": "disk",
-					"wwn": "0x55cd2e414e193b8c",
+					"wwn": "0x5555555",
 					"kname": "/dev/sda",
 					"pkname": null
 				},{
 					"name": "/dev/sda1",
 					"mountpoint": "/boot/efi",
-					"partuuid": "e2ac92cc-6a34-4402-a253-40533a3fc877",
+					"partuuid": "xxxxx-6a34-4402-a253-nnnnn",
 					"hotplug": false,
 					"model": null,
 					"serial": null,
 					"size": "1G",
 					"fstype": "vfat",
 					"type": "part",
-					"wwn": "0x55cd2e414e193b8c",
+					"wwn": "0x5555555",
 					"kname": "/dev/sda1",
 					"pkname": "/dev/sda"
 				},{
 					"name": "/dev/sda2",
 					"mountpoint": null,
-					"partuuid": "e95db4fa-99b4-42c4-9dc4-ff5459557801",
+					"partuuid": "xxxxx-99b4-42c4-9dc4-nnnnnnn",
 					"hotplug": false,
 					"model": null,
 					"serial": null,
 					"size": "1G",
 					"fstype": "linux_raid_member",
 					"type": "part",
-					"wwn": "0x55cd2e414e193b8c",
+					"wwn": "0x5555555",
 					"kname": "/dev/sda2",
 					"pkname": "/dev/sda"
 				},{
 					"name": "/dev/sda3",
 					"mountpoint": null,
-					"partuuid": "ed7633b6-f3ef-4b4a-86f8-48c0180de78f",
+					"partuuid": "xxxxx-f3ef-4b4a-86f8-nnnnnn",
 					"hotplug": false,
 					"model": null,
 					"serial": null,
 					"size": "55G",
 					"fstype": "linux_raid_member",
 					"type": "part",
-					"wwn": "0x55cd2e414e193b8c",
+					"wwn": "0x5555555",
 					"kname": "/dev/sda3",
 					"pkname": "/dev/sda"
 				},{
 					"name": "/dev/sda4",
 					"mountpoint": null,
-					"partuuid": "6f1d599d-9f91-41c5-9616-69709cf30b9d",
+					"partuuid": "xxxxx-9f91-41c5-9616-nnnnnn",
 					"hotplug": false,
 					"model": null,
 					"serial": null,
 					"size": "390.1G",
 					"fstype": "LVM2_member",
 					"type": "part",
-					"wwn": "0x55cd2e414e193b8c",
+					"wwn": "0x55cddd",
 					"kname": "/dev/sda4",
 					"pkname": "/dev/sda"
 				},{
-					"name": "/dev/mapper/data--linstor-pvc--9671a7f4--8997--4630--a728--2cd6f915c19b_00000",
+					"name": "/dev/mapper/data--linstor-pvc--xxxx--8997--4630--a728--nnnnnn_00000",
 					"mountpoint": null,
 					"partuuid": null,
 					"hotplug": false,
