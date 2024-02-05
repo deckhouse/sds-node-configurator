@@ -220,7 +220,7 @@ func CreateThickLogicalVolume(vgName, lvName, size string) (string, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to lvcreate, err: %w stdert: %s", err, stderr.String())
+		return cmd.String(), fmt.Errorf("unable to lvcreate, cmd: %s ,err: %w stdert: %s", cmd.String(), err, stderr.String())
 	}
 
 	return cmd.String(), nil
