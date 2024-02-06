@@ -37,9 +37,12 @@ func GetBlockDevices() ([]internal.Device, string, error) {
 	cmd := exec.Command(nsenter, extendedArgs...)
 	cmd.Stdout = &outs
 
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
 	err := cmd.Run()
 	if err != nil {
-		return nil, cmd.String(), fmt.Errorf("unable to GetBlockDevices, err: %w", err)
+		return nil, cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
 	devices, err := unmarshalDevices(outs.Bytes())
@@ -58,8 +61,8 @@ func GetAllVGs() (data []internal.VGData, command string, stdErr bytes.Buffer, e
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
-	if err := cmd.Run(); err != nil {
-		return nil, cmd.String(), stdErr, fmt.Errorf("unable to GetAllVGs, err: %w", err)
+	if err = cmd.Run(); err != nil {
+		return nil, cmd.String(), stdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stdErr.String())
 	}
 
 	data, err = unmarshalVGs(outs.Bytes())
@@ -78,8 +81,8 @@ func GetAllLVs() (data []internal.LVData, command string, stdErr bytes.Buffer, e
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
-	if err := cmd.Run(); err != nil {
-		return nil, cmd.String(), stdErr, fmt.Errorf("unable to GetAllLVs, err: %w", err)
+	if err = cmd.Run(); err != nil {
+		return nil, cmd.String(), stdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stdErr.String())
 	}
 
 	lvs, err := unmarshalLVs(outs.Bytes())
@@ -98,8 +101,8 @@ func GetAllPVs() (data []internal.PVData, command string, stdErr bytes.Buffer, e
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
-	if err := cmd.Run(); err != nil {
-		return nil, cmd.String(), stdErr, fmt.Errorf("unable to GetAllPVs, err: %w", err)
+	if err = cmd.Run(); err != nil {
+		return nil, cmd.String(), stdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stdErr.String())
 	}
 
 	data, err = unmarshalPVs(outs.Bytes())
@@ -108,32 +111,6 @@ func GetAllPVs() (data []internal.PVData, command string, stdErr bytes.Buffer, e
 	}
 
 	return data, cmd.String(), stdErr, nil
-}
-
-func GetSinglePV(pVname string) (*internal.PVData, string, error) {
-	var outs bytes.Buffer
-	args := []string{"pvs", pVname, "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--reportformat", "json"}
-	extendedArgs := extendArgs(args)
-	cmd := exec.Command(nsenter, extendedArgs...)
-	cmd.Stdout = &outs
-
-	if err := cmd.Run(); err != nil {
-		return nil, cmd.String(), fmt.Errorf("unable to GetSinglePV, err: %w", err)
-	}
-
-	pvs, err := unmarshalPVs(outs.Bytes())
-	if err != nil {
-		return nil, cmd.String(), fmt.Errorf("unable to GetSinglePV, err: %w", err)
-	}
-
-	singlePv := pvs[0]
-
-	if len(pvs) != 1 ||
-		singlePv.PVName != pVname {
-		return nil, cmd.String(), fmt.Errorf(`unable to GetSinglePV by name: "%s"`, pVname)
-	}
-
-	return &singlePv, cmd.String(), nil
 }
 
 func CreatePV(path string) (string, error) {
@@ -145,7 +122,7 @@ func CreatePV(path string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to CreatePV, err: %w , stderror = %s", err, stderr.String())
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderror = %s", cmd.String(), err, stderr.String())
 	}
 
 	return cmd.String(), nil
@@ -162,7 +139,7 @@ func CreateVGLocal(vgName, lvmName string, pvNames []string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to CreateVGLocal, err: %w , stderror = %s", err, stderr.String())
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderror: %s", cmd.String(), err, stderr.String())
 	}
 
 	return cmd.String(), nil
@@ -173,8 +150,11 @@ func CreateVGShared(vgName, lvmName string, pvNames []string) (string, error) {
 	extendedArgs := extendArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to CreateVGShared, err: %w", err)
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
 	return cmd.String(), nil
@@ -189,7 +169,7 @@ func CreateThinPool(thinPool v1alpha1.SpecThinPool, VGName string) (string, erro
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to CreateThinPool, err: %w tderr = %s", err, stderr.String())
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 	return cmd.String(), nil
 }
@@ -206,7 +186,7 @@ func CreateThinLogicalVolume(vgName, tpName, lvName, size string) (string, error
 
 	err := cmd.Run()
 	if err != nil {
-		return cmd.String(), err
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
 	return cmd.String(), nil
@@ -219,8 +199,9 @@ func CreateThickLogicalVolume(vgName, lvName, size string) (string, error) {
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to lvcreate, cmd: %s ,err: %w stdert: %s", cmd.String(), err, stderr.String())
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
 	return cmd.String(), nil
@@ -235,7 +216,7 @@ func ExtendVG(vgName string, paths []string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to ExtendVG, err: %w stderr = %s", err, stderr.String())
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
 	return cmd.String(), nil
@@ -250,7 +231,7 @@ func ExtendLV(size, vgName, lvName string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to ExtendLV, err: %w stderr = %s", err, stderr.String())
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
 	return cmd.String(), nil
@@ -260,78 +241,12 @@ func ResizePV(pvName string) (string, error) {
 	args := []string{"pvresize", pvName}
 	extendedArgs := extendArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
-	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to ResizePV, err: %w", err)
-	}
 
-	return cmd.String(), nil
-}
-
-func RemovePVFromVG(pvName, vgName string) (string, error) {
-	pvs, cmdStr, _, err := GetAllPVs()
-	if err != nil {
-		return cmdStr, fmt.Errorf("unable to RemovePVFromVG, err: %w", err)
-	}
-
-	if len(pvs) == 1 {
-		pv := pvs[0]
-
-		if pv.PVName != pvName ||
-			pv.VGName != vgName {
-			return cmdStr,
-				fmt.Errorf(
-					`unable to RemovePVFromVG, err: unexpected pv gotten, no pv with pvName: "%s", vgName: "%s"`,
-					pvName, vgName)
-		}
-
-		if pv.PVUsed != "0 " {
-			return cmdStr, fmt.Errorf("unable to RemovePVFromVG, err: single PVData has data")
-		}
-
-		cmdStr, err = RemoveVG(pv.VGName)
-		return cmdStr, err
-	}
-
-	if cmdStr, err = MovePV(pvName); err != nil {
-		return cmdStr, err
-	}
-
-	clr, cmdStr, err := CheckPVHasNoData(pvName)
-	if err != nil {
-		return cmdStr, err
-	}
-
-	if !clr {
-		return cmdStr, fmt.Errorf(`unable to RemovePVFromVG, err: can't move LV segments from PVData, pv name: "%s"`, pvName)
-	}
-
-	args := []string{"vgreduce", vgName, pvName}
-	extendedArgs := extendArgs(args)
-	cmd := exec.Command(nsenter, extendedArgs...)
-	if err = cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf(`unable to RemovePVFromVG with vgName: "%s", pvName: "%s", err: %w`,
-			vgName, pvName, err)
-	}
-
-	return cmd.String(), nil
-}
-
-func CheckPVHasNoData(pvName string) (bool, string, error) {
-	pv, cmdStr, err := GetSinglePV(pvName)
-	if err != nil {
-		return true, cmdStr, err
-	}
-
-	return pv.PVUsed == "0 ", cmdStr, nil
-}
-
-func MovePV(pvName string) (string, error) {
-	args := []string{"pvmove", pvName}
-	extendedArgs := extendArgs(args)
-	cmd := exec.Command(nsenter, extendedArgs...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to MovePV, err: %w", err)
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
 	return cmd.String(), nil
@@ -346,7 +261,7 @@ func RemoveVG(vgName string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to RemoveVG, err: %w stderr = %s", err, stderr.String())
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
 	return cmd.String(), nil
@@ -361,7 +276,7 @@ func RemovePV(pvNames []string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to RemovePV, err: %w stderr = %s", err, stderr.String())
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr, %s", cmd.String(), err, stderr.String())
 	}
 	return cmd.String(), nil
 }
@@ -375,7 +290,50 @@ func RemoveLV(vgName, lvName string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to RemoveLV, err: %w stderr = %s", err, stderr.String())
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+func VGChangeAddTag(vGName, tag string) (string, error) {
+	var outs, stdErr bytes.Buffer
+	args := []string{"vgchange", vGName, "--addtag", tag}
+	extendedArgs := extendArgs(args)
+	cmd := exec.Command(nsenter, extendedArgs...)
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stdErr: %s", cmd.String(), err, stdErr.String())
+	}
+	return cmd.String(), nil
+}
+
+func VGChangeDelTag(vGName, tag string) (string, error) {
+	var outs, stdErr bytes.Buffer
+	args := []string{"vgchange", vGName, "--deltag", tag}
+	extendedArgs := extendArgs(args)
+	cmd := exec.Command(nsenter, extendedArgs...)
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stdErr: %s", cmd.String(), err, stdErr.String())
+	}
+	return cmd.String(), nil
+}
+
+func LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
+	tmpStr := fmt.Sprintf("/dev/%s/%s", lv.VGName, lv.LVName)
+	var outs, stdErr bytes.Buffer
+	args := []string{"lvchange", tmpStr, "--deltag", tag}
+	extendedArgs := extendArgs(args)
+	cmd := exec.Command(nsenter, extendedArgs...)
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stdErr: %s", cmd.String(), err, stdErr.String())
 	}
 	return cmd.String(), nil
 }
@@ -441,49 +399,6 @@ func unmarshalLVs(out []byte) ([]internal.LVData, error) {
 	}
 
 	return lvs, nil
-}
-
-func VGChangeAddTag(vGName, tag string) (string, error) {
-	var outs, stdErr bytes.Buffer
-	args := []string{"vgchange", vGName, "--addtag", tag}
-	extendedArgs := extendArgs(args)
-	cmd := exec.Command(nsenter, extendedArgs...)
-	cmd.Stdout = &outs
-	cmd.Stderr = &stdErr
-
-	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to VGChangeAddTag, err: %w , stdErr: %s", err, stdErr.String())
-	}
-	return cmd.String(), nil
-}
-
-func VGChangeDelTag(vGName, tag string) (string, error) {
-	var outs, stdErr bytes.Buffer
-	args := []string{"vgchange", vGName, "--deltag", tag}
-	extendedArgs := extendArgs(args)
-	cmd := exec.Command(nsenter, extendedArgs...)
-	cmd.Stdout = &outs
-	cmd.Stderr = &stdErr
-
-	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to VGChangeDelTag, err: %w , stdErr: %s", err, stdErr.String())
-	}
-	return cmd.String(), nil
-}
-
-func LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
-	tmpStr := fmt.Sprintf("/dev/%s/%s", lv.VGName, lv.LVName)
-	var outs, stdErr bytes.Buffer
-	args := []string{"lvchange", tmpStr, "--deltag", tag}
-	extendedArgs := extendArgs(args)
-	cmd := exec.Command(nsenter, extendedArgs...)
-	cmd.Stdout = &outs
-	cmd.Stderr = &stdErr
-
-	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to LVChangeDelTag, err: %w , stdErr: %s", err, stdErr.String())
-	}
-	return cmd.String(), nil
 }
 
 func extendArgs(args []string) []string {
