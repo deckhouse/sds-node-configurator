@@ -282,7 +282,7 @@ func reconcileLLVUpdateFunc(
 	if err != nil {
 		log.Error(err, "[reconcileLLVUpdateFunc] unable to updateLVMLogicalVolumePhase")
 	}
-	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] updated LVMLogicaVolume %s status.phase to %s", llv.Name, pendingStatusPhase))
+	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] updated LVMLogicaVolume %s status.phase to %s", llv.Name, resizingStatusPhase))
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s spec.thin.poolname: \"%s\"", llv.Name, llv.Spec.Thin.PoolName))
 
 	extendingSize, err := getExtendingSize(log, metrics, llv)
@@ -381,7 +381,7 @@ func shouldReconcileByUpdateFunc(log logger.Logger, llv *v1alpha1.LvmLogicalVolu
 		return false, nil
 	}
 
-	if llv.Status.Phase == pendingStatusPhase {
+	if llv.Status.Phase == pendingStatusPhase || llv.Status.Phase == resizingStatusPhase {
 		return false, nil
 	}
 
