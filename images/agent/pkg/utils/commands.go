@@ -45,7 +45,7 @@ func GetBlockDevices() ([]internal.Device, string, error) {
 		return nil, cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
-	devices, err := unmarshalDevices(outs.Bytes())
+	devices, err := UnmarshalDevices(outs.Bytes())
 	if err != nil {
 		return nil, cmd.String(), fmt.Errorf("unable to unmarshal devices, err: %w", err)
 	}
@@ -338,7 +338,7 @@ func LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
 	return cmd.String(), nil
 }
 
-func unmarshalDevices(out []byte) ([]internal.Device, error) {
+func UnmarshalDevices(out []byte) ([]internal.Device, error) {
 	var devices internal.Devices
 	if err := json.Unmarshal(out, &devices); err != nil {
 		return nil, err

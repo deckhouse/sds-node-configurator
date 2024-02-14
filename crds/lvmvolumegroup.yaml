@@ -24,10 +24,9 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            LVMVolumeGroup is a Kubernetes Custom Resource for managing the Volume Groups and Thin pools on the nodes.
+            An interface for managing Volume Groups and Thin pools on the nodes.
             
-            > These resources might be created both by a user and the SDS-Node-Configurator controller. 
-            The SDS-Node-Configurator controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. The controller will fill both the 'Spec' and 'Status' fields.
+            > These resources might be created both by a user and the sds-node-configurator controller. The sds-node-configurator controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. The controller will fill in both the 'spec' and 'status' fields.
           required:
             - spec
           properties:
@@ -38,7 +37,7 @@ spec:
                   type: string
                   description: |
                     The type of a Volume Group. Might be:
-                    - Local (if Volume Group devices are not shared)
+                    - Local, that is, local if the devices used are not distributed (not Shared LUN).
                   enum:
                     - Local
                 blockDeviceNames:
@@ -78,10 +77,6 @@ spec:
                       - size
             status:
               type: object
-              description: |
-                Defines the current state of the Volume Group.
-                
-                > These params are updated by the controller.
               properties:
                 health:
                   type: string
@@ -103,11 +98,11 @@ spec:
                 vgSize:
                   type: string
                   description: |
-                    The total Volume Group size.
+                    The Volume Group capacity.
                 allocatedSize:
                   type: string
                   description: |
-                    The actual Volume Group size.
+                    The amount of space currently occupied on the Volume Group.
                 thinPools:
                   type: array
                   description: |
@@ -128,7 +123,7 @@ spec:
                       actualSize:
                         type: string
                         description: |
-                          The Thin-pool current total size.
+                          The Thin-pool capacity.
                       usedSize:
                         type: string
                         description: |
@@ -154,7 +149,7 @@ spec:
                             path:
                               type: string
                               description: |
-                                The device path (name) on the node.
+                                The device path on the node (e.g., /dev/sda).
                             pvSize:
                               type: string
                               description: |
@@ -166,7 +161,7 @@ spec:
                             pvUUID:
                               type: string
                               description: |
-                                The Physical Volume UUID.
+                                The LVM Physical Volume UUID.
                             blockDevice:
                               type: string
                               description: |

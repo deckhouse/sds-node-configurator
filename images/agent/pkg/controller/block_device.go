@@ -21,6 +21,7 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"os"
+	"regexp"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/config"
 	"sds-node-configurator/internal"
@@ -167,7 +168,7 @@ func GetAPIBlockDevices(ctx context.Context, kc kclient.Client, metrics monitori
 	metrics.ApiMethodsExecutionCount(blockDeviceCtrlName, "list").Inc()
 	if err != nil {
 		metrics.ApiMethodsErrors(blockDeviceCtrlName, "list").Inc()
-		return nil, fmt.Errorf("Unable to kc.List, error: %w", err)
+		return nil, fmt.Errorf("unable to kc.List, error: %w", err)
 	}
 
 	devices := make(map[string]v1alpha1.BlockDevice, len(listDevice.Items))
@@ -231,7 +232,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 		return nil, fmt.Errorf("unable to GetBlockDevices, err: %w", err)
 	}
 
-	filteredDevices, err := filterDevices(log, devices)
+	filteredDevices, err := FilterDevices(log, devices)
 	if err != nil {
 		log.Error(err, "[GetBlockDeviceCandidates] unable to filter devices")
 		return nil, err
@@ -272,27 +273,14 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 		}
 
 		log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Get following candidate: %+v", candidate))
-		if len(candidate.Serial) == 0 {
-			log.Info(fmt.Sprintf("[GetBlockDeviceCandidates] Serial is empty, trying to get it from device: %s", candidate.Path))
-			if candidate.Type == internal.TypePart {
-				if len(candidate.PartUUID) == 0 {
-					log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] Type = part and cannot get PartUUID; skipping this device, path: %s", candidate.Path))
-					continue
-				}
-			} else {
-				err, serial := readSerialBlockDevice(candidate.Path)
-				if err != nil {
-					log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] readSerialBlockDevice, err: %s", err.Error()))
+		candidateName := CreateCandidateName(log, candidate)
 
-					if len(candidate.Wwn) == 0 {
-						log.Warning(fmt.Sprintf("[GetBlockDeviceCandidates] Cannot get WWN and serial number; skipping this device, path: %s", candidate.Path))
-						continue
-					}
-				}
-				candidate.Serial = serial
-			}
+		if candidateName == "" {
+			log.Trace("[GetBlockDeviceCandidates] candidateName is empty. Skipping device")
+			continue
 		}
-		candidate.Name = CreateUniqDeviceName(candidate)
+
+		candidate.Name = candidateName
 		log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Generated a unique candidate name: %s", candidate.Name))
 
 		delFlag = false
@@ -328,12 +316,11 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 	return candidates, nil
 }
 
-func filterDevices(log logger.Logger, devices []internal.Device) ([]internal.Device, error) {
+func FilterDevices(log logger.Logger, devices []internal.Device) ([]internal.Device, error) {
 	log.Trace(fmt.Sprintf("[filterDevices] devices before type filtration: %+v", devices))
 
 	validTypes := make([]internal.Device, 0, len(devices))
 
-	// We do first filtering to avoid block of devices by "isParent" condition with FSType "LVM2_member".
 	for _, device := range devices {
 		if !strings.HasPrefix(device.Name, internal.DRBDName) &&
 			hasValidType(device.Type) &&
@@ -345,13 +332,17 @@ func filterDevices(log logger.Logger, devices []internal.Device) ([]internal.Dev
 	log.Trace(fmt.Sprintf("[filterDevices] devices after type filtration: %+v", validTypes))
 
 	pkNames := make(map[string]struct{}, len(validTypes))
-	for _, device := range validTypes {
-		pkNames[device.PkName] = struct{}{}
+	for _, device := range devices {
+		if device.PkName != "" {
+			log.Trace(fmt.Sprintf("[filterDevices] find parent %s for child : %+v.", device.PkName, device))
+			pkNames[device.PkName] = struct{}{}
+		}
 	}
+	log.Trace(fmt.Sprintf("[filterDevices] pkNames: %+v", pkNames))
 
 	filtered := make([]internal.Device, 0, len(validTypes))
 	for _, device := range validTypes {
-		if !isParent(device.KName, pkNames) {
+		if !isParent(device.KName, pkNames) || device.FSType == internal.LVMFSType {
 			validSize, err := hasValidSize(device.Size)
 			if err != nil {
 				return nil, err
@@ -438,19 +429,64 @@ func CheckTag(tags string) (bool, string) {
 	return true, ""
 }
 
+func CreateCandidateName(log logger.Logger, candidate internal.BlockDeviceCandidate) string {
+	if len(candidate.Serial) == 0 {
+		log.Trace(fmt.Sprintf("[CreateCandidateName] Serial number is empty for device: %s", candidate.Path))
+		if candidate.Type == internal.TypePart {
+			if len(candidate.PartUUID) == 0 {
+				log.Warning(fmt.Sprintf("[CreateCandidateName] Type = part and cannot get PartUUID; skipping this device, path: %s", candidate.Path))
+				return ""
+			}
+			log.Trace(fmt.Sprintf("[CreateCandidateName] Type = part and PartUUID is not empty; skiping getting serial number for device: %s", candidate.Path))
+		} else {
+			log.Debug(fmt.Sprintf("[CreateCandidateName] Serial number is empty and device type is not part; trying to obtain serial number or its equivalent for device: %s, with type: %s", candidate.Path, candidate.Type))
+
+			isMdRaid := false
+			matched, err := regexp.MatchString(`raid.*`, candidate.Type)
+			if err != nil {
+				log.Error(err, "[CreateCandidateName] failed to match regex - unable to determine if the device is an mdraid. Attempting to retrieve serial number directly from the device")
+			} else if matched {
+				log.Trace("[CreateCandidateName] device is mdraid")
+				isMdRaid = true
+			}
+			serial, err := readSerialBlockDevice(candidate.Path, isMdRaid)
+			if err != nil {
+				log.Warning(fmt.Sprintf("[CreateCandidateName] Unable to obtain serial number or its equivalent; skipping device: %s. Error: %s", candidate.Path, err))
+				return ""
+			}
+			log.Info(fmt.Sprintf("[CreateCandidateName] Successfully obtained serial number or its equivalent: %s for device: %s", serial, candidate.Path))
+			candidate.Serial = serial
+			log.Trace(fmt.Sprintf("[CreateCandidateName] Serial number is now: %s. Creating candidate name", candidate.Serial))
+		}
+	}
+
+	return CreateUniqDeviceName(candidate)
+}
+
 func CreateUniqDeviceName(can internal.BlockDeviceCandidate) string {
 	temp := fmt.Sprintf("%s%s%s%s%s", can.NodeName, can.Wwn, can.Model, can.Serial, can.PartUUID)
 	s := fmt.Sprintf("dev-%x", sha1.Sum([]byte(temp)))
 	return s
 }
 
-func readSerialBlockDevice(deviceName string) (error, string) {
+func readSerialBlockDevice(deviceName string, isMdRaid bool) (string, error) {
+	if len(deviceName) < 6 {
+		return "", fmt.Errorf("device name is too short")
+	}
 	strPath := fmt.Sprintf("/sys/block/%s/serial", deviceName[5:])
+
+	if isMdRaid {
+		strPath = fmt.Sprintf("/sys/block/%s/md/uuid", deviceName[5:])
+	}
+
 	serial, err := os.ReadFile(strPath)
 	if err != nil {
-		return err, ""
+		return "", fmt.Errorf("unable to read serial from block device: %s, error: %s", deviceName, err)
 	}
-	return nil, string(serial)
+	if len(serial) == 0 {
+		return "", fmt.Errorf("serial is empty")
+	}
+	return string(serial), nil
 }
 
 func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, res v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {

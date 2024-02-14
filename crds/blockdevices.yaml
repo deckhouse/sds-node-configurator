@@ -24,20 +24,18 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            BlockDevice is a Kubernetes Custom Resource that displays actual information about block devices, which might be used by the sds-node-configurator controller to create Volume Groups, extend Physical Volumes, and so on.
+            The resource displays up-to-date information about available block devices on nodes that can be used by the sds-node-configurator controller for LVM operations.
             
-            > The resource is created and managed by the controller only.
+            > The resource is created and managed by the controller only. Manual modification of the resource is prohibited.
           properties:
             status:
               type: object
-              description: |
-                Defines the current device state.
               required: [size,type,consumable,path,rota,hotPlug,nodeName,machineId]
               properties:
                 type:
                   type: string
                   description: |
-                    The device's type.
+                    The device's type (disk, part, RAID, and others).
                 fsType:
                   type: string
                   enum: [LVM2_member, ""]
@@ -50,17 +48,17 @@ spec:
                 consumable:
                   type: boolean
                   description: |
-                    The flag that defines whether this device can be used by the controller.
+                    The flag that defines whether this device can be used by the controller to create an LVM Physical Volume.
                 pvUUID:
                   type: string
                   description: |
-                    The Physical Volume UUID.
+                    The LVM Physical Volume UUID.
                     
-                    > Optional: exists only if the device is used as a Physical Volume.
+                    > Optional: exists only if the device is used as a LVM Physical Volume.
                 vgUUID:
                   type: string
                   description: | 
-                    The Volume Group UUID.
+                    The UUID of the LVM Volume Group to which this device belongs to as a Physical Volume.
 
                     > Optional: exists only if the device is used as a Physical Volume and is included in a Volume Group.
                 lvmVolumeGroupName:
@@ -68,11 +66,11 @@ spec:
                   description: | 
                     The LVMVolumeGroup resource name. 
                     
-                    > Optional: exists only if the device is used as a Physical Volume and is included in a Volume Group and LVMVolumeGroup resource.
+                    > Optional: exists only if the device is used as a Physical Volume, is included in a Volume Group, and is specified in an LVMVolumeGroup resource.
                 actualVGNameOnTheNode:
                   type: string
                   description: |
-                    The actual name of the Volume Group the device is included in.
+                    The actual name of the LVM Volume Group the device is included in.
                     
                     > Optional: exists if only the device is used as a Physical Volume and is included in a Volume Group.
                 wwn:
@@ -80,7 +78,7 @@ spec:
                   description: |
                     The device unique wwn (World Wide Name) identifier.
                     
-                    > Optional: might be empty if no WWN was set.
+                    > Optional: might be empty if WWN is not supported for this type of disk by the manufacturer.
                 serial:
                   type: string
                   description: |
@@ -88,7 +86,7 @@ spec:
                 path:
                   type: string
                   description: |
-                    The device path (name).
+                    The device path on the node (/dev/sda).
                 size:
                   type: string
                   description: |
@@ -98,19 +96,19 @@ spec:
                   description: |
                     The device model.
                     
-                    > Optional: might be empty if no model was set.
+                    > Optional: might be empty if not supported by the manufacturer for this type of disk.
                 rota:
                   type: boolean
                   description: |
                     The device media type. Might be:
-                    - 'True' (for HHD)
-                    - 'False' (for SSD)
+                    - 'true' (for HHD)
+                    - 'false' (for SSD)
                 hotPlug:
                   type: boolean
                   description: |
                     The device connection type. Might be:
-                    - 'True' (if the device has been hotPlugged)
-                    - 'False' (otherwise)
+                    - 'true' (if the device has been hotPlugged)
+                    - 'false' (otherwise)
                 machineId:
                   type: string
                   description: |

@@ -1,21 +1,19 @@
 ---
-title: "The SDS-Node-Configurator module: usage examples"
-description: Usage and examples of the SDS-Node-Configurator controller operation.
+title: "The sds-node-configurator module: usage examples"
+description: Usage and examples of the sds-node-configurator controller operation. Deckhouse Kubernetes Platform.
 ---
 
-{% alert level="warning" %}
-The module is guaranteed to work in the following cases only:
-- if stock kernels shipped with the [supported distributions](../../supported_versions.html#linux) are used;
-- if a 10Gbps network is used.
+{{< alert level="warning" >}}
+The module is guaranteed to work only with stock kernels that are shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
 
-As for any other configurations, the module may work, but its smooth operation is not guaranteed.
-{% endalert %}
+The module may work with other kernels or distributions, but its stable operation and availability of all features is not guaranteed.
+{{< /alert >}}
 
 The controller supports two types of resources:
 * `BlockDevice`;
 * `LVMVolumeGroup`.
 
-## [BlockDevice](block device) resources
+## `BlockDevice` resources
 
 ### Creating a `BlockDevice` resource
 
@@ -28,7 +26,7 @@ It contains all the information about the device in question.
 * The device is not a drbd device.
 * The device is not a pseudo-device (i.e. not a loop device).
 * The device is not a `Logical Volume`.
-* File system is missing or matches LVM2_MEMBER.
+* File system is missing or matches `LVM2_MEMBER`.
 * The block device has no partitions.
 * The size of the block device is greater than 1 Gi.
 * If the device is a virtual disk, it must have a serial number.
@@ -37,52 +35,84 @@ The controller will use the information from the custom resource to handle `LVMV
 
 ### Updating a `BlockDevice` resource
 
-The controller updates the information in the custom resource independently if the state of the block device it refers to has changed.
+The controller independently updates the information in the custom resource if the state of the block device to which it refers to has changed on the node.
 
 ### Deleting a `BlockDevice` resource
 
 The following are the cases in which the controller will automatically delete a resource if the block device it refers to has become unavailable:
 * if the resource had a Consumable status;
-* if the block device belongs to a `Volume Group` that does not have the tag `storage.deckhouse.io/enabled=true` attached to it (this `Volume Group` is not managed by our controller).
-
+* if the block device belongs to a `Volume Group` that does not have the LVM tag `storage.deckhouse.io/enabled=true` attached to it (this `Volume Group` is not managed by our controller).
 
 > The controller performs the above activities automatically and requires no user intervention.
 
-## [LVMVolumeGroup](lvmVolumeGroup) resources
+> If the resource is manually deleted, it will be recreated by the controller.
 
-The `BlockDevice` resources are required to create and update `LVMVolumeGroup` resources.
+## `LVMVolumeGroup` resources
 
-The `LVMVolumeGroup` resources are designed to communicate with the `Volume Group` and display up-to-date information about their state.
+`BlockDevice` resources are required to create and update `LVMVolumeGroup` resources.
+Currently, only local `Volume Groups` are supported.
+`LVMVolumeGroup` resources are designed to communicate with the `LVM Volume Groups` on nodes and display up-to-date information about their state.
 
-### Creating a `LVMVolumeGroup` resource and a `Volume Group`
+### Creating an `LVMVolumeGroup` resource
 
-There are two ways to create a `LVMVolumeGroup` resource:
+There are two ways to create an `LVMVolumeGroup` resource:
 * Automatically:
-  * The controller automatically scans for information about the existing `Volume Groups` on nodes and creates a resource 
-  if a `Volume Group` is tagged with `storage.deckhouse.io/enabled=true` and there is no matching resource for it.
+  * The controller automatically scans for information about the existing `LVM Volume Groups` on nodes and creates a resource if an `LVM Volume Group` is tagged with the `storage.deckhouse.io/enabled=true` LVM tag and there is no matching Kubernetes resource for it.
   * In this case, the controller populates all fields of the resource on its own.
 * By the user:
-  * The user manually creates the resource by filling in only the `Spec` field. In it, they specify the desired state of the new `Volume Group`.
-  * This information is then validated to ensure that the configuration provided is correct and can be implemented.
-  * After successful validation, the controller uses the provided information to create the specified `Volume Group` and update the user resource with the actual information about the state of the created `Volume Group`.  
+  * The user manually creates the resource by filling in only the `metadata.name` and `spec` fields. In it, they specify the desired state of the new `Volume Group`.
+  * This configuration is then validated to ensure its correctness.
+  * After successful validation, the controller uses the provided configuration to create the specified `LVM Volume Group` on the node and update the user resource with the actual information about the state of the created `LVM Volume Group`.
+  * An example of a resource for creating a local `LVM Volume Group` from multiple `BlockDevices`:
 
-### Updating a `LVMVolumeGroup` resource and a `Volume Group`
+    ```yaml
+    apiVersion: storage.deckhouse.io/v1alpha1
+    kind: LvmVolumeGroup
+    metadata:
+      name: "vg-0-on-node-0"
+    spec:
+      type: Local
+      blockDeviceNames:
+        - dev-c1de9f9b534bf5c0b44e8b1cd39da80d5cda7c3f
+        - dev-f3269d92a99e1f668255a47d5d3500add1462711
+      actualVGNameOnTheNode: "vg-0"
+    ```
+  
+  * An example of a resource for creating a local `LVM Volume Group` and a `Thin-pool` on it from multiple `BlockDevices`:
 
-The controller automatically updates the `Status` field of the `LVMVolumeGroup` with the current data about the `Volume Group` in question.
-We do **not recommend** making manual changes to the `Status` field.
+    ```yaml
+    apiVersion: storage.deckhouse.io/v1alpha1
+    kind: LvmVolumeGroup
+    metadata:
+      name: "vg-thin-on-node-0"
+    spec:
+      type: Local
+      blockDeviceNames:
+        - dev-0428672e39334e545eb96c85f8760fd59dcf15f1
+        - dev-456977ded72ef804dd7cec90eec94b10acdf99b7
+      actualVGNameOnTheNode: "vg-thin"
+      thinPools:
+      - name: thin-1
+        size: 250Gi
+    ```
+  
+  > Please note that the resource does not specify the node on which the `Volume Group` will be created. The node is picked from the `BlockDevice` resources whose names are listed in `spec.blockDeviceNames`.
 
-> The controller does not update the `Spec` field since it represents the desired state of the `Volume Group`. The user can make changes to the `Spec` field to change the state of the `Volume Group`.
+  > **Caution!** All the selected block devices must belong to the same node for a 'Local' `LVMVolumeGroup`.
 
-### Deleting a `LVMVolumeGroup` resource and a `Volume Group`
+### Updating an `LVMVolumeGroup` resource and a `Volume Group`
 
-The controller will automatically delete a resource if the `Volume Group` it references has become unavailable.
+The controller automatically updates the `status` field of the `LVMVolumeGroup` resource to display up-to-date data about the corresponding `LVM Volume Group` on the node.
+We do **not recommend** making manual changes to the `status` field.
 
-> The user may delete a resource manually. However, if the corresponding `Volume Group` still exists at the moment the resource is deleted, 
-> the controller will create a resource *automatically* based on the existing `Volume Group` 
-> and assign it a new generated name.
+> The controller does not update the `spec` field since it represents the desired state of the `LVM Volume Group`. The user can make changes to the `spec` field to change the state of the `LVM Volume Group` on the node.
 
-To delete a `Volume Group` and its associated `Physical Volume`, append the `storage.deckhouse.io/sds-delete-vg: ""` annotation to the corresponding `LVMVolumeGroup` resource.
+### Deleting an `LVMVolumeGroup` resource and a `Volume Group`
 
-The controller will detect that the annotation has been added and initiate the process of deleting the `Volume Group` and its parts.
+The controller will automatically delete a resource if the `Volume Group` it references has become unavailable (e.g., all block devices that made up the `Volume Group` have been unplugged).
 
-This will result in the `Volume Group` being deleted, as well as its associated `Physical Volume`, and the `LVMVolumeGroup` resource (**if there is no `Logical Volume`** on the `Volume Group`**). If there is a `Logical Volume` on the `Volume Group`, the user must first manually delete the `Logical Volume` on the node.
+> The user may delete a resource manually. However, if the corresponding `LVM Volume Group` still exists on the node at the moment the resource is deleted, the controller will create a resource *automatically* based on the existing `Volume Group` and assign a newly generated name to it.
+
+To delete an `LVM Volume Group` and its associated `LVM Physical Volume`, add the `storage.deckhouse.io/sds-delete-vg: ""` annotation to the corresponding `LVMVolumeGroup` resource. The controller will detect that the annotation has been added and initiate the process of deleting the `Volume Group` and its components from the node.
+
+> **Caution!** It is forbidden to delete an `LVM Volume Group` using the above method if it contains a `Logical Volume`, even if it is only the `Thin-pool` that is specified in `spec`. The user must delete all `Logical Volumes` that the `Volume Group` to be deleted contains.
