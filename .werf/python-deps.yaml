@@ -2,7 +2,7 @@
 ---
 image: python-dependencies
 from: registry.deckhouse.io/base_images/alpine:3.16.3
-fromCacheVersion: nonexisting
+fromCacheVersion: 2024-02-12
 git:
   - add: /
     to: /
