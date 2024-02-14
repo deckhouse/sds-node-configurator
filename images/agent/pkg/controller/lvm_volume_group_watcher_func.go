@@ -135,13 +135,10 @@ func ValidateLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.
 			status.Health = NonOperational
 			status.Phase = Failed
 			status.Message = "selected block devices are from different nodes for local LVMVolumeGroup"
-			return false, &status, nil
+			return false, &status, errors.New("wrong block devices selected")
 		}
 
 		if membership == 0 {
-			status.Health = NonOperational
-			status.Phase = Failed
-			status.Message = "selected block devices not affiliated to current Watcher's node"
 			return false, &status, nil
 		}
 	}

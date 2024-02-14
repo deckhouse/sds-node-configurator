@@ -33,13 +33,19 @@ spec:
               description: |
               properties:
                 type:
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
                   type: string
                   enum: [Thick, Thin]
                 size:
                   type: string
                 lvmVolumeGroup:
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
                   type: string
                 thin:
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
                   type: object
                   properties:
                     poolName:
@@ -56,6 +62,10 @@ spec:
                 actualSize:
                   type: string
       additionalPrinterColumns:
+        - jsonPath: .status.phase
+          name: Phase
+          type: string
+          description: The current resource status.
         - jsonPath: .spec.lvmVolumeGroup
           name: LVMVolumeGroup
           type: string

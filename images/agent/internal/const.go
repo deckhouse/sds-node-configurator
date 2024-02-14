@@ -17,14 +17,14 @@ limitations under the License.
 package internal
 
 const (
-	TypePart                  = "part"
-	DRBDName                  = "/dev/drbd"
-	LoopDeviceType            = "loop"
-	LVMDeviceType             = "lvm"
-	LVMFSType                 = "LVM2_member"
-	SdsNodeConfigurator       = "storage.deckhouse.io/sds-node-configurator"
-	LVMVGHealthOperational    = "Operational"
-	LVMVGHealthNonOperational = "NonOperational"
+	TypePart                     = "part"
+	DRBDName                     = "/dev/drbd"
+	LoopDeviceType               = "loop"
+	LVMDeviceType                = "lvm"
+	LVMFSType                    = "LVM2_member"
+	SdsNodeConfiguratorFinalizer = "storage.deckhouse.io/sds-node-configurator"
+	LVMVGHealthOperational       = "Operational"
+	LVMVGHealthNonOperational    = "NonOperational"
 )
 
 var (
@@ -32,6 +32,6 @@ var (
 	InvalidDeviceTypes   = [...]string{LoopDeviceType, LVMDeviceType}
 	BlockDeviceValidSize = "1G"
 	ResizeDelta          = "32Mi"
-	Finalizers           = []string{SdsNodeConfigurator}
+	Finalizers           = []string{SdsNodeConfiguratorFinalizer}
 	LVMTags              = []string{"storage.deckhouse.io/enabled=true", "linstor-"}
 )
