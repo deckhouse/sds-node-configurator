@@ -454,9 +454,9 @@ func ReconcileLVMVG(
 						if err != nil {
 							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, resource name: %s", group.Name))
 						}
-						newLVSizeStr := strconv.FormatInt(pool.Size.Value()/1024, 10)
+						//newLVSizeStr := strconv.FormatInt(pool.Size.Value()/1024, 10)
 						start := time.Now()
-						cmd, err := utils.ExtendLV(newLVSizeStr+"K", group.Spec.ActualVGNameOnTheNode, pool.Name)
+						cmd, err := utils.ExtendLV(pool.Size.Value(), group.Spec.ActualVGNameOnTheNode, pool.Name)
 						metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "lvextend").Observe(metrics.GetEstimatedTimeInSeconds(start))
 						metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "lvextend").Inc()
 						log.Debug(cmd)

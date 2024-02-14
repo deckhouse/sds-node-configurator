@@ -174,8 +174,8 @@ func CreateThinPool(thinPool v1alpha1.SpecThinPool, VGName string) (string, erro
 	return cmd.String(), nil
 }
 
-func CreateThinLogicalVolume(vgName, tpName, lvName, size string) (string, error) {
-	args := []string{"lvcreate", "-T", fmt.Sprintf("%s/%s", vgName, tpName), "-n", lvName, "-V", size, "-W", "y", "-y"}
+func CreateThinLogicalVolume(vgName, tpName, lvName string, size int64) (string, error) {
+	args := []string{"lvcreate", "-T", fmt.Sprintf("%s/%s", vgName, tpName), "-n", lvName, "-V", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
 	extendedArgs := extendArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
@@ -192,8 +192,8 @@ func CreateThinLogicalVolume(vgName, tpName, lvName, size string) (string, error
 	return cmd.String(), nil
 }
 
-func CreateThickLogicalVolume(vgName, lvName, size string) (string, error) {
-	args := []string{"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", size, "-W", "y", "-y"}
+func CreateThickLogicalVolume(vgName, lvName string, size int64) (string, error) {
+	args := []string{"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
 	extendedArgs := extendArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
@@ -222,8 +222,8 @@ func ExtendVG(vgName string, paths []string) (string, error) {
 	return cmd.String(), nil
 }
 
-func ExtendLV(size, vgName, lvName string) (string, error) {
-	args := []string{"lvextend", "-L", size, fmt.Sprintf("/dev/%s/%s", vgName, lvName)}
+func ExtendLV(size int64, vgName, lvName string) (string, error) {
+	args := []string{"lvextend", "-L", fmt.Sprintf("%dk", size/1024), fmt.Sprintf("/dev/%s/%s", vgName, lvName)}
 	extendedArgs := extendArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
