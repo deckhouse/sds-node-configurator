@@ -623,7 +623,7 @@ var (
 					"wwn": null,
 					"kname": "/dev/vdc",
 					"pkname": null
-			 },{
+				},{
 					"name": "/dev/vdc1",
 					"mountpoint": null,
 					"partuuid": "13dcb00e-01",
