@@ -212,7 +212,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		testLsblkOutputBytes := []byte(testLsblkOutput)
 		devices, err := utils.UnmarshalDevices(testLsblkOutputBytes)
 		if assert.NoError(t, err) {
-			assert.Equal(t, 26, len(devices))
+			assert.Equal(t, 28, len(devices))
 		}
 		filteredDevices, err := FilterDevices(*log, devices)
 
@@ -252,12 +252,17 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				assert.False(t, candidate.Consumable)
 				candidateName := CreateCandidateName(*log, candidate)
 				assert.Equal(t, "dev-377bc6adf33d84eb5932f5c89798bb6c5949ae2d", candidateName, "device name generated incorrectly")
+			case 5:
+				assert.Equal(t, "/dev/vdc1", device.Name)
+				assert.True(t, candidate.Consumable)
+				candidateName := CreateCandidateName(*log, candidate)
+				assert.Equal(t, "dev-a9d768213aaead8b42465ec859189de8779f96b7", candidateName, "device name generated incorrectly")
 
 			}
 
 		}
 		if assert.NoError(t, err) {
-			assert.Equal(t, 5, len(filteredDevices))
+			assert.Equal(t, 6, len(filteredDevices))
 		}
 	})
 
@@ -605,7 +610,33 @@ var (
 					"wwn": null,
 					"kname": "/dev/drbd1028",
 					"pkname": "/dev/dm-10"
-			}
+				},{
+					"name": "/dev/vdc",
+					"mountpoint": null,
+					"partuuid": null,
+					"hotplug": false,
+					"model": null,
+					"serial": "fhmnscgfsllbsi2u5o8v",
+					"size": "20G",
+					"fstype": null,
+					"type": "disk",
+					"wwn": null,
+					"kname": "/dev/vdc",
+					"pkname": null
+			 },{
+					"name": "/dev/vdc1",
+					"mountpoint": null,
+					"partuuid": "13dcb00e-01",
+					"hotplug": false,
+					"model": null,
+					"serial": null,
+					"size": "20G",
+					"fstype": null,
+					"type": "part",
+					"wwn": null,
+					"kname": "/dev/vdc1",
+					"pkname": "/dev/vdc"
+			 }
 		]
 	}`
 )
