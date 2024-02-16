@@ -2,7 +2,7 @@
 ---
 image: bundle
 from: registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc
-fromCacheVersion: "2023-11-27.1"
+fromCacheVersion: "2024-02-12.1"
 import:
 # Rendering .werf/images-digests.yaml is required!
 - image: images-digests
@@ -21,6 +21,7 @@ git:
   - .helmignore
   - charts
   - crds
+  - docs
   - enabled
   - hooks
   - monitoring
