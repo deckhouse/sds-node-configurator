@@ -45,10 +45,10 @@ func getLVMVolumeGroup(ctx context.Context, cl client.Client, metrics monitoring
 		Name:      name,
 		Namespace: namespace,
 	}, obj)
-	metrics.ApiMethodsDuration(watcherLVMVGCtrlName, "get").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(watcherLVMVGCtrlName, "get").Inc()
+	metrics.ApiMethodsDuration(LVMVolumeGroupWatcherCtrlName, "get").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "get").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(watcherLVMVGCtrlName, "get").Inc()
+		metrics.ApiMethodsErrors(LVMVolumeGroupWatcherCtrlName, "get").Inc()
 		return nil, err
 	}
 	return obj, nil
@@ -62,10 +62,10 @@ func updateLVMVolumeGroupHealthStatus(ctx context.Context, cl client.Client, met
 		Name:      name,
 		Namespace: namespace,
 	}, obj)
-	metrics.ApiMethodsDuration(watcherLVMVGCtrlName, "get").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(watcherLVMVGCtrlName, "get").Inc()
+	metrics.ApiMethodsDuration(LVMVolumeGroupWatcherCtrlName, "get").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "get").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(watcherLVMVGCtrlName, "get").Inc()
+		metrics.ApiMethodsErrors(LVMVolumeGroupWatcherCtrlName, "get").Inc()
 		return err
 	}
 
@@ -82,10 +82,10 @@ func updateLVMVolumeGroupHealthStatus(ctx context.Context, cl client.Client, met
 
 	start = time.Now()
 	err = cl.Update(ctx, obj)
-	metrics.ApiMethodsDuration(watcherLVMVGCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(watcherLVMVGCtrlName, "update").Inc()
+	metrics.ApiMethodsDuration(LVMVolumeGroupWatcherCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "update").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(watcherLVMVGCtrlName, "update").Inc()
+		metrics.ApiMethodsErrors(LVMVolumeGroupWatcherCtrlName, "update").Inc()
 		return err
 	}
 	return nil
@@ -99,10 +99,10 @@ func getBlockDevice(ctx context.Context, cl client.Client, metrics monitoring.Me
 		Name:      name,
 		Namespace: namespace,
 	}, obj)
-	metrics.ApiMethodsDuration(watcherLVMVGCtrlName, "get").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(watcherLVMVGCtrlName, "get").Inc()
+	metrics.ApiMethodsDuration(LVMVolumeGroupWatcherCtrlName, "get").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "get").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(watcherLVMVGCtrlName, "get").Inc()
+		metrics.ApiMethodsErrors(LVMVolumeGroupWatcherCtrlName, "get").Inc()
 		return nil, err
 	}
 	return obj, nil
@@ -135,13 +135,10 @@ func ValidateLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.
 			status.Health = NonOperational
 			status.Phase = Failed
 			status.Message = "selected block devices are from different nodes for local LVMVolumeGroup"
-			return false, &status, nil
+			return false, &status, errors.New("wrong block devices selected")
 		}
 
 		if membership == 0 {
-			status.Health = NonOperational
-			status.Phase = Failed
-			status.Message = "selected block devices not affiliated to current Watcher's node"
 			return false, &status, nil
 		}
 	}
@@ -240,16 +237,16 @@ func CreateEventLVMVolumeGroup(ctx context.Context, cl client.Client, metrics mo
 		},
 		Action:              actions,
 		ReportingInstance:   nodeName,
-		ReportingController: watcherLVMVGCtrlName,
+		ReportingController: LVMVolumeGroupWatcherCtrlName,
 		Message:             "Event Message",
 	}
 
 	start := time.Now()
 	err := cl.Create(ctx, e)
-	metrics.ApiMethodsDuration(watcherLVMVGCtrlName, "create").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(watcherLVMVGCtrlName, "create").Inc()
+	metrics.ApiMethodsDuration(LVMVolumeGroupWatcherCtrlName, "create").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "create").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(watcherLVMVGCtrlName, "create").Inc()
+		metrics.ApiMethodsErrors(LVMVolumeGroupWatcherCtrlName, "create").Inc()
 		return err
 	}
 	return nil
@@ -259,11 +256,11 @@ func DeleteVG(vgName string, log logger.Logger, metrics monitoring.Metrics) erro
 	// if VG exist
 	start := time.Now()
 	vgs, command, _, err := utils.GetAllVGs()
-	metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "vgs").Inc()
+	metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgs").Inc()
 	log.Debug(command)
 	if err != nil {
-		metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "vgs").Inc()
+		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "vgs").Inc()
 		log.Error(err, "GetAllVGs "+command)
 		return err
 	}
@@ -275,11 +272,11 @@ func DeleteVG(vgName string, log logger.Logger, metrics monitoring.Metrics) erro
 	// if exist LV in VG
 	start = time.Now()
 	lvs, command, _, err := utils.GetAllLVs()
-	metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "lvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "lvs").Inc()
+	metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "lvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "lvs").Inc()
 	log.Debug(command)
 	if err != nil {
-		metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "lvs").Inc()
+		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "lvs").Inc()
 		log.Error(err, "GetAllLVs "+command)
 		return err
 	}
@@ -292,22 +289,22 @@ func DeleteVG(vgName string, log logger.Logger, metrics monitoring.Metrics) erro
 
 	start = time.Now()
 	pvs, command, _, err := utils.GetAllPVs()
-	metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "pvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "pvs").Inc()
+	metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "pvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "pvs").Inc()
 	log.Debug(command)
 	if err != nil {
-		metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "pvs").Inc()
+		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "pvs").Inc()
 		log.Error(err, "RemoveVG "+command)
 		return err
 	}
 
 	start = time.Now()
 	command, err = utils.RemoveVG(vgName)
-	metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "vgremove").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "vgremove").Inc()
+	metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgremove").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgremove").Inc()
 	log.Debug(command)
 	if err != nil {
-		metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "vgremove").Inc()
+		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "vgremove").Inc()
 		log.Error(err, "RemoveVG "+command)
 		return err
 	}
@@ -322,11 +319,11 @@ func DeleteVG(vgName string, log logger.Logger, metrics monitoring.Metrics) erro
 
 	start = time.Now()
 	command, err = utils.RemovePV(listDeletingPV)
-	metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "pvremove").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "pvremove").Inc()
+	metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "pvremove").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "pvremove").Inc()
 	log.Debug(command)
 	if err != nil {
-		metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "pvremove").Inc()
+		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "pvremove").Inc()
 		log.Error(err, "RemovePV "+command)
 		return err
 	}
@@ -337,11 +334,11 @@ func DeleteVG(vgName string, log logger.Logger, metrics monitoring.Metrics) erro
 func ExistVG(vgName string, log logger.Logger, metrics monitoring.Metrics) (bool, error) {
 	start := time.Now()
 	vg, command, _, err := utils.GetAllVGs()
-	metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "vgs").Inc()
+	metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgs").Inc()
 	log.Debug(command)
 	if err != nil {
-		metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "vgs").Inc()
+		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "vgs").Inc()
 		log.Error(err, " error CreateEventLVMVolumeGroup")
 		return false, err
 	}
@@ -394,11 +391,11 @@ func ExtendVGComplex(metrics monitoring.Metrics, extendPVs []string, VGName stri
 	for _, pvPath := range extendPVs {
 		start := time.Now()
 		command, err := utils.CreatePV(pvPath)
-		metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "pvcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
-		metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "pvcreate").Inc()
+		metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "pvcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
+		metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "pvcreate").Inc()
 		l.Debug(command)
 		if err != nil {
-			metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "pvcreate").Inc()
+			metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "pvcreate").Inc()
 			l.Error(err, "CreatePV ")
 			return err
 		}
@@ -406,11 +403,11 @@ func ExtendVGComplex(metrics monitoring.Metrics, extendPVs []string, VGName stri
 
 	start := time.Now()
 	command, err := utils.ExtendVG(VGName, extendPVs)
-	metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "vgextend").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "vgextend").Inc()
+	metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgextend").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgextend").Inc()
 	l.Debug(command)
 	if err != nil {
-		metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "vgextend").Inc()
+		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "vgextend").Inc()
 		l.Error(err, "ExtendVG ")
 		return err
 	}
@@ -437,11 +434,11 @@ func CreateVGComplex(ctx context.Context, cl client.Client, metrics monitoring.M
 		p := path
 		start := time.Now()
 		command, err := utils.CreatePV(p)
-		metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "pvcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
-		metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "pvcreate").Inc()
+		metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "pvcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
+		metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "pvcreate").Inc()
 		l.Debug(command)
 		if err != nil {
-			metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "pvcreate").Inc()
+			metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "pvcreate").Inc()
 			l.Error(err, "CreatePV "+p)
 			return err
 		}
@@ -450,11 +447,11 @@ func CreateVGComplex(ctx context.Context, cl client.Client, metrics monitoring.M
 	if group.Spec.Type == Local {
 		start := time.Now()
 		cmd, err := utils.CreateVGLocal(group.Spec.ActualVGNameOnTheNode, group.Name, paths)
-		metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "vgcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
-		metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "vgcreate").Inc()
+		metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
+		metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgcreate").Inc()
 		l.Debug(cmd)
 		if err != nil {
-			metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "vgcreate").Inc()
+			metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "vgcreate").Inc()
 			l.Error(err, "error CreateVGLocal")
 			return err
 		}
@@ -463,11 +460,11 @@ func CreateVGComplex(ctx context.Context, cl client.Client, metrics monitoring.M
 	if group.Spec.Type == Shared {
 		start := time.Now()
 		cmd, err := utils.CreateVGShared(group.Spec.ActualVGNameOnTheNode, group.Name, paths)
-		metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "vgcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
-		metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "vgcreate").Inc()
+		metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
+		metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgcreate").Inc()
 		l.Debug(cmd)
 		if err != nil {
-			metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "vgcreate").Inc()
+			metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "vgcreate").Inc()
 			l.Error(err, "error CreateVGShared")
 			return err
 		}
@@ -480,12 +477,12 @@ func UpdateLVMVolumeGroupTagsName(log logger.Logger, metrics monitoring.Metrics,
 
 	start := time.Now()
 	vgs, cmd, _, err := utils.GetAllVGs()
-	metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "vgs").Inc()
+	metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgs").Inc()
 	log.Debug(fmt.Sprintf("[ReconcileLVMVG] exec cmd: %s", cmd))
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to get VG by resource, name: %s", lvg.Name))
-		metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "vgs").Inc()
+		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "vgs").Inc()
 		return false, err
 	}
 
@@ -500,23 +497,23 @@ func UpdateLVMVolumeGroupTagsName(log logger.Logger, metrics monitoring.Metrics,
 	if found && lvg.Name != tagName {
 		start = time.Now()
 		cmd, err = utils.VGChangeDelTag(vg.VGName, fmt.Sprintf("%s=%s", tag, tagName))
-		metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
-		metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "vgchange").Inc()
+		metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
+		metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgchange").Inc()
 		log.Debug(fmt.Sprintf("[UpdateLVMVolumeGroupTagsName] exec cmd: %s", cmd))
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[UpdateLVMVolumeGroupTagsName] unable to delete tag: %s=%s, vg: %s", tag, tagName, vg.VGName))
-			metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "vgchange").Inc()
+			metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "vgchange").Inc()
 			return false, err
 		}
 
 		start = time.Now()
 		cmd, err = utils.VGChangeAddTag(vg.VGName, fmt.Sprintf("%s=%s", tag, lvg.Name))
-		metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
-		metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "vgchange").Inc()
+		metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
+		metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgchange").Inc()
 		log.Debug(fmt.Sprintf("[UpdateLVMVolumeGroupTagsName] exec cmd: %s", cmd))
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[UpdateLVMVolumeGroupTagsName] unable to add tag: %s=%s, vg: %s", tag, lvg.Name, vg.VGName))
-			metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "vgchange").Inc()
+			metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "vgchange").Inc()
 			return false, err
 		}
 

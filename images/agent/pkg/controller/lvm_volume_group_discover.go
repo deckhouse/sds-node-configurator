@@ -43,9 +43,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-const discoveryLVMVGCtrlName = "discover-lvmvg-controller"
+const LVMVolumeGroupDiscoverCtrlName = "lvm-volume-group-discover-controller"
 
-func RunDiscoveryLVMVGController(
+func RunLVMVolumeGroupDiscoverController(
 	ctx context.Context,
 	mgr manager.Manager,
 	cfg config.Options,
@@ -55,53 +55,53 @@ func RunDiscoveryLVMVGController(
 	cl := mgr.GetClient()
 	cache := mgr.GetCache()
 
-	c, err := controller.New(discoveryLVMVGCtrlName, mgr, controller.Options{
+	c, err := controller.New(LVMVolumeGroupDiscoverCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 			return reconcile.Result{}, nil
 		}),
 	})
 
 	if err != nil {
-		log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to create controller: "%s"`, discoveryLVMVGCtrlName))
+		log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to create controller: "%s"`, LVMVolumeGroupDiscoverCtrlName))
 		return nil, err
 	}
 
 	err = c.Watch(source.Kind(cache, &v1alpha1.LvmVolumeGroup{}), &handler.EnqueueRequestForObject{})
 	if err != nil {
-		log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to run "%s" controller watch`, discoveryLVMVGCtrlName))
+		log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to run "%s" controller watch`, LVMVolumeGroupDiscoverCtrlName))
 	}
 
-	log.Info("[RunDiscoveryLVMVGController] run discovery loop")
+	log.Info("[RunLVMVolumeGroupDiscoverController] run discovery loop")
 
 	go func() {
 		for {
 			time.Sleep(cfg.VolumeGroupScanInterval * time.Second)
 			reconcileStart := time.Now()
 
-			log.Info("[RunDiscoveryLVMVGController] START discovery loop")
+			log.Info("[RunLVMVolumeGroupDiscoverController] START discovery loop")
 
 			currentLVMVGs, err := GetAPILVMVolumeGroups(ctx, cl, metrics)
 			if err != nil {
-				log.Error(err, "[RunDiscoveryLVMVGController] unable to run GetAPILVMVolumeGroups")
+				log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to run GetAPILVMVolumeGroups")
 				continue
 			}
 
 			blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
 			if err != nil {
-				log.Error(err, "[RunDiscoveryLVMVGController] unable to GetAPIBlockDevices")
+				log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to GetAPIBlockDevices")
 				for _, lvm := range currentLVMVGs {
 					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvm, err); err != nil {
-						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
+						log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
 					}
 				}
 				continue
 			}
 
 			if len(blockDevices) == 0 {
-				log.Error(fmt.Errorf("no block devices found"), "[RunDiscoveryLVMVGController] unable to get block devices")
+				log.Error(fmt.Errorf("no block devices found"), "[RunLVMVolumeGroupDiscoverController] unable to get block devices")
 				for _, lvm := range currentLVMVGs {
 					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvm, fmt.Errorf("no block devices found")); err != nil {
-						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
+						log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
 					}
 				}
 				continue
@@ -111,10 +111,10 @@ func RunDiscoveryLVMVGController(
 
 			candidates, err := GetLVMVolumeGroupCandidates(log, metrics, blockDevices, cfg.NodeName)
 			if err != nil {
-				log.Error(err, "[RunDiscoveryLVMVGController] unable to run GetLVMVolumeGroupCandidates")
+				log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to run GetLVMVolumeGroupCandidates")
 				for _, lvm := range filteredResources {
 					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvm, err); err != nil {
-						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
+						log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
 					}
 				}
 				continue
@@ -123,36 +123,36 @@ func RunDiscoveryLVMVGController(
 			for _, candidate := range candidates {
 				if lvmVolumeGroup := getResourceByCandidate(filteredResources, candidate); lvmVolumeGroup != nil {
 					if !hasLVMVolumeGroupDiff(log, *lvmVolumeGroup, candidate) {
-						log.Debug(fmt.Sprintf(`[RunDiscoveryLVMVGController] no data to update for LvmVolumeGroup, name: "%s"`, lvmVolumeGroup.Name))
+						log.Debug(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] no data to update for LvmVolumeGroup, name: "%s"`, lvmVolumeGroup.Name))
 						continue
 					}
 					//TODO: take lock
 
-					log.Debug(fmt.Sprintf("[RunDiscoveryLVMVGController] run UpdateLVMVolumeGroupByCandidate, lvmVolumeGroup name: %s", lvmVolumeGroup.Name))
+					log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] run UpdateLVMVolumeGroupByCandidate, lvmVolumeGroup name: %s", lvmVolumeGroup.Name))
 					if err = UpdateLVMVolumeGroupByCandidate(ctx, cl, metrics, *lvmVolumeGroup, candidate); err != nil {
-						log.Error(err, fmt.Sprintf(`[RunDiscoveryLVMVGController] unable to update LvmVolumeGroup, name: "%s"`,
+						log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to update LvmVolumeGroup, name: "%s"`,
 							lvmVolumeGroup.Name))
 						continue
 					}
 
-					log.Info(fmt.Sprintf(`[RunDiscoveryLVMVGController] updated LvmVolumeGroup, name: "%s"`, lvmVolumeGroup.Name))
+					log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] updated LvmVolumeGroup, name: "%s"`, lvmVolumeGroup.Name))
 
 					//TODO: release lock
 				} else {
 					lvm, err := CreateLVMVolumeGroup(ctx, log, metrics, cl, candidate)
 					if err != nil {
-						log.Error(err, "[RunDiscoveryLVMVGController] unable to CreateLVMVolumeGroup")
+						log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to CreateLVMVolumeGroup")
 						continue
 					}
-					log.Info(fmt.Sprintf(`[RunDiscoveryLVMVGController] created new APILVMVolumeGroup, name: "%s"`, lvm.Name))
+					log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] created new APILVMVolumeGroup, name: "%s"`, lvm.Name))
 				}
 			}
 
 			ClearLVMVolumeGroupResources(ctx, cl, log, metrics, candidates, filteredResources, cfg.NodeName)
 
-			log.Info("[RunDiscoveryLVMVGController] END discovery loop")
-			metrics.ReconcileDuration(discoveryLVMVGCtrlName).Observe(metrics.GetEstimatedTimeInSeconds(reconcileStart))
-			metrics.ReconcilesCountTotal(discoveryLVMVGCtrlName).Inc()
+			log.Info("[RunLVMVolumeGroupDiscoverController] END discovery loop")
+			metrics.ReconcileDuration(LVMVolumeGroupDiscoverCtrlName).Observe(metrics.GetEstimatedTimeInSeconds(reconcileStart))
+			metrics.ReconcilesCountTotal(LVMVolumeGroupDiscoverCtrlName).Inc()
 		}
 	}()
 
@@ -320,10 +320,10 @@ func DeleteLVMVolumeGroup(ctx context.Context, kc kclient.Client, metrics monito
 
 	start := time.Now()
 	err := kc.Delete(ctx, lvm)
-	metrics.ApiMethodsDuration(discoveryLVMVGCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(discoveryLVMVGCtrlName, "delete").Inc()
+	metrics.ApiMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "delete").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(discoveryLVMVGCtrlName, "delete").Inc()
+		metrics.ApiMethodsErrors(LVMVolumeGroupDiscoverCtrlName, "delete").Inc()
 		return err
 	}
 	return nil
@@ -334,13 +334,13 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, metrics monitoring.Metrics, 
 
 	start := time.Now()
 	vgs, cmdStr, vgErrs, err := utils.GetAllVGs()
-	metrics.UtilsCommandsDuration(discoveryLVMVGCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(discoveryLVMVGCtrlName, "vgs").Inc()
+	metrics.UtilsCommandsDuration(LVMVolumeGroupDiscoverCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "vgs").Inc()
 	log.Debug(fmt.Sprintf("[GetLVMVolumeGroupCandidates] exec cmd: %s", cmdStr))
 
 	// If we can't run vgs command at all, that means we will not have important information, so we break.
 	if err != nil {
-		metrics.UtilsCommandsErrorsCount(discoveryLVMVGCtrlName, "vgs").Inc()
+		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupDiscoverCtrlName, "vgs").Inc()
 		log.Error(err, "[GetLVMVolumeGroupCandidates] unable to GetAllVGs")
 		return nil, err
 	}
@@ -360,13 +360,13 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, metrics monitoring.Metrics, 
 
 	start = time.Now()
 	pvs, cmdStr, pvErrs, err := utils.GetAllPVs()
-	metrics.UtilsCommandsDuration(discoveryLVMVGCtrlName, "pvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(discoveryLVMVGCtrlName, "pvs").Inc()
+	metrics.UtilsCommandsDuration(LVMVolumeGroupDiscoverCtrlName, "pvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "pvs").Inc()
 	log.Debug(fmt.Sprintf("[GetLVMVolumeGroupCandidates] exec cmd: %s", cmdStr))
 
 	// If we can't run pvs command at all, that means we will not have important information, so we break.
 	if err != nil {
-		metrics.UtilsCommandsErrorsCount(discoveryLVMVGCtrlName, "pvs").Inc()
+		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupDiscoverCtrlName, "pvs").Inc()
 		log.Error(err, "[GetLVMVolumeGroupCandidates] unable to GetAllPVs")
 		return nil, err
 	}
@@ -379,13 +379,13 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, metrics monitoring.Metrics, 
 
 	start = time.Now()
 	lvs, cmdStr, lvErrs, err := utils.GetAllLVs()
-	metrics.UtilsCommandsDuration(discoveryLVMVGCtrlName, "lvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(discoveryLVMVGCtrlName, "lvs").Inc()
+	metrics.UtilsCommandsDuration(LVMVolumeGroupDiscoverCtrlName, "lvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "lvs").Inc()
 	log.Debug(fmt.Sprintf("[GetLVMVolumeGroupCandidates] exec cmd: %s", cmdStr))
 
 	// As long as LVS data is used to fill ThinPool fields, that is optional, we won't break but log the error.
 	if err != nil {
-		metrics.UtilsCommandsErrorsCount(discoveryLVMVGCtrlName, "lvs").Inc()
+		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupDiscoverCtrlName, "lvs").Inc()
 		log.Error(err, "[GetLVMVolumeGroupCandidates] unable to GetAllLVs")
 	}
 
@@ -669,20 +669,20 @@ func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVDat
 	tps := make([]internal.LVMVGStatusThinPool, 0, len(filtered))
 
 	for _, lv := range filtered {
-		usedSize, err := getUsedSizeMiB(lv) //todo rename
+		usedSize, err := getLVUsedSize(lv)
 		if err != nil {
-			log.Error(err, "[getStatusThinPools] unable to getUsedSizeMiB")
+			log.Error(err, "[getStatusThinPools] unable to getLVUsedSize")
 		}
 		tps = append(tps, internal.LVMVGStatusThinPool{
 			Name:       lv.LVName,
 			ActualSize: lv.LVSize,
-			UsedSize:   usedSize,
+			UsedSize:   usedSize.String(),
 		})
 	}
 	return tps
 }
 
-func getUsedSizeMiB(lv internal.LVData) (string, error) {
+func getLVUsedSize(lv internal.LVData) (*resource.Quantity, error) {
 	var (
 		err         error
 		dataPercent float64
@@ -693,12 +693,13 @@ func getUsedSizeMiB(lv internal.LVData) (string, error) {
 	} else {
 		dataPercent, err = strconv.ParseFloat(lv.DataPercent, 64)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 
 	tmp := float64(lv.LVSize.Value()) * dataPercent
-	return utils.BytesToQuantity(int64(tmp)), nil
+
+	return resource.NewQuantity(int64(tmp), resource.BinarySI), nil
 }
 
 func isThinPool(lv internal.LVData) bool {
@@ -765,10 +766,10 @@ func CreateLVMVolumeGroup(
 
 	start := time.Now()
 	err := kc.Create(ctx, lvmVolumeGroup)
-	metrics.ApiMethodsDuration(discoveryLVMVGCtrlName, "create").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(discoveryLVMVGCtrlName, "create").Inc()
+	metrics.ApiMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "create").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "create").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(discoveryLVMVGCtrlName, "create").Inc()
+		metrics.ApiMethodsErrors(LVMVolumeGroupDiscoverCtrlName, "create").Inc()
 		return nil, fmt.Errorf("unable to CreateLVMVolumeGroup, err: %w", err)
 	}
 
@@ -838,10 +839,10 @@ func UpdateLVMVolumeGroupByCandidate(
 
 	start := time.Now()
 	err := kc.Update(ctx, lvmvg)
-	metrics.ApiMethodsDuration(discoveryLVMVGCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(discoveryLVMVGCtrlName, "update").Inc()
+	metrics.ApiMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "update").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(discoveryLVMVGCtrlName, "update").Inc()
+		metrics.ApiMethodsErrors(LVMVolumeGroupDiscoverCtrlName, "update").Inc()
 		return fmt.Errorf(`[UpdateLVMVolumeGroupByCandidate] unable to update LVMVolumeGroup, name: "%s", err: %w`, lvmvg.Name, err)
 	}
 
@@ -925,10 +926,10 @@ func GetAPILVMVolumeGroups(ctx context.Context, kc kclient.Client, metrics monit
 
 	start := time.Now()
 	err := kc.List(ctx, listLvms)
-	metrics.ApiMethodsDuration(discoveryLVMVGCtrlName, "list").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(discoveryLVMVGCtrlName, "list").Inc()
+	metrics.ApiMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "list").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "list").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(discoveryLVMVGCtrlName, "list").Inc()
+		metrics.ApiMethodsErrors(LVMVolumeGroupDiscoverCtrlName, "list").Inc()
 		return nil, fmt.Errorf("[GetApiLVMVolumeGroups] unable to list lvm volume groups, err: %w", err)
 	}
 

@@ -23,6 +23,7 @@ spec:
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       serviceAccountName: sds-node-configurator
+      hostPID: true
       containers:
       - name: sds-node-configurator-agent
         image: {{ include "helm_lib_module_image" (list . "agent") }}
@@ -49,54 +50,4 @@ spec:
 {{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
             value: "4"
 {{- end }}
-        volumeMounts:
-        - mountPath: /dev/
-          name: host-device-dir
-        - mountPath: /lib/modules
-          name: host-modules-dir
-          mountPropagation: Bidirectional
-        - mountPath: /sys/
-          name: host-sys-dir
-        - mountPath: /run/udev/
-          name: host-run-udev-dir
-        - mountPath: /run/lvm/
-          name: host-run-lvm-dir
-        - mountPath: /run/dmeventd-client
-          name: host-run-dmeventd-client
-        - mountPath: /run/dmeventd-server
-          name: host-run-dmeventd-server
-        - mountPath: /host-root/etc/machine-id
-          name: host-machine-id
-          readOnly: true
-      volumes:
-      - hostPath:
-          path: /dev/
-          type: ""
-        name: host-device-dir
-      - hostPath:
-          path: /sys/
-          type: Directory
-        name: host-sys-dir
-      - hostPath:
-          path: /run/udev/
-          type: Directory
-        name: host-run-udev-dir
-      - hostPath:
-          path: /run/lvm
-          type: Directory
-        name: host-run-lvm-dir
-      - hostPath:
-          path: /run/dmeventd-client
-        name: host-run-dmeventd-client
-      - hostPath:
-          path: /run/dmeventd-server
-        name: host-run-dmeventd-server
-      - hostPath:
-          path: /etc/machine-id
-          type: File
-        name: host-machine-id
-      - hostPath:
-          path: /lib/modules/
-          type: DirectoryOrCreate
-        name: host-modules-dir
 {{- end }}

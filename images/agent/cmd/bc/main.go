@@ -110,28 +110,33 @@ func main() {
 	}
 	log.Info("[main] ReTag ends")
 
-	if _, err := controller.RunBlockDeviceController(ctx, mgr, *cfgParams, *log, metrics); err != nil {
+	if _, err = controller.RunBlockDeviceController(ctx, mgr, *cfgParams, *log, metrics); err != nil {
 		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
 		os.Exit(1)
 	}
 
-	if _, err := controller.RunWatcherLVMVGController(mgr, *cfgParams, *log, metrics); err != nil {
-		log.Error(err, "[main] error Run RunLVMVolumeGroupController")
+	if _, err = controller.RunLVMVolumeGroupWatcherController(mgr, *cfgParams, *log, metrics); err != nil {
+		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
 		os.Exit(1)
 	}
 
-	if _, err := controller.RunDiscoveryLVMVGController(ctx, mgr, *cfgParams, *log, metrics); err != nil {
-		log.Error(err, "[main] unable to controller.RunDiscoveryLVMVGController")
+	if _, err = controller.RunLVMVolumeGroupDiscoverController(ctx, mgr, *cfgParams, *log, metrics); err != nil {
+		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupDiscoverController")
 		os.Exit(1)
 	}
 
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+	if _, err = controller.RunLVMLogicalVolumeWatcherController(mgr, *cfgParams, *log, metrics); err != nil {
+		log.Error(err, "[main] unable to controller.RunLVMLogicalVolumeWatcherController")
+		os.Exit(1)
+	}
+
+	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
 		os.Exit(1)
 	}
 	log.Info("[main] successfully AddHealthzCheck")
 
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		log.Error(err, "[main] unable to mgr.AddReadyzCheck")
 		os.Exit(1)
 	}

@@ -29,6 +29,7 @@ rules:
     resources:
       - blockdevices
       - lvmvolumegroups
+      - lvmlogicalvolumes
     verbs:
       - get
       - list

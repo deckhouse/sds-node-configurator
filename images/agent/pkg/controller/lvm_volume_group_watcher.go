@@ -44,10 +44,10 @@ import (
 )
 
 const (
-	watcherLVMVGCtrlName = "watcher-lvmvg-controller"
+	LVMVolumeGroupWatcherCtrlName = "lvm-volume-group-watcher-controller"
 )
 
-func RunWatcherLVMVGController(
+func RunLVMVolumeGroupWatcherController(
 	mgr manager.Manager,
 	cfg config.Options,
 	log logger.Logger,
@@ -56,9 +56,9 @@ func RunWatcherLVMVGController(
 	cl := mgr.GetClient()
 	cache := mgr.GetCache()
 
-	c, err := controller.New(watcherLVMVGCtrlName, mgr, controller.Options{
+	c, err := controller.New(LVMVolumeGroupWatcherCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-			log.Info(fmt.Sprintf(`Reconcile of RunWatcherLVMVGController on request, name: "%s" starts`, request.Name))
+			log.Info(fmt.Sprintf(`Reconcile of RunLVMVolumeGroupWatcherController on request, name: "%s" starts`, request.Name))
 
 			shouldRequeue, err := ReconcileLVMVG(ctx, metrics, request.Name, request.Namespace, cfg.NodeName, log, cl)
 			if shouldRequeue {
@@ -68,14 +68,14 @@ func RunWatcherLVMVGController(
 					RequeueAfter: cfg.VolumeGroupScanInterval * time.Second,
 				}, nil
 			}
-			log.Info(fmt.Sprintf(`Reconcile of RunWatcherLVMVGController on request, name: "%s" ends`, request.Name))
+			log.Info(fmt.Sprintf(`Reconcile of RunLVMVolumeGroupWatcherController on request, name: "%s" ends`, request.Name))
 
 			return reconcile.Result{}, nil
 		}),
 	})
 
 	if err != nil {
-		log.Error(err, "[RunWatcherLVMVGController] Unable to create controller RunWatcherLVMVGController")
+		log.Error(err, "[RunLVMVolumeGroupWatcherController] Unable to create controller RunLVMVolumeGroupWatcherController")
 		return nil, err
 	}
 
@@ -85,31 +85,32 @@ func RunWatcherLVMVGController(
 		request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 		shouldRequeue, err := ReconcileLVMVG(ctx, metrics, e.Object.GetName(), e.Object.GetNamespace(), cfg.NodeName, log, cl)
 		if shouldRequeue {
-			log.Error(err, fmt.Sprintf("[RunWatcherLVMVGController] An error has occured in ReconcileLVMVG. Adds to retry after %d seconds.", cfg.VolumeGroupScanInterval))
+			log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] An error has occured in ReconcileLVMVG. Adds to retry after %d seconds.", cfg.VolumeGroupScanInterval))
 			q.AddAfter(request, cfg.VolumeGroupScanInterval*time.Second)
 			log.Warning(fmt.Sprintf(`Added request, namespace: "%s" name: "%s", to requeue`, request.Namespace, request.Name))
 		}
 	}
+
 	updateFunc := func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
-		log.Info(fmt.Sprintf("[RunWatcherLVMVGController] update LVMVolumeGroupn, name: %s", e.ObjectNew.GetName()))
+		log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] update LVMVolumeGroupn, name: %s", e.ObjectNew.GetName()))
 
 		newLVG, ok := e.ObjectNew.(*v1alpha1.LvmVolumeGroup)
 		if !ok {
-			log.Error(err, "[RunWatcherLVMVGController] error get  ObjectNew LinstorStoragePool")
+			log.Error(err, "[RunLVMVolumeGroupWatcherController] error get  ObjectNew LinstorStoragePool")
 		}
 
 		oldLVG, ok := e.ObjectOld.(*v1alpha1.LvmVolumeGroup)
 		if !ok {
-			log.Error(err, "[RunWatcherLVMVGController] error get  ObjectOld LinstorStoragePool")
+			log.Error(err, "[RunLVMVolumeGroupWatcherController] error get  ObjectOld LinstorStoragePool")
 		}
 
 		if !reflect.DeepEqual(oldLVG.Annotations, newLVG.Annotations) {
-			log.Info("[RunWatcherLVMVGController] annotations update")
+			log.Info("[RunLVMVolumeGroupWatcherController] annotations update")
 
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 			shouldRequeue, err := ReconcileLVMVG(ctx, metrics, e.ObjectNew.GetName(), e.ObjectNew.GetNamespace(), cfg.NodeName, log, cl)
 			if shouldRequeue {
-				log.Error(err, fmt.Sprintf("[RunWatcherLVMVGController] An error has occured in ReconcileLVMVG. Adds to retry after %d seconds.", cfg.VolumeGroupScanInterval))
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] An error has occured in ReconcileLVMVG. Adds to retry after %d seconds.", cfg.VolumeGroupScanInterval))
 				q.AddAfter(request, cfg.VolumeGroupScanInterval*time.Second)
 				log.Warning(fmt.Sprintf(`Added request, namespace: "%s" name: "%s", to requeue`, request.Namespace, request.Name))
 			}
@@ -117,12 +118,12 @@ func RunWatcherLVMVGController(
 		}
 
 		if !reflect.DeepEqual(oldLVG.Spec, newLVG.Spec) {
-			log.Info("[RunWatcherLVMVGController] lvg spec changed")
+			log.Info("[RunLVMVolumeGroupWatcherController] lvg spec changed")
 
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 			shouldRequeue, err := ReconcileLVMVG(ctx, metrics, e.ObjectNew.GetName(), e.ObjectNew.GetNamespace(), cfg.NodeName, log, cl)
 			if shouldRequeue {
-				log.Error(err, fmt.Sprintf("[RunWatcherLVMVGController] An error has occured in ReconcileLVMVG. Adds to retry after %d seconds.", cfg.VolumeGroupScanInterval))
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] An error has occured in ReconcileLVMVG. Adds to retry after %d seconds.", cfg.VolumeGroupScanInterval))
 				q.AddAfter(request, cfg.VolumeGroupScanInterval*time.Second)
 				log.Warning(fmt.Sprintf(`Added request, namespace: "%s" name: "%s", to requeue`, request.Namespace, request.Name))
 			}
@@ -133,38 +134,38 @@ func RunWatcherLVMVGController(
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 			shouldRequeue, err := ReconcileLVMVG(ctx, metrics, e.ObjectNew.GetName(), e.ObjectNew.GetNamespace(), cfg.NodeName, log, cl)
 			if shouldRequeue {
-				log.Error(err, fmt.Sprintf("[RunWatcherLVMVGController] An error has occured in ReconcileLVMVG. Adds to retry after %d seconds.", cfg.VolumeGroupScanInterval))
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] An error has occured in ReconcileLVMVG. Adds to retry after %d seconds.", cfg.VolumeGroupScanInterval))
 				q.AddAfter(request, cfg.VolumeGroupScanInterval*time.Second)
 				log.Warning(fmt.Sprintf(`Added request, namespace: "%s" name: "%s", to requeue`, request.Namespace, request.Name))
 			}
 		} else {
-			log.Info("[RunWatcherLVMVGController] lvg check dev size")
+			log.Info("[RunLVMVolumeGroupWatcherController] lvg check dev size")
 			for _, node := range newLVG.Status.Nodes {
 				for _, device := range node.Devices {
 
 					if device.DevSize.Value() == 0 {
-						log.Warning(fmt.Sprintf("[RunWatcherLVMVGController] check dev size device.DevSize = %s", device.DevSize.String()))
+						log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] check dev size device.DevSize = %s", device.DevSize.String()))
 						return
 					}
 
-					log.Debug(fmt.Sprintf("[RunWatcherLVMVGController] update spec check resize device.PVSize = %s", device.PVSize))
+					log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] update spec check resize device.PVSize = %s", device.PVSize))
 					dPVSizeTmp := resource.MustParse(device.PVSize)
 
 					if dPVSizeTmp.Value() == 0 {
-						log.Warning(fmt.Sprintf("[RunWatcherLVMVGController] check dev PV size device.PVSize = %s", device.PVSize))
+						log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] check dev PV size device.PVSize = %s", device.PVSize))
 						return
 					}
 
 					delta, _ := utils.QuantityToBytes(internal.ResizeDelta)
 
-					log.Debug(fmt.Sprintf("[RunWatcherLVMVGController] resize flag = %t", device.DevSize.Value()-dPVSizeTmp.Value() > delta))
+					log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] resize flag = %t", device.DevSize.Value()-dPVSizeTmp.Value() > delta))
 
 					if device.DevSize.Value()-dPVSizeTmp.Value() > delta {
-						log.Info("[RunWatcherLVMVGController] lvg status device and PV changed")
+						log.Info("[RunLVMVolumeGroupWatcherController] lvg status device and PV changed")
 						request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 						shouldRequeue, err := ReconcileLVMVG(ctx, metrics, e.ObjectNew.GetName(), e.ObjectNew.GetNamespace(), cfg.NodeName, log, cl)
 						if shouldRequeue {
-							log.Error(err, fmt.Sprintf("[RunWatcherLVMVGController] An error has occured in ReconcileLVMVG. Adds to retry after %d seconds.", cfg.VolumeGroupScanInterval))
+							log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] An error has occured in ReconcileLVMVG. Adds to retry after %d seconds.", cfg.VolumeGroupScanInterval))
 							q.AddAfter(request, cfg.VolumeGroupScanInterval*time.Second)
 							log.Warning(fmt.Sprintf(`Added request, namespace: "%s" name: "%s", to requeue`, request.Namespace, request.Name))
 						}
@@ -180,7 +181,7 @@ func RunWatcherLVMVGController(
 	})
 
 	if err != nil {
-		log.Error(err, "[RunWatcherLVMVGController] error Watch controller RunWatcherLVMVGController")
+		log.Error(err, "[RunLVMVolumeGroupWatcherController] error Watch controller RunLVMVolumeGroupWatcherController")
 		return nil, err
 	}
 	return c, err
@@ -404,13 +405,13 @@ func ReconcileLVMVG(
 						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, resource name: %s", group.Name))
 					}
 					start := time.Now()
-					command, err := utils.CreateLV(pool, group.Spec.ActualVGNameOnTheNode)
-					metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "lvcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
-					metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "lvcreate").Inc()
+					command, err := utils.CreateThinPool(pool, group.Spec.ActualVGNameOnTheNode)
+					metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "lvcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
+					metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "lvcreate").Inc()
 					log.Debug(command)
 					if err != nil {
-						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateLV, thin pool: %s", pool.Name))
-						metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "lvcreate").Inc()
+						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateThinPool, thin pool: %s", pool.Name))
+						metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "lvcreate").Inc()
 						if err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, group.Name, group.Namespace, err.Error(), NonOperational); err != nil {
 							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update LVMVolumeGroupStatus, resource name: %s", group.Name))
 						}
@@ -453,14 +454,14 @@ func ReconcileLVMVG(
 						if err != nil {
 							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, resource name: %s", group.Name))
 						}
-						newLVSizeStr := strconv.FormatInt(pool.Size.Value()/1024, 10)
+						//newLVSizeStr := strconv.FormatInt(pool.Size.Value()/1024, 10)
 						start := time.Now()
-						cmd, err := utils.ExtendLV(newLVSizeStr+"K", group.Spec.ActualVGNameOnTheNode, pool.Name)
-						metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "lvextend").Observe(metrics.GetEstimatedTimeInSeconds(start))
-						metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "lvextend").Inc()
+						cmd, err := utils.ExtendLV(pool.Size.Value(), group.Spec.ActualVGNameOnTheNode, pool.Name)
+						metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "lvextend").Observe(metrics.GetEstimatedTimeInSeconds(start))
+						metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "lvextend").Inc()
 						log.Debug(cmd)
 						if err != nil {
-							metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "lvextend").Inc()
+							metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "lvextend").Inc()
 							log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error ExtendLV, pool name: %s", pool.Name))
 							return true, err
 						}
@@ -496,13 +497,13 @@ func ReconcileLVMVG(
 		if len(group.Spec.ThinPools) != 0 {
 			for _, v := range group.Spec.ThinPools {
 				start := time.Now()
-				command, err := utils.CreateLV(v, group.Spec.ActualVGNameOnTheNode)
-				metrics.UtilsCommandsDuration(watcherLVMVGCtrlName, "lvcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
-				metrics.UtilsCommandsExecutionCount(watcherLVMVGCtrlName, "lvcreate").Inc()
+				command, err := utils.CreateThinPool(v, group.Spec.ActualVGNameOnTheNode)
+				metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "lvcreate").Observe(metrics.GetEstimatedTimeInSeconds(start))
+				metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "lvcreate").Inc()
 				log.Debug(command)
 				if err != nil {
-					metrics.UtilsCommandsErrorsCount(watcherLVMVGCtrlName, "lvcreate").Inc()
-					log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateLV, thin pool: %s", v.Name))
+					metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "lvcreate").Inc()
+					log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateThinPool, thin pool: %s", v.Name))
 					if err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, group.Name, group.Namespace, err.Error(), NonOperational); err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update LVMVolumeGroupStatus, resource name: %s", group.Name))
 					}
