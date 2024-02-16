@@ -32,15 +32,15 @@ type LvmLogicalVolume struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   LvmLogicalVolumeSpec   `json:"spec"`
-	Status LvmLogicalVolumeStatus `json:"status,omitempty"`
+	Spec   LvmLogicalVolumeSpec    `json:"spec"`
+	Status *LvmLogicalVolumeStatus `json:"status,omitempty"`
 }
 
 type LvmLogicalVolumeSpec struct {
-	Type           string                `json:"type"`
-	Size           resource.Quantity     `json:"size"`
-	LvmVolumeGroup string                `json:"lvmVolumeGroup"`
-	Thin           ThinLogicalVolumeSpec `json:"thin"`
+	Type           string                 `json:"type"`
+	Size           resource.Quantity      `json:"size"`
+	LvmVolumeGroup string                 `json:"lvmVolumeGroup"`
+	Thin           *ThinLogicalVolumeSpec `json:"thin"`
 }
 
 type ThinLogicalVolumeSpec struct {
