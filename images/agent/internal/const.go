@@ -25,13 +25,15 @@ const (
 	SdsNodeConfiguratorFinalizer = "storage.deckhouse.io/sds-node-configurator"
 	LVMVGHealthOperational       = "Operational"
 	LVMVGHealthNonOperational    = "NonOperational"
+	BlockDeviceValidSize         = "1G"
+	ResizeDelta                  = "32Mi"
+	KubernetesApiRequestLimit    = 5
+	KubernetesApiRequestTimeout  = 1
 )
 
 var (
-	AllowedFSTypes       = [...]string{LVMFSType}
-	InvalidDeviceTypes   = [...]string{LoopDeviceType, LVMDeviceType}
-	BlockDeviceValidSize = "1G"
-	ResizeDelta          = "32Mi"
-	Finalizers           = []string{SdsNodeConfiguratorFinalizer}
-	LVMTags              = []string{"storage.deckhouse.io/enabled=true", "linstor-"}
+	AllowedFSTypes     = [...]string{LVMFSType}
+	InvalidDeviceTypes = [...]string{LoopDeviceType, LVMDeviceType}
+	Finalizers         = []string{SdsNodeConfiguratorFinalizer}
+	LVMTags            = []string{"storage.deckhouse.io/enabled=true", "linstor-"}
 )

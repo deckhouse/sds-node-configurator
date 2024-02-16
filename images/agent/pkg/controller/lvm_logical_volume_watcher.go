@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/client-go/util/workqueue"
-	"k8s.io/utils/strings/slices"
 	"math"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/config"
@@ -14,6 +11,11 @@ import (
 	"sds-node-configurator/pkg/logger"
 	"sds-node-configurator/pkg/monitoring"
 	"sds-node-configurator/pkg/utils"
+	"time"
+
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -138,7 +140,7 @@ func runEventReconcile(ctx context.Context, cl client.Client, log logger.Logger,
 	recType, err := identifyReconcileFunc(log, llv)
 	if err != nil {
 		log.Error(err, "[runEventReconcile] an error occurs while identify reconcile func")
-		err = updateLVMLogicalVolumePhase(ctx, cl, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to identify reconcile func, err: %s", err.Error()))
+		err = updateLVMLogicalVolumePhase(ctx, cl, metrics, llv, failedStatusPhase, fmt.Sprintf("An error occurred while identifying the reconcile func, err: %s", err.Error()))
 		if err != nil {
 			log.Error(err, "[runEventReconcile] unable to update a LVMLogicalVolume Phase")
 		}
@@ -583,7 +585,8 @@ func addLLVFinalizerIfNotExist(ctx context.Context, cl client.Client, metrics mo
 	}
 
 	llv.Finalizers = append(llv.Finalizers, internal.SdsNodeConfiguratorFinalizer)
-	err := cl.Update(ctx, llv)
+
+	err := updateLVMLogicalVolume(ctx, metrics, cl, llv)
 	if err != nil {
 		return false, err
 	}
@@ -712,10 +715,15 @@ func updateLVMLogicalVolumePhase(ctx context.Context, cl client.Client, metrics 
 }
 
 func updateLVMLogicalVolume(ctx context.Context, metrics monitoring.Metrics, cl client.Client, llv *v1alpha1.LvmLogicalVolume) error {
-	err := cl.Update(ctx, llv)
-	if err != nil {
-		return err
+	var err error
+
+	for i := 0; i < internal.KubernetesApiRequestLimit; i++ {
+		err = cl.Update(ctx, llv)
+		if err == nil {
+			return nil
+		}
+		time.Sleep(internal.KubernetesApiRequestTimeout + time.Second)
 	}
 
-	return nil
+	return err
 }
