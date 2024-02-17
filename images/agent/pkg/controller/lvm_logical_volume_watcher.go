@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/config"
 	"sds-node-configurator/internal"
@@ -435,7 +434,7 @@ func shouldReconcileByUpdateFunc(llv *v1alpha1.LvmLogicalVolume) (bool, error) {
 		return false, fmt.Errorf("requested size %d is less than actual %d", llv.Spec.Size.Value(), llv.Status.ActualSize.Value())
 	}
 
-	if math.Abs(float64(llv.Spec.Size.Value()-llv.Status.ActualSize.Value())) < float64(delta.Value()) {
+	if AreSizesEqualWithinDelta(llv.Spec.Size, llv.Status.ActualSize, delta) {
 		return false, nil
 	}
 
@@ -726,4 +725,13 @@ func updateLVMLogicalVolume(ctx context.Context, metrics monitoring.Metrics, cl 
 	}
 
 	return err
+}
+
+func AreSizesEqualWithinDelta(leftSize, rightSize, allowedDelta resource.Quantity) bool {
+	delta := leftSize.DeepCopy()
+	delta.Sub(rightSize)
+	if delta.Sign() < 0 {
+		delta.Neg()
+	}
+	return delta.Cmp(allowedDelta) <= 0
 }
