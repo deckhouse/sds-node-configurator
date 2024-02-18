@@ -457,7 +457,10 @@ func reconcileLLVCreateFunc(
 		return
 	}
 	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] updated the LVMLogicaVolume %s status.phase to %s", llv.Name, pendingStatusPhase))
-	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s spec.thin.poolname: \"%s\"", llv.Name, llv.Spec.Thin.PoolName))
+
+	if llv.Spec.Thin != nil {
+		log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s spec.thin.poolname: \"%s\"", llv.Name, llv.Spec.Thin.PoolName))
+	}
 
 	added, err := addLLVFinalizerIfNotExist(ctx, cl, metrics, llv)
 	if err != nil {
@@ -680,10 +683,9 @@ func getFreeVGSpace(lvg *v1alpha1.LvmVolumeGroup) (resource.Quantity, error) {
 }
 
 func getLVMLogicalVolumeType(llv *v1alpha1.LvmLogicalVolume) deviceType {
-	if llv.Spec.Thin.PoolName == "" {
+	if llv.Spec.Thin == nil {
 		return Thick
 	}
-
 	return Thin
 }
 
