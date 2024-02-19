@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	Thick deviceType = "Thick"
-	Thin  deviceType = "Thin"
+	Thick = "Thick"
+	Thin  = "Thin"
 
 	CreateReconcile reconcileType = "Create"
 	UpdateReconcile reconcileType = "Update"
@@ -41,7 +41,6 @@ const (
 )
 
 type (
-	deviceType    string
 	reconcileType string
 )
 
@@ -318,7 +317,7 @@ func reconcileLLVUpdateFunc(
 	}
 	log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s has extending size %d", llv.Name, extendingSize.Value()))
 
-	switch getLVMLogicalVolumeType(llv) {
+	switch llv.Spec.Type {
 	case Thick:
 		freeSpace, err := getFreeVGSpace(lvg)
 		if err != nil {
@@ -458,10 +457,6 @@ func reconcileLLVCreateFunc(
 	}
 	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] updated the LVMLogicaVolume %s status.phase to %s", llv.Name, pendingStatusPhase))
 
-	if llv.Spec.Thin != nil {
-		log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s spec.thin.poolname: \"%s\"", llv.Name, llv.Spec.Thin.PoolName))
-	}
-
 	added, err := addLLVFinalizerIfNotExist(ctx, cl, metrics, llv)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
@@ -469,7 +464,7 @@ func reconcileLLVCreateFunc(
 	}
 	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] a finalizer to the LVMLogicalVolume %s was added: %t", llv.Name, added))
 
-	switch getLVMLogicalVolumeType(llv) {
+	switch llv.Spec.Type {
 	case Thick:
 		freeSpace, err := getFreeVGSpace(lvg)
 		if err != nil {
@@ -481,7 +476,7 @@ func reconcileLLVCreateFunc(
 			return
 		}
 
-		log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s requested size: %d, free size: %d", llv.Name, llv.Spec.Size.Value(), freeSpace.Value()))
+		log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s, type: %s requested size: %d, free size: %d", llv.Name, llv.Spec.Type, llv.Spec.Size.Value(), freeSpace.Value()))
 		if freeSpace.Value() < llv.Spec.Size.Value() {
 			err = errors.New("not enough space")
 			log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s requested size is more than the VG %s free space", llv.Name, lvg.Spec.ActualVGNameOnTheNode))
@@ -514,7 +509,7 @@ func reconcileLLVCreateFunc(
 			return
 		}
 
-		log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s requested size: %d, free size: %d", llv.Name, llv.Spec.Size.Value(), freeSpace.Value()))
+		log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s, type: %s requested size: %d, free size: %d", llv.Name, llv.Spec.Type, llv.Spec.Size.Value(), freeSpace.Value()))
 		if freeSpace.Value() < llv.Spec.Size.Value() {
 			err = errors.New("not enough space")
 			log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s requested size is more than the Thin-pool %s free space", llv.Name, llv.Spec.Thin.PoolName))
@@ -680,13 +675,6 @@ func getFreeVGSpace(lvg *v1alpha1.LvmVolumeGroup) (resource.Quantity, error) {
 	}
 
 	return subtractQuantity(total, allocated), nil
-}
-
-func getLVMLogicalVolumeType(llv *v1alpha1.LvmLogicalVolume) deviceType {
-	if llv.Spec.Thin == nil {
-		return Thick
-	}
-	return Thin
 }
 
 func belongsToNode(lvg *v1alpha1.LvmVolumeGroup, nodeName string) bool {
