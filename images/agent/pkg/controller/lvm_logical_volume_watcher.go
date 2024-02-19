@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/config"
 	"sds-node-configurator/internal"
@@ -718,10 +719,8 @@ func updateLVMLogicalVolume(ctx context.Context, metrics monitoring.Metrics, cl 
 }
 
 func AreSizesEqualWithinDelta(leftSize, rightSize, allowedDelta resource.Quantity) bool {
-	delta := leftSize.DeepCopy()
-	delta.Sub(rightSize)
-	if delta.Sign() < 0 {
-		delta.Neg()
-	}
-	return delta.Cmp(allowedDelta) <= 0
+	leftSizeFloat := float64(leftSize.Value())
+	rightSizeFloat := float64(rightSize.Value())
+
+	return math.Abs(leftSizeFloat-rightSizeFloat) < float64(allowedDelta.Value())
 }
