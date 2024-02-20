@@ -272,8 +272,8 @@ func deleteLVIfExists(log logger.Logger, llv *v1alpha1.LvmLogicalVolume) error {
 	}
 
 	if lv == nil {
-		log.Debug(fmt.Sprintf("[deleteLVIfExists] did not find LV %s", lv.LVName))
-		return errors.New("lv does not exist")
+		log.Warning(fmt.Sprintf("[deleteLVIfExists] did not find LV %s", llv.Name))
+		return nil
 	}
 
 	cmd, err = utils.RemoveLV(lv.VGName, lv.LVName)
@@ -592,6 +592,10 @@ func addLLVFinalizerIfNotExist(ctx context.Context, cl client.Client, metrics mo
 }
 
 func shouldReconcileByCreateFunc(log logger.Logger, llv *v1alpha1.LvmLogicalVolume) (bool, error) {
+	if llv.DeletionTimestamp != nil {
+		return false, nil
+	}
+
 	if llv.Status == nil {
 		return true, nil
 	}
