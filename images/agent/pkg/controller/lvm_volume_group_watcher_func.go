@@ -28,6 +28,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -521,4 +522,58 @@ func UpdateLVMVolumeGroupTagsName(log logger.Logger, metrics monitoring.Metrics,
 	}
 
 	return false, nil
+}
+
+func ResizeThinPool(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, specThinPool v1alpha1.SpecThinPool, statusThinPool v1alpha1.StatusThinPool, nodeName string, resizeDelta resource.Quantity) (bool, error) {
+	volumeGroupSize, err := resource.ParseQuantity(lvg.Status.VGSize)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[ResizeThinPool] error ParseQuantity, resource name: %s", lvg.Name))
+		return true, err
+	}
+
+	volumeGroupAllocatedSize, err := resource.ParseQuantity(lvg.Status.VGSize)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[ResizeThinPool] error ParseQuantity, resource name: %s", lvg.Name))
+		return true, err
+	}
+
+	volumeGroupFreeSpaceBytes := volumeGroupSize.Value() - volumeGroupAllocatedSize.Value()
+	addSizeBytes := specThinPool.Size.Value() - statusThinPool.ActualSize.Value()
+
+	log.Debug(fmt.Sprintf("[ResizeThinPool] volumeGroupSize = %s", volumeGroupSize.String()))
+	log.Debug(fmt.Sprintf("[ResizeThinPool] volumeGroupAllocatedSize = %s", volumeGroupAllocatedSize.String()))
+	log.Debug(fmt.Sprintf("[ResizeThinPool] volumeGroupFreeSpaceBytes = %d", volumeGroupFreeSpaceBytes))
+	log.Debug(fmt.Sprintf("[ResizeThinPool] addSizeBytes = %d", addSizeBytes))
+
+	if addSizeBytes <= 0 {
+		err = fmt.Errorf("thin pool name: %s; add size value <= 0, specThinPool.Size: %s, statusThinPool.ActualSize: %s", specThinPool.Name, specThinPool.Size.String(), statusThinPool.ActualSize.String())
+		log.Error(err, "[ResizeThinPool]: ")
+		return false, err
+	}
+
+	log.Debug(fmt.Sprintf("[ResizeThinPool] Identified a thin pool requiring resize: %s", specThinPool.Name))
+	if volumeGroupFreeSpaceBytes < addSizeBytes+resizeDelta.Value() {
+		err = fmt.Errorf("not enough space for resizing in the thin pool: %s; specThinPool.Size: %s, volumeGroupFreeSpace: %s, resizeDelta: %s", specThinPool.Name, specThinPool.Size.String(), resource.NewQuantity(volumeGroupFreeSpaceBytes, resource.BinarySI).String(), resizeDelta.String())
+		log.Error(err, "[ResizeThinPool]: ")
+	}
+
+	log.Info(fmt.Sprintf("[ResizeThinPool] Start resizing thin pool: %s; with new size: %s", specThinPool.Name, specThinPool.Size.String()))
+
+	err = CreateEventLVMVolumeGroup(ctx, cl, metrics, EventReasonResizing, EventActionResizing, nodeName, lvg)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[ResizeThinPool] error CreateEventLVMVolumeGroup, resource name: %s", lvg.Name))
+	}
+	start := time.Now()
+	cmd, err := utils.ExtendLV(specThinPool.Size.Value(), lvg.Spec.ActualVGNameOnTheNode, specThinPool.Name)
+	metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "lvextend").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "lvextend").Inc()
+	log.Debug(cmd)
+	if err != nil {
+		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "lvextend").Inc()
+		log.Error(err, fmt.Sprintf("[ResizeThinPool] error ExtendLV, pool name: %s", specThinPool.Name))
+		return true, err
+	}
+
+	return false, nil
+
 }

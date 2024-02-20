@@ -16,7 +16,11 @@ limitations under the License.
 
 package utils
 
-import "k8s.io/apimachinery/pkg/api/resource"
+import (
+	"math"
+
+	"k8s.io/apimachinery/pkg/api/resource"
+)
 
 func BytesToQuantity(size int64) string {
 	tmp := resource.NewQuantity(size, resource.BinarySI)
@@ -29,4 +33,11 @@ func QuantityToBytes(quantity string) (int64, error) {
 		return 0, err
 	}
 	return b.Value(), nil
+}
+
+func AreSizesEqualWithinDelta(leftSize, rightSize, allowedDelta resource.Quantity) bool {
+	leftSizeFloat := float64(leftSize.Value())
+	rightSizeFloat := float64(rightSize.Value())
+
+	return math.Abs(leftSizeFloat-rightSizeFloat) < float64(allowedDelta.Value())
 }
