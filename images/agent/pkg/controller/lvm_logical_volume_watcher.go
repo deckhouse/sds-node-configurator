@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/config"
 	"sds-node-configurator/internal"
@@ -273,8 +272,8 @@ func deleteLVIfExists(log logger.Logger, llv *v1alpha1.LvmLogicalVolume) error {
 	}
 
 	if lv == nil {
-		log.Debug(fmt.Sprintf("[deleteLVIfExists] did not find LV %s", lv.LVName))
-		return errors.New("lv does not exist")
+		log.Warning(fmt.Sprintf("[deleteLVIfExists] did not find LV %s", llv.Name))
+		return nil
 	}
 
 	cmd, err = utils.RemoveLV(lv.VGName, lv.LVName)
@@ -434,7 +433,7 @@ func shouldReconcileByUpdateFunc(llv *v1alpha1.LvmLogicalVolume) (bool, error) {
 		return false, fmt.Errorf("requested size %d is less than actual %d", llv.Spec.Size.Value(), llv.Status.ActualSize.Value())
 	}
 
-	if AreSizesEqualWithinDelta(llv.Spec.Size, llv.Status.ActualSize, delta) {
+	if utils.AreSizesEqualWithinDelta(llv.Spec.Size, llv.Status.ActualSize, delta) {
 		return false, nil
 	}
 
@@ -593,6 +592,10 @@ func addLLVFinalizerIfNotExist(ctx context.Context, cl client.Client, metrics mo
 }
 
 func shouldReconcileByCreateFunc(log logger.Logger, llv *v1alpha1.LvmLogicalVolume) (bool, error) {
+	if llv.DeletionTimestamp != nil {
+		return false, nil
+	}
+
 	if llv.Status == nil {
 		return true, nil
 	}
@@ -716,11 +719,4 @@ func updateLVMLogicalVolume(ctx context.Context, metrics monitoring.Metrics, cl 
 	}
 
 	return err
-}
-
-func AreSizesEqualWithinDelta(leftSize, rightSize, allowedDelta resource.Quantity) bool {
-	leftSizeFloat := float64(leftSize.Value())
-	rightSizeFloat := float64(rightSize.Value())
-
-	return math.Abs(leftSizeFloat-rightSizeFloat) < float64(allowedDelta.Value())
 }
