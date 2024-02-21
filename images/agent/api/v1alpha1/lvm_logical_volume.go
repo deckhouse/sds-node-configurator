@@ -21,22 +21,22 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type LvmLogicalVolumeList struct {
+type LVMLogicalVolumeList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
 
-	Items []LvmLogicalVolume `json:"items"`
+	Items []LVMLogicalVolume `json:"items"`
 }
 
-type LvmLogicalVolume struct {
+type LVMLogicalVolume struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   LvmLogicalVolumeSpec    `json:"spec"`
-	Status *LvmLogicalVolumeStatus `json:"status,omitempty"`
+	Spec   LVMLogicalVolumeSpec    `json:"spec"`
+	Status *LVMLogicalVolumeStatus `json:"status,omitempty"`
 }
 
-type LvmLogicalVolumeSpec struct {
+type LVMLogicalVolumeSpec struct {
 	Type           string                 `json:"type"`
 	Size           resource.Quantity      `json:"size"`
 	LvmVolumeGroup string                 `json:"lvmVolumeGroup"`
@@ -47,7 +47,7 @@ type ThinLogicalVolumeSpec struct {
 	PoolName string `json:"poolName"`
 }
 
-type LvmLogicalVolumeStatus struct {
+type LVMLogicalVolumeStatus struct {
 	Phase      string            `json:"phase"`
 	Reason     string            `json:"reason"`
 	ActualSize resource.Quantity `json:"actualSize"`

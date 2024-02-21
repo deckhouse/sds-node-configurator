@@ -12,7 +12,7 @@ spec:
   group: storage.deckhouse.io
   scope: Cluster
   names:
-    kind: LvmLogicalVolume
+    kind: LVMLogicalVolume
     plural: lvmlogicalvolumes
     singular: lvmlogicalvolume
     shortNames:

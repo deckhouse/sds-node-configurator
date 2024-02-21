@@ -63,11 +63,11 @@ func RunLVMLogicalVolumeWatcherController(
 		return nil, err
 	}
 
-	err = c.Watch(source.Kind(cache, &v1alpha1.LvmLogicalVolume{}), handler.Funcs{
+	err = c.Watch(source.Kind(cache, &v1alpha1.LVMLogicalVolume{}), handler.Funcs{
 		CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
 			log.Info("[RunLVMLogicalVolumeWatcherController] CreateFunc starts reconciliation")
 
-			llv, ok := e.Object.(*v1alpha1.LvmLogicalVolume)
+			llv, ok := e.Object.(*v1alpha1.LVMLogicalVolume)
 			if !ok {
 				err = errors.New("unable to cast event object to a given type")
 				log.Error(err, "[CreateFunc] an error occurred while handling create event")
@@ -98,7 +98,7 @@ func RunLVMLogicalVolumeWatcherController(
 		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
 			log.Info("[RunLVMLogicalVolumeWatcherController] UpdateFunc starts reconciliation")
 
-			llv, ok := e.ObjectNew.(*v1alpha1.LvmLogicalVolume)
+			llv, ok := e.ObjectNew.(*v1alpha1.LVMLogicalVolume)
 			if !ok {
 				err = errors.New("unable to cast event object to a given type")
 				log.Error(err, "[UpdateFunc] an error occurs while handling update event")
@@ -134,7 +134,7 @@ func RunLVMLogicalVolumeWatcherController(
 	return c, err
 }
 
-func runEventReconcile(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, llv *v1alpha1.LvmLogicalVolume, lvg *v1alpha1.LvmVolumeGroup) {
+func runEventReconcile(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LvmVolumeGroup) {
 	recType, err := identifyReconcileFunc(log, llv)
 	if err != nil {
 		log.Error(err, "[runEventReconcile] an error occurs while identify reconcile func")
@@ -160,7 +160,7 @@ func runEventReconcile(ctx context.Context, cl client.Client, log logger.Logger,
 	}
 }
 
-func identifyReconcileFunc(log logger.Logger, llv *v1alpha1.LvmLogicalVolume) (reconcileType, error) {
+func identifyReconcileFunc(log logger.Logger, llv *v1alpha1.LVMLogicalVolume) (reconcileType, error) {
 	should, err := shouldReconcileByCreateFunc(log, llv)
 	if err != nil {
 		return "", err
@@ -190,7 +190,7 @@ func reconcileLLVDeleteFunc(
 	cl client.Client,
 	log logger.Logger,
 	metrics monitoring.Metrics,
-	llv *v1alpha1.LvmLogicalVolume,
+	llv *v1alpha1.LVMLogicalVolume,
 ) {
 	log.Info("[reconcileLLVDeleteFunc] starts reconciliation")
 
@@ -218,7 +218,7 @@ func reconcileLLVDeleteFunc(
 	log.Info("[reconcileLLVDeleteFunc] ends reconciliation")
 }
 
-func shouldReconcileByDeleteFunc(llv *v1alpha1.LvmLogicalVolume) bool {
+func shouldReconcileByDeleteFunc(llv *v1alpha1.LVMLogicalVolume) bool {
 	if llv.DeletionTimestamp == nil {
 		return false
 	}
@@ -231,7 +231,7 @@ func removeLLVFinalizersIfExist(
 	cl client.Client,
 	metrics monitoring.Metrics,
 	log logger.Logger,
-	llv *v1alpha1.LvmLogicalVolume,
+	llv *v1alpha1.LVMLogicalVolume,
 ) error {
 	var removed bool
 	for i, f := range llv.Finalizers {
@@ -254,7 +254,7 @@ func removeLLVFinalizersIfExist(
 	return nil
 }
 
-func deleteLVIfExists(log logger.Logger, llv *v1alpha1.LvmLogicalVolume) error {
+func deleteLVIfExists(log logger.Logger, llv *v1alpha1.LVMLogicalVolume) error {
 	lvs, cmd, _, err := utils.GetAllLVs()
 	log.Debug(fmt.Sprintf("[deleteLVIfExists] runs cmd: %s", cmd))
 	if err != nil {
@@ -286,7 +286,7 @@ func deleteLVIfExists(log logger.Logger, llv *v1alpha1.LvmLogicalVolume) error {
 	return nil
 }
 
-func getExtendingSize(llv *v1alpha1.LvmLogicalVolume) (resource.Quantity, error) {
+func getExtendingSize(llv *v1alpha1.LVMLogicalVolume) (resource.Quantity, error) {
 	return subtractQuantity(llv.Spec.Size, llv.Status.ActualSize), nil
 }
 
@@ -295,7 +295,7 @@ func reconcileLLVUpdateFunc(
 	cl client.Client,
 	log logger.Logger,
 	metrics monitoring.Metrics,
-	llv *v1alpha1.LvmLogicalVolume,
+	llv *v1alpha1.LVMLogicalVolume,
 	lvg *v1alpha1.LvmVolumeGroup,
 ) {
 	log.Info("[reconcileLLVUpdateFunc] starts reconciliation")
@@ -410,7 +410,7 @@ func reconcileLLVUpdateFunc(
 	log.Info("[reconcileLLVUpdateFunc] ends reconciliation")
 }
 
-func shouldReconcileByUpdateFunc(llv *v1alpha1.LvmLogicalVolume) (bool, error) {
+func shouldReconcileByUpdateFunc(llv *v1alpha1.LVMLogicalVolume) (bool, error) {
 	if llv.DeletionTimestamp != nil {
 		return false, nil
 	}
@@ -445,7 +445,7 @@ func reconcileLLVCreateFunc(
 	cl client.Client,
 	log logger.Logger,
 	metrics monitoring.Metrics,
-	llv *v1alpha1.LvmLogicalVolume,
+	llv *v1alpha1.LVMLogicalVolume,
 	lvg *v1alpha1.LvmVolumeGroup,
 ) {
 	log.Info("[reconcileLLVCreateFunc] starts reconciliation")
@@ -547,7 +547,7 @@ func reconcileLLVCreateFunc(
 	log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LV, name: %s has actual size: %d", llv.Name, actualSize.Value()))
 
 	if llv.Status == nil {
-		llv.Status = new(v1alpha1.LvmLogicalVolumeStatus)
+		llv.Status = new(v1alpha1.LVMLogicalVolumeStatus)
 	}
 	llv.Status.Phase = createdStatusPhase
 	llv.Status.ActualSize = actualSize
@@ -576,7 +576,7 @@ func getLVActualSize(log logger.Logger, lvName string) (resource.Quantity, error
 	return resource.Quantity{}, nil
 }
 
-func addLLVFinalizerIfNotExist(ctx context.Context, cl client.Client, metrics monitoring.Metrics, llv *v1alpha1.LvmLogicalVolume) (bool, error) {
+func addLLVFinalizerIfNotExist(ctx context.Context, cl client.Client, metrics monitoring.Metrics, llv *v1alpha1.LVMLogicalVolume) (bool, error) {
 	if slices.Contains(llv.Finalizers, internal.SdsNodeConfiguratorFinalizer) {
 		return false, nil
 	}
@@ -591,7 +591,7 @@ func addLLVFinalizerIfNotExist(ctx context.Context, cl client.Client, metrics mo
 	return true, nil
 }
 
-func shouldReconcileByCreateFunc(log logger.Logger, llv *v1alpha1.LvmLogicalVolume) (bool, error) {
+func shouldReconcileByCreateFunc(log logger.Logger, llv *v1alpha1.LVMLogicalVolume) (bool, error) {
 	if llv.DeletionTimestamp != nil {
 		return false, nil
 	}
@@ -692,9 +692,9 @@ func belongsToNode(lvg *v1alpha1.LvmVolumeGroup, nodeName string) bool {
 	return belongs
 }
 
-func updateLVMLogicalVolumePhase(ctx context.Context, cl client.Client, metrics monitoring.Metrics, llv *v1alpha1.LvmLogicalVolume, phase, reason string) error {
+func updateLVMLogicalVolumePhase(ctx context.Context, cl client.Client, metrics monitoring.Metrics, llv *v1alpha1.LVMLogicalVolume, phase, reason string) error {
 	if llv.Status == nil {
-		llv.Status = new(v1alpha1.LvmLogicalVolumeStatus)
+		llv.Status = new(v1alpha1.LVMLogicalVolumeStatus)
 	}
 	llv.Status.Phase = phase
 	llv.Status.Reason = reason
@@ -707,7 +707,7 @@ func updateLVMLogicalVolumePhase(ctx context.Context, cl client.Client, metrics 
 	return nil
 }
 
-func updateLVMLogicalVolume(ctx context.Context, metrics monitoring.Metrics, cl client.Client, llv *v1alpha1.LvmLogicalVolume) error {
+func updateLVMLogicalVolume(ctx context.Context, metrics monitoring.Metrics, cl client.Client, llv *v1alpha1.LVMLogicalVolume) error {
 	var err error
 
 	for i := 0; i < internal.KubernetesApiRequestLimit; i++ {
