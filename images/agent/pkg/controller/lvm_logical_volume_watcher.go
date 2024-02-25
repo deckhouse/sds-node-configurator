@@ -363,15 +363,16 @@ func reconcileLLVUpdateFunc(
 		}
 
 		log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s Thin extending size: %d, free size: %d", llv.Name, extendingSize.Value(), freeSpace.Value()))
-		if freeSpace.Value() < extendingSize.Value() {
-			err = errors.New("not enough space")
-			log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s requested size is more than the Thin-pool %s free space", llv.Name, llv.Spec.Thin.PoolName))
-			err = updateLVMLogicalVolumePhase(ctx, cl, metrics, llv, failedStatusPhase, "Not enough space in a Thin-pool")
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-			}
-			return
-		}
+		// TODO: uncomment after implementing overcommit.
+		// if freeSpace.Value() < extendingSize.Value() {
+		// 	err = errors.New("not enough space")
+		// 	log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s requested size is more than the Thin-pool %s free space", llv.Name, llv.Spec.Thin.PoolName))
+		// 	err = updateLVMLogicalVolumePhase(ctx, cl, metrics, llv, failedStatusPhase, "Not enough space in a Thin-pool")
+		// 	if err != nil {
+		// 		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
+		// 	}
+		// 	return
+		// }
 
 		log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s will be extended in Thin-pool %s with Quantity value: %d", llv.Name, llv.Spec.Thin.PoolName, llv.Spec.Size.Value()))
 		cmd, err := utils.ExtendLV(llv.Spec.Size.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Name)
