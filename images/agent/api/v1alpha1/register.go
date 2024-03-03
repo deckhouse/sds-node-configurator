@@ -25,7 +25,7 @@ import (
 const (
 	BlockDeviceKind           = "BlockDevice"
 	LVMVolumeGroupKind        = "LvmVolumeGroup"
-	LVMLogicalVolumeKind      = "LvmLogicalVolume"
+	LVMLogicalVolumeKind      = "LVMLogicalVolume"
 	APIGroup                  = "storage.deckhouse.io"
 	APIVersion                = "v1alpha1"
 	OwnerReferencesAPIVersion = "v1"
@@ -50,8 +50,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&BlockDeviceList{},
 		&LvmVolumeGroup{},
 		&LvmVolumeGroupList{},
-		&LvmLogicalVolume{},
-		&LvmLogicalVolumeList{},
+		&LVMLogicalVolume{},
+		&LVMLogicalVolumeList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil
