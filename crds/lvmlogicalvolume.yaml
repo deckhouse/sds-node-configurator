@@ -28,7 +28,6 @@ spec:
           properties:
             spec:
               type: object
-              description: |
               properties:
                 type:
                   x-kubernetes-validations:
