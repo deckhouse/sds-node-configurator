@@ -49,7 +49,6 @@ spec:
                       type: string
             status:
               type: object
-              description: |
               properties:
                 phase:
                   type: string
