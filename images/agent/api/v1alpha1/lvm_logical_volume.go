@@ -1,5 +1,5 @@
 /*
-Copyright 2023 Flant JSC
+Copyright 2024 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -37,10 +37,11 @@ type LVMLogicalVolume struct {
 }
 
 type LVMLogicalVolumeSpec struct {
-	Type           string                 `json:"type"`
-	Size           resource.Quantity      `json:"size"`
-	LvmVolumeGroup string                 `json:"lvmVolumeGroup"`
-	Thin           *ThinLogicalVolumeSpec `json:"thin"`
+	ActualLVNameOnTheNode string                 `json:"actualLVNameOnTheNode"`
+	Type                  string                 `json:"type"`
+	Size                  resource.Quantity      `json:"size"`
+	LvmVolumeGroupName    string                 `json:"lvmVolumeGroupName"`
+	Thin                  *ThinLogicalVolumeSpec `json:"thin"`
 }
 
 type ThinLogicalVolumeSpec struct {

@@ -164,32 +164,32 @@ func filterResourcesByNode(
 	ctx context.Context,
 	cl kclient.Client,
 	log logger.Logger,
-	lvs map[string]v1alpha1.LvmVolumeGroup,
+	lvgs map[string]v1alpha1.LvmVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 	currentNode string) []v1alpha1.LvmVolumeGroup {
 
-	filtered := make([]v1alpha1.LvmVolumeGroup, 0, len(lvs))
+	filtered := make([]v1alpha1.LvmVolumeGroup, 0, len(lvgs))
 	blockDevicesNodes := make(map[string]string, len(blockDevices))
 
 	for _, bd := range blockDevices {
 		blockDevicesNodes[bd.Name] = bd.Status.NodeName
 	}
 
-	for _, lv := range lvs {
-		switch lv.Spec.Type {
+	for _, lvg := range lvgs {
+		switch lvg.Spec.Type {
 		case Local:
 			currentNodeDevices := 0
-			for _, bdName := range lv.Spec.BlockDeviceNames {
+			for _, bdName := range lvg.Spec.BlockDeviceNames {
 				if blockDevicesNodes[bdName] == currentNode {
 					currentNodeDevices++
 				}
 			}
 
 			// If we did not add every block device of local VG, that means a mistake, and we turn the resource's health to Nonoperational.
-			if currentNodeDevices > 0 && currentNodeDevices < len(lv.Spec.BlockDeviceNames) {
+			if currentNodeDevices > 0 && currentNodeDevices < len(lvg.Spec.BlockDeviceNames) {
 				if err := turnLVMVGHealthToNonOperational(
-					ctx, cl, lv, fmt.Errorf("there are block devices from different nodes for local volume group")); err != nil {
-					log.Error(err, `[filterResourcesByNode] unable to update resource, name: "%s"`, lv.Name)
+					ctx, cl, lvg, fmt.Errorf("there are block devices from different nodes for local volume group")); err != nil {
+					log.Error(err, `[filterResourcesByNode] unable to update resource, name: "%s"`, lvg.Name)
 					continue
 				}
 			}
@@ -200,24 +200,24 @@ func filterResourcesByNode(
 			}
 
 			// Otherwise, we add the resource to the filtered ones.
-			filtered = append(filtered, lv)
+			filtered = append(filtered, lvg)
 		case Shared:
-			if len(lv.Spec.BlockDeviceNames) != 1 {
+			if len(lvg.Spec.BlockDeviceNames) != 1 {
 				if err := turnLVMVGHealthToNonOperational(
-					ctx, cl, lv, fmt.Errorf("there are more than one block devices for shared volume group")); err != nil {
-					log.Error(err, `[filterResourcesByNode] unable to update resource, name: "%s"`, lv.Name)
+					ctx, cl, lvg, fmt.Errorf("there are more than one block devices for shared volume group")); err != nil {
+					log.Error(err, `[filterResourcesByNode] unable to update resource, name: "%s"`, lvg.Name)
 					continue
 				}
 			}
 
 			// If the only one block devices does not belong to our node, we skip the resource.
-			singleBD := lv.Spec.BlockDeviceNames[0]
+			singleBD := lvg.Spec.BlockDeviceNames[0]
 			if blockDevicesNodes[singleBD] != currentNode {
 				continue
 			}
 
 			// Otherwise, we add the resource to the filtered ones.
-			filtered = append(filtered, lv)
+			filtered = append(filtered, lvg)
 		}
 	}
 

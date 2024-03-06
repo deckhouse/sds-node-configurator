@@ -25,28 +25,55 @@ spec:
           type: object
           description: | 
             The LVMLogicalVolume resource defines the storage where a PV will be created in.
+          required:
+            - spec
           properties:
             spec:
               type: object
+              x-kubernetes-validations:
+                - rule: |
+                    (self.type == "Thin" && has(self.thin)) || self.type != "Thin"
+                  message: "Field 'thin' is required when 'type' is 'Thin'."
+              required:
+                - actualLVNameOnTheNode
+                - type
+                - lvmVolumeGroupName
+                - size
               properties:
-                type:
+                actualLVNameOnTheNode:
+                  type: string
                   x-kubernetes-validations:
                     - rule: self == oldSelf
+                      message: Value is immutable.
+                type:
                   type: string
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
                   enum: [Thick, Thin]
                 size:
                   type: string
-                lvmVolumeGroup:
-                  x-kubernetes-validations:
-                    - rule: self == oldSelf
+                  minLength: 1
+                  pattern: '^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$'
+                lvmVolumeGroupName:
                   type: string
-                thin:
                   x-kubernetes-validations:
                     - rule: self == oldSelf
+                      message: Value is immutable.
+                  minLength: 1
+                  pattern: '^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$'
+                thin:
                   type: object
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                  required:
+                    - poolName
                   properties:
                     poolName:
                       type: string
+                      minLength: 1
+                      pattern: ^.*$
             status:
               type: object
               properties:
@@ -62,7 +89,7 @@ spec:
           name: Phase
           type: string
           description: The current resource status.
-        - jsonPath: .spec.lvmVolumeGroup
+        - jsonPath: .spec.lvmVolumeGroupName
           name: LVMVolumeGroup
           type: string
           description: The selected LVMVolumeGroup resource.
