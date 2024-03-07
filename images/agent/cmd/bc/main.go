@@ -49,7 +49,6 @@ var (
 )
 
 func main() {
-
 	ctx := context.Background()
 
 	cfgParams, err := config.NewConfig()
@@ -125,7 +124,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if _, err = controller.RunLVMLogicalVolumeWatcherController(mgr, *cfgParams, *log, cfgParams.Loglevel, metrics); err != nil {
+	if _, err = controller.RunLVMLogicalVolumeWatcherController(mgr, *cfgParams, *log, metrics); err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMLogicalVolumeWatcherController")
 		os.Exit(1)
 	}

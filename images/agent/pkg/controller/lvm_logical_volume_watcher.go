@@ -51,7 +51,6 @@ func RunLVMLogicalVolumeWatcherController(
 	mgr manager.Manager,
 	cfg config.Options,
 	log logger.Logger,
-	logLevel logger.Verbosity,
 	metrics monitoring.Metrics,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
@@ -118,11 +117,13 @@ func RunLVMLogicalVolumeWatcherController(
 			}
 			log.Trace("[RunLVMLogicalVolumeWatcherController] UpdateFunc get new LVMLogicalVolume: ", newLLV.Name, newLLV)
 
-			if logLevel == "4" {
+			// TODO: Figure out how to log it in our logger.
+			if cfg.Loglevel == "4" {
 				fmt.Println("==============START DIFF==================")
 				fmt.Println(cmp.Diff(oldLLV, newLLV))
 				fmt.Println("==============END DIFF==================")
 			}
+
 			if reflect.DeepEqual(oldLLV.Spec, newLLV.Spec) && newLLV.DeletionTimestamp == nil {
 				log.Info(fmt.Sprintf("[UpdateFunc] the LVMLogicalVolume %s has not been changed", newLLV.Name))
 				log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] UpdateFunc ends reconciliation of LLV: %s", newLLV.Name))
@@ -293,13 +294,12 @@ func removeLLVFinalizersIfExist(
 }
 
 func deleteLVIfExists(log logger.Logger, vgName, lvName string) error {
-
-	exists, _, err := FindLV(log, vgName, lvName)
+	lv, err := FindLV(log, vgName, lvName)
 	if err != nil {
 		return err
 	}
 
-	if !exists {
+	if lv == nil {
 		log.Warning(fmt.Sprintf("[deleteLVIfExists] did not find LV %s in VG %s", lvName, vgName))
 		return nil
 	}
@@ -648,12 +648,12 @@ func shouldReconcileByCreateFunc(log logger.Logger, vgName string, llv *v1alpha1
 		return false, nil
 	}
 
-	exists, _, err := FindLV(log, vgName, llv.Spec.ActualLVNameOnTheNode)
+	lv, err := FindLV(log, vgName, llv.Spec.ActualLVNameOnTheNode)
 	if err != nil {
 		return false, err
 	}
 
-	if exists {
+	if lv != nil {
 		return false, nil
 	}
 
@@ -760,21 +760,21 @@ func updateLVMLogicalVolume(ctx context.Context, metrics monitoring.Metrics, cl 
 	return err
 }
 
-func FindLV(log logger.Logger, vgName, lvName string) (bool, internal.LVData, error) {
+func FindLV(log logger.Logger, vgName, lvName string) (*internal.LVData, error) {
 	lvs, cmd, _, err := utils.GetAllLVs()
 	log.Debug(fmt.Sprintf("[FindLV] runs cmd: %s", cmd))
 	if err != nil {
 		log.Error(err, "[shouldReconcileByCreateFunc] unable to GetAllLVs")
-		return false, internal.LVData{}, err
+		return &internal.LVData{}, err
 	}
 
 	log.Debug(fmt.Sprintf("[FindLV] Try to find LV: %s in VG: %s", lvName, vgName))
 	for _, lv := range lvs {
 		log.Trace(fmt.Sprintf("[FindLV] processing LV: %s, VG: %s", lv.LVName, lv.VGName))
 		if lv.VGName == vgName && lv.LVName == lvName {
-			return true, lv, nil
+			return &lv, nil
 		}
 	}
 
-	return false, internal.LVData{}, nil
+	return &internal.LVData{}, nil
 }
