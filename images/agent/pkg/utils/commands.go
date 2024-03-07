@@ -93,6 +93,29 @@ func GetAllLVs() (data []internal.LVData, command string, stdErr bytes.Buffer, e
 	return lvs, cmd.String(), stdErr, nil
 }
 
+func GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdErr bytes.Buffer, err error) {
+	var outs bytes.Buffer
+	lvData = internal.LVData{}
+	lvPath := fmt.Sprintf("/dev/%s/%s", vgName, lvName)
+	args := []string{"lvs", "-o", "+vg_uuid,tags", "--units", "B", "--nosuffix", "--reportformat", "json", lvPath}
+	extendedArgs := extendArgs(args)
+	cmd := exec.Command(nsenter, extendedArgs...)
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	if err = cmd.Run(); err != nil {
+		return lvData, cmd.String(), stdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stdErr.String())
+	}
+
+	lv, err := unmarshalLVs(outs.Bytes())
+	if err != nil {
+		return lvData, cmd.String(), stdErr, fmt.Errorf("unable to GetLV %s, err: %w", lvPath, err)
+	}
+	lvData = lv[0]
+
+	return lvData, cmd.String(), stdErr, nil
+}
+
 func GetAllPVs() (data []internal.PVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json"}

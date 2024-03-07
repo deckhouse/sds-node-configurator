@@ -49,7 +49,6 @@ var (
 )
 
 func main() {
-
 	ctx := context.Background()
 
 	cfgParams, err := config.NewConfig()
