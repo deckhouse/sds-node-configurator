@@ -96,7 +96,7 @@ func RunLVMLogicalVolumeWatcherController(
 
 			runEventReconcile(ctx, cl, log, metrics, llv, lvg)
 
-			log.Info(fmt.Sprint("[RunLVMLogicalVolumeWatcherController] CreateFunc ends reconciliation of LLV: %s", llv.Name))
+			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] CreateFunc ends reconciliation of LLV: %s", llv.Name))
 		},
 
 		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
@@ -125,7 +125,7 @@ func RunLVMLogicalVolumeWatcherController(
 			}
 			if reflect.DeepEqual(oldLLV.Spec, newLLV.Spec) && newLLV.DeletionTimestamp == nil {
 				log.Info(fmt.Sprintf("[UpdateFunc] the LVMLogicalVolume %s has not been changed", newLLV.Name))
-				log.Info(fmt.Sprint("[RunLVMLogicalVolumeWatcherController] UpdateFunc ends reconciliation of LLV: %s", newLLV.Name))
+				log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] UpdateFunc ends reconciliation of LLV: %s", newLLV.Name))
 				return
 			}
 
@@ -147,7 +147,7 @@ func RunLVMLogicalVolumeWatcherController(
 
 			runEventReconcile(ctx, cl, log, metrics, newLLV, lvg)
 
-			log.Info(fmt.Sprint("[RunLVMLogicalVolumeWatcherController] UpdateFunc ends reconciliation of LLV: %s", newLLV.Name))
+			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] UpdateFunc ends reconciliation of LLV: %s", newLLV.Name))
 		},
 	})
 	if err != nil {

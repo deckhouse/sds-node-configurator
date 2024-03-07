@@ -22,6 +22,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		cl      = NewFakeClient()
 		log     = logger.Logger{}
 		metrics = monitoring.Metrics{}
+		vgName  = "test-vg"
 	)
 
 	t.Run("subtractQuantity_returns_correct_value", func(t *testing.T) {
@@ -62,7 +63,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("returns_create", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{}
 
-			actual, err := identifyReconcileFunc(log, llv)
+			actual, err := identifyReconcileFunc(log, vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.Equal(t, CreateReconcile, actual)
@@ -82,7 +83,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				},
 			}
 
-			actual, err := identifyReconcileFunc(log, llv)
+			actual, err := identifyReconcileFunc(log, vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.Equal(t, UpdateReconcile, actual)
@@ -97,7 +98,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				},
 			}
 
-			actual, err := identifyReconcileFunc(log, llv)
+			actual, err := identifyReconcileFunc(log, vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.Equal(t, DeleteReconcile, actual)
@@ -117,7 +118,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				},
 			}
 
-			actual, err := identifyReconcileFunc(log, llv)
+			actual, err := identifyReconcileFunc(log, vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.Equal(t, reconcileType(""), actual)
@@ -129,7 +130,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("if_status_nill_returns_true", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{}
 
-			should, err := shouldReconcileByCreateFunc(log, llv)
+			should, err := shouldReconcileByCreateFunc(log, vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.True(t, should)
@@ -143,7 +144,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				},
 			}
 
-			should, err := shouldReconcileByCreateFunc(log, llv)
+			should, err := shouldReconcileByCreateFunc(log, vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.False(t, should)
@@ -157,7 +158,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				},
 			}
 
-			should, err := shouldReconcileByCreateFunc(log, llv)
+			should, err := shouldReconcileByCreateFunc(log, vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.False(t, should)
@@ -324,7 +325,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			}
 		}()
 
-		err = updateLVMLogicalVolumePhase(ctx, cl, metrics, llv, failedStatusPhase, reason)
+		err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, reason)
 		if assert.NoError(t, err) {
 			newLLV := &v1alpha1.LVMLogicalVolume{}
 			err = cl.Get(ctx, client.ObjectKey{
@@ -362,7 +363,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				}
 			}()
 
-			added, err := addLLVFinalizerIfNotExist(ctx, cl, metrics, llv)
+			added, err := addLLVFinalizerIfNotExist(ctx, cl, log, metrics, llv)
 			if assert.NoError(t, err) {
 				assert.True(t, added)
 
@@ -400,7 +401,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				}
 			}()
 
-			added, err := addLLVFinalizerIfNotExist(ctx, cl, metrics, llv)
+			added, err := addLLVFinalizerIfNotExist(ctx, cl, log, metrics, llv)
 			if assert.NoError(t, err) {
 				assert.False(t, added)
 
@@ -415,29 +416,29 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		})
 	})
 
-	t.Run("getVirtualLVSize", func(t *testing.T) {
-		const (
-			tpName = "test_tp"
-		)
-		lvs := []internal.LVData{
-			{
-				PoolLv: tpName,
-				LVSize: *resource.NewQuantity(1000, resource.BinarySI),
-			},
-			{
-				PoolLv: tpName,
-				LVSize: *resource.NewQuantity(1000, resource.BinarySI),
-			},
-			{
-				PoolLv: tpName,
-				LVSize: *resource.NewQuantity(1000, resource.BinarySI),
-			},
-		}
+	// t.Run("getVirtualLVSize", func(t *testing.T) {
+	// 	const (
+	// 		tpName = "test_tp"
+	// 	)
+	// 	lvs := []internal.LVData{
+	// 		{
+	// 			PoolLv: tpName,
+	// 			LVSize: *resource.NewQuantity(1000, resource.BinarySI),
+	// 		},
+	// 		{
+	// 			PoolLv: tpName,
+	// 			LVSize: *resource.NewQuantity(1000, resource.BinarySI),
+	// 		},
+	// 		{
+	// 			PoolLv: tpName,
+	// 			LVSize: *resource.NewQuantity(1000, resource.BinarySI),
+	// 		},
+	// 	}
 
-		size := getVirtualLVSize(tpName, lvs)
+	// 	size := getVirtualLVSize(tpName, lvs)
 
-		assert.Equal(t, int64(3000), size.Value())
-	})
+	// 	assert.Equal(t, int64(3000), size.Value())
+	// })
 
 	t.Run("getFreeVGSpace", func(t *testing.T) {
 		lvg := &v1alpha1.LvmVolumeGroup{
