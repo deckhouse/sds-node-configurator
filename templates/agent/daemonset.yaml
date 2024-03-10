@@ -55,8 +55,6 @@ spec:
       - name: static-utils-copier
         image: {{ include "helm_lib_module_image" (list . "staticUtilsCopier") }}
         imagePullPolicy: IfNotPresent
-        args:
-          
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
