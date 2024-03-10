@@ -4,30 +4,6 @@ ARG UBUNTU_UTILS_BUILDER=registry.deckhouse.io/base_images/ubuntu:jammy-20221130
 ARG BASE_IMAGE=registry.deckhouse.io/base_images/ubuntu:jammy-20221130@sha256:c14c3b1242536729ce5227ff833144977b4e378723858fb73a4cf40ea6daaf6a
 
 #################################
-FROM $UBUNTU_UTILS_BUILDER as util-linux-builder
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    git \
-    pkg-config \
-    autopoint \
-    autoconf \
-    bison \
-    libtool \
-    automake \
-    gettext \
-    flex \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN git clone https://github.com/util-linux/util-linux.git /util-linux
-
-WORKDIR /util-linux
-RUN git checkout v2.39.3
-RUN ./autogen.sh
-RUN ./configure LDFLAGS="-static" --enable-static-programs -disable-shared
-RUN make LDFLAGS="--static" nsenter
-
-
-#################################
 FROM $GOLANG_20_ALPINE_BUILDER as agent-builder
 WORKDIR /go/src
 
@@ -44,7 +20,6 @@ RUN GOOS=linux GOARCH=amd64 go build -o sds-node-configurator-agent
 #################################
 FROM --platform=linux/amd64 $BASE_IMAGE
 
-COPY --from=util-linux-builder /util-linux/nsenter /opt/deckhouse/bin/nsenter.static
 COPY --from=agent-builder /go/src/cmd/sds-node-configurator-agent /go/src/cmd/sds-node-configurator-agent
 
 CMD ["/go/src/cmd/sds-node-configurator-agent"]

@@ -43,7 +43,7 @@ WORKDIR /util-linux
 RUN git checkout v2.39.3
 RUN ./autogen.sh
 RUN ./configure LDFLAGS="-static" --enable-static-programs -disable-shared
-RUN make LDFLAGS="--static" lsblk
+RUN make LDFLAGS="--static" lsblk nsenter
 
 
 #################################
@@ -55,6 +55,7 @@ ADD bin-copier.sh  .
 
 COPY --from=lvm-builder /lvm2/tools/lvm.static /usr/local/bin/flant/lvm.static
 COPY --from=util-linux-builder /util-linux/lsblk /usr/local/bin/flant/lsblk.static
+COPY --from=util-linux-builder /util-linux/lsblk /usr/local/bin/flant/nsenter.static
 
 ENTRYPOINT ["/bin-copier.sh"]
 CMD ["/usr/local/bin/flant", "/opt/deckhouse/bin"]
