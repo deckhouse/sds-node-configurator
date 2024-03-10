@@ -56,7 +56,7 @@ spec:
         image: {{ include "helm_lib_module_image" (list . "staticUtilsCopier") }}
         imagePullPolicy: IfNotPresent
         volumeMounts:
-        - mountPath: /opt/deckhouse/bin
+        - mountPath: /opt/deckhouse/bin/sds
           name: opt-deckhouse-bin
         resources:
           requests:
@@ -91,7 +91,7 @@ spec:
             value: "4"
 {{- end }}
         volumeMounts:
-        - mountPath: /opt/deckhouse/bin
+        - mountPath: /opt/deckhouse/bin/sds
           name: opt-deckhouse-bin
         resources:
           requests:
@@ -101,7 +101,7 @@ spec:
 {{- end }}
       volumes:
       - hostPath:
-          path: /opt/deckhouse/bin
+          path: /opt/deckhouse/bin/sds
           type: Directory
         name: opt-deckhouse-bin
 {{- end }}

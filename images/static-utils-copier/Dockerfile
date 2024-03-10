@@ -49,6 +49,8 @@ RUN make LDFLAGS="--static" lsblk nsenter
 #################################
 FROM --platform=linux/amd64 $BASE_IMAGE
 
+RUN apk add --no-cache rsync
+
 WORKDIR /
 
 ADD bin-copier.sh  .
@@ -58,4 +60,4 @@ COPY --from=util-linux-builder /util-linux/lsblk /usr/local/bin/flant/lsblk.stat
 COPY --from=util-linux-builder /util-linux/nsenter /usr/local/bin/flant/nsenter.static
 
 ENTRYPOINT ["/bin-copier.sh"]
-CMD ["/usr/local/bin/flant", "/opt/deckhouse/bin"]
+CMD ["/usr/local/bin/flant", "/opt/deckhouse/bin/sds"]

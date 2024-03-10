@@ -27,12 +27,12 @@ import (
 )
 
 const (
-	nsenter = "/opt/deckhouse/bin/nsenter.static"
+	nsenter = "/opt/deckhouse/bin/sds/nsenter.static"
 )
 
 func GetBlockDevices() ([]internal.Device, string, error) {
 	var outs bytes.Buffer
-	args := []string{"/opt/deckhouse/bin/lsblk.static", "-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
+	args := []string{"/opt/deckhouse/bin/sds/lsblk.static", "-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
 	extendedArgs := extendArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 	cmd.Stdout = &outs
@@ -431,7 +431,7 @@ func extendArgs(args []string) []string {
 
 func lvmStaticExtendedArgs(args []string) []string {
 	nsenterArgs := []string{"-t", "1", "-m", "-u", "-i", "-n", "-p"}
-	lvmStaticBin := []string{"--", "/opt/deckhouse/bin/lvm.static"}
+	lvmStaticBin := []string{"--", "/opt/deckhouse/bin/sds/lvm.static"}
 	result := append(nsenterArgs, lvmStaticBin...)
 	return append(result, args...)
 }
