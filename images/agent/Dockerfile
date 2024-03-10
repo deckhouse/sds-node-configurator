@@ -3,28 +3,7 @@ ARG UBUNTU_UTILS_BUILDER=registry.deckhouse.io/base_images/ubuntu:jammy-20221130
 ARG BASE_IMAGE=registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc
 
 #################################
-FROM $UBUNTU_UTILS_BUILDER as lvm-builder
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    autoconf \
-    automake \
-    libtool \
-    pkg-config \
-    libdevmapper-dev \
-    libaio-dev \
-    thin-provisioning-tools \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN git clone https://sourceware.org/git/lvm2.git /lvm2
-
-WORKDIR /lvm2
-RUN git checkout v2_03_22
-RUN ./configure --enable-static_link
-RUN make
-
-#################################
-FROM $UBUNTU_UTILS_BUILDER as lsblk-builder
+FROM $UBUNTU_UTILS_BUILDER as util-linux-builder
 RUN apt-get update && apt-get install -y \
     build-essential \
     git \
@@ -44,7 +23,7 @@ WORKDIR /util-linux
 RUN git checkout v2.39.3
 RUN ./autogen.sh
 RUN ./configure LDFLAGS="-static" --enable-static-programs -disable-shared
-RUN make LDFLAGS="--static" lsblk nsenter
+RUN make LDFLAGS="--static" nsenter
 
 
 #################################
@@ -64,9 +43,7 @@ RUN GOOS=linux GOARCH=amd64 go build -o sds-node-configurator-agent
 #################################
 FROM --platform=linux/amd64 $BASE_IMAGE
 
-COPY --from=lvm-builder /lvm2/tools/lvm.static /usr/local/bin/lvm.static
-COPY --from=lsblk-builder /util-linux/lsblk /usr/local/bin/lsblk.static
-COPY --from=lsblk-builder /util-linux/nsenter /usr/local/bin/nsenter.static
+COPY --from=util-linux-builder /util-linux/nsenter /usr/local/bin/nsenter.static
 COPY --from=agent-builder /go/src/cmd/sds-node-configurator-agent /go/src/cmd/sds-node-configurator-agent
 
 CMD ["/go/src/cmd/sds-node-configurator-agent"]
