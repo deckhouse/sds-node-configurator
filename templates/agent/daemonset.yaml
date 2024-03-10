@@ -91,7 +91,7 @@ spec:
 {{- end }}
         volumeMounts:
         - mountPath: /opt/deckhouse/bin
-          name: statically-linked-utils
+          name: opt-deckhouse-bin
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
