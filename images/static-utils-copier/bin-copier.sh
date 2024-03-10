@@ -39,7 +39,6 @@ if [ ! -d "$DEST_DIR" ]; then
   exit 1
 fi
 
-
 cp -r "$SOURCE_DIR"/* "$DEST_DIR"
 if [ $? -ne 0 ]; then
   echo "Failed to copy files from $SOURCE_DIR to $DEST_DIR"
