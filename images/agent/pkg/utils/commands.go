@@ -27,12 +27,12 @@ import (
 )
 
 const (
-	nsenter = "/usr/bin/nsenter"
+	nsenter = "/opt/deckhouse/bin/nsenter.static"
 )
 
 func GetBlockDevices() ([]internal.Device, string, error) {
 	var outs bytes.Buffer
-	args := []string{"lsblk", "-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
+	args := []string{"/opt/deckhouse/bin/lsblk.static", "-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
 	extendedArgs := extendArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 	cmd.Stdout = &outs
@@ -56,7 +56,7 @@ func GetBlockDevices() ([]internal.Device, string, error) {
 func GetAllVGs() (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	args := []string{"vgs", "-o", "+uuid,tags,shared", "--units", "B", "--nosuffix", "--reportformat", "json"}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
@@ -76,7 +76,7 @@ func GetAllVGs() (data []internal.VGData, command string, stdErr bytes.Buffer, e
 func GetAllLVs() (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	args := []string{"lvs", "-o", "+vg_uuid,tags", "--units", "B", "--nosuffix", "--reportformat", "json"}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
@@ -98,7 +98,7 @@ func GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdEr
 	lvData = internal.LVData{}
 	lvPath := fmt.Sprintf("/dev/%s/%s", vgName, lvName)
 	args := []string{"lvs", "-o", "+vg_uuid,tags", "--units", "B", "--nosuffix", "--reportformat", "json", lvPath}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
@@ -119,7 +119,7 @@ func GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdEr
 func GetAllPVs() (data []internal.PVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json"}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
@@ -138,7 +138,7 @@ func GetAllPVs() (data []internal.PVData, command string, stdErr bytes.Buffer, e
 
 func CreatePV(path string) (string, error) {
 	args := []string{"pvcreate", path}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -155,7 +155,7 @@ func CreateVGLocal(vgName, lvmName string, pvNames []string) (string, error) {
 	tmpStr := fmt.Sprintf("storage.deckhouse.io/lvmVolumeGroupName=%s", lvmName)
 	args := []string{"vgcreate", vgName, strings.Join(pvNames, " "), "--addtag", "storage.deckhouse.io/enabled=true", "--addtag", tmpStr}
 
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -170,7 +170,7 @@ func CreateVGLocal(vgName, lvmName string, pvNames []string) (string, error) {
 
 func CreateVGShared(vgName, lvmName string, pvNames []string) (string, error) {
 	args := []string{"vgcreate", "--shared", vgName, strings.Join(pvNames, " "), "--addtag", "storage.deckhouse.io/enabled=true", "--addtag", fmt.Sprintf("storage.deckhouse.io/lvmVolumeGroupName=%s", lvmName)}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -185,7 +185,7 @@ func CreateVGShared(vgName, lvmName string, pvNames []string) (string, error) {
 
 func CreateThinPool(thinPool v1alpha1.SpecThinPool, VGName string) (string, error) {
 	args := []string{"lvcreate", "-L", thinPool.Size.String(), "-T", fmt.Sprintf("%s/%s", VGName, thinPool.Name)}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -199,7 +199,7 @@ func CreateThinPool(thinPool v1alpha1.SpecThinPool, VGName string) (string, erro
 
 func CreateThinLogicalVolume(vgName, tpName, lvName string, size int64) (string, error) {
 	args := []string{"lvcreate", "-T", fmt.Sprintf("%s/%s", vgName, tpName), "-n", lvName, "-V", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -217,7 +217,7 @@ func CreateThinLogicalVolume(vgName, tpName, lvName string, size int64) (string,
 
 func CreateThickLogicalVolume(vgName, lvName string, size int64) (string, error) {
 	args := []string{"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -232,7 +232,7 @@ func CreateThickLogicalVolume(vgName, lvName string, size int64) (string, error)
 
 func ExtendVG(vgName string, paths []string) (string, error) {
 	args := []string{"vgextend", vgName, strings.Join(paths, " ")}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -247,7 +247,7 @@ func ExtendVG(vgName string, paths []string) (string, error) {
 
 func ExtendLV(size int64, vgName, lvName string) (string, error) {
 	args := []string{"lvextend", "-L", fmt.Sprintf("%dk", size/1024), fmt.Sprintf("/dev/%s/%s", vgName, lvName)}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -262,7 +262,7 @@ func ExtendLV(size int64, vgName, lvName string) (string, error) {
 
 func ResizePV(pvName string) (string, error) {
 	args := []string{"pvresize", pvName}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -277,7 +277,7 @@ func ResizePV(pvName string) (string, error) {
 
 func RemoveVG(vgName string) (string, error) {
 	args := []string{"vgremove", vgName}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -292,7 +292,7 @@ func RemoveVG(vgName string) (string, error) {
 
 func RemovePV(pvNames []string) (string, error) {
 	args := []string{"pvremove", strings.Join(pvNames, " ")}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -306,7 +306,7 @@ func RemovePV(pvNames []string) (string, error) {
 
 func RemoveLV(vgName, lvName string) (string, error) {
 	args := []string{"lvremove", fmt.Sprintf("/dev/%s/%s", vgName, lvName), "-y"}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -321,7 +321,7 @@ func RemoveLV(vgName, lvName string) (string, error) {
 func VGChangeAddTag(vGName, tag string) (string, error) {
 	var outs, stdErr bytes.Buffer
 	args := []string{"vgchange", vGName, "--addtag", tag}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
@@ -335,7 +335,7 @@ func VGChangeAddTag(vGName, tag string) (string, error) {
 func VGChangeDelTag(vGName, tag string) (string, error) {
 	var outs, stdErr bytes.Buffer
 	args := []string{"vgchange", vGName, "--deltag", tag}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
@@ -350,7 +350,7 @@ func LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
 	tmpStr := fmt.Sprintf("/dev/%s/%s", lv.VGName, lv.LVName)
 	var outs, stdErr bytes.Buffer
 	args := []string{"lvchange", tmpStr, "--deltag", tag}
-	extendedArgs := extendArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(nsenter, extendedArgs...)
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
@@ -427,4 +427,11 @@ func unmarshalLVs(out []byte) ([]internal.LVData, error) {
 func extendArgs(args []string) []string {
 	nsenterArgs := []string{"-t", "1", "-m", "-u", "-i", "-n", "-p"}
 	return append(nsenterArgs, args...)
+}
+
+func lvmStaticExtendedArgs(args []string) []string {
+	nsenterArgs := []string{"-t", "1", "-m", "-u", "-i", "-n", "-p"}
+	lvmStaticBin := []string{"--", "/opt/deckhouse/bin/lvm.static"}
+	result := append(nsenterArgs, lvmStaticBin...)
+	return append(result, args...)
 }

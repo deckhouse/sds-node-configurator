@@ -43,7 +43,7 @@ RUN GOOS=linux GOARCH=amd64 go build -o sds-node-configurator-agent
 #################################
 FROM --platform=linux/amd64 $BASE_IMAGE
 
-COPY --from=util-linux-builder /util-linux/nsenter /usr/local/bin/nsenter.static
+COPY --from=util-linux-builder /util-linux/nsenter /opt/deckhouse/bin/nsenter.static
 COPY --from=agent-builder /go/src/cmd/sds-node-configurator-agent /go/src/cmd/sds-node-configurator-agent
 
 CMD ["/go/src/cmd/sds-node-configurator-agent"]
