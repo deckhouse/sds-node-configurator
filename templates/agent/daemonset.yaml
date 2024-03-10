@@ -102,6 +102,6 @@ spec:
       volumes:
       - hostPath:
           path: /opt/deckhouse/bin/sds
-          type: Directory
+          type: DirectoryOrCreate
         name: opt-deckhouse-bin
 {{- end }}
