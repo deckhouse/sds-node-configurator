@@ -1,6 +1,5 @@
 ARG UBUNTU_UTILS_BUILDER=registry.deckhouse.io/base_images/ubuntu:jammy-20221130@sha256:c14c3b1242536729ce5227ff833144977b4e378723858fb73a4cf40ea6daaf6a
 ARG BASE_IMAGE=registry.deckhouse.io/base_images/alpine:3.16.3@sha256:5548e9172c24a1b0ca9afdd2bf534e265c94b12b36b3e0c0302f5853eaf00abb
-ARG UTILS_DIR_PATH=/usr/local/bin/flant
 
 #################################
 FROM $UBUNTU_UTILS_BUILDER as lvm-builder
@@ -54,8 +53,8 @@ WORKDIR /
 
 ADD bin-copier.sh  .
 
-COPY --from=lvm-builder /lvm2/tools/lvm.static $UTILS_DIR_PATH/lvm.static
-COPY --from=util-linux-builder /util-linux/lsblk $UTILS_DIR_PATH/lsblk.static
+COPY --from=lvm-builder /lvm2/tools/lvm.static /usr/local/bin/flant/lvm.static
+COPY --from=util-linux-builder /util-linux/lsblk /usr/local/bin/flant/lsblk.static
 
 ENTRYPOINT ["/bin-copier.sh"]
-CMD [$UTILS_DIR_PATH, "/opt/deckhouse/bin"]
+CMD ["/usr/local/bin/flant", "/opt/deckhouse/bin"]
