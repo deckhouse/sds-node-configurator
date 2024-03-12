@@ -80,7 +80,7 @@ func RunLVMVolumeGroupWatcherController(
 	}
 
 	createFunc := func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
-		log.Info(fmt.Sprintf("[RunLVMVolumeGroupController] event create LVMVolumeGroup, name: %s", e.Object.GetName()))
+		log.Info(fmt.Sprintf("[RunLVMVolumeGroupController] Get event CREATE for resource LVMVolumeGroup, name: %s", e.Object.GetName()))
 
 		request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 		shouldRequeue, err := ReconcileLVMVG(ctx, metrics, e.Object.GetName(), e.Object.GetNamespace(), cfg.NodeName, log, cl)
@@ -92,7 +92,7 @@ func RunLVMVolumeGroupWatcherController(
 	}
 
 	updateFunc := func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
-		log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] update LVMVolumeGroupn, name: %s", e.ObjectNew.GetName()))
+		log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] Get event UPDATE for resource LVMVolumeGroup, name: %s", e.ObjectNew.GetName()))
 
 		newLVG, ok := e.ObjectNew.(*v1alpha1.LvmVolumeGroup)
 		if !ok {
@@ -198,41 +198,34 @@ func ReconcileLVMVG(
 	lvg, err := getLVMVolumeGroup(ctx, cl, metrics, objectNameSpace, objectName)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error getLVMVolumeGroup, objectname: %s", objectName))
-		return true, err
+		return false, err
 	}
-	validation, status, err := ValidateLVMGroup(ctx, cl, metrics, lvg, objectNameSpace, nodeName)
-
 	if lvg == nil {
 		err = errors.New("nil pointer detected")
 		log.Error(err, "[ReconcileLVMVG] requested LVMVG group in nil")
 		return true, err
 	}
 
-	if status.Health == NonOperational {
-		health := status.Health
-		var message string
-		if err != nil {
-			message = err.Error()
-		}
-
-		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] ValidateLVMGroup, resource name: %s, message: %s", lvg.Name, message))
-		err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, lvg.Name, lvg.Namespace, message, health)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error update LVMVolumeGroup %s", lvg.Name))
-			return true, err
-		}
-	}
+	isOwnedByNode, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, lvg, objectNameSpace, nodeName)
 
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] validationLVMGroup failed, resource name: %s", lvg.Name))
-		return false, err
+		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CheckLVMVGNodeOwnership, resource name: %s", lvg.Name))
+		if status.Health == NonOperational {
+			health := status.Health
+			message := status.Message
+			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] ValidateLVMGroup, resource name: %s, health: %s, phase: %s, message: %s", lvg.Name, health, status.Phase, message))
+			err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, lvg.Name, lvg.Namespace, message, health)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error update LVMVolumeGroup %s", lvg.Name))
+				return true, err
+			}
+		}
+		return true, err
 	}
 
-	if validation == false {
-		err = errors.New("resource validation failed")
-		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] validation failed for resource, name: %s", lvg.Name))
-		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] status.Message = %s", status.Message))
-		return false, err
+	if !isOwnedByNode {
+		log.Debug(fmt.Sprintf("[ReconcileLVMVG] resource is not owned by node, name: %s, skip it", lvg.Name))
+		return false, nil
 	}
 
 	log.Info("[ReconcileLVMVG] validation passed")
@@ -272,14 +265,14 @@ func ReconcileLVMVG(
 	}
 	log.Info(fmt.Sprintf(`[ReconcileLVMVG] event was created for resource, name: %s`, lvg.Name))
 
-	existVG, err := ExistVG(lvg.Spec.ActualVGNameOnTheNode, log, metrics)
+	isVgExist, vg, err := GetVGFromNode(lvg.Spec.ActualVGNameOnTheNode, log, metrics)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error ExistVG, name: %s", lvg.Spec.ActualVGNameOnTheNode))
 		return true, err
 	}
-	if existVG {
-		log.Debug("[ReconcileLVMVG] tries to update ")
-		updated, err := UpdateLVMVolumeGroupTagsName(log, metrics, lvg)
+	if isVgExist {
+		log.Debug("[ReconcileLVMVG] start UpdateLVMVolumeGroupTagsName for r " + lvg.Name)
+		updated, err := UpdateLVMVolumeGroupTagsName(log, metrics, vg, lvg)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update VG tags on VG, name: %s", lvg.Spec.ActualVGNameOnTheNode))
 			return true, err
@@ -292,16 +285,16 @@ func ReconcileLVMVG(
 		}
 
 		log.Info("[ReconcileLVMVG] validation and choosing the type of operation")
-		extendPVs, shrinkPVs, err := ValidateTypeLVMGroup(ctx, cl, metrics, lvg, log)
+		extendPVs, shrinkPVs, err := ValidateOperationTypeLVMGroup(ctx, cl, metrics, lvg, log)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error ValidateTypeLVMGroup, name: %s", lvg.Name))
+			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error ValidateOperationTypeLVMGroup, name: %s", lvg.Name))
 			return true, err
 		}
 
-		if err == nil && extendPVs == nil && shrinkPVs == nil {
-			log.Warning("[ReconcileLVMVG] ValidateTypeLVMGroup FAIL")
-			//todo retry and send message
-		}
+		// if err == nil && extendPVs == nil && shrinkPVs == nil {
+		// 	log.Warning(fmt.Sprintf("[ReconcileLVMVG] ValidateOperationTypeLVMGroup FAIL for resource %s", lvg.Name))
+		// 	//todo retry and send message
+		// }
 
 		log.Debug("----- extendPVs list -----")
 		for _, pvExt := range extendPVs {
@@ -449,6 +442,7 @@ func ReconcileLVMVG(
 			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] error CreateEventLVMVolumeGroup, resource name: %s", lvg.Name))
 		}
 
+		log.Debug("[ReconcileLVMVG] Start CreateVGComplex function for resource " + lvg.Name)
 		err := CreateVGComplex(ctx, cl, metrics, lvg, log)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to CreateVGComplex for resource, name: %s", lvg.Name))

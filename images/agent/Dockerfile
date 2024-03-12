@@ -4,6 +4,9 @@ ARG BASE_IMAGE=registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205
 
 #################################
 FROM $UBUNTU_UTILS_BUILDER as util-linux-builder
+ARG SOURCE_REPO
+ARG UTIL_LINUX_VERSION=2.39.3
+
 RUN apt-get update && apt-get install -y \
     build-essential \
     git \
@@ -17,12 +20,13 @@ RUN apt-get update && apt-get install -y \
     flex \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/util-linux/util-linux.git /util-linux
-
 WORKDIR /util-linux
-RUN git checkout v2.39.3
-RUN ./autogen.sh
-RUN ./configure LDFLAGS="-static" --enable-static-programs -disable-shared
+
+RUN git clone ${SOURCE_REPO}/util-linux/util-linux.git . && \
+  git checkout v${UTIL_LINUX_VERSION} && \
+  ./autogen.sh && \
+  ./configure LDFLAGS="-static" --enable-static-programs -disable-shared
+
 RUN make LDFLAGS="--static" nsenter
 
 #################################
@@ -42,7 +46,7 @@ RUN GOOS=linux GOARCH=amd64 go build -o sds-node-configurator-agent
 #################################
 FROM --platform=linux/amd64 $BASE_IMAGE
 
-COPY --from=util-linux-builder /util-linux/nsenter /usr/local/bin/flant/nsenter.static
+COPY --from=util-linux-builder /util-linux/nsenter /opt/deckhouse/sds/nsenter.static
 COPY --from=agent-builder /go/src/cmd/sds-node-configurator-agent /go/src/cmd/sds-node-configurator-agent
 
 CMD ["/go/src/cmd/sds-node-configurator-agent"]

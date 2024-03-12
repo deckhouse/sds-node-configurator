@@ -2,12 +2,13 @@ package controller
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/pkg/monitoring"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
@@ -318,7 +319,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 	})
 
 	t.Run("ValidateLVMGroup_lvg_is_nil_returns_error", func(t *testing.T) {
-		valid, obj, err := ValidateLVMGroup(ctx, cl, metrics, nil, "test_ns", "test_node")
+		valid, obj, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, nil, "test_ns", "test_node")
 		assert.False(t, valid)
 		assert.Nil(t, obj)
 		assert.EqualError(t, err, "lvmVolumeGroup is nil")
@@ -350,7 +351,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}()
 		}
 
-		valid, status, err := ValidateLVMGroup(ctx, cl, metrics, testObj, namespace, "test_node")
+		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testObj, namespace, "test_node")
 		assert.False(t, valid)
 		if assert.NotNil(t, status) {
 			assert.Equal(t, NonOperational, status.Health)
@@ -431,7 +432,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}()
 		}
 
-		valid, status, err := ValidateLVMGroup(ctx, cl, metrics, testLvg, namespace, testNode)
+		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testLvg, namespace, testNode)
 		assert.False(t, valid)
 		if assert.NotNil(t, status) {
 			assert.Equal(t, NonOperational, status.Health)
@@ -513,7 +514,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}()
 		}
 
-		valid, status, err := ValidateLVMGroup(ctx, cl, metrics, testLvg, namespace, "another-node")
+		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testLvg, namespace, "another-node")
 		assert.False(t, valid)
 		if assert.NotNil(t, status) {
 			assert.Equal(t, NonOperational, status.Health)
@@ -595,7 +596,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}()
 		}
 
-		valid, status, err := ValidateLVMGroup(ctx, cl, metrics, testLvg, namespace, testNode)
+		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testLvg, namespace, testNode)
 		assert.True(t, valid)
 		if assert.NotNil(t, status) {
 			assert.Equal(t, "", status.Health)
@@ -677,7 +678,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}()
 		}
 
-		valid, status, err := ValidateLVMGroup(ctx, cl, metrics, testLvg, namespace, testNode)
+		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testLvg, namespace, testNode)
 		assert.False(t, valid)
 		if assert.NotNil(t, status) {
 			assert.Equal(t, NonOperational, status.Health)
@@ -749,7 +750,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}()
 		}
 
-		valid, status, err := ValidateLVMGroup(ctx, cl, metrics, testLvg, namespace, testNode)
+		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testLvg, namespace, testNode)
 		assert.False(t, valid)
 		if assert.NotNil(t, status) {
 			assert.Equal(t, NonOperational, status.Health)
@@ -821,7 +822,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}()
 		}
 
-		valid, status, err := ValidateLVMGroup(ctx, cl, metrics, testLvg, namespace, testNode)
+		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testLvg, namespace, testNode)
 		assert.True(t, valid)
 		if assert.NotNil(t, status) {
 			assert.Equal(t, "", status.Health)

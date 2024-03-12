@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sds-node-configurator/internal"
 	"sds-node-configurator/pkg/logger"
 	"time"
 )
@@ -80,7 +81,7 @@ func getMachineId() (string, error) {
 		args := []string{"-m", "-u", "-i", "-n", "-p", "-t", "1", "cat", "/etc/machine-id"}
 
 		var stdout bytes.Buffer
-		cmd := exec.Command("/usr/local/bin/flant/nsenter.static", args...)
+		cmd := exec.Command(internal.NSENTERCmd, args...)
 		cmd.Stdout = &stdout
 		err := cmd.Run()
 		if err != nil {

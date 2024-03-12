@@ -8,6 +8,8 @@
 image: images/{{ $ctx.ImageName }}
 context: images/{{ $ctx.ImageName }}
 dockerfile: Dockerfile
+args:
+  SOURCE_REPO: {{ env "SOURCE_REPO" | default "https://github.com" }}
 
   {{- /* For werf.inc.yaml render content by providing the ImageName param. */ -}}
   {{- else }}

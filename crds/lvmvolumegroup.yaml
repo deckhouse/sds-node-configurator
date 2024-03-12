@@ -32,6 +32,10 @@ spec:
           properties:
             spec:
               type: object
+              required:
+                - type
+                - blockDeviceNames
+                - actualVGNameOnTheNode
               properties:
                 type:
                   type: string
