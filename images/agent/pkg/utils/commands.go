@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	nsenter = "/opt/deckhouse/bin/sds/nsenter.static"
+	nsenter = "/usr/local/bin/flant/nsenter.static"
 )
 
 func GetBlockDevices() ([]internal.Device, string, error) {
