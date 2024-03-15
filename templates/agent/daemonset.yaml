@@ -1,3 +1,13 @@
+{{- define "static_utils_copier_resources" }}
+cpu: 10m
+memory: 25Mi
+{{- end }}
+
+{{- define "sds_node_configurator_agent_resources" }}
+cpu: 50m
+memory: 50Mi
+{{- end }}
+
 {{- if not .Values.sdsNodeConfigurator.disableDs }}
 ---
 apiVersion: apps/v1
@@ -41,6 +51,19 @@ spec:
         - name: {{ .Chart.Name }}-module-registry
       serviceAccountName: sds-node-configurator
       hostPID: true
+      initContainers:
+      - name: static-utils-copier
+        image: {{ include "helm_lib_module_image" (list . "staticUtilsCopier") }}
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - mountPath: /opt/deckhouse/sds
+          name: opt-deckhouse-sds
+        resources:
+          requests:
+            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
+{{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+            {{- include "static_utils_copier_resources" . | nindent 14 }}
+{{- end }}
       containers:
       - name: sds-node-configurator-agent
         image: {{ include "helm_lib_module_image" (list . "agent") }}
@@ -67,4 +90,15 @@ spec:
 {{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
             value: "4"
 {{- end }}
+        resources:
+          requests:
+            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
+{{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+            {{- include "sds_node_configurator_agent_resources" . | nindent 14 }}
+{{- end }}
+      volumes:
+      - hostPath:
+          path: /opt/deckhouse/sds
+          type: DirectoryOrCreate
+        name: opt-deckhouse-sds
 {{- end }}

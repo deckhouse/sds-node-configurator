@@ -8,6 +8,8 @@ env:
   MODULES_REGISTRY_LOGIN: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
   MODULES_REGISTRY_PASSWORD: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
   MODULES_MODULE_TAG: ${{ github.ref_name }}
+  # for ex https://user:password@my-repo.com/group
+  SOURCE_REPO: "${{ secrets.SOURCE_REPO }}"
 
 on:
   push:

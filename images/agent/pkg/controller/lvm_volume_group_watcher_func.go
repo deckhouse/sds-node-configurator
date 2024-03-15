@@ -109,7 +109,7 @@ func getBlockDevice(ctx context.Context, cl client.Client, metrics monitoring.Me
 	return obj, nil
 }
 
-func ValidateLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.Metrics, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, namespace, nodeName string) (bool, *StatusLVMVolumeGroup, error) {
+func CheckLVMVGNodeOwnership(ctx context.Context, cl client.Client, metrics monitoring.Metrics, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, namespace, nodeName string) (bool, *StatusLVMVolumeGroup, error) {
 	status := StatusLVMVolumeGroup{}
 	if lvmVolumeGroup == nil {
 		return false, nil, errors.New("lvmVolumeGroup is nil")
@@ -120,7 +120,10 @@ func ValidateLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.
 		for _, blockDev := range lvmVolumeGroup.Spec.BlockDeviceNames {
 			device, err := getBlockDevice(ctx, cl, metrics, namespace, blockDev)
 			if err != nil {
+				err = fmt.Errorf("error getBlockDevice: %s", err)
 				status.Health = NonOperational
+				status.Phase = Failed
+				status.Message = err.Error()
 				return false, &status, err
 			}
 			if device.Status.NodeName == nodeName {
@@ -129,6 +132,13 @@ func ValidateLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.
 		}
 
 		if membership == len(lvmVolumeGroup.Spec.BlockDeviceNames) {
+			if lvmVolumeGroup.Spec.ActualVGNameOnTheNode == "" {
+				err := fmt.Errorf("actualVGNameOnTheNode is empty")
+				status.Health = NonOperational
+				status.Phase = Failed
+				status.Message = "actualVGNameOnTheNode is empty"
+				return false, &status, err
+			}
 			return true, &status, nil
 		}
 
@@ -136,7 +146,7 @@ func ValidateLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.
 			status.Health = NonOperational
 			status.Phase = Failed
 			status.Message = "selected block devices are from different nodes for local LVMVolumeGroup"
-			return false, &status, errors.New("wrong block devices selected")
+			return false, &status, nil
 		}
 
 		if membership == 0 {
@@ -144,31 +154,10 @@ func ValidateLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.
 		}
 	}
 
-	if lvmVolumeGroup.Spec.Type == Shared {
-		if len(lvmVolumeGroup.Spec.BlockDeviceNames) != 1 {
-			status.Health = NonOperational
-			status.Phase = Failed
-			status.Message = "several block devices are selected for the shared LVMVolumeGroup"
-			return false, &status, errors.New(status.Message)
-		}
-
-		singleBD := lvmVolumeGroup.Spec.BlockDeviceNames[0]
-		bd, err := getBlockDevice(ctx, cl, metrics, namespace, singleBD)
-		if err != nil {
-			status.Health = NonOperational
-			status.Phase = Failed
-			status.Message = "selected unknown block device for the shared LVMVolumeGroup"
-			return false, &status, err
-		}
-
-		if bd.Status.NodeName == nodeName {
-			return true, &status, nil
-		}
-	}
 	return false, &status, nil
 }
 
-func ValidateTypeLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.Metrics, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, l logger.Logger) (extendPV, shrinkPV []string, err error) {
+func ValidateOperationTypeLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.Metrics, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, l logger.Logger) (extendPV, shrinkPV []string, err error) {
 	pvs, cmdStr, _, err := utils.GetAllPVs()
 	l.Debug(fmt.Sprintf("GetAllPVs exec cmd: %s", cmdStr))
 	if err != nil {
@@ -182,36 +171,27 @@ func ValidateTypeLVMGroup(ctx context.Context, cl client.Client, metrics monitor
 		}
 
 		if dev.Status.Consumable == true {
-			extendPV = append(extendPV, dev.Status.Path)
+			isReallyConsumable := true
+			for _, pv := range pvs {
+				if pv.PVName == dev.Status.Path && pv.VGName == lvmVolumeGroup.Spec.ActualVGNameOnTheNode {
+					isReallyConsumable = false
+					break
+				}
+			}
+			if isReallyConsumable {
+				extendPV = append(extendPV, dev.Status.Path)
+			}
+
 			continue
 		}
 
 		if dev.Status.ActualVGNameOnTheNode != lvmVolumeGroup.Spec.ActualVGNameOnTheNode && (len(dev.Status.VGUuid) != 0) {
-			return nil, nil, nil
-			// validation fail, send message => LVG  ?
+			err = fmt.Errorf("block device %s is already in use by another VG: %s with uuid %s. Our VG: %s with uuid %s", devName, dev.Status.ActualVGNameOnTheNode, dev.Status.VGUuid, lvmVolumeGroup.Spec.ActualVGNameOnTheNode, dev.Status.VGUuid)
+			return nil, nil, err
 		}
+		// TODO: realisation of shrinkPV
 	}
 
-	var flag bool
-
-	for _, pv := range pvs {
-		if pv.VGName == lvmVolumeGroup.Spec.ActualVGNameOnTheNode {
-			flag = false
-			for _, devName := range lvmVolumeGroup.Spec.BlockDeviceNames {
-				dev, err := getBlockDevice(ctx, cl, metrics, lvmVolumeGroup.Namespace, devName)
-				if err != nil {
-					return nil, nil, err
-				}
-
-				if pv.PVUuid == dev.Status.PVUuid {
-					flag = true
-				}
-			}
-		}
-		if !flag && pv.VGName == lvmVolumeGroup.Spec.ActualVGNameOnTheNode {
-			shrinkPV = append(shrinkPV, pv.PVName)
-		}
-	}
 	return extendPV, shrinkPV, nil
 }
 
@@ -332,24 +312,25 @@ func DeleteVG(vgName string, log logger.Logger, metrics monitoring.Metrics) erro
 	return nil
 }
 
-func ExistVG(vgName string, log logger.Logger, metrics monitoring.Metrics) (bool, error) {
+func GetVGFromNode(vgName string, log logger.Logger, metrics monitoring.Metrics) (bool, internal.VGData, error) {
 	start := time.Now()
-	vg, command, _, err := utils.GetAllVGs()
+	var vg internal.VGData
+	vgs, command, _, err := utils.GetAllVGs()
 	metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgs").Inc()
 	log.Debug(command)
 	if err != nil {
 		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "vgs").Inc()
 		log.Error(err, " error CreateEventLVMVolumeGroup")
-		return false, err
+		return false, vg, err
 	}
 
-	for _, v := range vg {
-		if v.VGName == vgName {
-			return true, nil
+	for _, vg := range vgs {
+		if vg.VGName == vgName {
+			return true, vg, nil
 		}
 	}
-	return false, nil
+	return false, vg, nil
 }
 
 func ValidateConsumableDevices(ctx context.Context, cl client.Client, metrics monitoring.Metrics, group *v1alpha1.LvmVolumeGroup) (bool, error) {
@@ -422,7 +403,8 @@ func CreateVGComplex(ctx context.Context, cl client.Client, metrics monitoring.M
 		return err
 	}
 	if !allDevicesConsumable {
-		l.Error(err, " error not all devices is consumable")
+		err = fmt.Errorf("not all devices is consumable")
+		l.Error(err, "error ValidateConsumableDevices")
 		return err
 	}
 	paths, err := GetPathsConsumableDevicesFromLVMVG(ctx, cl, metrics, group)
@@ -473,31 +455,13 @@ func CreateVGComplex(ctx context.Context, cl client.Client, metrics monitoring.M
 	return nil
 }
 
-func UpdateLVMVolumeGroupTagsName(log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
+func UpdateLVMVolumeGroupTagsName(log logger.Logger, metrics monitoring.Metrics, vg internal.VGData, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
 	const tag = "storage.deckhouse.io/lvmVolumeGroupName"
-
-	start := time.Now()
-	vgs, cmd, _, err := utils.GetAllVGs()
-	metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgs").Inc()
-	log.Debug(fmt.Sprintf("[ReconcileLVMVG] exec cmd: %s", cmd))
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to get VG by resource, name: %s", lvg.Name))
-		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "vgs").Inc()
-		return false, err
-	}
-
-	var vg internal.VGData
-	for _, v := range vgs {
-		if v.VGName == lvg.Spec.ActualVGNameOnTheNode {
-			vg = v
-		}
-	}
 
 	found, tagName := CheckTag(vg.VGTags)
 	if found && lvg.Name != tagName {
-		start = time.Now()
-		cmd, err = utils.VGChangeDelTag(vg.VGName, fmt.Sprintf("%s=%s", tag, tagName))
+		start := time.Now()
+		cmd, err := utils.VGChangeDelTag(vg.VGName, fmt.Sprintf("%s=%s", tag, tagName))
 		metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
 		metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgchange").Inc()
 		log.Debug(fmt.Sprintf("[UpdateLVMVolumeGroupTagsName] exec cmd: %s", cmd))
