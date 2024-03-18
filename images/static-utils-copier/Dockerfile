@@ -52,7 +52,7 @@ WORKDIR /util-linux
 RUN git clone ${SOURCE_REPO}/util-linux/util-linux.git . && \
   git checkout v${UTIL_LINUX_VERSION} && \
   ./autogen.sh && \
-  ./configure LDFLAGS="-static" --enable-static-programs -disable-shared
+  ./configure LDFLAGS="-static" --enable-static-programs -disable-shared --with-udev="/usr/lib/x86_64-linux-gnu/pkgconfig"
 
 RUN make LDFLAGS="--static" lsblk
 
