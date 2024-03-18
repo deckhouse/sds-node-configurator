@@ -90,6 +90,9 @@ spec:
 {{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
             value: "4"
 {{- end }}
+        volumeMounts:
+        - mountPath: /sys/
+          name: host-sys-dir
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
@@ -101,4 +104,8 @@ spec:
           path: /opt/deckhouse/sds
           type: DirectoryOrCreate
         name: opt-deckhouse-sds
+      - hostPath:
+          path: /sys/
+          type: Directory
+        name: host-sys-dir
 {{- end }}
