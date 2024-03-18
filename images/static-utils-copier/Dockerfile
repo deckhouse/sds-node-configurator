@@ -42,6 +42,7 @@ RUN apt-get update && apt-get install -y \
     autoconf \
     bison \
     libtool \
+    libudev-dev \
     automake \
     gettext \
     flex \
