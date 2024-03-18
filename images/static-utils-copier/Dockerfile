@@ -43,6 +43,9 @@ RUN apt-get update && apt-get install -y \
     bison \
     libtool \
     libudev-dev \
+    libblkid-dev \
+    libsmartcols-dev \
+    libmount-dev \
     automake \
     gettext \
     flex \
