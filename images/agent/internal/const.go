@@ -29,9 +29,9 @@ const (
 	ResizeDelta                  = "32Mi"
 	KubernetesApiRequestLimit    = 5
 	KubernetesApiRequestTimeout  = 1
-	NSENTERCmd                   = "/opt/deckhouse/sds/nsenter.static"
-	LSBLKCmd                     = "/opt/deckhouse/sds/lsblk.static"
-	LVMCmd                       = "/opt/deckhouse/sds/lvm.static"
+	NSENTERCmd                   = "/opt/deckhouse/sds/bin/nsenter.static"
+	LSBLKCmd                     = "/opt/deckhouse/sds/bin/lsblk.dynamic"
+	LVMCmd                       = "/opt/deckhouse/sds/bin/lvm.static"
 )
 
 var (

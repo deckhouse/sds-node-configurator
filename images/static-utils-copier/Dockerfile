@@ -56,9 +56,9 @@ WORKDIR /util-linux
 RUN git clone ${SOURCE_REPO}/util-linux/util-linux.git . && \
   git checkout v${UTIL_LINUX_VERSION} && \
   ./autogen.sh && \
-  ./configure LDFLAGS="-static" --enable-static-programs -disable-shared --with-udev="/usr/lib/x86_64-linux-gnu/pkgconfig"
+  ./configure --prefix /opt/deckhouse/sds
 
-RUN make LDFLAGS="--static" lsblk
+RUN make install-strip
 
 #################################
 FROM --platform=linux/amd64 $BASE_IMAGE
@@ -67,10 +67,17 @@ RUN apk add --no-cache rsync
 
 WORKDIR /
 
-COPY --from=lvm-builder /lvm2/tools/lvm.static /static-bin/lvm.static
-COPY --from=util-linux-builder /util-linux/lsblk /static-bin/lsblk.static
+COPY --from=lvm-builder /lvm2/tools/lvm.static /static-utils/bin/lvm.static
+
+COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libblkid.so.1 /linux-util/lib/
+COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libmount.so.1 /linux-util/lib/
+COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libsmartcols.so.1 /linux-util/lib/
+COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libudev.so.1 /linux-util/lib/
+COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libc.so.6 /linux-util/lib/
+COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libcap.so.2 /linux-util/lib/
+COPY --from=util-linux-builder /opt/deckhouse/sds/bin/lsblk /linux-util/bin/lsblk.dynamic
 
 ADD bin-copier.sh  .
 
 ENTRYPOINT ["/bin-copier.sh"]
-CMD ["/static-bin", "/opt/deckhouse/sds"]
+CMD ["/linux-util", "/opt/deckhouse/sds"]
