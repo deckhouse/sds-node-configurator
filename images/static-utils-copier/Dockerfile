@@ -69,15 +69,15 @@ WORKDIR /
 
 COPY --from=lvm-builder /lvm2/tools/lvm.static /static-utils/bin/lvm.static
 
-COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libblkid.so.1 /linux-util/lib/
-COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libmount.so.1 /linux-util/lib/
-COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libsmartcols.so.1 /linux-util/lib/
-COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libudev.so.1 /linux-util/lib/
-COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libc.so.6 /linux-util/lib/
-COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libcap.so.2 /linux-util/lib/
-COPY --from=util-linux-builder /opt/deckhouse/sds/bin/lsblk /linux-util/bin/lsblk.dynamic
+COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libblkid.so.1 /static-utils/lib/
+COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libmount.so.1 /static-utils/lib/
+COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libsmartcols.so.1 /static-utils/lib/
+COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libudev.so.1 /static-utils/lib/
+COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libc.so.6 /static-utils/lib/
+COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libcap.so.2 /static-utils/lib/
+COPY --from=util-linux-builder /opt/deckhouse/sds/bin/lsblk /static-utils/bin/lsblk.dynamic
 
 ADD bin-copier.sh  .
 
 ENTRYPOINT ["/bin-copier.sh"]
-CMD ["/linux-util", "/opt/deckhouse/sds"]
+CMD ["/static-utils", "/opt/deckhouse/sds"]
