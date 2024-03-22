@@ -69,6 +69,7 @@ WORKDIR /
 
 COPY --from=lvm-builder /lvm2/tools/lvm.static /sds-utils/bin/lvm.static
 
+# Got from ldd lsblk.dynamic
 COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libblkid.so.1 /sds-utils/lib/
 COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libmount.so.1 /sds-utils/lib/
 COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libsmartcols.so.1 /sds-utils/lib/
