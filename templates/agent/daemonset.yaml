@@ -1,4 +1,4 @@
-{{- define "static_utils_copier_resources" }}
+{{- define "sds_utils_installer_resources" }}
 cpu: 10m
 memory: 25Mi
 {{- end }}
@@ -52,8 +52,8 @@ spec:
       serviceAccountName: sds-node-configurator
       hostPID: true
       initContainers:
-      - name: static-utils-copier
-        image: {{ include "helm_lib_module_image" (list . "staticUtilsCopier") }}
+      - name: sds-utils-installer
+        image: {{ include "helm_lib_module_image" (list . "sdsUtilsInstaller") }}
         imagePullPolicy: IfNotPresent
         volumeMounts:
         - mountPath: /opt/deckhouse/sds
@@ -62,7 +62,7 @@ spec:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-            {{- include "static_utils_copier_resources" . | nindent 14 }}
+            {{- include "sds_utils_installer_resources" . | nindent 14 }}
 {{- end }}
       containers:
       - name: sds-node-configurator-agent
@@ -90,6 +90,9 @@ spec:
 {{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
             value: "4"
 {{- end }}
+        volumeMounts:
+        - mountPath: /sys/
+          name: host-sys-dir
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
@@ -101,4 +104,8 @@ spec:
           path: /opt/deckhouse/sds
           type: DirectoryOrCreate
         name: opt-deckhouse-sds
+      - hostPath:
+          path: /sys/
+          type: Directory
+        name: host-sys-dir
 {{- end }}

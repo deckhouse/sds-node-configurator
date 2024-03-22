@@ -32,6 +32,11 @@ spec:
                     LVM Volume Group UUID, которой принадлежит данный девайс в качестве Physical Volume.
 
                     > Опциально: присутствует, только если девайс используется как Physical Volume и включен в Volume Group.
+                partUUID:
+                  description: |
+                    UUID раздела.
+
+                    > Опциально: присутствует, только если девайс является разделом.
                 lvmVolumeGroupName:
                   description: |
                     Имя ресурса LVMVolumeGroup.

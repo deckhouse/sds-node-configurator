@@ -43,6 +43,7 @@ type BlockDeviceStatus struct {
 	Consumable            bool           `json:"consumable"`
 	PVUuid                string         `json:"pvUUID"`
 	VGUuid                string         `json:"vgUUID"`
+	PartUUID              string         `json:"partUUID"`
 	LvmVolumeGroupName    string         `json:"lvmVolumeGroupName"`
 	ActualVGNameOnTheNode string         `json:"actualVGNameOnTheNode"`
 	Wwn                   string         `json:"wwn"`

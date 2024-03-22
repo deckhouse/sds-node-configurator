@@ -138,6 +138,7 @@ func hasBlockDeviceDiff(res v1alpha1.BlockDeviceStatus, candidate internal.Block
 		candidate.Consumable != res.Consumable ||
 		candidate.PVUuid != res.PVUuid ||
 		candidate.VGUuid != res.VGUuid ||
+		candidate.PartUUID != res.PartUUID ||
 		candidate.LvmVolumeGroupName != res.LvmVolumeGroupName ||
 		candidate.ActualVGNameOnTheNode != res.ActualVGNameOnTheNode ||
 		candidate.Wwn != res.Wwn ||
@@ -508,6 +509,7 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 			Consumable:            candidate.Consumable,
 			PVUuid:                candidate.PVUuid,
 			VGUuid:                candidate.VGUuid,
+			PartUUID:              candidate.PartUUID,
 			LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
 			ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
 			Wwn:                   candidate.Wwn,
@@ -551,6 +553,7 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 			Consumable:            candidate.Consumable,
 			PVUuid:                candidate.PVUuid,
 			VGUuid:                candidate.VGUuid,
+			PartUUID:              candidate.PartUUID,
 			LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
 			ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
 			Wwn:                   candidate.Wwn,

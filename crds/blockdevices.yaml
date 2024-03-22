@@ -61,6 +61,12 @@ spec:
                     The UUID of the LVM Volume Group to which this device belongs to as a Physical Volume.
 
                     > Optional: exists only if the device is used as a Physical Volume and is included in a Volume Group.
+                partUUID:
+                  type: string
+                  description: |
+                    The UUID of the partition.
+
+                    > Optional: exists only if the device is a partition.
                 lvmVolumeGroupName:
                   type: string
                   description: | 

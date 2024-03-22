@@ -25,9 +25,9 @@ WORKDIR /util-linux
 RUN git clone ${SOURCE_REPO}/util-linux/util-linux.git . && \
   git checkout v${UTIL_LINUX_VERSION} && \
   ./autogen.sh && \
-  ./configure LDFLAGS="-static" --enable-static-programs -disable-shared
+  ./configure LDFLAGS="-static" --enable-static-programs -disable-all-programs --enable-nsenter
 
-RUN make LDFLAGS="--static" nsenter
+RUN make install-strip
 
 #################################
 FROM $GOLANG_20_ALPINE_BUILDER as agent-builder
@@ -46,7 +46,7 @@ RUN GOOS=linux GOARCH=amd64 go build -o sds-node-configurator-agent
 #################################
 FROM --platform=linux/amd64 $BASE_IMAGE
 
-COPY --from=util-linux-builder /util-linux/nsenter /opt/deckhouse/sds/nsenter.static
+COPY --from=util-linux-builder /util-linux/nsenter.static /opt/deckhouse/sds/bin/nsenter.static
 COPY --from=agent-builder /go/src/cmd/sds-node-configurator-agent /go/src/cmd/sds-node-configurator-agent
 
 CMD ["/go/src/cmd/sds-node-configurator-agent"]
