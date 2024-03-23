@@ -408,7 +408,7 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, metrics monitoring.Metrics, 
 
 	for _, vg := range vgWithTag {
 		if err != nil {
-			log.Error(err, "[GetLVMVolumeGroupCandidates] unable to count ParseInt vgSize, err: %w", err)
+			log.Error(err, "[GetLVMVolumeGroupCandidates] unable to lvCount ParseInt vgSize, err: %w", err)
 		}
 
 		allocateSize := vg.VGSize

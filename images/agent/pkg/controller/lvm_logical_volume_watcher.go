@@ -4,24 +4,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/go-cmp/cmp"
+	"k8s.io/client-go/util/workqueue"
 	"reflect"
-
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/config"
 	"sds-node-configurator/internal"
 	"sds-node-configurator/pkg/logger"
 	"sds-node-configurator/pkg/monitoring"
 	"sds-node-configurator/pkg/utils"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
@@ -232,7 +231,6 @@ func reconcileLLVDeleteFunc(
 	lvName := llv.Spec.ActualLVNameOnTheNode
 
 	err := deleteLVIfExists(log, vgName, lvName)
-
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLLVDeleteFunc] unable to delete the LV %s in VG %s", lvName, vgName))
 		err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to delete the the LV %s in VG %s, err: %s", lvName, vgName, err.Error()))
@@ -347,8 +345,8 @@ func reconcileLLVUpdateFunc(
 	case Thick:
 		freeSpace, err := getFreeVGSpace(lvg)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to count free space in VG, name: %s", vgName))
-			err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to count free VG space, VG name %s, err: %s", vgName, err.Error()))
+			log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to lvCount free space in VG, name: %s", vgName))
+			err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to lvCount free VG space, VG name %s, err: %s", vgName, err.Error()))
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
 			}
@@ -370,8 +368,8 @@ func reconcileLLVUpdateFunc(
 	case Thin:
 		// freeSpace, err := getFreeLVSpace(log, llv.Spec.Thin.PoolName)
 		// if err != nil {
-		// 	log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to count free space in Thin-pool, name: %s", llv.Spec.Thin.PoolName))
-		// 	err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to count free Thin-pool space, err: %s", err.Error()))
+		// 	log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to lvCount free space in Thin-pool, name: %s", llv.Spec.Thin.PoolName))
+		// 	err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to lvCount free Thin-pool space, err: %s", err.Error()))
 		// 	if err != nil {
 		// 		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
 		// 	}
@@ -500,18 +498,12 @@ func reconcileLLVCreateFunc(
 
 	vgName := lvg.Spec.ActualVGNameOnTheNode
 	lvName := llv.Spec.ActualLVNameOnTheNode
-	added, err := addLLVFinalizerIfNotExist(ctx, cl, log, metrics, llv)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-		return
-	}
-	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] a finalizer to the LVMLogicalVolume %s was added: %t", llv.Name, added))
 
 	switch llv.Spec.Type {
 	case Thick:
 		freeSpace, err := getFreeVGSpace(lvg)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to count free space in VG, name: %s", vgName))
+			log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to lvCount free space in VG, name: %s", vgName))
 			err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get free VG space, err: %s", err.Error()))
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to updateLVMLogicalVolumePhase for LVMLogicalVolume %s", llv.Name))
@@ -544,7 +536,7 @@ func reconcileLLVCreateFunc(
 	case Thin:
 		// freeSpace, err := getFreeLVSpace(log, llv.Spec.Thin.PoolName)
 		// if err != nil {
-		// 	log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to count free space in LV, name: %s", llv.Spec.Thin.PoolName))
+		// 	log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to lvCount free space in LV, name: %s", llv.Spec.Thin.PoolName))
 		// 	err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get free LV space, err: %s", err.Error()))
 		// 	if err != nil {
 		// 		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume, name: %s", llv.Name))
@@ -578,6 +570,12 @@ func reconcileLLVCreateFunc(
 	}
 
 	log.Info(fmt.Sprintf("[reconcileLLVCreateFunc] successfully created LV %s in VG %s for LVMLogicalVolume resource with name: %s", lvName, vgName, llv.Name))
+	added, err := addLLVFinalizerIfNotExist(ctx, cl, log, metrics, llv)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
+		return
+	}
+	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] a finalizer to the LVMLogicalVolume %s was added: %t", llv.Name, added))
 
 	actualSize, err := getLVActualSize(log, vgName, lvName)
 	if err != nil {
@@ -765,10 +763,10 @@ func FindLV(log logger.Logger, vgName, lvName string) (*internal.LVData, error) 
 	log.Debug(fmt.Sprintf("[FindLV] runs cmd: %s", cmd))
 	if err != nil {
 		log.Error(err, "[shouldReconcileByCreateFunc] unable to GetAllLVs")
-		return &internal.LVData{}, err
+		return nil, err
 	}
 
-	log.Debug(fmt.Sprintf("[FindLV] Try to find LV: %s in VG: %s", lvName, vgName))
+	log.Debug(fmt.Sprintf("[FindLV] Try to find a LV: %s in VG: %s", lvName, vgName))
 	for _, lv := range lvs {
 		log.Trace(fmt.Sprintf("[FindLV] processing LV: %s, VG: %s", lv.LVName, lv.VGName))
 		if lv.VGName == vgName && lv.LVName == lvName {
@@ -776,5 +774,6 @@ func FindLV(log logger.Logger, vgName, lvName string) (*internal.LVData, error) 
 		}
 	}
 
-	return &internal.LVData{}, nil
+	log.Debug(fmt.Sprintf("[FindLV] LV %s was not found", lvName))
+	return nil, nil
 }
