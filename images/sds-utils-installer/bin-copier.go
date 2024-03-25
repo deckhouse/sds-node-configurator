@@ -81,7 +81,7 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 			if err != nil {
 				return err
 			}
-			fmt.Println(dstPath, "- File already exists, checking sha256..")
+			fmt.Println(dstPath, "- File already exists, checking sha256 sum..")
 			dstChecksum, err := getChecksum(dstPath)
 			if err != nil {
 				return err
