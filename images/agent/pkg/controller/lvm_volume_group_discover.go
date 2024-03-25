@@ -19,7 +19,9 @@ package controller
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"k8s.io/client-go/util/workqueue"
 	"os/exec"
 	"reflect"
 	"sds-node-configurator/api/v1alpha1"
@@ -28,6 +30,7 @@ import (
 	"sds-node-configurator/pkg/logger"
 	"sds-node-configurator/pkg/monitoring"
 	"sds-node-configurator/pkg/utils"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"strconv"
 	"strings"
 	"time"
@@ -66,7 +69,46 @@ func RunLVMVolumeGroupDiscoverController(
 		return nil, err
 	}
 
-	err = c.Watch(source.Kind(cache, &v1alpha1.LvmVolumeGroup{}), &handler.EnqueueRequestForObject{})
+	err = c.Watch(source.Kind(cache, &v1alpha1.LVMLogicalVolume{}), &handler.Funcs{
+		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
+			llv, ok := e.ObjectNew.(*v1alpha1.LVMLogicalVolume)
+			if !ok {
+				err = errors.New("unable to cast event object to a given type")
+				log.Error(err, "[RunLVMVolumeGroupDiscoverController] an error occurred while handling create event")
+			}
+
+			if llv.Status.Phase != createdStatusPhase {
+				log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] the LVMLogicalVolume %s is not in a Created status phase. It will be skipped.", llv.Name))
+				return
+			}
+
+			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] the LVMLogicalVolume %s has a Created status phase. VG allocated size for the LVMVolumeGroup %s will be updated", llv.Name, llv.Spec.LvmVolumeGroupName))
+
+			lvg := &v1alpha1.LvmVolumeGroup{}
+			err := cl.Get(ctx, kclient.ObjectKey{
+				Name: llv.Spec.LvmVolumeGroupName,
+			}, lvg)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to get the LVMVolumeGroup %s. Its VG allocated size will not be updated", llv.Spec.LvmVolumeGroupName))
+				return
+			}
+
+			allocated, err := resource.ParseQuantity(lvg.Status.AllocatedSize)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to parse quantity for the LVMVolumeGroup %s. Its VG allocated size will not be updated", lvg.Name))
+				return
+			}
+
+			allocated.Add(llv.Status.ActualSize)
+			err = cl.Update(ctx, lvg)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to update the LVMVolumeGroup %s", lvg.Name))
+				return
+			}
+
+			log.Info(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] VG allocated size was successfully updated for the LVMVolumeGroup %s by a controller.Watcher", lvg.Name))
+		},
+	})
 	if err != nil {
 		log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to run "%s" controller watch`, LVMVolumeGroupDiscoverCtrlName))
 	}
