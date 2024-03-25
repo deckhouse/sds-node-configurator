@@ -24,118 +24,113 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 )
 
-func contentsHash(path string) (string, error) {
-	var hashes []string
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
 
-	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
 
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
+	_, err = io.Copy(dstFile, srcFile)
+	return err
+}
 
-		hasher := sha256.New()
-		hasher.Write(data)
-
-		hashes = append(hashes, hex.EncodeToString(hasher.Sum(nil)))
-
-		return nil
-	})
+func getChecksum(filePath string) (string, error) {
+	file, err := os.Open(filePath)
 	if err != nil {
 		return "", err
 	}
+	defer file.Close()
 
-	sort.Strings(hashes)
-	return hex.EncodeToString(sha256.New().Sum([]byte(strings.Join(hashes, "")))), nil
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func copyIfDifferent(src, dst string) error {
-	return filepath.Walk(src, func(srcPath string, info os.FileInfo, err error) error {
+func copyFilesRecursive(srcDir, dstDir string) error {
+	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
-		dstPath := filepath.Join(dst, strings.TrimPrefix(srcPath, src))
+		relPath, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+
+		dstPath := filepath.Join(dstDir, relPath)
+
 		if info.IsDir() {
+			fmt.Println("Checking subfolder", dstPath)
 			return os.MkdirAll(dstPath, info.Mode())
 		}
 
-		srcHash, err := contentsHash(srcPath)
+		if _, err := os.Stat(dstPath); err == nil {
+			srcChecksum, err := getChecksum(path)
+			if err != nil {
+				return err
+			}
+			fmt.Println(dstPath, "- File already exists, checking sha256..")
+			dstChecksum, err := getChecksum(dstPath)
+			if err != nil {
+				return err
+			}
+
+			if srcChecksum == dstChecksum {
+				fmt.Printf("Skipping %s: Checksum is the same\n", path)
+				return nil
+			} else {
+				fmt.Println("Copying\n", path)
+			}
+		}
+
+		err = copyFile(path, dstPath)
 		if err != nil {
 			return err
 		}
 
-		dstHash, _ := contentsHash(dstPath)
-
-		if srcHash != dstHash {
-			srcFile, err := os.Open(srcPath)
-			if err != nil {
-				fmt.Println("Error getting file from source")
-			}
-			defer srcFile.Close()
-
-			dstFile, err := os.Create(dstPath)
-			if err != nil {
-				fmt.Println("Error copying file to destination folder")
-			}
-			fmt.Println(dstPath)
-			defer dstFile.Close()
-
-			_, err = io.Copy(dstFile, srcFile)
-			return err
-		}
+		fmt.Printf("Copied %s successfully\n", path)
 
 		return nil
 	})
+
+	return err
 }
 
 func main() {
-	src := os.Args[1]
-	dst := os.Args[2]
+	srcDir := os.Args[1]
+	dstDir := os.Args[2]
 
-	srcCheck, err := os.Stat(src)
+	srcCheck, err := os.Stat(srcDir)
 	if os.IsNotExist(err) {
 		log.Fatal("ERR: source path doesn't exist!")
 	} else if !srcCheck.IsDir() {
 		log.Fatal("ERR: source path is a file (expecting dir)!")
 	}
 
-	dstCheck, err := os.Stat(dst)
+	dstCheck, err := os.Stat(dstDir)
 	if os.IsNotExist(err) {
 		log.Fatal("ERR: destination path doesn't exist!")
 	} else if !dstCheck.IsDir() {
 		log.Fatal("ERR: destination path is a file (expecting dir)!")
 	}
 
-	srcHash, err := contentsHash(src)
+	err = copyFilesRecursive(srcDir, dstDir)
 	if err != nil {
-		log.Fatal("ERR failed calculating src dir hash")
+		fmt.Println("Error:", err)
+		return
 	}
 
-	dstHash, err := contentsHash(dst)
-	if err != nil {
-		log.Fatal("ERR failed calculating destination dir hash")
-	}
-
-	if srcHash != dstHash {
-		fmt.Println("Found new files, copying:")
-		err := copyIfDifferent(src, dst)
-		if err != nil {
-			log.Fatal("ERR failed copying files")
-		}
-		fmt.Println("Utils have been updated successfully.")
-	} else {
-		fmt.Println("Everything is up-to-date. No files were copied.")
-	}
-
+	fmt.Println("Done.")
 }
