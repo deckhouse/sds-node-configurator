@@ -19,7 +19,6 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"log"
 	"os"
@@ -72,7 +71,7 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 		dstPath := filepath.Join(dstDir, relPath)
 
 		if info.IsDir() {
-			fmt.Println("Checking subfolder", dstPath)
+			log.Println("Checking subfolder", dstPath)
 			return os.MkdirAll(dstPath, info.Mode())
 		}
 
@@ -81,17 +80,17 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 			if err != nil {
 				return err
 			}
-			fmt.Println(dstPath, "- File already exists, checking sha256 sum..")
+			log.Println(dstPath, "- File already exists, checking sha256 sum..")
 			dstChecksum, err := getChecksum(dstPath)
 			if err != nil {
 				return err
 			}
 
 			if srcChecksum == dstChecksum {
-				fmt.Printf("Skipping %s: Checksum is the same\n", path)
+				log.Printf("Skipping %s: Checksum is the same\n", path)
 				return nil
 			} else {
-				fmt.Println("Copying\n", path)
+				log.Println("Copying\n", path)
 			}
 		}
 
@@ -100,7 +99,7 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 			return err
 		}
 
-		fmt.Printf("Copied %s successfully\n", path)
+		log.Printf("Copied %s successfully\n", path)
 
 		return nil
 	})
@@ -128,9 +127,9 @@ func main() {
 
 	err = copyFilesRecursive(srcDir, dstDir)
 	if err != nil {
-		fmt.Println("Error:", err)
+		log.Println("Error:", err)
 		return
 	}
 
-	fmt.Println("Done.")
+	log.Println("Done.")
 }
