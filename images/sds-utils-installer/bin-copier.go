@@ -126,7 +126,7 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 		dstPath := filepath.Join(dstDir, relPath)
 
 		if info.IsDir() {
-			log.Println("Checking subfolder", dstPath)
+			log.Println("Checking subfolder: ", dstPath)
 			return os.MkdirAll(dstPath, info.Mode())
 		}
 
@@ -135,14 +135,14 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 			if err != nil {
 				return err
 			}
-			log.Printf("%s - File already exists, checking sha256 and permissions..", dstPath)
+			log.Printf("%s - File already exists, checking sha256 and permissions\n", dstPath)
 			dstChecksum, err := getChecksum(dstPath)
 			if err != nil {
 				return err
 			}
 
 			if srcChecksum == dstChecksum {
-				log.Printf("%s: Checksum is the same\n", srcPath)
+				log.Printf("Checksum of %s in unchanged, checking permissions\n", srcPath)
 			} else {
 				log.Printf("Copying %s: Checksum is different\n", srcPath)
 			}
