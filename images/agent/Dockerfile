@@ -30,7 +30,7 @@ RUN git clone ${SOURCE_REPO}/util-linux/util-linux.git . && \
 RUN ./configure LDFLAGS="-static" --enable-static-programs -disable-all-programs --enable-nsenter && \
     make install-strip
 
-RUN ./configure --prefix /opt/deckhouse/sds && \
+RUN ./configure --prefix /opt/deckhouse/sds --with-udev && \
     make install-strip
 
 
