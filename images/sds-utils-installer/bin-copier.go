@@ -24,9 +24,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 func main() {
+	time.Sleep(time.Minute * 2)
 	srcDir := os.Args[1]
 	dstDir := os.Args[2]
 
