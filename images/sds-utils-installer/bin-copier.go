@@ -24,11 +24,9 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 func main() {
-	time.Sleep(time.Minute * 2)
 	srcDir := os.Args[1]
 	dstDir := os.Args[2]
 
@@ -83,6 +81,8 @@ func copyFile(src, dst string) (err error) {
 	return err
 }
 
+//func getRights()
+
 func getChecksum(filePath string) (checksum string, err error) {
 	var file *os.File
 	file, err = os.Open(filePath)
@@ -106,12 +106,12 @@ func getChecksum(filePath string) (checksum string, err error) {
 }
 
 func copyFilesRecursive(srcDir, dstDir string) error {
-	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(srcDir, func(srcPath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
-		relPath, err := filepath.Rel(srcDir, path)
+		relPath, err := filepath.Rel(srcDir, srcPath)
 		if err != nil {
 			return err
 		}
@@ -124,7 +124,7 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 		}
 
 		if _, err := os.Stat(dstPath); err == nil {
-			srcChecksum, err := getChecksum(path)
+			srcChecksum, err := getChecksum(srcPath)
 			if err != nil {
 				return err
 			}
@@ -135,19 +135,23 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 			}
 
 			if srcChecksum == dstChecksum {
-				log.Printf("Skipping %s: Checksum is the same\n", path)
+
+				//TODO - проверить права на файл функцией
+
+				log.Printf("Skipping %s: Checksum is the same\n", srcPath)
 				return nil
 			} else {
-				log.Printf("Copying %s: Checksum is different\n", path)
+				log.Printf("Copying %s: Checksum is different\n", srcPath)
 			}
+
 		}
 
-		err = copyFile(path, dstPath)
+		err = copyFile(srcPath, dstPath)
 		if err != nil {
 			return err
 		}
-
-		log.Printf("Copied %s successfully\n", path)
+		// TODO - копирование прав здесь
+		log.Printf("Copied file from %s to %s successfully\n", srcPath, dstPath)
 
 		return nil
 	})
