@@ -136,7 +136,7 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 				log.Printf("Skipping %s: Checksum is the same\n", path)
 				return nil
 			} else {
-				log.Println("Copying\n", path)
+				log.Printf("Copying %s: Checksum is different\n", path)
 			}
 		}
 
