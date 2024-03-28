@@ -80,7 +80,6 @@ FROM --platform=linux/amd64 $BASE_IMAGE
 RUN apk add --no-cache rsync
 
 WORKDIR /
-
 COPY --from=lvm-builder /lvm2/tools/lvm.static /sds-utils/bin/lvm.static
 
 # Got from ldd lsblk.dynamic

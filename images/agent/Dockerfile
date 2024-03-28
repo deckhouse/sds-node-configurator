@@ -24,10 +24,14 @@ WORKDIR /util-linux
 
 RUN git clone ${SOURCE_REPO}/util-linux/util-linux.git . && \
   git checkout v${UTIL_LINUX_VERSION} && \
-  ./autogen.sh && \
-  ./configure LDFLAGS="-static" --enable-static-programs -disable-all-programs --enable-nsenter
+  ./autogen.sh
 
-RUN make install-strip
+RUN ./configure LDFLAGS="-static" --enable-static-programs -disable-all-programs --enable-nsenter && \
+    make install-strip
+
+RUN ./configure --prefix /opt/deckhouse/sds && \
+    make install-strip
+
 
 #################################
 FROM $GOLANG_20_ALPINE_BUILDER as agent-builder
@@ -47,6 +51,16 @@ RUN GOOS=linux GOARCH=amd64 go build -o sds-node-configurator-agent
 FROM --platform=linux/amd64 $BASE_IMAGE
 
 COPY --from=util-linux-builder /util-linux/nsenter.static /opt/deckhouse/sds/bin/nsenter.static
+
+# Got from ldd lsblk.dynamic
+COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/
+COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/
+COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/lib/
+COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/
+COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libc.so.6 /opt/deckhouse/sds/lib/
+COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/lib/
+COPY --from=util-linux-builder /opt/deckhouse/sds/bin/lsblk /opt/deckhouse/sds/bin/lsblk.dynamic
+
 COPY --from=agent-builder /go/src/cmd/sds-node-configurator-agent /go/src/cmd/sds-node-configurator-agent
 
 CMD ["/go/src/cmd/sds-node-configurator-agent"]
