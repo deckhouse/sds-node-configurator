@@ -77,11 +77,18 @@ func copyFile(src, dst string) (err error) {
 		}
 	}(dstFile)
 
+	srcFileInfo, err := srcFile.Stat()
+
 	_, err = io.Copy(dstFile, srcFile)
+	if err != nil {
+		return err
+	}
+	err = dstFile.Chmod(srcFileInfo.Mode().Perm())
+	if err != nil {
+		return err
+	}
 	return err
 }
-
-//func getRights()
 
 func getChecksum(filePath string) (checksum string, err error) {
 	var file *os.File
@@ -128,20 +135,29 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 			if err != nil {
 				return err
 			}
-			log.Println(dstPath, "- File already exists, checking sha256 sum..")
+			log.Printf("%s - File already exists, checking sha256 and permissions..", dstPath)
 			dstChecksum, err := getChecksum(dstPath)
 			if err != nil {
 				return err
 			}
 
 			if srcChecksum == dstChecksum {
-
-				//TODO - проверить права на файл функцией
-
-				log.Printf("Skipping %s: Checksum is the same\n", srcPath)
-				return nil
+				log.Printf("%s: Checksum is the same\n", srcPath)
 			} else {
 				log.Printf("Copying %s: Checksum is different\n", srcPath)
+			}
+
+			var srcPerm = info.Mode()
+			dstInfo, err := os.Stat(dstPath)
+			if err != nil {
+				return err
+			}
+			var dstPerm = dstInfo.Mode()
+			if srcPerm == dstPerm {
+				log.Printf("Skipping %s: Permissions are the same\n", srcPath)
+				return nil
+			} else {
+				log.Printf("Copying %s: Permissions are different - %s vs %s \n", srcPath, srcPerm, dstPerm)
 			}
 
 		}
@@ -150,7 +166,6 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 		if err != nil {
 			return err
 		}
-		// TODO - копирование прав здесь
 		log.Printf("Copied file from %s to %s successfully\n", srcPath, dstPath)
 
 		return nil
