@@ -93,6 +93,8 @@ spec:
         volumeMounts:
         - mountPath: /sys/
           name: host-sys-dir
+        - mountPath: /run/udev/
+          name: host-run-udev-dir
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
@@ -108,4 +110,8 @@ spec:
           path: /sys/
           type: Directory
         name: host-sys-dir
+      - hostPath:
+          path: /run/udev/
+          type: Directory
+        name: host-run-udev-dir
 {{- end }}
