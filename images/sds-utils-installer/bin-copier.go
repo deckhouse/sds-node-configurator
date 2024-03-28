@@ -19,42 +19,88 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 )
 
-func copyFile(src, dst string) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
+func main() {
+	srcDir := os.Args[1]
+	dstDir := os.Args[2]
 
-	dstFile, err := os.Create(dst)
+	srcCheck, err := os.Stat(srcDir)
+	if os.IsNotExist(err) {
+		log.Fatal("ERR: source path doesn't exist!")
+	} else if !srcCheck.IsDir() {
+		log.Fatal("ERR: source path is a file (expecting dir)!")
+	}
+
+	dstCheck, err := os.Stat(dstDir)
+	if os.IsNotExist(err) {
+		log.Fatal("ERR: destination path doesn't exist!")
+	} else if !dstCheck.IsDir() {
+		log.Fatal("ERR: destination path is a file (expecting dir)!")
+	}
+
+	err = copyFilesRecursive(srcDir, dstDir)
+	if err != nil {
+		log.Println("Error:", err)
+		return
+	}
+
+	log.Println("Done.")
+}
+
+func copyFile(src, dst string) (err error) {
+	var srcFile, dstFile *os.File
+	srcFile, err = os.Open(src)
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer func(srcFile *os.File) {
+		errClose := srcFile.Close()
+		if errClose != nil {
+			err = errors.Join(err, errClose)
+		}
+	}(srcFile)
+
+	dstFile, err = os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func(dstFile *os.File) {
+		errClose := dstFile.Close()
+		if errClose != nil {
+			err = errors.Join(err, errClose)
+		}
+	}(dstFile)
 
 	_, err = io.Copy(dstFile, srcFile)
 	return err
 }
 
-func getChecksum(filePath string) (string, error) {
-	file, err := os.Open(filePath)
+func getChecksum(filePath string) (checksum string, err error) {
+	var file *os.File
+	file, err = os.Open(filePath)
 	if err != nil {
-		return "", err
+		return
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		errClose := file.Close()
+		if errClose != nil {
+			err = errors.Join(err, errClose)
+		}
+	}(file)
 
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
+	if _, err = io.Copy(hash, file); err != nil {
+		return
 	}
 
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	checksum = hex.EncodeToString(hash.Sum(nil))
+	return
 }
 
 func copyFilesRecursive(srcDir, dstDir string) error {
@@ -105,31 +151,4 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 	})
 
 	return err
-}
-
-func main() {
-	srcDir := os.Args[1]
-	dstDir := os.Args[2]
-
-	srcCheck, err := os.Stat(srcDir)
-	if os.IsNotExist(err) {
-		log.Fatal("ERR: source path doesn't exist!")
-	} else if !srcCheck.IsDir() {
-		log.Fatal("ERR: source path is a file (expecting dir)!")
-	}
-
-	dstCheck, err := os.Stat(dstDir)
-	if os.IsNotExist(err) {
-		log.Fatal("ERR: destination path doesn't exist!")
-	} else if !dstCheck.IsDir() {
-		log.Fatal("ERR: destination path is a file (expecting dir)!")
-	}
-
-	err = copyFilesRecursive(srcDir, dstDir)
-	if err != nil {
-		log.Println("Error:", err)
-		return
-	}
-
-	log.Println("Done.")
 }
