@@ -761,20 +761,14 @@ func updateLVMLogicalVolume(ctx context.Context, metrics monitoring.Metrics, cl 
 }
 
 func FindLV(log logger.Logger, vgName, lvName string) (*internal.LVData, error) {
-	lvs, cmd, _, err := utils.GetAllLVs()
+	log.Debug(fmt.Sprintf("[FindLV] Try to find LV: %s in VG: %s", lvName, vgName))
+	lv, cmd, _, err := utils.GetLV(vgName, lvName)
+
 	log.Debug(fmt.Sprintf("[FindLV] runs cmd: %s", cmd))
 	if err != nil {
 		log.Error(err, "[shouldReconcileByCreateFunc] unable to GetAllLVs")
 		return &internal.LVData{}, err
 	}
+	return &lv, nil
 
-	log.Debug(fmt.Sprintf("[FindLV] Try to find LV: %s in VG: %s", lvName, vgName))
-	for _, lv := range lvs {
-		log.Trace(fmt.Sprintf("[FindLV] processing LV: %s, VG: %s", lv.LVName, lv.VGName))
-		if lv.VGName == vgName && lv.LVName == lvName {
-			return &lv, nil
-		}
-	}
-
-	return &internal.LVData{}, nil
 }
