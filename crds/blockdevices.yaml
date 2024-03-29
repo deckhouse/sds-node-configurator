@@ -119,6 +119,11 @@ spec:
                   type: string
                   description: |
                     The unique identifier of the machine the device is on (normally at /etc/machine-id)
+                age:
+                  type: date
+                  description: |
+                    The age of this resource
+                            
       additionalPrinterColumns:
         - jsonPath: .status.nodeName
           name: Node
