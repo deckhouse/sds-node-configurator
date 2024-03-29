@@ -77,12 +77,39 @@ func copyFile(src, dst string) (err error) {
 		}
 	}(dstFile)
 
-	srcFileInfo, err := srcFile.Stat()
-
 	_, err = io.Copy(dstFile, srcFile)
 	if err != nil {
 		return err
 	}
+	return err
+}
+
+func copyPerm(src, dst string) (err error) {
+	var srcFile, dstFile *os.File
+	srcFile, err = os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func(srcFile *os.File) {
+		errClose := srcFile.Close()
+		if errClose != nil {
+			err = errors.Join(err, errClose)
+		}
+	}(srcFile)
+
+	dstFile, err = os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func(dstFile *os.File) {
+		errClose := dstFile.Close()
+		if errClose != nil {
+			err = errors.Join(err, errClose)
+		}
+	}(dstFile)
+
+	srcFileInfo, err := srcFile.Stat()
+
 	err = dstFile.Chmod(srcFileInfo.Mode().Perm())
 	if err != nil {
 		return err
@@ -157,7 +184,13 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 				log.Printf("Skipping %s: Permissions are the same\n", srcPath)
 				return nil
 			} else {
-				log.Printf("Copying %s: Permissions are different - %s vs %s \n", srcPath, srcPerm, dstPerm)
+				log.Printf("%s - Permissions are different: %s vs %s \n", srcPath, srcPerm, dstPerm)
+				err = copyPerm(srcPath, dstPath)
+				if err != nil {
+					return err
+				}
+				log.Printf("Set file permissions on existing file %s according to %s successfully\n", dstPath, srcPath)
+				return nil
 			}
 
 		}
@@ -167,6 +200,12 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 			return err
 		}
 		log.Printf("Copied file from %s to %s successfully\n", srcPath, dstPath)
+
+		err = copyPerm(srcPath, dstPath)
+		if err != nil {
+			return err
+		}
+		log.Printf("Set file permissions on a new file %s according to %s successfully\n", dstPath, srcPath)
 
 		return nil
 	})
