@@ -170,6 +170,10 @@ spec:
                               type: string
                               description: |
                                 The name of the corresponding block device resource.
+                            age:
+                              type: date
+                              description: |
+                                The age of this resource
       additionalPrinterColumns:
         - jsonPath: .status.health
           name: health

@@ -84,6 +84,10 @@ spec:
                   type: string
                 actualSize:
                   type: string
+                age:
+                  type: date
+                  description: |
+                    The age of this resource
       additionalPrinterColumns:
         - jsonPath: .status.phase
           name: Phase
