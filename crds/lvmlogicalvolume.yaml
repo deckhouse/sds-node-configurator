@@ -101,3 +101,7 @@ spec:
           name: Size
           type: string
           description: Actual LVMLogicalVolume size.
+        - description: The age of this resource
+          jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date          

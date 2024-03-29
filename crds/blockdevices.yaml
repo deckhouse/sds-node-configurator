@@ -146,3 +146,8 @@ spec:
           type: string
           description: The LVMVolumeGroup resource the block device is in.
           priority: 1
+        - description: The age of this resource
+          jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+

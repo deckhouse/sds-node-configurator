@@ -196,3 +196,7 @@ spec:
           type: string
           description: Volume Group type.
           priority: 1
+        - description: The age of this resource
+          jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date          
