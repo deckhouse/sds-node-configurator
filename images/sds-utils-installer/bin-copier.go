@@ -205,7 +205,7 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 		if err != nil {
 			return err
 		}
-		log.Printf("Set file permissions on a new file %s according to %s successfully\n", dstPath, srcPath)
+		log.Printf("Set permissions on a new file %s according to %s successfully\n", dstPath, srcPath)
 
 		return nil
 	})
