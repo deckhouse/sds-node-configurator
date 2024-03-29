@@ -650,7 +650,7 @@ func shouldReconcileByCreateFunc(log logger.Logger, vgName string, llv *v1alpha1
 
 	lv, err := FindLV(log, vgName, llv.Spec.ActualLVNameOnTheNode)
 	if err == nil && lv.LVName == llv.Spec.ActualLVNameOnTheNode {
-		return false, err
+		return false, nil
 	}
 
 	if lv != nil {
