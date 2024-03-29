@@ -1,7 +1,6 @@
 ARG GOLANG_20_ALPINE_BUILDER=registry.deckhouse.io/base_images/golang:1.20.5-alpine3.18@sha256:51a47fb0851397db2f506c15c426735bc23de31177cbdd962880c0879d1906a4
 ARG UBUNTU_UTILS_BUILDER=registry.deckhouse.io/base_images/ubuntu:jammy-20221130@sha256:c14c3b1242536729ce5227ff833144977b4e378723858fb73a4cf40ea6daaf6a
-# ARG BASE_IMAGE=registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc
-ARG BASE_IMAGE=registry.deckhouse.io/base_images/ubuntu:jammy-20221130@sha256:c14c3b1242536729ce5227ff833144977b4e378723858fb73a4cf40ea6daaf6a
+ARG BASE_IMAGE=registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc
 
 #################################
 FROM $UBUNTU_UTILS_BUILDER as util-linux-builder
@@ -64,6 +63,7 @@ COPY --from=util-linux-builder /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/dec
 COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/
 COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libc.so.6 /opt/deckhouse/sds/lib/
 COPY --from=util-linux-builder /lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/lib/
+COPY --from=util-linux-builder /lib64/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
 COPY --from=util-linux-builder /opt/deckhouse/sds/bin/lsblk /opt/deckhouse/sds/bin/lsblk.dynamic
 
 COPY --from=agent-builder /go/src/cmd/sds-node-configurator-agent /go/src/cmd/sds-node-configurator-agent
