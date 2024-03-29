@@ -84,37 +84,35 @@ func copyFile(src, dst string) (err error) {
 	return err
 }
 
-func copyPerm(src, dst string) (err error) {
-	var srcFile, dstFile *os.File
-	srcFile, err = os.Open(src)
+func copyPerm(srcPath, dstPath string) (err error) {
+	srcInfo, err := os.Stat(srcPath)
 	if err != nil {
 		return err
 	}
-	defer func(srcFile *os.File) {
-		errClose := srcFile.Close()
-		if errClose != nil {
-			err = errors.Join(err, errClose)
-		}
-	}(srcFile)
-
-	dstFile, err = os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func(dstFile *os.File) {
-		errClose := dstFile.Close()
-		if errClose != nil {
-			err = errors.Join(err, errClose)
-		}
-	}(dstFile)
-
-	srcFileInfo, err := srcFile.Stat()
-
-	err = dstFile.Chmod(srcFileInfo.Mode().Perm())
+	err = os.Chmod(dstPath, srcInfo.Mode())
 	if err != nil {
 		return err
 	}
 	return err
+}
+
+func arePermissionsEqual(srcPath, dstPath string) (equal bool, err error) {
+
+	srcInfo, err := os.Stat(srcPath)
+	if err != nil {
+		return false, err
+	}
+	log.Printf("file %s mode %s", srcPath, srcInfo.Mode())
+	dstInfo, err := os.Stat(dstPath)
+	if err != nil {
+		return false, err
+	}
+	log.Printf("file %s mode %s", dstPath, dstInfo.Mode())
+	if srcInfo.Mode() == dstInfo.Mode() {
+		return true, nil
+	} else {
+		return false, nil
+	}
 }
 
 func getChecksum(filePath string) (checksum string, err error) {
@@ -170,28 +168,22 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 
 			if srcChecksum == dstChecksum {
 				log.Printf("Checksum of %s in unchanged, checking permissions\n", srcPath)
-			} else {
-				log.Printf("Copying %s: Checksum is different\n", srcPath)
-			}
-
-			var srcPerm = info.Mode()
-			dstInfo, err := os.Stat(dstPath)
-			if err != nil {
-				return err
-			}
-			var dstPerm = dstInfo.Mode()
-			if srcPerm == dstPerm {
-				log.Printf("Skipping %s: Permissions are the same\n", srcPath)
-				return nil
-			} else {
-				log.Printf("%s - Permissions are different: %s vs %s \n", srcPath, srcPerm, dstPerm)
-				err = copyPerm(srcPath, dstPath)
+				equal, err := arePermissionsEqual(srcPath, dstPath)
 				if err != nil {
 					return err
 				}
-				log.Printf("Set file permissions on existing file %s according to %s successfully\n", dstPath, srcPath)
+				if equal == false {
+					err = copyPerm(srcPath, dstPath)
+					if err != nil {
+						return err
+					}
+					log.Printf("Set permissions on a file %s according to %s successfully\n", dstPath, srcPath)
+				} else {
+					log.Printf("Permissions on %s are the same, skipping", dstPath)
+				}
 				return nil
 			}
+			log.Printf("Copying %s: Checksum is different\n", srcPath)
 
 		}
 
