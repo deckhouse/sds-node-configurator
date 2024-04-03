@@ -84,10 +84,7 @@ spec:
                   type: string
                 actualSize:
                   type: string
-                age:
-                  type: date
-                  description: |
-                    The age of this resource
+
       additionalPrinterColumns:
         - jsonPath: .status.phase
           name: Phase
@@ -105,7 +102,7 @@ spec:
           name: Size
           type: string
           description: Actual LVMLogicalVolume size.
-        - description: The age of this resource
-          jsonPath: .metadata.creationTimestamp
+        - jsonPath: .metadata.creationTimestamp
           name: Age
-          type: date          
+          type: date
+          description: The age of this resource

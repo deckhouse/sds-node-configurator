@@ -170,10 +170,7 @@ spec:
                               type: string
                               description: |
                                 The name of the corresponding block device resource.
-                            age:
-                              type: date
-                              description: |
-                                The age of this resource
+
       additionalPrinterColumns:
         - jsonPath: .status.health
           name: health
@@ -200,7 +197,7 @@ spec:
           type: string
           description: Volume Group type.
           priority: 1
-        - description: The age of this resource
-          jsonPath: .metadata.creationTimestamp
+        - jsonPath: .metadata.creationTimestamp
           name: Age
-          type: date          
+          type: date
+          description: The age of this resource

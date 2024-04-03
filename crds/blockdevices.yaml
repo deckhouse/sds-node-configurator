@@ -119,10 +119,7 @@ spec:
                   type: string
                   description: |
                     The unique identifier of the machine the device is on (normally at /etc/machine-id)
-                age:
-                  type: date
-                  description: |
-                    The age of this resource
+
                             
       additionalPrinterColumns:
         - jsonPath: .status.nodeName
@@ -151,8 +148,7 @@ spec:
           type: string
           description: The LVMVolumeGroup resource the block device is in.
           priority: 1
-        - description: The age of this resource
-          jsonPath: .metadata.creationTimestamp
+        - jsonPath: .metadata.creationTimestamp
           name: Age
           type: date
-
+          description: The age of this resource
