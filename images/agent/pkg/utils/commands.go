@@ -496,6 +496,20 @@ func lvmStaticExtendedArgs(args []string) []string {
 	return append(result, args...)
 }
 
+// filterStdErr processes a bytes.Buffer containing stderr output and filters out specific
+// messages that match a predefined regular expression pattern. In this context, it's used to
+// exclude "Regex version mismatch" messages generated due to SELinux checks on a statically
+// compiled LVM binary. These messages report a discrepancy between the versions of the regex
+// library used inside the LVM binary, but since LVM is statically compiled and doesn't rely on
+// system libraries at runtime, these warnings do not impact LVM's functionality or overall
+// system security. Therefore, they can be safely ignored to simplify the analysis of command output.
+//
+// Parameters:
+//   - stdErr (bytes.Buffer): The buffer containing the stderr output from a command execution.
+//
+// Returns:
+//   - bytes.Buffer: A new buffer containing the filtered stderr output, excluding lines that
+//     match the "Regex version mismatch" pattern.
 func filterStdErr(stdErr bytes.Buffer) bytes.Buffer {
 	var filteredStdErr bytes.Buffer
 	stdErrScanner := bufio.NewScanner(&stdErr)
