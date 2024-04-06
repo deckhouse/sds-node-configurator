@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/config"
@@ -60,6 +61,7 @@ func RunLVMLogicalVolumeWatcherController(
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 			return reconcile.Result{}, nil
 		}),
+		MaxConcurrentReconciles: 10,
 	})
 	if err != nil {
 		log.Error(err, "[RunLVMLogicalVolumeWatcherController] unable to create controller")
@@ -649,7 +651,7 @@ func shouldReconcileByCreateFunc(log logger.Logger, vgName string, llv *v1alpha1
 	}
 
 	lv, err := FindLV(log, vgName, llv.Spec.ActualLVNameOnTheNode)
-	if err == nil && lv.LVName == llv.Spec.ActualLVNameOnTheNode {
+	if err == nil && lv != nil && lv.LVName == llv.Spec.ActualLVNameOnTheNode {
 		return false, nil
 	}
 
@@ -766,8 +768,12 @@ func FindLV(log logger.Logger, vgName, lvName string) (*internal.LVData, error) 
 
 	log.Debug(fmt.Sprintf("[FindLV] runs cmd: %s", cmd))
 	if err != nil {
-		log.Error(err, "[shouldReconcileByCreateFunc] unable to GetAllLVs")
-		return &internal.LVData{}, err
+		if strings.Contains(err.Error(), "Failed to find logical volume") {
+			log.Debug("[FindLV] LV not found")
+			return nil, nil
+		}
+		log.Error(err, "[shouldReconcileByCreateFunc] unable to GetLV")
+		return nil, err
 	}
 	return &lv, nil
 
