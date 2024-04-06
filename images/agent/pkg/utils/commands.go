@@ -27,9 +27,8 @@ import (
 
 func GetBlockDevices() ([]internal.Device, string, error) {
 	var outs bytes.Buffer
-	args := []string{internal.LSBLKCmd, "-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
-	extendedArgs := extendArgs(args)
-	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+	args := []string{"-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
+	cmd := exec.Command(internal.LSBLKCmd, args...)
 	cmd.Stdout = &outs
 
 	var stderr bytes.Buffer
