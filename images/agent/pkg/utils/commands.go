@@ -17,10 +17,12 @@ limitations under the License.
 package utils
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/internal"
 )
@@ -55,16 +57,42 @@ func GetAllVGs() (data []internal.VGData, command string, stdErr bytes.Buffer, e
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
-	if err = cmd.Run(); err != nil {
-		return nil, cmd.String(), stdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stdErr.String())
+	filteredStdErr := filterStdErr(stdErr)
+	err = cmd.Run()
+	if err != nil {
+		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
 
 	data, err = unmarshalVGs(outs.Bytes())
 	if err != nil {
-		return nil, cmd.String(), stdErr, fmt.Errorf("unable to GetAllVGs, err: %w", err)
+		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to GetAllVGs, err: %w", err)
 	}
 
-	return data, cmd.String(), stdErr, nil
+	return data, cmd.String(), filteredStdErr, nil
+}
+
+func GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.Buffer, err error) {
+	var outs bytes.Buffer
+	vgData = internal.VGData{}
+	args := []string{"vgs", "-o", "+uuid,tags,shared", "--units", "B", "--nosuffix", "--reportformat", "json", vgName}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	err = cmd.Run()
+	filteredStdErr := filterStdErr(stdErr)
+	if err != nil {
+		return vgData, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
+	}
+
+	data, err := unmarshalVGs(outs.Bytes())
+	if err != nil {
+		return vgData, cmd.String(), filteredStdErr, fmt.Errorf("unable to GetVG, err: %w", err)
+	}
+	vgData = data[0]
+
+	return vgData, cmd.String(), filteredStdErr, nil
 }
 
 func GetAllLVs() (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
@@ -75,16 +103,18 @@ func GetAllLVs() (data []internal.LVData, command string, stdErr bytes.Buffer, e
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
-	if err = cmd.Run(); err != nil {
-		return nil, cmd.String(), stdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stdErr.String())
+	err = cmd.Run()
+	filteredStdErr := filterStdErr(stdErr)
+	if err != nil {
+		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
 
 	lvs, err := unmarshalLVs(outs.Bytes())
 	if err != nil {
-		return nil, cmd.String(), stdErr, fmt.Errorf("unable to GetAllLVs, err: %w", err)
+		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to GetAllLVs, err: %w", err)
 	}
 
-	return lvs, cmd.String(), stdErr, nil
+	return lvs, cmd.String(), filteredStdErr, nil
 }
 
 func GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdErr bytes.Buffer, err error) {
@@ -97,17 +127,19 @@ func GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdEr
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
-	if err = cmd.Run(); err != nil {
-		return lvData, cmd.String(), stdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stdErr.String())
+	err = cmd.Run()
+	filteredStdErr := filterStdErr(stdErr)
+	if err != nil {
+		return lvData, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
 
 	lv, err := unmarshalLVs(outs.Bytes())
 	if err != nil {
-		return lvData, cmd.String(), stdErr, fmt.Errorf("unable to GetLV %s, err: %w", lvPath, err)
+		return lvData, cmd.String(), filteredStdErr, fmt.Errorf("unable to GetLV %s, err: %w", lvPath, err)
 	}
 	lvData = lv[0]
 
-	return lvData, cmd.String(), stdErr, nil
+	return lvData, cmd.String(), filteredStdErr, nil
 }
 
 func GetAllPVs() (data []internal.PVData, command string, stdErr bytes.Buffer, err error) {
@@ -118,16 +150,42 @@ func GetAllPVs() (data []internal.PVData, command string, stdErr bytes.Buffer, e
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
-	if err = cmd.Run(); err != nil {
-		return nil, cmd.String(), stdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stdErr.String())
+	err = cmd.Run()
+	filteredStdErr := filterStdErr(stdErr)
+	if err != nil {
+		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
 
 	data, err = unmarshalPVs(outs.Bytes())
 	if err != nil {
-		return nil, cmd.String(), stdErr, fmt.Errorf("unable to GetAllPVs, err: %w", err)
+		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to GetAllPVs, err: %w", err)
 	}
 
-	return data, cmd.String(), stdErr, nil
+	return data, cmd.String(), filteredStdErr, nil
+}
+
+func GetPV(pvName string) (pvData internal.PVData, command string, stdErr bytes.Buffer, err error) {
+	var outs bytes.Buffer
+	pvData = internal.PVData{}
+	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json", pvName}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	err = cmd.Run()
+	filteredStdErr := filterStdErr(stdErr)
+	if err != nil {
+		return pvData, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
+	}
+
+	data, err := unmarshalPVs(outs.Bytes())
+	if err != nil {
+		return pvData, cmd.String(), filteredStdErr, fmt.Errorf("unable to GetPV, err: %w", err)
+	}
+	pvData = data[0]
+
+	return pvData, cmd.String(), filteredStdErr, nil
 }
 
 func CreatePV(path string) (string, error) {
@@ -436,4 +494,23 @@ func lvmStaticExtendedArgs(args []string) []string {
 	lvmStaticBin := []string{"--", internal.LVMCmd}
 	result := append(nsenterArgs, lvmStaticBin...)
 	return append(result, args...)
+}
+
+func filterStdErr(stdErr bytes.Buffer) bytes.Buffer {
+	var filteredStdErr bytes.Buffer
+	stdErrScanner := bufio.NewScanner(&stdErr)
+	regexpPattern := `Regex version mismatch, expected: .+ actual: .+`
+	regex, err := regexp.Compile(regexpPattern)
+	if err != nil {
+		return stdErr
+	}
+
+	for stdErrScanner.Scan() {
+		line := stdErrScanner.Text()
+		if !regex.MatchString(line) {
+			filteredStdErr.WriteString(line + "\n")
+		}
+	}
+
+	return filteredStdErr
 }
