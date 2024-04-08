@@ -41,6 +41,7 @@ type Options struct {
 	MetricsPort             string
 	BlockDeviceScanInterval time.Duration
 	VolumeGroupScanInterval time.Duration
+	LLVRequeInterval        time.Duration
 }
 
 func NewConfig() (*Options, error) {
@@ -71,6 +72,7 @@ func NewConfig() (*Options, error) {
 
 	opts.BlockDeviceScanInterval = 5
 	opts.VolumeGroupScanInterval = 5
+	opts.LLVRequeInterval = 5
 
 	return &opts, nil
 }
