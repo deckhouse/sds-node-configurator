@@ -17,10 +17,8 @@ limitations under the License.
 package controller
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"reflect"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/config"
@@ -486,24 +484,21 @@ func removeDuplicates(strList []string) []string {
 }
 
 func sortLVIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string][]string {
-	var (
-		errs         bytes.Buffer
-		cmd          *exec.Cmd
-		lvIssuesByVG = make(map[string][]string, len(lvs))
-	)
+	var lvIssuesByVG = make(map[string][]string, len(lvs))
 
 	for _, lv := range lvs {
-		cmd = exec.Command("lvs", fmt.Sprintf("%s/%s", lv.VGName, lv.LVName))
-		cmd.Stderr = &errs
+		_, cmd, stdErr, err := utils.GetLV(lv.VGName, lv.LVName)
+		log.Debug(fmt.Sprintf("[sortLVIssuesByVG] runs cmd: %s", cmd))
 
-		if err := cmd.Run(); err != nil {
+		if err != nil {
 			log.Error(err, fmt.Sprintf(`[sortLVIssuesByVG] unable to run lvs command for lv, name: "%s"`, lv.LVName))
 			lvIssuesByVG[lv.VGName+lv.VGUuid] = append(lvIssuesByVG[lv.VGName+lv.VGUuid], err.Error())
 		}
 
-		if errs.Len() != 0 {
-			lvIssuesByVG[lv.VGName+lv.VGUuid] = append(lvIssuesByVG[lv.VGName+lv.VGUuid], errs.String())
-			errs.Reset()
+		if stdErr.Len() != 0 {
+			log.Error(fmt.Errorf(stdErr.String()), fmt.Sprintf(`[sortLVIssuesByVG] lvs command for lv "%s" has stderr: `, lv.LVName))
+			lvIssuesByVG[lv.VGName+lv.VGUuid] = append(lvIssuesByVG[lv.VGName+lv.VGUuid], stdErr.String())
+			stdErr.Reset()
 		}
 	}
 
@@ -511,24 +506,22 @@ func sortLVIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string][]str
 }
 
 func sortPVIssuesByVG(log logger.Logger, pvs []internal.PVData) map[string][]string {
-	var (
-		errs         bytes.Buffer
-		cmd          *exec.Cmd
-		pvIssuesByVG = make(map[string][]string, len(pvs))
-	)
+
+	pvIssuesByVG := make(map[string][]string, len(pvs))
 
 	for _, pv := range pvs {
-		cmd = exec.Command("pvs", pv.PVName)
-		cmd.Stderr = &errs
+		_, cmd, stdErr, err := utils.GetPV(pv.PVName)
+		log.Debug(fmt.Sprintf("[sortPVIssuesByVG] runs cmd: %s", cmd))
 
-		if err := cmd.Run(); err != nil {
-			log.Error(err, fmt.Sprintf(`[sortPVIssuesByVG] unable to run pvs command for pv, name: "%s"`, pv.PVName))
+		if err != nil {
+			log.Error(err, fmt.Sprintf(`[sortPVIssuesByVG] unable to run pvs command for pv "%s"`, pv.PVName))
 			pvIssuesByVG[pv.VGName+pv.VGUuid] = append(pvIssuesByVG[pv.VGName+pv.VGUuid], err.Error())
 		}
 
-		if errs.Len() != 0 {
-			pvIssuesByVG[pv.VGName+pv.VGUuid] = append(pvIssuesByVG[pv.VGName+pv.VGUuid], errs.String())
-			errs.Reset()
+		if stdErr.Len() != 0 {
+			log.Error(fmt.Errorf(stdErr.String()), fmt.Sprintf(`[sortPVIssuesByVG] pvs command for pv "%s" has stderr: `, pv.PVName))
+			pvIssuesByVG[pv.VGName+pv.VGUuid] = append(pvIssuesByVG[pv.VGName+pv.VGUuid], stdErr.String())
+			stdErr.Reset()
 		}
 	}
 
@@ -536,24 +529,21 @@ func sortPVIssuesByVG(log logger.Logger, pvs []internal.PVData) map[string][]str
 }
 
 func sortVGIssuesByVG(log logger.Logger, vgs []internal.VGData) map[string]string {
-	var (
-		errs     bytes.Buffer
-		cmd      *exec.Cmd
-		vgIssues = make(map[string]string, len(vgs))
-	)
+
+	vgIssues := make(map[string]string, len(vgs))
 
 	for _, vg := range vgs {
-		cmd = exec.Command("vgs", vg.VGName)
-		cmd.Stderr = &errs
-
-		if err := cmd.Run(); err != nil {
+		_, cmd, stdErr, err := utils.GetVG(vg.VGName)
+		log.Debug(fmt.Sprintf("[sortVGIssuesByVG] runs cmd: %s", cmd))
+		if err != nil {
 			log.Error(err, fmt.Sprintf(`[sortVGIssuesByVG] unable to run vgs command for vg, name: "%s"`, vg.VGName))
 			vgIssues[vg.VGName+vg.VGUuid] = err.Error()
 		}
 
-		if errs.Len() != 0 {
-			vgIssues[vg.VGName+vg.VGUuid] = errs.String()
-			errs.Reset()
+		if stdErr.Len() != 0 {
+			log.Error(fmt.Errorf(stdErr.String()), fmt.Sprintf(`[sortVGIssuesByVG] vgs command for vg "%s" has stderr: `, vg.VGName))
+			vgIssues[vg.VGName+vg.VGUuid] = stdErr.String()
+			stdErr.Reset()
 		}
 	}
 
