@@ -507,6 +507,7 @@ func lvmStaticExtendedArgs(args []string) []string {
 // system security. Therefore, they can be safely ignored to simplify the analysis of command output.
 //
 // Parameters:
+//   - command (string): The command that generated the stderr output.
 //   - stdErr (bytes.Buffer): The buffer containing the stderr output from a command execution.
 //
 // Returns:
