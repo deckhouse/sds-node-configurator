@@ -25,6 +25,8 @@ import (
 	"regexp"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/internal"
+
+	golog "log"
 )
 
 func GetBlockDevices() ([]internal.Device, string, error) {
@@ -57,7 +59,7 @@ func GetAllVGs() (data []internal.VGData, command string, stdErr bytes.Buffer, e
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
-	filteredStdErr := filterStdErr(stdErr)
+	filteredStdErr := filterStdErr(cmd.String(), stdErr)
 	err = cmd.Run()
 	if err != nil {
 		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
@@ -81,7 +83,7 @@ func GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.
 	cmd.Stderr = &stdErr
 
 	err = cmd.Run()
-	filteredStdErr := filterStdErr(stdErr)
+	filteredStdErr := filterStdErr(cmd.String(), stdErr)
 	if err != nil {
 		return vgData, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
@@ -104,7 +106,7 @@ func GetAllLVs() (data []internal.LVData, command string, stdErr bytes.Buffer, e
 	cmd.Stderr = &stdErr
 
 	err = cmd.Run()
-	filteredStdErr := filterStdErr(stdErr)
+	filteredStdErr := filterStdErr(cmd.String(), stdErr)
 	if err != nil {
 		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
@@ -128,7 +130,7 @@ func GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdEr
 	cmd.Stderr = &stdErr
 
 	err = cmd.Run()
-	filteredStdErr := filterStdErr(stdErr)
+	filteredStdErr := filterStdErr(cmd.String(), stdErr)
 	if err != nil {
 		return lvData, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
@@ -151,7 +153,7 @@ func GetAllPVs() (data []internal.PVData, command string, stdErr bytes.Buffer, e
 	cmd.Stderr = &stdErr
 
 	err = cmd.Run()
-	filteredStdErr := filterStdErr(stdErr)
+	filteredStdErr := filterStdErr(cmd.String(), stdErr)
 	if err != nil {
 		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
@@ -174,7 +176,7 @@ func GetPV(pvName string) (pvData internal.PVData, command string, stdErr bytes.
 	cmd.Stderr = &stdErr
 
 	err = cmd.Run()
-	filteredStdErr := filterStdErr(stdErr)
+	filteredStdErr := filterStdErr(cmd.String(), stdErr)
 	if err != nil {
 		return pvData, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
@@ -510,7 +512,7 @@ func lvmStaticExtendedArgs(args []string) []string {
 // Returns:
 //   - bytes.Buffer: A new buffer containing the filtered stderr output, excluding lines that
 //     match the "Regex version mismatch" pattern.
-func filterStdErr(stdErr bytes.Buffer) bytes.Buffer {
+func filterStdErr(command string, stdErr bytes.Buffer) bytes.Buffer {
 	var filteredStdErr bytes.Buffer
 	stdErrScanner := bufio.NewScanner(&stdErr)
 	regexpPattern := `Regex version mismatch, expected: .+ actual: .+`
@@ -523,6 +525,8 @@ func filterStdErr(stdErr bytes.Buffer) bytes.Buffer {
 		line := stdErrScanner.Text()
 		if !regex.MatchString(line) {
 			filteredStdErr.WriteString(line + "\n")
+		} else {
+			golog.Printf("WARNING: [filterStdErr] Line filtered from stderr due to matching exclusion pattern. Line: '%s'. Triggered by command: '%s'.", line, command)
 		}
 	}
 
