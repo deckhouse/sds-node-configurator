@@ -297,7 +297,7 @@ func ReconcileLVMVG(
 
 	isVgExist, vg, err := GetVGFromNode(lvg.Spec.ActualVGNameOnTheNode, log, metrics)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unabke to get VG %s from the node for LVMVolumeGroup %s", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
+		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to get VG %s from the node for LVMVolumeGroup %s", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 		return true, err
 	}
 
