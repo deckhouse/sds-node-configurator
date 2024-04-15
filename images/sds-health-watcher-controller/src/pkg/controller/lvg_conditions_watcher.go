@@ -104,12 +104,12 @@ func RunLVGConditionsWatcher(
 			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] createFunc added a request for the LVMVolumeGroup %s to the Reconcilers queue", e.Object.GetName()))
 		},
 		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
-			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] got a create event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
+			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] got a update event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
 
 			oldLVG, ok := e.ObjectOld.(*v1alpha1.LvmVolumeGroup)
 			if !ok {
 				err = errors.New("unable to cast event object to a given type")
-				log.Error(err, "[RunLVGConditionsWatcher] an error occurred while handling a create event")
+				log.Error(err, "[RunLVGConditionsWatcher] an error occurred while handling a update event")
 				return
 			}
 			log.Debug(fmt.Sprintf("[RunLVGConditionsWatcher] successfully casted an old state of the LVMVolumeGroup %s", oldLVG.Name))
@@ -117,7 +117,7 @@ func RunLVGConditionsWatcher(
 			newLVG, ok := e.ObjectNew.(*v1alpha1.LvmVolumeGroup)
 			if !ok {
 				err = errors.New("unable to cast event object to a given type")
-				log.Error(err, "[RunLVGConditionsWatcher] an error occurred while handling a create event")
+				log.Error(err, "[RunLVGConditionsWatcher] an error occurred while handling a update event")
 				return
 			}
 			log.Debug(fmt.Sprintf("[RunLVGConditionsWatcher] successfully casted a new state of the LVMVolumeGroup %s", newLVG.Name))

@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"fmt"
+	dh "github.com/deckhouse/deckhouse/deckhouse-controller/pkg/apis/deckhouse.io/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"os"
 	goruntime "runtime"
@@ -40,6 +41,7 @@ import (
 
 var (
 	resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
+		dh.AddToScheme,
 		v1alpha1.AddToScheme,
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,
@@ -113,6 +115,12 @@ func main() {
 	err = controller.RunLVGStatusWatcher(mgr, *log)
 	if err != nil {
 		log.Error(err, "[main] unable to run LVGConfigurationWatcher controller")
+		os.Exit(1)
+	}
+
+	err = controller.RunMCWatcher(mgr, *log)
+	if err != nil {
+		log.Error(err, "[main] unable to run MCWatcher controller")
 		os.Exit(1)
 	}
 

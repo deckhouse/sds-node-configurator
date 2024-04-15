@@ -16,3 +16,7 @@ properties:
       - TRACE
     description: Module log level
     default: INFO
+  enableThinProvisioning:
+    type: boolean
+    default: false
+    description: Allow thin LVM volumes usage

@@ -52,6 +52,16 @@ rules:
       - delete
       - update
       - create
+  - verbs:
+      - get
+      - list
+      - update
+      - patch
+      - watch
+    apiGroups:
+      - "deckhouse.io"
+    resources:
+      - "moduleconfigs"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
