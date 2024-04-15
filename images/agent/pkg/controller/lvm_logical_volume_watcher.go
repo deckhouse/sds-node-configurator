@@ -741,12 +741,12 @@ func ReconcileLVMLogicalVolume(ctx context.Context, cl client.Client, log logger
 			}
 			return true, nil
 		}
-		firstErr := fmt.Errorf("[ReconcileLVMLogicalVolume] unable to get LVMVolumeGroup %s: %w", llv.Spec.LvmVolumeGroupName, err)
-		secondErr := updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get selected LVMVolumeGroup, err: %s", err.Error()))
-		if secondErr != nil {
-			return true, fmt.Errorf("%s. Also failed to update LVMLogicalVolume %s status.phase to %s: %w", firstErr, llv.Name, failedStatusPhase, secondErr)
+		reconcileErr := fmt.Errorf("[ReconcileLVMLogicalVolume] unable to get LVMVolumeGroup %s: %w", llv.Spec.LvmVolumeGroupName, err)
+		updateErr := updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get selected LVMVolumeGroup, err: %s", err.Error()))
+		if updateErr != nil {
+			return true, fmt.Errorf("%s. Also failed to update LVMLogicalVolume %s status.phase to %s: %w", reconcileErr, llv.Name, failedStatusPhase, updateErr)
 		}
-		return false, firstErr
+		return false, reconcileErr
 	}
 
 	if !belongsToNode(lvg, cfg.NodeName) {
@@ -759,12 +759,12 @@ func ReconcileLVMLogicalVolume(ctx context.Context, cl client.Client, log logger
 
 	recType, err := identifyReconcileFunc(log, lvg.Spec.ActualVGNameOnTheNode, llv)
 	if err != nil {
-		firstErr := fmt.Errorf("[ReconcileLVMLogicalVolume] unable to identify the reconcile func: %w", err)
-		secondErr := updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("An error occurred while identifying the reconcile func, err: %s", err.Error()))
-		if secondErr != nil {
-			return true, fmt.Errorf("%s. Also failed to update LVMLogicalVolume %s status.phase to %s: %w", firstErr, llv.Name, failedStatusPhase, secondErr)
+		reconcileErr := fmt.Errorf("[ReconcileLVMLogicalVolume] unable to identify the reconcile func: %w", err)
+		updateErr := updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("An error occurred while identifying the reconcile func, err: %s", err.Error()))
+		if updateErr != nil {
+			return true, fmt.Errorf("%s. Also failed to update LVMLogicalVolume %s status.phase to %s: %w", reconcileErr, llv.Name, failedStatusPhase, updateErr)
 		}
-		return false, firstErr
+		return false, reconcileErr
 	}
 
 	switch recType {
