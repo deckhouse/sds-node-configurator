@@ -248,7 +248,9 @@ func ReconcileLVMVG(
 		totalThinPoolSize += tp.Size.Value()
 	}
 
-	if totalThinPoolSize >= totalVGSize {
+	resizeDelta, _ := utils.QuantityToBytes(internal.ResizeDelta)
+
+	if totalThinPoolSize+resizeDelta >= totalVGSize {
 		err := errors.New("required space for thin pools is more than VG size")
 		log.Error(err, fmt.Sprintf("[ReconcileLVMVG] validation fails for LVMVolumeGroup %s", lvg.Name))
 
