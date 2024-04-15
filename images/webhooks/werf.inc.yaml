@@ -1,0 +1,16 @@
+---
+image: webhooks
+from: "registry.deckhouse.io/base_images/golang:1.22.1-alpine@sha256:0de6cf7cceab6ecbf0718bdfb675b08b78113c3709c5e4b99456cdb2ae8c2495"
+
+git:
+  - add: /images/webhooks/src
+    to: /src
+    stageDependencies:
+      setup:
+        - "**/*"
+
+shell:
+  setup:
+    - cd /src
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o webhooks
+    - mv webhooks /webhooks
