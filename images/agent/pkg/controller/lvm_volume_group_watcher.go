@@ -497,7 +497,7 @@ func ReconcileLVMVG(
 					if err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, lvg.Name, lvg.Namespace, err.Error(), NonOperational); err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to update Status for LVMVolumeGroup %s", lvg.Name))
 					}
-					return false, err
+					return true, err
 				}
 			}
 		}
