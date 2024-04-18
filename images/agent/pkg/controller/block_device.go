@@ -31,7 +31,6 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/api/policy/v1beta1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -149,7 +148,7 @@ func hasBlockDeviceDiff(res v1alpha1.BlockDeviceStatus, candidate internal.Block
 		candidate.Model != res.Model ||
 		candidate.HotPlug != res.HotPlug ||
 		candidate.Type != res.Type ||
-		v1beta1.FSType(candidate.FSType) != res.FsType ||
+		candidate.FSType != res.FsType ||
 		candidate.MachineId != res.MachineID
 }
 
@@ -504,7 +503,7 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 		},
 		Status: v1alpha1.BlockDeviceStatus{
 			Type:                  candidate.Type,
-			FsType:                v1beta1.FSType(candidate.FSType),
+			FsType:                candidate.FSType,
 			NodeName:              candidate.NodeName,
 			Consumable:            candidate.Consumable,
 			PVUuid:                candidate.PVUuid,
@@ -548,7 +547,7 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 		},
 		Status: v1alpha1.BlockDeviceStatus{
 			Type:                  candidate.Type,
-			FsType:                v1beta1.FSType(candidate.FSType),
+			FsType:                candidate.FSType,
 			NodeName:              candidate.NodeName,
 			Consumable:            candidate.Consumable,
 			PVUuid:                candidate.PVUuid,
