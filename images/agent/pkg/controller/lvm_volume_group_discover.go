@@ -87,9 +87,9 @@ func RunLVMVolumeGroupDiscoverController(
 			blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
 			if err != nil {
 				log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to GetAPIBlockDevices")
-				for _, lvm := range currentLVMVGs {
-					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvm, err); err != nil {
-						log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
+				for _, lvg := range currentLVMVGs {
+					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvg, err); err != nil {
+						log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvg.Name))
 					}
 				}
 				continue
@@ -97,9 +97,9 @@ func RunLVMVolumeGroupDiscoverController(
 
 			if len(blockDevices) == 0 {
 				log.Error(fmt.Errorf("no block devices found"), "[RunLVMVolumeGroupDiscoverController] unable to get block devices")
-				for _, lvm := range currentLVMVGs {
-					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvm, fmt.Errorf("no block devices found")); err != nil {
-						log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
+				for _, lvg := range currentLVMVGs {
+					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvg, fmt.Errorf("no block devices found")); err != nil {
+						log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvg.Name))
 					}
 				}
 				continue
@@ -110,9 +110,10 @@ func RunLVMVolumeGroupDiscoverController(
 			candidates, err := GetLVMVolumeGroupCandidates(log, metrics, blockDevices, cfg.NodeName)
 			if err != nil {
 				log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to run GetLVMVolumeGroupCandidates")
-				for _, lvm := range filteredResources {
-					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvm, err); err != nil {
-						log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvm.Name))
+				for _, lvg := range filteredResources {
+					log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] turn LVMVolumeGroup %q to non operational. LVG struct: %+v ", lvg.Name, lvg))
+					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvg, err); err != nil {
+						log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvg.Name))
 					}
 				}
 				continue
