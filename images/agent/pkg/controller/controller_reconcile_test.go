@@ -71,7 +71,7 @@ var _ = Describe("Storage Controller", func() {
 		Expect(blockDevice.Status.Wwn).To(Equal(candidate.Wwn))
 		Expect(blockDevice.Status.Serial).To(Equal(candidate.Serial))
 		Expect(blockDevice.Status.Path).To(Equal(candidate.Path))
-		Expect(blockDevice.Status.Size).To(Equal(candidate.Size.String()))
+		Expect(blockDevice.Status.Size.Value()).To(Equal(candidate.Size.Value()))
 		Expect(blockDevice.Status.Rota).To(Equal(candidate.Rota))
 		Expect(blockDevice.Status.Model).To(Equal(candidate.Model))
 		Expect(blockDevice.Status.Type).To(Equal(candidate.Type))

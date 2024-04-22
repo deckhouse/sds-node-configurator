@@ -51,7 +51,7 @@ type LvmVolumeGroupSpec struct {
 type LvmVolumeGroupDevice struct {
 	BlockDevice string            `json:"blockDevice"`
 	DevSize     resource.Quantity `json:"devSize"`
-	PVSize      string            `json:"pvSize"`
+	PVSize      resource.Quantity `json:"pvSize"`
 	PVUuid      string            `json:"pvUUID"`
 	Path        string            `json:"path"`
 }
@@ -64,15 +64,15 @@ type LvmVolumeGroupNode struct {
 type StatusThinPool struct {
 	Name       string            `json:"name"`
 	ActualSize resource.Quantity `json:"actualSize"`
-	UsedSize   string            `json:"usedSize"`
+	UsedSize   resource.Quantity `json:"usedSize"`
 }
 
 type LvmVolumeGroupStatus struct {
-	AllocatedSize string               `json:"allocatedSize"`
+	AllocatedSize resource.Quantity    `json:"allocatedSize"`
 	Health        string               `json:"health"`
 	Message       string               `json:"message"`
 	Nodes         []LvmVolumeGroupNode `json:"nodes"`
 	ThinPools     []StatusThinPool     `json:"thinPools"`
-	VGSize        string               `json:"vgSize"`
+	VGSize        resource.Quantity    `json:"vgSize"`
 	VGUuid        string               `json:"vgUUID"`
 }

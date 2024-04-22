@@ -134,7 +134,6 @@ func RunLVMVolumeGroupDiscoverController(
 					}
 
 					log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] updated LvmVolumeGroup, name: "%s"`, lvmVolumeGroup.Name))
-
 					//TODO: release lock
 				} else {
 					lvm, err := CreateLVMVolumeGroup(ctx, log, metrics, cl, candidate)
@@ -230,24 +229,21 @@ func turnLVMVGHealthToNonOperational(ctx context.Context, cl kclient.Client, lvg
 }
 
 func hasLVMVolumeGroupDiff(log logger.Logger, res v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
-	candidateASTmp := resource.NewQuantity(candidate.AllocatedSize.Value(), resource.BinarySI)
-	candidateVGSizeTmp := resource.NewQuantity(candidate.VGSize.Value(), resource.BinarySI)
-
-	log.Trace(fmt.Sprintf(`AllocatedSize, candidate: %s, res: %s`, candidateASTmp.String(), res.Status.AllocatedSize))
+	log.Trace(fmt.Sprintf(`AllocatedSize, candidate: %s, res: %s`, candidate.AllocatedSize.String(), res.Status.AllocatedSize.String()))
 	log.Trace(fmt.Sprintf(`Health, candidate: %s, res: %s`, candidate.Health, res.Status.Health))
 	log.Trace(fmt.Sprintf(`Message, candidate: %s, res: %s`, candidate.Message, res.Status.Message))
 	log.Trace(fmt.Sprintf(`ThinPools, candidate: %v, res: %v`, convertStatusThinPools(candidate.StatusThinPools), res.Status.ThinPools))
-	log.Trace(fmt.Sprintf(`VGSize, candidate: %s, res: %s`, candidateVGSizeTmp.String(), res.Status.VGSize))
+	log.Trace(fmt.Sprintf(`VGSize, candidate: %s, res: %s`, candidate.VGSize.String(), res.Status.VGSize.String()))
 	log.Trace(fmt.Sprintf(`VGUuid, candidate: %s, res: %s`, candidate.VGUuid, res.Status.VGUuid))
 	log.Trace(fmt.Sprintf(`Nodes, candidate: %v, res: %v`, convertLVMVGNodes(candidate.Nodes), res.Status.Nodes))
 
 	//TODO: Uncomment this
 	//return strings.Join(candidate.Finalizers, "") == strings.Join(res.Finalizers, "") ||
-	return candidateASTmp.String() != res.Status.AllocatedSize ||
+	return candidate.AllocatedSize.Value() != res.Status.AllocatedSize.Value() ||
 		candidate.Health != res.Status.Health ||
 		candidate.Message != res.Status.Message ||
 		!reflect.DeepEqual(convertStatusThinPools(candidate.StatusThinPools), res.Status.ThinPools) ||
-		candidateVGSizeTmp.String() != res.Status.VGSize ||
+		candidate.VGSize.Value() != res.Status.VGSize.Value() ||
 		candidate.VGUuid != res.Status.VGUuid ||
 		!reflect.DeepEqual(convertLVMVGNodes(candidate.Nodes), res.Status.Nodes)
 }
@@ -421,11 +417,11 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, metrics monitoring.Metrics, 
 			BlockDevicesNames:     getBlockDevicesNames(sortedBDs, vg),
 			SpecThinPools:         getSpecThinPools(sortedThinPools, vg),
 			Type:                  getVgType(vg),
-			AllocatedSize:         allocateSize,
+			AllocatedSize:         *resource.NewQuantity(allocateSize.Value(), resource.BinarySI),
 			Health:                health,
 			Message:               message,
 			StatusThinPools:       getStatusThinPools(log, sortedThinPools, vg),
-			VGSize:                vg.VGSize,
+			VGSize:                *resource.NewQuantity(vg.VGSize.Value(), resource.BinarySI),
 			VGUuid:                vg.VGUuid,
 			Nodes:                 configureCandidateNodeDevices(sortedPVs, sortedBDs, vg, currentNode),
 		}
@@ -608,12 +604,12 @@ func configureCandidateNodeDevices(pvs map[string][]internal.PVData, bds map[str
 	for _, pv := range filteredPV {
 		device := internal.LVMVGDevice{
 			Path:   pv.PVName,
-			PVSize: pv.PVSize,
+			PVSize: *resource.NewQuantity(pv.PVSize.Value(), resource.BinarySI),
 			PVUuid: pv.PVUuid,
 		}
 
 		if bd, exist := bdPathStatus[pv.PVName]; exist {
-			device.DevSize = resource.MustParse(bd.Status.Size)
+			device.DevSize = *resource.NewQuantity(bd.Status.Size.Value(), resource.BinarySI)
 			device.BlockDevice = bd.Name
 		}
 
@@ -665,8 +661,8 @@ func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVDat
 		}
 		tps = append(tps, internal.LVMVGStatusThinPool{
 			Name:       lv.LVName,
-			ActualSize: lv.LVSize,
-			UsedSize:   usedSize.String(),
+			ActualSize: *resource.NewQuantity(lv.LVSize.Value(), resource.BinarySI),
+			UsedSize:   *resource.NewQuantity(usedSize.Value(), resource.BinarySI),
 		})
 	}
 	return tps
@@ -714,8 +710,6 @@ func CreateLVMVolumeGroup(
 	kc kclient.Client,
 	candidate internal.LVMVolumeGroupCandidate,
 ) (*v1alpha1.LvmVolumeGroup, error) {
-	candidateVGSizeTmp := resource.NewQuantity(candidate.VGSize.Value(), resource.BinarySI)
-	candidateAllocatedSizeTmp := resource.NewQuantity(candidate.AllocatedSize.Value(), resource.BinarySI)
 	lvmVolumeGroup := &v1alpha1.LvmVolumeGroup{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       v1alpha1.LVMVolumeGroupKind,
@@ -734,12 +728,12 @@ func CreateLVMVolumeGroup(
 			Type:                  candidate.Type,
 		},
 		Status: v1alpha1.LvmVolumeGroupStatus{
-			AllocatedSize: candidateAllocatedSizeTmp.String(),
+			AllocatedSize: candidate.AllocatedSize,
 			Health:        candidate.Health,
 			Message:       candidate.Message,
 			Nodes:         convertLVMVGNodes(candidate.Nodes),
 			ThinPools:     convertStatusThinPools(candidate.StatusThinPools),
-			VGSize:        candidateVGSizeTmp.String(),
+			VGSize:        candidate.VGSize,
 			VGUuid:        candidate.VGUuid,
 		},
 	}
@@ -760,7 +754,7 @@ func CreateLVMVolumeGroup(
 	metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "create").Inc()
 	if err != nil {
 		metrics.ApiMethodsErrors(LVMVolumeGroupDiscoverCtrlName, "create").Inc()
-		return nil, fmt.Errorf("unable to CreateLVMVolumeGroup, err: %w", err)
+		return nil, fmt.Errorf("unable to сreate LVMVolumeGroup, err: %w", err)
 	}
 
 	return lvmVolumeGroup, nil
@@ -795,10 +789,6 @@ func UpdateLVMVolumeGroupByCandidate(
 	}
 
 	// Update status.
-
-	candidateVGSizeTmp := resource.NewQuantity(candidate.VGSize.Value(), resource.BinarySI)
-	candidateAllocatedSizeTmp := resource.NewQuantity(candidate.AllocatedSize.Value(), resource.BinarySI)
-
 	lvmvg := &v1alpha1.LvmVolumeGroup{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       v1alpha1.LVMVolumeGroupKind,
@@ -817,12 +807,12 @@ func UpdateLVMVolumeGroupByCandidate(
 			Type:                  res.Spec.Type,
 		},
 		Status: v1alpha1.LvmVolumeGroupStatus{
-			AllocatedSize: candidateAllocatedSizeTmp.String(),
+			AllocatedSize: candidate.AllocatedSize,
 			Health:        candidate.Health,
 			Message:       candidate.Message,
 			Nodes:         convertLVMVGNodes(candidate.Nodes),
 			ThinPools:     convertStatusThinPools(candidate.StatusThinPools),
-			VGSize:        candidateVGSizeTmp.String(),
+			VGSize:        candidate.VGSize,
 			VGUuid:        candidate.VGUuid,
 		},
 	}
@@ -858,13 +848,10 @@ func convertLVMVGDevices(devices []internal.LVMVGDevice) []v1alpha1.LvmVolumeGro
 	convertedDevices := make([]v1alpha1.LvmVolumeGroupDevice, 0, len(devices))
 
 	for _, dev := range devices {
-
-		devPVSizeTmp := resource.NewQuantity(dev.PVSize.Value(), resource.BinarySI)
-
 		convertedDevices = append(convertedDevices, v1alpha1.LvmVolumeGroupDevice{
 			BlockDevice: dev.BlockDevice,
 			DevSize:     dev.DevSize,
-			PVSize:      devPVSizeTmp.String(),
+			PVSize:      dev.PVSize,
 			PVUuid:      dev.PVUuid,
 			Path:        dev.Path,
 		})
