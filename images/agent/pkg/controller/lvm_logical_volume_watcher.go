@@ -346,14 +346,6 @@ func reconcileLLVUpdateFunc(
 	switch llv.Spec.Type {
 	case Thick:
 		freeSpace := getFreeVGSpace(lvg)
-		//if err != nil {
-		//	log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to count free space in VG, name: %s", vgName))
-		//	err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to count free VG space, VG name %s, err: %s", vgName, err.Error()))
-		//	if err != nil {
-		//		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-		//	}
-		//	return
-		//}
 
 		log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s, LV: %s, VG: %s Thick extending size: %d, free size: %d", llv.Name, lvName, vgName, extendingSize.Value(), freeSpace.Value()))
 		if freeSpace.Value() < extendingSize.Value()+delta.Value() {
@@ -510,14 +502,6 @@ func reconcileLLVCreateFunc(
 	switch llv.Spec.Type {
 	case Thick:
 		freeSpace := getFreeVGSpace(lvg)
-		//if err != nil {
-		//	log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to count free space in VG, name: %s", vgName))
-		//	err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get free VG space, err: %s", err.Error()))
-		//	if err != nil {
-		//		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to updateLVMLogicalVolumePhase for LVMLogicalVolume %s", llv.Name))
-		//	}
-		//	return
-		//}
 
 		log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s, LV: %s, VG: %s type: %s requested size: %d, free size: %d", llv.Name, lvName, vgName, llv.Spec.Type, llv.Spec.Size.Value(), freeSpace.Value()))
 		if freeSpace.Value() < llv.Spec.Size.Value() {
