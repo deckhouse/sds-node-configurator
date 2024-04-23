@@ -133,7 +133,6 @@ func RunBlockDeviceController(
 }
 
 func hasBlockDeviceDiff(res v1alpha1.BlockDeviceStatus, candidate internal.BlockDeviceCandidate) bool {
-	candSizeTmp := resource.NewQuantity(candidate.Size.Value(), resource.BinarySI)
 	return candidate.NodeName != res.NodeName ||
 		candidate.Consumable != res.Consumable ||
 		candidate.PVUuid != res.PVUuid ||
@@ -144,7 +143,7 @@ func hasBlockDeviceDiff(res v1alpha1.BlockDeviceStatus, candidate internal.Block
 		candidate.Wwn != res.Wwn ||
 		candidate.Serial != res.Serial ||
 		candidate.Path != res.Path ||
-		candSizeTmp.String() != res.Size ||
+		candidate.Size.Value() != res.Size.Value() ||
 		candidate.Rota != res.Rota ||
 		candidate.Model != res.Model ||
 		candidate.HotPlug != res.HotPlug ||
@@ -491,7 +490,6 @@ func readSerialBlockDevice(deviceName string, isMdRaid bool) (string, error) {
 }
 
 func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, res v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {
-	candidateSizeTmp := resource.NewQuantity(candidate.Size.Value(), resource.BinarySI)
 	device := &v1alpha1.BlockDevice{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       v1alpha1.BlockDeviceKind,
@@ -515,7 +513,7 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 			Wwn:                   candidate.Wwn,
 			Serial:                candidate.Serial,
 			Path:                  candidate.Path,
-			Size:                  candidateSizeTmp.String(),
+			Size:                  *resource.NewQuantity(candidate.Size.Value(), resource.BinarySI),
 			Model:                 candidate.Model,
 			Rota:                  candidate.Rota,
 			HotPlug:               candidate.HotPlug,
@@ -559,7 +557,7 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 			Wwn:                   candidate.Wwn,
 			Serial:                candidate.Serial,
 			Path:                  candidate.Path,
-			Size:                  candidateSizeTmp.String(),
+			Size:                  *resource.NewQuantity(candidateSizeTmp.Value(), resource.BinarySI),
 			Model:                 candidate.Model,
 			Rota:                  candidate.Rota,
 			MachineID:             candidate.MachineId,

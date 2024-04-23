@@ -443,15 +443,13 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 	t.Run("getFreeVGSpace", func(t *testing.T) {
 		lvg := &v1alpha1.LvmVolumeGroup{
 			Status: v1alpha1.LvmVolumeGroupStatus{
-				VGSize:        "2G",
-				AllocatedSize: "1G",
+				VGSize:        resource.MustParse("2G"),
+				AllocatedSize: resource.MustParse("1G"),
 			},
 		}
 
-		free, err := getFreeVGSpace(lvg)
-		if assert.NoError(t, err) {
-			assert.Equal(t, int64(1000000000), free.Value())
-		}
+		free := getFreeVGSpace(lvg)
+		assert.Equal(t, int64(1000000000), free.Value())
 	})
 
 	t.Run("updateLVMLogicalVolume", func(t *testing.T) {

@@ -60,7 +60,7 @@ type LVMVolumeGroupCandidate struct {
 type LVMVGStatusThinPool struct {
 	Name       string
 	ActualSize resource.Quantity
-	UsedSize   string
+	UsedSize   resource.Quantity
 }
 
 type LVMVGDevice struct {

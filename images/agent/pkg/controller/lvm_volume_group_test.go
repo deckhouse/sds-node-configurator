@@ -95,7 +95,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
                "actualSize": "1G"
            }
 		],
-       "vgSize": "test-vg-size",
+       "vgSize": "30G",
        "vgUUID": "test-vg-uuid"
    }
 }`
@@ -127,8 +127,8 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 				Health:        "operational",
 				Message:       "all-good",
 				VGUuid:        "test-vg-uuid",
-				VGSize:        "test-vg-size",
-				AllocatedSize: "20G",
+				VGSize:        resource.MustParse("30G"),
+				AllocatedSize: resource.MustParse("20G"),
 				ThinPools: []v1alpha1.StatusThinPool{
 					{
 						Name:       "test-name",
@@ -141,14 +141,14 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 						Devices: []v1alpha1.LvmVolumeGroupDevice{
 							{
 								Path:        "test/path1",
-								PVSize:      "1G",
+								PVSize:      resource.MustParse("1G"),
 								DevSize:     *convertSize("1G", t),
 								PVUuid:      "testPV1",
 								BlockDevice: "test/BD",
 							},
 							{
 								Path:        "test/path2",
-								PVSize:      "2G",
+								PVSize:      resource.MustParse("2G"),
 								DevSize:     *convertSize("1G", t),
 								PVUuid:      "testPV2",
 								BlockDevice: "test/BD2",
@@ -160,7 +160,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 						Devices: []v1alpha1.LvmVolumeGroupDevice{
 							{
 								Path:        "test/path3",
-								PVSize:      "3G",
+								PVSize:      resource.MustParse("3G"),
 								DevSize:     *convertSize("2G", t),
 								PVUuid:      "testPV3",
 								BlockDevice: "test/DB3",
@@ -249,7 +249,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 				"usedSize": "500M"
            }
        ],
-       "vgSize": "test-vg-size",
+       "vgSize": "30G",
        "vgUUID": "test-vg-uuid"
    }
 }`
@@ -278,7 +278,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 				Type: "local",
 			},
 			Status: v1alpha1.LvmVolumeGroupStatus{
-				AllocatedSize: "20G",
+				AllocatedSize: resource.MustParse("20G"),
 				Health:        "operational",
 				Message:       "all-good",
 				Nodes: []v1alpha1.LvmVolumeGroupNode{
@@ -287,14 +287,14 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 							{
 								BlockDevice: "test/BD",
 								DevSize:     *convertSize("1G", t),
-								PVSize:      "1G",
+								PVSize:      resource.MustParse("1G"),
 								PVUuid:      "testPV1",
 								Path:        "test/path1",
 							},
 							{
 								BlockDevice: "test/BD2",
 								DevSize:     *convertSize("1G", t),
-								PVSize:      "2G",
+								PVSize:      resource.MustParse("2G"),
 								PVUuid:      "testPV2",
 								Path:        "test/path2",
 							},
@@ -306,7 +306,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 							{
 								BlockDevice: "test/DB3",
 								DevSize:     *convertSize("2G", t),
-								PVSize:      "3G",
+								PVSize:      resource.MustParse("3G"),
 								PVUuid:      "testPV3",
 								Path:        "test/path3",
 							},
@@ -318,10 +318,10 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 					{
 						Name:       "test-name",
 						ActualSize: *convertSize("1G", t),
-						UsedSize:   "500M",
+						UsedSize:   resource.MustParse("500M"),
 					},
 				},
-				VGSize: "test-vg-size",
+				VGSize: resource.MustParse("30G"),
 				VGUuid: "test-vg-uuid",
 			},
 		}
