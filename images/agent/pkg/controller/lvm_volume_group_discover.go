@@ -799,6 +799,7 @@ func UpdateLVMVolumeGroupByCandidate(
 			OwnerReferences: res.OwnerReferences,
 			ResourceVersion: res.ResourceVersion,
 			Annotations:     res.Annotations,
+			Labels:          res.Labels,
 		},
 		Spec: v1alpha1.LvmVolumeGroupSpec{
 			ActualVGNameOnTheNode: res.Spec.ActualVGNameOnTheNode,
