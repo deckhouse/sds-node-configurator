@@ -490,7 +490,6 @@ func readSerialBlockDevice(deviceName string, isMdRaid bool) (string, error) {
 }
 
 func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, res v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {
-	//candidateSizeTmp := resource.NewQuantity(candidate.Size.Value(), resource.BinarySI)
 	device := &v1alpha1.BlockDevice{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       v1alpha1.BlockDeviceKind,
