@@ -20,6 +20,6 @@ The module manages `LVM` on cluster nodes through [Kubernetes custom resources](
 
   - Scanning `LVM Physical Volumes` on the nodes that are part of managed `LVM Volume Groups`. In case the size of underlying block device expands, the corresponding `LVM Physical Volumes` will be automatically expanded as well (`pvresize` will occur).
 
-  > **Caution!** Downsizing a block device is not supported.
+  > **Caution!** Downsizing a block device is not supported
 
   - Creating/expanding/deleting `LVM Volume Groups` on the node according to the changes the user has made to the `LVMVolumeGroup` resources. [Usage examples](./usage.html#lvmvolumegroup-resources)
