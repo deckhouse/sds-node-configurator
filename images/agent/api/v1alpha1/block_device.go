@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -36,21 +38,21 @@ type BlockDeviceList struct {
 }
 
 type BlockDeviceStatus struct {
-	Type                  string `json:"type"`
-	FsType                string `json:"fsType"`
-	NodeName              string `json:"nodeName"`
-	Consumable            bool   `json:"consumable"`
-	PVUuid                string `json:"pvUUID"`
-	VGUuid                string `json:"vgUUID"`
-	PartUUID              string `json:"partUUID"`
-	LvmVolumeGroupName    string `json:"lvmVolumeGroupName"`
-	ActualVGNameOnTheNode string `json:"actualVGNameOnTheNode"`
-	Wwn                   string `json:"wwn"`
-	Serial                string `json:"serial"`
-	Path                  string `json:"path"`
-	Size                  string `json:"size"`
-	Model                 string `json:"model"`
-	Rota                  bool   `json:"rota"`
-	HotPlug               bool   `json:"hotPlug"`
-	MachineID             string `json:"machineId"`
+	Type                  string            `json:"type"`
+	FsType                string            `json:"fsType"`
+	NodeName              string            `json:"nodeName"`
+	Consumable            bool              `json:"consumable"`
+	PVUuid                string            `json:"pvUUID"`
+	VGUuid                string            `json:"vgUUID"`
+	PartUUID              string            `json:"partUUID"`
+	LvmVolumeGroupName    string            `json:"lvmVolumeGroupName"`
+	ActualVGNameOnTheNode string            `json:"actualVGNameOnTheNode"`
+	Wwn                   string            `json:"wwn"`
+	Serial                string            `json:"serial"`
+	Path                  string            `json:"path"`
+	Size                  resource.Quantity `json:"size"`
+	Model                 string            `json:"model"`
+	Rota                  bool              `json:"rota"`
+	HotPlug               bool              `json:"hotPlug"`
+	MachineID             string            `json:"machineId"`
 }
