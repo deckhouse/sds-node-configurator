@@ -233,13 +233,7 @@ func ReconcileLVMVG(
 			return true, err
 		}
 
-		size, err := resource.ParseQuantity(bd.Status.Size)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[ReconcileLVMVG] unable to parse quantity for BlockDevice %s size", bd.Name))
-			return false, err
-		}
-
-		totalVGSize += size.Value()
+		totalVGSize += bd.Status.Size.Value()
 	}
 
 	var totalThinPoolSize int64

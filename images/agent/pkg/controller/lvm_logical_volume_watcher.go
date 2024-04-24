@@ -127,40 +127,40 @@ func RunLVMLogicalVolumeWatcherController(
 			q.Add(request)
 			log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] UpdateFunc ends reconciliation of LLV: %s", newLLV.Name))
 		},
-		DeleteFunc: func(ctx context.Context, e event.DeleteEvent, q workqueue.RateLimitingInterface) {
-			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] DeleteFunc starts reconciliation of LLV: %s", e.Object.GetName()))
+		// DeleteFunc: func(ctx context.Context, e event.DeleteEvent, q workqueue.RateLimitingInterface) {
+		// 	log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] DeleteFunc starts reconciliation of LLV: %s", e.Object.GetName()))
 
-			llv, ok := e.Object.(*v1alpha1.LVMLogicalVolume)
-			if !ok {
-				err = errors.New("unable to cast event object to a given type")
-				log.Error(err, "[DeleteFunc] an error occurs while handling update event")
-				return
-			}
-			log.Trace("[RunLVMLogicalVolumeWatcherController] DeleteFunc got LVMLogicalVolume: ", llv.Name, llv)
+		// 	llv, ok := e.Object.(*v1alpha1.LVMLogicalVolume)
+		// 	if !ok {
+		// 		err = errors.New("unable to cast event object to a given type")
+		// 		log.Error(err, "[DeleteFunc] an error occurs while handling update event")
+		// 		return
+		// 	}
+		// 	log.Trace("[RunLVMLogicalVolumeWatcherController] DeleteFunc got LVMLogicalVolume: ", llv.Name, llv)
 
-			lvg, err := getLVMVolumeGroup(ctx, cl, metrics, "", llv.Spec.LvmVolumeGroupName)
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[DeleteFunc] unable to get the LVMVolumeGroup, name: %s", llv.Spec.LvmVolumeGroupName))
-				err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get selected LVMVolumeGroup, err: %s", err.Error()))
-				if err != nil {
-					log.Error(err, "[DeleteFunc] unable to update LVMLogicalVolume Phase")
-				}
-				return
-			}
+		// 	lvg, err := getLVMVolumeGroup(ctx, cl, metrics, "", llv.Spec.LvmVolumeGroupName)
+		// 	if err != nil {
+		// 		log.Error(err, fmt.Sprintf("[DeleteFunc] unable to get the LVMVolumeGroup, name: %q. Skip deletion of the LVMLogicalVolume %q", llv.Spec.LvmVolumeGroupName, llv.Name))
+		// 		err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get selected LVMVolumeGroup, err: %s", err.Error()))
+		// 		if err != nil {
+		// 			log.Error(err, "[DeleteFunc] unable to update LVMLogicalVolume Phase")
+		// 		}
+		// 		return
+		// 	}
 
-			if !belongsToNode(lvg, cfg.NodeName) {
-				log.Debug(fmt.Sprintf("[DeleteFunc] the LVMVolumeGroup %s does not belongs to the current node: %s. Reconciliation stopped", lvg.Name, cfg.NodeName))
-				return
-			}
-			log.Debug(fmt.Sprintf("[DeleteFunc] the LVMVolumeGroup %s belongs to the current node: %s", lvg.Name, cfg.NodeName))
+		// 	if !belongsToNode(lvg, cfg.NodeName) {
+		// 		log.Debug(fmt.Sprintf("[DeleteFunc] the LVMVolumeGroup %s does not belongs to the current node: %s. Skip deletion of the LVMLogicalVolume %q", lvg.Name, cfg.NodeName))
+		// 		return
+		// 	}
+		// 	log.Debug(fmt.Sprintf("[DeleteFunc] the LVMVolumeGroup %s belongs to the current node: %s", lvg.Name, cfg.NodeName))
 
-			err = deleteLVIfExists(log, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[DeleteFunc] an error occured while trying to delete LV for LVMLogicalVolume %s", llv.Name))
-			}
+		// 	err = deleteLVIfExists(log, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+		// 	if err != nil {
+		// 		log.Error(err, fmt.Sprintf("[DeleteFunc] an error occured while trying to delete LV for LVMLogicalVolume %s", llv.Name))
+		// 	}
 
-			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] DeleteFunc ends reconciliation of LLV: %s", llv.Name))
-		},
+		// 	log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] DeleteFunc ends reconciliation of LLV: %s", llv.Name))
+		// },
 	})
 
 	if err != nil {
