@@ -189,7 +189,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				Wwn:                   "testWWN",
 				Serial:                "testSERIAL",
 				Path:                  "testPATH",
-				Size:                  "0",
+				Size:                  resource.MustParse("0"),
 				Model:                 "testMODEL",
 				Rota:                  false,
 				HotPlug:               false,

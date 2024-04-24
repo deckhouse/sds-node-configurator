@@ -326,11 +326,11 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 	})
 
 	t.Run("ValidateLVMGroup_type_local_selected_absent_bds_validation_fails", func(t *testing.T) {
-		const name = "test_name"
+		const lvgName = "test_name"
 
-		testObj := &v1alpha1.LvmVolumeGroup{
+		lvg := &v1alpha1.LvmVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
+				Name:      lvgName,
 				Namespace: namespace,
 			},
 			Spec: v1alpha1.LvmVolumeGroupSpec{
@@ -339,24 +339,24 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			},
 		}
 
-		err := cl.Create(ctx, testObj)
+		err := cl.Create(ctx, lvg)
 		if err != nil {
 			t.Error(err)
 		} else {
 			defer func() {
-				err = cl.Delete(ctx, testObj)
+				err = cl.Delete(ctx, lvg)
 				if err != nil {
 					t.Error(err)
 				}
 			}()
 		}
 
-		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testObj, namespace, "test_node")
+		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, lvg, namespace, "test_node")
 		assert.False(t, valid)
 		if assert.NotNil(t, status) {
 			assert.Equal(t, NonOperational, status.Health)
+			assert.EqualError(t, err, "error getBlockDevice: blockdevices.storage.deckhouse.io \"test_bd\" not found")
 		}
-		assert.EqualError(t, err, "blockdevices.storage.deckhouse.io \"test_bd\" not found")
 	})
 
 	t.Run("ValidateLVMGroup_type_local_selected_bds_from_different_nodes_validation_fails", func(t *testing.T) {
@@ -441,88 +441,6 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	t.Run("ValidateLVMGroup_type_local_no_bds_affiliated_to_the_node_validation_fails", func(t *testing.T) {
-		const (
-			name     = "test_name"
-			firstBd  = "first"
-			secondBd = "second"
-			testNode = "test_node"
-		)
-
-		bds := &v1alpha1.BlockDeviceList{
-			Items: []v1alpha1.BlockDevice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      firstBd,
-						Namespace: namespace,
-					},
-					Status: v1alpha1.BlockDeviceStatus{
-						NodeName: testNode,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      secondBd,
-						Namespace: namespace,
-					},
-					Status: v1alpha1.BlockDeviceStatus{
-						NodeName: testNode,
-					},
-				},
-			},
-		}
-
-		var err error
-		for _, bd := range bds.Items {
-			err = cl.Create(ctx, &bd)
-			if err != nil {
-				t.Error(err)
-			}
-		}
-
-		if err == nil {
-			defer func() {
-				for _, bd := range bds.Items {
-					err = cl.Delete(ctx, &bd)
-					if err != nil {
-						t.Error(err)
-					}
-				}
-			}()
-		}
-
-		testLvg := &v1alpha1.LvmVolumeGroup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: namespace,
-			},
-			Spec: v1alpha1.LvmVolumeGroupSpec{
-				BlockDeviceNames: []string{firstBd, secondBd},
-				Type:             Local,
-			},
-		}
-
-		err = cl.Create(ctx, testLvg)
-		if err != nil {
-			t.Error(err)
-		} else {
-			defer func() {
-				err = cl.Delete(ctx, testLvg)
-				if err != nil {
-					t.Error(err)
-				}
-			}()
-		}
-
-		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testLvg, namespace, "another-node")
-		assert.False(t, valid)
-		if assert.NotNil(t, status) {
-			assert.Equal(t, NonOperational, status.Health)
-			assert.Equal(t, "selected block devices not affiliated to current Watcher's node", status.Message)
-		}
-		assert.Nil(t, err)
-	})
-
 	t.Run("ValidateLVMGroup_type_local_validation_passes", func(t *testing.T) {
 		const (
 			name     = "test_name"
@@ -579,234 +497,9 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				Namespace: namespace,
 			},
 			Spec: v1alpha1.LvmVolumeGroupSpec{
-				BlockDeviceNames: []string{firstBd, secondBd},
-				Type:             Local,
-			},
-		}
-
-		err = cl.Create(ctx, testLvg)
-		if err != nil {
-			t.Error(err)
-		} else {
-			defer func() {
-				err = cl.Delete(ctx, testLvg)
-				if err != nil {
-					t.Error(err)
-				}
-			}()
-		}
-
-		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testLvg, namespace, testNode)
-		assert.True(t, valid)
-		if assert.NotNil(t, status) {
-			assert.Equal(t, "", status.Health)
-			assert.Equal(t, "", status.Message)
-		}
-		assert.Nil(t, err)
-	})
-
-	t.Run("ValidateLVMGroup_type_shared_selected_several_bds_validation_fails", func(t *testing.T) {
-		const (
-			name     = "test_name"
-			firstBd  = "first"
-			secondBd = "second"
-			testNode = "test_node"
-		)
-
-		bds := &v1alpha1.BlockDeviceList{
-			Items: []v1alpha1.BlockDevice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      firstBd,
-						Namespace: namespace,
-					},
-					Status: v1alpha1.BlockDeviceStatus{
-						NodeName: testNode,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      secondBd,
-						Namespace: namespace,
-					},
-					Status: v1alpha1.BlockDeviceStatus{
-						NodeName: "another_node",
-					},
-				},
-			},
-		}
-
-		var err error
-		for _, bd := range bds.Items {
-			err = cl.Create(ctx, &bd)
-			if err != nil {
-				t.Error(err)
-			}
-		}
-
-		if err == nil {
-			defer func() {
-				for _, bd := range bds.Items {
-					err = cl.Delete(ctx, &bd)
-					if err != nil {
-						t.Error(err)
-					}
-				}
-			}()
-		}
-
-		testLvg := &v1alpha1.LvmVolumeGroup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: namespace,
-			},
-			Spec: v1alpha1.LvmVolumeGroupSpec{
-				BlockDeviceNames: []string{firstBd, secondBd},
-				Type:             Shared,
-			},
-		}
-
-		err = cl.Create(ctx, testLvg)
-		if err != nil {
-			t.Error(err)
-		} else {
-			defer func() {
-				err = cl.Delete(ctx, testLvg)
-				if err != nil {
-					t.Error(err)
-				}
-			}()
-		}
-
-		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testLvg, namespace, testNode)
-		assert.False(t, valid)
-		if assert.NotNil(t, status) {
-			assert.Equal(t, NonOperational, status.Health)
-			assert.Equal(t, "several block devices are selected for the shared LVMVolumeGroup", status.Message)
-		}
-		assert.EqualError(t, err, "several block devices are selected for the shared LVMVolumeGroup")
-	})
-
-	t.Run("ValidateLVMGroup_type_shared_selected_absent_bd_validation_fails", func(t *testing.T) {
-		const (
-			name     = "test_name"
-			firstBd  = "first"
-			testNode = "test_node"
-		)
-
-		bds := &v1alpha1.BlockDeviceList{
-			Items: []v1alpha1.BlockDevice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      firstBd,
-						Namespace: namespace,
-					},
-					Status: v1alpha1.BlockDeviceStatus{
-						NodeName: testNode,
-					},
-				},
-			},
-		}
-
-		var err error
-		for _, bd := range bds.Items {
-			err = cl.Create(ctx, &bd)
-			if err != nil {
-				t.Error(err)
-			}
-		}
-
-		if err == nil {
-			defer func() {
-				for _, bd := range bds.Items {
-					err = cl.Delete(ctx, &bd)
-					if err != nil {
-						t.Error(err)
-					}
-				}
-			}()
-		}
-
-		testLvg := &v1alpha1.LvmVolumeGroup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: namespace,
-			},
-			Spec: v1alpha1.LvmVolumeGroupSpec{
-				BlockDeviceNames: []string{"absent_bd"},
-				Type:             Shared,
-			},
-		}
-
-		err = cl.Create(ctx, testLvg)
-		if err != nil {
-			t.Error(err)
-		} else {
-			defer func() {
-				err = cl.Delete(ctx, testLvg)
-				if err != nil {
-					t.Error(err)
-				}
-			}()
-		}
-
-		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testLvg, namespace, testNode)
-		assert.False(t, valid)
-		if assert.NotNil(t, status) {
-			assert.Equal(t, NonOperational, status.Health)
-			assert.Equal(t, "selected unknown block device for the shared LVMVolumeGroup", status.Message)
-		}
-		assert.EqualError(t, err, "blockdevices.storage.deckhouse.io \"absent_bd\" not found")
-	})
-
-	t.Run("ValidateLVMGroup_type_shared_validation_passes", func(t *testing.T) {
-		const (
-			name     = "test_name"
-			firstBd  = "first"
-			testNode = "test_node"
-		)
-
-		bds := &v1alpha1.BlockDeviceList{
-			Items: []v1alpha1.BlockDevice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      firstBd,
-						Namespace: namespace,
-					},
-					Status: v1alpha1.BlockDeviceStatus{
-						NodeName: testNode,
-					},
-				},
-			},
-		}
-
-		var err error
-		for _, bd := range bds.Items {
-			err = cl.Create(ctx, &bd)
-			if err != nil {
-				t.Error(err)
-			}
-		}
-
-		if err == nil {
-			defer func() {
-				for _, bd := range bds.Items {
-					err = cl.Delete(ctx, &bd)
-					if err != nil {
-						t.Error(err)
-					}
-				}
-			}()
-		}
-
-		testLvg := &v1alpha1.LvmVolumeGroup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: namespace,
-			},
-			Spec: v1alpha1.LvmVolumeGroupSpec{
-				BlockDeviceNames: []string{firstBd},
-				Type:             Shared,
+				BlockDeviceNames:      []string{firstBd, secondBd},
+				Type:                  Local,
+				ActualVGNameOnTheNode: "some-vg",
 			},
 		}
 

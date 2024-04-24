@@ -281,7 +281,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "block_device1"},
 				Status: v1alpha1.BlockDeviceStatus{
 					Path:                  "test_pv1",
-					Size:                  "10G",
+					Size:                  resource.MustParse("10G"),
 					VGUuid:                vgUuid,
 					ActualVGNameOnTheNode: vgName,
 				},
@@ -290,7 +290,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "block_device2"},
 				Status: v1alpha1.BlockDeviceStatus{
 					Path:                  "test_pv2",
-					Size:                  "1G",
+					Size:                  resource.MustParse("1G"),
 					VGUuid:                vgUuid,
 					ActualVGNameOnTheNode: vgName,
 				},
@@ -301,15 +301,15 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			nodeName: {
 				{
 					Path:        "test_pv1",
-					PVSize:      size10G,
-					DevSize:     size10G,
+					PVSize:      *resource.NewQuantity(size10G.Value(), resource.BinarySI),
+					DevSize:     *resource.NewQuantity(size10G.Value(), resource.BinarySI),
 					PVUuid:      "pv_uuid1",
 					BlockDevice: "block_device1",
 				},
 				{
 					Path:        "test_pv2",
-					PVSize:      size1G,
-					DevSize:     size1G,
+					PVSize:      *resource.NewQuantity(size1G.Value(), resource.BinarySI),
+					DevSize:     *resource.NewQuantity(size1G.Value(), resource.BinarySI),
 					PVUuid:      "pv_uuid2",
 					BlockDevice: "block_device2",
 				},
@@ -414,10 +414,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			LVMVGName             = "test_lvm"
 			ActualVGNameOnTheNode = "test-vg"
 			Type                  = "local"
-			AllocatedSize         = "9765625Ki"
 			Health                = internal.LVMVGHealthOperational
 			Message               = "No problems detected"
-			VGSize                = "9765625Ki"
 			VGUuid                = "test_uuid"
 		)
 
@@ -438,7 +436,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				{
 					Name:       "first_status_pool",
 					ActualSize: size10G,
-					UsedSize:   "4G",
+					UsedSize:   resource.MustParse("4G"),
 				},
 			}
 			nodes = map[string][]internal.LVMVGDevice{
@@ -486,12 +484,12 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Type:                  Type,
 			},
 			Status: v1alpha1.LvmVolumeGroupStatus{
-				AllocatedSize: AllocatedSize,
+				AllocatedSize: size10G,
 				Health:        Health,
 				Message:       Message,
 				Nodes:         convertLVMVGNodes(nodes),
 				ThinPools:     convertStatusThinPools(statusThinPools),
-				VGSize:        VGSize,
+				VGSize:        size10G,
 				VGUuid:        VGUuid,
 			},
 		}
@@ -507,10 +505,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			LVMVGName             = "test_lvm"
 			ActualVGNameOnTheNode = "test-vg"
 			Type                  = "local"
-			AllocatedSize         = "9765625Ki"
 			Health                = internal.LVMVGHealthOperational
 			Message               = "No problems detected"
-			VGSize                = "9765625Ki"
 			VGUuid                = "test_uuid"
 		)
 
@@ -531,7 +527,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				{
 					Name:       "first_status_pool",
 					ActualSize: size10G,
-					UsedSize:   "4G",
+					UsedSize:   resource.MustParse("4G"),
 				},
 			}
 			nodes = map[string][]internal.LVMVGDevice{
@@ -580,12 +576,12 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 					Type:                  Type,
 				},
 				Status: v1alpha1.LvmVolumeGroupStatus{
-					AllocatedSize: AllocatedSize,
+					AllocatedSize: size10G,
 					Health:        Health,
 					Message:       Message,
 					Nodes:         convertLVMVGNodes(nodes),
 					ThinPools:     convertStatusThinPools(statusThinPools),
-					VGSize:        VGSize,
+					VGSize:        size10G,
 					VGUuid:        VGUuid,
 				},
 			},
@@ -627,7 +623,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				{
 					Name:       "first_status_pool",
 					ActualSize: size10G,
-					UsedSize:   "4G",
+					UsedSize:   resource.MustParse("4G"),
 				},
 			}
 			nodes = map[string][]internal.LVMVGDevice{
@@ -678,10 +674,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			LVMVGName             = "test_lvm"
 			ActualVGNameOnTheNode = "test-vg"
 			Type                  = "local"
-			AllocatedSize         = "9765625Ki"
 			Health                = internal.LVMVGHealthOperational
 			Message               = "No problems detected"
-			VGSize                = "9765625Ki"
 			VGUuid                = "test_uuid"
 		)
 
@@ -702,7 +696,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				{
 					Name:       "first_status_pool",
 					ActualSize: size10G,
-					UsedSize:   "4G",
+					UsedSize:   resource.MustParse("4G"),
 				},
 			}
 			oldNodes = map[string][]internal.LVMVGDevice{
@@ -783,12 +777,12 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Type:                  Type,
 			},
 			Status: v1alpha1.LvmVolumeGroupStatus{
-				AllocatedSize: AllocatedSize,
+				AllocatedSize: size10G,
 				Health:        Health,
 				Message:       Message,
 				Nodes:         convertLVMVGNodes(newNodes),
 				ThinPools:     convertStatusThinPools(StatusThinPools),
-				VGSize:        VGSize,
+				VGSize:        size10G,
 				VGUuid:        VGUuid,
 			},
 		}
@@ -868,15 +862,15 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 
 	t.Run("filterResourcesByNode_returns_current_node_resources", func(t *testing.T) {
 		var (
-			ctx           = context.Background()
-			cl            = NewFakeClient()
-			testLogger, _ = logger.NewLogger(logger.InfoLevel)
-			currentNode   = "test_node"
-			firstBDName   = "first_device"
-			secondBDName  = "second_device"
-			firstLVName   = "first_lv"
-			secondLVName  = "second_lv"
-			blockDevices  = map[string]v1alpha1.BlockDevice{
+			ctx          = context.Background()
+			cl           = NewFakeClient()
+			testLogger   = logger.Logger{}
+			currentNode  = "test_node"
+			firstBDName  = "first_device"
+			secondBDName = "second_device"
+			firstLVName  = "first_lv"
+			secondLVName = "second_lv"
+			blockDevices = map[string]v1alpha1.BlockDevice{
 				firstBDName: {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: firstBDName,
@@ -923,7 +917,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			},
 		}
 
-		actual := filterResourcesByNode(ctx, cl, *testLogger, lvs, blockDevices, currentNode)
+		actual := filterResourcesByNode(ctx, cl, testLogger, lvs, blockDevices, currentNode)
 
 		assert.Equal(t, expected, actual)
 	})
@@ -1007,12 +1001,12 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 					{
 						Name:       "first",
 						ActualSize: size10G,
-						UsedSize:   "2G",
+						UsedSize:   resource.MustParse("2G"),
 					},
 					{
 						Name:       "second",
 						ActualSize: size10G,
-						UsedSize:   "2G",
+						UsedSize:   resource.MustParse("2G"),
 					},
 				}
 				nodes = map[string][]internal.LVMVGDevice{
@@ -1046,12 +1040,12 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 					Type:             specType,
 				},
 				Status: v1alpha1.LvmVolumeGroupStatus{
-					AllocatedSize: "9765625Ki",
+					AllocatedSize: resource.MustParse("9765625Ki"),
 					Health:        health,
 					Message:       message,
 					Nodes:         convertLVMVGNodes(nodes),
 					ThinPools:     convertStatusThinPools(statusThinPools),
-					VGSize:        "9765625Ki",
+					VGSize:        resource.MustParse("9765625Ki"),
 				},
 			}
 
@@ -1076,22 +1070,22 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 					"second": size1G,
 				}
 				specType        = "type"
-				allocatedSize   = "10G"
+				allocatedSize   = resource.MustParse("10G")
 				health          = internal.LVMVGHealthOperational
 				message         = "all good"
 				statusThinPools = []internal.LVMVGStatusThinPool{
 					{
 						Name:       "first",
 						ActualSize: size10G,
-						UsedSize:   "2G",
+						UsedSize:   resource.MustParse("2G"),
 					},
 					{
 						Name:       "second",
 						ActualSize: size10G,
-						UsedSize:   "2G",
+						UsedSize:   resource.MustParse("2G"),
 					},
 				}
-				vgSize = "10G"
+				vgSize = resource.MustParse("10G")
 				nodes  = map[string][]internal.LVMVGDevice{
 					"test_node": {
 						{

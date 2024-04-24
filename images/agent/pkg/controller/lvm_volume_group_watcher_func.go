@@ -489,26 +489,15 @@ func UpdateLVMVolumeGroupTagsName(log logger.Logger, metrics monitoring.Metrics,
 }
 
 func ResizeThinPool(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, specThinPool v1alpha1.SpecThinPool, statusThinPool v1alpha1.StatusThinPool, nodeName string, resizeDelta resource.Quantity) (bool, error) {
-	volumeGroupSize, err := resource.ParseQuantity(lvg.Status.VGSize)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[ResizeThinPool] error ParseQuantity, resource name: %s", lvg.Name))
-		return true, err
-	}
-
-	volumeGroupAllocatedSize, err := resource.ParseQuantity(lvg.Status.VGSize)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[ResizeThinPool] error ParseQuantity, resource name: %s", lvg.Name))
-		return true, err
-	}
-
-	volumeGroupFreeSpaceBytes := volumeGroupSize.Value() - volumeGroupAllocatedSize.Value()
+	volumeGroupFreeSpaceBytes := lvg.Status.VGSize.Value() - lvg.Status.AllocatedSize.Value()
 	addSizeBytes := specThinPool.Size.Value() - statusThinPool.ActualSize.Value()
 
-	log.Debug(fmt.Sprintf("[ResizeThinPool] volumeGroupSize = %s", volumeGroupSize.String()))
-	log.Debug(fmt.Sprintf("[ResizeThinPool] volumeGroupAllocatedSize = %s", volumeGroupAllocatedSize.String()))
+	log.Debug(fmt.Sprintf("[ResizeThinPool] volumeGroupSize = %s", lvg.Status.VGSize.String()))
+	log.Debug(fmt.Sprintf("[ResizeThinPool] volumeGroupAllocatedSize = %s", lvg.Status.AllocatedSize.String()))
 	log.Debug(fmt.Sprintf("[ResizeThinPool] volumeGroupFreeSpaceBytes = %d", volumeGroupFreeSpaceBytes))
 	log.Debug(fmt.Sprintf("[ResizeThinPool] addSizeBytes = %d", addSizeBytes))
 
+	var err error
 	if addSizeBytes <= 0 {
 		err = fmt.Errorf("thin pool name: %s; add size value <= 0, specThinPool.Size: %s, statusThinPool.ActualSize: %s", specThinPool.Name, specThinPool.Size.String(), statusThinPool.ActualSize.String())
 		log.Error(err, "[ResizeThinPool]: ")
