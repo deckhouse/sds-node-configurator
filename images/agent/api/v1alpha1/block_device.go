@@ -17,7 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"k8s.io/api/policy/v1beta1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -39,7 +38,7 @@ type BlockDeviceList struct {
 
 type BlockDeviceStatus struct {
 	Type                  string            `json:"type"`
-	FsType                v1beta1.FSType    `json:"fsType"`
+	FsType                string            `json:"fsType"`
 	NodeName              string            `json:"nodeName"`
 	Consumable            bool              `json:"consumable"`
 	PVUuid                string            `json:"pvUUID"`

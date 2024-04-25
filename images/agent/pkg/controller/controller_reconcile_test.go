@@ -18,14 +18,14 @@ package controller_test
 
 import (
 	"context"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"sds-node-configurator/internal"
 	"sds-node-configurator/pkg/controller"
 	"sds-node-configurator/pkg/monitoring"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/api/policy/v1beta1"
 )
 
 var _ = Describe("Storage Controller", func() {
@@ -75,7 +75,7 @@ var _ = Describe("Storage Controller", func() {
 		Expect(blockDevice.Status.Rota).To(Equal(candidate.Rota))
 		Expect(blockDevice.Status.Model).To(Equal(candidate.Model))
 		Expect(blockDevice.Status.Type).To(Equal(candidate.Type))
-		Expect(blockDevice.Status.FsType).To(Equal(v1beta1.FSType(candidate.FSType)))
+		Expect(blockDevice.Status.FsType).To(Equal(candidate.FSType))
 		Expect(blockDevice.Status.MachineID).To(Equal(candidate.MachineId))
 	})
 
