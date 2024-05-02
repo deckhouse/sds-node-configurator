@@ -90,6 +90,9 @@ spec:
 {{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
             value: "4"
 {{- end }}
+        ports:
+          - containerPort: 8080
+            name: http
         volumeMounts:
         - mountPath: /sys/
           name: host-sys-dir
