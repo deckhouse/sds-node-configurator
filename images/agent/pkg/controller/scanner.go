@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"github.com/pilebones/go-udev/netlink"
@@ -13,7 +14,7 @@ import (
 	"time"
 )
 
-func RunScanner(log logger.Logger, cfg config.Options, sdsCache cache.Cache) error {
+func RunScanner(log logger.Logger, cfg config.Options, sdsCache *cache.Cache) error {
 	log.Info("[RunScanner] starts the work")
 
 	t := throttler.New(cfg.ThrottleInterval * time.Second)
@@ -85,74 +86,74 @@ func RunScanner(log logger.Logger, cfg config.Options, sdsCache cache.Cache) err
 	}
 }
 
-func fillTheCache(log logger.Logger, cache cache.Cache) error {
-	devices, err := scanDevices(log)
+func fillTheCache(log logger.Logger, cache *cache.Cache) error {
+	devices, devErr, err := scanDevices(log)
 	if err != nil {
 		return err
 	}
 
-	pvs, err := scanPVs(log)
+	pvs, pvsErr, err := scanPVs(log)
 	if err != nil {
 		return err
 	}
 
-	vgs, err := scanVGs(log)
+	vgs, vgsErr, err := scanVGs(log)
 	if err != nil {
 		return err
 	}
 
-	lvs, err := scanLVs(log)
+	lvs, lvsErr, err := scanLVs(log)
 	if err != nil {
 		return err
 	}
 
 	log.Debug("[fillTheCache] successfully scanned entities. Starts to fill the cache")
-	cache.StoreDevices(devices)
-	cache.StorePVs(pvs)
-	cache.StoreVGs(vgs)
-	cache.StoreLVs(lvs)
+	cache.StoreDevices(devices, devErr)
+	cache.StorePVs(pvs, pvsErr)
+	cache.StoreVGs(vgs, vgsErr)
+	cache.StoreLVs(lvs, lvsErr)
 	log.Debug("[fillTheCache] successfully filled the cache")
 	cache.PrintTheCache(log)
 
 	return nil
 }
 
-func scanDevices(log logger.Logger) ([]internal.Device, error) {
-	devices, cmdStr, err := utils.GetBlockDevices()
+func scanDevices(log logger.Logger) ([]internal.Device, bytes.Buffer, error) {
+	devices, cmdStr, stdErr, err := utils.GetBlockDevices()
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ScanDevices] unable to scan the devices, cmd: %s", cmdStr))
-		return nil, err
+		return nil, stdErr, err
 	}
 
-	return devices, nil
+	return devices, stdErr, nil
 }
 
-func scanPVs(log logger.Logger) ([]internal.PVData, error) {
-	pvs, cmdStr, _, err := utils.GetAllPVs()
+func scanPVs(log logger.Logger) ([]internal.PVData, bytes.Buffer, error) {
+	pvs, cmdStr, stdErr, err := utils.GetAllPVs()
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ScanPVs] unable to scan the PVs, cmd: %s", cmdStr))
-		return nil, err
+		return nil, stdErr, err
 	}
 
-	return pvs, nil
+	return pvs, stdErr, nil
 }
 
-func scanVGs(log logger.Logger) ([]internal.VGData, error) {
-	vgs, cmdStr, _, err := utils.GetAllVGs()
+func scanVGs(log logger.Logger) ([]internal.VGData, bytes.Buffer, error) {
+	vgs, cmdStr, stdErr, err := utils.GetAllVGs()
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ScanVGs] unable to scan the VGs, cmd: %s", cmdStr))
-		return nil, err
+		return nil, stdErr, err
 	}
 
-	return vgs, nil
+	return vgs, stdErr, nil
 }
 
-func scanLVs(log logger.Logger) ([]internal.LVData, error) {
-	lvs, cmdStr, _, err := utils.GetAllLVs()
+func scanLVs(log logger.Logger) ([]internal.LVData, bytes.Buffer, error) {
+	lvs, cmdStr, stdErr, err := utils.GetAllLVs()
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ScanLVs] unable to scan LVs, cmd: %s", cmdStr))
-		return nil, err
+		return nil, stdErr, err
 	}
 
-	return lvs, nil
+	return lvs, stdErr, nil
 }
