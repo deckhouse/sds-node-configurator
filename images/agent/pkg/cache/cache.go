@@ -13,8 +13,8 @@ type Cache struct {
 	lvs     []internal.LVData
 }
 
-func New() *Cache {
-	return &Cache{}
+func New() Cache {
+	return Cache{}
 }
 
 func (c *Cache) StoreDevices(devices []internal.Device) {

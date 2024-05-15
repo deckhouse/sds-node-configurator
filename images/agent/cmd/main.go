@@ -113,13 +113,13 @@ func main() {
 	sdsCache := cache.New()
 
 	go func() {
-		if err = controller.RunScanner(*log, *cfgParams, sdsCache); err != nil {
+		if err = controller.RunScanner(*log, sdsCache); err != nil {
 			log.Error(err, "[main] unable to run scanner")
 			os.Exit(1)
 		}
 	}()
 
-	if _, err = controller.RunBlockDeviceController(ctx, mgr, *cfgParams, *log, metrics, sdsCache); err != nil {
+	if _, err = controller.RunBlockDeviceController(ctx, mgr, *cfgParams, *log, metrics); err != nil {
 		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
 		os.Exit(1)
 	}
