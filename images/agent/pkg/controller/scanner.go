@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pilebones/go-udev/netlink"
-	"sds-node-configurator/config"
 	"sds-node-configurator/internal"
 	"sds-node-configurator/pkg/cache"
 	"sds-node-configurator/pkg/logger"
@@ -13,10 +12,10 @@ import (
 	"time"
 )
 
-func RunScanner(log logger.Logger, cfg config.Options, sdsCache cache.Cache) error {
+func RunScanner(log logger.Logger, sdsCache cache.Cache) error {
 	log.Info("[RunScanner] starts the work")
 
-	t := throttler.New(cfg.ThrottleInterval * time.Second)
+	t := throttler.New(2 * time.Second)
 
 	conn := new(netlink.UEventConn)
 	if err := conn.Connect(netlink.UdevEvent); err != nil {
