@@ -18,11 +18,13 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/config"
 	"sds-node-configurator/internal"
+	"sds-node-configurator/pkg/cache"
 	"sds-node-configurator/pkg/logger"
 	"sds-node-configurator/pkg/monitoring"
 	"sds-node-configurator/pkg/utils"
@@ -84,6 +86,10 @@ func RunLVMVolumeGroupDiscoverController(
 				continue
 			}
 
+			if len(currentLVMVGs) == 0 {
+				log.Debug("[RunLVMVolumeGroupDiscoverController] no current LVMVolumeGroups found")
+			}
+
 			blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
 			if err != nil {
 				log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to GetAPIBlockDevices")
@@ -96,12 +102,7 @@ func RunLVMVolumeGroupDiscoverController(
 			}
 
 			if len(blockDevices) == 0 {
-				log.Error(fmt.Errorf("no block devices found"), "[RunLVMVolumeGroupDiscoverController] unable to get block devices")
-				for _, lvg := range currentLVMVGs {
-					if err = turnLVMVGHealthToNonOperational(ctx, cl, lvg, fmt.Errorf("no block devices found")); err != nil {
-						log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvg.Name))
-					}
-				}
+				log.Info("[RunLVMVolumeGroupDiscoverController] no BlockDevices were found")
 				continue
 			}
 
@@ -324,22 +325,10 @@ func DeleteLVMVolumeGroup(ctx context.Context, kc kclient.Client, metrics monito
 	return nil
 }
 
-func GetLVMVolumeGroupCandidates(log logger.Logger, metrics monitoring.Metrics, bds map[string]v1alpha1.BlockDevice, currentNode string) ([]internal.LVMVolumeGroupCandidate, error) {
+func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, metrics monitoring.Metrics, bds map[string]v1alpha1.BlockDevice, currentNode string) ([]internal.LVMVolumeGroupCandidate, error) {
 	var candidates []internal.LVMVolumeGroupCandidate
 
-	start := time.Now()
-	vgs, cmdStr, vgErrs, err := utils.GetAllVGs()
-	metrics.UtilsCommandsDuration(LVMVolumeGroupDiscoverCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "vgs").Inc()
-	log.Debug(fmt.Sprintf("[GetLVMVolumeGroupCandidates] exec cmd: %s", cmdStr))
-
-	// If we can't run vgs command at all, that means we will not have important information, so we break.
-	if err != nil {
-		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupDiscoverCtrlName, "vgs").Inc()
-		log.Error(err, "[GetLVMVolumeGroupCandidates] unable to GetAllVGs")
-		return nil, err
-	}
-
+	vgs := sdsCache.GetVGs()
 	vgWithTag := filterVGByTag(vgs, internal.LVMTags)
 
 	// If there is no VG with our tag, then there is no any candidate.
@@ -353,16 +342,10 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, metrics monitoring.Metrics, 
 		vgIssues = sortVGIssuesByVG(log, vgWithTag)
 	}
 
-	start = time.Now()
-	pvs, cmdStr, pvErrs, err := utils.GetAllPVs()
-	metrics.UtilsCommandsDuration(LVMVolumeGroupDiscoverCtrlName, "pvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "pvs").Inc()
-	log.Debug(fmt.Sprintf("[GetLVMVolumeGroupCandidates] exec cmd: %s", cmdStr))
-
-	// If we can't run pvs command at all, that means we will not have important information, so we break.
-	if err != nil {
-		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupDiscoverCtrlName, "pvs").Inc()
-		log.Error(err, "[GetLVMVolumeGroupCandidates] unable to GetAllPVs")
+	pvs := sdsCache.GetPVs()
+	if len(pvs) == 0 {
+		err := errors.New("no PV found")
+		log.Error(err, "[GetLVMVolumeGroupCandidates] no PV was found, but VG with tags are not empty")
 		return nil, err
 	}
 
@@ -372,7 +355,6 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, metrics monitoring.Metrics, 
 		pvIssues = sortPVIssuesByVG(log, pvs)
 	}
 
-	start = time.Now()
 	lvs, cmdStr, lvErrs, err := utils.GetAllLVs()
 	metrics.UtilsCommandsDuration(LVMVolumeGroupDiscoverCtrlName, "lvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "lvs").Inc()
