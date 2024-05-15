@@ -51,7 +51,6 @@ func RunLVMVolumeGroupDiscoverController(
 	cfg config.Options,
 	log logger.Logger,
 	metrics monitoring.Metrics,
-	sdsCache *cache.Cache,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
 	cache := mgr.GetCache()
@@ -109,7 +108,7 @@ func RunLVMVolumeGroupDiscoverController(
 
 			filteredResources := filterResourcesByNode(ctx, cl, log, currentLVMVGs, blockDevices, cfg.NodeName)
 
-			candidates, err := GetLVMVolumeGroupCandidates(log, sdsCache, blockDevices, cfg.NodeName)
+			candidates, err := GetLVMVolumeGroupCandidates(log, metrics, blockDevices, cfg.NodeName)
 			if err != nil {
 				log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to run GetLVMVolumeGroupCandidates")
 				for _, lvg := range filteredResources {
@@ -127,6 +126,7 @@ func RunLVMVolumeGroupDiscoverController(
 						log.Debug(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] no data to update for LvmVolumeGroup, name: "%s"`, lvmVolumeGroup.Name))
 						continue
 					}
+					//TODO: take lock
 
 					log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] run UpdateLVMVolumeGroupByCandidate, lvmVolumeGroup name: %s", lvmVolumeGroup.Name))
 					if err = UpdateLVMVolumeGroupByCandidate(ctx, cl, metrics, *lvmVolumeGroup, candidate); err != nil {
@@ -136,6 +136,7 @@ func RunLVMVolumeGroupDiscoverController(
 					}
 
 					log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] updated LvmVolumeGroup, name: "%s"`, lvmVolumeGroup.Name))
+					//TODO: release lock
 				} else {
 					lvm, err := CreateLVMVolumeGroup(ctx, log, metrics, cl, candidate)
 					if err != nil {
@@ -238,6 +239,8 @@ func hasLVMVolumeGroupDiff(log logger.Logger, res v1alpha1.LvmVolumeGroup, candi
 	log.Trace(fmt.Sprintf(`VGUuid, candidate: %s, res: %s`, candidate.VGUuid, res.Status.VGUuid))
 	log.Trace(fmt.Sprintf(`Nodes, candidate: %v, res: %v`, convertLVMVGNodes(candidate.Nodes), res.Status.Nodes))
 
+	//TODO: Uncomment this
+	//return strings.Join(candidate.Finalizers, "") == strings.Join(res.Finalizers, "") ||
 	return candidate.AllocatedSize.Value() != res.Status.AllocatedSize.Value() ||
 		candidate.Health != res.Status.Health ||
 		candidate.Message != res.Status.Message ||
@@ -322,10 +325,10 @@ func DeleteLVMVolumeGroup(ctx context.Context, kc kclient.Client, metrics monito
 	return nil
 }
 
-func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds map[string]v1alpha1.BlockDevice, currentNode string) ([]internal.LVMVolumeGroupCandidate, error) {
+func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, metrics monitoring.Metrics, bds map[string]v1alpha1.BlockDevice, currentNode string) ([]internal.LVMVolumeGroupCandidate, error) {
 	var candidates []internal.LVMVolumeGroupCandidate
 
-	vgs, vgErrs := sdsCache.GetVGs()
+	vgs := sdsCache.GetVGs()
 	vgWithTag := filterVGByTag(vgs, internal.LVMTags)
 
 	// If there is no VG with our tag, then there is no any candidate.
@@ -336,11 +339,10 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 	// If vgErrs is not empty, that means we have some problems on vgs, so we need to identify unhealthy vgs.
 	var vgIssues map[string]string
 	if vgErrs.Len() != 0 {
-		log.Warning("[GetLVMVolumeGroupCandidates] some errors have been occurred while executing vgs command")
 		vgIssues = sortVGIssuesByVG(log, vgWithTag)
 	}
 
-	pvs, pvErrs := sdsCache.GetPVs()
+	pvs := sdsCache.GetPVs()
 	if len(pvs) == 0 {
 		err := errors.New("no PV found")
 		log.Error(err, "[GetLVMVolumeGroupCandidates] no PV was found, but VG with tags are not empty")
@@ -350,11 +352,20 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 	// If pvErrs is not empty, that means we have some problems on vgs, so we need to identify unhealthy vgs.
 	var pvIssues map[string][]string
 	if pvErrs.Len() != 0 {
-		log.Warning("[GetLVMVolumeGroupCandidates] some errors have been occurred while executing pvs command")
 		pvIssues = sortPVIssuesByVG(log, pvs)
 	}
 
-	lvs, lvErrs := sdsCache.GetLVs()
+	lvs, cmdStr, lvErrs, err := utils.GetAllLVs()
+	metrics.UtilsCommandsDuration(LVMVolumeGroupDiscoverCtrlName, "lvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "lvs").Inc()
+	log.Debug(fmt.Sprintf("[GetLVMVolumeGroupCandidates] exec cmd: %s", cmdStr))
+
+	// As long as LVS data is used to fill ThinPool fields, that is optional, we won't break but log the error.
+	if err != nil {
+		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupDiscoverCtrlName, "lvs").Inc()
+		log.Error(err, "[GetLVMVolumeGroupCandidates] unable to GetAllLVs")
+	}
+
 	var thinPools []internal.LVData
 	if lvs != nil && len(lvs) > 0 {
 		// Filter LV to get only thin pools as we do not support thick for now.
@@ -364,7 +375,6 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 	// If lvErrs is not empty, that means we have some problems on vgs, so we need to identify unhealthy vgs.
 	var lvIssues map[string][]string
 	if lvErrs.Len() != 0 {
-		log.Warning("[GetLVMVolumeGroupCandidates] some errors have been occurred while executing lvs command")
 		lvIssues = sortLVIssuesByVG(log, thinPools)
 	}
 
@@ -374,10 +384,14 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 	sortedThinPools := sortLVsByVG(thinPools, vgWithTag)
 
 	for _, vg := range vgWithTag {
+		if err != nil {
+			log.Error(err, "[GetLVMVolumeGroupCandidates] unable to count ParseInt vgSize, err: %w", err)
+		}
+
 		allocateSize := vg.VGSize
 		allocateSize.Sub(vg.VGFree)
 
-		health, message := checkVGHealth(sortedBDs, vgIssues, pvIssues, lvIssues, vg)
+		health, message := checkVGHealth(err, sortedBDs, vgIssues, pvIssues, lvIssues, vg)
 
 		candidate := internal.LVMVolumeGroupCandidate{
 			LVMVGName:             generateLVMVGName(),
@@ -401,8 +415,12 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 	return candidates, nil
 }
 
-func checkVGHealth(blockDevices map[string][]v1alpha1.BlockDevice, vgIssues map[string]string, pvIssues map[string][]string, lvIssues map[string][]string, vg internal.VGData) (health, message string) {
+func checkVGHealth(err error, blockDevices map[string][]v1alpha1.BlockDevice, vgIssues map[string]string, pvIssues map[string][]string, lvIssues map[string][]string, vg internal.VGData) (health, message string) {
 	issues := make([]string, 0, len(vgIssues)+len(pvIssues)+len(lvIssues)+1)
+
+	if err != nil {
+		issues = append(issues, err.Error())
+	}
 
 	if bds, exist := blockDevices[vg.VGName+vg.VGUuid]; !exist || len(bds) == 0 {
 		issues = append(issues, fmt.Sprintf("[ERROR] Unable to get block devices for VG, name: %s ; uuid: %s", vg.VGName, vg.VGUuid))
