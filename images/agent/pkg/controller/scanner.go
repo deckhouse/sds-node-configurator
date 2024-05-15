@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func RunScanner(log logger.Logger, cfg config.Options, sdsCache cache.Cache) error {
+func RunScanner(log logger.Logger, cfg config.Options, sdsCache *cache.Cache) error {
 	log.Info("[RunScanner] starts the work")
 
 	t := throttler.New(cfg.ThrottleInterval * time.Second)
@@ -85,7 +85,7 @@ func RunScanner(log logger.Logger, cfg config.Options, sdsCache cache.Cache) err
 	}
 }
 
-func fillTheCache(log logger.Logger, cache cache.Cache) error {
+func fillTheCache(log logger.Logger, cache *cache.Cache) error {
 	devices, err := scanDevices(log)
 	if err != nil {
 		return err
