@@ -23,15 +23,17 @@ import (
 	"os/exec"
 	"sds-node-configurator/internal"
 	"sds-node-configurator/pkg/logger"
+	"strconv"
 	"time"
 )
 
 const (
-	ScanInterval = "SCAN_INTERVAL"
-	NodeName     = "NODE_NAME"
-	LogLevel     = "LOG_LEVEL"
-	MetricsPort  = "METRICS_PORT"
-	MachineID    = "MACHINE_ID"
+	ScanInterval     = "SCAN_INTERVAL"
+	NodeName         = "NODE_NAME"
+	LogLevel         = "LOG_LEVEL"
+	MetricsPort      = "METRICS_PORT"
+	MachineID        = "MACHINE_ID"
+	ThrottleInterval = "THROTTLER_INTERVAL"
 )
 
 type Options struct {
@@ -42,6 +44,7 @@ type Options struct {
 	BlockDeviceScanInterval time.Duration
 	VolumeGroupScanInterval time.Duration
 	LLVRequeInterval        time.Duration
+	ThrottleInterval        time.Duration
 }
 
 func NewConfig() (*Options, error) {
@@ -70,9 +73,32 @@ func NewConfig() (*Options, error) {
 		opts.MetricsPort = ":8080"
 	}
 
-	opts.BlockDeviceScanInterval = 5
-	opts.VolumeGroupScanInterval = 5
-	opts.LLVRequeInterval = 5
+	scanInt := os.Getenv(ScanInterval)
+	if scanInt == "" {
+		opts.BlockDeviceScanInterval = 5
+		opts.VolumeGroupScanInterval = 5
+		opts.LLVRequeInterval = 5
+	} else {
+		interval, err := strconv.Atoi(scanInt)
+		if err != nil {
+			return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", ScanInterval, err)
+		}
+		opts.BlockDeviceScanInterval = time.Duration(interval)
+		opts.VolumeGroupScanInterval = time.Duration(interval)
+		opts.LLVRequeInterval = time.Duration(interval)
+	}
+
+	thrInt := os.Getenv(ThrottleInterval)
+	if thrInt == "" {
+		opts.ThrottleInterval = 3
+	} else {
+		interval, err := strconv.Atoi(scanInt)
+		if err != nil {
+			return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", ThrottleInterval, err)
+		}
+
+		opts.ThrottleInterval = time.Duration(interval)
+	}
 
 	return &opts, nil
 }
