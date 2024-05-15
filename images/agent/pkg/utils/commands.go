@@ -517,17 +517,20 @@ func filterStdErr(command string, stdErr bytes.Buffer) bytes.Buffer {
 	var filteredStdErr bytes.Buffer
 	stdErrScanner := bufio.NewScanner(&stdErr)
 	regexpPattern := `Regex version mismatch, expected: .+ actual: .+`
-	regex, err := regexp.Compile(regexpPattern)
+	regexpSocketError := `File descriptor .+ leaked on lvm.static invocation. Parent PID .+: /opt/deckhouse/sds/bin/nsenter`
+	regex1, err := regexp.Compile(regexpPattern)
+	regex2, err := regexp.Compile(regexpSocketError)
 	if err != nil {
 		return stdErr
 	}
 
 	for stdErrScanner.Scan() {
 		line := stdErrScanner.Text()
-		if !regex.MatchString(line) {
-			filteredStdErr.WriteString(line + "\n")
-		} else {
+		if regex1.MatchString(line) ||
+			regex2.MatchString(line) {
 			golog.Printf("WARNING: [filterStdErr] Line filtered from stderr due to matching exclusion pattern. Line: '%s'. Triggered by command: '%s'.", line, command)
+		} else {
+			filteredStdErr.WriteString(line + "\n")
 		}
 	}
 

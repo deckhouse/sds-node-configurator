@@ -30,6 +30,7 @@ const (
 	InfoLevel    Verbosity = "2"
 	DebugLevel   Verbosity = "3"
 	TraceLevel   Verbosity = "4"
+	CacheLevel   Verbosity = "5"
 )
 
 const (
@@ -37,6 +38,7 @@ const (
 	infoLvl
 	debugLvl
 	traceLvl
+	cacheLvl
 )
 
 type (
@@ -81,4 +83,8 @@ func (l Logger) Debug(message string, keysAndValues ...interface{}) {
 
 func (l Logger) Trace(message string, keysAndValues ...interface{}) {
 	l.log.V(traceLvl).Info(fmt.Sprintf("TRACE %s", message), keysAndValues...)
+}
+
+func (l Logger) Cache(message string, keysAndValues ...interface{}) {
+	l.log.V(cacheLvl).Info(fmt.Sprintf("CACHE %s", message), keysAndValues...)
 }
