@@ -29,7 +29,7 @@ import (
 	golog "log"
 )
 
-func GetBlockDevices() ([]internal.Device, string, error) {
+func GetBlockDevices() ([]internal.Device, string, bytes.Buffer, error) {
 	var outs bytes.Buffer
 	args := []string{"-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
 	cmd := exec.Command(internal.LSBLKCmd, args...)
@@ -40,15 +40,15 @@ func GetBlockDevices() ([]internal.Device, string, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		return nil, cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+		return nil, cmd.String(), stderr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
 	devices, err := UnmarshalDevices(outs.Bytes())
 	if err != nil {
-		return nil, cmd.String(), fmt.Errorf("unable to unmarshal devices, err: %w", err)
+		return nil, cmd.String(), stderr, fmt.Errorf("unable to unmarshal devices, err: %w", err)
 	}
 
-	return devices, cmd.String(), nil
+	return devices, cmd.String(), stderr, nil
 }
 
 func GetAllVGs() (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {

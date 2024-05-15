@@ -228,7 +228,7 @@ func isBlockDeviceDeprecated(blockDevice string, actualCandidates map[string]str
 
 func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, sdsCache *cache.Cache) []internal.BlockDeviceCandidate {
 	var candidates []internal.BlockDeviceCandidate
-	devices := sdsCache.GetDevices()
+	devices, _ := sdsCache.GetDevices()
 	if len(devices) == 0 {
 		log.Debug("[GetBlockDeviceCandidates] no devices found, returns empty candidates")
 		return candidates
@@ -245,7 +245,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, sdsCache *c
 		return candidates
 	}
 
-	pvs := sdsCache.GetPVs()
+	pvs, _ := sdsCache.GetPVs()
 	if len(pvs) == 0 {
 		log.Debug("[GetBlockDeviceCandidates] no PVs found")
 	}
@@ -274,7 +274,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, sdsCache *c
 		}
 
 		log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Get following candidate: %+v", candidate))
-		candidateName := CreateCandidateName(log, candidate, devices)
+		candidateName := CreateCandidateName(log, candidate)
 
 		if candidateName == "" {
 			log.Trace("[GetBlockDeviceCandidates] candidateName is empty. Skipping device")
@@ -430,10 +430,10 @@ func CheckTag(tags string) (bool, string) {
 	return true, ""
 }
 
-func CreateCandidateName(log logger.Logger, candidate internal.BlockDeviceCandidate, devices []internal.Device) string {
+func CreateCandidateName(log logger.Logger, candidate internal.BlockDeviceCandidate) string {
 	if len(candidate.Serial) == 0 {
 		log.Trace(fmt.Sprintf("[CreateCandidateName] Serial number is empty for device: %s", candidate.Path))
-		if candidate.Type == internal.PartType {
+		if candidate.Type == internal.TypePart {
 			if len(candidate.PartUUID) == 0 {
 				log.Warning(fmt.Sprintf("[CreateCandidateName] Type = part and cannot get PartUUID; skipping this device, path: %s", candidate.Path))
 				return ""
@@ -442,38 +442,25 @@ func CreateCandidateName(log logger.Logger, candidate internal.BlockDeviceCandid
 		} else {
 			log.Debug(fmt.Sprintf("[CreateCandidateName] Serial number is empty and device type is not part; trying to obtain serial number or its equivalent for device: %s, with type: %s", candidate.Path, candidate.Type))
 
-			switch candidate.Type {
-			case internal.MultiPathType:
-				log.Debug(fmt.Sprintf("[CreateCandidateName] device %s type = %s; get serial number from parent device.", candidate.Path, candidate.Type))
-				log.Trace(fmt.Sprintf("[CreateCandidateName] device: %+v. Device list: %+v", candidate, devices))
-				serial, err := getSerialForMultipathDevice(candidate, devices)
-				if err != nil {
-					log.Warning(fmt.Sprintf("[CreateCandidateName] Unable to obtain serial number or its equivalent; skipping device: %s. Error: %s", candidate.Path, err))
-					return ""
-				}
-				candidate.Serial = serial
-				log.Info(fmt.Sprintf("[CreateCandidateName] Successfully obtained serial number or its equivalent: %s for device: %s", candidate.Serial, candidate.Path))
-			default:
-				isMdRaid := false
-				matched, err := regexp.MatchString(`raid.*`, candidate.Type)
-				if err != nil {
-					log.Error(err, "[CreateCandidateName] failed to match regex - unable to determine if the device is an mdraid. Attempting to retrieve serial number directly from the device")
-				} else if matched {
-					log.Trace("[CreateCandidateName] device is mdraid")
-					isMdRaid = true
-				}
-				serial, err := readSerialBlockDevice(candidate.Path, isMdRaid)
-				if err != nil {
-					log.Warning(fmt.Sprintf("[CreateCandidateName] Unable to obtain serial number or its equivalent; skipping device: %s. Error: %s", candidate.Path, err))
-					return ""
-				}
-				log.Info(fmt.Sprintf("[CreateCandidateName] Successfully obtained serial number or its equivalent: %s for device: %s", serial, candidate.Path))
-				candidate.Serial = serial
+			isMdRaid := false
+			matched, err := regexp.MatchString(`raid.*`, candidate.Type)
+			if err != nil {
+				log.Error(err, "[CreateCandidateName] failed to match regex - unable to determine if the device is an mdraid. Attempting to retrieve serial number directly from the device")
+			} else if matched {
+				log.Debug(fmt.Sprintf("[CreateCandidateName] device %s is mdraid", candidate.Path))
+				isMdRaid = true
 			}
+			serial, err := readSerialBlockDevice(candidate.Path, isMdRaid)
+			if err != nil {
+				log.Warning(fmt.Sprintf("[CreateCandidateName] Unable to obtain serial number or its equivalent; skipping device: %s. Error: %s", candidate.Path, err))
+				return ""
+			}
+			log.Info(fmt.Sprintf("[CreateCandidateName] Successfully obtained serial number or its equivalent: %s for device: %s", serial, candidate.Path))
+			candidate.Serial = serial
+			log.Trace(fmt.Sprintf("[CreateCandidateName] Serial number is now: %s. Creating candidate name", candidate.Serial))
 		}
 	}
 
-	log.Trace(fmt.Sprintf("[CreateCandidateName] Serial number is now: %s. Creating candidate name", candidate.Serial))
 	return CreateUniqDeviceName(candidate)
 }
 
@@ -637,7 +624,6 @@ func ReTag(log logger.Logger, metrics monitoring.Metrics) error {
 				cmdStr, err = utils.LVChangeDelTag(lv, tag)
 				metrics.UtilsCommandsDuration(blockDeviceCtrlName, "lvchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
 				metrics.UtilsCommandsExecutionCount(blockDeviceCtrlName, "lvchange").Inc()
-				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
 				if err != nil {
 					metrics.UtilsCommandsErrorsCount(blockDeviceCtrlName, "lvchange").Inc()
 					log.Error(err, "[ReTag] unable to LVChangeDelTag")
@@ -706,33 +692,4 @@ func ReTag(log logger.Logger, metrics monitoring.Metrics) error {
 	log.Debug("[ReTag] stop re-tagging LVM")
 
 	return nil
-}
-
-func getSerialForMultipathDevice(candidate internal.BlockDeviceCandidate, devices []internal.Device) (string, error) {
-	parentDevice := getParentDevice(candidate.PkName, devices)
-	if parentDevice.Name == "" {
-		err := fmt.Errorf("parent device %s not found for multipath device: %s in device list", candidate.PkName, candidate.Path)
-		return "", err
-	}
-
-	if parentDevice.FSType != internal.MultiPathMemberFSType {
-		err := fmt.Errorf("parent device %s for multipath device %s is not a multipath member (fstype != %s)", parentDevice.Name, candidate.Path, internal.MultiPathMemberFSType)
-		return "", err
-	}
-
-	if parentDevice.Serial == "" {
-		err := fmt.Errorf("serial number is empty for parent device %s", parentDevice.Name)
-		return "", err
-	}
-
-	return parentDevice.Serial, nil
-}
-
-func getParentDevice(pkName string, devices []internal.Device) internal.Device {
-	for _, device := range devices {
-		if device.Name == pkName {
-			return device
-		}
-	}
-	return internal.Device{}
 }
