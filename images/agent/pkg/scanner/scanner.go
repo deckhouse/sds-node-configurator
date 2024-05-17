@@ -1,4 +1,4 @@
-package controller
+package scanner
 
 import (
 	"bytes"

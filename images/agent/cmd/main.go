@@ -124,7 +124,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if _, err = controller.RunLVMVolumeGroupWatcherController(mgr, *cfgParams, *log, metrics); err != nil {
+	if _, err = controller.RunLVMVolumeGroupWatcherController(mgr, *cfgParams, *log, metrics, sdsCache); err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
 		os.Exit(1)
 	}

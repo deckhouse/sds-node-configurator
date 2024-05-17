@@ -36,10 +36,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -55,7 +53,7 @@ func RunBlockDeviceController(
 	sdsCache *cache.Cache,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
-	cache := mgr.GetCache()
+	//cache := mgr.GetCache()
 
 	c, err := controller.New(blockDeviceCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
@@ -68,13 +66,9 @@ func RunBlockDeviceController(
 		return nil, err
 	}
 
-	err = c.Watch(source.Kind(cache, &v1alpha1.BlockDevice{}), &handler.EnqueueRequestForObject{})
-	if err != nil {
-		log.Error(err, "[RunBlockDeviceController] unable to controller watch")
-	}
-
 	log.Info("[RunBlockDeviceController] Start loop scan block devices")
 
+	// TODO: должно запускаться сразу после скана
 	go func() {
 		for {
 			time.Sleep(cfg.BlockDeviceScanInterval * time.Second)
@@ -159,12 +153,12 @@ func hasBlockDeviceDiff(res v1alpha1.BlockDeviceStatus, candidate internal.Block
 
 func GetAPIBlockDevices(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics) (map[string]v1alpha1.BlockDevice, error) {
 	listDevice := &v1alpha1.BlockDeviceList{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       v1alpha1.BlockDeviceKind,
-			APIVersion: v1alpha1.TypeMediaAPIVersion,
-		},
-		ListMeta: metav1.ListMeta{},
-		Items:    []v1alpha1.BlockDevice{},
+		//TypeMeta: metav1.TypeMeta{
+		//	Kind:       v1alpha1.BlockDeviceKind,
+		//	APIVersion: v1alpha1.TypeMediaAPIVersion,
+		//},
+		//ListMeta: metav1.ListMeta{},
+		//Items:    []v1alpha1.BlockDevice{},
 	}
 
 	start := time.Now()

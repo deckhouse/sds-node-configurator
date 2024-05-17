@@ -77,9 +77,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		pvIssues := map[string][]string{}
 		lvIssues := map[string][]string{}
 		vg := internal.VGData{VGName: vgName, VGUuid: vgUuid}
-		var err error = nil
 
-		health, _ := checkVGHealth(err, bds, vgIssues, pvIssues, lvIssues, vg)
+		health, _ := checkVGHealth(bds, vgIssues, pvIssues, lvIssues, vg)
 		assert.Equal(t, health, internal.LVMVGHealthOperational)
 	})
 
@@ -95,9 +94,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		pvIssues := map[string][]string{}
 		lvIssues := map[string][]string{}
 		vg := internal.VGData{VGName: vgName, VGUuid: vgUuid}
-		var err error = nil
 
-		health, _ := checkVGHealth(err, bds, vgIssues, pvIssues, lvIssues, vg)
+		health, _ := checkVGHealth(bds, vgIssues, pvIssues, lvIssues, vg)
 		assert.Equal(t, health, internal.LVMVGHealthNonOperational)
 	})
 

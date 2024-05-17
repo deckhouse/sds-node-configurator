@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
-	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/internal"
 
 	golog "log"
@@ -243,8 +242,8 @@ func CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string
 	return cmd.String(), nil
 }
 
-func CreateThinPool(thinPool v1alpha1.SpecThinPool, VGName string) (string, error) {
-	args := []string{"lvcreate", "-L", thinPool.Size.String(), "-T", fmt.Sprintf("%s/%s", VGName, thinPool.Name)}
+func CreateThinPool(thinPoolName, VGName string, size int64) (string, error) {
+	args := []string{"lvcreate", "-L", fmt.Sprintf("%dk", size/1024), "-T", fmt.Sprintf("%s/%s", VGName, thinPoolName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
