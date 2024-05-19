@@ -658,7 +658,7 @@ var (
 					"kname": "/dev/dm-6",
 					"pkname": "/dev/sdf",
 					"rota": false
-			 	}, {
+			 	},{
 					"name": "/dev/sdf",
 					"mountpoint": null,
 					"partuuid": null,
