@@ -28,8 +28,6 @@ import (
 	"sds-node-configurator/pkg/utils"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -65,143 +63,6 @@ func updateLVMVolumeGroupHealthStatus(ctx context.Context, cl client.Client, met
 	metrics.ApiMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "update").Inc()
 	if err != nil {
 		metrics.ApiMethodsErrors(LVMVolumeGroupWatcherCtrlName, "update").Inc()
-		return err
-	}
-	return nil
-}
-
-func getBlockDevice(ctx context.Context, cl client.Client, metrics monitoring.Metrics, name string) (*v1alpha1.BlockDevice, error) {
-	obj := &v1alpha1.BlockDevice{}
-
-	start := time.Now()
-	err := cl.Get(ctx, client.ObjectKey{
-		Name: name,
-	}, obj)
-	metrics.ApiMethodsDuration(LVMVolumeGroupWatcherCtrlName, "get").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "get").Inc()
-	if err != nil {
-		metrics.ApiMethodsErrors(LVMVolumeGroupWatcherCtrlName, "get").Inc()
-		return nil, err
-	}
-	return obj, nil
-}
-
-//func CheckLVMVGNodeOwnership(ctx context.Context, cl client.Client, metrics monitoring.Metrics, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, nodeName string) (bool, error) {
-//	if lvmVolumeGroup == nil {
-//		return false, errors.New("lvmVolumeGroup is nil")
-//	}
-//
-//	membership := 0
-//	if lvmVolumeGroup.Spec.Type == Local {
-//		for _, blockDev := range lvmVolumeGroup.Spec.BlockDeviceNames {
-//			device, err := getBlockDevice(ctx, cl, metrics, blockDev)
-//			if err != nil {
-//				err = fmt.Errorf("unable to get BlockDevice %s, err: %w", blockDev, err)
-//				return false, err
-//			}
-//
-//			if device.Status.NodeName == nodeName {
-//				membership++
-//			}
-//		}
-//
-//		if membership == len(lvmVolumeGroup.Spec.BlockDeviceNames) {
-//			if lvmVolumeGroup.Spec.ActualVGNameOnTheNode == "" {
-//				err := fmt.Errorf("actualVGNameOnTheNode is empty")
-//				status.Health = NonOperational
-//				status.Phase = Failed
-//				status.Message = "actualVGNameOnTheNode is empty"
-//				return false, &status, err
-//			}
-//			return true, &status, nil
-//		}
-//
-//		if membership > 0 {
-//			status.Health = NonOperational
-//			status.Phase = Failed
-//			status.Message = "selected block devices are from different nodes for local LVMVolumeGroup"
-//			return false, &status, nil
-//		}
-//
-//		if membership == 0 {
-//			return false, &status, nil
-//		}
-//	}
-//
-//	return false, &status, nil
-//}
-
-//func ValidateOperationTypeLVMGroup(ctx context.Context, cl client.Client, metrics monitoring.Metrics, lvmVolumeGroup *v1alpha1.LvmVolumeGroup, l logger.Logger) (extendPV, shrinkPV []string, err error) {
-//	pvs, cmdStr, _, err := utils.GetAllPVs()
-//	l.Debug(fmt.Sprintf("GetAllPVs exec cmd: %s", cmdStr))
-//	if err != nil {
-//		return nil, nil, err
-//	}
-//
-//	for _, devName := range lvmVolumeGroup.Spec.BlockDeviceNames {
-//		dev, err := getBlockDevice(ctx, cl, metrics, lvmVolumeGroup.Namespace, devName)
-//		if err != nil {
-//			return nil, nil, err
-//		}
-//
-//		if dev.Status.Consumable == true {
-//			isReallyConsumable := true
-//			for _, pv := range pvs {
-//				if pv.PVName == dev.Status.Path && pv.VGName == lvmVolumeGroup.Spec.ActualVGNameOnTheNode {
-//					isReallyConsumable = false
-//					break
-//				}
-//			}
-//			if isReallyConsumable {
-//				extendPV = append(extendPV, dev.Status.Path)
-//			}
-//
-//			continue
-//		}
-//
-//		if dev.Status.ActualVGNameOnTheNode != lvmVolumeGroup.Spec.ActualVGNameOnTheNode && (len(dev.Status.VGUuid) != 0) {
-//			err = fmt.Errorf("block device %s is already in use by another VG: %s with uuid %s. Our VG: %s with uuid %s", devName, dev.Status.ActualVGNameOnTheNode, dev.Status.VGUuid, lvmVolumeGroup.Spec.ActualVGNameOnTheNode, dev.Status.VGUuid)
-//			return nil, nil, err
-//		}
-//		// TODO: realisation of shrinkPV
-//	}
-//
-//	return extendPV, shrinkPV, nil
-//}
-
-func CreateEventLVMVolumeGroup(ctx context.Context, cl client.Client, metrics monitoring.Metrics, reason, actions, nodeName string, obj *v1alpha1.LvmVolumeGroup) error {
-	e := &v1.Event{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Event",
-			APIVersion: "events.k8s.io/v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: obj.Name + "-",
-			Namespace:    nameSpaceEvent,
-		},
-		Reason: reason,
-		InvolvedObject: v1.ObjectReference{
-			Kind:       obj.Kind,
-			Name:       obj.Name,
-			UID:        obj.UID,
-			APIVersion: "apiextensions.k8s.io/v1",
-		},
-		Type: v1.EventTypeNormal,
-		EventTime: metav1.MicroTime{
-			Time: time.Now(),
-		},
-		Action:              actions,
-		ReportingInstance:   nodeName,
-		ReportingController: LVMVolumeGroupWatcherCtrlName,
-		Message:             "Event Message",
-	}
-
-	start := time.Now()
-	err := cl.Create(ctx, e)
-	metrics.ApiMethodsDuration(LVMVolumeGroupWatcherCtrlName, "create").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "create").Inc()
-	if err != nil {
-		metrics.ApiMethodsErrors(LVMVolumeGroupWatcherCtrlName, "create").Inc()
 		return err
 	}
 	return nil
@@ -251,63 +112,6 @@ func DeleteVGIfExist(log logger.Logger, metrics monitoring.Metrics, sdsCache *ca
 	}
 
 	return nil
-}
-
-func GetVGFromNode(vgName string, log logger.Logger, metrics monitoring.Metrics) (bool, internal.VGData, error) {
-	start := time.Now()
-	var vg internal.VGData
-	vgs, command, _, err := utils.GetAllVGs()
-	metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgs").Inc()
-	log.Debug(command)
-	if err != nil {
-		metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "vgs").Inc()
-		log.Error(err, " error CreateEventLVMVolumeGroup")
-		return false, vg, err
-	}
-
-	for _, vg := range vgs {
-		if vg.VGName == vgName {
-			return true, vg, nil
-		}
-	}
-	return false, vg, nil
-}
-
-//func ValidateConsumableDevices(ctx context.Context, cl client.Client, metrics monitoring.Metrics, group *v1alpha1.LvmVolumeGroup) (bool, error) {
-//	if group == nil {
-//		return false, fmt.Errorf("lvmVolumeGroup is nil")
-//	}
-//
-//	for _, device := range group.Spec.BlockDeviceNames {
-//		d, err := getBlockDevice(ctx, cl, metrics, group.Namespace, device)
-//		if err != nil {
-//			return false, err
-//		}
-//
-//		if d.Status.Consumable == false {
-//			return false, nil
-//		}
-//	}
-//
-//	return true, nil
-//}
-
-func GetPathsConsumableDevicesFromLVMVG(ctx context.Context, cl client.Client, mertics monitoring.Metrics, group *v1alpha1.LvmVolumeGroup) ([]string, error) {
-	if group == nil {
-		return nil, fmt.Errorf("lvmVolumeGroup is nil")
-	}
-
-	var paths []string
-	for _, device := range group.Spec.BlockDeviceNames {
-		d, err := getBlockDevice(ctx, cl, mertics, device)
-		paths = append(paths, d.Status.Path)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return paths, nil
 }
 
 func ExtendVGComplex(metrics monitoring.Metrics, extendPVs []string, VGName string, log logger.Logger) error {
@@ -427,11 +231,6 @@ func ResizeThinPool(log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1
 	log.Trace(fmt.Sprintf("[ResizeThinPool] addSizeBytes = %d", addSizeBytes))
 
 	log.Info(fmt.Sprintf("[ResizeThinPool] Start resizing thin pool: %s; with new size: %s", specThinPool.Name, specThinPool.Size.String()))
-
-	//err := CreateEventLVMVolumeGroup(ctx, cl, metrics, EventReasonResizing, EventActionResizing, nodeName, lvg)
-	//if err != nil {
-	//	log.Error(err, fmt.Sprintf("[ResizeThinPool] error CreateEventLVMVolumeGroup, resource name: %s", lvg.Name))
-	//}
 
 	start := time.Now()
 	cmd, err := utils.ExtendLV(specThinPool.Size.Value(), lvg.Spec.ActualVGNameOnTheNode, specThinPool.Name)

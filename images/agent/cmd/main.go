@@ -28,6 +28,7 @@ import (
 	"sds-node-configurator/pkg/kubutils"
 	"sds-node-configurator/pkg/logger"
 	"sds-node-configurator/pkg/monitoring"
+	"sds-node-configurator/pkg/scanner"
 
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
@@ -70,7 +71,9 @@ func main() {
 	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.NodeName, cfgParams.NodeName))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.MachineID, cfgParams.MachineId))
-	log.Info(fmt.Sprintf("[main] %s = %d", config.ScanInterval, cfgParams.BlockDeviceScanInterval))
+	log.Info(fmt.Sprintf("[main] %s = %d", config.ScanInterval, cfgParams.BlockDeviceScanIntervalSec))
+	log.Info(fmt.Sprintf("[main] %s = %d", config.ThrottleInterval, cfgParams.ThrottleIntervalSec))
+	log.Info(fmt.Sprintf("[main] %s = %d", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDurationSec))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
@@ -104,7 +107,7 @@ func main() {
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 
 	log.Info("[main] ReTag starts")
-	err = controller.ReTag(*log, metrics)
+	err = controller.ReTag(ctx, *log, metrics)
 	if err != nil {
 		log.Error(err, "[main] unable to run ReTag")
 	}
@@ -112,14 +115,8 @@ func main() {
 
 	sdsCache := cache.New()
 
-	go func() {
-		if err = controller.RunScanner(*log, *cfgParams, sdsCache); err != nil {
-			log.Error(err, "[main] unable to run scanner")
-			os.Exit(1)
-		}
-	}()
-
-	if _, err = controller.RunBlockDeviceController(ctx, mgr, *cfgParams, *log, metrics); err != nil {
+	bdCtrl, err := controller.RunBlockDeviceController(mgr, *cfgParams, *log, metrics, sdsCache)
+	if err != nil {
 		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
 		os.Exit(1)
 	}
@@ -129,10 +126,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	if _, err = controller.RunLVMVolumeGroupDiscoverController(ctx, mgr, *cfgParams, *log, metrics, sdsCache); err != nil {
+	lvgDiscoverCtrl, err := controller.RunLVMVolumeGroupDiscoverController(mgr, *cfgParams, *log, metrics, sdsCache)
+	if err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupDiscoverController")
 		os.Exit(1)
 	}
+
+	go func() {
+		if err = scanner.RunScanner(ctx, *log, *cfgParams, sdsCache, bdCtrl, lvgDiscoverCtrl); err != nil {
+			log.Error(err, "[main] unable to run scanner")
+			os.Exit(1)
+		}
+	}()
 
 	if _, err = controller.RunLVMLogicalVolumeWatcherController(mgr, *cfgParams, *log, metrics); err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMLogicalVolumeWatcherController")

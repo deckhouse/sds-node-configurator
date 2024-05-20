@@ -67,8 +67,8 @@ func RunLVMLogicalVolumeWatcherController(
 				log.Error(err, fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] an error occurred while reconciling LLV: %s", request.Name))
 			}
 			if shouldRequeue {
-				log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] requeue reconciliation of LLV: %s after %s", request.Name, cfg.LLVRequeInterval))
-				return reconcile.Result{RequeueAfter: cfg.LLVRequeInterval}, nil
+				log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] requeue reconciliation of LLV: %s after %ss", request.Name, cfg.LLVRequeueIntervalSec))
+				return reconcile.Result{RequeueAfter: cfg.LLVRequeueIntervalSec}, nil
 			}
 			log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] ends reconciliation of LLV: %s without requeue", request.Name))
 			return reconcile.Result{Requeue: false}, nil

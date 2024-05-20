@@ -19,6 +19,7 @@ package utils
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -28,10 +29,10 @@ import (
 	golog "log"
 )
 
-func GetBlockDevices() ([]internal.Device, string, bytes.Buffer, error) {
+func GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
 	var outs bytes.Buffer
 	args := []string{"-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
-	cmd := exec.Command(internal.LSBLKCmd, args...)
+	cmd := exec.CommandContext(ctx, internal.LSBLKCmd, args...)
 	cmd.Stdout = &outs
 
 	var stderr bytes.Buffer
@@ -50,11 +51,11 @@ func GetBlockDevices() ([]internal.Device, string, bytes.Buffer, error) {
 	return devices, cmd.String(), stderr, nil
 }
 
-func GetAllVGs() (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
+func GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	args := []string{"vgs", "-o", "+uuid,tags,shared", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
-	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
@@ -96,11 +97,11 @@ func GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.
 	return vgData, cmd.String(), filteredStdErr, nil
 }
 
-func GetAllLVs() (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
+func GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	args := []string{"lvs", "-o", "+vg_uuid,tags", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
-	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
@@ -143,11 +144,11 @@ func GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdEr
 	return lvData, cmd.String(), filteredStdErr, nil
 }
 
-func GetAllPVs() (data []internal.PVData, command string, stdErr bytes.Buffer, err error) {
+func GetAllPVs(ctx context.Context) (data []internal.PVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
-	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
