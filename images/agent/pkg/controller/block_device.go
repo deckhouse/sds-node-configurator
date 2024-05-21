@@ -25,6 +25,7 @@ import (
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/config"
 	"sds-node-configurator/internal"
+	"sds-node-configurator/pkg/cache"
 	"sds-node-configurator/pkg/logger"
 	"sds-node-configurator/pkg/monitoring"
 	"sds-node-configurator/pkg/utils"
@@ -51,6 +52,7 @@ func RunBlockDeviceController(
 	cfg config.Options,
 	log logger.Logger,
 	metrics monitoring.Metrics,
+	sdsCache *cache.Cache,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
 	cache := mgr.GetCache()
@@ -80,9 +82,9 @@ func RunBlockDeviceController(
 
 			log.Info("[RunBlockDeviceController] START reconcile of block devices")
 
-			candidates, err := GetBlockDeviceCandidates(log, cfg, metrics)
-			if err != nil {
-				log.Error(err, "[RunBlockDeviceController] unable to GetBlockDeviceCandidates")
+			candidates := GetBlockDeviceCandidates(log, cfg, sdsCache)
+			if len(candidates) == 0 {
+				log.Info("[RunBlockDeviceController] no block devices candidates found. Stop reconciliation")
 				continue
 			}
 
@@ -90,6 +92,10 @@ func RunBlockDeviceController(
 			if err != nil {
 				log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDevices")
 				continue
+			}
+
+			if len(apiBlockDevices) == 0 {
+				log.Debug("[RunBlockDeviceController] no BlockDevice resources were found")
 			}
 
 			// create new API devices
@@ -220,37 +226,33 @@ func isBlockDeviceDeprecated(blockDevice string, actualCandidates map[string]str
 	return !ok
 }
 
-func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics monitoring.Metrics) ([]internal.BlockDeviceCandidate, error) {
-	start := time.Now()
-	devices, cmdStr, err := utils.GetBlockDevices()
-	metrics.UtilsCommandsDuration(blockDeviceCtrlName, "lsblk").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(blockDeviceCtrlName, "lsblk").Inc()
-	log.Debug(fmt.Sprintf("[GetBlockDeviceCandidates] exec cmd: %s", cmdStr))
-	if err != nil {
-		metrics.UtilsCommandsErrorsCount(blockDeviceCtrlName, "lsblk").Inc()
-		return nil, fmt.Errorf("unable to GetBlockDevices, err: %w", err)
+func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, sdsCache *cache.Cache) []internal.BlockDeviceCandidate {
+	var candidates []internal.BlockDeviceCandidate
+	devices := sdsCache.GetDevices()
+	if len(devices) == 0 {
+		log.Debug("[GetBlockDeviceCandidates] no devices found, returns empty candidates")
+		return candidates
 	}
 
 	filteredDevices, err := FilterDevices(log, devices)
 	if err != nil {
 		log.Error(err, "[GetBlockDeviceCandidates] unable to filter devices")
-		return nil, err
+		return nil
 	}
 
-	start = time.Now()
-	pvs, cmdStr, _, err := utils.GetAllPVs()
-	metrics.UtilsCommandsDuration(blockDeviceCtrlName, "pvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(blockDeviceCtrlName, "pvs").Inc()
-	log.Debug(fmt.Sprintf("[GetBlockDeviceCandidates] exec cmd: %s", cmdStr))
-	if err != nil {
-		metrics.UtilsCommandsErrorsCount(blockDeviceCtrlName, "pvs").Inc()
-		log.Error(err, "[GetBlockDeviceCandidates] unable to GetAllPVs")
-		return nil, err
+	if len(filteredDevices) == 0 {
+		log.Debug("[GetBlockDeviceCandidates] no filtered devices left, returns empty candidates")
+		return candidates
+	}
+
+	pvs := sdsCache.GetPVs()
+	if len(pvs) == 0 {
+		log.Debug("[GetBlockDeviceCandidates] no PVs found")
 	}
 
 	var delFlag bool
+	candidates = make([]internal.BlockDeviceCandidate, 0, len(filteredDevices))
 
-	var candidates []internal.BlockDeviceCandidate
 	for _, device := range filteredDevices {
 		log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Process device: %+v", device))
 		candidate := internal.BlockDeviceCandidate{
@@ -312,7 +314,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, metrics mon
 		candidates = append(candidates, candidate)
 	}
 
-	return candidates, nil
+	return candidates
 }
 
 func FilterDevices(log logger.Logger, devices []internal.Device) ([]internal.Device, error) {
