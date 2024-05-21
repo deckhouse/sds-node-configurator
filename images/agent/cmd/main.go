@@ -119,7 +119,7 @@ func main() {
 		}
 	}()
 
-	if _, err = controller.RunBlockDeviceController(ctx, mgr, *cfgParams, *log, metrics); err != nil {
+	if _, err = controller.RunBlockDeviceController(ctx, mgr, *cfgParams, *log, metrics, sdsCache); err != nil {
 		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
 		os.Exit(1)
 	}
