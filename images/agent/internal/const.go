@@ -17,11 +17,14 @@ limitations under the License.
 package internal
 
 const (
-	TypePart                     = "part"
+	PartType                     = "part"
+	MultiPathType                = "mpath"
+	CDROMDeviceType              = "rom"
 	DRBDName                     = "/dev/drbd"
 	LoopDeviceType               = "loop"
 	LVMDeviceType                = "lvm"
 	LVMFSType                    = "LVM2_member"
+	MultiPathMemberFSType        = "mpath_member"
 	SdsNodeConfiguratorFinalizer = "storage.deckhouse.io/sds-node-configurator"
 	LVMVGHealthOperational       = "Operational"
 	LVMVGHealthNonOperational    = "NonOperational"
@@ -36,7 +39,7 @@ const (
 
 var (
 	AllowedFSTypes     = [...]string{LVMFSType}
-	InvalidDeviceTypes = [...]string{LoopDeviceType, LVMDeviceType}
+	InvalidDeviceTypes = [...]string{LoopDeviceType, LVMDeviceType, CDROMDeviceType}
 	Finalizers         = []string{SdsNodeConfiguratorFinalizer}
 	LVMTags            = []string{"storage.deckhouse.io/enabled=true", "linstor-"}
 )

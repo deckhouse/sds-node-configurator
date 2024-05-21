@@ -23,7 +23,9 @@ import (
 	"os/exec"
 	"sds-node-configurator/internal"
 	"sds-node-configurator/pkg/logger"
+
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -116,9 +118,8 @@ func getMachineId() (string, error) {
 			return "", err
 		}
 
-		id = stdout.String()
+		id = strings.TrimSpace(stdout.String())
 		fmt.Println("MACHINE ID " + id)
-
 	}
 
 	return id, nil
