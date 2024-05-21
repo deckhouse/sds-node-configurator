@@ -51,6 +51,7 @@ spec:
         - name: {{ .Chart.Name }}-module-registry
       serviceAccountName: sds-node-configurator
       hostPID: true
+      hostNetwork: true
       initContainers:
       - name: sds-utils-installer
         image: {{ include "helm_lib_module_image" (list . "sdsUtilsInstaller") }}

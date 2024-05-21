@@ -516,7 +516,7 @@ func sortPVIssuesByVG(log logger.Logger, pvs []internal.PVData) map[string][]str
 		}
 
 		if stdErr.Len() != 0 {
-			log.Error(fmt.Errorf(stdErr.String()), fmt.Sprintf(`[sortPVIssuesByVG] pvs command for pv "%s" has stderr: `, pv.PVName))
+			log.Error(fmt.Errorf(stdErr.String()), fmt.Sprintf(`[sortPVIssuesByVG] pvs command for pv "%s" has stderr: %s`, pv.PVName, stdErr.String()))
 			pvIssuesByVG[pv.VGName+pv.VGUuid] = append(pvIssuesByVG[pv.VGName+pv.VGUuid], stdErr.String())
 			stdErr.Reset()
 		}

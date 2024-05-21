@@ -23,6 +23,7 @@ import (
 	goruntime "runtime"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/config"
+	"sds-node-configurator/pkg/cache"
 	"sds-node-configurator/pkg/controller"
 	"sds-node-configurator/pkg/kubutils"
 	"sds-node-configurator/pkg/logger"
@@ -108,6 +109,15 @@ func main() {
 		log.Error(err, "[main] unable to run ReTag")
 	}
 	log.Info("[main] ReTag ends")
+
+	sdsCache := cache.New()
+
+	go func() {
+		if err = controller.RunScanner(*log, *cfgParams, sdsCache); err != nil {
+			log.Error(err, "[main] unable to run scanner")
+			os.Exit(1)
+		}
+	}()
 
 	if _, err = controller.RunBlockDeviceController(ctx, mgr, *cfgParams, *log, metrics); err != nil {
 		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
