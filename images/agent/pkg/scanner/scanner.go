@@ -64,7 +64,9 @@ func RunScanner(ctx context.Context, log logger.Logger, cfg config.Options, sdsC
 				err := fillTheCache(ctx, log, sdsCache, cfg)
 				if err != nil {
 					log.Error(err, "[RunScanner] unable to fill the cache. Retry")
-					eventChan <- device
+					go func() {
+						eventChan <- device
+					}()
 					return
 				}
 				log.Info("[RunScanner] successfully filled the cache")
@@ -79,7 +81,9 @@ func RunScanner(ctx context.Context, log logger.Logger, cfg config.Options, sdsC
 
 		case err := <-errChan:
 			log.Error(err, "[RunScanner] Monitor udev event error")
-			return err
+			quit = conn.Monitor(eventChan, errChan, matcher)
+			timer.Reset(duration)
+			continue
 
 		case <-quit:
 			err := errors.New("receive quit signal when monitor udev event")

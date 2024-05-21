@@ -106,7 +106,7 @@ func NewConfig() (*Options, error) {
 
 	cmdDur := os.Getenv(CmdDeadlineDuration)
 	if cmdDur == "" {
-		opts.CmdDeadlineDurationSec = 2 * time.Second
+		opts.CmdDeadlineDurationSec = 30 * time.Second
 	} else {
 		duration, err := strconv.Atoi(cmdDur)
 		if err != nil {

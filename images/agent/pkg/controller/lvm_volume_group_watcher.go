@@ -101,7 +101,7 @@ func RunLVMVolumeGroupWatcherController(
 			}
 
 			if shouldRequeue {
-				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s event will be requeued in %s", lvg.Name, cfg.BlockDeviceScanIntervalSec.String()))
+				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s event will be requeued in %s", lvg.Name, cfg.VolumeGroupScanIntervalSec.String()))
 				return reconcile.Result{
 					RequeueAfter: cfg.VolumeGroupScanIntervalSec,
 				}, nil

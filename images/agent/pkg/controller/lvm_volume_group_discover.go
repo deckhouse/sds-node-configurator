@@ -119,6 +119,10 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 		return true
 	}
 
+	if len(candidates) == 0 {
+		log.Debug("[RunLVMVolumeGroupDiscoverController] no candidates were found on the node")
+	}
+
 	for _, candidate := range candidates {
 		if lvmVolumeGroup := getResourceByCandidate(filteredResources, candidate); lvmVolumeGroup != nil {
 			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] candidate: %v", candidate))

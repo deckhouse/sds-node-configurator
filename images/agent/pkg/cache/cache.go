@@ -18,8 +18,8 @@ type Cache struct {
 	lvsErrs    bytes.Buffer
 }
 
-func New() Cache {
-	return Cache{}
+func New() *Cache {
+	return &Cache{}
 }
 
 func (c *Cache) StoreDevices(devices []internal.Device, stdErr bytes.Buffer) {
