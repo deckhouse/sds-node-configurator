@@ -91,6 +91,8 @@ spec:
             value: "4"
 {{- end }}
         volumeMounts:
+        - mountPath: /dev/
+          name: host-device-dir
         - mountPath: /sys/
           name: host-sys-dir
         - mountPath: /run/udev/
@@ -106,6 +108,10 @@ spec:
           path: /opt/deckhouse/sds
           type: DirectoryOrCreate
         name: opt-deckhouse-sds
+      - hostPath:
+          path: /dev/
+          type: ""
+        name: host-device-dir
       - hostPath:
           path: /sys/
           type: Directory

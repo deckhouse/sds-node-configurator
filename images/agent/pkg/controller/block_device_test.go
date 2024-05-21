@@ -212,7 +212,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		testLsblkOutputBytes := []byte(testLsblkOutput)
 		devices, err := utils.UnmarshalDevices(testLsblkOutputBytes)
 		if assert.NoError(t, err) {
-			assert.Equal(t, 28, len(devices))
+			assert.Equal(t, 31, len(devices))
 		}
 		filteredDevices, err := FilterDevices(*log, devices)
 
@@ -244,25 +244,33 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			case 2:
 				assert.Equal(t, "/dev/nvme4n1", device.Name)
 				assert.True(t, candidate.Consumable)
+				candidateName := CreateCandidateName(*log, candidate, devices)
+				assert.Equal(t, "dev-794d93d177d16bc9a85e2dd2ccbdc7325c287374", candidateName, "device name generated incorrectly")
 			case 3:
 				assert.Equal(t, "/dev/nvme5n1", device.Name)
 				assert.True(t, candidate.Consumable)
+				candidateName := CreateCandidateName(*log, candidate, devices)
+				assert.Equal(t, "dev-3306e773ab3cde6d519ce8d7c3686bf17a124dcb", candidateName, "device name generated incorrectly")
 			case 4:
 				assert.Equal(t, "/dev/sda4", device.Name)
 				assert.False(t, candidate.Consumable)
-				candidateName := CreateCandidateName(*log, candidate)
+				candidateName := CreateCandidateName(*log, candidate, devices)
 				assert.Equal(t, "dev-377bc6adf33d84eb5932f5c89798bb6c5949ae2d", candidateName, "device name generated incorrectly")
 			case 5:
 				assert.Equal(t, "/dev/vdc1", device.Name)
 				assert.True(t, candidate.Consumable)
-				candidateName := CreateCandidateName(*log, candidate)
+				candidateName := CreateCandidateName(*log, candidate, devices)
 				assert.Equal(t, "dev-a9d768213aaead8b42465ec859189de8779f96b7", candidateName, "device name generated incorrectly")
-
+			case 6:
+				assert.Equal(t, "/dev/mapper/mpatha", device.Name)
+				assert.True(t, candidate.Consumable)
+				candidateName := CreateCandidateName(*log, candidate, devices)
+				assert.Equal(t, "dev-6367f0efb2dfa697c90aaf1fad24ad9cc87a76cd", candidateName, "device name generated incorrectly")
 			}
 
 		}
 		if assert.NoError(t, err) {
-			assert.Equal(t, 6, len(filteredDevices))
+			assert.Equal(t, 7, len(filteredDevices))
 		}
 	})
 
@@ -636,7 +644,49 @@ var (
 					"wwn": null,
 					"kname": "/dev/vdc1",
 					"pkname": "/dev/vdc"
-			 }
+			 	},{
+					"name": "/dev/mapper/mpatha",
+					"mountpoint": null,
+					"partuuid": null,
+					"hotplug": false,
+					"model": null,
+					"serial": null,
+					"size": 3650722201600,
+					"fstype": null,
+					"type": "mpath",
+					"wwn": null,
+					"kname": "/dev/dm-6",
+					"pkname": "/dev/sdf",
+					"rota": false
+			 	},{
+					"name": "/dev/sdf",
+					"mountpoint": null,
+					"partuuid": null,
+					"hotplug": false,
+					"model": "test-model",
+					"serial": "22222222xxxxx",
+					"size": 3650722201600,
+					"fstype": "mpath_member",
+					"type": "disk",
+					"wwn": "2222xxxxxx",
+					"kname": "/dev/sdf",
+					"pkname": null,
+					"rota": false
+			 	},{
+					"name": "/dev/sdh",
+					"mountpoint": null,
+					"partuuid": null,
+					"hotplug": false,
+					"model": "test-model",
+					"serial": "22222222xxxxx",
+					"size": 3650722201600,
+					"fstype": "mpath_member",
+					"type": "disk",
+					"wwn": "2222xxxxxx",
+					"kname": "/dev/sdh",
+					"pkname": null,
+					"rota": false
+		 	 	}
 		]
 	}`
 )
