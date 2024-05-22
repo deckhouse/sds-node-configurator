@@ -128,6 +128,13 @@ func RunLVMVolumeGroupWatcherController(
 		}
 		log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully casted the LVMVolumeGroup %s", lvg.Name))
 
+		bds, _ := sdsCache.GetDevices()
+		if len(bds) == 0 {
+			log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no block devices in the cache, add to requeue the LVMVolumeGroup %s", lvg.Name))
+			requeue(q, lvg, cfg.BlockDeviceScanIntervalSec)
+			return
+		}
+
 		blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %d", cfg.BlockDeviceScanIntervalSec))
@@ -185,6 +192,11 @@ func RunLVMVolumeGroupWatcherController(
 		}
 		log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully casted an old state of the LVMVolumeGroup %s", newLVG.Name))
 
+		if !shouldLVGUpdateEventTriggers(log, oldLVG, newLVG) {
+			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s should not be reconciled", newLVG.Name))
+			return
+		}
+
 		blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %d", cfg.BlockDeviceScanIntervalSec))
@@ -209,11 +221,6 @@ func RunLVMVolumeGroupWatcherController(
 			return
 		}
 		log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s belongs to the node %s. Starts to reconcile", newLVG.Name, cfg.NodeName))
-
-		if !shouldLVGUpdateEventTriggers(log, oldLVG, newLVG) {
-			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s should not be reconciled", newLVG.Name))
-			return
-		}
 
 		shouldRequeue, err := runEventReconcile(ctx, cl, log, metrics, sdsCache, newLVG, blockDevices)
 		if err != nil {
@@ -247,8 +254,8 @@ func shouldLVGUpdateEventTriggers(log logger.Logger, oldLVG, newLVG *v1alpha1.Lv
 	}
 	log.Debug(fmt.Sprintf("[shouldLVGUpdateEventTriggers] the LVMVolumeGroup %s old and new states have the same Spec", newLVG.Name))
 
-	log.Debug(fmt.Sprintf("[shouldLVGUpdateEventTriggers] old LVMVolumeGroup %s nodes: %+v", oldLVG.Name, oldLVG.Status.Nodes))
-	log.Debug(fmt.Sprintf("[shouldLVGUpdateEventTriggers] new LVMVolumeGroup %s nodes: %+v", newLVG.Name, newLVG.Status.Nodes))
+	log.Trace(fmt.Sprintf("[shouldLVGUpdateEventTriggers] old LVMVolumeGroup %s nodes: %+v", oldLVG.Name, oldLVG.Status.Nodes))
+	log.Trace(fmt.Sprintf("[shouldLVGUpdateEventTriggers] new LVMVolumeGroup %s nodes: %+v", newLVG.Name, newLVG.Status.Nodes))
 	if hasStatusNodesDiff(log, oldLVG.Status.Nodes, newLVG.Status.Nodes) {
 		log.Debug(fmt.Sprintf("[shouldLVGUpdateEventTriggers] the LVMVolumeGroup %s old and new states have different Status.Nodes", newLVG.Name))
 		return true
@@ -262,7 +269,7 @@ func shouldLVGUpdateEventTriggers(log logger.Logger, oldLVG, newLVG *v1alpha1.Lv
 	log.Debug(fmt.Sprintf("[shouldLVGUpdateEventTriggers] the LVMVolumeGroup %s Status.Nodes device sizes are the same as PV ones", newLVG.Name))
 
 	if !reflect.DeepEqual(oldLVG.Annotations, newLVG.Annotations) {
-		fmt.Println(oldLVG.Annotations, newLVG.Annotations)
+		log.Trace(fmt.Sprintf("[shouldLVGUpdateEventTriggers] the LVMVolumeGroup %s old annotaions: %v, new annotations: %v", newLVG.Name, oldLVG.Annotations, newLVG.Annotations))
 		log.Debug(fmt.Sprintf("[shouldLVGUpdateEventTriggers] the LVMVolumeGroup %s old and new states have different Annotations", newLVG.Name))
 		return true
 	}
@@ -801,8 +808,10 @@ func validateLVGForUpdateFunc(log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, b
 		pvMap[pv.PVName] = struct{}{}
 	}
 
+	//TODO: add a check if BlockDevice size got less than PV size
+
 	// Check if added BlockDevices are consumable
-	// additionBlockDeviceSpace value is needed to count if VG will have enough space for new thin-pools
+	// additionBlockDeviceSpace value is needed to count if VG will have enough space for thin-pools
 	var additionBlockDeviceSpace int64
 	for _, bdName := range lvg.Spec.BlockDeviceNames {
 		bd := blockDevices[bdName]
@@ -815,7 +824,6 @@ func validateLVGForUpdateFunc(log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, b
 			}
 
 			log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] BlockDevice %s is consumable", bdName))
-			bd := blockDevices[bdName]
 			additionBlockDeviceSpace += bd.Status.Size.Value()
 		}
 	}
@@ -836,15 +844,26 @@ func validateLVGForUpdateFunc(log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, b
 
 		var newThinPoolsSize int64
 		for _, specTp := range lvg.Spec.ThinPools {
+			if specTp.Size.Value() == 0 {
+				reason.WriteString(fmt.Sprintf("[validateLVGForCreateFunc] thin pool %s has zero size", specTp.Name))
+				continue
+			}
+
 			if statusTp, used := usedThinPools[specTp.Name]; !used {
 				log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] thin-pool %s of the LVMVolumeGroup %s is not used yet, check its requested size", specTp.Name, lvg.Name))
 				newThinPoolsSize += specTp.Size.Value()
 			} else {
 				log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] thin-pool %s of the LVMVolumeGroup %s is already created, check its requested size", specTp.Name, lvg.Name))
-				if specTp.Size.Value() == 0 ||
-					specTp.Size.Value()+resizeDelta.Value() < statusTp.ActualSize.Value() {
+				if specTp.Size.Value()+resizeDelta.Value() < statusTp.ActualSize.Value() {
 					log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] the LVMVolumeGroup %s Spec.ThinPool %s size %s is less than Status one: %s", lvg.Name, specTp.Name, specTp.Size.String(), statusTp.ActualSize.String()))
-					reason.WriteString(fmt.Sprintf("requested Spec.ThinPool %s size is less than actual one (or equals zero)", specTp.Name))
+					reason.WriteString(fmt.Sprintf("requested Spec.ThinPool %s size is less than actual one", specTp.Name))
+					continue
+				}
+
+				thinPoolSizeDiff := specTp.Size.Value() - statusTp.ActualSize.Value()
+				if thinPoolSizeDiff > resizeDelta.Value() {
+					log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] the LVMVolumeGroup %s Spec.ThinPool %s size %s more than Status one: %s", lvg.Name, specTp.Name, specTp.Size.String(), statusTp.ActualSize.String()))
+					newThinPoolsSize += thinPoolSizeDiff
 				}
 			}
 		}
@@ -881,6 +900,7 @@ func identifyLVGReconcileFunc(lvg *v1alpha1.LvmVolumeGroup, sdsCache *cache.Cach
 
 func shouldReconcileLVGByCreateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cache) bool {
 	_, exist := lvg.Annotations[delAnnotation]
+	//TODO: probably remove DeletionTimestamp in a future
 	if lvg.DeletionTimestamp != nil || exist {
 		return false
 	}
@@ -897,6 +917,7 @@ func shouldReconcileLVGByCreateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cach
 
 func shouldReconcileLVGByUpdateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cache) bool {
 	_, exist := lvg.Annotations[delAnnotation]
+	//TODO: probably remove DeletionTimestamp in a future
 	if lvg.DeletionTimestamp != nil || exist {
 		return false
 	}

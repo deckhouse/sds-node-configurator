@@ -70,15 +70,24 @@ func updateLVMVolumeGroupHealthStatus(ctx context.Context, cl client.Client, met
 
 func DeleteVGIfExist(log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, vgName string) error {
 	vgs, _ := sdsCache.GetVGs()
-	if len(vgs) == 0 {
-		log.Debug("[DeleteVGIfExist] no VG found, nothing to delete")
+
+	vgExist := false
+	for _, vg := range vgs {
+		if vg.VGName == vgName {
+			vgExist = true
+			break
+		}
+	}
+
+	if !vgExist {
+		log.Debug(fmt.Sprintf("[DeleteVGIfExist] no VG %s found, nothing to delete", vgName))
 		return nil
 	}
 
 	pvs, _ := sdsCache.GetPVs()
 	if len(pvs) == 0 {
-		err := errors.New("no PV found")
-		log.Error(err, fmt.Sprintf("[DeleteVGIfExist] no PV was found while deleting VG %s", vgName))
+		err := errors.New("no any PV found")
+		log.Error(err, fmt.Sprintf("[DeleteVGIfExist] no any PV was found while deleting VG %s", vgName))
 		return err
 	}
 
