@@ -28,6 +28,7 @@ import (
 	"sds-node-configurator/pkg/kubutils"
 	"sds-node-configurator/pkg/logger"
 	"sds-node-configurator/pkg/monitoring"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
@@ -89,9 +90,9 @@ func main() {
 	log.Info("[main] successfully read scheme CR")
 
 	managerOpts := manager.Options{
-		Scheme: scheme,
-		//MetricsBindAddress: cfgParams.MetricsPort,
-		Logger: log.GetLogger(),
+		Scheme:  scheme,
+		Logger:  log.GetLogger(),
+		Metrics: server.Options{BindAddress: cfgParams.MetricsPort},
 	}
 
 	mgr, err := manager.New(kConfig, managerOpts)
