@@ -228,7 +228,7 @@ func isBlockDeviceDeprecated(blockDevice string, actualCandidates map[string]str
 
 func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, sdsCache *cache.Cache) []internal.BlockDeviceCandidate {
 	var candidates []internal.BlockDeviceCandidate
-	devices := sdsCache.GetDevices()
+	devices, _ := sdsCache.GetDevices()
 	if len(devices) == 0 {
 		log.Debug("[GetBlockDeviceCandidates] no devices found, returns empty candidates")
 		return candidates
@@ -245,7 +245,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, sdsCache *c
 		return candidates
 	}
 
-	pvs := sdsCache.GetPVs()
+	pvs, _ := sdsCache.GetPVs()
 	if len(pvs) == 0 {
 		log.Debug("[GetBlockDeviceCandidates] no PVs found")
 	}

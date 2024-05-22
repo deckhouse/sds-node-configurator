@@ -129,7 +129,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if _, err = controller.RunLVMVolumeGroupDiscoverController(ctx, mgr, *cfgParams, *log, metrics); err != nil {
+	if _, err = controller.RunLVMVolumeGroupDiscoverController(ctx, mgr, *cfgParams, *log, metrics, sdsCache); err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupDiscoverController")
 		os.Exit(1)
 	}
