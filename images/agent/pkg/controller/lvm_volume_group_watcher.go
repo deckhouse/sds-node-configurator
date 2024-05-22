@@ -74,6 +74,14 @@ func RunLVMVolumeGroupWatcherController(
 				return reconcile.Result{}, nil
 			}
 
+			bds, _ := sdsCache.GetDevices()
+			if len(bds) == 0 {
+				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no block devices in the cache, add to requeue the LVMVolumeGroup %s", lvg.Name))
+				return reconcile.Result{
+					RequeueAfter: cfg.VolumeGroupScanIntervalSec,
+				}, nil
+			}
+
 			blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %d", cfg.BlockDeviceScanIntervalSec))
@@ -94,6 +102,13 @@ func RunLVMVolumeGroupWatcherController(
 				}, nil
 			}
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully validated BlockDevices of the LVMVolumeGroup %s", lvg.Name))
+
+			belongs := checkIfLVGBelongsToNode(lvg, blockDevices, cfg.NodeName)
+			if !belongs {
+				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s does not belong to the node %s", lvg.Name, cfg.NodeName))
+				return reconcile.Result{}, nil
+			}
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s belongs to the node %s. Starts to reconcile", lvg.Name, cfg.NodeName))
 
 			shouldRequeue, err := runEventReconcile(ctx, cl, log, metrics, sdsCache, lvg, blockDevices)
 			if err != nil {
