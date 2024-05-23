@@ -132,127 +132,44 @@ func RunLVMVolumeGroupWatcherController(
 		return nil, err
 	}
 
-	createFunc := func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
-		log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] createFunc starts reconciliation for the LVMVolumeGroup, name: %s", e.Object.GetName()))
-
-		lvg, ok := e.Object.(*v1alpha1.LvmVolumeGroup)
-		if !ok {
-			err = errors.New("unable to cast event object to a given type")
-			log.Error(err, "[RunLVMVolumeGroupWatcherController] an error occurred while handling a create event")
-			return
-		}
-		log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully casted the LVMVolumeGroup %s", lvg.Name))
-
-		bds, _ := sdsCache.GetDevices()
-		if len(bds) == 0 {
-			log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no block devices in the cache, add to requeue the LVMVolumeGroup %s", lvg.Name))
-			requeue(q, lvg, cfg.BlockDeviceScanIntervalSec)
-			return
-		}
-
-		blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %d", cfg.BlockDeviceScanIntervalSec))
-			requeue(q, lvg, cfg.BlockDeviceScanIntervalSec)
-			return
-		}
-		log.Debug("[RunLVMVolumeGroupWatcherController] successfully got BlockDevices")
-
-		valid, reason := validateSpecBlockDevices(lvg, blockDevices)
-		if !valid {
-			err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, lvg, NonOperational, reason)
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to update the LVMVolumeGroup %s", lvg.Name))
-			}
-			requeue(q, lvg, cfg.BlockDeviceScanIntervalSec)
-		}
-		log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully validated BlockDevices of the LVMVolumeGroup %s", lvg.Name))
-
-		belongs := checkIfLVGBelongsToNode(lvg, blockDevices, cfg.NodeName)
-		if !belongs {
-			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s does not belong to the node %s", lvg.Name, cfg.NodeName))
-			return
-		}
-
-		log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s belongs to the node %s. Starts to reconcile", lvg.Name, cfg.NodeName))
-		shouldRequeue, err := runEventReconcile(ctx, cl, log, metrics, sdsCache, lvg, blockDevices)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to reconcile the LVMVolumeGroup %s", lvg.Name))
-		}
-
-		if shouldRequeue {
-			log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s event will be requeued in %s", lvg.Name, cfg.BlockDeviceScanIntervalSec.String()))
-			requeue(q, lvg, cfg.BlockDeviceScanIntervalSec)
-		}
-
-		log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] createFunc ends reconciliation for the LVMVolumeGroup %s", lvg.Name))
-	}
-
-	updateFunc := func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
-		log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] UpdateFunc starts the reconciliation for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
-
-		newLVG, ok := e.ObjectNew.(*v1alpha1.LvmVolumeGroup)
-		if !ok {
-			err = errors.New("unable to cast event object to a given type")
-			log.Error(err, "[RunLVMVolumeGroupWatcherController] an error occurred while handling a create event")
-			return
-		}
-		log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully casted a new state of the LVMVolumeGroup %s", newLVG.Name))
-
-		oldLVG, ok := e.ObjectOld.(*v1alpha1.LvmVolumeGroup)
-		if !ok {
-			err = errors.New("unable to cast event object to a given type")
-			log.Error(err, "[RunLVMVolumeGroupWatcherController] an error occurred while handling a create event")
-			return
-		}
-		log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully casted an old state of the LVMVolumeGroup %s", newLVG.Name))
-
-		if !shouldLVGUpdateEventTriggers(log, oldLVG, newLVG) {
-			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s should not be reconciled", newLVG.Name))
-			return
-		}
-
-		blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %d", cfg.BlockDeviceScanIntervalSec))
-			requeue(q, newLVG, cfg.BlockDeviceScanIntervalSec)
-			return
-		}
-		log.Debug("[RunLVMVolumeGroupWatcherController] successfully got BlockDevices")
-
-		valid, reason := validateSpecBlockDevices(newLVG, blockDevices)
-		if !valid {
-			err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, newLVG, NonOperational, reason)
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to update the LVMVolumeGroup %s", newLVG.Name))
-			}
-			requeue(q, newLVG, cfg.BlockDeviceScanIntervalSec)
-		}
-		log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully validated BlockDevices of the LVMVolumeGroup %s", newLVG.Name))
-
-		belongs := checkIfLVGBelongsToNode(newLVG, blockDevices, cfg.NodeName)
-		if !belongs {
-			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s does not belong to the node %s", newLVG.Name, cfg.NodeName))
-			return
-		}
-		log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s belongs to the node %s. Starts to reconcile", newLVG.Name, cfg.NodeName))
-
-		shouldRequeue, err := runEventReconcile(ctx, cl, log, metrics, sdsCache, newLVG, blockDevices)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to reconcile the LVMVolumeGroup %s", newLVG.Name))
-		}
-
-		if shouldRequeue {
-			log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s event will be requeued in %s", newLVG.Name, cfg.BlockDeviceScanIntervalSec.String()))
-			requeue(q, newLVG, cfg.BlockDeviceScanIntervalSec)
-		}
-
-		log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] updateFunc ends reconciliation for the LVMVolumeGroup %s", newLVG.Name))
-	}
-
 	err = c.Watch(source.Kind(mgrCache, &v1alpha1.LvmVolumeGroup{}), handler.Funcs{
-		CreateFunc: createFunc,
-		UpdateFunc: updateFunc,
+		CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
+			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] createFunc got a create event for the LVMVolumeGroup, name: %s", e.Object.GetName()))
+
+			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
+			q.Add(request)
+
+			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] createFunc added a request for the LVMVolumeGroup %s to the Reconcilers queue", e.Object.GetName()))
+		},
+		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
+			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] UpdateFunc got a update event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
+
+			newLVG, ok := e.ObjectNew.(*v1alpha1.LvmVolumeGroup)
+			if !ok {
+				err = errors.New("unable to cast event object to a given type")
+				log.Error(err, "[RunLVMVolumeGroupWatcherController] an error occurred while handling a create event")
+				return
+			}
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully casted a new state of the LVMVolumeGroup %s", newLVG.Name))
+
+			oldLVG, ok := e.ObjectOld.(*v1alpha1.LvmVolumeGroup)
+			if !ok {
+				err = errors.New("unable to cast event object to a given type")
+				log.Error(err, "[RunLVMVolumeGroupWatcherController] an error occurred while handling a create event")
+				return
+			}
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully casted an old state of the LVMVolumeGroup %s", newLVG.Name))
+
+			if !shouldLVGUpdateEventTriggers(log, oldLVG, newLVG) {
+				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s should not be reconciled", newLVG.Name))
+				return
+			}
+
+			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
+			q.Add(request)
+
+			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] updateFunc added a request for the LVMVolumeGroup %s to the Reconcilers queue", newLVG.Name))
+		},
 	})
 
 	if err != nil {
@@ -702,15 +619,6 @@ func reconcileLVGCreateFunc(ctx context.Context, cl client.Client, log logger.Lo
 	}
 
 	return false, nil
-}
-
-func requeue(q workqueue.RateLimitingInterface, lvg *v1alpha1.LvmVolumeGroup, interval time.Duration) {
-	q.AddAfter(reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Namespace: lvg.Namespace,
-			Name:      lvg.Name,
-		},
-	}, interval)
 }
 
 func validateSpecBlockDevices(lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
