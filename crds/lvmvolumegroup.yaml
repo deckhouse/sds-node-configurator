@@ -82,6 +82,38 @@ spec:
             status:
               type: object
               properties:
+                phase:
+                  type: string
+                  enum:
+                    - Pending
+                    - Ready
+                    - NotReady
+                    - Terminating
+                    - ""
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        enum:
+                          - VGConfigurationApplied
+                          - VGReady
+                          - NodeReady
+                          - AgentReady
+                          - Ready
+                          - ""
+                      status:
+                        type: boolean
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                      observedGeneration:
+                        type: integer
                 health:
                   type: string
                   description: |
@@ -132,6 +164,10 @@ spec:
                         type: string
                         description: |
                           The Thin-pool used size.
+                      ready:
+                        type: boolean
+                      message:
+                        type: string
                 nodes:
                   type: array
                   description: |

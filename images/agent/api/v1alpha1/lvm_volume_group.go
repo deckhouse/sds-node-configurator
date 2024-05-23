@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"time"
 )
 
 type LvmVolumeGroupList struct {
@@ -65,6 +66,8 @@ type StatusThinPool struct {
 	Name       string            `json:"name"`
 	ActualSize resource.Quantity `json:"actualSize"`
 	UsedSize   resource.Quantity `json:"usedSize"`
+	Ready      bool              `json:"ready"`
+	Message    string            `json:"message"`
 }
 
 type LvmVolumeGroupStatus struct {
@@ -75,4 +78,14 @@ type LvmVolumeGroupStatus struct {
 	ThinPools     []StatusThinPool     `json:"thinPools"`
 	VGSize        resource.Quantity    `json:"vgSize"`
 	VGUuid        string               `json:"vgUUID"`
+	Phase         string               `json:"phase"`
+}
+
+type Condition struct {
+	Type               string    `json:"type"`
+	Status             bool      `json:"status"`
+	Reason             string    `json:"reason"`
+	Message            string    `json:"message"`
+	lastTransitionTime time.Time `json:"lastTransitionTime"`
+	observedGeneration int       `json:"observedGeneration"`
 }
