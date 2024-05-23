@@ -74,7 +74,7 @@ func NewConfig() (*Options, error) {
 
 	opts.MetricsPort = os.Getenv(MetricsPort)
 	if opts.MetricsPort == "" {
-		opts.MetricsPort = ":8080"
+		opts.MetricsPort = ":9695"
 	}
 
 	scanInt := os.Getenv(ScanInterval)
