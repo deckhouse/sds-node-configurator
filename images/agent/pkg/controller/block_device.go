@@ -493,16 +493,43 @@ func readSerialBlockDevice(deviceName string, isMdRaid bool) (string, error) {
 	return string(serial), nil
 }
 
-func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, res v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {
+func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, blockDevice v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {
+	blockDevice.Status = v1alpha1.BlockDeviceStatus{
+		Type:                  candidate.Type,
+		FsType:                candidate.FSType,
+		NodeName:              candidate.NodeName,
+		Consumable:            candidate.Consumable,
+		PVUuid:                candidate.PVUuid,
+		VGUuid:                candidate.VGUuid,
+		PartUUID:              candidate.PartUUID,
+		LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
+		ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
+		Wwn:                   candidate.Wwn,
+		Serial:                candidate.Serial,
+		Path:                  candidate.Path,
+		Size:                  *resource.NewQuantity(candidate.Size.Value(), resource.BinarySI),
+		Model:                 candidate.Model,
+		Rota:                  candidate.Rota,
+		HotPlug:               candidate.HotPlug,
+		MachineID:             candidate.MachineId,
+	}
+
+	start := time.Now()
+	err := kc.Update(ctx, &blockDevice)
+	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(BlockDeviceCtrlName, "update").Inc()
+	if err != nil {
+		metrics.ApiMethodsErrors(BlockDeviceCtrlName, "update").Inc()
+		return err
+	}
+
+	return nil
+}
+
+func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, candidate internal.BlockDeviceCandidate) (*v1alpha1.BlockDevice, error) {
 	device := &v1alpha1.BlockDevice{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       v1alpha1.BlockDeviceKind,
-			APIVersion: v1alpha1.TypeMediaAPIVersion,
-		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:            res.Name,
-			ResourceVersion: res.ResourceVersion,
-			OwnerReferences: res.OwnerReferences,
+			Name: candidate.Name,
 		},
 		Status: v1alpha1.BlockDeviceStatus{
 			Type:                  candidate.Type,
@@ -518,50 +545,6 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 			Serial:                candidate.Serial,
 			Path:                  candidate.Path,
 			Size:                  *resource.NewQuantity(candidate.Size.Value(), resource.BinarySI),
-			Model:                 candidate.Model,
-			Rota:                  candidate.Rota,
-			HotPlug:               candidate.HotPlug,
-			MachineID:             candidate.MachineId,
-		},
-	}
-
-	start := time.Now()
-	err := kc.Update(ctx, device)
-	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(BlockDeviceCtrlName, "update").Inc()
-	if err != nil {
-		metrics.ApiMethodsErrors(BlockDeviceCtrlName, "update").Inc()
-		return err
-	}
-
-	return nil
-}
-
-func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, candidate internal.BlockDeviceCandidate) (*v1alpha1.BlockDevice, error) {
-	candidateSizeTmp := resource.NewQuantity(candidate.Size.Value(), resource.BinarySI)
-	device := &v1alpha1.BlockDevice{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       v1alpha1.BlockDeviceKind,
-			APIVersion: v1alpha1.TypeMediaAPIVersion,
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            candidate.Name,
-			OwnerReferences: []metav1.OwnerReference{},
-		},
-		Status: v1alpha1.BlockDeviceStatus{
-			Type:                  candidate.Type,
-			FsType:                candidate.FSType,
-			NodeName:              candidate.NodeName,
-			Consumable:            candidate.Consumable,
-			PVUuid:                candidate.PVUuid,
-			VGUuid:                candidate.VGUuid,
-			PartUUID:              candidate.PartUUID,
-			LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
-			ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
-			Wwn:                   candidate.Wwn,
-			Serial:                candidate.Serial,
-			Path:                  candidate.Path,
-			Size:                  *resource.NewQuantity(candidateSizeTmp.Value(), resource.BinarySI),
 			Model:                 candidate.Model,
 			Rota:                  candidate.Rota,
 			MachineID:             candidate.MachineId,

@@ -487,7 +487,7 @@ func reconcileLVGUpdateFunc(ctx context.Context, cl client.Client, log logger.Lo
 
 	err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, lvg, Operational, "")
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to update the LVMVolumeGroup %s", lvg.Name))
+		log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to update the LVMVolumeGroup %s", lvg.Name))
 		return true, err
 	}
 

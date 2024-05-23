@@ -420,6 +420,8 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 	// Sort PV,BlockDevices and LV by VG to fill needed information for LVMVolumeGroup resource further.
 	sortedPVs := sortPVsByVG(pvs, vgWithTag)
 	sortedBDs := sortBlockDevicesByVG(bds, vgWithTag)
+	log.Trace(fmt.Sprintf("[GetLVMVolumeGroupCandidates] BlockDevices: %+v", bds))
+	log.Trace(fmt.Sprintf("[GetLVMVolumeGroupCandidates] Sorted BlockDevices: %+v", sortedBDs))
 	sortedThinPools := sortLVsByVG(thinPools, vgWithTag)
 
 	for _, vg := range vgWithTag {
@@ -773,13 +775,13 @@ func UpdateLVMVolumeGroupByCandidate(
 	ctx context.Context,
 	kc kclient.Client,
 	metrics monitoring.Metrics,
-	res v1alpha1.LvmVolumeGroup,
+	lvg v1alpha1.LvmVolumeGroup,
 	candidate internal.LVMVolumeGroupCandidate,
 ) error {
 	// The resource.Status.Nodes can not be just re-written, it needs to be updated directly by node.
 	// We take all current resources nodes and convert them to map for better performance further.
-	resourceNodes := make(map[string][]v1alpha1.LvmVolumeGroupDevice, len(res.Status.Nodes))
-	for _, node := range res.Status.Nodes {
+	resourceNodes := make(map[string][]v1alpha1.LvmVolumeGroupDevice, len(lvg.Status.Nodes))
+	for _, node := range lvg.Status.Nodes {
 		resourceNodes[node.Name] = node.Devices
 	}
 
@@ -791,50 +793,34 @@ func UpdateLVMVolumeGroupByCandidate(
 	}
 
 	// Now we take resource's nodes, match them with our map and fill with new info.
-	for i, node := range res.Status.Nodes {
+	for i, node := range lvg.Status.Nodes {
 		if devices, match := resourceNodes[node.Name]; match {
-			res.Status.Nodes[i].Devices = devices
+			lvg.Status.Nodes[i].Devices = devices
 		}
 	}
 
-	if res.Status.Health == NonOperational {
+	if lvg.Status.Health == NonOperational {
 		candidate.Health = NonOperational
-		candidate.Message += res.Status.Message
+		candidate.Message += lvg.Status.Message
 	}
 
-	// Update status.
-	lvmvg := &v1alpha1.LvmVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            res.Name,
-			OwnerReferences: res.OwnerReferences,
-			ResourceVersion: res.ResourceVersion,
-			Annotations:     res.Annotations,
-			Labels:          res.Labels,
-		},
-		Spec: v1alpha1.LvmVolumeGroupSpec{
-			ActualVGNameOnTheNode: res.Spec.ActualVGNameOnTheNode,
-			BlockDeviceNames:      res.Spec.BlockDeviceNames,
-			ThinPools:             res.Spec.ThinPools,
-			Type:                  res.Spec.Type,
-		},
-		Status: v1alpha1.LvmVolumeGroupStatus{
-			AllocatedSize: candidate.AllocatedSize,
-			Health:        candidate.Health,
-			Message:       candidate.Message,
-			Nodes:         convertLVMVGNodes(candidate.Nodes),
-			ThinPools:     convertStatusThinPools(candidate.StatusThinPools),
-			VGSize:        candidate.VGSize,
-			VGUuid:        candidate.VGUuid,
-		},
+	lvg.Status = v1alpha1.LvmVolumeGroupStatus{
+		AllocatedSize: candidate.AllocatedSize,
+		Health:        candidate.Health,
+		Message:       candidate.Message,
+		Nodes:         convertLVMVGNodes(candidate.Nodes),
+		ThinPools:     convertStatusThinPools(candidate.StatusThinPools),
+		VGSize:        candidate.VGSize,
+		VGUuid:        candidate.VGUuid,
 	}
 
 	start := time.Now()
-	err := kc.Update(ctx, lvmvg)
+	err := kc.Update(ctx, &lvg)
 	metrics.ApiMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "update").Inc()
 	if err != nil {
 		metrics.ApiMethodsErrors(LVMVolumeGroupDiscoverCtrlName, "update").Inc()
-		return fmt.Errorf(`[UpdateLVMVolumeGroupByCandidate] unable to update LVMVolumeGroup, name: "%s", err: %w`, lvmvg.Name, err)
+		return fmt.Errorf(`[UpdateLVMVolumeGroupByCandidate] unable to update LVMVolumeGroup, name: "%s", err: %w`, lvg.Name, err)
 	}
 
 	return nil
