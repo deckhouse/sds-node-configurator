@@ -48,4 +48,6 @@ const (
 
 	EventActionReady = "Ready"
 	EventReasonReady = "Ready"
+
+	LVMVolumeGroupTag = "storage.deckhouse.io/lvmVolumeGroupName"
 )

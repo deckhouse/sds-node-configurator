@@ -30,23 +30,25 @@ import (
 )
 
 const (
-	ScanInterval     = "SCAN_INTERVAL"
-	NodeName         = "NODE_NAME"
-	LogLevel         = "LOG_LEVEL"
-	MetricsPort      = "METRICS_PORT"
-	MachineID        = "MACHINE_ID"
-	ThrottleInterval = "THROTTLER_INTERVAL"
+	ScanInterval        = "SCAN_INTERVAL"
+	NodeName            = "NODE_NAME"
+	LogLevel            = "LOG_LEVEL"
+	MetricsPort         = "METRICS_PORT"
+	MachineID           = "MACHINE_ID"
+	ThrottleInterval    = "THROTTLER_INTERVAL"
+	CmdDeadlineDuration = "CMD_DEADLINE_DURATION"
 )
 
 type Options struct {
-	MachineId               string
-	NodeName                string
-	Loglevel                logger.Verbosity
-	MetricsPort             string
-	BlockDeviceScanInterval time.Duration
-	VolumeGroupScanInterval time.Duration
-	LLVRequeInterval        time.Duration
-	ThrottleInterval        time.Duration
+	MachineId                  string
+	NodeName                   string
+	Loglevel                   logger.Verbosity
+	MetricsPort                string
+	BlockDeviceScanIntervalSec time.Duration
+	VolumeGroupScanIntervalSec time.Duration
+	LLVRequeueIntervalSec      time.Duration
+	ThrottleIntervalSec        time.Duration
+	CmdDeadlineDurationSec     time.Duration
 }
 
 func NewConfig() (*Options, error) {
@@ -77,29 +79,41 @@ func NewConfig() (*Options, error) {
 
 	scanInt := os.Getenv(ScanInterval)
 	if scanInt == "" {
-		opts.BlockDeviceScanInterval = 5
-		opts.VolumeGroupScanInterval = 5
-		opts.LLVRequeInterval = 5
+		opts.BlockDeviceScanIntervalSec = 5 * time.Second
+		opts.VolumeGroupScanIntervalSec = 5 * time.Second
+		opts.LLVRequeueIntervalSec = 5 * time.Second
 	} else {
 		interval, err := strconv.Atoi(scanInt)
 		if err != nil {
 			return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", ScanInterval, err)
 		}
-		opts.BlockDeviceScanInterval = time.Duration(interval)
-		opts.VolumeGroupScanInterval = time.Duration(interval)
-		opts.LLVRequeInterval = time.Duration(interval)
+		opts.BlockDeviceScanIntervalSec = time.Duration(interval) * time.Second
+		opts.VolumeGroupScanIntervalSec = time.Duration(interval) * time.Second
+		opts.LLVRequeueIntervalSec = time.Duration(interval) * time.Second
 	}
 
 	thrInt := os.Getenv(ThrottleInterval)
 	if thrInt == "" {
-		opts.ThrottleInterval = 3
+		opts.ThrottleIntervalSec = 3 * time.Second
 	} else {
 		interval, err := strconv.Atoi(scanInt)
 		if err != nil {
 			return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", ThrottleInterval, err)
 		}
 
-		opts.ThrottleInterval = time.Duration(interval)
+		opts.ThrottleIntervalSec = time.Duration(interval) * time.Second
+	}
+
+	cmdDur := os.Getenv(CmdDeadlineDuration)
+	if cmdDur == "" {
+		opts.CmdDeadlineDurationSec = 30 * time.Second
+	} else {
+		duration, err := strconv.Atoi(cmdDur)
+		if err != nil {
+			return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", CmdDeadlineDuration, err)
+		}
+
+		opts.CmdDeadlineDurationSec = time.Duration(duration) * time.Second
 	}
 
 	return &opts, nil

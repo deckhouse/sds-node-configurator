@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"reflect"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/internal"
 	"sds-node-configurator/pkg/logger"
@@ -77,9 +76,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		pvIssues := map[string][]string{}
 		lvIssues := map[string][]string{}
 		vg := internal.VGData{VGName: vgName, VGUuid: vgUuid}
-		var err error = nil
 
-		health, _ := checkVGHealth(err, bds, vgIssues, pvIssues, lvIssues, vg)
+		health, _ := checkVGHealth(bds, vgIssues, pvIssues, lvIssues, vg)
 		assert.Equal(t, health, internal.LVMVGHealthOperational)
 	})
 
@@ -95,9 +93,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		pvIssues := map[string][]string{}
 		lvIssues := map[string][]string{}
 		vg := internal.VGData{VGName: vgName, VGUuid: vgUuid}
-		var err error = nil
 
-		health, _ := checkVGHealth(err, bds, vgIssues, pvIssues, lvIssues, vg)
+		health, _ := checkVGHealth(bds, vgIssues, pvIssues, lvIssues, vg)
 		assert.Equal(t, health, internal.LVMVGHealthNonOperational)
 	})
 
@@ -468,10 +465,6 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		}
 
 		expected := v1alpha1.LvmVolumeGroup{
-			TypeMeta: metav1.TypeMeta{
-				Kind:       v1alpha1.LVMVolumeGroupKind,
-				APIVersion: v1alpha1.TypeMediaAPIVersion,
-			},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:            LVMVGName,
 				ResourceVersion: "1",
@@ -560,10 +553,6 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 
 		expected := map[string]v1alpha1.LvmVolumeGroup{
 			LVMVGName: {
-				TypeMeta: metav1.TypeMeta{
-					Kind:       v1alpha1.LVMVolumeGroupKind,
-					APIVersion: v1alpha1.TypeMediaAPIVersion,
-				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:            LVMVGName,
 					ResourceVersion: "1",
@@ -761,10 +750,6 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		}
 
 		expected := v1alpha1.LvmVolumeGroup{
-			TypeMeta: metav1.TypeMeta{
-				Kind:       v1alpha1.LVMVolumeGroupKind,
-				APIVersion: v1alpha1.TypeMediaAPIVersion,
-			},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:            LVMVGName,
 				ResourceVersion: "2",
@@ -799,65 +784,6 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				}
 			}
 		}
-	})
-
-	t.Run("deepEqual_specThinPools_returnsTrue", func(t *testing.T) {
-		size10G, err := resource.ParseQuantity("10G")
-		size1G, err := resource.ParseQuantity("1G")
-		if err != nil {
-			t.Error(err)
-		}
-
-		var (
-			specThinPools = map[string]resource.Quantity{
-				"first":  size10G,
-				"second": size1G,
-			}
-		)
-		candidate := internal.LVMVolumeGroupCandidate{
-			SpecThinPools: specThinPools,
-		}
-
-		lvmVolumeGroup := v1alpha1.LvmVolumeGroup{
-			Spec: v1alpha1.LvmVolumeGroupSpec{
-				ThinPools: convertSpecThinPools(specThinPools),
-			},
-		}
-
-		assert.True(t, reflect.DeepEqual(convertSpecThinPools(candidate.SpecThinPools), lvmVolumeGroup.Spec.ThinPools))
-	})
-
-	t.Run("deepEqual_specThinPools_returnsFalse", func(t *testing.T) {
-		size10G, err := resource.ParseQuantity("10G")
-		size1G, err := resource.ParseQuantity("1G")
-		size2G, err := resource.ParseQuantity("2G")
-		size3G, err := resource.ParseQuantity("3G")
-		if err != nil {
-			t.Error(err)
-		}
-
-		var (
-			specThinPools = map[string]resource.Quantity{
-				"first":  size10G,
-				"second": size1G,
-			}
-
-			anotherSpecThinPools = map[string]resource.Quantity{
-				"third":  size2G,
-				"second": size3G,
-			}
-		)
-		candidate := internal.LVMVolumeGroupCandidate{
-			SpecThinPools: specThinPools,
-		}
-
-		lvmVolumeGroup := v1alpha1.LvmVolumeGroup{
-			Spec: v1alpha1.LvmVolumeGroupSpec{
-				ThinPools: convertSpecThinPools(anotherSpecThinPools),
-			},
-		}
-
-		assert.False(t, reflect.DeepEqual(convertSpecThinPools(candidate.SpecThinPools), lvmVolumeGroup.Spec.ThinPools))
 	})
 
 	t.Run("filterResourcesByNode_returns_current_node_resources", func(t *testing.T) {

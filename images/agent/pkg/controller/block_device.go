@@ -36,18 +36,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
-	blockDeviceCtrlName = "block-device-controller"
+	BlockDeviceCtrlName = "block-device-controller"
 )
 
 func RunBlockDeviceController(
-	ctx context.Context,
 	mgr manager.Manager,
 	cfg config.Options,
 	log logger.Logger,
@@ -55,10 +52,18 @@ func RunBlockDeviceController(
 	sdsCache *cache.Cache,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
-	cache := mgr.GetCache()
 
-	c, err := controller.New(blockDeviceCtrlName, mgr, controller.Options{
+	c, err := controller.New(BlockDeviceCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
+			log.Info("[RunLVMVolumeGroupDiscoverController] Reconciler starts BlockDevice resources reconciliation")
+			shouldRequeue := BlockDeviceReconcile(ctx, cl, log, metrics, cfg, sdsCache)
+			if shouldRequeue {
+				log.Warning(fmt.Sprintf("[RunBlockDeviceController] an error occured while run the Reconciler func, retry in %f", cfg.BlockDeviceScanIntervalSec.Seconds()))
+				return reconcile.Result{
+					RequeueAfter: cfg.BlockDeviceScanIntervalSec,
+				}, nil
+			}
+			log.Info("[RunBlockDeviceController] Reconciler successfully ended BlockDevice resources reconciliation")
 			return reconcile.Result{}, nil
 		}),
 	})
@@ -68,73 +73,65 @@ func RunBlockDeviceController(
 		return nil, err
 	}
 
-	err = c.Watch(source.Kind(cache, &v1alpha1.BlockDevice{}), &handler.EnqueueRequestForObject{})
-	if err != nil {
-		log.Error(err, "[RunBlockDeviceController] unable to controller watch")
+	return c, err
+}
+
+func BlockDeviceReconcile(ctx context.Context, cl kclient.Client, log logger.Logger, metrics monitoring.Metrics, cfg config.Options, sdsCache *cache.Cache) bool {
+	reconcileStart := time.Now()
+
+	log.Info("[RunBlockDeviceController] START reconcile of block devices")
+
+	candidates := GetBlockDeviceCandidates(log, cfg, sdsCache)
+	if len(candidates) == 0 {
+		log.Info("[RunBlockDeviceController] no block devices candidates found. Stop reconciliation")
+		return true
 	}
 
-	log.Info("[RunBlockDeviceController] Start loop scan block devices")
+	apiBlockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
+	if err != nil {
+		log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDevices")
+		return true
+	}
 
-	go func() {
-		for {
-			time.Sleep(cfg.BlockDeviceScanInterval * time.Second)
-			reconcileStart := time.Now()
+	if len(apiBlockDevices) == 0 {
+		log.Debug("[RunBlockDeviceController] no BlockDevice resources were found")
+	}
 
-			log.Info("[RunBlockDeviceController] START reconcile of block devices")
-
-			candidates := GetBlockDeviceCandidates(log, cfg, sdsCache)
-			if len(candidates) == 0 {
-				log.Info("[RunBlockDeviceController] no block devices candidates found. Stop reconciliation")
+	// create new API devices
+	for _, candidate := range candidates {
+		if blockDevice, exist := apiBlockDevices[candidate.Name]; exist {
+			if !hasBlockDeviceDiff(blockDevice.Status, candidate) {
+				log.Debug(fmt.Sprintf(`[RunBlockDeviceController] no data to update for block device, name: "%s"`, candidate.Name))
 				continue
 			}
 
-			apiBlockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
+			if err := UpdateAPIBlockDevice(ctx, cl, metrics, blockDevice, candidate); err != nil {
+				log.Error(err, "[RunBlockDeviceController] unable to update blockDevice, name: %s", blockDevice.Name)
+				continue
+			}
+
+			log.Info(fmt.Sprintf(`[RunBlockDeviceController] updated APIBlockDevice, name: %s`, blockDevice.Name))
+		} else {
+			device, err := CreateAPIBlockDevice(ctx, cl, metrics, candidate)
 			if err != nil {
-				log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDevices")
+				log.Error(err, fmt.Sprintf("[RunBlockDeviceController] unable to create block device blockDevice, name: %s", candidate.Name))
 				continue
 			}
+			log.Info(fmt.Sprintf("[RunBlockDeviceController] created new APIBlockDevice: %s", candidate.Name))
 
-			if len(apiBlockDevices) == 0 {
-				log.Debug("[RunBlockDeviceController] no BlockDevice resources were found")
-			}
-
-			// create new API devices
-			for _, candidate := range candidates {
-				if blockDevice, exist := apiBlockDevices[candidate.Name]; exist {
-					if !hasBlockDeviceDiff(blockDevice.Status, candidate) {
-						log.Debug(fmt.Sprintf(`[RunBlockDeviceController] no data to update for block device, name: "%s"`, candidate.Name))
-						continue
-					}
-
-					if err := UpdateAPIBlockDevice(ctx, cl, metrics, blockDevice, candidate); err != nil {
-						log.Error(err, "[RunBlockDeviceController] unable to update blockDevice, name: %s", blockDevice.Name)
-						continue
-					}
-
-					log.Info(fmt.Sprintf(`[RunBlockDeviceController] updated APIBlockDevice, name: %s`, blockDevice.Name))
-				} else {
-					device, err := CreateAPIBlockDevice(ctx, cl, metrics, candidate)
-					if err != nil {
-						log.Error(err, fmt.Sprintf("[RunBlockDeviceController] unable to create block device blockDevice, name: %s", candidate.Name))
-						continue
-					}
-					log.Info(fmt.Sprintf("[RunBlockDeviceController] created new APIBlockDevice: %s", candidate.Name))
-
-					// add new api device to the map, so it won't be deleted as fantom
-					apiBlockDevices[candidate.Name] = *device
-				}
-			}
-
-			// delete api device if device no longer exists, but we still have its api resource
-			RemoveDeprecatedAPIDevices(ctx, cl, log, metrics, candidates, apiBlockDevices, cfg.NodeName)
-
-			log.Info("[RunBlockDeviceController] END reconcile of block devices")
-			metrics.ReconcileDuration(blockDeviceCtrlName).Observe(metrics.GetEstimatedTimeInSeconds(reconcileStart))
-			metrics.ReconcilesCountTotal(blockDeviceCtrlName).Inc()
+			// add new api device to the map, so it won't be deleted as fantom
+			apiBlockDevices[candidate.Name] = *device
 		}
-	}()
+	}
 
-	return c, err
+	// delete api device if device no longer exists, but we still have its api resource
+	RemoveDeprecatedAPIDevices(ctx, cl, log, metrics, candidates, apiBlockDevices, cfg.NodeName)
+
+	log.Info("[RunBlockDeviceController] END reconcile of block devices")
+	metrics.ReconcileDuration(BlockDeviceCtrlName).Observe(metrics.GetEstimatedTimeInSeconds(reconcileStart))
+	metrics.ReconcilesCountTotal(BlockDeviceCtrlName).Inc()
+
+	return false
 }
 
 func hasBlockDeviceDiff(res v1alpha1.BlockDeviceStatus, candidate internal.BlockDeviceCandidate) bool {
@@ -158,21 +155,14 @@ func hasBlockDeviceDiff(res v1alpha1.BlockDeviceStatus, candidate internal.Block
 }
 
 func GetAPIBlockDevices(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics) (map[string]v1alpha1.BlockDevice, error) {
-	listDevice := &v1alpha1.BlockDeviceList{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       v1alpha1.BlockDeviceKind,
-			APIVersion: v1alpha1.TypeMediaAPIVersion,
-		},
-		ListMeta: metav1.ListMeta{},
-		Items:    []v1alpha1.BlockDevice{},
-	}
+	listDevice := &v1alpha1.BlockDeviceList{}
 
 	start := time.Now()
 	err := kc.List(ctx, listDevice)
-	metrics.ApiMethodsDuration(blockDeviceCtrlName, "list").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(blockDeviceCtrlName, "list").Inc()
+	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "list").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(BlockDeviceCtrlName, "list").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(blockDeviceCtrlName, "list").Inc()
+		metrics.ApiMethodsErrors(BlockDeviceCtrlName, "list").Inc()
 		return nil, fmt.Errorf("unable to kc.List, error: %w", err)
 	}
 
@@ -503,16 +493,43 @@ func readSerialBlockDevice(deviceName string, isMdRaid bool) (string, error) {
 	return string(serial), nil
 }
 
-func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, res v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {
+func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, blockDevice v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {
+	blockDevice.Status = v1alpha1.BlockDeviceStatus{
+		Type:                  candidate.Type,
+		FsType:                candidate.FSType,
+		NodeName:              candidate.NodeName,
+		Consumable:            candidate.Consumable,
+		PVUuid:                candidate.PVUuid,
+		VGUuid:                candidate.VGUuid,
+		PartUUID:              candidate.PartUUID,
+		LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
+		ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
+		Wwn:                   candidate.Wwn,
+		Serial:                candidate.Serial,
+		Path:                  candidate.Path,
+		Size:                  *resource.NewQuantity(candidate.Size.Value(), resource.BinarySI),
+		Model:                 candidate.Model,
+		Rota:                  candidate.Rota,
+		HotPlug:               candidate.HotPlug,
+		MachineID:             candidate.MachineId,
+	}
+
+	start := time.Now()
+	err := kc.Update(ctx, &blockDevice)
+	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(BlockDeviceCtrlName, "update").Inc()
+	if err != nil {
+		metrics.ApiMethodsErrors(BlockDeviceCtrlName, "update").Inc()
+		return err
+	}
+
+	return nil
+}
+
+func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, candidate internal.BlockDeviceCandidate) (*v1alpha1.BlockDevice, error) {
 	device := &v1alpha1.BlockDevice{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       v1alpha1.BlockDeviceKind,
-			APIVersion: v1alpha1.TypeMediaAPIVersion,
-		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:            res.Name,
-			ResourceVersion: res.ResourceVersion,
-			OwnerReferences: res.OwnerReferences,
+			Name: candidate.Name,
 		},
 		Status: v1alpha1.BlockDeviceStatus{
 			Type:                  candidate.Type,
@@ -530,60 +547,16 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 			Size:                  *resource.NewQuantity(candidate.Size.Value(), resource.BinarySI),
 			Model:                 candidate.Model,
 			Rota:                  candidate.Rota,
-			HotPlug:               candidate.HotPlug,
-			MachineID:             candidate.MachineId,
-		},
-	}
-
-	start := time.Now()
-	err := kc.Update(ctx, device)
-	metrics.ApiMethodsDuration(blockDeviceCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(blockDeviceCtrlName, "update").Inc()
-	if err != nil {
-		metrics.ApiMethodsErrors(blockDeviceCtrlName, "update").Inc()
-		return err
-	}
-
-	return nil
-}
-
-func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, candidate internal.BlockDeviceCandidate) (*v1alpha1.BlockDevice, error) {
-	candidateSizeTmp := resource.NewQuantity(candidate.Size.Value(), resource.BinarySI)
-	device := &v1alpha1.BlockDevice{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       v1alpha1.BlockDeviceKind,
-			APIVersion: v1alpha1.TypeMediaAPIVersion,
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            candidate.Name,
-			OwnerReferences: []metav1.OwnerReference{},
-		},
-		Status: v1alpha1.BlockDeviceStatus{
-			Type:                  candidate.Type,
-			FsType:                candidate.FSType,
-			NodeName:              candidate.NodeName,
-			Consumable:            candidate.Consumable,
-			PVUuid:                candidate.PVUuid,
-			VGUuid:                candidate.VGUuid,
-			PartUUID:              candidate.PartUUID,
-			LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
-			ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
-			Wwn:                   candidate.Wwn,
-			Serial:                candidate.Serial,
-			Path:                  candidate.Path,
-			Size:                  *resource.NewQuantity(candidateSizeTmp.Value(), resource.BinarySI),
-			Model:                 candidate.Model,
-			Rota:                  candidate.Rota,
 			MachineID:             candidate.MachineId,
 		},
 	}
 
 	start := time.Now()
 	err := kc.Create(ctx, device)
-	metrics.ApiMethodsDuration(blockDeviceCtrlName, "create").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(blockDeviceCtrlName, "create").Inc()
+	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "create").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(BlockDeviceCtrlName, "create").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(blockDeviceCtrlName, "create").Inc()
+		metrics.ApiMethodsErrors(BlockDeviceCtrlName, "create").Inc()
 		return nil, err
 	}
 	return device, nil
@@ -602,25 +575,25 @@ func DeleteAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 
 	start := time.Now()
 	err := kc.Delete(ctx, device)
-	metrics.ApiMethodsDuration(blockDeviceCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(blockDeviceCtrlName, "delete").Inc()
+	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.ApiMethodsExecutionCount(BlockDeviceCtrlName, "delete").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(blockDeviceCtrlName, "delete").Inc()
+		metrics.ApiMethodsErrors(BlockDeviceCtrlName, "delete").Inc()
 		return err
 	}
 	return nil
 }
 
-func ReTag(log logger.Logger, metrics monitoring.Metrics) error {
+func ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics) error {
 	// thin pool
 	log.Debug("[ReTag] start re-tagging LV")
 	start := time.Now()
-	lvs, cmdStr, _, err := utils.GetAllLVs()
-	metrics.UtilsCommandsDuration(blockDeviceCtrlName, "lvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(blockDeviceCtrlName, "lvs").Inc()
+	lvs, cmdStr, _, err := utils.GetAllLVs(ctx)
+	metrics.UtilsCommandsDuration(BlockDeviceCtrlName, "lvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(BlockDeviceCtrlName, "lvs").Inc()
 	log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
 	if err != nil {
-		metrics.UtilsCommandsErrorsCount(blockDeviceCtrlName, "lvs").Inc()
+		metrics.UtilsCommandsErrorsCount(BlockDeviceCtrlName, "lvs").Inc()
 		log.Error(err, "[ReTag] unable to GetAllLVs")
 		return err
 	}
@@ -635,22 +608,22 @@ func ReTag(log logger.Logger, metrics monitoring.Metrics) error {
 			if strings.Contains(tag, internal.LVMTags[1]) {
 				start = time.Now()
 				cmdStr, err = utils.LVChangeDelTag(lv, tag)
-				metrics.UtilsCommandsDuration(blockDeviceCtrlName, "lvchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
-				metrics.UtilsCommandsExecutionCount(blockDeviceCtrlName, "lvchange").Inc()
+				metrics.UtilsCommandsDuration(BlockDeviceCtrlName, "lvchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
+				metrics.UtilsCommandsExecutionCount(BlockDeviceCtrlName, "lvchange").Inc()
 				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
 				if err != nil {
-					metrics.UtilsCommandsErrorsCount(blockDeviceCtrlName, "lvchange").Inc()
+					metrics.UtilsCommandsErrorsCount(BlockDeviceCtrlName, "lvchange").Inc()
 					log.Error(err, "[ReTag] unable to LVChangeDelTag")
 					return err
 				}
 
 				start = time.Now()
 				cmdStr, err = utils.VGChangeAddTag(lv.VGName, internal.LVMTags[0])
-				metrics.UtilsCommandsDuration(blockDeviceCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
-				metrics.UtilsCommandsExecutionCount(blockDeviceCtrlName, "vgchange").Inc()
+				metrics.UtilsCommandsDuration(BlockDeviceCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
+				metrics.UtilsCommandsExecutionCount(BlockDeviceCtrlName, "vgchange").Inc()
 				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
 				if err != nil {
-					metrics.UtilsCommandsErrorsCount(blockDeviceCtrlName, "vgchange").Inc()
+					metrics.UtilsCommandsErrorsCount(BlockDeviceCtrlName, "vgchange").Inc()
 					log.Error(err, "[ReTag] unable to VGChangeAddTag")
 					return err
 				}
@@ -661,12 +634,12 @@ func ReTag(log logger.Logger, metrics monitoring.Metrics) error {
 
 	log.Debug("[ReTag] start re-tagging LVM")
 	start = time.Now()
-	vgs, cmdStr, _, err := utils.GetAllVGs()
-	metrics.UtilsCommandsDuration(blockDeviceCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(blockDeviceCtrlName, "vgs").Inc()
+	vgs, cmdStr, _, err := utils.GetAllVGs(ctx)
+	metrics.UtilsCommandsDuration(BlockDeviceCtrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(BlockDeviceCtrlName, "vgs").Inc()
 	log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
 	if err != nil {
-		metrics.UtilsCommandsErrorsCount(blockDeviceCtrlName, cmdStr).Inc()
+		metrics.UtilsCommandsErrorsCount(BlockDeviceCtrlName, cmdStr).Inc()
 		log.Error(err, "[ReTag] unable to GetAllVGs")
 		return err
 	}
@@ -681,22 +654,22 @@ func ReTag(log logger.Logger, metrics monitoring.Metrics) error {
 			if strings.Contains(tag, internal.LVMTags[1]) {
 				start = time.Now()
 				cmdStr, err = utils.VGChangeDelTag(vg.VGName, tag)
-				metrics.UtilsCommandsDuration(blockDeviceCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
-				metrics.UtilsCommandsExecutionCount(blockDeviceCtrlName, "vgchange").Inc()
+				metrics.UtilsCommandsDuration(BlockDeviceCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
+				metrics.UtilsCommandsExecutionCount(BlockDeviceCtrlName, "vgchange").Inc()
 				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
 				if err != nil {
-					metrics.UtilsCommandsErrorsCount(blockDeviceCtrlName, "vgchange").Inc()
+					metrics.UtilsCommandsErrorsCount(BlockDeviceCtrlName, "vgchange").Inc()
 					log.Error(err, "[ReTag] unable to VGChangeDelTag")
 					return err
 				}
 
 				start = time.Now()
 				cmdStr, err = utils.VGChangeAddTag(vg.VGName, internal.LVMTags[0])
-				metrics.UtilsCommandsDuration(blockDeviceCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
-				metrics.UtilsCommandsExecutionCount(blockDeviceCtrlName, "vgchange").Inc()
+				metrics.UtilsCommandsDuration(BlockDeviceCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
+				metrics.UtilsCommandsExecutionCount(BlockDeviceCtrlName, "vgchange").Inc()
 				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
 				if err != nil {
-					metrics.UtilsCommandsErrorsCount(blockDeviceCtrlName, "vgchange").Inc()
+					metrics.UtilsCommandsErrorsCount(BlockDeviceCtrlName, "vgchange").Inc()
 					log.Error(err, "[ReTag] unable to VGChangeAddTag")
 					return err
 				}
