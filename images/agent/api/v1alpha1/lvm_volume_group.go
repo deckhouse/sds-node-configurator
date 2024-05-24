@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"time"
 )
 
 type LvmVolumeGroupList struct {
@@ -79,13 +78,5 @@ type LvmVolumeGroupStatus struct {
 	VGSize        resource.Quantity    `json:"vgSize"`
 	VGUuid        string               `json:"vgUUID"`
 	Phase         string               `json:"phase"`
-}
-
-type Condition struct {
-	Type               string    `json:"type"`
-	Status             bool      `json:"status"`
-	Reason             string    `json:"reason"`
-	Message            string    `json:"message"`
-	lastTransitionTime time.Time `json:"lastTransitionTime"`
-	observedGeneration int       `json:"observedGeneration"`
+	Conditions    []metav1.Condition   `json:"conditions"`
 }

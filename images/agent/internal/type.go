@@ -61,6 +61,8 @@ type LVMVGStatusThinPool struct {
 	Name       string
 	ActualSize resource.Quantity
 	UsedSize   resource.Quantity
+	Ready      bool
+	Message    string
 }
 
 type LVMVGDevice struct {

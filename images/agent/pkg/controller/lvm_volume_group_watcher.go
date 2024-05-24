@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"k8s.io/utils/strings/slices"
 	"reflect"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/internal"
@@ -46,6 +47,8 @@ import (
 
 const (
 	LVMVolumeGroupWatcherCtrlName = "lvm-volume-group-watcher-controller"
+
+	VGConfigurationAppliedType = "VGConfigurationApplied"
 )
 
 func RunLVMVolumeGroupWatcherController(
@@ -273,6 +276,17 @@ func runEventReconcile(
 func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
 
+	_, exist := lvg.Annotations[delAnnotation]
+	if lvg.DeletionTimestamp != nil && !exist {
+		err := updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, lvg, NonOperational, fmt.Sprintf("to delete the LVG annotate it with %s", delAnnotation))
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to update the LVMVolumeGroup %s", lvg.Name))
+			return true, err
+		}
+
+		return false, nil
+	}
+
 	log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] check if VG %s of the LVMVolumeGroup %s uses LVs", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 	usedLVs := checkIfVGHasLV(sdsCache, lvg.Spec.ActualVGNameOnTheNode)
 
@@ -297,8 +311,40 @@ func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Lo
 		return true, err
 	}
 
+	removed, err := removeLVGFinalizerIfExist(ctx, cl, lvg)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to remove a finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+		return true, err
+	}
+
+	if removed {
+		log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] successfully removed a finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+	} else {
+		log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] no need to remove a finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+	}
+
 	log.Info(fmt.Sprintf("[reconcileLVGDeleteFunc] successfully deleted VG %s of the LVMVolumeGroup %s", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 	return false, nil
+}
+
+func removeLVGFinalizerIfExist(ctx context.Context, cl client.Client, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
+	if !slices.Contains(lvg.Finalizers, internal.SdsNodeConfiguratorFinalizer) {
+		return false, nil
+	}
+
+	for i := range lvg.Finalizers {
+		if lvg.Finalizers[i] == internal.SdsNodeConfiguratorFinalizer {
+			lvg.Finalizers = append(lvg.Finalizers[:i], lvg.Finalizers[i+1:]...)
+			break
+		}
+	}
+
+	err := cl.Update(ctx, lvg)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 func checkIfVGHasLV(ch *cache.Cache, vgName string) []string {
@@ -315,6 +361,19 @@ func checkIfVGHasLV(ch *cache.Cache, vgName string) []string {
 
 func reconcileLVGUpdateFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
+
+	log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] tries to add a finalizer to the LVMVolumeGroup %s", lvg.Name))
+	added, err := addLVGFinalizerIfNotExist(ctx, cl, lvg)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to add a finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+		return true, err
+	}
+
+	if added {
+		log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] successfully added a finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+	} else {
+		log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] no need to add a finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+	}
 
 	log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] tries to validate the LVMVolumeGroup %s", lvg.Name))
 	pvs, _ := sdsCache.GetPVs()
@@ -569,6 +628,18 @@ func tryGetVG(sdsCache *cache.Cache, vgName string) (bool, internal.VGData) {
 
 func reconcileLVGCreateFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
+	log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] tries to add a finalizer to the LVMVolumeGroup %s", lvg.Name))
+	added, err := addLVGFinalizerIfNotExist(ctx, cl, lvg)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to add a finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+		return true, err
+	}
+
+	if added {
+		log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] successfully added a finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+	} else {
+		log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] no need to add a finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+	}
 
 	log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] tries to validate the LVMVolumeGroup %s", lvg.Name))
 	valid, reason := validateLVGForCreateFunc(log, lvg, blockDevices)
@@ -584,7 +655,7 @@ func reconcileLVGCreateFunc(ctx context.Context, cl client.Client, log logger.Lo
 	log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] successfully validated the LVMVolumeGroup %s", lvg.Name))
 
 	log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] tries to create VG for the LVMVolumeGroup %s", lvg.Name))
-	err := CreateVGComplex(metrics, log, lvg, blockDevices)
+	err = CreateVGComplex(metrics, log, lvg, blockDevices)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to create VG for the LVMVolumeGroup %s", lvg.Name))
 		err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, lvg, NonOperational, err.Error())
@@ -619,6 +690,21 @@ func reconcileLVGCreateFunc(ctx context.Context, cl client.Client, log logger.Lo
 	}
 
 	return false, nil
+}
+
+func addLVGFinalizerIfNotExist(ctx context.Context, cl client.Client, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
+	if slices.Contains(lvg.Finalizers, internal.SdsNodeConfiguratorFinalizer) {
+		return false, nil
+	}
+
+	lvg.Finalizers = append(lvg.Finalizers, internal.SdsNodeConfiguratorFinalizer)
+	lvg.Status.Health = Operational
+	err := cl.Update(ctx, lvg)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 func validateSpecBlockDevices(lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
@@ -823,7 +909,6 @@ func identifyLVGReconcileFunc(lvg *v1alpha1.LvmVolumeGroup, sdsCache *cache.Cach
 
 func shouldReconcileLVGByCreateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cache) bool {
 	_, exist := lvg.Annotations[delAnnotation]
-	//TODO: probably remove DeletionTimestamp in a future
 	if lvg.DeletionTimestamp != nil || exist {
 		return false
 	}
@@ -840,7 +925,6 @@ func shouldReconcileLVGByCreateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cach
 
 func shouldReconcileLVGByUpdateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cache) bool {
 	_, exist := lvg.Annotations[delAnnotation]
-	//TODO: probably remove DeletionTimestamp in a future
 	if lvg.DeletionTimestamp != nil || exist {
 		return false
 	}
@@ -857,7 +941,7 @@ func shouldReconcileLVGByUpdateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cach
 
 func shouldReconcileLVGByDeleteFunc(lvg *v1alpha1.LvmVolumeGroup) bool {
 	_, exist := lvg.Annotations[delAnnotation]
-	if exist {
+	if lvg.DeletionTimestamp != nil || exist {
 		return true
 	}
 

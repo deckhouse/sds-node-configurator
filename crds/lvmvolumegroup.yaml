@@ -105,7 +105,7 @@ spec:
                           - Ready
                           - ""
                       status:
-                        type: boolean
+                        type: string
                       reason:
                         type: string
                       message:
@@ -206,7 +206,8 @@ spec:
                               type: string
                               description: |
                                 The name of the corresponding block device resource.
-
+      subresources:
+        status: {}
       additionalPrinterColumns:
         - jsonPath: .status.health
           name: health

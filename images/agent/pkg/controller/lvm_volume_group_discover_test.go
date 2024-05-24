@@ -843,7 +843,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			},
 		}
 
-		actual := filterResourcesByNode(ctx, cl, testLogger, lvs, blockDevices, currentNode)
+		actual := filterLVGsByNode(ctx, cl, testLogger, lvs, blockDevices, currentNode)
 
 		assert.Equal(t, expected, actual)
 	})
@@ -896,7 +896,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			}
 		)
 
-		actual := filterResourcesByNode(ctx, cl, testLogger, lvs, blockDevices, currentNode)
+		actual := filterLVGsByNode(ctx, cl, testLogger, lvs, blockDevices, currentNode)
 
 		assert.Equal(t, 0, len(actual))
 	})

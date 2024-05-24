@@ -58,7 +58,7 @@ func updateLVMVolumeGroupHealthStatus(ctx context.Context, cl client.Client, met
 	lvg.Status.Message = message
 
 	start := time.Now()
-	err := cl.Update(ctx, lvg)
+	err := cl.Status().Update(ctx, lvg)
 	metrics.ApiMethodsDuration(LVMVolumeGroupWatcherCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.ApiMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "update").Inc()
 	if err != nil {
