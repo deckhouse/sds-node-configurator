@@ -27,8 +27,8 @@ var (
 
 	resizeOn = false
 
-	ctx = context.Background()
-	cl  client.Client
+	ctx   = context.Background()
+	e2eCL client.Client
 
 	resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
 		v1alpha1.AddToScheme,
@@ -46,7 +46,7 @@ func BenchmarkRunThickLLVCreationSingleThread(b *testing.B) {
 	b.StartTimer()
 	for i := 0; i < lvCount; i++ {
 		llv := configureTestThickLLV(fmt.Sprintf("test-llv-%d", i), lvgName)
-		err := cl.Create(ctx, llv)
+		err := e2eCL.Create(ctx, llv)
 		if err != nil {
 			b.Logf("unable to create test LLV %s, err: %s", llv.Name, err.Error())
 		}
@@ -56,7 +56,7 @@ func BenchmarkRunThickLLVCreationSingleThread(b *testing.B) {
 
 	succeeded := 0
 	for succeeded < len(llvNames) {
-		llvs, err := getAllLLV(ctx, cl)
+		llvs, err := getAllLLV(ctx, e2eCL)
 		if err != nil {
 			b.Error(err)
 			continue
@@ -86,7 +86,7 @@ func BenchmarkRunThickLLVCreationSingleThread(b *testing.B) {
 						}
 
 						llv.Spec.Size.Add(add)
-						err = cl.Update(ctx, &llv)
+						err = e2eCL.Update(ctx, &llv)
 						if err != nil {
 							b.Logf(err.Error())
 							continue
@@ -110,7 +110,7 @@ func BenchmarkRunThinLLVCreationSingleThread(b *testing.B) {
 	b.StartTimer()
 	for i := 0; i < lvCount; i++ {
 		llv := configureTestThinLLV(fmt.Sprintf("test-llv-%d", i), lvgName, poolName)
-		err := cl.Create(ctx, llv)
+		err := e2eCL.Create(ctx, llv)
 		if err != nil {
 			b.Logf("unable to create test LLV %s, err: %s", llv.Name, err.Error())
 			continue
@@ -121,7 +121,7 @@ func BenchmarkRunThinLLVCreationSingleThread(b *testing.B) {
 
 	succeeded := 0
 	for succeeded < len(llvNames) {
-		llvs, err := getAllLLV(ctx, cl)
+		llvs, err := getAllLLV(ctx, e2eCL)
 		if err != nil {
 			b.Error(err)
 			continue
@@ -151,7 +151,7 @@ func BenchmarkRunThinLLVCreationSingleThread(b *testing.B) {
 						}
 
 						llv.Spec.Size.Add(add)
-						err = cl.Update(ctx, &llv)
+						err = e2eCL.Update(ctx, &llv)
 						if err != nil {
 							b.Logf(err.Error())
 							continue
@@ -242,7 +242,7 @@ func init() {
 		Scheme: scheme,
 	}
 
-	cl, err = client.New(config, options)
+	e2eCL, err = client.New(config, options)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)

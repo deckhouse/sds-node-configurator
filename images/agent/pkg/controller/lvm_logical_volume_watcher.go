@@ -138,10 +138,10 @@ func RunLVMLogicalVolumeWatcherController(
 		// 	}
 		// 	log.Trace("[RunLVMLogicalVolumeWatcherController] DeleteFunc got LVMLogicalVolume: ", llv.Name, llv)
 
-		// 	lvg, err := getLVMVolumeGroup(ctx, cl, metrics, "", llv.Spec.LvmVolumeGroupName)
+		// 	lvg, err := getLVMVolumeGroup(ctx, e2eCL, metrics, "", llv.Spec.LvmVolumeGroupName)
 		// 	if err != nil {
 		// 		log.Error(err, fmt.Sprintf("[DeleteFunc] unable to get the LVMVolumeGroup, name: %q. Skip deletion of the LVMLogicalVolume %q", llv.Spec.LvmVolumeGroupName, llv.Name))
-		// 		err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get selected LVMVolumeGroup, err: %s", err.Error()))
+		// 		err = updateLVMLogicalVolumePhase(ctx, e2eCL, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get selected LVMVolumeGroup, err: %s", err.Error()))
 		// 		if err != nil {
 		// 			log.Error(err, "[DeleteFunc] unable to update LVMLogicalVolume Phase")
 		// 		}
@@ -347,7 +347,7 @@ func reconcileLLVUpdateFunc(
 		// freeSpace, err := getFreeLVSpace(log, llv.Spec.Thin.PoolName)
 		// if err != nil {
 		// 	log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to count free space in Thin-pool, name: %s", llv.Spec.Thin.PoolName))
-		// 	err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to count free Thin-pool space, err: %s", err.Error()))
+		// 	err = updateLVMLogicalVolumePhase(ctx, e2eCL, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to count free Thin-pool space, err: %s", err.Error()))
 		// 	if err != nil {
 		// 		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
 		// 	}
@@ -359,7 +359,7 @@ func reconcileLLVUpdateFunc(
 		// if freeSpace.Value() < extendingSize.Value() {
 		// 	err = errors.New("not enough space")
 		// 	log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s requested size is more than the Thin-pool %s free space", llv.Name, llv.Spec.Thin.PoolName))
-		// 	err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, "Not enough space in a Thin-pool")
+		// 	err = updateLVMLogicalVolumePhase(ctx, e2eCL, log, metrics, llv, failedStatusPhase, "Not enough space in a Thin-pool")
 		// 	if err != nil {
 		// 		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
 		// 	}
@@ -513,7 +513,7 @@ func reconcileLLVCreateFunc(
 		// freeSpace, err := getFreeLVSpace(log, llv.Spec.Thin.PoolName)
 		// if err != nil {
 		// 	log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to count free space in LV, name: %s", llv.Spec.Thin.PoolName))
-		// 	err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get free LV space, err: %s", err.Error()))
+		// 	err = updateLVMLogicalVolumePhase(ctx, e2eCL, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get free LV space, err: %s", err.Error()))
 		// 	if err != nil {
 		// 		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume, name: %s", llv.Name))
 		// 	}
@@ -525,7 +525,7 @@ func reconcileLLVCreateFunc(
 		// if freeSpace.Value() < llv.Spec.Size.Value() {
 		// 	err = errors.New("not enough space")
 		// 	log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s requested size is more than the Thin-pool %s free space", llv.Name, llv.Spec.Thin.PoolName))
-		// 	err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Not enough space in Thin-pool %s in LVMVolumeGroup %s", llv.Spec.Thin.PoolName, lvg.Name))
+		// 	err = updateLVMLogicalVolumePhase(ctx, e2eCL, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Not enough space in Thin-pool %s in LVMVolumeGroup %s", llv.Spec.Thin.PoolName, lvg.Name))
 		// 	if err != nil {
 		// 		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume, name: %s", llv.Name))
 		// 	}

@@ -56,6 +56,7 @@ func RunBlockDeviceController(
 	c, err := controller.New(BlockDeviceCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 			log.Info("[RunLVMVolumeGroupDiscoverController] Reconciler starts BlockDevice resources reconciliation")
+
 			shouldRequeue := BlockDeviceReconcile(ctx, cl, log, metrics, cfg, sdsCache)
 			if shouldRequeue {
 				log.Warning(fmt.Sprintf("[RunBlockDeviceController] an error occured while run the Reconciler func, retry in %f", cfg.BlockDeviceScanIntervalSec.Seconds()))

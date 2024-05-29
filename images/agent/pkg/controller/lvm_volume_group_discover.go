@@ -43,8 +43,6 @@ import (
 
 const (
 	LVMVolumeGroupDiscoverCtrlName = "lvm-volume-group-discover-controller"
-
-	VGReadyType = "VGReady"
 )
 
 func RunLVMVolumeGroupDiscoverController(
@@ -59,9 +57,10 @@ func RunLVMVolumeGroupDiscoverController(
 	c, err := controller.New(LVMVolumeGroupDiscoverCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 			log.Info("[RunLVMVolumeGroupDiscoverController] Reconciler starts LVMVolumeGroup resources reconciliation")
+
 			shouldRequeue := LVMVolumeGroupDiscoverReconcile(ctx, cl, metrics, log, cfg, sdsCache)
 			if shouldRequeue {
-				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error occured while run the Reconciler func, retry in %fs", cfg.VolumeGroupScanIntervalSec.Seconds()))
+				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error occured while run the Reconciler func, retry in %s", cfg.VolumeGroupScanIntervalSec.String()))
 				return reconcile.Result{
 					RequeueAfter: cfg.VolumeGroupScanIntervalSec,
 				}, nil
@@ -97,6 +96,11 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 	if err != nil {
 		log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to GetAPIBlockDevices")
 		for _, lvg := range currentLVMVGs {
+			err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGReadyType, "NoBlockDevices", fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()))
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+			}
+
 			if err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, &lvg, NonOperational, err.Error()); err != nil {
 				log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvg.Name))
 			}
@@ -117,6 +121,11 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 		log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to run GetLVMVolumeGroupCandidates")
 		for _, lvg := range filteredLVGs {
 			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] turn LVMVolumeGroup %s to non operational. LVG struct: %+v ", lvg.Name, lvg))
+			err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGReadyType, "DataConfigurationFailed", fmt.Sprintf("unable to configure data, err: %s", err.Error()))
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+			}
+
 			if updtErr := updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, &lvg, NonOperational, err.Error()); err != nil {
 				log.Error(updtErr, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvg.Name))
 			}
@@ -129,13 +138,32 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 		log.Debug("[RunLVMVolumeGroupDiscoverController] no candidates were found on the node")
 	}
 
+	shouldRequeue := false
 	for _, candidate := range candidates {
 		if lvg, exist := filteredLVGs[candidate.ActualVGNameOnTheNode]; exist {
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is already exist. Tries to update it", lvg.Name))
 			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] candidate: %v", candidate))
 			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] lvg: %v", lvg))
+			if vgConfigurationAppliedCon := tryGetConditionByType(lvg.Status.Conditions, internal.VGConfigurationAppliedType); vgConfigurationAppliedCon == nil ||
+				vgConfigurationAppliedCon.Status == metav1.ConditionFalse {
+				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the condition %s of the LVMVolumeGroup %s has an improper state condition, retry in %s", internal.VGConfigurationAppliedType, lvg.Name, cfg.VolumeGroupScanIntervalSec.String()))
+				shouldRequeue = true
+
+				err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGReadyType, "ConfigurationDoesNotApplied", fmt.Sprintf("improper state if the condition %s", internal.VGConfigurationAppliedType))
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+				}
+
+				continue
+			}
+
 			if !hasLVMVolumeGroupDiff(log, lvg, candidate) {
 				log.Debug(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] no data to update for LvmVolumeGroup, name: "%s"`, lvg.Name))
+				err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGReadyType, "Updated", "ready to create LV")
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+					shouldRequeue = true
+				}
 				continue
 			}
 
@@ -143,25 +171,55 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 			if err = UpdateLVMVolumeGroupByCandidate(ctx, cl, metrics, lvg, candidate); err != nil {
 				log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to update LvmVolumeGroup, name: "%s". Requeue the request in %s`,
 					lvg.Name, cfg.VolumeGroupScanIntervalSec.String()))
-				return true
+
+				err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGReadyType, "UpdateFailed", fmt.Sprintf("unable to update lvg, err: %s", err.Error()))
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+				}
+				shouldRequeue = true
 			}
 
 			log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] updated LvmVolumeGroup, name: "%s"`, lvg.Name))
+			err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGReadyType, "Updated", "ready to create LV")
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+				shouldRequeue = true
+			}
 		} else {
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is not yet created. Create it", lvg.Name))
-			lvm, err := CreateLVMVolumeGroup(ctx, log, metrics, cl, candidate)
+			lvm, err := CreateLVMVolumeGroupByCandidate(ctx, log, metrics, cl, candidate)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to CreateLVMVolumeGroup %s. Requeue the request in %s", candidate.LVMVGName, cfg.VolumeGroupScanIntervalSec.String()))
-				return true
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to CreateLVMVolumeGroupByCandidate %s. Requeue the request in %s", candidate.LVMVGName, cfg.VolumeGroupScanIntervalSec.String()))
+				shouldRequeue = true
+				continue
+			}
+
+			err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGConfigurationAppliedType, "Success", "all configuration has been applied")
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+				shouldRequeue = true
+				continue
+			}
+
+			err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGReadyType, "Updated", "ready to create LV")
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+				shouldRequeue = true
+				continue
 			}
 
 			log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] created new APILVMVolumeGroup, name: "%s"`, lvm.Name))
 		}
 	}
 
+	if shouldRequeue {
+		log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] some problems have been occurred while iterating the lvmvolumegroup resources. Retry the reconcile in %s", cfg.VolumeGroupScanIntervalSec.String()))
+		return true
+	}
+
 	err = ClearLVMVolumeGroupResources(ctx, cl, log, metrics, candidates, filteredLVGs, cfg.NodeName)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error has occurred while clearing the LVMVolumeGroups resources. Requeue the request in %s", cfg.VolumeGroupScanIntervalSec.Seconds()))
+		log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error has occurred while clearing the LVMVolumeGroups resources. Requeue the request in %s", cfg.VolumeGroupScanIntervalSec.String()))
 		return true
 	}
 
@@ -169,6 +227,16 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 	metrics.ReconcileDuration(LVMVolumeGroupDiscoverCtrlName).Observe(metrics.GetEstimatedTimeInSeconds(reconcileStart))
 	metrics.ReconcilesCountTotal(LVMVolumeGroupDiscoverCtrlName).Inc()
 	return false
+}
+
+func tryGetConditionByType(conditions []metav1.Condition, conType string) *metav1.Condition {
+	for _, c := range conditions {
+		if c.Type == conType {
+			return &c
+		}
+	}
+
+	return nil
 }
 
 func filterLVGsByNode(
@@ -727,7 +795,7 @@ func getBlockDevicesNames(bds map[string][]v1alpha1.BlockDevice, vg internal.VGD
 	return names
 }
 
-func CreateLVMVolumeGroup(
+func CreateLVMVolumeGroupByCandidate(
 	ctx context.Context,
 	log logger.Logger,
 	metrics monitoring.Metrics,
@@ -820,6 +888,7 @@ func UpdateLVMVolumeGroupByCandidate(
 		ThinPools:     convertStatusThinPools(candidate.StatusThinPools),
 		VGSize:        candidate.VGSize,
 		VGUuid:        candidate.VGUuid,
+		Conditions:    lvg.Status.Conditions,
 	}
 
 	start := time.Now()

@@ -72,9 +72,9 @@ func main() {
 	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.NodeName, cfgParams.NodeName))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.MachineID, cfgParams.MachineId))
-	log.Info(fmt.Sprintf("[main] %s = %d", config.ScanInterval, cfgParams.BlockDeviceScanIntervalSec))
-	log.Info(fmt.Sprintf("[main] %s = %d", config.ThrottleInterval, cfgParams.ThrottleIntervalSec))
-	log.Info(fmt.Sprintf("[main] %s = %d", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDurationSec))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.BlockDeviceScanIntervalSec.String()))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.ThrottleInterval, cfgParams.ThrottleIntervalSec.String()))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDurationSec.String()))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {

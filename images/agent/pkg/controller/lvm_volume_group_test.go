@@ -206,6 +206,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
        "type": "local"
    },
    "status": {
+       "conditions": null,
        "allocatedSize": "20G",
        "health": "operational",
        "message": "all-good",
@@ -242,11 +243,14 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
                "name": "node2"
            }
        ],
+       "phase": "",
        "thinPools": [
            {
                "name": "test-name",
                "actualSize": "1G",
-				"usedSize": "500M"
+				"usedSize": "500M",
+               "ready": true,
+               "message": ""
            }
        ],
        "vgSize": "30G",
@@ -319,6 +323,8 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 						Name:       "test-name",
 						ActualSize: *convertSize("1G", t),
 						UsedSize:   resource.MustParse("500M"),
+						Ready:      true,
+						Message:    "",
 					},
 				},
 				VGSize: resource.MustParse("30G"),

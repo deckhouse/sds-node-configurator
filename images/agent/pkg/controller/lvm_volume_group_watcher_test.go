@@ -13,7 +13,7 @@ package controller
 //)
 //
 //func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
-//	cl := NewFakeClient()
+//	e2eCL := NewFakeClient()
 //	ctx := context.Background()
 //	metrics := monitoring.GetMetrics("")
 //	namespace := "test"
@@ -27,19 +27,19 @@ package controller
 //			},
 //		}
 //
-//		err := cl.Create(ctx, testObj)
+//		err := e2eCL.Create(ctx, testObj)
 //		if err != nil {
 //			t.Error(err)
 //		} else {
 //			defer func() {
-//				err = cl.Delete(ctx, testObj)
+//				err = e2eCL.Delete(ctx, testObj)
 //				if err != nil {
 //					t.Error(err)
 //				}
 //			}()
 //		}
 //
-//		actual, err := getLVMVolumeGroup(ctx, cl, metrics, namespace, name)
+//		actual, err := getLVMVolumeGroup(ctx, e2eCL, metrics, namespace, name)
 //
 //		if assert.NoError(t, err) {
 //			assert.NotNil(t, actual)
@@ -57,19 +57,19 @@ package controller
 //			},
 //		}
 //
-//		err := cl.Create(ctx, testObj)
+//		err := e2eCL.Create(ctx, testObj)
 //		if err != nil {
 //			t.Error(err)
 //		} else {
 //			defer func() {
-//				err = cl.Delete(ctx, testObj)
+//				err = e2eCL.Delete(ctx, testObj)
 //				if err != nil {
 //					t.Error(err)
 //				}
 //			}()
 //		}
 //
-//		actual, err := getLVMVolumeGroup(ctx, cl, metrics, namespace, "another-name")
+//		actual, err := getLVMVolumeGroup(ctx, e2eCL, metrics, namespace, "another-name")
 //
 //		if assert.EqualError(t, err, "lvmvolumegroups.storage.deckhouse.io \"another-name\" not found") {
 //			assert.Nil(t, actual)
@@ -92,29 +92,29 @@ package controller
 //			},
 //		}
 //
-//		err := cl.Create(ctx, testObj)
+//		err := e2eCL.Create(ctx, testObj)
 //		if err != nil {
 //			t.Error(err)
 //		} else {
 //			defer func() {
-//				err = cl.Delete(ctx, testObj)
+//				err = e2eCL.Delete(ctx, testObj)
 //				if err != nil {
 //					t.Error(err)
 //				}
 //			}()
 //		}
 //
-//		oldLvg, err := getLVMVolumeGroup(ctx, cl, metrics, namespace, name)
+//		oldLvg, err := getLVMVolumeGroup(ctx, e2eCL, metrics, namespace, name)
 //		if assert.NoError(t, err) {
 //			assert.Equal(t, name, oldLvg.Name)
 //			assert.Equal(t, Operational, oldLvg.Status.Health)
 //			assert.Equal(t, message, oldLvg.Status.Message)
 //		}
 //
-//		err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, name, namespace, "new message", Operational)
+//		err = updateLVMVolumeGroupHealthStatus(ctx, e2eCL, metrics, name, namespace, "new message", Operational)
 //		assert.Nil(t, err)
 //
-//		updatedLvg, err := getLVMVolumeGroup(ctx, cl, metrics, namespace, name)
+//		updatedLvg, err := getLVMVolumeGroup(ctx, e2eCL, metrics, namespace, name)
 //		if assert.NoError(t, err) {
 //			assert.Equal(t, name, updatedLvg.Name)
 //			assert.Equal(t, Operational, updatedLvg.Status.Health)
@@ -138,29 +138,29 @@ package controller
 //			},
 //		}
 //
-//		err := cl.Create(ctx, testObj)
+//		err := e2eCL.Create(ctx, testObj)
 //		if err != nil {
 //			t.Error(err)
 //		} else {
 //			defer func() {
-//				err = cl.Delete(ctx, testObj)
+//				err = e2eCL.Delete(ctx, testObj)
 //				if err != nil {
 //					t.Error(err)
 //				}
 //			}()
 //		}
 //
-//		oldLvg, err := getLVMVolumeGroup(ctx, cl, metrics, namespace, name)
+//		oldLvg, err := getLVMVolumeGroup(ctx, e2eCL, metrics, namespace, name)
 //		if assert.NoError(t, err) {
 //			assert.Equal(t, name, oldLvg.Name)
 //			assert.Equal(t, NonOperational, oldLvg.Status.Health)
 //			assert.Equal(t, message, oldLvg.Status.Message)
 //		}
 //
-//		err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, name, namespace, message, NonOperational)
+//		err = updateLVMVolumeGroupHealthStatus(ctx, e2eCL, metrics, name, namespace, message, NonOperational)
 //		assert.Nil(t, err)
 //
-//		updatedLvg, err := getLVMVolumeGroup(ctx, cl, metrics, namespace, name)
+//		updatedLvg, err := getLVMVolumeGroup(ctx, e2eCL, metrics, namespace, name)
 //		if assert.NoError(t, err) {
 //			assert.Equal(t, name, updatedLvg.Name)
 //			assert.Equal(t, NonOperational, updatedLvg.Status.Health)
@@ -185,29 +185,29 @@ package controller
 //			},
 //		}
 //
-//		err := cl.Create(ctx, testObj)
+//		err := e2eCL.Create(ctx, testObj)
 //		if err != nil {
 //			t.Error(err)
 //		} else {
 //			defer func() {
-//				err = cl.Delete(ctx, testObj)
+//				err = e2eCL.Delete(ctx, testObj)
 //				if err != nil {
 //					t.Error(err)
 //				}
 //			}()
 //		}
 //
-//		oldLvg, err := getLVMVolumeGroup(ctx, cl, metrics, namespace, name)
+//		oldLvg, err := getLVMVolumeGroup(ctx, e2eCL, metrics, namespace, name)
 //		if assert.NoError(t, err) {
 //			assert.Equal(t, name, oldLvg.Name)
 //			assert.Equal(t, NonOperational, oldLvg.Status.Health)
 //			assert.Equal(t, oldMessage, oldLvg.Status.Message)
 //		}
 //
-//		err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, name, namespace, newMessage, NonOperational)
+//		err = updateLVMVolumeGroupHealthStatus(ctx, e2eCL, metrics, name, namespace, newMessage, NonOperational)
 //		assert.Nil(t, err)
 //
-//		updatedLvg, err := getLVMVolumeGroup(ctx, cl, metrics, namespace, name)
+//		updatedLvg, err := getLVMVolumeGroup(ctx, e2eCL, metrics, namespace, name)
 //		if assert.NoError(t, err) {
 //			assert.Equal(t, name, updatedLvg.Name)
 //			assert.Equal(t, NonOperational, updatedLvg.Status.Health)
@@ -232,29 +232,29 @@ package controller
 //			},
 //		}
 //
-//		err := cl.Create(ctx, testObj)
+//		err := e2eCL.Create(ctx, testObj)
 //		if err != nil {
 //			t.Error(err)
 //		} else {
 //			defer func() {
-//				err = cl.Delete(ctx, testObj)
+//				err = e2eCL.Delete(ctx, testObj)
 //				if err != nil {
 //					t.Error(err)
 //				}
 //			}()
 //		}
 //
-//		oldLvg, err := getLVMVolumeGroup(ctx, cl, metrics, namespace, name)
+//		oldLvg, err := getLVMVolumeGroup(ctx, e2eCL, metrics, namespace, name)
 //		if assert.NoError(t, err) {
 //			assert.Equal(t, name, oldLvg.Name)
 //			assert.Equal(t, NonOperational, oldLvg.Status.Health)
 //			assert.Equal(t, oldMessage, oldLvg.Status.Message)
 //		}
 //
-//		err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, name, namespace, newMessage, Operational)
+//		err = updateLVMVolumeGroupHealthStatus(ctx, e2eCL, metrics, name, namespace, newMessage, Operational)
 //		assert.Nil(t, err)
 //
-//		updatedLvg, err := getLVMVolumeGroup(ctx, cl, metrics, namespace, name)
+//		updatedLvg, err := getLVMVolumeGroup(ctx, e2eCL, metrics, namespace, name)
 //		if assert.NoError(t, err) {
 //			assert.Equal(t, name, updatedLvg.Name)
 //			assert.Equal(t, Operational, updatedLvg.Status.Health)
@@ -272,19 +272,19 @@ package controller
 //			},
 //		}
 //
-//		err := cl.Create(ctx, testObj)
+//		err := e2eCL.Create(ctx, testObj)
 //		if err != nil {
 //			t.Error(err)
 //		} else {
 //			defer func() {
-//				err = cl.Delete(ctx, testObj)
+//				err = e2eCL.Delete(ctx, testObj)
 //				if err != nil {
 //					t.Error(err)
 //				}
 //			}()
 //		}
 //
-//		bd, err := getBlockDevice(ctx, cl, metrics, namespace, name)
+//		bd, err := getBlockDevice(ctx, e2eCL, metrics, namespace, name)
 //		if assert.NoError(t, err) {
 //			assert.Equal(t, name, bd.Name)
 //			assert.Equal(t, namespace, bd.Namespace)
@@ -301,26 +301,26 @@ package controller
 //			},
 //		}
 //
-//		err := cl.Create(ctx, testObj)
+//		err := e2eCL.Create(ctx, testObj)
 //		if err != nil {
 //			t.Error(err)
 //		} else {
 //			defer func() {
-//				err = cl.Delete(ctx, testObj)
+//				err = e2eCL.Delete(ctx, testObj)
 //				if err != nil {
 //					t.Error(err)
 //				}
 //			}()
 //		}
 //
-//		bd, err := getBlockDevice(ctx, cl, metrics, namespace, "another-name")
+//		bd, err := getBlockDevice(ctx, e2eCL, metrics, namespace, "another-name")
 //		if assert.EqualError(t, err, "blockdevices.storage.deckhouse.io \"another-name\" not found") {
 //			assert.Nil(t, bd)
 //		}
 //	})
 //
 //	t.Run("ValidateLVMGroup_lvg_is_nil_returns_error", func(t *testing.T) {
-//		valid, obj, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, nil, "test_ns", "test_node")
+//		valid, obj, err := CheckLVMVGNodeOwnership(ctx, e2eCL, metrics, nil, "test_ns", "test_node")
 //		assert.False(t, valid)
 //		assert.Nil(t, obj)
 //		assert.EqualError(t, err, "lvmVolumeGroup is nil")
@@ -340,19 +340,19 @@ package controller
 //			},
 //		}
 //
-//		err := cl.Create(ctx, lvg)
+//		err := e2eCL.Create(ctx, lvg)
 //		if err != nil {
 //			t.Error(err)
 //		} else {
 //			defer func() {
-//				err = cl.Delete(ctx, lvg)
+//				err = e2eCL.Delete(ctx, lvg)
 //				if err != nil {
 //					t.Error(err)
 //				}
 //			}()
 //		}
 //
-//		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, lvg, namespace, "test_node")
+//		valid, status, err := CheckLVMVGNodeOwnership(ctx, e2eCL, metrics, lvg, namespace, "test_node")
 //		assert.False(t, valid)
 //		if assert.NotNil(t, status) {
 //			assert.Equal(t, NonOperational, status.Health)
@@ -393,7 +393,7 @@ package controller
 //
 //		var err error
 //		for _, bd := range bds.Items {
-//			err = cl.Create(ctx, &bd)
+//			err = e2eCL.Create(ctx, &bd)
 //			if err != nil {
 //				t.Error(err)
 //			}
@@ -402,7 +402,7 @@ package controller
 //		if err == nil {
 //			defer func() {
 //				for _, bd := range bds.Items {
-//					err = cl.Delete(ctx, &bd)
+//					err = e2eCL.Delete(ctx, &bd)
 //					if err != nil {
 //						t.Error(err)
 //					}
@@ -421,19 +421,19 @@ package controller
 //			},
 //		}
 //
-//		err = cl.Create(ctx, testLvg)
+//		err = e2eCL.Create(ctx, testLvg)
 //		if err != nil {
 //			t.Error(err)
 //		} else {
 //			defer func() {
-//				err = cl.Delete(ctx, testLvg)
+//				err = e2eCL.Delete(ctx, testLvg)
 //				if err != nil {
 //					t.Error(err)
 //				}
 //			}()
 //		}
 //
-//		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testLvg, namespace, testNode)
+//		valid, status, err := CheckLVMVGNodeOwnership(ctx, e2eCL, metrics, testLvg, namespace, testNode)
 //		assert.False(t, valid)
 //		if assert.NotNil(t, status) {
 //			assert.Equal(t, NonOperational, status.Health)
@@ -475,7 +475,7 @@ package controller
 //
 //		var err error
 //		for _, bd := range bds.Items {
-//			err = cl.Create(ctx, &bd)
+//			err = e2eCL.Create(ctx, &bd)
 //			if err != nil {
 //				t.Error(err)
 //			}
@@ -484,7 +484,7 @@ package controller
 //		if err == nil {
 //			defer func() {
 //				for _, bd := range bds.Items {
-//					err = cl.Delete(ctx, &bd)
+//					err = e2eCL.Delete(ctx, &bd)
 //					if err != nil {
 //						t.Error(err)
 //					}
@@ -504,19 +504,19 @@ package controller
 //			},
 //		}
 //
-//		err = cl.Create(ctx, testLvg)
+//		err = e2eCL.Create(ctx, testLvg)
 //		if err != nil {
 //			t.Error(err)
 //		} else {
 //			defer func() {
-//				err = cl.Delete(ctx, testLvg)
+//				err = e2eCL.Delete(ctx, testLvg)
 //				if err != nil {
 //					t.Error(err)
 //				}
 //			}()
 //		}
 //
-//		valid, status, err := CheckLVMVGNodeOwnership(ctx, cl, metrics, testLvg, namespace, testNode)
+//		valid, status, err := CheckLVMVGNodeOwnership(ctx, e2eCL, metrics, testLvg, namespace, testNode)
 //		assert.True(t, valid)
 //		if assert.NotNil(t, status) {
 //			assert.Equal(t, "", status.Health)
@@ -546,10 +546,10 @@ package controller
 //			},
 //		}
 //
-//		err := CreateEventLVMVolumeGroup(ctx, cl, metrics, EventReasonDeleting, EventActionDeleting, nodeName, testLvg)
+//		err := CreateEventLVMVolumeGroup(ctx, e2eCL, metrics, EventReasonDeleting, EventActionDeleting, nodeName, testLvg)
 //		if assert.NoError(t, err) {
 //			events := &v1.EventList{}
-//			err = cl.List(ctx, events)
+//			err = e2eCL.List(ctx, events)
 //			if err != nil {
 //				t.Error(err)
 //			}
@@ -570,7 +570,7 @@ package controller
 //				assert.Equal(t, LVMVolumeGroupWatcherCtrlName, event.ReportingController)
 //				assert.Equal(t, "Event Message", event.Message)
 //
-//				err = cl.Delete(ctx, &event)
+//				err = e2eCL.Delete(ctx, &event)
 //				if err != nil {
 //					t.Error(err)
 //				}
@@ -613,7 +613,7 @@ package controller
 //
 //		var err error
 //		for _, bd := range bds.Items {
-//			err = cl.Create(ctx, &bd)
+//			err = e2eCL.Create(ctx, &bd)
 //			if err != nil {
 //				t.Error(err)
 //			}
@@ -622,7 +622,7 @@ package controller
 //		if err == nil {
 //			defer func() {
 //				for _, bd := range bds.Items {
-//					err = cl.Delete(ctx, &bd)
+//					err = e2eCL.Delete(ctx, &bd)
 //					if err != nil {
 //						t.Error(err)
 //					}
@@ -641,7 +641,7 @@ package controller
 //			},
 //		}
 //
-//		passed, err := ValidateConsumableDevices(ctx, cl, metrics, testLvg)
+//		passed, err := ValidateConsumableDevices(ctx, e2eCL, metrics, testLvg)
 //		if assert.NoError(t, err) {
 //			assert.True(t, passed)
 //		}
@@ -682,7 +682,7 @@ package controller
 //
 //		var err error
 //		for _, bd := range bds.Items {
-//			err = cl.Create(ctx, &bd)
+//			err = e2eCL.Create(ctx, &bd)
 //			if err != nil {
 //				t.Error(err)
 //			}
@@ -691,7 +691,7 @@ package controller
 //		if err == nil {
 //			defer func() {
 //				for _, bd := range bds.Items {
-//					err = cl.Delete(ctx, &bd)
+//					err = e2eCL.Delete(ctx, &bd)
 //					if err != nil {
 //						t.Error(err)
 //					}
@@ -710,21 +710,21 @@ package controller
 //			},
 //		}
 //
-//		passed, err := ValidateConsumableDevices(ctx, cl, metrics, testLvg)
+//		passed, err := ValidateConsumableDevices(ctx, e2eCL, metrics, testLvg)
 //		if assert.NoError(t, err) {
 //			assert.False(t, passed)
 //		}
 //	})
 //
 //	t.Run("ValidateConsumableDevices_lvg_is_nil_validation_fails", func(t *testing.T) {
-//		passed, err := ValidateConsumableDevices(ctx, cl, metrics, nil)
+//		passed, err := ValidateConsumableDevices(ctx, e2eCL, metrics, nil)
 //		if assert.EqualError(t, err, "lvmVolumeGroup is nil") {
 //			assert.False(t, passed)
 //		}
 //	})
 //
 //	t.Run("GetPathsConsumableDevicesFromLVMVG_lvg_is_nil_returns_error", func(t *testing.T) {
-//		paths, err := GetPathsConsumableDevicesFromLVMVG(ctx, cl, metrics, nil)
+//		paths, err := GetPathsConsumableDevicesFromLVMVG(ctx, e2eCL, metrics, nil)
 //
 //		if assert.EqualError(t, err, "lvmVolumeGroup is nil") {
 //			assert.Nil(t, paths)
@@ -770,7 +770,7 @@ package controller
 //
 //		var err error
 //		for _, bd := range bds.Items {
-//			err = cl.Create(ctx, &bd)
+//			err = e2eCL.Create(ctx, &bd)
 //			if err != nil {
 //				t.Error(err)
 //			}
@@ -779,7 +779,7 @@ package controller
 //		if err == nil {
 //			defer func() {
 //				for _, bd := range bds.Items {
-//					err = cl.Delete(ctx, &bd)
+//					err = e2eCL.Delete(ctx, &bd)
 //					if err != nil {
 //						t.Error(err)
 //					}
@@ -800,7 +800,7 @@ package controller
 //
 //		expected := []string{firstPath, secondPath}
 //
-//		actual, err := GetPathsConsumableDevicesFromLVMVG(ctx, cl, metrics, testLvg)
+//		actual, err := GetPathsConsumableDevicesFromLVMVG(ctx, e2eCL, metrics, testLvg)
 //		if assert.NoError(t, err) {
 //			assert.ElementsMatch(t, expected, actual)
 //		}

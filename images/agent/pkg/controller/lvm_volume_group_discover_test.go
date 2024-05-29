@@ -33,6 +33,12 @@ import (
 )
 
 func TestLVMVolumeGroupDiscover(t *testing.T) {
+	var (
+		ctx = context.Background()
+		cl  = NewFakeClient()
+		log = logger.Logger{}
+	)
+
 	t.Run("getThinPools_returns_only_thinPools", func(t *testing.T) {
 		lvs := []internal.LVData{
 			{
@@ -487,7 +493,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			},
 		}
 
-		created, err := CreateLVMVolumeGroup(ctx, testLogger, testMetrics, cl, candidate)
+		created, err := CreateLVMVolumeGroupByCandidate(ctx, testLogger, testMetrics, cl, candidate)
 		if assert.NoError(t, err) {
 			assert.Equal(t, &expected, created)
 		}
@@ -576,7 +582,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			},
 		}
 
-		created, err := CreateLVMVolumeGroup(ctx, testLogger, testMetrics, cl, candidate)
+		created, err := CreateLVMVolumeGroupByCandidate(ctx, testLogger, testMetrics, cl, candidate)
 		if assert.NoError(t, err) && assert.NotNil(t, created) {
 			actual, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
 			if assert.NoError(t, err) && assert.Equal(t, 1, len(actual)) {
@@ -643,7 +649,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Nodes:                 nodes,
 		}
 
-		created, err := CreateLVMVolumeGroup(ctx, testLogger, testMetrics, cl, candidate)
+		created, err := CreateLVMVolumeGroupByCandidate(ctx, testLogger, testMetrics, cl, candidate)
 		if assert.NoError(t, err) && assert.NotNil(t, created) {
 			actual, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
 			if assert.NoError(t, err) && assert.Equal(t, 1, len(actual)) {
@@ -772,7 +778,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			},
 		}
 
-		created, err := CreateLVMVolumeGroup(ctx, testLogger, testMetrics, cl, oldCandidate)
+		created, err := CreateLVMVolumeGroupByCandidate(ctx, testLogger, testMetrics, cl, oldCandidate)
 		if assert.NoError(t, err) {
 			err := UpdateLVMVolumeGroupByCandidate(ctx, cl, testMetrics, *created, newCandidate)
 
@@ -792,6 +798,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			cl           = NewFakeClient()
 			testLogger   = logger.Logger{}
 			currentNode  = "test_node"
+			vgName       = "test_vg"
 			firstBDName  = "first_device"
 			secondBDName = "second_device"
 			firstLVName  = "first_lv"
@@ -819,40 +826,40 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				firstLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: firstLVName},
 					Spec: v1alpha1.LvmVolumeGroupSpec{
-						BlockDeviceNames: []string{firstBDName},
-						Type:             Local,
+						BlockDeviceNames:      []string{firstBDName},
+						Type:                  Local,
+						ActualVGNameOnTheNode: vgName,
 					},
 				},
 				secondLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: secondLVName},
 					Spec: v1alpha1.LvmVolumeGroupSpec{
-						BlockDeviceNames: []string{secondBDName},
-						Type:             Local,
+						BlockDeviceNames:      []string{secondBDName},
+						Type:                  Local,
+						ActualVGNameOnTheNode: vgName,
 					},
 				},
 			}
 		)
 
-		expected := []v1alpha1.LvmVolumeGroup{
-			{
+		expected := map[string]v1alpha1.LvmVolumeGroup{
+			vgName: {
 				ObjectMeta: metav1.ObjectMeta{Name: firstLVName},
 				Spec: v1alpha1.LvmVolumeGroupSpec{
-					BlockDeviceNames: []string{firstBDName},
-					Type:             Local,
+					BlockDeviceNames:      []string{firstBDName},
+					Type:                  Local,
+					ActualVGNameOnTheNode: vgName,
 				},
 			},
 		}
 
-		actual := filterLVGsByNode(ctx, cl, testLogger, lvs, blockDevices, currentNode)
+		actual := filterLVGsByNode(ctx, cl, testLogger, monitoring.Metrics{}, lvs, blockDevices, currentNode)
 
 		assert.Equal(t, expected, actual)
 	})
 
 	t.Run("filterResourcesByNode_returns_no_resources_for_current_node", func(t *testing.T) {
 		var (
-			ctx          = context.Background()
-			cl           = NewFakeClient()
-			testLogger   = logger.Logger{}
 			currentNode  = "test_node"
 			anotherNode  = "another_node"
 			firstBDName  = "first_device"
@@ -896,7 +903,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			}
 		)
 
-		actual := filterLVGsByNode(ctx, cl, testLogger, lvs, blockDevices, currentNode)
+		actual := filterLVGsByNode(ctx, cl, log, monitoring.Metrics{}, lvs, blockDevices, currentNode)
 
 		assert.Equal(t, 0, len(actual))
 	})
@@ -1062,6 +1069,41 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			assert.True(t, hasLVMVolumeGroupDiff(logger.Logger{}, lvmVolumeGroup, candidate))
 		})
 	})
+
+	t.Run("addConditionToLVG", func(t *testing.T) {
+		const (
+			lvgName = "test-lvg"
+			conType = "test-type"
+			reason  = "test-reason"
+			message = "test-message"
+		)
+		lvg := &v1alpha1.LvmVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: lvgName,
+			},
+		}
+
+		err := cl.Create(ctx, lvg)
+		if err != nil {
+			t.Error(err)
+		}
+
+		err = addConditionToLVG(ctx, cl, logger.Logger{}, lvg, metav1.ConditionTrue, conType, reason, message)
+		if assert.NoError(t, err) {
+			err = cl.Get(ctx, client.ObjectKey{
+				Name: lvgName,
+			}, lvg)
+			if err != nil {
+				t.Error(err)
+			}
+
+			assert.Equal(t, 1, len(lvg.Status.Conditions))
+			assert.Equal(t, metav1.ConditionTrue, lvg.Status.Conditions[0].Status)
+			assert.Equal(t, conType, lvg.Status.Conditions[0].Type)
+			assert.Equal(t, reason, lvg.Status.Conditions[0].Reason)
+			assert.Equal(t, message, lvg.Status.Conditions[0].Message)
+		}
+	})
 }
 
 func NewFakeClient() client.WithWatch {
@@ -1069,7 +1111,7 @@ func NewFakeClient() client.WithWatch {
 	_ = metav1.AddMetaToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
 
-	builder := fake.NewClientBuilder().WithScheme(s)
+	builder := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&v1alpha1.LvmVolumeGroup{})
 
 	cl := builder.Build()
 	return cl
