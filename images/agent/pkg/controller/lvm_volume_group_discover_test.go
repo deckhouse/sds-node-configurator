@@ -1070,7 +1070,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		})
 	})
 
-	t.Run("addConditionToLVG", func(t *testing.T) {
+	t.Run("updateLVGConditionIfNeeded", func(t *testing.T) {
 		const (
 			lvgName = "test-lvg"
 			conType = "test-type"
@@ -1088,7 +1088,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			t.Error(err)
 		}
 
-		err = addConditionToLVG(ctx, cl, logger.Logger{}, lvg, metav1.ConditionTrue, conType, reason, message)
+		err = updateLVGConditionIfNeeded(ctx, cl, logger.Logger{}, lvg, metav1.ConditionTrue, conType, reason, message)
 		if assert.NoError(t, err) {
 			err = cl.Get(ctx, client.ObjectKey{
 				Name: lvgName,

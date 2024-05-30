@@ -96,9 +96,9 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 	if err != nil {
 		log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to GetAPIBlockDevices")
 		for _, lvg := range currentLVMVGs {
-			err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGReadyType, "NoBlockDevices", fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()))
+			err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGReadyType, "NoBlockDevices", fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()))
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
 			}
 
 			if err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, &lvg, NonOperational, err.Error()); err != nil {
@@ -121,9 +121,9 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 		log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to run GetLVMVolumeGroupCandidates")
 		for _, lvg := range filteredLVGs {
 			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] turn LVMVolumeGroup %s to non operational. LVG struct: %+v ", lvg.Name, lvg))
-			err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGReadyType, "DataConfigurationFailed", fmt.Sprintf("unable to configure data, err: %s", err.Error()))
+			err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGReadyType, "DataConfigurationFailed", fmt.Sprintf("unable to configure data, err: %s", err.Error()))
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
 			}
 
 			if updtErr := updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, &lvg, NonOperational, err.Error()); err != nil {
@@ -144,24 +144,12 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is already exist. Tries to update it", lvg.Name))
 			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] candidate: %v", candidate))
 			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] lvg: %v", lvg))
-			if vgConfigurationAppliedCon := tryGetConditionByType(lvg.Status.Conditions, internal.VGConfigurationAppliedType); vgConfigurationAppliedCon == nil ||
-				vgConfigurationAppliedCon.Status == metav1.ConditionFalse {
-				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the condition %s of the LVMVolumeGroup %s has an improper state condition, retry in %s", internal.VGConfigurationAppliedType, lvg.Name, cfg.VolumeGroupScanIntervalSec.String()))
-				shouldRequeue = true
-
-				err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGReadyType, "ConfigurationDoesNotApplied", fmt.Sprintf("improper state if the condition %s", internal.VGConfigurationAppliedType))
-				if err != nil {
-					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
-				}
-
-				continue
-			}
 
 			if !hasLVMVolumeGroupDiff(log, lvg, candidate) {
 				log.Debug(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] no data to update for LvmVolumeGroup, name: "%s"`, lvg.Name))
-				err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGReadyType, "Updated", "ready to create LV")
+				err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGReadyType, "Updated", "ready to create LV")
 				if err != nil {
-					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
 					shouldRequeue = true
 				}
 				continue
@@ -172,17 +160,17 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 				log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to update LvmVolumeGroup, name: "%s". Requeue the request in %s`,
 					lvg.Name, cfg.VolumeGroupScanIntervalSec.String()))
 
-				err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGReadyType, "UpdateFailed", fmt.Sprintf("unable to update lvg, err: %s", err.Error()))
+				err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGReadyType, "UpdateFailed", fmt.Sprintf("unable to update lvg, err: %s", err.Error()))
 				if err != nil {
-					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
 				}
 				shouldRequeue = true
 			}
 
 			log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] updated LvmVolumeGroup, name: "%s"`, lvg.Name))
-			err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGReadyType, "Updated", "ready to create LV")
+			err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGReadyType, "Updated", "ready to create LV")
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
 				shouldRequeue = true
 			}
 		} else {
@@ -194,16 +182,16 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 				continue
 			}
 
-			err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGConfigurationAppliedType, "Success", "all configuration has been applied")
+			err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGConfigurationAppliedType, "Success", "all configuration has been applied")
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
 				shouldRequeue = true
 				continue
 			}
 
-			err = addConditionToLVG(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGReadyType, "Updated", "ready to create LV")
+			err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGReadyType, "Updated", "ready to create LV")
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
 				shouldRequeue = true
 				continue
 			}
@@ -227,16 +215,6 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 	metrics.ReconcileDuration(LVMVolumeGroupDiscoverCtrlName).Observe(metrics.GetEstimatedTimeInSeconds(reconcileStart))
 	metrics.ReconcilesCountTotal(LVMVolumeGroupDiscoverCtrlName).Inc()
 	return false
-}
-
-func tryGetConditionByType(conditions []metav1.Condition, conType string) *metav1.Condition {
-	for _, c := range conditions {
-		if c.Type == conType {
-			return &c
-		}
-	}
-
-	return nil
 }
 
 func filterLVGsByNode(
