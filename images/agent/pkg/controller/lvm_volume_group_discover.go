@@ -832,6 +832,15 @@ func UpdateLVMVolumeGroupByCandidate(
 	lvg v1alpha1.LvmVolumeGroup,
 	candidate internal.LVMVolumeGroupCandidate,
 ) error {
+	// Check if every BlockDevice was configured
+	for _, devices := range candidate.Nodes {
+		for _, d := range devices {
+			if d.BlockDevice == "" {
+				return fmt.Errorf("no block device found for PV %s", d.Path)
+			}
+		}
+	}
+
 	// The resource.Status.Nodes can not be just re-written, it needs to be updated directly by node.
 	// We take all current resources nodes and convert them to map for better performance further.
 	resourceNodes := make(map[string][]v1alpha1.LvmVolumeGroupDevice, len(lvg.Status.Nodes))

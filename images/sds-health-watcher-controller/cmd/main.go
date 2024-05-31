@@ -66,11 +66,9 @@ func main() {
 
 	log.Info("[main] CfgParams has been successfully created")
 	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.MetricsPort, cfgParams.MetricsPort))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.ScanIntervalSec))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.NodeName, cfgParams.NodeName))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.MachineID, cfgParams.MachineId))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.BlockDeviceScanIntervalSec.String()))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ThrottleInterval, cfgParams.ThrottleIntervalSec.String()))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDurationSec.String()))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
@@ -102,7 +100,13 @@ func main() {
 	log.Info("[main] successfully created kubernetes manager")
 
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
-	controller.RunHealthWatcher(ctx, mgr, *cfgParams, metrics, *log)
+	controller.RunSdsInfraWatcher(ctx, mgr, *cfgParams, metrics, *log)
+
+	err = controller.RunLVGConditionsWatcher(mgr, *cfgParams, *log)
+	if err != nil {
+		log.Error(err, "[main] unable to run LVGConditionsWatcher controller")
+		os.Exit(1)
+	}
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "[main] unable to mgr.AddHealthzCheck")

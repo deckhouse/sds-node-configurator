@@ -182,6 +182,7 @@ func RunLVMVolumeGroupWatcherController(
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition to the LVMVolumeGroup %s", newLVG.Name))
 				}
+				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully update the condition %s of the LVMVolumeGroup %s to False", internal.VGConfigurationAppliedType, newLVG.Name))
 			}
 
 			if !shouldLVGUpdateEventTriggers(log, oldLVG, newLVG) {
@@ -210,7 +211,7 @@ func checkIfThinPoolsWereDeleted(oldLVG, newLVG *v1alpha1.LvmVolumeGroup) bool {
 func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, status v1.ConditionStatus, conType, reason, message string) error {
 	exist := false
 	index := 0
-	condition := v1.Condition{
+	newCondition := v1.Condition{
 		Type:               conType,
 		Status:             status,
 		ObservedGeneration: lvg.Generation,
@@ -228,8 +229,13 @@ func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logge
 		log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] there are some conditions in the LVMVolumeGroup %s. Tries to find a condition %s", lvg.Name, conType))
 		for i, c := range lvg.Status.Conditions {
 			if c.Type == conType {
-				if c.Status == v1.ConditionTrue && status == v1.ConditionTrue {
-					log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no need to update condition %s in the LVMVolumeGroup %s", conType, lvg.Name))
+				//if c.Status == v1.ConditionTrue && status == v1.ConditionTrue {
+				//	log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no need to update newCondition %s in the LVMVolumeGroup %s as new and old statuses are True", conType, lvg.Name))
+				//	return nil
+				//}
+
+				if checkIfEqualConditions(c, newCondition) {
+					log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no need to update condition %s in the LVMVolumeGroup %s as new and old condition states are the same", conType, lvg.Name))
 					return nil
 				}
 
@@ -241,17 +247,25 @@ func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logge
 
 		if !exist {
 			log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was not found. Append it in the end of the LVMVolumeGroup %s conditions", conType, lvg.Name))
-			lvg.Status.Conditions = append(lvg.Status.Conditions, condition)
+			lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
 		} else {
 			log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] insert the condition %s at index %d of the LVMVolumeGroup %s conditions", conType, index, lvg.Name))
-			lvg.Status.Conditions[index] = condition
+			lvg.Status.Conditions[index] = newCondition
 		}
 	} else {
 		log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no conditions were found in the LVMVolumeGroup %s. Append the condition %s in the end", lvg.Name, conType))
-		lvg.Status.Conditions = append(lvg.Status.Conditions, condition)
+		lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
 	}
 
 	return cl.Status().Update(ctx, lvg)
+}
+
+func checkIfEqualConditions(first, second v1.Condition) bool {
+	return first.Type == second.Type &&
+		first.Status == second.Status &&
+		first.Reason == second.Reason &&
+		first.Message == second.Message &&
+		first.ObservedGeneration == second.ObservedGeneration
 }
 
 func shouldLVGUpdateEventTriggers(log logger.Logger, oldLVG, newLVG *v1alpha1.LvmVolumeGroup) bool {
@@ -280,6 +294,12 @@ func shouldLVGUpdateEventTriggers(log logger.Logger, oldLVG, newLVG *v1alpha1.Lv
 		log.Debug(fmt.Sprintf("[shouldLVGUpdateEventTriggers] the LVMVolumeGroup %s old and new states have different Annotations", newLVG.Name))
 		return true
 	}
+
+	if newLVG.DeletionTimestamp != nil {
+		log.Debug(fmt.Sprintf("[shouldLVGUpdateEventTriggers] the LVMVolumeGroup %s got a deletion timestamp", newLVG.Name))
+		return true
+	}
+
 	log.Debug(fmt.Sprintf("[shouldLVGUpdateEventTriggers] the LVMVolumeGroup %s old and new states have the same Annotations", newLVG.Name))
 
 	return false
@@ -347,10 +367,29 @@ func runEventReconcile(
 
 func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
+	log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] tries to add the condition %s status false to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+
+	for _, c := range lvg.Status.Conditions {
+		if c.Type == internal.VGConfigurationAppliedType && c.Reason != "Terminating" {
+			err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, "Terminating", "trying to delete VG")
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+				return true, err
+			}
+			break
+		}
+	}
 
 	_, exist := lvg.Annotations[delAnnotation]
 	if lvg.DeletionTimestamp != nil && !exist {
-		err := updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, lvg, NonOperational, fmt.Sprintf("to delete the LVG annotate it with %s", delAnnotation))
+		log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] the LVMVolumeGroup %s has a deletion timestamp but does not have an annotation", lvg.Name))
+		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, "Terminating", fmt.Sprintf("to delete the LVG annotate it with %s", delAnnotation))
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+			return true, err
+		}
+
+		err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, lvg, NonOperational, fmt.Sprintf("to delete the LVG annotate it with %s", delAnnotation))
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to update the LVMVolumeGroup %s", lvg.Name))
 			return true, err
@@ -361,14 +400,21 @@ func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Lo
 
 	log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] check if VG %s of the LVMVolumeGroup %s uses LVs", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 	usedLVs := checkIfVGHasLV(sdsCache, lvg.Spec.ActualVGNameOnTheNode)
-
 	if len(usedLVs) > 0 {
 		err := fmt.Errorf("VG %s uses LVs: %v. Delete used LVs first", lvg.Spec.ActualVGNameOnTheNode, usedLVs)
 		log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to reconcile LVG %s", lvg.Name))
-		err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, lvg, NonOperational, err.Error())
+
+		log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] tries to add the condition %s status False to the LVMVolumeGroup %s due to LV does exist", internal.VGConfigurationAppliedType, lvg.Name))
+		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, "Terminating", err.Error())
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to update the LVMVolumeGroup %s", lvg.Name))
+			log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+			return true, err
 		}
+
+		//err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, lvg, NonOperational, err.Error())
+		//if err != nil {
+		//	log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to update the LVMVolumeGroup %s", lvg.Name))
+		//}
 		return true, nil
 	}
 
@@ -376,6 +422,12 @@ func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Lo
 	err := DeleteVGIfExist(log, metrics, sdsCache, lvg.Spec.ActualVGNameOnTheNode)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to delete VG %s", lvg.Spec.ActualVGNameOnTheNode))
+		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, "Terminating", err.Error())
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+			return true, err
+		}
+
 		err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, lvg, NonOperational, err.Error())
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to update the LVMVolumeGroup %s", lvg.Name))
@@ -386,6 +438,11 @@ func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Lo
 	removed, err := removeLVGFinalizerIfExist(ctx, cl, lvg)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to remove a finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, "Terminating", err.Error())
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+			return true, err
+		}
 		return true, err
 	}
 
@@ -434,6 +491,14 @@ func checkIfVGHasLV(ch *cache.Cache, vgName string) []string {
 func reconcileLVGUpdateFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
 
+	log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] tries to add a condition %s to the LVMVolumeGroup %s as start to apply the configuration", internal.VGConfigurationAppliedType, lvg.Name))
+	err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, "Pending", "tries to apply the configuration")
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+		return true, err
+	}
+	log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] successfully added a condition %s to the LVMVolumeGroup %s as start to apply the configuration", internal.VGConfigurationAppliedType, lvg.Name))
+
 	log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] tries to add a finalizer to the LVMVolumeGroup %s", lvg.Name))
 	added, err := addLVGFinalizerIfNotExist(ctx, cl, lvg)
 	if err != nil {
@@ -462,7 +527,7 @@ func reconcileLVGUpdateFunc(ctx context.Context, cl client.Client, log logger.Lo
 			return true, err
 		}
 
-		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, "ValidationFailed", "configuration is not valid, check status.message for more information")
+		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, "ValidationFailed", reason)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
 		}
@@ -481,7 +546,7 @@ func reconcileLVGUpdateFunc(ctx context.Context, cl client.Client, log logger.Lo
 			log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to update the LVMVolumeGroup %s", lvg.Name))
 		}
 
-		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, "VGNotFound", fmt.Sprintf("and existing VG %s as not found", lvg.Spec.ActualVGNameOnTheNode))
+		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, "VGNotFound", err.Error())
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
 		}
@@ -568,7 +633,7 @@ func reconcileLVGUpdateFunc(ctx context.Context, cl client.Client, log logger.Lo
 	}
 
 	log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] tries to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
-	err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionTrue, internal.VGConfigurationAppliedType, "Success", "all configuration has been applied")
+	err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionTrue, internal.VGConfigurationAppliedType, "Applied", "configuration has been applied")
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
 		return true, err
@@ -746,6 +811,13 @@ func tryGetVG(sdsCache *cache.Cache, vgName string) (bool, internal.VGData) {
 
 func reconcileLVGCreateFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
+	log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] tries to add the condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+	err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, "Pending", "trying to apply the configuration")
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+		return true, err
+	}
+
 	log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] tries to add a finalizer to the LVMVolumeGroup %s", lvg.Name))
 	added, err := addLVGFinalizerIfNotExist(ctx, cl, lvg)
 	if err != nil {
