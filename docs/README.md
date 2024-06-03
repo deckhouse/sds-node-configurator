@@ -1,7 +1,7 @@
 ---
 title: "The sds-node-configurator module"
 description: "General Concepts and Principles of  the sds-node-configurator module. Deckhouse Kubernetes Platform."
-moduleStatus: experimental
+moduleStatus: preview
 ---
 
 {{< alert level="warning" >}}
