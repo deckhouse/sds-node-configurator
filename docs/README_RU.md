@@ -1,7 +1,7 @@
 ---
 title: "Модуль sds-node-configurator"
 description: "Концепция и принцип работы модуля sds-node-configurator, Deckhouse Kubernetes Platform."
-moduleStatus: experimental
+moduleStatus: preview
 ---
 {{< alert level="warning" >}}
 Работоспособность модуля гарантируется только при использовании стоковых ядер, поставляемых вместе с [поддерживаемыми дистрибутивами](https://deckhouse.ru/documentation/v1/supported_versions.html#linux).
