@@ -304,7 +304,6 @@ func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LvmVolumeGro
 			return true
 		}
 
-		//TODO: разнести этот метод для Discover-а и Watcher-а
 		for j := range first[i].Devices {
 			log.Trace(fmt.Sprintf("[hasStatusNodesDiff] first Device: name %s, PVSize %s, DevSize %s", first[i].Devices[j].BlockDevice, first[i].Devices[j].PVSize.String(), first[i].Devices[j].DevSize.String()))
 			log.Trace(fmt.Sprintf("[hasStatusNodesDiff] second Device: name %s, PVSize %s, DevSize %s", second[i].Devices[j].BlockDevice, second[i].Devices[j].PVSize.String(), second[i].Devices[j].DevSize.String()))

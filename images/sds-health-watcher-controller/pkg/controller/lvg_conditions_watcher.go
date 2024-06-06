@@ -71,7 +71,7 @@ func RunLVGConditionsWatcher(
 		return err
 	}
 
-	c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LvmVolumeGroup{}), handler.Funcs{
+	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LvmVolumeGroup{}), handler.Funcs{
 		CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] got a create event for the LVMVolumeGroup %s", e.Object.GetName()))
 
@@ -109,6 +109,10 @@ func RunLVGConditionsWatcher(
 
 		},
 	})
+	if err != nil {
+		log.Error(err, "[RunLVGConditionsWatcher] unable to watch the events")
+		return err
+	}
 
 	return nil
 }
