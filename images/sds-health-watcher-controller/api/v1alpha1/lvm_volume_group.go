@@ -71,8 +71,6 @@ type StatusThinPool struct {
 
 type LvmVolumeGroupStatus struct {
 	AllocatedSize resource.Quantity    `json:"allocatedSize"`
-	Health        string               `json:"health"`
-	Message       string               `json:"message"`
 	Nodes         []LvmVolumeGroupNode `json:"nodes"`
 	ThinPools     []StatusThinPool     `json:"thinPools"`
 	VGSize        resource.Quantity    `json:"vgSize"`

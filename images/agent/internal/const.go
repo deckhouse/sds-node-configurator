@@ -40,6 +40,7 @@ const (
 	VGReadyType                = "VGReady"
 	ValidationFailed           = "ValidationFailed"
 
+	Creating    = "Creating"
 	Pending     = "Pending"
 	Terminating = "Terminating"
 

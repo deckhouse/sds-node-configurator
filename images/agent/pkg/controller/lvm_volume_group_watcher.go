@@ -477,6 +477,11 @@ func ReconcileThinPoolsIfNeeded(ctx context.Context, cl client.Client, log logge
 			}
 
 			log.Debug(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] the LVMVolumeGroup %s requested thin pool %s size is more than actual one. Resize it", lvg.Name, specTp.Size.String()))
+			err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, internal.Pending, "trying to apply the configuration")
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, internal.Pending, lvg.Name))
+				return err
+			}
 			err = ResizeThinPool(log, metrics, lvg, specTp, statusTp)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[ReconcileThinPoolsIfNeeded] unable to resize thin-pool %s of the LVMVolumeGroup %s", specTp.Name, lvg.Name))
@@ -600,7 +605,7 @@ func reconcileLVGCreateFunc(ctx context.Context, cl client.Client, log logger.Lo
 	log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
 
 	log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] tries to add the condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
-	err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, internal.Pending, "trying to apply the configuration")
+	err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, internal.Creating, "trying to apply the configuration")
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
 		return true, err
@@ -681,7 +686,6 @@ func addLVGFinalizerIfNotExist(ctx context.Context, cl client.Client, lvg *v1alp
 	}
 
 	lvg.Finalizers = append(lvg.Finalizers, internal.SdsNodeConfiguratorFinalizer)
-	lvg.Status.Health = Operational
 	err := cl.Update(ctx, lvg)
 	if err != nil {
 		return false, err
