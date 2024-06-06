@@ -100,10 +100,6 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
 			}
-
-			if err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, &lvg, NonOperational, err.Error()); err != nil {
-				log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvg.Name))
-			}
 		}
 		return true
 	}
@@ -234,7 +230,7 @@ func filterLVGsByNode(
 
 			// If we did not add every block device of local VG, that means a mistake, and we turn the resource's health to Nonoperational.
 			if currentNodeDevices > 0 && currentNodeDevices < len(lvg.Spec.BlockDeviceNames) {
-				if err := updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, &lvg, NonOperational, "there are block devices from different nodes for local volume group"); err != nil {
+				if err := updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGConfigurationAppliedType, "InvalidBlockDevices", "there are block devices from different nodes for local volume group"); err != nil {
 					log.Error(err, `[filterLVGsByNode] unable to update resource, name: "%s"`, lvg.Name)
 					continue
 				}
@@ -249,7 +245,7 @@ func filterLVGsByNode(
 			filtered[lvg.Spec.ActualVGNameOnTheNode] = lvg
 		case Shared:
 			if len(lvg.Spec.BlockDeviceNames) != 1 {
-				if err := updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, &lvg, NonOperational, "there are more than one block devices for shared volume group"); err != nil {
+				if err := updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGConfigurationAppliedType, "InvalidBlockDevices", "there are more than one block devices for shared volume group"); err != nil {
 					log.Error(err, `[filterLVGsByNode] unable to update resource, name: "%s"`, lvg.Name)
 					continue
 				}
@@ -307,8 +303,6 @@ func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LvmVolumeGro
 		for j := range first[i].Devices {
 			log.Trace(fmt.Sprintf("[hasStatusNodesDiff] first Device: name %s, PVSize %s, DevSize %s", first[i].Devices[j].BlockDevice, first[i].Devices[j].PVSize.String(), first[i].Devices[j].DevSize.String()))
 			log.Trace(fmt.Sprintf("[hasStatusNodesDiff] second Device: name %s, PVSize %s, DevSize %s", second[i].Devices[j].BlockDevice, second[i].Devices[j].PVSize.String(), second[i].Devices[j].DevSize.String()))
-			fmt.Println("OLD path: ", first[i].Devices[j].Path)
-			fmt.Println("NEW path: ", second[i].Devices[j].Path)
 			if first[i].Devices[j].BlockDevice != second[i].Devices[j].BlockDevice ||
 				first[i].Devices[j].Path != second[i].Devices[j].Path ||
 				first[i].Devices[j].PVUuid != second[i].Devices[j].PVUuid ||
@@ -354,8 +348,6 @@ func ClearLVMVolumeGroupResources(
 	for _, candidate := range candidates {
 		actualVGs[candidate.ActualVGNameOnTheNode] = struct{}{}
 	}
-
-	fmt.Println("ACTUAL VGS LEN: ", len(actualVGs))
 
 	for _, lvg := range lvgs {
 		if !reflect.ValueOf(lvg.Status.VGUuid).IsZero() {

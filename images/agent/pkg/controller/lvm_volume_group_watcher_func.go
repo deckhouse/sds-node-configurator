@@ -54,21 +54,6 @@ func getLVMVolumeGroup(ctx context.Context, cl client.Client, metrics monitoring
 	return obj, nil
 }
 
-func updateLVMVolumeGroupHealthStatus(ctx context.Context, cl client.Client, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, health, message string) error {
-	lvg.Status.Health = health
-	lvg.Status.Message = message
-
-	start := time.Now()
-	err := cl.Status().Update(ctx, lvg)
-	metrics.ApiMethodsDuration(LVMVolumeGroupWatcherCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "update").Inc()
-	if err != nil {
-		metrics.ApiMethodsErrors(LVMVolumeGroupWatcherCtrlName, "update").Inc()
-		return err
-	}
-	return nil
-}
-
 func DeleteVGIfExist(log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, vgName string) error {
 	vgs, _ := sdsCache.GetVGs()
 

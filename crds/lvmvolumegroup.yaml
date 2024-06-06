@@ -114,19 +114,6 @@ spec:
                         type: string
                       observedGeneration:
                         type: integer
-                health:
-                  type: string
-                  description: |
-                    The global state of the Volume Group. Might be:
-                    - Operational (if everything is fine with the Volume Group)
-                    - NonOperational (if there are some problems in the Volume Group)
-                  enum:
-                    - Operational
-                    - NonOperational
-                message:
-                  type: string
-                  description: |
-                    Additional information about the Volume Group current state.
                 vgUUID:
                   type: string
                   description: |
@@ -209,10 +196,10 @@ spec:
       subresources:
         status: {}
       additionalPrinterColumns:
-        - jsonPath: .status.health
-          name: health
+        - jsonPath: .status.phase
+          name: phase
           type: string
-          description: Volume Group health.
+          description: Resource phase.
         - jsonPath: .status.nodes..name
           name: node
           type: string
