@@ -38,6 +38,13 @@ const (
 
 	VGConfigurationAppliedType = "VGConfigurationApplied"
 	VGReadyType                = "VGReady"
+	ValidationFailed           = "ValidationFailed"
+
+	Pending     = "Pending"
+	Terminating = "Terminating"
+
+	ScanFailed = "ScanFailed"
+	Updated    = "Updated"
 )
 
 var (

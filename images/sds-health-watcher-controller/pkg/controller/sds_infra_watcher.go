@@ -33,11 +33,6 @@ import (
 const (
 	SdsInfraWatcherCtrlName = "sds-infrastructure-watcher-controller"
 
-	pendingPhase     phase = "Pending"
-	readyPhase       phase = "Ready"
-	notReadyPhase    phase = "NotReady"
-	terminatingPhase phase = "Terminating"
-
 	nodeReadyType  = "NodeReady"
 	agentReadyType = "AgentReady"
 )
@@ -45,8 +40,6 @@ const (
 var (
 	sdsNodeConfiguratorSelector = map[string]string{"app": "sds-node-configurator"}
 )
-
-type phase string
 
 func RunSdsInfraWatcher(
 	ctx context.Context,
@@ -205,11 +198,6 @@ func getPodsBySelector(ctx context.Context, cl client.Client, selector map[strin
 	}
 
 	return pods, nil
-}
-
-func updateLVMVolumeGroupPhase(ctx context.Context, cl client.Client, lvg *v1alpha1.LvmVolumeGroup, phase phase) error {
-	lvg.Status.Phase = string(phase)
-	return cl.Status().Update(ctx, lvg)
 }
 
 func findLVMVolumeGroupsByNodes(lvgs map[string]v1alpha1.LvmVolumeGroup, nodeNames []string) map[string]v1alpha1.LvmVolumeGroup {
