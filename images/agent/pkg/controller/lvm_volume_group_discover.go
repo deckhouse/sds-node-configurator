@@ -914,6 +914,7 @@ func UpdateLVMVolumeGroupByCandidate(
 		VGSize:        candidate.VGSize,
 		VGUuid:        candidate.VGUuid,
 		Conditions:    lvg.Status.Conditions,
+		Phase:         lvg.Status.Phase,
 	}
 
 	start := time.Now()

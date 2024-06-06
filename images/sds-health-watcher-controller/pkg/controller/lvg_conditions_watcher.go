@@ -24,8 +24,6 @@ import (
 
 const (
 	SdsLVGConditionsWatcherCtrlName = "sds-conditions-watcher-controller"
-
-	readyType = "LVGReady"
 )
 
 func RunLVGConditionsWatcher(
@@ -126,7 +124,7 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 	ready := true
 	falseConditions := make([]string, 0, len(lvg.Status.Conditions))
 	for _, c := range lvg.Status.Conditions {
-		if c.Type == readyType {
+		if c.Type == internal.Ready {
 		} else if c.Status == metav1.ConditionTrue {
 			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s condition %s has status True", lvg.Name, c.Type))
 		} else if c.Reason == internal.Pending {
@@ -138,9 +136,9 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 				return true, err
 			}
 
-			err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, readyType, internal.Pending, fmt.Sprintf("condition %s has Pending reason", c.Type))
+			err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.Ready, internal.Pending, fmt.Sprintf("condition %s has Pending reason", c.Type))
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to add the condition %s to the LVMVolumeGroup %s", readyType, lvg.Name))
+				log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to add the condition %s to the LVMVolumeGroup %s", internal.Ready, lvg.Name))
 				return true, err
 			}
 
@@ -154,9 +152,9 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 				return true, err
 			}
 
-			err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, readyType, internal.Terminating, fmt.Sprintf("condition %s has Terminating reason", c.Type))
+			err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.Ready, internal.Terminating, fmt.Sprintf("condition %s has Terminating reason", c.Type))
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to add the condition %s to the LVMVolumeGroup %s", readyType, lvg.Name))
+				log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to add the condition %s to the LVMVolumeGroup %s", internal.Ready, lvg.Name))
 				return true, err
 			}
 			break
@@ -173,13 +171,13 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 			return true, err
 		}
 
-		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, readyType, "InvalidConditionStates", fmt.Sprintf("conditions %s has False status", strings.Join(falseConditions, ",")))
+		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.Ready, "InvalidConditionStates", fmt.Sprintf("conditions %s has False status", strings.Join(falseConditions, ",")))
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to add the condition %s to the LVMVolumeGroup %s", readyType, lvg.Name))
+			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to add the condition %s to the LVMVolumeGroup %s", internal.Ready, lvg.Name))
 			return true, err
 		}
 
-		log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully updated the LVMVolumeGroup %s condition %s to NotReady", lvg.Name, readyType))
+		log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully updated the LVMVolumeGroup %s condition %s to NotReady", lvg.Name, internal.Ready))
 	}
 
 	if ready {
@@ -190,10 +188,10 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 			return false, nil
 		}
 
-		log.Debug(fmt.Sprintf("[reconcileLVGConditions] tries to add a condition %s to the LVMVolumeGroup %s", readyType, lvg.Name))
-		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionTrue, readyType, "ValidConditionStates", "every condition has a proper state")
+		log.Debug(fmt.Sprintf("[reconcileLVGConditions] tries to add a condition %s to the LVMVolumeGroup %s", internal.Ready, lvg.Name))
+		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionTrue, internal.Ready, "ValidConditionStates", "every condition has a proper state")
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to update the condition %s of the LVMVolumeGroup %s", readyType, lvg.Name))
+			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to update the condition %s of the LVMVolumeGroup %s", internal.Ready, lvg.Name))
 			return true, err
 		}
 

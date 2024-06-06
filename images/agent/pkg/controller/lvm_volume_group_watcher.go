@@ -91,11 +91,7 @@ func RunLVMVolumeGroupWatcherController(
 
 			valid, reason := validateSpecBlockDevices(lvg, blockDevices)
 			if !valid {
-				err = updateLVMVolumeGroupHealthStatus(ctx, cl, metrics, lvg, NonOperational, reason)
-				if err != nil {
-					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to update the LVMVolumeGroup %s", lvg.Name))
-				}
-				err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, "InvalidSpec", "invalid configuration. Check the status.message for more information")
+				err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, "InvalidSpec", reason)
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.VGConfigurationAppliedType, lvg.Name, cfg.VolumeGroupScanIntervalSec.String()))
 				}
@@ -159,35 +155,18 @@ func RunLVMVolumeGroupWatcherController(
 		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] UpdateFunc got a update event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
 
-			newLVG, ok := e.ObjectNew.(*v1alpha1.LvmVolumeGroup)
+			lvg, ok := e.ObjectNew.(*v1alpha1.LvmVolumeGroup)
 			if !ok {
 				err = errors.New("unable to cast event object to a given type")
 				log.Error(err, "[RunLVMVolumeGroupWatcherController] an error occurred while handling a create event")
 				return
 			}
-			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully casted a new state of the LVMVolumeGroup %s", newLVG.Name))
-
-			oldLVG, ok := e.ObjectOld.(*v1alpha1.LvmVolumeGroup)
-			if !ok {
-				err = errors.New("unable to cast event object to a given type")
-				log.Error(err, "[RunLVMVolumeGroupWatcherController] an error occurred while handling a create event")
-				return
-			}
-			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully casted an old state of the LVMVolumeGroup %s", newLVG.Name))
-
-			if checkIfThinPoolsWereDeleted(oldLVG, newLVG) {
-				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] some thin pools were manually deleted from the LVMVolumeGroup %s", newLVG.Name))
-				err = updateLVGConditionIfNeeded(ctx, cl, log, newLVG, v1.ConditionFalse, internal.VGConfigurationAppliedType, "MissedThinPools", "some thin pools were deleted from the VG")
-				if err != nil {
-					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition to the LVMVolumeGroup %s", newLVG.Name))
-				}
-				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully update the condition %s of the LVMVolumeGroup %s to False", internal.VGConfigurationAppliedType, newLVG.Name))
-			}
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully casted a new state of the LVMVolumeGroup %s", lvg.Name))
 
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 			q.Add(request)
 
-			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] updateFunc added a request for the LVMVolumeGroup %s to the Reconcilers queue", newLVG.Name))
+			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] updateFunc added a request for the LVMVolumeGroup %s to the Reconcilers queue", lvg.Name))
 		},
 	})
 
@@ -261,7 +240,6 @@ func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Lo
 	if len(usedLVs) > 0 {
 		err := fmt.Errorf("VG %s uses LVs: %v. Delete used LVs first", lvg.Spec.ActualVGNameOnTheNode, usedLVs)
 		log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to reconcile LVG %s", lvg.Name))
-
 		log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] tries to add the condition %s status False to the LVMVolumeGroup %s due to LV does exist", internal.VGConfigurationAppliedType, lvg.Name))
 		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, internal.Terminating, err.Error())
 		if err != nil {
@@ -1019,10 +997,6 @@ func getConditionByType(conditions []v1.Condition, conType string) *v1.Condition
 	}
 
 	return nil
-}
-
-func checkIfThinPoolsWereDeleted(oldLVG, newLVG *v1alpha1.LvmVolumeGroup) bool {
-	return len(oldLVG.Status.ThinPools) > len(newLVG.Status.ThinPools)
 }
 
 func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, status v1.ConditionStatus, conType, reason, message string) error {
