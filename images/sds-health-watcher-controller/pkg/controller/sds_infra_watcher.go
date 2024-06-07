@@ -65,7 +65,9 @@ func RunSdsInfraWatcher(
 				continue
 			}
 			log.Debug(fmt.Sprint("[RunSdsInfraWatcher] successfully got LVMVolumeGroups"))
-
+			for _, lvg := range lvgs {
+				log.Trace(fmt.Sprintf("[RunSdsInfraWatcher] LVMVolumeGroup %s conditions: %+v", lvg.Name, lvg.Status.Conditions))
+			}
 			if len(lvgs) == 0 {
 				log.Info("[RunSdsInfraWatcher] no LVMVolumeGroups found")
 				continue
@@ -163,13 +165,14 @@ func RunSdsInfraWatcher(
 			log.Debug("[RunSdsInfraWatcher] sds-node-configurator agent's pods were found. Check if some pods are missing")
 
 			var unmanagedNodes []string
-			if len(usedNodes) != len(sdsPods) {
+			unmanagedNodes = getNodeNamesWithoutAgent(usedNodes, sdsPods)
+			if len(unmanagedNodes) > 0 {
 				log.Warning("[RunSdsInfraWatcher] some LVMVolumeGroups are not managed due to corresponding sds-node-configurator agent's pods are not running. Turn such LVMVolumeGroups to NotReady phase")
-				unmanagedNodes = getNodeNamesWithoutAgent(usedNodes, sdsPods)
 				log.Trace(fmt.Sprintf("[RunSdsInfraWatcher] nodes without the agent: %v", unmanagedNodes))
 				lvgsNotReady := findLVMVolumeGroupsByNodeNames(lvgs, unmanagedNodes)
 				for _, lvg := range lvgsNotReady {
-					err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, agentReadyType, "NoPods", "unable to find any agent's pod")
+					log.Debug(fmt.Sprintf("[RunSdsInfraWatcher] tries to add a condition %s status False due the LVMVolumeGroup %s node is not managed by a sds-node-configurator agent's pod", agentReadyType, lvg.Name))
+					err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, agentReadyType, "NoPod", "unable to find any agent's pod")
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to add a condition to the LVMVolumeGroup %s", lvg.Name))
 						continue
@@ -181,12 +184,12 @@ func RunSdsInfraWatcher(
 				log.Info("[RunSdsInfraWatcher] no missing sds-node-configurator agent's pods were found")
 			}
 
-			log.Debug("[RunSdsInfraWatcher] check if every agent's pod is in a Running state")
-			notRunningPods := getNotRunningPods(sdsPods)
-			if len(notRunningPods) > 0 {
-				log.Warning(fmt.Sprintf("[RunSdsInfraWatcher] there is some sds-node-configurator agent's pods that is not Running, pods: %v. Turn the LVMVolumeGroups condition AgentReady to False", notRunningPods))
-				nodeNames := getNodeNamesFromPods(notRunningPods)
-				log.Trace(fmt.Sprintf("[RunSdsInfraWatcher] node names with not running sds-node-configurator agent's pods: %v", nodeNames))
+			log.Debug("[RunSdsInfraWatcher] check if every agent's pod is in a Ready state")
+			notReadyPods := getNotReadyPods(sdsPods)
+			if len(notReadyPods) > 0 {
+				log.Warning(fmt.Sprintf("[RunSdsInfraWatcher] there is some sds-node-configurator agent's pods that is not Ready, pods: %v. Turn the LVMVolumeGroups condition AgentReady to False", notReadyPods))
+				nodeNames := getNodeNamesFromPods(notReadyPods)
+				log.Trace(fmt.Sprintf("[RunSdsInfraWatcher] node names with not Ready sds-node-configurator agent's pods: %v", nodeNames))
 				lvgsNotReady := findLVMVolumeGroupsByNodeNames(lvgs, nodeNames)
 				for _, lvg := range lvgsNotReady {
 					err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, agentReadyType, "PodNotRunning", "the pod is not in a Running state")
@@ -197,11 +200,9 @@ func RunSdsInfraWatcher(
 
 					log.Info(fmt.Sprintf("[RunSdsInfraWatcher] successfully reconciled the LVMVolumeGroup %s phase and condition %s due to the pod is not in a running state", lvg.Name, agentReadyType))
 				}
-
-				continue
 			}
 
-			if len(unmanagedNodes) == 0 && len(notRunningPods) == 0 {
+			if len(unmanagedNodes) == 0 && len(notReadyPods) == 0 {
 				log.Info("[RunSdsInfraWatcher] no problems with sds-node-configurator agent's pods were found")
 				for _, lvg := range lvgs {
 					err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, agentReadyType, "PodRunning", "pod is running and managing the resource")
@@ -226,12 +227,15 @@ func getNodeNamesFromPods(pods map[string]v1.Pod) []string {
 	return result
 }
 
-func getNotRunningPods(pods map[string]v1.Pod) map[string]v1.Pod {
+func getNotReadyPods(pods map[string]v1.Pod) map[string]v1.Pod {
 	result := make(map[string]v1.Pod, len(pods))
 
 	for _, p := range pods {
-		if p.Status.Phase != v1.PodRunning {
-			result[p.Name] = p
+		for _, c := range p.Status.Conditions {
+			if c.Type == internal.ReadyType && c.Status != v1.ConditionTrue {
+				result[p.Name] = p
+
+			}
 		}
 	}
 
@@ -273,7 +277,6 @@ func getPodsBySelector(ctx context.Context, cl client.Client, selector map[strin
 
 	pods := make(map[string]v1.Pod, len(podList.Items))
 	for _, p := range podList.Items {
-		fmt.Println(p.Name)
 		pods[p.Spec.NodeName] = p
 	}
 
@@ -357,7 +360,7 @@ func GetLVMVolumeGroups(ctx context.Context, cl client.Client, metrics monitorin
 func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, status metav1.ConditionStatus, conType, reason, message string) error {
 	exist := false
 	index := 0
-	condition := metav1.Condition{
+	newCondition := metav1.Condition{
 		Type:               conType,
 		Status:             status,
 		ObservedGeneration: lvg.Generation,
@@ -375,8 +378,9 @@ func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logge
 		log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] there are some conditions in the LVMVolumeGroup %s. Tries to find a condition %s", lvg.Name, conType))
 		for i, c := range lvg.Status.Conditions {
 			if c.Type == conType {
-				if c.Status == metav1.ConditionTrue && status == metav1.ConditionTrue {
-					log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no need to update %s condition of the LVMVolumeGroup %s", conType, lvg.Name))
+				log.Trace(fmt.Sprintf("[updateLVGConditionIfNeeded] old condition: %+v, new condition: %+v", c, newCondition))
+				if checkIfEqualConditions(c, newCondition) {
+					log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no need to update condition %s in the LVMVolumeGroup %s as new and old condition states are the same", conType, lvg.Name))
 					return nil
 				}
 
@@ -388,15 +392,23 @@ func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logge
 
 		if !exist {
 			log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was not found. Append it in the end of the LVMVolumeGroup %s conditions", conType, lvg.Name))
-			lvg.Status.Conditions = append(lvg.Status.Conditions, condition)
+			lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
 		} else {
 			log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] insert the condition %s at index %d of the LVMVolumeGroup %s conditions", conType, index, lvg.Name))
-			lvg.Status.Conditions[index] = condition
+			lvg.Status.Conditions[index] = newCondition
 		}
 	} else {
 		log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no conditions were found in the LVMVolumeGroup %s. Append the condition %s in the end", lvg.Name, conType))
-		lvg.Status.Conditions = append(lvg.Status.Conditions, condition)
+		lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
 	}
 
 	return cl.Status().Update(ctx, lvg)
+}
+
+func checkIfEqualConditions(first, second metav1.Condition) bool {
+	return first.Type == second.Type &&
+		first.Status == second.Status &&
+		first.Reason == second.Reason &&
+		first.Message == second.Message &&
+		first.ObservedGeneration == second.ObservedGeneration
 }

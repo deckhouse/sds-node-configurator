@@ -103,7 +103,6 @@ spec:
                           - NodeReady
                           - AgentReady
                           - Ready
-                          - ""
                       status:
                         type: string
                       reason:

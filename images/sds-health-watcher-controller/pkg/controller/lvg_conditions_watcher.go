@@ -203,7 +203,7 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 			return true, err
 		}
 
-		log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully updated the LVMVolumeGroup %s condition %s to NotReady", lvg.Name, internal.ReadyType))
+		log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully reconciled the LVMVolumeGroup %s condition %s to NotReady", lvg.Name, internal.ReadyType))
 	}
 
 	if ready {
