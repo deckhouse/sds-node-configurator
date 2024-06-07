@@ -144,13 +144,17 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 	ready := true
 	falseConditions := make([]string, 0, len(lvg.Status.Conditions))
 	for _, c := range lvg.Status.Conditions {
+		log.Debug(fmt.Sprintf("[reconcileLVGConditions] check condition %s of the LVMVolumeGroup %s", c.Type, lvg.Name))
+		log.Trace(fmt.Sprintf("[reconcileLVGConditions] check condition %+v of the LVMVolumeGroup %s", c, lvg.Name))
 		if c.Type == internal.Ready {
+			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the condition %s of the LVMVolumeGroup %s is ours, skip it", c.Type, lvg.Name))
 		} else if c.Status == metav1.ConditionTrue {
 			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s condition %s has status True", lvg.Name, c.Type))
 		} else if c.Reason == internal.Creating {
 			ready = false
-			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s condition %s has Creating reason. Turn the LVMVolumeGroup Ready condition to Pening", lvg.Name, c.Type))
-			err := updateLVMVolumeGroupPhase(ctx, cl, lvg, internal.Pending)
+			falseConditions = nil
+			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s condition %s has Creating reason. Turn the LVMVolumeGroup Ready condition and phase to Pening", lvg.Name, c.Type))
+			err := updateLVMVolumeGroupPhaseIfNeeded(ctx, cl, lvg, internal.Pending)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to update the LVMVolumeGroup %s phase", lvg.Name))
 				return true, err
@@ -165,8 +169,9 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 			break
 		} else if c.Reason == internal.Terminating {
 			ready = false
-			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s condition %s has Terminating reason. Turn the LVMVolumeGroup Ready condition to Terminating", lvg.Name, c.Type))
-			err := updateLVMVolumeGroupPhase(ctx, cl, lvg, internal.Terminating)
+			falseConditions = nil
+			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s condition %s has Terminating reason. Turn the LVMVolumeGroup Ready condition and phase to Terminating", lvg.Name, c.Type))
+			err := updateLVMVolumeGroupPhaseIfNeeded(ctx, cl, lvg, internal.Terminating)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to update the LVMVolumeGroup %s phase", lvg.Name))
 				return true, err
@@ -180,12 +185,13 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 			break
 		} else if c.Status == metav1.ConditionFalse && c.Reason != internal.Pending {
 			log.Warning(fmt.Sprintf("[reconcileLVGConditions] the condition %s of the LVMVolumeGroup %s has status False and it is not cause of Pending", c.Type, lvg.Name))
+			falseConditions = append(falseConditions, c.Type)
 			ready = false
 		}
 	}
 
 	if len(falseConditions) > 0 {
-		err := updateLVMVolumeGroupPhase(ctx, cl, lvg, internal.NotReady)
+		err := updateLVMVolumeGroupPhaseIfNeeded(ctx, cl, lvg, internal.NotReady)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to update the LVMVolumeGroup %s phase", lvg.Name))
 			return true, err
@@ -203,11 +209,6 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 	if ready {
 		log.Info(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s has no conditions with status False", lvg.Name))
 
-		if lvg.Status.Phase == internal.Ready {
-			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s has already Ready phase. No need to update", lvg.Name))
-			return false, nil
-		}
-
 		log.Debug(fmt.Sprintf("[reconcileLVGConditions] tries to add a condition %s to the LVMVolumeGroup %s", internal.Ready, lvg.Name))
 		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionTrue, internal.Ready, "ValidConditionStates", "every condition has a proper state")
 		if err != nil {
@@ -215,20 +216,24 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 			return true, err
 		}
 
-		log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully reconciled conditions of the LVMVolumeGroup %s", lvg.Name))
-
-		err = updateLVMVolumeGroupPhase(ctx, cl, lvg, internal.Ready)
+		err = updateLVMVolumeGroupPhaseIfNeeded(ctx, cl, lvg, internal.Ready)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to update the LVMVolumeGroup %s phase", lvg.Name))
 
 		}
-		log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully updated the LVMVolumeGroup %s phase to Ready", lvg.Name))
+		log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully reconciled the LVMVolumeGroup %s phase to Ready", lvg.Name))
+		log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully reconciled conditions of the LVMVolumeGroup %s", lvg.Name))
 	}
 
 	return false, nil
 }
 
-func updateLVMVolumeGroupPhase(ctx context.Context, cl client.Client, lvg *v1alpha1.LvmVolumeGroup, phase string) error {
+func updateLVMVolumeGroupPhaseIfNeeded(ctx context.Context, cl client.Client, lvg *v1alpha1.LvmVolumeGroup, phase string) error {
+	if lvg.Status.Phase == phase {
+		return nil
+	}
+
 	lvg.Status.Phase = phase
+
 	return cl.Status().Update(ctx, lvg)
 }
