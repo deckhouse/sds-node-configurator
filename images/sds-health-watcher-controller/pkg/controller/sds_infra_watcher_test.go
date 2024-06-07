@@ -79,7 +79,7 @@ func TestHealthWatcher(t *testing.T) {
 		}
 	})
 
-	t.Run("findLVMVolumeGroupsByNodes", func(t *testing.T) {
+	t.Run("findLVMVolumeGroupsByNodeNames", func(t *testing.T) {
 		const (
 			node1 = "node1"
 			node2 = "node2"
@@ -111,7 +111,7 @@ func TestHealthWatcher(t *testing.T) {
 			},
 		}
 
-		actual := findLVMVolumeGroupsByNodes(lvgs, []string{node1})
+		actual := findLVMVolumeGroupsByNodeNames(lvgs, []string{node1})
 		if assert.Equal(t, 1, len(actual)) {
 			lvg, exist := actual["first"]
 

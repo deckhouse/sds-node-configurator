@@ -16,11 +16,17 @@ limitations under the License.
 
 package internal
 
-// TODO: seperate constats by usage (PhasePending, ReasonPending, etc)
 const (
-	Pending     = "Pending"
-	Creating    = "Creating"
-	Ready       = "Ready"
-	NotReady    = "NotReady"
-	Terminating = "Terminating"
+	SdsNodeConfiguratorNamespace = "d8-sds-node-configurator"
+
+	PendingPhase     = "Pending"
+	NotReadyPhase    = "NotReady"
+	ReadyPhase       = "Ready"
+	TerminatingPhase = "Terminating"
+
+	PendingReason     = "Pending"
+	CreatingReason    = "Creating"
+	TerminatingReason = "Terminating"
+
+	ReadyType = "Ready"
 )
