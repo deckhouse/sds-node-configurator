@@ -42,11 +42,6 @@ type Options struct {
 func NewConfig() (*Options, error) {
 	var opts Options
 
-	//opts.NodeName = os.Getenv(NodeName)
-	//if opts.NodeName == "" {
-	//	return nil, fmt.Errorf("[NewConfig] required %s env variable is not specified", NodeName)
-	//}
-
 	loglevel := os.Getenv(LogLevel)
 	if loglevel == "" {
 		opts.Loglevel = logger.DebugLevel
