@@ -84,6 +84,8 @@ spec:
               properties:
                 phase:
                   type: string
+                  description: |
+                    The general LVMVolumeGroup condition.
                   enum:
                     - Pending
                     - Ready
@@ -91,12 +93,16 @@ spec:
                     - Terminating
                     - ""
                 conditions:
+                  description: |
+                    The LVMVolumeGroup conditions.
                   type: array
                   items:
                     type: object
                     properties:
                       type:
                         type: string
+                        description: |
+                          The condition type.
                         enum:
                           - VGConfigurationApplied
                           - VGReady
@@ -105,14 +111,24 @@ spec:
                           - Ready
                       status:
                         type: string
+                        description: |
+                          The condition status.
                       reason:
                         type: string
+                        description: |
+                          The reason of the current status.
                       message:
                         type: string
+                        description: |
+                          The information about the current status.
                       lastTransitionTime:
                         type: string
+                        description: |
+                          The time the condition was updated.
                       observedGeneration:
                         type: integer
+                        description: |
+                          The resource version when the condition applied.
                 vgUUID:
                   type: string
                   description: |
@@ -152,8 +168,12 @@ spec:
                           The Thin-pool used size.
                       ready:
                         type: boolean
+                        description: |
+                          The Thin-pool health status.
                       message:
                         type: string
+                        description: |
+                          Information about the status.
                 nodes:
                   type: array
                   description: |

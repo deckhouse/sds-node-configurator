@@ -40,9 +40,9 @@ const (
 	VGReadyType                = "VGReady"
 	ValidationFailed           = "ValidationFailed"
 
-	Creating    = "Creating"
-	Pending     = "Pending"
-	Terminating = "Terminating"
+	CreatingReason    = "Creating"
+	UpdatingReason    = "Updating"
+	TerminatingReason = "Terminating"
 
 	ScanFailed = "ScanFailed"
 	Updated    = "Updated"

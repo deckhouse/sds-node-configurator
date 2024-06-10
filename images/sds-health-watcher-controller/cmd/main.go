@@ -44,6 +44,7 @@ var (
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,
 		v1.AddToScheme,
+		extv1.AddToScheme,
 	}
 )
 

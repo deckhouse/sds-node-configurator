@@ -15,6 +15,14 @@ metadata:
   {{- include "helm_lib_module_labels" (list . (dict "app" "sds-health-watcher-controller")) | nindent 2 }}
 rules:
   - apiGroups:
+      - "apiextensions.k8s.io"
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
       - "storage.deckhouse.io"
     resources:
       - lvmvolumegroups
