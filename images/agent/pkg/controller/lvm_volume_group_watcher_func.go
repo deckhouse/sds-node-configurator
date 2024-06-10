@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/internal"
 	"sds-node-configurator/pkg/cache"
@@ -51,21 +52,6 @@ func getLVMVolumeGroup(ctx context.Context, cl client.Client, metrics monitoring
 		return nil, err
 	}
 	return obj, nil
-}
-
-func updateLVMVolumeGroupHealthStatus(ctx context.Context, cl client.Client, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, health, message string) error {
-	lvg.Status.Health = health
-	lvg.Status.Message = message
-
-	start := time.Now()
-	err := cl.Update(ctx, lvg)
-	metrics.ApiMethodsDuration(LVMVolumeGroupWatcherCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "update").Inc()
-	if err != nil {
-		metrics.ApiMethodsErrors(LVMVolumeGroupWatcherCtrlName, "update").Inc()
-		return err
-	}
-	return nil
 }
 
 func DeleteVGIfExist(log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, vgName string) error {
@@ -199,9 +185,15 @@ func CreateVGComplex(metrics monitoring.Metrics, log logger.Logger, lvg *v1alpha
 	return nil
 }
 
-func UpdateVGTagIfNeeded(log logger.Logger, metrics monitoring.Metrics, vg internal.VGData, lvgName string) (bool, error) {
+func UpdateVGTagIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, vg internal.VGData) (bool, error) {
 	found, tagName := CheckTag(vg.VGTags)
-	if found && lvgName != tagName {
+	if found && lvg.Name != tagName {
+		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, internal.UpdatingReason, "trying to apply the configuration")
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, internal.UpdatingReason, lvg.Name))
+			return false, err
+		}
+
 		start := time.Now()
 		cmd, err := utils.VGChangeDelTag(vg.VGName, fmt.Sprintf("%s=%s", LVMVolumeGroupTag, tagName))
 		metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
@@ -214,12 +206,12 @@ func UpdateVGTagIfNeeded(log logger.Logger, metrics monitoring.Metrics, vg inter
 		}
 
 		start = time.Now()
-		cmd, err = utils.VGChangeAddTag(vg.VGName, fmt.Sprintf("%s=%s", LVMVolumeGroupTag, lvgName))
+		cmd, err = utils.VGChangeAddTag(vg.VGName, fmt.Sprintf("%s=%s", LVMVolumeGroupTag, lvg.Name))
 		metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
 		metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgchange").Inc()
 		log.Debug(fmt.Sprintf("[UpdateVGTagIfNeeded] exec cmd: %s", cmd))
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add LVMVolumeGroupTag: %s=%s, vg: %s", LVMVolumeGroupTag, lvgName, vg.VGName))
+			log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add LVMVolumeGroupTag: %s=%s, vg: %s", LVMVolumeGroupTag, lvg.Name, vg.VGName))
 			metrics.UtilsCommandsErrorsCount(LVMVolumeGroupWatcherCtrlName, "vgchange").Inc()
 			return false, err
 		}

@@ -1,5 +1,5 @@
 /*
-Copyright 2023 Flant JSC
+Copyright 2024 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,17 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils
+package internal
 
-import (
-	"math"
+const (
+	SdsNodeConfiguratorNamespace = "d8-sds-node-configurator"
 
-	"k8s.io/apimachinery/pkg/api/resource"
+	PendingPhase     = "Pending"
+	NotReadyPhase    = "NotReady"
+	ReadyPhase       = "Ready"
+	TerminatingPhase = "Terminating"
+
+	UpdatingReason    = "Updating"
+	CreatingReason    = "Creating"
+	TerminatingReason = "Terminating"
+
+	ReadyType = "Ready"
 )
-
-func AreSizesEqualWithinDelta(leftSize, rightSize, allowedDelta resource.Quantity) bool {
-	leftSizeFloat := float64(leftSize.Value())
-	rightSizeFloat := float64(rightSize.Value())
-
-	return math.Abs(leftSizeFloat-rightSizeFloat) < float64(allowedDelta.Value())
-}

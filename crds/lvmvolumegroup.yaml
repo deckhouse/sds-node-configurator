@@ -82,19 +82,53 @@ spec:
             status:
               type: object
               properties:
-                health:
+                phase:
                   type: string
                   description: |
-                    The global state of the Volume Group. Might be:
-                    - Operational (if everything is fine with the Volume Group)
-                    - NonOperational (if there are some problems in the Volume Group)
+                    The general LVMVolumeGroup condition.
                   enum:
-                    - Operational
-                    - NonOperational
-                message:
-                  type: string
+                    - Pending
+                    - Ready
+                    - NotReady
+                    - Terminating
+                    - ""
+                conditions:
                   description: |
-                    Additional information about the Volume Group current state.
+                    The LVMVolumeGroup conditions.
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        description: |
+                          The condition type.
+                        enum:
+                          - VGConfigurationApplied
+                          - VGReady
+                          - NodeReady
+                          - AgentReady
+                          - Ready
+                      status:
+                        type: string
+                        description: |
+                          The condition status.
+                      reason:
+                        type: string
+                        description: |
+                          The reason of the current status.
+                      message:
+                        type: string
+                        description: |
+                          The information about the current status.
+                      lastTransitionTime:
+                        type: string
+                        description: |
+                          The time the condition was updated.
+                      observedGeneration:
+                        type: integer
+                        description: |
+                          The resource version when the condition applied.
                 vgUUID:
                   type: string
                   description: |
@@ -132,6 +166,14 @@ spec:
                         type: string
                         description: |
                           The Thin-pool used size.
+                      ready:
+                        type: boolean
+                        description: |
+                          The Thin-pool health status.
+                      message:
+                        type: string
+                        description: |
+                          Information about the status.
                 nodes:
                   type: array
                   description: |
@@ -170,12 +212,13 @@ spec:
                               type: string
                               description: |
                                 The name of the corresponding block device resource.
-
+      subresources:
+        status: {}
       additionalPrinterColumns:
-        - jsonPath: .status.health
-          name: health
+        - jsonPath: .status.phase
+          name: phase
           type: string
-          description: Volume Group health.
+          description: Resource phase.
         - jsonPath: .status.nodes..name
           name: node
           type: string

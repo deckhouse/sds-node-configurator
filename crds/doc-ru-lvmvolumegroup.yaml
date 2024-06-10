@@ -39,14 +39,32 @@ spec:
                           Желаемый размер Thin-pool.
             status:
               properties:
-                health:
+                phase:
                   description: |
-                    Состояние Volume Group. Может быть:
-                    - Operational (если с Volume Group все в порядке)
-                    - NonOperational (если на Volume Group наблюдаются какие-либо проблемы)
-                message:
+                    Обозначает общее состояние ресурса.
+                conditions:
                   description: |
-                    Дополнительная информация о текущем состоянии Volume Group.
+                    Обозначает текущие состояния ресурса.
+                  items:
+                    properties:
+                      type:
+                        description: |
+                          Тип состояния.
+                      status:
+                        description: |
+                          Статус состояния.
+                      reason:
+                        description: |
+                          Причина текущего статуса.
+                      message:
+                        description: |
+                          Дополнительная информация о текущем состоянии ресурса.
+                      lastTransitionTime:
+                        description: |
+                          Время обновления состояния.
+                      observedGeneration:
+                        description: |
+                          Версия ресурса на момент проставления состояния.
                 vgUUID:
                   description: |
                     Уникальный идентификатор Volume Group.
@@ -72,6 +90,12 @@ spec:
                       usedSize:
                         description: |
                           Используемый размер Thin-pool.
+                      ready:
+                        description: |
+                          Текущее состояние Thin-pool.
+                      message:
+                        description: |
+                          Дополнительная информация о состоянии Thin-pool.
                 nodes:
                   description: |
                     Информация об узлах, на которых расположена Volume Group.

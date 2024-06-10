@@ -1,5 +1,5 @@
 /*
-Copyright 2023 Flant JSC
+Copyright 2024 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,18 +21,15 @@ import (
 	"fmt"
 	"os"
 	goruntime "runtime"
-	"sds-node-configurator/api/v1alpha1"
-	"sds-node-configurator/config"
-	"sds-node-configurator/pkg/cache"
-	"sds-node-configurator/pkg/controller"
-	"sds-node-configurator/pkg/kubutils"
-	"sds-node-configurator/pkg/logger"
-	"sds-node-configurator/pkg/monitoring"
-	"sds-node-configurator/pkg/scanner"
+	"sds-health-watcher-controller/api/v1alpha1"
+	"sds-health-watcher-controller/config"
+	"sds-health-watcher-controller/pkg/controller"
+	"sds-health-watcher-controller/pkg/kubutils"
+	"sds-health-watcher-controller/pkg/logger"
+	"sds-health-watcher-controller/pkg/monitoring"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	v1 "k8s.io/api/core/v1"
-	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
@@ -47,7 +44,7 @@ var (
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,
 		v1.AddToScheme,
-		sv1.AddToScheme,
+		extv1.AddToScheme,
 	}
 )
 
@@ -70,11 +67,9 @@ func main() {
 
 	log.Info("[main] CfgParams has been successfully created")
 	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.MetricsPort, cfgParams.MetricsPort))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.ScanIntervalSec))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.NodeName, cfgParams.NodeName))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.MachineID, cfgParams.MachineId))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.BlockDeviceScanIntervalSec.String()))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ThrottleInterval, cfgParams.ThrottleIntervalSec.String()))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDurationSec.String()))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
@@ -106,42 +101,11 @@ func main() {
 	log.Info("[main] successfully created kubernetes manager")
 
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
+	controller.RunSdsInfraWatcher(ctx, mgr, *cfgParams, metrics, *log)
 
-	log.Info("[main] ReTag starts")
-	err = controller.ReTag(ctx, *log, metrics)
+	err = controller.RunLVGConditionsWatcher(mgr, *cfgParams, *log)
 	if err != nil {
-		log.Error(err, "[main] unable to run ReTag")
-	}
-	log.Info("[main] ReTag ends")
-
-	sdsCache := cache.New()
-
-	bdCtrl, err := controller.RunBlockDeviceController(mgr, *cfgParams, *log, metrics, sdsCache)
-	if err != nil {
-		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
-		os.Exit(1)
-	}
-
-	if _, err = controller.RunLVMVolumeGroupWatcherController(mgr, *cfgParams, *log, metrics, sdsCache); err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
-		os.Exit(1)
-	}
-
-	lvgDiscoverCtrl, err := controller.RunLVMVolumeGroupDiscoverController(mgr, *cfgParams, *log, metrics, sdsCache)
-	if err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupDiscoverController")
-		os.Exit(1)
-	}
-
-	go func() {
-		if err = scanner.RunScanner(ctx, *log, *cfgParams, sdsCache, bdCtrl, lvgDiscoverCtrl); err != nil {
-			log.Error(err, "[main] unable to run scanner")
-			os.Exit(1)
-		}
-	}()
-
-	if _, err = controller.RunLVMLogicalVolumeWatcherController(mgr, *cfgParams, *log, metrics); err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMLogicalVolumeWatcherController")
+		log.Error(err, "[main] unable to run LVGConditionsWatcher controller")
 		os.Exit(1)
 	}
 

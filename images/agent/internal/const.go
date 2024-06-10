@@ -35,6 +35,17 @@ const (
 	NSENTERCmd                   = "/opt/deckhouse/sds/bin/nsenter.static"
 	LSBLKCmd                     = "/opt/deckhouse/sds/bin/lsblk.dynamic"
 	LVMCmd                       = "/opt/deckhouse/sds/bin/lvm.static"
+
+	VGConfigurationAppliedType = "VGConfigurationApplied"
+	VGReadyType                = "VGReady"
+	ValidationFailed           = "ValidationFailed"
+
+	CreatingReason    = "Creating"
+	UpdatingReason    = "Updating"
+	TerminatingReason = "Terminating"
+
+	ScanFailed = "ScanFailed"
+	Updated    = "Updated"
 )
 
 var (

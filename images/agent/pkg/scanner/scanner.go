@@ -113,18 +113,44 @@ func RunScanner(ctx context.Context, log logger.Logger, cfg config.Options, sdsC
 
 func runControllersReconcile(ctx context.Context, log logger.Logger, bdCtrl, lvgDiscoverCtrl kubeCtrl.Controller) error {
 	log.Info(fmt.Sprintf("[runControllersReconcile] run %s reconcile", controller.BlockDeviceCtrlName))
-	_, err := bdCtrl.Reconcile(ctx, reconcile.Request{})
+	bdRes, err := bdCtrl.Reconcile(ctx, reconcile.Request{})
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[RunScanner] an error occured while %s reconcile", controller.BlockDeviceCtrlName))
+		log.Error(err, fmt.Sprintf("[runControllersReconcile] an error occured while %s reconcile", controller.BlockDeviceCtrlName))
 		return err
 	}
+
+	if bdRes.RequeueAfter > 0 {
+		go func() {
+			for bdRes.RequeueAfter > 0 {
+				log.Warning(fmt.Sprintf("[runControllersReconcile] BlockDevices reconcile needs a retry in %s", bdRes.RequeueAfter.String()))
+				time.Sleep(bdRes.RequeueAfter)
+				bdRes, err = bdCtrl.Reconcile(ctx, reconcile.Request{})
+			}
+
+			log.Info("[runControllersReconcile] successfully reconciled BlockDevices after a retry")
+			return
+		}()
+	}
+
 	log.Info(fmt.Sprintf("[runControllersReconcile] run %s successfully reconciled", controller.BlockDeviceCtrlName))
 
 	log.Info(fmt.Sprintf("[runControllersReconcile] run %s reconcile", controller.LVMVolumeGroupDiscoverCtrlName))
-	_, err = lvgDiscoverCtrl.Reconcile(ctx, reconcile.Request{})
+	lvgRes, err := lvgDiscoverCtrl.Reconcile(ctx, reconcile.Request{})
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[runControllersReconcile] an error occured while %s reconcile", controller.LVMVolumeGroupDiscoverCtrlName))
 		return err
+	}
+	if lvgRes.RequeueAfter > 0 {
+		go func() {
+			for lvgRes.RequeueAfter > 0 {
+				log.Warning(fmt.Sprintf("[runControllersReconcile] LVMVolumeGroups reconcile needs a retry in %s", lvgRes.RequeueAfter.String()))
+				time.Sleep(lvgRes.RequeueAfter)
+				lvgRes, err = lvgDiscoverCtrl.Reconcile(ctx, reconcile.Request{})
+			}
+
+			log.Info("[runControllersReconcile] successfully reconciled LVMVolumeGroups after a retry")
+			return
+		}()
 	}
 	log.Info(fmt.Sprintf("[runControllersReconcile] run %s successfully reconciled", controller.LVMVolumeGroupDiscoverCtrlName))
 

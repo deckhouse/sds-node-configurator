@@ -41,7 +41,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-const LVMVolumeGroupDiscoverCtrlName = "lvm-volume-group-discover-controller"
+const (
+	LVMVolumeGroupDiscoverCtrlName = "lvm-volume-group-discover-controller"
+)
 
 func RunLVMVolumeGroupDiscoverController(
 	mgr manager.Manager,
@@ -55,9 +57,10 @@ func RunLVMVolumeGroupDiscoverController(
 	c, err := controller.New(LVMVolumeGroupDiscoverCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 			log.Info("[RunLVMVolumeGroupDiscoverController] Reconciler starts LVMVolumeGroup resources reconciliation")
+
 			shouldRequeue := LVMVolumeGroupDiscoverReconcile(ctx, cl, metrics, log, cfg, sdsCache)
 			if shouldRequeue {
-				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error occured while run the Reconciler func, retry in %fs", cfg.VolumeGroupScanIntervalSec.Seconds()))
+				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error occured while run the Reconciler func, retry in %s", cfg.VolumeGroupScanIntervalSec.String()))
 				return reconcile.Result{
 					RequeueAfter: cfg.VolumeGroupScanIntervalSec,
 				}, nil
@@ -93,8 +96,9 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 	if err != nil {
 		log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to GetAPIBlockDevices")
 		for _, lvg := range currentLVMVGs {
-			if err = turnLVMVGHealthToNonOperational(ctx, cl, lvg, err); err != nil {
-				log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvg.Name))
+			err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGReadyType, "NoBlockDevices", fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()))
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
 			}
 		}
 		return true
@@ -105,52 +109,91 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 		return false
 	}
 
-	filteredResources := filterResourcesByNode(ctx, cl, log, currentLVMVGs, blockDevices, cfg.NodeName)
+	filteredLVGs := filterLVGsByNode(ctx, cl, log, metrics, currentLVMVGs, blockDevices, cfg.NodeName)
 
+	log.Debug("[RunLVMVolumeGroupDiscoverController] tries to get LVMVolumeGroup candidates")
 	candidates, err := GetLVMVolumeGroupCandidates(log, sdsCache, blockDevices, cfg.NodeName)
 	if err != nil {
 		log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to run GetLVMVolumeGroupCandidates")
-		for _, lvg := range filteredResources {
-			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] turn LVMVolumeGroup %q to non operational. LVG struct: %+v ", lvg.Name, lvg))
-			if err = turnLVMVGHealthToNonOperational(ctx, cl, lvg, err); err != nil {
-				log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to change health param in LVMVolumeGroup, name: "%s"`, lvg.Name))
+		for _, lvg := range filteredLVGs {
+			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] turn LVMVolumeGroup %s to non operational. LVG struct: %+v ", lvg.Name, lvg))
+			err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGReadyType, "DataConfigurationFailed", fmt.Sprintf("unable to configure data, err: %s", err.Error()))
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
 			}
 		}
 		return true
 	}
+	log.Debug("[RunLVMVolumeGroupDiscoverController] successfully got LVMVolumeGroup candidates")
 
 	if len(candidates) == 0 {
 		log.Debug("[RunLVMVolumeGroupDiscoverController] no candidates were found on the node")
 	}
 
+	shouldRequeue := false
 	for _, candidate := range candidates {
-		if lvmVolumeGroup := getResourceByCandidate(filteredResources, candidate); lvmVolumeGroup != nil {
+		if lvg, exist := filteredLVGs[candidate.ActualVGNameOnTheNode]; exist {
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is already exist. Tries to update it", lvg.Name))
 			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] candidate: %v", candidate))
-			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] lvmVolumeGroup: %v", *lvmVolumeGroup))
-			if !hasLVMVolumeGroupDiff(log, *lvmVolumeGroup, candidate) {
-				log.Debug(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] no data to update for LvmVolumeGroup, name: "%s"`, lvmVolumeGroup.Name))
+			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] lvg: %v", lvg))
+
+			if !hasLVMVolumeGroupDiff(log, lvg, candidate) {
+				log.Debug(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] no data to update for LvmVolumeGroup, name: "%s"`, lvg.Name))
+				err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGReadyType, internal.Updated, "ready to create LV")
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
+					shouldRequeue = true
+				}
 				continue
 			}
 
-			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LvmVolumeGroup %s should be updated", lvmVolumeGroup.Name))
-			if err = UpdateLVMVolumeGroupByCandidate(ctx, cl, metrics, *lvmVolumeGroup, candidate); err != nil {
-				log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to update LvmVolumeGroup, name: "%s"`,
-					lvmVolumeGroup.Name))
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LvmVolumeGroup %s should be updated", lvg.Name))
+			if err = UpdateLVMVolumeGroupByCandidate(ctx, cl, metrics, log, &lvg, candidate); err != nil {
+				log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to update LvmVolumeGroup, name: "%s". Requeue the request in %s`,
+					lvg.Name, cfg.VolumeGroupScanIntervalSec.String()))
+				shouldRequeue = true
 				continue
 			}
 
-			log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] updated LvmVolumeGroup, name: "%s"`, lvmVolumeGroup.Name))
+			log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] updated LvmVolumeGroup, name: "%s"`, lvg.Name))
+
 		} else {
-			lvm, err := CreateLVMVolumeGroup(ctx, log, metrics, cl, candidate)
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is not yet created. Create it", lvg.Name))
+			lvm, err := CreateLVMVolumeGroupByCandidate(ctx, log, metrics, cl, candidate)
 			if err != nil {
-				log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to CreateLVMVolumeGroup")
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to CreateLVMVolumeGroupByCandidate %s. Requeue the request in %s", candidate.LVMVGName, cfg.VolumeGroupScanIntervalSec.String()))
+				shouldRequeue = true
 				continue
 			}
+
+			err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGConfigurationAppliedType, "Success", "all configuration has been applied")
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, lvg.Name))
+				shouldRequeue = true
+				continue
+			}
+
+			err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.VGReadyType, internal.Updated, "ready to create LV")
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
+				shouldRequeue = true
+				continue
+			}
+
 			log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] created new APILVMVolumeGroup, name: "%s"`, lvm.Name))
 		}
 	}
 
-	ClearLVMVolumeGroupResources(ctx, cl, log, metrics, candidates, filteredResources, cfg.NodeName)
+	if shouldRequeue {
+		log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] some problems have been occurred while iterating the lvmvolumegroup resources. Retry the reconcile in %s", cfg.VolumeGroupScanIntervalSec.String()))
+		return true
+	}
+
+	err = ClearLVMVolumeGroupResources(ctx, cl, log, metrics, candidates, filteredLVGs, cfg.NodeName)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error has occurred while clearing the LVMVolumeGroups resources. Requeue the request in %s", cfg.VolumeGroupScanIntervalSec.String()))
+		return true
+	}
 
 	log.Info("[RunLVMVolumeGroupDiscoverController] END discovery loop")
 	metrics.ReconcileDuration(LVMVolumeGroupDiscoverCtrlName).Observe(metrics.GetEstimatedTimeInSeconds(reconcileStart))
@@ -158,15 +201,17 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 	return false
 }
 
-func filterResourcesByNode(
+func filterLVGsByNode(
 	ctx context.Context,
 	cl kclient.Client,
 	log logger.Logger,
+	metrics monitoring.Metrics,
 	lvgs map[string]v1alpha1.LvmVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
-	currentNode string) []v1alpha1.LvmVolumeGroup {
+	currentNode string,
+) map[string]v1alpha1.LvmVolumeGroup {
 
-	filtered := make([]v1alpha1.LvmVolumeGroup, 0, len(lvgs))
+	filtered := make(map[string]v1alpha1.LvmVolumeGroup, len(lvgs))
 	blockDevicesNodes := make(map[string]string, len(blockDevices))
 
 	for _, bd := range blockDevices {
@@ -185,9 +230,8 @@ func filterResourcesByNode(
 
 			// If we did not add every block device of local VG, that means a mistake, and we turn the resource's health to Nonoperational.
 			if currentNodeDevices > 0 && currentNodeDevices < len(lvg.Spec.BlockDeviceNames) {
-				if err := turnLVMVGHealthToNonOperational(
-					ctx, cl, lvg, fmt.Errorf("there are block devices from different nodes for local volume group")); err != nil {
-					log.Error(err, `[filterResourcesByNode] unable to update resource, name: "%s"`, lvg.Name)
+				if err := updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGConfigurationAppliedType, "InvalidBlockDevices", "there are block devices from different nodes for local volume group"); err != nil {
+					log.Error(err, `[filterLVGsByNode] unable to update resource, name: "%s"`, lvg.Name)
 					continue
 				}
 			}
@@ -198,12 +242,11 @@ func filterResourcesByNode(
 			}
 
 			// Otherwise, we add the resource to the filtered ones.
-			filtered = append(filtered, lvg)
+			filtered[lvg.Spec.ActualVGNameOnTheNode] = lvg
 		case Shared:
 			if len(lvg.Spec.BlockDeviceNames) != 1 {
-				if err := turnLVMVGHealthToNonOperational(
-					ctx, cl, lvg, fmt.Errorf("there are more than one block devices for shared volume group")); err != nil {
-					log.Error(err, `[filterResourcesByNode] unable to update resource, name: "%s"`, lvg.Name)
+				if err := updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.VGConfigurationAppliedType, "InvalidBlockDevices", "there are more than one block devices for shared volume group"); err != nil {
+					log.Error(err, `[filterLVGsByNode] unable to update resource, name: "%s"`, lvg.Name)
 					continue
 				}
 			}
@@ -215,25 +258,16 @@ func filterResourcesByNode(
 			}
 
 			// Otherwise, we add the resource to the filtered ones.
-			filtered = append(filtered, lvg)
+			filtered[lvg.Spec.ActualVGNameOnTheNode] = lvg
 		}
 	}
 
 	return filtered
 }
 
-func turnLVMVGHealthToNonOperational(ctx context.Context, cl kclient.Client, lvg v1alpha1.LvmVolumeGroup, err error) error {
-	lvg.Status.Health = internal.LVMVGHealthNonOperational
-	lvg.Status.Message = err.Error()
-
-	return cl.Update(ctx, &lvg)
-}
-
 func hasLVMVolumeGroupDiff(log logger.Logger, res v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
 	convertedStatusPools := convertStatusThinPools(candidate.StatusThinPools)
 	log.Trace(fmt.Sprintf(`AllocatedSize, candidate: %s, res: %s`, candidate.AllocatedSize.String(), res.Status.AllocatedSize.String()))
-	log.Trace(fmt.Sprintf(`Health, candidate: %s, res: %s`, candidate.Health, res.Status.Health))
-	log.Trace(fmt.Sprintf(`Message, candidate: %s, res: %s`, candidate.Message, res.Status.Message))
 	log.Trace(fmt.Sprintf(`ThinPools, candidate: %+v, res: %+v`, convertedStatusPools, res.Status.ThinPools))
 	for _, tp := range convertedStatusPools {
 		log.Trace(fmt.Sprintf("Candidate ThinPool name: %s, actual size: %s, used size: %s", tp.Name, tp.ActualSize.String(), tp.UsedSize.String()))
@@ -246,8 +280,6 @@ func hasLVMVolumeGroupDiff(log logger.Logger, res v1alpha1.LvmVolumeGroup, candi
 	log.Trace(fmt.Sprintf(`Nodes, candidate: %+v, res: %+v`, convertLVMVGNodes(candidate.Nodes), res.Status.Nodes))
 
 	return candidate.AllocatedSize.Value() != res.Status.AllocatedSize.Value() ||
-		candidate.Health != res.Status.Health ||
-		candidate.Message != res.Status.Message ||
 		hasStatusPoolDiff(convertedStatusPools, res.Status.ThinPools) ||
 		candidate.VGSize.Value() != res.Status.VGSize.Value() ||
 		candidate.VGUuid != res.Status.VGUuid ||
@@ -292,22 +324,14 @@ func hasStatusPoolDiff(first, second []v1alpha1.StatusThinPool) bool {
 	for i := range first {
 		if first[i].Name != second[i].Name ||
 			first[i].UsedSize.Value() != second[i].UsedSize.Value() ||
-			first[i].ActualSize.Value() != second[i].ActualSize.Value() {
+			first[i].ActualSize.Value() != second[i].ActualSize.Value() ||
+			first[i].Ready != second[i].Ready ||
+			first[i].Message != second[i].Message {
 			return true
 		}
 	}
 
 	return false
-}
-
-func getResourceByCandidate(current []v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) *v1alpha1.LvmVolumeGroup {
-	for _, lvm := range current {
-		if lvm.Spec.ActualVGNameOnTheNode == candidate.ActualVGNameOnTheNode {
-			return &lvm
-		}
-	}
-
-	return nil
 }
 
 // ClearLVMVolumeGroupResources Removes deprecated nodes and resources.
@@ -317,40 +341,42 @@ func ClearLVMVolumeGroupResources(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	candidates []internal.LVMVolumeGroupCandidate,
-	lvmVolumeGroups []v1alpha1.LvmVolumeGroup,
+	lvgs map[string]v1alpha1.LvmVolumeGroup,
 	currentNode string,
-) {
+) error {
 	actualVGs := make(map[string]struct{}, len(candidates))
 	for _, candidate := range candidates {
 		actualVGs[candidate.ActualVGNameOnTheNode] = struct{}{}
 	}
 
-	for _, lvm := range lvmVolumeGroups {
-		if !reflect.ValueOf(lvm.Status.VGUuid).IsZero() {
-			if _, exist := actualVGs[lvm.Spec.ActualVGNameOnTheNode]; !exist {
+	for _, lvg := range lvgs {
+		if !reflect.ValueOf(lvg.Status.VGUuid).IsZero() {
+			if _, exist := actualVGs[lvg.Spec.ActualVGNameOnTheNode]; !exist {
 				log.Debug(fmt.Sprintf(`[ClearLVMVolumeGroupResources] Node "%s" does not belong to VG "%s". 
-It will be removed from LVM resource, name "%s"'`, currentNode, lvm.Spec.ActualVGNameOnTheNode, lvm.Name))
-				for i, node := range lvm.Status.Nodes {
+It will be removed from LVM resource, name "%s"'`, currentNode, lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
+				for i, node := range lvg.Status.Nodes {
 					if node.Name == currentNode {
 						// delete node
-						lvm.Status.Nodes = append(lvm.Status.Nodes[:i], lvm.Status.Nodes[i+1:]...)
+						lvg.Status.Nodes = append(lvg.Status.Nodes[:i], lvg.Status.Nodes[i+1:]...)
 						log.Info(fmt.Sprintf(`[ClearLVMVolumeGroupResources] deleted node, name: "%s", 
-from LVMVolumeGroup, name: "%s"`, node.Name, lvm.Name))
+from LVMVolumeGroup, name: "%s"`, node.Name, lvg.Name))
 					}
 				}
 
 				// If current LVMVolumeGroup has no nodes left, and it is not cause of errors, delete it.
-				if len(lvm.Status.Nodes) == 0 {
-					if err := DeleteLVMVolumeGroup(ctx, cl, metrics, lvm.Name); err != nil {
-						log.Error(err, fmt.Sprintf("Unable to delete LVMVolumeGroup, name: %s", lvm.Name))
-						continue
+				if len(lvg.Status.Nodes) == 0 {
+					if err := DeleteLVMVolumeGroup(ctx, cl, metrics, lvg.Name); err != nil {
+						log.Error(err, fmt.Sprintf("Unable to delete LVMVolumeGroup, name: %s", lvg.Name))
+						return err
 					}
 
-					log.Info(fmt.Sprintf("[ClearLVMVolumeGroupResources] deleted LVMVolumeGroup, name: %s", lvm.Name))
+					log.Info(fmt.Sprintf("[ClearLVMVolumeGroupResources] deleted LVMVolumeGroup, name: %s", lvg.Name))
 				}
 			}
 		}
 	}
+
+	return nil
 }
 
 func DeleteLVMVolumeGroup(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, lvmvgName string) error {
@@ -440,7 +466,7 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 			AllocatedSize:         *resource.NewQuantity(allocateSize.Value(), resource.BinarySI),
 			Health:                health,
 			Message:               message,
-			StatusThinPools:       getStatusThinPools(log, sortedThinPools, vg),
+			StatusThinPools:       getStatusThinPools(log, sortedThinPools, vg, lvIssues),
 			VGSize:                *resource.NewQuantity(vg.VGSize.Value(), resource.BinarySI),
 			VGUuid:                vg.VGUuid,
 			Nodes:                 configureCandidateNodeDevices(sortedPVs, sortedBDs, vg, currentNode),
@@ -663,7 +689,7 @@ func getThinPools(lvs []internal.LVData) []internal.LVData {
 	return thinPools
 }
 
-func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVData, vg internal.VGData) []internal.LVMVGStatusThinPool {
+func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVData, vg internal.VGData, lvIssues map[string][]string) []internal.LVMVGStatusThinPool {
 	filtered := thinPools[vg.VGName+vg.VGUuid]
 	tps := make([]internal.LVMVGStatusThinPool, 0, len(filtered))
 
@@ -674,11 +700,20 @@ func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVDat
 			log.Error(err, "[getStatusThinPools] unable to getLVUsedSize")
 		}
 
-		tps = append(tps, internal.LVMVGStatusThinPool{
+		tp := internal.LVMVGStatusThinPool{
 			Name:       lv.LVName,
 			ActualSize: *resource.NewQuantity(lv.LVSize.Value(), resource.BinarySI),
 			UsedSize:   *resource.NewQuantity(usedSize.Value(), resource.BinarySI),
-		})
+			Ready:      true,
+			Message:    "",
+		}
+
+		if lverrs, exist := lvIssues[vg.VGName+vg.VGUuid]; exist {
+			tp.Ready = false
+			tp.Message = strings.Join(lverrs, "")
+		}
+
+		tps = append(tps, tp)
 	}
 	return tps
 }
@@ -718,7 +753,7 @@ func getBlockDevicesNames(bds map[string][]v1alpha1.BlockDevice, vg internal.VGD
 	return names
 }
 
-func CreateLVMVolumeGroup(
+func CreateLVMVolumeGroupByCandidate(
 	ctx context.Context,
 	log logger.Logger,
 	metrics monitoring.Metrics,
@@ -729,8 +764,7 @@ func CreateLVMVolumeGroup(
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            candidate.LVMVGName,
 			OwnerReferences: []metav1.OwnerReference{},
-			//TODO: Uncomment this
-			//Finalizers:      candidate.Finalizers,
+			Finalizers:      candidate.Finalizers,
 		},
 		Spec: v1alpha1.LvmVolumeGroupSpec{
 			ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
@@ -740,8 +774,6 @@ func CreateLVMVolumeGroup(
 		},
 		Status: v1alpha1.LvmVolumeGroupStatus{
 			AllocatedSize: candidate.AllocatedSize,
-			Health:        candidate.Health,
-			Message:       candidate.Message,
 			Nodes:         convertLVMVGNodes(candidate.Nodes),
 			ThinPools:     convertStatusThinPools(candidate.StatusThinPools),
 			VGSize:        candidate.VGSize,
@@ -771,14 +803,81 @@ func CreateLVMVolumeGroup(
 	return lvmVolumeGroup, nil
 }
 
+func findBlockDevicesNamesWithoutPV(lvg *v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) []string {
+	actualBlockDevices := make(map[string]struct{}, len(lvg.Spec.BlockDeviceNames))
+	for _, devices := range candidate.Nodes {
+		for _, d := range devices {
+			if d.BlockDevice != "" {
+				actualBlockDevices[d.BlockDevice] = struct{}{}
+			}
+		}
+	}
+
+	result := make([]string, 0, len(lvg.Spec.BlockDeviceNames))
+
+	for _, bd := range lvg.Spec.BlockDeviceNames {
+		if _, exist := actualBlockDevices[bd]; !exist {
+			result = append(result, bd)
+		}
+	}
+
+	return result
+}
+
 func UpdateLVMVolumeGroupByCandidate(
 	ctx context.Context,
-	kc kclient.Client,
+	cl kclient.Client,
 	metrics monitoring.Metrics,
-	lvg v1alpha1.LvmVolumeGroup,
+	log logger.Logger,
+	lvg *v1alpha1.LvmVolumeGroup,
 	candidate internal.LVMVolumeGroupCandidate,
 ) error {
-	// The resource.Status.Nodes can not be just re-written, it needs to be updated directly by node.
+	// Check if we miss some PV for BlockDevices
+	unhealthyBDs := findBlockDevicesNamesWithoutPV(lvg, candidate)
+	if len(unhealthyBDs) > 0 {
+		shouldUpdate := false
+		for _, bd := range unhealthyBDs {
+			for _, n := range lvg.Status.Nodes {
+				for i := range n.Devices {
+					if n.Devices[i].BlockDevice == bd {
+						p := strings.Split(n.Devices[i].Path, " ")
+						if len(p) > 1 {
+							continue
+						}
+
+						shouldUpdate = true
+						n.Devices[i].Path = fmt.Sprintf("%s [missed]", n.Devices[i].Path)
+					}
+				}
+			}
+		}
+
+		if shouldUpdate {
+			err := errors.New("missed PV")
+			log.Error(err, fmt.Sprintf("BlockDevices %s miss their PVs. Its likely because the corresponding device was manually removed from the node", strings.Join(unhealthyBDs, ",")))
+			err = cl.Status().Update(ctx, lvg)
+			if err != nil {
+				return err
+			}
+		}
+
+		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.VGReadyType, internal.ScanFailed, fmt.Sprintf("BlockDevices %s miss their PVs. Its likely because the corresponding device was manually removed from the node", strings.Join(unhealthyBDs, ",")))
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
+		}
+		return err
+	}
+
+	// Check if VG has some problems
+	if candidate.Health == NonOperational {
+		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.VGReadyType, internal.ScanFailed, candidate.Message)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
+		}
+		return err
+	}
+
+	// The resource.Status.Nodes can not be just re-written, it needs to be updated directly by a node.
 	// We take all current resources nodes and convert them to map for better performance further.
 	resourceNodes := make(map[string][]v1alpha1.LvmVolumeGroupDevice, len(lvg.Status.Nodes))
 	for _, node := range lvg.Status.Nodes {
@@ -799,23 +898,18 @@ func UpdateLVMVolumeGroupByCandidate(
 		}
 	}
 
-	if lvg.Status.Health == NonOperational {
-		candidate.Health = NonOperational
-		candidate.Message += lvg.Status.Message
-	}
-
 	lvg.Status = v1alpha1.LvmVolumeGroupStatus{
 		AllocatedSize: candidate.AllocatedSize,
-		Health:        candidate.Health,
-		Message:       candidate.Message,
 		Nodes:         convertLVMVGNodes(candidate.Nodes),
 		ThinPools:     convertStatusThinPools(candidate.StatusThinPools),
 		VGSize:        candidate.VGSize,
 		VGUuid:        candidate.VGUuid,
+		Conditions:    lvg.Status.Conditions,
+		Phase:         lvg.Status.Phase,
 	}
 
 	start := time.Now()
-	err := kc.Update(ctx, &lvg)
+	err := cl.Status().Update(ctx, lvg)
 	metrics.ApiMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "update").Inc()
 	if err != nil {
@@ -823,7 +917,12 @@ func UpdateLVMVolumeGroupByCandidate(
 		return fmt.Errorf(`[UpdateLVMVolumeGroupByCandidate] unable to update LVMVolumeGroup, name: "%s", err: %w`, lvg.Name, err)
 	}
 
-	return nil
+	err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionTrue, internal.VGReadyType, internal.Updated, "ready to create LV")
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.VGReadyType, lvg.Name))
+	}
+
+	return err
 }
 
 func convertLVMVGNodes(nodes map[string][]internal.LVMVGDevice) []v1alpha1.LvmVolumeGroupNode {
@@ -872,11 +971,12 @@ func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.Spe
 func convertStatusThinPools(thinPools []internal.LVMVGStatusThinPool) []v1alpha1.StatusThinPool {
 	result := make([]v1alpha1.StatusThinPool, 0, len(thinPools))
 	for _, tp := range thinPools {
-
 		result = append(result, v1alpha1.StatusThinPool{
 			Name:       tp.Name,
 			ActualSize: tp.ActualSize,
 			UsedSize:   tp.UsedSize,
+			Ready:      tp.Ready,
+			Message:    tp.Message,
 		})
 	}
 
