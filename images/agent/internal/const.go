@@ -38,14 +38,13 @@ const (
 
 	VGConfigurationAppliedType = "VGConfigurationApplied"
 	VGReadyType                = "VGReady"
-	ValidationFailed           = "ValidationFailed"
 
-	CreatingReason    = "Creating"
-	UpdatingReason    = "Updating"
-	TerminatingReason = "Terminating"
-
-	ScanFailed = "ScanFailed"
-	Updated    = "Updated"
+	ValidationFailedReason = "ValidationFailed"
+	CreatingReason         = "Creating"
+	UpdatingReason         = "Updating"
+	TerminatingReason      = "Terminating"
+	ScanFailedReason       = "ScanFailed"
+	UpdatedReason          = "Updated"
 )
 
 var (

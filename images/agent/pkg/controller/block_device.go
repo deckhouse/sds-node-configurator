@@ -55,7 +55,7 @@ func RunBlockDeviceController(
 
 	c, err := controller.New(BlockDeviceCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-			log.Info("[RunLVMVolumeGroupDiscoverController] Reconciler starts BlockDevice resources reconciliation")
+			log.Info("[RunBlockDeviceController] Reconciler starts BlockDevice resources reconciliation")
 
 			shouldRequeue := BlockDeviceReconcile(ctx, cl, log, metrics, cfg, sdsCache)
 			if shouldRequeue {
@@ -282,6 +282,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, sdsCache *c
 				if candidate.FSType == internal.LVMFSType {
 					hasTag, lvmVGName := CheckTag(pv.VGTags)
 					if hasTag {
+						log.Debug(fmt.Sprintf("[GetBlockDeviceCandidates] PV %s of BlockDevice %s has tag, fill the VG information", pv.PVName, candidate.Name))
 						candidate.PVUuid = pv.PVUuid
 						candidate.VGUuid = pv.VGUuid
 						candidate.ActualVGNameOnTheNode = pv.VGName
@@ -301,7 +302,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, sdsCache *c
 		if delFlag {
 			continue
 		}
-		log.Trace("[GetBlockDeviceCandidates] Append candidate to candidates")
+		log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] configured candidate %+v", candidate))
 		candidates = append(candidates, candidate)
 	}
 

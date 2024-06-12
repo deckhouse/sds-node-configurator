@@ -24,9 +24,10 @@ const (
 	ReadyPhase       = "Ready"
 	TerminatingPhase = "Terminating"
 
-	UpdatingReason    = "Updating"
-	CreatingReason    = "Creating"
-	TerminatingReason = "Terminating"
+	UpdatingReason         = "Updating"
+	CreatingReason         = "Creating"
+	TerminatingReason      = "Terminating"
+	ValidationFailedReason = "ValidationFailed"
 
 	ReadyType = "Ready"
 )

@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/strings/slices"
 	"reflect"
 	"sds-health-watcher-controller/api/v1alpha1"
 	"sds-health-watcher-controller/config"
@@ -42,6 +43,10 @@ const (
 	SdsLVGConditionsWatcherCtrlName = "sds-conditions-watcher-controller"
 
 	lvgCrdName = "lvmvolumegroups.storage.deckhouse.io"
+)
+
+var (
+	acceptableReasons = []string{internal.UpdatingReason, internal.ValidationFailedReason}
 )
 
 func RunLVGConditionsWatcher(
@@ -217,8 +222,9 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 				return true, err
 			}
 			break
-		} else if c.Status == metav1.ConditionFalse && c.Reason != internal.UpdatingReason {
-			log.Warning(fmt.Sprintf("[reconcileLVGConditions] the condition %s of the LVMVolumeGroup %s has status False and it is not cause of Updating reason", c.Type, lvg.Name))
+		} else if c.Status == metav1.ConditionFalse &&
+			!slices.Contains(acceptableReasons, c.Reason) {
+			log.Warning(fmt.Sprintf("[reconcileLVGConditions] the condition %s of the LVMVolumeGroup %s has status False and its reason is not acceptable", c.Type, lvg.Name))
 			falseConditions = append(falseConditions, c.Type)
 			ready = false
 		}
