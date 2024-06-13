@@ -188,9 +188,9 @@ func CreateVGComplex(metrics monitoring.Metrics, log logger.Logger, lvg *v1alpha
 func UpdateVGTagIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, vg internal.VGData) (bool, error) {
 	found, tagName := CheckTag(vg.VGTags)
 	if found && lvg.Name != tagName {
-		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.VGConfigurationAppliedType, internal.UpdatingReason, "trying to apply the configuration")
+		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.VGConfigurationAppliedType, internal.UpdatingReason, lvg.Name))
+			log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
 			return false, err
 		}
 

@@ -45,7 +45,7 @@ func getNotReadyPods(pods map[string]v1.Pod) map[string]v1.Pod {
 
 	for _, p := range pods {
 		for _, c := range p.Status.Conditions {
-			if c.Type == internal.ReadyType && c.Status != v1.ConditionTrue {
+			if c.Type == internal.TypeReady && c.Status != v1.ConditionTrue {
 				result[p.Name] = p
 
 			}
@@ -60,7 +60,7 @@ func getNotReadyNodes(nodes map[string]v1.Node) []string {
 
 	for _, n := range nodes {
 		for _, c := range n.Status.Conditions {
-			if c.Type == internal.ReadyType && c.Status != v1.ConditionTrue {
+			if c.Type == internal.TypeReady && c.Status != v1.ConditionTrue {
 				result = append(result, n.Name)
 			}
 		}

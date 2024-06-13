@@ -36,16 +36,15 @@ const (
 	LSBLKCmd                     = "/opt/deckhouse/sds/bin/lsblk.dynamic"
 	LVMCmd                       = "/opt/deckhouse/sds/bin/lvm.static"
 
-	VGConfigurationAppliedType = "VGConfigurationApplied"
-	VGReadyType                = "VGReady"
-	ValidationFailed           = "ValidationFailed"
+	TypeVGConfigurationApplied = "VGConfigurationApplied"
+	TypeVGReady                = "VGReady"
 
-	CreatingReason    = "Creating"
-	UpdatingReason    = "Updating"
-	TerminatingReason = "Terminating"
-
-	ScanFailed = "ScanFailed"
-	Updated    = "Updated"
+	ReasonValidationFailed = "ValidationFailed"
+	ReasonCreating         = "Creating"
+	ReasonUpdating         = "Updating"
+	ReasonTerminating      = "Terminating"
+	ReasonScanFailed       = "ScanFailed"
+	ReasonUpdated          = "Updated"
 )
 
 var (

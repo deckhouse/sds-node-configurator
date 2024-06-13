@@ -19,14 +19,15 @@ package internal
 const (
 	SdsNodeConfiguratorNamespace = "d8-sds-node-configurator"
 
-	PendingPhase     = "Pending"
-	NotReadyPhase    = "NotReady"
-	ReadyPhase       = "Ready"
-	TerminatingPhase = "Terminating"
+	PhasePending     = "Pending"
+	PhaseNotReady    = "NotReady"
+	PhaseReady       = "Ready"
+	PhaseTerminating = "Terminating"
 
-	UpdatingReason    = "Updating"
-	CreatingReason    = "Creating"
-	TerminatingReason = "Terminating"
+	ReasonUpdating         = "Updating"
+	ReasonCreating         = "Creating"
+	ReasonTerminating      = "Terminating"
+	ReasonValidationFailed = "ValidationFailed"
 
-	ReadyType = "Ready"
+	TypeReady = "Ready"
 )
