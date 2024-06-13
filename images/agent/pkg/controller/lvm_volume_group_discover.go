@@ -109,7 +109,7 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 		return false
 	}
 
-	filteredLVGs := filterLVGsByNode(ctx, cl, log, metrics, currentLVMVGs, blockDevices, cfg.NodeName)
+	filteredLVGs := filterLVGsByNode(ctx, cl, log, currentLVMVGs, blockDevices, cfg.NodeName)
 
 	log.Debug("[RunLVMVolumeGroupDiscoverController] tries to get LVMVolumeGroup candidates")
 	candidates, err := GetLVMVolumeGroupCandidates(log, sdsCache, blockDevices, cfg.NodeName)
@@ -205,7 +205,6 @@ func filterLVGsByNode(
 	ctx context.Context,
 	cl kclient.Client,
 	log logger.Logger,
-	metrics monitoring.Metrics,
 	lvgs map[string]v1alpha1.LvmVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 	currentNode string,
@@ -365,7 +364,7 @@ from LVMVolumeGroup, name: "%s"`, node.Name, lvg.Name))
 
 				// If current LVMVolumeGroup has no nodes left, and it is not cause of errors, delete it.
 				if len(lvg.Status.Nodes) == 0 {
-					if err := DeleteLVMVolumeGroup(ctx, cl, metrics, lvg.Name); err != nil {
+					if err := DeleteLVMVolumeGroup(ctx, cl, metrics, &lvg); err != nil {
 						log.Error(err, fmt.Sprintf("Unable to delete LVMVolumeGroup, name: %s", lvg.Name))
 						return err
 					}
@@ -379,15 +378,9 @@ from LVMVolumeGroup, name: "%s"`, node.Name, lvg.Name))
 	return nil
 }
 
-func DeleteLVMVolumeGroup(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, lvmvgName string) error {
-	lvm := &v1alpha1.LvmVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: lvmvgName,
-		},
-	}
-
+func DeleteLVMVolumeGroup(ctx context.Context, cl kclient.Client, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup) error {
 	start := time.Now()
-	err := kc.Delete(ctx, lvm)
+	err := cl.Delete(ctx, lvg)
 	metrics.ApiMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "delete").Inc()
 	if err != nil {
@@ -842,16 +835,11 @@ func UpdateLVMVolumeGroupByCandidate(
 			lvg.Status.Nodes[i].Devices = devices
 		}
 	}
-
-	lvg.Status = v1alpha1.LvmVolumeGroupStatus{
-		AllocatedSize: candidate.AllocatedSize,
-		Nodes:         convertLVMVGNodes(candidate.Nodes),
-		ThinPools:     convertStatusThinPools(candidate.StatusThinPools),
-		VGSize:        candidate.VGSize,
-		VGUuid:        candidate.VGUuid,
-		Conditions:    lvg.Status.Conditions,
-		Phase:         lvg.Status.Phase,
-	}
+	lvg.Status.AllocatedSize = candidate.AllocatedSize
+	lvg.Status.Nodes = convertLVMVGNodes(candidate.Nodes)
+	lvg.Status.ThinPools = convertStatusThinPools(candidate.StatusThinPools)
+	lvg.Status.VGSize = candidate.VGSize
+	lvg.Status.VGUuid = candidate.VGUuid
 
 	start := time.Now()
 	err := cl.Status().Update(ctx, lvg)

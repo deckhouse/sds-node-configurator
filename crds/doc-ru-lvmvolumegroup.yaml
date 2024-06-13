@@ -47,6 +47,12 @@ spec:
                     Обозначает текущие состояния ресурса.
                   items:
                     properties:
+                      thinPoolReady:
+                        description: |
+                          Показывает количество здоровых Thin-pool к общему.
+                      configurationApplied:
+                        description: |
+                          Показывает, была ли успешно применена последняя конфигурация.
                       type:
                         description: |
                           Тип состояния.
