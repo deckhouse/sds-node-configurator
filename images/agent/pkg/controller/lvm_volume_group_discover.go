@@ -430,7 +430,7 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 	}
 
 	// If lvErrs is not empty, that means we have some problems on vgs, so we need to identify unhealthy vgs.
-	var lvIssues map[string][]string
+	var lvIssues map[string]map[string]string
 	if lvErrs.Len() != 0 {
 		log.Warning("[GetLVMVolumeGroupCandidates] some errors have been occurred while executing lvs command")
 		lvIssues = sortLVIssuesByVG(log, thinPools)
@@ -471,7 +471,7 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 	return candidates, nil
 }
 
-func checkVGHealth(blockDevices map[string][]v1alpha1.BlockDevice, vgIssues map[string]string, pvIssues map[string][]string, lvIssues map[string][]string, vg internal.VGData) (health, message string) {
+func checkVGHealth(blockDevices map[string][]v1alpha1.BlockDevice, vgIssues map[string]string, pvIssues map[string][]string, lvIssues map[string]map[string]string, vg internal.VGData) (health, message string) {
 	issues := make([]string, 0, len(vgIssues)+len(pvIssues)+len(lvIssues)+1)
 
 	if bds, exist := blockDevices[vg.VGName+vg.VGUuid]; !exist || len(bds) == 0 {
@@ -487,7 +487,9 @@ func checkVGHealth(blockDevices map[string][]v1alpha1.BlockDevice, vgIssues map[
 	}
 
 	if lvIssue, exist := lvIssues[vg.VGName+vg.VGUuid]; exist {
-		issues = append(issues, strings.Join(lvIssue, ""))
+		for lvName, issue := range lvIssue {
+			issues = append(issues, fmt.Sprintf("%s: %s", lvName, issue))
+		}
 	}
 
 	if len(issues) != 0 {
@@ -514,8 +516,8 @@ func removeDuplicates(strList []string) []string {
 	return result
 }
 
-func sortLVIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string][]string {
-	var lvIssuesByVG = make(map[string][]string, len(lvs))
+func sortLVIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string]map[string]string {
+	var lvIssuesByVG = make(map[string]map[string]string, len(lvs))
 
 	for _, lv := range lvs {
 		_, cmd, stdErr, err := utils.GetLV(lv.VGName, lv.LVName)
@@ -523,12 +525,16 @@ func sortLVIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string][]str
 
 		if err != nil {
 			log.Error(err, fmt.Sprintf(`[sortLVIssuesByVG] unable to run lvs command for lv, name: "%s"`, lv.LVName))
-			lvIssuesByVG[lv.VGName+lv.VGUuid] = append(lvIssuesByVG[lv.VGName+lv.VGUuid], err.Error())
+			//lvIssuesByVG[lv.VGName+lv.VGUuid] = append(lvIssuesByVG[lv.VGName+lv.VGUuid], err.Error())
+			lvIssuesByVG[lv.VGName+lv.VGUuid] = make(map[string]string, len(lvs))
+			lvIssuesByVG[lv.VGName+lv.VGUuid][lv.LVName] = err.Error()
+
 		}
 
 		if stdErr.Len() != 0 {
 			log.Error(fmt.Errorf(stdErr.String()), fmt.Sprintf(`[sortLVIssuesByVG] lvs command for lv "%s" has stderr: `, lv.LVName))
-			lvIssuesByVG[lv.VGName+lv.VGUuid] = append(lvIssuesByVG[lv.VGName+lv.VGUuid], stdErr.String())
+			lvIssuesByVG[lv.VGName+lv.VGUuid] = make(map[string]string, len(lvs))
+			lvIssuesByVG[lv.VGName+lv.VGUuid][lv.LVName] = stdErr.String()
 			stdErr.Reset()
 		}
 	}
@@ -682,7 +688,7 @@ func getThinPools(lvs []internal.LVData) []internal.LVData {
 	return thinPools
 }
 
-func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVData, vg internal.VGData, lvIssues map[string][]string) []internal.LVMVGStatusThinPool {
+func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVData, vg internal.VGData, lvIssues map[string]map[string]string) []internal.LVMVGStatusThinPool {
 	filtered := thinPools[vg.VGName+vg.VGUuid]
 	tps := make([]internal.LVMVGStatusThinPool, 0, len(filtered))
 
@@ -701,9 +707,9 @@ func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVDat
 			Message:    "",
 		}
 
-		if lverrs, exist := lvIssues[vg.VGName+vg.VGUuid]; exist {
+		if lverrs, exist := lvIssues[vg.VGName+vg.VGUuid][lv.LVName]; exist {
 			tp.Ready = false
-			tp.Message = strings.Join(lverrs, "")
+			tp.Message = lverrs
 		}
 
 		tps = append(tps, tp)

@@ -92,8 +92,8 @@ func reconcileLVGStatus(ctx context.Context, cl client.Client, log logger.Logger
 	shouldUpdate := false
 
 	log.Debug(fmt.Sprintf("[reconcileLVGStatus] starts to check ThinPools Ready status for the LVMVolumeGroup %s", lvg.Name))
-	totalTPCount := len(lvg.Spec.ThinPools)
-	actualTPCount := len(lvg.Status.ThinPools)
+	totalTPCount := getUniqueThinPoolCount(lvg.Spec.ThinPools, lvg.Status.ThinPools)
+	actualTPCount := getActualThinPoolReadyCount(lvg.Status.ThinPools)
 	if totalTPCount > actualTPCount {
 		log.Warning(fmt.Sprintf("[reconcileLVGStatus] some ThinPools of the LVMVolumeGroup %s is not Ready", lvg.Name))
 	}
@@ -114,6 +114,32 @@ func reconcileLVGStatus(ctx context.Context, cl client.Client, log logger.Logger
 		err = cl.Status().Update(ctx, lvg)
 	}
 	return err
+}
+
+func getActualThinPoolReadyCount(statusTp []v1alpha1.StatusThinPool) int {
+	count := 0
+
+	for _, tp := range statusTp {
+		if tp.Ready {
+			count++
+		}
+	}
+
+	return count
+}
+
+func getUniqueThinPoolCount(specTp []v1alpha1.SpecThinPool, statusTp []v1alpha1.StatusThinPool) int {
+	unique := make(map[string]struct{}, len(specTp)+len(statusTp))
+
+	for _, tp := range specTp {
+		unique[tp.Name] = struct{}{}
+	}
+
+	for _, tp := range statusTp {
+		unique[tp.Name] = struct{}{}
+	}
+
+	return len(unique)
 }
 
 func getVGConfigurationAppliedStatus(lvg *v1alpha1.LvmVolumeGroup) v1.ConditionStatus {
