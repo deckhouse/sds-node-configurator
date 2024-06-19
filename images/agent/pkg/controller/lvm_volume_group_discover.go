@@ -911,11 +911,12 @@ func convertStatusThinPools(thinPools []internal.LVMVGStatusThinPool) []v1alpha1
 	result := make([]v1alpha1.StatusThinPool, 0, len(thinPools))
 	for _, tp := range thinPools {
 		result = append(result, v1alpha1.StatusThinPool{
-			Name:       tp.Name,
-			ActualSize: tp.ActualSize,
-			UsedSize:   tp.UsedSize,
-			Ready:      tp.Ready,
-			Message:    tp.Message,
+			Name:            tp.Name,
+			ActualSize:      tp.ActualSize,
+			AllocationLimit: internal.AllocationLimitDefaultValue,
+			UsedSize:        tp.UsedSize,
+			Ready:           tp.Ready,
+			Message:         tp.Message,
 		})
 	}
 

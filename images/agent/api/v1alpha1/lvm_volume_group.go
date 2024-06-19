@@ -37,8 +37,9 @@ type LvmVolumeGroup struct {
 }
 
 type SpecThinPool struct {
-	Name string            `json:"name"`
-	Size resource.Quantity `json:"size"`
+	Name            string            `json:"name"`
+	Size            resource.Quantity `json:"size"`
+	AllocationLimit string            `json:"allocationLimit"`
 }
 
 type LvmVolumeGroupSpec struct {
@@ -62,11 +63,13 @@ type LvmVolumeGroupNode struct {
 }
 
 type StatusThinPool struct {
-	Name       string            `json:"name"`
-	ActualSize resource.Quantity `json:"actualSize"`
-	UsedSize   resource.Quantity `json:"usedSize"`
-	Ready      bool              `json:"ready"`
-	Message    string            `json:"message"`
+	Name            string            `json:"name"`
+	ActualSize      resource.Quantity `json:"actualSize"`
+	UsedSize        resource.Quantity `json:"usedSize"`
+	AllocatedSize   resource.Quantity `json:"allocatedSize"`
+	AllocationLimit string            `json:"allocationLimit"`
+	Ready           bool              `json:"ready"`
+	Message         string            `json:"message"`
 }
 
 type LvmVolumeGroupStatus struct {

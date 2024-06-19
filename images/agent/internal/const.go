@@ -39,6 +39,8 @@ const (
 	TypeVGConfigurationApplied = "VGConfigurationApplied"
 	TypeVGReady                = "VGReady"
 
+	AllocationLimitDefaultValue = "150%"
+
 	ReasonValidationFailed = "ValidationFailed"
 	ReasonCreating         = "Creating"
 	ReasonUpdating         = "Updating"
