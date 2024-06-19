@@ -70,11 +70,13 @@ type StatusThinPool struct {
 }
 
 type LvmVolumeGroupStatus struct {
-	AllocatedSize resource.Quantity    `json:"allocatedSize"`
-	Nodes         []LvmVolumeGroupNode `json:"nodes"`
-	ThinPools     []StatusThinPool     `json:"thinPools"`
-	VGSize        resource.Quantity    `json:"vgSize"`
-	VGUuid        string               `json:"vgUUID"`
-	Phase         string               `json:"phase"`
-	Conditions    []metav1.Condition   `json:"conditions"`
+	AllocatedSize        resource.Quantity    `json:"allocatedSize"`
+	Nodes                []LvmVolumeGroupNode `json:"nodes"`
+	ThinPools            []StatusThinPool     `json:"thinPools"`
+	VGSize               resource.Quantity    `json:"vgSize"`
+	VGUuid               string               `json:"vgUUID"`
+	Phase                string               `json:"phase"`
+	Conditions           []metav1.Condition   `json:"conditions"`
+	ThinPoolReady        string               `json:"thinPoolReady"`
+	ConfigurationApplied string               `json:"configurationApplied"`
 }

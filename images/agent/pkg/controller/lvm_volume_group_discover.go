@@ -109,7 +109,7 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 		return false
 	}
 
-	filteredLVGs := filterLVGsByNode(ctx, cl, log, metrics, currentLVMVGs, blockDevices, cfg.NodeName)
+	filteredLVGs := filterLVGsByNode(ctx, cl, log, currentLVMVGs, blockDevices, cfg.NodeName)
 
 	log.Debug("[RunLVMVolumeGroupDiscoverController] tries to get LVMVolumeGroup candidates")
 	candidates, err := GetLVMVolumeGroupCandidates(log, sdsCache, blockDevices, cfg.NodeName)
@@ -205,7 +205,6 @@ func filterLVGsByNode(
 	ctx context.Context,
 	cl kclient.Client,
 	log logger.Logger,
-	metrics monitoring.Metrics,
 	lvgs map[string]v1alpha1.LvmVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 	currentNode string,
@@ -365,7 +364,7 @@ from LVMVolumeGroup, name: "%s"`, node.Name, lvg.Name))
 
 				// If current LVMVolumeGroup has no nodes left, and it is not cause of errors, delete it.
 				if len(lvg.Status.Nodes) == 0 {
-					if err := DeleteLVMVolumeGroup(ctx, cl, metrics, lvg.Name); err != nil {
+					if err := DeleteLVMVolumeGroup(ctx, cl, metrics, &lvg); err != nil {
 						log.Error(err, fmt.Sprintf("Unable to delete LVMVolumeGroup, name: %s", lvg.Name))
 						return err
 					}
@@ -379,15 +378,9 @@ from LVMVolumeGroup, name: "%s"`, node.Name, lvg.Name))
 	return nil
 }
 
-func DeleteLVMVolumeGroup(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, lvmvgName string) error {
-	lvm := &v1alpha1.LvmVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: lvmvgName,
-		},
-	}
-
+func DeleteLVMVolumeGroup(ctx context.Context, cl kclient.Client, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup) error {
 	start := time.Now()
-	err := kc.Delete(ctx, lvm)
+	err := cl.Delete(ctx, lvg)
 	metrics.ApiMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "delete").Inc()
 	if err != nil {
@@ -437,7 +430,7 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 	}
 
 	// If lvErrs is not empty, that means we have some problems on vgs, so we need to identify unhealthy vgs.
-	var lvIssues map[string][]string
+	var lvIssues map[string]map[string]string
 	if lvErrs.Len() != 0 {
 		log.Warning("[GetLVMVolumeGroupCandidates] some errors have been occurred while executing lvs command")
 		lvIssues = sortLVIssuesByVG(log, thinPools)
@@ -478,7 +471,7 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 	return candidates, nil
 }
 
-func checkVGHealth(blockDevices map[string][]v1alpha1.BlockDevice, vgIssues map[string]string, pvIssues map[string][]string, lvIssues map[string][]string, vg internal.VGData) (health, message string) {
+func checkVGHealth(blockDevices map[string][]v1alpha1.BlockDevice, vgIssues map[string]string, pvIssues map[string][]string, lvIssues map[string]map[string]string, vg internal.VGData) (health, message string) {
 	issues := make([]string, 0, len(vgIssues)+len(pvIssues)+len(lvIssues)+1)
 
 	if bds, exist := blockDevices[vg.VGName+vg.VGUuid]; !exist || len(bds) == 0 {
@@ -494,7 +487,9 @@ func checkVGHealth(blockDevices map[string][]v1alpha1.BlockDevice, vgIssues map[
 	}
 
 	if lvIssue, exist := lvIssues[vg.VGName+vg.VGUuid]; exist {
-		issues = append(issues, strings.Join(lvIssue, ""))
+		for lvName, issue := range lvIssue {
+			issues = append(issues, fmt.Sprintf("%s: %s", lvName, issue))
+		}
 	}
 
 	if len(issues) != 0 {
@@ -521,8 +516,8 @@ func removeDuplicates(strList []string) []string {
 	return result
 }
 
-func sortLVIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string][]string {
-	var lvIssuesByVG = make(map[string][]string, len(lvs))
+func sortLVIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string]map[string]string {
+	var lvIssuesByVG = make(map[string]map[string]string, len(lvs))
 
 	for _, lv := range lvs {
 		_, cmd, stdErr, err := utils.GetLV(lv.VGName, lv.LVName)
@@ -530,12 +525,16 @@ func sortLVIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string][]str
 
 		if err != nil {
 			log.Error(err, fmt.Sprintf(`[sortLVIssuesByVG] unable to run lvs command for lv, name: "%s"`, lv.LVName))
-			lvIssuesByVG[lv.VGName+lv.VGUuid] = append(lvIssuesByVG[lv.VGName+lv.VGUuid], err.Error())
+			//lvIssuesByVG[lv.VGName+lv.VGUuid] = append(lvIssuesByVG[lv.VGName+lv.VGUuid], err.Error())
+			lvIssuesByVG[lv.VGName+lv.VGUuid] = make(map[string]string, len(lvs))
+			lvIssuesByVG[lv.VGName+lv.VGUuid][lv.LVName] = err.Error()
+
 		}
 
 		if stdErr.Len() != 0 {
 			log.Error(fmt.Errorf(stdErr.String()), fmt.Sprintf(`[sortLVIssuesByVG] lvs command for lv "%s" has stderr: `, lv.LVName))
-			lvIssuesByVG[lv.VGName+lv.VGUuid] = append(lvIssuesByVG[lv.VGName+lv.VGUuid], stdErr.String())
+			lvIssuesByVG[lv.VGName+lv.VGUuid] = make(map[string]string, len(lvs))
+			lvIssuesByVG[lv.VGName+lv.VGUuid][lv.LVName] = stdErr.String()
 			stdErr.Reset()
 		}
 	}
@@ -689,7 +688,7 @@ func getThinPools(lvs []internal.LVData) []internal.LVData {
 	return thinPools
 }
 
-func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVData, vg internal.VGData, lvIssues map[string][]string) []internal.LVMVGStatusThinPool {
+func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVData, vg internal.VGData, lvIssues map[string]map[string]string) []internal.LVMVGStatusThinPool {
 	filtered := thinPools[vg.VGName+vg.VGUuid]
 	tps := make([]internal.LVMVGStatusThinPool, 0, len(filtered))
 
@@ -708,9 +707,9 @@ func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVDat
 			Message:    "",
 		}
 
-		if lverrs, exist := lvIssues[vg.VGName+vg.VGUuid]; exist {
+		if lverrs, exist := lvIssues[vg.VGName+vg.VGUuid][lv.LVName]; exist {
 			tp.Ready = false
-			tp.Message = strings.Join(lverrs, "")
+			tp.Message = lverrs
 		}
 
 		tps = append(tps, tp)
@@ -842,16 +841,11 @@ func UpdateLVMVolumeGroupByCandidate(
 			lvg.Status.Nodes[i].Devices = devices
 		}
 	}
-
-	lvg.Status = v1alpha1.LvmVolumeGroupStatus{
-		AllocatedSize: candidate.AllocatedSize,
-		Nodes:         convertLVMVGNodes(candidate.Nodes),
-		ThinPools:     convertStatusThinPools(candidate.StatusThinPools),
-		VGSize:        candidate.VGSize,
-		VGUuid:        candidate.VGUuid,
-		Conditions:    lvg.Status.Conditions,
-		Phase:         lvg.Status.Phase,
-	}
+	lvg.Status.AllocatedSize = candidate.AllocatedSize
+	lvg.Status.Nodes = convertLVMVGNodes(candidate.Nodes)
+	lvg.Status.ThinPools = convertStatusThinPools(candidate.StatusThinPools)
+	lvg.Status.VGSize = candidate.VGSize
+	lvg.Status.VGUuid = candidate.VGUuid
 
 	start := time.Now()
 	err := cl.Status().Update(ctx, lvg)

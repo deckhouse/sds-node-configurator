@@ -82,6 +82,14 @@ spec:
             status:
               type: object
               properties:
+                thinPoolReady:
+                  type: string
+                  description: |
+                    Shows the healthy and total Thin-pool count.
+                configurationApplied:
+                  type: string
+                  description: |
+                    Show if last configuration has been successfully applied.
                 phase:
                   type: string
                   description: |
@@ -215,6 +223,14 @@ spec:
       subresources:
         status: {}
       additionalPrinterColumns:
+        - jsonPath: .status.thinPoolReady
+          name: ThinPools
+          type: string
+          description: Current and total Thin pools count.
+        - jsonPath: .status.configurationApplied
+          name: Configuration Applied
+          type: string
+          description: If last configuration has been successfully applied.
         - jsonPath: .status.phase
           name: phase
           type: string

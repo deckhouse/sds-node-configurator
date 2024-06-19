@@ -29,5 +29,6 @@ const (
 	ReasonTerminating      = "Terminating"
 	ReasonValidationFailed = "ValidationFailed"
 
-	TypeReady = "Ready"
+	TypeReady                  = "Ready"
+	TypeVGConfigurationApplied = "VGConfigurationApplied"
 )
