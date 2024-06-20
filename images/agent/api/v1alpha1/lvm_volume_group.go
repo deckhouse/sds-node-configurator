@@ -36,17 +36,17 @@ type LvmVolumeGroup struct {
 	Status LvmVolumeGroupStatus `json:"status,omitempty"`
 }
 
-type SpecThinPool struct {
+type LVGSpecThinPool struct {
 	Name            string            `json:"name"`
 	Size            resource.Quantity `json:"size"`
 	AllocationLimit string            `json:"allocationLimit"`
 }
 
 type LvmVolumeGroupSpec struct {
-	ActualVGNameOnTheNode string         `json:"actualVGNameOnTheNode"`
-	BlockDeviceNames      []string       `json:"blockDeviceNames"`
-	ThinPools             []SpecThinPool `json:"thinPools"`
-	Type                  string         `json:"type"`
+	ActualVGNameOnTheNode string            `json:"actualVGNameOnTheNode"`
+	BlockDeviceNames      []string          `json:"blockDeviceNames"`
+	ThinPools             []LVGSpecThinPool `json:"thinPools"`
+	Type                  string            `json:"type"`
 }
 
 type LvmVolumeGroupDevice struct {
@@ -62,7 +62,7 @@ type LvmVolumeGroupNode struct {
 	Name    string                 `json:"name"`
 }
 
-type StatusThinPool struct {
+type LVGStatusThinPool struct {
 	Name            string            `json:"name"`
 	ActualSize      resource.Quantity `json:"actualSize"`
 	UsedSize        resource.Quantity `json:"usedSize"`
@@ -75,7 +75,7 @@ type StatusThinPool struct {
 type LvmVolumeGroupStatus struct {
 	AllocatedSize        resource.Quantity    `json:"allocatedSize"`
 	Nodes                []LvmVolumeGroupNode `json:"nodes"`
-	ThinPools            []StatusThinPool     `json:"thinPools"`
+	ThinPools            []LVGStatusThinPool  `json:"thinPools"`
 	VGSize               resource.Quantity    `json:"vgSize"`
 	VGUuid               string               `json:"vgUUID"`
 	Phase                string               `json:"phase"`

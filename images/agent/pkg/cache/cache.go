@@ -95,7 +95,7 @@ func (c *Cache) PrintTheCache(log logger.Logger) {
 	log.Cache("[VGs ENDS]")
 	log.Cache("[LVs BEGIN]")
 	for _, lv := range c.lvs {
-		log.Cache(fmt.Sprintf("     LV Name: %s, VG name: %s, size: %s, tags: %s, attr: %s, pool: %s", lv.LVName, lv.VGName, lv.LVSize.String(), lv.LvTags, lv.LVAttr, lv.PoolLv))
+		log.Cache(fmt.Sprintf("     LV Name: %s, VG name: %s, size: %s, tags: %s, attr: %s, pool: %s", lv.LVName, lv.VGName, lv.LVSize.String(), lv.LvTags, lv.LVAttr, lv.PoolName))
 	}
 	log.Cache("[ERRS]")
 	log.Cache(c.lvsErrs.String())

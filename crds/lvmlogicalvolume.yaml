@@ -86,7 +86,8 @@ spec:
                   type: string
                 actualSize:
                   type: string
-
+      subresources:
+        status: {}
       additionalPrinterColumns:
         - jsonPath: .status.phase
           name: Phase

@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"fmt"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/internal"
@@ -18,7 +17,6 @@ import (
 
 func TestLVMLogicaVolumeWatcher(t *testing.T) {
 	var (
-		ctx     = context.Background()
 		cl      = NewFakeClient()
 		log     = logger.Logger{}
 		metrics = monitoring.Metrics{}
@@ -32,6 +30,160 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 
 		actual := subtractQuantity(*mini, *sub)
 		assert.Equal(t, expected, &actual)
+	})
+
+	t.Run("validateLVMLogicalVolume", func(t *testing.T) {
+		t.Run("thick_all_good_returns_true", func(t *testing.T) {
+			const lvgName = "test-lvg"
+
+			lvg := &v1alpha1.LvmVolumeGroup{
+				ObjectMeta: v1.ObjectMeta{
+					Name: lvgName,
+				},
+			}
+
+			err := cl.Create(ctx, lvg)
+			if err != nil {
+				t.Error(err)
+			} else {
+				defer func() {
+					err = cl.Delete(ctx, lvg)
+					if err != nil {
+						t.Error(err)
+					}
+				}()
+			}
+
+			llv := &v1alpha1.LVMLogicalVolume{
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					ActualLVNameOnTheNode: "test-lv",
+					Type:                  Thick,
+					Size:                  resource.MustParse("10M"),
+					LvmVolumeGroupName:    lvgName,
+				},
+			}
+
+			v, r := validateLVMLogicalVolume(ctx, cl, llv)
+			if assert.True(t, v) {
+				assert.Equal(t, 0, len(r))
+			}
+		})
+
+		t.Run("thick_all_bad_returns_false", func(t *testing.T) {
+			llv := &v1alpha1.LVMLogicalVolume{
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					ActualLVNameOnTheNode: "",
+					Type:                  Thick,
+					Size:                  resource.MustParse("0M"),
+					LvmVolumeGroupName:    "some-lvg",
+					Thin:                  &v1alpha1.ThinLogicalVolumeSpec{PoolName: "some-lvg"},
+				},
+			}
+
+			v, r := validateLVMLogicalVolume(ctx, cl, llv)
+			if assert.False(t, v) {
+				assert.Equal(t, "zero size for LV; no LV name specified; lvmvolumegroups.storage.deckhouse.io \"some-lvg\" not found; thin pool specified for Thick LV; ", r)
+			}
+		})
+
+		t.Run("thin_all_good_returns_true", func(t *testing.T) {
+			const (
+				lvgName = "test-lvg"
+				tpName  = "test-tp"
+			)
+
+			lvg := &v1alpha1.LvmVolumeGroup{
+				ObjectMeta: v1.ObjectMeta{
+					Name: lvgName,
+				},
+				Status: v1alpha1.LvmVolumeGroupStatus{
+					ThinPools: []v1alpha1.LVGStatusThinPool{
+						{
+							Name: tpName,
+						},
+					},
+				},
+			}
+
+			err := cl.Create(ctx, lvg)
+			if err != nil {
+				t.Error(err)
+			} else {
+				defer func() {
+					err = cl.Delete(ctx, lvg)
+					if err != nil {
+						t.Error(err)
+					}
+				}()
+			}
+
+			llv := &v1alpha1.LVMLogicalVolume{
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					ActualLVNameOnTheNode: "test-lv",
+					Type:                  Thin,
+					Size:                  resource.MustParse("10M"),
+					LvmVolumeGroupName:    lvgName,
+					Thin:                  &v1alpha1.ThinLogicalVolumeSpec{PoolName: tpName},
+				},
+			}
+
+			v, r := validateLVMLogicalVolume(ctx, cl, llv)
+			if assert.True(t, v) {
+				assert.Equal(t, 0, len(r))
+			}
+		})
+
+		t.Run("thin_all_bad_returns_false", func(t *testing.T) {
+			llv := &v1alpha1.LVMLogicalVolume{
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					ActualLVNameOnTheNode: "",
+					Type:                  Thin,
+					Size:                  resource.MustParse("0M"),
+					LvmVolumeGroupName:    "some-lvg",
+				},
+			}
+
+			v, r := validateLVMLogicalVolume(ctx, cl, llv)
+			if assert.False(t, v) {
+				assert.Equal(t, "zero size for LV; no LV name specified; lvmvolumegroups.storage.deckhouse.io \"some-lvg\" not found; no thin pool specified; ", r)
+			}
+		})
+
+	})
+
+	t.Run("getFreeThinPoolSpace", func(t *testing.T) {
+		const tpName = "test-tp"
+		tps := []v1alpha1.LVGStatusThinPool{
+			{
+				Name:            tpName,
+				ActualSize:      resource.MustParse("10Gi"),
+				UsedSize:        resource.MustParse("1Gi"),
+				AllocatedSize:   resource.MustParse("5Gi"),
+				AllocationLimit: "150%",
+			},
+		}
+
+		free, err := getFreeThinPoolSpace(tps, tpName)
+		if err != nil {
+			t.Error(err)
+		}
+		expected := resource.MustParse("10Gi")
+
+		assert.Equal(t, expected.Value(), free.Value())
+	})
+
+	t.Run("isIntegral", func(t *testing.T) {
+		t.Run("returns_true", func(t *testing.T) {
+			val := 1000.000
+
+			assert.True(t, isIntegral(val))
+		})
+
+		t.Run("returns_false", func(t *testing.T) {
+			val := 1000.001
+
+			assert.False(t, isIntegral(val))
+		})
 	})
 
 	t.Run("belongToNode", func(t *testing.T) {
@@ -300,7 +452,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		})
 	})
 
-	t.Run("updateLVMLogicalVolumePhase", func(t *testing.T) {
+	t.Run("updateLVMLogicalVolumePhaseIfNeeded", func(t *testing.T) {
 		const reason = "test_reason"
 		llv := &v1alpha1.LVMLogicalVolume{
 			ObjectMeta: v1.ObjectMeta{
@@ -325,7 +477,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			}
 		}()
 
-		err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, reason)
+		err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, reason)
 		if assert.NoError(t, err) {
 			newLLV := &v1alpha1.LVMLogicalVolume{}
 			err = cl.Get(ctx, client.ObjectKey{
@@ -422,15 +574,15 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 	// 	)
 	// 	lvs := []internal.LVData{
 	// 		{
-	// 			PoolLv: tpName,
+	// 			PoolName: tpName,
 	// 			LVSize: *resource.NewQuantity(1000, resource.BinarySI),
 	// 		},
 	// 		{
-	// 			PoolLv: tpName,
+	// 			PoolName: tpName,
 	// 			LVSize: *resource.NewQuantity(1000, resource.BinarySI),
 	// 		},
 	// 		{
-	// 			PoolLv: tpName,
+	// 			PoolName: tpName,
 	// 			LVSize: *resource.NewQuantity(1000, resource.BinarySI),
 	// 		},
 	// 	}

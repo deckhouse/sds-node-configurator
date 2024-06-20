@@ -264,25 +264,25 @@ func filterLVGsByNode(
 	return filtered
 }
 
-func hasLVMVolumeGroupDiff(log logger.Logger, res v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
-	convertedStatusPools := convertStatusThinPools(candidate.StatusThinPools)
-	log.Trace(fmt.Sprintf(`AllocatedSize, candidate: %s, res: %s`, candidate.AllocatedSize.String(), res.Status.AllocatedSize.String()))
-	log.Trace(fmt.Sprintf(`ThinPools, candidate: %+v, res: %+v`, convertedStatusPools, res.Status.ThinPools))
+func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
+	convertedStatusPools := convertStatusThinPools(lvg, candidate.StatusThinPools)
+	log.Trace(fmt.Sprintf(`AllocatedSize, candidate: %s, lvg: %s`, candidate.AllocatedSize.String(), lvg.Status.AllocatedSize.String()))
+	log.Trace(fmt.Sprintf(`ThinPools, candidate: %+v, lvg: %+v`, convertedStatusPools, lvg.Status.ThinPools))
 	for _, tp := range convertedStatusPools {
 		log.Trace(fmt.Sprintf("Candidate ThinPool name: %s, actual size: %s, used size: %s", tp.Name, tp.ActualSize.String(), tp.UsedSize.String()))
 	}
-	for _, tp := range res.Status.ThinPools {
+	for _, tp := range lvg.Status.ThinPools {
 		log.Trace(fmt.Sprintf("Resource ThinPool name: %s, actual size: %s, used size: %s", tp.Name, tp.ActualSize.String(), tp.UsedSize.String()))
 	}
-	log.Trace(fmt.Sprintf(`VGSize, candidate: %s, res: %s`, candidate.VGSize.String(), res.Status.VGSize.String()))
-	log.Trace(fmt.Sprintf(`VGUuid, candidate: %s, res: %s`, candidate.VGUuid, res.Status.VGUuid))
-	log.Trace(fmt.Sprintf(`Nodes, candidate: %+v, res: %+v`, convertLVMVGNodes(candidate.Nodes), res.Status.Nodes))
+	log.Trace(fmt.Sprintf(`VGSize, candidate: %s, lvg: %s`, candidate.VGSize.String(), lvg.Status.VGSize.String()))
+	log.Trace(fmt.Sprintf(`VGUuid, candidate: %s, lvg: %s`, candidate.VGUuid, lvg.Status.VGUuid))
+	log.Trace(fmt.Sprintf(`Nodes, candidate: %+v, lvg: %+v`, convertLVMVGNodes(candidate.Nodes), lvg.Status.Nodes))
 
-	return candidate.AllocatedSize.Value() != res.Status.AllocatedSize.Value() ||
-		hasStatusPoolDiff(convertedStatusPools, res.Status.ThinPools) ||
-		candidate.VGSize.Value() != res.Status.VGSize.Value() ||
-		candidate.VGUuid != res.Status.VGUuid ||
-		hasStatusNodesDiff(log, convertLVMVGNodes(candidate.Nodes), res.Status.Nodes)
+	return candidate.AllocatedSize.Value() != lvg.Status.AllocatedSize.Value() ||
+		hasStatusPoolDiff(convertedStatusPools, lvg.Status.ThinPools) ||
+		candidate.VGSize.Value() != lvg.Status.VGSize.Value() ||
+		candidate.VGUuid != lvg.Status.VGUuid ||
+		hasStatusNodesDiff(log, convertLVMVGNodes(candidate.Nodes), lvg.Status.Nodes)
 }
 
 func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LvmVolumeGroupNode) bool {
@@ -315,7 +315,7 @@ func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LvmVolumeGro
 	return false
 }
 
-func hasStatusPoolDiff(first, second []v1alpha1.StatusThinPool) bool {
+func hasStatusPoolDiff(first, second []v1alpha1.LVGStatusThinPool) bool {
 	if len(first) != len(second) {
 		return true
 	}
@@ -324,6 +324,7 @@ func hasStatusPoolDiff(first, second []v1alpha1.StatusThinPool) bool {
 		if first[i].Name != second[i].Name ||
 			first[i].UsedSize.Value() != second[i].UsedSize.Value() ||
 			first[i].ActualSize.Value() != second[i].ActualSize.Value() ||
+			first[i].AllocatedSize.Value() != second[i].AllocatedSize.Value() ||
 			first[i].Ready != second[i].Ready ||
 			first[i].Message != second[i].Message {
 			return true
@@ -433,7 +434,7 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 	var lvIssues map[string]map[string]string
 	if lvErrs.Len() != 0 {
 		log.Warning("[GetLVMVolumeGroupCandidates] some errors have been occurred while executing lvs command")
-		lvIssues = sortLVIssuesByVG(log, thinPools)
+		lvIssues = sortThinPoolIssuesByVG(log, thinPools)
 	}
 
 	// Sort PV,BlockDevices and LV by VG to fill needed information for LVMVolumeGroup resource further.
@@ -441,7 +442,8 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 	sortedBDs := sortBlockDevicesByVG(bds, vgWithTag)
 	log.Trace(fmt.Sprintf("[GetLVMVolumeGroupCandidates] BlockDevices: %+v", bds))
 	log.Trace(fmt.Sprintf("[GetLVMVolumeGroupCandidates] Sorted BlockDevices: %+v", sortedBDs))
-	sortedThinPools := sortLVsByVG(thinPools, vgWithTag)
+	sortedThinPools := sortThinPoolsByVG(thinPools, vgWithTag)
+	sortedLVByThinPool := sortLVByThinPool(lvs)
 
 	for _, vg := range vgWithTag {
 		allocateSize := vg.VGSize
@@ -459,7 +461,7 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 			AllocatedSize:         *resource.NewQuantity(allocateSize.Value(), resource.BinarySI),
 			Health:                health,
 			Message:               message,
-			StatusThinPools:       getStatusThinPools(log, sortedThinPools, vg, lvIssues),
+			StatusThinPools:       getStatusThinPools(log, sortedThinPools, sortedLVByThinPool, vg, lvIssues),
 			VGSize:                *resource.NewQuantity(vg.VGSize.Value(), resource.BinarySI),
 			VGUuid:                vg.VGUuid,
 			Nodes:                 configureCandidateNodeDevices(sortedPVs, sortedBDs, vg, currentNode),
@@ -516,15 +518,15 @@ func removeDuplicates(strList []string) []string {
 	return result
 }
 
-func sortLVIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string]map[string]string {
+func sortThinPoolIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string]map[string]string {
 	var lvIssuesByVG = make(map[string]map[string]string, len(lvs))
 
 	for _, lv := range lvs {
 		_, cmd, stdErr, err := utils.GetLV(lv.VGName, lv.LVName)
-		log.Debug(fmt.Sprintf("[sortLVIssuesByVG] runs cmd: %s", cmd))
+		log.Debug(fmt.Sprintf("[sortThinPoolIssuesByVG] runs cmd: %s", cmd))
 
 		if err != nil {
-			log.Error(err, fmt.Sprintf(`[sortLVIssuesByVG] unable to run lvs command for lv, name: "%s"`, lv.LVName))
+			log.Error(err, fmt.Sprintf(`[sortThinPoolIssuesByVG] unable to run lvs command for lv, name: "%s"`, lv.LVName))
 			//lvIssuesByVG[lv.VGName+lv.VGUuid] = append(lvIssuesByVG[lv.VGName+lv.VGUuid], err.Error())
 			lvIssuesByVG[lv.VGName+lv.VGUuid] = make(map[string]string, len(lvs))
 			lvIssuesByVG[lv.VGName+lv.VGUuid][lv.LVName] = err.Error()
@@ -532,7 +534,7 @@ func sortLVIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string]map[s
 		}
 
 		if stdErr.Len() != 0 {
-			log.Error(fmt.Errorf(stdErr.String()), fmt.Sprintf(`[sortLVIssuesByVG] lvs command for lv "%s" has stderr: `, lv.LVName))
+			log.Error(fmt.Errorf(stdErr.String()), fmt.Sprintf(`[sortThinPoolIssuesByVG] lvs command for lv "%s" has stderr: `, lv.LVName))
 			lvIssuesByVG[lv.VGName+lv.VGUuid] = make(map[string]string, len(lvs))
 			lvIssuesByVG[lv.VGName+lv.VGUuid][lv.LVName] = stdErr.String()
 			stdErr.Reset()
@@ -584,7 +586,19 @@ func sortVGIssuesByVG(log logger.Logger, vgs []internal.VGData) map[string]strin
 	return vgIssues
 }
 
-func sortLVsByVG(lvs []internal.LVData, vgs []internal.VGData) map[string][]internal.LVData {
+func sortLVByThinPool(lvs []internal.LVData) map[string][]internal.LVData {
+	result := make(map[string][]internal.LVData, len(lvs))
+
+	for _, lv := range lvs {
+		if len(lv.PoolName) > 0 {
+			result[lv.PoolName] = append(result[lv.PoolName], lv)
+		}
+	}
+
+	return result
+}
+
+func sortThinPoolsByVG(lvs []internal.LVData, vgs []internal.VGData) map[string][]internal.LVData {
 	result := make(map[string][]internal.LVData, len(vgs))
 	for _, vg := range vgs {
 		result[vg.VGName+vg.VGUuid] = make([]internal.LVData, 0, len(lvs))
@@ -688,36 +702,49 @@ func getThinPools(lvs []internal.LVData) []internal.LVData {
 	return thinPools
 }
 
-func getStatusThinPools(log logger.Logger, thinPools map[string][]internal.LVData, vg internal.VGData, lvIssues map[string]map[string]string) []internal.LVMVGStatusThinPool {
-	filtered := thinPools[vg.VGName+vg.VGUuid]
-	tps := make([]internal.LVMVGStatusThinPool, 0, len(filtered))
+func getStatusThinPools(log logger.Logger, thinPools, sortedLVs map[string][]internal.LVData, vg internal.VGData, lvIssues map[string]map[string]string) []internal.LVMVGStatusThinPool {
+	tps := thinPools[vg.VGName+vg.VGUuid]
+	result := make([]internal.LVMVGStatusThinPool, 0, len(tps))
 
-	for _, lv := range filtered {
-		usedSize, err := getLVUsedSize(lv)
-		log.Trace(fmt.Sprintf("[getStatusThinPools] LV %v for VG name %s", lv, vg.VGName))
+	for _, thinPool := range tps {
+		usedSize, err := getThinPoolUsedSize(thinPool)
+		log.Trace(fmt.Sprintf("[getStatusThinPools] LV %v for VG name %s", thinPool, vg.VGName))
 		if err != nil {
-			log.Error(err, "[getStatusThinPools] unable to getLVUsedSize")
+			log.Error(err, "[getStatusThinPools] unable to getThinPoolUsedSize")
 		}
 
+		allocatedSize := getThinPoolAllocatedSize(thinPool.LVName, sortedLVs[thinPool.LVName])
 		tp := internal.LVMVGStatusThinPool{
-			Name:       lv.LVName,
-			ActualSize: *resource.NewQuantity(lv.LVSize.Value(), resource.BinarySI),
-			UsedSize:   *resource.NewQuantity(usedSize.Value(), resource.BinarySI),
-			Ready:      true,
-			Message:    "",
+			Name:          thinPool.LVName,
+			ActualSize:    *resource.NewQuantity(thinPool.LVSize.Value(), resource.BinarySI),
+			UsedSize:      *resource.NewQuantity(usedSize.Value(), resource.BinarySI),
+			AllocatedSize: *resource.NewQuantity(allocatedSize, resource.BinarySI),
+			Ready:         true,
+			Message:       "",
 		}
 
-		if lverrs, exist := lvIssues[vg.VGName+vg.VGUuid][lv.LVName]; exist {
+		if lverrs, exist := lvIssues[vg.VGName+vg.VGUuid][thinPool.LVName]; exist {
 			tp.Ready = false
 			tp.Message = lverrs
 		}
 
-		tps = append(tps, tp)
+		result = append(result, tp)
 	}
-	return tps
+	return result
 }
 
-func getLVUsedSize(lv internal.LVData) (*resource.Quantity, error) {
+func getThinPoolAllocatedSize(tpName string, lvs []internal.LVData) int64 {
+	var size int64
+	for _, lv := range lvs {
+		if lv.PoolName == tpName {
+			size += lv.LVSize.Value()
+		}
+	}
+
+	return size
+}
+
+func getThinPoolUsedSize(lv internal.LVData) (*resource.Quantity, error) {
 	var (
 		err         error
 		dataPercent float64
@@ -774,7 +801,7 @@ func CreateLVMVolumeGroupByCandidate(
 		Status: v1alpha1.LvmVolumeGroupStatus{
 			AllocatedSize: candidate.AllocatedSize,
 			Nodes:         convertLVMVGNodes(candidate.Nodes),
-			ThinPools:     convertStatusThinPools(candidate.StatusThinPools),
+			ThinPools:     convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, candidate.StatusThinPools),
 			VGSize:        candidate.VGSize,
 			VGUuid:        candidate.VGUuid,
 		},
@@ -843,7 +870,7 @@ func UpdateLVMVolumeGroupByCandidate(
 	}
 	lvg.Status.AllocatedSize = candidate.AllocatedSize
 	lvg.Status.Nodes = convertLVMVGNodes(candidate.Nodes)
-	lvg.Status.ThinPools = convertStatusThinPools(candidate.StatusThinPools)
+	lvg.Status.ThinPools = convertStatusThinPools(*lvg, candidate.StatusThinPools)
 	lvg.Status.VGSize = candidate.VGSize
 	lvg.Status.VGUuid = candidate.VGUuid
 
@@ -895,10 +922,10 @@ func convertLVMVGDevices(devices []internal.LVMVGDevice) []v1alpha1.LvmVolumeGro
 	return convertedDevices
 }
 
-func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.SpecThinPool {
-	result := make([]v1alpha1.SpecThinPool, 0, len(thinPools))
+func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.LVGSpecThinPool {
+	result := make([]v1alpha1.LVGSpecThinPool, 0, len(thinPools))
 	for name, size := range thinPools {
-		result = append(result, v1alpha1.SpecThinPool{
+		result = append(result, v1alpha1.LVGSpecThinPool{
 			Name: name,
 			Size: size,
 		})
@@ -907,13 +934,24 @@ func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.Spe
 	return result
 }
 
-func convertStatusThinPools(thinPools []internal.LVMVGStatusThinPool) []v1alpha1.StatusThinPool {
-	result := make([]v1alpha1.StatusThinPool, 0, len(thinPools))
+func convertStatusThinPools(lvg v1alpha1.LvmVolumeGroup, thinPools []internal.LVMVGStatusThinPool) []v1alpha1.LVGStatusThinPool {
+	tpLimits := make(map[string]string, len(lvg.Spec.ThinPools))
+	for _, tp := range lvg.Spec.ThinPools {
+		tpLimits[tp.Name] = tp.AllocationLimit
+	}
+
+	result := make([]v1alpha1.LVGStatusThinPool, 0, len(thinPools))
 	for _, tp := range thinPools {
-		result = append(result, v1alpha1.StatusThinPool{
+		limit := tpLimits[tp.Name]
+		if len(limit) == 0 {
+			limit = internal.AllocationLimitDefaultValue
+		}
+
+		result = append(result, v1alpha1.LVGStatusThinPool{
 			Name:            tp.Name,
 			ActualSize:      tp.ActualSize,
-			AllocationLimit: internal.AllocationLimitDefaultValue,
+			AllocationLimit: limit,
+			AllocatedSize:   tp.AllocatedSize,
 			UsedSize:        tp.UsedSize,
 			Ready:           tp.Ready,
 			Message:         tp.Message,
