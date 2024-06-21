@@ -63,7 +63,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				},
 			}
 
-			v, r := validateLVMLogicalVolume(ctx, cl, llv)
+			v, r := validateLVMLogicalVolume(llv, lvg)
 			if assert.True(t, v) {
 				assert.Equal(t, 0, len(r))
 			}
@@ -80,9 +80,9 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				},
 			}
 
-			v, r := validateLVMLogicalVolume(ctx, cl, llv)
+			v, r := validateLVMLogicalVolume(llv, &v1alpha1.LvmVolumeGroup{})
 			if assert.False(t, v) {
-				assert.Equal(t, "zero size for LV; no LV name specified; lvmvolumegroups.storage.deckhouse.io \"some-lvg\" not found; thin pool specified for Thick LV; ", r)
+				assert.Equal(t, "zero size for LV; no LV name specified; thin pool specified for Thick LV; ", r)
 			}
 		})
 
@@ -105,18 +105,6 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				},
 			}
 
-			err := cl.Create(ctx, lvg)
-			if err != nil {
-				t.Error(err)
-			} else {
-				defer func() {
-					err = cl.Delete(ctx, lvg)
-					if err != nil {
-						t.Error(err)
-					}
-				}()
-			}
-
 			llv := &v1alpha1.LVMLogicalVolume{
 				Spec: v1alpha1.LVMLogicalVolumeSpec{
 					ActualLVNameOnTheNode: "test-lv",
@@ -127,7 +115,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				},
 			}
 
-			v, r := validateLVMLogicalVolume(ctx, cl, llv)
+			v, r := validateLVMLogicalVolume(llv, lvg)
 			if assert.True(t, v) {
 				assert.Equal(t, 0, len(r))
 			}
@@ -143,9 +131,9 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				},
 			}
 
-			v, r := validateLVMLogicalVolume(ctx, cl, llv)
+			v, r := validateLVMLogicalVolume(llv, &v1alpha1.LvmVolumeGroup{})
 			if assert.False(t, v) {
-				assert.Equal(t, "zero size for LV; no LV name specified; lvmvolumegroups.storage.deckhouse.io \"some-lvg\" not found; no thin pool specified; ", r)
+				assert.Equal(t, "zero size for LV; no LV name specified; no thin pool specified; ", r)
 			}
 		})
 
