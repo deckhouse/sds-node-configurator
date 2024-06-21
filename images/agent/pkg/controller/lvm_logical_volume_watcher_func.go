@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sds-node-configurator/pkg/cache"
 	"strconv"
 	"strings"
 
@@ -18,29 +19,23 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func identifyReconcileFunc(log logger.Logger, vgName string, llv *v1alpha1.LVMLogicalVolume) (reconcileType, error) {
-	should, err := shouldReconcileByCreateFunc(log, vgName, llv)
-	if err != nil {
-		return "", err
-	}
+func identifyReconcileFunc(sdsCache *cache.Cache, vgName string, llv *v1alpha1.LVMLogicalVolume) reconcileType {
+	should := shouldReconcileByCreateFunc(sdsCache, vgName, llv)
 	if should {
-		return CreateReconcile, nil
+		return CreateReconcile
 	}
 
-	should, err = shouldReconcileByUpdateFunc(llv)
-	if err != nil {
-		return "", err
-	}
+	should = shouldReconcileByUpdateFunc(sdsCache, vgName, llv)
 	if should {
-		return UpdateReconcile, nil
+		return UpdateReconcile
 	}
 
 	should = shouldReconcileByDeleteFunc(llv)
 	if should {
-		return DeleteReconcile, nil
+		return DeleteReconcile
 	}
 
-	return "", nil
+	return ""
 }
 
 func shouldReconcileByDeleteFunc(llv *v1alpha1.LVMLogicalVolume) bool {
@@ -80,21 +75,38 @@ func removeLLVFinalizersIfExist(
 	return nil
 }
 
-func deleteLVIfExists(log logger.Logger, vgName, lvName string) error {
-	lv, err := FindLV(log, vgName, lvName)
-	if err != nil {
-		return err
+func checkIfLVBelongsToLLV(llv *v1alpha1.LVMLogicalVolume, lv *internal.LVData) bool {
+	switch llv.Spec.Type {
+	case Thin:
+		if lv.PoolName != llv.Spec.Thin.PoolName {
+			return false
+		}
+	case Thick:
+		if string(lv.LVAttr[0]) != "-" {
+			return false
+		}
 	}
 
+	return true
+}
+
+func deleteLVIfExists(log logger.Logger, sdsCache *cache.Cache, vgName string, llv *v1alpha1.LVMLogicalVolume) error {
+	lv := FindLV(sdsCache, vgName, llv.Spec.ActualLVNameOnTheNode)
 	if lv == nil {
-		log.Warning(fmt.Sprintf("[deleteLVIfExists] did not find LV %s in VG %s", lvName, vgName))
+		log.Warning(fmt.Sprintf("[deleteLVIfExists] did not find LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
 		return nil
 	}
 
-	cmd, err := utils.RemoveLV(vgName, lvName)
+	// this case prevents unexpected same-name LV deletions which does not actually belong to our LLV
+	if !checkIfLVBelongsToLLV(llv, lv) {
+		log.Warning(fmt.Sprintf("[deleteLVIfExists] no need to delete LV %s as it doesnt belong to LVMLogicalVolume %s", lv.LVName, llv.Name))
+		return nil
+	}
+
+	cmd, err := utils.RemoveLV(vgName, llv.Spec.ActualLVNameOnTheNode)
 	log.Debug(fmt.Sprintf("[deleteLVIfExists] runs cmd: %s", cmd))
 	if err != nil {
-		log.Error(err, "[deleteLVIfExists] unable to RemoveLV")
+		log.Error(err, fmt.Sprintf("[deleteLVIfExists] unable to remove LV %s from VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
 		return err
 	}
 
@@ -130,30 +142,17 @@ func addLLVFinalizerIfNotExist(ctx context.Context, cl client.Client, log logger
 	return true, nil
 }
 
-func shouldReconcileByCreateFunc(log logger.Logger, vgName string, llv *v1alpha1.LVMLogicalVolume) (bool, error) {
+func shouldReconcileByCreateFunc(sdsCache *cache.Cache, vgName string, llv *v1alpha1.LVMLogicalVolume) bool {
 	if llv.DeletionTimestamp != nil {
-		return false, nil
+		return false
 	}
 
-	if llv.Status == nil {
-		return true, nil
-	}
-
-	if llv.Status.Phase == createdStatusPhase ||
-		llv.Status.Phase == resizingStatusPhase {
-		return false, nil
-	}
-
-	lv, err := FindLV(log, vgName, llv.Spec.ActualLVNameOnTheNode)
-	if err == nil && lv != nil && lv.LVName == llv.Spec.ActualLVNameOnTheNode {
-		return false, nil
-	}
-
+	lv := FindLV(sdsCache, vgName, llv.Spec.ActualLVNameOnTheNode)
 	if lv != nil {
-		return false, nil
+		return false
 	}
 
-	return true, nil
+	return true
 }
 
 func getFreeThinPoolSpace(thinPools []v1alpha1.LVGStatusThinPool, poolName string) (resource.Quantity, error) {
@@ -207,23 +206,26 @@ func belongsToNode(lvg *v1alpha1.LvmVolumeGroup, nodeName string) bool {
 	return belongs
 }
 
-func validateLVMLogicalVolume(ctx context.Context, cl client.Client, llv *v1alpha1.LVMLogicalVolume) (bool, string) {
-	reason := strings.Builder{}
-
-	if llv.Spec.Size.Value() == 0 {
-		reason.WriteString("zero size for LV; ")
+func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LvmVolumeGroup, delta resource.Quantity) (bool, string) {
+	if llv.DeletionTimestamp != nil {
+		// as the configuration doesn't matter if we want to delete it
+		return true, ""
 	}
+
+	reason := strings.Builder{}
 
 	if len(llv.Spec.ActualLVNameOnTheNode) == 0 {
 		reason.WriteString("no LV name specified; ")
 	}
 
-	lvg := &v1alpha1.LvmVolumeGroup{}
-	err := cl.Get(ctx, client.ObjectKey{
-		Name: llv.Spec.LvmVolumeGroupName,
-	}, lvg)
-	if err != nil {
-		reason.WriteString(fmt.Sprintf("%s; ", err.Error()))
+	if llv.Spec.Size.Value() == 0 {
+		reason.WriteString("zero size for LV; ")
+	}
+
+	if llv.Status != nil {
+		if llv.Spec.Size.Value()+delta.Value() < llv.Status.ActualSize.Value() {
+			reason.WriteString("desired LV size is less than actual one")
+		}
 	}
 
 	switch llv.Spec.Type {
@@ -244,9 +246,26 @@ func validateLVMLogicalVolume(ctx context.Context, cl client.Client, llv *v1alph
 		if !exist {
 			reason.WriteString("selected thin pool does not exist in selected LVMVolumeGroup; ")
 		}
+
+		// if a specified Thin LV name matches the existing Thick one
+		lv := FindLV(sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+		if lv != nil && lv.PoolName != llv.Spec.Thin.PoolName {
+			reason.WriteString(fmt.Sprintf("specified LV %s is already created and does not belong to selected thin pool %s", lv.LVName, llv.Spec.Thin.PoolName))
+		}
 	case Thick:
 		if llv.Spec.Thin != nil {
 			reason.WriteString("thin pool specified for Thick LV; ")
+		}
+
+		// if a specified Thick LV name matches the existing Thin one
+		lv := FindLV(sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+		if lv != nil && len(lv.LVAttr) == 0 {
+			reason.WriteString(fmt.Sprintf("LV %s was found on the node, but can't be validated due to its attributes is empty string", lv.LVName))
+			break
+		}
+
+		if lv != nil && string(lv.LVAttr[0]) != "-" {
+			reason.WriteString(fmt.Sprintf("specified LV %s is already created and it is not Thick", lv.LVName))
 		}
 	}
 
@@ -257,7 +276,6 @@ func validateLVMLogicalVolume(ctx context.Context, cl client.Client, llv *v1alph
 	return true, ""
 }
 
-// TODO: validation if Thick с ThinPool указан
 func updateLVMLogicalVolumePhaseIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, llv *v1alpha1.LVMLogicalVolume, phase, reason string) error {
 	if llv.Status != nil &&
 		llv.Status.Phase == phase &&
@@ -273,6 +291,7 @@ func updateLVMLogicalVolumePhaseIfNeeded(ctx context.Context, cl client.Client, 
 	llv.Status.Phase = phase
 	llv.Status.Reason = reason
 
+	log.Debug(fmt.Sprintf("[updateLVMLogicalVolumePhaseIfNeeded] tries to update the LVMLogicalVolume %s status with phase: %s, reason: %s", llv.Name, phase, reason))
 	err := cl.Status().Update(ctx, llv)
 	if err != nil {
 		return err
@@ -298,48 +317,26 @@ func updateLVMLogicalVolume(ctx context.Context, metrics monitoring.Metrics, cl 
 	return err
 }
 
-func FindLV(log logger.Logger, vgName, lvName string) (*internal.LVData, error) {
-	log.Debug(fmt.Sprintf("[FindLV] Try to find LV: %s in VG: %s", lvName, vgName))
-	lv, cmd, _, err := utils.GetLV(vgName, lvName)
-
-	log.Debug(fmt.Sprintf("[FindLV] runs cmd: %s", cmd))
-	if err != nil {
-		if strings.Contains(err.Error(), "Failed to find logical volume") {
-			log.Debug("[FindLV] LV not found")
-			return nil, nil
+func FindLV(sdsCache *cache.Cache, vgName, lvName string) *internal.LVData {
+	lvs, _ := sdsCache.GetLVs()
+	for _, lv := range lvs {
+		if lv.VGName == vgName && lv.LVName == lvName {
+			return &lv
 		}
-		log.Error(err, "[shouldReconcileByCreateFunc] unable to GetLV")
-		return nil, err
 	}
-	return &lv, nil
 
+	return nil
 }
 
-func shouldReconcileByUpdateFunc(llv *v1alpha1.LVMLogicalVolume) (bool, error) {
+func shouldReconcileByUpdateFunc(sdsCache *cache.Cache, vgName string, llv *v1alpha1.LVMLogicalVolume) bool {
 	if llv.DeletionTimestamp != nil {
-		return false, nil
+		return false
 	}
 
-	if llv.Status == nil {
-		return false, nil
+	lv := FindLV(sdsCache, vgName, llv.Spec.ActualLVNameOnTheNode)
+	if lv == nil {
+		return false
 	}
 
-	if llv.Status.Phase == pendingStatusPhase || llv.Status.Phase == resizingStatusPhase {
-		return false, nil
-	}
-
-	delta, err := resource.ParseQuantity(internal.ResizeDelta)
-	if err != nil {
-		return false, err
-	}
-
-	if llv.Spec.Size.Value()+delta.Value() < llv.Status.ActualSize.Value() {
-		return false, fmt.Errorf("requested size %d is less than actual %d", llv.Spec.Size.Value(), llv.Status.ActualSize.Value())
-	}
-
-	if utils.AreSizesEqualWithinDelta(llv.Spec.Size, llv.Status.ActualSize, delta) {
-		return false, nil
-	}
-
-	return true, nil
+	return true
 }
