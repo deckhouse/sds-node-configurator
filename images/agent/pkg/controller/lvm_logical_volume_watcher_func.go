@@ -313,9 +313,21 @@ func shouldReconcileByUpdateFunc(sdsCache *cache.Cache, vgName string, llv *v1al
 		return false
 	}
 
+	if llv.Status == nil {
+		return true
+	}
+
 	if llv.Status.Phase == pendingStatusPhase || llv.Status.Phase == resizingStatusPhase {
 		return false
 	}
 
 	return true
+}
+
+func isContiguous(llv *v1alpha1.LVMLogicalVolume) bool {
+	if llv.Spec.Thick == nil {
+		return false
+	}
+
+	return llv.Spec.Thick.Contiguous
 }

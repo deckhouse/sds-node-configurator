@@ -3,6 +3,12 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os"
+	"sds-node-configurator/api/v1alpha1"
+	"sds-node-configurator/internal"
+	"sds-node-configurator/pkg/kubutils"
+	"testing"
+
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -11,12 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"os"
-	"sds-node-configurator/api/v1alpha1"
-	"sds-node-configurator/internal"
-	"sds-node-configurator/pkg/kubutils"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"testing"
 )
 
 var (
@@ -209,7 +210,7 @@ func configureTestThinLLV(name, lvgName, poolName string) *v1alpha1.LVMLogicalVo
 			Type:                  Thin,
 			Size:                  size,
 			LvmVolumeGroupName:    lvgName,
-			Thin:                  &v1alpha1.ThinLogicalVolumeSpec{PoolName: poolName},
+			Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
 		},
 	}
 }

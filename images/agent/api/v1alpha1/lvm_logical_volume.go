@@ -37,15 +37,20 @@ type LVMLogicalVolume struct {
 }
 
 type LVMLogicalVolumeSpec struct {
-	ActualLVNameOnTheNode string                 `json:"actualLVNameOnTheNode"`
-	Type                  string                 `json:"type"`
-	Size                  resource.Quantity      `json:"size"`
-	LvmVolumeGroupName    string                 `json:"lvmVolumeGroupName"`
-	Thin                  *ThinLogicalVolumeSpec `json:"thin"`
+	ActualLVNameOnTheNode string                     `json:"actualLVNameOnTheNode"`
+	Type                  string                     `json:"type"`
+	Size                  resource.Quantity          `json:"size"`
+	LvmVolumeGroupName    string                     `json:"lvmVolumeGroupName"`
+	Thin                  *LVMLogicalVolumeThinSpec  `json:"thin"`
+	Thick                 *LVMLogicalVolumeThickSpec `json:"thick"`
 }
 
-type ThinLogicalVolumeSpec struct {
+type LVMLogicalVolumeThinSpec struct {
 	PoolName string `json:"poolName"`
+}
+
+type LVMLogicalVolumeThickSpec struct {
+	Contiguous bool `json:"contiguous"`
 }
 
 type LVMLogicalVolumeStatus struct {

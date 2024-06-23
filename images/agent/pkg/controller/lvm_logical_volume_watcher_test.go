@@ -76,7 +76,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Type:                  Thick,
 					Size:                  resource.MustParse("0M"),
 					LvmVolumeGroupName:    "some-lvg",
-					Thin:                  &v1alpha1.ThinLogicalVolumeSpec{PoolName: "some-lvg"},
+					Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: "some-lvg"},
 				},
 			}
 
@@ -111,7 +111,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Type:                  Thin,
 					Size:                  resource.MustParse("10M"),
 					LvmVolumeGroupName:    lvgName,
-					Thin:                  &v1alpha1.ThinLogicalVolumeSpec{PoolName: tpName},
+					Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: tpName},
 				},
 			}
 

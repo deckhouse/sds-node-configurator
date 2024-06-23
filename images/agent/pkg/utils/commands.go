@@ -275,8 +275,11 @@ func CreateThinLogicalVolume(vgName, tpName, lvName string, size int64) (string,
 	return cmd.String(), nil
 }
 
-func CreateThickLogicalVolume(vgName, lvName string, size int64) (string, error) {
+func CreateThickLogicalVolume(vgName, lvName string, size int64, contiguous bool) (string, error) {
 	args := []string{"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
+	if contiguous {
+		args = append(args, "--contiguous", "y")
+	}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 

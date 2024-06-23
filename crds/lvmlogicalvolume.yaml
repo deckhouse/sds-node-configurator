@@ -32,8 +32,14 @@ spec:
               type: object
               x-kubernetes-validations:
                 - rule: |
-                    (self.type == "Thin" && has(self.thin)) || self.type != "Thin"
-                  message: "Field 'thin' is required when 'type' is 'Thin'."
+                    (self.type == "Thin" && has(self.thin) && !has(self.thick)) || self.type != "Thin"
+                  message: "Field 'thin' is required and field 'thick' is forbidden when 'type' is 'Thin'."
+                - rule: |
+                    (!has(oldSelf.thick) || has(self.thick))
+                  message: "Field 'thick' cannot be removed."
+                - rule: |
+                    (!has(self.thick) || !has(self.thick.contiguous) || (has(self.thick.contiguous) && self.thick.contiguous == oldSelf.thick.contiguous))
+                  message: "Field 'contiguous' is immutable and cannot be added if not specified at creation."
               required:
                 - actualLVNameOnTheNode
                 - type
@@ -76,6 +82,22 @@ spec:
                       type: string
                       minLength: 1
                       pattern: ^.*$
+                thick:
+                  type: object
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                    - rule: |
+                        (!has(oldSelf.contiguous) || has(self.contiguous))
+                      message: "Field 'contiguous' cannot be removed."
+                  properties:
+                    contiguous:
+                      type: boolean
+                      x-kubernetes-validations:
+                        - rule: 'self == oldSelf'
+                          message: Value is immutable.
+                      description: |
+                        If true, the Logical Volume will be created with the contiguous flag.
             status:
               type: object
               properties:
