@@ -209,7 +209,7 @@ func configureTestThinLLV(name, lvgName, poolName string) *v1alpha1.LVMLogicalVo
 			Type:                  Thin,
 			Size:                  size,
 			LvmVolumeGroupName:    lvgName,
-			Thin:                  &v1alpha1.ThinLogicalVolumeSpec{PoolName: poolName},
+			Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
 		},
 	}
 }

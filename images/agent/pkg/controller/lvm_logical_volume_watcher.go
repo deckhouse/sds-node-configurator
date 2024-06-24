@@ -308,7 +308,7 @@ func reconcileLLVCreateFunc(
 	switch llv.Spec.Type {
 	case Thick:
 		log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] LV %s will be created in VG %s with size: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Size.String()))
-		cmd, err := utils.CreateThickLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode, llv.Spec.Size.Value())
+		cmd, err := utils.CreateThickLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode, llv.Spec.Size.Value(), isContiguous(llv))
 		log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] runs cmd: %s", cmd))
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to create a thick LogicalVolume for the LVMLogicalVolume %s", llv.Name))
@@ -354,6 +354,13 @@ func reconcileLLVCreateFunc(
 
 	llv.Status.Phase = createdStatusPhase
 	llv.Status.ActualSize = actualSize
+	if llv.Spec.Thick != nil {
+		if *llv.Spec.Thick.Contiguous == false {
+			llv.Status.Contiguous = nil
+		} else {
+			llv.Status.Contiguous = llv.Spec.Thick.Contiguous
+		}
+	}
 	log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s status.phase set to %s and actual size to %+v", llv.Name, createdStatusPhase, actualSize))
 	err = cl.Status().Update(ctx, llv)
 	if err != nil {
@@ -522,6 +529,7 @@ func reconcileLLVDeleteFunc(
 		return false, nil
 	}
 
+	// TODO: добавить в статус isContiguous nill-able
 	err := deleteLVIfExists(log, sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLLVDeleteFunc] unable to delete the LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode))

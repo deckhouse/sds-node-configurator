@@ -82,7 +82,9 @@ func checkIfLVBelongsToLLV(llv *v1alpha1.LVMLogicalVolume, lv *internal.LVData) 
 			return false
 		}
 	case Thick:
-		if string(lv.LVAttr[0]) != "-" {
+		contiguous := string(lv.LVAttr[2]) == "c"
+		if string(lv.LVAttr[0]) != "-" ||
+			contiguous != isContiguous(llv) {
 			return false
 		}
 	}
@@ -264,8 +266,15 @@ func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVol
 			break
 		}
 
-		if lv != nil && string(lv.LVAttr[0]) != "-" {
-			reason.WriteString(fmt.Sprintf("specified LV %s is already created and it is not Thick", lv.LVName))
+		if lv != nil {
+			if string(lv.LVAttr[0]) != "-" {
+				reason.WriteString(fmt.Sprintf("specified LV %s is already created and it is not Thick", lv.LVName))
+			}
+
+			contiguous := string(lv.LVAttr[2]) == "c"
+			if contiguous != isContiguous(llv) {
+				reason.WriteString(fmt.Sprintf("specified LV %s is already created and its contiguous state does not match the specified one", lv.LVName))
+			}
 		}
 	}
 
@@ -339,4 +348,12 @@ func shouldReconcileByUpdateFunc(sdsCache *cache.Cache, vgName string, llv *v1al
 	}
 
 	return true
+}
+
+func isContiguous(llv *v1alpha1.LVMLogicalVolume) bool {
+	if llv.Spec.Thick == nil {
+		return false
+	}
+
+	return *llv.Spec.Thick.Contiguous
 }

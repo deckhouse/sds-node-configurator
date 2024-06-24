@@ -42,7 +42,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				ObjectMeta: v1.ObjectMeta{},
 				Spec: v1alpha1.LVMLogicalVolumeSpec{
 					Type: Thin,
-					Thin: &v1alpha1.ThinLogicalVolumeSpec{PoolName: poolName},
+					Thin: &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
 				},
 			}
 			lv := &internal.LVData{PoolName: poolName}
@@ -56,7 +56,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				ObjectMeta: v1.ObjectMeta{},
 				Spec: v1alpha1.LVMLogicalVolumeSpec{
 					Type: Thin,
-					Thin: &v1alpha1.ThinLogicalVolumeSpec{PoolName: poolName},
+					Thin: &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
 				},
 			}
 			lv := &internal.LVData{PoolName: "another-name"}
@@ -76,7 +76,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			assert.True(t, checkIfLVBelongsToLLV(llv, lv))
 		})
 
-		t.Run("llv_thick_returns_true", func(t *testing.T) {
+		t.Run("llv_thick_returns_false", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				ObjectMeta: v1.ObjectMeta{},
 				Spec: v1alpha1.LVMLogicalVolumeSpec{
@@ -85,9 +85,11 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			}
 			lv1 := &internal.LVData{LVAttr: "Vwi-a-----"}
 			lv2 := &internal.LVData{LVAttr: "twi-a-----"}
+			lv3 := &internal.LVData{LVAttr: "-wc-a-----"}
 
 			assert.False(t, checkIfLVBelongsToLLV(llv, lv1))
 			assert.False(t, checkIfLVBelongsToLLV(llv, lv2))
+			assert.False(t, checkIfLVBelongsToLLV(llv, lv3))
 		})
 	})
 
@@ -137,7 +139,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Type:                  Thick,
 					Size:                  resource.MustParse("0M"),
 					LvmVolumeGroupName:    "some-lvg",
-					Thin:                  &v1alpha1.ThinLogicalVolumeSpec{PoolName: "some-lvg"},
+					Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: "some-lvg"},
 				},
 			}
 
@@ -179,7 +181,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Type:                  Thin,
 					Size:                  resource.MustParse("10M"),
 					LvmVolumeGroupName:    lvgName,
-					Thin:                  &v1alpha1.ThinLogicalVolumeSpec{PoolName: tpName},
+					Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: tpName},
 				},
 			}
 
