@@ -1,10 +1,11 @@
 package controller
 
 import (
-	"context"
+	"bytes"
 	"fmt"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/internal"
+	"sds-node-configurator/pkg/cache"
 	"sds-node-configurator/pkg/logger"
 	"sds-node-configurator/pkg/monitoring"
 	"sds-node-configurator/pkg/utils"
@@ -18,11 +19,11 @@ import (
 
 func TestLVMLogicaVolumeWatcher(t *testing.T) {
 	var (
-		ctx     = context.Background()
 		cl      = NewFakeClient()
 		log     = logger.Logger{}
 		metrics = monitoring.Metrics{}
 		vgName  = "test-vg"
+		delta   = resource.MustParse(internal.ResizeDelta)
 	)
 
 	t.Run("subtractQuantity_returns_correct_value", func(t *testing.T) {
@@ -32,6 +33,209 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 
 		actual := subtractQuantity(*mini, *sub)
 		assert.Equal(t, expected, &actual)
+	})
+
+	t.Run("checkIfLVBelongsToLLV", func(t *testing.T) {
+		t.Run("llv_thin_returns_true", func(t *testing.T) {
+			const poolName = "test-pool"
+			llv := &v1alpha1.LVMLogicalVolume{
+				ObjectMeta: v1.ObjectMeta{},
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					Type: Thin,
+					Thin: &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
+				},
+			}
+			lv := &internal.LVData{PoolName: poolName}
+
+			assert.True(t, checkIfLVBelongsToLLV(llv, lv))
+		})
+
+		t.Run("llv_thin_returns_false", func(t *testing.T) {
+			const poolName = "test-pool"
+			llv := &v1alpha1.LVMLogicalVolume{
+				ObjectMeta: v1.ObjectMeta{},
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					Type: Thin,
+					Thin: &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
+				},
+			}
+			lv := &internal.LVData{PoolName: "another-name"}
+
+			assert.False(t, checkIfLVBelongsToLLV(llv, lv))
+		})
+
+		t.Run("llv_thick_returns_true", func(t *testing.T) {
+			llv := &v1alpha1.LVMLogicalVolume{
+				ObjectMeta: v1.ObjectMeta{},
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					Type: Thick,
+				},
+			}
+			lv := &internal.LVData{LVAttr: "-wi-a-----"}
+
+			assert.True(t, checkIfLVBelongsToLLV(llv, lv))
+		})
+
+		t.Run("llv_thick_returns_false", func(t *testing.T) {
+			llv := &v1alpha1.LVMLogicalVolume{
+				ObjectMeta: v1.ObjectMeta{},
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					Type: Thick,
+				},
+			}
+			lv1 := &internal.LVData{LVAttr: "Vwi-a-----"}
+			lv2 := &internal.LVData{LVAttr: "twi-a-----"}
+			lv3 := &internal.LVData{LVAttr: "-wc-a-----"}
+
+			assert.False(t, checkIfLVBelongsToLLV(llv, lv1))
+			assert.False(t, checkIfLVBelongsToLLV(llv, lv2))
+			assert.False(t, checkIfLVBelongsToLLV(llv, lv3))
+		})
+	})
+
+	t.Run("validateLVMLogicalVolume", func(t *testing.T) {
+		t.Run("thick_all_good_returns_true", func(t *testing.T) {
+			const lvgName = "test-lvg"
+
+			lvg := &v1alpha1.LvmVolumeGroup{
+				ObjectMeta: v1.ObjectMeta{
+					Name: lvgName,
+				},
+			}
+
+			err := cl.Create(ctx, lvg)
+			if err != nil {
+				t.Error(err)
+			} else {
+				defer func() {
+					err = cl.Delete(ctx, lvg)
+					if err != nil {
+						t.Error(err)
+					}
+				}()
+			}
+
+			llv := &v1alpha1.LVMLogicalVolume{
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					ActualLVNameOnTheNode: "test-lv",
+					Type:                  Thick,
+					Size:                  resource.MustParse("10M"),
+					LvmVolumeGroupName:    lvgName,
+				},
+			}
+
+			v, r := validateLVMLogicalVolume(&cache.Cache{}, llv, lvg, delta)
+			if assert.True(t, v) {
+				assert.Equal(t, 0, len(r))
+			}
+		})
+
+		t.Run("thick_all_bad_returns_false", func(t *testing.T) {
+			lvName := "test-lv"
+
+			llv := &v1alpha1.LVMLogicalVolume{
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					ActualLVNameOnTheNode: lvName,
+					Type:                  Thick,
+					Size:                  resource.MustParse("0M"),
+					LvmVolumeGroupName:    "some-lvg",
+					Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: "some-lvg"},
+				},
+			}
+
+			sdsCache := cache.New()
+			sdsCache.StoreLVs([]internal.LVData{
+				{
+					LVName: lvName,
+				},
+			}, bytes.Buffer{})
+
+			v, r := validateLVMLogicalVolume(sdsCache, llv, &v1alpha1.LvmVolumeGroup{}, delta)
+			if assert.False(t, v) {
+				assert.Equal(t, "zero size for LV; no LV name specified; thin pool specified for Thick LV; ", r)
+			}
+		})
+
+		t.Run("thin_all_good_returns_true", func(t *testing.T) {
+			const (
+				lvgName = "test-lvg"
+				tpName  = "test-tp"
+			)
+
+			lvg := &v1alpha1.LvmVolumeGroup{
+				ObjectMeta: v1.ObjectMeta{
+					Name: lvgName,
+				},
+				Status: v1alpha1.LvmVolumeGroupStatus{
+					ThinPools: []v1alpha1.LvmVolumeGroupThinPoolStatus{
+						{
+							Name: tpName,
+						},
+					},
+				},
+			}
+
+			llv := &v1alpha1.LVMLogicalVolume{
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					ActualLVNameOnTheNode: "test-lv",
+					Type:                  Thin,
+					Size:                  resource.MustParse("10M"),
+					LvmVolumeGroupName:    lvgName,
+					Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: tpName},
+				},
+			}
+
+			v, r := validateLVMLogicalVolume(cache.New(), llv, lvg, delta)
+			if assert.True(t, v) {
+				assert.Equal(t, 0, len(r))
+			}
+		})
+
+		t.Run("thin_all_bad_returns_false", func(t *testing.T) {
+
+			llv := &v1alpha1.LVMLogicalVolume{
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					ActualLVNameOnTheNode: "",
+					Type:                  Thin,
+					Size:                  resource.MustParse("0M"),
+					LvmVolumeGroupName:    "some-lvg",
+				},
+			}
+
+			sdsCache := cache.New()
+			sdsCache.StoreLVs([]internal.LVData{
+				{
+					LVName: "test-lv",
+				},
+			}, bytes.Buffer{})
+
+			v, r := validateLVMLogicalVolume(sdsCache, llv, &v1alpha1.LvmVolumeGroup{}, delta)
+			if assert.False(t, v) {
+				assert.Equal(t, "zero size for LV; no LV name specified; no thin pool specified; ", r)
+			}
+		})
+
+	})
+
+	t.Run("getFreeThinPoolSpace", func(t *testing.T) {
+		const tpName = "test-tp"
+		tps := []v1alpha1.LvmVolumeGroupThinPoolStatus{
+			{
+				Name:            tpName,
+				ActualSize:      resource.MustParse("10Gi"),
+				UsedSize:        resource.MustParse("1Gi"),
+				AllocatedSize:   resource.MustParse("5Gi"),
+				AllocationLimit: "150%",
+			},
+		}
+
+		free, err := getFreeThinPoolSpace(tps, tpName)
+		if err != nil {
+			t.Error(err)
+		}
+		expected := resource.MustParse("10Gi")
+
+		assert.Equal(t, expected.Value(), free.Value())
 	})
 
 	t.Run("belongToNode", func(t *testing.T) {
@@ -63,46 +267,48 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("returns_create", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{}
 
-			actual, err := identifyReconcileFunc(log, vgName, llv)
+			actual := identifyReconcileFunc(cache.New(), vgName, llv)
 
-			if assert.NoError(t, err) {
-				assert.Equal(t, CreateReconcile, actual)
-			}
+			assert.Equal(t, CreateReconcile, actual)
 		})
 
 		t.Run("returns_update", func(t *testing.T) {
 			specSize := resource.NewQuantity(40000000000, resource.BinarySI)
 			statusSize := resource.NewQuantity(10000000000, resource.BinarySI)
+			lvName := "test-lv"
 			llv := &v1alpha1.LVMLogicalVolume{
 				Spec: v1alpha1.LVMLogicalVolumeSpec{
-					Size: *specSize,
+					ActualLVNameOnTheNode: lvName,
+					Size:                  *specSize,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase:      createdStatusPhase,
+					Phase:      StatusPhaseCreated,
 					ActualSize: *statusSize,
 				},
 			}
+			sdsCache := cache.New()
+			sdsCache.StoreLVs([]internal.LVData{
+				{
+					LVName: lvName,
+				},
+			}, bytes.Buffer{})
 
-			actual, err := identifyReconcileFunc(log, vgName, llv)
+			actual := identifyReconcileFunc(sdsCache, vgName, llv)
 
-			if assert.NoError(t, err) {
-				assert.Equal(t, UpdateReconcile, actual)
-			}
+			assert.Equal(t, UpdateReconcile, actual)
 		})
 
 		t.Run("returns_delete", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				ObjectMeta: v1.ObjectMeta{DeletionTimestamp: &v1.Time{}},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: createdStatusPhase,
+					Phase: StatusPhaseCreated,
 				},
 			}
 
-			actual, err := identifyReconcileFunc(log, vgName, llv)
+			actual := identifyReconcileFunc(cache.New(), vgName, llv)
 
-			if assert.NoError(t, err) {
-				assert.Equal(t, DeleteReconcile, actual)
-			}
+			assert.Equal(t, DeleteReconcile, actual)
 		})
 
 		t.Run("returns_empty", func(t *testing.T) {
@@ -113,16 +319,14 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Size: *specSize,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase:      createdStatusPhase,
+					Phase:      StatusPhaseCreated,
 					ActualSize: *statusSize,
 				},
 			}
 
-			actual, err := identifyReconcileFunc(log, vgName, llv)
+			actual := identifyReconcileFunc(cache.New(), vgName, llv)
 
-			if assert.NoError(t, err) {
-				assert.Equal(t, reconcileType(""), actual)
-			}
+			assert.Equal(t, reconcileType(""), actual)
 		})
 	})
 
@@ -130,7 +334,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("if_status_nill_returns_true", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{}
 
-			should, err := shouldReconcileByCreateFunc(log, vgName, llv)
+			should := shouldReconcileByCreateFunc(cache.New(), vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.True(t, should)
@@ -140,11 +344,11 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("if_phase_created_returns_false", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: createdStatusPhase,
+					Phase: StatusPhaseCreated,
 				},
 			}
 
-			should, err := shouldReconcileByCreateFunc(log, vgName, llv)
+			should := shouldReconcileByCreateFunc(cache.New(), vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.False(t, should)
@@ -154,11 +358,11 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("if_phase_resizing_returns_false", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: resizingStatusPhase,
+					Phase: StatusPhaseResizing,
 				},
 			}
 
-			should, err := shouldReconcileByCreateFunc(log, vgName, llv)
+			should := shouldReconcileByCreateFunc(cache.New(), vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.False(t, should)
@@ -174,7 +378,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				},
 			}
 
-			should, err := shouldReconcileByUpdateFunc(llv)
+			should := shouldReconcileByUpdateFunc(cache.New(), vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.False(t, should)
@@ -184,7 +388,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("if_status_nil_returns_false", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{}
 
-			should, err := shouldReconcileByUpdateFunc(llv)
+			should := shouldReconcileByUpdateFunc(cache.New(), vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.False(t, should)
@@ -194,11 +398,11 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("if_phase_pending_returns_false", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: pendingStatusPhase,
+					Phase: StatusPhasePending,
 				},
 			}
 
-			should, err := shouldReconcileByUpdateFunc(llv)
+			should := shouldReconcileByUpdateFunc(cache.New(), vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.False(t, should)
@@ -208,11 +412,11 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("if_phase_resizing_returns_false", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: resizingStatusPhase,
+					Phase: StatusPhaseResizing,
 				},
 			}
 
-			should, err := shouldReconcileByUpdateFunc(llv)
+			should := shouldReconcileByUpdateFunc(cache.New(), vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.False(t, should)
@@ -227,12 +431,12 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Size: *specSize,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase:      createdStatusPhase,
+					Phase:      StatusPhaseCreated,
 					ActualSize: *statusSize,
 				},
 			}
 
-			should, err := shouldReconcileByUpdateFunc(llv)
+			should := shouldReconcileByUpdateFunc(cache.New(), vgName, llv)
 
 			if assert.ErrorContains(t, err, fmt.Sprintf("requested size %d is less than actual %d", llv.Spec.Size.Value(), llv.Status.ActualSize.Value())) {
 				assert.False(t, should)
@@ -247,12 +451,12 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Size: *specSize,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase:      createdStatusPhase,
+					Phase:      StatusPhaseCreated,
 					ActualSize: *statusSize,
 				},
 			}
 
-			should, err := shouldReconcileByUpdateFunc(llv)
+			should := shouldReconcileByUpdateFunc(cache.New(), vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.False(t, should)
@@ -267,12 +471,12 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Size: *specSize,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase:      createdStatusPhase,
+					Phase:      StatusPhaseCreated,
 					ActualSize: *statusSize,
 				},
 			}
 
-			should, err := shouldReconcileByUpdateFunc(llv)
+			should := shouldReconcileByUpdateFunc(cache.New(), vgName, llv)
 
 			if assert.NoError(t, err) {
 				assert.True(t, should)
@@ -300,14 +504,14 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		})
 	})
 
-	t.Run("updateLVMLogicalVolumePhase", func(t *testing.T) {
+	t.Run("updateLVMLogicalVolumePhaseIfNeeded", func(t *testing.T) {
 		const reason = "test_reason"
 		llv := &v1alpha1.LVMLogicalVolume{
 			ObjectMeta: v1.ObjectMeta{
 				Name: "test",
 			},
 			Status: &v1alpha1.LVMLogicalVolumeStatus{
-				Phase:  createdStatusPhase,
+				Phase:  StatusPhaseCreated,
 				Reason: "",
 			},
 		}
@@ -325,7 +529,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			}
 		}()
 
-		err = updateLVMLogicalVolumePhase(ctx, cl, log, metrics, llv, failedStatusPhase, reason)
+		err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, reason)
 		if assert.NoError(t, err) {
 			newLLV := &v1alpha1.LVMLogicalVolume{}
 			err = cl.Get(ctx, client.ObjectKey{
@@ -333,7 +537,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				Namespace: "",
 			}, newLLV)
 
-			assert.Equal(t, newLLV.Status.Phase, failedStatusPhase)
+			assert.Equal(t, newLLV.Status.Phase, StatusPhaseFailed)
 			assert.Equal(t, newLLV.Status.Reason, reason)
 		}
 	})
@@ -422,15 +626,15 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 	// 	)
 	// 	lvs := []internal.LVData{
 	// 		{
-	// 			PoolLv: tpName,
+	// 			PoolName: tpName,
 	// 			LVSize: *resource.NewQuantity(1000, resource.BinarySI),
 	// 		},
 	// 		{
-	// 			PoolLv: tpName,
+	// 			PoolName: tpName,
 	// 			LVSize: *resource.NewQuantity(1000, resource.BinarySI),
 	// 		},
 	// 		{
-	// 			PoolLv: tpName,
+	// 			PoolName: tpName,
 	// 			LVSize: *resource.NewQuantity(1000, resource.BinarySI),
 	// 		},
 	// 	}
@@ -463,7 +667,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				Name: lvgName,
 			},
 			Status: &v1alpha1.LVMLogicalVolumeStatus{
-				Phase:      pendingStatusPhase,
+				Phase:      StatusPhasePending,
 				Reason:     "",
 				ActualSize: *resource.NewQuantity(oldSize, resource.BinarySI),
 			},
@@ -492,11 +696,11 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		}
 
 		if assert.NotNil(t, oldLLV) {
-			assert.Equal(t, pendingStatusPhase, oldLLV.Status.Phase)
+			assert.Equal(t, StatusPhasePending, oldLLV.Status.Phase)
 			assert.Equal(t, oldSize, oldLLV.Status.ActualSize.Value())
 		}
 
-		oldLLV.Status.Phase = createdStatusPhase
+		oldLLV.Status.Phase = StatusPhaseCreated
 		oldLLV.Status.ActualSize = *resource.NewQuantity(newSize, resource.BinarySI)
 		err = updateLVMLogicalVolume(ctx, metrics, cl, oldLLV)
 
@@ -510,7 +714,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				return
 			}
 
-			assert.Equal(t, createdStatusPhase, newLLV.Status.Phase)
+			assert.Equal(t, StatusPhaseCreated, newLLV.Status.Phase)
 			assert.Equal(t, newSize, newLLV.Status.ActualSize.Value())
 		}
 	})

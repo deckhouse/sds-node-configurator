@@ -73,7 +73,7 @@ func BenchmarkRunThickLLVCreationSingleThread(b *testing.B) {
 				}
 
 				if llv.Status != nil &&
-					llv.Status.Phase == createdStatusPhase &&
+					llv.Status.Phase == StatusPhaseCreated &&
 					!created {
 					succeeded++
 					llvNames[llvName] = true
@@ -138,7 +138,7 @@ func BenchmarkRunThinLLVCreationSingleThread(b *testing.B) {
 				}
 
 				if llv.Status != nil &&
-					llv.Status.Phase == createdStatusPhase &&
+					llv.Status.Phase == StatusPhaseCreated &&
 					!visited {
 					succeeded++
 					llvNames[llvName] = true
@@ -185,10 +185,6 @@ func getAllLLV(ctx context.Context, cl client.Client) (map[string]v1alpha1.LVMLo
 
 func configureTestThickLLV(name, lvgName string) *v1alpha1.LVMLogicalVolume {
 	return &v1alpha1.LVMLogicalVolume{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       v1alpha1.LVMLogicalVolumeKind,
-			APIVersion: v1alpha1.TypeMediaAPIVersion,
-		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       name,
 			Finalizers: []string{internal.SdsNodeConfiguratorFinalizer},
@@ -204,10 +200,6 @@ func configureTestThickLLV(name, lvgName string) *v1alpha1.LVMLogicalVolume {
 
 func configureTestThinLLV(name, lvgName, poolName string) *v1alpha1.LVMLogicalVolume {
 	return &v1alpha1.LVMLogicalVolume{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       v1alpha1.LVMLogicalVolumeKind,
-			APIVersion: v1alpha1.TypeMediaAPIVersion,
-		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       name,
 			Finalizers: []string{internal.SdsNodeConfiguratorFinalizer},
@@ -217,7 +209,7 @@ func configureTestThinLLV(name, lvgName, poolName string) *v1alpha1.LVMLogicalVo
 			Type:                  Thin,
 			Size:                  size,
 			LvmVolumeGroupName:    lvgName,
-			Thin:                  &v1alpha1.ThinLogicalVolumeSpec{PoolName: poolName},
+			Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
 		},
 	}
 }

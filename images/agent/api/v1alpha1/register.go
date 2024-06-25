@@ -23,14 +23,10 @@ import (
 )
 
 const (
-	BlockDeviceKind           = "BlockDevice"
-	LVMVolumeGroupKind        = "LvmVolumeGroup"
-	LVMLogicalVolumeKind      = "LVMLogicalVolume"
-	APIGroup                  = "storage.deckhouse.io"
-	APIVersion                = "v1alpha1"
-	OwnerReferencesAPIVersion = "v1"
-	TypeMediaAPIVersion       = APIGroup + "/" + APIVersion
-	Node                      = "Node"
+	BlockDeviceKind     = "BlockDevice"
+	APIGroup            = "storage.deckhouse.io"
+	APIVersion          = "v1alpha1"
+	TypeMediaAPIVersion = APIGroup + "/" + APIVersion
 )
 
 // SchemeGroupVersion is group version used to register these objects

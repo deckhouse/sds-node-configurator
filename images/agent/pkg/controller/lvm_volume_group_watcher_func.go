@@ -144,6 +144,41 @@ func addLVGFinalizerIfNotExist(ctx context.Context, cl client.Client, lvg *v1alp
 	return true, nil
 }
 
+func syncThinPoolsAllocationLimit(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup) error {
+	updated := false
+
+	tpSpecLimits := make(map[string]string, len(lvg.Spec.ThinPools))
+	for _, tp := range lvg.Spec.ThinPools {
+		tpSpecLimits[tp.Name] = tp.AllocationLimit
+	}
+
+	for i := range lvg.Status.ThinPools {
+		if specLimits, matched := tpSpecLimits[lvg.Status.ThinPools[i].Name]; matched {
+			if lvg.Status.ThinPools[i].AllocationLimit != specLimits {
+				log.Debug(fmt.Sprintf("[syncThinPoolsAllocationLimit] thin-pool %s status AllocationLimit: %s of the LVMVolumeGroup %s should be updated by spec one: %s", lvg.Status.ThinPools[i].Name, lvg.Status.ThinPools[i].AllocationLimit, lvg.Name, specLimits))
+				updated = true
+				lvg.Status.ThinPools[i].AllocationLimit = specLimits
+			}
+		} else {
+			log.Debug(fmt.Sprintf("[syncThinPoolsAllocationLimit] status thin-pool %s of the LVMVolumeGroup %s was not found as used in spec", lvg.Status.ThinPools[i].Name, lvg.Name))
+		}
+	}
+
+	if updated {
+		fmt.Printf("%+v", lvg.Status.ThinPools)
+		log.Debug(fmt.Sprintf("[syncThinPoolsAllocationLimit] tries to update the LVMVolumeGroup %s", lvg.Name))
+		err := cl.Status().Update(ctx, lvg)
+		if err != nil {
+			return err
+		}
+		log.Debug(fmt.Sprintf("[syncThinPoolsAllocationLimit] successfully updated the LVMVolumeGroup %s", lvg.Name))
+	} else {
+		log.Debug(fmt.Sprintf("[syncThinPoolsAllocationLimit] every status thin-pool AllocationLimit value is synced with spec one for the LVMVolumeGroup %s", lvg.Name))
+	}
+
+	return nil
+}
+
 func validateSpecBlockDevices(lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
 	reason := strings.Builder{}
 
@@ -298,7 +333,7 @@ func validateLVGForUpdateFunc(log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, b
 
 	if lvg.Spec.ThinPools != nil {
 		log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] the LVMVolumeGroup %s has thin-pools. Validate them", lvg.Name))
-		usedThinPools := make(map[string]v1alpha1.StatusThinPool, len(lvg.Status.ThinPools))
+		usedThinPools := make(map[string]v1alpha1.LvmVolumeGroupThinPoolStatus, len(lvg.Status.ThinPools))
 		for _, tp := range lvg.Status.ThinPools {
 			usedThinPools[tp.Name] = tp
 		}
@@ -399,7 +434,7 @@ func shouldReconcileLVGByUpdateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cach
 }
 
 func ReconcileThinPoolsIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, vg internal.VGData, lvs []internal.LVData) error {
-	actualThinPools := make(map[string]v1alpha1.StatusThinPool, len(lvg.Status.ThinPools))
+	actualThinPools := make(map[string]v1alpha1.LvmVolumeGroupThinPoolStatus, len(lvg.Status.ThinPools))
 	for _, tp := range lvg.Status.ThinPools {
 		actualThinPools[tp.Name] = tp
 	}
@@ -607,12 +642,11 @@ func checkIfVGHasLV(ch *cache.Cache, vgName string) []string {
 	return usedLVs
 }
 
-func getLVMVolumeGroup(ctx context.Context, cl client.Client, metrics monitoring.Metrics, namespace, name string) (*v1alpha1.LvmVolumeGroup, error) {
+func getLVMVolumeGroup(ctx context.Context, cl client.Client, metrics monitoring.Metrics, name string) (*v1alpha1.LvmVolumeGroup, error) {
 	obj := &v1alpha1.LvmVolumeGroup{}
 	start := time.Now()
 	err := cl.Get(ctx, client.ObjectKey{
-		Name:      name,
-		Namespace: namespace,
+		Name: name,
 	}, obj)
 	metrics.ApiMethodsDuration(LVMVolumeGroupWatcherCtrlName, "get").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.ApiMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "get").Inc()
@@ -782,7 +816,7 @@ func UpdateVGTagIfNeeded(ctx context.Context, cl client.Client, log logger.Logge
 	return false, nil
 }
 
-func ResizeThinPool(log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, specThinPool v1alpha1.SpecThinPool, statusThinPool v1alpha1.StatusThinPool) error {
+func ResizeThinPool(log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, specThinPool v1alpha1.LvmVolumeGroupThinPoolSpec, statusThinPool v1alpha1.LvmVolumeGroupThinPoolStatus) error {
 	volumeGroupFreeSpaceBytes := lvg.Status.VGSize.Value() - lvg.Status.AllocatedSize.Value()
 	addSizeBytes := specThinPool.Size.Value() - statusThinPool.ActualSize.Value()
 

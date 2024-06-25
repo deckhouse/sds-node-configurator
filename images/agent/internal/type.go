@@ -58,11 +58,12 @@ type LVMVolumeGroupCandidate struct {
 }
 
 type LVMVGStatusThinPool struct {
-	Name       string
-	ActualSize resource.Quantity
-	UsedSize   resource.Quantity
-	Ready      bool
-	Message    string
+	Name          string
+	ActualSize    resource.Quantity
+	UsedSize      resource.Quantity
+	AllocatedSize resource.Quantity
+	Ready         bool
+	Message       string
 }
 
 type LVMVGDevice struct {
@@ -142,7 +143,7 @@ type LVData struct {
 	VGUuid          string            `json:"vg_uuid"`
 	LVAttr          string            `json:"lv_attr"`
 	LVSize          resource.Quantity `json:"lv_size"`
-	PoolLv          string            `json:"pool_lv"`
+	PoolName        string            `json:"pool_lv"`
 	Origin          string            `json:"origin"`
 	DataPercent     string            `json:"data_percent"`
 	MetadataPercent string            `json:"metadata_percent"`

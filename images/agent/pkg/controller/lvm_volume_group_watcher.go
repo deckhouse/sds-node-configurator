@@ -164,6 +164,13 @@ func RunLVMVolumeGroupWatcherController(
 				}, nil
 			}
 
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to sync status and spec thin-pool AllicationLimit fields for the LVMVolumeGroup %s", lvg.Name))
+			err = syncThinPoolsAllocationLimit(ctx, cl, log, lvg)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to sync status and spec thin-pool AllocationLimit fields for the LVMVolumeGroup %s", lvg.Name))
+				return reconcile.Result{}, err
+			}
+
 			shouldRequeue, err := runEventReconcile(ctx, cl, log, metrics, sdsCache, lvg, blockDevices)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to reconcile the LVMVolumeGroup %s", lvg.Name))

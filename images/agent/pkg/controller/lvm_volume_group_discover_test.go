@@ -80,7 +80,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		}
 		vgIssues := map[string]string{}
 		pvIssues := map[string][]string{}
-		lvIssues := map[string][]string{}
+		lvIssues := map[string]map[string]string{}
 		vg := internal.VGData{VGName: vgName, VGUuid: vgUuid}
 
 		health, _ := checkVGHealth(bds, vgIssues, pvIssues, lvIssues, vg)
@@ -97,7 +97,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		}
 		vgIssues := map[string]string{}
 		pvIssues := map[string][]string{}
-		lvIssues := map[string][]string{}
+		lvIssues := map[string]map[string]string{}
 		vg := internal.VGData{VGName: vgName, VGUuid: vgUuid}
 
 		health, _ := checkVGHealth(bds, vgIssues, pvIssues, lvIssues, vg)
@@ -115,7 +115,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			DataPercent: "50",
 		}
 		expected := "97656250Ki"
-		actual, err := getLVUsedSize(lv)
+		actual, err := getThinPoolUsedSize(lv)
 
 		if assert.NoError(t, err) {
 			assert.Equal(t, expected, actual.String())
@@ -240,7 +240,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			secondVgName + secondVgUuid: {lvs[1]},
 		}
 
-		actual := sortLVsByVG(lvs, vgs)
+		actual := sortThinPoolsByVG(lvs, vgs)
 		assert.Equal(t, expected, actual)
 	})
 
@@ -484,10 +484,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			},
 			Status: v1alpha1.LvmVolumeGroupStatus{
 				AllocatedSize: size10G,
-				Health:        Health,
-				Message:       Message,
 				Nodes:         convertLVMVGNodes(nodes),
-				ThinPools:     convertStatusThinPools(statusThinPools),
+				ThinPools:     convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools),
 				VGSize:        size10G,
 				VGUuid:        VGUuid,
 			},
@@ -572,10 +570,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				},
 				Status: v1alpha1.LvmVolumeGroupStatus{
 					AllocatedSize: size10G,
-					Health:        Health,
-					Message:       Message,
 					Nodes:         convertLVMVGNodes(nodes),
-					ThinPools:     convertStatusThinPools(statusThinPools),
+					ThinPools:     convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools),
 					VGSize:        size10G,
 					VGUuid:        VGUuid,
 				},
@@ -653,7 +649,11 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		if assert.NoError(t, err) && assert.NotNil(t, created) {
 			actual, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
 			if assert.NoError(t, err) && assert.Equal(t, 1, len(actual)) {
-				err := DeleteLVMVolumeGroup(ctx, cl, testMetrics, LVMVGName)
+				err := DeleteLVMVolumeGroup(ctx, cl, testMetrics, &v1alpha1.LvmVolumeGroup{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: LVMVGName,
+					},
+				})
 				if assert.NoError(t, err) {
 					actual, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
 					if assert.NoError(t, err) {
@@ -769,10 +769,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			},
 			Status: v1alpha1.LvmVolumeGroupStatus{
 				AllocatedSize: size10G,
-				Health:        Health,
-				Message:       Message,
 				Nodes:         convertLVMVGNodes(newNodes),
-				ThinPools:     convertStatusThinPools(StatusThinPools),
+				ThinPools:     convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, StatusThinPools),
 				VGSize:        size10G,
 				VGUuid:        VGUuid,
 			},
@@ -780,7 +778,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 
 		created, err := CreateLVMVolumeGroupByCandidate(ctx, testLogger, testMetrics, cl, oldCandidate)
 		if assert.NoError(t, err) {
-			err := UpdateLVMVolumeGroupByCandidate(ctx, cl, testMetrics, *created, newCandidate)
+			err := UpdateLVMVolumeGroupByCandidate(ctx, cl, testMetrics, log, created, newCandidate)
 
 			if assert.NoError(t, err) {
 				lmvs, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
@@ -853,7 +851,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			},
 		}
 
-		actual := filterLVGsByNode(ctx, cl, testLogger, monitoring.Metrics{}, lvs, blockDevices, currentNode)
+		actual := filterLVGsByNode(ctx, cl, testLogger, lvs, blockDevices, currentNode)
 
 		assert.Equal(t, expected, actual)
 	})
@@ -903,7 +901,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			}
 		)
 
-		actual := filterLVGsByNode(ctx, cl, log, monitoring.Metrics{}, lvs, blockDevices, currentNode)
+		actual := filterLVGsByNode(ctx, cl, log, lvs, blockDevices, currentNode)
 
 		assert.Equal(t, 0, len(actual))
 	})
@@ -974,10 +972,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				},
 				Status: v1alpha1.LvmVolumeGroupStatus{
 					AllocatedSize: resource.MustParse("9765625Ki"),
-					Health:        health,
-					Message:       message,
 					Nodes:         convertLVMVGNodes(nodes),
-					ThinPools:     convertStatusThinPools(statusThinPools),
+					ThinPools:     convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools),
 					VGSize:        resource.MustParse("9765625Ki"),
 				},
 			}
@@ -1005,7 +1001,6 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				specType        = "type"
 				allocatedSize   = resource.MustParse("10G")
 				health          = internal.LVMVGHealthOperational
-				message         = "all good"
 				statusThinPools = []internal.LVMVGStatusThinPool{
 					{
 						Name:       "first",
@@ -1058,10 +1053,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				},
 				Status: v1alpha1.LvmVolumeGroupStatus{
 					AllocatedSize: allocatedSize,
-					Health:        health,
-					Message:       message,
 					Nodes:         convertLVMVGNodes(nodes),
-					ThinPools:     convertStatusThinPools(statusThinPools),
+					ThinPools:     convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools),
 					VGSize:        vgSize,
 				},
 			}
