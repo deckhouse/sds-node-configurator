@@ -29,6 +29,13 @@ spec:
                     poolName:
                       description: |
                         Имя используемого Thin pool.
+                thick:
+                  description: | 
+                    Описывает настройки используемого Thick LV.
+                  properties:
+                    contiguous:
+                      description: |
+                        Если true, логический том будет создан с флагом contiguous. Примечание: Этот флаг следует использовать с осторожностью, так как он может привести к невозможности создания LV, не смотря на наличие свободного пространства.
             status:
               description: |
                 Описывает состояние ресурса.
@@ -42,6 +49,9 @@ spec:
                 actualSize:
                   description: |
                     Актуальный размер LV на узле.
+                contiguous:
+                  description: |
+                    Создан ли логический том с флагом contiguous.
       subresources:
         status: {}
       additionalPrinterColumns:

@@ -72,7 +72,7 @@ spec:
                           
                           > This field is immutable.
                       size:
-                        type: string
+                        x-kubernetes-int-or-string: true
                         pattern: '^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$'
                         description: |
                           The desired Thin-pool size.

@@ -112,7 +112,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 				Type:                  "local",
 				BlockDeviceNames:      []string{"test-bd", "test-bd2"},
 				ActualVGNameOnTheNode: "testVGname",
-				ThinPools: []v1alpha1.LVGSpecThinPool{
+				ThinPools: []v1alpha1.LvmVolumeGroupThinPoolSpec{
 					{
 						Name: "test-name",
 						Size: *convertSize("10G", t),
@@ -127,7 +127,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 				VGUuid:        "test-vg-uuid",
 				VGSize:        resource.MustParse("30G"),
 				AllocatedSize: resource.MustParse("20G"),
-				ThinPools: []v1alpha1.LVGStatusThinPool{
+				ThinPools: []v1alpha1.LvmVolumeGroupThinPoolStatus{
 					{
 						Name:       "test-name",
 						ActualSize: *convertSize("1G", t),
@@ -267,7 +267,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 			Spec: v1alpha1.LvmVolumeGroupSpec{
 				ActualVGNameOnTheNode: "testVGname",
 				BlockDeviceNames:      []string{"test-bd", "test-bd2"},
-				ThinPools: []v1alpha1.LVGSpecThinPool{
+				ThinPools: []v1alpha1.LvmVolumeGroupThinPoolSpec{
 					{
 						Name: "test-name",
 						Size: *convertSize("10G", t),
@@ -314,7 +314,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 						Name: "node2",
 					},
 				},
-				ThinPools: []v1alpha1.LVGStatusThinPool{
+				ThinPools: []v1alpha1.LvmVolumeGroupThinPoolStatus{
 					{
 						Name:       "test-name",
 						ActualSize: *convertSize("1G", t),

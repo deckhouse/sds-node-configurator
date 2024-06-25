@@ -167,7 +167,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Name: lvgName,
 				},
 				Status: v1alpha1.LvmVolumeGroupStatus{
-					ThinPools: []v1alpha1.LVGStatusThinPool{
+					ThinPools: []v1alpha1.LvmVolumeGroupThinPoolStatus{
 						{
 							Name: tpName,
 						},
@@ -219,7 +219,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 
 	t.Run("getFreeThinPoolSpace", func(t *testing.T) {
 		const tpName = "test-tp"
-		tps := []v1alpha1.LVGStatusThinPool{
+		tps := []v1alpha1.LvmVolumeGroupThinPoolStatus{
 			{
 				Name:            tpName,
 				ActualSize:      resource.MustParse("10Gi"),
@@ -296,7 +296,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Size:                  *specSize,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase:      createdStatusPhase,
+					Phase:      StatusPhaseCreated,
 					ActualSize: *statusSize,
 				},
 			}
@@ -316,7 +316,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				ObjectMeta: v1.ObjectMeta{DeletionTimestamp: &v1.Time{}},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: createdStatusPhase,
+					Phase: StatusPhaseCreated,
 				},
 			}
 
@@ -333,7 +333,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Size: *specSize,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase:      createdStatusPhase,
+					Phase:      StatusPhaseCreated,
 					ActualSize: *statusSize,
 				},
 			}
@@ -358,7 +358,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("if_phase_created_returns_false", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: createdStatusPhase,
+					Phase: StatusPhaseCreated,
 				},
 			}
 
@@ -372,7 +372,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("if_phase_resizing_returns_false", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: resizingStatusPhase,
+					Phase: StatusPhaseResizing,
 				},
 			}
 
@@ -412,7 +412,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("if_phase_pending_returns_false", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: pendingStatusPhase,
+					Phase: StatusPhasePending,
 				},
 			}
 
@@ -426,7 +426,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("if_phase_resizing_returns_false", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: resizingStatusPhase,
+					Phase: StatusPhaseResizing,
 				},
 			}
 
@@ -445,7 +445,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Size: *specSize,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase:      createdStatusPhase,
+					Phase:      StatusPhaseCreated,
 					ActualSize: *statusSize,
 				},
 			}
@@ -465,7 +465,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Size: *specSize,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase:      createdStatusPhase,
+					Phase:      StatusPhaseCreated,
 					ActualSize: *statusSize,
 				},
 			}
@@ -485,7 +485,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					Size: *specSize,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase:      createdStatusPhase,
+					Phase:      StatusPhaseCreated,
 					ActualSize: *statusSize,
 				},
 			}
@@ -525,7 +525,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				Name: "test",
 			},
 			Status: &v1alpha1.LVMLogicalVolumeStatus{
-				Phase:  createdStatusPhase,
+				Phase:  StatusPhaseCreated,
 				Reason: "",
 			},
 		}
@@ -543,7 +543,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			}
 		}()
 
-		err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, reason)
+		err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, reason)
 		if assert.NoError(t, err) {
 			newLLV := &v1alpha1.LVMLogicalVolume{}
 			err = cl.Get(ctx, client.ObjectKey{
@@ -551,7 +551,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				Namespace: "",
 			}, newLLV)
 
-			assert.Equal(t, newLLV.Status.Phase, failedStatusPhase)
+			assert.Equal(t, newLLV.Status.Phase, StatusPhaseFailed)
 			assert.Equal(t, newLLV.Status.Reason, reason)
 		}
 	})
@@ -681,7 +681,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				Name: lvgName,
 			},
 			Status: &v1alpha1.LVMLogicalVolumeStatus{
-				Phase:      pendingStatusPhase,
+				Phase:      StatusPhasePending,
 				Reason:     "",
 				ActualSize: *resource.NewQuantity(oldSize, resource.BinarySI),
 			},
@@ -710,11 +710,11 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		}
 
 		if assert.NotNil(t, oldLLV) {
-			assert.Equal(t, pendingStatusPhase, oldLLV.Status.Phase)
+			assert.Equal(t, StatusPhasePending, oldLLV.Status.Phase)
 			assert.Equal(t, oldSize, oldLLV.Status.ActualSize.Value())
 		}
 
-		oldLLV.Status.Phase = createdStatusPhase
+		oldLLV.Status.Phase = StatusPhaseCreated
 		oldLLV.Status.ActualSize = *resource.NewQuantity(newSize, resource.BinarySI)
 		err = updateLVMLogicalVolume(ctx, metrics, cl, oldLLV)
 
@@ -728,7 +728,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				return
 			}
 
-			assert.Equal(t, createdStatusPhase, newLLV.Status.Phase)
+			assert.Equal(t, StatusPhaseCreated, newLLV.Status.Phase)
 			assert.Equal(t, newSize, newLLV.Status.ActualSize.Value())
 		}
 	})

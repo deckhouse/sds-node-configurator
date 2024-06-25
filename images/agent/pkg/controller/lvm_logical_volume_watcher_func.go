@@ -92,40 +92,38 @@ func checkIfLVBelongsToLLV(llv *v1alpha1.LVMLogicalVolume, lv *internal.LVData) 
 	return true
 }
 
-func deleteLVIfExists(log logger.Logger, sdsCache *cache.Cache, vgName string, llv *v1alpha1.LVMLogicalVolume) error {
+func deleteLVIfNeeded(log logger.Logger, sdsCache *cache.Cache, vgName string, llv *v1alpha1.LVMLogicalVolume) error {
 	lv := FindLV(sdsCache, vgName, llv.Spec.ActualLVNameOnTheNode)
 	if lv == nil {
-		log.Warning(fmt.Sprintf("[deleteLVIfExists] did not find LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
+		log.Warning(fmt.Sprintf("[deleteLVIfNeeded] did not find LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
 		return nil
 	}
 
 	// this case prevents unexpected same-name LV deletions which does not actually belong to our LLV
 	if !checkIfLVBelongsToLLV(llv, lv) {
-		log.Warning(fmt.Sprintf("[deleteLVIfExists] no need to delete LV %s as it doesnt belong to LVMLogicalVolume %s", lv.LVName, llv.Name))
+		log.Warning(fmt.Sprintf("[deleteLVIfNeeded] no need to delete LV %s as it doesnt belong to LVMLogicalVolume %s", lv.LVName, llv.Name))
 		return nil
 	}
 
 	cmd, err := utils.RemoveLV(vgName, llv.Spec.ActualLVNameOnTheNode)
-	log.Debug(fmt.Sprintf("[deleteLVIfExists] runs cmd: %s", cmd))
+	log.Debug(fmt.Sprintf("[deleteLVIfNeeded] runs cmd: %s", cmd))
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[deleteLVIfExists] unable to remove LV %s from VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
+		log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to remove LV %s from VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
 		return err
 	}
 
 	return nil
 }
 
-func getLVActualSize(log logger.Logger, vgName, lvName string) (resource.Quantity, error) {
-	lv, cmd, _, err := utils.GetLV(vgName, lvName)
-	log.Debug(fmt.Sprintf("[getActualSize] runs cmd: %s", cmd))
-	if err != nil {
-		return resource.Quantity{}, err
+func getLVActualSize(sdsCache *cache.Cache, vgName, lvName string) (resource.Quantity, error) {
+	lv := FindLV(sdsCache, vgName, lvName)
+	if lv == nil {
+		return resource.Quantity{}, fmt.Errorf("LV %s not found", lv.LVName)
 	}
 
 	result := resource.NewQuantity(lv.LVSize.Value(), resource.BinarySI)
 
 	return *result, nil
-
 }
 
 func addLLVFinalizerIfNotExist(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, llv *v1alpha1.LVMLogicalVolume) (bool, error) {
@@ -157,7 +155,7 @@ func shouldReconcileByCreateFunc(sdsCache *cache.Cache, vgName string, llv *v1al
 	return true
 }
 
-func getFreeThinPoolSpace(thinPools []v1alpha1.LVGStatusThinPool, poolName string) (resource.Quantity, error) {
+func getFreeThinPoolSpace(thinPools []v1alpha1.LvmVolumeGroupThinPoolStatus, poolName string) (resource.Quantity, error) {
 	for _, thinPool := range thinPools {
 		if thinPool.Name == poolName {
 			limits := strings.Split(thinPool.AllocationLimit, "%")

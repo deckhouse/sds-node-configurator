@@ -36,10 +36,10 @@ const (
 
 	lvmLogicalVolumeWatcherCtrlName = "lvm-logical-volume-watcher-controller"
 
-	createdStatusPhase  = "Created"
-	pendingStatusPhase  = "Pending"
-	resizingStatusPhase = "Resizing"
-	failedStatusPhase   = "Failed"
+	StatusPhaseCreated  = "Created"
+	StatusPhasePending  = "Pending"
+	StatusPhaseResizing = "Resizing"
+	StatusPhaseFailed   = "Failed"
 )
 
 type (
@@ -81,7 +81,7 @@ func RunLVMLogicalVolumeWatcherController(
 			if err != nil {
 				if k8serr.IsNotFound(err) {
 					log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] LVMVolumeGroup %s not found for LVMLogicalVolume %s", llv.Spec.LvmVolumeGroupName, llv.Name))
-					err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("LVMVolumeGroup %s not found", llv.Spec.LvmVolumeGroupName))
+					err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, fmt.Sprintf("LVMVolumeGroup %s not found", llv.Spec.LvmVolumeGroupName))
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] unable to update the LVMLogicalVolume %s", llv.Name))
 						return reconcile.Result{}, err
@@ -90,7 +90,7 @@ func RunLVMLogicalVolumeWatcherController(
 					return reconcile.Result{}, nil
 				}
 
-				err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get selected LVMVolumeGroup, err: %s", err.Error()))
+				err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, fmt.Sprintf("Unable to get selected LVMVolumeGroup, err: %s", err.Error()))
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] unable to update the LVMLogicalVolume %s", llv.Name))
 				}
@@ -127,7 +127,7 @@ func RunLVMLogicalVolumeWatcherController(
 			valid, reason := validateLVMLogicalVolume(sdsCache, llv, lvg, delta)
 			if !valid {
 				log.Warning(fmt.Sprintf("[ReconcileLVMLogicalVolume] the LVMLogicalVolume %s is not valid, reason: %s", llv.Name, reason))
-				err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, reason)
+				err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, reason)
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] unable to update the LVMLogicalVolume %s", llv.Name))
 					return reconcile.Result{}, err
@@ -140,6 +140,11 @@ func RunLVMLogicalVolumeWatcherController(
 			shouldRequeue, err := ReconcileLVMLogicalVolume(ctx, cl, log, metrics, sdsCache, llv, lvg)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] an error occurred while reconciling the LVMLogicalVolume: %s", request.Name))
+				updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, err.Error())
+				if updErr != nil {
+					log.Error(updErr, fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] unable to update the LVMLogicalVolume %s", llv.Name))
+					return reconcile.Result{RequeueAfter: cfg.LLVRequeueIntervalSec}, nil
+				}
 			}
 			if shouldRequeue {
 				log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] some issues were occured while reconciliation the LVMLogicalVolume %s. Requeue the request in %s", request.Name, cfg.LLVRequeueIntervalSec.String()))
@@ -221,16 +226,16 @@ func ReconcileLVMLogicalVolume(ctx context.Context, cl client.Client, log logger
 
 	switch identifyReconcileFunc(sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv) {
 	case CreateReconcile:
-		return reconcileLLVCreateFunc(ctx, cl, log, metrics, llv, lvg)
+		return reconcileLLVCreateFunc(ctx, cl, log, metrics, sdsCache, llv, lvg)
 	case UpdateReconcile:
-		return reconcileLLVUpdateFunc(ctx, cl, log, metrics, llv, lvg)
+		return reconcileLLVUpdateFunc(ctx, cl, log, metrics, sdsCache, llv, lvg)
 	case DeleteReconcile:
 		return reconcileLLVDeleteFunc(ctx, cl, log, metrics, sdsCache, llv, lvg)
 	default:
 		log.Info(fmt.Sprintf("[runEventReconcile] the LVMLogicalVolume %s has compeleted configuration and should not be reconciled", llv.Name))
-		if llv.Status.Phase != createdStatusPhase {
-			log.Warning(fmt.Sprintf("[runEventReconcile] the LVMLogicalVolume %s should not be reconciled but has an unexpected phase: %s. Setting the phase to %s", llv.Name, llv.Status.Phase, createdStatusPhase))
-			err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, createdStatusPhase, "")
+		if llv.Status.Phase != StatusPhaseCreated {
+			log.Warning(fmt.Sprintf("[runEventReconcile] the LVMLogicalVolume %s should not be reconciled but has an unexpected phase: %s. Setting the phase to %s", llv.Name, llv.Status.Phase, StatusPhaseCreated))
+			err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseCreated, "")
 			if err != nil {
 				return true, err
 			}
@@ -245,6 +250,7 @@ func reconcileLLVCreateFunc(
 	cl client.Client,
 	log logger.Logger,
 	metrics monitoring.Metrics,
+	sdsCache *cache.Cache,
 	llv *v1alpha1.LVMLogicalVolume,
 	lvg *v1alpha1.LvmVolumeGroup,
 ) (bool, error) {
@@ -252,28 +258,17 @@ func reconcileLLVCreateFunc(
 
 	// this check prevents infinite resource updating after retries
 	if llv.Status == nil {
-		err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, pendingStatusPhase, "")
+		err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhasePending, "")
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
 			return true, err
 		}
 	}
 
-	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] tries to parse the resize delta: %s", internal.ResizeDelta))
-	delta, err := resource.ParseQuantity(internal.ResizeDelta)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to parse the resize delta, value: %s", internal.ResizeDelta))
-		updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to parse the resize delta, value: %s, err: %s", internal.ResizeDelta, err.Error()))
-		if updErr != nil {
-			log.Error(updErr, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-			return true, updErr
-		}
-
-		return true, err
-	}
-	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] successfully parsed the resize delta: %s", internal.ResizeDelta))
-
-	var freeSpace resource.Quantity
+	var (
+		freeSpace resource.Quantity
+		err       error
+	)
 	switch llv.Spec.Type {
 	case Thick:
 		freeSpace = getFreeVGSpace(lvg)
@@ -281,25 +276,22 @@ func reconcileLLVCreateFunc(
 		freeSpace, err = getFreeThinPoolSpace(lvg.Status.ThinPools, llv.Spec.Thin.PoolName)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to count free thin pool %s space of the LVMLogicalVolume %s", llv.Spec.Thin.PoolName, llv.Name))
-			updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, err.Error())
-			if updErr != nil {
-				log.Error(updErr, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume, name: %s", llv.Name))
-				return true, updErr
-			}
-
 			return false, err
 		}
 	}
 	log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s, LV: %s, VG: %s type: %s requested size: %s, free space: %s", llv.Name, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Type, llv.Spec.Size.String(), freeSpace.String()))
 
+	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] tries to parse the resize delta: %s", internal.ResizeDelta))
+	delta, err := resource.ParseQuantity(internal.ResizeDelta)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to parse the resize delta, value: %s", internal.ResizeDelta))
+		return true, err
+	}
+	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] successfully parsed the resize delta: %s", internal.ResizeDelta))
+
 	if freeSpace.Value() < llv.Spec.Size.Value()+delta.Value() {
 		err = errors.New("not enough space")
 		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] the LV %s requested size %s of the LVMLogicalVolume %s is more than the actual free space %s", llv.Spec.ActualLVNameOnTheNode, llv.Spec.Size.String(), llv.Name, freeSpace.String()))
-		updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, err.Error())
-		if updErr != nil {
-			log.Error(updErr, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-			return true, updErr
-		}
 
 		// we return true cause the user might manage LVMVolumeGroup free space without changing the LLV
 		return true, err
@@ -312,11 +304,6 @@ func reconcileLLVCreateFunc(
 		log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] runs cmd: %s", cmd))
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to create a thick LogicalVolume for the LVMLogicalVolume %s", llv.Name))
-			updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, err.Error())
-			if updErr != nil {
-				log.Error(updErr, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume, name: %s", llv.Name))
-				return true, updErr
-			}
 			return true, err
 		}
 	case Thin:
@@ -325,12 +312,6 @@ func reconcileLLVCreateFunc(
 		log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] runs cmd: %s", cmd))
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to create Thin LogicalVolume %s for the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name))
-			updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to create Thin LV, err: %s", err.Error()))
-			if updErr != nil {
-				log.Error(updErr, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume, name: %s", llv.Name))
-				return true, updErr
-			}
-
 			return true, err
 		}
 	}
@@ -338,21 +319,15 @@ func reconcileLLVCreateFunc(
 	log.Info(fmt.Sprintf("[reconcileLLVCreateFunc] successfully created LV %s in VG %s for LVMLogicalVolume resource with name: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Name))
 
 	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] tries to get the LV %s actual size", llv.Spec.ActualLVNameOnTheNode))
-	actualSize, err := getLVActualSize(log, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+	actualSize, err := getLVActualSize(sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to get actual size for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode))
-		updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get actual LV size, LV name: %s, VG name: %s, err: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, err.Error()))
-		if updErr != nil {
-			log.Error(updErr, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume, name: %s", llv.Name))
-			return true, updErr
-		}
-
 		return true, err
 	}
 	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] successfully got the LV %s actual size", llv.Spec.ActualLVNameOnTheNode))
 	log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LV %s in VG: %s has actual size: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, actualSize.String()))
 
-	llv.Status.Phase = createdStatusPhase
+	llv.Status.Phase = StatusPhaseCreated
 	llv.Status.ActualSize = actualSize
 	if llv.Spec.Thick != nil {
 		if *llv.Spec.Thick.Contiguous == false {
@@ -361,7 +336,7 @@ func reconcileLLVCreateFunc(
 			llv.Status.Contiguous = llv.Spec.Thick.Contiguous
 		}
 	}
-	log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s status.phase set to %s and actual size to %+v", llv.Name, createdStatusPhase, actualSize))
+	log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s status.phase set to %s and actual size to %+v", llv.Name, StatusPhaseCreated, actualSize))
 	err = cl.Status().Update(ctx, llv)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume, name: %s", llv.Name))
@@ -377,35 +352,73 @@ func reconcileLLVUpdateFunc(
 	cl client.Client,
 	log logger.Logger,
 	metrics monitoring.Metrics,
+	sdsCache *cache.Cache,
 	llv *v1alpha1.LVMLogicalVolume,
 	lvg *v1alpha1.LvmVolumeGroup,
 ) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] starts reconciliation for the LVMLogicalVolume %s", llv.Name))
 
-	// this check prevents infinite resource updates after retry
-	if llv.Status.Phase != Failed {
-		err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, resizingStatusPhase, "")
+	// status might be nil if a user creates the resource with LV name which matches existing LV on the node
+	if llv.Status == nil {
+		err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhasePending, "")
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume, name: %s", llv.Name))
+			log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
 			return true, err
 		}
 	}
 
-	extendingSize := subtractQuantity(llv.Spec.Size, llv.Status.ActualSize)
-	log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s has extending size %d", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, extendingSize.Value()))
+	// it needs to get current LV size from the node as status might be nil
+	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] tries to get LVMLogicalVolume %s actual size before the extension", llv.Name))
+	actualSize, err := getLVActualSize(sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to get actual LV %s size of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name))
+		return true, err
+	}
+	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully got LVMLogicalVolume %s actual size %s before the extension", llv.Name, actualSize.String()))
+
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] tries to parse the resize delta: %s", internal.ResizeDelta))
 	delta, err := resource.ParseQuantity(internal.ResizeDelta)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to parse the resize delta, value: %s", internal.ResizeDelta))
-		updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to parse the resize delta, value: %s, err: %s", internal.ResizeDelta, err.Error()))
-		if updErr != nil {
-			log.Error(updErr, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-			return true, updErr
-		}
-
 		return true, err
 	}
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully parsed the resize delta: %s", internal.ResizeDelta))
+
+	if utils.AreSizesEqualWithinDelta(actualSize, llv.Spec.Size, delta) {
+		log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s has the same actual size %s as the requested size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, actualSize.String(), llv.Spec.Size.String()))
+
+		if llv.Status.Phase != StatusPhaseCreated ||
+			llv.Status.ActualSize.Value() != actualSize.Value() {
+			llv.Status.Phase = StatusPhaseCreated
+			llv.Status.ActualSize = actualSize
+			log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s status.phase set to %s and actual size to %s", llv.Name, StatusPhaseCreated, actualSize.String()))
+			err = cl.Status().Update(ctx, llv)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
+				return true, err
+			}
+		}
+
+		return false, nil
+	}
+
+	extendingSize := subtractQuantity(llv.Spec.Size, actualSize)
+	log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s has extending size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, extendingSize.String()))
+	if extendingSize.Value() < 0 {
+		err = fmt.Errorf("specified LV size %dB is less than actual one on the node %dB", llv.Spec.Size.Value(), actualSize.Value())
+		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to extend the LVMLogicalVolume %s", llv.Name))
+		return false, err
+	}
+
+	log.Info(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s should be resized", llv.Name))
+	// this check prevents infinite resource updates after retry
+	if llv.Status.Phase != Failed {
+		err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseResizing, "")
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
+			return true, err
+		}
+	}
 
 	var freeSpace resource.Quantity
 	switch llv.Spec.Type {
@@ -415,11 +428,6 @@ func reconcileLLVUpdateFunc(
 		freeSpace, err = getFreeThinPoolSpace(lvg.Status.ThinPools, llv.Spec.Thin.PoolName)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to count free space in Thin-pool %s of the LVMLogicalVolume %s", llv.Spec.Thin.PoolName, llv.Name))
-			updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, err.Error())
-			if updErr != nil {
-				log.Error(updErr, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-				return true, updErr
-			}
 
 			// returns false, cause the error might be occurred cause of string parsing (so the string has to be changed that goes to another update)
 			return false, err
@@ -430,41 +438,9 @@ func reconcileLLVUpdateFunc(
 	if freeSpace.Value() < extendingSize.Value()+delta.Value() {
 		err = errors.New("not enough space")
 		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s requested size %s of the LVMLogicalVolume %s is more than actual free space %s", llv.Spec.ActualLVNameOnTheNode, llv.Spec.Size.String(), llv.Name, freeSpace.String()))
-		updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, err.Error())
-		if updErr != nil {
-			log.Error(updErr, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-			return true, updErr
-		}
 
 		// returns true cause a user might manage LVG free space without changing the LLV
 		return true, err
-	}
-
-	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] tries to get LVMLogicalVolume %s actual size before the extension", llv.Name))
-	actualSize, err := getLVActualSize(log, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to get actual size for LV %s from VG %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode))
-		updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get actual LV size, LV name: %s, VG name: %s, err: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, err.Error()))
-		if updErr != nil {
-			log.Error(updErr, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-			return true, updErr
-		}
-		return true, err
-	}
-	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully got LVMLogicalVolume %s actual size before the extension", llv.Name))
-
-	if utils.AreSizesEqualWithinDelta(actualSize, llv.Spec.Size, delta) {
-		log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s has the same actual size %s as the requested size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, actualSize.String(), llv.Spec.Size.String()))
-		llv.Status.Phase = createdStatusPhase
-		llv.Status.ActualSize = actualSize
-		log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s status.phase set to %s and actual size to %s", llv.Name, createdStatusPhase, actualSize.String()))
-		err = cl.Status().Update(ctx, llv)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-			return true, err
-		}
-
-		return false, nil
 	}
 
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s of the LVMLogicalVolume %s will be extended with size: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, llv.Spec.Size.String()))
@@ -472,35 +448,24 @@ func reconcileLLVUpdateFunc(
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] runs cmd: %s", cmd))
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to ExtendLV, name: %s, type: %s", llv.Spec.ActualLVNameOnTheNode, llv.Spec.Type))
-		updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, err.Error())
-		if updErr != nil {
-			log.Error(updErr, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-			return true, updErr
-		}
-
 		return true, err
 	}
 
 	log.Info(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully extended LV %s in VG %s for LVMLogicalVolume resource with name: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Name))
 
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] tries to get LVMLogicalVolume %s actual size after the extension", llv.Name))
-	newActualSize, err := getLVActualSize(log, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+	newActualSize, err := getLVActualSize(sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to get actual size for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode))
-		updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to get LV actual size, err: %s", err.Error()))
-		if updErr != nil {
-			log.Error(updErr, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-			return true, updErr
-		}
-
 		return true, err
 	}
+
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully got LVMLogicalVolume %s actual size before the extension", llv.Name))
 	log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s actual size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, newActualSize.String()))
 
-	llv.Status.Phase = createdStatusPhase
+	llv.Status.Phase = StatusPhaseCreated
 	llv.Status.ActualSize = newActualSize
-	log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s status.phase set to %s and actual size to %+v", llv.Name, createdStatusPhase, newActualSize))
+	log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s status.phase set to %s and actual size to %+v", llv.Name, StatusPhaseCreated, newActualSize))
 	err = cl.Status().Update(ctx, llv)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update LVMLogicalVolume %s", llv.Name))
@@ -529,15 +494,9 @@ func reconcileLLVDeleteFunc(
 		return false, nil
 	}
 
-	// TODO: добавить в статус isContiguous nill-able
-	err := deleteLVIfExists(log, sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv)
+	err := deleteLVIfNeeded(log, sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLLVDeleteFunc] unable to delete the LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode))
-		updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to delete the the LV %s in VG %s, err: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, err.Error()))
-		if updErr != nil {
-			log.Error(updErr, fmt.Sprintf("[reconcileLLVDeleteFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-			return true, updErr
-		}
 		return true, err
 	}
 
@@ -546,11 +505,7 @@ func reconcileLLVDeleteFunc(
 	err = removeLLVFinalizersIfExist(ctx, cl, metrics, log, llv)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLLVDeleteFunc] unable to remove finalizers from the LVMVolumeGroup %s", llv.Name))
-		updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, failedStatusPhase, fmt.Sprintf("Unable to remove finalizer %s, err: %s", internal.SdsNodeConfiguratorFinalizer, err.Error()))
-		if updErr != nil {
-			log.Error(updErr, fmt.Sprintf("[reconcileLLVDeleteFunc] unable to update the LVMLogicalVolume %s", llv.Name))
-			return true, updErr
-		}
+		return true, err
 	}
 
 	log.Info(fmt.Sprintf("[reconcileLLVDeleteFunc] successfully ended reconciliation for the LVMLogicalVolume %s", llv.Name))

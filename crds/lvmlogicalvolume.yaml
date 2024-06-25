@@ -64,7 +64,7 @@ spec:
                       message: Value is immutable.
                   enum: [Thick, Thin]
                 size:
-                  type: string
+                  x-kubernetes-int-or-string: true
                   description: |
                     Desired LV size.
                   minLength: 1
@@ -111,7 +111,7 @@ spec:
                         - rule: 'self == oldSelf'
                           message: Value is immutable.
                       description: |
-                        If true, the Logical Volume will be created with the contiguous flag.
+                        If true, the Logical Volume will be created with the contiguous flag. Use it carefully as LV might not be created even if there is enough space in VG.
             status:
               type: object
               description: |

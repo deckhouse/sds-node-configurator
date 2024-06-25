@@ -315,7 +315,7 @@ func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LvmVolumeGro
 	return false
 }
 
-func hasStatusPoolDiff(first, second []v1alpha1.LVGStatusThinPool) bool {
+func hasStatusPoolDiff(first, second []v1alpha1.LvmVolumeGroupThinPoolStatus) bool {
 	if len(first) != len(second) {
 		return true
 	}
@@ -922,10 +922,10 @@ func convertLVMVGDevices(devices []internal.LVMVGDevice) []v1alpha1.LvmVolumeGro
 	return convertedDevices
 }
 
-func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.LVGSpecThinPool {
-	result := make([]v1alpha1.LVGSpecThinPool, 0, len(thinPools))
+func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.LvmVolumeGroupThinPoolSpec {
+	result := make([]v1alpha1.LvmVolumeGroupThinPoolSpec, 0, len(thinPools))
 	for name, size := range thinPools {
-		result = append(result, v1alpha1.LVGSpecThinPool{
+		result = append(result, v1alpha1.LvmVolumeGroupThinPoolSpec{
 			Name: name,
 			Size: size,
 		})
@@ -934,20 +934,20 @@ func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.LVG
 	return result
 }
 
-func convertStatusThinPools(lvg v1alpha1.LvmVolumeGroup, thinPools []internal.LVMVGStatusThinPool) []v1alpha1.LVGStatusThinPool {
+func convertStatusThinPools(lvg v1alpha1.LvmVolumeGroup, thinPools []internal.LVMVGStatusThinPool) []v1alpha1.LvmVolumeGroupThinPoolStatus {
 	tpLimits := make(map[string]string, len(lvg.Spec.ThinPools))
 	for _, tp := range lvg.Spec.ThinPools {
 		tpLimits[tp.Name] = tp.AllocationLimit
 	}
 
-	result := make([]v1alpha1.LVGStatusThinPool, 0, len(thinPools))
+	result := make([]v1alpha1.LvmVolumeGroupThinPoolStatus, 0, len(thinPools))
 	for _, tp := range thinPools {
 		limit := tpLimits[tp.Name]
 		if len(limit) == 0 {
 			limit = internal.AllocationLimitDefaultValue
 		}
 
-		result = append(result, v1alpha1.LVGStatusThinPool{
+		result = append(result, v1alpha1.LvmVolumeGroupThinPoolStatus{
 			Name:            tp.Name,
 			ActualSize:      tp.ActualSize,
 			AllocationLimit: limit,
