@@ -80,14 +80,16 @@ func RunLVMLogicalVolumeWatcherController(
 			lvg, err := getLVMVolumeGroup(ctx, cl, metrics, llv.Spec.LvmVolumeGroupName)
 			if err != nil {
 				if k8serr.IsNotFound(err) {
-					log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] LVMVolumeGroup %s not found for LVMLogicalVolume %s", llv.Spec.LvmVolumeGroupName, llv.Name))
+					log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] LVMVolumeGroup %s not found for LVMLogicalVolume %s. Retry in %s", llv.Spec.LvmVolumeGroupName, llv.Name, cfg.VolumeGroupScanIntervalSec.String()))
 					err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, fmt.Sprintf("LVMVolumeGroup %s not found", llv.Spec.LvmVolumeGroupName))
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] unable to update the LVMLogicalVolume %s", llv.Name))
 						return reconcile.Result{}, err
 					}
-					// no need to retry as it is likely a user change the selected LVMVolumeGroup than create the whole LVMVolumeGroup for a single LV
-					return reconcile.Result{}, nil
+
+					return reconcile.Result{
+						RequeueAfter: cfg.VolumeGroupScanIntervalSec,
+					}, nil
 				}
 
 				err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, fmt.Sprintf("Unable to get selected LVMVolumeGroup, err: %s", err.Error()))
@@ -143,7 +145,7 @@ func RunLVMLogicalVolumeWatcherController(
 				updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, err.Error())
 				if updErr != nil {
 					log.Error(updErr, fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] unable to update the LVMLogicalVolume %s", llv.Name))
-					return reconcile.Result{RequeueAfter: cfg.LLVRequeueIntervalSec}, nil
+					return reconcile.Result{}, updErr
 				}
 			}
 			if shouldRequeue {
@@ -460,6 +462,12 @@ func reconcileLLVUpdateFunc(
 		return true, err
 	}
 
+	// this case might be triggered if sds cache will not update lv state in time
+	if newActualSize.Value() == actualSize.Value() {
+		log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s of the LVMLogicalVolume %s was extended but cache is not updated yet. It will be retried", llv.Spec.ActualLVNameOnTheNode, llv.Name))
+		return true, nil
+	}
+
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully got LVMLogicalVolume %s actual size before the extension", llv.Name))
 	log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s actual size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, newActualSize.String()))
 
@@ -488,10 +496,12 @@ func reconcileLLVDeleteFunc(
 	log.Debug(fmt.Sprintf("[reconcileLLVDeleteFunc] starts reconciliation for the LVMLogicalVolume %s", llv.Name))
 
 	// The controller won't remove the LLV resource and LV volume till the resource has any other finalizer.
-	if len(llv.Finalizers) != 1 ||
-		llv.Finalizers[0] != internal.SdsNodeConfiguratorFinalizer {
-		log.Debug(fmt.Sprintf("[reconcileLLVDeleteFunc] unable to delete LVMLogicalVolume %s for now due to it has any other finalizer", llv.Name))
-		return false, nil
+	if len(llv.Finalizers) != 0 {
+		if len(llv.Finalizers) > 1 ||
+			llv.Finalizers[0] != internal.SdsNodeConfiguratorFinalizer {
+			log.Debug(fmt.Sprintf("[reconcileLLVDeleteFunc] unable to delete LVMLogicalVolume %s for now due to it has any other finalizer", llv.Name))
+			return false, nil
+		}
 	}
 
 	err := deleteLVIfNeeded(log, sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv)

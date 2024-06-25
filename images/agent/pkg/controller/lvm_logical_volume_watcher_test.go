@@ -238,20 +238,6 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		assert.Equal(t, expected.Value(), free.Value())
 	})
 
-	t.Run("isIntegral", func(t *testing.T) {
-		t.Run("returns_true", func(t *testing.T) {
-			val := 1000.000
-
-			assert.True(t, isIntegral(val))
-		})
-
-		t.Run("returns_false", func(t *testing.T) {
-			val := 1000.001
-
-			assert.False(t, isIntegral(val))
-		})
-	})
-
 	t.Run("belongToNode", func(t *testing.T) {
 		const (
 			nodeName = "test_node"

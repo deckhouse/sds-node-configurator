@@ -168,21 +168,11 @@ func getFreeThinPoolSpace(thinPools []v1alpha1.LvmVolumeGroupThinPoolStatus, poo
 			factor = factor / 100
 			free := float64(thinPool.ActualSize.Value())*factor - float64(thinPool.AllocatedSize.Value())
 
-			// this means free value is like 10000.00000 number, so we do not need to round it up
-			if isIntegral(free) {
-				return *resource.NewQuantity(int64(free), resource.BinarySI), nil
-			}
-
-			// otherwise, we need to add 1 to the free value as parsing float to int rounds the value down
-			return *resource.NewQuantity(int64(free)+1, resource.BinarySI), nil
+			return *resource.NewQuantity(int64(free), resource.BinarySI), nil
 		}
 	}
 
 	return resource.Quantity{}, nil
-}
-
-func isIntegral(val float64) bool {
-	return val == float64(int(val))
 }
 
 func subtractQuantity(currentQuantity, quantityToSubtract resource.Quantity) resource.Quantity {
