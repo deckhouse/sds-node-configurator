@@ -49,7 +49,7 @@ FROM --platform=linux/amd64 $BASE_IMAGE
 WORKDIR /
 COPY --from=lvm-builder /lvm2/tools/lvm.static /sds-utils/bin/lvm.static
 COPY --from=bin-copier-builder /bin-copier /bin-copier
-
+COPY thin-pool-loader.sh .
 
 ENTRYPOINT ["/bin-copier"]
 CMD ["/sds-utils", "/opt/deckhouse/sds"]
