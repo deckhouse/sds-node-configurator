@@ -53,6 +53,7 @@ type LvmVolumeGroupStatus struct {
 	Conditions           []metav1.Condition             `json:"conditions"`
 	ThinPoolReady        string                         `json:"thinPoolReady"`
 	ConfigurationApplied string                         `json:"configurationApplied"`
+	VGFree               resource.Quantity              `json:"vgFree"`
 }
 
 type LvmVolumeGroupDevice struct {
@@ -73,6 +74,7 @@ type LvmVolumeGroupThinPoolStatus struct {
 	ActualSize      resource.Quantity `json:"actualSize"`
 	UsedSize        resource.Quantity `json:"usedSize"`
 	AllocatedSize   resource.Quantity `json:"allocatedSize"`
+	AvailableSpace  resource.Quantity `json:"availableSpace"`
 	AllocationLimit string            `json:"allocationLimit"`
 	Ready           bool              `json:"ready"`
 	Message         string            `json:"message"`

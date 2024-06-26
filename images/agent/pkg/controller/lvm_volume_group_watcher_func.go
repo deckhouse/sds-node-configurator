@@ -152,12 +152,24 @@ func syncThinPoolsAllocationLimit(ctx context.Context, cl client.Client, log log
 		tpSpecLimits[tp.Name] = tp.AllocationLimit
 	}
 
+	var (
+		space resource.Quantity
+		err   error
+	)
 	for i := range lvg.Status.ThinPools {
 		if specLimits, matched := tpSpecLimits[lvg.Status.ThinPools[i].Name]; matched {
 			if lvg.Status.ThinPools[i].AllocationLimit != specLimits {
 				log.Debug(fmt.Sprintf("[syncThinPoolsAllocationLimit] thin-pool %s status AllocationLimit: %s of the LVMVolumeGroup %s should be updated by spec one: %s", lvg.Status.ThinPools[i].Name, lvg.Status.ThinPools[i].AllocationLimit, lvg.Name, specLimits))
 				updated = true
 				lvg.Status.ThinPools[i].AllocationLimit = specLimits
+
+				space, err = getThinPoolAvailableSpace(lvg.Status.ThinPools[i].ActualSize, lvg.Status.ThinPools[i].AllocatedSize, specLimits)
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[syncThinPoolsAllocationLimit] unable to get thin pool %s available space", lvg.Status.ThinPools[i].Name))
+					return err
+				}
+				log.Debug(fmt.Sprintf("[syncThinPoolsAllocationLimit] successfully got a new available space %s of the thin-pool %s", space.String(), lvg.Status.ThinPools[i].Name))
+				lvg.Status.ThinPools[i].AvailableSpace = space
 			}
 		} else {
 			log.Debug(fmt.Sprintf("[syncThinPoolsAllocationLimit] status thin-pool %s of the LVMVolumeGroup %s was not found as used in spec", lvg.Status.ThinPools[i].Name, lvg.Name))

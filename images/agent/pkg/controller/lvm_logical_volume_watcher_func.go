@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sds-node-configurator/pkg/cache"
-	"strconv"
 	"strings"
 
 	"sds-node-configurator/api/v1alpha1"
@@ -92,6 +91,33 @@ func checkIfLVBelongsToLLV(llv *v1alpha1.LVMLogicalVolume, lv *internal.LVData) 
 	return true
 }
 
+func updateLLVPhaseToCreatedIfNeeded(ctx context.Context, cl client.Client, llv *v1alpha1.LVMLogicalVolume, actualSize resource.Quantity) (bool, error) {
+	var contiguous *bool
+	if llv.Spec.Thick != nil {
+		if *llv.Spec.Thick.Contiguous == true {
+			contiguous = llv.Spec.Thick.Contiguous
+		}
+	}
+
+	if llv.Status.Phase != StatusPhaseCreated ||
+		llv.Status.ActualSize.Value() != actualSize.Value() ||
+		llv.Status.Phase != "" ||
+		llv.Status.Contiguous != contiguous {
+		llv.Status.Phase = StatusPhaseCreated
+		llv.Status.Reason = ""
+		llv.Status.ActualSize = actualSize
+		llv.Status.Contiguous = contiguous
+		err := cl.Status().Update(ctx, llv)
+		if err != nil {
+			return false, err
+		}
+
+		return true, err
+	}
+
+	return false, nil
+}
+
 func deleteLVIfNeeded(log logger.Logger, sdsCache *cache.Cache, vgName string, llv *v1alpha1.LVMLogicalVolume) error {
 	lv := FindLV(sdsCache, vgName, llv.Spec.ActualLVNameOnTheNode)
 	if lv == nil {
@@ -115,15 +141,15 @@ func deleteLVIfNeeded(log logger.Logger, sdsCache *cache.Cache, vgName string, l
 	return nil
 }
 
-func getLVActualSize(sdsCache *cache.Cache, vgName, lvName string) (resource.Quantity, error) {
+func getLVActualSize(sdsCache *cache.Cache, vgName, lvName string) resource.Quantity {
 	lv := FindLV(sdsCache, vgName, lvName)
 	if lv == nil {
-		return resource.Quantity{}, fmt.Errorf("LV %s not found", lv.LVName)
+		return resource.Quantity{}
 	}
 
 	result := resource.NewQuantity(lv.LVSize.Value(), resource.BinarySI)
 
-	return *result, nil
+	return *result
 }
 
 func addLLVFinalizerIfNotExist(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, llv *v1alpha1.LVMLogicalVolume) (bool, error) {
@@ -155,34 +181,26 @@ func shouldReconcileByCreateFunc(sdsCache *cache.Cache, vgName string, llv *v1al
 	return true
 }
 
-func getFreeThinPoolSpace(thinPools []v1alpha1.LvmVolumeGroupThinPoolStatus, poolName string) (resource.Quantity, error) {
-	for _, thinPool := range thinPools {
-		if thinPool.Name == poolName {
-			limits := strings.Split(thinPool.AllocationLimit, "%")
-			percent, err := strconv.Atoi(limits[0])
-			if err != nil {
-				return resource.Quantity{}, err
+func getFreeLVGSpaceForLLV(lvg *v1alpha1.LvmVolumeGroup, llv *v1alpha1.LVMLogicalVolume) resource.Quantity {
+	var freeSpace resource.Quantity
+	switch llv.Spec.Type {
+	case Thick:
+		freeSpace = lvg.Status.VGFree
+	case Thin:
+		for _, tp := range lvg.Status.ThinPools {
+			if tp.Name == llv.Spec.Thin.PoolName {
+				freeSpace = tp.AvailableSpace
 			}
-
-			factor := float64(percent)
-			factor = factor / 100
-			free := float64(thinPool.ActualSize.Value())*factor - float64(thinPool.AllocatedSize.Value())
-
-			return *resource.NewQuantity(int64(free), resource.BinarySI), nil
 		}
 	}
 
-	return resource.Quantity{}, nil
+	return freeSpace
 }
 
 func subtractQuantity(currentQuantity, quantityToSubtract resource.Quantity) resource.Quantity {
 	resultingQuantity := currentQuantity.DeepCopy()
 	resultingQuantity.Sub(quantityToSubtract)
 	return resultingQuantity
-}
-
-func getFreeVGSpace(lvg *v1alpha1.LvmVolumeGroup) resource.Quantity {
-	return subtractQuantity(lvg.Status.VGSize, lvg.Status.AllocatedSize)
 }
 
 func belongsToNode(lvg *v1alpha1.LvmVolumeGroup, nodeName string) bool {

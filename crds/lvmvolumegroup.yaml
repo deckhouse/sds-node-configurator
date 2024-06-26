@@ -151,6 +151,10 @@ spec:
                   type: string
                   description: |
                     The Volume Group capacity.
+                vgFree:
+                  type: string
+                  description: |
+                    The Volume Group free space.
                 allocatedSize:
                   type: string
                   description: |
@@ -190,6 +194,10 @@ spec:
                           Thin pool oversize limit. Default is 150%.
                         default: "150%"
                         pattern: '^[1-9][0-9]{2,3}%$'
+                      availableSpace:
+                        type: string
+                        description: |
+                          Thin pool free space available.
                       ready:
                         type: boolean
                         description: |
