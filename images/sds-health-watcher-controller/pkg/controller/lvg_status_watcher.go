@@ -116,7 +116,7 @@ func reconcileLVGStatus(ctx context.Context, cl client.Client, log logger.Logger
 	return err
 }
 
-func getActualThinPoolReadyCount(statusTp []v1alpha1.StatusThinPool) int {
+func getActualThinPoolReadyCount(statusTp []v1alpha1.LvmVolumeGroupThinPoolStatus) int {
 	count := 0
 
 	for _, tp := range statusTp {
@@ -128,7 +128,7 @@ func getActualThinPoolReadyCount(statusTp []v1alpha1.StatusThinPool) int {
 	return count
 }
 
-func getUniqueThinPoolCount(specTp []v1alpha1.SpecThinPool, statusTp []v1alpha1.StatusThinPool) int {
+func getUniqueThinPoolCount(specTp []v1alpha1.LvmVolumeGroupThinPoolSpec, statusTp []v1alpha1.LvmVolumeGroupThinPoolStatus) int {
 	unique := make(map[string]struct{}, len(specTp)+len(statusTp))
 
 	for _, tp := range specTp {

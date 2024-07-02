@@ -470,6 +470,10 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Nodes:                 nodes,
 		}
 
+		thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools)
+		if err != nil {
+			t.Error(err)
+		}
 		expected := v1alpha1.LvmVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:            LVMVGName,
@@ -485,7 +489,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Status: v1alpha1.LvmVolumeGroupStatus{
 				AllocatedSize: size10G,
 				Nodes:         convertLVMVGNodes(nodes),
-				ThinPools:     convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools),
+				ThinPools:     thinPools,
 				VGSize:        size10G,
 				VGUuid:        VGUuid,
 			},
@@ -555,6 +559,11 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Nodes:                 nodes,
 		}
 
+		thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools)
+		if err != nil {
+			t.Error(err)
+		}
+
 		expected := map[string]v1alpha1.LvmVolumeGroup{
 			LVMVGName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -571,7 +580,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Status: v1alpha1.LvmVolumeGroupStatus{
 					AllocatedSize: size10G,
 					Nodes:         convertLVMVGNodes(nodes),
-					ThinPools:     convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools),
+					ThinPools:     thinPools,
 					VGSize:        size10G,
 					VGUuid:        VGUuid,
 				},
@@ -755,6 +764,11 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Nodes:                 newNodes,
 		}
 
+		thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, StatusThinPools)
+		if err != nil {
+			t.Error(err)
+		}
+
 		expected := v1alpha1.LvmVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:            LVMVGName,
@@ -770,7 +784,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Status: v1alpha1.LvmVolumeGroupStatus{
 				AllocatedSize: size10G,
 				Nodes:         convertLVMVGNodes(newNodes),
-				ThinPools:     convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, StatusThinPools),
+				ThinPools:     thinPools,
 				VGSize:        size10G,
 				VGUuid:        VGUuid,
 			},
@@ -964,6 +978,10 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Nodes:             nodes,
 			}
 
+			thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools)
+			if err != nil {
+				t.Error(err)
+			}
 			lvmVolumeGroup := v1alpha1.LvmVolumeGroup{
 				Spec: v1alpha1.LvmVolumeGroupSpec{
 					BlockDeviceNames: blockDevicesNames,
@@ -973,7 +991,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Status: v1alpha1.LvmVolumeGroupStatus{
 					AllocatedSize: resource.MustParse("9765625Ki"),
 					Nodes:         convertLVMVGNodes(nodes),
-					ThinPools:     convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools),
+					ThinPools:     thinPools,
 					VGSize:        resource.MustParse("9765625Ki"),
 				},
 			}
@@ -1045,6 +1063,11 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Nodes:             nodes,
 			}
 
+			thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools)
+			if err != nil {
+				t.Error(err)
+			}
+
 			lvmVolumeGroup := v1alpha1.LvmVolumeGroup{
 				Spec: v1alpha1.LvmVolumeGroupSpec{
 					BlockDeviceNames: blockDevicesNames,
@@ -1054,7 +1077,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Status: v1alpha1.LvmVolumeGroupStatus{
 					AllocatedSize: allocatedSize,
 					Nodes:         convertLVMVGNodes(nodes),
-					ThinPools:     convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools),
+					ThinPools:     thinPools,
 					VGSize:        vgSize,
 				},
 			}

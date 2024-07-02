@@ -265,7 +265,11 @@ func filterLVGsByNode(
 }
 
 func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
-	convertedStatusPools := convertStatusThinPools(lvg, candidate.StatusThinPools)
+	convertedStatusPools, err := convertStatusThinPools(lvg, candidate.StatusThinPools)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[hasLVMVolumeGroupDiff] unable to identify candidate difference for the LVMVolumeGroup %s", lvg.Name))
+		return false
+	}
 	log.Trace(fmt.Sprintf(`AllocatedSize, candidate: %s, lvg: %s`, candidate.AllocatedSize.String(), lvg.Status.AllocatedSize.String()))
 	log.Trace(fmt.Sprintf(`ThinPools, candidate: %+v, lvg: %+v`, convertedStatusPools, lvg.Status.ThinPools))
 	for _, tp := range convertedStatusPools {
@@ -281,6 +285,7 @@ func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LvmVolumeGroup, candi
 	return candidate.AllocatedSize.Value() != lvg.Status.AllocatedSize.Value() ||
 		hasStatusPoolDiff(convertedStatusPools, lvg.Status.ThinPools) ||
 		candidate.VGSize.Value() != lvg.Status.VGSize.Value() ||
+		candidate.VGFree.Value() != lvg.Status.VGFree.Value() ||
 		candidate.VGUuid != lvg.Status.VGUuid ||
 		hasStatusNodesDiff(log, convertLVMVGNodes(candidate.Nodes), lvg.Status.Nodes)
 }
@@ -326,7 +331,8 @@ func hasStatusPoolDiff(first, second []v1alpha1.LvmVolumeGroupThinPoolStatus) bo
 			first[i].ActualSize.Value() != second[i].ActualSize.Value() ||
 			first[i].AllocatedSize.Value() != second[i].AllocatedSize.Value() ||
 			first[i].Ready != second[i].Ready ||
-			first[i].Message != second[i].Message {
+			first[i].Message != second[i].Message ||
+			first[i].AvailableSpace.Value() != second[i].AvailableSpace.Value() {
 			return true
 		}
 	}
@@ -463,6 +469,7 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 			Message:               message,
 			StatusThinPools:       getStatusThinPools(log, sortedThinPools, sortedLVByThinPool, vg, lvIssues),
 			VGSize:                *resource.NewQuantity(vg.VGSize.Value(), resource.BinarySI),
+			VGFree:                *resource.NewQuantity(vg.VGFree.Value(), resource.BinarySI),
 			VGUuid:                vg.VGUuid,
 			Nodes:                 configureCandidateNodeDevices(sortedPVs, sortedBDs, vg, currentNode),
 		}
@@ -786,6 +793,11 @@ func CreateLVMVolumeGroupByCandidate(
 	kc kclient.Client,
 	candidate internal.LVMVolumeGroupCandidate,
 ) (*v1alpha1.LvmVolumeGroup, error) {
+	thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, candidate.StatusThinPools)
+	if err != nil {
+		return nil, err
+	}
+
 	lvmVolumeGroup := &v1alpha1.LvmVolumeGroup{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            candidate.LVMVGName,
@@ -801,9 +813,10 @@ func CreateLVMVolumeGroupByCandidate(
 		Status: v1alpha1.LvmVolumeGroupStatus{
 			AllocatedSize: candidate.AllocatedSize,
 			Nodes:         convertLVMVGNodes(candidate.Nodes),
-			ThinPools:     convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, candidate.StatusThinPools),
+			ThinPools:     thinPools,
 			VGSize:        candidate.VGSize,
 			VGUuid:        candidate.VGUuid,
+			VGFree:        candidate.VGFree,
 		},
 	}
 
@@ -818,7 +831,7 @@ func CreateLVMVolumeGroupByCandidate(
 	}
 
 	start := time.Now()
-	err := kc.Create(ctx, lvmVolumeGroup)
+	err = kc.Create(ctx, lvmVolumeGroup)
 	metrics.ApiMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "create").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "create").Inc()
 	if err != nil {
@@ -868,14 +881,21 @@ func UpdateLVMVolumeGroupByCandidate(
 			lvg.Status.Nodes[i].Devices = devices
 		}
 	}
+	thinPools, err := convertStatusThinPools(*lvg, candidate.StatusThinPools)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] unable to convert status thin pools for the LVMVolumeGroup %s", lvg.Name))
+		return err
+	}
+
 	lvg.Status.AllocatedSize = candidate.AllocatedSize
 	lvg.Status.Nodes = convertLVMVGNodes(candidate.Nodes)
-	lvg.Status.ThinPools = convertStatusThinPools(*lvg, candidate.StatusThinPools)
+	lvg.Status.ThinPools = thinPools
 	lvg.Status.VGSize = candidate.VGSize
+	lvg.Status.VGFree = candidate.VGFree
 	lvg.Status.VGUuid = candidate.VGUuid
 
 	start := time.Now()
-	err := cl.Status().Update(ctx, lvg)
+	err = cl.Status().Update(ctx, lvg)
 	metrics.ApiMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "update").Inc()
 	if err != nil {
@@ -934,7 +954,7 @@ func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.Lvm
 	return result
 }
 
-func convertStatusThinPools(lvg v1alpha1.LvmVolumeGroup, thinPools []internal.LVMVGStatusThinPool) []v1alpha1.LvmVolumeGroupThinPoolStatus {
+func convertStatusThinPools(lvg v1alpha1.LvmVolumeGroup, thinPools []internal.LVMVGStatusThinPool) ([]v1alpha1.LvmVolumeGroupThinPoolStatus, error) {
 	tpLimits := make(map[string]string, len(lvg.Spec.ThinPools))
 	for _, tp := range lvg.Spec.ThinPools {
 		tpLimits[tp.Name] = tp.AllocationLimit
@@ -947,18 +967,38 @@ func convertStatusThinPools(lvg v1alpha1.LvmVolumeGroup, thinPools []internal.LV
 			limit = internal.AllocationLimitDefaultValue
 		}
 
+		freeSpace, err := getThinPoolAvailableSpace(tp.ActualSize, tp.AllocatedSize, limit)
+		if err != nil {
+			return nil, err
+		}
+
 		result = append(result, v1alpha1.LvmVolumeGroupThinPoolStatus{
 			Name:            tp.Name,
 			ActualSize:      tp.ActualSize,
 			AllocationLimit: limit,
 			AllocatedSize:   tp.AllocatedSize,
+			AvailableSpace:  freeSpace,
 			UsedSize:        tp.UsedSize,
 			Ready:           tp.Ready,
 			Message:         tp.Message,
 		})
 	}
 
-	return result
+	return result, nil
+}
+
+func getThinPoolAvailableSpace(actualSize, allocatedSize resource.Quantity, allocationLimit string) (resource.Quantity, error) {
+	limits := strings.Split(allocationLimit, "%")
+	percent, err := strconv.Atoi(limits[0])
+	if err != nil {
+		return resource.Quantity{}, err
+	}
+
+	factor := float64(percent)
+	factor = factor / 100
+	free := float64(actualSize.Value())*factor - float64(allocatedSize.Value())
+
+	return *resource.NewQuantity(int64(free), resource.BinarySI), nil
 }
 
 func generateLVMVGName() string {

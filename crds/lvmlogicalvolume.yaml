@@ -137,6 +137,10 @@ spec:
       subresources:
         status: {}
       additionalPrinterColumns:
+        - jsonPath: .spec.actualLVNameOnTheNode
+          name: LV Name
+          type: string
+          description: Actual LV name on the node.
         - jsonPath: .status.phase
           name: Phase
           type: string

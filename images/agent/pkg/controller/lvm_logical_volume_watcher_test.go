@@ -217,19 +217,17 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 
 	})
 
-	t.Run("getFreeThinPoolSpace", func(t *testing.T) {
+	t.Run("getThinPoolAvailableSpace", func(t *testing.T) {
 		const tpName = "test-tp"
-		tps := []v1alpha1.LvmVolumeGroupThinPoolStatus{
-			{
-				Name:            tpName,
-				ActualSize:      resource.MustParse("10Gi"),
-				UsedSize:        resource.MustParse("1Gi"),
-				AllocatedSize:   resource.MustParse("5Gi"),
-				AllocationLimit: "150%",
-			},
+		tp := v1alpha1.LvmVolumeGroupThinPoolStatus{
+			Name:            tpName,
+			ActualSize:      resource.MustParse("10Gi"),
+			UsedSize:        resource.MustParse("1Gi"),
+			AllocatedSize:   resource.MustParse("5Gi"),
+			AllocationLimit: "150%",
 		}
 
-		free, err := getFreeThinPoolSpace(tps, tpName)
+		free, err := getThinPoolAvailableSpace(tp.ActualSize, tp.AllocatedSize, tpName)
 		if err != nil {
 			t.Error(err)
 		}
@@ -618,42 +616,6 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				assert.Contains(t, newLLV.Finalizers, internal.SdsNodeConfiguratorFinalizer)
 			}
 		})
-	})
-
-	// t.Run("getVirtualLVSize", func(t *testing.T) {
-	// 	const (
-	// 		tpName = "test_tp"
-	// 	)
-	// 	lvs := []internal.LVData{
-	// 		{
-	// 			PoolName: tpName,
-	// 			LVSize: *resource.NewQuantity(1000, resource.BinarySI),
-	// 		},
-	// 		{
-	// 			PoolName: tpName,
-	// 			LVSize: *resource.NewQuantity(1000, resource.BinarySI),
-	// 		},
-	// 		{
-	// 			PoolName: tpName,
-	// 			LVSize: *resource.NewQuantity(1000, resource.BinarySI),
-	// 		},
-	// 	}
-
-	// 	size := getVirtualLVSize(tpName, lvs)
-
-	// 	assert.Equal(t, int64(3000), size.Value())
-	// })
-
-	t.Run("getFreeVGSpace", func(t *testing.T) {
-		lvg := &v1alpha1.LvmVolumeGroup{
-			Status: v1alpha1.LvmVolumeGroupStatus{
-				VGSize:        resource.MustParse("2G"),
-				AllocatedSize: resource.MustParse("1G"),
-			},
-		}
-
-		free := getFreeVGSpace(lvg)
-		assert.Equal(t, int64(1000000000), free.Value())
 	})
 
 	t.Run("updateLVMLogicalVolume", func(t *testing.T) {
