@@ -464,10 +464,12 @@ func ReconcileThinPoolsIfNeeded(ctx context.Context, cl client.Client, log logge
 				continue
 			}
 			log.Debug(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] thin-pool %s of the LVMVolumeGroup %s is not created yet. Create it", specTp.Name, lvg.Name))
-			err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
-				return err
+			if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
+				err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
+					return err
+				}
 			}
 
 			start := time.Now()
@@ -535,11 +537,14 @@ func ResizePVIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, 
 	for _, n := range lvg.Status.Nodes {
 		for _, d := range n.Devices {
 			if d.DevSize.Value()-d.PVSize.Value() > delta.Value() {
-				err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
-				if err != nil {
-					log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
-					return err
+				if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
+					err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
+					if err != nil {
+						log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
+						return err
+					}
 				}
+
 				log.Debug(fmt.Sprintf("[ResizePVIfNeeded] the LVMVolumeGroup %s BlockDevice %s PVSize is less than actual device size. Resize PV", lvg.Name, d.BlockDevice))
 
 				start := time.Now()
@@ -593,15 +598,17 @@ func ExtendVGIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, 
 		return nil
 	}
 
-	err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
-		return err
+	if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
+		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
+			return err
+		}
 	}
 
 	log.Debug(fmt.Sprintf("[ExtendVGIfNeeded] VG %s should be extended as there are some BlockDevices were added to Spec field of the LVMVolumeGroup %s", vg.VGName, lvg.Name))
 	paths := extractPathsFromBlockDevices(devicesToExtend, blockDevices)
-	err = ExtendVGComplex(metrics, paths, vg.VGName, log)
+	err := ExtendVGComplex(metrics, paths, vg.VGName, log)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ExtendVGIfNeeded] unable to extend VG %s of the LVMVolumeGroup %s", vg.VGName, lvg.Name))
 		return err
@@ -794,10 +801,12 @@ func CreateVGComplex(metrics monitoring.Metrics, log logger.Logger, lvg *v1alpha
 func UpdateVGTagIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, vg internal.VGData) (bool, error) {
 	found, tagName := CheckTag(vg.VGTags)
 	if found && lvg.Name != tagName {
-		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
-			return false, err
+		if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
+			err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
+				return false, err
+			}
 		}
 
 		start := time.Now()

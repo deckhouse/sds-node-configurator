@@ -325,7 +325,7 @@ func reconcileLLVCreateFunc(
 	if updated {
 		log.Info(fmt.Sprintf("[reconcileLLVCreateFunc] successfully updated the LVMLogicalVolume %s status phase to Created", llv.Name))
 	} else {
-		log.Warning(fmt.Sprintf("[reconcileLLVCreateFunc] LVMLogicalVolume %s status phase was not updated to Created", llv.Name))
+		log.Warning(fmt.Sprintf("[reconcileLLVCreateFunc] LVMLogicalVolume %s status phase was not updated to Created due to the resource has already have the same phase", llv.Name))
 	}
 
 	log.Info(fmt.Sprintf("[reconcileLLVCreateFunc] successfully ended the reconciliation for the LVMLogicalVolume %s", llv.Name))
@@ -439,8 +439,6 @@ func reconcileLLVUpdateFunc(
 
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully got LVMLogicalVolume %s actual size before the extension", llv.Name))
 	log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s actual size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, newActualSize.String()))
-
-	// need this here as a user might create the LLV with existing LV
 
 	updated, err := updateLLVPhaseToCreatedIfNeeded(ctx, cl, llv, newActualSize)
 	if err != nil {
