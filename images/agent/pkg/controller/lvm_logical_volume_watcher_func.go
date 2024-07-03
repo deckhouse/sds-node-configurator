@@ -3,19 +3,17 @@ package controller
 import (
 	"context"
 	"fmt"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sds-node-configurator/pkg/cache"
-	"strconv"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/utils/strings/slices"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/internal"
 	"sds-node-configurator/pkg/logger"
 	"sds-node-configurator/pkg/monitoring"
 	"sds-node-configurator/pkg/utils"
-	"time"
-
-	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -44,6 +42,17 @@ func shouldReconcileByDeleteFunc(llv *v1alpha1.LVMLogicalVolume) bool {
 	}
 
 	return true
+}
+
+func checkIfConditionIsTrue(lvg *v1alpha1.LvmVolumeGroup, conType string) bool {
+	// this check prevents infinite resource updating after a retry
+	for _, c := range lvg.Status.Conditions {
+		if c.Type == conType && c.Status == v1.ConditionTrue {
+			return true
+		}
+	}
+
+	return false
 }
 
 func removeLLVFinalizersIfExist(
@@ -92,6 +101,33 @@ func checkIfLVBelongsToLLV(llv *v1alpha1.LVMLogicalVolume, lv *internal.LVData) 
 	return true
 }
 
+func updateLLVPhaseToCreatedIfNeeded(ctx context.Context, cl client.Client, llv *v1alpha1.LVMLogicalVolume, actualSize resource.Quantity) (bool, error) {
+	var contiguous *bool
+	if llv.Spec.Thick != nil {
+		if *llv.Spec.Thick.Contiguous == true {
+			contiguous = llv.Spec.Thick.Contiguous
+		}
+	}
+
+	if llv.Status.Phase != StatusPhaseCreated ||
+		llv.Status.ActualSize.Value() != actualSize.Value() ||
+		llv.Status.Reason != "" ||
+		llv.Status.Contiguous != contiguous {
+		llv.Status.Phase = StatusPhaseCreated
+		llv.Status.Reason = ""
+		llv.Status.ActualSize = actualSize
+		llv.Status.Contiguous = contiguous
+		err := cl.Status().Update(ctx, llv)
+		if err != nil {
+			return false, err
+		}
+
+		return true, err
+	}
+
+	return false, nil
+}
+
 func deleteLVIfNeeded(log logger.Logger, sdsCache *cache.Cache, vgName string, llv *v1alpha1.LVMLogicalVolume) error {
 	lv := FindLV(sdsCache, vgName, llv.Spec.ActualLVNameOnTheNode)
 	if lv == nil {
@@ -115,15 +151,15 @@ func deleteLVIfNeeded(log logger.Logger, sdsCache *cache.Cache, vgName string, l
 	return nil
 }
 
-func getLVActualSize(sdsCache *cache.Cache, vgName, lvName string) (resource.Quantity, error) {
+func getLVActualSize(sdsCache *cache.Cache, vgName, lvName string) resource.Quantity {
 	lv := FindLV(sdsCache, vgName, lvName)
 	if lv == nil {
-		return resource.Quantity{}, fmt.Errorf("LV %s not found", lv.LVName)
+		return resource.Quantity{}
 	}
 
 	result := resource.NewQuantity(lv.LVSize.Value(), resource.BinarySI)
 
-	return *result, nil
+	return *result
 }
 
 func addLLVFinalizerIfNotExist(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, llv *v1alpha1.LVMLogicalVolume) (bool, error) {
@@ -155,34 +191,25 @@ func shouldReconcileByCreateFunc(sdsCache *cache.Cache, vgName string, llv *v1al
 	return true
 }
 
-func getFreeThinPoolSpace(thinPools []v1alpha1.LvmVolumeGroupThinPoolStatus, poolName string) (resource.Quantity, error) {
-	for _, thinPool := range thinPools {
-		if thinPool.Name == poolName {
-			limits := strings.Split(thinPool.AllocationLimit, "%")
-			percent, err := strconv.Atoi(limits[0])
-			if err != nil {
-				return resource.Quantity{}, err
+func getFreeLVGSpaceForLLV(lvg *v1alpha1.LvmVolumeGroup, llv *v1alpha1.LVMLogicalVolume) resource.Quantity {
+	switch llv.Spec.Type {
+	case Thick:
+		return lvg.Status.VGFree
+	case Thin:
+		for _, tp := range lvg.Status.ThinPools {
+			if tp.Name == llv.Spec.Thin.PoolName {
+				return tp.AvailableSpace
 			}
-
-			factor := float64(percent)
-			factor = factor / 100
-			free := float64(thinPool.ActualSize.Value())*factor - float64(thinPool.AllocatedSize.Value())
-
-			return *resource.NewQuantity(int64(free), resource.BinarySI), nil
 		}
 	}
 
-	return resource.Quantity{}, nil
+	return resource.Quantity{}
 }
 
 func subtractQuantity(currentQuantity, quantityToSubtract resource.Quantity) resource.Quantity {
 	resultingQuantity := currentQuantity.DeepCopy()
 	resultingQuantity.Sub(quantityToSubtract)
 	return resultingQuantity
-}
-
-func getFreeVGSpace(lvg *v1alpha1.LvmVolumeGroup) resource.Quantity {
-	return subtractQuantity(lvg.Status.VGSize, lvg.Status.AllocatedSize)
 }
 
 func belongsToNode(lvg *v1alpha1.LvmVolumeGroup, nodeName string) bool {
@@ -239,8 +266,10 @@ func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVol
 
 		// if a specified Thin LV name matches the existing Thick one
 		lv := FindLV(sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-		if lv != nil && lv.PoolName != llv.Spec.Thin.PoolName {
-			reason.WriteString(fmt.Sprintf("specified LV %s is already created and does not belong to selected thin pool %s", lv.LVName, llv.Spec.Thin.PoolName))
+		if lv != nil {
+			if !checkIfLVBelongsToLLV(llv, lv) {
+				reason.WriteString(fmt.Sprintf("specified LV %s is already created and does not belong to selected thin pool %s", lv.LVName, llv.Spec.Thin.PoolName))
+			}
 		}
 	case Thick:
 		if llv.Spec.Thin != nil {
@@ -255,13 +284,8 @@ func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVol
 		}
 
 		if lv != nil {
-			if string(lv.LVAttr[0]) != "-" {
-				reason.WriteString(fmt.Sprintf("specified LV %s is already created and it is not Thick", lv.LVName))
-			}
-
-			contiguous := string(lv.LVAttr[2]) == "c"
-			if contiguous != isContiguous(llv) {
-				reason.WriteString(fmt.Sprintf("specified LV %s is already created and its contiguous state does not match the specified one", lv.LVName))
+			if !checkIfLVBelongsToLLV(llv, lv) {
+				reason.WriteString(fmt.Sprintf("specified LV %s is already created and it is doesnt match the one on the node", lv.LVName))
 			}
 		}
 	}
@@ -299,19 +323,7 @@ func updateLVMLogicalVolumePhaseIfNeeded(ctx context.Context, cl client.Client, 
 }
 
 func updateLVMLogicalVolume(ctx context.Context, metrics monitoring.Metrics, cl client.Client, llv *v1alpha1.LVMLogicalVolume) error {
-	var err error
-
-	// TODO: это не очень будет работать, потому что при распространенной ошибки при апдейте из-за устаревшей версии (resource version)
-	// мы не сможем обновить ресурс никак, пока заново его не получим, а потому тут можно сразу возвращать ошибку и уходить на ретрай
-	for i := 0; i < internal.KubernetesApiRequestLimit; i++ {
-		err = cl.Update(ctx, llv)
-		if err == nil {
-			return nil
-		}
-		time.Sleep(internal.KubernetesApiRequestTimeout * time.Second)
-	}
-
-	return err
+	return cl.Update(ctx, llv)
 }
 
 func FindLV(sdsCache *cache.Cache, vgName, lvName string) *internal.LVData {

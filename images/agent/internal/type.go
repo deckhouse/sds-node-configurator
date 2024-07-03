@@ -53,6 +53,7 @@ type LVMVolumeGroupCandidate struct {
 	Message               string
 	StatusThinPools       []LVMVGStatusThinPool
 	VGSize                resource.Quantity
+	VGFree                resource.Quantity
 	VGUuid                string
 	Nodes                 map[string][]LVMVGDevice
 }

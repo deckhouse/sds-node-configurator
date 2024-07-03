@@ -77,6 +77,9 @@ spec:
                 vgSize:
                   description: |
                     Ёмкость Volume Group.
+                vgFree:
+                  description: |
+                    Свободное пространство Volume Group.
                 allocatedSize:
                   description: |
                     Текущее занятое место на Volume Group.
@@ -96,6 +99,9 @@ spec:
                       usedSize:
                         description: |
                           Используемый размер Thin-pool.
+                      availableSpace:
+                        description: |
+                          Свободное место в Thin-pool.
                       ready:
                         description: |
                           Текущее состояние Thin-pool.
