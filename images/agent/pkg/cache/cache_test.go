@@ -1,9 +1,9 @@
 package cache
 
 import (
+	"agent/internal"
 	"bytes"
 	"github.com/stretchr/testify/assert"
-	"sds-node-configurator/internal"
 	"testing"
 )
 

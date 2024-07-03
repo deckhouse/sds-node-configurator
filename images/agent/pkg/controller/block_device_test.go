@@ -17,11 +17,11 @@ limitations under the License.
 package controller
 
 import (
+	"agent/internal"
+	"agent/pkg/logger"
+	"agent/pkg/utils"
 	"fmt"
-	"sds-node-configurator/api/v1alpha1"
-	"sds-node-configurator/internal"
-	"sds-node-configurator/pkg/logger"
-	"sds-node-configurator/pkg/utils"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/api/resource"

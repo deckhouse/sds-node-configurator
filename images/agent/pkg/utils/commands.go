@@ -17,6 +17,7 @@ limitations under the License.
 package utils
 
 import (
+	"agent/internal"
 	"bufio"
 	"bytes"
 	"context"
@@ -24,7 +25,6 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
-	"sds-node-configurator/internal"
 
 	golog "log"
 )

@@ -19,9 +19,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"os"
 	goruntime "runtime"
-	"sds-health-watcher-controller/api/v1alpha1"
 	"sds-health-watcher-controller/config"
 	"sds-health-watcher-controller/pkg/controller"
 	"sds-health-watcher-controller/pkg/kubutils"

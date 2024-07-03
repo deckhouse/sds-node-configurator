@@ -17,12 +17,12 @@ limitations under the License.
 package config
 
 import (
+	"agent/internal"
+	"agent/pkg/logger"
 	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
-	"sds-node-configurator/internal"
-	"sds-node-configurator/pkg/logger"
 
 	"strconv"
 	"strings"
