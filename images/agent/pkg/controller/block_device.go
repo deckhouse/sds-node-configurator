@@ -17,18 +17,18 @@ limitations under the License.
 package controller
 
 import (
+	"agent/config"
+	"agent/internal"
+	"agent/pkg/cache"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
+	"agent/pkg/utils"
 	"context"
 	"crypto/sha1"
 	"fmt"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"os"
 	"regexp"
-	"sds-node-configurator/api/v1alpha1"
-	"sds-node-configurator/config"
-	"sds-node-configurator/internal"
-	"sds-node-configurator/pkg/cache"
-	"sds-node-configurator/pkg/logger"
-	"sds-node-configurator/pkg/monitoring"
-	"sds-node-configurator/pkg/utils"
 	"strings"
 	"time"
 

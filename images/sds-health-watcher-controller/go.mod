@@ -1,11 +1,13 @@
 module sds-health-watcher-controller
 
-go 1.22.1
+go 1.22.2
 
 require (
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240703153608-69b457e922ca
 	github.com/go-logr/logr v1.4.1
 	github.com/prometheus/client_golang v1.18.0
 	github.com/stretchr/testify v1.8.4
+	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.30.1
 	k8s.io/apiextensions-apiserver v0.29.4
 	k8s.io/apimachinery v0.30.2
@@ -59,7 +61,6 @@ require (
 	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/component-base v0.29.4 // indirect
 	k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect

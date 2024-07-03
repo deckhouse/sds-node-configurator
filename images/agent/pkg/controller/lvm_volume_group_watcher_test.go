@@ -3,8 +3,8 @@ package controller
 //
 //import (
 //	"context"
-//	"sds-node-configurator/api/v1alpha1"
-//	"sds-node-configurator/pkg/monitoring"
+//	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+//	"agent/pkg/monitoring"
 //	"testing"
 //
 //	"github.com/stretchr/testify/assert"

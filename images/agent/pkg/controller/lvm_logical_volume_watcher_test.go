@@ -1,14 +1,14 @@
 package controller
 
 import (
+	"agent/internal"
+	"agent/pkg/cache"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
+	"agent/pkg/utils"
 	"bytes"
 	"fmt"
-	"sds-node-configurator/api/v1alpha1"
-	"sds-node-configurator/internal"
-	"sds-node-configurator/pkg/cache"
-	"sds-node-configurator/pkg/logger"
-	"sds-node-configurator/pkg/monitoring"
-	"sds-node-configurator/pkg/utils"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"testing"
 
 	"github.com/stretchr/testify/assert"

@@ -1,10 +1,10 @@
 package cache
 
 import (
+	"agent/internal"
+	"agent/pkg/logger"
 	"bytes"
 	"fmt"
-	"sds-node-configurator/internal"
-	"sds-node-configurator/pkg/logger"
 )
 
 type Cache struct {

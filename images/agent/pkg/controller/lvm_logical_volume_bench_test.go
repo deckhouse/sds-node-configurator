@@ -1,8 +1,11 @@
 package controller
 
 import (
+	"agent/internal"
+	"agent/pkg/kubutils"
 	"context"
 	"fmt"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -12,9 +15,6 @@ import (
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"os"
-	"sds-node-configurator/api/v1alpha1"
-	"sds-node-configurator/internal"
-	"sds-node-configurator/pkg/kubutils"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"testing"
 )
