@@ -36,6 +36,32 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+func DeleteLVMVolumeGroup(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, currentNode string) error {
+	log.Debug(fmt.Sprintf(`[DeleteLVMVolumeGroup] Node "%s" does not belong to VG "%s". It will be removed from LVM resource, name "%s"'`, currentNode, lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
+	for i, node := range lvg.Status.Nodes {
+		if node.Name == currentNode {
+			// delete node
+			lvg.Status.Nodes = append(lvg.Status.Nodes[:i], lvg.Status.Nodes[i+1:]...)
+			log.Info(fmt.Sprintf(`[DeleteLVMVolumeGroup] deleted node "%s" from LVMVolumeGroup "%s"`, node.Name, lvg.Name))
+		}
+	}
+
+	// If current LVMVolumeGroup has no nodes left, delete it.
+	if len(lvg.Status.Nodes) == 0 {
+		start := time.Now()
+		err := cl.Delete(ctx, lvg)
+		metrics.ApiMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))
+		metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "delete").Inc()
+		if err != nil {
+			metrics.ApiMethodsErrors(LVMVolumeGroupDiscoverCtrlName, "delete").Inc()
+			return err
+		}
+		log.Info(fmt.Sprintf("[DeleteLVMVolumeGroup] the LVMVolumeGroup %s deleted", lvg.Name))
+	}
+
+	return nil
+}
+
 func checkIfVGExist(vgName string, vgs []internal.VGData) bool {
 	for _, vg := range vgs {
 		if vg.VGName == vgName {
@@ -700,7 +726,7 @@ func DeleteVGIfExist(log logger.Logger, metrics monitoring.Metrics, sdsCache *ca
 		log.Error(err, "RemoveVG "+command)
 		return err
 	}
-
+	log.Debug(fmt.Sprintf("[DeleteVGIfExist] VG %s was successfully deleted from the node", vgName))
 	var pvsToRemove []string
 	for _, pv := range pvs {
 		if pv.VGName == vgName {
@@ -718,6 +744,7 @@ func DeleteVGIfExist(log logger.Logger, metrics monitoring.Metrics, sdsCache *ca
 		log.Error(err, "RemovePV "+command)
 		return err
 	}
+	log.Debug(fmt.Sprintf("[DeleteVGIfExist] successfully delete PVs of VG %s from the node", vgName))
 
 	return nil
 }

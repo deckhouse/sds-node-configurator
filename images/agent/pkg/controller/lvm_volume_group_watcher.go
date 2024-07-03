@@ -140,7 +140,7 @@ func RunLVMVolumeGroupWatcherController(
 					log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no need to remove the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
 				}
 
-				err = DeleteLVMVolumeGroup(ctx, cl, metrics, lvg)
+				err = DeleteLVMVolumeGroup(ctx, cl, log, metrics, lvg, cfg.NodeName)
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to delete the LVMVolumeGroup %s", lvg.Name))
 					return reconcile.Result{}, err
@@ -171,7 +171,7 @@ func RunLVMVolumeGroupWatcherController(
 				return reconcile.Result{}, err
 			}
 
-			shouldRequeue, err := runEventReconcile(ctx, cl, log, metrics, sdsCache, lvg, blockDevices)
+			shouldRequeue, err := runEventReconcile(ctx, cl, log, metrics, sdsCache, cfg, lvg, blockDevices)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to reconcile the LVMVolumeGroup %s", lvg.Name))
 			}
@@ -246,6 +246,7 @@ func runEventReconcile(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
+	cfg config.Options,
 	lvg *v1alpha1.LvmVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 ) (bool, error) {
@@ -260,14 +261,14 @@ func runEventReconcile(
 		return reconcileLVGUpdateFunc(ctx, cl, log, metrics, sdsCache, lvg, blockDevices)
 	case DeleteReconcile:
 		log.Info(fmt.Sprintf("[runEventReconcile] DeleteReconcile starts the reconciliation for the LVMVolumeGroup %s", lvg.Name))
-		return reconcileLVGDeleteFunc(ctx, cl, log, metrics, sdsCache, lvg)
+		return reconcileLVGDeleteFunc(ctx, cl, log, metrics, sdsCache, cfg, lvg)
 	default:
 		log.Info(fmt.Sprintf("[runEventReconcile] no need to reconcile the LVMVolumeGroup %s", lvg.Name))
 	}
 	return false, nil
 }
 
-func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
+func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, cfg config.Options, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
 	log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] tries to add the condition %s status false to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 
@@ -339,7 +340,13 @@ func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Lo
 		log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] no need to remove a finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
 	}
 
-	log.Info(fmt.Sprintf("[reconcileLVGDeleteFunc] successfully deleted VG %s of the LVMVolumeGroup %s", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
+	err = DeleteLVMVolumeGroup(ctx, cl, log, metrics, lvg, cfg.NodeName)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to delete the LVMVolumeGroup %s", lvg.Name))
+		return true, err
+	}
+
+	log.Info(fmt.Sprintf("[reconcileLVGDeleteFunc] successfully reconciled VG %s of the LVMVolumeGroup %s", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 	return false, nil
 }
 
@@ -472,6 +479,7 @@ func reconcileLVGCreateFunc(ctx context.Context, cl client.Client, log logger.Lo
 		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, reason)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
+			return true, err
 		}
 
 		return false, err

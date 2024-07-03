@@ -23,31 +23,8 @@ const (
 	Failed = "Failed"
 
 	NonOperational = "NonOperational"
-	Operational    = "Operational"
 
-	delAnnotation  = "storage.deckhouse.io/sds-delete-vg"
-	nameSpaceEvent = "default"
-
-	EventActionDeleting = "Deleting"
-	EventReasonDeleting = "Deleting"
-
-	EventActionProvisioning = "Provisioning"
-	EventReasonProvisioning = "Provisioning"
-
-	EventActionCreating = "Creating"
-	EventReasonCreating = "Creating"
-
-	EventActionExtending = "Extending"
-	EventReasonExtending = "Extending"
-
-	EventActionShrinking = "Shrinking"
-	EventReasonShrinking = "Shrinking"
-
-	EventActionResizing = "Resizing"
-	EventReasonResizing = "Resizing"
-
-	EventActionReady = "Ready"
-	EventReasonReady = "Ready"
+	delAnnotation = "storage.deckhouse.io/sds-delete-vg"
 
 	LVMVolumeGroupTag = "storage.deckhouse.io/lvmVolumeGroupName"
 )
