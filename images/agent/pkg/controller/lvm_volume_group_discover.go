@@ -27,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
