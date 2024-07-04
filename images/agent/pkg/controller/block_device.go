@@ -59,7 +59,7 @@ func RunBlockDeviceController(
 
 			shouldRequeue := BlockDeviceReconcile(ctx, cl, log, metrics, cfg, sdsCache)
 			if shouldRequeue {
-				log.Warning(fmt.Sprintf("[RunBlockDeviceController] an error occured while run the Reconciler func, retry in %f", cfg.BlockDeviceScanIntervalSec.Seconds()))
+				log.Warning(fmt.Sprintf("[RunBlockDeviceController] Reconciler needs a retry in %f", cfg.BlockDeviceScanIntervalSec.Seconds()))
 				return reconcile.Result{
 					RequeueAfter: cfg.BlockDeviceScanIntervalSec,
 				}, nil

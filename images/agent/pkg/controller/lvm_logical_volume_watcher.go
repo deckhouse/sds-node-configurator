@@ -440,6 +440,7 @@ func reconcileLLVUpdateFunc(
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully got LVMLogicalVolume %s actual size before the extension", llv.Name))
 	log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s actual size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, newActualSize.String()))
 
+	// need this here as a user might create the LLV with existing LV
 	updated, err := updateLLVPhaseToCreatedIfNeeded(ctx, cl, llv, newActualSize)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))

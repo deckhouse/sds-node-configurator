@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"sds-node-configurator/api/v1alpha1"
 	"sds-node-configurator/config"
 	"sds-node-configurator/internal"
@@ -130,6 +129,12 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 		log.Debug("[RunLVMVolumeGroupDiscoverController] no candidates were found on the node")
 	}
 
+	candidates, err = ReconcileUnhealthyLVMVolumeGroups(ctx, cl, log, candidates, filteredLVGs)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error has occurred while clearing the LVMVolumeGroups resources. Requeue the request in %s", cfg.VolumeGroupScanIntervalSec.String()))
+		return true
+	}
+
 	shouldRequeue := false
 	for _, candidate := range candidates {
 		if lvg, exist := filteredLVGs[candidate.ActualVGNameOnTheNode]; exist {
@@ -186,12 +191,6 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 
 	if shouldRequeue {
 		log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] some problems have been occurred while iterating the lvmvolumegroup resources. Retry the reconcile in %s", cfg.VolumeGroupScanIntervalSec.String()))
-		return true
-	}
-
-	err = ClearLVMVolumeGroupResources(ctx, cl, log, metrics, candidates, filteredLVGs, cfg.NodeName)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error has occurred while clearing the LVMVolumeGroups resources. Requeue the request in %s", cfg.VolumeGroupScanIntervalSec.String()))
 		return true
 	}
 
@@ -340,61 +339,77 @@ func hasStatusPoolDiff(first, second []v1alpha1.LvmVolumeGroupThinPoolStatus) bo
 	return false
 }
 
-// ClearLVMVolumeGroupResources Removes deprecated nodes and resources.
-func ClearLVMVolumeGroupResources(
+// ReconcileUnhealthyLVMVolumeGroups turns LVMVolumeGroup resources without VG or ThinPools to NotReady.
+func ReconcileUnhealthyLVMVolumeGroups(
 	ctx context.Context,
 	cl kclient.Client,
 	log logger.Logger,
-	metrics monitoring.Metrics,
 	candidates []internal.LVMVolumeGroupCandidate,
 	lvgs map[string]v1alpha1.LvmVolumeGroup,
-	currentNode string,
-) error {
-	actualVGs := make(map[string]struct{}, len(candidates))
+) ([]internal.LVMVolumeGroupCandidate, error) {
+	candidateMap := make(map[string]internal.LVMVolumeGroupCandidate, len(candidates))
 	for _, candidate := range candidates {
-		actualVGs[candidate.ActualVGNameOnTheNode] = struct{}{}
+		candidateMap[candidate.ActualVGNameOnTheNode] = candidate
 	}
+	vgNamesToSkip := make(map[string]struct{}, len(candidates))
 
+	var err error
 	for _, lvg := range lvgs {
-		if !reflect.ValueOf(lvg.Status.VGUuid).IsZero() {
-			if _, exist := actualVGs[lvg.Spec.ActualVGNameOnTheNode]; !exist {
-				log.Debug(fmt.Sprintf(`[ClearLVMVolumeGroupResources] Node "%s" does not belong to VG "%s". 
-It will be removed from LVM resource, name "%s"'`, currentNode, lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
-				for i, node := range lvg.Status.Nodes {
-					if node.Name == currentNode {
-						// delete node
-						lvg.Status.Nodes = append(lvg.Status.Nodes[:i], lvg.Status.Nodes[i+1:]...)
-						log.Info(fmt.Sprintf(`[ClearLVMVolumeGroupResources] deleted node, name: "%s", 
-from LVMVolumeGroup, name: "%s"`, node.Name, lvg.Name))
-					}
+		// this means VG was actually created on the node before
+		if len(lvg.Status.VGUuid) > 0 {
+			messageBldr := strings.Builder{}
+			candidate, exist := candidateMap[lvg.Spec.ActualVGNameOnTheNode]
+			if !exist {
+				log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its VG %s", lvg.Name, lvg.Spec.ActualVGNameOnTheNode))
+				messageBldr.WriteString(fmt.Sprintf("unable to find VG %s (it should be created with special tag %s); ", lvg.Spec.ActualVGNameOnTheNode, internal.LVMTags[0]))
+			} else {
+				// candidate exists, check thin pools
+				candidateTPs := make(map[string]internal.LVMVGStatusThinPool, len(candidate.StatusThinPools))
+				for _, tp := range candidate.StatusThinPools {
+					candidateTPs[tp.Name] = tp
 				}
 
-				// If current LVMVolumeGroup has no nodes left, and it is not cause of errors, delete it.
-				if len(lvg.Status.Nodes) == 0 {
-					if err := DeleteLVMVolumeGroup(ctx, cl, metrics, &lvg); err != nil {
-						log.Error(err, fmt.Sprintf("Unable to delete LVMVolumeGroup, name: %s", lvg.Name))
-						return err
+				for _, tp := range lvg.Spec.ThinPools {
+					if candidateTp, exist := candidateTPs[tp.Name]; !exist {
+						log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, tp.Name))
+						messageBldr.WriteString(fmt.Sprintf("unable to find ThinPool %s; ", tp.Name))
+					} else {
+						if candidateTp.ActualSize.Value() < tp.Size.Value() {
+							log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s ThinPool %s size %s is less than Spec one %s", lvg.Name, tp.Name, candidateTp.ActualSize.String(), tp.Size.String()))
+							messageBldr.WriteString(fmt.Sprintf("ThinPool %s on the node has size %s which is less than Spec one %s; ", tp.Name, candidateTp.ActualSize.String(), tp.Size.String()))
+						}
 					}
-
-					log.Info(fmt.Sprintf("[ClearLVMVolumeGroupResources] deleted LVMVolumeGroup, name: %s", lvg.Name))
 				}
+			}
+
+			if messageBldr.Len() > 0 {
+				err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.TypeVGReady, internal.ReasonScanFailed, messageBldr.String())
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] unable to update the LVMVolumeGroup %s", lvg.Name))
+					return nil, err
+				}
+
+				log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s and its data obejct will be removed from the reconcile due to unhealthy states"))
+				vgNamesToSkip[candidate.ActualVGNameOnTheNode] = struct{}{}
 			}
 		}
 	}
 
-	return nil
-}
-
-func DeleteLVMVolumeGroup(ctx context.Context, cl kclient.Client, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup) error {
-	start := time.Now()
-	err := cl.Delete(ctx, lvg)
-	metrics.ApiMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "delete").Inc()
-	if err != nil {
-		metrics.ApiMethodsErrors(LVMVolumeGroupDiscoverCtrlName, "delete").Inc()
-		return err
+	for _, lvg := range lvgs {
+		if _, shouldSkip := vgNamesToSkip[lvg.Spec.ActualVGNameOnTheNode]; shouldSkip {
+			log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] remove the LVMVolumeGroup %s from the reconcile", lvg.Name))
+			delete(lvgs, lvg.Spec.ActualVGNameOnTheNode)
+		}
 	}
-	return nil
+
+	for i, c := range candidates {
+		if _, shouldSkip := vgNamesToSkip[c.ActualVGNameOnTheNode]; shouldSkip {
+			log.Debug(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] remove the data object for VG %s from the reconcile", c.ActualVGNameOnTheNode))
+			candidates = append(candidates[:i], candidates[i+1:]...)
+		}
+	}
+
+	return candidates, nil
 }
 
 func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds map[string]v1alpha1.BlockDevice, currentNode string) ([]internal.LVMVolumeGroupCandidate, error) {
