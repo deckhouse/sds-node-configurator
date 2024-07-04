@@ -17,7 +17,7 @@ limitations under the License.
 package utils
 
 import (
-	"sds-node-configurator/internal"
+	"agent/internal"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/api/resource"

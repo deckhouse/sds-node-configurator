@@ -6,6 +6,8 @@ github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ3
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/deckhouse/sds-node-configurator/api v0.0.0-20240704133537-7fc08e30741c h1:L7y2+Vr3VTgERytPdj6VwocJpUGR6KMh6WeBw4IW8to=
+github.com/deckhouse/sds-node-configurator/api v0.0.0-20240704133537-7fc08e30741c/go.mod h1:H71+9G0Jr46Qs0BA3z3/xt0h9lbnJnCEYcaCJCWFBf0=
 github.com/emicklei/go-restful/v3 v3.11.0 h1:rAQeMHw1c7zTmncogyy8VvRZwtkmkZ4FxERmMY4rD+g=
 github.com/emicklei/go-restful/v3 v3.11.0/go.mod h1:6n3XBCmQQb25CM2LCACGz8ukIrRry+4bhvbpWn3mrbc=
 github.com/evanphx/json-patch v4.12.0+incompatible h1:4onqiflcdA9EOZ4RxV643DvftH5pOlLGNtQ5lPWQu84=
@@ -172,8 +174,6 @@ k8s.io/api v0.30.1 h1:kCm/6mADMdbAxmIh0LBjS54nQBE+U4KmbCfIkF5CpJY=
 k8s.io/api v0.30.1/go.mod h1:ddbN2C0+0DIiPntan/bye3SW3PdwLa11/0yqwvuRrJM=
 k8s.io/apiextensions-apiserver v0.29.4 h1:M7hbuHU/ckbibR7yPbe6DyNWgTFKNmZDbdZKD8q1Smk=
 k8s.io/apiextensions-apiserver v0.29.4/go.mod h1:TTDC9fB+0kHY2rogf5hgBR03KBKCwED+GHUsXGpR7SM=
-k8s.io/apimachinery v0.30.1 h1:ZQStsEfo4n65yAdlGTfP/uSHMQSoYzU/oeEbkmF7P2U=
-k8s.io/apimachinery v0.30.1/go.mod h1:iexa2somDaxdnj7bha06bhb43Zpa6eWH8N8dbqVjTUc=
 k8s.io/apimachinery v0.30.2 h1:fEMcnBj6qkzzPGSVsAZtQThU62SmQ4ZymlXRC5yFSCg=
 k8s.io/apimachinery v0.30.2/go.mod h1:iexa2somDaxdnj7bha06bhb43Zpa6eWH8N8dbqVjTUc=
 k8s.io/client-go v0.29.4 h1:79ytIedxVfyXV8rpH3jCBW0u+un0fxHDwX5F9K8dPR8=

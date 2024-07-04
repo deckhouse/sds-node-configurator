@@ -17,12 +17,12 @@ limitations under the License.
 package controller
 
 import (
+	"agent/internal"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
 	"context"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"sds-node-configurator/api/v1alpha1"
-	"sds-node-configurator/internal"
-	"sds-node-configurator/pkg/logger"
-	"sds-node-configurator/pkg/monitoring"
 	"testing"
 
 	"github.com/stretchr/testify/assert"

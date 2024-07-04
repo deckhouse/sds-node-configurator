@@ -17,10 +17,10 @@ limitations under the License.
 package controller_test
 
 import (
+	"agent/internal"
+	"agent/pkg/controller"
+	"agent/pkg/monitoring"
 	"context"
-	"sds-node-configurator/internal"
-	"sds-node-configurator/pkg/controller"
-	"sds-node-configurator/pkg/monitoring"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 

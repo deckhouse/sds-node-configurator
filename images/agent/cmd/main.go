@@ -17,18 +17,18 @@ limitations under the License.
 package main
 
 import (
+	"agent/config"
+	"agent/pkg/cache"
+	"agent/pkg/controller"
+	"agent/pkg/kubutils"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
+	"agent/pkg/scanner"
 	"context"
 	"fmt"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"os"
 	goruntime "runtime"
-	"sds-node-configurator/api/v1alpha1"
-	"sds-node-configurator/config"
-	"sds-node-configurator/pkg/cache"
-	"sds-node-configurator/pkg/controller"
-	"sds-node-configurator/pkg/kubutils"
-	"sds-node-configurator/pkg/logger"
-	"sds-node-configurator/pkg/monitoring"
-	"sds-node-configurator/pkg/scanner"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	v1 "k8s.io/api/core/v1"
