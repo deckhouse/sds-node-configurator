@@ -3,11 +3,11 @@ package controller
 import (
 	"context"
 	"fmt"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
-	"sds-health-watcher-controller/api/v1alpha1"
 	"sds-health-watcher-controller/internal"
 	"sds-health-watcher-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"

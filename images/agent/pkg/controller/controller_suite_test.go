@@ -17,14 +17,12 @@ limitations under the License.
 package controller_test
 
 import (
-	"sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )

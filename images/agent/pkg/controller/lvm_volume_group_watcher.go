@@ -17,18 +17,18 @@ limitations under the License.
 package controller
 
 import (
+	"agent/config"
+	"agent/internal"
+	"agent/pkg/cache"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
+	"agent/pkg/utils"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sds-node-configurator/api/v1alpha1"
-	"sds-node-configurator/config"
-	"sds-node-configurator/internal"
-	"sds-node-configurator/pkg/cache"
-	"sds-node-configurator/pkg/logger"
-	"sds-node-configurator/pkg/monitoring"
-	"sds-node-configurator/pkg/utils"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"

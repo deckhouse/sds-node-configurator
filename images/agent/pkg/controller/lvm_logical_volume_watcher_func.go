@@ -1,19 +1,19 @@
 package controller
 
 import (
+	"agent/pkg/cache"
 	"context"
 	"fmt"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sds-node-configurator/pkg/cache"
 	"strings"
 
+	"agent/internal"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
+	"agent/pkg/utils"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/strings/slices"
-	"sds-node-configurator/api/v1alpha1"
-	"sds-node-configurator/internal"
-	"sds-node-configurator/pkg/logger"
-	"sds-node-configurator/pkg/monitoring"
-	"sds-node-configurator/pkg/utils"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 

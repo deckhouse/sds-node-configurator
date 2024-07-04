@@ -1,8 +1,9 @@
-module sds-node-configurator
+module agent
 
-go 1.22.1
+go 1.22.2
 
 require (
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240704133537-7fc08e30741c
 	github.com/go-logr/logr v1.4.1
 	github.com/google/go-cmp v0.6.0
 	github.com/onsi/ginkgo/v2 v2.15.0
