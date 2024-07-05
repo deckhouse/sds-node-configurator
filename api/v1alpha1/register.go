@@ -24,6 +24,8 @@ import (
 
 const (
 	BlockDeviceKind     = "BlockDevice"
+	LVMVolumeGroupKind   = "LvmVolumeGroup"
+	LVMLogicalVolumeKind = "LVMLogicalVolume"
 	APIGroup            = "storage.deckhouse.io"
 	APIVersion          = "v1alpha1"
 	TypeMediaAPIVersion = APIGroup + "/" + APIVersion
