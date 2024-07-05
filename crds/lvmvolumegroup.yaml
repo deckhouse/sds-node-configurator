@@ -27,6 +27,7 @@ spec:
             An interface for managing Volume Groups and Thin pools on the nodes.
             
             > These resources might be created both by a user and the sds-node-configurator controller. The sds-node-configurator controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. The controller will fill in both the 'spec' and 'status' fields.
+            > The `spec.thinPools` field must be filled in by yourself.
           required:
             - spec
           properties:
