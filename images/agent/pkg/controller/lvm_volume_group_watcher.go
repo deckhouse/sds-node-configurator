@@ -125,9 +125,8 @@ func RunLVMVolumeGroupWatcherController(
 
 			// this case handles the situation when a user decides to remove LVMVolumeGroup resource without created VG
 			vgs, _ := sdsCache.GetVGs()
-			_, contains := lvg.Annotations[delAnnotation]
-			if !checkIfVGExist(lvg.Spec.ActualVGNameOnTheNode, vgs) && contains {
-				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] VG %s was not yet created for the LVMVolumeGroup %s and the resoruce marked as deleting. Delete the resource", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
+			if !checkIfVGExist(lvg.Spec.ActualVGNameOnTheNode, vgs) && lvg.DeletionTimestamp != nil {
+				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] VG %s was not yet created for the LVMVolumeGroup %s and the resource is marked as deleting. Delete the resource", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 				removed, err := removeLVGFinalizerIfExist(ctx, cl, lvg)
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to remove the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
@@ -284,10 +283,10 @@ func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Lo
 		}
 	}
 
-	_, exist := lvg.Annotations[delAnnotation]
-	if lvg.DeletionTimestamp != nil && !exist {
-		log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] the LVMVolumeGroup %s has a deletion timestamp but does not have an annotation", lvg.Name))
-		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, fmt.Sprintf("to delete the LVG annotate it with %s", delAnnotation))
+	_, exist := lvg.Annotations[deletionProtectionAnnotation]
+	if exist {
+		log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] the LVMVolumeGroup %s has a deletion timestamp but also has a deletion protection annotation %s. Remove it to proceed the delete operation", lvg.Name, deletionProtectionAnnotation))
+		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, fmt.Sprintf("to delete the LVG remove the annotation %s", deletionProtectionAnnotation))
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 			return true, err

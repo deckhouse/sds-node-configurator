@@ -24,7 +24,7 @@ const (
 
 	NonOperational = "NonOperational"
 
-	delAnnotation = "storage.deckhouse.io/sds-delete-vg"
+	deletionProtectionAnnotation = "storage.deckhouse.io/deletion-protection"
 
 	LVMVolumeGroupTag = "storage.deckhouse.io/lvmVolumeGroupName"
 )

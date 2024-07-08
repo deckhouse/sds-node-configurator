@@ -78,11 +78,6 @@ func shouldReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1alpha1.LvmV
 		return true
 	}
 
-	if !reflect.DeepEqual(oldLVG.Annotations, newLVG.Annotations) {
-		log.Debug(fmt.Sprintf("[shouldReconcileUpdateEvent] update event should be reconciled as LVMVolumeGroup %s annotations have been changed", newLVG.Name))
-		return true
-	}
-
 	if !reflect.DeepEqual(oldLVG.Spec, newLVG.Spec) {
 		log.Debug(fmt.Sprintf("[shouldReconcileUpdateEvent] update event should be reconciled as LVMVolumeGroup %s configuration has been changed", newLVG.Name))
 		return true
@@ -92,8 +87,7 @@ func shouldReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1alpha1.LvmV
 }
 
 func shouldReconcileLVGByDeleteFunc(lvg *v1alpha1.LvmVolumeGroup) bool {
-	_, exist := lvg.Annotations[delAnnotation]
-	if lvg.DeletionTimestamp != nil || exist {
+	if lvg.DeletionTimestamp != nil {
 		return true
 	}
 
@@ -440,8 +434,7 @@ func identifyLVGReconcileFunc(lvg *v1alpha1.LvmVolumeGroup, sdsCache *cache.Cach
 }
 
 func shouldReconcileLVGByCreateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cache) bool {
-	_, exist := lvg.Annotations[delAnnotation]
-	if lvg.DeletionTimestamp != nil || exist {
+	if lvg.DeletionTimestamp != nil {
 		return false
 	}
 
@@ -456,8 +449,7 @@ func shouldReconcileLVGByCreateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cach
 }
 
 func shouldReconcileLVGByUpdateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cache) bool {
-	_, exist := lvg.Annotations[delAnnotation]
-	if lvg.DeletionTimestamp != nil || exist {
+	if lvg.DeletionTimestamp != nil {
 		return false
 	}
 
