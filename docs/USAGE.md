@@ -58,7 +58,7 @@ Currently, only local `Volume Groups` are supported.
 There are two ways to create an `LVMVolumeGroup` resource:
 * Automatically:
   * The controller automatically scans for information about the existing `LVM Volume Groups` on nodes and creates a resource if an `LVM Volume Group` is tagged with the `storage.deckhouse.io/enabled=true` LVM tag and there is no matching Kubernetes resource for it.
-  * In this case, the controller populates all fields of the resource on its own.
+  * In this case, the controller populates all `Spec` fields of the resource but `thinPools` on its own. A user should manually add an information about thin-pools on the node to the `Spec` field, if they want to make the controller manage the thin-pools. 
 * By the user:
   * The user manually creates the resource by filling in only the `metadata.name` and `spec` fields. In it, they specify the desired state of the new `Volume Group`.
   * This configuration is then validated to ensure its correctness.
@@ -111,8 +111,12 @@ We do **not recommend** making manual changes to the `status` field.
 
 The controller will automatically delete a resource if the `Volume Group` it references has become unavailable (e.g., all block devices that made up the `Volume Group` have been unplugged).
 
-> The user may delete a resource manually. However, if the corresponding `LVM Volume Group` still exists on the node at the moment the resource is deleted, the controller will create a resource *automatically* based on the existing `Volume Group` and assign a newly generated name to it.
+A user can delete an `LVM Volume Group` and its associated `LVM Physical Volume` using the following command:
 
-To delete an `LVM Volume Group` and its associated `LVM Physical Volume`, add the `storage.deckhouse.io/sds-delete-vg: ""` annotation to the corresponding `LVMVolumeGroup` resource. The controller will detect that the annotation has been added and initiate the process of deleting the `Volume Group` and its components from the node.
+```shell
+kubectl delete lvg %lvg-name%
+```
 
-> **Caution!** It is forbidden to delete an `LVM Volume Group` using the above method if it contains a `Logical Volume`, even if it is only the `Thin-pool` that is specified in `spec`. The user must delete all `Logical Volumes` that the `Volume Group` to be deleted contains.
+> **Caution!** If the deleting `LVM Volume Group` resource contains any `Logical Volume` (even if it is only the `Thin-pool` that is specified in `spec`), a user must delete all those `Logical Volumes` manually. Otherwise, the `LVMVolumeGroup` resource and its `Volume Group` will not be deleted. 
+
+> A user can forbid to delete the `LVMVolumeGroup` resource by annotate it with `storage.deckhouse.io/deletion-protection`. If the controller finds the annotation, it will not delete nether the resource or the `Volume Group` till the annotation removal.

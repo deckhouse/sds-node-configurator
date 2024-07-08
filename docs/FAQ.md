@@ -17,17 +17,20 @@ The module may work with other kernels or distributions, but its stable operatio
 
 * If the `BlockDevice` resources are present and the `LVMVolumeGroup` resources are not present, please make sure the existing `LVM Volume Group` on the node has a special tag `storage.deckhouse.io/enabled=true` attached.
 
-## I have deleted the `LVMVolumeGroup` resource, but the `Volume Group` is still there. What do I do?
+## I have deleted the `LVMVolumeGroup` resource, but the resource and its `Volume Group` are still there. What do I do?
 
-Deleting an `LVMVolumeGroup` resource does not delete the `Volume Group` it references. To delete it, add a special `storage.deckhouse.io/sds-delete-vg: ""` annotation to trigger the deletion process. The controller will then automatically delete the `LVM Volume Group` from the node as well as its associated resource.
+Such a situation is possible in two cases:
 
-> Note that merely deleting the `LVMVolumeGroup` resource will result in a new resource with a generated name being created based on the existing `LVM Volume Group` on the node.
+1. The `Volume Group` contains `LV`.
+The controller does not take responsibility for removing LV from the node, so if there are any logical volumes in the `Volume Group` created by the resource, you need to manually delete them on the node. After this, both the resource and the `Volume Group` (along with the `PV`) will be deleted automatically.
 
-## I have attached the delete annotation, but the `LVMVolumeGroup` resource is still there as well as the `Volume Group` on the node. Why?
+2. The resource has an annotation `storage.deckhouse.io/deletion-protection`.
+This annotation protects the resource from deletion and, as a result, the `Volume Group` created by it. You need to remove the annotation manually with the command:
+```shell
+kubectl annotate lvg %lvg-name% storage.deckhouse.io/deletion-protection-
+```
 
-Typically, the `LVM Volume Group` on the node has the corresponding `Logical Volumes`. The controller does not delete `Logical Volumes` because these `volumes` may contain important data. Thus, the user must purge them manually.
-
-Once the `Logical Volume` has been deleted, the controller will proceed to delete the `Volume Group` and its corresponding resource.
+After the command's execution, both the `LVMVolumeGroup` resource and `Volume Group` will be deleted automatically.
 
 ## I'm trying to create a `Volume Group` using the `LVMVolumeGroup` resource, but I'm not getting anywhere. Why?
 
