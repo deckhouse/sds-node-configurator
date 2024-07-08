@@ -39,7 +39,7 @@ type LVMLogicalVolume struct {
 type LVMLogicalVolumeSpec struct {
 	ActualLVNameOnTheNode string                     `json:"actualLVNameOnTheNode"`
 	Type                  string                     `json:"type"`
-	Size                  resource.Quantity          `json:"size"`
+	Size                  string                     `json:"size"`
 	LvmVolumeGroupName    string                     `json:"lvmVolumeGroupName"`
 	Thin                  *LVMLogicalVolumeThinSpec  `json:"thin"`
 	Thick                 *LVMLogicalVolumeThickSpec `json:"thick"`
