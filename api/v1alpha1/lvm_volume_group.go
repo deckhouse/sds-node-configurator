@@ -81,7 +81,7 @@ type LvmVolumeGroupThinPoolStatus struct {
 }
 
 type LvmVolumeGroupThinPoolSpec struct {
-	Name            string            `json:"name"`
-	Size            resource.Quantity `json:"size"`
-	AllocationLimit string            `json:"allocationLimit"`
+	Name            string `json:"name"`
+	Size            string `json:"size"`
+	AllocationLimit string `json:"allocationLimit"`
 }
