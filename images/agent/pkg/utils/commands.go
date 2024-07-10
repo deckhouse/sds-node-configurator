@@ -257,6 +257,20 @@ func CreateThinPool(thinPoolName, VGName string, size int64) (string, error) {
 	return cmd.String(), nil
 }
 
+func CreateThinPoolFullVGSpace(thinPoolName, VGName string) (string, error) {
+	args := []string{"lvcreate", "-l", "100%FREE", "-T", fmt.Sprintf("%s/%s", VGName, thinPoolName)}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
 func CreateThinLogicalVolume(vgName, tpName, lvName string, size int64) (string, error) {
 	args := []string{"lvcreate", "-T", fmt.Sprintf("%s/%s", vgName, tpName), "-n", lvName, "-V", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
 	extendedArgs := lvmStaticExtendedArgs(args)
@@ -320,6 +334,23 @@ func ExtendLV(size int64, vgName, lvName string) (string, error) {
 
 	if err := cmd.Run(); err != nil {
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+
+	return cmd.String(), nil
+}
+
+func ExtendLVFullVGSpace(vgName, lvName string) (string, error) {
+	args := []string{"lvextend", "-l", "100%VG", fmt.Sprintf("/dev/%s/%s", vgName, lvName)}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	filteredStdErr := filterStdErr(cmd.String(), stderr)
+	if err != nil && filteredStdErr.Len() > 0 {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
 
 	return cmd.String(), nil
@@ -522,8 +553,13 @@ func filterStdErr(command string, stdErr bytes.Buffer) bytes.Buffer {
 	stdErrScanner := bufio.NewScanner(&stdErr)
 	regexpPattern := `Regex version mismatch, expected: .+ actual: .+`
 	regexpSocketError := `File descriptor .+ leaked on lvm.static invocation. Parent PID .+: /opt/deckhouse/sds/bin/nsenter`
+	// this needs as if the controller were restarted and found existing LVG thin-pools with size equals 100%VG space,
+	// as the Thin-pool size on the node might be less than Spec one even with delta (because of metadata). So the controller
+	// will try to resize the Thin-pool with 100%VG space and will get the error.
+	regexpNoSizeChangeError := ` No size change.+`
 	regex1, err := regexp.Compile(regexpPattern)
 	regex2, err := regexp.Compile(regexpSocketError)
+	regex3, err := regexp.Compile(regexpNoSizeChangeError)
 	if err != nil {
 		return stdErr
 	}
@@ -531,7 +567,8 @@ func filterStdErr(command string, stdErr bytes.Buffer) bytes.Buffer {
 	for stdErrScanner.Scan() {
 		line := stdErrScanner.Text()
 		if regex1.MatchString(line) ||
-			regex2.MatchString(line) {
+			regex2.MatchString(line) ||
+			regex3.MatchString(line) {
 			golog.Printf("WARNING: [filterStdErr] Line filtered from stderr due to matching exclusion pattern. Line: '%s'. Triggered by command: '%s'.", line, command)
 		} else {
 			filteredStdErr.WriteString(line + "\n")

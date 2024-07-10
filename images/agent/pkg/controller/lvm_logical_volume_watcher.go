@@ -13,7 +13,6 @@ import (
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"reflect"
@@ -117,16 +116,8 @@ func RunLVMLogicalVolumeWatcherController(
 				log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolume] no need to add the finalizer %s to the LVMLogicalVolume %s", internal.SdsNodeConfiguratorFinalizer, llv.Name))
 			}
 
-			log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolume] tries to parse resize delta %s", internal.ResizeDelta))
-			delta, err := resource.ParseQuantity(internal.ResizeDelta)
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] unable to parse resize delta %s", internal.ResizeDelta))
-				return reconcile.Result{}, nil
-			}
-			log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolume] successfully parsed resize delta %s", internal.ResizeDelta))
-
 			log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolume] starts to validate the LVMLogicalVolume %s", llv.Name))
-			valid, reason := validateLVMLogicalVolume(sdsCache, llv, lvg, delta)
+			valid, reason := validateLVMLogicalVolume(sdsCache, llv, lvg)
 			if !valid {
 				log.Warning(fmt.Sprintf("[ReconcileLVMLogicalVolume] the LVMLogicalVolume %s is not valid, reason: %s", llv.Name, reason))
 				err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, reason)
@@ -266,43 +257,38 @@ func reconcileLLVCreateFunc(
 			return true, err
 		}
 	}
+	llvRequestSize, err := getLLVRequestedSize(llv, lvg)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to get LVMLogicalVolume %s requested size", llv.Name))
+		return false, err
+	}
 
 	freeSpace := getFreeLVGSpaceForLLV(lvg, llv)
-	log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s, LV: %s, VG: %s type: %s requested size: %s, free space: %s", llv.Name, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Type, llv.Spec.Size.String(), freeSpace.String()))
+	log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s, LV: %s, VG: %s type: %s requested size: %s, free space: %s", llv.Name, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Type, llvRequestSize.String(), freeSpace.String()))
 
-	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] tries to parse the resize delta: %s", internal.ResizeDelta))
-	delta, err := resource.ParseQuantity(internal.ResizeDelta)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to parse the resize delta, value: %s", internal.ResizeDelta))
-		return true, err
-	}
-	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] successfully parsed the resize delta: %s", internal.ResizeDelta))
+	if !utils.AreSizesEqualWithinDelta(llvRequestSize, freeSpace, internal.ResizeDelta) {
+		if freeSpace.Value() < llvRequestSize.Value()+internal.ResizeDelta.Value() {
+			err = errors.New("not enough space")
+			log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] the LV %s requested size %s of the LVMLogicalVolume %s is more than the actual free space %s", llv.Spec.ActualLVNameOnTheNode, llvRequestSize.String(), llv.Name, freeSpace.String()))
 
-	if freeSpace.Value() < llv.Spec.Size.Value()+delta.Value() {
-		err = errors.New("not enough space")
-		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] the LV %s requested size %s of the LVMLogicalVolume %s is more than the actual free space %s", llv.Spec.ActualLVNameOnTheNode, llv.Spec.Size.String(), llv.Name, freeSpace.String()))
-
-		// we return true cause the user might manage LVMVolumeGroup free space without changing the LLV
-		return true, err
+			// we return true cause the user might manage LVMVolumeGroup free space without changing the LLV
+			return true, err
+		}
 	}
 
+	var cmd string
 	switch llv.Spec.Type {
 	case Thick:
-		log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] LV %s will be created in VG %s with size: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Size.String()))
-		cmd, err := utils.CreateThickLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode, llv.Spec.Size.Value(), isContiguous(llv))
-		log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] runs cmd: %s", cmd))
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to create a thick LogicalVolume for the LVMLogicalVolume %s", llv.Name))
-			return true, err
-		}
+		log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] LV %s will be created in VG %s with size: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llvRequestSize.String()))
+		cmd, err = utils.CreateThickLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode, llvRequestSize.Value(), isContiguous(llv))
 	case Thin:
-		log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] LV %s of the LVMLogicalVolume %s will be create in Thin-pool %s with size %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, llv.Spec.Thin.PoolName, llv.Spec.Size.String()))
-		cmd, err := utils.CreateThinLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Thin.PoolName, llv.Spec.ActualLVNameOnTheNode, llv.Spec.Size.Value())
-		log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] runs cmd: %s", cmd))
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to create Thin LogicalVolume %s for the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name))
-			return true, err
-		}
+		log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] LV %s of the LVMLogicalVolume %s will be create in Thin-pool %s with size %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, llv.Spec.Thin.PoolName, llvRequestSize.String()))
+		cmd, err = utils.CreateThinLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Thin.PoolName, llv.Spec.ActualLVNameOnTheNode, llvRequestSize.Value())
+	}
+	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] runs cmd: %s", cmd))
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to create a %s LogicalVolume for the LVMLogicalVolume %s", llv.Spec.Type, llv.Name))
+		return true, err
 	}
 
 	log.Info(fmt.Sprintf("[reconcileLLVCreateFunc] successfully created LV %s in VG %s for LVMLogicalVolume resource with name: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Name))
@@ -362,16 +348,16 @@ func reconcileLLVUpdateFunc(
 	}
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully got LVMLogicalVolume %s actual size %s before the extension", llv.Name, actualSize.String()))
 
-	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] tries to parse the resize delta: %s", internal.ResizeDelta))
-	delta, err := resource.ParseQuantity(internal.ResizeDelta)
+	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] tries to count the LVMLogicalVolume %s requested size", llv.Name))
+	llvRequestSize, err := getLLVRequestedSize(llv, lvg)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to parse the resize delta, value: %s", internal.ResizeDelta))
-		return true, err
+		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to get LVMLogicalVolume %s requested size", llv.Name))
+		return false, err
 	}
-	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully parsed the resize delta: %s", internal.ResizeDelta))
+	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] sucessfully counted the LVMLogicalVolume %s requested size: %s", llv.Name, llvRequestSize.String()))
 
-	if utils.AreSizesEqualWithinDelta(actualSize, llv.Spec.Size, delta) {
-		log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s has the same actual size %s as the requested size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, actualSize.String(), llv.Spec.Size.String()))
+	if utils.AreSizesEqualWithinDelta(actualSize, llvRequestSize, internal.ResizeDelta) {
+		log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s has the same actual size %s as the requested size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, actualSize.String(), llvRequestSize.String()))
 
 		updated, err := updateLLVPhaseToCreatedIfNeeded(ctx, cl, llv, actualSize)
 		if err != nil {
@@ -390,10 +376,10 @@ func reconcileLLVUpdateFunc(
 		return false, nil
 	}
 
-	extendingSize := subtractQuantity(llv.Spec.Size, actualSize)
+	extendingSize := subtractQuantity(llvRequestSize, actualSize)
 	log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s has extending size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, extendingSize.String()))
 	if extendingSize.Value() < 0 {
-		err = fmt.Errorf("specified LV size %dB is less than actual one on the node %dB", llv.Spec.Size.Value(), actualSize.Value())
+		err = fmt.Errorf("specified LV size %dB is less than actual one on the node %dB", llvRequestSize.Value(), actualSize.Value())
 		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to extend the LVMLogicalVolume %s", llv.Name))
 		return false, err
 	}
@@ -410,16 +396,19 @@ func reconcileLLVUpdateFunc(
 
 	freeSpace := getFreeLVGSpaceForLLV(lvg, llv)
 	log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s, LV: %s, VG: %s, type: %s, extending size: %s, free space: %s", llv.Name, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Type, extendingSize.String(), freeSpace.String()))
-	if freeSpace.Value() < extendingSize.Value()+delta.Value() {
-		err = errors.New("not enough space")
-		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s requested size %s of the LVMLogicalVolume %s is more than actual free space %s", llv.Spec.ActualLVNameOnTheNode, llv.Spec.Size.String(), llv.Name, freeSpace.String()))
 
-		// returns true cause a user might manage LVG free space without changing the LLV
-		return true, err
+	if !utils.AreSizesEqualWithinDelta(freeSpace, extendingSize, internal.ResizeDelta) {
+		if freeSpace.Value() < extendingSize.Value()+internal.ResizeDelta.Value() {
+			err = errors.New("not enough space")
+			log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s requested size %s of the LVMLogicalVolume %s is more than actual free space %s", llv.Spec.ActualLVNameOnTheNode, llvRequestSize.String(), llv.Name, freeSpace.String()))
+
+			// returns true cause a user might manage LVG free space without changing the LLV
+			return true, err
+		}
 	}
 
-	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s of the LVMLogicalVolume %s will be extended with size: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, llv.Spec.Size.String()))
-	cmd, err := utils.ExtendLV(llv.Spec.Size.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s of the LVMLogicalVolume %s will be extended with size: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, llvRequestSize.String()))
+	cmd, err := utils.ExtendLV(llvRequestSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] runs cmd: %s", cmd))
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to ExtendLV, name: %s, type: %s", llv.Spec.ActualLVNameOnTheNode, llv.Spec.Type))

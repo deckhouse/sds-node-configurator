@@ -24,6 +24,7 @@ const (
 	PhaseReady       = "Ready"
 	PhaseTerminating = "Terminating"
 
+	ReasonPending          = "Pending"
 	ReasonUpdating         = "Updating"
 	ReasonCreating         = "Creating"
 	ReasonTerminating      = "Terminating"

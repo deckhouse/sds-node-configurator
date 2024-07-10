@@ -3,7 +3,7 @@ module sds-health-watcher-controller
 go 1.22.2
 
 require (
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240704133537-7fc08e30741c
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240709091744-c9d24f05db41
 	github.com/go-logr/logr v1.4.1
 	github.com/prometheus/client_golang v1.18.0
 	github.com/stretchr/testify v1.8.4

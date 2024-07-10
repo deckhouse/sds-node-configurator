@@ -55,6 +55,30 @@ func checkIfConditionIsTrue(lvg *v1alpha1.LvmVolumeGroup, conType string) bool {
 	return false
 }
 
+func isPercentSize(size string) bool {
+	return strings.Contains(size, "%")
+}
+
+func getLLVRequestedSize(llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LvmVolumeGroup) (resource.Quantity, error) {
+	switch llv.Spec.Type {
+	case Thick:
+		return getRequestedSizeFromString(llv.Spec.Size, lvg.Status.VGSize)
+	case Thin:
+		for _, tp := range lvg.Status.ThinPools {
+			if tp.Name == llv.Spec.Thin.PoolName {
+				totalSize, err := getThinPoolSpaceWithAllocationLimit(tp.ActualSize, tp.AllocationLimit)
+				if err != nil {
+					return resource.Quantity{}, err
+				}
+
+				return getRequestedSizeFromString(llv.Spec.Size, totalSize)
+			}
+		}
+	}
+
+	return resource.Quantity{}, nil
+}
+
 func removeLLVFinalizersIfExist(
 	ctx context.Context,
 	cl client.Client,
@@ -223,7 +247,7 @@ func belongsToNode(lvg *v1alpha1.LvmVolumeGroup, nodeName string) bool {
 	return belongs
 }
 
-func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LvmVolumeGroup, delta resource.Quantity) (bool, string) {
+func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LvmVolumeGroup) (bool, string) {
 	if llv.DeletionTimestamp != nil {
 		// as the configuration doesn't matter if we want to delete it
 		return true, ""
@@ -232,23 +256,28 @@ func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVol
 	reason := strings.Builder{}
 
 	if len(llv.Spec.ActualLVNameOnTheNode) == 0 {
-		reason.WriteString("no LV name specified; ")
+		reason.WriteString("No LV name specified. ")
 	}
 
-	if llv.Spec.Size.Value() == 0 {
-		reason.WriteString("zero size for LV; ")
+	llvRequestedSize, err := getLLVRequestedSize(llv, lvg)
+	if err != nil {
+		reason.WriteString(err.Error())
+	}
+
+	if llvRequestedSize.Value() == 0 {
+		reason.WriteString("Zero size for LV. ")
 	}
 
 	if llv.Status != nil {
-		if llv.Spec.Size.Value()+delta.Value() < llv.Status.ActualSize.Value() {
-			reason.WriteString("desired LV size is less than actual one")
+		if llvRequestedSize.Value()+internal.ResizeDelta.Value() < llv.Status.ActualSize.Value() {
+			reason.WriteString("Desired LV size is less than actual one. ")
 		}
 	}
 
 	switch llv.Spec.Type {
 	case Thin:
 		if llv.Spec.Thin == nil {
-			reason.WriteString("no thin pool specified; ")
+			reason.WriteString("No thin pool specified. ")
 			break
 		}
 
@@ -261,31 +290,31 @@ func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVol
 		}
 
 		if !exist {
-			reason.WriteString("selected thin pool does not exist in selected LVMVolumeGroup; ")
+			reason.WriteString("Selected thin pool does not exist in selected LVMVolumeGroup. ")
 		}
 
 		// if a specified Thin LV name matches the existing Thick one
 		lv := FindLV(sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 		if lv != nil {
 			if !checkIfLVBelongsToLLV(llv, lv) {
-				reason.WriteString(fmt.Sprintf("specified LV %s is already created and does not belong to selected thin pool %s", lv.LVName, llv.Spec.Thin.PoolName))
+				reason.WriteString(fmt.Sprintf("Specified LV %s is already created and does not belong to selected thin pool %s. ", lv.LVName, llv.Spec.Thin.PoolName))
 			}
 		}
 	case Thick:
 		if llv.Spec.Thin != nil {
-			reason.WriteString("thin pool specified for Thick LV; ")
+			reason.WriteString("Thin pool specified for Thick LV. ")
 		}
 
 		// if a specified Thick LV name matches the existing Thin one
 		lv := FindLV(sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 		if lv != nil && len(lv.LVAttr) == 0 {
-			reason.WriteString(fmt.Sprintf("LV %s was found on the node, but can't be validated due to its attributes is empty string", lv.LVName))
+			reason.WriteString(fmt.Sprintf("LV %s was found on the node, but can't be validated due to its attributes is empty string. ", lv.LVName))
 			break
 		}
 
 		if lv != nil {
 			if !checkIfLVBelongsToLLV(llv, lv) {
-				reason.WriteString(fmt.Sprintf("specified LV %s is already created and it is doesnt match the one on the node", lv.LVName))
+				reason.WriteString(fmt.Sprintf("Specified LV %s is already created and it is doesnt match the one on the node.", lv.LVName))
 			}
 		}
 	}

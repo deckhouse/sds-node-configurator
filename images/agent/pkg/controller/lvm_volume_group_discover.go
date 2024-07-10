@@ -138,6 +138,12 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 	shouldRequeue := false
 	for _, candidate := range candidates {
 		if lvg, exist := filteredLVGs[candidate.ActualVGNameOnTheNode]; exist {
+			if !shouldReconcileLVG(&lvg) {
+				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is not ready to be reconciled due its conditions state, retry...", lvg.Name))
+				shouldRequeue = true
+				continue
+			}
+
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is already exist. Tries to update it", lvg.Name))
 			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] candidate: %v", candidate))
 			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] lvg: %v", lvg))
@@ -198,6 +204,20 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 	metrics.ReconcileDuration(LVMVolumeGroupDiscoverCtrlName).Observe(metrics.GetEstimatedTimeInSeconds(reconcileStart))
 	metrics.ReconcilesCountTotal(LVMVolumeGroupDiscoverCtrlName).Inc()
 	return false
+}
+
+func shouldReconcileLVG(lvg *v1alpha1.LvmVolumeGroup) bool {
+	if lvg.Status.Conditions == nil {
+		return false
+	}
+
+	for _, c := range lvg.Status.Conditions {
+		if c.Type == internal.TypeVGConfigurationApplied && c.Reason == internal.ReasonCreating {
+			return false
+		}
+	}
+
+	return true
 }
 
 func filterLVGsByNode(
@@ -361,7 +381,7 @@ func ReconcileUnhealthyLVMVolumeGroups(
 			candidate, exist := candidateMap[lvg.Spec.ActualVGNameOnTheNode]
 			if !exist {
 				log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its VG %s", lvg.Name, lvg.Spec.ActualVGNameOnTheNode))
-				messageBldr.WriteString(fmt.Sprintf("unable to find VG %s (it should be created with special tag %s); ", lvg.Spec.ActualVGNameOnTheNode, internal.LVMTags[0]))
+				messageBldr.WriteString(fmt.Sprintf("Unable to find VG %s (it should be created with special tag %s). ", lvg.Spec.ActualVGNameOnTheNode, internal.LVMTags[0]))
 			} else {
 				// candidate exists, check thin pools
 				candidateTPs := make(map[string]internal.LVMVGStatusThinPool, len(candidate.StatusThinPools))
@@ -369,14 +389,19 @@ func ReconcileUnhealthyLVMVolumeGroups(
 					candidateTPs[tp.Name] = tp
 				}
 
-				for _, tp := range lvg.Spec.ThinPools {
-					if candidateTp, exist := candidateTPs[tp.Name]; !exist {
-						log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, tp.Name))
-						messageBldr.WriteString(fmt.Sprintf("unable to find ThinPool %s; ", tp.Name))
+				// take thin-pools from status instead of spec to prevent miss never-created ones
+				for _, thinPool := range lvg.Status.ThinPools {
+					if candidateTp, exist := candidateTPs[thinPool.Name]; !exist {
+						log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, thinPool.Name))
+						messageBldr.WriteString(fmt.Sprintf("Unable to find ThinPool %s. ", thinPool.Name))
 					} else {
-						if candidateTp.ActualSize.Value() < tp.Size.Value() {
-							log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s ThinPool %s size %s is less than Spec one %s", lvg.Name, tp.Name, candidateTp.ActualSize.String(), tp.Size.String()))
-							messageBldr.WriteString(fmt.Sprintf("ThinPool %s on the node has size %s which is less than Spec one %s; ", tp.Name, candidateTp.ActualSize.String(), tp.Size.String()))
+						// that means thin-pool is not 100%VG space
+						// use candidate VGSize as lvg.Status.VGSize might not be updated yet
+						if !utils.AreSizesEqualWithinDelta(candidate.VGSize, thinPool.ActualSize, internal.ResizeDelta) {
+							if candidateTp.ActualSize.Value()+internal.ResizeDelta.Value() < thinPool.ActualSize.Value() {
+								log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s ThinPool %s size %s is less than status one %s", lvg.Name, thinPool.Name, candidateTp.ActualSize.String(), thinPool.ActualSize.String()))
+								messageBldr.WriteString(fmt.Sprintf("ThinPool %s on the node has size %s which is less than status one %s. ", thinPool.Name, candidateTp.ActualSize.String(), thinPool.ActualSize.String()))
+							}
 						}
 					}
 				}
@@ -389,7 +414,7 @@ func ReconcileUnhealthyLVMVolumeGroups(
 					return nil, err
 				}
 
-				log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s and its data obejct will be removed from the reconcile due to unhealthy states"))
+				log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s and its data obejct will be removed from the reconcile due to unhealthy states", lvg.Name))
 				vgNamesToSkip[candidate.ActualVGNameOnTheNode] = struct{}{}
 			}
 		}
@@ -962,7 +987,7 @@ func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.Lvm
 	for name, size := range thinPools {
 		result = append(result, v1alpha1.LvmVolumeGroupThinPoolSpec{
 			Name: name,
-			Size: size,
+			Size: size.String(),
 		})
 	}
 
@@ -1003,6 +1028,15 @@ func convertStatusThinPools(lvg v1alpha1.LvmVolumeGroup, thinPools []internal.LV
 }
 
 func getThinPoolAvailableSpace(actualSize, allocatedSize resource.Quantity, allocationLimit string) (resource.Quantity, error) {
+	totalSize, err := getThinPoolSpaceWithAllocationLimit(actualSize, allocationLimit)
+	if err != nil {
+		return resource.Quantity{}, err
+	}
+
+	return *resource.NewQuantity(totalSize.Value()-allocatedSize.Value(), resource.BinarySI), nil
+}
+
+func getThinPoolSpaceWithAllocationLimit(actualSize resource.Quantity, allocationLimit string) (resource.Quantity, error) {
 	limits := strings.Split(allocationLimit, "%")
 	percent, err := strconv.Atoi(limits[0])
 	if err != nil {
@@ -1011,9 +1045,8 @@ func getThinPoolAvailableSpace(actualSize, allocatedSize resource.Quantity, allo
 
 	factor := float64(percent)
 	factor = factor / 100
-	free := float64(actualSize.Value())*factor - float64(allocatedSize.Value())
 
-	return *resource.NewQuantity(int64(free), resource.BinarySI), nil
+	return *resource.NewQuantity(int64(float64(actualSize.Value())*factor), resource.BinarySI), nil
 }
 
 func generateLVMVGName() string {
