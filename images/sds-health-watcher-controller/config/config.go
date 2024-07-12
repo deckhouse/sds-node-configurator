@@ -26,17 +26,20 @@ import (
 )
 
 const (
-	ScanInterval = "SCAN_INTERVAL"
-	NodeName     = "NODE_NAME"
-	LogLevel     = "LOG_LEVEL"
-	MetricsPort  = "METRICS_PORT"
+	ScanInterval                         = "SCAN_INTERVAL"
+	NodeName                             = "NODE_NAME"
+	LogLevel                             = "LOG_LEVEL"
+	MetricsPort                          = "METRICS_PORT"
+	DefaultHealthProbeBindAddressEnvName = "HEALTH_PROBE_BIND_ADDRESS"
+	DefaultHealthProbeBindAddress        = ":8081"
 )
 
 type Options struct {
-	Loglevel        logger.Verbosity
-	MetricsPort     string
-	ScanIntervalSec time.Duration
-	NodeName        string
+	Loglevel               logger.Verbosity
+	MetricsPort            string
+	ScanIntervalSec        time.Duration
+	NodeName               string
+	HealthProbeBindAddress string
 }
 
 func NewConfig() (*Options, error) {
@@ -52,6 +55,11 @@ func NewConfig() (*Options, error) {
 	opts.MetricsPort = os.Getenv(MetricsPort)
 	if opts.MetricsPort == "" {
 		opts.MetricsPort = ":9695"
+	}
+
+	opts.HealthProbeBindAddress = os.Getenv(DefaultHealthProbeBindAddressEnvName)
+	if opts.HealthProbeBindAddress == "" {
+		opts.HealthProbeBindAddress = DefaultHealthProbeBindAddress
 	}
 
 	scanInt := os.Getenv(ScanInterval)
