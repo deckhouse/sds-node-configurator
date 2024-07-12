@@ -169,7 +169,7 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 			return true, err
 		}
 
-		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.TypeReady, internal.ReasonUpdating, "wait for conditions to got configured")
+		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.TypeReady, internal.ReasonPending, "wait for conditions to got configured")
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeReady, lvg.Name))
 			return true, err
@@ -199,7 +199,7 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 				return true, err
 			}
 
-			err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.TypeReady, internal.ReasonUpdating, fmt.Sprintf("condition %s has ReasonCreating reason", c.Type))
+			err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.TypeReady, internal.ReasonPending, fmt.Sprintf("condition %s has Creating reason", c.Type))
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeReady, lvg.Name))
 				return true, err

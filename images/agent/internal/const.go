@@ -16,7 +16,10 @@ limitations under the License.
 
 package internal
 
+import "k8s.io/apimachinery/pkg/api/resource"
+
 const (
+	resizeDelta                  = "32Mi"
 	PartType                     = "part"
 	MultiPathType                = "mpath"
 	CDROMDeviceType              = "rom"
@@ -29,9 +32,6 @@ const (
 	LVMVGHealthOperational       = "Operational"
 	LVMVGHealthNonOperational    = "NonOperational"
 	BlockDeviceValidSize         = "1G"
-	ResizeDelta                  = "32Mi"
-	KubernetesApiRequestLimit    = 5
-	KubernetesApiRequestTimeout  = 1
 	NSENTERCmd                   = "/opt/deckhouse/sds/bin/nsenter.static"
 	LSBLKCmd                     = "/opt/deckhouse/sds/bin/lsblk.dynamic"
 	LVMCmd                       = "/opt/deckhouse/sds/bin/lvm.static"
@@ -54,4 +54,5 @@ var (
 	InvalidDeviceTypes = [...]string{LoopDeviceType, LVMDeviceType, CDROMDeviceType}
 	Finalizers         = []string{SdsNodeConfiguratorFinalizer}
 	LVMTags            = []string{"storage.deckhouse.io/enabled=true", "linstor-"}
+	ResizeDelta        = resource.MustParse(resizeDelta)
 )
