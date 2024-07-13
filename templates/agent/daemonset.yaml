@@ -69,6 +69,21 @@ spec:
       - name: sds-node-configurator-agent
         image: {{ include "helm_lib_module_image" (list . "agent") }}
         imagePullPolicy: IfNotPresent
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 5
+          failureThreshold: 2
+          periodSeconds: 1
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+            scheme: HTTP
+          periodSeconds: 1
+          failureThreshold: 3
         securityContext:
           privileged: true
           seLinuxOptions:

@@ -30,13 +30,15 @@ import (
 )
 
 const (
-	ScanInterval        = "SCAN_INTERVAL"
-	NodeName            = "NODE_NAME"
-	LogLevel            = "LOG_LEVEL"
-	MetricsPort         = "METRICS_PORT"
-	MachineID           = "MACHINE_ID"
-	ThrottleInterval    = "THROTTLER_INTERVAL"
-	CmdDeadlineDuration = "CMD_DEADLINE_DURATION"
+	ScanInterval                         = "SCAN_INTERVAL"
+	NodeName                             = "NODE_NAME"
+	LogLevel                             = "LOG_LEVEL"
+	MetricsPort                          = "METRICS_PORT"
+	MachineID                            = "MACHINE_ID"
+	ThrottleInterval                     = "THROTTLER_INTERVAL"
+	CmdDeadlineDuration                  = "CMD_DEADLINE_DURATION"
+	DefaultHealthProbeBindAddressEnvName = "HEALTH_PROBE_BIND_ADDRESS"
+	DefaultHealthProbeBindAddress        = ":8081"
 )
 
 type Options struct {
@@ -49,6 +51,7 @@ type Options struct {
 	LLVRequeueIntervalSec      time.Duration
 	ThrottleIntervalSec        time.Duration
 	CmdDeadlineDurationSec     time.Duration
+	HealthProbeBindAddress     string
 }
 
 func NewConfig() (*Options, error) {
@@ -75,6 +78,11 @@ func NewConfig() (*Options, error) {
 	opts.MetricsPort = os.Getenv(MetricsPort)
 	if opts.MetricsPort == "" {
 		opts.MetricsPort = ":9695"
+	}
+
+	opts.HealthProbeBindAddress = os.Getenv(DefaultHealthProbeBindAddressEnvName)
+	if opts.HealthProbeBindAddress == "" {
+		opts.HealthProbeBindAddress = DefaultHealthProbeBindAddress
 	}
 
 	scanInt := os.Getenv(ScanInterval)

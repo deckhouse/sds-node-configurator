@@ -93,9 +93,10 @@ func main() {
 	log.Info("[main] successfully read scheme CR")
 
 	managerOpts := manager.Options{
-		Scheme:  scheme,
-		Logger:  log.GetLogger(),
-		Metrics: server.Options{BindAddress: cfgParams.MetricsPort},
+		Scheme:                 scheme,
+		Logger:                 log.GetLogger(),
+		Metrics:                server.Options{BindAddress: cfgParams.MetricsPort},
+		HealthProbeBindAddress: cfgParams.HealthProbeBindAddress,
 	}
 
 	mgr, err := manager.New(kConfig, managerOpts)
