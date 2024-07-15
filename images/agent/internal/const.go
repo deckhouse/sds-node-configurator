@@ -41,6 +41,8 @@ const (
 
 	AllocationLimitDefaultValue = "150%"
 
+	PhaseReady = "Ready"
+
 	ReasonValidationFailed = "ValidationFailed"
 	ReasonCreating         = "Creating"
 	ReasonUpdating         = "Updating"

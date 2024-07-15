@@ -73,7 +73,7 @@ func BenchmarkRunThickLLVCreationSingleThread(b *testing.B) {
 				}
 
 				if llv.Status != nil &&
-					llv.Status.Phase == StatusPhaseCreated &&
+					llv.Status.Phase == LLVStatusPhaseCreated &&
 					!created {
 					succeeded++
 					llvNames[llvName] = true
@@ -138,7 +138,7 @@ func BenchmarkRunThinLLVCreationSingleThread(b *testing.B) {
 				}
 
 				if llv.Status != nil &&
-					llv.Status.Phase == StatusPhaseCreated &&
+					llv.Status.Phase == LLVStatusPhaseCreated &&
 					!visited {
 					succeeded++
 					llvNames[llvName] = true

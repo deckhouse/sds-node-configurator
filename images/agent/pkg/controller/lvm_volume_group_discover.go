@@ -138,15 +138,9 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 	shouldRequeue := false
 	for _, candidate := range candidates {
 		if lvg, exist := filteredLVGs[candidate.ActualVGNameOnTheNode]; exist {
-			if !shouldReconcileLVG(&lvg) {
-				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is not ready to be reconciled due its conditions state, retry...", lvg.Name))
-				shouldRequeue = true
-				continue
-			}
-
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is already exist. Tries to update it", lvg.Name))
-			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] candidate: %v", candidate))
-			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] lvg: %v", lvg))
+			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] candidate: %+v", candidate))
+			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] lvg: %+v", lvg))
 
 			if !hasLVMVolumeGroupDiff(log, lvg, candidate) {
 				log.Debug(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] no data to update for LvmVolumeGroup, name: "%s"`, lvg.Name))
@@ -204,20 +198,6 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 	metrics.ReconcileDuration(LVMVolumeGroupDiscoverCtrlName).Observe(metrics.GetEstimatedTimeInSeconds(reconcileStart))
 	metrics.ReconcilesCountTotal(LVMVolumeGroupDiscoverCtrlName).Inc()
 	return false
-}
-
-func shouldReconcileLVG(lvg *v1alpha1.LvmVolumeGroup) bool {
-	if lvg.Status.Conditions == nil {
-		return false
-	}
-
-	for _, c := range lvg.Status.Conditions {
-		if c.Type == internal.TypeVGConfigurationApplied && c.Reason == internal.ReasonCreating {
-			return false
-		}
-	}
-
-	return true
 }
 
 func filterLVGsByNode(
@@ -438,10 +418,9 @@ func ReconcileUnhealthyLVMVolumeGroups(
 }
 
 func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds map[string]v1alpha1.BlockDevice, currentNode string) ([]internal.LVMVolumeGroupCandidate, error) {
-	var candidates []internal.LVMVolumeGroupCandidate
-
 	vgs, vgErrs := sdsCache.GetVGs()
 	vgWithTag := filterVGByTag(vgs, internal.LVMTags)
+	candidates := make([]internal.LVMVolumeGroupCandidate, 0, len(vgWithTag))
 
 	// If there is no VG with our tag, then there is no any candidate.
 	if len(vgWithTag) == 0 {
@@ -892,13 +871,12 @@ func UpdateLVMVolumeGroupByCandidate(
 ) error {
 	// Check if VG has some problems
 	if candidate.Health == NonOperational {
-		err := errors.New(candidate.Message)
-		log.Error(err, fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] candidate for LVMVolumeGroup %s has NonOperational health, message %s. Update the VGReady condition to False", lvg.Name, candidate.Message))
+		log.Warning(fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] candidate for LVMVolumeGroup %s has NonOperational health, message %s. Update the VGReady condition to False", lvg.Name, candidate.Message))
 		updErr := updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.TypeVGReady, internal.ReasonScanFailed, candidate.Message)
 		if updErr != nil {
-			log.Error(err, fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name))
+			log.Error(updErr, fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name))
 		}
-		return err
+		return updErr
 	}
 
 	// The resource.Status.Nodes can not be just re-written, it needs to be updated directly by a node.
@@ -955,10 +933,8 @@ func convertLVMVGNodes(nodes map[string][]internal.LVMVGDevice) []v1alpha1.LvmVo
 	lvmvgNodes := make([]v1alpha1.LvmVolumeGroupNode, 0, len(nodes))
 
 	for nodeName, nodeDevices := range nodes {
-		convertedDevices := convertLVMVGDevices(nodeDevices)
-
 		lvmvgNodes = append(lvmvgNodes, v1alpha1.LvmVolumeGroupNode{
-			Devices: convertedDevices,
+			Devices: convertLVMVGDevices(nodeDevices),
 			Name:    nodeName,
 		})
 	}

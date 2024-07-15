@@ -158,12 +158,8 @@ func runControllersReconcile(ctx context.Context, log logger.Logger, bdCtrl, lvg
 }
 
 func fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Options) error {
-	devices, devErr, err := scanDevices(ctx, log, cfg)
-	if err != nil {
-		return err
-	}
-
-	pvs, pvsErr, err := scanPVs(ctx, log, cfg)
+	// the scan operations order is very important as it guarantees the consistent and reliable data from the node
+	lvs, lvsErr, err := scanLVs(ctx, log, cfg)
 	if err != nil {
 		return err
 	}
@@ -173,7 +169,12 @@ func fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cf
 		return err
 	}
 
-	lvs, lvsErr, err := scanLVs(ctx, log, cfg)
+	pvs, pvsErr, err := scanPVs(ctx, log, cfg)
+	if err != nil {
+		return err
+	}
+
+	devices, devErr, err := scanDevices(ctx, log, cfg)
 	if err != nil {
 		return err
 	}
