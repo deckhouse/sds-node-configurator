@@ -84,6 +84,15 @@ func shouldReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1alpha1.LvmV
 		return true
 	}
 
+	for _, n := range newLVG.Status.Nodes {
+		for _, d := range n.Devices {
+			if !utils.AreSizesEqualWithinDelta(d.PVSize, d.DevSize, internal.ResizeDelta) {
+				log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s PV size is different to device size", newLVG.Name))
+				return true
+			}
+		}
+	}
+
 	return false
 }
 
