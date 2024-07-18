@@ -146,6 +146,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = controller.RunLVMLogicalVolumeExtenderWatcherController(mgr, *cfgParams, *log, metrics, sdsCache); err != nil {
+		log.Error(err, "[main] unable to controller.RunLVMLogicalVolumeExtenderWatcherController")
+		os.Exit(1)
+	}
+
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
 		os.Exit(1)

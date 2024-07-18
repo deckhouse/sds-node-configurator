@@ -70,6 +70,26 @@ func (c *Cache) GetLVs() ([]internal.LVData, bytes.Buffer) {
 	return dst, c.lvsErrs
 }
 
+func (c *Cache) FindLV(vgName, lvName string) *internal.LVData {
+	for _, lv := range c.lvs {
+		if lv.VGName == vgName && lv.LVName == lvName {
+			return &lv
+		}
+	}
+
+	return nil
+}
+
+func (c *Cache) FindVG(vgName string) *internal.VGData {
+	for _, vg := range c.vgs {
+		if vg.VGName == vgName {
+			return &vg
+		}
+	}
+
+	return nil
+}
+
 func (c *Cache) PrintTheCache(log logger.Logger) {
 	log.Cache("*****************CACHE BEGIN*****************")
 	log.Cache("[Devices BEGIN]")

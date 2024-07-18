@@ -332,7 +332,9 @@ func ExtendLV(size int64, vgName, lvName string) (string, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	err := cmd.Run()
+	filteredStdErr := filterStdErr(cmd.String(), stderr)
+	if err != nil && filteredStdErr.Len() > 0 {
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 

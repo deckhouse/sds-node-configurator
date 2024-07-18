@@ -66,7 +66,9 @@ spec:
                 size:
                   x-kubernetes-int-or-string: true
                   description: |
-                    Desired LV size.
+                   The desired LV size. Might be specified as number or percent size of total VG or thin pool space (for thin pool total space is counted by actual thin pool size multiply by allocationLimit value)
+                    
+                   > Note, that if you specify the percent size, the LV will be automatically extended when VG, thin pool or thin pool's allocationLimit value is extended.
                   minLength: 1
                   pattern: '^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$|^[1-9][0-9]?%$|100%'
                 lvmVolumeGroupName:

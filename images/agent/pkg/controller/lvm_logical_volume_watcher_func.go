@@ -133,11 +133,11 @@ func updateLLVPhaseToCreatedIfNeeded(ctx context.Context, cl client.Client, llv 
 		}
 	}
 
-	if llv.Status.Phase != StatusPhaseCreated ||
+	if llv.Status.Phase != LLVStatusPhaseCreated ||
 		llv.Status.ActualSize.Value() != actualSize.Value() ||
 		llv.Status.Reason != "" ||
 		llv.Status.Contiguous != contiguous {
-		llv.Status.Phase = StatusPhaseCreated
+		llv.Status.Phase = LLVStatusPhaseCreated
 		llv.Status.Reason = ""
 		llv.Status.ActualSize = actualSize
 		llv.Status.Contiguous = contiguous
@@ -153,7 +153,7 @@ func updateLLVPhaseToCreatedIfNeeded(ctx context.Context, cl client.Client, llv 
 }
 
 func deleteLVIfNeeded(log logger.Logger, sdsCache *cache.Cache, vgName string, llv *v1alpha1.LVMLogicalVolume) error {
-	lv := FindLV(sdsCache, vgName, llv.Spec.ActualLVNameOnTheNode)
+	lv := sdsCache.FindLV(vgName, llv.Spec.ActualLVNameOnTheNode)
 	if lv == nil {
 		log.Warning(fmt.Sprintf("[deleteLVIfNeeded] did not find LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
 		return nil
@@ -176,7 +176,7 @@ func deleteLVIfNeeded(log logger.Logger, sdsCache *cache.Cache, vgName string, l
 }
 
 func getLVActualSize(sdsCache *cache.Cache, vgName, lvName string) resource.Quantity {
-	lv := FindLV(sdsCache, vgName, lvName)
+	lv := sdsCache.FindLV(vgName, lvName)
 	if lv == nil {
 		return resource.Quantity{}
 	}
@@ -207,7 +207,7 @@ func shouldReconcileByCreateFunc(sdsCache *cache.Cache, vgName string, llv *v1al
 		return false
 	}
 
-	lv := FindLV(sdsCache, vgName, llv.Spec.ActualLVNameOnTheNode)
+	lv := sdsCache.FindLV(vgName, llv.Spec.ActualLVNameOnTheNode)
 	if lv != nil {
 		return false
 	}
@@ -292,30 +292,21 @@ func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVol
 		if !exist {
 			reason.WriteString("Selected thin pool does not exist in selected LVMVolumeGroup. ")
 		}
-
-		// if a specified Thin LV name matches the existing Thick one
-		lv := FindLV(sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-		if lv != nil {
-			if !checkIfLVBelongsToLLV(llv, lv) {
-				reason.WriteString(fmt.Sprintf("Specified LV %s is already created and does not belong to selected thin pool %s. ", lv.LVName, llv.Spec.Thin.PoolName))
-			}
-		}
 	case Thick:
 		if llv.Spec.Thin != nil {
 			reason.WriteString("Thin pool specified for Thick LV. ")
 		}
+	}
 
-		// if a specified Thick LV name matches the existing Thin one
-		lv := FindLV(sdsCache, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-		if lv != nil && len(lv.LVAttr) == 0 {
-			reason.WriteString(fmt.Sprintf("LV %s was found on the node, but can't be validated due to its attributes is empty string. ", lv.LVName))
-			break
-		}
+	// if a specified Thick LV name matches the existing Thin one
+	lv := sdsCache.FindLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+	if lv != nil && len(lv.LVAttr) == 0 {
+		reason.WriteString(fmt.Sprintf("LV %s was found on the node, but can't be validated due to its attributes is empty string. ", lv.LVName))
+	}
 
-		if lv != nil {
-			if !checkIfLVBelongsToLLV(llv, lv) {
-				reason.WriteString(fmt.Sprintf("Specified LV %s is already created and it is doesnt match the one on the node.", lv.LVName))
-			}
+	if lv != nil {
+		if !checkIfLVBelongsToLLV(llv, lv) {
+			reason.WriteString(fmt.Sprintf("Specified LV %s is already created and it is doesnt match the one on the node.", lv.LVName))
 		}
 	}
 
@@ -355,23 +346,12 @@ func updateLVMLogicalVolume(ctx context.Context, metrics monitoring.Metrics, cl 
 	return cl.Update(ctx, llv)
 }
 
-func FindLV(sdsCache *cache.Cache, vgName, lvName string) *internal.LVData {
-	lvs, _ := sdsCache.GetLVs()
-	for _, lv := range lvs {
-		if lv.VGName == vgName && lv.LVName == lvName {
-			return &lv
-		}
-	}
-
-	return nil
-}
-
 func shouldReconcileByUpdateFunc(sdsCache *cache.Cache, vgName string, llv *v1alpha1.LVMLogicalVolume) bool {
 	if llv.DeletionTimestamp != nil {
 		return false
 	}
 
-	lv := FindLV(sdsCache, vgName, llv.Spec.ActualLVNameOnTheNode)
+	lv := sdsCache.FindLV(vgName, llv.Spec.ActualLVNameOnTheNode)
 	if lv == nil {
 		return false
 	}

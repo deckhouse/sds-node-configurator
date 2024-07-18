@@ -35,10 +35,10 @@ const (
 
 	lvmLogicalVolumeWatcherCtrlName = "lvm-logical-volume-watcher-controller"
 
-	StatusPhaseCreated  = "Created"
-	StatusPhasePending  = "Pending"
-	StatusPhaseResizing = "Resizing"
-	StatusPhaseFailed   = "Failed"
+	LLVStatusPhaseCreated  = "Created"
+	LLVStatusPhasePending  = "Pending"
+	LLVStatusPhaseResizing = "Resizing"
+	LLVStatusPhaseFailed   = "Failed"
 )
 
 type (
@@ -53,17 +53,10 @@ func RunLVMLogicalVolumeWatcherController(
 	sdsCache *cache.Cache,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
-	kubeCache := mgr.GetCache()
 
 	c, err := controller.New(lvmLogicalVolumeWatcherCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] Reconciler starts reconciliation of the LVMLogicalVolume: %s", request.Name))
-
-			// this case prevents the unexpected behavior when the controller runs up with existing LVMLogicalVolumes
-			if vgs, _ := sdsCache.GetVGs(); len(vgs) == 0 {
-				log.Warning(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] unable to reconcile the request as no VG was found in the cache. Retry in %s", cfg.VolumeGroupScanIntervalSec.String()))
-				return reconcile.Result{RequeueAfter: cfg.VolumeGroupScanIntervalSec}, nil
-			}
 
 			log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] tries to get the LVMLogicalVolume %s", request.Name))
 			llv := &v1alpha1.LVMLogicalVolume{}
@@ -80,7 +73,7 @@ func RunLVMLogicalVolumeWatcherController(
 			if err != nil {
 				if k8serr.IsNotFound(err) {
 					log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] LVMVolumeGroup %s not found for LVMLogicalVolume %s. Retry in %s", llv.Spec.LvmVolumeGroupName, llv.Name, cfg.VolumeGroupScanIntervalSec.String()))
-					err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, fmt.Sprintf("LVMVolumeGroup %s not found", llv.Spec.LvmVolumeGroupName))
+					err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, LLVStatusPhaseFailed, fmt.Sprintf("LVMVolumeGroup %s not found", llv.Spec.LvmVolumeGroupName))
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] unable to update the LVMLogicalVolume %s", llv.Name))
 						return reconcile.Result{}, err
@@ -91,7 +84,7 @@ func RunLVMLogicalVolumeWatcherController(
 					}, nil
 				}
 
-				err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, fmt.Sprintf("Unable to get selected LVMVolumeGroup, err: %s", err.Error()))
+				err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, LLVStatusPhaseFailed, fmt.Sprintf("Unable to get selected LVMVolumeGroup, err: %s", err.Error()))
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] unable to update the LVMLogicalVolume %s", llv.Name))
 				}
@@ -103,6 +96,12 @@ func RunLVMLogicalVolumeWatcherController(
 				return reconcile.Result{}, nil
 			}
 			log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolume] the LVMVolumeGroup %s of the LVMLogicalVolume %s belongs to the current node: %s. Reconciliation continues", lvg.Name, llv.Name, cfg.NodeName))
+
+			// this case prevents the unexpected behavior when the controller runs up with existing LVMLogicalVolumes
+			if vgs, _ := sdsCache.GetVGs(); len(vgs) == 0 {
+				log.Warning(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] unable to reconcile the request as no VG was found in the cache. Retry in %s", cfg.VolumeGroupScanIntervalSec.String()))
+				return reconcile.Result{RequeueAfter: cfg.VolumeGroupScanIntervalSec}, nil
+			}
 
 			log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolume] tries to add the finalizer %s to the LVMLogicalVolume %s", internal.SdsNodeConfiguratorFinalizer, llv.Name))
 			added, err := addLLVFinalizerIfNotExist(ctx, cl, log, metrics, llv)
@@ -120,7 +119,7 @@ func RunLVMLogicalVolumeWatcherController(
 			valid, reason := validateLVMLogicalVolume(sdsCache, llv, lvg)
 			if !valid {
 				log.Warning(fmt.Sprintf("[ReconcileLVMLogicalVolume] the LVMLogicalVolume %s is not valid, reason: %s", llv.Name, reason))
-				err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, reason)
+				err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, LLVStatusPhaseFailed, reason)
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] unable to update the LVMLogicalVolume %s", llv.Name))
 					return reconcile.Result{}, err
@@ -133,7 +132,7 @@ func RunLVMLogicalVolumeWatcherController(
 			shouldRequeue, err := ReconcileLVMLogicalVolume(ctx, cl, log, metrics, sdsCache, llv, lvg)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] an error occurred while reconciling the LVMLogicalVolume: %s", request.Name))
-				updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseFailed, err.Error())
+				updErr := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, LLVStatusPhaseFailed, err.Error())
 				if updErr != nil {
 					log.Error(updErr, fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] unable to update the LVMLogicalVolume %s", llv.Name))
 					return reconcile.Result{}, updErr
@@ -155,53 +154,33 @@ func RunLVMLogicalVolumeWatcherController(
 		return nil, err
 	}
 
-	err = c.Watch(source.Kind(kubeCache, &v1alpha1.LVMLogicalVolume{}), handler.Funcs{
-		CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
+	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LVMLogicalVolume{}, handler.TypedFuncs[*v1alpha1.LVMLogicalVolume]{
+		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*v1alpha1.LVMLogicalVolume], q workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] got a create event for the LVMLogicalVolume: %s", e.Object.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
-
 			q.Add(request)
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] added the request of the LVMLogicalVolume %s to Reconciler", e.Object.GetName()))
 		},
 
-		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
+		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*v1alpha1.LVMLogicalVolume], q workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] got an update event for the LVMLogicalVolume: %s", e.ObjectNew.GetName()))
-
-			log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] tries to cast the request's old object %s to LVMLogicalVolume", e.ObjectOld.GetName()))
-			oldLLV, ok := e.ObjectOld.(*v1alpha1.LVMLogicalVolume)
-			if !ok {
-				err = errors.New("unable to cast event object to a given type")
-				log.Error(err, "[RunLVMLogicalVolumeWatcherController] an error occurs while handling an update event")
-				return
-			}
-			log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] successfully casted the request's old object %s to LVMLogicalVolume", e.ObjectOld.GetName()))
-
-			log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] tries to cast the request's new object %s to LVMLogicalVolume", e.ObjectOld.GetName()))
-			newLLV, ok := e.ObjectNew.(*v1alpha1.LVMLogicalVolume)
-			if !ok {
-				err = errors.New("unable to cast event object to a given type")
-				log.Error(err, "[RunLVMLogicalVolumeWatcherController] an error occurs while handling update event")
-				return
-			}
-			log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] successfully casted the request's new object %s to LVMLogicalVolume", e.ObjectOld.GetName()))
-
 			// TODO: Figure out how to log it in our logger.
 			if cfg.Loglevel == "4" {
 				fmt.Println("==============START DIFF==================")
-				fmt.Println(cmp.Diff(oldLLV, newLLV))
+				fmt.Println(cmp.Diff(e.ObjectOld, e.ObjectNew))
 				fmt.Println("==============END DIFF==================")
 			}
 
-			if reflect.DeepEqual(oldLLV.Spec, newLLV.Spec) && newLLV.DeletionTimestamp == nil {
-				log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] no target changes were made for the LVMLogicalVolume %s. No need to reconcile the request", newLLV.Name))
+			if reflect.DeepEqual(e.ObjectOld.Spec, e.ObjectNew.Spec) && e.ObjectNew.DeletionTimestamp == nil {
+				log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] no target changes were made for the LVMLogicalVolume %s. No need to reconcile the request", e.ObjectNew.Name))
 				return
 			}
 
-			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: newLLV.Namespace, Name: newLLV.Name}}
+			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.Namespace, Name: e.ObjectNew.Name}}
 			q.Add(request)
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] added the request of the LVMLogicalVolume %s to Reconciler", e.ObjectNew.GetName()))
 		},
-	})
+	}))
 
 	if err != nil {
 		log.Error(err, "[RunLVMLogicalVolumeWatcherController] the controller is unable to watch")
@@ -226,9 +205,9 @@ func ReconcileLVMLogicalVolume(ctx context.Context, cl client.Client, log logger
 		return reconcileLLVDeleteFunc(ctx, cl, log, metrics, sdsCache, llv, lvg)
 	default:
 		log.Info(fmt.Sprintf("[runEventReconcile] the LVMLogicalVolume %s has compeleted configuration and should not be reconciled", llv.Name))
-		if llv.Status.Phase != StatusPhaseCreated {
-			log.Warning(fmt.Sprintf("[runEventReconcile] the LVMLogicalVolume %s should not be reconciled but has an unexpected phase: %s. Setting the phase to %s", llv.Name, llv.Status.Phase, StatusPhaseCreated))
-			err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseCreated, "")
+		if llv.Status.Phase != LLVStatusPhaseCreated {
+			log.Warning(fmt.Sprintf("[runEventReconcile] the LVMLogicalVolume %s should not be reconciled but has an unexpected phase: %s. Setting the phase to %s", llv.Name, llv.Status.Phase, LLVStatusPhaseCreated))
+			err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, LLVStatusPhaseCreated, "")
 			if err != nil {
 				return true, err
 			}
@@ -251,7 +230,7 @@ func reconcileLLVCreateFunc(
 
 	// this check prevents infinite resource updating after retries
 	if llv.Status == nil {
-		err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhasePending, "")
+		err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, LLVStatusPhasePending, "")
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
 			return true, err
@@ -331,7 +310,7 @@ func reconcileLLVUpdateFunc(
 
 	// status might be nil if a user creates the resource with LV name which matches existing LV on the node
 	if llv.Status == nil {
-		err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhasePending, "")
+		err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, LLVStatusPhasePending, "")
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
 			return true, err
@@ -387,7 +366,7 @@ func reconcileLLVUpdateFunc(
 	log.Info(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s should be resized", llv.Name))
 	// this check prevents infinite resource updates after retry
 	if llv.Status.Phase != Failed {
-		err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, StatusPhaseResizing, "")
+		err := updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, LLVStatusPhaseResizing, "")
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
 			return true, err
