@@ -66,7 +66,7 @@ vgchange myvg-0 --addtag storage.deckhouse.io/enabled=true
 Достаточно удалить LVM-тег `storage.deckhouse.io/enabled=true` у нужной `LVM Volume Group` на узле:
 
 ```shell
-vgchange myvg-0 --addtag storage.deckhouse.io/enabled=true
+vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true
 ```
 
 После этого контроллер перестанет отслеживать выбранную `Volume Group` и самостоятельно удалит связанный с ней ресурс `LVMVolumeGroup`.

@@ -65,7 +65,7 @@ vgchange myvg-0 --addtag storage.deckhouse.io/enabled=true
 Delete the `storage.deckhouse.io/enabled=true` LVM tag for the target `Volume Group` on the node:
 
 ```shell
-vgchange myvg-0 --addtag storage.deckhouse.io/enabled=true
+vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true
 ```
 
 The controller will then stop tracking the selected `Volume Group` and delete the associated `LVMVolumeGroup` resource automatically.
