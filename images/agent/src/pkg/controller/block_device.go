@@ -28,7 +28,9 @@ import (
 	"fmt"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"os"
+	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,7 +43,8 @@ import (
 )
 
 const (
-	BlockDeviceCtrlName = "block-device-controller"
+	BlockDeviceCtrlName    = "block-device-controller"
+	BlockDeviceLabelPrefix = "status.blockdevice.storage.deckhouse.io"
 )
 
 func RunBlockDeviceController(
@@ -100,8 +103,9 @@ func BlockDeviceReconcile(ctx context.Context, cl kclient.Client, log logger.Log
 
 	// create new API devices
 	for _, candidate := range candidates {
-		if blockDevice, exist := apiBlockDevices[candidate.Name]; exist {
-			if !hasBlockDeviceDiff(blockDevice.Status, candidate) {
+		blockDevice, exist := apiBlockDevices[candidate.Name]
+		if exist {
+			if !hasBlockDeviceDiff(blockDevice, candidate) {
 				log.Debug(fmt.Sprintf(`[RunBlockDeviceController] no data to update for block device, name: "%s"`, candidate.Name))
 				continue
 			}
@@ -122,6 +126,7 @@ func BlockDeviceReconcile(ctx context.Context, cl kclient.Client, log logger.Log
 
 			// add new api device to the map, so it won't be deleted as fantom
 			apiBlockDevices[candidate.Name] = *device
+
 		}
 	}
 
@@ -135,24 +140,36 @@ func BlockDeviceReconcile(ctx context.Context, cl kclient.Client, log logger.Log
 	return false
 }
 
-func hasBlockDeviceDiff(res v1alpha1.BlockDeviceStatus, candidate internal.BlockDeviceCandidate) bool {
-	return candidate.NodeName != res.NodeName ||
-		candidate.Consumable != res.Consumable ||
-		candidate.PVUuid != res.PVUuid ||
-		candidate.VGUuid != res.VGUuid ||
-		candidate.PartUUID != res.PartUUID ||
-		candidate.LvmVolumeGroupName != res.LvmVolumeGroupName ||
-		candidate.ActualVGNameOnTheNode != res.ActualVGNameOnTheNode ||
-		candidate.Wwn != res.Wwn ||
-		candidate.Serial != res.Serial ||
-		candidate.Path != res.Path ||
-		candidate.Size.Value() != res.Size.Value() ||
-		candidate.Rota != res.Rota ||
-		candidate.Model != res.Model ||
-		candidate.HotPlug != res.HotPlug ||
-		candidate.Type != res.Type ||
-		candidate.FSType != res.FsType ||
-		candidate.MachineId != res.MachineID
+func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) bool {
+	hasBlockDeviceDiff := candidate.NodeName != blockDevice.Status.NodeName ||
+		candidate.Consumable != blockDevice.Status.Consumable ||
+		candidate.PVUuid != blockDevice.Status.PVUuid ||
+		candidate.VGUuid != blockDevice.Status.VGUuid ||
+		candidate.PartUUID != blockDevice.Status.PartUUID ||
+		candidate.LvmVolumeGroupName != blockDevice.Status.LvmVolumeGroupName ||
+		candidate.ActualVGNameOnTheNode != blockDevice.Status.ActualVGNameOnTheNode ||
+		candidate.Wwn != blockDevice.Status.Wwn ||
+		candidate.Serial != blockDevice.Status.Serial ||
+		candidate.Path != blockDevice.Status.Path ||
+		candidate.Size.Value() != blockDevice.Status.Size.Value() ||
+		candidate.Rota != blockDevice.Status.Rota ||
+		candidate.Model != blockDevice.Status.Model ||
+		candidate.HotPlug != blockDevice.Status.HotPlug ||
+		candidate.Type != blockDevice.Status.Type ||
+		candidate.FSType != blockDevice.Status.FsType ||
+		candidate.MachineId != blockDevice.Status.MachineID
+	if hasBlockDeviceDiff {
+		return hasBlockDeviceDiff
+	}
+
+	newLabels := GetBlockDeviceLabels(blockDevice)
+	equal := reflect.DeepEqual(newLabels, blockDevice.Labels)
+
+	if equal {
+		return false
+	}
+
+	return true
 }
 
 func GetAPIBlockDevices(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics) (map[string]v1alpha1.BlockDevice, error) {
@@ -516,6 +533,8 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 		MachineID:             candidate.MachineId,
 	}
 
+	blockDevice.Labels = GetBlockDeviceLabels(blockDevice)
+
 	start := time.Now()
 	err := kc.Update(ctx, &blockDevice)
 	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
@@ -528,8 +547,36 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 	return nil
 }
 
+func GetBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]string {
+
+	if blockDevice.Labels == nil {
+		blockDevice.Labels = make(map[string]string)
+	}
+
+	blockDevice.Labels["kubernetes.io/metadata.name"] = blockDevice.Name
+	blockDevice.Labels["kubernetes.io/hostname"] = blockDevice.Status.NodeName
+
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/type"] = blockDevice.Status.Type
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/fstype"] = blockDevice.Status.FsType
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/pvuuid"] = blockDevice.Status.PVUuid
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/vguuid"] = blockDevice.Status.VGUuid
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/partuuid"] = blockDevice.Status.PartUUID
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/lvmvolumegroupname"] = blockDevice.Status.LvmVolumeGroupName
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/actualvgnameonthenode"] = blockDevice.Status.ActualVGNameOnTheNode
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/wwn"] = blockDevice.Status.Wwn
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/serial"] = blockDevice.Status.Serial
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/path"] = blockDevice.Status.Path
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/size"] = blockDevice.Status.Size.String()
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/model"] = blockDevice.Status.Model
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/rota"] = strconv.FormatBool(blockDevice.Status.Rota)
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/hotplug"] = strconv.FormatBool(blockDevice.Status.HotPlug)
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/machineid"] = blockDevice.Status.MachineID
+
+	return blockDevice.Labels
+}
+
 func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, candidate internal.BlockDeviceCandidate) (*v1alpha1.BlockDevice, error) {
-	device := &v1alpha1.BlockDevice{
+	blockDevice := &v1alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: candidate.Name,
 		},
@@ -553,15 +600,16 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 		},
 	}
 
+	blockDevice.Labels = GetBlockDeviceLabels(*blockDevice)
 	start := time.Now()
-	err := kc.Create(ctx, device)
+	err := kc.Create(ctx, blockDevice)
 	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "create").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.ApiMethodsExecutionCount(BlockDeviceCtrlName, "create").Inc()
 	if err != nil {
 		metrics.ApiMethodsErrors(BlockDeviceCtrlName, "create").Inc()
 		return nil, err
 	}
-	return device, nil
+	return blockDevice, nil
 }
 
 func DeleteAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, device *v1alpha1.BlockDevice) error {
