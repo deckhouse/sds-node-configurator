@@ -553,7 +553,7 @@ func GetBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]string {
 		blockDevice.Labels = make(map[string]string)
 	}
 
-	blockDevice.Labels["kubernetes.io/metadata.name"] = blockDevice.ObjectMeta.Name
+	// blockDevice.Labels["kubernetes.io/metadata.name"] = blockDevice.ObjectMeta.Name
 	blockDevice.Labels["kubernetes.io/hostname"] = blockDevice.Status.NodeName
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/type"] = blockDevice.Status.Type
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/fstype"] = blockDevice.Status.FsType
