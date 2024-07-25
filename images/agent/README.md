@@ -22,7 +22,7 @@
 
 `NODE_NAME`
 
-`METRICS_PORT` - default : 9695
+`METRICS_PORT` - default : 4202
 
 
 #### Metrics

@@ -107,7 +107,7 @@ func TestNewConfig(t *testing.T) {
 
 	t.Run("MetricsPortNotSet_ReturnsDefaultPort", func(t *testing.T) {
 		expNodeName := "test-node"
-		expMetricsPort := ":9695"
+		expMetricsPort := ":8080"
 		expMachineId := "test-id"
 
 		err := os.Setenv(NodeName, expNodeName)

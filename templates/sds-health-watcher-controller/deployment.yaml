@@ -83,6 +83,10 @@ spec:
               scheme: HTTP
             periodSeconds: 1
             failureThreshold: 3
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
           resources:
             requests:
               {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
