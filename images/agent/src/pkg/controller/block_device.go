@@ -564,7 +564,6 @@ func GetBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]string {
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/actualvgnameonthenode"] = blockDevice.Status.ActualVGNameOnTheNode
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/wwn"] = blockDevice.Status.Wwn
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/serial"] = blockDevice.Status.Serial
-	//blockDevice.Labels[BlockDeviceLabelPrefix+"/path"] = blockDevice.Status.Path
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/size"] = blockDevice.Status.Size.String()
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/model"] = blockDevice.Status.Model
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/rota"] = strconv.FormatBool(blockDevice.Status.Rota)
