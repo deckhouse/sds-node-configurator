@@ -60,7 +60,7 @@ func RunLVGConditionsWatcher(
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] Reconciler got a request %s", request.String()))
 
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			err := cl.Get(ctx, request.NamespacedName, lvg)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVGConditionsWatcher] unable to get the LVMVolumeGroup %s", request.Name))
@@ -94,7 +94,7 @@ func RunLVGConditionsWatcher(
 		return err
 	}
 
-	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LvmVolumeGroup{}), handler.Funcs{
+	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LVMVolumeGroup{}), handler.Funcs{
 		CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] got a create event for the LVMVolumeGroup %s", e.Object.GetName()))
 
@@ -106,7 +106,7 @@ func RunLVGConditionsWatcher(
 		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] got a create event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
 
-			oldLVG, ok := e.ObjectOld.(*v1alpha1.LvmVolumeGroup)
+			oldLVG, ok := e.ObjectOld.(*v1alpha1.LVMVolumeGroup)
 			if !ok {
 				err = errors.New("unable to cast event object to a given type")
 				log.Error(err, "[RunLVGConditionsWatcher] an error occurred while handling a create event")
@@ -114,7 +114,7 @@ func RunLVGConditionsWatcher(
 			}
 			log.Debug(fmt.Sprintf("[RunLVGConditionsWatcher] successfully casted an old state of the LVMVolumeGroup %s", oldLVG.Name))
 
-			newLVG, ok := e.ObjectNew.(*v1alpha1.LvmVolumeGroup)
+			newLVG, ok := e.ObjectNew.(*v1alpha1.LVMVolumeGroup)
 			if !ok {
 				err = errors.New("unable to cast event object to a given type")
 				log.Error(err, "[RunLVGConditionsWatcher] an error occurred while handling a create event")
@@ -140,7 +140,7 @@ func RunLVGConditionsWatcher(
 	return nil
 }
 
-func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
+func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLVGConditions] starts the reconciliation for the LVMVolumeGroup %s", lvg.Name))
 
 	if lvg.Status.Conditions == nil {

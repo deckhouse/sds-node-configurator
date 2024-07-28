@@ -69,11 +69,11 @@ func RunLVMLogicalVolumeWatcherController(
 				return reconcile.Result{}, err
 			}
 
-			lvg, err := getLVMVolumeGroup(ctx, cl, metrics, llv.Spec.LvmVolumeGroupName)
+			lvg, err := getLVMVolumeGroup(ctx, cl, metrics, llv.Spec.LVMVolumeGroupName)
 			if err != nil {
 				if k8serr.IsNotFound(err) {
-					log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] LVMVolumeGroup %s not found for LVMLogicalVolume %s. Retry in %s", llv.Spec.LvmVolumeGroupName, llv.Name, cfg.VolumeGroupScanIntervalSec.String()))
-					err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, LLVStatusPhaseFailed, fmt.Sprintf("LVMVolumeGroup %s not found", llv.Spec.LvmVolumeGroupName))
+					log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] LVMVolumeGroup %s not found for LVMLogicalVolume %s. Retry in %s", llv.Spec.LVMVolumeGroupName, llv.Name, cfg.VolumeGroupScanIntervalSec.String()))
+					err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, llv, LLVStatusPhaseFailed, fmt.Sprintf("LVMVolumeGroup %s not found", llv.Spec.LVMVolumeGroupName))
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] unable to update the LVMLogicalVolume %s", llv.Name))
 						return reconcile.Result{}, err
@@ -190,7 +190,7 @@ func RunLVMLogicalVolumeWatcherController(
 	return c, err
 }
 
-func ReconcileLVMLogicalVolume(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
+func ReconcileLVMLogicalVolume(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
 	log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolume] starts the reconciliation for the LVMLogicalVolume %s", llv.Name))
 
 	log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolume] tries to identify the reconciliation type for the LVMLogicalVolume %s", llv.Name))
@@ -224,7 +224,7 @@ func reconcileLLVCreateFunc(
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
 	llv *v1alpha1.LVMLogicalVolume,
-	lvg *v1alpha1.LvmVolumeGroup,
+	lvg *v1alpha1.LVMVolumeGroup,
 ) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] starts reconciliation for the LVMLogicalVolume %s", llv.Name))
 
@@ -304,7 +304,7 @@ func reconcileLLVUpdateFunc(
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
 	llv *v1alpha1.LVMLogicalVolume,
-	lvg *v1alpha1.LvmVolumeGroup,
+	lvg *v1alpha1.LVMVolumeGroup,
 ) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] starts reconciliation for the LVMLogicalVolume %s", llv.Name))
 
@@ -432,7 +432,7 @@ func reconcileLLVDeleteFunc(
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
 	llv *v1alpha1.LVMLogicalVolume,
-	lvg *v1alpha1.LvmVolumeGroup,
+	lvg *v1alpha1.LVMVolumeGroup,
 ) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLLVDeleteFunc] starts reconciliation for the LVMLogicalVolume %s", llv.Name))
 

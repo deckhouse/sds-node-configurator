@@ -17,6 +17,8 @@ require (
 	sigs.k8s.io/controller-runtime v0.17.3
 )
 
+replace github.com/deckhouse/sds-node-configurator/api => ../../api
+
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect

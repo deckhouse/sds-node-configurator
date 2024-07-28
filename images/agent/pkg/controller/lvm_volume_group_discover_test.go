@@ -470,23 +470,23 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Nodes:                 nodes,
 		}
 
-		thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools)
+		thinPools, err := convertStatusThinPools(v1alpha1.LVMVolumeGroup{}, statusThinPools)
 		if err != nil {
 			t.Error(err)
 		}
-		expected := v1alpha1.LvmVolumeGroup{
+		expected := v1alpha1.LVMVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:            LVMVGName,
 				ResourceVersion: "1",
 				OwnerReferences: []metav1.OwnerReference{},
 			},
-			Spec: v1alpha1.LvmVolumeGroupSpec{
+			Spec: v1alpha1.LVMVolumeGroupSpec{
 				ActualVGNameOnTheNode: ActualVGNameOnTheNode,
 				BlockDeviceNames:      blockDevicesNames,
 				ThinPools:             convertSpecThinPools(specThinPools),
 				Type:                  Type,
 			},
-			Status: v1alpha1.LvmVolumeGroupStatus{
+			Status: v1alpha1.LVMVolumeGroupStatus{
 				AllocatedSize: size10G,
 				Nodes:         convertLVMVGNodes(nodes),
 				ThinPools:     thinPools,
@@ -559,25 +559,25 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Nodes:                 nodes,
 		}
 
-		thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools)
+		thinPools, err := convertStatusThinPools(v1alpha1.LVMVolumeGroup{}, statusThinPools)
 		if err != nil {
 			t.Error(err)
 		}
 
-		expected := map[string]v1alpha1.LvmVolumeGroup{
+		expected := map[string]v1alpha1.LVMVolumeGroup{
 			LVMVGName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:            LVMVGName,
 					ResourceVersion: "1",
 					OwnerReferences: nil,
 				},
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					ActualVGNameOnTheNode: ActualVGNameOnTheNode,
 					BlockDeviceNames:      blockDevicesNames,
 					ThinPools:             convertSpecThinPools(specThinPools),
 					Type:                  Type,
 				},
-				Status: v1alpha1.LvmVolumeGroupStatus{
+				Status: v1alpha1.LVMVolumeGroupStatus{
 					AllocatedSize: size10G,
 					Nodes:         convertLVMVGNodes(nodes),
 					ThinPools:     thinPools,
@@ -658,7 +658,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		if assert.NoError(t, err) && assert.NotNil(t, created) {
 			actual, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
 			if assert.NoError(t, err) && assert.Equal(t, 1, len(actual)) {
-				err := DeleteLVMVolumeGroup(ctx, cl, testMetrics, &v1alpha1.LvmVolumeGroup{
+				err := DeleteLVMVolumeGroup(ctx, cl, testMetrics, &v1alpha1.LVMVolumeGroup{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: LVMVGName,
 					},
@@ -764,24 +764,24 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Nodes:                 newNodes,
 		}
 
-		thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, StatusThinPools)
+		thinPools, err := convertStatusThinPools(v1alpha1.LVMVolumeGroup{}, StatusThinPools)
 		if err != nil {
 			t.Error(err)
 		}
 
-		expected := v1alpha1.LvmVolumeGroup{
+		expected := v1alpha1.LVMVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:            LVMVGName,
 				ResourceVersion: "2",
 				OwnerReferences: nil,
 			},
-			Spec: v1alpha1.LvmVolumeGroupSpec{
+			Spec: v1alpha1.LVMVolumeGroupSpec{
 				ActualVGNameOnTheNode: ActualVGNameOnTheNode,
 				BlockDeviceNames:      BlockDevicesNames,
 				ThinPools:             convertSpecThinPools(SpecThinPools),
 				Type:                  Type,
 			},
-			Status: v1alpha1.LvmVolumeGroupStatus{
+			Status: v1alpha1.LVMVolumeGroupStatus{
 				AllocatedSize: size10G,
 				Nodes:         convertLVMVGNodes(newNodes),
 				ThinPools:     thinPools,
@@ -834,10 +834,10 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				},
 			}
 
-			lvs = map[string]v1alpha1.LvmVolumeGroup{
+			lvs = map[string]v1alpha1.LVMVolumeGroup{
 				firstLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: firstLVName},
-					Spec: v1alpha1.LvmVolumeGroupSpec{
+					Spec: v1alpha1.LVMVolumeGroupSpec{
 						BlockDeviceNames:      []string{firstBDName},
 						Type:                  Local,
 						ActualVGNameOnTheNode: vgName,
@@ -845,7 +845,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				},
 				secondLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: secondLVName},
-					Spec: v1alpha1.LvmVolumeGroupSpec{
+					Spec: v1alpha1.LVMVolumeGroupSpec{
 						BlockDeviceNames:      []string{secondBDName},
 						Type:                  Local,
 						ActualVGNameOnTheNode: vgName,
@@ -854,10 +854,10 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			}
 		)
 
-		expected := map[string]v1alpha1.LvmVolumeGroup{
+		expected := map[string]v1alpha1.LVMVolumeGroup{
 			vgName: {
 				ObjectMeta: metav1.ObjectMeta{Name: firstLVName},
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames:      []string{firstBDName},
 					Type:                  Local,
 					ActualVGNameOnTheNode: vgName,
@@ -897,17 +897,17 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				},
 			}
 
-			lvs = map[string]v1alpha1.LvmVolumeGroup{
+			lvs = map[string]v1alpha1.LVMVolumeGroup{
 				firstLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: firstLVName},
-					Spec: v1alpha1.LvmVolumeGroupSpec{
+					Spec: v1alpha1.LVMVolumeGroupSpec{
 						BlockDeviceNames: []string{firstBDName},
 						Type:             Local,
 					},
 				},
 				secondLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: secondLVName},
-					Spec: v1alpha1.LvmVolumeGroupSpec{
+					Spec: v1alpha1.LVMVolumeGroupSpec{
 						BlockDeviceNames: []string{secondBDName},
 						Type:             Local,
 					},
@@ -978,17 +978,17 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Nodes:             nodes,
 			}
 
-			thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools)
+			thinPools, err := convertStatusThinPools(v1alpha1.LVMVolumeGroup{}, statusThinPools)
 			if err != nil {
 				t.Error(err)
 			}
-			lvmVolumeGroup := v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvmVolumeGroup := v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames: blockDevicesNames,
 					ThinPools:        convertSpecThinPools(specThinPools),
 					Type:             specType,
 				},
-				Status: v1alpha1.LvmVolumeGroupStatus{
+				Status: v1alpha1.LVMVolumeGroupStatus{
 					AllocatedSize: resource.MustParse("9765625Ki"),
 					Nodes:         convertLVMVGNodes(nodes),
 					ThinPools:     thinPools,
@@ -1063,18 +1063,18 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Nodes:             nodes,
 			}
 
-			thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools)
+			thinPools, err := convertStatusThinPools(v1alpha1.LVMVolumeGroup{}, statusThinPools)
 			if err != nil {
 				t.Error(err)
 			}
 
-			lvmVolumeGroup := v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvmVolumeGroup := v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames: blockDevicesNames,
 					ThinPools:        convertSpecThinPools(specThinPools),
 					Type:             specType,
 				},
-				Status: v1alpha1.LvmVolumeGroupStatus{
+				Status: v1alpha1.LVMVolumeGroupStatus{
 					AllocatedSize: allocatedSize,
 					Nodes:         convertLVMVGNodes(nodes),
 					ThinPools:     thinPools,
@@ -1093,7 +1093,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			reason  = "test-reason"
 			message = "test-message"
 		)
-		lvg := &v1alpha1.LvmVolumeGroup{
+		lvg := &v1alpha1.LVMVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: lvgName,
 			},
@@ -1127,7 +1127,7 @@ func NewFakeClient() client.WithWatch {
 	_ = metav1.AddMetaToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
 
-	builder := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&v1alpha1.LvmVolumeGroup{})
+	builder := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&v1alpha1.LVMVolumeGroup{})
 
 	cl := builder.Build()
 	return cl

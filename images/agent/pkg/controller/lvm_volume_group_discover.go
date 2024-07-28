@@ -143,7 +143,7 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] lvg: %+v", lvg))
 
 			if !hasLVMVolumeGroupDiff(log, lvg, candidate) {
-				log.Debug(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] no data to update for LvmVolumeGroup, name: "%s"`, lvg.Name))
+				log.Debug(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] no data to update for LVMVolumeGroup, name: "%s"`, lvg.Name))
 				err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.TypeVGReady, internal.ReasonUpdated, "ready to create LV")
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name))
@@ -152,15 +152,15 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 				continue
 			}
 
-			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LvmVolumeGroup %s should be updated", lvg.Name))
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s should be updated", lvg.Name))
 			if err = UpdateLVMVolumeGroupByCandidate(ctx, cl, metrics, log, &lvg, candidate); err != nil {
-				log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to update LvmVolumeGroup, name: "%s". Requeue the request in %s`,
+				log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to update LVMVolumeGroup, name: "%s". Requeue the request in %s`,
 					lvg.Name, cfg.VolumeGroupScanIntervalSec.String()))
 				shouldRequeue = true
 				continue
 			}
 
-			log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] updated LvmVolumeGroup, name: "%s"`, lvg.Name))
+			log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] updated LVMVolumeGroup, name: "%s"`, lvg.Name))
 
 		} else {
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is not yet created. Create it", lvg.Name))
@@ -204,12 +204,12 @@ func filterLVGsByNode(
 	ctx context.Context,
 	cl kclient.Client,
 	log logger.Logger,
-	lvgs map[string]v1alpha1.LvmVolumeGroup,
+	lvgs map[string]v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 	currentNode string,
-) map[string]v1alpha1.LvmVolumeGroup {
+) map[string]v1alpha1.LVMVolumeGroup {
 
-	filtered := make(map[string]v1alpha1.LvmVolumeGroup, len(lvgs))
+	filtered := make(map[string]v1alpha1.LVMVolumeGroup, len(lvgs))
 	blockDevicesNodes := make(map[string]string, len(blockDevices))
 
 	for _, bd := range blockDevices {
@@ -263,7 +263,7 @@ func filterLVGsByNode(
 	return filtered
 }
 
-func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LvmVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
+func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LVMVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
 	convertedStatusPools, err := convertStatusThinPools(lvg, candidate.StatusThinPools)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[hasLVMVolumeGroupDiff] unable to identify candidate difference for the LVMVolumeGroup %s", lvg.Name))
@@ -289,7 +289,7 @@ func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LvmVolumeGroup, candi
 		hasStatusNodesDiff(log, convertLVMVGNodes(candidate.Nodes), lvg.Status.Nodes)
 }
 
-func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LvmVolumeGroupNode) bool {
+func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LVMVolumeGroupNode) bool {
 	if len(first) != len(second) {
 		return true
 	}
@@ -319,7 +319,7 @@ func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LvmVolumeGro
 	return false
 }
 
-func hasStatusPoolDiff(first, second []v1alpha1.LvmVolumeGroupThinPoolStatus) bool {
+func hasStatusPoolDiff(first, second []v1alpha1.LVMVolumeGroupThinPoolStatus) bool {
 	if len(first) != len(second) {
 		return true
 	}
@@ -345,7 +345,7 @@ func ReconcileUnhealthyLVMVolumeGroups(
 	cl kclient.Client,
 	log logger.Logger,
 	candidates []internal.LVMVolumeGroupCandidate,
-	lvgs map[string]v1alpha1.LvmVolumeGroup,
+	lvgs map[string]v1alpha1.LVMVolumeGroup,
 ) ([]internal.LVMVolumeGroupCandidate, error) {
 	candidateMap := make(map[string]internal.LVMVolumeGroupCandidate, len(candidates))
 	for _, candidate := range candidates {
@@ -811,25 +811,25 @@ func CreateLVMVolumeGroupByCandidate(
 	metrics monitoring.Metrics,
 	kc kclient.Client,
 	candidate internal.LVMVolumeGroupCandidate,
-) (*v1alpha1.LvmVolumeGroup, error) {
-	thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, candidate.StatusThinPools)
+) (*v1alpha1.LVMVolumeGroup, error) {
+	thinPools, err := convertStatusThinPools(v1alpha1.LVMVolumeGroup{}, candidate.StatusThinPools)
 	if err != nil {
 		return nil, err
 	}
 
-	lvmVolumeGroup := &v1alpha1.LvmVolumeGroup{
+	lvmVolumeGroup := &v1alpha1.LVMVolumeGroup{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            candidate.LVMVGName,
 			OwnerReferences: []metav1.OwnerReference{},
 			Finalizers:      candidate.Finalizers,
 		},
-		Spec: v1alpha1.LvmVolumeGroupSpec{
+		Spec: v1alpha1.LVMVolumeGroupSpec{
 			ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
 			BlockDeviceNames:      candidate.BlockDevicesNames,
 			ThinPools:             convertSpecThinPools(candidate.SpecThinPools),
 			Type:                  candidate.Type,
 		},
-		Status: v1alpha1.LvmVolumeGroupStatus{
+		Status: v1alpha1.LVMVolumeGroupStatus{
 			AllocatedSize: candidate.AllocatedSize,
 			Nodes:         convertLVMVGNodes(candidate.Nodes),
 			ThinPools:     thinPools,
@@ -866,7 +866,7 @@ func UpdateLVMVolumeGroupByCandidate(
 	cl kclient.Client,
 	metrics monitoring.Metrics,
 	log logger.Logger,
-	lvg *v1alpha1.LvmVolumeGroup,
+	lvg *v1alpha1.LVMVolumeGroup,
 	candidate internal.LVMVolumeGroupCandidate,
 ) error {
 	// Check if VG has some problems
@@ -881,7 +881,7 @@ func UpdateLVMVolumeGroupByCandidate(
 
 	// The resource.Status.Nodes can not be just re-written, it needs to be updated directly by a node.
 	// We take all current resources nodes and convert them to map for better performance further.
-	resourceNodes := make(map[string][]v1alpha1.LvmVolumeGroupDevice, len(lvg.Status.Nodes))
+	resourceNodes := make(map[string][]v1alpha1.LVMVolumeGroupDevice, len(lvg.Status.Nodes))
 	for _, node := range lvg.Status.Nodes {
 		resourceNodes[node.Name] = node.Devices
 	}
@@ -929,11 +929,11 @@ func UpdateLVMVolumeGroupByCandidate(
 	return err
 }
 
-func convertLVMVGNodes(nodes map[string][]internal.LVMVGDevice) []v1alpha1.LvmVolumeGroupNode {
-	lvmvgNodes := make([]v1alpha1.LvmVolumeGroupNode, 0, len(nodes))
+func convertLVMVGNodes(nodes map[string][]internal.LVMVGDevice) []v1alpha1.LVMVolumeGroupNode {
+	lvmvgNodes := make([]v1alpha1.LVMVolumeGroupNode, 0, len(nodes))
 
 	for nodeName, nodeDevices := range nodes {
-		lvmvgNodes = append(lvmvgNodes, v1alpha1.LvmVolumeGroupNode{
+		lvmvgNodes = append(lvmvgNodes, v1alpha1.LVMVolumeGroupNode{
 			Devices: convertLVMVGDevices(nodeDevices),
 			Name:    nodeName,
 		})
@@ -942,11 +942,11 @@ func convertLVMVGNodes(nodes map[string][]internal.LVMVGDevice) []v1alpha1.LvmVo
 	return lvmvgNodes
 }
 
-func convertLVMVGDevices(devices []internal.LVMVGDevice) []v1alpha1.LvmVolumeGroupDevice {
-	convertedDevices := make([]v1alpha1.LvmVolumeGroupDevice, 0, len(devices))
+func convertLVMVGDevices(devices []internal.LVMVGDevice) []v1alpha1.LVMVolumeGroupDevice {
+	convertedDevices := make([]v1alpha1.LVMVolumeGroupDevice, 0, len(devices))
 
 	for _, dev := range devices {
-		convertedDevices = append(convertedDevices, v1alpha1.LvmVolumeGroupDevice{
+		convertedDevices = append(convertedDevices, v1alpha1.LVMVolumeGroupDevice{
 			BlockDevice: dev.BlockDevice,
 			DevSize:     dev.DevSize,
 			PVSize:      dev.PVSize,
@@ -958,10 +958,10 @@ func convertLVMVGDevices(devices []internal.LVMVGDevice) []v1alpha1.LvmVolumeGro
 	return convertedDevices
 }
 
-func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.LvmVolumeGroupThinPoolSpec {
-	result := make([]v1alpha1.LvmVolumeGroupThinPoolSpec, 0, len(thinPools))
+func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.LVMVolumeGroupThinPoolSpec {
+	result := make([]v1alpha1.LVMVolumeGroupThinPoolSpec, 0, len(thinPools))
 	for name, size := range thinPools {
-		result = append(result, v1alpha1.LvmVolumeGroupThinPoolSpec{
+		result = append(result, v1alpha1.LVMVolumeGroupThinPoolSpec{
 			Name: name,
 			Size: size.String(),
 		})
@@ -970,13 +970,13 @@ func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.Lvm
 	return result
 }
 
-func convertStatusThinPools(lvg v1alpha1.LvmVolumeGroup, thinPools []internal.LVMVGStatusThinPool) ([]v1alpha1.LvmVolumeGroupThinPoolStatus, error) {
+func convertStatusThinPools(lvg v1alpha1.LVMVolumeGroup, thinPools []internal.LVMVGStatusThinPool) ([]v1alpha1.LVMVolumeGroupThinPoolStatus, error) {
 	tpLimits := make(map[string]string, len(lvg.Spec.ThinPools))
 	for _, tp := range lvg.Spec.ThinPools {
 		tpLimits[tp.Name] = tp.AllocationLimit
 	}
 
-	result := make([]v1alpha1.LvmVolumeGroupThinPoolStatus, 0, len(thinPools))
+	result := make([]v1alpha1.LVMVolumeGroupThinPoolStatus, 0, len(thinPools))
 	for _, tp := range thinPools {
 		limit := tpLimits[tp.Name]
 		if len(limit) == 0 {
@@ -988,7 +988,7 @@ func convertStatusThinPools(lvg v1alpha1.LvmVolumeGroup, thinPools []internal.LV
 			return nil, err
 		}
 
-		result = append(result, v1alpha1.LvmVolumeGroupThinPoolStatus{
+		result = append(result, v1alpha1.LVMVolumeGroupThinPoolStatus{
 			Name:            tp.Name,
 			ActualSize:      tp.ActualSize,
 			AllocationLimit: limit,
@@ -1029,8 +1029,8 @@ func generateLVMVGName() string {
 	return "vg-" + string(uuid.NewUUID())
 }
 
-func GetAPILVMVolumeGroups(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics) (map[string]v1alpha1.LvmVolumeGroup, error) {
-	lvgList := &v1alpha1.LvmVolumeGroupList{}
+func GetAPILVMVolumeGroups(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics) (map[string]v1alpha1.LVMVolumeGroup, error) {
+	lvgList := &v1alpha1.LVMVolumeGroupList{}
 
 	start := time.Now()
 	err := kc.List(ctx, lvgList)
@@ -1038,10 +1038,10 @@ func GetAPILVMVolumeGroups(ctx context.Context, kc kclient.Client, metrics monit
 	metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "list").Inc()
 	if err != nil {
 		metrics.ApiMethodsErrors(LVMVolumeGroupDiscoverCtrlName, "list").Inc()
-		return nil, fmt.Errorf("[GetApiLVMVolumeGroups] unable to list LvmVolumeGroups, err: %w", err)
+		return nil, fmt.Errorf("[GetApiLVMVolumeGroups] unable to list LVMVolumeGroups, err: %w", err)
 	}
 
-	lvgs := make(map[string]v1alpha1.LvmVolumeGroup, len(lvgList.Items))
+	lvgs := make(map[string]v1alpha1.LVMVolumeGroup, len(lvgList.Items))
 	for _, lvg := range lvgList.Items {
 		lvgs[lvg.Name] = lvg
 	}

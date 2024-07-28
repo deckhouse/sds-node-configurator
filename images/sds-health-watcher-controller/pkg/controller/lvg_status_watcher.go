@@ -33,7 +33,7 @@ func RunLVGStatusWatcher(
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 			log.Info(fmt.Sprintf("[RunLVGStatusWatcher] Reconciler got a request %s", request.String()))
 
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			err := cl.Get(ctx, request.NamespacedName, lvg)
 			if err != nil {
 				if errors2.IsNotFound(err) {
@@ -65,7 +65,7 @@ func RunLVGStatusWatcher(
 		return err
 	}
 
-	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LvmVolumeGroup{}), handler.Funcs{
+	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LVMVolumeGroup{}), handler.Funcs{
 		CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[RunLVGStatusWatcher] got a create event for the LVMVolumeGroup %s", e.Object.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
@@ -87,7 +87,7 @@ func RunLVGStatusWatcher(
 	return nil
 }
 
-func reconcileLVGStatus(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup) error {
+func reconcileLVGStatus(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup) error {
 	log.Debug(fmt.Sprintf("[reconcileLVGStatus] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
 	shouldUpdate := false
 
@@ -116,7 +116,7 @@ func reconcileLVGStatus(ctx context.Context, cl client.Client, log logger.Logger
 	return err
 }
 
-func getActualThinPoolReadyCount(statusTp []v1alpha1.LvmVolumeGroupThinPoolStatus) int {
+func getActualThinPoolReadyCount(statusTp []v1alpha1.LVMVolumeGroupThinPoolStatus) int {
 	count := 0
 
 	for _, tp := range statusTp {
@@ -128,7 +128,7 @@ func getActualThinPoolReadyCount(statusTp []v1alpha1.LvmVolumeGroupThinPoolStatu
 	return count
 }
 
-func getUniqueThinPoolCount(specTp []v1alpha1.LvmVolumeGroupThinPoolSpec, statusTp []v1alpha1.LvmVolumeGroupThinPoolStatus) int {
+func getUniqueThinPoolCount(specTp []v1alpha1.LVMVolumeGroupThinPoolSpec, statusTp []v1alpha1.LVMVolumeGroupThinPoolStatus) int {
 	unique := make(map[string]struct{}, len(specTp)+len(statusTp))
 
 	for _, tp := range specTp {
@@ -142,7 +142,7 @@ func getUniqueThinPoolCount(specTp []v1alpha1.LvmVolumeGroupThinPoolSpec, status
 	return len(unique)
 }
 
-func getVGConfigurationAppliedStatus(lvg *v1alpha1.LvmVolumeGroup) v1.ConditionStatus {
+func getVGConfigurationAppliedStatus(lvg *v1alpha1.LVMVolumeGroup) v1.ConditionStatus {
 	for _, c := range lvg.Status.Conditions {
 		if c.Type == internal.TypeVGConfigurationApplied {
 			return c.Status

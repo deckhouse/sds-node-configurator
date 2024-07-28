@@ -193,7 +193,7 @@ func configureTestThickLLV(name, lvgName string) *v1alpha1.LVMLogicalVolume {
 			ActualLVNameOnTheNode: name,
 			Type:                  Thick,
 			Size:                  size,
-			LvmVolumeGroupName:    lvgName,
+			LVMVolumeGroupName:    lvgName,
 		},
 	}
 }
@@ -208,7 +208,7 @@ func configureTestThinLLV(name, lvgName, poolName string) *v1alpha1.LVMLogicalVo
 			ActualLVNameOnTheNode: name,
 			Type:                  Thin,
 			Size:                  size,
-			LvmVolumeGroupName:    lvgName,
+			LVMVolumeGroupName:    lvgName,
 			Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
 		},
 	}

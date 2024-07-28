@@ -146,7 +146,7 @@ func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.Blo
 		candidate.PVUuid != blockDevice.Status.PVUuid ||
 		candidate.VGUuid != blockDevice.Status.VGUuid ||
 		candidate.PartUUID != blockDevice.Status.PartUUID ||
-		candidate.LvmVolumeGroupName != blockDevice.Status.LvmVolumeGroupName ||
+		candidate.LVMVolumeGroupName != blockDevice.Status.LVMVolumeGroupName ||
 		candidate.ActualVGNameOnTheNode != blockDevice.Status.ActualVGNameOnTheNode ||
 		candidate.Wwn != blockDevice.Status.Wwn ||
 		candidate.Serial != blockDevice.Status.Serial ||
@@ -303,7 +303,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, sdsCache *c
 						candidate.PVUuid = pv.PVUuid
 						candidate.VGUuid = pv.VGUuid
 						candidate.ActualVGNameOnTheNode = pv.VGName
-						candidate.LvmVolumeGroupName = lvmVGName
+						candidate.LVMVolumeGroupName = lvmVGName
 					} else {
 						if len(pv.VGName) != 0 {
 							log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] The device is a PV with VG named %s that lacks our tag %s. Removing it from Kubernetes", pv.VGName, internal.LVMTags[0]))
@@ -521,7 +521,7 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 		PVUuid:                candidate.PVUuid,
 		VGUuid:                candidate.VGUuid,
 		PartUUID:              candidate.PartUUID,
-		LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
+		LVMVolumeGroupName:    candidate.LVMVolumeGroupName,
 		ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
 		Wwn:                   candidate.Wwn,
 		Serial:                candidate.Serial,
@@ -560,7 +560,7 @@ func GetBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]string {
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/pvuuid"] = blockDevice.Status.PVUuid
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/vguuid"] = blockDevice.Status.VGUuid
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/partuuid"] = blockDevice.Status.PartUUID
-	blockDevice.Labels[BlockDeviceLabelPrefix+"/lvmvolumegroupname"] = blockDevice.Status.LvmVolumeGroupName
+	blockDevice.Labels[BlockDeviceLabelPrefix+"/lvmvolumegroupname"] = blockDevice.Status.LVMVolumeGroupName
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/actualvgnameonthenode"] = blockDevice.Status.ActualVGNameOnTheNode
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/wwn"] = blockDevice.Status.Wwn
 	blockDevice.Labels[BlockDeviceLabelPrefix+"/serial"] = blockDevice.Status.Serial
@@ -586,7 +586,7 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 			PVUuid:                candidate.PVUuid,
 			VGUuid:                candidate.VGUuid,
 			PartUUID:              candidate.PartUUID,
-			LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
+			LVMVolumeGroupName:    candidate.LVMVolumeGroupName,
 			ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
 			Wwn:                   candidate.Wwn,
 			Serial:                candidate.Serial,

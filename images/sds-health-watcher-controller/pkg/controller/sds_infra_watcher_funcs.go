@@ -96,8 +96,8 @@ func getPodsBySelector(ctx context.Context, cl client.Client, selector map[strin
 	return pods, nil
 }
 
-func findLVMVolumeGroupsByNodeNames(lvgs map[string]v1alpha1.LvmVolumeGroup, nodeNames []string) map[string]v1alpha1.LvmVolumeGroup {
-	result := make(map[string]v1alpha1.LvmVolumeGroup, len(lvgs))
+func findLVMVolumeGroupsByNodeNames(lvgs map[string]v1alpha1.LVMVolumeGroup, nodeNames []string) map[string]v1alpha1.LVMVolumeGroup {
+	result := make(map[string]v1alpha1.LVMVolumeGroup, len(lvgs))
 
 	names := make(map[string]struct{}, len(nodeNames))
 	for _, n := range nodeNames {
@@ -138,7 +138,7 @@ func getNodesByNames(ctx context.Context, cl client.Client, names []string) (map
 	return nodes, missedNodes, nil
 }
 
-func getNodeNamesFromLVGs(lvgs map[string]v1alpha1.LvmVolumeGroup) []string {
+func getNodeNamesFromLVGs(lvgs map[string]v1alpha1.LVMVolumeGroup) []string {
 	nodes := make([]string, 0, len(lvgs))
 
 	for _, lvg := range lvgs {
@@ -150,8 +150,8 @@ func getNodeNamesFromLVGs(lvgs map[string]v1alpha1.LvmVolumeGroup) []string {
 	return nodes
 }
 
-func GetLVMVolumeGroups(ctx context.Context, cl client.Client, metrics monitoring.Metrics) (map[string]v1alpha1.LvmVolumeGroup, error) {
-	lvgList := &v1alpha1.LvmVolumeGroupList{}
+func GetLVMVolumeGroups(ctx context.Context, cl client.Client, metrics monitoring.Metrics) (map[string]v1alpha1.LVMVolumeGroup, error) {
+	lvgList := &v1alpha1.LVMVolumeGroupList{}
 
 	start := time.Now()
 	err := cl.List(ctx, lvgList)
@@ -159,10 +159,10 @@ func GetLVMVolumeGroups(ctx context.Context, cl client.Client, metrics monitorin
 	metrics.ApiMethodsExecutionCount(SdsInfraWatcherCtrlName, "list").Inc()
 	if err != nil {
 		metrics.ApiMethodsErrors(SdsInfraWatcherCtrlName, "list").Inc()
-		return nil, fmt.Errorf("[GetApiLVMVolumeGroups] unable to list LvmVolumeGroups, err: %w", err)
+		return nil, fmt.Errorf("[GetApiLVMVolumeGroups] unable to list LVMVolumeGroups, err: %w", err)
 	}
 
-	lvgs := make(map[string]v1alpha1.LvmVolumeGroup, len(lvgList.Items))
+	lvgs := make(map[string]v1alpha1.LVMVolumeGroup, len(lvgList.Items))
 	for _, lvg := range lvgList.Items {
 		lvgs[lvg.Name] = lvg
 	}
@@ -170,7 +170,7 @@ func GetLVMVolumeGroups(ctx context.Context, cl client.Client, metrics monitorin
 	return lvgs, nil
 }
 
-func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, status metav1.ConditionStatus, conType, reason, message string) error {
+func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, status metav1.ConditionStatus, conType, reason, message string) error {
 	exist := false
 	index := 0
 	newCondition := metav1.Condition{

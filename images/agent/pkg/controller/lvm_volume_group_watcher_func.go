@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func DeleteLVMVolumeGroup(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, currentNode string) error {
+func DeleteLVMVolumeGroup(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LVMVolumeGroup, currentNode string) error {
 	log.Debug(fmt.Sprintf(`[DeleteLVMVolumeGroup] Node "%s" does not belong to VG "%s". It will be removed from LVM resource, name "%s"'`, currentNode, lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 	for i, node := range lvg.Status.Nodes {
 		if node.Name == currentNode {
@@ -73,7 +73,7 @@ func checkIfVGExist(vgName string, vgs []internal.VGData) bool {
 	return false
 }
 
-func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1alpha1.LvmVolumeGroup) bool {
+func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1alpha1.LVMVolumeGroup) bool {
 	if newLVG.DeletionTimestamp != nil {
 		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has deletionTimestamp", newLVG.Name))
 		return true
@@ -105,7 +105,7 @@ func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1a
 	return false
 }
 
-func shouldReconcileLVGByDeleteFunc(lvg *v1alpha1.LvmVolumeGroup) bool {
+func shouldReconcileLVGByDeleteFunc(lvg *v1alpha1.LVMVolumeGroup) bool {
 	if lvg.DeletionTimestamp != nil {
 		return true
 	}
@@ -113,7 +113,7 @@ func shouldReconcileLVGByDeleteFunc(lvg *v1alpha1.LvmVolumeGroup) bool {
 	return false
 }
 
-func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, status v1.ConditionStatus, conType, reason, message string) error {
+func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, status v1.ConditionStatus, conType, reason, message string) error {
 	exist := false
 	index := 0
 	newCondition := v1.Condition{
@@ -169,7 +169,7 @@ func checkIfEqualConditions(first, second v1.Condition) bool {
 		first.ObservedGeneration == second.ObservedGeneration
 }
 
-func addLVGFinalizerIfNotExist(ctx context.Context, cl client.Client, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
+func addLVGFinalizerIfNotExist(ctx context.Context, cl client.Client, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
 	if slices.Contains(lvg.Finalizers, internal.SdsNodeConfiguratorFinalizer) {
 		return false, nil
 	}
@@ -183,7 +183,7 @@ func addLVGFinalizerIfNotExist(ctx context.Context, cl client.Client, lvg *v1alp
 	return true, nil
 }
 
-func syncThinPoolsAllocationLimit(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup) error {
+func syncThinPoolsAllocationLimit(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup) error {
 	updated := false
 
 	tpSpecLimits := make(map[string]string, len(lvg.Spec.ThinPools))
@@ -230,7 +230,7 @@ func syncThinPoolsAllocationLimit(ctx context.Context, cl client.Client, log log
 	return nil
 }
 
-func validateSpecBlockDevices(lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
+func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
 	reason := strings.Builder{}
 
 	targetNodeName := ""
@@ -258,7 +258,7 @@ func validateSpecBlockDevices(lvg *v1alpha1.LvmVolumeGroup, blockDevices map[str
 	return true, ""
 }
 
-func checkIfLVGBelongsToNode(lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice, nodeName string) bool {
+func checkIfLVGBelongsToNode(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice, nodeName string) bool {
 	bd := blockDevices[lvg.Spec.BlockDeviceNames[0]]
 	if bd.Status.NodeName != nodeName {
 		return false
@@ -295,7 +295,7 @@ func getRequestedSizeFromString(size string, targetSpace resource.Quantity) (res
 	return resource.Quantity{}, nil
 }
 
-func countVGSizeByBlockDevices(lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) resource.Quantity {
+func countVGSizeByBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) resource.Quantity {
 	var totalVGSize int64
 	for _, bdName := range lvg.Spec.BlockDeviceNames {
 		bd := blockDevices[bdName]
@@ -304,7 +304,7 @@ func countVGSizeByBlockDevices(lvg *v1alpha1.LvmVolumeGroup, blockDevices map[st
 	return *resource.NewQuantity(totalVGSize, resource.BinarySI)
 }
 
-func validateLVGForCreateFunc(log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
+func validateLVGForCreateFunc(log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
 	reason := strings.Builder{}
 
 	log.Debug(fmt.Sprintf("[validateLVGForCreateFunc] check if every selected BlockDevice of the LVMVolumeGroup %s is consumable", lvg.Name))
@@ -366,7 +366,7 @@ func validateLVGForCreateFunc(log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, b
 	return true, ""
 }
 
-func validateLVGForUpdateFunc(log logger.Logger, sdsCache *cache.Cache, lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice, pvs []internal.PVData) (bool, string) {
+func validateLVGForUpdateFunc(log logger.Logger, sdsCache *cache.Cache, lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice, pvs []internal.PVData) (bool, string) {
 	reason := strings.Builder{}
 
 	log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] check if every new BlockDevice of the LVMVolumeGroup %s is comsumable", lvg.Name))
@@ -499,7 +499,7 @@ func validateLVGForUpdateFunc(log logger.Logger, sdsCache *cache.Cache, lvg *v1a
 	return true, ""
 }
 
-func identifyLVGReconcileFunc(lvg *v1alpha1.LvmVolumeGroup, sdsCache *cache.Cache) reconcileType {
+func identifyLVGReconcileFunc(lvg *v1alpha1.LVMVolumeGroup, sdsCache *cache.Cache) reconcileType {
 	if shouldReconcileLVGByCreateFunc(lvg, sdsCache) {
 		return CreateReconcile
 	}
@@ -515,7 +515,7 @@ func identifyLVGReconcileFunc(lvg *v1alpha1.LvmVolumeGroup, sdsCache *cache.Cach
 	return "none"
 }
 
-func shouldReconcileLVGByCreateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cache) bool {
+func shouldReconcileLVGByCreateFunc(lvg *v1alpha1.LVMVolumeGroup, ch *cache.Cache) bool {
 	if lvg.DeletionTimestamp != nil {
 		return false
 	}
@@ -527,7 +527,7 @@ func shouldReconcileLVGByCreateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cach
 	return true
 }
 
-func shouldReconcileLVGByUpdateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cache) bool {
+func shouldReconcileLVGByUpdateFunc(lvg *v1alpha1.LVMVolumeGroup, ch *cache.Cache) bool {
 	if lvg.DeletionTimestamp != nil {
 		return false
 	}
@@ -539,7 +539,7 @@ func shouldReconcileLVGByUpdateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cach
 	return false
 }
 
-func ReconcileThinPoolsIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, vg internal.VGData, lvs []internal.LVData) error {
+func ReconcileThinPoolsIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LVMVolumeGroup, vg internal.VGData, lvs []internal.LVData) error {
 	actualThinPools := make(map[string]internal.LVData, len(lvs))
 	for _, lv := range lvs {
 		if string(lv.LVAttr[0]) == "t" {
@@ -615,7 +615,7 @@ func ReconcileThinPoolsIfNeeded(ctx context.Context, cl client.Client, log logge
 	return nil
 }
 
-func ResizePVIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup) error {
+func ResizePVIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LVMVolumeGroup) error {
 	if len(lvg.Status.Nodes) == 0 {
 		log.Warning(fmt.Sprintf("[ResizePVIfNeeded] the LVMVolumeGroup %s nodes are empty. Wait for the next update", lvg.Name))
 		return nil
@@ -660,7 +660,7 @@ func ResizePVIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, 
 	return nil
 }
 
-func ExtendVGIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, vg internal.VGData, pvs []internal.PVData, blockDevices map[string]v1alpha1.BlockDevice) error {
+func ExtendVGIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LVMVolumeGroup, vg internal.VGData, pvs []internal.PVData, blockDevices map[string]v1alpha1.BlockDevice) error {
 	for _, n := range lvg.Status.Nodes {
 		for _, d := range n.Devices {
 			log.Trace(fmt.Sprintf("[ExtendVGIfNeeded] the LVMVolumeGroup %s status block device: %s", lvg.Name, d.BlockDevice))
@@ -717,7 +717,7 @@ func tryGetVG(sdsCache *cache.Cache, vgName string) (bool, internal.VGData) {
 	return false, internal.VGData{}
 }
 
-func removeLVGFinalizerIfExist(ctx context.Context, cl client.Client, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
+func removeLVGFinalizerIfExist(ctx context.Context, cl client.Client, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
 	if !slices.Contains(lvg.Finalizers, internal.SdsNodeConfiguratorFinalizer) {
 		return false, nil
 	}
@@ -749,8 +749,8 @@ func checkIfVGHasLV(ch *cache.Cache, vgName string) []string {
 	return usedLVs
 }
 
-func getLVMVolumeGroup(ctx context.Context, cl client.Client, metrics monitoring.Metrics, name string) (*v1alpha1.LvmVolumeGroup, error) {
-	obj := &v1alpha1.LvmVolumeGroup{}
+func getLVMVolumeGroup(ctx context.Context, cl client.Client, metrics monitoring.Metrics, name string) (*v1alpha1.LVMVolumeGroup, error) {
+	obj := &v1alpha1.LVMVolumeGroup{}
 	start := time.Now()
 	err := cl.Get(ctx, client.ObjectKey{
 		Name: name,
@@ -838,7 +838,7 @@ func ExtendVGComplex(metrics monitoring.Metrics, extendPVs []string, VGName stri
 	return nil
 }
 
-func CreateVGComplex(metrics monitoring.Metrics, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) error {
+func CreateVGComplex(metrics monitoring.Metrics, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) error {
 	paths := extractPathsFromBlockDevices(lvg.Spec.BlockDeviceNames, blockDevices)
 
 	log.Trace(fmt.Sprintf("[CreateVGComplex] LVMVolumeGroup %s devices paths %v", lvg.Name, paths))
@@ -887,7 +887,7 @@ func CreateVGComplex(metrics monitoring.Metrics, log logger.Logger, lvg *v1alpha
 	return nil
 }
 
-func UpdateVGTagIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, vg internal.VGData) (bool, error) {
+func UpdateVGTagIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LVMVolumeGroup, vg internal.VGData) (bool, error) {
 	found, tagName := CheckTag(vg.VGTags)
 	if found && lvg.Name != tagName {
 		if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
@@ -926,7 +926,7 @@ func UpdateVGTagIfNeeded(ctx context.Context, cl client.Client, log logger.Logge
 	return false, nil
 }
 
-func ExtendThinPool(log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, specThinPool v1alpha1.LvmVolumeGroupThinPoolSpec) error {
+func ExtendThinPool(log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LVMVolumeGroup, specThinPool v1alpha1.LVMVolumeGroupThinPoolSpec) error {
 	volumeGroupFreeSpaceBytes := lvg.Status.VGSize.Value() - lvg.Status.AllocatedSize.Value()
 	tpRequestedSize, err := getRequestedSizeFromString(specThinPool.Size, lvg.Status.VGSize)
 	if err != nil {

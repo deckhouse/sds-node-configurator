@@ -23,12 +23,12 @@ import (
 )
 
 const (
-	BlockDeviceKind     = "BlockDevice"
-	LVMVolumeGroupKind   = "LvmVolumeGroup"
+	BlockDeviceKind      = "BlockDevice"
+	LVMVolumeGroupKind   = "LVMVolumeGroup"
 	LVMLogicalVolumeKind = "LVMLogicalVolume"
-	APIGroup            = "storage.deckhouse.io"
-	APIVersion          = "v1alpha1"
-	TypeMediaAPIVersion = APIGroup + "/" + APIVersion
+	APIGroup             = "storage.deckhouse.io"
+	APIVersion           = "v1alpha1"
+	TypeMediaAPIVersion  = APIGroup + "/" + APIVersion
 )
 
 // SchemeGroupVersion is group version used to register these objects
@@ -46,8 +46,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
 		&BlockDevice{},
 		&BlockDeviceList{},
-		&LvmVolumeGroup{},
-		&LvmVolumeGroupList{},
+		&LVMVolumeGroup{},
+		&LVMVolumeGroupList{},
 		&LVMLogicalVolume{},
 		&LVMLogicalVolumeList{},
 	)

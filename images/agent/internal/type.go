@@ -23,7 +23,7 @@ type BlockDeviceCandidate struct {
 	Consumable            bool
 	PVUuid                string
 	VGUuid                string
-	LvmVolumeGroupName    string
+	LVMVolumeGroupName    string
 	ActualVGNameOnTheNode string
 	Wwn                   string
 	Serial                string

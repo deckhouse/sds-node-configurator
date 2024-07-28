@@ -78,14 +78,14 @@ func RunLVMLogicalVolumeExtenderWatcherController(
 		return err
 	}
 
-	err = c.Watch(source.Kind(mgrCache, &v1alpha1.LvmVolumeGroup{}, handler.TypedFuncs[*v1alpha1.LvmVolumeGroup]{
-		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.RateLimitingInterface) {
+	err = c.Watch(source.Kind(mgrCache, &v1alpha1.LVMVolumeGroup{}, handler.TypedFuncs[*v1alpha1.LVMVolumeGroup]{
+		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*v1alpha1.LVMVolumeGroup], q workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] got a Create event for the LVMVolumeGroup %s", e.Object.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 			q.Add(request)
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] added the LVMVolumeGroup %s to the Reconcilers queue", e.Object.GetName()))
 		},
-		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.RateLimitingInterface) {
+		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*v1alpha1.LVMVolumeGroup], q workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] got an Update event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 			q.Add(request)
@@ -100,9 +100,9 @@ func RunLVMLogicalVolumeExtenderWatcherController(
 	return nil
 }
 
-func shouldLLVExtenderReconcileEvent(log logger.Logger, newLVG *v1alpha1.LvmVolumeGroup, nodeName string) bool {
+func shouldLLVExtenderReconcileEvent(log logger.Logger, newLVG *v1alpha1.LVMVolumeGroup, nodeName string) bool {
 	// for new LVMVolumeGroups
-	if reflect.DeepEqual(newLVG.Status, v1alpha1.LvmVolumeGroupStatus{}) {
+	if reflect.DeepEqual(newLVG.Status, v1alpha1.LVMVolumeGroupStatus{}) {
 		log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as its Status is not initialized yet", newLVG.Name))
 		return false
 	}
@@ -120,7 +120,7 @@ func shouldLLVExtenderReconcileEvent(log logger.Logger, newLVG *v1alpha1.LvmVolu
 	return true
 }
 
-func ReconcileLVMLogicalVolumeExtension(ctx context.Context, cl client.Client, metrics monitoring.Metrics, log logger.Logger, sdsCache *cache.Cache, lvg *v1alpha1.LvmVolumeGroup) bool {
+func ReconcileLVMLogicalVolumeExtension(ctx context.Context, cl client.Client, metrics monitoring.Metrics, log logger.Logger, sdsCache *cache.Cache, lvg *v1alpha1.LVMVolumeGroup) bool {
 	log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] tries to get LLV resources with percent size for the LVMVolumeGroup %s", lvg.Name))
 	llvs, err := getAllLLVsWithPercentSize(ctx, cl, lvg.Name)
 	if err != nil {
@@ -246,7 +246,7 @@ func getAllLLVsWithPercentSize(ctx context.Context, cl client.Client, lvgName st
 
 	result := make([]v1alpha1.LVMLogicalVolume, 0, len(llvList.Items))
 	for _, llv := range llvList.Items {
-		if llv.Spec.LvmVolumeGroupName == lvgName && isPercentSize(llv.Spec.Size) {
+		if llv.Spec.LVMVolumeGroupName == lvgName && isPercentSize(llv.Spec.Size) {
 			result = append(result, llv)
 		}
 	}

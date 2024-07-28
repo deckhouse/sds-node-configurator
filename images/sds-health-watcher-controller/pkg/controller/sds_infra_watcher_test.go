@@ -20,7 +20,7 @@ func TestHealthWatcher(t *testing.T) {
 	metrics := monitoring.GetMetrics("")
 
 	t.Run("GetLVMVolumeGroups_returns_lvgs", func(t *testing.T) {
-		lvgsToCreate := []v1alpha1.LvmVolumeGroup{
+		lvgsToCreate := []v1alpha1.LVMVolumeGroup{
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-lvg-1",
@@ -51,10 +51,10 @@ func TestHealthWatcher(t *testing.T) {
 			node1 = "node1"
 			node2 = "node2"
 		)
-		lvgs := map[string]v1alpha1.LvmVolumeGroup{
+		lvgs := map[string]v1alpha1.LVMVolumeGroup{
 			"first": {
-				Status: v1alpha1.LvmVolumeGroupStatus{
-					Nodes: []v1alpha1.LvmVolumeGroupNode{
+				Status: v1alpha1.LVMVolumeGroupStatus{
+					Nodes: []v1alpha1.LVMVolumeGroupNode{
 						{
 							Name: node1,
 						},
@@ -62,8 +62,8 @@ func TestHealthWatcher(t *testing.T) {
 				},
 			},
 			"second": {
-				Status: v1alpha1.LvmVolumeGroupStatus{
-					Nodes: []v1alpha1.LvmVolumeGroupNode{
+				Status: v1alpha1.LVMVolumeGroupStatus{
+					Nodes: []v1alpha1.LVMVolumeGroupNode{
 						{
 							Name: node2,
 						},
@@ -84,13 +84,13 @@ func TestHealthWatcher(t *testing.T) {
 			node1 = "node1"
 			node2 = "node2"
 		)
-		lvgs := map[string]v1alpha1.LvmVolumeGroup{
+		lvgs := map[string]v1alpha1.LVMVolumeGroup{
 			"first": {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "first",
 				},
-				Status: v1alpha1.LvmVolumeGroupStatus{
-					Nodes: []v1alpha1.LvmVolumeGroupNode{
+				Status: v1alpha1.LVMVolumeGroupStatus{
+					Nodes: []v1alpha1.LVMVolumeGroupNode{
 						{
 							Name: node1,
 						},
@@ -101,8 +101,8 @@ func TestHealthWatcher(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "second",
 				},
-				Status: v1alpha1.LvmVolumeGroupStatus{
-					Nodes: []v1alpha1.LvmVolumeGroupNode{
+				Status: v1alpha1.LVMVolumeGroupStatus{
+					Nodes: []v1alpha1.LVMVolumeGroupNode{
 						{
 							Name: node2,
 						},

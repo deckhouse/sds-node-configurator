@@ -10,7 +10,7 @@ spec:
   group: storage.deckhouse.io
   scope: Cluster
   names:
-    kind: LvmVolumeGroup
+    kind: LVMVolumeGroup
     plural: lvmvolumegroups
     singular: lvmvolumegroup
     shortNames:
@@ -33,9 +33,13 @@ spec:
           properties:
             spec:
               type: object
+              x-kubernetes-validations:
+                - rule: |
+                    (self.type == "Local" && has(self.local) || self.type != "Local"
+                  message: "The 'local' field is required when the 'type' field is 'Local'."
               required:
                 - type
-                - blockDeviceNames
+                - blockDeviceSelector
                 - actualVGNameOnTheNode
               properties:
                 type:
@@ -45,20 +49,65 @@ spec:
                     - Local, that is, local if the devices used are not distributed (not Shared LUN).
                   enum:
                     - Local
-                blockDeviceNames:
-                  type: array
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: "The type field is immutable."
+                local:
+                  type: object
                   description: |
-                    An array of block device resource names to create a Volume Group.
-                    
-                    > Note that the selected block devices must belong to the same node for a Local Volume Group.
-                  items:
-                    type: string
+                    The desired configuration for a local Volume Group.
+                  required:
+                    - nodeName
+                  properties:
+                    nodeName:
+                      type: string
+                      description: |
+                        The desired node name for the LVM Volume Group.
+                        
+                        > This field is immutable.
+                      x-kubernetes-validations:
+                        - rule: self == oldSelf
+                          message: "The nodeName field is immutable."
+                blockDeviceSelector:
+                  type: object
+                  description: |
+                    The desired block device selector.
+                  properties:
+                    matchLabels:
+                      type: object
+                      description: |
+                        The desired block device selector labels.
+                      additionalProperties:
+                        type: string
+                    matchExpressions:
+                      type: array
+                      description: |
+                        The desired block device selector expressions.
+                      items:
+                        type: object
+                        properties:
+                          key:
+                            type: string
+                          operator:
+                            type: string
+                            enum:
+                              - In
+                              - NotIn
+                              - Exists
+                              - DoesNotExist
+                          values:
+                            type: array
+                            items:
+                              type: string
                 actualVGNameOnTheNode:
                   type: string
                   description: |
                     The desired name of a Volume Group. Must be unique for the node it is on.
                     
                     > This field is immutable.
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: "The actualVGNameOnTheNode field is immutable."
                 thinPools:
                   type: array
                   description: |

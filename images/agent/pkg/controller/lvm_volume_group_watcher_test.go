@@ -20,7 +20,7 @@ package controller
 //
 //	t.Run("getLVMVolumeGroup_lvg_exists_returns_correct", func(t *testing.T) {
 //		const name = "test_name"
-//		testObj := &v1alpha1.LvmVolumeGroup{
+//		testObj := &v1alpha1.LVMVolumeGroup{
 //			ObjectMeta: metav1.ObjectMeta{
 //				Name:      name,
 //				Namespace: namespace,
@@ -50,7 +50,7 @@ package controller
 //
 //	t.Run("getLVMVolumeGroup_lvg_doesnt_exist_returns_nil", func(t *testing.T) {
 //		const name = "test_name"
-//		testObj := &v1alpha1.LvmVolumeGroup{
+//		testObj := &v1alpha1.LVMVolumeGroup{
 //			ObjectMeta: metav1.ObjectMeta{
 //				Name:      name,
 //				Namespace: namespace,
@@ -81,12 +81,12 @@ package controller
 //			name    = "test_name"
 //			message = "All good"
 //		)
-//		testObj := &v1alpha1.LvmVolumeGroup{
+//		testObj := &v1alpha1.LVMVolumeGroup{
 //			ObjectMeta: metav1.ObjectMeta{
 //				Name:      name,
 //				Namespace: namespace,
 //			},
-//			Status: v1alpha1.LvmVolumeGroupStatus{
+//			Status: v1alpha1.LVMVolumeGroupStatus{
 //				Health:  Operational,
 //				Message: message,
 //			},
@@ -127,12 +127,12 @@ package controller
 //			name    = "test_name"
 //			message = "All bad"
 //		)
-//		testObj := &v1alpha1.LvmVolumeGroup{
+//		testObj := &v1alpha1.LVMVolumeGroup{
 //			ObjectMeta: metav1.ObjectMeta{
 //				Name:      name,
 //				Namespace: namespace,
 //			},
-//			Status: v1alpha1.LvmVolumeGroupStatus{
+//			Status: v1alpha1.LVMVolumeGroupStatus{
 //				Health:  NonOperational,
 //				Message: message,
 //			},
@@ -174,12 +174,12 @@ package controller
 //			oldMessage = "All bad1"
 //			newMessage = "All bad2"
 //		)
-//		testObj := &v1alpha1.LvmVolumeGroup{
+//		testObj := &v1alpha1.LVMVolumeGroup{
 //			ObjectMeta: metav1.ObjectMeta{
 //				Name:      name,
 //				Namespace: namespace,
 //			},
-//			Status: v1alpha1.LvmVolumeGroupStatus{
+//			Status: v1alpha1.LVMVolumeGroupStatus{
 //				Health:  NonOperational,
 //				Message: oldMessage,
 //			},
@@ -221,12 +221,12 @@ package controller
 //			oldMessage = "All bad"
 //			newMessage = "All good"
 //		)
-//		testObj := &v1alpha1.LvmVolumeGroup{
+//		testObj := &v1alpha1.LVMVolumeGroup{
 //			ObjectMeta: metav1.ObjectMeta{
 //				Name:      name,
 //				Namespace: namespace,
 //			},
-//			Status: v1alpha1.LvmVolumeGroupStatus{
+//			Status: v1alpha1.LVMVolumeGroupStatus{
 //				Health:  NonOperational,
 //				Message: oldMessage,
 //			},
@@ -329,12 +329,12 @@ package controller
 //	t.Run("ValidateLVMGroup_type_local_selected_absent_bds_validation_fails", func(t *testing.T) {
 //		const lvgName = "test_name"
 //
-//		lvg := &v1alpha1.LvmVolumeGroup{
+//		lvg := &v1alpha1.LVMVolumeGroup{
 //			ObjectMeta: metav1.ObjectMeta{
 //				Name:      lvgName,
 //				Namespace: namespace,
 //			},
-//			Spec: v1alpha1.LvmVolumeGroupSpec{
+//			Spec: v1alpha1.LVMVolumeGroupSpec{
 //				BlockDeviceNames: []string{"test_bd"},
 //				Type:             Local,
 //			},
@@ -410,12 +410,12 @@ package controller
 //			}()
 //		}
 //
-//		testLvg := &v1alpha1.LvmVolumeGroup{
+//		testLvg := &v1alpha1.LVMVolumeGroup{
 //			ObjectMeta: metav1.ObjectMeta{
 //				Name:      name,
 //				Namespace: namespace,
 //			},
-//			Spec: v1alpha1.LvmVolumeGroupSpec{
+//			Spec: v1alpha1.LVMVolumeGroupSpec{
 //				BlockDeviceNames: []string{firstBd, secondBd},
 //				Type:             Local,
 //			},
@@ -492,12 +492,12 @@ package controller
 //			}()
 //		}
 //
-//		testLvg := &v1alpha1.LvmVolumeGroup{
+//		testLvg := &v1alpha1.LVMVolumeGroup{
 //			ObjectMeta: metav1.ObjectMeta{
 //				Name:      name,
 //				Namespace: namespace,
 //			},
-//			Spec: v1alpha1.LvmVolumeGroupSpec{
+//			Spec: v1alpha1.LVMVolumeGroupSpec{
 //				BlockDeviceNames:      []string{firstBd, secondBd},
 //				Type:                  Local,
 //				ActualVGNameOnTheNode: "some-vg",
@@ -531,7 +531,7 @@ package controller
 //			nodeName = "test_node"
 //		)
 //
-//		testLvg := &v1alpha1.LvmVolumeGroup{
+//		testLvg := &v1alpha1.LVMVolumeGroup{
 //			TypeMeta: metav1.TypeMeta{
 //				Kind: "test_kind",
 //			},
@@ -540,7 +540,7 @@ package controller
 //				Namespace: namespace,
 //				UID:       "test_UUID",
 //			},
-//			Spec: v1alpha1.LvmVolumeGroupSpec{
+//			Spec: v1alpha1.LVMVolumeGroupSpec{
 //				BlockDeviceNames: []string{"absent_bd"},
 //				Type:             Local,
 //			},
@@ -630,12 +630,12 @@ package controller
 //			}()
 //		}
 //
-//		testLvg := &v1alpha1.LvmVolumeGroup{
+//		testLvg := &v1alpha1.LVMVolumeGroup{
 //			ObjectMeta: metav1.ObjectMeta{
 //				Name:      name,
 //				Namespace: namespace,
 //			},
-//			Spec: v1alpha1.LvmVolumeGroupSpec{
+//			Spec: v1alpha1.LVMVolumeGroupSpec{
 //				BlockDeviceNames: []string{firstBd, secondBd},
 //				Type:             Shared,
 //			},
@@ -699,12 +699,12 @@ package controller
 //			}()
 //		}
 //
-//		testLvg := &v1alpha1.LvmVolumeGroup{
+//		testLvg := &v1alpha1.LVMVolumeGroup{
 //			ObjectMeta: metav1.ObjectMeta{
 //				Name:      name,
 //				Namespace: namespace,
 //			},
-//			Spec: v1alpha1.LvmVolumeGroupSpec{
+//			Spec: v1alpha1.LVMVolumeGroupSpec{
 //				BlockDeviceNames: []string{firstBd, secondBd},
 //				Type:             Shared,
 //			},
@@ -787,12 +787,12 @@ package controller
 //			}()
 //		}
 //
-//		testLvg := &v1alpha1.LvmVolumeGroup{
+//		testLvg := &v1alpha1.LVMVolumeGroup{
 //			ObjectMeta: metav1.ObjectMeta{
 //				Name:      name,
 //				Namespace: namespace,
 //			},
-//			Spec: v1alpha1.LvmVolumeGroupSpec{
+//			Spec: v1alpha1.LVMVolumeGroupSpec{
 //				BlockDeviceNames: []string{firstBd, secondBd},
 //				Type:             Shared,
 //			},

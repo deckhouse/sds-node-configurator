@@ -57,7 +57,7 @@ func getLVGCRD(ctx context.Context, cl client.Client) (*v1.CustomResourceDefinit
 	return crd, err
 }
 
-func updateLVMVolumeGroupPhaseIfNeeded(ctx context.Context, cl client.Client, lvg *v1alpha1.LvmVolumeGroup, phase string) error {
+func updateLVMVolumeGroupPhaseIfNeeded(ctx context.Context, cl client.Client, lvg *v1alpha1.LVMVolumeGroup, phase string) error {
 	if lvg.Status.Phase == phase {
 		return nil
 	}
