@@ -73,9 +73,36 @@ func checkIfVGExist(vgName string, vgs []internal.VGData) bool {
 	return false
 }
 
+func checkLabels(log logger.Logger, newLVG *v1alpha1.LvmVolumeGroup) bool {
+
+	if newLVG.Labels == nil {
+		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has no labels", newLVG.Name))
+		return false
+	}
+
+	labelValue, exist := newLVG.Labels[LVGHostnameLabelKey]
+
+	if !exist {
+		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has no label %s", newLVG.Name, LVGHostnameLabelKey))
+		return false
+	}
+
+	if labelValue != newLVG.Name {
+		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has label %s but the value is incorrect - %q, but should be %q", newLVG.Name, LVGHostnameLabelKey, labelValue, newLVG.Name))
+		return false
+	}
+
+	return true
+}
+
 func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1alpha1.LvmVolumeGroup) bool {
 	if newLVG.DeletionTimestamp != nil {
 		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has deletionTimestamp", newLVG.Name))
+		return true
+	}
+
+	if !checkLabels(log, newLVG) {
+		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup's %s labels have been changed", newLVG.Name))
 		return true
 	}
 

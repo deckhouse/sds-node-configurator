@@ -43,6 +43,7 @@ import (
 
 const (
 	LVMVolumeGroupWatcherCtrlName = "lvm-volume-group-watcher-controller"
+	LVGHostnameLabelKey           = "kubernetes.io/metadata.name"
 )
 
 func RunLVMVolumeGroupWatcherController(
