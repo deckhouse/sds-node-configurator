@@ -1,0 +1,100 @@
+{{- $_ := set . "BASE_GOLANG_22_ALPINE" "registry.deckhouse.ru/base_images/golang:1.22.3-alpine@sha256:dbf216b880b802c22e3f4f2ef0a78396b4a9a6983cb9b767c5efc351ebf946b0" }}
+{{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.ru/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
+{{- $_ := set . "BASE_ALPINE_DEV" "registry.deckhouse.ru/base_images/dev-alpine:3.16.3@sha256:c706fa83cc129079e430480369a3f062b8178cac9ec89266ebab753a574aca8e" }}
+{{- $_ := set . "BASE_ALT_DEV"    "registry.deckhouse.ru/base_images/dev-alt:p10@sha256:76e6e163fa982f03468166203488b569e6d9fc10855d6a259c662706436cdcad" }}
+
+{{ $binaries := "/sds-utils/bin/lvm.static" }}
+{{ $lvm_version := "d786a8f820d54ce87a919e6af5426c333c173b11" }}
+---
+image: {{ $.ImageName }}-binaries-artifact
+from: {{ $.BASE_ALT_DEV }}
+final: false
+
+shell:
+  install:
+  - apt-get update
+  - |
+    apt-get install -y \
+    build-essential \
+    autoconf \
+    automake \
+    libtool \
+    pkg-config \
+    libdevmapper-devel \
+    libaio-devel-static \
+    libblkid-devel-static \
+    thin-provisioning-tools \
+    git
+  - cd /
+  - git clone {{ env "SOURCE_REPO" }}/lvmteam/lvm2.git
+  - cd /lvm2
+  - git checkout {{ $lvm_version }}
+  - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu
+  - make
+  - mkdir -p /sds-utils/bin/
+  - mv /lvm2/tools/lvm.static /sds-utils/bin/lvm.static
+  - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
+
+---
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.BASE_GOLANG_22_ALPINE }}
+final: false
+
+git:
+  - add: /images/sds-utils-installer/src
+    to: /src
+    stageDependencies:
+      setup:
+        - "**/*"
+
+shell:
+  setup:
+    - cd /src/cmd
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /bin-copier
+    - chmod +x /bin-copier
+
+---
+image: {{ $.ImageName }}-distroless-artifact
+from: {{ $.BASE_ALPINE_DEV }}
+final: false
+
+shell:
+  install:
+    - mkdir -p /relocate/bin /relocate/sbin /relocate/etc /relocate/etc/ssl /relocate/usr/bin /relocate/usr/sbin /relocate/usr/share
+    - cp -pr /tmp /relocate
+    - cp -pr /etc/passwd /etc/group /etc/hostname /etc/hosts /etc/shadow /etc/protocols /etc/services /etc/nsswitch.conf /relocate/etc
+    - cp -pr /usr/share/ca-certificates /relocate/usr/share
+    - cp -pr /usr/share/zoneinfo /relocate/usr/share
+    - cp -pr etc/ssl/cert.pem /relocate/etc/ssl
+    - cp -pr /etc/ssl/certs /relocate/etc/ssl
+    - echo "deckhouse:x:64535:64535:deckhouse:/:/sbin/nologin" >> /relocate/etc/passwd
+    - echo "deckhouse:x:64535:" >> /relocate/etc/group
+    - echo "deckhouse:!::0:::::" >> /relocate/etc/shadow
+
+---
+image: {{ $.ImageName }}-distroless
+from: {{ $.BASE_SCRATCH }}
+final: false
+
+import:
+  - image: {{ $.ImageName }}-distroless-artifact
+    add: /relocate
+    to: /
+    before: setup
+
+---
+image: {{ $.ImageName }}
+fromImage: {{ $.ImageName }}-distroless
+import:
+  - image: {{ $.ImageName }}-binaries-artifact
+    add: /relocate
+    to: /
+    before: setup
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /bin-copier
+    to: /bin-copier
+    before: setup
+
+docker:
+  ENTRYPOINT: ["/bin-copier"]
+  CMD: ["/sds-utils", "/opt/deckhouse/sds"]
