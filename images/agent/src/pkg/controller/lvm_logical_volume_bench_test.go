@@ -20,10 +20,10 @@ import (
 )
 
 var (
-	lvgName   = "hdd-lvg-on-node-0"
-	poolName  = "hhd-thin"
-	lvCount   = 600
-	size, err = resource.ParseQuantity("1Gi")
+	lvgName  = "hdd-lvg-on-node-0"
+	poolName = "hhd-thin"
+	lvCount  = 600
+	size     = "1Gi"
 
 	resizeOn = false
 
@@ -85,7 +85,9 @@ func BenchmarkRunThickLLVCreationSingleThread(b *testing.B) {
 							continue
 						}
 
-						llv.Spec.Size.Add(add)
+						lvsize := resource.MustParse(llv.Spec.Size)
+						lvsize.Add(add)
+						llv.Spec.Size = lvsize.String()
 						err = e2eCL.Update(ctx, &llv)
 						if err != nil {
 							b.Logf(err.Error())
@@ -150,7 +152,9 @@ func BenchmarkRunThinLLVCreationSingleThread(b *testing.B) {
 							continue
 						}
 
-						llv.Spec.Size.Add(add)
+						lvsize := resource.MustParse(llv.Spec.Size)
+						lvsize.Add(add)
+						llv.Spec.Size = lvsize.String()
 						err = e2eCL.Update(ctx, &llv)
 						if err != nil {
 							b.Logf(err.Error())

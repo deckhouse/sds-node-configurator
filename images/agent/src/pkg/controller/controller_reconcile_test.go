@@ -21,8 +21,9 @@ import (
 	"agent/pkg/controller"
 	"agent/pkg/monitoring"
 	"context"
-
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -138,7 +139,11 @@ var _ = Describe("Storage Controller", func() {
 	})
 
 	It("DeleteAPIBlockDevice", func() {
-		err := controller.DeleteAPIBlockDevice(ctx, cl, testMetrics, deviceName)
+		err := controller.DeleteAPIBlockDevice(ctx, cl, testMetrics, &v1alpha1.BlockDevice{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: deviceName,
+			},
+		})
 		Expect(err).NotTo(HaveOccurred())
 
 		devices, err := controller.GetAPIBlockDevices(context.Background(), cl, testMetrics)
