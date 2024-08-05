@@ -25,14 +25,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/strings/slices"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/strings/slices"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -73,22 +74,22 @@ func checkIfVGExist(vgName string, vgs []internal.VGData) bool {
 	return false
 }
 
-func checkLabels(log logger.Logger, newLVG *v1alpha1.LvmVolumeGroup) bool {
+func checkLVGLabels(log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, labelKey, labelValue string) bool {
 
-	if newLVG.Labels == nil {
-		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has no labels", newLVG.Name))
+	if lvg.Labels == nil {
+		log.Debug(fmt.Sprintf("[checkLabels] the LVMVolumeGroup %s has no labels.", lvg.Name))
 		return false
 	}
 
-	labelValue, exist := newLVG.Labels[LVGHostnameLabelKey]
+	val, exist := lvg.Labels[labelKey]
 
 	if !exist {
-		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has no label %s", newLVG.Name, LVGHostnameLabelKey))
+		log.Debug(fmt.Sprintf("[checkLabels] the LVMVolumeGroup %s has no label %s.", lvg.Name, labelKey))
 		return false
 	}
 
-	if labelValue != newLVG.Name {
-		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has label %s but the value is incorrect - %q, but should be %q", newLVG.Name, LVGHostnameLabelKey, labelValue, newLVG.Name))
+	if val != labelValue {
+		log.Debug(fmt.Sprintf("[checkLabels] the LVMVolumeGroup %s has label %s but the value is incorrect - %q (should be %q)", lvg.Name, labelKey, val, labelValue))
 		return false
 	}
 
@@ -101,7 +102,7 @@ func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1a
 		return true
 	}
 
-	if !checkLabels(log, newLVG) {
+	if !checkLVGLabels(log, newLVG, LVGMetadateNameLabelKey, newLVG.Name) {
 		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup's %s labels have been changed", newLVG.Name))
 		return true
 	}
@@ -984,4 +985,22 @@ func ExtendThinPool(log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1
 	}
 
 	return nil
+}
+
+func addLVGLabelIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, labelKey, labelValue string) (bool, error) {
+	if checkLVGLabels(log, lvg, labelKey, labelValue) {
+		return false, nil
+	}
+
+	if lvg.Labels == nil {
+		lvg.Labels = make(map[string]string)
+	}
+
+	lvg.Labels[labelKey] = labelValue
+	err := cl.Update(ctx, lvg)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }

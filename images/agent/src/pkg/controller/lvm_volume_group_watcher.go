@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,7 +44,7 @@ import (
 
 const (
 	LVMVolumeGroupWatcherCtrlName = "lvm-volume-group-watcher-controller"
-	LVGHostnameLabelKey           = "kubernetes.io/metadata.name"
+	LVGMetadateNameLabelKey       = "kubernetes.io/metadata.name"
 )
 
 func RunLVMVolumeGroupWatcherController(
@@ -123,6 +124,19 @@ func RunLVMVolumeGroupWatcherController(
 				return reconcile.Result{}, nil
 			}
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s belongs to the node %s. Starts to reconcile", lvg.Name, cfg.NodeName))
+
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to add label %s to the LVMVolumeGroup %s", LVGMetadateNameLabelKey, cfg.NodeName))
+			added, err = addLVGLabelIfNeeded(ctx, cl, log, lvg, LVGMetadateNameLabelKey, lvg.Name)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add label %s to the LVMVolumeGroup %s", LVGMetadateNameLabelKey, lvg.Name))
+				return reconcile.Result{}, err
+			}
+
+			if added {
+				log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully added label %s to the LVMVolumeGroup %s", LVGMetadateNameLabelKey, lvg.Name))
+			} else {
+				log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no need to add label %s to the LVMVolumeGroup %s", LVGMetadateNameLabelKey, lvg.Name))
+			}
 
 			// this case handles the situation when a user decides to remove LVMVolumeGroup resource without created VG
 			vgs, _ := sdsCache.GetVGs()
