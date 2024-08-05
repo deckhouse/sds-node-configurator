@@ -190,7 +190,7 @@ func RemoveDeprecatedAPIDevices(
 
 	for name, device := range apiBlockDevices {
 		if shouldDeleteBlockDevice(device, actualCandidates, nodeName) {
-			err := DeleteAPIBlockDevice(ctx, cl, metrics, name)
+			err := DeleteAPIBlockDevice(ctx, cl, metrics, &device)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunBlockDeviceController] unable to delete APIBlockDevice, name: %s", name))
 				continue
@@ -564,17 +564,7 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 	return device, nil
 }
 
-func DeleteAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, deviceName string) error {
-	device := &v1alpha1.BlockDevice{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: deviceName,
-		},
-		TypeMeta: metav1.TypeMeta{
-			Kind:       v1alpha1.BlockDeviceKind,
-			APIVersion: v1alpha1.TypeMediaAPIVersion,
-		},
-	}
-
+func DeleteAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, device *v1alpha1.BlockDevice) error {
 	start := time.Now()
 	err := kc.Delete(ctx, device)
 	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))
