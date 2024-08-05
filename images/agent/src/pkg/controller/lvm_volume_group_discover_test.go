@@ -503,302 +503,97 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 
 	t.Run("GetLVMVolumeGroup", func(t *testing.T) {
 		const (
-			LVMVGName             = "test_lvm"
-			ActualVGNameOnTheNode = "test-vg"
-			Type                  = "local"
-			Health                = internal.LVMVGHealthOperational
-			Message               = "No problems detected"
-			VGUuid                = "test_uuid"
+			LVMVGName = "test_lvm"
 		)
 
-		size10G, err := resource.ParseQuantity("10G")
-		size1G, err := resource.ParseQuantity("1G")
-		if err != nil {
-			t.Error(err)
-		}
-
-		var (
-			cl                = NewFakeClient()
-			testMetrics       = monitoring.GetMetrics("")
-			testLogger        = logger.Logger{}
-			ctx               = context.Background()
-			blockDevicesNames = []string{"first", "second"}
-			specThinPools     = map[string]resource.Quantity{"first": size10G}
-			statusThinPools   = []internal.LVMVGStatusThinPool{
-				{
-					Name:       "first_status_pool",
-					ActualSize: size10G,
-					UsedSize:   resource.MustParse("4G"),
-				},
-			}
-			nodes = map[string][]internal.LVMVGDevice{
-				"test-node-1": {
-					{
-						Path:        "test/path",
-						PVSize:      size1G,
-						DevSize:     size1G,
-						PVUuid:      "test-pv-uuid",
-						BlockDevice: "test-device",
-					},
-				},
-			}
-		)
-
-		candidate := internal.LVMVolumeGroupCandidate{
-			LVMVGName:             LVMVGName,
-			ActualVGNameOnTheNode: ActualVGNameOnTheNode,
-			BlockDevicesNames:     blockDevicesNames,
-			SpecThinPools:         specThinPools,
-			Type:                  Type,
-			AllocatedSize:         size10G,
-			Health:                Health,
-			Message:               Message,
-			StatusThinPools:       statusThinPools,
-			VGSize:                size10G,
-			VGUuid:                VGUuid,
-			Nodes:                 nodes,
-		}
-
-		thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools)
-		if err != nil {
-			t.Error(err)
-		}
-
-		expected := map[string]v1alpha1.LvmVolumeGroup{
-			LVMVGName: {
-				ObjectMeta: metav1.ObjectMeta{
-					Name:            LVMVGName,
-					ResourceVersion: "1",
-					OwnerReferences: nil,
-				},
-				Spec: v1alpha1.LvmVolumeGroupSpec{
-					ActualVGNameOnTheNode: ActualVGNameOnTheNode,
-					BlockDeviceNames:      blockDevicesNames,
-					ThinPools:             convertSpecThinPools(specThinPools),
-					Type:                  Type,
-				},
-				Status: v1alpha1.LvmVolumeGroupStatus{
-					AllocatedSize: size10G,
-					Nodes:         convertLVMVGNodes(nodes),
-					ThinPools:     thinPools,
-					VGSize:        size10G,
-					VGUuid:        VGUuid,
-				},
+		lvg := &v1alpha1.LvmVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: LVMVGName,
 			},
 		}
+		err := cl.Create(ctx, lvg)
+		if err != nil {
+			t.Error(err)
+		}
 
-		created, err := CreateLVMVolumeGroupByCandidate(ctx, testLogger, testMetrics, cl, candidate)
-		if assert.NoError(t, err) && assert.NotNil(t, created) {
-			actual, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
-			if assert.NoError(t, err) && assert.Equal(t, 1, len(actual)) {
-				assert.Equal(t, expected, actual)
+		defer func() {
+			err = cl.Delete(ctx, lvg)
+			if err != nil {
+				t.Error(err)
 			}
+		}()
+
+		actual, err := GetAPILVMVolumeGroups(ctx, cl, monitoring.GetMetrics("test-node"))
+		if assert.NoError(t, err) {
+			_, ok := actual[LVMVGName]
+			assert.True(t, ok)
 		}
 	})
 
 	t.Run("DeleteLVMVolumeGroup", func(t *testing.T) {
 		const (
-			LVMVGName             = "test_lvm"
-			ActualVGNameOnTheNode = "test-vg"
-			Type                  = "local"
-			Health                = internal.LVMVGHealthOperational
-			Message               = "No problems detected"
-			VGUuid                = "test_uuid"
+			LVMVGName = "test_lvm-2"
 		)
 
-		size10G, err := resource.ParseQuantity("10G")
-		size1G, err := resource.ParseQuantity("1G")
+		metrics := monitoring.GetMetrics("test-node")
+
+		lvg := &v1alpha1.LvmVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: LVMVGName,
+			},
+		}
+		err := cl.Create(ctx, lvg)
 		if err != nil {
 			t.Error(err)
 		}
 
-		var (
-			cl                = NewFakeClient()
-			ctx               = context.Background()
-			testMetrics       = monitoring.GetMetrics("")
-			testLogger        = logger.Logger{}
-			blockDevicesNames = []string{"first", "second"}
-			specThinPools     = map[string]resource.Quantity{"first": size10G}
-			statusThinPools   = []internal.LVMVGStatusThinPool{
-				{
-					Name:       "first_status_pool",
-					ActualSize: size10G,
-					UsedSize:   resource.MustParse("4G"),
-				},
-			}
-			nodes = map[string][]internal.LVMVGDevice{
-				"test-node-1": {
-					{
-						Path:        "test/path",
-						PVSize:      size1G,
-						DevSize:     size1G,
-						PVUuid:      "test-pv-uuid",
-						BlockDevice: "test-device",
-					},
-				},
-			}
-		)
-
-		candidate := internal.LVMVolumeGroupCandidate{
-			LVMVGName:             LVMVGName,
-			ActualVGNameOnTheNode: ActualVGNameOnTheNode,
-			BlockDevicesNames:     blockDevicesNames,
-			SpecThinPools:         specThinPools,
-			Type:                  Type,
-			AllocatedSize:         size10G,
-			Health:                Health,
-			Message:               Message,
-			StatusThinPools:       statusThinPools,
-			VGSize:                size10G,
-			VGUuid:                VGUuid,
-			Nodes:                 nodes,
+		actual, err := GetAPILVMVolumeGroups(ctx, cl, metrics)
+		if assert.NoError(t, err) {
+			_, ok := actual[LVMVGName]
+			assert.True(t, ok)
 		}
 
-		created, err := CreateLVMVolumeGroupByCandidate(ctx, testLogger, testMetrics, cl, candidate)
-		if assert.NoError(t, err) && assert.NotNil(t, created) {
-			actual, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
-			if assert.NoError(t, err) && assert.Equal(t, 1, len(actual)) {
-				err := DeleteLVMVolumeGroup(ctx, cl, testMetrics, &v1alpha1.LvmVolumeGroup{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: LVMVGName,
-					},
-				})
-				if assert.NoError(t, err) {
-					actual, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
-					if assert.NoError(t, err) {
-						assert.Equal(t, 0, len(actual))
-					}
-				}
-			}
+		err = DeleteLVMVolumeGroup(ctx, cl, log, metrics, lvg, "test-node")
+		if assert.NoError(t, err) {
+			actual, err = GetAPILVMVolumeGroups(ctx, cl, metrics)
+			assert.Equal(t, 0, len(actual))
 		}
 	})
 
 	t.Run("UpdateLVMVolumeGroup", func(t *testing.T) {
 		const (
-			LVMVGName             = "test_lvm"
-			ActualVGNameOnTheNode = "test-vg"
-			Type                  = "local"
-			Health                = internal.LVMVGHealthOperational
-			Message               = "No problems detected"
-			VGUuid                = "test_uuid"
+			LVMVGName = "test_lvm"
 		)
 
-		size10G, err := resource.ParseQuantity("10G")
-		size1G, err := resource.ParseQuantity("1G")
-		if err != nil {
-			t.Error(err)
-		}
+		metrics := monitoring.GetMetrics("test-node")
 
-		var (
-			cl                = NewFakeClient()
-			ctx               = context.Background()
-			testMetrics       = monitoring.GetMetrics("")
-			testLogger        = logger.Logger{}
-			BlockDevicesNames = []string{"first", "second"}
-			SpecThinPools     = map[string]resource.Quantity{"first": size1G}
-			StatusThinPools   = []internal.LVMVGStatusThinPool{
-				{
-					Name:       "first_status_pool",
-					ActualSize: size10G,
-					UsedSize:   resource.MustParse("4G"),
-				},
-			}
-			oldNodes = map[string][]internal.LVMVGDevice{
-				"test-node-1": {
-					{
-						Path:        "test/path",
-						PVSize:      size1G,
-						DevSize:     size1G,
-						PVUuid:      "test-pv-uuid",
-						BlockDevice: "test-device",
-					},
-				},
-			}
-			newNodes = map[string][]internal.LVMVGDevice{
-				"test-node-1": {
-					{
-						Path:        "test/path",
-						PVSize:      size1G,
-						DevSize:     size1G,
-						PVUuid:      "test-pv-uuid",
-						BlockDevice: "test-device",
-					},
-					{
-						Path:        "test/path2",
-						PVSize:      size1G,
-						DevSize:     size1G,
-						PVUuid:      "test-pv-uuid2",
-						BlockDevice: "test-device2",
-					},
-				},
-			}
-		)
-
-		oldCandidate := internal.LVMVolumeGroupCandidate{
-			LVMVGName:             LVMVGName,
-			ActualVGNameOnTheNode: ActualVGNameOnTheNode,
-			BlockDevicesNames:     BlockDevicesNames,
-			SpecThinPools:         SpecThinPools,
-			Type:                  Type,
-			AllocatedSize:         size10G,
-			Health:                Health,
-			Message:               Message,
-			StatusThinPools:       StatusThinPools,
-			VGSize:                size10G,
-			VGUuid:                VGUuid,
-			Nodes:                 oldNodes,
-		}
-
-		newCandidate := internal.LVMVolumeGroupCandidate{
-			LVMVGName:             LVMVGName,
-			ActualVGNameOnTheNode: ActualVGNameOnTheNode,
-			BlockDevicesNames:     BlockDevicesNames,
-			SpecThinPools:         SpecThinPools,
-			Type:                  Type,
-			AllocatedSize:         size10G,
-			Health:                Health,
-			Message:               Message,
-			StatusThinPools:       StatusThinPools,
-			VGSize:                size10G,
-			VGUuid:                VGUuid,
-			Nodes:                 newNodes,
-		}
-
-		thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, StatusThinPools)
-		if err != nil {
-			t.Error(err)
-		}
-
-		expected := v1alpha1.LvmVolumeGroup{
+		lvg := &v1alpha1.LvmVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:            LVMVGName,
-				ResourceVersion: "2",
-				OwnerReferences: nil,
-			},
-			Spec: v1alpha1.LvmVolumeGroupSpec{
-				ActualVGNameOnTheNode: ActualVGNameOnTheNode,
-				BlockDeviceNames:      BlockDevicesNames,
-				ThinPools:             convertSpecThinPools(SpecThinPools),
-				Type:                  Type,
-			},
-			Status: v1alpha1.LvmVolumeGroupStatus{
-				AllocatedSize: size10G,
-				Nodes:         convertLVMVGNodes(newNodes),
-				ThinPools:     thinPools,
-				VGSize:        size10G,
-				VGUuid:        VGUuid,
+				Name: LVMVGName,
 			},
 		}
+		err := cl.Create(ctx, lvg)
+		if err != nil {
+			t.Error(err)
+		}
 
-		created, err := CreateLVMVolumeGroupByCandidate(ctx, testLogger, testMetrics, cl, oldCandidate)
+		actual, err := GetAPILVMVolumeGroups(ctx, cl, metrics)
 		if assert.NoError(t, err) {
-			err := UpdateLVMVolumeGroupByCandidate(ctx, cl, testMetrics, log, created, newCandidate)
+			createdLvg, ok := actual[LVMVGName]
+			assert.True(t, ok)
 
+			candidate := internal.LVMVolumeGroupCandidate{
+				LVMVGName:     LVMVGName,
+				AllocatedSize: *resource.NewQuantity(1000, resource.BinarySI),
+			}
+			err = UpdateLVMVolumeGroupByCandidate(ctx, cl, metrics, log, &createdLvg, candidate)
 			if assert.NoError(t, err) {
-				lmvs, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
+				updated, err := GetAPILVMVolumeGroups(ctx, cl, metrics)
 				if assert.NoError(t, err) {
-					actual := lmvs[LVMVGName]
-					assert.Equal(t, expected, actual)
+					updatedLvg, ok := updated[LVMVGName]
+					assert.True(t, ok)
+
+					assert.Equal(t, candidate.AllocatedSize.Value(), updatedLvg.Status.AllocatedSize.Value())
 				}
 			}
 		}
@@ -1000,25 +795,13 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		})
 
 		t.Run("should_return_true", func(t *testing.T) {
-			size10G, err := resource.ParseQuantity("10G")
-			size1G, err := resource.ParseQuantity("1G")
-			size13G, err := resource.ParseQuantity("13G")
-			if err != nil {
-				t.Error(err)
-			}
+			size10G := resource.MustParse("10G")
+			size1G := resource.MustParse("1G")
+			size13G := resource.MustParse("13G")
+			vgFree := resource.MustParse("5G")
 
 			var (
-				blockDevicesNames = []string{
-					"first",
-					"second",
-				}
-				specThinPools = map[string]resource.Quantity{
-					"first":  size10G,
-					"second": size1G,
-				}
-				specType        = "type"
 				allocatedSize   = resource.MustParse("10G")
-				health          = internal.LVMVGHealthOperational
 				statusThinPools = []internal.LVMVGStatusThinPool{
 					{
 						Name:       "first",
@@ -1052,15 +835,11 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				}
 			)
 			candidate := internal.LVMVolumeGroupCandidate{
-				BlockDevicesNames: blockDevicesNames,
-				SpecThinPools:     specThinPools,
-				Type:              specType,
-				AllocatedSize:     size10G,
-				Health:            health,
-				Message:           "NewMessage",
-				StatusThinPools:   statusThinPools,
-				VGSize:            size10G,
-				Nodes:             nodes,
+				AllocatedSize:   size10G,
+				StatusThinPools: statusThinPools,
+				VGSize:          size10G,
+				VGFree:          vgFree,
+				Nodes:           nodes,
 			}
 
 			thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools)
@@ -1069,16 +848,12 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			}
 
 			lvmVolumeGroup := v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
-					BlockDeviceNames: blockDevicesNames,
-					ThinPools:        convertSpecThinPools(specThinPools),
-					Type:             specType,
-				},
 				Status: v1alpha1.LvmVolumeGroupStatus{
 					AllocatedSize: allocatedSize,
 					Nodes:         convertLVMVGNodes(nodes),
 					ThinPools:     thinPools,
 					VGSize:        vgSize,
+					VGFree:        *resource.NewQuantity(vgFree.Value()+10000, resource.BinarySI),
 				},
 			}
 
@@ -1126,8 +901,7 @@ func NewFakeClient() client.WithWatch {
 	s := scheme.Scheme
 	_ = metav1.AddMetaToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
-
-	builder := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&v1alpha1.LvmVolumeGroup{})
+	builder := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&v1alpha1.LvmVolumeGroup{}).WithStatusSubresource(&v1alpha1.LVMLogicalVolume{})
 
 	cl := builder.Build()
 	return cl

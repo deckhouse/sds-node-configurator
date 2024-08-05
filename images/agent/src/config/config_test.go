@@ -89,7 +89,7 @@ func TestNewConfig(t *testing.T) {
 		expMetricsPort := ":0000"
 		expNodeName := "test-node"
 		expErrorMsg := fmt.Sprintf("[NewConfig] unable to get %s, error: %s",
-			MachineID, "open /host-root/etc/machine-id: no such file or directory")
+			MachineID, "fork/exec /opt/deckhouse/sds/bin/nsenter.static: no such file or directory")
 
 		err := os.Setenv(MetricsPort, expMetricsPort)
 		if err != nil {

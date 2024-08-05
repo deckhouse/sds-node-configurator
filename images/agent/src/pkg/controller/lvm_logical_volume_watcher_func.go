@@ -98,9 +98,9 @@ func removeLLVFinalizersIfExist(
 
 	if removed {
 		log.Trace(fmt.Sprintf("[removeLLVFinalizersIfExist] removed finalizer %s from the LVMLogicalVolume %s", internal.SdsNodeConfiguratorFinalizer, llv.Name))
-		err := updateLVMLogicalVolume(ctx, metrics, cl, llv)
+		err := updateLVMLogicalVolumeSpec(ctx, metrics, cl, llv)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[updateLVMLogicalVolume] unable to update the LVMVolumeGroup %s", llv.Name))
+			log.Error(err, fmt.Sprintf("[updateLVMLogicalVolumeSpec] unable to update the LVMVolumeGroup %s", llv.Name))
 			return err
 		}
 	}
@@ -194,7 +194,7 @@ func addLLVFinalizerIfNotExist(ctx context.Context, cl client.Client, log logger
 	llv.Finalizers = append(llv.Finalizers, internal.SdsNodeConfiguratorFinalizer)
 
 	log.Trace(fmt.Sprintf("[addLLVFinalizerIfNotExist] added finalizer %s to the LVMLogicalVolume %s", internal.SdsNodeConfiguratorFinalizer, llv.Name))
-	err := updateLVMLogicalVolume(ctx, metrics, cl, llv)
+	err := updateLVMLogicalVolumeSpec(ctx, metrics, cl, llv)
 	if err != nil {
 		return false, err
 	}
@@ -300,13 +300,13 @@ func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVol
 
 	// if a specified Thick LV name matches the existing Thin one
 	lv := sdsCache.FindLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-	if lv != nil && len(lv.LVAttr) == 0 {
-		reason.WriteString(fmt.Sprintf("LV %s was found on the node, but can't be validated due to its attributes is empty string. ", lv.LVName))
-	}
-
 	if lv != nil {
-		if !checkIfLVBelongsToLLV(llv, lv) {
-			reason.WriteString(fmt.Sprintf("Specified LV %s is already created and it is doesnt match the one on the node.", lv.LVName))
+		if len(lv.LVAttr) == 0 {
+			reason.WriteString(fmt.Sprintf("LV %s was found on the node, but can't be validated due to its attributes is empty string. ", lv.LVName))
+		} else {
+			if !checkIfLVBelongsToLLV(llv, lv) {
+				reason.WriteString(fmt.Sprintf("Specified LV %s is already created and it is doesnt match the one on the node.", lv.LVName))
+			}
 		}
 	}
 
@@ -342,7 +342,7 @@ func updateLVMLogicalVolumePhaseIfNeeded(ctx context.Context, cl client.Client, 
 	return nil
 }
 
-func updateLVMLogicalVolume(ctx context.Context, metrics monitoring.Metrics, cl client.Client, llv *v1alpha1.LVMLogicalVolume) error {
+func updateLVMLogicalVolumeSpec(ctx context.Context, metrics monitoring.Metrics, cl client.Client, llv *v1alpha1.LVMLogicalVolume) error {
 	return cl.Update(ctx, llv)
 }
 
