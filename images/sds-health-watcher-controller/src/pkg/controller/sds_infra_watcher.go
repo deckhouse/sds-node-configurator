@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -182,11 +183,17 @@ func RunSdsInfraWatcher(
 			log.Debug("[RunSdsInfraWatcher] check if every agent's pod is in a Ready state")
 			notReadyPods := getNotReadyPods(sdsPods)
 			if len(notReadyPods) > 0 {
-				log.Warning(fmt.Sprintf("[RunSdsInfraWatcher] there is some sds-node-configurator agent's pods that is not Ready, pods: %v. Turn the LVMVolumeGroups condition AgentReady to False", notReadyPods))
+				podsNames := make([]string, 0, len(notReadyPods))
+				for name := range notReadyPods {
+					podsNames = append(podsNames, name)
+				}
+
+				log.Warning(fmt.Sprintf("[RunSdsInfraWatcher] there is some sds-node-configurator agent's pods that is not Ready, pods: %s. Turn the LVMVolumeGroups condition AgentReady to False", strings.Join(podsNames, ",")))
 				nodeNames := getNodeNamesFromPods(notReadyPods)
 				log.Trace(fmt.Sprintf("[RunSdsInfraWatcher] node names with not Ready sds-node-configurator agent's pods: %v", nodeNames))
 				lvgsNotReady := findLVMVolumeGroupsByNodeNames(lvgs, nodeNames)
 				for _, lvg := range lvgsNotReady {
+					log.Warning(fmt.Sprintf("[RunSdsInfraWatcher] the LVMVolumeGroup %s is managed by not Ready pod, turns the condition %s to False", lvg.Name, agentReadyType))
 					err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, agentReadyType, "PodNotReady", "the pod is not Ready")
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to add a condition to the LVMVolumeGroup %s", lvg.Name))

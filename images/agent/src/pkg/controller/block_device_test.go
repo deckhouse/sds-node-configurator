@@ -17,30 +17,31 @@ limitations under the License.
 package controller
 
 import (
+	"bytes"
+	"context"
+	"fmt"
+	"testing"
+
 	"agent/config"
 	"agent/internal"
 	"agent/pkg/cache"
 	"agent/pkg/logger"
 	"agent/pkg/monitoring"
 	"agent/pkg/utils"
-	"bytes"
-	"fmt"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/stretchr/testify/assert"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"testing"
-
-	"k8s.io/apimachinery/pkg/api/resource"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestBlockDeviceCtrl(t *testing.T) {
+	ctx := context.Background()
 	log, _ := logger.NewLogger("1")
 	cfg := config.Options{
 		NodeName:  "test-node",
-		MachineId: "test-id",
+		MachineID: "test-id",
 	}
 
 	t.Run("shouldDeleteBlockDevice", func(t *testing.T) {
@@ -121,7 +122,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				Model:                 "124124-adf",
 				Name:                  goodName,
 				HotPlug:               false,
-				MachineId:             "1245151241241",
+				MachineID:             "1245151241241",
 			},
 		}
 
@@ -151,7 +152,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 
 		defer func() {
 			for _, bd := range bds {
-				cl.Delete(ctx, &bd)
+				_ = cl.Delete(ctx, &bd)
 			}
 		}()
 
@@ -212,7 +213,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		assert.Equal(t, 3, len(candidates))
 		for i := range candidates {
 			assert.Equal(t, devices[i].Name, candidates[i].Path)
-			assert.Equal(t, cfg.MachineId, candidates[i].MachineId)
+			assert.Equal(t, cfg.MachineID, candidates[i].MachineID)
 			assert.Equal(t, cfg.NodeName, candidates[i].NodeName)
 		}
 	})
@@ -338,7 +339,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				PkName:                "testPKNAME",
 				Type:                  "testTYPE",
 				FSType:                "testFS",
-				MachineId:             "testMACHINE",
+				MachineID:             "testMACHINE",
 			},
 			// diff state
 			{
@@ -360,7 +361,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				PkName:                "testPKNAME2",
 				Type:                  "testTYPE2",
 				FSType:                "testFS2",
-				MachineId:             "testMACHINE2",
+				MachineID:             "testMACHINE2",
 			},
 		}
 		blockDevice := v1alpha1.BlockDevice{
@@ -450,8 +451,8 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				candidateName := CreateCandidateName(*log, candidate, devices)
 				assert.Equal(t, "dev-98ca88ddaaddec43b1c4894756f4856244985511", candidateName, "device name generated incorrectly")
 			}
-
 		}
+
 		if assert.NoError(t, err) {
 			assert.Equal(t, 7, len(filteredDevices))
 		}

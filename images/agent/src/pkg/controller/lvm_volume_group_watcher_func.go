@@ -17,23 +17,23 @@ limitations under the License.
 package controller
 
 import (
-	"agent/internal"
-	"agent/pkg/cache"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
-	"agent/pkg/utils"
 	"context"
 	"errors"
 	"fmt"
-	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/strings/slices"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
+	"agent/internal"
+	"agent/pkg/cache"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
+	"agent/pkg/utils"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -51,10 +51,10 @@ func DeleteLVMVolumeGroup(ctx context.Context, cl client.Client, log logger.Logg
 	if len(lvg.Status.Nodes) == 0 {
 		start := time.Now()
 		err := cl.Delete(ctx, lvg)
-		metrics.ApiMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))
-		metrics.ApiMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "delete").Inc()
+		metrics.APIMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))
+		metrics.APIMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "delete").Inc()
 		if err != nil {
-			metrics.ApiMethodsErrors(LVMVolumeGroupDiscoverCtrlName, "delete").Inc()
+			metrics.APIMethodsErrors(LVMVolumeGroupDiscoverCtrlName, "delete").Inc()
 			return err
 		}
 		log.Info(fmt.Sprintf("[DeleteLVMVolumeGroup] the LVMVolumeGroup %s deleted", lvg.Name))
@@ -106,11 +106,7 @@ func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1a
 }
 
 func shouldReconcileLVGByDeleteFunc(lvg *v1alpha1.LvmVolumeGroup) bool {
-	if lvg.DeletionTimestamp != nil {
-		return true
-	}
-
-	return false
+	return lvg.DeletionTimestamp != nil
 }
 
 func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, status v1.ConditionStatus, conType, reason, message string) error {
@@ -260,11 +256,7 @@ func validateSpecBlockDevices(lvg *v1alpha1.LvmVolumeGroup, blockDevices map[str
 
 func checkIfLVGBelongsToNode(lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice, nodeName string) bool {
 	bd := blockDevices[lvg.Spec.BlockDeviceNames[0]]
-	if bd.Status.NodeName != nodeName {
-		return false
-	}
-
-	return true
+	return bd.Status.NodeName == nodeName
 }
 
 func extractPathsFromBlockDevices(blockDevicesNames []string, blockDevices map[string]v1alpha1.BlockDevice) []string {
@@ -366,9 +358,9 @@ func validateLVGForCreateFunc(log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, b
 	return true, ""
 }
 
-func validateLVGForUpdateFunc(log logger.Logger, sdsCache *cache.Cache, lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice, pvs []internal.PVData) (bool, string) {
+func validateLVGForUpdateFunc(log logger.Logger, sdsCache *cache.Cache, lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
 	reason := strings.Builder{}
-
+	pvs, _ := sdsCache.GetPVs()
 	log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] check if every new BlockDevice of the LVMVolumeGroup %s is comsumable", lvg.Name))
 	actualPVPaths := make(map[string]struct{}, len(pvs))
 	for _, pv := range pvs {
@@ -440,9 +432,10 @@ func validateLVGForUpdateFunc(log logger.Logger, sdsCache *cache.Cache, lvg *v1a
 			return false, reason.String()
 		}
 
+		newTotalVGSize := resource.NewQuantity(vg.VGSize.Value()+additionBlockDeviceSpace, resource.BinarySI)
 		for _, specTp := range lvg.Spec.ThinPools {
 			// might be a case when Thin-pool is already created, but is not shown in status
-			tpRequestedSize, err := getRequestedSizeFromString(specTp.Size, vg.VGSize)
+			tpRequestedSize, err := getRequestedSizeFromString(specTp.Size, *newTotalVGSize)
 			if err != nil {
 				reason.WriteString(err.Error())
 				continue
@@ -454,7 +447,7 @@ func validateLVGForUpdateFunc(log logger.Logger, sdsCache *cache.Cache, lvg *v1a
 			}
 
 			log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] the LVMVolumeGroup %s thin-pool %s requested size %s, Status VG size %s", lvg.Name, specTp.Name, tpRequestedSize.String(), lvg.Status.VGSize.String()))
-			switch utils.AreSizesEqualWithinDelta(tpRequestedSize, lvg.Status.VGSize, internal.ResizeDelta) {
+			switch utils.AreSizesEqualWithinDelta(tpRequestedSize, *newTotalVGSize, internal.ResizeDelta) {
 			// means a user wants 100% of VG space
 			case true:
 				hasFullThinPool = true
@@ -484,7 +477,8 @@ func validateLVGForUpdateFunc(log logger.Logger, sdsCache *cache.Cache, lvg *v1a
 		}
 
 		if !hasFullThinPool {
-			totalFreeSpace := lvg.Status.VGSize.Value() - lvg.Status.AllocatedSize.Value() + additionBlockDeviceSpace
+			allocatedSize := getVGAllocatedSize(*vg)
+			totalFreeSpace := newTotalVGSize.Value() - allocatedSize.Value()
 			log.Trace(fmt.Sprintf("[validateLVGForUpdateFunc] new LVMVolumeGroup %s thin-pools requested %d size, additional BlockDevices space %d, total: %d", lvg.Name, addingThinPoolSize, additionBlockDeviceSpace, totalFreeSpace))
 			if addingThinPoolSize != 0 && addingThinPoolSize+internal.ResizeDelta.Value() > totalFreeSpace {
 				reason.WriteString("Added thin-pools requested sizes are more than allowed free space in VG.")
@@ -520,11 +514,8 @@ func shouldReconcileLVGByCreateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cach
 		return false
 	}
 
-	if vg := ch.FindVG(lvg.Spec.ActualVGNameOnTheNode); vg != nil {
-		return false
-	}
-
-	return true
+	vg := ch.FindVG(lvg.Spec.ActualVGNameOnTheNode)
+	return vg == nil
 }
 
 func shouldReconcileLVGByUpdateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cache) bool {
@@ -532,11 +523,8 @@ func shouldReconcileLVGByUpdateFunc(lvg *v1alpha1.LvmVolumeGroup, ch *cache.Cach
 		return false
 	}
 
-	if vg := ch.FindVG(lvg.Spec.ActualVGNameOnTheNode); vg != nil {
-		return true
-	}
-
-	return false
+	vg := ch.FindVG(lvg.Spec.ActualVGNameOnTheNode)
+	return vg != nil
 }
 
 func ReconcileThinPoolsIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, vg internal.VGData, lvs []internal.LVData) error {
@@ -737,7 +725,7 @@ func removeLVGFinalizerIfExist(ctx context.Context, cl client.Client, lvg *v1alp
 	return true, nil
 }
 
-func checkIfVGHasLV(ch *cache.Cache, vgName string) []string {
+func getLVForVG(ch *cache.Cache, vgName string) []string {
 	lvs, _ := ch.GetLVs()
 	usedLVs := make([]string, 0, len(lvs))
 	for _, lv := range lvs {
@@ -755,10 +743,10 @@ func getLVMVolumeGroup(ctx context.Context, cl client.Client, metrics monitoring
 	err := cl.Get(ctx, client.ObjectKey{
 		Name: name,
 	}, obj)
-	metrics.ApiMethodsDuration(LVMVolumeGroupWatcherCtrlName, "get").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "get").Inc()
+	metrics.APIMethodsDuration(LVMVolumeGroupWatcherCtrlName, "get").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.APIMethodsExecutionCount(LVMVolumeGroupWatcherCtrlName, "get").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(LVMVolumeGroupWatcherCtrlName, "get").Inc()
+		metrics.APIMethodsErrors(LVMVolumeGroupWatcherCtrlName, "get").Inc()
 		return nil, err
 	}
 	return obj, nil
@@ -811,7 +799,7 @@ func DeleteVGIfExist(log logger.Logger, metrics monitoring.Metrics, sdsCache *ca
 	return nil
 }
 
-func ExtendVGComplex(metrics monitoring.Metrics, extendPVs []string, VGName string, log logger.Logger) error {
+func ExtendVGComplex(metrics monitoring.Metrics, extendPVs []string, vgName string, log logger.Logger) error {
 	for _, pvPath := range extendPVs {
 		start := time.Now()
 		command, err := utils.CreatePV(pvPath)
@@ -826,7 +814,7 @@ func ExtendVGComplex(metrics monitoring.Metrics, extendPVs []string, VGName stri
 	}
 
 	start := time.Now()
-	command, err := utils.ExtendVG(VGName, extendPVs)
+	command, err := utils.ExtendVG(vgName, extendPVs)
 	metrics.UtilsCommandsDuration(LVMVolumeGroupWatcherCtrlName, "vgextend").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.UtilsCommandsExecutionCount(LVMVolumeGroupWatcherCtrlName, "vgextend").Inc()
 	log.Debug(command)

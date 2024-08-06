@@ -17,15 +17,15 @@ limitations under the License.
 package controller
 
 import (
+	"context"
+	"testing"
+
 	"agent/internal"
 	"agent/pkg/logger"
 	"agent/pkg/monitoring"
-	"context"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	"testing"
-
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -73,15 +73,15 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("checkVGHealth_returns_Operational", func(t *testing.T) {
 		const (
 			vgName = "testVg"
-			vgUuid = "testUuid"
+			vgUUID = "testUuid"
 		)
 		bds := map[string][]v1alpha1.BlockDevice{
-			vgName + vgUuid: {{}},
+			vgName + vgUUID: {{}},
 		}
 		vgIssues := map[string]string{}
 		pvIssues := map[string][]string{}
 		lvIssues := map[string]map[string]string{}
-		vg := internal.VGData{VGName: vgName, VGUuid: vgUuid}
+		vg := internal.VGData{VGName: vgName, VGUUID: vgUUID}
 
 		health, _ := checkVGHealth(bds, vgIssues, pvIssues, lvIssues, vg)
 		assert.Equal(t, health, internal.LVMVGHealthOperational)
@@ -90,15 +90,15 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("checkVGHealth_returns_NonOperational", func(t *testing.T) {
 		const (
 			vgName = "testVg"
-			vgUuid = "testUuid"
+			vgUUID = "testUuid"
 		)
 		bds := map[string][]v1alpha1.BlockDevice{
-			vgName + vgUuid: {},
+			vgName + vgUUID: {},
 		}
 		vgIssues := map[string]string{}
 		pvIssues := map[string][]string{}
 		lvIssues := map[string]map[string]string{}
-		vg := internal.VGData{VGName: vgName, VGUuid: vgUuid}
+		vg := internal.VGData{VGName: vgName, VGUUID: vgUUID}
 
 		health, _ := checkVGHealth(bds, vgIssues, pvIssues, lvIssues, vg)
 		assert.Equal(t, health, internal.LVMVGHealthNonOperational)
@@ -125,37 +125,37 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("sortPVsByVG_returns_sorted_pvs", func(t *testing.T) {
 		const (
 			firstVgName  = "firstVg"
-			firstVgUuid  = "firstUUID"
+			firstVgUUID  = "firstUUID"
 			secondVgName = "secondVg"
-			secondVgUuid = "secondUUID"
+			secondVgUUID = "secondUUID"
 		)
 		pvs := []internal.PVData{
 			{
 				PVName: "first",
 				VGName: firstVgName,
-				VGUuid: firstVgUuid,
+				VGUuid: firstVgUUID,
 			},
 			{
 				PVName: "second",
 				VGName: secondVgName,
-				VGUuid: secondVgUuid,
+				VGUuid: secondVgUUID,
 			},
 		}
 
 		vgs := []internal.VGData{
 			{
 				VGName: firstVgName,
-				VGUuid: firstVgUuid,
+				VGUUID: firstVgUUID,
 			},
 			{
 				VGName: secondVgName,
-				VGUuid: secondVgUuid,
+				VGUUID: secondVgUUID,
 			},
 		}
 
 		expected := map[string][]internal.PVData{
-			firstVgName + firstVgUuid:   {pvs[0]},
-			secondVgName + secondVgUuid: {pvs[1]},
+			firstVgName + firstVgUUID:   {pvs[0]},
+			secondVgName + secondVgUUID: {pvs[1]},
 		}
 
 		actual := sortPVsByVG(pvs, vgs)
@@ -165,18 +165,18 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("sortBlockDevicesByVG_returns_sorted_bds", func(t *testing.T) {
 		const (
 			firstVgName  = "firstVg"
-			firstVgUuid  = "firstUUID"
+			firstVgUUID  = "firstUUID"
 			secondVgName = "secondVg"
-			secondVgUuid = "secondUUID"
+			secondVgUUID = "secondUUID"
 		)
 		vgs := []internal.VGData{
 			{
 				VGName: firstVgName,
-				VGUuid: firstVgUuid,
+				VGUUID: firstVgUUID,
 			},
 			{
 				VGName: secondVgName,
-				VGUuid: secondVgUuid,
+				VGUUID: secondVgUUID,
 			},
 		}
 
@@ -185,21 +185,21 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "first"},
 				Status: v1alpha1.BlockDeviceStatus{
 					ActualVGNameOnTheNode: firstVgName,
-					VGUuid:                firstVgUuid,
+					VGUuid:                firstVgUUID,
 				},
 			},
 			"second": {
 				ObjectMeta: metav1.ObjectMeta{Name: "second"},
 				Status: v1alpha1.BlockDeviceStatus{
 					ActualVGNameOnTheNode: secondVgName,
-					VGUuid:                secondVgUuid,
+					VGUuid:                secondVgUUID,
 				},
 			},
 		}
 
 		expected := map[string][]v1alpha1.BlockDevice{
-			firstVgName + firstVgUuid:   {bds["first"]},
-			secondVgName + secondVgUuid: {bds["second"]},
+			firstVgName + firstVgUUID:   {bds["first"]},
+			secondVgName + secondVgUUID: {bds["second"]},
 		}
 
 		actual := sortBlockDevicesByVG(bds, vgs)
@@ -209,35 +209,35 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("sortLVsByVG_returns_sorted_LVs", func(t *testing.T) {
 		const (
 			firstVgName  = "firstVg"
-			firstVgUuid  = "firstUUID"
+			firstVgUUID  = "firstUUID"
 			secondVgName = "secondVg"
-			secondVgUuid = "secondUUID"
+			secondVgUUID = "secondUUID"
 		)
 		vgs := []internal.VGData{
 			{
 				VGName: firstVgName,
-				VGUuid: firstVgUuid,
+				VGUUID: firstVgUUID,
 			},
 			{
 				VGName: secondVgName,
-				VGUuid: secondVgUuid,
+				VGUUID: secondVgUUID,
 			},
 		}
 		lvs := []internal.LVData{
 			{
 				LVName: "first",
 				VGName: firstVgName,
-				VGUuid: firstVgUuid,
+				VGUuid: firstVgUUID,
 			},
 			{
 				LVName: "second",
 				VGName: secondVgName,
-				VGUuid: secondVgUuid,
+				VGUuid: secondVgUUID,
 			},
 		}
 		expected := map[string][]internal.LVData{
-			firstVgName + firstVgUuid:   {lvs[0]},
-			secondVgName + secondVgUuid: {lvs[1]},
+			firstVgName + firstVgUUID:   {lvs[0]},
+			secondVgName + secondVgUUID: {lvs[1]},
 		}
 
 		actual := sortThinPoolsByVG(lvs, vgs)
@@ -247,16 +247,19 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("configureCandidateNodesDevices_returns_candidates_nodes", func(t *testing.T) {
 		const (
 			vgName   = "test_vg"
-			vgUuid   = "vg_uuid"
+			vgUUID   = "vg_uuid"
 			nodeName = "test_node"
 		)
 
 		vg := internal.VGData{
 			VGName: vgName,
-			VGUuid: vgUuid,
+			VGUUID: vgUUID,
 		}
 
 		size10G, err := resource.ParseQuantity("10G")
+		if err != nil {
+			t.Error(err)
+		}
 		size1G, err := resource.ParseQuantity("1G")
 		if err != nil {
 			t.Error(err)
@@ -268,13 +271,13 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				PVSize: size10G,
 				PVUuid: "pv_uuid1",
 				VGName: vgName,
-				VGUuid: vgUuid,
+				VGUuid: vgUUID,
 			},
 			{
 				PVName: "test_pv2",
 				PVSize: size1G,
 				PVUuid: "pv_uuid2",
-				VGUuid: vgUuid,
+				VGUuid: vgUUID,
 				VGName: vgName,
 			},
 		}
@@ -285,7 +288,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Status: v1alpha1.BlockDeviceStatus{
 					Path:                  "test_pv1",
 					Size:                  resource.MustParse("10G"),
-					VGUuid:                vgUuid,
+					VGUuid:                vgUUID,
 					ActualVGNameOnTheNode: vgName,
 				},
 			},
@@ -294,7 +297,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Status: v1alpha1.BlockDeviceStatus{
 					Path:                  "test_pv2",
 					Size:                  resource.MustParse("1G"),
-					VGUuid:                vgUuid,
+					VGUuid:                vgUUID,
 					ActualVGNameOnTheNode: vgName,
 				},
 			},
@@ -306,20 +309,20 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 					Path:        "test_pv1",
 					PVSize:      *resource.NewQuantity(size10G.Value(), resource.BinarySI),
 					DevSize:     *resource.NewQuantity(size10G.Value(), resource.BinarySI),
-					PVUuid:      "pv_uuid1",
+					PVUUID:      "pv_uuid1",
 					BlockDevice: "block_device1",
 				},
 				{
 					Path:        "test_pv2",
 					PVSize:      *resource.NewQuantity(size1G.Value(), resource.BinarySI),
 					DevSize:     *resource.NewQuantity(size1G.Value(), resource.BinarySI),
-					PVUuid:      "pv_uuid2",
+					PVUUID:      "pv_uuid2",
 					BlockDevice: "block_device2",
 				},
 			},
 		}
-		mp := map[string][]v1alpha1.BlockDevice{vgName + vgUuid: bds}
-		ar := map[string][]internal.PVData{vgName + vgUuid: pvs}
+		mp := map[string][]v1alpha1.BlockDevice{vgName + vgUUID: bds}
+		ar := map[string][]internal.PVData{vgName + vgUUID: pvs}
 
 		actual := configureCandidateNodeDevices(ar, mp, vg, nodeName)
 
@@ -347,7 +350,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		vgs := []internal.VGData{
 			{
 				VGName: "firstVG",
-				VGUuid: "firstUUID",
+				VGUUID: "firstUUID",
 			},
 		}
 		actual := sortBlockDevicesByVG(bds, vgs)
@@ -378,19 +381,22 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("getSpecThinPools_returns_LVName_LVSize_map", func(t *testing.T) {
 		const (
 			vgName = "test_vg"
-			vgUuid = "test_uuid"
+			vgUUID = "test_uuid"
 		)
 
-		vg := internal.VGData{VGName: vgName, VGUuid: vgUuid}
+		vg := internal.VGData{VGName: vgName, VGUUID: vgUUID}
 
 		firstSize, err := resource.ParseQuantity("1G")
+		if err != nil {
+			t.Error(err)
+		}
 		secondSize, err := resource.ParseQuantity("2G")
 		if err != nil {
 			t.Error(err)
 		}
 
 		thinPools := map[string][]internal.LVData{
-			vgName + vgUuid: {
+			vgName + vgUUID: {
 				{
 					LVName: "first",
 					LVSize: firstSize,
@@ -419,10 +425,13 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Type                  = "local"
 			Health                = internal.LVMVGHealthOperational
 			Message               = "No problems detected"
-			VGUuid                = "test_uuid"
+			VGUUID                = "test_uuid"
 		)
 
 		size10G, err := resource.ParseQuantity("10G")
+		if err != nil {
+			t.Error(err)
+		}
 		size1G, err := resource.ParseQuantity("1G")
 		if err != nil {
 			t.Error(err)
@@ -448,7 +457,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 						Path:        "test/path",
 						PVSize:      size1G,
 						DevSize:     size1G,
-						PVUuid:      "test-pv-uuid",
+						PVUUID:      "test-pv-uuid",
 						BlockDevice: "test-device",
 					},
 				},
@@ -466,7 +475,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Message:               Message,
 			StatusThinPools:       statusThinPools,
 			VGSize:                size10G,
-			VGUuid:                VGUuid,
+			VGUUID:                VGUUID,
 			Nodes:                 nodes,
 		}
 
@@ -491,7 +500,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Nodes:         convertLVMVGNodes(nodes),
 				ThinPools:     thinPools,
 				VGSize:        size10G,
-				VGUuid:        VGUuid,
+				VGUuid:        VGUUID,
 			},
 		}
 
@@ -556,6 +565,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		err = DeleteLVMVolumeGroup(ctx, cl, log, metrics, lvg, "test-node")
 		if assert.NoError(t, err) {
 			actual, err = GetAPILVMVolumeGroups(ctx, cl, metrics)
+			assert.NoError(t, err)
 			assert.Equal(t, 0, len(actual))
 		}
 	})
@@ -718,7 +728,13 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("hasLVMVolumeGroupDiff", func(t *testing.T) {
 		t.Run("should_return_false", func(t *testing.T) {
 			size10G, err := resource.ParseQuantity("10G")
+			if err != nil {
+				t.Error(err)
+			}
 			size1G, err := resource.ParseQuantity("1G")
+			if err != nil {
+				t.Error(err)
+			}
 			size13G, err := resource.ParseQuantity("13G")
 			if err != nil {
 				t.Error(err)
@@ -755,7 +771,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 							Path:        "/test/ds",
 							PVSize:      size1G,
 							DevSize:     size13G,
-							PVUuid:      "testUUID",
+							PVUUID:      "testUUID",
 							BlockDevice: "something",
 						},
 					},
@@ -821,14 +837,14 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 							Path:        "/test/ds",
 							PVSize:      size1G,
 							DevSize:     size13G,
-							PVUuid:      "testUUID",
+							PVUUID:      "testUUID",
 							BlockDevice: "something",
 						},
 						{
 							Path:        "/test/ds2",
 							PVSize:      size1G,
 							DevSize:     size13G,
-							PVUuid:      "testUUID2",
+							PVUUID:      "testUUID2",
 							BlockDevice: "something2",
 						},
 					},

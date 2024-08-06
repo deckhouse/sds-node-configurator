@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"gopkg.in/yaml.v3"
@@ -36,7 +35,6 @@ func getTargetConditionsCount(lvgCrd *v1.CustomResourceDefinition) (int, error) 
 		} `json:"properties"`
 	}
 	i := item{}
-	fmt.Printf("%+v\n", lvgCrd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["status"].Properties["conditions"].Items)
 	json, err := lvgCrd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["status"].Properties["conditions"].Items.MarshalJSON()
 	if err != nil {
 		return 0, err

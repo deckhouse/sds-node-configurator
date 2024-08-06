@@ -50,19 +50,12 @@ type Logger struct {
 }
 
 func NewLogger(level Verbosity) (*Logger, error) {
-	// klog.InitFlags(nil)
-	// if err := flag.Set("v", string(level)); err != nil {
-	// return nil, err
-	// }
-	// flag.Parse()
-
 	v, err := strconv.Atoi(string(level))
 	if err != nil {
 		return nil, err
 	}
 
 	log := textlogger.NewLogger(textlogger.NewConfig(textlogger.Verbosity(v))).WithCallDepth(1)
-	// log := klogr.New().WithCallDepth(1)
 
 	return &Logger{log: log}, nil
 }
