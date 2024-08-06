@@ -18,16 +18,17 @@ package config
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNewConfig(t *testing.T) {
 	t.Run("AllValuesSet_ReturnsNoError", func(t *testing.T) {
 		expNodeName := "test-node"
 		expMetricsPort := ":0000"
-		expMachineId := "test-id"
+		expMachineID := "test-id"
 
 		err := os.Setenv(NodeName, expNodeName)
 		if err != nil {
@@ -37,7 +38,10 @@ func TestNewConfig(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		err = os.Setenv(MachineID, expMachineId)
+		err = os.Setenv(MachineID, expMachineID)
+		if err != nil {
+			t.Error(err)
+		}
 		defer os.Clearenv()
 
 		opts, err := NewConfig()
@@ -45,12 +49,12 @@ func TestNewConfig(t *testing.T) {
 		if assert.NoError(t, err) {
 			assert.Equal(t, expNodeName, opts.NodeName)
 			assert.Equal(t, expMetricsPort, opts.MetricsPort)
-			assert.Equal(t, expMachineId, opts.MachineId)
+			assert.Equal(t, expMachineID, opts.MachineID)
 		}
 	})
 
 	t.Run("NodeNameNotSet_ReturnsError", func(t *testing.T) {
-		machineIdFile := "./host-root/etc/machine-id"
+		machineIDFile := "./host-root/etc/machine-id"
 		expMetricsPort := ":0000"
 		expErrorMsg := fmt.Sprintf("[NewConfig] required %s env variable is not specified", NodeName)
 
@@ -65,7 +69,7 @@ func TestNewConfig(t *testing.T) {
 			t.Error(err)
 		}
 
-		file, err := os.Create(machineIdFile)
+		file, err := os.Create(machineIDFile)
 		if err != nil {
 			t.Error(err)
 		}
@@ -85,7 +89,7 @@ func TestNewConfig(t *testing.T) {
 		assert.EqualError(t, err, expErrorMsg)
 	})
 
-	t.Run("MachineIdNotSet_ReturnsError", func(t *testing.T) {
+	t.Run("MachineIDNotSet_ReturnsError", func(t *testing.T) {
 		expMetricsPort := ":0000"
 		expNodeName := "test-node"
 		expErrorMsg := fmt.Sprintf("[NewConfig] unable to get %s, error: %s",
@@ -108,13 +112,13 @@ func TestNewConfig(t *testing.T) {
 	t.Run("MetricsPortNotSet_ReturnsDefaultPort", func(t *testing.T) {
 		expNodeName := "test-node"
 		expMetricsPort := ":4202"
-		expMachineId := "test-id"
+		expMachineID := "test-id"
 
 		err := os.Setenv(NodeName, expNodeName)
 		if err != nil {
 			t.Error(err)
 		}
-		err = os.Setenv(MachineID, expMachineId)
+		err = os.Setenv(MachineID, expMachineID)
 		if err != nil {
 			t.Error(err)
 		}
@@ -126,7 +130,7 @@ func TestNewConfig(t *testing.T) {
 		if assert.NoError(t, err) {
 			assert.Equal(t, expNodeName, opts.NodeName)
 			assert.Equal(t, expMetricsPort, opts.MetricsPort)
-			assert.Equal(t, expMachineId, opts.MachineId)
+			assert.Equal(t, expMachineID, opts.MachineID)
 		}
 	})
 }

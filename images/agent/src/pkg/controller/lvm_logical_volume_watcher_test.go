@@ -1,15 +1,16 @@
 package controller
 
 import (
+	"bytes"
+	"context"
+	"testing"
+
 	"agent/internal"
 	"agent/pkg/cache"
 	"agent/pkg/logger"
 	"agent/pkg/monitoring"
 	"agent/pkg/utils"
-	"bytes"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"testing"
-
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,6 +23,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		log     = logger.Logger{}
 		metrics = monitoring.Metrics{}
 		vgName  = "test-vg"
+		ctx     = context.Background()
 	)
 
 	t.Run("subtractQuantity_returns_correct_value", func(t *testing.T) {
@@ -212,7 +214,6 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				assert.Equal(t, "No LV name specified. Zero size for LV. No thin pool specified. ", r)
 			}
 		})
-
 	})
 
 	t.Run("getThinPoolAvailableSpace", func(t *testing.T) {

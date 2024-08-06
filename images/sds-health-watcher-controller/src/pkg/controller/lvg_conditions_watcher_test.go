@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,6 +45,18 @@ func TestLVGConditionsWatcher(t *testing.T) {
 	})
 
 	t.Run("getTargetConditionsCount", func(t *testing.T) {
+		first, err := json.Marshal("first")
+		if err != nil {
+			t.Error(err)
+		}
+		second, err := json.Marshal("second")
+		if err != nil {
+			t.Error(err)
+		}
+		third, err := json.Marshal("third")
+		if err != nil {
+			t.Error(err)
+		}
 		crd := &v1.CustomResourceDefinition{
 			Spec: v1.CustomResourceDefinitionSpec{
 				Versions: []v1.CustomResourceDefinitionVersion{
@@ -60,13 +73,13 @@ func TestLVGConditionsWatcher(t *testing.T) {
 															"type": {
 																Enum: []v1.JSON{
 																	{
-																		Raw: []byte("first"),
+																		Raw: first,
 																	},
 																	{
-																		Raw: []byte("second"),
+																		Raw: second,
 																	},
 																	{
-																		Raw: []byte("third"),
+																		Raw: third,
 																	},
 																},
 															},

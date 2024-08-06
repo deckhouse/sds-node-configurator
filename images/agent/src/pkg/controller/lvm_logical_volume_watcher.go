@@ -1,21 +1,22 @@
 package controller
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+
 	"agent/config"
 	"agent/internal"
 	"agent/pkg/cache"
 	"agent/pkg/logger"
 	"agent/pkg/monitoring"
 	"agent/pkg/utils"
-	"context"
-	"errors"
-	"fmt"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/google/go-cmp/cmp"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
-	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -139,7 +140,7 @@ func RunLVMLogicalVolumeWatcherController(
 				}
 			}
 			if shouldRequeue {
-				log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] some issues were occured while reconciliation the LVMLogicalVolume %s. Requeue the request in %s", request.Name, cfg.LLVRequeueIntervalSec.String()))
+				log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] some issues were occurred while reconciliation the LVMLogicalVolume %s. Requeue the request in %s", request.Name, cfg.LLVRequeueIntervalSec.String()))
 				return reconcile.Result{RequeueAfter: cfg.LLVRequeueIntervalSec}, nil
 			}
 
@@ -155,14 +156,14 @@ func RunLVMLogicalVolumeWatcherController(
 	}
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LVMLogicalVolume{}, handler.TypedFuncs[*v1alpha1.LVMLogicalVolume]{
-		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*v1alpha1.LVMLogicalVolume], q workqueue.RateLimitingInterface) {
+		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LVMLogicalVolume], q workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] got a create event for the LVMLogicalVolume: %s", e.Object.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 			q.Add(request)
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] added the request of the LVMLogicalVolume %s to Reconciler", e.Object.GetName()))
 		},
 
-		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*v1alpha1.LVMLogicalVolume], q workqueue.RateLimitingInterface) {
+		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LVMLogicalVolume], q workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] got an update event for the LVMLogicalVolume: %s", e.ObjectNew.GetName()))
 			// TODO: Figure out how to log it in our logger.
 			if cfg.Loglevel == "4" {
@@ -333,7 +334,7 @@ func reconcileLLVUpdateFunc(
 		log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to get LVMLogicalVolume %s requested size", llv.Name))
 		return false, err
 	}
-	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] sucessfully counted the LVMLogicalVolume %s requested size: %s", llv.Name, llvRequestSize.String()))
+	log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully counted the LVMLogicalVolume %s requested size: %s", llv.Name, llvRequestSize.String()))
 
 	if utils.AreSizesEqualWithinDelta(actualSize, llvRequestSize, internal.ResizeDelta) {
 		log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s has the same actual size %s as the requested size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, actualSize.String(), llvRequestSize.String()))

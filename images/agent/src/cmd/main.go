@@ -17,6 +17,11 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"fmt"
+	"os"
+	goruntime "runtime"
+
 	"agent/config"
 	"agent/pkg/cache"
 	"agent/pkg/controller"
@@ -24,13 +29,7 @@ import (
 	"agent/pkg/logger"
 	"agent/pkg/monitoring"
 	"agent/pkg/scanner"
-	"context"
-	"fmt"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"os"
-	goruntime "runtime"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
-
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -39,6 +38,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 var (
@@ -61,7 +61,7 @@ func main() {
 
 	log, err := logger.NewLogger(cfgParams.Loglevel)
 	if err != nil {
-		fmt.Println(fmt.Sprintf("unable to create NewLogger, err: %v", err))
+		fmt.Printf("unable to create NewLogger, err: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -71,7 +71,7 @@ func main() {
 	log.Info("[main] CfgParams has been successfully created")
 	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.NodeName, cfgParams.NodeName))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.MachineID, cfgParams.MachineId))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.MachineID, cfgParams.MachineID))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.BlockDeviceScanIntervalSec.String()))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.ThrottleInterval, cfgParams.ThrottleIntervalSec.String()))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDurationSec.String()))

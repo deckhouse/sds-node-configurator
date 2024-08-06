@@ -18,11 +18,11 @@ package controller
 
 import (
 	"encoding/json"
-	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"testing"
 
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
