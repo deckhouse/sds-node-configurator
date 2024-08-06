@@ -23,7 +23,6 @@ import (
 )
 
 func KubernetesDefaultConfigCreate() (*rest.Config, error) {
-	//todo validate empty
 	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(),
 		&clientcmd.ConfigOverrides{},

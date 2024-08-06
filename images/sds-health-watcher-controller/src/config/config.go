@@ -19,15 +19,14 @@ package config
 import (
 	"fmt"
 	"os"
-	"sds-health-watcher-controller/pkg/logger"
-
 	"strconv"
 	"time"
+
+	"sds-health-watcher-controller/pkg/logger"
 )
 
 const (
 	ScanInterval                         = "SCAN_INTERVAL"
-	NodeName                             = "NODE_NAME"
 	LogLevel                             = "LOG_LEVEL"
 	MetricsPort                          = "METRICS_PORT"
 	DefaultHealthProbeBindAddressEnvName = "HEALTH_PROBE_BIND_ADDRESS"

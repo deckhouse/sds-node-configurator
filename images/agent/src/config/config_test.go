@@ -129,5 +129,4 @@ func TestNewConfig(t *testing.T) {
 			assert.Equal(t, expMachineId, opts.MachineId)
 		}
 	})
-
 }

@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"fmt"
+
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"gopkg.in/yaml.v3"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -34,7 +36,7 @@ func getTargetConditionsCount(lvgCrd *v1.CustomResourceDefinition) (int, error) 
 		} `json:"properties"`
 	}
 	i := item{}
-
+	fmt.Printf("%+v\n", lvgCrd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["status"].Properties["conditions"].Items)
 	json, err := lvgCrd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["status"].Properties["conditions"].Items.MarshalJSON()
 	if err != nil {
 		return 0, err
@@ -48,10 +50,10 @@ func getTargetConditionsCount(lvgCrd *v1.CustomResourceDefinition) (int, error) 
 	return len(i.Properties.Type.Enum), nil
 }
 
-func getLVGCRD(ctx context.Context, cl client.Client) (*v1.CustomResourceDefinition, error) {
+func getCRD(ctx context.Context, cl client.Client, crdName string) (*v1.CustomResourceDefinition, error) {
 	crd := &v1.CustomResourceDefinition{}
 	err := cl.Get(ctx, client.ObjectKey{
-		Name: lvgCrdName,
+		Name: crdName,
 	}, crd)
 
 	return crd, err

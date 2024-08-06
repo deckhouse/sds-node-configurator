@@ -20,12 +20,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
+
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/strings/slices"
-	"reflect"
 	"sds-health-watcher-controller/config"
 	"sds-health-watcher-controller/internal"
 	"sds-health-watcher-controller/pkg/logger"
@@ -36,7 +38,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-	"strings"
 )
 
 const (
@@ -95,7 +96,7 @@ func RunLVGConditionsWatcher(
 	}
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LvmVolumeGroup{}), handler.Funcs{
-		CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
+		CreateFunc: func(_ context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] got a create event for the LVMVolumeGroup %s", e.Object.GetName()))
 
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
@@ -103,7 +104,7 @@ func RunLVGConditionsWatcher(
 
 			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] createFunc added a request for the LVMVolumeGroup %s to the Reconcilers queue", e.Object.GetName()))
 		},
-		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
+		UpdateFunc: func(_ context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] got a update event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
 
 			oldLVG, ok := e.ObjectOld.(*v1alpha1.LvmVolumeGroup)
@@ -129,7 +130,6 @@ func RunLVGConditionsWatcher(
 
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 			q.Add(request)
-
 		},
 	})
 	if err != nil {
@@ -148,7 +148,7 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 		return true, nil
 	}
 
-	crd, err := getLVGCRD(ctx, cl)
+	crd, err := getCRD(ctx, cl, lvgCrdName)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to get crd %s", lvgCrdName))
 		return true, err
@@ -156,7 +156,7 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 
 	targetConCount, err := getTargetConditionsCount(crd)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[reconcileLVGConditions]"))
+		log.Error(err, "[reconcileLVGConditions] unable to get target conditions count")
 		return true, err
 	}
 
@@ -187,9 +187,15 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 		log.Trace(fmt.Sprintf("[reconcileLVGConditions] check condition %+v of the LVMVolumeGroup %s", c, lvg.Name))
 		if c.Type == internal.TypeReady {
 			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the condition %s of the LVMVolumeGroup %s is ours, skip it", c.Type, lvg.Name))
-		} else if c.Status == metav1.ConditionTrue {
+			continue
+		}
+
+		if c.Status == metav1.ConditionTrue {
 			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s condition %s has status True", lvg.Name, c.Type))
-		} else if c.Reason == internal.ReasonCreating {
+			continue
+		}
+
+		if c.Reason == internal.ReasonCreating {
 			ready = false
 			falseConditions = nil
 			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s condition %s has Creating reason. Turn the LVMVolumeGroup Ready condition and phase to Pending", lvg.Name, c.Type))
@@ -206,7 +212,9 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 			}
 
 			break
-		} else if c.Reason == internal.ReasonTerminating {
+		}
+
+		if c.Reason == internal.ReasonTerminating {
 			ready = false
 			falseConditions = nil
 			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s condition %s has Terminating reason. Turn the LVMVolumeGroup Ready condition and phase to Terminating", lvg.Name, c.Type))
@@ -222,7 +230,9 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 				return true, err
 			}
 			break
-		} else if c.Status == metav1.ConditionFalse &&
+		}
+
+		if c.Status == metav1.ConditionFalse &&
 			!slices.Contains(acceptableReasons, c.Reason) {
 			log.Warning(fmt.Sprintf("[reconcileLVGConditions] the condition %s of the LVMVolumeGroup %s has status False and its reason is not acceptable", c.Type, lvg.Name))
 			falseConditions = append(falseConditions, c.Type)
@@ -259,7 +269,6 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 		err = updateLVMVolumeGroupPhaseIfNeeded(ctx, cl, lvg, internal.PhaseReady)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to update the LVMVolumeGroup %s phase", lvg.Name))
-
 		}
 		log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully reconciled the LVMVolumeGroup %s phase to Ready", lvg.Name))
 		log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully reconciled conditions of the LVMVolumeGroup %s", lvg.Name))

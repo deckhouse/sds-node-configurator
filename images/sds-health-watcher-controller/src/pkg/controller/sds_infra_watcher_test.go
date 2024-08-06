@@ -2,21 +2,22 @@ package controller
 
 import (
 	"context"
+	"testing"
+
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
+	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/strings/slices"
 	"sds-health-watcher-controller/pkg/monitoring"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"testing"
 )
 
 func TestHealthWatcher(t *testing.T) {
 	cl := NewFakeClient()
 	ctx := context.Background()
-	//log := logger.Logger{}
 	metrics := monitoring.GetMetrics("")
 
 	t.Run("GetLVMVolumeGroups_returns_lvgs", func(t *testing.T) {
@@ -42,7 +43,7 @@ func TestHealthWatcher(t *testing.T) {
 		}
 
 		lvgs, err := GetLVMVolumeGroups(ctx, cl, metrics)
-
+		assert.NoError(t, err)
 		assert.Equal(t, 2, len(lvgs))
 	})
 
@@ -126,6 +127,7 @@ func NewFakeClient() client.WithWatch {
 	s := scheme.Scheme
 	_ = metav1.AddMetaToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
+	_ = v1.AddToScheme(s)
 
 	builder := fake.NewClientBuilder().WithScheme(s)
 
