@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"github.com/cloudflare/cfssl/log"
 	dh "github.com/deckhouse/deckhouse/deckhouse-controller/pkg/apis/deckhouse.io/v1alpha1"
 	"k8s.io/apimachinery/pkg/types"
@@ -48,7 +49,7 @@ func RunMCWatcher(
 	cl := mgr.GetClient()
 
 	c, err := controller.New(MCWatcherCtrlName, mgr, controller.Options{
-		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
+		Reconciler: reconcile.Func(func(_ context.Context, request reconcile.Request) (reconcile.Result, error) {
 			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] Reconciler got a request %s", request.String()))
 			return reconcile.Result{}, nil
 		}),
@@ -60,11 +61,11 @@ func RunMCWatcher(
 	}
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &dh.ModuleConfig{}), handler.Funcs{
-		CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
+		CreateFunc: func(ctx context.Context, e event.CreateEvent, _ workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[MCWatcherCtrlName] got a create event for the ModuleConfig %s", e.Object.GetName()))
 			checkMCThinPoolsEnabled(ctx, cl)
 		},
-		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
+		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, _ workqueue.RateLimitingInterface) {
 			log.Info(fmt.Sprintf("[MCWatcherCtrlName] got a update event for the ModuleConfig %s", e.ObjectNew.GetName()))
 			checkMCThinPoolsEnabled(ctx, cl)
 		},

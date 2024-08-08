@@ -1,10 +1,11 @@
 package cache
 
 import (
-	"agent/internal"
 	"bytes"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"agent/internal"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCache(t *testing.T) {

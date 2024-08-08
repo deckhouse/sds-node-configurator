@@ -17,12 +17,11 @@ limitations under the License.
 package utils
 
 import (
-	"agent/internal"
 	"testing"
 
-	"k8s.io/apimachinery/pkg/api/resource"
-
+	"agent/internal"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 func TestCommands(t *testing.T) {
@@ -63,6 +62,9 @@ func TestCommands(t *testing.T) {
 }`
 
 			size30G, err := resource.ParseQuantity("30G")
+			if err != nil {
+				t.Error(err)
+			}
 			size1M, err := resource.ParseQuantity("1M")
 			if err != nil {
 				t.Error(err)
@@ -216,7 +218,7 @@ func TestCommands(t *testing.T) {
 			expectedVGs := internal.VG{VG: []internal.VGData{
 				{
 					VGName:   "test-vg",
-					VGUuid:   "P14t8J-nfUE-hryT-LiTv-JdFD-Wqxg-R8taCa",
+					VGUUID:   "P14t8J-nfUE-hryT-LiTv-JdFD-Wqxg-R8taCa",
 					VGTags:   "test-tag",
 					VGSize:   size2G,
 					VGShared: "test-shared",

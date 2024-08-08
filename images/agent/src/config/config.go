@@ -17,16 +17,16 @@ limitations under the License.
 package config
 
 import (
-	"agent/internal"
-	"agent/pkg/logger"
 	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
-
 	"strconv"
 	"strings"
 	"time"
+
+	"agent/internal"
+	"agent/pkg/logger"
 )
 
 const (
@@ -42,7 +42,7 @@ const (
 )
 
 type Options struct {
-	MachineId                  string
+	MachineID                  string
 	NodeName                   string
 	Loglevel                   logger.Verbosity
 	MetricsPort                string
@@ -69,11 +69,11 @@ func NewConfig() (*Options, error) {
 		opts.Loglevel = logger.Verbosity(loglevel)
 	}
 
-	machId, err := getMachineId()
+	machID, err := getMachineID()
 	if err != nil {
 		return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", MachineID, err)
 	}
-	opts.MachineId = machId
+	opts.MachineID = machID
 
 	opts.MetricsPort = os.Getenv(MetricsPort)
 	if opts.MetricsPort == "" {
@@ -127,7 +127,7 @@ func NewConfig() (*Options, error) {
 	return &opts, nil
 }
 
-func getMachineId() (string, error) {
+func getMachineID() (string, error) {
 	id := os.Getenv(MachineID)
 	if id == "" {
 		args := []string{"-m", "-u", "-i", "-n", "-p", "-t", "1", "cat", "/etc/machine-id"}

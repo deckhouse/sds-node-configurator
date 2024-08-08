@@ -17,16 +17,16 @@ limitations under the License.
 package utils
 
 import (
-	"agent/internal"
 	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	golog "log"
 	"os/exec"
 	"regexp"
 
-	golog "log"
+	"agent/internal"
 )
 
 func GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
@@ -243,8 +243,8 @@ func CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string
 	return cmd.String(), nil
 }
 
-func CreateThinPool(thinPoolName, VGName string, size int64) (string, error) {
-	args := []string{"lvcreate", "-L", fmt.Sprintf("%dk", size/1024), "-T", fmt.Sprintf("%s/%s", VGName, thinPoolName)}
+func CreateThinPool(thinPoolName, vgName string, size int64) (string, error) {
+	args := []string{"lvcreate", "-L", fmt.Sprintf("%dk", size/1024), "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -257,8 +257,8 @@ func CreateThinPool(thinPoolName, VGName string, size int64) (string, error) {
 	return cmd.String(), nil
 }
 
-func CreateThinPoolFullVGSpace(thinPoolName, VGName string) (string, error) {
-	args := []string{"lvcreate", "-l", "100%FREE", "-T", fmt.Sprintf("%s/%s", VGName, thinPoolName)}
+func CreateThinPoolFullVGSpace(thinPoolName, vgName string) (string, error) {
+	args := []string{"lvcreate", "-l", "100%FREE", "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -476,12 +476,9 @@ func unmarshalPVs(out []byte) ([]internal.PVData, error) {
 		return nil, err
 	}
 
-	var pvs []internal.PVData
-
+	pvs := make([]internal.PVData, 0, len(pvR.Report))
 	for _, rep := range pvR.Report {
-		for _, pv := range rep.PV {
-			pvs = append(pvs, pv)
-		}
+		pvs = append(pvs, rep.PV...)
 	}
 
 	return pvs, nil
@@ -494,12 +491,9 @@ func unmarshalVGs(out []byte) ([]internal.VGData, error) {
 		return nil, err
 	}
 
-	var vgs []internal.VGData
-
+	vgs := make([]internal.VGData, 0, len(vgR.Report))
 	for _, rep := range vgR.Report {
-		for _, vg := range rep.VG {
-			vgs = append(vgs, vg)
-		}
+		vgs = append(vgs, rep.VG...)
 	}
 
 	return vgs, nil
@@ -512,27 +506,19 @@ func unmarshalLVs(out []byte) ([]internal.LVData, error) {
 		return nil, err
 	}
 
-	var lvs []internal.LVData
-
+	lvs := make([]internal.LVData, 0, len(lvR.Report))
 	for _, rep := range lvR.Report {
-		for _, lv := range rep.LV {
-			lvs = append(lvs, lv)
-		}
+		lvs = append(lvs, rep.LV...)
 	}
 
 	return lvs, nil
 }
 
-func extendArgs(args []string) []string {
-	nsenterArgs := []string{"-t", "1", "-m", "-u", "-i", "-n", "-p"}
-	return append(nsenterArgs, args...)
-}
-
 func lvmStaticExtendedArgs(args []string) []string {
 	nsenterArgs := []string{"-t", "1", "-m", "-u", "-i", "-n", "-p"}
 	lvmStaticBin := []string{"--", internal.LVMCmd}
-	result := append(nsenterArgs, lvmStaticBin...)
-	return append(result, args...)
+	nsenterArgs = append(nsenterArgs, lvmStaticBin...)
+	return append(nsenterArgs, args...)
 }
 
 // filterStdErr processes a bytes.Buffer containing stderr output and filters out specific
@@ -560,7 +546,13 @@ func filterStdErr(command string, stdErr bytes.Buffer) bytes.Buffer {
 	// will try to resize the Thin-pool with 100%VG space and will get the error.
 	regexpNoSizeChangeError := ` No size change.+`
 	regex1, err := regexp.Compile(regexpPattern)
+	if err != nil {
+		return stdErr
+	}
 	regex2, err := regexp.Compile(regexpSocketError)
+	if err != nil {
+		return stdErr
+	}
 	regex3, err := regexp.Compile(regexpNoSizeChangeError)
 	if err != nil {
 		return stdErr

@@ -17,11 +17,12 @@ limitations under the License.
 package monitoring
 
 import (
+	"strings"
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
-	"strings"
-	"time"
 )
 
 const (
@@ -133,15 +134,15 @@ func (m Metrics) UtilsCommandsErrorsCount(controllerName, command string) promet
 	return utilsCommandsErrorsCount.WithLabelValues(m.node, controllerName, strings.ToLower(command))
 }
 
-func (m Metrics) ApiMethodsDuration(controllerName, method string) prometheus.Observer {
+func (m Metrics) APIMethodsDuration(controllerName, method string) prometheus.Observer {
 	return apiMethodsDuration.WithLabelValues(m.node, controllerName, strings.ToLower(method))
 }
 
-func (m Metrics) ApiMethodsExecutionCount(controllerName, method string) prometheus.Counter {
+func (m Metrics) APIMethodsExecutionCount(controllerName, method string) prometheus.Counter {
 	return apiMethodsExecutionCount.WithLabelValues(m.node, controllerName, strings.ToLower(method))
 }
 
-func (m Metrics) ApiMethodsErrors(controllerName, method string) prometheus.Counter {
+func (m Metrics) APIMethodsErrors(controllerName, method string) prometheus.Counter {
 	return apiMethodsErrorsCount.WithLabelValues(m.node, controllerName, strings.ToLower(method))
 }
 

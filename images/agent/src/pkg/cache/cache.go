@@ -1,10 +1,11 @@
 package cache
 
 import (
-	"agent/internal"
-	"agent/pkg/logger"
 	"bytes"
 	"fmt"
+
+	"agent/internal"
+	"agent/pkg/logger"
 )
 
 type Cache struct {

@@ -3,7 +3,7 @@ module agent
 go 1.22.2
 
 require (
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240709091744-c9d24f05db41
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240805103635-969dc811217b
 	github.com/go-logr/logr v1.4.1
 	github.com/google/go-cmp v0.6.0
 	github.com/onsi/ginkgo/v2 v2.17.1
