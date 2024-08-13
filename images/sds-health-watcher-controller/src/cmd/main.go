@@ -29,14 +29,15 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
 	"sds-health-watcher-controller/config"
 	"sds-health-watcher-controller/pkg/controller"
 	"sds-health-watcher-controller/pkg/kubutils"
 	"sds-health-watcher-controller/pkg/logger"
 	"sds-health-watcher-controller/pkg/monitoring"
-	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 var (

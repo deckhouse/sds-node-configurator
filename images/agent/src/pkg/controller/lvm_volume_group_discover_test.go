@@ -20,9 +20,6 @@ import (
 	"context"
 	"testing"
 
-	"agent/internal"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -30,6 +27,10 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"agent/internal"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
 )
 
 func TestLVMVolumeGroupDiscover(t *testing.T) {

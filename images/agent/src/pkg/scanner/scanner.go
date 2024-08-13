@@ -7,6 +7,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/pilebones/go-udev/netlink"
+	kubeCtrl "sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
 	"agent/config"
 	"agent/internal"
 	"agent/pkg/cache"
@@ -14,9 +18,6 @@ import (
 	"agent/pkg/logger"
 	"agent/pkg/throttler"
 	"agent/pkg/utils"
-	"github.com/pilebones/go-udev/netlink"
-	kubeCtrl "sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 func RunScanner(ctx context.Context, log logger.Logger, cfg config.Options, sdsCache *cache.Cache, bdCtrl, lvgDiscoverCtrl kubeCtrl.Controller) error {

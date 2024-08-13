@@ -25,10 +25,11 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"sds-health-watcher-controller/internal"
 	"sds-health-watcher-controller/pkg/logger"
 	"sds-health-watcher-controller/pkg/monitoring"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func getNodeNamesFromPods(pods map[string]v1.Pod) []string {

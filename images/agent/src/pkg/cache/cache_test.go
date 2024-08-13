@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"testing"
 
-	"agent/internal"
 	"github.com/stretchr/testify/assert"
+
+	"agent/internal"
 )
 
 func TestCache(t *testing.T) {

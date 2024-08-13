@@ -19,9 +19,10 @@ package utils
 import (
 	"testing"
 
-	"agent/internal"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"agent/internal"
 )
 
 func TestCommands(t *testing.T) {

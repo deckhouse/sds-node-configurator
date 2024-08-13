@@ -22,13 +22,6 @@ import (
 	"os"
 	goruntime "runtime"
 
-	"agent/config"
-	"agent/pkg/cache"
-	"agent/pkg/controller"
-	"agent/pkg/kubutils"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
-	"agent/pkg/scanner"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
@@ -39,6 +32,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	"agent/config"
+	"agent/pkg/cache"
+	"agent/pkg/controller"
+	"agent/pkg/kubutils"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
+	"agent/pkg/scanner"
 )
 
 var (

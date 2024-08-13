@@ -19,14 +19,15 @@ package controller_test
 import (
 	"context"
 
-	"agent/internal"
-	"agent/pkg/controller"
-	"agent/pkg/monitoring"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"agent/internal"
+	"agent/pkg/controller"
+	"agent/pkg/monitoring"
 )
 
 var _ = Describe("Storage Controller", func() {
