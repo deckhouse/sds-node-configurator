@@ -17,10 +17,10 @@ import axios from 'axios';
 import moment from 'moment';
 
 const owner = 'deckhouse';
-const repo = 'virtualization';
-const project = 'DVP'
+const repo = 'sds-node-configurator';
+const project = 'SNC'
 
-const octokit = new Octokit({ auth: process.env.RELEASE_PLEASE_TOKEN });
+const octokit = new Octokit({ auth: process.env.PR_SUMMARY_TOKEN });
 
 
 async function fetchPullRequests() {
