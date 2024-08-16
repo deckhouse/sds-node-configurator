@@ -1,20 +1,21 @@
 package controller
 
 import (
-	"agent/pkg/cache"
 	"context"
 	"fmt"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strings"
 
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/strings/slices"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"agent/internal"
+	"agent/pkg/cache"
 	"agent/pkg/logger"
 	"agent/pkg/monitoring"
 	"agent/pkg/utils"
-	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/utils/strings/slices"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func identifyReconcileFunc(sdsCache *cache.Cache, vgName string, llv *v1alpha1.LVMLogicalVolume) reconcileType {
@@ -37,13 +38,10 @@ func identifyReconcileFunc(sdsCache *cache.Cache, vgName string, llv *v1alpha1.L
 }
 
 func shouldReconcileByDeleteFunc(llv *v1alpha1.LVMLogicalVolume) bool {
-	if llv.DeletionTimestamp == nil {
-		return false
-	}
-
-	return true
+	return llv.DeletionTimestamp != nil
 }
 
+//nolint:unparam
 func checkIfConditionIsTrue(lvg *v1alpha1.LvmVolumeGroup, conType string) bool {
 	// this check prevents infinite resource updating after a retry
 	for _, c := range lvg.Status.Conditions {
@@ -98,9 +96,9 @@ func removeLLVFinalizersIfExist(
 
 	if removed {
 		log.Trace(fmt.Sprintf("[removeLLVFinalizersIfExist] removed finalizer %s from the LVMLogicalVolume %s", internal.SdsNodeConfiguratorFinalizer, llv.Name))
-		err := updateLVMLogicalVolume(ctx, metrics, cl, llv)
+		err := updateLVMLogicalVolumeSpec(ctx, metrics, cl, llv)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[updateLVMLogicalVolume] unable to update the LVMVolumeGroup %s", llv.Name))
+			log.Error(err, fmt.Sprintf("[updateLVMLogicalVolumeSpec] unable to update the LVMVolumeGroup %s", llv.Name))
 			return err
 		}
 	}
@@ -128,7 +126,7 @@ func checkIfLVBelongsToLLV(llv *v1alpha1.LVMLogicalVolume, lv *internal.LVData) 
 func updateLLVPhaseToCreatedIfNeeded(ctx context.Context, cl client.Client, llv *v1alpha1.LVMLogicalVolume, actualSize resource.Quantity) (bool, error) {
 	var contiguous *bool
 	if llv.Spec.Thick != nil {
-		if *llv.Spec.Thick.Contiguous == true {
+		if *llv.Spec.Thick.Contiguous {
 			contiguous = llv.Spec.Thick.Contiguous
 		}
 	}
@@ -194,7 +192,7 @@ func addLLVFinalizerIfNotExist(ctx context.Context, cl client.Client, log logger
 	llv.Finalizers = append(llv.Finalizers, internal.SdsNodeConfiguratorFinalizer)
 
 	log.Trace(fmt.Sprintf("[addLLVFinalizerIfNotExist] added finalizer %s to the LVMLogicalVolume %s", internal.SdsNodeConfiguratorFinalizer, llv.Name))
-	err := updateLVMLogicalVolume(ctx, metrics, cl, llv)
+	err := updateLVMLogicalVolumeSpec(ctx, metrics, cl, llv)
 	if err != nil {
 		return false, err
 	}
@@ -208,11 +206,7 @@ func shouldReconcileByCreateFunc(sdsCache *cache.Cache, vgName string, llv *v1al
 	}
 
 	lv := sdsCache.FindLV(vgName, llv.Spec.ActualLVNameOnTheNode)
-	if lv != nil {
-		return false
-	}
-
-	return true
+	return lv == nil
 }
 
 func getFreeLVGSpaceForLLV(lvg *v1alpha1.LvmVolumeGroup, llv *v1alpha1.LVMLogicalVolume) resource.Quantity {
@@ -300,12 +294,10 @@ func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVol
 
 	// if a specified Thick LV name matches the existing Thin one
 	lv := sdsCache.FindLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-	if lv != nil && len(lv.LVAttr) == 0 {
-		reason.WriteString(fmt.Sprintf("LV %s was found on the node, but can't be validated due to its attributes is empty string. ", lv.LVName))
-	}
-
 	if lv != nil {
-		if !checkIfLVBelongsToLLV(llv, lv) {
+		if len(lv.LVAttr) == 0 {
+			reason.WriteString(fmt.Sprintf("LV %s was found on the node, but can't be validated due to its attributes is empty string. ", lv.LVName))
+		} else if !checkIfLVBelongsToLLV(llv, lv) {
 			reason.WriteString(fmt.Sprintf("Specified LV %s is already created and it is doesnt match the one on the node.", lv.LVName))
 		}
 	}
@@ -317,7 +309,7 @@ func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVol
 	return true, ""
 }
 
-func updateLVMLogicalVolumePhaseIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, llv *v1alpha1.LVMLogicalVolume, phase, reason string) error {
+func updateLVMLogicalVolumePhaseIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, _ monitoring.Metrics, llv *v1alpha1.LVMLogicalVolume, phase, reason string) error {
 	if llv.Status != nil &&
 		llv.Status.Phase == phase &&
 		llv.Status.Reason == reason {
@@ -342,7 +334,7 @@ func updateLVMLogicalVolumePhaseIfNeeded(ctx context.Context, cl client.Client, 
 	return nil
 }
 
-func updateLVMLogicalVolume(ctx context.Context, metrics monitoring.Metrics, cl client.Client, llv *v1alpha1.LVMLogicalVolume) error {
+func updateLVMLogicalVolumeSpec(ctx context.Context, _ monitoring.Metrics, cl client.Client, llv *v1alpha1.LVMLogicalVolume) error {
 	return cl.Update(ctx, llv)
 }
 
@@ -352,11 +344,7 @@ func shouldReconcileByUpdateFunc(sdsCache *cache.Cache, vgName string, llv *v1al
 	}
 
 	lv := sdsCache.FindLV(vgName, llv.Spec.ActualLVNameOnTheNode)
-	if lv == nil {
-		return false
-	}
-
-	return true
+	return lv != nil
 }
 
 func isContiguous(llv *v1alpha1.LVMLogicalVolume) bool {

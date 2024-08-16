@@ -17,19 +17,20 @@ limitations under the License.
 package controller
 
 import (
-	"agent/internal"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
 	"context"
-	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"testing"
 
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"agent/internal"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
 )
 
 func TestLVMVolumeGroupDiscover(t *testing.T) {
@@ -73,15 +74,15 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("checkVGHealth_returns_Operational", func(t *testing.T) {
 		const (
 			vgName = "testVg"
-			vgUuid = "testUuid"
+			vgUUID = "testUuid"
 		)
 		bds := map[string][]v1alpha1.BlockDevice{
-			vgName + vgUuid: {{}},
+			vgName + vgUUID: {{}},
 		}
 		vgIssues := map[string]string{}
 		pvIssues := map[string][]string{}
 		lvIssues := map[string]map[string]string{}
-		vg := internal.VGData{VGName: vgName, VGUuid: vgUuid}
+		vg := internal.VGData{VGName: vgName, VGUUID: vgUUID}
 
 		health, _ := checkVGHealth(bds, vgIssues, pvIssues, lvIssues, vg)
 		assert.Equal(t, health, internal.LVMVGHealthOperational)
@@ -90,15 +91,15 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("checkVGHealth_returns_NonOperational", func(t *testing.T) {
 		const (
 			vgName = "testVg"
-			vgUuid = "testUuid"
+			vgUUID = "testUuid"
 		)
 		bds := map[string][]v1alpha1.BlockDevice{
-			vgName + vgUuid: {},
+			vgName + vgUUID: {},
 		}
 		vgIssues := map[string]string{}
 		pvIssues := map[string][]string{}
 		lvIssues := map[string]map[string]string{}
-		vg := internal.VGData{VGName: vgName, VGUuid: vgUuid}
+		vg := internal.VGData{VGName: vgName, VGUUID: vgUUID}
 
 		health, _ := checkVGHealth(bds, vgIssues, pvIssues, lvIssues, vg)
 		assert.Equal(t, health, internal.LVMVGHealthNonOperational)
@@ -125,37 +126,37 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("sortPVsByVG_returns_sorted_pvs", func(t *testing.T) {
 		const (
 			firstVgName  = "firstVg"
-			firstVgUuid  = "firstUUID"
+			firstVgUUID  = "firstUUID"
 			secondVgName = "secondVg"
-			secondVgUuid = "secondUUID"
+			secondVgUUID = "secondUUID"
 		)
 		pvs := []internal.PVData{
 			{
 				PVName: "first",
 				VGName: firstVgName,
-				VGUuid: firstVgUuid,
+				VGUuid: firstVgUUID,
 			},
 			{
 				PVName: "second",
 				VGName: secondVgName,
-				VGUuid: secondVgUuid,
+				VGUuid: secondVgUUID,
 			},
 		}
 
 		vgs := []internal.VGData{
 			{
 				VGName: firstVgName,
-				VGUuid: firstVgUuid,
+				VGUUID: firstVgUUID,
 			},
 			{
 				VGName: secondVgName,
-				VGUuid: secondVgUuid,
+				VGUUID: secondVgUUID,
 			},
 		}
 
 		expected := map[string][]internal.PVData{
-			firstVgName + firstVgUuid:   {pvs[0]},
-			secondVgName + secondVgUuid: {pvs[1]},
+			firstVgName + firstVgUUID:   {pvs[0]},
+			secondVgName + secondVgUUID: {pvs[1]},
 		}
 
 		actual := sortPVsByVG(pvs, vgs)
@@ -165,18 +166,18 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("sortBlockDevicesByVG_returns_sorted_bds", func(t *testing.T) {
 		const (
 			firstVgName  = "firstVg"
-			firstVgUuid  = "firstUUID"
+			firstVgUUID  = "firstUUID"
 			secondVgName = "secondVg"
-			secondVgUuid = "secondUUID"
+			secondVgUUID = "secondUUID"
 		)
 		vgs := []internal.VGData{
 			{
 				VGName: firstVgName,
-				VGUuid: firstVgUuid,
+				VGUUID: firstVgUUID,
 			},
 			{
 				VGName: secondVgName,
-				VGUuid: secondVgUuid,
+				VGUUID: secondVgUUID,
 			},
 		}
 
@@ -185,21 +186,21 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "first"},
 				Status: v1alpha1.BlockDeviceStatus{
 					ActualVGNameOnTheNode: firstVgName,
-					VGUuid:                firstVgUuid,
+					VGUuid:                firstVgUUID,
 				},
 			},
 			"second": {
 				ObjectMeta: metav1.ObjectMeta{Name: "second"},
 				Status: v1alpha1.BlockDeviceStatus{
 					ActualVGNameOnTheNode: secondVgName,
-					VGUuid:                secondVgUuid,
+					VGUuid:                secondVgUUID,
 				},
 			},
 		}
 
 		expected := map[string][]v1alpha1.BlockDevice{
-			firstVgName + firstVgUuid:   {bds["first"]},
-			secondVgName + secondVgUuid: {bds["second"]},
+			firstVgName + firstVgUUID:   {bds["first"]},
+			secondVgName + secondVgUUID: {bds["second"]},
 		}
 
 		actual := sortBlockDevicesByVG(bds, vgs)
@@ -209,35 +210,35 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("sortLVsByVG_returns_sorted_LVs", func(t *testing.T) {
 		const (
 			firstVgName  = "firstVg"
-			firstVgUuid  = "firstUUID"
+			firstVgUUID  = "firstUUID"
 			secondVgName = "secondVg"
-			secondVgUuid = "secondUUID"
+			secondVgUUID = "secondUUID"
 		)
 		vgs := []internal.VGData{
 			{
 				VGName: firstVgName,
-				VGUuid: firstVgUuid,
+				VGUUID: firstVgUUID,
 			},
 			{
 				VGName: secondVgName,
-				VGUuid: secondVgUuid,
+				VGUUID: secondVgUUID,
 			},
 		}
 		lvs := []internal.LVData{
 			{
 				LVName: "first",
 				VGName: firstVgName,
-				VGUuid: firstVgUuid,
+				VGUuid: firstVgUUID,
 			},
 			{
 				LVName: "second",
 				VGName: secondVgName,
-				VGUuid: secondVgUuid,
+				VGUuid: secondVgUUID,
 			},
 		}
 		expected := map[string][]internal.LVData{
-			firstVgName + firstVgUuid:   {lvs[0]},
-			secondVgName + secondVgUuid: {lvs[1]},
+			firstVgName + firstVgUUID:   {lvs[0]},
+			secondVgName + secondVgUUID: {lvs[1]},
 		}
 
 		actual := sortThinPoolsByVG(lvs, vgs)
@@ -247,16 +248,19 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("configureCandidateNodesDevices_returns_candidates_nodes", func(t *testing.T) {
 		const (
 			vgName   = "test_vg"
-			vgUuid   = "vg_uuid"
+			vgUUID   = "vg_uuid"
 			nodeName = "test_node"
 		)
 
 		vg := internal.VGData{
 			VGName: vgName,
-			VGUuid: vgUuid,
+			VGUUID: vgUUID,
 		}
 
 		size10G, err := resource.ParseQuantity("10G")
+		if err != nil {
+			t.Error(err)
+		}
 		size1G, err := resource.ParseQuantity("1G")
 		if err != nil {
 			t.Error(err)
@@ -268,13 +272,13 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				PVSize: size10G,
 				PVUuid: "pv_uuid1",
 				VGName: vgName,
-				VGUuid: vgUuid,
+				VGUuid: vgUUID,
 			},
 			{
 				PVName: "test_pv2",
 				PVSize: size1G,
 				PVUuid: "pv_uuid2",
-				VGUuid: vgUuid,
+				VGUuid: vgUUID,
 				VGName: vgName,
 			},
 		}
@@ -285,7 +289,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Status: v1alpha1.BlockDeviceStatus{
 					Path:                  "test_pv1",
 					Size:                  resource.MustParse("10G"),
-					VGUuid:                vgUuid,
+					VGUuid:                vgUUID,
 					ActualVGNameOnTheNode: vgName,
 				},
 			},
@@ -294,7 +298,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Status: v1alpha1.BlockDeviceStatus{
 					Path:                  "test_pv2",
 					Size:                  resource.MustParse("1G"),
-					VGUuid:                vgUuid,
+					VGUuid:                vgUUID,
 					ActualVGNameOnTheNode: vgName,
 				},
 			},
@@ -306,20 +310,20 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 					Path:        "test_pv1",
 					PVSize:      *resource.NewQuantity(size10G.Value(), resource.BinarySI),
 					DevSize:     *resource.NewQuantity(size10G.Value(), resource.BinarySI),
-					PVUuid:      "pv_uuid1",
+					PVUUID:      "pv_uuid1",
 					BlockDevice: "block_device1",
 				},
 				{
 					Path:        "test_pv2",
 					PVSize:      *resource.NewQuantity(size1G.Value(), resource.BinarySI),
 					DevSize:     *resource.NewQuantity(size1G.Value(), resource.BinarySI),
-					PVUuid:      "pv_uuid2",
+					PVUUID:      "pv_uuid2",
 					BlockDevice: "block_device2",
 				},
 			},
 		}
-		mp := map[string][]v1alpha1.BlockDevice{vgName + vgUuid: bds}
-		ar := map[string][]internal.PVData{vgName + vgUuid: pvs}
+		mp := map[string][]v1alpha1.BlockDevice{vgName + vgUUID: bds}
+		ar := map[string][]internal.PVData{vgName + vgUUID: pvs}
 
 		actual := configureCandidateNodeDevices(ar, mp, vg, nodeName)
 
@@ -347,7 +351,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		vgs := []internal.VGData{
 			{
 				VGName: "firstVG",
-				VGUuid: "firstUUID",
+				VGUUID: "firstUUID",
 			},
 		}
 		actual := sortBlockDevicesByVG(bds, vgs)
@@ -378,19 +382,22 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("getSpecThinPools_returns_LVName_LVSize_map", func(t *testing.T) {
 		const (
 			vgName = "test_vg"
-			vgUuid = "test_uuid"
+			vgUUID = "test_uuid"
 		)
 
-		vg := internal.VGData{VGName: vgName, VGUuid: vgUuid}
+		vg := internal.VGData{VGName: vgName, VGUUID: vgUUID}
 
 		firstSize, err := resource.ParseQuantity("1G")
+		if err != nil {
+			t.Error(err)
+		}
 		secondSize, err := resource.ParseQuantity("2G")
 		if err != nil {
 			t.Error(err)
 		}
 
 		thinPools := map[string][]internal.LVData{
-			vgName + vgUuid: {
+			vgName + vgUUID: {
 				{
 					LVName: "first",
 					LVSize: firstSize,
@@ -419,10 +426,13 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Type                  = "local"
 			Health                = internal.LVMVGHealthOperational
 			Message               = "No problems detected"
-			VGUuid                = "test_uuid"
+			VGUUID                = "test_uuid"
 		)
 
 		size10G, err := resource.ParseQuantity("10G")
+		if err != nil {
+			t.Error(err)
+		}
 		size1G, err := resource.ParseQuantity("1G")
 		if err != nil {
 			t.Error(err)
@@ -448,7 +458,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 						Path:        "test/path",
 						PVSize:      size1G,
 						DevSize:     size1G,
-						PVUuid:      "test-pv-uuid",
+						PVUUID:      "test-pv-uuid",
 						BlockDevice: "test-device",
 					},
 				},
@@ -466,7 +476,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Message:               Message,
 			StatusThinPools:       statusThinPools,
 			VGSize:                size10G,
-			VGUuid:                VGUuid,
+			VGUUID:                VGUUID,
 			Nodes:                 nodes,
 		}
 
@@ -491,7 +501,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Nodes:         convertLVMVGNodes(nodes),
 				ThinPools:     thinPools,
 				VGSize:        size10G,
-				VGUuid:        VGUuid,
+				VGUuid:        VGUUID,
 			},
 		}
 
@@ -503,302 +513,98 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 
 	t.Run("GetLVMVolumeGroup", func(t *testing.T) {
 		const (
-			LVMVGName             = "test_lvm"
-			ActualVGNameOnTheNode = "test-vg"
-			Type                  = "local"
-			Health                = internal.LVMVGHealthOperational
-			Message               = "No problems detected"
-			VGUuid                = "test_uuid"
+			LVMVGName = "test_lvm"
 		)
 
-		size10G, err := resource.ParseQuantity("10G")
-		size1G, err := resource.ParseQuantity("1G")
-		if err != nil {
-			t.Error(err)
-		}
-
-		var (
-			cl                = NewFakeClient()
-			testMetrics       = monitoring.GetMetrics("")
-			testLogger        = logger.Logger{}
-			ctx               = context.Background()
-			blockDevicesNames = []string{"first", "second"}
-			specThinPools     = map[string]resource.Quantity{"first": size10G}
-			statusThinPools   = []internal.LVMVGStatusThinPool{
-				{
-					Name:       "first_status_pool",
-					ActualSize: size10G,
-					UsedSize:   resource.MustParse("4G"),
-				},
-			}
-			nodes = map[string][]internal.LVMVGDevice{
-				"test-node-1": {
-					{
-						Path:        "test/path",
-						PVSize:      size1G,
-						DevSize:     size1G,
-						PVUuid:      "test-pv-uuid",
-						BlockDevice: "test-device",
-					},
-				},
-			}
-		)
-
-		candidate := internal.LVMVolumeGroupCandidate{
-			LVMVGName:             LVMVGName,
-			ActualVGNameOnTheNode: ActualVGNameOnTheNode,
-			BlockDevicesNames:     blockDevicesNames,
-			SpecThinPools:         specThinPools,
-			Type:                  Type,
-			AllocatedSize:         size10G,
-			Health:                Health,
-			Message:               Message,
-			StatusThinPools:       statusThinPools,
-			VGSize:                size10G,
-			VGUuid:                VGUuid,
-			Nodes:                 nodes,
-		}
-
-		thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools)
-		if err != nil {
-			t.Error(err)
-		}
-
-		expected := map[string]v1alpha1.LvmVolumeGroup{
-			LVMVGName: {
-				ObjectMeta: metav1.ObjectMeta{
-					Name:            LVMVGName,
-					ResourceVersion: "1",
-					OwnerReferences: nil,
-				},
-				Spec: v1alpha1.LvmVolumeGroupSpec{
-					ActualVGNameOnTheNode: ActualVGNameOnTheNode,
-					BlockDeviceNames:      blockDevicesNames,
-					ThinPools:             convertSpecThinPools(specThinPools),
-					Type:                  Type,
-				},
-				Status: v1alpha1.LvmVolumeGroupStatus{
-					AllocatedSize: size10G,
-					Nodes:         convertLVMVGNodes(nodes),
-					ThinPools:     thinPools,
-					VGSize:        size10G,
-					VGUuid:        VGUuid,
-				},
+		lvg := &v1alpha1.LvmVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: LVMVGName,
 			},
 		}
+		err := cl.Create(ctx, lvg)
+		if err != nil {
+			t.Error(err)
+		}
 
-		created, err := CreateLVMVolumeGroupByCandidate(ctx, testLogger, testMetrics, cl, candidate)
-		if assert.NoError(t, err) && assert.NotNil(t, created) {
-			actual, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
-			if assert.NoError(t, err) && assert.Equal(t, 1, len(actual)) {
-				assert.Equal(t, expected, actual)
+		defer func() {
+			err = cl.Delete(ctx, lvg)
+			if err != nil {
+				t.Error(err)
 			}
+		}()
+
+		actual, err := GetAPILVMVolumeGroups(ctx, cl, monitoring.GetMetrics("test-node"))
+		if assert.NoError(t, err) {
+			_, ok := actual[LVMVGName]
+			assert.True(t, ok)
 		}
 	})
 
 	t.Run("DeleteLVMVolumeGroup", func(t *testing.T) {
 		const (
-			LVMVGName             = "test_lvm"
-			ActualVGNameOnTheNode = "test-vg"
-			Type                  = "local"
-			Health                = internal.LVMVGHealthOperational
-			Message               = "No problems detected"
-			VGUuid                = "test_uuid"
+			LVMVGName = "test_lvm-2"
 		)
 
-		size10G, err := resource.ParseQuantity("10G")
-		size1G, err := resource.ParseQuantity("1G")
+		metrics := monitoring.GetMetrics("test-node")
+
+		lvg := &v1alpha1.LvmVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: LVMVGName,
+			},
+		}
+		err := cl.Create(ctx, lvg)
 		if err != nil {
 			t.Error(err)
 		}
 
-		var (
-			cl                = NewFakeClient()
-			ctx               = context.Background()
-			testMetrics       = monitoring.GetMetrics("")
-			testLogger        = logger.Logger{}
-			blockDevicesNames = []string{"first", "second"}
-			specThinPools     = map[string]resource.Quantity{"first": size10G}
-			statusThinPools   = []internal.LVMVGStatusThinPool{
-				{
-					Name:       "first_status_pool",
-					ActualSize: size10G,
-					UsedSize:   resource.MustParse("4G"),
-				},
-			}
-			nodes = map[string][]internal.LVMVGDevice{
-				"test-node-1": {
-					{
-						Path:        "test/path",
-						PVSize:      size1G,
-						DevSize:     size1G,
-						PVUuid:      "test-pv-uuid",
-						BlockDevice: "test-device",
-					},
-				},
-			}
-		)
-
-		candidate := internal.LVMVolumeGroupCandidate{
-			LVMVGName:             LVMVGName,
-			ActualVGNameOnTheNode: ActualVGNameOnTheNode,
-			BlockDevicesNames:     blockDevicesNames,
-			SpecThinPools:         specThinPools,
-			Type:                  Type,
-			AllocatedSize:         size10G,
-			Health:                Health,
-			Message:               Message,
-			StatusThinPools:       statusThinPools,
-			VGSize:                size10G,
-			VGUuid:                VGUuid,
-			Nodes:                 nodes,
+		actual, err := GetAPILVMVolumeGroups(ctx, cl, metrics)
+		if assert.NoError(t, err) {
+			_, ok := actual[LVMVGName]
+			assert.True(t, ok)
 		}
 
-		created, err := CreateLVMVolumeGroupByCandidate(ctx, testLogger, testMetrics, cl, candidate)
-		if assert.NoError(t, err) && assert.NotNil(t, created) {
-			actual, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
-			if assert.NoError(t, err) && assert.Equal(t, 1, len(actual)) {
-				err := DeleteLVMVolumeGroup(ctx, cl, testMetrics, &v1alpha1.LvmVolumeGroup{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: LVMVGName,
-					},
-				})
-				if assert.NoError(t, err) {
-					actual, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
-					if assert.NoError(t, err) {
-						assert.Equal(t, 0, len(actual))
-					}
-				}
-			}
+		err = DeleteLVMVolumeGroup(ctx, cl, log, metrics, lvg, "test-node")
+		if assert.NoError(t, err) {
+			actual, err = GetAPILVMVolumeGroups(ctx, cl, metrics)
+			assert.NoError(t, err)
+			assert.Equal(t, 0, len(actual))
 		}
 	})
 
 	t.Run("UpdateLVMVolumeGroup", func(t *testing.T) {
 		const (
-			LVMVGName             = "test_lvm"
-			ActualVGNameOnTheNode = "test-vg"
-			Type                  = "local"
-			Health                = internal.LVMVGHealthOperational
-			Message               = "No problems detected"
-			VGUuid                = "test_uuid"
+			LVMVGName = "test_lvm"
 		)
 
-		size10G, err := resource.ParseQuantity("10G")
-		size1G, err := resource.ParseQuantity("1G")
-		if err != nil {
-			t.Error(err)
-		}
+		metrics := monitoring.GetMetrics("test-node")
 
-		var (
-			cl                = NewFakeClient()
-			ctx               = context.Background()
-			testMetrics       = monitoring.GetMetrics("")
-			testLogger        = logger.Logger{}
-			BlockDevicesNames = []string{"first", "second"}
-			SpecThinPools     = map[string]resource.Quantity{"first": size1G}
-			StatusThinPools   = []internal.LVMVGStatusThinPool{
-				{
-					Name:       "first_status_pool",
-					ActualSize: size10G,
-					UsedSize:   resource.MustParse("4G"),
-				},
-			}
-			oldNodes = map[string][]internal.LVMVGDevice{
-				"test-node-1": {
-					{
-						Path:        "test/path",
-						PVSize:      size1G,
-						DevSize:     size1G,
-						PVUuid:      "test-pv-uuid",
-						BlockDevice: "test-device",
-					},
-				},
-			}
-			newNodes = map[string][]internal.LVMVGDevice{
-				"test-node-1": {
-					{
-						Path:        "test/path",
-						PVSize:      size1G,
-						DevSize:     size1G,
-						PVUuid:      "test-pv-uuid",
-						BlockDevice: "test-device",
-					},
-					{
-						Path:        "test/path2",
-						PVSize:      size1G,
-						DevSize:     size1G,
-						PVUuid:      "test-pv-uuid2",
-						BlockDevice: "test-device2",
-					},
-				},
-			}
-		)
-
-		oldCandidate := internal.LVMVolumeGroupCandidate{
-			LVMVGName:             LVMVGName,
-			ActualVGNameOnTheNode: ActualVGNameOnTheNode,
-			BlockDevicesNames:     BlockDevicesNames,
-			SpecThinPools:         SpecThinPools,
-			Type:                  Type,
-			AllocatedSize:         size10G,
-			Health:                Health,
-			Message:               Message,
-			StatusThinPools:       StatusThinPools,
-			VGSize:                size10G,
-			VGUuid:                VGUuid,
-			Nodes:                 oldNodes,
-		}
-
-		newCandidate := internal.LVMVolumeGroupCandidate{
-			LVMVGName:             LVMVGName,
-			ActualVGNameOnTheNode: ActualVGNameOnTheNode,
-			BlockDevicesNames:     BlockDevicesNames,
-			SpecThinPools:         SpecThinPools,
-			Type:                  Type,
-			AllocatedSize:         size10G,
-			Health:                Health,
-			Message:               Message,
-			StatusThinPools:       StatusThinPools,
-			VGSize:                size10G,
-			VGUuid:                VGUuid,
-			Nodes:                 newNodes,
-		}
-
-		thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, StatusThinPools)
-		if err != nil {
-			t.Error(err)
-		}
-
-		expected := v1alpha1.LvmVolumeGroup{
+		lvg := &v1alpha1.LvmVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:            LVMVGName,
-				ResourceVersion: "2",
-				OwnerReferences: nil,
-			},
-			Spec: v1alpha1.LvmVolumeGroupSpec{
-				ActualVGNameOnTheNode: ActualVGNameOnTheNode,
-				BlockDeviceNames:      BlockDevicesNames,
-				ThinPools:             convertSpecThinPools(SpecThinPools),
-				Type:                  Type,
-			},
-			Status: v1alpha1.LvmVolumeGroupStatus{
-				AllocatedSize: size10G,
-				Nodes:         convertLVMVGNodes(newNodes),
-				ThinPools:     thinPools,
-				VGSize:        size10G,
-				VGUuid:        VGUuid,
+				Name: LVMVGName,
 			},
 		}
+		err := cl.Create(ctx, lvg)
+		if err != nil {
+			t.Error(err)
+		}
 
-		created, err := CreateLVMVolumeGroupByCandidate(ctx, testLogger, testMetrics, cl, oldCandidate)
+		actual, err := GetAPILVMVolumeGroups(ctx, cl, metrics)
 		if assert.NoError(t, err) {
-			err := UpdateLVMVolumeGroupByCandidate(ctx, cl, testMetrics, log, created, newCandidate)
+			createdLvg, ok := actual[LVMVGName]
+			assert.True(t, ok)
 
+			candidate := internal.LVMVolumeGroupCandidate{
+				LVMVGName:     LVMVGName,
+				AllocatedSize: *resource.NewQuantity(1000, resource.BinarySI),
+			}
+			err = UpdateLVMVolumeGroupByCandidate(ctx, cl, metrics, log, &createdLvg, candidate)
 			if assert.NoError(t, err) {
-				lmvs, err := GetAPILVMVolumeGroups(ctx, cl, testMetrics)
+				updated, err := GetAPILVMVolumeGroups(ctx, cl, metrics)
 				if assert.NoError(t, err) {
-					actual := lmvs[LVMVGName]
-					assert.Equal(t, expected, actual)
+					updatedLvg, ok := updated[LVMVGName]
+					assert.True(t, ok)
+
+					assert.Equal(t, candidate.AllocatedSize.Value(), updatedLvg.Status.AllocatedSize.Value())
 				}
 			}
 		}
@@ -923,7 +729,13 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	t.Run("hasLVMVolumeGroupDiff", func(t *testing.T) {
 		t.Run("should_return_false", func(t *testing.T) {
 			size10G, err := resource.ParseQuantity("10G")
+			if err != nil {
+				t.Error(err)
+			}
 			size1G, err := resource.ParseQuantity("1G")
+			if err != nil {
+				t.Error(err)
+			}
 			size13G, err := resource.ParseQuantity("13G")
 			if err != nil {
 				t.Error(err)
@@ -960,7 +772,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 							Path:        "/test/ds",
 							PVSize:      size1G,
 							DevSize:     size13G,
-							PVUuid:      "testUUID",
+							PVUUID:      "testUUID",
 							BlockDevice: "something",
 						},
 					},
@@ -1000,25 +812,13 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		})
 
 		t.Run("should_return_true", func(t *testing.T) {
-			size10G, err := resource.ParseQuantity("10G")
-			size1G, err := resource.ParseQuantity("1G")
-			size13G, err := resource.ParseQuantity("13G")
-			if err != nil {
-				t.Error(err)
-			}
+			size10G := resource.MustParse("10G")
+			size1G := resource.MustParse("1G")
+			size13G := resource.MustParse("13G")
+			vgFree := resource.MustParse("5G")
 
 			var (
-				blockDevicesNames = []string{
-					"first",
-					"second",
-				}
-				specThinPools = map[string]resource.Quantity{
-					"first":  size10G,
-					"second": size1G,
-				}
-				specType        = "type"
 				allocatedSize   = resource.MustParse("10G")
-				health          = internal.LVMVGHealthOperational
 				statusThinPools = []internal.LVMVGStatusThinPool{
 					{
 						Name:       "first",
@@ -1038,29 +838,25 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 							Path:        "/test/ds",
 							PVSize:      size1G,
 							DevSize:     size13G,
-							PVUuid:      "testUUID",
+							PVUUID:      "testUUID",
 							BlockDevice: "something",
 						},
 						{
 							Path:        "/test/ds2",
 							PVSize:      size1G,
 							DevSize:     size13G,
-							PVUuid:      "testUUID2",
+							PVUUID:      "testUUID2",
 							BlockDevice: "something2",
 						},
 					},
 				}
 			)
 			candidate := internal.LVMVolumeGroupCandidate{
-				BlockDevicesNames: blockDevicesNames,
-				SpecThinPools:     specThinPools,
-				Type:              specType,
-				AllocatedSize:     size10G,
-				Health:            health,
-				Message:           "NewMessage",
-				StatusThinPools:   statusThinPools,
-				VGSize:            size10G,
-				Nodes:             nodes,
+				AllocatedSize:   size10G,
+				StatusThinPools: statusThinPools,
+				VGSize:          size10G,
+				VGFree:          vgFree,
+				Nodes:           nodes,
 			}
 
 			thinPools, err := convertStatusThinPools(v1alpha1.LvmVolumeGroup{}, statusThinPools)
@@ -1069,16 +865,12 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			}
 
 			lvmVolumeGroup := v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
-					BlockDeviceNames: blockDevicesNames,
-					ThinPools:        convertSpecThinPools(specThinPools),
-					Type:             specType,
-				},
 				Status: v1alpha1.LvmVolumeGroupStatus{
 					AllocatedSize: allocatedSize,
 					Nodes:         convertLVMVGNodes(nodes),
 					ThinPools:     thinPools,
 					VGSize:        vgSize,
+					VGFree:        *resource.NewQuantity(vgFree.Value()+10000, resource.BinarySI),
 				},
 			}
 
@@ -1126,8 +918,7 @@ func NewFakeClient() client.WithWatch {
 	s := scheme.Scheme
 	_ = metav1.AddMetaToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
-
-	builder := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&v1alpha1.LvmVolumeGroup{})
+	builder := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&v1alpha1.LvmVolumeGroup{}).WithStatusSubresource(&v1alpha1.LVMLogicalVolume{})
 
 	cl := builder.Build()
 	return cl

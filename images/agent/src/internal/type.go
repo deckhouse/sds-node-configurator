@@ -37,7 +37,7 @@ type BlockDeviceCandidate struct {
 	PkName                string
 	Type                  string
 	FSType                string
-	MachineId             string
+	MachineID             string
 	PartUUID              string
 }
 
@@ -54,7 +54,7 @@ type LVMVolumeGroupCandidate struct {
 	StatusThinPools       []LVMVGStatusThinPool
 	VGSize                resource.Quantity
 	VGFree                resource.Quantity
-	VGUuid                string
+	VGUUID                string
 	Nodes                 map[string][]LVMVGDevice
 }
 
@@ -71,7 +71,7 @@ type LVMVGDevice struct {
 	Path        string
 	PVSize      resource.Quantity
 	DevSize     resource.Quantity
-	PVUuid      string
+	PVUUID      string
 	BlockDevice string
 }
 
@@ -127,7 +127,7 @@ type VGData struct {
 	VGShared string            `json:"vg_shared"`
 	VGSize   resource.Quantity `json:"vg_size"`
 	VGTags   string            `json:"vg_tags"`
-	VGUuid   string            `json:"vg_uuid"`
+	VGUUID   string            `json:"vg_uuid"`
 }
 
 type LVReport struct {

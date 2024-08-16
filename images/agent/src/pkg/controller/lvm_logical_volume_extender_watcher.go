@@ -1,20 +1,16 @@
 package controller
 
 import (
-	"agent/config"
-	"agent/internal"
-	"agent/pkg/cache"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
-	"agent/pkg/utils"
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"time"
+
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
-	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -22,7 +18,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-	"time"
+
+	"agent/config"
+	"agent/internal"
+	"agent/pkg/cache"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
+	"agent/pkg/utils"
 )
 
 const (
@@ -78,14 +80,14 @@ func RunLVMLogicalVolumeExtenderWatcherController(
 		return err
 	}
 
-	err = c.Watch(source.Kind(mgrCache, &v1alpha1.LvmVolumeGroup{}, handler.TypedFuncs[*v1alpha1.LvmVolumeGroup]{
-		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.RateLimitingInterface) {
+	err = c.Watch(source.Kind(mgrCache, &v1alpha1.LvmVolumeGroup{}, handler.TypedFuncs[*v1alpha1.LvmVolumeGroup, reconcile.Request]{
+		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] got a Create event for the LVMVolumeGroup %s", e.Object.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 			q.Add(request)
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] added the LVMVolumeGroup %s to the Reconcilers queue", e.Object.GetName()))
 		},
-		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.RateLimitingInterface) {
+		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] got an Update event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 			q.Add(request)
@@ -124,7 +126,7 @@ func ReconcileLVMLogicalVolumeExtension(ctx context.Context, cl client.Client, m
 	log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] tries to get LLV resources with percent size for the LVMVolumeGroup %s", lvg.Name))
 	llvs, err := getAllLLVsWithPercentSize(ctx, cl, lvg.Name)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to get LLV resources"))
+		log.Error(err, "[ReconcileLVMLogicalVolumeExtension] unable to get LLV resources")
 		return true
 	}
 	log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] successfully got LLV resources for the LVMVolumeGroup %s", lvg.Name))
@@ -181,6 +183,12 @@ func ReconcileLVMLogicalVolumeExtension(ctx context.Context, cl client.Client, m
 
 		log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] the LVMLogicalVolume %s should be extended from %s to %s size", llv.Name, llv.Status.ActualSize.String(), llvRequestedSize.String()))
 		err = updateLVMLogicalVolumePhaseIfNeeded(ctx, cl, log, metrics, &llv, LLVStatusPhaseResizing, "")
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
+			shouldRetry = true
+			continue
+		}
+
 		cmd, err := utils.ExtendLV(llvRequestedSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to extend LV %s of the LVMLogicalVolume %s, cmd: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, cmd))

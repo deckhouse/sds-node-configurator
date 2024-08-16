@@ -97,7 +97,6 @@ func copyPerm(srcPath, dstPath string) (err error) {
 }
 
 func arePermissionsEqual(srcPath, dstPath string) (equal bool, err error) {
-
 	srcInfo, err := os.Stat(srcPath)
 	if err != nil {
 		return false, err
@@ -110,9 +109,9 @@ func arePermissionsEqual(srcPath, dstPath string) (equal bool, err error) {
 	log.Printf("file %s mode %s", dstPath, dstInfo.Mode())
 	if srcInfo.Mode() == dstInfo.Mode() {
 		return true, nil
-	} else {
-		return false, nil
 	}
+
+	return false, nil
 }
 
 func getChecksum(filePath string) (checksum string, err error) {
@@ -172,7 +171,7 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 				if err != nil {
 					return err
 				}
-				if equal == false {
+				if !equal {
 					err = copyPerm(srcPath, dstPath)
 					if err != nil {
 						return err
@@ -184,7 +183,6 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 				return nil
 			}
 			log.Printf("Copying %s: Checksum is different\n", srcPath)
-
 		}
 
 		err = copyFile(srcPath, dstPath)

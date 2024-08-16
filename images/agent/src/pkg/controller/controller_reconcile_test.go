@@ -17,15 +17,17 @@ limitations under the License.
 package controller_test
 
 import (
+	"context"
+
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"agent/internal"
 	"agent/pkg/controller"
 	"agent/pkg/monitoring"
-	"context"
-
-	"k8s.io/apimachinery/pkg/api/resource"
-
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Storage Controller", func() {
@@ -53,7 +55,7 @@ var _ = Describe("Storage Controller", func() {
 			PkName:                "/dev/sda14",
 			Type:                  "disk",
 			FSType:                "",
-			MachineId:             "1234",
+			MachineID:             "1234",
 		}
 	)
 
@@ -76,7 +78,7 @@ var _ = Describe("Storage Controller", func() {
 		Expect(blockDevice.Status.Model).To(Equal(candidate.Model))
 		Expect(blockDevice.Status.Type).To(Equal(candidate.Type))
 		Expect(blockDevice.Status.FsType).To(Equal(candidate.FSType))
-		Expect(blockDevice.Status.MachineID).To(Equal(candidate.MachineId))
+		Expect(blockDevice.Status.MachineID).To(Equal(candidate.MachineID))
 	})
 
 	It("GetAPIBlockDevices", func() {
@@ -110,7 +112,7 @@ var _ = Describe("Storage Controller", func() {
 			PkName:                "/dev/sda14",
 			Type:                  "disk",
 			FSType:                "",
-			MachineId:             "1234",
+			MachineID:             "1234",
 		}
 
 		resources, err := controller.GetAPIBlockDevices(ctx, cl, testMetrics)
@@ -138,10 +140,15 @@ var _ = Describe("Storage Controller", func() {
 	})
 
 	It("DeleteAPIBlockDevice", func() {
-		err := controller.DeleteAPIBlockDevice(ctx, cl, testMetrics, deviceName)
+		err := controller.DeleteAPIBlockDevice(ctx, cl, testMetrics, &v1alpha1.BlockDevice{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: deviceName,
+			},
+		})
 		Expect(err).NotTo(HaveOccurred())
 
 		devices, err := controller.GetAPIBlockDevices(context.Background(), cl, testMetrics)
+		Expect(err).NotTo(HaveOccurred())
 		for name := range devices {
 			Expect(name).NotTo(Equal(deviceName))
 		}

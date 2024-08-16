@@ -7,12 +7,16 @@ issues:
     - "should not use dot imports"
     - "don't use an underscore in package name"
     - "exported: .*"
+    - "could not import"
 
 linters-settings:
   gci:
     sections:
       - standard
       - default
+      - prefix(agent)
+      - prefix(sds-health-watcher-controller)
+      - prefix(sds-utils-installer)
   errcheck:
     ignore: fmt:.*,[rR]ead|[wW]rite|[cC]lose,io:Copy
 
@@ -24,7 +28,7 @@ linters:
   - gci
   - gocritic
   - gofmt
-  - goimports
+#  - goimports
   - gosimple
   - govet
   - ineffassign
