@@ -191,8 +191,8 @@ func RunLVMVolumeGroupWatcherController(
 		return nil, err
 	}
 
-	err = c.Watch(source.Kind(mgrCache, &v1alpha1.LvmVolumeGroup{}, handler.TypedFuncs[*v1alpha1.LvmVolumeGroup]{
-		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.RateLimitingInterface) {
+	err = c.Watch(source.Kind(mgrCache, &v1alpha1.LvmVolumeGroup{}, handler.TypedFuncs[*v1alpha1.LvmVolumeGroup, reconcile.Request]{
+		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] createFunc got a create event for the LVMVolumeGroup, name: %s", e.Object.GetName()))
 
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
@@ -200,7 +200,7 @@ func RunLVMVolumeGroupWatcherController(
 
 			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] createFunc added a request for the LVMVolumeGroup %s to the Reconcilers queue", e.Object.GetName()))
 		},
-		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.RateLimitingInterface) {
+		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] UpdateFunc got a update event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
 			if !shouldLVGWatcherReconcileUpdateEvent(log, e.ObjectOld, e.ObjectNew) {
 				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] update event for the LVMVolumeGroup %s should not be reconciled as not target changed were made", e.ObjectNew.Name))

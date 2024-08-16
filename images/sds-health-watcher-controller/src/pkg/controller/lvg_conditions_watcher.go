@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -96,8 +95,8 @@ func RunLVGConditionsWatcher(
 		return err
 	}
 
-	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LvmVolumeGroup{}), handler.Funcs{
-		CreateFunc: func(_ context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
+	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LvmVolumeGroup{}, handler.TypedFuncs[*v1alpha1.LvmVolumeGroup, reconcile.Request]{
+		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] got a create event for the LVMVolumeGroup %s", e.Object.GetName()))
 
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
@@ -105,34 +104,17 @@ func RunLVGConditionsWatcher(
 
 			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] createFunc added a request for the LVMVolumeGroup %s to the Reconcilers queue", e.Object.GetName()))
 		},
-		UpdateFunc: func(_ context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
+		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] got a update event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
-
-			oldLVG, ok := e.ObjectOld.(*v1alpha1.LvmVolumeGroup)
-			if !ok {
-				err = errors.New("unable to cast event object to a given type")
-				log.Error(err, "[RunLVGConditionsWatcher] an error occurred while handling a update event")
-				return
-			}
-			log.Debug(fmt.Sprintf("[RunLVGConditionsWatcher] successfully casted an old state of the LVMVolumeGroup %s", oldLVG.Name))
-
-			newLVG, ok := e.ObjectNew.(*v1alpha1.LvmVolumeGroup)
-			if !ok {
-				err = errors.New("unable to cast event object to a given type")
-				log.Error(err, "[RunLVGConditionsWatcher] an error occurred while handling a update event")
-				return
-			}
-			log.Debug(fmt.Sprintf("[RunLVGConditionsWatcher] successfully casted a new state of the LVMVolumeGroup %s", newLVG.Name))
-
-			if reflect.DeepEqual(oldLVG.Status.Conditions, newLVG.Status.Conditions) {
-				log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] no condition changes for the LVMVolumeGroup %s. No need to reconcile", newLVG.Name))
+			if reflect.DeepEqual(e.ObjectOld.Status.Conditions, e.ObjectNew.Status.Conditions) {
+				log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] no condition changes for the LVMVolumeGroup %s. No need to reconcile", e.ObjectNew.Name))
 				return
 			}
 
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 			q.Add(request)
 		},
-	})
+	}))
 	if err != nil {
 		log.Error(err, "[RunLVGConditionsWatcher] unable to watch the events")
 		return err

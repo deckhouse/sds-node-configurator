@@ -80,14 +80,14 @@ func RunLVMLogicalVolumeExtenderWatcherController(
 		return err
 	}
 
-	err = c.Watch(source.Kind(mgrCache, &v1alpha1.LvmVolumeGroup{}, handler.TypedFuncs[*v1alpha1.LvmVolumeGroup]{
-		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.RateLimitingInterface) {
+	err = c.Watch(source.Kind(mgrCache, &v1alpha1.LvmVolumeGroup{}, handler.TypedFuncs[*v1alpha1.LvmVolumeGroup, reconcile.Request]{
+		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] got a Create event for the LVMVolumeGroup %s", e.Object.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 			q.Add(request)
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] added the LVMVolumeGroup %s to the Reconcilers queue", e.Object.GetName()))
 		},
-		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.RateLimitingInterface) {
+		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] got an Update event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 			q.Add(request)

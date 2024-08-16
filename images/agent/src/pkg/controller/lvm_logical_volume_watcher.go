@@ -156,15 +156,15 @@ func RunLVMLogicalVolumeWatcherController(
 		return nil, err
 	}
 
-	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LVMLogicalVolume{}, handler.TypedFuncs[*v1alpha1.LVMLogicalVolume]{
-		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LVMLogicalVolume], q workqueue.RateLimitingInterface) {
+	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LVMLogicalVolume{}, handler.TypedFuncs[*v1alpha1.LVMLogicalVolume, reconcile.Request]{
+		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LVMLogicalVolume], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] got a create event for the LVMLogicalVolume: %s", e.Object.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 			q.Add(request)
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] added the request of the LVMLogicalVolume %s to Reconciler", e.Object.GetName()))
 		},
 
-		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LVMLogicalVolume], q workqueue.RateLimitingInterface) {
+		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LVMLogicalVolume], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] got an update event for the LVMLogicalVolume: %s", e.ObjectNew.GetName()))
 			// TODO: Figure out how to log it in our logger.
 			if cfg.Loglevel == "4" {
