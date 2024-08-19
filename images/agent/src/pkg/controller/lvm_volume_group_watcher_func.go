@@ -75,7 +75,6 @@ func checkIfVGExist(vgName string, vgs []internal.VGData) bool {
 }
 
 func checkLVGLabels(log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, labelKey, labelValue string) bool {
-
 	if lvg.Labels == nil {
 		log.Debug(fmt.Sprintf("[checkLabels] the LVMVolumeGroup %s has no labels.", lvg.Name))
 		return false
