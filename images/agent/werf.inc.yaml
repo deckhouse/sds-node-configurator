@@ -4,7 +4,7 @@
 {{- $_ := set . "BASE_ALT_DEV"    "registry.deckhouse.ru/base_images/dev-alt:p10@sha256:76e6e163fa982f03468166203488b569e6d9fc10855d6a259c662706436cdcad" }}
 
 {{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 ld-linux-x86-64.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic" }}
-{{ $util_linux_version := "2.39.3" }}
+{{ $version := "2.39.3" }}
 ---
 image: {{ $.ImageName }}-binaries-artifact
 from: {{ $.BASE_ALT_DEV }}
@@ -32,7 +32,7 @@ shell:
   - cd /
   - git clone {{ env "SOURCE_REPO" }}/util-linux/util-linux.git
   - cd /util-linux
-  - git checkout v{{ $util_linux_version }}
+  - git checkout v{{ $version }}
   - ./autogen.sh
   - ./configure LDFLAGS="-static" --enable-static-programs -disable-all-programs --enable-nsenter
   - make install-strip
