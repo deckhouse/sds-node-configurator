@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"k8s.io/utils/clock"
 	"time"
 
 	"github.com/pilebones/go-udev/netlink"
@@ -159,22 +160,31 @@ func runControllersReconcile(ctx context.Context, log logger.Logger, bdCtrl, lvg
 
 func fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Options) error {
 	// the scan operations order is very important as it guarantees the consistent and reliable data from the node
+	realClock := clock.RealClock{}
+	now := time.Now()
 	lvs, lvsErr, err := scanLVs(ctx, log, cfg)
+	log.Trace(fmt.Sprintf("[fillTheCache] LVS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
 
+	now = time.Now()
 	vgs, vgsErr, err := scanVGs(ctx, log, cfg)
+	log.Trace(fmt.Sprintf("[fillTheCache] VGS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
 
+	now = time.Now()
 	pvs, pvsErr, err := scanPVs(ctx, log, cfg)
+	log.Trace(fmt.Sprintf("[fillTheCache] PVS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
 
+	now = time.Now()
 	devices, devErr, err := scanDevices(ctx, log, cfg)
+	log.Trace(fmt.Sprintf("[fillTheCache] LSBLK command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
