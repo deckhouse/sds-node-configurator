@@ -127,7 +127,6 @@ func BlockDeviceReconcile(ctx context.Context, cl kclient.Client, log logger.Log
 
 			// add new api device to the map, so it won't be deleted as fantom
 			apiBlockDevices[candidate.Name] = *device
-
 		}
 	}
 
@@ -166,11 +165,7 @@ func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.Blo
 	newLabels := GetBlockDeviceLabels(blockDevice)
 	equal := reflect.DeepEqual(newLabels, blockDevice.Labels)
 
-	if equal {
-		return false
-	}
-
-	return true
+	return !equal
 }
 
 func GetAPIBlockDevices(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics) (map[string]v1alpha1.BlockDevice, error) {
@@ -549,7 +544,6 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 }
 
 func GetBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]string {
-
 	if blockDevice.Labels == nil {
 		blockDevice.Labels = make(map[string]string)
 	}

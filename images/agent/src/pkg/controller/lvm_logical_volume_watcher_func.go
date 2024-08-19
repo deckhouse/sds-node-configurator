@@ -73,7 +73,6 @@ func getLLVRequestedSize(llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LvmVolume
 			}
 		}
 	}
-
 	return resource.Quantity{}, nil
 }
 
