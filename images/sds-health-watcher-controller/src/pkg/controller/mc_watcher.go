@@ -20,11 +20,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"github.com/cloudflare/cfssl/log"
 	dh "github.com/deckhouse/deckhouse/deckhouse-controller/pkg/apis/deckhouse.io/v1alpha1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
-	"sds-health-watcher-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -32,6 +32,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	"sds-health-watcher-controller/pkg/logger"
 )
 
 const (
@@ -49,28 +51,33 @@ func RunMCWatcher(
 
 	c, err := controller.New(MCWatcherCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-			log.Info(fmt.Sprintf("[RunLVGConditionsWatcher] Reconciler got a request %s", request.String()))
+			log.Info(fmt.Sprintf("[RunMCWatcher] Reconciler got a request %s", request.String()))
+			checkMCThinPoolsEnabled(ctx, cl)
 			return reconcile.Result{}, nil
 		}),
 	})
 
 	if err != nil {
-		log.Error(err, "[MCWatcherCtrlName] unable to create a controller")
+		log.Error(err, "[RunMCWatcher] unable to create a controller")
 		return err
 	}
 
-	err = c.Watch(source.Kind(mgr.GetCache(), &dh.ModuleConfig{}), handler.Funcs{
-		CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
-			log.Info(fmt.Sprintf("[MCWatcherCtrlName] got a create event for the ModuleConfig %s", e.Object.GetName()))
-			checkMCThinPoolsEnabled(ctx, cl)
+	err = c.Watch(source.Kind(mgr.GetCache(), &dh.ModuleConfig{}, handler.TypedFuncs[*dh.ModuleConfig, reconcile.Request]{
+		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*dh.ModuleConfig], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			log.Info(fmt.Sprintf("[RunMCWatcher] got a create event for the ModuleConfig %s", e.Object.GetName()))
+			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
+			q.Add(request)
+			log.Info(fmt.Sprintf("[RunMCWatcher] added the ModuleConfig %s to the Reconcilers queue", e.Object.GetName()))
 		},
-		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
-			log.Info(fmt.Sprintf("[MCWatcherCtrlName] got a update event for the ModuleConfig %s", e.ObjectNew.GetName()))
-			checkMCThinPoolsEnabled(ctx, cl)
+		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*dh.ModuleConfig], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			log.Info(fmt.Sprintf("[RunMCWatcher] got a update event for the ModuleConfig %s", e.ObjectNew.GetName()))
+			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
+			q.Add(request)
+			log.Info(fmt.Sprintf("[RunMCWatcher] added the ModuleConfig %s to the Reconcilers queue", e.ObjectNew.GetName()))
 		},
-	})
+	}))
 	if err != nil {
-		log.Error(err, "[MCWatcherCtrlName] unable to watch the events")
+		log.Error(err, "[RunMCWatcher] unable to watch the events")
 		return err
 	}
 
@@ -91,16 +98,13 @@ func checkMCThinPoolsEnabled(ctx context.Context, cl client.Client) {
 		}
 
 		if value, exists := moduleItem.Spec.Settings["enableThinProvisioning"]; exists && value == true {
-			ctx := context.Background()
-
 			sncModuleConfig := &dh.ModuleConfig{}
-
 			err = cl.Get(ctx, types.NamespacedName{Name: sdsNodeConfiguratorModuleName, Namespace: ""}, sncModuleConfig)
 			if err != nil {
 				log.Fatal(err)
 			}
 
-			if value, exists := sncModuleConfig.Spec.Settings["enableThinProvisioning"]; exists && value == true {
+			if value, exists = sncModuleConfig.Spec.Settings["enableThinProvisioning"]; exists && value == true {
 				log.Info("Thin pools support is enabled")
 			} else {
 				log.Info("Enabling thin pools support")

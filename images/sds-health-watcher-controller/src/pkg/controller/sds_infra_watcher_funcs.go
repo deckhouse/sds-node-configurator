@@ -19,15 +19,17 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"sds-health-watcher-controller/internal"
 	"sds-health-watcher-controller/pkg/logger"
 	"sds-health-watcher-controller/pkg/monitoring"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"time"
 )
 
 func getNodeNamesFromPods(pods map[string]v1.Pod) []string {
@@ -47,7 +49,6 @@ func getNotReadyPods(pods map[string]v1.Pod) map[string]v1.Pod {
 		for _, c := range p.Status.Conditions {
 			if c.Type == internal.TypeReady && c.Status != v1.ConditionTrue {
 				result[p.Name] = p
-
 			}
 		}
 	}
@@ -155,10 +156,10 @@ func GetLVMVolumeGroups(ctx context.Context, cl client.Client, metrics monitorin
 
 	start := time.Now()
 	err := cl.List(ctx, lvgList)
-	metrics.ApiMethodsDuration(SdsInfraWatcherCtrlName, "list").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(SdsInfraWatcherCtrlName, "list").Inc()
+	metrics.APIMethodsDuration(SdsInfraWatcherCtrlName, "list").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.APIMethodsExecutionCount(SdsInfraWatcherCtrlName, "list").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(SdsInfraWatcherCtrlName, "list").Inc()
+		metrics.APIMethodsErrors(SdsInfraWatcherCtrlName, "list").Inc()
 		return nil, fmt.Errorf("[GetApiLVMVolumeGroups] unable to list LvmVolumeGroups, err: %w", err)
 	}
 

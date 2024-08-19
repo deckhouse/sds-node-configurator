@@ -19,17 +19,11 @@ package main
 import (
 	"context"
 	"fmt"
-	dh "github.com/deckhouse/deckhouse/deckhouse-controller/pkg/apis/deckhouse.io/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"os"
 	goruntime "runtime"
-	"sds-health-watcher-controller/config"
-	"sds-health-watcher-controller/pkg/controller"
-	"sds-health-watcher-controller/pkg/kubutils"
-	"sds-health-watcher-controller/pkg/logger"
-	"sds-health-watcher-controller/pkg/monitoring"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	dh "github.com/deckhouse/deckhouse/deckhouse-controller/pkg/apis/deckhouse.io/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -37,6 +31,13 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	"sds-health-watcher-controller/config"
+	"sds-health-watcher-controller/pkg/controller"
+	"sds-health-watcher-controller/pkg/kubutils"
+	"sds-health-watcher-controller/pkg/logger"
+	"sds-health-watcher-controller/pkg/monitoring"
 )
 
 var (
@@ -60,7 +61,7 @@ func main() {
 
 	log, err := logger.NewLogger(cfgParams.Loglevel)
 	if err != nil {
-		fmt.Println(fmt.Sprintf("unable to create NewLogger, err: %v", err))
+		fmt.Printf("unable to create NewLogger, err: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -71,7 +72,6 @@ func main() {
 	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.MetricsPort, cfgParams.MetricsPort))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.ScanIntervalSec))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.NodeName, cfgParams.NodeName))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {

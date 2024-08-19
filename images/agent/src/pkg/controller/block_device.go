@@ -17,16 +17,9 @@ limitations under the License.
 package controller
 
 import (
-	"agent/config"
-	"agent/internal"
-	"agent/pkg/cache"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
-	"agent/pkg/utils"
 	"context"
 	"crypto/sha1"
 	"fmt"
-	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"os"
 	"reflect"
 	"regexp"
@@ -34,12 +27,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"agent/config"
+	"agent/internal"
+	"agent/pkg/cache"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
+	"agent/pkg/utils"
 )
 
 const (
@@ -57,7 +58,7 @@ func RunBlockDeviceController(
 	cl := mgr.GetClient()
 
 	c, err := controller.New(BlockDeviceCtrlName, mgr, controller.Options{
-		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
+		Reconciler: reconcile.Func(func(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 			log.Info("[RunBlockDeviceController] Reconciler starts BlockDevice resources reconciliation")
 
 			shouldRequeue := BlockDeviceReconcile(ctx, cl, log, metrics, cfg, sdsCache)
@@ -88,7 +89,7 @@ func BlockDeviceReconcile(ctx context.Context, cl kclient.Client, log logger.Log
 	candidates := GetBlockDeviceCandidates(log, cfg, sdsCache)
 	if len(candidates) == 0 {
 		log.Info("[RunBlockDeviceController] no block devices candidates found. Stop reconciliation")
-		return true
+		return false
 	}
 
 	apiBlockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
@@ -140,6 +141,7 @@ func BlockDeviceReconcile(ctx context.Context, cl kclient.Client, log logger.Log
 	return false
 }
 
+
 func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) bool {
 	hasBlockDeviceDiff := candidate.NodeName != blockDevice.Status.NodeName ||
 		candidate.Consumable != blockDevice.Status.Consumable ||
@@ -177,10 +179,10 @@ func GetAPIBlockDevices(ctx context.Context, kc kclient.Client, metrics monitori
 
 	start := time.Now()
 	err := kc.List(ctx, listDevice)
-	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "list").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(BlockDeviceCtrlName, "list").Inc()
+	metrics.APIMethodsDuration(BlockDeviceCtrlName, "list").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.APIMethodsExecutionCount(BlockDeviceCtrlName, "list").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(BlockDeviceCtrlName, "list").Inc()
+		metrics.APIMethodsErrors(BlockDeviceCtrlName, "list").Inc()
 		return nil, fmt.Errorf("unable to kc.List, error: %w", err)
 	}
 
@@ -198,8 +200,8 @@ func RemoveDeprecatedAPIDevices(
 	metrics monitoring.Metrics,
 	candidates []internal.BlockDeviceCandidate,
 	apiBlockDevices map[string]v1alpha1.BlockDevice,
-	nodeName string) {
-
+	nodeName string,
+) {
 	actualCandidates := make(map[string]struct{}, len(candidates))
 	for _, candidate := range candidates {
 		actualCandidates[candidate.Name] = struct{}{}
@@ -277,7 +279,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, sdsCache *c
 			PkName:     device.PkName,
 			Type:       device.Type,
 			FSType:     device.FSType,
-			MachineId:  cfg.MachineId,
+			MachineID:  cfg.MachineID,
 			PartUUID:   device.PartUUID,
 		}
 
@@ -530,17 +532,17 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 		Model:                 candidate.Model,
 		Rota:                  candidate.Rota,
 		HotPlug:               candidate.HotPlug,
-		MachineID:             candidate.MachineId,
+		MachineID:             candidate.MachineID,
 	}
 
 	blockDevice.Labels = GetBlockDeviceLabels(blockDevice)
 
 	start := time.Now()
 	err := kc.Update(ctx, &blockDevice)
-	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(BlockDeviceCtrlName, "update").Inc()
+	metrics.APIMethodsDuration(BlockDeviceCtrlName, "update").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.APIMethodsExecutionCount(BlockDeviceCtrlName, "update").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(BlockDeviceCtrlName, "update").Inc()
+		metrics.APIMethodsErrors(BlockDeviceCtrlName, "update").Inc()
 		return err
 	}
 
@@ -594,17 +596,18 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 			Size:                  *resource.NewQuantity(candidate.Size.Value(), resource.BinarySI),
 			Model:                 candidate.Model,
 			Rota:                  candidate.Rota,
-			MachineID:             candidate.MachineId,
+			MachineID:             candidate.MachineID,
 		},
 	}
 
 	blockDevice.Labels = GetBlockDeviceLabels(*blockDevice)
 	start := time.Now()
+
 	err := kc.Create(ctx, blockDevice)
 	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "create").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.ApiMethodsExecutionCount(BlockDeviceCtrlName, "create").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(BlockDeviceCtrlName, "create").Inc()
+		metrics.APIMethodsErrors(BlockDeviceCtrlName, "create").Inc()
 		return nil, err
 	}
 	return blockDevice, nil
@@ -613,10 +616,10 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 func DeleteAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, device *v1alpha1.BlockDevice) error {
 	start := time.Now()
 	err := kc.Delete(ctx, device)
-	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(BlockDeviceCtrlName, "delete").Inc()
+	metrics.APIMethodsDuration(BlockDeviceCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.APIMethodsExecutionCount(BlockDeviceCtrlName, "delete").Inc()
 	if err != nil {
-		metrics.ApiMethodsErrors(BlockDeviceCtrlName, "delete").Inc()
+		metrics.APIMethodsErrors(BlockDeviceCtrlName, "delete").Inc()
 		return err
 	}
 	return nil

@@ -17,19 +17,208 @@ limitations under the License.
 package controller
 
 import (
-	"agent/internal"
-	"agent/pkg/logger"
-	"agent/pkg/utils"
+	"bytes"
+	"context"
 	"fmt"
-	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"testing"
 
-	"k8s.io/apimachinery/pkg/api/resource"
-
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
+	errors2 "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"agent/config"
+	"agent/internal"
+	"agent/pkg/cache"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
+	"agent/pkg/utils"
 )
 
 func TestBlockDeviceCtrl(t *testing.T) {
+	ctx := context.Background()
+	log, _ := logger.NewLogger("1")
+	cfg := config.Options{
+		NodeName:  "test-node",
+		MachineID: "test-id",
+	}
+
+	t.Run("shouldDeleteBlockDevice", func(t *testing.T) {
+		t.Run("returns_true", func(t *testing.T) {
+			bd := v1alpha1.BlockDevice{
+				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:   cfg.NodeName,
+					Consumable: true,
+				},
+			}
+			actual := map[string]struct{}{}
+
+			assert.True(t, shouldDeleteBlockDevice(bd, actual, cfg.NodeName))
+		})
+
+		t.Run("returns_false_cause_of_dif_node", func(t *testing.T) {
+			bd := v1alpha1.BlockDevice{
+				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:   cfg.NodeName,
+					Consumable: true,
+				},
+			}
+			actual := map[string]struct{}{}
+
+			assert.False(t, shouldDeleteBlockDevice(bd, actual, "dif-node"))
+		})
+
+		t.Run("returns_false_cause_of_not_consumable", func(t *testing.T) {
+			bd := v1alpha1.BlockDevice{
+				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:   cfg.NodeName,
+					Consumable: false,
+				},
+			}
+			actual := map[string]struct{}{}
+
+			assert.False(t, shouldDeleteBlockDevice(bd, actual, cfg.NodeName))
+		})
+
+		t.Run("returns_false_cause_of_not_deprecated", func(t *testing.T) {
+			const name = "test"
+			bd := v1alpha1.BlockDevice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: name,
+				},
+				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:   cfg.NodeName,
+					Consumable: true,
+				},
+			}
+			actual := map[string]struct{}{
+				name: {},
+			}
+
+			assert.False(t, shouldDeleteBlockDevice(bd, actual, cfg.NodeName))
+		})
+	})
+
+	t.Run("RemoveDeprecatedAPIDevices", func(t *testing.T) {
+		const (
+			goodName = "test-candidate1"
+			badName  = "test-candidate2"
+		)
+		cl := NewFakeClient()
+		candidates := []internal.BlockDeviceCandidate{
+			{
+				NodeName:              cfg.NodeName,
+				Consumable:            false,
+				PVUuid:                "142412421",
+				VGUuid:                "123123123",
+				LvmVolumeGroupName:    "test-lvg",
+				ActualVGNameOnTheNode: "test-vg",
+				Wwn:                   "12414212",
+				Serial:                "1412412412412",
+				Path:                  "/dev/vdb",
+				Size:                  resource.MustParse("1G"),
+				Rota:                  false,
+				Model:                 "124124-adf",
+				Name:                  goodName,
+				HotPlug:               false,
+				MachineID:             "1245151241241",
+			},
+		}
+
+		bds := map[string]v1alpha1.BlockDevice{
+			goodName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name: goodName,
+				},
+			},
+			badName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name: badName,
+				},
+				Status: v1alpha1.BlockDeviceStatus{
+					Consumable: true,
+					NodeName:   cfg.NodeName,
+				},
+			},
+		}
+
+		for _, bd := range bds {
+			err := cl.Create(ctx, &bd)
+			if err != nil {
+				t.Error(err)
+			}
+		}
+
+		defer func() {
+			for _, bd := range bds {
+				_ = cl.Delete(ctx, &bd)
+			}
+		}()
+
+		for _, bd := range bds {
+			createdBd := &v1alpha1.BlockDevice{}
+			err := cl.Get(ctx, client.ObjectKey{
+				Name: bd.Name,
+			}, createdBd)
+			if err != nil {
+				t.Error(err)
+			}
+			assert.Equal(t, bd.Name, createdBd.Name)
+		}
+
+		RemoveDeprecatedAPIDevices(ctx, cl, *log, monitoring.GetMetrics(cfg.NodeName), candidates, bds, cfg.NodeName)
+
+		_, ok := bds[badName]
+		assert.False(t, ok)
+
+		deleted := &v1alpha1.BlockDevice{}
+		err := cl.Get(ctx, client.ObjectKey{
+			Name: badName,
+		}, deleted)
+		if assert.True(t, errors2.IsNotFound(err)) {
+			assert.Equal(t, "", deleted.Name)
+		}
+	})
+
+	t.Run("GetBlockDeviceCandidates", func(t *testing.T) {
+		devices := []internal.Device{
+			{
+				Name:   "valid1",
+				Size:   resource.MustParse("1G"),
+				Serial: "131412",
+			},
+			{
+				Name:   "valid2",
+				Size:   resource.MustParse("1G"),
+				Serial: "12412412",
+			},
+			{
+				Name:   "valid3",
+				Size:   resource.MustParse("1G"),
+				Serial: "4214215",
+			},
+			{
+				Name:   "invalid",
+				FSType: "ext4",
+				Size:   resource.MustParse("1G"),
+			},
+		}
+
+		sdsCache := cache.New()
+		sdsCache.StoreDevices(devices, bytes.Buffer{})
+
+		candidates := GetBlockDeviceCandidates(*log, cfg, sdsCache)
+
+		assert.Equal(t, 3, len(candidates))
+		for i := range candidates {
+			assert.Equal(t, devices[i].Name, candidates[i].Path)
+			assert.Equal(t, cfg.MachineID, candidates[i].MachineID)
+			assert.Equal(t, cfg.NodeName, candidates[i].NodeName)
+		}
+	})
+
 	t.Run("CheckConsumable", func(t *testing.T) {
 		t.Run("Good device returns true", func(t *testing.T) {
 			goodDevice := internal.Device{
@@ -151,7 +340,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				PkName:                "testPKNAME",
 				Type:                  "testTYPE",
 				FSType:                "testFS",
-				MachineId:             "testMACHINE",
+				MachineID:             "testMACHINE",
 			},
 			// diff state
 			{
@@ -173,7 +362,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				PkName:                "testPKNAME2",
 				Type:                  "testTYPE2",
 				FSType:                "testFS2",
-				MachineId:             "testMACHINE2",
+				MachineID:             "testMACHINE2",
 			},
 		}
 		blockDevice := v1alpha1.BlockDevice{
@@ -205,10 +394,6 @@ func TestBlockDeviceCtrl(t *testing.T) {
 	})
 
 	t.Run("validateTestLSBLKOutput", func(t *testing.T) {
-		log, err := logger.NewLogger("1")
-		if err != nil {
-			t.Fatal(err)
-		}
 		testLsblkOutputBytes := []byte(testLsblkOutput)
 		devices, err := utils.UnmarshalDevices(testLsblkOutputBytes)
 		if assert.NoError(t, err) {
@@ -267,8 +452,8 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				candidateName := CreateCandidateName(*log, candidate, devices)
 				assert.Equal(t, "dev-98ca88ddaaddec43b1c4894756f4856244985511", candidateName, "device name generated incorrectly")
 			}
-
 		}
+
 		if assert.NoError(t, err) {
 			assert.Equal(t, 7, len(filteredDevices))
 		}
