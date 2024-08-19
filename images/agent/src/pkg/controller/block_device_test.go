@@ -388,7 +388,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		expected := []bool{false, true}
 
 		for i, candidate := range candidates {
-			actual := hasBlockDeviceDiff(blockDevice.Status, candidate)
+			actual := hasBlockDeviceDiff(blockDevice, candidate)
 			assert.Equal(t, expected[i], actual)
 		}
 	})

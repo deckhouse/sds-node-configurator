@@ -141,7 +141,6 @@ func BlockDeviceReconcile(ctx context.Context, cl kclient.Client, log logger.Log
 	return false
 }
 
-
 func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) bool {
 	hasBlockDeviceDiff := candidate.NodeName != blockDevice.Status.NodeName ||
 		candidate.Consumable != blockDevice.Status.Consumable ||
@@ -159,7 +158,7 @@ func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.Blo
 		candidate.HotPlug != blockDevice.Status.HotPlug ||
 		candidate.Type != blockDevice.Status.Type ||
 		candidate.FSType != blockDevice.Status.FsType ||
-		candidate.MachineId != blockDevice.Status.MachineID
+		candidate.MachineID != blockDevice.Status.MachineID
 	if hasBlockDeviceDiff {
 		return hasBlockDeviceDiff
 	}
@@ -604,8 +603,8 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 	start := time.Now()
 
 	err := kc.Create(ctx, blockDevice)
-	metrics.ApiMethodsDuration(BlockDeviceCtrlName, "create").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.ApiMethodsExecutionCount(BlockDeviceCtrlName, "create").Inc()
+	metrics.APIMethodsDuration(BlockDeviceCtrlName, "create").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.APIMethodsExecutionCount(BlockDeviceCtrlName, "create").Inc()
 	if err != nil {
 		metrics.APIMethodsErrors(BlockDeviceCtrlName, "create").Inc()
 		return nil, err
