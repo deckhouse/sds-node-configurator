@@ -22,7 +22,8 @@ import (
 	"fmt"
 
 	"github.com/cloudflare/cfssl/log"
-	dh "github.com/deckhouse/deckhouse/deckhouse-controller/pkg/apis/deckhouse.io/v1alpha1"
+	mc "sds-health-watcher-controller/api"
+
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -62,14 +63,14 @@ func RunMCWatcher(
 		return err
 	}
 
-	err = c.Watch(source.Kind(mgr.GetCache(), &dh.ModuleConfig{}, handler.TypedFuncs[*dh.ModuleConfig, reconcile.Request]{
-		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*dh.ModuleConfig], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	err = c.Watch(source.Kind(mgr.GetCache(), &mc.ModuleConfig{}, handler.TypedFuncs[*mc.ModuleConfig, reconcile.Request]{
+		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*mc.ModuleConfig], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunMCWatcher] got a create event for the ModuleConfig %s", e.Object.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 			q.Add(request)
 			log.Info(fmt.Sprintf("[RunMCWatcher] added the ModuleConfig %s to the Reconcilers queue", e.Object.GetName()))
 		},
-		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*dh.ModuleConfig], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*mc.ModuleConfig], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunMCWatcher] got a update event for the ModuleConfig %s", e.ObjectNew.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 			q.Add(request)
@@ -85,7 +86,7 @@ func RunMCWatcher(
 }
 
 func checkMCThinPoolsEnabled(ctx context.Context, cl client.Client) {
-	listDevice := &dh.ModuleConfigList{}
+	listDevice := &mc.ModuleConfigList{}
 
 	err := cl.List(ctx, listDevice)
 	if err != nil {
@@ -98,7 +99,7 @@ func checkMCThinPoolsEnabled(ctx context.Context, cl client.Client) {
 		}
 
 		if value, exists := moduleItem.Spec.Settings["enableThinProvisioning"]; exists && value == true {
-			sncModuleConfig := &dh.ModuleConfig{}
+			sncModuleConfig := &mc.ModuleConfig{}
 			err = cl.Get(ctx, types.NamespacedName{Name: sdsNodeConfiguratorModuleName, Namespace: ""}, sncModuleConfig)
 			if err != nil {
 				log.Fatal(err)
