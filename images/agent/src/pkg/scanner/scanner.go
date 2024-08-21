@@ -162,11 +162,13 @@ func fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cf
 	// the scan operations order is very important as it guarantees the consistent and reliable data from the node
 	realClock := clock.RealClock{}
 	now := time.Now()
+	fmt.Printf("LVS TIME BEFORE: %s", time.Now().String())
 	lvs, lvsErr, err := scanLVs(ctx, log, cfg)
 	log.Trace(fmt.Sprintf("[fillTheCache] LVS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
+	fmt.Printf("LVS TIME AFTER: %s", time.Now().String())
 
 	now = time.Now()
 	vgs, vgsErr, err := scanVGs(ctx, log, cfg)

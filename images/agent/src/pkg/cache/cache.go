@@ -1,11 +1,10 @@
 package cache
 
 import (
-	"bytes"
-	"fmt"
-
 	"agent/internal"
 	"agent/pkg/logger"
+	"bytes"
+	"fmt"
 )
 
 type Cache struct {
@@ -79,6 +78,18 @@ func (c *Cache) FindLV(vgName, lvName string) *internal.LVData {
 	}
 
 	return nil
+}
+
+func (c *Cache) AddLV(vgName, lvName string) {
+	c.lvs = append(c.lvs, internal.LVData{VGName: vgName, LVName: lvName})
+}
+
+func (c *Cache) RemoveLV(vgName, lvName string) {
+	for i, lv := range c.lvs {
+		if lv.VGName == vgName && lv.LVName == lvName {
+			c.lvs = append(c.lvs[:i], c.lvs[i+1:]...)
+		}
+	}
 }
 
 func (c *Cache) FindVG(vgName string) *internal.VGData {
