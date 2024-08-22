@@ -153,7 +153,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 
 			v, r := validateLVMLogicalVolume(sdsCache, llv, &v1alpha1.LvmVolumeGroup{})
 			if assert.False(t, v) {
-				assert.Equal(t, "Zero size for LV. Thin pool specified for Thick LV. LV test-lv was found on the node, but can't be validated due to its attributes is empty string. ", r)
+				assert.Equal(t, "Zero size for LV. Thin pool specified for Thick LV. ", r)
 			}
 		})
 

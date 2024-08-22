@@ -145,10 +145,6 @@ func RunLVMLogicalVolumeWatcherController(
 				return reconcile.Result{RequeueAfter: cfg.LLVRequeueIntervalSec}, nil
 			}
 
-			// создаем LV и пытаемся получить его размер на 113278 строчке I0819 12:43:10.563596
-			// при этом у нас кэш начинает заполняться в I0819 12:43:09.486602 и заканчивает в I0819 12:43:22.070604, а потом только в I0819 12:43:22.081861
-			// при этом получаем ретрай в I0819 12:43:15.563851 (и на мо
-
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] successfully ended reconciliation of the LVMLogicalVolume %s", request.Name))
 			return reconcile.Result{}, nil
 		}),

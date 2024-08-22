@@ -412,12 +412,12 @@ func validateLVGForUpdateFunc(log logger.Logger, sdsCache *cache.Cache, lvg *v1a
 		for _, tp := range lvg.Spec.ThinPools {
 			lv := sdsCache.FindLV(lvg.Spec.ActualVGNameOnTheNode, tp.Name)
 			if lv != nil {
-				if !isThinPool(*lv) {
-					reason.WriteString(fmt.Sprintf("LV %s is already created on the node and it is not a thin-pool", lv.LVName))
+				if !isThinPool(lv.Data) {
+					reason.WriteString(fmt.Sprintf("LV %s is already created on the node and it is not a thin-pool", lv.Data.LVName))
 					continue
 				}
 
-				actualThinPools[lv.LVName] = *lv
+				actualThinPools[lv.Data.LVName] = lv.Data
 			}
 		}
 
