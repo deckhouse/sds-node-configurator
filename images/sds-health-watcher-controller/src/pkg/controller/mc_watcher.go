@@ -22,8 +22,6 @@ import (
 	"fmt"
 
 	"github.com/cloudflare/cfssl/log"
-	mc "sds-health-watcher-controller/api"
-
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	mc "sds-health-watcher-controller/api"
 	"sds-health-watcher-controller/pkg/logger"
 )
 
