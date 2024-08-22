@@ -22,7 +22,6 @@ import (
 	"os"
 	goruntime "runtime"
 
-	dh "github.com/deckhouse/deckhouse/deckhouse-controller/pkg/apis/deckhouse.io/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -33,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	mc "sds-health-watcher-controller/api"
 	"sds-health-watcher-controller/config"
 	"sds-health-watcher-controller/pkg/controller"
 	"sds-health-watcher-controller/pkg/kubutils"
@@ -42,7 +42,7 @@ import (
 
 var (
 	resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
-		dh.AddToScheme,
+		mc.AddToScheme,
 		v1alpha1.AddToScheme,
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,
