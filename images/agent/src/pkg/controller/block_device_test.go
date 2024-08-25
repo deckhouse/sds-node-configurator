@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -318,6 +319,50 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		}
 	})
 
+	t.Run("ConfigureBlockDeviceLabels", func(t *testing.T) {
+		blockDevice := v1alpha1.BlockDevice{
+			Status: v1alpha1.BlockDeviceStatus{
+				Type:                  "testTYPE",
+				FsType:                "testFS",
+				NodeName:              "test_node",
+				Consumable:            false,
+				PVUuid:                "testPV",
+				VGUuid:                "testVGUID",
+				LvmVolumeGroupName:    "testLVGName",
+				ActualVGNameOnTheNode: "testNameOnNode",
+				Wwn:                   "testWWN",
+				Serial:                "testSERIAL",
+				Path:                  "testPATH",
+				Size:                  resource.MustParse("0"),
+				Model:                 "testMODEL",
+				Rota:                  false,
+				HotPlug:               false,
+				MachineID:             "testMACHINE",
+			},
+		}
+
+		expectedLabels := map[string]string{
+			"kubernetes.io/metadata.name":                     blockDevice.ObjectMeta.Name,
+			"kubernetes.io/hostname":                          blockDevice.Status.NodeName,
+			BlockDeviceLabelPrefix + "/type":                  blockDevice.Status.Type,
+			BlockDeviceLabelPrefix + "/fstype":                blockDevice.Status.FsType,
+			BlockDeviceLabelPrefix + "/pvuuid":                blockDevice.Status.PVUuid,
+			BlockDeviceLabelPrefix + "/vguuid":                blockDevice.Status.VGUuid,
+			BlockDeviceLabelPrefix + "/partuuid":              blockDevice.Status.PartUUID,
+			BlockDeviceLabelPrefix + "/lvmvolumegroupname":    blockDevice.Status.LvmVolumeGroupName,
+			BlockDeviceLabelPrefix + "/actualvgnameonthenode": blockDevice.Status.ActualVGNameOnTheNode,
+			BlockDeviceLabelPrefix + "/wwn":                   blockDevice.Status.Wwn,
+			BlockDeviceLabelPrefix + "/serial":                blockDevice.Status.Serial,
+			BlockDeviceLabelPrefix + "/size":                  blockDevice.Status.Size.String(),
+			BlockDeviceLabelPrefix + "/model":                 blockDevice.Status.Model,
+			BlockDeviceLabelPrefix + "/rota":                  strconv.FormatBool(blockDevice.Status.Rota),
+			BlockDeviceLabelPrefix + "/hotplug":               strconv.FormatBool(blockDevice.Status.HotPlug),
+			BlockDeviceLabelPrefix + "/machineid":             blockDevice.Status.MachineID,
+		}
+
+		assert.Equal(t, expectedLabels, ConfigureBlockDeviceLabels(blockDevice))
+	})
+
 	t.Run("hasBlockDeviceDiff", func(t *testing.T) {
 		candidates := []internal.BlockDeviceCandidate{
 			// same state
@@ -385,6 +430,8 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				MachineID:             "testMACHINE",
 			},
 		}
+		labels := ConfigureBlockDeviceLabels(blockDevice)
+		blockDevice.Labels = labels
 		expected := []bool{false, true}
 
 		for i, candidate := range candidates {

@@ -74,25 +74,24 @@ func checkIfVGExist(vgName string, vgs []internal.VGData) bool {
 	return false
 }
 
-func checkLVGLabels(log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, labelKey, labelValue string) bool {
+func shouldUpdateLVGLabels(log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, labelKey, labelValue string) bool {
 	if lvg.Labels == nil {
-		log.Debug(fmt.Sprintf("[checkLabels] the LVMVolumeGroup %s has no labels.", lvg.Name))
-		return false
+		log.Debug(fmt.Sprintf("[shouldUpdateLVGLabels] the LVMVolumeGroup %s has no labels.", lvg.Name))
+		return true
 	}
 
 	val, exist := lvg.Labels[labelKey]
-
 	if !exist {
-		log.Debug(fmt.Sprintf("[checkLabels] the LVMVolumeGroup %s has no label %s.", lvg.Name, labelKey))
-		return false
+		log.Debug(fmt.Sprintf("[shouldUpdateLVGLabels] the LVMVolumeGroup %s has no label %s.", lvg.Name, labelKey))
+		return true
 	}
 
 	if val != labelValue {
-		log.Debug(fmt.Sprintf("[checkLabels] the LVMVolumeGroup %s has label %s but the value is incorrect - %q (should be %q)", lvg.Name, labelKey, val, labelValue))
-		return false
+		log.Debug(fmt.Sprintf("[shouldUpdateLVGLabels] the LVMVolumeGroup %s has label %s but the value is incorrect - %s (should be %s)", lvg.Name, labelKey, val, labelValue))
+		return true
 	}
 
-	return true
+	return false
 }
 
 func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1alpha1.LvmVolumeGroup) bool {
@@ -101,7 +100,7 @@ func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1a
 		return true
 	}
 
-	if !checkLVGLabels(log, newLVG, LVGMetadateNameLabelKey, newLVG.Name) {
+	if shouldUpdateLVGLabels(log, newLVG, LVGMetadateNameLabelKey, newLVG.Name) {
 		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup's %s labels have been changed", newLVG.Name))
 		return true
 	}
@@ -975,7 +974,7 @@ func ExtendThinPool(log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1
 }
 
 func addLVGLabelIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, labelKey, labelValue string) (bool, error) {
-	if checkLVGLabels(log, lvg, labelKey, labelValue) {
+	if !shouldUpdateLVGLabels(log, lvg, labelKey, labelValue) {
 		return false, nil
 	}
 
