@@ -545,8 +545,8 @@ func ConfigureBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]str
 		labels = make(map[string]string, len(blockDevice.Labels))
 	}
 
-	for k, v := range blockDevice.Labels {
-		labels[k] = v
+	for key, value := range blockDevice.Labels {
+		labels[key] = value
 	}
 
 	labels["kubernetes.io/metadata.name"] = blockDevice.ObjectMeta.Name
