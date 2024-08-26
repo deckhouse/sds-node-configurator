@@ -538,7 +538,16 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 }
 
 func ConfigureBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]string {
-	labels := make(map[string]string, 16)
+	var labels map[string]string
+	if blockDevice.Labels == nil {
+		labels = make(map[string]string, 16)
+	} else {
+		labels = make(map[string]string, len(blockDevice.Labels))
+	}
+
+	for k, v := range blockDevice.Labels {
+		labels[k] = v
+	}
 
 	labels["kubernetes.io/metadata.name"] = blockDevice.ObjectMeta.Name
 	labels["kubernetes.io/hostname"] = blockDevice.Status.NodeName
