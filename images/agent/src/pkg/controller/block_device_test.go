@@ -340,6 +340,10 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				MachineID:             "testMACHINE",
 			},
 		}
+		blockDevice.Labels = map[string]string{
+			"some-custom-label1": "v",
+			"some-custom-label2": "v",
+		}
 
 		expectedLabels := map[string]string{
 			"kubernetes.io/metadata.name":                     blockDevice.ObjectMeta.Name,
@@ -358,6 +362,8 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			BlockDeviceLabelPrefix + "/rota":                  strconv.FormatBool(blockDevice.Status.Rota),
 			BlockDeviceLabelPrefix + "/hotplug":               strconv.FormatBool(blockDevice.Status.HotPlug),
 			BlockDeviceLabelPrefix + "/machineid":             blockDevice.Status.MachineID,
+			"some-custom-label1":                              "v",
+			"some-custom-label2":                              "v",
 		}
 
 		assert.Equal(t, expectedLabels, ConfigureBlockDeviceLabels(blockDevice))
