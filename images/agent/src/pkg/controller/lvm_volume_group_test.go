@@ -26,8 +26,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestLvmVolumeGroupAPIObjects(t *testing.T) {
-	t.Run("Unmarshal_LvmVolumeGroup_json_to_struct", func(t *testing.T) {
+func TestLVMVolumeGroupAPIObjects(t *testing.T) {
+	t.Run("Unmarshal_LVMVolumeGroup_json_to_struct", func(t *testing.T) {
 		js := `{
    "apiVersion": "storage.deckhouse.io/v1alpha1",
    "kind": "LVMVolumeGroup",
@@ -100,7 +100,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
    }
 }`
 
-		expected := v1alpha1.LvmVolumeGroup{
+		expected := v1alpha1.LVMVolumeGroup{
 			TypeMeta: metav1.TypeMeta{
 				Kind:       "LVMVolumeGroup",
 				APIVersion: "storage.deckhouse.io/v1alpha1",
@@ -108,11 +108,11 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "lvg-test-1",
 			},
-			Spec: v1alpha1.LvmVolumeGroupSpec{
+			Spec: v1alpha1.LVMVolumeGroupSpec{
 				Type:                  "local",
 				BlockDeviceNames:      []string{"test-bd", "test-bd2"},
 				ActualVGNameOnTheNode: "testVGname",
-				ThinPools: []v1alpha1.LvmVolumeGroupThinPoolSpec{
+				ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
 					{
 						Name: "test-name",
 						Size: "10G",
@@ -123,20 +123,20 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 					},
 				},
 			},
-			Status: v1alpha1.LvmVolumeGroupStatus{
+			Status: v1alpha1.LVMVolumeGroupStatus{
 				VGUuid:        "test-vg-uuid",
 				VGSize:        resource.MustParse("30G"),
 				AllocatedSize: resource.MustParse("20G"),
-				ThinPools: []v1alpha1.LvmVolumeGroupThinPoolStatus{
+				ThinPools: []v1alpha1.LVMVolumeGroupThinPoolStatus{
 					{
 						Name:       "test-name",
 						ActualSize: *convertSize("1G", t),
 					},
 				},
-				Nodes: []v1alpha1.LvmVolumeGroupNode{
+				Nodes: []v1alpha1.LVMVolumeGroupNode{
 					{
 						Name: "node1",
-						Devices: []v1alpha1.LvmVolumeGroupDevice{
+						Devices: []v1alpha1.LVMVolumeGroupDevice{
 							{
 								Path:        "test/path1",
 								PVSize:      resource.MustParse("1G"),
@@ -155,7 +155,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 					},
 					{
 						Name: "node2",
-						Devices: []v1alpha1.LvmVolumeGroupDevice{
+						Devices: []v1alpha1.LVMVolumeGroupDevice{
 							{
 								Path:        "test/path3",
 								PVSize:      resource.MustParse("3G"),
@@ -169,7 +169,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 			},
 		}
 
-		var actual v1alpha1.LvmVolumeGroup
+		var actual v1alpha1.LVMVolumeGroup
 		err := json.Unmarshal([]byte(js), &actual)
 
 		if assert.NoError(t, err) {

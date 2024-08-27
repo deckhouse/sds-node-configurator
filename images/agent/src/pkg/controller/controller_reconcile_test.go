@@ -41,7 +41,7 @@ var _ = Describe("Storage Controller", func() {
 			Consumable:            true,
 			PVUuid:                "123",
 			VGUuid:                "123",
-			LvmVolumeGroupName:    "testLvm",
+			LVMVolumeGroupName:    "testLvm",
 			ActualVGNameOnTheNode: "testVG",
 			Wwn:                   "WW12345678",
 			Serial:                "test",
@@ -68,7 +68,7 @@ var _ = Describe("Storage Controller", func() {
 		Expect(blockDevice.Status.Consumable).To(Equal(candidate.Consumable))
 		Expect(blockDevice.Status.PVUuid).To(Equal(candidate.PVUuid))
 		Expect(blockDevice.Status.VGUuid).To(Equal(candidate.VGUuid))
-		Expect(blockDevice.Status.LvmVolumeGroupName).To(Equal(candidate.LvmVolumeGroupName))
+		Expect(blockDevice.Status.LvmVolumeGroupName).To(Equal(candidate.LVMVolumeGroupName))
 		Expect(blockDevice.Status.ActualVGNameOnTheNode).To(Equal(candidate.ActualVGNameOnTheNode))
 		Expect(blockDevice.Status.Wwn).To(Equal(candidate.Wwn))
 		Expect(blockDevice.Status.Serial).To(Equal(candidate.Serial))
@@ -98,7 +98,7 @@ var _ = Describe("Storage Controller", func() {
 			Consumable:            false,
 			PVUuid:                "123",
 			VGUuid:                "123",
-			LvmVolumeGroupName:    "updatedField",
+			LVMVolumeGroupName:    "updatedField",
 			ActualVGNameOnTheNode: "testVG",
 			Wwn:                   "WW12345678",
 			Serial:                "test",

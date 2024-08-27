@@ -42,7 +42,7 @@ func shouldReconcileByDeleteFunc(llv *v1alpha1.LVMLogicalVolume) bool {
 }
 
 //nolint:unparam
-func checkIfConditionIsTrue(lvg *v1alpha1.LvmVolumeGroup, conType string) bool {
+func checkIfConditionIsTrue(lvg *v1alpha1.LVMVolumeGroup, conType string) bool {
 	// this check prevents infinite resource updating after a retry
 	for _, c := range lvg.Status.Conditions {
 		if c.Type == conType && c.Status == v1.ConditionTrue {
@@ -57,7 +57,7 @@ func isPercentSize(size string) bool {
 	return strings.Contains(size, "%")
 }
 
-func getLLVRequestedSize(llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LvmVolumeGroup) (resource.Quantity, error) {
+func getLLVRequestedSize(llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LVMVolumeGroup) (resource.Quantity, error) {
 	switch llv.Spec.Type {
 	case Thick:
 		return getRequestedSizeFromString(llv.Spec.Size, lvg.Status.VGSize)
@@ -212,7 +212,7 @@ func shouldReconcileByCreateFunc(sdsCache *cache.Cache, vgName string, llv *v1al
 	return lv == nil
 }
 
-func getFreeLVGSpaceForLLV(lvg *v1alpha1.LvmVolumeGroup, llv *v1alpha1.LVMLogicalVolume) resource.Quantity {
+func getFreeLVGSpaceForLLV(lvg *v1alpha1.LVMVolumeGroup, llv *v1alpha1.LVMLogicalVolume) resource.Quantity {
 	switch llv.Spec.Type {
 	case Thick:
 		return lvg.Status.VGFree
@@ -233,7 +233,7 @@ func subtractQuantity(currentQuantity, quantityToSubtract resource.Quantity) res
 	return resultingQuantity
 }
 
-func belongsToNode(lvg *v1alpha1.LvmVolumeGroup, nodeName string) bool {
+func belongsToNode(lvg *v1alpha1.LVMVolumeGroup, nodeName string) bool {
 	var belongs bool
 	for _, node := range lvg.Status.Nodes {
 		if node.Name == nodeName {
@@ -244,7 +244,7 @@ func belongsToNode(lvg *v1alpha1.LvmVolumeGroup, nodeName string) bool {
 	return belongs
 }
 
-func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LvmVolumeGroup) (bool, string) {
+func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LVMVolumeGroup) (bool, string) {
 	if llv.DeletionTimestamp != nil {
 		// as the configuration doesn't matter if we want to delete it
 		return true, ""

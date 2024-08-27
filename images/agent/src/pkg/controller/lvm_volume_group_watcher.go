@@ -60,7 +60,7 @@ func RunLVMVolumeGroupWatcherController(
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] Reconciler starts to reconcile the request %s", request.NamespacedName.String()))
 
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			err := cl.Get(ctx, request.NamespacedName, lvg)
 			if err != nil {
 				if errors2.IsNotFound(err) {
@@ -205,8 +205,8 @@ func RunLVMVolumeGroupWatcherController(
 		return nil, err
 	}
 
-	err = c.Watch(source.Kind(mgrCache, &v1alpha1.LvmVolumeGroup{}, handler.TypedFuncs[*v1alpha1.LvmVolumeGroup, reconcile.Request]{
-		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	err = c.Watch(source.Kind(mgrCache, &v1alpha1.LVMVolumeGroup{}, handler.TypedFuncs[*v1alpha1.LVMVolumeGroup, reconcile.Request]{
+		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LVMVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] createFunc got a create event for the LVMVolumeGroup, name: %s", e.Object.GetName()))
 
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
@@ -214,7 +214,7 @@ func RunLVMVolumeGroupWatcherController(
 
 			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] createFunc added a request for the LVMVolumeGroup %s to the Reconcilers queue", e.Object.GetName()))
 		},
-		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LvmVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LVMVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] UpdateFunc got a update event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
 			if !shouldLVGWatcherReconcileUpdateEvent(log, e.ObjectOld, e.ObjectNew) {
 				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] update event for the LVMVolumeGroup %s should not be reconciled as not target changed were made", e.ObjectNew.Name))
@@ -242,7 +242,7 @@ func runEventReconcile(
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
 	cfg config.Options,
-	lvg *v1alpha1.LvmVolumeGroup,
+	lvg *v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 ) (bool, error) {
 	recType := identifyLVGReconcileFunc(lvg, sdsCache)
@@ -263,7 +263,7 @@ func runEventReconcile(
 	return false, nil
 }
 
-func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, cfg config.Options, lvg *v1alpha1.LvmVolumeGroup) (bool, error) {
+func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, cfg config.Options, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
 	log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] tries to add the condition %s status false to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 
@@ -345,7 +345,7 @@ func reconcileLVGDeleteFunc(ctx context.Context, cl client.Client, log logger.Lo
 	return false, nil
 }
 
-func reconcileLVGUpdateFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, error) {
+func reconcileLVGUpdateFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
 
 	log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] tries to validate the LVMVolumeGroup %s", lvg.Name))
@@ -445,7 +445,7 @@ func reconcileLVGUpdateFunc(ctx context.Context, cl client.Client, log logger.Lo
 	return false, nil
 }
 
-func reconcileLVGCreateFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LvmVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, error) {
+func reconcileLVGCreateFunc(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
 
 	// this check prevents the LVMVolumeGroup resource's infinity updating after a retry

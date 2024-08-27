@@ -293,7 +293,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, sdsCache *c
 						candidate.PVUuid = pv.PVUuid
 						candidate.VGUuid = pv.VGUuid
 						candidate.ActualVGNameOnTheNode = pv.VGName
-						candidate.LvmVolumeGroupName = lvmVGName
+						candidate.LVMVolumeGroupName = lvmVGName
 					} else {
 						if len(pv.VGName) != 0 {
 							log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] The device is a PV with VG named %s that lacks our tag %s. Removing it from Kubernetes", pv.VGName, internal.LVMTags[0]))
@@ -511,7 +511,7 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 		PVUuid:                candidate.PVUuid,
 		VGUuid:                candidate.VGUuid,
 		PartUUID:              candidate.PartUUID,
-		LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
+		LVMVolumeGroupName:    candidate.LVMVolumeGroupName,
 		ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
 		Wwn:                   candidate.Wwn,
 		Serial:                candidate.Serial,
@@ -583,7 +583,7 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 			PVUuid:                candidate.PVUuid,
 			VGUuid:                candidate.VGUuid,
 			PartUUID:              candidate.PartUUID,
-			LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
+			LVMVolumeGroupName:    candidate.LVMVolumeGroupName,
 			ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
 			Wwn:                   candidate.Wwn,
 			Serial:                candidate.Serial,

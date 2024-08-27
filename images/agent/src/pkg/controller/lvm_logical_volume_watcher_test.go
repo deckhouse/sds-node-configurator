@@ -98,7 +98,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		t.Run("thick_all_good_returns_true", func(t *testing.T) {
 			const lvgName = "test-lvg"
 
-			lvg := &v1alpha1.LvmVolumeGroup{
+			lvg := &v1alpha1.LVMVolumeGroup{
 				ObjectMeta: v1.ObjectMeta{
 					Name: lvgName,
 				},
@@ -121,7 +121,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: "test-lv",
 					Type:                  Thick,
 					Size:                  "10M",
-					LvmVolumeGroupName:    lvgName,
+					LVMVolumeGroupName:    lvgName,
 				},
 			}
 
@@ -139,7 +139,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: lvName,
 					Type:                  Thick,
 					Size:                  "0M",
-					LvmVolumeGroupName:    "some-lvg",
+					LVMVolumeGroupName:    "some-lvg",
 					Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: "some-lvg"},
 				},
 			}
@@ -151,7 +151,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				},
 			}, bytes.Buffer{})
 
-			v, r := validateLVMLogicalVolume(sdsCache, llv, &v1alpha1.LvmVolumeGroup{})
+			v, r := validateLVMLogicalVolume(sdsCache, llv, &v1alpha1.LVMVolumeGroup{})
 			if assert.False(t, v) {
 				assert.Equal(t, "Zero size for LV. Thin pool specified for Thick LV. ", r)
 			}
@@ -163,12 +163,12 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				tpName  = "test-tp"
 			)
 
-			lvg := &v1alpha1.LvmVolumeGroup{
+			lvg := &v1alpha1.LVMVolumeGroup{
 				ObjectMeta: v1.ObjectMeta{
 					Name: lvgName,
 				},
-				Status: v1alpha1.LvmVolumeGroupStatus{
-					ThinPools: []v1alpha1.LvmVolumeGroupThinPoolStatus{
+				Status: v1alpha1.LVMVolumeGroupStatus{
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolStatus{
 						{
 							Name:            tpName,
 							AllocationLimit: internal.AllocationLimitDefaultValue,
@@ -182,7 +182,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: "test-lv",
 					Type:                  Thin,
 					Size:                  "10M",
-					LvmVolumeGroupName:    lvgName,
+					LVMVolumeGroupName:    lvgName,
 					Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: tpName},
 				},
 			}
@@ -199,7 +199,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: "",
 					Type:                  Thin,
 					Size:                  "0M",
-					LvmVolumeGroupName:    "some-lvg",
+					LVMVolumeGroupName:    "some-lvg",
 				},
 			}
 
@@ -210,7 +210,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				},
 			}, bytes.Buffer{})
 
-			v, r := validateLVMLogicalVolume(sdsCache, llv, &v1alpha1.LvmVolumeGroup{})
+			v, r := validateLVMLogicalVolume(sdsCache, llv, &v1alpha1.LVMVolumeGroup{})
 			if assert.False(t, v) {
 				assert.Equal(t, "No LV name specified. Zero size for LV. No thin pool specified. ", r)
 			}
@@ -219,7 +219,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 
 	t.Run("getThinPoolAvailableSpace", func(t *testing.T) {
 		const tpName = "test-tp"
-		tp := v1alpha1.LvmVolumeGroupThinPoolStatus{
+		tp := v1alpha1.LVMVolumeGroupThinPoolStatus{
 			Name:            tpName,
 			ActualSize:      resource.MustParse("10Gi"),
 			UsedSize:        resource.MustParse("1Gi"),
@@ -240,9 +240,9 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		const (
 			nodeName = "test_node"
 		)
-		lvg := &v1alpha1.LvmVolumeGroup{
-			Status: v1alpha1.LvmVolumeGroupStatus{
-				Nodes: []v1alpha1.LvmVolumeGroupNode{
+		lvg := &v1alpha1.LVMVolumeGroup{
+			Status: v1alpha1.LVMVolumeGroupStatus{
+				Nodes: []v1alpha1.LVMVolumeGroupNode{
 					{
 						Name: nodeName,
 					},

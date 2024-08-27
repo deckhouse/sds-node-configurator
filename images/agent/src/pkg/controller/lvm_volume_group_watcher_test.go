@@ -58,11 +58,11 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					},
 				},
 			}
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames: []string{firstBd, secondBd},
 				},
-				Status: v1alpha1.LvmVolumeGroupStatus{
+				Status: v1alpha1.LVMVolumeGroupStatus{
 					Phase:                "",
 					Conditions:           nil,
 					ThinPoolReady:        "",
@@ -118,11 +118,11 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					},
 				},
 			}
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames: []string{firstBd, secondBd},
 				},
-				Status: v1alpha1.LvmVolumeGroupStatus{
+				Status: v1alpha1.LVMVolumeGroupStatus{
 					Phase:                "",
 					Conditions:           nil,
 					ThinPoolReady:        "",
@@ -179,10 +179,10 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					},
 				},
 			}
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames: []string{firstBd, secondBd},
-					ThinPools: []v1alpha1.LvmVolumeGroupThinPoolSpec{
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
 						{
 							Name:            "new-thin",
 							Size:            "2.5G",
@@ -251,10 +251,10 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					},
 				},
 			}
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames: []string{firstBd, secondBd},
-					ThinPools: []v1alpha1.LvmVolumeGroupThinPoolSpec{
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
 						{
 							Name:            "new-thin",
 							Size:            "4G",
@@ -315,8 +315,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					},
 				},
 			}
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames: []string{firstBd, secondBd},
 				},
 			}
@@ -343,8 +343,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					},
 				},
 			}
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames: []string{firstBd, secondBd},
 				},
 			}
@@ -378,10 +378,10 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					},
 				},
 			}
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames: []string{firstBd, secondBd},
-					ThinPools: []v1alpha1.LvmVolumeGroupThinPoolSpec{
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
 						{
 							Size: "1G",
 						},
@@ -420,10 +420,10 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					},
 				},
 			}
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames: []string{firstBd, secondBd},
-					ThinPools: []v1alpha1.LvmVolumeGroupThinPoolSpec{
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
 						{
 							Size: "3G",
 						},
@@ -439,8 +439,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 	t.Run("identifyLVGReconcileFunc", func(t *testing.T) {
 		t.Run("returns_create", func(t *testing.T) {
 			const vgName = "test-vg"
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					ActualVGNameOnTheNode: vgName,
 				},
 			}
@@ -453,8 +453,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 		t.Run("returns_update", func(t *testing.T) {
 			const vgName = "test-vg"
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					ActualVGNameOnTheNode: vgName,
 				},
 			}
@@ -473,8 +473,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 		t.Run("returns_delete", func(t *testing.T) {
 			const vgName = "test-vg"
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					ActualVGNameOnTheNode: vgName,
 				},
 			}
@@ -495,7 +495,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 	t.Run("removeLVGFinalizerIfExist", func(t *testing.T) {
 		t.Run("not_exist_no_remove", func(t *testing.T) {
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 
 			removed, err := removeLVGFinalizerIfExist(ctx, cl, lvg)
 			if err != nil {
@@ -507,7 +507,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 		t.Run("does_exist_remove", func(t *testing.T) {
 			const lvgName = "test-lvg"
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.Name = lvgName
 			lvg.Finalizers = append(lvg.Finalizers, internal.SdsNodeConfiguratorFinalizer)
 
@@ -529,7 +529,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}
 
 			if assert.True(t, removed) {
-				updatedLVG := &v1alpha1.LvmVolumeGroup{}
+				updatedLVG := &v1alpha1.LVMVolumeGroup{}
 				err = cl.Get(ctx, client.ObjectKey{
 					Name: lvgName,
 				}, updatedLVG)
@@ -591,8 +591,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			},
 		}
-		lvg := &v1alpha1.LvmVolumeGroup{
-			Spec: v1alpha1.LvmVolumeGroupSpec{
+		lvg := &v1alpha1.LVMVolumeGroup{
+			Spec: v1alpha1.LVMVolumeGroupSpec{
 				BlockDeviceNames: []string{firstBd, secondBd},
 			},
 		}
@@ -663,8 +663,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			const (
 				nodeName = "nodeName"
 			)
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames: []string{
 						"first", "second",
 					},
@@ -701,8 +701,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			const (
 				nodeName = "nodeName"
 			)
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames: []string{
 						"first", "second",
 					},
@@ -728,8 +728,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			const (
 				nodeName = "nodeName"
 			)
-			lvg := &v1alpha1.LvmVolumeGroup{
-				Spec: v1alpha1.LvmVolumeGroupSpec{
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceNames: []string{
 						"first", "second",
 					},
@@ -762,12 +762,12 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 	t.Run("syncThinPoolsAllocationLimit", func(t *testing.T) {
 		const lvgName = "test"
-		lvg := &v1alpha1.LvmVolumeGroup{
+		lvg := &v1alpha1.LVMVolumeGroup{
 			ObjectMeta: v1.ObjectMeta{
 				Name: lvgName,
 			},
-			Spec: v1alpha1.LvmVolumeGroupSpec{
-				ThinPools: []v1alpha1.LvmVolumeGroupThinPoolSpec{
+			Spec: v1alpha1.LVMVolumeGroupSpec{
+				ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
 					{
 						Name:            "first",
 						Size:            "1G",
@@ -775,8 +775,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					},
 				},
 			},
-			Status: v1alpha1.LvmVolumeGroupStatus{
-				ThinPools: []v1alpha1.LvmVolumeGroupThinPoolStatus{
+			Status: v1alpha1.LVMVolumeGroupStatus{
+				ThinPools: []v1alpha1.LVMVolumeGroupThinPoolStatus{
 					{
 						Name:            "first",
 						AllocationLimit: "150%",
@@ -802,7 +802,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			t.Error(err)
 		}
 
-		updatedLVG := &v1alpha1.LvmVolumeGroup{}
+		updatedLVG := &v1alpha1.LVMVolumeGroup{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Name: lvgName,
 		}, updatedLVG)
@@ -815,7 +815,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			const (
 				lvgName = "test"
 			)
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.Name = lvgName
 			lvg.Finalizers = []string{}
 
@@ -837,7 +837,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}
 
 			if assert.True(t, added) {
-				updatedLVG := &v1alpha1.LvmVolumeGroup{}
+				updatedLVG := &v1alpha1.LVMVolumeGroup{}
 				err = cl.Get(ctx, client.ObjectKey{
 					Name: lvgName,
 				}, updatedLVG)
@@ -850,7 +850,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			const (
 				lvgName = "test-1"
 			)
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.Name = lvgName
 			lvg.Finalizers = []string{
 				internal.SdsNodeConfiguratorFinalizer,
@@ -874,7 +874,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}
 
 			if assert.False(t, added) {
-				updatedLVG := &v1alpha1.LvmVolumeGroup{}
+				updatedLVG := &v1alpha1.LVMVolumeGroup{}
 				err = cl.Get(ctx, client.ObjectKey{
 					Name: lvgName,
 				}, updatedLVG)
@@ -891,7 +891,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				badReason = "bad"
 			)
 			curTime := v1.NewTime(time.Now())
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.Name = lvgName
 			lvg.Generation = 1
 			lvg.Status.Conditions = []v1.Condition{
@@ -915,7 +915,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				t.Error(err)
 			}
 
-			notUpdatedLVG := &v1alpha1.LvmVolumeGroup{}
+			notUpdatedLVG := &v1alpha1.LVMVolumeGroup{}
 			err = cl.Get(ctx, client.ObjectKey{
 				Name: lvgName,
 			}, notUpdatedLVG)
@@ -934,7 +934,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				lvgName = "test-name-2"
 			)
 			curTime := v1.NewTime(time.Now())
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.Name = lvgName
 			lvg.Generation = 1
 			lvg.Status.Conditions = []v1.Condition{
@@ -964,14 +964,14 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 	t.Run("shouldReconcileLVGByDeleteFunc", func(t *testing.T) {
 		t.Run("returns_true", func(t *testing.T) {
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.DeletionTimestamp = &v1.Time{}
 
 			assert.True(t, shouldReconcileLVGByDeleteFunc(lvg))
 		})
 
 		t.Run("returns_false", func(t *testing.T) {
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.DeletionTimestamp = nil
 
 			assert.False(t, shouldReconcileLVGByDeleteFunc(lvg))
@@ -980,37 +980,35 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 	t.Run("shouldLVGWatcherReconcileUpdateEvent", func(t *testing.T) {
 		t.Run("deletion_timestamp_not_nil_returns_true", func(t *testing.T) {
-			oldLVG := &v1alpha1.LvmVolumeGroup{}
-			newLVG := &v1alpha1.LvmVolumeGroup{}
+			oldLVG := &v1alpha1.LVMVolumeGroup{}
+			newLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG.DeletionTimestamp = &v1.Time{}
 			assert.True(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
 		})
 
 		t.Run("spec_is_diff_returns_true", func(t *testing.T) {
-			oldLVG := &v1alpha1.LvmVolumeGroup{}
-			newLVG := &v1alpha1.LvmVolumeGroup{}
+			oldLVG := &v1alpha1.LVMVolumeGroup{}
+			newLVG := &v1alpha1.LVMVolumeGroup{}
 			oldLVG.Spec.BlockDeviceNames = []string{"first"}
 			newLVG.Spec.BlockDeviceNames = []string{"first", "second"}
 			assert.True(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
 		})
 
 		t.Run("condition_vg_configuration_applied_is_updating_returns_false", func(t *testing.T) {
-			oldLVG := &v1alpha1.LvmVolumeGroup{}
-			newLVG := &v1alpha1.LvmVolumeGroup{}
-			newLVG.Name = "test-name"
+			oldLVG := &v1alpha1.LVMVolumeGroup{}
+			newLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG.Status.Conditions = []v1.Condition{
 				{
 					Type:   internal.TypeVGConfigurationApplied,
 					Reason: internal.ReasonUpdating,
 				},
 			}
-			newLVG.Labels = map[string]string{LVGMetadateNameLabelKey: newLVG.Name}
 			assert.False(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
 		})
 
 		t.Run("condition_vg_configuration_applied_is_creating_returns_false", func(t *testing.T) {
-			oldLVG := &v1alpha1.LvmVolumeGroup{}
-			newLVG := &v1alpha1.LvmVolumeGroup{}
+			oldLVG := &v1alpha1.LVMVolumeGroup{}
+			newLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG.Name = "test-name"
 			newLVG.Status.Conditions = []v1.Condition{
 				{
@@ -1023,8 +1021,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		})
 
 		t.Run("label_is_not_the_same_returns_true", func(t *testing.T) {
-			oldLVG := &v1alpha1.LvmVolumeGroup{}
-			newLVG := &v1alpha1.LvmVolumeGroup{}
+			oldLVG := &v1alpha1.LVMVolumeGroup{}
+			newLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG.Name = "test-name"
 			newLVG.Status.Conditions = []v1.Condition{
 				{
@@ -1037,11 +1035,11 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		})
 
 		t.Run("dev_size_and_pv_size_are_diff_returns_true", func(t *testing.T) {
-			oldLVG := &v1alpha1.LvmVolumeGroup{}
-			newLVG := &v1alpha1.LvmVolumeGroup{}
-			newLVG.Status.Nodes = []v1alpha1.LvmVolumeGroupNode{
+			oldLVG := &v1alpha1.LVMVolumeGroup{}
+			newLVG := &v1alpha1.LVMVolumeGroup{}
+			newLVG.Status.Nodes = []v1alpha1.LVMVolumeGroupNode{
 				{
-					Devices: []v1alpha1.LvmVolumeGroupDevice{
+					Devices: []v1alpha1.LVMVolumeGroupDevice{
 						{
 							BlockDevice: "test",
 							DevSize:     resource.MustParse("1G"),
@@ -1057,17 +1055,17 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 	t.Run("shouldUpdateLVGLabels", func(t *testing.T) {
 		t.Run("labels_nil_returns_true", func(t *testing.T) {
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			assert.True(t, shouldUpdateLVGLabels(log, lvg, "key", "value"))
 		})
 		t.Run("no_such_label_returns_true", func(t *testing.T) {
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.Labels = map[string]string{"key": "value"}
 			assert.True(t, shouldUpdateLVGLabels(log, lvg, "other-key", "value"))
 		})
 		t.Run("key_exists_other_value_returns_true", func(t *testing.T) {
 			const key = "key"
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.Labels = map[string]string{key: "value"}
 			assert.True(t, shouldUpdateLVGLabels(log, lvg, key, "other-value"))
 		})
@@ -1076,7 +1074,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				key   = "key"
 				value = "value"
 			)
-			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.Labels = map[string]string{key: value}
 			assert.False(t, shouldUpdateLVGLabels(log, lvg, key, value))
 		})
@@ -1108,12 +1106,12 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			nodeName = "test-node"
 		)
 
-		lvgToDelete := &v1alpha1.LvmVolumeGroup{
+		lvgToDelete := &v1alpha1.LVMVolumeGroup{
 			ObjectMeta: v1.ObjectMeta{
 				Name: lvgName,
 			},
-			Status: v1alpha1.LvmVolumeGroupStatus{
-				Nodes: []v1alpha1.LvmVolumeGroupNode{
+			Status: v1alpha1.LVMVolumeGroupStatus{
+				Nodes: []v1alpha1.LVMVolumeGroupNode{
 					{
 						Name: nodeName,
 					},
@@ -1130,7 +1128,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			_ = cl.Delete(ctx, lvgToDelete)
 		}()
 
-		lvgCheck := &v1alpha1.LvmVolumeGroup{}
+		lvgCheck := &v1alpha1.LVMVolumeGroup{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Name: lvgName,
 		}, lvgCheck)
@@ -1144,7 +1142,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			t.Error(err)
 		}
 
-		lvgNewCheck := &v1alpha1.LvmVolumeGroup{}
+		lvgNewCheck := &v1alpha1.LVMVolumeGroup{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Name: lvgName,
 		}, lvgNewCheck)
@@ -1155,7 +1153,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 	t.Run("getLVMVolumeGroup_lvg_exists_returns_correct", func(t *testing.T) {
 		const name = "test_name"
-		lvgToCreate := &v1alpha1.LvmVolumeGroup{
+		lvgToCreate := &v1alpha1.LVMVolumeGroup{
 			ObjectMeta: v1.ObjectMeta{
 				Name: name,
 			},
@@ -1182,7 +1180,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 	t.Run("getLVMVolumeGroup_lvg_doesnt_exist_returns_nil", func(t *testing.T) {
 		const name = "test_name"
-		testObj := &v1alpha1.LvmVolumeGroup{
+		testObj := &v1alpha1.LVMVolumeGroup{
 			ObjectMeta: v1.ObjectMeta{
 				Name: name,
 			},
