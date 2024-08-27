@@ -30,7 +30,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 	t.Run("Unmarshal_LvmVolumeGroup_json_to_struct", func(t *testing.T) {
 		js := `{
    "apiVersion": "storage.deckhouse.io/v1alpha1",
-   "kind": "LvmVolumeGroup",
+   "kind": "LVMVolumeGroup",
    "metadata": {
        "name": "lvg-test-1"
    },
@@ -102,7 +102,7 @@ func TestLvmVolumeGroupAPIObjects(t *testing.T) {
 
 		expected := v1alpha1.LvmVolumeGroup{
 			TypeMeta: metav1.TypeMeta{
-				Kind:       "LvmVolumeGroup",
+				Kind:       "LVMVolumeGroup",
 				APIVersion: "storage.deckhouse.io/v1alpha1",
 			},
 			ObjectMeta: metav1.ObjectMeta{

@@ -42,8 +42,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
 		&BlockDevice{},
 		&BlockDeviceList{},
-		&LvmVolumeGroup{},
-		&LvmVolumeGroupList{},
+		&LVMVolumeGroup{},
+		&LVMVolumeGroupList{},
 		&LVMLogicalVolume{},
 		&LVMLogicalVolumeList{},
 	)

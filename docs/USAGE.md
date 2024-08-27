@@ -67,7 +67,7 @@ There are two ways to create an `LVMVolumeGroup` resource:
 
     ```yaml
     apiVersion: storage.deckhouse.io/v1alpha1
-    kind: LvmVolumeGroup
+    kind: LVMVolumeGroup
     metadata:
       name: "vg-0-on-node-0"
     spec:
@@ -82,7 +82,7 @@ There are two ways to create an `LVMVolumeGroup` resource:
 
     ```yaml
     apiVersion: storage.deckhouse.io/v1alpha1
-    kind: LvmVolumeGroup
+    kind: LVMVolumeGroup
     metadata:
       name: "vg-thin-on-node-0"
     spec:
