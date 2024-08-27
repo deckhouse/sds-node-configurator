@@ -926,7 +926,7 @@ func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.LVM
 		result = append(result, v1alpha1.LVMVolumeGroupThinPoolSpec{
 			Name:            name,
 			AllocationLimit: "150%",
-			Size:            size.String(),
+			Size: size.String(),
 		})
 	}
 
