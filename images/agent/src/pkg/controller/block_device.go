@@ -31,7 +31,7 @@ import (
 	"github.com/gosimple/slug"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -81,7 +81,7 @@ func RunBlockDeviceController(
 	return c, err
 }
 
-func BlockDeviceReconcile(ctx context.Context, cl kclient.Client, log logger.Logger, metrics monitoring.Metrics, cfg config.Options, sdsCache *cache.Cache) bool {
+func BlockDeviceReconcile(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, cfg config.Options, sdsCache *cache.Cache) bool {
 	reconcileStart := time.Now()
 
 	log.Info("[RunBlockDeviceController] START reconcile of block devices")
@@ -147,7 +147,7 @@ func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.Blo
 		candidate.PVUuid != blockDevice.Status.PVUuid ||
 		candidate.VGUuid != blockDevice.Status.VGUuid ||
 		candidate.PartUUID != blockDevice.Status.PartUUID ||
-		candidate.LvmVolumeGroupName != blockDevice.Status.LvmVolumeGroupName ||
+		candidate.LVMVolumeGroupName != blockDevice.Status.LVMVolumeGroupName ||
 		candidate.ActualVGNameOnTheNode != blockDevice.Status.ActualVGNameOnTheNode ||
 		candidate.Wwn != blockDevice.Status.Wwn ||
 		candidate.Serial != blockDevice.Status.Serial ||
@@ -162,7 +162,26 @@ func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.Blo
 		!reflect.DeepEqual(ConfigureBlockDeviceLabels(blockDevice), blockDevice.Labels)
 }
 
-func GetAPIBlockDevices(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics) (map[string]v1alpha1.BlockDevice, error) {
+func GetApiBlockDevicesBySelector(ctx context.Context, cl client.Client, metrics monitoring.Metrics, selector *metav1.LabelSelector) (map[string]v1alpha1.BlockDevice, error) {
+	list := &v1alpha1.BlockDeviceList{}
+	s, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil {
+		return nil, err
+	}
+	err = cl.List(ctx, list, &client.ListOptions{LabelSelector: s})
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]v1alpha1.BlockDevice, len(list.Items))
+	for _, i := range list.Items {
+		result[i.Name] = i
+	}
+
+	return result, nil
+}
+
+func GetAPIBlockDevices(ctx context.Context, kc client.Client, metrics monitoring.Metrics) (map[string]v1alpha1.BlockDevice, error) {
 	listDevice := &v1alpha1.BlockDeviceList{}
 
 	start := time.Now()
@@ -183,7 +202,7 @@ func GetAPIBlockDevices(ctx context.Context, kc kclient.Client, metrics monitori
 
 func RemoveDeprecatedAPIDevices(
 	ctx context.Context,
-	cl kclient.Client,
+	cl client.Client,
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	candidates []internal.BlockDeviceCandidate,
@@ -502,7 +521,7 @@ func readSerialBlockDevice(deviceName string, isMdRaid bool) (string, error) {
 	return string(serial), nil
 }
 
-func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, blockDevice v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {
+func UpdateAPIBlockDevice(ctx context.Context, kc client.Client, metrics monitoring.Metrics, blockDevice v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {
 	blockDevice.Status = v1alpha1.BlockDeviceStatus{
 		Type:                  candidate.Type,
 		FsType:                candidate.FSType,
@@ -570,7 +589,7 @@ func ConfigureBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]str
 	return labels
 }
 
-func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, candidate internal.BlockDeviceCandidate) (*v1alpha1.BlockDevice, error) {
+func CreateAPIBlockDevice(ctx context.Context, kc client.Client, metrics monitoring.Metrics, candidate internal.BlockDeviceCandidate) (*v1alpha1.BlockDevice, error) {
 	blockDevice := &v1alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: candidate.Name,
@@ -608,7 +627,7 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 	return blockDevice, nil
 }
 
-func DeleteAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, device *v1alpha1.BlockDevice) error {
+func DeleteAPIBlockDevice(ctx context.Context, kc client.Client, metrics monitoring.Metrics, device *v1alpha1.BlockDevice) error {
 	start := time.Now()
 	err := kc.Delete(ctx, device)
 	metrics.APIMethodsDuration(BlockDeviceCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))

@@ -427,21 +427,13 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			Health                = internal.LVMVGHealthOperational
 			Message               = "No problems detected"
 			VGUUID                = "test_uuid"
+			NodeName              = "test-node"
 		)
 
-		size10G, err := resource.ParseQuantity("10G")
-		if err != nil {
-			t.Error(err)
-		}
-		size1G, err := resource.ParseQuantity("1G")
-		if err != nil {
-			t.Error(err)
-		}
+		size10G := resource.MustParse("10G")
+		size1G := resource.MustParse("1G")
 
 		var (
-			cl                = NewFakeClient()
-			ctx               = context.Background()
-			testLogger        = logger.Logger{}
 			testMetrics       = monitoring.GetMetrics("")
 			blockDevicesNames = []string{"first", "second"}
 			specThinPools     = map[string]resource.Quantity{"first": size10G}
@@ -492,9 +484,10 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			},
 			Spec: v1alpha1.LVMVolumeGroupSpec{
 				ActualVGNameOnTheNode: ActualVGNameOnTheNode,
-				BlockDeviceNames:      blockDevicesNames,
 				ThinPools:             convertSpecThinPools(specThinPools),
 				Type:                  Type,
+				Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: NodeName},
+				BlockDeviceSelector:   configureBlockDeviceSelector(candidate, NodeName),
 			},
 			Status: v1alpha1.LVMVolumeGroupStatus{
 				AllocatedSize: size10G,
@@ -505,7 +498,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			},
 		}
 
-		created, err := CreateLVMVolumeGroupByCandidate(ctx, testLogger, testMetrics, cl, candidate)
+		created, err := CreateLVMVolumeGroupByCandidate(ctx, log, testMetrics, cl, candidate, NodeName)
 		if assert.NoError(t, err) {
 			assert.Equal(t, &expected, created)
 		}
@@ -513,7 +506,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 
 	t.Run("GetLVMVolumeGroup", func(t *testing.T) {
 		const (
-			LVMVGName = "test_lvm"
+			LVMVGName = "test_lvm-1"
 		)
 
 		lvg := &v1alpha1.LVMVolumeGroup{
@@ -566,14 +559,14 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		err = DeleteLVMVolumeGroup(ctx, cl, log, metrics, lvg, "test-node")
 		if assert.NoError(t, err) {
 			actual, err = GetAPILVMVolumeGroups(ctx, cl, metrics)
-			assert.NoError(t, err)
-			assert.Equal(t, 0, len(actual))
+			_, ok := actual[LVMVGName]
+			assert.False(t, ok)
 		}
 	})
 
 	t.Run("UpdateLVMVolumeGroup", func(t *testing.T) {
 		const (
-			LVMVGName = "test_lvm"
+			LVMVGName = "test_lvm_x"
 		)
 
 		metrics := monitoring.GetMetrics("test-node")
@@ -612,49 +605,30 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 
 	t.Run("filterResourcesByNode_returns_current_node_resources", func(t *testing.T) {
 		var (
-			ctx          = context.Background()
-			cl           = NewFakeClient()
-			testLogger   = logger.Logger{}
 			currentNode  = "test_node"
 			vgName       = "test_vg"
-			firstBDName  = "first_device"
-			secondBDName = "second_device"
 			firstLVName  = "first_lv"
 			secondLVName = "second_lv"
-			blockDevices = map[string]v1alpha1.BlockDevice{
-				firstBDName: {
-					ObjectMeta: metav1.ObjectMeta{
-						Name: firstBDName,
-					},
-					Status: v1alpha1.BlockDeviceStatus{
-						NodeName: currentNode,
-					},
-				},
-				secondBDName: {
-					ObjectMeta: metav1.ObjectMeta{
-						Name: secondBDName,
-					},
-					Status: v1alpha1.BlockDeviceStatus{
-						NodeName: "another_node",
-					},
-				},
-			}
 
 			lvs = map[string]v1alpha1.LVMVolumeGroup{
 				firstLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: firstLVName},
 					Spec: v1alpha1.LVMVolumeGroupSpec{
-						BlockDeviceNames:      []string{firstBDName},
 						Type:                  Local,
 						ActualVGNameOnTheNode: vgName,
+						Local: v1alpha1.LVMVolumeGroupLocalSpec{
+							NodeName: "other-node",
+						},
 					},
 				},
 				secondLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: secondLVName},
 					Spec: v1alpha1.LVMVolumeGroupSpec{
-						BlockDeviceNames:      []string{secondBDName},
 						Type:                  Local,
 						ActualVGNameOnTheNode: vgName,
+						Local: v1alpha1.LVMVolumeGroupLocalSpec{
+							NodeName: currentNode,
+						},
 					},
 				},
 			}
@@ -662,16 +636,18 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 
 		expected := map[string]v1alpha1.LVMVolumeGroup{
 			vgName: {
-				ObjectMeta: metav1.ObjectMeta{Name: firstLVName},
+				ObjectMeta: metav1.ObjectMeta{Name: secondLVName},
 				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceNames:      []string{firstBDName},
 					Type:                  Local,
 					ActualVGNameOnTheNode: vgName,
+					Local: v1alpha1.LVMVolumeGroupLocalSpec{
+						NodeName: currentNode,
+					},
 				},
 			},
 		}
 
-		actual := filterLVGsByNode(ctx, cl, testLogger, lvs, blockDevices, currentNode)
+		actual := filterLVGsByNode(lvs, currentNode)
 
 		assert.Equal(t, expected, actual)
 	})
@@ -680,48 +656,32 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		var (
 			currentNode  = "test_node"
 			anotherNode  = "another_node"
-			firstBDName  = "first_device"
-			secondBDName = "second_device"
 			firstLVName  = "first_lv"
 			secondLVName = "second_lv"
-			blockDevices = map[string]v1alpha1.BlockDevice{
-				firstBDName: {
-					ObjectMeta: metav1.ObjectMeta{
-						Name: firstBDName,
-					},
-					Status: v1alpha1.BlockDeviceStatus{
-						NodeName: anotherNode,
-					},
-				},
-				secondBDName: {
-					ObjectMeta: metav1.ObjectMeta{
-						Name: secondBDName,
-					},
-					Status: v1alpha1.BlockDeviceStatus{
-						NodeName: anotherNode,
-					},
-				},
-			}
 
 			lvs = map[string]v1alpha1.LVMVolumeGroup{
 				firstLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: firstLVName},
 					Spec: v1alpha1.LVMVolumeGroupSpec{
-						BlockDeviceNames: []string{firstBDName},
-						Type:             Local,
+						Type: Local,
+						Local: v1alpha1.LVMVolumeGroupLocalSpec{
+							NodeName: anotherNode,
+						},
 					},
 				},
 				secondLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: secondLVName},
 					Spec: v1alpha1.LVMVolumeGroupSpec{
-						BlockDeviceNames: []string{secondBDName},
-						Type:             Local,
+						Type: Local,
+						Local: v1alpha1.LVMVolumeGroupLocalSpec{
+							NodeName: anotherNode,
+						},
 					},
 				},
 			}
 		)
 
-		actual := filterLVGsByNode(ctx, cl, log, lvs, blockDevices, currentNode)
+		actual := filterLVGsByNode(lvs, currentNode)
 
 		assert.Equal(t, 0, len(actual))
 	})
@@ -796,9 +756,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			}
 			lvmVolumeGroup := v1alpha1.LVMVolumeGroup{
 				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceNames: blockDevicesNames,
-					ThinPools:        convertSpecThinPools(specThinPools),
-					Type:             specType,
+					ThinPools: convertSpecThinPools(specThinPools),
+					Type:      specType,
 				},
 				Status: v1alpha1.LVMVolumeGroupStatus{
 					AllocatedSize: resource.MustParse("9765625Ki"),

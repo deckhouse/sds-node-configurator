@@ -37,12 +37,18 @@ type LVMVolumeGroup struct {
 }
 
 type LVMVolumeGroupSpec struct {
-	ActualVGNameOnTheNode string                       `json:"actualVGNameOnTheNode"`
-	BlockDeviceSelector   *metav1.LabelSelector        `json:"blockDeviceSelector"`
-	ThinPools             []LVMVolumeGroupThinPoolSpec `json:"thinPools"`
-	Type                  string                       `json:"type"`
-	Local                 LVMVolumeGroupLocaSpec       `json:"local"`
+	ActualVGNameOnTheNode string                `json:"actualVGNameOnTheNode"`
+	BlockDeviceSelector   *metav1.LabelSelector `json:"blockDeviceSelector"`
+	//BlockDeviceNames []string
+	ThinPools []LVMVolumeGroupThinPoolSpec `json:"thinPools"`
+	Type      string                       `json:"type"`
+	Local     LVMVolumeGroupLocalSpec      `json:"local"`
 }
+
+// 1. Для каждой существующей LVG должны будем создать поле Local и указать в нем NodeName => имя ноды
+// 2. Взять имена блок девайсов, которые указаны в сущ LVG, по ним получить block device ресурсы и из ресурсов
+// вытащить имя ноды и размер девайса
+// 3. Имя ноды и размер девайсов добавить как селекторы (labels: size: 2G, hostname: "имя ноды")
 
 type LVMVolumeGroupStatus struct {
 	AllocatedSize        resource.Quantity              `json:"allocatedSize"`
@@ -87,6 +93,6 @@ type LVMVolumeGroupThinPoolSpec struct {
 	AllocationLimit string `json:"allocationLimit"`
 }
 
-type LVMVolumeGroupLocaSpec struct {
+type LVMVolumeGroupLocalSpec struct {
 	NodeName string `json:"nodeName"`
 }

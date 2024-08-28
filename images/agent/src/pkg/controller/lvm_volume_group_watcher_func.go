@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"agent/config"
 	"context"
 	"errors"
 	"fmt"
@@ -253,44 +254,92 @@ func syncThinPoolsAllocationLimit(ctx context.Context, cl client.Client, log log
 }
 
 func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
-	reason := strings.Builder{}
-
-	targetNodeName := ""
-	for _, bdName := range lvg.Spec.BlockDeviceNames {
-		bd, exist := blockDevices[bdName]
-
-		if !exist {
-			reason.WriteString(fmt.Sprintf("the BlockDevice %s does not exist", bdName))
-			continue
-		}
-
-		if targetNodeName == "" {
-			targetNodeName = bd.Status.NodeName
-		}
-
-		if bd.Status.NodeName != targetNodeName {
-			reason.WriteString(fmt.Sprintf("the BlockDevice %s has the node %s though the target node %s", bd.Name, bd.Status.NodeName, targetNodeName))
+	bdNames := make([]string, 0, len(blockDevices))
+	for _, bd := range blockDevices {
+		if bd.Status.NodeName != lvg.Spec.Local.NodeName {
+			bdNames = append(bdNames, bd.Name)
 		}
 	}
 
-	if reason.Len() != 0 {
-		return false, reason.String()
+	if len(bdNames) != 0 {
+		return false, fmt.Sprintf("block devices %s have different node names from LVMVolumeGroup Local.NodeName", strings.Join(bdNames, ","))
 	}
 
 	return true, ""
 }
 
-func checkIfLVGBelongsToNode(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice, nodeName string) bool {
-	bd := blockDevices[lvg.Spec.BlockDeviceNames[0]]
-	return bd.Status.NodeName == nodeName
+func deleteLVGIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, cfg config.Options, sdsCache *cache.Cache, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
+	vgs, _ := sdsCache.GetVGs()
+	if !checkIfVGExist(lvg.Spec.ActualVGNameOnTheNode, vgs) && lvg.DeletionTimestamp != nil {
+		log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] VG %s was not yet created for the LVMVolumeGroup %s and the resource is marked as deleting. Delete the resource", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
+		removed, err := removeLVGFinalizerIfExist(ctx, cl, lvg)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to remove the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+			return false, err
+		}
+
+		if removed {
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully removed the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+		} else {
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no need to remove the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+		}
+
+		err = DeleteLVMVolumeGroup(ctx, cl, log, metrics, lvg, cfg.NodeName)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to delete the LVMVolumeGroup %s", lvg.Name))
+			return false, err
+		}
+		log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully deleted the LVMVolumeGroup %s", lvg.Name))
+		return true, nil
+	}
+	return false, nil
 }
 
-func extractPathsFromBlockDevices(blockDevicesNames []string, blockDevices map[string]v1alpha1.BlockDevice) []string {
-	paths := make([]string, 0, len(blockDevicesNames))
+//func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
+//	reason := strings.Builder{}
+//
+//	targetNodeName := ""
+//	for _, bdName := range lvg.Spec.BlockDeviceNames {
+//		bd, exist := blockDevices[bdName]
+//
+//		if !exist {
+//			reason.WriteString(fmt.Sprintf("the BlockDevice %s does not exist", bdName))
+//			continue
+//		}
+//
+//		if targetNodeName == "" {
+//			targetNodeName = bd.Status.NodeName
+//		}
+//
+//		if bd.Status.NodeName != targetNodeName {
+//			reason.WriteString(fmt.Sprintf("the BlockDevice %s has the node %s though the target node %s", bd.Name, bd.Status.NodeName, targetNodeName))
+//		}
+//	}
+//
+//	if reason.Len() != 0 {
+//		return false, reason.String()
+//	}
+//
+//	return true, ""
+//}
 
-	for _, bdName := range blockDevicesNames {
-		bd := blockDevices[bdName]
-		paths = append(paths, bd.Status.Path)
+func checkIfLVGBelongsToNode(lvg *v1alpha1.LVMVolumeGroup, nodeName string) bool {
+	return lvg.Spec.Local.NodeName == nodeName
+}
+
+func extractPathsFromBlockDevices(targetDevices []string, blockDevices map[string]v1alpha1.BlockDevice) []string {
+	var paths []string
+	if len(targetDevices) > 0 {
+		paths = make([]string, 0, len(targetDevices))
+		for _, bdName := range targetDevices {
+			bd := blockDevices[bdName]
+			paths = append(paths, bd.Status.Path)
+		}
+	} else {
+		paths = make([]string, 0, len(blockDevices))
+		for _, bd := range blockDevices {
+			paths = append(paths, bd.Status.Path)
+		}
 	}
 
 	return paths
@@ -313,10 +362,9 @@ func getRequestedSizeFromString(size string, targetSpace resource.Quantity) (res
 	return resource.Quantity{}, nil
 }
 
-func countVGSizeByBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) resource.Quantity {
+func countVGSizeByBlockDevices(blockDevices map[string]v1alpha1.BlockDevice) resource.Quantity {
 	var totalVGSize int64
-	for _, bdName := range lvg.Spec.BlockDeviceNames {
-		bd := blockDevices[bdName]
+	for _, bd := range blockDevices {
 		totalVGSize += bd.Status.Size.Value()
 	}
 	return *resource.NewQuantity(totalVGSize, resource.BinarySI)
@@ -327,13 +375,12 @@ func validateLVGForCreateFunc(log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, b
 
 	log.Debug(fmt.Sprintf("[validateLVGForCreateFunc] check if every selected BlockDevice of the LVMVolumeGroup %s is consumable", lvg.Name))
 	// totalVGSize needs to count if there is enough space for requested thin-pools
-	totalVGSize := countVGSizeByBlockDevices(lvg, blockDevices)
-	for _, bdName := range lvg.Spec.BlockDeviceNames {
-		bd := blockDevices[bdName]
+	totalVGSize := countVGSizeByBlockDevices(blockDevices)
+	for _, bd := range blockDevices {
 		if !bd.Status.Consumable {
-			log.Warning(fmt.Sprintf("[validateLVGForCreateFunc] BlockDevice %s is not consumable", bdName))
-			log.Trace(fmt.Sprintf("[validateLVGForCreateFunc] BlockDevice name: %s, status: %+v", bdName, bd.Status))
-			reason.WriteString(fmt.Sprintf("BlockDevice %s is not consumable. ", bdName))
+			log.Warning(fmt.Sprintf("[validateLVGForCreateFunc] BlockDevice %s is not consumable", bd.Name))
+			log.Trace(fmt.Sprintf("[validateLVGForCreateFunc] BlockDevice name: %s, status: %+v", bd.Name, bd.Status))
+			reason.WriteString(fmt.Sprintf("BlockDevice %s is not consumable. ", bd.Name))
 		}
 	}
 
@@ -398,15 +445,14 @@ func validateLVGForUpdateFunc(log logger.Logger, sdsCache *cache.Cache, lvg *v1a
 	// Check if added BlockDevices are consumable
 	// additionBlockDeviceSpace value is needed to count if VG will have enough space for thin-pools
 	var additionBlockDeviceSpace int64
-	for _, bdName := range lvg.Spec.BlockDeviceNames {
-		specBd := blockDevices[bdName]
-		if _, found := actualPVPaths[specBd.Status.Path]; !found {
-			log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] unable to find the PV %s for BlockDevice %s. Check if the BlockDevice is already used", specBd.Status.Path, specBd.Name))
+	for _, bd := range blockDevices {
+		if _, found := actualPVPaths[bd.Status.Path]; !found {
+			log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] unable to find the PV %s for BlockDevice %s. Check if the BlockDevice is already used", bd.Status.Path, bd.Name))
 			for _, n := range lvg.Status.Nodes {
 				for _, d := range n.Devices {
-					if d.BlockDevice == specBd.Name {
-						log.Warning(fmt.Sprintf("[validateLVGForUpdateFunc] BlockDevice %s misses the PV %s. That might be because the corresponding device was removed from the node. Unable to validate BlockDevices", specBd.Name, specBd.Status.Path))
-						reason.WriteString(fmt.Sprintf("BlockDevice %s misses the PV %s (that might be because the device was removed from the node). ", specBd.Name, specBd.Status.Path))
+					if d.BlockDevice == bd.Name {
+						log.Warning(fmt.Sprintf("[validateLVGForUpdateFunc] BlockDevice %s misses the PV %s. That might be because the corresponding device was removed from the node. Unable to validate BlockDevices", bd.Name, bd.Status.Path))
+						reason.WriteString(fmt.Sprintf("BlockDevice %s misses the PV %s (that might be because the device was removed from the node). ", bd.Name, bd.Status.Path))
 					}
 
 					if reason.Len() == 0 {
@@ -415,19 +461,19 @@ func validateLVGForUpdateFunc(log logger.Logger, sdsCache *cache.Cache, lvg *v1a
 				}
 			}
 
-			log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] PV %s for BlockDevice %s of the LVMVolumeGroup %s is not created yet, check if the BlockDevice is consumable", specBd.Status.Path, bdName, lvg.Name))
+			log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] PV %s for BlockDevice %s of the LVMVolumeGroup %s is not created yet, check if the BlockDevice is consumable", bd.Status.Path, bd.Name, lvg.Name))
 			if reason.Len() > 0 {
 				log.Debug("[validateLVGForUpdateFunc] some BlockDevices misses its PVs, unable to check if they are consumable")
 				continue
 			}
 
-			if !blockDevices[bdName].Status.Consumable {
-				reason.WriteString(fmt.Sprintf("BlockDevice %s is not consumable. ", bdName))
+			if !bd.Status.Consumable {
+				reason.WriteString(fmt.Sprintf("BlockDevice %s is not consumable. ", bd.Name))
 				continue
 			}
 
-			log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] BlockDevice %s is consumable", bdName))
-			additionBlockDeviceSpace += specBd.Status.Size.Value()
+			log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] BlockDevice %s is consumable", bd.Name))
+			additionBlockDeviceSpace += bd.Status.Size.Value()
 		}
 	}
 
@@ -686,12 +732,11 @@ func ExtendVGIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, 
 		pvsMap[pv.PVName] = struct{}{}
 	}
 
-	devicesToExtend := make([]string, 0, len(lvg.Spec.BlockDeviceNames))
-	for _, bdName := range lvg.Spec.BlockDeviceNames {
-		bd := blockDevices[bdName]
+	devicesToExtend := make([]string, 0, len(blockDevices))
+	for _, bd := range blockDevices {
 		if _, exist := pvsMap[bd.Status.Path]; !exist {
-			log.Debug(fmt.Sprintf("[ExtendVGIfNeeded] the BlockDevice %s of LVMVolumeGroup %s Spec is not counted as used", bdName, lvg.Name))
-			devicesToExtend = append(devicesToExtend, bdName)
+			log.Debug(fmt.Sprintf("[ExtendVGIfNeeded] the BlockDevice %s of LVMVolumeGroup %s Spec is not counted as used", bd.Name, lvg.Name))
+			devicesToExtend = append(devicesToExtend, bd.Name)
 		}
 	}
 
@@ -853,7 +898,7 @@ func ExtendVGComplex(metrics monitoring.Metrics, extendPVs []string, vgName stri
 }
 
 func CreateVGComplex(metrics monitoring.Metrics, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) error {
-	paths := extractPathsFromBlockDevices(lvg.Spec.BlockDeviceNames, blockDevices)
+	paths := extractPathsFromBlockDevices(nil, blockDevices)
 
 	log.Trace(fmt.Sprintf("[CreateVGComplex] LVMVolumeGroup %s devices paths %v", lvg.Name, paths))
 	for _, path := range paths {

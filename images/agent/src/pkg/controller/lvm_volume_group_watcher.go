@@ -77,6 +77,13 @@ func RunLVMVolumeGroupWatcherController(
 				return reconcile.Result{}, nil
 			}
 
+			belongs := checkIfLVGBelongsToNode(lvg, cfg.NodeName)
+			if !belongs {
+				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s does not belong to the node %s", lvg.Name, cfg.NodeName))
+				return reconcile.Result{}, nil
+			}
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s belongs to the node %s. Starts to reconcile", lvg.Name, cfg.NodeName))
+
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to add the finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
 			added, err := addLVGFinalizerIfNotExist(ctx, cl, lvg)
 			if err != nil {
@@ -90,7 +97,8 @@ func RunLVMVolumeGroupWatcherController(
 				log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no need to add a finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
 			}
 
-			blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector.MatchLabels))
+			blockDevices, err := GetApiBlockDevicesBySelector(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %s", cfg.BlockDeviceScanIntervalSec.String()))
 				err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "NoBlockDevices", fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()))
@@ -98,11 +106,23 @@ func RunLVMVolumeGroupWatcherController(
 					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, cfg.BlockDeviceScanIntervalSec.String()))
 				}
 
-				return reconcile.Result{
-					RequeueAfter: cfg.BlockDeviceScanIntervalSec,
-				}, nil
+				return reconcile.Result{RequeueAfter: cfg.BlockDeviceScanIntervalSec}, nil
 			}
-			log.Debug("[RunLVMVolumeGroupController] successfully got BlockDevices")
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully got block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector.MatchLabels))
+
+			//blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
+			//if err != nil {
+			//	log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %s", cfg.BlockDeviceScanIntervalSec.String()))
+			//	err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "NoBlockDevices", fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()))
+			//	if err != nil {
+			//		log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, cfg.BlockDeviceScanIntervalSec.String()))
+			//	}
+			//
+			//	return reconcile.Result{
+			//		RequeueAfter: cfg.BlockDeviceScanIntervalSec,
+			//	}, nil
+			//}
+			//log.Debug("[RunLVMVolumeGroupController] successfully got BlockDevices")
 
 			valid, reason := validateSpecBlockDevices(lvg, blockDevices)
 			if !valid {
@@ -117,51 +137,42 @@ func RunLVMVolumeGroupWatcherController(
 			}
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully validated BlockDevices of the LVMVolumeGroup %s", lvg.Name))
 
-			belongs := checkIfLVGBelongsToNode(lvg, blockDevices, cfg.NodeName)
-			if !belongs {
-				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s does not belong to the node %s", lvg.Name, cfg.NodeName))
-				return reconcile.Result{}, nil
-			}
-			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s belongs to the node %s. Starts to reconcile", lvg.Name, cfg.NodeName))
-
-			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to add label %s to the LVMVolumeGroup %s", LVGMetadateNameLabelKey, cfg.NodeName))
-			added, err = addLVGLabelIfNeeded(ctx, cl, log, lvg, LVGMetadateNameLabelKey, lvg.Name)
+			// this case handles the situation when a user decides to remove LVMVolumeGroup resource without created VG
+			deleted, err := deleteLVGIfNeeded(ctx, cl, log, metrics, cfg, sdsCache, lvg)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add label %s to the LVMVolumeGroup %s", LVGMetadateNameLabelKey, lvg.Name))
 				return reconcile.Result{}, err
 			}
 
-			if added {
-				log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully added label %s to the LVMVolumeGroup %s", LVGMetadateNameLabelKey, lvg.Name))
-			} else {
-				log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no need to add label %s to the LVMVolumeGroup %s", LVGMetadateNameLabelKey, lvg.Name))
-			}
-
-			// this case handles the situation when a user decides to remove LVMVolumeGroup resource without created VG
-			vgs, _ := sdsCache.GetVGs()
-			if !checkIfVGExist(lvg.Spec.ActualVGNameOnTheNode, vgs) && lvg.DeletionTimestamp != nil {
-				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] VG %s was not yet created for the LVMVolumeGroup %s and the resource is marked as deleting. Delete the resource", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
-				removed, err := removeLVGFinalizerIfExist(ctx, cl, lvg)
-				if err != nil {
-					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to remove the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
-					return reconcile.Result{}, err
-				}
-
-				if removed {
-					log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully removed the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
-				} else {
-					log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no need to remove the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
-				}
-
-				err = DeleteLVMVolumeGroup(ctx, cl, log, metrics, lvg, cfg.NodeName)
-				if err != nil {
-					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to delete the LVMVolumeGroup %s", lvg.Name))
-					return reconcile.Result{}, err
-				}
-				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully deleted the LVMVolumeGroup %s", lvg.Name))
-
+			if deleted {
+				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s was deleted, stop the reconciliation", lvg.Name))
 				return reconcile.Result{}, nil
 			}
+
+			//vgs, _ := sdsCache.GetVGs()
+			//if !checkIfVGExist(lvg.Spec.ActualVGNameOnTheNode, vgs) && lvg.DeletionTimestamp != nil {
+			//	log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] VG %s was not yet created for the LVMVolumeGroup %s and the resource is marked as deleting. Delete the resource", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
+			//	removed, err := removeLVGFinalizerIfExist(ctx, cl, lvg)
+			//	if err != nil {
+			//		log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to remove the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+			//		return reconcile.Result{}, err
+			//	}
+			//
+			//	if removed {
+			//		log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully removed the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+			//	} else {
+			//		log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no need to remove the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+			//	}
+			//
+			//	err = DeleteLVMVolumeGroup(ctx, cl, log, metrics, lvg, cfg.NodeName)
+			//	if err != nil {
+			//		log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to delete the LVMVolumeGroup %s", lvg.Name))
+			//		return reconcile.Result{}, err
+			//	}
+			//	log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully deleted the LVMVolumeGroup %s", lvg.Name))
+			//
+			//	return reconcile.Result{}, nil
+			//}
+
 			// We do this after BlockDevices validation and node belonging check to prevent multiple updates by all agents pods
 			bds, _ := sdsCache.GetDevices()
 			if len(bds) == 0 {
@@ -495,7 +506,7 @@ func reconcileLVGCreateFunc(ctx context.Context, cl client.Client, log logger.Lo
 		log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] the LVMVolumeGroup %s has thin-pools. Tries to create them", lvg.Name))
 
 		for _, tp := range lvg.Spec.ThinPools {
-			vgSize := countVGSizeByBlockDevices(lvg, blockDevices)
+			vgSize := countVGSizeByBlockDevices(blockDevices)
 			tpRequestedSize, err := getRequestedSizeFromString(tp.Size, vgSize)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to get thin-pool %s requested size of the LVMVolumeGroup %s", tp.Name, lvg.Name))

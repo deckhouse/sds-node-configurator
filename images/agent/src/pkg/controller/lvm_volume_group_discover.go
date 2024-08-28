@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -78,7 +78,7 @@ func RunLVMVolumeGroupDiscoverController(
 	return c, err
 }
 
-func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, metrics monitoring.Metrics, log logger.Logger, cfg config.Options, sdsCache *cache.Cache) bool {
+func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl client.Client, metrics monitoring.Metrics, log logger.Logger, cfg config.Options, sdsCache *cache.Cache) bool {
 	reconcileStart := time.Now()
 	log.Info("[RunLVMVolumeGroupDiscoverController] starts the reconciliation")
 
@@ -109,7 +109,7 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 		return false
 	}
 
-	filteredLVGs := filterLVGsByNode(ctx, cl, log, currentLVMVGs, blockDevices, cfg.NodeName)
+	filteredLVGs := filterLVGsByNode(currentLVMVGs, cfg.NodeName)
 
 	log.Debug("[RunLVMVolumeGroupDiscoverController] tries to get LVMVolumeGroup candidates")
 	candidates, err := GetLVMVolumeGroupCandidates(log, sdsCache, blockDevices, cfg.NodeName)
@@ -164,7 +164,7 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 			log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] updated LVMVolumeGroup, name: "%s"`, lvg.Name))
 		} else {
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is not yet created. Create it", lvg.Name))
-			lvm, err := CreateLVMVolumeGroupByCandidate(ctx, log, metrics, cl, candidate)
+			lvm, err := CreateLVMVolumeGroupByCandidate(ctx, log, metrics, cl, candidate, cfg.NodeName)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to CreateLVMVolumeGroupByCandidate %s. Requeue the request in %s", candidate.LVMVGName, cfg.VolumeGroupScanIntervalSec.String()))
 				shouldRequeue = true
@@ -200,66 +200,68 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl kclient.Client, met
 	return false
 }
 
-func filterLVGsByNode(
-	ctx context.Context,
-	cl kclient.Client,
-	log logger.Logger,
-	lvgs map[string]v1alpha1.LVMVolumeGroup,
-	blockDevices map[string]v1alpha1.BlockDevice,
-	currentNode string,
-) map[string]v1alpha1.LVMVolumeGroup {
+func filterLVGsByNode(lvgs map[string]v1alpha1.LVMVolumeGroup, currentNode string) map[string]v1alpha1.LVMVolumeGroup {
 	filtered := make(map[string]v1alpha1.LVMVolumeGroup, len(lvgs))
-	blockDevicesNodes := make(map[string]string, len(blockDevices))
-
-	for _, bd := range blockDevices {
-		blockDevicesNodes[bd.Name] = bd.Status.NodeName
-	}
-
 	for _, lvg := range lvgs {
-		switch lvg.Spec.Type {
-		case Local:
-			currentNodeDevices := 0
-			for _, bdName := range lvg.Spec.BlockDeviceNames {
-				if blockDevicesNodes[bdName] == currentNode {
-					currentNodeDevices++
-				}
-			}
-
-			// If we did not add every block device of local VG, that means a mistake, and we turn the resource's health to Nonoperational.
-			if currentNodeDevices > 0 && currentNodeDevices < len(lvg.Spec.BlockDeviceNames) {
-				if err := updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.TypeVGConfigurationApplied, "InvalidBlockDevices", "there are block devices from different nodes for local volume group"); err != nil {
-					log.Error(err, `[filterLVGsByNode] unable to update resource, name: "%s"`, lvg.Name)
-					continue
-				}
-			}
-
-			// If we did not find any block device for our node, we skip the resource.
-			if currentNodeDevices == 0 {
-				continue
-			}
-
-			// Otherwise, we add the resource to the filtered ones.
-			filtered[lvg.Spec.ActualVGNameOnTheNode] = lvg
-		case Shared:
-			if len(lvg.Spec.BlockDeviceNames) != 1 {
-				if err := updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.TypeVGConfigurationApplied, "InvalidBlockDevices", "there are more than one block devices for shared volume group"); err != nil {
-					log.Error(err, `[filterLVGsByNode] unable to update resource, name: "%s"`, lvg.Name)
-					continue
-				}
-			}
-
-			// If the only one block devices does not belong to our node, we skip the resource.
-			singleBD := lvg.Spec.BlockDeviceNames[0]
-			if blockDevicesNodes[singleBD] != currentNode {
-				continue
-			}
-
-			// Otherwise, we add the resource to the filtered ones.
+		if lvg.Spec.Local.NodeName == currentNode {
 			filtered[lvg.Spec.ActualVGNameOnTheNode] = lvg
 		}
 	}
 
 	return filtered
+
+	//filtered := make(map[string]v1alpha1.LVMVolumeGroup, len(lvgs))
+	//blockDevicesNodes := make(map[string]string, len(blockDevices))
+	//
+	//for _, bd := range blockDevices {
+	//	blockDevicesNodes[bd.Name] = bd.Status.NodeName
+	//}
+	//
+	//for _, lvg := range lvgs {
+	//	switch lvg.Spec.Type {
+	//	case Local:
+	//		currentNodeDevices := 0
+	//		for _, bdName := range lvg.Spec.BlockDeviceNames {
+	//			if blockDevicesNodes[bdName] == currentNode {
+	//				currentNodeDevices++
+	//			}
+	//		}
+	//
+	//		// If we did not add every block device of local VG, that means a mistake, and we turn the resource's health to Nonoperational.
+	//		if currentNodeDevices > 0 && currentNodeDevices < len(lvg.Spec.BlockDeviceNames) {
+	//			if err := updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.TypeVGConfigurationApplied, "InvalidBlockDevices", "there are block devices from different nodes for local volume group"); err != nil {
+	//				log.Error(err, `[filterLVGsByNode] unable to update resource, name: "%s"`, lvg.Name)
+	//				continue
+	//			}
+	//		}
+	//
+	//		// If we did not find any block device for our node, we skip the resource.
+	//		if currentNodeDevices == 0 {
+	//			continue
+	//		}
+	//
+	//		// Otherwise, we add the resource to the filtered ones.
+	//		filtered[lvg.Spec.ActualVGNameOnTheNode] = lvg
+	//	case Shared:
+	//		if len(lvg.Spec.BlockDeviceNames) != 1 {
+	//			if err := updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.TypeVGConfigurationApplied, "InvalidBlockDevices", "there are more than one block devices for shared volume group"); err != nil {
+	//				log.Error(err, `[filterLVGsByNode] unable to update resource, name: "%s"`, lvg.Name)
+	//				continue
+	//			}
+	//		}
+	//
+	//		// If the only one block devices does not belong to our node, we skip the resource.
+	//		singleBD := lvg.Spec.BlockDeviceNames[0]
+	//		if blockDevicesNodes[singleBD] != currentNode {
+	//			continue
+	//		}
+	//
+	//		// Otherwise, we add the resource to the filtered ones.
+	//		filtered[lvg.Spec.ActualVGNameOnTheNode] = lvg
+	//	}
+	//}
+	//
+	//return filtered
 }
 
 func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LVMVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
@@ -341,7 +343,7 @@ func hasStatusPoolDiff(first, second []v1alpha1.LVMVolumeGroupThinPoolStatus) bo
 // ReconcileUnhealthyLVMVolumeGroups turns LVMVolumeGroup resources without VG or ThinPools to NotReady.
 func ReconcileUnhealthyLVMVolumeGroups(
 	ctx context.Context,
-	cl kclient.Client,
+	cl client.Client,
 	log logger.Logger,
 	candidates []internal.LVMVolumeGroupCandidate,
 	lvgs map[string]v1alpha1.LVMVolumeGroup,
@@ -807,8 +809,9 @@ func CreateLVMVolumeGroupByCandidate(
 	ctx context.Context,
 	log logger.Logger,
 	metrics monitoring.Metrics,
-	kc kclient.Client,
+	cl client.Client,
 	candidate internal.LVMVolumeGroupCandidate,
+	nodeName string,
 ) (*v1alpha1.LVMVolumeGroup, error) {
 	thinPools, err := convertStatusThinPools(v1alpha1.LVMVolumeGroup{}, candidate.StatusThinPools)
 	if err != nil {
@@ -823,9 +826,10 @@ func CreateLVMVolumeGroupByCandidate(
 		},
 		Spec: v1alpha1.LVMVolumeGroupSpec{
 			ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
-			BlockDeviceNames:      candidate.BlockDevicesNames,
+			BlockDeviceSelector:   configureBlockDeviceSelector(candidate, nodeName),
 			ThinPools:             convertSpecThinPools(candidate.SpecThinPools),
 			Type:                  candidate.Type,
+			Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
 		},
 		Status: v1alpha1.LVMVolumeGroupStatus{
 			AllocatedSize: candidate.AllocatedSize,
@@ -848,7 +852,7 @@ func CreateLVMVolumeGroupByCandidate(
 	}
 
 	start := time.Now()
-	err = kc.Create(ctx, lvmVolumeGroup)
+	err = cl.Create(ctx, lvmVolumeGroup)
 	metrics.APIMethodsDuration(LVMVolumeGroupDiscoverCtrlName, "create").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.APIMethodsExecutionCount(LVMVolumeGroupDiscoverCtrlName, "create").Inc()
 	if err != nil {
@@ -861,7 +865,7 @@ func CreateLVMVolumeGroupByCandidate(
 
 func UpdateLVMVolumeGroupByCandidate(
 	ctx context.Context,
-	cl kclient.Client,
+	cl client.Client,
 	metrics monitoring.Metrics,
 	log logger.Logger,
 	lvg *v1alpha1.LVMVolumeGroup,
@@ -925,6 +929,22 @@ func UpdateLVMVolumeGroupByCandidate(
 	}
 
 	return err
+}
+
+func configureBlockDeviceSelector(candidate internal.LVMVolumeGroupCandidate, nodeName string) *metav1.LabelSelector {
+	// TODO: change to consts later
+	return &metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			"kubernetes.io/hostname": nodeName,
+		},
+		MatchExpressions: []metav1.LabelSelectorRequirement{
+			{
+				Key:      "kubernetes.io/metadata.name",
+				Operator: metav1.LabelSelectorOpIn,
+				Values:   candidate.BlockDevicesNames,
+			},
+		},
+	}
 }
 
 func convertLVMVGNodes(nodes map[string][]internal.LVMVGDevice) []v1alpha1.LVMVolumeGroupNode {
@@ -1028,7 +1048,7 @@ func generateLVMVGName() string {
 	return "vg-" + string(uuid.NewUUID())
 }
 
-func GetAPILVMVolumeGroups(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics) (map[string]v1alpha1.LVMVolumeGroup, error) {
+func GetAPILVMVolumeGroups(ctx context.Context, kc client.Client, metrics monitoring.Metrics) (map[string]v1alpha1.LVMVolumeGroup, error) {
 	lvgList := &v1alpha1.LVMVolumeGroupList{}
 
 	start := time.Now()

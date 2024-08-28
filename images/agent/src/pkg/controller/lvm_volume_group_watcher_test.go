@@ -59,9 +59,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 			lvg := &v1alpha1.LVMVolumeGroup{
-				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceNames: []string{firstBd, secondBd},
-				},
+				Spec: v1alpha1.LVMVolumeGroupSpec{},
 				Status: v1alpha1.LVMVolumeGroupStatus{
 					Phase:                "",
 					Conditions:           nil,
@@ -119,9 +117,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 			lvg := &v1alpha1.LVMVolumeGroup{
-				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceNames: []string{firstBd, secondBd},
-				},
+				Spec: v1alpha1.LVMVolumeGroupSpec{},
 				Status: v1alpha1.LVMVolumeGroupStatus{
 					Phase:                "",
 					Conditions:           nil,
@@ -181,7 +177,6 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}
 			lvg := &v1alpha1.LVMVolumeGroup{
 				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceNames: []string{firstBd, secondBd},
 					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
 						{
 							Name:            "new-thin",
@@ -253,7 +248,6 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}
 			lvg := &v1alpha1.LVMVolumeGroup{
 				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceNames: []string{firstBd, secondBd},
 					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
 						{
 							Name:            "new-thin",
@@ -316,9 +310,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 			lvg := &v1alpha1.LVMVolumeGroup{
-				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceNames: []string{firstBd, secondBd},
-				},
+				Spec: v1alpha1.LVMVolumeGroupSpec{},
 			}
 
 			valid, reason := validateLVGForCreateFunc(log, lvg, bds)
@@ -329,8 +321,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 		t.Run("without_thin_pools_returns_false", func(t *testing.T) {
 			const (
-				firstBd  = "first"
-				secondBd = "second"
+				firstBd = "first"
 			)
 			bds := map[string]v1alpha1.BlockDevice{
 				firstBd: {
@@ -339,14 +330,12 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					},
 					Status: v1alpha1.BlockDeviceStatus{
 						Size:       resource.MustParse("1G"),
-						Consumable: true,
+						Consumable: false,
 					},
 				},
 			}
 			lvg := &v1alpha1.LVMVolumeGroup{
-				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceNames: []string{firstBd, secondBd},
-				},
+				Spec: v1alpha1.LVMVolumeGroupSpec{},
 			}
 
 			valid, _ := validateLVGForCreateFunc(log, lvg, bds)
@@ -380,7 +369,6 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}
 			lvg := &v1alpha1.LVMVolumeGroup{
 				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceNames: []string{firstBd, secondBd},
 					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
 						{
 							Size: "1G",
@@ -422,7 +410,6 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}
 			lvg := &v1alpha1.LVMVolumeGroup{
 				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceNames: []string{firstBd, secondBd},
 					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
 						{
 							Size: "3G",
@@ -591,15 +578,10 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			},
 		}
-		lvg := &v1alpha1.LVMVolumeGroup{
-			Spec: v1alpha1.LVMVolumeGroupSpec{
-				BlockDeviceNames: []string{firstBd, secondBd},
-			},
-		}
 
 		expected := resource.MustParse("2G")
 
-		actual := countVGSizeByBlockDevices(lvg, bds)
+		actual := countVGSizeByBlockDevices(bds)
 		assert.Equal(t, expected.Value(), actual.Value())
 	})
 
@@ -626,36 +608,71 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 	})
 
 	t.Run("extractPathsFromBlockDevices", func(t *testing.T) {
-		const (
-			firstBd  = "first"
-			secondBd = "second"
+		t.Run("if_specified_returns_only_them", func(t *testing.T) {
+			const (
+				firstBd  = "first"
+				secondBd = "second"
 
-			firstPath  = "first-path"
-			secondPath = "second-path"
-		)
-		bdNames := []string{firstBd, secondBd}
-		bds := map[string]v1alpha1.BlockDevice{
-			firstBd: {
-				ObjectMeta: v1.ObjectMeta{
-					Name: firstBd,
+				firstPath  = "first-path"
+				secondPath = "second-path"
+			)
+			bdNames := []string{firstBd}
+			bds := map[string]v1alpha1.BlockDevice{
+				firstBd: {
+					ObjectMeta: v1.ObjectMeta{
+						Name: firstBd,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Path: firstPath,
+					},
 				},
-				Status: v1alpha1.BlockDeviceStatus{
-					Path: firstPath,
+				secondBd: {
+					ObjectMeta: v1.ObjectMeta{
+						Name: secondBd,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Path: secondPath,
+					},
 				},
-			},
-			secondBd: {
-				ObjectMeta: v1.ObjectMeta{
-					Name: secondBd,
-				},
-				Status: v1alpha1.BlockDeviceStatus{
-					Path: secondPath,
-				},
-			},
-		}
+			}
 
-		expected := []string{firstPath, secondPath}
-		actual := extractPathsFromBlockDevices(bdNames, bds)
-		assert.ElementsMatch(t, expected, actual)
+			expected := []string{firstPath}
+			actual := extractPathsFromBlockDevices(bdNames, bds)
+			assert.ElementsMatch(t, expected, actual)
+		})
+
+		t.Run("if_nil_returns_all", func(t *testing.T) {
+			const (
+				firstBd  = "first"
+				secondBd = "second"
+
+				firstPath  = "first-path"
+				secondPath = "second-path"
+			)
+			bds := map[string]v1alpha1.BlockDevice{
+				firstBd: {
+					ObjectMeta: v1.ObjectMeta{
+						Name: firstBd,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Path: firstPath,
+					},
+				},
+				secondBd: {
+					ObjectMeta: v1.ObjectMeta{
+						Name: secondBd,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Path: secondPath,
+					},
+				},
+			}
+
+			expected := []string{firstPath, secondPath}
+			actual := extractPathsFromBlockDevices(nil, bds)
+			assert.ElementsMatch(t, expected, actual)
+		})
+
 	})
 
 	t.Run("validateSpecBlockDevices", func(t *testing.T) {
@@ -665,8 +682,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			)
 			lvg := &v1alpha1.LVMVolumeGroup{
 				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceNames: []string{
-						"first", "second",
+					Local: v1alpha1.LVMVolumeGroupLocalSpec{
+						NodeName: nodeName,
 					},
 				},
 			}
@@ -697,41 +714,14 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}
 		})
 
-		t.Run("validation_fails_due_to_bd_does_not_exist", func(t *testing.T) {
-			const (
-				nodeName = "nodeName"
-			)
-			lvg := &v1alpha1.LVMVolumeGroup{
-				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceNames: []string{
-						"first", "second",
-					},
-				},
-			}
-
-			bds := map[string]v1alpha1.BlockDevice{
-				"first": {
-					ObjectMeta: v1.ObjectMeta{
-						Name: "first",
-					},
-					Status: v1alpha1.BlockDeviceStatus{
-						NodeName: nodeName,
-					},
-				},
-			}
-
-			valid, _ := validateSpecBlockDevices(lvg, bds)
-			assert.False(t, valid)
-		})
-
 		t.Run("validation_fails_due_to_bd_has_dif_node", func(t *testing.T) {
 			const (
 				nodeName = "nodeName"
 			)
 			lvg := &v1alpha1.LVMVolumeGroup{
 				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceNames: []string{
-						"first", "second",
+					Local: v1alpha1.LVMVolumeGroupLocalSpec{
+						NodeName: nodeName,
 					},
 				},
 			}
@@ -989,8 +979,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		t.Run("spec_is_diff_returns_true", func(t *testing.T) {
 			oldLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG := &v1alpha1.LVMVolumeGroup{}
-			oldLVG.Spec.BlockDeviceNames = []string{"first"}
-			newLVG.Spec.BlockDeviceNames = []string{"first", "second"}
+			oldLVG.Spec.BlockDeviceSelector = &v1.LabelSelector{MatchLabels: map[string]string{"first": "second"}}
+			newLVG.Spec.BlockDeviceSelector = &v1.LabelSelector{MatchLabels: map[string]string{"second": "second"}}
 			assert.True(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
 		})
 
