@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -334,7 +335,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				Serial:                "testSERIAL",
 				Path:                  "testPATH",
 				Size:                  resource.MustParse("0"),
-				Model:                 "testMODEL",
+				Model:                 "Very good model-1241",
 				Rota:                  false,
 				HotPlug:               false,
 				MachineID:             "testMACHINE",
@@ -346,24 +347,24 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		}
 
 		expectedLabels := map[string]string{
-			"kubernetes.io/metadata.name":                     blockDevice.ObjectMeta.Name,
-			"kubernetes.io/hostname":                          blockDevice.Status.NodeName,
-			BlockDeviceLabelPrefix + "/type":                  blockDevice.Status.Type,
-			BlockDeviceLabelPrefix + "/fstype":                blockDevice.Status.FsType,
-			BlockDeviceLabelPrefix + "/pvuuid":                blockDevice.Status.PVUuid,
-			BlockDeviceLabelPrefix + "/vguuid":                blockDevice.Status.VGUuid,
-			BlockDeviceLabelPrefix + "/partuuid":              blockDevice.Status.PartUUID,
-			BlockDeviceLabelPrefix + "/lvmvolumegroupname":    blockDevice.Status.LvmVolumeGroupName,
-			BlockDeviceLabelPrefix + "/actualvgnameonthenode": blockDevice.Status.ActualVGNameOnTheNode,
-			BlockDeviceLabelPrefix + "/wwn":                   blockDevice.Status.Wwn,
-			BlockDeviceLabelPrefix + "/serial":                blockDevice.Status.Serial,
-			BlockDeviceLabelPrefix + "/size":                  blockDevice.Status.Size.String(),
-			BlockDeviceLabelPrefix + "/model":                 blockDevice.Status.Model,
-			BlockDeviceLabelPrefix + "/rota":                  strconv.FormatBool(blockDevice.Status.Rota),
-			BlockDeviceLabelPrefix + "/hotplug":               strconv.FormatBool(blockDevice.Status.HotPlug),
-			BlockDeviceLabelPrefix + "/machineid":             blockDevice.Status.MachineID,
-			"some-custom-label1":                              "v",
-			"some-custom-label2":                              "v",
+			internal.MetadataNameLabelKey:                  blockDevice.ObjectMeta.Name,
+			internal.HostNameLabelKey:                      blockDevice.Status.NodeName,
+			internal.BlockDeviceTypeLabelKey:               blockDevice.Status.Type,
+			internal.BlockDeviceFSTypeLabelKey:             blockDevice.Status.FsType,
+			internal.BlockDevicePVUUIDLabelKey:             blockDevice.Status.PVUuid,
+			internal.BlockDeviceVGUUIDLabelKey:             blockDevice.Status.VGUuid,
+			internal.BlockDevicePartUUIDLabelKey:           blockDevice.Status.PartUUID,
+			internal.BlockDeviceLVMVolumeGroupNameLabelKey: blockDevice.Status.LvmVolumeGroupName,
+			internal.BlockDeviceActualVGNameLabelKey:       blockDevice.Status.ActualVGNameOnTheNode,
+			internal.BlockDeviceWWNLabelKey:                blockDevice.Status.Wwn,
+			internal.BlockDeviceSerialLabelKey:             blockDevice.Status.Serial,
+			internal.BlockDeviceSizeLabelKey:               blockDevice.Status.Size.String(),
+			internal.BlockDeviceModelLabelKey:              strings.ReplaceAll(blockDevice.Status.Model, " ", "_"),
+			internal.BlockDeviceRotaLabelKey:               strconv.FormatBool(blockDevice.Status.Rota),
+			internal.BlockDeviceHotPlugLabelKey:            strconv.FormatBool(blockDevice.Status.HotPlug),
+			internal.BlockDeviceMachineIDLabelKey:          blockDevice.Status.MachineID,
+			"some-custom-label1":                           "v",
+			"some-custom-label2":                           "v",
 		}
 
 		assert.Equal(t, expectedLabels, ConfigureBlockDeviceLabels(blockDevice))

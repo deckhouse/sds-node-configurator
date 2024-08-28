@@ -44,8 +44,7 @@ import (
 )
 
 const (
-	BlockDeviceCtrlName    = "block-device-controller"
-	BlockDeviceLabelPrefix = "status.blockdevice.storage.deckhouse.io"
+	BlockDeviceCtrlName = "block-device-controller"
 )
 
 func RunBlockDeviceController(
@@ -549,22 +548,22 @@ func ConfigureBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]str
 		labels[key] = value
 	}
 
-	labels["kubernetes.io/metadata.name"] = blockDevice.ObjectMeta.Name
-	labels["kubernetes.io/hostname"] = blockDevice.Status.NodeName
-	labels[BlockDeviceLabelPrefix+"/type"] = blockDevice.Status.Type
-	labels[BlockDeviceLabelPrefix+"/fstype"] = blockDevice.Status.FsType
-	labels[BlockDeviceLabelPrefix+"/pvuuid"] = blockDevice.Status.PVUuid
-	labels[BlockDeviceLabelPrefix+"/vguuid"] = blockDevice.Status.VGUuid
-	labels[BlockDeviceLabelPrefix+"/partuuid"] = blockDevice.Status.PartUUID
-	labels[BlockDeviceLabelPrefix+"/lvmvolumegroupname"] = blockDevice.Status.LvmVolumeGroupName
-	labels[BlockDeviceLabelPrefix+"/actualvgnameonthenode"] = blockDevice.Status.ActualVGNameOnTheNode
-	labels[BlockDeviceLabelPrefix+"/wwn"] = blockDevice.Status.Wwn
-	labels[BlockDeviceLabelPrefix+"/serial"] = blockDevice.Status.Serial
-	labels[BlockDeviceLabelPrefix+"/size"] = blockDevice.Status.Size.String()
-	labels[BlockDeviceLabelPrefix+"/model"] = blockDevice.Status.Model
-	labels[BlockDeviceLabelPrefix+"/rota"] = strconv.FormatBool(blockDevice.Status.Rota)
-	labels[BlockDeviceLabelPrefix+"/hotplug"] = strconv.FormatBool(blockDevice.Status.HotPlug)
-	labels[BlockDeviceLabelPrefix+"/machineid"] = blockDevice.Status.MachineID
+	labels[internal.MetadataNameLabelKey] = strings.ReplaceAll(blockDevice.ObjectMeta.Name, " ", "_")
+	labels[internal.HostNameLabelKey] = strings.ReplaceAll(blockDevice.Status.NodeName, " ", "_")
+	labels[internal.BlockDeviceTypeLabelKey] = strings.ReplaceAll(blockDevice.Status.Type, " ", "_")
+	labels[internal.BlockDeviceFSTypeLabelKey] = strings.ReplaceAll(blockDevice.Status.FsType, " ", "_")
+	labels[internal.BlockDevicePVUUIDLabelKey] = blockDevice.Status.PVUuid
+	labels[internal.BlockDeviceVGUUIDLabelKey] = blockDevice.Status.VGUuid
+	labels[internal.BlockDevicePartUUIDLabelKey] = blockDevice.Status.PartUUID
+	labels[internal.BlockDeviceLVMVolumeGroupNameLabelKey] = strings.ReplaceAll(blockDevice.Status.LvmVolumeGroupName, " ", "_")
+	labels[internal.BlockDeviceActualVGNameLabelKey] = strings.ReplaceAll(blockDevice.Status.ActualVGNameOnTheNode, " ", "_")
+	labels[internal.BlockDeviceWWNLabelKey] = strings.ReplaceAll(blockDevice.Status.Wwn, " ", "_")
+	labels[internal.BlockDeviceSerialLabelKey] = strings.ReplaceAll(blockDevice.Status.Serial, " ", "_")
+	labels[internal.BlockDeviceSizeLabelKey] = blockDevice.Status.Size.String()
+	labels[internal.BlockDeviceModelLabelKey] = strings.ReplaceAll(blockDevice.Status.Model, " ", "_")
+	labels[internal.BlockDeviceRotaLabelKey] = strconv.FormatBool(blockDevice.Status.Rota)
+	labels[internal.BlockDeviceHotPlugLabelKey] = strconv.FormatBool(blockDevice.Status.HotPlug)
+	labels[internal.BlockDeviceMachineIDLabelKey] = strings.ReplaceAll(blockDevice.Status.MachineID, " ", "_")
 
 	return labels
 }

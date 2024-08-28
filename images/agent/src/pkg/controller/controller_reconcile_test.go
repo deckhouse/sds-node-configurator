@@ -48,7 +48,7 @@ var _ = Describe("Storage Controller", func() {
 			Path:                  deviceName,
 			Size:                  resource.Quantity{},
 			Rota:                  false,
-			Model:                 "",
+			Model:                 "very good-model",
 			Name:                  "/dev/sda",
 			HotPlug:               false,
 			KName:                 "/dev/sda",
