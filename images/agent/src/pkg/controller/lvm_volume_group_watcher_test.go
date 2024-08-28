@@ -674,6 +674,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		})
 	})
 
+	})
+
 	t.Run("validateSpecBlockDevices", func(t *testing.T) {
 		t.Run("validation_passes", func(t *testing.T) {
 			const (
