@@ -997,25 +997,43 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		t.Run("condition_vg_configuration_applied_is_updating_returns_false", func(t *testing.T) {
 			oldLVG := &v1alpha1.LvmVolumeGroup{}
 			newLVG := &v1alpha1.LvmVolumeGroup{}
+			newLVG.Name = "test-name"
 			newLVG.Status.Conditions = []v1.Condition{
 				{
 					Type:   internal.TypeVGConfigurationApplied,
 					Reason: internal.ReasonUpdating,
 				},
 			}
+			newLVG.Labels = map[string]string{LVGMetadateNameLabelKey: newLVG.Name}
 			assert.False(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
 		})
 
 		t.Run("condition_vg_configuration_applied_is_creating_returns_false", func(t *testing.T) {
 			oldLVG := &v1alpha1.LvmVolumeGroup{}
 			newLVG := &v1alpha1.LvmVolumeGroup{}
+			newLVG.Name = "test-name"
 			newLVG.Status.Conditions = []v1.Condition{
 				{
 					Type:   internal.TypeVGConfigurationApplied,
 					Reason: internal.ReasonCreating,
 				},
 			}
+			newLVG.Labels = map[string]string{LVGMetadateNameLabelKey: newLVG.Name}
 			assert.False(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
+		})
+
+		t.Run("label_is_not_the_same_returns_true", func(t *testing.T) {
+			oldLVG := &v1alpha1.LvmVolumeGroup{}
+			newLVG := &v1alpha1.LvmVolumeGroup{}
+			newLVG.Name = "test-name"
+			newLVG.Status.Conditions = []v1.Condition{
+				{
+					Type:   internal.TypeVGConfigurationApplied,
+					Reason: internal.ReasonCreating,
+				},
+			}
+			newLVG.Labels = map[string]string{LVGMetadateNameLabelKey: "some-other-name"}
+			assert.True(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
 		})
 
 		t.Run("dev_size_and_pv_size_are_diff_returns_true", func(t *testing.T) {
@@ -1034,6 +1052,33 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 			assert.True(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
+		})
+	})
+
+	t.Run("shouldUpdateLVGLabels", func(t *testing.T) {
+		t.Run("labels_nil_returns_true", func(t *testing.T) {
+			lvg := &v1alpha1.LvmVolumeGroup{}
+			assert.True(t, shouldUpdateLVGLabels(log, lvg, "key", "value"))
+		})
+		t.Run("no_such_label_returns_true", func(t *testing.T) {
+			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg.Labels = map[string]string{"key": "value"}
+			assert.True(t, shouldUpdateLVGLabels(log, lvg, "other-key", "value"))
+		})
+		t.Run("key_exists_other_value_returns_true", func(t *testing.T) {
+			const key = "key"
+			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg.Labels = map[string]string{key: "value"}
+			assert.True(t, shouldUpdateLVGLabels(log, lvg, key, "other-value"))
+		})
+		t.Run("all_good_returns_false", func(t *testing.T) {
+			const (
+				key   = "key"
+				value = "value"
+			)
+			lvg := &v1alpha1.LvmVolumeGroup{}
+			lvg.Labels = map[string]string{key: value}
+			assert.False(t, shouldUpdateLVGLabels(log, lvg, key, value))
 		})
 	})
 
