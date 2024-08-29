@@ -131,7 +131,7 @@ func (c *Cache) AddLV(vgName, lvName string) {
 	}
 }
 
-func (c *Cache) RemoveLV(vgName, lvName string) {
+func (c *Cache) MarkLVAsRemoved(vgName, lvName string) {
 	c.m.Lock()
 	defer c.m.Unlock()
 
@@ -172,11 +172,10 @@ func (c *Cache) PrintTheCache(log logger.Logger) {
 	log.Cache(c.vgsErrs.String())
 	log.Cache("[VGs ENDS]")
 	log.Cache("[LVs BEGIN]")
-	c.m.RLock()
-	for _, lv := range c.lvs {
-		log.Cache(fmt.Sprintf("     Data Name: %s, VG name: %s, size: %s, tags: %s, attr: %s, pool: %s", lv.Data.LVName, lv.Data.VGName, lv.Data.LVSize.String(), lv.Data.LvTags, lv.Data.LVAttr, lv.Data.PoolName))
+	lvs, _ := c.GetLVs()
+	for _, lv := range lvs {
+		log.Cache(fmt.Sprintf("     Data Name: %s, VG name: %s, size: %s, tags: %s, attr: %s, pool: %s", lv.LVName, lv.VGName, lv.LVSize.String(), lv.LvTags, lv.LVAttr, lv.PoolName))
 	}
-	c.m.RUnlock()
 	log.Cache("[ERRS]")
 	log.Cache(c.lvsErrs.String())
 	log.Cache("[LVs ENDS]")

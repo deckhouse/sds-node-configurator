@@ -170,8 +170,8 @@ func deleteLVIfNeeded(log logger.Logger, sdsCache *cache.Cache, vgName string, l
 		return err
 	}
 
-	log.Debug(fmt.Sprintf("[deleteLVIfNeeded] removes LV %s from the cache", lv.Data.LVName))
-	sdsCache.RemoveLV(lv.Data.VGName, lv.Data.LVName)
+	log.Debug(fmt.Sprintf("[deleteLVIfNeeded] mark LV %s in the cache as removed", lv.Data.LVName))
+	sdsCache.MarkLVAsRemoved(lv.Data.VGName, lv.Data.LVName)
 
 	return nil
 }
