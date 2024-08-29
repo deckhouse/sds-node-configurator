@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/gosimple/slug"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -548,22 +549,23 @@ func ConfigureBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]str
 		labels[key] = value
 	}
 
-	labels[internal.MetadataNameLabelKey] = strings.ReplaceAll(blockDevice.ObjectMeta.Name, " ", "_")
-	labels[internal.HostNameLabelKey] = strings.ReplaceAll(blockDevice.Status.NodeName, " ", "_")
-	labels[internal.BlockDeviceTypeLabelKey] = strings.ReplaceAll(blockDevice.Status.Type, " ", "_")
-	labels[internal.BlockDeviceFSTypeLabelKey] = strings.ReplaceAll(blockDevice.Status.FsType, " ", "_")
+	slug.Lowercase = false
+	labels[internal.MetadataNameLabelKey] = slug.Make(blockDevice.ObjectMeta.Name)
+	labels[internal.HostNameLabelKey] = slug.Make(blockDevice.Status.NodeName)
+	labels[internal.BlockDeviceTypeLabelKey] = slug.Make(blockDevice.Status.Type)
+	labels[internal.BlockDeviceFSTypeLabelKey] = slug.Make(blockDevice.Status.FsType)
 	labels[internal.BlockDevicePVUUIDLabelKey] = blockDevice.Status.PVUuid
 	labels[internal.BlockDeviceVGUUIDLabelKey] = blockDevice.Status.VGUuid
 	labels[internal.BlockDevicePartUUIDLabelKey] = blockDevice.Status.PartUUID
-	labels[internal.BlockDeviceLVMVolumeGroupNameLabelKey] = strings.ReplaceAll(blockDevice.Status.LvmVolumeGroupName, " ", "_")
-	labels[internal.BlockDeviceActualVGNameLabelKey] = strings.ReplaceAll(blockDevice.Status.ActualVGNameOnTheNode, " ", "_")
-	labels[internal.BlockDeviceWWNLabelKey] = strings.ReplaceAll(blockDevice.Status.Wwn, " ", "_")
-	labels[internal.BlockDeviceSerialLabelKey] = strings.ReplaceAll(blockDevice.Status.Serial, " ", "_")
+	labels[internal.BlockDeviceLVMVolumeGroupNameLabelKey] = slug.Make(blockDevice.Status.LvmVolumeGroupName)
+	labels[internal.BlockDeviceActualVGNameLabelKey] = slug.Make(blockDevice.Status.ActualVGNameOnTheNode)
+	labels[internal.BlockDeviceWWNLabelKey] = slug.Make(blockDevice.Status.Wwn)
+	labels[internal.BlockDeviceSerialLabelKey] = slug.Make(blockDevice.Status.Serial)
 	labels[internal.BlockDeviceSizeLabelKey] = blockDevice.Status.Size.String()
-	labels[internal.BlockDeviceModelLabelKey] = strings.ReplaceAll(blockDevice.Status.Model, " ", "_")
+	labels[internal.BlockDeviceModelLabelKey] = slug.Make(blockDevice.Status.Model)
 	labels[internal.BlockDeviceRotaLabelKey] = strconv.FormatBool(blockDevice.Status.Rota)
 	labels[internal.BlockDeviceHotPlugLabelKey] = strconv.FormatBool(blockDevice.Status.HotPlug)
-	labels[internal.BlockDeviceMachineIDLabelKey] = strings.ReplaceAll(blockDevice.Status.MachineID, " ", "_")
+	labels[internal.BlockDeviceMachineIDLabelKey] = slug.Make(blockDevice.Status.MachineID)
 
 	return labels
 }

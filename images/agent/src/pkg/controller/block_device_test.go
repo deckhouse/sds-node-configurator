@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -359,7 +358,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			internal.BlockDeviceWWNLabelKey:                blockDevice.Status.Wwn,
 			internal.BlockDeviceSerialLabelKey:             blockDevice.Status.Serial,
 			internal.BlockDeviceSizeLabelKey:               blockDevice.Status.Size.String(),
-			internal.BlockDeviceModelLabelKey:              strings.ReplaceAll(blockDevice.Status.Model, " ", "_"),
+			internal.BlockDeviceModelLabelKey:              "Very-good-model-1241",
 			internal.BlockDeviceRotaLabelKey:               strconv.FormatBool(blockDevice.Status.Rota),
 			internal.BlockDeviceHotPlugLabelKey:            strconv.FormatBool(blockDevice.Status.HotPlug),
 			internal.BlockDeviceMachineIDLabelKey:          blockDevice.Status.MachineID,
