@@ -576,7 +576,7 @@ func ConfigureBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]str
 	labels[internal.BlockDevicePVUUIDLabelKey] = blockDevice.Status.PVUuid
 	labels[internal.BlockDeviceVGUUIDLabelKey] = blockDevice.Status.VGUuid
 	labels[internal.BlockDevicePartUUIDLabelKey] = blockDevice.Status.PartUUID
-	labels[internal.BlockDeviceLVMVolumeGroupNameLabelKey] = slug.Make(blockDevice.Status.LvmVolumeGroupName)
+	labels[internal.BlockDeviceLVMVolumeGroupNameLabelKey] = slug.Make(blockDevice.Status.LVMVolumeGroupName)
 	labels[internal.BlockDeviceActualVGNameLabelKey] = slug.Make(blockDevice.Status.ActualVGNameOnTheNode)
 	labels[internal.BlockDeviceWWNLabelKey] = slug.Make(blockDevice.Status.Wwn)
 	labels[internal.BlockDeviceSerialLabelKey] = slug.Make(blockDevice.Status.Serial)

@@ -1018,7 +1018,7 @@ func ExtendThinPool(log logger.Logger, metrics monitoring.Metrics, lvg *v1alpha1
 	return nil
 }
 
-func addLVGLabelIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LvmVolumeGroup, labelKey, labelValue string) (bool, error) {
+func addLVGLabelIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, labelKey, labelValue string) (bool, error) {
 	if !shouldUpdateLVGLabels(log, lvg, labelKey, labelValue) {
 		return false, nil
 	}
