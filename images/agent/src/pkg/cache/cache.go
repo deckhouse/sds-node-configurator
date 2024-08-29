@@ -3,24 +3,37 @@ package cache
 import (
 	"bytes"
 	"fmt"
+	"sync"
 
 	"agent/internal"
 	"agent/pkg/logger"
 )
 
+const (
+	lvcount = 50
+)
+
 type Cache struct {
+	m          sync.RWMutex
 	devices    []internal.Device
 	deviceErrs bytes.Buffer
 	pvs        []internal.PVData
 	pvsErrs    bytes.Buffer
 	vgs        []internal.VGData
 	vgsErrs    bytes.Buffer
-	lvs        []internal.LVData
+	lvs        map[string]*LVData
 	lvsErrs    bytes.Buffer
 }
 
+type LVData struct {
+	Data  internal.LVData
+	Exist bool
+}
+
 func New() *Cache {
-	return &Cache{}
+	return &Cache{
+		lvs: make(map[string]*LVData, lvcount),
+	}
 }
 
 func (c *Cache) StoreDevices(devices []internal.Device, stdErr bytes.Buffer) {
@@ -60,25 +73,69 @@ func (c *Cache) GetVGs() ([]internal.VGData, bytes.Buffer) {
 }
 
 func (c *Cache) StoreLVs(lvs []internal.LVData, stdErr bytes.Buffer) {
-	c.lvs = lvs
+	lvsOnNode := make(map[string]internal.LVData, len(lvs))
+	for _, lv := range lvs {
+		lvsOnNode[c.configureLVKey(lv.VGName, lv.LVName)] = lv
+	}
+
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	for _, lv := range lvsOnNode {
+		k := c.configureLVKey(lv.VGName, lv.LVName)
+		if cachedLV, exist := c.lvs[k]; !exist || cachedLV.Exist {
+			c.lvs[k] = &LVData{
+				Data:  lv,
+				Exist: true,
+			}
+		}
+	}
+
+	for key, lv := range c.lvs {
+		if lv.Exist {
+			continue
+		}
+
+		if _, exist := lvsOnNode[key]; !exist {
+			delete(c.lvs, key)
+		}
+	}
+
 	c.lvsErrs = stdErr
 }
 
 func (c *Cache) GetLVs() ([]internal.LVData, bytes.Buffer) {
-	dst := make([]internal.LVData, len(c.lvs))
-	copy(dst, c.lvs)
+	dst := make([]internal.LVData, 0, len(c.lvs))
+
+	c.m.RLock()
+	defer c.m.RUnlock()
+	for _, lv := range c.lvs {
+		dst = append(dst, lv.Data)
+	}
 
 	return dst, c.lvsErrs
 }
 
-func (c *Cache) FindLV(vgName, lvName string) *internal.LVData {
-	for _, lv := range c.lvs {
-		if lv.VGName == vgName && lv.LVName == lvName {
-			return &lv
-		}
-	}
+func (c *Cache) FindLV(vgName, lvName string) *LVData {
+	c.m.RLock()
+	defer c.m.RUnlock()
+	return c.lvs[c.configureLVKey(vgName, lvName)]
+}
 
-	return nil
+func (c *Cache) AddLV(vgName, lvName string) {
+	c.m.Lock()
+	defer c.m.Unlock()
+	c.lvs[c.configureLVKey(vgName, lvName)] = &LVData{
+		Data:  internal.LVData{VGName: vgName, LVName: lvName},
+		Exist: true,
+	}
+}
+
+func (c *Cache) MarkLVAsRemoved(vgName, lvName string) {
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	c.lvs[c.configureLVKey(vgName, lvName)].Exist = false
 }
 
 func (c *Cache) FindVG(vgName string) *internal.VGData {
@@ -115,11 +172,16 @@ func (c *Cache) PrintTheCache(log logger.Logger) {
 	log.Cache(c.vgsErrs.String())
 	log.Cache("[VGs ENDS]")
 	log.Cache("[LVs BEGIN]")
-	for _, lv := range c.lvs {
-		log.Cache(fmt.Sprintf("     LV Name: %s, VG name: %s, size: %s, tags: %s, attr: %s, pool: %s", lv.LVName, lv.VGName, lv.LVSize.String(), lv.LvTags, lv.LVAttr, lv.PoolName))
+	lvs, _ := c.GetLVs()
+	for _, lv := range lvs {
+		log.Cache(fmt.Sprintf("     Data Name: %s, VG name: %s, size: %s, tags: %s, attr: %s, pool: %s", lv.LVName, lv.VGName, lv.LVSize.String(), lv.LvTags, lv.LVAttr, lv.PoolName))
 	}
 	log.Cache("[ERRS]")
 	log.Cache(c.lvsErrs.String())
 	log.Cache("[LVs ENDS]")
 	log.Cache("*****************CACHE ENDS*****************")
+}
+
+func (c *Cache) configureLVKey(vgName, lvName string) string {
+	return fmt.Sprintf("%s/%s", vgName, lvName)
 }

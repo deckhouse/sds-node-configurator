@@ -152,14 +152,14 @@ func updateLLVPhaseToCreatedIfNeeded(ctx context.Context, cl client.Client, llv 
 
 func deleteLVIfNeeded(log logger.Logger, sdsCache *cache.Cache, vgName string, llv *v1alpha1.LVMLogicalVolume) error {
 	lv := sdsCache.FindLV(vgName, llv.Spec.ActualLVNameOnTheNode)
-	if lv == nil {
+	if lv == nil || !lv.Exist {
 		log.Warning(fmt.Sprintf("[deleteLVIfNeeded] did not find LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
 		return nil
 	}
 
 	// this case prevents unexpected same-name LV deletions which does not actually belong to our LLV
-	if !checkIfLVBelongsToLLV(llv, lv) {
-		log.Warning(fmt.Sprintf("[deleteLVIfNeeded] no need to delete LV %s as it doesnt belong to LVMLogicalVolume %s", lv.LVName, llv.Name))
+	if !checkIfLVBelongsToLLV(llv, &lv.Data) {
+		log.Warning(fmt.Sprintf("[deleteLVIfNeeded] no need to delete LV %s as it doesnt belong to LVMLogicalVolume %s", lv.Data.LVName, llv.Name))
 		return nil
 	}
 
@@ -170,6 +170,9 @@ func deleteLVIfNeeded(log logger.Logger, sdsCache *cache.Cache, vgName string, l
 		return err
 	}
 
+	log.Debug(fmt.Sprintf("[deleteLVIfNeeded] mark LV %s in the cache as removed", lv.Data.LVName))
+	sdsCache.MarkLVAsRemoved(lv.Data.VGName, lv.Data.LVName)
+
 	return nil
 }
 
@@ -179,7 +182,7 @@ func getLVActualSize(sdsCache *cache.Cache, vgName, lvName string) resource.Quan
 		return resource.Quantity{}
 	}
 
-	result := resource.NewQuantity(lv.LVSize.Value(), resource.BinarySI)
+	result := resource.NewQuantity(lv.Data.LVSize.Value(), resource.BinarySI)
 
 	return *result
 }
@@ -294,12 +297,9 @@ func validateLVMLogicalVolume(sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVol
 
 	// if a specified Thick LV name matches the existing Thin one
 	lv := sdsCache.FindLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-	if lv != nil {
-		if len(lv.LVAttr) == 0 {
-			reason.WriteString(fmt.Sprintf("LV %s was found on the node, but can't be validated due to its attributes is empty string. ", lv.LVName))
-		} else if !checkIfLVBelongsToLLV(llv, lv) {
-			reason.WriteString(fmt.Sprintf("Specified LV %s is already created and it is doesnt match the one on the node.", lv.LVName))
-		}
+	if lv != nil &&
+		len(lv.Data.LVAttr) != 0 && !checkIfLVBelongsToLLV(llv, &lv.Data) {
+		reason.WriteString(fmt.Sprintf("Specified LV %s is already created and it is doesnt match the one on the node.", lv.Data.LVName))
 	}
 
 	if reason.Len() > 0 {
@@ -344,7 +344,7 @@ func shouldReconcileByUpdateFunc(sdsCache *cache.Cache, vgName string, llv *v1al
 	}
 
 	lv := sdsCache.FindLV(vgName, llv.Spec.ActualLVNameOnTheNode)
-	return lv != nil
+	return lv != nil && lv.Exist
 }
 
 func isContiguous(llv *v1alpha1.LVMLogicalVolume) bool {
