@@ -1,3 +1,19 @@
+#!/usr/bin/env python3
+#
+# Copyright 2024 Flant JSC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from typing import Any, List
 
 from deckhouse import hook
@@ -6,13 +22,18 @@ import kubernetes
 
 config = """
 configVersion: v1
-afterHelm: 10
+onStartup: 5
 """
 
 group = "storage.deckhouse.io"
 plural = "lvmvolumegroups"
 version = "v1alpha1"
 
+
+# This webhook ensures the migration of LVMVolumeGroup resources from the old CRD version to the new one:
+# - Removes field spec.blockDeviceNames
+# - Adds spec.Local field and fills its value 'nodeName' with the resource's node.
+# - Adds spec.blockDeviceSelector field and fills it with the LVMVolumeGroup nodeName and blockDeviceNames
 
 def main(ctx: hook.Context):
     kubernetes.config.load_incluster_config()
