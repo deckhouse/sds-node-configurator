@@ -35,6 +35,8 @@ version = 'v1alpha1'
 # - Adds spec.Local field and fills its value 'nodeName' with the resource's node.
 # - Adds spec.blockDeviceSelector field and fills it with the LVMVolumeGroup nodeName and blockDeviceNames
 
+# add some
+
 def main(ctx: hook.Context):
     kubernetes.config.load_incluster_config()
 
