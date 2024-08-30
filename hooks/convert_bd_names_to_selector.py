@@ -25,7 +25,7 @@ configVersion: v1
 onStartup: 5
 """
 
-group = 'torage.deckhouse.io'
+group = 'storage.deckhouse.io'
 plural = 'lvmvolumegroups'
 version = 'v1alpha1'
 
