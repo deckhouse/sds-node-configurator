@@ -35,7 +35,7 @@ spec:
               type: object
               x-kubernetes-validations:
                 - rule: |
-                    (self.type == "Local" && has(self.local) || self.type != "Local"
+                    (self.type == "Local" && has(self.local)) || self.type != "Local"
                   message: "The 'local' field is required when the 'type' field is 'Local'."
               required:
                 - type

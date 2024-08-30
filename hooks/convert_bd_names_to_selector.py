@@ -22,7 +22,7 @@ import kubernetes
 
 config = """
 configVersion: v1
-onStartup: 5
+onStartup: 10
 """
 
 group = 'storage.deckhouse.io'
@@ -62,11 +62,13 @@ def main(ctx: hook.Context):
             }
             print(f"LVMVolumeGroup {lvg_name} spec after adding the Selector: {lvg['spec']}")
 
-            kubernetes.client.CustomObjectsApi().replace_cluster_custom_object(group=group,
-                                                                               plural=plural,
-                                                                               version=version,
-                                                                               name=lvg_name,
-                                                                               body=lvg)
+            ctx.kubernetes.create_or_update(lvg)
+
+            # kubernetes.client.CustomObjectsApi().replace_cluster_custom_object(group=group,
+            #                                                                    plural=plural,
+            #                                                                    version=version,
+            #                                                                    name=lvg_name,
+            #                                                                    body=lvg)
             print(f"LVMVolumeGroup {lvg_name} was successfully updated")
 
 
