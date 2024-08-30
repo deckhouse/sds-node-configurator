@@ -38,25 +38,36 @@ version = 'v1alpha1'
 # add some
 
 def main(ctx: hook.Context):
+    print("starts to convert LVMVolumeGroup block device names to selector")
     kubernetes.config.load_incluster_config()
 
     lvg_list: Any = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=group,
                                                                                     plural=plural,
                                                                                     version=version)
 
-    for lvg in lvg_list['items']:
-        print(f"lvg {lvg['metadata']['name']} is going to be updated")
-        print(f"full lvg {lvg}")
+    for lvg in lvg_list.get('items', []):
+        lvg_name = lvg['metadata']['name']
+        print(f"LVMVolumeGroup {lvg_name} is going to be updated")
+        print(f"LVMVolumeGroup {lvg_name} spec before update: {lvg['spec']}")
         bd_names: List[str] = lvg['spec']['blockDeviceNames']
-        print(f"blockDeviceNames: {bd_names}")
-        del lvg['spec']['blockDeviceNames']
-        lvg['spec']['local']['nodeName'] = lvg['status']['nodes'][0]['name']
-        lvg['spec']['blockDeviceSelector']['matchLabels']['kubernetes.io/hostname'] = lvg['spec']['local']['nodeName']
-        lvg['spec']['blockDeviceSelector']['matchExpressions'][0]['key'] = 'kubernetes.io/metadata.name'
-        lvg['spec']['blockDeviceSelector']['matchExpressions'][0]['operator'] = 'in'
-        lvg['spec']['blockDeviceSelector']['matchExpressions'][0]['values'] = bd_names
+        if len(bd_names) > 0:
+            print(f"extracted BlockDevice names: {bd_names} from LVMVolumeGroup {lvg_name}")
+            del lvg['spec']['blockDeviceNames']
+            lvg['spec']['local'] = {'nodeName': lvg['status']['nodes'][0]['name']}
+            print(f"LVMVolumeGroup {lvg_name} spec after adding the Local field: {lvg['spec']}")
+            lvg['spec']['blockDeviceSelector'] = {
+                'matchLabels': {'kubernetes.io/hostname': lvg['spec']['local']['nodeName']},
+                'matchExpressions': [
+                    {'key': 'kubernetes.io/metadata.name', 'operator': 'in', 'values': bd_names}]
+            }
+            print(f"LVMVolumeGroup {lvg_name} spec after adding the Selector: {lvg['spec']}")
 
-        kubernetes.client.CustomObjectsApi.patch_cluster_custom_object(group=group, plural=plural, version=version)
+            kubernetes.client.CustomObjectsApi().replace_cluster_custom_object(group=group,
+                                                                               plural=plural,
+                                                                               version=version,
+                                                                               name=lvg_name,
+                                                                               body=lvg)
+            print(f"LVMVolumeGroup {lvg_name} was successfully updated")
 
 
 if __name__ == "__main__":
