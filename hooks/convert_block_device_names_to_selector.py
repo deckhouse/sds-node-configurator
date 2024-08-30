@@ -25,9 +25,9 @@ configVersion: v1
 onStartup: 5
 """
 
-group = "storage.deckhouse.io"
-plural = "lvmvolumegroups"
-version = "v1alpha1"
+group = 'torage.deckhouse.io'
+plural = 'lvmvolumegroups'
+version = 'v1alpha1'
 
 
 # This webhook ensures the migration of LVMVolumeGroup resources from the old CRD version to the new one:
@@ -42,14 +42,17 @@ def main(ctx: hook.Context):
                                                                                     plural=plural,
                                                                                     version=version)
 
-    for lvg in lvg_list["items"]:
-        bd_names: List[str] = lvg["spec"]["blockDeviceNames"]
-        del lvg["spec"]["blockDeviceNames"]
-        lvg["spec"]["local"]["nodeName"] = lvg["status"]["nodes"][0]["name"]
-        lvg["spec"]["blockDeviceSelector"]["matchLabels"]["kubernetes.io/hostname"] = lvg["spec"]["local"]["nodeName"]
-        lvg["spec"]["blockDeviceSelector"]["matchExpressions"][0]["key"] = "kubernetes.io/metadata.name"
-        lvg["spec"]["blockDeviceSelector"]["matchExpressions"][0]["operator"] = "in"
-        lvg["spec"]["blockDeviceSelector"]["matchExpressions"][0]["values"] = bd_names
+    for lvg in lvg_list['items']:
+        print(f"lvg {lvg['metadata']['name']} is going to be updated")
+        print(f"full lvg {lvg}")
+        bd_names: List[str] = lvg['spec']['blockDeviceNames']
+        print(f"blockDeviceNames: {bd_names}")
+        del lvg['spec']['blockDeviceNames']
+        lvg['spec']['local']['nodeName'] = lvg['status']['nodes'][0]['name']
+        lvg['spec']['blockDeviceSelector']['matchLabels']['kubernetes.io/hostname'] = lvg['spec']['local']['nodeName']
+        lvg['spec']['blockDeviceSelector']['matchExpressions'][0]['key'] = 'kubernetes.io/metadata.name'
+        lvg['spec']['blockDeviceSelector']['matchExpressions'][0]['operator'] = 'in'
+        lvg['spec']['blockDeviceSelector']['matchExpressions'][0]['values'] = bd_names
 
         kubernetes.client.CustomObjectsApi.patch_cluster_custom_object(group=group, plural=plural, version=version)
 
