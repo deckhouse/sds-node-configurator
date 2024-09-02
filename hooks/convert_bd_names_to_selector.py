@@ -45,6 +45,9 @@ def main(ctx: hook.Context):
                                                                                     plural=plural,
                                                                                     version=version)
 
+
+    # TODO: запатчить kind у ресурсов с LvmVolumegroup -> LVMVolumeGroup
+    # пересоздать CRD LVMVolumeGroup
     for lvg in lvg_list.get('items', []):
         lvg_name = lvg['metadata']['name']
         print(f"LVMVolumeGroup {lvg_name} is going to be updated")
