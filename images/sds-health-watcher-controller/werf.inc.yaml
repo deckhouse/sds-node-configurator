@@ -7,8 +7,11 @@ from: {{ $.BASE_GOLANG }}
 final: false
 
 git:
-  - add: /images/sds-health-watcher-controller/src
-    to: /src
+  - add: /
+    to: /
+    includePaths:
+      - api
+      - images/sds-health-watcher-controller/src
     stageDependencies:
       setup:
         - "**/*"
@@ -17,7 +20,7 @@ mount:
     to: /go/pkg
 shell:
   setup:
-    - cd /src/cmd
+    - cd images/sds-health-watcher-controller/src/cmd
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /sds-health-watcher-controller
     - chmod +x /sds-health-watcher-controller
 
