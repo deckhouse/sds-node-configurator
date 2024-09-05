@@ -312,7 +312,7 @@ def configure_new_lvg(backup):
 
 
 def turn_on_daemonset(api_v1, name, namespace, daemonset):
-    del daemonset['spec']['template']['spec']['nodeSelector']['exclude']
+    _ = daemonset.spec.template.spec.node_selector.pop('exclude')
     try:
         api_v1.patch_namespaced_daemon_set(name=name, namespace=namespace, body=daemonset)
         print(f"{migrate_script} successfully migrated LvmVolumeGroup kind to LVMVolumeGroup")
