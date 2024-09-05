@@ -960,8 +960,9 @@ func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.Lvm
 	result := make([]v1alpha1.LvmVolumeGroupThinPoolSpec, 0, len(thinPools))
 	for name, size := range thinPools {
 		result = append(result, v1alpha1.LvmVolumeGroupThinPoolSpec{
-			Name: name,
-			Size: size.String(),
+			Name:            name,
+			AllocationLimit: "150%",
+			Size:            size.String(),
 		})
 	}
 
