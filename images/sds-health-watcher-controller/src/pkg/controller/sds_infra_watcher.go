@@ -73,11 +73,11 @@ func RunSdsInfraWatcher(
 
 			log.Info("[RunSdsInfraWatcher] LVMVolumeGroups found. Starts to check their health")
 			log.Info("[RunSdsInfraWatcher] check if every LVMVolumeGroup node does exist")
-			lvgNodes := getNodeNamesFromLVGs(lvgs)
-			log.Trace(fmt.Sprintf("[RunSdsInfraWatcher] used nodes %v", lvgNodes))
+			lvgNodeNames := getNodeNamesFromLVGs(lvgs)
+			log.Trace(fmt.Sprintf("[RunSdsInfraWatcher] used nodes %v", lvgNodeNames))
 
 			log.Debug("[RunSdsInfraWatcher] tries to collect nodes used by LVMVolumeGroups")
-			usedNodes, missedNodes, err := getNodesByNames(ctx, cl, lvgNodes)
+			usedNodes, missedNodes, err := getNodesByNames(ctx, cl, lvgNodeNames)
 			if err != nil {
 				log.Error(err, "[RunSdsInfraWatcher] unable to get nodes")
 				continue

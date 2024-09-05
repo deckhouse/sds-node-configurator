@@ -116,7 +116,7 @@ func findLVMVolumeGroupsByNodeNames(lvgs map[string]v1alpha1.LvmVolumeGroup, nod
 	return result
 }
 
-func getNodesByNames(ctx context.Context, cl client.Client, names []string) (map[string]v1.Node, []string, error) {
+func getNodesByNames(ctx context.Context, cl client.Client, lvgNodeNames []string) (map[string]v1.Node, []string, error) {
 	nodeList := &v1.NodeList{}
 
 	err := cl.List(ctx, nodeList)
@@ -129,14 +129,16 @@ func getNodesByNames(ctx context.Context, cl client.Client, names []string) (map
 		nodes[n.Name] = n
 	}
 
-	missedNodes := make([]string, 0, len(names))
-	for _, name := range names {
+	missedNodes := make([]string, 0, len(lvgNodeNames))
+	usedNodes := make(map[string]v1.Node, len(lvgNodeNames))
+	for _, name := range lvgNodeNames {
 		if _, exist := nodes[name]; !exist {
 			missedNodes = append(missedNodes, name)
 		}
+		usedNodes[name] = nodes[name]
 	}
 
-	return nodes, missedNodes, nil
+	return usedNodes, missedNodes, nil
 }
 
 func getNodeNamesFromLVGs(lvgs map[string]v1alpha1.LvmVolumeGroup) []string {

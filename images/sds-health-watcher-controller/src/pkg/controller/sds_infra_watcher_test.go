@@ -6,6 +6,7 @@ import (
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
+	coreV1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -20,6 +21,109 @@ func TestHealthWatcher(t *testing.T) {
 	cl := NewFakeClient()
 	ctx := context.Background()
 	metrics := monitoring.GetMetrics("")
+
+	t.Run("getNodesByNames", func(t *testing.T) {
+		t.Run("returns_correct_used_nodes", func(t *testing.T) {
+			lvgNodeNames := []string{"test-node1", "test-node2"}
+			nodes := coreV1.NodeList{
+				Items: []coreV1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "test-node1",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "test-node2",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "test-node3",
+						},
+					},
+				},
+			}
+
+			for _, n := range nodes.Items {
+				err := cl.Create(ctx, &n)
+				if err != nil {
+					t.Error()
+				}
+			}
+
+			defer func() {
+				for _, n := range nodes.Items {
+					err := cl.Delete(ctx, &n)
+					if err != nil {
+						t.Error(err)
+					}
+				}
+			}()
+
+			usedNodes, missedNodes, err := getNodesByNames(ctx, cl, lvgNodeNames)
+			if err != nil {
+				t.Error(err)
+			}
+
+			if assert.Equal(t, 0, len(missedNodes)) {
+				assert.Equal(t, 2, len(usedNodes))
+
+				for _, name := range lvgNodeNames {
+					_, ok := usedNodes[name]
+					assert.True(t, ok)
+				}
+			}
+		})
+
+		t.Run("returns_correct_missed_nodes", func(t *testing.T) {
+			lvgNodeNames := []string{"test-node1", "test-node2"}
+			nodes := coreV1.NodeList{
+				Items: []coreV1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "test-node1",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "test-node4",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "test-node3",
+						},
+					},
+				},
+			}
+
+			for _, n := range nodes.Items {
+				err := cl.Create(ctx, &n)
+				if err != nil {
+					t.Error()
+				}
+			}
+
+			defer func() {
+				for _, n := range nodes.Items {
+					err := cl.Delete(ctx, &n)
+					if err != nil {
+						t.Error(err)
+					}
+				}
+			}()
+
+			expectedMissed := []string{"test-node2"}
+
+			_, missedNodes, err := getNodesByNames(ctx, cl, lvgNodeNames)
+			if err != nil {
+				t.Error(err)
+			}
+
+			assert.ElementsMatch(t, expectedMissed, missedNodes)
+		})
+	})
 
 	t.Run("GetLVMVolumeGroups_returns_lvgs", func(t *testing.T) {
 		lvgsToCreate := []v1alpha1.LvmVolumeGroup{
