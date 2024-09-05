@@ -60,6 +60,8 @@ def main(ctx: hook.Context):
     api_v1.patch_namespaced_daemon_set(name=ds_name, namespace=ds_ns, body=daemonset)
     print(f"{migrate_script} daemon set has been successfully scaled down")
 
+
+
     # get current lvgs with old CRD (which is LvmVolumeGroup)
     try:
         # this list might be LvmVolumeGroups as LVMVolumeGroups
@@ -314,7 +316,7 @@ def configure_new_lvg(backup):
 def turn_on_daemonset(api_v1, name, namespace, daemonset):
     _ = daemonset.spec.template.spec.node_selector.pop('exclude')
     try:
-        api_v1.patch_namespaced_daemon_set(name=name, namespace=namespace, body=daemonset)
+        api_v1.replace_namespaced_daemon_set(name=name, namespace=namespace, body=daemonset)
         print(f"{migrate_script} successfully migrated LvmVolumeGroup kind to LVMVolumeGroup")
     except Exception as e:
         print(f"{migrate_script} an ERROR occurred while turning on the daemonset, err: {e}")

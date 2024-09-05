@@ -57,7 +57,7 @@ func getCRD(ctx context.Context, cl client.Client, crdName string) (*v1.CustomRe
 	return crd, err
 }
 
-func updateLVMVolumeGroupPhaseIfNeeded(ctx context.Context, cl client.Client, lvg *v1alpha1.LvmVolumeGroup, phase string) error {
+func updateLVMVolumeGroupPhaseIfNeeded(ctx context.Context, cl client.Client, lvg *v1alpha1.LVMVolumeGroup, phase string) error {
 	if lvg.Status.Phase == phase {
 		return nil
 	}
