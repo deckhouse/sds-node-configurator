@@ -15,7 +15,6 @@
 # limitations under the License.
 import copy
 import os
-import time
 from typing import Any, List
 
 import yaml
@@ -71,12 +70,11 @@ def main(ctx: hook.Context):
         # so we might have LvmVolumeGroup list or LVMVolumeGroup list
         if len(lvg_list.get('items', [])) == 0:
             try:
-                # ctx.kubernetes.delete(kind='CustomResourceDefinition',
-                #                       apiVersion='apiextensions.k8s.io/v1',
-                #                       name='LvmVolumeGroup',
-                #                       namespace='')
+                ctx.kubernetes.delete(kind='CustomResourceDefinition',
+                                      apiVersion='apiextensions.k8s.io/v1',
+                                      name='LvmVolumeGroup',
+                                      namespace='')
 
-                api_extenstion.delete_custom_resource_definition('lvmvolumegroups.storage.deckhouse.io')
                 print(f"{migrate_script} successfully delete the LvmVolumeGroup CRD")
                 # that means we deleted old kind (LvmVolumeGroup)
                 create_new_lvg_crd(ctx)
@@ -90,8 +88,7 @@ def main(ctx: hook.Context):
                                                                                                            version=version)
                     for backup in lvg_backup_list.get('items', []):
                         if backup['metadata']['labels'][migration_completed_label] == 'true':
-                            print(
-                                f"{migrate_script} the LvmVolumeGroup {backup['metadata']['name']} was already migrated")
+                            print(f"{migrate_script} the LvmVolumeGroup {backup['metadata']['name']} was already migrated")
                             continue
 
                         lvg = configure_new_lvg(backup)
@@ -316,8 +313,13 @@ def configure_new_lvg(backup):
 
 def turn_on_daemonset(api_v1, name, namespace, daemonset):
     del daemonset['spec']['template']['spec']['nodeSelector']['exclude']
-    print(f"{migrate_script} successfully migrated LvmVolumeGroup kind to LVMVolumeGroup")
-    api_v1.patch_namespaced_daemon_set(name=name, namespace=namespace, body=daemonset)
+    try:
+        api_v1.patch_namespaced_daemon_set(name=name, namespace=namespace, body=daemonset)
+        print(f"{migrate_script} successfully migrated LvmVolumeGroup kind to LVMVolumeGroup")
+    except Exception as e:
+        print(f"{migrate_script} an ERROR occurred while turning on the daemonset, err: {e}")
+        raise e
+
 
 
 def find_crds_root(hookpath):
