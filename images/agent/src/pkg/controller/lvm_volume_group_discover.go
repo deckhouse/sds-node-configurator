@@ -371,10 +371,11 @@ func ReconcileUnhealthyLVMVolumeGroups(
 				}
 
 				// take thin-pools from status instead of spec to prevent miss never-created ones
-				for _, thinPool := range lvg.Status.ThinPools {
+				for i, thinPool := range lvg.Status.ThinPools {
 					if candidateTp, exist := candidateTPs[thinPool.Name]; !exist {
 						log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, thinPool.Name))
 						messageBldr.WriteString(fmt.Sprintf("Unable to find ThinPool %s. ", thinPool.Name))
+						lvg.Status.ThinPools = append(lvg.Status.ThinPools[:i], lvg.Status.ThinPools[i+1:]...)
 					} else if !utils.AreSizesEqualWithinDelta(candidate.VGSize, thinPool.ActualSize, internal.ResizeDelta) &&
 						candidateTp.ActualSize.Value()+internal.ResizeDelta.Value() < thinPool.ActualSize.Value() {
 						// that means thin-pool is not 100%VG space
@@ -980,9 +981,9 @@ func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.LVM
 	result := make([]v1alpha1.LVMVolumeGroupThinPoolSpec, 0, len(thinPools))
 	for name, size := range thinPools {
 		result = append(result, v1alpha1.LVMVolumeGroupThinPoolSpec{
-			Name: name,
+			Name:            name,
 			AllocationLimit: "150%",
-			Size: size.String(),
+			Size:            size.String(),
 		})
 	}
 
