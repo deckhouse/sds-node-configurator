@@ -15,7 +15,6 @@
 # limitations under the License.
 import copy
 import os
-from datetime import time
 from typing import Any, List
 
 import kubernetes
@@ -73,24 +72,27 @@ def main(ctx: hook.Context):
         if crd.spec.names.kind == 'LvmVolumeGroup':
             print(f"{migrate_script} found LvmVolumeGroup CRD")
             print(f"{migrate_script} tries to list lvmvolumegroup resources")
-            lvg_list: Any = custom_api.list_cluster_custom_object(group=group,
-                                                                  plural=lvmvolumegroup_plural,
-                                                                  version=version)
-            print(f"{migrate_script} successfully listed lvmvolumegroup resources")
+            try:
+                lvg_list: Any = custom_api.list_cluster_custom_object(group=group,
+                                                                      plural=lvmvolumegroup_plural,
+                                                                      version=version)
+                print(f"{migrate_script} successfully listed lvmvolumegroup resources")
+            except kubernetes.client.exceptions.ApiException as e:
+                if e.status == '404':
+                    print(f"{migrate_script} no lvmvolumegroup resources found, tries to delete LvmVolumeGroup CRD")
+                    try:
+                        api_extension.delete_custom_resource_definition(crd_name)
+                    except Exception as e:
+                        print(f"{migrate_script} unable to delete LvmVolumeGroup CRD, error: {e}")
 
-            if len(lvg_list.get('items', [])) == 0:
-                print(f"{migrate_script} no lvmvolumegroup resources found, tries to delete LvmVolumeGroup CRD")
-                try:
-                    api_extension.delete_custom_resource_definition(crd_name)
-                except Exception as e:
-                    print(f"{migrate_script} unable to delete LvmVolumeGroup CRD, error: {e}")
+                    print(f"{migrate_script} successfully deleted the LvmVolumeGroup CRD")
 
-                print(f"{migrate_script} successfully deleted the LvmVolumeGroup CRD")
-
-                print(f"{migrate_script} tries to create LVMVolumeGroup CRD")
-                create_new_lvg_crd(ctx)
-                print(f"{migrate_script} successfully created LVMVolumeGroup CRD")
-                return
+                    print(f"{migrate_script} tries to create LVMVolumeGroup CRD")
+                    create_new_lvg_crd(ctx)
+                    print(f"{migrate_script} successfully created LVMVolumeGroup CRD")
+                    return
+            except Exception as e:
+                raise e
 
             print(f"{migrate_script} some lvmvolumegroup resource were found, tries to create LvmVolumeGroupBackup CRD")
             create_new_lvg_crd(ctx)
@@ -99,29 +101,15 @@ def main(ctx: hook.Context):
             print(f"{migrate_script} starts to create backups and add 'kubernetes.io/hostname' to store the node name")
             for lvg in lvg_list.get('items', []):
                 lvg_backup = copy.deepcopy(lvg)
-                # lvg_backup.pop('kind')
-                # lvg_backup['metadata'].pop('annotations')
-                # lvg_backup['metadata'].pop('creationTimestamp')
-                # lvg_backup['metadata'].pop('deletionGracePeriodSeconds')
-                # lvg_backup['metadata'].pop('deletionTimestamp')
-                # lvg_backup['metadata'].pop('generation')
-                # lvg_backup['metadata'].pop('resourceVersion')
-                # lvg_backup['metadata'].pop('uid')
-                # lvg_backup.pop('status')
+                lvg_backup['kind'] = 'LvmVolumeGroupBackup'
                 lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg_backup['status']['nodes'][0]['name']
                 lvg_backup['metadata']['labels'][migration_completed_label] = 'false'
-                print(f"{migrate_script} LvmVolumeGroupBackup: {lvg_backup}")
                 try:
-                    create_custom_resource(group,
-                                           'lvmvolumegroupbackups',
-                                           version,
-                                           'LvmVolumeGroupBackup',
-                                           lvg_backup['metadata']['name'],
-                                           lvg['spec'])
-                    # custom_api.create_cluster_custom_object(group=group,
-                    #                                         version=version,
-                    #                                         plural='lvmvolumegroupbackups',
-                    #                                         body=lvg_backup)
+                    create_or_update_custom_resource(group,
+                                                     'lvmvolumegroupbackups',
+                                                     version,
+                                                     lvg_backup)
+
                 except Exception as e:
                     print(f"{migrate_script} unable to create backup, error: {e}")
                     raise e
@@ -171,37 +159,31 @@ def main(ctx: hook.Context):
             print(f"{migrate_script} create new LVMVolumeGroup CRs")
             for lvg_backup in lvg_backup_list.get('items', []):
                 lvg = configure_new_lvg(lvg_backup)
-            try:
-                # custom_api.create_cluster_custom_object(group=group,
-                #                                         version=version,
-                #                                         plural='lvmvolumegroups',
-                #                                         body=lvg)
-                create_custom_resource(group,
-                                       'lvmvolumegroups',
-                                       version,
-                                       'LVMVolumeGroup',
-                                       lvg['metadata']['name'],
-                                       lvg['spec'])
-                print(f"{migrate_script} LVMVolumeGroup {lvg['metadata']['name']} was created")
-            except Exception as e:
-                print(f"{migrate_script} unable to create LVMVolumeGroup {lvg['metadata']['name']}, error: {e}")
-                raise e
-            try:
-                # lvg_backup['metadata']['labels'][migration_completed_label] = 'true'
-                custom_api.patch_cluster_custom_object(group=group,
-                                                       version=version,
-                                                       plural='lvmvolumegroupbackups',
-                                                       name=lvg_backup['metadata']['name'],
-                                                       body={
-                                                           'metadata': {'labels': {migration_completed_label: 'true'}}})
-                print(
-                    f"{migrate_script} the LVMVolumeGroupBackup label {migration_completed_label} was updated to true")
-            except Exception as e:
-                print(
-                    f"{migrate_script} unable to update LvmVolumeGroupBackup {lvg_backup['metadata']['name']}, error: {e}")
-                raise e
-            print(f"{migrate_script} successfully created every LVMVolumeGroup CR from backup")
-            return
+                try:
+                    create_or_update_custom_resource(group,
+                                                     'lvmvolumegroups',
+                                                     version,
+                                                     lvg)
+                    print(f"{migrate_script} LVMVolumeGroup {lvg['metadata']['name']} was created")
+                except Exception as e:
+                    print(f"{migrate_script} unable to create LVMVolumeGroup {lvg['metadata']['name']}, error: {e}")
+                    raise e
+                try:
+                    custom_api.patch_cluster_custom_object(group=group,
+                                                           version=version,
+                                                           plural='lvmvolumegroupbackups',
+                                                           name=lvg_backup['metadata']['name'],
+                                                           body={
+                                                               'metadata': {
+                                                                   'labels': {migration_completed_label: 'true'}}})
+                    print(
+                        f"{migrate_script} the LVMVolumeGroupBackup label {migration_completed_label} was updated to true")
+                except Exception as e:
+                    print(
+                        f"{migrate_script} unable to update LvmVolumeGroupBackup {lvg_backup['metadata']['name']}, error: {e}")
+                    raise e
+                print(f"{migrate_script} successfully created every LVMVolumeGroup CR from backup")
+                return
         ### End of LvmVolumeGroup CRD flow
 
         ### LVMVolumeGroup CRD flow
@@ -240,20 +222,18 @@ def main(ctx: hook.Context):
                 print(f"{migrate_script} the LvmVolumeGroup {backup['metadata']['name']} was already migrated")
                 continue
 
-            print(f"{migrate_script} tries to create LVMVolumeGroup {lvg['metadata']['name']}")
+            print(f"{migrate_script} tries to create LVMVolumeGroup {backup['metadata']['name']}")
             lvg = configure_new_lvg(backup)
             try:
-                custom_api.replace_cluster_custom_object(group=group,
-                                                         plural='lvmvolumegroups',
-                                                         version=version,
-                                                         name=lvg['metadata']['name'],
-                                                         body=lvg)
+                create_or_update_custom_resource(group=group,
+                                                 plural='lvmvolumegroups',
+                                                 version=version,
+                                                 resource=lvg)
             except Exception as e:
                 print(f"{migrate_script} unable to create LVMVolumeGroup {lvg['metadata']['name']}, error: {e}")
                 raise e
             print(
                 f"{migrate_script} the LVMVolumeGroup {lvg['metadata']['name']} has been successfully created")
-            backup['metadata']['labels'][migration_completed_label] = 'true'
 
             print(f"{migrate_script} tries to update LvmVolumeGroupBackup {backup['metadata']['name']}")
             try:
@@ -261,7 +241,8 @@ def main(ctx: hook.Context):
                                                        version=version,
                                                        plural='lvmvolumegroupbackups',
                                                        name=backup['metadata']['name'],
-                                                       body=backup)
+                                                       body={
+                                                           'metadata': {'labels': {migration_completed_label: 'true'}}})
                 print(
                     f"{migrate_script} the LVMVolumeGroupBackup {backup['metadata']['name']} {migration_completed_label} was updated to true")
             except Exception as e:
@@ -297,14 +278,13 @@ def main(ctx: hook.Context):
                     print(f"{migrate_script} the LvmVolumeGroup {backup['metadata']['name']} was already migrated")
                     continue
 
-                print(f"{migrate_script} tries to create LVMVolumeGroup {lvg['metadata']['name']}")
+                print(f"{migrate_script} tries to create LVMVolumeGroup {backup['metadata']['name']}")
                 lvg = configure_new_lvg(backup)
                 try:
-                    custom_api.replace_cluster_custom_object(group=group,
-                                                             version=version,
-                                                             plural='lvmvolumegroups',
-                                                             name=lvg['metadata']['name'],
-                                                             body=lvg)
+                    create_or_update_custom_resource(group=group,
+                                                     version=version,
+                                                     plural='lvmvolumegroups',
+                                                     resource=lvg)
                 except Exception as e:
                     print(f"{migrate_script} unable to create LVMVolumeGroup {lvg['metadata']['name']}, error: {e}")
                     raise e
@@ -330,264 +310,6 @@ def main(ctx: hook.Context):
     except Exception as e:
         print(f"{migrate_script} unable to get lvmvolumegroup CRD, error: {e}")
         raise e
-
-    #
-    # try:
-    #     # this list might be LvmVolumeGroups as LVMVolumeGroups
-    #     print(f"{migrate_script} tries to list lvmvolumegroup resources")
-    #     lvg_list: Any = custom_api.list_cluster_custom_object(group=group,
-    #                                                           plural=lvmvolumegroup_plural,
-    #                                                           version=version)
-    #
-    #     print(f"{migrate_script} successfully listed lvmvolumegroup resources")
-    #
-    #     # so we might have LvmVolumeGroup list or LVMVolumeGroup list
-    #     if len(lvg_list.get('items', [])) == 0:
-    #         print(f"{migrate_script} no lvmvolumegroup resources found, tries to delete LvmVolumeGroup CRD")
-    #         try:
-    #             ctx.kubernetes.delete(kind='CustomResourceDefinition',
-    #                                   name='LvmVolumeGroup',
-    #                                   namespace='')
-    #
-    #             print(f"{migrate_script} successfully delete the LvmVolumeGroup CRD")
-    #             # that means we deleted old kind (LvmVolumeGroup)
-    #             create_new_lvg_crd(ctx)
-    #             # turn_on_daemonset(api_v1, ds_name, ds_ns, daemonset)
-    #             return
-    #         except kubernetes.client.exceptions.ApiException as e:
-    #             if e.status == '404':
-    #                 # that means we found LVMVolumeGroup CRD
-    #                 lvg_backup_list: Any = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=group,
-    #                                                                                                        plural='lvmvolumegroupbackups',
-    #                                                                                                        version=version)
-    #                 for backup in lvg_backup_list.get('items', []):
-    #                     if backup['metadata']['labels'][migration_completed_label] == 'true':
-    #                         print(f"{migrate_script} the LvmVolumeGroup {backup['metadata']['name']} was already migrated")
-    #                         continue
-    #
-    #                     lvg = configure_new_lvg(backup)
-    #                     ctx.kubernetes.create_or_update(lvg)
-    #                     print(
-    #                         f"{migrate_script} the LVMVolumeGroup {lvg['metadata']['name']} has been successfully created")
-    #                     backup['metadata']['labels'][migration_completed_label] = 'true'
-    #                     ctx.kubernetes.create_or_update(backup)
-    #                     print(
-    #                         f"{migrate_script} the LVMVolumeGroupBackup {lvg['metadata']['name']} {migration_completed_label} was updated to true")
-    #
-    #                 # turn_on_daemonset(api_v1, ds_name, ds_ns, daemonset)
-    #                 return
-    #         except Exception as e:
-    #             print(f"{migrate_script} ERROR occurred while deleting the LvmVolumeGroup CRD: {e}")
-    #             raise e
-    #
-    #         print(f"{migrate_script} creates the new LVMVolumeGroup CRD")
-    #         for dirpath, _, filenames in os.walk(top=find_crds_root(__file__)):
-    #             for filename in filenames:
-    #                 if filename == 'lvmvolumegroup.yaml':
-    #                     crd_path = os.path.join(dirpath, filename)
-    #                     with open(crd_path, "r", encoding="utf-8") as f:
-    #                         for manifest in yaml.safe_load_all(f):
-    #                             if manifest is None:
-    #                                 continue
-    #                             ctx.kubernetes.create_or_update(manifest)
-    #                             print(f"{migrate_script} CRD {filename} was successfully created")
-    #                             break
-    #
-    #     # as we found some LVG resources, we need to check if they are new or not
-    #     if lvg_list.get('items', [])[0]['kind'] == 'LVMVolumeGroup':
-    #         print(f"{migrate_script} found LVMVolumeGroup kind")
-    #         actual_lvgs = {}
-    #         for lvg in lvg_list.get('items', []):
-    #             actual_lvgs[lvg['metadata']['name']] = ''
-    #
-    #         try:
-    #             lvg_backup_list: Any = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=group,
-    #                                                                                                    plural='lvmvolumegroupbackups',
-    #                                                                                                    version=version)
-    #             for backup in lvg_backup_list.get('items', []):
-    #                 if backup['metadata']['name'] in actual_lvgs:
-    #                     print(f"{migrate_script} LVMVolumeGroup {backup['metadata']['name']} has been already migrated")
-    #                     continue
-    #
-    #                 if backup['metadata']['labels'][migration_completed_label] == 'true':
-    #                     print(f"{migrate_script} no need to migrate LVMVolumeGroup {backup['metadata']['name']}")
-    #                     continue
-    #
-    #                 lvg = configure_new_lvg(backup)
-    #                 ctx.kubernetes.create_or_update(lvg)
-    #                 print(f"{migrate_script} LVMVolumeGroup {backup['metadata']['name']} has been successfully created")
-    #
-    #                 backup['metadata']['labels'][migration_completed_label] = 'true'
-    #                 ctx.kubernetes.create_or_update(backup)
-    #                 print(
-    #                     f"{migrate_script} LVMVolumeGroupBackup {backup['metadata']['name']} {migration_completed_label} has been updated to true")
-    #
-    #             # turn_on_daemonset(api_v1, ds_name, ds_ns, daemonset)
-    #             return
-    #         except kubernetes.client.exceptions.ApiException as e:
-    #             if e.status == '404':
-    #                 print(f"{migrate_script} no migration needed")
-    #                 return
-    #         except Exception as e:
-    #             print(f"{migrate_script} ERROR occurred: {e}")
-    #             raise e
-    #
-    #     # so we have old CRD (LvmVolumeGroup) and we need to full cycle migration
-    #     print(f"{migrate_script} starts the full cycle migration")
-    #
-    #     # first we create backup crd for lvmvolumegroups
-    #     print(f"{migrate_script} tries to create backup manifest")
-    #     for dirpath, _, filenames in os.walk(top=find_crds_root(__file__)):
-    #         for filename in filenames:
-    #             if filename == 'lvmvolumegroupbackup.yaml':
-    #                 crd_path = os.path.join(dirpath, filename)
-    #                 with open(crd_path, "r", encoding="utf-8") as f:
-    #                     for manifest in yaml.safe_load_all(f):
-    #                         if manifest is None:
-    #                             continue
-    #                         try:
-    #                             ctx.kubernetes.create_or_update(manifest)
-    #                             print(f"{migrate_script} {filename} was successfully created")
-    #                         except Exception as e:
-    #                             print(f"{migrate_script} unable to create LvmVolumeGroupBackup CRD, error: {e}")
-    #                             raise e
-    #                         break
-    #
-    #     print(f"{migrate_script} starts to create backups and add 'kubernetes.io/hostname' to store the node name")
-    #     for lvg in lvg_list.get('items', []):
-    #         lvg_backup = copy.deepcopy(lvg)
-    #         lvg_backup['kind'] = 'LvmVolumeGroupBackup'
-    #         lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg_backup['status']['nodes'][0]['name']
-    #         lvg_backup['metadata']['labels'][migration_completed_label] = 'false'
-    #         try:
-    #             ctx.kubernetes.create_or_update(lvg_backup)
-    #         except Exception as e:
-    #             print(f"{migrate_script} unable to create backup, error: {e}")
-    #             raise e
-    #
-    #         print(f"{migrate_script} {lvg_backup['metadata']['name']} backup was created")
-    #
-    #     print(f"{migrate_script} every backup was successfully created for lvmvolumegroups")
-    #
-    #     # we do it before CRD removal to prevent deletion timestamps
-    #     print(f"{migrate_script} remove finalizers from old LvmVolumeGroup CRs")
-    #     for lvg in lvg_list.get('items', []):
-    #         del lvg['metadata']['finalizers']
-    #         print(f"{migrate_script} metadata of LvmVolumeGroup {lvg['metadata']['name']}: {lvg['metadata']}")
-    #         try:
-    #             ctx.kubernetes.create_or_update(lvg)
-    #         except Exception as e:
-    #             print(f"{migrate_script} unable to remove finalizers from LvmVolumeGroups, error: {e}")
-    #             raise e
-    #
-    #         print(f"{migrate_script} removed finalizer from LvmVolumeGroup {lvg['metadata']['name']}")
-    #     print(f"{migrate_script} successfully removed finalizers from old LvmVolumeGroup CRs")
-    #
-    #     # we delete the LvmVolumeGroup CRD (old one)
-    #     print(f"{migrate_script} delete the old LvmVolumeGroup CRD")
-    #     try:
-    #         ctx.kubernetes.delete(kind='CustomResourceDefinition',
-    #                               apiVersion='apiextensions.k8s.io/v1',
-    #                               name='LvmVolumeGroup',
-    #                               namespace='')
-    #     except Exception as e:
-    #         print(f"{migrate_script} unable to delete LvmVolumeGroup CRD, error: {e}")
-    #         raise e
-    #
-    #     print(f"{migrate_script} successfully deleted old LvmVolumeGroup CRD")
-    #
-    #     # we create new LVMVolumeGroup CRD (new one)
-    #     create_new_lvg_crd(ctx)
-    #     print(f"{migrate_script} successfully created the new LVMVolumeGroup CRD")
-    #
-    #     print(f"{migrate_script} get LvmVolumeGroupBackups")
-    #     try:
-    #         lvg_backup_list: Any = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=group,
-    #                                                                                                plural='lvmvolumegroupbackups',
-    #                                                                                                version=version)
-    #         print(f"{migrate_script} successfully got LvmVolumeGroupBackups")
-    #         print(f"{migrate_script} create new LVMVolumeGroup CRs")
-    #         for lvg_backup in lvg_backup_list.get('items', []):
-    #             lvg = configure_new_lvg(backup)
-    #             try:
-    #                 ctx.kubernetes.create(lvg)
-    #                 print(f"{migrate_script} LVMVolumeGroup {lvg['metadata']['name']} was created")
-    #             except Exception as e:
-    #                 print(f"{migrate_script} unable to create LVMVolumeGroup {lvg['metadata']['name']}, error: {e}")
-    #                 raise e
-    #
-    #
-    #             try:
-    #                 lvg_backup['metadata']['labels'][migration_completed_label] = 'true'
-    #                 ctx.kubernetes.create_or_update(lvg_backup)
-    #                 print(f"{migrate_script} the LVMVolumeGroupBackup label {migration_completed_label} was updated to true")
-    #             except Exception as e:
-    #                 print(f"{migrate_script} unable to update LvmVolumeGroupBackup {lvg_backup['metadata']['name']}, error: {e}")
-    #                 raise e
-    #
-    #         print(f"{migrate_script} successfully created every LVMVolumeGroup CR from backup")
-    #     except Exception as e:
-    #         print(f"{migrate_script} unable to get LvmVolumeGroupBackups, error: {e}")
-    #         raise e
-    #     # turn_on_daemonset(api_v1, ds_name, ds_ns, daemonset)
-    #     return
-    # except kubernetes.client.exceptions.ApiException as e:
-    #     if e.status == '404':
-    #         # this means we have no CRD with LVMVolumeGroup or LvmVolumeGroup kind
-    #
-    #         print(f"{migrate_script} creates the new LVMVolumeGroup CRD")
-    #         create_new_lvg_crd(ctx)
-    #
-    #         print(f"{migrate_script} no old LvmVolumeGroup CRD was found, try to find the backups")
-    #         try:
-    #             lvg_backup_list: Any = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=group,
-    #                                                                                                    plural='lvmvolumegroupbackups',
-    #                                                                                                    version=version)
-    #
-    #             print(f"{migrate_script} LvmVolumeGroup backups were found. Check if every backup has node name")
-    #             for lvg_backup in lvg_backup_list.get('items', []):
-    #                 if lvg_backup['metadata']['labels']['kubernetes.io/hostname'] == '':
-    #                     raise ValueError(
-    #                         f"{lvg_backup['metadata']['name']} has no 'kubernetes.io/hostname' specified in labels. Specify node name manually into the labels with key 'kubernetes.io/hostname'")
-    #
-    #             print(f"{migrate_script} create new LVMVolumeGroup CRs")
-    #             for lvg_backup in lvg_backup_list.get('items', []):
-    #                 if lvg_backup['metadata']['labels'][migration_completed_label] == 'true':
-    #                     print(f"{migrate_script} no need to create LVMVolumeGroup {lvg_backup['metadata']['name']}")
-    #                     continue
-    #
-    #                 lvg = configure_new_lvg(lvg_backup)
-    #                 try:
-    #                     ctx.kubernetes.create_or_update(lvg)
-    #                     print(f"{migrate_script} LVMVolumeGroup {lvg['metadata']['name']} was created")
-    #                 except Exception as e:
-    #                     print(f"{migrate_script} unable to create LVMVolumeGroup {lvg['metadata']['name']}, error: {e}")
-    #                     raise e
-    #
-    #
-    #                 lvg_backup['metadata']['labels'][migration_completed_label] = 'true'
-    #                 try:
-    #                     ctx.kubernetes.create_or_update(lvg_backup)
-    #                     print( f"{migrate_script} updated LvmVolumeGroupBackup {lvg['metadata']['name']} migration completed to true")
-    #                 except Exception as e:
-    #                     print(f"{migrate_script} unable to update LvmVolumeGroupBackup {lvg_backup['metadata']['name']}, error: {e}")
-    #                     raise e
-    #
-    #             print(f"{migrate_script} successfully created every LVMVolumeGroup CR from backup")
-    #             # turn_on_daemonset(api_v1, ds_name, ds_ns, daemonset)
-    #             return
-    #         except kubernetes.client.exceptions.ApiException as ex:
-    #             if ex.status == '404':
-    #                 # this means we start in a "fresh" cluster
-    #                 print(f"{migrate_script} no LVMVolumeGroup or BackUp CRD was found. No need to migrate")
-    #                 # turn_on_daemonset(api_v1, ds_name, ds_ns, daemonset)
-    #                 return
-    #         except Exception as e:
-    #             print(f"{migrate_script} exception occurred during the migration process: {e}")
-    #             raise e
-    # except Exception as e:
-    #     print(f"{migrate_script} exception occurred during the migration process: {e}")
-    #     raise e
 
 
 def create_new_lvg_crd(ctx):
@@ -629,16 +351,6 @@ def configure_new_lvg(backup):
     return lvg
 
 
-# def turn_on_daemonset(api_v1, name, namespace, daemonset):
-#     _ = daemonset.spec.template.spec.node_selector.pop('exclude')
-#     try:
-#         api_v1.replace_namespaced_daemon_set(name=name, namespace=namespace, body=daemonset)
-#         print(f"{migrate_script} successfully migrated LvmVolumeGroup kind to LVMVolumeGroup")
-#     except Exception as e:
-#         print(f"{migrate_script} an ERROR occurred while turning on the daemonset, err: {e}")
-#         raise e
-
-
 def find_crds_root(hookpath):
     hooks_root = os.path.dirname(hookpath)
     module_root = os.path.dirname(hooks_root)
@@ -646,29 +358,62 @@ def find_crds_root(hookpath):
     return crds_root
 
 
-def create_custom_resource(group, plural, version, kind, name, spec):
+def create_or_update_custom_resource(group, plural, version, resource):
     max_attempts = 3
     delay_between_attempts = 10
 
     for attempt in range(max_attempts):
         try:
-            kubernetes.client.CustomObjectsApi().create_cluster_custom_object(group=group,
-                                                                              plural=plural,
-                                                                              version=version,
-                                                                              body={
-                                                                                  'apiVersion': f'{group}/{version}',
-                                                                                  'kind': kind,
-                                                                                  'metadata': {'name': name},
-                                                                                  'spec': spec})
-            print(f"{migrate_script} {kind} {name} created")
+            kubernetes.client.CustomObjectsApi().replace_cluster_custom_object(group=group,
+                                                                               plural=plural,
+                                                                               version=version,
+                                                                               name=resource['metadata']['name'],
+                                                                               body={
+                                                                                   'apiVersion': f'{group}/{version}',
+                                                                                   'kind': resource['kind'],
+                                                                                   'metadata': {
+                                                                                       'name': resource['metadata'][
+                                                                                           'name'],
+                                                                                       'labels': resource['metadata'][
+                                                                                           'labels']},
+                                                                                   'finalizers': resource['metadata'][
+                                                                                       'finalizers'],
+                                                                                   'spec': resource['spec']})
+            print(f"{migrate_script} {resource['kind']} {resource['metadata']['name']} created")
             return True
+        except kubernetes.client.exceptions.ApiException as e:
+            if e.status == '404':
+                try:
+                    kubernetes.client.CustomObjectsApi().create_cluster_custom_object(group=group,
+                                                                                      plural=plural,
+                                                                                      version=version,
+                                                                                      body={
+                                                                                          'apiVersion': f'{group}/{version}',
+                                                                                          'kind': resource['kind'],
+                                                                                          'metadata': {
+                                                                                              'name':
+                                                                                                  resource['metadata'][
+                                                                                                      'name'],
+                                                                                              'labels':
+                                                                                                  resource['metadata'][
+                                                                                                      'labels'],
+                                                                                              'finalizers':
+                                                                                                  resource['metadata'][
+                                                                                                      'finalizers']},
+                                                                                          'spec': resource['spec']})
+                except Exception as e:
+                    print(
+                        f"{migrate_script} failed to create {resource['kind']} {resource['metadata']['name']} after {max_attempts} attempts, error: {e}")
+                return False
         except Exception as e:
-            print(f"{migrate_script} attempt {attempt + 1} failed for {kind} {name} with message: {e}")
+            print(
+                f"{migrate_script} attempt {attempt + 1} failed for {resource['kind']} {resource['metadata']['name']} with message: {e}")
             if attempt < max_attempts - 1:
                 print(f"{migrate_script} retrying in {delay_between_attempts} seconds...")
-                time.sleep(delay_between_attempts)
+                # time.sleep(delay_between_attempts)
             else:
-                print(f"{migrate_script} failed to create {kind} {name} after {max_attempts} attempts")
+                print(
+                    f"{migrate_script} failed to create {resource['kind']} {resource['metadata']['name']} after {max_attempts} attempts")
                 return False
 
 

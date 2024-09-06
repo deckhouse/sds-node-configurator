@@ -3,6 +3,7 @@ package cache
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"agent/internal"
@@ -92,7 +93,7 @@ func (c *Cache) StoreLVs(lvs []internal.LVData, stdErr bytes.Buffer) {
 	}
 
 	for key, lv := range c.lvs {
-		if lv.Exist {
+		if lv.Exist && reflect.ValueOf(lv.Data).IsZero() {
 			continue
 		}
 
