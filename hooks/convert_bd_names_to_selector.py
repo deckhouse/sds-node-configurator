@@ -47,7 +47,7 @@ def main(ctx: hook.Context):
 
     api_v1 = kubernetes.client.AppsV1Api()
     custom_api = kubernetes.client.CustomObjectsApi()
-    api_extenstion = kubernetes.client.ApiextensionsV1Api()
+    api_extension = kubernetes.client.ApiextensionsV1Api()
 
     ds_name = 'sds-node-configurator'
     ds_ns = 'd8-sds-node-configurator'
@@ -70,7 +70,7 @@ def main(ctx: hook.Context):
 
     try:
         print(f"{migrate_script} tries to find lvmvolumegroup CRD")
-        crd = api_extenstion.read_custom_resource_definition(crd_name)
+        crd = api_extension.read_custom_resource_definition(crd_name)
         print(f"{migrate_script} successfully found lvmvolumegroup CRD")
 
         ### LvmVolumeGroup CRD flow
@@ -85,7 +85,7 @@ def main(ctx: hook.Context):
             if len(lvg_list.get('items', [])) == 0:
                 print(f"{migrate_script} no lvmvolumegroup resources found, tries to delete LvmVolumeGroup CRD")
                 try:
-                    api_extenstion.delete_custom_resource_definition(crd_name)
+                    api_extension.delete_custom_resource_definition(crd_name)
                 except Exception as e:
                     print(f"{migrate_script} unable to delete LvmVolumeGroup CRD, error: {e}")
 
@@ -103,10 +103,18 @@ def main(ctx: hook.Context):
             print(f"{migrate_script} starts to create backups and add 'kubernetes.io/hostname' to store the node name")
             for lvg in lvg_list.get('items', []):
                 lvg_backup = copy.deepcopy(lvg)
-                del lvg_backup['kind']
-                del lvg_backup['metadata']['annotations']
+                lvg_backup.pop('kind')
+                lvg_backup['metadata'].pop('annotations')
+                lvg_backup['metadata'].pop('creationTimestamp')
+                lvg_backup['metadata'].pop('deletionGracePeriodSeconds')
+                lvg_backup['metadata'].pop('deletionTimestamp')
+                lvg_backup['metadata'].pop('generation')
+                lvg_backup['metadata'].pop('resourceVersion')
+                lvg_backup['metadata'].pop('uid')
+                lvg_backup.pop('status')
                 lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg_backup['status']['nodes'][0]['name']
                 lvg_backup['metadata']['labels'][migration_completed_label] = 'false'
+                print(f"{migrate_script} LvmVolumeGroupBackup: {lvg_backup}")
                 try:
                     custom_api.create_cluster_custom_object(group=group,
                                                             version=version,
@@ -135,7 +143,7 @@ def main(ctx: hook.Context):
 
             print(f"{migrate_script} tries to delete LvmVolumeGroup CRD")
             try:
-                api_extenstion.delete_custom_resource_definition(crd_name)
+                api_extension.delete_custom_resource_definition(crd_name)
             except kubernetes.client.exceptions.ApiException as e:
                 if e.status == '404':
                     print(f"{migrate_script} the LvmVolumeGroup CRD has been already deleted")
