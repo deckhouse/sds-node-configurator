@@ -17,10 +17,9 @@ import copy
 import os
 from typing import Any, List
 
+import kubernetes
 import yaml
 from deckhouse import hook
-
-import kubernetes
 
 config = """
 configVersion: v1
@@ -98,30 +97,21 @@ def main(ctx: hook.Context):
                 return
 
             print(f"{migrate_script} some lvmvolumegroup resource were found, tries to create LvmVolumeGroupBackup CRD")
-            for dirpath, _, filenames in os.walk(top=find_crds_root(__file__)):
-                for filename in filenames:
-                    if filename == 'lvmvolumegroupbackup.yaml':
-                        crd_path = os.path.join(dirpath, filename)
-                        with open(crd_path, "r", encoding="utf-8") as f:
-                            for manifest in yaml.safe_load_all(f):
-                                if manifest is None:
-                                    continue
-                                try:
-                                    ctx.kubernetes.create_or_update(manifest)
-                                except Exception as e:
-                                    print(f"{migrate_script} unable to create LvmVolumeGroupBackup CRD, error: {e}")
-                                    raise e
-                                break
+            create_new_lvg_crd(ctx)
             print(f"{migrate_script} successfully created LvmVolumeGroupBackup CRD")
 
             print(f"{migrate_script} starts to create backups and add 'kubernetes.io/hostname' to store the node name")
             for lvg in lvg_list.get('items', []):
                 lvg_backup = copy.deepcopy(lvg)
-                lvg_backup['kind'] = 'LvmVolumeGroupBackup'
+                del lvg_backup['kind']
+                del lvg_backup['metadata']['annotations']
                 lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg_backup['status']['nodes'][0]['name']
                 lvg_backup['metadata']['labels'][migration_completed_label] = 'false'
                 try:
-                    ctx.kubernetes.create_or_update(lvg_backup)
+                    custom_api.create_cluster_custom_object(group=group,
+                                                            version=version,
+                                                            plural='lvmvolumegroupbackups',
+                                                            body=lvg_backup)
                 except Exception as e:
                     print(f"{migrate_script} unable to create backup, error: {e}")
                     raise e
@@ -132,7 +122,11 @@ def main(ctx: hook.Context):
             for lvg in lvg_list.get('items', []):
                 del lvg['metadata']['finalizers']
                 try:
-                    ctx.kubernetes.create_or_update(lvg)
+                    custom_api.patch_cluster_custom_object(group=group,
+                                                           plural='lvmvolumegroups',
+                                                           version=version,
+                                                           name=lvg['metadata']['name'],
+                                                           body=lvg)
                 except Exception as e:
                     print(f"{migrate_script} unable to remove finalizers from LvmVolumeGroups, error: {e}")
                     raise e
@@ -142,6 +136,10 @@ def main(ctx: hook.Context):
             print(f"{migrate_script} tries to delete LvmVolumeGroup CRD")
             try:
                 api_extenstion.delete_custom_resource_definition(crd_name)
+            except kubernetes.client.exceptions.ApiException as e:
+                if e.status == '404':
+                    print(f"{migrate_script} the LvmVolumeGroup CRD has been already deleted")
+                    pass
             except Exception as e:
                 print(f"{migrate_script} unable to delete LvmVolumeGroup CRD")
                 raise e
@@ -153,9 +151,9 @@ def main(ctx: hook.Context):
 
             print(f"{migrate_script} tries to get LvmVolumeGroupBackups")
             try:
-                lvg_backup_list: Any = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=group,
-                                                                                                       plural='lvmvolumegroupbackups',
-                                                                                                       version=version)
+                lvg_backup_list: Any = custom_api.list_cluster_custom_object(group=group,
+                                                                             plural='lvmvolumegroupbackups',
+                                                                             version=version)
             except Exception as e:
                 print(f"{migrate_script} unable to list lvmvolumegroupbackups, error: {e}")
                 raise e
@@ -165,14 +163,21 @@ def main(ctx: hook.Context):
             for lvg_backup in lvg_backup_list.get('items', []):
                 lvg = configure_new_lvg(lvg_backup)
             try:
-                ctx.kubernetes.create(lvg)
+                custom_api.create_cluster_custom_object(group=group,
+                                                        version=version,
+                                                        plural='lvmvolumegroups',
+                                                        body=lvg)
                 print(f"{migrate_script} LVMVolumeGroup {lvg['metadata']['name']} was created")
             except Exception as e:
                 print(f"{migrate_script} unable to create LVMVolumeGroup {lvg['metadata']['name']}, error: {e}")
                 raise e
             try:
                 lvg_backup['metadata']['labels'][migration_completed_label] = 'true'
-                ctx.kubernetes.create_or_update(lvg_backup)
+                custom_api.patch_cluster_custom_object(group=group,
+                                                       version=version,
+                                                       plural='lvmvolumegroupbackups',
+                                                       name=lvg_backup['metadata']['name'],
+                                                       body=lvg_backup)
                 print(
                     f"{migrate_script} the LVMVolumeGroupBackup label {migration_completed_label} was updated to true")
             except Exception as e:
@@ -188,9 +193,9 @@ def main(ctx: hook.Context):
 
         print(f"{migrate_script} tries to list LVMVolumeGroup resources")
         try:
-            lvg_list: Any = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=group,
-                                                                                            plural='lvmvolumegroups',
-                                                                                            version=version)
+            lvg_list: Any = custom_api.list_cluster_custom_object(group=group,
+                                                                  plural='lvmvolumegroups',
+                                                                  version=version)
         except Exception as e:
             print(f"{migrate_script} unable to list LVMVolumeGroup resources")
             raise e
@@ -202,9 +207,9 @@ def main(ctx: hook.Context):
 
         print(f"{migrate_script} tries to list lvmvolumegroupbackups")
         try:
-            lvg_backup_list: Any = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=group,
-                                                                                                   plural='lvmvolumegroupbackups',
-                                                                                                   version=version)
+            lvg_backup_list: Any = custom_api.list_cluster_custom_object(group=group,
+                                                                         plural='lvmvolumegroupbackups',
+                                                                         version=version)
         except Exception as e:
             print(f"{migrate_script} unable to list lvmvolumegroupbackups, error: {e}")
             raise e
@@ -222,7 +227,11 @@ def main(ctx: hook.Context):
             print(f"{migrate_script} tries to create LVMVolumeGroup {lvg['metadata']['name']}")
             lvg = configure_new_lvg(backup)
             try:
-                ctx.kubernetes.create_or_update(lvg)
+                custom_api.replace_cluster_custom_object(group=group,
+                                                         plural='lvmvolumegroups',
+                                                         version=version,
+                                                         name=lvg['metadata']['name'],
+                                                         body=lvg)
             except Exception as e:
                 print(f"{migrate_script} unable to create LVMVolumeGroup {lvg['metadata']['name']}, error: {e}")
                 raise e
@@ -232,13 +241,18 @@ def main(ctx: hook.Context):
 
             print(f"{migrate_script} tries to update LvmVolumeGroupBackup {backup['metadata']['name']}")
             try:
-                ctx.kubernetes.create_or_update(backup)
+                custom_api.patch_cluster_custom_object(group=group,
+                                                       version=version,
+                                                       plural='lvmvolumegroupbackups',
+                                                       name=backup['metadata']['name'],
+                                                       body=backup)
+                print(
+                    f"{migrate_script} the LVMVolumeGroupBackup {backup['metadata']['name']} {migration_completed_label} was updated to true")
             except Exception as e:
                 print(
-                    f"{migrate_script} unable to create LVMVolumeGroupBackup {backup['metadata']['name']}, error: {e}")
+                    f"{migrate_script} unable to update LVMVolumeGroupBackup {backup['metadata']['name']}, error: {e}")
                 raise e
-            print(
-                f"{migrate_script} the LVMVolumeGroupBackup {backup['metadata']['name']} {migration_completed_label} was updated to true")
+
         print(f"{migrate_script} every LVMVolumeGroup resources has been migrated")
         return
         ### End of LVMVolumeGroup CRD flow
@@ -254,9 +268,9 @@ def main(ctx: hook.Context):
 
             print(f"{migrate_script} tries to list lvmvolumegroupbackups")
             try:
-                lvg_backup_list: Any = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=group,
-                                                                                                       plural='lvmvolumegroupbackups',
-                                                                                                       version=version)
+                lvg_backup_list: Any = custom_api.list_cluster_custom_object(group=group,
+                                                                             plural='lvmvolumegroupbackups',
+                                                                             version=version)
             except Exception as e:
                 print(f"{migrate_script} unable to list lvmvolumegroupbackups, error: {e}")
                 raise e
@@ -270,7 +284,11 @@ def main(ctx: hook.Context):
                 print(f"{migrate_script} tries to create LVMVolumeGroup {lvg['metadata']['name']}")
                 lvg = configure_new_lvg(backup)
                 try:
-                    ctx.kubernetes.create_or_update(lvg)
+                    custom_api.replace_cluster_custom_object(group=group,
+                                                             version=version,
+                                                             plural='lvmvolumegroups',
+                                                             name=lvg['metadata']['name'],
+                                                             body=lvg)
                 except Exception as e:
                     print(f"{migrate_script} unable to create LVMVolumeGroup {lvg['metadata']['name']}, error: {e}")
                     raise e
@@ -280,7 +298,11 @@ def main(ctx: hook.Context):
 
                 print(f"{migrate_script} tries to update LvmVolumeGroupBackup {backup['metadata']['name']}")
                 try:
-                    ctx.kubernetes.create_or_update(backup)
+                    custom_api.patch_cluster_custom_object(group=group,
+                                                           version=version,
+                                                           plural='lvmvolumegroupbackups',
+                                                           name=backup['metadata']['name'],
+                                                           body=backup)
                 except Exception as e:
                     print(
                         f"{migrate_script} unable to create LVMVolumeGroupBackup {backup['metadata']['name']}, error: {e}")
