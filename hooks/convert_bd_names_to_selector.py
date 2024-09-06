@@ -72,6 +72,7 @@ def main(ctx: hook.Context):
         if crd.spec.names.kind == 'LvmVolumeGroup':
             print(f"{migrate_script} found LvmVolumeGroup CRD")
             print(f"{migrate_script} tries to list lvmvolumegroup resources")
+            lvg_list = None
             try:
                 lvg_list: Any = custom_api.list_cluster_custom_object(group=group,
                                                                       plural=lvmvolumegroup_plural,
@@ -97,20 +98,26 @@ def main(ctx: hook.Context):
 
             print(f"{migrate_script} some lvmvolumegroup resource were found, tries to create LvmVolumeGroupBackup CRD")
             for dirpath, _, filenames in os.walk(top=find_crds_root(__file__)):
+                found = False
                 for filename in filenames:
                     if filename == 'lvmvolumegroupbackup.yaml':
                         crd_path = os.path.join(dirpath, filename)
                         with open(crd_path, "r", encoding="utf-8") as f:
                             for manifest in yaml.safe_load_all(f):
                                 if manifest is None:
+                                    print(f"{migrate_script} LvmVolumeGroupBackup manifest is None, skip it")
                                     continue
                                 try:
+                                    found = True
                                     print(f"{migrate_script} LvmVolumeGroupBackup manifest found, tries to create it")
                                     ctx.kubernetes.create_or_update(manifest)
+                                    break
                                 except Exception as e:
                                     print(f"{migrate_script} unable to create LVMVolumeGroupBackup CRD, error: {e}")
                                     raise e
-                                break
+                    if found:
+                        break
+
             print(f"{migrate_script} successfully created LvmVolumeGroupBackup CRD")
 
             print(f"{migrate_script} starts to create backups and add 'kubernetes.io/hostname' to store the node name")
