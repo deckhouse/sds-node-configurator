@@ -15,6 +15,7 @@
 # limitations under the License.
 import copy
 import os
+from datetime import time
 from typing import Any, List
 
 import kubernetes
@@ -54,11 +55,6 @@ def main(ctx: hook.Context):
     crd_name = "lvmvolumegroups.storage.deckhouse.io"
 
     print(f"{migrate_script} tries to scale down the sds-node-configurator daemon set")
-    # daemonset = api_v1.read_namespaced_daemon_set(name=ds_name, namespace=ds_ns)
-    # if daemonset.spec.template.spec.node_selector is None:
-    #     daemonset.spec.template.spec.node_selector = {}
-    # daemonset.spec.template.spec.node_selector = {'exclude': 'true'}
-    # api_v1.patch_namespaced_daemon_set(name=ds_name, namespace=ds_ns, body=daemonset)
     try:
         api_v1.delete_namespaced_daemon_set(name=ds_name, namespace=ds_ns)
     except kubernetes.client.exceptions.ApiException as e:
@@ -103,23 +99,29 @@ def main(ctx: hook.Context):
             print(f"{migrate_script} starts to create backups and add 'kubernetes.io/hostname' to store the node name")
             for lvg in lvg_list.get('items', []):
                 lvg_backup = copy.deepcopy(lvg)
-                lvg_backup.pop('kind')
-                lvg_backup['metadata'].pop('annotations')
-                lvg_backup['metadata'].pop('creationTimestamp')
-                lvg_backup['metadata'].pop('deletionGracePeriodSeconds')
-                lvg_backup['metadata'].pop('deletionTimestamp')
-                lvg_backup['metadata'].pop('generation')
-                lvg_backup['metadata'].pop('resourceVersion')
-                lvg_backup['metadata'].pop('uid')
-                lvg_backup.pop('status')
+                # lvg_backup.pop('kind')
+                # lvg_backup['metadata'].pop('annotations')
+                # lvg_backup['metadata'].pop('creationTimestamp')
+                # lvg_backup['metadata'].pop('deletionGracePeriodSeconds')
+                # lvg_backup['metadata'].pop('deletionTimestamp')
+                # lvg_backup['metadata'].pop('generation')
+                # lvg_backup['metadata'].pop('resourceVersion')
+                # lvg_backup['metadata'].pop('uid')
+                # lvg_backup.pop('status')
                 lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg_backup['status']['nodes'][0]['name']
                 lvg_backup['metadata']['labels'][migration_completed_label] = 'false'
                 print(f"{migrate_script} LvmVolumeGroupBackup: {lvg_backup}")
                 try:
-                    custom_api.create_cluster_custom_object(group=group,
-                                                            version=version,
-                                                            plural='lvmvolumegroupbackups',
-                                                            body=lvg_backup)
+                    create_custom_resource(group,
+                                           'lvmvolumegroupbackups',
+                                           version,
+                                           'LvmVolumeGroupBackup',
+                                           lvg_backup['metadata']['name'],
+                                           lvg['spec'])
+                    # custom_api.create_cluster_custom_object(group=group,
+                    #                                         version=version,
+                    #                                         plural='lvmvolumegroupbackups',
+                    #                                         body=lvg_backup)
                 except Exception as e:
                     print(f"{migrate_script} unable to create backup, error: {e}")
                     raise e
@@ -128,13 +130,12 @@ def main(ctx: hook.Context):
 
             print(f"{migrate_script} remove finalizers from old LvmVolumeGroup CRs")
             for lvg in lvg_list.get('items', []):
-                del lvg['metadata']['finalizers']
                 try:
                     custom_api.patch_cluster_custom_object(group=group,
                                                            plural='lvmvolumegroups',
                                                            version=version,
                                                            name=lvg['metadata']['name'],
-                                                           body=lvg)
+                                                           body={'metadata': {'finalizers': []}})
                 except Exception as e:
                     print(f"{migrate_script} unable to remove finalizers from LvmVolumeGroups, error: {e}")
                     raise e
@@ -171,21 +172,28 @@ def main(ctx: hook.Context):
             for lvg_backup in lvg_backup_list.get('items', []):
                 lvg = configure_new_lvg(lvg_backup)
             try:
-                custom_api.create_cluster_custom_object(group=group,
-                                                        version=version,
-                                                        plural='lvmvolumegroups',
-                                                        body=lvg)
+                # custom_api.create_cluster_custom_object(group=group,
+                #                                         version=version,
+                #                                         plural='lvmvolumegroups',
+                #                                         body=lvg)
+                create_custom_resource(group,
+                                       'lvmvolumegroups',
+                                       version,
+                                       'LVMVolumeGroup',
+                                       lvg['metadata']['name'],
+                                       lvg['spec'])
                 print(f"{migrate_script} LVMVolumeGroup {lvg['metadata']['name']} was created")
             except Exception as e:
                 print(f"{migrate_script} unable to create LVMVolumeGroup {lvg['metadata']['name']}, error: {e}")
                 raise e
             try:
-                lvg_backup['metadata']['labels'][migration_completed_label] = 'true'
+                # lvg_backup['metadata']['labels'][migration_completed_label] = 'true'
                 custom_api.patch_cluster_custom_object(group=group,
                                                        version=version,
                                                        plural='lvmvolumegroupbackups',
                                                        name=lvg_backup['metadata']['name'],
-                                                       body=lvg_backup)
+                                                       body={
+                                                           'metadata': {'labels': {migration_completed_label: 'true'}}})
                 print(
                     f"{migrate_script} the LVMVolumeGroupBackup label {migration_completed_label} was updated to true")
             except Exception as e:
@@ -621,14 +629,14 @@ def configure_new_lvg(backup):
     return lvg
 
 
-def turn_on_daemonset(api_v1, name, namespace, daemonset):
-    _ = daemonset.spec.template.spec.node_selector.pop('exclude')
-    try:
-        api_v1.replace_namespaced_daemon_set(name=name, namespace=namespace, body=daemonset)
-        print(f"{migrate_script} successfully migrated LvmVolumeGroup kind to LVMVolumeGroup")
-    except Exception as e:
-        print(f"{migrate_script} an ERROR occurred while turning on the daemonset, err: {e}")
-        raise e
+# def turn_on_daemonset(api_v1, name, namespace, daemonset):
+#     _ = daemonset.spec.template.spec.node_selector.pop('exclude')
+#     try:
+#         api_v1.replace_namespaced_daemon_set(name=name, namespace=namespace, body=daemonset)
+#         print(f"{migrate_script} successfully migrated LvmVolumeGroup kind to LVMVolumeGroup")
+#     except Exception as e:
+#         print(f"{migrate_script} an ERROR occurred while turning on the daemonset, err: {e}")
+#         raise e
 
 
 def find_crds_root(hookpath):
@@ -636,6 +644,32 @@ def find_crds_root(hookpath):
     module_root = os.path.dirname(hooks_root)
     crds_root = os.path.join(module_root, "crds")
     return crds_root
+
+
+def create_custom_resource(group, plural, version, kind, name, spec):
+    max_attempts = 3
+    delay_between_attempts = 10
+
+    for attempt in range(max_attempts):
+        try:
+            kubernetes.client.CustomObjectsApi().create_cluster_custom_object(group=group,
+                                                                              plural=plural,
+                                                                              version=version,
+                                                                              body={
+                                                                                  'apiVersion': f'{group}/{version}',
+                                                                                  'kind': kind,
+                                                                                  'metadata': {'name': name},
+                                                                                  'spec': spec})
+            print(f"{migrate_script} {kind} {name} created")
+            return True
+        except Exception as e:
+            print(f"{migrate_script} attempt {attempt + 1} failed for {kind} {name} with message: {e}")
+            if attempt < max_attempts - 1:
+                print(f"{migrate_script} retrying in {delay_between_attempts} seconds...")
+                time.sleep(delay_between_attempts)
+            else:
+                print(f"{migrate_script} failed to create {kind} {name} after {max_attempts} attempts")
+                return False
 
 
 if __name__ == "__main__":
