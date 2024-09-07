@@ -121,27 +121,27 @@ def main(ctx: hook.Context):
                         break
 
             print(f"{migrate_script} successfully created LvmVolumeGroupBackup CRD")
+
+            print(f"{migrate_script} starts to create backups and add 'kubernetes.io/hostname' to store the node name")
+            for lvg in lvg_list.get('items', []):
+                lvg_backup = copy.deepcopy(lvg)
+                lvg_backup['kind'] = 'LvmVolumeGroupBackup'
+                lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg_backup['status']['nodes'][0]['name']
+                lvg_backup['metadata']['labels'][migration_completed_label] = 'false'
+                try:
+                    create_or_update_custom_resource(group=group,
+                                                     plural='lvmvolumegroupbackups',
+                                                     version=version,
+                                                     resource=lvg_backup)
+
+                except Exception as e:
+                    print(f"{migrate_script} unable to create backup, error: {e}")
+                    raise e
+                print(f"{migrate_script} {lvg_backup['metadata']['name']} backup was created")
+            print(f"{migrate_script} every backup was successfully created for lvmvolumegroups")
     except Exception as e:
         print(f"{migrate_script} error occurred")
         raise e
-
-    #         print(f"{migrate_script} starts to create backups and add 'kubernetes.io/hostname' to store the node name")
-    #         for lvg in lvg_list.get('items', []):
-    #             lvg_backup = copy.deepcopy(lvg)
-    #             lvg_backup['kind'] = 'LvmVolumeGroupBackup'
-    #             lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg_backup['status']['nodes'][0]['name']
-    #             lvg_backup['metadata']['labels'][migration_completed_label] = 'false'
-    #             try:
-    #                 create_or_update_custom_resource(group=group,
-    #                                                  plural='lvmvolumegroupbackups',
-    #                                                  version=version,
-    #                                                  resource=lvg_backup)
-    #
-    #             except Exception as e:
-    #                 print(f"{migrate_script} unable to create backup, error: {e}")
-    #                 raise e
-    #             print(f"{migrate_script} {lvg_backup['metadata']['name']} backup was created")
-    #         print(f"{migrate_script} every backup was successfully created for lvmvolumegroups")
     #
     #         print(f"{migrate_script} remove finalizers from old LvmVolumeGroup CRs")
     #         for lvg in lvg_list.get('items', []):
