@@ -15,6 +15,7 @@
 # limitations under the License.
 import copy
 import os
+import time
 from typing import Any, List
 
 import kubernetes
@@ -398,19 +399,22 @@ def create_or_update_custom_resource(group, plural, version, resource):
                                                                                body={
                                                                                    'apiVersion': f'{group}/{version}',
                                                                                    'kind': resource['kind'],
-                                                                                   'metadata': {
-                                                                                       'name': resource['metadata'][
-                                                                                           'name'],
-                                                                                       'labels': resource['metadata'][
-                                                                                           'labels'],
-                                                                                       'finalizers': resource['metadata'][
-                                                                                           'finalizers']},
+                                                                                   'metadata': resource['metadata'],
+                                                                                   #     {
+                                                                                   #     'name': resource['metadata'][
+                                                                                   #         'name'],
+                                                                                   #     'labels': resource['metadata'][
+                                                                                   #         'labels'],
+                                                                                   #     'finalizers':
+                                                                                   #         resource['metadata'][
+                                                                                   #             'finalizers'],
+                                                                                   # },
                                                                                    'spec': resource['spec']})
             print(f"{migrate_script} {resource['kind']} {resource['metadata']['name']} updated")
             return True
         except kubernetes.client.exceptions.ApiException as e:
-            print(f"{migrate_script} {resource['kind']} {resource['metadata']['name']} was not found, try to create it")
             if e.status == 404:
+                print(f"{migrate_script} {resource['kind']} {resource['metadata']['name']} was not found, try to create it")
                 try:
                     kubernetes.client.CustomObjectsApi().create_cluster_custom_object(group=group,
                                                                                       plural=plural,
@@ -418,28 +422,30 @@ def create_or_update_custom_resource(group, plural, version, resource):
                                                                                       body={
                                                                                           'apiVersion': f'{group}/{version}',
                                                                                           'kind': resource['kind'],
-                                                                                          'metadata': {
-                                                                                              'name':
-                                                                                                  resource['metadata'][
-                                                                                                      'name'],
-                                                                                              'labels':
-                                                                                                  resource['metadata'][
-                                                                                                      'labels'],
-                                                                                              'finalizers':
-                                                                                                  resource['metadata'][
-                                                                                                      'finalizers']},
+                                                                                          'metadata': resource[
+                                                                                              'metadata'],
+                                                                                          # {
+                                                                                          # 'name':
+                                                                                          #     resource['metadata'][
+                                                                                          #         'name'],
+                                                                                          # 'labels':
+                                                                                          #     resource['metadata'][
+                                                                                          #         'labels'],
+                                                                                          # 'finalizers':
+                                                                                          #     resource['metadata'][
+                                                                                          #         'finalizers']},
                                                                                           'spec': resource['spec']})
                     print(f"{migrate_script} {resource['kind']} {resource['metadata']['name']} created")
-                except Exception as e:
+                except Exception as createEx:
                     print(
-                        f"{migrate_script} failed to create {resource['kind']} {resource['metadata']['name']} after {max_attempts} attempts, error: {e}")
+                        f"{migrate_script} failed to create {resource['kind']} {resource['metadata']['name']}, error: {createEx}")
                     return False
-        except Exception as e:
+        except Exception as ex:
             print(
-                f"{migrate_script} attempt {attempt + 1} failed for {resource['kind']} {resource['metadata']['name']} with message: {e}")
+                f"{migrate_script} attempt {attempt + 1} failed for {resource['kind']} {resource['metadata']['name']} with message: {ex}")
             if attempt < max_attempts - 1:
                 print(f"{migrate_script} retrying in {delay_between_attempts} seconds...")
-                # time.sleep(delay_between_attempts)
+                time.sleep(delay_between_attempts)
             else:
                 print(
                     f"{migrate_script} failed to create {resource['kind']} {resource['metadata']['name']} after {max_attempts} attempts")
