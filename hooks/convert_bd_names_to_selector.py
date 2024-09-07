@@ -411,10 +411,10 @@ def create_or_update_custom_resource(group, plural, version, resource):
                                                                                    # },
                                                                                    'spec': resource['spec']})
             print(f"{migrate_script} {resource['kind']} {resource['metadata']['name']} updated")
-            return True
         except kubernetes.client.exceptions.ApiException as e:
             if e.status == 404:
-                print(f"{migrate_script} {resource['kind']} {resource['metadata']['name']} was not found, try to create it")
+                print(
+                    f"{migrate_script} {resource['kind']} {resource['metadata']['name']} was not found, try to create it")
                 try:
                     kubernetes.client.CustomObjectsApi().create_cluster_custom_object(group=group,
                                                                                       plural=plural,
@@ -439,7 +439,7 @@ def create_or_update_custom_resource(group, plural, version, resource):
                 except Exception as createEx:
                     print(
                         f"{migrate_script} failed to create {resource['kind']} {resource['metadata']['name']}, error: {createEx}")
-                    return False
+                    raise createEx
         except Exception as ex:
             print(
                 f"{migrate_script} attempt {attempt + 1} failed for {resource['kind']} {resource['metadata']['name']} with message: {ex}")
@@ -449,7 +449,7 @@ def create_or_update_custom_resource(group, plural, version, resource):
             else:
                 print(
                     f"{migrate_script} failed to create {resource['kind']} {resource['metadata']['name']} after {max_attempts} attempts")
-                return False
+                raise ex
 
 
 if __name__ == "__main__":
