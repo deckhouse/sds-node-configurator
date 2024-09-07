@@ -402,9 +402,9 @@ def create_or_update_custom_resource(group, plural, version, resource):
                                                                                        'name': resource['metadata'][
                                                                                            'name'],
                                                                                        'labels': resource['metadata'][
-                                                                                           'labels']},
-                                                                                   'finalizers': resource['metadata'][
-                                                                                       'finalizers'],
+                                                                                           'labels'],
+                                                                                       'finalizers': resource['metadata'][
+                                                                                           'finalizers']},
                                                                                    'spec': resource['spec']})
             print(f"{migrate_script} {resource['kind']} {resource['metadata']['name']} updated")
             return True
