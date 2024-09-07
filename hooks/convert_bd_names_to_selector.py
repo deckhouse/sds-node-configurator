@@ -392,54 +392,49 @@ def create_or_update_custom_resource(group, plural, version, resource):
 
     for attempt in range(max_attempts):
         try:
-            kubernetes.client.CustomObjectsApi().replace_cluster_custom_object(group=group,
-                                                                               plural=plural,
-                                                                               version=version,
-                                                                               name=resource['metadata']['name'],
-                                                                               body={
-                                                                                   'apiVersion': f'{group}/{version}',
-                                                                                   'kind': resource['kind'],
-                                                                                   'metadata': resource['metadata'],
-                                                                                   #     {
-                                                                                   #     'name': resource['metadata'][
-                                                                                   #         'name'],
-                                                                                   #     'labels': resource['metadata'][
-                                                                                   #         'labels'],
-                                                                                   #     'finalizers':
-                                                                                   #         resource['metadata'][
-                                                                                   #             'finalizers'],
-                                                                                   # },
-                                                                                   'spec': resource['spec']})
-            print(f"{migrate_script} {resource['kind']} {resource['metadata']['name']} updated")
-        except kubernetes.client.exceptions.ApiException as e:
-            if e.status == 404:
+            kubernetes.client.CustomObjectsApi().create_cluster_custom_object(group=group,
+                                                                              plural=plural,
+                                                                              version=version,
+                                                                              body={
+                                                                                  'apiVersion': f'{group}/{version}',
+                                                                                  'kind': resource['kind'],
+                                                                                  'metadata': resource[
+                                                                                      'metadata'],
+                                                                                  # {
+                                                                                  # 'name':
+                                                                                  #     resource['metadata'][
+                                                                                  #         'name'],
+                                                                                  # 'labels':
+                                                                                  #     resource['metadata'][
+                                                                                  #         'labels'],
+                                                                                  # 'finalizers':
+                                                                                  #     resource['metadata'][
+                                                                                  #         'finalizers']},
+                                                                                  'spec': resource['spec']})
+            print(f"{migrate_script} {resource['kind']} {resource['metadata']['name']} created")
+        except kubernetes.client.exceptions.ApiException as ae:
+            if ae.status == 409:
                 print(
-                    f"{migrate_script} {resource['kind']} {resource['metadata']['name']} was not found, try to create it")
-                try:
-                    kubernetes.client.CustomObjectsApi().create_cluster_custom_object(group=group,
-                                                                                      plural=plural,
-                                                                                      version=version,
-                                                                                      body={
-                                                                                          'apiVersion': f'{group}/{version}',
-                                                                                          'kind': resource['kind'],
-                                                                                          'metadata': resource[
-                                                                                              'metadata'],
-                                                                                          # {
-                                                                                          # 'name':
-                                                                                          #     resource['metadata'][
-                                                                                          #         'name'],
-                                                                                          # 'labels':
-                                                                                          #     resource['metadata'][
-                                                                                          #         'labels'],
-                                                                                          # 'finalizers':
-                                                                                          #     resource['metadata'][
-                                                                                          #         'finalizers']},
-                                                                                          'spec': resource['spec']})
-                    print(f"{migrate_script} {resource['kind']} {resource['metadata']['name']} created")
-                except Exception as createEx:
-                    print(
-                        f"{migrate_script} failed to create {resource['kind']} {resource['metadata']['name']}, error: {createEx}")
-                    raise createEx
+                    f"{migrate_script} the {resource['kind']} {resource['metadata']['name']} has been already created, update it")
+                kubernetes.client.CustomObjectsApi().replace_cluster_custom_object(group=group,
+                                                                                   plural=plural,
+                                                                                   version=version,
+                                                                                   name=resource['metadata']['name'],
+                                                                                   body={
+                                                                                       'apiVersion': f'{group}/{version}',
+                                                                                       'kind': resource['kind'],
+                                                                                       'metadata': resource['metadata'],
+                                                                                       #     {
+                                                                                       #     'name': resource['metadata'][
+                                                                                       #         'name'],
+                                                                                       #     'labels': resource['metadata'][
+                                                                                       #         'labels'],
+                                                                                       #     'finalizers':
+                                                                                       #         resource['metadata'][
+                                                                                       #             'finalizers'],
+                                                                                       # },
+                                                                                       'spec': resource['spec']})
+                pass
         except Exception as ex:
             print(
                 f"{migrate_script} attempt {attempt + 1} failed for {resource['kind']} {resource['metadata']['name']} with message: {ex}")
