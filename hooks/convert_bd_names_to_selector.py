@@ -42,12 +42,62 @@ migration_completed_label = 'migration-completed'
 # add some
 
 def main(ctx: hook.Context):
-    print(f"{migrate_script} starts to migrate LvmVolumeGroup kind to LVMVolumeGroup new version")
     kubernetes.config.load_incluster_config()
+
+    print(f"{migrate_script} tries to create LVGMigration CRD")
+    for dirpath, _, filenames in os.walk(top=find_crds_root(__file__)):
+        found = False
+        for filename in filenames:
+            if filename == 'lvgmigration.yaml':
+                crd_path = os.path.join(dirpath, filename)
+                print(f"{migrate_script} CRD path: {crd_path}")
+                with open(crd_path, "r", encoding="utf-8") as f:
+                    for manifest in yaml.safe_load_all(f):
+                        if manifest is None:
+                            print(f"{migrate_script} LVGMigration manifest is None, skip it")
+                            continue
+                        try:
+                            found = True
+                            print(f"{migrate_script} LVGMigration manifest found, tries to create it")
+                            ctx.kubernetes.create_or_update(manifest)
+                            print(f"{migrate_script} successfully created LVGMigration CRD")
+                            break
+                        except kubernetes.client.exceptions.ApiException as ae:
+                            print(f"{migrate_script} unable to create LVGMigration CRD, error: {ae}")
+                            raise ae
+                        except Exception as e:
+                            print(f"{migrate_script} unable to create LVGMigration CRD, error: {e}")
+                            raise e
+            if found:
+                break
 
     api_v1 = kubernetes.client.AppsV1Api()
     custom_api = kubernetes.client.CustomObjectsApi()
     api_extension = kubernetes.client.ApiextensionsV1Api()
+
+    print(f"{migrate_script} tries to check if LvmVolumeGroup migration has been completed")
+    # try:
+    #     ctx.kubernetes.create_if_not_exists({'apiVersion': 'storage.deckhouse.io/v1alpha1',
+    #                                          'kind': 'LVGMigration',
+    #                                          'metadata': {
+    #                                              'name': 'lvg-migration',
+    #                                              'finalizers': ["storage.deckhouse.io/sds-node-configurator"]},
+    #                                          'spec': lvg['spec']})
+    # print(f"{migrate_script} tries to read the LVGMigration CRD")
+    try:
+        migration_cr = custom_api.list_cluster_custom_object(group=group,
+                                                             version=version,
+                                                             plural='lvgmigrations')
+        print(f"{migrate_script} successfully list lvgmigrations")
+    except Exception as e:
+        print(f"{migrate_script} unable to list LVGMigrations, error: {e}")
+        raise e
+
+    if len(migration_cr.get('items', [])) > 0:
+        print(f"{migrate_script} migration has been already completed")
+        return
+
+    print(f"{migrate_script} starts to migrate LvmVolumeGroup kind to LVMVolumeGroup new version")
 
     ds_name = 'sds-node-configurator'
     ds_ns = 'd8-sds-node-configurator'
@@ -163,32 +213,29 @@ def main(ctx: hook.Context):
                 print(f"{migrate_script} unable to remove finalizers from LvmVolumeGroups, error: {e}")
                 raise e
         print(f"{migrate_script} successfully removed finalizers from all old LvmVolumeGroup resources")
-#
-#         print(f"{migrate_script} tries to delete LvmVolumeGroup CRD")
-#         try:
-#             api_extension.delete_custom_resource_definition(crd_name)
-#         except kubernetes.client.exceptions.ApiException as e:
-#             if e.status == 404:
-#                 print(f"{migrate_script} the LvmVolumeGroup CRD has been already deleted")
-#                 pass
-#         except Exception as e:
-#             print(f"{migrate_script} unable to delete LvmVolumeGroup CRD")
-#             raise e
-#         print(f"{migrate_script} successfully removed LvmVolumeGroup CRD")
-#
-#         print(f"{migrate_script} tries to create LVMVolumeGroup CRD")
-#         create_new_lvg_crd(ctx)
-#         print(f"{migrate_script} successfully created LVMVolumeGroup CRD")
-#
-#         print(f"{migrate_script} tries to get LvmVolumeGroupBackups")
-#         try:
-#             lvg_backup_list: Any = custom_api.list_cluster_custom_object(group=group,
-#                                                                          plural='lvmvolumegroupbackups',
-#                                                                          version=version)
-#         except Exception as e:
-#             print(f"{migrate_script} unable to list lvmvolumegroupbackups, error: {e}")
-#             raise e
-#
+
+        print(f"{migrate_script} tries to delete LvmVolumeGroup CRD")
+        try:
+            api_extension.delete_custom_resource_definition(crd_name)
+        except Exception as e:
+            print(f"{migrate_script} unable to delete LvmVolumeGroup CRD")
+            raise e
+        print(f"{migrate_script} successfully removed LvmVolumeGroup CRD")
+
+        print(f"{migrate_script} tries to create LVMVolumeGroup CRD")
+        create_new_lvg_crd(ctx)
+        print(f"{migrate_script} successfully created LVMVolumeGroup CRD")
+
+        print(f"{migrate_script} tries to get LvmVolumeGroupBackups")
+        try:
+            lvg_backup_list: Any = custom_api.list_cluster_custom_object(group=group,
+                                                                         plural='lvmvolumegroupbackups',
+                                                                         version=version)
+        except Exception as e:
+            print(f"{migrate_script} unable to list lvmvolumegroupbackups, error: {e}")
+            raise e
+
+
 #         print(f"{migrate_script} successfully got LvmVolumeGroupBackups")
 #         print(f"{migrate_script} create new LVMVolumeGroup CRs")
 #         for lvg_backup in lvg_backup_list.get('items', []):
