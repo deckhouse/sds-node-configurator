@@ -145,28 +145,24 @@ def main(ctx: hook.Context):
                 ctx.kubernetes.create_or_update(lvg_backup)
             except Exception as e:
                 print(f"{migrate_script} unable to create or update, error {e}")
-            # create_or_update_custom_resource(group=group,
-            #                                  plural='lvmvolumegroupbackups',
-            #                                  version=version,
-            #                                  resource=lvg_backup)
             print(f"{migrate_script} {lvg_backup['metadata']['name']} backup was created")
         print(f"{migrate_script} every backup was successfully created for lvmvolumegroups")
 
-        # print(f"{migrate_script} remove finalizers from old LvmVolumeGroup CRs")
-        # for lvg in lvg_list.get('items', []):
-        #     try:
-        #         custom_api.patch_cluster_custom_object(group=group,
-        #                                                plural='lvmvolumegroups',
-        #                                                version=version,
-        #                                                name=lvg['metadata']['name'],
-        #                                                body={'metadata': {'finalizers': []}})
-        #     except Exception as e:
-        #         print(f"{migrate_script} unable to remove finalizers from LvmVolumeGroups, error: {e}")
-        #         raise e
-        #     print(f"{migrate_script} removed finalizer from LvmVolumeGroup {lvg['metadata']['name']}")
-        # print(f"{migrate_script} successfully removed finalizers from old LvmVolumeGroup CRs")
-
-
+        print(f"{migrate_script} remove finalizers from old LvmVolumeGroup CRs")
+        for lvg in lvg_list.get('items', []):
+            try:
+                custom_api.patch_cluster_custom_object(group=group,
+                                                       plural='lvmvolumegroups',
+                                                       version=version,
+                                                       name=lvg['metadata']['name'],
+                                                       body={'metadata': {'finalizers': []}})
+                print(f"{migrate_script} successfully removed finalizer from LvmVolumeGroup {lvg['metadata']['name']}")
+            except kubernetes.client.exceptions.ApiException as ae:
+                print(f"{migrate_script} unable to patch LvmVolumeGroup {lvg['metadata']['name']}, error: {ae}")
+            except Exception as e:
+                print(f"{migrate_script} unable to remove finalizers from LvmVolumeGroups, error: {e}")
+                raise e
+        print(f"{migrate_script} successfully removed finalizers from all old LvmVolumeGroup resources")
 #
 #         print(f"{migrate_script} tries to delete LvmVolumeGroup CRD")
 #         try:
