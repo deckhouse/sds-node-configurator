@@ -58,6 +58,7 @@ def main(ctx: hook.Context):
                             continue
                         try:
                             found = True
+                            print(f"{migrate_script} manifest: {manifest}")
                             print(f"{migrate_script} LVGMigration manifest found, tries to create it")
                             ctx.kubernetes.create_or_update(manifest)
                             print(f"{migrate_script} successfully created LVGMigration CRD")
@@ -406,10 +407,10 @@ def create_new_lvg_crd(ctx):
                         try:
                             ctx.kubernetes.create_or_update(manifest)
                             print(f"{migrate_script} {filename} was successfully created")
+                            break
                         except Exception as e:
                             print(f"{migrate_script} unable to create LVMVolumeGroup CRD, error: {e}")
                             raise e
-                        break
 
 
 def configure_new_lvg(backup):
