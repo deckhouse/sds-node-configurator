@@ -126,9 +126,20 @@ def main(ctx: hook.Context):
 
         print(f"{migrate_script} starts to create backups and add 'kubernetes.io/hostname' to store the node name")
         for lvg in lvg_list.get('items', []):
-            lvg_backup = copy.deepcopy(lvg)
-            lvg_backup['kind'] = 'LvmVolumeGroupBackup'
-            lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg_backup['status']['nodes'][0]['name']
+            lvg_backup = {'apiVersion': lvg['apiVersion'],
+                          'kind': lvg['kind'],
+                          'metadata': {
+                              'name':
+                                  lvg['metadata'][
+                                      'name'],
+                              'labels':
+                                  lvg['metadata'][
+                                      'labels'],
+                              'finalizers':
+                                  lvg['metadata'][
+                                      'finalizers']},
+                          'spec': lvg['spec']}
+            lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg['status']['nodes'][0]['name']
             lvg_backup['metadata']['labels'][migration_completed_label] = 'false'
             try:
                 ctx.kubernetes.create_or_update(lvg_backup)
