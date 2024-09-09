@@ -33,6 +33,8 @@ version = 'v1alpha1'
 
 migration_completed_label = 'migration-completed'
 
+secret_name = 'lvg-migration'
+
 
 # This webhook ensures the migration of LVMVolumeGroup resources from the old CRD version to the new one:
 # - Removes field spec.blockDeviceNames
@@ -44,59 +46,48 @@ migration_completed_label = 'migration-completed'
 def main(ctx: hook.Context):
     kubernetes.config.load_incluster_config()
 
-    print(f"{migrate_script} tries to create LVGMigration CRD")
-    for dirpath, _, filenames in os.walk(top=find_crds_root(__file__)):
-        found = False
-        for filename in filenames:
-            if filename == 'lvgmigration.yaml':
-                crd_path = os.path.join(dirpath, filename)
-                print(f"{migrate_script} CRD path: {crd_path}")
-                with open(crd_path, "r", encoding="utf-8") as f:
-                    for manifest in yaml.safe_load_all(f):
-                        if manifest is None:
-                            print(f"{migrate_script} LVGMigration manifest is None, skip it")
-                            continue
-                        try:
-                            found = True
-                            print(f"{migrate_script} manifest: {manifest}")
-                            print(f"{migrate_script} LVGMigration manifest found, tries to create it")
-                            ctx.kubernetes.create_or_update(manifest)
-                            print(f"{migrate_script} successfully created LVGMigration CRD")
-                            break
-                        except kubernetes.client.exceptions.ApiException as ae:
-                            print(f"{migrate_script} unable to create LVGMigration CRD, error: {ae}")
-                            raise ae
-                        except Exception as e:
-                            print(f"{migrate_script} unable to create LVGMigration CRD, error: {e}")
-                            raise e
-            if found:
-                break
+    # print(f"{migrate_script} tries to create LVGMigration CRD")
+    # for dirpath, _, filenames in os.walk(top=find_crds_root(__file__)):
+    #     found = False
+    #     for filename in filenames:
+    #         if filename == 'lvgmigration.yaml':
+    #             crd_path = os.path.join(dirpath, filename)
+    #             print(f"{migrate_script} CRD path: {crd_path}")
+    #             with open(crd_path, "r", encoding="utf-8") as f:
+    #                 for manifest in yaml.safe_load_all(f):
+    #                     if manifest is None:
+    #                         print(f"{migrate_script} LVGMigration manifest is None, skip it")
+    #                         continue
+    #                     try:
+    #                         found = True
+    #                         print(f"{migrate_script} manifest: {manifest}")
+    #                         print(f"{migrate_script} LVGMigration manifest found, tries to create it")
+    #                         ctx.kubernetes.create_or_update(manifest)
+    #                         print(f"{migrate_script} successfully created LVGMigration CRD")
+    #                         break
+    #                     except kubernetes.client.exceptions.ApiException as ae:
+    #                         print(f"{migrate_script} unable to create LVGMigration CRD, error: {ae}")
+    #                         raise ae
+    #                     except Exception as e:
+    #                         print(f"{migrate_script} unable to create LVGMigration CRD, error: {e}")
+    #                         raise e
+    #         if found:
+    #             break
 
     api_v1 = kubernetes.client.AppsV1Api()
     custom_api = kubernetes.client.CustomObjectsApi()
     api_extension = kubernetes.client.ApiextensionsV1Api()
 
     print(f"{migrate_script} tries to check if LvmVolumeGroup migration has been completed")
-    # try:
-    #     ctx.kubernetes.create_if_not_exists({'apiVersion': 'storage.deckhouse.io/v1alpha1',
-    #                                          'kind': 'LVGMigration',
-    #                                          'metadata': {
-    #                                              'name': 'lvg-migration',
-    #                                              'finalizers': ["storage.deckhouse.io/sds-node-configurator"]},
-    #                                          'spec': lvg['spec']})
-    # print(f"{migrate_script} tries to read the LVGMigration CRD")
     try:
-        migration_cr = custom_api.list_cluster_custom_object(group=group,
-                                                             version=version,
-                                                             plural='lvgmigrations')
-        print(f"{migrate_script} successfully list lvgmigrations")
-    except Exception as e:
-        print(f"{migrate_script} unable to list LVGMigrations, error: {e}")
-        raise e
-
-    if len(migration_cr.get('items', [])) > 0:
-        print(f"{migrate_script} migration has been already completed")
+        kubernetes.client.CoreV1Api().read_namespaced_secret(secret_name, 'd8-sds-node-configurator')
+        print(f"{migrate_script} secret 'lvg-migration' was found, no need to run the migration")
         return
+    except kubernetes.client.exceptions.ApiException as ae:
+        if ae.status == 404:
+            pass
+        else:
+            print(f"{migrate_script} unable to get the secret {secret_name}, error: {ae}")
 
     print(f"{migrate_script} starts to migrate LvmVolumeGroup kind to LVMVolumeGroup new version")
 
