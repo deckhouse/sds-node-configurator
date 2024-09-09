@@ -406,24 +406,32 @@ def create_or_update_custom_resource(group, plural, version, resource):
         if ae.status == 409:
             print(
                 f"{migrate_script} the {resource['kind']} {resource['metadata']['name']} has been already created, update it")
-            kubernetes.client.CustomObjectsApi().replace_cluster_custom_object(group=group,
-                                                                               plural=plural,
-                                                                               version=version,
-                                                                               name=resource['metadata']['name'],
-                                                                               body={
-                                                                                   'apiVersion': f'{group}/{version}',
-                                                                                   'kind': resource['kind'],
-                                                                                   'metadata': resource['metadata'],
-                                                                                   #     {
-                                                                                   #     'name': resource['metadata'][
-                                                                                   #         'name'],
-                                                                                   #     'labels': resource['metadata'][
-                                                                                   #         'labels'],
-                                                                                   #     'finalizers':
-                                                                                   #         resource['metadata'][
-                                                                                   #             'finalizers'],
-                                                                                   # },
-                                                                                   'spec': resource['spec']})
+            try:
+                kubernetes.client.CustomObjectsApi().replace_cluster_custom_object(group=group,
+                                                                                   plural=plural,
+                                                                                   version=version,
+                                                                                   name=resource['metadata']['name'],
+                                                                                   body={
+                                                                                       'apiVersion': f'{group}/{version}',
+                                                                                       'kind': resource['kind'],
+                                                                                       'metadata': resource['metadata'],
+                                                                                       #     {
+                                                                                       #     'name': resource['metadata'][
+                                                                                       #         'name'],
+                                                                                       #     'labels': resource['metadata'][
+                                                                                       #         'labels'],
+                                                                                       #     'finalizers':
+                                                                                       #         resource['metadata'][
+                                                                                       #             'finalizers'],
+                                                                                       # },
+                                                                                       'spec': resource['spec']})
+                print(f"{migrate_script} successfully updated LvmVolumeGroupBackup {resource['metadata']['name']}")
+            except kubernetes.client.exceptions.ApiException as ae2:
+                print(
+                    f"{migrate_script} ApiException occurred while trying to update LvmVolumeGroupBackup {resource['metadata']['name']}, error: {ae2}")
+            except Exception as e:
+                print(
+                    f"{migrate_script} Exception occurred while trying to update LvmVolumeGroupBackup {resource['metadata']['name']}, error: {e}")
         else:
             print(
                 f"{migrate_script} unexpected error has been occurred while trying to create the LvmVolumeGroupBackup CR, error: {ae}")
