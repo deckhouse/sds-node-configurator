@@ -73,7 +73,7 @@ def main(ctx: hook.Context):
         if crd.spec.names.kind == 'LvmVolumeGroup':
             print(f"{migrate_script} found LvmVolumeGroup CRD")
             print(f"{migrate_script} tries to list lvmvolumegroup resources")
-            lvg_list = None
+            lvg_list = {}
             try:
                 lvg_list: Any = custom_api.list_cluster_custom_object(group=group,
                                                                       plural=lvmvolumegroup_plural,
@@ -112,7 +112,6 @@ def main(ctx: hook.Context):
                                 try:
                                     found = True
                                     print(f"{migrate_script} LvmVolumeGroupBackup manifest found, tries to create it")
-                                    print(f"{migrate_script} manifest: {manifest}")
                                     ctx.kubernetes.create_or_update(manifest)
                                     break
                                 except Exception as e:
@@ -141,21 +140,21 @@ def main(ctx: hook.Context):
                 print(f"{migrate_script} {lvg_backup['metadata']['name']} backup was created")
             print(f"{migrate_script} every backup was successfully created for lvmvolumegroups")
 
-            print(f"{migrate_script} remove finalizers from old LvmVolumeGroup CRs")
-            for lvg in lvg_list.get('items', []):
-                try:
-                    custom_api.patch_cluster_custom_object(group=group,
-                                                           plural='lvmvolumegroups',
-                                                           version=version,
-                                                           name=lvg['metadata']['name'],
-                                                           body={'metadata': {'finalizers': []}})
-                except Exception as e:
-                    print(f"{migrate_script} unable to remove finalizers from LvmVolumeGroups, error: {e}")
-                    raise e
-                print(f"{migrate_script} removed finalizer from LvmVolumeGroup {lvg['metadata']['name']}")
-            print(f"{migrate_script} successfully removed finalizers from old LvmVolumeGroup CRs")
+            # print(f"{migrate_script} remove finalizers from old LvmVolumeGroup CRs")
+            # for lvg in lvg_list.get('items', []):
+            #     try:
+            #         custom_api.patch_cluster_custom_object(group=group,
+            #                                                plural='lvmvolumegroups',
+            #                                                version=version,
+            #                                                name=lvg['metadata']['name'],
+            #                                                body={'metadata': {'finalizers': []}})
+            #     except Exception as e:
+            #         print(f"{migrate_script} unable to remove finalizers from LvmVolumeGroups, error: {e}")
+            #         raise e
+            #     print(f"{migrate_script} removed finalizer from LvmVolumeGroup {lvg['metadata']['name']}")
+            # print(f"{migrate_script} successfully removed finalizers from old LvmVolumeGroup CRs")
     except Exception as e:
-        print(f"{migrate_script} error occurred")
+        print(f"{migrate_script} error occurred, error: {e}")
         raise e
     #
     #         print(f"{migrate_script} tries to delete LvmVolumeGroup CRD")
@@ -398,18 +397,17 @@ def create_or_update_custom_resource(group, plural, version, resource):
                                                                               body={
                                                                                   'apiVersion': f'{group}/{version}',
                                                                                   'kind': resource['kind'],
-                                                                                  'metadata': resource[
-                                                                                      'metadata'],
-                                                                                  # {
-                                                                                  # 'name':
-                                                                                  #     resource['metadata'][
-                                                                                  #         'name'],
-                                                                                  # 'labels':
-                                                                                  #     resource['metadata'][
-                                                                                  #         'labels'],
-                                                                                  # 'finalizers':
-                                                                                  #     resource['metadata'][
-                                                                                  #         'finalizers']},
+                                                                                  'metadata':
+                                                                                      {
+                                                                                          'name':
+                                                                                              resource['metadata'][
+                                                                                                  'name'],
+                                                                                          'labels':
+                                                                                              resource['metadata'][
+                                                                                                  'labels'],
+                                                                                          'finalizers':
+                                                                                              resource['metadata'][
+                                                                                                  'finalizers']},
                                                                                   'spec': resource['spec']})
             print(f"{migrate_script} {resource['kind']} {resource['metadata']['name']} created")
         except kubernetes.client.exceptions.ApiException as ae:
@@ -434,7 +432,8 @@ def create_or_update_custom_resource(group, plural, version, resource):
                                                                                        #             'finalizers'],
                                                                                        # },
                                                                                        'spec': resource['spec']})
-                pass
+            else:
+                print(f"{migrate_script} unexpected error has been occurred while trying to create the LvmVolumeGroupBackup CR, error: {ae}")
         except Exception as ex:
             print(
                 f"{migrate_script} attempt {attempt + 1} failed for {resource['kind']} {resource['metadata']['name']} with message: {ex}")
