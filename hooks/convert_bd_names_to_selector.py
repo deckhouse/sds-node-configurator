@@ -48,18 +48,19 @@ def main(ctx: hook.Context):
     custom_api = kubernetes.client.CustomObjectsApi()
     api_extension = kubernetes.client.ApiextensionsV1Api()
 
-    print(f"{migrate_script} tries to check if LvmVolumeGroup migration has been completed")
-    try:
-        kubernetes.client.CoreV1Api().read_namespaced_secret(secret_name, 'd8-sds-node-configurator')
-        print(f"{migrate_script} secret 'lvg-migration' was found, no need to run the migration")
-        return
-    except kubernetes.client.exceptions.ApiException as ae:
-        if ae.status == 404:
-            pass
-        else:
-            print(f"{migrate_script} unable to get the secret {secret_name}, error: {ae}")
+    # print(f"{migrate_script} tries to check if LvmVolumeGroup migration has been completed")
+    # try:
+    #     kubernetes.client.CoreV1Api().read_namespaced_secret(secret_name, 'd8-sds-node-configurator')
+    #     print(f"{migrate_script} secret 'lvg-migration' was found, no need to run the migration")
+    #     return
+    # except kubernetes.client.exceptions.ApiException as ae:
+    #     if ae.status == 404:
+    #         pass
+    #     else:
+    #         print(f"{migrate_script} unable to get the secret {secret_name}, error: {ae}")
 
-    print(f"{migrate_script} starts to migrate LvmVolumeGroup kind to LVMVolumeGroup new version")
+    print(
+        f"{migrate_script} no migration has been completed, starts to migrate LvmVolumeGroup kind to LVMVolumeGroup new version")
 
     ds_name = 'sds-node-configurator'
     ds_ns = 'd8-sds-node-configurator'
@@ -95,6 +96,7 @@ def main(ctx: hook.Context):
             print(f"{migrate_script} successfully listed lvmvolumegroup resources")
         except kubernetes.client.exceptions.ApiException as e:
             # means no lvmvolumegroup resources found
+            # проверь это не будет так
             if e.status == 404:
                 print(f"{migrate_script} no lvmvolumegroup resources found, tries to delete LvmVolumeGroup CRD")
                 try:
