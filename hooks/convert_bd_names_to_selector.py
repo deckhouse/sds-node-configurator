@@ -130,10 +130,14 @@ def main(ctx: hook.Context):
             lvg_backup['kind'] = 'LvmVolumeGroupBackup'
             lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg_backup['status']['nodes'][0]['name']
             lvg_backup['metadata']['labels'][migration_completed_label] = 'false'
-            create_or_update_custom_resource(group=group,
-                                             plural='lvmvolumegroupbackups',
-                                             version=version,
-                                             resource=lvg_backup)
+            try:
+                ctx.kubernetes.create_or_update(lvg_backup)
+            except Exception as e:
+                print(f"{migrate_script} unable to create or update, error {e}")
+            # create_or_update_custom_resource(group=group,
+            #                                  plural='lvmvolumegroupbackups',
+            #                                  version=version,
+            #                                  resource=lvg_backup)
             print(f"{migrate_script} {lvg_backup['metadata']['name']} backup was created")
         print(f"{migrate_script} every backup was successfully created for lvmvolumegroups")
 
