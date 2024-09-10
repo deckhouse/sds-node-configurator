@@ -162,14 +162,18 @@ func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.Blo
 		!reflect.DeepEqual(ConfigureBlockDeviceLabels(blockDevice), blockDevice.Labels)
 }
 
-func GetApiBlockDevicesBySelector(ctx context.Context, cl client.Client, metrics monitoring.Metrics, selector *metav1.LabelSelector) (map[string]v1alpha1.BlockDevice, error) {
+func GetAPIBlockDevicesBySelector(ctx context.Context, cl client.Client, metrics monitoring.Metrics, selector *metav1.LabelSelector) (map[string]v1alpha1.BlockDevice, error) {
 	list := &v1alpha1.BlockDeviceList{}
 	s, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil {
 		return nil, err
 	}
+	start := time.Now()
 	err = cl.List(ctx, list, &client.ListOptions{LabelSelector: s})
+	metrics.APIMethodsDuration(BlockDeviceCtrlName, "list").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.APIMethodsExecutionCount(BlockDeviceCtrlName, "list").Inc()
 	if err != nil {
+		metrics.APIMethodsErrors(BlockDeviceCtrlName, "list").Inc()
 		return nil, err
 	}
 

@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"agent/config"
 	"context"
 	"errors"
 	"fmt"
@@ -32,6 +31,7 @@ import (
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"agent/config"
 	"agent/internal"
 	"agent/pkg/cache"
 	"agent/pkg/logger"
@@ -294,34 +294,6 @@ func deleteLVGIfNeeded(ctx context.Context, cl client.Client, log logger.Logger,
 	}
 	return false, nil
 }
-
-//func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
-//	reason := strings.Builder{}
-//
-//	targetNodeName := ""
-//	for _, bdName := range lvg.Spec.BlockDeviceNames {
-//		bd, exist := blockDevices[bdName]
-//
-//		if !exist {
-//			reason.WriteString(fmt.Sprintf("the BlockDevice %s does not exist", bdName))
-//			continue
-//		}
-//
-//		if targetNodeName == "" {
-//			targetNodeName = bd.Status.NodeName
-//		}
-//
-//		if bd.Status.NodeName != targetNodeName {
-//			reason.WriteString(fmt.Sprintf("the BlockDevice %s has the node %s though the target node %s", bd.Name, bd.Status.NodeName, targetNodeName))
-//		}
-//	}
-//
-//	if reason.Len() != 0 {
-//		return false, reason.String()
-//	}
-//
-//	return true, ""
-//}
 
 func checkIfLVGBelongsToNode(lvg *v1alpha1.LVMVolumeGroup, nodeName string) bool {
 	return lvg.Spec.Local.NodeName == nodeName

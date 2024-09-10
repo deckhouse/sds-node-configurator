@@ -559,6 +559,9 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		err = DeleteLVMVolumeGroup(ctx, cl, log, metrics, lvg, "test-node")
 		if assert.NoError(t, err) {
 			actual, err = GetAPILVMVolumeGroups(ctx, cl, metrics)
+			if err != nil {
+				t.Error(err)
+			}
 			_, ok := actual[LVMVGName]
 			assert.False(t, ok)
 		}

@@ -120,7 +120,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := GetApiBlockDevicesBySelector(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := GetAPIBlockDevicesBySelector(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 
@@ -195,7 +195,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := GetApiBlockDevicesBySelector(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := GetAPIBlockDevicesBySelector(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 
@@ -276,7 +276,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := GetApiBlockDevicesBySelector(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := GetAPIBlockDevicesBySelector(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 				_, ok := actualBd[name1]
@@ -571,7 +571,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				Consumable:            false,
 				PVUuid:                "testPV",
 				VGUuid:                "testVGUID",
-				LvmVolumeGroupName:    "testLVGName",
+				LVMVolumeGroupName:    "testLVGName",
 				ActualVGNameOnTheNode: "testNameOnNode",
 				Wwn:                   "testWWN",
 				Serial:                "testSERIAL",
@@ -596,7 +596,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			internal.BlockDevicePVUUIDLabelKey:             blockDevice.Status.PVUuid,
 			internal.BlockDeviceVGUUIDLabelKey:             blockDevice.Status.VGUuid,
 			internal.BlockDevicePartUUIDLabelKey:           blockDevice.Status.PartUUID,
-			internal.BlockDeviceLVMVolumeGroupNameLabelKey: blockDevice.Status.LvmVolumeGroupName,
+			internal.BlockDeviceLVMVolumeGroupNameLabelKey: blockDevice.Status.LVMVolumeGroupName,
 			internal.BlockDeviceActualVGNameLabelKey:       blockDevice.Status.ActualVGNameOnTheNode,
 			internal.BlockDeviceWWNLabelKey:                blockDevice.Status.Wwn,
 			internal.BlockDeviceSerialLabelKey:             blockDevice.Status.Serial,

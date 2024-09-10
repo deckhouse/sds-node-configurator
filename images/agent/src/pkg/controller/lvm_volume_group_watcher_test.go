@@ -672,7 +672,6 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			actual := extractPathsFromBlockDevices(nil, bds)
 			assert.ElementsMatch(t, expected, actual)
 		})
-
 	})
 
 	t.Run("validateSpecBlockDevices", func(t *testing.T) {
@@ -987,6 +986,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		t.Run("condition_vg_configuration_applied_is_updating_returns_false", func(t *testing.T) {
 			oldLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG := &v1alpha1.LVMVolumeGroup{}
+			newLVG.Name = "test-name"
+			newLVG.Labels = map[string]string{LVGMetadateNameLabelKey: "test-name"}
 			newLVG.Status.Conditions = []v1.Condition{
 				{
 					Type:   internal.TypeVGConfigurationApplied,

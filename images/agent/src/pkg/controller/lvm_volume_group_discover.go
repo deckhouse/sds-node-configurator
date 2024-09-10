@@ -209,59 +209,6 @@ func filterLVGsByNode(lvgs map[string]v1alpha1.LVMVolumeGroup, currentNode strin
 	}
 
 	return filtered
-
-	//filtered := make(map[string]v1alpha1.LVMVolumeGroup, len(lvgs))
-	//blockDevicesNodes := make(map[string]string, len(blockDevices))
-	//
-	//for _, bd := range blockDevices {
-	//	blockDevicesNodes[bd.Name] = bd.Status.NodeName
-	//}
-	//
-	//for _, lvg := range lvgs {
-	//	switch lvg.Spec.Type {
-	//	case Local:
-	//		currentNodeDevices := 0
-	//		for _, bdName := range lvg.Spec.BlockDeviceNames {
-	//			if blockDevicesNodes[bdName] == currentNode {
-	//				currentNodeDevices++
-	//			}
-	//		}
-	//
-	//		// If we did not add every block device of local VG, that means a mistake, and we turn the resource's health to Nonoperational.
-	//		if currentNodeDevices > 0 && currentNodeDevices < len(lvg.Spec.BlockDeviceNames) {
-	//			if err := updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.TypeVGConfigurationApplied, "InvalidBlockDevices", "there are block devices from different nodes for local volume group"); err != nil {
-	//				log.Error(err, `[filterLVGsByNode] unable to update resource, name: "%s"`, lvg.Name)
-	//				continue
-	//			}
-	//		}
-	//
-	//		// If we did not find any block device for our node, we skip the resource.
-	//		if currentNodeDevices == 0 {
-	//			continue
-	//		}
-	//
-	//		// Otherwise, we add the resource to the filtered ones.
-	//		filtered[lvg.Spec.ActualVGNameOnTheNode] = lvg
-	//	case Shared:
-	//		if len(lvg.Spec.BlockDeviceNames) != 1 {
-	//			if err := updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, internal.TypeVGConfigurationApplied, "InvalidBlockDevices", "there are more than one block devices for shared volume group"); err != nil {
-	//				log.Error(err, `[filterLVGsByNode] unable to update resource, name: "%s"`, lvg.Name)
-	//				continue
-	//			}
-	//		}
-	//
-	//		// If the only one block devices does not belong to our node, we skip the resource.
-	//		singleBD := lvg.Spec.BlockDeviceNames[0]
-	//		if blockDevicesNodes[singleBD] != currentNode {
-	//			continue
-	//		}
-	//
-	//		// Otherwise, we add the resource to the filtered ones.
-	//		filtered[lvg.Spec.ActualVGNameOnTheNode] = lvg
-	//	}
-	//}
-	//
-	//return filtered
 }
 
 func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LVMVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {

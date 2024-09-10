@@ -236,10 +236,10 @@ def main(ctx: hook.Context):
             lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg['status']['nodes'][0]['name']
             lvg_backup['metadata']['labels'][migration_completed_label] = 'false'
             try:
-                custom_api.create_cluster_custom_object(group=group,
-                                                        version=version,
-                                                        plural='lvmvolumegroupbackups',
-                                                        body=lvg_backup)
+                create_or_update_custom_resource(group=group,
+                                                 version=version,
+                                                 plural='lvmvolumegroupbackups',
+                                                 resource=lvg_backup)
             except Exception as e:
                 print(f"{migrate_script} unable to create or update, error {e}")
                 raise e
@@ -315,10 +315,11 @@ def main(ctx: hook.Context):
                 print(
                     f"{migrate_script} unable to update LvmVolumeGroupBackup {lvg_backup['metadata']['name']}, error: {e}")
                 raise e
-            print(f"{migrate_script} successfully created every LVMVolumeGroup CR from backup")
-            create_migration_secret()
-            print(f"{migrate_script} successfully migrated LvmVolumeGroup to LVMVolumeGroup CRD")
-            return
+
+        print(f"{migrate_script} successfully created every LVMVolumeGroup CR from backup")
+        create_migration_secret()
+        print(f"{migrate_script} successfully migrated LvmVolumeGroup to LVMVolumeGroup CRD")
+        return
     # End of LvmVolumeGroup CRD flow
 
     # LVMVolumeGroup CRD flow
