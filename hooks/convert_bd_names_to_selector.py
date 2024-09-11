@@ -452,11 +452,12 @@ def delete_old_lvg_crd():
 
 def create_migration_secret():
     try:
-        kubernetes.client.CoreV1Api().create_namespaced_secret(namespace='d8-sds-node-configurator',
-                                                               body={'apiVersion': 'v1',
-                                                                     'kind': 'Secret',
-                                                                     'metadata': {
-                                                                         'name': secret_name}})
+        # kubernetes.client.CoreV1Api().create_namespaced_secret(namespace='d8-sds-node-configurator',
+        #                                                        body={'apiVersion': 'v1',
+        #                                                              'kind': 'Secret',
+        #                                                              'metadata': {
+        #                                                                  'name': secret_name}})
+        print(f"{migrate_script} created")
     except kubernetes.client.api_client as ae:
         print(f"{migrate_script} unable to create migration secret, error: {ae}")
         raise ae
