@@ -13,6 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import datetime
 import os
 import time
 from typing import Any, List
@@ -36,6 +37,7 @@ lvg_crd_name = "lvmvolumegroups.storage.deckhouse.io"
 secret_name = 'lvg-migration'
 
 migration_completed_label = 'migration-completed'
+migration_condition_type = 'MigrationStatus'
 
 
 # This webhook ensures the migration of LVMVolumeGroup resources from the old CRD version to the new one:
@@ -51,30 +53,16 @@ def main(ctx: hook.Context):
     api_extension = kubernetes.client.ApiextensionsV1Api()
 
     print(f"{migrate_script} tries to check if LvmVolumeGroup migration has been completed")
-    try:
-        kubernetes.client.CoreV1Api().read_namespaced_secret(secret_name, 'd8-sds-node-configurator')
-        print(f"{migrate_script} secret {secret_name} was found, no need to run the migration")
-        return
-    except kubernetes.client.exceptions.ApiException as ae:
-        if ae.status == 404:
-            pass
-        else:
-            print(f"{migrate_script} unable to get the secret {secret_name}, error: {ae}")
-            raise ae
-
-    print(
-        f"{migrate_script} no migration has been completed, starts to migrate LvmVolumeGroup kind to LVMVolumeGroup new version")
-
-    print(f"{migrate_script} tries to scale down the sds-node-configurator daemon set")
-    try:
-        api_v1.delete_namespaced_daemon_set(name=ds_name, namespace=ds_ns)
-    except kubernetes.client.exceptions.ApiException as e:
-        # if we are retrying the ds is already deleted
-        if e.status == 404:
-            pass
-    except Exception as e:
-        raise e
-    print(f"{migrate_script} daemon set has been successfully scaled down")
+    # try:
+    #     kubernetes.client.CoreV1Api().read_namespaced_secret(secret_name, 'd8-sds-node-configurator')
+    #     print(f"{migrate_script} secret {secret_name} was found, no need to run the migration")
+    #     return
+    # except kubernetes.client.exceptions.ApiException as ae:
+    #     if ae.status == 404:
+    #         pass
+    #     else:
+    #         print(f"{migrate_script} unable to get the secret {secret_name}, error: {ae}")
+    #         raise ae
 
     print(f"{migrate_script} tries to find lvmvolumegroup CRD")
     try:
@@ -108,7 +96,11 @@ def main(ctx: hook.Context):
             # if we do not have any of them, we are good, so just end the migration
             if lvg_backup_list is None or len(lvg_backup_list.get('items', [])) == 0:
                 print(f"{migrate_script} no LvmVolumeGroup backups were found")
-                create_migration_secret()
+                try:
+                    add_condition_to_lvg_crd()
+                except Exception as e:
+                    print(f"{migrate_script} unable to patch LVMVolumeGroup CRD, error: {e}")
+                    raise e
                 print(f"{migrate_script} successfully migrated LvmVolumeGroup to LVMVolumeGroup CRD")
                 return
 
@@ -140,12 +132,36 @@ def main(ctx: hook.Context):
                     raise e
 
             print(f"{migrate_script} all LVMVolumeGroup were created from the backups")
-            create_migration_secret()
+            try:
+                add_condition_to_lvg_crd()
+            except Exception as e:
+                print(f"{migrate_script} unable to add a condition to the LVMVolumeGroup CRD, error: {e}")
+                raise e
             print(f"{migrate_script} successfully migrated LvmVolumeGroup to LVMVolumeGroup CRD")
             return
     except Exception as e:
         print(f"{migrate_script} error occurred, error: {e}")
         raise e
+
+    # check if migration has been already done
+    for condition in lvg_crd.status.conditions:
+        if condition.type == migration_condition_type:
+            print(f"{migrate_script} LvmVolumeGroup CRD has been already migrated to LVMVolumeGroup one")
+            return
+
+    print(
+        f"{migrate_script} migration has not been completed, starts to migrate LvmVolumeGroup kind to LVMVolumeGroup new version")
+
+    print(f"{migrate_script} tries to scale down the sds-node-configurator daemon set")
+    try:
+        api_v1.delete_namespaced_daemon_set(name=ds_name, namespace=ds_ns)
+    except kubernetes.client.exceptions.ApiException as e:
+        # if we are retrying the ds is already deleted
+        if e.status == 404:
+            pass
+    except Exception as e:
+        raise e
+    print(f"{migrate_script} daemon set has been successfully scaled down")
 
     # LvmVolumeGroup CRD flow
     if lvg_crd.spec.names.kind == 'LvmVolumeGroup':
@@ -170,9 +186,17 @@ def main(ctx: hook.Context):
                 print(f"{migrate_script} successfully deleted the LvmVolumeGroup CRD")
 
                 print(f"{migrate_script} tries to create LVMVolumeGroup CRD")
-                create_new_lvg_crd()
-                print(f"{migrate_script} successfully created LVMVolumeGroup CRD")
-                create_migration_secret()
+                try:
+                    create_new_lvg_crd()
+                except Exception as e:
+                    print(f"{migrate_script} unable to create the LVMVolumeGroup CRD, error: {e}")
+                    raise e
+                try:
+                    add_condition_to_lvg_crd()
+                except Exception as e:
+                    print(f"{migrate_script} unable to add a condition to the LVMVolumeGroup CRD, error: {e}")
+                    raise e
+
                 print(f"{migrate_script} successfully migrated LvmVolumeGroup to LVMVolumeGroup CRD")
                 return
         except Exception as e:
@@ -248,9 +272,8 @@ def main(ctx: hook.Context):
                                                  plural='lvmvolumegroupbackups',
                                                  resource=lvg_backup)
             except Exception as e:
-                print(f"{migrate_script} unable to create or update, error {e}")
+                print(f"{migrate_script} unable to create or update LvmVolumeGroupBackups, error {e}")
                 raise e
-            print(f"{migrate_script} {lvg_backup['metadata']['name']} backup was created")
         print(f"{migrate_script} every backup was successfully created for lvmvolumegroups")
 
         # before we are going to remove finalizers from LvmVolumeGroup resources and delete LvmVolumeGroup CRD, we need
@@ -303,8 +326,11 @@ def main(ctx: hook.Context):
         print(f"{migrate_script} successfully removed LvmVolumeGroup CRD")
 
         print(f"{migrate_script} tries to create LVMVolumeGroup CRD")
-        create_new_lvg_crd()
-        print(f"{migrate_script} successfully created LVMVolumeGroup CRD")
+        try:
+            create_new_lvg_crd()
+        except Exception as e:
+            print(f"{migrate_script} unable to create the LVMVolumeGroup CRD, error: {e}")
+            raise e
 
         print(f"{migrate_script} create new LVMVolumeGroup CRs from backups")
         for lvg_backup in lvg_backup_list.get('items', []):
@@ -314,7 +340,6 @@ def main(ctx: hook.Context):
                                                  plural='lvmvolumegroups',
                                                  version=version,
                                                  resource=lvg)
-                print(f"{migrate_script} LVMVolumeGroup {lvg['metadata']['name']} was created")
             except Exception as e:
                 print(f"{migrate_script} unable to create LVMVolumeGroup {lvg['metadata']['name']}, error: {e}")
                 raise e
@@ -326,7 +351,11 @@ def main(ctx: hook.Context):
                 raise e
 
         print(f"{migrate_script} successfully created every LVMVolumeGroup CR from backup")
-        create_migration_secret()
+        try:
+            add_condition_to_lvg_crd()
+        except Exception as e:
+            print(f"{migrate_script} unable to add a condition to the LVMVolumeGroup CRD, error: {e}")
+            raise e
         print(f"{migrate_script} successfully migrated LvmVolumeGroup to LVMVolumeGroup CRD")
         return
     # End of LvmVolumeGroup CRD flow
@@ -351,7 +380,11 @@ def main(ctx: hook.Context):
     # if we already have the new LVMVolumeGroup CRD and there is no any backup, we are good and just end the migration
     if lvg_backup_list is None or len(lvg_backup_list.get('items', [])) == 0:
         print(f"{migrate_script} no LvmVolumeGroupBackups found")
-        create_migration_secret()
+        try:
+            add_condition_to_lvg_crd()
+        except Exception as e:
+            print(f"{migrate_script} unable to add a condition to the LVMVolumeGroup CRD, error: {e}")
+            raise e
         print(f"{migrate_script} successfully migrated LvmVolumeGroup to LVMVolumeGroup CRD")
         return
 
@@ -393,8 +426,6 @@ def main(ctx: hook.Context):
         except Exception as e:
             print(f"{migrate_script} unable to create LVMVolumeGroup {lvg['metadata']['name']}, error: {e}")
             raise e
-        print(
-            f"{migrate_script} the LVMVolumeGroup {lvg['metadata']['name']} has been successfully created")
 
         print(f"{migrate_script} tries to update LvmVolumeGroupBackup {backup['metadata']['name']}")
         try:
@@ -405,7 +436,11 @@ def main(ctx: hook.Context):
             raise e
 
     print(f"{migrate_script} every LVMVolumeGroup resources has been migrated")
-    create_migration_secret()
+    try:
+        add_condition_to_lvg_crd()
+    except Exception as e:
+        print(f"{migrate_script} unable to add a condition to the LVMVolumeGroup CRD, error: {e}")
+        raise e
     print(f"{migrate_script} successfully migrated LvmVolumeGroup to LVMVolumeGroup CRD")
     return
     ### End of LVMVolumeGroup CRD flow
@@ -445,21 +480,26 @@ def delete_old_lvg_crd():
             except Exception as e:
                 print(f"{migrate_script} unable to read {lvg_crd_name}, error: {e}")
                 raise e
-    except Exception as e2:
-        print(f"{migrate_script} unable to delete {lvg_crd_name}, error:{e2}")
-        raise e2
+    except Exception as e:
+        raise e
 
 
-def create_migration_secret():
+def add_condition_to_lvg_crd():
     try:
-        # kubernetes.client.CoreV1Api().create_namespaced_secret(namespace='d8-sds-node-configurator',
-        #                                                        body={'apiVersion': 'v1',
-        #                                                              'kind': 'Secret',
-        #                                                              'metadata': {
-        #                                                                  'name': secret_name}})
-        print(f"{migrate_script} created")
+        status: Any = kubernetes.client.ApiextensionsV1Api().read_custom_resource_definition_status(lvg_crd_name)
+        status.status.conditions.append({
+            'lastTransitionTime': datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'message': 'LvmVolumeGroup CRD has been migrated to LVMVolumeGroup one',
+            'reason': 'MigrationCompleted',
+            'type': migration_condition_type,
+            'status': "True",
+        })
+
+        kubernetes.client.ApiextensionsV1Api().patch_custom_resource_definition_status(name=lvg_crd_name,
+                                                                                       body={
+                                                                                           'status': status.status
+                                                                                       })
     except kubernetes.client.api_client as ae:
-        print(f"{migrate_script} unable to create migration secret, error: {ae}")
         raise ae
 
 
@@ -558,9 +598,8 @@ def create_or_update_custom_resource(group, plural, version, resource):
                                                                                           resource['metadata'][
                                                                                               'finalizers']},
                                                                               'spec': resource['spec']})
-        print(f"{migrate_script} {resource['kind']} {resource['metadata']['name']} created")
+        print(f"{migrate_script} successfully created {resource['kind']} {resource['metadata']['name']}")
     except kubernetes.client.exceptions.ApiException as ae:
-        # todo: перепроверить статус код ошибки
         if ae.status == 409:
             print(
                 f"{migrate_script} the {resource['kind']} {resource['metadata']['name']} has been already created, update it")
@@ -583,21 +622,19 @@ def create_or_update_custom_resource(group, plural, version, resource):
                                                                                                      'finalizers'],
                                                                                          },
                                                                                      'spec': resource['spec']})
-                print(f"{migrate_script} successfully updated LvmVolumeGroupBackup {resource['metadata']['name']}")
-            except kubernetes.client.exceptions.ApiException as ae2:
-                print(
-                    f"{migrate_script} ApiException occurred while trying to update {resource['kind']} {resource['metadata']['name']}, error: {ae2}")
+                print(f"{migrate_script} successfully updated {resource['kind']} {resource['metadata']['name']}")
             except Exception as e:
                 print(
                     f"{migrate_script} Exception occurred while trying to update {resource['kind']} {resource['metadata']['name']}, error: {e}")
+                raise e
         else:
             print(
                 f"{migrate_script} unexpected error has been occurred while trying to create the {resource['kind']} {resource['metadata']['name']}, error: {ae}")
             raise ae
-    except Exception as ex:
+    except Exception as e:
         print(
             f"{migrate_script} failed to create {resource['kind']} {resource['metadata']['name']}")
-        raise ex
+        raise e
 
 
 if __name__ == "__main__":
