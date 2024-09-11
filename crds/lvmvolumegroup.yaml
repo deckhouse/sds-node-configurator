@@ -45,7 +45,7 @@ spec:
                 type:
                   type: string
                   description: |
-                    The type of a Volume Group. Might be:
+                    The type of a VolumeGroup. Might be:
                     - Local, that is, local if the devices used are not distributed (not Shared LUN).
                   enum:
                     - Local
