@@ -318,17 +318,17 @@ func ReconcileUnhealthyLVMVolumeGroups(
 				}
 
 				// take thin-pools from status instead of spec to prevent miss never-created ones
-				for i, thinPool := range lvg.Status.ThinPools {
-					if candidateTp, exist := candidateTPs[thinPool.Name]; !exist {
-						log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, thinPool.Name))
-						messageBldr.WriteString(fmt.Sprintf("Unable to find ThinPool %s. ", thinPool.Name))
-						lvg.Status.ThinPools = append(lvg.Status.ThinPools[:i], lvg.Status.ThinPools[i+1:]...)
-					} else if !utils.AreSizesEqualWithinDelta(candidate.VGSize, thinPool.ActualSize, internal.ResizeDelta) &&
-						candidateTp.ActualSize.Value()+internal.ResizeDelta.Value() < thinPool.ActualSize.Value() {
+				for i := range lvg.Status.ThinPools {
+					if candidateTp, exist := candidateTPs[lvg.Status.ThinPools[i].Name]; !exist {
+						log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, lvg.Status.ThinPools[i].Name))
+						messageBldr.WriteString(fmt.Sprintf("Unable to find ThinPool %s. ", lvg.Status.ThinPools[i].Name))
+						lvg.Status.ThinPools[i].Ready = false
+					} else if !utils.AreSizesEqualWithinDelta(candidate.VGSize, lvg.Status.ThinPools[i].ActualSize, internal.ResizeDelta) &&
+						candidateTp.ActualSize.Value()+internal.ResizeDelta.Value() < lvg.Status.ThinPools[i].ActualSize.Value() {
 						// that means thin-pool is not 100%VG space
 						// use candidate VGSize as lvg.Status.VGSize might not be updated yet
-						log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s ThinPool %s size %s is less than status one %s", lvg.Name, thinPool.Name, candidateTp.ActualSize.String(), thinPool.ActualSize.String()))
-						messageBldr.WriteString(fmt.Sprintf("ThinPool %s on the node has size %s which is less than status one %s. ", thinPool.Name, candidateTp.ActualSize.String(), thinPool.ActualSize.String()))
+						log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s ThinPool %s size %s is less than status one %s", lvg.Name, lvg.Status.ThinPools[i].Name, candidateTp.ActualSize.String(), lvg.Status.ThinPools[i].ActualSize.String()))
+						messageBldr.WriteString(fmt.Sprintf("ThinPool %s on the node has size %s which is less than status one %s. ", lvg.Status.ThinPools[i].Name, candidateTp.ActualSize.String(), lvg.Status.ThinPools[i].ActualSize.String()))
 					}
 				}
 			}
@@ -880,14 +880,13 @@ func UpdateLVMVolumeGroupByCandidate(
 }
 
 func configureBlockDeviceSelector(candidate internal.LVMVolumeGroupCandidate, nodeName string) *metav1.LabelSelector {
-	// TODO: change to consts later
 	return &metav1.LabelSelector{
 		MatchLabels: map[string]string{
-			"kubernetes.io/hostname": nodeName,
+			internal.HostNameLabelKey: nodeName,
 		},
 		MatchExpressions: []metav1.LabelSelectorRequirement{
 			{
-				Key:      "kubernetes.io/metadata.name",
+				Key:      internal.MetadataNameLabelKey,
 				Operator: metav1.LabelSelectorOpIn,
 				Values:   candidate.BlockDevicesNames,
 			},

@@ -72,10 +72,18 @@ There are two ways to create an `LVMVolumeGroup` resource:
       name: "vg-0-on-node-0"
     spec:
       type: Local
-      blockDeviceNames:
-        - dev-c1de9f9b534bf5c0b44e8b1cd39da80d5cda7c3f
-        - dev-f3269d92a99e1f668255a47d5d3500add1462711
-      actualVGNameOnTheNode: "vg-0"
+      local:
+        nodeName: "node-0"
+      blockDeviceSelector:
+        matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+          - dev-07ad52cef2348996b72db262011f1b5f896bb68f
+          - dev-e90e8915902bd6c371e59f89254c0fd644126da7
+    matchLabels:
+      kubernetes.io/hostname: node-0
+    actualVGNameOnTheNode: "vg-0"
     ```
   
   * An example of a resource for creating a local `LVM Volume Group` and a `Thin-pool` on it from multiple `BlockDevices`:
@@ -84,23 +92,33 @@ There are two ways to create an `LVMVolumeGroup` resource:
     apiVersion: storage.deckhouse.io/v1alpha1
     kind: LVMVolumeGroup
     metadata:
-      name: "vg-thin-on-node-0"
+      name: "vg-0-on-node-0"
     spec:
       type: Local
-      blockDeviceNames:
-        - dev-0428672e39334e545eb96c85f8760fd59dcf15f1
-        - dev-456977ded72ef804dd7cec90eec94b10acdf99b7
-      actualVGNameOnTheNode: "vg-thin"
+      local:
+        nodeName: "node-0"
+      blockDeviceSelector:
+        matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+          - dev-07ad52cef2348996b72db262011f1b5f896bb68f
+          - dev-e90e8915902bd6c371e59f89254c0fd644126da7
+        matchLabels:
+          kubernetes.io/hostname: node-0
+      actualVGNameOnTheNode: "vg-0"
       thinPools:
       - name: thin-1
         size: 250Gi
     ```
   
-  > Please note that the resource does not specify the node on which the `Volume Group` will be created. The node is picked from the `BlockDevice` resources whose names are listed in `spec.blockDeviceNames`.
+  > You can specify any selectors that are convenient for you for `BlockDevice` resources. For example, you can select all devices on a node (using, for instance, `matchLabels`), or choose a subset by additionally specifying their names (or other parameters).
+  > Please note that the `spec.local` field is mandatory for the `Local` type. If there's a discrepancy between the name in the `spec.local.nodeName` field and the selectors, the creation of the LVMVolumeGroup will not proceed.
 
   > **Caution!** All the selected block devices must belong to the same node for a 'Local' `LVMVolumeGroup`.
 
 ### Updating an `LVMVolumeGroup` resource and a `Volume Group`
+You can change the desired state of a `VolumeGroup` or `thin pool` on nodes by modifying the `spec` field of the corresponding `LVMVolumeGroup` resource. The controller will automatically validate the new data and, if it is in a valid state, apply the necessary changes to the entities on the node.
 
 The controller automatically updates the `status` field of the `LVMVolumeGroup` resource to display up-to-date data about the corresponding `LVM Volume Group` on the node.
 We do **not recommend** making manual changes to the `status` field.

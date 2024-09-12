@@ -24,10 +24,7 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            An interface for managing Volume Groups and Thin pools on the nodes.
-            
-            > These resources might be created both by a user and the sds-node-configurator controller. The sds-node-configurator controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. The controller will fill in both the 'spec' and 'status' fields.
-            > The `spec.thinPools` field must be filled in by yourself.
+            Stores the information from lvmvolumegroups resources to migrate their kind from LvmVolumeGroup to LVMVolumeGroup.
           required:
             - spec
           properties:
@@ -212,7 +209,7 @@ spec:
                 nodes:
                   type: array
                   description: |
-                   Information about the nodes the Volume Group is on.
+                    Information about the nodes the Volume Group is on.
                   items:
                     type: object
                     properties:
@@ -248,7 +245,7 @@ spec:
                               description: |
                                 The name of the corresponding block device resource.
       subresources:
-        status: {}
+        status: { }
       additionalPrinterColumns:
         - jsonPath: .status.thinPoolReady
           name: ThinPools

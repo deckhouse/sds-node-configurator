@@ -254,6 +254,10 @@ func syncThinPoolsAllocationLimit(ctx context.Context, cl client.Client, log log
 }
 
 func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
+	if len(blockDevices) == 0 {
+		return false, "specified blockdevices were not found"
+	}
+
 	bdNames := make([]string, 0, len(blockDevices))
 	for _, bd := range blockDevices {
 		if bd.Status.NodeName != lvg.Spec.Local.NodeName {

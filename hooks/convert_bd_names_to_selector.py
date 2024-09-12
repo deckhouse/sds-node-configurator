@@ -22,6 +22,17 @@ import kubernetes
 import yaml
 from deckhouse import hook
 
+# This webhook ensures the migration of LVMVolumeGroup resources from the old CRD version to the new one:
+# - Removes field spec.blockDeviceNames
+# - Adds spec.Local field and fills its value 'nodeName' with the resource's node.
+# - Adds spec.blockDeviceSelector field and fills it with the LVMVolumeGroup nodeName and blockDeviceNames
+
+# The expecting result of the hook is:
+# - LvmVolumeGroup kind is replaced by LVMVolumeGroup one for lvmvolumegroups CRD and CRs
+# - LVMVolumeGroup CRD has the condition 'MigrationCompleted' with status 'True'
+# - LvmVolumeGroupBackup resources are created and their label 'migration-completed' has value 'true'
+# - new LVMVolumeGroup resources are in Ready state
+
 config = """
 configVersion: v1
 onStartup: 1
@@ -37,13 +48,8 @@ lvg_crd_name = "lvmvolumegroups.storage.deckhouse.io"
 secret_name = 'lvg-migration'
 
 migration_completed_label = 'migration-completed'
-migration_condition_type = 'MigrationStatus'
+migration_condition_type = 'MigrationCompleted'
 
-
-# This webhook ensures the migration of LVMVolumeGroup resources from the old CRD version to the new one:
-# - Removes field spec.blockDeviceNames
-# - Adds spec.Local field and fills its value 'nodeName' with the resource's node.
-# - Adds spec.blockDeviceSelector field and fills it with the LVMVolumeGroup nodeName and blockDeviceNames
 
 # need the param as it is given from a running context above
 def main(ctx: hook.Context):
@@ -52,18 +58,7 @@ def main(ctx: hook.Context):
     custom_api = kubernetes.client.CustomObjectsApi()
     api_extension = kubernetes.client.ApiextensionsV1Api()
 
-    print(f"{migrate_script} tries to check if LvmVolumeGroup migration has been completed")
-    # try:
-    #     kubernetes.client.CoreV1Api().read_namespaced_secret(secret_name, 'd8-sds-node-configurator')
-    #     print(f"{migrate_script} secret {secret_name} was found, no need to run the migration")
-    #     return
-    # except kubernetes.client.exceptions.ApiException as ae:
-    #     if ae.status == 404:
-    #         pass
-    #     else:
-    #         print(f"{migrate_script} unable to get the secret {secret_name}, error: {ae}")
-    #         raise ae
-
+    print(f"{migrate_script} check if LvmVolumeGroup migration has been completed")
     print(f"{migrate_script} tries to find lvmvolumegroup CRD")
     try:
         lvg_crd = api_extension.read_custom_resource_definition(lvg_crd_name)
@@ -490,7 +485,7 @@ def add_condition_to_lvg_crd():
         status.status.conditions.append({
             'lastTransitionTime': datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
             'message': 'LvmVolumeGroup CRD has been migrated to LVMVolumeGroup one',
-            'reason': 'MigrationCompleted',
+            'reason': 'ResourcesMigrated',
             'type': migration_condition_type,
             'status': "True",
         })
