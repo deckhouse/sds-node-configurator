@@ -15,6 +15,7 @@ jobs:
   test:
     name: Trivy images check
     runs-on: [self-hosted, regular]
+    needs: dev_setup_build
 
     steps:
       - uses: actions/checkout@v4
@@ -53,9 +54,9 @@ jobs:
           exit_code=0
           image_name=$MODULES_MODULE_SOURCE/$MODULES_MODULE_NAME
           image_name_with_tag=$MODULES_MODULE_SOURCE/$MODULES_MODULE_NAME:pr$PR_NUMBER
-          
+
           crane_output=$(crane export $image_name_with_tag | tar -xOf - images_digests.json | jq -c 'to_entries[]')
-          
+
           while read -r item; do
             key=$(echo "$item" | jq -r '.key')
             value=$(echo "$item" | jq -r '.value')
