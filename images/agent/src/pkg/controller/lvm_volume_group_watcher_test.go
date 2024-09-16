@@ -684,6 +684,15 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					Local: v1alpha1.LVMVolumeGroupLocalSpec{
 						NodeName: nodeName,
 					},
+					BlockDeviceSelector: &v1.LabelSelector{
+						MatchExpressions: []v1.LabelSelectorRequirement{
+							{
+								Key:      internal.MetadataNameLabelKey,
+								Operator: v1.LabelSelectorOpIn,
+								Values:   []string{"first", "second"},
+							},
+						},
+					},
 				},
 			}
 
@@ -722,6 +731,15 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					Local: v1alpha1.LVMVolumeGroupLocalSpec{
 						NodeName: nodeName,
 					},
+					BlockDeviceSelector: &v1.LabelSelector{
+						MatchExpressions: []v1.LabelSelectorRequirement{
+							{
+								Key:      internal.MetadataNameLabelKey,
+								Operator: v1.LabelSelectorOpIn,
+								Values:   []string{"first", "second"},
+							},
+						},
+					},
 				},
 			}
 
@@ -740,6 +758,67 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					},
 					Status: v1alpha1.BlockDeviceStatus{
 						NodeName: "another-node",
+					},
+				},
+			}
+
+			valid, _ := validateSpecBlockDevices(lvg, bds)
+			assert.False(t, valid)
+		})
+
+		t.Run("validation_fails_due_to_no_block_devices_were_found", func(t *testing.T) {
+			const (
+				nodeName = "nodeName"
+			)
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					Local: v1alpha1.LVMVolumeGroupLocalSpec{
+						NodeName: nodeName,
+					},
+					BlockDeviceSelector: &v1.LabelSelector{
+						MatchExpressions: []v1.LabelSelectorRequirement{
+							{
+								Key:      internal.MetadataNameLabelKey,
+								Operator: v1.LabelSelectorOpIn,
+								Values:   []string{"first", "second"},
+							},
+						},
+					},
+				},
+			}
+
+			valid, _ := validateSpecBlockDevices(lvg, nil)
+			assert.False(t, valid)
+		})
+
+		t.Run("validation_fails_due_to_some_blockdevice_were_not_found", func(t *testing.T) {
+			const (
+				nodeName = "nodeName"
+			)
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					Local: v1alpha1.LVMVolumeGroupLocalSpec{
+						NodeName: nodeName,
+					},
+					BlockDeviceSelector: &v1.LabelSelector{
+						MatchExpressions: []v1.LabelSelectorRequirement{
+							{
+								Key:      internal.MetadataNameLabelKey,
+								Operator: v1.LabelSelectorOpIn,
+								Values:   []string{"first", "second"},
+							},
+						},
+					},
+				},
+			}
+
+			bds := map[string]v1alpha1.BlockDevice{
+				"first": {
+					ObjectMeta: v1.ObjectMeta{
+						Name: "first",
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName: nodeName,
 					},
 				},
 			}

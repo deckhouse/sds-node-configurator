@@ -18,6 +18,10 @@ spec:
                 local:
                   description: |
                     Желаемая конфигурация для локальной Volume Group.
+                  properties:
+                    nodeName:
+                      description: |
+                        Имя ноды, на которой планируется размещение Volume Group.
                 blockDeviceSelector:
                   description: |
                     Желаемый селектор для выбора BlockDevice ресурсов.

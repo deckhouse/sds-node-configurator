@@ -97,6 +97,17 @@ func RunLVMVolumeGroupWatcherController(
 				log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no need to add a finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
 			}
 
+			// this case handles the situation when a user decides to remove LVMVolumeGroup resource without created VG
+			deleted, err := deleteLVGIfNeeded(ctx, cl, log, metrics, cfg, sdsCache, lvg)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+
+			if deleted {
+				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s was deleted, stop the reconciliation", lvg.Name))
+				return reconcile.Result{}, nil
+			}
+
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector.MatchLabels))
 			blockDevices, err := GetAPIBlockDevicesBySelector(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
 			if err != nil {
@@ -113,7 +124,7 @@ func RunLVMVolumeGroupWatcherController(
 			valid, reason := validateSpecBlockDevices(lvg, blockDevices)
 			if !valid {
 				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupController] validation failed for the LVMVolumeGroup %s, reason: %s", lvg.Name, reason))
-				err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "InvalidSpec", reason)
+				err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, reason)
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, cfg.VolumeGroupScanIntervalSec.String()))
 					return reconcile.Result{}, err
@@ -122,17 +133,6 @@ func RunLVMVolumeGroupWatcherController(
 				return reconcile.Result{}, nil
 			}
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully validated BlockDevices of the LVMVolumeGroup %s", lvg.Name))
-
-			// this case handles the situation when a user decides to remove LVMVolumeGroup resource without created VG
-			deleted, err := deleteLVGIfNeeded(ctx, cl, log, metrics, cfg, sdsCache, lvg)
-			if err != nil {
-				return reconcile.Result{}, err
-			}
-
-			if deleted {
-				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s was deleted, stop the reconciliation", lvg.Name))
-				return reconcile.Result{}, nil
-			}
 
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to add label %s to the LVMVolumeGroup %s", LVGMetadateNameLabelKey, cfg.NodeName))
 			added, err = addLVGLabelIfNeeded(ctx, cl, log, lvg, LVGMetadateNameLabelKey, lvg.Name)

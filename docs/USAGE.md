@@ -135,6 +135,9 @@ A user can delete an `LVM Volume Group` and its associated `LVM Physical Volume`
 kubectl delete lvg %lvg-name%
 ```
 
+### Extracting the `BlockDevice` Resource from the `LVMVolumeGroup` Resource
+To extract the `BlockDevice` resource from the `LVMVolumeGroup` resource, you need to either modify the `spec.blockDeviceSelector` field of the `LVMVolumeGroup` resource (by adding other selectors) or change the corresponding labels on the `BlockDevice` resource, so they no longer match the selectors of the `LVMVolumeGroup`.
+
 > **Caution!** If the deleting `LVM Volume Group` resource contains any `Logical Volume` (even if it is only the `Thin-pool` that is specified in `spec`), a user must delete all those `Logical Volumes` manually. Otherwise, the `LVMVolumeGroup` resource and its `Volume Group` will not be deleted. 
 
 > A user can forbid to delete the `LVMVolumeGroup` resource by annotate it with `storage.deckhouse.io/deletion-protection`. If the controller finds the annotation, it will not delete nether the resource or the `Volume Group` till the annotation removal.

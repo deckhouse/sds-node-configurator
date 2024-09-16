@@ -255,7 +255,22 @@ func syncThinPoolsAllocationLimit(ctx context.Context, cl client.Client, log log
 
 func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
 	if len(blockDevices) == 0 {
-		return false, "specified blockdevices were not found"
+		return false, "none of specified BlockDevices were found"
+	}
+
+	for _, me := range lvg.Spec.BlockDeviceSelector.MatchExpressions {
+		if me.Key == internal.MetadataNameLabelKey {
+			if len(me.Values) != len(blockDevices) {
+				missedBds := make([]string, 0, len(me.Values))
+				for _, bdName := range me.Values {
+					if _, exist := blockDevices[bdName]; !exist {
+						missedBds = append(missedBds, bdName)
+					}
+				}
+
+				return false, fmt.Sprintf("unable to find specified BlockDevices: %s", strings.Join(missedBds, ","))
+			}
+		}
 	}
 
 	bdNames := make([]string, 0, len(blockDevices))
@@ -273,8 +288,12 @@ func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[str
 }
 
 func deleteLVGIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, cfg config.Options, sdsCache *cache.Cache, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
+	if lvg.DeletionTimestamp == nil {
+		return false, nil
+	}
+
 	vgs, _ := sdsCache.GetVGs()
-	if !checkIfVGExist(lvg.Spec.ActualVGNameOnTheNode, vgs) && lvg.DeletionTimestamp != nil {
+	if !checkIfVGExist(lvg.Spec.ActualVGNameOnTheNode, vgs) {
 		log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] VG %s was not yet created for the LVMVolumeGroup %s and the resource is marked as deleting. Delete the resource", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 		removed, err := removeLVGFinalizerIfExist(ctx, cl, lvg)
 		if err != nil {

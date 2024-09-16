@@ -62,7 +62,7 @@ spec:
                     nodeName:
                       type: string
                       description: |
-                        The desired node name for the LVM Volume Group.
+                        The desired node for the LVM Volume Group.
                         
                         > This field is immutable.
                       x-kubernetes-validations:
