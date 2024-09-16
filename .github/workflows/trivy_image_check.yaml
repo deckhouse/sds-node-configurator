@@ -14,6 +14,7 @@ on:
 jobs:
   build_dev:
     uses: ./.github/workflows/build_dev.yml
+    secrets: inherit
   test:
     name: Trivy images check
     runs-on: [self-hosted, regular]
