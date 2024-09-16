@@ -27,6 +27,7 @@ rules:
     resources:
       - lvmvolumegroups
       - lvmvolumegroups/status
+      - blockdevices
     verbs:
       - get
       - list

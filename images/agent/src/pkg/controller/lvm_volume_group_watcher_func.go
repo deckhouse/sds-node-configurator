@@ -101,6 +101,11 @@ func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1a
 		return true
 	}
 
+	if _, exist := newLVG.Labels[internal.LVGUpdateTriggerLabel]; exist {
+		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] updte event should be reconciled as the LVMVolumeGroup %s has the label %s", newLVG.Name, internal.LVGUpdateTriggerLabel))
+		return true
+	}
+
 	if shouldUpdateLVGLabels(log, newLVG, LVGMetadateNameLabelKey, newLVG.Name) {
 		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup's %s labels have been changed", newLVG.Name))
 		return true
@@ -256,6 +261,22 @@ func syncThinPoolsAllocationLimit(ctx context.Context, cl client.Client, log log
 func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
 	if len(blockDevices) == 0 {
 		return false, "none of specified BlockDevices were found"
+	}
+
+	if len(lvg.Status.Nodes) > 0 {
+		lostBdNames := make([]string, 0, len(lvg.Status.Nodes[0].Devices))
+		for _, n := range lvg.Status.Nodes {
+			for _, d := range n.Devices {
+				if _, found := blockDevices[d.BlockDevice]; !found {
+					lostBdNames = append(lostBdNames, d.BlockDevice)
+				}
+			}
+		}
+
+		// that means some of the used BlockDevices no longer match the blockDeviceSelector
+		if len(lostBdNames) > 0 {
+			return false, fmt.Sprintf("these BlockDevices no longer match the blockDeviceSelector: %s", strings.Join(lostBdNames, ","))
+		}
 	}
 
 	for _, me := range lvg.Spec.BlockDeviceSelector.MatchExpressions {

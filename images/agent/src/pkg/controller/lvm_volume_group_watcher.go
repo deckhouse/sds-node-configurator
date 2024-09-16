@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	errors2 "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -63,7 +63,7 @@ func RunLVMVolumeGroupWatcherController(
 			lvg := &v1alpha1.LVMVolumeGroup{}
 			err := cl.Get(ctx, request.NamespacedName, lvg)
 			if err != nil {
-				if errors2.IsNotFound(err) {
+				if errors.IsNotFound(err) {
 					log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] seems like the LVMVolumeGroup was deleted as unable to get it, err: %s. Stop to reconcile", err.Error()))
 					return reconcile.Result{}, nil
 				}
@@ -95,6 +95,27 @@ func RunLVMVolumeGroupWatcherController(
 				log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully added a finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
 			} else {
 				log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no need to add a finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+			}
+
+			// this case handles the situation when a user decides to remove LVMVolumeGroup resource without created VG
+			deleted, err := deleteLVGIfNeeded(ctx, cl, log, metrics, cfg, sdsCache, lvg)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+
+			if deleted {
+				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s was deleted, stop the reconciliation", lvg.Name))
+				return reconcile.Result{}, nil
+			}
+
+			if _, exist := lvg.Labels[internal.LVGUpdateTriggerLabel]; exist {
+				delete(lvg.Labels, internal.LVGUpdateTriggerLabel)
+				err = cl.Update(ctx, lvg)
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to update the LVMVolumeGroup %s", lvg.Name))
+					return reconcile.Result{}, err
+				}
+				log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully removed the label %s from the LVMVolumeGroup %s", internal.LVGUpdateTriggerLabel, lvg.Name))
 			}
 
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector.MatchLabels))

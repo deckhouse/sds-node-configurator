@@ -124,6 +124,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	err = controller.RunBlockDeviceLabelsWatcher(mgr, *log)
+	if err != nil {
+		log.Error(err, "[main] unable to run BlockDeviceWatcher controller")
+		os.Exit(1)
+	}
+
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
 		os.Exit(1)
