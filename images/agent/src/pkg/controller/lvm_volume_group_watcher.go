@@ -97,17 +97,6 @@ func RunLVMVolumeGroupWatcherController(
 				log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no need to add a finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
 			}
 
-			// this case handles the situation when a user decides to remove LVMVolumeGroup resource without created VG
-			deleted, err := deleteLVGIfNeeded(ctx, cl, log, metrics, cfg, sdsCache, lvg)
-			if err != nil {
-				return reconcile.Result{}, err
-			}
-
-			if deleted {
-				log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s was deleted, stop the reconciliation", lvg.Name))
-				return reconcile.Result{}, nil
-			}
-
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector.MatchLabels))
 			blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
 			if err != nil {
