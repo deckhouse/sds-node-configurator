@@ -12,10 +12,12 @@ on:
   pull_request:
 
 jobs:
+  build_dev:
+    uses: ./.github/workflows/build_dev.yml
   test:
     name: Trivy images check
     runs-on: [self-hosted, regular]
-    needs: dev_setup_build
+    needs: [build_dev]
 
     steps:
       - uses: actions/checkout@v4
