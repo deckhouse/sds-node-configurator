@@ -2,9 +2,8 @@ package cache
 
 import (
 	"bytes"
-	"testing"
-
 	"github.com/stretchr/testify/assert"
+	"testing"
 
 	"agent/internal"
 )
