@@ -81,8 +81,21 @@ There are two ways to create an `LVMVolumeGroup` resource:
           values:
           - dev-07ad52cef2348996b72db262011f1b5f896bb68f
           - dev-e90e8915902bd6c371e59f89254c0fd644126da7
-    matchLabels:
-      kubernetes.io/hostname: node-0
+    actualVGNameOnTheNode: "vg-0"
+    ```
+
+  ```yaml
+    apiVersion: storage.deckhouse.io/v1alpha1
+    kind: LVMVolumeGroup
+    metadata:
+      name: "vg-0-on-node-0"
+    spec:
+      type: Local
+      local:
+        nodeName: "node-0"
+      blockDeviceSelector:
+        matchLabels:
+          kubernetes.io/hostname: node-0
     actualVGNameOnTheNode: "vg-0"
     ```
   
@@ -104,6 +117,22 @@ There are two ways to create an `LVMVolumeGroup` resource:
           values:
           - dev-07ad52cef2348996b72db262011f1b5f896bb68f
           - dev-e90e8915902bd6c371e59f89254c0fd644126da7
+      actualVGNameOnTheNode: "vg-0"
+      thinPools:
+      - name: thin-1
+        size: 250Gi
+    ```
+
+    ```yaml
+    apiVersion: storage.deckhouse.io/v1alpha1
+    kind: LVMVolumeGroup
+    metadata:
+      name: "vg-0-on-node-0"
+    spec:
+      type: Local
+      local:
+        nodeName: "node-0"
+      blockDeviceSelector:
         matchLabels:
           kubernetes.io/hostname: node-0
       actualVGNameOnTheNode: "vg-0"
@@ -136,7 +165,7 @@ kubectl delete lvg %lvg-name%
 ```
 
 ### Extracting the `BlockDevice` Resource from the `LVMVolumeGroup` Resource
-To extract the `BlockDevice` resource from the `LVMVolumeGroup` resource, you need to either modify the `spec.blockDeviceSelector` field of the `LVMVolumeGroup` resource (by adding other selectors) or change the corresponding labels on the `BlockDevice` resource, so they no longer match the selectors of the `LVMVolumeGroup`.
+To extract the `BlockDevice` resource from the `LVMVolumeGroup` resource, you need to either modify the `spec.blockDeviceSelector` field of the `LVMVolumeGroup` resource (by adding other selectors) or change the corresponding labels on the `BlockDevice` resource, so they no longer match the selectors of the `LVMVolumeGroup`. After this, you need to manually execute the commands `pvmove`, `vgreduce`, and `pvremove` on the node.
 
 > **Caution!** If the deleting `LVM Volume Group` resource contains any `Logical Volume` (even if it is only the `Thin-pool` that is specified in `spec`), a user must delete all those `Logical Volumes` manually. Otherwise, the `LVMVolumeGroup` resource and its `Volume Group` will not be deleted. 
 

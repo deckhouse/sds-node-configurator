@@ -81,8 +81,21 @@ description: Использование и примеры работы конт�
           values:
           - dev-07ad52cef2348996b72db262011f1b5f896bb68f
           - dev-e90e8915902bd6c371e59f89254c0fd644126da7
-    matchLabels:
-      kubernetes.io/hostname: node-0
+    actualVGNameOnTheNode: "vg-0"
+    ```
+
+    ```yaml
+    apiVersion: storage.deckhouse.io/v1alpha1
+    kind: LVMVolumeGroup
+    metadata:
+      name: "vg-0-on-node-0"
+    spec:
+      type: Local
+      local:
+        nodeName: "node-0"
+      blockDeviceSelector:
+        matchLabels:
+          kubernetes.io/hostname: node-0
     actualVGNameOnTheNode: "vg-0"
     ```
 
@@ -104,6 +117,22 @@ description: Использование и примеры работы конт�
           values:
           - dev-07ad52cef2348996b72db262011f1b5f896bb68f
           - dev-e90e8915902bd6c371e59f89254c0fd644126da7
+      actualVGNameOnTheNode: "vg-0"
+      thinPools:
+      - name: thin-1
+        size: 250Gi
+    ```
+
+    ```yaml
+    apiVersion: storage.deckhouse.io/v1alpha1
+    kind: LVMVolumeGroup
+    metadata:
+      name: "vg-0-on-node-0"
+    spec:
+      type: Local
+      local:
+        nodeName: "node-0"
+      blockDeviceSelector:
         matchLabels:
           kubernetes.io/hostname: node-0
       actualVGNameOnTheNode: "vg-0"
@@ -136,7 +165,7 @@ kubectl delete lvg %lvg-name%
 ```
 
 ### Вывод ресурса `BlockDevice` из `LVMVolumeGroup` ресурса
-Для того чтобы вывести `BlockDevice` ресурс из `LVMVolumeGroup` ресурса, необходимо либо изменить поле `spec.blockDeviceSelector` `LVMVolumeGroup` ресурса (добавить другие селекторы), либо изменить соответствующие лейблы у `BlockDevice` ресурса, чтобы они больше не попадали под селекторы `LVMVolumeGroup`. 
+Для того чтобы вывести `BlockDevice` ресурс из `LVMVolumeGroup` ресурса, необходимо либо изменить поле `spec.blockDeviceSelector` `LVMVolumeGroup` ресурса (добавить другие селекторы), либо изменить соответствующие лейблы у `BlockDevice` ресурса, чтобы они больше не попадали под селекторы `LVMVolumeGroup`. После этого вам необходимо вручную выполнить команды `pvmove`, `vgreduce`, и `pvremove` на узле.
 
 > **Внимание!** Если удаляемый ресурс `LVMVolumeGroup` содержит `Logical Volume` (даже если это только `Thin-pool`, который указан в `spec`) пользователю необходимо самостоятельно удалить все `Logical Volume`, которые содержит удаляемая `Volume Group`. В противном случае ни ресурс, ни `Volume Group` удалены не будут.
 

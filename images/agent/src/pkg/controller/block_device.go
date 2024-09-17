@@ -178,8 +178,8 @@ func GetAPIBlockDevicesBySelector(ctx context.Context, cl client.Client, metrics
 	}
 
 	result := make(map[string]v1alpha1.BlockDevice, len(list.Items))
-	for _, i := range list.Items {
-		result[i.Name] = i
+	for _, item := range list.Items {
+		result[item.Name] = item
 	}
 
 	return result, nil

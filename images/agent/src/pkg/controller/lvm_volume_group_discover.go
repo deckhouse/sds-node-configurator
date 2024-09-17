@@ -318,17 +318,17 @@ func ReconcileUnhealthyLVMVolumeGroups(
 				}
 
 				// take thin-pools from status instead of spec to prevent miss never-created ones
-				for i := range lvg.Status.ThinPools {
-					if candidateTp, exist := candidateTPs[lvg.Status.ThinPools[i].Name]; !exist {
-						log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, lvg.Status.ThinPools[i].Name))
-						messageBldr.WriteString(fmt.Sprintf("Unable to find ThinPool %s. ", lvg.Status.ThinPools[i].Name))
-						lvg.Status.ThinPools[i].Ready = false
-					} else if !utils.AreSizesEqualWithinDelta(candidate.VGSize, lvg.Status.ThinPools[i].ActualSize, internal.ResizeDelta) &&
-						candidateTp.ActualSize.Value()+internal.ResizeDelta.Value() < lvg.Status.ThinPools[i].ActualSize.Value() {
+				for _, statusTp := range lvg.Status.ThinPools {
+					if candidateTp, exist := candidateTPs[statusTp.Name]; !exist {
+						log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, statusTp.Name))
+						messageBldr.WriteString(fmt.Sprintf("Unable to find ThinPool %s. ", statusTp.Name))
+						statusTp.Ready = false
+					} else if !utils.AreSizesEqualWithinDelta(candidate.VGSize, statusTp.ActualSize, internal.ResizeDelta) &&
+						candidateTp.ActualSize.Value()+internal.ResizeDelta.Value() < statusTp.ActualSize.Value() {
 						// that means thin-pool is not 100%VG space
 						// use candidate VGSize as lvg.Status.VGSize might not be updated yet
-						log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s ThinPool %s size %s is less than status one %s", lvg.Name, lvg.Status.ThinPools[i].Name, candidateTp.ActualSize.String(), lvg.Status.ThinPools[i].ActualSize.String()))
-						messageBldr.WriteString(fmt.Sprintf("ThinPool %s on the node has size %s which is less than status one %s. ", lvg.Status.ThinPools[i].Name, candidateTp.ActualSize.String(), lvg.Status.ThinPools[i].ActualSize.String()))
+						log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s ThinPool %s size %s is less than status one %s", lvg.Name, statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String()))
+						messageBldr.WriteString(fmt.Sprintf("ThinPool %s on the node has size %s which is less than status one %s. ", statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String()))
 					}
 				}
 			}
