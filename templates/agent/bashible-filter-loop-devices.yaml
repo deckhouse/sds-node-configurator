@@ -59,5 +59,6 @@ spec:
     EOF
     }
 
+    bb-log-info "Blacklisting loop-devices"
     configure_lvm
     configure_multipath
