@@ -25,12 +25,12 @@ from deckhouse import hook
 # This webhook ensures the migration of LVMVolumeGroup resources from the old CRD version to the new one:
 # - Removes field spec.blockDeviceNames
 # - Adds spec.Local field and fills its value 'nodeName' with the resource's node.
-# - Adds spec.blockDeviceSelector field and fills it with the LVMVolumeGroup nodeName and blockDeviceNames
+# - Adds spec.blockDeviceSelector field and fills it with the LVMVolumeGroup blockDeviceNames
 
 # The expecting result of the hook is:
 # - LvmVolumeGroup kind is replaced by LVMVolumeGroup one for lvmvolumegroups CRD and CRs
 # - LVMVolumeGroup CRD has the condition 'MigrationCompleted' with status 'True'
-# - LvmVolumeGroupBackup resources are created and their label 'migration-completed' has value 'true'
+# - LvmVolumeGroupBackup resources are created if needed and their labels 'migration-completed' have value 'true'
 # - new LVMVolumeGroup resources are in Ready state
 
 config = """
@@ -45,7 +45,6 @@ version = 'v1alpha1'
 ds_name = 'sds-node-configurator'
 ds_ns = 'd8-sds-node-configurator'
 lvg_crd_name = "lvmvolumegroups.storage.deckhouse.io"
-secret_name = 'lvg-migration'
 
 migration_completed_label = 'migration-completed'
 migration_condition_type = 'MigrationCompleted'
@@ -173,7 +172,7 @@ def main(ctx: hook.Context):
             if len(lvg_list.get('items', [])) == 0:
                 print(f"{migrate_script} no lvmvolumegroup resources found, tries to delete LvmVolumeGroup CRD")
                 try:
-                    api_extension.delete_custom_resource_definition(lvg_crd_name)
+                    delete_old_lvg_crd()
                 except Exception as e:
                     print(f"{migrate_script} unable to delete LvmVolumeGroup CRD, error: {e}")
                     raise e
@@ -437,7 +436,6 @@ def main(ctx: hook.Context):
         print(f"{migrate_script} unable to add a condition to the LVMVolumeGroup CRD, error: {e}")
         raise e
     print(f"{migrate_script} successfully migrated LvmVolumeGroup to LVMVolumeGroup CRD")
-    return
     ### End of LVMVolumeGroup CRD flow
 
 
@@ -558,7 +556,6 @@ def configure_new_lvg_from_backup(backup):
     del lvg['metadata']['labels'][migration_completed_label]
     print(f"{migrate_script} LVMVolumeGroup {lvg_name} spec after adding the Local field: {lvg['spec']}")
     lvg['spec']['blockDeviceSelector'] = {
-        'matchLabels': {'kubernetes.io/hostname': lvg['spec']['local']['nodeName']},
         'matchExpressions': [
             {'key': 'kubernetes.io/metadata.name', 'operator': 'In', 'values': bd_names}]
     }
