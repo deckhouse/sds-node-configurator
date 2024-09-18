@@ -318,11 +318,11 @@ func ReconcileUnhealthyLVMVolumeGroups(
 				}
 
 				// take thin-pools from status instead of spec to prevent miss never-created ones
-				for _, statusTp := range lvg.Status.ThinPools {
+				for i, statusTp := range lvg.Status.ThinPools {
 					if candidateTp, exist := candidateTPs[statusTp.Name]; !exist {
 						log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, statusTp.Name))
 						messageBldr.WriteString(fmt.Sprintf("Unable to find ThinPool %s. ", statusTp.Name))
-						statusTp.Ready = false
+						lvg.Status.ThinPools[i].Ready = false
 					} else if !utils.AreSizesEqualWithinDelta(candidate.VGSize, statusTp.ActualSize, internal.ResizeDelta) &&
 						candidateTp.ActualSize.Value()+internal.ResizeDelta.Value() < statusTp.ActualSize.Value() {
 						// that means thin-pool is not 100%VG space
