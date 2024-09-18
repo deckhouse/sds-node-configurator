@@ -487,7 +487,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				ThinPools:             convertSpecThinPools(specThinPools),
 				Type:                  Type,
 				Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: NodeName},
-				BlockDeviceSelector:   configureBlockDeviceSelector(candidate, NodeName),
+				BlockDeviceSelector:   configureBlockDeviceSelector(candidate),
 			},
 			Status: v1alpha1.LVMVolumeGroupStatus{
 				AllocatedSize: size10G,

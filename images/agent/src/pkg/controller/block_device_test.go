@@ -48,7 +48,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		MachineID: "test-id",
 	}
 
-	t.Run("GetAPIBlockDevicesBySelector", func(t *testing.T) {
+	t.Run("GetAPIBlockDevices", func(t *testing.T) {
 		t.Run("bds_exist_match_labels_and_expressions_return_bds", func(t *testing.T) {
 			const (
 				name1    = "name1"
@@ -120,7 +120,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := GetAPIBlockDevicesBySelector(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 
@@ -195,7 +195,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := GetAPIBlockDevicesBySelector(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 
@@ -276,7 +276,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := GetAPIBlockDevicesBySelector(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 				_, ok := actualBd[name1]

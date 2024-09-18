@@ -92,7 +92,7 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl client.Client, metr
 		log.Debug("[RunLVMVolumeGroupDiscoverController] no current LVMVolumeGroups found")
 	}
 
-	blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
+	blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics, nil)
 	if err != nil {
 		log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to GetAPIBlockDevices")
 		for _, lvg := range currentLVMVGs {
@@ -774,7 +774,7 @@ func CreateLVMVolumeGroupByCandidate(
 		},
 		Spec: v1alpha1.LVMVolumeGroupSpec{
 			ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
-			BlockDeviceSelector:   configureBlockDeviceSelector(candidate, nodeName),
+			BlockDeviceSelector:   configureBlockDeviceSelector(candidate),
 			ThinPools:             convertSpecThinPools(candidate.SpecThinPools),
 			Type:                  candidate.Type,
 			Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
@@ -879,11 +879,8 @@ func UpdateLVMVolumeGroupByCandidate(
 	return err
 }
 
-func configureBlockDeviceSelector(candidate internal.LVMVolumeGroupCandidate, nodeName string) *metav1.LabelSelector {
+func configureBlockDeviceSelector(candidate internal.LVMVolumeGroupCandidate) *metav1.LabelSelector {
 	return &metav1.LabelSelector{
-		MatchLabels: map[string]string{
-			internal.HostNameLabelKey: nodeName,
-		},
 		MatchExpressions: []metav1.LabelSelectorRequirement{
 			{
 				Key:      internal.MetadataNameLabelKey,

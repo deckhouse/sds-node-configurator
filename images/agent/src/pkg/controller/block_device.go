@@ -31,6 +31,7 @@ import (
 	"github.com/gosimple/slug"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -92,7 +93,7 @@ func BlockDeviceReconcile(ctx context.Context, cl client.Client, log logger.Logg
 		return false
 	}
 
-	apiBlockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
+	apiBlockDevices, err := GetAPIBlockDevices(ctx, cl, metrics, nil)
 	if err != nil {
 		log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDevices")
 		return true
@@ -162,11 +163,16 @@ func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.Blo
 		!reflect.DeepEqual(ConfigureBlockDeviceLabels(blockDevice), blockDevice.Labels)
 }
 
-func GetAPIBlockDevicesBySelector(ctx context.Context, cl client.Client, metrics monitoring.Metrics, selector *metav1.LabelSelector) (map[string]v1alpha1.BlockDevice, error) {
+// GetAPIBlockDevices returns map of BlockDevice resources with BlockDevice as a key. You might specify a selector to get a subset or
+// leave it as nil to get all the resources.
+func GetAPIBlockDevices(ctx context.Context, cl client.Client, metrics monitoring.Metrics, selector *metav1.LabelSelector) (map[string]v1alpha1.BlockDevice, error) {
 	list := &v1alpha1.BlockDeviceList{}
 	s, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil {
 		return nil, err
+	}
+	if s == labels.Nothing() {
+		s = nil
 	}
 	start := time.Now()
 	err = cl.List(ctx, list, &client.ListOptions{LabelSelector: s})
@@ -183,25 +189,6 @@ func GetAPIBlockDevicesBySelector(ctx context.Context, cl client.Client, metrics
 	}
 
 	return result, nil
-}
-
-func GetAPIBlockDevices(ctx context.Context, kc client.Client, metrics monitoring.Metrics) (map[string]v1alpha1.BlockDevice, error) {
-	listDevice := &v1alpha1.BlockDeviceList{}
-
-	start := time.Now()
-	err := kc.List(ctx, listDevice)
-	metrics.APIMethodsDuration(BlockDeviceCtrlName, "list").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.APIMethodsExecutionCount(BlockDeviceCtrlName, "list").Inc()
-	if err != nil {
-		metrics.APIMethodsErrors(BlockDeviceCtrlName, "list").Inc()
-		return nil, fmt.Errorf("unable to kc.List, error: %w", err)
-	}
-
-	devices := make(map[string]v1alpha1.BlockDevice, len(listDevice.Items))
-	for _, blockDevice := range listDevice.Items {
-		devices[blockDevice.Name] = blockDevice
-	}
-	return devices, nil
 }
 
 func RemoveDeprecatedAPIDevices(
@@ -561,36 +548,36 @@ func UpdateAPIBlockDevice(ctx context.Context, kc client.Client, metrics monitor
 }
 
 func ConfigureBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]string {
-	var labels map[string]string
+	var lbls map[string]string
 	if blockDevice.Labels == nil {
-		labels = make(map[string]string, 16)
+		lbls = make(map[string]string, 16)
 	} else {
-		labels = make(map[string]string, len(blockDevice.Labels))
+		lbls = make(map[string]string, len(blockDevice.Labels))
 	}
 
 	for key, value := range blockDevice.Labels {
-		labels[key] = value
+		lbls[key] = value
 	}
 
 	slug.Lowercase = false
-	labels[internal.MetadataNameLabelKey] = slug.Make(blockDevice.ObjectMeta.Name)
-	labels[internal.HostNameLabelKey] = slug.Make(blockDevice.Status.NodeName)
-	labels[internal.BlockDeviceTypeLabelKey] = slug.Make(blockDevice.Status.Type)
-	labels[internal.BlockDeviceFSTypeLabelKey] = slug.Make(blockDevice.Status.FsType)
-	labels[internal.BlockDevicePVUUIDLabelKey] = blockDevice.Status.PVUuid
-	labels[internal.BlockDeviceVGUUIDLabelKey] = blockDevice.Status.VGUuid
-	labels[internal.BlockDevicePartUUIDLabelKey] = blockDevice.Status.PartUUID
-	labels[internal.BlockDeviceLVMVolumeGroupNameLabelKey] = slug.Make(blockDevice.Status.LVMVolumeGroupName)
-	labels[internal.BlockDeviceActualVGNameLabelKey] = slug.Make(blockDevice.Status.ActualVGNameOnTheNode)
-	labels[internal.BlockDeviceWWNLabelKey] = slug.Make(blockDevice.Status.Wwn)
-	labels[internal.BlockDeviceSerialLabelKey] = slug.Make(blockDevice.Status.Serial)
-	labels[internal.BlockDeviceSizeLabelKey] = blockDevice.Status.Size.String()
-	labels[internal.BlockDeviceModelLabelKey] = slug.Make(blockDevice.Status.Model)
-	labels[internal.BlockDeviceRotaLabelKey] = strconv.FormatBool(blockDevice.Status.Rota)
-	labels[internal.BlockDeviceHotPlugLabelKey] = strconv.FormatBool(blockDevice.Status.HotPlug)
-	labels[internal.BlockDeviceMachineIDLabelKey] = slug.Make(blockDevice.Status.MachineID)
+	lbls[internal.MetadataNameLabelKey] = slug.Make(blockDevice.ObjectMeta.Name)
+	lbls[internal.HostNameLabelKey] = slug.Make(blockDevice.Status.NodeName)
+	lbls[internal.BlockDeviceTypeLabelKey] = slug.Make(blockDevice.Status.Type)
+	lbls[internal.BlockDeviceFSTypeLabelKey] = slug.Make(blockDevice.Status.FsType)
+	lbls[internal.BlockDevicePVUUIDLabelKey] = blockDevice.Status.PVUuid
+	lbls[internal.BlockDeviceVGUUIDLabelKey] = blockDevice.Status.VGUuid
+	lbls[internal.BlockDevicePartUUIDLabelKey] = blockDevice.Status.PartUUID
+	lbls[internal.BlockDeviceLVMVolumeGroupNameLabelKey] = slug.Make(blockDevice.Status.LVMVolumeGroupName)
+	lbls[internal.BlockDeviceActualVGNameLabelKey] = slug.Make(blockDevice.Status.ActualVGNameOnTheNode)
+	lbls[internal.BlockDeviceWWNLabelKey] = slug.Make(blockDevice.Status.Wwn)
+	lbls[internal.BlockDeviceSerialLabelKey] = slug.Make(blockDevice.Status.Serial)
+	lbls[internal.BlockDeviceSizeLabelKey] = blockDevice.Status.Size.String()
+	lbls[internal.BlockDeviceModelLabelKey] = slug.Make(blockDevice.Status.Model)
+	lbls[internal.BlockDeviceRotaLabelKey] = strconv.FormatBool(blockDevice.Status.Rota)
+	lbls[internal.BlockDeviceHotPlugLabelKey] = strconv.FormatBool(blockDevice.Status.HotPlug)
+	lbls[internal.BlockDeviceMachineIDLabelKey] = slug.Make(blockDevice.Status.MachineID)
 
-	return labels
+	return lbls
 }
 
 func CreateAPIBlockDevice(ctx context.Context, kc client.Client, metrics monitoring.Metrics, candidate internal.BlockDeviceCandidate) (*v1alpha1.BlockDevice, error) {

@@ -273,15 +273,15 @@ func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[str
 		}
 	}
 
-	bdNames := make([]string, 0, len(blockDevices))
+	bdFromOtherNode := make([]string, 0, len(blockDevices))
 	for _, bd := range blockDevices {
 		if bd.Status.NodeName != lvg.Spec.Local.NodeName {
-			bdNames = append(bdNames, bd.Name)
+			bdFromOtherNode = append(bdFromOtherNode, bd.Name)
 		}
 	}
 
-	if len(bdNames) != 0 {
-		return false, fmt.Sprintf("block devices %s have different node names from LVMVolumeGroup Local.NodeName", strings.Join(bdNames, ","))
+	if len(bdFromOtherNode) != 0 {
+		return false, fmt.Sprintf("block devices %s have different node names from LVMVolumeGroup Local.NodeName", strings.Join(bdFromOtherNode, ","))
 	}
 
 	return true, ""
