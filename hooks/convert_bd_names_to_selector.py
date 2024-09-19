@@ -49,6 +49,8 @@ lvg_crd_name = "lvmvolumegroups.storage.deckhouse.io"
 migration_completed_label = 'migration-completed'
 migration_condition_type = 'MigrationCompleted'
 
+retries = 5
+
 
 # need the param as it is given from a running context above
 def main(ctx: hook.Context):
@@ -216,14 +218,14 @@ def main(ctx: hook.Context):
 
                                 # as the next step is creating the LvmVolumeGroupBackup resources, we need to be sure, that
                                 # LvmVolumeGroupBackup CRD has been appeared in a cluster
-                                for count in range(3):
+                                for count in range(retries):
                                     try:
                                         api_extension.read_custom_resource_definition(
                                             "lvmvolumegroupbackups.storage.deckhouse.io")
                                         break
                                     except kubernetes.client.exceptions.ApiException as ae:
                                         if ae.status == 404:
-                                            if count == 2:
+                                            if count == retries - 1:
                                                 return ae
 
                                             time.sleep(1)
@@ -275,14 +277,14 @@ def main(ctx: hook.Context):
         print(f"{migrate_script} check if every LvmVolumeGroupBackup is ready to be used")
         lvg_backup_list = {}
         try:
-            for count in range(3):
+            for count in range(retries):
                 lvg_backup_list = custom_api.list_cluster_custom_object(group=group,
                                                                         plural='lvmvolumegroupbackups',
                                                                         version=version)
                 print(f"{migrate_script} successfully got LvmVolumeGroupBackups")
 
                 if len(lvg_backup_list.get('items', [])) < len(lvg_list.get('items', [])):
-                    if count == 2:
+                    if count == retries - 1:
                         raise Exception('unable to find some LvmVolumeGroup backups')
 
                     print(f"{migrate_script} some backups were not ready yet, retry in 1s")
@@ -461,12 +463,12 @@ def delete_old_lvg_crd():
         kubernetes.client.ApiextensionsV1Api().delete_custom_resource_definition(lvg_crd_name)
 
         # we need to be sure that old CRD was really removed before creating the new one
-        for count in range(3):
+        for count in range(retries):
             try:
                 kubernetes.client.ApiextensionsV1Api().read_custom_resource_definition(lvg_crd_name)
-
-                if count == 2:
+                if count == retries - 1:
                     raise Exception('LvmVolumeGroup CRD still exists in a cluster')
+                time.sleep(1)
             except kubernetes.client.exceptions.ApiException as ae:
                 if ae.status == 404:
                     return
@@ -510,13 +512,13 @@ def create_new_lvg_crd():
                             kubernetes.client.ApiextensionsV1Api().create_custom_resource_definition(manifest)
 
                             # we need to be sure that the new LVMVolumeGroup CRD was created before creating LVMVolumeGroup resources
-                            for count in range(3):
+                            for count in range(retries):
                                 try:
                                     kubernetes.client.ApiextensionsV1Api().read_custom_resource_definition(lvg_crd_name)
                                     break
                                 except kubernetes.client.exceptions.ApiException as ae:
                                     if ae.status == 404:
-                                        if count == 2:
+                                        if count == retries - 1:
                                             raise ae
 
                                         time.sleep(1)
