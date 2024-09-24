@@ -503,7 +503,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				assert.Equal(t, "/dev/mapper/mpatha", device.Name)
 				assert.True(t, candidate.Consumable)
 				candidateName := CreateCandidateName(*log, candidate, devices)
-				assert.Equal(t, "dev-98ca88ddaaddec43b1c4894756f4856244985511", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-98ca88ddaaddec43b1c4894756f4856244985512", candidateName, "device name generated incorrectly")
 			}
 		}
 
