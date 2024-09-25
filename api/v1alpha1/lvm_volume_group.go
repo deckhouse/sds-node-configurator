@@ -21,32 +21,33 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type LvmVolumeGroupList struct {
+type LVMVolumeGroupList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
 
-	Items []LvmVolumeGroup `json:"items"`
+	Items []LVMVolumeGroup `json:"items"`
 }
 
-type LvmVolumeGroup struct {
+type LVMVolumeGroup struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   LvmVolumeGroupSpec   `json:"spec"`
-	Status LvmVolumeGroupStatus `json:"status,omitempty"`
+	Spec   LVMVolumeGroupSpec   `json:"spec"`
+	Status LVMVolumeGroupStatus `json:"status,omitempty"`
 }
 
-type LvmVolumeGroupSpec struct {
+type LVMVolumeGroupSpec struct {
 	ActualVGNameOnTheNode string                       `json:"actualVGNameOnTheNode"`
-	BlockDeviceNames      []string                     `json:"blockDeviceNames"`
-	ThinPools             []LvmVolumeGroupThinPoolSpec `json:"thinPools"`
+	BlockDeviceSelector   *metav1.LabelSelector        `json:"blockDeviceSelector"`
+	ThinPools             []LVMVolumeGroupThinPoolSpec `json:"thinPools"`
 	Type                  string                       `json:"type"`
+	Local                 LVMVolumeGroupLocalSpec      `json:"local"`
 }
 
-type LvmVolumeGroupStatus struct {
+type LVMVolumeGroupStatus struct {
 	AllocatedSize        resource.Quantity              `json:"allocatedSize"`
-	Nodes                []LvmVolumeGroupNode           `json:"nodes"`
-	ThinPools            []LvmVolumeGroupThinPoolStatus `json:"thinPools"`
+	Nodes                []LVMVolumeGroupNode           `json:"nodes"`
+	ThinPools            []LVMVolumeGroupThinPoolStatus `json:"thinPools"`
 	VGSize               resource.Quantity              `json:"vgSize"`
 	VGUuid               string                         `json:"vgUUID"`
 	Phase                string                         `json:"phase"`
@@ -56,7 +57,7 @@ type LvmVolumeGroupStatus struct {
 	VGFree               resource.Quantity              `json:"vgFree"`
 }
 
-type LvmVolumeGroupDevice struct {
+type LVMVolumeGroupDevice struct {
 	BlockDevice string            `json:"blockDevice"`
 	DevSize     resource.Quantity `json:"devSize"`
 	PVSize      resource.Quantity `json:"pvSize"`
@@ -64,12 +65,12 @@ type LvmVolumeGroupDevice struct {
 	Path        string            `json:"path"`
 }
 
-type LvmVolumeGroupNode struct {
-	Devices []LvmVolumeGroupDevice `json:"devices"`
+type LVMVolumeGroupNode struct {
+	Devices []LVMVolumeGroupDevice `json:"devices"`
 	Name    string                 `json:"name"`
 }
 
-type LvmVolumeGroupThinPoolStatus struct {
+type LVMVolumeGroupThinPoolStatus struct {
 	Name            string            `json:"name"`
 	ActualSize      resource.Quantity `json:"actualSize"`
 	UsedSize        resource.Quantity `json:"usedSize"`
@@ -80,8 +81,12 @@ type LvmVolumeGroupThinPoolStatus struct {
 	Message         string            `json:"message"`
 }
 
-type LvmVolumeGroupThinPoolSpec struct {
+type LVMVolumeGroupThinPoolSpec struct {
 	Name            string `json:"name"`
 	Size            string `json:"size"`
 	AllocationLimit string `json:"allocationLimit"`
+}
+
+type LVMVolumeGroupLocalSpec struct {
+	NodeName string `json:"nodeName"`
 }

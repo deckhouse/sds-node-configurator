@@ -67,40 +67,87 @@ description: Использование и примеры работы конт�
 
     ```yaml
     apiVersion: storage.deckhouse.io/v1alpha1
-    kind: LvmVolumeGroup
+    kind: LVMVolumeGroup
     metadata:
       name: "vg-0-on-node-0"
     spec:
       type: Local
-      blockDeviceNames:
-        - dev-c1de9f9b534bf5c0b44e8b1cd39da80d5cda7c3f
-        - dev-f3269d92a99e1f668255a47d5d3500add1462711
-      actualVGNameOnTheNode: "vg-0"
+      local:
+        nodeName: "node-0"
+      blockDeviceSelector:
+        matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+          - dev-07ad52cef2348996b72db262011f1b5f896bb68f
+          - dev-e90e8915902bd6c371e59f89254c0fd644126da7
+    actualVGNameOnTheNode: "vg-0"
+    ```
+
+    ```yaml
+    apiVersion: storage.deckhouse.io/v1alpha1
+    kind: LVMVolumeGroup
+    metadata:
+      name: "vg-0-on-node-0"
+    spec:
+      type: Local
+      local:
+        nodeName: "node-0"
+      blockDeviceSelector:
+        matchLabels:
+          kubernetes.io/hostname: node-0
+    actualVGNameOnTheNode: "vg-0"
     ```
 
   * Пример ресурса для создания локальной `LVM Volume Group` и `Thin-pool` на ней из нескольких `BlockDevice`:
 
     ```yaml
     apiVersion: storage.deckhouse.io/v1alpha1
-    kind: LvmVolumeGroup
+    kind: LVMVolumeGroup
     metadata:
-      name: "vg-thin-on-node-0"
+      name: "vg-0-on-node-0"
     spec:
       type: Local
-      blockDeviceNames:
-        - dev-0428672e39334e545eb96c85f8760fd59dcf15f1
-        - dev-456977ded72ef804dd7cec90eec94b10acdf99b7
-      actualVGNameOnTheNode: "vg-thin"
+      local:
+        nodeName: "node-0"
+      blockDeviceSelector:
+        matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+          - dev-07ad52cef2348996b72db262011f1b5f896bb68f
+          - dev-e90e8915902bd6c371e59f89254c0fd644126da7
+      actualVGNameOnTheNode: "vg-0"
       thinPools:
       - name: thin-1
         size: 250Gi
     ```
 
-  > Обратите внимание, что в ресурсе не указывается узел, на котором будет создана `Volume Group`. Узел берется из ресурсов `BlockDevice`, имена которых указаны в `spec.blockDeviceNames`.
+    ```yaml
+    apiVersion: storage.deckhouse.io/v1alpha1
+    kind: LVMVolumeGroup
+    metadata:
+      name: "vg-0-on-node-0"
+    spec:
+      type: Local
+      local:
+        nodeName: "node-0"
+      blockDeviceSelector:
+        matchLabels:
+          kubernetes.io/hostname: node-0
+      actualVGNameOnTheNode: "vg-0"
+      thinPools:
+      - name: thin-1
+        size: 250Gi
+    ```
+
+  > Вы можете указать любые удобные для Вас селекторы для ресурсов `BlockDevice`. Так, например, Вы можете выбрать все девайсы на этом узле (используя, например, `matchLabels`), либо выбрать часть, дополнительно указав их имена (или иные другие параметры).
+  > Обратите внимание, что поле `spec.local` является обязательным для типа `Local`. В случае расхождения имени в поле `spec.local.nodeName` и селекторах создание LVMVolumeGroup выполнено не будет.
   
   > **Внимание!** Все выбранные блок-девайсы должны принадлежать одному узлу для `LVMVolumeGroup` с типом 'Local'. 
 
 ### Обновление ресурса `LVMVolumeGroup`
+Вы можете изменить желаемое состояние `VolumeGroup` или `thin pool` на узлах с помощью изменения поля `spec` соответствующего ресурса `LVMVolumeGroup`. Контроллер автоматически провалидирует новые данные и, в случае их валидного состояния, внесет необходимые изменения в сущности на узле.
 
 Контроллер в автоматическом режиме обновляет поле `status` ресурса `LVMVolumeGroup`, отображая актуальные данные о соответствующей `LVM Volume Group` на узле.
 Пользователю **не рекомендуется** собственноручно вносить изменения в поле `status`.
@@ -116,6 +163,9 @@ description: Использование и примеры работы конт�
 ```shell
 kubectl delete lvg %lvg-name%
 ```
+
+### Вывод ресурса `BlockDevice` из `LVMVolumeGroup` ресурса
+Для того чтобы вывести `BlockDevice` ресурс из `LVMVolumeGroup` ресурса, необходимо либо изменить поле `spec.blockDeviceSelector` `LVMVolumeGroup` ресурса (добавить другие селекторы), либо изменить соответствующие лейблы у `BlockDevice` ресурса, чтобы они больше не попадали под селекторы `LVMVolumeGroup`. После этого вам необходимо вручную выполнить команды `pvmove`, `vgreduce`, и `pvremove` на узле.
 
 > **Внимание!** Если удаляемый ресурс `LVMVolumeGroup` содержит `Logical Volume` (даже если это только `Thin-pool`, который указан в `spec`) пользователю необходимо самостоятельно удалить все `Logical Volume`, которые содержит удаляемая `Volume Group`. В противном случае ни ресурс, ни `Volume Group` удалены не будут.
 

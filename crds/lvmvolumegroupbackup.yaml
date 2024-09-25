@@ -2,7 +2,7 @@
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: lvmvolumegroups.storage.deckhouse.io
+  name: lvmvolumegroupbackups.storage.deckhouse.io
   labels:
     heritage: deckhouse
     module: storage
@@ -10,11 +10,11 @@ spec:
   group: storage.deckhouse.io
   scope: Cluster
   names:
-    kind: LVMVolumeGroup
-    plural: lvmvolumegroups
-    singular: lvmvolumegroup
+    kind: LvmVolumeGroupBackup
+    plural: lvmvolumegroupbackups
+    singular: lvmvolumegroupbackup
     shortNames:
-      - lvg
+      - lvgbk
   preserveUnknownFields: false
   versions:
     - name: v1alpha1
@@ -24,90 +24,38 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            An interface for managing Volume Groups and Thin pools on the nodes.
-            
-            > These resources might be created both by a user and the sds-node-configurator controller. The sds-node-configurator controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. The controller will fill in both the 'spec' and 'status' fields.
-            > The `spec.thinPools` field must be filled in by yourself.
+            Stores the information from lvmvolumegroups resources to migrate their kind from LvmVolumeGroup to LVMVolumeGroup.
           required:
             - spec
           properties:
             spec:
               type: object
-              x-kubernetes-validations:
-                - rule: |
-                    (self.type == "Local" && has(self.local)) || self.type != "Local"
-                  message: "The 'local' field is required when the 'type' field is 'Local'."
               required:
                 - type
-                - blockDeviceSelector
+                - blockDeviceNames
                 - actualVGNameOnTheNode
               properties:
                 type:
                   type: string
                   description: |
-                    The type of a VolumeGroup. Might be:
+                    The type of a Volume Group. Might be:
                     - Local, that is, local if the devices used are not distributed (not Shared LUN).
                   enum:
                     - Local
-                  x-kubernetes-validations:
-                    - rule: self == oldSelf
-                      message: "The type field is immutable."
-                local:
-                  type: object
+                blockDeviceNames:
+                  type: array
                   description: |
-                    The desired configuration for a local Volume Group.
-                  required:
-                    - nodeName
-                  properties:
-                    nodeName:
-                      type: string
-                      description: |
-                        The desired node for the LVM Volume Group.
-                        
-                        > This field is immutable.
-                      x-kubernetes-validations:
-                        - rule: self == oldSelf
-                          message: "The nodeName field is immutable."
-                blockDeviceSelector:
-                  type: object
-                  description: |
-                    The desired block device selector.
-                  properties:
-                    matchLabels:
-                      type: object
-                      description: |
-                        The desired block device selector labels.
-                      additionalProperties:
-                        type: string
-                    matchExpressions:
-                      type: array
-                      description: |
-                        The desired block device selector expressions.
-                      items:
-                        type: object
-                        properties:
-                          key:
-                            type: string
-                          operator:
-                            type: string
-                            enum:
-                              - In
-                              - NotIn
-                              - Exists
-                              - DoesNotExist
-                          values:
-                            type: array
-                            items:
-                              type: string
+                    An array of block device resource names to create a Volume Group.
+                    
+                    > Note that the selected block devices must belong to the same node for a Local Volume Group.
+                  items:
+                    type: string
                 actualVGNameOnTheNode:
                   type: string
                   description: |
                     The desired name of a Volume Group. Must be unique for the node it is on.
                     
                     > This field is immutable.
-                  x-kubernetes-validations:
-                    - rule: self == oldSelf
-                      message: "The actualVGNameOnTheNode field is immutable."
                 thinPools:
                   type: array
                   description: |
@@ -261,7 +209,7 @@ spec:
                 nodes:
                   type: array
                   description: |
-                   Information about the nodes the Volume Group is on.
+                    Information about the nodes the Volume Group is on.
                   items:
                     type: object
                     properties:
@@ -297,7 +245,7 @@ spec:
                               description: |
                                 The name of the corresponding block device resource.
       subresources:
-        status: {}
+        status: { }
       additionalPrinterColumns:
         - jsonPath: .status.thinPoolReady
           name: ThinPools

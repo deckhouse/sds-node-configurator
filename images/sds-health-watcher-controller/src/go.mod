@@ -4,7 +4,7 @@ go 1.22.3
 
 require (
 	github.com/cloudflare/cfssl v1.5.0
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240805103635-969dc811217b
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240905123334-64f17b70f035
 	github.com/go-logr/logr v1.4.2
 	github.com/prometheus/client_golang v1.19.1
 	github.com/stretchr/testify v1.9.0
@@ -17,6 +17,8 @@ require (
 	k8s.io/utils v0.0.0-20240711033017-18e509b52bc8
 	sigs.k8s.io/controller-runtime v0.19.0
 )
+
+replace github.com/deckhouse/sds-node-configurator/api => ../../../api
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

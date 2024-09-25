@@ -53,15 +53,18 @@ from: {{ $.BASE_GOLANG }}
 final: false
 
 git:
-  - add: /images/agent/src
-    to: /src
+  - add: /
+    to: /
+    includePaths:
+      - api
+      - images/agent/src
     stageDependencies:
       setup:
         - "**/*"
 
 shell:
   setup:
-    - cd /src/cmd
+    - cd /images/agent/src/cmd
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /sds-node-configurator-agent
     - chmod +x /sds-node-configurator-agent
 

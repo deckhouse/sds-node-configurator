@@ -40,11 +40,254 @@ import (
 
 func TestBlockDeviceCtrl(t *testing.T) {
 	ctx := context.Background()
+	cl := NewFakeClient()
+	metrics := monitoring.GetMetrics("")
 	log, _ := logger.NewLogger("1")
 	cfg := config.Options{
 		NodeName:  "test-node",
 		MachineID: "test-id",
 	}
+
+	t.Run("GetAPIBlockDevices", func(t *testing.T) {
+		t.Run("bds_exist_match_labels_and_expressions_return_bds", func(t *testing.T) {
+			const (
+				name1    = "name1"
+				name2    = "name2"
+				name3    = "name3"
+				hostName = "test-host"
+			)
+
+			bds := []v1alpha1.BlockDevice{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: name1,
+						Labels: map[string]string{
+							"kubernetes.io/hostname":      hostName,
+							"kubernetes.io/metadata.name": name1,
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: name2,
+						Labels: map[string]string{
+							"kubernetes.io/hostname":      hostName,
+							"kubernetes.io/metadata.name": name2,
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: name3,
+						Labels: map[string]string{
+							"kubernetes.io/hostname":      hostName,
+							"kubernetes.io/metadata.name": name3,
+						},
+					},
+				},
+			}
+
+			for _, bd := range bds {
+				err := cl.Create(ctx, &bd)
+				if err != nil {
+					t.Error(err)
+				}
+			}
+
+			defer func() {
+				for _, bd := range bds {
+					err := cl.Delete(ctx, &bd)
+					if err != nil {
+						t.Error(err)
+					}
+				}
+			}()
+
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					BlockDeviceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"kubernetes.io/hostname": hostName,
+						},
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      "kubernetes.io/metadata.name",
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{name1, name2},
+							},
+						},
+					},
+				},
+			}
+
+			actualBd, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
+			if assert.NoError(t, err) {
+				assert.Equal(t, 2, len(actualBd))
+
+				_, ok := actualBd[name1]
+				assert.True(t, ok)
+				_, ok = actualBd[name2]
+				assert.True(t, ok)
+				_, ok = actualBd[name3]
+				assert.False(t, ok)
+			}
+		})
+
+		t.Run("bds_exist_only_match_labels_return_bds", func(t *testing.T) {
+			const (
+				name1    = "name11"
+				name2    = "name22"
+				name3    = "name33"
+				hostName = "test-host"
+			)
+
+			bds := []v1alpha1.BlockDevice{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: name1,
+						Labels: map[string]string{
+							"kubernetes.io/hostname":      hostName,
+							"kubernetes.io/metadata.name": name1,
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: name2,
+						Labels: map[string]string{
+							"kubernetes.io/hostname":      hostName,
+							"kubernetes.io/metadata.name": name2,
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: name3,
+						Labels: map[string]string{
+							"kubernetes.io/hostname":      "other-host",
+							"kubernetes.io/metadata.name": name3,
+						},
+					},
+				},
+			}
+
+			for _, bd := range bds {
+				err := cl.Create(ctx, &bd)
+				if err != nil {
+					t.Error(err)
+				}
+			}
+
+			defer func() {
+				for _, bd := range bds {
+					err := cl.Delete(ctx, &bd)
+					if err != nil {
+						t.Error(err)
+					}
+				}
+			}()
+
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					BlockDeviceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"kubernetes.io/hostname": hostName},
+					},
+				},
+			}
+
+			actualBd, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
+			if assert.NoError(t, err) {
+				assert.Equal(t, 2, len(actualBd))
+
+				_, ok := actualBd[name1]
+				assert.True(t, ok)
+				_, ok = actualBd[name2]
+				assert.True(t, ok)
+				_, ok = actualBd[name3]
+				assert.False(t, ok)
+			}
+		})
+
+		t.Run("bds_exist_only_match_expressions_return_bds", func(t *testing.T) {
+			const (
+				name1    = "name111"
+				name2    = "name222"
+				name3    = "name333"
+				hostName = "test-host"
+			)
+
+			bds := []v1alpha1.BlockDevice{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: name1,
+						Labels: map[string]string{
+							"kubernetes.io/hostname":      hostName,
+							"kubernetes.io/metadata.name": name1,
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: name2,
+						Labels: map[string]string{
+							"kubernetes.io/hostname":      hostName,
+							"kubernetes.io/metadata.name": name2,
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: name3,
+						Labels: map[string]string{
+							"kubernetes.io/hostname":      hostName,
+							"kubernetes.io/metadata.name": name3,
+						},
+					},
+				},
+			}
+
+			for _, bd := range bds {
+				err := cl.Create(ctx, &bd)
+				if err != nil {
+					t.Error(err)
+				}
+			}
+
+			defer func() {
+				for _, bd := range bds {
+					err := cl.Delete(ctx, &bd)
+					if err != nil {
+						t.Error(err)
+					}
+				}
+			}()
+
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					BlockDeviceSelector: &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      "kubernetes.io/metadata.name",
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{name1, name2},
+							},
+						},
+					},
+				},
+			}
+
+			actualBd, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
+			if assert.NoError(t, err) {
+				assert.Equal(t, 2, len(actualBd))
+				_, ok := actualBd[name1]
+				assert.True(t, ok)
+				_, ok = actualBd[name2]
+				assert.True(t, ok)
+				_, ok = actualBd[name3]
+				assert.False(t, ok)
+			}
+		})
+	})
 
 	t.Run("shouldDeleteBlockDevice", func(t *testing.T) {
 		t.Run("returns_true", func(t *testing.T) {
@@ -107,14 +350,14 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			goodName = "test-candidate1"
 			badName  = "test-candidate2"
 		)
-		cl := NewFakeClient()
+
 		candidates := []internal.BlockDeviceCandidate{
 			{
 				NodeName:              cfg.NodeName,
 				Consumable:            false,
 				PVUuid:                "142412421",
 				VGUuid:                "123123123",
-				LvmVolumeGroupName:    "test-lvg",
+				LVMVolumeGroupName:    "test-lvg",
 				ActualVGNameOnTheNode: "test-vg",
 				Wwn:                   "12414212",
 				Serial:                "1412412412412",
@@ -328,7 +571,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				Consumable:            false,
 				PVUuid:                "testPV",
 				VGUuid:                "testVGUID",
-				LvmVolumeGroupName:    "testLVGName",
+				LVMVolumeGroupName:    "testLVGName",
 				ActualVGNameOnTheNode: "testNameOnNode",
 				Wwn:                   "testWWN",
 				Serial:                "testSERIAL",
@@ -353,7 +596,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			internal.BlockDevicePVUUIDLabelKey:             blockDevice.Status.PVUuid,
 			internal.BlockDeviceVGUUIDLabelKey:             blockDevice.Status.VGUuid,
 			internal.BlockDevicePartUUIDLabelKey:           blockDevice.Status.PartUUID,
-			internal.BlockDeviceLVMVolumeGroupNameLabelKey: blockDevice.Status.LvmVolumeGroupName,
+			internal.BlockDeviceLVMVolumeGroupNameLabelKey: blockDevice.Status.LVMVolumeGroupName,
 			internal.BlockDeviceActualVGNameLabelKey:       blockDevice.Status.ActualVGNameOnTheNode,
 			internal.BlockDeviceWWNLabelKey:                blockDevice.Status.Wwn,
 			internal.BlockDeviceSerialLabelKey:             blockDevice.Status.Serial,
@@ -377,7 +620,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				Consumable:            false,
 				PVUuid:                "testPV",
 				VGUuid:                "testVGUID",
-				LvmVolumeGroupName:    "testLVGName",
+				LVMVolumeGroupName:    "testLVGName",
 				ActualVGNameOnTheNode: "testNameOnNode",
 				Wwn:                   "testWWN",
 				Serial:                "testSERIAL",
@@ -399,7 +642,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				Consumable:            true,
 				PVUuid:                "testPV2",
 				VGUuid:                "testVGUID2",
-				LvmVolumeGroupName:    "testLVGName2",
+				LVMVolumeGroupName:    "testLVGName2",
 				ActualVGNameOnTheNode: "testNameOnNode2",
 				Wwn:                   "testWWN2",
 				Serial:                "testSERIAL2",
@@ -424,7 +667,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				Consumable:            false,
 				PVUuid:                "testPV",
 				VGUuid:                "testVGUID",
-				LvmVolumeGroupName:    "testLVGName",
+				LVMVolumeGroupName:    "testLVGName",
 				ActualVGNameOnTheNode: "testNameOnNode",
 				Wwn:                   "testWWN",
 				Serial:                "testSERIAL",

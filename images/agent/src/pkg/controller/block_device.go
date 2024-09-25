@@ -31,7 +31,8 @@ import (
 	"github.com/gosimple/slug"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -81,7 +82,7 @@ func RunBlockDeviceController(
 	return c, err
 }
 
-func BlockDeviceReconcile(ctx context.Context, cl kclient.Client, log logger.Logger, metrics monitoring.Metrics, cfg config.Options, sdsCache *cache.Cache) bool {
+func BlockDeviceReconcile(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, cfg config.Options, sdsCache *cache.Cache) bool {
 	reconcileStart := time.Now()
 
 	log.Info("[RunBlockDeviceController] START reconcile of block devices")
@@ -92,7 +93,7 @@ func BlockDeviceReconcile(ctx context.Context, cl kclient.Client, log logger.Log
 		return false
 	}
 
-	apiBlockDevices, err := GetAPIBlockDevices(ctx, cl, metrics)
+	apiBlockDevices, err := GetAPIBlockDevices(ctx, cl, metrics, nil)
 	if err != nil {
 		log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDevices")
 		return true
@@ -147,7 +148,7 @@ func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.Blo
 		candidate.PVUuid != blockDevice.Status.PVUuid ||
 		candidate.VGUuid != blockDevice.Status.VGUuid ||
 		candidate.PartUUID != blockDevice.Status.PartUUID ||
-		candidate.LvmVolumeGroupName != blockDevice.Status.LvmVolumeGroupName ||
+		candidate.LVMVolumeGroupName != blockDevice.Status.LVMVolumeGroupName ||
 		candidate.ActualVGNameOnTheNode != blockDevice.Status.ActualVGNameOnTheNode ||
 		candidate.Wwn != blockDevice.Status.Wwn ||
 		candidate.Serial != blockDevice.Status.Serial ||
@@ -162,28 +163,37 @@ func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.Blo
 		!reflect.DeepEqual(ConfigureBlockDeviceLabels(blockDevice), blockDevice.Labels)
 }
 
-func GetAPIBlockDevices(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics) (map[string]v1alpha1.BlockDevice, error) {
-	listDevice := &v1alpha1.BlockDeviceList{}
-
+// GetAPIBlockDevices returns map of BlockDevice resources with BlockDevice as a key. You might specify a selector to get a subset or
+// leave it as nil to get all the resources.
+func GetAPIBlockDevices(ctx context.Context, cl client.Client, metrics monitoring.Metrics, selector *metav1.LabelSelector) (map[string]v1alpha1.BlockDevice, error) {
+	list := &v1alpha1.BlockDeviceList{}
+	s, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil {
+		return nil, err
+	}
+	if s == labels.Nothing() {
+		s = nil
+	}
 	start := time.Now()
-	err := kc.List(ctx, listDevice)
+	err = cl.List(ctx, list, &client.ListOptions{LabelSelector: s})
 	metrics.APIMethodsDuration(BlockDeviceCtrlName, "list").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.APIMethodsExecutionCount(BlockDeviceCtrlName, "list").Inc()
 	if err != nil {
 		metrics.APIMethodsErrors(BlockDeviceCtrlName, "list").Inc()
-		return nil, fmt.Errorf("unable to kc.List, error: %w", err)
+		return nil, err
 	}
 
-	devices := make(map[string]v1alpha1.BlockDevice, len(listDevice.Items))
-	for _, blockDevice := range listDevice.Items {
-		devices[blockDevice.Name] = blockDevice
+	result := make(map[string]v1alpha1.BlockDevice, len(list.Items))
+	for _, item := range list.Items {
+		result[item.Name] = item
 	}
-	return devices, nil
+
+	return result, nil
 }
 
 func RemoveDeprecatedAPIDevices(
 	ctx context.Context,
-	cl kclient.Client,
+	cl client.Client,
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	candidates []internal.BlockDeviceCandidate,
@@ -293,7 +303,7 @@ func GetBlockDeviceCandidates(log logger.Logger, cfg config.Options, sdsCache *c
 						candidate.PVUuid = pv.PVUuid
 						candidate.VGUuid = pv.VGUuid
 						candidate.ActualVGNameOnTheNode = pv.VGName
-						candidate.LvmVolumeGroupName = lvmVGName
+						candidate.LVMVolumeGroupName = lvmVGName
 					} else {
 						if len(pv.VGName) != 0 {
 							log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] The device is a PV with VG named %s that lacks our tag %s. Removing it from Kubernetes", pv.VGName, internal.LVMTags[0]))
@@ -502,7 +512,7 @@ func readSerialBlockDevice(deviceName string, isMdRaid bool) (string, error) {
 	return string(serial), nil
 }
 
-func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, blockDevice v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {
+func UpdateAPIBlockDevice(ctx context.Context, kc client.Client, metrics monitoring.Metrics, blockDevice v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) error {
 	blockDevice.Status = v1alpha1.BlockDeviceStatus{
 		Type:                  candidate.Type,
 		FsType:                candidate.FSType,
@@ -511,7 +521,7 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 		PVUuid:                candidate.PVUuid,
 		VGUuid:                candidate.VGUuid,
 		PartUUID:              candidate.PartUUID,
-		LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
+		LVMVolumeGroupName:    candidate.LVMVolumeGroupName,
 		ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
 		Wwn:                   candidate.Wwn,
 		Serial:                candidate.Serial,
@@ -538,39 +548,39 @@ func UpdateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 }
 
 func ConfigureBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]string {
-	var labels map[string]string
+	var lbls map[string]string
 	if blockDevice.Labels == nil {
-		labels = make(map[string]string, 16)
+		lbls = make(map[string]string, 16)
 	} else {
-		labels = make(map[string]string, len(blockDevice.Labels))
+		lbls = make(map[string]string, len(blockDevice.Labels))
 	}
 
 	for key, value := range blockDevice.Labels {
-		labels[key] = value
+		lbls[key] = value
 	}
 
 	slug.Lowercase = false
-	labels[internal.MetadataNameLabelKey] = slug.Make(blockDevice.ObjectMeta.Name)
-	labels[internal.HostNameLabelKey] = slug.Make(blockDevice.Status.NodeName)
-	labels[internal.BlockDeviceTypeLabelKey] = slug.Make(blockDevice.Status.Type)
-	labels[internal.BlockDeviceFSTypeLabelKey] = slug.Make(blockDevice.Status.FsType)
-	labels[internal.BlockDevicePVUUIDLabelKey] = blockDevice.Status.PVUuid
-	labels[internal.BlockDeviceVGUUIDLabelKey] = blockDevice.Status.VGUuid
-	labels[internal.BlockDevicePartUUIDLabelKey] = blockDevice.Status.PartUUID
-	labels[internal.BlockDeviceLVMVolumeGroupNameLabelKey] = slug.Make(blockDevice.Status.LvmVolumeGroupName)
-	labels[internal.BlockDeviceActualVGNameLabelKey] = slug.Make(blockDevice.Status.ActualVGNameOnTheNode)
-	labels[internal.BlockDeviceWWNLabelKey] = slug.Make(blockDevice.Status.Wwn)
-	labels[internal.BlockDeviceSerialLabelKey] = slug.Make(blockDevice.Status.Serial)
-	labels[internal.BlockDeviceSizeLabelKey] = blockDevice.Status.Size.String()
-	labels[internal.BlockDeviceModelLabelKey] = slug.Make(blockDevice.Status.Model)
-	labels[internal.BlockDeviceRotaLabelKey] = strconv.FormatBool(blockDevice.Status.Rota)
-	labels[internal.BlockDeviceHotPlugLabelKey] = strconv.FormatBool(blockDevice.Status.HotPlug)
-	labels[internal.BlockDeviceMachineIDLabelKey] = slug.Make(blockDevice.Status.MachineID)
+	lbls[internal.MetadataNameLabelKey] = slug.Make(blockDevice.ObjectMeta.Name)
+	lbls[internal.HostNameLabelKey] = slug.Make(blockDevice.Status.NodeName)
+	lbls[internal.BlockDeviceTypeLabelKey] = slug.Make(blockDevice.Status.Type)
+	lbls[internal.BlockDeviceFSTypeLabelKey] = slug.Make(blockDevice.Status.FsType)
+	lbls[internal.BlockDevicePVUUIDLabelKey] = blockDevice.Status.PVUuid
+	lbls[internal.BlockDeviceVGUUIDLabelKey] = blockDevice.Status.VGUuid
+	lbls[internal.BlockDevicePartUUIDLabelKey] = blockDevice.Status.PartUUID
+	lbls[internal.BlockDeviceLVMVolumeGroupNameLabelKey] = slug.Make(blockDevice.Status.LVMVolumeGroupName)
+	lbls[internal.BlockDeviceActualVGNameLabelKey] = slug.Make(blockDevice.Status.ActualVGNameOnTheNode)
+	lbls[internal.BlockDeviceWWNLabelKey] = slug.Make(blockDevice.Status.Wwn)
+	lbls[internal.BlockDeviceSerialLabelKey] = slug.Make(blockDevice.Status.Serial)
+	lbls[internal.BlockDeviceSizeLabelKey] = blockDevice.Status.Size.String()
+	lbls[internal.BlockDeviceModelLabelKey] = slug.Make(blockDevice.Status.Model)
+	lbls[internal.BlockDeviceRotaLabelKey] = strconv.FormatBool(blockDevice.Status.Rota)
+	lbls[internal.BlockDeviceHotPlugLabelKey] = strconv.FormatBool(blockDevice.Status.HotPlug)
+	lbls[internal.BlockDeviceMachineIDLabelKey] = slug.Make(blockDevice.Status.MachineID)
 
-	return labels
+	return lbls
 }
 
-func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, candidate internal.BlockDeviceCandidate) (*v1alpha1.BlockDevice, error) {
+func CreateAPIBlockDevice(ctx context.Context, kc client.Client, metrics monitoring.Metrics, candidate internal.BlockDeviceCandidate) (*v1alpha1.BlockDevice, error) {
 	blockDevice := &v1alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: candidate.Name,
@@ -583,7 +593,7 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 			PVUuid:                candidate.PVUuid,
 			VGUuid:                candidate.VGUuid,
 			PartUUID:              candidate.PartUUID,
-			LvmVolumeGroupName:    candidate.LvmVolumeGroupName,
+			LVMVolumeGroupName:    candidate.LVMVolumeGroupName,
 			ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
 			Wwn:                   candidate.Wwn,
 			Serial:                candidate.Serial,
@@ -608,7 +618,7 @@ func CreateAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monito
 	return blockDevice, nil
 }
 
-func DeleteAPIBlockDevice(ctx context.Context, kc kclient.Client, metrics monitoring.Metrics, device *v1alpha1.BlockDevice) error {
+func DeleteAPIBlockDevice(ctx context.Context, kc client.Client, metrics monitoring.Metrics, device *v1alpha1.BlockDevice) error {
 	start := time.Now()
 	err := kc.Delete(ctx, device)
 	metrics.APIMethodsDuration(BlockDeviceCtrlName, "delete").Observe(metrics.GetEstimatedTimeInSeconds(start))

@@ -3,6 +3,7 @@ package cache
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"agent/internal"
@@ -81,8 +82,7 @@ func (c *Cache) StoreLVs(lvs []internal.LVData, stdErr bytes.Buffer) {
 	c.m.Lock()
 	defer c.m.Unlock()
 
-	for _, lv := range lvsOnNode {
-		k := c.configureLVKey(lv.VGName, lv.LVName)
+	for k, lv := range lvsOnNode {
 		if cachedLV, exist := c.lvs[k]; !exist || cachedLV.Exist {
 			c.lvs[k] = &LVData{
 				Data:  lv,
@@ -92,7 +92,7 @@ func (c *Cache) StoreLVs(lvs []internal.LVData, stdErr bytes.Buffer) {
 	}
 
 	for key, lv := range c.lvs {
-		if lv.Exist {
+		if lv.Exist && reflect.ValueOf(lv.Data).IsZero() {
 			continue
 		}
 
@@ -126,7 +126,7 @@ func (c *Cache) AddLV(vgName, lvName string) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	c.lvs[c.configureLVKey(vgName, lvName)] = &LVData{
-		Data:  internal.LVData{VGName: vgName, LVName: lvName},
+		Data:  internal.LVData{},
 		Exist: true,
 	}
 }

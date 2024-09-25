@@ -15,9 +15,16 @@ spec:
                   description: |
                     Тип Volume Group. Может быть: 
                     - Local, то есть локальным, если используемые девайсы не являются распределенными (не Shared LUN).
-                blockDeviceNames:
+                local:
                   description: |
-                    Список имен ресурсов BlockDevice для создания Volume Group.
+                    Желаемая конфигурация для локальной Volume Group.
+                  properties:
+                    nodeName:
+                      description: |
+                        Имя ноды, на которой планируется размещение Volume Group.
+                blockDeviceSelector:
+                  description: |
+                    Желаемый селектор для выбора BlockDevice ресурсов.
 
                     > Обратите внимание, что выбранные блок-девайсы должны принадлежать одному узлу для Volume Group с типом 'Local'.
                 actualVGNameOnTheNode:
