@@ -253,13 +253,13 @@ def main(ctx: hook.Context):
                               'name':
                                   lvg['metadata'][
                                       'name'],
-                              'labels':
-                                  lvg['metadata'][
-                                      'labels'],
                               'finalizers':
                                   lvg['metadata'][
                                       'finalizers']},
                           'spec': lvg['spec']}
+            if 'labels' in lvg['metadata']:
+                lvg_backup['metadata']['labels'] = lvg['metadata']['labels']
+
             lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg['status']['nodes'][0]['name']
             lvg_backup['metadata']['labels'][migration_completed_label] = 'false'
             try:
