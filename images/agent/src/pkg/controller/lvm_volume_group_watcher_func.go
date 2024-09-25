@@ -102,7 +102,7 @@ func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1a
 	}
 
 	if _, exist := newLVG.Labels[internal.LVGUpdateTriggerLabel]; exist {
-		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] updte event should be reconciled as the LVMVolumeGroup %s has the label %s", newLVG.Name, internal.LVGUpdateTriggerLabel))
+		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has the label %s", newLVG.Name, internal.LVGUpdateTriggerLabel))
 		return true
 	}
 
@@ -246,7 +246,7 @@ func syncThinPoolsAllocationLimit(ctx context.Context, cl client.Client, log log
 	if updated {
 		fmt.Printf("%+v", lvg.Status.ThinPools)
 		log.Debug(fmt.Sprintf("[syncThinPoolsAllocationLimit] tries to update the LVMVolumeGroup %s", lvg.Name))
-		err := cl.Status().Update(ctx, lvg)
+		err = cl.Status().Update(ctx, lvg)
 		if err != nil {
 			return err
 		}

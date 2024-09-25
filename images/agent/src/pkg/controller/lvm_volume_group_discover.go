@@ -163,8 +163,8 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl client.Client, metr
 
 			log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] updated LVMVolumeGroup, name: "%s"`, lvg.Name))
 		} else {
-			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is not yet created. Create it", lvg.Name))
-			lvm, err := CreateLVMVolumeGroupByCandidate(ctx, log, metrics, cl, candidate, cfg.NodeName)
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is not yet created. Create it", candidate.LVMVGName))
+			createdLvg, err := CreateLVMVolumeGroupByCandidate(ctx, log, metrics, cl, candidate, cfg.NodeName)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to CreateLVMVolumeGroupByCandidate %s. Requeue the request in %s", candidate.LVMVGName, cfg.VolumeGroupScanIntervalSec.String()))
 				shouldRequeue = true
@@ -173,19 +173,19 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl client.Client, metr
 
 			err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.TypeVGConfigurationApplied, "Success", "all configuration has been applied")
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, createdLvg.Name))
 				shouldRequeue = true
 				continue
 			}
 
 			err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, internal.TypeVGReady, internal.ReasonUpdated, "ready to create LV")
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name))
+				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, createdLvg.Name))
 				shouldRequeue = true
 				continue
 			}
 
-			log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] created new APILVMVolumeGroup, name: "%s"`, lvm.Name))
+			log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] created new APILVMVolumeGroup, name: "%s"`, createdLvg.Name))
 		}
 	}
 
@@ -926,7 +926,7 @@ func convertSpecThinPools(thinPools map[string]resource.Quantity) []v1alpha1.LVM
 		result = append(result, v1alpha1.LVMVolumeGroupThinPoolSpec{
 			Name:            name,
 			AllocationLimit: "150%",
-			Size: size.String(),
+			Size:            size.String(),
 		})
 	}
 
