@@ -132,42 +132,18 @@ func ReconcileBlockDeviceLabels(ctx context.Context, cl client.Client, log logge
 				usedBdNames[d.BlockDevice] = struct{}{}
 			}
 		}
-		if lvg.Labels == nil {
-			lvg.Labels = make(map[string]string)
-		}
 
 		shouldTrigger := false
-		switch selector.Matches(labels.Set(blockDevice.Labels)) {
-		case true:
-			log.Debug(fmt.Sprintf("[ReconcileBlockDeviceLabels] BlockDevice %s matches a blockDeviceSelector of the LVMVolumeGroup %s", blockDevice.Name, lvg.Name))
-			if _, used := usedBdNames[blockDevice.Name]; !used {
-				log.Info(fmt.Sprintf("[ReconcileBlockDeviceLabels] the BlockDevice %s matches the LVMVolumeGroup %s blockDeviceSelector, but is not used yet. Add the label %s to provide LVMVolumeGroup resource configuration update", blockDevice.Name, lvg.Name, LVGUpdateTriggerLabel))
-				shouldTrigger = true
-				break
-			}
-
-			// for the case when BlockDevice stopped match the LVG blockDeviceSelector and then start again
-			for _, c := range lvg.Status.Conditions {
-				if c.Type == internal.TypeVGConfigurationApplied && c.Status == metav1.ConditionFalse {
-					log.Warning(fmt.Sprintf("[ReconcileBlockDeviceLabels] the BlockDevice %s matches the LVMVolumeGroup %s blockDeviceSelector, but the LVMVolumeGroup has condition %s in status False. Add the label %s to provide LVMVolumeGroup resource configuration update", blockDevice.Name, lvg.Name, c.Type, LVGUpdateTriggerLabel))
-					shouldTrigger = true
-					break
-				}
-			}
-
-			log.Debug(fmt.Sprintf("[ReconcileBlockDeviceLabels] the BlockDevice %s matches the LVMVolumeGroup %s blockDeviceSelector and already used by the resource", blockDevice.Name, lvg.Name))
-		case false:
-			log.Debug(fmt.Sprintf("[ReconcileBlockDeviceLabels] BlockDevice %s does not match a blockDeviceSelector of the LVMVolumeGroup %s", blockDevice.Name, lvg.Name))
-			if _, used := usedBdNames[blockDevice.Name]; used {
-				log.Warning(fmt.Sprintf("[ReconcileBlockDeviceLabels] the BlockDevice %s does not match the LVMVolumeGroup %s blockDeviceSelector, but is used by the resource. Add the label %s to provide LVMVolumeGroup resource configuration update", blockDevice.Name, lvg.Name, LVGUpdateTriggerLabel))
-				shouldTrigger = true
-				break
-			}
-
-			log.Debug(fmt.Sprintf("[ReconcileBlockDeviceLabels] the BlockDevice %s does not match the LVMVolumeGroup %s blockDeviceSelector and is not used by the resource", blockDevice.Name, lvg.Name))
+		if selector.Matches(labels.Set(blockDevice.Labels)) {
+			shouldTrigger = shouldTriggerLVGUpdateIfMatches(log, &lvg, blockDevice, usedBdNames)
+		} else {
+			shouldTrigger = shouldTriggerLVGUpdateIfNotMatches(log, &lvg, blockDevice, usedBdNames)
 		}
 
 		if shouldTrigger {
+			if lvg.Labels == nil {
+				lvg.Labels = make(map[string]string)
+			}
 			lvg.Labels[LVGUpdateTriggerLabel] = "true"
 			log.Info(fmt.Sprintf("[ReconcileBlockDeviceLabels] the LVMVolumeGroup %s should be triggered to update its configuration", lvg.Name))
 			err = cl.Update(ctx, &lvg)
@@ -179,4 +155,34 @@ func ReconcileBlockDeviceLabels(ctx context.Context, cl client.Client, log logge
 	}
 
 	return shouldRetry, nil
+}
+
+func shouldTriggerLVGUpdateIfMatches(log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, blockDevice *v1alpha1.BlockDevice, usedBdNames map[string]struct{}) bool {
+	log.Debug(fmt.Sprintf("[ReconcileBlockDeviceLabels] BlockDevice %s matches a blockDeviceSelector of the LVMVolumeGroup %s", blockDevice.Name, lvg.Name))
+	if _, used := usedBdNames[blockDevice.Name]; !used {
+		log.Info(fmt.Sprintf("[ReconcileBlockDeviceLabels] the BlockDevice %s matches the LVMVolumeGroup %s blockDeviceSelector, but is not used yet. Add the label %s to provide LVMVolumeGroup resource configuration update", blockDevice.Name, lvg.Name, LVGUpdateTriggerLabel))
+		return true
+	}
+
+	// for the case when BlockDevice stopped match the LVG blockDeviceSelector and then start again
+	for _, c := range lvg.Status.Conditions {
+		if c.Type == internal.TypeVGConfigurationApplied && c.Status == metav1.ConditionFalse {
+			log.Warning(fmt.Sprintf("[ReconcileBlockDeviceLabels] the BlockDevice %s matches the LVMVolumeGroup %s blockDeviceSelector, but the LVMVolumeGroup has condition %s in status False. Add the label %s to provide LVMVolumeGroup resource configuration update", blockDevice.Name, lvg.Name, c.Type, LVGUpdateTriggerLabel))
+			return true
+		}
+	}
+
+	log.Debug(fmt.Sprintf("[ReconcileBlockDeviceLabels] the BlockDevice %s matches the LVMVolumeGroup %s blockDeviceSelector and already used by the resource", blockDevice.Name, lvg.Name))
+	return false
+}
+
+func shouldTriggerLVGUpdateIfNotMatches(log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, blockDevice *v1alpha1.BlockDevice, usedBdNames map[string]struct{}) bool {
+	log.Debug(fmt.Sprintf("[ReconcileBlockDeviceLabels] BlockDevice %s does not match a blockDeviceSelector of the LVMVolumeGroup %s", blockDevice.Name, lvg.Name))
+	if _, used := usedBdNames[blockDevice.Name]; used {
+		log.Warning(fmt.Sprintf("[ReconcileBlockDeviceLabels] the BlockDevice %s does not match the LVMVolumeGroup %s blockDeviceSelector, but is used by the resource. Add the label %s to provide LVMVolumeGroup resource configuration update", blockDevice.Name, lvg.Name, LVGUpdateTriggerLabel))
+		return true
+	}
+
+	log.Debug(fmt.Sprintf("[ReconcileBlockDeviceLabels] the BlockDevice %s does not match the LVMVolumeGroup %s blockDeviceSelector and is not used by the resource", blockDevice.Name, lvg.Name))
+	return false
 }
