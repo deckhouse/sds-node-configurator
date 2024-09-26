@@ -70,7 +70,7 @@ func TestRunBlockDeviceLabelsWatcher(t *testing.T) {
 			}
 		}()
 
-		shouldRetry, err := ReconcileBlockDeviceLabels(ctx, cl, log, bd)
+		shouldRetry, err := reconcileBlockDeviceLabels(ctx, cl, log, bd)
 		if assert.NoError(t, err) {
 			assert.False(t, shouldRetry)
 
@@ -128,7 +128,7 @@ func TestRunBlockDeviceLabelsWatcher(t *testing.T) {
 			}
 		}()
 
-		shouldRetry, err := ReconcileBlockDeviceLabels(ctx, cl, log, bd)
+		shouldRetry, err := reconcileBlockDeviceLabels(ctx, cl, log, bd)
 		if assert.NoError(t, err) {
 			assert.True(t, shouldRetry)
 			newLvg := &v1alpha1.LVMVolumeGroup{}
@@ -202,7 +202,7 @@ func TestRunBlockDeviceLabelsWatcher(t *testing.T) {
 			}
 		}()
 
-		shouldRetry, err := ReconcileBlockDeviceLabels(ctx, cl, log, bd)
+		shouldRetry, err := reconcileBlockDeviceLabels(ctx, cl, log, bd)
 		if assert.NoError(t, err) {
 			assert.False(t, shouldRetry)
 			newLvg := &v1alpha1.LVMVolumeGroup{}
@@ -270,7 +270,7 @@ func TestRunBlockDeviceLabelsWatcher(t *testing.T) {
 			}
 		}()
 
-		shouldRetry, err := ReconcileBlockDeviceLabels(ctx, cl, log, bd)
+		shouldRetry, err := reconcileBlockDeviceLabels(ctx, cl, log, bd)
 		if assert.NoError(t, err) {
 			assert.False(t, shouldRetry)
 			newLvg := &v1alpha1.LVMVolumeGroup{}
@@ -338,7 +338,7 @@ func TestRunBlockDeviceLabelsWatcher(t *testing.T) {
 			}
 		}()
 
-		shouldRetry, err := ReconcileBlockDeviceLabels(ctx, cl, log, bd)
+		shouldRetry, err := reconcileBlockDeviceLabels(ctx, cl, log, bd)
 		if assert.NoError(t, err) {
 			assert.False(t, shouldRetry)
 			newLvg := &v1alpha1.LVMVolumeGroup{}
@@ -406,7 +406,7 @@ func TestRunBlockDeviceLabelsWatcher(t *testing.T) {
 			}
 		}()
 
-		shouldRetry, err := ReconcileBlockDeviceLabels(ctx, cl, log, bd)
+		shouldRetry, err := reconcileBlockDeviceLabels(ctx, cl, log, bd)
 		if assert.NoError(t, err) {
 			assert.False(t, shouldRetry)
 			newLvg := &v1alpha1.LVMVolumeGroup{}
