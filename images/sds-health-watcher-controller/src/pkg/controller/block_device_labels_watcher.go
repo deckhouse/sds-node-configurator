@@ -3,14 +3,14 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
+
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
-	"reflect"
-	"sds-health-watcher-controller/config"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"sds-health-watcher-controller/config"
 	"sds-health-watcher-controller/internal"
 	"sds-health-watcher-controller/pkg/logger"
 )
@@ -60,7 +61,7 @@ func RunBlockDeviceLabelsWatcher(
 			}
 
 			if shouldRequeue {
-				log.Warning(fmt.Sprintf("[RunBlockDeviceLabelsWatcher] the request for the BlockDevice %s should be requeued in 5s", bd.Name))
+				log.Warning(fmt.Sprintf("[RunBlockDeviceLabelsWatcher] the request for the BlockDevice %s should be requeued in %s", bd.Name, cfg.ScanIntervalSec.String()))
 				return reconcile.Result{RequeueAfter: cfg.ScanIntervalSec}, nil
 			}
 
