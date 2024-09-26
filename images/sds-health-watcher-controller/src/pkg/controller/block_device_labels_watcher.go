@@ -28,7 +28,7 @@ const (
 	BlockDeviceLabelsWatcherCtrlName = "block-device-labels-watcher-controller"
 
 	// LVGUpdateTriggerLabel if you change this value, you must change its value in agent/src/internal/const.go as well
-	LVGUpdateTriggerLabel = "update-trigger"
+	LVGUpdateTriggerLabel = "storage.deckhouse.io/update-trigger"
 )
 
 func RunBlockDeviceLabelsWatcher(

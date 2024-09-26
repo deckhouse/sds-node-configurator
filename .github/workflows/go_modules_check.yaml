@@ -37,7 +37,7 @@ jobs:
           echo "Processing $go_mod_file"
           
           while IFS= read -r line; do
-            if [[ "line" =~ ^replace ]]; then
+            if [[ "$line" =~ ^replace ]]; then
               continue
             fi
 
