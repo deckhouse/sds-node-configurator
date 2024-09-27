@@ -722,6 +722,38 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}
 		})
 
+		t.Run("validation_fails_due_to_bd_left_the_selector", func(t *testing.T) {
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Status: v1alpha1.LVMVolumeGroupStatus{
+					Nodes: []v1alpha1.LVMVolumeGroupNode{
+						{
+							Devices: []v1alpha1.LVMVolumeGroupDevice{
+								{
+									BlockDevice: "first",
+								},
+								{
+									BlockDevice: "second",
+								},
+							},
+							Name: "some-node",
+						},
+					},
+				},
+			}
+
+			bds := map[string]v1alpha1.BlockDevice{
+				"second": {
+					ObjectMeta: v1.ObjectMeta{
+						Name: "second",
+					},
+				},
+			}
+
+			valid, reason := validateSpecBlockDevices(lvg, bds)
+			assert.False(t, valid)
+			assert.Equal(t, "these BlockDevices no longer match the blockDeviceSelector: first", reason)
+		})
+
 		t.Run("validation_fails_due_to_bd_has_dif_node", func(t *testing.T) {
 			const (
 				nodeName = "nodeName"
@@ -762,8 +794,9 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			valid, _ := validateSpecBlockDevices(lvg, bds)
+			valid, reason := validateSpecBlockDevices(lvg, bds)
 			assert.False(t, valid)
+			assert.Equal(t, "block devices second have different node names from LVMVolumeGroup Local.NodeName", reason)
 		})
 
 		t.Run("validation_fails_due_to_no_block_devices_were_found", func(t *testing.T) {
@@ -787,8 +820,9 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			valid, _ := validateSpecBlockDevices(lvg, nil)
+			valid, reason := validateSpecBlockDevices(lvg, nil)
 			assert.False(t, valid)
+			assert.Equal(t, "none of specified BlockDevices were found", reason)
 		})
 
 		t.Run("validation_fails_due_to_some_blockdevice_were_not_found", func(t *testing.T) {
