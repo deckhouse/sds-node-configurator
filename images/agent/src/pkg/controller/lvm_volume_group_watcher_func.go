@@ -294,19 +294,18 @@ func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[str
 		}
 	}
 
-	// TODO: надо написать, отбирать те, которые для нашей ноды и если никаких нет, то ругаемся
-	bdsForUsage := make([]string, 0, len(blockDevices))
+	return true, ""
+}
+
+func filterBlockDevicesByNodeName(blockDevices map[string]v1alpha1.BlockDevice, nodeName string) map[string]v1alpha1.BlockDevice {
+	bdsForUsage := make(map[string]v1alpha1.BlockDevice, len(blockDevices))
 	for _, bd := range blockDevices {
-		if bd.Status.NodeName == lvg.Spec.Local.NodeName {
-			bdsForUsage = append(bdsForUsage, bd.Name)
+		if bd.Status.NodeName == nodeName {
+			bdsForUsage[bd.Name] = bd
 		}
 	}
 
-	if len(bdsForUsage) == 0 {
-		return false, "no block devices were found for the specified Local.NodeName"
-	}
-
-	return true, ""
+	return bdsForUsage
 }
 
 func deleteLVGIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, cfg config.Options, sdsCache *cache.Cache, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
