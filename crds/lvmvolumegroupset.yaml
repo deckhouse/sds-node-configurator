@@ -1,0 +1,234 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: lvmvolumegroupsets.storage.deckhouse.io
+  labels:
+    heritage: deckhouse
+    module: storage
+spec:
+  group: storage.deckhouse.io
+  scope: Cluster
+  names:
+    kind: LVMVolumeGroupSet
+    plural: lvmvolumegroupsets
+    singular: lvmvolumegroupset
+    shortNames:
+      - lvgset
+  preserveUnknownFields: false
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: |
+            An interface for managing Volume Groups and Thin pools on the nodes.
+            
+            > These resources might be created both by a user and the sds-node-configurator controller. The sds-node-configurator controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. The controller will fill in both the 'spec' and 'status' fields.
+            > The `spec.thinPools` field must be filled in by yourself.
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - strategy
+                - lvmVolumeGroupTemplate
+              properties:
+                strategy:
+                  type: string
+                  description: |
+                    The strategy (rule) to provide LVMVolumeGroup resources by the set.
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: "The strategy field is immutable."
+                  enum:
+                    - PerNode
+                nodeSelector:
+                  type: object
+                  description: |
+                    The desired node selector.
+                  properties:
+                    matchLabels:
+                      type: object
+                      description: |
+                        The desired node selector labels.
+                      additionalProperties:
+                        type: string
+                    matchExpressions:
+                      type: array
+                      description: |
+                        The desired node selector expressions.
+                      items:
+                        type: object
+                        properties:
+                          key:
+                            type: string
+                          operator:
+                            type: string
+                            enum:
+                              - In
+                              - NotIn
+                              - Exists
+                              - DoesNotExist
+                          values:
+                            type: array
+                            items:
+                              type: string
+                lvmVolumeGroupTemplate:
+                  type: object
+                  required:
+                    - type
+                    - actualVGNameOnTheNode
+                  properties:
+                    blockDeviceSelector:
+                      type: object
+                      description: |
+                        The desired block device selector.
+                      properties:
+                        matchLabels:
+                          type: object
+                          description: |
+                            The desired block device selector labels.
+                          additionalProperties:
+                            type: string
+                        matchExpressions:
+                          type: array
+                          description: |
+                            The desired block device selector expressions.
+                          items:
+                            type: object
+                            properties:
+                              key:
+                                type: string
+                              operator:
+                                type: string
+                                enum:
+                                  - In
+                                  - NotIn
+                                  - Exists
+                                  - DoesNotExist
+                              values:
+                                type: array
+                                items:
+                                  type: string
+                    metadata:
+                      type: object
+                      description: |
+                        Metadata of LVMVolumeGroup resources.
+                      properties:
+                        labels:
+                          type: object
+                          additionalProperties:
+                            type: string
+                          description: |
+                            Must-have labels for LVMVolumeGroup resources.
+                    type:
+                      type: string
+                      description: |
+                        The type of a VolumeGroup. Might be:
+                        - Local, that is, local if the devices used are not distributed (not Shared LUN).
+                      enum:
+                        - Local
+                      x-kubernetes-validations:
+                        - rule: self == oldSelf
+                          message: "The type field is immutable."
+                    actualVGNameOnTheNode:
+                      type: string
+                      description: |
+                        The desired name of a Volume Group. Must be unique for the node it is on.
+                        
+                        > This field is immutable.
+                      x-kubernetes-validations:
+                        - rule: self == oldSelf
+                          message: "The actualVGNameOnTheNode field is immutable."
+                    thinPools:
+                      type: array
+                      description: |
+                        The desired Thin-pool configuration.
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                            description: |
+                              The desired thin pool name.
+                              
+                              > This field is immutable.
+                          size:
+                            x-kubernetes-int-or-string: true
+                            pattern: '^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$|^[1-9][0-9]?%$|100%'
+                            description: |
+                              The desired thin pool size. Might be specified as number or percent size of total VG space.
+                              
+                              > Note, that if you specify the percent size, the thin pool will be automatically extended when VG is extended.
+                          allocationLimit:
+                            type: string
+                            pattern: '^[1-9][0-9]{2,3}%$'
+                            default: "150%"
+                            description: |
+                              Thin pool oversize limit. Default is 150%.
+                        required:
+                          - name
+                          - size
+            status:
+              type: object
+              properties:
+                createdLVMVolumeGroups:
+                  type: array
+                  description: |
+                    Short information about LVMVolumeGroups created by the set.
+                  items:
+                    type: object
+                    properties:
+                      lvmVolumeGroupName:
+                        type: string
+                      nodeName:
+                        type: string
+                lvgReady:
+                  type: string
+                  description: |
+                    Shows the current and total LVMVolumeGroup resources count created by the set.
+                phase:
+                  type: string
+                  description: |
+                    Shows the LVMVolumeGroups creation phase.
+                  enum:
+                    - Created
+                    - Pending
+                    - NotCreated
+                    - ""
+                reason:
+                  type: string
+                  description: |
+                    Shows the reason of the phase.
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - jsonPath: .spec.strategy
+          name: Strategy
+          type: string
+          description: The specified LVMVolumeGroups strategy creation.
+        - jsonPath: .spec.lvmVolumeGroupTemplate.actualVGNameOnTheNode
+          name: VG
+          type: string
+          description: Actual VG name.
+        - jsonPath: .spec.lvmVolumeGroupTemplate.type
+          name: type
+          type: string
+          description: Volume Group type.
+          priority: 1
+        - jsonPath: .status.lvgReady
+          name: LVMVolumeGroups Ready
+          type: string
+          description: Current and total LVMVolumeGroups count created by the set.
+        - jsonPath: .status.phase
+          name: Phase
+          type: string
+          description: Resource phase.
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+          description: The age of this resource
