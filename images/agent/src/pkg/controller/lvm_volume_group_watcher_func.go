@@ -294,15 +294,16 @@ func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[str
 		}
 	}
 
-	bdFromOtherNode := make([]string, 0, len(blockDevices))
+	// TODO: надо написать, отбирать те, которые для нашей ноды и если никаких нет, то ругаемся
+	bdsForUsage := make([]string, 0, len(blockDevices))
 	for _, bd := range blockDevices {
-		if bd.Status.NodeName != lvg.Spec.Local.NodeName {
-			bdFromOtherNode = append(bdFromOtherNode, bd.Name)
+		if bd.Status.NodeName == lvg.Spec.Local.NodeName {
+			bdsForUsage = append(bdsForUsage, bd.Name)
 		}
 	}
 
-	if len(bdFromOtherNode) != 0 {
-		return false, fmt.Sprintf("block devices %s have different node names from LVMVolumeGroup Local.NodeName", strings.Join(bdFromOtherNode, ","))
+	if len(bdsForUsage) == 0 {
+		return false, "no block devices were found for the specified Local.NodeName"
 	}
 
 	return true, ""
