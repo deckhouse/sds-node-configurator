@@ -117,11 +117,14 @@ func reconcileLVMVolumeGroupSet(ctx context.Context, cl client.Client, log logge
 		return false, err
 	}
 
+	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] tries to get nodes by the LVMVolumeGroupSet %s nodeSelector", lvgSet.Name))
 	nodes, err := GetNodes(ctx, cl, metrics, lvgSet.Spec.NodeSelector)
 	if err != nil {
 		return false, err
 	}
+	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] successfully got nodes by the LVMVolumeGroupSet %s nodeSelector", lvgSet.Name))
 
+	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] starts to validate the LVMVolumeGroupSet %s nodes", lvgSet.Name))
 	valid, reason := validateLVMVolumeGroupSetNodes(nodes)
 	if !valid {
 		err = updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, phaseNotCreated, reason)
@@ -131,25 +134,25 @@ func reconcileLVMVolumeGroupSet(ctx context.Context, cl client.Client, log logge
 
 		return true, nil
 	}
+	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] the LVMVolumeGroupSet %s nodes are valid", lvgSet.Name))
 
 	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] tries to provide LVMVolumeGroups by the LVMVolumeGroupSet %s", lvgSet.Name))
 	err = provideLVMVolumeGroupsBySet(ctx, cl, log, metrics, lvgSet, nodes)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLVMVolumeGroupSet] unable to provide LVMVolumeGroups by LVMVolumeGroupSet %s", lvgSet.Name))
-		updErr := updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, phaseNotCreated, reason)
+		updErr := updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, phaseNotCreated, err.Error())
 		if updErr != nil {
 			return false, updErr
 		}
 		return false, err
 	}
-
 	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] successfully provided LVMVolumeGroups by the LVMVolumeGroupSet %s", lvgSet.Name))
+
 	err = updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, phaseCreated, "")
 	if err != nil {
 		return false, err
 	}
 
-	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] tries to update the LVMVolumeGroupSet %s status"))
 	return false, nil
 }
 
@@ -169,27 +172,33 @@ func provideLVMVolumeGroupsBySet(ctx context.Context, cl client.Client, log logg
 }
 
 func provideLVMVolumeGroupsBySetPerNode(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvgSet *v1alpha1.LVMVolumeGroupSet, nodes map[string]v1.Node) error {
+	log.Debug("[provideLVMVolumeGroupsBySetPerNode] tries to get LVMVolumeGroups")
 	currentLVGs, err := GetLVMVolumeGroups(ctx, cl, metrics)
 	if err != nil {
 		log.Error(err, "[provideLVMVolumeGroupsBySetPerNode] unable to get LVMVolumeGroups")
 		return err
 	}
-	for _, n := range nodes {
-		lvg := configureLVGBySet(lvgSet, n)
+	log.Debug("[provideLVMVolumeGroupsBySetPerNode] successfully got LVMVolumeGroups")
+	log.Trace(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] current LVMVolumeGroups: %+v", currentLVGs))
+
+	for _, node := range nodes {
+		lvg := configureLVGBySet(lvgSet, node)
+		log.Trace(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] configurated LVMVolumeGroup: %+v", lvg))
 		log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] tries to create the LVMVolumeGroup %s", lvg.Name))
-		created, err := createLVMVolumeGroupIfNeeded(ctx, cl, log, lvg, currentLVGs)
+		created, err := createLVMVolumeGroupIfNeeded(ctx, cl, lvg, currentLVGs)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] unable to create the LVMVolumeGroup %s", lvg.Name))
 			return err
 		}
 
 		if !created {
+			log.Warning(fmt.Sprintf("[createLVMVolumeGroupIfNeeded] the LVMVolumeGroup %s has been already created", lvg.Name))
 			continue
 		}
 
 		log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] the LVMVolumeGroup %s has been created", lvg.Name))
 		log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] tries to update the LVMVolumeGroupSet %s status by the created LVMVolumeGroup %s", lvgSet.Name, lvg.Name))
-		err = updateLVMVolumeGroupSetStatusWithLVGIfNeeded(ctx, cl, log, lvgSet, lvg, nodes)
+		err = updateLVMVolumeGroupSetStatusByLVGIfNeeded(ctx, cl, log, lvgSet, lvg, nodes)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] unable to update the LVMVolumeGroupSet %s", lvgSet.Name))
 			return err
@@ -200,14 +209,15 @@ func provideLVMVolumeGroupsBySetPerNode(ctx context.Context, cl client.Client, l
 	return nil
 }
 
-func updateLVMVolumeGroupSetStatusWithLVGIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvgSet *v1alpha1.LVMVolumeGroupSet, lvg *v1alpha1.LVMVolumeGroup, nodes map[string]v1.Node) error {
+func updateLVMVolumeGroupSetStatusByLVGIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvgSet *v1alpha1.LVMVolumeGroupSet, lvg *v1alpha1.LVMVolumeGroup, nodes map[string]v1.Node) error {
 	for _, createdLVG := range lvgSet.Status.CreatedLVGs {
 		if createdLVG.LVMVolumeGroupName == lvg.Name {
-			log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetStatusWithLVGIfNeeded] no need to update the LVMVolumeGroupSet status %s with the LVMVolumeGroup %s", lvgSet.Name, lvg.Name))
+			log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetStatusByLVGIfNeeded] no need to update the LVMVolumeGroupSet status %s by the LVMVolumeGroup %s", lvgSet.Name, lvg.Name))
 			return nil
 		}
 	}
 
+	log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetStatusByLVGIfNeeded] the LVMVolumeGroupSet status %s should be updated by the LVMVolumeGroup %s", lvgSet.Name, lvg.Name))
 	if cap(lvgSet.Status.CreatedLVGs) == 0 {
 		lvgSet.Status.CreatedLVGs = make([]v1alpha1.LVMVolumeGroupSetStatusLVG, 0, len(nodes))
 	}
@@ -222,15 +232,13 @@ func updateLVMVolumeGroupSetStatusWithLVGIfNeeded(ctx context.Context, cl client
 	return cl.Status().Update(ctx, lvgSet)
 }
 
-func createLVMVolumeGroupIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, lvgs map[string]v1alpha1.LVMVolumeGroup) (bool, error) {
+func createLVMVolumeGroupIfNeeded(ctx context.Context, cl client.Client, lvg *v1alpha1.LVMVolumeGroup, lvgs map[string]v1alpha1.LVMVolumeGroup) (bool, error) {
 	if _, exist := lvgs[lvg.Name]; exist {
-		log.Warning(fmt.Sprintf("[createLVMVolumeGroupIfNeeded] the LVMVolumeGroup %s has been already created", lvg.Name))
 		return false, nil
 	}
 
 	for _, l := range lvgs {
 		if l.Spec.Local.NodeName == lvg.Spec.Local.NodeName && l.Spec.ActualVGNameOnTheNode == lvg.Spec.ActualVGNameOnTheNode {
-			log.Warning(fmt.Sprintf("[createLVMVolumeGroupIfNeeded] the LVMVolumeGroup %s has been already created", lvg.Name))
 			return false, nil
 		}
 	}
