@@ -132,7 +132,6 @@ func RunLVMVolumeGroupWatcherController(
 			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully got block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
 
 			blockDevices = filterBlockDevicesByNodeName(blockDevices, lvg.Spec.Local.NodeName)
-
 			valid, reason := validateSpecBlockDevices(lvg, blockDevices)
 			if !valid {
 				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupController] validation failed for the LVMVolumeGroup %s, reason: %s", lvg.Name, reason))
