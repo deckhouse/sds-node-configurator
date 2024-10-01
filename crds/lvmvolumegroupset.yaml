@@ -191,10 +191,14 @@ spec:
                         type: string
                       nodeName:
                         type: string
-                lvgCount:
+                currentLvgCount:
                   type: integer
                   description: |
-                    Shows the total LVMVolumeGroup count created by the set.
+                    Shows the current LVMVolumeGroup count created by the set.
+                desiredLvgCount:
+                  type: integer
+                  description: |
+                    Shows the desired LVMVolumeGroup count created by the set.
                 phase:
                   type: string
                   description: |
@@ -224,10 +228,14 @@ spec:
           type: string
           description: Volume Group type.
           priority: 1
-        - jsonPath: .status.lvgCount
-          name: LVMVolumeGroups Count
+        - jsonPath: .status.currentLvgCount
+          name: Current LVG Count
           type: integer
-          description: Total LVMVolumeGroups count created by the set.
+          description: Current LVMVolumeGroups count created by the set.
+        - jsonPath: .status.desiredLvgCount
+          name: Desired LVG Count
+          type: integer
+          description: Desired LVMVolumeGroups count created by the set.
         - jsonPath: .status.phase
           name: Phase
           type: string

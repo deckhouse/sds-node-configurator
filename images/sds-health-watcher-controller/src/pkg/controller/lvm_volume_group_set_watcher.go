@@ -182,31 +182,55 @@ func provideLVMVolumeGroupsBySetPerNode(ctx context.Context, cl client.Client, l
 	log.Trace(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] current LVMVolumeGroups: %+v", currentLVGs))
 
 	for _, node := range nodes {
-		lvg := configureLVGBySet(lvgSet, node)
-		log.Trace(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] configurated LVMVolumeGroup: %+v", lvg))
-		log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] tries to create the LVMVolumeGroup %s", lvg.Name))
-		created, err := createLVMVolumeGroupIfNeeded(ctx, cl, lvg, currentLVGs)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] unable to create the LVMVolumeGroup %s", lvg.Name))
-			return err
-		}
+		configuredLVG := configureLVGBySet(lvgSet, node)
+		log.Trace(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] configurated LVMVolumeGroup: %+v", configuredLVG))
 
-		if !created {
-			log.Warning(fmt.Sprintf("[createLVMVolumeGroupIfNeeded] the LVMVolumeGroup %s has been already created", lvg.Name))
-			continue
-		}
+		currentLVG := matchConfiguredLVGWithExistingOne(configuredLVG, currentLVGs)
+		if currentLVG != nil {
+			log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] tries to update the LVMVolumeGroup %s", currentLVG.Name))
+			err = updateLVMVolumeGroupByConfiguredFromSet(ctx, cl, currentLVG, configuredLVG)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] unable to update the LVMVolumeGroup %s", currentLVG.Name))
+				return err
+			}
+			log.Info(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] LVMVolumeGroup %s has been successfully updated", currentLVG.Name))
+		} else {
+			log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] tries to create the LVMVolumeGroup %s", configuredLVG.Name))
+			err = createLVMVolumeGroup(ctx, cl, configuredLVG)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] unable to create the LVMVolumeGroup %s", configuredLVG.Name))
+				return err
+			}
 
-		log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] the LVMVolumeGroup %s has been created", lvg.Name))
-		log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] tries to update the LVMVolumeGroupSet %s status by the created LVMVolumeGroup %s", lvgSet.Name, lvg.Name))
-		err = updateLVMVolumeGroupSetStatusByLVGIfNeeded(ctx, cl, log, lvgSet, lvg, nodes)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] unable to update the LVMVolumeGroupSet %s", lvgSet.Name))
-			return err
+			log.Info(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] the LVMVolumeGroup %s has been created", configuredLVG.Name))
+			log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] tries to update the LVMVolumeGroupSet %s status by the created LVMVolumeGroup %s", lvgSet.Name, configuredLVG.Name))
+			err = updateLVMVolumeGroupSetStatusByLVGIfNeeded(ctx, cl, log, lvgSet, configuredLVG, nodes)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] unable to update the LVMVolumeGroupSet %s", lvgSet.Name))
+				return err
+			}
+			log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] successfully updated the LVMVolumeGroupSet %s status by the created LVMVolumeGroup %s", lvgSet.Name, configuredLVG.Name))
 		}
-		log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySetPerNode] successfully updated the LVMVolumeGroupSet %s status by the created LVMVolumeGroup %s", lvgSet.Name, lvg.Name))
 	}
 
 	return nil
+}
+
+func matchConfiguredLVGWithExistingOne(lvg *v1alpha1.LVMVolumeGroup, lvgs map[string]v1alpha1.LVMVolumeGroup) *v1alpha1.LVMVolumeGroup {
+	for _, l := range lvgs {
+		if l.Spec.Local.NodeName == lvg.Spec.Local.NodeName && l.Spec.ActualVGNameOnTheNode == lvg.Spec.ActualVGNameOnTheNode {
+			return &l
+		}
+	}
+
+	return nil
+}
+
+func updateLVMVolumeGroupByConfiguredFromSet(ctx context.Context, cl client.Client, existing, configured *v1alpha1.LVMVolumeGroup) error {
+	existing.Spec.ThinPools = configured.Spec.ThinPools
+	existing.Spec.BlockDeviceSelector = configured.Spec.BlockDeviceSelector
+
+	return cl.Update(ctx, existing)
 }
 
 func updateLVMVolumeGroupSetStatusByLVGIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvgSet *v1alpha1.LVMVolumeGroupSet, lvg *v1alpha1.LVMVolumeGroup, nodes map[string]v1.Node) error {
@@ -227,23 +251,14 @@ func updateLVMVolumeGroupSetStatusByLVGIfNeeded(ctx context.Context, cl client.C
 		NodeName:           lvg.Spec.Local.NodeName,
 	})
 
-	lvgSet.Status.LVGCount = len(lvgSet.Status.CreatedLVGs)
+	lvgSet.Status.CurrentLVGCount = len(lvgSet.Status.CreatedLVGs)
+	lvgSet.Status.DesiredLVGCount = len(nodes)
 
 	return cl.Status().Update(ctx, lvgSet)
 }
 
-func createLVMVolumeGroupIfNeeded(ctx context.Context, cl client.Client, lvg *v1alpha1.LVMVolumeGroup, lvgs map[string]v1alpha1.LVMVolumeGroup) (bool, error) {
-	if _, exist := lvgs[lvg.Name]; exist {
-		return false, nil
-	}
-
-	for _, l := range lvgs {
-		if l.Spec.Local.NodeName == lvg.Spec.Local.NodeName && l.Spec.ActualVGNameOnTheNode == lvg.Spec.ActualVGNameOnTheNode {
-			return false, nil
-		}
-	}
-
-	return true, cl.Create(ctx, lvg)
+func createLVMVolumeGroup(ctx context.Context, cl client.Client, lvg *v1alpha1.LVMVolumeGroup) error {
+	return cl.Create(ctx, lvg)
 }
 
 func configureLVGBySet(lvgSet *v1alpha1.LVMVolumeGroupSet, node v1.Node) *v1alpha1.LVMVolumeGroup {
