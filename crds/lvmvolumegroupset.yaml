@@ -24,10 +24,7 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            An interface for managing Volume Groups and Thin pools on the nodes.
-            
-            > These resources might be created both by a user and the sds-node-configurator controller. The sds-node-configurator controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. The controller will fill in both the 'spec' and 'status' fields.
-            > The `spec.thinPools` field must be filled in by yourself.
+            An interface for creating several LVMVolumeGroups by common template at once.
           required:
             - spec
           properties:
@@ -36,6 +33,7 @@ spec:
               required:
                 - strategy
                 - lvmVolumeGroupTemplate
+                - nodeSelector
               properties:
                 strategy:
                   type: string
@@ -49,7 +47,7 @@ spec:
                 nodeSelector:
                   type: object
                   description: |
-                    The desired node selector.
+                    The desired node selector for nodes which will be used by LVMVolumeGroups.
                   properties:
                     matchLabels:
                       type: object
@@ -79,14 +77,17 @@ spec:
                               type: string
                 lvmVolumeGroupTemplate:
                   type: object
+                  description: |
+                    The common template for LVMVolumeGroup resources provided by the set.
                   required:
                     - type
                     - actualVGNameOnTheNode
+                    - blockDeviceSelector
                   properties:
                     blockDeviceSelector:
                       type: object
                       description: |
-                        The desired block device selector.
+                        The desired BlockDevice resources selector to provide in LVMVolumeGroups configurations.
                       properties:
                         matchLabels:
                           type: object
@@ -128,7 +129,7 @@ spec:
                     type:
                       type: string
                       description: |
-                        The type of a VolumeGroup. Might be:
+                        The type of a VolumeGroup in LVMVolumeGroups. Might be:
                         - Local, that is, local if the devices used are not distributed (not Shared LUN).
                       enum:
                         - Local
@@ -138,16 +139,19 @@ spec:
                     actualVGNameOnTheNode:
                       type: string
                       description: |
-                        The desired name of a Volume Group. Must be unique for the node it is on.
+                        The desired name of a Volume Group in LVMVolumeGroups. Must be unique for the node it is on.
                         
                         > This field is immutable.
+                        > Note, that this Volume Group name will be common for every LVMVolumeGroup created by the set.
                       x-kubernetes-validations:
                         - rule: self == oldSelf
                           message: "The actualVGNameOnTheNode field is immutable."
                     thinPools:
                       type: array
                       description: |
-                        The desired Thin-pool configuration.
+                        The desired Thin-pool configuration in LVMVolumeGroups.
+                        
+                        > Note, that the configuration will be common for every LVMVolumeGroup created by the set.
                       items:
                         type: object
                         properties:
