@@ -168,6 +168,8 @@ func provideLVMVolumeGroupsBySet(ctx context.Context, cl client.Client, log logg
 			return err
 		}
 		log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySet] successfully provided LVMVolumeGroups by the LVMVolumeGroupSet %s with strategy %s", lvgSet.Name, strategyPerNode))
+	default:
+		return fmt.Errorf("LVMVolumeGroupSet %s strategy %s is not implemented", lvgSet.Name, lvgSet.Spec.Strategy)
 	}
 
 	return nil
@@ -282,7 +284,7 @@ func configureLVGBySet(lvgSet *v1alpha1.LVMVolumeGroupSet, node v1.Node) *v1alph
 }
 
 func configureLVGNameFromSet(lvgSet *v1alpha1.LVMVolumeGroupSet) string {
-	return fmt.Sprintf("%s-%d", lvgSet.Name, len(lvgSet.Status.CreatedLVGs)+1)
+	return fmt.Sprintf("%s-%d", lvgSet.Name, len(lvgSet.Status.CreatedLVGs))
 }
 
 func GetNodes(ctx context.Context, cl client.Client, metrics monitoring.Metrics, selector *metav1.LabelSelector) (map[string]v1.Node, error) {
