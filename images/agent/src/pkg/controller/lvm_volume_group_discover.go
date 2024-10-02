@@ -418,7 +418,7 @@ func GetLVMVolumeGroupCandidates(log logger.Logger, sdsCache *cache.Cache, bds m
 
 	for _, vg := range vgWithTag {
 		allocateSize := getVGAllocatedSize(vg)
-		health, message := checkVGHealth(sortedBDs, vgIssues, pvIssues, lvIssues, vg)
+		health, message := checkVGHealth(vgIssues, pvIssues, lvIssues, vg)
 
 		candidate := internal.LVMVolumeGroupCandidate{
 			LVMVGName:             generateLVMVGName(),
@@ -449,12 +449,8 @@ func getVGAllocatedSize(vg internal.VGData) resource.Quantity {
 	return allocatedSize
 }
 
-func checkVGHealth(blockDevices map[string][]v1alpha1.BlockDevice, vgIssues map[string]string, pvIssues map[string][]string, lvIssues map[string]map[string]string, vg internal.VGData) (health, message string) {
+func checkVGHealth(vgIssues map[string]string, pvIssues map[string][]string, lvIssues map[string]map[string]string, vg internal.VGData) (health, message string) {
 	issues := make([]string, 0, len(vgIssues)+len(pvIssues)+len(lvIssues)+1)
-
-	if bds, exist := blockDevices[vg.VGName+vg.VGUUID]; !exist || len(bds) == 0 {
-		issues = append(issues, fmt.Sprintf("[ERROR] Unable to get BlockDevice resources for VG, name: %s ; uuid: %s", vg.VGName, vg.VGUUID))
-	}
 
 	if vgIssue, exist := vgIssues[vg.VGName+vg.VGUUID]; exist {
 		issues = append(issues, vgIssue)
@@ -642,11 +638,6 @@ func configureCandidateNodeDevices(log logger.Logger, pvs map[string][]internal.
 			PVSize: *resource.NewQuantity(pv.PVSize.Value(), resource.BinarySI),
 			PVUUID: pv.PVUuid,
 		}
-
-		//if bd, exist := bdPathStatus[pv.PVName]; exist {
-		//	device.DevSize = *resource.NewQuantity(bd.Status.Size.Value(), resource.BinarySI)
-		//	device.BlockDevice = bd.Name
-		//}
 
 		device.DevSize = *resource.NewQuantity(bd.Status.Size.Value(), resource.BinarySI)
 		device.BlockDevice = bd.Name
