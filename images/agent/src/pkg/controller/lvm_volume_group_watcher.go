@@ -430,7 +430,7 @@ func reconcileLVGUpdateFunc(ctx context.Context, cl client.Client, log logger.Lo
 	}
 
 	log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] tries to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
-	err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, "Applied", "configuration has been applied")
+	err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, internal.ReasonApplied, "configuration has been applied")
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		return true, err
@@ -519,7 +519,7 @@ func reconcileLVGCreateFunc(ctx context.Context, cl client.Client, log logger.Lo
 		log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] successfully created thin-pools for the LVMVolumeGroup %s", lvg.Name))
 	}
 
-	err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, "Success", "all configuration has been applied")
+	err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, internal.ReasonApplied, "all configuration has been applied")
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		return true, err

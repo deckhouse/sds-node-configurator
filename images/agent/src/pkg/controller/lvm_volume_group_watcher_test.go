@@ -1086,7 +1086,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			newLVG.Status.Conditions = []v1.Condition{
 				{
 					Type:   internal.TypeVGConfigurationApplied,
-					Reason: internal.ReasonCreating,
+					Reason: internal.ReasonApplied,
 				},
 			}
 			newLVG.Labels = map[string]string{LVGMetadateNameLabelKey: "some-other-name"}
