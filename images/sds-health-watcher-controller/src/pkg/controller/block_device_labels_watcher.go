@@ -119,7 +119,7 @@ func reconcileBlockDeviceLabels(ctx context.Context, cl client.Client, log logge
 			continue
 		}
 
-		if !checkIfLVGInProgress(&lvg) {
+		if checkIfLVGInProgress(&lvg) {
 			log.Warning(fmt.Sprintf("[reconcileBlockDeviceLabels] the LVMVolumeGroup %s is in a progress, retry later...", lvg.Name))
 			shouldRetry = true
 			continue
@@ -167,12 +167,12 @@ func checkIfLVGInProgress(newLVG *v1alpha1.LVMVolumeGroup) bool {
 	for _, c := range newLVG.Status.Conditions {
 		if c.Type == internal.TypeVGConfigurationApplied {
 			if c.Reason == internal.ReasonUpdating || c.Reason == internal.ReasonCreating {
-				return false
+				return true
 			}
 		}
 	}
 
-	return true
+	return false
 }
 
 func shouldTriggerLVGUpdateIfMatches(log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, blockDevice *v1alpha1.BlockDevice, usedBdNames map[string]struct{}) bool {
