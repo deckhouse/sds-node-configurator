@@ -27,6 +27,8 @@ import (
 	"regexp"
 
 	"agent/internal"
+
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
 func GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
@@ -268,6 +270,24 @@ func CreateThinPoolFullVGSpace(thinPoolName, vgName string) (string, error) {
 	if err := cmd.Run(); err != nil {
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
+	return cmd.String(), nil
+}
+
+func CreateThinLogicalVolumeSnapshot(sourceLlv *v1alpha1.LVMLogicalVolume) (string, error) {
+	args := []string{"lvcreate", "-s", "-n", sourceLlv.Name, "-y"}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	err := cmd.Run()
+	if err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+
 	return cmd.String(), nil
 }
 

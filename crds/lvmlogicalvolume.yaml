@@ -114,6 +114,14 @@ spec:
                           message: Value is immutable.
                       description: |
                         If true, the Logical Volume will be created with the contiguous flag. Use it carefully as LV might not be created even if there is enough space in VG.
+                source:
+                  type: string
+                  description: |
+                    Name of the source, if present.
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                  minLength: 1
             status:
               type: object
               description: |
