@@ -121,7 +121,6 @@ spec:
                   x-kubernetes-validations:
                     - rule: self == oldSelf
                       message: Value is immutable.
-                  minLength: 1
             status:
               type: object
               description: |
