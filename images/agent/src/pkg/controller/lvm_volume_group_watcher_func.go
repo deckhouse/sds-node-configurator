@@ -101,6 +101,15 @@ func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1a
 		return true
 	}
 
+	for _, c := range newLVG.Status.Conditions {
+		if c.Type == internal.TypeVGConfigurationApplied {
+			if c.Reason == internal.ReasonUpdating || c.Reason == internal.ReasonCreating {
+				log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should not be reconciled as the LVMVolumeGroup %s reconciliation still in progress", newLVG.Name))
+				return false
+			}
+		}
+	}
+
 	if _, exist := newLVG.Labels[internal.LVGUpdateTriggerLabel]; exist {
 		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has the label %s", newLVG.Name, internal.LVGUpdateTriggerLabel))
 		return true
@@ -114,15 +123,6 @@ func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1a
 	if !reflect.DeepEqual(oldLVG.Spec, newLVG.Spec) {
 		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s configuration has been changed", newLVG.Name))
 		return true
-	}
-
-	for _, c := range newLVG.Status.Conditions {
-		if c.Type == internal.TypeVGConfigurationApplied {
-			if c.Reason == internal.ReasonUpdating || c.Reason == internal.ReasonCreating {
-				log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should not be reconciled as the LVMVolumeGroup %s reconciliation still in progress", newLVG.Name))
-				return false
-			}
-		}
 	}
 
 	for _, n := range newLVG.Status.Nodes {
