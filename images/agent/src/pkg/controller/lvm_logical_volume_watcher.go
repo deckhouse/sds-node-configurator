@@ -272,7 +272,7 @@ func reconcileLLVCreateFunc(
 			if err = cl.Get(ctx, types.NamespacedName{Namespace: llv.Namespace, Name: llv.Spec.Source}, sourceLlv); err != nil {
 				log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to find source LogicalVolume %s (%s)", llv.Spec.Source, llv.Namespace))
 			} else {
-				cmd, err = utils.CreateThinLogicalVolumeSnapshot(sourceLlv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, sourceLlv)
+				cmd, err = utils.CreateThinLogicalVolumeSnapshot(llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, sourceLlv)
 			}
 		}
 	}
