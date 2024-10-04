@@ -149,37 +149,40 @@ func (c *Cache) FindVG(vgName string) *internal.VGData {
 }
 
 func (c *Cache) PrintTheCache(log logger.Logger) {
-	log.Cache("*****************CACHE BEGIN*****************")
-	log.Cache("[Devices BEGIN]")
+	log.Trace("*****************CACHE BEGIN*****************")
+	log.Trace("[Devices BEGIN]")
 	for _, d := range c.devices {
-		log.Cache(fmt.Sprintf("     Device Name: %s, size: %s, fsType: %s, serial: %s, wwn: %s", d.Name, d.Size.String(), d.FSType, d.Serial, d.Wwn))
+		log.Trace(fmt.Sprintf("     Device Name: %s, size: %s, fsType: %s, serial: %s, wwn: %s", d.Name, d.Size.String(), d.FSType, d.Serial, d.Wwn))
 	}
-	log.Cache("[ERRS]")
-	log.Cache(c.deviceErrs.String())
-	log.Cache("[Devices ENDS]")
-	log.Cache("[PVs BEGIN]")
+	log.Trace("[ERRS]")
+	log.Trace(c.deviceErrs.String())
+	log.Trace("[Devices ENDS]")
+	log.Trace("[PVs BEGIN]")
 	for _, pv := range c.pvs {
-		log.Cache(fmt.Sprintf("     PV Name: %s, VG Name: %s, size: %s, vgTags: %s", pv.PVName, pv.VGName, pv.PVSize.String(), pv.VGTags))
+		log.Trace(fmt.Sprintf("     PV Name: %s, VG Name: %s, size: %s, vgTags: %s", pv.PVName, pv.VGName, pv.PVSize.String(), pv.VGTags))
 	}
-	log.Cache("[ERRS]")
-	log.Cache(c.pvsErrs.String())
-	log.Cache("[PVs ENDS]")
-	log.Cache("[VGs BEGIN]")
+	log.Trace("[ERRS]")
+	log.Trace(c.pvsErrs.String())
+	log.Trace("[PVs ENDS]")
+	log.Trace("[VGs BEGIN]")
 	for _, vg := range c.vgs {
-		log.Cache(fmt.Sprintf("     VG Name: %s, size: %s, free: %s, vgTags: %s", vg.VGName, vg.VGSize.String(), vg.VGFree.String(), vg.VGTags))
+		log.Trace(fmt.Sprintf("     VG Name: %s, size: %s, free: %s, vgTags: %s", vg.VGName, vg.VGSize.String(), vg.VGFree.String(), vg.VGTags))
 	}
-	log.Cache("[ERRS]")
-	log.Cache(c.vgsErrs.String())
-	log.Cache("[VGs ENDS]")
-	log.Cache("[LVs BEGIN]")
-	lvs, _ := c.GetLVs()
-	for _, lv := range lvs {
-		log.Cache(fmt.Sprintf("     Data Name: %s, VG name: %s, size: %s, tags: %s, attr: %s, pool: %s", lv.LVName, lv.VGName, lv.LVSize.String(), lv.LvTags, lv.LVAttr, lv.PoolName))
+	log.Trace("[ERRS]")
+	log.Trace(c.vgsErrs.String())
+	log.Trace("[VGs ENDS]")
+	log.Trace("[LVs BEGIN]")
+
+	for _, lv := range c.lvs {
+		lvData := lv.Data
+		log.Trace(fmt.Sprintf("     Exist: %t, Data Name: %s, VG name: %s, size: %s, tags: %s, attr: %s, pool: %s", lv.Exist, lvData.LVName, lvData.VGName, lvData.LVSize.String(), lvData.LvTags, lvData.LVAttr, lvData.PoolName))
+
 	}
-	log.Cache("[ERRS]")
-	log.Cache(c.lvsErrs.String())
-	log.Cache("[LVs ENDS]")
-	log.Cache("*****************CACHE ENDS*****************")
+
+	log.Trace("[ERRS]")
+	log.Trace(c.lvsErrs.String())
+	log.Trace("[LVs ENDS]")
+	log.Trace("*****************CACHE ENDS*****************")
 }
 
 func (c *Cache) configureLVKey(vgName, lvName string) string {
