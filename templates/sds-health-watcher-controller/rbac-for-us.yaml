@@ -28,11 +28,14 @@ rules:
       - lvmvolumegroups
       - lvmvolumegroups/status
       - blockdevices
+      - lvmvolumegroupsets
+      - lvmvolumegroupsets/status
     verbs:
       - get
       - list
       - update
       - watch
+      - create
   - apiGroups:
       - ""
     resources:
