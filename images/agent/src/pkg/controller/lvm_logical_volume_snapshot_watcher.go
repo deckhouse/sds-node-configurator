@@ -1,6 +1,12 @@
 package controller
 
 import (
+	"agent/config"
+	"agent/internal"
+	"agent/pkg/cache"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
+	"agent/pkg/utils"
 	"context"
 	"errors"
 	"fmt"
@@ -18,28 +24,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-
-	"agent/config"
-	"agent/internal"
-	"agent/pkg/cache"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
-	"agent/pkg/utils"
 )
 
 const (
-	Thick = "Thick"
-	Thin  = "Thin"
-
-	lvmLogicalVolumeWatcherCtrlName = "lvm-logical-volume-watcher-controller"
-
-	LLVStatusPhaseCreated  = "Created"
-	LLVStatusPhasePending  = "Pending"
-	LLVStatusPhaseResizing = "Resizing"
-	LLVStatusPhaseFailed   = "Failed"
+	lvmLogicalVolumeSnapshotWatcherCtrlName = "lvm-logical-volume-snapshot-watcher-controller"
 )
 
-func RunLVMLogicalVolumeWatcherController(
+func RunLVMLogicalVolumeSnapshotWatcherController(
 	mgr manager.Manager,
 	cfg config.Options,
 	log logger.Logger,
@@ -48,7 +39,7 @@ func RunLVMLogicalVolumeWatcherController(
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
 
-	c, err := controller.New(lvmLogicalVolumeWatcherCtrlName, mgr, controller.Options{
+	c, err := controller.New(lvmLogicalVolumeSnapshotWatcherCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 			log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] Reconciler starts reconciliation of the LVMLogicalVolume: %s", request.Name))
 
@@ -184,7 +175,15 @@ func RunLVMLogicalVolumeWatcherController(
 	return c, err
 }
 
-func ReconcileLVMLogicalVolume(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
+func ReconcileLVMLogicalVolumeSnapshot(
+	ctx context.Context,
+	cl client.Client,
+	log logger.Logger,
+	metrics monitoring.Metrics,
+	sdsCache *cache.Cache,
+	llv *v1alpha1.LVMLogicalVolume,
+	lvg *v1alpha1.LVMVolumeGroup,
+) (bool, error) {
 	log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolume] starts the reconciliation for the LVMLogicalVolume %s", llv.Name))
 
 	log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolume] tries to identify the reconciliation type for the LVMLogicalVolume %s", llv.Name))
@@ -211,7 +210,7 @@ func ReconcileLVMLogicalVolume(ctx context.Context, cl client.Client, log logger
 	return false, nil
 }
 
-func reconcileLLVCreateFunc(
+func reconcileLLVSCreateFunc(
 	ctx context.Context,
 	cl client.Client,
 	log logger.Logger,
@@ -325,7 +324,7 @@ func reconcileLLVCreateFunc(
 	return false, nil
 }
 
-func reconcileLLVUpdateFunc(
+func reconcileLLVSUpdateFunc(
 	ctx context.Context,
 	cl client.Client,
 	log logger.Logger,
@@ -452,7 +451,7 @@ func reconcileLLVUpdateFunc(
 	return false, nil
 }
 
-func reconcileLLVDeleteFunc(
+func reconcileLLVSDeleteFunc(
 	ctx context.Context,
 	cl client.Client,
 	log logger.Logger,

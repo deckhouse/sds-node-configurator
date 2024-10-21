@@ -25,8 +25,12 @@ import (
 	golog "log"
 	"os/exec"
 	"regexp"
+	"strings"
+	"time"
 
 	"agent/internal"
+	"agent/pkg/logger"
+	"agent/pkg/monitoring"
 )
 
 func GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
@@ -271,6 +275,24 @@ func CreateThinPoolFullVGSpace(thinPoolName, vgName string) (string, error) {
 	return cmd.String(), nil
 }
 
+func CreateThinLogicalVolumeSnapshot(name string, sourceVgName string, sourceName string) (string, error) {
+	args := []string{"lvcreate", "-s", "-kn", "-n", name, fmt.Sprintf("%s/%s", sourceVgName, sourceName), "-y"}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	err := cmd.Run()
+	if err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+
+	return cmd.String(), nil
+}
+
 func CreateThinLogicalVolume(vgName, tpName, lvName string, size int64) (string, error) {
 	args := []string{"lvcreate", "-T", fmt.Sprintf("%s/%s", vgName, tpName), "-n", lvName, "-V", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
 	extendedArgs := lvmStaticExtendedArgs(args)
@@ -467,6 +489,103 @@ func UnmarshalDevices(out []byte) ([]internal.Device, error) {
 	}
 
 	return devices.BlockDevices, nil
+}
+
+func ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, ctrlName string) error {
+	// thin pool
+	log.Debug("[ReTag] start re-tagging LV")
+	start := time.Now()
+	lvs, cmdStr, _, err := GetAllLVs(ctx)
+	metrics.UtilsCommandsDuration(ctrlName, "lvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(ctrlName, "lvs").Inc()
+	log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+	if err != nil {
+		metrics.UtilsCommandsErrorsCount(ctrlName, "lvs").Inc()
+		log.Error(err, "[ReTag] unable to GetAllLVs")
+		return err
+	}
+
+	for _, lv := range lvs {
+		tags := strings.Split(lv.LvTags, ",")
+		for _, tag := range tags {
+			if strings.Contains(tag, internal.LVMTags[0]) {
+				continue
+			}
+
+			if strings.Contains(tag, internal.LVMTags[1]) {
+				start = time.Now()
+				cmdStr, err = LVChangeDelTag(lv, tag)
+				metrics.UtilsCommandsDuration(ctrlName, "lvchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
+				metrics.UtilsCommandsExecutionCount(ctrlName, "lvchange").Inc()
+				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+				if err != nil {
+					metrics.UtilsCommandsErrorsCount(ctrlName, "lvchange").Inc()
+					log.Error(err, "[ReTag] unable to LVChangeDelTag")
+					return err
+				}
+
+				start = time.Now()
+				cmdStr, err = VGChangeAddTag(lv.VGName, internal.LVMTags[0])
+				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
+				metrics.UtilsCommandsExecutionCount(ctrlName, "vgchange").Inc()
+				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+				if err != nil {
+					metrics.UtilsCommandsErrorsCount(ctrlName, "vgchange").Inc()
+					log.Error(err, "[ReTag] unable to VGChangeAddTag")
+					return err
+				}
+			}
+		}
+	}
+	log.Debug("[ReTag] end re-tagging LV")
+
+	log.Debug("[ReTag] start re-tagging LVM")
+	start = time.Now()
+	vgs, cmdStr, _, err := GetAllVGs(ctx)
+	metrics.UtilsCommandsDuration(ctrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(ctrlName, "vgs").Inc()
+	log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+	if err != nil {
+		metrics.UtilsCommandsErrorsCount(ctrlName, cmdStr).Inc()
+		log.Error(err, "[ReTag] unable to GetAllVGs")
+		return err
+	}
+
+	for _, vg := range vgs {
+		tags := strings.Split(vg.VGTags, ",")
+		for _, tag := range tags {
+			if strings.Contains(tag, internal.LVMTags[0]) {
+				continue
+			}
+
+			if strings.Contains(tag, internal.LVMTags[1]) {
+				start = time.Now()
+				cmdStr, err = VGChangeDelTag(vg.VGName, tag)
+				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
+				metrics.UtilsCommandsExecutionCount(ctrlName, "vgchange").Inc()
+				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+				if err != nil {
+					metrics.UtilsCommandsErrorsCount(ctrlName, "vgchange").Inc()
+					log.Error(err, "[ReTag] unable to VGChangeDelTag")
+					return err
+				}
+
+				start = time.Now()
+				cmdStr, err = VGChangeAddTag(vg.VGName, internal.LVMTags[0])
+				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
+				metrics.UtilsCommandsExecutionCount(ctrlName, "vgchange").Inc()
+				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+				if err != nil {
+					metrics.UtilsCommandsErrorsCount(ctrlName, "vgchange").Inc()
+					log.Error(err, "[ReTag] unable to VGChangeAddTag")
+					return err
+				}
+			}
+		}
+	}
+	log.Debug("[ReTag] stop re-tagging LVM")
+
+	return nil
 }
 
 func unmarshalPVs(out []byte) ([]internal.PVData, error) {

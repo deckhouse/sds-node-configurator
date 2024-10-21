@@ -14,10 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller_test
+package bd
 
 import (
 	"context"
+	"testing"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
@@ -26,43 +27,45 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"agent/internal"
-	"agent/pkg/controller"
+	"agent/pkg/cache"
+	"agent/pkg/logger"
 	"agent/pkg/monitoring"
+	"agent/pkg/test_utils"
 )
 
 var _ = Describe("Storage Controller", func() {
+	ctx := context.Background()
+	testMetrics := monitoring.GetMetrics("")
+	deviceName := "/dev/sda"
+	candidate := internal.BlockDeviceCandidate{
+		NodeName:              "test-node",
+		Consumable:            true,
+		PVUuid:                "123",
+		VGUuid:                "123",
+		LVMVolumeGroupName:    "testLvm",
+		ActualVGNameOnTheNode: "testVG",
+		Wwn:                   "WW12345678",
+		Serial:                "test",
+		Path:                  deviceName,
+		Size:                  resource.Quantity{},
+		Rota:                  false,
+		Model:                 "very good-model",
+		Name:                  "/dev/sda",
+		HotPlug:               false,
+		KName:                 "/dev/sda",
+		PkName:                "/dev/sda14",
+		Type:                  "disk",
+		FSType:                "",
+		MachineID:             "1234",
+	}
+	cl := test_utils.NewFakeClient()
+	log, _ := logger.NewLogger("1")
+	sdsCache := cache.New()
 
-	var (
-		ctx         = context.Background()
-		testMetrics = monitoring.GetMetrics("")
-		deviceName  = "/dev/sda"
-		candidate   = internal.BlockDeviceCandidate{
-			NodeName:              "test-node",
-			Consumable:            true,
-			PVUuid:                "123",
-			VGUuid:                "123",
-			LVMVolumeGroupName:    "testLvm",
-			ActualVGNameOnTheNode: "testVG",
-			Wwn:                   "WW12345678",
-			Serial:                "test",
-			Path:                  deviceName,
-			Size:                  resource.Quantity{},
-			Rota:                  false,
-			Model:                 "very good-model",
-			Name:                  "/dev/sda",
-			HotPlug:               false,
-			KName:                 "/dev/sda",
-			PkName:                "/dev/sda14",
-			Type:                  "disk",
-			FSType:                "",
-			MachineID:             "1234",
-		}
-	)
-
-	cl := NewFakeClient()
+	r := NewDiscoverer(cl, *log, testMetrics, sdsCache, Options{})
 
 	It("CreateAPIBlockDevice", func() {
-		blockDevice, err := controller.CreateAPIBlockDevice(ctx, cl, testMetrics, candidate)
+		blockDevice, err := r.createAPIBlockDevice(ctx, candidate)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(blockDevice.Status.NodeName).To(Equal(candidate.NodeName))
 		Expect(blockDevice.Status.Consumable).To(Equal(candidate.Consumable))
@@ -82,7 +85,7 @@ var _ = Describe("Storage Controller", func() {
 	})
 
 	It("GetAPIBlockDevices", func() {
-		listDevice, err := controller.GetAPIBlockDevices(ctx, cl, testMetrics, nil)
+		listDevice, err := r.getAPIBlockDevices(ctx, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(listDevice).NotTo(BeNil())
 		Expect(len(listDevice)).To(Equal(1))
@@ -115,7 +118,7 @@ var _ = Describe("Storage Controller", func() {
 			MachineID:             "1234",
 		}
 
-		resources, err := controller.GetAPIBlockDevices(ctx, cl, testMetrics, nil)
+		resources, err := r.getAPIBlockDevices(ctx, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resources).NotTo(BeNil())
 		Expect(len(resources)).To(Equal(1))
@@ -124,10 +127,10 @@ var _ = Describe("Storage Controller", func() {
 		Expect(oldResource).NotTo(BeNil())
 		Expect(oldResource.Status.NodeName).To(Equal(candidate.NodeName))
 
-		err = controller.UpdateAPIBlockDevice(ctx, cl, testMetrics, oldResource, newCandidate)
+		err = r.updateAPIBlockDevice(ctx, oldResource, newCandidate)
 		Expect(err).NotTo(HaveOccurred())
 
-		resources, err = controller.GetAPIBlockDevices(ctx, cl, testMetrics, nil)
+		resources, err = r.getAPIBlockDevices(ctx, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resources).NotTo(BeNil())
 		Expect(len(resources)).To(Equal(1))
@@ -140,17 +143,22 @@ var _ = Describe("Storage Controller", func() {
 	})
 
 	It("DeleteAPIBlockDevice", func() {
-		err := controller.DeleteAPIBlockDevice(ctx, cl, testMetrics, &v1alpha1.BlockDevice{
+		err := r.deleteAPIBlockDevice(ctx, &v1alpha1.BlockDevice{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: deviceName,
 			},
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		devices, err := controller.GetAPIBlockDevices(context.Background(), cl, testMetrics, nil)
+		devices, err := r.getAPIBlockDevices(context.Background(), nil)
 		Expect(err).NotTo(HaveOccurred())
 		for name := range devices {
 			Expect(name).NotTo(Equal(deviceName))
 		}
 	})
 })
+
+func TestController(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Controller Suite")
+}

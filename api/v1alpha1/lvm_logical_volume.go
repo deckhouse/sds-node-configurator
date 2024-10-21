@@ -41,6 +41,7 @@ type LVMLogicalVolumeSpec struct {
 	Type                  string                     `json:"type"`
 	Size                  string                     `json:"size"`
 	LVMVolumeGroupName    string                     `json:"lvmVolumeGroupName"`
+	Source                *LVMLogicalVolumeSource    `json:"source"`
 	Thin                  *LVMLogicalVolumeThinSpec  `json:"thin"`
 	Thick                 *LVMLogicalVolumeThickSpec `json:"thick"`
 }
@@ -57,4 +58,10 @@ type LVMLogicalVolumeStatus struct {
 	Reason     string            `json:"reason"`
 	ActualSize resource.Quantity `json:"actualSize"`
 	Contiguous *bool             `json:"contiguous"`
+}
+
+type LVMLogicalVolumeSource struct {
+	// Either LVMLogicalVolume or LVMLogicalVolumeSnapshot
+	Kind string `json:"kind"`
+	Name string `json:"name"`
 }
