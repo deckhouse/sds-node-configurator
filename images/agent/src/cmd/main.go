@@ -36,10 +36,12 @@ import (
 	"agent/config"
 	"agent/pkg/cache"
 	"agent/pkg/controller"
+	"agent/pkg/controller/bd"
 	"agent/pkg/kubutils"
 	"agent/pkg/logger"
 	"agent/pkg/monitoring"
 	"agent/pkg/scanner"
+	"agent/pkg/utils"
 )
 
 var (
@@ -110,15 +112,27 @@ func main() {
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 
 	log.Info("[main] ReTag starts")
-	err = controller.ReTag(ctx, *log, metrics)
-	if err != nil {
+	if err := utils.ReTag(ctx, *log, metrics, bd.Name); err != nil {
 		log.Error(err, "[main] unable to run ReTag")
 	}
-	log.Info("[main] ReTag ends")
 
 	sdsCache := cache.New()
 
-	bdCtrl, err := controller.RunBlockDeviceController(mgr, *cfgParams, *log, metrics, sdsCache)
+	rediscoverBlockDevices, err := controller.AddDiscoverer(
+		mgr,
+		*log,
+		bd.NewDiscoverer(
+			mgr.GetClient(),
+			*log,
+			metrics,
+			sdsCache,
+			bd.Options{
+				NodeName:                cfgParams.NodeName,
+				MachineID:               cfgParams.MachineID,
+				BlockDeviceScanInterval: cfgParams.BlockDeviceScanIntervalSec,
+			},
+		),
+	)
 	if err != nil {
 		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
 		os.Exit(1)
@@ -136,7 +150,7 @@ func main() {
 	}
 
 	go func() {
-		if err = scanner.RunScanner(ctx, *log, *cfgParams, sdsCache, bdCtrl, lvgDiscoverCtrl); err != nil {
+		if err = scanner.RunScanner(ctx, *log, *cfgParams, sdsCache, rediscoverBlockDevices, lvgDiscoverCtrl); err != nil {
 			log.Error(err, "[main] unable to run scanner")
 			os.Exit(1)
 		}

@@ -16,12 +16,20 @@ import (
 	"agent/internal"
 	"agent/pkg/cache"
 	"agent/pkg/controller"
+	"agent/pkg/controller/bd"
 	"agent/pkg/logger"
 	"agent/pkg/throttler"
 	"agent/pkg/utils"
 )
 
-func RunScanner(ctx context.Context, log logger.Logger, cfg config.Options, sdsCache *cache.Cache, bdCtrl, lvgDiscoverCtrl kubeCtrl.Controller) error {
+func RunScanner(
+	ctx context.Context,
+	log logger.Logger,
+	cfg config.Options,
+	sdsCache *cache.Cache,
+	bdCtrl func(context.Context) (controller.Result, error),
+	lvgDiscoverCtrl kubeCtrl.Controller,
+) error {
 	log.Info("[RunScanner] starts the work")
 
 	t := throttler.New(cfg.ThrottleIntervalSec)
@@ -114,11 +122,16 @@ func RunScanner(ctx context.Context, log logger.Logger, cfg config.Options, sdsC
 	}
 }
 
-func runControllersReconcile(ctx context.Context, log logger.Logger, bdCtrl, lvgDiscoverCtrl kubeCtrl.Controller) error {
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s reconcile", controller.BlockDeviceCtrlName))
-	bdRes, err := bdCtrl.Reconcile(ctx, reconcile.Request{})
+func runControllersReconcile(
+	ctx context.Context,
+	log logger.Logger,
+	bdCtrl func(context.Context) (controller.Result, error),
+	lvgDiscoverCtrl kubeCtrl.Controller,
+) error {
+	log.Info(fmt.Sprintf("[runControllersReconcile] run %s reconcile", bd.Name))
+	bdRes, err := bdCtrl(ctx)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[runControllersReconcile] an error occurred while %s reconcile", controller.BlockDeviceCtrlName))
+		log.Error(err, fmt.Sprintf("[runControllersReconcile] an error occurred while %s reconcile", bd.Name))
 		return err
 	}
 
@@ -127,14 +140,14 @@ func runControllersReconcile(ctx context.Context, log logger.Logger, bdCtrl, lvg
 			for bdRes.RequeueAfter > 0 {
 				log.Warning(fmt.Sprintf("[runControllersReconcile] BlockDevices reconcile needs a retry in %s", bdRes.RequeueAfter.String()))
 				time.Sleep(bdRes.RequeueAfter)
-				bdRes, err = bdCtrl.Reconcile(ctx, reconcile.Request{})
+				bdRes, err = bdCtrl(ctx)
 			}
 
 			log.Info("[runControllersReconcile] successfully reconciled BlockDevices after a retry")
 		}()
 	}
 
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s successfully reconciled", controller.BlockDeviceCtrlName))
+	log.Info(fmt.Sprintf("[runControllersReconcile] run %s successfully reconciled", bd.Name))
 
 	log.Info(fmt.Sprintf("[runControllersReconcile] run %s reconcile", controller.LVMVolumeGroupDiscoverCtrlName))
 	lvgRes, err := lvgDiscoverCtrl.Reconcile(ctx, reconcile.Request{})
