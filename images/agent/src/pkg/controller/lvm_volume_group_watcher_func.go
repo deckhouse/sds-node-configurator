@@ -101,6 +101,15 @@ func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1a
 		return true
 	}
 
+	for _, c := range newLVG.Status.Conditions {
+		if c.Type == internal.TypeVGConfigurationApplied {
+			if c.Reason == internal.ReasonUpdating || c.Reason == internal.ReasonCreating {
+				log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should not be reconciled as the LVMVolumeGroup %s reconciliation still in progress", newLVG.Name))
+				return false
+			}
+		}
+	}
+
 	if _, exist := newLVG.Labels[internal.LVGUpdateTriggerLabel]; exist {
 		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has the label %s", newLVG.Name, internal.LVGUpdateTriggerLabel))
 		return true
@@ -114,15 +123,6 @@ func shouldLVGWatcherReconcileUpdateEvent(log logger.Logger, oldLVG, newLVG *v1a
 	if !reflect.DeepEqual(oldLVG.Spec, newLVG.Spec) {
 		log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s configuration has been changed", newLVG.Name))
 		return true
-	}
-
-	for _, c := range newLVG.Status.Conditions {
-		if c.Type == internal.TypeVGConfigurationApplied {
-			if c.Reason == internal.ReasonUpdating || c.Reason == internal.ReasonCreating {
-				log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should not be reconciled as the LVMVolumeGroup %s reconciliation still in progress", newLVG.Name))
-				return false
-			}
-		}
 	}
 
 	for _, n := range newLVG.Status.Nodes {
@@ -294,18 +294,18 @@ func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[str
 		}
 	}
 
-	bdFromOtherNode := make([]string, 0, len(blockDevices))
+	return true, ""
+}
+
+func filterBlockDevicesByNodeName(blockDevices map[string]v1alpha1.BlockDevice, nodeName string) map[string]v1alpha1.BlockDevice {
+	bdsForUsage := make(map[string]v1alpha1.BlockDevice, len(blockDevices))
 	for _, bd := range blockDevices {
-		if bd.Status.NodeName != lvg.Spec.Local.NodeName {
-			bdFromOtherNode = append(bdFromOtherNode, bd.Name)
+		if bd.Status.NodeName == nodeName {
+			bdsForUsage[bd.Name] = bd
 		}
 	}
 
-	if len(bdFromOtherNode) != 0 {
-		return false, fmt.Sprintf("block devices %s have different node names from LVMVolumeGroup Local.NodeName", strings.Join(bdFromOtherNode, ","))
-	}
-
-	return true, ""
+	return bdsForUsage
 }
 
 func deleteLVGIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, cfg config.Options, sdsCache *cache.Cache, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
