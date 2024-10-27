@@ -34,6 +34,7 @@ type Named interface {
 
 type Reconciler[T client.Object] interface {
 	Named
+	MaxConcurrentReconciles() int
 	ShouldReconcileUpdate(objectOld T, objectNew T) bool
 	Reconcile(context.Context, ReconcileRequest[T]) (Result, error)
 }
@@ -65,7 +66,8 @@ func AddReconciler[T client.Object](
 		reconciler.Name(),
 		mgr,
 		controller.Options{
-			Reconciler: makeReconcileDispatcher(mgr, log, reconciler),
+			Reconciler:              makeReconcileDispatcher(mgr, log, reconciler),
+			MaxConcurrentReconciles: reconciler.MaxConcurrentReconciles(),
 		},
 	)
 	if err != nil {
@@ -138,13 +140,11 @@ func AddDiscoverer(
 
 func makeDiscovererDispatcher(log logger.Logger, discoverer Discoverer) reconcile.Func {
 	return reconcile.Func(func(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-		log.Info(fmt.Sprintf("[DiscovererDispatcher] Discoverer starts"))
+		log.Info(fmt.Sprintf("[DiscovererDispatcher] %s discoverer starts", discoverer.Name()))
 
 		result, err := discoverer.Discover(ctx)
 
-		return reconcile.Result{
-			RequeueAfter: result.RequeueAfter,
-		}, err
+		return reconcile.Result{RequeueAfter: result.RequeueAfter}, err
 	})
 }
 
@@ -155,13 +155,8 @@ func makeReconcileDispatcher[T client.Object](
 ) reconcile.TypedReconciler[reconcile.Request] {
 	cl := mgr.GetClient()
 	return reconcile.Func(func(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-
 		// load object being reconciled
 		log.Info(fmt.Sprintf("[ReconcileDispatcher] Reconciler starts to reconcile the request %s", req.NamespacedName.String()))
-
-		if req.Name == "" {
-
-		}
 
 		var obj T
 		if err := cl.Get(ctx, req.NamespacedName, obj); err != nil {

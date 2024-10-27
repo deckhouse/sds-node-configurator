@@ -33,6 +33,7 @@ import (
 
 	"agent/internal"
 	"agent/pkg/cache"
+	cutils "agent/pkg/controller/utils"
 	"agent/pkg/logger"
 	"agent/pkg/monitoring"
 	"agent/pkg/test_utils"
@@ -127,7 +128,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := r.getAPIBlockDevices(ctx, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := r.bdCl.GetAPIBlockDevices(ctx, DiscovererName, lvg.Spec.BlockDeviceSelector)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 
@@ -202,7 +203,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := r.getAPIBlockDevices(ctx, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := r.bdCl.GetAPIBlockDevices(ctx, DiscovererName, lvg.Spec.BlockDeviceSelector)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 
@@ -283,7 +284,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := r.getAPIBlockDevices(ctx, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := r.bdCl.GetAPIBlockDevices(ctx, DiscovererName, lvg.Spec.BlockDeviceSelector)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 				_, ok := actualBd[name1]
@@ -538,7 +539,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			expectedName := "testName"
 			tags := fmt.Sprintf("storage.deckhouse.io/enabled=true,storage.deckhouse.io/lvmVolumeGroupName=%s", expectedName)
 
-			shouldBeTrue, actualName := checkTag(tags)
+			shouldBeTrue, actualName := cutils.CheckTag(tags)
 			if assert.True(t, shouldBeTrue) {
 				assert.Equal(t, expectedName, actualName)
 			}
@@ -547,7 +548,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		t.Run("Haven't tag_Returns false and empty", func(t *testing.T) {
 			tags := "someWeirdTags=oMGwtFIsThis"
 
-			shouldBeFalse, actualName := checkTag(tags)
+			shouldBeFalse, actualName := cutils.CheckTag(tags)
 			if assert.False(t, shouldBeFalse) {
 				assert.Equal(t, "", actualName)
 			}

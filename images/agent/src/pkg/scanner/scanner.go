@@ -9,14 +9,13 @@ import (
 
 	"github.com/pilebones/go-udev/netlink"
 	"k8s.io/utils/clock"
-	kubeCtrl "sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"agent/config"
 	"agent/internal"
 	"agent/pkg/cache"
 	"agent/pkg/controller"
 	"agent/pkg/controller/bd"
+	"agent/pkg/controller/lvg"
 	"agent/pkg/logger"
 	"agent/pkg/throttler"
 	"agent/pkg/utils"
@@ -28,7 +27,7 @@ func RunScanner(
 	cfg config.Options,
 	sdsCache *cache.Cache,
 	bdCtrl func(context.Context) (controller.Result, error),
-	lvgDiscoverCtrl kubeCtrl.Controller,
+	lvgDiscoverCtrl func(context.Context) (controller.Result, error),
 ) error {
 	log.Info("[RunScanner] starts the work")
 
@@ -126,12 +125,12 @@ func runControllersReconcile(
 	ctx context.Context,
 	log logger.Logger,
 	bdCtrl func(context.Context) (controller.Result, error),
-	lvgDiscoverCtrl kubeCtrl.Controller,
+	lvgDiscoverCtrl func(context.Context) (controller.Result, error),
 ) error {
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s reconcile", bd.Name))
+	log.Info(fmt.Sprintf("[runControllersReconcile] run %s reconcile", bd.DiscovererName))
 	bdRes, err := bdCtrl(ctx)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[runControllersReconcile] an error occurred while %s reconcile", bd.Name))
+		log.Error(err, fmt.Sprintf("[runControllersReconcile] an error occurred while %s reconcile", bd.DiscovererName))
 		return err
 	}
 
@@ -147,12 +146,12 @@ func runControllersReconcile(
 		}()
 	}
 
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s successfully reconciled", bd.Name))
+	log.Info(fmt.Sprintf("[runControllersReconcile] run %s successfully reconciled", bd.DiscovererName))
 
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s reconcile", controller.LVMVolumeGroupDiscoverCtrlName))
-	lvgRes, err := lvgDiscoverCtrl.Reconcile(ctx, reconcile.Request{})
+	log.Info(fmt.Sprintf("[runControllersReconcile] run %s reconcile", lvg.DiscovererName))
+	lvgRes, err := lvgDiscoverCtrl(ctx)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[runControllersReconcile] an error occurred while %s reconcile", controller.LVMVolumeGroupDiscoverCtrlName))
+		log.Error(err, fmt.Sprintf("[runControllersReconcile] an error occurred while %s reconcile", lvg.DiscovererName))
 		return err
 	}
 	if lvgRes.RequeueAfter > 0 {
@@ -160,13 +159,13 @@ func runControllersReconcile(
 			for lvgRes.RequeueAfter > 0 {
 				log.Warning(fmt.Sprintf("[runControllersReconcile] LVMVolumeGroups reconcile needs a retry in %s", lvgRes.RequeueAfter.String()))
 				time.Sleep(lvgRes.RequeueAfter)
-				lvgRes, err = lvgDiscoverCtrl.Reconcile(ctx, reconcile.Request{})
+				lvgRes, err = lvgDiscoverCtrl(ctx)
 			}
 
 			log.Info("[runControllersReconcile] successfully reconciled LVMVolumeGroups after a retry")
 		}()
 	}
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s successfully reconciled", controller.LVMVolumeGroupDiscoverCtrlName))
+	log.Info(fmt.Sprintf("[runControllersReconcile] run %s successfully reconciled", lvg.DiscovererName))
 
 	return nil
 }

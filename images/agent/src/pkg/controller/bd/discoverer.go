@@ -4,6 +4,8 @@ import (
 	"agent/internal"
 	"agent/pkg/cache"
 	"agent/pkg/controller"
+	"agent/pkg/controller/clients"
+	"agent/pkg/controller/utils"
 	"agent/pkg/logger"
 	"agent/pkg/monitoring"
 	"context"
@@ -20,15 +22,15 @@ import (
 	"github.com/gosimple/slug"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const Name = "block-device-controller"
+const DiscovererName = "block-device-controller"
 
 type Discoverer struct {
 	cl       client.Client
 	log      logger.Logger
+	bdCl     *clients.BDClient
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
 	opts     Options
@@ -50,6 +52,7 @@ func NewDiscoverer(
 	return &Discoverer{
 		cl:       cl,
 		log:      log,
+		bdCl:     clients.NewBDClient(cl, metrics),
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		opts:     opts,
@@ -57,7 +60,7 @@ func NewDiscoverer(
 }
 
 func (d *Discoverer) Name() string {
-	return Name
+	return DiscovererName
 }
 
 func (d *Discoverer) Discover(ctx context.Context) (controller.Result, error) {
@@ -83,7 +86,7 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 		return false
 	}
 
-	apiBlockDevices, err := d.getAPIBlockDevices(ctx, nil)
+	apiBlockDevices, err := d.bdCl.GetAPIBlockDevices(ctx, DiscovererName, nil)
 	if err != nil {
 		d.log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDevices")
 		return true
@@ -126,41 +129,10 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 	d.removeDeprecatedAPIDevices(ctx, candidates, apiBlockDevices)
 
 	d.log.Info("[RunBlockDeviceController] END reconcile of block devices")
-	d.metrics.ReconcileDuration(Name).Observe(d.metrics.GetEstimatedTimeInSeconds(reconcileStart))
-	d.metrics.ReconcilesCountTotal(Name).Inc()
+	d.metrics.ReconcileDuration(DiscovererName).Observe(d.metrics.GetEstimatedTimeInSeconds(reconcileStart))
+	d.metrics.ReconcilesCountTotal(DiscovererName).Inc()
 
 	return false
-}
-
-// getAPIBlockDevices returns map of BlockDevice resources with BlockDevice as a key. You might specify a selector to get a subset or
-// leave it as nil to get all the resources.
-func (d *Discoverer) getAPIBlockDevices(
-	ctx context.Context,
-	selector *metav1.LabelSelector,
-) (map[string]v1alpha1.BlockDevice, error) {
-	list := &v1alpha1.BlockDeviceList{}
-	s, err := metav1.LabelSelectorAsSelector(selector)
-	if err != nil {
-		return nil, err
-	}
-	if s == labels.Nothing() {
-		s = nil
-	}
-	start := time.Now()
-	err = d.cl.List(ctx, list, &client.ListOptions{LabelSelector: s})
-	d.metrics.APIMethodsDuration(Name, "list").Observe(d.metrics.GetEstimatedTimeInSeconds(start))
-	d.metrics.APIMethodsExecutionCount(Name, "list").Inc()
-	if err != nil {
-		d.metrics.APIMethodsErrors(Name, "list").Inc()
-		return nil, err
-	}
-
-	result := make(map[string]v1alpha1.BlockDevice, len(list.Items))
-	for _, item := range list.Items {
-		result[item.Name] = item
-	}
-
-	return result, nil
 }
 
 func (d *Discoverer) removeDeprecatedAPIDevices(
@@ -250,7 +222,7 @@ func (d *Discoverer) getBlockDeviceCandidates() []internal.BlockDeviceCandidate 
 			if pv.PVName == device.Name {
 				d.log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] The device is a PV. Found PV name: %s", pv.PVName))
 				if candidate.FSType == internal.LVMFSType {
-					hasTag, lvmVGName := checkTag(pv.VGTags)
+					hasTag, lvmVGName := utils.CheckTag(pv.VGTags)
 					if hasTag {
 						d.log.Debug(fmt.Sprintf("[GetBlockDeviceCandidates] PV %s of BlockDevice %s has tag, fill the VG information", pv.PVName, candidate.Name))
 						candidate.PVUuid = pv.PVUuid
@@ -398,10 +370,10 @@ func (d *Discoverer) updateAPIBlockDevice(
 
 	start := time.Now()
 	err := d.cl.Update(ctx, &blockDevice)
-	d.metrics.APIMethodsDuration(Name, "update").Observe(d.metrics.GetEstimatedTimeInSeconds(start))
-	d.metrics.APIMethodsExecutionCount(Name, "update").Inc()
+	d.metrics.APIMethodsDuration(DiscovererName, "update").Observe(d.metrics.GetEstimatedTimeInSeconds(start))
+	d.metrics.APIMethodsExecutionCount(DiscovererName, "update").Inc()
 	if err != nil {
-		d.metrics.APIMethodsErrors(Name, "update").Inc()
+		d.metrics.APIMethodsErrors(DiscovererName, "update").Inc()
 		return err
 	}
 
@@ -437,10 +409,10 @@ func (d *Discoverer) createAPIBlockDevice(ctx context.Context, candidate interna
 	start := time.Now()
 
 	err := d.cl.Create(ctx, blockDevice)
-	d.metrics.APIMethodsDuration(Name, "create").Observe(d.metrics.GetEstimatedTimeInSeconds(start))
-	d.metrics.APIMethodsExecutionCount(Name, "create").Inc()
+	d.metrics.APIMethodsDuration(DiscovererName, "create").Observe(d.metrics.GetEstimatedTimeInSeconds(start))
+	d.metrics.APIMethodsExecutionCount(DiscovererName, "create").Inc()
 	if err != nil {
-		d.metrics.APIMethodsErrors(Name, "create").Inc()
+		d.metrics.APIMethodsErrors(DiscovererName, "create").Inc()
 		return nil, err
 	}
 	return blockDevice, nil
@@ -449,10 +421,10 @@ func (d *Discoverer) createAPIBlockDevice(ctx context.Context, candidate interna
 func (d *Discoverer) deleteAPIBlockDevice(ctx context.Context, device *v1alpha1.BlockDevice) error {
 	start := time.Now()
 	err := d.cl.Delete(ctx, device)
-	d.metrics.APIMethodsDuration(Name, "delete").Observe(d.metrics.GetEstimatedTimeInSeconds(start))
-	d.metrics.APIMethodsExecutionCount(Name, "delete").Inc()
+	d.metrics.APIMethodsDuration(DiscovererName, "delete").Observe(d.metrics.GetEstimatedTimeInSeconds(start))
+	d.metrics.APIMethodsExecutionCount(DiscovererName, "delete").Inc()
 	if err != nil {
-		d.metrics.APIMethodsErrors(Name, "delete").Inc()
+		d.metrics.APIMethodsErrors(DiscovererName, "delete").Inc()
 		return err
 	}
 	return nil
@@ -575,22 +547,6 @@ func checkConsumable(device internal.Device) bool {
 	}
 
 	return true
-}
-
-func checkTag(tags string) (bool, string) {
-	if !strings.Contains(tags, internal.LVMTags[0]) {
-		return false, ""
-	}
-
-	splitTags := strings.Split(tags, ",")
-	for _, tag := range splitTags {
-		if strings.HasPrefix(tag, "storage.deckhouse.io/lvmVolumeGroupName") {
-			kv := strings.Split(tag, "=")
-			return true, kv[1]
-		}
-	}
-
-	return true, ""
 }
 
 func createUniqDeviceName(can internal.BlockDeviceCandidate) string {

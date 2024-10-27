@@ -27,7 +27,6 @@ import (
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -37,6 +36,9 @@ import (
 	"agent/pkg/cache"
 	"agent/pkg/controller"
 	"agent/pkg/controller/bd"
+	"agent/pkg/controller/llv"
+	"agent/pkg/controller/llv_extender"
+	"agent/pkg/controller/lvg"
 	"agent/pkg/kubutils"
 	"agent/pkg/logger"
 	"agent/pkg/monitoring"
@@ -45,7 +47,7 @@ import (
 )
 
 var (
-	resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
+	resourcesSchemeFuncs = []func(*runtime.Scheme) error{
 		v1alpha1.AddToScheme,
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,
@@ -112,7 +114,7 @@ func main() {
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 
 	log.Info("[main] ReTag starts")
-	if err := utils.ReTag(ctx, *log, metrics, bd.Name); err != nil {
+	if err := utils.ReTag(ctx, *log, metrics, bd.DiscovererName); err != nil {
 		log.Error(err, "[main] unable to run ReTag")
 	}
 
@@ -138,30 +140,91 @@ func main() {
 		os.Exit(1)
 	}
 
-	if _, err = controller.RunLVMVolumeGroupWatcherController(mgr, *cfgParams, *log, metrics, sdsCache); err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
-		os.Exit(1)
-	}
-
-	lvgDiscoverCtrl, err := controller.RunLVMVolumeGroupDiscoverController(mgr, *cfgParams, *log, metrics, sdsCache)
+	rediscoverLVGs, err := controller.AddDiscoverer(
+		mgr,
+		*log,
+		lvg.NewDiscoverer(
+			mgr.GetClient(),
+			*log,
+			metrics,
+			sdsCache,
+			lvg.DiscovererOptions{
+				NodeName:                cfgParams.NodeName,
+				VolumeGroupScanInterval: cfgParams.VolumeGroupScanIntervalSec,
+			},
+		),
+	)
 	if err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupDiscoverController")
 		os.Exit(1)
 	}
 
+	err = controller.AddReconciler(
+		mgr,
+		*log,
+		lvg.NewReconciler(
+			mgr.GetClient(),
+			*log,
+			metrics,
+			sdsCache,
+			lvg.ReconcilerOptions{
+				NodeName:                cfgParams.NodeName,
+				VolumeGroupScanInterval: cfgParams.VolumeGroupScanIntervalSec,
+				BlockDeviceScanInterval: cfgParams.BlockDeviceScanIntervalSec,
+			},
+		),
+	)
+	if err != nil {
+		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
+		os.Exit(1)
+	}
+
 	go func() {
-		if err = scanner.RunScanner(ctx, *log, *cfgParams, sdsCache, rediscoverBlockDevices, lvgDiscoverCtrl); err != nil {
+		if err = scanner.RunScanner(
+			ctx,
+			*log,
+			*cfgParams,
+			sdsCache,
+			rediscoverBlockDevices,
+			rediscoverLVGs,
+		); err != nil {
 			log.Error(err, "[main] unable to run scanner")
 			os.Exit(1)
 		}
 	}()
 
-	if _, err = controller.RunLVMLogicalVolumeWatcherController(mgr, *cfgParams, *log, metrics, sdsCache); err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMLogicalVolumeWatcherController")
+	err = controller.AddReconciler(
+		mgr,
+		*log,
+		llv.NewReconciler(
+			mgr.GetClient(),
+			*log,
+			metrics,
+			sdsCache,
+			llv.ReconcilerOptions{
+				NodeName:                cfgParams.NodeName,
+				VolumeGroupScanInterval: cfgParams.VolumeGroupScanIntervalSec,
+				Loglevel:                cfgParams.Loglevel,
+				LLVRequeueInterval:      cfgParams.LLVRequeueIntervalSec,
+			},
+		),
+	)
+	if err != nil {
+		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
 		os.Exit(1)
 	}
 
-	if err = controller.RunLVMLogicalVolumeExtenderWatcherController(mgr, *cfgParams, *log, metrics, sdsCache); err != nil {
+	err = controller.AddReconciler(mgr, *log, llv_extender.NewReconciler(
+		mgr.GetClient(),
+		*log,
+		metrics,
+		sdsCache,
+		llv_extender.ReconcilerOptions{
+			NodeName:                cfgParams.NodeName,
+			VolumeGroupScanInterval: cfgParams.VolumeGroupScanIntervalSec,
+		},
+	))
+	if err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMLogicalVolumeExtenderWatcherController")
 		os.Exit(1)
 	}

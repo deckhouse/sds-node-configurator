@@ -1,4 +1,4 @@
-package controller
+package lvg
 
 import (
 	"bytes"
@@ -10,21 +10,26 @@ import (
 	"github.com/stretchr/testify/assert"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"agent/internal"
 	"agent/pkg/cache"
+	cutils "agent/pkg/controller/utils"
 	"agent/pkg/logger"
 	"agent/pkg/monitoring"
+	"agent/pkg/test_utils"
 )
 
 func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
-	cl := NewFakeClient()
+	cl := test_utils.NewFakeClient()
 	ctx := context.Background()
 	log := logger.Logger{}
 	metrics := monitoring.GetMetrics("")
+	ch := cache.New()
+
+	r := NewReconciler(cl, log, metrics, ch, ReconcilerOptions{})
 
 	t.Run("validateLVGForUpdateFunc", func(t *testing.T) {
 		t.Run("without_thin_pools_returns_true", func(t *testing.T) {
@@ -76,10 +81,9 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			ch := cache.New()
 			ch.StorePVs(pvs, bytes.Buffer{})
 
-			valid, reason := validateLVGForUpdateFunc(log, ch, lvg, bds)
+			valid, reason := r.validateLVGForUpdateFunc(lvg, bds)
 			if assert.True(t, valid) {
 				assert.Equal(t, "", reason)
 			}
@@ -134,11 +138,10 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			ch := cache.New()
-			ch.StorePVs(pvs, bytes.Buffer{})
+			r.sdsCache.StorePVs(pvs, bytes.Buffer{})
 
 			// new block device is not consumable
-			valid, _ := validateLVGForUpdateFunc(log, ch, lvg, bds)
+			valid, _ := r.validateLVGForUpdateFunc(lvg, bds)
 			assert.False(t, valid)
 		})
 
@@ -203,11 +206,10 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			ch := cache.New()
-			ch.StorePVs(pvs, bytes.Buffer{})
-			ch.StoreVGs(vgs, bytes.Buffer{})
+			r.sdsCache.StorePVs(pvs, bytes.Buffer{})
+			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
 
-			valid, reason := validateLVGForUpdateFunc(log, ch, lvg, bds)
+			valid, reason := r.validateLVGForUpdateFunc(lvg, bds)
 			if assert.True(t, valid) {
 				assert.Equal(t, "", reason)
 			}
@@ -274,11 +276,10 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			ch := cache.New()
-			ch.StorePVs(pvs, bytes.Buffer{})
-			ch.StoreVGs(vgs, bytes.Buffer{})
+			r.sdsCache.StorePVs(pvs, bytes.Buffer{})
+			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
 
-			valid, _ := validateLVGForUpdateFunc(log, ch, lvg, bds)
+			valid, _ := r.validateLVGForUpdateFunc(lvg, bds)
 			assert.False(t, valid)
 		})
 	})
@@ -313,7 +314,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				Spec: v1alpha1.LVMVolumeGroupSpec{},
 			}
 
-			valid, reason := validateLVGForCreateFunc(log, lvg, bds)
+			valid, reason := r.validateLVGForCreateFunc(lvg, bds)
 			if assert.True(t, valid) {
 				assert.Equal(t, "", reason)
 			}
@@ -338,7 +339,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				Spec: v1alpha1.LVMVolumeGroupSpec{},
 			}
 
-			valid, _ := validateLVGForCreateFunc(log, lvg, bds)
+			valid, _ := r.validateLVGForCreateFunc(lvg, bds)
 			assert.False(t, valid)
 		})
 
@@ -377,7 +378,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			valid, reason := validateLVGForCreateFunc(log, lvg, bds)
+			valid, reason := r.validateLVGForCreateFunc(lvg, bds)
 			if assert.True(t, valid) {
 				assert.Equal(t, "", reason)
 			}
@@ -418,7 +419,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			valid, _ := validateLVGForCreateFunc(log, lvg, bds)
+			valid, _ := r.validateLVGForCreateFunc(lvg, bds)
 			assert.False(t, valid)
 		})
 	})
@@ -432,9 +433,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			ch := cache.New()
-
-			actual := identifyLVGReconcileFunc(lvg, ch)
+			actual := r.identifyLVGReconcileFunc(lvg)
 			assert.Equal(t, CreateReconcile, actual)
 		})
 
@@ -451,10 +450,9 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			ch := cache.New()
-			ch.StoreVGs(vgs, bytes.Buffer{})
+			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
 
-			actual := identifyLVGReconcileFunc(lvg, ch)
+			actual := r.identifyLVGReconcileFunc(lvg)
 			assert.Equal(t, UpdateReconcile, actual)
 		})
 
@@ -472,10 +470,9 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			ch := cache.New()
-			ch.StoreVGs(vgs, bytes.Buffer{})
+			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
 
-			actual := identifyLVGReconcileFunc(lvg, ch)
+			actual := r.identifyLVGReconcileFunc(lvg)
 			assert.Equal(t, DeleteReconcile, actual)
 		})
 	})
@@ -484,7 +481,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		t.Run("not_exist_no_remove", func(t *testing.T) {
 			lvg := &v1alpha1.LVMVolumeGroup{}
 
-			removed, err := removeLVGFinalizerIfExist(ctx, cl, lvg)
+			removed, err := r.removeLVGFinalizerIfExist(ctx, lvg)
 			if err != nil {
 				t.Error(err)
 			}
@@ -510,7 +507,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				}
 			}()
 
-			removed, err := removeLVGFinalizerIfExist(ctx, cl, lvg)
+			removed, err := r.removeLVGFinalizerIfExist(ctx, lvg)
 			if err != nil {
 				t.Error(err)
 			}
@@ -550,7 +547,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		ch.StoreLVs(lvs, bytes.Buffer{})
 		expected := []string{firstLV}
 
-		actual := getLVForVG(ch, vgName)
+		actual := r.getLVForVG(vgName)
 
 		assert.ElementsMatch(t, expected, actual)
 	})
@@ -587,7 +584,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 	t.Run("getRequestedSizeFromString", func(t *testing.T) {
 		t.Run("for_percent_size", func(t *testing.T) {
-			actual, err := getRequestedSizeFromString("50%", resource.MustParse("10G"))
+			actual, err := cutils.GetRequestedSizeFromString("50%", resource.MustParse("10G"))
 			if err != nil {
 				t.Error(err)
 			}
@@ -597,7 +594,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		})
 
 		t.Run("for_number_size", func(t *testing.T) {
-			actual, err := getRequestedSizeFromString("5G", resource.MustParse("10G"))
+			actual, err := cutils.GetRequestedSizeFromString("5G", resource.MustParse("10G"))
 			if err != nil {
 				t.Error(err)
 			}
@@ -899,7 +896,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}
 		}()
 
-		err = syncThinPoolsAllocationLimit(ctx, cl, log, lvg)
+		err = r.syncThinPoolsAllocationLimit(ctx, lvg)
 		if err != nil {
 			t.Error(err)
 		}
@@ -933,7 +930,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				}
 			}()
 
-			added, err := addLVGFinalizerIfNotExist(ctx, cl, lvg)
+			added, err := r.addLVGFinalizerIfNotExist(ctx, lvg)
 			if err != nil {
 				t.Error(err)
 			}
@@ -970,7 +967,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				}
 			}()
 
-			added, err := addLVGFinalizerIfNotExist(ctx, cl, lvg)
+			added, err := r.addLVGFinalizerIfNotExist(ctx, lvg)
 			if err != nil {
 				t.Error(err)
 			}
@@ -1012,7 +1009,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				t.Error(err)
 			}
 
-			err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, badReason, "")
+			err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, badReason, "")
 			if err != nil {
 				t.Error(err)
 			}
@@ -1055,7 +1052,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				t.Error(err)
 			}
 
-			err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, "", "")
+			err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, "", "")
 			if err != nil {
 				t.Error(err)
 			}
@@ -1069,14 +1066,14 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.DeletionTimestamp = &v1.Time{}
 
-			assert.True(t, shouldReconcileLVGByDeleteFunc(lvg))
+			assert.True(t, r.shouldReconcileLVGByDeleteFunc(lvg))
 		})
 
 		t.Run("returns_false", func(t *testing.T) {
 			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.DeletionTimestamp = nil
 
-			assert.False(t, shouldReconcileLVGByDeleteFunc(lvg))
+			assert.False(t, r.shouldReconcileLVGByDeleteFunc(lvg))
 		})
 	})
 
@@ -1085,7 +1082,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			oldLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG.DeletionTimestamp = &v1.Time{}
-			assert.True(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
+			assert.True(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
 		})
 
 		t.Run("spec_is_diff_returns_true", func(t *testing.T) {
@@ -1093,7 +1090,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			newLVG := &v1alpha1.LVMVolumeGroup{}
 			oldLVG.Spec.BlockDeviceSelector = &v1.LabelSelector{MatchLabels: map[string]string{"first": "second"}}
 			newLVG.Spec.BlockDeviceSelector = &v1.LabelSelector{MatchLabels: map[string]string{"second": "second"}}
-			assert.True(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
+			assert.True(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
 		})
 
 		t.Run("condition_vg_configuration_applied_is_updating_returns_false", func(t *testing.T) {
@@ -1107,7 +1104,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					Reason: internal.ReasonUpdating,
 				},
 			}
-			assert.False(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
+			assert.False(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
 		})
 
 		t.Run("condition_vg_configuration_applied_is_creating_returns_false", func(t *testing.T) {
@@ -1121,7 +1118,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 			newLVG.Labels = map[string]string{LVGMetadateNameLabelKey: newLVG.Name}
-			assert.False(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
+			assert.False(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
 		})
 
 		t.Run("label_is_not_the_same_returns_true", func(t *testing.T) {
@@ -1135,7 +1132,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 			newLVG.Labels = map[string]string{LVGMetadateNameLabelKey: "some-other-name"}
-			assert.True(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
+			assert.True(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
 		})
 
 		t.Run("dev_size_and_pv_size_are_diff_returns_true", func(t *testing.T) {
@@ -1153,25 +1150,25 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					Name: "some-node",
 				},
 			}
-			assert.True(t, shouldLVGWatcherReconcileUpdateEvent(log, oldLVG, newLVG))
+			assert.True(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
 		})
 	})
 
 	t.Run("shouldUpdateLVGLabels", func(t *testing.T) {
 		t.Run("labels_nil_returns_true", func(t *testing.T) {
 			lvg := &v1alpha1.LVMVolumeGroup{}
-			assert.True(t, shouldUpdateLVGLabels(log, lvg, "key", "value"))
+			assert.True(t, r.shouldUpdateLVGLabels(lvg, "key", "value"))
 		})
 		t.Run("no_such_label_returns_true", func(t *testing.T) {
 			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.Labels = map[string]string{"key": "value"}
-			assert.True(t, shouldUpdateLVGLabels(log, lvg, "other-key", "value"))
+			assert.True(t, r.shouldUpdateLVGLabels(lvg, "other-key", "value"))
 		})
 		t.Run("key_exists_other_value_returns_true", func(t *testing.T) {
 			const key = "key"
 			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.Labels = map[string]string{key: "value"}
-			assert.True(t, shouldUpdateLVGLabels(log, lvg, key, "other-value"))
+			assert.True(t, r.shouldUpdateLVGLabels(lvg, key, "other-value"))
 		})
 		t.Run("all_good_returns_false", func(t *testing.T) {
 			const (
@@ -1180,7 +1177,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			)
 			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.Labels = map[string]string{key: value}
-			assert.False(t, shouldUpdateLVGLabels(log, lvg, key, value))
+			assert.False(t, r.shouldUpdateLVGLabels(lvg, key, value))
 		})
 	})
 
@@ -1241,7 +1238,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		}
 		assert.Equal(t, lvgName, lvgCheck.Name)
 
-		err = DeleteLVMVolumeGroup(ctx, cl, log, metrics, lvgToDelete, nodeName)
+		err = r.lvgCl.DeleteLVMVolumeGroup(ctx, lvgToDelete)
 		if err != nil {
 			t.Error(err)
 		}
@@ -1275,7 +1272,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}()
 		}
 
-		actual, err := getLVMVolumeGroup(ctx, cl, metrics, name)
+		actual, err := r.lvgCl.GetLVMVolumeGroup(ctx, name)
 		if assert.NoError(t, err) {
 			assert.NotNil(t, actual)
 			assert.Equal(t, name, actual.Name)
@@ -1302,7 +1299,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}()
 		}
 
-		actual, err := getLVMVolumeGroup(ctx, cl, metrics, "another-name")
+		actual, err := r.lvgCl.GetLVMVolumeGroup(ctx, "another-name")
 
 		if assert.EqualError(t, err, "lvmvolumegroups.storage.deckhouse.io \"another-name\" not found") {
 			assert.Nil(t, actual)

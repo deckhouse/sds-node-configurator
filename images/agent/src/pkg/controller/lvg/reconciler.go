@@ -4,6 +4,8 @@ import (
 	"agent/internal"
 	"agent/pkg/cache"
 	"agent/pkg/controller"
+	"agent/pkg/controller/clients"
+	cutils "agent/pkg/controller/utils"
 	"agent/pkg/logger"
 	"agent/pkg/monitoring"
 	"agent/pkg/utils"
@@ -12,18 +14,16 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/cloudflare/cfssl/log"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const Name = "lvm-volume-group-watcher-controller"
+const ReconcilerName = "lvm-volume-group-watcher-controller"
 const LVGMetadateNameLabelKey = "kubernetes.io/metadata.name"
 
 const (
@@ -39,18 +39,31 @@ const (
 	LVMVolumeGroupTag = "storage.deckhouse.io/lvmVolumeGroupName"
 )
 
+// TODO: remove
+const (
+	CreateReconcile reconcileType = "Create"
+	UpdateReconcile reconcileType = "Update"
+	DeleteReconcile reconcileType = "Delete"
+)
+
+type (
+	reconcileType string
+)
+
 type Reconciler struct {
 	cl       client.Client
 	log      logger.Logger
+	lvgCl    *clients.LVGClient
+	bdCl     *clients.BDClient
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
-	opts     Options
+	opts     ReconcilerOptions
 }
 
-type Options struct {
-	NodeName                   string
-	BlockDeviceScanIntervalSec time.Duration
-	VolumeGroupScanIntervalSec time.Duration
+type ReconcilerOptions struct {
+	NodeName                string
+	BlockDeviceScanInterval time.Duration
+	VolumeGroupScanInterval time.Duration
 }
 
 func NewReconciler(
@@ -58,11 +71,19 @@ func NewReconciler(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
-	opts Options,
+	opts ReconcilerOptions,
 ) *Reconciler {
 	return &Reconciler{
-		cl:       cl,
-		log:      log,
+		cl:  cl,
+		log: log,
+		lvgCl: clients.NewLVGClient(
+			cl,
+			log,
+			metrics,
+			opts.NodeName,
+			ReconcilerName,
+		),
+		bdCl:     clients.NewBDClient(cl, metrics),
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		opts:     opts,
@@ -70,9 +91,19 @@ func NewReconciler(
 }
 
 func (r *Reconciler) Name() string {
-	return Name
+	return ReconcilerName
 }
 
+func (r *Reconciler) MaxConcurrentReconciles() int {
+	return 1
+}
+
+// ShouldReconcileUpdate implements controller.Reconciler.
+func (r *Reconciler) ShouldReconcileUpdate(objectOld *v1alpha1.LVMVolumeGroup, objectNew *v1alpha1.LVMVolumeGroup) bool {
+	return r.shouldLVGWatcherReconcileUpdateEvent(objectOld, objectNew)
+}
+
+// Reconcile implements controller.Reconciler.
 func (r *Reconciler) Reconcile(ctx context.Context, request controller.ReconcileRequest[*v1alpha1.LVMVolumeGroup]) (controller.Result, error) {
 	r.log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] Reconciler starts to reconcile the request %s", request.Object.Name))
 
@@ -120,24 +151,38 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 	}
 
 	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector.MatchLabels))
-	blockDevices, err := r.getAPIBlockDevices(ctx, lvg.Spec.BlockDeviceSelector)
+	blockDevices, err := r.bdCl.GetAPIBlockDevices(ctx, ReconcilerName, lvg.Spec.BlockDeviceSelector)
 	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %s", r.opts.BlockDeviceScanIntervalSec.String()))
-		err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "NoBlockDevices", fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()))
+		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %s", r.opts.BlockDeviceScanInterval.String()))
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(
+			ctx,
+			lvg,
+			v1.ConditionFalse,
+			internal.TypeVGConfigurationApplied,
+			"NoBlockDevices",
+			fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()),
+		)
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.opts.BlockDeviceScanIntervalSec.String()))
+			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.opts.BlockDeviceScanInterval.String()))
 		}
 
-		return controller.Result{RequeueAfter: r.opts.BlockDeviceScanIntervalSec}, nil
+		return controller.Result{RequeueAfter: r.opts.BlockDeviceScanInterval}, nil
 	}
 	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully got block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector.MatchLabels))
 
 	valid, reason := validateSpecBlockDevices(lvg, blockDevices)
 	if !valid {
 		r.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupController] validation failed for the LVMVolumeGroup %s, reason: %s", lvg.Name, reason))
-		err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, reason)
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(
+			ctx,
+			lvg,
+			v1.ConditionFalse,
+			internal.TypeVGConfigurationApplied,
+			internal.ReasonValidationFailed,
+			reason,
+		)
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, cfg.VolumeGroupScanIntervalSec.String()))
+			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.opts.VolumeGroupScanInterval.String()))
 			return controller.Result{}, err
 		}
 
@@ -145,7 +190,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 	}
 	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully validated BlockDevices of the LVMVolumeGroup %s", lvg.Name))
 
-	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to add label %s to the LVMVolumeGroup %s", LVGMetadateNameLabelKey, cfg.NodeName))
+	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to add label %s to the LVMVolumeGroup %s", LVGMetadateNameLabelKey, r.opts.NodeName))
 	added, err = r.addLVGLabelIfNeeded(ctx, lvg, LVGMetadateNameLabelKey, lvg.Name)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add label %s to the LVMVolumeGroup %s", LVGMetadateNameLabelKey, lvg.Name))
@@ -162,13 +207,20 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 	bds, _ := r.sdsCache.GetDevices()
 	if len(bds) == 0 {
 		r.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no block devices in the cache, add the LVMVolumeGroup %s to requeue", lvg.Name))
-		err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "CacheEmpty", "unable to apply configuration due to the cache's state")
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(
+			ctx,
+			lvg,
+			v1.ConditionFalse,
+			internal.TypeVGConfigurationApplied,
+			"CacheEmpty",
+			"unable to apply configuration due to the cache's state",
+		)
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, cfg.VolumeGroupScanIntervalSec.String()))
+			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.opts.VolumeGroupScanInterval.String()))
 		}
 
 		return controller.Result{
-			RequeueAfter: r.opts.VolumeGroupScanIntervalSec,
+			RequeueAfter: r.opts.VolumeGroupScanInterval,
 		}, nil
 	}
 
@@ -185,15 +237,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 	}
 
 	if shouldRequeue {
-		r.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s event will be requeued in %s", lvg.Name, r.opts.VolumeGroupScanIntervalSec.String()))
+		r.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s event will be requeued in %s", lvg.Name, r.opts.VolumeGroupScanInterval.String()))
 		return controller.Result{
-			RequeueAfter: r.opts.VolumeGroupScanIntervalSec,
+			RequeueAfter: r.opts.VolumeGroupScanInterval,
 		}, nil
 	}
 	r.log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] Reconciler successfully reconciled the LVMVolumeGroup %s", lvg.Name))
 
 	return controller.Result{}, nil
-
 }
 
 func (r *Reconciler) runEventReconcile(
@@ -201,7 +252,7 @@ func (r *Reconciler) runEventReconcile(
 	lvg *v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 ) (bool, error) {
-	recType := r.identifyLVGReconcileFunc(lvg, sdsCache)
+	recType := r.identifyLVGReconcileFunc(lvg)
 
 	switch recType {
 	case CreateReconcile:
@@ -226,7 +277,7 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 	// this check prevents the LVMVolumeGroup resource's infinity updating after a retry
 	for _, c := range lvg.Status.Conditions {
 		if c.Type == internal.TypeVGConfigurationApplied && c.Reason != internal.ReasonTerminating {
-			err := r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, "trying to delete VG")
+			err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, "trying to delete VG")
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 				return true, err
@@ -238,7 +289,14 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 	_, exist := lvg.Annotations[deletionProtectionAnnotation]
 	if exist {
 		r.log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] the LVMVolumeGroup %s has a deletion timestamp but also has a deletion protection annotation %s. Remove it to proceed the delete operation", lvg.Name, deletionProtectionAnnotation))
-		err := r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, fmt.Sprintf("to delete the LVG remove the annotation %s", deletionProtectionAnnotation))
+		err := r.lvgCl.UpdateLVGConditionIfNeeded(
+			ctx,
+			lvg,
+			v1.ConditionFalse,
+			internal.TypeVGConfigurationApplied,
+			internal.ReasonTerminating,
+			fmt.Sprintf("to delete the LVG remove the annotation %s", deletionProtectionAnnotation),
+		)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 			return true, err
@@ -253,7 +311,7 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 		err := fmt.Errorf("VG %s uses LVs: %v. Delete used LVs first", lvg.Spec.ActualVGNameOnTheNode, usedLVs)
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to reconcile LVG %s", lvg.Name))
 		r.log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] tries to add the condition %s status False to the LVMVolumeGroup %s due to LV does exist", internal.TypeVGConfigurationApplied, lvg.Name))
-		err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, err.Error())
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, err.Error())
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 			return true, err
@@ -266,7 +324,7 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 	err := r.deleteVGIfExist(lvg.Spec.ActualVGNameOnTheNode)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to delete VG %s", lvg.Spec.ActualVGNameOnTheNode))
-		err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, err.Error())
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, err.Error())
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 			return true, err
@@ -278,7 +336,7 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 	removed, err := r.removeLVGFinalizerIfExist(ctx, lvg)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to remove a finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
-		err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, err.Error())
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, err.Error())
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		}
@@ -291,7 +349,7 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 		r.log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] no need to remove a finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
 	}
 
-	err = r.deleteLVMVolumeGroup(ctx, lvg, r.opts.NodeName)
+	err = r.lvgCl.DeleteLVMVolumeGroup(ctx, lvg)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to delete the LVMVolumeGroup %s", lvg.Name))
 		return true, err
@@ -313,7 +371,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 	valid, reason := r.validateLVGForUpdateFunc(lvg, blockDevices)
 	if !valid {
 		r.log.Warning(fmt.Sprintf("[reconcileLVGUpdateFunc] the LVMVolumeGroup %s is not valid", lvg.Name))
-		err := r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, reason)
+		err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, reason)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, lvg.Name))
 		}
@@ -323,11 +381,11 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] successfully validated the LVMVolumeGroup %s", lvg.Name))
 
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] tries to get VG %s for the LVMVolumeGroup %s", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
-	found, vg := tryGetVG(r.sdsCache, lvg.Spec.ActualVGNameOnTheNode)
+	found, vg := r.tryGetVG(lvg.Spec.ActualVGNameOnTheNode)
 	if !found {
 		err := fmt.Errorf("VG %s not found", lvg.Spec.ActualVGNameOnTheNode)
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to reconcile the LVMVolumeGroup %s", lvg.Name))
-		err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "VGNotFound", err.Error())
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "VGNotFound", err.Error())
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		}
@@ -339,7 +397,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 	updated, err := r.updateVGTagIfNeeded(ctx, lvg, vg)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to update VG %s tag of the LVMVolumeGroup %s", vg.VGName, lvg.Name))
-		err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "VGUpdateFailed", fmt.Sprintf("unable to update VG tag, err: %s", err.Error()))
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "VGUpdateFailed", fmt.Sprintf("unable to update VG tag, err: %s", err.Error()))
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		}
@@ -357,7 +415,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 	err = r.resizePVIfNeeded(ctx, lvg)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to resize PV of the LVMVolumeGroup %s", lvg.Name))
-		err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "PVResizeFailed", fmt.Sprintf("unable to resize PV, err: %s", err.Error()))
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "PVResizeFailed", fmt.Sprintf("unable to resize PV, err: %s", err.Error()))
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		}
@@ -369,7 +427,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 	err = r.extendVGIfNeeded(ctx, lvg, vg, pvs, blockDevices)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to extend VG of the LVMVolumeGroup %s", lvg.Name))
-		err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "VGExtendFailed", fmt.Sprintf("unable to extend VG, err: %s", err.Error()))
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "VGExtendFailed", fmt.Sprintf("unable to extend VG, err: %s", err.Error()))
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		}
@@ -384,7 +442,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 		err = r.reconcileThinPoolsIfNeeded(ctx, lvg, vg, lvs)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to reconcile thin-pools of the LVMVolumeGroup %s", lvg.Name))
-			err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "ThinPoolReconcileFailed", fmt.Sprintf("unable to reconcile thin-pools, err: %s", err.Error()))
+			err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "ThinPoolReconcileFailed", fmt.Sprintf("unable to reconcile thin-pools, err: %s", err.Error()))
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 			}
@@ -394,7 +452,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 	}
 
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] tries to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
-	err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, "Applied", "configuration has been applied")
+	err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, "Applied", "configuration has been applied")
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		return true, err
@@ -423,7 +481,7 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 
 	if !exist {
 		r.log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] tries to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
-		err := r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonCreating, "trying to apply the configuration")
+		err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonCreating, "trying to apply the configuration")
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 			return true, err
@@ -434,7 +492,7 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 	valid, reason := r.validateLVGForCreateFunc(lvg, blockDevices)
 	if !valid {
 		r.log.Warning(fmt.Sprintf("[reconcileLVGCreateFunc] validation fails for the LVMVolumeGroup %s", lvg.Name))
-		err := r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, reason)
+		err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, reason)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		}
@@ -447,7 +505,7 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 	err := r.createVGComplex(lvg, blockDevices)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to create VG for the LVMVolumeGroup %s", lvg.Name))
-		err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "VGCreationFailed", fmt.Sprintf("unable to create VG, err: %s", err.Error()))
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "VGCreationFailed", fmt.Sprintf("unable to create VG, err: %s", err.Error()))
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		}
@@ -460,7 +518,7 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 
 		for _, tp := range lvg.Spec.ThinPools {
 			vgSize := countVGSizeByBlockDevices(blockDevices)
-			tpRequestedSize, err := getRequestedSizeFromString(tp.Size, vgSize)
+			tpRequestedSize, err := cutils.GetRequestedSizeFromString(tp.Size, vgSize)
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to get thin-pool %s requested size of the LVMVolumeGroup %s", tp.Name, lvg.Name))
 				return false, err
@@ -476,7 +534,7 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 			}
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to create thin-pool %s of the LVMVolumeGroup %s, cmd: %s", tp.Name, lvg.Name, cmd))
-				err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "ThinPoolCreationFailed", fmt.Sprintf("unable to create thin-pool, err: %s", err.Error()))
+				err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "ThinPoolCreationFailed", fmt.Sprintf("unable to create thin-pool, err: %s", err.Error()))
 				if err != nil {
 					r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 				}
@@ -487,49 +545,13 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 		r.log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] successfully created thin-pools for the LVMVolumeGroup %s", lvg.Name))
 	}
 
-	err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, "Success", "all configuration has been applied")
+	err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, "Success", "all configuration has been applied")
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		return true, err
 	}
 
 	return false, nil
-}
-
-func (r *Reconciler) deleteLVMVolumeGroup(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup, currentNode string) error {
-	r.log.Debug(fmt.Sprintf(`[DeleteLVMVolumeGroup] Node "%s" does not belong to VG "%s". It will be removed from LVM resource, name "%s"'`, currentNode, lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
-	for i, node := range lvg.Status.Nodes {
-		if node.Name == currentNode {
-			// delete node
-			lvg.Status.Nodes = append(lvg.Status.Nodes[:i], lvg.Status.Nodes[i+1:]...)
-			r.log.Info(fmt.Sprintf(`[DeleteLVMVolumeGroup] deleted node "%s" from LVMVolumeGroup "%s"`, node.Name, lvg.Name))
-		}
-	}
-
-	// If current LVMVolumeGroup has no nodes left, delete it.
-	if len(lvg.Status.Nodes) == 0 {
-		start := time.Now()
-		err := r.cl.Delete(ctx, lvg)
-		r.metrics.APIMethodsDuration(Name, "delete").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-		r.metrics.APIMethodsExecutionCount(Name, "delete").Inc()
-		if err != nil {
-			r.metrics.APIMethodsErrors(Name, "delete").Inc()
-			return err
-		}
-		r.log.Info(fmt.Sprintf("[DeleteLVMVolumeGroup] the LVMVolumeGroup %s deleted", lvg.Name))
-	}
-
-	return nil
-}
-
-func checkIfVGExist(vgName string, vgs []internal.VGData) bool {
-	for _, vg := range vgs {
-		if vg.VGName == vgName {
-			return true
-		}
-	}
-
-	return false
 }
 
 func (r *Reconciler) shouldUpdateLVGLabels(lvg *v1alpha1.LVMVolumeGroup, labelKey, labelValue string) bool {
@@ -563,7 +585,7 @@ func (r *Reconciler) shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alph
 		return true
 	}
 
-	if r.shouldUpdateLVGLabels(log, newLVG, LVGMetadateNameLabelKey, newLVG.Name) {
+	if r.shouldUpdateLVGLabels(newLVG, LVGMetadateNameLabelKey, newLVG.Name) {
 		r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup's %s labels have been changed", newLVG.Name))
 		return true
 	}
@@ -576,7 +598,7 @@ func (r *Reconciler) shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alph
 	for _, c := range newLVG.Status.Conditions {
 		if c.Type == internal.TypeVGConfigurationApplied {
 			if c.Reason == internal.ReasonUpdating || c.Reason == internal.ReasonCreating {
-				log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should not be reconciled as the LVMVolumeGroup %s reconciliation still in progress", newLVG.Name))
+				r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should not be reconciled as the LVMVolumeGroup %s reconciliation still in progress", newLVG.Name))
 				return false
 			}
 		}
@@ -585,78 +607,13 @@ func (r *Reconciler) shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alph
 	for _, n := range newLVG.Status.Nodes {
 		for _, d := range n.Devices {
 			if !utils.AreSizesEqualWithinDelta(d.PVSize, d.DevSize, internal.ResizeDelta) {
-				log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s PV size is different to device size", newLVG.Name))
+				r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s PV size is different to device size", newLVG.Name))
 				return true
 			}
 		}
 	}
 
 	return false
-}
-
-func shouldReconcileLVGByDeleteFunc(lvg *v1alpha1.LVMVolumeGroup) bool {
-	return lvg.DeletionTimestamp != nil
-}
-
-func (r *Reconciler) updateLVGConditionIfNeeded(
-	ctx context.Context,
-	lvg *v1alpha1.LVMVolumeGroup,
-	status v1.ConditionStatus,
-	conType, reason, message string,
-) error {
-	exist := false
-	index := 0
-	newCondition := v1.Condition{
-		Type:               conType,
-		Status:             status,
-		ObservedGeneration: lvg.Generation,
-		LastTransitionTime: v1.NewTime(time.Now()),
-		Reason:             reason,
-		Message:            message,
-	}
-
-	if lvg.Status.Conditions == nil {
-		r.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] the LVMVolumeGroup %s conditions is nil. Initialize them", lvg.Name))
-		lvg.Status.Conditions = make([]v1.Condition, 0, 5)
-	}
-
-	if len(lvg.Status.Conditions) > 0 {
-		r.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] there are some conditions in the LVMVolumeGroup %s. Tries to find a condition %s", lvg.Name, conType))
-		for i, c := range lvg.Status.Conditions {
-			if c.Type == conType {
-				if checkIfEqualConditions(c, newCondition) {
-					log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no need to update condition %s in the LVMVolumeGroup %s as new and old condition states are the same", conType, lvg.Name))
-					return nil
-				}
-
-				index = i
-				exist = true
-				r.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was found in the LVMVolumeGroup %s at the index %d", conType, lvg.Name, i))
-			}
-		}
-
-		if !exist {
-			r.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was not found. Append it in the end of the LVMVolumeGroup %s conditions", conType, lvg.Name))
-			lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
-		} else {
-			r.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] insert the condition %s status %s reason %s message %s at index %d of the LVMVolumeGroup %s conditions", conType, status, reason, message, index, lvg.Name))
-			lvg.Status.Conditions[index] = newCondition
-		}
-	} else {
-		r.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no conditions were found in the LVMVolumeGroup %s. Append the condition %s in the end", lvg.Name, conType))
-		lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
-	}
-
-	r.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] tries to update the condition type %s status %s reason %s message %s of the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
-	return r.cl.Status().Update(ctx, lvg)
-}
-
-func checkIfEqualConditions(first, second v1.Condition) bool {
-	return first.Type == second.Type &&
-		first.Status == second.Status &&
-		first.Reason == second.Reason &&
-		first.Message == second.Message &&
-		first.ObservedGeneration == second.ObservedGeneration
 }
 
 func (r *Reconciler) addLVGFinalizerIfNotExist(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
@@ -692,7 +649,7 @@ func (r *Reconciler) syncThinPoolsAllocationLimit(ctx context.Context, lvg *v1al
 				updated = true
 				lvg.Status.ThinPools[i].AllocationLimit = specLimits
 
-				space, err = getThinPoolAvailableSpace(lvg.Status.ThinPools[i].ActualSize, lvg.Status.ThinPools[i].AllocatedSize, specLimits)
+				space, err = cutils.GetThinPoolAvailableSpace(lvg.Status.ThinPools[i].ActualSize, lvg.Status.ThinPools[i].AllocatedSize, specLimits)
 				if err != nil {
 					r.log.Error(err, fmt.Sprintf("[syncThinPoolsAllocationLimit] unable to get thin pool %s available space", lvg.Status.ThinPools[i].Name))
 					return err
@@ -720,56 +677,6 @@ func (r *Reconciler) syncThinPoolsAllocationLimit(ctx context.Context, lvg *v1al
 	return nil
 }
 
-func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
-	if len(blockDevices) == 0 {
-		return false, "none of specified BlockDevices were found"
-	}
-
-	if len(lvg.Status.Nodes) > 0 {
-		lostBdNames := make([]string, 0, len(lvg.Status.Nodes[0].Devices))
-		for _, n := range lvg.Status.Nodes {
-			for _, d := range n.Devices {
-				if _, found := blockDevices[d.BlockDevice]; !found {
-					lostBdNames = append(lostBdNames, d.BlockDevice)
-				}
-			}
-		}
-
-		// that means some of the used BlockDevices no longer match the blockDeviceSelector
-		if len(lostBdNames) > 0 {
-			return false, fmt.Sprintf("these BlockDevices no longer match the blockDeviceSelector: %s", strings.Join(lostBdNames, ","))
-		}
-	}
-
-	for _, me := range lvg.Spec.BlockDeviceSelector.MatchExpressions {
-		if me.Key == internal.MetadataNameLabelKey {
-			if len(me.Values) != len(blockDevices) {
-				missedBds := make([]string, 0, len(me.Values))
-				for _, bdName := range me.Values {
-					if _, exist := blockDevices[bdName]; !exist {
-						missedBds = append(missedBds, bdName)
-					}
-				}
-
-				return false, fmt.Sprintf("unable to find specified BlockDevices: %s", strings.Join(missedBds, ","))
-			}
-		}
-	}
-
-	bdFromOtherNode := make([]string, 0, len(blockDevices))
-	for _, bd := range blockDevices {
-		if bd.Status.NodeName != lvg.Spec.Local.NodeName {
-			bdFromOtherNode = append(bdFromOtherNode, bd.Name)
-		}
-	}
-
-	if len(bdFromOtherNode) != 0 {
-		return false, fmt.Sprintf("block devices %s have different node names from LVMVolumeGroup Local.NodeName", strings.Join(bdFromOtherNode, ","))
-	}
-
-	return true, ""
-}
-
 func (r *Reconciler) deleteLVGIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
 	if lvg.DeletionTimestamp == nil {
 		return false, nil
@@ -778,7 +685,7 @@ func (r *Reconciler) deleteLVGIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVol
 	vgs, _ := r.sdsCache.GetVGs()
 	if !checkIfVGExist(lvg.Spec.ActualVGNameOnTheNode, vgs) {
 		r.log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] VG %s was not yet created for the LVMVolumeGroup %s and the resource is marked as deleting. Delete the resource", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
-		removed, err := removeLVGFinalizerIfExist(ctx, lvg)
+		removed, err := r.removeLVGFinalizerIfExist(ctx, lvg)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to remove the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
 			return false, err
@@ -790,7 +697,7 @@ func (r *Reconciler) deleteLVGIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVol
 			r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no need to remove the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
 		}
 
-		err = r.deleteLVMVolumeGroup(ctx, lvg, r.opts.NodeName)
+		err = r.lvgCl.DeleteLVMVolumeGroup(ctx, lvg)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to delete the LVMVolumeGroup %s", lvg.Name))
 			return false, err
@@ -799,53 +706,6 @@ func (r *Reconciler) deleteLVGIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVol
 		return true, nil
 	}
 	return false, nil
-}
-
-func checkIfLVGBelongsToNode(lvg *v1alpha1.LVMVolumeGroup, nodeName string) bool {
-	return lvg.Spec.Local.NodeName == nodeName
-}
-
-func extractPathsFromBlockDevices(targetDevices []string, blockDevices map[string]v1alpha1.BlockDevice) []string {
-	var paths []string
-	if len(targetDevices) > 0 {
-		paths = make([]string, 0, len(targetDevices))
-		for _, bdName := range targetDevices {
-			bd := blockDevices[bdName]
-			paths = append(paths, bd.Status.Path)
-		}
-	} else {
-		paths = make([]string, 0, len(blockDevices))
-		for _, bd := range blockDevices {
-			paths = append(paths, bd.Status.Path)
-		}
-	}
-
-	return paths
-}
-
-func getRequestedSizeFromString(size string, targetSpace resource.Quantity) (resource.Quantity, error) {
-	switch isPercentSize(size) {
-	case true:
-		strPercent := strings.Split(size, "%")[0]
-		percent, err := strconv.Atoi(strPercent)
-		if err != nil {
-			return resource.Quantity{}, err
-		}
-		lvSize := targetSpace.Value() * int64(percent) / 100
-		return *resource.NewQuantity(lvSize, resource.BinarySI), nil
-	case false:
-		return resource.ParseQuantity(size)
-	}
-
-	return resource.Quantity{}, nil
-}
-
-func countVGSizeByBlockDevices(blockDevices map[string]v1alpha1.BlockDevice) resource.Quantity {
-	var totalVGSize int64
-	for _, bd := range blockDevices {
-		totalVGSize += bd.Status.Size.Value()
-	}
-	return *resource.NewQuantity(totalVGSize, resource.BinarySI)
 }
 
 func (r *Reconciler) validateLVGForCreateFunc(
@@ -876,7 +736,7 @@ func (r *Reconciler) validateLVGForCreateFunc(
 
 		var totalThinPoolSize int64
 		for _, tp := range lvg.Spec.ThinPools {
-			tpRequestedSize, err := getRequestedSizeFromString(tp.Size, totalVGSize)
+			tpRequestedSize, err := cutils.GetRequestedSizeFromString(tp.Size, totalVGSize)
 			if err != nil {
 				reason.WriteString(err.Error())
 				continue
@@ -991,7 +851,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 		newTotalVGSize := resource.NewQuantity(vg.VGSize.Value()+additionBlockDeviceSpace, resource.BinarySI)
 		for _, specTp := range lvg.Spec.ThinPools {
 			// might be a case when Thin-pool is already created, but is not shown in status
-			tpRequestedSize, err := getRequestedSizeFromString(specTp.Size, *newTotalVGSize)
+			tpRequestedSize, err := cutils.GetRequestedSizeFromString(specTp.Size, *newTotalVGSize)
 			if err != nil {
 				reason.WriteString(err.Error())
 				continue
@@ -1083,6 +943,10 @@ func (r *Reconciler) shouldReconcileLVGByUpdateFunc(lvg *v1alpha1.LVMVolumeGroup
 	return vg != nil
 }
 
+func (r *Reconciler) shouldReconcileLVGByDeleteFunc(lvg *v1alpha1.LVMVolumeGroup) bool {
+	return lvg.DeletionTimestamp != nil
+}
+
 func (r *Reconciler) reconcileThinPoolsIfNeeded(
 	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
@@ -1098,7 +962,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 
 	errs := strings.Builder{}
 	for _, specTp := range lvg.Spec.ThinPools {
-		tpRequestedSize, err := getRequestedSizeFromString(specTp.Size, lvg.Status.VGSize)
+		tpRequestedSize, err := cutils.GetRequestedSizeFromString(specTp.Size, lvg.Status.VGSize)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[ReconcileThinPoolsIfNeeded] unable to get requested thin-pool %s size of the LVMVolumeGroup %s", specTp.Name, lvg.Name))
 			return err
@@ -1107,7 +971,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 		if actualTp, exist := actualThinPools[specTp.Name]; !exist {
 			r.log.Debug(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] thin-pool %s of the LVMVolumeGroup %s is not created yet. Create it", specTp.Name, lvg.Name))
 			if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
-				err := r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
+				err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 				if err != nil {
 					r.log.Error(err, fmt.Sprintf("[ReconcileThinPoolsIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
 					return err
@@ -1123,10 +987,10 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 				r.log.Debug(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] thin-pool %s of the LVMVolumeGroup %s will be created with size %s", specTp.Name, lvg.Name, tpRequestedSize.String()))
 				cmd, err = utils.CreateThinPool(specTp.Name, vg.VGName, tpRequestedSize.Value())
 			}
-			r.metrics.UtilsCommandsDuration(Name, "lvcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-			r.metrics.UtilsCommandsExecutionCount(Name, "lvcreate").Inc()
+			r.metrics.UtilsCommandsDuration(ReconcilerName, "lvcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+			r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "lvcreate").Inc()
 			if err != nil {
-				r.metrics.UtilsCommandsErrorsCount(Name, "lvcreate").Inc()
+				r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "lvcreate").Inc()
 				r.log.Error(err, fmt.Sprintf("[ReconcileThinPoolsIfNeeded] unable to create thin-pool %s of the LVMVolumeGroup %s, cmd: %s", specTp.Name, lvg.Name, cmd))
 				errs.WriteString(fmt.Sprintf("unable to create thin-pool %s, err: %s. ", specTp.Name, err.Error()))
 				continue
@@ -1140,9 +1004,9 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 				continue
 			}
 
-			log.Debug(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] the LVMVolumeGroup %s requested thin pool %s size is more than actual one. Resize it", lvg.Name, tpRequestedSize.String()))
+			r.log.Debug(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] the LVMVolumeGroup %s requested thin pool %s size is more than actual one. Resize it", lvg.Name, tpRequestedSize.String()))
 			if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
-				err = r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
+				err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 				if err != nil {
 					r.log.Error(err, fmt.Sprintf("[ReconcileThinPoolsIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
 					return err
@@ -1175,7 +1039,7 @@ func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolu
 		for _, d := range n.Devices {
 			if d.DevSize.Value()-d.PVSize.Value() > internal.ResizeDelta.Value() {
 				if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
-					err := r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
+					err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 					if err != nil {
 						r.log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
 						return err
@@ -1186,10 +1050,10 @@ func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolu
 
 				start := time.Now()
 				cmd, err := utils.ResizePV(d.Path)
-				r.metrics.UtilsCommandsDuration(Name, "pvresize").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-				r.metrics.UtilsCommandsExecutionCount(Name, "pvresize")
+				r.metrics.UtilsCommandsDuration(ReconcilerName, "pvresize").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+				r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "pvresize")
 				if err != nil {
-					r.metrics.UtilsCommandsErrorsCount(Name, "pvresize").Inc()
+					r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "pvresize").Inc()
 					r.log.Error(err, fmt.Sprintf("[ResizePVIfNeeded] unable to resize PV %s of BlockDevice %s of LVMVolumeGroup %s, cmd: %s", d.Path, d.BlockDevice, lvg.Name, cmd))
 					errs.WriteString(fmt.Sprintf("unable to resize PV %s, err: %s. ", d.Path, err.Error()))
 					continue
@@ -1241,7 +1105,7 @@ func (r *Reconciler) extendVGIfNeeded(
 	}
 
 	if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
-		err := r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
+		err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
 			return err
@@ -1260,8 +1124,8 @@ func (r *Reconciler) extendVGIfNeeded(
 	return nil
 }
 
-func tryGetVG(sdsCache *cache.Cache, vgName string) (bool, internal.VGData) {
-	vgs, _ := sdsCache.GetVGs()
+func (r *Reconciler) tryGetVG(vgName string) (bool, internal.VGData) {
+	vgs, _ := r.sdsCache.GetVGs()
 	for _, vg := range vgs {
 		if vg.VGName == vgName {
 			return true, vg
@@ -1303,42 +1167,27 @@ func (r *Reconciler) getLVForVG(vgName string) []string {
 	return usedLVs
 }
 
-func (r *Reconciler) getLVMVolumeGroup(ctx context.Context, name string) (*v1alpha1.LVMVolumeGroup, error) {
-	obj := &v1alpha1.LVMVolumeGroup{}
-	start := time.Now()
-	err := r.cl.Get(ctx, client.ObjectKey{
-		Name: name,
-	}, obj)
-	r.metrics.APIMethodsDuration(Name, "get").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-	r.metrics.APIMethodsExecutionCount(Name, "get").Inc()
-	if err != nil {
-		r.metrics.APIMethodsErrors(Name, "get").Inc()
-		return nil, err
-	}
-	return obj, nil
-}
-
 func (r *Reconciler) deleteVGIfExist(vgName string) error {
 	vgs, _ := r.sdsCache.GetVGs()
 	if !checkIfVGExist(vgName, vgs) {
-		log.Debug(fmt.Sprintf("[DeleteVGIfExist] no VG %s found, nothing to delete", vgName))
+		r.log.Debug(fmt.Sprintf("[DeleteVGIfExist] no VG %s found, nothing to delete", vgName))
 		return nil
 	}
 
 	pvs, _ := r.sdsCache.GetPVs()
 	if len(pvs) == 0 {
 		err := errors.New("no any PV found")
-		log.Error(err, fmt.Sprintf("[DeleteVGIfExist] no any PV was found while deleting VG %s", vgName))
+		r.log.Error(err, fmt.Sprintf("[DeleteVGIfExist] no any PV was found while deleting VG %s", vgName))
 		return err
 	}
 
 	start := time.Now()
 	command, err := utils.RemoveVG(vgName)
-	r.metrics.UtilsCommandsDuration(Name, "vgremove").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-	r.metrics.UtilsCommandsExecutionCount(Name, "vgremove").Inc()
+	r.metrics.UtilsCommandsDuration(ReconcilerName, "vgremove").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+	r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgremove").Inc()
 	r.log.Debug(command)
 	if err != nil {
-		r.metrics.UtilsCommandsErrorsCount(Name, "vgremove").Inc()
+		r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "vgremove").Inc()
 		r.log.Error(err, "RemoveVG "+command)
 		return err
 	}
@@ -1352,11 +1201,11 @@ func (r *Reconciler) deleteVGIfExist(vgName string) error {
 
 	start = time.Now()
 	command, err = utils.RemovePV(pvsToRemove)
-	r.metrics.UtilsCommandsDuration(Name, "pvremove").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-	r.metrics.UtilsCommandsExecutionCount(Name, "pvremove").Inc()
+	r.metrics.UtilsCommandsDuration(ReconcilerName, "pvremove").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+	r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "pvremove").Inc()
 	r.log.Debug(command)
 	if err != nil {
-		r.metrics.UtilsCommandsErrorsCount(Name, "pvremove").Inc()
+		r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "pvremove").Inc()
 		r.log.Error(err, "RemovePV "+command)
 		return err
 	}
@@ -1369,11 +1218,11 @@ func (r *Reconciler) extendVGComplex(extendPVs []string, vgName string) error {
 	for _, pvPath := range extendPVs {
 		start := time.Now()
 		command, err := utils.CreatePV(pvPath)
-		r.metrics.UtilsCommandsDuration(Name, "pvcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-		r.metrics.UtilsCommandsExecutionCount(Name, "pvcreate").Inc()
+		r.metrics.UtilsCommandsDuration(ReconcilerName, "pvcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "pvcreate").Inc()
 		r.log.Debug(command)
 		if err != nil {
-			r.metrics.UtilsCommandsErrorsCount(Name, "pvcreate").Inc()
+			r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "pvcreate").Inc()
 			r.log.Error(err, "CreatePV ")
 			return err
 		}
@@ -1381,11 +1230,11 @@ func (r *Reconciler) extendVGComplex(extendPVs []string, vgName string) error {
 
 	start := time.Now()
 	command, err := utils.ExtendVG(vgName, extendPVs)
-	r.metrics.UtilsCommandsDuration(Name, "vgextend").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-	r.metrics.UtilsCommandsExecutionCount(Name, "vgextend").Inc()
+	r.metrics.UtilsCommandsDuration(ReconcilerName, "vgextend").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+	r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgextend").Inc()
 	r.log.Debug(command)
 	if err != nil {
-		r.metrics.UtilsCommandsErrorsCount(Name, "vgextend").Inc()
+		r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "vgextend").Inc()
 		r.log.Error(err, "ExtendVG ")
 		return err
 	}
@@ -1399,11 +1248,11 @@ func (r *Reconciler) createVGComplex(lvg *v1alpha1.LVMVolumeGroup, blockDevices 
 	for _, path := range paths {
 		start := time.Now()
 		command, err := utils.CreatePV(path)
-		r.metrics.UtilsCommandsDuration(Name, "pvcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-		r.metrics.UtilsCommandsExecutionCount(Name, "pvcreate").Inc()
+		r.metrics.UtilsCommandsDuration(ReconcilerName, "pvcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "pvcreate").Inc()
 		r.log.Debug(command)
 		if err != nil {
-			r.metrics.UtilsCommandsErrorsCount(Name, "pvcreate").Inc()
+			r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "pvcreate").Inc()
 			r.log.Error(err, fmt.Sprintf("[CreateVGComplex] unable to create PV by path %s", path))
 			return err
 		}
@@ -1415,22 +1264,22 @@ func (r *Reconciler) createVGComplex(lvg *v1alpha1.LVMVolumeGroup, blockDevices 
 	case Local:
 		start := time.Now()
 		cmd, err := utils.CreateVGLocal(lvg.Spec.ActualVGNameOnTheNode, lvg.Name, paths)
-		r.metrics.UtilsCommandsDuration(Name, "vgcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-		r.metrics.UtilsCommandsExecutionCount(Name, "vgcreate").Inc()
-		log.Debug(cmd)
+		r.metrics.UtilsCommandsDuration(ReconcilerName, "vgcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgcreate").Inc()
+		r.log.Debug(cmd)
 		if err != nil {
-			r.metrics.UtilsCommandsErrorsCount(Name, "vgcreate").Inc()
-			log.Error(err, "error CreateVGLocal")
+			r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "vgcreate").Inc()
+			r.log.Error(err, "error CreateVGLocal")
 			return err
 		}
 	case Shared:
 		start := time.Now()
 		cmd, err := utils.CreateVGShared(lvg.Spec.ActualVGNameOnTheNode, lvg.Name, paths)
-		r.metrics.UtilsCommandsDuration(Name, "vgcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-		r.metrics.UtilsCommandsExecutionCount(Name, "vgcreate").Inc()
+		r.metrics.UtilsCommandsDuration(ReconcilerName, "vgcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgcreate").Inc()
 		r.log.Debug(cmd)
 		if err != nil {
-			r.metrics.UtilsCommandsErrorsCount(Name, "vgcreate").Inc()
+			r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "vgcreate").Inc()
 			r.log.Error(err, "error CreateVGShared")
 			return err
 		}
@@ -1446,35 +1295,35 @@ func (r *Reconciler) updateVGTagIfNeeded(
 	lvg *v1alpha1.LVMVolumeGroup,
 	vg internal.VGData,
 ) (bool, error) {
-	found, tagName := checkTag(vg.VGTags)
+	found, tagName := cutils.CheckTag(vg.VGTags)
 	if found && lvg.Name != tagName {
 		if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
-			err := r.updateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
+			err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
+				r.log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
 				return false, err
 			}
 		}
 
 		start := time.Now()
 		cmd, err := utils.VGChangeDelTag(vg.VGName, fmt.Sprintf("%s=%s", LVMVolumeGroupTag, tagName))
-		r.metrics.UtilsCommandsDuration(Name, "vgchange").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-		r.metrics.UtilsCommandsExecutionCount(Name, "vgchange").Inc()
-		log.Debug(fmt.Sprintf("[UpdateVGTagIfNeeded] exec cmd: %s", cmd))
+		r.metrics.UtilsCommandsDuration(ReconcilerName, "vgchange").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgchange").Inc()
+		r.log.Debug(fmt.Sprintf("[UpdateVGTagIfNeeded] exec cmd: %s", cmd))
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to delete LVMVolumeGroupTag: %s=%s, vg: %s", LVMVolumeGroupTag, tagName, vg.VGName))
-			r.metrics.UtilsCommandsErrorsCount(Name, "vgchange").Inc()
+			r.log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to delete LVMVolumeGroupTag: %s=%s, vg: %s", LVMVolumeGroupTag, tagName, vg.VGName))
+			r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "vgchange").Inc()
 			return false, err
 		}
 
 		start = time.Now()
 		cmd, err = utils.VGChangeAddTag(vg.VGName, fmt.Sprintf("%s=%s", LVMVolumeGroupTag, lvg.Name))
-		r.metrics.UtilsCommandsDuration(Name, "vgchange").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-		r.metrics.UtilsCommandsExecutionCount(Name, "vgchange").Inc()
-		log.Debug(fmt.Sprintf("[UpdateVGTagIfNeeded] exec cmd: %s", cmd))
+		r.metrics.UtilsCommandsDuration(ReconcilerName, "vgchange").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgchange").Inc()
+		r.log.Debug(fmt.Sprintf("[UpdateVGTagIfNeeded] exec cmd: %s", cmd))
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add LVMVolumeGroupTag: %s=%s, vg: %s", LVMVolumeGroupTag, lvg.Name, vg.VGName))
-			r.metrics.UtilsCommandsErrorsCount(Name, "vgchange").Inc()
+			r.log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add LVMVolumeGroupTag: %s=%s, vg: %s", LVMVolumeGroupTag, lvg.Name, vg.VGName))
+			r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "vgchange").Inc()
 			return false, err
 		}
 
@@ -1486,7 +1335,7 @@ func (r *Reconciler) updateVGTagIfNeeded(
 
 func (r *Reconciler) extendThinPool(lvg *v1alpha1.LVMVolumeGroup, specThinPool v1alpha1.LVMVolumeGroupThinPoolSpec) error {
 	volumeGroupFreeSpaceBytes := lvg.Status.VGSize.Value() - lvg.Status.AllocatedSize.Value()
-	tpRequestedSize, err := getRequestedSizeFromString(specThinPool.Size, lvg.Status.VGSize)
+	tpRequestedSize, err := cutils.GetRequestedSizeFromString(specThinPool.Size, lvg.Status.VGSize)
 	if err != nil {
 		return err
 	}
@@ -1506,10 +1355,10 @@ func (r *Reconciler) extendThinPool(lvg *v1alpha1.LVMVolumeGroup, specThinPool v
 		r.log.Debug(fmt.Sprintf("[ExtendThinPool] thin-pool %s of the LVMVolumeGroup %s will be extend to size %s", specThinPool.Name, lvg.Name, tpRequestedSize.String()))
 		cmd, err = utils.ExtendLV(tpRequestedSize.Value(), lvg.Spec.ActualVGNameOnTheNode, specThinPool.Name)
 	}
-	r.metrics.UtilsCommandsDuration(Name, "lvextend").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-	r.metrics.UtilsCommandsExecutionCount(Name, "lvextend").Inc()
+	r.metrics.UtilsCommandsDuration(ReconcilerName, "lvextend").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+	r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "lvextend").Inc()
 	if err != nil {
-		r.metrics.UtilsCommandsErrorsCount(Name, "lvextend").Inc()
+		r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "lvextend").Inc()
 		r.log.Error(err, fmt.Sprintf("[ExtendThinPool] unable to extend LV, name: %s, cmd: %s", specThinPool.Name, cmd))
 		return err
 	}
@@ -1533,4 +1382,94 @@ func (r *Reconciler) addLVGLabelIfNeeded(ctx context.Context, lvg *v1alpha1.LVMV
 	}
 
 	return true, nil
+}
+
+func checkIfVGExist(vgName string, vgs []internal.VGData) bool {
+	for _, vg := range vgs {
+		if vg.VGName == vgName {
+			return true
+		}
+	}
+
+	return false
+}
+
+func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (bool, string) {
+	if len(blockDevices) == 0 {
+		return false, "none of specified BlockDevices were found"
+	}
+
+	if len(lvg.Status.Nodes) > 0 {
+		lostBdNames := make([]string, 0, len(lvg.Status.Nodes[0].Devices))
+		for _, n := range lvg.Status.Nodes {
+			for _, d := range n.Devices {
+				if _, found := blockDevices[d.BlockDevice]; !found {
+					lostBdNames = append(lostBdNames, d.BlockDevice)
+				}
+			}
+		}
+
+		// that means some of the used BlockDevices no longer match the blockDeviceSelector
+		if len(lostBdNames) > 0 {
+			return false, fmt.Sprintf("these BlockDevices no longer match the blockDeviceSelector: %s", strings.Join(lostBdNames, ","))
+		}
+	}
+
+	for _, me := range lvg.Spec.BlockDeviceSelector.MatchExpressions {
+		if me.Key == internal.MetadataNameLabelKey {
+			if len(me.Values) != len(blockDevices) {
+				missedBds := make([]string, 0, len(me.Values))
+				for _, bdName := range me.Values {
+					if _, exist := blockDevices[bdName]; !exist {
+						missedBds = append(missedBds, bdName)
+					}
+				}
+
+				return false, fmt.Sprintf("unable to find specified BlockDevices: %s", strings.Join(missedBds, ","))
+			}
+		}
+	}
+
+	bdFromOtherNode := make([]string, 0, len(blockDevices))
+	for _, bd := range blockDevices {
+		if bd.Status.NodeName != lvg.Spec.Local.NodeName {
+			bdFromOtherNode = append(bdFromOtherNode, bd.Name)
+		}
+	}
+
+	if len(bdFromOtherNode) != 0 {
+		return false, fmt.Sprintf("block devices %s have different node names from LVMVolumeGroup Local.NodeName", strings.Join(bdFromOtherNode, ","))
+	}
+
+	return true, ""
+}
+
+func checkIfLVGBelongsToNode(lvg *v1alpha1.LVMVolumeGroup, nodeName string) bool {
+	return lvg.Spec.Local.NodeName == nodeName
+}
+
+func extractPathsFromBlockDevices(targetDevices []string, blockDevices map[string]v1alpha1.BlockDevice) []string {
+	var paths []string
+	if len(targetDevices) > 0 {
+		paths = make([]string, 0, len(targetDevices))
+		for _, bdName := range targetDevices {
+			bd := blockDevices[bdName]
+			paths = append(paths, bd.Status.Path)
+		}
+	} else {
+		paths = make([]string, 0, len(blockDevices))
+		for _, bd := range blockDevices {
+			paths = append(paths, bd.Status.Path)
+		}
+	}
+
+	return paths
+}
+
+func countVGSizeByBlockDevices(blockDevices map[string]v1alpha1.BlockDevice) resource.Quantity {
+	var totalVGSize int64
+	for _, bd := range blockDevices {
+		totalVGSize += bd.Status.Size.Value()
+	}
+	return *resource.NewQuantity(totalVGSize, resource.BinarySI)
 }

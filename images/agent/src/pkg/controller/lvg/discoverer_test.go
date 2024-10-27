@@ -1,3 +1,5 @@
+package lvg
+
 /*
 Copyright 2023 Flant JSC
 
@@ -14,8 +16,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
-
 import (
 	"context"
 	"testing"
@@ -24,21 +24,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"agent/internal"
+	"agent/pkg/cache"
 	"agent/pkg/logger"
 	"agent/pkg/monitoring"
+	"agent/pkg/test_utils"
 )
 
 func TestLVMVolumeGroupDiscover(t *testing.T) {
-	var (
-		ctx = context.Background()
-		cl  = NewFakeClient()
-		log = logger.Logger{}
-	)
+	ctx := context.Background()
 
 	t.Run("getThinPools_returns_only_thinPools", func(t *testing.T) {
 		lvs := []internal.LVData{
@@ -430,11 +426,12 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			NodeName              = "test-node"
 		)
 
+		d := setupDiscoverer(&DiscovererOptions{NodeName: NodeName})
+
 		size10G := resource.MustParse("10G")
 		size1G := resource.MustParse("1G")
 
 		var (
-			testMetrics       = monitoring.GetMetrics("")
 			blockDevicesNames = []string{"first", "second"}
 			specThinPools     = map[string]resource.Quantity{"first": size10G}
 			statusThinPools   = []internal.LVMVGStatusThinPool{
@@ -498,7 +495,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			},
 		}
 
-		created, err := CreateLVMVolumeGroupByCandidate(ctx, log, testMetrics, cl, candidate, NodeName)
+		created, err := d.CreateLVMVolumeGroupByCandidate(ctx, candidate)
 		if assert.NoError(t, err) {
 			assert.Equal(t, &expected, created)
 		}
@@ -509,24 +506,26 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			LVMVGName = "test_lvm-1"
 		)
 
+		d := setupDiscoverer(nil)
+
 		lvg := &v1alpha1.LVMVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: LVMVGName,
 			},
 		}
-		err := cl.Create(ctx, lvg)
+		err := d.cl.Create(ctx, lvg)
 		if err != nil {
 			t.Error(err)
 		}
 
 		defer func() {
-			err = cl.Delete(ctx, lvg)
+			err = d.cl.Delete(ctx, lvg)
 			if err != nil {
 				t.Error(err)
 			}
 		}()
 
-		actual, err := GetAPILVMVolumeGroups(ctx, cl, monitoring.GetMetrics("test-node"))
+		actual, err := d.GetAPILVMVolumeGroups(ctx)
 		if assert.NoError(t, err) {
 			_, ok := actual[LVMVGName]
 			assert.True(t, ok)
@@ -538,27 +537,27 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			LVMVGName = "test_lvm-2"
 		)
 
-		metrics := monitoring.GetMetrics("test-node")
+		d := setupDiscoverer(nil)
 
 		lvg := &v1alpha1.LVMVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: LVMVGName,
 			},
 		}
-		err := cl.Create(ctx, lvg)
+		err := d.cl.Create(ctx, lvg)
 		if err != nil {
 			t.Error(err)
 		}
 
-		actual, err := GetAPILVMVolumeGroups(ctx, cl, metrics)
+		actual, err := d.GetAPILVMVolumeGroups(ctx)
 		if assert.NoError(t, err) {
 			_, ok := actual[LVMVGName]
 			assert.True(t, ok)
 		}
 
-		err = DeleteLVMVolumeGroup(ctx, cl, log, metrics, lvg, "test-node")
+		err = d.lvgCl.DeleteLVMVolumeGroup(ctx, lvg)
 		if assert.NoError(t, err) {
-			actual, err = GetAPILVMVolumeGroups(ctx, cl, metrics)
+			actual, err = d.GetAPILVMVolumeGroups(ctx)
 			if err != nil {
 				t.Error(err)
 			}
@@ -572,19 +571,19 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			LVMVGName = "test_lvm_x"
 		)
 
-		metrics := monitoring.GetMetrics("test-node")
+		d := setupDiscoverer(nil)
 
 		lvg := &v1alpha1.LVMVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: LVMVGName,
 			},
 		}
-		err := cl.Create(ctx, lvg)
+		err := d.cl.Create(ctx, lvg)
 		if err != nil {
 			t.Error(err)
 		}
 
-		actual, err := GetAPILVMVolumeGroups(ctx, cl, metrics)
+		actual, err := d.GetAPILVMVolumeGroups(ctx)
 		if assert.NoError(t, err) {
 			createdLvg, ok := actual[LVMVGName]
 			assert.True(t, ok)
@@ -593,9 +592,9 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				LVMVGName:     LVMVGName,
 				AllocatedSize: *resource.NewQuantity(1000, resource.BinarySI),
 			}
-			err = UpdateLVMVolumeGroupByCandidate(ctx, cl, metrics, log, &createdLvg, candidate)
+			err = d.UpdateLVMVolumeGroupByCandidate(ctx, &createdLvg, candidate)
 			if assert.NoError(t, err) {
-				updated, err := GetAPILVMVolumeGroups(ctx, cl, metrics)
+				updated, err := d.GetAPILVMVolumeGroups(ctx)
 				if assert.NoError(t, err) {
 					updatedLvg, ok := updated[LVMVGName]
 					assert.True(t, ok)
@@ -847,20 +846,23 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			reason  = "test-reason"
 			message = "test-message"
 		)
+
+		d := setupDiscoverer(nil)
+
 		lvg := &v1alpha1.LVMVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: lvgName,
 			},
 		}
 
-		err := cl.Create(ctx, lvg)
+		err := d.cl.Create(ctx, lvg)
 		if err != nil {
 			t.Error(err)
 		}
 
-		err = updateLVGConditionIfNeeded(ctx, cl, logger.Logger{}, lvg, metav1.ConditionTrue, conType, reason, message)
+		err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, metav1.ConditionTrue, conType, reason, message)
 		if assert.NoError(t, err) {
-			err = cl.Get(ctx, client.ObjectKey{
+			err = d.cl.Get(ctx, client.ObjectKey{
 				Name: lvgName,
 			}, lvg)
 			if err != nil {
@@ -876,12 +878,14 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	})
 }
 
-func NewFakeClient() client.WithWatch {
-	s := scheme.Scheme
-	_ = metav1.AddMetaToScheme(s)
-	_ = v1alpha1.AddToScheme(s)
-	builder := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&v1alpha1.LVMVolumeGroup{}).WithStatusSubresource(&v1alpha1.LVMLogicalVolume{})
+func setupDiscoverer(opts *DiscovererOptions) *Discoverer {
+	cl := test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{}, &v1alpha1.LVMLogicalVolume{})
+	log := logger.Logger{}
+	metrics := monitoring.GetMetrics("")
+	if opts == nil {
+		opts = &DiscovererOptions{NodeName: "test_node"}
+	}
+	sdsCache := cache.New()
 
-	cl := builder.Build()
-	return cl
+	return NewDiscoverer(cl, log, metrics, sdsCache, *opts)
 }

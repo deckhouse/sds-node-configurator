@@ -8,13 +8,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func NewFakeClient() client.WithWatch {
+func NewFakeClient(statusSubresources ...client.Object) client.WithWatch {
 	s := scheme.Scheme
 	_ = metav1.AddMetaToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
 
-	builder := fake.NewClientBuilder().WithScheme(s)
-
-	cl := builder.Build()
-	return cl
+	return fake.
+		NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(statusSubresources...).
+		Build()
 }
