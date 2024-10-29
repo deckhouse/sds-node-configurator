@@ -77,9 +77,9 @@ func main() {
 	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.NodeName, cfgParams.NodeName))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.MachineID, cfgParams.MachineID))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.BlockDeviceScanIntervalSec.String()))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ThrottleInterval, cfgParams.ThrottleIntervalSec.String()))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDurationSec.String()))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.BlockDeviceScanInterval.String()))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.ThrottleInterval, cfgParams.ThrottleInterval.String()))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDuration.String()))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
@@ -114,7 +114,7 @@ func main() {
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 
 	log.Info("[main] ReTag starts")
-	if err := utils.ReTag(ctx, *log, metrics, bd.DiscovererName); err != nil {
+	if err := utils.ReTag(ctx, log, metrics, bd.DiscovererName); err != nil {
 		log.Error(err, "[main] unable to run ReTag")
 	}
 
@@ -122,16 +122,16 @@ func main() {
 
 	rediscoverBlockDevices, err := controller.AddDiscoverer(
 		mgr,
-		*log,
+		log,
 		bd.NewDiscoverer(
 			mgr.GetClient(),
-			*log,
+			log,
 			metrics,
 			sdsCache,
-			bd.Options{
+			bd.DiscovererConfig{
 				NodeName:                cfgParams.NodeName,
 				MachineID:               cfgParams.MachineID,
-				BlockDeviceScanInterval: cfgParams.BlockDeviceScanIntervalSec,
+				BlockDeviceScanInterval: cfgParams.BlockDeviceScanInterval,
 			},
 		),
 	)
@@ -142,15 +142,15 @@ func main() {
 
 	rediscoverLVGs, err := controller.AddDiscoverer(
 		mgr,
-		*log,
+		log,
 		lvg.NewDiscoverer(
 			mgr.GetClient(),
-			*log,
+			log,
 			metrics,
 			sdsCache,
-			lvg.DiscovererOptions{
+			lvg.DiscovererConfig{
 				NodeName:                cfgParams.NodeName,
-				VolumeGroupScanInterval: cfgParams.VolumeGroupScanIntervalSec,
+				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
 			},
 		),
 	)
@@ -161,16 +161,16 @@ func main() {
 
 	err = controller.AddReconciler(
 		mgr,
-		*log,
+		log,
 		lvg.NewReconciler(
 			mgr.GetClient(),
-			*log,
+			log,
 			metrics,
 			sdsCache,
-			lvg.ReconcilerOptions{
+			lvg.ReconcilerConfig{
 				NodeName:                cfgParams.NodeName,
-				VolumeGroupScanInterval: cfgParams.VolumeGroupScanIntervalSec,
-				BlockDeviceScanInterval: cfgParams.BlockDeviceScanIntervalSec,
+				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
+				BlockDeviceScanInterval: cfgParams.BlockDeviceScanInterval,
 			},
 		),
 	)
@@ -182,7 +182,7 @@ func main() {
 	go func() {
 		if err = scanner.RunScanner(
 			ctx,
-			*log,
+			log,
 			*cfgParams,
 			sdsCache,
 			rediscoverBlockDevices,
@@ -195,17 +195,17 @@ func main() {
 
 	err = controller.AddReconciler(
 		mgr,
-		*log,
+		log,
 		llv.NewReconciler(
 			mgr.GetClient(),
-			*log,
+			log,
 			metrics,
 			sdsCache,
-			llv.ReconcilerOptions{
+			llv.ReconcilerConfig{
 				NodeName:                cfgParams.NodeName,
-				VolumeGroupScanInterval: cfgParams.VolumeGroupScanIntervalSec,
+				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
 				Loglevel:                cfgParams.Loglevel,
-				LLVRequeueInterval:      cfgParams.LLVRequeueIntervalSec,
+				LLVRequeueInterval:      cfgParams.LLVRequeueInterval,
 			},
 		),
 	)
@@ -214,14 +214,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = controller.AddReconciler(mgr, *log, llv_extender.NewReconciler(
+	err = controller.AddReconciler(mgr, log, llv_extender.NewReconciler(
 		mgr.GetClient(),
-		*log,
+		log,
 		metrics,
 		sdsCache,
-		llv_extender.ReconcilerOptions{
+		llv_extender.ReconcilerConfig{
 			NodeName:                cfgParams.NodeName,
-			VolumeGroupScanInterval: cfgParams.VolumeGroupScanIntervalSec,
+			VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
 		},
 	))
 	if err != nil {

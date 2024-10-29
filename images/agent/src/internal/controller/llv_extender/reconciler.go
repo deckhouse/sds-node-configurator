@@ -26,10 +26,10 @@ type Reconciler struct {
 	llvCl    *utils.LLVClient
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
-	opts     ReconcilerOptions
+	cfg      ReconcilerConfig
 }
 
-type ReconcilerOptions struct {
+type ReconcilerConfig struct {
 	NodeName                string
 	VolumeGroupScanInterval time.Duration
 }
@@ -39,7 +39,7 @@ func NewReconciler(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
-	opts ReconcilerOptions,
+	cfg ReconcilerConfig,
 ) controller.Reconciler[*v1alpha1.LVMVolumeGroup] {
 	return &Reconciler{
 		cl:  cl,
@@ -48,13 +48,13 @@ func NewReconciler(
 			cl,
 			log,
 			metrics,
-			opts.NodeName,
+			cfg.NodeName,
 			ReconcilerName,
 		),
 		llvCl:    utils.NewLLVClient(cl, log),
 		metrics:  metrics,
 		sdsCache: sdsCache,
-		opts:     opts,
+		cfg:      cfg,
 	}
 }
 
@@ -88,9 +88,9 @@ func (r *Reconciler) Reconcile(
 
 	shouldRequeue := r.ReconcileLVMLogicalVolumeExtension(ctx, lvg)
 	if shouldRequeue {
-		r.log.Warning(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] Reconciler needs a retry for the LVMVolumeGroup %s. Retry in %s", lvg.Name, r.opts.VolumeGroupScanInterval.String()))
+		r.log.Warning(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] Reconciler needs a retry for the LVMVolumeGroup %s. Retry in %s", lvg.Name, r.cfg.VolumeGroupScanInterval.String()))
 		return controller.Result{
-			RequeueAfter: r.opts.VolumeGroupScanInterval,
+			RequeueAfter: r.cfg.VolumeGroupScanInterval,
 		}, nil
 	}
 
@@ -106,8 +106,8 @@ func (r *Reconciler) shouldLLVExtenderReconcileEvent(newLVG *v1alpha1.LVMVolumeG
 		return false
 	}
 
-	if !utils.LVGBelongsToNode(newLVG, r.opts.NodeName) {
-		r.log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as it does not belong to the node %s", newLVG.Name, r.opts.NodeName))
+	if !utils.LVGBelongsToNode(newLVG, r.cfg.NodeName) {
+		r.log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as it does not belong to the node %s", newLVG.Name, r.cfg.NodeName))
 		return false
 	}
 

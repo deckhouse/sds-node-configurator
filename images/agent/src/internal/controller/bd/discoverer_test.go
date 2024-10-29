@@ -43,7 +43,7 @@ import (
 var testLsblkOutput string
 
 func setupDiscoverer() *Discoverer {
-	opts := Options{
+	opts := DiscovererConfig{
 		NodeName:  "test-node",
 		MachineID: "test-id",
 	}
@@ -52,7 +52,7 @@ func setupDiscoverer() *Discoverer {
 	log, _ := logger.NewLogger("1")
 	sdsCache := cache.New()
 
-	return NewDiscoverer(cl, *log, metrics, sdsCache, opts)
+	return NewDiscoverer(cl, log, metrics, sdsCache, opts)
 }
 
 func TestBlockDeviceCtrl(t *testing.T) {
@@ -371,7 +371,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 
 		candidates := []internal.BlockDeviceCandidate{
 			{
-				NodeName:              d.opts.NodeName,
+				NodeName:              d.cfg.NodeName,
 				Consumable:            false,
 				PVUuid:                "142412421",
 				VGUuid:                "123123123",
@@ -401,7 +401,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 				Status: v1alpha1.BlockDeviceStatus{
 					Consumable: true,
-					NodeName:   d.opts.NodeName,
+					NodeName:   d.cfg.NodeName,
 				},
 			},
 		}
@@ -477,8 +477,8 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		assert.Equal(t, 3, len(candidates))
 		for i := range candidates {
 			assert.Equal(t, devices[i].Name, candidates[i].Path)
-			assert.Equal(t, d.opts.MachineID, candidates[i].MachineID)
-			assert.Equal(t, d.opts.NodeName, candidates[i].NodeName)
+			assert.Equal(t, d.cfg.MachineID, candidates[i].MachineID)
+			assert.Equal(t, d.cfg.NodeName, candidates[i].NodeName)
 		}
 	})
 

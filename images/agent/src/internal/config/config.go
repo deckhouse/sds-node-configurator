@@ -41,90 +41,90 @@ const (
 	DefaultHealthProbeBindAddress        = ":4228"
 )
 
-type Options struct {
-	MachineID                  string
-	NodeName                   string
-	Loglevel                   logger.Verbosity
-	MetricsPort                string
-	BlockDeviceScanIntervalSec time.Duration
-	VolumeGroupScanIntervalSec time.Duration
-	LLVRequeueIntervalSec      time.Duration
-	ThrottleIntervalSec        time.Duration
-	CmdDeadlineDurationSec     time.Duration
-	HealthProbeBindAddress     string
+type Config struct {
+	MachineID               string
+	NodeName                string
+	Loglevel                logger.Verbosity
+	MetricsPort             string
+	BlockDeviceScanInterval time.Duration
+	VolumeGroupScanInterval time.Duration
+	LLVRequeueInterval      time.Duration
+	ThrottleInterval        time.Duration
+	CmdDeadlineDuration     time.Duration
+	HealthProbeBindAddress  string
 }
 
-func NewConfig() (*Options, error) {
-	var opts Options
+func NewConfig() (*Config, error) {
+	var cfg Config
 
-	opts.NodeName = os.Getenv(NodeName)
-	if opts.NodeName == "" {
+	cfg.NodeName = os.Getenv(NodeName)
+	if cfg.NodeName == "" {
 		return nil, fmt.Errorf("[NewConfig] required %s env variable is not specified", NodeName)
 	}
 
 	loglevel := os.Getenv(LogLevel)
 	if loglevel == "" {
-		opts.Loglevel = logger.DebugLevel
+		cfg.Loglevel = logger.DebugLevel
 	} else {
-		opts.Loglevel = logger.Verbosity(loglevel)
+		cfg.Loglevel = logger.Verbosity(loglevel)
 	}
 
 	machID, err := getMachineID()
 	if err != nil {
 		return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", MachineID, err)
 	}
-	opts.MachineID = machID
+	cfg.MachineID = machID
 
-	opts.MetricsPort = os.Getenv(MetricsPort)
-	if opts.MetricsPort == "" {
-		opts.MetricsPort = ":4202"
+	cfg.MetricsPort = os.Getenv(MetricsPort)
+	if cfg.MetricsPort == "" {
+		cfg.MetricsPort = ":4202"
 	}
 
-	opts.HealthProbeBindAddress = os.Getenv(DefaultHealthProbeBindAddressEnvName)
-	if opts.HealthProbeBindAddress == "" {
-		opts.HealthProbeBindAddress = DefaultHealthProbeBindAddress
+	cfg.HealthProbeBindAddress = os.Getenv(DefaultHealthProbeBindAddressEnvName)
+	if cfg.HealthProbeBindAddress == "" {
+		cfg.HealthProbeBindAddress = DefaultHealthProbeBindAddress
 	}
 
 	scanInt := os.Getenv(ScanInterval)
 	if scanInt == "" {
-		opts.BlockDeviceScanIntervalSec = 5 * time.Second
-		opts.VolumeGroupScanIntervalSec = 5 * time.Second
-		opts.LLVRequeueIntervalSec = 5 * time.Second
+		cfg.BlockDeviceScanInterval = 5 * time.Second
+		cfg.VolumeGroupScanInterval = 5 * time.Second
+		cfg.LLVRequeueInterval = 5 * time.Second
 	} else {
 		interval, err := strconv.Atoi(scanInt)
 		if err != nil {
 			return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", ScanInterval, err)
 		}
-		opts.BlockDeviceScanIntervalSec = time.Duration(interval) * time.Second
-		opts.VolumeGroupScanIntervalSec = time.Duration(interval) * time.Second
-		opts.LLVRequeueIntervalSec = time.Duration(interval) * time.Second
+		cfg.BlockDeviceScanInterval = time.Duration(interval) * time.Second
+		cfg.VolumeGroupScanInterval = time.Duration(interval) * time.Second
+		cfg.LLVRequeueInterval = time.Duration(interval) * time.Second
 	}
 
 	thrInt := os.Getenv(ThrottleInterval)
 	if thrInt == "" {
-		opts.ThrottleIntervalSec = 3 * time.Second
+		cfg.ThrottleInterval = 3 * time.Second
 	} else {
 		interval, err := strconv.Atoi(scanInt)
 		if err != nil {
 			return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", ThrottleInterval, err)
 		}
 
-		opts.ThrottleIntervalSec = time.Duration(interval) * time.Second
+		cfg.ThrottleInterval = time.Duration(interval) * time.Second
 	}
 
 	cmdDur := os.Getenv(CmdDeadlineDuration)
 	if cmdDur == "" {
-		opts.CmdDeadlineDurationSec = 30 * time.Second
+		cfg.CmdDeadlineDuration = 30 * time.Second
 	} else {
 		duration, err := strconv.Atoi(cmdDur)
 		if err != nil {
 			return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", CmdDeadlineDuration, err)
 		}
 
-		opts.CmdDeadlineDurationSec = time.Duration(duration) * time.Second
+		cfg.CmdDeadlineDuration = time.Duration(duration) * time.Second
 	}
 
-	return &opts, nil
+	return &cfg, nil
 }
 
 func getMachineID() (string, error) {

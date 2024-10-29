@@ -47,15 +47,15 @@ type Logger struct {
 	log logr.Logger
 }
 
-func NewLogger(level Verbosity) (*Logger, error) {
+func NewLogger(level Verbosity) (Logger, error) {
 	v, err := strconv.Atoi(string(level))
 	if err != nil {
-		return nil, err
+		return Logger{}, err
 	}
 
 	log := textlogger.NewLogger(textlogger.NewConfig(textlogger.Verbosity(v))).WithCallDepth(1)
 
-	return &Logger{log: log}, nil
+	return Logger{log: log}, nil
 }
 
 func (l Logger) GetLogger() logr.Logger {

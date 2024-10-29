@@ -24,14 +24,14 @@ import (
 func RunScanner(
 	ctx context.Context,
 	log logger.Logger,
-	cfg config.Options,
+	cfg config.Config,
 	sdsCache *cache.Cache,
 	bdCtrl func(context.Context) (controller.Result, error),
 	lvgDiscoverCtrl func(context.Context) (controller.Result, error),
 ) error {
 	log.Info("[RunScanner] starts the work")
 
-	t := throttler.New(cfg.ThrottleIntervalSec)
+	t := throttler.New(cfg.ThrottleInterval)
 
 	conn := new(netlink.UEventConn)
 	if err := conn.Connect(netlink.UdevEvent); err != nil {
@@ -170,7 +170,7 @@ func runControllersReconcile(
 	return nil
 }
 
-func fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Options) error {
+func fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Config) error {
 	// the scan operations order is very important as it guarantees the consistent and reliable data from the node
 	realClock := clock.RealClock{}
 	now := time.Now()
@@ -212,8 +212,8 @@ func fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cf
 	return nil
 }
 
-func scanDevices(ctx context.Context, log logger.Logger, cfg config.Options) ([]internal.Device, bytes.Buffer, error) {
-	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDurationSec)
+func scanDevices(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.Device, bytes.Buffer, error) {
+	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
 	defer cancel()
 	devices, cmdStr, stdErr, err := utils.GetBlockDevices(ctx)
 	if err != nil {
@@ -224,8 +224,8 @@ func scanDevices(ctx context.Context, log logger.Logger, cfg config.Options) ([]
 	return devices, stdErr, nil
 }
 
-func scanPVs(ctx context.Context, log logger.Logger, cfg config.Options) ([]internal.PVData, bytes.Buffer, error) {
-	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDurationSec)
+func scanPVs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.PVData, bytes.Buffer, error) {
+	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
 	defer cancel()
 	pvs, cmdStr, stdErr, err := utils.GetAllPVs(ctx)
 	if err != nil {
@@ -236,8 +236,8 @@ func scanPVs(ctx context.Context, log logger.Logger, cfg config.Options) ([]inte
 	return pvs, stdErr, nil
 }
 
-func scanVGs(ctx context.Context, log logger.Logger, cfg config.Options) ([]internal.VGData, bytes.Buffer, error) {
-	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDurationSec)
+func scanVGs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.VGData, bytes.Buffer, error) {
+	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
 	defer cancel()
 	vgs, cmdStr, stdErr, err := utils.GetAllVGs(ctx)
 	if err != nil {
@@ -248,8 +248,8 @@ func scanVGs(ctx context.Context, log logger.Logger, cfg config.Options) ([]inte
 	return vgs, stdErr, nil
 }
 
-func scanLVs(ctx context.Context, log logger.Logger, cfg config.Options) ([]internal.LVData, bytes.Buffer, error) {
-	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDurationSec)
+func scanLVs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.LVData, bytes.Buffer, error) {
+	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
 	defer cancel()
 	lvs, cmdStr, stdErr, err := utils.GetAllLVs(ctx)
 	if err != nil {

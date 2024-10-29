@@ -62,7 +62,7 @@ var _ = Describe("Storage Controller", func() {
 	log, _ := logger.NewLogger("1")
 	sdsCache := cache.New()
 
-	r := NewDiscoverer(cl, *log, testMetrics, sdsCache, Options{})
+	r := NewDiscoverer(cl, log, testMetrics, sdsCache, DiscovererConfig{})
 
 	It("CreateAPIBlockDevice", func() {
 		blockDevice, err := r.createAPIBlockDevice(ctx, candidate)

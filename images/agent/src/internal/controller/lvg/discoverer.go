@@ -31,10 +31,10 @@ type Discoverer struct {
 	bdCl     *utils.BDClient
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
-	opts     DiscovererOptions
+	cfg      DiscovererConfig
 }
 
-type DiscovererOptions struct {
+type DiscovererConfig struct {
 	NodeName                string
 	VolumeGroupScanInterval time.Duration
 }
@@ -44,16 +44,16 @@ func NewDiscoverer(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
-	opts DiscovererOptions,
+	cfg DiscovererConfig,
 ) *Discoverer {
 	return &Discoverer{
 		cl:       cl,
 		log:      log,
-		lvgCl:    utils.NewLVGClient(cl, log, metrics, opts.NodeName, DiscovererName),
+		lvgCl:    utils.NewLVGClient(cl, log, metrics, cfg.NodeName, DiscovererName),
 		bdCl:     utils.NewBDClient(cl, metrics),
 		metrics:  metrics,
 		sdsCache: sdsCache,
-		opts:     opts,
+		cfg:      cfg,
 	}
 }
 
@@ -65,9 +65,9 @@ func (d *Discoverer) Discover(ctx context.Context) (controller.Result, error) {
 	d.log.Info("[RunLVMVolumeGroupDiscoverController] Reconciler starts LVMVolumeGroup resources reconciliation")
 	shouldRequeue := d.LVMVolumeGroupDiscoverReconcile(ctx)
 	if shouldRequeue {
-		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error occurred while run the Reconciler func, retry in %s", d.opts.VolumeGroupScanInterval.String()))
+		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error occurred while run the Reconciler func, retry in %s", d.cfg.VolumeGroupScanInterval.String()))
 		return controller.Result{
-			RequeueAfter: d.opts.VolumeGroupScanInterval,
+			RequeueAfter: d.cfg.VolumeGroupScanInterval,
 		}, nil
 	}
 	d.log.Info("[RunLVMVolumeGroupDiscoverController] Reconciler successfully ended LVMVolumeGroup resources reconciliation")
@@ -105,7 +105,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 		return false
 	}
 
-	filteredLVGs := filterLVGsByNode(currentLVMVGs, d.opts.NodeName)
+	filteredLVGs := filterLVGsByNode(currentLVMVGs, d.cfg.NodeName)
 
 	d.log.Debug("[RunLVMVolumeGroupDiscoverController] tries to get LVMVolumeGroup candidates")
 	candidates, err := d.GetLVMVolumeGroupCandidates(blockDevices)
@@ -128,7 +128,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 
 	candidates, err = d.ReconcileUnhealthyLVMVolumeGroups(ctx, candidates, filteredLVGs)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error has occurred while clearing the LVMVolumeGroups resources. Requeue the request in %s", d.opts.VolumeGroupScanInterval.String()))
+		d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error has occurred while clearing the LVMVolumeGroups resources. Requeue the request in %s", d.cfg.VolumeGroupScanInterval.String()))
 		return true
 	}
 
@@ -152,7 +152,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 			d.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s should be updated", lvg.Name))
 			if err = d.UpdateLVMVolumeGroupByCandidate(ctx, &lvg, candidate); err != nil {
 				d.log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to update LVMVolumeGroup, name: "%s". Requeue the request in %s`,
-					lvg.Name, d.opts.VolumeGroupScanInterval.String()))
+					lvg.Name, d.cfg.VolumeGroupScanInterval.String()))
 				shouldRequeue = true
 				continue
 			}
@@ -162,7 +162,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 			d.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is not yet created. Create it", candidate.LVMVGName))
 			createdLvg, err := d.CreateLVMVolumeGroupByCandidate(ctx, candidate)
 			if err != nil {
-				d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to CreateLVMVolumeGroupByCandidate %s. Requeue the request in %s", candidate.LVMVGName, d.opts.VolumeGroupScanInterval.String()))
+				d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to CreateLVMVolumeGroupByCandidate %s. Requeue the request in %s", candidate.LVMVGName, d.cfg.VolumeGroupScanInterval.String()))
 				shouldRequeue = true
 				continue
 			}
@@ -186,7 +186,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 	}
 
 	if shouldRequeue {
-		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] some problems have been occurred while iterating the lvmvolumegroup resources. Retry the reconcile in %s", d.opts.VolumeGroupScanInterval.String()))
+		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] some problems have been occurred while iterating the lvmvolumegroup resources. Retry the reconcile in %s", d.cfg.VolumeGroupScanInterval.String()))
 		return true
 	}
 
@@ -361,7 +361,7 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(bds map[string]v1alpha1.BlockDe
 			VGSize:                *resource.NewQuantity(vg.VGSize.Value(), resource.BinarySI),
 			VGFree:                *resource.NewQuantity(vg.VGFree.Value(), resource.BinarySI),
 			VGUUID:                vg.VGUUID,
-			Nodes:                 configureCandidateNodeDevices(sortedPVs, sortedBDs, vg, d.opts.NodeName),
+			Nodes:                 configureCandidateNodeDevices(sortedPVs, sortedBDs, vg, d.cfg.NodeName),
 		}
 
 		candidates = append(candidates, candidate)
@@ -390,7 +390,7 @@ func (d *Discoverer) CreateLVMVolumeGroupByCandidate(
 			BlockDeviceSelector:   configureBlockDeviceSelector(candidate),
 			ThinPools:             convertSpecThinPools(candidate.SpecThinPools),
 			Type:                  candidate.Type,
-			Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: d.opts.NodeName},
+			Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: d.cfg.NodeName},
 		},
 		Status: v1alpha1.LVMVolumeGroupStatus{
 			AllocatedSize: candidate.AllocatedSize,

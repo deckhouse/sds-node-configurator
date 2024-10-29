@@ -30,10 +30,10 @@ type Reconciler struct {
 	bdCl     *utils.BDClient
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
-	opts     ReconcilerOptions
+	cfg      ReconcilerConfig
 }
 
-type ReconcilerOptions struct {
+type ReconcilerConfig struct {
 	NodeName                string
 	BlockDeviceScanInterval time.Duration
 	VolumeGroupScanInterval time.Duration
@@ -44,7 +44,7 @@ func NewReconciler(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
-	opts ReconcilerOptions,
+	cfg ReconcilerConfig,
 ) *Reconciler {
 	return &Reconciler{
 		cl:  cl,
@@ -53,13 +53,13 @@ func NewReconciler(
 			cl,
 			log,
 			metrics,
-			opts.NodeName,
+			cfg.NodeName,
 			ReconcilerName,
 		),
 		bdCl:     utils.NewBDClient(cl, metrics),
 		metrics:  metrics,
 		sdsCache: sdsCache,
-		opts:     opts,
+		cfg:      cfg,
 	}
 }
 
@@ -82,12 +82,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 
 	lvg := request.Object
 
-	belongs := checkIfLVGBelongsToNode(lvg, r.opts.NodeName)
+	belongs := checkIfLVGBelongsToNode(lvg, r.cfg.NodeName)
 	if !belongs {
-		r.log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s does not belong to the node %s", lvg.Name, r.opts.NodeName))
+		r.log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s does not belong to the node %s", lvg.Name, r.cfg.NodeName))
 		return controller.Result{}, nil
 	}
-	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s belongs to the node %s. Starts to reconcile", lvg.Name, r.opts.NodeName))
+	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s belongs to the node %s. Starts to reconcile", lvg.Name, r.cfg.NodeName))
 
 	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to add the finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
 	added, err := r.addLVGFinalizerIfNotExist(ctx, lvg)
@@ -126,7 +126,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector.MatchLabels))
 	blockDevices, err := r.bdCl.GetAPIBlockDevices(ctx, ReconcilerName, lvg.Spec.BlockDeviceSelector)
 	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %s", r.opts.BlockDeviceScanInterval.String()))
+		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %s", r.cfg.BlockDeviceScanInterval.String()))
 		err = r.lvgCl.UpdateLVGConditionIfNeeded(
 			ctx,
 			lvg,
@@ -136,10 +136,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 			fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()),
 		)
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.opts.BlockDeviceScanInterval.String()))
+			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.cfg.BlockDeviceScanInterval.String()))
 		}
 
-		return controller.Result{RequeueAfter: r.opts.BlockDeviceScanInterval}, nil
+		return controller.Result{RequeueAfter: r.cfg.BlockDeviceScanInterval}, nil
 	}
 	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully got block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector.MatchLabels))
 
@@ -155,7 +155,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 			reason,
 		)
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.opts.VolumeGroupScanInterval.String()))
+			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.cfg.VolumeGroupScanInterval.String()))
 			return controller.Result{}, err
 		}
 
@@ -163,7 +163,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 	}
 	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully validated BlockDevices of the LVMVolumeGroup %s", lvg.Name))
 
-	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to add label %s to the LVMVolumeGroup %s", internal.LVGMetadateNameLabelKey, r.opts.NodeName))
+	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to add label %s to the LVMVolumeGroup %s", internal.LVGMetadateNameLabelKey, r.cfg.NodeName))
 	added, err = r.addLVGLabelIfNeeded(ctx, lvg, internal.LVGMetadateNameLabelKey, lvg.Name)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add label %s to the LVMVolumeGroup %s", internal.LVGMetadateNameLabelKey, lvg.Name))
@@ -189,11 +189,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 			"unable to apply configuration due to the cache's state",
 		)
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.opts.VolumeGroupScanInterval.String()))
+			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.cfg.VolumeGroupScanInterval.String()))
 		}
 
 		return controller.Result{
-			RequeueAfter: r.opts.VolumeGroupScanInterval,
+			RequeueAfter: r.cfg.VolumeGroupScanInterval,
 		}, nil
 	}
 
@@ -210,9 +210,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 	}
 
 	if shouldRequeue {
-		r.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s event will be requeued in %s", lvg.Name, r.opts.VolumeGroupScanInterval.String()))
+		r.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s event will be requeued in %s", lvg.Name, r.cfg.VolumeGroupScanInterval.String()))
 		return controller.Result{
-			RequeueAfter: r.opts.VolumeGroupScanInterval,
+			RequeueAfter: r.cfg.VolumeGroupScanInterval,
 		}, nil
 	}
 	r.log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] Reconciler successfully reconciled the LVMVolumeGroup %s", lvg.Name))

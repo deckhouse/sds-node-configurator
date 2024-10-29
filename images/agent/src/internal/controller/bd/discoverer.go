@@ -32,10 +32,10 @@ type Discoverer struct {
 	bdCl     *utils.BDClient
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
-	opts     Options
+	cfg      DiscovererConfig
 }
 
-type Options struct {
+type DiscovererConfig struct {
 	BlockDeviceScanInterval time.Duration
 	MachineID               string
 	NodeName                string
@@ -46,7 +46,7 @@ func NewDiscoverer(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
-	opts Options,
+	cfg DiscovererConfig,
 ) *Discoverer {
 	return &Discoverer{
 		cl:       cl,
@@ -54,7 +54,7 @@ func NewDiscoverer(
 		bdCl:     utils.NewBDClient(cl, metrics),
 		metrics:  metrics,
 		sdsCache: sdsCache,
-		opts:     opts,
+		cfg:      cfg,
 	}
 }
 
@@ -67,8 +67,8 @@ func (d *Discoverer) Discover(ctx context.Context) (controller.Result, error) {
 
 	shouldRequeue := d.blockDeviceReconcile(ctx)
 	if shouldRequeue {
-		d.log.Warning(fmt.Sprintf("[RunBlockDeviceController] Reconciler needs a retry in %f", d.opts.BlockDeviceScanInterval.Seconds()))
-		return controller.Result{RequeueAfter: d.opts.BlockDeviceScanInterval}, nil
+		d.log.Warning(fmt.Sprintf("[RunBlockDeviceController] Reconciler needs a retry in %f", d.cfg.BlockDeviceScanInterval.Seconds()))
+		return controller.Result{RequeueAfter: d.cfg.BlockDeviceScanInterval}, nil
 	}
 	d.log.Info("[RunBlockDeviceController] Reconciler successfully ended BlockDevice resources reconciliation")
 	return controller.Result{}, nil
@@ -145,7 +145,7 @@ func (d *Discoverer) removeDeprecatedAPIDevices(
 	}
 
 	for name, device := range apiBlockDevices {
-		if shouldDeleteBlockDevice(device, actualCandidates, d.opts.NodeName) {
+		if shouldDeleteBlockDevice(device, actualCandidates, d.cfg.NodeName) {
 			err := d.deleteAPIBlockDevice(ctx, &device)
 			if err != nil {
 				d.log.Error(err, fmt.Sprintf("[RunBlockDeviceController] unable to delete APIBlockDevice, name: %s", name))
@@ -188,7 +188,7 @@ func (d *Discoverer) getBlockDeviceCandidates() []internal.BlockDeviceCandidate 
 	for _, device := range filteredDevices {
 		d.log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Process device: %+v", device))
 		candidate := internal.BlockDeviceCandidate{
-			NodeName:   d.opts.NodeName,
+			NodeName:   d.cfg.NodeName,
 			Consumable: checkConsumable(device),
 			Wwn:        device.Wwn,
 			Serial:     device.Serial,
@@ -201,7 +201,7 @@ func (d *Discoverer) getBlockDeviceCandidates() []internal.BlockDeviceCandidate 
 			PkName:     device.PkName,
 			Type:       device.Type,
 			FSType:     device.FSType,
-			MachineID:  d.opts.MachineID,
+			MachineID:  d.cfg.MachineID,
 			PartUUID:   device.PartUUID,
 		}
 

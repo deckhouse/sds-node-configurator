@@ -32,10 +32,10 @@ type Reconciler struct {
 	llvCl    *utils.LLVClient
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
-	opts     ReconcilerOptions
+	cfg      ReconcilerConfig
 }
 
-type ReconcilerOptions struct {
+type ReconcilerConfig struct {
 	NodeName                string
 	Loglevel                logger.Verbosity
 	VolumeGroupScanInterval time.Duration
@@ -47,7 +47,7 @@ func NewReconciler(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
-	opts ReconcilerOptions,
+	cfg ReconcilerConfig,
 ) *Reconciler {
 	return &Reconciler{
 		cl:  cl,
@@ -56,7 +56,7 @@ func NewReconciler(
 			cl,
 			log,
 			metrics,
-			opts.NodeName,
+			cfg.NodeName,
 			ReconcilerName,
 		),
 		llvCl: utils.NewLLVClient(
@@ -64,7 +64,7 @@ func NewReconciler(
 		),
 		metrics:  metrics,
 		sdsCache: sdsCache,
-		opts:     opts,
+		cfg:      cfg,
 	}
 }
 
@@ -82,7 +82,7 @@ func (r *Reconciler) ShouldReconcileUpdate(objectOld *v1alpha1.LVMLogicalVolume,
 	r.log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] got an update event for the LVMLogicalVolume: %s", objectNew.GetName()))
 
 	// TODO: Figure out how to log it in our logger.
-	if r.opts.Loglevel == "4" {
+	if r.cfg.Loglevel == "4" {
 		fmt.Println("==============START DIFF==================")
 		fmt.Println(cmp.Diff(objectOld, objectNew))
 		fmt.Println("==============END DIFF==================")
@@ -107,7 +107,7 @@ func (r *Reconciler) Reconcile(
 	lvg, err := r.lvgCl.GetLVMVolumeGroup(ctx, llv.Spec.LVMVolumeGroupName)
 	if err != nil {
 		if k8serr.IsNotFound(err) {
-			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] LVMVolumeGroup %s not found for LVMLogicalVolume %s. Retry in %s", llv.Spec.LVMVolumeGroupName, llv.Name, r.opts.VolumeGroupScanInterval.String()))
+			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] LVMVolumeGroup %s not found for LVMLogicalVolume %s. Retry in %s", llv.Spec.LVMVolumeGroupName, llv.Name, r.cfg.VolumeGroupScanInterval.String()))
 			err = r.llvCl.UpdatePhaseIfNeeded(
 				ctx,
 				llv,
@@ -120,7 +120,7 @@ func (r *Reconciler) Reconcile(
 			}
 
 			return controller.Result{
-				RequeueAfter: r.opts.VolumeGroupScanInterval,
+				RequeueAfter: r.cfg.VolumeGroupScanInterval,
 			}, nil
 		}
 
@@ -136,16 +136,16 @@ func (r *Reconciler) Reconcile(
 		return controller.Result{}, err
 	}
 
-	if !utils.LVGBelongsToNode(lvg, r.opts.NodeName) {
-		r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolume] the LVMVolumeGroup %s of the LVMLogicalVolume %s does not belongs to the current node: %s. Reconciliation stopped", lvg.Name, llv.Name, r.opts.NodeName))
+	if !utils.LVGBelongsToNode(lvg, r.cfg.NodeName) {
+		r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolume] the LVMVolumeGroup %s of the LVMLogicalVolume %s does not belongs to the current node: %s. Reconciliation stopped", lvg.Name, llv.Name, r.cfg.NodeName))
 		return controller.Result{}, nil
 	}
-	r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolume] the LVMVolumeGroup %s of the LVMLogicalVolume %s belongs to the current node: %s. Reconciliation continues", lvg.Name, llv.Name, r.opts.NodeName))
+	r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolume] the LVMVolumeGroup %s of the LVMLogicalVolume %s belongs to the current node: %s. Reconciliation continues", lvg.Name, llv.Name, r.cfg.NodeName))
 
 	// this case prevents the unexpected behavior when the controller runs up with existing LVMLogicalVolumes
 	if vgs, _ := r.sdsCache.GetVGs(); len(vgs) == 0 {
-		r.log.Warning(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] unable to reconcile the request as no VG was found in the cache. Retry in %s", r.opts.VolumeGroupScanInterval.String()))
-		return controller.Result{RequeueAfter: r.opts.VolumeGroupScanInterval}, nil
+		r.log.Warning(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] unable to reconcile the request as no VG was found in the cache. Retry in %s", r.cfg.VolumeGroupScanInterval.String()))
+		return controller.Result{RequeueAfter: r.cfg.VolumeGroupScanInterval}, nil
 	}
 
 	r.log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolume] tries to add the finalizer %s to the LVMLogicalVolume %s", internal.SdsNodeConfiguratorFinalizer, llv.Name))
@@ -184,8 +184,8 @@ func (r *Reconciler) Reconcile(
 		}
 	}
 	if shouldRequeue {
-		r.log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] some issues were occurred while reconciliation the LVMLogicalVolume %s. Requeue the request in %s", llv.Name, r.opts.LLVRequeueInterval.String()))
-		return controller.Result{RequeueAfter: r.opts.LLVRequeueInterval}, nil
+		r.log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] some issues were occurred while reconciliation the LVMLogicalVolume %s. Requeue the request in %s", llv.Name, r.cfg.LLVRequeueInterval.String()))
+		return controller.Result{RequeueAfter: r.cfg.LLVRequeueInterval}, nil
 	}
 
 	r.log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] successfully ended reconciliation of the LVMLogicalVolume %s", llv.Name))

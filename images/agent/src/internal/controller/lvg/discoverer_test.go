@@ -426,7 +426,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			NodeName              = "test-node"
 		)
 
-		d := setupDiscoverer(&DiscovererOptions{NodeName: NodeName})
+		d := setupDiscoverer(&DiscovererConfig{NodeName: NodeName})
 
 		size10G := resource.MustParse("10G")
 		size1G := resource.MustParse("1G")
@@ -878,12 +878,12 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	})
 }
 
-func setupDiscoverer(opts *DiscovererOptions) *Discoverer {
+func setupDiscoverer(opts *DiscovererConfig) *Discoverer {
 	cl := test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{}, &v1alpha1.LVMLogicalVolume{})
 	log := logger.Logger{}
 	metrics := monitoring.GetMetrics("")
 	if opts == nil {
-		opts = &DiscovererOptions{NodeName: "test_node"}
+		opts = &DiscovererConfig{NodeName: "test_node"}
 	}
 	sdsCache := cache.New()
 
