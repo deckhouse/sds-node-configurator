@@ -9,7 +9,6 @@ import (
 )
 
 func checkIfConditionIsTrue(lvg *v1alpha1.LVMVolumeGroup, conType string) bool {
-	// this check prevents infinite resource updating after a retry
 	for _, c := range lvg.Status.Conditions {
 		if c.Type == conType && c.Status == v1.ConditionTrue {
 			return true

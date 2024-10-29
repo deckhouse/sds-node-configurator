@@ -20,7 +20,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -497,18 +496,6 @@ func (r *Reconciler) identifyReconcileFunc(vgName string, llv *v1alpha1.LVMLogic
 
 func shouldReconcileByDeleteFunc(llv *v1alpha1.LVMLogicalVolume) bool {
 	return llv.DeletionTimestamp != nil
-}
-
-//nolint:unparam
-func checkIfConditionIsTrue(lvg *v1alpha1.LVMVolumeGroup, conType string) bool {
-	// this check prevents infinite resource updating after a retry
-	for _, c := range lvg.Status.Conditions {
-		if c.Type == conType && c.Status == v1.ConditionTrue {
-			return true
-		}
-	}
-
-	return false
 }
 
 func (r *Reconciler) removeLLVFinalizersIfExist(

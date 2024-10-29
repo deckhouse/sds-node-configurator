@@ -224,16 +224,11 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 	})
 
 	t.Run("getThinPoolAvailableSpace", func(t *testing.T) {
-		const tpName = "test-tp"
-		tp := v1alpha1.LVMVolumeGroupThinPoolStatus{
-			Name:            tpName,
-			ActualSize:      resource.MustParse("10Gi"),
-			UsedSize:        resource.MustParse("1Gi"),
-			AllocatedSize:   resource.MustParse("5Gi"),
-			AllocationLimit: internal.AllocationLimitDefaultValue,
-		}
-
-		free, err := cutils.GetThinPoolAvailableSpace(tp.ActualSize, tp.AllocatedSize, tp.AllocationLimit)
+		free, err := cutils.GetThinPoolAvailableSpace(
+			resource.MustParse("10Gi"),
+			resource.MustParse("5Gi"),
+			internal.AllocationLimitDefaultValue,
+		)
 		if err != nil {
 			t.Error(err)
 		}
@@ -778,7 +773,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 }
 
 func setupReconciler() *Reconciler {
-	cl := test_utils.NewFakeClient()
+	cl := test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{})
 	log := logger.Logger{}
 	metrics := monitoring.Metrics{}
 

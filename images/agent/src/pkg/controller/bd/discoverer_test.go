@@ -43,8 +43,7 @@ import (
 //go:embed testdata/lsblk_output.json
 var testLsblkOutput string
 
-func TestBlockDeviceCtrl(t *testing.T) {
-	ctx := context.Background()
+func setupDiscoverer() *Discoverer {
 	opts := Options{
 		NodeName:  "test-node",
 		MachineID: "test-id",
@@ -54,7 +53,11 @@ func TestBlockDeviceCtrl(t *testing.T) {
 	log, _ := logger.NewLogger("1")
 	sdsCache := cache.New()
 
-	r := NewDiscoverer(cl, *log, metrics, sdsCache, opts)
+	return NewDiscoverer(cl, *log, metrics, sdsCache, opts)
+}
+
+func TestBlockDeviceCtrl(t *testing.T) {
+	ctx := context.Background()
 
 	t.Run("GetAPIBlockDevices", func(t *testing.T) {
 		t.Run("bds_exist_match_labels_and_expressions_return_bds", func(t *testing.T) {
@@ -64,6 +67,8 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				name3    = "name3"
 				hostName = "test-host"
 			)
+
+			d := setupDiscoverer()
 
 			bds := []v1alpha1.BlockDevice{
 				{
@@ -96,7 +101,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			}
 
 			for _, bd := range bds {
-				err := cl.Create(ctx, &bd)
+				err := d.cl.Create(ctx, &bd)
 				if err != nil {
 					t.Error(err)
 				}
@@ -104,7 +109,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 
 			defer func() {
 				for _, bd := range bds {
-					err := cl.Delete(ctx, &bd)
+					err := d.cl.Delete(ctx, &bd)
 					if err != nil {
 						t.Error(err)
 					}
@@ -128,7 +133,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := r.bdCl.GetAPIBlockDevices(ctx, DiscovererName, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := d.bdCl.GetAPIBlockDevices(ctx, DiscovererName, lvg.Spec.BlockDeviceSelector)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 
@@ -148,6 +153,8 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				name3    = "name33"
 				hostName = "test-host"
 			)
+
+			d := setupDiscoverer()
 
 			bds := []v1alpha1.BlockDevice{
 				{
@@ -180,7 +187,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			}
 
 			for _, bd := range bds {
-				err := cl.Create(ctx, &bd)
+				err := d.cl.Create(ctx, &bd)
 				if err != nil {
 					t.Error(err)
 				}
@@ -188,7 +195,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 
 			defer func() {
 				for _, bd := range bds {
-					err := cl.Delete(ctx, &bd)
+					err := d.cl.Delete(ctx, &bd)
 					if err != nil {
 						t.Error(err)
 					}
@@ -203,7 +210,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := r.bdCl.GetAPIBlockDevices(ctx, DiscovererName, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := d.bdCl.GetAPIBlockDevices(ctx, DiscovererName, lvg.Spec.BlockDeviceSelector)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 
@@ -223,6 +230,8 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				name3    = "name333"
 				hostName = "test-host"
 			)
+
+			d := setupDiscoverer()
 
 			bds := []v1alpha1.BlockDevice{
 				{
@@ -255,7 +264,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			}
 
 			for _, bd := range bds {
-				err := cl.Create(ctx, &bd)
+				err := d.cl.Create(ctx, &bd)
 				if err != nil {
 					t.Error(err)
 				}
@@ -263,7 +272,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 
 			defer func() {
 				for _, bd := range bds {
-					err := cl.Delete(ctx, &bd)
+					err := d.cl.Delete(ctx, &bd)
 					if err != nil {
 						t.Error(err)
 					}
@@ -284,7 +293,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := r.bdCl.GetAPIBlockDevices(ctx, DiscovererName, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := d.bdCl.GetAPIBlockDevices(ctx, DiscovererName, lvg.Spec.BlockDeviceSelector)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 				_, ok := actualBd[name1]
@@ -301,19 +310,19 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		t.Run("returns_true", func(t *testing.T) {
 			bd := v1alpha1.BlockDevice{
 				Status: v1alpha1.BlockDeviceStatus{
-					NodeName:   opts.NodeName,
+					NodeName:   "node",
 					Consumable: true,
 				},
 			}
 			actual := map[string]struct{}{}
 
-			assert.True(t, shouldDeleteBlockDevice(bd, actual, opts.NodeName))
+			assert.True(t, shouldDeleteBlockDevice(bd, actual, "node"))
 		})
 
 		t.Run("returns_false_cause_of_dif_node", func(t *testing.T) {
 			bd := v1alpha1.BlockDevice{
 				Status: v1alpha1.BlockDeviceStatus{
-					NodeName:   opts.NodeName,
+					NodeName:   "node",
 					Consumable: true,
 				},
 			}
@@ -325,13 +334,13 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		t.Run("returns_false_cause_of_not_consumable", func(t *testing.T) {
 			bd := v1alpha1.BlockDevice{
 				Status: v1alpha1.BlockDeviceStatus{
-					NodeName:   opts.NodeName,
+					NodeName:   "node",
 					Consumable: false,
 				},
 			}
 			actual := map[string]struct{}{}
 
-			assert.False(t, shouldDeleteBlockDevice(bd, actual, opts.NodeName))
+			assert.False(t, shouldDeleteBlockDevice(bd, actual, "node"))
 		})
 
 		t.Run("returns_false_cause_of_not_deprecated", func(t *testing.T) {
@@ -341,7 +350,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 					Name: name,
 				},
 				Status: v1alpha1.BlockDeviceStatus{
-					NodeName:   opts.NodeName,
+					NodeName:   "node",
 					Consumable: true,
 				},
 			}
@@ -349,7 +358,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				name: {},
 			}
 
-			assert.False(t, shouldDeleteBlockDevice(bd, actual, opts.NodeName))
+			assert.False(t, shouldDeleteBlockDevice(bd, actual, "node"))
 		})
 	})
 
@@ -359,9 +368,11 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			badName  = "test-candidate2"
 		)
 
+		d := setupDiscoverer()
+
 		candidates := []internal.BlockDeviceCandidate{
 			{
-				NodeName:              opts.NodeName,
+				NodeName:              d.opts.NodeName,
 				Consumable:            false,
 				PVUuid:                "142412421",
 				VGUuid:                "123123123",
@@ -391,13 +402,13 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 				Status: v1alpha1.BlockDeviceStatus{
 					Consumable: true,
-					NodeName:   opts.NodeName,
+					NodeName:   d.opts.NodeName,
 				},
 			},
 		}
 
 		for _, bd := range bds {
-			err := cl.Create(ctx, &bd)
+			err := d.cl.Create(ctx, &bd)
 			if err != nil {
 				t.Error(err)
 			}
@@ -405,13 +416,13 @@ func TestBlockDeviceCtrl(t *testing.T) {
 
 		defer func() {
 			for _, bd := range bds {
-				_ = cl.Delete(ctx, &bd)
+				_ = d.cl.Delete(ctx, &bd)
 			}
 		}()
 
 		for _, bd := range bds {
 			createdBd := &v1alpha1.BlockDevice{}
-			err := cl.Get(ctx, client.ObjectKey{
+			err := d.cl.Get(ctx, client.ObjectKey{
 				Name: bd.Name,
 			}, createdBd)
 			if err != nil {
@@ -420,13 +431,13 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			assert.Equal(t, bd.Name, createdBd.Name)
 		}
 
-		r.removeDeprecatedAPIDevices(ctx, candidates, bds)
+		d.removeDeprecatedAPIDevices(ctx, candidates, bds)
 
 		_, ok := bds[badName]
 		assert.False(t, ok)
 
 		deleted := &v1alpha1.BlockDevice{}
-		err := cl.Get(ctx, client.ObjectKey{
+		err := d.cl.Get(ctx, client.ObjectKey{
 			Name: badName,
 		}, deleted)
 		if assert.True(t, errors2.IsNotFound(err)) {
@@ -458,16 +469,17 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			},
 		}
 
-		sdsCache := cache.New()
-		sdsCache.StoreDevices(devices, bytes.Buffer{})
+		d := setupDiscoverer()
 
-		candidates := r.getBlockDeviceCandidates()
+		d.sdsCache.StoreDevices(devices, bytes.Buffer{})
+
+		candidates := d.getBlockDeviceCandidates()
 
 		assert.Equal(t, 3, len(candidates))
 		for i := range candidates {
 			assert.Equal(t, devices[i].Name, candidates[i].Path)
-			assert.Equal(t, opts.MachineID, candidates[i].MachineID)
-			assert.Equal(t, opts.NodeName, candidates[i].NodeName)
+			assert.Equal(t, d.opts.MachineID, candidates[i].MachineID)
+			assert.Equal(t, d.opts.NodeName, candidates[i].NodeName)
 		}
 	})
 
@@ -698,12 +710,13 @@ func TestBlockDeviceCtrl(t *testing.T) {
 	})
 
 	t.Run("validateTestLSBLKOutput", func(t *testing.T) {
+		d := setupDiscoverer()
 		testLsblkOutputBytes := []byte(testLsblkOutput)
 		devices, err := utils.UnmarshalDevices(testLsblkOutputBytes)
 		if assert.NoError(t, err) {
 			assert.Equal(t, 31, len(devices))
 		}
-		filteredDevices, err := r.filterDevices(devices)
+		filteredDevices, err := d.filterDevices(devices)
 
 		for i, device := range filteredDevices {
 			println("Filtered device: ", device.Name)
@@ -733,27 +746,27 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			case 2:
 				assert.Equal(t, "/dev/nvme4n1", device.Name)
 				assert.True(t, candidate.Consumable)
-				candidateName := r.createCandidateName(candidate, devices)
+				candidateName := d.createCandidateName(candidate, devices)
 				assert.Equal(t, "dev-794d93d177d16bc9a85e2dd2ccbdc7325c287374", candidateName, "device name generated incorrectly")
 			case 3:
 				assert.Equal(t, "/dev/nvme5n1", device.Name)
 				assert.True(t, candidate.Consumable)
-				candidateName := r.createCandidateName(candidate, devices)
+				candidateName := d.createCandidateName(candidate, devices)
 				assert.Equal(t, "dev-3306e773ab3cde6d519ce8d7c3686bf17a124dcb", candidateName, "device name generated incorrectly")
 			case 4:
 				assert.Equal(t, "/dev/sda4", device.Name)
 				assert.False(t, candidate.Consumable)
-				candidateName := r.createCandidateName(candidate, devices)
+				candidateName := d.createCandidateName(candidate, devices)
 				assert.Equal(t, "dev-377bc6adf33d84eb5932f5c89798bb6c5949ae2d", candidateName, "device name generated incorrectly")
 			case 5:
 				assert.Equal(t, "/dev/vdc1", device.Name)
 				assert.True(t, candidate.Consumable)
-				candidateName := r.createCandidateName(candidate, devices)
+				candidateName := d.createCandidateName(candidate, devices)
 				assert.Equal(t, "dev-a9d768213aaead8b42465ec859189de8779f96b7", candidateName, "device name generated incorrectly")
 			case 6:
 				assert.Equal(t, "/dev/mapper/mpatha", device.Name)
 				assert.True(t, candidate.Consumable)
-				candidateName := r.createCandidateName(candidate, devices)
+				candidateName := d.createCandidateName(candidate, devices)
 				assert.Equal(t, "dev-98ca88ddaaddec43b1c4894756f4856244985511", candidateName, "device name generated incorrectly")
 			}
 		}

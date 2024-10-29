@@ -550,7 +550,7 @@ func sortThinPoolIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string
 		}
 
 		if stdErr.Len() != 0 {
-			log.Error(fmt.Errorf(stdErr.String()), fmt.Sprintf(`[sortThinPoolIssuesByVG] lvs command for lv "%s" has stderr: `, lv.LVName))
+			log.Error(errors.New(stdErr.String()), fmt.Sprintf(`[sortThinPoolIssuesByVG] lvs command for lv "%s" has stderr: `, lv.LVName))
 			lvIssuesByVG[lv.VGName+lv.VGUuid] = make(map[string]string, len(lvs))
 			lvIssuesByVG[lv.VGName+lv.VGUuid][lv.LVName] = stdErr.String()
 			stdErr.Reset()
@@ -573,7 +573,7 @@ func sortPVIssuesByVG(log logger.Logger, pvs []internal.PVData) map[string][]str
 		}
 
 		if stdErr.Len() != 0 {
-			log.Error(fmt.Errorf(stdErr.String()), fmt.Sprintf(`[sortPVIssuesByVG] pvs command for pv "%s" has stderr: %s`, pv.PVName, stdErr.String()))
+			log.Error(errors.New(stdErr.String()), fmt.Sprintf(`[sortPVIssuesByVG] pvs command for pv "%s" has stderr: %s`, pv.PVName, stdErr.String()))
 			pvIssuesByVG[pv.VGName+pv.VGUuid] = append(pvIssuesByVG[pv.VGName+pv.VGUuid], stdErr.String())
 			stdErr.Reset()
 		}
@@ -593,7 +593,7 @@ func sortVGIssuesByVG(log logger.Logger, vgs []internal.VGData) map[string]strin
 		}
 
 		if stdErr.Len() != 0 {
-			log.Error(fmt.Errorf(stdErr.String()), fmt.Sprintf(`[sortVGIssuesByVG] vgs command for vg "%s" has stderr: `, vg.VGName))
+			log.Error(errors.New(stdErr.String()), fmt.Sprintf(`[sortVGIssuesByVG] vgs command for vg "%s" has stderr: `, vg.VGName))
 			vgIssues[vg.VGName+vg.VGUUID] = stdErr.String()
 			stdErr.Reset()
 		}
