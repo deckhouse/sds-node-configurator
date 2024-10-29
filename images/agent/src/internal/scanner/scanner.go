@@ -10,15 +10,15 @@ import (
 	"github.com/pilebones/go-udev/netlink"
 	"k8s.io/utils/clock"
 
-	"agent/config"
 	"agent/internal"
-	"agent/pkg/cache"
-	"agent/pkg/controller"
-	"agent/pkg/controller/bd"
-	"agent/pkg/controller/lvg"
-	"agent/pkg/logger"
-	"agent/pkg/throttler"
-	"agent/pkg/utils"
+	"agent/internal/cache"
+	"agent/internal/config"
+	"agent/internal/controller"
+	"agent/internal/controller/bd"
+	"agent/internal/controller/lvg"
+	"agent/internal/logger"
+	"agent/internal/throttler"
+	"agent/internal/utils"
 )
 
 func RunScanner(

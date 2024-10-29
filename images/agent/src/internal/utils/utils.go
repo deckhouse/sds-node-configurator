@@ -9,16 +9,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-const (
-	Thick = "Thick"
-	Thin  = "Thin"
-
-	LLVStatusPhaseCreated  = "Created"
-	LLVStatusPhasePending  = "Pending"
-	LLVStatusPhaseResizing = "Resizing"
-	LLVStatusPhaseFailed   = "Failed"
-)
-
 func IsPercentSize(size string) bool {
 	return strings.Contains(size, "%")
 }
@@ -77,9 +67,9 @@ func GetThinPoolSpaceWithAllocationLimit(actualSize resource.Quantity, allocatio
 
 func GetLLVRequestedSize(llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LVMVolumeGroup) (resource.Quantity, error) {
 	switch llv.Spec.Type {
-	case Thick:
+	case internal.Thick:
 		return GetRequestedSizeFromString(llv.Spec.Size, lvg.Status.VGSize)
-	case Thin:
+	case internal.Thin:
 		for _, tp := range lvg.Status.ThinPools {
 			if tp.Name == llv.Spec.Thin.PoolName {
 				totalSize, err := GetThinPoolSpaceWithAllocationLimit(tp.ActualSize, tp.AllocationLimit)
@@ -108,9 +98,9 @@ func LVGBelongsToNode(lvg *v1alpha1.LVMVolumeGroup, nodeName string) bool {
 
 func GetFreeLVGSpaceForLLV(lvg *v1alpha1.LVMVolumeGroup, llv *v1alpha1.LVMLogicalVolume) resource.Quantity {
 	switch llv.Spec.Type {
-	case Thick:
+	case internal.Thick:
 		return lvg.Status.VGFree
-	case Thin:
+	case internal.Thin:
 		for _, tp := range lvg.Status.ThinPools {
 			if tp.Name == llv.Spec.Thin.PoolName {
 				return tp.AvailableSpace

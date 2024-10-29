@@ -1,8 +1,8 @@
-package clients
+package utils
 
 import (
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
+	"agent/internal/logger"
+	"agent/internal/monitoring"
 	"context"
 	"fmt"
 	"time"

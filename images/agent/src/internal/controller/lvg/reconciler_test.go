@@ -15,21 +15,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"agent/internal"
-	"agent/pkg/cache"
-	cutils "agent/pkg/controller/utils"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
-	"agent/pkg/test_utils"
+	"agent/internal/cache"
+	"agent/internal/utils"
 )
 
 func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
-	cl := test_utils.NewFakeClient()
 	ctx := context.Background()
-	log := logger.Logger{}
-	metrics := monitoring.GetMetrics("")
-	ch := cache.New()
-
-	r := NewReconciler(cl, log, metrics, ch, ReconcilerOptions{})
 
 	t.Run("validateLVGForUpdateFunc", func(t *testing.T) {
 		t.Run("without_thin_pools_returns_true", func(t *testing.T) {
@@ -81,7 +72,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			ch.StorePVs(pvs, bytes.Buffer{})
+			r.ch.StorePVs(pvs, bytes.Buffer{})
 
 			valid, reason := r.validateLVGForUpdateFunc(lvg, bds)
 			if assert.True(t, valid) {
@@ -434,7 +425,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}
 
 			actual := r.identifyLVGReconcileFunc(lvg)
-			assert.Equal(t, CreateReconcile, actual)
+			assert.Equal(t, internal.CreateReconcile, actual)
 		})
 
 		t.Run("returns_update", func(t *testing.T) {
@@ -453,7 +444,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
 
 			actual := r.identifyLVGReconcileFunc(lvg)
-			assert.Equal(t, UpdateReconcile, actual)
+			assert.Equal(t, internal.UpdateReconcile, actual)
 		})
 
 		t.Run("returns_delete", func(t *testing.T) {
@@ -473,7 +464,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
 
 			actual := r.identifyLVGReconcileFunc(lvg)
-			assert.Equal(t, DeleteReconcile, actual)
+			assert.Equal(t, internal.DeleteReconcile, actual)
 		})
 	})
 
@@ -584,7 +575,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 	t.Run("getRequestedSizeFromString", func(t *testing.T) {
 		t.Run("for_percent_size", func(t *testing.T) {
-			actual, err := cutils.GetRequestedSizeFromString("50%", resource.MustParse("10G"))
+			actual, err := utils.GetRequestedSizeFromString("50%", resource.MustParse("10G"))
 			if err != nil {
 				t.Error(err)
 			}
@@ -594,7 +585,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		})
 
 		t.Run("for_number_size", func(t *testing.T) {
-			actual, err := cutils.GetRequestedSizeFromString("5G", resource.MustParse("10G"))
+			actual, err := utils.GetRequestedSizeFromString("5G", resource.MustParse("10G"))
 			if err != nil {
 				t.Error(err)
 			}
@@ -1097,7 +1088,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			oldLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG.Name = "test-name"
-			newLVG.Labels = map[string]string{LVGMetadateNameLabelKey: "test-name"}
+			newLVG.Labels = map[string]string{internal.LVGMetadateNameLabelKey: "test-name"}
 			newLVG.Status.Conditions = []v1.Condition{
 				{
 					Type:   internal.TypeVGConfigurationApplied,
@@ -1117,7 +1108,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					Reason: internal.ReasonCreating,
 				},
 			}
-			newLVG.Labels = map[string]string{LVGMetadateNameLabelKey: newLVG.Name}
+			newLVG.Labels = map[string]string{internal.LVGMetadateNameLabelKey: newLVG.Name}
 			assert.False(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
 		})
 
@@ -1131,7 +1122,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					Reason: internal.ReasonCreating,
 				},
 			}
-			newLVG.Labels = map[string]string{LVGMetadateNameLabelKey: "some-other-name"}
+			newLVG.Labels = map[string]string{internal.LVGMetadateNameLabelKey: "some-other-name"}
 			assert.True(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
 		})
 

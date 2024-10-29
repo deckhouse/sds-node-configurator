@@ -1,8 +1,8 @@
-package clients
+package utils
 
 import (
-	cutils "agent/pkg/controller/utils"
-	"agent/pkg/logger"
+	"agent/internal"
+	"agent/internal/logger"
 	"context"
 	"fmt"
 
@@ -68,7 +68,7 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 		}
 	}
 
-	updateNeeded := llv.Status.Phase != cutils.LLVStatusPhaseCreated ||
+	updateNeeded := llv.Status.Phase != internal.LLVStatusPhaseCreated ||
 		llv.Status.ActualSize.Value() != actualSize.Value() ||
 		llv.Status.Reason != "" ||
 		llv.Status.Contiguous != contiguous
@@ -78,7 +78,7 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 		return nil
 	}
 
-	llv.Status.Phase = cutils.LLVStatusPhaseCreated
+	llv.Status.Phase = internal.LLVStatusPhaseCreated
 	llv.Status.Reason = ""
 	llv.Status.ActualSize = actualSize
 	llv.Status.Contiguous = contiguous

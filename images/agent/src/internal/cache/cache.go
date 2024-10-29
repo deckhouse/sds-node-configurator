@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"agent/internal"
-	"agent/pkg/logger"
+	"agent/internal/logger"
 )
 
 const (

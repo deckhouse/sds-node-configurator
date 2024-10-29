@@ -2,12 +2,11 @@ package bd
 
 import (
 	"agent/internal"
-	"agent/pkg/cache"
-	"agent/pkg/controller"
-	"agent/pkg/controller/clients"
-	"agent/pkg/controller/utils"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
+	"agent/internal/cache"
+	"agent/internal/controller"
+	"agent/internal/logger"
+	"agent/internal/monitoring"
+	"agent/internal/utils"
 	"context"
 	"crypto/sha1"
 	"fmt"
@@ -30,7 +29,7 @@ const DiscovererName = "block-device-controller"
 type Discoverer struct {
 	cl       client.Client
 	log      logger.Logger
-	bdCl     *clients.BDClient
+	bdCl     *utils.BDClient
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
 	opts     Options
@@ -52,7 +51,7 @@ func NewDiscoverer(
 	return &Discoverer{
 		cl:       cl,
 		log:      log,
-		bdCl:     clients.NewBDClient(cl, metrics),
+		bdCl:     utils.NewBDClient(cl, metrics),
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		opts:     opts,

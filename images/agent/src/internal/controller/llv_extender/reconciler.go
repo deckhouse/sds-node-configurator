@@ -2,13 +2,11 @@ package llv_extender
 
 import (
 	"agent/internal"
-	"agent/pkg/cache"
-	"agent/pkg/controller"
-	"agent/pkg/controller/clients"
-	cutils "agent/pkg/controller/utils"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
-	"agent/pkg/utils"
+	"agent/internal/cache"
+	"agent/internal/controller"
+	"agent/internal/logger"
+	"agent/internal/monitoring"
+	"agent/internal/utils"
 	"context"
 	"errors"
 	"fmt"
@@ -24,8 +22,8 @@ const ReconcilerName = "lvm-logical-volume-extender-controller"
 type Reconciler struct {
 	cl       client.Client
 	log      logger.Logger
-	lvgCl    *clients.LVGClient
-	llvCl    *clients.LLVClient
+	lvgCl    *utils.LVGClient
+	llvCl    *utils.LLVClient
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
 	opts     ReconcilerOptions
@@ -46,14 +44,14 @@ func NewReconciler(
 	return &Reconciler{
 		cl:  cl,
 		log: log,
-		lvgCl: clients.NewLVGClient(
+		lvgCl: utils.NewLVGClient(
 			cl,
 			log,
 			metrics,
 			opts.NodeName,
 			ReconcilerName,
 		),
-		llvCl:    clients.NewLLVClient(cl, log),
+		llvCl:    utils.NewLLVClient(cl, log),
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		opts:     opts,
@@ -108,7 +106,7 @@ func (r *Reconciler) shouldLLVExtenderReconcileEvent(newLVG *v1alpha1.LVMVolumeG
 		return false
 	}
 
-	if !cutils.LVGBelongsToNode(newLVG, r.opts.NodeName) {
+	if !utils.LVGBelongsToNode(newLVG, r.opts.NodeName) {
 		r.log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as it does not belong to the node %s", newLVG.Name, r.opts.NodeName))
 		return false
 	}
@@ -141,7 +139,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 	shouldRetry := false
 	for _, llv := range llvs {
 		r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] starts to reconcile the LVMLogicalVolume %s", llv.Name))
-		llvRequestedSize, err := cutils.GetLLVRequestedSize(&llv, lvg)
+		llvRequestedSize, err := utils.GetLLVRequestedSize(&llv, lvg)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to get requested size of the LVMLogicalVolume %s", llv.Name))
 			shouldRetry = true
@@ -153,7 +151,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 		if lv == nil {
 			err = fmt.Errorf("lv %s not found", llv.Spec.ActualLVNameOnTheNode)
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to find LV %s of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name))
-			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, cutils.LLVStatusPhaseFailed, err.Error())
+			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, internal.LLVStatusPhaseFailed, err.Error())
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
 			}
@@ -171,11 +169,11 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 			continue
 		}
 
-		freeSpace := cutils.GetFreeLVGSpaceForLLV(lvg, &llv)
+		freeSpace := utils.GetFreeLVGSpaceForLLV(lvg, &llv)
 		if llvRequestedSize.Value()+internal.ResizeDelta.Value() > freeSpace.Value() {
 			err = errors.New("not enough space")
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to extend the LV %s of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name))
-			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, cutils.LLVStatusPhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
+			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, internal.LLVStatusPhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
 				shouldRetry = true
@@ -184,7 +182,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 		}
 
 		r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] the LVMLogicalVolume %s should be extended from %s to %s size", llv.Name, llv.Status.ActualSize.String(), llvRequestedSize.String()))
-		err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, cutils.LLVStatusPhaseResizing, "")
+		err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, internal.LLVStatusPhaseResizing, "")
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
 			shouldRetry = true
@@ -194,7 +192,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 		cmd, err := utils.ExtendLV(llvRequestedSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to extend LV %s of the LVMLogicalVolume %s, cmd: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, cmd))
-			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, cutils.LLVStatusPhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
+			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, internal.LLVStatusPhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
 			}
@@ -224,7 +222,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to resize the LVMLogicalVolume %s", llv.Name))
 			shouldRetry = true
 
-			if err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, cutils.LLVStatusPhaseFailed, err.Error()); err != nil {
+			if err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, internal.LLVStatusPhaseFailed, err.Error()); err != nil {
 				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
 			}
 			continue
@@ -247,7 +245,7 @@ func (r *Reconciler) getAllLLVsWithPercentSize(ctx context.Context, lvgName stri
 
 	result := make([]v1alpha1.LVMLogicalVolume, 0, len(llvList.Items))
 	for _, llv := range llvList.Items {
-		if llv.Spec.LVMVolumeGroupName == lvgName && cutils.IsPercentSize(llv.Spec.Size) {
+		if llv.Spec.LVMVolumeGroupName == lvgName && utils.IsPercentSize(llv.Spec.Size) {
 			result = append(result, llv)
 		}
 	}

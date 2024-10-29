@@ -32,12 +32,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"agent/internal"
-	"agent/pkg/cache"
-	cutils "agent/pkg/controller/utils"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
-	"agent/pkg/test_utils"
-	"agent/pkg/utils"
+	"agent/internal/cache"
+	"agent/internal/logger"
+	"agent/internal/monitoring"
+	"agent/internal/test_utils"
+	"agent/internal/utils"
 )
 
 //go:embed testdata/lsblk_output.json
@@ -551,7 +550,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			expectedName := "testName"
 			tags := fmt.Sprintf("storage.deckhouse.io/enabled=true,storage.deckhouse.io/lvmVolumeGroupName=%s", expectedName)
 
-			shouldBeTrue, actualName := cutils.CheckTag(tags)
+			shouldBeTrue, actualName := utils.CheckTag(tags)
 			if assert.True(t, shouldBeTrue) {
 				assert.Equal(t, expectedName, actualName)
 			}
@@ -560,7 +559,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		t.Run("Haven't tag_Returns false and empty", func(t *testing.T) {
 			tags := "someWeirdTags=oMGwtFIsThis"
 
-			shouldBeFalse, actualName := cutils.CheckTag(tags)
+			shouldBeFalse, actualName := utils.CheckTag(tags)
 			if assert.False(t, shouldBeFalse) {
 				assert.Equal(t, "", actualName)
 			}

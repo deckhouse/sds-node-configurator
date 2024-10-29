@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"agent/pkg/logger"
+	"agent/internal/logger"
 	"context"
 	"fmt"
 	"reflect"
@@ -75,7 +75,7 @@ func AddReconciler[T client.Object](
 	}
 
 	var obj T
-	err = c.Watch(
+	return c.Watch(
 		source.Kind(
 			mgrCache,
 			obj,
@@ -112,8 +112,6 @@ func AddReconciler[T client.Object](
 			},
 		),
 	)
-
-	return nil
 }
 
 func AddDiscoverer(
@@ -169,7 +167,6 @@ func makeReconcileDispatcher[T client.Object](
 			return reconcile.Result{}, err
 		}
 
-		//
 		result, err := reconciler.Reconcile(
 			ctx,
 			ReconcileRequest[T]{

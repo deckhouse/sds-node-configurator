@@ -29,8 +29,8 @@ import (
 	"time"
 
 	"agent/internal"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
+	"agent/internal/logger"
+	"agent/internal/monitoring"
 )
 
 func GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {

@@ -27,10 +27,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"agent/internal"
-	"agent/pkg/cache"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
-	"agent/pkg/test_utils"
+	"agent/internal/cache"
+	"agent/internal/logger"
+	"agent/internal/monitoring"
+	"agent/internal/test_utils"
 )
 
 var _ = Describe("Storage Controller", func() {

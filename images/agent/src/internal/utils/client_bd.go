@@ -1,7 +1,7 @@
-package clients
+package utils
 
 import (
-	"agent/pkg/monitoring"
+	"agent/internal/monitoring"
 	"context"
 	"time"
 

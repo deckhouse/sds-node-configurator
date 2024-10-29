@@ -27,10 +27,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"agent/internal"
-	"agent/pkg/cache"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
-	"agent/pkg/test_utils"
+	"agent/internal/cache"
+	"agent/internal/logger"
+	"agent/internal/monitoring"
+	"agent/internal/test_utils"
 )
 
 func TestLVMVolumeGroupDiscover(t *testing.T) {
@@ -616,7 +616,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				firstLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: firstLVName},
 					Spec: v1alpha1.LVMVolumeGroupSpec{
-						Type:                  Local,
+						Type:                  internal.Local,
 						ActualVGNameOnTheNode: vgName,
 						Local: v1alpha1.LVMVolumeGroupLocalSpec{
 							NodeName: "other-node",
@@ -626,7 +626,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				secondLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: secondLVName},
 					Spec: v1alpha1.LVMVolumeGroupSpec{
-						Type:                  Local,
+						Type:                  internal.Local,
 						ActualVGNameOnTheNode: vgName,
 						Local: v1alpha1.LVMVolumeGroupLocalSpec{
 							NodeName: currentNode,
@@ -640,7 +640,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			vgName: {
 				ObjectMeta: metav1.ObjectMeta{Name: secondLVName},
 				Spec: v1alpha1.LVMVolumeGroupSpec{
-					Type:                  Local,
+					Type:                  internal.Local,
 					ActualVGNameOnTheNode: vgName,
 					Local: v1alpha1.LVMVolumeGroupLocalSpec{
 						NodeName: currentNode,
@@ -665,7 +665,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				firstLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: firstLVName},
 					Spec: v1alpha1.LVMVolumeGroupSpec{
-						Type: Local,
+						Type: internal.Local,
 						Local: v1alpha1.LVMVolumeGroupLocalSpec{
 							NodeName: anotherNode,
 						},
@@ -674,7 +674,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				secondLVName: {
 					ObjectMeta: metav1.ObjectMeta{Name: secondLVName},
 					Spec: v1alpha1.LVMVolumeGroupSpec{
-						Type: Local,
+						Type: internal.Local,
 						Local: v1alpha1.LVMVolumeGroupLocalSpec{
 							NodeName: anotherNode,
 						},

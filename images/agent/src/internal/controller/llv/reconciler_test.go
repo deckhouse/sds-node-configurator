@@ -12,12 +12,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"agent/internal"
-	"agent/pkg/cache"
-	cutils "agent/pkg/controller/utils"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
-	"agent/pkg/test_utils"
-	"agent/pkg/utils"
+	"agent/internal/cache"
+	"agent/internal/logger"
+	"agent/internal/monitoring"
+	"agent/internal/test_utils"
+	"agent/internal/utils"
 )
 
 func TestLVMLogicaVolumeWatcher(t *testing.T) {
@@ -41,7 +40,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				ObjectMeta: v1.ObjectMeta{},
 				Spec: v1alpha1.LVMLogicalVolumeSpec{
-					Type: cutils.Thin,
+					Type: internal.Thin,
 					Thin: &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
 				},
 			}
@@ -55,7 +54,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				ObjectMeta: v1.ObjectMeta{},
 				Spec: v1alpha1.LVMLogicalVolumeSpec{
-					Type: cutils.Thin,
+					Type: internal.Thin,
 					Thin: &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
 				},
 			}
@@ -68,7 +67,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				ObjectMeta: v1.ObjectMeta{},
 				Spec: v1alpha1.LVMLogicalVolumeSpec{
-					Type: cutils.Thick,
+					Type: internal.Thick,
 				},
 			}
 			lv := &internal.LVData{LVAttr: "-wi-a-----"}
@@ -80,7 +79,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				ObjectMeta: v1.ObjectMeta{},
 				Spec: v1alpha1.LVMLogicalVolumeSpec{
-					Type: cutils.Thick,
+					Type: internal.Thick,
 				},
 			}
 			lv1 := &internal.LVData{LVAttr: "Vwi-a-----"}
@@ -120,7 +119,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				Spec: v1alpha1.LVMLogicalVolumeSpec{
 					ActualLVNameOnTheNode: "test-lv",
-					Type:                  cutils.Thick,
+					Type:                  internal.Thick,
 					Size:                  "10M",
 					LVMVolumeGroupName:    lvgName,
 				},
@@ -140,7 +139,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				Spec: v1alpha1.LVMLogicalVolumeSpec{
 					ActualLVNameOnTheNode: lvName,
-					Type:                  cutils.Thick,
+					Type:                  internal.Thick,
 					Size:                  "0M",
 					LVMVolumeGroupName:    "some-lvg",
 					Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: "some-lvg"},
@@ -184,7 +183,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				Spec: v1alpha1.LVMLogicalVolumeSpec{
 					ActualLVNameOnTheNode: "test-lv",
-					Type:                  cutils.Thin,
+					Type:                  internal.Thin,
 					Size:                  "10M",
 					LVMVolumeGroupName:    lvgName,
 					Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: tpName},
@@ -204,7 +203,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				Spec: v1alpha1.LVMLogicalVolumeSpec{
 					ActualLVNameOnTheNode: "",
-					Type:                  cutils.Thin,
+					Type:                  internal.Thin,
 					Size:                  "0M",
 					LVMVolumeGroupName:    "some-lvg",
 				},
@@ -224,7 +223,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 	})
 
 	t.Run("getThinPoolAvailableSpace", func(t *testing.T) {
-		free, err := cutils.GetThinPoolAvailableSpace(
+		free, err := utils.GetThinPoolAvailableSpace(
 			resource.MustParse("10Gi"),
 			resource.MustParse("5Gi"),
 			internal.AllocationLimitDefaultValue,
@@ -252,12 +251,12 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		}
 
 		t.Run("returns_true", func(t *testing.T) {
-			belongs := cutils.LVGBelongsToNode(lvg, nodeName)
+			belongs := utils.LVGBelongsToNode(lvg, nodeName)
 			assert.True(t, belongs)
 		})
 
 		t.Run("returns_false", func(t *testing.T) {
-			belongs := cutils.LVGBelongsToNode(lvg, "other_node")
+			belongs := utils.LVGBelongsToNode(lvg, "other_node")
 			assert.False(t, belongs)
 		})
 	})
@@ -269,7 +268,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 
 			actual := r.identifyReconcileFunc(vgName, llv)
 
-			assert.Equal(t, CreateReconcile, actual)
+			assert.Equal(t, internal.CreateReconcile, actual)
 		})
 
 		t.Run("returns_update", func(t *testing.T) {
@@ -281,7 +280,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: lvName,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: cutils.LLVStatusPhaseCreated,
+					Phase: internal.LLVStatusPhaseCreated,
 				},
 			}
 			r.sdsCache.StoreLVs([]internal.LVData{
@@ -293,7 +292,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 
 			actual := r.identifyReconcileFunc(vgName, llv)
 
-			assert.Equal(t, UpdateReconcile, actual)
+			assert.Equal(t, internal.UpdateReconcile, actual)
 		})
 
 		t.Run("returns_delete", func(t *testing.T) {
@@ -302,13 +301,13 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				ObjectMeta: v1.ObjectMeta{DeletionTimestamp: &v1.Time{}},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: cutils.LLVStatusPhaseCreated,
+					Phase: internal.LLVStatusPhaseCreated,
 				},
 			}
 
 			actual := r.identifyReconcileFunc(vgName, llv)
 
-			assert.Equal(t, DeleteReconcile, actual)
+			assert.Equal(t, internal.DeleteReconcile, actual)
 		})
 	})
 
@@ -322,7 +321,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: lvName,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: cutils.LLVStatusPhaseCreated,
+					Phase: internal.LLVStatusPhaseCreated,
 				},
 			}
 
@@ -338,7 +337,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: lvName,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: cutils.LLVStatusPhaseCreated,
+					Phase: internal.LLVStatusPhaseCreated,
 				},
 			}
 			r.sdsCache.StoreLVs([]internal.LVData{
@@ -360,7 +359,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: lvName,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: cutils.LLVStatusPhaseCreated,
+					Phase: internal.LLVStatusPhaseCreated,
 				},
 			}
 			should := r.shouldReconcileByCreateFunc(vgName, llv)
@@ -389,7 +388,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: lvName,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: cutils.LLVStatusPhaseCreated,
+					Phase: internal.LLVStatusPhaseCreated,
 				},
 			}
 			r.sdsCache.StoreLVs([]internal.LVData{
@@ -410,7 +409,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: lvName,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: cutils.LLVStatusPhaseCreated,
+					Phase: internal.LLVStatusPhaseCreated,
 				},
 			}
 			should := r.shouldReconcileByUpdateFunc(vgName, llv)
@@ -446,7 +445,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				Name: "test",
 			},
 			Status: &v1alpha1.LVMLogicalVolumeStatus{
-				Phase:  cutils.LLVStatusPhaseCreated,
+				Phase:  internal.LLVStatusPhaseCreated,
 				Reason: "",
 			},
 		}
@@ -464,7 +463,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			}
 		}()
 
-		err = r.llvCl.UpdatePhaseIfNeeded(ctx, llv, cutils.LLVStatusPhaseFailed, reason)
+		err = r.llvCl.UpdatePhaseIfNeeded(ctx, llv, internal.LLVStatusPhaseFailed, reason)
 		if assert.NoError(t, err) {
 			newLLV := &v1alpha1.LVMLogicalVolume{}
 			err = r.cl.Get(ctx, client.ObjectKey{
@@ -472,7 +471,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				Namespace: "",
 			}, newLLV)
 
-			assert.Equal(t, newLLV.Status.Phase, cutils.LLVStatusPhaseFailed)
+			assert.Equal(t, newLLV.Status.Phase, internal.LLVStatusPhaseFailed)
 			assert.Equal(t, newLLV.Status.Reason, reason)
 		}
 	})
@@ -576,7 +575,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				Size:                  oldSize.String(),
 			},
 			Status: &v1alpha1.LVMLogicalVolumeStatus{
-				Phase:      cutils.LLVStatusPhasePending,
+				Phase:      internal.LLVStatusPhasePending,
 				Reason:     "",
 				ActualSize: *oldSize,
 			},
@@ -605,12 +604,12 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		}
 
 		if assert.NotNil(t, oldLLV) {
-			assert.Equal(t, cutils.LLVStatusPhasePending, oldLLV.Status.Phase)
+			assert.Equal(t, internal.LLVStatusPhasePending, oldLLV.Status.Phase)
 			assert.Equal(t, oldSize.Value(), oldLLV.Status.ActualSize.Value())
 		}
 
 		oldLLV.Spec.Size = newSize.String()
-		oldLLV.Status.Phase = cutils.LLVStatusPhaseCreated
+		oldLLV.Status.Phase = internal.LLVStatusPhaseCreated
 		oldLLV.Status.ActualSize = *newSize
 
 		err = r.updateLVMLogicalVolumeSpec(ctx, oldLLV)
@@ -624,7 +623,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				return
 			}
 
-			assert.Equal(t, cutils.LLVStatusPhasePending, newLLV.Status.Phase)
+			assert.Equal(t, internal.LLVStatusPhasePending, newLLV.Status.Phase)
 			assert.Equal(t, oldSize.Value(), newLLV.Status.ActualSize.Value())
 		}
 	})
@@ -648,7 +647,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				Size:                  oldSize.String(),
 			},
 			Status: &v1alpha1.LVMLogicalVolumeStatus{
-				Phase:      cutils.LLVStatusPhasePending,
+				Phase:      internal.LLVStatusPhasePending,
 				Reason:     "",
 				ActualSize: *oldSize,
 			},
@@ -677,7 +676,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		}
 
 		if assert.NotNil(t, oldLLV) {
-			assert.Equal(t, cutils.LLVStatusPhasePending, oldLLV.Status.Phase)
+			assert.Equal(t, internal.LLVStatusPhasePending, oldLLV.Status.Phase)
 			assert.Equal(t, oldSize.Value(), oldLLV.Status.ActualSize.Value())
 		}
 
@@ -695,7 +694,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			}
 
 			assert.Equal(t, oldSize.String(), newLLV.Spec.Size)
-			assert.Equal(t, cutils.LLVStatusPhaseCreated, newLLV.Status.Phase)
+			assert.Equal(t, internal.LLVStatusPhaseCreated, newLLV.Status.Phase)
 			assert.Equal(t, newSize.Value(), newLLV.Status.ActualSize.Value())
 		}
 	})

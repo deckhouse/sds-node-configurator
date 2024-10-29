@@ -2,13 +2,11 @@ package lvg
 
 import (
 	"agent/internal"
-	"agent/pkg/cache"
-	"agent/pkg/controller"
-	"agent/pkg/controller/clients"
-	cutils "agent/pkg/controller/utils"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
-	"agent/pkg/utils"
+	"agent/internal/cache"
+	"agent/internal/controller"
+	"agent/internal/logger"
+	"agent/internal/monitoring"
+	"agent/internal/utils"
 	"context"
 	"errors"
 	"fmt"
@@ -29,8 +27,8 @@ const DiscovererName = "lvm-volume-group-discover-controller"
 type Discoverer struct {
 	cl       client.Client
 	log      logger.Logger
-	lvgCl    *clients.LVGClient
-	bdCl     *clients.BDClient
+	lvgCl    *utils.LVGClient
+	bdCl     *utils.BDClient
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
 	opts     DiscovererOptions
@@ -51,8 +49,8 @@ func NewDiscoverer(
 	return &Discoverer{
 		cl:       cl,
 		log:      log,
-		lvgCl:    clients.NewLVGClient(cl, log, metrics, opts.NodeName, DiscovererName),
-		bdCl:     clients.NewBDClient(cl, metrics),
+		lvgCl:    utils.NewLVGClient(cl, log, metrics, opts.NodeName, DiscovererName),
+		bdCl:     utils.NewBDClient(cl, metrics),
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		opts:     opts,
@@ -432,7 +430,7 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	candidate internal.LVMVolumeGroupCandidate,
 ) error {
 	// Check if VG has some problems
-	if candidate.Health == NonOperational {
+	if candidate.Health == internal.NonOperational {
 		d.log.Warning(fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] candidate for LVMVolumeGroup %s has NonOperational health, message %s. Update the VGReady condition to False", lvg.Name, candidate.Message))
 		updErr := d.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, metav1.ConditionFalse, internal.TypeVGReady, internal.ReasonScanFailed, candidate.Message)
 		if updErr != nil {
@@ -945,7 +943,7 @@ func convertStatusThinPools(lvg v1alpha1.LVMVolumeGroup, thinPools []internal.LV
 			limit = internal.AllocationLimitDefaultValue
 		}
 
-		freeSpace, err := cutils.GetThinPoolAvailableSpace(tp.ActualSize, tp.AllocatedSize, limit)
+		freeSpace, err := utils.GetThinPoolAvailableSpace(tp.ActualSize, tp.AllocatedSize, limit)
 		if err != nil {
 			return nil, err
 		}
