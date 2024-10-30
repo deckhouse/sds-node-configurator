@@ -120,7 +120,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector, lvg.Spec.Local.NodeName)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 
@@ -132,13 +132,14 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				assert.False(t, ok)
 			}
 		})
-
 		t.Run("bds_exist_only_match_labels_return_bds", func(t *testing.T) {
 			const (
-				name1    = "name11"
-				name2    = "name22"
-				name3    = "name33"
-				hostName = "test-host"
+				name1         = "name11"
+				name2         = "name22"
+				name3         = "name33"
+				name4         = "name44"
+				hostName      = "test-host"
+				otherHostName = "other-host"
 			)
 
 			bds := []v1alpha1.BlockDevice{
@@ -146,27 +147,60 @@ func TestBlockDeviceCtrl(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: name1,
 						Labels: map[string]string{
-							"kubernetes.io/hostname":      hostName,
-							"kubernetes.io/metadata.name": name1,
+							"kubernetes.io/hostname":                       hostName,
+							"kubernetes.io/metadata.name":                  name1,
+							"status.blockdevice.storage.deckhouse.io/size": "1G",
 						},
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Size:       resource.MustParse("1G"),
+						NodeName:   hostName,
+						Consumable: true,
 					},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: name2,
 						Labels: map[string]string{
-							"kubernetes.io/hostname":      hostName,
-							"kubernetes.io/metadata.name": name2,
+							"kubernetes.io/hostname":                       hostName,
+							"kubernetes.io/metadata.name":                  name2,
+							"status.blockdevice.storage.deckhouse.io/size": "1G",
 						},
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Size:       resource.MustParse("1G"),
+						NodeName:   hostName,
+						Consumable: true,
 					},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: name3,
 						Labels: map[string]string{
-							"kubernetes.io/hostname":      "other-host",
-							"kubernetes.io/metadata.name": name3,
+							"kubernetes.io/hostname":                       hostName,
+							"kubernetes.io/metadata.name":                  name3,
+							"status.blockdevice.storage.deckhouse.io/size": "2G",
 						},
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Size:       resource.MustParse("1G"),
+						NodeName:   hostName,
+						Consumable: true,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: name4,
+						Labels: map[string]string{
+							"kubernetes.io/hostname":                       otherHostName,
+							"kubernetes.io/metadata.name":                  name4,
+							"status.blockdevice.storage.deckhouse.io/size": "1G",
+						},
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Size:       resource.MustParse("1G"),
+						NodeName:   otherHostName,
+						Consumable: true,
 					},
 				},
 			}
@@ -190,12 +224,15 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			lvg := &v1alpha1.LVMVolumeGroup{
 				Spec: v1alpha1.LVMVolumeGroupSpec{
 					BlockDeviceSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{"kubernetes.io/hostname": hostName},
+						MatchLabels: map[string]string{"status.blockdevice.storage.deckhouse.io/size": "1G"},
+					},
+					Local: v1alpha1.LVMVolumeGroupLocalSpec{
+						NodeName: hostName,
 					},
 				},
 			}
 
-			actualBd, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector, lvg.Spec.Local.NodeName)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 
@@ -204,6 +241,8 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				_, ok = actualBd[name2]
 				assert.True(t, ok)
 				_, ok = actualBd[name3]
+				assert.False(t, ok)
+				_, ok = actualBd[name4]
 				assert.False(t, ok)
 			}
 		})
@@ -276,7 +315,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				},
 			}
 
-			actualBd, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
+			actualBd, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector, lvg.Spec.Local.NodeName)
 			if assert.NoError(t, err) {
 				assert.Equal(t, 2, len(actualBd))
 				_, ok := actualBd[name1]

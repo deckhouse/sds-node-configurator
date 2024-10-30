@@ -92,7 +92,7 @@ func LVMVolumeGroupDiscoverReconcile(ctx context.Context, cl client.Client, metr
 		log.Debug("[RunLVMVolumeGroupDiscoverController] no current LVMVolumeGroups found")
 	}
 
-	blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics, nil)
+	blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics, nil, cfg.NodeName)
 	if err != nil {
 		log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to GetAPIBlockDevices")
 		for _, lvg := range currentLVMVGs {

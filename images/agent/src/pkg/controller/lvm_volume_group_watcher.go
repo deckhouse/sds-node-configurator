@@ -118,8 +118,8 @@ func RunLVMVolumeGroupWatcherController(
 				log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully removed the label %s from the LVMVolumeGroup %s", internal.LVGUpdateTriggerLabel, lvg.Name))
 			}
 
-			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
-			blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector)
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v on the node %s", lvg.Name, lvg.Spec.BlockDeviceSelector, lvg.Spec.Local.NodeName))
+			blockDevices, err := GetAPIBlockDevices(ctx, cl, metrics, lvg.Spec.BlockDeviceSelector, lvg.Spec.Local.NodeName)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %s", cfg.BlockDeviceScanIntervalSec.String()))
 				err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "NoBlockDevices", fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()))
@@ -129,7 +129,7 @@ func RunLVMVolumeGroupWatcherController(
 
 				return reconcile.Result{RequeueAfter: cfg.BlockDeviceScanIntervalSec}, nil
 			}
-			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully got block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
+			log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully got block device resources for the LVMVolumeGroup %s by the selector %v on the node %s", lvg.Name, lvg.Spec.BlockDeviceSelector, lvg.Spec.Local.NodeName))
 			log.Trace(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] block devices: %v", blockDevices))
 
 			valid, reason := validateSpecBlockDevices(lvg, blockDevices)
