@@ -18,7 +18,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -266,32 +265,7 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 			// volume is a clone
 			r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] Snapshot (for source %s) LV %s of the LVMLogicalVolume %s will be created in Thin-pool %s with size %s", llv.Spec.Source.Name, llv.Spec.ActualLVNameOnTheNode, llv.Name, llv.Spec.Thin.PoolName, llvRequestSize.String()))
 
-			var sourceVgName, sourceVolumeName string
-			if llv.Spec.Source.Kind == "LVMLogicalVolume" {
-				sourceLlv := &v1alpha1.LVMLogicalVolume{}
-				if err = r.cl.Get(ctx, types.NamespacedName{Name: llv.Spec.Source.Name}, sourceLlv); err != nil {
-					r.log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to find source LVMLogicalVolume %s", llv.Spec.Source.Name))
-					return false, err
-				}
-
-				sourceVolumeName = sourceLlv.Spec.ActualLVNameOnTheNode
-				sourceVgName = sourceLlv.Spec.LVMVolumeGroupName
-
-				// TODO snapshots: validate source llv
-			} else if llv.Spec.Source.Kind == "LVMLogicalVolumeSnapshot" {
-				sourceSnapshot := &v1alpha1.LVMLogicalVolumeSnapshot{}
-				if err = r.cl.Get(ctx, types.NamespacedName{Name: llv.Spec.Source.Name}, sourceSnapshot); err != nil {
-					r.log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to find source LVMLogicalVolumeSnapshot %s", llv.Spec.Source.Name))
-					return false, err
-				}
-				sourceVolumeName = sourceSnapshot.Spec.ActualLVNameOnTheNode
-				sourceVgName = sourceSnapshot.Spec.LVMVolumeGroupName
-				// TODO snapshots: validate source snapshot
-			} else {
-				return false, fmt.Errorf("source kind is not supported: %s", llv.Spec.Source.Kind)
-			}
-			cmd, err = utils.CreateThinLogicalVolumeSnapshot(llv.Spec.ActualLVNameOnTheNode, sourceVgName, sourceVolumeName)
-
+			cmd, err = utils.CreateThinLogicalVolumeSnapshot(llv.Spec.ActualLVNameOnTheNode, llv.Spec.LVMVolumeGroupName, llv.Spec.Source.Name)
 		}
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] runs cmd: %s", cmd))
