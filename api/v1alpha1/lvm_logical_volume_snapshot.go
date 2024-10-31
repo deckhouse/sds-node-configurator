@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -41,20 +42,14 @@ type LVMLogicalVolumeSnapshot struct {
 
 // +k8s:deepcopy-gen=true
 type LVMLogicalVolumeSnapshotSpec struct {
-	ActualLVNameOnTheNode string `json:"actualLVNameOnTheNode"`
-	Size                  string `json:"size"`
-	LVMVolumeGroupName    string `json:"lvmVolumeGroupName"`
-
-	Source *LVMLogicalVolumeSnapshotSource `json:"source"`
+	NodeName             string `json:"nodeName"`
+	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName"`
 }
 
 // +k8s:deepcopy-gen=true
 type LVMLogicalVolumeSnapshotStatus struct {
-	Phase  string `json:"phase"`
-	Reason string `json:"reason"`
-}
-
-// +k8s:deepcopy-gen=true
-type LVMLogicalVolumeSnapshotSource struct {
-	Selector *metav1.LabelSelector `json:"selector,omitempty" protobuf:"bytes,1,opt,name=selector"`
+	Phase      string            `json:"phase"`
+	Reason     string            `json:"reason"`
+	Size       resource.Quantity `json:"size"`
+	ActualSize resource.Quantity `json:"actualSize"`
 }
