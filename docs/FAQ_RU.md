@@ -76,3 +76,13 @@ vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true
 Это возможно в случае, если вы создавали `LVM Volume Group` через ресурс `LVMVolumeGroup` (в таком случае контроллер автоматически вешает данный LVM-тег на созданную `LVM Volume Group`). Либо на данной `Volume Group` или ее `Thin-pool` был LVM-тег модуля `linstor` — `linstor-*`.
 
 При миграции с встроенного модуля `linstor` на модули `sds-node-configurator` и `sds-drbd` автоматически происходит изменение LVM-тегов `linstor-*` на LVM-тег `storage.deckhouse.io/enabled=true` в `Volume Group`. Таким образом, управление этими `Volume Group` передается модулю `sds-node-configurator`.
+
+## Как использовать ресурс `LVMVolumeGroupSet` для создания `LVMVolumeGroup`?
+
+Для создания `LVMVolumeGroup` с помощью `LVMVolumeGroupSet` необходимо указать в спецификации `LVMVolumeGroupSet` селекторы для нод и селекторы для `BlockDevice`. На данный момент поддерживается только стратегия `perNode`, при которой контроллер создаст `LVMVolumeGroup` на каждой ноде, удовлетворяющей селектору для нод, и использующей `BlockDevice`, удовлетворяющие селектору для `BlockDevice` и находящиеся на этой ноде.
+
+Пример спецификации `LVMVolumeGroupSet`:
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: LVMVolumeGroupSet
