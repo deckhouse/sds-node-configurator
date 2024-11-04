@@ -26,13 +26,20 @@ rules:
       - "storage.deckhouse.io"
     resources:
       - blockdevices
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - "storage.deckhouse.io"
+    resources:
       - lvmvolumegroupsets
       - lvmvolumegroupsets/status
     verbs:
       - get
       - list
-      - update
       - watch
+      - update
   - apiGroups:
       - "storage.deckhouse.io"
     resources:
@@ -41,8 +48,8 @@ rules:
     verbs:
       - get
       - list
-      - update
       - watch
+      - update
       - create
   - apiGroups:
       - ""
@@ -59,11 +66,11 @@ rules:
       - leases
     verbs:
       - get
-      - watch
       - list
-      - delete
+      - watch
       - update
       - create
+      - delete
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
