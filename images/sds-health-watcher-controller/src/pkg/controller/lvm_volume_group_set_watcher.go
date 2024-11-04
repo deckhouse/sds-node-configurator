@@ -124,10 +124,12 @@ func reconcileLVMVolumeGroupSet(ctx context.Context, cl client.Client, log logge
 		return false, err
 	}
 	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] successfully got nodes by the LVMVolumeGroupSet %s nodeSelector", lvgSet.Name))
+	log.Trace(fmt.Sprintf("[reconcileLVMVolumeGroupSet] nodes: %+v", nodes))
 
 	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] starts to validate the LVMVolumeGroupSet %s nodes", lvgSet.Name))
 	valid, reason := validateLVMVolumeGroupSetNodes(nodes)
 	if !valid {
+		log.Warning(fmt.Sprintf("[reconcileLVMVolumeGroupSet] the LVMVolumeGroupSet %s nodes are invalid: %s", lvgSet.Name, reason))
 		err = updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, phaseNotCreated, reason)
 		if err != nil {
 			return false, err
