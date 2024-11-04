@@ -255,8 +255,8 @@ func updateLVMVolumeGroupSetStatusByLVGIfNeeded(ctx context.Context, cl client.C
 		NodeName:           lvg.Spec.Local.NodeName,
 	})
 
-	lvgSet.Status.CurrentLVGCount = len(lvgSet.Status.CreatedLVGs)
-	lvgSet.Status.DesiredLVGCount = len(nodes)
+	lvgSet.Status.CurrentLVMVolumeGroupsCount = len(lvgSet.Status.CreatedLVGs)
+	lvgSet.Status.DesiredLVMVolumeGroupsCount = len(nodes)
 
 	return cl.Status().Update(ctx, lvgSet)
 }

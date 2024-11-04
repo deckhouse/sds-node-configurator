@@ -53,11 +53,11 @@ type LVMVolumeGroupTemplateMeta struct {
 }
 
 type LVMVolumeGroupSetStatus struct {
-	CreatedLVGs     []LVMVolumeGroupSetStatusLVG `json:"createdLVMVolumeGroups"`
-	CurrentLVGCount int                          `json:"currentLvgCount"`
-	DesiredLVGCount int                          `json:"desiredLvgCount"`
-	Phase           string                       `json:"phase"`
-	Reason          string                       `json:"reason"`
+	CreatedLVGs                 []LVMVolumeGroupSetStatusLVG `json:"createdLVMVolumeGroups"`
+	CurrentLVMVolumeGroupsCount int                          `json:"currentLVMVolumeGroupsCount"`
+	DesiredLVMVolumeGroupsCount int                          `json:"desiredLVMVolumeGroupsCount"`
+	Phase                       string                       `json:"phase"`
+	Reason                      string                       `json:"reason"`
 }
 
 type LVMVolumeGroupSetStatusLVG struct {

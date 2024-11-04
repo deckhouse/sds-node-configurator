@@ -78,10 +78,10 @@ spec:
                 createdLVMVolumeGroups:
                   description: |
                     Короткая информация о LVMVolumeGroup ресурсах, созданных по текущему ресурсу.
-                currentLvgCount:
+                currentLVMVolumeGroupsCount:
                   description: |
                     Текущее количество созданных LVMVolumeGroup ресурсов.
-                desiredLvgCount:
+                desiredLVMVolumeGroupsCount:
                   description: |
                     Желаемое количество созданных LVMVolumeGroup ресурсов.
                 phase:
