@@ -70,6 +70,7 @@ func AddReconciler[T client.Object](
 			MaxConcurrentReconciles: reconciler.MaxConcurrentReconciles(),
 		},
 	)
+
 	if err != nil {
 		return err
 	}
