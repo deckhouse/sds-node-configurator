@@ -72,15 +72,12 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			vgName = "testVg"
 			vgUUID = "testUuid"
 		)
-		bds := map[string][]v1alpha1.BlockDevice{
-			vgName + vgUUID: {{}},
-		}
 		vgIssues := map[string]string{}
 		pvIssues := map[string][]string{}
 		lvIssues := map[string]map[string]string{}
 		vg := internal.VGData{VGName: vgName, VGUUID: vgUUID}
 
-		health, _ := checkVGHealth(bds, vgIssues, pvIssues, lvIssues, vg)
+		health, _ := checkVGHealth(vgIssues, pvIssues, lvIssues, vg)
 		assert.Equal(t, health, internal.LVMVGHealthOperational)
 	})
 
@@ -89,15 +86,14 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			vgName = "testVg"
 			vgUUID = "testUuid"
 		)
-		bds := map[string][]v1alpha1.BlockDevice{
-			vgName + vgUUID: {},
+		vgIssues := map[string]string{
+			vgName + vgUUID: "some-issue",
 		}
-		vgIssues := map[string]string{}
 		pvIssues := map[string][]string{}
 		lvIssues := map[string]map[string]string{}
 		vg := internal.VGData{VGName: vgName, VGUUID: vgUUID}
 
-		health, _ := checkVGHealth(bds, vgIssues, pvIssues, lvIssues, vg)
+		health, _ := checkVGHealth(vgIssues, pvIssues, lvIssues, vg)
 		assert.Equal(t, health, internal.LVMVGHealthNonOperational)
 	})
 
@@ -321,7 +317,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		mp := map[string][]v1alpha1.BlockDevice{vgName + vgUUID: bds}
 		ar := map[string][]internal.PVData{vgName + vgUUID: pvs}
 
-		actual := configureCandidateNodeDevices(ar, mp, vg, nodeName)
+		actual := configureCandidateNodeDevices(log, ar, mp, vg, nodeName)
 
 		assert.Equal(t, expected, actual)
 	})

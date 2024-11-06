@@ -253,6 +253,7 @@ def main(ctx: hook.Context):
                               'name':
                                   lvg['metadata'][
                                       'name'],
+                              'labels': {},
                               'finalizers':
                                   lvg['metadata'][
                                       'finalizers']},

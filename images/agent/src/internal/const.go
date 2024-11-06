@@ -52,6 +52,7 @@ const (
 	ReasonTerminating      = "Terminating"
 	ReasonScanFailed       = "ScanFailed"
 	ReasonUpdated          = "Updated"
+	ReasonApplied          = "Applied"
 
 	BlockDeviceLabelPrefix = "status.blockdevice.storage.deckhouse.io"
 

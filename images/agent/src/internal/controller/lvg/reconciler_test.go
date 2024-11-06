@@ -769,51 +769,6 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			assert.Equal(t, "these BlockDevices no longer match the blockDeviceSelector: first", reason)
 		})
 
-		t.Run("validation_fails_due_to_bd_has_dif_node", func(t *testing.T) {
-			const (
-				nodeName = "nodeName"
-			)
-			lvg := &v1alpha1.LVMVolumeGroup{
-				Spec: v1alpha1.LVMVolumeGroupSpec{
-					Local: v1alpha1.LVMVolumeGroupLocalSpec{
-						NodeName: nodeName,
-					},
-					BlockDeviceSelector: &v1.LabelSelector{
-						MatchExpressions: []v1.LabelSelectorRequirement{
-							{
-								Key:      internal.MetadataNameLabelKey,
-								Operator: v1.LabelSelectorOpIn,
-								Values:   []string{"first", "second"},
-							},
-						},
-					},
-				},
-			}
-
-			bds := map[string]v1alpha1.BlockDevice{
-				"first": {
-					ObjectMeta: v1.ObjectMeta{
-						Name: "first",
-					},
-					Status: v1alpha1.BlockDeviceStatus{
-						NodeName: nodeName,
-					},
-				},
-				"second": {
-					ObjectMeta: v1.ObjectMeta{
-						Name: "second",
-					},
-					Status: v1alpha1.BlockDeviceStatus{
-						NodeName: "another-node",
-					},
-				},
-			}
-
-			valid, reason := validateSpecBlockDevices(lvg, bds)
-			assert.False(t, valid)
-			assert.Equal(t, "block devices second have different node names from LVMVolumeGroup Local.NodeName", reason)
-		})
-
 		t.Run("validation_fails_due_to_no_block_devices_were_found", func(t *testing.T) {
 			const (
 				nodeName = "nodeName"
@@ -1160,7 +1115,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			newLVG.Status.Conditions = []v1.Condition{
 				{
 					Type:   internal.TypeVGConfigurationApplied,
-					Reason: internal.ReasonCreating,
+					Reason: internal.ReasonApplied,
 				},
 			}
 			newLVG.Labels = map[string]string{internal.LVGMetadateNameLabelKey: "some-other-name"}

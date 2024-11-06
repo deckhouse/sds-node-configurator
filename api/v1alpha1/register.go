@@ -48,6 +48,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&LVMLogicalVolumeList{},
 		&LVMLogicalVolumeSnapshot{},
 		&LVMLogicalVolumeSnapshotList{},
+		&LVMVolumeGroupSet{},
+		&LVMVolumeGroupSetList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil
