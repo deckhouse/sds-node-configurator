@@ -42,6 +42,7 @@ type LVMLogicalVolumeSnapshot struct {
 
 // +k8s:deepcopy-gen=true
 type LVMLogicalVolumeSnapshotSpec struct {
+	NodeName             string `json:"nodeName"`
 	LVMVolumeGroupName   string `json:"lvmVolumeGroupName"`
 	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName"`
 }

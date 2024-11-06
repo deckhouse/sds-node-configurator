@@ -32,12 +32,21 @@ spec:
               type: object
               required:
                 - nodeName
+                - lvmVolumeGroupName
                 - lvmLogicalVolumeName
               properties:
                 nodeName:
                   type: string
                   description: |
-                    The name of the kubernetes node the snapshot is on.
+                    The name of the kubernetes node the snapshot resides in.
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                  minLength: 1
+                lvmVolumeGroupName:
+                  type: string
+                  description: |
+                    The name of the volume group, where the snapshot resides in.
                   x-kubernetes-validations:
                     - rule: self == oldSelf
                       message: Value is immutable.
