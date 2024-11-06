@@ -123,7 +123,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully removed the label %s from the LVMVolumeGroup %s", internal.LVGUpdateTriggerLabel, lvg.Name))
 	}
 
-	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector.MatchLabels))
+	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
 	blockDevices, err := r.bdCl.GetAPIBlockDevices(ctx, ReconcilerName, lvg.Spec.BlockDeviceSelector)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %s", r.cfg.BlockDeviceScanInterval.String()))
@@ -141,7 +141,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 
 		return controller.Result{RequeueAfter: r.cfg.BlockDeviceScanInterval}, nil
 	}
-	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully got block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector.MatchLabels))
+	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully got block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
+
+	blockDevices = filterBlockDevicesByNodeName(blockDevices, lvg.Spec.Local.NodeName)
 
 	valid, reason := validateSpecBlockDevices(lvg, blockDevices)
 	if !valid {
@@ -425,7 +427,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 	}
 
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] tries to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
-	err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, "Applied", "configuration has been applied")
+	err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, internal.ReasonApplied, "configuration has been applied")
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		return true, err
@@ -518,7 +520,7 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 		r.log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] successfully created thin-pools for the LVMVolumeGroup %s", lvg.Name))
 	}
 
-	err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, "Success", "all configuration has been applied")
+	err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, internal.ReasonApplied, "all configuration has been applied")
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		return true, err
@@ -553,6 +555,15 @@ func (r *Reconciler) shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alph
 		return true
 	}
 
+	for _, c := range newLVG.Status.Conditions {
+		if c.Type == internal.TypeVGConfigurationApplied {
+			if c.Reason == internal.ReasonUpdating || c.Reason == internal.ReasonCreating {
+				r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should not be reconciled as the LVMVolumeGroup %s reconciliation still in progress", newLVG.Name))
+				return false
+			}
+		}
+	}
+
 	if _, exist := newLVG.Labels[internal.LVGUpdateTriggerLabel]; exist {
 		r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has the label %s", newLVG.Name, internal.LVGUpdateTriggerLabel))
 		return true
@@ -566,15 +577,6 @@ func (r *Reconciler) shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alph
 	if !reflect.DeepEqual(oldLVG.Spec, newLVG.Spec) {
 		r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s configuration has been changed", newLVG.Name))
 		return true
-	}
-
-	for _, c := range newLVG.Status.Conditions {
-		if c.Type == internal.TypeVGConfigurationApplied {
-			if c.Reason == internal.ReasonUpdating || c.Reason == internal.ReasonCreating {
-				r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should not be reconciled as the LVMVolumeGroup %s reconciliation still in progress", newLVG.Name))
-				return false
-			}
-		}
 	}
 
 	for _, n := range newLVG.Status.Nodes {
@@ -1403,18 +1405,18 @@ func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[str
 		}
 	}
 
-	bdFromOtherNode := make([]string, 0, len(blockDevices))
+	return true, ""
+}
+
+func filterBlockDevicesByNodeName(blockDevices map[string]v1alpha1.BlockDevice, nodeName string) map[string]v1alpha1.BlockDevice {
+	bdsForUsage := make(map[string]v1alpha1.BlockDevice, len(blockDevices))
 	for _, bd := range blockDevices {
-		if bd.Status.NodeName != lvg.Spec.Local.NodeName {
-			bdFromOtherNode = append(bdFromOtherNode, bd.Name)
+		if bd.Status.NodeName == nodeName {
+			bdsForUsage[bd.Name] = bd
 		}
 	}
 
-	if len(bdFromOtherNode) != 0 {
-		return false, fmt.Sprintf("block devices %s have different node names from LVMVolumeGroup Local.NodeName", strings.Join(bdFromOtherNode, ","))
-	}
-
-	return true, ""
+	return bdsForUsage
 }
 
 func checkIfLVGBelongsToNode(lvg *v1alpha1.LVMVolumeGroup, nodeName string) bool {

@@ -317,7 +317,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		mp := map[string][]v1alpha1.BlockDevice{vgName + vgUUID: bds}
 		ar := map[string][]internal.PVData{vgName + vgUUID: pvs}
 
-		actual := configureCandidateNodeDevices(log, ar, mp, vg, nodeName)
+		actual := setupDiscoverer(nil).configureCandidateNodeDevices(ar, mp, vg, nodeName)
 
 		assert.Equal(t, expected, actual)
 	})

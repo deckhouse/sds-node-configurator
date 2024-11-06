@@ -167,7 +167,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 				continue
 			}
 
-			err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, metav1.ConditionTrue, internal.TypeVGConfigurationApplied, "Success", "all configuration has been applied")
+			err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, metav1.ConditionTrue, internal.TypeVGConfigurationApplied, internal.ReasonApplied, "all configuration has been applied")
 			if err != nil {
 				d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, createdLvg.Name))
 				shouldRequeue = true
@@ -361,7 +361,7 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(bds map[string]v1alpha1.BlockDe
 			VGSize:                *resource.NewQuantity(vg.VGSize.Value(), resource.BinarySI),
 			VGFree:                *resource.NewQuantity(vg.VGFree.Value(), resource.BinarySI),
 			VGUUID:                vg.VGUUID,
-			Nodes:                 configureCandidateNodeDevices(sortedPVs, sortedBDs, vg, d.cfg.NodeName),
+			Nodes:                 d.configureCandidateNodeDevices(sortedPVs, sortedBDs, vg, d.cfg.NodeName),
 		}
 
 		candidates = append(candidates, candidate)
@@ -487,6 +487,41 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	}
 
 	return err
+}
+
+func (d *Discoverer) configureCandidateNodeDevices(pvs map[string][]internal.PVData, bds map[string][]v1alpha1.BlockDevice, vg internal.VGData, currentNode string) map[string][]internal.LVMVGDevice {
+	filteredPV := pvs[vg.VGName+vg.VGUUID]
+	filteredBds := bds[vg.VGName+vg.VGUUID]
+	bdPathStatus := make(map[string]v1alpha1.BlockDevice, len(bds))
+	result := make(map[string][]internal.LVMVGDevice, len(filteredPV))
+
+	for _, blockDevice := range filteredBds {
+		bdPathStatus[blockDevice.Status.Path] = blockDevice
+	}
+
+	for _, pv := range filteredPV {
+		bd, exist := bdPathStatus[pv.PVName]
+		// this is very rare case which might occurred while VG extend operation goes. In this case, in the cache the controller
+		// sees a new PV included in the VG, but BlockDeviceDiscover did not update the corresponding BlockDevice resource on time,
+		// so the BlockDevice resource does not have any info, that it is in the VG.
+		if !exist {
+			d.log.Warning(fmt.Sprintf("[configureCandidateNodeDevices] no BlockDevice resource is yet configured for PV %s in VG %s, retry on the next iteration", pv.PVName, vg.VGName))
+			continue
+		}
+
+		device := internal.LVMVGDevice{
+			Path:   pv.PVName,
+			PVSize: *resource.NewQuantity(pv.PVSize.Value(), resource.BinarySI),
+			PVUUID: pv.PVUuid,
+		}
+
+		device.DevSize = *resource.NewQuantity(bd.Status.Size.Value(), resource.BinarySI)
+		device.BlockDevice = bd.Name
+
+		result[currentNode] = append(result[currentNode], device)
+	}
+
+	return result
 }
 
 func checkVGHealth(vgIssues map[string]string, pvIssues map[string][]string, lvIssues map[string]map[string]string, vg internal.VGData) (health, message string) {
@@ -648,41 +683,6 @@ func sortBlockDevicesByVG(bds map[string]v1alpha1.BlockDevice, vgs []internal.VG
 		if _, ok := result[bd.Status.ActualVGNameOnTheNode+bd.Status.VGUuid]; ok {
 			result[bd.Status.ActualVGNameOnTheNode+bd.Status.VGUuid] = append(result[bd.Status.ActualVGNameOnTheNode+bd.Status.VGUuid], bd)
 		}
-	}
-
-	return result
-}
-
-func configureCandidateNodeDevices(log logger.Logger, pvs map[string][]internal.PVData, bds map[string][]v1alpha1.BlockDevice, vg internal.VGData, currentNode string) map[string][]internal.LVMVGDevice {
-	filteredPV := pvs[vg.VGName+vg.VGUUID]
-	filteredBds := bds[vg.VGName+vg.VGUUID]
-	bdPathStatus := make(map[string]v1alpha1.BlockDevice, len(bds))
-	result := make(map[string][]internal.LVMVGDevice, len(filteredPV))
-
-	for _, blockDevice := range filteredBds {
-		bdPathStatus[blockDevice.Status.Path] = blockDevice
-	}
-
-	for _, pv := range filteredPV {
-		bd, exist := bdPathStatus[pv.PVName]
-		// this is very rare case which might occurred while VG extend operation goes. In this case, in the cache the controller
-		// sees a new PV included in the VG, but BlockDeviceDiscover did not update the corresponding BlockDevice resource on time,
-		// so the BlockDevice resource does not have any info, that it is in the VG.
-		if !exist {
-			log.Warning(fmt.Sprintf("[configureCandidateNodeDevices] no BlockDevice resource is yet configured for PV %s in VG %s, retry on the next iteration", pv.PVName, vg.VGName))
-			continue
-		}
-
-		device := internal.LVMVGDevice{
-			Path:   pv.PVName,
-			PVSize: *resource.NewQuantity(pv.PVSize.Value(), resource.BinarySI),
-			PVUUID: pv.PVUuid,
-		}
-
-		device.DevSize = *resource.NewQuantity(bd.Status.Size.Value(), resource.BinarySI)
-		device.BlockDevice = bd.Name
-
-		result[currentNode] = append(result[currentNode], device)
 	}
 
 	return result
