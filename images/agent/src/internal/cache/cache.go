@@ -176,7 +176,6 @@ func (c *Cache) PrintTheCache(log logger.Logger) {
 	for key, lv := range c.lvs {
 		lvData := lv.Data
 		log.Trace(fmt.Sprintf("     Key: %s, Exist: %t, Data Name: %s, VG name: %s, size: %s, tags: %s, attr: %s, pool: %s", key, lv.Exist, lvData.LVName, lvData.VGName, lvData.LVSize.String(), lvData.LvTags, lvData.LVAttr, lvData.PoolName))
-
 	}
 
 	log.Trace("[ERRS]")

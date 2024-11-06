@@ -945,7 +945,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 
 		if actualTp, exist := actualThinPools[specTp.Name]; !exist {
 			r.log.Debug(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] thin-pool %s of the LVMVolumeGroup %s is not created yet. Create it", specTp.Name, lvg.Name))
-			if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
+			if isApplied(lvg) {
 				err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 				if err != nil {
 					r.log.Error(err, fmt.Sprintf("[ReconcileThinPoolsIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
@@ -980,7 +980,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 			}
 
 			r.log.Debug(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] the LVMVolumeGroup %s requested thin pool %s size is more than actual one. Resize it", lvg.Name, tpRequestedSize.String()))
-			if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
+			if isApplied(lvg) {
 				err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 				if err != nil {
 					r.log.Error(err, fmt.Sprintf("[ReconcileThinPoolsIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
@@ -1013,7 +1013,7 @@ func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolu
 	for _, n := range lvg.Status.Nodes {
 		for _, d := range n.Devices {
 			if d.DevSize.Value()-d.PVSize.Value() > internal.ResizeDelta.Value() {
-				if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
+				if isApplied(lvg) {
 					err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 					if err != nil {
 						r.log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
@@ -1079,7 +1079,7 @@ func (r *Reconciler) extendVGIfNeeded(
 		return nil
 	}
 
-	if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
+	if isApplied(lvg) {
 		err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
@@ -1272,7 +1272,7 @@ func (r *Reconciler) updateVGTagIfNeeded(
 ) (bool, error) {
 	found, tagName := utils.CheckTag(vg.VGTags)
 	if found && lvg.Name != tagName {
-		if checkIfConditionIsTrue(lvg, internal.TypeVGConfigurationApplied) {
+		if isApplied(lvg) {
 			err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))

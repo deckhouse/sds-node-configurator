@@ -197,7 +197,6 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		})
 
 		t.Run("thin_all_bad_returns_false", func(t *testing.T) {
-
 			r := setupReconciler()
 
 			llv := &v1alpha1.LVMLogicalVolume{

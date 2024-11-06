@@ -38,9 +38,8 @@ func GetRequestedSizeFromString(size string, targetSpace resource.Quantity) (res
 		}
 		lvSize := targetSpace.Value() * int64(percent) / 100
 		return *resource.NewQuantity(lvSize, resource.BinarySI), nil
-	} else {
-		return resource.ParseQuantity(size)
 	}
+	return resource.ParseQuantity(size)
 }
 
 func GetThinPoolAvailableSpace(actualSize, allocatedSize resource.Quantity, allocationLimit string) (resource.Quantity, error) {

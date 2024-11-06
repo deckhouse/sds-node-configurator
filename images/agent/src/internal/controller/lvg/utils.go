@@ -8,9 +8,9 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func checkIfConditionIsTrue(lvg *v1alpha1.LVMVolumeGroup, conType string) bool {
+func isApplied(lvg *v1alpha1.LVMVolumeGroup) bool {
 	for _, c := range lvg.Status.Conditions {
-		if c.Type == conType && c.Status == v1.ConditionTrue {
+		if c.Type == internal.TypeVGConfigurationApplied && c.Status == v1.ConditionTrue {
 			return true
 		}
 	}

@@ -62,11 +62,11 @@ func (r *Reconciler) MaxConcurrentReconciles() int {
 }
 
 // ShouldReconcileUpdate implements controller.Reconciler.
-func (r *Reconciler) ShouldReconcileUpdate(objectOld *v1alpha1.LVMVolumeGroup, objectNew *v1alpha1.LVMVolumeGroup) bool {
+func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.LVMVolumeGroup, _ *v1alpha1.LVMVolumeGroup) bool {
 	return true
 }
 
 // Reconcile implements controller.Reconciler.
-func (r *Reconciler) Reconcile(ctx context.Context, request controller.ReconcileRequest[*v1alpha1.LVMVolumeGroup]) (controller.Result, error) {
+func (r *Reconciler) Reconcile(_ context.Context, _ controller.ReconcileRequest[*v1alpha1.LVMVolumeGroup]) (controller.Result, error) {
 	return controller.Result{}, nil
 }

@@ -69,7 +69,7 @@ func (r *Reconciler) MaxConcurrentReconciles() int {
 }
 
 // ShouldReconcileUpdate implements controller.Reconciler.
-func (r *Reconciler) ShouldReconcileUpdate(objectOld *v1alpha1.LVMVolumeGroup, objectNew *v1alpha1.LVMVolumeGroup) bool {
+func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.LVMVolumeGroup, _ *v1alpha1.LVMVolumeGroup) bool {
 	return true
 }
 
@@ -78,7 +78,6 @@ func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req controller.ReconcileRequest[*v1alpha1.LVMVolumeGroup],
 ) (controller.Result, error) {
-
 	lvg := req.Object
 
 	if !r.shouldLLVExtenderReconcileEvent(lvg) {
@@ -96,7 +95,6 @@ func (r *Reconciler) Reconcile(
 
 	r.log.Info(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] successfully reconciled LVMLogicalVolumes for the LVMVolumeGroup %s", lvg.Name))
 	return controller.Result{}, nil
-
 }
 
 func (r *Reconciler) shouldLLVExtenderReconcileEvent(newLVG *v1alpha1.LVMVolumeGroup) bool {
