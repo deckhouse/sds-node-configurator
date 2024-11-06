@@ -1,11 +1,12 @@
 package controller
 
 import (
-	"agent/internal/logger"
 	"context"
 	"fmt"
 	"reflect"
 	"time"
+
+	"agent/internal/logger"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -15,9 +16,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/source"
-
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 type ReconcileRequest[T client.Object] struct {
