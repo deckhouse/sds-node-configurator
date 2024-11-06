@@ -1,11 +1,11 @@
 package lvg
 
 import (
-	"agent/internal"
-
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"agent/internal"
 )
 
 func isApplied(lvg *v1alpha1.LVMVolumeGroup) bool {

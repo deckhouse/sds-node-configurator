@@ -1,12 +1,13 @@
 package utils
 
 import (
-	"agent/internal"
 	"strconv"
 	"strings"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"agent/internal"
 )
 
 func IsPercentSize(size string) bool {

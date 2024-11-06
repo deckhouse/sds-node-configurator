@@ -1,8 +1,6 @@
 package utils
 
 import (
-	"agent/internal/logger"
-	"agent/internal/monitoring"
 	"context"
 	"fmt"
 	"time"
@@ -10,6 +8,9 @@ import (
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"agent/internal/logger"
+	"agent/internal/monitoring"
 )
 
 type LVGClient struct {

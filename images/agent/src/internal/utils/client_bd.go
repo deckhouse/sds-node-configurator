@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"agent/internal/monitoring"
 	"context"
 	"time"
 
@@ -9,6 +8,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"agent/internal/monitoring"
 )
 
 type BDClient struct {

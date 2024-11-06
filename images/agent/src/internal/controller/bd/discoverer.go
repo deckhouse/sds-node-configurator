@@ -1,12 +1,6 @@
 package bd
 
 import (
-	"agent/internal"
-	"agent/internal/cache"
-	"agent/internal/controller"
-	"agent/internal/logger"
-	"agent/internal/monitoring"
-	"agent/internal/utils"
 	"context"
 	"crypto/sha1"
 	"fmt"
@@ -22,6 +16,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"agent/internal"
+	"agent/internal/cache"
+	"agent/internal/controller"
+	"agent/internal/logger"
+	"agent/internal/monitoring"
+	"agent/internal/utils"
 )
 
 const DiscovererName = "block-device-controller"

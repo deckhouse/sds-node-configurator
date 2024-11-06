@@ -1,14 +1,15 @@
 package utils
 
 import (
-	"agent/internal"
-	"agent/internal/logger"
 	"context"
 	"fmt"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"agent/internal"
+	"agent/internal/logger"
 )
 
 type LLVClient struct {

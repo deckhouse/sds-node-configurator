@@ -1,12 +1,6 @@
 package llv_extender
 
 import (
-	"agent/internal"
-	"agent/internal/cache"
-	"agent/internal/controller"
-	"agent/internal/logger"
-	"agent/internal/monitoring"
-	"agent/internal/utils"
 	"context"
 	"errors"
 	"fmt"
@@ -15,6 +9,13 @@ import (
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"agent/internal"
+	"agent/internal/cache"
+	"agent/internal/controller"
+	"agent/internal/logger"
+	"agent/internal/monitoring"
+	"agent/internal/utils"
 )
 
 const ReconcilerName = "lvm-logical-volume-extender-controller"
