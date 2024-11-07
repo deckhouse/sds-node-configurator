@@ -82,6 +82,10 @@ const (
 	LLVStatusPhaseResizing = "Resizing"
 	LLVStatusPhaseFailed   = "Failed"
 
+	LLVSStatusPhaseCreated = "Created"
+	LLVSStatusPhasePending = "Pending"
+	LLVSStatusPhaseFailed  = "Failed"
+
 	Local  = "Local"
 	Shared = "Shared"
 

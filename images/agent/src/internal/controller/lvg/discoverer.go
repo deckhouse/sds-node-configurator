@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -724,7 +723,7 @@ func getStatusThinPools(log logger.Logger, thinPools, sortedLVs map[string][]int
 	result := make([]internal.LVMVGStatusThinPool, 0, len(tps))
 
 	for _, thinPool := range tps {
-		usedSize, err := getThinPoolUsedSize(thinPool)
+		usedSize, err := thinPool.GetUsedSize()
 		log.Trace(fmt.Sprintf("[getStatusThinPools] LV %v for VG name %s", thinPool, vg.VGName))
 		if err != nil {
 			log.Error(err, "[getStatusThinPools] unable to getThinPoolUsedSize")
@@ -759,26 +758,6 @@ func getThinPoolAllocatedSize(tpName string, lvs []internal.LVData) int64 {
 	}
 
 	return size
-}
-
-func getThinPoolUsedSize(lv internal.LVData) (*resource.Quantity, error) {
-	var (
-		err         error
-		dataPercent float64
-	)
-
-	if lv.DataPercent == "" {
-		dataPercent = 0.0
-	} else {
-		dataPercent, err = strconv.ParseFloat(lv.DataPercent, 64)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	tmp := float64(lv.LVSize.Value()) * dataPercent
-
-	return resource.NewQuantity(int64(tmp), resource.BinarySI), nil
 }
 
 func getBlockDevicesNames(bds map[string][]v1alpha1.BlockDevice, vg internal.VGData) []string {

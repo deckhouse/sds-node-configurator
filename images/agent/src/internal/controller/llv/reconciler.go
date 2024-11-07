@@ -266,10 +266,10 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 			// volume is a clone
 			r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] Snapshot (for source %s) LV %s of the LVMLogicalVolume %s will be created in Thin-pool %s with size %s", llv.Spec.Source.Name, llv.Spec.ActualLVNameOnTheNode, llv.Name, llv.Spec.Thin.PoolName, llvRequestSize.String()))
 
-			cmd, err = utils.CreateThinLogicalSnapshotVolume(llv.Spec.ActualLVNameOnTheNode, llv.Spec.LVMVolumeGroupName, llv.Spec.Source.Name)
+			cmd, err = utils.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, llv.Spec.LVMVolumeGroupName, llv.Spec.Source.Name)
 		}
 	}
-	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] runs cmd: %s", cmd))
+	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] ran cmd: %s", cmd))
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to create a %s LogicalVolume for the LVMLogicalVolume %s", llv.Spec.Type, llv.Name))
 		return true, err
