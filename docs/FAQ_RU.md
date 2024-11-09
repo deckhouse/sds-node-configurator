@@ -79,10 +79,32 @@ vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true
 
 ## Как использовать ресурс `LVMVolumeGroupSet` для создания `LVMVolumeGroup`?
 
-Для создания `LVMVolumeGroup` с помощью `LVMVolumeGroupSet` необходимо указать в спецификации `LVMVolumeGroupSet` селекторы для нод и селекторы для `BlockDevice`. На данный момент поддерживается только стратегия `perNode`, при которой контроллер создаст `LVMVolumeGroup` на каждой ноде, удовлетворяющей селектору для нод, и использующей `BlockDevice`, удовлетворяющие селектору для `BlockDevice` и находящиеся на этой ноде.
+Для создания `LVMVolumeGroup` с помощью `LVMVolumeGroupSet` необходимо указать в спецификации `LVMVolumeGroupSet` селекторы для нод и шаблон для создаваемых ресурсов `LVMVolumeGroup`. На данный момент поддерживается только стратегия `PerNode`, при которой контроллер создаст по одному ресуру `LVMVolumeGroup` из шаблона для каждой ноды, удовлетворяющей селектору.
 
 Пример спецификации `LVMVolumeGroupSet`:
 
 ```yaml
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: LVMVolumeGroupSet
+metadata:
+  name: my-lvm-volume-group-set
+  labels:
+    my-label: my-value
+spec:
+  strategy: PerNode
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/worker: ""
+  lvmVolumeGroupTemplate:
+    metadata:
+      labels:
+        my-label-for-lvg: my-value-for-lvg
+    spec:
+      type: Local
+      blockDeviceSelector:
+        matchLabels:
+          status.blockdevice.storage.deckhouse.io/model: <model>
+      actualVGNameOnTheNode: <actual-vg-name-on-the-node>
+
+
+```
