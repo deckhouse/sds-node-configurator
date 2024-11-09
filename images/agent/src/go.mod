@@ -3,9 +3,10 @@ module agent
 go 1.22.2
 
 require (
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20241103120640-3e41c48c48fa
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20241104200552-c02b44d9b6a0
 	github.com/go-logr/logr v1.4.2
 	github.com/google/go-cmp v0.6.0
+	github.com/gosimple/slug v1.14.0
 	github.com/onsi/ginkgo/v2 v2.19.0
 	github.com/onsi/gomega v1.33.1
 	github.com/pilebones/go-udev v0.9.0
@@ -42,7 +43,6 @@ require (
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/pprof v0.0.0-20240525223248-4bfdf5a9a2af // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gosimple/slug v1.14.0 // indirect
 	github.com/gosimple/unidecode v1.0.1 // indirect
 	github.com/imdario/mergo v0.3.16 // indirect
 	github.com/josharian/intern v1.0.0 // indirect

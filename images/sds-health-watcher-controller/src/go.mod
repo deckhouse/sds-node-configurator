@@ -4,7 +4,7 @@ go 1.22.3
 
 require (
 	github.com/cloudflare/cfssl v1.5.0
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20241103120640-3e41c48c48fa
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20241104200552-c02b44d9b6a0
 	github.com/go-logr/logr v1.4.2
 	github.com/prometheus/client_golang v1.19.1
 	github.com/stretchr/testify v1.9.0
