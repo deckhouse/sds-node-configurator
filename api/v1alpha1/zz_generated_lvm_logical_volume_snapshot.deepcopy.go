@@ -109,7 +109,7 @@ func (in *LVMLogicalVolumeSnapshotSpec) DeepCopy() *LVMLogicalVolumeSnapshotSpec
 func (in *LVMLogicalVolumeSnapshotStatus) DeepCopyInto(out *LVMLogicalVolumeSnapshotStatus) {
 	*out = *in
 	out.Size = in.Size.DeepCopy()
-	out.ActualSize = in.ActualSize.DeepCopy()
+	out.UsedSize = in.UsedSize.DeepCopy()
 	return
 }
 

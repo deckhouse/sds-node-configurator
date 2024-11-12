@@ -77,6 +77,11 @@ func (r *Reconciler) ShouldReconcileUpdate(objectOld *v1alpha1.LVMVolumeGroup, o
 	return r.shouldLVGWatcherReconcileUpdateEvent(objectOld, objectNew)
 }
 
+// ShouldReconcileCreate implements controller.Reconciler.
+func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMVolumeGroup) bool {
+	return true
+}
+
 // Reconcile implements controller.Reconciler.
 func (r *Reconciler) Reconcile(ctx context.Context, request controller.ReconcileRequest[*v1alpha1.LVMVolumeGroup]) (controller.Result, error) {
 	r.log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] Reconciler starts to reconcile the request %s", request.Object.Name))
@@ -1271,7 +1276,7 @@ func (r *Reconciler) updateVGTagIfNeeded(
 	lvg *v1alpha1.LVMVolumeGroup,
 	vg internal.VGData,
 ) (bool, error) {
-	found, tagName := utils.CheckTag(vg.VGTags)
+	found, tagName := utils.ReadValueFromTags(vg.VGTags, internal.LVMVolumeGroupTag)
 	if found && lvg.Name != tagName {
 		if isApplied(lvg) {
 			err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")

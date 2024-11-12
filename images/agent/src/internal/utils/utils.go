@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -14,14 +15,18 @@ func IsPercentSize(size string) bool {
 	return strings.Contains(size, "%")
 }
 
-func CheckTag(tags string) (bool, string) {
+func NewEnabledTags(key string, value string) []string {
+	return []string{internal.LVMTags[0], fmt.Sprintf("%s=%s", key, value)}
+}
+
+func ReadValueFromTags(tags string, key string) (bool, string) {
 	if !strings.Contains(tags, internal.LVMTags[0]) {
 		return false, ""
 	}
 
 	splitTags := strings.Split(tags, ",")
 	for _, tag := range splitTags {
-		if strings.HasPrefix(tag, "storage.deckhouse.io/lvmVolumeGroupName") {
+		if strings.HasPrefix(tag, key) {
 			kv := strings.Split(tag, "=")
 			return true, kv[1]
 		}

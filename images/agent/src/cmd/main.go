@@ -38,6 +38,7 @@ import (
 	"agent/internal/controller/bd"
 	"agent/internal/controller/llv"
 	"agent/internal/controller/llv_extender"
+	"agent/internal/controller/llvs"
 	"agent/internal/controller/lvg"
 	"agent/internal/kubutils"
 	"agent/internal/logger"
@@ -214,18 +215,42 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = controller.AddReconciler(mgr, log, llv_extender.NewReconciler(
-		mgr.GetClient(),
+	err = controller.AddReconciler(
+		mgr,
 		log,
-		metrics,
-		sdsCache,
-		llv_extender.ReconcilerConfig{
-			NodeName:                cfgParams.NodeName,
-			VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
-		},
-	))
+		llv_extender.NewReconciler(
+			mgr.GetClient(),
+			log,
+			metrics,
+			sdsCache,
+			llv_extender.ReconcilerConfig{
+				NodeName:                cfgParams.NodeName,
+				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
+			},
+		),
+	)
 	if err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMLogicalVolumeExtenderWatcherController")
+		os.Exit(1)
+	}
+
+	err = controller.AddReconciler(
+		mgr,
+		log,
+		llvs.NewReconciler(
+			mgr.GetClient(),
+			log,
+			metrics,
+			sdsCache,
+			llvs.ReconcilerConfig{
+				NodeName:            cfgParams.NodeName,
+				LLVRequeueInterval:  cfgParams.LLVRequeueInterval,
+				LLVSRequeueInterval: cfgParams.LLVSRequeueInterval,
+			},
+		),
+	)
+	if err != nil {
+		log.Error(err, "[main] unable to start llvs.NewReconciler")
 		os.Exit(1)
 	}
 

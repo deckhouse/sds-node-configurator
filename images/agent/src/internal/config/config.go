@@ -49,6 +49,7 @@ type Config struct {
 	BlockDeviceScanInterval time.Duration
 	VolumeGroupScanInterval time.Duration
 	LLVRequeueInterval      time.Duration
+	LLVSRequeueInterval     time.Duration
 	ThrottleInterval        time.Duration
 	CmdDeadlineDuration     time.Duration
 	HealthProbeBindAddress  string
@@ -90,6 +91,7 @@ func NewConfig() (*Config, error) {
 		cfg.BlockDeviceScanInterval = 5 * time.Second
 		cfg.VolumeGroupScanInterval = 5 * time.Second
 		cfg.LLVRequeueInterval = 5 * time.Second
+		cfg.LLVSRequeueInterval = 5 * time.Second
 	} else {
 		interval, err := strconv.Atoi(scanInt)
 		if err != nil {
@@ -98,6 +100,7 @@ func NewConfig() (*Config, error) {
 		cfg.BlockDeviceScanInterval = time.Duration(interval) * time.Second
 		cfg.VolumeGroupScanInterval = time.Duration(interval) * time.Second
 		cfg.LLVRequeueInterval = time.Duration(interval) * time.Second
+		cfg.LLVSRequeueInterval = time.Duration(interval) * time.Second
 	}
 
 	thrInt := os.Getenv(ThrottleInterval)

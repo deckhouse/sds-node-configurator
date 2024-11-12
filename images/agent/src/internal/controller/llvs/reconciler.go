@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -67,8 +66,13 @@ func (r *Reconciler) MaxConcurrentReconciles() int {
 	return 10
 }
 
-func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.LVMLogicalVolumeSnapshot, _ *v1alpha1.LVMLogicalVolumeSnapshot) bool {
-	return false
+func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.LVMLogicalVolumeSnapshot, newObj *v1alpha1.LVMLogicalVolumeSnapshot) bool {
+	// to proceed with deletion when finalizers were updated
+	return r.checkNode(newObj) && newObj.DeletionTimestamp != nil
+}
+
+func (r *Reconciler) ShouldReconcileCreate(obj *v1alpha1.LVMLogicalVolumeSnapshot) bool {
+	return r.checkNode(obj)
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req controller.ReconcileRequest[*v1alpha1.LVMLogicalVolumeSnapshot]) (controller.Result, error) {
@@ -78,32 +82,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req controller.ReconcileRequ
 	if llvs.Spec.NodeName != r.cfg.NodeName {
 		r.log.Info(fmt.Sprintf("the LVMLogicalVolumeSnapshot %s of does not belong to the current node: %s. Reconciliation stopped", req.Object.Spec.NodeName, r.cfg.NodeName))
 		return controller.Result{}, nil
-	}
-
-	// get LLV
-	origin := &v1alpha1.LVMLogicalVolume{}
-	if req.Object.DeletionTimestamp != nil {
-		// origin may already be deleted at the moment of llvs deletion
-		origin = nil
-	} else if err := r.cl.Get(ctx, client.ObjectKey{Name: llvs.Spec.LVMLogicalVolumeName}, origin); err != nil {
-		if k8serr.IsNotFound(err) {
-			r.log.Error(err, fmt.Sprintf("LVMLogicalVolume %s not found for LVMLogicalVolumeSnapshot %s. Retry in %s", llvs.Spec.LVMLogicalVolumeName, llvs.Name, r.cfg.LLVRequeueInterval.String()))
-			err = r.updatePhaseAndSizeIfNeeded(
-				ctx,
-				llvs,
-				internal.LLVSStatusPhaseFailed, fmt.Sprintf("LVMLogicalVolume %s not found", llvs.Spec.LVMLogicalVolumeName),
-				nil,
-				nil,
-			)
-			if err != nil {
-				r.log.Error(err, fmt.Sprintf("unable to update the LVMLogicalVolumeSnapshot %s", llvs.Name))
-				return controller.Result{}, err
-			}
-
-			return controller.Result{
-				RequeueAfter: r.cfg.LLVRequeueInterval,
-			}, nil
-		}
 	}
 
 	// this case prevents the unexpected behavior when the controller runs up with existing LVMLogicalVolumeSnapshots
@@ -126,7 +104,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req controller.ReconcileRequ
 	}
 
 	//
-	shouldRequeue, err := r.reconcileLVMLogicalVolumeSnapshot(ctx, llvs, origin)
+	shouldRequeue, err := r.reconcileLVMLogicalVolumeSnapshot(ctx, llvs)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("an error occurred while reconciling the LVMLogicalVolumeSnapshot: %s", llvs.Name))
 		updErr := r.updatePhaseAndSizeIfNeeded(ctx, llvs, internal.LLVSStatusPhaseFailed, err.Error(), nil, nil)
@@ -140,39 +118,38 @@ func (r *Reconciler) Reconcile(ctx context.Context, req controller.ReconcileRequ
 		return controller.Result{RequeueAfter: r.cfg.LLVRequeueInterval}, nil
 	}
 
-	r.log.Info(fmt.Sprintf("successfully ended reconciliation of the LVMLogicalVolumeSnapshot %s", origin.Name))
+	r.log.Info(fmt.Sprintf("successfully ended reconciliation of the LVMLogicalVolumeSnapshot %s", llvs.Name))
 	return controller.Result{}, nil
 }
 
 func (r *Reconciler) reconcileLVMLogicalVolumeSnapshot(
 	ctx context.Context,
 	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
-	origin *v1alpha1.LVMLogicalVolume,
 ) (bool, error) {
-	lvExists := r.sdsCache.FindLV(llvs.Spec.LVMVolumeGroupName, llvs.Name) != nil
+	lvOfSnapshotExists := r.sdsCache.FindLV(llvs.Spec.ActualVGNameOnTheNode, llvs.Spec.ActualSnapshotNameOnTheNode) != nil
 
-	if !lvExists && llvs.DeletionTimestamp == nil {
-		return r.reconcileLLVSCreateFunc(ctx, llvs, origin)
+	if !lvOfSnapshotExists && llvs.DeletionTimestamp == nil {
+		return r.reconcileLLVSCreateFunc(ctx, llvs)
 	} else if llvs.DeletionTimestamp != nil {
 		return r.reconcileLLVSDeleteFunc(ctx, llvs)
 	}
 
 	if llvs.Status.Phase != internal.LLVSStatusPhaseCreated {
-		// update actual size
-		size, actualSize, err := r.getLVActualSize(llvs.Spec.LVMVolumeGroupName, llvs.Name)
+		// update used size
+		size, usedSize, err := r.getLVUsedSize(llvs.Spec.ActualVGNameOnTheNode, llvs.Spec.ActualSnapshotNameOnTheNode)
 		if err != nil {
 			r.log.Error(err, "error parsing LV size")
 			return true, nil
 		}
 		if size == nil {
-			r.log.Warning(fmt.Sprintf("[reconcileLVMLogicalVolumeSnapshot] unable to get actual size for LV %s in VG %s (likely LV was not found in the cache), retry...", llvs.Name, llvs.Spec.LVMVolumeGroupName))
+			r.log.Warning(fmt.Sprintf("[reconcileLVMLogicalVolumeSnapshot] unable to get actual size for LV %s in VG %s (likely LV was not found in the cache), retry...", llvs.Spec.ActualSnapshotNameOnTheNode, llvs.Spec.ActualVGNameOnTheNode))
 			return true, nil
 		}
 
 		// finalize operation
-		err = r.updatePhaseAndSizeIfNeeded(ctx, llvs, internal.LLVSStatusPhaseCreated, "", size, actualSize)
+		err = r.updatePhaseAndSizeIfNeeded(ctx, llvs, internal.LLVSStatusPhaseCreated, "", size, usedSize)
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[reconcileLVMLogicalVolumeSnapshot] unable update phase and actualSize for LV %s, retry...", llvs.Name))
+			r.log.Error(err, fmt.Sprintf("[reconcileLVMLogicalVolumeSnapshot] unable update phase and usedSize for LV %s, retry...", llvs.Name))
 			return true, err
 		}
 		r.log.Info(fmt.Sprintf("successfully ended the reconciliation for the LVMLogicalVolumeSnapshot %s", llvs.Name))
@@ -186,26 +163,46 @@ func (r *Reconciler) reconcileLVMLogicalVolumeSnapshot(
 func (r *Reconciler) reconcileLLVSCreateFunc(
 	ctx context.Context,
 	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
-	origin *v1alpha1.LVMLogicalVolume,
 ) (bool, error) {
-	if llvs.Status == nil {
-		err := r.updatePhaseAndSizeIfNeeded(ctx, llvs, internal.LLVSStatusPhasePending, "", nil, nil)
-		if err != nil {
-			r.log.Error(err, fmt.Sprintf("unable to update the LVMLogicalVolumeSnapshot %s", llvs.Name))
-			return true, err
-		}
+	// validate origin is known
+	origin := r.sdsCache.FindLV(llvs.Spec.ActualVGNameOnTheNode, llvs.Spec.ActualLVNameOnTheNode)
+
+	retryStatus := ""
+	if origin == nil {
+		// creation is not possible when origin is absent
+		retryStatus = fmt.Sprintf(
+			"Can't find source volume named '%s' in volume group '%s'. It may be deleted or deactivated.",
+			llvs.Spec.ActualLVNameOnTheNode,
+			llvs.Spec.ActualVGNameOnTheNode,
+		)
 	}
 
-	cmd, err := utils.CreateThinLogicalVolumeSnapshot(llvs.Name, origin.Spec.LVMVolumeGroupName, origin.Spec.ActualLVNameOnTheNode)
+	err := r.updatePhaseAndSizeIfNeeded(ctx, llvs, internal.LLVSStatusPhasePending, retryStatus, nil, nil)
+	if err != nil {
+		r.log.Error(err, fmt.Sprintf("unable to update the LVMLogicalVolumeSnapshot %s", llvs.Name))
+		return false, err
+	}
+
+	if retryStatus != "" {
+		r.log.Error(nil, retryStatus)
+		return true, nil
+	}
+
+	cmd, err := utils.CreateThinLogicalVolumeSnapshot(
+		llvs.Name,
+		llvs.Spec.ActualVGNameOnTheNode,
+		llvs.Spec.ActualLVNameOnTheNode,
+		utils.NewEnabledTags(internal.LLVSNameTag, llvs.Name),
+	)
 	r.log.Debug(fmt.Sprintf("[reconcileLLVSCreateFunc] ran cmd: %s", cmd))
 	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[reconcileLLVSCreateFunc] unable to create a LVMLogicalVolumeSnapshot %s for the LVMLogicalVolume %s", llvs.Name, origin.Spec.ActualLVNameOnTheNode))
+		r.log.Error(err, fmt.Sprintf("[reconcileLLVSCreateFunc] unable to create a LVMLogicalVolumeSnapshot %s for the LVMLogicalVolume %s", llvs.Name, llvs.Spec.ActualLVNameOnTheNode))
 		return true, err
 	}
-	r.log.Info(fmt.Sprintf("[reconcileLLVSCreateFunc] successfully created LV %s in VG %s for LVMLogicalVolumeSnapshot resource with name: %s", llvs.Name, origin.Spec.LVMVolumeGroupName, origin.Spec.ActualLVNameOnTheNode))
+	r.log.Info(fmt.Sprintf("[reconcileLLVSCreateFunc] successfully created LV %s in VG %s for LVMLogicalVolumeSnapshot resource with name: %s", llvs.Name, llvs.Spec.ActualVGNameOnTheNode, llvs.Spec.ActualLVNameOnTheNode))
 
 	r.log.Debug(fmt.Sprintf("[reconcileLLVSCreateFunc] adds the LV %s to the cache", llvs.Name))
-	r.sdsCache.AddLV(origin.Spec.LVMVolumeGroupName, llvs.Name)
+	r.sdsCache.AddLV(llvs.Spec.ActualVGNameOnTheNode, llvs.Name)
 
 	// we'll have to update actual size when scanner ends it's job, so re-schedule
 	return true, nil
@@ -215,41 +212,43 @@ func (r *Reconciler) reconcileLLVSDeleteFunc(
 	ctx context.Context,
 	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
 ) (bool, error) {
-	// The controller won't remove the LLV resource and LV volume till the resource has any other finalizer.
-	if len(llvs.Finalizers) != 0 {
-		if len(llvs.Finalizers) > 1 ||
-			llvs.Finalizers[0] != internal.SdsNodeConfiguratorFinalizer {
-			r.log.Debug(fmt.Sprintf("[reconcileLLVDeleteFunc] unable to delete LVMLogicalVolume %s for now due to it has any other finalizer", llvs.Name))
-			return false, nil
-		}
+	if len(llvs.Finalizers) == 0 {
+		// means that we've deleted everything already (see below)
+		return false, nil
+	}
+
+	if len(llvs.Finalizers) > 1 || llvs.Finalizers[0] != internal.SdsNodeConfiguratorFinalizer {
+		// postpone deletion until another finalizer gets removed
+		r.log.Debug(fmt.Sprintf("[reconcileLLVSDeleteFunc] unable to delete LVMLogicalVolumeSnapshot %s for now due to it has any other finalizer", llvs.Name))
+		return false, nil
 	}
 
 	err := r.deleteLVIfNeeded(llvs)
 	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[reconcileLLVDeleteFunc] unable to delete the LV %s in VG %s", llvs.Name, llvs.Spec.LVMVolumeGroupName))
+		r.log.Error(err, fmt.Sprintf("[reconcileLLVSDeleteFunc] unable to delete the LV %s in VG %s", llvs.Spec.ActualSnapshotNameOnTheNode, llvs.Spec.ActualVGNameOnTheNode))
 		return true, err
 	}
 
-	r.log.Info(fmt.Sprintf("[reconcileLLVDeleteFunc] successfully deleted the LV %s in VG %s", llvs.Name, llvs.Spec.LVMVolumeGroupName))
+	r.log.Info(fmt.Sprintf("[reconcileLLVSDeleteFunc] successfully deleted the LV %s in VG %s", llvs.Spec.ActualSnapshotNameOnTheNode, llvs.Spec.ActualVGNameOnTheNode))
 
 	err = r.removeLLVSFinalizersIfExist(ctx, llvs)
 	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[reconcileLLVDeleteFunc] unable to remove finalizers from the LVMVolumeGroup %s", llvs.Name))
+		r.log.Error(err, fmt.Sprintf("[reconcileLLVSDeleteFunc] unable to remove finalizers from the LVMLogicalVolumeSnapshot %s", llvs.Name))
 		return true, err
 	}
 
-	r.log.Info(fmt.Sprintf("[reconcileLLVDeleteFunc] successfully ended reconciliation for the LVMLogicalVolume %s", llvs.Name))
+	r.log.Info(fmt.Sprintf("[reconcileLLVSDeleteFunc] successfully ended reconciliation for the LVMLogicalVolumeSnapshot %s", llvs.Name))
 	return false, nil
 }
 
-func (r *Reconciler) getLVActualSize(vgName, lvName string) (size *resource.Quantity, actualSize *resource.Quantity, err error) {
+func (r *Reconciler) getLVUsedSize(vgName, lvName string) (size *resource.Quantity, usedSize *resource.Quantity, err error) {
 	lv := r.sdsCache.FindLV(vgName, lvName)
 	if lv == nil {
 		return
 	}
 
 	size = resource.NewQuantity(lv.Data.LVSize.Value(), resource.BinarySI)
-	actualSize, err = lv.Data.GetUsedSize()
+	usedSize, err = lv.Data.GetUsedSize()
 	return
 }
 
@@ -259,11 +258,13 @@ func (r *Reconciler) updatePhaseAndSizeIfNeeded(
 	phase string,
 	reason string,
 	size *resource.Quantity,
-	actualSize *resource.Quantity,
+	usedSize *resource.Quantity,
 ) error {
 	if llvs.Status != nil &&
 		llvs.Status.Phase == phase &&
-		llvs.Status.Reason == reason {
+		llvs.Status.Reason == reason &&
+		size == nil &&
+		usedSize == nil {
 		r.log.Debug(fmt.Sprintf("[updatePhaseIfNeeded] no need to update the LVMLogicalVolume %s phase and reason", llvs.Name))
 		return nil
 	}
@@ -278,8 +279,8 @@ func (r *Reconciler) updatePhaseAndSizeIfNeeded(
 	if size != nil {
 		llvs.Status.Size = *size
 	}
-	if actualSize != nil {
-		llvs.Status.ActualSize = *actualSize
+	if usedSize != nil {
+		llvs.Status.UsedSize = *usedSize
 	}
 
 	r.log.Debug(fmt.Sprintf("[updatePhaseIfNeeded] tries to update the LVMLogicalVolumeSnapshot %s status with phase: %s, reason: %s", llvs.Name, phase, reason))
@@ -335,16 +336,26 @@ func (r *Reconciler) removeLLVSFinalizersIfExist(
 }
 
 func (r *Reconciler) deleteLVIfNeeded(llvs *v1alpha1.LVMLogicalVolumeSnapshot) error {
-	lv := r.sdsCache.FindLV(llvs.Spec.LVMVolumeGroupName, llvs.Name)
+	vgName, lvName := llvs.Spec.ActualVGNameOnTheNode, llvs.Spec.ActualLVNameOnTheNode
+
+	lv := r.sdsCache.FindLV(vgName, lvName)
 	if lv == nil || !lv.Exist {
-		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] did not find LV %s in VG %s", llvs.Name, llvs.Spec.LVMVolumeGroupName))
+		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] did not find LV %s in VG %s", lvName, vgName))
 		return nil
 	}
 
-	cmd, err := utils.RemoveLV(llvs.Spec.LVMVolumeGroupName, llvs.Name)
+	if ok, name := utils.ReadValueFromTags(lv.Data.LvTags, internal.LLVSNameTag); !ok {
+		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] did not find required tags on LV %s in VG %s", lvName, vgName))
+		return nil
+	} else if name != llvs.Name {
+		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] name in tag doesn't match on LV %s in VG %s", lvName, vgName))
+		return nil
+	}
+
+	cmd, err := utils.RemoveLV(vgName, lvName)
 	r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] runs cmd: %s", cmd))
 	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to remove LV %s from VG %s", llvs.Name, llvs.Spec.LVMVolumeGroupName))
+		r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to remove LV %s from VG %s", lvName, vgName))
 		return err
 	}
 
@@ -352,4 +363,12 @@ func (r *Reconciler) deleteLVIfNeeded(llvs *v1alpha1.LVMLogicalVolumeSnapshot) e
 	r.sdsCache.MarkLVAsRemoved(lv.Data.VGName, lv.Data.LVName)
 
 	return nil
+}
+
+func (r *Reconciler) checkNode(obj *v1alpha1.LVMLogicalVolumeSnapshot) bool {
+	sameNode := obj.Spec.NodeName == r.cfg.NodeName
+	if !sameNode {
+		r.log.Info(fmt.Sprintf("the LVMLogicalVolumeSnapshot %s of does not belong to the current node: %s. Reconciliation stopped", obj.Spec.NodeName, r.cfg.NodeName))
+	}
+	return sameNode
 }

@@ -222,7 +222,7 @@ func (d *Discoverer) getBlockDeviceCandidates() []internal.BlockDeviceCandidate 
 			if pv.PVName == device.Name {
 				d.log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] The device is a PV. Found PV name: %s", pv.PVName))
 				if candidate.FSType == internal.LVMFSType {
-					hasTag, lvmVGName := utils.CheckTag(pv.VGTags)
+					hasTag, lvmVGName := utils.ReadValueFromTags(pv.VGTags, internal.LVMVolumeGroupTag)
 					if hasTag {
 						d.log.Debug(fmt.Sprintf("[GetBlockDeviceCandidates] PV %s of BlockDevice %s has tag, fill the VG information", pv.PVName, candidate.Name))
 						candidate.PVUuid = pv.PVUuid

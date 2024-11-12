@@ -74,6 +74,11 @@ func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.LVMVolumeGroup, _ *v1alph
 	return true
 }
 
+// ShouldReconcileCreate implements controller.Reconciler.
+func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMVolumeGroup) bool {
+	return true
+}
+
 // Reconcile implements controller.Reconciler.
 func (r *Reconciler) Reconcile(
 	ctx context.Context,

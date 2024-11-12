@@ -85,6 +85,7 @@ const (
 	LLVSStatusPhaseCreated = "Created"
 	LLVSStatusPhasePending = "Pending"
 	LLVSStatusPhaseFailed  = "Failed"
+	LLVSNameTag            = "storage.deckhouse.io/lvmLogicalVolumeSnapshotName"
 
 	Local  = "Local"
 	Shared = "Shared"

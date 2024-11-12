@@ -550,7 +550,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			expectedName := "testName"
 			tags := fmt.Sprintf("storage.deckhouse.io/enabled=true,storage.deckhouse.io/lvmVolumeGroupName=%s", expectedName)
 
-			shouldBeTrue, actualName := utils.CheckTag(tags)
+			shouldBeTrue, actualName := utils.ReadValueFromTags(tags, internal.LVMVolumeGroupTag)
 			if assert.True(t, shouldBeTrue) {
 				assert.Equal(t, expectedName, actualName)
 			}
@@ -559,7 +559,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		t.Run("Haven't tag_Returns false and empty", func(t *testing.T) {
 			tags := "someWeirdTags=oMGwtFIsThis"
 
-			shouldBeFalse, actualName := utils.CheckTag(tags)
+			shouldBeFalse, actualName := utils.ReadValueFromTags(tags, internal.LVMVolumeGroupTag)
 			if assert.False(t, shouldBeFalse) {
 				assert.Equal(t, "", actualName)
 			}

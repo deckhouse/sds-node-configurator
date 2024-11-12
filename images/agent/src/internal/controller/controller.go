@@ -35,6 +35,7 @@ type Named interface {
 type Reconciler[T client.Object] interface {
 	Named
 	MaxConcurrentReconciles() int
+	ShouldReconcileCreate(objectNew T) bool
 	ShouldReconcileUpdate(objectOld T, objectNew T) bool
 	Reconcile(context.Context, ReconcileRequest[T]) (Result, error)
 }
@@ -86,6 +87,11 @@ func AddReconciler[T client.Object](
 					e event.TypedCreateEvent[T],
 					q workqueue.TypedRateLimitingInterface[reconcile.Request],
 				) {
+					if !reconciler.ShouldReconcileCreate(e.Object) {
+						log.Debug(fmt.Sprintf("createFunc skipped a request for the %s %s to the Reconcilers queue", tname, e.Object.GetName()))
+						return
+					}
+
 					log.Info(fmt.Sprintf("createFunc got a create event for the %s, name: %s", tname, e.Object.GetName()))
 
 					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}

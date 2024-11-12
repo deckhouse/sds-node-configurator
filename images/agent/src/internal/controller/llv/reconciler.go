@@ -77,6 +77,11 @@ func (r *Reconciler) MaxConcurrentReconciles() int {
 	return 10
 }
 
+// ShouldReconcileCreate implements controller.Reconciler.
+func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMLogicalVolume) bool {
+	return true
+}
+
 // ShouldReconcileUpdate implements controller.Reconciler.
 func (r *Reconciler) ShouldReconcileUpdate(objectOld *v1alpha1.LVMLogicalVolume, objectNew *v1alpha1.LVMLogicalVolume) bool {
 	r.log.Info(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] got an update event for the LVMLogicalVolume: %s", objectNew.GetName()))
@@ -429,7 +434,7 @@ func (r *Reconciler) reconcileLLVDeleteFunc(
 
 	err = r.removeLLVFinalizersIfExist(ctx, llv)
 	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[reconcileLLVDeleteFunc] unable to remove finalizers from the LVMVolumeGroup %s", llv.Name))
+		r.log.Error(err, fmt.Sprintf("[reconcileLLVDeleteFunc] unable to remove finalizers from the LVMLogicalVolume %s", llv.Name))
 		return true, err
 	}
 

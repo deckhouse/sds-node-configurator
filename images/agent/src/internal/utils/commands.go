@@ -276,15 +276,21 @@ func CreateThinPoolFullVGSpace(thinPoolName, vgName string) (string, error) {
 }
 
 func CreateThinLogicalVolumeFromSource(name string, sourceVgName string, sourceName string) (string, error) {
-	return createSnapshotVolume(name, sourceVgName, sourceName)
+	return createSnapshotVolume(name, sourceVgName, sourceName, nil)
 }
 
-func CreateThinLogicalVolumeSnapshot(name string, sourceVgName string, sourceName string) (string, error) {
-	return createSnapshotVolume(name, sourceVgName, sourceName)
+func CreateThinLogicalVolumeSnapshot(name string, sourceVgName string, sourceName string, tags []string) (string, error) {
+	return createSnapshotVolume(name, sourceVgName, sourceName, tags)
 }
 
-func createSnapshotVolume(name string, sourceVgName string, sourceName string) (string, error) {
+func createSnapshotVolume(name string, sourceVgName string, sourceName string, tags []string) (string, error) {
 	args := []string{"lvcreate", "-s", "-kn", "-n", name, fmt.Sprintf("%s/%s", sourceVgName, sourceName), "-y"}
+
+	for _, tag := range tags {
+		args = append(args, "--addtag")
+		args = append(args, tag)
+	}
+
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
