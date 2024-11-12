@@ -189,20 +189,27 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 	}
 
 	cmd, err := utils.CreateThinLogicalVolumeSnapshot(
-		llvs.Name,
+		llvs.Spec.ActualSnapshotNameOnTheNode,
 		llvs.Spec.ActualVGNameOnTheNode,
 		llvs.Spec.ActualLVNameOnTheNode,
 		utils.NewEnabledTags(internal.LLVSNameTag, llvs.Name),
 	)
 	r.log.Debug(fmt.Sprintf("[reconcileLLVSCreateFunc] ran cmd: %s", cmd))
 	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[reconcileLLVSCreateFunc] unable to create a LVMLogicalVolumeSnapshot %s for the LVMLogicalVolume %s", llvs.Name, llvs.Spec.ActualLVNameOnTheNode))
+		r.log.Error(
+			err,
+			fmt.Sprintf(
+				"[reconcileLLVSCreateFunc] unable to create a LVMLogicalVolumeSnapshot %s from %s/%s",
+				llvs.Spec.ActualSnapshotNameOnTheNode,
+				llvs.Spec.ActualVGNameOnTheNode,
+				llvs.Spec.ActualLVNameOnTheNode,
+			))
 		return true, err
 	}
-	r.log.Info(fmt.Sprintf("[reconcileLLVSCreateFunc] successfully created LV %s in VG %s for LVMLogicalVolumeSnapshot resource with name: %s", llvs.Name, llvs.Spec.ActualVGNameOnTheNode, llvs.Spec.ActualLVNameOnTheNode))
+	r.log.Info(fmt.Sprintf("[reconcileLLVSCreateFunc] successfully created LV %s in VG %s for LVMLogicalVolumeSnapshot resource with name: %s", llvs.Spec.ActualSnapshotNameOnTheNode, llvs.Spec.ActualVGNameOnTheNode, llvs.Name))
 
-	r.log.Debug(fmt.Sprintf("[reconcileLLVSCreateFunc] adds the LV %s to the cache", llvs.Name))
-	r.sdsCache.AddLV(llvs.Spec.ActualVGNameOnTheNode, llvs.Name)
+	r.log.Debug(fmt.Sprintf("[reconcileLLVSCreateFunc] adds the LV %s to the cache", llvs.Spec.ActualSnapshotNameOnTheNode))
+	r.sdsCache.AddLV(llvs.Spec.ActualVGNameOnTheNode, llvs.Spec.ActualSnapshotNameOnTheNode)
 
 	// we'll have to update actual size when scanner ends it's job, so re-schedule
 	return true, nil
