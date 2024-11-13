@@ -103,7 +103,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req controller.ReconcileRequ
 		r.log.Debug(fmt.Sprintf("no need to add the finalizer %s to the LVMLogicalVolumeSnapshot %s", internal.SdsNodeConfiguratorFinalizer, llvs.Name))
 	}
 
-	//
+	// reconcile
 	shouldRequeue, err := r.reconcileLVMLogicalVolumeSnapshot(ctx, llvs)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("an error occurred while reconciling the LVMLogicalVolumeSnapshot: %s", llvs.Name))
@@ -171,7 +171,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 	if origin == nil {
 		// creation is not possible when origin is absent
 		retryStatus = fmt.Sprintf(
-			"Can't find source volume named '%s' in volume group '%s'. It may be deleted or deactivated.",
+			"Can't find source volume named '%s' in volume group '%s'. It may be deleted.",
 			llvs.Spec.ActualLVNameOnTheNode,
 			llvs.Spec.ActualVGNameOnTheNode,
 		)
@@ -226,7 +226,7 @@ func (r *Reconciler) reconcileLLVSDeleteFunc(
 
 	if len(llvs.Finalizers) > 1 || llvs.Finalizers[0] != internal.SdsNodeConfiguratorFinalizer {
 		// postpone deletion until another finalizer gets removed
-		r.log.Debug(fmt.Sprintf("[reconcileLLVSDeleteFunc] unable to delete LVMLogicalVolumeSnapshot %s for now due to it has any other finalizer", llvs.Name))
+		r.log.Warning(fmt.Sprintf("[reconcileLLVSDeleteFunc] unable to delete LVMLogicalVolumeSnapshot %s for now due to it has any other finalizer", llvs.Name))
 		return false, nil
 	}
 
@@ -238,8 +238,9 @@ func (r *Reconciler) reconcileLLVSDeleteFunc(
 
 	r.log.Info(fmt.Sprintf("[reconcileLLVSDeleteFunc] successfully deleted the LV %s in VG %s", llvs.Spec.ActualSnapshotNameOnTheNode, llvs.Spec.ActualVGNameOnTheNode))
 
-	err = r.removeLLVSFinalizersIfExist(ctx, llvs)
-	if err != nil {
+	// at this point we have exactly 1 finalizer
+	llvs.Finalizers = nil
+	if err := r.cl.Update(ctx, llvs); err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLLVSDeleteFunc] unable to remove finalizers from the LVMLogicalVolumeSnapshot %s", llvs.Name))
 		return true, err
 	}
@@ -314,32 +315,6 @@ func (r *Reconciler) addLLVSFinalizerIfNotExist(ctx context.Context, llvs *v1alp
 	}
 
 	return true, nil
-}
-
-func (r *Reconciler) removeLLVSFinalizersIfExist(
-	ctx context.Context,
-	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
-) error {
-	var removed bool
-	for i, f := range llvs.Finalizers {
-		if f == internal.SdsNodeConfiguratorFinalizer {
-			llvs.Finalizers = append(llvs.Finalizers[:i], llvs.Finalizers[i+1:]...)
-			removed = true
-			r.log.Debug(fmt.Sprintf("[removeLLVSFinalizersIfExist] removed finalizer %s from the LVMLogicalVolumeSnapshot %s", internal.SdsNodeConfiguratorFinalizer, llvs.Name))
-			break
-		}
-	}
-
-	if removed {
-		r.log.Trace(fmt.Sprintf("[removeLLVSFinalizersIfExist] removed finalizer %s from the LVMLogicalVolumeSnapshot %s", internal.SdsNodeConfiguratorFinalizer, llvs.Name))
-		err := r.cl.Update(ctx, llvs)
-		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[updateLVMLogicalVolumeSpec] unable to update the LVMVolumeGroup %s", llvs.Name))
-			return err
-		}
-	}
-
-	return nil
 }
 
 func (r *Reconciler) deleteLVIfNeeded(llvs *v1alpha1.LVMLogicalVolumeSnapshot) error {
