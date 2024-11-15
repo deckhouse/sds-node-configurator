@@ -61,8 +61,6 @@ func AddReconciler[T client.Object](
 
 	tname := t.Elem().Name()
 
-	mgrCache := mgr.GetCache()
-
 	c, err := controller.New(
 		reconciler.Name(),
 		mgr,
@@ -76,10 +74,11 @@ func AddReconciler[T client.Object](
 		return err
 	}
 
-	var obj T
+	obj := reflect.New(t.Elem()).Interface().(T)
+
 	return c.Watch(
 		source.Kind(
-			mgrCache,
+			mgr.GetCache(),
 			obj,
 			handler.TypedFuncs[T, reconcile.Request]{
 				CreateFunc: func(
