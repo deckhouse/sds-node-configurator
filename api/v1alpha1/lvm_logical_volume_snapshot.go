@@ -40,6 +40,13 @@ type LVMLogicalVolumeSnapshot struct {
 	Status *LVMLogicalVolumeSnapshotStatus `json:"status,omitempty"`
 }
 
+func (llvs *LVMLogicalVolumeSnapshot) ActualSnapshotNameOnTheNode() string {
+	if llvs.Spec.ActualSnapshotNameOnTheNode != "" {
+		return llvs.Spec.ActualSnapshotNameOnTheNode
+	}
+	return llvs.Name
+}
+
 // +k8s:deepcopy-gen=true
 type LVMLogicalVolumeSnapshotSpec struct {
 	ActualSnapshotNameOnTheNode string `json:"actualSnapshotNameOnTheNode"`

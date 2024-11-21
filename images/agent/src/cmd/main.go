@@ -243,9 +243,10 @@ func main() {
 			metrics,
 			sdsCache,
 			llvs.ReconcilerConfig{
-				NodeName:            cfgParams.NodeName,
-				LLVRequeueInterval:  cfgParams.LLVRequeueInterval,
-				LLVSRequeueInterval: cfgParams.LLVSRequeueInterval,
+				NodeName:                cfgParams.NodeName,
+				LLVRequeueInterval:      cfgParams.LLVRequeueInterval,
+				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
+				LLVSRequeueInterval:     cfgParams.LLVSRequeueInterval,
 			},
 		),
 	)
