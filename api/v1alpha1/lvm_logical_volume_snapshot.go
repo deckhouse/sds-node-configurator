@@ -42,16 +42,17 @@ type LVMLogicalVolumeSnapshot struct {
 
 // +k8s:deepcopy-gen=true
 type LVMLogicalVolumeSnapshotSpec struct {
-	NodeName                    string `json:"nodeName"`
-	ActualVGNameOnTheNode       string `json:"actualVGNameOnTheNode"`
-	ActualLVNameOnTheNode       string `json:"actualLVNameOnTheNode"`
 	ActualSnapshotNameOnTheNode string `json:"actualSnapshotNameOnTheNode"`
+	LVMLogicalVolumeName        string `json:"lvmLogicalVolumeName"`
 }
 
 // +k8s:deepcopy-gen=true
 type LVMLogicalVolumeSnapshotStatus struct {
-	Phase    string            `json:"phase"`
-	Reason   string            `json:"reason"`
-	Size     resource.Quantity `json:"size"`
-	UsedSize resource.Quantity `json:"usedSize"`
+	NodeName              string            `json:"nodeName"`
+	ActualVGNameOnTheNode string            `json:"actualVGNameOnTheNode"`
+	ActualLVNameOnTheNode string            `json:"actualLVNameOnTheNode"`
+	Phase                 string            `json:"phase"`
+	Reason                string            `json:"reason"`
+	Size                  resource.Quantity `json:"size"`
+	UsedSize              resource.Quantity `json:"usedSize"`
 }

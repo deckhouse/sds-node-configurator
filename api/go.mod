@@ -2,7 +2,7 @@ module github.com/deckhouse/sds-node-configurator/api
 
 go 1.22.2
 
-require k8s.io/apimachinery v0.31.2
+require k8s.io/apimachinery v0.31.3
 
 require (
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect

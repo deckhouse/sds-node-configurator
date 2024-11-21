@@ -31,38 +31,20 @@ spec:
             spec:
               type: object
               required:
-                - nodeName
-                - lvmVolumeGroupName
                 - lvmLogicalVolumeName
               properties:
-                nodeName:
-                  type: string
-                  description: |
-                    The name of the kubernetes node the snapshot resides in.
-                  x-kubernetes-validations:
-                    - rule: self == oldSelf
-                      message: Value is immutable.
-                  minLength: 1
-                actualVGNameOnTheNode:
-                  type: string
-                  description: |
-                    The name of the volume group, where the snapshot resides in.
-                  x-kubernetes-validations:
-                    - rule: self == oldSelf
-                      message: Value is immutable.
-                  minLength: 1
-                actualLVNameOnTheNode:
-                  type: string
-                  description: |
-                    The name of the volume the snapshot is created from.
-                  x-kubernetes-validations:
-                    - rule: self == oldSelf
-                      message: Value is immutable.
-                  minLength: 1
                 actualSnapshotNameOnTheNode:
                   type: string
                   description: |
                     The name of the snapshot volume.
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                  minLength: 1
+                lvmLogicalVolumeName:
+                  type: string
+                  description: |
+                    The name of the snapshotted LLV resource.
                   x-kubernetes-validations:
                     - rule: self == oldSelf
                       message: Value is immutable.
@@ -72,6 +54,18 @@ spec:
               description: |
                 Describes the resource status.
               properties:
+                nodeName:
+                  type: string
+                  description: |
+                    The name of the kubernetes node the snapshot resides in.
+                actualVGNameOnTheNode:
+                  type: string
+                  description: |
+                    The name of the volume group, where the snapshot resides in.
+                actualLVNameOnTheNode:
+                  type: string
+                  description: |
+                    The name of the volume the snapshot is created from.
                 phase:
                   type: string
                   enum: [Created, Pending, Failed]
@@ -96,6 +90,10 @@ spec:
           name: Snapshotted LLV Name
           type: string
           description: Snapshotted LLV name
+        - jsonPath: .status.nodeName
+          name: NodeName
+          type: string
+          description: The name of the kubernetes node the snapshot resides in..
         - jsonPath: .status.phase
           name: Phase
           type: string
