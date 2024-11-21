@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -259,20 +260,37 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 	}
 
 	var cmd string
-	switch llv.Spec.Type {
-	case internal.Thick:
+	switch {
+	case llv.Spec.Type == internal.Thick:
 		r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] LV %s will be created in VG %s with size: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llvRequestSize.String()))
 		cmd, err = utils.CreateThickLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode, llvRequestSize.Value(), isContiguous(llv))
-	case internal.Thin:
-		if llv.Spec.Source == nil {
-			r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] LV %s of the LVMLogicalVolume %s will be created in Thin-pool %s with size %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, llv.Spec.Thin.PoolName, llvRequestSize.String()))
-			cmd, err = utils.CreateThinLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Thin.PoolName, llv.Spec.ActualLVNameOnTheNode, llvRequestSize.Value())
-		} else {
-			// volume is a clone
-			r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] Snapshot (for source %s) LV %s of the LVMLogicalVolume %s will be created in Thin-pool %s with size %s", llv.Spec.Source.Name, llv.Spec.ActualLVNameOnTheNode, llv.Name, llv.Spec.Thin.PoolName, llvRequestSize.String()))
-
-			cmd, err = utils.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, llv.Spec.LVMVolumeGroupName, llv.Spec.Source.Name)
+	case llv.Spec.Source == nil:
+		r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] LV %s of the LVMLogicalVolume %s will be created in Thin-pool %s with size %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, llv.Spec.Thin.PoolName, llvRequestSize.String()))
+		cmd, err = utils.CreateThinLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Thin.PoolName, llv.Spec.ActualLVNameOnTheNode, llvRequestSize.Value())
+	case llv.Spec.Source.Kind == "LVMLogicalVolume":
+		sourceLLV := &v1alpha1.LVMLogicalVolume{}
+		if err := r.cl.Get(ctx, types.NamespacedName{Name: llv.Spec.Source.Name}, sourceLLV); err != nil {
+			r.log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to get source LVMLogicalVolume %s for the LVMLogicalVolume %s", llv.Spec.Source.Name, llv.Name))
+			return true, err
 		}
+
+		if sourceLLV.Spec.LVMVolumeGroupName != lvg.Name {
+			return false, errors.New("cloned volume should be in the same volume group as the source volume")
+		}
+
+		cmd, err = utils.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, sourceLLV.Spec.ActualLVNameOnTheNode)
+	case llv.Spec.Source.Kind == "LVMLogicalVolumeSnapshot":
+		sourceLLVS := &v1alpha1.LVMLogicalVolumeSnapshot{}
+		if err := r.cl.Get(ctx, types.NamespacedName{Name: llv.Spec.Source.Name}, sourceLLVS); err != nil {
+			r.log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to get source LVMLogicalVolumeSnapshot %s for the LVMLogicalVolume %s", llv.Spec.Source.Name, llv.Name))
+			return true, err
+		}
+
+		if sourceLLVS.Status.ActualVGNameOnTheNode != lvg.Spec.ActualVGNameOnTheNode || sourceLLVS.Status.NodeName != lvg.Spec.Local.NodeName {
+			return false, errors.New("restored volume should be in the same volume group as the origin volume")
+		}
+
+		cmd, err = utils.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, sourceLLVS.Status.ActualVGNameOnTheNode, sourceLLVS.Spec.ActualSnapshotNameOnTheNode)
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] ran cmd: %s", cmd))
 	if err != nil {
