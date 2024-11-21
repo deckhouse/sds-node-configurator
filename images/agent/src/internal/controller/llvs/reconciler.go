@@ -74,7 +74,7 @@ func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.LVMLogicalVolumeSnapshot,
 	return newObj.Status.NodeName == r.cfg.NodeName && newObj.DeletionTimestamp != nil
 }
 
-func (r *Reconciler) ShouldReconcileCreate(obj *v1alpha1.LVMLogicalVolumeSnapshot) bool {
+func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMLogicalVolumeSnapshot) bool {
 	return true
 }
 
@@ -126,18 +126,18 @@ func (r *Reconciler) reconcileLVMLogicalVolumeSnapshot(
 	llv *v1alpha1.LVMLogicalVolume,
 	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
 ) (bool, error) {
-	if llvs.DeletionTimestamp != nil {
+	switch {
+	case llvs.DeletionTimestamp != nil:
 		// delete
 		return r.reconcileLLVSDeleteFunc(ctx, llvs, lvg)
-	} else if llvs.Status == nil || llvs.Status.Phase == internal.LLVSStatusPhasePending {
-		// initialize most of the status fields and create snapshot LV
-		// check that LV was propagated to cache and update UsedSize
+	case llvs.Status == nil || llvs.Status.Phase == internal.LLVSStatusPhasePending:
 		return r.reconcileLLVSCreateFunc(ctx, lvg, llv, llvs)
-	} else if llvs.Status.Phase == internal.LLVSStatusPhaseCreated {
-		r.log.Info(fmt.Sprintf("the LVMLogicalVolumeSnapshot %s has compeleted configuration and should not be reconciled", llvs.Name))
-	} else {
-		r.log.Warning(fmt.Sprintf("skipping LLVS reconcilation, since it is in phase: %s", llvs.Status.Phase))
+	case llvs.Status.Phase == internal.LLVSStatusPhaseCreated:
+		r.log.Info(fmt.Sprintf("the LVMLogicalVolumeSnapshot %s is already Created and should not be reconciled", llvs.Name))
+	default:
+		r.log.Warning(fmt.Sprintf("skipping LLVS reconciliation, since it is in phase: %s", llvs.Status.Phase))
 	}
+
 	return false, nil
 }
 
@@ -161,7 +161,8 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 
 	snapshotLVData := r.sdsCache.FindLV(llvs.Status.ActualVGNameOnTheNode, llvs.ActualSnapshotNameOnTheNode())
 
-	if snapshotLVData == nil || !snapshotLVData.Exist {
+	switch {
+	case snapshotLVData == nil || !snapshotLVData.Exist:
 		// create
 		cmd, err := utils.CreateThinLogicalVolumeSnapshot(
 			llvs.ActualSnapshotNameOnTheNode(),
@@ -197,10 +198,11 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 		llvs.Status.Reason = "Waiting for created volume to become discovered"
 		err = r.cl.Update(ctx, llvs)
 		return true, err
-	} else if reflect.ValueOf(snapshotLVData.Data).IsZero() {
+	case reflect.ValueOf(snapshotLVData.Data).IsZero():
 		// still "Waiting for created volume to become discovered"
+		r.log.Info("[reconcileLLVSCreateFunc] waiting for created volume to become discovered")
 		return true, nil
-	} else {
+	default:
 		// update size & phase
 		size := resource.NewQuantity(snapshotLVData.Data.LVSize.Value(), resource.BinarySI)
 		usedSize, err := snapshotLVData.Data.GetUsedSize()
