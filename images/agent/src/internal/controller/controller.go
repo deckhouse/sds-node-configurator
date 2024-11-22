@@ -96,7 +96,7 @@ func AddReconciler[T client.Object](
 					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 					q.Add(request)
 
-					log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] createFunc added a request for the LVMVolumeGroup %s to the Reconcilers queue", e.Object.GetName()))
+					log.Info(fmt.Sprintf("createFunc added a request for the %s %s to the Reconcilers queue", tname, e.Object.GetName()))
 				},
 				UpdateFunc: func(
 					_ context.Context,

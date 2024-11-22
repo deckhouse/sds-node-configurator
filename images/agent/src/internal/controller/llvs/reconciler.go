@@ -206,6 +206,8 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 		r.log.Info("[reconcileLLVSCreateFunc] waiting for created volume to become discovered")
 		return true, nil
 	default:
+		r.log.Info("[reconcileLLVSCreateFunc] updating LLVS size")
+
 		// update size & phase
 		size := resource.NewQuantity(snapshotLVData.Data.LVSize.Value(), resource.BinarySI)
 		usedSize, err := snapshotLVData.Data.GetUsedSize()
