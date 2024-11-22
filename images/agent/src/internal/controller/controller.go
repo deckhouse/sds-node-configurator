@@ -162,7 +162,9 @@ func makeReconcileDispatcher[T client.Object](
 		// load object being reconciled
 		log.Info(fmt.Sprintf("[ReconcileDispatcher] Reconciler starts to reconcile the request %s", req.NamespacedName.String()))
 
-		var obj T
+		t := reflect.TypeFor[T]()
+		obj := reflect.New(t.Elem()).Interface().(T)
+
 		if err := cl.Get(ctx, req.NamespacedName, obj); err != nil {
 			if errors.IsNotFound(err) {
 				log.Warning(fmt.Sprintf("[ReconcileDispatcher] seems like the object was deleted as unable to get it, err: %s. Stop to reconcile", err.Error()))
