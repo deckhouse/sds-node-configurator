@@ -71,7 +71,7 @@ func (r *Reconciler) MaxConcurrentReconciles() int {
 
 func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.LVMLogicalVolumeSnapshot, newObj *v1alpha1.LVMLogicalVolumeSnapshot) bool {
 	// to proceed with deletion when finalizers were updated
-	return newObj.Status.NodeName == r.cfg.NodeName && newObj.DeletionTimestamp != nil
+	return newObj.DeletionTimestamp != nil && newObj.Status != nil && newObj.Status.NodeName == r.cfg.NodeName
 }
 
 func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMLogicalVolumeSnapshot) bool {
