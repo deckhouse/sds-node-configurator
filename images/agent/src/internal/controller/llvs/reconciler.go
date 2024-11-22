@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -149,7 +150,9 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 ) (bool, error) {
 	if llvs.Status == nil {
 		// will be saved later
-		llvs.Finalizers = append(llvs.Finalizers, internal.SdsNodeConfiguratorFinalizer)
+		if !slices.Contains(llvs.Finalizers, internal.SdsNodeConfiguratorFinalizer) {
+			llvs.Finalizers = append(llvs.Finalizers, internal.SdsNodeConfiguratorFinalizer)
+		}
 
 		llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
 			NodeName:              lvg.Spec.Local.NodeName,
