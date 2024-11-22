@@ -81,7 +81,7 @@ There are two ways to create an `LVMVolumeGroup` resource:
           values:
           - dev-07ad52cef2348996b72db262011f1b5f896bb68f
           - dev-e90e8915902bd6c371e59f89254c0fd644126da7
-    actualVGNameOnTheNode: "vg-0"
+      actualVGNameOnTheNode: "vg-0"
     ```
 
   ```yaml
@@ -96,7 +96,7 @@ There are two ways to create an `LVMVolumeGroup` resource:
       blockDeviceSelector:
         matchLabels:
           kubernetes.io/hostname: node-0
-    actualVGNameOnTheNode: "vg-0"
+      actualVGNameOnTheNode: "vg-0"
     ```
   
   * An example of a resource for creating a local `LVM Volume Group` and a `Thin-pool` on it from multiple `BlockDevices`:

@@ -81,7 +81,7 @@ description: Использование и примеры работы конт�
           values:
           - dev-07ad52cef2348996b72db262011f1b5f896bb68f
           - dev-e90e8915902bd6c371e59f89254c0fd644126da7
-    actualVGNameOnTheNode: "vg-0"
+      actualVGNameOnTheNode: "vg-0"
     ```
 
     ```yaml
@@ -96,7 +96,7 @@ description: Использование и примеры работы конт�
       blockDeviceSelector:
         matchLabels:
           kubernetes.io/hostname: node-0
-    actualVGNameOnTheNode: "vg-0"
+      actualVGNameOnTheNode: "vg-0"
     ```
 
   * Пример ресурса для создания локальной `LVM Volume Group` и `Thin-pool` на ней из нескольких `BlockDevice`:
