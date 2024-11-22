@@ -149,11 +149,15 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
 ) (bool, error) {
 	if llvs.Status == nil {
-		// will be saved later
 		if !slices.Contains(llvs.Finalizers, internal.SdsNodeConfiguratorFinalizer) {
 			llvs.Finalizers = append(llvs.Finalizers, internal.SdsNodeConfiguratorFinalizer)
+			r.log.Debug(fmt.Sprintf("[reconcileLLVSCreateFunc] adding finalizer to LLVS %s", llvs.Name))
+			if err := r.cl.Update(ctx, llvs); err != nil {
+				return true, err
+			}
 		}
 
+		// will be saved later
 		llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
 			NodeName:              lvg.Spec.Local.NodeName,
 			ActualVGNameOnTheNode: lvg.Spec.ActualVGNameOnTheNode,
@@ -184,7 +188,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 					llvs.Status.ActualLVNameOnTheNode,
 				))
 			llvs.Status.Reason = "Repeating volume creation"
-			updateErr := r.cl.Update(ctx, llvs)
+			updateErr := r.cl.Status().Update(ctx, llvs)
 			err = errors.Join(err, updateErr)
 			return true, err
 		}
@@ -199,7 +203,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 		r.sdsCache.AddLV(llvs.Status.ActualVGNameOnTheNode, llvs.ActualSnapshotNameOnTheNode())
 
 		llvs.Status.Reason = "Waiting for created volume to become discovered"
-		err = r.cl.Update(ctx, llvs)
+		err = r.cl.Status().Update(ctx, llvs)
 		return true, err
 	case reflect.ValueOf(snapshotLVData.Data).IsZero():
 		// still "Waiting for created volume to become discovered"
@@ -220,7 +224,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 		llvs.Status.UsedSize = *usedSize
 		llvs.Status.Phase = internal.LLVSStatusPhaseCreated
 		llvs.Status.Reason = ""
-		err = r.cl.Update(ctx, llvs)
+		err = r.cl.Status().Update(ctx, llvs)
 		return false, err
 	}
 }
