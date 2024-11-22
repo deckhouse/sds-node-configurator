@@ -82,24 +82,6 @@ func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMLogicalVolumeSnapshot)
 func (r *Reconciler) Reconcile(ctx context.Context, req controller.ReconcileRequest[*v1alpha1.LVMLogicalVolumeSnapshot]) (controller.Result, error) {
 	llvs := req.Object
 
-	llv := &v1alpha1.LVMLogicalVolume{}
-	if err := r.cl.Get(ctx, types.NamespacedName{Name: llvs.Spec.LVMLogicalVolumeName}, llv); err != nil {
-		r.log.Warning(fmt.Sprintf("failed to get LLV %s. Retry in %s", llvs.Spec.LVMLogicalVolumeName, r.cfg.LLVRequeueInterval.String()))
-		return controller.Result{RequeueAfter: r.cfg.LLVRequeueInterval}, nil
-	}
-
-	lvg := &v1alpha1.LVMVolumeGroup{}
-	if err := r.cl.Get(ctx, types.NamespacedName{Name: llv.Spec.LVMVolumeGroupName}, lvg); err != nil {
-		r.log.Warning(fmt.Sprintf("failed to get LVG %s. Retry in %s", llv.Spec.LVMVolumeGroupName, r.cfg.VolumeGroupScanInterval.String()))
-		return controller.Result{RequeueAfter: r.cfg.VolumeGroupScanInterval}, nil
-	}
-
-	// check node
-	if lvg.Spec.Local.NodeName != r.cfg.NodeName {
-		r.log.Info(fmt.Sprintf("the LVMLogicalVolumeSnapshot %s of does not belong to the current node: %s. Reconciliation stopped", llvs.Name, r.cfg.NodeName))
-		return controller.Result{}, nil
-	}
-
 	// this case prevents the unexpected behavior when the controller runs up with existing LVMLogicalVolumeSnapshots
 	if lvs, _ := r.sdsCache.GetLVs(); len(lvs) == 0 {
 		r.log.Warning(fmt.Sprintf("unable to reconcile the request as no LV was found in the cache. Retry in %s", r.cfg.LLVRequeueInterval.String()))
@@ -130,7 +112,7 @@ func (r *Reconciler) reconcileLVMLogicalVolumeSnapshot(
 	switch {
 	case llvs.DeletionTimestamp != nil:
 		// delete
-		return r.reconcileLLVSDeleteFunc(ctx, llvs, lvg)
+		return r.reconcileLLVSDeleteFunc(ctx, llvs)
 	case llvs.Status == nil || llvs.Status.Phase == internal.LLVSStatusPhasePending:
 		return r.reconcileLLVSCreateFunc(ctx, lvg, llv, llvs)
 	case llvs.Status.Phase == internal.LLVSStatusPhaseCreated:
@@ -144,10 +126,33 @@ func (r *Reconciler) reconcileLVMLogicalVolumeSnapshot(
 
 func (r *Reconciler) reconcileLLVSCreateFunc(
 	ctx context.Context,
-	lvg *v1alpha1.LVMVolumeGroup,
-	llv *v1alpha1.LVMLogicalVolume,
 	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
 ) (bool, error) {
+	llv := &v1alpha1.LVMLogicalVolume{}
+	if err := r.cl.Get(ctx, types.NamespacedName{Name: llvs.Spec.LVMLogicalVolumeName}, llv); err != nil {
+		r.log.Warning(fmt.Sprintf("failed to get LLV %s. Retry", llvs.Spec.LVMLogicalVolumeName))
+		return true, nil
+	}
+
+	lvg := &v1alpha1.LVMVolumeGroup{}
+	if err := r.cl.Get(ctx, types.NamespacedName{Name: llv.Spec.LVMVolumeGroupName}, lvg); err != nil {
+		r.log.Warning(fmt.Sprintf("failed to get LVG %s. Retry", llv.Spec.LVMVolumeGroupName))
+		return true, nil
+	}
+
+	// check node
+	if lvg.Spec.Local.NodeName != r.cfg.NodeName {
+		r.log.Info(
+			fmt.Sprintf(
+				"the LVMLogicalVolumeSnapshot %s has LLV/LVG fo different node: %s. Current node: %s. Reconciliation stopped",
+				llvs.Name,
+				lvg.Spec.Local.NodeName,
+				r.cfg.NodeName,
+			),
+		)
+		return true, nil
+	}
+
 	if llvs.Status == nil {
 		if !slices.Contains(llvs.Finalizers, internal.SdsNodeConfiguratorFinalizer) {
 			llvs.Finalizers = append(llvs.Finalizers, internal.SdsNodeConfiguratorFinalizer)
@@ -232,7 +237,6 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 func (r *Reconciler) reconcileLLVSDeleteFunc(
 	ctx context.Context,
 	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
-	lvg *v1alpha1.LVMVolumeGroup,
 ) (bool, error) {
 	if len(llvs.Finalizers) == 0 {
 		// means that we've deleted everything already (see below)
@@ -245,13 +249,13 @@ func (r *Reconciler) reconcileLLVSDeleteFunc(
 		return false, nil
 	}
 
-	err := r.deleteLVIfNeeded(llvs.Name, llvs.ActualSnapshotNameOnTheNode(), lvg.Spec.ActualVGNameOnTheNode)
+	err := r.deleteLVIfNeeded(llvs.Name, llvs.ActualSnapshotNameOnTheNode(), llvs.Status.ActualVGNameOnTheNode)
 	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[reconcileLLVSDeleteFunc] unable to delete the LV %s in VG %s", llvs.ActualSnapshotNameOnTheNode(), lvg.Spec.ActualVGNameOnTheNode))
+		r.log.Error(err, fmt.Sprintf("[reconcileLLVSDeleteFunc] unable to delete the LV %s in VG %s", llvs.ActualSnapshotNameOnTheNode(), llvs.Status.ActualVGNameOnTheNode))
 		return true, err
 	}
 
-	r.log.Info(fmt.Sprintf("[reconcileLLVSDeleteFunc] successfully deleted the LV %s in VG %s", llvs.ActualSnapshotNameOnTheNode(), lvg.Spec.ActualVGNameOnTheNode))
+	r.log.Info(fmt.Sprintf("[reconcileLLVSDeleteFunc] successfully deleted the LV %s in VG %s", llvs.ActualSnapshotNameOnTheNode(), llvs.Status.ActualVGNameOnTheNode))
 
 	// at this point we have exactly 1 finalizer
 	llvs.Finalizers = nil
