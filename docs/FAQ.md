@@ -75,3 +75,33 @@ The controller will then stop tracking the selected `Volume Group` and delete th
 This can happen if you created the `LVM Volume Group` using the `LVMVolumeGroup` resource, in which case the controller will automatically add this LVM tag to the created `LVM Volume Group`. This is also possible if the `Volume Group` or its `Thin-pool` already had the `linstor-*` LVM tag of the `linstor` module.
 
 When you switch from the `linstor` module to the `sds-node-configurator` and `sds-drbd` modules, the `linstor-*` LVM tags are automatically replaced with the `storage.deckhouse.io/enabled=true` LVM tag in the `Volume Group`. This way, the `sds-node-configurator` gains control over these `Volume Groups`.
+
+## How to use the `LVMVolumeGroupSet` resource to create `LVMVolumeGroup`?
+
+To create an `LVMVolumeGroup` using the `LVMVolumeGroupSet` resource, you need to specify node selectors and a template for the `LVMVolumeGroup` resources in the `LVMVolumeGroupSet` specification. Currently, only the `PerNode` strategy is supported. With this strategy, the controller will create one `LVMVolumeGroup` resource from the template for each node that matches the selector.
+
+Example of an `LVMVolumeGroupSet` specification:
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: LVMVolumeGroupSet
+metadata:
+  name: my-lvm-volume-group-set
+  labels:
+    my-label: my-value
+spec:
+  strategy: PerNode
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/worker: ""
+  lvmVolumeGroupTemplate:
+    metadata:
+      labels:
+        my-label-for-lvg: my-value-for-lvg
+    spec:
+      type: Local
+      blockDeviceSelector:
+        matchLabels:
+          status.blockdevice.storage.deckhouse.io/model: <model>
+      actualVGNameOnTheNode: <actual-vg-name-on-the-node>
+```
