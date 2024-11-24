@@ -55,7 +55,6 @@ NAME                                      THINPOOLS   CONFIGURATION APPLIED   PH
 vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                main   61s
 vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                main   4m17s
 vg-c7863e12-c143-42bb-8e33-d578ce50d6c7   0/0         True                    Ready   worker-1   25596Mi   0                main   108s
-
 ```
 
 ##### Настройка модуля `sds-local-volume`
@@ -78,7 +77,6 @@ spec:
   reclaimPolicy: Delete
   volumeBindingMode: WaitForFirstConsumer
 EOF
-
 ```
 
 ##### Настройка модуля `sds-replicated-volume`
@@ -98,7 +96,6 @@ spec:
     - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
     - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
 EOF
-
 ```
 
 * Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданного ранее ресурса `ReplicatedStoragePool`:
@@ -138,7 +135,6 @@ spec:
   reclaimPolicy: Delete
   topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
 EOF
-
 ```
 
 ### Гибридный сценарий с несколькими разделами для экономии места
@@ -215,7 +211,6 @@ spec:
   reclaimPolicy: Delete
   volumeBindingMode: WaitForFirstConsumer
 EOF
-
 ```
 
 ##### Настройка модуля `sds-replicated-volume`
@@ -235,7 +230,6 @@ spec:
     - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
     - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
 EOF
-
 ```
 
 * Создаем ресурс `ReplicatedStoragePool` с именем data-unsafe и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `main-unsafe` на всех наших узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с replication `Availability` или `ConsistencyAndAvailability`:
@@ -253,7 +247,6 @@ spec:
     - name: vg-e0f00cab-03b3-49cf-a2f6-595628a2593c
     - name: vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2
 EOF
-
 ```
 
 * Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданных ранее ресурсов `ReplicatedStoragePool` для использования vg `main-safe` и `main-unsafe` на всех наших узлах:
@@ -293,7 +286,6 @@ spec:
   reclaimPolicy: Delete
   topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
 EOF
-
 ```
 
 ## Несколько одинаковых дисков и дополнительные диски
@@ -323,7 +315,6 @@ vgchange ssd-nvme --addtag storage.deckhouse.io/enabled=true
 | Надежно  | Overhead по месту на диске для SDS, которые сами реплицируют данные  |
 | Просто в настройке и использовании |  |
 | Удобно распределять (и перераспределять) место между разными SDS |  |
-
 
 ##### Примеры настройки модулей SDS при использовании рекомендованного сценария
 
@@ -358,7 +349,6 @@ spec:
   reclaimPolicy: Delete
   volumeBindingMode: WaitForFirstConsumer
 EOF
-
 ```
 
 ###### Настройка модуля `sds-replicated-volume`
@@ -378,7 +368,6 @@ spec:
     - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
     - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
 EOF
-
 ```
 
 * Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданного ранее ресурса `ReplicatedStoragePool`:
@@ -418,7 +407,6 @@ spec:
   reclaimPolicy: Delete
   topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
 EOF
-
 ```
 
 #### Гибридный сценарий с NVMe SSD
@@ -483,7 +471,6 @@ spec:
   reclaimPolicy: Delete
   volumeBindingMode: WaitForFirstConsumer
 EOF
-
 ```
 
 ###### Настройка модуля `sds-replicated-volume`
@@ -503,7 +490,6 @@ spec:
     - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
     - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
 EOF
-
 ```
 
 * Создаем ресурс `ReplicatedStoragePool` с именем data-ssd-nvme-unsafe и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `ssd-nvme-unsafe` на всех наших узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с replication `Availability` или `ConsistencyAndAvailability`:
@@ -521,7 +507,6 @@ spec:
     - name: vg-e0f00cab-03b3-49cf-a2f6-595628a2593c
     - name: vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2
 EOF
-
 ```
 
 * Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданных ранее ресурсов `ReplicatedStoragePool` для использования vg `ssd-nvme-safe` и `ssd-nvme-unsafe` на всех наших узлах:
@@ -561,7 +546,6 @@ spec:
   reclaimPolicy: Delete
   topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
 EOF
-
 ```
 
 ### Дополнительные диски - SATA SSD
@@ -618,7 +602,6 @@ spec:
   reclaimPolicy: Delete
   volumeBindingMode: WaitForFirstConsumer
 EOF
-
 ```
 
 ###### Настройка модуля `sds-replicated-volume`
@@ -638,7 +621,6 @@ spec:
     - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
     - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
 EOF
-
 ```
 
 * Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданного ранее ресурса `ReplicatedStoragePool`:
@@ -678,7 +660,6 @@ spec:
   reclaimPolicy: Delete
   topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
 EOF
-
 ```
 
 #### Гибридный сценарий с SATA SSD
@@ -743,7 +724,6 @@ spec:
   reclaimPolicy: Delete
   volumeBindingMode: WaitForFirstConsumer
 EOF
-
 ```
 
 ###### Настройка модуля `sds-replicated-volume`
@@ -763,7 +743,6 @@ spec:
     - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
     - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
 EOF
-
 ```
 
 * Создаем ресурс `ReplicatedStoragePool` с именем data-ssd-sata-unsafe и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `ssd-sata-unsafe` на всех наших узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с replication `Availability` или `ConsistencyAndAvailability`:
@@ -781,7 +760,6 @@ spec:
     - name: vg-e0f00cab-03b3-49cf-a2f6-595628a2593c
     - name: vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2
 EOF
-
 ```
 
 * Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданных ранее ресурсов `ReplicatedStoragePool` для использования vg `ssd-sata-safe` и `ssd-sata-unsafe` на всех наших узлах:
@@ -821,7 +799,6 @@ spec:
   reclaimPolicy: Delete
   topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
 EOF
-
 ```
 
 ### Дополнительные диски - HDD
@@ -878,7 +855,6 @@ spec:
   reclaimPolicy: Delete
   volumeBindingMode: WaitForFirstConsumer
 EOF
-
 ```
 
 ###### Настройка модуля `sds-replicated-volume`
@@ -898,7 +874,6 @@ spec:
     - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
     - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
 EOF
-
 ```
 
 * Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданного ранее ресурса `ReplicatedStoragePool`:
@@ -938,7 +913,6 @@ spec:
   reclaimPolicy: Delete
   topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
 EOF
-
 ```
 
 #### Гибридный сценарий с HDD
@@ -1003,7 +977,6 @@ spec:
   reclaimPolicy: Delete
   volumeBindingMode: WaitForFirstConsumer
 EOF
-
 ```
 
 ###### Настройка модуля `sds-replicated-volume`
@@ -1023,7 +996,6 @@ spec:
     - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
     - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
 EOF
-
 ```
 
 * Создаем ресурс `ReplicatedStoragePool` с именем data-hdd-unsafe и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `hdd-unsafe` на всех наших узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с replication `Availability` или `ConsistencyAndAvailability`:
@@ -1041,7 +1013,6 @@ spec:
     - name: vg-e0f00cab-03b3-49cf-a2f6-595628a2593c
     - name: vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2
 EOF
-
 ```
 
 * Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданных ранее ресурсов `ReplicatedStoragePool` для использования vg `hdd-safe` и `hdd-unsafe` на всех наших узлах:
@@ -1081,5 +1052,4 @@ spec:
   reclaimPolicy: Delete
   topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
 EOF
-
 ```
