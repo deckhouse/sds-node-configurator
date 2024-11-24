@@ -93,7 +93,7 @@ func BlockDeviceReconcile(ctx context.Context, cl client.Client, log logger.Logg
 		return false
 	}
 
-	apiBlockDevices, err := GetAPIBlockDevices(ctx, cl, metrics, nil, "")
+	apiBlockDevices, err := GetAPIBlockDevices(ctx, cl, metrics, nil)
 	if err != nil {
 		log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDevices")
 		return true
@@ -164,8 +164,8 @@ func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.Blo
 }
 
 // GetAPIBlockDevices returns map of BlockDevice resources with BlockDevice as a key. You might specify a selector to get a subset or
-// leave it as nil to get all the resources. Also you can specify a node name to get only resources that are related to the node. If nodeName is empty, all resources that match the selector will be returned.
-func GetAPIBlockDevices(ctx context.Context, cl client.Client, metrics monitoring.Metrics, selector *metav1.LabelSelector, nodeName string) (map[string]v1alpha1.BlockDevice, error) {
+// leave it as nil to get all the resources.
+func GetAPIBlockDevices(ctx context.Context, cl client.Client, metrics monitoring.Metrics, selector *metav1.LabelSelector) (map[string]v1alpha1.BlockDevice, error) {
 	list := &v1alpha1.BlockDeviceList{}
 	s, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil {
@@ -185,9 +185,6 @@ func GetAPIBlockDevices(ctx context.Context, cl client.Client, metrics monitorin
 
 	result := make(map[string]v1alpha1.BlockDevice, len(list.Items))
 	for _, item := range list.Items {
-		if nodeName != "" && item.Status.NodeName != nodeName {
-			continue
-		}
 		result[item.Name] = item
 	}
 

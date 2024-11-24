@@ -82,7 +82,7 @@ var _ = Describe("Storage Controller", func() {
 	})
 
 	It("GetAPIBlockDevices", func() {
-		listDevice, err := controller.GetAPIBlockDevices(ctx, cl, testMetrics, nil, "")
+		listDevice, err := controller.GetAPIBlockDevices(ctx, cl, testMetrics, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(listDevice).NotTo(BeNil())
 		Expect(len(listDevice)).To(Equal(1))
@@ -115,7 +115,7 @@ var _ = Describe("Storage Controller", func() {
 			MachineID:             "1234",
 		}
 
-		resources, err := controller.GetAPIBlockDevices(ctx, cl, testMetrics, nil, "")
+		resources, err := controller.GetAPIBlockDevices(ctx, cl, testMetrics, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resources).NotTo(BeNil())
 		Expect(len(resources)).To(Equal(1))
@@ -127,7 +127,7 @@ var _ = Describe("Storage Controller", func() {
 		err = controller.UpdateAPIBlockDevice(ctx, cl, testMetrics, oldResource, newCandidate)
 		Expect(err).NotTo(HaveOccurred())
 
-		resources, err = controller.GetAPIBlockDevices(ctx, cl, testMetrics, nil, "")
+		resources, err = controller.GetAPIBlockDevices(ctx, cl, testMetrics, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resources).NotTo(BeNil())
 		Expect(len(resources)).To(Equal(1))
@@ -147,7 +147,7 @@ var _ = Describe("Storage Controller", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		devices, err := controller.GetAPIBlockDevices(context.Background(), cl, testMetrics, nil, "")
+		devices, err := controller.GetAPIBlockDevices(context.Background(), cl, testMetrics, nil)
 		Expect(err).NotTo(HaveOccurred())
 		for name := range devices {
 			Expect(name).NotTo(Equal(deviceName))

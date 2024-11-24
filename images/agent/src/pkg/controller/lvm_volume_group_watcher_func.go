@@ -841,7 +841,6 @@ func getLVMVolumeGroup(ctx context.Context, cl client.Client, metrics monitoring
 
 func DeleteVGIfExist(log logger.Logger, metrics monitoring.Metrics, sdsCache *cache.Cache, vgName string) error {
 	vgs, _ := sdsCache.GetVGs()
-	log.Trace(fmt.Sprintf("[DeleteVGIfExist] check if VG %s exists in vgs %v", vgName, vgs))
 	if !checkIfVGExist(vgName, vgs) {
 		log.Debug(fmt.Sprintf("[DeleteVGIfExist] no VG %s found, nothing to delete", vgName))
 		return nil

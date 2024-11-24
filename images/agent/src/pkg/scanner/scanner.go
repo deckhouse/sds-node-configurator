@@ -163,28 +163,28 @@ func fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cf
 	realClock := clock.RealClock{}
 	now := time.Now()
 	lvs, lvsErr, err := scanLVs(ctx, log, cfg)
-	log.Debug(fmt.Sprintf("[fillTheCache] LVS command runs for: %s", realClock.Since(now).String()))
+	log.Trace(fmt.Sprintf("[fillTheCache] LVS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
 
 	now = time.Now()
 	vgs, vgsErr, err := scanVGs(ctx, log, cfg)
-	log.Debug(fmt.Sprintf("[fillTheCache] VGS command runs for: %s", realClock.Since(now).String()))
+	log.Trace(fmt.Sprintf("[fillTheCache] VGS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
 
 	now = time.Now()
 	pvs, pvsErr, err := scanPVs(ctx, log, cfg)
-	log.Debug(fmt.Sprintf("[fillTheCache] PVS command runs for: %s", realClock.Since(now).String()))
+	log.Trace(fmt.Sprintf("[fillTheCache] PVS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
 
 	now = time.Now()
 	devices, devErr, err := scanDevices(ctx, log, cfg)
-	log.Debug(fmt.Sprintf("[fillTheCache] LSBLK command runs for: %s", realClock.Since(now).String()))
+	log.Trace(fmt.Sprintf("[fillTheCache] LSBLK command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
@@ -208,7 +208,6 @@ func scanDevices(ctx context.Context, log logger.Logger, cfg config.Options) ([]
 		log.Error(err, fmt.Sprintf("[ScanDevices] unable to scan the devices, cmd: %s", cmdStr))
 		return nil, stdErr, err
 	}
-	log.Trace(fmt.Sprintf("[scanDevices] Devices: %v", devices))
 
 	return devices, stdErr, nil
 }
@@ -221,7 +220,6 @@ func scanPVs(ctx context.Context, log logger.Logger, cfg config.Options) ([]inte
 		log.Error(err, fmt.Sprintf("[ScanPVs] unable to scan the PVs, cmd: %s", cmdStr))
 		return nil, stdErr, err
 	}
-	log.Trace(fmt.Sprintf("[scanPVs] PVs: %v", pvs))
 
 	return pvs, stdErr, nil
 }
@@ -234,7 +232,6 @@ func scanVGs(ctx context.Context, log logger.Logger, cfg config.Options) ([]inte
 		log.Error(err, fmt.Sprintf("[ScanVGs] unable to scan the VGs, cmd: %s", cmdStr))
 		return nil, stdErr, err
 	}
-	log.Trace(fmt.Sprintf("[scanVGs] VGs: %v", vgs))
 
 	return vgs, stdErr, nil
 }
@@ -247,7 +244,6 @@ func scanLVs(ctx context.Context, log logger.Logger, cfg config.Options) ([]inte
 		log.Error(err, fmt.Sprintf("[ScanLVs] unable to scan LVs, cmd: %s", cmdStr))
 		return nil, stdErr, err
 	}
-	log.Trace(fmt.Sprintf("[scanLVs] LVs: %v", lvs))
 
 	return lvs, stdErr, nil
 }
