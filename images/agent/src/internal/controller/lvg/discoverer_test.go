@@ -98,7 +98,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 	})
 
 	t.Run("getUsedSizeMiB_returns_usedSize_in_M", func(t *testing.T) {
-		size, err := resource.ParseQuantity("2G")
+		size, err := resource.ParseQuantity("2Gi")
 		if err != nil {
 			t.Error(err)
 		}
@@ -107,7 +107,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			LVSize:      size,
 			DataPercent: "50",
 		}
-		expected := "97656250Ki"
+		expected := "1Gi"
 		actual, err := lv.GetUsedSize()
 
 		if assert.NoError(t, err) {
