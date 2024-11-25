@@ -71,8 +71,11 @@ func (r *Reconciler) MaxConcurrentReconciles() int {
 }
 
 func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.LVMLogicalVolumeSnapshot, newObj *v1alpha1.LVMLogicalVolumeSnapshot) bool {
-	// to proceed with deletion when finalizers were updated
-	return newObj.DeletionTimestamp != nil && newObj.Status != nil && newObj.Status.NodeName == r.cfg.NodeName
+	return newObj.DeletionTimestamp != nil &&
+		newObj.Status != nil &&
+		newObj.Status.NodeName == r.cfg.NodeName &&
+		len(newObj.Finalizers) == 1 &&
+		newObj.Finalizers[0] == internal.SdsNodeConfiguratorFinalizer
 }
 
 func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMLogicalVolumeSnapshot) bool {
@@ -89,7 +92,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req controller.ReconcileRequ
 	}
 
 	// reconcile
-	shouldRequeue, err := r.reconcileLVMLogicalVolumeSnapshot(ctx, lvg, llv, llvs)
+	shouldRequeue, err := r.reconcileLVMLogicalVolumeSnapshot(ctx, llvs)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("an error occurred while reconciling the LVMLogicalVolumeSnapshot: %s", llvs.Name))
 		shouldRequeue = true
@@ -105,8 +108,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req controller.ReconcileRequ
 
 func (r *Reconciler) reconcileLVMLogicalVolumeSnapshot(
 	ctx context.Context,
-	lvg *v1alpha1.LVMVolumeGroup,
-	llv *v1alpha1.LVMLogicalVolume,
 	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
 ) (bool, error) {
 	switch {
@@ -114,7 +115,7 @@ func (r *Reconciler) reconcileLVMLogicalVolumeSnapshot(
 		// delete
 		return r.reconcileLLVSDeleteFunc(ctx, llvs)
 	case llvs.Status == nil || llvs.Status.Phase == internal.LLVSStatusPhasePending:
-		return r.reconcileLLVSCreateFunc(ctx, lvg, llv, llvs)
+		return r.reconcileLLVSCreateFunc(ctx, llvs)
 	case llvs.Status.Phase == internal.LLVSStatusPhaseCreated:
 		r.log.Info(fmt.Sprintf("the LVMLogicalVolumeSnapshot %s is already Created and should not be reconciled", llvs.Name))
 	default:
@@ -128,46 +129,60 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 	ctx context.Context,
 	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
 ) (bool, error) {
-	llv := &v1alpha1.LVMLogicalVolume{}
-	if err := r.cl.Get(ctx, types.NamespacedName{Name: llvs.Spec.LVMLogicalVolumeName}, llv); err != nil {
-		r.log.Warning(fmt.Sprintf("failed to get LLV %s. Retry", llvs.Spec.LVMLogicalVolumeName))
-		return true, nil
-	}
-
-	lvg := &v1alpha1.LVMVolumeGroup{}
-	if err := r.cl.Get(ctx, types.NamespacedName{Name: llv.Spec.LVMVolumeGroupName}, lvg); err != nil {
-		r.log.Warning(fmt.Sprintf("failed to get LVG %s. Retry", llv.Spec.LVMVolumeGroupName))
-		return true, nil
-	}
-
-	// check node
-	if lvg.Spec.Local.NodeName != r.cfg.NodeName {
-		r.log.Info(
-			fmt.Sprintf(
-				"the LVMLogicalVolumeSnapshot %s has LLV/LVG fo different node: %s. Current node: %s. Reconciliation stopped",
-				llvs.Name,
-				lvg.Spec.Local.NodeName,
-				r.cfg.NodeName,
-			),
-		)
-		return true, nil
-	}
-
+	// should precede setting finalizer to be able to determine the node when deleting
 	if llvs.Status == nil {
-		if !slices.Contains(llvs.Finalizers, internal.SdsNodeConfiguratorFinalizer) {
-			llvs.Finalizers = append(llvs.Finalizers, internal.SdsNodeConfiguratorFinalizer)
-			r.log.Debug(fmt.Sprintf("[reconcileLLVSCreateFunc] adding finalizer to LLVS %s", llvs.Name))
-			if err := r.cl.Update(ctx, llvs); err != nil {
-				return true, err
-			}
+		llv := &v1alpha1.LVMLogicalVolume{}
+		if err := r.getWithRetriesOrFail(
+			ctx,
+			llvs,
+			types.NamespacedName{Name: llvs.Spec.LVMLogicalVolumeName},
+			llv,
+		); err != nil {
+			return true, err
 		}
 
-		// will be saved later
+		lvg := &v1alpha1.LVMVolumeGroup{}
+		if err := r.getWithRetriesOrFail(
+			ctx,
+			llvs,
+			types.NamespacedName{Name: llv.Spec.LVMVolumeGroupName},
+			llv,
+		); err != nil {
+			return true, err
+		}
+
+		if lvg.Spec.Local.NodeName != r.cfg.NodeName {
+			r.log.Info(fmt.Sprintf("LLVS %s is from different node %s", llvs.Name, lvg.Spec.Local.NodeName))
+			return false, nil
+		}
+
 		llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
 			NodeName:              lvg.Spec.Local.NodeName,
 			ActualVGNameOnTheNode: lvg.Spec.ActualVGNameOnTheNode,
 			ActualLVNameOnTheNode: llv.Spec.ActualLVNameOnTheNode,
 			Phase:                 internal.LLVSStatusPhasePending,
+			Reason:                "Creating volume",
+		}
+
+		if err := r.cl.Status().Update(ctx, llvs); err != nil {
+			r.log.Error(err, "Failed updating status of "+llvs.Name)
+			return true, err
+		}
+	}
+
+	// check node
+	if llvs.Status.NodeName != r.cfg.NodeName {
+		r.log.Info(fmt.Sprintf("LLVS %s has a Status with different node %s", llvs.Name, llvs.Status.NodeName))
+		return false, nil
+	}
+
+	// this block should precede any side-effects, which should be reverted during delete
+	if !slices.Contains(llvs.Finalizers, internal.SdsNodeConfiguratorFinalizer) {
+		llvs.Finalizers = append(llvs.Finalizers, internal.SdsNodeConfiguratorFinalizer)
+		r.log.Info("adding finalizer to LLVS " + llvs.Name)
+		if err := r.cl.Update(ctx, llvs); err != nil {
+			r.log.Error(err, "Failed adding finalizer to LLVS "+llvs.Name)
+			return true, err
 		}
 	}
 
@@ -294,4 +309,44 @@ func (r *Reconciler) deleteLVIfNeeded(llvsName, llvsActualNameOnTheNode, vgActua
 	r.sdsCache.MarkLVAsRemoved(lv.Data.VGName, lv.Data.LVName)
 
 	return nil
+}
+
+func (r *Reconciler) getWithRetriesOrFail(ctx context.Context, llvs *v1alpha1.LVMLogicalVolumeSnapshot, key types.NamespacedName, obj client.Object) error {
+	var err error
+	if err = r.getWithRetries(ctx, key, obj); err == nil {
+		return nil
+	}
+	r.log.Error(err, "failed to get object %s", obj.GetName())
+
+	llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
+		Phase:  internal.LLVSStatusPhaseFailed,
+		Reason: "Failed getting LVMLogicalVolume",
+	}
+	if updErr := r.cl.Status().Update(ctx, llvs); updErr != nil {
+		// likely because it's updated on another node, but we are still on an error path
+		return errors.Join(err, updErr)
+	}
+
+	// already failed, no need to retry
+	return nil
+}
+
+func (r *Reconciler) getWithRetries(ctx context.Context, key types.NamespacedName, obj client.Object) (err error) {
+	attemptCount := 10
+	for i := 0; i < attemptCount; i++ {
+		if err = ctx.Err(); err != nil {
+			return
+		}
+		if err = r.cl.Get(ctx, key, obj); err == nil {
+			return ctx.Err()
+		}
+		r.log.Warning(fmt.Sprintf("failed to get object %s/%s (try %d of %d)", key.Namespace, key.Name, i+1, attemptCount))
+
+		if err = ctx.Err(); err != nil {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return ctx.Err()
 }
