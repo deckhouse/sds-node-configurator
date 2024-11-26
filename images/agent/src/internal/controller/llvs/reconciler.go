@@ -334,23 +334,19 @@ func (r *Reconciler) getWithRetriesOrFail(ctx context.Context, llvs *v1alpha1.LV
 func (r *Reconciler) getWithRetries(ctx context.Context, key types.NamespacedName, obj client.Object) (err error) {
 	attemptCount := 10
 	for i := 0; i < attemptCount; i++ {
-		if err = ctx.Err(); err != nil {
-			return
-		}
+		// if err = ctx.Err(); err != nil {
+		// 	return
+		// }
 		if err = r.cl.Get(ctx, key, obj); err == nil {
-			return ctx.Err()
+			return nil
 		}
 		r.log.Warning(fmt.Sprintf("failed to get object %s/%s (try %d of %d)", key.Namespace, key.Name, i+1, attemptCount))
 
-		if err = ctx.Err(); err != nil {
-			return
-		}
+		// if err = ctx.Err(); err != nil {
+		// 	return
+		// }
 		time.Sleep(500 * time.Millisecond)
 	}
-
-	if err != nil {
-		return err
-	}
-
-	return ctx.Err()
+	return
+	// return ctx.Err()
 }
