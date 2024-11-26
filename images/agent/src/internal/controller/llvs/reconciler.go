@@ -95,10 +95,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req controller.ReconcileRequ
 	shouldRequeue, err := r.reconcileLVMLogicalVolumeSnapshot(ctx, llvs)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("an error occurred while reconciling the LVMLogicalVolumeSnapshot: %s", llvs.Name))
-		shouldRequeue = true
+		// will lead to exponential backoff
+		return controller.Result{}, err
 	}
 	if shouldRequeue {
 		r.log.Info(fmt.Sprintf("reconciliation of LVMLogicalVolumeSnapshot %s is not finished. Requeue the request in %s", llvs.Name, r.cfg.LLVSRequeueInterval.String()))
+		// will lead to retry after fixed time
 		return controller.Result{RequeueAfter: r.cfg.LLVSRequeueInterval}, nil
 	}
 
@@ -132,27 +134,17 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 	// should precede setting finalizer to be able to determine the node when deleting
 	if llvs.Status == nil {
 		llv := &v1alpha1.LVMLogicalVolume{}
-		if err := r.getWithRetriesOrFail(
-			ctx,
-			llvs,
-			types.NamespacedName{Name: llvs.Spec.LVMLogicalVolumeName},
-			llv,
-		); err != nil {
+		if err := r.cl.Get(ctx, types.NamespacedName{Name: llvs.Spec.LVMLogicalVolumeName}, llv); err != nil {
 			return true, err
 		}
 
 		lvg := &v1alpha1.LVMVolumeGroup{}
-		if err := r.getWithRetriesOrFail(
-			ctx,
-			llvs,
-			types.NamespacedName{Name: llv.Spec.LVMVolumeGroupName},
-			llv,
-		); err != nil {
+		if err := r.cl.Get(ctx, types.NamespacedName{Name: llv.Spec.LVMVolumeGroupName}, lvg); err != nil {
 			return true, err
 		}
 
 		if lvg.Spec.Local.NodeName != r.cfg.NodeName {
-			r.log.Info(fmt.Sprintf("LLVS %s is from different node %s", llvs.Name, lvg.Spec.Local.NodeName))
+			r.log.Info(fmt.Sprintf("LLVS %s is from node %s. Current node %s", llvs.Name, lvg.Spec.Local.NodeName, r.cfg.NodeName))
 			return false, nil
 		}
 
@@ -309,44 +301,4 @@ func (r *Reconciler) deleteLVIfNeeded(llvsName, llvsActualNameOnTheNode, vgActua
 	r.sdsCache.MarkLVAsRemoved(lv.Data.VGName, lv.Data.LVName)
 
 	return nil
-}
-
-func (r *Reconciler) getWithRetriesOrFail(ctx context.Context, llvs *v1alpha1.LVMLogicalVolumeSnapshot, key types.NamespacedName, obj client.Object) error {
-	var err error
-	if err = r.getWithRetries(ctx, key, obj); err == nil {
-		return nil
-	}
-	r.log.Error(err, "failed to get object %s", obj.GetName())
-
-	llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
-		Phase:  internal.LLVSStatusPhaseFailed,
-		Reason: "Failed getting LVMLogicalVolume",
-	}
-	if updErr := r.cl.Status().Update(ctx, llvs); updErr != nil {
-		// likely because it's updated on another node, but we are still on an error path
-		return errors.Join(err, updErr)
-	}
-
-	// already failed, no need to retry
-	return nil
-}
-
-func (r *Reconciler) getWithRetries(ctx context.Context, key types.NamespacedName, obj client.Object) (err error) {
-	attemptCount := 10
-	for i := 0; i < attemptCount; i++ {
-		// if err = ctx.Err(); err != nil {
-		// 	return
-		// }
-		if err = r.cl.Get(ctx, key, obj); err == nil {
-			return nil
-		}
-		r.log.Warning(fmt.Sprintf("failed to get object %s/%s (try %d of %d)", key.Namespace, key.Name, i+1, attemptCount))
-
-		// if err = ctx.Err(); err != nil {
-		// 	return
-		// }
-		time.Sleep(500 * time.Millisecond)
-	}
-	return
-	// return ctx.Err()
 }
