@@ -134,12 +134,22 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 	// should precede setting finalizer to be able to determine the node when deleting
 	if llvs.Status == nil {
 		llv := &v1alpha1.LVMLogicalVolume{}
-		if err := r.cl.Get(ctx, types.NamespacedName{Name: llvs.Spec.LVMLogicalVolumeName}, llv); err != nil {
+		if err := r.getObjectOrSetPendingStatus(
+			ctx,
+			llvs,
+			types.NamespacedName{Name: llvs.Spec.LVMLogicalVolumeName},
+			llv,
+		); err != nil {
 			return true, err
 		}
 
 		lvg := &v1alpha1.LVMVolumeGroup{}
-		if err := r.cl.Get(ctx, types.NamespacedName{Name: llv.Spec.LVMVolumeGroupName}, lvg); err != nil {
+		if err := r.getObjectOrSetPendingStatus(
+			ctx,
+			llvs,
+			types.NamespacedName{Name: llv.Spec.LVMVolumeGroupName},
+			lvg,
+		); err != nil {
 			return true, err
 		}
 
@@ -199,7 +209,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 					llvs.Status.ActualVGNameOnTheNode,
 					llvs.Status.ActualLVNameOnTheNode,
 				))
-			llvs.Status.Reason = "Repeating volume creation"
+			llvs.Status.Reason = fmt.Sprintf("Error during snapshot creation (will be retried): %v", err)
 			updateErr := r.cl.Status().Update(ctx, llvs)
 			err = errors.Join(err, updateErr)
 			return true, err
@@ -300,5 +310,22 @@ func (r *Reconciler) deleteLVIfNeeded(llvsName, llvsActualNameOnTheNode, vgActua
 	r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] mark LV %s in the cache as removed", lv.Data.LVName))
 	r.sdsCache.MarkLVAsRemoved(lv.Data.VGName, lv.Data.LVName)
 
+	return nil
+}
+
+func (r *Reconciler) getObjectOrSetPendingStatus(
+	ctx context.Context,
+	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
+	key types.NamespacedName,
+	obj client.Object,
+) error {
+	if err := r.cl.Get(ctx, key, obj); err != nil {
+		llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
+			Phase:  internal.LLVSStatusPhasePending,
+			Reason: fmt.Sprintf("Error while getting object %s: %v", obj.GetName(), err),
+		}
+		updErr := r.cl.Status().Update(ctx, llvs)
+		return errors.Join(err, updErr)
+	}
 	return nil
 }
