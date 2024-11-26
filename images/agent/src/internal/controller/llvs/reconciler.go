@@ -348,5 +348,9 @@ func (r *Reconciler) getWithRetries(ctx context.Context, key types.NamespacedNam
 		time.Sleep(500 * time.Millisecond)
 	}
 
+	if err != nil {
+		return err
+	}
+
 	return ctx.Err()
 }
