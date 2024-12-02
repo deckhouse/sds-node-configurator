@@ -106,3 +106,7 @@ spec:
           name: UsedSize
           type: string
           description: Snapshot size.
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+          description: The age of this resource
