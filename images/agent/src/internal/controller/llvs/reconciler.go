@@ -143,6 +143,15 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 			return true, err
 		}
 
+		if llv.Spec.Thin == nil {
+			r.log.Error(nil, fmt.Sprintf("Failed reconciling LLVS %s, LLV %s is not Thin", llvs.Name, llv.Name))
+			llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
+				Phase:  internal.LLVSStatusPhaseFailed,
+				Reason: fmt.Sprintf("Source LLV %s is not Thin", llv.Name),
+			}
+			return false, r.cl.Status().Update(ctx, llvs)
+		}
+
 		lvg := &v1alpha1.LVMVolumeGroup{}
 		if err := r.getObjectOrSetPendingStatus(
 			ctx,
@@ -156,6 +165,47 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 		if lvg.Spec.Local.NodeName != r.cfg.NodeName {
 			r.log.Info(fmt.Sprintf("LLVS %s is from node %s. Current node %s", llvs.Name, lvg.Spec.Local.NodeName, r.cfg.NodeName))
 			return false, nil
+		}
+
+		thinPoolIndex := slices.IndexFunc(lvg.Status.ThinPools, func(tps v1alpha1.LVMVolumeGroupThinPoolStatus) bool {
+			return tps.Name == llv.Spec.Thin.PoolName
+		})
+		if thinPoolIndex < 0 {
+			r.log.Error(nil, fmt.Sprintf("LLVS %s thin pool %s is not found in LVG %s", llvs.Name, llv.Spec.Thin.PoolName, lvg.Name))
+			llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
+				Phase:  internal.LLVSStatusPhasePending,
+				Reason: fmt.Sprintf("Thin pool %s is not found in LVG %s", llv.Spec.Thin.PoolName, lvg.Name),
+			}
+			return true, r.cl.Status().Update(ctx, llvs)
+		}
+
+		if llv.Status == nil || llv.Status.ActualSize.Value() == 0 {
+			r.log.Error(nil, fmt.Sprintf("Error reconciling LLVS %s, source LLV %s ActualSize is not known", llvs.Name, llv.Name))
+			llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
+				Phase:  internal.LLVSStatusPhaseFailed,
+				Reason: fmt.Sprintf("Source LLV %s ActualSize is not known", llv.Name),
+			}
+			return true, r.cl.Status().Update(ctx, llvs)
+		}
+
+		if lvg.Status.ThinPools[thinPoolIndex].AvailableSpace.Value() < llv.Status.ActualSize.Value() {
+			r.log.Error(nil, fmt.Sprintf(
+				"LLVS %s: not enough space available in thin pool %s: need at least %s, got %s",
+				llvs.Name,
+				llv.Spec.Thin.PoolName,
+				llv.Status.ActualSize.String(),
+				lvg.Status.ThinPools[thinPoolIndex].AvailableSpace.String(),
+			))
+			llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
+				Phase: internal.LLVSStatusPhasePending,
+				Reason: fmt.Sprintf(
+					"Not enough space available in thin pool %s: need at least %s, got %s",
+					llv.Spec.Thin.PoolName,
+					llv.Status.ActualSize.String(),
+					lvg.Status.ThinPools[thinPoolIndex].AvailableSpace.String(),
+				),
+			}
+			return true, r.cl.Status().Update(ctx, llvs)
 		}
 
 		llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
