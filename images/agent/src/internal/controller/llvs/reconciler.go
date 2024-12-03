@@ -182,7 +182,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 		if llv.Status == nil || llv.Status.ActualSize.Value() == 0 {
 			r.log.Error(nil, fmt.Sprintf("Error reconciling LLVS %s, source LLV %s ActualSize is not known", llvs.Name, llv.Name))
 			llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
-				Phase:  internal.LLVSStatusPhaseFailed,
+				Phase:  internal.LLVSStatusPhasePending,
 				Reason: fmt.Sprintf("Source LLV %s ActualSize is not known", llv.Name),
 			}
 			return true, r.cl.Status().Update(ctx, llvs)
