@@ -115,6 +115,33 @@ spec:
                           message: Value is immutable.
                       description: |
                         If true, the Logical Volume will be created with the contiguous flag. Use it carefully as LV might not be created even if there is enough space in VG.
+                source:
+                  type: object
+                  description: |
+                    Source of the volume, if present.
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                  required:
+                    - kind                  
+                    - name                  
+                  properties:
+                    kind:
+                      type: string
+                      enum: [LVMLogicalVolume, LVMLogicalVolumeSnapshot]
+                      description: |
+                        Kind of the source. Kind LVMLogicalVolume means that current resource is clone. Kind LVMLogicalVolumeSnapshot means that current resource is a restored volume.
+                      x-kubernetes-validations:
+                        - rule: self == oldSelf
+                          message: Value is immutable.                      
+                    name:
+                      type: string
+                      description: |
+                        The name of the resource current resource is created from.
+                      x-kubernetes-validations:
+                        - rule: self == oldSelf
+                          message: Value is immutable.
+                      minLength: 1                    
             status:
               type: object
               description: |

@@ -27,23 +27,28 @@ import (
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"agent/config"
-	"agent/pkg/cache"
-	"agent/pkg/controller"
-	"agent/pkg/kubutils"
-	"agent/pkg/logger"
-	"agent/pkg/monitoring"
-	"agent/pkg/scanner"
+	"agent/internal/cache"
+	"agent/internal/config"
+	"agent/internal/controller"
+	"agent/internal/controller/bd"
+	"agent/internal/controller/llv"
+	"agent/internal/controller/llv_extender"
+	"agent/internal/controller/llvs"
+	"agent/internal/controller/lvg"
+	"agent/internal/kubutils"
+	"agent/internal/logger"
+	"agent/internal/monitoring"
+	"agent/internal/scanner"
+	"agent/internal/utils"
 )
 
 var (
-	resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
+	resourcesSchemeFuncs = []func(*runtime.Scheme) error{
 		v1alpha1.AddToScheme,
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,
@@ -73,9 +78,9 @@ func main() {
 	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.NodeName, cfgParams.NodeName))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.MachineID, cfgParams.MachineID))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.BlockDeviceScanIntervalSec.String()))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ThrottleInterval, cfgParams.ThrottleIntervalSec.String()))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDurationSec.String()))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.BlockDeviceScanInterval.String()))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.ThrottleInterval, cfgParams.ThrottleInterval.String()))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDuration.String()))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
@@ -110,45 +115,143 @@ func main() {
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 
 	log.Info("[main] ReTag starts")
-	err = controller.ReTag(ctx, *log, metrics)
-	if err != nil {
+	if err := utils.ReTag(ctx, log, metrics, bd.DiscovererName); err != nil {
 		log.Error(err, "[main] unable to run ReTag")
 	}
-	log.Info("[main] ReTag ends")
 
 	sdsCache := cache.New()
 
-	bdCtrl, err := controller.RunBlockDeviceController(mgr, *cfgParams, *log, metrics, sdsCache)
+	rediscoverBlockDevices, err := controller.AddDiscoverer(
+		mgr,
+		log,
+		bd.NewDiscoverer(
+			mgr.GetClient(),
+			log,
+			metrics,
+			sdsCache,
+			bd.DiscovererConfig{
+				NodeName:                cfgParams.NodeName,
+				MachineID:               cfgParams.MachineID,
+				BlockDeviceScanInterval: cfgParams.BlockDeviceScanInterval,
+			},
+		),
+	)
 	if err != nil {
 		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
 		os.Exit(1)
 	}
 
-	if _, err = controller.RunLVMVolumeGroupWatcherController(mgr, *cfgParams, *log, metrics, sdsCache); err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
-		os.Exit(1)
-	}
-
-	lvgDiscoverCtrl, err := controller.RunLVMVolumeGroupDiscoverController(mgr, *cfgParams, *log, metrics, sdsCache)
+	rediscoverLVGs, err := controller.AddDiscoverer(
+		mgr,
+		log,
+		lvg.NewDiscoverer(
+			mgr.GetClient(),
+			log,
+			metrics,
+			sdsCache,
+			lvg.DiscovererConfig{
+				NodeName:                cfgParams.NodeName,
+				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
+			},
+		),
+	)
 	if err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupDiscoverController")
 		os.Exit(1)
 	}
 
+	err = controller.AddReconciler(
+		mgr,
+		log,
+		lvg.NewReconciler(
+			mgr.GetClient(),
+			log,
+			metrics,
+			sdsCache,
+			lvg.ReconcilerConfig{
+				NodeName:                cfgParams.NodeName,
+				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
+				BlockDeviceScanInterval: cfgParams.BlockDeviceScanInterval,
+			},
+		),
+	)
+	if err != nil {
+		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
+		os.Exit(1)
+	}
+
 	go func() {
-		if err = scanner.RunScanner(ctx, *log, *cfgParams, sdsCache, bdCtrl, lvgDiscoverCtrl); err != nil {
+		if err = scanner.RunScanner(
+			ctx,
+			log,
+			*cfgParams,
+			sdsCache,
+			rediscoverBlockDevices,
+			rediscoverLVGs,
+		); err != nil {
 			log.Error(err, "[main] unable to run scanner")
 			os.Exit(1)
 		}
 	}()
 
-	if _, err = controller.RunLVMLogicalVolumeWatcherController(mgr, *cfgParams, *log, metrics, sdsCache); err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMLogicalVolumeWatcherController")
+	err = controller.AddReconciler(
+		mgr,
+		log,
+		llv.NewReconciler(
+			mgr.GetClient(),
+			log,
+			metrics,
+			sdsCache,
+			llv.ReconcilerConfig{
+				NodeName:                cfgParams.NodeName,
+				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
+				Loglevel:                cfgParams.Loglevel,
+				LLVRequeueInterval:      cfgParams.LLVRequeueInterval,
+			},
+		),
+	)
+	if err != nil {
+		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
 		os.Exit(1)
 	}
 
-	if err = controller.RunLVMLogicalVolumeExtenderWatcherController(mgr, *cfgParams, *log, metrics, sdsCache); err != nil {
+	err = controller.AddReconciler(
+		mgr,
+		log,
+		llv_extender.NewReconciler(
+			mgr.GetClient(),
+			log,
+			metrics,
+			sdsCache,
+			llv_extender.ReconcilerConfig{
+				NodeName:                cfgParams.NodeName,
+				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
+			},
+		),
+	)
+	if err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMLogicalVolumeExtenderWatcherController")
+		os.Exit(1)
+	}
+
+	err = controller.AddReconciler(
+		mgr,
+		log,
+		llvs.NewReconciler(
+			mgr.GetClient(),
+			log,
+			metrics,
+			sdsCache,
+			llvs.ReconcilerConfig{
+				NodeName:                cfgParams.NodeName,
+				LLVRequeueInterval:      cfgParams.LLVRequeueInterval,
+				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
+				LLVSRequeueInterval:     cfgParams.LLVSRequeueInterval,
+			},
+		),
+	)
+	if err != nil {
+		log.Error(err, "[main] unable to start llvs.NewReconciler")
 		os.Exit(1)
 	}
 

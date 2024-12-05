@@ -32,6 +32,8 @@ rules:
       - lvmvolumegroups/status
       - lvmlogicalvolumes
       - lvmlogicalvolumes/status
+      - lvmlogicalvolumesnapshots
+      - lvmlogicalvolumesnapshots/status
     verbs:
       - get
       - list

@@ -46,6 +46,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&LVMVolumeGroupList{},
 		&LVMLogicalVolume{},
 		&LVMLogicalVolumeList{},
+		&LVMLogicalVolumeSnapshot{},
+		&LVMLogicalVolumeSnapshotList{},
 		&LVMVolumeGroupSet{},
 		&LVMVolumeGroupSetList{},
 	)
