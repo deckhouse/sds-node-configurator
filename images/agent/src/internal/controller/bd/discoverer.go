@@ -588,6 +588,7 @@ func configureBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]str
 	}
 
 	slug.Lowercase = false
+	slug.MaxLength = 63
 	lbls[internal.MetadataNameLabelKey] = slug.Make(blockDevice.ObjectMeta.Name)
 	lbls[internal.HostNameLabelKey] = slug.Make(blockDevice.Status.NodeName)
 	lbls[internal.BlockDeviceTypeLabelKey] = slug.Make(blockDevice.Status.Type)
