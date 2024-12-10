@@ -247,19 +247,21 @@ def main(ctx: hook.Context):
         # we store the using node name as a label due to we will lose the status for the backup resource
         print(f"{migrate_script} starts to create backups and add 'kubernetes.io/hostname' to store the node name")
         for lvg in lvg_list.get('items', []):
-            lvg_backup = {'apiVersion': lvg['apiVersion'],
-                          'kind': 'LvmVolumeGroupBackup',
-                          'metadata': {
-                              'name':
-                                  lvg['metadata'][
-                                      'name'],
-                              'labels': {},
-                              'finalizers':
-                                  lvg['metadata'][
-                                      'finalizers']},
-                          'spec': lvg['spec']}
+            lvg_backup = {
+                'apiVersion': lvg['apiVersion'],
+                'kind': 'LvmVolumeGroupBackup',
+                'metadata': {
+                    'name': lvg['metadata']['name'],
+                    'labels': {},
+                    'finalizers': lvg['metadata'].get('finalizers', [])
+                },
+                'spec': lvg['spec']
+            }
             if 'labels' in lvg['metadata']:
                 lvg_backup['metadata']['labels'] = lvg['metadata']['labels']
+            default_finalizer = 'storage.deckhouse.io/sds-node-configurator'
+            if default_finalizer not in lvg_backup['metadata']['finalizers']:
+                lvg_backup['metadata']['finalizers'].append(default_finalizer)
 
             lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg['status']['nodes'][0]['name']
             lvg_backup['metadata']['labels'][migration_completed_label] = 'false'
