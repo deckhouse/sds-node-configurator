@@ -247,15 +247,16 @@ def main(ctx: hook.Context):
         # we store the using node name as a label due to we will lose the status for the backup resource
         print(f"{migrate_script} starts to create backups and add 'kubernetes.io/hostname' to store the node name")
         for lvg in lvg_list.get('items', []):
-            lvg_backup = {'apiVersion': lvg['apiVersion'],
-                            'kind': 'LvmVolumeGroupBackup',
-                            'metadata': {
-                                'name':
-                                    lvg['metadata'][
-                                        'name'],
-                                'labels': {},
-                                'finalizers': lvg['metadata'].get('finalizers', [])},
-                            'spec': lvg['spec']}
+            lvg_backup = {
+                'apiVersion': lvg['apiVersion'],
+                'kind': 'LvmVolumeGroupBackup',
+                'metadata': {
+                    'name': lvg['metadata']['name'],
+                    'labels': {},
+                    'finalizers': lvg['metadata'].get('finalizers', [])
+                },
+                'spec': lvg['spec']
+            }
             if 'labels' in lvg['metadata']:
                 lvg_backup['metadata']['labels'] = lvg['metadata']['labels']
             if default_finalizer not in lvg_backup['metadata']['finalizers']:
