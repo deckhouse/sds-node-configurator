@@ -259,8 +259,9 @@ def main(ctx: hook.Context):
             }
             if 'labels' in lvg['metadata']:
                 lvg_backup['metadata']['labels'] = lvg['metadata']['labels']
+            default_finalizer = 'storage.deckhouse.io/sds-node-configurator'
             if default_finalizer not in lvg_backup['metadata']['finalizers']:
-                lvg_backup['metadata']['finalizers'].append('storage.deckhouse.io/sds-node-configurator')
+                lvg_backup['metadata']['finalizers'].append(default_finalizer)
 
             lvg_backup['metadata']['labels']['kubernetes.io/hostname'] = lvg['status']['nodes'][0]['name']
             lvg_backup['metadata']['labels'][migration_completed_label] = 'false'
