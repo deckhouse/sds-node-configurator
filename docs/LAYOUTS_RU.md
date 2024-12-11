@@ -1,6 +1,6 @@
 ---
-title: "Модуль sds-node-configurator: Сценарии использования"
-linkTitle: "Сценарии использования"
+title: "Модуль sds-node-configurator: сценарии конфигурации sds-модулей"
+description: "Сценарии конфигурации sds-модулей с помощью sds-node-configurator"
 ---
 
 {{< alert level="warning" >}}
@@ -9,48 +9,75 @@ linkTitle: "Сценарии использования"
 Работоспособность модуля при использовании других ядер или дистрибутивов возможна, но не гарантируется.
 {{< /alert >}}
 
-Примеры конфигурирования дисковой подсистемы на узлах кластера Kubernetes.
+{{< alert level="info" >}}
+Если вы создаёте виртуальные машины клонированием,
+необходимо изменить UUID у групп томов (VG) на созданных таким образом виртуальных машинах, выполнив команду `vgchange -u`.
+Данная команда сгенерирует новые UUID для всех VG на виртуальной машине.
+При необходимости команду можно добавить в скрипт `cloud-init`.
 
-{{< alert level="warning" >}}
-ВАЖНО! Если вы создаете виртуальные машины клонированием, то необходимо изменить uuid у vg в созданных таким образом виртуальных машинах. Для этого выполните команду `vgchange -u` - данная команда сгенерирует новые UUID для всех vg в виртуальной машине (можно добавить в cloud init).
-
-Внимание! Изменить UUID у vg можно, только если в ней нет активных логических томов (lv). Для деактивации логических томов необходимо сначала их отмонтировать, а затем выполнить команду `lvchange -an <название vg (если необходимо деактивировать все тома в vg) или lv (если необходимо деактивировать конкретный том)>`.
-{{< /alert >}}
-
-## Несколько одинаковых дисков
-
-### Рекомендованный сценарий
-
-* Собрать зеркало из дисков целиком (аппаратно или программно), которое будет использоваться как для корневой системы, так и для данных.
-* При установке операционной системы:
-  * Создать vg с именем `main` на зеркале.
-  * Создать lv с именем `root` в vg `main`.
-  * Установить ОС на lv `root`.
-* Поставить тег `storage.deckhouse.io/enabled=true` на vg `main` такой командой:
+Изменить UUID у VG можно, только если в группе томов нет активных логических томов (LV).
+Чтобы деактивировать логический том, отмонтируйте его и выполните следующую команду:
 
 ```shell
-vgchange main --addtag storage.deckhouse.io/enabled=true
+lvchange -an <название VG (для деактивации всех томов в группе) или LV (для деактивации конкретного тома)>
 ```
 
-* Добавить подготовленный узел в кластер Deckhouse.
+{{< /alert >}}
 
-Если узел подходит под `nodeSelector`, который указан в `spec.nodeSelector` модулей `sds-replicated-volume` и/или `sds-local-volume`, то на этом узле запустится агент модуля `sds-node-configurator`, который определит vg `main` и добавит соответствующий этой vg ресурс `LVMVolumeGroup` в кластер Deckhouse. Дальше ресурс `LVMVolumeGroup` можно использовать для создания томов в модулях `sds-replicated-volume` и/или `sds-local-volume`.
+На данной странице приведены сценарии конфигурации дисковой подсистемы на узлах кластера Kubernetes
+в зависимости от условий организации хранилища: на одинаковых дисках или с использованием дополнительных дисков.
 
-#### Плюсы и минусы сценария
+Для каждого из условий существует два сценария конфигурации: рекомендуемый и гибридный.
+Плюсы и минусы каждого из них приведены в таблице:
 
-| Плюсы                     | Минусы      |
-|---------------------------|-------------|
-| Надежно  | Overhead по месту на диске для SDS, которые сами реплицируют данные  |
-| Просто в настройке и использовании |  |
-| Удобно распределять (и перераспределять) место между разными SDS |  |
+| Сценарий конфигурации | Плюсы | Минусы |
+|-----------------------|-------|--------|
+| Рекомендуемый | - Надежно<br>- Просто в настройке и использовании<br>- Удобно распределять место между разными SDS | - Избыточное место на диске для программно-определяемых хранилищ (SDS), которые сами реплицируют данные  |
+| Гибридный | - Надежно<br>- Максимально эффективное использование места | - Сложно в настройке и использовании<br>- Очень сложно перераспределять место между safe- и unsafe-разделами |
 
-#### Примеры настройки модулей SDS при использовании рекомендованного сценария
+## Хранилище с одинаковыми дисками
 
-Допустим, что у Вас есть три узла, настроенных по рекомендованному сценарию. В таком случае в кластере Deckhouse появятся три ресурса `LVMVolumeGroup` со случайно сгенерированными именами (в будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`, которые создаются в процессе автоматического обнаружения vg, путем добавления lvm тега с желаемым именем ресурса).
+### Рекомендуемый сценарий
+
+Мы рекомендуем использовать данный сценарий конфигурации, поскольку он достаточно надёжен и прост в настройке.
+
+Чтобы настроить узел по рекомендуемому сценарию, выполните следующее:
+
+1. Соберите зеркало из дисков целиком (аппаратно или программно),
+   которое будет использоваться как для корневой системы, так и для данных.
+1. При установке операционной системы:
+   * создайте VG с именем `main` на зеркале;
+   * создайте LV с именем `root` в VG `main`;
+   * установите операционную систему на LV `root`.
+1. Установите тег `storage.deckhouse.io/enabled=true` для VG `main`, используя следующую команду:
+
+   ```shell
+   vgchange main --addtag storage.deckhouse.io/enabled=true
+   ```
+
+1. Добавьте подготовленный узел в кластер Deckhouse.
+
+   Если узел подходит под `nodeSelector`, который указан в `spec.nodeSelector` модулей `sds-replicated-volume` или `sds-local-volume`,
+   то на этом узле запустится агент модуля `sds-node-configurator`,
+   который определит VG `main` и добавит соответствующий этой VG ресурс `LVMVolumeGroup` в кластер Deckhouse.
+   Дальше ресурс `LVMVolumeGroup` можно использовать для создания томов в модулях `sds-replicated-volume` или `sds-local-volume`.
+
+#### Пример настройки модулей SDS
+
+В данном примере предполагается, что вы настроили три узла по рекомендуемому сценарию.
+В кластере Deckhouse при этом появятся три ресурса `LVMVolumeGroup` со случайно сгенерированными именами.
+В будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`,
+которые создаются в процессе автоматического обнаружения VG, с помощью тега `LVM` с желаемым именем ресурса.
+
+Чтобы вывести список ресурсов `LVMVolumeGroup`, выполните следующую команду:
 
 ```shell
 kubectl get lvmvolumegroups.storage.deckhouse.io
+```
 
+В результате будет выведен следующий список:
+
+```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG     AGE
 vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                main   61s
 vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                main   4m17s
@@ -59,7 +86,8 @@ vg-c7863e12-c143-42bb-8e33-d578ce50d6c7   0/0         True                    Re
 
 ##### Настройка модуля `sds-local-volume`
 
-* Создаем ресурс `LocalStorageClass` и добавляем в него все наши ресурсы `LVMVolumeGroup` для использования vg `main` на всех наших узлах в модуле `sds-local-volume`:
+Чтобы настроить модуль `sds-local-volume` по рекомендуемому сценарию, создайте ресурс `LocalStorageClass`
+и добавьте в него все ресурсы `LVMVolumeGroup`, чтобы VG `main` использовалась на всех узлах в модуле `sds-local-volume`:
 
 ```yaml
 kubectl apply -f -<<EOF
@@ -81,107 +109,126 @@ EOF
 
 ##### Настройка модуля `sds-replicated-volume`
 
-* Создаем ресурс `ReplicatedStoragePool` и добавляем в него все наши ресурсы `LVMVolumeGroup` для использования vg `main` на всех наших узлах в модуле `sds-replicated-volume`:
+Чтобы настроить модуль `sds-replicated-volume` по рекомендуемому сценарию, выполните следующее:
 
-```yaml
-kubectl apply -f -<<EOF
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data
-spec:
-  type: LVM
-  lvmVolumeGroups:
-    - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-    - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-    - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
-EOF
-```
+1. Создайте ресурс `ReplicatedStoragePool` и добавьте в него все ресурсы `LVMVolumeGroup`,
+   чтобы VG `main` использовалась на всех узлах в модуле `sds-replicated-volume`:
 
-* Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданного ранее ресурса `ReplicatedStoragePool`:
+   ```yaml
+   kubectl apply -f -<<EOF
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: data
+   spec:
+     type: LVM
+     lvmVolumeGroups:
+       - name: vg-08d3730c-9201-428d-966c-45795cba55a6
+       - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
+       - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+   EOF
+   ```
 
-```yaml
-kubectl apply -f -<<EOF
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-r1
-spec:
-  storagePool: data
-  replication: None
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+1. Создайте ресурс `ReplicatedStorageClass` и в поле `storagePool` укажите имя созданного ранее ресурса `ReplicatedStoragePool`:
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-r2
-spec:
-  storagePool: data
-  replication: Availability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+   ```yaml
+   kubectl apply -f -<<EOF
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-r1
+   spec:
+     storagePool: data
+     replication: None
+     reclaimPolicy: Delete
+     topology: Ignored # Если указать данную топологию, в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone)
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-r3
-spec:
-  storagePool: data
-  replication: ConsistencyAndAvailability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
-EOF
-```
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-r2
+   spec:
+     storagePool: data
+     replication: Availability
+     reclaimPolicy: Delete
+     topology: Ignored
 
-### Гибридный сценарий с несколькими разделами для экономии места
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-r3
+   spec:
+     storagePool: data
+     replication: ConsistencyAndAvailability
+     reclaimPolicy: Delete
+     topology: Ignored
+   EOF
+   ```
+
+### Гибридный сценарий с несколькими разделами
 
 {{< alert level="warning" >}}
-ВАЖНО! Не поддерживается использование разделов с одинаковыми part UUID, а так же изменение part UUID раздела, который используется для создания vg. При создании таблицы разделов рекомендуется выбрать GPT, так как part UUID в MBR является псевдослучайным и содержит в себе номер раздела. Помимо этого, в MBR нельзя задать partlabel, который может быть удобным для последующей идентификации раздела в Deckhouse.
+Не поддерживается использование разделов с одинаковыми PARTUUID,
+а также изменение PARTUUID раздела, который используется для создания VG.
+При создании таблицы разделов рекомендуется выбрать формат `GPT`,
+так как PARTUUID в `MBR` является псевдослучайным и содержит в себе номер раздела.
+Помимо этого, в `MBR` нельзя задать атрибут PARTLABEL,
+который может пригодиться для последующей идентификации раздела в Deckhouse.
 {{< /alert >}}
 
-В этом сценарии используются два раздела на каждом диске: один для корневой системы и хранения данных SDS, которые не реплицируются, другой для данных SDS, которые реплицируются. Первый раздел каждого диска используется для создания зеркала, а второй раздел для создания отдельной vg без зеркалирования. Таким образом, место на диске используется максимально эффективно.
+В данном сценарии используются два раздела на каждом диске:
+один для корневой системы и хранения данных SDS, которые не реплицируются,
+и другой для данных SDS, которые реплицируются.
+Первый раздел каждого диска используется для создания зеркала, а второй – для создания отдельной VG без зеркалирования.
+Это позволяет максимально эффективно использовать место на диске.
 
-* При установке операционной системы:
-  * Создать по 2 раздела на каждом диске.
-  * Собрать зеркало из первых разделов на каждом диске.
-  * Создать vg с именем `main-safe` на зеркале.
-  * Создать lv с именем `root` в vg `main-safe`.
-  * Установить ОС на lv `root`.
-* Поставить тег `storage.deckhouse.io/enabled=true` на vg `main-safe` такой командой:
+Чтобы настроить узел по гибридному сценарию, выполните следующее:
+
+1. При установке операционной системы:
+   * создайте по два раздела на каждом диске;
+   * соберите зеркало из первых разделов на каждом диске;
+   * создайте VG с именем `main-safe` на зеркале;
+   * создать LV с именем `root` в VG `main-safe`;
+   * установите операционную систему на LV `root`.
+1. Установите тег `storage.deckhouse.io/enabled=true` для VG `main-safe`, используя следующую команду:
   
-```shell
-vgchange main-safe --addtag storage.deckhouse.io/enabled=true
-```
+   ```shell
+   vgchange main-safe --addtag storage.deckhouse.io/enabled=true
+   ```
 
-* Создать vg с именем `main-unsafe` из вторых разделов каждого диска.
-* Поставить тег `storage.deckhouse.io/enabled=true` на vg `main-unsafe` такой командой:
+1. Создайте VG с именем `main-unsafe` из вторых разделов каждого диска.
+1. Установите тег `storage.deckhouse.io/enabled=true` для VG `main-unsafe`, используя следующую команду:
 
-```shell
-vgchange main-unsafe --addtag storage.deckhouse.io/enabled=true
-```
+   ```shell
+   vgchange main-unsafe --addtag storage.deckhouse.io/enabled=true
+   ```
 
-* Добавить подготовленный узел в кластер Deckhouse.
+1. Добавьте подготовленный узел в кластер Deckhouse.
 
-Если узел подходит под `nodeSelector`, который указан в `spec.nodeSelector` модулей `sds-replicated-volume` и/или `sds-local-volume`, то на этом узле запустится агент модуля `sds-node-configurator`, который определит vg `main-safe` и `main-unsafe` и добавит соответствующие этим vg ресурсы `LVMVolumeGroup` в кластер Deckhouse. Дальше ресурсы `LVMVolumeGroup` можно использовать для создания томов в модулях `sds-replicated-volume` и/или `sds-local-volume`.
+   Если узел подходит под `nodeSelector`, который указан в `spec.nodeSelector` модулей `sds-replicated-volume` или `sds-local-volume`,
+   то на этом узле запустится агент модуля `sds-node-configurator`,
+   который определит VG `main-safe` и `main-unsafe` и добавит соответствующие этим VG ресурсы `LVMVolumeGroup` в кластер Deckhouse.
+   Дальше ресурсы `LVMVolumeGroup` можно использовать для создания томов в модулях `sds-replicated-volume` или `sds-local-volume`.
 
-#### Плюсы и минусы сценария
+#### Пример настройки модулей SDS
 
-| Плюсы                     | Минусы      |
-|---------------------------|-------------|
-| Надежно  | Сложно в настройке и использовании  |
-| Место используется максимально эффективно | Очень сложно перераспределять место между safe и unsafe разделами |
+В данном примере предполагается, что вы настроили три узла по гибридному сценарию.
+В кластере Deckhouse при этом появятся шесть ресурсов `LVMVolumeGroup` со случайно сгенерированными именами.
+В будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`,
+которые создаются в процессе автоматического обнаружения VG, с помощью тега `LVM` с желаемым именем ресурса.
 
-#### Примеры настройки модулей SDS при использовании гибридного сценария
-
-Допустим, что у Вас есть три узла, настроенных по гибридному сценарию. В таком случае в кластере Deckhouse появятся шесть ресурсов `LVMVolumeGroup` со случайно сгенерированными именами (в будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`, которые создаются в процессе автоматического обнаружения vg, путем добавления lvm тега с желаемым именем ресурса).
+Чтобы вывести список ресурсов `LVMVolumeGroup`, выполните следующую команду:
 
 ```shell
 kubectl get lvmvolumegroups.storage.deckhouse.io
+```
 
+В результате будет выведен следующий список:
+
+```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG            AGE
 vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                main-safe     61s
 vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                main-safe     4m17s
@@ -193,7 +240,8 @@ vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2   0/0         True                    Re
 
 ##### Настройка модуля `sds-local-volume`
 
-* Создаем ресурс `LocalStorageClass` и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `main-safe` на всех наших узлах в модуле `sds-local-volume`:
+Чтобы настроить модуль `sds-local-volume` по гибридному сценарию, создайте ресурс `LocalStorageClass`
+и добавьте в него ресурсы `LVMVolumeGroup`, чтобы на всех узлах в модуле `sds-local-volume` использовалась только VG `main-safe`:
 
 ```yaml
 kubectl apply -f -<<EOF
@@ -215,114 +263,126 @@ EOF
 
 ##### Настройка модуля `sds-replicated-volume`
 
-* Создаем ресурс `ReplicatedStoragePool` с именем data-safe и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `main-safe` на всех наших узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с replication: `None`:
+Чтобы настроить модуль `sds-replicated-volume` по гибридному сценарию, выполните следующее:
 
-```yaml
-kubectl apply -f -<<EOF
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data-safe
-spec:
-  type: LVM
-  lvmVolumeGroups:
-    - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-    - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-    - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
-EOF
-```
+1. Создайте ресурс `ReplicatedStoragePool` с именем `data-safe` и добавьте в него ресурсы `LVMVolumeGroup`,
+   чтобы на всех узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с параметром `replication: None`
+   использовалась только VG `main-safe`:
 
-* Создаем ресурс `ReplicatedStoragePool` с именем data-unsafe и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `main-unsafe` на всех наших узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с replication `Availability` или `ConsistencyAndAvailability`:
+   ```yaml
+   kubectl apply -f -<<EOF
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: data-safe
+   spec:
+     type: LVM
+     lvmVolumeGroups:
+       - name: vg-08d3730c-9201-428d-966c-45795cba55a6
+       - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
+       - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+   EOF
+   ```
 
-```yaml
-kubectl apply -f -<<EOF
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data-unsafe
-spec:
-  type: LVM
-  lvmVolumeGroups:
-    - name: vg-deccf08a-44d4-45f2-aea9-6232c0eeef91
-    - name: vg-e0f00cab-03b3-49cf-a2f6-595628a2593c
-    - name: vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2
-EOF
-```
+1. Создайте ресурс `ReplicatedStoragePool` с именем `data-unsafe` и добавьте в него ресурсы `LVMVolumeGroup`,
+   чтобы на всех узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с параметром `replication: Availability` или
+   `replication: ConsistencyAndAvailability` использовалась только VG `main-unsafe`:
 
-* Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданных ранее ресурсов `ReplicatedStoragePool` для использования vg `main-safe` и `main-unsafe` на всех наших узлах:
+   ```yaml
+   kubectl apply -f -<<EOF
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: data-unsafe
+   spec:
+     type: LVM
+     lvmVolumeGroups:
+       - name: vg-deccf08a-44d4-45f2-aea9-6232c0eeef91
+       - name: vg-e0f00cab-03b3-49cf-a2f6-595628a2593c
+       - name: vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2
+   EOF
+   ```
 
-```yaml
-kubectl apply -f -<<EOF
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-r1
-spec:
-  storagePool: data-safe # обратите внимание, что мы используем data-safe для этого ресурса, так как в нем replication: None и репликация данных НЕ будет производиться для PV, созданных с этим StorageClass
-  replication: None
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+1. Создайте ресурс `ReplicatedStoragePool` и в поле `storagePool` укажите имя созданных ранее ресурсов `ReplicatedStoragePool`,
+   чтобы на всех узлах использовались VG `main-safe` и `main-unsafe`:
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-r2
-spec:
-  storagePool: data-unsafe # обратите внимание, что мы используем data-unsafe для этого ресурса, так как в нем replication: Availability и репликация данных будет производиться для PV, созданных с этим StorageClass
-  replication: Availability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+   ```yaml
+   kubectl apply -f -<<EOF
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-r1
+   spec:
+     storagePool: data-safe # Обратите внимание, что из-за replication: None для этого ресурса используется data-safe; следовательно, репликация данных для постоянных томов (PV), созданных с этим StorageClass, проводиться не будет
+     replication: None
+     reclaimPolicy: Delete
+     topology: Ignored # Если указать данную топологию, в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone)
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-r3
-spec:
-  storagePool: data-unsafe # обратите внимание, что мы используем data-unsafe для этого ресурса, так как в нем replication: ConsistencyAndAvailability и репликация данных будет производиться для PV, созданных с этим StorageClass
-  replication: ConsistencyAndAvailability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
-EOF
-```
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-r2
+   spec:
+     storagePool: data-unsafe # Обратите внимание, что из-за replication: Availability для этого ресурса используется data-unsafe; следовательно, будет проводиться репликация данных для PV, созданных с этим StorageClass
+     replication: Availability
+     reclaimPolicy: Delete
+     topology: Ignored
 
-## Несколько одинаковых дисков и дополнительные диски
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-r3
+   spec:
+     storagePool: data-unsafe # Обратите внимание, что из-за replication: ConsistencyAndAvailability для этого ресурса используется data-unsafe; следовательно, будет проводиться репликация данных для PV, созданных с этим StorageClass
+     replication: ConsistencyAndAvailability
+     reclaimPolicy: Delete
+     topology: Ignored
+   EOF
+   ```
 
-В таком случае рекомендуется из одинаковых дисков сделать зеркало, установить на него ОС и НЕ использовать его для SDS. Для SDS использовать дополнительные диски.
+## Хранилище с одинаковыми дисками и дополнительными дисками
 
-Рекомендуется разделить дополнительные диски на типы и использовать их для разных целей.
+В ситуации, когда несколько одинаковых дисков комбинируются с дополнительными,
+мы рекомендуем сделать зеркало из одинаковых дисков и установить на него операционную систему, но не использовать для SDS.
+Вместо этого, для SDS используйте дополнительные диски.
 
-### Дополнительные диски - NVMe SSD
+Также рекомендуем использовать дополнительные диски для разных целей, в зависимости от их типа.
 
-Рекомендуется использовать NVMe SSD для создания томов, которые требуют высокой производительности.
+### NVMe SSD
 
-#### Рекомендованный сценарий
+Мы рекомендуем использовать диски NVMe SSD для создания томов, которые требуют высокой производительности.
 
-* Собрать зеркало из всех NVMe SSD дисков целиком (аппаратно или программно).
-* Создать vg с именем `ssd-nvme` на зеркале.
-* Поставить тег `storage.deckhouse.io/enabled=true` на vg `ssd-nvme` такой командой:
+#### Рекомендуемый сценарий
 
-```shell
-vgchange ssd-nvme --addtag storage.deckhouse.io/enabled=true
-```
+Чтобы настроить узел по рекомендуемому сценарию, выполните следующее:
 
-##### Плюсы и минусы сценария
+1. Соберите зеркало из всех дисков NVMe SSD целиком (аппаратно или программно).
+1. Создайте VG с именем `ssd-nvme` на зеркале.
+1. Установите тег `storage.deckhouse.io/enabled=true` для VG `ssd-nvme`, используя следующую команду:
 
-| Плюсы                     | Минусы      |
-|---------------------------|-------------|
-| Надежно  | Overhead по месту на диске для SDS, которые сами реплицируют данные  |
-| Просто в настройке и использовании |  |
-| Удобно распределять (и перераспределять) место между разными SDS |  |
+   ```shell
+   vgchange ssd-nvme --addtag storage.deckhouse.io/enabled=true
+   ```
 
-##### Примеры настройки модулей SDS при использовании рекомендованного сценария
+##### Пример настройки модулей SDS
 
-Допустим, что у Вас есть три узла, настроенных по рекомендованному сценарию. В таком случае в кластере Deckhouse появится три ресурса `LVMVolumeGroup` со случайно сгенерированными именами (в будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`, которые создаются в процессе автоматического обнаружения vg, путем добавления lvm тега с желаемым именем ресурса).
+В данном примере предполагается, что вы настроили три узла по рекомендуемому сценарию.
+В кластере Deckhouse при этом появятся три ресурса `LVMVolumeGroup` со случайно сгенерированными именами.
+В будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`,
+которые создаются в процессе автоматического обнаружения VG, с помощью тега `LVM` с желаемым именем ресурса.
+
+Чтобы вывести список ресурсов `LVMVolumeGroup`, выполните следующую команду:
 
 ```shell
 kubectl get lvmvolumegroups.storage.deckhouse.io
+```
 
+В результате будет выведен следующий список:
+
+```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG         AGE
 vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                ssd-nvme   61s
 vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                ssd-nvme   4m17s
@@ -331,7 +391,8 @@ vg-c7863e12-c143-42bb-8e33-d578ce50d6c7   0/0         True                    Re
 
 ###### Настройка модуля `sds-local-volume`
 
-* Создаем ресурс `LocalStorageClass` и добавляем в него все наши ресурсы `LVMVolumeGroup` для использования vg `ssd-nvme` на всех наших узлах в модуле `sds-local-volume`:
+Чтобы настроить модуль `sds-local-volume` по рекомендуемому сценарию, создайте ресурс `LocalStorageClass`
+и добавьте в него все ресурсы `LVMVolumeGroup`, чтобы VG `ssd-nvme` использовалась на всех узлах в модуле `sds-local-volume`:
 
 ```yaml
 kubectl apply -f -<<EOF
@@ -353,95 +414,111 @@ EOF
 
 ###### Настройка модуля `sds-replicated-volume`
 
-* Создаем ресурс `ReplicatedStoragePool` и добавляем в него все наши ресурсы `LVMVolumeGroup` для использования vg `ssd-nvme` на всех наших узлах в модуле `sds-replicated-volume`:
+Чтобы настроить модуль `sds-replicated-volume` по рекомендуемому сценарию, выполните следующее:
 
-```yaml
-kubectl apply -f -<<EOF
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data-ssd-nvme
-spec:
-  type: LVM
-  lvmVolumeGroups:
-    - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-    - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-    - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
-EOF
-```
+1. Создайте ресурс `ReplicatedStoragePool` и добавьте в него все ресурсы `LVMVolumeGroup`,
+   чтобы VG `ssd-nvme` использовалась на всех узлах в модуле `sds-replicated-volume`:
 
-* Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданного ранее ресурса `ReplicatedStoragePool`:
+   ```yaml
+   kubectl apply -f -<<EOF
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: data-ssd-nvme
+   spec:
+     type: LVM
+     lvmVolumeGroups:
+       - name: vg-08d3730c-9201-428d-966c-45795cba55a6
+       - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
+       - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+   EOF
+   ```
 
-```yaml
-kubectl apply -f -<<EOF
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-ssd-nvme-r1
-spec:
-  storagePool: data-ssd-nvme
-  replication: None
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+1. Создайте ресурс `ReplicatedStorageClass` и в поле `storagePool` укажите имя созданного ранее ресурса `ReplicatedStoragePool`:
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-ssd-nvme-r2
-spec:
-  storagePool: data-ssd-nvme
-  replication: Availability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+   ```yaml
+   kubectl apply -f -<<EOF
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-ssd-nvme-r1
+   spec:
+     storagePool: data-ssd-nvme
+     replication: None
+     reclaimPolicy: Delete
+     topology: Ignored # Если указать данную топологию, в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone)
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-ssd-nvme-r3
-spec:
-  storagePool: data-ssd-nvme
-  replication: ConsistencyAndAvailability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
-EOF
-```
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-ssd-nvme-r2
+   spec:
+     storagePool: data-ssd-nvme
+     replication: Availability
+     reclaimPolicy: Delete
+     topology: Ignored
+
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-ssd-nvme-r3
+   spec:
+     storagePool: data-ssd-nvme
+     replication: ConsistencyAndAvailability
+     reclaimPolicy: Delete
+     topology: Ignored
+   EOF
+   ```
 
 #### Гибридный сценарий с NVMe SSD
 
 {{< alert level="warning" >}}
-ВАЖНО! Не поддерживается использование разделов с одинаковыми part UUID, а так же изменение part UUID раздела, который используется для создания vg. При создании таблицы разделов рекомендуется выбрать GPT, так как part UUID в MBR является псевдослучайным и содержит в себе номер раздела. Помимо этого, в MBR нельзя задать partlabel, который может быть удобным для последующей идентификации раздела в Deckhouse.
+Не поддерживается использование разделов с одинаковыми PARTUUID,
+а также изменение PARTUUID раздела, который используется для создания VG.
+При создании таблицы разделов рекомендуется выбрать формат `GPT`,
+так как PARTUUID в `MBR` является псевдослучайным и содержит в себе номер раздела.
+Помимо этого, в `MBR` нельзя задать атрибут PARTLABEL,
+который может пригодиться для последующей идентификации раздела в Deckhouse.
 {{< /alert >}}
 
-В этом сценарии используются два раздела на каждом диске: один для хранения данных SDS, которые не реплицируются, другой для данных SDS, которые реплицируются. Первый раздел каждого диска используется для создания зеркала, а второй раздел для создания отдельной vg без зеркалирования. Таким образом, место на диске используется максимально эффективно.
+В данном сценарии используются два раздела на каждом диске:
+один для хранения данных SDS, которые не реплицируются,
+и другой для данных SDS, которые реплицируются.
+Первый раздел каждого диска используется для создания зеркала, а второй – для создания отдельной VG без зеркалирования.
+Это позволяет максимально эффективно использовать место на диске.
 
-* Создать по 2 раздела на каждом диске.
-* Собрать зеркало из первых разделов на каждом диске.
-* Создать vg с именем `ssd-nvme-safe` на зеркале.
-* Создать vg с именем `ssd-nvme-unsafe` из вторых разделов каждого диска.
-* Поставить тег `storage.deckhouse.io/enabled=true` на vg `ssd-nvme-safe` и `ssd-nvme-unsafe` такой командой:
+Чтобы настроить узел по гибридному сценарию с NVMe SSD, выполните следующее:
 
-```shell
-vgchange ssd-nvme-safe --addtag storage.deckhouse.io/enabled=true
-vgchange ssd-nvme-unsafe --addtag storage.deckhouse.io/enabled=true
-```
+1. создайте по два раздела на каждом диске;
+1. соберите зеркало из первых разделов на каждом диске;
+1. создайте VG с именем `ssd-nvme-safe` на зеркале;
+1. создайте VG с именем `ssd-nvme-unsafe` из вторых разделов каждого диска;
+1. установите тег `storage.deckhouse.io/enabled=true` для VG `ssd-nvme-safe` и `ssd-nvme-unsafe`, используя следующую команду:
 
-##### Плюсы и минусы сценария
+   ```shell
+   vgchange ssd-nvme-safe --addtag storage.deckhouse.io/enabled=true
+   vgchange ssd-nvme-unsafe --addtag storage.deckhouse.io/enabled=true
+   ```
 
-| Плюсы                     | Минусы      |
-|---------------------------|-------------|
-| Надежно  | Сложно в настройке и использовании  |
-| Место используется максимально эффективно | Очень сложно перераспределять место между safe и unsafe разделами |
+##### Пример настройки модулей SDS
 
-##### Примеры настройки модулей SDS при использовании гибридного сценария с NVMe SSD
+В данном примере предполагается, что вы настроили три узла по гибридному сценарию с NVMe SSD.
+В кластере Deckhouse при этом появятся шесть ресурсов `LVMVolumeGroup` со случайно сгенерированными именами.
+В будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`,
+которые создаются в процессе автоматического обнаружения VG, с помощью тега `LVM` с желаемым именем ресурса.
 
-Допустим, что у Вас есть три узла, настроенных по гибридному сценарию с NVMe SSD. В таком случае в кластере Deckhouse появятся шесть ресурсов `LVMVolumeGroup` со случайно сгенерированными именами (в будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`, которые создаются в процессе автоматического обнаружения vg, путем добавления lvm тега с желаемым именем ресурса).
+Чтобы вывести список ресурсов `LVMVolumeGroup`, выполните следующую команду:
 
 ```shell
 kubectl get lvmvolumegroups.storage.deckhouse.io
+```
 
+В результате будет выведен следующий список:
+
+```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG                AGE
 vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                ssd-nvme-safe     61s
 vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                ssd-nvme-safe     4m17s
@@ -453,7 +530,8 @@ vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2   0/0         True                    Re
 
 ###### Настройка модуля `sds-local-volume`
 
-* Создаем ресурс `LocalStorageClass` и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `ssd-nvme-safe` на всех наших узлах в модуле `sds-local-volume`:
+Чтобы настроить модуль `sds-local-volume` по гибридному сценарию c NVMe SSD, создайте ресурс `LocalStorageClass`
+и добавьте в него ресурсы `LVMVolumeGroup`, чтобы на всех узлах в модуле `sds-local-volume` использовалась только VG `ssd-nvme-safe`:
 
 ```yaml
 kubectl apply -f -<<EOF
@@ -475,107 +553,117 @@ EOF
 
 ###### Настройка модуля `sds-replicated-volume`
 
-* Создаем ресурс `ReplicatedStoragePool` с именем data-ssd-nvme-safe и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `ssd-nvme-safe` на всех наших узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с replication: `None`:
+Чтобы настроить модуль `sds-replicated-volume` по гибридному сценарию c NVMe SSD, выполните следующее:
 
-```yaml
-kubectl apply -f -<<EOF
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data-ssd-nvme-safe
-spec:
-  type: LVM
-  lvmVolumeGroups:
-    - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-    - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-    - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
-EOF
-```
+1. Создайте ресурс `ReplicatedStoragePool` с именем `data-ssd-nvme-safe` и добавьте в него ресурсы `LVMVolumeGroup`,
+   чтобы на всех узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с параметром `replication: None`
+   использовалась только VG `ssd-nvme-safe`:
 
-* Создаем ресурс `ReplicatedStoragePool` с именем data-ssd-nvme-unsafe и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `ssd-nvme-unsafe` на всех наших узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с replication `Availability` или `ConsistencyAndAvailability`:
+   ```yaml
+   kubectl apply -f -<<EOF
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: data-ssd-nvme-safe
+   spec:
+     type: LVM
+     lvmVolumeGroups:
+       - name: vg-08d3730c-9201-428d-966c-45795cba55a6
+       - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
+       - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+   EOF
+   ```
 
-```yaml
-kubectl apply -f -<<EOF
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data-ssd-nvme-unsafe
-spec:
-  type: LVM
-  lvmVolumeGroups:
-    - name: vg-deccf08a-44d4-45f2-aea9-6232c0eeef91
-    - name: vg-e0f00cab-03b3-49cf-a2f6-595628a2593c
-    - name: vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2
-EOF
-```
+1. Создайте ресурс `ReplicatedStoragePool` с именем `data-ssd-nvme-unsafe` и добавьте в него ресурсы `LVMVolumeGroup`,
+   чтобы на всех узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с параметром `replication: Availability` или
+   `replication: ConsistencyAndAvailability` использовалась только VG `ssd-nvme-unsafe`:
 
-* Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданных ранее ресурсов `ReplicatedStoragePool` для использования vg `ssd-nvme-safe` и `ssd-nvme-unsafe` на всех наших узлах:
+   ```yaml
+   kubectl apply -f -<<EOF
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: data-ssd-nvme-unsafe
+   spec:
+     type: LVM
+     lvmVolumeGroups:
+       - name: vg-deccf08a-44d4-45f2-aea9-6232c0eeef91
+       - name: vg-e0f00cab-03b3-49cf-a2f6-595628a2593c
+       - name: vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2
+   EOF
+   ```
 
-```yaml
-kubectl apply -f -<<EOF
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-ssd-nvme-r1
-spec:
-  storagePool: data-ssd-nvme-safe # обратите внимание, что мы используем data-ssd-nvme-safe для этого ресурса, так как в нем replication: None и репликация данных НЕ будет производиться для PV, созданных с этим StorageClass
-  replication: None
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+1. Создайте ресурс `ReplicatedStoragePool` и в поле `storagePool` укажите имя созданных ранее ресурсов `ReplicatedStoragePool`,
+   чтобы на всех узлах использовались VG `ssd-nvme-safe` и `ssd-nvme-unsafe`:
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-ssd-nvme-r2
-spec:
-  storagePool: data-ssd-nvme-unsafe # обратите внимание, что мы используем data-ssd-nvme-unsafe для этого ресурса, так как в нем replication: Availability и репликация данных будет производиться для PV, созданных с этим StorageClass
-  replication: Availability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+   ```yaml
+   kubectl apply -f -<<EOF
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-ssd-nvme-r1
+   spec:
+     storagePool: data-ssd-nvme-safe # Обратите внимание, что из-за replication: None для этого ресурса используется data-ssd-nvme-safe; следовательно, репликация данных для PV, созданных с этим StorageClass, проводиться не будет
+     replication: None
+     reclaimPolicy: Delete
+     topology: Ignored # Если указать данную топологию, в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone)
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-ssd-nvme-r3
-spec:
-  storagePool: data-ssd-nvme-unsafe # обратите внимание, что мы используем data-ssd-nvme-unsafe для этого ресурса, так как в нем replication: ConsistencyAndAvailability и репликация данных будет производиться для PV, созданных с этим StorageClass
-  replication: ConsistencyAndAvailability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
-EOF
-```
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-ssd-nvme-r2
+   spec:
+     storagePool: data-ssd-nvme-unsafe # Обратите внимание, что из-за replication: Availability для этого ресурса используется data-ssd-nvme-unsafe; следовательно, будет проводиться репликация данных для PV, созданных с этим StorageClass
+     replication: Availability
+     reclaimPolicy: Delete
+     topology: Ignored
 
-### Дополнительные диски - SATA SSD
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-ssd-nvme-r3
+   spec:
+     storagePool: data-ssd-nvme-unsafe # Обратите внимание, что из-за replication: ConsistencyAndAvailability для этого ресурса используется data-ssd-nvme-unsafe; следовательно, будет проводиться репликация данных для PV, созданных с этим StorageClass
+     replication: ConsistencyAndAvailability
+     reclaimPolicy: Delete
+     topology: Ignored
+   EOF
+   ```
 
-Рекомендуется использовать SATA SSD для создания томов, которые не требуют высокой производительности.
+### SATA SSD
 
-#### Рекомендованный сценарий
+Мы рекомендуем использовать диски SATA SSD для создания томов, которые не требуют высокой производительности.
 
-* Создать vg с именем `ssd-sata` из всех SATA SSD дисков.
-* Поставить тег `storage.deckhouse.io/enabled=true` на vg `ssd-sata` такой командой:
+#### Рекомендуемый сценарий
 
-```shell
-vgchange ssd-sata --addtag storage.deckhouse.io/enabled=true
-```
+Чтобы настроить узел по рекомендуемому сценарию, выполните следующее:
 
-##### Плюсы и минусы сценария
+1. Создайте VG с именем `ssd-sata` из всех дисков SATA SSD.
+1. Установите тег `storage.deckhouse.io/enabled=true` для VG `ssd-sata`, используя следующую команду:
 
-| Плюсы                     | Минусы      |
-|---------------------------|-------------|
-| Надежно  | Overhead по месту на диске для SDS, которые сами реплицируют данные  |
-| Просто в настройке и использовании |  |
-| Удобно распределять (и перераспределять) место между разными SDS |  |
+   ```shell
+   vgchange ssd-sata --addtag storage.deckhouse.io/enabled=true
+   ```
 
-##### Примеры настройки модулей SDS при использовании рекомендованного сценария
+##### Пример настройки модулей SDS
 
-Допустим, что у Вас есть три узла, настроенных по рекомендованному сценарию. В таком случае в кластере Deckhouse появится три ресурса `LVMVolumeGroup` со случайно сгенерированными именами (в будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`, которые создаются в процессе автоматического обнаружения vg, путем добавления lvm тега с желаемым именем ресурса).
+В данном примере предполагается, что вы настроили три узла по рекомендуемому сценарию.
+В кластере Deckhouse при этом появятся три ресурса `LVMVolumeGroup` со случайно сгенерированными именами.
+В будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`,
+которые создаются в процессе автоматического обнаружения VG, с помощью тега `LVM` с желаемым именем ресурса.
+
+Чтобы вывести список ресурсов `LVMVolumeGroup`, выполните следующую команду:
 
 ```shell
 kubectl get lvmvolumegroups.storage.deckhouse.io
+```
 
+В результате будет выведен следующий список:
+
+```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG         AGE
 vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                ssd-sata   61s
 vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                ssd-sata   4m17s
@@ -584,7 +672,8 @@ vg-c7863e12-c143-42bb-8e33-d578ce50d6c7   0/0         True                    Re
 
 ###### Настройка модуля `sds-local-volume`
 
-* Создаем ресурс `LocalStorageClass` и добавляем в него все наши ресурсы `LVMVolumeGroup` для использования vg `ssd-sata` на всех наших узлах в модуле `sds-local-volume`:
+Чтобы настроить модуль `sds-local-volume` по рекомендуемому сценарию, создайте ресурс `LocalStorageClass`
+и добавьте в него все ресурсы `LVMVolumeGroup`, чтобы VG `ssd-sata` использовалась на всех узлах в модуле `sds-local-volume`:
 
 ```yaml
 kubectl apply -f -<<EOF
@@ -606,95 +695,111 @@ EOF
 
 ###### Настройка модуля `sds-replicated-volume`
 
-* Создаем ресурс `ReplicatedStoragePool` и добавляем в него все наши ресурсы `LVMVolumeGroup` для использования vg `ssd-sata` на всех наших узлах в модуле `sds-replicated-volume`:
+Чтобы настроить модуль `sds-replicated-volume` по рекомендуемому сценарию, выполните следующее:
 
-```yaml
-kubectl apply -f -<<EOF
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data-ssd-sata
-spec:
-  type: LVM
-  lvmVolumeGroups:
-    - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-    - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-    - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
-EOF
-```
+1. Создайте ресурс `ReplicatedStoragePool` и добавьте в него все ресурсы `LVMVolumeGroup`,
+   чтобы VG `ssd-sata` использовалась на всех узлах в модуле `sds-replicated-volume`:
 
-* Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданного ранее ресурса `ReplicatedStoragePool`:
+   ```yaml
+   kubectl apply -f -<<EOF
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: data-ssd-sata
+   spec:
+     type: LVM
+     lvmVolumeGroups:
+       - name: vg-08d3730c-9201-428d-966c-45795cba55a6
+       - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
+       - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+   EOF
+   ```
 
-```yaml
-kubectl apply -f -<<EOF
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-ssd-sata-r1
-spec:
-  storagePool: data-ssd-sata
-  replication: None
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+1. Создайте ресурс `ReplicatedStorageClass` и в поле `storagePool` укажите имя созданного ранее ресурса `ReplicatedStoragePool`:
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-ssd-sata-r2
-spec:
-  storagePool: data-ssd-sata
-  replication: Availability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+   ```yaml
+   kubectl apply -f -<<EOF
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-ssd-sata-r1
+   spec:
+     storagePool: data-ssd-sata
+     replication: None
+     reclaimPolicy: Delete
+     topology: Ignored # Если указать данную топологию, в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone)
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-ssd-sata-r3
-spec:
-  storagePool: data-ssd-sata
-  replication: ConsistencyAndAvailability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
-EOF
-```
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-ssd-sata-r2
+   spec:
+     storagePool: data-ssd-sata
+     replication: Availability
+     reclaimPolicy: Delete
+     topology: Ignored
+
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-ssd-sata-r3
+   spec:
+     storagePool: data-ssd-sata
+     replication: ConsistencyAndAvailability
+     reclaimPolicy: Delete
+     topology: Ignored
+   EOF
+   ```
 
 #### Гибридный сценарий с SATA SSD
 
 {{< alert level="warning" >}}
-ВАЖНО! Не поддерживается использование разделов с одинаковыми part UUID, а так же изменение part UUID раздела, который используется для создания vg. При создании таблицы разделов рекомендуется выбрать GPT, так как part UUID в MBR является псевдослучайным и содержит в себе номер раздела. Помимо этого, в MBR нельзя задать partlabel, который может быть удобным для последующей идентификации раздела в Deckhouse.
+Не поддерживается использование разделов с одинаковыми PARTUUID,
+а также изменение PARTUUID раздела, который используется для создания VG.
+При создании таблицы разделов рекомендуется выбрать формат `GPT`,
+так как PARTUUID в `MBR` является псевдослучайным и содержит в себе номер раздела.
+Помимо этого, в `MBR` нельзя задать атрибут PARTLABEL,
+который может пригодиться для последующей идентификации раздела в Deckhouse.
 {{< /alert >}}
 
-В этом сценарии используются два раздела на каждом диске: один для хранения данных SDS, которые не реплицируются, другой для данных SDS, которые реплицируются. Первый раздел каждого диска используется для создания зеркала, а второй раздел для создания отдельной vg без зеркалирования. Таким образом, место на диске используется максимально эффективно.
+В данном сценарии используются два раздела на каждом диске:
+один для хранения данных SDS, которые не реплицируются,
+и другой для данных SDS, которые реплицируются.
+Первый раздел каждого диска используется для создания зеркала, а второй – для создания отдельной VG без зеркалирования.
+Это позволяет максимально эффективно использовать место на диске.
 
-* Создать по 2 раздела на каждом диске.
-* Собрать зеркало из первых разделов на каждом диске.
-* Создать vg с именем `ssd-sata-safe` на зеркале.
-* Создать vg с именем `ssd-sata-unsafe` из вторых разделов каждого диска.
-* Поставить тег `storage.deckhouse.io/enabled=true` на vg `ssd-sata-safe` и `ssd-sata-unsafe` такой командой:
+Чтобы настроить узел по гибридному сценарию с SATA SSD, выполните следующее:
 
-```shell
-vgchange ssd-sata-safe --addtag storage.deckhouse.io/enabled=true
-vgchange ssd-sata-unsafe --addtag storage.deckhouse.io/enabled=true
-```
+1. создайте по два раздела на каждом диске;
+1. соберите зеркало из первых разделов на каждом диске;
+1. создайте VG с именем `ssd-sata-safe` на зеркале;
+1. создайте VG с именем `ssd-sata-unsafe` из вторых разделов каждого диска;
+1. установите тег `storage.deckhouse.io/enabled=true` для VG `ssd-sata-safe` и `ssd-sata-unsafe`, используя следующую команду:
 
-##### Плюсы и минусы сценария
+   ```shell
+   vgchange ssd-sata-safe --addtag storage.deckhouse.io/enabled=true
+   vgchange ssd-sata-unsafe --addtag storage.deckhouse.io/enabled=true
+   ```
 
-| Плюсы                     | Минусы      |
-|---------------------------|-------------|
-| Надежно  | Сложно в настройке и использовании  |
-| Место используется максимально эффективно | Очень сложно перераспределять место между safe и unsafe разделами |
+##### Пример настройки модулей SDS
 
-##### Примеры настройки модулей SDS при использовании гибридного сценария с SATA SSD
+В данном примере предполагается, что вы настроили три узла по гибридному сценарию с SATA SSD.
+В кластере Deckhouse при этом появятся шесть ресурсов `LVMVolumeGroup` со случайно сгенерированными именами.
+В будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`,
+которые создаются в процессе автоматического обнаружения VG, с помощью тега `LVM` с желаемым именем ресурса.
 
-Допустим, что у Вас есть три узла, настроенных по гибридному сценарию с SATA SSD. В таком случае в кластере Deckhouse появятся шесть ресурсов `LVMVolumeGroup` со случайно сгенерированными именами (в будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`, которые создаются в процессе автоматического обнаружения vg, путем добавления lvm тега с желаемым именем ресурса).
+Чтобы вывести список ресурсов `LVMVolumeGroup`, выполните следующую команду:
 
 ```shell
 kubectl get lvmvolumegroups.storage.deckhouse.io
+```
 
+В результате будет выведен следующий список:
+
+```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG                AGE
 vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                ssd-sata-safe     61s
 vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                ssd-sata-safe     4m17s
@@ -706,7 +811,8 @@ vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2   0/0         True                    Re
 
 ###### Настройка модуля `sds-local-volume`
 
-* Создаем ресурс `LocalStorageClass` и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `ssd-sata-safe` на всех наших узлах в модуле `sds-local-volume`:
+Чтобы настроить модуль `sds-local-volume` по гибридному сценарию c SATA SSD, создайте ресурс `LocalStorageClass`
+и добавьте в него ресурсы `LVMVolumeGroup`, чтобы на всех узлах в модуле `sds-local-volume` использовалась только VG `ssd-sata-safe`:
 
 ```yaml
 kubectl apply -f -<<EOF
@@ -728,107 +834,117 @@ EOF
 
 ###### Настройка модуля `sds-replicated-volume`
 
-* Создаем ресурс `ReplicatedStoragePool` с именем data-ssd-sata-safe и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `ssd-sata-safe` на всех наших узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с replication: `None`:
+Чтобы настроить модуль `sds-replicated-volume` по гибридному сценарию c SATA SSD, выполните следующее:
 
-```yaml
-kubectl apply -f -<<EOF
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data-ssd-sata-safe
-spec:
-  type: LVM
-  lvmVolumeGroups:
-    - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-    - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-    - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
-EOF
-```
+1. Создайте ресурс `ReplicatedStoragePool` с именем `data-ssd-sata-safe` и добавьте в него ресурсы `LVMVolumeGroup`,
+   чтобы на всех узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с параметром `replication: None`
+   использовалась только VG `ssd-sata-safe`:
 
-* Создаем ресурс `ReplicatedStoragePool` с именем data-ssd-sata-unsafe и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `ssd-sata-unsafe` на всех наших узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с replication `Availability` или `ConsistencyAndAvailability`:
+   ```yaml
+   kubectl apply -f -<<EOF
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: data-ssd-sata-safe
+   spec:
+     type: LVM
+     lvmVolumeGroups:
+       - name: vg-08d3730c-9201-428d-966c-45795cba55a6
+       - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
+       - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+   EOF
+   ```
 
-```yaml
-kubectl apply -f -<<EOF
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data-ssd-sata-unsafe
-spec:
-  type: LVM
-  lvmVolumeGroups:
-    - name: vg-deccf08a-44d4-45f2-aea9-6232c0eeef91
-    - name: vg-e0f00cab-03b3-49cf-a2f6-595628a2593c
-    - name: vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2
-EOF
-```
+1. Создайте ресурс `ReplicatedStoragePool` с именем `data-ssd-sata-unsafe` и добавьте в него ресурсы `LVMVolumeGroup`,
+   чтобы на всех узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с параметром `replication: Availability` или
+   `replication: ConsistencyAndAvailability` использовалась только VG `ssd-sata-unsafe`:
 
-* Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданных ранее ресурсов `ReplicatedStoragePool` для использования vg `ssd-sata-safe` и `ssd-sata-unsafe` на всех наших узлах:
+   ```yaml
+   kubectl apply -f -<<EOF
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: data-ssd-sata-unsafe
+   spec:
+     type: LVM
+     lvmVolumeGroups:
+       - name: vg-deccf08a-44d4-45f2-aea9-6232c0eeef91
+       - name: vg-e0f00cab-03b3-49cf-a2f6-595628a2593c
+       - name: vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2
+   EOF
+   ```
 
-```yaml
-kubectl apply -f -<<EOF
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-ssd-sata-r1
-spec:
-  storagePool: data-ssd-sata-safe # обратите внимание, что мы используем data-ssd-sata-safe для этого ресурса, так как в нем replication: None и репликация данных НЕ будет производиться для PV, созданных с этим StorageClass
-  replication: None
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+1. Создайте ресурс `ReplicatedStoragePool` и в поле `storagePool` укажите имя созданных ранее ресурсов `ReplicatedStoragePool`,
+   чтобы на всех узлах использовались VG `ssd-sata-safe` и `ssd-sata-unsafe`:
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-ssd-sata-r2
-spec:
-  storagePool: data-ssd-sata-unsafe # обратите внимание, что мы используем data-ssd-sata-unsafe для этого ресурса, так как в нем replication: Availability и репликация данных будет производиться для PV, созданных с этим StorageClass
-  replication: Availability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+   ```yaml
+   kubectl apply -f -<<EOF
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-ssd-sata-r1
+   spec:
+     storagePool: data-ssd-sata-safe # Обратите внимание, что из-за replication: None для этого ресурса используется data-ssd-sata-safe; следовательно, репликация данных для PV, созданных с этим StorageClass, проводиться не будет
+     replication: None
+     reclaimPolicy: Delete
+     topology: Ignored # Если указать данную топологию, в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone)
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-ssd-sata-r3
-spec:
-  storagePool: data-ssd-sata-unsafe # обратите внимание, что мы используем data-ssd-sata-unsafe для этого ресурса, так как в нем replication: ConsistencyAndAvailability и репликация данных будет производиться для PV, созданных с этим StorageClass
-  replication: ConsistencyAndAvailability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
-EOF
-```
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-ssd-sata-r2
+   spec:
+     storagePool: data-ssd-sata-unsafe # Обратите внимание, что из-за replication: Availability для этого ресурса используется data-ssd-sata-unsafe; следовательно, будет проводиться репликация данных для PV, созданных с этим StorageClass
+     replication: Availability
+     reclaimPolicy: Delete
+     topology: Ignored
 
-### Дополнительные диски - HDD
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-ssd-sata-r3
+   spec:
+     storagePool: data-ssd-sata-unsafe # Обратите внимание, что из-за replication: ConsistencyAndAvailability для этого ресурса используется data-ssd-sata-unsafe; следовательно, будет проводиться репликация данных для PV, созданных с этим StorageClass
+     replication: ConsistencyAndAvailability
+     reclaimPolicy: Delete
+     topology: Ignored
+   EOF
+   ```
 
-Рекомендуется использовать HDD для создания томов, которые не требуют производительности.
+### HDD
 
-#### Рекомендованный сценарий
+Мы рекомендуем использовать диски HDD для создания томов, которые не требуют производительности.
 
-* Создать vg с именем `hdd` из всех HDD дисков.
-* Поставить тег `storage.deckhouse.io/enabled=true` на vg `hdd` такой командой:
+#### Рекомендуемый сценарий
 
-```shell
-vgchange hdd --addtag storage.deckhouse.io/enabled=true
-```
+Чтобы настроить узел по рекомендуемому сценарию, выполните следующее:
 
-##### Плюсы и минусы сценария
+1. Создайте VG с именем `hdd` из всех дисков HDD.
+2. Установите тег `storage.deckhouse.io/enabled=true` для VG `hdd`, используя следующую команду:
 
-| Плюсы                     | Минусы      |
-|---------------------------|-------------|
-| Надежно  | Overhead по месту на диске для SDS, которые сами реплицируют данные  |
-| Просто в настройке и использовании |  |
-| Удобно распределять (и перераспределять) место между разными SDS |  |
+   ```shell
+   vgchange hdd --addtag storage.deckhouse.io/enabled=true
+   ```
 
-##### Примеры настройки модулей SDS при использовании рекомендованного сценария
+##### Пример настройки модулей SDS
 
-Допустим, что у Вас есть три узла, настроенных по рекомендованному сценарию. В таком случае в кластере Deckhouse появится три ресурса `LVMVolumeGroup` со случайно сгенерированными именами (в будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`, которые создаются в процессе автоматического обнаружения vg, путем добавления lvm тега с желаемым именем ресурса).
+В данном примере предполагается, что вы настроили три узла по рекомендуемому сценарию.
+В кластере Deckhouse при этом появятся три ресурса `LVMVolumeGroup` со случайно сгенерированными именами.
+В будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`,
+которые создаются в процессе автоматического обнаружения VG, с помощью тега `LVM` с желаемым именем ресурса.
+
+Чтобы вывести список ресурсов `LVMVolumeGroup`, выполните следующую команду:
 
 ```shell
 kubectl get lvmvolumegroups.storage.deckhouse.io
+```
 
+В результате будет выведен следующий список:
+
+```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG    AGE
 vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                hdd   61s
 vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                hdd   4m17s
@@ -837,7 +953,8 @@ vg-c7863e12-c143-42bb-8e33-d578ce50d6c7   0/0         True                    Re
 
 ###### Настройка модуля `sds-local-volume`
 
-* Создаем ресурс `LocalStorageClass` и добавляем в него все наши ресурсы `LVMVolumeGroup` для использования vg `hdd` на всех наших узлах в модуле `sds-local-volume`:
+Чтобы настроить модуль `sds-local-volume` по рекомендуемому сценарию, создайте ресурс `LocalStorageClass`
+и добавьте в него все ресурсы `LVMVolumeGroup`, чтобы VG `hdd` использовалась на всех узлах в модуле `sds-local-volume`:
 
 ```yaml
 kubectl apply -f -<<EOF
@@ -859,95 +976,111 @@ EOF
 
 ###### Настройка модуля `sds-replicated-volume`
 
-* Создаем ресурс `ReplicatedStoragePool` и добавляем в него все наши ресурсы `LVMVolumeGroup` для использования vg `hdd` на всех наших узлах в модуле `sds-replicated-volume`:
+Чтобы настроить модуль `sds-replicated-volume` по рекомендуемому сценарию, выполните следующее:
 
-```yaml
-kubectl apply -f -<<EOF
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data-hdd
-spec:
-  type: LVM
-  lvmVolumeGroups:
-    - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-    - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-    - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
-EOF
-```
+1. Создайте ресурс `ReplicatedStoragePool` и добавьте в него все ресурсы `LVMVolumeGroup`,
+   чтобы VG `hdd` использовалась на всех узлах в модуле `sds-replicated-volume`:
 
-* Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданного ранее ресурса `ReplicatedStoragePool`:
+   ```yaml
+   kubectl apply -f -<<EOF
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: data-hdd
+   spec:
+     type: LVM
+     lvmVolumeGroups:
+       - name: vg-08d3730c-9201-428d-966c-45795cba55a6
+       - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
+       - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+   EOF
+   ```
 
-```yaml
-kubectl apply -f -<<EOF
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-hdd-r1
-spec:
-  storagePool: data-hdd
-  replication: None
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+1. Создайте ресурс `ReplicatedStorageClass` и в поле `storagePool` укажите имя созданного ранее ресурса `ReplicatedStoragePool`:
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-hdd-r2
-spec:
-  storagePool: data-hdd
-  replication: Availability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+   ```yaml
+   kubectl apply -f -<<EOF
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-hdd-r1
+   spec:
+     storagePool: data-hdd
+     replication: None
+     reclaimPolicy: Delete
+     topology: Ignored # Если указать данную топологию, в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone)
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-hdd-r3
-spec:
-  storagePool: data-hdd
-  replication: ConsistencyAndAvailability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
-EOF
-```
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-hdd-r2
+   spec:
+     storagePool: data-hdd
+     replication: Availability
+     reclaimPolicy: Delete
+     topology: Ignored
+
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-hdd-r3
+   spec:
+     storagePool: data-hdd
+     replication: ConsistencyAndAvailability
+     reclaimPolicy: Delete
+     topology: Ignored
+   EOF
+   ```
 
 #### Гибридный сценарий с HDD
 
 {{< alert level="warning" >}}
-ВАЖНО! Не поддерживается использование разделов с одинаковыми part UUID, а так же изменение part UUID раздела, который используется для создания vg. При создании таблицы разделов рекомендуется выбрать GPT, так как part UUID в MBR является псевдослучайным и содержит в себе номер раздела. Помимо этого, в MBR нельзя задать partlabel, который может быть удобным для последующей идентификации раздела в Deckhouse.
+Не поддерживается использование разделов с одинаковыми PARTUUID,
+а также изменение PARTUUID раздела, который используется для создания VG.
+При создании таблицы разделов рекомендуется выбрать формат `GPT`,
+так как PARTUUID в `MBR` является псевдослучайным и содержит в себе номер раздела.
+Помимо этого, в `MBR` нельзя задать атрибут PARTLABEL,
+который может пригодиться для последующей идентификации раздела в Deckhouse.
 {{< /alert >}}
 
-В этом сценарии используются два раздела на каждом диске: один для хранения данных SDS, которые не реплицируются, другой для данных SDS, которые реплицируются. Первый раздел каждого диска используется для создания зеркала, а второй раздел для создания отдельной vg без зеркалирования. Таким образом, место на диске используется максимально эффективно.
+В данном сценарии используются два раздела на каждом диске:
+один для хранения данных SDS, которые не реплицируются,
+и другой для данных SDS, которые реплицируются.
+Первый раздел каждого диска используется для создания зеркала, а второй – для создания отдельной VG без зеркалирования.
+Это позволяет максимально эффективно использовать место на диске.
 
-* Создать по 2 раздела на каждом диске.
-* Собрать зеркало из первых разделов на каждом диске.
-* Создать vg с именем `hdd-safe` на зеркале.
-* Создать vg с именем `hdd-unsafe` из вторых разделов каждого диска.
-* Поставить тег `storage.deckhouse.io/enabled=true` на vg `hdd-safe` и `hdd-unsafe` такой командой:
+Чтобы настроить узел по гибридному сценарию с SATA SSD, выполните следующее:
 
-```shell
-vgchange hdd-safe --addtag storage.deckhouse.io/enabled=true
-vgchange hdd-unsafe --addtag storage.deckhouse.io/enabled=true
-```
+1. создайте по два раздела на каждом диске;
+1. соберите зеркало из первых разделов на каждом диске;
+1. создайте VG с именем `hdd-safe` на зеркале;
+1. создайте VG с именем `hdd-unsafe` из вторых разделов каждого диска;
+1. установите тег `storage.deckhouse.io/enabled=true` для VG `hdd-safe` и `hdd-unsafe`, используя следующую команду:
 
-##### Плюсы и минусы сценария
+   ```shell
+   vgchange hdd-safe --addtag storage.deckhouse.io/enabled=true
+   vgchange hdd-unsafe --addtag storage.deckhouse.io/enabled=true
+   ```
 
-| Плюсы                     | Минусы      |
-|---------------------------|-------------|
-| Надежно  | Сложно в настройке и использовании  |
-| Место используется максимально эффективно | Очень сложно перераспределять место между safe и unsafe разделами |
+##### Примеры настройки модулей SDS
 
-##### Примеры настройки модулей SDS при использовании гибридного сценария с HDD
+В данном примере предполагается, что вы настроили три узла по гибридному сценарию с HDD.
+В кластере Deckhouse при этом появятся шесть ресурсов `LVMVolumeGroup` со случайно сгенерированными именами.
+В будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`,
+которые создаются в процессе автоматического обнаружения VG, с помощью тега `LVM` с желаемым именем ресурса.
 
-Допустим, что у Вас есть три узла, настроенных по гибридному сценарию с HDD. В таком случае в кластере Deckhouse появятся шесть ресурсов `LVMVolumeGroup` со случайно сгенерированными именами (в будущем добавится возможность указывать имя для ресурсов `LVMVolumeGroup`, которые создаются в процессе автоматического обнаружения vg, путем добавления lvm тега с желаемым именем ресурса).
+Чтобы вывести список ресурсов `LVMVolumeGroup`, выполните следующую команду:
 
 ```shell
 kubectl get lvmvolumegroups.storage.deckhouse.io
+```
 
+В результате будет выведен следующий список:
+
+```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG           AGE
 vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                hdd-safe     61s
 vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                hdd-safe     4m17s
@@ -959,7 +1092,8 @@ vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2   0/0         True                    Re
 
 ###### Настройка модуля `sds-local-volume`
 
-* Создаем ресурс `LocalStorageClass` и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `hdd-safe` на всех наших узлах в модуле `sds-local-volume`:
+Чтобы настроить модуль `sds-local-volume` по гибридному сценарию c HDD, создайте ресурс `LocalStorageClass`
+и добавьте в него ресурсы `LVMVolumeGroup`, чтобы на всех узлах в модуле `sds-local-volume` использовалась только VG `hdd-safe`:
 
 ```yaml
 kubectl apply -f -<<EOF
@@ -981,75 +1115,82 @@ EOF
 
 ###### Настройка модуля `sds-replicated-volume`
 
-* Создаем ресурс `ReplicatedStoragePool` с именем data-hdd-safe и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `hdd-safe` на всех наших узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с replication: `None`:
+Чтобы настроить модуль `sds-replicated-volume` по гибридному сценарию c HDD, выполните следующее:
 
-```yaml
-kubectl apply -f -<<EOF
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data-hdd-safe
-spec:
-  type: LVM
-  lvmVolumeGroups:
-    - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-    - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-    - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
-EOF
-```
+1. Создайте ресурс `ReplicatedStoragePool` с именем `data-hdd-safe` и добавьте в него ресурсы `LVMVolumeGroup`,
+   чтобы на всех узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с параметром `replication: None`
+   использовалась только VG `hdd-safe`:
 
-* Создаем ресурс `ReplicatedStoragePool` с именем data-hdd-unsafe и добавляем в него ресурсы `LVMVolumeGroup` для использования только vg `hdd-unsafe` на всех наших узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с replication `Availability` или `ConsistencyAndAvailability`:
+   ```yaml
+   kubectl apply -f -<<EOF
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: data-hdd-safe
+   spec:
+     type: LVM
+     lvmVolumeGroups:
+       - name: vg-08d3730c-9201-428d-966c-45795cba55a6
+       - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
+       - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+   EOF
+   ```
 
-```yaml
-kubectl apply -f -<<EOF
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data-hdd-unsafe
-spec:
-  type: LVM
-  lvmVolumeGroups:
-    - name: vg-deccf08a-44d4-45f2-aea9-6232c0eeef91
-    - name: vg-e0f00cab-03b3-49cf-a2f6-595628a2593c
-    - name: vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2
-EOF
-```
+1. Создайте ресурс `ReplicatedStoragePool` с именем `data-hdd-unsafe` и добавьте в него ресурсы `LVMVolumeGroup`,
+   чтобы на всех узлах в модуле `sds-replicated-volume` в `ReplicatedStorageClass` с параметром `replication: Availability` или
+   `replication: ConsistencyAndAvailability` использовалась только VG `hdd-unsafe`:
 
-* Создаем ресурсы `ReplicatedStorageClass` и указываем в поле `storagePool` имя созданных ранее ресурсов `ReplicatedStoragePool` для использования vg `hdd-safe` и `hdd-unsafe` на всех наших узлах:
+   ```yaml
+   kubectl apply -f -<<EOF
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStoragePool
+   metadata:
+     name: data-hdd-unsafe
+   spec:
+     type: LVM
+     lvmVolumeGroups:
+       - name: vg-deccf08a-44d4-45f2-aea9-6232c0eeef91
+       - name: vg-e0f00cab-03b3-49cf-a2f6-595628a2593c
+       - name: vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2
+   EOF
+   ```
 
-```yaml
-kubectl apply -f -<<EOF
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-hdd-r1
-spec:
-  storagePool: data-hdd-safe # обратите внимание, что мы используем data-hdd-safe для этого ресурса, так как в нем replication: None и репликация данных НЕ будет производиться для PV, созданных с этим StorageClass
-  replication: None
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+1. Создайте ресурс `ReplicatedStoragePool` и в поле `storagePool` укажите имя созданных ранее ресурсов `ReplicatedStoragePool`,
+   чтобы на всех узлах использовались VG `hdd-safe` и `hdd-unsafe`:
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-hdd-r2
-spec:
-  storagePool: data-hdd-unsafe # обратите внимание, что мы используем data-hdd-unsafe для этого ресурса, так как в нем replication: Availability и репликация данных будет производиться для PV, созданных с этим StorageClass
-  replication: Availability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
+   ```yaml
+   kubectl apply -f -<<EOF
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-hdd-r1
+   spec:
+     storagePool: data-hdd-safe # Обратите внимание, что из-за replication: None для этого ресурса используется data-hdd-safe; следовательно, репликация данных для PV, созданных с этим StorageClass, проводиться не будет
+     replication: None
+     reclaimPolicy: Delete
+     topology: Ignored # Если указать данную топологию, в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone)
 
----
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: replicated-sc-hdd-r3
-spec:
-  storagePool: data-hdd-unsafe # обратите внимание, что мы используем data-hdd-unsafe для этого ресурса, так как в нем replication: ConsistencyAndAvailability и репликация данных будет производиться для PV, созданных с этим StorageClass
-  replication: ConsistencyAndAvailability
-  reclaimPolicy: Delete
-  topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
-EOF
-```
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-hdd-r2
+   spec:
+     storagePool: data-hdd-unsafe # Обратите внимание, что из-за replication: Availability для этого ресурса используется data-hdd-unsafe; следовательно, будет проводиться репликация данных для PV, созданных с этим StorageClass
+     replication: Availability
+     reclaimPolicy: Delete
+     topology: Ignored
+
+   ---
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: ReplicatedStorageClass
+   metadata:
+     name: replicated-sc-hdd-r3
+   spec:
+     storagePool: data-hdd-unsafe # Обратите внимание, что из-за replication: ConsistencyAndAvailability для этого ресурса используется data-hdd-unsafe; следовательно, будет проводиться репликация данных для PV, созданных с этим StorageClass
+     replication: ConsistencyAndAvailability
+     reclaimPolicy: Delete
+     topology: Ignored
+   EOF
+   ```
