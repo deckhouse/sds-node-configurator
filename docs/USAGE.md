@@ -15,6 +15,7 @@ The controller supports two types of resources:
 
 ## `BlockDevice` resources
 
+
 ### Creating a `BlockDevice` resource
 
 The controller regularly scans the existing devices on the node. If a device meets all the conditions 
