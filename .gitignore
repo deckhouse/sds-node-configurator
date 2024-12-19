@@ -28,6 +28,7 @@
 .settings
 .idea/
 venv/
+.vscode
 
 # macOS Finder files
 *.DS_Store

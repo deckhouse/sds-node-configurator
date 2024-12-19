@@ -38,7 +38,6 @@ import (
 	"agent/internal/controller/bd"
 	"agent/internal/controller/llv"
 	"agent/internal/controller/llv_extender"
-	"agent/internal/controller/llvs"
 	"agent/internal/controller/lvg"
 	"agent/internal/kubutils"
 	"agent/internal/logger"
@@ -234,26 +233,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = controller.AddReconciler(
-		mgr,
-		log,
-		llvs.NewReconciler(
-			mgr.GetClient(),
-			log,
-			metrics,
-			sdsCache,
-			llvs.ReconcilerConfig{
-				NodeName:                cfgParams.NodeName,
-				LLVRequeueInterval:      cfgParams.LLVRequeueInterval,
-				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
-				LLVSRequeueInterval:     cfgParams.LLVSRequeueInterval,
-			},
-		),
-	)
-	if err != nil {
-		log.Error(err, "[main] unable to start llvs.NewReconciler")
-		os.Exit(1)
-	}
+	addLLVSReconciler(mgr, log, metrics, sdsCache, cfgParams)
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
