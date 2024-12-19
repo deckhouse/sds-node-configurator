@@ -29,6 +29,7 @@
 .idea/
 venv/
 *.code-workspace
+.vscode
 
 # macOS Finder files
 *.DS_Store
