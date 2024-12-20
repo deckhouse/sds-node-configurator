@@ -3,12 +3,12 @@
 package main
 
 import (
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+
 	"agent/internal/cache"
 	"agent/internal/config"
 	"agent/internal/logger"
 	"agent/internal/monitoring"
-
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 func addLLVSReconciler(

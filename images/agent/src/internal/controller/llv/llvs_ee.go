@@ -3,13 +3,14 @@
 package llv
 
 import (
-	"agent/internal/utils"
 	"context"
 	"errors"
 	"fmt"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/types"
+
+	"agent/internal/utils"
 )
 
 func (r *Reconciler) handleLLVSSource(ctx context.Context, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LVMVolumeGroup) (string, bool, error) {
