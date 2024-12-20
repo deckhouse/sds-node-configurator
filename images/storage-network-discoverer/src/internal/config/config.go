@@ -33,7 +33,7 @@ const (
 	CacheSecEnv            = "CACHE_TTL_SEC"
 	DefaultDiscoverySec    = 15
 	DefaultCacheTTLSec     = 30
-	HardcodedControllerNS  = "d8-sds-replicated-volume"
+	HardcodedControllerNS  = "d8-sds-node-configurator"
 	LogLevelEnv            = "LOG_LEVEL"
 )
 
