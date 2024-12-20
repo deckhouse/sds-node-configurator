@@ -1,13 +1,7 @@
-{{- $_ := set . "BASE_GOLANG" "registry.deckhouse.io/base_images/golang:1.22.8-alpine@sha256:54bb7313917c733191a079ccae2e52bd3b80664e46c7879efa06513d4221d804" }}
-{{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.ru/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
-{{- $_ := set . "BASE_ALPINE_DEV" "registry.deckhouse.ru/base_images/dev-alpine:3.16.3@sha256:c706fa83cc129079e430480369a3f062b8178cac9ec89266ebab753a574aca8e" }}
-{{- $_ := set . "BASE_ALT_DEV"    "registry.deckhouse.ru/base_images/dev-alt:p10@sha256:76e6e163fa982f03468166203488b569e6d9fc10855d6a259c662706436cdcad" }}
-
 {{ $binaries := "/sds-utils/bin/lvm.static" }}
-{{ $version := "d786a8f820d54ce87a919e6af5426c333c173b11" }}
 ---
 image: {{ $.ImageName }}-binaries-artifact
-from: {{ $.BASE_ALT_DEV }}
+from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 shell:
@@ -28,7 +22,7 @@ shell:
   - cd /
   - git clone {{ env "SOURCE_REPO" }}/lvmteam/lvm2.git
   - cd /lvm2
-  - git checkout {{ $version }}
+  - git checkout {{ $.Versions.LVM2 }}
   - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu
   - make
   - mkdir -p /sds-utils/bin/
@@ -37,7 +31,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.BASE_GOLANG }}
+from: {{ $.Root.BASE_GOLANG_1_22 }}
 final: false
 
 git:
@@ -55,7 +49,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-distroless-artifact
-from: {{ $.BASE_ALPINE_DEV }}
+from: {{ $.Root.BASE_ALPINE_DEV }}
 final: false
 
 shell:
@@ -73,7 +67,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-distroless
-from: {{ $.BASE_SCRATCH }}
+from: {{ $.Root.BASE_SCRATCH }}
 final: false
 
 import:

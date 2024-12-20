@@ -1,0 +1,16 @@
+# base images
+{{- $_ := set $ "BASE_ALPINE_DEV"  "registry.deckhouse.io/base_images/dev-alpine:3.16.3@sha256:c706fa83cc129079e430480369a3f062b8178cac9ec89266ebab753a574aca8e" }}
+{{- $_ := set $ "BASE_ALT_P11"     "registry.deckhouse.io/base_images/alt:p11@sha256:c396cd7348a48f9236413e2ef5569223c15e554c0a3ca37f9d92fb787d4f1893" }}
+{{- $_ := set $ "BASE_GOLANG_1_22" "registry.deckhouse.io/base_images/golang:1.22.7-bullseye@sha256:e5dc67bf84590c008338a0e30f56a6ed2092a38e0d2895c797dd501db73a2330" }}
+{{- $_ := set $ "BASE_SCRATCH"     "registry.deckhouse.io/base_images/scratch@sha256:653ae76965c98c8cd1c8c9ff7725316d2983986f896655b30e0f44d2f8b2dd7e" }}
+
+
+# component versions
+{{- $versions := dict }}
+{{- $_ := set $versions "UTIL_LINUX" "2.39.3" }}
+{{- $_ := set $versions "LVM2" "d786a8f820d54ce87a919e6af5426c333c173b11" }}
+
+{{- $_ := set $ "VERSIONS" $versions }}
+
+
+# custom constants
