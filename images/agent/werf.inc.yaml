@@ -1,7 +1,7 @@
 {{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 ld-linux-x86-64.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic" }}
 ---
 image: {{ $.ImageName }}-binaries-artifact
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ $.Root.BASE_ALT_DEV }}
 final: false
 
 shell:

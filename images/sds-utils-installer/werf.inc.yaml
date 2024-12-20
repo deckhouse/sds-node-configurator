@@ -1,7 +1,7 @@
 {{ $binaries := "/sds-utils/bin/lvm.static" }}
 ---
 image: {{ $.ImageName }}-binaries-artifact
-from: {{ $.Root.BASE_ALT_P11 }}
+from: {{ $.Root.BASE_ALT_DEV }}
 final: false
 
 shell:
