@@ -1,6 +1,7 @@
 # Release image, stored in your.registry.io/modules/<module-name>/release:<semver>
 ---
-artifact: release-channel-version-artifact
+image: release-channel-version-artifact
+final: false
 from: registry.deckhouse.io/base_images/alpine:3.16.3
 shell:
   beforeInstall:

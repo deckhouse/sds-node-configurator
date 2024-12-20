@@ -20,6 +20,15 @@ rules:
   - apiGroups:
       - ""
     resources:
+      - nodes/status
+    verbs:
+      - get
+      - list
+      - patch
+      - update
+  - apiGroups:
+      - ""
+    resources:
       - events
     verbs:
       - create
