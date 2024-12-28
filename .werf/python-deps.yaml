@@ -8,6 +8,10 @@ git:
     to: /
     includePaths:
       - lib/python
+    stageDependencies:
+      beforeSetup:
+      - "*"
+
 shell:
   beforeInstall:
     - apt-get update
