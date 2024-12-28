@@ -27,4 +27,4 @@ git:
   - monitoring
   - openapi
   - templates
-  - Chart.yaml
+  - module.yaml
