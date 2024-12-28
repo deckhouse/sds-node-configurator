@@ -9,7 +9,7 @@ git:
     includePaths:
       - lib/python
     stageDependencies:
-      beforeSetup:
+      setup:
       - "*"
 
 shell:
