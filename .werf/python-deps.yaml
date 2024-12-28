@@ -15,6 +15,6 @@ git:
 shell:
   beforeInstall:
     - apt-get update
-    - apt-get install -y python3 python3-module-pip
+    - apt-get install -y python3 python3-module-pip-run
   setup:
     - pip3 install -r /lib/python/requirements.txt -t /lib/python/dist
