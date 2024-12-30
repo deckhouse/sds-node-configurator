@@ -10,7 +10,7 @@ git:
       - lib/python
     stageDependencies:
       setup:
-      - "*"
+        - lib/python/requirements.txt
 
 shell:
   beforeInstall:
