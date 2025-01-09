@@ -1,7 +1,7 @@
 # Python deps image, required to download dependencies and put it to the final module image (bundle)
 ---
 image: python-dependencies
-from: {{ .Images.BASE_ALT_P11 }}
+from: registry.deckhouse.io/base_images/alt:p11@sha256:c396cd7348a48f9236413e2ef5569223c15e554c0a3ca37f9d92fb787d4f1893
 git:
   - add: /
     to: /
