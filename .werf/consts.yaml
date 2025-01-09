@@ -1,0 +1,12 @@
+# base images
+{{- $_ := set $ "BASE_ALT"    "registry.deckhouse.io/base_images/alt:p11@sha256:e47d84424485d3674240cb2f67d3a1801b37d327e6d1eb8cc8d01be8ed3b34f3" }}
+{{- $_ := set $ "BASE_ALT_DEV"     "registry.deckhouse.io/base_images/dev-alt:p10@sha256:76e6e163fa982f03468166203488b569e6d9fc10855d6a259c662706436cdcad" }}
+{{- $_ := set $ "BASE_ALT_P11"     "registry.deckhouse.io/base_images/alt:p11@sha256:c396cd7348a48f9236413e2ef5569223c15e554c0a3ca37f9d92fb787d4f1893" }}
+{{- $_ := set $ "BASE_GOLANG_1_23" "registry.deckhouse.io/base_images/golang:1.23.1-alpine3.20@sha256:716820a183116e643839611ff9eca9bd1c92d2bf8f7a5eda2f9fd16e8acbaa72" }}
+{{- $_ := set $ "BASE_SCRATCH"     "registry.deckhouse.io/base_images/scratch@sha256:653ae76965c98c8cd1c8c9ff7725316d2983986f896655b30e0f44d2f8b2dd7e" }}
+
+
+# component versions
+{{- $versions := dict }}
+
+{{- $_ := set $ "VERSIONS" $versions }}
