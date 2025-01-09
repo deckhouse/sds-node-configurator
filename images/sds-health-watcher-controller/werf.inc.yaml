@@ -1,5 +1,6 @@
 {{- $_ := set . "BASE_GOLANG" "registry.deckhouse.io/base_images/golang:1.22.8-alpine@sha256:54bb7313917c733191a079ccae2e52bd3b80664e46c7879efa06513d4221d804" }}
 {{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
+{{- $_ := set . "BASE_ALT"    "registry.deckhouse.io/base_images/alt:p11@sha256:e47d84424485d3674240cb2f67d3a1801b37d327e6d1eb8cc8d01be8ed3b34f3" }}
 ---
 image: {{ $.ImageName }}-src-artifact
 from: {{ $.BASE_ALT }}
