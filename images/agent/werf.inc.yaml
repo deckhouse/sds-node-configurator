@@ -54,7 +54,8 @@ shell:
     libmount-devel-static \
     automake \
     gettext \
-    flex
+    flex \
+    libc6-compat
   - cd /
   - git clone {{ env "SOURCE_REPO" }}/util-linux/util-linux.git
   - cd /util-linux
