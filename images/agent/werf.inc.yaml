@@ -32,6 +32,12 @@ image: {{ $.ImageName }}-binaries-artifact
 from: {{ $.Root.BASE_ALT }}
 final: false
 
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
+
 git:
   - add: /tools/dev_images/additional_tools/binary_replace.sh
     to: /binary_replace.sh

@@ -24,6 +24,7 @@ shell:
     - apt-get update
     - apt-get -y install git
     - git clone --depth 1 {{ env "SOURCE_REPO" }}/lvmteam/lvm2.git /src/lvm2
+    - cd /src/lvm2
     - git fetch --depth 1 origin {{ $LVM2_VERSION }}
     - rm -rf /src/lvm2/.git
 
@@ -31,6 +32,12 @@ shell:
 image: {{ $.ImageName }}-binaries-artifact
 from: {{ $.Root.BASE_ALT }}
 final: false
+
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
 
 git:
   - add: /tools/dev_images/additional_tools/binary_replace.sh

@@ -15,14 +15,6 @@ git:
     stageDependencies:
       install:
         - "**/*"
-  # Taken from the original source - but I don't see patches in folder images
-  # - add: /images/{{ $.ImageName }}
-  #   to: /src
-  #   stageDependencies:
-  #     install:
-  #       - "**/*"
-  #   includePaths:
-  #     - patches
 
 shell:
   install:
