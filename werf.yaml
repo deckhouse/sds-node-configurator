@@ -1,10 +1,11 @@
 project: sds-node-configurator
 configVersion: 1
 ---
+{{ tpl (.Files.Get ".werf/consts.yaml") $ }}
 {{ tpl (.Files.Get ".werf/images.yaml") $ }}
 {{ tpl (.Files.Get ".werf/images-digests.yaml") $ }}
 {{ tpl (.Files.Get ".werf/python-deps.yaml") $ }}
 {{ tpl (.Files.Get ".werf/bundle.yaml") $ }}
 {{ tpl (.Files.Get ".werf/release.yaml") $ }}
-{{ tpl (.Files.Get ".werf/consts.yaml") $ }}
+
 
