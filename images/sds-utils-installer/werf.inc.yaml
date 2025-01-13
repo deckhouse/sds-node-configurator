@@ -134,8 +134,6 @@ import:
   - image: {{ $.ImageName }}-golang-artifact
     add: /{{ $.ImageName }}
     to: /{{ $.ImageName }}
-    # add: /bin-copier
-    # to: /bin-copier
     before: setup
 
 docker:
