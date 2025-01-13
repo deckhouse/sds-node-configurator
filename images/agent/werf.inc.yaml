@@ -55,7 +55,8 @@ shell:
     automake \
     gettext \
     flex \
-    glibc-core
+    glibc-core \
+    glibc
   - cd /
   - git clone {{ env "SOURCE_REPO" }}/util-linux/util-linux.git
   - cd /util-linux
@@ -66,6 +67,7 @@ shell:
   - ./configure --prefix /opt/deckhouse/sds --with-udev
   - make install-strip
   - mkdir -p /opt/deckhouse/sds/lib/x86_64-linux-gnu/
+  - ls -l /lib64 | grep ld
   - cp /util-linux/nsenter.static /opt/deckhouse/sds/bin/nsenter.static
   - cp /lib64/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1
   - cp /lib64/libc.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libc.so.6
