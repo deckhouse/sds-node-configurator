@@ -1,4 +1,4 @@
-{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 ld-linux-x86-64.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic" }}
+{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic" }}
 {{ $version := "2.39.3" }}
 
 # Do not remove. It's used in external tests.
@@ -55,8 +55,7 @@ shell:
     automake \
     gettext \
     flex \
-    glibc-core \
-    glibc
+    glibc-core
   - cd /
   - git clone {{ env "SOURCE_REPO" }}/util-linux/util-linux.git
   - cd /util-linux
@@ -67,7 +66,6 @@ shell:
   - ./configure --prefix /opt/deckhouse/sds --with-udev
   - make install-strip
   - mkdir -p /opt/deckhouse/sds/lib/x86_64-linux-gnu/
-  - ls -l /lib64 | grep ld
   - cp /util-linux/nsenter.static /opt/deckhouse/sds/bin/nsenter.static
   - cp /lib64/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1
   - cp /lib64/libc.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libc.so.6
