@@ -75,6 +75,8 @@ function relocate() {
   local binary=$1
   relocate_item ${binary}
 
+  ldd ${binary}
+
   for lib in $(ldd ${binary} 2>/dev/null | awk '{if ($2=="=>") print $3; else print $1}'); do
     # don't try to relocate linux-vdso.so lib due to this lib is virtual
     if [[ "${lib}" =~ "linux-vdso" ]]; then
