@@ -1,5 +1,5 @@
 {{ $binaries := "/sds-utils/bin/lvm.static" }}
-{{ $version := "d786a8f820d54ce87a919e6af5426c333c173b11" }}
+{{ $LVM2_VERSION := "d786a8f820d54ce87a919e6af5426c333c173b11" }}
 
 # Do not remove. It's used in external tests.
 ---
@@ -21,7 +21,10 @@ git:
 
 shell:
   install:
-    - echo "src artifact"
+    - apt-get update
+    - apt-get -y install git
+    - git clone --depth 1 --branch {{ $LVM2_VERSION }} {{ env "SOURCE_REPO" }}/lvmteam/lvm2.git /src/lvm2
+    - rm -rf /src/lvm2/.git
 
 ---
 image: {{ $.ImageName }}-binaries-artifact
@@ -49,12 +52,8 @@ shell:
     libaio-devel-static \
     libblkid-devel-static \
     thin-provisioning-tools \
-    git \
     glibc-core
-  - cd /
-  - git clone {{ env "SOURCE_REPO" }}/lvmteam/lvm2.git
-  - cd /lvm2
-  - git checkout {{ $version }}
+  - cd /src/lvm2
   - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu
   - make
   - mkdir -p /sds-utils/bin/

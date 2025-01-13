@@ -1,5 +1,5 @@
 {{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic" }}
-{{ $version := "2.39.3" }}
+{{ $UTIL_LINUX_VERSION := "2.39.3" }}
 
 # Do not remove. It's used in external tests.
 ---
@@ -21,7 +21,10 @@ git:
 
 shell:
   install:
-    - echo "src artifact"
+    - apt-get update
+    - apt-get -y install git
+    - git clone --depth 1 --branch v{{ $UTIL_LINUX_VERSION }} {{ env "SOURCE_REPO" }}/util-linux/util-linux.git /src/util-linux
+    - rm -rf /src/util-linux/.git
 
 
 ---
@@ -42,7 +45,6 @@ shell:
   - |
     apt-get install -y \
     build-essential \
-    git \
     pkg-config \
     gettext \
     autoconf \
@@ -56,17 +58,14 @@ shell:
     gettext \
     flex \
     glibc-core
-  - cd /
-  - git clone {{ env "SOURCE_REPO" }}/util-linux/util-linux.git
-  - cd /util-linux
-  - git checkout v{{ $version }}
+  - cd /src/util-linux
   - ./autogen.sh
   - ./configure LDFLAGS="-static" --enable-static-programs -disable-all-programs --enable-nsenter
   - make install-strip
   - ./configure --prefix /opt/deckhouse/sds --with-udev
   - make install-strip
   - mkdir -p /opt/deckhouse/sds/lib/x86_64-linux-gnu/
-  - cp /util-linux/nsenter.static /opt/deckhouse/sds/bin/nsenter.static
+  - cp /src/util-linux/nsenter.static /opt/deckhouse/sds/bin/nsenter.static
   - cp /lib64/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1
   - cp /lib64/libc.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libc.so.6
   - cp /lib64/libcap.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2
