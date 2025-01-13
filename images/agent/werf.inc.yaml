@@ -1,13 +1,37 @@
-{{- $_ := set . "BASE_GOLANG" "registry.deckhouse.io/base_images/golang:1.22.8-alpine@sha256:54bb7313917c733191a079ccae2e52bd3b80664e46c7879efa06513d4221d804" }}
-{{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.ru/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
-{{- $_ := set . "BASE_ALPINE_DEV" "registry.deckhouse.ru/base_images/dev-alpine:3.16.3@sha256:c706fa83cc129079e430480369a3f062b8178cac9ec89266ebab753a574aca8e" }}
-{{- $_ := set . "BASE_ALT_DEV"    "registry.deckhouse.ru/base_images/dev-alt:p10@sha256:76e6e163fa982f03468166203488b569e6d9fc10855d6a259c662706436cdcad" }}
+# {{- $_ := set . "BASE_GOLANG" "registry.deckhouse.io/base_images/golang:1.22.8-alpine@sha256:54bb7313917c733191a079ccae2e52bd3b80664e46c7879efa06513d4221d804" }}
+# {{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.ru/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
+# {{- $_ := set . "BASE_ALPINE_DEV" "registry.deckhouse.ru/base_images/dev-alpine:3.16.3@sha256:c706fa83cc129079e430480369a3f062b8178cac9ec89266ebab753a574aca8e" }}
+# {{- $_ := set . "BASE_ALT_DEV"    "registry.deckhouse.ru/base_images/dev-alt:p10@sha256:76e6e163fa982f03468166203488b569e6d9fc10855d6a259c662706436cdcad" }}
 
 {{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 ld-linux-x86-64.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic" }}
 {{ $version := "2.39.3" }}
+
+# Do not remove. It's used in external tests.
+---
+image: {{ $.ImageName }}-src-artifact
+from: {{ $.Root.BASE_ALT }}
+final: false
+
+git:
+  - add: /images/{{ $.ImageName }}/src
+    to: /src/images/{{ $.ImageName }}/src
+    stageDependencies:
+      install:
+        - "**/*"
+  - add: /api
+    to: /src/api
+    stageDependencies:
+      install:
+        - "**/*"
+
+shell:
+  install:
+    - echo "src artifact"
+
+
 ---
 image: {{ $.ImageName }}-binaries-artifact
-from: {{ $.BASE_ALT_DEV }}
+from: {{ $.Root.BASE_ALT }}
 final: false
 
 shell:
@@ -28,7 +52,8 @@ shell:
     libmount-devel-static \
     automake \
     gettext \
-    flex
+    flex \
+    ca-certificates
   - cd /
   - git clone {{ env "SOURCE_REPO" }}/util-linux/util-linux.git
   - cd /util-linux
@@ -49,28 +74,39 @@ shell:
 
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.BASE_GOLANG }}
+from: {{ $.Root.BASE_GOLANG_1_23 }}
 final: false
 
-git:
-  - add: /
-    to: /
-    includePaths:
-      - api
-      - images/agent/src
-    stageDependencies:
-      setup:
-        - "**/*"
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+
+# git:
+#   - add: /
+#     to: /
+#     includePaths:
+#       - api
+#       - images/agent/src
+#     stageDependencies:
+#       setup:
+#         - "**/*"
 
 shell:
   setup:
-    - cd /images/agent/src/cmd
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /sds-node-configurator-agent
-    - chmod +x /sds-node-configurator-agent
+    - cd /src/images/{{ $.ImageName }}/src/cmd
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
+    - chmod +x /{{ $.ImageName }}
 
 ---
 image: {{ $.ImageName }}-distroless-artifact
-from: {{ $.BASE_ALPINE_DEV }}
+# from: {{ $.BASE_ALPINE_DEV }}
+from: {{ $.Root.BASE_ALPINE }}
 final: false
 
 shell:
@@ -80,7 +116,7 @@ shell:
     - cp -pr /etc/passwd /etc/group /etc/hostname /etc/hosts /etc/shadow /etc/protocols /etc/services /etc/nsswitch.conf /relocate/etc
     - cp -pr /usr/share/ca-certificates /relocate/usr/share
     - cp -pr /usr/share/zoneinfo /relocate/usr/share
-    - cp -pr etc/ssl/cert.pem /relocate/etc/ssl
+    - cp -pr /etc/ssl/cert.pem /relocate/etc/ssl
     - cp -pr /etc/ssl/certs /relocate/etc/ssl
     - echo "deckhouse:x:64535:64535:deckhouse:/:/sbin/nologin" >> /relocate/etc/passwd
     - echo "deckhouse:x:64535:" >> /relocate/etc/group
@@ -88,7 +124,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-distroless
-from: {{ $.BASE_SCRATCH }}
+from: {{ $.Root.BASE_SCRATCH }}
 final: false
 
 import:
@@ -106,9 +142,9 @@ import:
     to: /
     before: setup
   - image: {{ $.ImageName }}-golang-artifact
-    add: /sds-node-configurator-agent
-    to: /sds-node-configurator-agent
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
     before: setup
 
 docker:
-  ENTRYPOINT: ["/sds-node-configurator-agent"]
+  ENTRYPOINT: ["/{{ $.ImageName }}"]

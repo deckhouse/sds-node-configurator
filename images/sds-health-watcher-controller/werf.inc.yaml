@@ -1,55 +1,67 @@
-{{- $_ := set . "BASE_GOLANG" "registry.deckhouse.io/base_images/golang:1.22.8-alpine@sha256:54bb7313917c733191a079ccae2e52bd3b80664e46c7879efa06513d4221d804" }}
-{{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
-{{- $_ := set . "BASE_ALT"    "registry.deckhouse.io/base_images/alt:p11@sha256:e47d84424485d3674240cb2f67d3a1801b37d327e6d1eb8cc8d01be8ed3b34f3" }}
+# {{- $_ := set . "BASE_GOLANG" "registry.deckhouse.io/base_images/golang:1.22.8-alpine@sha256:54bb7313917c733191a079ccae2e52bd3b80664e46c7879efa06513d4221d804" }}
+# {{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
+# {{- $_ := set . "BASE_ALT"    "registry.deckhouse.io/base_images/alt:p11@sha256:e47d84424485d3674240cb2f67d3a1801b37d327e6d1eb8cc8d01be8ed3b34f3" }}
+
+# Do not remove. It's used in external tests.
 ---
 image: {{ $.ImageName }}-src-artifact
-from: {{ $.BASE_ALT }}
+from: {{ $.Root.BASE_ALT }}
 final: false
 
 git:
-  - add: /images/{{ $.ImageName }}
-    to: /
+  - add: /images/{{ $.ImageName }}/src
+    to: /src/images/{{ $.ImageName }}/src
     stageDependencies:
       install:
         - "**/*"
-    includePaths:
-      - patches
+  - add: /api
+    to: /src/api
+    stageDependencies:
+      install:
+        - "**/*"
+  # Taken from the original source - but I don't see patches in folder images
+  # - add: /images/{{ $.ImageName }}
+  #   to: /src
+  #   stageDependencies:
+  #     install:
+  #       - "**/*"
+  #   includePaths:
+  #     - patches
 
 shell:
   install:
     - echo "src artifact"
+
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.BASE_GOLANG }}
+from: {{ $.Root.BASE_GOLANG_1_23 }}
 final: false
 
-git:
-  - add: /
-    to: /
-    includePaths:
-      - api
-      - images/sds-health-watcher-controller/src
-    stageDependencies:
-      setup:
-        - "**/*"
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
+
 mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
+
 shell:
   setup:
-    - cd images/sds-health-watcher-controller/src/cmd
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /sds-health-watcher-controller
-    - chmod +x /sds-health-watcher-controller
+    - cd /src/images/{{ $.ImageName }}/src/cmd
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
+    - chmod +x /{{ $.ImageName }}
 
 ---
 image: {{ $.ImageName }}
-from: {{ $.BASE_SCRATCH }}
+from: {{ $.Root.BASE_SCRATCH }}
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
-    add: /sds-health-watcher-controller
-    to: /sds-health-watcher-controller
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
     before: setup
 
 docker:
-  ENTRYPOINT: ["/sds-health-watcher-controller"]
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
