@@ -65,3 +65,4 @@ import:
 
 docker:
   ENTRYPOINT: ["/{{ $.ImageName }}"]
+  USER: deckhouse:deckhouse

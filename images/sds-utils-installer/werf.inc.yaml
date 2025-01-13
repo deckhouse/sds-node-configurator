@@ -136,3 +136,4 @@ import:
 docker:
   ENTRYPOINT: ["/{{ $.ImageName }}"]
   CMD: ["/sds-utils", "/opt/deckhouse/sds"]
+  USER: deckhouse:deckhouse
