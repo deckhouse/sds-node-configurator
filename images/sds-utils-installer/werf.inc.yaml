@@ -65,7 +65,7 @@ shell:
   - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu
   - make
   - mkdir -p /sds-utils/bin/
-  - mv /lvm2/tools/lvm.static /sds-utils/bin/lvm.static
+  - mv /src/lvm2/tools/lvm.static /sds-utils/bin/lvm.static
   - chmod +x /binary_replace.sh
   - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
 
