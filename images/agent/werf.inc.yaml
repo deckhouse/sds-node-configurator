@@ -86,16 +86,6 @@ mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
 
-# git:
-#   - add: /
-#     to: /
-#     includePaths:
-#       - api
-#       - images/agent/src
-#     stageDependencies:
-#       setup:
-#         - "**/*"
-
 shell:
   setup:
     - cd /src/images/{{ $.ImageName }}/src/cmd
@@ -110,8 +100,8 @@ final: false
 
 shell:
   install:
-    - apt-get update
-    - apt-get install ca-certificates tzdata -y
+    - apk update
+    - apk install ca-certificates tzdata -y
     - mkdir -p /relocate/bin /relocate/sbin /relocate/etc /relocate/etc/ssl /relocate/usr/bin /relocate/usr/sbin /relocate/usr/share
     - cp -pr /tmp /relocate
     - cp -pr /etc/passwd /etc/group /etc/hostname /etc/hosts /etc/shadow /etc/protocols /etc/services /etc/nsswitch.conf /relocate/etc
