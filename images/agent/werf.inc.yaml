@@ -52,8 +52,7 @@ shell:
     libmount-devel-static \
     automake \
     gettext \
-    flex \
-    ca-certificates
+    flex
   - cd /
   - git clone {{ env "SOURCE_REPO" }}/util-linux/util-linux.git
   - cd /util-linux
@@ -111,6 +110,8 @@ final: false
 
 shell:
   install:
+    - apt-get update
+    - apt-get install ca-certificates tzdata -y
     - mkdir -p /relocate/bin /relocate/sbin /relocate/etc /relocate/etc/ssl /relocate/usr/bin /relocate/usr/sbin /relocate/usr/share
     - cp -pr /tmp /relocate
     - cp -pr /etc/passwd /etc/group /etc/hostname /etc/hosts /etc/shadow /etc/protocols /etc/services /etc/nsswitch.conf /relocate/etc
