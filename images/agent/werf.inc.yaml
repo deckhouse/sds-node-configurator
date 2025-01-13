@@ -55,7 +55,7 @@ shell:
     automake \
     gettext \
     flex \
-    libc6-compat
+    glibc-core
   - cd /
   - git clone {{ env "SOURCE_REPO" }}/util-linux/util-linux.git
   - cd /util-linux

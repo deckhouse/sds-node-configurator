@@ -50,7 +50,7 @@ shell:
     libblkid-devel-static \
     thin-provisioning-tools \
     git \
-    libc6-compat
+    glibc-core
   - cd /
   - git clone {{ env "SOURCE_REPO" }}/lvmteam/lvm2.git
   - cd /lvm2
