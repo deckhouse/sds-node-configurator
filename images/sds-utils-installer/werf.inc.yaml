@@ -125,7 +125,7 @@ import:
 
 ---
 image: {{ $.ImageName }}
-from: {{ $.ImageName }}-distroless
+fromImage: {{ $.ImageName }}-distroless
 import:
   - image: {{ $.ImageName }}-binaries-artifact
     add: /relocate
