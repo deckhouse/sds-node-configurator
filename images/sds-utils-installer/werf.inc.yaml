@@ -109,7 +109,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-distroless
-from: {{ $.BASE_SCRATCH }}
+from: {{ $.Root.BASE_SCRATCH }}
 final: false
 
 import:
@@ -120,7 +120,7 @@ import:
 
 ---
 image: {{ $.ImageName }}
-fromImage: {{ $.ImageName }}-distroless
+from: {{ $.ImageName }}-distroless
 import:
   - image: {{ $.ImageName }}-binaries-artifact
     add: /relocate
