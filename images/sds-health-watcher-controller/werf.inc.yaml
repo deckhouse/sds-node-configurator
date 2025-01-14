@@ -1,3 +1,4 @@
+{{ $binaries := "/sds-utils/bin/lvm.static" }}#
 # Do not remove. It's used in external tests.
 ---
 image: {{ $.ImageName }}-src-artifact
@@ -41,9 +42,41 @@ shell:
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
     - chmod +x /{{ $.ImageName }}
 
+
+---
+image: {{ $.ImageName }}-distroless-artifact
+from: {{ $.Root.BASE_ALT }}
+final: false
+
+shell:
+  install:
+    - apt-get update
+    - apt-get install ca-certificates tzdata -y
+    - mkdir -p /relocate/bin /relocate/sbin /relocate/etc /relocate/etc/ssl /relocate/usr/bin /relocate/usr/sbin /relocate/usr/share
+    - cp -pr /tmp /relocate
+    - cp -pr /etc/passwd /etc/group /etc/hostname /etc/hosts /etc/shadow /etc/protocols /etc/services /etc/nsswitch.conf /relocate/etc
+    - cp -pr /usr/share/ca-certificates /relocate/usr/share
+    - cp -pr /usr/share/zoneinfo /relocate/usr/share
+    - cp -pr /etc/pki/tls/cert.pem /relocate/etc/ssl
+    - cp -pr /etc/pki/tls/certs /relocate/etc/ssl
+    - echo "deckhouse:x:64535:64535:deckhouse:/:/sbin/nologin" >> /relocate/etc/passwd
+    - echo "deckhouse:x:64535:" >> /relocate/etc/group
+    - echo "deckhouse:!::0:::::" >> /relocate/etc/shadow
+
+---
+image: {{ $.ImageName }}-distroless
+from: {{ $.Root.BASE_SCRATCH }}
+final: false
+
+import:
+  - image: {{ $.ImageName }}-distroless-artifact
+    add: /relocate
+    to: /
+    before: setup
+
 ---
 image: {{ $.ImageName }}
-from: {{ $.Root.BASE_SCRATCH }}
+fromImage: {{ $.ImageName }}-distroless
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
