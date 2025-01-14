@@ -52,6 +52,14 @@ spec:
       serviceAccountName: sds-node-configurator
       hostPID: true
       hostNetwork: true
+      # We need root privileges to perform LVM operations on the node.
+      securityContext:
+        runAsUser: 0
+        runAsNonRoot: false
+        runAsGroup: 0
+        seLinuxOptions:
+          level: s0
+          type: spc_t
       initContainers:
       - name: sds-utils-installer
         image: {{ include "helm_lib_module_image" (list . "sdsUtilsInstaller") }}
@@ -81,11 +89,10 @@ spec:
           - --
           - modprobe
           - dm_thin_pool
+        # Privileged mode is required to use nsenter and access the host's mount namespace.
+        # This is necessary to run modprobe and load the dm_thin_pool kernel module on the host.
         securityContext:
           privileged: true
-          seLinuxOptions:
-            level: s0
-            type: spc_t
         volumeMounts:
           - mountPath: /dev/
             name: host-device-dir
@@ -123,11 +130,6 @@ spec:
           - name: metrics
             containerPort: 4202
             protocol: TCP
-        securityContext:
-          privileged: true
-          seLinuxOptions:
-            level: s0
-            type: spc_t
         env:
           - name: NODE_NAME
             valueFrom:
@@ -145,6 +147,9 @@ spec:
 {{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
             value: "4"
 {{- end }}
+        # Privileged mode is required to use nsenter and execute host-level commands like lvm and lsblk.
+        securityContext:
+          privileged: true
         volumeMounts:
         - mountPath: /dev/
           name: host-device-dir

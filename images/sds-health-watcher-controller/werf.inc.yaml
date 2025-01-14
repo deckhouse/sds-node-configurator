@@ -1,38 +1,90 @@
-{{- $_ := set . "BASE_GOLANG" "registry.deckhouse.io/base_images/golang:1.22.8-alpine@sha256:54bb7313917c733191a079ccae2e52bd3b80664e46c7879efa06513d4221d804" }}
-{{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
+{{ $binaries := "/sds-utils/bin/lvm.static" }}
 
+# Do not remove. It's used in external tests.
 ---
-image: {{ $.ImageName }}-golang-artifact
-from: {{ $.BASE_GOLANG }}
+image: {{ $.ImageName }}-src-artifact
+from: {{ $.Root.BASE_ALT }}
 final: false
 
 git:
-  - add: /
-    to: /
-    includePaths:
-      - api
-      - images/sds-health-watcher-controller/src
+  - add: /images/{{ $.ImageName }}/src
+    to: /src/images/{{ $.ImageName }}/src
     stageDependencies:
-      setup:
+      install:
         - "**/*"
+  - add: /api
+    to: /src/api
+    stageDependencies:
+      install:
+        - "**/*"
+
+shell:
+  install:
+    - echo "src artifact"
+
+---
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.Root.BASE_GOLANG_1_23 }}
+final: false
+
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
+
 mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
+
 shell:
   setup:
-    - cd images/sds-health-watcher-controller/src/cmd
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /sds-health-watcher-controller
-    - chmod +x /sds-health-watcher-controller
+    - cd /src/images/{{ $.ImageName }}/src/cmd
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
+    - chmod +x /{{ $.ImageName }}
+
+
+---
+image: {{ $.ImageName }}-distroless-artifact
+from: {{ $.Root.BASE_ALT }}
+final: false
+
+shell:
+  install:
+    - apt-get update
+    - apt-get install ca-certificates tzdata -y
+    - mkdir -p /relocate/bin /relocate/sbin /relocate/etc /relocate/etc/ssl /relocate/usr/bin /relocate/usr/sbin /relocate/usr/share
+    - cp -pr /tmp /relocate
+    - cp -pr /etc/passwd /etc/group /etc/hostname /etc/hosts /etc/shadow /etc/protocols /etc/services /etc/nsswitch.conf /relocate/etc
+    - cp -pr /usr/share/ca-certificates /relocate/usr/share
+    - cp -pr /usr/share/zoneinfo /relocate/usr/share
+    - cp -pr /etc/pki/tls/cert.pem /relocate/etc/ssl
+    - cp -pr /etc/pki/tls/certs /relocate/etc/ssl
+    - echo "deckhouse:x:64535:64535:deckhouse:/:/sbin/nologin" >> /relocate/etc/passwd
+    - echo "deckhouse:x:64535:" >> /relocate/etc/group
+    - echo "deckhouse:!::0:::::" >> /relocate/etc/shadow
+
+---
+image: {{ $.ImageName }}-distroless
+from: {{ $.Root.BASE_SCRATCH }}
+final: false
+
+import:
+  - image: {{ $.ImageName }}-distroless-artifact
+    add: /relocate
+    to: /
+    before: setup
 
 ---
 image: {{ $.ImageName }}
-from: {{ $.BASE_SCRATCH }}
+fromImage: {{ $.ImageName }}-distroless
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
-    add: /sds-health-watcher-controller
-    to: /sds-health-watcher-controller
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
     before: setup
 
 docker:
-  ENTRYPOINT: ["/sds-health-watcher-controller"]
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
+  USER: deckhouse:deckhouse
