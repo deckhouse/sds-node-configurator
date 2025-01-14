@@ -1,4 +1,5 @@
-{{ $binaries := "/sds-utils/bin/lvm.static" }}#
+{{ $binaries := "/sds-utils/bin/lvm.static" }}
+
 # Do not remove. It's used in external tests.
 ---
 image: {{ $.ImageName }}-src-artifact
