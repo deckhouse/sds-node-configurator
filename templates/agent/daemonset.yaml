@@ -52,6 +52,14 @@ spec:
       serviceAccountName: sds-node-configurator
       hostPID: true
       hostNetwork: true
+      securityContext:
+        runAsUser: 0
+        runAsNonRoot: false
+        runAsGroup: 0
+        privileged: true
+        seLinuxOptions:
+          level: s0
+          type: spc_t
       initContainers:
       - name: sds-utils-installer
         image: {{ include "helm_lib_module_image" (list . "sdsUtilsInstaller") }}
@@ -81,11 +89,6 @@ spec:
           - --
           - modprobe
           - dm_thin_pool
-        securityContext:
-          privileged: true
-          seLinuxOptions:
-            level: s0
-            type: spc_t
         volumeMounts:
           - mountPath: /dev/
             name: host-device-dir
@@ -123,11 +126,6 @@ spec:
           - name: metrics
             containerPort: 4202
             protocol: TCP
-        securityContext:
-          privileged: true
-          seLinuxOptions:
-            level: s0
-            type: spc_t
         env:
           - name: NODE_NAME
             valueFrom:
