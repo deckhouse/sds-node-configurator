@@ -89,6 +89,8 @@ spec:
           - --
           - modprobe
           - dm_thin_pool
+        securityContext:
+          privileged: true
         volumeMounts:
           - mountPath: /dev/
             name: host-device-dir
@@ -143,6 +145,8 @@ spec:
 {{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
             value: "4"
 {{- end }}
+        securityContext:
+          privileged: true
         volumeMounts:
         - mountPath: /dev/
           name: host-device-dir
