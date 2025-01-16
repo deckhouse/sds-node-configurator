@@ -64,7 +64,8 @@ shell:
     automake \
     gettext \
     flex \
-    glibc-core
+    glibc-core \
+    cross-glibc-x86_64
   - cd /src/util-linux
   - ./autogen.sh
   - ./configure LDFLAGS="-static" --enable-static-programs -disable-all-programs --enable-nsenter
