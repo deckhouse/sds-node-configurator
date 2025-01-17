@@ -79,7 +79,7 @@ vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true
 
 ## Как использовать ресурс `LVMVolumeGroupSet` для создания `LVMVolumeGroup`?
 
-Для создания `LVMVolumeGroup` с помощью `LVMVolumeGroupSet` необходимо указать в спецификации `LVMVolumeGroupSet` селекторы для нод и шаблон для создаваемых ресурсов `LVMVolumeGroup`. На данный момент поддерживается только стратегия `PerNode`, при которой контроллер создаст по одному ресуру `LVMVolumeGroup` из шаблона для каждой ноды, удовлетворяющей селектору.
+Для создания `LVMVolumeGroup` с помощью `LVMVolumeGroupSet` необходимо указать в спецификации `LVMVolumeGroupSet` селекторы для узлов и шаблон для создаваемых ресурсов `LVMVolumeGroup`. На данный момент поддерживается только стратегия `PerNode`, при которой контроллер создаст по одному ресурсу `LVMVolumeGroup` из шаблона для каждого узла, удовлетворяющего селектору.
 
 Пример спецификации `LVMVolumeGroupSet`:
 
