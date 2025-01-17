@@ -36,9 +36,9 @@ func KubernetesDefaultConfigCreate() (*rest.Config, error) {
 	)
 
 	// Get a config to talk to API server
-	config, err := clientConfig.ClientConfig()
+	cconfig, err := clientConfig.ClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("config kubernetes error %w", err)
 	}
-	return config, nil
+	return cconfig, nil
 }
