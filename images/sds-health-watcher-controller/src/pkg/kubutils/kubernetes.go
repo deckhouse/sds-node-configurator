@@ -24,6 +24,7 @@ import (
 )
 
 func KubernetesDefaultConfigCreate() (*rest.Config, error) {
+	// err is either nil and we return config or its value doesn't matter for us here
 	config, err := rest.InClusterConfig()
 	if err == nil {
 		return config, nil
@@ -35,9 +36,10 @@ func KubernetesDefaultConfigCreate() (*rest.Config, error) {
 	)
 
 	// Get a config to talk to API server
-	cconfig, err := clientConfig.ClientConfig()
+	config, err = clientConfig.ClientConfig()
+
 	if err != nil {
 		return nil, fmt.Errorf("config kubernetes error %w", err)
 	}
-	return cconfig, nil
+	return config, nil
 }
