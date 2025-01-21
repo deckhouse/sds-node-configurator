@@ -10,41 +10,41 @@ skinparam backgroundColor transparent
 
 start
 
-:Выбор сценария;
+:Selecting a scenario;
 
-if (Выбран сценарий «Полное зеркало» (рекомендованный)?) then (да)
+if (Is the "Full mirror" scenario selected (recommended)?) then (Yes)
 
-group "Сценарий Полное зеркало"
-  :Формирование зеркала
-  из дисков целиком;
-  :Создание VG на зеркале;
-  :Создание LV в VG;
-  :Установка ОС на LV;
-  :Установка тега storage.deckhouse.io/enabled=true
-  на VG;
+group "Full mirror"
+  :Creating a mirror
+  of entire disks;
+  :Creating a VG on the mirror;
+  :Creating an LV in the VG;
+  :Installing the operating system on the LV;
+  :Assigning the storage.deckhouse.io/enabled=true tag
+  to the VG;
 end group
 
-else (нет)
+else (No)
 
-group "Сценарий Частичное зеркало"
-  :Создание двух разделов
-  на каждом диске;
-  :Формирование зеркала
-  из первых разделов дисков;
-  :Создание VG на зеркале;
-  :Создание LV в VG на зеркале;
-  :Установка ОС на LV в VG на зеркале;
-  :Установка тега storage.deckhouse.io/enabled=true
-  на VG на зеркале;
-  :Создание VG из вторых разделов каждого диска;
-  :Установка тега storage.deckhouse.io/enabled=true
-  на VG из вторых разделов;
+group "Partial mirror"
+  :Creating two partitions
+  on each disk;
+  :Creating a mirror
+  of the first partitions;
+  :Creating a VG on the mirror;
+  :Creating an LV in the VG on the mirror;
+  :Installing the operating system on the LV in the VG on the mirror;
+  :Assigning the storage.deckhouse.io/enabled=true tag
+  to the VG on the mirror;
+  :Creating a VG of the second partitions on each disk;
+  :Assigning the storage.deckhouse.io/enabled=true tag
+  to the VG of the second partitions;
 end group
 
 endif
 
-:Добавление узла в кластер Deckhouse;
-:Настройка модулей SDS;
+:Adding a node to the Deckhouse cluster;
+:Configuring the SDS modules;
 
 stop
 
