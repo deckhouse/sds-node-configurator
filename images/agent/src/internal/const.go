@@ -52,6 +52,7 @@ const (
 	ReasonTerminating      = "Terminating"
 	ReasonScanFailed       = "ScanFailed"
 	ReasonUpdated          = "Updated"
+	ReasonApplied          = "Applied"
 
 	BlockDeviceLabelPrefix = "status.blockdevice.storage.deckhouse.io"
 
@@ -72,6 +73,28 @@ const (
 	BlockDeviceRotaLabelKey               = BlockDeviceLabelPrefix + "/rota"
 	BlockDeviceHotPlugLabelKey            = BlockDeviceLabelPrefix + "/hotplug"
 	BlockDeviceMachineIDLabelKey          = BlockDeviceLabelPrefix + "/machineid"
+
+	Thick = "Thick"
+	Thin  = "Thin"
+
+	LLVStatusPhaseCreated  = "Created"
+	LLVStatusPhasePending  = "Pending"
+	LLVStatusPhaseResizing = "Resizing"
+	LLVStatusPhaseFailed   = "Failed"
+
+	LLVSStatusPhaseCreated = "Created"
+	LLVSStatusPhasePending = "Pending"
+	LLVSStatusPhaseFailed  = "Failed"
+	LLVSNameTag            = "storage.deckhouse.io/lvmLogicalVolumeSnapshotName"
+
+	Local  = "Local"
+	Shared = "Shared"
+
+	NonOperational = "NonOperational"
+
+	DeletionProtectionAnnotation = "storage.deckhouse.io/deletion-protection"
+	LVMVolumeGroupTag            = "storage.deckhouse.io/lvmVolumeGroupName"
+	LVGMetadateNameLabelKey      = "kubernetes.io/metadata.name"
 )
 
 var (
@@ -80,4 +103,14 @@ var (
 	Finalizers         = []string{SdsNodeConfiguratorFinalizer}
 	LVMTags            = []string{"storage.deckhouse.io/enabled=true", "linstor-"}
 	ResizeDelta        = resource.MustParse(resizeDelta)
+)
+
+const (
+	CreateReconcile ReconcileType = "Create"
+	UpdateReconcile ReconcileType = "Update"
+	DeleteReconcile ReconcileType = "Delete"
+)
+
+type (
+	ReconcileType string
 )

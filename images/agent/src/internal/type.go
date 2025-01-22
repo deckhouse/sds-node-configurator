@@ -16,7 +16,11 @@ limitations under the License.
 
 package internal
 
-import "k8s.io/apimachinery/pkg/api/resource"
+import (
+	"strconv"
+
+	"k8s.io/apimachinery/pkg/api/resource"
+)
 
 type BlockDeviceCandidate struct {
 	NodeName              string
@@ -153,4 +157,24 @@ type LVData struct {
 	CopyPercent     string            `json:"copy_percent"`
 	ConvertLv       string            `json:"convert_lv"`
 	LvTags          string            `json:"lv_tags"`
+}
+
+func (lv LVData) GetUsedSize() (*resource.Quantity, error) {
+	var (
+		err         error
+		dataPercent float64
+	)
+
+	if lv.DataPercent == "" {
+		dataPercent = 0.0
+	} else {
+		dataPercent, err = strconv.ParseFloat(lv.DataPercent, 64)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	aproxBytes := float64(lv.LVSize.Value()) * dataPercent * 0.01
+
+	return resource.NewQuantity(int64(aproxBytes), resource.BinarySI), nil
 }
