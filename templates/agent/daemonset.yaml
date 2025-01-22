@@ -90,7 +90,7 @@ spec:
           - modprobe
           - -a
           - dm_thin_pool
-{{- if and (.Values.global.enabledModules | has "snapshot-controller")  (not .Values.sdsNodeConfigurator.disableSnapshotKernelModuleLoading) }}
+{{- if  (.Values.global.enabledModules | has "snapshot-controller") }}
           - dm_snapshot
 {{- end }}
         # Privileged mode is required to use nsenter and access the host's mount namespace.

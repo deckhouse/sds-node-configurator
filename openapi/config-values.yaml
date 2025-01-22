@@ -6,10 +6,6 @@ properties:
     type: boolean
     default: false
     description: Disable sds-node-configurator daemonset
-  disableSnapshotKernelModuleLoading:
-    type: boolean
-    default: false
-    description: Disable loading of the snapshot kernel module
   logLevel:
     type: string
     enum:
