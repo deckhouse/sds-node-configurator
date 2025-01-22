@@ -16,9 +16,10 @@ If you create virtual machines by cloning, you must change the UUID of the volum
 You can only change the UUID of a VG if it has no active logical volumes (LV). To deactivate a logical volume, unmount it and run the following command:
 
 ```shell
-lvchange -an <name of a VG (to deactivate all LV in the VG) or LV (to deactivate a specific LV)>
+lvchange -an <VG_or_LV_NAME>
 ```
 
+, where `<VG_or_LV_NAME>` — the name of a VG, to deactivate all LV in the VG, or the name of a LV, to deactivate a specific LV.
 {{< /alert >}}
 
 ## Configuration methods and scenarios for node disk subsystems
@@ -36,14 +37,14 @@ Each configuration method comes with two configuration scenarios:
 
 The following table contains details, advantages, and disadvantages of each scenario:
 
-| Configuration scenario | Details | Advantages | Disadvantages |
-| ---------------------- | ------- | ---------- | ------------- |
-| "Full mirror" | - Disks aren't partitioned. A mirror is made of entire disks<br>- A single VG is used for the root system and data | - Reliable<br>- Easy to configure and use<br>- Convenient for allocating space between different software-defined storages (SDS) | - Overhead disk space for SDS, which replicate data on their own |
-| "Partial mirror" | - Disks are divided in two partitions<br>- The first partition on each disk is used to create a mirror. It stores a VG where the operating system (OS) is installed<br>- The second partition is used as a VG for data, without mirroring | - Reliable<br>- The most efficient disk space use | - Difficult to configure and use<br>- Very difficult to reallocate space between safe and unsafe partitions |
+| Configuration scenario | Details                                                                                                                                                                                                                                         | Advantages | Disadvantages                                                                                                               |
+| ---------------------- |-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------| ---------- |-----------------------------------------------------------------------------------------------------------------------------|
+| "Full mirror" | <ul><li>Disks aren't partitioned. A mirror is made of entire disks</li><li>A single VG is used for the root system and data</li></ul>                                                                                                              | <ul><li>Reliable</li><li>Easy to configure and use</li><li>Convenient for allocating space between different software-defined storages (SDS)</li></ul> | <ul><li>Overhead disk space for SDS, which replicate data on their own</li></ul>                                            |
+| "Partial mirror" | <ul><li>Disks are divided in two partitions</li><li>The first partition on each disk is used to create a mirror. It stores a VG where the operating system (OS) is installed</li><li>The second partition is used as a VG for data, without mirroring</li></ul> | <ul><li>Reliable</li><li>The most efficient disk space use</li></ul> | <ul><li>Difficult to configure and use</li><li>Very difficult to reallocate space between safe and unsafe partitions</li></ul> |
 
 The following diagram depicts the differences in disk subsystem configuration depending on the selected scenario:
 
-![Configuration scenarios compared](./images/sds-node-configurator-scenaries.png)
+![Configuration scenarios compared](images/sds-node-configurator-scenaries.png)
 
 ## Storage with identical disks
 
