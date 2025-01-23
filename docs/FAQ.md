@@ -75,3 +75,33 @@ The controller will then stop tracking the selected `Volume Group` and delete th
 This can happen if you created the `LVM Volume Group` using the `LVMVolumeGroup` resource, in which case the controller will automatically add this LVM tag to the created `LVM Volume Group`. This is also possible if the `Volume Group` or its `Thin-pool` already had the `linstor-*` LVM tag of the `linstor` module.
 
 When you switch from the `linstor` module to the `sds-node-configurator` and `sds-drbd` modules, the `linstor-*` LVM tags are automatically replaced with the `storage.deckhouse.io/enabled=true` LVM tag in the `Volume Group`. This way, the `sds-node-configurator` gains control over these `Volume Groups`.
+
+## Which labels are added by the controller to BlockDevice resources
+
+* status.blockdevice.storage.deckhouse.io/type - LVM type
+
+* status.blockdevice.storage.deckhouse.io/fstype - filesystem type
+
+* status.blockdevice.storage.deckhouse.io/pvuuid - PV UUID
+
+* status.blockdevice.storage.deckhouse.io/vguuid - VG UUID
+
+* status.blockdevice.storage.deckhouse.io/partuuid - partition UUID
+
+* status.blockdevice.storage.deckhouse.io/lvmvolumegroupname - resource name
+
+* status.blockdevice.storage.deckhouse.io/actualvgnameonthenode - actual VG name on the node
+
+* status.blockdevice.storage.deckhouse.io/wwn - WWN (World Wide Name) identifier for the device
+
+* status.blockdevice.storage.deckhouse.io/serial - device serial number
+
+* status.blockdevice.storage.deckhouse.io/size - size
+
+* status.blockdevice.storage.deckhouse.io/model - device model
+
+* status.blockdevice.storage.deckhouse.io/rota - whether it is a rotational device
+
+* status.blockdevice.storage.deckhouse.io/hotplug - hot-plug capability
+
+* status.blockdevice.storage.deckhouse.io/machineid - ID of the server on which the block device is installed
