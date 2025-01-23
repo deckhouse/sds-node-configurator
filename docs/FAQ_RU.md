@@ -76,3 +76,35 @@ vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true
 Это возможно в случае, если вы создавали `LVM Volume Group` через ресурс `LVMVolumeGroup` (в таком случае контроллер автоматически вешает данный LVM-тег на созданную `LVM Volume Group`). Либо на данной `Volume Group` или ее `Thin-pool` был LVM-тег модуля `linstor` — `linstor-*`.
 
 При миграции с встроенного модуля `linstor` на модули `sds-node-configurator` и `sds-drbd` автоматически происходит изменение LVM-тегов `linstor-*` на LVM-тег `storage.deckhouse.io/enabled=true` в `Volume Group`. Таким образом, управление этими `Volume Group` передается модулю `sds-node-configurator`.
+
+## Какие labels добавляются контроллером на ресурсы BlockDevices
+
+* status.blockdevice.storage.deckhouse.io/type - тип LVM
+
+* status.blockdevice.storage.deckhouse.io/fstype - тип файловой системы
+
+* status.blockdevice.storage.deckhouse.io/pvuuid - UUID PV
+
+* status.blockdevice.storage.deckhouse.io/vguuid - UUID VG
+
+* status.blockdevice.storage.deckhouse.io/partuuid - UUID раздела
+
+* status.blockdevice.storage.deckhouse.io/lvmvolumegroupname - Желаемое 
+название LVM группы
+
+* status.blockdevice.storage.deckhouse.io/actualvgnameonthenode - Актуальное 
+название LVM группы
+
+* status.blockdevice.storage.deckhouse.io/wwn - идентификатор WWN (World Wide Name) для устройства
+
+* status.blockdevice.storage.deckhouse.io/serial - серийный номер устройства
+
+* status.blockdevice.storage.deckhouse.io/size - раздел
+
+* status.blockdevice.storage.deckhouse.io/model - модель устройства
+
+* status.blockdevice.storage.deckhouse.io/rota - является ли ротационным  устройством
+
+* status.blockdevice.storage.deckhouse.io/hotplug - возможность hot подключения
+
+* status.blockdevice.storage.deckhouse.io/machineid - ID сервера, на котором установлено блочное устройство
