@@ -77,7 +77,7 @@ vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true
 
 При миграции с встроенного модуля `linstor` на модули `sds-node-configurator` и `sds-drbd` автоматически происходит изменение LVM-тегов `linstor-*` на LVM-тег `storage.deckhouse.io/enabled=true` в `Volume Group`. Таким образом, управление этими `Volume Group` передается модулю `sds-node-configurator`.
 
-## Какие labels добавляются контроллером на ресурсы BlockDevices
+## Какие лейблы добавляются контроллером на ресурсы BlockDevices
 
 * status.blockdevice.storage.deckhouse.io/type - тип LVM
 
