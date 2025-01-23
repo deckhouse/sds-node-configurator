@@ -88,9 +88,9 @@ When you switch from the `linstor` module to the `sds-node-configurator` and `sd
 
 * status.blockdevice.storage.deckhouse.io/partuuid - partition UUID
 
-* status.blockdevice.storage.deckhouse.io/lvmvolumegroupname - Desired LVM group name
+* status.blockdevice.storage.deckhouse.io/lvmvolumegroupname - resource name
 
-* status.blockdevice.storage.deckhouse.io/actualvgnameonthenode - Actual LVM group name on the node
+* status.blockdevice.storage.deckhouse.io/actualvgnameonthenode - actual VG name on the node
 
 * status.blockdevice.storage.deckhouse.io/wwn - WWN (World Wide Name) identifier for the device
 

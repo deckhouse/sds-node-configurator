@@ -89,11 +89,9 @@ vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true
 
 * status.blockdevice.storage.deckhouse.io/partuuid - UUID раздела
 
-* status.blockdevice.storage.deckhouse.io/lvmvolumegroupname - Желаемое 
-название LVM группы
+* status.blockdevice.storage.deckhouse.io/lvmvolumegroupname - имя этого ресурса
 
-* status.blockdevice.storage.deckhouse.io/actualvgnameonthenode - Актуальное 
-название LVM группы
+* status.blockdevice.storage.deckhouse.io/actualvgnameonthenode - название VolumeGroup на ноде
 
 * status.blockdevice.storage.deckhouse.io/wwn - идентификатор WWN (World Wide Name) для устройства
 
