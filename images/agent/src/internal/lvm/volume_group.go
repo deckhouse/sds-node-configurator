@@ -16,28 +16,34 @@ limitations under the License.
 
 package lvm
 
-import "errors"
-
-var ErrNotFound = errors.New("Resource not found")
-
-type Client interface {
-	VolumeGroup(name string) (VolumeGroup, error)
+type VolumeGroup interface {
+	Name() string
+	LogicalVolume(name string) (LogicalVolume, error)
 }
 
-type client struct {
-	vgs map[string]volumeGroup
+type volumeGroup struct {
+	name string
+	lvs  map[string]logicalVolume
 }
 
-func New() (Client, error) {
-	return &client{vgs: make(map[string]volumeGroup)}, nil
+func (vg *volumeGroup) Name() string {
+	return vg.name
 }
 
-func (client *client) VolumeGroup(name string) (VolumeGroup, error) {
-	vg, ok := client.vgs[name]
+func (vg *volumeGroup) LogicalVolume(name string) (LogicalVolume, error) {
+	lv, ok := vg.lvs[name]
 
 	if !ok {
 		return nil, ErrNotFound
 	}
 
-	return &vg, nil
+	return &lv, nil
+}
+
+func newVolumeGroup(name string) *volumeGroup {
+	return &volumeGroup{name: name}
+}
+
+func (vg *volumeGroup) newLogicalVolume(name string) *logicalVolume {
+	return &logicalVolume{name: name, vg: vg}
 }

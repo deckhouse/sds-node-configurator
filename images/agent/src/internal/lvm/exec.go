@@ -14,25 +14,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package nsenter
+package lvm
 
 import (
 	"agent/internal"
+	"agent/internal/nsenter"
 	"context"
 	"os/exec"
 )
 
 func makeCommand(name string, arg ...string) (string, []string) {
-	_arg := append([]string{"-t", "1", "-m", "-u", "-i", "-n", "-p", "--", name}, arg...)
-	return internal.NSENTERCmd, _arg
+	_arg := append([]string{name}, arg...)
+	return internal.LVMCmd, _arg
 }
 
 func Command(name string, arg ...string) *exec.Cmd {
 	_name, _arg := makeCommand(name, arg...)
-	return exec.Command(_name, _arg...)
+	return nsenter.Command(_name, _arg...)
 }
 
 func CommandContext(ctx context.Context, name string, arg ...string) *exec.Cmd {
 	_name, _arg := makeCommand(name, arg...)
-	return exec.CommandContext(ctx, _name, _arg...)
+	return nsenter.CommandContext(ctx, _name, _arg...)
 }

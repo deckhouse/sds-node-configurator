@@ -14,25 +14,33 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package nsenter
+package lvm
 
 import (
-	"agent/internal"
-	"context"
-	"os/exec"
+	"encoding/xml"
+	"fmt"
 )
 
-func makeCommand(name string, arg ...string) (string, []string) {
-	_arg := append([]string{"-t", "1", "-m", "-u", "-i", "-n", "-p", "--", name}, arg...)
-	return internal.NSENTERCmd, _arg
+type ThinPool interface {
+	LogicalVolume
+	DumpThinPoolSuperblock() (Superblock, error)
 }
 
-func Command(name string, arg ...string) *exec.Cmd {
-	_name, _arg := makeCommand(name, arg...)
-	return exec.Command(_name, _arg...)
+type thinPool struct {
+	logicalVolume
 }
 
-func CommandContext(ctx context.Context, name string, arg ...string) *exec.Cmd {
-	_name, _arg := makeCommand(name, arg...)
-	return exec.CommandContext(ctx, _name, _arg...)
+func (tp *thinPool) DumpThinPoolSuperblock() (Superblock, error) {
+	outs, err := ThinDump(tp)
+	var superblock Superblock
+
+	if err != nil {
+		return superblock, fmt.Errorf("dumping thin pool: %w", err)
+	}
+
+	if err := xml.Unmarshal(outs.Bytes(), &superblock); err != nil {
+		return superblock, fmt.Errorf("parsing metadata: %w", err)
+	}
+
+	return superblock, nil
 }
