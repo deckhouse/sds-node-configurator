@@ -23,25 +23,25 @@ import (
 	"fmt"
 )
 
-type Time uint64
-type Transaction uint64
+type Time int64
+type Transaction int64
 
 type Superblock struct {
 	XMLName       xml.Name    `xml:"superblock"`
 	Uuid          string      `xml:"uuid,attr"`
 	Time          Time        `xml:"time,attr"`
 	Transaction   Transaction `xml:"transaction,attr"`
-	Flags         uint64      `xml:"flags,attr"`
-	Version       uint32      `xml:"version,attr"`
-	DataBlockSize uint64      `xml:"data_block_size,attr"`
-	NrDataBlocks  uint64      `xml:"nr_data_blocks,attr"`
+	Flags         int64       `xml:"flags,attr"`
+	Version       int32       `xml:"version,attr"`
+	DataBlockSize int64       `xml:"data_block_size,attr"`
+	NrDataBlocks  int64       `xml:"nr_data_blocks,attr"`
 	Devices       []Device    `xml:"device"`
 }
 
 type Device struct {
 	XMLName        xml.Name        `xml:"device"`
 	DevId          ThinDeviceId    `xml:"dev_id,attr"`
-	MappedBlocks   uint64          `xml:"mapped_blocks,attr"`
+	MappedBlocks   int64           `xml:"mapped_blocks,attr"`
 	Transaction    Transaction     `xml:"transaction,attr"`
 	CreationTime   Time            `xml:"creation_time,attr"`
 	SnapTime       Time            `xml:"snap_time,attr"`
@@ -51,16 +51,16 @@ type Device struct {
 
 type RangeMapping struct {
 	XMLName     xml.Name `xml:"range_mapping"`
-	OriginBegin uint64   `xml:"origin_begin,attr"`
-	DataBegin   uint64   `xml:"data_begin,attr"`
-	Length      uint64   `xml:"length,attr"`
+	OriginBegin int64    `xml:"origin_begin,attr"`
+	DataBegin   int64    `xml:"data_begin,attr"`
+	Length      int64    `xml:"length,attr"`
 	Time        Time     `xml:"time,attr"`
 }
 
 type SingleMapping struct {
 	XMLName     xml.Name `xml:"single_mapping"`
-	OriginBlock uint64   `xml:"origin_block,attr"`
-	DataBlock   uint64   `xml:"data_block,attr"`
+	OriginBlock int64    `xml:"origin_block,attr"`
+	DataBlock   int64    `xml:"data_block,attr"`
 	Time        Time     `xml:"time,attr"`
 }
 
@@ -94,4 +94,3 @@ func ThinDump(ThinPool ThinPool) (*bytes.Buffer, error) {
 
 	return &outs, nil
 }
-

@@ -41,6 +41,14 @@ const (
 	DefaultHealthProbeBindAddress        = ":4228"
 )
 
+type ThinWipeMethod uint8
+
+const (
+	THIN_WIPE_NONE ThinWipeMethod = iota
+	THIN_WIPE_POOL
+	THIN_WIPE_BLOCKS
+)
+
 type Config struct {
 	MachineID               string
 	NodeName                string

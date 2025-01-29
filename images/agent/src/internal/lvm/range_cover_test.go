@@ -80,7 +80,7 @@ func TestMergeMerge(t *testing.T) {
 }
 
 func TestMultiply(t *testing.T) {
-	multiplier := uint64(4)
+	multiplier := int64(4)
 	original := RangeCover{
 		Range{Start: 0, Count: 2},
 		Range{Start: 5, Count: 1},

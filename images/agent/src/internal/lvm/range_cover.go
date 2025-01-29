@@ -22,7 +22,7 @@ import (
 )
 
 type Range struct {
-	Start, Count uint64
+	Start, Count int64
 }
 
 type RangeCover []Range
@@ -63,10 +63,14 @@ func (rc RangeCover) Merged() (RangeCover, error) {
 	return reduced, nil
 }
 
-func (cover RangeCover) Multiplied(multiplier uint64) RangeCover {
+func (value Range) Multiplied(multiplier int64) Range {
+	return Range{Start: value.Start * multiplier, Count: value.Count * multiplier}
+}
+
+func (cover RangeCover) Multiplied(multiplier int64) RangeCover {
 	multiplied := make([]Range, len(cover))
 	for i, value := range cover {
-		multiplied[i] = Range{Start: value.Start * multiplier, Count: value.Count * multiplier}
+		multiplied[i] = value.Multiplied(multiplier)
 	}
 	return multiplied
 }
