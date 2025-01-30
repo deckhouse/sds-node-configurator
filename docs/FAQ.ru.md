@@ -77,6 +77,70 @@ vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true
 
 При миграции с встроенного модуля `linstor` на модули `sds-node-configurator` и `sds-drbd` автоматически происходит изменение LVM-тегов `linstor-*` на LVM-тег `storage.deckhouse.io/enabled=true` в `Volume Group`. Таким образом, управление этими `Volume Group` передается модулю `sds-node-configurator`.
 
+## Как использовать ресурс `LVMVolumeGroupSet` для создания `LVMVolumeGroup`?
+
+Для создания `LVMVolumeGroup` с помощью `LVMVolumeGroupSet` необходимо указать в спецификации `LVMVolumeGroupSet` селекторы для узлов и шаблон для создаваемых ресурсов `LVMVolumeGroup`. На данный момент поддерживается только стратегия `PerNode`, при которой контроллер создаст по одному ресурсу `LVMVolumeGroup` из шаблона для каждого узла, удовлетворяющего селектору.
+
+Пример спецификации `LVMVolumeGroupSet`:
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: LVMVolumeGroupSet
+metadata:
+  name: my-lvm-volume-group-set
+  labels:
+    my-label: my-value
+spec:
+  strategy: PerNode
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/worker: ""
+  lvmVolumeGroupTemplate:
+    metadata:
+      labels:
+        my-label-for-lvg: my-value-for-lvg
+    spec:
+      type: Local
+      blockDeviceSelector:
+        matchLabels:
+          status.blockdevice.storage.deckhouse.io/model: <model>
+      actualVGNameOnTheNode: <actual-vg-name-on-the-node>
+
+
+```
+
+## Как использовать ресурс `LVMVolumeGroupSet` для создания `LVMVolumeGroup`?
+
+Для создания `LVMVolumeGroup` с помощью `LVMVolumeGroupSet` необходимо указать в спецификации `LVMVolumeGroupSet` селекторы для узлов и шаблон для создаваемых ресурсов `LVMVolumeGroup`. На данный момент поддерживается только стратегия `PerNode`, при которой контроллер создаст по одному ресурсу `LVMVolumeGroup` из шаблона для каждого узла, удовлетворяющего селектору.
+
+Пример спецификации `LVMVolumeGroupSet`:
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: LVMVolumeGroupSet
+metadata:
+  name: my-lvm-volume-group-set
+  labels:
+    my-label: my-value
+spec:
+  strategy: PerNode
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/worker: ""
+  lvmVolumeGroupTemplate:
+    metadata:
+      labels:
+        my-label-for-lvg: my-value-for-lvg
+    spec:
+      type: Local
+      blockDeviceSelector:
+        matchLabels:
+          status.blockdevice.storage.deckhouse.io/model: <model>
+      actualVGNameOnTheNode: <actual-vg-name-on-the-node>
+
+
+```
+
 ## Какие лейблы добавляются контроллером на ресурсы BlockDevices
 
 * status.blockdevice.storage.deckhouse.io/type - тип LVM
