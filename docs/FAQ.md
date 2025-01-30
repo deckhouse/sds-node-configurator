@@ -109,3 +109,63 @@ spec:
           status.blockdevice.storage.deckhouse.io/model: <model>
       actualVGNameOnTheNode: <actual-vg-name-on-the-node>
 ```
+
+## How to use the LVMVolumeGroupSet resource to create LVMVolumeGroup?
+
+To create an LVMVolumeGroup using the LVMVolumeGroupSet resource, you need to specify node selectors and a template for the LVMVolumeGroup resources in the LVMVolumeGroupSet specification. Currently, only the `PerNode` strategy is supported. With this strategy, the controller will create one LVMVolumeGroup resource from the template for each node that matches the selector.
+
+Example of an LVMVolumeGroupSet specification:
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: LVMVolumeGroupSet
+metadata:
+  name: my-lvm-volume-group-set
+  labels:
+    my-label: my-value
+spec:
+  strategy: PerNode
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/worker: ""
+  lvmVolumeGroupTemplate:
+    metadata:
+      labels:
+        my-label-for-lvg: my-value-for-lvg
+    spec:
+      type: Local
+      blockDeviceSelector:
+        matchLabels:
+          status.blockdevice.storage.deckhouse.io/model: <model>
+      actualVGNameOnTheNode: <actual-vg-name-on-the-node>
+```
+
+## Which labels are added by the controller to BlockDevice resources
+
+* status.blockdevice.storage.deckhouse.io/type - LVM type
+
+* status.blockdevice.storage.deckhouse.io/fstype - filesystem type
+
+* status.blockdevice.storage.deckhouse.io/pvuuid - PV UUID
+
+* status.blockdevice.storage.deckhouse.io/vguuid - VG UUID
+
+* status.blockdevice.storage.deckhouse.io/partuuid - partition UUID
+
+* status.blockdevice.storage.deckhouse.io/lvmvolumegroupname - resource name
+
+* status.blockdevice.storage.deckhouse.io/actualvgnameonthenode - actual VG name on the node
+
+* status.blockdevice.storage.deckhouse.io/wwn - WWN (World Wide Name) identifier for the device
+
+* status.blockdevice.storage.deckhouse.io/serial - device serial number
+
+* status.blockdevice.storage.deckhouse.io/size - size
+
+* status.blockdevice.storage.deckhouse.io/model - device model
+
+* status.blockdevice.storage.deckhouse.io/rota - whether it is a rotational device
+
+* status.blockdevice.storage.deckhouse.io/hotplug - hot-plug capability
+
+* status.blockdevice.storage.deckhouse.io/machineid - ID of the server on which the block device is installed
