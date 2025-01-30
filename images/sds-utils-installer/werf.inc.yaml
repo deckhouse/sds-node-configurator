@@ -4,7 +4,7 @@
 # Do not remove. It's used in external tests.
 ---
 image: {{ $.ImageName }}-src-artifact
-from: {{ $.Root.BASE_ALT }}
+from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
@@ -30,7 +30,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-binaries-artifact
-from: {{ $.Root.BASE_ALT }}
+from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 import:
@@ -94,7 +94,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-distroless-artifact
-from: {{ $.Root.BASE_ALT }}
+from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 shell:
