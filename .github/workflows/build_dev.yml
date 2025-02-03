@@ -9,14 +9,17 @@ env:
   MODULES_REGISTRY_PASSWORD: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
   SOURCE_REPO: "${{ secrets.SOURCE_REPO }}"
 
+
+
 on:
-  pull_request:
+  #pull_request:
   push:
     branches:
       - main
   # make this job as dependency for trivy_image_check workflow
   # https://stackoverflow.com/a/71489231
   workflow_call:
+
 
 jobs:
   dev_setup_build:
