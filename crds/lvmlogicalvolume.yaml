@@ -115,6 +115,7 @@ spec:
                           message: Value is immutable.
                       description: |
                         If true, the Logical Volume will be created with the contiguous flag. Use it carefully as LV might not be created even if there is enough space in VG.
+                    # secureEraseForHDD:
                 source:
                   type: object
                   description: |
