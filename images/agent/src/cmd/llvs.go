@@ -1,4 +1,4 @@
-//go:build !ee
+//go:build !EE
 
 package main
 

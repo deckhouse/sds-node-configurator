@@ -1,4 +1,4 @@
-//go:build ee
+//go:build EE
 
 /*
 Copyright 2024 Flant JSC

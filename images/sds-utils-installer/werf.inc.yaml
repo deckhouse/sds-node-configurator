@@ -1,5 +1,4 @@
 {{ $binaries := "/sds-utils/bin/lvm.static" }}
-{{ $LVM2_VERSION := "d786a8f820d54ce87a919e6af5426c333c173b11" }}
 
 # Do not remove. It's used in external tests.
 ---
@@ -25,7 +24,7 @@ shell:
     - apt-get -y install git
     - git clone --depth 1 {{ env "SOURCE_REPO" }}/lvmteam/lvm2.git /src/lvm2
     - cd /src/lvm2
-    - git fetch --depth 1 origin {{ $LVM2_VERSION }}
+    - git fetch --depth 1 origin {{ $.Versions.LVM2 }}
     - rm -rf /src/lvm2/.git
 
 ---
