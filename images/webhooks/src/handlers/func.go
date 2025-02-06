@@ -18,6 +18,9 @@ package handlers
 
 import (
 	"context"
+	"net/http"
+	"os"
+
 	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/go-logr/logr"
 	"github.com/slok/kubewebhook/v2/pkg/log"
@@ -29,11 +32,8 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"net/http"
-	"os"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	mc "webhooks/api"
 
 	kwhhttp "github.com/slok/kubewebhook/v2/pkg/http"
 	"github.com/slok/kubewebhook/v2/pkg/model"
@@ -62,7 +62,6 @@ func NewKubeClient(kubeconfigPath string) (client.Client, error) {
 	var (
 		resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
 			v1alpha2.AddToScheme,
-			mc.AddToScheme,
 			cn.AddToScheme,
 			clientgoscheme.AddToScheme,
 			extv1.AddToScheme,

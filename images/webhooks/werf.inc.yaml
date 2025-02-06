@@ -1,40 +1,79 @@
-{{- $_ := set . "BASE_GOLANG" "registry.deckhouse.io/base_images/golang:1.22.6-bullseye@sha256:260918a3795372a6d33225d361fe5349723be9667de865a23411b50fbcc76c5a" }}
-{{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
+---
+# do not remove this image: used in external audits (DKP CSE)
+image: {{ $.ImageName }}-src-artifact
+from: {{ $.Root.BASE_ALT_P11 }}
+final: false
+git:
+  - add: /
+    to: /src
+    includePaths:
+      - api
+      - images/{{ $.ImageName }}/src
+    stageDependencies:
+      install:
+        - '**/*'
+shell:
+  install:
+    - rm -rf /src/.git
 
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.BASE_GOLANG }}
+from: {{ $.Root.BASE_GOLANG_1_23 }}
 final: false
-
-git:
-  - add: /images/{{ $.ImageName }}/src
-    to: /src/images/{{ $.ImageName }}/src
-    stageDependencies:
-      install:
-        - "**/*"
-  - add: /api
-    to: /src/api
-    stageDependencies:
-      install:
-        - "**/*"
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: setup
 mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
 shell:
   setup:
-    - cd /src
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o webhooks
-    - mv webhooks /webhooks
+    - cd /src/images/{{ $.ImageName }}/src/cmd
+    - export CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+    - go build -ldflags="-s -w" -tags {{ $.Root.MODULE_EDITION }} -o /webhooks
     - chmod +x /webhooks
+
+---
+image: {{ $.ImageName }}-distroless-artifact
+from: {{ $.Root.BASE_ALT_P11 }}
+final: false
+shell:
+  beforeInstall:
+    - apt-get update
+    - apt-get install -y openssl libtirpc
+    - {{ $.Root.ALT_CLEANUP_CMD }}
+  install:
+    - mkdir -p /relocate/bin /relocate/sbin /relocate/etc /relocate/var/lib/ssl /relocate/usr/bin /relocate/usr/sbin /relocate/usr/share
+    - cp -pr /tmp /relocate
+    - cp -pr /etc/passwd /etc/group /etc/hostname /etc/hosts /etc/shadow /etc/protocols /etc/services /etc/nsswitch.conf /etc/netconfig /relocate/etc
+    - cp -pr /usr/share/ca-certificates /relocate/usr/share
+    - cp -pr /usr/share/zoneinfo /relocate/usr/share
+    - cp -pr /var/lib/ssl/cert.pem /relocate/var/lib/ssl
+    - cp -pr /var/lib/ssl/certs /relocate/var/lib/ssl
+    - echo "deckhouse:x:{{ $.Root.DECKHOUSE_UID_GID }}:{{ $.Root.DECKHOUSE_UID_GID }}:deckhouse:/:/sbin/nologin" >> /relocate/etc/passwd
+    - echo "deckhouse:x:{{ $.Root.DECKHOUSE_UID_GID }}:" >> /relocate/etc/group
+    - echo "deckhouse:!::0:::::" >> /relocate/etc/shadow
+
+---
+image: {{ $.ImageName }}-distroless
+from: {{ $.Root.BASE_SCRATCH }}
+final: false
+import:
+  - image: {{ $.ImageName }}-distroless-artifact
+    add: /relocate
+    to: /
+    before: setup
+
 ---
 image: {{ $.ImageName }}
-from: {{ $.BASE_SCRATCH }}
-
+fromImage: {{ $.ImageName }}-distroless
 import:
   - image: {{ $.ImageName }}-golang-artifact
     add: /webhooks
     to: /webhooks
     before: setup
-
 docker:
   ENTRYPOINT: ["/webhooks"]
+  USER: deckhouse:deckhouse
