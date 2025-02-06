@@ -1,5 +1,3 @@
-//go:build EE
-
 /*
 Copyright 2024 Flant JSC
 
@@ -22,14 +20,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
-
-func init() {
-	knownTypes = append(
-		knownTypes,
-		&LVMLogicalVolumeSnapshot{},
-		&LVMLogicalVolumeSnapshotList{},
-	)
-}
 
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
