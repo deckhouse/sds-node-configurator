@@ -49,9 +49,8 @@ func initFlags() config {
 }
 
 const (
-	port           = ":8443"
-	NSCValidatorId = "NSCValidator"
-	SCValidatorId  = "SCValidator"
+	port            = ":8443"
+	LLVSValidatorId = "LLVSValidator"
 )
 
 func main() {
