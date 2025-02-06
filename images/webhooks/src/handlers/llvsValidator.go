@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,5 +16,3 @@ func LLVSValidate(ctx context.Context, arReview *model.AdmissionReview, obj meta
 	return &kwhvalidating.ValidatorResult{Valid: false},
 		nil
 }
-
-//
