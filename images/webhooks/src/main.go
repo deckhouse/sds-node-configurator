@@ -26,7 +26,6 @@ import (
 	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/sirupsen/logrus"
 	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
-	storagev1 "k8s.io/api/storage/v1"
 )
 
 type config struct {
@@ -62,21 +61,14 @@ func main() {
 
 	cfg := initFlags()
 
-	scValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.SCValidate, SCValidatorId, &storagev1.StorageClass{}, logger)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error creating scValidatingWebhookHandler: %s", err)
-		os.Exit(1)
-	}
-
-	nscValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.NSCValidate, NSCValidatorId, &cn.NFSStorageClass{}, logger)
+	llvsValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.LLVSValidate, LLVSValidatorId, &cn.LVMLogicalVolumeSnapshot{}, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating nscValidatingWebhookHandler: %s", err)
 		os.Exit(1)
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/sc-validate", scValidatingWebhookHandler)
-	mux.Handle("/nsc-validate", nscValidatingWebhookHandler)
+	mux.Handle("/llvs-validate", llvsValidatingWebhookHandler)
 	mux.HandleFunc("/healthz", httpHandlerHealthz)
 
 	logger.Infof("Listening on %s", port)

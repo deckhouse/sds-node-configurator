@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"fmt"
 	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
@@ -13,11 +12,11 @@ import (
 )
 
 const (
-	csiNfsModuleName = "sds-node-configurator"
+	sdsNodeConfiguratorModuleName = "sds-node-configurator"
 )
 
-func NSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
-	nsc, ok := obj.(*cn.NFSStorageClass)
+func LLVSValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
+	llvs, ok := obj.(*cn.)
 	if !ok {
 		// If not a storage class just continue the validation chain(if there is one) and do nothing.
 		return &kwhvalidating.ValidatorResult{}, nil
@@ -27,9 +26,6 @@ func NSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 		klog.Infof("User %s is allowed to manage NFS storage classes", arReview.UserInfo.Username)
 		return &kwhvalidating.ValidatorResult{Valid: true}, nil
 	}
-
-	v3presents := false
-	v3enabled := false
 
 	cl, err := NewKubeClient("")
 	if err != nil {
@@ -47,26 +43,9 @@ func NSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 
 	nfsModuleConfig := &mc.ModuleConfig{}
 
-	err = cl.Get(ctx, types.NamespacedName{Name: csiNfsModuleName, Namespace: ""}, nfsModuleConfig)
+	err = cl.Get(ctx, types.NamespacedName{Name: sdsNodeConfiguratorModuleName, Namespace: ""}, nfsModuleConfig)
 	if err != nil {
 		klog.Fatal(err)
-	}
-
-	if value, exists := nfsModuleConfig.Spec.Settings["v3support"]; exists && value == true {
-		v3enabled = true
-	} else {
-		v3enabled = false
-	}
-
-	klog.Infof("NFSv3 support enabled: %t", v3enabled)
-
-	if v3presents && !v3enabled {
-		klog.Info("NFS v3 is not enabled in module config, enable it first")
-
-		return &kwhvalidating.ValidatorResult{Valid: false, Message: fmt.Sprint("NFS v3 is not enabled in module config, enable it first")}, err
-	} else if !v3presents && v3enabled {
-		klog.Info("NFS v3 is enabled in module config, but not used in NFSStorageCLass - disable it first")
-		return &kwhvalidating.ValidatorResult{Valid: false, Message: fmt.Sprint("NFS v3 is enabled in module config, but not used in NFSStorageCLass - disable it first")}, err
 	}
 
 	return &kwhvalidating.ValidatorResult{Valid: true},

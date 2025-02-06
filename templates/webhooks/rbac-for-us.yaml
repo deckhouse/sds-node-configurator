@@ -29,7 +29,7 @@ rules:
     apiGroups:
       - storage.deckhouse.io
     resources:
-      - lvmvolumegroups
+      - lvmlogicalvolumesnapshots
   - apiGroups:
       - ""
     verbs:
