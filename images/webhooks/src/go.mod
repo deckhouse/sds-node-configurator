@@ -1,6 +1,6 @@
 module webhooks
 
-go 1.23.2
+go 1.22.6
 
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250206203415-a9ffd855f5a3
