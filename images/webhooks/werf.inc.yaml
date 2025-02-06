@@ -7,10 +7,15 @@ from: {{ $.BASE_GOLANG }}
 final: false
 
 git:
-  - add: /images/webhooks/src
-    to: /src
+  - add: /images/{{ $.ImageName }}/src
+    to: /src/images/{{ $.ImageName }}/src
     stageDependencies:
-      setup:
+      install:
+        - "**/*"
+  - add: /api
+    to: /src/api
+    stageDependencies:
+      install:
         - "**/*"
 mount:
   - fromPath: ~/go-pkg-cache
