@@ -25,7 +25,6 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/slok/kubewebhook/v2/pkg/log"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/api/resource/v1alpha2"
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
@@ -61,7 +60,6 @@ func NewKubeClient(kubeconfigPath string) (client.Client, error) {
 
 	var (
 		resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
-			v1alpha2.AddToScheme,
 			cn.AddToScheme,
 			clientgoscheme.AddToScheme,
 			extv1.AddToScheme,
