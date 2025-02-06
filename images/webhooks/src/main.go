@@ -23,7 +23,7 @@ import (
 	"os"
 	"webhooks/handlers"
 
-	cn "github.com/deckhouse/csi-nfs/api/v1alpha1"
+	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/sirupsen/logrus"
 	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
 	storagev1 "k8s.io/api/storage/v1"
