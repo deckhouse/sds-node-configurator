@@ -3,7 +3,7 @@ module webhooks
 go 1.22.2
 
 require (
-	github.com/deckhouse/csi-nfs/api v0.0.0-20240715155038-264399e5952e
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240715155038-264399e5952e
 	github.com/go-logr/logr v1.4.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/slok/kubewebhook/v2 v2.6.0

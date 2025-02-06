@@ -18,7 +18,7 @@ package handlers
 
 import (
 	"context"
-	cn "github.com/deckhouse/csi-nfs/api/v1alpha1"
+	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/go-logr/logr"
 	"github.com/slok/kubewebhook/v2/pkg/log"
 	v1 "k8s.io/api/core/v1"

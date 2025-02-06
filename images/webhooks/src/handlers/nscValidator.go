@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
-	cn "github.com/deckhouse/csi-nfs/api/v1alpha1"
+	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	csiNfsModuleName = "csi-nfs"
+	csiNfsModuleName = "sds-node-configurator"
 )
 
 func NSCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
