@@ -1,0 +1,15 @@
+# TODO comment here
+---
+image: choice-edition
+from: {{ $.BASE_ALT_P11 }}
+fromCacheVersion: 2025-02-07.1
+git:
+  - add: /
+    to: /
+    includePaths:
+      - openapi
+shell:
+  setup:
+    - cd /openapi
+    - cp -v values_{{ .MODULE_EDITION }}.yaml values.yaml
+    - rm -rf values_*.yaml
