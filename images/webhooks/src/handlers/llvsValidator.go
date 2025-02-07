@@ -13,6 +13,8 @@ const (
 )
 
 func LLVSValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
-	return &kwhvalidating.ValidatorResult{Valid: false},
-		nil
+	return &kwhvalidating.ValidatorResult{
+		Valid:   false,
+		Message: "LVMLogicalVolumeSnapshot is not available in this Deckhouse edition.",
+	}, nil
 }
