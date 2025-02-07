@@ -1,11 +1,11 @@
 {{- define "webhooks_resources" }}
-{{- if .Values.sdsNodeConfigurator.internal.featureLLVSEnabled }}
+{{- if not (.Values.sdsNodeConfigurator.internal.featureLLVSEnabled) }}
 cpu: 10m
 memory: 50Mi
 {{- end }}
 {{- end }}
 
-{{- if .Values.sdsNodeConfigurator.internal.featureLLVSEnabled }}
+{{- if not (.Values.sdsNodeConfigurator.internal.featureLLVSEnabled) }}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1
