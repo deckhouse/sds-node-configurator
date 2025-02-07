@@ -21,11 +21,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"webhooks/handlers"
 
 	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/sirupsen/logrus"
 	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
+	"webhooks/handlers"
 )
 
 type config struct {
@@ -33,7 +33,7 @@ type config struct {
 	keyFile  string
 }
 
-func httpHandlerHealthz(w http.ResponseWriter, r *http.Request) {
+func httpHandlerHealthz(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprint(w, "Ok.")
 }
 
@@ -44,13 +44,16 @@ func initFlags() config {
 	fl.StringVar(&cfg.certFile, "tls-cert-file", "", "TLS certificate file")
 	fl.StringVar(&cfg.keyFile, "tls-key-file", "", "TLS key file")
 
-	fl.Parse(os.Args[1:])
+	if err := fl.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "error parsing os.Args: %s", err)
+		os.Exit(1)
+	}
 	return cfg
 }
 
 const (
 	port            = ":8443"
-	LLVSValidatorId = "LLVSValidator"
+	llvsValidatorID = "LLVSValidator"
 )
 
 func main() {
@@ -60,7 +63,7 @@ func main() {
 
 	cfg := initFlags()
 
-	llvsValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.LLVSValidate, LLVSValidatorId, &cn.LVMLogicalVolumeSnapshot{}, logger)
+	llvsValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.LLVSValidate, llvsValidatorID, &cn.LVMLogicalVolumeSnapshot{}, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating llvsValidatingWebhookHandler: %s", err)
 		os.Exit(1)
