@@ -62,7 +62,7 @@ func main() {
 
 	llvsValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.LLVSValidate, LLVSValidatorId, &cn.LVMLogicalVolumeSnapshot{}, logger)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error creating nscValidatingWebhookHandler: %s", err)
+		fmt.Fprintf(os.Stderr, "error creating llvsValidatingWebhookHandler: %s", err)
 		os.Exit(1)
 	}
 
