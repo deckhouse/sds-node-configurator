@@ -2,7 +2,7 @@
 ---
 image: choice-edition
 from: {{ $.BASE_ALT_P11 }}
-fromCacheVersion: 2025-02-07.1
+fromCacheVersion: 2025-02-07.2
 git:
   - add: /
     to: /
