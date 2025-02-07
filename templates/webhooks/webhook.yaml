@@ -17,7 +17,7 @@ webhooks:
         name: "webhooks"
         path: "/llvs-validate"
       caBundle: |
-        {{ .Values.sdsLocalVolume.internal.customWebhookCert.ca }}
+        {{ .Values.sdsNodeConfigurator.internal.customWebhookCert.ca }}
     admissionReviewVersions: ["v1", "v1beta1"]
     sideEffects: None
     timeoutSeconds: 5
