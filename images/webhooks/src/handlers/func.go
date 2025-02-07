@@ -20,9 +20,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/slok/kubewebhook/v2/pkg/log"
-
 	kwhhttp "github.com/slok/kubewebhook/v2/pkg/http"
+	"github.com/slok/kubewebhook/v2/pkg/log"
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,5 +45,4 @@ func GetValidatingWebhookHandler(validationFunc func(ctx context.Context, _ *mod
 	mutationWebhookHandler, err := kwhhttp.HandlerFor(kwhhttp.HandlerConfig{Webhook: mutationWebhook, Logger: logger})
 
 	return mutationWebhookHandler, err
-
 }
