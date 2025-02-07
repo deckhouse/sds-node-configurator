@@ -25,6 +25,5 @@ git:
   - enabled
   - hooks
   - monitoring
-  - openapi
   - templates
   - Chart.yaml

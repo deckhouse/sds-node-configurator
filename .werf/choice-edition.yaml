@@ -12,4 +12,4 @@ shell:
   setup:
     - cd /openapi
     - cp -v values_{{ .MODULE_EDITION }}.yaml values.yaml
-    - rm -rf values_*.yaml
+    - rm -f values_*.yaml
