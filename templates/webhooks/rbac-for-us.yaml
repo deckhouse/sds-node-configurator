@@ -12,16 +12,6 @@ metadata:
   name: d8:{{ .Chart.Name }}:webhooks
   {{- include "helm_lib_module_labels" (list . (dict "app" "webhooks")) | nindent 2 }}
 rules:
-  - apiGroups:
-      - deckhouse.io
-    resources:
-      - moduleconfigs
-    verbs:
-      - get
-      - watch
-      - update
-      - list
-      - patch
   - verbs:
       - get
       - list
@@ -30,22 +20,6 @@ rules:
       - storage.deckhouse.io
     resources:
       - lvmlogicalvolumesnapshots
-  - apiGroups:
-      - ""
-    verbs:
-      - get
-    resources:
-      - pods
-      - persistentvolumeclaims
-      - persistentvolumes
-  - apiGroups:
-      - storage.k8s.io
-    verbs:
-      - get
-      - list
-    resources:
-      - storageclasses
-
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1

@@ -1,11 +1,10 @@
-{{- if and (not (eq "dev" .Values.global.deckhouseVersion)) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: "d8-{{ .Chart.Name }}-sc-validation"
+  name: "d8-{{ .Chart.Name }}-llvs-validation"
 webhooks:
-  - name: "d8-{{ .Chart.Name }}-sc-validation.deckhouse.io"
+  - name: "d8-{{ .Chart.Name }}-llvs-validation.deckhouse.io"
     rules:
       - apiGroups: ["storage.deckhouse.io"]
         apiVersions: ["v1alpha1"]
