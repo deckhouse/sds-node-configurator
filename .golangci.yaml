@@ -17,8 +17,6 @@ linters-settings:
       - prefix(agent)
       - prefix(sds-health-watcher-controller)
       - prefix(sds-utils-installer)
-  errcheck:
-    ignore: fmt:.*,[rR]ead|[wW]rite|[cC]lose,io:Copy
 
 linters:
   disable-all: true

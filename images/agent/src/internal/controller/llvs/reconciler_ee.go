@@ -1,3 +1,5 @@
+//go:build EE
+
 package llvs
 
 import (

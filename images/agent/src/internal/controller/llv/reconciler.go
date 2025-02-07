@@ -280,17 +280,11 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 
 		cmd, err = utils.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, sourceLLV.Spec.ActualLVNameOnTheNode)
 	case llv.Spec.Source.Kind == "LVMLogicalVolumeSnapshot":
-		sourceLLVS := &v1alpha1.LVMLogicalVolumeSnapshot{}
-		if err := r.cl.Get(ctx, types.NamespacedName{Name: llv.Spec.Source.Name}, sourceLLVS); err != nil {
-			r.log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to get source LVMLogicalVolumeSnapshot %s for the LVMLogicalVolume %s", llv.Spec.Source.Name, llv.Name))
-			return true, err
+		cmdTmp, shouldRequeue, err := r.handleLLVSSource(ctx, llv, lvg)
+		if err != nil {
+			return shouldRequeue, err
 		}
-
-		if sourceLLVS.Status.ActualVGNameOnTheNode != lvg.Spec.ActualVGNameOnTheNode || sourceLLVS.Status.NodeName != lvg.Spec.Local.NodeName {
-			return false, errors.New("restored volume should be in the same volume group as the origin volume")
-		}
-
-		cmd, err = utils.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, sourceLLVS.Status.ActualVGNameOnTheNode, sourceLLVS.Spec.ActualSnapshotNameOnTheNode)
+		cmd = cmdTmp
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] ran cmd: %s", cmd))
 	if err != nil {

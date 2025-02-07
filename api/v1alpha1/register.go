@@ -37,20 +37,22 @@ var (
 	AddToScheme   = SchemeBuilder.AddToScheme
 )
 
+var knownTypes = []runtime.Object{
+	&BlockDevice{},
+	&BlockDeviceList{},
+	&LVMVolumeGroup{},
+	&LVMVolumeGroupList{},
+	&LVMLogicalVolume{},
+	&LVMLogicalVolumeList{},
+	&LVMVolumeGroupSet{},
+	&LVMVolumeGroupSetList{},
+	&LVMLogicalVolumeSnapshot{},
+	&LVMLogicalVolumeSnapshotList{},
+}
+
 // Adds the list of known types to Scheme.
 func addKnownTypes(scheme *runtime.Scheme) error {
-	scheme.AddKnownTypes(SchemeGroupVersion,
-		&BlockDevice{},
-		&BlockDeviceList{},
-		&LVMVolumeGroup{},
-		&LVMVolumeGroupList{},
-		&LVMLogicalVolume{},
-		&LVMLogicalVolumeList{},
-		&LVMLogicalVolumeSnapshot{},
-		&LVMLogicalVolumeSnapshotList{},
-		&LVMVolumeGroupSet{},
-		&LVMVolumeGroupSetList{},
-	)
+	scheme.AddKnownTypes(SchemeGroupVersion, knownTypes...)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil
 }

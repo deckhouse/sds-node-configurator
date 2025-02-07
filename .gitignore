@@ -28,6 +28,7 @@
 .settings
 .idea/
 venv/
+.vscode
 *.code-workspace
 
 # macOS Finder files
