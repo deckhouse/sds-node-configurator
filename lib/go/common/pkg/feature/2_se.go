@@ -15,4 +15,4 @@ limitations under the License.
 
 package feature
 
-const SnapshotsEnabled = false
+const SnapshotsEnabled = true
