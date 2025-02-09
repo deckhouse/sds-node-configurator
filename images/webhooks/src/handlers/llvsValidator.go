@@ -28,6 +28,12 @@ import (
 )
 
 func LLVSValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
+	if arReview.Operation == model.OperationDelete {
+		return &kwhvalidating.ValidatorResult{
+			Valid: true,
+		}, nil
+	}
+
 	llvs, ok := obj.(*snc.LVMLogicalVolumeSnapshot)
 	if !ok {
 		return &kwhvalidating.ValidatorResult{}, nil

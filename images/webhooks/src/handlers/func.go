@@ -26,10 +26,9 @@ import (
 	kwhhttp "github.com/slok/kubewebhook/v2/pkg/http"
 	"github.com/slok/kubewebhook/v2/pkg/log"
 	"github.com/slok/kubewebhook/v2/pkg/model"
-	apiruntime "k8s.io/apimachinery/pkg/runtime"
-
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"

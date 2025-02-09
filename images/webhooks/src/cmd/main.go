@@ -22,11 +22,11 @@ import (
 	"net/http"
 	"os"
 
-	"webhooks/handlers"
-
 	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/sirupsen/logrus"
 	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
+
+	"webhooks/handlers"
 )
 
 type config struct {
