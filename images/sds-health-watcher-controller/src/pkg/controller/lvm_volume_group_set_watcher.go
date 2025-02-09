@@ -106,8 +106,8 @@ func RunLVMVolumeGroupSetWatcher(
 	return nil
 }
 
-func shouldLVGSetWatcherReconcileUpdateEvent(old, new *v1alpha1.LVMVolumeGroupSet) bool {
-	return !reflect.DeepEqual(old.Spec, new.Spec)
+func shouldLVGSetWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alpha1.LVMVolumeGroupSet) bool {
+	return !reflect.DeepEqual(oldLVG.Spec, newLVG.Spec)
 }
 
 func reconcileLVMVolumeGroupSet(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvgSet *v1alpha1.LVMVolumeGroupSet) (bool, error) {

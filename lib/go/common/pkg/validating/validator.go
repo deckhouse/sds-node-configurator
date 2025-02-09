@@ -1,5 +1,5 @@
 /*
-Copyright 2024 Flant JSC
+Copyright 2025 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,11 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// func ValidateLVMLogicalVolumeSnapshot(llvs *snc.LVMLogicalVolumeSnapshot, llv *snc.LVMLogicalVolume) (string, error) {
 func ValidateLVMLogicalVolumeSnapshot(ctx context.Context, cl client.Client, llvs *snc.LVMLogicalVolumeSnapshot, llv *snc.LVMLogicalVolume) (string, error) {
-
-	// var logPostfix = "Such a combination of parameters is not allowed"
-
 	if !feature.SnapshotsEnabled {
 		msg := "The snapshot feature is not available in your edition"
 		return msg, nil
@@ -50,7 +46,6 @@ func ValidateLVMLogicalVolumeSnapshot(ctx context.Context, cl client.Client, llv
 		if llv.Spec.Thin == nil {
 			return "Source LVMLogicalVolume %s is not thin provisioned. Snapshots are only supported for thin provisioned logical volumes", nil
 		}
-
 	}
 
 	return "", nil
