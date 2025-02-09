@@ -53,9 +53,9 @@ jobs:
         run: |
           # Slect edition for build, default EE
           if echo "${{ steps.get-labels.outputs.result }}" | grep -q "edition/ce"; then
-            echo "MODULE_EDITION=CE" >> "$GITHUB_OUTPUT"
+            echo "MODULE_EDITION=ce" >> "$GITHUB_OUTPUT"
           else
-            echo "MODULE_EDITION=EE" >> "$GITHUB_OUTPUT"
+            echo "MODULE_EDITION=ee" >> "$GITHUB_OUTPUT"
           fi
 
   dev_setup_build:
