@@ -1,3 +1,19 @@
+/*
+Copyright 2024 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package llv
 
 import (
@@ -279,7 +295,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: lvName,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: internal.LLVStatusPhaseCreated,
+					Phase: v1alpha1.PhaseCreated,
 				},
 			}
 			r.sdsCache.StoreLVs([]internal.LVData{
@@ -300,7 +316,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				ObjectMeta: v1.ObjectMeta{DeletionTimestamp: &v1.Time{}},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: internal.LLVStatusPhaseCreated,
+					Phase: v1alpha1.PhaseCreated,
 				},
 			}
 
@@ -320,7 +336,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: lvName,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: internal.LLVStatusPhaseCreated,
+					Phase: v1alpha1.PhaseCreated,
 				},
 			}
 
@@ -336,7 +352,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: lvName,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: internal.LLVStatusPhaseCreated,
+					Phase: v1alpha1.PhaseCreated,
 				},
 			}
 			r.sdsCache.StoreLVs([]internal.LVData{
@@ -358,7 +374,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: lvName,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: internal.LLVStatusPhaseCreated,
+					Phase: v1alpha1.PhaseCreated,
 				},
 			}
 			should := r.shouldReconcileByCreateFunc(vgName, llv)
@@ -387,7 +403,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: lvName,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: internal.LLVStatusPhaseCreated,
+					Phase: v1alpha1.PhaseCreated,
 				},
 			}
 			r.sdsCache.StoreLVs([]internal.LVData{
@@ -408,7 +424,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 					ActualLVNameOnTheNode: lvName,
 				},
 				Status: &v1alpha1.LVMLogicalVolumeStatus{
-					Phase: internal.LLVStatusPhaseCreated,
+					Phase: v1alpha1.PhaseCreated,
 				},
 			}
 			should := r.shouldReconcileByUpdateFunc(vgName, llv)
@@ -444,7 +460,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				Name: "test",
 			},
 			Status: &v1alpha1.LVMLogicalVolumeStatus{
-				Phase:  internal.LLVStatusPhaseCreated,
+				Phase:  v1alpha1.PhaseCreated,
 				Reason: "",
 			},
 		}
@@ -462,7 +478,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			}
 		}()
 
-		err = r.llvCl.UpdatePhaseIfNeeded(ctx, llv, internal.LLVStatusPhaseFailed, reason)
+		err = r.llvCl.UpdatePhaseIfNeeded(ctx, llv, v1alpha1.PhaseFailed, reason)
 		if assert.NoError(t, err) {
 			newLLV := &v1alpha1.LVMLogicalVolume{}
 			err = r.cl.Get(ctx, client.ObjectKey{
@@ -470,7 +486,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				Namespace: "",
 			}, newLLV)
 
-			assert.Equal(t, newLLV.Status.Phase, internal.LLVStatusPhaseFailed)
+			assert.Equal(t, newLLV.Status.Phase, v1alpha1.PhaseFailed)
 			assert.Equal(t, newLLV.Status.Reason, reason)
 		}
 	})
@@ -574,7 +590,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				Size:                  oldSize.String(),
 			},
 			Status: &v1alpha1.LVMLogicalVolumeStatus{
-				Phase:      internal.LLVStatusPhasePending,
+				Phase:      v1alpha1.PhasePending,
 				Reason:     "",
 				ActualSize: *oldSize,
 			},
@@ -603,12 +619,12 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		}
 
 		if assert.NotNil(t, oldLLV) {
-			assert.Equal(t, internal.LLVStatusPhasePending, oldLLV.Status.Phase)
+			assert.Equal(t, v1alpha1.PhasePending, oldLLV.Status.Phase)
 			assert.Equal(t, oldSize.Value(), oldLLV.Status.ActualSize.Value())
 		}
 
 		oldLLV.Spec.Size = newSize.String()
-		oldLLV.Status.Phase = internal.LLVStatusPhaseCreated
+		oldLLV.Status.Phase = v1alpha1.PhaseCreated
 		oldLLV.Status.ActualSize = *newSize
 
 		err = r.updateLVMLogicalVolumeSpec(ctx, oldLLV)
@@ -622,7 +638,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				return
 			}
 
-			assert.Equal(t, internal.LLVStatusPhasePending, newLLV.Status.Phase)
+			assert.Equal(t, v1alpha1.PhasePending, newLLV.Status.Phase)
 			assert.Equal(t, oldSize.Value(), newLLV.Status.ActualSize.Value())
 		}
 	})
@@ -646,7 +662,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 				Size:                  oldSize.String(),
 			},
 			Status: &v1alpha1.LVMLogicalVolumeStatus{
-				Phase:      internal.LLVStatusPhasePending,
+				Phase:      v1alpha1.PhasePending,
 				Reason:     "",
 				ActualSize: *oldSize,
 			},
@@ -675,7 +691,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 		}
 
 		if assert.NotNil(t, oldLLV) {
-			assert.Equal(t, internal.LLVStatusPhasePending, oldLLV.Status.Phase)
+			assert.Equal(t, v1alpha1.PhasePending, oldLLV.Status.Phase)
 			assert.Equal(t, oldSize.Value(), oldLLV.Status.ActualSize.Value())
 		}
 
@@ -693,7 +709,7 @@ func TestLVMLogicaVolumeWatcher(t *testing.T) {
 			}
 
 			assert.Equal(t, oldSize.String(), newLLV.Spec.Size)
-			assert.Equal(t, internal.LLVStatusPhaseCreated, newLLV.Status.Phase)
+			assert.Equal(t, v1alpha1.PhaseCreated, newLLV.Status.Phase)
 			assert.Equal(t, newSize.Value(), newLLV.Status.ActualSize.Value())
 		}
 	})

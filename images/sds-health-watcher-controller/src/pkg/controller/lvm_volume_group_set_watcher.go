@@ -22,7 +22,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"sds-health-watcher-controller/config"
-	"sds-health-watcher-controller/internal"
 	"sds-health-watcher-controller/pkg/logger"
 	"sds-health-watcher-controller/pkg/monitoring"
 )
@@ -113,7 +112,7 @@ func shouldLVGSetWatcherReconcileUpdateEvent(old, new *v1alpha1.LVMVolumeGroupSe
 
 func reconcileLVMVolumeGroupSet(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvgSet *v1alpha1.LVMVolumeGroupSet) (bool, error) {
 	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] starts the reconciliation of the LVMVolumeGroupSet %s", lvgSet.Name))
-	err := updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, internal.PhasePending, reasonWorkInProgress)
+	err := updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, v1alpha1.PhasePending, reasonWorkInProgress)
 	if err != nil {
 		return false, err
 	}

@@ -23,6 +23,7 @@ import (
 	goruntime "runtime"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	commonfeature "github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -72,6 +73,8 @@ func main() {
 
 	log.Info(fmt.Sprintf("[main] Go Version:%s ", goruntime.Version()))
 	log.Info(fmt.Sprintf("[main] OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
+
+	log.Info(fmt.Sprintf("[main] Feature SnapshotsEnabled: %v", commonfeature.SnapshotsEnabled))
 
 	log.Info("[main] CfgParams has been successfully created")
 	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
@@ -233,7 +236,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	addLLVSReconciler(mgr, log, metrics, sdsCache, cfgParams)
+	if commonfeature.SnapshotsEnabled {
+		log.Info("[main] Snapshot feature is enabled. Adding LLVS reconciler")
+		addLLVSReconciler(mgr, log, metrics, sdsCache, cfgParams)
+	}
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
