@@ -1,4 +1,4 @@
-//go:build !EE
+//go:build ce
 
 package llv
 
@@ -10,5 +10,5 @@ import (
 )
 
 func (r *Reconciler) handleLLVSSource(_ context.Context, _ *v1alpha1.LVMLogicalVolume, _ *v1alpha1.LVMVolumeGroup) (string, bool, error) {
-	return "", false, errors.New("LLVS as a source is not supported")
+	return "", false, errors.New("LVMLocalVolumeSnapshot as a source is not supported in your edition")
 }

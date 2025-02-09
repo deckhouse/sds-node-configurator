@@ -1,5 +1,5 @@
 /*
-Copyright 2024 Flant JSC
+Copyright 2025 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,10 +22,11 @@ import (
 	"net/http"
 	"os"
 
+	"webhooks/handlers"
+
 	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/sirupsen/logrus"
 	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
-	"webhooks/handlers"
 )
 
 type config struct {
