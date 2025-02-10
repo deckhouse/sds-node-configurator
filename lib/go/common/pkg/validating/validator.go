@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	feature "github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
+	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -40,7 +40,7 @@ func ValidateLVMLogicalVolumeSnapshot(ctx context.Context, cl client.Client, llv
 		// cl.Get(ctx, llvs.Spec.LVMLogicalVolumeName, llv)
 		err := cl.Get(ctx, types.NamespacedName{Name: llvs.Spec.LVMLogicalVolumeName}, llv)
 		if err != nil {
-			return "", fmt.Errorf("Failed to get source LVMLogicalVolume %s: %s", llvs.Spec.LVMLogicalVolumeName, err)
+			return "", fmt.Errorf("failed to get source LVMLogicalVolume %s: %s", llvs.Spec.LVMLogicalVolumeName, err)
 		}
 
 		if llv.Spec.Thin == nil {

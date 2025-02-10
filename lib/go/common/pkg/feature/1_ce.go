@@ -16,7 +16,3 @@ limitations under the License.
 package feature
 
 const snapshotsEnabled = false
-
-func SnapshotsEnabled() bool {
-	return snapshotsEnabled
-}
