@@ -27,7 +27,7 @@ import (
 )
 
 func ValidateLVMLogicalVolumeSnapshot(ctx context.Context, cl client.Client, llvs *snc.LVMLogicalVolumeSnapshot, llv *snc.LVMLogicalVolume) (string, error) {
-	if !feature.SnapshotsEnabled {
+	if !feature.SnapshotsEnabled() {
 		msg := "The snapshot feature is not available in your edition"
 		return msg, nil
 	}

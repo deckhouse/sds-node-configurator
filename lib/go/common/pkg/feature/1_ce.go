@@ -15,4 +15,8 @@ limitations under the License.
 
 package feature
 
-const SnapshotsEnabled = false
+const snapshotsEnabled = false
+
+func SnapshotsEnabled() bool {
+	return snapshotsEnabled
+}

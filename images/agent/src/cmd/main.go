@@ -74,7 +74,7 @@ func main() {
 	log.Info(fmt.Sprintf("[main] Go Version:%s ", goruntime.Version()))
 	log.Info(fmt.Sprintf("[main] OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
-	log.Info(fmt.Sprintf("[main] Feature SnapshotsEnabled: %v", commonfeature.SnapshotsEnabled))
+	log.Info(fmt.Sprintf("[main] Feature SnapshotsEnabled: %t", commonfeature.SnapshotsEnabled()))
 
 	log.Info("[main] CfgParams has been successfully created")
 	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
@@ -236,7 +236,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if commonfeature.SnapshotsEnabled {
+	if commonfeature.SnapshotsEnabled() {
 		log.Info("[main] Snapshot feature is enabled. Adding LLVS reconciler")
 		addLLVSReconciler(mgr, log, metrics, sdsCache, cfgParams)
 	}
