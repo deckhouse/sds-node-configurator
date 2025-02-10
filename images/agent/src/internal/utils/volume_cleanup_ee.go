@@ -20,5 +20,12 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volum
 		return fmt.Errorf("Volume cleanup is not supported in your edition.")
 	}
 
+	// switch volumeCleanupMethod {
+	// case "Disable":
+	// case "SinglePass":
+	// case "ThreePass":
+	// case "Discard":
+	// default:
+
 	return nil
 }
