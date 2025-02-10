@@ -8,7 +8,12 @@ Licensed under the Deckhouse Platform Enterprise Edition (EE) license. See https
 package feature
 
 const snapshotsEnabled = true
+const volumeCleanupEnabled = true
 
 func SnapshotsEnabled() bool {
 	return snapshotsEnabled
+}
+
+func VolumeCleanupEnabled() bool {
+	return volumeCleanupEnabled
 }
