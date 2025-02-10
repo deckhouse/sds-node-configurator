@@ -452,7 +452,7 @@ func (r *Reconciler) reconcileLLVDeleteFunc(
 		}
 	}
 
-	err := r.deleteLVIfNeeded(lvg.Spec.ActualVGNameOnTheNode, llv)
+	err := r.deleteLVIfNeeded(ctx, lvg.Spec.ActualVGNameOnTheNode, llv)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLLVDeleteFunc] unable to delete the LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode))
 		return true, err
@@ -536,7 +536,7 @@ func checkIfLVBelongsToLLV(llv *v1alpha1.LVMLogicalVolume, lv *internal.LVData) 
 	return true
 }
 
-func (r *Reconciler) deleteLVIfNeeded(vgName string, llv *v1alpha1.LVMLogicalVolume) error {
+func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v1alpha1.LVMLogicalVolume) error {
 	lv := r.sdsCache.FindLV(vgName, llv.Spec.ActualLVNameOnTheNode)
 	if lv == nil || !lv.Exist {
 		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] did not find LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
@@ -547,6 +547,15 @@ func (r *Reconciler) deleteLVIfNeeded(vgName string, llv *v1alpha1.LVMLogicalVol
 	if !checkIfLVBelongsToLLV(llv, &lv.Data) {
 		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] no need to delete LV %s as it doesnt belong to LVMLogicalVolume %s", lv.Data.LVName, llv.Name))
 		return nil
+	}
+
+	if llv.Spec.Type == internal.Thick && llv.Spec.Thick.VolumeCleanupMethod != "" {
+		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] runs cleanup for LV %s in VG %s with method %s", llv.Spec.ActualLVNameOnTheNode, vgName, llv.Spec.Thick.VolumeCleanupMethod))
+		err := utils.VolumeCleanup(ctx, r.log, vgName, llv.Spec.ActualLVNameOnTheNode, llv.Spec.Thick.VolumeCleanupMethod)
+		if err != nil {
+			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", llv.Spec.ActualLVNameOnTheNode, vgName, llv.Spec.Thick.VolumeCleanupMethod))
+			return err
+		}
 	}
 
 	cmd, err := utils.RemoveLV(vgName, llv.Spec.ActualLVNameOnTheNode)
