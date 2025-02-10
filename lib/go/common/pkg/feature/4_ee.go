@@ -7,4 +7,8 @@ Licensed under the Deckhouse Platform Enterprise Edition (EE) license. See https
 
 package feature
 
-const SnapshotsEnabled = true
+const snapshotsEnabled = true
+
+func SnapshotsEnabled() bool {
+	return snapshotsEnabled
+}
