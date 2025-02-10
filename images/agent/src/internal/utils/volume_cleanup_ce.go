@@ -13,15 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package feature
+package utils
 
-const snapshotsEnabled = false
-const volumeCleanupEnabled = false
+import (
+	"agent/internal/logger"
+	"context"
+	"fmt"
+)
 
-func SnapshotsEnabled() bool {
-	return snapshotsEnabled
-}
-
-func VolumeCleanupEnabled() bool {
-	return volumeCleanupEnabled
+func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volumeCleanupMethod string) error {
+	return fmt.Errorf("Volume cleanup is not supported in your edition.")
 }

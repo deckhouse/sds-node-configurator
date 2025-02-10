@@ -51,7 +51,8 @@ type LVMLogicalVolumeThinSpec struct {
 }
 
 type LVMLogicalVolumeThickSpec struct {
-	Contiguous *bool `json:"contiguous"`
+	Contiguous          *bool  `json:"contiguous"`
+	VolumeCleanupMethod string `json:"volumeCleanupMethod"`
 }
 type LVMLogicalVolumeStatus struct {
 	Phase      string            `json:"phase"`

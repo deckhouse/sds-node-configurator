@@ -75,6 +75,7 @@ func main() {
 	log.Info(fmt.Sprintf("[main] OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
 	log.Info(fmt.Sprintf("[main] Feature SnapshotsEnabled: %t", commonfeature.SnapshotsEnabled()))
+	log.Info(fmt.Sprintf("[main] Feature VolumeCleanupEnabled: %t", commonfeature.VolumeCleanupEnabled()))
 
 	log.Info("[main] CfgParams has been successfully created")
 	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
