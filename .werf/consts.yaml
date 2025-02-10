@@ -5,8 +5,8 @@
 {{- $_ := set $ "BASE_SCRATCH"     "registry.deckhouse.io/base_images/scratch@sha256:653ae76965c98c8cd1c8c9ff7725316d2983986f896655b30e0f44d2f8b2dd7e" }}
 {{- $_ := set $ "BASE_ALPINE"      "registry.deckhouse.io/base_images/alpine:3.20.3@sha256:41628df7c9b935d248f64542634e7a843f9bc7f2252d7f878e77f7b79a947466" }}
 
-# Edition module settings, default EE
-{{- $_ := set . "MODULE_EDITION" (env "MODULE_EDITION" "EE") }}
+# Edition module settings, default ee
+{{- $_ := set . "MODULE_EDITION" (env "MODULE_EDITION" "ee") }}
 
 # component versions
 {{- $versions := dict }}

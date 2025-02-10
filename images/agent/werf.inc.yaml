@@ -7,16 +7,15 @@ from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
-  - add: /images/{{ $.ImageName }}/src
-    to: /src/images/{{ $.ImageName }}/src
+  - add: /
+    to: /src
+    includePaths:
+      - api
+      - lib/go
+      - images/{{ $.ImageName }}/src
     stageDependencies:
       install:
-        - "**/*"
-  - add: /api
-    to: /src/api
-    stageDependencies:
-      install:
-        - "**/*"
+        - '**/*'
 
 shell:
   install:
@@ -24,6 +23,7 @@ shell:
     - apt-get -y install git
     - git clone --depth 1 --branch {{ $.Versions.UTIL_LINUX }} {{ env "SOURCE_REPO" }}/util-linux/util-linux.git /src/util-linux
     - rm -rf /src/util-linux/.git
+    - rm -rf /src/.git
 
 
 ---

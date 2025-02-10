@@ -11,5 +11,6 @@ git:
 shell:
   setup:
     - cd /openapi
-    - cp -v values_{{ .MODULE_EDITION }}.yaml values.yaml
+    # - cp -v values_{{ .MODULE_EDITION }}.yaml values.yaml
+    - if [[ {{ .MODULE_EDITION }} == "ce" ]]; then cp -v values_ce.yaml values.yaml; else cp -v values_ee.yaml values.yaml; fi
     - rm -f values_*.yaml

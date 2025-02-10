@@ -77,16 +77,6 @@ const (
 	Thick = "Thick"
 	Thin  = "Thin"
 
-	LLVStatusPhaseCreated  = "Created"
-	LLVStatusPhasePending  = "Pending"
-	LLVStatusPhaseResizing = "Resizing"
-	LLVStatusPhaseFailed   = "Failed"
-
-	LLVSStatusPhaseCreated = "Created"
-	LLVSStatusPhasePending = "Pending"
-	LLVSStatusPhaseFailed  = "Failed"
-	LLVSNameTag            = "storage.deckhouse.io/lvmLogicalVolumeSnapshotName"
-
 	Local  = "Local"
 	Shared = "Shared"
 

@@ -155,7 +155,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 		if lv == nil {
 			err = fmt.Errorf("lv %s not found", llv.Spec.ActualLVNameOnTheNode)
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to find LV %s of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name))
-			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, internal.LLVStatusPhaseFailed, err.Error())
+			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, err.Error())
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
 			}
@@ -177,7 +177,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 		if llvRequestedSize.Value()+internal.ResizeDelta.Value() > freeSpace.Value() {
 			err = errors.New("not enough space")
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to extend the LV %s of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name))
-			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, internal.LLVStatusPhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
+			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
 				shouldRetry = true
@@ -186,7 +186,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 		}
 
 		r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] the LVMLogicalVolume %s should be extended from %s to %s size", llv.Name, llv.Status.ActualSize.String(), llvRequestedSize.String()))
-		err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, internal.LLVStatusPhaseResizing, "")
+		err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseResizing, "")
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
 			shouldRetry = true
@@ -196,7 +196,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 		cmd, err := utils.ExtendLV(llvRequestedSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to extend LV %s of the LVMLogicalVolume %s, cmd: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, cmd))
-			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, internal.LLVStatusPhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
+			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
 			}
@@ -226,7 +226,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to resize the LVMLogicalVolume %s", llv.Name))
 			shouldRetry = true
 
-			if err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, internal.LLVStatusPhaseFailed, err.Error()); err != nil {
+			if err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, err.Error()); err != nil {
 				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
 			}
 			continue

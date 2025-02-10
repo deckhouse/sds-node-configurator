@@ -8,7 +8,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"agent/internal"
 	"agent/internal/logger"
 )
 
@@ -69,7 +68,7 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 		}
 	}
 
-	updateNeeded := llv.Status.Phase != internal.LLVStatusPhaseCreated ||
+	updateNeeded := llv.Status.Phase != v1alpha1.PhaseCreated ||
 		llv.Status.ActualSize.Value() != actualSize.Value() ||
 		llv.Status.Reason != "" ||
 		llv.Status.Contiguous != contiguous
@@ -79,7 +78,7 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 		return nil
 	}
 
-	llv.Status.Phase = internal.LLVStatusPhaseCreated
+	llv.Status.Phase = v1alpha1.PhaseCreated
 	llv.Status.Reason = ""
 	llv.Status.ActualSize = actualSize
 	llv.Status.Contiguous = contiguous
