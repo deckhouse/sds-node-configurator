@@ -1,3 +1,19 @@
+/*
+Copyright 2024 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package llv
 
 import (
@@ -9,6 +25,7 @@ import (
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"github.com/google/go-cmp/cmp"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -117,7 +134,7 @@ func (r *Reconciler) Reconcile(
 			err = r.llvCl.UpdatePhaseIfNeeded(
 				ctx,
 				llv,
-				internal.LLVStatusPhaseFailed,
+				v1alpha1.PhaseFailed,
 				fmt.Sprintf("LVMVolumeGroup %s not found", llv.Spec.LVMVolumeGroupName),
 			)
 			if err != nil {
@@ -133,7 +150,7 @@ func (r *Reconciler) Reconcile(
 		err = r.llvCl.UpdatePhaseIfNeeded(
 			ctx,
 			llv,
-			internal.LLVStatusPhaseFailed,
+			v1alpha1.PhaseFailed,
 			fmt.Sprintf("Unable to get selected LVMVolumeGroup, err: %s", err.Error()),
 		)
 		if err != nil {
@@ -170,7 +187,7 @@ func (r *Reconciler) Reconcile(
 	valid, reason := r.validateLVMLogicalVolume(llv, lvg)
 	if !valid {
 		r.log.Warning(fmt.Sprintf("[ReconcileLVMLogicalVolume] the LVMLogicalVolume %s is not valid, reason: %s", llv.Name, reason))
-		err = r.llvCl.UpdatePhaseIfNeeded(ctx, llv, internal.LLVStatusPhaseFailed, reason)
+		err = r.llvCl.UpdatePhaseIfNeeded(ctx, llv, v1alpha1.PhaseFailed, reason)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolume] unable to update the LVMLogicalVolume %s", llv.Name))
 			return controller.Result{}, err
@@ -183,7 +200,7 @@ func (r *Reconciler) Reconcile(
 	shouldRequeue, err := r.ReconcileLVMLogicalVolume(ctx, llv, lvg)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] an error occurred while reconciling the LVMLogicalVolume: %s", llv.Name))
-		updErr := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, internal.LLVStatusPhaseFailed, err.Error())
+		updErr := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, v1alpha1.PhaseFailed, err.Error())
 		if updErr != nil {
 			r.log.Error(updErr, fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] unable to update the LVMLogicalVolume %s", llv.Name))
 			return controller.Result{}, updErr
@@ -213,9 +230,9 @@ func (r *Reconciler) ReconcileLVMLogicalVolume(ctx context.Context, llv *v1alpha
 		return r.reconcileLLVDeleteFunc(ctx, llv, lvg)
 	default:
 		r.log.Info(fmt.Sprintf("[runEventReconcile] the LVMLogicalVolume %s has compeleted configuration and should not be reconciled", llv.Name))
-		if llv.Status.Phase != internal.LLVStatusPhaseCreated {
-			r.log.Warning(fmt.Sprintf("[runEventReconcile] the LVMLogicalVolume %s should not be reconciled but has an unexpected phase: %s. Setting the phase to %s", llv.Name, llv.Status.Phase, internal.LLVStatusPhaseCreated))
-			err := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, internal.LLVStatusPhaseCreated, "")
+		if llv.Status.Phase != v1alpha1.PhaseCreated {
+			r.log.Warning(fmt.Sprintf("[runEventReconcile] the LVMLogicalVolume %s should not be reconciled but has an unexpected phase: %s. Setting the phase to %s", llv.Name, llv.Status.Phase, v1alpha1.PhaseCreated))
+			err := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, v1alpha1.PhaseCreated, "")
 			if err != nil {
 				return true, err
 			}
@@ -234,7 +251,7 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 
 	// this check prevents infinite resource updating after retries
 	if llv.Status == nil {
-		err := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, internal.LLVStatusPhasePending, "")
+		err := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, v1alpha1.PhasePending, "")
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
 			return true, err
@@ -280,6 +297,10 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 
 		cmd, err = utils.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, sourceLLV.Spec.ActualLVNameOnTheNode)
 	case llv.Spec.Source.Kind == "LVMLogicalVolumeSnapshot":
+		if !feature.SnapshotsEnabled() {
+			return false, errors.New("LVMLocalVolumeSnapshot as a source is not supported in your edition")
+		}
+
 		cmdTmp, shouldRequeue, err := r.handleLLVSSource(ctx, llv, lvg)
 		if err != nil {
 			return shouldRequeue, err
@@ -322,7 +343,7 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 
 	// status might be nil if a user creates the resource with LV name which matches existing LV on the node
 	if llv.Status == nil {
-		err := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, internal.LLVStatusPhasePending, "")
+		err := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, v1alpha1.PhasePending, "")
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
 			return true, err
@@ -368,8 +389,8 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 
 	r.log.Info(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s should be resized", llv.Name))
 	// this check prevents infinite resource updates after retry
-	if llv.Status.Phase != internal.LLVStatusPhaseFailed {
-		err := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, internal.LLVStatusPhaseResizing, "")
+	if llv.Status.Phase != v1alpha1.PhaseFailed {
+		err := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, v1alpha1.PhaseResizing, "")
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to update the LVMLogicalVolume %s", llv.Name))
 			return true, err

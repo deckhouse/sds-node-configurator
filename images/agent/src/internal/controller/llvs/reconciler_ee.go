@@ -1,4 +1,7 @@
-//go:build EE
+/*
+Copyright 2025 Flant JSC
+Licensed under the Deckhouse Platform Enterprise Edition (EE) license. See https://github.com/deckhouse/deckhouse/blob/main/ee/LICENSE
+*/
 
 package llvs
 
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	commonvalidating "github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/validating"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -80,12 +84,23 @@ func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.LVMLogicalVolumeSnapshot,
 		newObj.Finalizers[0] == internal.SdsNodeConfiguratorFinalizer
 }
 
-func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMLogicalVolumeSnapshot) bool {
+func (r *Reconciler) ShouldReconcileCreate(llvs *v1alpha1.LVMLogicalVolumeSnapshot) bool {
+	if llvs.Status != nil && llvs.Status.NodeName != r.cfg.NodeName {
+		r.log.Trace(fmt.Sprintf("LVMLogicalVolumeSnapshot %s has a Status with different node %s. Our node is %s. Skip", llvs.Name, llvs.Status.NodeName, r.cfg.NodeName))
+		return false
+	}
+
 	return true
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req controller.ReconcileRequest[*v1alpha1.LVMLogicalVolumeSnapshot]) (controller.Result, error) {
 	llvs := req.Object
+
+	r.log.Info(fmt.Sprintf("reconciling the LVMLogicalVolumeSnapshot %s", llvs.Name))
+	if llvs.Status != nil && llvs.Status.NodeName != r.cfg.NodeName {
+		r.log.Info(fmt.Sprintf("LVMLogicalVolumeSnapshot %s has a Status with different node %s. Our node is %s. Skip", llvs.Name, llvs.Status.NodeName, r.cfg.NodeName))
+		return controller.Result{}, nil
+	}
 
 	// this case prevents the unexpected behavior when the controller runs up with existing LVMLogicalVolumeSnapshots
 	if lvs, _ := r.sdsCache.GetLVs(); len(lvs) == 0 {
@@ -114,13 +129,27 @@ func (r *Reconciler) reconcileLVMLogicalVolumeSnapshot(
 	ctx context.Context,
 	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
 ) (bool, error) {
+	llv := &v1alpha1.LVMLogicalVolume{}
+	msg, err := commonvalidating.ValidateLVMLogicalVolumeSnapshot(ctx, r.cl, llvs, llv)
+	if err != nil {
+		r.log.Error(err, fmt.Sprintf("error validating LVMLogicalVolumeSnapshot %s", llvs.Name))
+		upErr := r.setStatusIfNeeded(ctx, llvs, v1alpha1.PhasePending, "Error validating LVMLogicalVolumeSnapshot")
+		retErr := errors.Join(err, upErr)
+		return true, retErr
+	}
+	if msg != "" {
+		r.log.Error(nil, fmt.Sprintf("LVMLogicalVolumeSnapshot %s is invalid: %s", llvs.Name, msg))
+		err := r.setStatusIfNeeded(ctx, llvs, v1alpha1.PhaseFailed, msg)
+		return false, err
+	}
+
 	switch {
 	case llvs.DeletionTimestamp != nil:
 		// delete
 		return r.reconcileLLVSDeleteFunc(ctx, llvs)
-	case llvs.Status == nil || llvs.Status.Phase == internal.LLVSStatusPhasePending:
-		return r.reconcileLLVSCreateFunc(ctx, llvs)
-	case llvs.Status.Phase == internal.LLVSStatusPhaseCreated:
+	case llvs.Status == nil || llvs.Status.Phase == v1alpha1.PhasePending:
+		return r.reconcileLLVSCreateFunc(ctx, llvs, llv)
+	case llvs.Status.Phase == v1alpha1.PhaseCreated:
 		r.log.Info(fmt.Sprintf("the LVMLogicalVolumeSnapshot %s is already Created and should not be reconciled", llvs.Name))
 	default:
 		r.log.Warning(fmt.Sprintf("skipping LLVS reconciliation, since it is in phase: %s", llvs.Status.Phase))
@@ -132,26 +161,21 @@ func (r *Reconciler) reconcileLVMLogicalVolumeSnapshot(
 func (r *Reconciler) reconcileLLVSCreateFunc(
 	ctx context.Context,
 	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
+	llv *v1alpha1.LVMLogicalVolume,
 ) (bool, error) {
 	// should precede setting finalizer to be able to determine the node when deleting
 	if llvs.Status == nil {
-		llv := &v1alpha1.LVMLogicalVolume{}
-		if err := r.getObjectOrSetPendingStatus(
-			ctx,
-			llvs,
-			types.NamespacedName{Name: llvs.Spec.LVMLogicalVolumeName},
-			llv,
-		); err != nil {
+		if llv.Status == nil {
+			reason := fmt.Sprintf("Source LLV %s does not have a status", llv.Name)
+			r.log.Error(nil, reason)
+			err := r.setStatusIfNeeded(ctx, llvs, v1alpha1.PhasePending, reason)
 			return true, err
 		}
-
-		if llv.Spec.Thin == nil {
-			r.log.Error(nil, fmt.Sprintf("Failed reconciling LLVS %s, LLV %s is not Thin", llvs.Name, llv.Name))
-			llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
-				Phase:  internal.LLVSStatusPhaseFailed,
-				Reason: fmt.Sprintf("Source LLV %s is not Thin", llv.Name),
-			}
-			return false, r.cl.Status().Update(ctx, llvs)
+		if llv.Status.Phase != v1alpha1.PhaseCreated {
+			reason := fmt.Sprintf("Source LLV %s is not in the Created phase", llv.Name)
+			r.log.Error(nil, reason)
+			err := r.setStatusIfNeeded(ctx, llvs, v1alpha1.PhasePending, reason)
+			return true, err
 		}
 
 		lvg := &v1alpha1.LVMVolumeGroup{}
@@ -173,48 +197,36 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 			return tps.Name == llv.Spec.Thin.PoolName
 		})
 		if thinPoolIndex < 0 {
-			r.log.Error(nil, fmt.Sprintf("LLVS %s thin pool %s is not found in LVG %s", llvs.Name, llv.Spec.Thin.PoolName, lvg.Name))
-			llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
-				Phase:  internal.LLVSStatusPhasePending,
-				Reason: fmt.Sprintf("Thin pool %s is not found in LVG %s", llv.Spec.Thin.PoolName, lvg.Name),
-			}
-			return true, r.cl.Status().Update(ctx, llvs)
+			reason := fmt.Sprintf("Thin pool %s for source LLV %s is not found in LVG %s", llv.Spec.Thin.PoolName, llv.Name, lvg.Name)
+			r.log.Error(nil, fmt.Sprintf("LLVS %s: %s", llvs.Name, reason))
+			err := r.setStatusIfNeeded(ctx, llvs, v1alpha1.PhasePending, reason)
+			return true, err
 		}
 
 		if llv.Status == nil || llv.Status.ActualSize.Value() == 0 {
-			r.log.Error(nil, fmt.Sprintf("Error reconciling LLVS %s, source LLV %s ActualSize is not known", llvs.Name, llv.Name))
-			llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
-				Phase:  internal.LLVSStatusPhasePending,
-				Reason: fmt.Sprintf("Source LLV %s ActualSize is not known", llv.Name),
-			}
-			return true, r.cl.Status().Update(ctx, llvs)
+			reason := fmt.Sprintf("Source LLV %s ActualSize is not known", llv.Name)
+			r.log.Error(nil, fmt.Sprintf("LLVS %s: %s", llvs.Name, reason))
+			err := r.setStatusIfNeeded(ctx, llvs, v1alpha1.PhasePending, reason)
+			return true, err
 		}
 
 		if lvg.Status.ThinPools[thinPoolIndex].AvailableSpace.Value() < llv.Status.ActualSize.Value() {
-			r.log.Error(nil, fmt.Sprintf(
-				"LLVS %s: not enough space available in thin pool %s: need at least %s, got %s",
-				llvs.Name,
+			reason := fmt.Sprintf(
+				"Not enough space available in thin pool %s: need at least %s, got %s",
 				llv.Spec.Thin.PoolName,
 				llv.Status.ActualSize.String(),
 				lvg.Status.ThinPools[thinPoolIndex].AvailableSpace.String(),
-			))
-			llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
-				Phase: internal.LLVSStatusPhasePending,
-				Reason: fmt.Sprintf(
-					"Not enough space available in thin pool %s: need at least %s, got %s",
-					llv.Spec.Thin.PoolName,
-					llv.Status.ActualSize.String(),
-					lvg.Status.ThinPools[thinPoolIndex].AvailableSpace.String(),
-				),
-			}
-			return true, r.cl.Status().Update(ctx, llvs)
+			)
+			r.log.Error(nil, fmt.Sprintf("LLVS %s: %s", llvs.Name, reason))
+			err := r.setStatusIfNeeded(ctx, llvs, v1alpha1.PhasePending, reason)
+			return true, err
 		}
 
 		llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
 			NodeName:              lvg.Spec.Local.NodeName,
 			ActualVGNameOnTheNode: lvg.Spec.ActualVGNameOnTheNode,
 			ActualLVNameOnTheNode: llv.Spec.ActualLVNameOnTheNode,
-			Phase:                 internal.LLVSStatusPhasePending,
+			Phase:                 v1alpha1.PhasePending,
 			Reason:                "Creating volume",
 		}
 
@@ -249,7 +261,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 			llvs.ActualSnapshotNameOnTheNode(),
 			llvs.Status.ActualVGNameOnTheNode,
 			llvs.Status.ActualLVNameOnTheNode,
-			utils.NewEnabledTags(internal.LLVSNameTag, llvs.Name),
+			utils.NewEnabledTags(v1alpha1.LLVSNameTag, llvs.Name),
 		)
 		r.log.Debug(fmt.Sprintf("[reconcileLLVSCreateFunc] ran cmd: %s", cmd))
 		if err != nil {
@@ -296,7 +308,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 
 		llvs.Status.Size = *size
 		llvs.Status.UsedSize = *usedSize
-		llvs.Status.Phase = internal.LLVSStatusPhaseCreated
+		llvs.Status.Phase = v1alpha1.PhaseCreated
 		llvs.Status.Reason = ""
 		err = r.cl.Status().Update(ctx, llvs)
 		return false, err
@@ -344,7 +356,7 @@ func (r *Reconciler) deleteLVIfNeeded(llvsName, llvsActualNameOnTheNode, vgActua
 		return nil
 	}
 
-	if ok, name := utils.ReadValueFromTags(lv.Data.LvTags, internal.LLVSNameTag); !ok {
+	if ok, name := utils.ReadValueFromTags(lv.Data.LvTags, v1alpha1.LLVSNameTag); !ok {
 		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] did not find required tags on LV %s in VG %s", llvsActualNameOnTheNode, vgActualNameOnTheNode))
 		return nil
 	} else if name != llvsName {
@@ -373,11 +385,39 @@ func (r *Reconciler) getObjectOrSetPendingStatus(
 ) error {
 	if err := r.cl.Get(ctx, key, obj); err != nil {
 		llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
-			Phase:  internal.LLVSStatusPhasePending,
+			Phase:  v1alpha1.PhasePending,
 			Reason: fmt.Sprintf("Error while getting object %s: %v", obj.GetName(), err),
 		}
 		updErr := r.cl.Status().Update(ctx, llvs)
 		return errors.Join(err, updErr)
 	}
+	return nil
+}
+
+func (r *Reconciler) setStatusIfNeeded(
+	ctx context.Context,
+	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
+	phase, reason string,
+) error {
+	needUpdate := false
+
+	if llvs.Status == nil {
+		needUpdate = true
+		llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
+			Phase:  phase,
+			Reason: reason,
+		}
+	}
+
+	if llvs.Status.Phase != phase || llvs.Status.Reason != reason {
+		needUpdate = true
+		llvs.Status.Phase = phase
+		llvs.Status.Reason = reason
+	}
+
+	if needUpdate {
+		return r.cl.Status().Update(ctx, llvs)
+	}
+
 	return nil
 }
