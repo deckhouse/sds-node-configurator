@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"github.com/google/go-cmp/cmp"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -297,10 +296,6 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 
 		cmd, err = utils.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, sourceLLV.Spec.ActualLVNameOnTheNode)
 	case llv.Spec.Source.Kind == "LVMLogicalVolumeSnapshot":
-		if !feature.SnapshotsEnabled() {
-			return false, errors.New("LVMLocalVolumeSnapshot as a source is not supported in your edition")
-		}
-
 		cmdTmp, shouldRequeue, err := r.handleLLVSSource(ctx, llv, lvg)
 		if err != nil {
 			return shouldRequeue, err
