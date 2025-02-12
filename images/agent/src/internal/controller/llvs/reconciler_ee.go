@@ -1,3 +1,5 @@
+//go:build !ce
+
 /*
 Copyright 2025 Flant JSC
 Licensed under the Deckhouse Platform Enterprise Edition (EE) license.

@@ -1,4 +1,3 @@
-{{- if not (.Values.sdsNodeConfigurator.internal.featureLLVSEnabled) }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -35,4 +34,3 @@ subjects:
   - kind: ServiceAccount
     name: webhooks
     namespace: d8-{{ .Chart.Name }}
-{{- end }}

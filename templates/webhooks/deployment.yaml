@@ -1,11 +1,8 @@
 {{- define "webhooks_resources" }}
-{{- if not (.Values.sdsNodeConfigurator.internal.featureLLVSEnabled) }}
 cpu: 10m
 memory: 50Mi
 {{- end }}
-{{- end }}
 
-{{- if not (.Values.sdsNodeConfigurator.internal.featureLLVSEnabled) }}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1
@@ -97,4 +94,3 @@ spec:
         - name: webhook-certs
           secret:
             secretName: webhooks-https-certs
-{{- end }}
