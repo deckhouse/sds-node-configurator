@@ -5,7 +5,6 @@ configVersion: 1
 {{ tpl (.Files.Get ".werf/images.yaml") $ }}
 {{ tpl (.Files.Get ".werf/images-digests.yaml") $ }}
 {{ tpl (.Files.Get ".werf/python-deps.yaml") $ }}
-{{ tpl (.Files.Get ".werf/choice-edition.yaml") $ }}
 {{ tpl (.Files.Get ".werf/bundle.yaml") $ }}
 {{ tpl (.Files.Get ".werf/release.yaml") $ }}
 

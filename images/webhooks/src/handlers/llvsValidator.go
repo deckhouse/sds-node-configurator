@@ -19,47 +19,19 @@ package handlers
 import (
 	"context"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	commonvalidating "github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/validating"
+	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog/v2"
 )
 
-func LLVSValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
-	if arReview.Operation == model.OperationDelete {
-		return &kwhvalidating.ValidatorResult{
-			Valid: true,
-		}, nil
-	}
-
-	llvs, ok := obj.(*snc.LVMLogicalVolumeSnapshot)
-	if !ok {
-		return &kwhvalidating.ValidatorResult{}, nil
-	}
-
-	cl, err := NewKubeClient("")
-	if err != nil {
-		klog.Fatal(err) // pod restarting
-	}
-
-	llv := &snc.LVMLogicalVolume{}
-	msg, err := commonvalidating.ValidateLVMLogicalVolumeSnapshot(ctx, cl, llvs, llv)
-	if err != nil {
-		klog.ErrorS(err, "LLVS validation failed with error")
+func LLVSValidate(_ context.Context, _ *model.AdmissionReview, _ metav1.Object) (*kwhvalidating.ValidatorResult, error) {
+	if !feature.SnapshotsEnabled() {
 		return &kwhvalidating.ValidatorResult{
 			Valid:   false,
-			Message: err.Error(),
+			Message: "LVMLogicalVolumeSnapshot is not available in this Deckhouse edition.",
 		}, nil
 	}
-	if msg != "" {
-		return &kwhvalidating.ValidatorResult{
-			Valid:   false,
-			Message: msg,
-		}, nil
-	}
-
 	return &kwhvalidating.ValidatorResult{
 		Valid: true,
 	}, nil
