@@ -51,10 +51,8 @@ jobs:
       - name: Set vars
         id: set-vars
         run: |
-          EDITION=$(echo "${{ steps.get-labels.outputs.result }}" | grep -Po "edition/\K\w+" | head -n 1)
-          if [[ -n "$EDITION" ]]; then
-            MODULE_EDITION="$EDITION"
-          fi
+          EDITION=$(echo "${{ steps.get-labels.outputs.result }}" | grep -Po "edition/\K\w+" | head -n 1 || true)
+          [[ -n "$EDITION" ]] && MODULE_EDITION="$EDITION"
           echo "MODULE_EDITION=$MODULE_EDITION" >> "$GITHUB_OUTPUT"
   dev_setup_build:
     runs-on: [self-hosted, regular, selectel]
