@@ -27,21 +27,35 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volum
 	devicePath := fmt.Sprintf("/dev/%s/%s", vgName, lvName)
 	randomSource := "/dev/urandom"
 
+	var err error
+	closingErrors := []error{}
+
 	switch volumeCleanupMethod {
 	case "Disable":
 		return nil
 	case "SinglePass":
-		return VolumeCleanupCopy(devicePath, randomSource, 1)
+		err = volumeCleanupCopy(ctx, log, &closingErrors, devicePath, randomSource, 1)
 	case "ThreePass":
-		return VolumeCleanupCopy(devicePath, randomSource, 3)
+		err = volumeCleanupCopy(ctx, log, &closingErrors, devicePath, randomSource, 3)
 	case "Discard":
-		return VolumeCleanupDiscard(devicePath)
+		err = volumeCleanupDiscard(ctx, log, &closingErrors, devicePath)
+	default:
+		return fmt.Errorf("unknown cleanup method %s", volumeCleanupMethod)
 	}
 
-	return fmt.Errorf("Unknown cleanup method %s", volumeCleanupMethod)
+	if err == nil && len(closingErrors) > 0 {
+		err = closingErrors[0]
+		closingErrors = closingErrors[1:]
+	}
+
+	if len(closingErrors) == 0 {
+		return fmt.Errorf("cleaning volume %s: %w", devicePath, err)
+	} else {
+		return fmt.Errorf("cleaning volume %s: %w, errors while closing files %v", devicePath, err, closingErrors)
+	}
 }
 
-func _VolumeSize(stat syscall.Stat_t) (int64, error) {
+func volumeSize(stat syscall.Stat_t) (int64, error) {
 	if stat.Size > 0 {
 		return stat.Size, nil
 	}
@@ -56,41 +70,55 @@ func _VolumeSize(stat syscall.Stat_t) (int64, error) {
 	return stat.Blksize * stat.Blocks, nil
 }
 
-func VolumeCleanupCopy(outputPath, inputPath string, passes int) error {
-	var stat syscall.Stat_t
-	if err := syscall.Stat(outputPath, &stat); err != nil {
+func volumeCleanupCopy(ctx context.Context, log logger.Logger, closingErrors *[]error, outputPath, inputPath string, passes int) error {
+	var outputStat syscall.Stat_t
+	if err := syscall.Stat(outputPath, &outputStat); err != nil {
 		return fmt.Errorf("stat call failed: %w", err)
 	}
 
-	bytesToWrite, err := _VolumeSize(stat)
-	if err != nil {
-		return fmt.Errorf("can't find the size of device: %w", err)
+	close := func(file *os.File) {
+		log := log.GetLogger().WithValues("name", file.Name())
+		// log.Info("Closing file", "name")
+		err := file.Close()
+		if err != nil {
+			log.Error(err, "While closing file")
+			*closingErrors = append(*closingErrors, fmt.Errorf("closing file %s: %w", file.Name(), err))
+		}
 	}
 
 	input, err := os.OpenFile(inputPath, syscall.O_RDONLY, os.ModeDevice)
 	if err != nil {
 		return fmt.Errorf("opening source device %s to wipe: %w", inputPath, err)
 	}
+	defer close(input)
 
 	output, err := os.OpenFile(outputPath, syscall.O_DIRECT, os.ModeDevice)
 	if err != nil {
 		return fmt.Errorf("opening device %s to wipe: %w", outputPath, err)
 	}
+	defer close(output)
 
-	written, err := io.CopyN(
-		output,
-		input,
-		bytesToWrite)
-
+	bytesToWrite, err := volumeSize(outputStat)
 	if err != nil {
-		return fmt.Errorf("copying from %s to %s: %w", inputPath, outputPath, err)
+		return fmt.Errorf("can't find the size of device %s: %w", outputPath, err)
 	}
 
-	if written != int64(bytesToWrite) {
-		return fmt.Errorf("only %d bytes written, expected %d", written, bytesToWrite)
+	for pass := 0; pass < passes; pass++ {
+		written, err := io.CopyN(
+			io.NewOffsetWriter(output, 0),
+			input,
+			bytesToWrite)
+
+		if err != nil {
+			return fmt.Errorf("copying from %s to %s: %w", inputPath, outputPath, err)
+		}
+
+		if written != int64(bytesToWrite) {
+			return fmt.Errorf("only %d bytes written, expected %d", written, bytesToWrite)
+		}
 	}
 
-	return nil
+	return err
 }
 
 const (
@@ -103,13 +131,13 @@ type Range struct {
 	start, count uint64
 }
 
-func VolumeCleanupDiscard(devicePath string) error {
+func volumeCleanupDiscard(ctx context.Context, log logger.Logger, closingErrors *[]error, devicePath string) error {
 	var stat syscall.Stat_t
 	if err := syscall.Stat(devicePath, &stat); err != nil {
 		return fmt.Errorf("stat call failed: %w", err)
 	}
 
-	deviceSize, err := _VolumeSize(stat)
+	deviceSize, err := volumeSize(stat)
 	if err != nil {
 		return fmt.Errorf("can't find the size of device: %w", err)
 	}
@@ -118,13 +146,24 @@ func VolumeCleanupDiscard(devicePath string) error {
 	if err != nil {
 		return fmt.Errorf("opening device %s to wipe: %w", devicePath, err)
 	}
+	defer func() {
+		log.Info("Closing file", device)
+		err := device.Close()
+		if err != nil {
+			*closingErrors = append(*closingErrors, fmt.Errorf("closing file %s: %w", device.Name(), err))
+		}
+	}()
 
 	rng := Range{
 		start: 0,
 		count: uint64(deviceSize),
 	}
 
-	_, _, err = syscall.Syscall(syscall.SYS_IOCTL, uintptr(device.Fd()), BLKDISCARD, uintptr(unsafe.Pointer(&rng)))
+	_, _, err = syscall.Syscall(
+		syscall.SYS_IOCTL,
+		uintptr(device.Fd()),
+		uintptr(BLKDISCARD),
+		uintptr(unsafe.Pointer(&rng)))
 
 	if err != nil {
 		return fmt.Errorf("calling ioctl BLKDISCARD: %w", err)
