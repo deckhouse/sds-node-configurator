@@ -11,6 +11,7 @@ package main
 import (
 	"os"
 
+	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"agent/internal/cache"
@@ -28,6 +29,10 @@ func addLLVSReconciler(
 	sdsCache *cache.Cache,
 	cfgParams *config.Config,
 ) {
+	if !feature.SnapshotsEnabled() {
+		return
+	}
+
 	err := controller.AddReconciler(
 		mgr,
 		log,
