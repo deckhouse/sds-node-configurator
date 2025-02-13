@@ -21,6 +21,6 @@ import (
 	"fmt"
 )
 
-func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volumeCleanupMethod string) error {
+func VolumeCleanup(_ context.Context, _ logger.Logger, _, _, _ string) error {
 	return fmt.Errorf("volume cleanup is not supported in your edition")
 }
