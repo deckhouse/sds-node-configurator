@@ -22,5 +22,5 @@ import (
 )
 
 func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volumeCleanupMethod string) error {
-	return fmt.Errorf("Volume cleanup is not supported in your edition.")
+	return fmt.Errorf("volume cleanup is not supported in your edition")
 }
