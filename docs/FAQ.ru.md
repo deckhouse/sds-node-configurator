@@ -169,8 +169,4 @@ spec:
 
 * status.blockdevice.storage.deckhouse.io/hotplug - возможность hot подключения
 
-<<<<<<< HEAD:docs/FAQ.ru.md
 * status.blockdevice.storage.deckhouse.io/machineid - ID сервера, на котором установлено блочное устройство
-=======
-* status.blockdevice.storage.deckhouse.io/machineid - ID сервера, на котором установлено блочное устройство
->>>>>>> 519f8d2 ([docs] Add labels list for BlockDevice (#121)):docs/FAQ_RU.md
