@@ -549,7 +549,7 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		return nil
 	}
 
-	if llv.Spec.Type == internal.Thick && llv.Spec.Thick.VolumeCleanupMethod != "" {
+	if llv.Spec.Type == internal.Thick && llv.Spec.Thick != nil && llv.Spec.Thick.VolumeCleanupMethod != "" {
 		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] runs cleanup for LV %s in VG %s with method %s", llv.Spec.ActualLVNameOnTheNode, vgName, llv.Spec.Thick.VolumeCleanupMethod))
 		err := utils.VolumeCleanup(ctx, r.log, vgName, llv.Spec.ActualLVNameOnTheNode, llv.Spec.Thick.VolumeCleanupMethod)
 		if err != nil {
@@ -692,7 +692,7 @@ func (r *Reconciler) shouldReconcileByUpdateFunc(vgName string, llv *v1alpha1.LV
 }
 
 func isContiguous(llv *v1alpha1.LVMLogicalVolume) bool {
-	if llv.Spec.Thick == nil {
+	if llv.Spec.Thick == nil || llv.Spec.Thick.Contiguous == nil {
 		return false
 	}
 
