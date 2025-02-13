@@ -35,10 +35,13 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volum
 		return nil
 	case "SinglePass":
 		err = volumeCleanupCopy(ctx, log, &closingErrors, devicePath, randomSource, 1)
+		break
 	case "ThreePass":
 		err = volumeCleanupCopy(ctx, log, &closingErrors, devicePath, randomSource, 3)
+		break
 	case "Discard":
 		err = volumeCleanupDiscard(ctx, log, &closingErrors, devicePath)
+		break
 	default:
 		return fmt.Errorf("unknown cleanup method %s", volumeCleanupMethod)
 	}
