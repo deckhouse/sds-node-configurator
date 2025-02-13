@@ -1,5 +1,5 @@
 /*
-Copyright 2024 Flant JSC
+Copyright 2025 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,17 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package internal
+package v1alpha1
 
 const (
-	SdsNodeConfiguratorNamespace = "d8-sds-node-configurator"
+	PhaseCreated     = "Created"
+	PhasePending     = "Pending"
+	PhaseResizing    = "Resizing"
+	PhaseFailed      = "Failed"
+	PhaseNotReady    = "NotReady"
+	PhaseReady       = "Ready"
+	PhaseTerminating = "Terminating"
 
-	ReasonPending          = "Pending"
-	ReasonUpdating         = "Updating"
-	ReasonCreating         = "Creating"
-	ReasonTerminating      = "Terminating"
-	ReasonValidationFailed = "ValidationFailed"
-
-	TypeReady                  = "Ready"
-	TypeVGConfigurationApplied = "VGConfigurationApplied"
+	LLVSNameTag = "storage.deckhouse.io/lvmLogicalVolumeSnapshotName"
 )
