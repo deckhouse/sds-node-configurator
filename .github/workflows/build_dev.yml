@@ -51,13 +51,9 @@ jobs:
       - name: Set vars
         id: set-vars
         run: |
-          # Slect edition for build, default EE
-          if echo "${{ steps.get-labels.outputs.result }}" | grep -q "edition/ce"; then
-            echo "MODULE_EDITION=ce" >> "$GITHUB_OUTPUT"
-          else
-            echo "MODULE_EDITION=ee" >> "$GITHUB_OUTPUT"
-          fi
-
+          EDITION=$(echo "${{ steps.get-labels.outputs.result }}" | grep -Po "edition/\K\w+" | head -n 1)
+          [[ -n "$EDITION" ]] && MODULE_EDITION="$EDITION"
+          echo "MODULE_EDITION=$MODULE_EDITION" >> "$GITHUB_OUTPUT"
   dev_setup_build:
     runs-on: [self-hosted, regular, selectel]
     name: Build and Push images
