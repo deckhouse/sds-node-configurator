@@ -17,6 +17,7 @@ import (
 	"unsafe"
 
 	commonfeature "github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
+	"github.com/go-logr/logr"
 )
 
 func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volumeCleanupMethod string) error {
@@ -59,17 +60,22 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volum
 	}
 }
 
-func volumeSize(device *os.File) (int64, error) {
+func volumeSize(log logr.Logger, device *os.File) (int64, error) {
+	log = log.WithName("volumeSize").WithValues("device", device.Name())
 	var stat syscall.Stat_t
+	log.Info("Calling fstat")
 	if err := syscall.Fstat(int(device.Fd()), &stat); err != nil {
+		log.Error(err, "Calling fstat")
 		return 0, fmt.Errorf("fstat call failed: %w", err)
 	}
 
 	if stat.Size > 0 {
+		log.Info("Size is valid.", "size", stat.Size)
 		return stat.Size, nil
 	}
 
 	if stat.Mode&S_IFMT != S_IFBLK {
+		log.Info("Device mode", "mode", stat.Mode)
 		return 0, fmt.Errorf("not a block device, mode: %x", stat.Mode)
 	}
 
@@ -82,6 +88,7 @@ func volumeSize(device *os.File) (int64, error) {
 	if errno != 0 {
 		return 0, fmt.Errorf("error calling ioctl BLKGETSIZE64: %s", errno.Error())
 	}
+	log.Info("Block size", "blockSize", blockSize)
 	if blockSize <= 0 {
 		return 0, fmt.Errorf("block size is invalid")
 	}
@@ -95,42 +102,47 @@ func volumeSize(device *os.File) (int64, error) {
 	if errno != 0 {
 		return 0, fmt.Errorf("error calling ioctl BLKSSZGET: %s", errno.Error())
 	}
+	log.Info("Block count", "blockCount", blockCount)
 	if blockCount <= 0 {
 		return 0, fmt.Errorf("block count is invalid")
 	}
 	return int64(blockSize * uint64(blockCount)), nil
 }
 
-func volumeCleanupOverwrite(ctx context.Context, log logger.Logger, closingErrors *[]error, devicePath, inputPath string, passes int) error {
+func volumeCleanupOverwrite(ctx context.Context, log logr.Logger, closingErrors *[]error, devicePath, inputPath string, passes int) error {
+	log = log.WithName("volumeCleanupOverwrite").WithValues("device", devicePath, "input", inputPath, "passes", passes)
 	close := func(file *os.File) {
-		log := log.GetLogger().WithValues("name", file.Name())
-		// log.Info("Closing file", "name")
+		log := log.WithValues("name", file.Name())
+		log.Info("Closing")
 		err := file.Close()
 		if err != nil {
-			log.Error(err, "While closing file")
+			log.Error(err, "While closing")
 			*closingErrors = append(*closingErrors, fmt.Errorf("closing file %s: %w", file.Name(), err))
 		}
 	}
 
 	input, err := os.OpenFile(inputPath, syscall.O_RDONLY, os.ModeDevice)
 	if err != nil {
+		log.Error(err, "Opening file", "file", inputPath)
 		return fmt.Errorf("opening source device %s to wipe: %w", inputPath, err)
 	}
 	defer close(input)
 
 	output, err := os.OpenFile(devicePath, syscall.O_DIRECT|syscall.O_RDWR, os.ModeDevice)
 	if err != nil {
+		log.Error(err, "Opening file", "file", devicePath)
 		return fmt.Errorf("opening device %s to wipe: %w", devicePath, err)
 	}
 	defer close(output)
 
-	bytesToWrite, err := volumeSize(output)
+	bytesToWrite, err := volumeSize(log, output)
 	if err != nil {
+		log.Error(err, "Finding volume size")
 		return fmt.Errorf("can't find the size of device %s: %w", devicePath, err)
 	}
 
 	for pass := 0; pass < passes; pass++ {
-		log.Info("Overwriting", "bytes", bytesToWrite)
+		log.Info("Overwriting", "bytes", bytesToWrite, "pass", pass)
 		written, err := io.CopyN(
 			io.NewOffsetWriter(output, 0),
 			input,
@@ -148,6 +160,28 @@ func volumeCleanupOverwrite(ctx context.Context, log logger.Logger, closingError
 	return err
 }
 
+/* To find these constant run:
+gcc -o test -x c - <<EOF
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <linux/fs.h>
+#include <stdio.h>
+
+#define PRINT_CONSTANT(name, fmt) printf(#name " = " fmt "\n", name)
+
+int main() {
+    PRINT_CONSTANT(S_IFMT, "0x%x");
+    PRINT_CONSTANT(S_IFBLK, "0x%x");
+    PRINT_CONSTANT(BLKGETSIZE64, "0x%lx");
+    PRINT_CONSTANT(BLKSSZGET, "0x%x");
+    PRINT_CONSTANT(BLKDISCARD, "0x%x");
+    PRINT_CONSTANT(BLKDISCARDZEROES, "0x%x");
+    PRINT_CONSTANT(BLKSECDISCARD, "0x%x");
+    return 0;
+}
+EOF
+*/
+
 const (
 	BLKDISCARD       = 0x1277
 	BLKDISCARDZEROES = 0x127c
@@ -164,21 +198,23 @@ type Range struct {
 	start, count uint64
 }
 
-func volumeCleanupDiscard(ctx context.Context, log logger.Logger, closingErrors *[]error, devicePath string) error {
-
+func volumeCleanupDiscard(ctx context.Context, log logr.Logger, closingErrors *[]error, devicePath string) error {
+	log = log.WithName("volumeCleanupOverwrite").WithValues("device", devicePath, "device", devicePath)
 	device, err := os.OpenFile(devicePath, syscall.O_DIRECT, os.ModeDevice)
 	if err != nil {
+		log.Error(err, "Opening device")
 		return fmt.Errorf("opening device %s to wipe: %w", devicePath, err)
 	}
 	defer func() {
-		log.Info("Closing file", device)
+		log.Info("Closing file")
 		err := device.Close()
 		if err != nil {
+			log.Error(err, "While closing deice")
 			*closingErrors = append(*closingErrors, fmt.Errorf("closing file %s: %w", device.Name(), err))
 		}
 	}()
 
-	deviceSize, err := volumeSize(device)
+	deviceSize, err := volumeSize(log, device)
 	if err != nil {
 		return fmt.Errorf("can't find the size of device %s: %w", devicePath, err)
 	}
