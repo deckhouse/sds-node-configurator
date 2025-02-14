@@ -35,10 +35,10 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volum
 	case "Disable":
 		return nil
 	case "SinglePass":
-		err = volumeCleanupCopy(ctx, log, &closingErrors, devicePath, randomSource, 1)
+		err = volumeCleanupOverwrite(ctx, log, &closingErrors, devicePath, randomSource, 1)
 		break
 	case "ThreePass":
-		err = volumeCleanupCopy(ctx, log, &closingErrors, devicePath, randomSource, 3)
+		err = volumeCleanupOverwrite(ctx, log, &closingErrors, devicePath, randomSource, 3)
 		break
 	case "Discard":
 		err = volumeCleanupDiscard(ctx, log, &closingErrors, devicePath)
@@ -101,8 +101,7 @@ func volumeSize(device *os.File) (int64, error) {
 	return int64(blockSize * uint64(blockCount)), nil
 }
 
-func volumeCleanupCopy(ctx context.Context, log logger.Logger, closingErrors *[]error, outputPath, inputPath string, passes int) error {
-
+func volumeCleanupOverwrite(ctx context.Context, log logger.Logger, closingErrors *[]error, devicePath, inputPath string, passes int) error {
 	close := func(file *os.File) {
 		log := log.GetLogger().WithValues("name", file.Name())
 		// log.Info("Closing file", "name")
@@ -119,25 +118,26 @@ func volumeCleanupCopy(ctx context.Context, log logger.Logger, closingErrors *[]
 	}
 	defer close(input)
 
-	output, err := os.OpenFile(outputPath, syscall.O_DIRECT, os.ModeDevice)
+	output, err := os.OpenFile(devicePath, syscall.O_DIRECT|syscall.O_RDWR, os.ModeDevice)
 	if err != nil {
-		return fmt.Errorf("opening device %s to wipe: %w", outputPath, err)
+		return fmt.Errorf("opening device %s to wipe: %w", devicePath, err)
 	}
 	defer close(output)
 
 	bytesToWrite, err := volumeSize(output)
 	if err != nil {
-		return fmt.Errorf("can't find the size of device %s: %w", outputPath, err)
+		return fmt.Errorf("can't find the size of device %s: %w", devicePath, err)
 	}
 
 	for pass := 0; pass < passes; pass++ {
+		log.Info("Overwriting", "bytes", bytesToWrite)
 		written, err := io.CopyN(
 			io.NewOffsetWriter(output, 0),
 			input,
 			bytesToWrite)
 
 		if err != nil {
-			return fmt.Errorf("copying from %s to %s: %w", inputPath, outputPath, err)
+			return fmt.Errorf("copying from %s to %s: %w", inputPath, devicePath, err)
 		}
 
 		if written != int64(bytesToWrite) {
