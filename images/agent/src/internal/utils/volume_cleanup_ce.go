@@ -16,9 +16,10 @@ limitations under the License.
 package utils
 
 import (
-	"agent/internal/logger"
 	"context"
 	"fmt"
+
+	"agent/internal/logger"
 )
 
 func VolumeCleanup(_ context.Context, _ logger.Logger, _, _, _ string) error {
