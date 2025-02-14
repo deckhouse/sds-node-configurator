@@ -100,11 +100,12 @@ spec:
                 thick:
                   type: object
                   x-kubernetes-validations:
-                    - rule: self == oldSelf
-                      message: Value is immutable.
                     - rule: |
                         (!has(oldSelf.contiguous) || has(self.contiguous))
                       message: "Field 'contiguous' cannot be removed."
+                    - rule: |
+                        (!has(oldSelf.volumeCleanupMethod) || has(self.volumeCleanupMethod))
+                      message: "Field 'volumeCleanupMethod' cannot be removed."
                   properties:
                     contiguous:
                       type: boolean
