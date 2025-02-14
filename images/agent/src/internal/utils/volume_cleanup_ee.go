@@ -77,34 +77,36 @@ func volumeSize(log logr.Logger, device *os.File) (int64, error) {
 		return 0, fmt.Errorf("not a block device, mode: %x", stat.Mode)
 	}
 
-	var blockSize uint64
+	var blockDeviceSize uint64
 	_, _, errno := syscall.Syscall(
 		syscall.SYS_IOCTL,
 		device.Fd(),
 		uintptr(BLKGETSIZE64),
-		uintptr(unsafe.Pointer(&blockSize)))
+		uintptr(unsafe.Pointer(&blockDeviceSize)))
 	if errno != 0 {
 		return 0, fmt.Errorf("error calling ioctl BLKGETSIZE64: %s", errno.Error())
 	}
-	log.Info("Block size", "blockSize", blockSize)
-	if blockSize <= 0 {
+	log.Info("Block device size", "size", blockDeviceSize)
+	if blockDeviceSize <= 0 {
 		return 0, fmt.Errorf("block size is invalid")
 	}
 
-	var blockCount int
-	_, _, errno = syscall.Syscall(
-		syscall.SYS_IOCTL,
-		device.Fd(),
-		uintptr(BLKSSZGET),
-		uintptr(unsafe.Pointer(&blockCount)))
-	if errno != 0 {
-		return 0, fmt.Errorf("error calling ioctl BLKSSZGET: %s", errno.Error())
-	}
-	log.Info("Block count", "blockCount", blockCount)
-	if blockCount <= 0 {
-		return 0, fmt.Errorf("block count is invalid")
-	}
-	return int64(blockSize * uint64(blockCount)), nil
+	return int64(blockDeviceSize), nil
+
+	// var blockSize int
+	// _, _, errno = syscall.Syscall(
+	// 	syscall.SYS_IOCTL,
+	// 	device.Fd(),
+	// 	uintptr(BLKSSZGET),
+	// 	uintptr(unsafe.Pointer(&blockSize)))
+	// if errno != 0 {
+	// 	return 0, fmt.Errorf("error calling ioctl BLKSSZGET: %s", errno.Error())
+	// }
+	// log.Info("Block size", "blockSize", blockSize)
+	// if blockSize <= 0 {
+	// 	return 0, fmt.Errorf("block size is invalid")
+	// }
+	// return int64(blockDeviceSize * uint64(blockSize)), nil
 }
 
 func volumeCleanupOverwrite(_ context.Context, log logr.Logger, closingErrors *[]error, devicePath, inputPath string, passes int) error {
