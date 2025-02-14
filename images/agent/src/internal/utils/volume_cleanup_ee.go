@@ -156,29 +156,8 @@ const (
 	BLKGETSIZE64 = 0x80081272
 	BLKSSZGET    = 0x1268
 
-	S_IFMT   = 0x0170000 /* type of file mask */
-	S_IFIFO  = 0x0010000 /* named pipe (fifo) */
-	S_IFCHR  = 0x0020000 /* character special */
-	S_IFDIR  = 0x0040000 /* directory */
-	S_IFBLK  = 0x0060000 /* block special */
-	S_IFREG  = 0x0100000 /* regular */
-	S_IFLNK  = 0x0120000 /* symbolic link */
-	S_IFSOCK = 0x0140000 /* socket */
-	S_ISUID  = 0x0004000 /* set-user-ID on execution */
-	S_ISGID  = 0x0002000 /* set-group-ID on execution */
-	S_ISVTX  = 0x0001000 /* save swapped text even after use */
-	S_IRWXU  = 0x0000700 /* RWX mask for owner */
-	S_IRUSR  = 0x0000400 /* R for owner */
-	S_IWUSR  = 0x0000200 /* W for owner */
-	S_IXUSR  = 0x0000100 /* X for owner */
-	S_IRWXG  = 0x0000070 /* RWX mask for group */
-	S_IRGRP  = 0x0000040 /* R for group */
-	S_IWGRP  = 0x0000020 /* W for group */
-	S_IXGRP  = 0x0000010 /* X for group */
-	S_IRWXO  = 0x0000007 /* RWX mask for other */
-	S_IROTH  = 0x0000004 /* R for other */
-	S_IWOTH  = 0x0000002 /* W for other */
-	S_IXOTH  = 0x0000001 /* X for other */
+	S_IFMT  = 0xf000 /* type of file mask */
+	S_IFBLK = 0x6000 /* block special */
 )
 
 type Range struct {
