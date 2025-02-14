@@ -65,19 +65,19 @@ func volumeSize(stat syscall.Stat_t) (int64, error) {
 	}
 
 	if stat.Blksize <= 0 {
-		return 0, fmt.Errorf("block size %d is invalid", stat.Blksize)
+		return 0, fmt.Errorf("block size %d is invalid, stat: %v", stat.Blksize, stat)
 	}
 	if stat.Blocks <= 0 {
-		return 0, fmt.Errorf("block count %d is invalid", stat.Blocks)
+		return 0, fmt.Errorf("block count %d is invalid, stat: %v", stat.Blocks, stat)
 	}
 
 	return stat.Blksize * stat.Blocks, nil
 }
 
 func volumeCleanupCopy(ctx context.Context, log logger.Logger, closingErrors *[]error, outputPath, inputPath string, passes int) error {
-	var outputStat syscall.Stat_t
-	if err := syscall.Stat(outputPath, &outputStat); err != nil {
-		return fmt.Errorf("stat call failed: %w", err)
+	outputStat, err := volumeStat(outputPath)
+	if err != nil {
+		return fmt.Errorf("can't get stat of %s: %w", outputPath, err)
 	}
 
 	close := func(file *os.File) {
@@ -135,15 +135,23 @@ type Range struct {
 	start, count uint64
 }
 
-func volumeCleanupDiscard(ctx context.Context, log logger.Logger, closingErrors *[]error, devicePath string) error {
+func volumeStat(devicePath string) (syscall.Stat_t, error) {
 	var stat syscall.Stat_t
 	if err := syscall.Stat(devicePath, &stat); err != nil {
-		return fmt.Errorf("stat call failed: %w", err)
+		return stat, fmt.Errorf("stat call failed for device %s: %w", devicePath, err)
+	}
+	return stat, nil
+}
+
+func volumeCleanupDiscard(ctx context.Context, log logger.Logger, closingErrors *[]error, devicePath string) error {
+	stat, err := volumeStat(devicePath)
+	if err != nil {
+		return fmt.Errorf("can't get stat of %s: %w", devicePath, err)
 	}
 
 	deviceSize, err := volumeSize(stat)
 	if err != nil {
-		return fmt.Errorf("can't find the size of device: %w", err)
+		return fmt.Errorf("can't find the size of device %s: %w", devicePath, err)
 	}
 
 	device, err := os.OpenFile(devicePath, syscall.O_DIRECT, os.ModeDevice)
