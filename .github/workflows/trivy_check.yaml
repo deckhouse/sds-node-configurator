@@ -45,12 +45,12 @@ jobs:
 
       - name: Prepare sub repo
         run: |
-          version=v`grep "UTIL_LINUX_VERSION :=" images/agent/werf.inc.yaml | awk -F'"' '{ print $2}'`
+          version=`grep '"UTIL_LINUX"' .werf/consts.yaml | awk -F'"' '{ print $4}'`
           git clone --depth 1 --branch $version ${{ secrets.SOURCE_REPO }}/util-linux/util-linux.git ./util-linux
           git clone ${{ secrets.SOURCE_REPO }}/lvmteam/lvm2.git ./lvm2
-          version=`grep "LVM2_VERSION :=" images/sds-utils-installer/werf.inc.yaml | awk -F'"' '{ print $2}'`
+          version=`grep '"LVM2"' .werf/consts.yaml | awk -F'"' '{ print $4}'`
           cd ./lvm2
-          git checkout $version 
+          git checkout $version
           cd ..
 
       - name: Run Trivy vulnerability scanner in fs mode
