@@ -52,6 +52,10 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volum
 		closingErrors = closingErrors[1:]
 	}
 
+	if err == nil {
+		return nil
+	}
+
 	if len(closingErrors) == 0 {
 		return fmt.Errorf("cleaning volume %s: %w", devicePath, err)
 	}
