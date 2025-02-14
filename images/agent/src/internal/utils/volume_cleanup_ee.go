@@ -59,23 +59,46 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volum
 	}
 }
 
-func volumeSize(stat syscall.Stat_t) (int64, error) {
+func volumeSize(device *os.File) (int64, error) {
+	var stat syscall.Stat_t
+	if err := syscall.Fstat(int(device.Fd()), &stat); err != nil {
+		return 0, fmt.Errorf("fstat call failed: %w", err)
+	}
+
 	if stat.Size > 0 {
 		return stat.Size, nil
 	}
 
 	if stat.Mode&S_IFMT != S_IFBLK {
-		return 0, fmt.Errorf("not a block device, ifmt: %x", stat.Mode&S_IFMT)
+		return 0, fmt.Errorf("not a block device, mode: %x", stat.Mode)
 	}
 
-	if stat.Blksize <= 0 {
-		return 0, fmt.Errorf("block size %d is invalid, stat: %v", stat.Blksize, stat)
+	var blockSize uint64
+	_, _, errno := syscall.Syscall(
+		syscall.SYS_IOCTL,
+		uintptr(device.Fd()),
+		uintptr(BLKGETSIZE64),
+		uintptr(unsafe.Pointer(&blockSize)))
+	if errno != 0 {
+		return 0, fmt.Errorf("error calling ioctl BLKGETSIZE64: %s", errno.Error())
 	}
-	if stat.Blocks <= 0 {
-		return 0, fmt.Errorf("block count %d is invalid, stat: %v", stat.Blocks, stat)
+	if blockSize <= 0 {
+		return 0, fmt.Errorf("block size is invalid")
 	}
 
-	return stat.Blksize * stat.Blocks, nil
+	var blockCount int
+	_, _, errno = syscall.Syscall(
+		syscall.SYS_IOCTL,
+		uintptr(device.Fd()),
+		uintptr(BLKSSZGET),
+		uintptr(unsafe.Pointer(&blockCount)))
+	if errno != 0 {
+		return 0, fmt.Errorf("error calling ioctl BLKSSZGET: %s", errno.Error())
+	}
+	if blockCount <= 0 {
+		return 0, fmt.Errorf("block count is invalid")
+	}
+	return int64(blockSize * uint64(blockCount)), nil
 }
 
 func volumeCleanupCopy(ctx context.Context, log logger.Logger, closingErrors *[]error, outputPath, inputPath string, passes int) error {
@@ -100,13 +123,9 @@ func volumeCleanupCopy(ctx context.Context, log logger.Logger, closingErrors *[]
 	if err != nil {
 		return fmt.Errorf("opening device %s to wipe: %w", outputPath, err)
 	}
-	outputStat, err := volumeStat(output)
-	if err != nil {
-		return fmt.Errorf("can't get stat of %s: %w", outputPath, err)
-	}
 	defer close(output)
 
-	bytesToWrite, err := volumeSize(outputStat)
+	bytesToWrite, err := volumeSize(output)
 	if err != nil {
 		return fmt.Errorf("can't find the size of device %s: %w", outputPath, err)
 	}
@@ -133,6 +152,9 @@ const (
 	BLKDISCARD       = 0x1277
 	BLKDISCARDZEROES = 0x127c
 	BLKSECDISCARD    = 0x127d
+
+	BLKGETSIZE64 = 0x80081272
+	BLKSSZGET    = 0x1268
 
 	S_IFMT   = 0x0170000 /* type of file mask */
 	S_IFIFO  = 0x0010000 /* named pipe (fifo) */
@@ -163,29 +185,11 @@ type Range struct {
 	start, count uint64
 }
 
-func volumeStat(device *os.File) (syscall.Stat_t, error) {
-	var stat syscall.Stat_t
-	if err := syscall.Fstat(int(device.Fd()), &stat); err != nil {
-		return stat, fmt.Errorf("fstat call failed: %w", err)
-	}
-	return stat, nil
-}
-
 func volumeCleanupDiscard(ctx context.Context, log logger.Logger, closingErrors *[]error, devicePath string) error {
 
 	device, err := os.OpenFile(devicePath, syscall.O_DIRECT, os.ModeDevice)
 	if err != nil {
 		return fmt.Errorf("opening device %s to wipe: %w", devicePath, err)
-	}
-
-	stat, err := volumeStat(device)
-	if err != nil {
-		return fmt.Errorf("can't get stat of %s: %w", devicePath, err)
-	}
-
-	deviceSize, err := volumeSize(stat)
-	if err != nil {
-		return fmt.Errorf("can't find the size of device %s: %w", devicePath, err)
 	}
 	defer func() {
 		log.Info("Closing file", device)
@@ -194,6 +198,11 @@ func volumeCleanupDiscard(ctx context.Context, log logger.Logger, closingErrors 
 			*closingErrors = append(*closingErrors, fmt.Errorf("closing file %s: %w", device.Name(), err))
 		}
 	}()
+
+	deviceSize, err := volumeSize(device)
+	if err != nil {
+		return fmt.Errorf("can't find the size of device %s: %w", devicePath, err)
+	}
 
 	rng := Range{
 		start: 0,
