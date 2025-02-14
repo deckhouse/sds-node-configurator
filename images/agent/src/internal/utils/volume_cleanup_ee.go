@@ -150,8 +150,9 @@ func volumeCleanupOverwrite(_ context.Context, log logr.Logger, closingErrors *[
 			io.NewOffsetWriter(output, 0),
 			input,
 			bytesToWrite)
-		log.Info("Copying is done", "duration", time.Since(start).String())
+		log.Info("Overwriting is done", "duration", time.Since(start).String())
 		if err != nil {
+			log.Error(err, "While overwriting")
 			return fmt.Errorf("copying from %s to %s: %w", inputPath, devicePath, err)
 		}
 
