@@ -8,20 +8,22 @@ Licensed under the Deckhouse Platform Enterprise Edition (EE) license. See https
 package utils
 
 import (
-	"agent/internal/logger"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"syscall"
+	"time"
 	"unsafe"
 
 	commonfeature "github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"github.com/go-logr/logr"
+
+	"agent/internal/logger"
 )
 
 func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volumeCleanupMethod string) error {
-	log.Info("Cleaning up volume", "vgname", vgName, "lvname", lvName, "method", volumeCleanupMethod)
+	log_int := log.GetLogger().WithName("VolumeCleanup").WithValues("vgname", vgName, "lvname", lvName, "method", volumeCleanupMethod)
 	if !commonfeature.VolumeCleanupEnabled() {
 		return fmt.Errorf("Volume cleanup is not supported in your edition.")
 	}
@@ -36,13 +38,13 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volum
 	case "Disable":
 		return nil
 	case "SinglePass":
-		err = volumeCleanupOverwrite(ctx, log, &closingErrors, devicePath, randomSource, 1)
+		err = volumeCleanupOverwrite(ctx, log_int, &closingErrors, devicePath, randomSource, 1)
 		break
 	case "ThreePass":
-		err = volumeCleanupOverwrite(ctx, log, &closingErrors, devicePath, randomSource, 3)
+		err = volumeCleanupOverwrite(ctx, log_int, &closingErrors, devicePath, randomSource, 3)
 		break
 	case "Discard":
-		err = volumeCleanupDiscard(ctx, log, &closingErrors, devicePath)
+		err = volumeCleanupDiscard(ctx, log_int, &closingErrors, devicePath)
 		break
 	default:
 		return fmt.Errorf("unknown cleanup method %s", volumeCleanupMethod)
@@ -109,7 +111,7 @@ func volumeSize(log logr.Logger, device *os.File) (int64, error) {
 	return int64(blockSize * uint64(blockCount)), nil
 }
 
-func volumeCleanupOverwrite(ctx context.Context, log logr.Logger, closingErrors *[]error, devicePath, inputPath string, passes int) error {
+func volumeCleanupOverwrite(_ context.Context, log logr.Logger, closingErrors *[]error, devicePath, inputPath string, passes int) error {
 	log = log.WithName("volumeCleanupOverwrite").WithValues("device", devicePath, "input", inputPath, "passes", passes)
 	close := func(file *os.File) {
 		log := log.WithValues("name", file.Name())
@@ -143,11 +145,12 @@ func volumeCleanupOverwrite(ctx context.Context, log logr.Logger, closingErrors 
 
 	for pass := 0; pass < passes; pass++ {
 		log.Info("Overwriting", "bytes", bytesToWrite, "pass", pass)
+		start := time.Now()
 		written, err := io.CopyN(
 			io.NewOffsetWriter(output, 0),
 			input,
 			bytesToWrite)
-
+		log.Info("Copying is done", "duration", time.Since(start).String())
 		if err != nil {
 			return fmt.Errorf("copying from %s to %s: %w", inputPath, devicePath, err)
 		}
