@@ -6,6 +6,7 @@ env:
   MODULES_MODULE_NAME: ${{ vars.MODULE_NAME }}
   MODULES_MODULE_SOURCE: ${{ vars.DEV_MODULE_SOURCE }}
   MODULES_REGISTRY_LOGIN: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
+  DEFAULT_EDITION: ${{ vars.DEFAULT_EDITION }}
   MODULES_REGISTRY_PASSWORD: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
   SOURCE_REPO: "${{ secrets.SOURCE_REPO }}"
 
@@ -51,8 +52,9 @@ jobs:
       - name: Set vars
         id: set-vars
         run: |
+          MODULE_EDITION=$DEFAULT_EDITION
           EDITION=$(echo "${{ steps.get-labels.outputs.result }}" | grep -Po "edition/\K\w+" | head -n 1 || true)
-          [[ -n "$EDITION" ]] && MODULE_EDITION="$EDITION"
+          [[ -n $EDITION ]] && MODULE_EDITION=$EDITION
           echo "MODULE_EDITION=$MODULE_EDITION" >> "$GITHUB_OUTPUT"
   dev_setup_build:
     runs-on: [self-hosted, regular, selectel]
