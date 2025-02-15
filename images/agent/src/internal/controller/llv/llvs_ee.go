@@ -22,7 +22,7 @@ import (
 
 func (r *Reconciler) handleLLVSSource(ctx context.Context, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LVMVolumeGroup) (string, bool, error) {
 	if !feature.SnapshotsEnabled() {
-		return "", false, errors.New("LVMLocalVolumeSnapshot as a source is not supported in your edition")
+		return "", false, errors.New("LVMLocalVolumeSnapshot as a source is not supported: snapshot feature is disabled")
 	}
 
 	sourceLLVS := &v1alpha1.LVMLogicalVolumeSnapshot{}

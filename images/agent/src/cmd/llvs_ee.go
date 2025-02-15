@@ -30,8 +30,11 @@ func addLLVSReconciler(
 	cfgParams *config.Config,
 ) {
 	if !feature.SnapshotsEnabled() {
+		log.Info("[addLLVSReconciler] Snapshot feature is disabled")
 		return
 	}
+
+	log.Info("[addLLVSReconciler] Snapshot feature is enabled. Adding LLVS reconciler")
 
 	err := controller.AddReconciler(
 		mgr,

@@ -236,10 +236,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if feature.SnapshotsEnabled() {
-		log.Info("[main] Snapshot feature is enabled. Adding LLVS reconciler")
-		addLLVSReconciler(mgr, log, metrics, sdsCache, cfgParams)
-	}
+	addLLVSReconciler(mgr, log, metrics, sdsCache, cfgParams)
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
