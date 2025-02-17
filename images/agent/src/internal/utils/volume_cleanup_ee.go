@@ -192,7 +192,7 @@ type Range struct {
 
 func volumeCleanupDiscard(_ context.Context, log logr.Logger, closingErrors *[]error, devicePath string) error {
 	log = log.WithValues("device", devicePath, "device", devicePath)
-	device, err := os.OpenFile(devicePath, syscall.O_DIRECT, os.ModeDevice)
+	device, err := os.OpenFile(devicePath, syscall.O_RDWR, os.ModeDevice)
 	if err != nil {
 		log.Error(err, "[volumeCleanupDiscard] Opening device")
 		return fmt.Errorf("opening device %s to wipe: %w", devicePath, err)
@@ -217,7 +217,7 @@ func volumeCleanupDiscard(_ context.Context, log logr.Logger, closingErrors *[]e
 		count: uint64(deviceSize),
 	}
 
-	log.Info("[volumeCleanupDiscard] calling BLKDISCARD")
+	log.Info("[volumeCleanupDiscard] calling BLKDISCARD", "fd", device.Fd(), "range", rng)
 	start := time.Now()
 
 	_, _, errno := syscall.Syscall(
