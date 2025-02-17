@@ -229,8 +229,9 @@ func volumeCleanupDiscard(_ context.Context, log logr.Logger, closingErrors *[]e
 	log.Info("[volumeCleanupDiscard] BLKDISCARD is done", "duration", time.Since(start).String(), "errno", errno)
 
 	if errno != 0 {
-		log.Error(fmt.Errorf(err.Error()), "[volumeCleanupDiscard] error calling BLKDISCARD")
-		return fmt.Errorf("calling ioctl BLKDISCARD: %s", err.Error())
+		err := fmt.Errorf(errno.Error())
+		log.Error(err, "[volumeCleanupDiscard] error calling BLKDISCARD")
+		return fmt.Errorf("calling ioctl BLKDISCARD: %s", err)
 	}
 
 	return nil
