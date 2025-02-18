@@ -103,9 +103,6 @@ spec:
                     - rule: |
                         (!has(oldSelf.contiguous) || has(self.contiguous))
                       message: "Field 'contiguous' cannot be removed."
-                    - rule: |
-                        (!has(oldSelf.volumeCleanup) || has(self.volumeCleanup))
-                      message: "Field 'volumeCleanup' cannot be removed."
                   properties:
                     contiguous:
                       type: boolean
