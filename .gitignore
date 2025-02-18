@@ -30,6 +30,8 @@
 venv/
 .vscode
 *.code-workspace
+.vscode
+*.code-workspace
 
 # macOS Finder files
 *.DS_Store

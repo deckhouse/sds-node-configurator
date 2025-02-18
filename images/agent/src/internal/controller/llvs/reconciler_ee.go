@@ -1,7 +1,4 @@
-/*
-Copyright 2025 Flant JSC
-Licensed under the Deckhouse Platform Enterprise Edition (EE) license. See https://github.com/deckhouse/deckhouse/blob/main/ee/LICENSE
-*/
+//go:build !ce
 
 package llvs
 
@@ -95,12 +92,6 @@ func (r *Reconciler) ShouldReconcileCreate(llvs *v1alpha1.LVMLogicalVolumeSnapsh
 
 func (r *Reconciler) Reconcile(ctx context.Context, req controller.ReconcileRequest[*v1alpha1.LVMLogicalVolumeSnapshot]) (controller.Result, error) {
 	llvs := req.Object
-
-	r.log.Info(fmt.Sprintf("reconciling the LVMLogicalVolumeSnapshot %s", llvs.Name))
-	if llvs.Status != nil && llvs.Status.NodeName != r.cfg.NodeName {
-		r.log.Info(fmt.Sprintf("LVMLogicalVolumeSnapshot %s has a Status with different node %s. Our node is %s. Skip", llvs.Name, llvs.Status.NodeName, r.cfg.NodeName))
-		return controller.Result{}, nil
-	}
 
 	// this case prevents the unexpected behavior when the controller runs up with existing LVMLogicalVolumeSnapshots
 	if lvs, _ := r.sdsCache.GetLVs(); len(lvs) == 0 {

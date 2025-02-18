@@ -297,10 +297,6 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 
 		cmd, err = utils.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, sourceLLV.Spec.ActualLVNameOnTheNode)
 	case llv.Spec.Source.Kind == "LVMLogicalVolumeSnapshot":
-		if !feature.SnapshotsEnabled() {
-			return false, errors.New("LVMLocalVolumeSnapshot as a source is not supported in your edition")
-		}
-
 		cmdTmp, shouldRequeue, err := r.handleLLVSSource(ctx, llv, lvg)
 		if err != nil {
 			return shouldRequeue, err

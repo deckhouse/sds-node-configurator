@@ -1,6 +1,9 @@
+//go:build !ce
+
 /*
 Copyright 2025 Flant JSC
-Licensed under the Deckhouse Platform Enterprise Edition (EE) license. See https://github.com/deckhouse/deckhouse/blob/main/ee/LICENSE
+Licensed under the Deckhouse Platform Enterprise Edition (EE) license.
+See https://github.com/deckhouse/deckhouse/blob/main/ee/LICENSE
 */
 
 package main
@@ -8,6 +11,7 @@ package main
 import (
 	"os"
 
+	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"agent/internal/cache"
@@ -25,6 +29,13 @@ func addLLVSReconciler(
 	sdsCache *cache.Cache,
 	cfgParams *config.Config,
 ) {
+	if !feature.SnapshotsEnabled() {
+		log.Info("[addLLVSReconciler] Snapshot feature is disabled")
+		return
+	}
+
+	log.Info("[addLLVSReconciler] Snapshot feature is enabled. Adding LLVS reconciler")
+
 	err := controller.AddReconciler(
 		mgr,
 		log,
