@@ -57,9 +57,9 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volum
 	}
 
 	if len(closingErrors) == 0 {
-		return fmt.Errorf("[VolumeCleanup] cleaning volume %s: %w", devicePath, err)
+		return fmt.Errorf("cleaning volume %s: %w", devicePath, err)
 	}
-	return fmt.Errorf("[VolumeCleanup] cleaning volume %s: %w, errors while closing files %v", devicePath, err, closingErrors)
+	return fmt.Errorf("cleaning volume %s: %w, errors while closing files %v", devicePath, err, closingErrors)
 }
 
 func volumeSize(log logr.Logger, device *os.File) (int64, error) {
