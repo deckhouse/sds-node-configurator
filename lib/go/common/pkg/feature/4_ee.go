@@ -9,11 +9,3 @@ package feature
 
 const snapshotsEnabled = true
 const volumeCleanupEnabled = true
-
-func SnapshotsEnabled() bool {
-	return snapshotsEnabled
-}
-
-func VolumeCleanupEnabled() bool {
-	return volumeCleanupEnabled
-}
