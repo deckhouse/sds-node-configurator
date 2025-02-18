@@ -16,7 +16,7 @@ import (
 	"time"
 	"unsafe"
 
-	commonfeature "github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
+	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"github.com/go-logr/logr"
 
 	"agent/internal/logger"
@@ -24,7 +24,7 @@ import (
 
 func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volumeCleanup string) error {
 	myLog := log.GetLogger().WithValues("vgname", vgName, "lvname", lvName, "method", volumeCleanup)
-	if !commonfeature.VolumeCleanupEnabled() {
+	if !feature.VolumeCleanupEnabled() {
 		return fmt.Errorf("volume cleanup is not supported in your edition")
 	}
 
