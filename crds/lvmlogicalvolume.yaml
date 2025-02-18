@@ -104,8 +104,8 @@ spec:
                         (!has(oldSelf.contiguous) || has(self.contiguous))
                       message: "Field 'contiguous' cannot be removed."
                     - rule: |
-                        (!has(oldSelf.volumeCleanupMethod) || has(self.volumeCleanupMethod))
-                      message: "Field 'volumeCleanupMethod' cannot be removed."
+                        (!has(oldSelf.volumeCleanup) || has(self.volumeCleanup))
+                      message: "Field 'volumeCleanup' cannot be removed."
                   properties:
                     contiguous:
                       type: boolean
@@ -114,14 +114,13 @@ spec:
                           message: Value is immutable.
                       description: |
                         If true, the Logical Volume will be created with the contiguous flag. Use it carefully as LV might not be created even if there is enough space in VG.
-                    volumeCleanupMethod:
+                    volumeCleanup:
                       type: string
-                      enum: [Disable, SinglePass, ThreePass, Discard]
+                      enum: [RandomFillThreePass, RandomFillSinglePass, Discard]
                       description: |
                         The method of the volume cleanup before deletion.
-                        - `Disable`: Do not perform any additional actions when deleting the volume. The data may remain accessible to the next user.
-                        - `SinglePass`: The volume will be overwritten with random data once before deletion. This option is not recommended for solid-state drives, as it reduces the lifespan of the drive.
-                        - `ThreePass`: The volume will be overwritten with random data three times before deletion. This option is also not recommended for solid-state drives, as it reduces the lifespan of the drive.
+                        - `RandomFillSinglePass`: The volume will be overwritten with random data once before deletion. This option is not recommended for solid-state drives, as it reduces the lifespan of the drive.
+                        - `RandomFillThreePass`: The volume will be overwritten with random data three times before deletion. This option is also not recommended for solid-state drives, as it reduces the lifespan of the drive.
                         - `Discard`: All blocks of the volume will be marked as free using the `discard`` system call before deletion. This option is only applicable to solid-state drives.
                 source:
                   type: object

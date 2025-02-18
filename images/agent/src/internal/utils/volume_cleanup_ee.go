@@ -22,8 +22,8 @@ import (
 	"agent/internal/logger"
 )
 
-func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volumeCleanupMethod string) error {
-	myLog := log.GetLogger().WithValues("vgname", vgName, "lvname", lvName, "method", volumeCleanupMethod)
+func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volumeCleanup string) error {
+	myLog := log.GetLogger().WithValues("vgname", vgName, "lvname", lvName, "method", volumeCleanup)
 	if !commonfeature.VolumeCleanupEnabled() {
 		return fmt.Errorf("volume cleanup is not supported in your edition")
 	}
@@ -34,17 +34,15 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volum
 	var err error
 	closingErrors := []error{}
 
-	switch volumeCleanupMethod {
-	case "Disable":
-		return nil
-	case "SinglePass":
+	switch volumeCleanup {
+	case "RandomFillSinglePass":
 		err = volumeCleanupOverwrite(ctx, myLog, &closingErrors, devicePath, randomSource, 1)
-	case "ThreePass":
+	case "RandomFillThreePass":
 		err = volumeCleanupOverwrite(ctx, myLog, &closingErrors, devicePath, randomSource, 3)
 	case "Discard":
 		err = volumeCleanupDiscard(ctx, myLog, &closingErrors, devicePath)
 	default:
-		return fmt.Errorf("unknown cleanup method %s", volumeCleanupMethod)
+		return fmt.Errorf("unknown cleanup method %s", volumeCleanup)
 	}
 
 	if err == nil && len(closingErrors) > 0 {
