@@ -18,7 +18,7 @@ jobs:
       - name: Setup Go environment
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.23.5'
 
       - name: Run Go modules version check
         run: |
@@ -44,8 +44,14 @@ jobs:
             if [[ "$line" == *github.com/deckhouse/sds-* || "$line" == *github.com/deckhouse/csi-* || "$line" == *github.com/deckhouse/virtualization ]]; then
               repository=$(echo "$line" | awk '{print $1}' | awk -F'/' '{ print "https://"$1"/"$2"/"$3".git" }')
               pseudo_tag=$(echo "$line" | awk '{print $2}')
+              
+              go_pkg=$(echo "$line" | awk '{print $1}')
+              if grep -q "^replace $go_pkg" $go_mod_file ;then
+                echo "Skipping $go_pkg check because it exists in replacement"
+                continue
+              fi
+              
               echo "Cloning repo $repository into $temp_dir"
-          
               git clone "$repository" "$temp_dir/$repository" >/dev/null 2>&1
           
               if [ -d "$temp_dir/$repository/api" ]; then

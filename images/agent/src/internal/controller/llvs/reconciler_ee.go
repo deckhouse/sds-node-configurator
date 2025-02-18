@@ -1,3 +1,5 @@
+//go:build !ce
+
 package llvs
 
 import (
@@ -116,9 +118,9 @@ func (r *Reconciler) reconcileLVMLogicalVolumeSnapshot(
 	case llvs.DeletionTimestamp != nil:
 		// delete
 		return r.reconcileLLVSDeleteFunc(ctx, llvs)
-	case llvs.Status == nil || llvs.Status.Phase == internal.LLVSStatusPhasePending:
+	case llvs.Status == nil || llvs.Status.Phase == v1alpha1.PhasePending:
 		return r.reconcileLLVSCreateFunc(ctx, llvs)
-	case llvs.Status.Phase == internal.LLVSStatusPhaseCreated:
+	case llvs.Status.Phase == v1alpha1.PhaseCreated:
 		r.log.Info(fmt.Sprintf("the LVMLogicalVolumeSnapshot %s is already Created and should not be reconciled", llvs.Name))
 	default:
 		r.log.Warning(fmt.Sprintf("skipping LLVS reconciliation, since it is in phase: %s", llvs.Status.Phase))
@@ -146,7 +148,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 		if llv.Spec.Thin == nil {
 			r.log.Error(nil, fmt.Sprintf("Failed reconciling LLVS %s, LLV %s is not Thin", llvs.Name, llv.Name))
 			llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
-				Phase:  internal.LLVSStatusPhaseFailed,
+				Phase:  v1alpha1.PhaseFailed,
 				Reason: fmt.Sprintf("Source LLV %s is not Thin", llv.Name),
 			}
 			return false, r.cl.Status().Update(ctx, llvs)
@@ -173,7 +175,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 		if thinPoolIndex < 0 {
 			r.log.Error(nil, fmt.Sprintf("LLVS %s thin pool %s is not found in LVG %s", llvs.Name, llv.Spec.Thin.PoolName, lvg.Name))
 			llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
-				Phase:  internal.LLVSStatusPhasePending,
+				Phase:  v1alpha1.PhasePending,
 				Reason: fmt.Sprintf("Thin pool %s is not found in LVG %s", llv.Spec.Thin.PoolName, lvg.Name),
 			}
 			return true, r.cl.Status().Update(ctx, llvs)
@@ -182,7 +184,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 		if llv.Status == nil || llv.Status.ActualSize.Value() == 0 {
 			r.log.Error(nil, fmt.Sprintf("Error reconciling LLVS %s, source LLV %s ActualSize is not known", llvs.Name, llv.Name))
 			llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
-				Phase:  internal.LLVSStatusPhasePending,
+				Phase:  v1alpha1.PhasePending,
 				Reason: fmt.Sprintf("Source LLV %s ActualSize is not known", llv.Name),
 			}
 			return true, r.cl.Status().Update(ctx, llvs)
@@ -197,7 +199,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 				lvg.Status.ThinPools[thinPoolIndex].AvailableSpace.String(),
 			))
 			llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
-				Phase: internal.LLVSStatusPhasePending,
+				Phase: v1alpha1.PhasePending,
 				Reason: fmt.Sprintf(
 					"Not enough space available in thin pool %s: need at least %s, got %s",
 					llv.Spec.Thin.PoolName,
@@ -212,7 +214,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 			NodeName:              lvg.Spec.Local.NodeName,
 			ActualVGNameOnTheNode: lvg.Spec.ActualVGNameOnTheNode,
 			ActualLVNameOnTheNode: llv.Spec.ActualLVNameOnTheNode,
-			Phase:                 internal.LLVSStatusPhasePending,
+			Phase:                 v1alpha1.PhasePending,
 			Reason:                "Creating volume",
 		}
 
@@ -247,7 +249,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 			llvs.ActualSnapshotNameOnTheNode(),
 			llvs.Status.ActualVGNameOnTheNode,
 			llvs.Status.ActualLVNameOnTheNode,
-			utils.NewEnabledTags(internal.LLVSNameTag, llvs.Name),
+			utils.NewEnabledTags(v1alpha1.LLVSNameTag, llvs.Name),
 		)
 		r.log.Debug(fmt.Sprintf("[reconcileLLVSCreateFunc] ran cmd: %s", cmd))
 		if err != nil {
@@ -294,7 +296,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 
 		llvs.Status.Size = *size
 		llvs.Status.UsedSize = *usedSize
-		llvs.Status.Phase = internal.LLVSStatusPhaseCreated
+		llvs.Status.Phase = v1alpha1.PhaseCreated
 		llvs.Status.Reason = ""
 		err = r.cl.Status().Update(ctx, llvs)
 		return false, err
@@ -342,7 +344,7 @@ func (r *Reconciler) deleteLVIfNeeded(llvsName, llvsActualNameOnTheNode, vgActua
 		return nil
 	}
 
-	if ok, name := utils.ReadValueFromTags(lv.Data.LvTags, internal.LLVSNameTag); !ok {
+	if ok, name := utils.ReadValueFromTags(lv.Data.LvTags, v1alpha1.LLVSNameTag); !ok {
 		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] did not find required tags on LV %s in VG %s", llvsActualNameOnTheNode, vgActualNameOnTheNode))
 		return nil
 	} else if name != llvsName {
@@ -371,7 +373,7 @@ func (r *Reconciler) getObjectOrSetPendingStatus(
 ) error {
 	if err := r.cl.Get(ctx, key, obj); err != nil {
 		llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
-			Phase:  internal.LLVSStatusPhasePending,
+			Phase:  v1alpha1.PhasePending,
 			Reason: fmt.Sprintf("Error while getting object %s: %v", obj.GetName(), err),
 		}
 		updErr := r.cl.Status().Update(ctx, llvs)

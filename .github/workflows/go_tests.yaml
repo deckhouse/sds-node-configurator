@@ -1,5 +1,8 @@
 name: Go tests for images
 
+env:
+  GO_BUILD_TAGS: "ce se seplus ee csepro"
+
 on:
   pull_request:
   push:
@@ -18,23 +21,24 @@ jobs:
       - name: Setup Go environment
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.23.5'
 
       - name: Run Go tests
         run: |
           basedir=$(pwd)
           failed='false'
-          for dir in $(find images -type d); do
-            if ls $dir/*_test.go &> /dev/null; then
-              echo "Running tests in $dir"
-              cd $dir
-              go test -v
+          for i in $(find images -type f -name '*_test.go');do
+            dir=$(echo $i | sed 's/[a-z_A-Z0-9-]*_test.go$//')
+            cd $basedir/$dir
+            # check all editions
+            for edition in $GO_BUILD_TAGS ;do
+              echo "Running tests in $dir (edition: $edition)"
+              go test -v -tags $edition
               if [ $? -ne 0 ]; then
-                echo "Tests failed in $dir"
+                echo "Tests failed in $dir (edition: $edition)"
                 failed='true'
               fi
-            cd $basedir
-            fi
+            done
           done
           if [ $failed == 'true' ]; then
             exit 1
