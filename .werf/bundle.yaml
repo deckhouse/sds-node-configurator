@@ -14,11 +14,6 @@ import:
   add: /lib/python/dist
   to: /lib/python/dist
   after: setup
-# Rendering .werf/choice-edition.yaml is required!
-- image: choice-edition
-  add: /openapi
-  to: /openapi
-  after: setup
 git:
 - add: /
   to: /
@@ -30,5 +25,6 @@ git:
   - enabled
   - hooks
   - monitoring
+  - openapi
   - templates
   - Chart.yaml

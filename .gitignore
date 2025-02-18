@@ -28,7 +28,6 @@
 .settings
 .idea/
 venv/
-.vscode
 *.code-workspace
 .vscode
 *.code-workspace
