@@ -6,9 +6,6 @@ properties:
     type: object
     default: {}
     properties:
-      featureLLVSEnabled:
-        type: boolean
-        default: true
       pythonVersions:
         type: array
         default: []
