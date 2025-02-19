@@ -35,8 +35,13 @@ spec:
                 - rule: |                  
                     (self.type == "Thin" && has(self.thin) && !has(self.thick)) || self.type != "Thin"
                   message: "Field 'thin' is required and field 'thick' is forbidden when 'type' is 'Thin'."
-                - rule: |
-                    (!has(self.thick) && !has(oldSelf.thick) || (!has(self.thick.contiguous) && !has(oldSelf.thick.contiguous)) || (has(self.thick.contiguous) && has(oldSelf.thick.contiguous) && self.thick.contiguous == oldSelf.thick.contiguous)
+                - rule: >
+                    (!has(self.thick) && !has(oldSelf.thick)) ||
+                    (!has(self.thick.contiguous) && !has(oldSelf.thick.contiguous)) ||
+                    (
+                      has(self.thick.contiguous) && has(oldSelf.thick.contiguous) &&
+                      self.thick.contiguous == oldSelf.thick.contiguous
+                    )
                   message: "Field 'contiguous' is immutable and cannot be added if not specified at creation."
               required:
                 - actualLVNameOnTheNode
