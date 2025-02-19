@@ -545,11 +545,11 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 
 	// this case prevents unexpected same-name LV deletions which does not actually belong to our LLV
 	if !checkIfLVBelongsToLLV(llv, &lv.Data) {
-		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] no need to delete LV %s as it doesnt belong to LVMLogicalVolume %s", lv.Data.LVName, llv.Name))
+		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] no need to delete LV %s as it doesn't belong to LVMLogicalVolume %s", lv.Data.LVName, llv.Name))
 		return nil
 	}
 
-	if llv.Spec.Type == internal.Thick && llv.Spec.Thick.VolumeCleanup != "" {
+	if llv.Spec.Type == internal.Thick && llv.Spec.Thick != nil && llv.Spec.Thick.VolumeCleanup != "" {
 		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] runs cleanup for LV %s in VG %s with method %s", llv.Spec.ActualLVNameOnTheNode, vgName, llv.Spec.Thick.VolumeCleanup))
 		err := utils.VolumeCleanup(ctx, r.log, vgName, llv.Spec.ActualLVNameOnTheNode, llv.Spec.Thick.VolumeCleanup)
 		if err != nil {
