@@ -28,6 +28,9 @@
 .settings
 .idea/
 venv/
+*.code-workspace
+.vscode
+*.code-workspace
 
 # macOS Finder files
 *.DS_Store
@@ -43,3 +46,4 @@ __pycache__/
 # dev
 images/agent/dev
 images/agent/Makefile
+local_build.sh

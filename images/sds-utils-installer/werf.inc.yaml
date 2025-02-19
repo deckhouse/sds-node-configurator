@@ -1,8 +1,49 @@
 {{ $binaries := "/sds-utils/bin/lvm.static" }}
+
+# Do not remove. It's used in external tests.
+---
+image: {{ $.ImageName }}-src-artifact
+from: {{ $.Root.BASE_ALT_P11 }}
+final: false
+
+git:
+  - add: /images/{{ $.ImageName }}/src
+    to: /src/images/{{ $.ImageName }}/src
+    stageDependencies:
+      install:
+        - "**/*"
+  - add: /api
+    to: /src/api
+    stageDependencies:
+      install:
+        - "**/*"
+
+shell:
+  install:
+    - apt-get update
+    - apt-get -y install git
+    - git clone --depth 1 {{ env "SOURCE_REPO" }}/lvmteam/lvm2.git /src/lvm2
+    - cd /src/lvm2
+    - git fetch --depth 1 origin {{ $.Versions.LVM2 }}
+    - rm -rf /src/lvm2/.git
+
 ---
 image: {{ $.ImageName }}-binaries-artifact
-from: {{ $.Root.BASE_ALT_DEV }}
+from: {{ $.Root.BASE_ALT_P11 }}
 final: false
+
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
+
+git:
+  - add: /tools/dev_images/additional_tools/binary_replace.sh
+    to: /binary_replace.sh
+    stageDependencies:
+      install:
+        - "**/*"
 
 shell:
   install:
@@ -18,49 +59,54 @@ shell:
     libaio-devel-static \
     libblkid-devel-static \
     thin-provisioning-tools \
-    git
-  - cd /
-  - git clone {{ env "SOURCE_REPO" }}/lvmteam/lvm2.git
-  - cd /lvm2
-  - git checkout {{ $.Versions.LVM2 }}
+    glibc-core
+  - cd /src/lvm2
   - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu
   - make
   - mkdir -p /sds-utils/bin/
-  - mv /lvm2/tools/lvm.static /sds-utils/bin/lvm.static
+  - mv /src/lvm2/tools/lvm.static /sds-utils/bin/lvm.static
+  - chmod +x /binary_replace.sh
   - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
 
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.Root.BASE_GOLANG_1_22 }}
+from: {{ $.Root.BASE_GOLANG_1_23 }}
 final: false
 
-git:
-  - add: /images/sds-utils-installer/src
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
     to: /src
-    stageDependencies:
-      setup:
-        - "**/*"
+    before: install
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
 
 shell:
   setup:
-    - cd /src/cmd
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /bin-copier
-    - chmod +x /bin-copier
+    - cd /src/images/{{ $.ImageName }}/src/cmd
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
+    - chmod +x /{{ $.ImageName }}
+    # - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /bin-copier
+    # - chmod +x /bin-copier
 
 ---
 image: {{ $.ImageName }}-distroless-artifact
-from: {{ $.Root.BASE_ALPINE_DEV }}
+from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 shell:
   install:
+    - apt-get update
+    - apt-get install ca-certificates tzdata -y
     - mkdir -p /relocate/bin /relocate/sbin /relocate/etc /relocate/etc/ssl /relocate/usr/bin /relocate/usr/sbin /relocate/usr/share
     - cp -pr /tmp /relocate
     - cp -pr /etc/passwd /etc/group /etc/hostname /etc/hosts /etc/shadow /etc/protocols /etc/services /etc/nsswitch.conf /relocate/etc
     - cp -pr /usr/share/ca-certificates /relocate/usr/share
     - cp -pr /usr/share/zoneinfo /relocate/usr/share
-    - cp -pr etc/ssl/cert.pem /relocate/etc/ssl
-    - cp -pr /etc/ssl/certs /relocate/etc/ssl
+    - cp -pr /etc/pki/tls/cert.pem /relocate/etc/ssl
+    - cp -pr /etc/pki/tls/certs /relocate/etc/ssl
     - echo "deckhouse:x:64535:64535:deckhouse:/:/sbin/nologin" >> /relocate/etc/passwd
     - echo "deckhouse:x:64535:" >> /relocate/etc/group
     - echo "deckhouse:!::0:::::" >> /relocate/etc/shadow
@@ -85,10 +131,11 @@ import:
     to: /
     before: setup
   - image: {{ $.ImageName }}-golang-artifact
-    add: /bin-copier
-    to: /bin-copier
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
     before: setup
 
 docker:
-  ENTRYPOINT: ["/bin-copier"]
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
   CMD: ["/sds-utils", "/opt/deckhouse/sds"]
+  USER: deckhouse:deckhouse

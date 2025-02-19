@@ -1,8 +1,48 @@
-{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 ld-linux-x86-64.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic" }}
+{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2" }}
+
+# Do not remove. It's used in external tests.
+---
+image: {{ $.ImageName }}-src-artifact
+from: {{ $.Root.BASE_ALT_P11 }}
+final: false
+
+git:
+  - add: /
+    to: /src
+    includePaths:
+      - api
+      - lib/go
+      - images/{{ $.ImageName }}/src
+    stageDependencies:
+      install:
+        - '**/*'
+
+shell:
+  install:
+    - apt-get update
+    - apt-get -y install git
+    - git clone --depth 1 --branch {{ $.Versions.UTIL_LINUX }} {{ env "SOURCE_REPO" }}/util-linux/util-linux.git /src/util-linux
+    - rm -rf /src/util-linux/.git
+    - rm -rf /src/.git
+
+
 ---
 image: {{ $.ImageName }}-binaries-artifact
-from: {{ $.Root.BASE_ALT_DEV }}
+from: {{ $.Root.BASE_ALT_P11 }}
 final: false
+
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
+
+git:
+  - add: /tools/dev_images/additional_tools/binary_replace.sh
+    to: /binary_replace.sh
+    stageDependencies:
+      install:
+        - "**/*"
 
 shell:
   install:
@@ -10,7 +50,6 @@ shell:
   - |
     apt-get install -y \
     build-essential \
-    git \
     pkg-config \
     gettext \
     autoconf \
@@ -22,60 +61,64 @@ shell:
     libmount-devel-static \
     automake \
     gettext \
-    flex
-  - cd /
-  - git clone {{ env "SOURCE_REPO" }}/util-linux/util-linux.git
-  - cd /util-linux
-  - git checkout v{{ $.Versions.UTIL_LINUX }}
+    flex \
+    glibc-core \
+    cross-glibc-x86_64
+  - cd /src/util-linux
   - ./autogen.sh
   - ./configure LDFLAGS="-static" --enable-static-programs -disable-all-programs --enable-nsenter
   - make install-strip
   - ./configure --prefix /opt/deckhouse/sds --with-udev
   - make install-strip
   - mkdir -p /opt/deckhouse/sds/lib/x86_64-linux-gnu/
-  - cp /util-linux/nsenter.static /opt/deckhouse/sds/bin/nsenter.static
+  - cp /src/util-linux/nsenter.static /opt/deckhouse/sds/bin/nsenter.static
   - cp /lib64/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1
   - cp /lib64/libc.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libc.so.6
   - cp /lib64/libcap.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2
-  - cp /lib64/ld-2.32.so /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+  # There is no more such file in P11 with glibc-core that it was a part of. Now it's /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2
+  #- cp /lib64/ld-2.32.so /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+  - cp /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
   - cp /opt/deckhouse/sds/bin/lsblk /opt/deckhouse/sds/bin/lsblk.dynamic
+  - chmod +x /binary_replace.sh
   - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
 
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.Root.BASE_GOLANG_1_22 }}
+from: {{ $.Root.BASE_GOLANG_1_23 }}
 final: false
 
-git:
-  - add: /
-    to: /
-    includePaths:
-      - api
-      - images/agent/src
-    stageDependencies:
-      setup:
-        - "**/*"
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
 
 shell:
   setup:
-    - cd /images/agent/src/cmd
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /sds-node-configurator-agent
-    - chmod +x /sds-node-configurator-agent
+    - cd /src/images/{{ $.ImageName }}/src/cmd
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -tags {{ $.Root.MODULE_EDITION }} -o /{{ $.ImageName }}
+    - chmod +x /{{ $.ImageName }}
 
 ---
 image: {{ $.ImageName }}-distroless-artifact
-from: {{ $.Root.BASE_ALPINE_DEV }}
+from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 shell:
   install:
+    - apt-get update
+    - apt-get install ca-certificates tzdata -y
     - mkdir -p /relocate/bin /relocate/sbin /relocate/etc /relocate/etc/ssl /relocate/usr/bin /relocate/usr/sbin /relocate/usr/share
     - cp -pr /tmp /relocate
     - cp -pr /etc/passwd /etc/group /etc/hostname /etc/hosts /etc/shadow /etc/protocols /etc/services /etc/nsswitch.conf /relocate/etc
     - cp -pr /usr/share/ca-certificates /relocate/usr/share
     - cp -pr /usr/share/zoneinfo /relocate/usr/share
-    - cp -pr etc/ssl/cert.pem /relocate/etc/ssl
-    - cp -pr /etc/ssl/certs /relocate/etc/ssl
+    - cp -pr /etc/pki/tls/cert.pem /relocate/etc/ssl
+    - cp -pr /etc/pki/tls/certs /relocate/etc/ssl
     - echo "deckhouse:x:64535:64535:deckhouse:/:/sbin/nologin" >> /relocate/etc/passwd
     - echo "deckhouse:x:64535:" >> /relocate/etc/group
     - echo "deckhouse:!::0:::::" >> /relocate/etc/shadow
@@ -100,9 +143,10 @@ import:
     to: /
     before: setup
   - image: {{ $.ImageName }}-golang-artifact
-    add: /sds-node-configurator-agent
-    to: /sds-node-configurator-agent
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
     before: setup
 
 docker:
-  ENTRYPOINT: ["/sds-node-configurator-agent"]
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
+  USER: deckhouse:deckhouse
