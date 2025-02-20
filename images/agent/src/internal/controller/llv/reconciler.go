@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -42,14 +43,23 @@ import (
 
 const ReconcilerName = "lvm-logical-volume-watcher-controller"
 
+type runningCleanupsKey struct {
+	vgName, lvName string
+}
+
+type runningCleanups struct {
+	m       sync.RWMutex
+	volumes map[runningCleanupsKey]bool
+}
 type Reconciler struct {
-	cl       client.Client
-	log      logger.Logger
-	lvgCl    *utils.LVGClient
-	llvCl    *utils.LLVClient
-	metrics  monitoring.Metrics
-	sdsCache *cache.Cache
-	cfg      ReconcilerConfig
+	cl              client.Client
+	log             logger.Logger
+	lvgCl           *utils.LVGClient
+	llvCl           *utils.LLVClient
+	metrics         monitoring.Metrics
+	sdsCache        *cache.Cache
+	cfg             ReconcilerConfig
+	runningCleanups runningCleanups
 }
 
 type ReconcilerConfig struct {
@@ -82,7 +92,34 @@ func NewReconciler(
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		cfg:      cfg,
+		runningCleanups: runningCleanups{
+			volumes: make(map[runningCleanupsKey]bool, 50),
+		},
 	}
+}
+
+func (r *Reconciler) insertCleanupRunning(vgName, lvName string) (inserted bool) {
+	r.runningCleanups.m.Lock()
+	defer r.runningCleanups.m.Unlock()
+	key := runningCleanupsKey{vgName: vgName, lvName: lvName}
+	value, exists := r.runningCleanups.volumes[key]
+	if exists && value {
+		return false
+	}
+	r.runningCleanups.volumes[key] = true
+	return true
+}
+
+func (r *Reconciler) removeCleanupRunning(vgName, lvName string) error {
+	r.runningCleanups.m.Lock()
+	defer r.runningCleanups.m.Unlock()
+	key := runningCleanupsKey{vgName: vgName, lvName: lvName}
+	value, exists := r.runningCleanups.volumes[key]
+	if !exists || !value {
+		return errors.New("cleanup is not running")
+	}
+	delete(r.runningCleanups.volumes, key)
+	return nil
 }
 
 // Name implements controller.Reconciler.
@@ -550,21 +587,32 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 	}
 
 	if llv.Spec.Type == internal.Thick && llv.Spec.Thick != nil && llv.Spec.Thick.VolumeCleanup != nil {
-		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] runs cleanup for LV %s in VG %s with method %s", llv.Spec.ActualLVNameOnTheNode, vgName, *llv.Spec.Thick.VolumeCleanup))
-		err := r.llvCl.UpdatePhaseIfNeeded(
-			ctx,
-			llv,
-			v1alpha1.PhaseCleaning,
-			fmt.Sprintf("Cleaning up volume %s using %s", llv.Spec.LVMVolumeGroupName, *llv.Spec.Thick.VolumeCleanup),
-		)
-		if err != nil {
-			r.log.Error(err, "[deleteLVIfNeeded] change phase to Cleaning")
-			return err
-		}
-		err = utils.VolumeCleanup(ctx, r.log, vgName, llv.Spec.ActualLVNameOnTheNode, *llv.Spec.Thick.VolumeCleanup)
-		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", llv.Spec.ActualLVNameOnTheNode, vgName, *llv.Spec.Thick.VolumeCleanup))
-			return err
+		lvName := llv.Spec.ActualLVNameOnTheNode
+		if r.insertCleanupRunning(vgName, lvName) {
+			defer func() {
+				err := r.removeCleanupRunning(vgName, lvName)
+				if err != nil {
+					r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't unregister running cleanup for LV %s in VG %s", lvName, vgName))
+				}
+			}()
+			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] runs cleanup for LV %s in VG %s with method %s", lvName, vgName, *llv.Spec.Thick.VolumeCleanup))
+			err := r.llvCl.UpdatePhaseIfNeeded(
+				ctx,
+				llv,
+				v1alpha1.PhaseCleaning,
+				fmt.Sprintf("Cleaning up volume %s in %s group using %s", lvName, vgName, *llv.Spec.Thick.VolumeCleanup),
+			)
+			if err != nil {
+				r.log.Error(err, "[deleteLVIfNeeded] changing phase to Cleaning")
+				return fmt.Errorf("changing phase to Cleaning :%w", err)
+			}
+			err = utils.VolumeCleanup(ctx, r.log, vgName, lvName, *llv.Spec.Thick.VolumeCleanup)
+			if err != nil {
+				r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, *llv.Spec.Thick.VolumeCleanup))
+				return err
+			}
+		} else {
+			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] cleanup already running for LV %s in VG %s", lvName, vgName))
 		}
 	}
 
