@@ -607,42 +607,40 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		method := *llv.Spec.Thick.VolumeCleanup
 		lvName := llv.Spec.ActualLVNameOnTheNode
 		started, failedMethod, failedMethodError := r.startCleanupRunning(vgName, lvName)
-		if started {
-			r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] starting cleaning up for LV %s in VG %s with method %s", lvName, vgName, method))
-			defer func() {
-				r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] stopping cleaning up for LV %s in VG %s with method %s", lvName, vgName, method))
-				err := r.stopCleanupRunning(vgName, lvName, failedMethod, failedMethodError)
-				if err != nil {
-					r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't unregister running cleanup for LV %s in VG %s", lvName, vgName))
-				}
-			}()
-			if failedMethod != nil && *failedMethod == method && failedMethodError != nil {
-				r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] was already failed with method %s for LV %s in VG %s", *failedMethod, lvName, vgName))
-				return failedMethodError
-			} else {
-				err := r.llvCl.UpdatePhaseIfNeeded(
-					ctx,
-					llv,
-					v1alpha1.PhaseCleaning,
-					fmt.Sprintf("Cleaning up volume %s in %s group using %s", lvName, vgName, method),
-				)
-				if err != nil {
-					r.log.Error(err, "[deleteLVIfNeeded] changing phase to Cleaning")
-					return fmt.Errorf("changing phase to Cleaning :%w", err)
-				}
-				failedMethod = &method
-				r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
-				failedMethodError = utils.VolumeCleanup(ctx, r.log, vgName, lvName, method)
-				if failedMethodError != nil {
-					r.log.Error(failedMethodError, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, method))
-					return failedMethodError
-				}
-				failedMethod = nil
-			}
-		} else {
+		if !started {
 			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] cleanup already running for LV %s in VG %s", lvName, vgName))
 			return errAlreadyRunning
 		}
+		r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] starting cleaning up for LV %s in VG %s with method %s", lvName, vgName, method))
+		defer func() {
+			r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] stopping cleaning up for LV %s in VG %s with method %s", lvName, vgName, method))
+			err := r.stopCleanupRunning(vgName, lvName, failedMethod, failedMethodError)
+			if err != nil {
+				r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't unregister running cleanup for LV %s in VG %s", lvName, vgName))
+			}
+		}()
+		if failedMethod != nil && *failedMethod == method && failedMethodError != nil {
+			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] was already failed with method %s for LV %s in VG %s", *failedMethod, lvName, vgName))
+			return failedMethodError
+		}
+		err := r.llvCl.UpdatePhaseIfNeeded(
+			ctx,
+			llv,
+			v1alpha1.PhaseCleaning,
+			fmt.Sprintf("Cleaning up volume %s in %s group using %s", lvName, vgName, method),
+		)
+		if err != nil {
+			r.log.Error(err, "[deleteLVIfNeeded] changing phase to Cleaning")
+			return fmt.Errorf("changing phase to Cleaning :%w", err)
+		}
+		failedMethod = &method
+		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
+		failedMethodError = utils.VolumeCleanup(ctx, r.log, vgName, lvName, method)
+		if failedMethodError != nil {
+			r.log.Error(failedMethodError, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, method))
+			return failedMethodError
+		}
+		failedMethod = nil
 	}
 
 	cmd, err := utils.RemoveLV(vgName, llv.Spec.ActualLVNameOnTheNode)
