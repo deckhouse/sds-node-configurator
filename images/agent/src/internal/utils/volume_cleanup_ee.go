@@ -130,13 +130,15 @@ func volumeCleanupOverwrite(_ context.Context, log logger.Logger, closingErrors 
 		return fmt.Errorf("can't find the size of device %s: %w", devicePath, err)
 	}
 
+	bufferSize := 1024 * 1024 * 4
+	buffer := make([]byte, bufferSize)
 	for pass := 0; pass < passes; pass++ {
 		log.Debug(fmt.Sprintf("[volumeCleanupOverwrite] Overwriting %d  bytes. Pass %d", bytesToWrite, pass))
 		start := time.Now()
-		written, err := io.CopyN(
+		written, err := io.CopyBuffer(
 			io.NewOffsetWriter(output, 0),
-			input,
-			bytesToWrite)
+			io.LimitReader(input, bytesToWrite),
+			buffer)
 		log.Info(fmt.Sprintf("[volumeCleanupOverwrite] Overwriting is done in %s", time.Since(start).String()))
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[volumeCleanupOverwrite] copying from %s to %s", inputPath, devicePath))
