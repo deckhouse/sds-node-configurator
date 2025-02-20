@@ -157,7 +157,7 @@ spec:
               properties:
                 phase:
                   type: string
-                  enum: [Created, Pending, Resizing, Failed]
+                  enum: [Created, Pending, Cleaning, Resizing, Failed]
                   description: |
                     The current resource's phase.
                 reason:

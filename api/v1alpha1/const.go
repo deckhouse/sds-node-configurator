@@ -19,6 +19,7 @@ package v1alpha1
 const (
 	PhaseCreated     = "Created"
 	PhasePending     = "Pending"
+	PhaseCleaning    = "Cleaning"
 	PhaseResizing    = "Resizing"
 	PhaseFailed      = "Failed"
 	PhaseNotReady    = "NotReady"

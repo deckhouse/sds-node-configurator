@@ -551,7 +551,17 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 
 	if llv.Spec.Type == internal.Thick && llv.Spec.Thick != nil && llv.Spec.Thick.VolumeCleanup != nil {
 		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] runs cleanup for LV %s in VG %s with method %s", llv.Spec.ActualLVNameOnTheNode, vgName, *llv.Spec.Thick.VolumeCleanup))
-		err := utils.VolumeCleanup(ctx, r.log, vgName, llv.Spec.ActualLVNameOnTheNode, *llv.Spec.Thick.VolumeCleanup)
+		err := r.llvCl.UpdatePhaseIfNeeded(
+			ctx,
+			llv,
+			v1alpha1.PhaseCleaning,
+			fmt.Sprintf("Cleaning up volume %s using %s", llv.Spec.LVMVolumeGroupName, *llv.Spec.Thick.VolumeCleanup),
+		)
+		if err != nil {
+			r.log.Error(err, "[deleteLVIfNeeded] change phase to Cleaning")
+			return err
+		}
+		err = utils.VolumeCleanup(ctx, r.log, vgName, llv.Spec.ActualLVNameOnTheNode, *llv.Spec.Thick.VolumeCleanup)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", llv.Spec.ActualLVNameOnTheNode, vgName, *llv.Spec.Thick.VolumeCleanup))
 			return err
