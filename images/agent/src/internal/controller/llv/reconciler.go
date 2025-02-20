@@ -48,9 +48,8 @@ type cleanupsKey struct {
 }
 
 type cleanupStatus struct {
-	cleanupRunning    bool
-	failedMethod      *string
-	failedMethodError error
+	cleanupRunning bool
+	failedMethod   *string
 }
 type cleanups struct {
 	m      sync.RWMutex
@@ -68,6 +67,7 @@ type Reconciler struct {
 }
 
 var errAlreadyRunning = errors.New("reconcile in progress")
+var errCleanupSameAsPreviouslyFailed = errors.New("cleanup method was failed and not changed")
 
 type ReconcilerConfig struct {
 	NodeName                string
@@ -105,20 +105,20 @@ func NewReconciler(
 	}
 }
 
-func (r *Reconciler) startCleanupRunning(vgName, lvName string) (inserted bool, failedMethod *string, failedMethodError error) {
+func (r *Reconciler) startCleanupRunning(vgName, lvName string) (inserted bool, failedMethod *string) {
 	r.runningCleanups.m.Lock()
 	defer r.runningCleanups.m.Unlock()
 	key := cleanupsKey{vgName: vgName, lvName: lvName}
 	value, exists := r.runningCleanups.status[key]
 	if exists && value.cleanupRunning {
-		return false, nil, nil
+		return false, nil
 	}
 	value.cleanupRunning = true
 	r.runningCleanups.status[key] = value
-	return true, value.failedMethod, value.failedMethodError
+	return true, value.failedMethod
 }
 
-func (r *Reconciler) stopCleanupRunning(vgName, lvName string, failedMethod *string, failedMethodError error) error {
+func (r *Reconciler) stopCleanupRunning(vgName, lvName string, failedMethod *string) error {
 	r.runningCleanups.m.Lock()
 	defer r.runningCleanups.m.Unlock()
 	key := cleanupsKey{vgName: vgName, lvName: lvName}
@@ -130,7 +130,6 @@ func (r *Reconciler) stopCleanupRunning(vgName, lvName string, failedMethod *str
 		delete(r.runningCleanups.status, key)
 	} else {
 		value.failedMethod = failedMethod
-		value.failedMethodError = failedMethodError
 		value.cleanupRunning = false
 		r.runningCleanups.status[key] = value
 	}
@@ -251,7 +250,7 @@ func (r *Reconciler) Reconcile(
 	shouldRequeue, err := r.ReconcileLVMLogicalVolume(ctx, llv, lvg)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[Reconcile] an error occurred while reconciling the LVMLogicalVolume: %s", llv.Name))
-		if !errors.Is(err, errAlreadyRunning) {
+		if !errors.Is(err, errAlreadyRunning) && !errors.Is(err, errCleanupSameAsPreviouslyFailed) {
 			updErr := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, v1alpha1.PhaseFailed, err.Error())
 			if updErr != nil {
 				r.log.Error(updErr, fmt.Sprintf("[Reconcile] unable to update the LVMLogicalVolume %s", llv.Name))
@@ -282,7 +281,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolume(ctx context.Context, llv *v1alpha
 	case internal.DeleteReconcile:
 		return r.reconcileLLVDeleteFunc(ctx, llv, lvg)
 	default:
-		r.log.Info(fmt.Sprintf("[runEventReconcile] the LVMLogicalVolume %s has compeleted configuration and should not be reconciled", llv.Name))
+		r.log.Info(fmt.Sprintf("[runEventReconcile] the LVMLogicalVolume %s has completed configuration and should not be reconciled", llv.Name))
 		if llv.Status.Phase != v1alpha1.PhaseCreated {
 			r.log.Warning(fmt.Sprintf("[runEventReconcile] the LVMLogicalVolume %s should not be reconciled but has an unexpected phase: %s. Setting the phase to %s", llv.Name, llv.Status.Phase, v1alpha1.PhaseCreated))
 			err := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, v1alpha1.PhaseCreated, "")
@@ -506,10 +505,10 @@ func (r *Reconciler) reconcileLLVDeleteFunc(
 		}
 	}
 
-	err := r.deleteLVIfNeeded(ctx, lvg.Spec.ActualVGNameOnTheNode, llv)
+	shouldRequeue, err := r.deleteLVIfNeeded(ctx, lvg.Spec.ActualVGNameOnTheNode, llv)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLLVDeleteFunc] unable to delete the LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode))
-		return true, err
+		return shouldRequeue, err
 	}
 
 	r.log.Info(fmt.Sprintf("[reconcileLLVDeleteFunc] successfully deleted the LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode))
@@ -590,38 +589,38 @@ func checkIfLVBelongsToLLV(llv *v1alpha1.LVMLogicalVolume, lv *internal.LVData) 
 	return true
 }
 
-func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v1alpha1.LVMLogicalVolume) error {
+func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v1alpha1.LVMLogicalVolume) (shouldRequeue bool, err error) {
 	lv := r.sdsCache.FindLV(vgName, llv.Spec.ActualLVNameOnTheNode)
 	if lv == nil || !lv.Exist {
 		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] did not find LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
-		return nil
+		return false, nil
 	}
 
 	// this case prevents unexpected same-name LV deletions which does not actually belong to our LLV
 	if !checkIfLVBelongsToLLV(llv, &lv.Data) {
 		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] no need to delete LV %s as it doesn't belong to LVMLogicalVolume %s", lv.Data.LVName, llv.Name))
-		return nil
+		return false, nil
 	}
 
 	if llv.Spec.Type == internal.Thick && llv.Spec.Thick != nil && llv.Spec.Thick.VolumeCleanup != nil {
 		method := *llv.Spec.Thick.VolumeCleanup
 		lvName := llv.Spec.ActualLVNameOnTheNode
-		started, failedMethod, failedMethodError := r.startCleanupRunning(vgName, lvName)
+		started, failedMethod := r.startCleanupRunning(vgName, lvName)
 		if !started {
 			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] cleanup already running for LV %s in VG %s", lvName, vgName))
-			return errAlreadyRunning
+			return false, errAlreadyRunning
 		}
 		r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] starting cleaning up for LV %s in VG %s with method %s", lvName, vgName, method))
 		defer func() {
 			r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] stopping cleaning up for LV %s in VG %s with method %s", lvName, vgName, method))
-			err := r.stopCleanupRunning(vgName, lvName, failedMethod, failedMethodError)
+			err := r.stopCleanupRunning(vgName, lvName, failedMethod)
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't unregister running cleanup for LV %s in VG %s", lvName, vgName))
 			}
 		}()
-		if failedMethod != nil && *failedMethod == method && failedMethodError != nil {
+		if failedMethod != nil && *failedMethod == method {
 			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] was already failed with method %s for LV %s in VG %s", *failedMethod, lvName, vgName))
-			return failedMethodError
+			return false, errCleanupSameAsPreviouslyFailed
 		}
 		err := r.llvCl.UpdatePhaseIfNeeded(
 			ctx,
@@ -631,14 +630,14 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		)
 		if err != nil {
 			r.log.Error(err, "[deleteLVIfNeeded] changing phase to Cleaning")
-			return fmt.Errorf("changing phase to Cleaning :%w", err)
+			return true, fmt.Errorf("changing phase to Cleaning :%w", err)
 		}
 		failedMethod = &method
 		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
-		failedMethodError = utils.VolumeCleanup(ctx, r.log, vgName, lvName, method)
-		if failedMethodError != nil {
-			r.log.Error(failedMethodError, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, method))
-			return failedMethodError
+		err = utils.VolumeCleanup(ctx, r.log, vgName, lvName, method)
+		if err != nil {
+			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, method))
+			return true, err
 		}
 		failedMethod = nil
 	}
@@ -647,13 +646,13 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 	r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] runs cmd: %s", cmd))
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to remove LV %s from VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
-		return err
+		return true, err
 	}
 
 	r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] mark LV %s in the cache as removed", lv.Data.LVName))
 	r.sdsCache.MarkLVAsRemoved(lv.Data.VGName, lv.Data.LVName)
 
-	return nil
+	return false, nil
 }
 
 func (r *Reconciler) getLVActualSize(vgName, lvName string) resource.Quantity {
