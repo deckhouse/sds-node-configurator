@@ -43,13 +43,17 @@ import (
 
 const ReconcilerName = "lvm-logical-volume-watcher-controller"
 
-type runningCleanupsKey struct {
+type cleanupsKey struct {
 	vgName, lvName string
 }
 
-type runningCleanups struct {
-	m       sync.RWMutex
-	volumes map[runningCleanupsKey]bool
+type cleanupStatus struct {
+	cleanupRunning bool
+	failedMethod   *string
+}
+type cleanups struct {
+	m      sync.RWMutex
+	status map[cleanupsKey]cleanupStatus
 }
 type Reconciler struct {
 	cl              client.Client
@@ -59,7 +63,7 @@ type Reconciler struct {
 	metrics         monitoring.Metrics
 	sdsCache        *cache.Cache
 	cfg             ReconcilerConfig
-	runningCleanups runningCleanups
+	runningCleanups cleanups
 }
 
 type ReconcilerConfig struct {
@@ -92,33 +96,40 @@ func NewReconciler(
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		cfg:      cfg,
-		runningCleanups: runningCleanups{
-			volumes: make(map[runningCleanupsKey]bool, 50),
+		runningCleanups: cleanups{
+			status: make(map[cleanupsKey]cleanupStatus, 50),
 		},
 	}
 }
 
-func (r *Reconciler) insertCleanupRunning(vgName, lvName string) (inserted bool) {
+func (r *Reconciler) startCleanupRunning(vgName, lvName string) (inserted bool, failedMethod *string) {
 	r.runningCleanups.m.Lock()
 	defer r.runningCleanups.m.Unlock()
-	key := runningCleanupsKey{vgName: vgName, lvName: lvName}
-	value, exists := r.runningCleanups.volumes[key]
-	if exists && value {
-		return false
+	key := cleanupsKey{vgName: vgName, lvName: lvName}
+	value, exists := r.runningCleanups.status[key]
+	if exists && value.cleanupRunning {
+		return false, nil
 	}
-	r.runningCleanups.volumes[key] = true
-	return true
+	value.cleanupRunning = true
+	r.runningCleanups.status[key] = value
+	return true, value.failedMethod
 }
 
-func (r *Reconciler) removeCleanupRunning(vgName, lvName string) error {
+func (r *Reconciler) stopCleanupRunning(vgName, lvName string, failedMethod *string) error {
 	r.runningCleanups.m.Lock()
 	defer r.runningCleanups.m.Unlock()
-	key := runningCleanupsKey{vgName: vgName, lvName: lvName}
-	value, exists := r.runningCleanups.volumes[key]
-	if !exists || !value {
+	key := cleanupsKey{vgName: vgName, lvName: lvName}
+	value, exists := r.runningCleanups.status[key]
+	if !exists || !value.cleanupRunning {
 		return errors.New("cleanup is not running")
 	}
-	delete(r.runningCleanups.volumes, key)
+	if failedMethod == nil {
+		delete(r.runningCleanups.status, key)
+	} else {
+		value.failedMethod = failedMethod
+		value.cleanupRunning = false
+		r.runningCleanups.status[key] = value
+	}
 	return nil
 }
 
@@ -587,29 +598,39 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 	}
 
 	if llv.Spec.Type == internal.Thick && llv.Spec.Thick != nil && llv.Spec.Thick.VolumeCleanup != nil {
+		method := *llv.Spec.Thick.VolumeCleanup
 		lvName := llv.Spec.ActualLVNameOnTheNode
-		if r.insertCleanupRunning(vgName, lvName) {
+		started, failedMethod := r.startCleanupRunning(vgName, lvName)
+		if started {
+			r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] starting cleaning up for LV %s in VG %s with method %s", lvName, vgName, method))
 			defer func() {
-				err := r.removeCleanupRunning(vgName, lvName)
+				r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] stopping cleaning up for LV %s in VG %s with method %s", lvName, vgName, method))
+				err := r.stopCleanupRunning(vgName, lvName, failedMethod)
 				if err != nil {
 					r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't unregister running cleanup for LV %s in VG %s", lvName, vgName))
 				}
 			}()
-			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] runs cleanup for LV %s in VG %s with method %s", lvName, vgName, *llv.Spec.Thick.VolumeCleanup))
-			err := r.llvCl.UpdatePhaseIfNeeded(
-				ctx,
-				llv,
-				v1alpha1.PhaseCleaning,
-				fmt.Sprintf("Cleaning up volume %s in %s group using %s", lvName, vgName, *llv.Spec.Thick.VolumeCleanup),
-			)
-			if err != nil {
-				r.log.Error(err, "[deleteLVIfNeeded] changing phase to Cleaning")
-				return fmt.Errorf("changing phase to Cleaning :%w", err)
-			}
-			err = utils.VolumeCleanup(ctx, r.log, vgName, lvName, *llv.Spec.Thick.VolumeCleanup)
-			if err != nil {
-				r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, *llv.Spec.Thick.VolumeCleanup))
-				return err
+			if failedMethod != nil && *failedMethod == method {
+				r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] was already failed with method %s for LV %s in VG %s", *failedMethod, lvName, vgName))
+			} else {
+				err := r.llvCl.UpdatePhaseIfNeeded(
+					ctx,
+					llv,
+					v1alpha1.PhaseCleaning,
+					fmt.Sprintf("Cleaning up volume %s in %s group using %s", lvName, vgName, method),
+				)
+				if err != nil {
+					r.log.Error(err, "[deleteLVIfNeeded] changing phase to Cleaning")
+					return fmt.Errorf("changing phase to Cleaning :%w", err)
+				}
+				failedMethod = &method
+				r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
+				err = utils.VolumeCleanup(ctx, r.log, vgName, lvName, method)
+				if err != nil {
+					r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, method))
+					return err
+				}
+				failedMethod = nil
 			}
 		} else {
 			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] cleanup already running for LV %s in VG %s", lvName, vgName))
