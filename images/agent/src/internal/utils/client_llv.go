@@ -62,7 +62,7 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 	actualSize resource.Quantity,
 ) error {
 	var contiguous *bool
-	if llv.Spec.Thick != nil {
+	if llv.Spec.Thick != nil && llv.Spec.Thick.Contiguous != nil {
 		if *llv.Spec.Thick.Contiguous {
 			contiguous = llv.Spec.Thick.Contiguous
 		}
