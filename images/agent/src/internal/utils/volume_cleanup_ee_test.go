@@ -52,19 +52,21 @@ func TestVolumeCleanup_Discard(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := NewMockBlockDevice(ctrl)
 	opener := NewMockBlockDeviceOpener(ctrl)
-	opener.EXPECT().Open("/dev/vg/lv", syscall.O_RDWR).Return(mock, nil)
-
 	deviceSize := 1024
-	mock.EXPECT().Size().Return(int64(deviceSize), nil)
-	mock.EXPECT().Discard(uint64(0), uint64(deviceSize))
-	mock.EXPECT().Close().Return(nil)
+	vgName := "vg"
+	lvName := "lv"
 
+	if feature.VolumeCleanupEnabled() {
+		opener.EXPECT().Open(filepath.Join("/dev", vgName, lvName), syscall.O_RDWR).Return(mock, nil)
+
+		mock.EXPECT().Size().Return(int64(deviceSize), nil)
+		mock.EXPECT().Discard(uint64(0), uint64(deviceSize))
+		mock.EXPECT().Close().Return(nil)
+	}
 	log, err := logger.NewLogger(logger.WarningLevel)
 	if err != nil {
 		t.Fatalf("creating log: %v", err)
 	}
-	vgName := "vg"
-	lvName := "lv"
 
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "Discard")
 
