@@ -636,7 +636,7 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		}
 		prevFailedMethod = &method
 		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
-		err = utils.VolumeCleanup(ctx, r.log, vgName, lvName, method)
+		err = utils.VolumeCleanup(ctx, r.log, utils.OpenBlockDevice, vgName, lvName, method)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, method))
 			return true, err

@@ -12,17 +12,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 
 	"agent/internal/logger"
 )
 
-func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volumeCleanup string) error {
+func VolumeCleanup(ctx context.Context, log logger.Logger, openBlockDevice func(name string, flag int) (BlockDevice, error), vgName, lvName, volumeCleanup string) error {
 	log.Trace(fmt.Sprintf("[VolumeCleanup] cleaning up volume %s in volume group %s using %s", lvName, vgName, volumeCleanup))
 	if !feature.VolumeCleanupEnabled() {
 		return fmt.Errorf("volume cleanup is not supported in your edition")
@@ -32,99 +30,52 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, vgName, lvName, volum
 	randomSource := "/dev/urandom"
 
 	var err error
-	closingErrors := []error{}
 
 	switch volumeCleanup {
 	case "RandomFillSinglePass":
-		err = volumeCleanupOverwrite(ctx, log, &closingErrors, devicePath, randomSource, 1)
+		err = volumeCleanupOverwrite(ctx, log, openBlockDevice, devicePath, randomSource, 1)
 	case "RandomFillThreePass":
-		err = volumeCleanupOverwrite(ctx, log, &closingErrors, devicePath, randomSource, 3)
+		err = volumeCleanupOverwrite(ctx, log, openBlockDevice, devicePath, randomSource, 3)
 	case "Discard":
-		err = volumeCleanupDiscard(ctx, log, &closingErrors, devicePath)
+		err = volumeCleanupDiscard(ctx, log, openBlockDevice, devicePath)
 	default:
 		return fmt.Errorf("unknown cleanup method %s", volumeCleanup)
 	}
 
-	if err != nil && len(closingErrors) > 0 {
-		closingErrors = append([]error{err}, closingErrors...)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[VolumeCleanup] fail to cleanup volume %s", devicePath))
+		return fmt.Errorf("cleaning volume %s: %w", devicePath, err)
 	}
 
-	if len(closingErrors) > 0 {
-		err = errors.Join(closingErrors...)
-	}
-
-	if err == nil {
-		return nil
-	}
-
-	log.Error(err, fmt.Sprintf("[VolumeCleanup] fail to cleanup volume %s", devicePath))
-	return fmt.Errorf("cleaning volume %s: %w", devicePath, err)
+	return nil
 }
 
-func volumeSize(log logger.Logger, device *os.File) (int64, error) {
-	log.Trace(fmt.Sprintf("[volumeSize] finding size of device %v", device))
-	var stat syscall.Stat_t
-	log.Debug("[volumeSize] Calling fstat")
-	if err := syscall.Fstat(int(device.Fd()), &stat); err != nil {
-		log.Error(err, "[volumeSize] Calling fstat")
-		return 0, fmt.Errorf("fstat call failed: %w", err)
-	}
-
-	if stat.Size > 0 {
-		log.Debug(fmt.Sprintf("[volumeSize] Size %d is valid.", stat.Size))
-		return stat.Size, nil
-	}
-
-	if stat.Mode&S_IFMT != S_IFBLK {
-		log.Debug(fmt.Sprintf("[volumeSize] Device mode %x", stat.Mode))
-		return 0, fmt.Errorf("not a block device, mode: %x", stat.Mode)
-	}
-
-	var blockDeviceSize uint64
-	_, _, errno := syscall.Syscall(
-		syscall.SYS_IOCTL,
-		device.Fd(),
-		uintptr(BLKGETSIZE64),
-		uintptr(unsafe.Pointer(&blockDeviceSize)))
-	if errno != 0 {
-		err := errors.New(errno.Error())
-		log.Error(err, "[volumeSize] calling ioctl BLKGETSIZE64")
-		return 0, fmt.Errorf("error calling ioctl BLKGETSIZE64: %w", err)
-	}
-	log.Debug(fmt.Sprintf("Block device size is %d", blockDeviceSize))
-	if blockDeviceSize <= 0 {
-		return 0, fmt.Errorf("block size is invalid")
-	}
-
-	return int64(blockDeviceSize), nil
-}
-
-func volumeCleanupOverwrite(_ context.Context, log logger.Logger, closingErrors *[]error, devicePath, inputPath string, passes int) error {
+func volumeCleanupOverwrite(_ context.Context, log logger.Logger, openBlockDevice func(name string, flag int) (BlockDevice, error), devicePath, inputPath string, passes int) (err error) {
 	log.Trace(fmt.Sprintf("[volumeCleanupOverwrite] overwriting %s by %s in %d passes", devicePath, inputPath, passes))
-	closeFile := func(file *os.File) {
+	closeFile := func(file BlockDevice) {
 		log.Trace(fmt.Sprintf("[volumeCleanupOverwrite] closing %s", file.Name()))
-		err := file.Close()
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[volumeCleanupOverwrite] While closing file %s", file.Name()))
-			*closingErrors = append(*closingErrors, fmt.Errorf("closing file %s: %w", file.Name(), err))
+		closingErr := file.Close()
+		if closingErr != nil {
+			log.Error(closingErr, fmt.Sprintf("[volumeCleanupOverwrite] While closing file %s", file.Name()))
+			err = errors.Join(err, fmt.Errorf("closing file %s: %w", file.Name(), closingErr))
 		}
 	}
 
-	input, err := os.OpenFile(inputPath, syscall.O_RDONLY, os.ModeDevice)
+	input, err := openBlockDevice(inputPath, syscall.O_RDONLY)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[volumeCleanupOverwrite] Opening file %s", inputPath))
 		return fmt.Errorf("opening source device %s to wipe: %w", inputPath, err)
 	}
 	defer closeFile(input)
 
-	output, err := os.OpenFile(devicePath, syscall.O_DIRECT|syscall.O_RDWR, os.ModeDevice)
+	output, err := openBlockDevice(devicePath, syscall.O_DIRECT|syscall.O_RDWR)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[volumeCleanupOverwrite] Opening file %s", devicePath))
 		return fmt.Errorf("opening device %s to wipe: %w", devicePath, err)
 	}
 	defer closeFile(output)
 
-	bytesToWrite, err := volumeSize(log, output)
+	bytesToWrite, err := output.Size()
 	if err != nil {
 		log.Error(err, "[volumeCleanupOverwrite] Finding volume size")
 		return fmt.Errorf("can't find the size of device %s: %w", devicePath, err)
@@ -151,87 +102,34 @@ func volumeCleanupOverwrite(_ context.Context, log logger.Logger, closingErrors 
 		}
 	}
 
-	return err
+	return nil
 }
 
-/* To find these constant run:
-gcc -o test -x c - <<EOF
-#include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <linux/fs.h>
-#include <stdio.h>
-
-#define PRINT_CONSTANT(name, fmt) printf(#name " = " fmt "\n", name)
-
-int main() {
-    PRINT_CONSTANT(S_IFMT, "0x%x");
-    PRINT_CONSTANT(S_IFBLK, "0x%x");
-    PRINT_CONSTANT(BLKGETSIZE64, "0x%lx");
-    PRINT_CONSTANT(BLKDISCARD, "0x%x");
-    return 0;
-}
-EOF
-*/
-
-// TODO: It will be nice to figure them out during compilation or maybe runtime?
-//
-//nolint:revive
-const (
-	BLKDISCARD = 0x1277
-
-	BLKGETSIZE64 = 0x80081272
-
-	S_IFMT  = 0xf000 /* type of file mask */
-	S_IFBLK = 0x6000 /* block special */
-)
-
-type Range struct {
-	start, count uint64
-}
-
-func volumeCleanupDiscard(_ context.Context, log logger.Logger, closingErrors *[]error, devicePath string) error {
+func volumeCleanupDiscard(_ context.Context, log logger.Logger, openBlockDevice func(name string, flag int) (BlockDevice, error), devicePath string) (err error) {
 	log.Trace(fmt.Sprintf("[volumeCleanupDiscard] discarding %s", devicePath))
-	device, err := os.OpenFile(devicePath, syscall.O_RDWR, os.ModeDevice)
+	device, err := openBlockDevice(devicePath, syscall.O_RDWR)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[volumeCleanupDiscard] Opening device %s", devicePath))
 		return fmt.Errorf("opening device %s to wipe: %w", devicePath, err)
 	}
 	defer func() {
 		log.Trace(fmt.Sprintf("Closing file %s", devicePath))
-		err := device.Close()
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[volumeCleanupDiscard] While closing deice %s", devicePath))
-			*closingErrors = append(*closingErrors, fmt.Errorf("closing file %s: %w", device.Name(), err))
+		closingErr := device.Close()
+		if closingErr != nil {
+			log.Error(closingErr, fmt.Sprintf("[volumeCleanupDiscard] While closing deice %s", devicePath))
+			err = errors.Join(err, fmt.Errorf("closing file %s: %w", device.Name(), closingErr))
 		}
 	}()
 
-	deviceSize, err := volumeSize(log, device)
+	deviceSize, err := device.Size()
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[volumeCleanupDiscard] can't find the size of device %s", devicePath))
 		return fmt.Errorf("can't find the size of device %s: %w", devicePath, err)
 	}
 
-	rng := Range{
-		start: 0,
-		count: uint64(deviceSize),
-	}
-
-	log.Debug(fmt.Sprintf("[volumeCleanupDiscard] calling BLKDISCARD fd: %d, range %v", device.Fd(), rng))
 	start := time.Now()
+	log.Debug(fmt.Sprintf("[volumeCleanupDiscard] calling BLKDISCARD fd: %d", device.Fd()))
+	defer log.Info(fmt.Sprintf("[volumeCleanupDiscard] BLKDISCARD is done in %s", time.Since(start).String()))
 
-	_, _, errno := syscall.Syscall(
-		syscall.SYS_IOCTL,
-		device.Fd(),
-		uintptr(BLKDISCARD),
-		uintptr(unsafe.Pointer(&rng)))
-
-	log.Info(fmt.Sprintf("[volumeCleanupDiscard] BLKDISCARD is done in %s", time.Since(start).String()))
-
-	if errno != 0 {
-		err := errors.New(errno.Error())
-		log.Error(err, "[volumeCleanupDiscard] error calling BLKDISCARD")
-		return fmt.Errorf("calling ioctl BLKDISCARD: %s", err)
-	}
-
-	return nil
+	return device.Discard(0, uint64(deviceSize))
 }
