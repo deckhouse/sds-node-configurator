@@ -87,46 +87,47 @@ func TestVolumeCleanup_RandomFillSinglePass(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	opener := NewMockBlockDeviceOpener(ctrl)
 
-	inputName := "/dev/urandom"
-	opener.EXPECT().Open(inputName, syscall.O_RDONLY).Return(func() (BlockDevice, error) {
-		input := NewMockBlockDevice(ctrl)
-		input.EXPECT().Read(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
-			if len(p) > bufferSize {
-				t.Fatalf("Buffer size should be less then %d, got %d", bufferSize, len(p))
-			}
-			return len(p), nil
-		}).Times(copyCount)
-		input.EXPECT().Close().Return(nil)
-		input.EXPECT().Name().AnyTimes().Return(inputName)
-		return input, nil
-	}())
-
-	deviceName := filepath.Join("/dev", vgName, lvName)
-	opener.EXPECT().Open(deviceName, syscall.O_DIRECT|syscall.O_RDWR).Return(func() (BlockDevice, error) {
-		device := NewMockBlockDevice(ctrl)
-		device.EXPECT().Size().Return(int64(deviceSize), nil)
-		device.EXPECT().WriteAt(gomock.Any(), gomock.Any()).DoAndReturn(func(p []byte, off int64) (int, error) {
-			if int64(expectedWrite) != off {
-				t.Fatalf("Expected write offset %d, got %d", expectedWrite, off)
-			}
-			expectedWrite += bufferSize
-			if expectedWrite > deviceSize {
-				expectedWrite = 0
+	if feature.VolumeCleanupEnabled() {
+		inputName := "/dev/urandom"
+		opener.EXPECT().Open(inputName, syscall.O_RDONLY).Return(func() (BlockDevice, error) {
+			input := NewMockBlockDevice(ctrl)
+			input.EXPECT().Read(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
 				if len(p) > bufferSize {
 					t.Fatalf("Buffer size should be less then %d, got %d", bufferSize, len(p))
 				}
-			} else {
-				if len(p) != bufferSize {
-					t.Fatalf("Expected buffer size %d, got %d", bufferSize, len(p))
-				}
-			}
-			return len(p), nil
-		}).Times(copyCount)
-		device.EXPECT().Close().Return(nil)
-		device.EXPECT().Name().AnyTimes().Return(deviceName)
-		return device, nil
-	}())
+				return len(p), nil
+			}).Times(copyCount)
+			input.EXPECT().Close().Return(nil)
+			input.EXPECT().Name().AnyTimes().Return(inputName)
+			return input, nil
+		}())
 
+		deviceName := filepath.Join("/dev", vgName, lvName)
+		opener.EXPECT().Open(deviceName, syscall.O_DIRECT|syscall.O_RDWR).Return(func() (BlockDevice, error) {
+			device := NewMockBlockDevice(ctrl)
+			device.EXPECT().Size().Return(int64(deviceSize), nil)
+			device.EXPECT().WriteAt(gomock.Any(), gomock.Any()).DoAndReturn(func(p []byte, off int64) (int, error) {
+				if int64(expectedWrite) != off {
+					t.Fatalf("Expected write offset %d, got %d", expectedWrite, off)
+				}
+				expectedWrite += bufferSize
+				if expectedWrite > deviceSize {
+					expectedWrite = 0
+					if len(p) > bufferSize {
+						t.Fatalf("Buffer size should be less then %d, got %d", bufferSize, len(p))
+					}
+				} else {
+					if len(p) != bufferSize {
+						t.Fatalf("Expected buffer size %d, got %d", bufferSize, len(p))
+					}
+				}
+				return len(p), nil
+			}).Times(copyCount)
+			device.EXPECT().Close().Return(nil)
+			device.EXPECT().Name().AnyTimes().Return(deviceName)
+			return device, nil
+		}())
+	}
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "RandomFillSinglePass")
 
 	if !feature.VolumeCleanupEnabled() {
@@ -155,45 +156,47 @@ func TestVolumeCleanup_RandomFillThreePass(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	opener := NewMockBlockDeviceOpener(ctrl)
 
-	inputName := "/dev/urandom"
-	opener.EXPECT().Open(inputName, syscall.O_RDONLY).Return(func() (BlockDevice, error) {
-		input := NewMockBlockDevice(ctrl)
-		input.EXPECT().Read(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
-			if len(p) > bufferSize {
-				t.Fatalf("Buffer size should be less then %d, got %d", bufferSize, len(p))
-			}
-			return len(p), nil
-		}).Times(copyCount)
-		input.EXPECT().Close().Return(nil)
-		input.EXPECT().Name().AnyTimes().Return(inputName)
-		return input, nil
-	}())
-
-	deviceName := filepath.Join("/dev", vgName, lvName)
-	opener.EXPECT().Open(deviceName, syscall.O_DIRECT|syscall.O_RDWR).Return(func() (BlockDevice, error) {
-		device := NewMockBlockDevice(ctrl)
-		device.EXPECT().Size().Return(int64(deviceSize), nil)
-		device.EXPECT().WriteAt(gomock.Any(), gomock.Any()).DoAndReturn(func(p []byte, off int64) (int, error) {
-			if int64(expectedWrite) != off {
-				t.Fatalf("Expected write offset %d, got %d", expectedWrite, off)
-			}
-			expectedWrite += bufferSize
-			if expectedWrite > deviceSize {
-				expectedWrite = 0
+	if feature.VolumeCleanupEnabled() {
+		inputName := "/dev/urandom"
+		opener.EXPECT().Open(inputName, syscall.O_RDONLY).Return(func() (BlockDevice, error) {
+			input := NewMockBlockDevice(ctrl)
+			input.EXPECT().Read(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
 				if len(p) > bufferSize {
 					t.Fatalf("Buffer size should be less then %d, got %d", bufferSize, len(p))
 				}
-			} else {
-				if len(p) != bufferSize {
-					t.Fatalf("Expected buffer size %d, got %d", bufferSize, len(p))
+				return len(p), nil
+			}).Times(copyCount)
+			input.EXPECT().Close().Return(nil)
+			input.EXPECT().Name().AnyTimes().Return(inputName)
+			return input, nil
+		}())
+
+		deviceName := filepath.Join("/dev", vgName, lvName)
+		opener.EXPECT().Open(deviceName, syscall.O_DIRECT|syscall.O_RDWR).Return(func() (BlockDevice, error) {
+			device := NewMockBlockDevice(ctrl)
+			device.EXPECT().Size().Return(int64(deviceSize), nil)
+			device.EXPECT().WriteAt(gomock.Any(), gomock.Any()).DoAndReturn(func(p []byte, off int64) (int, error) {
+				if int64(expectedWrite) != off {
+					t.Fatalf("Expected write offset %d, got %d", expectedWrite, off)
 				}
-			}
-			return len(p), nil
-		}).Times(copyCount)
-		device.EXPECT().Close().Return(nil)
-		device.EXPECT().Name().AnyTimes().Return(deviceName)
-		return device, nil
-	}())
+				expectedWrite += bufferSize
+				if expectedWrite > deviceSize {
+					expectedWrite = 0
+					if len(p) > bufferSize {
+						t.Fatalf("Buffer size should be less then %d, got %d", bufferSize, len(p))
+					}
+				} else {
+					if len(p) != bufferSize {
+						t.Fatalf("Expected buffer size %d, got %d", bufferSize, len(p))
+					}
+				}
+				return len(p), nil
+			}).Times(copyCount)
+			device.EXPECT().Close().Return(nil)
+			device.EXPECT().Name().AnyTimes().Return(deviceName)
+			return device, nil
+		}())
+	}
 
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "RandomFillThreePass")
 
@@ -223,27 +226,29 @@ func TestVolumeCleanup_RandomFill_ClosingErrors(t *testing.T) {
 	inputName := "/dev/urandom"
 	closingError := errors.New("expected closing error")
 	writeError := errors.New("expected writing error")
-	opener.EXPECT().Open(inputName, syscall.O_RDONLY).Return(func() (BlockDevice, error) {
-		input := NewMockBlockDevice(ctrl)
-		input.EXPECT().Read(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
-			return len(p), nil
-		})
-		input.EXPECT().Close().Return(closingError)
-		input.EXPECT().Name().AnyTimes().Return(inputName)
-		return input, nil
-	}())
+	if feature.VolumeCleanupEnabled() {
+		opener.EXPECT().Open(inputName, syscall.O_RDONLY).Return(func() (BlockDevice, error) {
+			input := NewMockBlockDevice(ctrl)
+			input.EXPECT().Read(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
+				return len(p), nil
+			})
+			input.EXPECT().Close().Return(closingError)
+			input.EXPECT().Name().AnyTimes().Return(inputName)
+			return input, nil
+		}())
 
-	deviceName := filepath.Join("/dev", vgName, lvName)
-	opener.EXPECT().Open(deviceName, syscall.O_DIRECT|syscall.O_RDWR).Return(func() (BlockDevice, error) {
-		device := NewMockBlockDevice(ctrl)
-		device.EXPECT().Size().Return(int64(deviceSize), nil)
-		device.EXPECT().WriteAt(gomock.Any(), gomock.Any()).DoAndReturn(func(p []byte, off int64) (int, error) {
-			return 0, writeError
-		})
-		device.EXPECT().Close().Return(closingError)
-		device.EXPECT().Name().AnyTimes().Return(deviceName)
-		return device, nil
-	}())
+		deviceName := filepath.Join("/dev", vgName, lvName)
+		opener.EXPECT().Open(deviceName, syscall.O_DIRECT|syscall.O_RDWR).Return(func() (BlockDevice, error) {
+			device := NewMockBlockDevice(ctrl)
+			device.EXPECT().Size().Return(int64(deviceSize), nil)
+			device.EXPECT().WriteAt(gomock.Any(), gomock.Any()).DoAndReturn(func(p []byte, off int64) (int, error) {
+				return 0, writeError
+			})
+			device.EXPECT().Close().Return(closingError)
+			device.EXPECT().Name().AnyTimes().Return(deviceName)
+			return device, nil
+		}())
+	}
 
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "RandomFillSinglePass")
 
