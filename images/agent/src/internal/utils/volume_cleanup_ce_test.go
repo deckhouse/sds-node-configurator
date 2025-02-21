@@ -13,28 +13,33 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils
+package utils_test
 
 import (
 	"context"
 	"testing"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
 	"agent/internal/logger"
+	. "agent/internal/utils"
 )
 
-func TestVolumeCleanup_Unsupported(t *testing.T) {
-	log, err := logger.NewLogger(logger.WarningLevel)
-	if err != nil {
-		t.Fatalf("can't create logger: %v", err)
-	}
-	err = VolumeCleanup(context.Background(), log, nil, "", "", "")
-	if err == nil {
-		t.Fatalf("error expected")
-	}
+var _ = Describe("Cleaning up volume", func() {
+	var log logger.Logger
+	BeforeEach(func() {
+		logger, err := logger.NewLogger(logger.WarningLevel)
+		log = logger
+		Expect(err).NotTo(HaveOccurred())
+	})
+	It("Unsupported", func() {
+		err := VolumeCleanup(context.Background(), log, nil, "", "", "")
+		Expect(err).To(MatchError("volume cleanup is not supported in your edition"))
+	})
+})
 
-	expected := "volume cleanup is not supported in your edition"
-	got := err.Error()
-	if got != expected {
-		t.Fatalf("error message expected '%s' got '%s'", expected, got)
-	}
+func TestVolumeCleanup(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "VolumeCleanup Suite")
 }
