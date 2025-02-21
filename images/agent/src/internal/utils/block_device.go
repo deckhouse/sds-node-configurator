@@ -3,51 +3,90 @@ package utils
 import (
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"syscall"
 	"unsafe"
 )
 
 type blockDevice struct {
-	*os.File
+	File
 	syscall SysCall
 }
 
-type BlockDevice interface {
-	Close() error
-	WriteAt(p []byte, off int64) (n int, err error)
-	Read(p []byte) (n int, err error)
-	Fd() uintptr
-	Name() string
-	Size() (int64, error)
+type Discarder interface {
 	Discard(start, count uint64) error
 }
 
-func OpenBlockDevice(name string, flag int) (BlockDevice, error) {
-	return openBlockDeviceWithSyscall(name, flag, DefaultSysCall())
+type File interface {
+	io.Closer
+	io.Reader
+	io.WriterAt
+	io.ReaderAt
+	io.Seeker
+	Name() string
+	Fd() uintptr
 }
 
-func openBlockDeviceWithSyscall(name string, flag int, syscall SysCall) (BlockDevice, error) {
-	file, err := os.OpenFile(name, flag, os.ModeDevice)
+type BlockDevice interface {
+	File
+	Discarder
+
+	Size() (int64, error)
+}
+
+type BlockDeviceOpener interface {
+	Open(name string, flag int) (BlockDevice, error)
+}
+type blockDeviceOpener struct {
+	fileOpener FileOpener
+	syscall    SysCall
+}
+
+type FileOpener interface {
+	Open(name string, flag int, mode fs.FileMode) (File, error)
+}
+
+type osFileOpener struct{}
+
+func (osFileOpener) Open(name string, flag int, mode fs.FileMode) (File, error) {
+	return os.OpenFile(name, flag, mode)
+}
+
+func (opener *blockDeviceOpener) Open(name string, flag int) (BlockDevice, error) {
+	file, err := opener.fileOpener.Open(name, flag, os.ModeDevice)
 	if err != nil {
 		return nil, fmt.Errorf("opening os file: %w", err)
 	}
 	return &blockDevice{
 		file,
-		syscall,
+		opener.syscall,
 	}, nil
+}
+
+var defaultBlockDeviceOpener = blockDeviceOpener{
+	fileOpener: &osFileOpener{},
+	syscall:    OsSysCall(),
+}
+
+func OsDeviceOpener() BlockDeviceOpener {
+	return &defaultBlockDeviceOpener
+}
+
+func NewBlockDeviceOpener(fileOpener FileOpener, syscall SysCall) BlockDeviceOpener {
+	return &blockDeviceOpener{
+		fileOpener: fileOpener,
+		syscall:    syscall,
+	}
 }
 
 func (device *blockDevice) Size() (int64, error) {
 	var stat Stat_t
-	if err := device.syscall.Fstat(int(device.Fd()), &stat); err != nil {
-		return 0, fmt.Errorf("fstat call failed: %w", err)
+	err := device.syscall.Fstat(int(device.Fd()), &stat)
+	if err != nil {
+		return 0, fmt.Errorf("calling fstat: %w", err)
 	}
-
-	if stat.Size > 0 {
-		return stat.Size, nil
-	}
-
 	if stat.Mode&S_IFMT != S_IFBLK {
 		return 0, fmt.Errorf("not a block device, mode: %x", stat.Mode)
 	}
@@ -56,7 +95,7 @@ func (device *blockDevice) Size() (int64, error) {
 	_, _, errno := device.syscall.Syscall(
 		syscall.SYS_IOCTL,
 		device.Fd(),
-		uintptr(BLKGETSIZE64),
+		BLKGETSIZE64,
 		uintptr(unsafe.Pointer(&blockDeviceSize)))
 	if errno != 0 {
 		err := errors.New(errno.Error())

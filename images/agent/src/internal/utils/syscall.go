@@ -24,26 +24,26 @@ type SysCall interface {
 	Blkdiscard(fd uintptr, start, count uint64) error
 }
 
-type _syscall struct {
+type osSyscall struct {
 }
 
-var theSysCall = _syscall{}
+var theSysCall = osSyscall{}
 
-func DefaultSysCall() SysCall {
+func OsSysCall() SysCall {
 	return &theSysCall
 }
 
-func (_syscall) Fstat(fd int, stat *Stat_t) (err error) {
+func (osSyscall) Fstat(fd int, stat *Stat_t) (err error) {
 	return syscall.Fstat(fd, (*syscall.Stat_t)(stat))
 }
 
-func (_syscall) Syscall(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno) {
+func (osSyscall) Syscall(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno) {
 	r1, r2, err_raw := syscall.Syscall(trap, a1, a2, a3)
 	err = Errno(err_raw)
 	return r1, r2, err
 }
 
-func (_syscall) Blkdiscard(fd uintptr, start, count uint64) error {
+func (osSyscall) Blkdiscard(fd uintptr, start, count uint64) error {
 	rng := rangeUI64{
 		start: start,
 		count: count,
@@ -91,8 +91,8 @@ const (
 	BLKDISCARDZEROES = 0x127c
 	BLKSECDISCARD    = 0x127d
 
-	BLKGETSIZE64 = 0x80081272
-	BLKSSZGET    = 0x1268
+	BLKGETSIZE64 = uintptr(0x80081272)
+	BLKSSZGET    = uintptr(0x1268)
 
 	S_IFMT  = 0xf000 /* type of file mask */
 	S_IFBLK = 0x6000 /* block special */

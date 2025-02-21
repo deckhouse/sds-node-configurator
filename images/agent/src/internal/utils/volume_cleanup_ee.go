@@ -20,7 +20,7 @@ import (
 	"agent/internal/logger"
 )
 
-func VolumeCleanup(ctx context.Context, log logger.Logger, openBlockDevice func(name string, flag int) (BlockDevice, error), vgName, lvName, volumeCleanup string) error {
+func VolumeCleanup(ctx context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, vgName, lvName, volumeCleanup string) error {
 	log.Trace(fmt.Sprintf("[VolumeCleanup] cleaning up volume %s in volume group %s using %s", lvName, vgName, volumeCleanup))
 	if !feature.VolumeCleanupEnabled() {
 		return fmt.Errorf("volume cleanup is not supported in your edition")
@@ -33,11 +33,11 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, openBlockDevice func(
 
 	switch volumeCleanup {
 	case "RandomFillSinglePass":
-		err = volumeCleanupOverwrite(ctx, log, openBlockDevice, devicePath, randomSource, 1)
+		err = volumeCleanupOverwrite(ctx, log, deviceOpener, devicePath, randomSource, 1)
 	case "RandomFillThreePass":
-		err = volumeCleanupOverwrite(ctx, log, openBlockDevice, devicePath, randomSource, 3)
+		err = volumeCleanupOverwrite(ctx, log, deviceOpener, devicePath, randomSource, 3)
 	case "Discard":
-		err = volumeCleanupDiscard(ctx, log, openBlockDevice, devicePath)
+		err = volumeCleanupDiscard(ctx, log, deviceOpener, devicePath)
 	default:
 		return fmt.Errorf("unknown cleanup method %s", volumeCleanup)
 	}
@@ -50,7 +50,7 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, openBlockDevice func(
 	return nil
 }
 
-func volumeCleanupOverwrite(_ context.Context, log logger.Logger, openBlockDevice func(name string, flag int) (BlockDevice, error), devicePath, inputPath string, passes int) (err error) {
+func volumeCleanupOverwrite(_ context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, devicePath, inputPath string, passes int) (err error) {
 	log.Trace(fmt.Sprintf("[volumeCleanupOverwrite] overwriting %s by %s in %d passes", devicePath, inputPath, passes))
 	closeFile := func(file BlockDevice) {
 		log.Trace(fmt.Sprintf("[volumeCleanupOverwrite] closing %s", file.Name()))
@@ -61,14 +61,14 @@ func volumeCleanupOverwrite(_ context.Context, log logger.Logger, openBlockDevic
 		}
 	}
 
-	input, err := openBlockDevice(inputPath, syscall.O_RDONLY)
+	input, err := deviceOpener.Open(inputPath, syscall.O_RDONLY)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[volumeCleanupOverwrite] Opening file %s", inputPath))
 		return fmt.Errorf("opening source device %s to wipe: %w", inputPath, err)
 	}
 	defer closeFile(input)
 
-	output, err := openBlockDevice(devicePath, syscall.O_DIRECT|syscall.O_RDWR)
+	output, err := deviceOpener.Open(devicePath, syscall.O_DIRECT|syscall.O_RDWR)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[volumeCleanupOverwrite] Opening file %s", devicePath))
 		return fmt.Errorf("opening device %s to wipe: %w", devicePath, err)
@@ -105,9 +105,9 @@ func volumeCleanupOverwrite(_ context.Context, log logger.Logger, openBlockDevic
 	return nil
 }
 
-func volumeCleanupDiscard(_ context.Context, log logger.Logger, openBlockDevice func(name string, flag int) (BlockDevice, error), devicePath string) (err error) {
+func volumeCleanupDiscard(_ context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, devicePath string) (err error) {
 	log.Trace(fmt.Sprintf("[volumeCleanupDiscard] discarding %s", devicePath))
-	device, err := openBlockDevice(devicePath, syscall.O_RDWR)
+	device, err := deviceOpener.Open(devicePath, syscall.O_RDWR)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[volumeCleanupDiscard] Opening device %s", devicePath))
 		return fmt.Errorf("opening device %s to wipe: %w", devicePath, err)
@@ -128,8 +128,8 @@ func volumeCleanupDiscard(_ context.Context, log logger.Logger, openBlockDevice 
 	}
 
 	start := time.Now()
-	log.Debug(fmt.Sprintf("[volumeCleanupDiscard] calling BLKDISCARD fd: %d", device.Fd()))
-	defer log.Info(fmt.Sprintf("[volumeCleanupDiscard] BLKDISCARD is done in %s", time.Since(start).String()))
+	log.Debug(fmt.Sprintf("[volumeCleanupDiscard] Discarding all %d bytes", deviceSize))
+	defer log.Info(fmt.Sprintf("[volumeCleanupDiscard] Discarding is done in %s", time.Since(start).String()))
 
 	return device.Discard(0, uint64(deviceSize))
 }
