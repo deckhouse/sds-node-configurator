@@ -181,7 +181,7 @@ This is possible, for example, in the following case:
   - user №1 deleted the files and the volume;
   - the physical blocks it occupied become “free” but not wiped;
   - user №2 requested a new volume from StorageClass 1 and on node 1 in “Block” mode;
-  - there is a risk that some or all of the blocks previously occupied by user #1 will be reallocated to user №2;
+  - there is a risk that some or all of the blocks previously occupied by user №1 will be reallocated to user №2;
   - in which case user №2 has the ability to recover user №1's data.
 
 ### Thick volumes
