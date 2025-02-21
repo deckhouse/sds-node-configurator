@@ -23,7 +23,7 @@ import (
 func TestVolumeCleanup_Unsupported(t *testing.T) {
 	log, err := logger.NewLogger(logger.WarningLevel)
 	if err != nil {
-		t.Fatalf("can't create logger %v")
+		t.Fatalf("can't create logger: %v", err)
 	}
 	err = VolumeCleanup(nil, log, nil, "", "", "")
 	if err == nil {
