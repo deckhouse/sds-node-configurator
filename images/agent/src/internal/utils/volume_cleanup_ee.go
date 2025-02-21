@@ -130,7 +130,9 @@ func volumeCleanupDiscard(_ context.Context, log logger.Logger, deviceOpener Blo
 
 	start := time.Now()
 	log.Debug(fmt.Sprintf("[volumeCleanupDiscard] Discarding all %d bytes", deviceSize))
-	defer log.Info(fmt.Sprintf("[volumeCleanupDiscard] Discarding is done in %s", time.Since(start).String()))
+	defer func() {
+		log.Info(fmt.Sprintf("[volumeCleanupDiscard] Discarding is done in %s", time.Since(start).String()))
+	}()
 
 	return device.Discard(0, uint64(deviceSize))
 }
