@@ -5,7 +5,7 @@ Copyright 2025 Flant JSC
 Licensed under the Deckhouse Platform Enterprise Edition (EE) license. See https://github.com/deckhouse/deckhouse/blob/main/ee/LICENSE
 */
 
-package utils
+package utils_test
 
 import (
 	"context"
@@ -18,6 +18,8 @@ import (
 	"golang.org/x/sys/unix"
 
 	"agent/internal/logger"
+	. "agent/internal/mock_utils"
+	. "agent/internal/utils"
 )
 
 func TestVolumeCleanup_UnknownMethod(t *testing.T) {

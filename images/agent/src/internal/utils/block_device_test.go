@@ -1,6 +1,8 @@
-package utils
+package utils_test
 
 import (
+	. "agent/internal/mock_utils"
+	. "agent/internal/utils"
 	"os"
 	"testing"
 	"unsafe"
