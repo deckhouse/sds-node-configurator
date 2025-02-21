@@ -102,7 +102,7 @@ func (device *blockDevice) Size() (int64, error) {
 		err := errors.New(errno.Error())
 		return 0, fmt.Errorf("error calling ioctl BLKGETSIZE64: %w", err)
 	}
-	if blockDeviceSize <= 0 {
+	if blockDeviceSize == 0 {
 		return 0, fmt.Errorf("block size is invalid")
 	}
 
