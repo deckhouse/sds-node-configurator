@@ -176,8 +176,9 @@ int main() {
 EOF
 */
 
-//nolint:revive
 // TODO: It will be nice to figure them out during compilation or maybe runtime?
+//
+//nolint:revive
 const (
 	BLKDISCARD       = 0x1277
 	BLKDISCARDZEROES = 0x127c
