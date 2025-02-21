@@ -24,6 +24,7 @@ import (
 	"fmt"
 	golog "log"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -126,7 +127,7 @@ func GetAllLVs(ctx context.Context) (data []internal.LVData, command string, std
 func GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	lvData = internal.LVData{}
-	lvPath := fmt.Sprintf("/dev/%s/%s", vgName, lvName)
+	lvPath := filepath.Join("/dev", vgName, lvName)
 	args := []string{"lvs", "-o", "+vg_uuid,tags", "--units", "B", "--nosuffix", "--reportformat", "json", lvPath}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
@@ -361,7 +362,7 @@ func ExtendVG(vgName string, paths []string) (string, error) {
 }
 
 func ExtendLV(size int64, vgName, lvName string) (string, error) {
-	args := []string{"lvextend", "-L", fmt.Sprintf("%dk", size/1024), fmt.Sprintf("/dev/%s/%s", vgName, lvName)}
+	args := []string{"lvextend", "-L", fmt.Sprintf("%dk", size/1024), filepath.Join("/dev", vgName, lvName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -378,7 +379,7 @@ func ExtendLV(size int64, vgName, lvName string) (string, error) {
 }
 
 func ExtendLVFullVGSpace(vgName, lvName string) (string, error) {
-	args := []string{"lvextend", "-l", "100%VG", fmt.Sprintf("/dev/%s/%s", vgName, lvName)}
+	args := []string{"lvextend", "-l", "100%VG", filepath.Join("/dev", vgName, lvName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -440,7 +441,7 @@ func RemovePV(pvNames []string) (string, error) {
 }
 
 func RemoveLV(vgName, lvName string) (string, error) {
-	args := []string{"lvremove", fmt.Sprintf("/dev/%s/%s", vgName, lvName), "-y"}
+	args := []string{"lvremove", filepath.Join("/dev", vgName, lvName), "-y"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -482,7 +483,7 @@ func VGChangeDelTag(vGName, tag string) (string, error) {
 }
 
 func LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
-	tmpStr := fmt.Sprintf("/dev/%s/%s", lv.VGName, lv.LVName)
+	tmpStr := filepath.Join("/dev/%s/%s", lv.VGName, lv.LVName)
 	var outs, stdErr bytes.Buffer
 	args := []string{"lvchange", tmpStr, "--deltag", tag}
 	extendedArgs := lvmStaticExtendedArgs(args)

@@ -11,7 +11,7 @@ import (
 	"agent/internal/logger"
 	"context"
 	"errors"
-	"fmt"
+	"path/filepath"
 	"syscall"
 	"testing"
 
@@ -80,7 +80,7 @@ func TestVolumeCleanup_RandomFillSinglePass(t *testing.T) {
 		return input, nil
 	}())
 
-	deviceName := fmt.Sprintf("/dev/%s/%s", vgName, lvName)
+	deviceName := filepath.Join("/dev", vgName, lvName)
 	opener.EXPECT().Open(deviceName, syscall.O_DIRECT|syscall.O_RDWR).Return(func() (BlockDevice, error) {
 		device := NewMockBlockDevice(ctrl)
 		device.EXPECT().Size().Return(int64(deviceSize), nil)
@@ -138,7 +138,7 @@ func TestVolumeCleanup_RandomFillThreePass(t *testing.T) {
 		return input, nil
 	}())
 
-	deviceName := fmt.Sprintf("/dev/%s/%s", vgName, lvName)
+	deviceName := filepath.Join("/dev", vgName, lvName)
 	opener.EXPECT().Open(deviceName, syscall.O_DIRECT|syscall.O_RDWR).Return(func() (BlockDevice, error) {
 		device := NewMockBlockDevice(ctrl)
 		device.EXPECT().Size().Return(int64(deviceSize), nil)
@@ -192,7 +192,7 @@ func TestVolumeCleanup_RandomFill_ClosingErrors(t *testing.T) {
 		return input, nil
 	}())
 
-	deviceName := fmt.Sprintf("/dev/%s/%s", vgName, lvName)
+	deviceName := filepath.Join("/dev", vgName, lvName)
 	opener.EXPECT().Open(deviceName, syscall.O_DIRECT|syscall.O_RDWR).Return(func() (BlockDevice, error) {
 		device := NewMockBlockDevice(ctrl)
 		device.EXPECT().Size().Return(int64(deviceSize), nil)

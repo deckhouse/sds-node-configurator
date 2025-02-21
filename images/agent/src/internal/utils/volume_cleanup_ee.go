@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -26,7 +27,7 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, deviceOpener BlockDev
 		return fmt.Errorf("volume cleanup is not supported in your edition")
 	}
 
-	devicePath := fmt.Sprintf("/dev/%s/%s", vgName, lvName)
+	devicePath := filepath.Join("/dev", vgName, lvName)
 	randomSource := "/dev/urandom"
 
 	var err error
