@@ -7,6 +7,7 @@ import (
 	"unsafe"
 )
 
+//nolint:revive
 type Stat_t syscall.Stat_t
 type Errno syscall.Errno
 

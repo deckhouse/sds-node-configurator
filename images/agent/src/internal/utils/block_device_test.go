@@ -11,9 +11,9 @@ import (
 
 func TestBlockDeviceSize(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	syscall_ := NewMockSysCall(ctrl)
+	sysCall := NewMockSysCall(ctrl)
 	fileOpener := NewMockFileOpener(ctrl)
-	blockDeviceOpener := NewBlockDeviceOpener(fileOpener, syscall_)
+	blockDeviceOpener := NewBlockDeviceOpener(fileOpener, sysCall)
 	file := NewMockFile(ctrl)
 
 	fileName := "fileName"
@@ -22,11 +22,11 @@ func TestBlockDeviceSize(t *testing.T) {
 	fd := uintptr(1234)
 
 	file.EXPECT().Fd().AnyTimes().Return(fd)
-	syscall_.EXPECT().Fstat(int(fd), gomock.Any()).DoAndReturn(func(fd_ int, stat *Stat_t) error {
+	sysCall.EXPECT().Fstat(int(fd), gomock.Any()).DoAndReturn(func(fd_ int, stat *Stat_t) error {
 		stat.Mode = S_IFBLK
 		return nil
 	})
-	syscall_.EXPECT().Syscall(uintptr(syscall.SYS_IOCTL), fd, BLKGETSIZE64, gomock.Any()).DoAndReturn(func(trap, a1, a2, a3 uintptr) (uintptr, uintptr, Errno) {
+	sysCall.EXPECT().Syscall(uintptr(syscall.SYS_IOCTL), fd, BLKGETSIZE64, gomock.Any()).DoAndReturn(func(trap, a1, a2, a3 uintptr) (uintptr, uintptr, Errno) {
 		*(*uint64)(unsafe.Pointer(a3)) = uint64(size)
 		return 0, 0, 0
 	})
@@ -51,9 +51,9 @@ func TestBlockDeviceSize(t *testing.T) {
 
 func TestBlockDeviceDiscard(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	syscall_ := NewMockSysCall(ctrl)
+	sysCall := NewMockSysCall(ctrl)
 	fileOpener := NewMockFileOpener(ctrl)
-	blockDeviceOpener := NewBlockDeviceOpener(fileOpener, syscall_)
+	blockDeviceOpener := NewBlockDeviceOpener(fileOpener, sysCall)
 	file := NewMockFile(ctrl)
 
 	fileName := "fileName"
@@ -63,7 +63,7 @@ func TestBlockDeviceDiscard(t *testing.T) {
 	count := uint64(512)
 
 	file.EXPECT().Fd().AnyTimes().Return(fd)
-	syscall_.EXPECT().Blkdiscard(fd, start, count).Return(nil)
+	sysCall.EXPECT().Blkdiscard(fd, start, count).Return(nil)
 	fileOpener.EXPECT().Open(fileName, flag, os.ModeDevice).Return(file, nil)
 
 	device, err := blockDeviceOpener.Open(fileName, 0)
