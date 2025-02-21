@@ -16,12 +16,23 @@ limitations under the License.
 package utils
 
 import (
-	"context"
-	"fmt"
-
 	"agent/internal/logger"
+	"testing"
 )
 
-func VolumeCleanup(_ context.Context, _ logger.Logger, _ BlockDeviceOpener, _, _, _ string) error {
-	return fmt.Errorf("volume cleanup is not supported in your edition")
+func TestVolumeCleanup_Unsupported(t *testing.T) {
+	log, err := logger.NewLogger(logger.WarningLevel)
+	if err != nil {
+		t.Fatalf("can't create logger %v")
+	}
+	err = VolumeCleanup(nil, log, nil, "", "", "")
+	if err == nil {
+		t.Fatalf("error expected")
+	}
+
+	expected := "volume cleanup is not supported in your edition"
+	got := err.Error()
+	if got != expected {
+		t.Fatalf("error message expected '%s' got '%s'", expected, got)
+	}
 }
