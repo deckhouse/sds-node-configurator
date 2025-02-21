@@ -3,20 +3,21 @@ package utils
 import (
 	"errors"
 	"fmt"
-	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 //nolint:revive
-type Stat_t syscall.Stat_t
-type Errno syscall.Errno
+type Stat_t unix.Stat_t
+type Errno unix.Errno
 
 type rangeUI64 struct {
 	start, count uint64
 }
 
 func (e Errno) Error() string {
-	return syscall.Errno(e).Error()
+	return unix.Errno(e).Error()
 }
 
 type SysCall interface {
@@ -35,11 +36,11 @@ func OsSysCall() SysCall {
 }
 
 func (osSyscall) Fstat(fd int, stat *Stat_t) (err error) {
-	return syscall.Fstat(fd, (*syscall.Stat_t)(stat))
+	return unix.Fstat(fd, (*unix.Stat_t)(stat))
 }
 
 func (osSyscall) Syscall(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno) {
-	r1, r2, errno := syscall.Syscall(trap, a1, a2, a3)
+	r1, r2, errno := unix.Syscall(trap, a1, a2, a3)
 	return r1, r2, Errno(errno)
 }
 
@@ -48,8 +49,8 @@ func (osSyscall) Blkdiscard(fd uintptr, start, count uint64) error {
 		start: start,
 		count: count,
 	}
-	_, _, errno := syscall.Syscall(
-		syscall.SYS_IOCTL,
+	_, _, errno := unix.Syscall(
+		unix.SYS_IOCTL,
 		fd,
 		uintptr(BLKDISCARD),
 		uintptr(unsafe.Pointer(&rng)))

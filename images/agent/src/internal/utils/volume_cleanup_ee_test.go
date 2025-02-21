@@ -11,11 +11,11 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"syscall"
 	"testing"
 
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"go.uber.org/mock/gomock"
+	"golang.org/x/sys/unix"
 
 	"agent/internal/logger"
 )
@@ -57,7 +57,7 @@ func TestVolumeCleanup_Discard(t *testing.T) {
 	lvName := "lv"
 
 	if feature.VolumeCleanupEnabled() {
-		opener.EXPECT().Open(filepath.Join("/dev", vgName, lvName), syscall.O_RDWR).Return(mock, nil)
+		opener.EXPECT().Open(filepath.Join("/dev", vgName, lvName), unix.O_RDWR).Return(mock, nil)
 
 		mock.EXPECT().Size().Return(int64(deviceSize), nil)
 		mock.EXPECT().Discard(uint64(0), uint64(deviceSize))
@@ -101,7 +101,7 @@ func TestVolumeCleanup_RandomFillSinglePass(t *testing.T) {
 
 	if feature.VolumeCleanupEnabled() {
 		inputName := "/dev/urandom"
-		opener.EXPECT().Open(inputName, syscall.O_RDONLY).Return(func() BlockDevice {
+		opener.EXPECT().Open(inputName, unix.O_RDONLY).Return(func() BlockDevice {
 			input := NewMockBlockDevice(ctrl)
 			input.EXPECT().Read(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
 				if len(p) > bufferSize {
@@ -115,7 +115,7 @@ func TestVolumeCleanup_RandomFillSinglePass(t *testing.T) {
 		}(), nil)
 
 		deviceName := filepath.Join("/dev", vgName, lvName)
-		opener.EXPECT().Open(deviceName, syscall.O_DIRECT|syscall.O_RDWR).Return(func() BlockDevice {
+		opener.EXPECT().Open(deviceName, unix.O_DIRECT|unix.O_RDWR).Return(func() BlockDevice {
 			device := NewMockBlockDevice(ctrl)
 			device.EXPECT().Size().Return(int64(deviceSize), nil)
 			device.EXPECT().WriteAt(gomock.Any(), gomock.Any()).DoAndReturn(func(p []byte, off int64) (int, error) {
@@ -171,7 +171,7 @@ func TestVolumeCleanup_RandomFillThreePass(t *testing.T) {
 
 	if feature.VolumeCleanupEnabled() {
 		inputName := "/dev/urandom"
-		opener.EXPECT().Open(inputName, syscall.O_RDONLY).Return(func() BlockDevice {
+		opener.EXPECT().Open(inputName, unix.O_RDONLY).Return(func() BlockDevice {
 			input := NewMockBlockDevice(ctrl)
 			input.EXPECT().Read(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
 				if len(p) > bufferSize {
@@ -185,7 +185,7 @@ func TestVolumeCleanup_RandomFillThreePass(t *testing.T) {
 		}(), nil)
 
 		deviceName := filepath.Join("/dev", vgName, lvName)
-		opener.EXPECT().Open(deviceName, syscall.O_DIRECT|syscall.O_RDWR).Return(func() BlockDevice {
+		opener.EXPECT().Open(deviceName, unix.O_DIRECT|unix.O_RDWR).Return(func() BlockDevice {
 			device := NewMockBlockDevice(ctrl)
 			device.EXPECT().Size().Return(int64(deviceSize), nil)
 			device.EXPECT().WriteAt(gomock.Any(), gomock.Any()).DoAndReturn(func(p []byte, off int64) (int, error) {
@@ -241,7 +241,7 @@ func TestVolumeCleanup_RandomFill_ClosingErrors(t *testing.T) {
 	closingError := errors.New("expected closing error")
 	writeError := errors.New("expected writing error")
 	if feature.VolumeCleanupEnabled() {
-		opener.EXPECT().Open(inputName, syscall.O_RDONLY).Return(func() BlockDevice {
+		opener.EXPECT().Open(inputName, unix.O_RDONLY).Return(func() BlockDevice {
 			input := NewMockBlockDevice(ctrl)
 			input.EXPECT().Read(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
 				return len(p), nil
@@ -252,7 +252,7 @@ func TestVolumeCleanup_RandomFill_ClosingErrors(t *testing.T) {
 		}(), nil)
 
 		deviceName := filepath.Join("/dev", vgName, lvName)
-		opener.EXPECT().Open(deviceName, syscall.O_DIRECT|syscall.O_RDWR).Return(func() BlockDevice {
+		opener.EXPECT().Open(deviceName, unix.O_DIRECT|unix.O_RDWR).Return(func() BlockDevice {
 			device := NewMockBlockDevice(ctrl)
 			device.EXPECT().Size().Return(int64(deviceSize), nil)
 			device.EXPECT().WriteAt(gomock.Any(), gomock.Any()).DoAndReturn(func(_ []byte, _ int64) (int, error) {

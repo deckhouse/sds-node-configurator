@@ -6,8 +6,9 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 type blockDevice struct {
@@ -93,7 +94,7 @@ func (device *blockDevice) Size() (int64, error) {
 
 	var blockDeviceSize uint64
 	_, _, errno := device.syscall.Syscall(
-		syscall.SYS_IOCTL,
+		unix.SYS_IOCTL,
 		device.Fd(),
 		BLKGETSIZE64,
 		uintptr(unsafe.Pointer(&blockDeviceSize)))

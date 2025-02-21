@@ -13,10 +13,10 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
+	"golang.org/x/sys/unix"
 
 	"agent/internal/logger"
 )
@@ -62,14 +62,14 @@ func volumeCleanupOverwrite(_ context.Context, log logger.Logger, deviceOpener B
 		}
 	}
 
-	input, err := deviceOpener.Open(inputPath, syscall.O_RDONLY)
+	input, err := deviceOpener.Open(inputPath, unix.O_RDONLY)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[volumeCleanupOverwrite] Opening file %s", inputPath))
 		return fmt.Errorf("opening source device %s to wipe: %w", inputPath, err)
 	}
 	defer closeFile(input)
 
-	output, err := deviceOpener.Open(devicePath, syscall.O_DIRECT|syscall.O_RDWR)
+	output, err := deviceOpener.Open(devicePath, unix.O_DIRECT|unix.O_RDWR)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[volumeCleanupOverwrite] Opening file %s", devicePath))
 		return fmt.Errorf("opening device %s to wipe: %w", devicePath, err)
@@ -108,7 +108,7 @@ func volumeCleanupOverwrite(_ context.Context, log logger.Logger, deviceOpener B
 
 func volumeCleanupDiscard(_ context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, devicePath string) (err error) {
 	log.Trace(fmt.Sprintf("[volumeCleanupDiscard] discarding %s", devicePath))
-	device, err := deviceOpener.Open(devicePath, syscall.O_RDWR)
+	device, err := deviceOpener.Open(devicePath, unix.O_RDWR)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[volumeCleanupDiscard] Opening device %s", devicePath))
 		return fmt.Errorf("opening device %s to wipe: %w", devicePath, err)

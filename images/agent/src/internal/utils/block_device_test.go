@@ -2,11 +2,11 @@ package utils
 
 import (
 	"os"
-	"syscall"
 	"testing"
 	"unsafe"
 
 	"go.uber.org/mock/gomock"
+	"golang.org/x/sys/unix"
 )
 
 func TestBlockDeviceSize(t *testing.T) {
@@ -26,7 +26,7 @@ func TestBlockDeviceSize(t *testing.T) {
 		stat.Mode = S_IFBLK
 		return nil
 	})
-	sysCall.EXPECT().Syscall(uintptr(syscall.SYS_IOCTL), fd, BLKGETSIZE64, gomock.Any()).DoAndReturn(func(_, _, _, a3 uintptr) (uintptr, uintptr, Errno) {
+	sysCall.EXPECT().Syscall(uintptr(unix.SYS_IOCTL), fd, BLKGETSIZE64, gomock.Any()).DoAndReturn(func(_, _, _, a3 uintptr) (uintptr, uintptr, Errno) {
 		*(*uint64)(unsafe.Pointer(a3)) = uint64(size)
 		return 0, 0, 0
 	})
