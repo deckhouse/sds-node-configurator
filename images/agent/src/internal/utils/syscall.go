@@ -9,12 +9,8 @@ import (
 )
 
 //nolint:revive
-type Stat_t unix.Stat_t
-type Errno unix.Errno
-
-func (e Errno) Error() string {
-	return unix.Errno(e).Error()
-}
+type Stat_t = unix.Stat_t
+type Errno = unix.Errno
 
 type SysCall interface {
 	Fstat(fd int, stat *Stat_t) (err error)
