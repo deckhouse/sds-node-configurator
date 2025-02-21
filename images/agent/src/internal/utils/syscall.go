@@ -55,7 +55,7 @@ func (osSyscall) Blkdiscard(fd uintptr, start, count uint64) error {
 
 	if errno != 0 {
 		err := errors.New(errno.Error())
-		return fmt.Errorf("calling ioctl BLKDISCARD: %s", err)
+		return fmt.Errorf("calling ioctl BLKDISCARD: %w", err)
 	}
 	return nil
 }
