@@ -39,9 +39,8 @@ func (osSyscall) Fstat(fd int, stat *Stat_t) (err error) {
 }
 
 func (osSyscall) Syscall(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno) {
-	r1, r2, err_raw := syscall.Syscall(trap, a1, a2, a3)
-	err = Errno(err_raw)
-	return r1, r2, err
+	r1, r2, errno := syscall.Syscall(trap, a1, a2, a3)
+	return r1, r2, Errno(errno)
 }
 
 func (osSyscall) Blkdiscard(fd uintptr, start, count uint64) error {

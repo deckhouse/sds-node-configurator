@@ -22,11 +22,11 @@ func TestBlockDeviceSize(t *testing.T) {
 	fd := uintptr(1234)
 
 	file.EXPECT().Fd().AnyTimes().Return(fd)
-	sysCall.EXPECT().Fstat(int(fd), gomock.Any()).DoAndReturn(func(fd_ int, stat *Stat_t) error {
+	sysCall.EXPECT().Fstat(int(fd), gomock.Any()).DoAndReturn(func(_ int, stat *Stat_t) error {
 		stat.Mode = S_IFBLK
 		return nil
 	})
-	sysCall.EXPECT().Syscall(uintptr(syscall.SYS_IOCTL), fd, BLKGETSIZE64, gomock.Any()).DoAndReturn(func(trap, a1, a2, a3 uintptr) (uintptr, uintptr, Errno) {
+	sysCall.EXPECT().Syscall(uintptr(syscall.SYS_IOCTL), fd, BLKGETSIZE64, gomock.Any()).DoAndReturn(func(_, _, _, a3 uintptr) (uintptr, uintptr, Errno) {
 		*(*uint64)(unsafe.Pointer(a3)) = uint64(size)
 		return 0, 0, 0
 	})

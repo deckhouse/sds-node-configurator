@@ -16,8 +16,9 @@ limitations under the License.
 package utils
 
 import (
-	"agent/internal/logger"
 	"testing"
+
+	"agent/internal/logger"
 )
 
 func TestVolumeCleanup_Unsupported(t *testing.T) {
