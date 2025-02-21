@@ -12,10 +12,6 @@ import (
 type Stat_t unix.Stat_t
 type Errno unix.Errno
 
-type rangeUI64 struct {
-	start, count uint64
-}
-
 func (e Errno) Error() string {
 	return unix.Errno(e).Error()
 }
@@ -45,7 +41,9 @@ func (osSyscall) Syscall(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno) {
 }
 
 func (osSyscall) Blkdiscard(fd uintptr, start, count uint64) error {
-	rng := rangeUI64{
+	rng := struct {
+		start, count uint64
+	}{
 		start: start,
 		count: count,
 	}
