@@ -16,6 +16,7 @@ limitations under the License.
 package utils
 
 import (
+	"context"
 	"testing"
 
 	"agent/internal/logger"
@@ -26,7 +27,7 @@ func TestVolumeCleanup_Unsupported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("can't create logger: %v", err)
 	}
-	err = VolumeCleanup(nil, log, nil, "", "", "")
+	err = VolumeCleanup(context.Background(), log, nil, "", "", "")
 	if err == nil {
 		t.Fatalf("error expected")
 	}
