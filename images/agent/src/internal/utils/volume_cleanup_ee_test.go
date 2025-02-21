@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"go.uber.org/mock/gomock"
 )
 
@@ -26,6 +27,16 @@ func TestVolumeCleanup_UnknownMethod(t *testing.T) {
 	vgName := "vg"
 	lvName := "lv"
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "some")
+
+	if !feature.VolumeCleanupEnabled() {
+		expected := "volume cleanup is not supported in your edition"
+		got := err.Error()
+		if got != expected {
+			t.Fatalf("error message expected '%s' got '%s'", expected, got)
+		}
+		return
+	}
+
 	if err == nil {
 		t.Fatal("error expected")
 	} else if err.Error() != "unknown cleanup method some" {
@@ -49,6 +60,16 @@ func TestVolumeCleanup_Discard(t *testing.T) {
 	lvName := "lv"
 
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "Discard")
+
+	if !feature.VolumeCleanupEnabled() {
+		expected := "volume cleanup is not supported in your edition"
+		got := err.Error()
+		if got != expected {
+			t.Fatalf("error message expected '%s' got '%s'", expected, got)
+		}
+		return
+	}
+
 	if err != nil {
 		t.Fatalf("unexpected error %v", err)
 	}
@@ -107,6 +128,16 @@ func TestVolumeCleanup_RandomFillSinglePass(t *testing.T) {
 	}())
 
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "RandomFillSinglePass")
+
+	if !feature.VolumeCleanupEnabled() {
+		expected := "volume cleanup is not supported in your edition"
+		got := err.Error()
+		if got != expected {
+			t.Fatalf("error message expected '%s' got '%s'", expected, got)
+		}
+		return
+	}
+
 	if err != nil {
 		t.Fatalf("unexpected error %v", err)
 	}
@@ -165,6 +196,16 @@ func TestVolumeCleanup_RandomFillThreePass(t *testing.T) {
 	}())
 
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "RandomFillThreePass")
+
+	if !feature.VolumeCleanupEnabled() {
+		expected := "volume cleanup is not supported in your edition"
+		got := err.Error()
+		if got != expected {
+			t.Fatalf("error message expected '%s' got '%s'", expected, got)
+		}
+		return
+	}
+
 	if err != nil {
 		t.Fatalf("unexpected error %v", err)
 	}
@@ -205,6 +246,16 @@ func TestVolumeCleanup_RandomFill_ClosingErrors(t *testing.T) {
 	}())
 
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "RandomFillSinglePass")
+
+	if !feature.VolumeCleanupEnabled() {
+		expected := "volume cleanup is not supported in your edition"
+		got := err.Error()
+		if got != expected {
+			t.Fatalf("error message expected '%s' got '%s'", expected, got)
+		}
+		return
+	}
+
 	if err == nil {
 		t.Fatal("unexpected success")
 	}
