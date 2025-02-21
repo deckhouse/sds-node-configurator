@@ -34,18 +34,18 @@ func TestBlockDeviceSize(t *testing.T) {
 
 	device, err := blockDeviceOpener.Open(fileName, 0)
 	if err != nil {
-		t.Errorf("opening block device: %v", err)
+		t.Fatalf("opening block device: %v", err)
 	}
 	if device == nil {
-		t.Error("nil device returned")
+		t.Fatal("nil device returned")
 	}
 
 	got, err := device.Size()
 	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if got != size {
-		t.Errorf("expected size %d, got %d", size, got)
+		t.Fatalf("expected size %d, got %d", size, got)
 	}
 }
 
@@ -68,14 +68,14 @@ func TestBlockDeviceDiscard(t *testing.T) {
 
 	device, err := blockDeviceOpener.Open(fileName, 0)
 	if err != nil {
-		t.Errorf("opening block device: %v", err)
+		t.Fatalf("opening block device: %v", err)
 	}
 	if device == nil {
-		t.Error("nil device returned")
+		t.Fatal("nil device returned")
 	}
 
 	err = device.Discard(start, count)
 	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

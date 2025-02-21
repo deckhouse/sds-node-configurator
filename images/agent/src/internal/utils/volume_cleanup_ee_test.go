@@ -27,9 +27,9 @@ func TestVolumeCleanup_UnknownMethod(t *testing.T) {
 	lvName := "lv"
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "some")
 	if err == nil {
-		t.Error("error expected")
+		t.Fatal("error expected")
 	} else if err.Error() != "unknown cleanup method some" {
-		t.Errorf("unexpected error %v", err)
+		t.Fatalf("unexpected error %v", err)
 	}
 }
 
@@ -50,7 +50,7 @@ func TestVolumeCleanup_Discard(t *testing.T) {
 
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "Discard")
 	if err != nil {
-		t.Errorf("unexpected error %v", err)
+		t.Fatalf("unexpected error %v", err)
 	}
 }
 
@@ -71,7 +71,7 @@ func TestVolumeCleanup_RandomFillSinglePass(t *testing.T) {
 		input := NewMockBlockDevice(ctrl)
 		input.EXPECT().Read(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
 			if len(p) > bufferSize {
-				t.Errorf("Buffer size should be less then %d, got %d", bufferSize, len(p))
+				t.Fatalf("Buffer size should be less then %d, got %d", bufferSize, len(p))
 			}
 			return len(p), nil
 		}).Times(copyCount)
@@ -86,17 +86,17 @@ func TestVolumeCleanup_RandomFillSinglePass(t *testing.T) {
 		device.EXPECT().Size().Return(int64(deviceSize), nil)
 		device.EXPECT().WriteAt(gomock.Any(), gomock.Any()).DoAndReturn(func(p []byte, off int64) (int, error) {
 			if int64(expectedWrite) != off {
-				t.Errorf("Expected write offset %d, got %d", expectedWrite, off)
+				t.Fatalf("Expected write offset %d, got %d", expectedWrite, off)
 			}
 			expectedWrite += bufferSize
 			if expectedWrite > deviceSize {
 				expectedWrite = 0
 				if len(p) > bufferSize {
-					t.Errorf("Buffer size should be less then %d, got %d", bufferSize, len(p))
+					t.Fatalf("Buffer size should be less then %d, got %d", bufferSize, len(p))
 				}
 			} else {
 				if len(p) != bufferSize {
-					t.Errorf("Expected buffer size %d, got %d", bufferSize, len(p))
+					t.Fatalf("Expected buffer size %d, got %d", bufferSize, len(p))
 				}
 			}
 			return len(p), nil
@@ -108,7 +108,7 @@ func TestVolumeCleanup_RandomFillSinglePass(t *testing.T) {
 
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "RandomFillSinglePass")
 	if err != nil {
-		t.Errorf("unexpected error %v", err)
+		t.Fatalf("unexpected error %v", err)
 	}
 }
 
@@ -129,7 +129,7 @@ func TestVolumeCleanup_RandomFillThreePass(t *testing.T) {
 		input := NewMockBlockDevice(ctrl)
 		input.EXPECT().Read(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
 			if len(p) > bufferSize {
-				t.Errorf("Buffer size should be less then %d, got %d", bufferSize, len(p))
+				t.Fatalf("Buffer size should be less then %d, got %d", bufferSize, len(p))
 			}
 			return len(p), nil
 		}).Times(copyCount)
@@ -144,17 +144,17 @@ func TestVolumeCleanup_RandomFillThreePass(t *testing.T) {
 		device.EXPECT().Size().Return(int64(deviceSize), nil)
 		device.EXPECT().WriteAt(gomock.Any(), gomock.Any()).DoAndReturn(func(p []byte, off int64) (int, error) {
 			if int64(expectedWrite) != off {
-				t.Errorf("Expected write offset %d, got %d", expectedWrite, off)
+				t.Fatalf("Expected write offset %d, got %d", expectedWrite, off)
 			}
 			expectedWrite += bufferSize
 			if expectedWrite > deviceSize {
 				expectedWrite = 0
 				if len(p) > bufferSize {
-					t.Errorf("Buffer size should be less then %d, got %d", bufferSize, len(p))
+					t.Fatalf("Buffer size should be less then %d, got %d", bufferSize, len(p))
 				}
 			} else {
 				if len(p) != bufferSize {
-					t.Errorf("Expected buffer size %d, got %d", bufferSize, len(p))
+					t.Fatalf("Expected buffer size %d, got %d", bufferSize, len(p))
 				}
 			}
 			return len(p), nil
@@ -166,7 +166,7 @@ func TestVolumeCleanup_RandomFillThreePass(t *testing.T) {
 
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "RandomFillThreePass")
 	if err != nil {
-		t.Errorf("unexpected error %v", err)
+		t.Fatalf("unexpected error %v", err)
 	}
 }
 
@@ -206,8 +206,10 @@ func TestVolumeCleanup_RandomFill_ClosingErrors(t *testing.T) {
 
 	err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, "RandomFillSinglePass")
 	if err == nil {
-		t.Error("unexpected success")
-	} else if !errors.Is(err, closingError) || !errors.Is(err, writeError) {
-		t.Errorf("expected error to have both (%v, %v), got %v", writeError, closingError, err)
+		t.Fatal("unexpected success")
+	}
+
+	if !errors.Is(err, closingError) || !errors.Is(err, writeError) {
+		t.Fatalf("expected error to have both (%v, %v), got %v", writeError, closingError, err)
 	}
 }
