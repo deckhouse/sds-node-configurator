@@ -167,10 +167,7 @@ int main() {
     PRINT_CONSTANT(S_IFMT, "0x%x");
     PRINT_CONSTANT(S_IFBLK, "0x%x");
     PRINT_CONSTANT(BLKGETSIZE64, "0x%lx");
-    PRINT_CONSTANT(BLKSSZGET, "0x%x");
     PRINT_CONSTANT(BLKDISCARD, "0x%x");
-    PRINT_CONSTANT(BLKDISCARDZEROES, "0x%x");
-    PRINT_CONSTANT(BLKSECDISCARD, "0x%x");
     return 0;
 }
 EOF
@@ -180,12 +177,9 @@ EOF
 //
 //nolint:revive
 const (
-	BLKDISCARD       = 0x1277
-	BLKDISCARDZEROES = 0x127c
-	BLKSECDISCARD    = 0x127d
+	BLKDISCARD = 0x1277
 
 	BLKGETSIZE64 = 0x80081272
-	BLKSSZGET    = 0x1268
 
 	S_IFMT  = 0xf000 /* type of file mask */
 	S_IFBLK = 0x6000 /* block special */
