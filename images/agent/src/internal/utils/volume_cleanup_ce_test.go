@@ -17,7 +17,6 @@ package utils_test
 
 import (
 	"context"
-	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -38,8 +37,3 @@ var _ = Describe("Cleaning up volume", func() {
 		Expect(err).To(MatchError("volume cleanup is not supported in your edition"))
 	})
 })
-
-func TestVolumeCleanup(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "VolumeCleanup Suite")
-}
