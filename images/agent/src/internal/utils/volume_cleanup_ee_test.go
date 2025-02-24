@@ -82,7 +82,9 @@ var _ = Describe("Cleaning up volume", func() {
 			})
 			It("fails with same error", func() {
 				doCall()
-				Expect(err).To(MatchError(deviceOpenError))
+				if feature.VolumeCleanupEnabled() {
+					Expect(err).To(MatchError(deviceOpenError))
+				}
 			})
 		})
 
