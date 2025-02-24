@@ -23,17 +23,17 @@ type osSyscall struct {
 
 var theSysCall = osSyscall{}
 
+//nolint:revive
 func OsSysCall() osSyscall {
 	return theSysCall
 }
 
 func (osSyscall) Fstat(fd int, stat *Stat_t) (err error) {
-	return unix.Fstat(fd, (*unix.Stat_t)(stat))
+	return unix.Fstat(fd, stat)
 }
 
 func (osSyscall) Syscall(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno) {
-	r1, r2, errno := unix.Syscall(trap, a1, a2, a3)
-	return r1, r2, Errno(errno)
+	return unix.Syscall(trap, a1, a2, a3)
 }
 
 func (osSyscall) Blkdiscard(fd uintptr, start, count uint64) error {

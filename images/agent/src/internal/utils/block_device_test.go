@@ -1,17 +1,17 @@
 package utils_test
 
 import (
-	. "agent/internal/mock_utils"
-	. "agent/internal/utils"
 	"errors"
 	"os"
 	"unsafe"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	. "agent/internal/mock_utils"
+	. "agent/internal/utils"
 )
 
 var _ = Describe("BlockDevice", func() {

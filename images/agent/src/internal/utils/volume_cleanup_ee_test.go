@@ -15,15 +15,14 @@ import (
 	"path/filepath"
 
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
 
 	"agent/internal/logger"
 	. "agent/internal/mock_utils"
 	. "agent/internal/utils"
-
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Cleaning up volume", func() {
@@ -179,7 +178,7 @@ var _ = Describe("Cleaning up volume", func() {
 				input = NewMockBlockDevice(ctrl)
 				if feature.VolumeCleanupEnabled() {
 					input.EXPECT().Name().AnyTimes().Return(inputName)
-					opener.EXPECT().Open(inputName, unix.O_RDONLY).DoAndReturn(func(s string, i int) (BlockDevice, error) {
+					opener.EXPECT().Open(inputName, unix.O_RDONLY).DoAndReturn(func(_ string, _ int) (BlockDevice, error) {
 						input.EXPECT().Close().Return(inputClosingError)
 						return input, nil
 					})
@@ -211,7 +210,7 @@ var _ = Describe("Cleaning up volume", func() {
 				BeforeEach(func() {
 					device = NewMockBlockDevice(ctrl)
 					if feature.VolumeCleanupEnabled() {
-						opener.EXPECT().Open(deviceName, unix.O_DIRECT|unix.O_RDWR).DoAndReturn(func(s string, i int) (BlockDevice, error) {
+						opener.EXPECT().Open(deviceName, unix.O_DIRECT|unix.O_RDWR).DoAndReturn(func(_ string, _ int) (BlockDevice, error) {
 							device.EXPECT().Close().Return(deviceClosingError)
 							return device, nil
 						})
@@ -255,7 +254,7 @@ var _ = Describe("Cleaning up volume", func() {
 
 						if readLimit < expectedTotalBytesRead {
 							// Extra call for EOF
-							expectedReadCallCount += 1
+							expectedReadCallCount++
 						}
 
 						if feature.VolumeCleanupEnabled() {

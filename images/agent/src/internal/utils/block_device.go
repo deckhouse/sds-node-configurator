@@ -71,10 +71,12 @@ var defaultBlockDeviceOpener = blockDeviceOpener[osFileOpener, osSyscall]{
 	syscall:    OsSysCall(),
 }
 
+//nolint:revive
 func OsDeviceOpener() *blockDeviceOpener[osFileOpener, osSyscall] {
 	return &defaultBlockDeviceOpener
 }
 
+//nolint:revive
 func NewBlockDeviceOpener[TFileOpener FileOpener, TSysCall SysCall](fileOpener TFileOpener, syscall TSysCall) *blockDeviceOpener[TFileOpener, TSysCall] {
 	return &blockDeviceOpener[TFileOpener, TSysCall]{
 		fileOpener: fileOpener,
