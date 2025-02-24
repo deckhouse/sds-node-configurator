@@ -3,6 +3,7 @@ package utils_test
 import (
 	. "agent/internal/mock_utils"
 	. "agent/internal/utils"
+	"errors"
 	"os"
 	"unsafe"
 
@@ -43,7 +44,7 @@ var _ = Describe("BlockDevice", func() {
 		JustBeforeEach(func() {
 			device, err = blockDeviceOpener.Open(fileName, 0)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(device).NotTo(Equal(nil))
+			Expect(device).NotTo(BeNil())
 		})
 
 		It("finds out size", func() {
@@ -68,6 +69,30 @@ var _ = Describe("BlockDevice", func() {
 
 			err = device.Discard(start, count)
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("closes underlying file", func() {
+			closingError := errors.New("Closing error")
+			file.EXPECT().Close().Return(closingError)
+
+			err = device.Close()
+
+			Expect(err).To(MatchError(closingError))
+		})
+	})
+
+	When("underlying open error occurred", func() {
+		openError := errors.New("Open file error")
+		BeforeEach(func() {
+			fileOpener.EXPECT().Open(fileName, flag, os.ModeDevice).Return(nil, openError)
+		})
+		JustBeforeEach(func() {
+			device, err = blockDeviceOpener.Open(fileName, 0)
+			Expect(err).To(MatchError(openError))
+		})
+
+		It("returns nil device", func() {
+			Expect(device).To(BeNil())
 		})
 	})
 })
