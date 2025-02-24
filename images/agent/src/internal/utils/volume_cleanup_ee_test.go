@@ -254,7 +254,6 @@ var _ = Describe("Cleaning up volume", func() {
 									}
 									return len(p), nil
 								}).AnyTimes() // Times(expectedWriteCount)
-								device.EXPECT().Close().Return(nil)
 							}
 						})
 						When("input has enough bytes to read", func() {
@@ -262,6 +261,11 @@ var _ = Describe("Cleaning up volume", func() {
 								readMissingBytes = 0
 							})
 							When("no closing error", func() {
+								BeforeEach(func() {
+									if feature.VolumeCleanupEnabled() {
+										device.EXPECT().Close().Return(nil)
+									}
+								})
 								When("SinglePass", func() {
 									BeforeEach(func() {
 										method = "RandomFillSinglePass"
@@ -283,6 +287,11 @@ var _ = Describe("Cleaning up volume", func() {
 								readMissingBytes = 512
 							})
 							When("no closing error", func() {
+								BeforeEach(func() {
+									if feature.VolumeCleanupEnabled() {
+										device.EXPECT().Close().Return(nil)
+									}
+								})
 								When("SinglePass", func() {
 									BeforeEach(func() {
 										method = "RandomFillSinglePass"
