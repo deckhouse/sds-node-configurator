@@ -11,9 +11,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type blockDevice struct {
-	File
-	syscall SysCall
+type blockDevice[TSysCall SysCall] struct {
+	File    // TODO: can I make it generic TFile to keep call static?
+	syscall TSysCall
 }
 
 type Discarder interface {
@@ -40,9 +40,9 @@ type BlockDevice interface {
 type BlockDeviceOpener interface {
 	Open(name string, flag int) (BlockDevice, error)
 }
-type blockDeviceOpener struct {
-	fileOpener FileOpener
-	syscall    SysCall
+type blockDeviceOpener[TFileOpener FileOpener, TSysCall SysCall] struct {
+	fileOpener TFileOpener
+	syscall    TSysCall
 }
 
 type FileOpener interface {
@@ -55,34 +55,34 @@ func (osFileOpener) Open(name string, flag int, mode fs.FileMode) (File, error) 
 	return os.OpenFile(name, flag, mode)
 }
 
-func (opener *blockDeviceOpener) Open(name string, flag int) (BlockDevice, error) {
+func (opener *blockDeviceOpener[TFileOpener, TSysCall]) Open(name string, flag int) (BlockDevice, error) {
 	file, err := opener.fileOpener.Open(name, flag, os.ModeDevice)
 	if err != nil {
 		return nil, fmt.Errorf("opening os file: %w", err)
 	}
-	return &blockDevice{
+	return &blockDevice[TSysCall]{
 		file,
 		opener.syscall,
 	}, nil
 }
 
-var defaultBlockDeviceOpener = blockDeviceOpener{
-	fileOpener: &osFileOpener{},
+var defaultBlockDeviceOpener = blockDeviceOpener[osFileOpener, osSyscall]{
+	fileOpener: osFileOpener{},
 	syscall:    OsSysCall(),
 }
 
-func OsDeviceOpener() BlockDeviceOpener {
+func OsDeviceOpener() *blockDeviceOpener[osFileOpener, osSyscall] {
 	return &defaultBlockDeviceOpener
 }
 
-func NewBlockDeviceOpener(fileOpener FileOpener, syscall SysCall) BlockDeviceOpener {
-	return &blockDeviceOpener{
+func NewBlockDeviceOpener[TFileOpener FileOpener, TSysCall SysCall](fileOpener TFileOpener, syscall TSysCall) *blockDeviceOpener[TFileOpener, TSysCall] {
+	return &blockDeviceOpener[TFileOpener, TSysCall]{
 		fileOpener: fileOpener,
 		syscall:    syscall,
 	}
 }
 
-func (device *blockDevice) Size() (int64, error) {
+func (device *blockDevice[TSysCall]) Size() (int64, error) {
 	var stat Stat_t
 	err := device.syscall.Fstat(int(device.Fd()), &stat)
 	if err != nil {
@@ -109,6 +109,6 @@ func (device *blockDevice) Size() (int64, error) {
 	return int64(blockDeviceSize), nil
 }
 
-func (device *blockDevice) Discard(start, count uint64) error {
+func (device *blockDevice[TSysCall]) Discard(start, count uint64) error {
 	return device.syscall.Blkdiscard(device.Fd(), start, count)
 }

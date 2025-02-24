@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"testing"
 
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"go.uber.org/mock/gomock"
@@ -188,8 +187,3 @@ var _ = Describe("Cleaning up volume", func() {
 		})
 	})
 })
-
-func TestVolumeCleanup(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "VolumeCleanup Suite")
-}

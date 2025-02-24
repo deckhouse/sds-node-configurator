@@ -23,8 +23,8 @@ type osSyscall struct {
 
 var theSysCall = osSyscall{}
 
-func OsSysCall() SysCall {
-	return &theSysCall
+func OsSysCall() osSyscall {
+	return theSysCall
 }
 
 func (osSyscall) Fstat(fd int, stat *Stat_t) (err error) {
