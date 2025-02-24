@@ -49,14 +49,7 @@ var _ = Describe("Cleaning up volume", func() {
 			Expect(err).To(MatchError("volume cleanup is not supported in your edition"))
 		}
 	}
-	ItSucceedOnlyWhenFeatureEnabled := func(text string) bool {
-		return It(text, func() {
-			doCall()
-			if feature.VolumeCleanupEnabled() {
-				Expect(err).ToNot(HaveOccurred())
-			}
-		})
-	}
+
 	When("method is unknown", func() {
 		BeforeEach(func() {
 			method = "some"
@@ -111,7 +104,12 @@ var _ = Describe("Cleaning up volume", func() {
 							device.EXPECT().Close().Return(nil)
 						}
 					})
-					ItSucceedOnlyWhenFeatureEnabled("calls device discard")
+					It("calls device discard", func() {
+						doCall()
+						if feature.VolumeCleanupEnabled() {
+							Expect(err).ToNot(HaveOccurred())
+						}
+					})
 				})
 				When("cannot close", func() {
 					closingError := errors.New("closing error")
