@@ -48,11 +48,11 @@ type cleanupsKey struct {
 }
 
 type cleanupStatus struct {
-	cleanupRunning bool
-	failedMethod   *string
+	cleanupRunning   bool
+	prevFailedMethod *string
 }
 type cleanups struct {
-	m      sync.RWMutex
+	m      sync.Mutex
 	status map[cleanupsKey]cleanupStatus
 }
 type Reconciler struct {
@@ -105,7 +105,7 @@ func NewReconciler(
 	}
 }
 
-func (r *Reconciler) startCleanupRunning(vgName, lvName string) (inserted bool, failedMethod *string) {
+func (r *Reconciler) startCleanupRunning(vgName, lvName string) (inserted bool, prevFailedMethod *string) {
 	r.runningCleanups.m.Lock()
 	defer r.runningCleanups.m.Unlock()
 	key := cleanupsKey{vgName: vgName, lvName: lvName}
@@ -115,7 +115,7 @@ func (r *Reconciler) startCleanupRunning(vgName, lvName string) (inserted bool, 
 	}
 	value.cleanupRunning = true
 	r.runningCleanups.status[key] = value
-	return true, value.failedMethod
+	return true, value.prevFailedMethod
 }
 
 func (r *Reconciler) stopCleanupRunning(vgName, lvName string, failedMethod *string) error {
@@ -129,7 +129,7 @@ func (r *Reconciler) stopCleanupRunning(vgName, lvName string, failedMethod *str
 	if failedMethod == nil {
 		delete(r.runningCleanups.status, key)
 	} else {
-		value.failedMethod = failedMethod
+		value.prevFailedMethod = failedMethod
 		value.cleanupRunning = false
 		r.runningCleanups.status[key] = value
 	}
