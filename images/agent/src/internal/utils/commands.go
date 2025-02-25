@@ -712,22 +712,27 @@ func filterStdErr(command string, stdErr bytes.Buffer) bytes.Buffer {
 	return filteredStdErr
 }
 
-func ThinDumpRaw(ctx context.Context, tpool, tmeta string) (out []byte, err error) {
+func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta string) (out []byte, err error) {
+	log.Trace(fmt.Sprintf("[ThinDumpRaw] calling for tpool %s tmeta %s", tpool, tmeta))
 	cmd := exec.CommandContext(
 		ctx,
 		internal.NSENTERCmd,
 		nsentrerExpendedArgs(internal.DMSetupCmd, "message", tpool, "0", "reserve_metadata_snap")...)
+	log.Debug(fmt.Sprintf("[ThinDumpRaw] running %v", cmd))
 	if err = cmd.Run(); err != nil {
+		log.Error(err, fmt.Sprintf("[ThinDumpRaw] can't reserve metadata snapshot for %s", tpool))
 		err = fmt.Errorf("reserving metadata snapshot: %w", err)
 		return
 	}
 	defer func() {
+		log.Debug(fmt.Sprintf("[ThinDumpRaw] running %v", cmd))
 		cmd := exec.CommandContext(
 			ctx,
 			internal.NSENTERCmd,
 			nsentrerExpendedArgs(internal.DMSetupCmd, "message", tpool, "0", "release_metadata_snap")...)
 
 		if errRelease := cmd.Run(); errRelease != nil {
+			log.Error(err, fmt.Sprintf("[ThinDumpRaw] can't release metadata snapshot for %s", tpool))
 			err = errors.Join(err, errRelease)
 		}
 	}()
@@ -739,21 +744,27 @@ func ThinDumpRaw(ctx context.Context, tpool, tmeta string) (out []byte, err erro
 	var output bytes.Buffer
 	cmd.Stdout = &output
 
+	log.Debug(fmt.Sprintf("[ThinDumpRaw] running %v", cmd))
 	if err = cmd.Run(); err != nil {
+		log.Error(err, fmt.Sprintf("[ThinDumpRaw] can't get metadata %s", tmeta))
 		err = fmt.Errorf("dumping metadata: %w", err)
 		return
 	}
 	return output.Bytes(), nil
 }
 
-func ThinDump(ctx context.Context, tpool, tmeta string) (superblock Superblock, err error) {
+func ThinDump(ctx context.Context, log logger.Logger, tpool, tmeta string) (superblock Superblock, err error) {
+	log.Trace(fmt.Sprintf("[ThinDump] calling for tpool %s tmeta %s", tpool, tmeta))
+
 	var rawOut []byte
-	rawOut, err = ThinDumpRaw(ctx, tpool, tmeta)
+	rawOut, err = ThinDumpRaw(ctx, log, tpool, tmeta)
 	if err != nil {
 		return
 	}
 
+	log.Debug("[ThinDump] unmarshaling")
 	if err = xml.Unmarshal(rawOut, &superblock); err != nil {
+		log.Error(err, "[ThinDump] unmarshaling error")
 		err = fmt.Errorf("parsing metadata: %w", err)
 		return
 	}
