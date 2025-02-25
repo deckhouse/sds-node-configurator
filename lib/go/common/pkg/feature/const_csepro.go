@@ -9,3 +9,4 @@ See https://github.com/deckhouse/deckhouse/blob/main/ee/LICENSE
 package feature
 
 const snapshotsEnabled = true
+const volumeCleanupEnabled = true
