@@ -18,10 +18,11 @@ import (
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"golang.org/x/sys/unix"
 
+	"agent/internal/cache"
 	"agent/internal/logger"
 )
 
-func VolumeCleanup(ctx context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, vgName, lvName, volumeCleanup string) error {
+func VolumeCleanup(ctx context.Context, log logger.Logger, lvData *cache.LVData, deviceOpener BlockDeviceOpener, vgName string, lvName, volumeCleanup string) error {
 	log.Trace(fmt.Sprintf("[VolumeCleanup] cleaning up volume %s in volume group %s using %s", lvName, vgName, volumeCleanup))
 	if !feature.VolumeCleanupEnabled() {
 		return fmt.Errorf("volume cleanup is not supported in your edition")

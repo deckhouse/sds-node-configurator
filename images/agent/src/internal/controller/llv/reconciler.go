@@ -601,9 +601,21 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] no need to delete LV %s as it doesn't belong to LVMLogicalVolume %s", lv.Data.LVName, llv.Name))
 		return false, nil
 	}
-
-	if llv.Spec.Type == internal.Thick && llv.Spec.Thick != nil && llv.Spec.Thick.VolumeCleanup != nil {
-		method := *llv.Spec.Thick.VolumeCleanup
+	getCleanupMethod := func() *string {
+		switch llv.Spec.Type {
+		case internal.Thick:
+			if llv.Spec.Thick != nil {
+				return llv.Spec.Thick.VolumeCleanup
+			}
+		case internal.Thin:
+			if llv.Spec.Thin != nil {
+				return llv.Spec.Thin.VolumeCleanup
+			}
+		}
+		return nil
+	}
+	if method := getCleanupMethod(); method != nil {
+		method := *method
 		lvName := llv.Spec.ActualLVNameOnTheNode
 		started, prevFailedMethod := r.startCleanupRunning(vgName, lvName)
 		if !started {
@@ -636,7 +648,7 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		}
 		prevFailedMethod = &method
 		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
-		err = utils.VolumeCleanup(ctx, r.log, utils.OsDeviceOpener(), vgName, lvName, method)
+		err = utils.VolumeCleanup(ctx, r.log, lv, utils.OsDeviceOpener(), vgName, lvName, method)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, method))
 			return true, err

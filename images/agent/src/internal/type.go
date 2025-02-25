@@ -157,6 +157,7 @@ type LVData struct {
 	CopyPercent     string            `json:"copy_percent"`
 	ConvertLv       string            `json:"convert_lv"`
 	LvTags          string            `json:"lv_tags"`
+	ThinId          uint64            `json:"thin_id"`
 }
 
 func (lv LVData) GetUsedSize() (*resource.Quantity, error) {

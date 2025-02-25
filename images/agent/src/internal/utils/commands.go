@@ -21,6 +21,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/xml"
+	"errors"
 	"fmt"
 	golog "log"
 	"os/exec"
@@ -104,7 +106,7 @@ func GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.
 
 func GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	args := []string{"lvs", "-o", "+vg_uuid,tags", "--units", "B", "--nosuffix", "--reportformat", "json"}
+	args := []string{"lvs", "-o", "+vg_uuid,tags,thin_id", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
@@ -648,11 +650,15 @@ func unmarshalLVs(out []byte) ([]internal.LVData, error) {
 	return lvs, nil
 }
 
-func lvmStaticExtendedArgs(args []string) []string {
+func nsentrerExpendedArgs(cmd string, args ...string) []string {
 	nsenterArgs := []string{"-t", "1", "-m", "-u", "-i", "-n", "-p"}
-	lvmStaticBin := []string{"--", internal.LVMCmd}
-	nsenterArgs = append(nsenterArgs, lvmStaticBin...)
+	cmdArgs := []string{"--", cmd}
+	nsenterArgs = append(nsenterArgs, cmdArgs...)
 	return append(nsenterArgs, args...)
+}
+
+func lvmStaticExtendedArgs(args []string) []string {
+	return nsentrerExpendedArgs(internal.LVMCmd, args...)
 }
 
 // filterStdErr processes a bytes.Buffer containing stderr output and filters out specific
@@ -704,4 +710,53 @@ func filterStdErr(command string, stdErr bytes.Buffer) bytes.Buffer {
 	}
 
 	return filteredStdErr
+}
+
+func ThinDumpRaw(ctx context.Context, tpool, tmeta string) (out []byte, err error) {
+	cmd := exec.CommandContext(
+		ctx,
+		internal.NSENTERCmd,
+		nsentrerExpendedArgs(internal.DMSetupCmd, "message", tpool, "0", "reserve_metadata_snap")...)
+	if err = cmd.Run(); err != nil {
+		err = fmt.Errorf("reserving metadata snapshot: %w", err)
+		return
+	}
+	defer func() {
+		cmd := exec.CommandContext(
+			ctx,
+			internal.NSENTERCmd,
+			nsentrerExpendedArgs(internal.DMSetupCmd, "message", tpool, "0", "release_metadata_snap")...)
+
+		if errRelease := cmd.Run(); errRelease != nil {
+			err = errors.Join(err, errRelease)
+		}
+	}()
+
+	cmd = exec.CommandContext(ctx,
+		internal.NSENTERCmd,
+		lvmStaticExtendedArgs([]string{"thin_dump", tmeta, "-m", "-f", "xml"})...)
+
+	var output bytes.Buffer
+	cmd.Stdout = &output
+
+	if err = cmd.Run(); err != nil {
+		err = fmt.Errorf("dumping metadata: %w", err)
+		return
+	}
+	return output.Bytes(), nil
+}
+
+func ThinDump(ctx context.Context, tpool, tmeta string) (superblock Superblock, err error) {
+	var rawOut []byte
+	rawOut, err = ThinDumpRaw(ctx, tpool, tmeta)
+	if err != nil {
+		return
+	}
+
+	if err = xml.Unmarshal(rawOut, &superblock); err != nil {
+		err = fmt.Errorf("parsing metadata: %w", err)
+		return
+	}
+
+	return superblock, nil
 }
