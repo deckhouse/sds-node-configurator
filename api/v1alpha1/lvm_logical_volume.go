@@ -47,7 +47,8 @@ type LVMLogicalVolumeSpec struct {
 }
 
 type LVMLogicalVolumeThinSpec struct {
-	PoolName string `json:"poolName"`
+	PoolName      string  `json:"poolName"`
+	VolumeCleanup *string `json:"volumeCleanup,omitempty"`
 }
 
 type LVMLogicalVolumeThickSpec struct {
