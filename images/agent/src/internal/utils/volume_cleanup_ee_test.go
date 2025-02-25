@@ -20,6 +20,7 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
 
+	"agent/internal/cache"
 	"agent/internal/logger"
 	. "agent/internal/mock_utils"
 	. "agent/internal/utils"
@@ -31,6 +32,7 @@ var _ = Describe("Cleaning up volume", func() {
 	var opener *MockBlockDeviceOpener
 	var device *MockBlockDevice
 	var err error
+	var lv *cache.LVData
 	vgName := "vg"
 	lvName := "lv"
 	var method string
@@ -44,7 +46,7 @@ var _ = Describe("Cleaning up volume", func() {
 	})
 
 	doCall := func() {
-		err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, method)
+		err = VolumeCleanup(context.Background(), log, lv, opener, vgName, lvName, method)
 		if !feature.VolumeCleanupEnabled() {
 			Expect(err).To(MatchError("volume cleanup is not supported in your edition"))
 		}

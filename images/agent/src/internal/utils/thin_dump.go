@@ -17,9 +17,7 @@ limitations under the License.
 package utils
 
 import (
-	"bytes"
 	"encoding/xml"
-	"fmt"
 )
 
 type (
