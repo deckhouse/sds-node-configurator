@@ -65,7 +65,7 @@ shell:
   - make
   - mkdir -p /sds-utils/bin/
   - mv /src/lvm2/tools/lvm.static /sds-utils/bin/lvm.static
-  - mv /src/lvm2/tools/dmsetup.static /sds-utils/bin/dmsetup.static
+  - mv /src/lvm2/libdm/dm-tools/dmsetup.static /sds-utils/bin/dmsetup.static
   - chmod +x /binary_replace.sh
   - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
 
