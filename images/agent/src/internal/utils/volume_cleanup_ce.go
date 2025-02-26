@@ -22,6 +22,6 @@ import (
 	"agent/internal/logger"
 )
 
-func VolumeCleanup(_ context.Context, _ logger.Logger, _ BlockDeviceOpener, _, _, _ string) error {
+func VolumeCleanup(_ context.Context, _ logger.Logger, _ BlockDeviceOpener, _, _, _ string, _ *RangeCover) error {
 	return fmt.Errorf("volume cleanup is not supported in your edition")
 }

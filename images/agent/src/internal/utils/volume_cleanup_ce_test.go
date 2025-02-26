@@ -33,7 +33,7 @@ var _ = Describe("Cleaning up volume", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 	It("Unsupported", func() {
-		err := VolumeCleanup(context.Background(), log, nil, "", "", "")
+		err := VolumeCleanup(context.Background(), log, nil, "", "", "", nil)
 		Expect(err).To(MatchError("volume cleanup is not supported in your edition"))
 	})
 })
