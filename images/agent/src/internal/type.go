@@ -157,7 +157,7 @@ type LVData struct {
 	CopyPercent     string            `json:"copy_percent"`
 	ConvertLv       string            `json:"convert_lv"`
 	LvTags          string            `json:"lv_tags"`
-	ThinID          uint64            `json:"thin_id"`
+	ThinID          *uint64           `json:"thin_id,omitempty"`
 	MetadataLv      string            `json:"metadata_lv"`
 	LVDmPath        string            `json:"lv_dm_path"`
 }

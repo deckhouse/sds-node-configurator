@@ -608,13 +608,16 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		if err != nil {
 			err = fmt.Errorf("dumping thin pool map: %w", err)
 			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't find pool map for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
-			return false, err
+			return true, err
 		}
-
-		ranges, err := utils.ThinVolumeUsedRanges(ctx, r.log, superblock, utils.LVMThinDeviceID(lv.Data.ThinID))
+		if lv.Data.ThinID == nil {
+			err = fmt.Errorf("missing deviceId for thin volume %s", llv.Spec.ActualLVNameOnTheNode)
+			return true, err
+		}
+		ranges, err := utils.ThinVolumeUsedRanges(ctx, r.log, superblock, utils.LVMThinDeviceID(*lv.Data.ThinID))
 		if err != nil {
 			err = fmt.Errorf("finding used ranges for deviceId %d in thin pool %s", lv.Data.ThinID, lv.Data.PoolName)
-			return false, err
+			return true, err
 		}
 		usedRanges = &ranges
 	}
