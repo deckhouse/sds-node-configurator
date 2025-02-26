@@ -1,4 +1,4 @@
-{{ $binaries := "/sds-utils/bin/lvm.static" }}
+{{ $binaries := "/sds-utils/bin/lvm.static:/sds-utils/bin/dmsetup.static" }}
 
 # Do not remove. It's used in external tests.
 ---
@@ -65,6 +65,7 @@ shell:
   - make
   - mkdir -p /sds-utils/bin/
   - mv /src/lvm2/tools/lvm.static /sds-utils/bin/lvm.static
+  - mv /src/lvm2/tools/dmsetup.static /sds-utils/bin/dmsetup.static
   - chmod +x /binary_replace.sh
   - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
 
