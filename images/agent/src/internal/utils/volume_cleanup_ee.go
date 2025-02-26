@@ -22,7 +22,7 @@ import (
 )
 
 func VolumeCleanup(ctx context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, vgName string, lvName, volumeCleanup string, usedRanges *RangeCover) error {
-	log.Trace(fmt.Sprintf("[VolumeCleanup] cleaning up volume %s in volume group %s using %s", lvName, vgName, volumeCleanup))
+	log.Trace(fmt.Sprintf("[VolumeCleanup] cleaning up volume %s in volume group %s using %s with ranges %v", lvName, vgName, volumeCleanup, usedRanges))
 	if !feature.VolumeCleanupEnabled() {
 		return fmt.Errorf("volume cleanup is not supported in your edition")
 	}

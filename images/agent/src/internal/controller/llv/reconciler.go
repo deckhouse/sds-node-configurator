@@ -596,37 +596,6 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] did not find LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
 		return false, nil
 	}
-	var usedRanges *utils.RangeCover
-	if lv.Data.PoolName != "" {
-		tpool, poolMetadataMapper, err := r.sdsCache.FindThinPoolMappers(lv)
-		if err != nil {
-			err = fmt.Errorf("finding mappers for thin pool %s: %w", lv.Data.PoolName, err)
-			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't find pool for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
-			return true, err
-		}
-
-		superblock, err := utils.ThinDump(ctx, r.log, tpool, poolMetadataMapper)
-		if err != nil {
-			err = fmt.Errorf("dumping thin pool map: %w", err)
-			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't find pool map for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
-			return true, err
-		}
-		if lv.Data.ThinID == "" {
-			err = fmt.Errorf("missing deviceId for thin volume %s", llv.Spec.ActualLVNameOnTheNode)
-			return true, err
-		}
-		thinID, err := strconv.Atoi(lv.Data.ThinID)
-		if err != nil {
-			err = fmt.Errorf("deviceId %s is not a number: %w", lv.Data.ThinID, err)
-			return true, err
-		}
-		ranges, err := utils.ThinVolumeUsedRanges(ctx, r.log, superblock, utils.LVMThinDeviceID(thinID))
-		if err != nil {
-			err = fmt.Errorf("finding used ranges for deviceId %d in thin pool %s: %w", thinID, lv.Data.PoolName, err)
-			return true, err
-		}
-		usedRanges = &ranges
-	}
 
 	// this case prevents unexpected same-name LV deletions which does not actually belong to our LLV
 	if !checkIfLVBelongsToLLV(llv, &lv.Data) {
@@ -680,6 +649,42 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		}
 		prevFailedMethod = &method
 		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
+		var usedRanges *utils.RangeCover
+		if lv.Data.PoolName != "" {
+			r.log.Debug("[deleteLVIfNeeded] loo")
+			tpool, poolMetadataMapper, err := r.sdsCache.FindThinPoolMappers(lv)
+			if err != nil {
+				err = fmt.Errorf("finding mappers for thin pool %s: %w", lv.Data.PoolName, err)
+				r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't find pool for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
+				return true, err
+			}
+
+			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] tpool %s tmeta %s", tpool, poolMetadataMapper))
+			superblock, err := utils.ThinDump(ctx, r.log, tpool, poolMetadataMapper)
+			if err != nil {
+				err = fmt.Errorf("dumping thin pool map: %w", err)
+				r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't find pool map for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
+				return true, err
+			}
+			if lv.Data.ThinID == "" {
+				err = fmt.Errorf("missing deviceId for thin volume %s", llv.Spec.ActualLVNameOnTheNode)
+				return true, err
+			}
+			thinID, err := strconv.Atoi(lv.Data.ThinID)
+			if err != nil {
+				err = fmt.Errorf("deviceId %s is not a number: %w", lv.Data.ThinID, err)
+				return true, err
+			}
+			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] ThinID %d", thinID))
+			ranges, err := utils.ThinVolumeUsedRanges(ctx, r.log, superblock, utils.LVMThinDeviceID(thinID))
+			if err != nil {
+				err = fmt.Errorf("finding used ranges for deviceId %d in thin pool %s: %w", thinID, lv.Data.PoolName, err)
+				return true, err
+			}
+			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] ranges %v", ranges))
+			usedRanges = &ranges
+		}
+
 		err = utils.VolumeCleanup(ctx, r.log, utils.OsDeviceOpener(), vgName, lvName, method, usedRanges)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, method))
