@@ -148,7 +148,7 @@ func (c *Cache) FindVG(vgName string) *internal.VGData {
 	return nil
 }
 
-func (c *Cache) FindThinPoolMappers(thinLvData *LVData) (poolMapper, poolMetadataMapper string, err error) {
+func (c *Cache) FindThinPoolMappers(thinLvData *LVData) (tpool, poolMetadataMapper string, err error) {
 	if thinLvData.Data.PoolName == "" {
 		err = fmt.Errorf("pool name is empty")
 		return
@@ -163,7 +163,7 @@ func (c *Cache) FindThinPoolMappers(thinLvData *LVData) (poolMapper, poolMetadat
 		return
 	}
 
-	poolMapper = poolLv.Data.LVDmPath
+	tpool = fmt.Sprintf("%s-tpool", poolLv.Data.LVDmPath)
 
 	if poolLv.Data.MetadataLv == "" {
 		err = fmt.Errorf("metadata name is empty for pool %s", thinLvData.Data.PoolName)

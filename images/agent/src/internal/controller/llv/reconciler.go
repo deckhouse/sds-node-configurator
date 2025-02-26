@@ -598,14 +598,14 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 	}
 	var usedRanges *utils.RangeCover
 	if lv.Data.PoolName != "" {
-		poolMapper, poolMetadataMapper, err := r.sdsCache.FindThinPoolMappers(lv)
+		tpool, poolMetadataMapper, err := r.sdsCache.FindThinPoolMappers(lv)
 		if err != nil {
 			err = fmt.Errorf("finding mappers for thin pool %s: %w", lv.Data.PoolName, err)
 			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't find pool for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
 			return true, err
 		}
 
-		superblock, err := utils.ThinDump(ctx, r.log, poolMapper, poolMetadataMapper)
+		superblock, err := utils.ThinDump(ctx, r.log, tpool, poolMetadataMapper)
 		if err != nil {
 			err = fmt.Errorf("dumping thin pool map: %w", err)
 			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't find pool map for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
