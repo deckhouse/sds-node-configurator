@@ -103,11 +103,16 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 		d.log.Info("[RunLVMVolumeGroupDiscoverController] no BlockDevices were found")
 		return false
 	}
+	d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] BlockDevices: %+v", blockDevices))
 
 	filteredLVGs := filterLVGsByNode(currentLVMVGs, d.cfg.NodeName)
+	filteredBlockDevices := filterBlockDevicesByNodeName(blockDevices, d.cfg.NodeName)
+	d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] Filtered LVMVolumeGroups: %+v", filteredLVGs))
+	d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] Filtered BlockDevices: %+v", filteredBlockDevices))
 
 	d.log.Debug("[RunLVMVolumeGroupDiscoverController] tries to get LVMVolumeGroup candidates")
-	candidates, err := d.GetLVMVolumeGroupCandidates(blockDevices)
+
+	candidates, err := d.GetLVMVolumeGroupCandidates(filteredBlockDevices)
 	if err != nil {
 		d.log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to run GetLVMVolumeGroupCandidates")
 		for _, lvg := range filteredLVGs {
@@ -470,6 +475,8 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	lvg.Status.VGSize = candidate.VGSize
 	lvg.Status.VGFree = candidate.VGFree
 	lvg.Status.VGUuid = candidate.VGUUID
+
+	// lvg.Spec.BlockDeviceSelector = updateBlockDeviceSelector(lvg.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
 
 	start := time.Now()
 	err = d.cl.Status().Update(ctx, lvg)
@@ -868,6 +875,47 @@ func configureBlockDeviceSelector(candidate internal.LVMVolumeGroupCandidate) *m
 			},
 		},
 	}
+}
+
+func updateBlockDeviceSelector(existedLabelSelector *metav1.LabelSelector, blockDeviceNames []string) *metav1.LabelSelector {
+	if existedLabelSelector == nil {
+		return &metav1.LabelSelector{
+			MatchExpressions: []metav1.LabelSelectorRequirement{
+				{
+					Key:      internal.MetadataNameLabelKey,
+					Operator: metav1.LabelSelectorOpIn,
+					Values:   blockDeviceNames,
+				},
+			},
+		}
+	}
+	found := false
+	for i := range existedLabelSelector.MatchExpressions {
+		if existedLabelSelector.MatchExpressions[i].Key == internal.MetadataNameLabelKey {
+			found = true
+
+			existingValuesMap := make(map[string]struct{})
+			for _, v := range existedLabelSelector.MatchExpressions[i].Values {
+				existingValuesMap[v] = struct{}{}
+			}
+
+			for _, bd := range blockDeviceNames {
+				if _, exist := existingValuesMap[bd]; !exist {
+					existedLabelSelector.MatchExpressions[i].Values = append(existedLabelSelector.MatchExpressions[i].Values, bd)
+					existingValuesMap[bd] = struct{}{}
+				}
+			}
+		}
+	}
+
+	if !found {
+		existedLabelSelector.MatchExpressions = append(existedLabelSelector.MatchExpressions, metav1.LabelSelectorRequirement{
+			Key:      internal.MetadataNameLabelKey,
+			Operator: metav1.LabelSelectorOpIn,
+			Values:   blockDeviceNames,
+		})
+	}
+	return existedLabelSelector
 }
 
 func convertLVMVGNodes(nodes map[string][]internal.LVMVGDevice) []v1alpha1.LVMVolumeGroupNode {
