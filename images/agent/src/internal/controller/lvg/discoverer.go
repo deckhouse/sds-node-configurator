@@ -478,6 +478,8 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 
 	lvg.Spec.BlockDeviceSelector, _ = updateBlockDeviceSelectorIfNeeded(lvg.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
 
+	d.log.Trace(fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] updated LVMVolumeGroup: %+v", lvg))
+
 	start := time.Now()
 	err = d.cl.Status().Update(ctx, lvg)
 	d.metrics.APIMethodsDuration(DiscovererName, "update").Observe(d.metrics.GetEstimatedTimeInSeconds(start))
