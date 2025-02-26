@@ -756,6 +756,15 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				Spec: v1alpha1.LVMVolumeGroupSpec{
 					ThinPools: convertSpecThinPools(specThinPools),
 					Type:      specType,
+					BlockDeviceSelector: &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      internal.MetadataNameLabelKey,
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   blockDevicesNames,
+							},
+						},
+					},
 				},
 				Status: v1alpha1.LVMVolumeGroupStatus{
 					AllocatedSize: resource.MustParse("9765625Ki"),
