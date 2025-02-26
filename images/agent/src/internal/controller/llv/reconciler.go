@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -610,13 +611,18 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't find pool map for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
 			return true, err
 		}
-		if lv.Data.ThinID == nil {
+		if lv.Data.ThinID == "" {
 			err = fmt.Errorf("missing deviceId for thin volume %s", llv.Spec.ActualLVNameOnTheNode)
 			return true, err
 		}
-		ranges, err := utils.ThinVolumeUsedRanges(ctx, r.log, superblock, utils.LVMThinDeviceID(*lv.Data.ThinID))
+		thinID, err := strconv.Atoi(lv.Data.ThinID)
 		if err != nil {
-			err = fmt.Errorf("finding used ranges for deviceId %d in thin pool %s", lv.Data.ThinID, lv.Data.PoolName)
+			err = fmt.Errorf("deviceId %s is not a number", lv.Data.ThinID)
+			return true, err
+		}
+		ranges, err := utils.ThinVolumeUsedRanges(ctx, r.log, superblock, utils.LVMThinDeviceID(thinID))
+		if err != nil {
+			err = fmt.Errorf("finding used ranges for deviceId %d in thin pool %s", thinID, lv.Data.PoolName)
 			return true, err
 		}
 		usedRanges = &ranges
