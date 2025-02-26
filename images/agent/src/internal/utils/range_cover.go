@@ -27,30 +27,31 @@ type Range struct {
 
 type RangeCover []Range
 
-func (rc RangeCover) Merged() (RangeCover, error) {
-	rcLen := len(rc)
+func (cover RangeCover) Merged() (RangeCover, error) {
+	rcLen := len(cover)
 	if rcLen <= 1 {
-		return rc, nil
+		return cover, nil
 	}
 
-	sort.Slice(rc, func(i, j int) bool {
-		return rc[i].Start < rc[j].Start
+	sort.Slice(cover, func(i, j int) bool {
+		return cover[i].Start < cover[j].Start
 	})
 
-	for i, d := range rc[0 : rcLen-1] {
-		if d.Start+d.Count > rc[i+1].Start {
+	for i, d := range cover[0 : rcLen-1] {
+		if d.Start+d.Count > cover[i+1].Start {
 			return nil, fmt.Errorf("self overlapped range")
 		}
 	}
 
 	last := Range{Start: 0, Count: 0}
-	reduced := make(RangeCover, 0, len(rc))
-	for _, d := range rc {
-		if last.Count == 0 {
+	reduced := make(RangeCover, 0, len(cover))
+	for _, d := range cover {
+		switch last.Count {
+		case 0:
 			last = d
-		} else if d.Start == last.Start+last.Count {
+		case d.Start - last.Start:
 			last.Count += d.Count
-		} else {
+		default:
 			reduced = append(reduced, last)
 			last = d
 		}
@@ -63,8 +64,8 @@ func (rc RangeCover) Merged() (RangeCover, error) {
 	return reduced, nil
 }
 
-func (value Range) Multiplied(multiplier int64) Range {
-	return Range{Start: value.Start * multiplier, Count: value.Count * multiplier}
+func (cover Range) Multiplied(multiplier int64) Range {
+	return Range{Start: cover.Start * multiplier, Count: cover.Count * multiplier}
 }
 
 func (cover RangeCover) Multiplied(multiplier int64) RangeCover {

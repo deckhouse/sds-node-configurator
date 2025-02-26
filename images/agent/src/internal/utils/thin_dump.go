@@ -17,22 +17,23 @@ limitations under the License.
 package utils
 
 import (
-	"agent/internal/logger"
 	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
+
+	"agent/internal/logger"
 )
 
 type (
 	LVMTime         = int64
 	LVMTransaction  = int64
-	LVMThinDeviceId = int64
+	LVMThinDeviceID = int64
 )
 
 type Superblock struct {
 	XMLName       xml.Name       `xml:"superblock"`
-	Uuid          string         `xml:"uuid,attr"`
+	UUID          string         `xml:"uuid,attr"`
 	Time          LVMTime        `xml:"time,attr"`
 	Transaction   LVMTransaction `xml:"transaction,attr"`
 	Flags         int64          `xml:"flags,attr"`
@@ -44,7 +45,7 @@ type Superblock struct {
 
 type Device struct {
 	XMLName        xml.Name        `xml:"device"`
-	DevId          LVMThinDeviceId `xml:"dev_id,attr"`
+	DevID          LVMThinDeviceID `xml:"dev_id,attr"`
 	MappedBlocks   int64           `xml:"mapped_blocks,attr"`
 	Transaction    LVMTransaction  `xml:"transaction,attr"`
 	CreationTime   LVMTime         `xml:"creation_time,attr"`
@@ -87,10 +88,10 @@ func ThinDump(ctx context.Context, log logger.Logger, tpool, tmeta string) (supe
 	return superblock, nil
 }
 
-func ThinVolumeUsedRanges(ctx context.Context, log logger.Logger, superblock Superblock, deviceId LVMThinDeviceId) (ranges RangeCover, err error) {
-	log.Trace(fmt.Sprintf("[ThinVolumeUsedRanges] calling for deviceId %d", deviceId))
+func ThinVolumeUsedRanges(_ context.Context, log logger.Logger, superblock Superblock, deviceID LVMThinDeviceID) (ranges RangeCover, err error) {
+	log.Trace(fmt.Sprintf("[ThinVolumeUsedRanges] calling for deviceId %d", deviceID))
 	for _, device := range superblock.Devices {
-		if device.DevId != deviceId {
+		if device.DevID != deviceID {
 			continue
 		}
 
@@ -104,9 +105,10 @@ func ThinVolumeUsedRanges(ctx context.Context, log logger.Logger, superblock Sup
 			ranges = append(ranges, Range{Start: mapping.DataBlock, Count: 1})
 		}
 
-		ranges, err := ranges.Merged()
+		ranges, err = ranges.Merged()
 		if err != nil {
 			err = fmt.Errorf("finding used ranges: %w", err)
+			return
 		}
 
 		return ranges.Multiplied(superblock.DataBlockSize), nil
