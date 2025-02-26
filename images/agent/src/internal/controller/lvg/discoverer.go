@@ -133,9 +133,9 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 
 	shouldRequeue := false
 	for _, candidate := range candidates {
+		d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] candidate: %+v", candidate))
 		if lvg, exist := filteredLVGs[candidate.ActualVGNameOnTheNode]; exist {
 			d.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is already exist. Tries to update it", lvg.Name))
-			d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] candidate: %+v", candidate))
 			d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] lvg: %+v", lvg))
 
 			if !hasLVMVolumeGroupDiff(d.log, lvg, candidate) {
