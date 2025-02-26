@@ -476,7 +476,7 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	lvg.Status.VGFree = candidate.VGFree
 	lvg.Status.VGUuid = candidate.VGUUID
 
-	// lvg.Spec.BlockDeviceSelector = updateBlockDeviceSelector(lvg.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
+	lvg.Spec.BlockDeviceSelector = updateBlockDeviceSelector(lvg.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
 
 	start := time.Now()
 	err = d.cl.Status().Update(ctx, lvg)

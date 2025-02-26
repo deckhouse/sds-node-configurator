@@ -17,6 +17,11 @@ git:
       install:
         - '**/*'
 
+---
+image: {{ $.ImageName }}-src-artifact-3p
+from: {{ $.Root.BASE_ALT_P11 }}
+final: false
+
 shell:
   install:
     - apt-get update
@@ -32,7 +37,7 @@ from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 import:
-  - image: {{ $.ImageName }}-src-artifact
+  - image: {{ $.ImageName }}-src-artifact-3p
     add: /src
     to: /src
     before: install
