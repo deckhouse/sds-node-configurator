@@ -738,7 +738,7 @@ func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta string) (o
 
 	cmd = exec.CommandContext(ctx,
 		internal.NSENTERCmd,
-		lvmStaticExtendedArgs([]string{"thin_dump", tmeta, "-m", "-f", "xml"})...)
+		nsentrerExpendedArgs(internal.ThinDumpCmd, tmeta, "-m", "-f", "xml")...)
 
 	var output bytes.Buffer
 	cmd.Stdout = &output
