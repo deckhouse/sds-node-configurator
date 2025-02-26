@@ -105,7 +105,7 @@ func GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.
 
 func GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	args := []string{"lvs", "-o", "+vg_uuid,tags,thin_id,metadata_lv,lv_dm_path", "--units", "B", "--nosuffix", "--reportformat", "json"}
+	args := []string{"lvs", "-o", "+vg_uuid,tags,thin_id,metadata_lv,lv_dm_path", "--units", "B", "--nosuffix", "--all", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
