@@ -158,6 +158,8 @@ type LVData struct {
 	ConvertLv       string            `json:"convert_lv"`
 	LvTags          string            `json:"lv_tags"`
 	ThinId          uint64            `json:"thin_id"`
+	MetadataLv      string            `json:"metadata_lv"`
+	LVDmPath        string            `json:"lv_dm_path"`
 }
 
 func (lv LVData) GetUsedSize() (*resource.Quantity, error) {

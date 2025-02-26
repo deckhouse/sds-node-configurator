@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	golog "log"
@@ -106,7 +105,7 @@ func GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.
 
 func GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	args := []string{"lvs", "-o", "+vg_uuid,tags,thin_id", "--units", "B", "--nosuffix", "--reportformat", "json"}
+	args := []string{"lvs", "-o", "+vg_uuid,tags,thin_id,metadata_lv,lv_dm_path", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
@@ -751,23 +750,4 @@ func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta string) (o
 		return
 	}
 	return output.Bytes(), nil
-}
-
-func ThinDump(ctx context.Context, log logger.Logger, tpool, tmeta string) (superblock Superblock, err error) {
-	log.Trace(fmt.Sprintf("[ThinDump] calling for tpool %s tmeta %s", tpool, tmeta))
-
-	var rawOut []byte
-	rawOut, err = ThinDumpRaw(ctx, log, tpool, tmeta)
-	if err != nil {
-		return
-	}
-
-	log.Debug("[ThinDump] unmarshaling")
-	if err = xml.Unmarshal(rawOut, &superblock); err != nil {
-		log.Error(err, "[ThinDump] unmarshaling error")
-		err = fmt.Errorf("parsing metadata: %w", err)
-		return
-	}
-
-	return superblock, nil
 }

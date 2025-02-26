@@ -18,11 +18,10 @@ import (
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"golang.org/x/sys/unix"
 
-	"agent/internal/cache"
 	"agent/internal/logger"
 )
 
-func VolumeCleanup(ctx context.Context, log logger.Logger, lvData *cache.LVData, deviceOpener BlockDeviceOpener, vgName string, lvName, volumeCleanup string) error {
+func VolumeCleanup(ctx context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, vgName string, lvName, volumeCleanup string, usedRanges *RangeCover) error {
 	log.Trace(fmt.Sprintf("[VolumeCleanup] cleaning up volume %s in volume group %s using %s", lvName, vgName, volumeCleanup))
 	if !feature.VolumeCleanupEnabled() {
 		return fmt.Errorf("volume cleanup is not supported in your edition")
@@ -35,9 +34,9 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, lvData *cache.LVData,
 
 	switch volumeCleanup {
 	case "RandomFillSinglePass":
-		err = volumeCleanupOverwrite(ctx, log, deviceOpener, devicePath, randomSource, 1)
+		err = volumeCleanupOverwrite(ctx, log, deviceOpener, devicePath, randomSource, 1, usedRanges)
 	case "RandomFillThreePass":
-		err = volumeCleanupOverwrite(ctx, log, deviceOpener, devicePath, randomSource, 3)
+		err = volumeCleanupOverwrite(ctx, log, deviceOpener, devicePath, randomSource, 3, usedRanges)
 	case "Discard":
 		err = volumeCleanupDiscard(ctx, log, deviceOpener, devicePath)
 	default:
@@ -52,7 +51,7 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, lvData *cache.LVData,
 	return nil
 }
 
-func volumeCleanupOverwrite(_ context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, devicePath, inputPath string, passes int) (err error) {
+func volumeCleanupOverwrite(_ context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, devicePath, inputPath string, passes int, usedRanges *RangeCover) (err error) {
 	log.Trace(fmt.Sprintf("[volumeCleanupOverwrite] overwriting %s by %s in %d passes", devicePath, inputPath, passes))
 	closeFile := func(file BlockDevice) {
 		log.Trace(fmt.Sprintf("[volumeCleanupOverwrite] closing %s", file.Name()))
@@ -77,30 +76,37 @@ func volumeCleanupOverwrite(_ context.Context, log logger.Logger, deviceOpener B
 	}
 	defer closeFile(output)
 
-	bytesToWrite, err := output.Size()
-	if err != nil {
-		log.Error(err, "[volumeCleanupOverwrite] Finding volume size")
-		return fmt.Errorf("can't find the size of device %s: %w", devicePath, err)
+	if usedRanges == nil {
+		size, err := output.Size()
+		if err != nil {
+			log.Error(err, "[volumeCleanupOverwrite] Finding volume size")
+			return fmt.Errorf("can't find the size of device %s: %w", devicePath, err)
+		}
+
+		usedRanges = &RangeCover{Range{Start: 0, Count: size}}
 	}
 
 	bufferSize := 1024 * 1024 * 4
 	buffer := make([]byte, bufferSize)
 	for pass := 0; pass < passes; pass++ {
-		log.Debug(fmt.Sprintf("[volumeCleanupOverwrite] Overwriting %d  bytes. Pass %d", bytesToWrite, pass))
-		start := time.Now()
-		written, err := io.CopyBuffer(
-			io.NewOffsetWriter(output, 0),
-			io.LimitReader(input, bytesToWrite),
-			buffer)
-		log.Info(fmt.Sprintf("[volumeCleanupOverwrite] Overwriting is done in %s", time.Since(start).String()))
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[volumeCleanupOverwrite] copying from %s to %s", inputPath, devicePath))
-			return fmt.Errorf("copying from %s to %s: %w", inputPath, devicePath, err)
-		}
+		for _, usedRange := range *usedRanges {
+			bytesToWrite := usedRange.Count
+			log.Debug(fmt.Sprintf("[volumeCleanupOverwrite] Overwriting %d bytes with offset %d. Pass %d", bytesToWrite, usedRange.Start, pass))
+			start := time.Now()
+			written, err := io.CopyBuffer(
+				io.NewOffsetWriter(output, usedRange.Start),
+				io.LimitReader(input, bytesToWrite),
+				buffer)
+			log.Info(fmt.Sprintf("[volumeCleanupOverwrite] Overwriting is done in %s", time.Since(start).String()))
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[volumeCleanupOverwrite] copying from %s to %s", inputPath, devicePath))
+				return fmt.Errorf("copying from %s to %s: %w", inputPath, devicePath, err)
+			}
 
-		if written != bytesToWrite {
-			log.Error(err, fmt.Sprintf("[volumeCleanupOverwrite] only %d bytes written, expected %d", written, bytesToWrite))
-			return fmt.Errorf("only %d bytes written, expected %d", written, bytesToWrite)
+			if written != bytesToWrite {
+				log.Error(err, fmt.Sprintf("[volumeCleanupOverwrite] only %d bytes written, expected %d", written, bytesToWrite))
+				return fmt.Errorf("only %d bytes written, expected %d", written, bytesToWrite)
+			}
 		}
 	}
 

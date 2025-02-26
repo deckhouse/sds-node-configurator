@@ -44,7 +44,7 @@ func (rc RangeCover) Merged() (RangeCover, error) {
 	}
 
 	last := Range{Start: 0, Count: 0}
-	reduced := rc[:0]
+	reduced := make(RangeCover, 0, len(rc))
 	for _, d := range rc {
 		if last.Count == 0 {
 			last = d

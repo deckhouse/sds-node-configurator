@@ -595,6 +595,30 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] did not find LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
 		return false, nil
 	}
+	var poolLv *cache.LVData
+	var usedRanges *utils.RangeCover
+	if lv.Data.PoolName != "" {
+		poolMapper, poolMetadataMapper, err := r.sdsCache.FindThinPoolMappers(lv)
+		if err != nil {
+			err = fmt.Errorf("finding mappers for thin pool %s", lv.Data.PoolName)
+			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't find pool for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
+			return true, err
+		}
+
+		superblock, err := utils.ThinDump(ctx, r.log, poolMapper, poolMetadataMapper)
+		if err != nil {
+			err = fmt.Errorf("dumping thin pool map: %w", err)
+			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't find pool map for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
+			return false, err
+		}
+
+		ranges, err := utils.ThinVolumeUsedRanges(ctx, r.log, superblock, utils.LVMThinDeviceId(lv.Data.ThinId))
+		if err != nil {
+			err = fmt.Errorf("finding used ranges for deviceId %d in thin pool %s", lv.Data.ThinId, lv.Data.PoolName)
+			return false, err
+		}
+		usedRanges = &ranges
+	}
 
 	// this case prevents unexpected same-name LV deletions which does not actually belong to our LLV
 	if !checkIfLVBelongsToLLV(llv, &lv.Data) {
@@ -648,7 +672,7 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		}
 		prevFailedMethod = &method
 		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
-		err = utils.VolumeCleanup(ctx, r.log, lv, utils.OsDeviceOpener(), vgName, lvName, method)
+		err = utils.VolumeCleanup(ctx, r.log, utils.OsDeviceOpener(), vgName, lvName, method, usedRanges)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, method))
 			return true, err

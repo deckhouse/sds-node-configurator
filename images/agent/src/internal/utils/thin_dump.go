@@ -17,13 +17,17 @@ limitations under the License.
 package utils
 
 import (
+	"agent/internal/logger"
+	"context"
 	"encoding/xml"
+	"errors"
+	"fmt"
 )
 
 type (
-	LVMTime         int64
-	LVMTransaction  int64
-	LVMThinDeviceId int64
+	LVMTime         = int64
+	LVMTransaction  = int64
+	LVMThinDeviceId = int64
 )
 
 type Superblock struct {
@@ -62,4 +66,50 @@ type SingleMapping struct {
 	OriginBlock int64    `xml:"origin_block,attr"`
 	DataBlock   int64    `xml:"data_block,attr"`
 	Time        LVMTime  `xml:"time,attr"`
+}
+
+func ThinDump(ctx context.Context, log logger.Logger, tpool, tmeta string) (superblock Superblock, err error) {
+	log.Trace(fmt.Sprintf("[ThinDump] calling for tpool %s tmeta %s", tpool, tmeta))
+
+	var rawOut []byte
+	rawOut, err = ThinDumpRaw(ctx, log, tpool, tmeta)
+	if err != nil {
+		return
+	}
+
+	log.Debug("[ThinDump] unmarshaling")
+	if err = xml.Unmarshal(rawOut, &superblock); err != nil {
+		log.Error(err, "[ThinDump] unmarshaling error")
+		err = fmt.Errorf("parsing metadata: %w", err)
+		return
+	}
+
+	return superblock, nil
+}
+
+func ThinVolumeUsedRanges(ctx context.Context, log logger.Logger, superblock Superblock, deviceId LVMThinDeviceId) (ranges RangeCover, err error) {
+	log.Trace(fmt.Sprintf("[ThinVolumeUsedRanges] calling for deviceId %d", deviceId))
+	for _, device := range superblock.Devices {
+		if device.DevId != deviceId {
+			continue
+		}
+
+		ranges = make(RangeCover, 0, len(device.RangeMappings)+len(device.SingleMappings))
+
+		for _, mapping := range device.RangeMappings {
+			ranges = append(ranges, Range{Start: mapping.DataBegin, Count: mapping.Length})
+		}
+
+		for _, mapping := range device.SingleMappings {
+			ranges = append(ranges, Range{Start: mapping.DataBlock, Count: 1})
+		}
+
+		ranges, err := ranges.Merged()
+		if err != nil {
+			err = fmt.Errorf("finding used ranges: %w", err)
+		}
+
+		return ranges.Multiplied(superblock.DataBlockSize), nil
+	}
+	return ranges, errors.New("device not found")
 }
