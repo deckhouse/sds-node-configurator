@@ -1,4 +1,4 @@
-{{ $binaries := "/sds-utils/bin/lvm.static:/sds-utils/bin/dmsetup.static" }}
+{{ $binaries := "/sds-utils/bin/lvm.static /sds-utils/bin/dmsetup.static" }}
 
 # Do not remove. It's used in external tests.
 ---
