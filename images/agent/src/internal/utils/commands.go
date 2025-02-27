@@ -749,5 +749,6 @@ func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta string) (o
 		err = fmt.Errorf("dumping metadata: %w", err)
 		return
 	}
+	log.Trace(fmt.Sprintf("[ThinDumpRaw] device map is: %s", output.Bytes()))
 	return output.Bytes(), nil
 }

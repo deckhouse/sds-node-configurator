@@ -85,6 +85,8 @@ func ThinDump(ctx context.Context, log logger.Logger, tpool, tmeta string) (supe
 		return
 	}
 
+	log.Trace(fmt.Sprintf("[ThinDump] unmarshaled: %v", superblock))
+
 	return superblock, nil
 }
 
