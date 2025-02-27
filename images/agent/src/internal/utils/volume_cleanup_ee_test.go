@@ -49,6 +49,23 @@ var _ = Describe("Cleaning up volume", func() {
 		}
 	}
 
+	LenFormatter := func(e gomock.Matcher) gomock.Matcher {
+		return gomock.GotFormatterAdapter(
+			gomock.GotFormatterFunc(
+				func(i any) string {
+					switch ii := i.(type) {
+					case []any:
+						return fmt.Sprintf("len %d", len(ii))
+					case []byte:
+						return fmt.Sprintf("len %d", len(ii))
+					default:
+						return "unsupported"
+					}
+				}),
+			e,
+		)
+	}
+
 	When("method is unknown", func() {
 		BeforeEach(func() {
 			method = "some"
@@ -165,10 +182,11 @@ var _ = Describe("Cleaning up volume", func() {
 		})
 	})
 	inputName := "/dev/urandom"
-	deviceSize := 1024 * 1024 * 50
+	deviceSize := int64(1024 * 1024 * 50)
+	deviceBlockSize := 512
 	When("method is RandomFill", func() {
 		var passCount int
-		var expectedWritePosition int
+		var expectedByteRangeCover RangeCover
 		bufferSize := 1024 * 1024 * 4
 		When("input open succeed", func() {
 			var input *MockBlockDevice
@@ -237,64 +255,62 @@ var _ = Describe("Cleaning up volume", func() {
 					})
 				}
 				When("read succeed", func() {
-					var readMissingBytes int
-					var totalBytesRead int
-					var lastBytesRead int
+					var readMissingBytes int64
 					JustBeforeEach(func() {
-						totalBytesRead = 0
-						buffersToReadPerPass := deviceSize / bufferSize
-						if 0 != deviceSize%bufferSize {
-							buffersToReadPerPass++
-						}
-						expectedTotalBytesRead := deviceSize * passCount
-						readLimit := expectedTotalBytesRead - readMissingBytes
-
-						expectedReadCallCount := buffersToReadPerPass * passCount
-
-						if readLimit < expectedTotalBytesRead {
-							// Extra call for EOF
-							expectedReadCallCount++
-						}
-
-						if feature.VolumeCleanupEnabled() {
-							input.EXPECT().Read(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
-								GinkgoWriter.Printf("Reading %d from input\n", len(p))
-								Expect(len(p) <= bufferSize).To(BeTrue())
-								lastBytesRead = min(len(p), readLimit-totalBytesRead)
-								totalBytesRead += lastBytesRead
-								if lastBytesRead == 0 {
-									return 0, io.EOF
-								}
-								return lastBytesRead, nil
-							}).Times(expectedReadCallCount)
+						if rangeCover == nil {
+							expectedByteRangeCover = RangeCover{Range{Start: 0, Count: int64(deviceSize)}}
+						} else {
+							expectedByteRangeCover = rangeCover.Multiplied(int64(deviceBlockSize))
 						}
 					})
 					When("write succeed", func() {
-						var totalBytesWritten int
-						var lastPassBytesWritten int
 						JustBeforeEach(func() {
-							expectedWritePosition = 0
-							totalBytesWritten = 0
-							lastPassBytesWritten = 0
 							if feature.VolumeCleanupEnabled() {
-								device.EXPECT().WriteAt(gomock.Any(), gomock.Any()).DoAndReturn(func(p []byte, off int64) (int, error) {
-									GinkgoWriter.Printf("Writing to device [%d, %d]\n", off, off+int64(len(p)))
-									Expect(off).To(BeEquivalentTo(int64(expectedWritePosition)))
-									expectedWritePosition += len(p)
-									lastPassBytesWritten += len(p)
-									totalBytesWritten += len(p)
-									if expectedWritePosition >= deviceSize {
-										expectedWritePosition = 0
+								bytesToReadPerPass := int64(0)
+								for _, r := range expectedByteRangeCover {
+									bytesToReadPerPass += r.Count
+								}
+								buffersToReadPerPass := bytesToReadPerPass / int64(bufferSize)
+								if 0 != deviceSize%int64(bufferSize) {
+									buffersToReadPerPass++
+								}
+								expectedTotalBytesRead := bytesToReadPerPass * int64(passCount)
+								readLimit := expectedTotalBytesRead - readMissingBytes
 
-										Expect(lastPassBytesWritten).To(Equal(deviceSize))
-										lastPassBytesWritten = 0
+								gomock.InOrder(func() (calls []any) {
+									for pass := 0; pass < passCount; pass++ {
+										for _, r := range expectedByteRangeCover {
+											var offset int64 = r.Start
+											deviceSizeRemain := deviceSize - r.Start
+											for remainInRange := r.Count; remainInRange > 0; {
+												var toRead int = int(min(remainInRange, int64(bufferSize)))
+												var read int = int(min(readLimit, int64(toRead)))
+												var written int = int(min(deviceSizeRemain, int64(read)))
 
-										Expect(len(p) <= bufferSize).To(BeTrue())
-									} else {
-										Expect(len(p)).To(BeEquivalentTo(lastBytesRead))
+												calls = append(calls, input.EXPECT().Read(LenFormatter(gomock.Len(toRead))).Return(read, nil))
+												if read != 0 {
+													calls = append(calls, device.EXPECT().WriteAt(LenFormatter(gomock.Len(read)), offset).Return(written, nil))
+												}
+
+												if read > written {
+													return
+												}
+
+												if toRead > read {
+													calls = append(calls, input.EXPECT().Read(LenFormatter(gomock.Any())).Return(0, io.EOF))
+													return
+												}
+
+												deviceSizeRemain -= int64(written)
+												readLimit -= int64(read)
+												remainInRange -= int64(written)
+												offset += int64(written)
+											}
+										}
 									}
-									return len(p), nil
-								}).AnyTimes()
+									return
+								}()...)
+
 							}
 						})
 						When("input has enough bytes to read", func() {
@@ -308,7 +324,7 @@ var _ = Describe("Cleaning up volume", func() {
 									passCount = 1
 								})
 								WhenClosingErrorVariants(func() {
-									It("fails the device", doCall)
+									It("fills the device", doCall)
 								}, func() {
 									JustAfterEach(func() {
 										if feature.VolumeCleanupEnabled() {
