@@ -724,12 +724,12 @@ func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta string) (o
 		return
 	}
 	defer func() {
-		log.Debug(fmt.Sprintf("[ThinDumpRaw] running %v", cmd))
 		cmd := exec.CommandContext(
 			ctx,
 			internal.NSENTERCmd,
 			nsentrerExpendedArgs(internal.DMSetupCmd, "message", tpool, "0", "release_metadata_snap")...)
 
+		log.Debug(fmt.Sprintf("[ThinDumpRaw] running %v", cmd))
 		if errRelease := cmd.Run(); errRelease != nil {
 			log.Error(err, fmt.Sprintf("[ThinDumpRaw] can't release metadata snapshot for %s", tpool))
 			err = errors.Join(err, errRelease)

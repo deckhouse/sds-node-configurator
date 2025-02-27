@@ -39,9 +39,7 @@ var _ = Describe("Cleaning up volume", func() {
 		ctrl = gomock.NewController(GinkgoT())
 		opener = NewMockBlockDeviceOpener(ctrl)
 		device = NewMockBlockDevice(ctrl)
-
-		log, err = logger.NewLogger(logger.WarningLevel)
-		Expect(err).NotTo(HaveOccurred())
+		log = logger.NewLoggerWrap(GinkgoLogr)
 	})
 
 	doCall := func() {

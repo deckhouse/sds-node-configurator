@@ -88,30 +88,30 @@ func ThinDump(ctx context.Context, log logger.Logger, tpool, tmeta string) (supe
 	return superblock, nil
 }
 
-func ThinVolumeUsedRanges(_ context.Context, log logger.Logger, superblock Superblock, deviceID LVMThinDeviceID) (ranges RangeCover, err error) {
+func ThinVolumeUsedRanges(_ context.Context, log logger.Logger, superblock Superblock, deviceID LVMThinDeviceID) (blockRanges RangeCover, err error) {
 	log.Trace(fmt.Sprintf("[ThinVolumeUsedRanges] calling for deviceId %d", deviceID))
 	for _, device := range superblock.Devices {
 		if device.DevID != deviceID {
 			continue
 		}
 
-		ranges = make(RangeCover, 0, len(device.RangeMappings)+len(device.SingleMappings))
+		blockRanges = make(RangeCover, 0, len(device.RangeMappings)+len(device.SingleMappings))
 
 		for _, mapping := range device.RangeMappings {
-			ranges = append(ranges, Range{Start: mapping.DataBegin, Count: mapping.Length})
+			blockRanges = append(blockRanges, Range{Start: mapping.DataBegin, Count: mapping.Length})
 		}
 
 		for _, mapping := range device.SingleMappings {
-			ranges = append(ranges, Range{Start: mapping.DataBlock, Count: 1})
+			blockRanges = append(blockRanges, Range{Start: mapping.DataBlock, Count: 1})
 		}
 
-		ranges, err = ranges.Merged()
+		blockRanges, err = blockRanges.Merged()
 		if err != nil {
 			err = fmt.Errorf("finding used ranges: %w", err)
 			return
 		}
 
-		return ranges.Multiplied(superblock.DataBlockSize), nil
+		return blockRanges.Multiplied(superblock.DataBlockSize), nil
 	}
-	return ranges, errors.New("device not found")
+	return blockRanges, errors.New("device not found")
 }

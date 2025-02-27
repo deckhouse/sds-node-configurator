@@ -649,9 +649,8 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		}
 		prevFailedMethod = &method
 		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
-		var usedRanges *utils.RangeCover
+		var usedBlockRanges *utils.RangeCover
 		if lv.Data.PoolName != "" {
-			r.log.Debug("[deleteLVIfNeeded] loo")
 			tpool, poolMetadataMapper, err := r.sdsCache.FindThinPoolMappers(lv)
 			if err != nil {
 				err = fmt.Errorf("finding mappers for thin pool %s: %w", lv.Data.PoolName, err)
@@ -676,16 +675,16 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 				return true, err
 			}
 			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] ThinID %d", thinID))
-			ranges, err := utils.ThinVolumeUsedRanges(ctx, r.log, superblock, utils.LVMThinDeviceID(thinID))
+			blockRanges, err := utils.ThinVolumeUsedRanges(ctx, r.log, superblock, utils.LVMThinDeviceID(thinID))
 			if err != nil {
 				err = fmt.Errorf("finding used ranges for deviceId %d in thin pool %s: %w", thinID, lv.Data.PoolName, err)
 				return true, err
 			}
-			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] ranges %v", ranges))
-			usedRanges = &ranges
+			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] ranges %v", blockRanges))
+			usedBlockRanges = &blockRanges
 		}
 
-		err = utils.VolumeCleanup(ctx, r.log, utils.OsDeviceOpener(), vgName, lvName, method, usedRanges)
+		err = utils.VolumeCleanup(ctx, r.log, utils.OsDeviceOpener(), vgName, lvName, method, usedBlockRanges)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, method))
 			return true, err
