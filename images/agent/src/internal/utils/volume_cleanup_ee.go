@@ -22,7 +22,7 @@ import (
 )
 
 func VolumeCleanup(ctx context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, vgName string, lvName, volumeCleanup string, usedBlockRanges *RangeCover) error {
-	log.Trace(fmt.Sprintf("[VolumeCleanup] cleaning up volume %s in volume group %s using %s with ranges %v", lvName, vgName, volumeCleanup, usedBlockRanges))
+	log.Trace(fmt.Sprintf("[VolumeCleanup] cleaning up volume %s in volume group %s using %s with block ranges %v", lvName, vgName, volumeCleanup, usedBlockRanges))
 	if !feature.VolumeCleanupEnabled() {
 		return fmt.Errorf("volume cleanup is not supported in your edition")
 	}
@@ -76,7 +76,7 @@ func volumeCleanupOverwrite(_ context.Context, log logger.Logger, deviceOpener B
 	}
 	defer closeFile(output)
 
-	var usedByteRange RangeCover
+	var usedByteRanges RangeCover
 
 	if usedBlockRanges == nil {
 		size, err := output.Size()
@@ -85,25 +85,29 @@ func volumeCleanupOverwrite(_ context.Context, log logger.Logger, deviceOpener B
 			return fmt.Errorf("can't find the size of device %s: %w", devicePath, err)
 		}
 
-		usedByteRange = RangeCover{Range{Start: 0, Count: size}}
+		log.Debug(fmt.Sprintf("[volumeCleanupOverwrite] device size is %d. Overwriting whole device.", size))
+		usedByteRanges = RangeCover{Range{Start: 0, Count: size}}
 	} else {
 		blockSize, err := output.BlockSize()
 		if err != nil {
 			log.Error(err, "[volumeCleanupOverwrite] Finding block size")
 			return fmt.Errorf("can't find the block size of device %s: %w", devicePath, err)
 		}
-		usedByteRange = usedBlockRanges.Multiplied(int64(blockSize))
+		log.Debug(fmt.Sprintf("[volumeCleanupOverwrite] device block size is %d", blockSize))
+		usedByteRanges = usedBlockRanges.Multiplied(int64(blockSize))
 	}
+
+	log.Debug(fmt.Sprintf("[volumeCleanupOverwrite] overwriting byte ranges %v", usedByteRanges))
 
 	bufferSize := 1024 * 1024 * 4
 	buffer := make([]byte, bufferSize)
 	for pass := 0; pass < passes; pass++ {
-		for _, usedRange := range usedByteRange {
-			bytesToWrite := usedRange.Count
-			log.Debug(fmt.Sprintf("[volumeCleanupOverwrite] Overwriting %d bytes with offset %d. Pass %d", bytesToWrite, usedRange.Start, pass))
+		for _, usedByteRange := range usedByteRanges {
+			bytesToWrite := usedByteRange.Count
+			log.Debug(fmt.Sprintf("[volumeCleanupOverwrite] Overwriting %d bytes with offset %d. Pass %d", bytesToWrite, usedByteRange.Start, pass))
 			start := time.Now()
 			written, err := io.CopyBuffer(
-				io.NewOffsetWriter(output, usedRange.Start),
+				io.NewOffsetWriter(output, usedByteRange.Start),
 				io.LimitReader(input, bytesToWrite),
 				buffer)
 			log.Info(fmt.Sprintf("[volumeCleanupOverwrite] Overwriting is done in %s", time.Since(start).String()))
