@@ -100,11 +100,11 @@ func ThinVolumeUsedRanges(_ context.Context, log logger.Logger, superblock Super
 		blockRanges = make(RangeCover, 0, len(device.RangeMappings)+len(device.SingleMappings))
 
 		for _, mapping := range device.RangeMappings {
-			blockRanges = append(blockRanges, Range{Start: mapping.DataBegin, Count: mapping.Length})
+			blockRanges = append(blockRanges, Range{Start: mapping.OriginBegin, Count: mapping.Length})
 		}
 
 		for _, mapping := range device.SingleMappings {
-			blockRanges = append(blockRanges, Range{Start: mapping.DataBlock, Count: 1})
+			blockRanges = append(blockRanges, Range{Start: mapping.OriginBlock, Count: 1})
 		}
 
 		blockRanges, err = blockRanges.Merged()
