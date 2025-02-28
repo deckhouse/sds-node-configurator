@@ -293,33 +293,35 @@ var _ = Describe("Cleaning up volume", func() {
 											readMissingBytes = 0
 										})
 
-										DescribeTableSubtree("methods", func(methodParam string, passCountParam int) {
-											BeforeEach(func() {
-												method = methodParam
-												passCount = passCountParam
-											})
-											DescribeTableSubtree("ranges", func(blockRangeParam *RangeCover) {
-												BeforeEach(func() {
-													blockRange = blockRangeParam
-												})
-												WhenClosingErrorVariants(func(noClosingError bool) {
-													It("fills the device", callVolumeCleanup)
-													if noClosingError {
-														JustAfterEach(IfVolumeCleanupEnabled(func() {
-															Expect(err).ToNot(HaveOccurred())
-														}))
-													}
-												})
-											},
-												Entry("nil", nil),
-												Entry("empty", &RangeCover{}),
-												Entry("full", &RangeCover{Range{0, deviceBlockCount}}),
-												Entry("partial", &RangeCover{Range{0, deviceBlockCount / 2}}),
-												Entry("hole inside", &RangeCover{Range{0, deviceBlockCount/2 - 1}, Range{deviceBlockCount/2 + 1, deviceBlockCount/2 - 1}}))
-										},
+										DescribeTableSubtree("methods",
 											Entry("SinglePass", "RandomFillSinglePass", 1),
 											Entry("ThreePass", "RandomFillThreePass", 3),
-										)
+											func(methodParam string, passCountParam int) {
+												BeforeEach(func() {
+													method = methodParam
+													passCount = passCountParam
+												})
+												DescribeTableSubtree("ranges",
+													Entry("nil", nil),
+													Entry("empty", &RangeCover{}),
+													Entry("full", &RangeCover{Range{0, deviceBlockCount}}),
+													Entry("first half", &RangeCover{Range{0, deviceBlockCount / 2}}),
+													Entry("second half", &RangeCover{Range{deviceBlockCount / 2, deviceBlockCount - deviceBlockCount/2}}),
+													Entry("hole inside", &RangeCover{Range{0, deviceBlockCount/2 - 1}, Range{deviceBlockCount/2 + 1, deviceBlockCount/2 - 1}}),
+													func(blockRangeParam *RangeCover) {
+														BeforeEach(func() {
+															blockRange = blockRangeParam
+														})
+														WhenClosingErrorVariants(func(noClosingError bool) {
+															It("fills the device", callVolumeCleanup)
+															if noClosingError {
+																JustAfterEach(IfVolumeCleanupEnabled(func() {
+																	Expect(err).ToNot(HaveOccurred())
+																}))
+															}
+														})
+													})
+											})
 									})
 									When("input doesn't have enough bytes to read", func() {
 										BeforeEach(func() {
