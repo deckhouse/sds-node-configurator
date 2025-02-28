@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -602,17 +603,22 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		return false, nil
 	}
 
-	if llv.Spec.Type == internal.Thick && llv.Spec.Thick != nil && llv.Spec.Thick.VolumeCleanup != nil {
-		method := *llv.Spec.Thick.VolumeCleanup
+	if cleanupMethod := llv.Spec.VolumeCleanup; cleanupMethod != nil {
+		cleanupMethod := *cleanupMethod
+		if cleanupMethod == v1alpha1.VolumeCleanupDiscard && lv.Data.PoolName != "" {
+			err = errors.New("Discard cleanup method is disabled for thin volumes")
+			r.log.Error(err, "[deleteLVIfNeeded] Discard cleanup method is disabled for thin volumes")
+			return false, err
+		}
 		lvName := llv.Spec.ActualLVNameOnTheNode
 		started, prevFailedMethod := r.startCleanupRunning(vgName, lvName)
 		if !started {
 			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] cleanup already running for LV %s in VG %s", lvName, vgName))
 			return false, errAlreadyRunning
 		}
-		r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] starting cleaning up for LV %s in VG %s with method %s", lvName, vgName, method))
+		r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] starting cleaning up for LV %s in VG %s with method %s", lvName, vgName, cleanupMethod))
 		defer func() {
-			r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] stopping cleaning up for LV %s in VG %s with method %s", lvName, vgName, method))
+			r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] stopping cleaning up for LV %s in VG %s with method %s", lvName, vgName, cleanupMethod))
 			err := r.stopCleanupRunning(vgName, lvName, prevFailedMethod)
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't unregister running cleanup for LV %s in VG %s", lvName, vgName))
@@ -620,7 +626,7 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		}()
 
 		// prevent doing cleanup with previously failed method
-		if prevFailedMethod != nil && *prevFailedMethod == method {
+		if prevFailedMethod != nil && *prevFailedMethod == cleanupMethod {
 			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] was already failed with method %s for LV %s in VG %s", *prevFailedMethod, lvName, vgName))
 			return false, errCleanupSameAsPreviouslyFailed
 		}
@@ -628,17 +634,24 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 			ctx,
 			llv,
 			v1alpha1.PhaseCleaning,
-			fmt.Sprintf("Cleaning up volume %s in %s group using %s", lvName, vgName, method),
+			fmt.Sprintf("Cleaning up volume %s in %s group using %s", lvName, vgName, cleanupMethod),
 		)
 		if err != nil {
 			r.log.Error(err, "[deleteLVIfNeeded] changing phase to Cleaning")
 			return true, fmt.Errorf("changing phase to Cleaning :%w", err)
 		}
-		prevFailedMethod = &method
-		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
-		err = utils.VolumeCleanup(ctx, r.log, utils.OsDeviceOpener(), vgName, lvName, method)
+
+		r.log.Debug("[deleteLVIfNeeded] finding used blocks")
+		usedBlockRanges, err := r.usedBlockRangeForThinVolume(ctx, lv)
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, method))
+			return true, err
+		}
+
+		prevFailedMethod = &cleanupMethod
+		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, cleanupMethod))
+		err = utils.VolumeCleanup(ctx, r.log, utils.OsDeviceOpener(), vgName, lvName, cleanupMethod, usedBlockRanges)
+		if err != nil {
+			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, cleanupMethod))
 			return true, err
 		}
 		prevFailedMethod = nil
@@ -775,6 +788,48 @@ func (r *Reconciler) shouldReconcileByUpdateFunc(vgName string, llv *v1alpha1.LV
 
 	lv := r.sdsCache.FindLV(vgName, llv.Spec.ActualLVNameOnTheNode)
 	return lv != nil && lv.Exist
+}
+
+func (r *Reconciler) usedBlockRangeForThinVolume(ctx context.Context, lv *cache.LVData) (usedBlockRanges *utils.RangeCover, err error) {
+	if lv.Data.PoolName == "" {
+		return
+	}
+
+	vgName := lv.Data.VGName
+	lvName := lv.Data.LVName
+
+	tpool, poolMetadataMapper, err := r.sdsCache.FindThinPoolMappers(lv)
+	if err != nil {
+		err = fmt.Errorf("finding mappers for thin pool %s: %w", lv.Data.PoolName, err)
+		r.log.Error(err, fmt.Sprintf("[UsedBlockRangeForThinVolume] can't find pool for LV %s in VG %s", lvName, vgName))
+		return
+	}
+
+	r.log.Debug(fmt.Sprintf("[UsedBlockRangeForThinVolume] tpool %s tmeta %s", tpool, poolMetadataMapper))
+	if lv.Data.ThinID == "" {
+		err = fmt.Errorf("missing deviceId for thin volume %s", lvName)
+		return
+	}
+	superblock, err := utils.ThinDump(ctx, r.log, tpool, poolMetadataMapper, lv.Data.ThinID)
+	if err != nil {
+		err = fmt.Errorf("dumping thin pool map: %w", err)
+		r.log.Error(err, fmt.Sprintf("[UsedBlockRangeForThinVolume] can't find pool map for LV %s in VG %s", lvName, vgName))
+		return
+	}
+	thinID, err := strconv.Atoi(lv.Data.ThinID)
+	if err != nil {
+		err = fmt.Errorf("deviceId %s is not a number: %w", lv.Data.ThinID, err)
+		return
+	}
+	r.log.Debug(fmt.Sprintf("[UsedBlockRangeForThinVolume] ThinID %d", thinID))
+	blockRanges, err := utils.ThinVolumeUsedRanges(ctx, r.log, superblock, utils.LVMThinDeviceID(thinID))
+	if err != nil {
+		err = fmt.Errorf("finding used ranges for deviceId %d in thin pool %s: %w", thinID, lv.Data.PoolName, err)
+		return
+	}
+	r.log.Debug(fmt.Sprintf("[UsedBlockRangeForThinVolume] ranges %v", blockRanges))
+	usedBlockRanges = &blockRanges
+	return
 }
 
 func isContiguous(llv *v1alpha1.LVMLogicalVolume) bool {

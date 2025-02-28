@@ -285,5 +285,33 @@ func TestCommands(t *testing.T) {
 				assert.Equal(t, string(pv.LVAttr[0]), "t")
 			}
 		})
+
+		t.Run("Unmarshal_LV_Empty_ThinDeviceID", func(t *testing.T) {
+			// TODO: Cleanup
+			js := ` {
+      "report": [
+          {
+              "lv": [
+                  {"lv_name":"[lvol0_pmspare]", "vg_name":"vg-1", "lv_attr":"ewi-------", "lv_size":"4194304", "pool_lv":"", "origin":"", "data_percent":"", "metadata_percent":"", "move_pv":"", "mirror_log":"", "copy_percent":"", "convert_lv":"", "vg_uuid":"QVh4uj-O6Wa-6TT8-XdU7-xCQu-M4gR-x9IY36", "lv_tags":"", "thin_id":"2", "metadata_lv":"", "lv_dm_path":"/dev/mapper/vg--1-lvol0_pmspare"},
+                  {"lv_name":"thin-1", "vg_name":"vg-1", "lv_attr":"twi-a-tz--", "lv_size":"104857600", "pool_lv":"", "origin":"", "data_percent":"0.00", "metadata_percent":"10.84", "move_pv":"", "mirror_log":"", "copy_percent":"", "convert_lv":"", "vg_uuid":"QVh4uj-O6Wa-6TT8-XdU7-xCQu-M4gR-x9IY36", "lv_tags":"", "thin_id":"", "metadata_lv":"[thin-1_tmeta]", "lv_dm_path":"/dev/mapper/vg--1-thin--1"},
+                  {"lv_name":"[thin-1_tdata]", "vg_name":"vg-1", "lv_attr":"Twi-ao----", "lv_size":"104857600", "pool_lv":"", "origin":"", "data_percent":"", "metadata_percent":"", "move_pv":"", "mirror_log":"", "copy_percent":"", "convert_lv":"", "vg_uuid":"QVh4uj-O6Wa-6TT8-XdU7-xCQu-M4gR-x9IY36", "lv_tags":"", "thin_id":"", "metadata_lv":"", "lv_dm_path":"/dev/mapper/vg--1-thin--1_tdata"},
+                  {"lv_name":"[thin-1_tmeta]", "vg_name":"vg-1", "lv_attr":"ewi-ao----", "lv_size":"4194304", "pool_lv":"", "origin":"", "data_percent":"", "metadata_percent":"", "move_pv":"", "mirror_log":"", "copy_percent":"", "convert_lv":"", "vg_uuid":"QVh4uj-O6Wa-6TT8-XdU7-xCQu-M4gR-x9IY36", "lv_tags":"", "thin_id":"", "metadata_lv":"", "lv_dm_path":"/dev/mapper/vg--1-thin--1_tmeta"},
+                  {"lv_name":"thin-5", "vg_name":"vg-1", "lv_attr":"twi-a-tz--", "lv_size":"54525952", "pool_lv":"", "origin":"", "data_percent":"0.00", "metadata_percent":"10.84", "move_pv":"", "mirror_log":"", "copy_percent":"", "convert_lv":"", "vg_uuid":"QVh4uj-O6Wa-6TT8-XdU7-xCQu-M4gR-x9IY36", "lv_tags":"", "thin_id":"", "metadata_lv":"[thin-5_tmeta]", "lv_dm_path":"/dev/mapper/vg--1-thin--5"},
+                  {"lv_name":"[thin-5_tdata]", "vg_name":"vg-1", "lv_attr":"Twi-ao----", "lv_size":"54525952", "pool_lv":"", "origin":"", "data_percent":"", "metadata_percent":"", "move_pv":"", "mirror_log":"", "copy_percent":"", "convert_lv":"", "vg_uuid":"QVh4uj-O6Wa-6TT8-XdU7-xCQu-M4gR-x9IY36", "lv_tags":"", "thin_id":"", "metadata_lv":"", "lv_dm_path":"/dev/mapper/vg--1-thin--5_tdata"},
+                  {"lv_name":"[thin-5_tmeta]", "vg_name":"vg-1", "lv_attr":"ewi-ao----", "lv_size":"4194304", "pool_lv":"", "origin":"", "data_percent":"", "metadata_percent":"", "move_pv":"", "mirror_log":"", "copy_percent":"", "convert_lv":"", "vg_uuid":"QVh4uj-O6Wa-6TT8-XdU7-xCQu-M4gR-x9IY36", "lv_tags":"", "thin_id":"", "metadata_lv":"", "lv_dm_path":"/dev/mapper/vg--1-thin--5_tmeta"}
+              ]
+          }
+      ]
+      ,
+      "log": [
+      ]
+  }
+`
+
+			pvs, err := unmarshalLVs([]byte(js))
+			if assert.NoError(t, err) {
+				assert.Equal(t, "vg-1", pvs[0].VGName)
+			}
+		})
 	})
 }

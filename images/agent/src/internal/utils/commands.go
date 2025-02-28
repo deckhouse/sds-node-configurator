@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	golog "log"
 	"os/exec"
@@ -104,7 +105,7 @@ func GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.
 
 func GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	args := []string{"lvs", "-o", "+vg_uuid,tags", "--units", "B", "--nosuffix", "--reportformat", "json"}
+	args := []string{"lvs", "-o", "+vg_uuid,tags,thin_id,metadata_lv,lv_dm_path", "--units", "B", "--nosuffix", "--all", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
@@ -648,11 +649,15 @@ func unmarshalLVs(out []byte) ([]internal.LVData, error) {
 	return lvs, nil
 }
 
-func lvmStaticExtendedArgs(args []string) []string {
+func nsentrerExpendedArgs(cmd string, args ...string) []string {
 	nsenterArgs := []string{"-t", "1", "-m", "-u", "-i", "-n", "-p"}
-	lvmStaticBin := []string{"--", internal.LVMCmd}
-	nsenterArgs = append(nsenterArgs, lvmStaticBin...)
+	cmdArgs := []string{"--", cmd}
+	nsenterArgs = append(nsenterArgs, cmdArgs...)
 	return append(nsenterArgs, args...)
+}
+
+func lvmStaticExtendedArgs(args []string) []string {
+	return nsentrerExpendedArgs(internal.LVMCmd, args...)
 }
 
 // filterStdErr processes a bytes.Buffer containing stderr output and filters out specific
@@ -704,4 +709,50 @@ func filterStdErr(command string, stdErr bytes.Buffer) bytes.Buffer {
 	}
 
 	return filteredStdErr
+}
+
+func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta, devID string) (out []byte, err error) {
+	log.Trace(fmt.Sprintf("[ThinDumpRaw] calling for tpool %s tmeta %s devID %s", tpool, tmeta, devID))
+	cmd := exec.CommandContext(
+		ctx,
+		internal.NSENTERCmd,
+		nsentrerExpendedArgs(internal.DMSetupCmd, "message", tpool, "0", "reserve_metadata_snap")...)
+	log.Debug(fmt.Sprintf("[ThinDumpRaw] running %v", cmd))
+	if err = cmd.Run(); err != nil {
+		log.Error(err, fmt.Sprintf("[ThinDumpRaw] can't reserve metadata snapshot for %s", tpool))
+		err = fmt.Errorf("reserving metadata snapshot: %w", err)
+		return
+	}
+	defer func() {
+		cmd := exec.CommandContext(
+			ctx,
+			internal.NSENTERCmd,
+			nsentrerExpendedArgs(internal.DMSetupCmd, "message", tpool, "0", "release_metadata_snap")...)
+
+		log.Debug(fmt.Sprintf("[ThinDumpRaw] running %v", cmd))
+		if errRelease := cmd.Run(); errRelease != nil {
+			log.Error(err, fmt.Sprintf("[ThinDumpRaw] can't release metadata snapshot for %s", tpool))
+			err = errors.Join(err, errRelease)
+		}
+	}()
+
+	args := []string{tmeta, "-m", "-f", "xml"}
+	if devID != "" {
+		args = append(args, "--dev-id", devID)
+	}
+	cmd = exec.CommandContext(ctx,
+		internal.NSENTERCmd,
+		nsentrerExpendedArgs(internal.ThinDumpCmd, args...)...)
+
+	var output bytes.Buffer
+	cmd.Stdout = &output
+
+	log.Debug(fmt.Sprintf("[ThinDumpRaw] running %v", cmd))
+	if err = cmd.Run(); err != nil {
+		log.Error(err, fmt.Sprintf("[ThinDumpRaw] can't get metadata %s", tmeta))
+		err = fmt.Errorf("dumping metadata: %w", err)
+		return
+	}
+	log.Trace(fmt.Sprintf("[ThinDumpRaw] device map is: %s", output.Bytes()))
+	return output.Bytes(), nil
 }

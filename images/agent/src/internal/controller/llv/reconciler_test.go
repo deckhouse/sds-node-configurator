@@ -35,7 +35,7 @@ import (
 	"agent/internal/utils"
 )
 
-func TestLVMLogicaVolumeWatcher(t *testing.T) {
+func TestLVMLogicalVolumeWatcher(t *testing.T) {
 	var (
 		vgName = "test-vg"
 		ctx    = context.Background()

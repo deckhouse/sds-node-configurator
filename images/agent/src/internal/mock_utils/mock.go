@@ -185,6 +185,45 @@ func (m *MockBlockDevice) EXPECT() *MockBlockDeviceMockRecorder {
 	return m.recorder
 }
 
+// BlockSize mocks base method.
+func (m *MockBlockDevice) BlockSize() (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BlockSize")
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// BlockSize indicates an expected call of BlockSize.
+func (mr *MockBlockDeviceMockRecorder) BlockSize() *MockBlockDeviceBlockSizeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BlockSize", reflect.TypeOf((*MockBlockDevice)(nil).BlockSize))
+	return &MockBlockDeviceBlockSizeCall{Call: call}
+}
+
+// MockBlockDeviceBlockSizeCall wrap *gomock.Call
+type MockBlockDeviceBlockSizeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBlockDeviceBlockSizeCall) Return(arg0 int, arg1 error) *MockBlockDeviceBlockSizeCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBlockDeviceBlockSizeCall) Do(f func() (int, error)) *MockBlockDeviceBlockSizeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBlockDeviceBlockSizeCall) DoAndReturn(f func() (int, error)) *MockBlockDeviceBlockSizeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // Close mocks base method.
 func (m *MockBlockDevice) Close() error {
 	m.ctrl.T.Helper()

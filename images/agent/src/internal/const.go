@@ -36,8 +36,10 @@ const (
 	LVMVGHealthNonOperational    = "NonOperational"
 	BlockDeviceValidSize         = "1G"
 	NSENTERCmd                   = "/opt/deckhouse/sds/bin/nsenter.static"
+	DMSetupCmd                   = "/opt/deckhouse/sds/bin/dmsetup.static"
 	LSBLKCmd                     = "/opt/deckhouse/sds/bin/lsblk.dynamic"
 	LVMCmd                       = "/opt/deckhouse/sds/bin/lvm.static"
+	ThinDumpCmd                  = "thin_dump" // TODO: add static version
 
 	TypeVGConfigurationApplied = "VGConfigurationApplied"
 	TypeVGReady                = "VGReady"
