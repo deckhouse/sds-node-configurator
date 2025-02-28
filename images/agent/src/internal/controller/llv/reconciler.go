@@ -637,17 +637,20 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 			fmt.Sprintf("Cleaning up volume %s in %s group using %s", lvName, vgName, cleanupMethod),
 		)
 		if err != nil {
+			prevFailedMethod = nil // should retry without changing method
 			r.log.Error(err, "[deleteLVIfNeeded] changing phase to Cleaning")
 			return true, fmt.Errorf("changing phase to Cleaning :%w", err)
 		}
 		prevFailedMethod = &cleanupMethod
 
-		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, cleanupMethod))
+		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] finding used blocks"))
 		usedBlockRanges, err := r.usedBlockRangeForThinVolume(ctx, lv)
 		if err != nil {
+			prevFailedMethod = nil // should retry without changing method
 			return true, err
 		}
 
+		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, cleanupMethod))
 		err = utils.VolumeCleanup(ctx, r.log, utils.OsDeviceOpener(), vgName, lvName, cleanupMethod, usedBlockRanges)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, cleanupMethod))
