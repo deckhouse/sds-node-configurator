@@ -22,9 +22,9 @@ shell:
   install:
     - apt-get update
     - apt-get -y install git
-    - git clone --depth 1 {{ env "SOURCE_REPO" }}/lvmteam/lvm2.git /src/lvm2
-    - cd /src/lvm2
-    - git fetch --depth 1 origin {{ $.Versions.LVM2 }}
+    - git clone --depth 1 --branch {{ $.Versions.LVM2 }} {{ env "SOURCE_REPO" }}/lvmteam/lvm2.git /src/lvm2
+    - git clone --depth 1 --branch {{ $.Versions.THIN_PROVISIONING_TOOLS }} {{ env "SOURCE_REPO" }}/jthornber/thin-provisioning-tools.git /src/thin-provisioning-tools
+    
     - rm -rf /src/lvm2/.git
 
 ---

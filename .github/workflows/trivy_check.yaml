@@ -47,11 +47,10 @@ jobs:
         run: |
           version=`grep '"UTIL_LINUX"' .werf/consts.yaml | awk -F'"' '{ print $4}'`
           git clone --depth 1 --branch $version ${{ secrets.SOURCE_REPO }}/util-linux/util-linux.git ./util-linux
-          git clone ${{ secrets.SOURCE_REPO }}/lvmteam/lvm2.git ./lvm2
           version=`grep '"LVM2"' .werf/consts.yaml | awk -F'"' '{ print $4}'`
-          cd ./lvm2
-          git checkout $version
-          cd ..
+          git clone --depth 1 --branch $version ${{ secrets.SOURCE_REPO }}/lvmteam/lvm2.git ./lvm2
+          version=`grep '"THIN_PROVISIONING_TOOLS"' .werf/consts.yaml | awk -F'"' '{ print $4}'`
+          git clone --depth 1 --branch $version ${{ secrets.SOURCE_REPO }}/jthornber/thin-provisioning-tools.git ./thin-provisioning-tools
 
       - name: Run Trivy vulnerability scanner in fs mode
         run: |
