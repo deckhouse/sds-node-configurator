@@ -643,7 +643,7 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		}
 		prevFailedMethod = &cleanupMethod
 
-		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] finding used blocks"))
+		r.log.Debug("[deleteLVIfNeeded] finding used blocks")
 		usedBlockRanges, err := r.usedBlockRangeForThinVolume(ctx, lv)
 		if err != nil {
 			prevFailedMethod = nil // should retry without changing method
