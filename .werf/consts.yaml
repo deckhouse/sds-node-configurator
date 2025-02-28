@@ -11,7 +11,8 @@
 # component versions
 {{- $versions := dict }}
 {{- $_ := set $versions "UTIL_LINUX" "v2.39.3" }}
-{{- $_ := set $versions "LVM2" "d786a8f820d54ce87a919e6af5426c333c173b11" }}
+{{- $_ := set $versions "LVM2" "v2_03_30" }}
+{{- $_ := set $versions "THIN_PROVISIONING_TOOLS" "v1.1.0"}}
 
 {{- $_ := set $ "VERSIONS" $versions }}
 
