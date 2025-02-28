@@ -711,12 +711,16 @@ func filterStdErr(command string, stdErr bytes.Buffer) bytes.Buffer {
 	return filteredStdErr
 }
 
-func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta string) (out []byte, err error) {
-	log.Trace(fmt.Sprintf("[ThinDumpRaw] calling for tpool %s tmeta %s", tpool, tmeta))
+func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta, devID string) (out []byte, err error) {
+	log.Trace(fmt.Sprintf("[ThinDumpRaw] calling for tpool %s tmeta %s devID %s", tpool, tmeta, devID))
+	args := []string{"message", tpool, "0", "reserve_metadata_snap"}
+	if devID != "" {
+		args = append(args, "--dev-id", devID)
+	}
 	cmd := exec.CommandContext(
 		ctx,
 		internal.NSENTERCmd,
-		nsentrerExpendedArgs(internal.DMSetupCmd, "message", tpool, "0", "reserve_metadata_snap")...)
+		nsentrerExpendedArgs(internal.DMSetupCmd, args...)...)
 	log.Debug(fmt.Sprintf("[ThinDumpRaw] running %v", cmd))
 	if err = cmd.Run(); err != nil {
 		log.Error(err, fmt.Sprintf("[ThinDumpRaw] can't reserve metadata snapshot for %s", tpool))

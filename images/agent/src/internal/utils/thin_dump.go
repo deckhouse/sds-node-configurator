@@ -69,11 +69,11 @@ type SingleMapping struct {
 	Time        LVMTime  `xml:"time,attr"`
 }
 
-func ThinDump(ctx context.Context, log logger.Logger, tpool, tmeta string) (superblock Superblock, err error) {
-	log.Trace(fmt.Sprintf("[ThinDump] calling for tpool %s tmeta %s", tpool, tmeta))
+func ThinDump(ctx context.Context, log logger.Logger, tpool, tmeta, devID string) (superblock Superblock, err error) {
+	log.Trace(fmt.Sprintf("[ThinDump] calling for tpool %s tmeta %s devID %s", tpool, tmeta, devID))
 
 	var rawOut []byte
-	rawOut, err = ThinDumpRaw(ctx, log, tpool, tmeta)
+	rawOut, err = ThinDumpRaw(ctx, log, tpool, tmeta, devID)
 	if err != nil {
 		return
 	}

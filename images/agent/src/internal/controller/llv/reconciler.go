@@ -659,14 +659,14 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 			}
 
 			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] tpool %s tmeta %s", tpool, poolMetadataMapper))
-			superblock, err := utils.ThinDump(ctx, r.log, tpool, poolMetadataMapper)
+			if lv.Data.ThinID == "" {
+				err = fmt.Errorf("missing deviceId for thin volume %s", llv.Spec.ActualLVNameOnTheNode)
+				return true, err
+			}
+			superblock, err := utils.ThinDump(ctx, r.log, tpool, poolMetadataMapper, lv.Data.ThinID)
 			if err != nil {
 				err = fmt.Errorf("dumping thin pool map: %w", err)
 				r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't find pool map for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
-				return true, err
-			}
-			if lv.Data.ThinID == "" {
-				err = fmt.Errorf("missing deviceId for thin volume %s", llv.Spec.ActualLVNameOnTheNode)
 				return true, err
 			}
 			thinID, err := strconv.Atoi(lv.Data.ThinID)
