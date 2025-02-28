@@ -36,6 +36,12 @@ type LVMLogicalVolume struct {
 	Status *LVMLogicalVolumeStatus `json:"status,omitempty"`
 }
 
+const (
+	VolumeCleanupDiscard              = "Discard"
+	VolumeCleanupRandomFillSinglePass = "RandomFillSinglePass"
+	VolumeCleanupRandomFillThreePass  = "RandomFillThreePass"
+)
+
 type LVMLogicalVolumeSpec struct {
 	ActualLVNameOnTheNode string                     `json:"actualLVNameOnTheNode"`
 	Type                  string                     `json:"type"`
@@ -44,16 +50,15 @@ type LVMLogicalVolumeSpec struct {
 	Source                *LVMLogicalVolumeSource    `json:"source"`
 	Thin                  *LVMLogicalVolumeThinSpec  `json:"thin"`
 	Thick                 *LVMLogicalVolumeThickSpec `json:"thick"`
+	VolumeCleanup         *string                    `json:"volumeCleanup,omitempty"`
 }
 
 type LVMLogicalVolumeThinSpec struct {
-	PoolName      string  `json:"poolName"`
-	VolumeCleanup *string `json:"volumeCleanup,omitempty"`
+	PoolName string `json:"poolName"`
 }
 
 type LVMLogicalVolumeThickSpec struct {
-	Contiguous    *bool   `json:"contiguous,omitempty"`
-	VolumeCleanup *string `json:"volumeCleanup,omitempty"`
+	Contiguous *bool `json:"contiguous,omitempty"`
 }
 type LVMLogicalVolumeStatus struct {
 	Phase      string            `json:"phase"`

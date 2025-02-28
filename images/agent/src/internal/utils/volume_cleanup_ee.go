@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"golang.org/x/sys/unix"
 
@@ -33,11 +34,11 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, deviceOpener BlockDev
 	var err error
 
 	switch volumeCleanup {
-	case "RandomFillSinglePass":
+	case v1alpha1.VolumeCleanupRandomFillSinglePass:
 		err = volumeCleanupOverwrite(ctx, log, deviceOpener, devicePath, randomSource, 1, usedBlockRanges)
-	case "RandomFillThreePass":
+	case v1alpha1.VolumeCleanupRandomFillThreePass:
 		err = volumeCleanupOverwrite(ctx, log, deviceOpener, devicePath, randomSource, 3, usedBlockRanges)
-	case "Discard":
+	case v1alpha1.VolumeCleanupDiscard:
 		err = volumeCleanupDiscard(ctx, log, deviceOpener, devicePath)
 	default:
 		return fmt.Errorf("unknown cleanup method %s", volumeCleanup)
