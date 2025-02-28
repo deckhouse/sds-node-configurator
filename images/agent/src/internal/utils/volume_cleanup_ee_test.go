@@ -49,7 +49,7 @@ var _ = Describe("Cleaning up volume", func() {
 		return foo
 	}
 
-	doCall := func() {
+	callVolumeCleanup := func() {
 		err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, method, blockRange)
 		if !feature.VolumeCleanupEnabled() {
 			Expect(err).To(MatchError("volume cleanup is not supported in your edition"))
@@ -77,7 +77,7 @@ var _ = Describe("Cleaning up volume", func() {
 		BeforeEach(func() {
 			method = "some"
 		})
-		It("fails", doCall)
+		It("fails", callVolumeCleanup)
 		JustAfterEach(IfVolumeCleanupEnabled(func() {
 			Expect(err).To(MatchError(fmt.Sprintf("unknown cleanup method %s", method)))
 		}))
@@ -92,7 +92,7 @@ var _ = Describe("Cleaning up volume", func() {
 			BeforeEach(IfVolumeCleanupEnabled(func() {
 				opener.EXPECT().Open(filepath.Join("/dev", vgName, lvName), unix.O_RDWR).Return(nil, deviceOpenError)
 			}))
-			It("fails with same error", doCall)
+			It("fails with same error", callVolumeCleanup)
 			JustAfterEach(IfVolumeCleanupEnabled(func() {
 				Expect(err).To(MatchError(deviceOpenError))
 			}))
@@ -115,7 +115,7 @@ var _ = Describe("Cleaning up volume", func() {
 					BeforeEach(IfVolumeCleanupEnabled(func() {
 						device.EXPECT().Close().Return(nil)
 					}))
-					It("calls device discard", doCall)
+					It("calls device discard", callVolumeCleanup)
 					JustAfterEach(IfVolumeCleanupEnabled(func() {
 						Expect(err).ToNot(HaveOccurred())
 					}))
@@ -125,7 +125,7 @@ var _ = Describe("Cleaning up volume", func() {
 					BeforeEach(IfVolumeCleanupEnabled(func() {
 						device.EXPECT().Close().Return(closingError)
 					}))
-					It("fails with closing error", doCall)
+					It("fails with closing error", callVolumeCleanup)
 					JustAfterEach(IfVolumeCleanupEnabled(func() {
 						Expect(err).To(MatchError(closingError))
 					}))
@@ -141,7 +141,7 @@ var _ = Describe("Cleaning up volume", func() {
 					BeforeEach(IfVolumeCleanupEnabled(func() {
 						device.EXPECT().Close().Return(nil)
 					}))
-					It("fails with matched error", doCall)
+					It("fails with matched error", callVolumeCleanup)
 					JustAfterEach(IfVolumeCleanupEnabled(func() {
 						Expect(err).To(MatchError(discardError))
 					}))
@@ -151,7 +151,7 @@ var _ = Describe("Cleaning up volume", func() {
 					BeforeEach(IfVolumeCleanupEnabled(func() {
 						device.EXPECT().Close().Return(closingError)
 					}))
-					It("fails with matched errors", doCall)
+					It("fails with matched errors", callVolumeCleanup)
 					JustAfterEach(IfVolumeCleanupEnabled(func() {
 						Expect(err).To(MatchError(discardError))
 						Expect(err).To(MatchError(closingError))
@@ -303,7 +303,7 @@ var _ = Describe("Cleaning up volume", func() {
 													blockRange = blockRangeParam
 												})
 												WhenClosingErrorVariants(func(noClosingError bool) {
-													It("fills the device", doCall)
+													It("fills the device", callVolumeCleanup)
 													if noClosingError {
 														JustAfterEach(IfVolumeCleanupEnabled(func() {
 															Expect(err).ToNot(HaveOccurred())
@@ -333,7 +333,7 @@ var _ = Describe("Cleaning up volume", func() {
 											})
 
 											WhenClosingErrorVariants(func(_ bool) {
-												It("fails", doCall)
+												It("fails", callVolumeCleanup)
 												JustAfterEach(IfVolumeCleanupEnabled(func() {
 													Expect(err).To(HaveOccurred())
 												}))
@@ -345,7 +345,7 @@ var _ = Describe("Cleaning up volume", func() {
 												passCount = 3
 											})
 											WhenClosingErrorVariants(func(_ bool) {
-												It("fails", doCall)
+												It("fails", callVolumeCleanup)
 												JustAfterEach(IfVolumeCleanupEnabled(func() {
 													Expect(err).To(HaveOccurred())
 												}))
@@ -359,7 +359,7 @@ var _ = Describe("Cleaning up volume", func() {
 								BeforeEach(IfVolumeCleanupEnabled(func() {
 									opener.EXPECT().Open(deviceName, unix.O_DIRECT|unix.O_RDWR).Return(nil, deviceOpenError)
 								}))
-								It("fails with matched error", doCall)
+								It("fails with matched error", callVolumeCleanup)
 								JustAfterEach(IfVolumeCleanupEnabled(func() {
 									Expect(err).To(MatchError(deviceOpenError))
 								}))
@@ -371,7 +371,7 @@ var _ = Describe("Cleaning up volume", func() {
 								opener.EXPECT().Open(inputName, unix.O_RDONLY).Return(nil, inputOpenError)
 							}))
 
-							It("fails with matched error", doCall)
+							It("fails with matched error", callVolumeCleanup)
 							JustAfterEach(IfVolumeCleanupEnabled(func() {
 								Expect(err).To(MatchError(inputOpenError))
 							}))
