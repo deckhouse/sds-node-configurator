@@ -241,8 +241,8 @@ var _ = Describe("Cleaning up volume", func() {
 									var readMissingBytes int64
 									JustBeforeEach(IfVolumeCleanupEnabled(func() {
 										if blockRange == nil {
-											expectedByteRangeCover = RangeCover{Range{Start: 0, Count: int64(deviceSize)}}
-											device.EXPECT().Size().Return(int64(deviceSize), nil)
+											expectedByteRangeCover = RangeCover{Range{Start: 0, Count: deviceSize}}
+											device.EXPECT().Size().Return(deviceSize, nil)
 										} else {
 											expectedByteRangeCover = blockRange.Multiplied(int64(deviceBlockSize))
 											device.EXPECT().BlockSize().Return(deviceBlockSize, nil)
@@ -250,10 +250,6 @@ var _ = Describe("Cleaning up volume", func() {
 										bytesToReadPerPass := int64(0)
 										for _, r := range expectedByteRangeCover {
 											bytesToReadPerPass += r.Count
-										}
-										buffersToReadPerPass := bytesToReadPerPass / int64(bufferSize)
-										if 0 != deviceSize%int64(bufferSize) {
-											buffersToReadPerPass++
 										}
 										expectedTotalBytesRead := bytesToReadPerPass * int64(passCount)
 										readLimit := expectedTotalBytesRead - readMissingBytes
