@@ -13,15 +13,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils
+package utils_test
 
 import (
 	"context"
-	"fmt"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"agent/internal/logger"
+	. "agent/internal/utils"
 )
 
-func VolumeCleanup(_ context.Context, _ logger.Logger, _ BlockDeviceOpener, _, _, _ string) error {
-	return fmt.Errorf("volume cleanup is not supported in your edition")
-}
+var _ = Describe("Cleaning up volume", func() {
+	var log logger.Logger
+	BeforeEach(func() {
+		logger, err := logger.NewLogger(logger.WarningLevel)
+		log = logger
+		Expect(err).NotTo(HaveOccurred())
+	})
+	It("Unsupported", func() {
+		err := VolumeCleanup(context.Background(), log, nil, "", "", "")
+		Expect(err).To(MatchError("volume cleanup is not supported in your edition"))
+	})
+})
