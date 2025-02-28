@@ -650,7 +650,7 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		prevFailedMethod = &method
 
 		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
-		usedBlockRanges, err := r.UsedBlockRangeForThinVolume(ctx, lv)
+		usedBlockRanges, err := r.usedBlockRangeForThinVolume(ctx, lv)
 		if err != nil {
 			return true, err
 		}
@@ -796,7 +796,7 @@ func (r *Reconciler) shouldReconcileByUpdateFunc(vgName string, llv *v1alpha1.LV
 	return lv != nil && lv.Exist
 }
 
-func (r *Reconciler) UsedBlockRangeForThinVolume(ctx context.Context, lv *cache.LVData) (usedBlockRanges *utils.RangeCover, err error) {
+func (r *Reconciler) usedBlockRangeForThinVolume(ctx context.Context, lv *cache.LVData) (usedBlockRanges *utils.RangeCover, err error) {
 	if lv.Data.PoolName == "" {
 		return
 	}
@@ -822,8 +822,7 @@ func (r *Reconciler) UsedBlockRangeForThinVolume(ctx context.Context, lv *cache.
 		r.log.Error(err, fmt.Sprintf("[UsedBlockRangeForThinVolume] can't find pool map for LV %s in VG %s", lvName, vgName))
 		return
 	}
-	var thinID int
-	thinID, err = strconv.Atoi(lv.Data.ThinID)
+	thinID, err := strconv.Atoi(lv.Data.ThinID)
 	if err != nil {
 		err = fmt.Errorf("deviceId %s is not a number: %w", lv.Data.ThinID, err)
 		return
