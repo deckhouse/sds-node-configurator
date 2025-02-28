@@ -648,40 +648,11 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 			return true, fmt.Errorf("changing phase to Cleaning :%w", err)
 		}
 		prevFailedMethod = &method
-		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
-		var usedBlockRanges *utils.RangeCover
-		if lv.Data.PoolName != "" {
-			tpool, poolMetadataMapper, err := r.sdsCache.FindThinPoolMappers(lv)
-			if err != nil {
-				err = fmt.Errorf("finding mappers for thin pool %s: %w", lv.Data.PoolName, err)
-				r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't find pool for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
-				return true, err
-			}
 
-			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] tpool %s tmeta %s", tpool, poolMetadataMapper))
-			if lv.Data.ThinID == "" {
-				err = fmt.Errorf("missing deviceId for thin volume %s", llv.Spec.ActualLVNameOnTheNode)
-				return true, err
-			}
-			superblock, err := utils.ThinDump(ctx, r.log, tpool, poolMetadataMapper, lv.Data.ThinID)
-			if err != nil {
-				err = fmt.Errorf("dumping thin pool map: %w", err)
-				r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't find pool map for LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
-				return true, err
-			}
-			thinID, err := strconv.Atoi(lv.Data.ThinID)
-			if err != nil {
-				err = fmt.Errorf("deviceId %s is not a number: %w", lv.Data.ThinID, err)
-				return true, err
-			}
-			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] ThinID %d", thinID))
-			blockRanges, err := utils.ThinVolumeUsedRanges(ctx, r.log, superblock, utils.LVMThinDeviceID(thinID))
-			if err != nil {
-				err = fmt.Errorf("finding used ranges for deviceId %d in thin pool %s: %w", thinID, lv.Data.PoolName, err)
-				return true, err
-			}
-			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] ranges %v", blockRanges))
-			usedBlockRanges = &blockRanges
+		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
+		usedBlockRanges, err := r.UsedBlockRangeForThinVolume(ctx, lv)
+		if err != nil {
+			return true, err
 		}
 
 		err = utils.VolumeCleanup(ctx, r.log, utils.OsDeviceOpener(), vgName, lvName, method, usedBlockRanges)
@@ -823,6 +794,49 @@ func (r *Reconciler) shouldReconcileByUpdateFunc(vgName string, llv *v1alpha1.LV
 
 	lv := r.sdsCache.FindLV(vgName, llv.Spec.ActualLVNameOnTheNode)
 	return lv != nil && lv.Exist
+}
+
+func (r *Reconciler) UsedBlockRangeForThinVolume(ctx context.Context, lv *cache.LVData) (usedBlockRanges *utils.RangeCover, err error) {
+	if lv.Data.PoolName == "" {
+		return
+	}
+
+	vgName := lv.Data.VGName
+	lvName := lv.Data.LVName
+
+	tpool, poolMetadataMapper, err := r.sdsCache.FindThinPoolMappers(lv)
+	if err != nil {
+		err = fmt.Errorf("finding mappers for thin pool %s: %w", lv.Data.PoolName, err)
+		r.log.Error(err, fmt.Sprintf("[UsedBlockRangeForThinVolume] can't find pool for LV %s in VG %s", lvName, vgName))
+		return
+	}
+
+	r.log.Debug(fmt.Sprintf("[UsedBlockRangeForThinVolume] tpool %s tmeta %s", tpool, poolMetadataMapper))
+	if lv.Data.ThinID == "" {
+		err = fmt.Errorf("missing deviceId for thin volume %s", lvName)
+		return
+	}
+	superblock, err := utils.ThinDump(ctx, r.log, tpool, poolMetadataMapper, lv.Data.ThinID)
+	if err != nil {
+		err = fmt.Errorf("dumping thin pool map: %w", err)
+		r.log.Error(err, fmt.Sprintf("[UsedBlockRangeForThinVolume] can't find pool map for LV %s in VG %s", lvName, vgName))
+		return
+	}
+	var thinID int
+	thinID, err = strconv.Atoi(lv.Data.ThinID)
+	if err != nil {
+		err = fmt.Errorf("deviceId %s is not a number: %w", lv.Data.ThinID, err)
+		return
+	}
+	r.log.Debug(fmt.Sprintf("[UsedBlockRangeForThinVolume] ThinID %d", thinID))
+	blockRanges, err := utils.ThinVolumeUsedRanges(ctx, r.log, superblock, utils.LVMThinDeviceID(thinID))
+	if err != nil {
+		err = fmt.Errorf("finding used ranges for deviceId %d in thin pool %s: %w", thinID, lv.Data.PoolName, err)
+		return
+	}
+	r.log.Debug(fmt.Sprintf("[UsedBlockRangeForThinVolume] ranges %v", blockRanges))
+	usedBlockRanges = &blockRanges
+	return
 }
 
 func isContiguous(llv *v1alpha1.LVMLogicalVolume) bool {
