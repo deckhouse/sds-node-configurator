@@ -45,7 +45,7 @@ spec:
                     )
                   message: "Field 'contiguous' is immutable and cannot be added if not specified at creation."
                 - rule: |
-                    self.Type == "Thick" || self.volumeCleanup != "Discard"
+                    self.type == "Thick" || self.volumeCleanup != "Discard"
                   message: "'volumeCleanup: Discard' is supported only for 'Thick' volumes"
               required:
                 - actualLVNameOnTheNode
