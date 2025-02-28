@@ -12,7 +12,7 @@
 {{- $versions := dict }}
 {{- $_ := set $versions "UTIL_LINUX" "v2.39.3" }}
 {{- $_ := set $versions "LVM2" "v2_03_30" }}
-{{- $  := set $versions "THIN_PROVISIONING_TOOLS" "v1.1.0"}}
+{{- $_ := set $versions "THIN_PROVISIONING_TOOLS" "v1.1.0"}}
 
 {{- $_ := set $ "VERSIONS" $versions }}
 
