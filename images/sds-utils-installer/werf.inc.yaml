@@ -67,12 +67,6 @@ shell:
   - mkdir -p /sds-utils/bin/
   - mv /src/lvm2/tools/lvm.static /sds-utils/bin/lvm.static
   - mv /src/lvm2/libdm/dm-tools/dmsetup.static /sds-utils/bin/dmsetup.static
-  - cp /lib64/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1
-  - cp /lib64/libc.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libc.so.6
-  - cp /lib64/libgcc_s.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libgcc_s.so.1
-  - cp /lib64/libm.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libm.so.6
-  - cp /usr/sbin/thin_dump /opt/deckhouse/sds/lib/x86_64-linux-gnu/thin_dump
-  - cp /usr/sbin/pdata_tools /opt/deckhouse/sds/lib/x86_64-linux-gnu/pdata_tools
   - chmod +x /binary_replace.sh
   - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
 

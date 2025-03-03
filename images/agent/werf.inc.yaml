@@ -1,4 +1,4 @@
-{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2" }}
+{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libgcc_s.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libm.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/thin_dump /opt/deckhouse/sds/lib/x86_64-linux-gnu/pdata_tools" }}
 
 # Do not remove. It's used in external tests.
 ---
@@ -60,6 +60,7 @@ shell:
     libblkid-devel-static \
     libsmartcols-devel-static \
     libmount-devel-static \
+    thin-provisioning-tools \
     automake \
     gettext \
     flex \
@@ -76,6 +77,10 @@ shell:
   - cp /lib64/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1
   - cp /lib64/libc.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libc.so.6
   - cp /lib64/libcap.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2
+  - cp /lib64/libgcc_s.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libgcc_s.so.1
+  - cp /lib64/libm.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libm.so.6
+  - cp /usr/sbin/thin_dump /opt/deckhouse/sds/lib/x86_64-linux-gnu/thin_dump
+  - cp /usr/sbin/pdata_tools /opt/deckhouse/sds/lib/x86_64-linux-gnu/pdata_tools
   # There is no more such file in P11 with glibc-core that it was a part of. Now it's /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2
   #- cp /lib64/ld-2.32.so /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
   - cp /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
