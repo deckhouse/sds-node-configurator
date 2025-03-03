@@ -60,7 +60,8 @@ shell:
     libaio-devel-static \
     libblkid-devel-static \
     thin-provisioning-tools \
-    glibc-core
+    glibc-core \
+    gcompat
   - cd /src/lvm2
   - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu
   - make
