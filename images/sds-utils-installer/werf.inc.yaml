@@ -22,7 +22,7 @@ shell:
   install:
     - apt-get update
     - apt-get -y install git
-    - git config advice.detachedHead=false
+    - git config advice.detachedHead false
     - git clone --depth 1 {{ env "SOURCE_REPO" }}/lvmteam/lvm2.git /src/lvm2
     - cd /src/lvm2
     - git fetch --depth 1 origin {{ $.Versions.LVM2 }}
