@@ -39,7 +39,7 @@ const (
 	DMSetupCmd                   = "/opt/deckhouse/sds/bin/dmsetup.static"
 	LSBLKCmd                     = "/opt/deckhouse/sds/bin/lsblk.dynamic"
 	LVMCmd                       = "/opt/deckhouse/sds/bin/lvm.static"
-	ThinDumpCmd                  = "thin_dump" // TODO: add static version
+	ThinDumpCmd                  = "/opt/deckhouse/sds/bin/thin_dump"
 
 	TypeVGConfigurationApplied = "VGConfigurationApplied"
 	TypeVGReady                = "VGReady"
