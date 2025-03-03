@@ -1,4 +1,4 @@
-{{ $binaries := "/sds-utils/bin/lvm.static /sds-utils/bin/dmsetup.static" }}
+{{ $binaries := "/sds-utils/bin/lvm.static /sds-utils/bin/dmsetup.static /sds-utils/lib/libudev.so.1 /sds-utils/lib/libgcc_s.so.1 /sds-utils/lib/libm.so.6 /sds-utils/lib/libc.so.6 /sds-utils/lib/ld-linux-x86-64.so.2 /sds-utils/bin/thin_dump /sds-utils/bin/pdata_tools" }}
 
 # Do not remove. It's used in external tests.
 ---
@@ -67,6 +67,10 @@ shell:
   - mkdir -p /sds-utils/bin/
   - mv /src/lvm2/tools/lvm.static /sds-utils/bin/lvm.static
   - mv /src/lvm2/libdm/dm-tools/dmsetup.static /sds-utils/bin/dmsetup.static
+  - cp /usr/sbin/{thin_dump,pdata_tools} sds-utils/bin/x86_64-linux-gnu/bin/
+  - mkdir -p /sds-utils/lib/
+  - cp /lib64/{libudev.so.1,libgcc_s.so.1,libm.so.6,libc.so.6} /sds-utils/lib/
+  - cp /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /sds-utils/lib/
   - chmod +x /binary_replace.sh
   - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
 
