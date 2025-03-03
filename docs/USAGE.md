@@ -196,12 +196,12 @@ Allowed values:
 
 * `RandomFillThreePass` - the volume will be overwritten with random data three times before deletion. Use of this option is not recommended for solid-state drives as it reduces the lifespan of the drive.
 
-* `Discard` - all blocks of the volume will be marked as free using the `discard` system call before deletion. This option is only applicable to solid-state drives.
+* `Discard` - all blocks of the volume will be marked as free using the `blkdiscard` system call before deletion. This option is only applicable to solid-state drives.
 
-Most modern solid-state drives ensure that a `discard` marked block will not return previous data when read. This makes the `Discard' option the most effective way to prevent leakage when using solid-state drives.
+Most modern solid-state drives ensure that a `blkdiscard` marked block will not return previous data when read. This makes the `Discard' option the most effective way to prevent leakage when using solid-state drives.
 However, clearing a cell is a relatively long operation, so it is performed in the background by the device. In addition, many drives cannot clear individual cells, only groups - pages. Because of this, not all drives guarantee immediate unavailability of the freed data. In addition, not all drives that do guarantee this keep the promise.
 If the device does not guarantee Deterministic TRIM (DRAT), Deterministic Read Zero after TRIM (RZAT) and is not tested, then it is not recommended.
 
 ### Thin volumes
 
-When a thin-pool block is released via `discard` by the guest operating system, this command is forwarded to the device. If a hard disk drive is used or if there is no `discard` support from the solid-state drive, the data may remain on the thin-pool until such a block is used again. However, users are only given access to thin volumes, not the thin-pool itself. They can only retrieve a volume from the pool, and the thin volumes are nulled for the thin-pool block on new use, preventing leakage between clients. This is guaranteed by setting `thin_pool_zero=1` in LVM.
+When a thin-pool block is released via `blkdiscard` by the guest operating system, this command is forwarded to the device. If a hard disk drive is used or if there is no `blkdiscard` support from the solid-state drive, the data may remain on the thin-pool until such a block is used again. However, users are only given access to thin volumes, not the thin-pool itself. They can only retrieve a volume from the pool, and the thin volumes are nulled for the thin-pool block on new use, preventing leakage between clients. This is guaranteed by setting `thin_pool_zero=1` in LVM.
