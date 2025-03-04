@@ -13,20 +13,35 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"golang.org/x/sys/unix"
 
+	"agent/internal/cache"
 	"agent/internal/logger"
 )
 
-func VolumeCleanup(ctx context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, vgName string, lvName, volumeCleanup string, usedBlockRanges *RangeCover) error {
-	log.Trace(fmt.Sprintf("[VolumeCleanup] cleaning up volume %s in volume group %s using %s with block ranges %v", lvName, vgName, volumeCleanup, usedBlockRanges))
-	if !feature.VolumeCleanupEnabled() {
-		return fmt.Errorf("volume cleanup is not supported in your edition")
+func VolumeCleanup(ctx context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, sdsCache *cache.Cache, lv *cache.LVData, volumeCleanup string) (shouldRequeue bool, err error) {
+	vgName := lv.Data.VGName
+	lvName := lv.Data.LVName
+
+	log.Debug("[deleteLVIfNeeded] finding used blocks")
+
+	usedBlockRanges, err := UsedBlockRangeForThinVolume(ctx, log, sdsCache, lv)
+	if err != nil {
+		return true, err
 	}
+
+	if err := VolumeCleanupWithRangeCover(ctx, log, deviceOpener, vgName, lvName, volumeCleanup, usedBlockRanges); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+func VolumeCleanupWithRangeCover(ctx context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, vgName string, lvName, volumeCleanup string, usedBlockRanges *RangeCover) error {
+	log.Trace(fmt.Sprintf("[VolumeCleanup] cleaning up volume %s in volume group %s using %s with block ranges %v", lvName, vgName, volumeCleanup, usedBlockRanges))
 
 	devicePath := filepath.Join("/dev", vgName, lvName)
 	randomSource := "/dev/urandom"
@@ -50,6 +65,48 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, deviceOpener BlockDev
 	}
 
 	return nil
+}
+
+func UsedBlockRangeForThinVolume(ctx context.Context, log logger.Logger, sdsCache *cache.Cache, lv *cache.LVData) (*RangeCover, error) {
+	if lv.Data.PoolName == "" {
+		return nil, nil
+	}
+
+	vgName := lv.Data.VGName
+	lvName := lv.Data.LVName
+
+	tpool, poolMetadataMapper, err := sdsCache.FindThinPoolMappers(lv)
+	if err != nil {
+		err = fmt.Errorf("finding mappers for thin pool %s: %w", lv.Data.PoolName, err)
+		log.Error(err, fmt.Sprintf("[UsedBlockRangeForThinVolume] can't find pool for LV %s in VG %s", lvName, vgName))
+		return nil, err
+	}
+
+	log.Debug(fmt.Sprintf("[UsedBlockRangeForThinVolume] tpool %s tmeta %s", tpool, poolMetadataMapper))
+	if lv.Data.ThinID == "" {
+		err = fmt.Errorf("missing deviceId for thin volume %s", lvName)
+		log.Error(err, fmt.Sprintf("[UsedBlockRangeForThinVolume] can't find pool for LV %s in VG %s", lvName, vgName))
+		return nil, err
+	}
+	superblock, err := ThinDump(ctx, log, tpool, poolMetadataMapper, lv.Data.ThinID)
+	if err != nil {
+		err = fmt.Errorf("dumping thin pool map: %w", err)
+		log.Error(err, fmt.Sprintf("[UsedBlockRangeForThinVolume] can't find pool map for LV %s in VG %s", lvName, vgName))
+		return nil, err
+	}
+	thinID, err := strconv.Atoi(lv.Data.ThinID)
+	if err != nil {
+		err = fmt.Errorf("deviceId %s is not a number: %w", lv.Data.ThinID, err)
+		return nil, err
+	}
+	log.Debug(fmt.Sprintf("[UsedBlockRangeForThinVolume] ThinID %d", thinID))
+	blockRanges, err := ThinVolumeUsedRanges(ctx, log, superblock, LVMThinDeviceID(thinID))
+	if err != nil {
+		err = fmt.Errorf("finding used ranges for deviceId %d in thin pool %s: %w", thinID, lv.Data.PoolName, err)
+		return nil, err
+	}
+	log.Debug(fmt.Sprintf("[UsedBlockRangeForThinVolume] ranges %v", blockRanges))
+	return &blockRanges, nil
 }
 
 func volumeCleanupOverwrite(_ context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, devicePath, inputPath string, passes int, usedBlockRanges *RangeCover) (err error) {

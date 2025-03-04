@@ -1,5 +1,3 @@
-//go:build ce
-
 /*
 Copyright 2025 Flant JSC
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,27 +11,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils_test
+package llv
 
 import (
+	"agent/internal/cache"
 	"context"
+	"fmt"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-
-	"agent/internal/logger"
-	. "agent/internal/utils"
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
-var _ = Describe("Cleaning up volume", func() {
-	var log logger.Logger
-	BeforeEach(func() {
-		logger, err := logger.NewLogger(logger.WarningLevel)
-		log = logger
-		Expect(err).NotTo(HaveOccurred())
-	})
-	It("Unsupported", func() {
-		err := VolumeCleanup(context.Background(), log, nil, "", "", "", nil)
-		Expect(err).To(MatchError("volume cleanup is not supported in your edition"))
-	})
-})
+func (r *Reconciler) cleanupVolumeIfNeeded(ctx context.Context, llv *v1alpha1.LVMLogicalVolume, lv *cache.LVData, vgName string) (shouldRequeue bool, err error) {
+	return false, fmt.Errorf("volume cleanup is not supported in your edition")
+}

@@ -14,7 +14,6 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
@@ -42,18 +41,8 @@ var _ = Describe("Cleaning up volume", func() {
 		log = logger.NewLoggerWrap(GinkgoLogr)
 	})
 
-	IfVolumeCleanupEnabled := func(foo func()) func() {
-		if !feature.VolumeCleanupEnabled() {
-			return func() {}
-		}
-		return foo
-	}
-
 	callVolumeCleanup := func() {
-		err = VolumeCleanup(context.Background(), log, opener, vgName, lvName, method, blockRange)
-		if !feature.VolumeCleanupEnabled() {
-			Expect(err).To(MatchError("volume cleanup is not supported in your edition"))
-		}
+		err = VolumeCleanupWithRangeCover(context.Background(), log, opener, vgName, lvName, method, blockRange)
 	}
 
 	LengthFormatter := func(e gomock.Matcher) gomock.Matcher {
@@ -76,9 +65,9 @@ var _ = Describe("Cleaning up volume", func() {
 			method = "some"
 		})
 		It("fails", callVolumeCleanup)
-		JustAfterEach(IfVolumeCleanupEnabled(func() {
+		JustAfterEach(func() {
 			Expect(err).To(MatchError(fmt.Sprintf("unknown cleanup method %s", method)))
-		}))
+		})
 	})
 	When("method is Discard", func() {
 		BeforeEach(func() {
@@ -87,73 +76,73 @@ var _ = Describe("Cleaning up volume", func() {
 
 		When("can't open device", func() {
 			deviceOpenError := errors.New("can't open device")
-			BeforeEach(IfVolumeCleanupEnabled(func() {
+			BeforeEach(func() {
 				opener.EXPECT().Open(filepath.Join("/dev", vgName, lvName), unix.O_RDWR).Return(nil, deviceOpenError)
-			}))
+			})
 			It("fails with same error", callVolumeCleanup)
-			JustAfterEach(IfVolumeCleanupEnabled(func() {
+			JustAfterEach(func() {
 				Expect(err).To(MatchError(deviceOpenError))
-			}))
+			})
 		})
 
 		When("device opened", func() {
-			BeforeEach(IfVolumeCleanupEnabled(func() {
+			BeforeEach(func() {
 				device = NewMockBlockDevice(ctrl)
 				name := filepath.Join("/dev", vgName, lvName)
 				opener.EXPECT().Open(name, unix.O_RDWR).Return(device, nil)
 				device.EXPECT().Name().AnyTimes().Return(name)
-			}))
+			})
 			deviceSize := 1024
 			When("discard succeed", func() {
-				BeforeEach(IfVolumeCleanupEnabled(func() {
+				BeforeEach(func() {
 					device.EXPECT().Size().Return(int64(deviceSize), nil)
 					device.EXPECT().Discard(uint64(0), uint64(deviceSize)).Return(nil)
-				}))
+				})
 				When("no closing error", func() {
-					BeforeEach(IfVolumeCleanupEnabled(func() {
+					BeforeEach(func() {
 						device.EXPECT().Close().Return(nil)
-					}))
+					})
 					It("calls device discard", callVolumeCleanup)
-					JustAfterEach(IfVolumeCleanupEnabled(func() {
+					JustAfterEach(func() {
 						Expect(err).ToNot(HaveOccurred())
-					}))
+					})
 				})
 				When("cannot close", func() {
 					closingError := errors.New("closing error")
-					BeforeEach(IfVolumeCleanupEnabled(func() {
+					BeforeEach(func() {
 						device.EXPECT().Close().Return(closingError)
-					}))
+					})
 					It("fails with closing error", callVolumeCleanup)
-					JustAfterEach(IfVolumeCleanupEnabled(func() {
+					JustAfterEach(func() {
 						Expect(err).To(MatchError(closingError))
-					}))
+					})
 				})
 			})
 			When("discard fails", func() {
 				discardError := errors.New("discard error")
-				BeforeEach(IfVolumeCleanupEnabled(func() {
+				BeforeEach(func() {
 					device.EXPECT().Size().Return(int64(deviceSize), nil)
 					device.EXPECT().Discard(uint64(0), uint64(deviceSize)).Return(discardError)
-				}))
+				})
 				When("no closing error", func() {
-					BeforeEach(IfVolumeCleanupEnabled(func() {
+					BeforeEach(func() {
 						device.EXPECT().Close().Return(nil)
-					}))
+					})
 					It("fails with matched error", callVolumeCleanup)
-					JustAfterEach(IfVolumeCleanupEnabled(func() {
+					JustAfterEach(func() {
 						Expect(err).To(MatchError(discardError))
-					}))
+					})
 				})
 				When("closing error", func() {
 					closingError := errors.New("closing error")
-					BeforeEach(IfVolumeCleanupEnabled(func() {
+					BeforeEach(func() {
 						device.EXPECT().Close().Return(closingError)
-					}))
+					})
 					It("fails with matched errors", callVolumeCleanup)
-					JustAfterEach(IfVolumeCleanupEnabled(func() {
+					JustAfterEach(func() {
 						Expect(err).To(MatchError(discardError))
 						Expect(err).To(MatchError(closingError))
-					}))
+					})
 				})
 			})
 		})
@@ -179,13 +168,13 @@ var _ = Describe("Cleaning up volume", func() {
 							BeforeEach(func() {
 								input = NewMockBlockDevice(ctrl)
 							})
-							JustBeforeEach(IfVolumeCleanupEnabled(func() {
+							JustBeforeEach(func() {
 								input.EXPECT().Name().AnyTimes().Return(inputName)
 								opener.EXPECT().Open(inputName, unix.O_RDONLY).DoAndReturn(func(_ string, _ int) (BlockDevice, error) {
 									input.EXPECT().Close().Return(inputClosingError)
 									return input, nil
 								})
-							}))
+							})
 							WhenInputClosingErrorVariants := func(f func(noClosingErrors bool)) {
 								When("no input closing error", func() {
 									BeforeEach(func() {
@@ -198,9 +187,9 @@ var _ = Describe("Cleaning up volume", func() {
 										inputClosingError = errors.New("can't close device")
 									})
 									f(false)
-									JustAfterEach(IfVolumeCleanupEnabled(func() {
+									JustAfterEach(func() {
 										Expect(err).To(MatchError(inputClosingError))
-									}))
+									})
 								})
 							}
 							deviceName := filepath.Join("/dev", vgName, lvName)
@@ -209,13 +198,13 @@ var _ = Describe("Cleaning up volume", func() {
 								BeforeEach(func() {
 									device = NewMockBlockDevice(ctrl)
 								})
-								JustBeforeEach(IfVolumeCleanupEnabled(func() {
+								JustBeforeEach(func() {
 									opener.EXPECT().Open(deviceName, unix.O_DIRECT|unix.O_RDWR).DoAndReturn(func(_ string, _ int) (BlockDevice, error) {
 										device.EXPECT().Close().Return(deviceClosingError)
 										return device, nil
 									})
 									device.EXPECT().Name().AnyTimes().Return(deviceName)
-								}))
+								})
 								WhenClosingErrorVariants := func(f func(noClosingError bool)) {
 									When("no device closing error", func() {
 										BeforeEach(func() {
@@ -230,14 +219,14 @@ var _ = Describe("Cleaning up volume", func() {
 										WhenInputClosingErrorVariants(func(_ bool) {
 											f(false)
 										})
-										JustAfterEach(IfVolumeCleanupEnabled(func() {
+										JustAfterEach(func() {
 											Expect(err).To(MatchError(deviceClosingError))
-										}))
+										})
 									})
 								}
 								When("copying data", func() {
 									var readMissingBytes int64
-									JustBeforeEach(IfVolumeCleanupEnabled(func() {
+									JustBeforeEach(func() {
 										if blockRange == nil {
 											expectedByteRangeCover = RangeCover{Range{Start: 0, Count: deviceSize}}
 											device.EXPECT().Size().Return(deviceSize, nil)
@@ -285,7 +274,7 @@ var _ = Describe("Cleaning up volume", func() {
 											}
 											return
 										}()...)
-									}))
+									})
 									When("input has enough bytes to read", func() {
 										BeforeEach(func() {
 											readMissingBytes = 0
@@ -313,9 +302,9 @@ var _ = Describe("Cleaning up volume", func() {
 														WhenClosingErrorVariants(func(noClosingError bool) {
 															It("fills the device", callVolumeCleanup)
 															if noClosingError {
-																JustAfterEach(IfVolumeCleanupEnabled(func() {
+																JustAfterEach(func() {
 																	Expect(err).ToNot(HaveOccurred())
-																}))
+																})
 															}
 														})
 													})
@@ -334,9 +323,9 @@ var _ = Describe("Cleaning up volume", func() {
 
 											WhenClosingErrorVariants(func(_ bool) {
 												It("fails", callVolumeCleanup)
-												JustAfterEach(IfVolumeCleanupEnabled(func() {
+												JustAfterEach(func() {
 													Expect(err).To(HaveOccurred())
-												}))
+												})
 											})
 										})
 										When("ThreePass", func() {
@@ -346,9 +335,9 @@ var _ = Describe("Cleaning up volume", func() {
 											})
 											WhenClosingErrorVariants(func(_ bool) {
 												It("fails", callVolumeCleanup)
-												JustAfterEach(IfVolumeCleanupEnabled(func() {
+												JustAfterEach(func() {
 													Expect(err).To(HaveOccurred())
-												}))
+												})
 											})
 										})
 									})
@@ -356,25 +345,25 @@ var _ = Describe("Cleaning up volume", func() {
 							})
 							When("device open failed", func() {
 								deviceOpenError := errors.New("input open error")
-								BeforeEach(IfVolumeCleanupEnabled(func() {
+								BeforeEach(func() {
 									opener.EXPECT().Open(deviceName, unix.O_DIRECT|unix.O_RDWR).Return(nil, deviceOpenError)
-								}))
+								})
 								It("fails with matched error", callVolumeCleanup)
-								JustAfterEach(IfVolumeCleanupEnabled(func() {
+								JustAfterEach(func() {
 									Expect(err).To(MatchError(deviceOpenError))
-								}))
+								})
 							})
 						})
 						When("input open failed", func() {
 							inputOpenError := errors.New("input open error")
-							BeforeEach(IfVolumeCleanupEnabled(func() {
+							BeforeEach(func() {
 								opener.EXPECT().Open(inputName, unix.O_RDONLY).Return(nil, inputOpenError)
-							}))
+							})
 
 							It("fails with matched error", callVolumeCleanup)
-							JustAfterEach(IfVolumeCleanupEnabled(func() {
+							JustAfterEach(func() {
 								Expect(err).To(MatchError(inputOpenError))
-							}))
+							})
 						})
 					})
 				})
