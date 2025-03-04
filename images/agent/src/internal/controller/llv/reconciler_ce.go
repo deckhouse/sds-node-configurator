@@ -14,13 +14,9 @@ limitations under the License.
 package llv
 
 import (
-	"agent/internal/cache"
-	"context"
 	"fmt"
-
-	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
-func (r *Reconciler) cleanupVolumeIfNeeded(ctx context.Context, llv *v1alpha1.LVMLogicalVolume, lv *cache.LVData, vgName string) (shouldRequeue bool, err error) {
+func (r *Reconciler) cleanupVolumeIfNeeded(...any) (shouldRequeue bool, err error) {
 	return false, fmt.Errorf("volume cleanup is not supported in your edition")
 }
