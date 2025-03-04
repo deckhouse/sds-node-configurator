@@ -45,15 +45,15 @@ func (cover RangeCover) Merged() (RangeCover, error) {
 
 	last := Range{Start: 0, Count: 0}
 	reduced := make(RangeCover, 0, len(cover))
-	for _, d := range cover {
+	for _, item := range cover {
 		switch last.Count {
-		case 0:
-			last = d
-		case d.Start - last.Start:
-			last.Count += d.Count
-		default:
+		case 0: // Special case for first range
+			last = item
+		case item.Start - last.Start: // Touching, merge to one range
+			last.Count += item.Count
+		default: // Add previously merged ranges to cover
 			reduced = append(reduced, last)
-			last = d
+			last = item
 		}
 	}
 
