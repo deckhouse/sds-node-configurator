@@ -166,7 +166,7 @@ var _ = Describe("Cleaning up volume", func() {
 			DescribeTableSubtree("block counts",
 				Entry("50 Mib", int64(1024*1024*50/deviceBlockSize)),
 				Entry("1 Mib", int64(1024*1024*1/deviceBlockSize)),
-				Entry("1 Kib", int64(1024)),
+				Entry("4 Kib", int64(1024*4)/int64(deviceBlockSize)),
 				func(deviceBlockCount int64) {
 					deviceSize := deviceBlockCount * int64(deviceBlockSize)
 					When("method is RandomFill", func() {
