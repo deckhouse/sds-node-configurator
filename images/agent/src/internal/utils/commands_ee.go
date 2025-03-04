@@ -8,13 +8,14 @@ Licensed under the Deckhouse Platform Enterprise Edition (EE) license. See https
 package utils
 
 import (
-	"agent/internal"
-	"agent/internal/logger"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os/exec"
+
+	"agent/internal"
+	"agent/internal/logger"
 )
 
 func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta, devID string) (out []byte, err error) {
