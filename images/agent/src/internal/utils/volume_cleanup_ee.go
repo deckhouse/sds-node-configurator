@@ -23,7 +23,7 @@ import (
 	"agent/internal/logger"
 )
 
-func VolumeCleanup(ctx context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, sdsCache *cache.Cache, lv *cache.LVData, volumeCleanup string) (shouldRequeue bool, err error) {
+func VolumeCleanup(ctx context.Context, log logger.Logger, sdsCache *cache.Cache, lv *cache.LVData, volumeCleanup string) (shouldRequeue bool, err error) {
 	vgName := lv.Data.VGName
 	lvName := lv.Data.LVName
 
@@ -34,7 +34,7 @@ func VolumeCleanup(ctx context.Context, log logger.Logger, deviceOpener BlockDev
 		return true, err
 	}
 
-	if err := VolumeCleanupWithRangeCover(ctx, log, deviceOpener, vgName, lvName, volumeCleanup, usedBlockRanges); err != nil {
+	if err := VolumeCleanupWithRangeCover(ctx, log, OsDeviceOpener(), vgName, lvName, volumeCleanup, usedBlockRanges); err != nil {
 		return false, err
 	}
 	return false, nil

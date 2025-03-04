@@ -69,7 +69,7 @@ func (r *Reconciler) cleanupVolumeIfNeeded(ctx context.Context, llv *v1alpha1.LV
 
 	prevFailedMethod = &cleanupMethod
 	r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, cleanupMethod))
-	if shouldRetry, err := utils.VolumeCleanup(ctx, r.log, utils.OsDeviceOpener(), r.sdsCache, lv, cleanupMethod); err != nil {
+	if shouldRetry, err := utils.VolumeCleanup(ctx, r.log, r.sdsCache, lv, cleanupMethod); err != nil {
 		r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, cleanupMethod))
 		if shouldRetry {
 			prevFailedMethod = nil
