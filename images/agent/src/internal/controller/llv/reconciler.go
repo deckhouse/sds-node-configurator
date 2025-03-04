@@ -603,8 +603,8 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		return false, nil
 	}
 
-	if cleanupMethod := llv.Spec.VolumeCleanup; cleanupMethod != nil {
-		cleanupMethod := *cleanupMethod
+	if cleanupMethodPtr := llv.Spec.VolumeCleanup; cleanupMethodPtr != nil {
+		cleanupMethod := *cleanupMethodPtr
 		if cleanupMethod == v1alpha1.VolumeCleanupDiscard && lv.Data.PoolName != "" {
 			err = errors.New("Discard cleanup method is disabled for thin volumes")
 			r.log.Error(err, "[deleteLVIfNeeded] Discard cleanup method is disabled for thin volumes")
