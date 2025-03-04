@@ -150,8 +150,7 @@ func (c *Cache) FindVG(vgName string) *internal.VGData {
 
 func (c *Cache) FindThinPoolMappers(thinLvData *LVData) (tpool, poolMetadataMapper string, err error) {
 	if thinLvData.Data.PoolName == "" {
-		err = fmt.Errorf("pool name is empty")
-		return
+		return "", "", fmt.Errorf("pool name is empty")
 	}
 
 	c.m.RLock()
@@ -159,25 +158,21 @@ func (c *Cache) FindThinPoolMappers(thinLvData *LVData) (tpool, poolMetadataMapp
 
 	poolLv := c.lvs[c.configureLVKey(thinLvData.Data.VGName, thinLvData.Data.PoolName)]
 	if poolLv == nil {
-		err = fmt.Errorf("can't find pool %s", thinLvData.Data.PoolName)
-		return
+		return "", "", fmt.Errorf("can't find pool %s", thinLvData.Data.PoolName)
 	}
 
 	tpool = fmt.Sprintf("%s-tpool", poolLv.Data.LVDmPath)
 
 	if poolLv.Data.MetadataLv == "" {
-		err = fmt.Errorf("metadata name is empty for pool %s", thinLvData.Data.PoolName)
-		return
+		return "", "", fmt.Errorf("metadata name is empty for pool %s", thinLvData.Data.PoolName)
 	}
 
 	metaLv := c.lvs[c.configureLVKey(thinLvData.Data.VGName, poolLv.Data.MetadataLv)]
 	if metaLv == nil {
-		err = fmt.Errorf("can't find metadata %s", poolLv.Data.MetadataLv)
-		return
+		return "", "", fmt.Errorf("can't find metadata %s", poolLv.Data.MetadataLv)
 	}
 
-	poolMetadataMapper = metaLv.Data.LVDmPath
-	return
+	return tpool, metaLv.Data.LVDmPath, nil
 }
 
 func (c *Cache) PrintTheCache(log logger.Logger) {
