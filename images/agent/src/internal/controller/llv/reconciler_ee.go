@@ -24,12 +24,12 @@ func (r *Reconciler) cleanupVolumeIfNeeded(ctx context.Context, llv *v1alpha1.LV
 		return false, fmt.Errorf("volume cleanup is not supported in your edition")
 	}
 
-	var cleanupMethod string
-	if cleanupMethodPtr := llv.Spec.VolumeCleanup; cleanupMethodPtr == nil {
+	cleanupMethodPtr := llv.Spec.VolumeCleanup
+	if cleanupMethodPtr == nil {
 		return false, nil
-	} else {
-		cleanupMethod = *cleanupMethodPtr
 	}
+
+	cleanupMethod := *cleanupMethodPtr
 
 	if cleanupMethod == v1alpha1.VolumeCleanupDiscard && lv.Data.PoolName != "" {
 		err := errors.New("Discard cleanup method is disabled for thin volumes")
