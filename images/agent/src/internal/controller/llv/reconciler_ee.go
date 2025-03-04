@@ -8,14 +8,15 @@ Licensed under the Deckhouse Platform Enterprise Edition (EE) license. See https
 package llv
 
 import (
-	"agent/internal/cache"
-	"agent/internal/utils"
 	"context"
 	"errors"
 	"fmt"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
+
+	"agent/internal/cache"
+	"agent/internal/utils"
 )
 
 func (r *Reconciler) cleanupVolumeIfNeeded(ctx context.Context, llv *v1alpha1.LVMLogicalVolume, lv *cache.LVData, vgName string) (shouldRequeue bool, err error) {
