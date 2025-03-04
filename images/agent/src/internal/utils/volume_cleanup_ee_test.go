@@ -56,13 +56,11 @@ var _ = Describe("Cleaning up volume", func() {
 		}
 	}
 
-	LenFormatter := func(e gomock.Matcher) gomock.Matcher {
+	LengthFormatter := func(e gomock.Matcher) gomock.Matcher {
 		return gomock.GotFormatterAdapter(
 			gomock.GotFormatterFunc(
 				func(i any) string {
 					switch ii := i.(type) {
-					case []any:
-						return fmt.Sprintf("len %d", len(ii))
 					case []byte:
 						return fmt.Sprintf("len %d", len(ii))
 					default:
@@ -264,9 +262,9 @@ var _ = Describe("Cleaning up volume", func() {
 														var read int = int(min(readLimit, int64(toRead)))
 														var written int = int(min(deviceSizeRemain, int64(read)))
 
-														calls = append(calls, input.EXPECT().Read(LenFormatter(gomock.Len(toRead))).Return(read, nil))
+														calls = append(calls, input.EXPECT().Read(LengthFormatter(gomock.Len(toRead))).Return(read, nil))
 														if read != 0 {
-															calls = append(calls, device.EXPECT().WriteAt(LenFormatter(gomock.Len(read)), offset).Return(written, nil))
+															calls = append(calls, device.EXPECT().WriteAt(LengthFormatter(gomock.Len(read)), offset).Return(written, nil))
 														}
 
 														if read > written {
@@ -274,7 +272,7 @@ var _ = Describe("Cleaning up volume", func() {
 														}
 
 														if toRead > read {
-															calls = append(calls, input.EXPECT().Read(LenFormatter(gomock.Any())).Return(0, io.EOF))
+															calls = append(calls, input.EXPECT().Read(LengthFormatter(gomock.Any())).Return(0, io.EOF))
 															return
 														}
 
