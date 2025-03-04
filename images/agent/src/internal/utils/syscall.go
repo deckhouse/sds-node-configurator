@@ -76,10 +76,8 @@ EOF
 //
 //nolint:revive
 const (
-	BLKDISCARD   = uintptr(0x1277)
-	BLKGETSIZE64 = uintptr(unix.BLKGETSIZE64)
+	BLKDISCARD = uintptr(0x1277)
 
-	SYS_IOCTL = unix.SYS_IOCTL
-	S_IFMT    = unix.S_IFMT  /* type of file mask */
-	S_IFBLK   = unix.S_IFBLK /* block special */
+	S_IFMT  = unix.S_IFMT  /* type of file mask */
+	S_IFBLK = unix.S_IFBLK /* block special */
 )

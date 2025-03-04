@@ -99,9 +99,9 @@ func (device *blockDevice[TSysCall]) Size() (int64, error) {
 
 	var blockDeviceSize uint64
 	_, _, errno := device.syscall.Syscall(
-		SYS_IOCTL,
+		unix.SYS_IOCTL,
 		device.Fd(),
-		BLKGETSIZE64,
+		unix.BLKGETSIZE64,
 		uintptr(unsafe.Pointer(&blockDeviceSize)))
 	if errno != 0 {
 		err := errors.New(errno.Error())
