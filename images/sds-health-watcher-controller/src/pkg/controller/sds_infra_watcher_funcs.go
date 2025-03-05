@@ -27,9 +27,9 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/sds-node-configurator/images/sds-health-watcher-controller/internal"
-	"github.com/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
-	"github.com/sds-node-configurator/images/sds-health-watcher-controller/pkg/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/internal"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/monitoring"
 )
 
 func getNodeNamesFromPods(pods map[string]v1.Pod) []string {

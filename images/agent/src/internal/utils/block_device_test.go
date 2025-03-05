@@ -10,8 +10,8 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
 
-	. "agent/internal/mock_utils"
-	. "agent/internal/utils"
+	. "github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
+	. "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 var _ = Describe("BlockDevice", func() {

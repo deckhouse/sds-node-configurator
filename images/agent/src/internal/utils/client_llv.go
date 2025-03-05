@@ -8,7 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 type LLVClient struct {

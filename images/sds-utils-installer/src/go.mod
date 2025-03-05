@@ -1,3 +1,3 @@
-module bin-copier
+module github.com/deckhouse/sds-node-configurator/images/sds-utils-installer
 
-go 1.22.3
+go 1.22.6

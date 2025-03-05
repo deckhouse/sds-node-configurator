@@ -9,7 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"agent/internal/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 )
 
 type BDClient struct {

@@ -19,7 +19,7 @@ import (
 	"context"
 	"fmt"
 
-	"agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 func VolumeCleanup(_ context.Context, _ logger.Logger, _ BlockDeviceOpener, _, _, _ string) error {

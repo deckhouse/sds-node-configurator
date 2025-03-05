@@ -10,7 +10,7 @@
 package mock_utils
 
 import (
-	utils "agent/internal/utils"
+	utils "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	fs "io/fs"
 	reflect "reflect"
 	syscall "syscall"

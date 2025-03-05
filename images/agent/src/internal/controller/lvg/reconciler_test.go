@@ -14,12 +14,12 @@ import (
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"agent/internal"
-	"agent/internal/cache"
-	"agent/internal/logger"
-	"agent/internal/monitoring"
-	"agent/internal/test_utils"
-	"agent/internal/utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {

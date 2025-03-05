@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"agent/internal"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
 func TestCommands(t *testing.T) {

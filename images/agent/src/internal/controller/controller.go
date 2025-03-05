@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 type ReconcileRequest[T client.Object] struct {

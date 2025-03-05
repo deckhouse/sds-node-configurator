@@ -26,7 +26,7 @@ import (
 	"github.com/sirupsen/logrus"
 	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
 
-	"webhooks/handlers"
+	"github.com/deckhouse/sds-node-configurator/images/webhooks/handlers"
 )
 
 type config struct {

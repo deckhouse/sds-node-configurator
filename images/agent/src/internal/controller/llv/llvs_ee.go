@@ -17,7 +17,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"k8s.io/apimachinery/pkg/types"
 
-	"agent/internal/utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 func (r *Reconciler) handleLLVSSource(ctx context.Context, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LVMVolumeGroup) (string, bool, error) {

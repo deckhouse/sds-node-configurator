@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"agent/internal"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
 func TestCache(t *testing.T) {

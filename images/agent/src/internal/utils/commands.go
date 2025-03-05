@@ -29,9 +29,9 @@ import (
 	"strings"
 	"time"
 
-	"agent/internal"
-	"agent/internal/logger"
-	"agent/internal/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 )
 
 func GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {

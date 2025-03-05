@@ -33,12 +33,12 @@ import (
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"agent/internal"
-	"agent/internal/cache"
-	"agent/internal/controller"
-	"agent/internal/logger"
-	"agent/internal/monitoring"
-	"agent/internal/utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 const ReconcilerName = "lvm-logical-volume-watcher-controller"
