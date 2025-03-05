@@ -32,12 +32,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	mc "sds-health-watcher-controller/api"
-	"sds-health-watcher-controller/config"
-	"sds-health-watcher-controller/pkg/controller"
-	"sds-health-watcher-controller/pkg/kubutils"
-	"sds-health-watcher-controller/pkg/logger"
-	"sds-health-watcher-controller/pkg/monitoring"
+	mc "github.com/sds-node-configurator/images/sds-health-watcher-controller/api"
+	"github.com/sds-node-configurator/images/sds-health-watcher-controller/config"
+	"github.com/sds-node-configurator/images/sds-health-watcher-controller/pkg/controller"
+	"github.com/sds-node-configurator/images/sds-health-watcher-controller/pkg/kubutils"
+	"github.com/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
+	"github.com/sds-node-configurator/images/sds-health-watcher-controller/pkg/monitoring"
 )
 
 var (

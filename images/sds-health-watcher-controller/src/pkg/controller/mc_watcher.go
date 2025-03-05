@@ -32,8 +32,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	mc "sds-health-watcher-controller/api"
-	"sds-health-watcher-controller/pkg/logger"
+	mc "github.com/sds-node-configurator/images/sds-health-watcher-controller/api"
+	"github.com/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
 )
 
 const (
