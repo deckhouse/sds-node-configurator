@@ -12,10 +12,12 @@ git:
     includePaths:
       - api
       - lib/go
-      - images/{{ $.ImageName }}/src
+      - images/{{ $.ImageName }}
     stageDependencies:
       install:
         - '**/*'
+    excludePaths:
+      - images/{{ $.ImageName }}/werf.yaml
 
 shell:
   install:
@@ -24,7 +26,6 @@ shell:
     - git clone --depth 1 --branch {{ $.Versions.UTIL_LINUX }} {{ env "SOURCE_REPO" }}/util-linux/util-linux.git /src/util-linux
     - rm -rf /src/util-linux/.git
     - rm -rf /src/.git
-
 
 ---
 image: {{ $.ImageName }}-binaries-artifact

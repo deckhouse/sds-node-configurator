@@ -7,16 +7,17 @@ from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
-  - add: /images/{{ $.ImageName }}/src
-    to: /src/images/{{ $.ImageName }}/src
+  - add: /
+    to: /src
+    includePaths:
+      - api
+      - lib/go
+      - images/{{ $.ImageName }}
     stageDependencies:
       install:
-        - "**/*"
-  - add: /api
-    to: /src/api
-    stageDependencies:
-      install:
-        - "**/*"
+        - '**/*'
+    excludePaths:
+      - images/{{ $.ImageName }}/werf.yaml
 
 shell:
   install:

@@ -13,6 +13,8 @@ require (
 	github.com/pilebones/go-udev v0.9.0
 	github.com/prometheus/client_golang v1.19.1
 	github.com/stretchr/testify v1.9.0
+	go.uber.org/mock v0.5.0
+	golang.org/x/sys v0.30.0
 	k8s.io/api v0.32.1
 	k8s.io/apiextensions-apiserver v0.32.0
 	k8s.io/apimachinery v0.32.1
@@ -22,9 +24,9 @@ require (
 	sigs.k8s.io/controller-runtime v0.20.1
 )
 
-replace github.com/deckhouse/sds-node-configurator/api => ../../../api
+replace github.com/deckhouse/sds-node-configurator/api => ../../api
 
-replace github.com/deckhouse/sds-node-configurator/lib/go/common => ../../../lib/go/common
+replace github.com/deckhouse/sds-node-configurator/lib/go/common => ../../lib/go/common
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -60,11 +62,9 @@ require (
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	go.uber.org/mock v0.5.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/oauth2 v0.26.0 // indirect
 	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/term v0.29.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/time v0.10.0 // indirect

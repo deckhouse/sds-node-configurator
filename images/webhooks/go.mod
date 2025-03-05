@@ -10,9 +10,9 @@ require (
 	k8s.io/apimachinery v0.32.1
 )
 
-replace github.com/deckhouse/sds-node-configurator/api => ../../../api
+replace github.com/deckhouse/sds-node-configurator/api => ../../api
 
-replace github.com/deckhouse/sds-node-configurator/lib/go/common => ../../../lib/go/common
+replace github.com/deckhouse/sds-node-configurator/lib/go/common => ../../lib/go/common
 
 require (
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
