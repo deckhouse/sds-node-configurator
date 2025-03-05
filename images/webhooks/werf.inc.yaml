@@ -34,10 +34,10 @@ mount:
     to: /go/pkg
 shell:
   setup:
-    - cd /src/images/{{ $.ImageName }}/src/cmd
+    - cd /src/images/{{ $.ImageName }}/cmd
     - export CGO_ENABLED=0 GOOS=linux GOARCH=amd64
-    - go build -ldflags="-s -w" -tags {{ $.Root.MODULE_EDITION }} -o /webhooks
-    - chmod +x /webhooks
+    - go build -ldflags="-s -w" -tags {{ $.Root.MODULE_EDITION }} -o /{{ $.ImageName }}
+    - chmod +x /{{ $.ImageName }}
 
 ---
 image: {{ $.ImageName }}-distroless-artifact
@@ -79,5 +79,5 @@ import:
     to: /webhooks
     before: setup
 docker:
-  ENTRYPOINT: ["/webhooks"]
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
   USER: deckhouse:deckhouse

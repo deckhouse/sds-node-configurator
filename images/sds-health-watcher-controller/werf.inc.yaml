@@ -40,7 +40,7 @@ mount:
 
 shell:
   setup:
-    - cd /src/images/{{ $.ImageName }}/src/cmd
+    - cd /src/images/{{ $.ImageName }}/cmd
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
     - chmod +x /{{ $.ImageName }}
 
