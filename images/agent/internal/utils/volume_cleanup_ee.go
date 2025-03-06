@@ -15,10 +15,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"golang.org/x/sys/unix"
-
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 func VolumeCleanup(ctx context.Context, log logger.Logger, deviceOpener BlockDeviceOpener, vgName, lvName, volumeCleanup string) error {

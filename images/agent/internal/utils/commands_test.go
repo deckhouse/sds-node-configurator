@@ -19,10 +19,9 @@ package utils
 import (
 	"testing"
 
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/api/resource"
-
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
 func TestCommands(t *testing.T) {

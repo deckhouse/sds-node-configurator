@@ -18,11 +18,10 @@ package utils_test
 import (
 	"context"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	. "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Cleaning up volume", func() {
