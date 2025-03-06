@@ -52,7 +52,7 @@ jobs:
               fi
               
               echo "Cloning repo $repository into $temp_dir"
-              git clone "$repository" "$temp_dir/$repository" >/dev/null 2>&1
+              git clone "$repository" "$temp_dir/$repository" >/dev/null 2>&1 || echo "While parsing line '$1' from $go_mod_file" && exit 1 
           
               if [ -d "$temp_dir/$repository/api" ]; then
                 cd "$temp_dir/$repository" || continue
