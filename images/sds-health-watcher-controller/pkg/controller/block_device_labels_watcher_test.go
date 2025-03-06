@@ -5,12 +5,11 @@ import (
 	"testing"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/internal"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/internal"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
 )
 
 func TestRunBlockDeviceLabelsWatcher(t *testing.T) {

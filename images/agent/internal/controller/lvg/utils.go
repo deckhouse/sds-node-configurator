@@ -2,10 +2,9 @@ package lvg
 
 import (
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
 func isApplied(lvg *v1alpha1.LVMVolumeGroup) bool {
