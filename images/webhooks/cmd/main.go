@@ -23,10 +23,9 @@ import (
 	"os"
 
 	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/webhooks/handlers"
 	"github.com/sirupsen/logrus"
 	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
-
-	"github.com/deckhouse/sds-node-configurator/images/webhooks/handlers"
 )
 
 type config struct {

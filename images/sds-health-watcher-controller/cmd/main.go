@@ -23,6 +23,12 @@ import (
 	goruntime "runtime"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	mc "github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/api"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/config"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/controller"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/kubutils"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/monitoring"
 	v1 "k8s.io/api/core/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -31,13 +37,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
-
-	mc "github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/api"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/config"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/controller"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/kubutils"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/monitoring"
 )
 
 var (
