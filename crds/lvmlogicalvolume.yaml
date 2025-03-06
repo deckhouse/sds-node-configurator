@@ -96,9 +96,9 @@ spec:
 
                     Allowed values:
 
-                    - `RandomFillSinglePass`: The volume will be overwritten with random data once before deletion. This option is not recommended for solid-state drives (SSDs), as overwriting reduces the drive's lifespan.
-                    - `RandomFillThreePass`: The volume will be overwritten with random data three times before deletion. This option is also not recommended for SSDs, as overwriting reduces the drive's lifespan.
-                    - `Discard`: Before deletion, all blocks of the volume will be marked as free using the `discard` system call. This option is applicable only to SSDs.
+                    - `RandomFillSinglePass`: The volume will be overwritten with random data once before deletion. This option is not recommended for solid-state drives (SSDs), as overwriting reduces the drive's lifespan. For thin volumes, only the space in use at the moment of volume deletion will be overwritten.
+                    - `RandomFillThreePass`: The volume will be overwritten with random data three times before deletion. This option is also not recommended for SSDs, as overwriting reduces the drive's lifespan. For thin volumes, only the space in use at the moment of volume deletion will be overwritten.
+                    - `Discard`: Before deletion, all blocks of the volume will be marked as free using the `discard` system call. This option is applicable only to SSDs and thick volumes.
                 thin:
                   type: object
                   description: |
