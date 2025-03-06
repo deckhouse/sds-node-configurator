@@ -11,11 +11,10 @@ import (
 	"context"
 	"encoding/xml"
 
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	. "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
-	"agent/internal/logger"
-	. "agent/internal/utils"
 )
 
 var _ = Describe("Thin mapping", func() {

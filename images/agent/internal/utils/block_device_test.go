@@ -5,13 +5,12 @@ import (
 	"os"
 	"unsafe"
 
+	. "github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
+	. "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
-
-	. "agent/internal/mock_utils"
-	. "agent/internal/utils"
 )
 
 var _ = Describe("BlockDevice", func() {

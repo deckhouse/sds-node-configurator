@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"time"
 
-	"sds-health-watcher-controller/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
 )
 
 const (

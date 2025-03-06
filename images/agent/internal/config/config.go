@@ -25,8 +25,8 @@ import (
 	"strings"
 	"time"
 
-	"agent/internal"
-	"agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 const (

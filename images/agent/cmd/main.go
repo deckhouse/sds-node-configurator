@@ -23,6 +23,18 @@ import (
 	goruntime "runtime"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/bd"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llv"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llv_extender"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lvg"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/kubutils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/scanner"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
@@ -32,19 +44,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
-
-	"agent/internal/cache"
-	"agent/internal/config"
-	"agent/internal/controller"
-	"agent/internal/controller/bd"
-	"agent/internal/controller/llv"
-	"agent/internal/controller/llv_extender"
-	"agent/internal/controller/lvg"
-	"agent/internal/kubutils"
-	"agent/internal/logger"
-	"agent/internal/monitoring"
-	"agent/internal/scanner"
-	"agent/internal/utils"
 )
 
 var (

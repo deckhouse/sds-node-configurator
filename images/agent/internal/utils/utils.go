@@ -6,9 +6,8 @@ import (
 	"strings"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"k8s.io/apimachinery/pkg/api/resource"
-
-	"agent/internal"
 )
 
 func IsPercentSize(size string) bool {

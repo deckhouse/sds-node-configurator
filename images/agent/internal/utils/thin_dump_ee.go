@@ -13,7 +13,7 @@ import (
 	"errors"
 	"fmt"
 
-	"agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 type (

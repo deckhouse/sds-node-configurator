@@ -25,9 +25,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"sds-health-watcher-controller/config"
-	"sds-health-watcher-controller/pkg/logger"
-	"sds-health-watcher-controller/pkg/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/config"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/monitoring"
 )
 
 const (

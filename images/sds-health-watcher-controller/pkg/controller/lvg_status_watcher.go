@@ -17,8 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"sds-health-watcher-controller/internal"
-	"sds-health-watcher-controller/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/internal"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
 )
 
 const (

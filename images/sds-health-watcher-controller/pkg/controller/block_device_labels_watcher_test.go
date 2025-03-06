@@ -9,8 +9,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sds-health-watcher-controller/internal"
-	"sds-health-watcher-controller/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/internal"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
 )
 
 func TestRunBlockDeviceLabelsWatcher(t *testing.T) {

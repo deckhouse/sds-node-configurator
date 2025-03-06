@@ -6,11 +6,10 @@ import (
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"agent/internal/logger"
-	"agent/internal/monitoring"
 )
 
 type LVGClient struct {

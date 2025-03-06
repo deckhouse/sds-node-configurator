@@ -1,6 +1,6 @@
-module webhooks
+module github.com/deckhouse/sds-node-configurator/images/webhooks
 
-go 1.23.5
+go 1.23.6
 
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250206203415-a9ffd855f5a3
@@ -10,9 +10,9 @@ require (
 	k8s.io/apimachinery v0.32.1
 )
 
-replace github.com/deckhouse/sds-node-configurator/api => ../../../api
+replace github.com/deckhouse/sds-node-configurator/api => ../../api
 
-replace github.com/deckhouse/sds-node-configurator/lib/go/common => ../../../lib/go/common
+replace github.com/deckhouse/sds-node-configurator/lib/go/common => ../../lib/go/common
 
 require (
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect

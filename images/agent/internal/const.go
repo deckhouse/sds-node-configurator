@@ -19,7 +19,7 @@ package internal
 import "k8s.io/apimachinery/pkg/api/resource"
 
 const (
-	// LVGUpdateTriggerLabel if you change this value, you must change its value in sds-health-watcher-controller/src/pkg/block_device_labels_watcher.go as well
+	// LVGUpdateTriggerLabel if you change this value, you must change its value in sds-health-watcher-controller/pkg/block_device_labels_watcher.go as well
 	LVGUpdateTriggerLabel = "storage.deckhouse.io/update-trigger"
 
 	resizeDelta                  = "32Mi"

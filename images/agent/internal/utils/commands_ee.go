@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"os/exec"
 
-	"agent/internal"
-	"agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta, devID string) (out []byte, err error) {
