@@ -18,17 +18,10 @@ import (
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 )
 
-func (r *Reconciler) cleanupVolumeIfNeeded(ctx context.Context, llv *v1alpha1.LVMLogicalVolume, lv *cache.LVData, vgName string) (shouldRequeue bool, err error) {
-	cleanupMethodPtr := llv.Spec.VolumeCleanup
-	if cleanupMethodPtr == nil {
-		return false, nil
-	}
-	
+func (r *Reconciler) cleanupVolume(ctx context.Context, llv *v1alpha1.LVMLogicalVolume, lv *cache.LVData, vgName string, cleanupMethod string) (shouldRequeue bool, err error) {
 	if !feature.VolumeCleanupEnabled() {
 		return false, fmt.Errorf("volume cleanup is not supported in your edition")
 	}
-
-	cleanupMethod := *cleanupMethodPtr
 
 	if cleanupMethod == v1alpha1.VolumeCleanupDiscard && lv.Data.PoolName != "" {
 		err := errors.New("Discard cleanup method is disabled for thin volumes")

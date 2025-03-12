@@ -601,8 +601,10 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		return false, nil
 	}
 
-	if shouldRequeue, err := r.cleanupVolumeIfNeeded(ctx, llv, lv, vgName); err != nil {
-		return shouldRequeue, err
+	if cleanupMethodPtr := llv.Spec.VolumeCleanup; cleanupMethodPtr != nil {
+		if shouldRequeue, err := r.cleanupVolume(ctx, llv, lv, vgName, *cleanupMethodPtr); err != nil {
+			return shouldRequeue, err
+		}
 	}
 
 	cmd, err := utils.RemoveLV(vgName, llv.Spec.ActualLVNameOnTheNode)

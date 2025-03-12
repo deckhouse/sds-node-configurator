@@ -19,6 +19,6 @@ import (
 	"fmt"
 )
 
-func (r *Reconciler) cleanupVolumeIfNeeded(...any) (shouldRequeue bool, err error) {
+func (r *Reconciler) cleanupVolume(...any) (shouldRequeue bool, err error) {
 	return false, fmt.Errorf("volume cleanup is not supported in your edition")
 }
