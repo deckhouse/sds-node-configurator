@@ -32,7 +32,7 @@ func (r *Reconciler) cleanupVolumeIfNeeded(ctx context.Context, llv *v1alpha1.LV
 
 	if cleanupMethod == v1alpha1.VolumeCleanupDiscard && lv.Data.PoolName != "" {
 		err := errors.New("Discard cleanup method is disabled for thin volumes")
-		r.log.Error(err, "[deleteLVIfNeeded] Discard cleanup method is disabled for thin volumes")
+		r.log.Error(err, "[deleteLVIfNeeded] Discard cleanup method is not allowed for thin volumes")
 		return false, err
 	}
 
