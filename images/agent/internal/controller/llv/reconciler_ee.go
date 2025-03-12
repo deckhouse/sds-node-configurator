@@ -19,13 +19,13 @@ import (
 )
 
 func (r *Reconciler) cleanupVolumeIfNeeded(ctx context.Context, llv *v1alpha1.LVMLogicalVolume, lv *cache.LVData, vgName string) (shouldRequeue bool, err error) {
-	if !feature.VolumeCleanupEnabled() {
-		return false, fmt.Errorf("volume cleanup is not supported in your edition")
-	}
-
 	cleanupMethodPtr := llv.Spec.VolumeCleanup
 	if cleanupMethodPtr == nil {
 		return false, nil
+	}
+	
+	if !feature.VolumeCleanupEnabled() {
+		return false, fmt.Errorf("volume cleanup is not supported in your edition")
 	}
 
 	cleanupMethod := *cleanupMethodPtr
