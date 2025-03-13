@@ -34,7 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func TestLVMLogicaVolumeWatcher(t *testing.T) {
+func TestLVMLogicalVolumeWatcher(t *testing.T) {
 	var (
 		vgName = "test-vg"
 		ctx    = context.Background()

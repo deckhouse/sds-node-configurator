@@ -13,15 +13,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils
+package llv
 
 import (
-	"context"
 	"fmt"
-
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
-func VolumeCleanup(_ context.Context, _ logger.Logger, _ BlockDeviceOpener, _, _, _ string) error {
-	return fmt.Errorf("volume cleanup is not supported in your edition")
+func (r *Reconciler) cleanupVolume(...any) (shouldRequeue bool, err error) {
+	return false, fmt.Errorf("volume cleanup is not supported in your edition")
 }

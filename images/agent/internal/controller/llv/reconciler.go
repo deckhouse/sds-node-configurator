@@ -588,7 +588,7 @@ func checkIfLVBelongsToLLV(llv *v1alpha1.LVMLogicalVolume, lv *internal.LVData) 
 	return true
 }
 
-func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v1alpha1.LVMLogicalVolume) (shouldRequeue bool, err error) {
+func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v1alpha1.LVMLogicalVolume) (bool, error) {
 	lv := r.sdsCache.FindLV(vgName, llv.Spec.ActualLVNameOnTheNode)
 	if lv == nil || !lv.Exist {
 		r.log.Warning(fmt.Sprintf("[deleteLVIfNeeded] did not find LV %s in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
@@ -601,46 +601,10 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		return false, nil
 	}
 
-	if llv.Spec.Type == internal.Thick && llv.Spec.Thick != nil && llv.Spec.Thick.VolumeCleanup != nil {
-		method := *llv.Spec.Thick.VolumeCleanup
-		lvName := llv.Spec.ActualLVNameOnTheNode
-		started, prevFailedMethod := r.startCleanupRunning(vgName, lvName)
-		if !started {
-			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] cleanup already running for LV %s in VG %s", lvName, vgName))
-			return false, errAlreadyRunning
+	if cleanupMethodPtr := llv.Spec.VolumeCleanup; cleanupMethodPtr != nil {
+		if shouldRequeue, err := r.cleanupVolume(ctx, llv, lv, vgName, *cleanupMethodPtr); err != nil {
+			return shouldRequeue, err
 		}
-		r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] starting cleaning up for LV %s in VG %s with method %s", lvName, vgName, method))
-		defer func() {
-			r.log.Trace(fmt.Sprintf("[deleteLVIfNeeded] stopping cleaning up for LV %s in VG %s with method %s", lvName, vgName, method))
-			err := r.stopCleanupRunning(vgName, lvName, prevFailedMethod)
-			if err != nil {
-				r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] can't unregister running cleanup for LV %s in VG %s", lvName, vgName))
-			}
-		}()
-
-		// prevent doing cleanup with previously failed method
-		if prevFailedMethod != nil && *prevFailedMethod == method {
-			r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] was already failed with method %s for LV %s in VG %s", *prevFailedMethod, lvName, vgName))
-			return false, errCleanupSameAsPreviouslyFailed
-		}
-		err := r.llvCl.UpdatePhaseIfNeeded(
-			ctx,
-			llv,
-			v1alpha1.PhaseCleaning,
-			fmt.Sprintf("Cleaning up volume %s in %s group using %s", lvName, vgName, method),
-		)
-		if err != nil {
-			r.log.Error(err, "[deleteLVIfNeeded] changing phase to Cleaning")
-			return true, fmt.Errorf("changing phase to Cleaning :%w", err)
-		}
-		prevFailedMethod = &method
-		r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] running cleanup for LV %s in VG %s with method %s", lvName, vgName, method))
-		err = utils.VolumeCleanup(ctx, r.log, utils.OsDeviceOpener(), vgName, lvName, method)
-		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to clean up LV %s in VG %s with method %s", lvName, vgName, method))
-			return true, err
-		}
-		prevFailedMethod = nil
 	}
 
 	cmd, err := utils.RemoveLV(vgName, llv.Spec.ActualLVNameOnTheNode)

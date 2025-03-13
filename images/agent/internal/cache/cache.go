@@ -148,6 +148,33 @@ func (c *Cache) FindVG(vgName string) *internal.VGData {
 	return nil
 }
 
+func (c *Cache) FindThinPoolMappers(thinLvData *LVData) (tpool, poolMetadataMapper string, err error) {
+	if thinLvData.Data.PoolName == "" {
+		return "", "", fmt.Errorf("pool name is empty")
+	}
+
+	c.m.RLock()
+	defer c.m.RUnlock()
+
+	poolLv := c.lvs[c.configureLVKey(thinLvData.Data.VGName, thinLvData.Data.PoolName)]
+	if poolLv == nil {
+		return "", "", fmt.Errorf("can't find pool %s", thinLvData.Data.PoolName)
+	}
+
+	tpool = fmt.Sprintf("%s-tpool", poolLv.Data.LVDmPath)
+
+	if poolLv.Data.MetadataLv == "" {
+		return "", "", fmt.Errorf("metadata name is empty for pool %s", thinLvData.Data.PoolName)
+	}
+
+	metaLv := c.lvs[c.configureLVKey(thinLvData.Data.VGName, poolLv.Data.MetadataLv)]
+	if metaLv == nil {
+		return "", "", fmt.Errorf("can't find metadata %s", poolLv.Data.MetadataLv)
+	}
+
+	return tpool, metaLv.Data.LVDmPath, nil
+}
+
 func (c *Cache) PrintTheCache(log logger.Logger) {
 	log.Trace("*****************CACHE BEGIN*****************")
 	log.Trace("[Devices BEGIN]")

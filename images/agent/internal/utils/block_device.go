@@ -16,6 +16,8 @@ type blockDevice[TSysCall SysCall] struct {
 	syscall TSysCall
 }
 
+var _ BlockDevice = &blockDevice[osSyscall]{}
+
 type Discarder interface {
 	Discard(start, count uint64) error
 }
@@ -35,6 +37,7 @@ type BlockDevice interface {
 	Discarder
 
 	Size() (int64, error)
+	BlockSize() (int, error)
 }
 
 type BlockDeviceOpener interface {
@@ -98,14 +101,14 @@ func (device *blockDevice[TSysCall]) Size() (int64, error) {
 	_, _, errno := device.syscall.Syscall(
 		unix.SYS_IOCTL,
 		device.Fd(),
-		BLKGETSIZE64,
+		unix.BLKGETSIZE64,
 		uintptr(unsafe.Pointer(&blockDeviceSize)))
 	if errno != 0 {
 		err := errors.New(errno.Error())
 		return 0, fmt.Errorf("error calling ioctl BLKGETSIZE64: %w", err)
 	}
 	if blockDeviceSize == 0 {
-		return 0, fmt.Errorf("block size is invalid")
+		return 0, fmt.Errorf("block device size is invalid")
 	}
 
 	return int64(blockDeviceSize), nil
@@ -113,4 +116,24 @@ func (device *blockDevice[TSysCall]) Size() (int64, error) {
 
 func (device *blockDevice[TSysCall]) Discard(start, count uint64) error {
 	return device.syscall.Blkdiscard(device.Fd(), start, count)
+}
+
+func (device *blockDevice[TSysCall]) BlockSize() (blockSize int, err error) {
+	_, _, errno := device.syscall.Syscall(
+		unix.SYS_IOCTL,
+		device.Fd(),
+		unix.BLKSSZGET,
+		uintptr(unsafe.Pointer(&blockSize)))
+
+	if errno != 0 {
+		err = errors.New(errno.Error())
+		err = fmt.Errorf("error calling ioctl BLKGETSIZE64: %w", err)
+		return
+	}
+	if blockSize == 0 {
+		err = fmt.Errorf("block size is invalid")
+		return
+	}
+
+	return
 }

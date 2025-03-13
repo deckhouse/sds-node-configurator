@@ -46,7 +46,7 @@ func (osSyscall) Blkdiscard(fd uintptr, start, count uint64) error {
 	_, _, errno := unix.Syscall(
 		unix.SYS_IOCTL,
 		fd,
-		uintptr(BLKDISCARD),
+		BLKDISCARD,
 		uintptr(unsafe.Pointer(&rng)))
 
 	if errno != 0 {
@@ -56,7 +56,7 @@ func (osSyscall) Blkdiscard(fd uintptr, start, count uint64) error {
 	return nil
 }
 
-/* To find these constant run:
+/* To find these constant missing from unix module:
 gcc -o test -x c - <<EOF
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -66,9 +66,6 @@ gcc -o test -x c - <<EOF
 #define PRINT_CONSTANT(name, fmt) printf(#name " = " fmt "\n", name)
 
 int main() {
-    PRINT_CONSTANT(S_IFMT, "0x%x");
-    PRINT_CONSTANT(S_IFBLK, "0x%x");
-    PRINT_CONSTANT(BLKGETSIZE64, "0x%lx");
     PRINT_CONSTANT(BLKDISCARD, "0x%x");
     return 0;
 }
@@ -79,10 +76,8 @@ EOF
 //
 //nolint:revive
 const (
-	BLKDISCARD = 0x1277
+	BLKDISCARD = uintptr(0x1277)
 
-	BLKGETSIZE64 = uintptr(0x80081272)
-
-	S_IFMT  = 0xf000 /* type of file mask */
-	S_IFBLK = 0x6000 /* block special */
+	S_IFMT  = unix.S_IFMT  /* type of file mask */
+	S_IFBLK = unix.S_IFBLK /* block special */
 )

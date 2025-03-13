@@ -104,7 +104,7 @@ func GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.
 
 func GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	args := []string{"lvs", "-o", "+vg_uuid,tags", "--units", "B", "--nosuffix", "--reportformat", "json"}
+	args := []string{"lvs", "-o", "+vg_uuid,tags,thin_id,metadata_lv,lv_dm_path", "--units", "B", "--nosuffix", "--all", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
@@ -648,11 +648,15 @@ func unmarshalLVs(out []byte) ([]internal.LVData, error) {
 	return lvs, nil
 }
 
-func lvmStaticExtendedArgs(args []string) []string {
+func nsentrerExpendedArgs(cmd string, args ...string) []string {
 	nsenterArgs := []string{"-t", "1", "-m", "-u", "-i", "-n", "-p"}
-	lvmStaticBin := []string{"--", internal.LVMCmd}
-	nsenterArgs = append(nsenterArgs, lvmStaticBin...)
+	cmdArgs := []string{"--", cmd}
+	nsenterArgs = append(nsenterArgs, cmdArgs...)
 	return append(nsenterArgs, args...)
+}
+
+func lvmStaticExtendedArgs(args []string) []string {
+	return nsentrerExpendedArgs(internal.LVMCmd, args...)
 }
 
 // filterStdErr processes a bytes.Buffer containing stderr output and filters out specific
