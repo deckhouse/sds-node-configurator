@@ -26,7 +26,7 @@ defaults:
 
 jobs:
   set_edition:
-    runs-on: [self-hosted, regular, selectel]
+    runs-on: [self-hosted, large]
     name: Set edition
     outputs:
       module_edition: ${{ steps.set-vars.outputs.MODULE_EDITION }}
@@ -57,7 +57,7 @@ jobs:
           [[ -n $EDITION ]] && MODULE_EDITION=$EDITION
           echo "MODULE_EDITION=$MODULE_EDITION" >> "$GITHUB_OUTPUT"
   dev_setup_build:
-    runs-on: [self-hosted, regular, selectel]
+    runs-on: [self-hosted, large]
     name: Build and Push images
     needs: [set_edition]
     env:
