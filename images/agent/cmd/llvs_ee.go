@@ -15,6 +15,8 @@ package main
 import (
 	"os"
 
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
@@ -22,7 +24,6 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 func addLLVSReconciler(

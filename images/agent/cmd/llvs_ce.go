@@ -19,11 +19,12 @@ limitations under the License.
 package main
 
 import (
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 func addLLVSReconciler(

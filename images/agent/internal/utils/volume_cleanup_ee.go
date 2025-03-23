@@ -21,10 +21,11 @@ import (
 	"strconv"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
-	"golang.org/x/sys/unix"
 )
 
 func VolumeCleanup(ctx context.Context, log logger.Logger, sdsCache *cache.Cache, lv *cache.LVData, volumeCleanup string) (shouldRequeue bool, err error) {

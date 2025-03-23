@@ -22,9 +22,10 @@ import (
 	reflect "reflect"
 	syscall "syscall"
 
-	utils "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	gomock "go.uber.org/mock/gomock"
 	unix "golang.org/x/sys/unix"
+
+	utils "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 //go:generate mockgen -write_generate_directive -typed github.com/deckhouse/sds-node-configurator/images/agent/internal/utils SysCall,BlockDevice,File,FileOpener,BlockDeviceOpener

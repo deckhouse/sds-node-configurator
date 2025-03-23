@@ -21,9 +21,10 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 func IsPercentSize(size string) bool {

@@ -19,10 +19,11 @@ package controller
 import (
 	"context"
 
-	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"gopkg.in/yaml.v3"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
 func getTargetConditionsCount(lvgCrd *v1.CustomResourceDefinition) (int, error) {

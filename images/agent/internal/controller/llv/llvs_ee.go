@@ -17,10 +17,11 @@ import (
 	"errors"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/types"
+
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 func (r *Reconciler) handleLLVSSource(ctx context.Context, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LVMVolumeGroup) (string, bool, error) {

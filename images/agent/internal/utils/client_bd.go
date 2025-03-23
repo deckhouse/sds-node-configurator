@@ -20,11 +20,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 )
 
 type BDClient struct {
