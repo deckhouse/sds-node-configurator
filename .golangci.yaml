@@ -14,29 +14,26 @@ linters-settings:
     sections:
       - standard
       - default
-      - prefix(agent)
-      - prefix(sds-health-watcher-controller)
-      - prefix(sds-utils-installer)
-      - prefix(webhooks)
+      - prefix(github.com/deckhouse)
 
 linters:
   disable-all: true
   enable:
-  - dogsled
-  - errcheck
-  - gci
-  - gocritic
-  - gofmt
-#  - goimports
-  - gosimple
-  - govet
-  - ineffassign
-  - misspell
-  - revive
-  - staticcheck
-#  - structcheck
-  - typecheck
-  - unconvert
-  - unparam
-  - whitespace
-  - copyloopvar
+    - dogsled
+    - errcheck
+    - gci
+    - gocritic
+    - gofmt
+    #  - goimports
+    - gosimple
+    - govet
+    - ineffassign
+    - misspell
+    - revive
+    - staticcheck
+    #  - structcheck
+    - typecheck
+    - unconvert
+    - unparam
+    - whitespace
+    - copyloopvar

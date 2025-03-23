@@ -1,8 +1,24 @@
 giterminismConfigVersion: 1
 config:
-  goTemplateRendering:	# The rules for the Go-template functions
-    allowEnvVariables: [ /CI_.+/, SOURCE_REPO, MODULE_EDITION ]
+  goTemplateRendering: # The rules for the Go-template functions
+    allowEnvVariables:
+      - /CI_.+/
+      - MODULES_MODULE_TAG
+      - WERF_DISABLE_META_TAGS
+      - GOLANG_VERSION
+      - GOPROXY
+      - SOURCE_REPO
+      - MODULE_EDITION
+      - MODULES_REGISTRY
+      - MODULES_REGISTRY_LOGIN
+      - MODULES_REGISTRY_PASSWORD
+      - MODULES_MODULE_SOURCE
+      - MODULES_MODULE_NAME
+      - DEV_MODULES_REGISTRY
+      - DEV_MODULES_REGISTRY_LOGIN
+      - DEV_MODULES_REGISTRY_PASSWORD
+      - DEV_MODULES_MODULE_SOURCE
   stapel:
     mount:
-     allowFromPaths:
-     - ~/go-pkg-cache
+      allowFromPaths:
+        - ~/go-pkg-cache

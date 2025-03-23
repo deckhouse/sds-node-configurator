@@ -19,10 +19,11 @@ package handlers
 import (
 	"context"
 
-	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 )
 
 func LLVSValidate(_ context.Context, _ *model.AdmissionReview, _ metav1.Object) (*kwhvalidating.ValidatorResult, error) {

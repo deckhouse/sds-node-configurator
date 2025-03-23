@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
@@ -14,7 +16,6 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const ReconcilerName = "lvm-logical-volume-extender-controller"

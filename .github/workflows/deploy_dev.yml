@@ -55,7 +55,15 @@ jobs:
         shell: bash
 
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v1
+      - uses: deckhouse/modules-actions/setup@v2
+        with:
+          registry: ${{ vars.DEV_REGISTRY }}
+          registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
+          registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}      
       - if: ${{ github.event.inputs.enableBuild == 'true' }}
-        uses: deckhouse/modules-actions/build@v1
-      - uses: deckhouse/modules-actions/deploy@v1
+        uses: deckhouse/modules-actions/build@v2
+        with:
+          module_source: "${{ vars.DEV_MODULE_SOURCE }}"
+          module_name: ${{ vars.MODULE_NAME }}
+          module_tag: $(echo pr${{ github.ref_name }} | sed 's/\/.*//g')
+      - uses: deckhouse/modules-actions/deploy@v2
