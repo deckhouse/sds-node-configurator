@@ -1,0 +1,14 @@
+repos:
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v1.64.6
+    hooks:
+      - id: golangci-lint
+        name: golangci-lint-ee
+        entry: find -type f -name go.mod -execdir sh -c "golangci-lint run --new-from-rev HEAD --build-tags ee --fix" {} +
+      - id: golangci-lint
+        name: golangci-lint-ce
+        entry: find -type f -name go.mod -execdir sh -c "golangci-lint run --new-from-rev HEAD --build-tags ce --fix" {} +
+  # - repo: https://github.com/streetsidesoftware/cspell-cli
+  #   rev: v8.17.3
+  #   hooks:
+  #     - id: cspell
