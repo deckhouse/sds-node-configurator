@@ -265,7 +265,7 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 					return nil, err
 				}
 
-				d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s and its data obejct will be removed from the reconcile due to unhealthy states", lvg.Name))
+				d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s and its data object will be removed from the reconcile due to unhealthy states", lvg.Name))
 				vgNamesToSkip[candidate.ActualVGNameOnTheNode] = struct{}{}
 			}
 		}

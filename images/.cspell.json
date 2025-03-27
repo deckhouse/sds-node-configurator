@@ -1,0 +1,19 @@
+{
+    "dictionaries": [
+        "en", "terms", "companies"
+    ],
+    "dictionaryDefinitions": [
+        {
+            "name": "terms",
+            "description": "Special terms we use",
+            "path": ".cspell/terms.txt"
+        },
+        {
+            "name": "companies",
+            "description": "Company names mentioned",
+            "path": ".cspell/companies.txt"
+        }
+    ],
+    "ignorePaths": [".cspell/"],
+    "allowCompoundWords": true
+}

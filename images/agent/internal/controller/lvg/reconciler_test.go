@@ -1081,7 +1081,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			oldLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG.Name = "test-name"
-			newLVG.Labels = map[string]string{internal.LVGMetadateNameLabelKey: "test-name"}
+			newLVG.Labels = map[string]string{internal.LVGMetadataNameLabelKey: "test-name"}
 			newLVG.Status.Conditions = []v1.Condition{
 				{
 					Type:   internal.TypeVGConfigurationApplied,
@@ -1102,7 +1102,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					Reason: internal.ReasonCreating,
 				},
 			}
-			newLVG.Labels = map[string]string{internal.LVGMetadateNameLabelKey: newLVG.Name}
+			newLVG.Labels = map[string]string{internal.LVGMetadataNameLabelKey: newLVG.Name}
 			assert.False(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
 		})
 
@@ -1117,7 +1117,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 					Reason: internal.ReasonApplied,
 				},
 			}
-			newLVG.Labels = map[string]string{internal.LVGMetadateNameLabelKey: "some-other-name"}
+			newLVG.Labels = map[string]string{internal.LVGMetadataNameLabelKey: "some-other-name"}
 			assert.True(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
 		})
 

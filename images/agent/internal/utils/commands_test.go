@@ -148,6 +148,7 @@ func TestCommands(t *testing.T) {
 
 	t.Run("GetAllPVs", func(t *testing.T) {
 		t.Run("UnmarshalPVs_Expects_Success", func(t *testing.T) {
+			// cspell: ignore BmuLLu-9ZSf-eqpf-qR3H-23rQ-fIl7-Ouyl5X JnCFQZ-TTfE-Ed2C-nKoH-yzPH-4fMA-CKwIv7
 			js := `{
       "report": [
           {
@@ -200,6 +201,7 @@ func TestCommands(t *testing.T) {
 
 	t.Run("GetAllVGs", func(t *testing.T) {
 		t.Run("UnmarshalVGs_Expects_Success", func(t *testing.T) {
+			// cspell: ignore P14t8J-nfUE-hryT-LiTv-JdFD-Wqxg-R8taCa
 			js := `{
       "report": [
           {
@@ -267,6 +269,7 @@ func TestCommands(t *testing.T) {
 
 	t.Run("GetAllPVs", func(t *testing.T) {
 		t.Run("Unmarshal_LV", func(t *testing.T) {
+			// cspell: ignore mythinpool
 			js := `{
       "report": [
           {
@@ -287,6 +290,7 @@ func TestCommands(t *testing.T) {
 
 		t.Run("Unmarshal_LV_Empty_ThinDeviceID", func(t *testing.T) {
 			// TODO: Cleanup
+			// cspell:ignore lvol0
 			js := ` {
       "report": [
           {
