@@ -1267,7 +1267,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		}
 	})
 
-	t.Run("getLVMVolumeGroup_lvg_doesnt_exist_returns_nil", func(t *testing.T) {
+	t.Run("getLVMVolumeGroup_lvg_doesn't_exist_returns_nil", func(t *testing.T) {
 		r := setupReconciler()
 		const name = "test_name"
 		testObj := &v1alpha1.LVMVolumeGroup{
@@ -1297,10 +1297,11 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 }
 
 func setupReconciler() *Reconciler {
-	cl := test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{}, &v1alpha1.LVMLogicalVolume{})
-	log := logger.Logger{}
-	metrics := monitoring.GetMetrics("")
-	sdsCache := cache.New()
-
-	return NewReconciler(cl, log, metrics, sdsCache, ReconcilerConfig{NodeName: "test_node"})
+	return NewReconciler(
+		test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{}, &v1alpha1.LVMLogicalVolume{}),
+		logger.Logger{},
+		monitoring.GetMetrics(""),
+		cache.New(),
+		utils.NewCommands(),
+		ReconcilerConfig{NodeName: "test_node"})
 }

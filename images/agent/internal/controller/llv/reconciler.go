@@ -81,6 +81,7 @@ func NewReconciler(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
+	commands utils.Commands,
 	cfg ReconcilerConfig,
 ) *Reconciler {
 	return &Reconciler{
@@ -102,7 +103,7 @@ func NewReconciler(
 		runningCleanups: cleanups{
 			status: make(map[cleanupsKey]cleanupStatus, 50),
 		},
-		commands: utils.NewCommands(),
+		commands: commands,
 	}
 }
 

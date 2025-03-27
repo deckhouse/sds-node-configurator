@@ -43,6 +43,7 @@ func NewDiscoverer(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
+	commands utils.Commands,
 	cfg DiscovererConfig,
 ) *Discoverer {
 	return &Discoverer{
@@ -53,7 +54,7 @@ func NewDiscoverer(
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		cfg:      cfg,
-		commands: utils.NewCommands(),
+		commands: commands,
 	}
 }
 

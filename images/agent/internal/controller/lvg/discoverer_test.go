@@ -26,6 +26,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -880,7 +881,6 @@ func setupDiscoverer(opts *DiscovererConfig) *Discoverer {
 	if opts == nil {
 		opts = &DiscovererConfig{NodeName: "test_node"}
 	}
-	sdsCache := cache.New()
 
-	return NewDiscoverer(cl, log, metrics, sdsCache, *opts)
+	return NewDiscoverer(cl, log, metrics, cache.New(), utils.NewCommands(), *opts)
 }

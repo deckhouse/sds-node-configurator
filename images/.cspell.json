@@ -15,5 +15,10 @@
         }
     ],
     "ignorePaths": [".cspell/"],
-    "allowCompoundWords": true
+    "allowCompoundWords": true,
+    "ignoreRegExpList": [
+        "\"-\\w+\"",
+        "\"--\\w+\"",
+        "[a-zA-Z0-9]{6}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{6}"
+    ]
 }

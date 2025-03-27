@@ -33,8 +33,8 @@ type scanner struct {
 	commands utils.Commands
 }
 
-func NewScanner() Scanner {
-	return &scanner{commands: utils.NewCommands()}
+func NewScanner(commands utils.Commands) Scanner {
+	return &scanner{commands: commands}
 }
 
 func (s *scanner) Run(

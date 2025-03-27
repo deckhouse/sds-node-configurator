@@ -40,6 +40,7 @@ func NewReconciler(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
+	commands utils.Commands,
 	cfg ReconcilerConfig,
 ) controller.Reconciler[*v1alpha1.LVMVolumeGroup] {
 	return &Reconciler{
@@ -56,7 +57,7 @@ func NewReconciler(
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		cfg:      cfg,
-		commands: utils.NewCommands(),
+		commands: commands,
 	}
 }
 
