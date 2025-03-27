@@ -63,6 +63,7 @@ type Reconciler struct {
 	sdsCache        *cache.Cache
 	cfg             ReconcilerConfig
 	runningCleanups cleanups
+	commands        utils.Commands
 }
 
 var errAlreadyRunning = errors.New("reconcile in progress")
@@ -101,6 +102,7 @@ func NewReconciler(
 		runningCleanups: cleanups{
 			status: make(map[cleanupsKey]cleanupStatus, 50),
 		},
+		commands: utils.NewCommands(),
 	}
 }
 
@@ -331,10 +333,10 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 	switch {
 	case llv.Spec.Type == internal.Thick:
 		r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] LV %s will be created in VG %s with size: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llvRequestSize.String()))
-		cmd, err = utils.CreateThickLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode, llvRequestSize.Value(), isContiguous(llv))
+		cmd, err = r.commands.CreateThickLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode, llvRequestSize.Value(), isContiguous(llv))
 	case llv.Spec.Source == nil:
 		r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] LV %s of the LVMLogicalVolume %s will be created in Thin-pool %s with size %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, llv.Spec.Thin.PoolName, llvRequestSize.String()))
-		cmd, err = utils.CreateThinLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Thin.PoolName, llv.Spec.ActualLVNameOnTheNode, llvRequestSize.Value())
+		cmd, err = r.commands.CreateThinLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Thin.PoolName, llv.Spec.ActualLVNameOnTheNode, llvRequestSize.Value())
 	case llv.Spec.Source.Kind == "LVMLogicalVolume":
 		sourceLLV := &v1alpha1.LVMLogicalVolume{}
 		if err := r.cl.Get(ctx, types.NamespacedName{Name: llv.Spec.Source.Name}, sourceLLV); err != nil {
@@ -346,7 +348,7 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 			return false, errors.New("cloned volume should be in the same volume group as the source volume")
 		}
 
-		cmd, err = utils.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, sourceLLV.Spec.ActualLVNameOnTheNode)
+		cmd, err = r.commands.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, sourceLLV.Spec.ActualLVNameOnTheNode)
 	case llv.Spec.Source.Kind == "LVMLogicalVolumeSnapshot":
 		cmdTmp, shouldRequeue, err := r.handleLLVSSource(ctx, llv, lvg)
 		if err != nil {
@@ -458,7 +460,7 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 	}
 
 	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s of the LVMLogicalVolume %s will be extended with size: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, llvRequestSize.String()))
-	cmd, err := utils.ExtendLV(llvRequestSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+	cmd, err := r.commands.ExtendLV(llvRequestSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] runs cmd: %s", cmd))
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to ExtendLV, name: %s, type: %s", llv.Spec.ActualLVNameOnTheNode, llv.Spec.Type))
@@ -607,7 +609,7 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 		}
 	}
 
-	cmd, err := utils.RemoveLV(vgName, llv.Spec.ActualLVNameOnTheNode)
+	cmd, err := r.commands.RemoveLV(vgName, llv.Spec.ActualLVNameOnTheNode)
 	r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] runs cmd: %s", cmd))
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to remove LV %s from VG %s", llv.Spec.ActualLVNameOnTheNode, vgName))
@@ -717,7 +719,7 @@ func (r *Reconciler) validateLVMLogicalVolume(llv *v1alpha1.LVMLogicalVolume, lv
 	lv := r.sdsCache.FindLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 	if lv != nil &&
 		len(lv.Data.LVAttr) != 0 && !checkIfLVBelongsToLLV(llv, &lv.Data) {
-		reason.WriteString(fmt.Sprintf("Specified LV %s is already created and it is doesnt match the one on the node.", lv.Data.LVName))
+		reason.WriteString(fmt.Sprintf("Specified LV %s is already created and it is doesn't match the one on the node.", lv.Data.LVName))
 	}
 
 	if reason.Len() > 0 {

@@ -34,7 +34,47 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 )
 
-func GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
+type Commands interface {
+	GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error)
+	GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error)
+	GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.Buffer, err error)
+	GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error)
+	GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdErr bytes.Buffer, err error)
+	GetAllPVs(ctx context.Context) (data []internal.PVData, command string, stdErr bytes.Buffer, err error)
+	GetPV(pvName string) (pvData internal.PVData, command string, stdErr bytes.Buffer, err error)
+	CreatePV(path string) (string, error)
+	CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []string) (string, error)
+	CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string, error)
+	CreateThinPool(thinPoolName, vgName string, size int64) (string, error)
+	CreateThinPoolFullVGSpace(thinPoolName, vgName string) (string, error)
+	CreateThinLogicalVolumeFromSource(name string, sourceVgName string, sourceName string) (string, error)
+	CreateThinLogicalVolumeSnapshot(name string, sourceVgName string, sourceName string, tags []string) (string, error)
+	CreateThinLogicalVolume(vgName, tpName, lvName string, size int64) (string, error)
+	CreateThickLogicalVolume(vgName, lvName string, size int64, contiguous bool) (string, error)
+	ExtendVG(vgName string, paths []string) (string, error)
+	ExtendLV(size int64, vgName, lvName string) (string, error)
+	ExtendLVFullVGSpace(vgName, lvName string) (string, error)
+	ResizePV(pvName string) (string, error)
+	RemoveVG(vgName string) (string, error)
+	RemovePV(pvNames []string) (string, error)
+	RemoveLV(vgName, lvName string) (string, error)
+	VGChangeAddTag(vGName, tag string) (string, error)
+	VGChangeDelTag(vGName, tag string) (string, error)
+	LVChangeDelTag(lv internal.LVData, tag string) (string, error)
+	UnmarshalDevices(out []byte) ([]internal.Device, error)
+	ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, ctrlName string) error
+}
+
+type commands struct {
+}
+
+func NewCommands() Commands {
+	return &commands{}
+}
+
+var _ Commands = commands{}
+
+func (c commands) GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
 	var outs bytes.Buffer
 	args := []string{"-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
 	cmd := exec.CommandContext(ctx, internal.LSBLKCmd, args...)
@@ -48,7 +88,7 @@ func GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buff
 		return nil, cmd.String(), stderr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
-	devices, err := UnmarshalDevices(outs.Bytes())
+	devices, err := c.UnmarshalDevices(outs.Bytes())
 	if err != nil {
 		return nil, cmd.String(), stderr, fmt.Errorf("unable to unmarshal devices, err: %w", err)
 	}
@@ -56,7 +96,7 @@ func GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buff
 	return devices, cmd.String(), stderr, nil
 }
 
-func GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
+func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	args := []string{"vgs", "-o", "+uuid,tags,shared", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
@@ -78,7 +118,7 @@ func GetAllVGs(ctx context.Context) (data []internal.VGData, command string, std
 	return data, cmd.String(), filteredStdErr, nil
 }
 
-func GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.Buffer, err error) {
+func (commands) GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	vgData = internal.VGData{}
 	args := []string{"vgs", "-o", "+uuid,tags,shared", "--units", "B", "--nosuffix", "--reportformat", "json", vgName}
@@ -102,7 +142,7 @@ func GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.
 	return vgData, cmd.String(), filteredStdErr, nil
 }
 
-func GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
+func (commands) GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	args := []string{"lvs", "-o", "+vg_uuid,tags,thin_id,metadata_lv,lv_dm_path", "--units", "B", "--nosuffix", "--all", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
@@ -124,7 +164,7 @@ func GetAllLVs(ctx context.Context) (data []internal.LVData, command string, std
 	return lvs, cmd.String(), filteredStdErr, nil
 }
 
-func GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdErr bytes.Buffer, err error) {
+func (commands) GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	lvData = internal.LVData{}
 	lvPath := filepath.Join("/dev", vgName, lvName)
@@ -149,7 +189,7 @@ func GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdEr
 	return lvData, cmd.String(), filteredStdErr, nil
 }
 
-func GetAllPVs(ctx context.Context) (data []internal.PVData, command string, stdErr bytes.Buffer, err error) {
+func (commands) GetAllPVs(ctx context.Context) (data []internal.PVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
@@ -171,7 +211,7 @@ func GetAllPVs(ctx context.Context) (data []internal.PVData, command string, std
 	return data, cmd.String(), filteredStdErr, nil
 }
 
-func GetPV(pvName string) (pvData internal.PVData, command string, stdErr bytes.Buffer, err error) {
+func (commands) GetPV(pvName string) (pvData internal.PVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	pvData = internal.PVData{}
 	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json", pvName}
@@ -195,7 +235,7 @@ func GetPV(pvName string) (pvData internal.PVData, command string, stdErr bytes.
 	return pvData, cmd.String(), filteredStdErr, nil
 }
 
-func CreatePV(path string) (string, error) {
+func (commands) CreatePV(path string) (string, error) {
 	args := []string{"pvcreate", path}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
@@ -210,7 +250,7 @@ func CreatePV(path string) (string, error) {
 	return cmd.String(), nil
 }
 
-func CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
+func (commands) CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
 	tmpStr := fmt.Sprintf("storage.deckhouse.io/lvmVolumeGroupName=%s", lvmVolumeGroupName)
 	args := []string{"vgcreate", vgName}
 	args = append(args, pvNames...)
@@ -229,7 +269,7 @@ func CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []string) (string,
 	return cmd.String(), nil
 }
 
-func CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
+func (commands) CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
 	tmpStr := fmt.Sprintf("storage.deckhouse.io/lvmVolumeGroupName=%s", lvmVolumeGroupName)
 	args := []string{"vgcreate", "--shared", vgName}
 	args = append(args, pvNames...)
@@ -248,7 +288,7 @@ func CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string
 	return cmd.String(), nil
 }
 
-func CreateThinPool(thinPoolName, vgName string, size int64) (string, error) {
+func (commands) CreateThinPool(thinPoolName, vgName string, size int64) (string, error) {
 	args := []string{"lvcreate", "-L", fmt.Sprintf("%dk", size/1024), "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
@@ -262,7 +302,7 @@ func CreateThinPool(thinPoolName, vgName string, size int64) (string, error) {
 	return cmd.String(), nil
 }
 
-func CreateThinPoolFullVGSpace(thinPoolName, vgName string) (string, error) {
+func (commands) CreateThinPoolFullVGSpace(thinPoolName, vgName string) (string, error) {
 	args := []string{"lvcreate", "-l", "100%FREE", "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
@@ -276,11 +316,11 @@ func CreateThinPoolFullVGSpace(thinPoolName, vgName string) (string, error) {
 	return cmd.String(), nil
 }
 
-func CreateThinLogicalVolumeFromSource(name string, sourceVgName string, sourceName string) (string, error) {
+func (commands) CreateThinLogicalVolumeFromSource(name string, sourceVgName string, sourceName string) (string, error) {
 	return createSnapshotVolume(name, sourceVgName, sourceName, nil)
 }
 
-func CreateThinLogicalVolumeSnapshot(name string, sourceVgName string, sourceName string, tags []string) (string, error) {
+func (commands) CreateThinLogicalVolumeSnapshot(name string, sourceVgName string, sourceName string, tags []string) (string, error) {
 	return createSnapshotVolume(name, sourceVgName, sourceName, tags)
 }
 
@@ -308,7 +348,7 @@ func createSnapshotVolume(name string, sourceVgName string, sourceName string, t
 	return cmd.String(), nil
 }
 
-func CreateThinLogicalVolume(vgName, tpName, lvName string, size int64) (string, error) {
+func (commands) CreateThinLogicalVolume(vgName, tpName, lvName string, size int64) (string, error) {
 	args := []string{"lvcreate", "-T", fmt.Sprintf("%s/%s", vgName, tpName), "-n", lvName, "-V", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
@@ -326,7 +366,7 @@ func CreateThinLogicalVolume(vgName, tpName, lvName string, size int64) (string,
 	return cmd.String(), nil
 }
 
-func CreateThickLogicalVolume(vgName, lvName string, size int64, contiguous bool) (string, error) {
+func (commands) CreateThickLogicalVolume(vgName, lvName string, size int64, contiguous bool) (string, error) {
 	args := []string{"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
 	if contiguous {
 		args = append(args, "--contiguous", "y")
@@ -345,7 +385,7 @@ func CreateThickLogicalVolume(vgName, lvName string, size int64, contiguous bool
 	return cmd.String(), nil
 }
 
-func ExtendVG(vgName string, paths []string) (string, error) {
+func (commands) ExtendVG(vgName string, paths []string) (string, error) {
 	args := []string{"vgextend", vgName}
 	args = append(args, paths...)
 	extendedArgs := lvmStaticExtendedArgs(args)
@@ -361,7 +401,7 @@ func ExtendVG(vgName string, paths []string) (string, error) {
 	return cmd.String(), nil
 }
 
-func ExtendLV(size int64, vgName, lvName string) (string, error) {
+func (commands) ExtendLV(size int64, vgName, lvName string) (string, error) {
 	args := []string{"lvextend", "-L", fmt.Sprintf("%dk", size/1024), filepath.Join("/dev", vgName, lvName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
@@ -378,7 +418,7 @@ func ExtendLV(size int64, vgName, lvName string) (string, error) {
 	return cmd.String(), nil
 }
 
-func ExtendLVFullVGSpace(vgName, lvName string) (string, error) {
+func (commands) ExtendLVFullVGSpace(vgName, lvName string) (string, error) {
 	args := []string{"lvextend", "-l", "100%VG", filepath.Join("/dev", vgName, lvName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
@@ -395,7 +435,7 @@ func ExtendLVFullVGSpace(vgName, lvName string) (string, error) {
 	return cmd.String(), nil
 }
 
-func ResizePV(pvName string) (string, error) {
+func (commands) ResizePV(pvName string) (string, error) {
 	args := []string{"pvresize", pvName}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
@@ -410,7 +450,7 @@ func ResizePV(pvName string) (string, error) {
 	return cmd.String(), nil
 }
 
-func RemoveVG(vgName string) (string, error) {
+func (commands) RemoveVG(vgName string) (string, error) {
 	args := []string{"vgremove", vgName}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
@@ -425,7 +465,7 @@ func RemoveVG(vgName string) (string, error) {
 	return cmd.String(), nil
 }
 
-func RemovePV(pvNames []string) (string, error) {
+func (commands) RemovePV(pvNames []string) (string, error) {
 	args := []string{"pvremove"}
 	args = append(args, pvNames...)
 	extendedArgs := lvmStaticExtendedArgs(args)
@@ -440,7 +480,7 @@ func RemovePV(pvNames []string) (string, error) {
 	return cmd.String(), nil
 }
 
-func RemoveLV(vgName, lvName string) (string, error) {
+func (commands) RemoveLV(vgName, lvName string) (string, error) {
 	args := []string{"lvremove", filepath.Join("/dev", vgName, lvName), "-y"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
@@ -454,7 +494,7 @@ func RemoveLV(vgName, lvName string) (string, error) {
 	return cmd.String(), nil
 }
 
-func VGChangeAddTag(vGName, tag string) (string, error) {
+func (commands) VGChangeAddTag(vGName, tag string) (string, error) {
 	var outs, stdErr bytes.Buffer
 	args := []string{"vgchange", vGName, "--addtag", tag}
 	extendedArgs := lvmStaticExtendedArgs(args)
@@ -468,7 +508,7 @@ func VGChangeAddTag(vGName, tag string) (string, error) {
 	return cmd.String(), nil
 }
 
-func VGChangeDelTag(vGName, tag string) (string, error) {
+func (commands) VGChangeDelTag(vGName, tag string) (string, error) {
 	var outs, stdErr bytes.Buffer
 	args := []string{"vgchange", vGName, "--deltag", tag}
 	extendedArgs := lvmStaticExtendedArgs(args)
@@ -482,7 +522,7 @@ func VGChangeDelTag(vGName, tag string) (string, error) {
 	return cmd.String(), nil
 }
 
-func LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
+func (commands) LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
 	tmpStr := filepath.Join("/dev/%s/%s", lv.VGName, lv.LVName)
 	var outs, stdErr bytes.Buffer
 	args := []string{"lvchange", tmpStr, "--deltag", tag}
@@ -497,7 +537,7 @@ func LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
 	return cmd.String(), nil
 }
 
-func UnmarshalDevices(out []byte) ([]internal.Device, error) {
+func (commands) UnmarshalDevices(out []byte) ([]internal.Device, error) {
 	var devices internal.Devices
 	if err := json.Unmarshal(out, &devices); err != nil {
 		return nil, err
@@ -506,11 +546,11 @@ func UnmarshalDevices(out []byte) ([]internal.Device, error) {
 	return devices.BlockDevices, nil
 }
 
-func ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, ctrlName string) error {
+func (c commands) ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, ctrlName string) error {
 	// thin pool
 	log.Debug("[ReTag] start re-tagging LV")
 	start := time.Now()
-	lvs, cmdStr, _, err := GetAllLVs(ctx)
+	lvs, cmdStr, _, err := c.GetAllLVs(ctx)
 	metrics.UtilsCommandsDuration(ctrlName, "lvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.UtilsCommandsExecutionCount(ctrlName, "lvs").Inc()
 	log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
@@ -529,7 +569,7 @@ func ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, c
 
 			if strings.Contains(tag, internal.LVMTags[1]) {
 				start = time.Now()
-				cmdStr, err = LVChangeDelTag(lv, tag)
+				cmdStr, err = c.LVChangeDelTag(lv, tag)
 				metrics.UtilsCommandsDuration(ctrlName, "lvchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
 				metrics.UtilsCommandsExecutionCount(ctrlName, "lvchange").Inc()
 				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
@@ -540,7 +580,7 @@ func ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, c
 				}
 
 				start = time.Now()
-				cmdStr, err = VGChangeAddTag(lv.VGName, internal.LVMTags[0])
+				cmdStr, err = c.VGChangeAddTag(lv.VGName, internal.LVMTags[0])
 				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
 				metrics.UtilsCommandsExecutionCount(ctrlName, "vgchange").Inc()
 				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
@@ -556,7 +596,7 @@ func ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, c
 
 	log.Debug("[ReTag] start re-tagging LVM")
 	start = time.Now()
-	vgs, cmdStr, _, err := GetAllVGs(ctx)
+	vgs, cmdStr, _, err := c.GetAllVGs(ctx)
 	metrics.UtilsCommandsDuration(ctrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.UtilsCommandsExecutionCount(ctrlName, "vgs").Inc()
 	log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
@@ -575,7 +615,7 @@ func ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, c
 
 			if strings.Contains(tag, internal.LVMTags[1]) {
 				start = time.Now()
-				cmdStr, err = VGChangeDelTag(vg.VGName, tag)
+				cmdStr, err = c.VGChangeDelTag(vg.VGName, tag)
 				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
 				metrics.UtilsCommandsExecutionCount(ctrlName, "vgchange").Inc()
 				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
@@ -586,7 +626,7 @@ func ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, c
 				}
 
 				start = time.Now()
-				cmdStr, err = VGChangeAddTag(vg.VGName, internal.LVMTags[0])
+				cmdStr, err = c.VGChangeAddTag(vg.VGName, internal.LVMTags[0])
 				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
 				metrics.UtilsCommandsExecutionCount(ctrlName, "vgchange").Inc()
 				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))

@@ -20,7 +20,24 @@ import (
 	"k8s.io/utils/clock"
 )
 
-func RunScanner(
+type Scanner interface {
+	Run(ctx context.Context,
+		log logger.Logger,
+		cfg config.Config,
+		sdsCache *cache.Cache,
+		bdCtrl func(context.Context) (controller.Result, error),
+		lvgDiscoverCtrl func(context.Context) (controller.Result, error)) error
+}
+
+type scanner struct {
+	commands utils.Commands
+}
+
+func NewScanner() Scanner {
+	return &scanner{commands: utils.NewCommands()}
+}
+
+func (s *scanner) Run(
 	ctx context.Context,
 	log logger.Logger,
 	cfg config.Config,
@@ -70,7 +87,7 @@ func RunScanner(
 
 			t.Do(func() {
 				log.Info("[RunScanner] start to fill the cache")
-				err := fillTheCache(ctx, log, sdsCache, cfg)
+				err := s.fillTheCache(ctx, log, sdsCache, cfg)
 				if err != nil {
 					log.Error(err, "[RunScanner] unable to fill the cache. Retry")
 					go func() {
@@ -101,7 +118,7 @@ func RunScanner(
 
 		case <-timer.C:
 			log.Info("[RunScanner] events ran out. Start to fill the cache")
-			err := fillTheCache(ctx, log, sdsCache, cfg)
+			err := s.fillTheCache(ctx, log, sdsCache, cfg)
 			if err != nil {
 				log.Error(err, "[RunScanner] unable to fill the cache after all events passed. Retry")
 				timer.Reset(duration)
@@ -169,32 +186,32 @@ func runControllersReconcile(
 	return nil
 }
 
-func fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Config) error {
+func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Config) error {
 	// the scan operations order is very important as it guarantees the consistent and reliable data from the node
 	realClock := clock.RealClock{}
 	now := time.Now()
-	lvs, lvsErr, err := scanLVs(ctx, log, cfg)
+	lvs, lvsErr, err := s.scanLVs(ctx, log, cfg)
 	log.Trace(fmt.Sprintf("[fillTheCache] LVS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
 
 	now = time.Now()
-	vgs, vgsErr, err := scanVGs(ctx, log, cfg)
+	vgs, vgsErr, err := s.scanVGs(ctx, log, cfg)
 	log.Trace(fmt.Sprintf("[fillTheCache] VGS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
 
 	now = time.Now()
-	pvs, pvsErr, err := scanPVs(ctx, log, cfg)
+	pvs, pvsErr, err := s.scanPVs(ctx, log, cfg)
 	log.Trace(fmt.Sprintf("[fillTheCache] PVS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
 
 	now = time.Now()
-	devices, devErr, err := scanDevices(ctx, log, cfg)
+	devices, devErr, err := s.scanDevices(ctx, log, cfg)
 	log.Trace(fmt.Sprintf("[fillTheCache] LSBLK command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
@@ -211,10 +228,10 @@ func fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cf
 	return nil
 }
 
-func scanDevices(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.Device, bytes.Buffer, error) {
+func (s *scanner) scanDevices(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.Device, bytes.Buffer, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
 	defer cancel()
-	devices, cmdStr, stdErr, err := utils.GetBlockDevices(ctx)
+	devices, cmdStr, stdErr, err := s.commands.GetBlockDevices(ctx)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ScanDevices] unable to scan the devices, cmd: %s", cmdStr))
 		return nil, stdErr, err
@@ -223,10 +240,10 @@ func scanDevices(ctx context.Context, log logger.Logger, cfg config.Config) ([]i
 	return devices, stdErr, nil
 }
 
-func scanPVs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.PVData, bytes.Buffer, error) {
+func (s *scanner) scanPVs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.PVData, bytes.Buffer, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
 	defer cancel()
-	pvs, cmdStr, stdErr, err := utils.GetAllPVs(ctx)
+	pvs, cmdStr, stdErr, err := s.commands.GetAllPVs(ctx)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ScanPVs] unable to scan the PVs, cmd: %s", cmdStr))
 		return nil, stdErr, err
@@ -235,10 +252,10 @@ func scanPVs(ctx context.Context, log logger.Logger, cfg config.Config) ([]inter
 	return pvs, stdErr, nil
 }
 
-func scanVGs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.VGData, bytes.Buffer, error) {
+func (s *scanner) scanVGs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.VGData, bytes.Buffer, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
 	defer cancel()
-	vgs, cmdStr, stdErr, err := utils.GetAllVGs(ctx)
+	vgs, cmdStr, stdErr, err := s.commands.GetAllVGs(ctx)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ScanVGs] unable to scan the VGs, cmd: %s", cmdStr))
 		return nil, stdErr, err
@@ -247,10 +264,10 @@ func scanVGs(ctx context.Context, log logger.Logger, cfg config.Config) ([]inter
 	return vgs, stdErr, nil
 }
 
-func scanLVs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.LVData, bytes.Buffer, error) {
+func (s *scanner) scanLVs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.LVData, bytes.Buffer, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
 	defer cancel()
-	lvs, cmdStr, stdErr, err := utils.GetAllLVs(ctx)
+	lvs, cmdStr, stdErr, err := s.commands.GetAllLVs(ctx)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ScanLVs] unable to scan LVs, cmd: %s", cmdStr))
 		return nil, stdErr, err

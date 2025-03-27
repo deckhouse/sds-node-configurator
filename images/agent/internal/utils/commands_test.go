@@ -102,7 +102,7 @@ func TestCommands(t *testing.T) {
 				},
 			}}
 
-			actualDevices, err := UnmarshalDevices([]byte(js))
+			actualDevices, err := NewCommands().UnmarshalDevices([]byte(js))
 			if assert.NoError(t, err) {
 				assert.Equal(t, expectedDevices.BlockDevices, actualDevices)
 			}
@@ -141,7 +141,7 @@ func TestCommands(t *testing.T) {
       }
    ]
 }`
-			_, err := UnmarshalDevices([]byte(js))
+			_, err := NewCommands().UnmarshalDevices([]byte(js))
 			assert.Error(t, err)
 		})
 	})

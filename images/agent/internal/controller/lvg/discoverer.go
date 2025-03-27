@@ -30,6 +30,7 @@ type Discoverer struct {
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
 	cfg      DiscovererConfig
+	commands utils.Commands
 }
 
 type DiscovererConfig struct {
@@ -52,6 +53,7 @@ func NewDiscoverer(
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		cfg:      cfg,
+		commands: utils.NewCommands(),
 	}
 }
 
@@ -302,7 +304,7 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(bds map[string]v1alpha1.BlockDe
 	var vgIssues map[string]string
 	if vgErrs.Len() != 0 {
 		d.log.Warning("[GetLVMVolumeGroupCandidates] some errors have been occurred while executing vgs command")
-		vgIssues = sortVGIssuesByVG(d.log, vgWithTag)
+		vgIssues = d.sortVGIssuesByVG(d.log, vgWithTag)
 	}
 
 	pvs, pvErrs := d.sdsCache.GetPVs()
@@ -316,7 +318,7 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(bds map[string]v1alpha1.BlockDe
 	var pvIssues map[string][]string
 	if pvErrs.Len() != 0 {
 		d.log.Warning("[GetLVMVolumeGroupCandidates] some errors have been occurred while executing pvs command")
-		pvIssues = sortPVIssuesByVG(d.log, pvs)
+		pvIssues = d.sortPVIssuesByVG(d.log, pvs)
 	}
 
 	lvs, lvErrs := d.sdsCache.GetLVs()
@@ -330,7 +332,7 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(bds map[string]v1alpha1.BlockDe
 	var lvIssues map[string]map[string]string
 	if lvErrs.Len() != 0 {
 		d.log.Warning("[GetLVMVolumeGroupCandidates] some errors have been occurred while executing lvs command")
-		lvIssues = sortThinPoolIssuesByVG(d.log, thinPools)
+		lvIssues = d.sortThinPoolIssuesByVG(d.log, thinPools)
 	}
 
 	// Sort PV,BlockDevices and LV by VG to fill needed information for LVMVolumeGroup resource further.
@@ -416,7 +418,7 @@ func (d *Discoverer) CreateLVMVolumeGroupByCandidate(
 	d.metrics.APIMethodsExecutionCount(DiscovererName, "create").Inc()
 	if err != nil {
 		d.metrics.APIMethodsErrors(DiscovererName, "create").Inc()
-		return nil, fmt.Errorf("unable to сreate LVMVolumeGroup, err: %w", err)
+		return nil, fmt.Errorf("unable to create LVMVolumeGroup, err: %w", err)
 	}
 
 	return lvmVolumeGroup, nil
@@ -563,11 +565,11 @@ func removeDuplicates(strList []string) []string {
 	return result
 }
 
-func sortThinPoolIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string]map[string]string {
+func (d *Discoverer) sortThinPoolIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string]map[string]string {
 	var lvIssuesByVG = make(map[string]map[string]string, len(lvs))
 
 	for _, lv := range lvs {
-		_, cmd, stdErr, err := utils.GetLV(lv.VGName, lv.LVName)
+		_, cmd, stdErr, err := d.commands.GetLV(lv.VGName, lv.LVName)
 		log.Debug(fmt.Sprintf("[sortThinPoolIssuesByVG] runs cmd: %s", cmd))
 
 		if err != nil {
@@ -587,11 +589,11 @@ func sortThinPoolIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string
 	return lvIssuesByVG
 }
 
-func sortPVIssuesByVG(log logger.Logger, pvs []internal.PVData) map[string][]string {
+func (d *Discoverer) sortPVIssuesByVG(log logger.Logger, pvs []internal.PVData) map[string][]string {
 	pvIssuesByVG := make(map[string][]string, len(pvs))
 
 	for _, pv := range pvs {
-		_, cmd, stdErr, err := utils.GetPV(pv.PVName)
+		_, cmd, stdErr, err := d.commands.GetPV(pv.PVName)
 		log.Debug(fmt.Sprintf("[sortPVIssuesByVG] runs cmd: %s", cmd))
 
 		if err != nil {
@@ -609,10 +611,10 @@ func sortPVIssuesByVG(log logger.Logger, pvs []internal.PVData) map[string][]str
 	return pvIssuesByVG
 }
 
-func sortVGIssuesByVG(log logger.Logger, vgs []internal.VGData) map[string]string {
+func (d *Discoverer) sortVGIssuesByVG(log logger.Logger, vgs []internal.VGData) map[string]string {
 	vgIssues := make(map[string]string, len(vgs))
 	for _, vg := range vgs {
-		_, cmd, stdErr, err := utils.GetVG(vg.VGName)
+		_, cmd, stdErr, err := d.commands.GetVG(vg.VGName)
 		log.Debug(fmt.Sprintf("[sortVGIssuesByVG] runs cmd: %s", cmd))
 		if err != nil {
 			log.Error(err, fmt.Sprintf(`[sortVGIssuesByVG] unable to run vgs command for vg, name: "%s"`, vg.VGName))
@@ -738,9 +740,9 @@ func getStatusThinPools(log logger.Logger, thinPools, sortedLVs map[string][]int
 			Message:       "",
 		}
 
-		if lverrs, exist := lvIssues[vg.VGName+vg.VGUUID][thinPool.LVName]; exist {
+		if lvErrs, exist := lvIssues[vg.VGName+vg.VGUUID][thinPool.LVName]; exist {
 			tp.Ready = false
-			tp.Message = lverrs
+			tp.Message = lvErrs
 		}
 
 		result = append(result, tp)

@@ -117,7 +117,7 @@ func main() {
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 
 	log.Info("[main] ReTag starts")
-	if err := utils.ReTag(ctx, log, metrics, bd.DiscovererName); err != nil {
+	if err := utils.NewCommands().ReTag(ctx, log, metrics, bd.DiscovererName); err != nil {
 		log.Error(err, "[main] unable to run ReTag")
 	}
 
@@ -183,7 +183,7 @@ func main() {
 	}
 
 	go func() {
-		if err = scanner.RunScanner(
+		if err = scanner.NewScanner().Run(
 			ctx,
 			log,
 			*cfgParams,
