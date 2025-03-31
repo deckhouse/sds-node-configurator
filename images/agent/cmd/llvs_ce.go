@@ -15,20 +15,6 @@ limitations under the License.
 
 package main
 
-import (
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-)
-
-func addLLVSReconciler(
-	_ manager.Manager,
-	_ logger.Logger,
-	_ monitoring.Metrics,
-	_ *cache.Cache,
-	_ *config.Config,
-) {
+func addLLVSReconciler(_ ...any) {
 	// noop
 }
