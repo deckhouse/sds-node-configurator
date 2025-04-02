@@ -8,16 +8,14 @@ env:
   MODULES_REGISTRY_LOGIN: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
   MODULES_REGISTRY_PASSWORD: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
   MODULES_MODULE_TAG: ${{ github.ref_name }}
-  SOURCE_REPO: "${{ secrets.SOURCE_REPO }}"
+  GOLANG_VERSION: ${{ vars.GOLANG_VERSION }}
+  GOPROXY: ${{ secrets.GOPROXY }}
+  SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
 
 on:
   push:
     tags:
       - '**'
-
-defaults:
-  run:
-    shell: bash
 
 jobs:
   prod_ce_setup_build:
@@ -34,6 +32,7 @@ jobs:
           echo $MODULES_MODULE_SOURCE
           echo $MODULES_MODULE_TAG
           echo $MODULE_EDITION
+        shell: bash
         name: Show vars
 
       - uses: actions/checkout@v4
@@ -68,6 +67,7 @@ jobs:
           echo $MODULES_MODULE_SOURCE
           echo $MODULES_MODULE_TAG
           echo $MODULE_EDITION
+        shell: bash
         name: Show vars
 
       - uses: actions/checkout@v4
@@ -102,6 +102,7 @@ jobs:
           echo $MODULES_MODULE_SOURCE
           echo $MODULES_MODULE_TAG
           echo $MODULE_EDITION
+        shell: bash
         name: Show vars
 
       - uses: actions/checkout@v4
@@ -136,6 +137,7 @@ jobs:
           echo $MODULES_MODULE_SOURCE
           echo $MODULES_MODULE_TAG
           echo $MODULE_EDITION
+        shell: bash
         name: Show vars
 
       - uses: actions/checkout@v4
@@ -170,6 +172,7 @@ jobs:
           echo $MODULES_MODULE_SOURCE
           echo $MODULES_MODULE_TAG
           echo $MODULE_EDITION
+        shell: bash
         name: Show vars
 
       - uses: actions/checkout@v4

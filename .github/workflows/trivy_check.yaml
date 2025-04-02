@@ -43,16 +43,6 @@ jobs:
 
           echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Prepare sub repo
-        run: |
-          version=`grep '"UTIL_LINUX"' .werf/consts.yaml | awk -F'"' '{ print $4}'`
-          git clone --depth 1 --branch $version ${{ secrets.SOURCE_REPO }}/util-linux/util-linux.git ./util-linux
-          git clone ${{ secrets.SOURCE_REPO }}/lvmteam/lvm2.git ./lvm2
-          version=`grep '"LVM2"' .werf/consts.yaml | awk -F'"' '{ print $4}'`
-          cd ./lvm2
-          git checkout $version
-          cd ..
-
       - name: Run Trivy vulnerability scanner in fs mode
         run: |
           trivy fs . --quiet --config trivy.yaml
