@@ -11,6 +11,8 @@ import (
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -477,7 +479,10 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	lvg.Status.VGFree = candidate.VGFree
 	lvg.Status.VGUuid = candidate.VGUUID
 
-	lvg.Spec.BlockDeviceSelector, _ = updateBlockDeviceSelectorIfNeeded(lvg.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
+	_, err = updateBlockDeviceSelectorIfNeeded(lvg.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
+	if err != nil {
+		return fmt.Errorf("updating block device selectors: %w", err)
+	}
 
 	d.log.Trace(fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] updated LVMVolumeGroup: %+v", lvg))
 
@@ -810,7 +815,11 @@ func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LVMVolumeGroup, candi
 	log.Trace(fmt.Sprintf(`VGUUID, candidate: %s, lvg: %s`, candidate.VGUUID, lvg.Status.VGUuid))
 	log.Trace(fmt.Sprintf(`Nodes, candidate: %+v, lvg: %+v`, convertLVMVGNodes(candidate.Nodes), lvg.Status.Nodes))
 
-	_, blockDeviceSelectorUpdated := updateBlockDeviceSelectorIfNeeded(lvg.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
+	notMatchedBlockDeviceNames, err := notMatchedBlockDeviceNames(lvg.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[hasLVMVolumeGroupDiff] unable to parse blockDeviceSelector"))
+		notMatchedBlockDeviceNames = []string{}
+	}
 
 	return candidate.AllocatedSize.Value() != lvg.Status.AllocatedSize.Value() ||
 		hasStatusPoolDiff(convertedStatusPools, lvg.Status.ThinPools) ||
@@ -818,7 +827,7 @@ func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LVMVolumeGroup, candi
 		candidate.VGFree.Value() != lvg.Status.VGFree.Value() ||
 		candidate.VGUUID != lvg.Status.VGUuid ||
 		hasStatusNodesDiff(log, convertLVMVGNodes(candidate.Nodes), lvg.Status.Nodes) ||
-		blockDeviceSelectorUpdated
+		len(notMatchedBlockDeviceNames) > 0
 }
 
 func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LVMVolumeGroupNode) bool {
@@ -883,8 +892,89 @@ func configureBlockDeviceSelector(candidate internal.LVMVolumeGroupCandidate) *m
 	}
 }
 
-func updateBlockDeviceSelectorIfNeeded(existedLabelSelector *metav1.LabelSelector, blockDeviceNames []string) (*metav1.LabelSelector, bool) {
-	if existedLabelSelector == nil {
+func newBlockDeviceLabelRequirements(labelSelector *metav1.LabelSelector) (labels.Requirements, error) {
+	var requirements labels.Requirements
+	for i, matchExpression := range labelSelector.MatchExpressions {
+		if matchExpression.Key != internal.MetadataNameLabelKey {
+			continue
+		}
+
+		requirement, err := labels.NewRequirement(matchExpression.Key, selection.Operator(matchExpression.Operator), matchExpression.Values)
+		if err != nil {
+			return requirements, fmt.Errorf("parsing expression at index %d '%s': %w", i, matchExpression.String(), err)
+		}
+
+		requirements = append(requirements, *requirement)
+	}
+	for key, value := range labelSelector.MatchLabels {
+		if key != internal.MetadataNameLabelKey {
+			continue
+		}
+
+		requirement, err := labels.NewRequirement(key, selection.In, []string{value})
+		if err != nil {
+			return requirements, fmt.Errorf("parsing match label with key %s, value %s: %w", key, value, err)
+		}
+
+		requirements = append(requirements, *requirement)
+	}
+	return requirements, nil
+}
+
+func notMatchedBlockDeviceNames(labelSelector *metav1.LabelSelector, blockDeviceNames []string) ([]string, error) {
+	requirements, err := newBlockDeviceLabelRequirements(labelSelector)
+	if err != nil {
+		return nil, err
+	}
+
+	existingSelector := labels.NewSelector().Add(requirements...)
+	var notMatchedBlockDeviceNames []string
+	for _, blockDeviceName := range blockDeviceNames {
+		if existingSelector.Matches(labels.Set{
+			internal.MetadataNameLabelKey: blockDeviceName,
+		}) {
+			continue
+		}
+		notMatchedBlockDeviceNames = append(notMatchedBlockDeviceNames, blockDeviceName)
+	}
+	return notMatchedBlockDeviceNames, nil
+}
+
+func appendDeviceNamesToLabelSelector(labelSelector *metav1.LabelSelector, blockDeviceNames []string) {
+	if len(blockDeviceNames) == 0 {
+		return
+	}
+
+	var expressionToAddTo *[]string = nil
+
+	// find existing expression to add
+	for _, expression := range labelSelector.MatchExpressions {
+		if expression.Key == internal.MetadataNameLabelKey && expression.Operator == metav1.LabelSelectorOpIn {
+			expressionToAddTo = &expression.Values
+			break
+		}
+	}
+
+	if expressionToAddTo == nil {
+		// Create new expression in list
+		labelSelector.MatchExpressions = append(labelSelector.MatchExpressions, metav1.LabelSelectorRequirement{
+			Key:      internal.MetadataNameLabelKey,
+			Operator: metav1.LabelSelectorOpIn,
+			Values:   {},
+		})
+		expressionToAddTo = &labelSelector.MatchExpressions[len(labelSelector.MatchExpressions)-1].Values
+	}
+
+	*expressionToAddTo = append(*expressionToAddTo, blockDeviceNames...)
+}
+
+// Add missing block device to label selector
+//
+// if labelSelector is provided it will be changed by this call
+// If labelSelector is created or updated it will be returned in updatedLabelSelector argument
+// If labelSelector was not changed the updatedLabelSelector will be nil
+func updateBlockDeviceSelectorIfNeeded(labelSelector *metav1.LabelSelector, blockDeviceNames []string) (updatedLabelSelector *metav1.LabelSelector, err error) {
+	if labelSelector == nil {
 		return &metav1.LabelSelector{
 			MatchExpressions: []metav1.LabelSelectorRequirement{
 				{
@@ -893,40 +983,20 @@ func updateBlockDeviceSelectorIfNeeded(existedLabelSelector *metav1.LabelSelecto
 					Values:   slices.Clone(blockDeviceNames),
 				},
 			},
-		}, true
+		}, nil
 	}
 
-	updated := false
-	found := false
-	for _, matchExpression := range existedLabelSelector.MatchExpressions {
-		if matchExpression.Key != internal.MetadataNameLabelKey {
-			continue
-		}
-		found = true
-
-		existingValuesMap := make(map[string]struct{})
-		for _, v := range matchExpression.Values {
-			existingValuesMap[v] = struct{}{}
-		}
-
-		for _, bd := range blockDeviceNames {
-			if _, exist := existingValuesMap[bd]; !exist {
-				matchExpression.Values = append(matchExpression.Values, bd)
-				existingValuesMap[bd] = struct{}{}
-				updated = true
-			}
-		}
+	notMatchedBlockDeviceNames, err := notMatchedBlockDeviceNames(labelSelector, blockDeviceNames)
+	if err != nil {
+		return nil, err
 	}
 
-	if !found {
-		existedLabelSelector.MatchExpressions = append(existedLabelSelector.MatchExpressions, metav1.LabelSelectorRequirement{
-			Key:      internal.MetadataNameLabelKey,
-			Operator: metav1.LabelSelectorOpIn,
-			Values:   blockDeviceNames,
-		})
-		updated = true
+	if len(notMatchedBlockDeviceNames) == 0 {
+		return nil, nil
 	}
-	return existedLabelSelector, updated
+
+	appendDeviceNamesToLabelSelector(labelSelector, notMatchedBlockDeviceNames)
+	return labelSelector, nil
 }
 
 func convertLVMVGNodes(nodes map[string][]internal.LVMVGDevice) []v1alpha1.LVMVolumeGroupNode {
