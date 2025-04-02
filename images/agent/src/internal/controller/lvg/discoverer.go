@@ -899,20 +899,21 @@ func updateBlockDeviceSelectorIfNeeded(existedLabelSelector *metav1.LabelSelecto
 	updated := false
 	found := false
 	for _, matchExpression := range existedLabelSelector.MatchExpressions {
-		if matchExpression.Key == internal.MetadataNameLabelKey {
-			found = true
+		if matchExpression.Key != internal.MetadataNameLabelKey {
+			continue
+		}
+		found = true
 
-			existingValuesMap := make(map[string]struct{})
-			for _, v := range matchExpression.Values {
-				existingValuesMap[v] = struct{}{}
-			}
+		existingValuesMap := make(map[string]struct{})
+		for _, v := range matchExpression.Values {
+			existingValuesMap[v] = struct{}{}
+		}
 
-			for _, bd := range blockDeviceNames {
-				if _, exist := existingValuesMap[bd]; !exist {
-					matchExpression.Values = append(matchExpression.Values, bd)
-					existingValuesMap[bd] = struct{}{}
-					updated = true
-				}
+		for _, bd := range blockDeviceNames {
+			if _, exist := existingValuesMap[bd]; !exist {
+				matchExpression.Values = append(matchExpression.Values, bd)
+				existingValuesMap[bd] = struct{}{}
+				updated = true
 			}
 		}
 	}
