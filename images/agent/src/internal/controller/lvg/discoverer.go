@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -889,7 +890,7 @@ func updateBlockDeviceSelectorIfNeeded(existedLabelSelector *metav1.LabelSelecto
 				{
 					Key:      internal.MetadataNameLabelKey,
 					Operator: metav1.LabelSelectorOpIn,
-					Values:   blockDeviceNames,
+					Values:   slices.Clone(blockDeviceNames),
 				},
 			},
 		}, true
@@ -897,18 +898,18 @@ func updateBlockDeviceSelectorIfNeeded(existedLabelSelector *metav1.LabelSelecto
 
 	updated := false
 	found := false
-	for i := range existedLabelSelector.MatchExpressions {
-		if existedLabelSelector.MatchExpressions[i].Key == internal.MetadataNameLabelKey {
+	for _, matchExpression := range existedLabelSelector.MatchExpressions {
+		if matchExpression.Key == internal.MetadataNameLabelKey {
 			found = true
 
 			existingValuesMap := make(map[string]struct{})
-			for _, v := range existedLabelSelector.MatchExpressions[i].Values {
+			for _, v := range matchExpression.Values {
 				existingValuesMap[v] = struct{}{}
 			}
 
 			for _, bd := range blockDeviceNames {
 				if _, exist := existingValuesMap[bd]; !exist {
-					existedLabelSelector.MatchExpressions[i].Values = append(existedLabelSelector.MatchExpressions[i].Values, bd)
+					matchExpression.Values = append(matchExpression.Values, bd)
 					existingValuesMap[bd] = struct{}{}
 					updated = true
 				}
