@@ -12,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -892,45 +891,24 @@ func configureBlockDeviceSelector(candidate internal.LVMVolumeGroupCandidate) *m
 	}
 }
 
-func newBlockDeviceLabelRequirements(labelSelector *metav1.LabelSelector) (labels.Requirements, error) {
-	var requirements labels.Requirements
-	for i, matchExpression := range labelSelector.MatchExpressions {
-		if matchExpression.Key != internal.MetadataNameLabelKey {
-			continue
-		}
-
-		requirement, err := labels.NewRequirement(matchExpression.Key, selection.Operator(matchExpression.Operator), matchExpression.Values)
-		if err != nil {
-			return requirements, fmt.Errorf("parsing expression at index %d '%s': %w", i, matchExpression.String(), err)
-		}
-
-		requirements = append(requirements, *requirement)
-	}
-	for key, value := range labelSelector.MatchLabels {
-		if key != internal.MetadataNameLabelKey {
-			continue
-		}
-
-		requirement, err := labels.NewRequirement(key, selection.In, []string{value})
-		if err != nil {
-			return requirements, fmt.Errorf("parsing match label with key %s, value %s: %w", key, value, err)
-		}
-
-		requirements = append(requirements, *requirement)
-	}
-	return requirements, nil
-}
-
 func notMatchedBlockDeviceNames(labelSelector *metav1.LabelSelector, blockDeviceNames []string) ([]string, error) {
-	requirements, err := newBlockDeviceLabelRequirements(labelSelector)
+	fullSelector, err := metav1.LabelSelectorAsSelector(labelSelector)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parsing label selector: %w", err)
 	}
 
-	existingSelector := labels.NewSelector().Add(requirements...)
+	requirements, _ := fullSelector.Requirements()
+	blockDeviceRequirements := requirements[0:0]
+	for _, requirement := range requirements {
+		if requirement.Key() == internal.MetadataNameLabelKey {
+			blockDeviceRequirements = append(blockDeviceRequirements, requirement)
+		}
+	}
+
+	blockDeviceNameSelector := labels.NewSelector().Add(blockDeviceRequirements...)
 	var notMatchedBlockDeviceNames []string
 	for _, blockDeviceName := range blockDeviceNames {
-		if existingSelector.Matches(labels.Set{
+		if blockDeviceNameSelector.Matches(labels.Set{
 			internal.MetadataNameLabelKey: blockDeviceName,
 		}) {
 			continue
@@ -948,9 +926,9 @@ func appendDeviceNamesToLabelSelector(labelSelector *metav1.LabelSelector, block
 	var expressionToAddTo *[]string = nil
 
 	// find existing expression to add
-	for _, expression := range labelSelector.MatchExpressions {
+	for i, expression := range labelSelector.MatchExpressions {
 		if expression.Key == internal.MetadataNameLabelKey && expression.Operator == metav1.LabelSelectorOpIn {
-			expressionToAddTo = &expression.Values
+			expressionToAddTo = &labelSelector.MatchExpressions[i].Values
 			break
 		}
 	}
@@ -960,12 +938,17 @@ func appendDeviceNamesToLabelSelector(labelSelector *metav1.LabelSelector, block
 		labelSelector.MatchExpressions = append(labelSelector.MatchExpressions, metav1.LabelSelectorRequirement{
 			Key:      internal.MetadataNameLabelKey,
 			Operator: metav1.LabelSelectorOpIn,
-			Values:   {},
+			Values:   []string{},
 		})
 		expressionToAddTo = &labelSelector.MatchExpressions[len(labelSelector.MatchExpressions)-1].Values
 	}
 
 	*expressionToAddTo = append(*expressionToAddTo, blockDeviceNames...)
+	value, exists := labelSelector.MatchLabels[internal.MetadataNameLabelKey]
+	if exists {
+		*expressionToAddTo = append(*expressionToAddTo, value)
+		delete(labelSelector.MatchLabels, internal.MetadataNameLabelKey)
+	}
 }
 
 // Add missing block device to label selector
