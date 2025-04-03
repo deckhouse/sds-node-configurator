@@ -119,4 +119,4 @@ jobs:
         with:
           module_source: "${{ vars.DEV_MODULE_SOURCE }}"
           module_name: ${{ vars.MODULE_NAME }}
-          module_tag: $(echo pr${{ github.ref_name }} | sed 's/\/.*//g')
+          module_tag: ${{ env.MODULES_MODULE_TAG }}
