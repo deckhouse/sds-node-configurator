@@ -22,8 +22,6 @@ import (
 	"fmt"
 
 	"github.com/cloudflare/cfssl/log"
-	mc "github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/api"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,6 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	mc "github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/api"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
 )
 
 const (

@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
 func TestCache(t *testing.T) {

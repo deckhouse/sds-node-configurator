@@ -1,7 +1,7 @@
 name: Go tests for images
 
 env:
-  GO_BUILD_TAGS: "ce se seplus ee csepro"
+  GO_BUILD_TAGS: "ee ce se seplus csepro"
 
 on:
   pull_request:
@@ -21,7 +21,7 @@ jobs:
       - name: Setup Go environment
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23.5'
+          go-version: "1.23.6"
 
       - name: Run Go tests
         run: |

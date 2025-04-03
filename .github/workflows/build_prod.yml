@@ -8,16 +8,14 @@ env:
   MODULES_REGISTRY_LOGIN: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
   MODULES_REGISTRY_PASSWORD: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
   MODULES_MODULE_TAG: ${{ github.ref_name }}
-  SOURCE_REPO: "${{ secrets.SOURCE_REPO }}"
+  GOLANG_VERSION: ${{ vars.GOLANG_VERSION }}
+  GOPROXY: ${{ secrets.GOPROXY }}
+  SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
 
 on:
   push:
     tags:
       - '**'
-
-defaults:
-  run:
-    shell: bash
 
 jobs:
   prod_ce_setup_build:
@@ -34,20 +32,21 @@ jobs:
           echo $MODULES_MODULE_SOURCE
           echo $MODULES_MODULE_TAG
           echo $MODULE_EDITION
+        shell: bash
         name: Show vars
 
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v1.2
+      - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v1.2
+      - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@v1.2
+      - uses: deckhouse/modules-actions/build@v2
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/ce/modules"
           module_name: ${{ vars.MODULE_NAME }}
@@ -68,20 +67,21 @@ jobs:
           echo $MODULES_MODULE_SOURCE
           echo $MODULES_MODULE_TAG
           echo $MODULE_EDITION
+        shell: bash
         name: Show vars
 
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v1.2
+      - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v1.2
+      - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@v1.2
+      - uses: deckhouse/modules-actions/build@v2
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/ee/modules"
           module_name: ${{ vars.MODULE_NAME }}
@@ -102,20 +102,21 @@ jobs:
           echo $MODULES_MODULE_SOURCE
           echo $MODULES_MODULE_TAG
           echo $MODULE_EDITION
+        shell: bash
         name: Show vars
 
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v1.2
+      - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v1.2
+      - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@v1.2
+      - uses: deckhouse/modules-actions/build@v2
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/fe/modules"
           module_name: ${{ vars.MODULE_NAME }}
@@ -136,20 +137,21 @@ jobs:
           echo $MODULES_MODULE_SOURCE
           echo $MODULES_MODULE_TAG
           echo $MODULE_EDITION
+        shell: bash
         name: Show vars
 
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v1.2
+      - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v1.2
+      - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@v1.2
+      - uses: deckhouse/modules-actions/build@v2
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/se/modules"
           module_name: ${{ vars.MODULE_NAME }}
@@ -170,20 +172,21 @@ jobs:
           echo $MODULES_MODULE_SOURCE
           echo $MODULES_MODULE_TAG
           echo $MODULE_EDITION
+        shell: bash
         name: Show vars
 
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v1.2
+      - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v1.2
+      - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@v1.2
+      - uses: deckhouse/modules-actions/build@v2
         with:
           module_source: "${{ vars.PROD_REGISTRY }}/${{ vars.PROD_MODULE_SOURCE_NAME }}/se-plus/modules"
           module_name: ${{ vars.MODULE_NAME }}
