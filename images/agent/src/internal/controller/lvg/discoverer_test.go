@@ -962,8 +962,8 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		for i := range allDeviceNames {
 			notExistingDevices := allDeviceNames[0:i]
 			existingDevices := allDeviceNames[i:]
-			t.Run(fmt.Sprintf("missingDevices %v", notExistingDevices), func(t *testing.T) {
-				selector := &metav1.LabelSelector{
+			selectors := map[string]metav1.LabelSelector{
+				"onlyOurKeys": {
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
 							Key:      internal.MetadataNameLabelKey,
@@ -971,85 +971,99 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 							Values:   slices.Clone(existingDevices),
 						},
 					},
-				}
-				if len(existingDevices) == 1 {
-					t.Run("inMatchLabels", func(t *testing.T) {
-						newSelector, err := updateBlockDeviceSelectorIfNeeded(&metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								internal.MetadataNameLabelKey: existingDevices[0],
-							},
-						}, allDeviceNames)
-						assert.NoError(t, err)
-						assert.NotNil(t, newSelector)
-
-						t.Run("doNotUpdateSecondTime", func(t *testing.T) {
-							newSelector2, err := updateBlockDeviceSelectorIfNeeded(newSelector.DeepCopy(), allDeviceNames)
-							assert.NoError(t, err)
-							assert.Nil(t, newSelector2)
-						})
-					})
-				}
-
-				for i := range notExistingDevices {
-					notExistingDevicesToAdd := notExistingDevices[i:]
-					t.Run(fmt.Sprintf("notMatchedBlockDeviceNames %v", notExistingDevicesToAdd), func(t *testing.T) {
-						notMatched, err := notMatchedBlockDeviceNames(selector.DeepCopy(), notExistingDevicesToAdd)
-						assert.NoError(t, err)
-						assert.EqualValues(t, notExistingDevicesToAdd, notMatched)
-					})
-
-					for _, devicesToAdd := range [][]string{
-						notExistingDevicesToAdd,
-						append(notExistingDevicesToAdd, existingDevices...),
-						append(existingDevices, notExistingDevicesToAdd...),
-					} {
-						t.Run(fmt.Sprintf("append %v to %v", devicesToAdd, existingDevices), func(t *testing.T) {
-							newSelector, err := updateBlockDeviceSelectorIfNeeded(selector.DeepCopy(), devicesToAdd)
-							assert.NoError(t, err)
-							if len(devicesToAdd) == 0 {
-								assert.Nil(t, newSelector)
-							} else {
-								assert.NotNil(t, newSelector)
-							}
-
-							if newSelector != nil {
-								t.Run("doNotUpdateSecondTime", func(t *testing.T) {
-									newSelector2, err := updateBlockDeviceSelectorIfNeeded(newSelector.DeepCopy(), devicesToAdd)
-									assert.NoError(t, err)
-									assert.Nil(t, newSelector2)
-								})
-
-								t.Run("notMatchedIsEmpty", func(t *testing.T) {
-									notMatched, err := notMatchedBlockDeviceNames(newSelector.DeepCopy(), devicesToAdd)
-									assert.NoError(t, err)
-									assert.Empty(t, notMatched)
-								})
-							}
-						})
-					}
-				}
-			})
-		}
-
-		t.Run("appendAllMissing", func(t *testing.T) {
-			newSelector, err := updateBlockDeviceSelectorIfNeeded(&metav1.LabelSelector{
-				MatchExpressions: []metav1.LabelSelectorRequirement{
-					{
-						Key:      internal.MetadataNameLabelKey,
-						Operator: metav1.LabelSelectorOpIn,
-						Values:   []string{"foo", "bar"},
+				},
+				// TODO: We don't cover this case yet
+				// "onlyOurKeysTwice": {
+				// 	MatchExpressions: []metav1.LabelSelectorRequirement{
+				// 		{
+				// 			Key:      internal.MetadataNameLabelKey,
+				// 			Operator: metav1.LabelSelectorOpIn,
+				// 			Values:   slices.Clone(existingDevices),
+				// 		}, {
+				// 			Key:      internal.MetadataNameLabelKey,
+				// 			Operator: metav1.LabelSelectorOpIn,
+				// 			Values:   slices.Clone(existingDevices),
+				// 		},
+				// 	},
+				// },
+				"withOtherKeys": {
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      internal.MetadataNameLabelKey,
+							Operator: metav1.LabelSelectorOpIn,
+							Values:   slices.Clone(existingDevices),
+						},
+						{
+							Key:      "other/key",
+							Operator: metav1.LabelSelectorOpIn,
+							Values:   []string{"foo", "bar"},
+						},
 					},
 				},
-			}, allDeviceNames)
-			assert.NoError(t, err)
-			assert.NotNil(t, newSelector)
+			}
 
-			t.Run("doNotUpdateSecondTime", func(t *testing.T) {
-				newSelector2, err := updateBlockDeviceSelectorIfNeeded(newSelector.DeepCopy(), allDeviceNames)
-				assert.Nil(t, newSelector2)
-				assert.NoError(t, err)
-			})
-		})
+			for selectorName, selectorToTest := range selectors {
+				selector := selectorToTest.DeepCopy()
+				t.Run(fmt.Sprintf("missingDevices %v with selector %s", notExistingDevices, selectorName), func(t *testing.T) {
+					if len(existingDevices) == 1 {
+						t.Run("inMatchLabels", func(t *testing.T) {
+							newSelector, err := updateBlockDeviceSelectorIfNeeded(&metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									internal.MetadataNameLabelKey: existingDevices[0],
+								},
+							}, allDeviceNames)
+							assert.NoError(t, err)
+							assert.NotNil(t, newSelector)
+
+							t.Run("doNotUpdateSecondTime", func(t *testing.T) {
+								newSelector2, err := updateBlockDeviceSelectorIfNeeded(newSelector.DeepCopy(), allDeviceNames)
+								assert.NoError(t, err)
+								assert.Nil(t, newSelector2)
+							})
+						})
+					}
+
+					for i := range notExistingDevices {
+						notExistingDevicesToAdd := notExistingDevices[i:]
+						t.Run(fmt.Sprintf("notMatchedBlockDeviceNames %v", notExistingDevicesToAdd), func(t *testing.T) {
+							notMatched, err := notMatchedBlockDeviceNames(selector.DeepCopy(), notExistingDevicesToAdd)
+							assert.NoError(t, err)
+							assert.EqualValues(t, notExistingDevicesToAdd, notMatched)
+						})
+
+						for _, devicesToAdd := range [][]string{
+							notExistingDevicesToAdd,
+							append(notExistingDevicesToAdd, existingDevices...),
+							append(existingDevices, notExistingDevicesToAdd...),
+						} {
+							t.Run(fmt.Sprintf("append %v to %v", devicesToAdd, existingDevices), func(t *testing.T) {
+								newSelector, err := updateBlockDeviceSelectorIfNeeded(selector.DeepCopy(), devicesToAdd)
+								assert.NoError(t, err)
+								if len(devicesToAdd) == 0 {
+									assert.Nil(t, newSelector)
+								} else {
+									assert.NotNil(t, newSelector)
+								}
+
+								if newSelector != nil {
+									t.Run("doNotUpdateSecondTime", func(t *testing.T) {
+										newSelector2, err := updateBlockDeviceSelectorIfNeeded(newSelector.DeepCopy(), devicesToAdd)
+										assert.NoError(t, err)
+										assert.Nil(t, newSelector2)
+									})
+
+									t.Run("notMatchedIsEmpty", func(t *testing.T) {
+										notMatched, err := notMatchedBlockDeviceNames(newSelector.DeepCopy(), devicesToAdd)
+										assert.NoError(t, err)
+										assert.Empty(t, notMatched)
+									})
+								}
+							})
+						}
+					}
+				})
+			}
+		}
 	})
 }
 
