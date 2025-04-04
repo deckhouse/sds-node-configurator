@@ -12,10 +12,12 @@ git:
     includePaths:
       - api
       - lib/go
-      - images/{{ $.ImageName }}/src
+      - images/{{ $.ImageName }}
     stageDependencies:
       install:
         - '**/*'
+    excludePaths:
+      - images/{{ $.ImageName }}/werf.yaml
 
 ---
 image: {{ $.ImageName }}-src-artifact-3p
@@ -26,10 +28,10 @@ shell:
   install:
     - apt-get update
     - apt-get -y install git
+    - git config --global advice.detachedHead false
     - git clone --depth 1 --branch {{ $.Versions.UTIL_LINUX }} {{ env "SOURCE_REPO" }}/util-linux/util-linux.git /src/util-linux
     - rm -rf /src/util-linux/.git
     - rm -rf /src/.git
-
 
 ---
 image: {{ $.ImageName }}-binaries-artifact
@@ -104,7 +106,7 @@ mount:
 
 shell:
   setup:
-    - cd /src/images/{{ $.ImageName }}/src/cmd
+    - cd /src/images/{{ $.ImageName }}/cmd
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -tags {{ $.Root.MODULE_EDITION }} -o /{{ $.ImageName }}
     - chmod +x /{{ $.ImageName }}
 

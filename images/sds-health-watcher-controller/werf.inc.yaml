@@ -7,16 +7,17 @@ from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
-  - add: /images/{{ $.ImageName }}/src
-    to: /src/images/{{ $.ImageName }}/src
+  - add: /
+    to: /src
+    includePaths:
+      - api
+      - lib/go
+      - images/{{ $.ImageName }}
     stageDependencies:
       install:
-        - "**/*"
-  - add: /api
-    to: /src/api
-    stageDependencies:
-      install:
-        - "**/*"
+        - '**/*'
+    excludePaths:
+      - images/{{ $.ImageName }}/werf.yaml
 
 shell:
   install:
@@ -39,7 +40,7 @@ mount:
 
 shell:
   setup:
-    - cd /src/images/{{ $.ImageName }}/src/cmd
+    - cd /src/images/{{ $.ImageName }}/cmd
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
     - chmod +x /{{ $.ImageName }}
 
