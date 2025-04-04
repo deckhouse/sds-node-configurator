@@ -1,13 +1,13 @@
 module github.com/deckhouse/sds-node-configurator/images/webhooks
 
-go 1.23.6
+go 1.24.2
 
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250206203415-a9ffd855f5a3
 	github.com/deckhouse/sds-node-configurator/lib/go/common v0.0.0-00010101000000-000000000000
 	github.com/sirupsen/logrus v1.9.3
 	github.com/slok/kubewebhook/v2 v2.7.0
-	k8s.io/apimachinery v0.32.1
+	k8s.io/apimachinery v0.32.3
 )
 
 replace github.com/deckhouse/sds-node-configurator/api => ../../api
