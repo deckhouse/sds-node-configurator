@@ -74,9 +74,7 @@ func NewCommands() Commands {
 	return &commands{}
 }
 
-var _ Commands = commands{}
-
-func (c commands) GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
+func (c *commands) GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
 	var outs bytes.Buffer
 	args := []string{"-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
 	cmd := exec.CommandContext(ctx, internal.LSBLKCmd, args...)
@@ -548,7 +546,7 @@ func (commands) UnmarshalDevices(out []byte) ([]internal.Device, error) {
 	return devices.BlockDevices, nil
 }
 
-func (c commands) ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, ctrlName string) error {
+func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, ctrlName string) error {
 	// thin pool
 	log.Debug("[ReTag] start re-tagging LV")
 	start := time.Now()

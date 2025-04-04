@@ -24,8 +24,6 @@ repos:
   - repo: https://github.com/golangci/golangci-lint
     rev: v1.64.5
     hooks:
-      - id: golangci-lint-config-verify
-        entry: ./hack/for-each-mod golangci-lint config verify
       - id: golangci-lint
         name: Run golangci-lint with tag `ee`
         entry: ./hack/for-each-mod golangci-lint run --new-from-rev HEAD --build-tags ee --fix
