@@ -1,14 +1,34 @@
 repos:
-  - repo: https://github.com/golangci/golangci-lint
-    rev: v1.64.6
+  - repo: local
     hooks:
+      - id: go-mod-tidy
+        name: Run `go mod tidy` fo all the modules
+        language: golang
+        entry: ./hack/for-each-mod go mod tidy
+        pass_filenames: false
+        types:
+          - file
+        files: ^.*/go\.mod$
+      - id: test-ce
+        name: Run `go test -tags=ee ./...` for all the modules
+        pass_filenames: false
+        language: golang
+        entry: ./hack/for-each-mod go test -tags=ce ./...
+        types: [go]
+      - id: test-ee
+        name: Run `go test -tags=ce ./...` for all the modules
+        pass_filenames: false
+        language: golang
+        entry: ./hack/for-each-mod go test -tags=ce ./...
+        types: [go]
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v1.64.5
+    hooks:
+      - id: golangci-lint-config-verify
+        entry: ./hack/for-each-mod golangci-lint config verify
       - id: golangci-lint
-        name: golangci-lint-ee
-        entry: find -type f -name go.mod -execdir sh -c "golangci-lint run --new-from-rev HEAD --build-tags ee --fix" {} +
+        name: Run golangci-lint with tag `ee`
+        entry: ./hack/for-each-mod golangci-lint run --new-from-rev HEAD --build-tags ee --fix
       - id: golangci-lint
-        name: golangci-lint-ce
-        entry: find -type f -name go.mod -execdir sh -c "golangci-lint run --new-from-rev HEAD --build-tags ce --fix" {} +
-  # - repo: https://github.com/streetsidesoftware/cspell-cli
-  #   rev: v8.17.3
-  #   hooks:
-  #     - id: cspell
+        name: Run golangci-lint with tag `ce`
+        entry: ./hack/for-each-mod golangci-lint run --new-from-rev HEAD --build-tags ce --fix
