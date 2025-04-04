@@ -102,7 +102,7 @@ func TestCommands(t *testing.T) {
 				},
 			}}
 
-			actualDevices, err := UnmarshalDevices([]byte(js))
+			actualDevices, err := NewCommands().UnmarshalDevices([]byte(js))
 			if assert.NoError(t, err) {
 				assert.Equal(t, expectedDevices.BlockDevices, actualDevices)
 			}
@@ -141,7 +141,7 @@ func TestCommands(t *testing.T) {
       }
    ]
 }`
-			_, err := UnmarshalDevices([]byte(js))
+			_, err := NewCommands().UnmarshalDevices([]byte(js))
 			assert.Error(t, err)
 		})
 	})
@@ -267,6 +267,7 @@ func TestCommands(t *testing.T) {
 
 	t.Run("GetAllPVs", func(t *testing.T) {
 		t.Run("Unmarshal_LV", func(t *testing.T) {
+			// cspell:ignore mythinpool
 			js := `{
       "report": [
           {
@@ -287,6 +288,7 @@ func TestCommands(t *testing.T) {
 
 		t.Run("Unmarshal_LV_Empty_ThinDeviceID", func(t *testing.T) {
 			// TODO: Cleanup
+			// cspell:ignore lvol0
 			js := ` {
       "report": [
           {

@@ -17,6 +17,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llvs"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -26,6 +27,7 @@ func addLLVSReconciler(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
+	commands utils.Commands,
 	cfgParams *config.Config,
 ) {
 	if !feature.SnapshotsEnabled() {
@@ -43,6 +45,7 @@ func addLLVSReconciler(
 			log,
 			metrics,
 			sdsCache,
+			commands,
 			llvs.ReconcilerConfig{
 				NodeName:                cfgParams.NodeName,
 				LLVRequeueInterval:      cfgParams.LLVRequeueInterval,

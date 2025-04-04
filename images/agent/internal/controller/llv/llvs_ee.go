@@ -14,7 +14,6 @@ import (
 	"fmt"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -34,7 +33,7 @@ func (r *Reconciler) handleLLVSSource(ctx context.Context, llv *v1alpha1.LVMLogi
 		return "", false, errors.New("restored volume should be in the same volume group as the origin volume")
 	}
 
-	cmd, err := utils.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, sourceLLVS.Status.ActualVGNameOnTheNode, sourceLLVS.Spec.ActualSnapshotNameOnTheNode)
+	cmd, err := r.commands.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, sourceLLVS.Status.ActualVGNameOnTheNode, sourceLLVS.Spec.ActualSnapshotNameOnTheNode)
 
 	return cmd, err != nil, err
 }

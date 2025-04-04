@@ -31,6 +31,7 @@ type Reconciler struct {
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
 	cfg      ReconcilerConfig
+	commands utils.Commands
 }
 
 type ReconcilerConfig struct {
@@ -45,6 +46,7 @@ func NewReconciler(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
+	commands utils.Commands,
 	cfg ReconcilerConfig,
 ) *Reconciler {
 	return &Reconciler{
@@ -60,6 +62,7 @@ func NewReconciler(
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		cfg:      cfg,
+		commands: commands,
 	}
 }
 
@@ -244,7 +247,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 	switch {
 	case snapshotLVData == nil || !snapshotLVData.Exist:
 		// create
-		cmd, err := utils.CreateThinLogicalVolumeSnapshot(
+		cmd, err := r.commands.CreateThinLogicalVolumeSnapshot(
 			llvs.ActualSnapshotNameOnTheNode(),
 			llvs.Status.ActualVGNameOnTheNode,
 			llvs.Status.ActualLVNameOnTheNode,
@@ -351,7 +354,7 @@ func (r *Reconciler) deleteLVIfNeeded(llvsName, llvsActualNameOnTheNode, vgActua
 		return nil
 	}
 
-	cmd, err := utils.RemoveLV(vgActualNameOnTheNode, llvsActualNameOnTheNode)
+	cmd, err := r.commands.RemoveLV(vgActualNameOnTheNode, llvsActualNameOnTheNode)
 	r.log.Debug(fmt.Sprintf("[deleteLVIfNeeded] runs cmd: %s", cmd))
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[deleteLVIfNeeded] unable to remove LV %s from VG %s", llvsActualNameOnTheNode, vgActualNameOnTheNode))
