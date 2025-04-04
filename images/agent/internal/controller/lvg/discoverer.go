@@ -815,7 +815,7 @@ func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LVMVolumeGroup, candi
 
 	notMatchedBlockDeviceNames, err := notMatchedBlockDeviceNames(lvg.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[hasLVMVolumeGroupDiff] unable to parse blockDeviceSelector"))
+		log.Error(err, "[hasLVMVolumeGroupDiff] unable to parse blockDeviceSelector")
 		notMatchedBlockDeviceNames = []string{}
 	}
 
@@ -922,7 +922,7 @@ func appendDeviceNamesToLabelSelector(labelSelector *metav1.LabelSelector, block
 		return
 	}
 
-	var expressionToAddTo *[]string = nil
+	var expressionToAddTo *[]string
 
 	// find existing expression to add
 	for i, expression := range labelSelector.MatchExpressions {
