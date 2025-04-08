@@ -22,7 +22,6 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -33,6 +32,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 type ReconcileRequest[T client.Object] struct {

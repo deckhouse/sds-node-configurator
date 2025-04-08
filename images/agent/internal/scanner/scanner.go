@@ -23,6 +23,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/pilebones/go-udev/netlink"
+	"k8s.io/utils/clock"
+
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
@@ -32,8 +35,6 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/throttler"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
-	"github.com/pilebones/go-udev/netlink"
-	"k8s.io/utils/clock"
 )
 
 func RunScanner(
