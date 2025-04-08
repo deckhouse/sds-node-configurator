@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# cspell:ignore dvcr
+
 def get_value(path: str, values: dict, default=None):
     def get(keys: list, values: dict, default):
         if len(keys) == 1:

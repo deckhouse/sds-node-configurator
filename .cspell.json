@@ -1,6 +1,18 @@
 {
+    "version": "0.2",
+    "language": "en_gb",
+    "import": [
+        "@cspell/dict-ru_ru/cspell-ext.json"
+    ],
     "dictionaries": [
-        "en", "terms", "companies"
+        "en_us",
+        "python",
+        "golang",
+        "bash",
+        "terms",
+        "companies",
+        "local_companies",
+        "names"
     ],
     "dictionaryDefinitions": [
         {
@@ -9,15 +21,178 @@
             "path": ".cspell/terms.txt"
         },
         {
-            "name": "companies",
+            "name": "ru_terms",
+            "description": "Special Russian terms we use",
+            "path": ".cspell/ru_terms.txt"
+        },
+        {
+            "name": "names",
+            "description": "People names we have in code",
+            "path": ".cspell/names.txt"
+        },
+        {
+            "name": "local_companies",
             "description": "Company names mentioned",
             "path": ".cspell/companies.txt"
+        },
+        {
+            "name": "puml",
+            "path": ".cspell/puml.txt"
+        },
+        {
+            "name": "go_libs",
+            "path": ".cspell/go_libs.txt",
+        },
+        {
+            "name": "go_commandline",
+            "path": ".cspell/go_commandline.txt"
+        },
+        {
+            "name": "python_sphinx",
+            "path": ".cspell/python_sphinx.txt"
+        },
+        {
+            "name": "go_template",
+            "path": ".cspell/go_template.txt"
+        },
+        {
+            "name": "werf",
+            "path": ".cspell/werf.txt"
         }
     ],
-    "ignorePaths": [".cspell/"],
+    "ignorePaths": [
+        ".cspell/**",
+        ".cspell.json",
+        "**/go.sum",
+        "**/mock_utils/*",
+        "**/testdata/**/*"
+    ],
     "allowCompoundWords": true,
+    "patterns": [
+        {
+            "name": "pv_uuid",
+            "pattern": [
+                "[a-zA-Z0-9]{6}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{6}"
+            ]
+        },
+        {
+            "name": "config_file_name",
+            "pattern": [
+                "/etc/.*"
+            ]
+        },
+        {
+            "name": "lib_name",
+            "pattern": "lib\\w+(-devel)?"
+        },
+        {
+            "name": "tar_command",
+            "pattern": [
+                "tar +[zxvf]+"
+            ]
+        },
+        {
+            "name": "go_module_urls",
+            "pattern": [
+                "ghcr.io/\\w+/\\w+",
+                "golang.org/x/\\w+",
+                "github.com/\\w+/\\w+",
+                "k8s.io/\\w+/\\w+",
+                "gomodules.xyz/\\w+/\\w+",
+                "gopkg.in/\\w+/\\w+"
+            ]
+        },
+        {
+            "name": "github_uses",
+            "pattern": "uses:\\s+\\w+\\/\\w+(@\\w+)?"
+        },
+        {
+            "name": "Base64SingleLine",
+            "pattern": ["[a-zA-Z0-9]+=*"]
+        }
+    ],
+    "languageSettings": [
+        {
+            "languageId": "go",
+            "dictionaries": [
+                "golang",
+                "go_libs",
+                "go_commandline"
+            ]
+        },
+        {
+            "languageId": "puml",
+            "dictionaries": [
+                "puml"
+            ]
+        },
+        {
+            "languageId": "python",
+            "dictionaries": [
+                "python",
+                "python_sphinx"
+            ]
+        }
+    ],
     "ignoreRegExpList": [
-        "[\"\\t^]--?\\w+[\"\\t$]",
-        "[a-zA-Z0-9]{6}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{6}",
+        "config_file_name",
+        "lib_name",
+        "tar_command",
+        "Base64SingleLine",
+        "go_module_urls",
+        "UUID",
+        "pv_uuid",
+        "github_uses"
+    ],
+    "overrides": [
+        {
+            "filename": [
+                "**/*.ru.md",
+                "**/doc-ru-*.yaml",
+                "**/*.ru.puml"
+            ],
+            "language": "ru",
+            "dictionaries": [
+                "ru_terms"
+            ]
+        },
+        {
+            "filename": [
+                "**/*.puml",
+            ],
+            "dictionaries": [
+                "puml"
+            ]
+        },
+        {
+            "filename": "**/*.go",
+            "dictionaries": [
+                "golang"
+            ]
+        },
+        {
+            "filename": "**/go.mod",
+            "dictionaries": [
+                "go_libs"
+            ]
+        },
+        {
+            "filename": [
+                "**/.golangci.yaml"
+            ],
+            "dictionaries": [
+                "go_libs"
+            ]
+        },
+        {
+            "filename": "**/*.yaml",
+            "dictionaries": [
+                "go_template"
+            ]
+        },
+        {
+            "filename": "**/werf*.yaml",
+            "dictionaries": ["werf"]
+        }
     ]
 }

@@ -187,7 +187,7 @@ func provideLVMVolumeGroupsPerNode(ctx context.Context, cl client.Client, log lo
 
 	for _, node := range nodes {
 		configuredLVG := configureLVGBySet(lvgSet, node)
-		log.Trace(fmt.Sprintf("[provideLVMVolumeGroupsPerNode] configurated LVMVolumeGroup: %+v", configuredLVG))
+		log.Trace(fmt.Sprintf("[provideLVMVolumeGroupsPerNode] configured LVMVolumeGroup: %+v", configuredLVG))
 
 		currentLVG := matchConfiguredLVGWithExistingOne(configuredLVG, currentLVGs)
 		if currentLVG != nil {

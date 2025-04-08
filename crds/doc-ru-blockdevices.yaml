@@ -26,27 +26,27 @@ spec:
                   description: |                    
                     LVM Physical Volume UUID.
                                         
-                    > Опциально: присутствует, только если девайс используется как LVM Physical Volume.
+                    > Опционально: присутствует, только если девайс используется как LVM Physical Volume.
                 vgUUID:
                   description: |
                     LVM Volume Group UUID, которой принадлежит данный девайс в качестве Physical Volume.
 
-                    > Опциально: присутствует, только если девайс используется как Physical Volume и включен в Volume Group.
+                    > Опционально: присутствует, только если девайс используется как Physical Volume и включен в Volume Group.
                 partUUID:
                   description: |
                     UUID раздела.
 
-                    > Опциально: присутствует, только если девайс является разделом.
+                    > Опционально: присутствует, только если девайс является разделом.
                 lvmVolumeGroupName:
                   description: |
                     Имя ресурса LVMVolumeGroup.
                     
-                    > Опциально: присутствует, только если девайс используется как Physical Volume, включен в Volume Group и указан в LVMVolumeGroup-ресурсе.
+                    > Опционально: присутствует, только если девайс используется как Physical Volume, включен в Volume Group и указан в LVMVolumeGroup-ресурсе.
                 actualVGNameOnTheNode:
                   description: |
                     Фактическое имя LVM Volume Group на узле, в которую включен девайс.
                     
-                    > Опциально: присутствует, только если девайс используется как Physical Volume и включен в Volume Group.
+                    > Опционально: присутствует, только если девайс используется как Physical Volume и включен в Volume Group.
                 wwn:
                   description: |
                     Уникальный идентификатор девайса WWN (World Wide Name).

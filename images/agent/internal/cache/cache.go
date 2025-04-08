@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	lvcount = 50
+	lvCount = 50
 )
 
 type Cache struct {
@@ -33,7 +33,7 @@ type LVData struct {
 
 func New() *Cache {
 	return &Cache{
-		lvs: make(map[string]*LVData, lvcount),
+		lvs: make(map[string]*LVData, lvCount),
 	}
 }
 

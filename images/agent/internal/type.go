@@ -177,7 +177,7 @@ func (lv LVData) GetUsedSize() (*resource.Quantity, error) {
 		}
 	}
 
-	aproxBytes := float64(lv.LVSize.Value()) * dataPercent * 0.01
+	approxBytes := float64(lv.LVSize.Value()) * dataPercent * 0.01
 
-	return resource.NewQuantity(int64(aproxBytes), resource.BinarySI), nil
+	return resource.NewQuantity(int64(approxBytes), resource.BinarySI), nil
 }

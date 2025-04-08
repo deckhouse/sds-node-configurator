@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# cspell:ignore dvcr
+
 from deckhouse import hook
 from datetime import timedelta
 from OpenSSL import crypto
@@ -220,7 +222,7 @@ class GenerateCertificateHook(Hook):
                     ca_crt, _ = ca.generate()
                     for secret in self.tls_secrets:
                         sans = secret.sansGenerator(ctx)
-                        print(f"Generate new certififcates for secret {secret.name}.")
+                        print(f"Generate new certificates for secret {secret.name}.")
                         tls_data = self.generate_selfsigned_tls_data_with_ca(cn=secret.cn,
                                                                              ca=ca,
                                                                              ca_crt=ca_crt,
@@ -232,7 +234,7 @@ class GenerateCertificateHook(Hook):
 
                 for secret in self.tls_secrets:
                     sans = secret.sansGenerator(ctx)
-                    print(f"Generate new certififcates for secret {secret.name}.")
+                    print(f"Generate new certificates for secret {secret.name}.")
                     tls_data = self.generate_selfsigned_tls_data(cn=secret.cn,
                                                                  sans=sans,
                                                                  key_usages=secret.key_usages,
@@ -248,7 +250,7 @@ class GenerateCertificateHook(Hook):
                 
                 tls_data = {}
                 if cert_outdated or data.get("tls.key", "") == "":
-                    print(f"Certificates from secret {secret.name} is invalid. Generate new certififcates.") 
+                    print(f"Certificates from secret {secret.name} is invalid. Generate new certificates.") 
                     tls_data = self.generate_selfsigned_tls_data(cn=secret.cn,
                                                 sans=sans,
                                                 key_usages=secret.key_usages,

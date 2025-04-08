@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# cspell:ignore CACRT
+
 from lib.tests import testing
 from lib.hooks.copy_custom_certificate import CopyCustomCertificatesHook
 

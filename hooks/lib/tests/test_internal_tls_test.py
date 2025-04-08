@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# cspell:ignore dvcr
+
 from lib.tests import testing
 from lib.hooks.internal_tls import GenerateCertificateHook, default_sans, TlsSecret
 from lib.certificate import parse

@@ -49,6 +49,8 @@
 
 # Parse command line options.
 
+# cspell:ignore Mmpd
+
 while getopts ":Mmpd" Option
 do
   case $Option in

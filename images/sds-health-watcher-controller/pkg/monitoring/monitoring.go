@@ -84,7 +84,7 @@ var (
 	noOperationalResourcesCount = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Name:      "no_operational_resources_count_total",
-		Help:      "How many LVMVolumeGroup resources are in Nooperational state.",
+		Help:      "How many LVMVolumeGroup resources are in Nonoperational state.",
 	}, []string{"resource"})
 )
 

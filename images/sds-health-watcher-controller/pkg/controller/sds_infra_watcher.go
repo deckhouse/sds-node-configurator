@@ -133,7 +133,7 @@ func RunSdsInfraWatcher(
 			log.Debug(fmt.Sprintf("[RunSdsInfraWatcher] tries to get pods by the selector %v", sdsNodeConfiguratorSelector))
 			sdsPods, err := getPodsBySelector(ctx, cl, sdsNodeConfiguratorSelector)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to get pods by the seletor %v", sdsNodeConfiguratorSelector))
+				log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to get pods by the selector %v", sdsNodeConfiguratorSelector))
 				continue
 			}
 			log.Debug(fmt.Sprintf("[RunSdsInfraWatcher] successfully got pods by the selector %v", sdsNodeConfiguratorSelector))

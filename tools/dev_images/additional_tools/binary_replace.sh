@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# cspell:ignore linux-vdso RDIR -Eeuo
+
 set -Eeuo pipefail
 shopt -s failglob
 
@@ -109,10 +111,10 @@ function get_binary_path () {
     BINARY_LIST+=$(ls -la $bin 2>/dev/null | awk '{print $9}')" "
   done
 
-  if [[ -z $BINARY_LIST ]]; then echo "No binaryes for replace"; exit 1; fi;
+  if [[ -z $BINARY_LIST ]]; then echo "No binaries for replace"; exit 1; fi;
 }
 
-# if get file with binaryes (-f)
+# if get file with binaries (-f)
 if [[ -n $FILE_TEMPLATE_BINS ]] && [[ -f $FILE_TEMPLATE_BINS ]] && [[ -z $TEMPLATE_BINS ]]; then
   BIN_TEMPLATE=$(cat $FILE_TEMPLATE_BINS)
   get_binary_path ${BIN_TEMPLATE}

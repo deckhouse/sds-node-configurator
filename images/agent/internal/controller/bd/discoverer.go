@@ -575,36 +575,36 @@ func readSerialBlockDevice(deviceName string, isMdRaid bool) (string, error) {
 }
 
 func configureBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]string {
-	var lbls map[string]string
+	var lables map[string]string
 	if blockDevice.Labels == nil {
-		lbls = make(map[string]string, 16)
+		lables = make(map[string]string, 16)
 	} else {
-		lbls = make(map[string]string, len(blockDevice.Labels))
+		lables = make(map[string]string, len(blockDevice.Labels))
 	}
 
 	for key, value := range blockDevice.Labels {
-		lbls[key] = value
+		lables[key] = value
 	}
 
 	slug.Lowercase = false
 	slug.MaxLength = 63
 	slug.EnableSmartTruncate = false
-	lbls[internal.MetadataNameLabelKey] = slug.Make(blockDevice.ObjectMeta.Name)
-	lbls[internal.HostNameLabelKey] = slug.Make(blockDevice.Status.NodeName)
-	lbls[internal.BlockDeviceTypeLabelKey] = slug.Make(blockDevice.Status.Type)
-	lbls[internal.BlockDeviceFSTypeLabelKey] = slug.Make(blockDevice.Status.FsType)
-	lbls[internal.BlockDevicePVUUIDLabelKey] = blockDevice.Status.PVUuid
-	lbls[internal.BlockDeviceVGUUIDLabelKey] = blockDevice.Status.VGUuid
-	lbls[internal.BlockDevicePartUUIDLabelKey] = blockDevice.Status.PartUUID
-	lbls[internal.BlockDeviceLVMVolumeGroupNameLabelKey] = slug.Make(blockDevice.Status.LVMVolumeGroupName)
-	lbls[internal.BlockDeviceActualVGNameLabelKey] = slug.Make(blockDevice.Status.ActualVGNameOnTheNode)
-	lbls[internal.BlockDeviceWWNLabelKey] = slug.Make(blockDevice.Status.Wwn)
-	lbls[internal.BlockDeviceSerialLabelKey] = slug.Make(blockDevice.Status.Serial)
-	lbls[internal.BlockDeviceSizeLabelKey] = blockDevice.Status.Size.String()
-	lbls[internal.BlockDeviceModelLabelKey] = slug.Make(blockDevice.Status.Model)
-	lbls[internal.BlockDeviceRotaLabelKey] = strconv.FormatBool(blockDevice.Status.Rota)
-	lbls[internal.BlockDeviceHotPlugLabelKey] = strconv.FormatBool(blockDevice.Status.HotPlug)
-	lbls[internal.BlockDeviceMachineIDLabelKey] = slug.Make(blockDevice.Status.MachineID)
+	lables[internal.MetadataNameLabelKey] = slug.Make(blockDevice.ObjectMeta.Name)
+	lables[internal.HostNameLabelKey] = slug.Make(blockDevice.Status.NodeName)
+	lables[internal.BlockDeviceTypeLabelKey] = slug.Make(blockDevice.Status.Type)
+	lables[internal.BlockDeviceFSTypeLabelKey] = slug.Make(blockDevice.Status.FsType)
+	lables[internal.BlockDevicePVUUIDLabelKey] = blockDevice.Status.PVUuid
+	lables[internal.BlockDeviceVGUUIDLabelKey] = blockDevice.Status.VGUuid
+	lables[internal.BlockDevicePartUUIDLabelKey] = blockDevice.Status.PartUUID
+	lables[internal.BlockDeviceLVMVolumeGroupNameLabelKey] = slug.Make(blockDevice.Status.LVMVolumeGroupName)
+	lables[internal.BlockDeviceActualVGNameLabelKey] = slug.Make(blockDevice.Status.ActualVGNameOnTheNode)
+	lables[internal.BlockDeviceWWNLabelKey] = slug.Make(blockDevice.Status.Wwn)
+	lables[internal.BlockDeviceSerialLabelKey] = slug.Make(blockDevice.Status.Serial)
+	lables[internal.BlockDeviceSizeLabelKey] = blockDevice.Status.Size.String()
+	lables[internal.BlockDeviceModelLabelKey] = slug.Make(blockDevice.Status.Model)
+	lables[internal.BlockDeviceRotaLabelKey] = strconv.FormatBool(blockDevice.Status.Rota)
+	lables[internal.BlockDeviceHotPlugLabelKey] = strconv.FormatBool(blockDevice.Status.HotPlug)
+	lables[internal.BlockDeviceMachineIDLabelKey] = slug.Make(blockDevice.Status.MachineID)
 
-	return lbls
+	return lables
 }

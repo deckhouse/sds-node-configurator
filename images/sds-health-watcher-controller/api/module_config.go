@@ -60,13 +60,13 @@ type ModuleConfig struct {
 type SettingsValues map[string]interface{}
 
 func (v *SettingsValues) DeepCopy() *SettingsValues {
-	nmap := make(map[string]interface{}, len(*v))
+	result := make(map[string]interface{}, len(*v))
 
 	for key, value := range *v {
-		nmap[key] = value
+		result[key] = value
 	}
 
-	vv := SettingsValues(nmap)
+	vv := SettingsValues(result)
 
 	return &vv
 }

@@ -58,7 +58,7 @@ func AddReconciler[T client.Object](
 		panic("T is not a struct pointer")
 	}
 
-	tname := t.Elem().Name()
+	tName := t.Elem().Name()
 
 	c, err := controller.New(
 		reconciler.Name(),
@@ -86,33 +86,33 @@ func AddReconciler[T client.Object](
 					q workqueue.TypedRateLimitingInterface[reconcile.Request],
 				) {
 					if !reconciler.ShouldReconcileCreate(e.Object) {
-						log.Debug(fmt.Sprintf("createFunc skipped a request for the %s %s to the Reconcilers queue", tname, e.Object.GetName()))
+						log.Debug(fmt.Sprintf("createFunc skipped a request for the %s %s to the Reconcilers queue", tName, e.Object.GetName()))
 						return
 					}
 
-					log.Info(fmt.Sprintf("createFunc got a create event for the %s, name: %s", tname, e.Object.GetName()))
+					log.Info(fmt.Sprintf("createFunc got a create event for the %s, name: %s", tName, e.Object.GetName()))
 
 					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 					q.Add(request)
 
-					log.Info(fmt.Sprintf("createFunc added a request for the %s %s to the Reconcilers queue", tname, e.Object.GetName()))
+					log.Info(fmt.Sprintf("createFunc added a request for the %s %s to the Reconcilers queue", tName, e.Object.GetName()))
 				},
 				UpdateFunc: func(
 					_ context.Context,
 					e event.TypedUpdateEvent[T],
 					q workqueue.TypedRateLimitingInterface[reconcile.Request],
 				) {
-					log.Info(fmt.Sprintf("UpdateFunc got a update event for the %s %s", tname, e.ObjectNew.GetName()))
+					log.Info(fmt.Sprintf("UpdateFunc got a update event for the %s %s", tName, e.ObjectNew.GetName()))
 
 					if !reconciler.ShouldReconcileUpdate(e.ObjectOld, e.ObjectNew) {
-						log.Debug(fmt.Sprintf("updateFunc skipped a request for the %s %s to the Reconcilers queue", tname, e.ObjectNew.GetName()))
+						log.Debug(fmt.Sprintf("updateFunc skipped a request for the %s %s to the Reconcilers queue", tName, e.ObjectNew.GetName()))
 						return
 					}
 
 					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 					q.Add(request)
 
-					log.Info(fmt.Sprintf("updateFunc added a request for the %s %s to the Reconcilers queue", tname, e.ObjectNew.GetName()))
+					log.Info(fmt.Sprintf("updateFunc added a request for the %s %s to the Reconcilers queue", tName, e.ObjectNew.GetName()))
 				},
 			},
 		),

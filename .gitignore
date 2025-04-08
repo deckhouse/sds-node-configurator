@@ -17,6 +17,7 @@
 *.swp
 
 # IDE
+# cspell:ignore njsproj ntvs
 .history/
 .idea
 *.suo

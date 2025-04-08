@@ -52,7 +52,7 @@ def iter_manifests(root_path: str):
                 # Wee only seek manifests
                 continue
             if filename.startswith("doc-"):
-                # Skip dedicated doc yamls, common for Deckhouse internal modules
+                # Skip dedicated doc-*.yaml, common for Deckhouse internal modules
                 continue
 
             crd_path = os.path.join(dirpath, filename)
