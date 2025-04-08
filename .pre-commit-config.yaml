@@ -14,7 +14,7 @@ repos:
           - --license-filepath
           - ./hack/boilerplate.txt
           - --comment-style
-          - ""
+          - "/*||*/"
           - --use-current-year
           - --no-extra-eol
       - id: insert-license
@@ -25,7 +25,7 @@ repos:
           - --license-filepath
           - ./hack/boilerplate_ee.txt
           - --comment-style
-          - ""
+          - "/*||*/"
           - --use-current-year
           - --no-extra-eol
       - id: insert-license
@@ -38,6 +38,16 @@ repos:
           - ./hack/boilerplate.txt
           - --comment-style
           - "//"                            # defaults to:  #
+          - --use-current-year
+          - --no-extra-eol                # see below
+      - id: insert-license
+        name: Insert License Pyhton
+        types: [python]
+        args:
+          - --license-filepath
+          - ./hack/boilerplate.txt
+          - --comment-style
+          - "#"                            # defaults to:  #
           - --use-current-year
           - --no-extra-eol                # see below
   - repo: https://github.com/streetsidesoftware/cspell-cli
