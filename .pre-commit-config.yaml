@@ -7,26 +7,29 @@ repos:
     rev: v1.5.5
     hooks:
       - id: insert-license
+        name: Insert License CE
         types: [go]
         exclude: "^.*(_(ee|csplus|se|seplus|csepro)(_test)?|mock_utils.*|zz_.*)\\.go$"
         args:
           - --license-filepath
           - ./hack/boilerplate.txt
           - --comment-style
-          - "/*||*/"
+          - ""
           - --use-current-year
           - --no-extra-eol
       - id: insert-license
+        name: Insert License EE
         types: [go]
         files: "^.*_(ee|csplus|se|seplus|csepro)(_test)?\\.go$"
         args:
           - --license-filepath
           - ./hack/boilerplate_ee.txt
           - --comment-style
-          - "/*||*/"
+          - ""
           - --use-current-year
           - --no-extra-eol
       - id: insert-license
+        name: Insert License generated
         types: [go]
         files: "^.*mock_utils.*.go$"
         exclude: "^.*_(ee|csplus|se|seplus|csepro)(_test)?\\.go$"
@@ -44,13 +47,13 @@ repos:
       # 1. Make our clone of https://github.com/streetsidesoftware/cspell-cli
       # 2. Add dependencies to `package.json`
       - id: cspell
-        name: Install dicts
+        name: CSpell - Install dicts
         entry: npm install -g @cspell/dict-ru_ru
         args: []
         pass_filenames: false
         always_run: true
       - id: cspell
-        name: Add dicts
+        name: CSpell - Add dictionaries
         args:
           - link
           - add
@@ -58,8 +61,9 @@ repos:
         pass_filenames: false
         always_run: true
       - id: cspell # Spell check changed files
+        name: CSpell - Check spelling
       - id: cspell # Spell check the commit message
-        name: check commit message spelling
+        name: CSpell - Check commit message spelling
         args:
           - --no-must-find-files
           - --no-progress
