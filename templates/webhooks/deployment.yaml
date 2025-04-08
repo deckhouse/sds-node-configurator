@@ -42,7 +42,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/ca: {{ .Values.sdsLocalVolume.internal.customWebhookCert.ca | sha256sum | quote }}        
+        checksum/ca: {{ .Values.sdsNodeConfigurator.internal.customWebhookCert.ca | sha256sum | quote }}        
       labels:
         app: webhooks
     spec:
