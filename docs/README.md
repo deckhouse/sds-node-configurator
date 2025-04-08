@@ -11,14 +11,14 @@ The module may work with other kernels or distributions, but its stable operatio
 
 The module manages `LVM` on cluster nodes through [Kubernetes custom resources](./cr.html) by performing the following operations:
 
-  - Discovering block devices and creating/updating/deleting their corresponding [BlockDevice resources](./cr.html#blockdevice).
+- Discovering block devices and creating/updating/deleting their corresponding [BlockDevice resources](./cr.html#blockdevice).
 
    > **Caution!** Manual creation and modification of the `BlockDevice` resource is prohibited.
 
-  - Discovering `LVM Volume Groups` on the nodes with the `storage.deckhouse.io/enabled=true` LVM tag attached and `Thin-pools` running on them as well as managing the corresponding [LVMVolumeGroup resources](./cr.html#lvmvolumegroup). The module automatically creates an `LVMVolumeGroup` resource if it does not yet exist for a discovered `LVM Volume Group`.
+- Discovering `LVM Volume Groups` on the nodes with the `storage.deckhouse.io/enabled=true` LVM tag attached and `Thin-pools` running on them as well as managing the corresponding [LVMVolumeGroup resources](./cr.html#lvmvolumegroup). The module automatically creates an `LVMVolumeGroup` resource if it does not yet exist for a discovered `LVM Volume Group`.
 
-  - Scanning `LVM Physical Volumes` on the nodes that are part of managed `LVM Volume Groups`. In case the size of underlying block device expands, the corresponding `LVM Physical Volumes` will be automatically expanded as well (`pvresize` will occur).
+- Scanning `LVM Physical Volumes` on the nodes that are part of managed `LVM Volume Groups`. In case the size of underlying block device expands, the corresponding `LVM Physical Volumes` will be automatically expanded as well (`pvresize` will occur).
 
   > **Caution!** Downsizing a block device is not supported.
 
-  - Creating/expanding/deleting `LVM Volume Groups` on the node according to the changes the user has made to the `LVMVolumeGroup` resources. [Usage examples](./usage.html#lvmvolumegroup-resources)
+- Creating/expanding/deleting `LVM Volume Groups` on the node according to the changes the user has made to the `LVMVolumeGroup` resources. [Usage examples](./usage.html#lvmvolumegroup-resources)

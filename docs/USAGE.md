@@ -10,6 +10,7 @@ The module may work with other kernels or distributions, but its stable operatio
 {{< /alert >}}
 
 The controller supports two types of resources:
+
 * `BlockDevice`;
 * `LVMVolumeGroup`.
 
@@ -17,8 +18,8 @@ The controller supports two types of resources:
 
 ### Creating a `BlockDevice` resource
 
-The controller regularly scans the existing devices on the node. If a device meets all the conditions 
-imposed by the controller, a `BlockDevice` `custom resource` (CR) with a unique name is created. 
+The controller regularly scans the existing devices on the node. If a device meets all the conditions
+imposed by the controller, a `BlockDevice` `custom resource` (CR) with a unique name is created.
 It contains all the information about the device in question.
 
 #### The conditions the controller imposes on the device
@@ -40,6 +41,7 @@ The controller independently updates the information in the custom resource if t
 ### Deleting a `BlockDevice` resource
 
 The following are the cases in which the controller will automatically delete a resource if the block device it refers to has become unavailable:
+
 * if the resource had a Consumable status;
 * if the block device belongs to a `Volume Group` that does not have the LVM tag `storage.deckhouse.io/enabled=true` attached to it (this `Volume Group` is not managed by our controller).
 
@@ -56,9 +58,10 @@ Currently, only local `Volume Groups` are supported.
 ### Creating an `LVMVolumeGroup` resource
 
 There are two ways to create an `LVMVolumeGroup` resource:
+
 * Automatically:
   * The controller automatically scans for information about the existing `LVM Volume Groups` on nodes and creates a resource if an `LVM Volume Group` is tagged with the `storage.deckhouse.io/enabled=true` LVM tag and there is no matching Kubernetes resource for it.
-  * In this case, the controller populates all `Spec` fields of the resource but `thinPools` on its own. A user should manually add an information about thin-pools on the node to the `Spec` field, if they want to make the controller manage the thin-pools. 
+  * In this case, the controller populates all `Spec` fields of the resource but `thinPools` on its own. A user should manually add an information about thin-pools on the node to the `Spec` field, if they want to make the controller manage the thin-pools.
 * By the user:
   * The user manually creates the resource by filling in only the `metadata.name` and `spec` fields. In it, they specify the desired state of the new `Volume Group`.
   * This configuration is then validated to ensure its correctness.
@@ -147,6 +150,7 @@ There are two ways to create an `LVMVolumeGroup` resource:
   > **Caution!** All the selected block devices must belong to the same node for a 'Local' `LVMVolumeGroup`.
 
 ### Updating an `LVMVolumeGroup` resource and a `Volume Group`
+
 You can change the desired state of a `VolumeGroup` or `thin pool` on nodes by modifying the `spec` field of the corresponding `LVMVolumeGroup` resource. The controller will automatically validate the new data and, if it is in a valid state, apply the necessary changes to the entities on the node.
 
 The controller automatically updates the `status` field of the `LVMVolumeGroup` resource to display up-to-date data about the corresponding `LVM Volume Group` on the node.
@@ -165,9 +169,10 @@ kubectl delete lvg %lvg-name%
 ```
 
 ### Extracting the `BlockDevice` Resource from the `LVMVolumeGroup` Resource
+
 To extract the `BlockDevice` resource from the `LVMVolumeGroup` resource, you need to either modify the `spec.blockDeviceSelector` field of the `LVMVolumeGroup` resource (by adding other selectors) or change the corresponding labels on the `BlockDevice` resource, so they no longer match the selectors of the `LVMVolumeGroup`. After this, you need to manually execute the commands `pvmove`, `vgreduce`, and `pvremove` on the node.
 
-> **Caution!** If the deleting `LVM Volume Group` resource contains any `Logical Volume` (even if it is only the `Thin-pool` that is specified in `spec`), a user must delete all those `Logical Volumes` manually. Otherwise, the `LVMVolumeGroup` resource and its `Volume Group` will not be deleted. 
+> **Caution!** If the deleting `LVM Volume Group` resource contains any `Logical Volume` (even if it is only the `Thin-pool` that is specified in `spec`), a user must delete all those `Logical Volumes` manually. Otherwise, the `LVMVolumeGroup` resource and its `Volume Group` will not be deleted.
 
 > A user can forbid to delete the `LVMVolumeGroup` resource by annotate it with `storage.deckhouse.io/deletion-protection`. If the controller finds the annotation, it will not delete nether the resource or the `Volume Group` till the annotation removal.
 
@@ -177,12 +182,12 @@ When deleting files, the operating system does not physically delete the content
 
 This is possible, for example, in the following case:
 
-  - user №1 placed files in the volume requested from StorageClass 1 and on node 1 (no matter in “Block” or “Filesystem” mode);
-  - user №1 deleted the files and the volume;
-  - the physical blocks it occupied become “free” but not wiped;
-  - user №2 requested a new volume from StorageClass 1 and on node 1 in “Block” mode;
-  - there is a risk that some or all of the blocks previously occupied by user №1 will be reallocated to user №2;
-  - in which case user №2 has the ability to recover user №1's data.
+* user №1 placed files in the volume requested from StorageClass 1 and on node 1 (no matter in “Block” or “Filesystem” mode);
+* user №1 deleted the files and the volume;
+* the physical blocks it occupied become “free” but not wiped;
+* user №2 requested a new volume from StorageClass 1 and on node 1 in “Block” mode;
+* there is a risk that some or all of the blocks previously occupied by user №1 will be reallocated to user №2;
+* in which case user №2 has the ability to recover user №1's data.
 
 ### Thick volumes
 

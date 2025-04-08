@@ -1,3 +1,4 @@
+<!-- markdownlint-disable first-line-h1 -->
 ## Description
 <!---
   Describe your changes in detail.
@@ -24,6 +25,7 @@
 -->
 
 ## Checklist
+
 - [ ] The code is covered by unit tests.
 - [ ] e2e tests passed.
 - [ ] Documentation updated according to the changes.

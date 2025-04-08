@@ -18,13 +18,14 @@ description: "Модуль sds-node-configurator, Deckhouse Kubernetes Platform.
 
 ## Я выполнил команду на удаление ресурса `LVMVolumeGroup`, но и ресурс, и `Volume Group` осталась. Почему так?
 
-Такая ситуация возможна в двух случаях: 
+Такая ситуация возможна в двух случаях:
 
-1. В `Volume Group` имеются `LV`. 
+1. В `Volume Group` имеются `LV`.
 Контроллер не берет ответственность за удаление LV с узла, поэтому, если в созданной с помощью ресурса `Volume Group` имеются какие-либо логические тома, Вам необходимо вручную удалить их на узле. После этого и ресурс, и `Volume Group` (вместе с `PV`) будут удалены автоматически.
 
 2. На ресурсе имеется аннотация `storage.deckhouse.io/deletion-protection`.
-Данная аннотация защищает удаление ресурса и, как следствие, созданной им `Volume Group`. Вам необходимо самостоятельно убрать аннотацию командой 
+Данная аннотация защищает удаление ресурса и, как следствие, созданной им `Volume Group`. Вам необходимо самостоятельно убрать аннотацию командой
+
 ```shell
 kubectl annotate lvg %lvg-name% storage.deckhouse.io/deletion-protection-
 ```
@@ -39,9 +40,10 @@ kubectl annotate lvg %lvg-name% storage.deckhouse.io/deletion-protection-
 
 Как правило, проблема кроется в некорректно указанных ресурсах `BlockDevice`. Пожалуйста, убедитесь, что выбранные
 ресурсы удовлетворяют следующим требованиям:
-- Поле `Consumable` имеет значение `true`.
-- Для `Volume Group` типа `Local` указанные `BlockDevice` принадлежат одному узлу.<!-- > - Для `Volume Group` типа `Shared` указан единственный ресурс `BlockDevice`. -->
-- Указаны актуальные имена ресурсов `BlockDevice`.
+
+* Поле `Consumable` имеет значение `true`.
+* Для `Volume Group` типа `Local` указанные `BlockDevice` принадлежат одному узлу.<!-- > - Для `Volume Group` типа `Shared` указан единственный ресурс `BlockDevice`. -->
+* Указаны актуальные имена ресурсов `BlockDevice`.
 
 С полным списком ожидаемых значений вы можете ознакомиться с помощью [CR-референса](./cr.html) `LVMVolumeGroup`-ресурса.
 
@@ -55,8 +57,8 @@ kubectl annotate lvg %lvg-name% storage.deckhouse.io/deletion-protection-
 
 ## Как передать контроллеру управление существующей на узле `LVM Volume Group`?
 
-Достаточно добавить LVM-тег `storage.deckhouse.io/enabled=true` на `LVM Volume Group` на узле: 
-
+Достаточно добавить LVM-тег `storage.deckhouse.io/enabled=true` на `LVM Volume Group` на узле:
+<!-- cspell:ignore myvg -->
 ```shell
 vgchange myvg-0 --addtag storage.deckhouse.io/enabled=true
 ```
@@ -76,38 +78,6 @@ vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true
 Это возможно в случае, если вы создавали `LVM Volume Group` через ресурс `LVMVolumeGroup` (в таком случае контроллер автоматически вешает данный LVM-тег на созданную `LVM Volume Group`). Либо на данной `Volume Group` или ее `Thin-pool` был LVM-тег модуля `linstor` — `linstor-*`.
 
 При миграции с встроенного модуля `linstor` на модули `sds-node-configurator` и `sds-drbd` автоматически происходит изменение LVM-тегов `linstor-*` на LVM-тег `storage.deckhouse.io/enabled=true` в `Volume Group`. Таким образом, управление этими `Volume Group` передается модулю `sds-node-configurator`.
-
-## Как использовать ресурс `LVMVolumeGroupSet` для создания `LVMVolumeGroup`?
-
-Для создания `LVMVolumeGroup` с помощью `LVMVolumeGroupSet` необходимо указать в спецификации `LVMVolumeGroupSet` селекторы для узлов и шаблон для создаваемых ресурсов `LVMVolumeGroup`. На данный момент поддерживается только стратегия `PerNode`, при которой контроллер создаст по одному ресурсу `LVMVolumeGroup` из шаблона для каждого узла, удовлетворяющего селектору.
-
-Пример спецификации `LVMVolumeGroupSet`:
-
-```yaml
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: LVMVolumeGroupSet
-metadata:
-  name: my-lvm-volume-group-set
-  labels:
-    my-label: my-value
-spec:
-  strategy: PerNode
-  nodeSelector:
-    matchLabels:
-      node-role.kubernetes.io/worker: ""
-  lvmVolumeGroupTemplate:
-    metadata:
-      labels:
-        my-label-for-lvg: my-value-for-lvg
-    spec:
-      type: Local
-      blockDeviceSelector:
-        matchLabels:
-          status.blockdevice.storage.deckhouse.io/model: <model>
-      actualVGNameOnTheNode: <actual-vg-name-on-the-node>
-
-
-```
 
 ## Как использовать ресурс `LVMVolumeGroupSet` для создания `LVMVolumeGroup`?
 

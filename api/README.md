@@ -1,5 +1,8 @@
-To use this module, execute 
-```
+# sds-node-configurator API
+
+To use this module, execute
+
+```sh
 go get github.com/deckhouse/MODULE/api@main. 
 ```
 

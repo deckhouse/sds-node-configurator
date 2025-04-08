@@ -1,29 +1,37 @@
 # sds-node-configurator
 
-#### local run
+## Usage
+
+### local run
+
 ``make run``
 
-#### run go test
+### run go test
+
 ``make test``
 
-#### run go tests with total coverage calculating
+### run go tests with total coverage calculating
+
 ``make test-cover``
 
-#### run go linter
+### run go linter
+
 ``make lint``
 
-#### docker image build
+### docker image build
+
 ``make build``
 
-#### remove docker image
+### remove docker image
+
 ``make remove``
 
-#### ENV
+### ENV
 
 `NODE_NAME`
 
 `METRICS_PORT` - default : 4202
 
+### Metrics
 
-#### Metrics
 ``` cs_available_block_device ```
