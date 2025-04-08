@@ -2,14 +2,20 @@
 
 /*
 Copyright 2025 Flant JSC
+
 Licensed under the Deckhouse Platform Enterprise Edition (EE) license.
-See https://github.com/deckhouse/deckhouse/blob/main/ee/LICENSE
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/deckhouse/deckhouse/blob/main/ee/LICENSE
 */
 
 package main
 
 import (
 	"os"
+
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
@@ -19,7 +25,6 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	"github.com/deckhouse/sds-node-configurator/lib/go/common/pkg/feature"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 func addLLVSReconciler(

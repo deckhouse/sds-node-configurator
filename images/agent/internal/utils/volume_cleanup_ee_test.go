@@ -2,7 +2,12 @@
 
 /*
 Copyright 2025 Flant JSC
-Licensed under the Deckhouse Platform Enterprise Edition (EE) license. See https://github.com/deckhouse/deckhouse/blob/main/ee/LICENSE
+
+Licensed under the Deckhouse Platform Enterprise Edition (EE) license.
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/deckhouse/deckhouse/blob/main/ee/LICENSE
 */
 
 package utils_test
@@ -14,13 +19,14 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
-	. "github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
-	. "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
+
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	. "github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
+	. "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 var _ = Describe("Cleaning up volume", func() {

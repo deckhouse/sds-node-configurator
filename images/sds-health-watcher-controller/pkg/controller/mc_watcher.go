@@ -1,5 +1,5 @@
 /*
-Copyright 2024 Flant JSC
+Copyright 2025 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,8 +22,6 @@ import (
 	"fmt"
 
 	"github.com/cloudflare/cfssl/log"
-	mc "github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/api"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,6 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	mc "github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/api"
+	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
 )
 
 const (
