@@ -1,5 +1,5 @@
 /*
-Copyright 2023 Flant JSC
+Copyright 2025 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ limitations under the License.
 
 //cspell:ignore lpfb nosuffix
 
-//go:generate go tool mockgen -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE
+//go:generate go tool mockgen -copyright_file ../../../../hack/boilerplate.txt -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE
 
 package utils
 
