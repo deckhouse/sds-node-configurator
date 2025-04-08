@@ -3,6 +3,40 @@ repos:
     rev: v0.44.0
     hooks:
       - id: markdownlint-fix
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.5
+    hooks:
+      - id: insert-license
+        types: [go]
+        exclude: "^.*(_(ee|csplus|se|seplus|csepro)(_test)?|mock_utils.*|zz_.*)\\.go$"
+        args:
+          - --license-filepath
+          - ./hack/boilerplate.txt
+          - --comment-style
+          - "/*||*/"
+          - --use-current-year
+          - --no-extra-eol
+      - id: insert-license
+        types: [go]
+        files: "^.*_(ee|csplus|se|seplus|csepro)(_test)?\\.go$"
+        args:
+          - --license-filepath
+          - ./hack/boilerplate_ee.txt
+          - --comment-style
+          - "/*||*/"
+          - --use-current-year
+          - --no-extra-eol
+      - id: insert-license
+        types: [go]
+        files: "^.*mock_utils.*.go$"
+        exclude: "^.*_(ee|csplus|se|seplus|csepro)(_test)?\\.go$"
+        args:
+          - --license-filepath
+          - ./hack/boilerplate.txt
+          - --comment-style
+          - "//"                            # defaults to:  #
+          - --use-current-year
+          - --no-extra-eol                # see below
   - repo: https://github.com/streetsidesoftware/cspell-cli
     rev: v8.17.3
     hooks:
