@@ -86,7 +86,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.Root.BASE_GOLANG_1_23 }}
+from: {{ $.Root.BASE_GOLANG_1_24 }}
 final: false
 
 import:
