@@ -1,3 +1,5 @@
+//go:build !ce
+
 /*
 Copyright 2025 Flant JSC
 
@@ -7,8 +9,6 @@ You may obtain a copy of the License at
 
     https://github.com/deckhouse/deckhouse/blob/main/ee/LICENSE
 */
-
-//go:build !ce
 
 package llvs
 

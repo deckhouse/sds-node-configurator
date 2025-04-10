@@ -33,8 +33,14 @@ repos:
     rev: v1.64.5
     hooks:
       - id: golangci-lint
-        name: Run golangci-lint with tag `ee`
+        name: Run golangci-lint with tag `ee` on change only
         entry: ./hack/for-each-mod golangci-lint run --new-from-rev HEAD --build-tags ee --fix
       - id: golangci-lint
-        name: Run golangci-lint with tag `ce`
+        name: Run golangci-lint with tag `ce` on change only
         entry: ./hack/for-each-mod golangci-lint run --new-from-rev HEAD --build-tags ce --fix
+      - id: golangci-lint-full
+        name: Run golangci-lint with tag `ee`
+        entry: ./hack/for-each-mod golangci-lint run --build-tags ee --fix
+      - id: golangci-lint-full
+        name: Run golangci-lint with tag `ce`
+        entry: ./hack/for-each-mod golangci-lint run --build-tags ce --fix

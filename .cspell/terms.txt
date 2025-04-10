@@ -5,6 +5,7 @@ apiserver
 Bldr
 CDROM
 clientgoscheme
+configurator
 dmsetup
 extv
 finalizers
