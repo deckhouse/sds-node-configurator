@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-//go:generate go tool deepcopy-gen -v 2 --output-file zz_generated_lvm_logical_volume_snapshot.deepcopy.go --go-header-file ../../hack/boilerplate.txt .
+//go:generate go run k8s.io/code-generator/cmd/deepcopy-gen -v 2 --output-file zz_generated_lvm_logical_volume_snapshot.deepcopy.go --go-header-file ../../hack/boilerplate.txt .
 
 package v1alpha1
 

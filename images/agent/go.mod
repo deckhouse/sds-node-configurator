@@ -13,7 +13,7 @@ require (
 	github.com/pilebones/go-udev v0.9.0
 	github.com/prometheus/client_golang v1.19.1
 	github.com/stretchr/testify v1.9.0
-	go.uber.org/mock v0.5.0
+	go.uber.org/mock v0.5.1
 	golang.org/x/sys v0.30.0
 	k8s.io/api v0.32.1
 	k8s.io/apiextensions-apiserver v0.32.0
@@ -80,5 +80,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.5.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
-
-tool go.uber.org/mock/mockgen
