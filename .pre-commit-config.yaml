@@ -9,6 +9,14 @@ repos:
         types:
           - file
         files: ^.*/go\.mod$
+      - id: go-generate
+        name: Run `go generate ./...` fo all the modules
+        language: golang
+        entry: ./hack/for-each-mod go generate ./...
+        pass_filenames: false
+        types:
+          - file
+        files: ^.*/go\.mod$
       - id: test-ce
         name: Run `go test -tags=ee ./...` for all the modules
         pass_filenames: false
