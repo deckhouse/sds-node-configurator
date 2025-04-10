@@ -42,10 +42,6 @@ jobs:
             fi
             
             if [[ "$line" == *github.com/deckhouse/sds-* || "$line" == *github.com/deckhouse/csi-* || "$line" == *github.com/deckhouse/virtualization ]]; then
-              if [[ -z "$1" || -z "$2" || -z "$3" ]]; then
-                echo "Can't parse line: $line"
-                exit 1
-              fi
               repository=$(echo "$line" | awk '{print $1}' | awk -F'/' '{ print "https://"$1"/"$2"/"$3".git" }')
               pseudo_tag=$(echo "$line" | awk '{print $2}')
               
