@@ -32,12 +32,13 @@ repos:
   - repo: https://github.com/golangci/golangci-lint
     rev: v1.64.5
     hooks:
-      - id: golangci-lint
-        name: Run golangci-lint with tag `ee` on change only
-        entry: ./hack/for-each-mod golangci-lint run --new-from-rev HEAD --build-tags ee --fix
-      - id: golangci-lint
-        name: Run golangci-lint with tag `ce` on change only
-        entry: ./hack/for-each-mod golangci-lint run --new-from-rev HEAD --build-tags ce --fix
+      # This doesn't work in case `pre-commit run --all-files`
+      # - id: golangci-lint
+      #   name: Run golangci-lint with tag `ee` on change only
+      #   entry: ./hack/for-each-mod golangci-lint run --new-from-rev HEAD --build-tags ee --fix
+      # - id: golangci-lint
+      #   name: Run golangci-lint with tag `ce` on change only
+      #   entry: ./hack/for-each-mod golangci-lint run --new-from-rev HEAD --build-tags ce --fix
       - id: golangci-lint-full
         name: Run golangci-lint with tag `ee`
         entry: ./hack/for-each-mod golangci-lint run --build-tags ee --fix
