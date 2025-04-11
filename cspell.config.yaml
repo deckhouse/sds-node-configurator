@@ -1,0 +1,19 @@
+$schema: https://raw.githubusercontent.com/streetsidesoftware/cspell/main/cspell.schema.json
+version: "0.2"
+dictionaries:
+  - en
+  - terms
+  - companies
+dictionaryDefinitions:
+  - name: terms
+    description: Special terms we use
+    path: hack/cspell/terms.txt
+  - name: companies
+    description: Company names mentioned
+    path: hack/cspell/companies.txt
+ignorePaths:
+  - hack/cspell/
+allowCompoundWords: true
+ignoreRegExpList:
+  - '["\t^]--?\w+["\t$]'
+  - '[a-zA-Z0-9]{6}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{6}'
