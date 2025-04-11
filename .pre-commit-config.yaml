@@ -3,31 +3,29 @@ repos:
     hooks:
       - id: go-mod-tidy
         name: Run `go mod tidy` fo all the modules
-        language: golang
-        entry: ./hack/for-each-mod go mod tidy
+        language: system
+        entry: make go-mod-tidy
         pass_filenames: false
         types:
           - file
         files: ^.*/go\.mod$
       - id: go-generate
         name: Run `go generate ./...` fo all the modules
-        language: golang
-        entry: ./hack/for-each-mod go generate ./...
+        language: system
+        entry: make go-generate
         pass_filenames: false
-        types:
-          - file
-        files: ^.*/go\.mod$
-      - id: test-ce
+        types: [go]
+      - id: go-test-ce
         name: Run `go test -tags=ee ./...` for all the modules
         pass_filenames: false
-        language: golang
-        entry: ./hack/for-each-mod go test -tags=ce ./...
+        language: system
+        entry: make go-test-ee
         types: [go]
-      - id: test-ee
+      - id: go-test-ee
         name: Run `go test -tags=ce ./...` for all the modules
         pass_filenames: false
-        language: golang
-        entry: ./hack/for-each-mod go test -tags=ce ./...
+        language: system
+        entry: make go-test-ce
         types: [go]
   - repo: https://github.com/golangci/golangci-lint
     rev: v1.64.5
