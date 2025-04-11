@@ -112,3 +112,14 @@ To run for all the modules
 ```sh
 ./hack/for-each-mod go generate ./...
 ```
+
+## CSpell
+
+We added very simple [CSpell](https://cspell.org/) configuration [file](/cspell.config.yaml). So now we can keep dictionaries in the repository
+
+To make use of then there are VSCode plugins:
+
+- [Code Spell Checker](https://marketplace.visualstudio.com/items?itemName=streetsidesoftware.code-spell-checker)
+- [Russian - Code Spell Checker](https://marketplace.visualstudio.com/items?itemName=streetsidesoftware.code-spell-checker-russian)
+
+To run from console the [cspell-cli](https://github.com/streetsidesoftware/cspell-cli) tool available
