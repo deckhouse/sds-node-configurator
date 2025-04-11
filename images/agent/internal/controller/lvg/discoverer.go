@@ -950,11 +950,13 @@ func appendDeviceNamesToLabelSelector(labelSelector *metav1.LabelSelector, block
 	}
 }
 
-// Add missing block device to label selector
+// Add missing block device to label selector.
 //
-// if labelSelector is provided it will be changed by this call
-// If labelSelector is created or updated it will be returned in updatedLabelSelector argument
-// If labelSelector was not changed the updatedLabelSelector will be nil
+// If labelSelector is provided it will be changed by this call.
+//
+// If labelSelector is created or updated it will be returned in updatedLabelSelector argument.
+//
+// If labelSelector was not changed the updatedLabelSelector will be nil.
 func updateBlockDeviceSelectorIfNeeded(labelSelector *metav1.LabelSelector, blockDeviceNames []string) (updatedLabelSelector *metav1.LabelSelector, err error) {
 	if labelSelector == nil {
 		return &metav1.LabelSelector{
