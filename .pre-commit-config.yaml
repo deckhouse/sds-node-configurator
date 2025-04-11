@@ -1,0 +1,45 @@
+repos:
+  - repo: local
+    hooks:
+      - id: go-mod-tidy
+        name: Run `go mod tidy` fo all the modules
+        language: system
+        entry: make go-mod-tidy
+        pass_filenames: false
+        types:
+          - file
+        files: ^.*/go\.mod$
+      - id: go-generate
+        name: Run `go generate ./...` fo all the modules
+        language: system
+        entry: make go-generate
+        pass_filenames: false
+        types: [go]
+      - id: go-test-ce
+        name: Run `go test -tags=ee ./...` for all the modules
+        pass_filenames: false
+        language: system
+        entry: make go-test-ee
+        types: [go]
+      - id: go-test-ee
+        name: Run `go test -tags=ce ./...` for all the modules
+        pass_filenames: false
+        language: system
+        entry: make go-test-ce
+        types: [go]
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v1.64.5
+    hooks:
+      # This doesn't work in case `pre-commit run --all-files`
+      # - id: golangci-lint
+      #   name: Run golangci-lint with tag `ee` on change only
+      #   entry: ./hack/for-each-mod golangci-lint run --new-from-rev HEAD --build-tags ee --fix
+      # - id: golangci-lint
+      #   name: Run golangci-lint with tag `ce` on change only
+      #   entry: ./hack/for-each-mod golangci-lint run --new-from-rev HEAD --build-tags ce --fix
+      - id: golangci-lint-full
+        name: Run golangci-lint with tag `ee`
+        entry: ./hack/for-each-mod golangci-lint run --build-tags ee --fix
+      - id: golangci-lint-full
+        name: Run golangci-lint with tag `ce`
+        entry: ./hack/for-each-mod golangci-lint run --build-tags ce --fix

@@ -48,6 +48,7 @@ type Reconciler struct {
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
 	cfg      ReconcilerConfig
+	commands utils.Commands
 }
 
 type ReconcilerConfig struct {
@@ -61,6 +62,7 @@ func NewReconciler(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
+	commands utils.Commands,
 	cfg ReconcilerConfig,
 ) *Reconciler {
 	return &Reconciler{
@@ -77,6 +79,7 @@ func NewReconciler(
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		cfg:      cfg,
+		commands: commands,
 	}
 }
 
@@ -187,17 +190,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 	}
 	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully validated BlockDevices of the LVMVolumeGroup %s", lvg.Name))
 
-	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to add label %s to the LVMVolumeGroup %s", internal.LVGMetadateNameLabelKey, r.cfg.NodeName))
-	added, err = r.addLVGLabelIfNeeded(ctx, lvg, internal.LVGMetadateNameLabelKey, lvg.Name)
+	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to add label %s to the LVMVolumeGroup %s", internal.LVGMetadataNameLabelKey, r.cfg.NodeName))
+	added, err = r.addLVGLabelIfNeeded(ctx, lvg, internal.LVGMetadataNameLabelKey, lvg.Name)
 	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add label %s to the LVMVolumeGroup %s", internal.LVGMetadateNameLabelKey, lvg.Name))
+		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add label %s to the LVMVolumeGroup %s", internal.LVGMetadataNameLabelKey, lvg.Name))
 		return controller.Result{}, err
 	}
 
 	if added {
-		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully added label %s to the LVMVolumeGroup %s", internal.LVGMetadateNameLabelKey, lvg.Name))
+		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully added label %s to the LVMVolumeGroup %s", internal.LVGMetadataNameLabelKey, lvg.Name))
 	} else {
-		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no need to add label %s to the LVMVolumeGroup %s", internal.LVGMetadateNameLabelKey, lvg.Name))
+		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] no need to add label %s to the LVMVolumeGroup %s", internal.LVGMetadataNameLabelKey, lvg.Name))
 	}
 
 	// We do this after BlockDevices validation and node belonging check to prevent multiple updates by all agents pods
@@ -221,7 +224,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 		}, nil
 	}
 
-	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to sync status and spec thin-pool AllicationLimit fields for the LVMVolumeGroup %s", lvg.Name))
+	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to sync status and spec thin-pool AllocationLimit fields for the LVMVolumeGroup %s", lvg.Name))
 	err = r.syncThinPoolsAllocationLimit(ctx, lvg)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to sync status and spec thin-pool AllocationLimit fields for the LVMVolumeGroup %s", lvg.Name))
@@ -524,10 +527,10 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 			var cmd string
 			if utils.AreSizesEqualWithinDelta(tpRequestedSize, vgSize, internal.ResizeDelta) {
 				r.log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] Thin-pool %s of the LVMVolumeGroup %s will be created with full VG space size", tp.Name, lvg.Name))
-				cmd, err = utils.CreateThinPoolFullVGSpace(tp.Name, lvg.Spec.ActualVGNameOnTheNode)
+				cmd, err = r.commands.CreateThinPoolFullVGSpace(tp.Name, lvg.Spec.ActualVGNameOnTheNode)
 			} else {
 				r.log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] Thin-pool %s of the LVMVolumeGroup %s will be created with size %s", tp.Name, lvg.Name, tpRequestedSize.String()))
-				cmd, err = utils.CreateThinPool(tp.Name, lvg.Spec.ActualVGNameOnTheNode, tpRequestedSize.Value())
+				cmd, err = r.commands.CreateThinPool(tp.Name, lvg.Spec.ActualVGNameOnTheNode, tpRequestedSize.Value())
 			}
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to create thin-pool %s of the LVMVolumeGroup %s, cmd: %s", tp.Name, lvg.Name, cmd))
@@ -591,7 +594,7 @@ func (r *Reconciler) shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alph
 		return true
 	}
 
-	if r.shouldUpdateLVGLabels(newLVG, internal.LVGMetadateNameLabelKey, newLVG.Name) {
+	if r.shouldUpdateLVGLabels(newLVG, internal.LVGMetadataNameLabelKey, newLVG.Name) {
 		r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup's %s labels have been changed", newLVG.Name))
 		return true
 	}
@@ -979,10 +982,10 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 			start := time.Now()
 			if utils.AreSizesEqualWithinDelta(tpRequestedSize, lvg.Status.VGSize, internal.ResizeDelta) {
 				r.log.Debug(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] thin-pool %s of the LVMVolumeGroup %s will be created with size 100FREE", specTp.Name, lvg.Name))
-				cmd, err = utils.CreateThinPoolFullVGSpace(specTp.Name, vg.VGName)
+				cmd, err = r.commands.CreateThinPoolFullVGSpace(specTp.Name, vg.VGName)
 			} else {
 				r.log.Debug(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] thin-pool %s of the LVMVolumeGroup %s will be created with size %s", specTp.Name, lvg.Name, tpRequestedSize.String()))
-				cmd, err = utils.CreateThinPool(specTp.Name, vg.VGName, tpRequestedSize.Value())
+				cmd, err = r.commands.CreateThinPool(specTp.Name, vg.VGName, tpRequestedSize.Value())
 			}
 			r.metrics.UtilsCommandsDuration(ReconcilerName, "lvcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 			r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "lvcreate").Inc()
@@ -1046,7 +1049,7 @@ func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolu
 				r.log.Debug(fmt.Sprintf("[ResizePVIfNeeded] the LVMVolumeGroup %s BlockDevice %s PVSize is less than actual device size. Resize PV", lvg.Name, d.BlockDevice))
 
 				start := time.Now()
-				cmd, err := utils.ResizePV(d.Path)
+				cmd, err := r.commands.ResizePV(d.Path)
 				r.metrics.UtilsCommandsDuration(ReconcilerName, "pvresize").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 				r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "pvresize")
 				if err != nil {
@@ -1179,7 +1182,7 @@ func (r *Reconciler) deleteVGIfExist(vgName string) error {
 	}
 
 	start := time.Now()
-	command, err := utils.RemoveVG(vgName)
+	command, err := r.commands.RemoveVG(vgName)
 	r.metrics.UtilsCommandsDuration(ReconcilerName, "vgremove").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 	r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgremove").Inc()
 	r.log.Debug(command)
@@ -1197,7 +1200,7 @@ func (r *Reconciler) deleteVGIfExist(vgName string) error {
 	}
 
 	start = time.Now()
-	command, err = utils.RemovePV(pvsToRemove)
+	command, err = r.commands.RemovePV(pvsToRemove)
 	r.metrics.UtilsCommandsDuration(ReconcilerName, "pvremove").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 	r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "pvremove").Inc()
 	r.log.Debug(command)
@@ -1214,7 +1217,7 @@ func (r *Reconciler) deleteVGIfExist(vgName string) error {
 func (r *Reconciler) extendVGComplex(extendPVs []string, vgName string) error {
 	for _, pvPath := range extendPVs {
 		start := time.Now()
-		command, err := utils.CreatePV(pvPath)
+		command, err := r.commands.CreatePV(pvPath)
 		r.metrics.UtilsCommandsDuration(ReconcilerName, "pvcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "pvcreate").Inc()
 		r.log.Debug(command)
@@ -1226,7 +1229,7 @@ func (r *Reconciler) extendVGComplex(extendPVs []string, vgName string) error {
 	}
 
 	start := time.Now()
-	command, err := utils.ExtendVG(vgName, extendPVs)
+	command, err := r.commands.ExtendVG(vgName, extendPVs)
 	r.metrics.UtilsCommandsDuration(ReconcilerName, "vgextend").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 	r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgextend").Inc()
 	r.log.Debug(command)
@@ -1244,7 +1247,7 @@ func (r *Reconciler) createVGComplex(lvg *v1alpha1.LVMVolumeGroup, blockDevices 
 	r.log.Trace(fmt.Sprintf("[CreateVGComplex] LVMVolumeGroup %s devices paths %v", lvg.Name, paths))
 	for _, path := range paths {
 		start := time.Now()
-		command, err := utils.CreatePV(path)
+		command, err := r.commands.CreatePV(path)
 		r.metrics.UtilsCommandsDuration(ReconcilerName, "pvcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "pvcreate").Inc()
 		r.log.Debug(command)
@@ -1260,7 +1263,7 @@ func (r *Reconciler) createVGComplex(lvg *v1alpha1.LVMVolumeGroup, blockDevices 
 	switch lvg.Spec.Type {
 	case internal.Local:
 		start := time.Now()
-		cmd, err := utils.CreateVGLocal(lvg.Spec.ActualVGNameOnTheNode, lvg.Name, paths)
+		cmd, err := r.commands.CreateVGLocal(lvg.Spec.ActualVGNameOnTheNode, lvg.Name, paths)
 		r.metrics.UtilsCommandsDuration(ReconcilerName, "vgcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgcreate").Inc()
 		r.log.Debug(cmd)
@@ -1271,7 +1274,7 @@ func (r *Reconciler) createVGComplex(lvg *v1alpha1.LVMVolumeGroup, blockDevices 
 		}
 	case internal.Shared:
 		start := time.Now()
-		cmd, err := utils.CreateVGShared(lvg.Spec.ActualVGNameOnTheNode, lvg.Name, paths)
+		cmd, err := r.commands.CreateVGShared(lvg.Spec.ActualVGNameOnTheNode, lvg.Name, paths)
 		r.metrics.UtilsCommandsDuration(ReconcilerName, "vgcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgcreate").Inc()
 		r.log.Debug(cmd)
@@ -1303,7 +1306,7 @@ func (r *Reconciler) updateVGTagIfNeeded(
 		}
 
 		start := time.Now()
-		cmd, err := utils.VGChangeDelTag(vg.VGName, fmt.Sprintf("%s=%s", internal.LVMVolumeGroupTag, tagName))
+		cmd, err := r.commands.VGChangeDelTag(vg.VGName, fmt.Sprintf("%s=%s", internal.LVMVolumeGroupTag, tagName))
 		r.metrics.UtilsCommandsDuration(ReconcilerName, "vgchange").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgchange").Inc()
 		r.log.Debug(fmt.Sprintf("[UpdateVGTagIfNeeded] exec cmd: %s", cmd))
@@ -1314,7 +1317,7 @@ func (r *Reconciler) updateVGTagIfNeeded(
 		}
 
 		start = time.Now()
-		cmd, err = utils.VGChangeAddTag(vg.VGName, fmt.Sprintf("%s=%s", internal.LVMVolumeGroupTag, lvg.Name))
+		cmd, err = r.commands.VGChangeAddTag(vg.VGName, fmt.Sprintf("%s=%s", internal.LVMVolumeGroupTag, lvg.Name))
 		r.metrics.UtilsCommandsDuration(ReconcilerName, "vgchange").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgchange").Inc()
 		r.log.Debug(fmt.Sprintf("[UpdateVGTagIfNeeded] exec cmd: %s", cmd))
@@ -1347,10 +1350,10 @@ func (r *Reconciler) extendThinPool(lvg *v1alpha1.LVMVolumeGroup, specThinPool v
 	start := time.Now()
 	if utils.AreSizesEqualWithinDelta(tpRequestedSize, lvg.Status.VGSize, internal.ResizeDelta) {
 		r.log.Debug(fmt.Sprintf("[ExtendThinPool] thin-pool %s of the LVMVolumeGroup %s will be extend to size 100VG", specThinPool.Name, lvg.Name))
-		cmd, err = utils.ExtendLVFullVGSpace(lvg.Spec.ActualVGNameOnTheNode, specThinPool.Name)
+		cmd, err = r.commands.ExtendLVFullVGSpace(lvg.Spec.ActualVGNameOnTheNode, specThinPool.Name)
 	} else {
 		r.log.Debug(fmt.Sprintf("[ExtendThinPool] thin-pool %s of the LVMVolumeGroup %s will be extend to size %s", specThinPool.Name, lvg.Name, tpRequestedSize.String()))
-		cmd, err = utils.ExtendLV(tpRequestedSize.Value(), lvg.Spec.ActualVGNameOnTheNode, specThinPool.Name)
+		cmd, err = r.commands.ExtendLV(tpRequestedSize.Value(), lvg.Spec.ActualVGNameOnTheNode, specThinPool.Name)
 	}
 	r.metrics.UtilsCommandsDuration(ReconcilerName, "lvextend").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 	r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "lvextend").Inc()

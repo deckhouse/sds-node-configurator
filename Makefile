@@ -89,3 +89,19 @@ helm-bump-helm-lib: ## Update helm lib in charts directory to specified version.
 	$(MAKE) helm-update-subcharts
 	@echo "Helm lib updated to $(version)"
 	ls -la charts
+
+.PHONY: go-generate
+go-generate: ## Run go generate
+	hack/for-each-mod go generate ./...
+
+.PHONY: go-test-ce
+go-test-ce: ## Run go generate
+	hack/for-each-mod go test -tags=ce ./...
+
+.PHONY: go-test-ee
+go-test-ee: ## Run go generate
+	hack/for-each-mod go test -tags=ee ./...
+
+.PHONY: go-mod-tidy
+go-mod-tidy: ## Run go generate
+	hack/for-each-mod go mod tidy

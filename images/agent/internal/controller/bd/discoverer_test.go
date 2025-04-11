@@ -711,7 +711,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 	t.Run("validateTestLSBLKOutput", func(t *testing.T) {
 		d := setupDiscoverer()
 		testLsblkOutputBytes := []byte(testLsblkOutput)
-		devices, err := utils.UnmarshalDevices(testLsblkOutputBytes)
+		devices, err := utils.NewCommands().UnmarshalDevices(testLsblkOutputBytes)
 		if assert.NoError(t, err) {
 			assert.Equal(t, 31, len(devices))
 		}

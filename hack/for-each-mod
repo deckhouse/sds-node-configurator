@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# Runs command in each folder with go.mod file
+#
+# Examples:
+#   Tidy all the modules:
+#       `for-each-mod go mod tody`
+#   Generate all the modules:
+#       `for-each-mod go generate ./...`
+
+find -type f -name go.mod -execdir sh -c "$*" {} +
