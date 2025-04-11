@@ -18,16 +18,36 @@ Remove hooks
 pre-commit unistall
 ```
 
-To commit without hooks
+To commit without hooks git has `--no-verify` argument
 
 ```sh
 git commit --no-verify
 ```
 
-To skip some checks `SKIP` environment variable is available
+To skip some checks `SKIP` environment variable is respected by `pre-commit` tool
 
 ```sh
 SKIP=go-mod-tidy git commit <...>
+```
+
+### Running hooks manually
+
+To run pre-commit all hooks on staged files
+
+```sh
+pre-commit run
+```
+
+To select tools to run
+
+```sh
+pre-commit run go-mod-tidy
+```
+
+To run on all the files regardles if they changed or not there is `--all-files` argument
+
+```sh
+pre-commit run [check_to_run] --all-files
 ```
 
 ## `for-each-mod` tool
