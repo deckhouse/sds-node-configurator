@@ -86,7 +86,7 @@ const (
 
 	DeletionProtectionAnnotation = "storage.deckhouse.io/deletion-protection"
 	LVMVolumeGroupTag            = "storage.deckhouse.io/lvmVolumeGroupName"
-	LVGMetadateNameLabelKey      = "kubernetes.io/metadata.name"
+	LVGMetadataNameLabelKey      = "kubernetes.io/metadata.name"
 )
 
 var (

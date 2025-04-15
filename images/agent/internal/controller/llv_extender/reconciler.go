@@ -44,6 +44,7 @@ type Reconciler struct {
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
 	cfg      ReconcilerConfig
+	commands utils.Commands
 }
 
 type ReconcilerConfig struct {
@@ -56,6 +57,7 @@ func NewReconciler(
 	log logger.Logger,
 	metrics monitoring.Metrics,
 	sdsCache *cache.Cache,
+	commands utils.Commands,
 	cfg ReconcilerConfig,
 ) controller.Reconciler[*v1alpha1.LVMVolumeGroup] {
 	return &Reconciler{
@@ -72,6 +74,7 @@ func NewReconciler(
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		cfg:      cfg,
+		commands: commands,
 	}
 }
 
@@ -209,7 +212,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 			continue
 		}
 
-		cmd, err := utils.ExtendLV(llvRequestedSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+		cmd, err := r.commands.ExtendLV(llvRequestedSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to extend LV %s of the LVMLogicalVolume %s, cmd: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, cmd))
 			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))

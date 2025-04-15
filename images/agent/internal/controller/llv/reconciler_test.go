@@ -791,5 +791,5 @@ func setupReconciler() *Reconciler {
 	log := logger.Logger{}
 	metrics := monitoring.Metrics{}
 
-	return NewReconciler(cl, log, metrics, cache.New(), ReconcilerConfig{})
+	return NewReconciler(cl, log, metrics, cache.New(), utils.NewCommands(), ReconcilerConfig{})
 }

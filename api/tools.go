@@ -1,4 +1,5 @@
-//go:build ce
+//go:build tools
+// +build tools
 
 /*
 Copyright 2025 Flant JSC
@@ -16,8 +17,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package tools
 
-func addLLVSReconciler(_ ...any) {
-	// noop
-}
+import _ "k8s.io/code-generator"

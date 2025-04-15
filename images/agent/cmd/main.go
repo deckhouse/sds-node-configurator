@@ -116,9 +116,10 @@ func main() {
 	log.Info("[main] successfully created kubernetes manager")
 
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
+	commands := utils.NewCommands()
 
 	log.Info("[main] ReTag starts")
-	if err := utils.ReTag(ctx, log, metrics, bd.DiscovererName); err != nil {
+	if err := commands.ReTag(ctx, log, metrics, bd.DiscovererName); err != nil {
 		log.Error(err, "[main] unable to run ReTag")
 	}
 
@@ -152,6 +153,7 @@ func main() {
 			log,
 			metrics,
 			sdsCache,
+			commands,
 			lvg.DiscovererConfig{
 				NodeName:                cfgParams.NodeName,
 				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
@@ -171,6 +173,7 @@ func main() {
 			log,
 			metrics,
 			sdsCache,
+			commands,
 			lvg.ReconcilerConfig{
 				NodeName:                cfgParams.NodeName,
 				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
@@ -184,7 +187,7 @@ func main() {
 	}
 
 	go func() {
-		if err = scanner.RunScanner(
+		if err = scanner.NewScanner(commands).Run(
 			ctx,
 			log,
 			*cfgParams,
@@ -205,6 +208,7 @@ func main() {
 			log,
 			metrics,
 			sdsCache,
+			commands,
 			llv.ReconcilerConfig{
 				NodeName:                cfgParams.NodeName,
 				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
@@ -226,6 +230,7 @@ func main() {
 			log,
 			metrics,
 			sdsCache,
+			commands,
 			llv_extender.ReconcilerConfig{
 				NodeName:                cfgParams.NodeName,
 				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
@@ -237,7 +242,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	addLLVSReconciler(mgr, log, metrics, sdsCache, cfgParams)
+	addLLVSReconciler(mgr, log, metrics, sdsCache, commands, cfgParams)
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
