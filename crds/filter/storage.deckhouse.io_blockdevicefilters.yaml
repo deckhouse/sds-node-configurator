@@ -92,11 +92,12 @@ spec:
                       operator is "In", and the values array contains only "value". The requirements are ANDed.
                     type: object
                 type: object
+                x-kubernetes-embedded-resource: true
                 x-kubernetes-map-type: atomic
+                x-kubernetes-preserve-unknown-fields: true
             required:
             - blockDeviceSelector
             type: object
-            x-kubernetes-preserve-unknown-fields: true
         required:
         - spec
         type: object

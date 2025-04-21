@@ -37,12 +37,12 @@ type BlockDeviceFilter struct {
 	Spec BlockDeviceFilterSpec `json:"spec"`
 }
 
-// +kubebuilder:validation:Required
-// +kubebuilder:validation:EmbeddedResource
-// +kubebuilder:pruning:PreserveUnknownFields
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // Defines the state of block device selector
 type BlockDeviceFilterSpec struct {
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:EmbeddedResource
+	// +kubebuilder:pruning:PreserveUnknownFields
 	// Selectors on block devices to keep.
 	//
 	// Block devices not matched all the selectors will be hidden
