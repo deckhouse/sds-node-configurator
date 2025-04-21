@@ -23,10 +23,8 @@ import (
 //go:generate go run sigs.k8s.io/controller-tools/cmd/controller-gen paths=$GOFILE crd output:crd:dir=../../crds/filter
 
 // +groupName=storage.deckhouse.io
-// +kubebuilder:webhook:admissionReviewVersions=v1,failurePolicy=fail,groups=storage.deckhouse.io,mutating=false,name=blockdevicefilter.storage.deckhouse.io,path=/validate-bdf,resources=blockdevicefilter,sideEffects=None,verbs=create;update,versions=v1alpha1
 
 // +kubebuilder:resource:scope=Cluster,shortName=bdf
-// +kubebuilder:subresource:status
 // +kubebuilder:object:root=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // The filters on BlockDevice list
@@ -35,9 +33,14 @@ import (
 type BlockDeviceFilter struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              BlockDeviceFilterSpec `json:"spec"`
+	// +kubebuilder:validation:Required
+	Spec BlockDeviceFilterSpec `json:"spec"`
 }
 
+// +kubebuilder:validation:Required
+// +kubebuilder:validation:EmbeddedResource
+// +kubebuilder:pruning:PreserveUnknownFields
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // Defines the state of block device selector
 type BlockDeviceFilterSpec struct {
 	// Selectors on block devices to keep.

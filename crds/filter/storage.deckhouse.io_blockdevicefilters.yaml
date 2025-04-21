@@ -96,10 +96,9 @@ spec:
             required:
             - blockDeviceSelector
             type: object
+            x-kubernetes-preserve-unknown-fields: true
         required:
         - spec
         type: object
     served: true
     storage: true
-    subresources:
-      status: {}
