@@ -102,6 +102,8 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 		return false
 	}
 
+	// TODO: Filter it by BlockDeviceFilters
+
 	apiBlockDevices, err := d.bdCl.GetAPIBlockDevices(ctx, DiscovererName, nil)
 	if err != nil {
 		d.log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDevices")
