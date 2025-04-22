@@ -26,6 +26,7 @@ import (
 
 // +kubebuilder:resource:scope=Cluster,shortName=bdf
 // +kubebuilder:object:root=true
+// +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // The filters on BlockDevice list
 //
@@ -37,7 +38,7 @@ type BlockDeviceFilter struct {
 	Spec BlockDeviceFilterSpec `json:"spec"`
 }
 
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:deepcopy-gen=true
 // Defines the state of block device selector
 type BlockDeviceFilterSpec struct {
 	// +kubebuilder:validation:Required
