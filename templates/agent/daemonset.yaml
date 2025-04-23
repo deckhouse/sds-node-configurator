@@ -91,6 +91,8 @@ spec:
       - name: sds-utils-installer
         image: {{ include "helm_lib_module_image" (list . "sdsUtilsInstaller") }}
         imagePullPolicy: IfNotPresent
+        securityContext:
+          readOnlyRootFilesystem: true        
         volumeMounts:
         - mountPath: /opt/deckhouse/sds
           name: opt-deckhouse-sds
