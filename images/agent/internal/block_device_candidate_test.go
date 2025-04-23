@@ -50,7 +50,7 @@ var _ = Describe("Block device candidate", func() {
 			candidate = internal.NewBlockDeviceCandidateByDevice(&internalDevice, nodeName, machineID)
 		})
 
-		It("value matches", func() {
+		It("has matching values", func() {
 			Expect(candidate.NodeName).Should(BeEquivalentTo(nodeName))
 			Expect(candidate.MachineID).Should(BeEquivalentTo(machineID))
 			Expect(candidate.Wwn).Should(BeEquivalentTo(internalDevice.Wwn))
@@ -124,7 +124,7 @@ var _ = Describe("Block device candidate", func() {
 		})
 
 		ItHasAllFieldsMatched := func() {
-			It("has correct fields matched", func() {
+			It("has correct field values", func() {
 				Expect(blockDevice.Status.Type).Should(BeEquivalentTo(candidate.Type))
 				Expect(blockDevice.Status.FsType).Should(BeEquivalentTo(candidate.FSType))
 				Expect(blockDevice.Status.NodeName).Should(BeEquivalentTo(candidate.NodeName))
@@ -232,7 +232,6 @@ var _ = Describe("Block device candidate", func() {
 			})
 
 			ItDoesNotHaveBlockDeviceDifference()
-
 			ItHasAllFieldsMatched()
 
 			When("it has extra labels", func() {
