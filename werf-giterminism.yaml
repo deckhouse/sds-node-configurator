@@ -18,6 +18,8 @@ config:
       - DEV_MODULES_REGISTRY_LOGIN
       - DEV_MODULES_REGISTRY_PASSWORD
       - DEV_MODULES_MODULE_SOURCE
+    allowUncommittedFiles:
+      - "base_images.yml"
   stapel:
     mount:
       allowFromPaths:

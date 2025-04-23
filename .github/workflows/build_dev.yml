@@ -10,6 +10,7 @@ env:
   GOLANG_VERSION: ${{ vars.GOLANG_VERSION }}
   GOPROXY: ${{ secrets.GOPROXY }}
   SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
+  BASE_IMAGES_VERSION: "v0.4.3"
 
 on:
   #pull_request:
@@ -34,7 +35,7 @@ jobs:
       - name: Copy openapi/values_ce.yaml to openapi/values.yaml
         run: |
           if [ -f openapi/values_ce.yaml ]; then
-            cp openapi/values_ce.yaml openapi/values.yaml
+            cp -f openapi/values_ce.yaml openapi/values.yaml
           fi
       - uses: deckhouse/modules-actions/lint@main
         env:
@@ -43,7 +44,7 @@ jobs:
       - name: Copy openapi/values_ee.yaml to openapi/values.yaml
         run: |
           if [ -f openapi/values_ee.yaml ]; then
-            cp openapi/values_ee.yaml openapi/values.yaml
+            cp -f openapi/values_ee.yaml openapi/values.yaml
           fi
       - uses: deckhouse/modules-actions/lint@main
         env:
@@ -77,7 +78,7 @@ jobs:
       - name: Set vars
         id: set-vars
         run: |
-          # Select edition for build, default ee
+          # Slect edition for build, default ee
           if echo "${{ steps.get-labels.outputs.result }}" | grep -q "edition/ce"; then
             echo "MODULE_EDITION=ce" >> "$GITHUB_OUTPUT"
           else
@@ -110,6 +111,12 @@ jobs:
           echo MODULE_EDITION=$MODULE_EDITION
 
       - uses: actions/checkout@v4
+
+      - name: Download base images
+        run: |
+          wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
+          cat base_images.yml
+
       - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.DEV_REGISTRY }}
