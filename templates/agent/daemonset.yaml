@@ -19,7 +19,7 @@ metadata:
 spec:
   targetRef:
     apiVersion: "apps/v1"
-    kind: Deployment
+    kind: DaemonSet
     name: sds-node-configurator
   updatePolicy:
     updateMode: "Auto"
