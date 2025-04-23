@@ -47,6 +47,7 @@ spec:
                     operator: In
                     values:
                       - ""
+      dnsPolicy: ClusterFirstWithHostNet
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       serviceAccountName: sds-node-configurator
@@ -57,6 +58,7 @@ spec:
         runAsUser: 0
         runAsNonRoot: false
         runAsGroup: 0
+        readOnlyRootFilesystem: false
         seLinuxOptions:
           level: s0
           type: spc_t
@@ -97,6 +99,7 @@ spec:
         # This is necessary to run modprobe and load the dm_thin_pool kernel module on the host.
         securityContext:
           privileged: true
+          readOnlyRootFilesystem: false
         volumeMounts:
           - mountPath: /dev/
             name: host-device-dir
