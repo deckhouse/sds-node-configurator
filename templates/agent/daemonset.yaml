@@ -8,6 +8,36 @@ cpu: 50m
 memory: 50Mi
 {{- end }}
 
+{{- define "sds_node_configurator_agent_resources" }}
+cpu: 10m
+memory: 25Mi
+{{- end }}
+
+{{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: sds-node-configurator
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-health-watcher-controller")) | nindent 2 }}
+spec:
+  targetRef:
+    apiVersion: "apps/v1"
+    kind: Deployment
+    name: sds-node-configurator
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: "sds-node-configurator-agent"
+      minAllowed:
+        {{- include "sds_node_configurator_agent_resources" . | nindent 8 }}
+      maxAllowed:
+        cpu: 200m
+        memory: 100Mi
+{{- end }}
+
 {{- if not .Values.sdsNodeConfigurator.disableDs }}
 ---
 apiVersion: apps/v1
@@ -58,7 +88,7 @@ spec:
         runAsUser: 0
         runAsNonRoot: false
         runAsGroup: 0
-        readOnlyRootFilesystem: false
+        readOnlyRootFilesystem: true
         seLinuxOptions:
           level: s0
           type: spc_t
@@ -99,7 +129,7 @@ spec:
         # This is necessary to run modprobe and load the dm_thin_pool kernel module on the host.
         securityContext:
           privileged: true
-          readOnlyRootFilesystem: false
+          readOnlyRootFilesystem: true
         volumeMounts:
           - mountPath: /dev/
             name: host-device-dir
@@ -157,7 +187,7 @@ spec:
         # Privileged mode is required to use nsenter and execute host-level commands like lvm and lsblk.
         securityContext:
           privileged: true
-          readOnlyRootFilesystem: false
+          readOnlyRootFilesystem: true
         volumeMounts:
         - mountPath: /dev/
           name: host-device-dir
