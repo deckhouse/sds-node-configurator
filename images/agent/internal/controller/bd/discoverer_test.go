@@ -21,7 +21,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -482,54 +481,6 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		}
 	})
 
-	t.Run("CheckConsumable", func(t *testing.T) {
-		t.Run("Good device returns true", func(t *testing.T) {
-			goodDevice := internal.Device{
-				Name:       "goodName",
-				MountPoint: "",
-				PartUUID:   "",
-				HotPlug:    false,
-				Model:      "",
-				Serial:     "",
-				Size:       resource.Quantity{},
-				Type:       "",
-				Wwn:        "",
-				KName:      "",
-				PkName:     "",
-				FSType:     "",
-				Rota:       false,
-			}
-
-			shouldBeTrue := checkConsumable(goodDevice)
-			assert.True(t, shouldBeTrue)
-		})
-
-		t.Run("Bad devices return false", func(t *testing.T) {
-			badDevices := internal.Devices{BlockDevices: []internal.Device{
-				{
-					MountPoint: "",
-					HotPlug:    true,
-					FSType:     "",
-				},
-				{
-					MountPoint: "bad",
-					HotPlug:    false,
-					FSType:     "",
-				},
-				{
-					MountPoint: "",
-					HotPlug:    false,
-					FSType:     "bad",
-				},
-			}}
-
-			for _, badDevice := range badDevices.BlockDevices {
-				shouldBeFalse := checkConsumable(badDevice)
-				assert.False(t, shouldBeFalse)
-			}
-		})
-	})
-
 	t.Run("CreateUniqDeviceName", func(t *testing.T) {
 		nodeName := "testNode"
 		can := internal.BlockDeviceCandidate{
@@ -581,133 +532,6 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		}
 	})
 
-	t.Run("ConfigureBlockDeviceLabels", func(t *testing.T) {
-		blockDevice := v1alpha1.BlockDevice{
-			Status: v1alpha1.BlockDeviceStatus{
-				Type:                  "testTYPE",
-				FsType:                "testFS",
-				NodeName:              "test_node",
-				Consumable:            false,
-				PVUuid:                "testPV",
-				VGUuid:                "testVGUID",
-				LVMVolumeGroupName:    "testLVGName",
-				ActualVGNameOnTheNode: "testNameOnNode",
-				Wwn:                   "testWWN",
-				Serial:                "testSERIAL",
-				Path:                  "testPATH",
-				Size:                  resource.MustParse("0"),
-				Model:                 "Very good model-1241",
-				Rota:                  false,
-				HotPlug:               false,
-				MachineID:             "testMACHINE",
-			},
-		}
-		blockDevice.Labels = map[string]string{
-			"some-custom-label1": "v",
-			"some-custom-label2": "v",
-		}
-
-		expectedLabels := map[string]string{
-			internal.MetadataNameLabelKey:                  blockDevice.ObjectMeta.Name,
-			internal.HostNameLabelKey:                      blockDevice.Status.NodeName,
-			internal.BlockDeviceTypeLabelKey:               blockDevice.Status.Type,
-			internal.BlockDeviceFSTypeLabelKey:             blockDevice.Status.FsType,
-			internal.BlockDevicePVUUIDLabelKey:             blockDevice.Status.PVUuid,
-			internal.BlockDeviceVGUUIDLabelKey:             blockDevice.Status.VGUuid,
-			internal.BlockDevicePartUUIDLabelKey:           blockDevice.Status.PartUUID,
-			internal.BlockDeviceLVMVolumeGroupNameLabelKey: blockDevice.Status.LVMVolumeGroupName,
-			internal.BlockDeviceActualVGNameLabelKey:       blockDevice.Status.ActualVGNameOnTheNode,
-			internal.BlockDeviceWWNLabelKey:                blockDevice.Status.Wwn,
-			internal.BlockDeviceSerialLabelKey:             blockDevice.Status.Serial,
-			internal.BlockDeviceSizeLabelKey:               blockDevice.Status.Size.String(),
-			internal.BlockDeviceModelLabelKey:              "Very-good-model-1241",
-			internal.BlockDeviceRotaLabelKey:               strconv.FormatBool(blockDevice.Status.Rota),
-			internal.BlockDeviceHotPlugLabelKey:            strconv.FormatBool(blockDevice.Status.HotPlug),
-			internal.BlockDeviceMachineIDLabelKey:          blockDevice.Status.MachineID,
-			"some-custom-label1":                           "v",
-			"some-custom-label2":                           "v",
-		}
-
-		assert.Equal(t, expectedLabels, configureBlockDeviceLabels(blockDevice))
-	})
-
-	t.Run("hasBlockDeviceDiff", func(t *testing.T) {
-		candidates := []internal.BlockDeviceCandidate{
-			// same state
-			{
-				NodeName:              "test_node",
-				Consumable:            false,
-				PVUuid:                "testPV",
-				VGUuid:                "testVGUID",
-				LVMVolumeGroupName:    "testLVGName",
-				ActualVGNameOnTheNode: "testNameOnNode",
-				Wwn:                   "testWWN",
-				Serial:                "testSERIAL",
-				Path:                  "testPATH",
-				Size:                  resource.Quantity{},
-				Rota:                  false,
-				Model:                 "testMODEL",
-				Name:                  "testNAME",
-				HotPlug:               false,
-				KName:                 "testKNAME",
-				PkName:                "testPKNAME",
-				Type:                  "testTYPE",
-				FSType:                "testFS",
-				MachineID:             "testMACHINE",
-			},
-			// diff state
-			{
-				NodeName:              "test_node",
-				Consumable:            true,
-				PVUuid:                "testPV2",
-				VGUuid:                "testVGUID2",
-				LVMVolumeGroupName:    "testLVGName2",
-				ActualVGNameOnTheNode: "testNameOnNode2",
-				Wwn:                   "testWWN2",
-				Serial:                "testSERIAL2",
-				Path:                  "testPATH2",
-				Size:                  resource.Quantity{},
-				Rota:                  true,
-				Model:                 "testMODEL2",
-				Name:                  "testNAME",
-				HotPlug:               true,
-				KName:                 "testKNAME2",
-				PkName:                "testPKNAME2",
-				Type:                  "testTYPE2",
-				FSType:                "testFS2",
-				MachineID:             "testMACHINE2",
-			},
-		}
-		blockDevice := v1alpha1.BlockDevice{
-			Status: v1alpha1.BlockDeviceStatus{
-				Type:                  "testTYPE",
-				FsType:                "testFS",
-				NodeName:              "test_node",
-				Consumable:            false,
-				PVUuid:                "testPV",
-				VGUuid:                "testVGUID",
-				LVMVolumeGroupName:    "testLVGName",
-				ActualVGNameOnTheNode: "testNameOnNode",
-				Wwn:                   "testWWN",
-				Serial:                "testSERIAL",
-				Path:                  "testPATH",
-				Size:                  resource.MustParse("0"),
-				Model:                 "testMODEL",
-				Rota:                  false,
-				HotPlug:               false,
-				MachineID:             "testMACHINE",
-			},
-		}
-		labels := configureBlockDeviceLabels(blockDevice)
-		blockDevice.Labels = labels
-		expected := []bool{false, true}
-
-		for i, candidate := range candidates {
-			actual := hasBlockDeviceDiff(blockDevice, candidate)
-			assert.Equal(t, expected[i], actual)
-		}
-	})
-
 	t.Run("validateTestLSBLKOutput", func(t *testing.T) {
 		d := setupDiscoverer()
 		testLsblkOutputBytes := []byte(testLsblkOutput)
@@ -719,22 +543,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 
 		for i, device := range filteredDevices {
 			println("Filtered device: ", device.Name)
-			candidate := internal.BlockDeviceCandidate{
-				NodeName:   "test-node",
-				Consumable: checkConsumable(device),
-				Wwn:        device.Wwn,
-				Serial:     device.Serial,
-				Path:       device.Name,
-				Size:       device.Size,
-				Rota:       device.Rota,
-				Model:      device.Model,
-				HotPlug:    device.HotPlug,
-				KName:      device.KName,
-				PkName:     device.PkName,
-				Type:       device.Type,
-				FSType:     device.FSType,
-				PartUUID:   device.PartUUID,
-			}
+			candidate := internal.NewBlockDeviceCandidateByDevice(&device, "test-node", "test-machine")
 			switch i {
 			case 0:
 				assert.Equal(t, "/dev/md1", device.Name)

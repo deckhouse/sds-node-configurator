@@ -38,6 +38,14 @@ type BlockDeviceFilter struct {
 	Spec BlockDeviceFilterSpec `json:"spec"`
 }
 
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// BlockDeviceList contains a list of empty block device
+type BlockDeviceFilterList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+	Items           []BlockDeviceFilter `json:"items"`
+}
+
 // +k8s:deepcopy-gen=true
 // Defines the state of block device selector
 type BlockDeviceFilterSpec struct {

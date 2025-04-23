@@ -65,7 +65,8 @@ var _ = Describe("Storage Controller", func() {
 	r := NewDiscoverer(cl, log, testMetrics, sdsCache, DiscovererConfig{})
 
 	It("CreateAPIBlockDevice", func() {
-		blockDevice, err := r.createAPIBlockDevice(ctx, candidate)
+		blockDevice := candidate.AsAPIBlockDevice()
+		err := r.createAPIBlockDevice(ctx, &blockDevice)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(blockDevice.Status.NodeName).To(Equal(candidate.NodeName))
 		Expect(blockDevice.Status.Consumable).To(Equal(candidate.Consumable))
