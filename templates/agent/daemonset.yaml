@@ -157,6 +157,7 @@ spec:
         # Privileged mode is required to use nsenter and execute host-level commands like lvm and lsblk.
         securityContext:
           privileged: true
+          readOnlyRootFilesystem: false
         volumeMounts:
         - mountPath: /dev/
           name: host-device-dir
