@@ -1,3 +1,5 @@
 name: sds-node-configurator
 weight: 900
-description: "SDS NODE CONFIGURATOR"
+descriptions:
+  en: "sds node configurator module"
+namespace: "d8-sds-node-configurator"
