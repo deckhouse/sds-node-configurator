@@ -50,7 +50,7 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
-      serviceAccountName: sds-node-configurator
+      serviceAccountName: agent
       hostPID: true
       hostNetwork: true
       # We need root privileges to perform LVM operations on the node.
