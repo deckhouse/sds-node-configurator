@@ -11,11 +11,12 @@ env:
   GOLANG_VERSION: ${{ vars.GOLANG_VERSION }}
   GOPROXY: ${{ secrets.GOPROXY }}
   SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
+  BASE_IMAGES_VERSION: "v0.4.3"
 
 on:
   push:
     tags:
-      - '**'
+      - "**"
 
 jobs:
   prod_ce_setup_build:
@@ -36,6 +37,12 @@ jobs:
         name: Show vars
 
       - uses: actions/checkout@v4
+
+      - name: Download base images
+        run: |
+          wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
+          cat base_images.yml
+
       - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.PROD_REGISTRY }}
@@ -71,6 +78,12 @@ jobs:
         name: Show vars
 
       - uses: actions/checkout@v4
+
+      - name: Download base images
+        run: |
+          wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
+          cat base_images.yml
+
       - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.PROD_REGISTRY }}
@@ -106,6 +119,12 @@ jobs:
         name: Show vars
 
       - uses: actions/checkout@v4
+
+      - name: Download base images
+        run: |
+          wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
+          cat base_images.yml
+
       - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.PROD_REGISTRY }}
@@ -141,6 +160,12 @@ jobs:
         name: Show vars
 
       - uses: actions/checkout@v4
+
+      - name: Download base images
+        run: |
+          wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
+          cat base_images.yml
+
       - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.PROD_REGISTRY }}
@@ -176,6 +201,12 @@ jobs:
         name: Show vars
 
       - uses: actions/checkout@v4
+
+      - name: Download base images
+        run: |
+          wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
+          cat base_images.yml
+
       - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.PROD_REGISTRY }}

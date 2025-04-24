@@ -1,0 +1,8 @@
+linters-settings:
+  module:
+    oss:
+      disable: true
+  openapi:
+    exclude-rules:
+      enum:
+        - spec.versions[0].schema.openAPIV3Schema.properties.status.properties.fsType
