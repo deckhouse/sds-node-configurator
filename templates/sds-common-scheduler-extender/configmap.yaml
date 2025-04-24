@@ -11,15 +11,15 @@ data:
     listen: ":8099"
     health-probe-bind-address: ":8081"
     default-divisor: 1
-{{- if eq .Values.sdsLocalVolume.logLevel "ERROR" }}
+{{- if eq .Values.sdsNodeConfigurator.logLevel "ERROR" }}
     log-level: "0"
-{{- else if eq .Values.sdsLocalVolume.logLevel "WARN" }}
+{{- else if eq .Values.sdsNodeConfigurator.logLevel "WARN" }}
     log-level: "1"
-{{- else if eq .Values.sdsLocalVolume.logLevel "INFO" }}
+{{- else if eq .Values.sdsNodeConfigurator.logLevel "INFO" }}
     log-level: "2"
-{{- else if eq .Values.sdsLocalVolume.logLevel "DEBUG" }}
+{{- else if eq .Values.sdsNodeConfigurator.logLevel "DEBUG" }}
     log-level: "3"
-{{- else if eq .Values.sdsLocalVolume.logLevel "TRACE" }}
+{{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
     log-level: "4"
     {{- end }}
 
