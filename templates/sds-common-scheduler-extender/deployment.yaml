@@ -1,43 +1,30 @@
-{{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
-{{- define "kube_scheduler_resources" }}
-cpu: 10m
-memory: 30Mi
-{{- end }}
-
-{{- define "sds_local_volume_scheduler_extender_resources" }}
+{{- define "sds_common_scheduler_extender_resources" }}
 cpu: 10m
 memory: 25Mi
 {{- end }}
 
-{{- $kubeVersion := semver .Values.global.discovery.kubernetesVersion -}}
+{{- if or (or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion)) (semverCompare ">=1.64" .Values.global.deckhouseVersion) }}
+
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
 metadata:
-  name: sds-local-volume-scheduler-extender
+  name: sds-common-scheduler-extender
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-local-volume-scheduler-extender")) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
 spec:
   targetRef:
     apiVersion: "apps/v1"
     kind: Deployment
-    name: sds-local-volume-scheduler-extender
+    name: sds-common-scheduler-extender
   updatePolicy:
     updateMode: "Auto"
   resourcePolicy:
     containerPolicies:
-{{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}    
-    - containerName: kube-scheduler
+    - containerName: sds-common-scheduler-extender
       minAllowed:
-        {{- include "kube_scheduler_resources" . | nindent 8 }}
-      maxAllowed:
-        memory: 60Mi
-        cpu: 20m
-{{- end }}        
-    - containerName: sds-local-volume-scheduler-extender
-      minAllowed:
-        {{- include "sds_local_volume_scheduler_extender_resources" . | nindent 8 }}
+        {{- include "sds_common_scheduler_extender_resources" . | nindent 8 }}
       maxAllowed:
         memory: 40Mi
         cpu: 20m
@@ -46,86 +33,43 @@ spec:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: sds-local-volume-scheduler-extender
+  name: sds-common-scheduler-extender
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-local-volume-scheduler-extender" )) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender" )) | nindent 2 }}
 spec:
   minAvailable: {{ include "helm_lib_is_ha_to_value" (list . 1 0) }}
   selector:
     matchLabels:
-      app: sds-local-volume-scheduler-extender
+      app: sds-common-scheduler-extender
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: sds-local-volume-scheduler-extender
+  name: sds-common-scheduler-extender
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-local-volume-scheduler-extender" )) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender" )) | nindent 2 }}
 spec:
   {{- include "helm_lib_deployment_strategy_and_replicas_for_ha" . | nindent 2 }}
   revisionHistoryLimit: 2
   selector:
     matchLabels:
-      app: sds-local-volume-scheduler-extender
+      app: sds-common-scheduler-extender
   template:
     metadata:
       labels:
-        app: sds-local-volume-scheduler-extender
+        app: sds-common-scheduler-extender
     spec:
       {{- include "helm_lib_priority_class" (tuple . "system-cluster-critical") | nindent 6 }}
       {{- include "helm_lib_node_selector" (tuple . "system") | nindent 6 }}
       {{- include "helm_lib_tolerations" (tuple . "system") | nindent 6 }}
       {{- include "helm_lib_module_pod_security_context_run_as_user_nobody" . | nindent 6 }}
-      {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "sds-local-volume-scheduler-extender")) | nindent 6 }}
+      {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 6 }}
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       containers:
-{{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
-        - name: kube-scheduler
+        - name: sds-common-scheduler-extender
           {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
-          command:
-          - kube-scheduler
-          - --config=/etc/kubernetes/scheduler-config.yaml
-          - --leader-elect=true
-          - --leader-elect-resource-name=sds-local-volume-scheduler
-          - --leader-elect-resource-namespace=$(NAMESPACE)
-          env:
-          - name: NAMESPACE
-            valueFrom:
-              fieldRef:
-                fieldPath: metadata.namespace
-          {{- /* Here we use kube-scheduler image from control-plane-manager module */}}
-          image: {{ include "helm_lib_module_image" (list (dict "Chart" (dict "Name" "control-plane-manager") "Values" .Values) (list "kubeScheduler" $kubeVersion.Major $kubeVersion.Minor | join "")) }}
-          imagePullPolicy: IfNotPresent
-          livenessProbe:
-            failureThreshold: 8
-            httpGet:
-              path: /healthz
-              port: 8081
-              scheme: HTTP
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 15
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 8081
-              scheme: HTTP
-            periodSeconds: 1
-            failureThreshold: 3
-          volumeMounts:
-          - mountPath: /etc/kubernetes
-            name: scheduler-config
-          resources:
-            requests:
-              {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
-              {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-              {{- include "kube_scheduler_resources" . | nindent 14 }}
-              {{- end }}
-{{- end }}
-        - name: sds-local-volume-scheduler-extender
-          {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
-          image: {{ include "helm_lib_module_image" (list . "sdsLocalVolumeSchedulerExtender") }}
+          image: {{ include "helm_lib_module_image" (list . "sdsCommonSchedulerExtender") }}
           imagePullPolicy: IfNotPresent
           livenessProbe:
             failureThreshold: 8
@@ -144,39 +88,33 @@ spec:
             periodSeconds: 1
             failureThreshold: 3
           args:
-            - sds-local-volume-scheduler-extender
-            - --config=/etc/sds-local-volume-scheduler-extender/scheduler-extender-config.yaml
+            - sds-common-scheduler-extender
+            - --config=/etc/sds-common-scheduler-extender/scheduler-extender-config.yaml
           volumeMounts:
           - name: scheduler-extender-config
-            mountPath: /etc/sds-local-volume-scheduler-extender
+            mountPath: /etc/sds-common-scheduler-extender
             readOnly: true
           - name: scheduler-extender-certs
-            mountPath: /etc/sds-local-volume-scheduler-extender/certs
+            mountPath: /etc/sds-common-scheduler-extender/certs
             readOnly: true
           resources:
             requests:
               {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
               {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-              {{- include "sds_local_volume_scheduler_extender_resources" . | nindent 14 }}
+              {{- include "sds_common_scheduler_extender_resources" . | nindent 14 }}
               {{- end }}
-{{- if or $dhVersionIsDev (semverCompare ">=1.64" .Values.global.deckhouseVersion) }}
           ports:
            - containerPort: 8099
              protocol: TCP
              name: http
-{{- end }}
       volumes:
       - name: scheduler-extender-config
         configMap:
           defaultMode: 420
-          name: sds-local-volume-scheduler-extender
+          name: sds-common-scheduler-extender
       - name: scheduler-extender-certs
         secret:
             secretName: scheduler-extender-https-certs
-{{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
-      - configMap:
-          defaultMode: 420
-          name: sds-local-volume-scheduler
-        name: scheduler-config
+      serviceAccountName: sds-common-scheduler-extender
+
 {{- end }}
-      serviceAccountName: sds-local-volume-scheduler-extender
