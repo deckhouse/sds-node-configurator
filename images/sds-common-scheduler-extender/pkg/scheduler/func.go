@@ -3,9 +3,9 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"scheduler-extender/pkg/cache"
-	"scheduler-extender/pkg/consts"
-	"scheduler-extender/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	"sync"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
