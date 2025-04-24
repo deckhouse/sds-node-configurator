@@ -1,0 +1,54 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sds-local-volume-scheduler-extender
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-local-volume-scheduler-extender")) | nindent 2 }}
+data:
+  scheduler-extender-config.yaml: |-
+    listen: ":8099"
+    health-probe-bind-address: ":8081"
+    default-divisor: 1
+{{- if eq .Values.sdsLocalVolume.logLevel "ERROR" }}
+    log-level: "0"
+{{- else if eq .Values.sdsLocalVolume.logLevel "WARN" }}
+    log-level: "1"
+{{- else if eq .Values.sdsLocalVolume.logLevel "INFO" }}
+    log-level: "2"
+{{- else if eq .Values.sdsLocalVolume.logLevel "DEBUG" }}
+    log-level: "3"
+{{- else if eq .Values.sdsLocalVolume.logLevel "TRACE" }}
+    log-level: "4"
+    {{- end }}
+
+{{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
+{{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sds-local-volume-scheduler
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-local-volume-scheduler")) | nindent 2 }}
+data:
+  scheduler-config.yaml: |-
+    {{- if semverCompare ">= 1.26" .Values.global.discovery.kubernetesVersion }}
+    apiVersion: kubescheduler.config.k8s.io/v1
+    {{- else }}
+    apiVersion: kubescheduler.config.k8s.io/v1beta3
+    {{- end }}
+    kind: KubeSchedulerConfiguration
+    profiles:
+      - schedulerName: sds-local-volume
+    extenders:
+      - urlPrefix: https://localhost:8099/scheduler
+        filterVerb: filter
+        prioritizeVerb: prioritize
+        weight: 5
+        enableHTTPS: true
+        httpTimeout: 300s
+        nodeCacheCapable: true
+        tlsConfig:
+          caData: {{ .Values.sdsLocalVolume.internal.customSchedulerExtenderCert.ca }}
+{{- end }}
