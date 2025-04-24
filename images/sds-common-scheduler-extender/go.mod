@@ -4,7 +4,8 @@ go 1.24.2
 
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250123151518-099b1c39c216
-	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250206111927-21823e6307fc
+	//github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250206111927-21823e6307fc
+	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250220121419-ea9e35fe0edf
 	github.com/go-logr/logr v1.4.2
 	github.com/spf13/cobra v1.8.1
 	k8s.io/api v0.32.1

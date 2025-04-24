@@ -3,8 +3,8 @@ package scheduler
 import (
 	"context"
 	"net/http"
-	"scheduler-extender/pkg/cache"
-	"scheduler-extender/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )

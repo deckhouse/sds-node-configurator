@@ -20,11 +20,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/yaml"
 
-	"scheduler-extender/pkg/cache"
-	"scheduler-extender/pkg/controller"
-	"scheduler-extender/pkg/kubutils"
-	"scheduler-extender/pkg/logger"
-	"scheduler-extender/pkg/scheduler"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/controller"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/kubutils"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/scheduler"
 
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/runtime"
