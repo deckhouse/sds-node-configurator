@@ -78,7 +78,7 @@ jobs:
       - name: Set vars
         id: set-vars
         run: |
-          # Slect edition for build, default ee
+          # Select edition for build, default ee
           if echo "${{ steps.get-labels.outputs.result }}" | grep -q "edition/ce"; then
             echo "MODULE_EDITION=ce" >> "$GITHUB_OUTPUT"
           else
