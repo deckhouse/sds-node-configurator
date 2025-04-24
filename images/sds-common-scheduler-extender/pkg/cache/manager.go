@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"scheduler-extender/pkg/logger"
 	"sync"
 	"time"
+
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"

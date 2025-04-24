@@ -2,9 +2,9 @@ package scheduler
 
 // import (
 // 	"fmt"
-// 	c "scheduler-extender/pkg/cache"
-// 	"scheduler-extender/pkg/consts"
-// 	"scheduler-extender/pkg/logger"
+// 	c "github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
+// 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
+// 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 // 	"testing"
 
 // 	apiv1 "k8s.io/api/core/v1"
