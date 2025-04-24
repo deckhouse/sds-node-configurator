@@ -2,20 +2,20 @@
 ---
 # Required for external analytics. Do not remove!
 image: {{ $.ImageName }}-src-artifact
-from: {{ $.Root.BASE_ALT }}
+fromImage: builder/src
 final: false
 
 git:
-  - add: /images/{{ $.ImageName }}/src
-    to: /src/images/{{ $.ImageName }}/src
+  - add: /
+    to: /src
+    includePaths:
+      - api
+      - images/{{ $.ImageName }}
     stageDependencies:
       install:
-        - "**/*"
-  - add: /api
-    to: /src/api
-    stageDependencies:
-      install:
-        - "**/*"
+        - '**/*'
+    excludePaths:
+      - images/{{ $.ImageName }}/werf.yaml
 
 shell:
   install:
@@ -23,7 +23,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.Root.BASE_GOLANG_1_23 }}
+fromImage: builder/golang-alpine
 final: false
 
 import:
@@ -35,15 +35,16 @@ import:
 mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
+
 shell:
   setup:
-    - cd /src/images/{{ $.ImageName }}/src/cmd
+    - cd /src/images/{{ $.ImageName }}/cmd
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
     - chmod +x /{{ $.ImageName }}
 
 ---
 image: {{ $.ImageName }}-binaries-artifact
-from: {{ $.Root.BASE_ALT }}
+fromImage: builder/alt
 final: false
 
 git:
@@ -56,46 +57,14 @@ git:
 shell:
   install:
     - apt-get update
-    - apt-get -y install glibc-utils mount nfs-utils curl
-    - rm -rf /var/lib/apt/lists/* /var/cache/apt/* && mkdir -p /var/lib/apt/lists/partial /var/cache/apt/archives/partial
+    - apt-get -y install glibc-utils curl
+    - {{ $.Root.ALT_CLEANUP_CMD }}
     - chmod +x /binary_replace.sh
     - /binary_replace.sh -i "{{ $csiBinaries }}" -o /relocate
 
 ---
-image: {{ $.ImageName }}-distroless-artifact
-from: {{ $.Root.BASE_ALT }}
-final: false
-
-shell:
-  install:
-    - apt-get update
-    - apt-get -y install ca-certificates tzdata
-    - mkdir -p /relocate/bin /relocate/sbin /relocate/etc /relocate/etc/ssl /relocate/usr/bin /relocate/usr/sbin /relocate/usr/share
-    - cp -pr /tmp /relocate
-    - cp -pr /etc/passwd /etc/group /etc/hostname /etc/hosts /etc/shadow /etc/protocols /etc/services /etc/nsswitch.conf /relocate/etc
-    - cp -pr /usr/share/ca-certificates /relocate/usr/share
-    - cp -pr /usr/share/zoneinfo /relocate/usr/share
-    # changed from /etc/ssl/* to ALTLinux specific
-    - cp -pr /etc/pki/tls/cert.pem /relocate/etc/ssl
-    - cp -pr /etc/pki/tls/certs /relocate/etc/ssl
-    - echo "deckhouse:x:64535:64535:deckhouse:/:/sbin/nologin" >> /relocate/etc/passwd
-    - echo "deckhouse:x:64535:" >> /relocate/etc/group
-    - echo "deckhouse:!::0:::::" >> /relocate/etc/shadow
-
----
-image: {{ $.ImageName }}-distroless
-from: {{ $.Root.BASE_SCRATCH }}
-final: false
-
-import:
-  - image: {{ $.ImageName }}-distroless-artifact
-    add: /relocate
-    to: /
-    before: install
-
----
 image: {{ $.ImageName }}
-fromImage: {{ $.ImageName }}-distroless
+fromImage: base/distroless
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
