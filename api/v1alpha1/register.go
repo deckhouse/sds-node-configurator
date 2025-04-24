@@ -43,6 +43,7 @@ var knownTypes = []runtime.Object{
 	&BlockDevice{},
 	&BlockDeviceList{},
 	&BlockDeviceFilter{},
+	&BlockDeviceFilterList{},
 	&LVMVolumeGroup{},
 	&LVMVolumeGroupList{},
 	&LVMLogicalVolume{},

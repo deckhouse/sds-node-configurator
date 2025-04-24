@@ -14,148 +14,149 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package bd
+package bd_test
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/bd"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
 )
 
 var _ = Describe("Storage Controller", func() {
-	ctx := context.Background()
-	testMetrics := monitoring.GetMetrics("")
-	deviceName := "/dev/sda"
-	candidate := internal.BlockDeviceCandidate{
-		NodeName:              "test-node",
-		Consumable:            true,
-		PVUuid:                "123",
-		VGUuid:                "123",
-		LVMVolumeGroupName:    "testLvm",
-		ActualVGNameOnTheNode: "testVG",
-		Wwn:                   "WW12345678",
-		Serial:                "test",
-		Path:                  deviceName,
-		Size:                  resource.Quantity{},
-		Rota:                  false,
-		Model:                 "very good-model",
-		Name:                  "/dev/sda",
-		HotPlug:               false,
-		KName:                 "/dev/sda",
-		PkName:                "/dev/sda14",
-		Type:                  "disk",
-		FSType:                "",
-		MachineID:             "1234",
-	}
-	cl := test_utils.NewFakeClient()
-	log, _ := logger.NewLogger("1")
-	sdsCache := cache.New()
+	var ctx context.Context
+	var metrics monitoring.Metrics
+	var fakeClient client.WithWatch
+	var log logger.Logger
+	var sdsCache *cache.Cache
+	var config bd.DiscovererConfig
+	var discoverer *bd.Discoverer
 
-	r := NewDiscoverer(cl, log, testMetrics, sdsCache, DiscovererConfig{})
-
-	It("CreateAPIBlockDevice", func() {
-		blockDevice := candidate.AsAPIBlockDevice()
-		err := r.createAPIBlockDevice(ctx, &blockDevice)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(blockDevice.Status.NodeName).To(Equal(candidate.NodeName))
-		Expect(blockDevice.Status.Consumable).To(Equal(candidate.Consumable))
-		Expect(blockDevice.Status.PVUuid).To(Equal(candidate.PVUuid))
-		Expect(blockDevice.Status.VGUuid).To(Equal(candidate.VGUuid))
-		Expect(blockDevice.Status.LVMVolumeGroupName).To(Equal(candidate.LVMVolumeGroupName))
-		Expect(blockDevice.Status.ActualVGNameOnTheNode).To(Equal(candidate.ActualVGNameOnTheNode))
-		Expect(blockDevice.Status.Wwn).To(Equal(candidate.Wwn))
-		Expect(blockDevice.Status.Serial).To(Equal(candidate.Serial))
-		Expect(blockDevice.Status.Path).To(Equal(candidate.Path))
-		Expect(blockDevice.Status.Size.Value()).To(Equal(candidate.Size.Value()))
-		Expect(blockDevice.Status.Rota).To(Equal(candidate.Rota))
-		Expect(blockDevice.Status.Model).To(Equal(candidate.Model))
-		Expect(blockDevice.Status.Type).To(Equal(candidate.Type))
-		Expect(blockDevice.Status.FsType).To(Equal(candidate.FSType))
-		Expect(blockDevice.Status.MachineID).To(Equal(candidate.MachineID))
+	BeforeEach(func() {
+		ctx = context.Background()
+		metrics = monitoring.GetMetrics("")
+		log = logger.NewLoggerWrap(GinkgoLogr)
+		sdsCache = cache.New()
+		fakeClient = test_utils.NewFakeClient()
+		config.MachineID = "testMachineID"
+		config.NodeName = "testNodeName"
+		discoverer = bd.NewDiscoverer(fakeClient, log, metrics, sdsCache, config)
 	})
 
-	It("GetAPIBlockDevices", func() {
-		listDevice, err := r.bdCl.GetAPIBlockDevices(ctx, DiscovererName, nil)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(listDevice).NotTo(BeNil())
-		Expect(len(listDevice)).To(Equal(1))
-
-		testBlockDevice := listDevice[deviceName]
-		Expect(testBlockDevice).NotTo(BeNil())
-		Expect(testBlockDevice.Status.NodeName).To(Equal(candidate.NodeName))
-	})
-
-	It("UpdateAPIBlockDevice", func() {
-		newCandidate := internal.BlockDeviceCandidate{
-			NodeName:              "test-node",
-			Consumable:            false,
-			PVUuid:                "123",
-			VGUuid:                "123",
-			LVMVolumeGroupName:    "updatedField",
-			ActualVGNameOnTheNode: "testVG",
-			Wwn:                   "WW12345678",
-			Serial:                "test",
-			Path:                  deviceName,
-			Size:                  resource.Quantity{},
-			Rota:                  false,
-			Model:                 "",
-			Name:                  "/dev/sda",
-			HotPlug:               false,
-			KName:                 "/dev/sda",
-			PkName:                "/dev/sda14",
-			Type:                  "disk",
-			FSType:                "",
-			MachineID:             "1234",
-		}
-
-		resources, err := r.bdCl.GetAPIBlockDevices(ctx, DiscovererName, nil)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(resources).NotTo(BeNil())
-		Expect(len(resources)).To(Equal(1))
-
-		oldResource := resources[deviceName]
-		Expect(oldResource).NotTo(BeNil())
-		Expect(oldResource.Status.NodeName).To(Equal(candidate.NodeName))
-
-		err = r.updateAPIBlockDevice(ctx, oldResource, newCandidate)
-		Expect(err).NotTo(HaveOccurred())
-
-		resources, err = r.bdCl.GetAPIBlockDevices(ctx, DiscovererName, nil)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(resources).NotTo(BeNil())
-		Expect(len(resources)).To(Equal(1))
-
-		newResource := resources[deviceName]
-		Expect(newResource).NotTo(BeNil())
-		Expect(newResource.Status.NodeName).To(Equal(candidate.NodeName))
-		Expect(newResource.Status.Consumable).To(BeFalse())
-		Expect(newResource.Status.LVMVolumeGroupName).To(Equal("updatedField"))
-	})
-
-	It("DeleteAPIBlockDevice", func() {
-		err := r.deleteAPIBlockDevice(ctx, &v1alpha1.BlockDevice{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: deviceName,
-			},
+	When("new devices appear", func() {
+		var (
+			newDevices    []internal.Device
+			newDevicesErr bytes.Buffer
+		)
+		BeforeEach(func() {
+			newDevices = []internal.Device{
+				{
+					Name:   "testDeviceName",
+					Model:  "very good-model",
+					Serial: "testSerial",
+					Wwn:    "testWWN",
+					Type:   "testType",
+					Size:   resource.MustParse("1G"),
+				}}
 		})
-		Expect(err).NotTo(HaveOccurred())
 
-		devices, err := r.bdCl.GetAPIBlockDevices(context.Background(), DiscovererName, nil)
-		Expect(err).NotTo(HaveOccurred())
-		for name := range devices {
-			Expect(name).NotTo(Equal(deviceName))
-		}
+		JustBeforeEach(func() {
+			sdsCache.StoreDevices(newDevices, newDevicesErr)
+		})
+
+		When("discovered", func() {
+			var (
+				discoverResult controller.Result
+				discoverError  error
+			)
+
+			JustBeforeEach(func() {
+				discoverResult, discoverError = discoverer.Discover(ctx)
+			})
+
+			expectOneDeviceMatchedToNewDevice := func() {
+				list := &v1alpha1.BlockDeviceList{}
+				Expect(fakeClient.List(ctx, list)).ShouldNot(HaveOccurred())
+				Expect(list.Items).Should(HaveLen(1))
+				blockDevice := list.Items[0]
+				Expect(blockDevice.Status.MachineID).To(Equal(config.MachineID))
+				Expect(blockDevice.Status.NodeName).To(Equal(config.NodeName))
+				Expect(blockDevice.Status.Consumable).To(BeTrue())
+				Expect(blockDevice.Status.Wwn).To(Equal(newDevices[0].Wwn))
+				Expect(blockDevice.Status.Serial).To(Equal(newDevices[0].Serial))
+				Expect(blockDevice.Status.Size.Value()).To(Equal(newDevices[0].Size.Value()))
+				Expect(blockDevice.Status.Rota).To(Equal(newDevices[0].Rota))
+				Expect(blockDevice.Status.Model).To(Equal(newDevices[0].Model))
+				Expect(blockDevice.Status.Type).To(Equal(newDevices[0].Type))
+				Expect(blockDevice.Status.FsType).To(Equal(newDevices[0].FSType))
+				Expect(blockDevice.Status.PVUuid).To(BeEmpty())
+				Expect(blockDevice.Status.VGUuid).To(BeEmpty())
+				Expect(blockDevice.Status.LVMVolumeGroupName).To(BeEmpty())
+				Expect(blockDevice.Status.ActualVGNameOnTheNode).To(BeEmpty())
+				Expect(blockDevice.Status.Path).To(Equal(newDevices[0].Name))
+			}
+
+			It("adds device to api", func() {
+				Expect(discoverError).ShouldNot(HaveOccurred())
+				Expect(discoverResult.RequeueAfter).Should(BeZero())
+				expectOneDeviceMatchedToNewDevice()
+			})
+
+			When("device than has changed", func() {
+				JustBeforeEach(func() {
+					expectOneDeviceMatchedToNewDevice()
+					newDevices = []internal.Device{
+						{
+							Name:   "testDeviceName2",
+							Model:  "very good-model2",
+							Serial: "testSerial2",
+							Wwn:    "testWWN2",
+							Type:   "testType2",
+							Size:   resource.MustParse("1G"),
+						}}
+					sdsCache.StoreDevices(newDevices, newDevicesErr)
+
+					result, err := discoverer.Discover(ctx)
+					Expect(err).ShouldNot(HaveOccurred())
+					Expect(result.RequeueAfter).Should(BeZero())
+				})
+
+				It("updates devices", func() {
+					expectOneDeviceMatchedToNewDevice()
+				})
+			})
+
+			When("device deleted", func() {
+				JustBeforeEach(func() {
+					expectOneDeviceMatchedToNewDevice()
+					newDevices = []internal.Device{}
+					sdsCache.StoreDevices(newDevices, newDevicesErr)
+				})
+
+				It("updates devices", func() {
+					result, err := discoverer.Discover(ctx)
+					Expect(err).ShouldNot(HaveOccurred())
+					Expect(result.RequeueAfter).Should(BeZero())
+
+					list := &v1alpha1.BlockDeviceList{}
+					Expect(fakeClient.List(ctx, list)).ShouldNot(HaveOccurred())
+					Expect(list.Items).Should(HaveLen(0))
+				})
+			})
+		})
 	})
 })
 

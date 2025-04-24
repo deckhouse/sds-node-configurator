@@ -96,10 +96,6 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 	d.log.Info("[RunBlockDeviceController] START reconcile of block devices")
 
 	candidates := d.getBlockDeviceCandidates()
-	if len(candidates) == 0 {
-		d.log.Info("[RunBlockDeviceController] no block devices candidates found. Stop reconciliation")
-		return false
-	}
 
 	d.log.Debug("[RunBlockDeviceController] Getting block device filters")
 	selector, err := d.blockDeviceFilterClient.GetAPIBlockDeviceFilters(ctx, DiscovererName)
