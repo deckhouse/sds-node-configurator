@@ -169,10 +169,10 @@ func subMain(ctx context.Context) error {
 	cacheMrg := cache.NewCacheManager(сache, &sync.Mutex{}, mgr, log)
 	log.Info("[subMain] scheduler cache manager initialized")
 
-	go cacheMrg.RunCleaner(ctx, time.Duration(config.CachePVCCheckInterval))
+	go cacheMrg.RunCleaner(ctx, time.Duration(config.CachePVCCheckInterval)*time.Second)
 	log.Info("[subMain] scheduler cleanup process started")
 
-	go cacheMrg.RunSaver(ctx, time.Duration(config.CacheCheckInterval), time.Duration(config.CfgMapUpdateTimeout))
+	go cacheMrg.RunSaver(ctx, time.Duration(config.CacheCheckInterval)*time.Second, time.Duration(config.CfgMapUpdateTimeout)*time.Second)
 	log.Info("[subMain] scheduler cache saver started")
 
 	h, err := scheduler.NewHandler(ctx, mgr.GetClient(), *log, сache, config.DefaultDivisor)
