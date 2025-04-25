@@ -25,18 +25,18 @@ const (
 
 type CacheManager struct {
 	cache     *Cache
-	mu        *sync.Mutex
+	locker    sync.Locker
 	log       *logger.Logger
 	mrg       manager.Manager
 	isUpdated bool
 }
 
-func NewCacheManager(c *Cache, mu *sync.Mutex, mrg manager.Manager, log *logger.Logger) *CacheManager {
+func NewCacheManager(c *Cache, mrg manager.Manager, log *logger.Logger) *CacheManager {
 	return &CacheManager{
-		cache: c,
-		mu:    mu,
-		mrg:   mrg,
-		log:   log,
+		cache:  c,
+		locker: &sync.Mutex{},
+		mrg:    mrg,
+		log:    log,
 	}
 }
 
@@ -51,17 +51,19 @@ func (cm *CacheManager) RunCleaner(ctx context.Context, pvcCheckInterval time.Du
 			return
 		case <-t.C:
 			cm.log.Info("[CacheManager] Starting pvc cleanup")
-			cm.mu.Lock()
-			cm.cache.clearBoundExpiredPVC(pvcCheckInterval)
-			cm.isUpdated = true
-			cm.mu.Unlock()
+			cm.locker.Lock()
+			deletedPVCs := cm.cache.clearBoundExpiredPVC(pvcCheckInterval)
+			if deletedPVCs > 0 {
+				cm.isUpdated = true
+			}
+			cm.locker.Unlock()
 			cm.log.Info("[CacheManager] pvc cleanup has finished")
 		}
 	}
 }
 
 func (cm *CacheManager) RunSaver(ctx context.Context, cacheCheckInterval, configMapUpdateTimeout time.Duration) {
-	t := time.NewTicker(cacheCheckInterval * time.Second)
+	t := time.NewTicker(cacheCheckInterval)
 
 	for {
 		select {
@@ -73,15 +75,15 @@ func (cm *CacheManager) RunSaver(ctx context.Context, cacheCheckInterval, config
 				continue
 			}
 
-			cm.mu.Lock()
+			cm.locker.Lock()
 			cacheStr := cm.cache.String()
-			cm.mu.Unlock()
+			cm.locker.Unlock()
 			if cacheStr == "" {
 				cm.log.Warning("[CacheManager] Cache returned an empty data string. Skipping iteration")
 				continue
 			}
 
-			cwt, cancel := context.WithTimeout(ctx, configMapUpdateTimeout*time.Second)
+			cwt, cancel := context.WithTimeout(ctx, configMapUpdateTimeout)
 			err := cm.SaveOrUpdate(cwt, cm.mrg, cacheStr)
 			if err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
@@ -117,83 +119,83 @@ func (cm *CacheManager) SaveOrUpdate(ctx context.Context, mrg manager.Manager, d
 }
 
 func (cm *CacheManager) GetAllLVG() map[string]*snc.LVMVolumeGroup {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.locker.Lock()
+	defer cm.locker.Unlock()
 
 	return cm.cache.GetAllLVG()
 }
 
 func (cm *CacheManager) GetLVGThickReservedSpace(lvgName string) (int64, error) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.locker.Lock()
+	defer cm.locker.Unlock()
 
 	return cm.cache.GetLVGThickReservedSpace(lvgName)
 }
 
 func (cm *CacheManager) GetLVGThinReservedSpace(lvgName string, thinPoolName string) (int64, error) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.locker.Lock()
+	defer cm.locker.Unlock()
 
 	return cm.cache.GetLVGThinReservedSpace(lvgName, thinPoolName)
 }
 
 func (cm *CacheManager) RemovePVCFromTheCache(pvc *v1.PersistentVolumeClaim) {
-	cm.mu.Lock()
+	cm.locker.Lock()
 	defer func() {
 		cm.isUpdated = true
-		cm.mu.Unlock()
+		cm.locker.Unlock()
 	}()
 
 	cm.cache.RemovePVCFromTheCache(pvc)
 }
 
 func (cm *CacheManager) GetLVGNamesForPVC(pvc *v1.PersistentVolumeClaim) []string {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.locker.Lock()
+	defer cm.locker.Unlock()
 
 	return cm.cache.GetLVGNamesForPVC(pvc)
 }
 
 func (cm *CacheManager) GetLVGNamesByNodeName(nodeName string) []string {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.locker.Lock()
+	defer cm.locker.Unlock()
 
 	return cm.cache.GetLVGNamesByNodeName(nodeName)
 }
 
 func (cm *CacheManager) UpdateThickPVC(lvgName string, pvc *v1.PersistentVolumeClaim, provisioner string) error {
-	cm.mu.Lock()
+	cm.locker.Lock()
 	defer func() {
 		cm.isUpdated = true
-		cm.mu.Unlock()
+		cm.locker.Unlock()
 	}()
 
 	return cm.cache.UpdateThickPVC(lvgName, pvc, provisioner)
 }
 
 func (cm *CacheManager) AddThickPVC(lvgName string, pvc *v1.PersistentVolumeClaim, provisioner string) error {
-	cm.mu.Lock()
+	cm.locker.Lock()
 	defer func() {
 		cm.isUpdated = true
-		cm.mu.Unlock()
+		cm.locker.Unlock()
 	}()
 
 	return cm.cache.AddThickPVC(lvgName, pvc, provisioner)
 }
 
 func (cm *CacheManager) UpdateThinPVC(lvgName, thinPoolName string, pvc *v1.PersistentVolumeClaim, provisioner string) error {
-	cm.mu.Lock()
+	cm.locker.Lock()
 	defer func() {
 		cm.isUpdated = true
-		cm.mu.Unlock()
+		cm.locker.Unlock()
 	}()
 
 	return cm.cache.UpdateThinPVC(lvgName, thinPoolName, pvc, provisioner)
 }
 
 func (cm *CacheManager) PrintTheCacheLog() {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.locker.Lock()
+	defer cm.locker.Unlock()
 
 	cm.log.Cache("*******************CACHE BEGIN*******************")
 	cm.log.Cache("[LVMVolumeGroups BEGIN]")
@@ -236,54 +238,54 @@ func (cm *CacheManager) PrintTheCacheLog() {
 }
 
 func (cm *CacheManager) TryGetLVG(name string) *snc.LVMVolumeGroup {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.locker.Lock()
+	defer cm.locker.Unlock()
 
 	return cm.cache.TryGetLVG(name)
 }
 
 func (cm *CacheManager) UpdateLVG(lvg *snc.LVMVolumeGroup) error {
-	cm.mu.Lock()
+	cm.locker.Lock()
 	defer func() {
 		cm.isUpdated = true
-		cm.mu.Unlock()
+		cm.locker.Unlock()
 	}()
 
 	return cm.cache.UpdateLVG(lvg)
 }
 
 func (cm *CacheManager) AddLVG(lvg *snc.LVMVolumeGroup) {
-	cm.mu.Lock()
+	cm.locker.Lock()
 	defer func() {
 		cm.isUpdated = true
-		cm.mu.Unlock()
+		cm.locker.Unlock()
 	}()
 
 	cm.cache.AddLVG(lvg)
 }
 
 func (cm *CacheManager) DeleteLVG(lvgName string) {
-	cm.mu.Lock()
+	cm.locker.Lock()
 	defer func() {
 		cm.isUpdated = true
-		cm.mu.Unlock()
+		cm.locker.Unlock()
 	}()
 
 	cm.cache.DeleteLVG(lvgName)
 }
 
 func (cm *CacheManager) GetAllPVCForLVG(lvgName string) ([]*v1.PersistentVolumeClaim, error) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.locker.Lock()
+	defer cm.locker.Unlock()
 
 	return cm.cache.GetAllPVCForLVG(lvgName)
 }
 
 func (cm *CacheManager) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentVolumeClaim, deviceType string, drbdResourceMap map[string]*srv.DRBDResource) error {
-	cm.mu.Lock()
+	cm.locker.Lock()
 	defer func() {
 		cm.isUpdated = true
-		cm.mu.Unlock()
+		cm.locker.Unlock()
 	}()
 
 	return cm.cache.RemoveSpaceReservationForPVCWithSelectedNode(pvc, deviceType, drbdResourceMap)
