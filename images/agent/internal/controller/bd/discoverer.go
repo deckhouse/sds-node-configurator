@@ -166,8 +166,7 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 		apiBlockDevices[candidate.Name] = device
 	}
 
-	// delete api device if device no longer exists, but we still have its api resource
-	d.removeDeprecatedAPIDevices(ctx, candidates, apiBlockDevices)
+	// delete devices doesn't match the filters
 	for _, device := range blockDevicesToDelete {
 		name := device.Name
 		err := d.deleteAPIBlockDevice(ctx, device)
@@ -178,6 +177,8 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 		delete(apiBlockDevices, name)
 		d.log.Info(fmt.Sprintf("[RunBlockDeviceController] device deleted, name: %s", name))
 	}
+	// delete api device if device no longer exists, but we still have its api resource
+	d.removeDeprecatedAPIDevices(ctx, candidates, apiBlockDevices)
 
 	d.log.Info("[RunBlockDeviceController] END reconcile of block devices")
 	d.metrics.ReconcileDuration(DiscovererName).Observe(d.metrics.GetEstimatedTimeInSeconds(reconcileStart))

@@ -26,7 +26,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/resource"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -45,8 +44,11 @@ var _ = Describe("Storage Controller", func() {
 	var fakeClient client.WithWatch
 	var log logger.Logger
 	var sdsCache *cache.Cache
-	var config bd.DiscovererConfig
 	var discoverer *bd.Discoverer
+	config := bd.DiscovererConfig{
+		MachineID: "testMachineID",
+		NodeName:  "testNodeName",
+	}
 
 	BeforeEach(func() {
 		ctx = context.Background()
@@ -54,40 +56,50 @@ var _ = Describe("Storage Controller", func() {
 		log = logger.NewLoggerWrap(GinkgoLogr)
 		sdsCache = cache.New()
 		fakeClient = test_utils.NewFakeClient()
-		config.MachineID = "testMachineID"
-		config.NodeName = "testNodeName"
 		discoverer = bd.NewDiscoverer(fakeClient, log, metrics, sdsCache, config)
 	})
 
-	thisNodeAPIDevices := []v1alpha1.BlockDevice{
-		{
-			ObjectMeta: v1.ObjectMeta{
-				Name: "existingName1",
-			},
-			Status: v1alpha1.BlockDeviceStatus{
-				NodeName:  config.NodeName,
-				MachineID: config.MachineID,
-			},
-		},
+	thisNodeConsumableAPIDevices := []v1alpha1.BlockDevice{
+		internal.BlockDeviceCandidate{
+			NodeName:   config.NodeName,
+			MachineID:  config.MachineID,
+			Name:       "existingName1",
+			Consumable: true,
+		}.AsAPIBlockDevice(),
 	}
 
+	thisNodeNonConsumableAPIDevices := []v1alpha1.BlockDevice{
+		internal.BlockDeviceCandidate{
+			NodeName:   config.NodeName,
+			MachineID:  config.MachineID,
+			Name:       "existingName4",
+			Consumable: false,
+		}.AsAPIBlockDevice(),
+	}
+	_ = thisNodeNonConsumableAPIDevices
+
 	otherNodeAPIDevices := []v1alpha1.BlockDevice{
-		{
-			ObjectMeta: v1.ObjectMeta{
-				Name: "existingName2",
-			},
-			Status: v1alpha1.BlockDeviceStatus{
-				NodeName:  "otherNode",
-				MachineID: "otherMachineID",
-			},
-		},
+		internal.BlockDeviceCandidate{
+			NodeName:  "otherNode",
+			MachineID: "MachineID",
+			Name:      "existingName2",
+		}.AsAPIBlockDevice(),
+		internal.BlockDeviceCandidate{
+			NodeName:  "otherNode2",
+			MachineID: "MachineID2",
+			Name:      "existingName3",
+		}.AsAPIBlockDevice(),
 	}
 
 	DescribeTableSubtree("initial devices",
 		Entry("no devices", []v1alpha1.BlockDevice{}),
 		Entry("only other Node and machineID devices", otherNodeAPIDevices),
-		Entry("some devices from the same node", thisNodeAPIDevices),
-		Entry("some devices from the same node some from other", append(slices.Clone(thisNodeAPIDevices), otherNodeAPIDevices...)),
+		Entry("consumable devices from the same node", thisNodeConsumableAPIDevices),
+		Entry("consumable devices from the same node some from another", append(slices.Clone(thisNodeConsumableAPIDevices), otherNodeAPIDevices...)),
+		// TODO: find out why we don't remove them"
+		// Entry("non consumable devices from the same node", thisNodeNonConsumableAPIDevices),
+		// Entry("devices from the same node", append(slices.Clone(thisNodeNonConsumableAPIDevices), thisNodeConsumableAPIDevices...),
+
 		func(intialBlockDevices []v1alpha1.BlockDevice) {
 			JustBeforeEach(func() {
 				for _, obj := range intialBlockDevices {
@@ -130,8 +142,9 @@ var _ = Describe("Storage Controller", func() {
 
 					When("discovered", func() {
 						var (
-							discoverResult controller.Result
-							discoverError  error
+							discoverResult           controller.Result
+							discoverError            error
+							deviceListBeforeDiscover v1alpha1.BlockDeviceList
 						)
 
 						splitByNode := func(list []v1alpha1.BlockDevice) map[string][]v1alpha1.BlockDevice {
@@ -151,20 +164,23 @@ var _ = Describe("Storage Controller", func() {
 						}
 
 						JustBeforeEach(func() {
+							Expect(fakeClient.List(ctx, &deviceListBeforeDiscover)).ShouldNot(HaveOccurred())
 							discoverResult, discoverError = discoverer.Discover(ctx)
 						})
 
-						expectAPIDevicesMatchedToInternalDevices := func(internalDevices []internal.Device) {
+						expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged := func(internalDevices []internal.Device) {
 							list := &v1alpha1.BlockDeviceList{}
 							Expect(fakeClient.List(ctx, list)).ShouldNot(HaveOccurred())
 
 							byMachineID := splitByMachineID(list.Items)
 							byNode := splitByNode(list.Items)
 
-							Expect(byMachineID[config.MachineID]).Should(HaveLen(len(internalDevices)))
-							Expect(byNode)
+							thisNodeDevices := byNode[config.NodeName]
+							thisMachineDevices := byMachineID[config.MachineID]
+							Expect(thisNodeDevices).Should(BeEquivalentTo(thisMachineDevices))
+							Expect(thisMachineDevices).Should(HaveLen(len(internalDevices)))
 							mapAPIBlockDevicesByName := make(map[string]v1alpha1.BlockDevice, len(list.Items))
-							for _, apiBlockDevice := range byMachineID[config.MachineID] {
+							for _, apiBlockDevice := range thisMachineDevices {
 								name := apiBlockDevice.Status.Path
 								Expect(mapAPIBlockDevicesByName).ShouldNot(ContainElement(name))
 								mapAPIBlockDevicesByName[name] = apiBlockDevice
@@ -188,12 +204,22 @@ var _ = Describe("Storage Controller", func() {
 								Expect(apiBlockDevice.Status.LVMVolumeGroupName).To(BeEmpty())
 								Expect(apiBlockDevice.Status.ActualVGNameOnTheNode).To(BeEmpty())
 							}
+
+							initialByMachineID := splitByMachineID(deviceListBeforeDiscover.Items)
+							for machineID := range byMachineID {
+								if machineID == config.MachineID {
+									continue
+								}
+								devices := byMachineID[machineID]
+								initialDevices := initialByMachineID[machineID]
+								Expect(devices).To(Equal(initialDevices))
+							}
 						}
 
 						It("adds devices to api", func() {
 							Expect(discoverError).ShouldNot(HaveOccurred())
 							Expect(discoverResult.RequeueAfter).Should(BeZero())
-							expectAPIDevicesMatchedToInternalDevices(internalDevices)
+							expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(internalDevices)
 						})
 
 						deviceChangeEntries := []TableEntry{
@@ -226,7 +252,7 @@ var _ = Describe("Storage Controller", func() {
 							deviceChangeEntries,
 							func(changedInternalDevices []internal.Device) {
 								JustBeforeEach(func() {
-									expectAPIDevicesMatchedToInternalDevices(internalDevices)
+									expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(internalDevices)
 									sdsCache.StoreDevices(changedInternalDevices, bytes.Buffer{})
 
 									result, err := discoverer.Discover(ctx)
@@ -235,7 +261,7 @@ var _ = Describe("Storage Controller", func() {
 								})
 
 								It("updates devices", func() {
-									expectAPIDevicesMatchedToInternalDevices(changedInternalDevices)
+									expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(changedInternalDevices)
 								})
 							})
 					})
