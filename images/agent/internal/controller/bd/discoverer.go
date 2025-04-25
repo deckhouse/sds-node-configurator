@@ -99,14 +99,12 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 
 	d.log.Debug("[RunBlockDeviceController] Getting block device filters")
 	selector, err := d.blockDeviceFilterClient.GetAPIBlockDeviceFilters(ctx, DiscovererName)
-
-	deviceMatchesSelector := func(blockDevice *v1alpha1.BlockDevice) bool {
-		return selector.Matches(labels.Set(blockDevice.Labels))
-	}
-
 	if err != nil {
 		d.log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDeviceFilters")
 		return true
+	}
+	deviceMatchesSelector := func(blockDevice *v1alpha1.BlockDevice) bool {
+		return selector.Matches(labels.Set(blockDevice.Labels))
 	}
 
 	apiBlockDevices, err := d.bdCl.GetAPIBlockDevices(ctx, DiscovererName, nil)

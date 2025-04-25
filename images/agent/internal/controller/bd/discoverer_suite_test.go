@@ -97,7 +97,7 @@ var _ = Describe("Storage Controller", func() {
 		Entry("only other Node and machineID devices", otherNodeAPIDevices),
 		Entry("consumable devices from the same node", thisNodeConsumableAPIDevices),
 		Entry("consumable devices from the same node some from another", append(slices.Clone(thisNodeConsumableAPIDevices), otherNodeAPIDevices...)),
-		// TODO: find out if we should remove them or why not
+		// TODO: add proper case for these. We don't remove non-consumable device to keep recourse for tracking and history
 		// Entry("non consumable devices from the same node", thisNodeNonConsumableAPIDevices),
 		// Entry("devices from the same node", append(slices.Clone(thisNodeNonConsumableAPIDevices), thisNodeConsumableAPIDevices...),
 
@@ -273,34 +273,36 @@ var _ = Describe("Storage Controller", func() {
 								Entry("all devices removed", []internal.Device{}),
 							}
 
-							if len(remainingInternalDevices) > 1 {
-								for i := range remainingInternalDevices {
-									newDevices := slices.Delete(slices.Clone(remainingInternalDevices), i, i+1)
-									Expect(newDevices).Should(HaveLen(len(remainingInternalDevices) - 1))
-									deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v is removed", i), newDevices))
-								}
+							for i := range remainingInternalDevices {
+								newDevices := slices.Delete(slices.Clone(remainingInternalDevices), i, i+1)
+								Expect(newDevices).Should(HaveLen(len(remainingInternalDevices) - 1))
+								deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v is removed", i), newDevices))
 							}
 
-							if len(remainingInternalDevices) > 0 {
-								for i := range remainingInternalDevices {
-									newDevices := slices.Replace(slices.Clone(remainingInternalDevices), i, i+1, internal.Device{
-										Name:   "testDeviceNameNew",
-										Model:  "very good-modelNew",
-										Serial: "testSerialNew",
-										Wwn:    "testWWNNew",
-										Type:   "testTypeNew",
-										Size:   resource.MustParse("10G"),
-									})
-									deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v is replaced", i), newDevices))
-								}
+							for i := range remainingInternalDevices {
+								newDevices := slices.Replace(slices.Clone(remainingInternalDevices), i, i+1, internal.Device{
+									Name:   "testDeviceNameNew",
+									Model:  "very good-modelNew",
+									Serial: "testSerialNew",
+									Wwn:    "testWWNNew",
+									Type:   "testTypeNew",
+									Size:   resource.MustParse("10G"),
+								})
+								deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v is replaced", i), newDevices))
 							}
 
-							DescribeTableSubtree("devices has changed",
+							for i := range remainingInternalDevices {
+								newDevices := slices.Clone(remainingInternalDevices)
+								newDevices[i].Size = resource.MustParse("3G")
+								deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v size has changed", i), newDevices))
+							}
+
+							DescribeTableSubtree("changed",
 								deviceChangeEntries,
-								func(changedInternalDevices []internal.Device) {
+								func(updatedInternalDevices []internal.Device) {
 									JustBeforeEach(func() {
 										expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(internalDevices)
-										sdsCache.StoreDevices(changedInternalDevices, bytes.Buffer{})
+										sdsCache.StoreDevices(updatedInternalDevices, bytes.Buffer{})
 
 										result, err := discoverer.Discover(ctx)
 										Expect(err).ShouldNot(HaveOccurred())
@@ -308,7 +310,7 @@ var _ = Describe("Storage Controller", func() {
 									})
 
 									It("updates devices", func() {
-										expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(changedInternalDevices)
+										expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(updatedInternalDevices)
 									})
 								})
 						})
