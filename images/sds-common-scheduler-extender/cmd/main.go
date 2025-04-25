@@ -166,7 +166,7 @@ func subMain(ctx context.Context) error {
 	}
 
 	сache := cache.NewCache(log)
-	cacheMrg := cache.NewCacheManager(сache, &sync.Mutex{}, log)
+	cacheMrg := cache.NewCacheManager(сache, &sync.Mutex{}, mgr, log)
 	log.Info("[subMain] scheduler cache manager initialized")
 
 	go cacheMrg.RunCleaner(ctx, time.Duration(config.CachePVCCheckInterval))

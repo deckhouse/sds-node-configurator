@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	nameSpace     = "d8-sds-replicated-volume"
+	nameSpace     = "d8-sds-node-configurator"
 	configMapName = "sheduler-extender-cache"
 )
 
