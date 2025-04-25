@@ -34,8 +34,8 @@ const (
 	defaultDivisor                = 1
 	defaultListenAddr             = ":8000"
 	defaultCacheSize              = 10
-	defaultcertFile               = "/etc/sds-local-volume-scheduler-extender/certs/tls.crt"
-	defaultkeyFile                = "/etc/sds-local-volume-scheduler-extender/certs/tls.key"
+	defaultcertFile               = "/etc/sds-common-scheduler-extender/certs/tls.crt"
+	defaultkeyFile                = "/etc/sds-common-scheduler-extender/certs/tls.key"
 	defaultConfigMapUpdateTimeout = 5
 	defaultCacheCheckInterval     = 1
 	defaultCachePVCTTL            = 3600
