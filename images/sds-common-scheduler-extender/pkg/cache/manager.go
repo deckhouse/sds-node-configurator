@@ -26,15 +26,17 @@ const (
 type CacheManager struct {
 	cache     *Cache
 	mu        *sync.Mutex
-	log       logger.Logger
-	mrg       manager.Manager
+	log       *logger.Logger
+	mrg       *manager.Manager
 	isUpdated bool
 }
 
-func NewCacheManager(c *Cache, mu *sync.Mutex, log *logger.Logger) *CacheManager {
+func NewCacheManager(c *Cache, mu *sync.Mutex, mrg *manager.Manager, log *logger.Logger) *CacheManager {
 	return &CacheManager{
 		cache: c,
 		mu:    mu,
+		mrg:   mrg,
+		log:   log,
 	}
 }
 
