@@ -66,7 +66,9 @@ func (c *Cache) String() string {
 	return string(bytes)
 }
 
-func (c *Cache) clearBoundExpiredPVC(pvcTTL time.Duration) {
+func (c *Cache) clearBoundExpiredPVC(pvcTTL time.Duration) int {
+	deletedPVCs := 0
+
 	for lvgName := range c.storage.Lvgs {
 		pvcs, err := c.GetAllPVCForLVG(lvgName)
 		if err != nil {
@@ -83,12 +85,15 @@ func (c *Cache) clearBoundExpiredPVC(pvcTTL time.Duration) {
 			if time.Since(pvc.CreationTimestamp.Time) > pvcTTL {
 				c.log.Warning(fmt.Sprintf("[clearBoundExpiredPVC] PVC %s is in a Bound state and expired, remove it from the cache", pvc.Name))
 				c.RemovePVCFromTheCache(pvc)
+				deletedPVCs++
 			} else {
 				c.log.Trace(fmt.Sprintf("[clearBoundExpiredPVC] PVC %s is in a Bound state but not expired yet.", pvc.Name))
 			}
 		}
 	}
+
 	c.log.Debug("[clearBoundExpiredPVC] finished the expired PVC clearing")
+	return deletedPVCs
 }
 
 func (c *Cache) GetAllPVCForLVG(lvgName string) ([]*v1.PersistentVolumeClaim, error) {
