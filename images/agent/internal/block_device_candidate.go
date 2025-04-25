@@ -108,7 +108,7 @@ func (candidate *BlockDeviceCandidate) asAPIBlockDeviceStatus() v1alpha1.BlockDe
 	}
 }
 
-func (candidate *BlockDeviceCandidate) AsAPIBlockDevice() v1alpha1.BlockDevice {
+func (candidate BlockDeviceCandidate) AsAPIBlockDevice() v1alpha1.BlockDevice {
 	blockDevice := v1alpha1.BlockDevice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: candidate.Name,
