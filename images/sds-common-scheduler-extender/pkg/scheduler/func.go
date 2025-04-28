@@ -3,10 +3,12 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
+
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
-	"sync"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -182,30 +184,64 @@ func getNodeWithLvmVgsMap(ctx context.Context, cl client.Client) (map[string][]*
 }
 
 func getDRBDResourceMap(ctx context.Context, cl client.Client) (map[string]*srv.DRBDResource, error) {
-	drbdList := &srv.DRBDResourceList{}
-	err := cl.List(ctx, drbdList)
+	// TODO
+	// drbdList := &srv.DRBDResourceList{}
+	// err := cl.List(ctx, drbdList)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// drbdMap := make(map[string]*srv.DRBDResource, len(drbdList.Items))
+	// for _, drbd := range drbdList.Items {
+	// 	drbdMap[drbd.Name] = &drbd
+	// }
+
+	pvcList := &corev1.PersistentVolumeClaimList{}
+	err := cl.List(ctx, pvcList)
 	if err != nil {
 		return nil, err
 	}
 
-	drbdMap := make(map[string]*srv.DRBDResource, len(drbdList.Items))
-	for _, drbd := range drbdList.Items {
-		drbdMap[drbd.Name] = &drbd
+	drbdMap := map[string]*srv.DRBDResource{}
+	for _, pvc := range pvcList.Items {
+		if strings.HasPrefix(*pvc.Spec.StorageClassName, "replicated") || strings.HasPrefix(*pvc.Spec.StorageClassName, "local") {
+			drbdMap[pvc.Name] = &srv.DRBDResource{
+				Spec: srv.DRBDResourceSpec{
+					Peers: map[string]srv.Peer{
+						"v-voytenok-worker-0": srv.Peer{
+							Diskless: false,
+						},
+						"v-voytenok-worker-1": srv.Peer{
+							Diskless: false,
+						},
+						"v-voytenok-worker-2": srv.Peer{
+							Diskless: false,
+						},
+					},
+				},
+			}
+		}
 	}
-
 	return drbdMap, nil
 }
 
 func getDRBDNodesMap(ctx context.Context, cl client.Client) (map[string]*srv.DRBDNode, error) {
-	drbdNodes := &srv.DRBDNodeList{}
-	err := cl.List(ctx, drbdNodes)
-	if err != nil {
-		return nil, err
-	}
+	// TODO remove when there is a controller for DRBDNodes
+	// drbdNodes := &srv.DRBDNodeList{}
+	// err := cl.List(ctx, drbdNodes)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	drbdNodesMap := make(map[string]*srv.DRBDNode, len(drbdNodes.Items))
-	for _, drbdNode := range drbdNodes.Items {
-		drbdNodesMap[drbdNode.Name] = &drbdNode
+	// drbdNodesMap := make(map[string]*srv.DRBDNode, len(drbdNodes.Items))
+	// for _, drbdNode := range drbdNodes.Items {
+	// 	drbdNodesMap[drbdNode.Name] = &drbdNode
+	// }
+
+	drbdNodesMap := map[string]*srv.DRBDNode{
+		"v-voytenok-worker-0": &srv.DRBDNode{},
+		"v-voytenok-worker-1": &srv.DRBDNode{},
+		"v-voytenok-worker-2": &srv.DRBDNode{},
 	}
 
 	return drbdNodesMap, nil
