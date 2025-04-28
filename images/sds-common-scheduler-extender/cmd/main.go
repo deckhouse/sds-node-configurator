@@ -40,7 +40,7 @@ const (
 	defaultCacheCheckInterval     = 1
 	defaultCachePVCTTL            = 3600
 	defaultCachePVCCheckInterval  = 3600
-	defaultLogLevel               = "2"
+	defaultLogLevel               = "3"
 )
 
 type Config struct {
