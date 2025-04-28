@@ -65,7 +65,7 @@ func (c *BlockDeviceFilterClient) GetAPIBlockDeviceFilters(
 		}
 
 		requirements, _ := selector.Requirements()
-		result.Add(requirements...)
+		result = result.Add(requirements...)
 	}
 
 	return result, nil

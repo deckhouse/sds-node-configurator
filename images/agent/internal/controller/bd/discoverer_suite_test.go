@@ -39,7 +39,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
 )
 
-var _ = Describe("Storage Controller", func() {
+var _ = Describe("Discoverer", func() {
 	var ctx context.Context
 	var metrics monitoring.Metrics
 	var fakeClient client.WithWatch
@@ -142,7 +142,7 @@ var _ = Describe("Storage Controller", func() {
 					})
 
 					filterEntries := []TableEntry{
-						Entry("no filters", []metav1.LabelSelector{}, []internal.Device{}),
+						Entry("no filters", []metav1.LabelSelector{}, internalDevices),
 					}
 
 					for i, device := range internalDevices {
@@ -266,7 +266,7 @@ var _ = Describe("Storage Controller", func() {
 							It("adds devices to api", func() {
 								Expect(discoverError).ShouldNot(HaveOccurred())
 								Expect(discoverResult.RequeueAfter).Should(BeZero())
-								expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(internalDevices)
+								expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(remainingInternalDevices)
 							})
 
 							deviceChangeEntries := []TableEntry{
@@ -297,11 +297,11 @@ var _ = Describe("Storage Controller", func() {
 								deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v size has changed", i), newDevices))
 							}
 
-							DescribeTableSubtree("changed",
+							DescribeTableSubtree("internal device list has changed",
 								deviceChangeEntries,
 								func(updatedInternalDevices []internal.Device) {
 									JustBeforeEach(func() {
-										expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(internalDevices)
+										expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(remainingInternalDevices)
 										sdsCache.StoreDevices(updatedInternalDevices, bytes.Buffer{})
 
 										result, err := discoverer.Discover(ctx)
@@ -313,6 +313,88 @@ var _ = Describe("Storage Controller", func() {
 										expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(updatedInternalDevices)
 									})
 								})
+
+							filterChangeEntries := []TableEntry{}
+							for i, device := range remainingInternalDevices {
+								newRemainingDevices := slices.Delete(slices.Clone(remainingInternalDevices), i, i+1)
+								selectorsWithWWN := slices.Clone(selectors)
+								selectorsWithWWN = append(selectorsWithWWN, metav1.LabelSelector{
+									MatchExpressions: []metav1.LabelSelectorRequirement{
+										{
+											Key:      internal.BlockDeviceWWNLabelKey,
+											Operator: metav1.LabelSelectorOpNotIn,
+											Values:   []string{device.Wwn},
+										},
+									},
+								})
+								filterChangeEntries = append(filterChangeEntries, Entry(
+									fmt.Sprintf("device %v filtered out by WWN", i), selectorsWithWWN, newRemainingDevices))
+
+								selectorsWithSerial := slices.Clone(selectors)
+								selectorsWithSerial = append(selectorsWithSerial, metav1.LabelSelector{
+									MatchExpressions: []metav1.LabelSelectorRequirement{
+										{
+											Key:      internal.BlockDeviceSerialLabelKey,
+											Operator: metav1.LabelSelectorOpNotIn,
+											Values:   []string{device.Serial},
+										},
+									},
+								})
+								filterChangeEntries = append(filterChangeEntries, Entry(
+									fmt.Sprintf("device %v filtered out by Serial", i), selectorsWithSerial, newRemainingDevices))
+							}
+
+							DescribeTableSubtree("device filtered out", filterChangeEntries, func(newLabelSelectors []metav1.LabelSelector, newRemainingDevices []internal.Device) {
+								JustBeforeEach(func() {
+									Expect(discoverError).ShouldNot(HaveOccurred())
+									Expect(discoverResult.RequeueAfter).Should(BeZero())
+									expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(remainingInternalDevices)
+
+									Expect(fakeClient.DeleteAllOf(ctx, &v1alpha1.BlockDeviceFilter{})).ShouldNot(HaveOccurred())
+									for i, selector := range newLabelSelectors {
+										Expect(fakeClient.Create(ctx, &v1alpha1.BlockDeviceFilter{
+											ObjectMeta: metav1.ObjectMeta{
+												Name: fmt.Sprintf("block-device-filter-%v", i),
+											},
+											Spec: v1alpha1.BlockDeviceFilterSpec{
+												BlockDeviceSelector: &selector,
+											},
+										})).ShouldNot(HaveOccurred())
+									}
+
+									result, err := discoverer.Discover(ctx)
+									Expect(err).ShouldNot(HaveOccurred())
+									Expect(result.RequeueAfter).Should(BeZero())
+								})
+
+								It("Removes the device", func() {
+									expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(newRemainingDevices)
+								})
+
+								When("filters are returned to previous state", func() {
+									JustBeforeEach(func() {
+										Expect(fakeClient.DeleteAllOf(ctx, &v1alpha1.BlockDeviceFilter{})).ShouldNot(HaveOccurred())
+										for i, selector := range selectors {
+											Expect(fakeClient.Create(ctx, &v1alpha1.BlockDeviceFilter{
+												ObjectMeta: metav1.ObjectMeta{
+													Name: fmt.Sprintf("block-device-filter-%v", i),
+												},
+												Spec: v1alpha1.BlockDeviceFilterSpec{
+													BlockDeviceSelector: &selector,
+												},
+											})).ShouldNot(HaveOccurred())
+										}
+
+										result, err := discoverer.Discover(ctx)
+										Expect(err).ShouldNot(HaveOccurred())
+										Expect(result.RequeueAfter).Should(BeZero())
+									})
+
+									It("device is back", func() {
+										expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(remainingInternalDevices)
+									})
+								})
+							})
 						})
 					})
 				})
