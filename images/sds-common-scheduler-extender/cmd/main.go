@@ -188,6 +188,12 @@ func subMain(ctx context.Context) error {
 	}
 	log.Info(fmt.Sprintf("[subMain] successfully ran %s controller", controller.PVCWatcherCacheCtrlName))
 
+	if err = controller.RunLVGWatcherCacheController(mgr, *log, cacheMrg); err != nil {
+		log.Error(err, fmt.Sprintf("[subMain] unable to run %s controller", controller.LVGWatcherCacheCtrlName))
+		return err
+	}
+	log.Info(fmt.Sprintf("[subMain] successfully ran %s controller", controller.LVGWatcherCacheCtrlName))
+
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "[subMain] unable to mgr.AddHealthzCheck")
 		return err

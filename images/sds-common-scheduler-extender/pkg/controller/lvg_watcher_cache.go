@@ -27,7 +27,7 @@ func RunLVGWatcherCacheController(
 	mgr manager.Manager,
 	log logger.Logger,
 	cacheMgr *cache.CacheManager,
-) (controller.Controller, error) {
+) error {
 	log.Info("[RunLVGWatcherCacheController] starts the work")
 
 	c, err := controller.New(LVGWatcherCacheCtrlName, mgr, controller.Options{
@@ -37,7 +37,7 @@ func RunLVGWatcherCacheController(
 	})
 	if err != nil {
 		log.Error(err, "[RunCacheWatcherController] unable to create a controller")
-		return nil, err
+		return err
 	}
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &snc.LVMVolumeGroup{}, handler.TypedFuncs[*snc.LVMVolumeGroup, reconcile.Request]{
@@ -136,10 +136,10 @@ func RunLVGWatcherCacheController(
 	)
 	if err != nil {
 		log.Error(err, "[RunCacheWatcherController] unable to watch the events")
-		return nil, err
+		return err
 	}
 
-	return c, nil
+	return nil
 }
 
 func shouldReconcileLVG(oldLVG, newLVG *snc.LVMVolumeGroup) bool {
