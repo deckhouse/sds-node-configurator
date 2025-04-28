@@ -57,7 +57,7 @@ func (c *BlockDeviceFilterClient) GetAPIBlockDeviceFilters(
 		return nil, err
 	}
 
-	result := labels.NewSelector()
+	resultRequirements := make(labels.Requirements, 0, len(list.Items))
 	for _, item := range list.Items {
 		selector, err := metav1.LabelSelectorAsSelector(item.Spec.BlockDeviceSelector)
 		if err != nil {
@@ -65,8 +65,8 @@ func (c *BlockDeviceFilterClient) GetAPIBlockDeviceFilters(
 		}
 
 		requirements, _ := selector.Requirements()
-		result = result.Add(requirements...)
+		resultRequirements = append(resultRequirements, requirements...)
 	}
 
-	return result, nil
+	return labels.NewSelector().Add(resultRequirements...), nil
 }
