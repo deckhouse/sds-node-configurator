@@ -55,3 +55,29 @@ subjects:
     name: sds-common-scheduler-extender
     namespace: d8-{{ .Chart.Name }}
 {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:rsc-reader
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+rules:
+  - apiGroups: ["storage.deckhouse.io"]
+    resources: ["replicatedstorageclasses"]
+    verbs: ["get", "update", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:rsc-reader
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:rsc-reader
+subjects:
+  - kind: ServiceAccount
+    name: sds-common-scheduler-extender
+    namespace: d8-{{ .Chart.Name }}

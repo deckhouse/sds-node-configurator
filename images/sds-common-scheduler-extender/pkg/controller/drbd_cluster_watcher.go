@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"fmt"
+
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 
@@ -34,7 +36,7 @@ func RunDRBDClusterWatcher(
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &srv.DRBDCluster{}, handler.TypedFuncs[*srv.DRBDCluster, reconcile.Request]{
 		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*srv.DRBDCluster], _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			
+			log.Info(fmt.Sprintf("DRBDCluster %s updated"), e.ObjectNew.Name)
 		},
 	}))
 
