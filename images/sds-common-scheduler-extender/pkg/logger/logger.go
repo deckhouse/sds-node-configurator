@@ -21,6 +21,8 @@ import (
 	"k8s.io/klog/v2/textlogger"
 )
 
+type Verbosity string
+
 const (
 	ErrorLevel   Verbosity = "0"
 	WarningLevel Verbosity = "1"
@@ -36,10 +38,6 @@ const (
 	debugLvl
 	traceLvl
 	cacheLvl
-)
-
-type (
-	Verbosity string
 )
 
 type Logger struct {
