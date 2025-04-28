@@ -116,6 +116,7 @@ jobs:
       - name: Download base images and auth prepare
         run: |
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
+          sed -i 's/--final-repo//' base_images.yml
           cat base_images.yml
 
       - uses: deckhouse/modules-actions/setup@v2
