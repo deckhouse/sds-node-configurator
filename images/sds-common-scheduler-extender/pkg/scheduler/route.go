@@ -2,7 +2,9 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 
@@ -20,10 +22,14 @@ type scheduler struct {
 
 func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
-	case "/filter":
+	case "scheduler/filter":
 		s.filter(w, r)
-	case "/prioritize":
+	case "scheduler/prioritize":
 		s.prioritize(w, r)
+	case "/status":
+		s.status(w, r)
+	default:
+		http.Error(w, "not found", http.StatusNotFound)
 	}
 }
 
@@ -35,4 +41,12 @@ func NewHandler(ctx context.Context, cl client.Client, log logger.Logger, lvgCac
 		ctx:            ctx,
 		cache:          lvgCache,
 	}, nil
+}
+
+func (s *scheduler) status(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, err := w.Write([]byte("ok"))
+	if err != nil {
+		fmt.Printf("error occurs on status route, err: %s\n", err.Error())
+	}
 }
