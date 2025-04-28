@@ -92,7 +92,7 @@ var _ = Describe("Discoverer", func() {
 		}.AsAPIBlockDevice(),
 	}
 
-	DescribeTableSubtree("initial devices",
+	DescribeTableSubtree("with initial devices",
 		Entry("no devices", []v1alpha1.BlockDevice{}),
 		Entry("only other Node and machineID devices", otherNodeAPIDevices),
 		Entry("consumable devices from the same node", thisNodeConsumableAPIDevices),
@@ -108,7 +108,7 @@ var _ = Describe("Discoverer", func() {
 				}
 			})
 
-			DescribeTableSubtree("initially appears",
+			DescribeTableSubtree("when initially appears",
 				Entry("no devices", []internal.Device{}),
 				Entry("one device", []internal.Device{
 					{
@@ -173,7 +173,7 @@ var _ = Describe("Discoverer", func() {
 							}, remainingDevices))
 					}
 
-					DescribeTableSubtree("block device filters", filterEntries, func(selectors []metav1.LabelSelector, remainingInternalDevices []internal.Device) {
+					DescribeTableSubtree("with block device filters", filterEntries, func(selectors []metav1.LabelSelector, remainingInternalDevices []internal.Device) {
 						JustBeforeEach(func() {
 							for i, selector := range selectors {
 								Expect(fakeClient.Create(ctx, &v1alpha1.BlockDeviceFilter{
@@ -297,7 +297,7 @@ var _ = Describe("Discoverer", func() {
 								deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v size has changed", i), newDevices))
 							}
 
-							DescribeTableSubtree("internal device list has changed",
+							DescribeTableSubtree("when internal device list has changed",
 								deviceChangeEntries,
 								func(updatedInternalDevices []internal.Device) {
 									JustBeforeEach(func() {
@@ -344,7 +344,7 @@ var _ = Describe("Discoverer", func() {
 									fmt.Sprintf("device %v filtered out by Serial", i), selectorsWithSerial, newRemainingDevices))
 							}
 
-							DescribeTableSubtree("device filtered out", filterChangeEntries, func(newLabelSelectors []metav1.LabelSelector, newRemainingDevices []internal.Device) {
+							DescribeTableSubtree("when device filtered out", filterChangeEntries, func(newLabelSelectors []metav1.LabelSelector, newRemainingDevices []internal.Device) {
 								JustBeforeEach(func() {
 									Expect(discoverError).ShouldNot(HaveOccurred())
 									Expect(discoverResult.RequeueAfter).Should(BeZero())
