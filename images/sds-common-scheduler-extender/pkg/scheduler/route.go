@@ -21,6 +21,7 @@ type scheduler struct {
 }
 
 func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("=URL= %s \n", r.URL.Path)
 	switch r.URL.Path {
 	case "/scheduler/filter":
 		s.filter(w, r)

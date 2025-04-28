@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
@@ -190,6 +191,12 @@ func scoreNodes(
 			pvcReq := pvcRequests[pvc.Name]
 			lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
 
+			b, _ := json.MarshalIndent(lvgsFromNode, "", "  ")
+			fmt.Println("=lvgsFromNode= %s\n", string(b))
+
+			bb, _ := json.MarshalIndent(lvgsFromSC, "", "  ")
+			fmt.Println("=lvgsFromSC= %s\n", string(bb))
+
 			commonLVG := findMatchedLVGs(lvgsFromNode, lvgsFromSC)
 			if commonLVG == nil {
 				log.Warning("unable to match Storage Class's LVMVolumeGroup with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
@@ -269,7 +276,7 @@ func getFreeSpaceLeftAsPercent(freeSpaceBytes, requestedSpace, totalSpace int64)
 	return int64(percent)
 }
 
-// TODO change divisor to multiplier +++ 
+// TODO change divisor to multiplier +++
 func getNodeScore(freeSpace int64, multiplier float64) int {
 	converted := int(math.Round(math.Log2(float64(freeSpace) * multiplier)))
 	switch {
