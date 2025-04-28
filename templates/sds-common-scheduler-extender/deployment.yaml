@@ -56,6 +56,8 @@ spec:
       app: sds-common-scheduler-extender
   template:
     metadata:
+      annotations:
+        checksum/ca: {{ .Values.sdsNodeConfigurator.internal.customSchedulerExtenderCert.ca | sha256sum | quote }}
       labels:
         app: sds-common-scheduler-extender
     spec:
