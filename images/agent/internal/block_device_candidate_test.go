@@ -123,30 +123,26 @@ var _ = Describe("Block device candidate", func() {
 			candidate.MachineID = "testMACHINE"
 		})
 
-		ItHasAllFieldsMatched := func() {
-			It("has correct field values", func() {
-				Expect(blockDevice.Status.Type).Should(BeEquivalentTo(candidate.Type))
-				Expect(blockDevice.Status.FsType).Should(BeEquivalentTo(candidate.FSType))
-				Expect(blockDevice.Status.NodeName).Should(BeEquivalentTo(candidate.NodeName))
-				Expect(blockDevice.Status.Consumable).Should(BeEquivalentTo(candidate.Consumable))
-				Expect(blockDevice.Status.PVUuid).Should(BeEquivalentTo(candidate.PVUuid))
-				Expect(blockDevice.Status.VGUuid).Should(BeEquivalentTo(candidate.VGUuid))
-				Expect(blockDevice.Status.LVMVolumeGroupName).Should(BeEquivalentTo(candidate.LVMVolumeGroupName))
-				Expect(blockDevice.Status.ActualVGNameOnTheNode).Should(BeEquivalentTo(candidate.ActualVGNameOnTheNode))
-				Expect(blockDevice.Status.Wwn).Should(BeEquivalentTo(candidate.Wwn))
-				Expect(blockDevice.Status.Serial).Should(BeEquivalentTo(candidate.Serial))
-				Expect(blockDevice.Status.Path).Should(BeEquivalentTo(candidate.Path))
-				Expect(blockDevice.Status.Size.Format).Should(BeEquivalentTo(resource.BinarySI))
-				Expect(blockDevice.Status.Size.Value()).Should(BeEquivalentTo(candidate.Size.Value()))
-				Expect(blockDevice.Status.Model).Should(BeEquivalentTo(candidate.Model))
-				Expect(blockDevice.Status.MachineID).Should(BeEquivalentTo(candidate.MachineID))
-			})
+		hasAllFieldsMatched := func() {
+			Expect(blockDevice.Status.Type).Should(BeEquivalentTo(candidate.Type))
+			Expect(blockDevice.Status.FsType).Should(BeEquivalentTo(candidate.FSType))
+			Expect(blockDevice.Status.NodeName).Should(BeEquivalentTo(candidate.NodeName))
+			Expect(blockDevice.Status.Consumable).Should(BeEquivalentTo(candidate.Consumable))
+			Expect(blockDevice.Status.PVUuid).Should(BeEquivalentTo(candidate.PVUuid))
+			Expect(blockDevice.Status.VGUuid).Should(BeEquivalentTo(candidate.VGUuid))
+			Expect(blockDevice.Status.LVMVolumeGroupName).Should(BeEquivalentTo(candidate.LVMVolumeGroupName))
+			Expect(blockDevice.Status.ActualVGNameOnTheNode).Should(BeEquivalentTo(candidate.ActualVGNameOnTheNode))
+			Expect(blockDevice.Status.Wwn).Should(BeEquivalentTo(candidate.Wwn))
+			Expect(blockDevice.Status.Serial).Should(BeEquivalentTo(candidate.Serial))
+			Expect(blockDevice.Status.Path).Should(BeEquivalentTo(candidate.Path))
+			Expect(blockDevice.Status.Size.Format).Should(BeEquivalentTo(resource.BinarySI))
+			Expect(blockDevice.Status.Size.Value()).Should(BeEquivalentTo(candidate.Size.Value()))
+			Expect(blockDevice.Status.Model).Should(BeEquivalentTo(candidate.Model))
+			Expect(blockDevice.Status.MachineID).Should(BeEquivalentTo(candidate.MachineID))
 		}
 
-		ItDoesNotHaveBlockDeviceDifference := func() {
-			It("does not have block device difference", func() {
-				Expect(candidate.HasBlockDeviceDiff(blockDevice)).Should(BeFalse())
-			})
+		doesNotHaveBlockDeviceDifference := func() {
+			Expect(candidate.HasBlockDeviceDiff(blockDevice)).Should(BeFalse())
 		}
 
 		t := reflect.TypeOf(candidate)
@@ -180,8 +176,8 @@ var _ = Describe("Block device candidate", func() {
 				blockDevice = candidate.AsAPIBlockDevice()
 			})
 
-			ItHasAllFieldsMatched()
-			ItDoesNotHaveBlockDeviceDifference()
+			It("has correct field values", hasAllFieldsMatched)
+			It("does not have block device difference", doesNotHaveBlockDeviceDifference)
 		})
 
 		When("updating api block device", func() {
@@ -231,8 +227,8 @@ var _ = Describe("Block device candidate", func() {
 				Expect(blockDevice.Labels).To(BeEquivalentTo(expectedLabels))
 			})
 
-			ItDoesNotHaveBlockDeviceDifference()
-			ItHasAllFieldsMatched()
+			It("does not have block device difference", doesNotHaveBlockDeviceDifference)
+			It("has correct field values", hasAllFieldsMatched)
 
 			When("it has extra labels", func() {
 				BeforeEach(func() {

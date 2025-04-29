@@ -141,240 +141,222 @@ var _ = Describe("Discoverer", func() {
 						sdsCache.StoreDevices(internalDevices, bytes.Buffer{})
 					})
 
-					filterEntries := []TableEntry{
-						Entry("no filters", []metav1.LabelSelector{}, internalDevices),
-					}
+					DescribeTableSubtree("with block device filters",
+						func() []TableEntry {
+							filterEntries := []TableEntry{
+								Entry("no filters", []metav1.LabelSelector{}, internalDevices),
+							}
 
-					for i, device := range internalDevices {
-						remainingDevices := slices.Delete(slices.Clone(internalDevices), i, i+1)
-						filterEntries = append(filterEntries,
-							Entry(fmt.Sprintf("device %v filtered by WWN", i), []metav1.LabelSelector{
-								{
-									MatchExpressions: []metav1.LabelSelectorRequirement{
+							for i, device := range internalDevices {
+								remainingDevices := slices.Delete(slices.Clone(internalDevices), i, i+1)
+								filterEntries = append(filterEntries,
+									Entry(fmt.Sprintf("device %v filtered by WWN", i), []metav1.LabelSelector{
 										{
-											Key:      internal.BlockDeviceWWNLabelKey,
-											Operator: metav1.LabelSelectorOpNotIn,
-											Values:   []string{device.Wwn},
+											MatchExpressions: []metav1.LabelSelectorRequirement{
+												{
+													Key:      internal.BlockDeviceWWNLabelKey,
+													Operator: metav1.LabelSelectorOpNotIn,
+													Values:   []string{device.Wwn},
+												},
+											},
 										},
-									},
-								},
-							}, remainingDevices))
-						filterEntries = append(filterEntries,
-							Entry(fmt.Sprintf("device %v filtered by Serial", i), []metav1.LabelSelector{
-								{
-									MatchExpressions: []metav1.LabelSelectorRequirement{
+									}, remainingDevices))
+								filterEntries = append(filterEntries,
+									Entry(fmt.Sprintf("device %v filtered by Serial", i), []metav1.LabelSelector{
 										{
-											Key:      internal.BlockDeviceSerialLabelKey,
-											Operator: metav1.LabelSelectorOpNotIn,
-											Values:   []string{device.Serial},
+											MatchExpressions: []metav1.LabelSelectorRequirement{
+												{
+													Key:      internal.BlockDeviceSerialLabelKey,
+													Operator: metav1.LabelSelectorOpNotIn,
+													Values:   []string{device.Serial},
+												},
+											},
 										},
-									},
-								},
-							}, remainingDevices))
-					}
-
-					DescribeTableSubtree("with block device filters", filterEntries, func(selectors []metav1.LabelSelector, remainingInternalDevices []internal.Device) {
-						JustBeforeEach(func() {
-							for i, selector := range selectors {
-								Expect(fakeClient.Create(ctx, &v1alpha1.BlockDeviceFilter{
-									ObjectMeta: metav1.ObjectMeta{
-										Name: fmt.Sprintf("block-device-filter-%v", i),
-									},
-									Spec: v1alpha1.BlockDeviceFilterSpec{
-										BlockDeviceSelector: &selector,
-									},
-								})).ShouldNot(HaveOccurred())
+									}, remainingDevices))
 							}
-						})
-
-						When("discovered", func() {
-							var (
-								discoverResult           controller.Result
-								discoverError            error
-								deviceListBeforeDiscover v1alpha1.BlockDeviceList
-							)
-
-							splitByNode := func(list []v1alpha1.BlockDevice) map[string][]v1alpha1.BlockDevice {
-								result := make(map[string][]v1alpha1.BlockDevice)
-								for _, item := range list {
-									result[item.Status.NodeName] = append(result[item.Status.NodeName], item)
-								}
-								return result
-							}
-
-							splitByMachineID := func(list []v1alpha1.BlockDevice) map[string][]v1alpha1.BlockDevice {
-								result := make(map[string][]v1alpha1.BlockDevice)
-								for _, item := range list {
-									result[item.Status.MachineID] = append(result[item.Status.MachineID], item)
-								}
-								return result
-							}
-
+							return filterEntries
+						}(),
+						func(selectors []metav1.LabelSelector, remainingInternalDevices []internal.Device) {
 							JustBeforeEach(func() {
-								Expect(fakeClient.List(ctx, &deviceListBeforeDiscover)).ShouldNot(HaveOccurred())
-								discoverResult, discoverError = discoverer.Discover(ctx)
+								for i, selector := range selectors {
+									Expect(fakeClient.Create(ctx, &v1alpha1.BlockDeviceFilter{
+										ObjectMeta: metav1.ObjectMeta{
+											Name: fmt.Sprintf("block-device-filter-%v", i),
+										},
+										Spec: v1alpha1.BlockDeviceFilterSpec{
+											BlockDeviceSelector: &selector,
+										},
+									})).ShouldNot(HaveOccurred())
+								}
 							})
 
-							expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged := func(internalDevices []internal.Device) {
-								list := &v1alpha1.BlockDeviceList{}
-								Expect(fakeClient.List(ctx, list)).ShouldNot(HaveOccurred())
+							When("discovered", func() {
+								var (
+									discoverResult           controller.Result
+									discoverError            error
+									deviceListBeforeDiscover v1alpha1.BlockDeviceList
+								)
 
-								byMachineID := splitByMachineID(list.Items)
-								byNode := splitByNode(list.Items)
-
-								thisNodeDevices := byNode[config.NodeName]
-								thisMachineDevices := byMachineID[config.MachineID]
-								Expect(thisNodeDevices).Should(BeEquivalentTo(thisMachineDevices))
-								Expect(thisMachineDevices).Should(HaveLen(len(internalDevices)))
-								mapAPIBlockDevicesByName := make(map[string]v1alpha1.BlockDevice, len(list.Items))
-								for _, apiBlockDevice := range thisMachineDevices {
-									name := apiBlockDevice.Status.Path
-									Expect(mapAPIBlockDevicesByName).ShouldNot(ContainElement(name))
-									mapAPIBlockDevicesByName[name] = apiBlockDevice
-								}
-								for _, internalDevice := range internalDevices {
-									apiBlockDevice, exists := mapAPIBlockDevicesByName[internalDevice.Name]
-									Expect(exists).Should(BeTrue())
-
-									Expect(apiBlockDevice.Status.MachineID).To(Equal(config.MachineID))
-									Expect(apiBlockDevice.Status.NodeName).To(Equal(config.NodeName))
-									Expect(apiBlockDevice.Status.Consumable).To(BeTrue())
-									Expect(apiBlockDevice.Status.Wwn).To(Equal(internalDevice.Wwn))
-									Expect(apiBlockDevice.Status.Serial).To(Equal(internalDevice.Serial))
-									Expect(apiBlockDevice.Status.Size.Value()).To(Equal(internalDevice.Size.Value()))
-									Expect(apiBlockDevice.Status.Rota).To(Equal(internalDevice.Rota))
-									Expect(apiBlockDevice.Status.Model).To(Equal(internalDevice.Model))
-									Expect(apiBlockDevice.Status.Type).To(Equal(internalDevice.Type))
-									Expect(apiBlockDevice.Status.FsType).To(Equal(internalDevice.FSType))
-									Expect(apiBlockDevice.Status.PVUuid).To(BeEmpty())
-									Expect(apiBlockDevice.Status.VGUuid).To(BeEmpty())
-									Expect(apiBlockDevice.Status.LVMVolumeGroupName).To(BeEmpty())
-									Expect(apiBlockDevice.Status.ActualVGNameOnTheNode).To(BeEmpty())
-								}
-
-								initialByMachineID := splitByMachineID(deviceListBeforeDiscover.Items)
-								for machineID := range byMachineID {
-									if machineID == config.MachineID {
-										continue
+								splitByNode := func(list []v1alpha1.BlockDevice) map[string][]v1alpha1.BlockDevice {
+									result := make(map[string][]v1alpha1.BlockDevice)
+									for _, item := range list {
+										result[item.Status.NodeName] = append(result[item.Status.NodeName], item)
 									}
-									devices := byMachineID[machineID]
-									initialDevices := initialByMachineID[machineID]
-									Expect(devices).To(Equal(initialDevices))
+									return result
 								}
-							}
 
-							It("adds devices to api", func() {
-								Expect(discoverError).ShouldNot(HaveOccurred())
-								Expect(discoverResult.RequeueAfter).Should(BeZero())
-								expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(remainingInternalDevices)
-							})
+								splitByMachineID := func(list []v1alpha1.BlockDevice) map[string][]v1alpha1.BlockDevice {
+									result := make(map[string][]v1alpha1.BlockDevice)
+									for _, item := range list {
+										result[item.Status.MachineID] = append(result[item.Status.MachineID], item)
+									}
+									return result
+								}
 
-							deviceChangeEntries := []TableEntry{
-								Entry("all devices removed", []internal.Device{}),
-							}
-
-							for i := range remainingInternalDevices {
-								newDevices := slices.Delete(slices.Clone(remainingInternalDevices), i, i+1)
-								Expect(newDevices).Should(HaveLen(len(remainingInternalDevices) - 1))
-								deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v is removed", i), newDevices))
-							}
-
-							for i := range remainingInternalDevices {
-								newDevices := slices.Replace(slices.Clone(remainingInternalDevices), i, i+1, internal.Device{
-									Name:   "testDeviceNameNew",
-									Model:  "very good-modelNew",
-									Serial: "testSerialNew",
-									Wwn:    "testWWNNew",
-									Type:   "testTypeNew",
-									Size:   resource.MustParse("10G"),
-								})
-								deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v is replaced", i), newDevices))
-							}
-
-							for i := range remainingInternalDevices {
-								newDevices := slices.Clone(remainingInternalDevices)
-								newDevices[i].Size = resource.MustParse("3G")
-								deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v size has changed", i), newDevices))
-							}
-
-							DescribeTableSubtree("when internal device list has changed",
-								deviceChangeEntries,
-								func(updatedInternalDevices []internal.Device) {
-									JustBeforeEach(func() {
-										expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(remainingInternalDevices)
-										sdsCache.StoreDevices(updatedInternalDevices, bytes.Buffer{})
-
-										result, err := discoverer.Discover(ctx)
-										Expect(err).ShouldNot(HaveOccurred())
-										Expect(result.RequeueAfter).Should(BeZero())
-									})
-
-									It("updates devices", func() {
-										expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(updatedInternalDevices)
-									})
-								})
-
-							filterChangeEntries := []TableEntry{}
-							for i, device := range remainingInternalDevices {
-								newRemainingDevices := slices.Delete(slices.Clone(remainingInternalDevices), i, i+1)
-								selectorsWithWWN := slices.Clone(selectors)
-								selectorsWithWWN = append(selectorsWithWWN, metav1.LabelSelector{
-									MatchExpressions: []metav1.LabelSelectorRequirement{
-										{
-											Key:      internal.BlockDeviceWWNLabelKey,
-											Operator: metav1.LabelSelectorOpNotIn,
-											Values:   []string{device.Wwn},
-										},
-									},
-								})
-								filterChangeEntries = append(filterChangeEntries, Entry(
-									fmt.Sprintf("device %v filtered out by WWN", i), selectorsWithWWN, newRemainingDevices))
-
-								selectorsWithSerial := slices.Clone(selectors)
-								selectorsWithSerial = append(selectorsWithSerial, metav1.LabelSelector{
-									MatchExpressions: []metav1.LabelSelectorRequirement{
-										{
-											Key:      internal.BlockDeviceSerialLabelKey,
-											Operator: metav1.LabelSelectorOpNotIn,
-											Values:   []string{device.Serial},
-										},
-									},
-								})
-								filterChangeEntries = append(filterChangeEntries, Entry(
-									fmt.Sprintf("device %v filtered out by Serial", i), selectorsWithSerial, newRemainingDevices))
-							}
-
-							DescribeTableSubtree("when device filtered out", filterChangeEntries, func(newLabelSelectors []metav1.LabelSelector, newRemainingDevices []internal.Device) {
 								JustBeforeEach(func() {
+									Expect(fakeClient.List(ctx, &deviceListBeforeDiscover)).ShouldNot(HaveOccurred())
+									discoverResult, discoverError = discoverer.Discover(ctx)
+								})
+
+								expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged := func(internalDevices []internal.Device) {
+									list := &v1alpha1.BlockDeviceList{}
+									Expect(fakeClient.List(ctx, list)).ShouldNot(HaveOccurred())
+
+									byMachineID := splitByMachineID(list.Items)
+									byNode := splitByNode(list.Items)
+
+									thisNodeDevices := byNode[config.NodeName]
+									thisMachineDevices := byMachineID[config.MachineID]
+									Expect(thisNodeDevices).Should(BeEquivalentTo(thisMachineDevices))
+									Expect(thisMachineDevices).Should(HaveLen(len(internalDevices)))
+									mapAPIBlockDevicesByName := make(map[string]v1alpha1.BlockDevice, len(list.Items))
+									for _, apiBlockDevice := range thisMachineDevices {
+										name := apiBlockDevice.Status.Path
+										Expect(mapAPIBlockDevicesByName).ShouldNot(ContainElement(name))
+										mapAPIBlockDevicesByName[name] = apiBlockDevice
+									}
+									for _, internalDevice := range internalDevices {
+										apiBlockDevice, exists := mapAPIBlockDevicesByName[internalDevice.Name]
+										Expect(exists).Should(BeTrue())
+
+										Expect(apiBlockDevice.Status.MachineID).To(Equal(config.MachineID))
+										Expect(apiBlockDevice.Status.NodeName).To(Equal(config.NodeName))
+										Expect(apiBlockDevice.Status.Consumable).To(BeTrue())
+										Expect(apiBlockDevice.Status.Wwn).To(Equal(internalDevice.Wwn))
+										Expect(apiBlockDevice.Status.Serial).To(Equal(internalDevice.Serial))
+										Expect(apiBlockDevice.Status.Size.Value()).To(Equal(internalDevice.Size.Value()))
+										Expect(apiBlockDevice.Status.Rota).To(Equal(internalDevice.Rota))
+										Expect(apiBlockDevice.Status.Model).To(Equal(internalDevice.Model))
+										Expect(apiBlockDevice.Status.Type).To(Equal(internalDevice.Type))
+										Expect(apiBlockDevice.Status.FsType).To(Equal(internalDevice.FSType))
+										Expect(apiBlockDevice.Status.PVUuid).To(BeEmpty())
+										Expect(apiBlockDevice.Status.VGUuid).To(BeEmpty())
+										Expect(apiBlockDevice.Status.LVMVolumeGroupName).To(BeEmpty())
+										Expect(apiBlockDevice.Status.ActualVGNameOnTheNode).To(BeEmpty())
+									}
+
+									initialByMachineID := splitByMachineID(deviceListBeforeDiscover.Items)
+									for machineID := range byMachineID {
+										if machineID == config.MachineID {
+											continue
+										}
+										devices := byMachineID[machineID]
+										initialDevices := initialByMachineID[machineID]
+										Expect(devices).To(Equal(initialDevices))
+									}
+								}
+
+								It("adds devices to api", func() {
 									Expect(discoverError).ShouldNot(HaveOccurred())
 									Expect(discoverResult.RequeueAfter).Should(BeZero())
 									expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(remainingInternalDevices)
+								})
 
-									Expect(fakeClient.DeleteAllOf(ctx, &v1alpha1.BlockDeviceFilter{})).ShouldNot(HaveOccurred())
-									for i, selector := range newLabelSelectors {
-										Expect(fakeClient.Create(ctx, &v1alpha1.BlockDeviceFilter{
-											ObjectMeta: metav1.ObjectMeta{
-												Name: fmt.Sprintf("block-device-filter-%v", i),
+								DescribeTableSubtree("when internal device list has changed",
+									func() []TableEntry {
+										deviceChangeEntries := []TableEntry{
+											Entry("all devices removed", []internal.Device{}),
+										}
+
+										for i := range remainingInternalDevices {
+											newDevices := slices.Delete(slices.Clone(remainingInternalDevices), i, i+1)
+											Expect(newDevices).Should(HaveLen(len(remainingInternalDevices) - 1))
+											deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v is removed", i), newDevices))
+										}
+
+										for i := range remainingInternalDevices {
+											newDevices := slices.Replace(slices.Clone(remainingInternalDevices), i, i+1, internal.Device{
+												Name:   "testDeviceNameNew",
+												Model:  "very good-modelNew",
+												Serial: "testSerialNew",
+												Wwn:    "testWWNNew",
+												Type:   "testTypeNew",
+												Size:   resource.MustParse("10G"),
+											})
+											deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v is replaced", i), newDevices))
+										}
+
+										for i := range remainingInternalDevices {
+											newDevices := slices.Clone(remainingInternalDevices)
+											newDevices[i].Size = resource.MustParse("3G")
+											deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v size has changed", i), newDevices))
+										}
+										return deviceChangeEntries
+									}(),
+									func(updatedInternalDevices []internal.Device) {
+										JustBeforeEach(func() {
+											expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(remainingInternalDevices)
+											sdsCache.StoreDevices(updatedInternalDevices, bytes.Buffer{})
+
+											result, err := discoverer.Discover(ctx)
+											Expect(err).ShouldNot(HaveOccurred())
+											Expect(result.RequeueAfter).Should(BeZero())
+										})
+
+										It("updates devices", func() {
+											expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(updatedInternalDevices)
+										})
+									})
+
+								DescribeTableSubtree("when device filtered out", func() []TableEntry {
+									filterChangeEntries := []TableEntry{}
+									for i, device := range remainingInternalDevices {
+										newRemainingDevices := slices.Delete(slices.Clone(remainingInternalDevices), i, i+1)
+										selectorsWithWWN := slices.Clone(selectors)
+										selectorsWithWWN = append(selectorsWithWWN, metav1.LabelSelector{
+											MatchExpressions: []metav1.LabelSelectorRequirement{
+												{
+													Key:      internal.BlockDeviceWWNLabelKey,
+													Operator: metav1.LabelSelectorOpNotIn,
+													Values:   []string{device.Wwn},
+												},
 											},
-											Spec: v1alpha1.BlockDeviceFilterSpec{
-												BlockDeviceSelector: &selector,
+										})
+										filterChangeEntries = append(filterChangeEntries, Entry(
+											fmt.Sprintf("device %v filtered out by WWN", i), selectorsWithWWN, newRemainingDevices))
+
+										selectorsWithSerial := slices.Clone(selectors)
+										selectorsWithSerial = append(selectorsWithSerial, metav1.LabelSelector{
+											MatchExpressions: []metav1.LabelSelectorRequirement{
+												{
+													Key:      internal.BlockDeviceSerialLabelKey,
+													Operator: metav1.LabelSelectorOpNotIn,
+													Values:   []string{device.Serial},
+												},
 											},
-										})).ShouldNot(HaveOccurred())
+										})
+										filterChangeEntries = append(filterChangeEntries, Entry(
+											fmt.Sprintf("device %v filtered out by Serial", i), selectorsWithSerial, newRemainingDevices))
 									}
-
-									result, err := discoverer.Discover(ctx)
-									Expect(err).ShouldNot(HaveOccurred())
-									Expect(result.RequeueAfter).Should(BeZero())
-								})
-
-								It("Removes the device", func() {
-									expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(newRemainingDevices)
-								})
-
-								When("filters are returned to previous state", func() {
+									return filterChangeEntries
+								}(), func(newLabelSelectors []metav1.LabelSelector, newRemainingDevices []internal.Device) {
 									JustBeforeEach(func() {
+										Expect(discoverError).ShouldNot(HaveOccurred())
+										Expect(discoverResult.RequeueAfter).Should(BeZero())
+										expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(remainingInternalDevices)
+
 										Expect(fakeClient.DeleteAllOf(ctx, &v1alpha1.BlockDeviceFilter{})).ShouldNot(HaveOccurred())
-										for i, selector := range selectors {
+										for i, selector := range newLabelSelectors {
 											Expect(fakeClient.Create(ctx, &v1alpha1.BlockDeviceFilter{
 												ObjectMeta: metav1.ObjectMeta{
 													Name: fmt.Sprintf("block-device-filter-%v", i),
@@ -390,13 +372,36 @@ var _ = Describe("Discoverer", func() {
 										Expect(result.RequeueAfter).Should(BeZero())
 									})
 
-									It("device is back", func() {
-										expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(remainingInternalDevices)
+									It("Removes the device", func() {
+										expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(newRemainingDevices)
+									})
+
+									When("filters are returned to previous state", func() {
+										JustBeforeEach(func() {
+											Expect(fakeClient.DeleteAllOf(ctx, &v1alpha1.BlockDeviceFilter{})).ShouldNot(HaveOccurred())
+											for i, selector := range selectors {
+												Expect(fakeClient.Create(ctx, &v1alpha1.BlockDeviceFilter{
+													ObjectMeta: metav1.ObjectMeta{
+														Name: fmt.Sprintf("block-device-filter-%v", i),
+													},
+													Spec: v1alpha1.BlockDeviceFilterSpec{
+														BlockDeviceSelector: &selector,
+													},
+												})).ShouldNot(HaveOccurred())
+											}
+
+											result, err := discoverer.Discover(ctx)
+											Expect(err).ShouldNot(HaveOccurred())
+											Expect(result.RequeueAfter).Should(BeZero())
+										})
+
+										It("device is back", func() {
+											expectAPIDevicesMatchedToInternalDevicesAndUnrelatedDevicesAreNotChanged(remainingInternalDevices)
+										})
 									})
 								})
 							})
 						})
-					})
 				})
 		})
 })
