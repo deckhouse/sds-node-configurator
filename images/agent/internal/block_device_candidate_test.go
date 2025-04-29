@@ -93,9 +93,9 @@ var _ = Describe("Block device candidate", func() {
 				HotPlug:    false,
 				FSType:     "bad",
 			}),
-			func(internalDevice1 internal.Device) {
+			func(notGoodInternalDevice internal.Device) {
 				BeforeEach(func() {
-					internalDevice = internalDevice1
+					internalDevice = notGoodInternalDevice
 				})
 				It("is not consumable", func() {
 					Expect(candidate.Consumable).Should(BeFalse())
