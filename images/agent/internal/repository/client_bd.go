@@ -14,11 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils
+package repository
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,13 +28,13 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 )
 
-type BlockDeviceFilterClient struct {
+type BDClient struct {
 	cl      client.Client
 	metrics monitoring.Metrics
 }
 
-func NewBlockDeviceFilterClient(cl client.Client, metrics monitoring.Metrics) *BlockDeviceFilterClient {
-	return &BlockDeviceFilterClient{
+func NewBDClient(cl client.Client, metrics monitoring.Metrics) *BDClient {
+	return &BDClient{
 		cl:      cl,
 		metrics: metrics,
 	}
@@ -43,30 +42,32 @@ func NewBlockDeviceFilterClient(cl client.Client, metrics monitoring.Metrics) *B
 
 // GetAPIBlockDevices returns map of BlockDevice resources with BlockDevice as a key. You might specify a selector to get a subset or
 // leave it as nil to get all the resources.
-func (c *BlockDeviceFilterClient) GetAPIBlockDeviceFilters(
+func (bdCl *BDClient) GetAPIBlockDevices(
 	ctx context.Context,
 	controllerName string,
-) (labels.Selector, error) {
-	list := &v1alpha1.BlockDeviceFilterList{}
-	start := time.Now()
-	err := c.cl.List(ctx, list)
-	c.metrics.APIMethodsDuration(controllerName, "list").Observe(c.metrics.GetEstimatedTimeInSeconds(start))
-	c.metrics.APIMethodsExecutionCount(controllerName, "list").Inc()
+	selector *metav1.LabelSelector,
+) (map[string]v1alpha1.BlockDevice, error) {
+	list := &v1alpha1.BlockDeviceList{}
+	s, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil {
-		c.metrics.APIMethodsErrors(controllerName, "list").Inc()
+		return nil, err
+	}
+	if s == labels.Nothing() {
+		s = nil
+	}
+	start := time.Now()
+	err = bdCl.cl.List(ctx, list, &client.ListOptions{LabelSelector: s})
+	bdCl.metrics.APIMethodsDuration(controllerName, "list").Observe(bdCl.metrics.GetEstimatedTimeInSeconds(start))
+	bdCl.metrics.APIMethodsExecutionCount(controllerName, "list").Inc()
+	if err != nil {
+		bdCl.metrics.APIMethodsErrors(controllerName, "list").Inc()
 		return nil, err
 	}
 
-	resultRequirements := make(labels.Requirements, 0, len(list.Items))
+	result := make(map[string]v1alpha1.BlockDevice, len(list.Items))
 	for _, item := range list.Items {
-		selector, err := metav1.LabelSelectorAsSelector(item.Spec.BlockDeviceSelector)
-		if err != nil {
-			return nil, fmt.Errorf("parsing selector %s: %w", item.Name, err)
-		}
-
-		requirements, _ := selector.Requirements()
-		resultRequirements = append(resultRequirements, requirements...)
+		result[item.Name] = item
 	}
 
-	return labels.NewSelector().Add(resultRequirements...), nil
+	return result, nil
 }

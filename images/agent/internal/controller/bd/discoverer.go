@@ -35,6 +35,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/repository"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -43,8 +44,8 @@ const DiscovererName = "block-device-controller"
 type Discoverer struct {
 	cl                      client.Client
 	log                     logger.Logger
-	bdCl                    *utils.BDClient
-	blockDeviceFilterClient *utils.BlockDeviceFilterClient
+	bdCl                    *repository.BDClient
+	blockDeviceFilterClient *repository.BlockDeviceFilterClient
 	metrics                 monitoring.Metrics
 	sdsCache                *cache.Cache
 	cfg                     DiscovererConfig
@@ -66,8 +67,8 @@ func NewDiscoverer(
 	return &Discoverer{
 		cl:                      cl,
 		log:                     log,
-		bdCl:                    utils.NewBDClient(cl, metrics),
-		blockDeviceFilterClient: utils.NewBlockDeviceFilterClient(cl, metrics),
+		bdCl:                    repository.NewBDClient(cl, metrics),
+		blockDeviceFilterClient: repository.NewBlockDeviceFilterClient(cl, metrics),
 		metrics:                 metrics,
 		sdsCache:                sdsCache,
 		cfg:                     cfg,

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils_test
+package repository_test
 
 import (
 	"context"
@@ -27,22 +27,22 @@ import (
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/repository"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 var _ = Describe("BlockDeviceFilterClient", func() {
 	var ctx context.Context
 	var metrics monitoring.Metrics
 	var fakeClient client.WithWatch
-	var filterClient *utils.BlockDeviceFilterClient
+	var filterClient *repository.BlockDeviceFilterClient
 	controllerName := "testController"
 
 	BeforeEach(func() {
 		ctx = context.Background()
 		metrics = monitoring.GetMetrics("")
 		fakeClient = test_utils.NewFakeClient()
-		filterClient = utils.NewBlockDeviceFilterClient(fakeClient, metrics)
+		filterClient = repository.NewBlockDeviceFilterClient(fakeClient, metrics)
 		Expect(filterClient).ShouldNot(BeNil())
 	})
 
