@@ -149,13 +149,12 @@ func (candidate *BlockDeviceCandidate) HasBlockDeviceDiff(blockDevice v1alpha1.B
 
 // Creates new labels as map, keeping unrelated labels device already has
 func newBlockDeviceLabels(blockDevice *v1alpha1.BlockDevice) map[string]string {
-	result := make(map[string]string, func() int {
-		if blockDevice.Labels == nil {
-			return 16
-		}
-		return len(blockDevice.Labels)
-	}())
+	resultItemCount := 16
+	if blockDevice.Labels != nil {
+		resultItemCount = len(blockDevice.Labels)
+	}
 
+	result := make(map[string]string, resultItemCount)
 	maps.Copy(result, blockDevice.Labels)
 
 	slug.Lowercase = false
