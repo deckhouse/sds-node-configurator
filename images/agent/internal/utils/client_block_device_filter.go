@@ -49,7 +49,7 @@ func (c *BlockDeviceFilterClient) GetAPIBlockDeviceFilters(
 ) (labels.Selector, error) {
 	list := &v1alpha1.BlockDeviceFilterList{}
 	start := time.Now()
-	err := c.cl.List(ctx, list, &client.ListOptions{LabelSelector: nil})
+	err := c.cl.List(ctx, list)
 	c.metrics.APIMethodsDuration(controllerName, "list").Observe(c.metrics.GetEstimatedTimeInSeconds(start))
 	c.metrics.APIMethodsExecutionCount(controllerName, "list").Inc()
 	if err != nil {

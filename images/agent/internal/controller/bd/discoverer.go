@@ -123,7 +123,7 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 	for _, candidate := range candidates {
 		blockDevice, exist := apiBlockDevices[candidate.Name]
 		if exist {
-			addToDeleteListIfNotMatched := func() {
+			addToDeleteListIfNotMatched := func(blockDevice v1alpha1.BlockDevice) {
 				if !deviceMatchesSelector(&blockDevice) {
 					d.log.Debug("[RunBlockDeviceController] block device doesn't match labels and will be deleted")
 					blockDevicesToDelete = append(blockDevicesToDelete, &blockDevice)
@@ -132,7 +132,7 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 
 			if !candidate.HasBlockDeviceDiff(blockDevice) {
 				d.log.Debug(fmt.Sprintf(`[RunBlockDeviceController] no data to update for block device, name: "%s"`, candidate.Name))
-				addToDeleteListIfNotMatched()
+				addToDeleteListIfNotMatched(blockDevice)
 				continue
 			}
 
@@ -142,7 +142,7 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 			}
 
 			d.log.Info(fmt.Sprintf(`[RunBlockDeviceController] updated APIBlockDevice, name: %s`, blockDevice.Name))
-			addToDeleteListIfNotMatched()
+			addToDeleteListIfNotMatched(blockDevice)
 			continue
 		}
 
@@ -157,7 +157,6 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 			d.log.Error(err, fmt.Sprintf("[RunBlockDeviceController] unable to create block device blockDevice, name: %s", candidate.Name))
 			continue
 		}
-		// blockDevicesToFilter = append(blockDevicesToFilter, device)
 		d.log.Info(fmt.Sprintf("[RunBlockDeviceController] created new APIBlockDevice: %s", candidate.Name))
 
 		// add new api device to the map, so it won't be deleted as fantom
