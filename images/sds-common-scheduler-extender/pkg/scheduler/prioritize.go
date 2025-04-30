@@ -144,7 +144,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	s.log.Debug(fmt.Sprintf("[prioritize] successfully scored the nodes for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
 
 	w.Header().Set("content-type", "application/json")
-	s.log.Debug("proiritized nodes:", "res", result)
+	s.log.Debug("prioritized nodes:", "res", result)
 	err = json.NewEncoder(w).Encode(result)
 	if err != nil {
 		s.log.Error(err, fmt.Sprintf("[prioritize] unable to encode a response for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))

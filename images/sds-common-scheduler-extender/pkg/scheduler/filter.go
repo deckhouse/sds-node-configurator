@@ -157,7 +157,8 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Debug(fmt.Sprintf("[filter] successfully filtered the nodes from the request for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-	s.log.Debug(fmt.Sprintf("[filter] filtered nodes are: %+#v", filteredNodes))
+	s.log.Debug(fmt.Sprintf("[filter] filtered OK nodes are: %+#v", *filteredNodes.NodeNames))
+	s.log.Debug(fmt.Sprintf("[filter] filtered NOT OK nodes are: %+#v", *&filteredNodes.FailedNodes))
 
 	w.Header().Set("content-type", "application/json")
 	err = json.NewEncoder(w).Encode(filteredNodes)
