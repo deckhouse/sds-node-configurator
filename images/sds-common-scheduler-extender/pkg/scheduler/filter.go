@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 )
 
@@ -156,6 +157,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Debug(fmt.Sprintf("[filter] successfully filtered the nodes from the request for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+	s.log.Debug(fmt.Sprintf("[filter] filtered nodes are: %+#v", filteredNodes))
 
 	w.Header().Set("content-type", "application/json")
 	err = json.NewEncoder(w).Encode(filteredNodes)
