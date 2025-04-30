@@ -15,6 +15,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	v1 "k8s.io/api/storage/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 )
@@ -278,234 +279,230 @@ func filterNodes(
 	drbdResourceMap map[string]*srv.DRBDResource,
 	drbdNodesMap map[string]*srv.DRBDNode,
 ) (*ExtenderFilterResult, error) {
-	return &ExtenderFilterResult{
-		NodeNames: nodeNames,
-	}, nil
+	lvgs := schedulerCache.GetAllLVG()
+	for _, lvg := range lvgs {
+		log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s in the cache", lvg.Name))
+	}
 
-	// lvgs := schedulerCache.GetAllLVG()
-	// for _, lvg := range lvgs {
-	// 	log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s in the cache", lvg.Name))
-	// }
+	log.Debug(fmt.Sprintf("[filterNodes] starts to get LVMVolumeGroups for Storage Classes for a Pod %s/%s", pod.Namespace, pod.Name))
+	scLVGs, err := GetSortedLVGsFromSC(scs)
+	if err != nil {
+		return nil, err
+	}
 
-	// log.Debug(fmt.Sprintf("[filterNodes] starts to get LVMVolumeGroups for Storage Classes for a Pod %s/%s", pod.Namespace, pod.Name))
-	// scLVGs, err := GetSortedLVGsFromSC(scs)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	usedLVGs := RemoveUnusedLVGs(lvgs, scLVGs)
+	for _, lvg := range usedLVGs {
+		log.Trace(fmt.Sprintf("[filterNodes] the LVMVolumeGroup %s is actually used. VG size: %s, allocatedSize: %s", lvg.Name, lvg.Status.VGSize.String(), lvg.Status.AllocatedSize.String()))
+	}
 
-	// usedLVGs := RemoveUnusedLVGs(lvgs, scLVGs)
-	// for _, lvg := range usedLVGs {
-	// 	log.Trace(fmt.Sprintf("[filterNodes] the LVMVolumeGroup %s is actually used. VG size: %s, allocatedSize: %s", lvg.Name, lvg.Status.VGSize.String(), lvg.Status.AllocatedSize.String()))
-	// }
+	lvgsThickFree := getLVGThickFreeSpaces(usedLVGs)
+	log.Trace(fmt.Sprintf("[filterNodes] for a Pod %s/%s current LVMVolumeGroups Thick FreeSpace on the node: %+v", pod.Namespace, pod.Name, lvgsThickFree))
+	for lvgName, freeSpace := range lvgsThickFree {
+		log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s Thick free space %s", lvgName, resource.NewQuantity(freeSpace, resource.BinarySI)))
+		reservedSpace, err := schedulerCache.GetLVGThickReservedSpace(lvgName)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[filterNodes] unable to count cache reserved space for the LVMVolumeGroup %s", lvgName))
+			continue
+		}
+		log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s reserved PVC space %s", lvgName, resource.NewQuantity(reservedSpace, resource.BinarySI)))
+		lvgsThickFree[lvgName] -= reservedSpace
+	}
+	log.Trace(fmt.Sprintf("[filterNodes] for a Pod %s/%s current LVMVolumeGroups Thick FreeSpace with reserved PVC: %+v", pod.Namespace, pod.Name, lvgsThickFree))
 
-	// lvgsThickFree := getLVGThickFreeSpaces(usedLVGs)
-	// log.Trace(fmt.Sprintf("[filterNodes] for a Pod %s/%s current LVMVolumeGroups Thick FreeSpace on the node: %+v", pod.Namespace, pod.Name, lvgsThickFree))
-	// for lvgName, freeSpace := range lvgsThickFree {
-	// 	log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s Thick free space %s", lvgName, resource.NewQuantity(freeSpace, resource.BinarySI)))
-	// 	reservedSpace, err := schedulerCache.GetLVGThickReservedSpace(lvgName)
-	// 	if err != nil {
-	// 		log.Error(err, fmt.Sprintf("[filterNodes] unable to count cache reserved space for the LVMVolumeGroup %s", lvgName))
-	// 		continue
-	// 	}
-	// 	log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s reserved PVC space %s", lvgName, resource.NewQuantity(reservedSpace, resource.BinarySI)))
-	// 	lvgsThickFree[lvgName] -= reservedSpace
-	// }
-	// log.Trace(fmt.Sprintf("[filterNodes] for a Pod %s/%s current LVMVolumeGroups Thick FreeSpace with reserved PVC: %+v", pod.Namespace, pod.Name, lvgsThickFree))
+	lvgsThinFree := getLVGThinFreeSpaces(usedLVGs)
+	log.Trace(fmt.Sprintf("[filterNodes] for a Pod %s/%s current LVMVolumeGroups Thin FreeSpace on the node: %+v", pod.Namespace, pod.Name, lvgsThinFree))
+	for lvgName, thinPools := range lvgsThinFree {
+		for tpName, freeSpace := range thinPools {
+			log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s Thin Pool %s free space %s", lvgName, tpName, resource.NewQuantity(freeSpace, resource.BinarySI)))
+			reservedSpace, err := schedulerCache.GetLVGThinReservedSpace(lvgName, tpName)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[filterNodes] unable to count cache reserved space for the Thin pool %s of the LVMVolumeGroup %s", tpName, lvgName))
+				continue
+			}
+			log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s Thin pool %s reserved PVC space %s", lvgName, tpName, resource.NewQuantity(reservedSpace, resource.BinarySI)))
+			lvgsThinFree[lvgName][tpName] -= reservedSpace
+		}
+	}
 
-	// lvgsThinFree := getLVGThinFreeSpaces(usedLVGs)
-	// log.Trace(fmt.Sprintf("[filterNodes] for a Pod %s/%s current LVMVolumeGroups Thin FreeSpace on the node: %+v", pod.Namespace, pod.Name, lvgsThinFree))
-	// for lvgName, thinPools := range lvgsThinFree {
-	// 	for tpName, freeSpace := range thinPools {
-	// 		log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s Thin Pool %s free space %s", lvgName, tpName, resource.NewQuantity(freeSpace, resource.BinarySI)))
-	// 		reservedSpace, err := schedulerCache.GetLVGThinReservedSpace(lvgName, tpName)
-	// 		if err != nil {
-	// 			log.Error(err, fmt.Sprintf("[filterNodes] unable to count cache reserved space for the Thin pool %s of the LVMVolumeGroup %s", tpName, lvgName))
-	// 			continue
-	// 		}
-	// 		log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s Thin pool %s reserved PVC space %s", lvgName, tpName, resource.NewQuantity(reservedSpace, resource.BinarySI)))
-	// 		lvgsThinFree[lvgName][tpName] -= reservedSpace
-	// 	}
-	// }
+	nodeLVGs := SortLVGsByNodeName(usedLVGs)
+	for n, ls := range nodeLVGs {
+		for _, l := range ls {
+			log.Trace(fmt.Sprintf("[filterNodes] the LVMVolumeGroup %s belongs to node %s", l.Name, n))
+		}
+	}
 
-	// nodeLVGs := SortLVGsByNodeName(usedLVGs)
-	// for n, ls := range nodeLVGs {
-	// 	for _, l := range ls {
-	// 		log.Trace(fmt.Sprintf("[filterNodes] the LVMVolumeGroup %s belongs to node %s", l.Name, n))
-	// 	}
-	// }
+	// these are the nodes which might store every PVC from the Pod
+	commonNodes, err := getCommonNodesByStorageClasses(scs, nodeLVGs)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[filterNodes] unable to get common nodes for PVCs from the Pod %s/%s", pod.Namespace, pod.Name))
+		return nil, err
+	}
 
-	// // these are the nodes which might store every PVC from the Pod
-	// commonNodes, err := getCommonNodesByStorageClasses(scs, nodeLVGs)
-	// if err != nil {
-	// 	log.Error(err, fmt.Sprintf("[filterNodes] unable to get common nodes for PVCs from the Pod %s/%s", pod.Namespace, pod.Name))
-	// 	return nil, err
-	// }
+	type ResultWithError struct {
+		nodeName string
+		err      error
+	}
 
-	// type ResultWithError struct {
-	// 	nodeName string
-	// 	err      error
-	// }
+	resCh := make(chan ResultWithError, len(*nodeNames))
+	result := &ExtenderFilterResult{
+		NodeNames:   &[]string{},
+		FailedNodes: FailedNodesMap{},
+	}
 
-	// resCh := make(chan ResultWithError, len(*nodeNames))
-	// result := &ExtenderFilterResult{
-	// 	NodeNames:   &[]string{},
-	// 	FailedNodes: FailedNodesMap{},
-	// }
+	var thickMapMtx sync.RWMutex
+	var thinMapMtx sync.RWMutex
+	var wg sync.WaitGroup
+	wg.Add(len(*nodeNames))
 
-	// var thickMapMtx sync.RWMutex
-	// var thinMapMtx sync.RWMutex
-	// var wg sync.WaitGroup
-	// wg.Add(len(*nodeNames))
+	for _, nodeName := range *nodeNames {
+		go func(nodeName string, log logger.Logger) {
+			log.Debug(fmt.Sprintf("[filterNodes] Node %s is being filtered now", nodeName))
+			log.Debug(fmt.Sprintf("[filterNodes]"))
+			defer wg.Done()
 
-	// for _, nodeName := range *nodeNames {
-	// 	go func(nodeName string, log logger.Logger) {
-	// 		log.Debug(fmt.Sprintf("[filterNodes] Node %s is being filtered now", nodeName))
-	// 		log.Debug(fmt.Sprintf("[filterNodes]"))
-	// 		defer wg.Done()
+			nodeLvgs := commonNodes[nodeName]
 
-	// 		nodeLvgs := commonNodes[nodeName]
+			for _, pvc := range pvcs {
+				log.Debug(fmt.Sprintf("[filterNodes] pvc %s is being processed. node: %s", pvc.Name, nodeName))
 
-	// 		for _, pvc := range pvcs {
-	// 			log.Debug(fmt.Sprintf("[filterNodes] pvc %s is being processed. node: %s", pvc.Name, nodeName))
+				lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
+				replicatedStorageClass := rscMap[*pvc.Spec.StorageClassName]
+				commonLVG := findMatchedLVG(nodeLvgs, lvgsFromSC)
+				isDrbdDiskfulNode := isDrbdDiskfulNode(drbdResourceMap, pvc.Spec.VolumeName, nodeName)
+				nodeHasEnoughSpace := nodeHasEnoughSpace(pvcRequests, lvgsThickFree, lvgsThinFree, commonLVG, pvc, lvgs, &thickMapMtx, &thinMapMtx)
 
-	// 			lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
-	// 			replicatedStorageClass := rscMap[*pvc.Spec.StorageClassName]
-	// 			commonLVG := findMatchedLVG(nodeLvgs, lvgsFromSC)
-	// 			isDrbdDiskfulNode := isDrbdDiskfulNode(drbdResourceMap, pvc.Spec.VolumeName, nodeName)
-	// 			nodeHasEnoughSpace := nodeHasEnoughSpace(pvcRequests, lvgsThickFree, lvgsThinFree, commonLVG, pvc, lvgs, &thickMapMtx, &thinMapMtx)
+				switch replicatedStorageClass.Spec.VolumeAccess {
+				case "Local":
+					log.Debug(fmt.Sprintf("[filterNodes] ReplicatedCS VolumeAccess %s, node %s, pvc %s", replicatedStorageClass.Spec.VolumeAccess, nodeName, pvc.Name))
+					if pvc.Spec.VolumeName == "" {
+						if commonLVG == nil {
+							log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: 0 copies of a volume storeed on it. pvc %s", nodeName, pvc.Name))
+							resCh <- ResultWithError{
+								nodeName: nodeName,
+								err:      fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
+							}
+							return
+						}
 
-	// 			switch replicatedStorageClass.Spec.VolumeAccess {
-	// 			case "Local":
-	// 				log.Debug(fmt.Sprintf("[filterNodes] ReplicatedCS VolumeAccess %s, node %s, pvc %s", replicatedStorageClass.Spec.VolumeAccess, nodeName, pvc.Name))
-	// 				if pvc.Spec.VolumeName == "" {
-	// 					if commonLVG == nil {
-	// 						log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: 0 copies of a volume storeed on it. pvc %s", nodeName, pvc.Name))
-	// 						resCh <- ResultWithError{
-	// 							nodeName: nodeName,
-	// 							err:      fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
-	// 						}
-	// 						return
-	// 					}
+						if !nodeHasEnoughSpace {
+							log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not enough free space. pvc %s", nodeName, pvc.Name))
+							resCh <- ResultWithError{
+								nodeName: nodeName,
+								err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
+							}
+							return
+						}
+						break
+					}
 
-	// 					if !nodeHasEnoughSpace {
-	// 						log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not enough free space. pvc %s", nodeName, pvc.Name))
-	// 						resCh <- ResultWithError{
-	// 							nodeName: nodeName,
-	// 							err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
-	// 						}
-	// 						return
-	// 					}
-	// 					break
-	// 				}
+					if !isDrbdDiskfulNode {
+						log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not a diskful DRBD node. pvc %s", nodeName, pvc.Name))
+						resCh <- ResultWithError{
+							nodeName: nodeName,
+							err:      fmt.Errorf("node %s is not diskful for pv %s", nodeName, pvc.Spec.VolumeName),
+						}
+						return
+					}
 
-	// 				if !isDrbdDiskfulNode {
-	// 					log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not a diskful DRBD node. pvc %s", nodeName, pvc.Name))
-	// 					resCh <- ResultWithError{
-	// 						nodeName: nodeName,
-	// 						err:      fmt.Errorf("node %s is not diskful for pv %s", nodeName, pvc.Spec.VolumeName),
-	// 					}
-	// 					return
-	// 				}
+				case "EventuallyLocal":
+					log.Debug(fmt.Sprintf("[filterNodes] ReplicatedCS VolumeAccess %s, node %s, pvc %s", replicatedStorageClass.Spec.VolumeAccess, nodeName, pvc.Name))
 
-	// 			case "EventuallyLocal":
-	// 				log.Debug(fmt.Sprintf("[filterNodes] ReplicatedCS VolumeAccess %s, node %s, pvc %s", replicatedStorageClass.Spec.VolumeAccess, nodeName, pvc.Name))
+					if pvc.Spec.VolumeName == "" {
+						if commonLVG == nil {
+							log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: 0 copies of a volume storeed on it. pvc %s", nodeName, pvc.Name))
+							resCh <- ResultWithError{
+								nodeName: nodeName,
+								err:      fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
+							}
+							return
+						}
+						if !nodeHasEnoughSpace {
+							log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not enough free space. pvc %s", nodeName, pvc.Name))
+							resCh <- ResultWithError{
+								nodeName: nodeName,
+								err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
+							}
+							return
+						}
+						break
+					}
 
-	// 				if pvc.Spec.VolumeName == "" {
-	// 					if commonLVG == nil {
-	// 						log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: 0 copies of a volume storeed on it. pvc %s", nodeName, pvc.Name))
-	// 						resCh <- ResultWithError{
-	// 							nodeName: nodeName,
-	// 							err:      fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
-	// 						}
-	// 						return
-	// 					}
-	// 					if !nodeHasEnoughSpace {
-	// 						log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not enough free space. pvc %s", nodeName, pvc.Name))
-	// 						resCh <- ResultWithError{
-	// 							nodeName: nodeName,
-	// 							err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
-	// 						}
-	// 						return
-	// 					}
-	// 					break
-	// 				}
+					if isDrbdDiskfulNode {
+						log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not a diskful DRBD node. pvc %s", nodeName, pvc.Name))
+						resCh <- ResultWithError{
+							nodeName: nodeName,
+							err:      nil,
+						}
+						return
+					}
+					if commonLVG == nil {
+						log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: 0 copies of a volume storeed on it. pvc %s", nodeName, pvc.Name))
+						resCh <- ResultWithError{
+							nodeName: nodeName,
+							err:      fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
+						}
+						return
+					}
+					if !nodeHasEnoughSpace {
+						log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not enough free space. pvc %s", nodeName, pvc.Name))
+						resCh <- ResultWithError{
+							nodeName: nodeName,
+							err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
+						}
+						return
+					}
 
-	// 				if isDrbdDiskfulNode {
-	// 					log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not a diskful DRBD node. pvc %s", nodeName, pvc.Name))
-	// 					resCh <- ResultWithError{
-	// 						nodeName: nodeName,
-	// 						err:      nil,
-	// 					}
-	// 					return
-	// 				}
-	// 				if commonLVG == nil {
-	// 					log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: 0 copies of a volume storeed on it. pvc %s", nodeName, pvc.Name))
-	// 					resCh <- ResultWithError{
-	// 						nodeName: nodeName,
-	// 						err:      fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
-	// 					}
-	// 					return
-	// 				}
-	// 				if !nodeHasEnoughSpace {
-	// 					log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not enough free space. pvc %s", nodeName, pvc.Name))
-	// 					resCh <- ResultWithError{
-	// 						nodeName: nodeName,
-	// 						err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
-	// 					}
-	// 					return
-	// 				}
+				case "PreferablyLocal":
+					log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not enough free space. pvc %s", nodeName, pvc.Name))
 
-	// 			case "PreferablyLocal":
-	// 				log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not enough free space. pvc %s", nodeName, pvc.Name))
+					if pvc.Spec.VolumeName == "" {
+						if !nodeHasEnoughSpace {
+							resCh <- ResultWithError{
+								nodeName: nodeName,
+								err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
+							}
+							return
+						}
+					}
+				}
+			}
 
-	// 				if pvc.Spec.VolumeName == "" {
-	// 					if !nodeHasEnoughSpace {
-	// 						resCh <- ResultWithError{
-	// 							nodeName: nodeName,
-	// 							err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
-	// 						}
-	// 						return
-	// 					}
-	// 				}
-	// 			}
-	// 		}
+			if !isDrbdNode(nodeName, drbdNodesMap) {
+				log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not a DRBD node", nodeName))
+				resCh <- ResultWithError{
+					nodeName: nodeName,
+					err:      fmt.Errorf("node %s is not a drbd node", nodeName),
+				}
+				return
+			}
+			if !isOkNode(nodeName) {
+				log.Debug(fmt.Sprintf("[filterNodes] node %s has problems nad will not be selected", nodeName))
+				resCh <- ResultWithError{
+					nodeName: nodeName,
+					err:      fmt.Errorf("node %s is offline", nodeName),
+				}
+				return
+			}
 
-	// 		if !isDrbdNode(nodeName, drbdNodesMap) {
-	// 			log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not a DRBD node", nodeName))
-	// 			resCh <- ResultWithError{
-	// 				nodeName: nodeName,
-	// 				err:      fmt.Errorf("node %s is not a drbd node", nodeName),
-	// 			}
-	// 			return
-	// 		}
-	// 		if !isOkNode(nodeName) {
-	// 			log.Debug(fmt.Sprintf("[filterNodes] node %s has problems nad will not be selected", nodeName))
-	// 			resCh <- ResultWithError{
-	// 				nodeName: nodeName,
-	// 				err:      fmt.Errorf("node %s is offline", nodeName),
-	// 			}
-	// 			return
-	// 		}
+			log.Debug(fmt.Sprintf("[filterNodes] node %s is ok", nodeName))
+			resCh <- ResultWithError{
+				nodeName: nodeName,
+				err:      nil,
+			}
+		}(nodeName, log)
+	}
 
-	// 		log.Debug(fmt.Sprintf("[filterNodes] node %s is ok", nodeName))
-	// 		resCh <- ResultWithError{
-	// 			nodeName: nodeName,
-	// 			err:      nil,
-	// 		}
-	// 	}(nodeName, log)
-	// }
+	wg.Wait()
+	close(resCh)
 
-	// wg.Wait()
-	// close(resCh)
-
-	// for res := range resCh {
-	// 	if res.err == nil {
-	// 		*result.NodeNames = append(*result.NodeNames, res.nodeName)
-	// 		continue
-	// 	}
-	// 	result.FailedNodes[res.nodeName] = res.err.Error()
-	// }
-	// return result, nil
+	for res := range resCh {
+		if res.err == nil {
+			*result.NodeNames = append(*result.NodeNames, res.nodeName)
+			continue
+		}
+		result.FailedNodes[res.nodeName] = res.err.Error()
+	}
+	return result, nil
 }
 
 func isDrbdDiskfulNode(drbdResourceMap map[string]*srv.DRBDResource, pvName string, nodeName string) bool {
