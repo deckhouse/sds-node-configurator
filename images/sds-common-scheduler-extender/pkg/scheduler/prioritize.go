@@ -162,7 +162,7 @@ func scoreNodes(
 	pvcRequests map[string]PVCRequest,
 	divisor float64,
 ) ([]HostPriority, error) {
-	log.Debug("nodes to prioritize:", *nodeNames)
+	log.Debug("nodes to prioritize:", "nodes", *nodeNames)
 	multiplier := 1 / divisor
 
 	lvgs := schedulerCache.GetAllLVG()
