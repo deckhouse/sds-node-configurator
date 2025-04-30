@@ -279,6 +279,7 @@ func filterNodes(
 	drbdResourceMap map[string]*srv.DRBDResource,
 	drbdNodesMap map[string]*srv.DRBDNode,
 ) (*ExtenderFilterResult, error) {
+	log.Debug("[filterNodes] node names to filter", "nodes", *nodeNames)
 	lvgs := schedulerCache.GetAllLVG()
 	for _, lvg := range lvgs {
 		log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s in the cache", lvg.Name))
@@ -502,6 +503,7 @@ func filterNodes(
 		}
 		result.FailedNodes[res.nodeName] = res.err.Error()
 	}
+	log.Debug("[filterNodes] filtered nodes", "nodes", result.NodeNames)
 	return result, nil
 }
 
