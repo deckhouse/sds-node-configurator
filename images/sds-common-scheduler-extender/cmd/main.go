@@ -128,7 +128,7 @@ func subMain(ctx context.Context) error {
 		}
 	}
 
-	log, err := logger.NewLogger(logger.Verbosity(config.LogLevel))
+	log, err := logger.NewLogger(logger.Verbosity("4"))
 	if err != nil {
 		print(fmt.Sprintf("[subMain] unable to initialize logger, err: %s", err))
 		return err
