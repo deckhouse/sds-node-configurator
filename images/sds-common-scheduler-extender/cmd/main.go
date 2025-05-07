@@ -175,7 +175,7 @@ func subMain(ctx context.Context) error {
 	go cacheMrg.RunSaver(ctx, time.Duration(config.CacheCheckInterval)*time.Second, time.Duration(config.CfgMapUpdateTimeout)*time.Second)
 	log.Info("[subMain] scheduler cache saver started")
 
-	h, err := scheduler.NewHandler(ctx, mgr.GetClient(), *log, сache, config.DefaultDivisor)
+	h, err := scheduler.NewHandler(ctx, mgr.GetClient(), *log, cacheMrg, config.DefaultDivisor)
 	if err != nil {
 		log.Error(err, "[subMain] unable to create http.Handler of the scheduler extender")
 		return err
