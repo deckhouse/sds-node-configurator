@@ -12,12 +12,11 @@ import (
 )
 
 type scheduler struct {
-	defaultDivisor float64
+	ctx            context.Context
 	log            logger.Logger
 	client         client.Client
-	ctx            context.Context
-	cache          *cache.Cache
-	requestCount   int
+	cacheMgr       *cache.CacheManager
+	defaultDivisor float64
 }
 
 func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -34,13 +33,13 @@ func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func NewHandler(ctx context.Context, cl client.Client, log logger.Logger, lvgCache *cache.Cache, defaultDiv float64) (http.Handler, error) {
+func NewHandler(ctx context.Context, cl client.Client, log logger.Logger, cacheMgr *cache.CacheManager, defaultDiv float64) (http.Handler, error) {
 	return &scheduler{
 		defaultDivisor: defaultDiv,
 		log:            log,
 		client:         cl,
 		ctx:            ctx,
-		cache:          lvgCache,
+		cacheMgr:       cacheMgr,
 	}, nil
 }
 
