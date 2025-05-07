@@ -285,6 +285,7 @@ func (c *Cache) addNewThickPVC(lvgCh *LvgCache, pvc *v1.PersistentVolumeClaim, p
 }
 
 func (c *Cache) AddLVGToPVC(lvgName, pvcKey string) {
+	// TODO protect from duplicates
 	lvgsForPVC, found := c.storage.PvcLVGs[pvcKey]
 	if !found || lvgsForPVC == nil {
 		lvgsForPVC = make([]string, 0, lvgsPerPVCCount)

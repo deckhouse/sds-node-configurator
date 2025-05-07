@@ -290,3 +290,13 @@ func (cm *CacheManager) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.Per
 
 	return cm.cache.RemoveSpaceReservationForPVCWithSelectedNode(pvc, deviceType, drbdResourceMap)
 }
+
+func (cm *CacheManager) AddLVGToPVC(lvgName, pvcKey string) {
+	cm.locker.Lock()
+	defer func() {
+		cm.isUpdated = true
+		cm.locker.Unlock()
+	}()
+
+	cm.cache.AddLVGToPVC(lvgName, pvcKey)
+}

@@ -17,7 +17,11 @@ limitations under the License.
 package scheduler
 
 import (
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	apiv1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 )
 
 // ExtenderArgs is copied from https://godoc.org/k8s.io/kubernetes/pkg/scheduler/api/v1#ExtenderArgs
@@ -41,13 +45,10 @@ type ExtenderFilterResult struct {
 	// only if ExtenderConfig.NodeCacheCapable == true
 	NodeNames *[]string `json:"nodenames,omitempty"`
 	// Filtered out nodes where the pod can't be scheduled and the failure messages
-	FailedNodes FailedNodesMap `json:"failedNodes,omitempty"`
+	FailedNodes map[string]string `json:"failedNodes,omitempty"`
 	// Error message indicating failure
 	Error string `json:"error,omitempty"`
 }
-
-// FailedNodesMap is copied from https://godoc.org/k8s.io/kubernetes/pkg/scheduler/api/v1#FailedNodesMap
-type FailedNodesMap map[string]string
 
 // HostPriority is copied from https://godoc.org/k8s.io/kubernetes/pkg/scheduler/api/v1#HostPriority
 type HostPriority struct {
@@ -55,4 +56,55 @@ type HostPriority struct {
 	Host string `json:"host"`
 	// Score associated with the host
 	Score int `json:"score"`
+}
+
+// FilterInput holds input data for filtering nodes
+type FilterInput struct {
+	Pod             *v1.Pod
+	NodeNames       []string
+	PVCs            map[string]*v1.PersistentVolumeClaim
+	StorageClasses  map[string]*storagev1.StorageClass
+	PVCRequests     map[string]PVCRequest
+	ReplicatedSCs   map[string]*srv.ReplicatedStorageClass
+	DRBDResourceMap map[string]*srv.DRBDResource
+	DRBDNodesMap    map[string]*srv.DRBDNode
+}
+
+// LVGInfo holds LVMVolumeGroup-related data
+type LVGInfo struct {
+	ThickFreeSpaces map[string]int64
+	ThinFreeSpaces  map[string]map[string]int64
+	NodeToLVGs      map[string][]*snc.LVMVolumeGroup
+	SCLVGs          map[string][]LVMVolumeGroup
+}
+
+// ResultWithError holds the result of filtering a single node
+type ResultWithError struct {
+	NodeName string
+	Err      error
+}
+
+// PrioritizeInput holds input data for prioritizing nodes
+type PrioritizeInput struct {
+	Pod            *v1.Pod
+	NodeNames      []string
+	PVCs           map[string]*v1.PersistentVolumeClaim
+	StorageClasses map[string]*storagev1.StorageClass
+	PVCRequests    map[string]PVCRequest
+	StoragePoolMap map[string]*srv.ReplicatedStoragePool
+	DefaultDivisor float64
+}
+
+// LVGScoreInfo holds LVMVolumeGroup-related data for scoring
+type LVGScoreInfo struct {
+	NodeToLVGs map[string][]*snc.LVMVolumeGroup
+	SCLVGs     map[string][]LVMVolumeGroup
+	LVGs       map[string]*snc.LVMVolumeGroup
+}
+
+type LVMVolumeGroup struct {
+	Name string `yaml:"name"`
+	Thin struct {
+		PoolName string `yaml:"poolName"`
+	} `yaml:"Thin"`
 }
