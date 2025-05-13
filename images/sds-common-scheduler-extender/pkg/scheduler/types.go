@@ -60,14 +60,14 @@ type HostPriority struct {
 
 // FilterInput holds input data for filtering nodes
 type FilterInput struct {
-	Pod             *v1.Pod
-	NodeNames       []string
-	PVCs            map[string]*v1.PersistentVolumeClaim
-	StorageClasses  map[string]*storagev1.StorageClass
-	PVCRequests     map[string]PVCRequest
-	ReplicatedSCs   map[string]*srv.ReplicatedStorageClass
-	DRBDResourceMap map[string]*srv.DRBDResource
-	DRBDNodesMap    map[string]*srv.DRBDNode
+	Pod                        *v1.Pod
+	NodeNames                  []string
+	ReplicatedProvisionPVCs    map[string]*v1.PersistentVolumeClaim
+	SCSUsedByPodPVCs           map[string]*storagev1.StorageClass
+	PVCSizeRequests            map[string]PVCRequest
+	ReplicatedSCSUsedByPodPVCs map[string]*srv.ReplicatedStorageClass
+	DRBDResourceMap            map[string]*srv.DRBDResource
+	DRBDNodesMap               map[string]*srv.DRBDNode
 }
 
 // LVGInfo holds LVMVolumeGroup-related data

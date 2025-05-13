@@ -25,7 +25,7 @@ const (
 
 func RunLVGWatcherCacheController(
 	mgr manager.Manager,
-	log logger.Logger,
+	log *logger.Logger,
 	cacheMgr *cache.CacheManager,
 ) error {
 	log.Info("[RunLVGWatcherCacheController] starts the work")

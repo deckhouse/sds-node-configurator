@@ -175,20 +175,19 @@ func subMain(ctx context.Context) error {
 	go cacheMrg.RunSaver(ctx, time.Duration(config.CacheCheckInterval)*time.Second, time.Duration(config.CfgMapUpdateTimeout)*time.Second)
 	log.Info("[subMain] scheduler cache saver started")
 
-	h, err := scheduler.NewHandler(ctx, mgr.GetClient(), *log, cacheMrg, config.DefaultDivisor)
-	if err != nil {
-		log.Error(err, "[subMain] unable to create http.Handler of the scheduler extender")
-		return err
-	}
+	client := mgr.GetClient()
+	s := scheduler.NewScheduler(ctx, client, log, cacheMrg, config.DefaultDivisor)
 	log.Info("[subMain] scheduler handler initialized")
 
-	if err = controller.RunPVCWatcherCacheController(mgr, *log, cacheMrg); err != nil {
+	h := scheduler.NewHandler(log, s)
+
+	if err = controller.RunPVCWatcherCacheController(mgr, log, cacheMrg); err != nil {
 		log.Error(err, fmt.Sprintf("[subMain] unable to run %s controller", controller.PVCWatcherCacheCtrlName))
 		return err
 	}
 	log.Info(fmt.Sprintf("[subMain] successfully ran %s controller", controller.PVCWatcherCacheCtrlName))
 
-	if err = controller.RunLVGWatcherCacheController(mgr, *log, cacheMrg); err != nil {
+	if err = controller.RunLVGWatcherCacheController(mgr, log, cacheMrg); err != nil {
 		log.Error(err, fmt.Sprintf("[subMain] unable to run %s controller", controller.LVGWatcherCacheCtrlName))
 		return err
 	}
@@ -206,9 +205,12 @@ func subMain(ctx context.Context) error {
 	}
 	log.Info("[subMain] successfully AddReadyzCheck")
 
+	hh := accessLogHandler(ctx, h)
+	handler := scheduler.ApplyMiddlewares(hh, scheduler.ShouldProcessPodMiddleware(ctx, client, nil, log))
+
 	serv := &http.Server{
 		Addr:         config.ListenAddr,
-		Handler:      accessLogHandler(ctx, h),
+		Handler:      handler,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

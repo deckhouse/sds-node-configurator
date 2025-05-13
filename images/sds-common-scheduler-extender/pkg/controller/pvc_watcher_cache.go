@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/scheduler"
-	"slices"
 
 	// srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
@@ -29,7 +30,7 @@ const (
 
 func RunPVCWatcherCacheController(
 	mgr manager.Manager,
-	log logger.Logger,
+	log *logger.Logger,
 	cacheMgr *cache.CacheManager,
 ) error {
 	log.Info("[RunPVCWatcherCacheController] starts the work")
@@ -107,7 +108,7 @@ func RunPVCWatcherCacheController(
 	return nil
 }
 
-func reconcilePVC(ctx context.Context, mgr manager.Manager, log logger.Logger, cacheMgr *cache.CacheManager, pvc *v1.PersistentVolumeClaim, selectedNodeName string) {
+func reconcilePVC(ctx context.Context, mgr manager.Manager, log *logger.Logger, cacheMgr *cache.CacheManager, pvc *v1.PersistentVolumeClaim, selectedNodeName string) {
 	sc := &storagev1.StorageClass{}
 	err := mgr.GetClient().Get(ctx, client.ObjectKey{
 		Name: *pvc.Spec.StorageClassName,
