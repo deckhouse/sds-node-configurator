@@ -206,7 +206,7 @@ func subMain(ctx context.Context) error {
 	log.Info("[subMain] successfully AddReadyzCheck")
 
 	hh := accessLogHandler(ctx, h)
-	handler := scheduler.ApplyMiddlewares(hh, scheduler.ShouldProcessPodMiddleware(ctx, client, nil, log))
+	handler := scheduler.ApplyMiddlewares(hh, scheduler.ShouldProcessPodMiddleware(ctx, client, log))
 
 	serv := &http.Server{
 		Addr:         config.ListenAddr,
