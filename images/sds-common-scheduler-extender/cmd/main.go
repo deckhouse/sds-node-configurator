@@ -210,13 +210,14 @@ func subMain(ctx context.Context) error {
 	mux.HandleFunc("/scheduler/prioritize", handler.Prioritize)
 	mux.HandleFunc("/status", handler.Status)
 
-	m := scheduler.NewMiddleware(mux, log).
+	handlerWithMiddleware := scheduler.NewMiddleware(mux, log).
 		WithLog().
-		WithPodCheck(ctx, client)
+		WithPodCheck(ctx, client).
+		Handler
 
 	serv := &http.Server{
 		Addr:         config.ListenAddr,
-		Handler:      m.Handler,
+		Handler:      handlerWithMiddleware,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
