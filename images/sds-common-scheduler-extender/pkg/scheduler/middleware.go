@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -73,10 +74,13 @@ func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middle
 				return
 			}
 			pod := inputData.Pod
+			if pod == nil {
+				m.Log.Error(errors.New("[ShouldProcessPodMiddleware] no pod in request"), "")
+				httpError(w, "[ShouldProcessPodMiddleware] no pod in request", http.StatusInternalServerError)
+			}
 
 			pvcs := &corev1.PersistentVolumeClaimList{}
-			err := cl.List(ctx, pvcs)
-			if err != nil {
+			if err := cl.List(ctx, pvcs); err != nil {
 				m.Log.Error(err, "[shouldProcessPodMiddleware] error listing PVCs")
 				http.Error(w, "error listing PVCs", http.StatusInternalServerError)
 			}
