@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
@@ -13,24 +15,60 @@ import (
 )
 
 // Middleware-функция
-type Middleware func(http.Handler) http.Handler
+// type Middleware func(http.Handler) http.Handler
 
-// ApplyMiddlewares объединяет middleware в цепочку
-func ApplyMiddlewares(handler http.Handler, middlewares ...Middleware) http.Handler {
-	for i := range middlewares {
-		handler = middlewares[i](handler)
-	}
-	return handler
+type Middleware struct {
+	Handler http.Handler
+	Log     *logger.Logger
 }
 
-func ShouldProcessPodMiddleware(ctx context.Context, cl client.Client, log *logger.Logger) Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func NewMiddleware(handler http.Handler, log *logger.Logger) *Middleware {
+	return &Middleware{
+		Handler: handler,
+		Log:     log,
+	}
+}
+
+func (m *Middleware) WithLog() *Middleware {
+	return &Middleware{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			m.Handler.ServeHTTP(w, r)
+
+			startTime := time.Now()
+			// status := m.handler.Status
+
+			fields := []interface{}{
+				"type", "access",
+				"response_time", time.Since(startTime).Seconds(),
+				"protocol", r.Proto,
+				"http_status_code", status,
+				"http_method", r.Method,
+				"url", r.RequestURI,
+				"http_host", r.Host,
+				"request_size", r.ContentLength,
+				// "response_size", wr.size,
+			}
+			ip, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err == nil {
+				fields = append(fields, "remote_ipaddr", ip)
+			}
+			ua := r.Header.Get("User-Agent")
+			if len(ua) > 0 {
+				fields = append(fields, "http_user_agent", ua)
+			}
+			m.Log.Info("access", fields...)
+		}),
+	}
+}
+
+func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middleware {
+	return &Middleware{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var inputData ExtenderArgs
 
 			reader := http.MaxBytesReader(w, r.Body, 10<<20)
 			if err := json.NewDecoder(reader).Decode(&inputData); err != nil {
-				log.Error(err, "[ShouldProcessPodMiddleware] unable to decode filter request")
+				m.Log.Error(err, "[ShouldProcessPodMiddleware] unable to decode filter request")
 				httpError(w, "unable to decode request", http.StatusBadRequest)
 				return
 			}
@@ -39,7 +77,7 @@ func ShouldProcessPodMiddleware(ctx context.Context, cl client.Client, log *logg
 			pvcs := &corev1.PersistentVolumeClaimList{}
 			err := cl.List(ctx, pvcs)
 			if err != nil {
-				log.Error(err, "[shouldProcessPodMiddleware] error listing PVCs")
+				m.Log.Error(err, "[shouldProcessPodMiddleware] error listing PVCs")
 				http.Error(w, "error listing PVCs", http.StatusInternalServerError)
 			}
 
@@ -48,25 +86,25 @@ func ShouldProcessPodMiddleware(ctx context.Context, cl client.Client, log *logg
 				pvcMap[pvc.Name] = &pvc
 			}
 
-			shouldProcess, volumes, err := shouldProcessPod(ctx, cl, pvcMap, log, pod, consts.SdsReplicatedVolumeProvisioner)
+			shouldProcess, volumes, err := shouldProcessPod(ctx, cl, pvcMap, m.Log, pod, consts.SdsReplicatedVolumeProvisioner)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[shouldProcessPodMiddleware] error processing pod %s/%s: %v", pod.Namespace, pod.Name))
+				m.Log.Error(err, fmt.Sprintf("[shouldProcessPodMiddleware] error processing pod %s/%s: %v", pod.Namespace, pod.Name))
 				http.Error(w, fmt.Sprintf("Error processing pod: %v", err), http.StatusInternalServerError)
 				return
 			}
 
 			if !shouldProcess {
-				log.Trace(fmt.Sprintf("[shouldProcessPodMiddleware] pod %s/%s should not be processed", pod.Namespace, pod.Name))
+				m.Log.Trace(fmt.Sprintf("[shouldProcessPodMiddleware] pod %s/%s should not be processed", pod.Namespace, pod.Name))
 				result := &ExtenderFilterResult{NodeNames: inputData.NodeNames}
 				if err := json.NewEncoder(w).Encode(result); err != nil {
-					log.Error(err, "[ShouldProcessPodMiddleware] unable to decode filter request")
+					m.Log.Error(err, "[ShouldProcessPodMiddleware] unable to decode filter request")
 					httpError(w, "unable to decode request", http.StatusBadRequest)
 					return
 				}
 				return
 			}
-			log.Trace(fmt.Sprintf("[shouldProcessPodMiddleware] pod %s/%s is eligible, matched volumes: %+v", pod.Namespace, pod.Name, volumes))
-			next.ServeHTTP(w, r)
-		})
+			m.Log.Trace(fmt.Sprintf("[shouldProcessPodMiddleware] pod %s/%s is eligible, matched volumes: %+v", pod.Namespace, pod.Name, volumes))
+			m.Handler.ServeHTTP(w, r)
+		}),
 	}
 }

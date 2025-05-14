@@ -179,7 +179,7 @@ func subMain(ctx context.Context) error {
 	s := scheduler.NewScheduler(ctx, client, log, cacheMrg, config.DefaultDivisor)
 	log.Info("[subMain] scheduler handler initialized")
 
-	h := scheduler.NewHandler(log, s)
+	handler := scheduler.NewHandler(log, s)
 
 	if err = controller.RunPVCWatcherCacheController(mgr, log, cacheMrg); err != nil {
 		log.Error(err, fmt.Sprintf("[subMain] unable to run %s controller", controller.PVCWatcherCacheCtrlName))
@@ -205,12 +205,18 @@ func subMain(ctx context.Context) error {
 	}
 	log.Info("[subMain] successfully AddReadyzCheck")
 
-	hh := accessLogHandler(ctx, h)
-	handler := scheduler.ApplyMiddlewares(hh, scheduler.ShouldProcessPodMiddleware(ctx, client, log))
+	mux := http.NewServeMux()
+	mux.HandleFunc("/scheduler/filter", handler.Filter)
+	mux.HandleFunc("/scheduler/prioritize", handler.Prioritize)
+	mux.HandleFunc("/status", handler.Status)
+
+	m := scheduler.NewMiddleware(mux, log).
+		WithLog().
+		WithPodCheck(ctx, client)
 
 	serv := &http.Server{
 		Addr:         config.ListenAddr,
-		Handler:      handler,
+		Handler:      m.Handler,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

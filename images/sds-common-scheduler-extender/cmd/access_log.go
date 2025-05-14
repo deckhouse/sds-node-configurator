@@ -31,26 +31,24 @@ type accessLogResponseWriter struct {
 	size       int
 }
 
-func (w *accessLogResponseWriter) Write(data []byte) (int, error) {
-	n, err := w.ResponseWriter.Write(data)
-	w.size += n
+func (wr *accessLogResponseWriter) Write(data []byte) (int, error) {
+	n, err := wr.ResponseWriter.Write(data)
+	wr.size += n
 	return n, err
 }
 
-func (w *accessLogResponseWriter) WriteHeader(statusCode int) {
-	w.statusCode = statusCode
-	w.ResponseWriter.WriteHeader(statusCode)
+func (wr *accessLogResponseWriter) WriteHeader(statusCode int) {
+	wr.statusCode = statusCode
+	wr.ResponseWriter.WriteHeader(statusCode)
 }
 
-func accessLogHandler(ctx context.Context, next http.Handler) http.Handler {
+func (wr *accessLogResponseWriter) accessLogHandler(ctx context.Context, next http.Handler) http.Handler {
 	logger := log.FromContext(ctx)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		startTime := time.Now()
 
-		accessLogRW := &accessLogResponseWriter{ResponseWriter: w}
-
-		next.ServeHTTP(accessLogRW, r)
-		status := accessLogRW.statusCode
+		next.ServeHTTP(w, r)
+		status := wr.statusCode
 
 		fields := []interface{}{
 			"type", "access",
@@ -61,7 +59,7 @@ func accessLogHandler(ctx context.Context, next http.Handler) http.Handler {
 			"url", r.RequestURI,
 			"http_host", r.Host,
 			"request_size", r.ContentLength,
-			"response_size", accessLogRW.size,
+			"response_size", wr.size,
 		}
 		ip, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err == nil {
