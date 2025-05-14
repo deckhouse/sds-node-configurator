@@ -29,6 +29,30 @@ func NewMiddleware(handler http.Handler, log *logger.Logger) *Middleware {
 	}
 }
 
+func (m *Middleware) WithBodyUnmarshal() *Middleware {
+	m.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var inputData ExtenderArgs
+		reader := http.MaxBytesReader(w, r.Body, 10<<20)
+		if err := json.NewDecoder(reader).Decode(&inputData); err != nil {
+			m.Log.Error(err, "[handler] unable to decode filter request")
+			httpError(w, "unable to decode request", http.StatusBadRequest)
+			return
+		}
+
+		m.Log.Trace(fmt.Sprintf("[handler] filter input data: %+v", inputData))
+		if inputData.Pod == nil {
+			m.Log.Error(errors.New("no pod in request"), "[handler] no pod provided for filtering")
+			httpError(w, "no pod in request", http.StatusBadRequest)
+			return
+		}
+
+		cwv := context.WithValue(r.Context(), "pod", inputData)
+		req := r.WithContext(cwv)
+		m.Handler.ServeHTTP(w, req)
+	})
+	return m
+}
+
 func (m *Middleware) WithLog() *Middleware {
 	m.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.Handler.ServeHTTP(w, r)
@@ -62,19 +86,13 @@ func (m *Middleware) WithLog() *Middleware {
 
 func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middleware {
 	m.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var inputData ExtenderArgs
-
-		reader := http.MaxBytesReader(w, r.Body, 10<<20)
-		if err := json.NewDecoder(reader).Decode(&inputData); err != nil {
-			m.Log.Error(err, "[ShouldProcessPodMiddleware] unable to decode filter request")
-			httpError(w, "unable to decode request", http.StatusBadRequest)
+		inputData, ok := r.Context().Value("pod").(ExtenderArgs)
+		if !ok {
+			m.Log.Error(errors.New("pod data not found in context"), "[Filter] missing pod data")
+			httpError(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		pod := inputData.Pod
-		if pod == nil {
-			m.Log.Error(errors.New("[ShouldProcessPodMiddleware] no pod in request"), "")
-			httpError(w, "[ShouldProcessPodMiddleware] no pod in request", http.StatusInternalServerError)
-		}
 
 		pvcs := &corev1.PersistentVolumeClaimList{}
 		if err := cl.List(ctx, pvcs); err != nil {

@@ -211,6 +211,7 @@ func subMain(ctx context.Context) error {
 	mux.HandleFunc("/status", handler.Status)
 
 	handlerWithMiddleware := scheduler.NewMiddleware(mux, log).
+		WithBodyUnmarshal().
 		WithLog().
 		WithPodCheck(ctx, client).
 		Handler
