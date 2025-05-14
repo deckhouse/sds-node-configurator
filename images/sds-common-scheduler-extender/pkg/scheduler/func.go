@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sync"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
@@ -29,11 +30,12 @@ const (
 
 type nodeFilter func([]string, map[string]struct{}) ([]string, error)
 
-func shouldProcessPod(ctx context.Context, cl client.Client, pvcMap map[string]*corev1.PersistentVolumeClaim, log *logger.Logger, pod *corev1.Pod, targetProvisioner string) (bool, []corev1.Volume, error) {
-	log.Trace(fmt.Sprintf("[ShouldProcessPod] targetProvisioner=%s, pod: %+v", targetProvisioner, pod))
-
+func shouldProcessPod(ctx context.Context, cl client.Client, pvcMap map[string]*corev1.PersistentVolumeClaim, log *logger.Logger, pod *corev1.Pod) (bool, []corev1.Volume, error) {
 	shouldProcessPod := false
 	targetProvisionerVolumes := make([]corev1.Volume, 0)
+	targetProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
+
+	log.Trace(fmt.Sprintf("[ShouldProcessPod] targetProvisioners=%+v, pod: %+v", targetProvisioners, pod))
 
 	for _, volume := range pod.Spec.Volumes {
 		if volume.PersistentVolumeClaim == nil {
@@ -55,21 +57,21 @@ func shouldProcessPod(ctx context.Context, cl client.Client, pvcMap map[string]*
 			return false, nil, fmt.Errorf("[ShouldProcessPod] error getting provisioner from PVC %s/%s: %v", pod.Namespace, pvcName)
 		}
 		log.Trace(fmt.Sprintf("[ShouldProcessPod] discovered provisioner: %s", discoveredProvisioner))
-		if discoveredProvisioner == targetProvisioner {
-			log.Trace(fmt.Sprintf("[ShouldProcessPod] provisioner matches targetProvisioner %s. Pod: %s/%s", pod.Namespace, pod.Name, targetProvisioner))
+		if slices.Contains(targetProvisioners, discoveredProvisioner) {
+			log.Trace(fmt.Sprintf("[ShouldProcessPod] provisioner matches targetProvisioner %s. Pod: %s/%s", discoveredProvisioner, pod.Namespace, pod.Name))
 			shouldProcessPod = true
 			targetProvisionerVolumes = append(targetProvisionerVolumes, volume)
 		} else {
-			log.Trace(fmt.Sprintf("[ShouldProcessPod] provisioner %s doesn't match targetProvisioner %s. Skip volume %s.", discoveredProvisioner, targetProvisioner, volume.Name))
+			log.Trace(fmt.Sprintf("[ShouldProcessPod] provisioner %s doesn't match targetProvisioner. Skip volume %s.", discoveredProvisioner, volume.Name))
 		}
 	}
 
 	if shouldProcessPod {
-		log.Trace(fmt.Sprintf("[ShouldProcessPod] targetProvisioner %s found in pod volumes. Pod: %s/%s. Volumes that match: %+v", targetProvisioner, pod.Namespace, pod.Name, targetProvisionerVolumes))
+		log.Trace(fmt.Sprintf("[ShouldProcessPod] targetProvisioner found in pod volumes. Pod: %s/%s. Volumes that match: %+v", pod.Namespace, pod.Name, targetProvisionerVolumes))
 		return true, targetProvisionerVolumes, nil
 	}
 
-	log.Trace(fmt.Sprintf("[ShouldProcessPod] can't find targetProvisioner %s in pod volumes. Skip pod: %s/%s", targetProvisioner, pod.Namespace, pod.Name))
+	log.Trace(fmt.Sprintf("[ShouldProcessPod] can't find targetProvisioner in pod volumes. Skip pod: %s/%s", pod.Namespace, pod.Name))
 	return false, nil, nil
 }
 
