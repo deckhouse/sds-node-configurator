@@ -89,9 +89,6 @@ func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middle
 				pvcMap[pvc.Name] = &pvc
 			}
 
-			fmt.Printf("== pod == %v+", pod)
-			fmt.Printf("== pvcMap == %v+", pvcMap)
-
 			volumes, err := shouldProcessPod(ctx, cl, pvcMap, m.Log, pod)
 			if err != nil {
 				m.Log.Error(err, fmt.Sprintf("[shouldProcessPodMiddleware] error processing pod %s/%s: %v", pod.Namespace, pod.Name))
