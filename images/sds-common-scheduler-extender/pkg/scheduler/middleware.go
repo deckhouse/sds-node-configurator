@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -90,7 +89,7 @@ func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middle
 				pvcMap[pvc.Name] = &pvc
 			}
 
-			shouldProcess, volumes, err := shouldProcessPod(ctx, cl, pvcMap, m.Log, pod, consts.SdsReplicatedVolumeProvisioner)
+			shouldProcess, volumes, err := shouldProcessPod(ctx, cl, pvcMap, m.Log, pod)
 			if err != nil {
 				m.Log.Error(err, fmt.Sprintf("[shouldProcessPodMiddleware] error processing pod %s/%s: %v", pod.Namespace, pod.Name))
 				http.Error(w, fmt.Sprintf("Error processing pod: %v", err), http.StatusInternalServerError)
