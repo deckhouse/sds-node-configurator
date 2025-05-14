@@ -155,28 +155,29 @@ func newBlockDeviceLabels(blockDevice *v1alpha1.BlockDevice) map[string]string {
 	}
 
 	result := make(map[string]string, resultItemCount)
+
 	maps.Copy(result, blockDevice.Labels)
 
 	slug.Lowercase = false
 	slug.MaxLength = 63
 	slug.EnableSmartTruncate = false
 	maps.Copy(result, map[string]string{
-		MetadataNameLabelKey:                  slug.Make(blockDevice.ObjectMeta.Name),
-		HostNameLabelKey:                      slug.Make(blockDevice.Status.NodeName),
-		BlockDeviceTypeLabelKey:               slug.Make(blockDevice.Status.Type),
-		BlockDeviceFSTypeLabelKey:             slug.Make(blockDevice.Status.FsType),
-		BlockDevicePVUUIDLabelKey:             blockDevice.Status.PVUuid,
-		BlockDeviceVGUUIDLabelKey:             blockDevice.Status.VGUuid,
-		BlockDevicePartUUIDLabelKey:           blockDevice.Status.PartUUID,
-		BlockDeviceLVMVolumeGroupNameLabelKey: slug.Make(blockDevice.Status.LVMVolumeGroupName),
-		BlockDeviceActualVGNameLabelKey:       slug.Make(blockDevice.Status.ActualVGNameOnTheNode),
-		BlockDeviceWWNLabelKey:                slug.Make(blockDevice.Status.Wwn),
-		BlockDeviceSerialLabelKey:             slug.Make(blockDevice.Status.Serial),
-		BlockDeviceSizeLabelKey:               blockDevice.Status.Size.String(),
-		BlockDeviceModelLabelKey:              slug.Make(blockDevice.Status.Model),
-		BlockDeviceRotaLabelKey:               strconv.FormatBool(blockDevice.Status.Rota),
-		BlockDeviceHotPlugLabelKey:            strconv.FormatBool(blockDevice.Status.HotPlug),
-		BlockDeviceMachineIDLabelKey:          slug.Make(blockDevice.Status.MachineID),
+		MetadataNameLabelKey:                           slug.Make(blockDevice.ObjectMeta.Name),
+		HostNameLabelKey:                               slug.Make(blockDevice.Status.NodeName),
+		v1alpha1.BlockDeviceTypeLabelKey:               slug.Make(blockDevice.Status.Type),
+		v1alpha1.BlockDeviceFSTypeLabelKey:             slug.Make(blockDevice.Status.FsType),
+		v1alpha1.BlockDevicePVUUIDLabelKey:             blockDevice.Status.PVUuid,
+		v1alpha1.BlockDeviceVGUUIDLabelKey:             blockDevice.Status.VGUuid,
+		v1alpha1.BlockDevicePartUUIDLabelKey:           blockDevice.Status.PartUUID,
+		v1alpha1.BlockDeviceLVMVolumeGroupNameLabelKey: slug.Make(blockDevice.Status.LVMVolumeGroupName),
+		v1alpha1.BlockDeviceActualVGNameLabelKey:       slug.Make(blockDevice.Status.ActualVGNameOnTheNode),
+		v1alpha1.BlockDeviceWWNLabelKey:                slug.Make(blockDevice.Status.Wwn),
+		v1alpha1.BlockDeviceSerialLabelKey:             slug.Make(blockDevice.Status.Serial),
+		v1alpha1.BlockDeviceSizeLabelKey:               blockDevice.Status.Size.String(),
+		v1alpha1.BlockDeviceModelLabelKey:              slug.Make(blockDevice.Status.Model),
+		v1alpha1.BlockDeviceRotaLabelKey:               strconv.FormatBool(blockDevice.Status.Rota),
+		v1alpha1.BlockDeviceHotPlugLabelKey:            strconv.FormatBool(blockDevice.Status.HotPlug),
+		v1alpha1.BlockDeviceMachineIDLabelKey:          slug.Make(blockDevice.Status.MachineID),
 	})
 
 	return result

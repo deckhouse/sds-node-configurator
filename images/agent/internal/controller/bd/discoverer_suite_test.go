@@ -154,7 +154,7 @@ var _ = Describe("Discoverer", func() {
 										{
 											MatchExpressions: []metav1.LabelSelectorRequirement{
 												{
-													Key:      internal.BlockDeviceWWNLabelKey,
+													Key:      v1alpha1.BlockDeviceWWNLabelKey,
 													Operator: metav1.LabelSelectorOpNotIn,
 													Values:   []string{device.Wwn},
 												},
@@ -166,7 +166,7 @@ var _ = Describe("Discoverer", func() {
 										{
 											MatchExpressions: []metav1.LabelSelectorRequirement{
 												{
-													Key:      internal.BlockDeviceSerialLabelKey,
+													Key:      v1alpha1.BlockDeviceSerialLabelKey,
 													Operator: metav1.LabelSelectorOpNotIn,
 													Values:   []string{device.Serial},
 												},
@@ -326,7 +326,7 @@ var _ = Describe("Discoverer", func() {
 										selectorsWithWWN = append(selectorsWithWWN, metav1.LabelSelector{
 											MatchExpressions: []metav1.LabelSelectorRequirement{
 												{
-													Key:      internal.BlockDeviceWWNLabelKey,
+													Key:      v1alpha1.BlockDeviceWWNLabelKey,
 													Operator: metav1.LabelSelectorOpNotIn,
 													Values:   []string{device.Wwn},
 												},
@@ -339,7 +339,7 @@ var _ = Describe("Discoverer", func() {
 										selectorsWithSerial = append(selectorsWithSerial, metav1.LabelSelector{
 											MatchExpressions: []metav1.LabelSelectorRequirement{
 												{
-													Key:      internal.BlockDeviceSerialLabelKey,
+													Key:      v1alpha1.BlockDeviceSerialLabelKey,
 													Operator: metav1.LabelSelectorOpNotIn,
 													Values:   []string{device.Serial},
 												},

@@ -25,7 +25,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/repository"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
@@ -59,7 +58,7 @@ var _ = Describe("BlockDeviceFilterClient", func() {
 
 	When("one requirement", func() {
 		testRequirement := metav1.LabelSelectorRequirement{
-			Key:      internal.BlockDeviceWWNLabelKey,
+			Key:      v1alpha1.BlockDeviceWWNLabelKey,
 			Operator: metav1.LabelSelectorOpNotIn,
 			Values:   []string{"someWWN"},
 		}
