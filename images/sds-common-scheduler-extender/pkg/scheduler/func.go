@@ -30,7 +30,7 @@ const (
 
 type nodeFilter func([]string, map[string]struct{}) ([]string, error)
 
-func shouldProcessPod(ctx context.Context, cl client.Client, pvcMap map[string]*corev1.PersistentVolumeClaim, log *logger.Logger, pod *corev1.Pod) (bool, []corev1.Volume, error) {
+func shouldProcessPod(ctx context.Context, cl client.Client, pvcMap map[string]*corev1.PersistentVolumeClaim, log *logger.Logger, pod *corev1.Pod) ([]corev1.Volume, error) {
 	shouldProcessPod := false
 	targetProvisionerVolumes := make([]corev1.Volume, 0)
 	targetProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
@@ -47,14 +47,14 @@ func shouldProcessPod(ctx context.Context, cl client.Client, pvcMap map[string]*
 		pvcName := volume.PersistentVolumeClaim.ClaimName
 		pvc, found := pvcMap[pvcName]
 		if !found {
-			return false, nil, fmt.Errorf("[ShouldProcessPod] error getting PVC %s/%s: %v", pod.Namespace, pvcName)
+			return nil, fmt.Errorf("[ShouldProcessPod] error getting PVC %s/%s: %v", pod.Namespace, pvcName)
 		}
 
 		log.Trace(fmt.Sprintf("[ShouldProcessPod] Successfully get PVC %s/%s: %+v", pod.Namespace, pvcName, pvc))
 
 		discoveredProvisioner, err := getProvisionerFromPVC(ctx, cl, log, pvc)
 		if err != nil {
-			return false, nil, fmt.Errorf("[ShouldProcessPod] error getting provisioner from PVC %s/%s: %v", pod.Namespace, pvcName)
+			return nil, fmt.Errorf("[ShouldProcessPod] error getting provisioner from PVC %s/%s: %v", pod.Namespace, pvcName)
 		}
 		log.Trace(fmt.Sprintf("[ShouldProcessPod] discovered provisioner: %s", discoveredProvisioner))
 		if slices.Contains(targetProvisioners, discoveredProvisioner) {
@@ -68,11 +68,11 @@ func shouldProcessPod(ctx context.Context, cl client.Client, pvcMap map[string]*
 
 	if shouldProcessPod {
 		log.Trace(fmt.Sprintf("[ShouldProcessPod] targetProvisioner found in pod volumes. Pod: %s/%s. Volumes that match: %+v", pod.Namespace, pod.Name, targetProvisionerVolumes))
-		return true, targetProvisionerVolumes, nil
+		return targetProvisionerVolumes, nil
 	}
 
 	log.Trace(fmt.Sprintf("[ShouldProcessPod] can't find targetProvisioner in pod volumes. Skip pod: %s/%s", pod.Namespace, pod.Name))
-	return false, nil, nil
+	return nil, errors.New(fmt.Sprintf("[ShouldProcessPod] can't find targetProvisioner in pod volumes. Skip pod: %s/%s"))
 }
 
 func getProvisionerFromPVC(ctx context.Context, cl client.Client, log *logger.Logger, pvc *corev1.PersistentVolumeClaim) (string, error) {

@@ -89,15 +89,12 @@ func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middle
 				pvcMap[pvc.Name] = &pvc
 			}
 
-			shouldProcess, volumes, err := shouldProcessPod(ctx, cl, pvcMap, m.Log, pod)
+			fmt.Printf("== pod == %v+", pod)
+			fmt.Printf("== pvcMap == %v+", pvcMap)
+
+			volumes, err := shouldProcessPod(ctx, cl, pvcMap, m.Log, pod)
 			if err != nil {
 				m.Log.Error(err, fmt.Sprintf("[shouldProcessPodMiddleware] error processing pod %s/%s: %v", pod.Namespace, pod.Name))
-				http.Error(w, fmt.Sprintf("Error processing pod: %v", err), http.StatusInternalServerError)
-				return
-			}
-
-			if !shouldProcess {
-				m.Log.Trace(fmt.Sprintf("[shouldProcessPodMiddleware] pod %s/%s should not be processed", pod.Namespace, pod.Name))
 				result := &ExtenderFilterResult{NodeNames: inputData.NodeNames}
 				if err := json.NewEncoder(w).Encode(result); err != nil {
 					m.Log.Error(err, "[ShouldProcessPodMiddleware] unable to decode filter request")
@@ -106,6 +103,7 @@ func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middle
 				}
 				return
 			}
+
 			m.Log.Trace(fmt.Sprintf("[shouldProcessPodMiddleware] pod %s/%s is eligible, matched volumes: %+v", pod.Namespace, pod.Name, volumes))
 			m.Handler.ServeHTTP(w, r)
 		}),
