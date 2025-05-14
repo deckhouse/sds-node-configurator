@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 
 	v1 "k8s.io/api/core/v1"
@@ -18,23 +17,6 @@ func (s *scheduler) Prioritize(inputData ExtenderArgs) ([]HostPriority, error) {
 
 	s.log.Debug(fmt.Sprintf("[prioritize] prioritizing for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
 	s.log.Trace(fmt.Sprintf("[prioritize] Pod: %+v, Nodes: %+v", inputData.Pod, nodeNames))
-
-	shouldProcess, _, err := shouldProcessPod(s.ctx, s.client, nil, s.log, inputData.Pod, consts.SdsReplicatedVolumeProvisioner)
-	if err != nil {
-		return nil, fmt.Errorf("unable to check if Pod should be processed: %w", err)
-	}
-
-	if !shouldProcess {
-		s.log.Debug(fmt.Sprintf("[prioritize] Pod %s/%s should not be processed", inputData.Pod.Namespace, inputData.Pod.Name))
-		scores := make([]HostPriority, 0, len(nodeNames))
-		for _, nodeName := range nodeNames {
-			scores = append(scores, HostPriority{
-				Host:  nodeName,
-				Score: 0,
-			})
-		}
-		return scores, nil
-	}
 
 	input, err := s.collectPrioritizeInput(inputData.Pod, nodeNames)
 	if err != nil {
