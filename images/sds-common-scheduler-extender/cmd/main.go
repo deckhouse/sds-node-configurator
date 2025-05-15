@@ -206,15 +206,17 @@ func subMain(ctx context.Context) error {
 	log.Info("[subMain] successfully AddReadyzCheck")
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/scheduler/filter", handler.Filter)
-	mux.HandleFunc("/scheduler/prioritize", handler.Prioritize)
-	mux.HandleFunc("/status", handler.Status)
 
 	handlerWithMiddleware := scheduler.NewMiddleware(mux, log).
 		WithLog().
 		WithPodCheck(ctx, client).
 		WithBodyUnmarshal().
 		Handler
+
+	mux.HandleFunc("/scheduler/filter", http.HandlerFunc(handler.Filter))
+	mux.HandleFunc("/scheduler/prioritize", http.HandlerFunc(handler.Prioritize))
+	mux.HandleFunc("/status", http.HandlerFunc(handler.Status))
+	// mux.HandleFunc("/status", handler.Status)
 
 	serv := &http.Server{
 		Addr:         config.ListenAddr,

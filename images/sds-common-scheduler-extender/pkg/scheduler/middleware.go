@@ -96,7 +96,7 @@ func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middle
 
 		pvcs := &corev1.PersistentVolumeClaimList{}
 		if err := cl.List(ctx, pvcs); err != nil {
-			m.Log.Error(err, "[shouldProcessPodMiddleware] error listing PVCs")
+			m.Log.Error(err, "[WithPodCheck] error listing PVCs")
 			http.Error(w, "error listing PVCs", http.StatusInternalServerError)
 		}
 
@@ -107,18 +107,32 @@ func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middle
 
 		volumes, err := shouldProcessPod(ctx, cl, pvcMap, m.Log, pod)
 		if err != nil {
-			m.Log.Error(err, fmt.Sprintf("[shouldProcessPodMiddleware] error processing pod %s/%s: %v", pod.Namespace, pod.Name))
+			m.Log.Error(err, fmt.Sprintf("[WithPodCheck] error processing pod %s/%s: %v", pod.Namespace, pod.Name))
 			result := &ExtenderFilterResult{NodeNames: inputData.NodeNames}
 			if err := json.NewEncoder(w).Encode(result); err != nil {
-				m.Log.Error(err, "[ShouldProcessPodMiddleware] unable to decode request")
+				m.Log.Error(err, "[WithPodCheck] unable to decode request")
 				http.Error(w, "unable to decode request", http.StatusBadRequest)
 				return
 			}
 			return
 		}
 
-		m.Log.Trace(fmt.Sprintf("[shouldProcessPodMiddleware] pod %s/%s is eligible, matched volumes: %+v", pod.Namespace, pod.Name, volumes))
+		m.Log.Trace(fmt.Sprintf("[WithPodCheck] pod %s/%s is eligible, matched volumes: %+v", pod.Namespace, pod.Name, volumes))
 		m.Handler.ServeHTTP(w, r)
 	})
 	return m
+}
+
+// HandlerFunc преобразует http.HandlerFunc в http.Handler, интегрируя его с цепочкой middleware
+func (m *Middleware) HandleFunc(f http.HandlerFunc) http.HandlerFunc {
+	// Создаем новый Handler, который сначала выполняет middleware, а затем f
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Если m.Handler содержит middleware (WithLog, WithPodCheck, WithBodyUnmarshal),
+		// они будут выполнены
+		if m.Handler != nil {
+			m.Handler.ServeHTTP(w, r)
+		}
+		// Вызываем конечный обработчик
+		f.ServeHTTP(w, r)
+	})
 }
