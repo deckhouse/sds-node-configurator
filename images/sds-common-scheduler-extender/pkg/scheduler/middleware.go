@@ -35,18 +35,18 @@ func (m *Middleware) WithBodyUnmarshal() *Middleware {
 		reader := http.MaxBytesReader(w, r.Body, 10<<20)
 		if err := json.NewDecoder(reader).Decode(&inputData); err != nil {
 			m.Log.Error(err, "[handler] unable to decode filter request")
-			httpError(w, "unable to decode request", http.StatusBadRequest)
+			http.Error(w, "unable to decode request", http.StatusBadRequest)
 			return
 		}
 
 		m.Log.Trace(fmt.Sprintf("[handler] filter input data: %+v", inputData))
 		if inputData.Pod == nil {
 			m.Log.Error(errors.New("no pod in request"), "[handler] no pod provided for filtering")
-			httpError(w, "no pod in request", http.StatusBadRequest)
+			http.Error(w, "no pod in request", http.StatusBadRequest)
 			return
 		}
 
-		cwv := context.WithValue(r.Context(), "pod", inputData)
+		cwv := context.WithValue(r.Context(), "inputData", inputData)
 		req := r.WithContext(cwv)
 		m.Handler.ServeHTTP(w, req)
 	})
@@ -64,7 +64,7 @@ func (m *Middleware) WithLog() *Middleware {
 			"type", "access",
 			"response_time", time.Since(startTime).Seconds(),
 			"protocol", r.Proto,
-			"http_status_code", status,
+			// "http_status_code", status,
 			"http_method", r.Method,
 			"url", r.RequestURI,
 			"http_host", r.Host,
@@ -86,10 +86,10 @@ func (m *Middleware) WithLog() *Middleware {
 
 func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middleware {
 	m.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		inputData, ok := r.Context().Value("pod").(ExtenderArgs)
+		inputData, ok := r.Context().Value("inputData").(ExtenderArgs)
 		if !ok {
-			m.Log.Error(errors.New("pod data not found in context"), "[Filter] missing pod data")
-			httpError(w, "internal error", http.StatusInternalServerError)
+			m.Log.Error(errors.New("pod data not found in context"), "[WithPodCheck] missing pod data")
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		pod := inputData.Pod
@@ -110,8 +110,8 @@ func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middle
 			m.Log.Error(err, fmt.Sprintf("[shouldProcessPodMiddleware] error processing pod %s/%s: %v", pod.Namespace, pod.Name))
 			result := &ExtenderFilterResult{NodeNames: inputData.NodeNames}
 			if err := json.NewEncoder(w).Encode(result); err != nil {
-				m.Log.Error(err, "[ShouldProcessPodMiddleware] unable to decode filter request")
-				httpError(w, "unable to decode request", http.StatusBadRequest)
+				m.Log.Error(err, "[ShouldProcessPodMiddleware] unable to decode request")
+				http.Error(w, "unable to decode request", http.StatusBadRequest)
 				return
 			}
 			return

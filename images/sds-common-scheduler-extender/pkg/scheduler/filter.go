@@ -3,17 +3,26 @@ package scheduler
 import (
 	"errors"
 	"fmt"
-	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
 )
 
-func status(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	_, err := w.Write([]byte("ok"))
+// Filter processes the filtering logic for a given request.
+func (s *scheduler) Filter(inputData ExtenderArgs) (*ExtenderFilterResult, error) {
+	nodeNames, err := getNodeNames(inputData)
 	if err != nil {
-		fmt.Printf("error occurs on status route, err: %s\n", err.Error())
+		return nil, fmt.Errorf("unable to get node names: %w", err)
 	}
+
+	s.log.Debug(fmt.Sprintf("[filter] filtering for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+	s.log.Trace(fmt.Sprintf("[filter] Pod: %+v, Nodes: %+v", inputData.Pod, nodeNames))
+
+	input, err := s.collectFilterInput(inputData.Pod, nodeNames)
+	if err != nil {
+		return nil, err
+	}
+
+	return filterNodes(s, input)
 }
 
 // collectFilterInput gathers all necessary data for filtering.
@@ -72,27 +81,4 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		DRBDResourceMap:            drbdResourceMap,
 		DRBDNodesMap:               drbdNodesMap,
 	}, nil
-}
-
-// Filter processes the filtering logic for a given request.
-func (s *scheduler) Filter(inputData ExtenderArgs) (*ExtenderFilterResult, error) {
-	nodeNames, err := getNodeNames(inputData)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get node names: %w", err)
-	}
-
-	s.log.Debug(fmt.Sprintf("[filter] filtering for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-	s.log.Trace(fmt.Sprintf("[filter] Pod: %+v, Nodes: %+v", inputData.Pod, nodeNames))
-
-	input, err := s.collectFilterInput(inputData.Pod, nodeNames)
-	if err != nil {
-		return nil, err
-	}
-
-	return filterNodes(s, input)
-}
-
-// httpError writes an HTTP error response.
-func httpError(w http.ResponseWriter, msg string, statusCode int) {
-	http.Error(w, msg, statusCode)
 }
