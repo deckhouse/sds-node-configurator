@@ -29,32 +29,24 @@ func NewHandler(log *logger.Logger, sheduler FiltererPrioritizer) *Handler {
 func (h *Handler) Filter(w http.ResponseWriter, r *http.Request) {
 	h.log.Debug("[handler] starts filtering")
 
-	var inputData ExtenderArgs
-	reader := http.MaxBytesReader(w, r.Body, 10<<20)
-	if err := json.NewDecoder(reader).Decode(&inputData); err != nil {
-		h.log.Error(err, "[handler] unable to decode filter request")
-		httpError(w, "unable to decode request", http.StatusBadRequest)
-		return
-	}
-
-	h.log.Trace(fmt.Sprintf("[handler] filter input data: %+v", inputData))
-	if inputData.Pod == nil {
-		h.log.Error(errors.New("no pod in request"), "[handler] no pod provided for filtering")
-		httpError(w, "no pod in request", http.StatusBadRequest)
+	inputData, ok := r.Context().Value("inputData").(ExtenderArgs)
+	if !ok {
+		h.log.Error(errors.New("pod data not found in context"), "[Filter] missing pod data")
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	result, err := h.scheduler.Filter(inputData)
 	if err != nil {
 		h.log.Error(err, "[handler] filtering failed")
-		httpError(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	w.Header().Set("content-type", "application/json")
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		h.log.Error(err, "[handler] unable to encode filter response")
-		httpError(w, "internal error", http.StatusInternalServerError)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
@@ -64,32 +56,24 @@ func (h *Handler) Filter(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Prioritize(w http.ResponseWriter, r *http.Request) {
 	h.log.Debug("[prioritize] starts serving")
 
-	var inputData ExtenderArgs
-	reader := http.MaxBytesReader(w, r.Body, 10<<20)
-	if err := json.NewDecoder(reader).Decode(&inputData); err != nil {
-		h.log.Error(err, "[prioritize] unable to decode request")
-		httpError(w, "unable to decode request", http.StatusBadRequest)
-		return
-	}
-
-	h.log.Trace(fmt.Sprintf("[prioritize] input data: %+v", inputData))
-	if inputData.Pod == nil {
-		h.log.Error(errors.New("no pod in request"), "[prioritize] no pod provided")
-		httpError(w, "no pod in request", http.StatusBadRequest)
+	inputData, ok := r.Context().Value("inputData").(ExtenderArgs)
+	if !ok {
+		h.log.Error(errors.New("pod data not found in context"), "[Prioritize] missing pod data")
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	result, err := h.scheduler.Prioritize(inputData)
 	if err != nil {
 		h.log.Error(err, "[prioritize] prioritization failed")
-		httpError(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	w.Header().Set("content-type", "application/json")
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		h.log.Error(err, "[prioritize] unable to encode response")
-		httpError(w, "internal error", http.StatusInternalServerError)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
@@ -97,5 +81,5 @@ func (h *Handler) Prioritize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
-	status(w, r)
+	Status(w, r)
 }

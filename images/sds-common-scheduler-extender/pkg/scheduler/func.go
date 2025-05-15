@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"slices"
 	"sync"
 
@@ -1081,4 +1082,12 @@ func getCommonNodesByStorageClasses(podStorageClasses map[string]*v1.StorageClas
 	}
 
 	return result, nil
+}
+
+func Status(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, err := w.Write([]byte("ok"))
+	if err != nil {
+		fmt.Printf("error occurs on status route, err: %s\n", err.Error())
+	}
 }
