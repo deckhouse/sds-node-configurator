@@ -207,17 +207,8 @@ func subMain(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 
-	// schedulerHandler := scheduler.PodCheckMiddleware(
-	// 	ctx,
-	// 	client,
-	// 	scheduler.LogMiddleware(
-	// 		scheduler.BodyUnmarshalMiddleware(http.HandlerFunc(handler.Filter), log),
-	// 		log,
-	// 	),
-	// 	log,
-	// )
-
-	schedulerHandler := scheduler.BodyUnmarshalMiddleware(
+	//TODO may be this approach needs to be simplified somehow
+	filteringHandler := scheduler.BodyUnmarshalMiddleware(
 		scheduler.LogMiddleware(
 			scheduler.PodCheckMiddleware(ctx, client, http.HandlerFunc(handler.Filter), log),
 			log,
@@ -225,8 +216,16 @@ func subMain(ctx context.Context) error {
 		log,
 	)
 
-	mux.Handle("/scheduler/filter", schedulerHandler)
-	mux.Handle("/scheduler/prioritize", schedulerHandler)
+	prioritizingHandler := scheduler.BodyUnmarshalMiddleware(
+		scheduler.LogMiddleware(
+			scheduler.PodCheckMiddleware(ctx, client, http.HandlerFunc(handler.Prioritize), log),
+			log,
+		),
+		log,
+	)
+
+	mux.Handle("/scheduler/filter", filteringHandler)
+	mux.Handle("/scheduler/prioritize", prioritizingHandler)
 	mux.HandleFunc("/status", handler.Status)
 
 	serv := &http.Server{
