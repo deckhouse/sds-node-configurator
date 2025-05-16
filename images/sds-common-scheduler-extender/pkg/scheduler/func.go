@@ -548,7 +548,7 @@ func scoreSingleNode(s *scheduler, input *PrioritizeInput, lvgInfo *LVGScoreInfo
 
 	lvgsFromNode := lvgInfo.NodeToLVGs[nodeName]
 	var totalFreeSpaceLeftPercent int64
-	var replicaCountOnNode int
+	replicaCountOnNode := 0
 
 	for _, pvc := range input.PVCs {
 		pvcReq := input.PVCRequests[pvc.Name]
@@ -560,7 +560,7 @@ func scoreSingleNode(s *scheduler, input *PrioritizeInput, lvgInfo *LVGScoreInfo
 			continue
 		}
 
-		replicaCountOnNode++
+		replicaCountOnNode += 10
 		lvg := lvgInfo.LVGs[commonLVG.Name]
 
 		freeSpace, err := calculateFreeSpace(lvg, s.cacheMgr, &pvcReq, commonLVG, s.log, pvc, nodeName)

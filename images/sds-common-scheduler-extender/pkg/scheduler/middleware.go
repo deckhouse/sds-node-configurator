@@ -14,48 +14,37 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// Middleware-функция
-// type Middleware func(http.Handler) http.Handler
+// type Middleware struct {
+// 	Handler http.Handler
+// 	Log     *logger.Logger
+// }
 
-type Middleware struct {
-	Handler http.Handler
-	Log     *logger.Logger
-}
+// func NewMiddleware(handler http.Handler, log *logger.Logger) *Middleware {
+// 	return &Middleware{
+// 		Handler: handler,
+// 		Log:     log,
+// 	}
+// }
 
-func NewMiddleware(handler http.Handler, log *logger.Logger) *Middleware {
-	return &Middleware{
-		Handler: handler,
-		Log:     log,
-	}
-}
-
-func (m *Middleware) WithBodyUnmarshal() *Middleware {
-	m.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func BodyUnmarshalMiddleware(next http.Handler, log *logger.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var inputData ExtenderArgs
 		reader := http.MaxBytesReader(w, r.Body, 10<<20)
 		if err := json.NewDecoder(reader).Decode(&inputData); err != nil {
-			m.Log.Error(err, "[handler] unable to decode filter request")
+			log.Error(err, "[handler] unable to decode filter request")
 			http.Error(w, "unable to decode request", http.StatusBadRequest)
-			return
-		}
-
-		m.Log.Trace(fmt.Sprintf("[handler] filter input data: %+v", inputData))
-		if inputData.Pod == nil {
-			m.Log.Error(errors.New("no pod in request"), "[handler] no pod provided for filtering")
-			http.Error(w, "no pod in request", http.StatusBadRequest)
 			return
 		}
 
 		cwv := context.WithValue(r.Context(), "inputData", inputData)
 		req := r.WithContext(cwv)
-		m.Handler.ServeHTTP(w, req)
+		next.ServeHTTP(w, req)
 	})
-	return m
 }
 
-func (m *Middleware) WithLog() *Middleware {
-	m.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		m.Handler.ServeHTTP(w, r)
+func LogMiddleware(next http.Handler, log *logger.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
 
 		startTime := time.Now()
 		// status := m.handler.Status
@@ -79,16 +68,15 @@ func (m *Middleware) WithLog() *Middleware {
 		if len(ua) > 0 {
 			fields = append(fields, "http_user_agent", ua)
 		}
-		m.Log.Info("access", fields...)
+		log.Info("access", fields...)
 	})
-	return m
 }
 
-func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middleware {
-	m.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func PodCheckMiddleware(ctx context.Context, cl client.Client, next http.Handler, log *logger.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		inputData, ok := r.Context().Value("inputData").(ExtenderArgs)
 		if !ok {
-			m.Log.Error(errors.New("pod data not found in context"), "[WithPodCheck] missing pod data")
+			log.Error(errors.New("pod data not found in context"), "[WithPodCheck] missing pod data")
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -96,7 +84,7 @@ func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middle
 
 		pvcs := &corev1.PersistentVolumeClaimList{}
 		if err := cl.List(ctx, pvcs); err != nil {
-			m.Log.Error(err, "[WithPodCheck] error listing PVCs")
+			log.Error(err, "[WithPodCheck] error listing PVCs")
 			http.Error(w, "error listing PVCs", http.StatusInternalServerError)
 		}
 
@@ -105,34 +93,19 @@ func (m *Middleware) WithPodCheck(ctx context.Context, cl client.Client) *Middle
 			pvcMap[pvc.Name] = &pvc
 		}
 
-		volumes, err := shouldProcessPod(ctx, cl, pvcMap, m.Log, pod)
+		volumes, err := shouldProcessPod(ctx, cl, pvcMap, log, pod)
 		if err != nil {
-			m.Log.Error(err, fmt.Sprintf("[WithPodCheck] error processing pod %s/%s: %v", pod.Namespace, pod.Name))
+			log.Error(err, fmt.Sprintf("[WithPodCheck] error processing pod %s/%s: %v", pod.Namespace, pod.Name))
 			result := &ExtenderFilterResult{NodeNames: inputData.NodeNames}
 			if err := json.NewEncoder(w).Encode(result); err != nil {
-				m.Log.Error(err, "[WithPodCheck] unable to decode request")
+				log.Error(err, "[WithPodCheck] unable to decode request")
 				http.Error(w, "unable to decode request", http.StatusBadRequest)
 				return
 			}
 			return
 		}
 
-		m.Log.Trace(fmt.Sprintf("[WithPodCheck] pod %s/%s is eligible, matched volumes: %+v", pod.Namespace, pod.Name, volumes))
-		m.Handler.ServeHTTP(w, r)
-	})
-	return m
-}
-
-// HandlerFunc преобразует http.HandlerFunc в http.Handler, интегрируя его с цепочкой middleware
-func (m *Middleware) HandleFunc(f http.HandlerFunc) http.HandlerFunc {
-	// Создаем новый Handler, который сначала выполняет middleware, а затем f
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Если m.Handler содержит middleware (WithLog, WithPodCheck, WithBodyUnmarshal),
-		// они будут выполнены
-		if m.Handler != nil {
-			m.Handler.ServeHTTP(w, r)
-		}
-		// Вызываем конечный обработчик
-		f.ServeHTTP(w, r)
+		log.Trace(fmt.Sprintf("[WithPodCheck] pod %s/%s is eligible, matched volumes: %+v", pod.Namespace, pod.Name, volumes))
+		next.ServeHTTP(w, r)
 	})
 }
