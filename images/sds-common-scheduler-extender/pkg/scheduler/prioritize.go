@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -66,7 +67,7 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		storagePoolMap[storagePool.Name] = &storagePool
 	}
 
-	return &PrioritizeInput{
+	res := &PrioritizeInput{
 		Pod:            pod,
 		NodeNames:      nodeNames,
 		PVCs:           managedPVCs,
@@ -74,7 +75,10 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		PVCRequests:    pvcRequests,
 		StoragePoolMap: storagePoolMap,
 		DefaultDivisor: s.defaultDivisor,
-	}, nil
+	}
+	b, _ := json.MarshalIndent(res, "", "  ")
+	s.log.Trace(fmt.Sprintf("[collectPrioritizeInput] PrioritizeInput: %+v", string(b)))
+	return res, nil
 }
 
 // scoreNodes prioritizes nodes based on storage criteria.
