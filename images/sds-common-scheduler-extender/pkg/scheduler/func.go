@@ -36,10 +36,6 @@ func shouldProcessPod(ctx context.Context, cl client.Client, pvcMap map[string]*
 	targetProvisionerVolumes := make([]corev1.Volume, 0)
 	targetProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
 
-	fmt.Printf("== pod == %v+\n", pod)
-	fmt.Printf("== log == %v\n", log)
-	fmt.Printf("== pvcMap == %v+\n", pvcMap)
-
 	log.Trace(fmt.Sprintf("[ShouldProcessPod] targetProvisioners=%+v, pod: %+v", targetProvisioners, pod))
 
 	for _, volume := range pod.Spec.Volumes {
