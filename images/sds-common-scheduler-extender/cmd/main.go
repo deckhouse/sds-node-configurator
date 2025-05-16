@@ -207,11 +207,19 @@ func subMain(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 
-	schedulerHandler := scheduler.PodCheckMiddleware(
-		ctx,
-		client,
+	// schedulerHandler := scheduler.PodCheckMiddleware(
+	// 	ctx,
+	// 	client,
+	// 	scheduler.LogMiddleware(
+	// 		scheduler.BodyUnmarshalMiddleware(http.HandlerFunc(handler.Filter), log),
+	// 		log,
+	// 	),
+	// 	log,
+	// )
+
+	schedulerHandler := scheduler.BodyUnmarshalMiddleware(
 		scheduler.LogMiddleware(
-			scheduler.BodyUnmarshalMiddleware(http.HandlerFunc(handler.Filter), log),
+			scheduler.PodCheckMiddleware(ctx, client, http.HandlerFunc(handler.Filter), log),
 			log,
 		),
 		log,
