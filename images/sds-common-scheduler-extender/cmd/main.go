@@ -207,20 +207,23 @@ func subMain(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 
-	handlerWithMiddleware := scheduler.NewMiddleware(mux, log).
-		WithLog().
-		WithPodCheck(ctx, client).
-		WithBodyUnmarshal().
-		Handler
+	schedulerHandler := scheduler.PodCheckMiddleware(
+		ctx,
+		client,
+		scheduler.LogMiddleware(
+			scheduler.BodyUnmarshalMiddleware(http.HandlerFunc(handler.Filter), log),
+			log,
+		),
+		log,
+	)
 
-	mux.HandleFunc("/scheduler/filter", http.HandlerFunc(handler.Filter))
-	mux.HandleFunc("/scheduler/prioritize", http.HandlerFunc(handler.Prioritize))
-	mux.HandleFunc("/status", http.HandlerFunc(handler.Status))
-	// mux.HandleFunc("/status", handler.Status)
+	mux.Handle("/scheduler/filter", schedulerHandler)
+	mux.Handle("/scheduler/prioritize", schedulerHandler)
+	mux.HandleFunc("/status", handler.Status)
 
 	serv := &http.Server{
 		Addr:         config.ListenAddr,
-		Handler:      handlerWithMiddleware,
+		Handler:      mux,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
