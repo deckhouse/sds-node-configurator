@@ -437,21 +437,24 @@ func collectLVGScoreInfo(s *scheduler, storageClasses map[string]*storagev1.Stor
 
 	usedLVGs := GetCachedLVGsUsedByPodStorageClases(lvgs, scLVGs)
 	for lvgName := range usedLVGs {
-		s.log.Trace(fmt.Sprintf("[scoreNodes] used LVMVolumeGroup %s", lvgName))
+		s.log.Trace(fmt.Sprintf("[collectLVGScoreInfo] used LVMVolumeGroup %s", lvgName))
 	}
 
 	nodeToLVGs := CreateNodeToCachedLVGsMap(usedLVGs)
 	for nodeName, lvgList := range nodeToLVGs {
 		for _, lvg := range lvgList {
-			s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s belongs to node %s", lvg.Name, nodeName))
+			s.log.Trace(fmt.Sprintf("[collectLVGScoreInfo] LVMVolumeGroup %s belongs to node %s", lvg.Name, nodeName))
 		}
 	}
 
-	return &LVGScoreInfo{
+	res := &LVGScoreInfo{
 		NodeToLVGs: nodeToLVGs,
 		SCLVGs:     scLVGs,
 		LVGs:       lvgs,
-	}, nil
+	}
+
+	s.log.Trace(fmt.Sprintf("[collectLVGScoreInfo] LVGScoreInfo %+v", res))
+	return res, nil
 }
 
 func calculateFreeSpace(
