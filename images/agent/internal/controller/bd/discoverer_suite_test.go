@@ -408,5 +408,5 @@ var _ = Describe("Discoverer", func() {
 
 func TestController(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Controller Suite")
+	RunSpecs(t, "Discoverer Suite")
 }
