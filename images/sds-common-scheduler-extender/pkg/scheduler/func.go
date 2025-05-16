@@ -543,13 +543,18 @@ func scoreSingleNode(s *scheduler, input *PrioritizeInput, lvgInfo *LVGScoreInfo
 	s.log.Debug(fmt.Sprintf("[scoreNodes] scoring node %s", nodeName))
 
 	lvgsFromNode := lvgInfo.NodeToLVGs[nodeName]
+	s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroups from node %s: %+v", nodeName, lvgsFromNode))
 	var totalFreeSpaceLeftPercent int64
 	replicaCountOnNode := 0
 
 	for _, pvc := range input.PVCs {
 		pvcReq := input.PVCRequests[pvc.Name]
+		s.log.Trace(fmt.Sprintf("[scoreNodes] pvc %s size request: %+v", pvc.Name, pvcReq))
+
 		lvgsFromSC := lvgInfo.SCLVGs[*pvc.Spec.StorageClassName]
+		s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroups %+v from SC: %s", lvgsFromSC, *pvc.Spec.StorageClassName))
 		commonLVG := findMatchedLVGs(lvgsFromNode, lvgsFromSC)
+		s.log.Trace(fmt.Sprintf("[scoreNodes] Common LVMVolumeGroup %+v of node %s and SC %s", commonLVG, nodeName, *pvc.Spec.StorageClassName))
 
 		if commonLVG == nil {
 			s.log.Warning(fmt.Sprintf("[scoreNodes] unable to match Storage Class's LVMVolumeGroup with node %s for Storage Class %s", nodeName, *pvc.Spec.StorageClassName))
@@ -558,15 +563,18 @@ func scoreSingleNode(s *scheduler, input *PrioritizeInput, lvgInfo *LVGScoreInfo
 
 		replicaCountOnNode += 10
 		lvg := lvgInfo.LVGs[commonLVG.Name]
+		s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s data: %+v", lvg.Name, lvg))
 
 		freeSpace, err := calculateFreeSpace(lvg, s.cacheMgr, &pvcReq, commonLVG, s.log, pvc, nodeName)
 		if err != nil {
 			s.log.Error(err, fmt.Sprintf("[scoreNodes] unable to calculate free space for LVMVolumeGroup %s, PVC: %s, node: %s", lvg.Name, pvc.Name, nodeName))
 			continue
 		}
-
+		s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s freeSpace: %s", lvg.Name, freeSpace.String()))
 		s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s total size: %s", lvg.Name, lvg.Status.VGSize.String()))
 		totalFreeSpaceLeftPercent += getFreeSpaceLeftAsPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
+
+		s.log.Trace(fmt.Sprintf("[scoreNodes] totalFreeSpaceLeftPercent: %d", totalFreeSpaceLeftPercent))
 	}
 
 	nodeScore := replicaCountOnNode
