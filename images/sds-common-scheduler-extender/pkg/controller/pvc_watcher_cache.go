@@ -11,9 +11,10 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/scheduler"
 
-	// srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	slv "github.com/deckhouse/sds-local-volume/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -189,12 +190,19 @@ func reconcilePVC(ctx context.Context, mgr manager.Manager, log *logger.Logger, 
 	cacheMgr.PrintTheCacheLog()
 	log.Debug(fmt.Sprintf("[reconcilePVC] starts to remove space reservation for PVC %s/%s with selected node from the cache", pvc.Namespace, pvc.Name))
 
-	// Space reservation removal when node is selected now happens in sds-local-volume-only
-	// err = schedulerCache.RemoveSpaceReservationForPVCWithSelectedNode(pvc, sc.Parameters[consts.LvmTypeParamKey], nil)
-	// if err != nil {
-	// 	log.Error(err, fmt.Sprintf("[reconcilePVC] unable to remove PVC %s/%s space reservation in the cache", pvc.Namespace, pvc.Name))
-	// 	return
-	// }
+	err = mgr.GetClient().Get(ctx, client.ObjectKey{Name: sc.Name, Namespace: sc.Namespace}, &slv.LocalStorageClass{})
+	if err != nil {
+		// Space reservation removal when node is selected now happens in sds-local-volume-only
+		if !k8serrors.IsNotFound(err) {
+			removalErr := cacheMgr.RemoveSpaceReservationForPVCWithSelectedNode(pvc, sc.Parameters[consts.LvmTypeParamKey], nil)
+			if removalErr != nil {
+				log.Error(removalErr, fmt.Sprintf("[reconcilePVC] unable to remove PVC %s/%s space reservation in the cache", pvc.Namespace, pvc.Name))
+			}
+		} else {
+			log.Error(err, fmt.Sprintf("[reconcilePVC] unable to get LocalStorageClass %s/%s", sc.Namespace, sc.Name))
+			return
+		}
+	}
 	log.Debug(fmt.Sprintf("[reconcilePVC] successfully removed space reservation for PVC %s/%s with selected node", pvc.Namespace, pvc.Name))
 
 	log.Cache(fmt.Sprintf("[reconcilePVC] cache state AFTER the removal space reservation for PVC %s/%s", pvc.Namespace, pvc.Name))
