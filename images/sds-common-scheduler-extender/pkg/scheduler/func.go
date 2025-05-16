@@ -985,8 +985,17 @@ func CreateLVGsMapFromStorageClasses(scs map[string]*v1.StorageClass) (map[strin
 }
 
 func ExtractLVGsFromSC(sc *v1.StorageClass) ([]LVMVolumeGroup, error) {
+	// TODO Simplify this part later
+	lvms, ok := sc.Parameters[consts.ReplicatedLVMVolumeGroupsParamKey]
+	if !ok {
+		lvms, ok = sc.Parameters[consts.LocalLVMVolumeGroupsParamKey]
+		if !ok {
+			return nil, fmt.Errorf("neither %s nor %s found in StorageClass parameters", consts.ReplicatedLVMVolumeGroupsParamKey, consts.LocalLVMVolumeGroupsParamKey)
+		}
+	}
+
 	var lvmVolumeGroups []LVMVolumeGroup
-	err := yaml.Unmarshal([]byte(sc.Parameters[consts.LVMVolumeGroupsParamKey]), &lvmVolumeGroups)
+	err := yaml.Unmarshal([]byte(lvms), &lvmVolumeGroups)
 	if err != nil {
 		return nil, err
 	}
