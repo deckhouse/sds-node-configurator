@@ -21,15 +21,12 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"os"
-	"reflect"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/gosimple/slug"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -38,18 +35,20 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/repository"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 const DiscovererName = "block-device-controller"
 
 type Discoverer struct {
-	cl       client.Client
-	log      logger.Logger
-	bdCl     *utils.BDClient
-	metrics  monitoring.Metrics
-	sdsCache *cache.Cache
-	cfg      DiscovererConfig
+	cl                      client.Client
+	log                     logger.Logger
+	bdCl                    *repository.BDClient
+	blockDeviceFilterClient *repository.BlockDeviceFilterClient
+	metrics                 monitoring.Metrics
+	sdsCache                *cache.Cache
+	cfg                     DiscovererConfig
 }
 
 type DiscovererConfig struct {
@@ -66,12 +65,13 @@ func NewDiscoverer(
 	cfg DiscovererConfig,
 ) *Discoverer {
 	return &Discoverer{
-		cl:       cl,
-		log:      log,
-		bdCl:     utils.NewBDClient(cl, metrics),
-		metrics:  metrics,
-		sdsCache: sdsCache,
-		cfg:      cfg,
+		cl:                      cl,
+		log:                     log,
+		bdCl:                    repository.NewBDClient(cl, metrics),
+		blockDeviceFilterClient: repository.NewBlockDeviceFilterClient(cl, metrics),
+		metrics:                 metrics,
+		sdsCache:                sdsCache,
+		cfg:                     cfg,
 	}
 }
 
@@ -97,9 +97,15 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 	d.log.Info("[RunBlockDeviceController] START reconcile of block devices")
 
 	candidates := d.getBlockDeviceCandidates()
-	if len(candidates) == 0 {
-		d.log.Info("[RunBlockDeviceController] no block devices candidates found. Stop reconciliation")
-		return false
+
+	d.log.Debug("[RunBlockDeviceController] Getting block device filters")
+	selector, err := d.blockDeviceFilterClient.GetAPIBlockDeviceFilters(ctx, DiscovererName)
+	if err != nil {
+		d.log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDeviceFilters")
+		return true
+	}
+	deviceMatchesSelector := func(blockDevice *v1alpha1.BlockDevice) bool {
+		return selector.Matches(labels.Set(blockDevice.Labels))
 	}
 
 	apiBlockDevices, err := d.bdCl.GetAPIBlockDevices(ctx, DiscovererName, nil)
@@ -112,12 +118,22 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 		d.log.Debug("[RunBlockDeviceController] no BlockDevice resources were found")
 	}
 
+	blockDevicesToDelete := make([]*v1alpha1.BlockDevice, 0, len(candidates))
+
 	// create new API devices
 	for _, candidate := range candidates {
 		blockDevice, exist := apiBlockDevices[candidate.Name]
 		if exist {
-			if !hasBlockDeviceDiff(blockDevice, candidate) {
+			addToDeleteListIfNotMatched := func(blockDevice v1alpha1.BlockDevice) {
+				if !deviceMatchesSelector(&blockDevice) {
+					d.log.Debug("[RunBlockDeviceController] block device doesn't match labels and will be deleted")
+					blockDevicesToDelete = append(blockDevicesToDelete, &blockDevice)
+				}
+			}
+
+			if !candidate.HasBlockDeviceDiff(blockDevice) {
 				d.log.Debug(fmt.Sprintf(`[RunBlockDeviceController] no data to update for block device, name: "%s"`, candidate.Name))
+				addToDeleteListIfNotMatched(blockDevice)
 				continue
 			}
 
@@ -127,10 +143,17 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 			}
 
 			d.log.Info(fmt.Sprintf(`[RunBlockDeviceController] updated APIBlockDevice, name: %s`, blockDevice.Name))
+			addToDeleteListIfNotMatched(blockDevice)
 			continue
 		}
 
-		device, err := d.createAPIBlockDevice(ctx, candidate)
+		device := candidate.AsAPIBlockDevice()
+		if !deviceMatchesSelector(&device) {
+			d.log.Debug("[RunBlockDeviceController] block device doesn't match labels and will not be created")
+			continue
+		}
+
+		err := d.createAPIBlockDevice(ctx, &device)
 		if err != nil {
 			d.log.Error(err, fmt.Sprintf("[RunBlockDeviceController] unable to create block device blockDevice, name: %s", candidate.Name))
 			continue
@@ -138,9 +161,20 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 		d.log.Info(fmt.Sprintf("[RunBlockDeviceController] created new APIBlockDevice: %s", candidate.Name))
 
 		// add new api device to the map, so it won't be deleted as fantom
-		apiBlockDevices[candidate.Name] = *device
+		apiBlockDevices[candidate.Name] = device
 	}
 
+	// delete devices doesn't match the filters
+	for _, device := range blockDevicesToDelete {
+		name := device.Name
+		err := d.deleteAPIBlockDevice(ctx, device)
+		if err != nil {
+			d.log.Error(err, fmt.Sprintf("[RunBlockDeviceController] unable to delete APIBlockDevice, name: %s", name))
+			continue
+		}
+		delete(apiBlockDevices, name)
+		d.log.Info(fmt.Sprintf("[RunBlockDeviceController] device deleted, name: %s", name))
+	}
 	// delete api device if device no longer exists, but we still have its api resource
 	d.removeDeprecatedAPIDevices(ctx, candidates, apiBlockDevices)
 
@@ -204,23 +238,7 @@ func (d *Discoverer) getBlockDeviceCandidates() []internal.BlockDeviceCandidate 
 
 	for _, device := range filteredDevices {
 		d.log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Process device: %+v", device))
-		candidate := internal.BlockDeviceCandidate{
-			NodeName:   d.cfg.NodeName,
-			Consumable: checkConsumable(device),
-			Wwn:        device.Wwn,
-			Serial:     device.Serial,
-			Path:       device.Name,
-			Size:       device.Size,
-			Rota:       device.Rota,
-			Model:      device.Model,
-			HotPlug:    device.HotPlug,
-			KName:      device.KName,
-			PkName:     device.PkName,
-			Type:       device.Type,
-			FSType:     device.FSType,
-			MachineID:  d.cfg.MachineID,
-			PartUUID:   device.PartUUID,
-		}
+		candidate := internal.NewBlockDeviceCandidateByDevice(&device, d.cfg.NodeName, d.cfg.MachineID)
 
 		d.log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Get following candidate: %+v", candidate))
 		candidateName := d.createCandidateName(candidate, devices)
@@ -362,27 +380,7 @@ func (d *Discoverer) updateAPIBlockDevice(
 	blockDevice v1alpha1.BlockDevice,
 	candidate internal.BlockDeviceCandidate,
 ) error {
-	blockDevice.Status = v1alpha1.BlockDeviceStatus{
-		Type:                  candidate.Type,
-		FsType:                candidate.FSType,
-		NodeName:              candidate.NodeName,
-		Consumable:            candidate.Consumable,
-		PVUuid:                candidate.PVUuid,
-		VGUuid:                candidate.VGUuid,
-		PartUUID:              candidate.PartUUID,
-		LVMVolumeGroupName:    candidate.LVMVolumeGroupName,
-		ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
-		Wwn:                   candidate.Wwn,
-		Serial:                candidate.Serial,
-		Path:                  candidate.Path,
-		Size:                  *resource.NewQuantity(candidate.Size.Value(), resource.BinarySI),
-		Model:                 candidate.Model,
-		Rota:                  candidate.Rota,
-		HotPlug:               candidate.HotPlug,
-		MachineID:             candidate.MachineID,
-	}
-
-	blockDevice.Labels = configureBlockDeviceLabels(blockDevice)
+	candidate.UpdateAPIBlockDevice(&blockDevice)
 
 	start := time.Now()
 	err := d.cl.Update(ctx, &blockDevice)
@@ -396,32 +394,7 @@ func (d *Discoverer) updateAPIBlockDevice(
 	return nil
 }
 
-func (d *Discoverer) createAPIBlockDevice(ctx context.Context, candidate internal.BlockDeviceCandidate) (*v1alpha1.BlockDevice, error) {
-	blockDevice := &v1alpha1.BlockDevice{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: candidate.Name,
-		},
-		Status: v1alpha1.BlockDeviceStatus{
-			Type:                  candidate.Type,
-			FsType:                candidate.FSType,
-			NodeName:              candidate.NodeName,
-			Consumable:            candidate.Consumable,
-			PVUuid:                candidate.PVUuid,
-			VGUuid:                candidate.VGUuid,
-			PartUUID:              candidate.PartUUID,
-			LVMVolumeGroupName:    candidate.LVMVolumeGroupName,
-			ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
-			Wwn:                   candidate.Wwn,
-			Serial:                candidate.Serial,
-			Path:                  candidate.Path,
-			Size:                  *resource.NewQuantity(candidate.Size.Value(), resource.BinarySI),
-			Model:                 candidate.Model,
-			Rota:                  candidate.Rota,
-			MachineID:             candidate.MachineID,
-		},
-	}
-
-	blockDevice.Labels = configureBlockDeviceLabels(*blockDevice)
+func (d *Discoverer) createAPIBlockDevice(ctx context.Context, blockDevice *v1alpha1.BlockDevice) error {
 	start := time.Now()
 
 	err := d.cl.Create(ctx, blockDevice)
@@ -429,9 +402,9 @@ func (d *Discoverer) createAPIBlockDevice(ctx context.Context, candidate interna
 	d.metrics.APIMethodsExecutionCount(DiscovererName, "create").Inc()
 	if err != nil {
 		d.metrics.APIMethodsErrors(DiscovererName, "create").Inc()
-		return nil, err
+		return err
 	}
-	return blockDevice, nil
+	return nil
 }
 
 func (d *Discoverer) deleteAPIBlockDevice(ctx context.Context, device *v1alpha1.BlockDevice) error {
@@ -444,27 +417,6 @@ func (d *Discoverer) deleteAPIBlockDevice(ctx context.Context, device *v1alpha1.
 		return err
 	}
 	return nil
-}
-
-func hasBlockDeviceDiff(blockDevice v1alpha1.BlockDevice, candidate internal.BlockDeviceCandidate) bool {
-	return candidate.NodeName != blockDevice.Status.NodeName ||
-		candidate.Consumable != blockDevice.Status.Consumable ||
-		candidate.PVUuid != blockDevice.Status.PVUuid ||
-		candidate.VGUuid != blockDevice.Status.VGUuid ||
-		candidate.PartUUID != blockDevice.Status.PartUUID ||
-		candidate.LVMVolumeGroupName != blockDevice.Status.LVMVolumeGroupName ||
-		candidate.ActualVGNameOnTheNode != blockDevice.Status.ActualVGNameOnTheNode ||
-		candidate.Wwn != blockDevice.Status.Wwn ||
-		candidate.Serial != blockDevice.Status.Serial ||
-		candidate.Path != blockDevice.Status.Path ||
-		candidate.Size.Value() != blockDevice.Status.Size.Value() ||
-		candidate.Rota != blockDevice.Status.Rota ||
-		candidate.Model != blockDevice.Status.Model ||
-		candidate.HotPlug != blockDevice.Status.HotPlug ||
-		candidate.Type != blockDevice.Status.Type ||
-		candidate.FSType != blockDevice.Status.FsType ||
-		candidate.MachineID != blockDevice.Status.MachineID ||
-		!reflect.DeepEqual(configureBlockDeviceLabels(blockDevice), blockDevice.Labels)
 }
 
 func getSerialForMultipathDevice(candidate internal.BlockDeviceCandidate, devices []internal.Device) (string, error) {
@@ -549,22 +501,6 @@ func hasValidFSType(fsType string) bool {
 	return false
 }
 
-func checkConsumable(device internal.Device) bool {
-	if device.MountPoint != "" {
-		return false
-	}
-
-	if device.FSType != "" {
-		return false
-	}
-
-	if device.HotPlug {
-		return false
-	}
-
-	return true
-}
-
 func createUniqDeviceName(can internal.BlockDeviceCandidate) string {
 	temp := fmt.Sprintf("%s%s%s%s%s", can.NodeName, can.Wwn, can.Model, can.Serial, can.PartUUID)
 	s := fmt.Sprintf("dev-%x", sha1.Sum([]byte(temp)))
@@ -589,39 +525,4 @@ func readSerialBlockDevice(deviceName string, isMdRaid bool) (string, error) {
 		return "", fmt.Errorf("serial is empty")
 	}
 	return string(serial), nil
-}
-
-func configureBlockDeviceLabels(blockDevice v1alpha1.BlockDevice) map[string]string {
-	var lbls map[string]string
-	if blockDevice.Labels == nil {
-		lbls = make(map[string]string, 16)
-	} else {
-		lbls = make(map[string]string, len(blockDevice.Labels))
-	}
-
-	for key, value := range blockDevice.Labels {
-		lbls[key] = value
-	}
-
-	slug.Lowercase = false
-	slug.MaxLength = 63
-	slug.EnableSmartTruncate = false
-	lbls[internal.MetadataNameLabelKey] = slug.Make(blockDevice.ObjectMeta.Name)
-	lbls[internal.HostNameLabelKey] = slug.Make(blockDevice.Status.NodeName)
-	lbls[internal.BlockDeviceTypeLabelKey] = slug.Make(blockDevice.Status.Type)
-	lbls[internal.BlockDeviceFSTypeLabelKey] = slug.Make(blockDevice.Status.FsType)
-	lbls[internal.BlockDevicePVUUIDLabelKey] = blockDevice.Status.PVUuid
-	lbls[internal.BlockDeviceVGUUIDLabelKey] = blockDevice.Status.VGUuid
-	lbls[internal.BlockDevicePartUUIDLabelKey] = blockDevice.Status.PartUUID
-	lbls[internal.BlockDeviceLVMVolumeGroupNameLabelKey] = slug.Make(blockDevice.Status.LVMVolumeGroupName)
-	lbls[internal.BlockDeviceActualVGNameLabelKey] = slug.Make(blockDevice.Status.ActualVGNameOnTheNode)
-	lbls[internal.BlockDeviceWWNLabelKey] = slug.Make(blockDevice.Status.Wwn)
-	lbls[internal.BlockDeviceSerialLabelKey] = slug.Make(blockDevice.Status.Serial)
-	lbls[internal.BlockDeviceSizeLabelKey] = blockDevice.Status.Size.String()
-	lbls[internal.BlockDeviceModelLabelKey] = slug.Make(blockDevice.Status.Model)
-	lbls[internal.BlockDeviceRotaLabelKey] = strconv.FormatBool(blockDevice.Status.Rota)
-	lbls[internal.BlockDeviceHotPlugLabelKey] = strconv.FormatBool(blockDevice.Status.HotPlug)
-	lbls[internal.BlockDeviceMachineIDLabelKey] = slug.Make(blockDevice.Status.MachineID)
-
-	return lbls
 }

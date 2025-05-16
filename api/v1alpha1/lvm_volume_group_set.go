@@ -20,6 +20,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// +k8s:deepcopy-gen=true
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type LVMVolumeGroupSetList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
@@ -27,6 +29,8 @@ type LVMVolumeGroupSetList struct {
 	Items []LVMVolumeGroupSet `json:"items"`
 }
 
+// +k8s:deepcopy-gen=true
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type LVMVolumeGroupSet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -35,11 +39,14 @@ type LVMVolumeGroupSet struct {
 	Status LVMVolumeGroupSetStatus `json:"status,omitempty"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMVolumeGroupSetSpec struct {
 	NodeSelector *metav1.LabelSelector  `json:"nodeSelector"`
 	LVGTemplate  LVMVolumeGroupTemplate `json:"lvmVolumeGroupTemplate"`
 	Strategy     string                 `json:"strategy"`
 }
+
+// +k8s:deepcopy-gen=true
 type LVMVolumeGroupTemplate struct {
 	Metadata              LVMVolumeGroupTemplateMeta   `json:"metadata"`
 	BlockDeviceSelector   *metav1.LabelSelector        `json:"blockDeviceSelector"`
@@ -48,10 +55,12 @@ type LVMVolumeGroupTemplate struct {
 	Type                  string                       `json:"type"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMVolumeGroupTemplateMeta struct {
 	Labels map[string]string `json:"labels"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMVolumeGroupSetStatus struct {
 	CreatedLVGs                 []LVMVolumeGroupSetStatusLVG `json:"createdLVMVolumeGroups"`
 	CurrentLVMVolumeGroupsCount int                          `json:"currentLVMVolumeGroupsCount"`
@@ -60,6 +69,7 @@ type LVMVolumeGroupSetStatus struct {
 	Reason                      string                       `json:"reason"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMVolumeGroupSetStatusLVG struct {
 	LVMVolumeGroupName string `json:"lvmVolumeGroupName"`
 	NodeName           string `json:"nodeName"`

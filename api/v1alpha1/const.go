@@ -27,4 +27,20 @@ const (
 	PhaseTerminating = "Terminating"
 
 	LLVSNameTag = "storage.deckhouse.io/lvmLogicalVolumeSnapshotName"
+
+	blockDeviceLabelPrefix                = "status.blockdevice.storage.deckhouse.io"
+	BlockDeviceTypeLabelKey               = blockDeviceLabelPrefix + "/type"
+	BlockDeviceFSTypeLabelKey             = blockDeviceLabelPrefix + "/fstype"
+	BlockDevicePVUUIDLabelKey             = blockDeviceLabelPrefix + "/pvuuid"
+	BlockDeviceVGUUIDLabelKey             = blockDeviceLabelPrefix + "/vguuid"
+	BlockDevicePartUUIDLabelKey           = blockDeviceLabelPrefix + "/partuuid"
+	BlockDeviceLVMVolumeGroupNameLabelKey = blockDeviceLabelPrefix + "/lvmvolumegroupname"
+	BlockDeviceActualVGNameLabelKey       = blockDeviceLabelPrefix + "/actualvgnameonthenode"
+	BlockDeviceWWNLabelKey                = blockDeviceLabelPrefix + "/wwn"
+	BlockDeviceSerialLabelKey             = blockDeviceLabelPrefix + "/serial"
+	BlockDeviceSizeLabelKey               = blockDeviceLabelPrefix + "/size"
+	BlockDeviceModelLabelKey              = blockDeviceLabelPrefix + "/model"
+	BlockDeviceRotaLabelKey               = blockDeviceLabelPrefix + "/rota"
+	BlockDeviceHotPlugLabelKey            = blockDeviceLabelPrefix + "/hotplug"
+	BlockDeviceMachineIDLabelKey          = blockDeviceLabelPrefix + "/machineid"
 )

@@ -35,6 +35,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/repository"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -43,8 +44,8 @@ const ReconcilerName = "lvm-volume-group-watcher-controller"
 type Reconciler struct {
 	cl       client.Client
 	log      logger.Logger
-	lvgCl    *utils.LVGClient
-	bdCl     *utils.BDClient
+	lvgCl    *repository.LVGClient
+	bdCl     *repository.BDClient
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
 	cfg      ReconcilerConfig
@@ -68,14 +69,14 @@ func NewReconciler(
 	return &Reconciler{
 		cl:  cl,
 		log: log,
-		lvgCl: utils.NewLVGClient(
+		lvgCl: repository.NewLVGClient(
 			cl,
 			log,
 			metrics,
 			cfg.NodeName,
 			ReconcilerName,
 		),
-		bdCl:     utils.NewBDClient(cl, metrics),
+		bdCl:     repository.NewBDClient(cl, metrics),
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		cfg:      cfg,
