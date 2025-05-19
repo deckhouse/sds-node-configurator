@@ -380,7 +380,9 @@ func filterSingleNode(s *scheduler, nodeName string, filterInput *FilterInput, l
 		pvcRSC := filterInput.ReplicatedSCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
 		commonLVG := findMatchedLVG(nodeLvgs, lvgsFromSC)
 		isDrbdDiskful := isDrbdDiskfulNode(filterInput.DRBDResourceMap, pvc.Spec.VolumeName, nodeName)
-		hasEnoughSpace := nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo.ThickFreeSpaces, lvgInfo.ThinFreeSpaces, commonLVG, pvc, nil, nil, nil)
+
+		lvgs := s.cacheMgr.GetAllLVG()
+		hasEnoughSpace := nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo.ThickFreeSpaces, lvgInfo.ThinFreeSpaces, commonLVG, pvc, lvgs)
 
 		switch pvcRSC.Spec.VolumeAccess {
 		case "Local":
@@ -649,11 +651,11 @@ func nodeHasEnoughSpace(
 	commonLVG *LVMVolumeGroup,
 	pvc *corev1.PersistentVolumeClaim,
 	lvgMap map[string]*snc.LVMVolumeGroup,
-	thickMapMtx *sync.RWMutex,
-	thinMapMtx *sync.RWMutex,
 ) bool {
 	nodeIsOk := true
 	pvcReq := pvcRequests[pvc.Name]
+	thickMapMtx := &sync.RWMutex{}
+	thinMapMtx := &sync.RWMutex{}
 
 	switch pvcReq.DeviceType {
 	case consts.Thick:
@@ -833,11 +835,19 @@ func extractRequestedSize(
 		case corev1.ClaimPending:
 			switch sc.Parameters[consts.LvmTypeParamKey] {
 			case consts.Thick:
+				reqSize := pvc.Spec.Resources.Requests.Storage().Value()
+				if reqSize < 0 {
+					reqSize = 0
+				}
 				pvcRequests[pvc.Name] = PVCRequest{
 					DeviceType:    consts.Thick,
-					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value(),
+					RequestedSize: reqSize,
 				}
 			case consts.Thin:
+				reqSize := pvc.Spec.Resources.Requests.Storage().Value()
+				if reqSize < 0 {
+					reqSize = 0
+				}
 				pvcRequests[pvc.Name] = PVCRequest{
 					DeviceType:    consts.Thin,
 					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value(),
@@ -856,7 +866,6 @@ func extractRequestedSize(
 					DeviceType:    consts.Thick,
 					RequestedSize: reqSize,
 				}
-				// linstor affinity controller
 			case consts.Thin:
 				reqSize := pvc.Spec.Resources.Requests.Storage().Value() - pv.Spec.Capacity.Storage().Value()
 				if reqSize < 0 {
@@ -864,7 +873,7 @@ func extractRequestedSize(
 				}
 				pvcRequests[pvc.Name] = PVCRequest{
 					DeviceType:    consts.Thin,
-					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value() - pv.Spec.Capacity.Storage().Value(),
+					RequestedSize: reqSize,
 				}
 			}
 		}
