@@ -956,7 +956,7 @@ func filterPVCsByProvisioner(log *logger.Logger, podRelatedPVCs map[string]*core
 	filteredPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(podRelatedPVCs))
 	for _, pvc := range podRelatedPVCs {
 		sc := scsUsedByPodPVCs[*pvc.Spec.StorageClassName]
-		if slices.Contains([]string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}, sc.Provisioner) {
+		if !slices.Contains([]string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}, sc.Provisioner) {
 			log.Debug(fmt.Sprintf("[filterNotManagedPVC] filter out PVC %s/%s due to used Storage class %s is not managed by sds-replicated-volume-provisioner", pvc.Name, pvc.Namespace, sc.Name))
 			continue
 		}
