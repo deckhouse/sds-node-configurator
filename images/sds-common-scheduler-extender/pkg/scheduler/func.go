@@ -636,6 +636,7 @@ func getRSCByCS(ctx context.Context, cl client.Client, scs map[string]*v1.Storag
 		}
 	}
 
+	fmt.Printf("[getRSCByCS] result: %+v\n", result)
 	return result, nil
 }
 
@@ -949,6 +950,7 @@ func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map
 		}
 	}
 
+	fmt.Printf("[getStorageClassesUsedByPVCs] result: %+v\n", result)
 	return result, nil
 }
 
