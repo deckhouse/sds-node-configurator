@@ -13,6 +13,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 
+	slv "github.com/deckhouse/sds-local-volume/api/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -199,26 +200,37 @@ func getDRBDResourceMap(ctx context.Context, cl client.Client) (map[string]*srv.
 	return drbdMap, nil
 }
 
-func getDRBDNodesMap(ctx context.Context, cl client.Client) (map[string]*srv.DRBDNode, error) {
-	// TODO remove when there is a controller for DRBDNodes
-	// drbdNodes := &srv.DRBDNodeList{}
-	// err := cl.List(ctx, drbdNodes)
-	// if err != nil {
-	// 	return nil, err
-	// }
+func getDRBDNodesMap(ctx context.Context, cl client.Client) (map[string]struct{}, error) {
+	result := make(map[string]struct{})
 
-	// drbdNodesMap := make(map[string]*srv.DRBDNode, len(drbdNodes.Items))
-	// for _, drbdNode := range drbdNodes.Items {
-	// 	drbdNodesMap[drbdNode.Name] = &drbdNode
-	// }
-
-	drbdNodesMap := map[string]*srv.DRBDNode{
-		"v-voytenok-worker-0": &srv.DRBDNode{},
-		"v-voytenok-worker-1": &srv.DRBDNode{},
-		"v-voytenok-worker-2": &srv.DRBDNode{},
+	lvgList := &snc.LVMVolumeGroupList{}
+	err := cl.List(ctx, lvgList)
+	if err != nil {
+		return result, err
 	}
 
-	return drbdNodesMap, nil
+	lvgMap := make(map[string]*snc.LVMVolumeGroup, len(lvgList.Items))
+	for _, lvg := range lvgList.Items {
+		lvgMap[lvg.Name] = &lvg
+	}
+
+	rspList := &srv.ReplicatedStoragePoolList{}
+	err = cl.List(ctx, rspList)
+	if err != nil {
+		return result, err
+	}
+
+	for _, rsc := range rspList.Items {
+		for _, rscLVG := range rsc.Spec.LVMVolumeGroups {
+			lvg, found := lvgMap[rscLVG.Name]
+			if !found {
+				fmt.Printf("[getDRBDNodesMap] no lvg %s found, can't get a node name for it. skipping iteration")
+			}
+			result[lvg.Spec.Local.NodeName] = struct{}{}
+		}
+	}
+
+	return result, nil
 }
 
 func getPersistentVolumeClaims(ctx context.Context, cl client.Client) (map[string]*corev1.PersistentVolumeClaim, error) {
@@ -378,20 +390,20 @@ func filterSingleNode(s *scheduler, nodeName string, filterInput *FilterInput, l
 
 		lvgsFromSC := lvgInfo.SCLVGs[*pvc.Spec.StorageClassName]
 		pvcRSC := filterInput.ReplicatedSCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
-		commonLVG := findMatchedLVG(nodeLvgs, lvgsFromSC)
+		sharedLVG := findSharedLVG(nodeLvgs, lvgsFromSC)
 		isDrbdDiskful := isDrbdDiskfulNode(filterInput.DRBDResourceMap, pvc.Spec.VolumeName, nodeName)
 
 		lvgs := s.cacheMgr.GetAllLVG()
-		hasEnoughSpace := nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo.ThickFreeSpaces, lvgInfo.ThinFreeSpaces, commonLVG, pvc, lvgs)
+		hasEnoughSpace := nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo.ThickFreeSpaces, lvgInfo.ThinFreeSpaces, sharedLVG, pvc, lvgs)
 
 		switch pvcRSC.Spec.VolumeAccess {
 		case "Local":
 			if pvc.Spec.VolumeName == "" {
-				if commonLVG == nil {
+				if sharedLVG == nil {
 					return fmt.Errorf("node %s does not contain LVGs from storage class %s", nodeName, pvcRSC.Name)
 				}
 				if !hasEnoughSpace {
-					return fmt.Errorf("node does not have enough space in LVG %s for PVC %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name)
+					return fmt.Errorf("node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
 				}
 			} else if !isDrbdDiskful {
 				return fmt.Errorf("node %s is not diskful for PV %s", nodeName, pvc.Spec.VolumeName)
@@ -399,21 +411,21 @@ func filterSingleNode(s *scheduler, nodeName string, filterInput *FilterInput, l
 
 		case "EventuallyLocal":
 			if pvc.Spec.VolumeName == "" {
-				if commonLVG == nil {
+				if sharedLVG == nil {
 					return fmt.Errorf("node %s does not contain LVGs from storage class %s", nodeName, pvcRSC.Name)
 				}
 				if !hasEnoughSpace {
-					return fmt.Errorf("node does not have enough space in LVG %s for PVC %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name)
+					return fmt.Errorf("node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
 				}
 			} else if isDrbdDiskful {
 				return nil
-			} else if commonLVG == nil || !hasEnoughSpace {
+			} else if sharedLVG == nil || !hasEnoughSpace {
 				return fmt.Errorf("node %s does not meet EventuallyLocal criteria for PVC %s", nodeName, pvc.Name)
 			}
 
 		case "PreferablyLocal":
 			if pvc.Spec.VolumeName == "" && !hasEnoughSpace {
-				return fmt.Errorf("node does not have enough space in LVG %s for PVC %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name)
+				return fmt.Errorf("node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
 			}
 		}
 	}
@@ -616,13 +628,14 @@ func isOkNode(_ string) bool {
 	return true
 }
 
-func getRSCByCS(ctx context.Context, cl client.Client, scs map[string]*v1.StorageClass) (map[string]*srv.ReplicatedStorageClass, error) {
-	result := map[string]*srv.ReplicatedStorageClass{}
+func getRSCByCS(ctx context.Context, cl client.Client, scs map[string]*v1.StorageClass) (map[string]*srv.ReplicatedStorageClass, map[string]*slv.LocalStorageClass, error) {
+	SRVresult := map[string]*srv.ReplicatedStorageClass{}
+	SLVresult := map[string]*slv.LocalStorageClass{}
 
 	rscList := &srv.ReplicatedStorageClassList{}
 	err := cl.List(ctx, rscList)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	rscMap := make(map[string]*srv.ReplicatedStorageClass, len(rscList.Items))
@@ -630,17 +643,30 @@ func getRSCByCS(ctx context.Context, cl client.Client, scs map[string]*v1.Storag
 		rscMap[rsc.Name] = &rsc
 	}
 
+	lscList := &slv.LocalStorageClassList{}
+	err = cl.List(ctx, lscList)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	lscMap := make(map[string]*slv.LocalStorageClass, len(lscList.Items))
+	for _, lsc := range lscList.Items {
+		lscMap[lsc.Name] = &lsc
+	}
+
 	for _, sc := range scs {
 		if sc.Provisioner == consts.SdsReplicatedVolumeProvisioner {
-			result[sc.Name] = rscMap[sc.Name]
+			SRVresult[sc.Name] = rscMap[sc.Name]
+		}
+		if sc.Provisioner == consts.SdsLocalVolumeProvisioner {
+			SLVresult[sc.Name] = lscMap[sc.Name]
 		}
 	}
 
-	fmt.Printf("[getRSCByCS] result: %+v\n", result)
-	return result, nil
+	return SRVresult, SLVresult, nil
 }
 
-func isDrbdNode(targetNode string, drbdNodesMap map[string]*srv.DRBDNode) bool {
+func isDrbdNode(targetNode string, drbdNodesMap map[string]struct{}) bool {
 	_, ok := drbdNodesMap[targetNode]
 	return ok
 }
@@ -720,7 +746,7 @@ func findMatchedThinPool(thinPools []snc.LVMVolumeGroupThinPoolStatus, name stri
 // 	return nil
 // }
 
-func findMatchedLVG(nodeLVGs []*snc.LVMVolumeGroup, scLVGs []LVMVolumeGroup) *LVMVolumeGroup {
+func findSharedLVG(nodeLVGs []*snc.LVMVolumeGroup, scLVGs []LVMVolumeGroup) *LVMVolumeGroup {
 	nodeLVGNames := make(map[string]struct{}, len(nodeLVGs))
 	for _, lvg := range nodeLVGs {
 		nodeLVGNames[lvg.Name] = struct{}{}

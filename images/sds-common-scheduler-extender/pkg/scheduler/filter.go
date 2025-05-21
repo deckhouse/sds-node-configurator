@@ -56,7 +56,7 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		return nil, fmt.Errorf("unable to extract PVC request sizes: %w", err)
 	}
 
-	replicatedSCSUsedByPodPVCs, err := getRSCByCS(s.ctx, s.client, scsUsedByPodPVCs)
+	replicatedSCSUsedByPodPVCs, localSCSUsedByPodPVCs, err := getRSCByCS(s.ctx, s.client, scsUsedByPodPVCs)
 	if err != nil {
 		return nil, fmt.Errorf("unable to filter replicated StorageClasses: %w", err)
 	}
@@ -78,6 +78,7 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		SCSUsedByPodPVCs:           scsUsedByPodPVCs,
 		PVCSizeRequests:            pvcSizeRequests,
 		ReplicatedSCSUsedByPodPVCs: replicatedSCSUsedByPodPVCs,
+		LocalSCSUsedByPodPVCs:      localSCSUsedByPodPVCs,
 		DRBDResourceMap:            drbdResourceMap,
 		DRBDNodesMap:               drbdNodesMap,
 	}, nil
