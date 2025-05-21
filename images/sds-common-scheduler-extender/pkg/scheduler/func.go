@@ -355,11 +355,15 @@ func filterNodesParallel(s *scheduler, input *FilterInput, lvgInfo *LVGInfo) (*E
 	for _, nodeName := range input.NodeNames {
 		go func(nodeName string) {
 			defer wg.Done()
-			if err := filterSingleNodeSRV(s, nodeName, input, lvgInfo, commonNodes); err != nil {
-				resCh <- ResultWithError{NodeName: nodeName, Err: err}
-				return
+
+			srvErr := filterSingleNodeSRV(s, nodeName, input, lvgInfo, commonNodes)
+			slvErr := filterSingleNodeSLV(s, nodeName, input, lvgInfo, commonNodes)
+
+			if srvErr == nil && slvErr == nil {
+				resCh <- ResultWithError{NodeName: nodeName}
 			}
-			resCh <- ResultWithError{NodeName: nodeName}
+			nodeErr := fmt.Errorf(srvErr.Error() + " " +  slvErr.Error())
+			resCh <- ResultWithError{NodeName: nodeName, Err: nodeErr}
 		}(nodeName)
 	}
 
@@ -378,6 +382,25 @@ func filterNodesParallel(s *scheduler, input *FilterInput, lvgInfo *LVGInfo) (*E
 
 	s.log.Debug("[filterNodes] filtered nodes", "nodes", result.NodeNames)
 	return result, nil
+}
+
+func filterSingleNodeSLV(s *scheduler, nodeName string, filterInput *FilterInput, lvgInfo *LVGInfo, commonNodes map[string][]*snc.LVMVolumeGroup) error {
+	nodeLvgs := commonNodes[nodeName]
+
+	hasEnoughSpace := true
+	for _, pvc := range filterInput.LocalProvisionPVCs {
+		lvgsFromSC := lvgInfo.SCLVGs[*pvc.Spec.StorageClassName]
+		sharedLVG := findSharedLVG(nodeLvgs, lvgsFromSC)
+		lvgs := s.cacheMgr.GetAllLVG()
+
+		hasEnoughSpace = nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo.ThickFreeSpaces, lvgInfo.ThinFreeSpaces, sharedLVG, pvc, lvgs)
+
+		if !hasEnoughSpace {
+			return fmt.Errorf("node has not enough space")
+		}
+	}
+
+	return nil
 }
 
 // filterSingleNodeSRV checks if a single node meets the criteria.
@@ -1038,13 +1061,9 @@ func CreateLVGsMapFromStorageClasses(scs map[string]*v1.StorageClass) (map[strin
 }
 
 func ExtractLVGsFromSC(sc *v1.StorageClass) ([]LVMVolumeGroup, error) {
-	// TODO Simplify this part later
-	lvms, ok := sc.Parameters[consts.ReplicatedLVMVolumeGroupsParamKey]
+	lvms, ok := sc.Parameters[consts.LvmTypeParamKey]
 	if !ok {
-		lvms, ok = sc.Parameters[consts.LocalLVMVolumeGroupsParamKey]
-		if !ok {
-			return nil, fmt.Errorf("neither %s nor %s found in StorageClass parameters", consts.ReplicatedLVMVolumeGroupsParamKey, consts.LocalLVMVolumeGroupsParamKey)
-		}
+		return nil, fmt.Errorf("neither %s nor %s found in StorageClass parameters", consts.ReplicatedLVMVolumeGroupsParamKey, consts.LocalLVMVolumeGroupsParamKey)
 	}
 
 	var lvmVolumeGroups []LVMVolumeGroup
