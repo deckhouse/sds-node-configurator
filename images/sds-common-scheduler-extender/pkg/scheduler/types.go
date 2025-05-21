@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	slv "github.com/deckhouse/sds-local-volume/api/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	apiv1 "k8s.io/api/core/v1"
@@ -66,8 +67,9 @@ type FilterInput struct {
 	SCSUsedByPodPVCs           map[string]*storagev1.StorageClass
 	PVCSizeRequests            map[string]PVCRequest
 	ReplicatedSCSUsedByPodPVCs map[string]*srv.ReplicatedStorageClass
+	LocalSCSUsedByPodPVCs      map[string]*slv.LocalStorageClass
 	DRBDResourceMap            map[string]*srv.DRBDResource
-	DRBDNodesMap               map[string]*srv.DRBDNode
+	DRBDNodesMap               map[string]struct{}
 }
 
 // LVGInfo holds LVMVolumeGroup-related data
