@@ -7,6 +7,7 @@ import (
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -42,10 +43,18 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		return nil, fmt.Errorf("unable to get StorageClasses: %w", err)
 	}
 
-	managedPVCs := filterPVCsByProvisioner(s.log, pvcs, scs)
-	if len(managedPVCs) == 0 {
-		s.log.Warning(fmt.Sprintf("[prioritize] Pod %s/%s uses unmanaged PVCs", pod.Namespace, pod.Name))
+	replicatedPVCs, localPVCs := filterPVCsByProvisioner(s.log, pvcs, scs)
+	if len(replicatedPVCs) == 0 || len(localPVCs) == 0 {
+		s.log.Warning(fmt.Sprintf("[filter] Pod %s/%s uses unmanaged PVCs. replicatedPVCs length %d, localPVCs length %d", pod.Namespace, pod.Name, len(replicatedPVCs), len(localPVCs)))
 		return nil, errors.New("no managed PVCs found")
+	}
+
+	replicatedAndLocalPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(replicatedPVCs)+len(localPVCs))
+	for name, pvc := range replicatedPVCs {
+		replicatedAndLocalPVCs[name] = pvc
+	}
+	for name, pvc := range replicatedPVCs {
+		localPVCs[name] = pvc
 	}
 
 	pvMap, err := getPersistentVolumes(s.ctx, s.client)
@@ -53,7 +62,7 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		return nil, fmt.Errorf("unable to get PersistentVolumes: %w", err)
 	}
 
-	pvcRequests, err := extractRequestedSize(s.log, managedPVCs, scs, pvMap)
+	pvcRequests, err := extractRequestedSize(s.log, replicatedAndLocalPVCs, scs, pvMap)
 	if err != nil {
 		return nil, fmt.Errorf("unable to extract PVC request sizes: %w", err)
 	}
@@ -68,13 +77,14 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 	}
 
 	res := &PrioritizeInput{
-		Pod:            pod,
-		NodeNames:      nodeNames,
-		PVCs:           managedPVCs,
-		StorageClasses: scs,
-		PVCRequests:    pvcRequests,
-		StoragePoolMap: storagePoolMap,
-		DefaultDivisor: s.defaultDivisor,
+		Pod:                     pod,
+		NodeNames:               nodeNames,
+		ReplicatedProvisionPVCs: replicatedPVCs,
+		LocalProvisionPVCs:      localPVCs,
+		StorageClasses:          scs,
+		PVCRequests:             pvcRequests,
+		StoragePoolMap:          storagePoolMap,
+		DefaultDivisor:          s.defaultDivisor,
 	}
 	b, _ := json.MarshalIndent(res, "", "  ")
 	s.log.Trace(fmt.Sprintf("[collectPrioritizeInput] PrioritizeInput: %+v", string(b)))
