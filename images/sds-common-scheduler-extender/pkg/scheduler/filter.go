@@ -40,9 +40,9 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		return nil, fmt.Errorf("unable to get StorageClasses: %w", err)
 	}
 
-	replicatedProvisionPVCs := filterPVCsByProvisioner(s.log, podRelatedPVCs, scsUsedByPodPVCs)
-	if len(replicatedProvisionPVCs) == 0 {
-		s.log.Warning(fmt.Sprintf("[filter] Pod %s/%s uses unmanaged PVCs", pod.Namespace, pod.Name))
+	replicatedPVCs, localPVCs := filterPVCsByProvisioner(s.log, podRelatedPVCs, scsUsedByPodPVCs)
+	if len(replicatedPVCs) == 0 || len(localPVCs) == 0 {
+		s.log.Warning(fmt.Sprintf("[filter] Pod %s/%s uses unmanaged PVCs. replicatedPVCs length %d, localPVCs length %d", pod.Namespace, pod.Name, len(replicatedPVCs), len(localPVCs)))
 		return nil, errors.New("no managed PVCs found")
 	}
 
@@ -51,7 +51,15 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		return nil, fmt.Errorf("unable to get PersistentVolumes: %w", err)
 	}
 
-	pvcSizeRequests, err := extractRequestedSize(s.log, replicatedProvisionPVCs, scsUsedByPodPVCs, pvMap)
+	replicatedAndLocalPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(replicatedPVCs)+len(localPVCs))
+	for name, pvc := range replicatedPVCs {
+		replicatedAndLocalPVCs[name] = pvc
+	}
+	for name, pvc := range replicatedPVCs {
+		localPVCs[name] = pvc
+	}
+
+	pvcSizeRequests, err := extractRequestedSize(s.log, replicatedAndLocalPVCs, scsUsedByPodPVCs, pvMap)
 	if err != nil {
 		return nil, fmt.Errorf("unable to extract PVC request sizes: %w", err)
 	}
@@ -74,7 +82,8 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 	return &FilterInput{
 		Pod:                        pod,
 		NodeNames:                  nodeNames,
-		ReplicatedProvisionPVCs:    replicatedProvisionPVCs,
+		ReplicatedProvisionPVCs:    replicatedPVCs,
+		LocalProvisionPVCs:         localPVCs,
 		SCSUsedByPodPVCs:           scsUsedByPodPVCs,
 		PVCSizeRequests:            pvcSizeRequests,
 		ReplicatedSCSUsedByPodPVCs: replicatedSCSUsedByPodPVCs,

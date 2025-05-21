@@ -355,7 +355,7 @@ func filterNodesParallel(s *scheduler, input *FilterInput, lvgInfo *LVGInfo) (*E
 	for _, nodeName := range input.NodeNames {
 		go func(nodeName string) {
 			defer wg.Done()
-			if err := filterSingleNode(s, nodeName, input, lvgInfo, commonNodes); err != nil {
+			if err := filterSingleNodeSRV(s, nodeName, input, lvgInfo, commonNodes); err != nil {
 				resCh <- ResultWithError{NodeName: nodeName, Err: err}
 				return
 			}
@@ -380,8 +380,8 @@ func filterNodesParallel(s *scheduler, input *FilterInput, lvgInfo *LVGInfo) (*E
 	return result, nil
 }
 
-// filterSingleNode checks if a single node meets the criteria.
-func filterSingleNode(s *scheduler, nodeName string, filterInput *FilterInput, lvgInfo *LVGInfo, commonNodes map[string][]*snc.LVMVolumeGroup) error {
+// filterSingleNodeSRV checks if a single node meets the criteria.
+func filterSingleNodeSRV(s *scheduler, nodeName string, filterInput *FilterInput, lvgInfo *LVGInfo, commonNodes map[string][]*snc.LVMVolumeGroup) error {
 	s.log.Debug(fmt.Sprintf("[filterNodes] filtering node %s", nodeName))
 
 	nodeLvgs := commonNodes[nodeName]
@@ -564,7 +564,15 @@ func scoreSingleNode(s *scheduler, input *PrioritizeInput, lvgInfo *LVGScoreInfo
 	var totalFreeSpaceLeftPercent int64
 	replicaCountOnNode := 0
 
-	for _, pvc := range input.PVCs {
+	PVCs := make(map[string]*corev1.PersistentVolumeClaim, len(input.LocalProvisionPVCs)+len(input.ReplicatedProvisionPVCs))
+	for name, pvc := range input.LocalProvisionPVCs {
+		PVCs[name] = pvc
+	}
+	for name, pvc := range input.ReplicatedProvisionPVCs {
+		PVCs[name] = pvc
+	}
+
+	for _, pvc := range PVCs {
 		pvcReq := input.PVCRequests[pvc.Name]
 		s.log.Trace(fmt.Sprintf("[scoreNodes] pvc %s size request: %+v", pvc.Name, pvcReq))
 
@@ -596,8 +604,8 @@ func scoreSingleNode(s *scheduler, input *PrioritizeInput, lvgInfo *LVGScoreInfo
 
 	nodeScore := replicaCountOnNode
 	averageFreeSpace := int64(0)
-	if len(input.PVCs) > 0 {
-		averageFreeSpace = totalFreeSpaceLeftPercent / int64(len(input.PVCs))
+	if len(PVCs) > 0 {
+		averageFreeSpace = totalFreeSpaceLeftPercent / int64(len(PVCs))
 	}
 	s.log.Trace(fmt.Sprintf("[scoreNodes] average free space left for node %s: %d%%", nodeName, averageFreeSpace))
 
@@ -980,19 +988,27 @@ func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map
 	return result, nil
 }
 
-func filterPVCsByProvisioner(log *logger.Logger, podRelatedPVCs map[string]*corev1.PersistentVolumeClaim, scsUsedByPodPVCs map[string]*v1.StorageClass) map[string]*corev1.PersistentVolumeClaim {
-	filteredPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(podRelatedPVCs))
+func filterPVCsByProvisioner(log *logger.Logger, podRelatedPVCs map[string]*corev1.PersistentVolumeClaim, scsUsedByPodPVCs map[string]*v1.StorageClass) (map[string]*corev1.PersistentVolumeClaim, map[string]*corev1.PersistentVolumeClaim) {
+	replicatedPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(podRelatedPVCs))
+	localPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(podRelatedPVCs))
+
 	for _, pvc := range podRelatedPVCs {
 		sc := scsUsedByPodPVCs[*pvc.Spec.StorageClassName]
+		if sc.Provisioner == consts.SdsLocalVolumeProvisioner {
+			localPVCs[pvc.Name] = pvc
+			continue
+		}
+		if sc.Provisioner == consts.SdsReplicatedVolumeProvisioner {
+			replicatedPVCs[pvc.Name] = pvc
+			continue
+		}
 		if !slices.Contains([]string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}, sc.Provisioner) {
 			log.Debug(fmt.Sprintf("[filterNotManagedPVC] filter out PVC %s/%s due to used Storage class %s is not managed by sds-replicated-volume-provisioner", pvc.Name, pvc.Namespace, sc.Name))
 			continue
 		}
-
-		filteredPVCs[pvc.Name] = pvc
 	}
 
-	return filteredPVCs
+	return replicatedPVCs, localPVCs
 }
 
 func getSortedLVGsFromStorageClasses(replicatedSCs map[string]*srv.ReplicatedStorageClass, spMap map[string]*srv.ReplicatedStoragePool) (map[string][]srv.ReplicatedStoragePoolLVMVolumeGroups, error) {

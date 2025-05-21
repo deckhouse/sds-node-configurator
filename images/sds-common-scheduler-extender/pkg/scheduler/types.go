@@ -64,6 +64,7 @@ type FilterInput struct {
 	Pod                        *v1.Pod
 	NodeNames                  []string
 	ReplicatedProvisionPVCs    map[string]*v1.PersistentVolumeClaim
+	LocalProvisionPVCs         map[string]*v1.PersistentVolumeClaim
 	SCSUsedByPodPVCs           map[string]*storagev1.StorageClass
 	PVCSizeRequests            map[string]PVCRequest
 	ReplicatedSCSUsedByPodPVCs map[string]*srv.ReplicatedStorageClass
@@ -88,13 +89,14 @@ type ResultWithError struct {
 
 // PrioritizeInput holds input data for prioritizing nodes
 type PrioritizeInput struct {
-	Pod            *v1.Pod
-	NodeNames      []string
-	PVCs           map[string]*v1.PersistentVolumeClaim
-	StorageClasses map[string]*storagev1.StorageClass
-	PVCRequests    map[string]PVCRequest
-	StoragePoolMap map[string]*srv.ReplicatedStoragePool
-	DefaultDivisor float64
+	Pod                     *v1.Pod
+	NodeNames               []string
+	ReplicatedProvisionPVCs map[string]*v1.PersistentVolumeClaim
+	LocalProvisionPVCs      map[string]*v1.PersistentVolumeClaim
+	StorageClasses          map[string]*storagev1.StorageClass
+	PVCRequests             map[string]PVCRequest
+	StoragePoolMap          map[string]*srv.ReplicatedStoragePool
+	DefaultDivisor          float64
 }
 
 // LVGScoreInfo holds LVMVolumeGroup-related data for scoring
