@@ -12,7 +12,7 @@ import (
 )
 
 func (s *scheduler) Prioritize(inputData ExtenderArgs) ([]HostPriority, error) {
-	nodeNames, err := getNodeNames(inputData)
+	nodeNames, err := getNodeNames(inputData, s.log)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get node names: %w", err)
 	}
@@ -57,7 +57,7 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		localPVCs[name] = pvc
 	}
 
-	pvMap, err := getPersistentVolumes(s.ctx, s.client)
+	pvMap, err := getPersistentVolumes(s.ctx, s.client, s.log)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get PersistentVolumes: %w", err)
 	}

@@ -9,7 +9,7 @@ import (
 
 // Filter processes the filtering logic for a given request.
 func (s *scheduler) Filter(inputData ExtenderArgs) (*ExtenderFilterResult, error) {
-	nodeNames, err := getNodeNames(inputData)
+	nodeNames, err := getNodeNames(inputData, s.log)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get node names: %w", err)
 	}
@@ -22,7 +22,7 @@ func (s *scheduler) Filter(inputData ExtenderArgs) (*ExtenderFilterResult, error
 		return nil, err
 	}
 
-	return filterNodes(s, input)
+	return filterNodes(s, input, s.log)
 }
 
 // collectFilterInput gathers all necessary data for filtering.
@@ -46,7 +46,7 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		return nil, errors.New("no managed PVCs found")
 	}
 
-	pvMap, err := getPersistentVolumes(s.ctx, s.client)
+	pvMap, err := getPersistentVolumes(s.ctx, s.client, s.log)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get PersistentVolumes: %w", err)
 	}
@@ -64,7 +64,7 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		return nil, fmt.Errorf("unable to extract PVC request sizes: %w", err)
 	}
 
-	replicatedSCSUsedByPodPVCs, localSCSUsedByPodPVCs, err := getRSCByCS(s.ctx, s.client, scsUsedByPodPVCs)
+	replicatedSCSUsedByPodPVCs, localSCSUsedByPodPVCs, err := getRSCByCS(s.ctx, s.client, scsUsedByPodPVCs, s.log)
 	if err != nil {
 		return nil, fmt.Errorf("unable to filter replicated StorageClasses: %w", err)
 	}
@@ -74,7 +74,7 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		return nil, fmt.Errorf("unable to get DRBD resource map: %w", err)
 	}
 
-	drbdNodesMap, err := getDRBDNodesMap(s.ctx, s.client)
+	drbdNodesMap, err := getDRBDNodesMap(s.ctx, s.client, s.log)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get DRBD nodes map: %w", err)
 	}
