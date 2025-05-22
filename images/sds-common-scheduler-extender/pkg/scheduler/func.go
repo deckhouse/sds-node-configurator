@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
@@ -124,10 +125,11 @@ func getProvisionerFromPVC(ctx context.Context, cl client.Client, log *logger.Lo
 	return discoveredProvisioner, nil
 }
 
-func getReplicatedStoragePools(ctx context.Context, cl client.Client) (map[string]*srv.ReplicatedStoragePool, error) {
+func getReplicatedStoragePools(ctx context.Context, cl client.Client, log *logger.Logger) (map[string]*srv.ReplicatedStoragePool, error) {
 	rsp := &srv.ReplicatedStoragePoolList{}
 	err := cl.List(ctx, rsp)
 	if err != nil {
+		log.Error(err, "[getReplicatedStoragePools] failed to list replicated storage pools")
 		return nil, err
 	}
 
@@ -136,13 +138,15 @@ func getReplicatedStoragePools(ctx context.Context, cl client.Client) (map[strin
 		rpsMap[rp.Name] = &rp
 	}
 
+	log.Trace("[getReplicatedStoragePools]", "replicated storage pools", rpsMap)
 	return rpsMap, nil
 }
 
-func getReplicatedStorageClasses(ctx context.Context, cl client.Client) (map[string]*srv.ReplicatedStorageClass, error) {
+func getReplicatedStorageClasses(ctx context.Context, cl client.Client, log *logger.Logger) (map[string]*srv.ReplicatedStorageClass, error) {
 	rscs := &srv.ReplicatedStorageClassList{}
 	err := cl.List(ctx, rscs)
 	if err != nil {
+		log.Error(err, "[getReplicatedStorageClasses] failed to list replicated storage classes")
 		return nil, err
 	}
 
@@ -151,13 +155,15 @@ func getReplicatedStorageClasses(ctx context.Context, cl client.Client) (map[str
 		rscMap[rsc.Name] = &rsc
 	}
 
+	log.Trace("[getReplicatedStorageClasses]", "replicated storage classes", rscMap)
 	return rscMap, nil
 }
 
-func getlvmVolumeGroups(ctx context.Context, cl client.Client) (map[string]*snc.LVMVolumeGroup, error) {
+func getlvmVolumeGroups(ctx context.Context, cl client.Client, log *logger.Logger) (map[string]*snc.LVMVolumeGroup, error) {
 	lvmList := &snc.LVMVolumeGroupList{}
 	err := cl.List(ctx, lvmList)
 	if err != nil {
+		log.Error(err, "[getlvmVolumeGroups] failed to list LVM volume groups")
 		return nil, err
 	}
 
@@ -166,13 +172,15 @@ func getlvmVolumeGroups(ctx context.Context, cl client.Client) (map[string]*snc.
 		lvmMap[lvm.Name] = &lvm
 	}
 
+	log.Trace("[getlvmVolumeGroups]", "LVM volume groups map", lvmMap)
 	return lvmMap, nil
 }
 
-func getNodeWithLvmVgsMap(ctx context.Context, cl client.Client) (map[string][]*snc.LVMVolumeGroup, error) {
+func getNodeWithLvmVgsMap(ctx context.Context, cl client.Client, log *logger.Logger) (map[string][]*snc.LVMVolumeGroup, error) {
 	lvmList := &snc.LVMVolumeGroupList{}
 	err := cl.List(ctx, lvmList)
 	if err != nil {
+		log.Error(err, "[getNodeWithLvmVgsMap] failed to list LVM volume groups")
 		return nil, err
 	}
 
@@ -181,6 +189,7 @@ func getNodeWithLvmVgsMap(ctx context.Context, cl client.Client) (map[string][]*
 		nodeToLvmMap[lvm.Spec.Local.NodeName] = append(nodeToLvmMap[lvm.Spec.Local.NodeName], &lvm)
 	}
 
+	log.Trace("[getNodeWithLvmVgsMap]", "node to LVM volume groups map", nodeToLvmMap)
 	return nodeToLvmMap, nil
 }
 
@@ -200,12 +209,13 @@ func getDRBDResourceMap(ctx context.Context, cl client.Client) (map[string]*srv.
 	return drbdMap, nil
 }
 
-func getDRBDNodesMap(ctx context.Context, cl client.Client) (map[string]struct{}, error) {
+func getDRBDNodesMap(ctx context.Context, cl client.Client, log *logger.Logger) (map[string]struct{}, error) {
 	result := make(map[string]struct{})
 
 	lvgList := &snc.LVMVolumeGroupList{}
 	err := cl.List(ctx, lvgList)
 	if err != nil {
+		log.Error(err, "[getDRBDNodesMap] failed to list LVM volume groups")
 		return result, err
 	}
 
@@ -213,30 +223,35 @@ func getDRBDNodesMap(ctx context.Context, cl client.Client) (map[string]struct{}
 	for _, lvg := range lvgList.Items {
 		lvgMap[lvg.Name] = &lvg
 	}
+	log.Trace("[getDRBDNodesMap]", "LVM volume group map", lvgMap)
 
 	rspList := &srv.ReplicatedStoragePoolList{}
 	err = cl.List(ctx, rspList)
 	if err != nil {
+		log.Error(err, "[getDRBDNodesMap] failed to list replicated storage pools")
 		return result, err
 	}
+	log.Trace("[getDRBDNodesMap]", "LVM volume group map", lvgMap)
 
 	for _, rsc := range rspList.Items {
 		for _, rscLVG := range rsc.Spec.LVMVolumeGroups {
 			lvg, found := lvgMap[rscLVG.Name]
 			if !found {
-				fmt.Printf("[getDRBDNodesMap] no lvg %s found, can't get a node name for it. skipping iteration")
+				log.Warning("[getDRBDNodesMap]", fmt.Sprintf("no LVM volume group %s found, skipping iteration", rscLVG.Name))
 			}
 			result[lvg.Spec.Local.NodeName] = struct{}{}
 		}
 	}
 
+	log.Trace("[getDRBDNodesMap]", "DRBD nodes map", result)
 	return result, nil
 }
 
-func getPersistentVolumeClaims(ctx context.Context, cl client.Client) (map[string]*corev1.PersistentVolumeClaim, error) {
+func getPersistentVolumeClaims(ctx context.Context, cl client.Client, log *logger.Logger) (map[string]*corev1.PersistentVolumeClaim, error) {
 	pvs := &corev1.PersistentVolumeClaimList{}
 	err := cl.List(ctx, pvs)
 	if err != nil {
+		log.Error(err, "[getPersistentVolumeClaims] failed to list persistent volume claims")
 		return nil, err
 	}
 
@@ -245,13 +260,15 @@ func getPersistentVolumeClaims(ctx context.Context, cl client.Client) (map[strin
 		pvcMap[pvc.Name] = &pvc
 	}
 
+	log.Trace("[getPersistentVolumeClaims]", "persistent volume claims map", pvcMap)
 	return pvcMap, nil
 }
 
-func getPersistentVolumes(ctx context.Context, cl client.Client) (map[string]*corev1.PersistentVolume, error) {
+func getPersistentVolumes(ctx context.Context, cl client.Client, log *logger.Logger) (map[string]*corev1.PersistentVolume, error) {
 	pvs := &corev1.PersistentVolumeList{}
 	err := cl.List(ctx, pvs)
 	if err != nil {
+		log.Error(err, "[getPersistentVolumes] failed to list persistent volumes")
 		return nil, err
 	}
 
@@ -260,11 +277,13 @@ func getPersistentVolumes(ctx context.Context, cl client.Client) (map[string]*co
 		pvMap[pv.Name] = &pv
 	}
 
+	log.Trace("[getPersistentVolumes]", "persistent volumes map", pvMap)
 	return pvMap, nil
 }
 
-func getNodeNames(inputData ExtenderArgs) ([]string, error) {
+func getNodeNames(inputData ExtenderArgs, log *logger.Logger) ([]string, error) {
 	if inputData.NodeNames != nil && len(*inputData.NodeNames) > 0 {
+		log.Trace("[getNodeNames]", "node names from input", *inputData.NodeNames)
 		return *inputData.NodeNames, nil
 	}
 
@@ -273,22 +292,32 @@ func getNodeNames(inputData ExtenderArgs) ([]string, error) {
 		for _, node := range inputData.Nodes.Items {
 			nodeNames = append(nodeNames, node.Name)
 		}
+		log.Trace("[getNodeNames]", "node names from nodes", nodeNames)
 		return nodeNames, nil
 	}
 
+	log.Error(nil, "[getNodeNames] no nodes provided")
 	return nil, fmt.Errorf("no nodes provided")
 }
 
 // filterNodes filters nodes based on storage and DRBD requirements.
-func filterNodes(s *scheduler, input *FilterInput) (*ExtenderFilterResult, error) {
-	s.log.Debug("[filterNodes] filtering nodes", "nodes", input.NodeNames)
+func filterNodes(s *scheduler, input *FilterInput, log *logger.Logger) (*ExtenderFilterResult, error) {
+	log.Debug("[filterNodes] filtering nodes", "nodes", input.NodeNames)
 
 	lvgInfo, err := collectLVGInfo(s, input.SCSUsedByPodPVCs)
 	if err != nil {
+		log.Error(err, "[filterNodes] unable to collect LVG info")
 		return nil, fmt.Errorf("unable to collect LVG info: %w", err)
 	}
 
-	return filterNodesParallel(s, input, lvgInfo)
+	result, err := filterNodesParallel(s, input, lvgInfo)
+	if err != nil {
+		log.Error(err, "[filterNodes] failed to filter nodes")
+		return nil, err
+	}
+
+	log.Trace("[filterNodes]", "filtered nodes result", result)
+	return result, nil
 }
 
 // collectLVGInfo gathers LVMVolumeGroup data.
@@ -330,6 +359,7 @@ func collectLVGInfo(s *scheduler, storageClasses map[string]*storagev1.StorageCl
 	}
 
 	nodeToLVGs := CreateNodeToCachedLVGsMap(filteredLVGs)
+	s.log.Trace(fmt.Sprintf("[filterNodes] node name to LVM volume group map %+v", nodeToLVGs))
 	return &LVGInfo{
 		ThickFreeSpaces: thickFreeSpaces,
 		ThinFreeSpaces:  thinFreeSpaces,
@@ -339,8 +369,9 @@ func collectLVGInfo(s *scheduler, storageClasses map[string]*storagev1.StorageCl
 }
 
 func filterNodesParallel(s *scheduler, input *FilterInput, lvgInfo *LVGInfo) (*ExtenderFilterResult, error) {
-	commonNodes, err := getCommonNodesByStorageClasses(input.SCSUsedByPodPVCs, lvgInfo.NodeToLVGs)
+	commonNodes, err := getSharedNodesByStorageClasses(input.SCSUsedByPodPVCs, lvgInfo.NodeToLVGs)
 	if err != nil {
+		s.log.Error(err, "[filterNodesParallel] failed to find any shared nodes")
 		return nil, fmt.Errorf("unable to get common nodes: %w", err)
 	}
 
@@ -356,13 +387,18 @@ func filterNodesParallel(s *scheduler, input *FilterInput, lvgInfo *LVGInfo) (*E
 		go func(nodeName string) {
 			defer wg.Done()
 
-			srvErr := filterSingleNodeSRV(s, nodeName, input, lvgInfo, commonNodes)
-			slvErr := filterSingleNodeSLV(s, nodeName, input, lvgInfo, commonNodes)
+			srvErr := filterSingleNodeSRV(s, nodeName, input, lvgInfo, commonNodes, s.log)
+			slvErr := filterSingleNodeSLV(s, nodeName, input, lvgInfo, commonNodes, s.log)
 
 			if srvErr == nil && slvErr == nil {
+				s.log.Debug(fmt.Sprintf("[filterNodesParallel] node %s is ok to schedule a pod to", nodeName))
 				resCh <- ResultWithError{NodeName: nodeName}
+				return
 			}
-			nodeErr := fmt.Errorf(srvErr.Error() + " " +  slvErr.Error())
+			// TODO improve this part of the code later
+			errMessages := []string{srvErr.Error(), slvErr.Error()}
+			nodeErr := fmt.Errorf(strings.Join(errMessages, ", "))
+			s.log.Debug(fmt.Sprintf("[filterNodesParallel] node %s is bad to schedule a pod to. Reason: %s", nodeName, nodeErr.Error()))
 			resCh <- ResultWithError{NodeName: nodeName, Err: nodeErr}
 		}(nodeName)
 	}
@@ -372,11 +408,11 @@ func filterNodesParallel(s *scheduler, input *FilterInput, lvgInfo *LVGInfo) (*E
 		close(resCh)
 	}()
 
-	for res := range resCh {
-		if res.Err == nil {
-			*result.NodeNames = append(*result.NodeNames, res.NodeName)
+	for r := range resCh {
+		if r.Err == nil {
+			*result.NodeNames = append(*result.NodeNames, r.NodeName)
 		} else {
-			result.FailedNodes[res.NodeName] = res.Err.Error()
+			result.FailedNodes[r.NodeName] = r.Err.Error()
 		}
 	}
 
@@ -384,7 +420,9 @@ func filterNodesParallel(s *scheduler, input *FilterInput, lvgInfo *LVGInfo) (*E
 	return result, nil
 }
 
-func filterSingleNodeSLV(s *scheduler, nodeName string, filterInput *FilterInput, lvgInfo *LVGInfo, commonNodes map[string][]*snc.LVMVolumeGroup) error {
+func filterSingleNodeSLV(s *scheduler, nodeName string, filterInput *FilterInput, lvgInfo *LVGInfo, commonNodes map[string][]*snc.LVMVolumeGroup, log *logger.Logger) error {
+	log.Debug("[filterSingleNodeSLV] checking node", "node", nodeName)
+
 	nodeLvgs := commonNodes[nodeName]
 
 	hasEnoughSpace := true
@@ -393,23 +431,22 @@ func filterSingleNodeSLV(s *scheduler, nodeName string, filterInput *FilterInput
 		sharedLVG := findSharedLVG(nodeLvgs, lvgsFromSC)
 		lvgs := s.cacheMgr.GetAllLVG()
 
-		hasEnoughSpace = nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo.ThickFreeSpaces, lvgInfo.ThinFreeSpaces, sharedLVG, pvc, lvgs)
+		hasEnoughSpace = nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo.ThickFreeSpaces, lvgInfo.ThinFreeSpaces, sharedLVG, pvc, lvgs, s.log)
 
 		if !hasEnoughSpace {
 			return fmt.Errorf("node has not enough space")
 		}
 	}
-
 	return nil
 }
 
 // filterSingleNodeSRV checks if a single node meets the criteria.
-func filterSingleNodeSRV(s *scheduler, nodeName string, filterInput *FilterInput, lvgInfo *LVGInfo, commonNodes map[string][]*snc.LVMVolumeGroup) error {
-	s.log.Debug(fmt.Sprintf("[filterNodes] filtering node %s", nodeName))
+func filterSingleNodeSRV(s *scheduler, nodeName string, filterInput *FilterInput, lvgInfo *LVGInfo, commonNodes map[string][]*snc.LVMVolumeGroup, log *logger.Logger) error {
+	log.Debug("[filterSingleNodeSRV] filtering node", "node", nodeName)
 
 	nodeLvgs := commonNodes[nodeName]
 	for _, pvc := range filterInput.ReplicatedProvisionPVCs {
-		s.log.Debug(fmt.Sprintf("[filterNodes] processing PVC %s on node %s", pvc.Name, nodeName))
+		log.Debug("[filterSingleNodeSRV] processing PVC", "pvc", pvc.Name, "node", nodeName)
 
 		lvgsFromSC := lvgInfo.SCLVGs[*pvc.Spec.StorageClassName]
 		pvcRSC := filterInput.ReplicatedSCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
@@ -417,7 +454,7 @@ func filterSingleNodeSRV(s *scheduler, nodeName string, filterInput *FilterInput
 		isDrbdDiskful := isDrbdDiskfulNode(filterInput.DRBDResourceMap, pvc.Spec.VolumeName, nodeName)
 
 		lvgs := s.cacheMgr.GetAllLVG()
-		hasEnoughSpace := nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo.ThickFreeSpaces, lvgInfo.ThinFreeSpaces, sharedLVG, pvc, lvgs)
+		hasEnoughSpace := nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo.ThickFreeSpaces, lvgInfo.ThinFreeSpaces, sharedLVG, pvc, lvgs, s.log)
 
 		switch pvcRSC.Spec.VolumeAccess {
 		case "Local":
@@ -441,6 +478,7 @@ func filterSingleNodeSRV(s *scheduler, nodeName string, filterInput *FilterInput
 					return fmt.Errorf("node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
 				}
 			} else if isDrbdDiskful {
+				log.Trace("[filterSingleNodeSRV]", "node is diskful for EventuallyLocal PVC", "node", nodeName, "pvc", pvc.Name)
 				return nil
 			} else if sharedLVG == nil || !hasEnoughSpace {
 				return fmt.Errorf("node %s does not meet EventuallyLocal criteria for PVC %s", nodeName, pvc.Name)
@@ -460,11 +498,10 @@ func filterSingleNodeSRV(s *scheduler, nodeName string, filterInput *FilterInput
 		return fmt.Errorf("node %s is offline", nodeName)
 	}
 
-	s.log.Debug(fmt.Sprintf("[filterNodes] node %s is ok", nodeName))
+	log.Debug("[filterSingleNodeSRV] node is ok", "node", nodeName)
 	return nil
 }
 
-// collectLVGScoreInfo gathers LVMVolumeGroup data for scoring.
 func collectLVGScoreInfo(s *scheduler, storageClasses map[string]*storagev1.StorageClass) (*LVGScoreInfo, error) {
 	lvgs := s.cacheMgr.GetAllLVG()
 	scLVGs, err := CreateLVGsMapFromStorageClasses(storageClasses)
@@ -509,6 +546,7 @@ func calculateFreeSpace(
 	case consts.Thick:
 		freeSpace = lvg.Status.VGFree
 		log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s free Thick space before PVC reservation: %s", lvg.Name, freeSpace.String()))
+
 		reserved, err := schedulerCache.GetLVGThickReservedSpace(lvg.Name)
 		if err != nil {
 			return freeSpace, errors.New(fmt.Sprintf("[scoreNodes] unable to count reserved space for the LVMVolumeGroup %s", lvg.Name))
@@ -639,6 +677,7 @@ func scoreSingleNode(s *scheduler, input *PrioritizeInput, lvgInfo *LVGScoreInfo
 }
 
 func isDrbdDiskfulNode(drbdResourceMap map[string]*srv.DRBDResource, pvName string, nodeName string) bool {
+	//TODO implement logic later when DRBDResource becomes available in the cluster
 	return true
 	// resource, found := drbdResourceMap[pvName]
 	// if !found {
@@ -659,13 +698,14 @@ func isOkNode(_ string) bool {
 	return true
 }
 
-func getRSCByCS(ctx context.Context, cl client.Client, scs map[string]*v1.StorageClass) (map[string]*srv.ReplicatedStorageClass, map[string]*slv.LocalStorageClass, error) {
+func getRSCByCS(ctx context.Context, cl client.Client, scs map[string]*v1.StorageClass, log *logger.Logger) (map[string]*srv.ReplicatedStorageClass, map[string]*slv.LocalStorageClass, error) {
 	SRVresult := map[string]*srv.ReplicatedStorageClass{}
 	SLVresult := map[string]*slv.LocalStorageClass{}
 
 	rscList := &srv.ReplicatedStorageClassList{}
 	err := cl.List(ctx, rscList)
 	if err != nil {
+		log.Error(err, "[getRSCByCS] failed to list replicated storage classes")
 		return nil, nil, err
 	}
 
@@ -677,6 +717,7 @@ func getRSCByCS(ctx context.Context, cl client.Client, scs map[string]*v1.Storag
 	lscList := &slv.LocalStorageClassList{}
 	err = cl.List(ctx, lscList)
 	if err != nil {
+		log.Error(err, "[getRSCByCS] failed to list local storage classes")
 		return nil, nil, err
 	}
 
@@ -694,6 +735,7 @@ func getRSCByCS(ctx context.Context, cl client.Client, scs map[string]*v1.Storag
 		}
 	}
 
+	log.Debug("[getRSCByCS]", "replicated storage classes map", SRVresult, "local storage classes map", SLVresult)
 	return SRVresult, SLVresult, nil
 }
 
@@ -709,7 +751,10 @@ func nodeHasEnoughSpace(
 	commonLVG *LVMVolumeGroup,
 	pvc *corev1.PersistentVolumeClaim,
 	lvgMap map[string]*snc.LVMVolumeGroup,
+	log *logger.Logger,
 ) bool {
+	log.Debug("[nodeHasEnoughSpace] checking space for PVC", "pvc", pvc.Name)
+
 	nodeIsOk := true
 	pvcReq := pvcRequests[pvc.Name]
 	thickMapMtx := &sync.RWMutex{}
@@ -722,6 +767,7 @@ func nodeHasEnoughSpace(
 		thickMapMtx.RUnlock()
 
 		if freeSpace < pvcReq.RequestedSize {
+			log.Warning("[nodeHasEnoughSpace]", "insufficient thick space for PVC", "pvc", pvc.Name, "freeSpace", freeSpace, "requested", pvcReq.RequestedSize)
 			nodeIsOk = false
 			break
 		}
@@ -729,10 +775,10 @@ func nodeHasEnoughSpace(
 		thickMapMtx.Lock()
 		lvgsThickFree[commonLVG.Name] -= pvcReq.RequestedSize
 		thickMapMtx.Unlock()
+		log.Trace("[nodeHasEnoughSpace]", "updated thick free space", "lvg", commonLVG.Name, "remaining", lvgsThickFree[commonLVG.Name])
 
 	case consts.Thin:
 		lvg := lvgMap[commonLVG.Name]
-
 		targetThinPool := findMatchedThinPool(lvg.Status.ThinPools, commonLVG.Thin.PoolName)
 
 		thinMapMtx.RLock()
@@ -740,6 +786,7 @@ func nodeHasEnoughSpace(
 		thinMapMtx.RUnlock()
 
 		if freeSpace < pvcReq.RequestedSize {
+			log.Warning("[nodeHasEnoughSpace]", "insufficient thin space for PVC", "pvc", pvc.Name, "freeSpace", freeSpace, "requested", pvcReq.RequestedSize)
 			nodeIsOk = false
 			break
 		}
@@ -747,8 +794,10 @@ func nodeHasEnoughSpace(
 		thinMapMtx.Lock()
 		lvgsThinFree[lvg.Name][targetThinPool.Name] -= pvcReq.RequestedSize
 		thinMapMtx.Unlock()
+		log.Trace("[nodeHasEnoughSpace]", "updated thin free space", "lvg", lvg.Name, "thinPool", targetThinPool.Name, "remaining", lvgsThinFree[lvg.Name][targetThinPool.Name])
 	}
 
+	log.Trace("[nodeHasEnoughSpace]", "space check result", "pvc", pvc.Name, "nodeIsOk", nodeIsOk)
 	return nodeIsOk
 }
 
@@ -792,40 +841,40 @@ func findSharedLVG(nodeLVGs []*snc.LVMVolumeGroup, scLVGs []LVMVolumeGroup) *LVM
 	return nil
 }
 
-func getAllNodesWithLVGs(ctx context.Context, cl client.Client) (map[string]*snc.LVMVolumeGroup, error) {
-	result := map[string]*snc.LVMVolumeGroup{}
-	lvgs := &snc.LVMVolumeGroupList{}
-	err := cl.List(ctx, lvgs)
-	if err != nil {
-		return nil, err
-	}
+// func getAllNodesWithLVGs(ctx context.Context, cl client.Client) (map[string]*snc.LVMVolumeGroup, error) {
+// 	result := map[string]*snc.LVMVolumeGroup{}
+// 	lvgs := &snc.LVMVolumeGroupList{}
+// 	err := cl.List(ctx, lvgs)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	for _, lvg := range lvgs.Items {
-		result[lvg.Spec.Local.NodeName] = &lvg
-	}
+// 	for _, lvg := range lvgs.Items {
+// 		result[lvg.Spec.Local.NodeName] = &lvg
+// 	}
 
-	return result, nil
-}
+// 	return result, nil
+// }
 
-func getAllLvgsFromPod(pvcs map[string]*corev1.PersistentVolumeClaim, rscMap map[string]*srv.ReplicatedStorageClass, spMap map[string]*srv.ReplicatedStoragePool, lvgMap map[string]*snc.LVMVolumeGroup) map[string]*snc.LVMVolumeGroup {
-	result := map[string]*snc.LVMVolumeGroup{}
+// func getAllLvgsFromPod(pvcs map[string]*corev1.PersistentVolumeClaim, rscMap map[string]*srv.ReplicatedStorageClass, spMap map[string]*srv.ReplicatedStoragePool, lvgMap map[string]*snc.LVMVolumeGroup) map[string]*snc.LVMVolumeGroup {
+// 	result := map[string]*snc.LVMVolumeGroup{}
 
-	for _, pvc := range pvcs {
-		scName := *pvc.Spec.StorageClassName
-		sc, found := rscMap[scName]
-		if !found {
-			continue //TODO
-		}
+// 	for _, pvc := range pvcs {
+// 		scName := *pvc.Spec.StorageClassName
+// 		sc, found := rscMap[scName]
+// 		if !found {
+// 			continue //TODO
+// 		}
 
-		sp := spMap[sc.Spec.StoragePool]
+// 		sp := spMap[sc.Spec.StoragePool]
 
-		for _, lvgGr := range sp.Spec.LVMVolumeGroups {
-			result[lvgGr.Name] = lvgMap[lvgGr.Name]
-		}
-	}
+// 		for _, lvgGr := range sp.Spec.LVMVolumeGroups {
+// 			result[lvgGr.Name] = lvgMap[lvgGr.Name]
+// 		}
+// 	}
 
-	return result
-}
+// 	return result
+// }
 
 func getLVGThinFreeSpaces(lvgs map[string]*snc.LVMVolumeGroup) map[string]map[string]int64 {
 	result := make(map[string]map[string]int64, len(lvgs))
@@ -853,26 +902,26 @@ func getLVGThickFreeSpaces(lvgs map[string]*snc.LVMVolumeGroup) map[string]int64
 	return result
 }
 
-func filterDRBDNodes(nodes []string, sp *srv.ReplicatedStoragePool, lvmGrMap map[string]*snc.LVMVolumeGroup) []string {
-	result := []string{}
-	allowedNodes := map[string]struct{}{} // nodes which contain lvgs
+// func filterDRBDNodes(nodes []string, sp *srv.ReplicatedStoragePool, lvmGrMap map[string]*snc.LVMVolumeGroup) []string {
+// 	result := []string{}
+// 	allowedNodes := map[string]struct{}{} // nodes which contain lvgs
 
-	for _, lvmVolGr := range sp.Spec.LVMVolumeGroups {
-		lvmGr, found := lvmGrMap[lvmVolGr.Name]
-		if !found {
-			continue
-		}
-		allowedNodes[lvmGr.Spec.Local.NodeName] = struct{}{}
-	}
+// 	for _, lvmVolGr := range sp.Spec.LVMVolumeGroups {
+// 		lvmGr, found := lvmGrMap[lvmVolGr.Name]
+// 		if !found {
+// 			continue
+// 		}
+// 		allowedNodes[lvmGr.Spec.Local.NodeName] = struct{}{}
+// 	}
 
-	for _, nodeName := range nodes {
-		if _, allowed := allowedNodes[nodeName]; allowed {
-			result = append(result, nodeName)
-		}
-	}
+// 	for _, nodeName := range nodes {
+// 		if _, allowed := allowedNodes[nodeName]; allowed {
+// 			result = append(result, nodeName)
+// 		}
+// 	}
 
-	return result
-}
+// 	return result
+// }
 
 type PVCRequest struct {
 	DeviceType    string
@@ -1034,16 +1083,16 @@ func filterPVCsByProvisioner(log *logger.Logger, podRelatedPVCs map[string]*core
 	return replicatedPVCs, localPVCs
 }
 
-func getSortedLVGsFromStorageClasses(replicatedSCs map[string]*srv.ReplicatedStorageClass, spMap map[string]*srv.ReplicatedStoragePool) (map[string][]srv.ReplicatedStoragePoolLVMVolumeGroups, error) {
-	result := make(map[string][]srv.ReplicatedStoragePoolLVMVolumeGroups, len(replicatedSCs))
+// func getSortedLVGsFromStorageClasses(replicatedSCs map[string]*srv.ReplicatedStorageClass, spMap map[string]*srv.ReplicatedStoragePool) (map[string][]srv.ReplicatedStoragePoolLVMVolumeGroups, error) {
+// 	result := make(map[string][]srv.ReplicatedStoragePoolLVMVolumeGroups, len(replicatedSCs))
 
-	for _, sc := range replicatedSCs {
-		pool := spMap[sc.Spec.StoragePool]
-		result[sc.Name] = pool.Spec.LVMVolumeGroups
-	}
+// 	for _, sc := range replicatedSCs {
+// 		pool := spMap[sc.Spec.StoragePool]
+// 		result[sc.Name] = pool.Spec.LVMVolumeGroups
+// 	}
 
-	return result, nil
-}
+// 	return result, nil
+// }
 
 func CreateLVGsMapFromStorageClasses(scs map[string]*v1.StorageClass) (map[string][]LVMVolumeGroup, error) {
 	result := make(map[string][]LVMVolumeGroup, len(scs))
@@ -1104,20 +1153,20 @@ func CreateNodeToCachedLVGsMap(lvgs map[string]*snc.LVMVolumeGroup) map[string][
 	return sorted
 }
 
-func isOnSameNode(nodeLVGs []*snc.LVMVolumeGroup, scLVGs []LVMVolumeGroup) bool {
-	nodeLVGNames := make(map[string]struct{}, len(nodeLVGs))
-	for _, lvg := range nodeLVGs {
-		nodeLVGNames[lvg.Name] = struct{}{}
-	}
+// func isOnSameNode(nodeLVGs []*snc.LVMVolumeGroup, scLVGs []LVMVolumeGroup) bool {
+// 	nodeLVGNames := make(map[string]struct{}, len(nodeLVGs))
+// 	for _, lvg := range nodeLVGs {
+// 		nodeLVGNames[lvg.Name] = struct{}{}
+// 	}
 
-	for _, lvg := range scLVGs {
-		if _, found := nodeLVGNames[lvg.Name]; !found {
-			return false
-		}
-	}
+// 	for _, lvg := range scLVGs {
+// 		if _, found := nodeLVGNames[lvg.Name]; !found {
+// 			return false
+// 		}
+// 	}
 
-	return true
-}
+// 	return true
+// }
 
 func findMatchedLVGs(nodeLVGs []*snc.LVMVolumeGroup, scLVGs []LVMVolumeGroup) *LVMVolumeGroup {
 	nodeLVGNames := make(map[string]struct{}, len(nodeLVGs))
@@ -1134,7 +1183,7 @@ func findMatchedLVGs(nodeLVGs []*snc.LVMVolumeGroup, scLVGs []LVMVolumeGroup) *L
 	return nil
 }
 
-func getCommonNodesByStorageClasses(podStorageClasses map[string]*v1.StorageClass, nodeToCachedLVGsMap map[string][]*snc.LVMVolumeGroup) (map[string][]*snc.LVMVolumeGroup, error) {
+func getSharedNodesByStorageClasses(podStorageClasses map[string]*v1.StorageClass, nodeToCachedLVGsMap map[string][]*snc.LVMVolumeGroup) (map[string][]*snc.LVMVolumeGroup, error) {
 	result := make(map[string][]*snc.LVMVolumeGroup, len(nodeToCachedLVGsMap))
 
 	for nodeName, lvgs := range nodeToCachedLVGsMap {
