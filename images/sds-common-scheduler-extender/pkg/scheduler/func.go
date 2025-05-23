@@ -30,8 +30,6 @@ const (
 	annotationStorageProvisioner     = "volume.kubernetes.io/storage-provisioner"
 )
 
-type nodeFilter func([]string, map[string]struct{}) ([]string, error)
-
 func shouldProcessPod(ctx context.Context, cl client.Client, pvcMap map[string]*corev1.PersistentVolumeClaim, log *logger.Logger, pod *corev1.Pod) ([]corev1.Volume, error) {
 	shouldProcessPod := false
 	targetProvisionerVolumes := make([]corev1.Volume, 0)
@@ -869,7 +867,7 @@ func CreateLVGsMapFromStorageClasses(scs map[string]*v1.StorageClass) (map[strin
 func ExtractLVGsFromSC(sc *v1.StorageClass) ([]LVMVolumeGroup, error) {
 	lvms, ok := sc.Parameters[consts.LvmTypeParamKey]
 	if !ok {
-		return nil, fmt.Errorf("neither %s nor %s found in StorageClass parameters", consts.ReplicatedLVMVolumeGroupsParamKey, consts.LocalLVMVolumeGroupsParamKey)
+		return nil, fmt.Errorf("key is %s not found in StorageClass parameters", consts.LvmTypeParamKey)
 	}
 
 	var lvmVolumeGroups []LVMVolumeGroup
