@@ -3,7 +3,11 @@ package scheduler
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -22,7 +26,7 @@ func (s *scheduler) Filter(inputData ExtenderArgs) (*ExtenderFilterResult, error
 		return nil, err
 	}
 
-	return filterNodes(s, input, s.log)
+	return s.filterNodes(input, s.log)
 }
 
 // collectFilterInput gathers all necessary data for filtering.
@@ -91,4 +95,156 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		DRBDResourceMap:            drbdResourceMap,
 		DRBDNodesMap:               drbdNodesMap,
 	}, nil
+}
+
+func (s *scheduler) filterNodes(input *FilterInput, log *logger.Logger) (*ExtenderFilterResult, error) {
+	log.Debug("[filterNodes] filtering nodes", "nodes", input.NodeNames)
+
+	lvgInfo, err := collectLVGInfo(s, input.SCSUsedByPodPVCs)
+	if err != nil {
+		log.Error(err, "[filterNodes] unable to collect LVG info")
+		return nil, fmt.Errorf("unable to collect LVG info: %w", err)
+	}
+
+	result, err := s.filterNodesParallel(input, lvgInfo)
+	if err != nil {
+		log.Error(err, "[filterNodes] failed to filter nodes")
+		return nil, err
+	}
+
+	log.Trace("[filterNodes]", "filtered nodes result", result)
+	return result, nil
+}
+
+func (s *scheduler) filterNodesParallel(input *FilterInput, lvgInfo *LVGInfo) (*ExtenderFilterResult, error) {
+	commonNodes, err := getSharedNodesByStorageClasses(input.SCSUsedByPodPVCs, lvgInfo.NodeToLVGs)
+	if err != nil {
+		s.log.Error(err, "[filterNodesParallel] failed to find any shared nodes")
+		return nil, fmt.Errorf("unable to get common nodes: %w", err)
+	}
+
+	result := &ExtenderFilterResult{
+		NodeNames:   &[]string{},
+		FailedNodes: map[string]string{},
+	}
+	resCh := make(chan ResultWithError, len(input.NodeNames))
+	var wg sync.WaitGroup
+	wg.Add(len(input.NodeNames))
+
+	for _, nodeName := range input.NodeNames {
+		go func(nodeName string) {
+			defer wg.Done()
+
+			srvErr := s.filterSingleNodeSRV(nodeName, input, lvgInfo, commonNodes, s.log)
+			slvErr := s.filterSingleNodeSLV(nodeName, input, lvgInfo, commonNodes, s.log)
+
+			if srvErr == nil && slvErr == nil {
+				s.log.Debug(fmt.Sprintf("[filterNodesParallel] node %s is ok to schedule a pod to", nodeName))
+				resCh <- ResultWithError{NodeName: nodeName}
+				return
+			}
+			// TODO improve this part of the code later
+			errMessages := []string{srvErr.Error(), slvErr.Error()}
+			nodeErr := fmt.Errorf(strings.Join(errMessages, ", "))
+			s.log.Debug(fmt.Sprintf("[filterNodesParallel] node %s is bad to schedule a pod to. Reason: %s", nodeName, nodeErr.Error()))
+			resCh <- ResultWithError{NodeName: nodeName, Err: nodeErr}
+		}(nodeName)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resCh)
+	}()
+
+	for r := range resCh {
+		if r.Err == nil {
+			*result.NodeNames = append(*result.NodeNames, r.NodeName)
+		} else {
+			result.FailedNodes[r.NodeName] = r.Err.Error()
+		}
+	}
+
+	s.log.Debug("[filterNodes] filtered nodes", "nodes", result.NodeNames)
+	return result, nil
+}
+
+func (s *scheduler) filterSingleNodeSLV(nodeName string, filterInput *FilterInput, lvgInfo *LVGInfo, commonNodes map[string][]*snc.LVMVolumeGroup, log *logger.Logger) error {
+	log.Debug("[filterSingleNodeSLV] checking node", "node", nodeName)
+
+	nodeLvgs := commonNodes[nodeName]
+
+	hasEnoughSpace := true
+	for _, pvc := range filterInput.LocalProvisionPVCs {
+		lvgsFromSC := lvgInfo.SCLVGs[*pvc.Spec.StorageClassName]
+		sharedLVG := findSharedLVG(nodeLvgs, lvgsFromSC)
+		lvgs := s.cacheMgr.GetAllLVG()
+
+		hasEnoughSpace = nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo.ThickFreeSpaces, lvgInfo.ThinFreeSpaces, sharedLVG, pvc, lvgs, s.log)
+
+		if !hasEnoughSpace {
+			return fmt.Errorf("node has not enough space")
+		}
+	}
+	return nil
+}
+
+func (s *scheduler) filterSingleNodeSRV(nodeName string, filterInput *FilterInput, lvgInfo *LVGInfo, commonNodes map[string][]*snc.LVMVolumeGroup, log *logger.Logger) error {
+	log.Debug("[filterSingleNodeSRV] filtering node", "node", nodeName)
+
+	nodeLvgs := commonNodes[nodeName]
+	for _, pvc := range filterInput.ReplicatedProvisionPVCs {
+		log.Debug("[filterSingleNodeSRV] processing PVC", "pvc", pvc.Name, "node", nodeName)
+
+		lvgsFromSC := lvgInfo.SCLVGs[*pvc.Spec.StorageClassName]
+		pvcRSC := filterInput.ReplicatedSCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
+		sharedLVG := findSharedLVG(nodeLvgs, lvgsFromSC)
+		isDrbdDiskful := isDrbdDiskfulNode(filterInput.DRBDResourceMap, pvc.Spec.VolumeName, nodeName)
+
+		lvgs := s.cacheMgr.GetAllLVG()
+		hasEnoughSpace := nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo.ThickFreeSpaces, lvgInfo.ThinFreeSpaces, sharedLVG, pvc, lvgs, s.log)
+
+		switch pvcRSC.Spec.VolumeAccess {
+		case "Local":
+			if pvc.Spec.VolumeName == "" {
+				if sharedLVG == nil {
+					return fmt.Errorf("node %s does not contain LVGs from storage class %s", nodeName, pvcRSC.Name)
+				}
+				if !hasEnoughSpace {
+					return fmt.Errorf("node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
+				}
+			} else if !isDrbdDiskful {
+				return fmt.Errorf("node %s is not diskful for PV %s", nodeName, pvc.Spec.VolumeName)
+			}
+
+		case "EventuallyLocal":
+			if pvc.Spec.VolumeName == "" {
+				if sharedLVG == nil {
+					return fmt.Errorf("node %s does not contain LVGs from storage class %s", nodeName, pvcRSC.Name)
+				}
+				if !hasEnoughSpace {
+					return fmt.Errorf("node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
+				}
+			} else if isDrbdDiskful {
+				log.Trace("[filterSingleNodeSRV]", "node is diskful for EventuallyLocal PVC", "node", nodeName, "pvc", pvc.Name)
+				return nil
+			} else if sharedLVG == nil || !hasEnoughSpace {
+				return fmt.Errorf("node %s does not meet EventuallyLocal criteria for PVC %s", nodeName, pvc.Name)
+			}
+
+		case "PreferablyLocal":
+			if pvc.Spec.VolumeName == "" && !hasEnoughSpace {
+				return fmt.Errorf("node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
+			}
+		}
+	}
+
+	if !isDrbdNode(nodeName, filterInput.DRBDNodesMap) {
+		return fmt.Errorf("node %s is not a DRBD node", nodeName)
+	}
+	if !isOkNode(nodeName) {
+		return fmt.Errorf("node %s is offline", nodeName)
+	}
+
+	log.Debug("[filterSingleNodeSRV] node is ok", "node", nodeName)
+	return nil
 }
