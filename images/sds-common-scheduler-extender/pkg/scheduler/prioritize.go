@@ -45,7 +45,7 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 	}
 
 	replicatedPVCs, localPVCs := filterPVCsByProvisioner(s.log, pvcs, scs)
-	if len(replicatedPVCs) == 0 || len(localPVCs) == 0 {
+	if len(replicatedPVCs) == 0 && len(localPVCs) == 0 {
 		s.log.Warning(fmt.Sprintf("[filter] Pod %s/%s uses unmanaged PVCs. replicatedPVCs length %d, localPVCs length %d", pod.Namespace, pod.Name, len(replicatedPVCs), len(localPVCs)))
 		return nil, errors.New("no managed PVCs found")
 	}
