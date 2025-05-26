@@ -865,7 +865,7 @@ func CreateLVGsMapFromStorageClasses(scs map[string]*v1.StorageClass) (map[strin
 }
 
 func ExtractLVGsFromSC(sc *v1.StorageClass) ([]LVMVolumeGroup, error) {
-	lvms, ok := sc.Parameters[consts.LvmTypeParamKey]
+	lvms, ok := sc.Parameters[consts.LVMVolumeGroupsParamKey]
 	if !ok {
 		return nil, fmt.Errorf("key is %s not found in StorageClass parameters", consts.LvmTypeParamKey)
 	}
