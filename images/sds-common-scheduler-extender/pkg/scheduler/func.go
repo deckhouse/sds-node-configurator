@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
@@ -870,6 +871,7 @@ func ExtractLVGsFromSC(sc *v1.StorageClass) ([]LVMVolumeGroup, error) {
 		return nil, fmt.Errorf("key is %s not found in StorageClass parameters", consts.LvmTypeParamKey)
 	}
 
+	lvms = strings.Trim(lvms, "'")
 	var lvmVolumeGroups []LVMVolumeGroup
 	err := yaml.Unmarshal([]byte(lvms), &lvmVolumeGroups)
 	if err != nil {
