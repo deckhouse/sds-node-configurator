@@ -137,7 +137,7 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInf
 	lvgsFromNode := lvgInfo.NodeToLVGs[nodeName]
 	s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroups from node %s: %+v", nodeName, lvgsFromNode))
 	var totalFreeSpaceLeftPercent int64
-	replicaCountOnNode := 0
+	nodeScore := 0
 
 	PVCs := make(map[string]*corev1.PersistentVolumeClaim, len(input.LocalProvisionPVCs)+len(input.ReplicatedProvisionPVCs))
 	for name, pvc := range input.LocalProvisionPVCs {
@@ -161,7 +161,7 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInf
 			continue
 		}
 
-		replicaCountOnNode += 10
+		nodeScore += 10
 		lvg := lvgInfo.LVGs[commonLVG.Name]
 		s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s data: %+v", lvg.Name, lvg))
 
@@ -177,7 +177,6 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInf
 		s.log.Trace(fmt.Sprintf("[scoreNodes] totalFreeSpaceLeftPercent: %d", totalFreeSpaceLeftPercent))
 	}
 
-	nodeScore := replicaCountOnNode
 	averageFreeSpace := int64(0)
 	if len(PVCs) > 0 {
 		averageFreeSpace = totalFreeSpaceLeftPercent / int64(len(PVCs))
