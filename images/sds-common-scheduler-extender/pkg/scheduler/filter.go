@@ -59,8 +59,8 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 	for name, pvc := range replicatedPVCs {
 		replicatedAndLocalPVCs[name] = pvc
 	}
-	for name, pvc := range replicatedPVCs {
-		localPVCs[name] = pvc
+	for name, pvc := range localPVCs {
+		replicatedAndLocalPVCs[name] = pvc
 	}
 
 	pvcSizeRequests, err := extractRequestedSize(s.log, replicatedAndLocalPVCs, scsUsedByPodPVCs, pvMap)
