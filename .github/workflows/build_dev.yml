@@ -142,6 +142,10 @@ jobs:
             fi
           done <<< "$HOST_KEYS"
 
+      - name: check ssh user
+        run: |
+          echo "ssh-add -l"
+        
       - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.DEV_REGISTRY }}
