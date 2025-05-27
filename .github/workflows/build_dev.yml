@@ -144,7 +144,7 @@ jobs:
 
       - name: check ssh user
         run: |
-          echo "ssh-add -l"
+          ssh-add -l
         
       - uses: deckhouse/modules-actions/setup@v2
         with:
