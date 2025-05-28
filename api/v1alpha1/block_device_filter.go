@@ -50,7 +50,6 @@ type BlockDeviceFilterList struct {
 // Defines the state of block device selector
 type BlockDeviceFilterSpec struct {
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:EmbeddedResource
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// Selectors on block devices to keep.
 	//
