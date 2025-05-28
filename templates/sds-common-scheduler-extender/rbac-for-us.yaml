@@ -34,7 +34,7 @@ rules:
     resources: ["leases"]
     verbs: ["create", "get", "update"]
   - apiGroups: [ "storage.deckhouse.io" ]
-    resources: [ "lvmvolumegroups" ]
+    resources: [ "lvmvolumegroups", "localstorageclasses", "replicatedstorageclasses" ]
     verbs: [ "list", "watch", "get"]
   - apiGroups: ["v1"]
     resources: ["persistentvolumeclaims"]

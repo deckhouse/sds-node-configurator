@@ -36,8 +36,6 @@ rules:
       - lvmlogicalvolumes/status
       - lvmlogicalvolumesnapshots
       - lvmlogicalvolumesnapshots/status
-      - localstorageclasses
-      - replicatedstorageclasses
     verbs:
       - get
       - list
