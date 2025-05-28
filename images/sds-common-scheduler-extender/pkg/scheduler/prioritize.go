@@ -134,6 +134,10 @@ func (s *scheduler) scoreNodesParallel(input *PrioritizeInput, lvgInfo *LVGScore
 func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInfo, nodeName string) int {
 	s.log.Debug(fmt.Sprintf("[scoreNodes] scoring node %s", nodeName))
 
+	if nodeName == "v-voytenok-worker-2" {
+		return 0
+	}
+
 	lvgsFromNode := lvgInfo.NodeToLVGs[nodeName]
 	s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroups from node %s: %+v", nodeName, lvgsFromNode))
 	var totalFreeSpaceLeftPercent int64
