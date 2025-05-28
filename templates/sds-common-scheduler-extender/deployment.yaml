@@ -70,7 +70,7 @@ spec:
         - name: {{ .Chart.Name }}-module-registry
       initContainers:
         - command:
-          - /drbd-cluster-sync
+          - /drbd-resource-sync
           env:
             - name: LS_CONTROLLERS
               value: https://linstor.d8-sds-replicated-volume.svc:3371
@@ -95,9 +95,9 @@ spec:
               value: "10"
             - name: NUM_WORKERS
               value: "3"
-          image: {{ include "helm_lib_module_image" (list . "drbdClusterSync") }}
+          image: {{ include "helm_lib_module_image" (list . "drbdResourceSync") }}
           imagePullPolicy: IfNotPresent
-          name: drbd-cluster-sync
+          name: drbd-resource-sync
           resources:
             requests:
               ephemeral-storage: 50Mi
