@@ -38,6 +38,7 @@ func NewDRBDClusterSyncer(kc kubecl.Client, log *log.Entry, opts *config.Options
 }
 
 func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
+	return nil
 	// Step 1 - get entities from k8s etcd
 	drbdClusters := &srv.DRBDClusterList{}
 	if err := r.kc.List(ctx, drbdClusters); err != nil {
