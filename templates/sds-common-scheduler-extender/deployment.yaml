@@ -68,27 +68,6 @@ spec:
       {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 6 }}
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
-      initContainers:
-        - command:
-          - /drbd-resource-sync
-          env:
-            - name: LS_CONTROLLERS
-              value: https://linstor.d8-sds-replicated-volume.svc:3371
-            - name: RETRY_COUNT
-              value: "2"
-            - name: RETRY_DELAY_SEC
-              value: "10"
-            - name: NUM_WORKERS
-              value: "3"
-          image: {{ include "helm_lib_module_image" (list . "drbdResourceSync") }}
-          imagePullPolicy: IfNotPresent
-          name: drbd-resource-sync
-          resources:
-            requests:
-              ephemeral-storage: 50Mi
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          securityContext: {}
       containers:
         - name: sds-common-scheduler-extender
           {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
