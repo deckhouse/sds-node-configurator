@@ -12,7 +12,6 @@ import (
 
 	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
@@ -28,14 +27,14 @@ const (
 )
 
 type DRBDClusterSyncer struct {
-	kc   kubecl.Client
-	lc   *lc.HighLevelClient
+	kc kubecl.Client
+	// lc   *lc.HighLevelClient
 	opts *config.Options
 	log  *log.Entry
 }
 
-func NewDRBDClusterSyncer(kc kubecl.Client, lc *lc.HighLevelClient, log *log.Entry, opts *config.Options) *DRBDClusterSyncer {
-	return &DRBDClusterSyncer{kc: kc, lc: lc, log: log, opts: opts}
+func NewDRBDClusterSyncer(kc kubecl.Client, log *log.Entry, opts *config.Options) *DRBDClusterSyncer {
+	return &DRBDClusterSyncer{kc: kc, log: log, opts: opts}
 }
 
 func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {

@@ -16,19 +16,13 @@ limitations under the License.
 package main
 
 import (
-	"crypto/tls"
-	"net/http"
-	"net/url"
 	"os"
 
-	lapi "github.com/LINBIT/golinstor/client"
 	"github.com/deckhouse/sds-node-configurator/images/drbd-cluster-sync/config"
 	"github.com/deckhouse/sds-node-configurator/images/drbd-cluster-sync/crd_sync"
 	"github.com/deckhouse/sds-node-configurator/images/drbd-cluster-sync/pkg/kubeutils"
 	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/piraeusdatastore/linstor-csi/pkg/driver"
-	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
@@ -91,47 +85,47 @@ func main() {
 		r = rate.Inf
 	}
 
-	linstorOpts := []lapi.Option{
-		lapi.Limit(r, opts.Burst),
-		lapi.UserAgent("linstor-csi/" + driver.Version),
-		lapi.Log(logger),
-	}
+	// linstorOpts := []lapi.Option{
+	// 	lapi.Limit(r, opts.Burst),
+	// 	lapi.UserAgent("linstor-csi/" + driver.Version),
+	// 	lapi.Log(logger),
+	// }
 
-	if opts.LSEndpoint != "" {
-		u, err := url.Parse(opts.LSEndpoint)
-		if err != nil {
-			log.Errorf("Failed to parse endpoint: %v", err)
-			os.Exit(1)
-		}
+	// if opts.LSEndpoint != "" {
+	// 	u, err := url.Parse(opts.LSEndpoint)
+	// 	if err != nil {
+	// 		log.Errorf("Failed to parse endpoint: %v", err)
+	// 		os.Exit(1)
+	// 	}
 
-		linstorOpts = append(linstorOpts, lapi.BaseURL(u))
-	}
+	// 	linstorOpts = append(linstorOpts, lapi.BaseURL(u))
+	// }
 
-	if opts.LSSkipTLSVerification {
-		linstorOpts = append(linstorOpts, lapi.HTTPClient(&http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}))
-	}
+	// if opts.LSSkipTLSVerification {
+	// 	linstorOpts = append(linstorOpts, lapi.HTTPClient(&http.Client{
+	// 		Transport: &http.Transport{
+	// 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	// 		},
+	// 	}))
+	// }
 
-	if opts.BearerTokenFile != "" {
-		token, err := os.ReadFile(opts.BearerTokenFile)
-		if err != nil {
-			log.Errorf("failed to read bearer token file: %v", err)
-			os.Exit(1)
-		}
+	// if opts.BearerTokenFile != "" {
+	// 	token, err := os.ReadFile(opts.BearerTokenFile)
+	// 	if err != nil {
+	// 		log.Errorf("failed to read bearer token file: %v", err)
+	// 		os.Exit(1)
+	// 	}
 
-		linstorOpts = append(linstorOpts, lapi.BearerToken(string(token)))
-	}
+	// 	linstorOpts = append(linstorOpts, lapi.BearerToken(string(token)))
+	// }
 
-	lc, err := lc.NewHighLevelClient(linstorOpts...)
-	if err != nil {
-		log.Errorf("failed to create linstor high level client: %v", err)
-		os.Exit(1)
-	}
+	// lc, err := lc.NewHighLevelClient(linstorOpts...)
+	// if err != nil {
+	// 	log.Errorf("failed to create linstor high level client: %v", err)
+	// 	os.Exit(1)
+	// }
 
-	if err = crd_sync.NewDRBDClusterSyncer(kc, lc, logger, opts).Sync(ctx); err != nil {
+	if err = crd_sync.NewDRBDClusterSyncer(kc, logger, opts).Sync(ctx); err != nil {
 		log.Infof("failed to sync DRBD clusters: %v", err)
 		os.Exit(1)
 	}
