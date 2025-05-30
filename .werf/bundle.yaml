@@ -2,6 +2,7 @@
 ---
 image: bundle
 fromImage: builder/scratch
+
 import:
   # Rendering .werf/images-digests.yaml is required!
   - image: images-digests
@@ -18,6 +19,11 @@ import:
     add: /usr/local/bin/go-hooks
     to: /hooks/go-hooks
     after: setup
+  # Rendering .werf/choose-edition.yaml is required!
+  - image: choose-edition
+    add: /openapi
+    to: /openapi
+    after: setup
 git:
   - add: /
     to: /
@@ -30,7 +36,6 @@ git:
       - docs
       - hooks
       - monitoring
-      - openapi
-      - module.yaml
       - templates
       - Chart.yaml
+      - module.yaml
