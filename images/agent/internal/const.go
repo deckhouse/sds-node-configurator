@@ -56,25 +56,8 @@ const (
 	ReasonUpdated          = "Updated"
 	ReasonApplied          = "Applied"
 
-	BlockDeviceLabelPrefix = "status.blockdevice.storage.deckhouse.io"
-
 	MetadataNameLabelKey = "kubernetes.io/metadata.name"
 	HostNameLabelKey     = "kubernetes.io/hostname"
-
-	BlockDeviceTypeLabelKey               = BlockDeviceLabelPrefix + "/type"
-	BlockDeviceFSTypeLabelKey             = BlockDeviceLabelPrefix + "/fstype"
-	BlockDevicePVUUIDLabelKey             = BlockDeviceLabelPrefix + "/pvuuid"
-	BlockDeviceVGUUIDLabelKey             = BlockDeviceLabelPrefix + "/vguuid"
-	BlockDevicePartUUIDLabelKey           = BlockDeviceLabelPrefix + "/partuuid"
-	BlockDeviceLVMVolumeGroupNameLabelKey = BlockDeviceLabelPrefix + "/lvmvolumegroupname"
-	BlockDeviceActualVGNameLabelKey       = BlockDeviceLabelPrefix + "/actualvgnameonthenode"
-	BlockDeviceWWNLabelKey                = BlockDeviceLabelPrefix + "/wwn"
-	BlockDeviceSerialLabelKey             = BlockDeviceLabelPrefix + "/serial"
-	BlockDeviceSizeLabelKey               = BlockDeviceLabelPrefix + "/size"
-	BlockDeviceModelLabelKey              = BlockDeviceLabelPrefix + "/model"
-	BlockDeviceRotaLabelKey               = BlockDeviceLabelPrefix + "/rota"
-	BlockDeviceHotPlugLabelKey            = BlockDeviceLabelPrefix + "/hotplug"
-	BlockDeviceMachineIDLabelKey          = BlockDeviceLabelPrefix + "/machineid"
 
 	Thick = "Thick"
 	Thin  = "Thin"

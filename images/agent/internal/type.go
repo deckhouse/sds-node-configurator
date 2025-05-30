@@ -22,29 +22,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-type BlockDeviceCandidate struct {
-	NodeName              string
-	Consumable            bool
-	PVUuid                string
-	VGUuid                string
-	LVMVolumeGroupName    string
-	ActualVGNameOnTheNode string
-	Wwn                   string
-	Serial                string
-	Path                  string
-	Size                  resource.Quantity
-	Rota                  bool
-	Model                 string
-	Name                  string
-	HotPlug               bool
-	KName                 string
-	PkName                string
-	Type                  string
-	FSType                string
-	MachineID             string
-	PartUUID              string
-}
-
 type LVMVolumeGroupCandidate struct {
 	LVMVGName             string
 	Finalizers            []string
