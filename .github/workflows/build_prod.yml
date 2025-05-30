@@ -44,6 +44,22 @@ jobs:
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
+          eval $(ssh-agent)
+          trap "kill -3 ${SSH_AGENT_PID}" ERR EXIT HUP INT QUIT TERM
+          ssh-add - <<< "$SOURCE_REPO_SSH_KEY"
+          export SSH_KNOWN_HOSTS=~/.ssh/known_hosts
+
+          HOST=$(grep -oP '(?<=@)[^/:]+' <<< $SOURCE_REPO)
+          mkdir -p ~/.ssh
+          touch ~/.ssh/known_hosts
+          HOST_KEYS=$(ssh-keyscan -H "$HOST" 2>/dev/null)
+          while IFS= read -r KEY_LINE; do
+            CONSTANT_PART=$(awk '{print $2, $3}' <<< "$KEY_LINE")
+            if ! grep -q "$CONSTANT_PART" ~/.ssh/known_hosts; then
+              echo "$KEY_LINE" >> ~/.ssh/known_hosts
+            fi
+          done <<< "$HOST_KEYS"
+
       - uses: deckhouse/modules-actions/setup@v2
         with:
           registry: ${{ vars.PROD_REGISTRY }}
