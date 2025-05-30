@@ -1,4 +1,4 @@
-project: sds-node-configurator
+project: sds-replicated-volume
 configVersion: 1
 build:
   imageSpec:
@@ -8,17 +8,12 @@ build:
       clearWerfLabels: true
       removeLabels:
         - /.*/
-gitWorktree:
-  forceShallowClone: true
-cleanup:
-  disableGitHistoryBasedPolicy: {{ env "WERF_DISABLE_META_TAGS" "false" }}
 ---
 {{ tpl (.Files.Get ".werf/base-images.yaml") $ }}
 {{ tpl (.Files.Get ".werf/consts.yaml") $ }}
+{{ tpl (.Files.Get ".werf/choose-edition.yaml") $ }}
 {{ tpl (.Files.Get ".werf/images.yaml") $ }}
 {{ tpl (.Files.Get ".werf/images-digests.yaml") $ }}
 {{ tpl (.Files.Get ".werf/python-deps.yaml") $ }}
 {{ tpl (.Files.Get ".werf/bundle.yaml") $ }}
 {{ tpl (.Files.Get ".werf/release.yaml") $ }}
-
-
