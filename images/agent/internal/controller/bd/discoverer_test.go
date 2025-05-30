@@ -39,7 +39,7 @@ import (
 )
 
 //go:embed testdata/lsblk_output.json
-var testLsblkOutput string
+var testLsblkOutput []byte
 
 func setupDiscoverer() *Discoverer {
 	opts := DiscovererConfig{
@@ -538,8 +538,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 
 	t.Run("validateTestLSBLKOutput", func(t *testing.T) {
 		d := setupDiscoverer()
-		testLsblkOutputBytes := []byte(testLsblkOutput)
-		devices, err := utils.NewCommands().UnmarshalDevices(testLsblkOutputBytes)
+		devices, err := utils.NewCommands().UnmarshalDevices(testLsblkOutput)
 		if assert.NoError(t, err) {
 			assert.Equal(t, 31, len(devices))
 		}

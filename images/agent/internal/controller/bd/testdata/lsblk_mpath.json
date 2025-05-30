@@ -58,13 +58,13 @@
          "rota": true
       },{
          "name": "/dev/mapper/mpathatp",
-         "mountpoint": "/var/lib/kubelet/pods/3014a50c-1a57-48fd-b73e-96627273983e/volumes/kubernetes.io~csi/pvc-65b93221-21cf-4174-b20b-665ee5f1467b/mount",
+         "mountpoint": "",
          "partuuid": null,
          "hotplug": false,
          "model": null,
          "serial": null,
          "size": 1610612736,
-         "fstype": "xfs",
+         "fstype": null,
          "type": "mpath",
          "wwn": null,
          "kname": "/dev/dm-70",

@@ -45,7 +45,12 @@ const (
 	DiscovererName = "block-device-controller"
 )
 
-var ErrDeviceListInvalid = errors.New("device list invalid")
+var (
+	ErrDeviceListInvalid                             = errors.New("device list invalid")
+	ErrDeviceListKNameIsEmpty                        = fmt.Errorf("kname is empty: %w", ErrDeviceListInvalid)
+	ErrDEviceListParentVisitingRecursionLimitReached = fmt.Errorf("max parent recursion reached: %w", ErrDeviceListInvalid)
+	ErrDeviceListParentNotFound                      = fmt.Errorf("parent not found: %w", ErrDeviceListInvalid)
+)
 
 type Discoverer struct {
 	cl                      client.Client
@@ -302,18 +307,21 @@ func (d *Discoverer) getBlockDeviceCandidates() ([]internal.BlockDeviceCandidate
 //
 // Once maxDepth reached or travel function returns false it stops
 // Returns true if interrupted by visitor
-func visitParents(devicesByKName map[string]*internal.Device, device *internal.Device, visitor func(parent *internal.Device) bool, maxDepth int) bool {
-	if maxDepth <= 0 || device.PkName == "" {
-		return false
+func visitParents(devicesByKName map[string]*internal.Device, device *internal.Device, visitor func(parent *internal.Device) bool, maxDepth int) (bool, error) {
+	if maxDepth <= 0 {
+		return false, ErrDEviceListParentVisitingRecursionLimitReached
+	}
+	if device.PkName == "" {
+		return false, nil
 	}
 
 	parent, found := devicesByKName[device.PkName]
 	if !found {
-		return false
+		return false, ErrDeviceListParentNotFound
 	}
 
 	if !visitor(parent) {
-		return true
+		return true, nil
 	}
 
 	return visitParents(devicesByKName, parent, visitor, maxDepth-1)
@@ -354,25 +362,37 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 		device := &devices[i]
 
 		if device.Serial == "" {
-			if !visitParents(devicesByKName, device, func(parent *internal.Device) bool {
+			found, err := visitParents(devicesByKName, device, func(parent *internal.Device) bool {
 				if parent.Serial == "" {
 					return true
 				}
 				device.Serial = parent.Serial
 				return false
-			}, 16) {
+			}, 16)
+
+			if err != nil {
+				return nil, fmt.Errorf("looking serial for device %v: %w", device, err)
+			}
+
+			if !found {
 				d.log.Trace(fmt.Sprintf("[filterDevices] Can't find serial for device %s, kname: %s, pkname: %s", device.Name, device.KName, device.PkName))
 			}
 		}
 
 		if device.Wwn == "" {
-			if !visitParents(devicesByKName, device, func(parent *internal.Device) bool {
+			found, err := visitParents(devicesByKName, device, func(parent *internal.Device) bool {
 				if parent.Wwn == "" {
 					return true
 				}
 				device.Wwn = parent.Wwn
 				return false
-			}, 16) {
+			}, 16)
+
+			if err != nil {
+				return nil, fmt.Errorf("looking WWN for device %v: %w", device, err)
+			}
+
+			if !found {
 				d.log.Trace(fmt.Sprintf("[filterDevices] Can't find wwn for device %s, kname: %s, pkname: %s", device.Name, device.KName, device.PkName))
 			}
 		}

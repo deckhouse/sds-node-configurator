@@ -324,7 +324,7 @@
                 "type": "lvm",
                 "wwn": null,
                 "kname": "/dev/dm-18",
-                "pkname": "/dev/sda4"
+                "pkname": "/dev/sdb4"
             },{
                 "name": "/dev/drbd1028",
                 "mountpoint": null,
@@ -337,7 +337,7 @@
                 "type": "disk",
                 "wwn": null,
                 "kname": "/dev/drbd1028",
-                "pkname": "/dev/dm-10"
+                "pkname": "/dev/dm-1"
             },{
                 "name": "/dev/vdc",
                 "mountpoint": null,

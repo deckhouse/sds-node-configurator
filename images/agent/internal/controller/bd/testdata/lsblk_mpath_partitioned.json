@@ -43,20 +43,6 @@
          "pkname": null,
          "rota": true
       },{
-         "name": "/dev/sdin",
-         "mountpoint": null,
-         "partuuid": null,
-         "hotplug": false,
-         "model": "VV",
-         "serial": "CZ3811SC9P",
-         "size": 21474836480,
-         "fstype": "mpath_member",
-         "type": "disk",
-         "wwn": "0x60002ac000000000000002ec000209eb",
-         "kname": "/dev/sdin",
-         "pkname": null,
-         "rota": true
-      },{
          "name": "/dev/mapper/mpathayt",
          "mountpoint": null,
          "partuuid": null,
@@ -78,7 +64,7 @@
          "model": null,
          "serial": null,
          "size": 21358427648,
-         "fstype": "ext4",
+         "fstype": null,
          "type": "part",
          "wwn": null,
          "kname": "/dev/dm-81",
@@ -106,7 +92,7 @@
          "model": null,
          "serial": null,
          "size": 111149056,
-         "fstype": "vfat",
+         "fstype": null,
          "type": "part",
          "wwn": null,
          "kname": "/dev/dm-83",
