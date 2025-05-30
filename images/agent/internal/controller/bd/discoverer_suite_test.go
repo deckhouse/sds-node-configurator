@@ -113,6 +113,7 @@ var _ = Describe("Discoverer", func() {
 				Entry("one device", []internal.Device{
 					{
 						Name:   "testDeviceName",
+						KName:  "/dev/name",
 						Model:  "very good-model",
 						Serial: "testSerial",
 						Wwn:    "testWWN",
@@ -122,6 +123,7 @@ var _ = Describe("Discoverer", func() {
 				Entry("two devices", []internal.Device{
 					{
 						Name:   "testDeviceName1",
+						KName:  "/dev/name1",
 						Model:  "very good-model1",
 						Serial: "testSerial1",
 						Wwn:    "testWWN1",
@@ -130,6 +132,7 @@ var _ = Describe("Discoverer", func() {
 					},
 					{
 						Name:   "testDeviceName2",
+						KName:  "/dev/name2",
 						Model:  "very good-model2",
 						Serial: "testSerial2",
 						Wwn:    "testWWN2",
@@ -287,6 +290,7 @@ var _ = Describe("Discoverer", func() {
 										for i := range remainingInternalDevices {
 											newDevices := slices.Replace(slices.Clone(remainingInternalDevices), i, i+1, internal.Device{
 												Name:   "testDeviceNameNew",
+												KName:  "/dev/kname",
 												Model:  "very good-modelNew",
 												Serial: "testSerialNew",
 												Wwn:    "testWWNNew",

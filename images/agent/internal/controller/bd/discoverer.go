@@ -19,9 +19,11 @@ package bd
 import (
 	"context"
 	"crypto/sha1"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,7 +41,11 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
-const DiscovererName = "block-device-controller"
+const (
+	DiscovererName = "block-device-controller"
+)
+
+var ErrDeviceListInvalid = errors.New("device list invalid")
 
 type Discoverer struct {
 	cl                      client.Client
@@ -82,27 +88,34 @@ func (d *Discoverer) Name() string {
 func (d *Discoverer) Discover(ctx context.Context) (controller.Result, error) {
 	d.log.Info("[RunBlockDeviceController] Reconciler starts BlockDevice resources reconciliation")
 
-	shouldRequeue := d.blockDeviceReconcile(ctx)
+	shouldRequeue, err := d.blockDeviceReconcile(ctx)
+	if err != nil {
+		d.log.Error(err, "reconsailing block devices")
+	}
 	if shouldRequeue {
 		d.log.Warning(fmt.Sprintf("[RunBlockDeviceController] Reconciler needs a retry in %f", d.cfg.BlockDeviceScanInterval.Seconds()))
-		return controller.Result{RequeueAfter: d.cfg.BlockDeviceScanInterval}, nil
+		return controller.Result{RequeueAfter: d.cfg.BlockDeviceScanInterval}, err
 	}
 	d.log.Info("[RunBlockDeviceController] Reconciler successfully ended BlockDevice resources reconciliation")
-	return controller.Result{}, nil
+	return controller.Result{}, err
 }
 
-func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
+func (d *Discoverer) blockDeviceReconcile(ctx context.Context) (bool, error) {
 	reconcileStart := time.Now()
 
 	d.log.Info("[RunBlockDeviceController] START reconcile of block devices")
 
-	candidates := d.getBlockDeviceCandidates()
+	candidates, err := d.getBlockDeviceCandidates()
+	if err != nil {
+		d.log.Error(err, "[RunBlockDeviceController] unable to get block device candidates")
+		return true, fmt.Errorf("getting block device candidates: %w", err)
+	}
 
 	d.log.Debug("[RunBlockDeviceController] Getting block device filters")
 	selector, err := d.blockDeviceFilterClient.GetAPIBlockDeviceFilters(ctx, DiscovererName)
 	if err != nil {
 		d.log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDeviceFilters")
-		return true
+		return true, fmt.Errorf("getting BlockDeviceFilters from API: %w", err)
 	}
 	deviceMatchesSelector := func(blockDevice *v1alpha1.BlockDevice) bool {
 		return selector.Matches(labels.Set(blockDevice.Labels))
@@ -111,7 +124,7 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 	apiBlockDevices, err := d.bdCl.GetAPIBlockDevices(ctx, DiscovererName, nil)
 	if err != nil {
 		d.log.Error(err, "[RunBlockDeviceController] unable to GetAPIBlockDevices")
-		return true
+		return true, fmt.Errorf("getting BlockDevices from API: %w", err)
 	}
 
 	if len(apiBlockDevices) == 0 {
@@ -182,7 +195,7 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) bool {
 	d.metrics.ReconcileDuration(DiscovererName).Observe(d.metrics.GetEstimatedTimeInSeconds(reconcileStart))
 	d.metrics.ReconcilesCountTotal(DiscovererName).Inc()
 
-	return false
+	return false, nil
 }
 
 func (d *Discoverer) removeDeprecatedAPIDevices(
@@ -209,23 +222,23 @@ func (d *Discoverer) removeDeprecatedAPIDevices(
 	}
 }
 
-func (d *Discoverer) getBlockDeviceCandidates() []internal.BlockDeviceCandidate {
+func (d *Discoverer) getBlockDeviceCandidates() ([]internal.BlockDeviceCandidate, error) {
 	var candidates []internal.BlockDeviceCandidate
 	devices, _ := d.sdsCache.GetDevices()
 	if len(devices) == 0 {
 		d.log.Debug("[GetBlockDeviceCandidates] no devices found, returns empty candidates")
-		return candidates
+		return candidates, nil
 	}
 
 	filteredDevices, err := d.filterDevices(devices)
 	if err != nil {
 		d.log.Error(err, "[GetBlockDeviceCandidates] unable to filter devices")
-		return nil
+		return nil, fmt.Errorf("filtering devices: %w", err)
 	}
 
 	if len(filteredDevices) == 0 {
 		d.log.Debug("[GetBlockDeviceCandidates] no filtered devices left, returns empty candidates")
-		return candidates
+		return candidates, nil
 	}
 
 	pvs, _ := d.sdsCache.GetPVs()
@@ -282,50 +295,126 @@ func (d *Discoverer) getBlockDeviceCandidates() []internal.BlockDeviceCandidate 
 		candidates = append(candidates, candidate)
 	}
 
-	return candidates
+	return candidates, nil
 }
 
+// Calls visitor function for each parent of the device
+//
+// Once maxDepth reached or travel function returns false it stops
+// Returns true if interrupted by visitor
+func visitParents(devicesByKName map[string]*internal.Device, device *internal.Device, visitor func(parent *internal.Device) bool, maxDepth int) bool {
+	if maxDepth <= 0 || device.PkName == "" {
+		return false
+	}
+
+	parent, found := devicesByKName[device.PkName]
+	if !found {
+		return false
+	}
+
+	if !visitor(parent) {
+		return true
+	}
+
+	return visitParents(devicesByKName, parent, visitor, maxDepth-1)
+}
+
+// Removing devices we don't need
+//
+// Generally we remove parent devices:
+//
+// - sda - remove
+//   - sda1 - keep
+//   - sda2 - keep
+//
+// In mpath case we should copy serial and wwn from the parent device
+// Also mpath devices appears once but their parents multiple times. So only way to filter them out is to remove them by "fstype": "mpath_member"
 func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device, error) {
 	d.log.Trace(fmt.Sprintf("[filterDevices] devices before type filtration: %+v", devices))
 
-	validTypes := make([]internal.Device, 0, len(devices))
-
+	start := time.Now()
+	// arrange devices by pkname to fast access
+	devicesByKName := make(map[string]*internal.Device, len(devices))
 	for _, device := range devices {
-		if !strings.HasPrefix(device.Name, internal.DRBDName) &&
-			hasValidType(device.Type) &&
-			hasValidFSType(device.FSType) {
-			validTypes = append(validTypes, device)
+		if device.KName == "" {
+			return devices, fmt.Errorf("empty kname is unexpected for device: %v", device)
+		}
+		firstDevice, alreadyExists := devicesByKName[device.KName]
+		if alreadyExists {
+			d.log.Error(ErrDeviceListInvalid, "second device with same kname", "first", firstDevice, "second", device)
+			return devices, fmt.Errorf("%w: second device with kname %s found", ErrDeviceListInvalid, device.KName)
+		}
+		devicesByKName[device.KName] = &device
+	}
+	d.log.Trace(fmt.Sprintf("[filterDevices] Made map by KName in %v", time.Since(start)))
+
+	start = time.Now()
+	// feel up missing serial and wwn for mpath and partitions
+	for i := range devices {
+		device := &devices[i]
+
+		if device.Serial == "" {
+			if !visitParents(devicesByKName, device, func(parent *internal.Device) bool {
+				if parent.Serial == "" {
+					return true
+				}
+				device.Serial = parent.Serial
+				return false
+			}, 16) {
+				d.log.Trace(fmt.Sprintf("[filterDevices] Can't find serial for device %s, kname: %s, pkname: %s", device.Name, device.KName, device.PkName))
+			}
+		}
+
+		if device.Wwn == "" {
+			if !visitParents(devicesByKName, device, func(parent *internal.Device) bool {
+				if parent.Wwn == "" {
+					return true
+				}
+				device.Wwn = parent.Wwn
+				return false
+			}, 16) {
+				d.log.Trace(fmt.Sprintf("[filterDevices] Can't find wwn for device %s, kname: %s, pkname: %s", device.Name, device.KName, device.PkName))
+			}
 		}
 	}
+	d.log.Trace("Found missing Serial and Wwn in %v", time.Since(start))
 
-	d.log.Trace(fmt.Sprintf("[filterDevices] devices after type filtration: %+v", validTypes))
+	// deleting parent devices
 
-	pkNames := make(map[string]struct{}, len(validTypes))
+	// making pkname set
+	pkNames := make(map[string]struct{}, len(devices))
 	for _, device := range devices {
 		if device.PkName != "" {
 			d.log.Trace(fmt.Sprintf("[filterDevices] find parent %s for child : %+v.", device.PkName, device))
 			pkNames[device.PkName] = struct{}{}
 		}
 	}
-	d.log.Trace(fmt.Sprintf("[filterDevices] pkNames: %+v", pkNames))
 
-	filtered := make([]internal.Device, 0, len(validTypes))
-	for _, device := range validTypes {
-		if !isParent(device.KName, pkNames) || device.FSType == internal.LVMFSType {
-			validSize, err := hasValidSize(device.Size)
-			if err != nil {
-				return nil, err
-			}
-
-			if validSize {
-				filtered = append(filtered, device)
-			}
+	devices = slices.DeleteFunc(devices, func(device internal.Device) bool {
+		if device.FSType == "mpath_member" {
+			return true
 		}
-	}
 
-	d.log.Trace(fmt.Sprintf("[filterDevices] final filtered devices: %+v", filtered))
+		if strings.HasPrefix(device.Name, internal.DRBDName) || !hasValidType(device.Type) || !hasValidFSType(device.FSType) {
+			return true
+		}
 
-	return filtered, nil
+		_, hasChildren := pkNames[device.KName]
+		if hasChildren && device.FSType != internal.LVMFSType {
+			return true
+		}
+
+		validSize, err := hasValidSize(device.Size)
+		if err != nil || !validSize {
+			return true
+		}
+
+		return false
+	})
+
+	d.log.Trace(fmt.Sprintf("[filterDevices] final filtered devices: %+v", devices))
+
+	return devices, nil
 }
 
 func (d *Discoverer) createCandidateName(candidate internal.BlockDeviceCandidate, devices []internal.Device) string {

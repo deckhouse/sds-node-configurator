@@ -1,0 +1,75 @@
+{
+    "blockdevices": [
+        {
+         "name": "/dev/sdii",
+         "mountpoint": null,
+         "partuuid": null,
+         "hotplug": false,
+         "model": "VV",
+         "serial": "CZ3811SC9P",
+         "size": 1610612736,
+         "fstype": "mpath_member",
+         "type": "disk",
+         "wwn": "0x60002ac0000000000000017d000209eb",
+         "kname": "/dev/sdii",
+         "pkname": null,
+         "rota": true
+      },{
+         "name": "/dev/sdik",
+         "mountpoint": null,
+         "partuuid": null,
+         "hotplug": false,
+         "model": "VV",
+         "serial": "CZ3811SC9P",
+         "size": 1610612736,
+         "fstype": "mpath_member",
+         "type": "disk",
+         "wwn": "0x60002ac0000000000000017d000209eb",
+         "kname": "/dev/sdik",
+         "pkname": null,
+         "rota": true
+      },{
+         "name": "/dev/sdij",
+         "mountpoint": null,
+         "partuuid": null,
+         "hotplug": false,
+         "model": "VV",
+         "serial": "CZ3811SC9P",
+         "size": 1610612736,
+         "fstype": "mpath_member",
+         "type": "disk",
+         "wwn": "0x60002ac0000000000000017d000209eb",
+         "kname": "/dev/sdij",
+         "pkname": null,
+         "rota": true
+      },{
+         "name": "/dev/sdio",
+         "mountpoint": null,
+         "partuuid": null,
+         "hotplug": false,
+         "model": "VV",
+         "serial": "CZ3811SC9P",
+         "size": 1610612736,
+         "fstype": "mpath_member",
+         "type": "disk",
+         "wwn": "0x60002ac0000000000000017d000209eb",
+         "kname": "/dev/sdio",
+         "pkname": null,
+         "rota": true
+      },{
+         "name": "/dev/mapper/mpathatp",
+         "mountpoint": "/var/lib/kubelet/pods/3014a50c-1a57-48fd-b73e-96627273983e/volumes/kubernetes.io~csi/pvc-65b93221-21cf-4174-b20b-665ee5f1467b/mount",
+         "partuuid": null,
+         "hotplug": false,
+         "model": null,
+         "serial": null,
+         "size": 1610612736,
+         "fstype": "xfs",
+         "type": "mpath",
+         "wwn": null,
+         "kname": "/dev/dm-70",
+         "pkname": "/dev/sdij",
+         "rota": true
+      }
+    ]
+}

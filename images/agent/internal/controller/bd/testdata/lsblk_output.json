@@ -248,7 +248,7 @@
                 "kname": "/dev/sda1",
                 "pkname": "/dev/sda"
             },{
-                "name": "/dev/sda",
+                "name": "/dev/sdb",
                 "mountpoint": null,
                 "partuuid": null,
                 "hotplug": false,
@@ -258,7 +258,7 @@
                 "fstype": null,
                 "type": "disk",
                 "wwn": "0x5555555",
-                "kname": "/dev/sda",
+                "kname": "/dev/sdb",
                 "pkname": null
             },{
                 "name": "/dev/sda1",
@@ -271,10 +271,10 @@
                 "fstype": "vfat",
                 "type": "part",
                 "wwn": "0x5555555",
-                "kname": "/dev/sda1",
-                "pkname": "/dev/sda"
+                "kname": "/dev/sdb1",
+                "pkname": "/dev/sdb"
             },{
-                "name": "/dev/sda2",
+                "name": "/dev/sdb2",
                 "mountpoint": null,
                 "partuuid": "xxxxx-99b4-42c4-9dc4-nnnnnnn",
                 "hotplug": false,
@@ -284,10 +284,10 @@
                 "fstype": "linux_raid_member",
                 "type": "part",
                 "wwn": "0x5555555",
-                "kname": "/dev/sda2",
-                "pkname": "/dev/sda"
+                "kname": "/dev/sdb2",
+                "pkname": "/dev/sdb"
             },{
-                "name": "/dev/sda3",
+                "name": "/dev/sdb3",
                 "mountpoint": null,
                 "partuuid": "xxxxx-f3ef-4b4a-86f8-nnnnnn",
                 "hotplug": false,
@@ -297,10 +297,10 @@
                 "fstype": "linux_raid_member",
                 "type": "part",
                 "wwn": "0x5555555",
-                "kname": "/dev/sda3",
-                "pkname": "/dev/sda"
+                "kname": "/dev/sdb3",
+                "pkname": "/dev/sdb"
             },{
-                "name": "/dev/sda4",
+                "name": "/dev/sdb4",
                 "mountpoint": null,
                 "partuuid": "xxxxx-9f91-41c5-9616-nnnnnn",
                 "hotplug": false,
@@ -310,8 +310,8 @@
                 "fstype": "LVM2_member",
                 "type": "part",
                 "wwn": "0x55cddd",
-                "kname": "/dev/sda4",
-                "pkname": "/dev/sda"
+                "kname": "/dev/sdb4",
+                "pkname": "/dev/sdb"
             },{
                 "name": "/dev/mapper/data--linstor-pvc--xxxx--8997--4630--a728--nnnnnn_00000",
                 "mountpoint": null,

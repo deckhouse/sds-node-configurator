@@ -447,21 +447,25 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		devices := []internal.Device{
 			{
 				Name:   "valid1",
+				KName:  "/dev/kname1",
 				Size:   resource.MustParse("1G"),
 				Serial: "131412",
 			},
 			{
 				Name:   "valid2",
+				KName:  "/dev/kname2",
 				Size:   resource.MustParse("1G"),
 				Serial: "12412412",
 			},
 			{
 				Name:   "valid3",
+				KName:  "/dev/kname3",
 				Size:   resource.MustParse("1G"),
 				Serial: "4214215",
 			},
 			{
 				Name:   "invalid",
+				KName:  "/dev/kname4",
 				FSType: "ext4",
 				Size:   resource.MustParse("1G"),
 			},
@@ -471,8 +475,8 @@ func TestBlockDeviceCtrl(t *testing.T) {
 
 		d.sdsCache.StoreDevices(devices, bytes.Buffer{})
 
-		candidates := d.getBlockDeviceCandidates()
-
+		candidates, err := d.getBlockDeviceCandidates()
+		assert.Equal(t, nil, err)
 		assert.Equal(t, 3, len(candidates))
 		for i := range candidates {
 			assert.Equal(t, devices[i].Name, candidates[i].Path)
@@ -562,20 +566,20 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				candidateName := d.createCandidateName(candidate, devices)
 				assert.Equal(t, "dev-3306e773ab3cde6d519ce8d7c3686bf17a124dcb", candidateName, "device name generated incorrectly")
 			case 4:
-				assert.Equal(t, "/dev/sda4", device.Name)
+				assert.Equal(t, "/dev/sdb4", device.Name)
 				assert.False(t, candidate.Consumable)
 				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-377bc6adf33d84eb5932f5c89798bb6c5949ae2d", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-9787f657504d7c13f51becc3b0dd08d08a5d4477", candidateName, "device name generated incorrectly")
 			case 5:
 				assert.Equal(t, "/dev/vdc1", device.Name)
 				assert.True(t, candidate.Consumable)
 				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-a9d768213aaead8b42465ec859189de8779f96b7", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-ce11be00c63955b5517034063102cbfeabc09f48", candidateName, "device name generated incorrectly")
 			case 6:
 				assert.Equal(t, "/dev/mapper/mpatha", device.Name)
 				assert.True(t, candidate.Consumable)
 				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-98ca88ddaaddec43b1c4894756f4856244985511", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-c1885ec6dcee6409d508292b5c2b2f92260f6e0f", candidateName, "device name generated incorrectly")
 			}
 		}
 
