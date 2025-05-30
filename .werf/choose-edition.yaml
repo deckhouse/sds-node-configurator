@@ -11,6 +11,7 @@ git:
         - "**/*"
 shell:
   setup:
-    - cd /openapi 
-    - if [[ {{ .MODULE_EDITION }} == "ce" ]]; then cp -v values_ce.yaml values.yaml; else cp -v values_ee.yaml values.yaml; fi 
-    - rm -rf values_*.yaml 
+    - cd /openapi
+    - echo "Choose edition for the module"
+    - if [[ {{ .MODULE_EDITION }} == "ce" ]]; then cp -v values_ce.yaml values.yaml; else cp -v values_ee.yaml values.yaml; fi
+    - rm -rf values_*.yaml
