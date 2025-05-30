@@ -77,6 +77,20 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		storagePoolMap[storagePool.Name] = &storagePool
 	}
 
+	layerStorageVolumes, err := getLayerStorageVolumes(s.ctx, s.client)
+	if err != nil {
+		return nil, fmt.Errorf("unable to list layer storage volumes: %w", err)
+	}
+
+	isNodeDisklessMap := make(map[string]bool, len(layerStorageVolumes.Items))
+	for _, lsv := range layerStorageVolumes.Items {
+		isDiskless := false
+		if lsv.Spec.ProviderKind == "DISKLESS" {
+			isDiskless = true
+		}
+		isNodeDisklessMap[lsv.Spec.NodeName] = isDiskless
+	}
+
 	res := &PrioritizeInput{
 		Pod:                     pod,
 		NodeNames:               nodeNames,
@@ -86,6 +100,7 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		PVCRequests:             pvcRequests,
 		StoragePoolMap:          storagePoolMap,
 		DefaultDivisor:          s.defaultDivisor,
+		IsNodeDisklessMap:       isNodeDisklessMap,
 	}
 	b, _ := json.MarshalIndent(res, "", "  ")
 	s.log.Trace(fmt.Sprintf("[collectPrioritizeInput] PrioritizeInput: %+v", string(b)))
@@ -132,14 +147,16 @@ func (s *scheduler) scoreNodesParallel(input *PrioritizeInput, lvgInfo *LVGScore
 }
 
 func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInfo, nodeName string) int {
-	s.log.Debug(fmt.Sprintf("[scoreNodes] scoring node %s", nodeName))
+	s.log.Debug(fmt.Sprintf("[scoreSingleNode] scoring node %s", nodeName))
 
-	if nodeName == "v-voytenok-worker-2" {
+	isDisklessNode := input.IsNodeDisklessMap[nodeName]
+	if isDisklessNode {
+		s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s is diskless, returning 0 score points"))
 		return 0
 	}
 
 	lvgsFromNode := lvgInfo.NodeToLVGs[nodeName]
-	s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroups from node %s: %+v", nodeName, lvgsFromNode))
+	s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroups from node %s: %+v", nodeName, lvgsFromNode))
 	var totalFreeSpaceLeftPercent int64
 	nodeScore := 0
 
@@ -153,32 +170,32 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInf
 
 	for _, pvc := range PVCs {
 		pvcReq := input.PVCRequests[pvc.Name]
-		s.log.Trace(fmt.Sprintf("[scoreNodes] pvc %s size request: %+v", pvc.Name, pvcReq))
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] pvc %s size request: %+v", pvc.Name, pvcReq))
 
 		lvgsFromSC := lvgInfo.SCLVGs[*pvc.Spec.StorageClassName]
-		s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroups %+v from SC: %s", lvgsFromSC, *pvc.Spec.StorageClassName))
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroups %+v from SC: %s", lvgsFromSC, *pvc.Spec.StorageClassName))
 		commonLVG := findMatchedLVGs(lvgsFromNode, lvgsFromSC)
-		s.log.Trace(fmt.Sprintf("[scoreNodes] Common LVMVolumeGroup %+v of node %s and SC %s", commonLVG, nodeName, *pvc.Spec.StorageClassName))
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] Common LVMVolumeGroup %+v of node %s and SC %s", commonLVG, nodeName, *pvc.Spec.StorageClassName))
 
 		if commonLVG == nil {
-			s.log.Warning(fmt.Sprintf("[scoreNodes] unable to match Storage Class's LVMVolumeGroup with node %s for Storage Class %s", nodeName, *pvc.Spec.StorageClassName))
+			s.log.Warning(fmt.Sprintf("[scoreSingleNode] unable to match Storage Class's LVMVolumeGroup with node %s for Storage Class %s", nodeName, *pvc.Spec.StorageClassName))
 			continue
 		}
 
 		nodeScore += 10
 		lvg := lvgInfo.LVGs[commonLVG.Name]
-		s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s data: %+v", lvg.Name, lvg))
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroup %s data: %+v", lvg.Name, lvg))
 
 		freeSpace, err := calculateFreeSpace(lvg, s.cacheMgr, &pvcReq, commonLVG, s.log, pvc, nodeName)
 		if err != nil {
-			s.log.Error(err, fmt.Sprintf("[scoreNodes] unable to calculate free space for LVMVolumeGroup %s, PVC: %s, node: %s", lvg.Name, pvc.Name, nodeName))
+			s.log.Error(err, fmt.Sprintf("[scoreSingleNode] unable to calculate free space for LVMVolumeGroup %s, PVC: %s, node: %s", lvg.Name, pvc.Name, nodeName))
 			continue
 		}
-		s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s freeSpace: %s", lvg.Name, freeSpace.String()))
-		s.log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s total size: %s", lvg.Name, lvg.Status.VGSize.String()))
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroup %s freeSpace: %s", lvg.Name, freeSpace.String()))
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroup %s total size: %s", lvg.Name, lvg.Status.VGSize.String()))
 		totalFreeSpaceLeftPercent += getFreeSpaceLeftAsPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
 
-		s.log.Trace(fmt.Sprintf("[scoreNodes] totalFreeSpaceLeftPercent: %d", totalFreeSpaceLeftPercent))
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] totalFreeSpaceLeftPercent: %d", totalFreeSpaceLeftPercent))
 	}
 
 	averageFreeSpace := int64(0)

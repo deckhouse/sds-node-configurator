@@ -10,7 +10,6 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -281,14 +280,14 @@ func (cm *CacheManager) GetAllPVCForLVG(lvgName string) ([]*v1.PersistentVolumeC
 	return cm.cache.GetAllPVCForLVG(lvgName)
 }
 
-func (cm *CacheManager) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentVolumeClaim, deviceType string, drbdResourceMap map[string]*srv.DRBDResource) error {
+func (cm *CacheManager) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentVolumeClaim, deviceType string) error {
 	cm.locker.Lock()
 	defer func() {
 		cm.isUpdated = true
 		cm.locker.Unlock()
 	}()
 
-	return cm.cache.RemoveSpaceReservationForPVCWithSelectedNode(pvc, deviceType, drbdResourceMap)
+	return cm.cache.RemoveSpaceReservationForPVCWithSelectedNode(pvc, deviceType)
 }
 
 func (cm *CacheManager) AddLVGToPVC(lvgName, pvcKey string) {

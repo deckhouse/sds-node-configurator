@@ -69,8 +69,9 @@ type FilterInput struct {
 	PVCSizeRequests            map[string]PVCRequest
 	ReplicatedSCSUsedByPodPVCs map[string]*srv.ReplicatedStorageClass
 	LocalSCSUsedByPodPVCs      map[string]*slv.LocalStorageClass
-	DRBDResourceMap            map[string]*srv.DRBDResource
-	DRBDNodesMap               map[string]struct{}
+	// DRBDResourceMap            map[string]*srv.DRBDResource
+	DRBDNodesMap      map[string]struct{}
+	IsNodeDisklessMap map[string]bool
 }
 
 // LVGInfo holds LVMVolumeGroup-related data
@@ -97,6 +98,7 @@ type PrioritizeInput struct {
 	PVCRequests             map[string]PVCRequest
 	StoragePoolMap          map[string]*srv.ReplicatedStoragePool
 	DefaultDivisor          float64
+	IsNodeDisklessMap       map[string]bool
 }
 
 // LVGScoreInfo holds LVMVolumeGroup-related data for scoring

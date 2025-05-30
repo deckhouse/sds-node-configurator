@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
@@ -16,6 +17,7 @@ import (
 
 	slv "github.com/deckhouse/sds-local-volume/api/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -191,21 +193,21 @@ func getNodeWithLvmVgsMap(ctx context.Context, cl client.Client, log *logger.Log
 	return nodeToLvmMap, nil
 }
 
-func getDRBDResourceMap(ctx context.Context, cl client.Client) (map[string]*srv.DRBDResource, error) {
-	// TODO
-	// drbdList := &srv.DRBDResourceList{}
-	// err := cl.List(ctx, drbdList)
-	// if err != nil {
-	// 	return nil, err
-	// }
+// func getDRBDResourceMap(ctx context.Context, cl client.Client) (map[string]*srv.DRBDResource, error) {
+// 	// TODO
+// 	// drbdList := &srv.DRBDResourceList{}
+// 	// err := cl.List(ctx, drbdList)
+// 	// if err != nil {
+// 	// 	return nil, err
+// 	// }
 
-	// drbdMap := make(map[string]*srv.DRBDResource, len(drbdList.Items))
-	// for _, drbd := range drbdList.Items {
-	// 	drbdMap[drbd.Name] = &drbd
-	// }
-	drbdMap := map[string]*srv.DRBDResource{}
-	return drbdMap, nil
-}
+// 	// drbdMap := make(map[string]*srv.DRBDResource, len(drbdList.Items))
+// 	// for _, drbd := range drbdList.Items {
+// 	// 	drbdMap[drbd.Name] = &drbd
+// 	// }
+// 	drbdMap := map[string]*srv.DRBDResource{}
+// 	return drbdMap, nil
+// }
 
 func getDRBDNodesMap(ctx context.Context, cl client.Client, log *logger.Logger) (map[string]struct{}, error) {
 	result := make(map[string]struct{})
@@ -277,6 +279,19 @@ func getPersistentVolumes(ctx context.Context, cl client.Client, log *logger.Log
 
 	log.Trace("[getPersistentVolumes]", "persistent volumes map", pvMap)
 	return pvMap, nil
+}
+
+func getLayerStorageVolumes(ctx context.Context, cl client.Client) (*lsrv.LayerStorageVolumesList, error) {
+	cwt, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	layerStorageVolumes := &lsrv.LayerStorageVolumesList{}
+	err := cl.List(cwt, layerStorageVolumes)
+	if err != nil {
+		return nil, err
+	}
+
+	return layerStorageVolumes, nil
 }
 
 func getNodeNames(inputData ExtenderArgs, log *logger.Logger) ([]string, error) {
@@ -432,22 +447,22 @@ func getNodeScore(freeSpace int64, multiplier float64) int {
 	}
 }
 
-func isDrbdDiskfulNode(drbdResourceMap map[string]*srv.DRBDResource, pvName string, nodeName string) bool {
-	//TODO implement logic later when DRBDResource becomes available in the cluster
-	return true
-	// resource, found := drbdResourceMap[pvName]
-	// if !found {
-	// 	return false
-	// }
+// func isDrbdDiskfulNode(drbdResourceMap map[string]*srv.DRBDResource, pvName string, nodeName string) bool {
+// 	//TODO implement logic later when DRBDResource becomes available in the cluster
+// 	return true
+// 	// resource, found := drbdResourceMap[pvName]
+// 	// if !found {
+// 	// 	return false
+// 	// }
 
-	// for _, node := range resource.Spec.Peers {
-	// 	if node.NodeName == nodeName && !node.Diskless {
-	// 		return true
-	// 	}
-	// }
+// 	// for _, node := range resource.Spec.Peers {
+// 	// 	if node.NodeName == nodeName && !node.Diskless {
+// 	// 		return true
+// 	// 	}
+// 	// }
 
-	// return false
-}
+// 	// return false
+// }
 
 func isOkNode(_ string) bool {
 	// TODO implement node online check
