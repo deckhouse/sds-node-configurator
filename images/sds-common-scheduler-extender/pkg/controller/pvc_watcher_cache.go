@@ -194,7 +194,7 @@ func reconcilePVC(ctx context.Context, mgr manager.Manager, log *logger.Logger, 
 	if err != nil {
 		// Space reservation removal when node is selected now happens in sds-local-volume-only
 		if !k8serrors.IsNotFound(err) {
-			removalErr := cacheMgr.RemoveSpaceReservationForPVCWithSelectedNode(pvc, sc.Parameters[consts.LvmTypeParamKey], nil)
+			removalErr := cacheMgr.RemoveSpaceReservationForPVCWithSelectedNode(pvc, sc.Parameters[consts.LvmTypeParamKey])
 			if removalErr != nil {
 				log.Error(removalErr, fmt.Sprintf("[reconcilePVC] unable to remove PVC %s/%s space reservation in the cache", pvc.Namespace, pvc.Name))
 			}
