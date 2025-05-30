@@ -1,7 +1,7 @@
 ---
 image: choose-edition
 fromImage: builder/alt
-fromCacheVersion: {{ div .Commit.Date.Unix (mul 60 60 24 30) }}
+fromCacheVersion: { { div .Commit.Date.Unix (mul 60 60 24 30) } }
 
 git:
   - add: /
@@ -11,5 +11,6 @@ git:
 shell:
   setup:
     - cd /openapi
+    - ls -lah
     - if [[ {{ .MODULE_EDITION }} == "ce" ]]; then cp -v values_ce.yaml values.yaml; else cp -v values_ee.yaml values.yaml; fi
     - rm -rf values_*.yaml
