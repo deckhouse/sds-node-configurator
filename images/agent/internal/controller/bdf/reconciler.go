@@ -75,5 +75,6 @@ func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.BlockDeviceFilter, _ *v1a
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, _ controller.ReconcileRequest[*v1alpha1.BlockDeviceFilter]) (controller.Result, error) {
+	r.log.Trace("Reconciling BlockDeviceFilter")
 	return r.runBlockDeviceDiscover(ctx)
 }
