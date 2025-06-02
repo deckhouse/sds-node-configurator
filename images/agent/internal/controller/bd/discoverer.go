@@ -354,7 +354,7 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 		}
 		devicesByKName[device.KName] = &device
 	}
-	d.log.Trace(fmt.Sprintf("[filterDevices] Made map by KName in %v", time.Since(start)))
+	d.log.Trace("[filterDevices] Made map by KName", "duration", time.Since(start))
 
 	start = time.Now()
 	// feel up missing serial and wwn for mpath and partitions
@@ -397,7 +397,7 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 			}
 		}
 	}
-	d.log.Trace("Found missing Serial and Wwn in %v", time.Since(start))
+	d.log.Trace("Found missing Serial and Wwn", "duration", time.Since(start))
 
 	// deleting parent devices
 
@@ -410,27 +410,67 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 		}
 	}
 
-	devices = slices.DeleteFunc(devices, func(device internal.Device) bool {
-		if device.FSType == "mpath_member" {
-			return true
-		}
+	devices = slices.DeleteFunc(
+		devices,
+		func(device internal.Device) bool {
+			if device.FSType == "mpath_member" {
+				d.log.Trace("[filterDevices] filtered out", "name", device.Name, "kname", device.KName, "reason", "mpath_member")
+				return true
+			}
 
-		if strings.HasPrefix(device.Name, internal.DRBDName) || !hasValidType(device.Type) || !hasValidFSType(device.FSType) {
-			return true
-		}
+			if strings.HasPrefix(device.Name, internal.DRBDName) {
+				d.log.Trace("[filterDevices] filtered out", "name", device.Name, "kname", device.KName, "reason", "drbd")
+				return true
+			}
+			if !hasValidType(device.Type) {
+				d.log.Trace(
+					"[filterDevices] filtered out",
+					"name", device.Name,
+					"kname", device.KName,
+					"reason", "type",
+					"type", device.Type,
+				)
+				return true
+			}
+			if !hasValidFSType(device.FSType) {
+				d.log.Trace(
+					"[filterDevices] filtered out",
+					"name", device.Name,
+					"kname", device.KName,
+					"reason", "fstype",
+					"fstype", device.FSType,
+				)
+				return true
+			}
 
-		_, hasChildren := pkNames[device.KName]
-		if hasChildren && device.FSType != internal.LVMFSType {
-			return true
-		}
+			_, hasChildren := pkNames[device.KName]
+			if hasChildren && device.FSType != internal.LVMFSType {
+				d.log.Trace(
+					"[filterDevices] filtered out",
+					"name", device.Name,
+					"kname", device.KName,
+					"reason", "has children but not LVM",
+					"fstype", device.FSType,
+					"has_children", hasChildren,
+				)
+				return true
+			}
 
-		validSize, err := hasValidSize(device.Size)
-		if err != nil || !validSize {
-			return true
-		}
+			validSize, err := hasValidSize(device.Size)
+			if err != nil || !validSize {
+				d.log.Trace(
+					"[filterDevices] filtered out",
+					"name", device.Name,
+					"kname", device.KName,
+					"reason", "invalid size",
+					"size", device.Size,
+				)
+				return true
+			}
 
-		return false
-	})
+			return false
+		},
+	)
 
 	d.log.Trace(fmt.Sprintf("[filterDevices] final filtered devices: %+v", devices))
 
