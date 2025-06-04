@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -77,18 +78,14 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		storagePoolMap[storagePool.Name] = &storagePool
 	}
 
-	layerStorageVolumes, err := getLayerStorageVolumes(s.ctx, s.client)
+	drbdReplicaList, err := getDRBDReplicaList(s.ctx, s.client)
 	if err != nil {
 		return nil, fmt.Errorf("unable to list layer storage volumes: %w", err)
 	}
 
-	isNodeDisklessMap := make(map[string]bool, len(layerStorageVolumes.Items))
-	for _, lsv := range layerStorageVolumes.Items {
-		isDiskless := false
-		if lsv.Spec.ProviderKind == "DISKLESS" {
-			isDiskless = true
-		}
-		isNodeDisklessMap[lsv.Spec.NodeName] = isDiskless
+	drbdReplicaMap := make(map[string]*srv2.DRBDResourceReplica, len(drbdReplicaList.Items))
+	for _, replica := range drbdReplicaList.Items {
+		drbdReplicaMap[replica.Name] = &replica
 	}
 
 	res := &PrioritizeInput{
@@ -100,7 +97,7 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		PVCRequests:             pvcRequests,
 		StoragePoolMap:          storagePoolMap,
 		DefaultDivisor:          s.defaultDivisor,
-		IsNodeDisklessMap:       isNodeDisklessMap,
+		DRBDResourceReplicaMap:  drbdReplicaMap,
 	}
 	b, _ := json.MarshalIndent(res, "", "  ")
 	s.log.Trace(fmt.Sprintf("[collectPrioritizeInput] PrioritizeInput: %+v", string(b)))
@@ -149,12 +146,6 @@ func (s *scheduler) scoreNodesParallel(input *PrioritizeInput, lvgInfo *LVGScore
 func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInfo, nodeName string) int {
 	s.log.Debug(fmt.Sprintf("[scoreSingleNode] scoring node %s", nodeName))
 
-	isDisklessNode := input.IsNodeDisklessMap[nodeName]
-	if isDisklessNode {
-		s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s is diskless, returning 0 score points"))
-		return 0
-	}
-
 	lvgsFromNode := lvgInfo.NodeToLVGs[nodeName]
 	s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroups from node %s: %+v", nodeName, lvgsFromNode))
 	var totalFreeSpaceLeftPercent int64
@@ -169,6 +160,13 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInf
 	}
 
 	for _, pvc := range PVCs {
+		replica := input.DRBDResourceReplicaMap[pvc.Name]
+		peer := replica.Spec.Peers[nodeName]
+		if peer.Diskless {
+			s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s is diskless, returning 0 score points"))
+			return 0
+		}
+		
 		pvcReq := input.PVCRequests[pvc.Name]
 		s.log.Trace(fmt.Sprintf("[scoreSingleNode] pvc %s size request: %+v", pvc.Name, pvcReq))
 

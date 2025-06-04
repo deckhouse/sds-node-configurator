@@ -12,6 +12,8 @@ github.com/deckhouse/sds-local-volume/api v0.0.0-20250507092959-70b48eb00576 h1:
 github.com/deckhouse/sds-local-volume/api v0.0.0-20250507092959-70b48eb00576/go.mod h1:LucHX2fB3tjvLZlGWyf8rJa7pTo0/8cxFCYzZ236bPo=
 github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250206111927-21823e6307fc h1:2YVIoMrRW3B1K6KyMM5bnNvFLGLBBK0F7i5S/ugpoLA=
 github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250206111927-21823e6307fc/go.mod h1:6yz0RtbkLVJtK2DeuvgfaqBZRl5V5ax1WsfPF5pbnvo=
+github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250604071507-b6f049a19181 h1:BzcFcjPDTQ1wT/Nrk8B+OauyVk3ecdr0fEnVX8Rse/I=
+github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250604071507-b6f049a19181/go.mod h1:2NWJIfctU3XGDpwuVMRkaqzsGvcjEvMYHcuSwnO8fn4=
 github.com/emicklei/go-restful/v3 v3.11.0 h1:rAQeMHw1c7zTmncogyy8VvRZwtkmkZ4FxERmMY4rD+g=
 github.com/emicklei/go-restful/v3 v3.11.0/go.mod h1:6n3XBCmQQb25CM2LCACGz8ukIrRry+4bhvbpWn3mrbc=
 github.com/evanphx/json-patch v0.5.2 h1:xVCHIVMUu1wtM/VkR9jVZ45N3FhZfYMMYGorLCR8P3k=
