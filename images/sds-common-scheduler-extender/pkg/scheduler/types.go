@@ -20,6 +20,7 @@ import (
 	slv "github.com/deckhouse/sds-local-volume/api/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	apiv1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -98,7 +99,7 @@ type PrioritizeInput struct {
 	PVCRequests             map[string]PVCRequest
 	StoragePoolMap          map[string]*srv.ReplicatedStoragePool
 	DefaultDivisor          float64
-	IsNodeDisklessMap       map[string]bool
+	DRBDResourceReplicaMap  map[string]*srv2.DRBDResourceReplica
 }
 
 // LVGScoreInfo holds LVMVolumeGroup-related data for scoring

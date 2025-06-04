@@ -19,6 +19,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	v1 "k8s.io/api/storage/v1"
@@ -292,6 +293,18 @@ func getLayerStorageVolumes(ctx context.Context, cl client.Client) (*lsrv.LayerS
 	}
 
 	return layerStorageVolumes, nil
+}
+
+func getDRBDReplicaList(ctx context.Context, cl client.Client) (*srv2.DRBDResourceReplicaList, error) {
+	cwt, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	rrl := &srv2.DRBDResourceReplicaList{}
+	if err := cl.List(cwt, rrl); err != nil {
+		return nil, err
+	}
+
+	return rrl, nil
 }
 
 func getNodeNames(inputData ExtenderArgs, log *logger.Logger) ([]string, error) {
