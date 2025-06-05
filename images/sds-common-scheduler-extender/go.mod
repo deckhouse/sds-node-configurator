@@ -4,8 +4,6 @@ go 1.24.2
 
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250123151518-099b1c39c216
-	// github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250206111927-21823e6307fc
-	// github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250529123408-1f8bf3e7b12a
 	github.com/go-logr/logr v1.4.2
 	github.com/spf13/cobra v1.8.1
 	k8s.io/api v0.32.1
@@ -19,13 +17,15 @@ require (
 
 replace github.com/deckhouse/sds-node-configurator/api => ../../api
 
-require github.com/deckhouse/sds-local-volume/api v0.0.0-20250507092959-70b48eb00576
+require (
+	github.com/deckhouse/sds-local-volume/api v0.0.0-20250507092959-70b48eb00576
+	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250605080358-5a38c8fe1203
+)
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250604071507-b6f049a19181 // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.0 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect

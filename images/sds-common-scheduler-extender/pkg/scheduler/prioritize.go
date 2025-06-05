@@ -80,7 +80,7 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 
 	drbdReplicaList, err := getDRBDReplicaList(s.ctx, s.client)
 	if err != nil {
-		return nil, fmt.Errorf("unable to list layer storage volumes: %w", err)
+		return nil, fmt.Errorf("unable to list DRBD replicas: %w", err)
 	}
 
 	drbdReplicaMap := make(map[string]*srv2.DRBDResourceReplica, len(drbdReplicaList.Items))
@@ -166,7 +166,7 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInf
 			s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s is diskless, returning 0 score points"))
 			return 0
 		}
-		
+
 		pvcReq := input.PVCRequests[pvc.Name]
 		s.log.Trace(fmt.Sprintf("[scoreSingleNode] pvc %s size request: %+v", pvc.Name, pvcReq))
 
