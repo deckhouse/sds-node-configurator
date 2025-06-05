@@ -24,7 +24,7 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: |
+          description: | 
             The LVMLogicalVolume resource defines the storage where a PV will be created.
           required:
             - spec
@@ -32,7 +32,7 @@ spec:
             spec:
               type: object
               x-kubernetes-validations:
-                - rule: |
+                - rule: |                  
                     (self.type == "Thin" && has(self.thin) && !has(self.thick)) || self.type != "Thin"
                   message: "Field 'thin' is required and field 'thick' is forbidden when 'type' is 'Thin'."
                 - rule: >
@@ -61,7 +61,7 @@ spec:
                     - rule: self == oldSelf
                       message: Value is immutable.
                   minLength: 1
-                  pattern: "^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$"
+                  pattern: '^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$'
                 type:
                   type: string
                   description: |
@@ -73,9 +73,9 @@ spec:
                 size:
                   x-kubernetes-int-or-string: true
                   description: |
-                    The desired LV size. It can be specified as a numerical value or percentage of the total VG or thin pool space. For thin pools, the total space is calculated as the actual thin pool size multiplied by the `allocationLimit` value.
-                     
-                    > Note that if you specify a percentage, the LV will be automatically extended when VG, thin pool, or thin pool's `allocationLimit` value is increased.
+                   The desired LV size. It can be specified as a numerical value or percentage of the total VG or thin pool space. For thin pools, the total space is calculated as the actual thin pool size multiplied by the `allocationLimit` value.
+                    
+                   > Note that if you specify a percentage, the LV will be automatically extended when VG, thin pool, or thin pool's `allocationLimit` value is increased.
                   minLength: 1
                   pattern: '^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$|^[1-9][0-9]?%$|100%'
                 lvmVolumeGroupName:
@@ -86,7 +86,7 @@ spec:
                     - rule: self == oldSelf
                       message: Value is immutable.
                   minLength: 1
-                  pattern: "^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$"
+                  pattern: '^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$'
                 volumeCleanup:
                   type: string
                   enum: [RandomFillThreePass, RandomFillSinglePass, Discard]
@@ -125,11 +125,11 @@ spec:
                     contiguous:
                       type: boolean
                       x-kubernetes-validations:
-                        - rule: "self == oldSelf"
+                        - rule: 'self == oldSelf'
                           message: Value is immutable.
                       description: |
                         If set to `true`, the logical volume will be created with the `contiguous` attribute.
-
+                        
                         > Use this attribute carefully, as it may prevent from LV creation even if there is enough space for it.
                 source:
                   type: object
@@ -139,8 +139,8 @@ spec:
                     - rule: self == oldSelf
                       message: Value is immutable.
                   required:
-                    - kind
-                    - name
+                    - kind                  
+                    - name                  
                   properties:
                     kind:
                       type: string
@@ -149,7 +149,7 @@ spec:
                         Kind of the source. The LVMLogicalVolume kind means that the current resource is a clone. The LVMLogicalVolumeSnapshot kind means that the current resource is a restored volume.
                       x-kubernetes-validations:
                         - rule: self == oldSelf
-                          message: Value is immutable.
+                          message: Value is immutable.                      
                     name:
                       type: string
                       description: |
@@ -157,7 +157,7 @@ spec:
                       x-kubernetes-validations:
                         - rule: self == oldSelf
                           message: Value is immutable.
-                      minLength: 1
+                      minLength: 1                    
             status:
               type: object
               description: |
