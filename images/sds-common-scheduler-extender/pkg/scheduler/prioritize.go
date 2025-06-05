@@ -163,7 +163,7 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInf
 		replica := input.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
 		peer := replica.Spec.Peers[nodeName]
 		if peer.Diskless {
-			s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s is diskless, returning 0 score points"))
+			s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s is diskless for pvc %s, returning 0 score points", nodeName, pvc.Name))
 			return 0
 		}
 
