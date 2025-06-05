@@ -15,6 +15,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	lapi "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -68,6 +69,7 @@ var resourcesSchemeFuncs = []func(*runtime.Scheme) error{
 	sv1.AddToScheme,
 	slv.AddToScheme,
 	lapi.AddToScheme,
+	srv2.AddToScheme,
 }
 
 var config = &Config{
