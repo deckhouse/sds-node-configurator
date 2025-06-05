@@ -158,7 +158,7 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInf
 		PVCs[name] = pvc
 	}
 
-	for _, pvc := range PVCs {
+	for _, pvc := range PVCs { 
 		replica := input.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
 		s.log.Info(fmt.Sprintf("[scoreSingleNode] replica %s: %+v", replica.Name, replica))
 		s.log.Info(fmt.Sprintf("[scoreSingleNode] node Name %s", nodeName))
