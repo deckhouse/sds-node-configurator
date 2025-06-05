@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -99,8 +98,8 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		DefaultDivisor:          s.defaultDivisor,
 		DRBDResourceReplicaMap:  drbdReplicaMap,
 	}
-	b, _ := json.MarshalIndent(res, "", "  ")
-	s.log.Trace(fmt.Sprintf("[collectPrioritizeInput] PrioritizeInput: %+v", string(b)))
+	// b, _ := json.MarshalIndent(res, "", "  ")
+	// s.log.Trace(fmt.Sprintf("[collectPrioritizeInput] PrioritizeInput: %+v", string(b)))
 	return res, nil
 }
 
@@ -161,6 +160,8 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInf
 
 	for _, pvc := range PVCs {
 		replica := input.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
+		s.log.Info(fmt.Sprintf("[scoreSingleNode] replica %s: %+v", replica.Name, replica))
+		s.log.Info(fmt.Sprintf("[scoreSingleNode] node Name %s", nodeName))
 		peer := replica.Spec.Peers[nodeName]
 		if peer.Diskless {
 			s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s is diskless for pvc %s, returning 0 score points", nodeName, pvc.Name))
