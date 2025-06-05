@@ -5,7 +5,8 @@ metadata:
   name: lvmlogicalvolumesnapshots.storage.deckhouse.io
   labels:
     heritage: deckhouse
-    module: storage
+    module:  sds-local-volume
+    backup.deckhouse.io/cluster-config: "true"
 spec:
   group: storage.deckhouse.io
   scope: Cluster
