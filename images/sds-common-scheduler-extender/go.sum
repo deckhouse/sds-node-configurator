@@ -10,10 +10,8 @@ github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/deckhouse/sds-local-volume/api v0.0.0-20250507092959-70b48eb00576 h1:p0OATWSzVJn4U8f+xuOk7SoZknyNhUEH+sx1ecSVSSY=
 github.com/deckhouse/sds-local-volume/api v0.0.0-20250507092959-70b48eb00576/go.mod h1:LucHX2fB3tjvLZlGWyf8rJa7pTo0/8cxFCYzZ236bPo=
-github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250206111927-21823e6307fc h1:2YVIoMrRW3B1K6KyMM5bnNvFLGLBBK0F7i5S/ugpoLA=
-github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250206111927-21823e6307fc/go.mod h1:6yz0RtbkLVJtK2DeuvgfaqBZRl5V5ax1WsfPF5pbnvo=
-github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250604071507-b6f049a19181 h1:BzcFcjPDTQ1wT/Nrk8B+OauyVk3ecdr0fEnVX8Rse/I=
-github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250604071507-b6f049a19181/go.mod h1:2NWJIfctU3XGDpwuVMRkaqzsGvcjEvMYHcuSwnO8fn4=
+github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250605080358-5a38c8fe1203 h1:T1OoDF6S6e4ZxIut7JyKLMEVee1dE8t92upDdou+Nx0=
+github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250605080358-5a38c8fe1203/go.mod h1:2NWJIfctU3XGDpwuVMRkaqzsGvcjEvMYHcuSwnO8fn4=
 github.com/emicklei/go-restful/v3 v3.11.0 h1:rAQeMHw1c7zTmncogyy8VvRZwtkmkZ4FxERmMY4rD+g=
 github.com/emicklei/go-restful/v3 v3.11.0/go.mod h1:6n3XBCmQQb25CM2LCACGz8ukIrRry+4bhvbpWn3mrbc=
 github.com/evanphx/json-patch v0.5.2 h1:xVCHIVMUu1wtM/VkR9jVZ45N3FhZfYMMYGorLCR8P3k=
