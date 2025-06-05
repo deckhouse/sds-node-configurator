@@ -44,8 +44,8 @@ image: {{ $.ImageName }}
 fromImage: base/distroless
 import:
   - image: {{ $.ImageName }}-golang-artifact
-    add: /webhooks
-    to: /webhooks
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
     before: setup
 docker:
   ENTRYPOINT: ["/{{ $.ImageName }}"]
