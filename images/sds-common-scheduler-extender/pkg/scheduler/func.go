@@ -304,7 +304,7 @@ func getDRBDReplicaList(ctx context.Context, cl client.Client) (*srv2.DRBDResour
 		return nil, err
 	}
 
-	return rrl, nil
+	return rrl, nil 
 }
 
 func getNodeNames(inputData ExtenderArgs, log *logger.Logger) ([]string, error) {
