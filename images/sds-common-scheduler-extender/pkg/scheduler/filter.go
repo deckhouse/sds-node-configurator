@@ -231,7 +231,7 @@ func (s *scheduler) filterSingleNodeSRV(nodeName string, filterInput *FilterInpu
 
 		case "EventuallyLocal":
 			if pvc.Spec.VolumeName == "" {
-				if sharedLVG == nil {
+				if sharedLVG == nil { 
 					return fmt.Errorf("node %s does not contain LVGs from storage class %s", nodeName, pvcRSC.Name)
 				}
 				if !hasEnoughSpace {
