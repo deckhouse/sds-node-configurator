@@ -2,7 +2,7 @@
 
 # Do not remove. It's used in external tests.
 ---
-image: {{ $.ImageName }}-src-artifact
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
 fromImage: builder/src
 final: false
 
@@ -29,18 +29,18 @@ shell:
     - rm -rf /src/.git
 
 ---
-image: {{ $.ImageName }}-binaries-artifact
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-binaries-artifact
 fromImage: builder/alt
 final: false
 
 import:
-  - image: {{ $.ImageName }}-src-artifact
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
     add: /src
     to: /src
     before: install
 
 git:
-  - add: /tools/dev_images/additional_tools/binary_replace.sh
+  - add: {{ .ModuleDir }}/tools/dev_images/additional_tools/binary_replace.sh
     to: /binary_replace.sh
     stageDependencies:
       install:
@@ -85,39 +85,43 @@ shell:
   - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
 
 ---
-image: {{ $.ImageName }}-golang-artifact
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
 fromImage: builder/golang-alpine
 final: false
 
 import:
-  - image: {{ $.ImageName }}-src-artifact
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
     add: /src
     to: /src
     before: install
 
 mount:
-  - fromPath: ~/go-pkg-cache
-    to: /go/pkg
+{{ include "mount points for golang builds" . }}
+
+secrets:
+- id: GOPROXY
+  value: {{ .GOPROXY }}
 
 shell:
   setup:
     - cd /src/images/{{ $.ImageName }}/cmd
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -tags {{ $.Root.MODULE_EDITION }} -o /{{ $.ImageName }}
+    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
     - chmod +x /{{ $.ImageName }}
 
 ---
 image: {{ $.ImageName }}
 fromImage: base/distroless
 import:
-  - image: {{ $.ImageName }}-binaries-artifact
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-binaries-artifact
     add: /relocate
     to: /
     before: setup
-  - image: {{ $.ImageName }}-golang-artifact
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
     add: /{{ $.ImageName }}
     to: /{{ $.ImageName }}
     before: setup
 
-docker:
-  ENTRYPOINT: ["/{{ $.ImageName }}"]
-  USER: deckhouse:deckhouse
+imageSpec:
+  config:
+    entrypoint: ["/{{ $.ImageName }}"]
