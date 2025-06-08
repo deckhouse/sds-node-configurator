@@ -48,6 +48,7 @@ git:
 
 shell:
   install:
+  {{- include "alt packages proxy" . | nindent 4 }}
   - apt-get update
   - |
     apt-get install -y \
