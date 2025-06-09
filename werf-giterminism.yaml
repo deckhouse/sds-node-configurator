@@ -23,6 +23,7 @@ config:
   secrets:
     allowValueIds:
       - GOPROXY
+      - SOURCE_REPO
   stapel:
     mount:
       allowFromPaths:
