@@ -7,7 +7,7 @@ fromImage: builder/src
 final: false
 
 git:
-  - add: /
+  - add: {{ .ModuleDir }}
     to: /src
     includePaths:
       - api
@@ -21,8 +21,6 @@ git:
 
 shell:
   install:
-    - apt-get update
-    - apt-get -y install git
     - git config --global advice.detachedHead false
     - git clone --depth 1 --branch {{ $.Versions.UTIL_LINUX }} {{ env "SOURCE_REPO" }}/util-linux/util-linux.git /src/util-linux
     - rm -rf /src/util-linux/.git
