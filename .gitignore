@@ -47,3 +47,4 @@ __pycache__/
 images/agent/dev
 images/agent/Makefile
 local_build.sh
+/base_images.yml
