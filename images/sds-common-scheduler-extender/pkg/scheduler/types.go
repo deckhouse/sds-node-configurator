@@ -71,8 +71,8 @@ type FilterInput struct {
 	ReplicatedSCSUsedByPodPVCs map[string]*srv.ReplicatedStorageClass
 	LocalSCSUsedByPodPVCs      map[string]*slv.LocalStorageClass
 	// DRBDResourceMap            map[string]*srv.DRBDResource
-	DRBDNodesMap      map[string]struct{}
-	IsNodeDisklessMap map[string]bool
+	DRBDNodesMap           map[string]struct{}
+	DRBDResourceReplicaMap map[string]*srv2.DRBDResourceReplica
 }
 
 // LVGInfo holds LVMVolumeGroup-related data
