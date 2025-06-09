@@ -8,6 +8,7 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -73,18 +74,14 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		return nil, fmt.Errorf("unable to filter replicated StorageClasses: %w", err)
 	}
 
-	layerStorageVolumes, err := getLayerStorageVolumes(s.ctx, s.client)
+	drbdReplicaList, err := getDRBDReplicaList(s.ctx, s.client)
 	if err != nil {
-		return nil, fmt.Errorf("unable to list layer storage volumes: %w", err)
+		return nil, fmt.Errorf("unable to list DRBD replicas: %w", err)
 	}
 
-	isNodeDisklessMap := make(map[string]bool, len(layerStorageVolumes.Items))
-	for _, lsv := range layerStorageVolumes.Items {
-		isDiskless := false
-		if lsv.Spec.ProviderKind == "DISKLESS" {
-			isDiskless = true
-		}
-		isNodeDisklessMap[lsv.Spec.NodeName] = isDiskless
+	drbdReplicaMap := make(map[string]*srv2.DRBDResourceReplica, len(drbdReplicaList.Items))
+	for _, replica := range drbdReplicaList.Items {
+		drbdReplicaMap[replica.Name] = &replica
 	}
 
 	drbdNodesMap, err := getDRBDNodesMap(s.ctx, s.client, s.log)
@@ -101,9 +98,8 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		PVCSizeRequests:            pvcSizeRequests,
 		ReplicatedSCSUsedByPodPVCs: replicatedSCSUsedByPodPVCs,
 		LocalSCSUsedByPodPVCs:      localSCSUsedByPodPVCs,
-		// DRBDResourceMap:            drbdResourceMap,
-		DRBDNodesMap:      drbdNodesMap,
-		IsNodeDisklessMap: isNodeDisklessMap,
+		DRBDNodesMap:               drbdNodesMap,
+		DRBDResourceReplicaMap:     drbdReplicaMap,
 	}, nil
 }
 
@@ -204,10 +200,9 @@ func (s *scheduler) filterSingleNodeSRV(nodeName string, filterInput *FilterInpu
 	nodeLvgs := commonNodes[nodeName]
 	for _, pvc := range filterInput.ReplicatedProvisionPVCs {
 		log.Debug("[filterSingleNodeSRV] processing PVC", "pvc", pvc.Name, "node", nodeName)
-		isNodeDiskless := filterInput.IsNodeDisklessMap[nodeName]
-		if isNodeDiskless {
-			return fmt.Errorf("node %s is diskless", nodeName)
-		}
+		replica := filterInput.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
+		peer := replica.Spec.Peers[nodeName]
+		isNodeDiskless := peer.Diskless
 
 		lvgsFromSC := lvgInfo.SCLVGs[*pvc.Spec.StorageClassName]
 		pvcRSC := filterInput.ReplicatedSCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
@@ -220,42 +215,42 @@ func (s *scheduler) filterSingleNodeSRV(nodeName string, filterInput *FilterInpu
 		case "Local":
 			if pvc.Spec.VolumeName == "" {
 				if sharedLVG == nil {
-					return fmt.Errorf("node %s does not contain LVGs from storage class %s", nodeName, pvcRSC.Name)
+					return fmt.Errorf("[filterSingleNodeSRV] node %s does not contain LVGs from storage class %s", nodeName, pvcRSC.Name)
 				}
 				if !hasEnoughSpace {
-					return fmt.Errorf("node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
+					return fmt.Errorf("[filterSingleNodeSRV] node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
 				}
 			} else if !isNodeDiskless {
-				return fmt.Errorf("node %s is not diskful for PV %s", nodeName, pvc.Spec.VolumeName)
+				return fmt.Errorf("[filterSingleNodeSRV] node %s is not diskful for PV %s", nodeName, pvc.Spec.VolumeName)
 			}
 
 		case "EventuallyLocal":
 			if pvc.Spec.VolumeName == "" {
-				if sharedLVG == nil { 
-					return fmt.Errorf("node %s does not contain LVGs from storage class %s", nodeName, pvcRSC.Name)
+				if sharedLVG == nil {
+					return fmt.Errorf("[filterSingleNodeSRV] node %s does not contain LVGs from storage class %s", nodeName, pvcRSC.Name)
 				}
 				if !hasEnoughSpace {
-					return fmt.Errorf("node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
+					return fmt.Errorf("[filterSingleNodeSRV] node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
 				}
 			} else if isNodeDiskless {
 				log.Trace("[filterSingleNodeSRV]", "node is diskful for EventuallyLocal PVC", "node", nodeName, "pvc", pvc.Name)
 				return nil
 			} else if sharedLVG == nil || !hasEnoughSpace {
-				return fmt.Errorf("node %s does not meet EventuallyLocal criteria for PVC %s", nodeName, pvc.Name)
+				return fmt.Errorf("[filterSingleNodeSRV] node %s does not meet EventuallyLocal criteria for PVC %s", nodeName, pvc.Name)
 			}
 
 		case "PreferablyLocal":
 			if pvc.Spec.VolumeName == "" && !hasEnoughSpace {
-				return fmt.Errorf("node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
+				return fmt.Errorf("[filterSingleNodeSRV] node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
 			}
 		}
 	}
 
 	if !isDrbdNode(nodeName, filterInput.DRBDNodesMap) {
-		return fmt.Errorf("node %s is not a DRBD node", nodeName)
+		return fmt.Errorf("[filterSingleNodeSRV] node %s is not a DRBD node", nodeName)
 	}
 	if !isOkNode(nodeName) {
-		return fmt.Errorf("node %s is offline", nodeName)
+		return fmt.Errorf("[filterSingleNodeSRV] node %s is offline", nodeName)
 	}
 
 	log.Debug("[filterSingleNodeSRV] node is ok", "node", nodeName)
