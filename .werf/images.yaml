@@ -3,6 +3,7 @@
 {{- range $path, $content := $ImagesBuildFiles  }}
   {{- $ctx := dict }}
   {{- $_ := set $ctx "ImageName" ($path | split "/")._1 }}
+  {{- $_ := set $ctx "SOURCE_REPO" (env "SOURCE_REPO" "https://github.com") }}
   {{- $_ := set $ctx "MODULE_EDITION" $.MODULE_EDITION }}
   {{- $_ := set $ctx "Versions" $.VERSIONS }}
   {{- $_ := set $ctx "ImagePath" (printf "/images/%s" $ctx.ImageName) }}
