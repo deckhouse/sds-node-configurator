@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	LVGLayerResourceIDsWatcherName = "lvg-watcher-cache-controller"
+	LVGLayerResourceIDsWatcherName = "layer-resource-ids-watcher"
 )
 
 func RunLayerResourceIDsWatcher(
