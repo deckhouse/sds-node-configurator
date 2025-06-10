@@ -19,7 +19,7 @@ replace github.com/deckhouse/sds-node-configurator/api => ../../api
 
 require (
 	github.com/deckhouse/sds-local-volume/api v0.0.0-20250507092959-70b48eb00576
-	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250605080358-5a38c8fe1203
+	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250610081001-f06e0b517b0b
 )
 
 require (
