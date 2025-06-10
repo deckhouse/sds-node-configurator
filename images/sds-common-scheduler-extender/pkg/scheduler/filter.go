@@ -186,9 +186,8 @@ func (s *scheduler) filterSingleNodeSLV(nodeName string, filterInput *FilterInpu
 		lvgs := s.cacheMgr.GetAllLVG()
 
 		hasEnoughSpace = nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo.ThickFreeSpaces, lvgInfo.ThinFreeSpaces, sharedLVG, pvc, lvgs, s.log)
-
 		if !hasEnoughSpace {
-			return fmt.Errorf("node has not enough space")
+			return fmt.Errorf("[filterSingleNodeSLV] node %s has not enough space", nodeName)
 		}
 	}
 	return nil
