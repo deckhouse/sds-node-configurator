@@ -1,8 +1,8 @@
 ---
-# do not remove this image: used in external audits (DKP CSE)
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
 fromImage: builder/src
 final: false
+
 git:
   - add: {{ .ModuleDir }}
     to: /src
@@ -46,14 +46,14 @@ shell:
     - chmod +x /{{ $.ImageName }}
 
 ---
-image: {{ $.ImageName }}
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}
 fromImage: base/distroless
 
 import:
   - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
     add: /{{ $.ImageName }}
     to: /{{ $.ImageName }}
-    before: setup
+    before: install
 
 imageSpec:
   config:

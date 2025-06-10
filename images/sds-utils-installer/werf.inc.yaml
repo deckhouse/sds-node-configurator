@@ -51,33 +51,33 @@ git:
 
 shell:
   install:
-  {{- include "alt packages proxy" . | nindent 2 }}
-  - apt-get update
-  - |
-    apt-get install -y \
-    build-essential \
-    autoconf \
-    automake \
-    libtool \
-    pkg-config \
-    libdevmapper-devel \
-    libaio-devel-static \
-    libblkid-devel-static \
-    thin-provisioning-tools \
-    glibc-core \
-    cross-glibc-x86_64
-  - cd /src/lvm2
-  - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu
-  - make
-  - mkdir -p /sds-utils/bin/
-  - mv /src/lvm2/tools/lvm.static /sds-utils/bin/lvm.static
-  - mv /src/lvm2/libdm/dm-tools/dmsetup.static /sds-utils/bin/dmsetup.static
-  - cp /usr/sbin/{thin_dump,pdata_tools} /sds-utils/bin/
-  - mkdir -p /sds-utils/lib/
-  - cp /lib64/{libudev.so.1,libgcc_s.so.1,libm.so.6,libc.so.6} /sds-utils/lib/
-  - cp /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /sds-utils/lib/
-  - chmod +x /binary_replace.sh
-  - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
+    {{- include "alt packages proxy" . | nindent 4 }}
+    - apt-get update
+    - |
+      apt-get install -y \
+      build-essential \
+      autoconf \
+      automake \
+      libtool \
+      pkg-config \
+      libdevmapper-devel \
+      libaio-devel-static \
+      libblkid-devel-static \
+      thin-provisioning-tools \
+      glibc-core \
+      cross-glibc-x86_64
+    - cd /src/lvm2
+    - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu
+    - make
+    - mkdir -p /sds-utils/bin/
+    - mv /src/lvm2/tools/lvm.static /sds-utils/bin/lvm.static
+    - mv /src/lvm2/libdm/dm-tools/dmsetup.static /sds-utils/bin/dmsetup.static
+    - cp /usr/sbin/{thin_dump,pdata_tools} /sds-utils/bin/
+    - mkdir -p /sds-utils/lib/
+    - cp /lib64/{libudev.so.1,libgcc_s.so.1,libm.so.6,libc.so.6} /sds-utils/lib/
+    - cp /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /sds-utils/lib/
+    - chmod +x /binary_replace.sh
+    - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
@@ -105,7 +105,7 @@ shell:
     - chmod +x /{{ $.ImageName }}
 
 ---
-image: {{ $.ImageName }}
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}
 fromImage: base/distroless
 import:
   - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-binaries-artifact
