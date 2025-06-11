@@ -116,7 +116,7 @@ spec:
           name: sds-common-scheduler-extender
       - name: scheduler-extender-certs
         secret:
-            secretName: scheduler-extender-https-certs
+            secretName: common-scheduler-extender-https-certs
       serviceAccountName: sds-common-scheduler-extender
 
 {{- end }}
