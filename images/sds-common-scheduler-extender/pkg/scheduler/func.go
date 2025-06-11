@@ -76,7 +76,7 @@ func shouldProcessPod(ctx context.Context, cl client.Client, pvcMap map[string]*
 	}
 
 	log.Trace(fmt.Sprintf("[ShouldProcessPod] can't find targetProvisioner in pod volumes. Skip pod: %s/%s", pod.Namespace, pod.Name))
-	return nil, errors.New(fmt.Sprintf("[ShouldProcessPod] can't find targetProvisioner in pod volumes. Skip pod: %s/%s"))
+	return nil, errors.New(fmt.Sprintf("[ShouldProcessPod] can't find targetProvisioner in pod volumes. Skip pod: %s/%s", pod.Namespace, pod.Name))
 }
 
 func getProvisionerFromPVC(ctx context.Context, cl client.Client, log *logger.Logger, pvc *corev1.PersistentVolumeClaim) (string, error) {
@@ -304,7 +304,7 @@ func getDRBDReplicaList(ctx context.Context, cl client.Client) (*srv2.DRBDResour
 		return nil, err
 	}
 
-	return rrl, nil  
+	return rrl, nil
 }
 
 func getNodeNames(inputData ExtenderArgs, log *logger.Logger) ([]string, error) {

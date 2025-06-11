@@ -95,7 +95,7 @@ func PodCheckMiddleware(ctx context.Context, cl client.Client, next http.Handler
 
 		volumes, err := shouldProcessPod(ctx, cl, pvcMap, log, pod)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[WithPodCheck] error processing pod %s/%s: %v", pod.Namespace, pod.Name))
+			log.Error(err, fmt.Sprintf("[WithPodCheck] error processing pod %s/%s", pod.Namespace, pod.Name))
 			result := &ExtenderFilterResult{NodeNames: inputData.NodeNames}
 			if err := json.NewEncoder(w).Encode(result); err != nil {
 				log.Error(err, "[WithPodCheck] unable to decode request")
