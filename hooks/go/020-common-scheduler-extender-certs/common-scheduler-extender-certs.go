@@ -26,9 +26,11 @@ import (
 var _ = tlscertificate.RegisterInternalTLSHookEM(tlscertificate.GenSelfSignedTLSHookConf{
 	CommonCACanonicalName: fmt.Sprintf("%s-%s", consts.ModulePluralName, consts.SdsCommonSchedulerExtenderCertCn),
 	CN:                    consts.SdsCommonSchedulerExtenderCertCn,
-	TLSSecretName:         fmt.Sprintf("%s-https-certs", consts.SdsCommonSchedulerExtenderCertCn),
+	TLSSecretName:         consts.CommonSchedulerExtenderSecretName,
 	Namespace:             consts.ModuleNamespace,
 	SANs: tlscertificate.DefaultSANs([]string{
+		"localhost",
+		"127.0.0.1",
 		consts.SdsCommonSchedulerExtenderCertCn,
 		fmt.Sprintf("%s.%s", consts.SdsCommonSchedulerExtenderCertCn, consts.ModuleNamespace),
 		fmt.Sprintf("%s.%s.svc", consts.SdsCommonSchedulerExtenderCertCn, consts.ModuleNamespace),
