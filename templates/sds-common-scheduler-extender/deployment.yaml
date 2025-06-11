@@ -69,49 +69,6 @@ spec:
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       containers:
-{{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
-        - name: kube-scheduler
-          {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
-          command:
-          - kube-scheduler
-          - --config=/etc/kubernetes/scheduler-config.yaml
-          - --leader-elect=true
-          - --leader-elect-resource-name=sds-local-volume-scheduler
-          - --leader-elect-resource-namespace=$(NAMESPACE)
-          env:
-          - name: NAMESPACE
-            valueFrom:
-              fieldRef:
-                fieldPath: metadata.namespace
-          {{- /* Here we use kube-scheduler image from control-plane-manager module */}}
-          image: {{ include "helm_lib_module_image" (list (dict "Chart" (dict "Name" "control-plane-manager") "Values" .Values) (list "kubeScheduler" $kubeVersion.Major $kubeVersion.Minor | join "")) }}
-          imagePullPolicy: IfNotPresent
-          livenessProbe:
-            failureThreshold: 8
-            httpGet:
-              path: /healthz
-              port: 8081
-              scheme: HTTP
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 15
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 8081
-              scheme: HTTP
-            periodSeconds: 1
-            failureThreshold: 3
-          volumeMounts:
-          - mountPath: /etc/kubernetes
-            name: scheduler-config
-          resources:
-            requests:
-              {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
-              {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-              {{- include "kube_scheduler_resources" . | nindent 14 }}
-              {{- end }}
-{{- end }}
         - name: sds-common-scheduler-extender
           {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
           image: {{ include "helm_lib_module_image" (list . "sdsCommonSchedulerExtender") }}
@@ -160,12 +117,6 @@ spec:
       - name: scheduler-extender-certs
         secret:
             secretName: common-scheduler-extender-https-certs
-{{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
-      - configMap:
-          defaultMode: 420
-          name: sds-common-scheduler
-        name: scheduler-config
-{{- end }}
       serviceAccountName: sds-common-scheduler-extender
 
 {{- end }}
