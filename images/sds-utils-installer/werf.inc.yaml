@@ -2,12 +2,12 @@
 
 # Do not remove. It's used in external tests.
 ---
-image: {{ $.ImageName }}-src-artifact
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
 fromImage: builder/src
 final: false
 
 git:
-  - add: /
+  - add: {{ .ModuleDir }}
     to: /src
     includePaths:
       - api
@@ -19,29 +19,31 @@ git:
     excludePaths:
       - images/{{ $.ImageName }}/werf.yaml
 
+secrets:
+- id: SOURCE_REPO
+  value: {{ .SOURCE_REPO }}
+
 shell:
   install:
-    - apt-get update
-    - apt-get -y install git
     - git config --global advice.detachedHead false
-    - git clone --depth 1 {{ env "SOURCE_REPO" }}/lvmteam/lvm2.git /src/lvm2
+    - git clone --depth 1 $(cat /run/secrets/SOURCE_REPO)/lvmteam/lvm2.git /src/lvm2
     - cd /src/lvm2
-    - git fetch --depth 1 origin {{ $.Versions.LVM2 }}
+    - git fetch --depth 1 origin {{ .Versions.LVM2 }}
     - rm -rf /src/lvm2/.git
 
 ---
-image: {{ $.ImageName }}-binaries-artifact
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-binaries-artifact
 fromImage: builder/alt
 final: false
 
 import:
-  - image: {{ $.ImageName }}-src-artifact
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
     add: /src
     to: /src
     before: install
 
 git:
-  - add: /tools/dev_images/additional_tools/binary_replace.sh
+  - add: {{ .ModuleDir }}/tools/dev_images/additional_tools/binary_replace.sh
     to: /binary_replace.sh
     stageDependencies:
       install:
@@ -49,68 +51,72 @@ git:
 
 shell:
   install:
-  - apt-get update
-  - |
-    apt-get install -y \
-    build-essential \
-    autoconf \
-    automake \
-    libtool \
-    pkg-config \
-    libdevmapper-devel \
-    libaio-devel-static \
-    libblkid-devel-static \
-    thin-provisioning-tools \
-    glibc-core \
-    cross-glibc-x86_64
-  - cd /src/lvm2
-  - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu
-  - make
-  - mkdir -p /sds-utils/bin/
-  - mv /src/lvm2/tools/lvm.static /sds-utils/bin/lvm.static
-  - mv /src/lvm2/libdm/dm-tools/dmsetup.static /sds-utils/bin/dmsetup.static
-  - cp /usr/sbin/{thin_dump,pdata_tools} /sds-utils/bin/
-  - mkdir -p /sds-utils/lib/
-  - cp /lib64/{libudev.so.1,libgcc_s.so.1,libm.so.6,libc.so.6} /sds-utils/lib/
-  - cp /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /sds-utils/lib/
-  - chmod +x /binary_replace.sh
-  - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
+    {{- include "alt packages proxy" . | nindent 4 }}
+    - apt-get update
+    - |
+      apt-get install -y \
+      build-essential \
+      autoconf \
+      automake \
+      libtool \
+      pkg-config \
+      libdevmapper-devel \
+      libaio-devel-static \
+      libblkid-devel-static \
+      thin-provisioning-tools \
+      glibc-core \
+      cross-glibc-x86_64
+    - cd /src/lvm2
+    - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu
+    - make
+    - mkdir -p /sds-utils/bin/
+    - mv /src/lvm2/tools/lvm.static /sds-utils/bin/lvm.static
+    - mv /src/lvm2/libdm/dm-tools/dmsetup.static /sds-utils/bin/dmsetup.static
+    - cp /usr/sbin/{thin_dump,pdata_tools} /sds-utils/bin/
+    - mkdir -p /sds-utils/lib/
+    - cp /lib64/{libudev.so.1,libgcc_s.so.1,libm.so.6,libc.so.6} /sds-utils/lib/
+    - cp /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /sds-utils/lib/
+    - chmod +x /binary_replace.sh
+    - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
 
 ---
-image: {{ $.ImageName }}-golang-artifact
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
 fromImage: builder/golang-alpine
 final: false
 
 import:
-  - image: {{ $.ImageName }}-src-artifact
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
     add: /src
     to: /src
     before: install
 
 mount:
-  - fromPath: ~/go-pkg-cache
-    to: /go/pkg
+{{ include "mount points for golang builds" . }}
+
+secrets:
+- id: GOPROXY
+  value: {{ .GOPROXY }}
 
 shell:
   setup:
     - cd /src/images/{{ $.ImageName }}/cmd
+    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
     - chmod +x /{{ $.ImageName }}
 
 ---
-image: {{ $.ImageName }}
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}
 fromImage: base/distroless
 import:
-  - image: {{ $.ImageName }}-binaries-artifact
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-binaries-artifact
     add: /relocate
     to: /
     before: setup
-  - image: {{ $.ImageName }}-golang-artifact
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
     add: /{{ $.ImageName }}
     to: /{{ $.ImageName }}
     before: setup
 
-docker:
-  ENTRYPOINT: ["/{{ $.ImageName }}"]
-  CMD: ["/sds-utils", "/opt/deckhouse/sds"]
-  USER: deckhouse:deckhouse
+imageSpec:
+  config:
+    entrypoint: ["/{{ $.ImageName }}"]
