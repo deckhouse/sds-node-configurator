@@ -20,6 +20,10 @@ config:
       - DEV_MODULES_MODULE_SOURCE
     allowUncommittedFiles:
       - "base_images.yml"
+  secrets:
+    allowValueIds:
+      - GOPROXY
+      - SOURCE_REPO
   stapel:
     mount:
       allowFromPaths:
