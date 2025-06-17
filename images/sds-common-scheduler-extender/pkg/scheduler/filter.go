@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -83,12 +84,13 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 	for _, replica := range drbdReplicaList.Items {
 		drbdReplicaMap[replica.Name] = &replica
 	}
+	b, _ := json.MarshalIndent(drbdReplicaMap, "", "  ")
+	fmt.Printf("[collectFilterInput] drbdReplicaMap %+v\n", string(b))
 
 	drbdNodesMap, err := getDRBDNodesMap(s.ctx, s.client, s.log)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get DRBD nodes map: %w", err)
 	}
-
 	return &FilterInput{
 		Pod:                        pod,
 		NodeNames:                  nodeNames,
