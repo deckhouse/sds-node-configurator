@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	mc "github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/api"
+	mc "github.com/deckhouse/deckhouse/deckhouse-controller/pkg/apis/deckhouse.io/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/config"
 	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/controller"
 	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/kubutils"
