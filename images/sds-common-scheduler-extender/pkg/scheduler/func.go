@@ -227,41 +227,61 @@ func getNodeWithLvmVgsMap(ctx context.Context, cl client.Client, log *logger.Log
 // }
 
 func getDRBDNodesMap(ctx context.Context, cl client.Client, log *logger.Logger) (map[string]struct{}, error) {
-	result := make(map[string]struct{})
+	nodeList := &corev1.NodeList{}
 
-	lvgList := &snc.LVMVolumeGroupList{}
-	err := cl.List(ctx, lvgList)
+	cwt, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	err := cl.List(cwt, nodeList)
 	if err != nil {
-		log.Error(err, "[getDRBDNodesMap] failed to list LVM volume groups")
-		return result, err
+		log.Error(err, "[getDRBDNodesMap] failed to list cluster nodes")
+		return nil, err
 	}
 
-	lvgMap := make(map[string]*snc.LVMVolumeGroup, len(lvgList.Items))
-	for _, lvg := range lvgList.Items {
-		lvgMap[lvg.Name] = &lvg
-	}
-	log.Trace("[getDRBDNodesMap]", "LVM volume group map", lvgMap)
-
-	rspList := &srv.ReplicatedStoragePoolList{}
-	err = cl.List(ctx, rspList)
-	if err != nil {
-		log.Error(err, "[getDRBDNodesMap] failed to list replicated storage pools")
-		return result, err
-	}
-	log.Trace("[getDRBDNodesMap]", "LVM volume group map", lvgMap)
-
-	for _, rsc := range rspList.Items {
-		for _, rscLVG := range rsc.Spec.LVMVolumeGroups {
-			lvg, found := lvgMap[rscLVG.Name]
-			if !found {
-				log.Warning("[getDRBDNodesMap]", fmt.Sprintf("no LVM volume group %s found, skipping iteration", rscLVG.Name))
-			}
-			result[lvg.Spec.Local.NodeName] = struct{}{}
+	result := map[string]struct{}{}
+	for _, node := range nodeList.Items {
+		if _, ok := node.Labels["storage.deckhouse.io/sds-replicated-volume-node"]; ok {
+			result[node.Name] = struct{}{}
 		}
 	}
 
-	log.Trace("[getDRBDNodesMap]", "DRBD nodes map", result)
 	return result, nil
+
+	// result := make(map[string]struct{})
+
+	// lvgList := &snc.LVMVolumeGroupList{}
+	// err := cl.List(ctx, lvgList)
+	// if err != nil {
+	// 	log.Error(err, "[getDRBDNodesMap] failed to list LVM volume groups")
+	// 	return result, err
+	// }
+
+	// lvgMap := make(map[string]*snc.LVMVolumeGroup, len(lvgList.Items))
+	// for _, lvg := range lvgList.Items {
+	// 	lvgMap[lvg.Name] = &lvg
+	// }
+	// log.Trace("[getDRBDNodesMap]", "LVM volume group map", lvgMap)
+
+	// rspList := &srv.ReplicatedStoragePoolList{}
+	// err = cl.List(ctx, rspList)
+	// if err != nil {
+	// 	log.Error(err, "[getDRBDNodesMap] failed to list replicated storage pools")
+	// 	return result, err
+	// }
+	// log.Trace("[getDRBDNodesMap]", "LVM volume group map", lvgMap)
+
+	// for _, rsc := range rspList.Items {
+	// 	for _, rscLVG := range rsc.Spec.LVMVolumeGroups {
+	// 		lvg, found := lvgMap[rscLVG.Name]
+	// 		if !found {
+	// 			log.Warning("[getDRBDNodesMap]", fmt.Sprintf("no LVM volume group %s found, skipping iteration", rscLVG.Name))
+	// 		}
+	// 		result[lvg.Spec.Local.NodeName] = struct{}{}
+	// 	}
+	// }
+
+	// log.Trace("[getDRBDNodesMap]", "DRBD nodes map", result)
+	// return result, nil
 }
 
 func getPersistentVolumeClaims(ctx context.Context, cl client.Client, log *logger.Logger) (map[string]*corev1.PersistentVolumeClaim, error) {
@@ -546,9 +566,8 @@ func isDrbdNode(targetNode string, drbdNodesMap map[string]struct{}) bool {
 
 func nodeHasEnoughSpace(
 	pvcRequests map[string]PVCRequest,
-	lvgsThickFree map[string]int64,
-	lvgsThinFree map[string]map[string]int64,
-	commonLVG *LVMVolumeGroup,
+	lvgInfo *LVGInfo,
+	sharedLVG *LVMVolumeGroup,
 	pvc *corev1.PersistentVolumeClaim,
 	lvgMap map[string]*snc.LVMVolumeGroup,
 	log *logger.Logger,
@@ -563,7 +582,7 @@ func nodeHasEnoughSpace(
 	switch pvcReq.DeviceType {
 	case consts.Thick:
 		thickMapMtx.RLock()
-		freeSpace := lvgsThickFree[commonLVG.Name]
+		freeSpace := lvgInfo.ThickFreeSpaces[sharedLVG.Name]
 		thickMapMtx.RUnlock()
 
 		if freeSpace < pvcReq.RequestedSize {
@@ -573,16 +592,16 @@ func nodeHasEnoughSpace(
 		}
 
 		thickMapMtx.Lock()
-		lvgsThickFree[commonLVG.Name] -= pvcReq.RequestedSize
+		lvgInfo.ThickFreeSpaces[sharedLVG.Name] -= pvcReq.RequestedSize
 		thickMapMtx.Unlock()
-		log.Trace("[nodeHasEnoughSpace]", "updated thick free space", "lvg", commonLVG.Name, "remaining", lvgsThickFree[commonLVG.Name])
+		log.Trace("[nodeHasEnoughSpace]", "updated thick free space", "lvg", sharedLVG.Name, "remaining", lvgInfo.ThickFreeSpaces[sharedLVG.Name])
 
 	case consts.Thin:
-		lvg := lvgMap[commonLVG.Name]
-		targetThinPool := findMatchedThinPool(lvg.Status.ThinPools, commonLVG.Thin.PoolName)
+		lvg := lvgMap[sharedLVG.Name]
+		targetThinPool := findMatchedThinPool(lvg.Status.ThinPools, sharedLVG.Thin.PoolName)
 
 		thinMapMtx.RLock()
-		freeSpace := lvgsThinFree[lvg.Name][targetThinPool.Name]
+		freeSpace := lvgInfo.ThinFreeSpaces[lvg.Name][targetThinPool.Name]
 		thinMapMtx.RUnlock()
 
 		if freeSpace < pvcReq.RequestedSize {
@@ -592,9 +611,9 @@ func nodeHasEnoughSpace(
 		}
 
 		thinMapMtx.Lock()
-		lvgsThinFree[lvg.Name][targetThinPool.Name] -= pvcReq.RequestedSize
+		lvgInfo.ThinFreeSpaces[lvg.Name][targetThinPool.Name] -= pvcReq.RequestedSize
 		thinMapMtx.Unlock()
-		log.Trace("[nodeHasEnoughSpace]", "updated thin free space", "lvg", lvg.Name, "thinPool", targetThinPool.Name, "remaining", lvgsThinFree[lvg.Name][targetThinPool.Name])
+		log.Trace("[nodeHasEnoughSpace]", "updated thin free space", "lvg", lvg.Name, "thinPool", targetThinPool.Name, "remaining", lvgInfo.ThinFreeSpaces[lvg.Name][targetThinPool.Name])
 	}
 
 	log.Trace("[nodeHasEnoughSpace]", "space check result", "pvc", pvc.Name, "nodeIsOk", nodeIsOk)

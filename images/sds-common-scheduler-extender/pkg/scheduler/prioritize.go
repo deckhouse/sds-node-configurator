@@ -175,14 +175,19 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInf
 	}
 
 	for _, pvc := range PVCs {
-		replica := input.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
+		replica, found := input.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
+		if !found {
+			s.log.Info(fmt.Sprintf("[scoreSingleNode] no DRBDResourceReplica found for pvc %s, giving 0 score points for node %s", pvc.Name, nodeName))
+			continue
+		}
 		s.log.Info(fmt.Sprintf("[scoreSingleNode] pvc: %+v", pvc))
 		s.log.Info(fmt.Sprintf("[scoreSingleNode] replica: %+v", replica))
 		s.log.Info(fmt.Sprintf("[scoreSingleNode] node Name %s", nodeName))
+
 		peer := replica.Spec.Peers[nodeName]
 		if peer.Diskless {
-			s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s is diskless for pvc %s, returning 0 score points", nodeName, pvc.Name))
-			return 0
+			s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s is diskless for pvc %s, giving 0 score points", nodeName, pvc.Name))
+			continue
 		}
 
 		pvcReq := input.PVCRequests[pvc.Name]

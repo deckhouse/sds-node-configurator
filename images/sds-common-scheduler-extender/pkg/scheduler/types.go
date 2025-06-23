@@ -66,13 +66,14 @@ type FilterInput struct {
 	NodeNames                  []string
 	ReplicatedProvisionPVCs    map[string]*v1.PersistentVolumeClaim
 	LocalProvisionPVCs         map[string]*v1.PersistentVolumeClaim
+	ReplicatedAndLocalPVC      map[string]*v1.PersistentVolumeClaim
 	SCSUsedByPodPVCs           map[string]*storagev1.StorageClass
 	PVCSizeRequests            map[string]PVCRequest
 	ReplicatedSCSUsedByPodPVCs map[string]*srv.ReplicatedStorageClass
 	LocalSCSUsedByPodPVCs      map[string]*slv.LocalStorageClass
-	// DRBDResourceMap            map[string]*srv.DRBDResource
-	DRBDNodesMap           map[string]struct{}
-	DRBDResourceReplicaMap map[string]*srv2.DRBDResourceReplica
+	LVGInfo                    *LVGInfo
+	DRBDNodesMap               map[string]struct{}
+	DRBDResourceReplicaMap     map[string]*srv2.DRBDResourceReplica
 }
 
 // LVGInfo holds LVMVolumeGroup-related data
