@@ -1,6 +1,7 @@
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
 fromImage: builder/src
+fromCacheVersion: 20250624173315
 final: false
 
 git:
