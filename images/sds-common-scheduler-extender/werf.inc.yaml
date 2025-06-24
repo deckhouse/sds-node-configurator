@@ -1,7 +1,7 @@
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
 fromImage: builder/src
-fromCacheVersion: 20250624173315
+fromCacheVersion: 20250624180000
 final: false
 
 git:
@@ -24,6 +24,7 @@ shell:
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
 fromImage: builder/golang-alpine
+fromCacheVersion: 20250624180000
 final: false
 
 import:
@@ -48,6 +49,7 @@ shell:
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}
+fromCacheVersion: 20250624180000
 fromImage: base/distroless
 
 import:
