@@ -363,7 +363,7 @@ func getNodeNames(inputData ExtenderArgs, log *logger.Logger) ([]string, error) 
 }
 
 // collectLVGInfo gathers LVMVolumeGroup data.
-func collectLVGInfo(s *scheduler, storageClasses map[string]*storagev1.StorageClass) (*LVGInfo, error) {
+func collectLVGInfo(s *scheduler, storageClasses map[string]*storagev1.StorageClass) (*LVGFilteringInfo, error) {
 	lvgs := s.cacheMgr.GetAllLVG()
 	for _, lvg := range lvgs {
 		s.log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s in cache", lvg.Name))
@@ -402,7 +402,7 @@ func collectLVGInfo(s *scheduler, storageClasses map[string]*storagev1.StorageCl
 
 	nodeToLVGs := CreateNodeToCachedLVGsMap(filteredLVGs)
 	s.log.Trace(fmt.Sprintf("[filterNodes] node name to LVM volume group map %+v", nodeToLVGs))
-	return &LVGInfo{
+	return &LVGFilteringInfo{
 		ThickFreeSpaces: thickFreeSpaces,
 		ThinFreeSpaces:  thinFreeSpaces,
 		NodeToLVGs:      nodeToLVGs,
@@ -410,7 +410,7 @@ func collectLVGInfo(s *scheduler, storageClasses map[string]*storagev1.StorageCl
 	}, nil
 }
 
-func collectLVGScoreInfo(s *scheduler, storageClasses map[string]*storagev1.StorageClass) (*LVGScoreInfo, error) {
+func collectLVGScoreInfo(s *scheduler, storageClasses map[string]*storagev1.StorageClass) (*LVGScoringInfo, error) {
 	lvgs := s.cacheMgr.GetAllLVG()
 	scLVGs, err := CreateLVGsMapFromStorageClasses(storageClasses)
 	if err != nil {
@@ -429,7 +429,7 @@ func collectLVGScoreInfo(s *scheduler, storageClasses map[string]*storagev1.Stor
 		}
 	}
 
-	res := &LVGScoreInfo{
+	res := &LVGScoringInfo{
 		NodeToLVGs: nodeToLVGs,
 		SCLVGs:     scLVGs,
 		LVGs:       lvgs,
@@ -443,7 +443,7 @@ func calculateFreeSpace(
 	lvg *snc.LVMVolumeGroup,
 	schedulerCache *cache.CacheManager,
 	pvcReq *PVCRequest,
-	commonLVG *LVMVolumeGroup,
+	sharedLVG *LVMVolumeGroup,
 	log *logger.Logger,
 	pvc *corev1.PersistentVolumeClaim,
 	nodeName string,
@@ -464,9 +464,9 @@ func calculateFreeSpace(
 		freeSpace = *resource.NewQuantity(freeSpace.Value()-reserved, resource.BinarySI)
 		log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s free Thick space after PVC reservation: %s", lvg.Name, freeSpace.String()))
 	case consts.Thin:
-		thinPool := findMatchedThinPool(lvg.Status.ThinPools, commonLVG.Thin.PoolName)
+		thinPool := findMatchedThinPool(lvg.Status.ThinPools, sharedLVG.Thin.PoolName)
 		if thinPool == nil {
-			return freeSpace, errors.New(fmt.Sprintf("[scoreNodes] unable to match Storage Class's ThinPools with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName))
+			return freeSpace, fmt.Errorf("[scoreNodes] unable to match Storage Class's ThinPools with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
 		}
 
 		freeSpace = thinPool.AvailableSpace
@@ -566,7 +566,7 @@ func isDrbdNode(targetNode string, drbdNodesMap map[string]struct{}) bool {
 
 func nodeHasEnoughSpace(
 	pvcRequests map[string]PVCRequest,
-	lvgInfo *LVGInfo,
+	lvgInfo *LVGFilteringInfo,
 	sharedLVG *LVMVolumeGroup,
 	pvc *corev1.PersistentVolumeClaim,
 	lvgMap map[string]*snc.LVMVolumeGroup,

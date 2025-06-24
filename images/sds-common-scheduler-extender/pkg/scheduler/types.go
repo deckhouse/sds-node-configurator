@@ -71,13 +71,13 @@ type FilterInput struct {
 	PVCSizeRequests            map[string]PVCRequest
 	ReplicatedSCSUsedByPodPVCs map[string]*srv.ReplicatedStorageClass
 	LocalSCSUsedByPodPVCs      map[string]*slv.LocalStorageClass
-	LVGInfo                    *LVGInfo
+	LVGFilteringInfo           *LVGFilteringInfo
 	DRBDNodesMap               map[string]struct{}
 	DRBDResourceReplicaMap     map[string]*srv2.DRBDResourceReplica
 }
 
-// LVGInfo holds LVMVolumeGroup-related data
-type LVGInfo struct {
+// LVGFilteringInfo holds LVMVolumeGroup-related data
+type LVGFilteringInfo struct {
 	ThickFreeSpaces map[string]int64
 	ThinFreeSpaces  map[string]map[string]int64
 	NodeToLVGs      map[string][]*snc.LVMVolumeGroup
@@ -92,19 +92,23 @@ type ResultWithError struct {
 
 // PrioritizeInput holds input data for prioritizing nodes
 type PrioritizeInput struct {
-	Pod                     *v1.Pod
-	NodeNames               []string
-	ReplicatedProvisionPVCs map[string]*v1.PersistentVolumeClaim
-	LocalProvisionPVCs      map[string]*v1.PersistentVolumeClaim
-	StorageClasses          map[string]*storagev1.StorageClass
-	PVCRequests             map[string]PVCRequest
-	StoragePoolMap          map[string]*srv.ReplicatedStoragePool
-	DefaultDivisor          float64
-	DRBDResourceReplicaMap  map[string]*srv2.DRBDResourceReplica
+	Pod                        *v1.Pod
+	NodeNames                  []string
+	ReplicatedProvisionPVCs    map[string]*v1.PersistentVolumeClaim
+	LocalProvisionPVCs         map[string]*v1.PersistentVolumeClaim
+	ReplicatedAndLocalPVC      map[string]*v1.PersistentVolumeClaim
+	ReplicatedSCSUsedByPodPVCs map[string]*srv.ReplicatedStorageClass
+	LocalSCSUsedByPodPVCs      map[string]*slv.LocalStorageClass
+	LVGScoringInfo             *LVGScoringInfo
+	SCSUsedByPodPVCs           map[string]*storagev1.StorageClass
+	PVCRequests                map[string]PVCRequest
+	StoragePoolMap             map[string]*srv.ReplicatedStoragePool
+	DefaultDivisor             float64
+	DRBDResourceReplicaMap     map[string]*srv2.DRBDResourceReplica
 }
 
-// LVGScoreInfo holds LVMVolumeGroup-related data for scoring
-type LVGScoreInfo struct {
+// LVGScoringInfo holds LVMVolumeGroup-related data for scoring
+type LVGScoringInfo struct {
 	NodeToLVGs map[string][]*snc.LVMVolumeGroup
 	SCLVGs     map[string][]LVMVolumeGroup
 	LVGs       map[string]*snc.LVMVolumeGroup
