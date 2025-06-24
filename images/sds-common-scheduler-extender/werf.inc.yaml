@@ -29,7 +29,7 @@ import:
   - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
     add: /src
     to: /src
-    before: install
+    before: setup
 
 mount:
 {{ include "mount points for golang builds" . }}
