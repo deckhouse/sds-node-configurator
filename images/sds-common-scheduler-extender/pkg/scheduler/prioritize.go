@@ -143,21 +143,27 @@ func scoreNodeForNotBoundLocalVolumePVC(nodeName string, input *PrioritizeInput,
 	sharedLVG := findMatchedLVGs(lvgsFromNode, lvgsFromSC)
 
 	lvg := input.LVGScoringInfo.LVGs[sharedLVG.Name]
+	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] lvg name %s", lvg.Name))
 	pvcReq := input.PVCRequests[pvc.Name]
+	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] pvc space request %+v", pvcReq))
 	freeSpace, err := calculateFreeSpace(lvg, schedulerCache, &pvcReq, sharedLVG, log, pvc, nodeName)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[scoreNodeForNotBoundReplicatedVolumePVC] unable to calculate free space for LVMVolumeGroup %s, PVC: %s, node: %s", lvg.Name, pvc.Name, nodeName))
+		log.Error(err, fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] unable to calculate free space for LVMVolumeGroup %s, PVC: %s, node: %s", lvg.Name, pvc.Name, nodeName))
 		return score
 	}
-
+	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] freeSpace %+v", freeSpace))
 	totalFreeSpaceLeftPercent := getFreeSpaceLeftAsPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
 
+	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] totalFreeSpaceLeftPercent %d", totalFreeSpaceLeftPercent))
+	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] ReplicatedAndLocalPVC length %d", len(input.ReplicatedAndLocalPVC)))
 	averageFreeSpace := int64(0)
 	if len(input.ReplicatedAndLocalPVC) > 0 {
 		averageFreeSpace = totalFreeSpaceLeftPercent / int64(len(input.ReplicatedAndLocalPVC))
 	}
+	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] averageFreeSpace %d", averageFreeSpace))
 	score += getNodeScore(averageFreeSpace, 1/input.DefaultDivisor)
 
+	log.Info(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] node %s, pvc %s, score %d", nodeName, pvc.Name, score))
 	return score
 }
 
@@ -275,7 +281,7 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, nodeName string) int
 
 		if sc.Provisioner == consts.SdsLocalVolumeProvisioner {
 			if pvc.Spec.VolumeName != "" {
-
+				// TODO this needs to be designed
 			} else {
 				score = scoreNodeForNotBoundLocalVolumePVC(nodeName, input, pvc, s.cacheMgr, s.log)
 			}
