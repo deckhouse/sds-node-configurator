@@ -712,6 +712,7 @@ func extractRequestedSize(
 				if reqSize < 0 {
 					reqSize = 0
 				}
+				log.Debug(fmt.Sprintf("[extractRequestedSize] thic reqSize %d, %d", reqSize, pvc.Spec.Resources.Requests.Storage().Value()))
 				pvcRequests[pvc.Name] = PVCRequest{
 					DeviceType:    consts.Thick,
 					RequestedSize: reqSize,
@@ -721,9 +722,10 @@ func extractRequestedSize(
 				if reqSize < 0 {
 					reqSize = 0
 				}
+				log.Debug(fmt.Sprintf("[extractRequestedSize] thin reqSize %d, %d", reqSize, pvc.Spec.Resources.Requests.Storage().Value()))
 				pvcRequests[pvc.Name] = PVCRequest{
 					DeviceType:    consts.Thin,
-					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value(),
+					RequestedSize: reqSize,
 				}
 			}
 
