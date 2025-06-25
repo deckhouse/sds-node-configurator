@@ -223,8 +223,8 @@ func filterNodeForNotBoundLocalVolumePVC(nodeName string, pvc *corev1.Persistent
 }
 
 func checkIfNodeContainsDiskfulReplica(nodeName string, drbdReplica *srv2.DRBDResourceReplica) bool {
-	for _, peer := range drbdReplica.Spec.Peers {
-		if peer.NodeName != nodeName {
+	for peerName, peer := range drbdReplica.Spec.Peers {
+		if peerName != nodeName {
 			continue
 		}
 		if !peer.Diskless {
