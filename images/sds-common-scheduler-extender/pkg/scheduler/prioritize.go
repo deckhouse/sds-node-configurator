@@ -200,7 +200,7 @@ func scoreNodeForBoundReplicatedVolumePVC(nodeName string, input *PrioritizeInpu
 	sharedLVG := findMatchedLVGs(lvgsFromNode, lvgsFromSC)
 
 	if sharedLVG != nil {
-		log.Info("[scoreNodeForBoundReplicatedVolumePVC] node %s contains a volume replica and gets +100 score points")
+		log.Info(fmt.Sprintf("[scoreNodeForBoundReplicatedVolumePVC] node %s contains a volume replica and gets +100 score points", nodeName))
 		score += 100
 	}
 
@@ -277,75 +277,6 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, nodeName string) int
 		}
 	}
 
-	s.log.Info("[scoreSingleNode] node %s score %d", nodeName, score)
+	s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s score %d", nodeName, score))
 	return score
-
-	// lvgsFromNode := lvgInfo.NodeToLVGs[nodeName]
-	// s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroups from node %s: %+v", nodeName, lvgsFromNode))
-	// var totalFreeSpaceLeftPercent int64
-	// nodeScore := 0
-
-	// PVCs := make(map[string]*corev1.PersistentVolumeClaim, len(input.LocalProvisionPVCs)+len(input.ReplicatedProvisionPVCs))
-	// for name, pvc := range input.LocalProvisionPVCs {
-	// 	PVCs[name] = pvc
-	// }
-	// for name, pvc := range input.ReplicatedProvisionPVCs {
-	// 	PVCs[name] = pvc
-	// }
-
-	// for _, pvc := range PVCs {
-	// 	replica, found := input.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
-	// 	if !found {
-	// 		s.log.Info(fmt.Sprintf("[scoreSingleNode] no DRBDResourceReplica found for pvc %s, giving 0 score points for node %s", pvc.Name, nodeName))
-	// 		continue
-	// 	}
-	// 	s.log.Info(fmt.Sprintf("[scoreSingleNode] pvc: %+v", pvc))
-	// 	s.log.Info(fmt.Sprintf("[scoreSingleNode] replica: %+v", replica))
-	// 	s.log.Info(fmt.Sprintf("[scoreSingleNode] node Name %s", nodeName))
-
-	// 	peer := replica.Spec.Peers[nodeName]
-	// 	if peer.Diskless {
-	// 		s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s is diskless for pvc %s, giving 0 score points", nodeName, pvc.Name))
-	// 		continue
-	// 	}
-
-	// 	pvcReq := input.PVCRequests[pvc.Name]
-	// 	s.log.Trace(fmt.Sprintf("[scoreSingleNode] pvc %s size request: %+v", pvc.Name, pvcReq))
-
-	// 	lvgsFromSC := lvgInfo.SCLVGs[*pvc.Spec.StorageClassName]
-	// 	s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroups %+v from SC: %s", lvgsFromSC, *pvc.Spec.StorageClassName))
-	// 	sharedLVG := findMatchedLVGs(lvgsFromNode, lvgsFromSC)
-	// 	s.log.Trace(fmt.Sprintf("[scoreSingleNode] Common LVMVolumeGroup %+v of node %s and SC %s", sharedLVG, nodeName, *pvc.Spec.StorageClassName))
-
-	// 	if sharedLVG == nil {
-	// 		s.log.Warning(fmt.Sprintf("[scoreSingleNode] unable to match Storage Class's LVMVolumeGroup with node %s for Storage Class %s", nodeName, *pvc.Spec.StorageClassName))
-	// 		continue
-	// 	}
-
-	// 	nodeScore += 10
-	// 	lvg := lvgInfo.LVGs[sharedLVG.Name]
-	// 	s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroup %s data: %+v", lvg.Name, lvg))
-
-	// 	freeSpace, err := calculateFreeSpace(lvg, s.cacheMgr, &pvcReq, sharedLVG, s.log, pvc, nodeName)
-	// 	if err != nil {
-	// 		s.log.Error(err, fmt.Sprintf("[scoreSingleNode] unable to calculate free space for LVMVolumeGroup %s, PVC: %s, node: %s", lvg.Name, pvc.Name, nodeName))
-	// 		continue
-	// 	}
-	// 	s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroup %s freeSpace: %s", lvg.Name, freeSpace.String()))
-	// 	s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroup %s total size: %s", lvg.Name, lvg.Status.VGSize.String()))
-	// 	totalFreeSpaceLeftPercent += getFreeSpaceLeftAsPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
-
-	// 	s.log.Trace(fmt.Sprintf("[scoreSingleNode] totalFreeSpaceLeftPercent: %d", totalFreeSpaceLeftPercent))
-	// }
-
-	// averageFreeSpace := int64(0)
-	// if len(PVCs) > 0 {
-	// 	averageFreeSpace = totalFreeSpaceLeftPercent / int64(len(PVCs))
-	// }
-	// s.log.Trace(fmt.Sprintf("[scoreNodes] average free space left for node %s: %d%%", nodeName, averageFreeSpace))
-
-	// nodeScore += getNodeScore(averageFreeSpace, 1/input.DefaultDivisor)
-	// s.log.Trace(fmt.Sprintf("[scoreNodes] node %s has score %d with average free space left %d%%", nodeName, nodeScore, averageFreeSpace))
-
-	// return nodeScore
 }

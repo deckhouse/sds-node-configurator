@@ -174,36 +174,6 @@ func (s *scheduler) filterNodesParallel(input *FilterInput) (*ExtenderFilterResu
 			s.log.Debug(fmt.Sprintf("[filterNodesParallel] node %s is not ok to schedule a pod to", nodeName))
 			// TODO specify error text
 			resCh <- ResultWithError{NodeName: nodeName, Err: errors.New("node not ok")}
-
-			// for _, pvc := range input.ReplicatedProvisionPVCs {
-			// 	nodeIsOk := false
-			// 	if pvc.Spec.VolumeName != "" {
-			// 		nodeIsOk = checkRSCVolumeAccessForBoundPVC(nodeName, pvc, input, sharedNodes, cachedLVGs, s.log)
-			// 	} else {
-			// 		nodeIsOk = checkRSCVolumeAccessForUnBoundPVC(nodeName, pvc, input, cachedLVGs, sharedNodes, s.log)
-			// 	}
-
-			// 	if !nodeIsOk {
-			// 		s.log.Debug(fmt.Sprintf("[filterNodesParallel] node %s is ok to schedule a pod to", nodeName))
-			// 		// TODO specify error text
-			// 		resCh <- ResultWithError{NodeName: nodeName, Err: errors.New("node not ok")}
-			// 		return
-			// 	}
-			// }
-
-			// srvErr := s.filterSingleNodeSRV(nodeName, input, input.LVGInfo, sharedNodes, s.log)
-			// slvErr := s.filterSingleNodeSLV(nodeName, input, input.LVGInfo, sharedNodes, s.log)
-
-			// if srvErr == nil && slvErr == nil {
-			// 	s.log.Debug(fmt.Sprintf("[filterNodesParallel] node %s is ok to schedule a pod to", nodeName))
-			// 	resCh <- ResultWithError{NodeName: nodeName}
-			// 	return
-			// }
-			// // TODO improve this part of the code later
-			// errMessages := []string{srvErr.Error(), slvErr.Error()}
-			// nodeErr := fmt.Errorf(strings.Join(errMessages, ", "))
-			// s.log.Debug(fmt.Sprintf("[filterNodesParallel] node %s is bad to schedule a pod to. Reason: %s", nodeName, nodeErr.Error()))
-			// resCh <- ResultWithError{NodeName: nodeName, Err: nodeErr}
 		}(nodeName)
 	}
 
@@ -220,7 +190,7 @@ func (s *scheduler) filterNodesParallel(input *FilterInput) (*ExtenderFilterResu
 		}
 	}
 
-	s.log.Debug("[filterNodes] filtered nodes", "nodes", result.NodeNames)
+	s.log.Debug(fmt.Sprintf("[filterNodes] filtered nodes", "nodes", result.NodeNames))
 	return result, nil
 }
 
@@ -230,11 +200,11 @@ func filterNodeForBoundLocalVolumePVC(nodeName string, pvc *corev1.PersistentVol
 	sharedLVG := findSharedLVG(nodeLvgs, lvgsFromSC)
 
 	if sharedLVG == nil {
-		log.Info("[filterNodeForBoundLocalVolumePVC] node %s is not ok, it does not have any LVG from PVC's Storage Class", nodeName)
+		log.Info(fmt.Sprintf("[filterNodeForBoundLocalVolumePVC] node %s is not ok, it does not have any LVG from PVC's Storage Class", nodeName))
 		return false
 	}
 
-	log.Info("[filterNodeForBoundLocalVolumePVC] node %s is ok", nodeName)
+	log.Info(fmt.Sprintf("[filterNodeForBoundLocalVolumePVC] node %s is ok", nodeName))
 	return true
 }
 
@@ -245,63 +215,12 @@ func filterNodeForNotBoundLocalVolumePVC(nodeName string, pvc *corev1.Persistent
 	hasEnoughSpace := nodeHasEnoughSpace(filterInput.PVCSizeRequests, filterInput.LVGFilteringInfo, sharedLVG, pvc, cachedLVGs, log)
 
 	if sharedLVG == nil || !hasEnoughSpace {
-		log.Info("[filterNodeForNotBoundLocalVolumePVC] node %s is not ok, has enough disk space: %b or does not have any LVG from PVC's Storage Class", nodeName, hasEnoughSpace)
+		log.Info(fmt.Sprintf("[filterNodeForNotBoundLocalVolumePVC] node %s is not ok, has enough disk space: %t or does not have any LVG from PVC's Storage Class", nodeName, hasEnoughSpace))
 		return false
 	}
 
 	return true
 }
-
-// func (s *scheduler) filterSingleNodeSLV(nodeName string, filterInput *FilterInput, lvgInfo *LVGInfo, sharedNodes map[string][]*snc.LVMVolumeGroup, log *logger.Logger) bool {
-// 	log.Debug("[filterSingleNodeSLV] filtering node", "node", nodeName)
-
-// 	nodeLvgs := sharedNodes[nodeName]
-
-// 	hasEnoughSpace := true
-// 	for _, pvc := range filterInput.LocalProvisionPVCs {
-// 		lvgsFromSC := lvgInfo.SCLVGs[*pvc.Spec.StorageClassName]
-// 		sharedLVG := findSharedLVG(nodeLvgs, lvgsFromSC)
-// 		lvgs := s.cacheMgr.GetAllLVG()
-// 		hasEnoughSpace = nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo, sharedLVG, pvc, lvgs, s.log)
-
-// 		if pvc.Spec.VolumeName == "" {
-// 			if sharedLVG == nil {
-// 				return fmt.Errorf("[filterSingleNodeSLV] node %s does not contain LVGs from storage class", nodeName)
-// 			}
-// 			if !hasEnoughSpace {
-// 				return fmt.Errorf("[filterSingleNodeSLV] node does not have enough space in LVG %s for PVC %s/%s", nodeName, pvc.Namespace, pvc.Name)
-// 			}
-// 			continue
-// 		} else {
-// 			if sharedLVG == nil {
-// 				return fmt.Errorf("[filterSingleNodeSLV] node %s does not contain LVGs from storage class", nodeName)
-// 			}
-// 			continue
-// 		}
-// 	}
-// 	return nil
-// }
-
-// func checkBoundPVC(nodeName string, pvc *corev1.PersistentVolumeClaim, filterInput *FilterInput) error {
-// 	replica, found := filterInput.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
-// 	if !found {
-// 		return fmt.Errorf("[filterSingleNodeSRV] pvc %s/%s does not have any diskful replicas", pvc.Namespace, pvc.Name)
-// 	}
-
-// 	hasDiskfulVolumes := false
-// 	for _, peer := range replica.Spec.Peers {
-// 		if peer.Diskless {
-// 			continue
-// 		}
-// 		hasDiskfulVolumes = true
-// 		break
-// 	}
-// 	if !hasDiskfulVolumes {
-// 		return fmt.Errorf("[filterSingleNodeSRV] pvc %s/%s does not have any diskful replicas", pvc.Namespace, pvc.Name)
-// 	}
-
-// 	return nil
-// }
 
 func checkIfNodeContainsDiskfulReplica(nodeName string, drbdReplica *srv2.DRBDResourceReplica) bool {
 	for _, peer := range drbdReplica.Spec.Peers {
@@ -327,7 +246,7 @@ func filterNodeForBoundReplicatedVolumePVC(nodeName string, pvc *corev1.Persiste
 	switch pvcRSC.Spec.VolumeAccess {
 	case "Local":
 		isOk := checkIfNodeContainsDiskfulReplica(nodeName, replica)
-		log.Info("[filterNodeForBoundReplicatedVolumePVC] volume access: %s, nodeName: %s, node contains diskful replica status: %b", pvcRSC.Spec.VolumeAccess, nodeName, isOk)
+		log.Info(fmt.Sprintf("[filterNodeForBoundReplicatedVolumePVC] volume access: %s, nodeName: %s, node contains diskful replica status: %b", pvcRSC.Spec.VolumeAccess, nodeName, isOk))
 		nodeIsOk = isOk
 	case "EventuallyLocal":
 		nodeLvgs := sharedNodes[nodeName]
@@ -335,21 +254,21 @@ func filterNodeForBoundReplicatedVolumePVC(nodeName string, pvc *corev1.Persiste
 		sharedLVG := findSharedLVG(nodeLvgs, lvgsFromSC)
 
 		if sharedLVG == nil {
-			log.Info("[filterNodeForBoundReplicatedVolumePVC] volume access: %s,  node %s does not contain LVGs from storage class %s", pvcRSC.Spec.VolumeAccess, nodeName, *pvc.Spec.StorageClassName)
+			log.Info(fmt.Sprintf("[filterNodeForBoundReplicatedVolumePVC] volume access: %s,  node %s does not contain LVGs from storage class %s", pvcRSC.Spec.VolumeAccess, nodeName, *pvc.Spec.StorageClassName))
 			nodeIsOk = false
 		}
 
 		hasEnoughSpace := nodeHasEnoughSpace(filterInput.PVCSizeRequests, filterInput.LVGFilteringInfo, sharedLVG, pvc, cachedLVGs, log)
 		containsDiskfulReplica := checkIfNodeContainsDiskfulReplica(nodeName, replica)
 		if !hasEnoughSpace && containsDiskfulReplica {
-			log.Info("[filterNodeForBoundReplicatedVolumePVC] node %s is not ok: volume access: %s, enough disk space: %b, contains diskful replica: %b", nodeName, pvcRSC.Spec.VolumeAccess, hasEnoughSpace, containsDiskfulReplica)
+			log.Info(fmt.Sprintf("[filterNodeForBoundReplicatedVolumePVC] node %s is not ok: volume access: %s, enough disk space: %b, contains diskful replica: %b", nodeName, pvcRSC.Spec.VolumeAccess, hasEnoughSpace, containsDiskfulReplica))
 			nodeIsOk = false
 		}
 
 		nodeIsOk = true
 	case "PreferablyLocal", "Any":
 		_, isOk := filterInput.DRBDNodesMap[nodeName]
-		log.Info("[filterNodeForBoundReplicatedVolumePVC] volume access: %s, node is ok status: %b", pvcRSC.Spec.VolumeAccess, isOk)
+		log.Info(fmt.Sprintf("[filterNodeForBoundReplicatedVolumePVC] volume access: %s, node is ok status: %b", pvcRSC.Spec.VolumeAccess, isOk))
 		nodeIsOk = isOk
 	}
 
@@ -368,98 +287,15 @@ func filterNodeForNotBoundReplicatedVolumePVC(nodeName string, pvc *corev1.Persi
 		hasEnoughSpace := nodeHasEnoughSpace(filterInput.PVCSizeRequests, filterInput.LVGFilteringInfo, sharedLVG, pvc, cachedLVGs, log)
 
 		if sharedLVG == nil || hasEnoughSpace {
-			log.Info("[checkRSCVolumeAccessForUnBoundPVC] volume access: %s, node is ok status: %b", pvcRSC.Spec.VolumeAccess, false)
+			log.Info(fmt.Sprintf("[checkRSCVolumeAccessForUnBoundPVC] volume access: %s, node is ok status: %t", pvcRSC.Spec.VolumeAccess, false))
 			nodeIsOk = false
 		}
 
 	case "PreferablyLocal", "Any":
 		_, ok := filterInput.DRBDNodesMap[nodeName]
-		log.Info("[checkRSCVolumeAccessForUnBoundPVC] volume access: %s, node is ok status: %b", pvcRSC.Spec.VolumeAccess, ok)
+		log.Info(fmt.Sprintf("[checkRSCVolumeAccessForUnBoundPVC] volume access: %s, node is ok status: %t", pvcRSC.Spec.VolumeAccess, ok))
 		nodeIsOk = ok
 	}
 
 	return nodeIsOk
 }
-
-// func (s *scheduler) filterSingleNodeSRV(nodeName string, filterInput *FilterInput, lvgInfo *LVGInfo, sharedNodes map[string][]*snc.LVMVolumeGroup, log *logger.Logger) error {
-// log.Debug("[filterSingleNodeSRV] filtering node", "node", nodeName)
-
-// nodeLvgs := sharedNodes[nodeName]
-// for _, pvc := range filterInput.ReplicatedProvisionPVCs {
-
-// log.Debug("[filterSingleNodeSRV] processing PVC", "pvc", pvc.Name, "node", nodeName)
-
-// if pvc.Spec.VolumeName != "" {
-// 	replica, found := filterInput.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
-
-// 	if !found {
-// 		return fmt.Errorf("[filterSingleNodeSRV] pvc %s/%s does not have any diskful replicas", pvc.Namespace, pvc.Name)
-// 	}
-
-// 	hasDiskfulVolumes := false
-// 	for _, peer := range replica.Spec.Peers {
-// 		if peer.Diskless {
-// 			continue
-// 		}
-// 		hasDiskfulVolumes = true
-// 		break
-// 	}
-
-// 	if !hasDiskfulVolumes {
-// 		return fmt.Errorf("[filterSingleNodeSRV] pvc %s/%s does not have any diskful replicas", pvc.Namespace, pvc.Name)
-// 	}
-// }
-
-// isNodeDiskless := true
-// lvgsFromSC := lvgInfo.SCLVGs[*pvc.Spec.StorageClassName]
-// pvcRSC := filterInput.ReplicatedSCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
-// sharedLVG := findSharedLVG(nodeLvgs, lvgsFromSC)
-
-// lvgs := s.cacheMgr.GetAllLVG()
-// hasEnoughSpace := nodeHasEnoughSpace(filterInput.PVCSizeRequests, lvgInfo, sharedLVG, pvc, lvgs, s.log)
-
-// switch pvcRSC.Spec.VolumeAccess {
-// case "Local":
-// 	if pvc.Spec.VolumeName == "" {
-// 		if sharedLVG == nil {
-// 			return fmt.Errorf("[filterSingleNodeSRV] node %s does not contain LVGs from storage class %s", nodeName, pvcRSC.Name)
-// 		}
-// 		if !hasEnoughSpace {
-// 			return fmt.Errorf("[filterSingleNodeSRV] node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
-// 		}
-// 	} else if !isNodeDiskless {
-// 		return fmt.Errorf("[filterSingleNodeSRV] node %s is not diskful for PV %s", nodeName, pvc.Spec.VolumeName)
-// 	}
-
-// case "EventuallyLocal":
-// 	if pvc.Spec.VolumeName == "" {
-// 		if sharedLVG == nil {
-// 			return fmt.Errorf("[filterSingleNodeSRV] node %s does not contain LVGs from storage class %s", nodeName, pvcRSC.Name)
-// 		}
-// 		if !hasEnoughSpace {
-// 			return fmt.Errorf("[filterSingleNodeSRV] node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
-// 		}
-// 	} else if isNodeDiskless {
-// 		log.Trace("[filterSingleNodeSRV]", "node is diskful for EventuallyLocal PVC", "node", nodeName, "pvc", pvc.Name)
-// 		return nil
-// 	} else if sharedLVG == nil || !hasEnoughSpace {
-// 		return fmt.Errorf("[filterSingleNodeSRV] node %s does not meet EventuallyLocal criteria for PVC %s", nodeName, pvc.Name)
-// 	}
-
-// case "PreferablyLocal":
-// 	if pvc.Spec.VolumeName == "" && !hasEnoughSpace {
-// 		return fmt.Errorf("[filterSingleNodeSRV] node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
-// 	}
-// }
-// }
-
-// if !isDrbdNode(nodeName, filterInput.DRBDNodesMap) {
-// 	return fmt.Errorf("[filterSingleNodeSRV] node %s is not a DRBD node", nodeName)
-// }
-// if !isOkNode(nodeName) {
-// 	return fmt.Errorf("[filterSingleNodeSRV] node %s is offline", nodeName)
-// }
-
-// log.Debug("[filterSingleNodeSRV] node is ok", "node", nodeName)
-// return nil
-// }
