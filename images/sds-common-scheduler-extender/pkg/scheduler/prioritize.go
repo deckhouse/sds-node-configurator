@@ -197,9 +197,14 @@ func scoreNodeForBoundReplicatedVolumePVC(nodeName string, input *PrioritizeInpu
 	lvgsFromNode := input.LVGScoringInfo.NodeToLVGs[nodeName]
 	lvgsFromSC := input.LVGScoringInfo.SCLVGs[*pvc.Spec.StorageClassName]
 
-	sharedLVG := findMatchedLVGs(lvgsFromNode, lvgsFromSC)
+	replica, found := input.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
+	if !found {
+		// TODO
+	}
 
-	if sharedLVG != nil {
+	containsDiskfulReplica := checkIfNodeContainsDiskfulReplica(nodeName, replica)
+	sharedLVG := findMatchedLVGs(lvgsFromNode, lvgsFromSC)
+	if sharedLVG != nil && containsDiskfulReplica {
 		log.Info(fmt.Sprintf("[scoreNodeForBoundReplicatedVolumePVC] node %s contains a volume replica and gets +100 score points", nodeName))
 		score += 100
 	}

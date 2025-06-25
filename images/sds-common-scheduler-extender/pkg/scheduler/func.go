@@ -18,7 +18,6 @@ package scheduler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -92,7 +91,7 @@ func shouldProcessPod(ctx context.Context, cl client.Client, pvcMap map[string]*
 	}
 
 	log.Trace(fmt.Sprintf("[ShouldProcessPod] can't find targetProvisioner in pod volumes. Skip pod: %s/%s", pod.Namespace, pod.Name))
-	return nil, errors.New(fmt.Sprintf("[ShouldProcessPod] can't find targetProvisioner in pod volumes. Skip pod: %s/%s", pod.Namespace, pod.Name))
+	return nil, fmt.Errorf("[ShouldProcessPod] can't find targetProvisioner in pod volumes. Skip pod: %s/%s", pod.Namespace, pod.Name)
 }
 
 func getProvisionerFromPVC(ctx context.Context, cl client.Client, log *logger.Logger, pvc *corev1.PersistentVolumeClaim) (string, error) {
@@ -210,22 +209,6 @@ func getNodeWithLvmVgsMap(ctx context.Context, cl client.Client, log *logger.Log
 	return nodeToLvmMap, nil
 }
 
-// func getDRBDResourceMap(ctx context.Context, cl client.Client) (map[string]*srv.DRBDResource, error) {
-// 	// TODO
-// 	// drbdList := &srv.DRBDResourceList{}
-// 	// err := cl.List(ctx, drbdList)
-// 	// if err != nil {
-// 	// 	return nil, err
-// 	// }
-
-// 	// drbdMap := make(map[string]*srv.DRBDResource, len(drbdList.Items))
-// 	// for _, drbd := range drbdList.Items {
-// 	// 	drbdMap[drbd.Name] = &drbd
-// 	// }
-// 	drbdMap := map[string]*srv.DRBDResource{}
-// 	return drbdMap, nil
-// }
-
 func getDRBDNodesMap(ctx context.Context, cl client.Client, log *logger.Logger) (map[string]struct{}, error) {
 	nodeList := &corev1.NodeList{}
 
@@ -246,42 +229,6 @@ func getDRBDNodesMap(ctx context.Context, cl client.Client, log *logger.Logger) 
 	}
 
 	return result, nil
-
-	// result := make(map[string]struct{})
-
-	// lvgList := &snc.LVMVolumeGroupList{}
-	// err := cl.List(ctx, lvgList)
-	// if err != nil {
-	// 	log.Error(err, "[getDRBDNodesMap] failed to list LVM volume groups")
-	// 	return result, err
-	// }
-
-	// lvgMap := make(map[string]*snc.LVMVolumeGroup, len(lvgList.Items))
-	// for _, lvg := range lvgList.Items {
-	// 	lvgMap[lvg.Name] = &lvg
-	// }
-	// log.Trace("[getDRBDNodesMap]", "LVM volume group map", lvgMap)
-
-	// rspList := &srv.ReplicatedStoragePoolList{}
-	// err = cl.List(ctx, rspList)
-	// if err != nil {
-	// 	log.Error(err, "[getDRBDNodesMap] failed to list replicated storage pools")
-	// 	return result, err
-	// }
-	// log.Trace("[getDRBDNodesMap]", "LVM volume group map", lvgMap)
-
-	// for _, rsc := range rspList.Items {
-	// 	for _, rscLVG := range rsc.Spec.LVMVolumeGroups {
-	// 		lvg, found := lvgMap[rscLVG.Name]
-	// 		if !found {
-	// 			log.Warning("[getDRBDNodesMap]", fmt.Sprintf("no LVM volume group %s found, skipping iteration", rscLVG.Name))
-	// 		}
-	// 		result[lvg.Spec.Local.NodeName] = struct{}{}
-	// 	}
-	// }
-
-	// log.Trace("[getDRBDNodesMap]", "DRBD nodes map", result)
-	// return result, nil
 }
 
 func getPersistentVolumeClaims(ctx context.Context, cl client.Client, log *logger.Logger) (map[string]*corev1.PersistentVolumeClaim, error) {
@@ -457,7 +404,7 @@ func calculateFreeSpace(
 
 		reserved, err := schedulerCache.GetLVGThickReservedSpace(lvg.Name)
 		if err != nil {
-			return freeSpace, errors.New(fmt.Sprintf("[scoreNodes] unable to count reserved space for the LVMVolumeGroup %s", lvg.Name))
+			return freeSpace, fmt.Errorf("[scoreNodes] unable to count reserved space for the LVMVolumeGroup %s", lvg.Name)
 		}
 		log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s PVC Space reservation: %s", lvg.Name, resource.NewQuantity(reserved, resource.BinarySI)))
 

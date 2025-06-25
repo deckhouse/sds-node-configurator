@@ -190,7 +190,7 @@ func (s *scheduler) filterNodesParallel(input *FilterInput) (*ExtenderFilterResu
 		}
 	}
 
-	s.log.Debug(fmt.Sprintf("[filterNodes] filtered nodes", "nodes", result.NodeNames))
+	s.log.Debug(fmt.Sprintf("[filterNodes] filtered nodes: %v", result.NodeNames))
 	return result, nil
 }
 
@@ -246,7 +246,7 @@ func filterNodeForBoundReplicatedVolumePVC(nodeName string, pvc *corev1.Persiste
 	switch pvcRSC.Spec.VolumeAccess {
 	case "Local":
 		isOk := checkIfNodeContainsDiskfulReplica(nodeName, replica)
-		log.Info(fmt.Sprintf("[filterNodeForBoundReplicatedVolumePVC] volume access: %s, nodeName: %s, node contains diskful replica status: %b", pvcRSC.Spec.VolumeAccess, nodeName, isOk))
+		log.Info(fmt.Sprintf("[filterNodeForBoundReplicatedVolumePVC] volume access: %s, nodeName: %s, node contains diskful replica status: %t", pvcRSC.Spec.VolumeAccess, nodeName, isOk))
 		nodeIsOk = isOk
 	case "EventuallyLocal":
 		nodeLvgs := sharedNodes[nodeName]
@@ -261,14 +261,14 @@ func filterNodeForBoundReplicatedVolumePVC(nodeName string, pvc *corev1.Persiste
 		hasEnoughSpace := nodeHasEnoughSpace(filterInput.PVCSizeRequests, filterInput.LVGFilteringInfo, sharedLVG, pvc, cachedLVGs, log)
 		containsDiskfulReplica := checkIfNodeContainsDiskfulReplica(nodeName, replica)
 		if !hasEnoughSpace && containsDiskfulReplica {
-			log.Info(fmt.Sprintf("[filterNodeForBoundReplicatedVolumePVC] node %s is not ok: volume access: %s, enough disk space: %b, contains diskful replica: %b", nodeName, pvcRSC.Spec.VolumeAccess, hasEnoughSpace, containsDiskfulReplica))
+			log.Info(fmt.Sprintf("[filterNodeForBoundReplicatedVolumePVC] node %s is not ok: volume access: %s, enough disk space: %t, contains diskful replica: %t", nodeName, pvcRSC.Spec.VolumeAccess, hasEnoughSpace, containsDiskfulReplica))
 			nodeIsOk = false
 		}
 
 		nodeIsOk = true
 	case "PreferablyLocal", "Any":
 		_, isOk := filterInput.DRBDNodesMap[nodeName]
-		log.Info(fmt.Sprintf("[filterNodeForBoundReplicatedVolumePVC] volume access: %s, node is ok status: %b", pvcRSC.Spec.VolumeAccess, isOk))
+		log.Info(fmt.Sprintf("[filterNodeForBoundReplicatedVolumePVC] volume access: %s, node is ok status: %t", pvcRSC.Spec.VolumeAccess, isOk))
 		nodeIsOk = isOk
 	}
 
