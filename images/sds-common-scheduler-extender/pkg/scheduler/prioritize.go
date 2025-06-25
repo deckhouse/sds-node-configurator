@@ -270,6 +270,8 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, nodeName string) int
 	score := 0
 	for _, pvc := range input.ReplicatedAndLocalPVC {
 		sc := input.SCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
+		s.log.Info(fmt.Sprintf("[scoreSingleNode] sc provisioner %s", sc.Provisioner))
+		s.log.Info(fmt.Sprintf("[scoreSingleNode] sc name %s", sc.Name))
 
 		if sc.Provisioner == consts.SdsReplicatedVolumeProvisioner {
 			if pvc.Spec.VolumeName != "" {
