@@ -281,8 +281,10 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, nodeName string) int
 
 		if sc.Provisioner == consts.SdsLocalVolumeProvisioner {
 			if pvc.Spec.VolumeName != "" {
+				s.log.Info(fmt.Sprintf("[scoreSingleNode] pvc %s is bound to volume %s", pvc.Name, pvc.Spec.VolumeName))
 				// TODO this needs to be designed
 			} else {
+				s.log.Info(fmt.Sprintf("[scoreSingleNode] pvc %s is not bound", pvc.Name))
 				score = scoreNodeForNotBoundLocalVolumePVC(nodeName, input, pvc, s.cacheMgr, s.log)
 			}
 		}
