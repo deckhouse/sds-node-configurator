@@ -73,8 +73,8 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 	for name, pvc := range replicatedPVCs {
 		replicatedAndLocalPVCs[name] = pvc
 	}
-	for name, pvc := range replicatedPVCs {
-		localPVCs[name] = pvc
+	for name, pvc := range localPVCs {
+		replicatedAndLocalPVCs[name] = pvc
 	}
 
 	pvMap, err := getPersistentVolumes(s.ctx, s.client, s.log)
