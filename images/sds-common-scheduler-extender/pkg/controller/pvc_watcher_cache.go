@@ -135,8 +135,8 @@ func reconcilePVC(ctx context.Context, mgr manager.Manager, log *logger.Logger, 
 		return
 	}
 
-	if sc.Provisioner != consts.SdsReplicatedVolumeProvisioner {
-		log.Debug(fmt.Sprintf("[reconcilePVC] Storage Class %s for PVC %s/%s is not managed by sds-replicated-volume-provisioner. Ends the reconciliation", sc.Name, pvc.Namespace, pvc.Name))
+	if sc.Provisioner != consts.SdsReplicatedVolumeProvisioner && sc.Provisioner != consts.SdsLocalVolumeProvisioner {
+		log.Debug(fmt.Sprintf("[reconcilePVC] Storage Class %s for PVC %s/%s is not managed by sds-replicated-volume-provisioner or sds-local-volume-provisioner. Ends the reconciliation", sc.Name, pvc.Namespace, pvc.Name))
 		return
 	}
 
