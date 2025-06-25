@@ -67,11 +67,6 @@ spec:
                     operator: In
                     values:
                       - ""
-              - matchExpressions:
-                  - key: storage.deckhouse.io/sds-drbd-node
-                    operator: In
-                    values:
-                      - ""
       dnsPolicy: ClusterFirstWithHostNet
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry

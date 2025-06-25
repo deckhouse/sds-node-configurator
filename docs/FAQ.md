@@ -78,7 +78,7 @@ The controller will then stop tracking the selected `Volume Group` and delete th
 
 This can happen if you created the `LVM Volume Group` using the LVMVolumeGroup resource, in which case the controller will automatically add this LVM tag to the created `LVM Volume Group`. This is also possible if the `Volume Group` or its `Thin-pool` already had the `linstor-*` LVM tag of the `linstor` module.
 
-When you switch from the `linstor` module to the `sds-node-configurator` and `sds-drbd` modules, the `linstor-*` LVM tags are automatically replaced with the `storage.deckhouse.io/enabled=true` LVM tag in the `Volume Group`. This way, the `sds-node-configurator` gains control over these `Volume Groups`.
+When you switch from the `linstor` module to the `sds-node-configurator` and `sds-replicated-volume` modules, the `linstor-*` LVM tags are automatically replaced with the `storage.deckhouse.io/enabled=true` LVM tag in the `Volume Group`. This way, the `sds-node-configurator` gains control over these `Volume Groups`.
 
 ## How to use the LVMVolumeGroupSet resource to create LVMVolumeGroup?
 
