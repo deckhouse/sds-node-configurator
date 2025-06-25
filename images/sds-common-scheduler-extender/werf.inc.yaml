@@ -1,6 +1,7 @@
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
 fromImage: builder/src
+fromCacheVersion: 20250624180000
 final: false
 
 git:
@@ -23,13 +24,14 @@ shell:
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
 fromImage: builder/golang-alpine
+fromCacheVersion: 20250624180000
 final: false
 
 import:
   - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
     add: /src
     to: /src
-    before: install
+    before: setup
 
 mount:
 {{ include "mount points for golang builds" . }}
@@ -47,6 +49,7 @@ shell:
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}
+fromCacheVersion: 20250624180000
 fromImage: base/distroless
 
 import:
