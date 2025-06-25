@@ -266,6 +266,7 @@ func (s *scheduler) scoreNodesParallel(input *PrioritizeInput) ([]HostPriority, 
 
 func (s *scheduler) scoreSingleNode(input *PrioritizeInput, nodeName string) int {
 	s.log.Debug(fmt.Sprintf("[scoreSingleNode] scoring node %s", nodeName))
+	s.log.Info(fmt.Sprintf("[scoreSingleNode] test %d", len(input.ReplicatedAndLocalPVC)))
 
 	score := 0
 	for _, pvc := range input.ReplicatedAndLocalPVC {
