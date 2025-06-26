@@ -147,6 +147,7 @@ spec:
         readinessProbe:
           httpGet:
             path: /readyz
+            host: 127.0.0.1
             port: 4228
             scheme: HTTP
           initialDelaySeconds: 5
@@ -155,6 +156,7 @@ spec:
         livenessProbe:
           httpGet:
             path: /healthz
+            host: 127.0.0.1
             port: 4228
             scheme: HTTP
           periodSeconds: 1
