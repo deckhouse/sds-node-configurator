@@ -168,6 +168,8 @@ spec:
         env:
           - name: HEALTH_PROBE_BIND_ADDRESS
             value: 127.0.0.1:4228
+          - name: METRICS_PORT
+            value: 127.0.0.1:4202
           - name: NODE_NAME
             valueFrom:
               fieldRef:
