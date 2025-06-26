@@ -164,6 +164,8 @@ spec:
             containerPort: 4202
             protocol: TCP
         env:
+          - name: HEALTH_PROBE_BIND_ADDRESS
+            value: 127.0.0.1:4228
           - name: NODE_NAME
             valueFrom:
               fieldRef:
