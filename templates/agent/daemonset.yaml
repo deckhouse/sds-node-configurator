@@ -91,7 +91,7 @@ spec:
         - /sds-utils
         - /opt/deckhouse/sds
         securityContext:
-          readOnlyRootFilesystem: true        
+          readOnlyRootFilesystem: true
         volumeMounts:
         - mountPath: /opt/deckhouse/sds
           name: opt-deckhouse-sds
