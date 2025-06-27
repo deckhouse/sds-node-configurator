@@ -35,8 +35,7 @@ func (s *scheduler) Filter(inputData ExtenderArgs) (*ExtenderFilterResult, error
 		return nil, fmt.Errorf("unable to get node names: %w", err)
 	}
 
-	s.log.Debug(fmt.Sprintf("[filter] filtering for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-	s.log.Trace(fmt.Sprintf("[filter] Pod: %+v, Nodes: %+v", inputData.Pod, nodeNames))
+	s.log.Debug(fmt.Sprintf("[filter] filtering Nodes: %+v for Pod %s/%s", nodeNames, inputData.Pod.Namespace, inputData.Pod.Name))
 
 	input, err := s.collectFilterInput(inputData.Pod, nodeNames)
 	if err != nil {
@@ -113,7 +112,7 @@ func (s *scheduler) filterNodesParallel(input *FilterInput) (*ExtenderFilterResu
 	sharedNodes, err := getSharedNodesByStorageClasses(input.SCSUsedByPodPVCs, input.LVGFilteringInfo.NodeToLVGs)
 	if err != nil {
 		s.log.Error(err, "[filterNodesParallel] failed to find any shared nodes")
-		return nil, fmt.Errorf("unable to get common nodes: %w", err)
+		return nil, fmt.Errorf("unable to get shared nodes: %w", err)
 	}
 	cachedLVGs := s.cacheMgr.GetAllLVG()
 
@@ -131,6 +130,7 @@ func (s *scheduler) filterNodesParallel(input *FilterInput) (*ExtenderFilterResu
 
 			nodeIsOk := false
 			for _, pvc := range input.PodRelatedPVCs {
+				s.log.Debug("[filterNodesParallel] filtering node %s, pvc %s/%s", nodeName, pvc.Namespace, pvc.Name)
 				sc := input.SCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
 
 				if sc.Provisioner == consts.SdsReplicatedVolumeProvisioner {
@@ -156,7 +156,7 @@ func (s *scheduler) filterNodesParallel(input *FilterInput) (*ExtenderFilterResu
 			}
 
 			s.log.Debug(fmt.Sprintf("[filterNodesParallel] node %s is not ok to schedule a pod to", nodeName))
-			// TODO specify error text
+			// TODO make filtering methods return an error and put error text here
 			resCh <- ResultWithError{NodeName: nodeName, Err: errors.New("node not ok")}
 		}(nodeName)
 	}
@@ -179,6 +179,7 @@ func (s *scheduler) filterNodesParallel(input *FilterInput) (*ExtenderFilterResu
 }
 
 func filterNodeForBoundLocalVolumePVC(nodeName string, pvc *corev1.PersistentVolumeClaim, filterInput *FilterInput, sharedNodes map[string][]*snc.LVMVolumeGroup, log *logger.Logger) bool {
+	log.Debug("[filterNodeForBoundLocalVolumePVC] filter node %s, pvc %s/%s", nodeName, pvc.Namespace, pvc.Name)
 	nodeLvgs := sharedNodes[nodeName]
 	lvgsFromSC := filterInput.LVGFilteringInfo.SCLVGs[*pvc.Spec.StorageClassName]
 	sharedLVG := findSharedLVG(nodeLvgs, lvgsFromSC)
@@ -193,6 +194,7 @@ func filterNodeForBoundLocalVolumePVC(nodeName string, pvc *corev1.PersistentVol
 }
 
 func filterNodeForNotBoundLocalVolumePVC(nodeName string, pvc *corev1.PersistentVolumeClaim, filterInput *FilterInput, sharedNodes map[string][]*snc.LVMVolumeGroup, cachedLVGs map[string]*snc.LVMVolumeGroup, log *logger.Logger) bool {
+	log.Debug("[filterNodeForNotBoundLocalVolumePVC] filter node %s, pvc %s/%s", nodeName, pvc.Namespace, pvc.Name)
 	nodeLvgs := sharedNodes[nodeName]
 	lvgsFromSC := filterInput.LVGFilteringInfo.SCLVGs[*pvc.Spec.StorageClassName]
 	sharedLVG := findSharedLVG(nodeLvgs, lvgsFromSC)
@@ -203,6 +205,7 @@ func filterNodeForNotBoundLocalVolumePVC(nodeName string, pvc *corev1.Persistent
 		return false
 	}
 
+	log.Info(fmt.Sprintf("[filterNodeForNotBoundLocalVolumePVC] node %s is ok", nodeName))
 	return true
 }
 
@@ -219,6 +222,7 @@ func checkIfNodeContainsDiskfulReplica(nodeName string, drbdReplica *srv2.DRBDRe
 }
 
 func filterNodeForBoundReplicatedVolumePVC(nodeName string, pvc *corev1.PersistentVolumeClaim, filterInput *FilterInput, sharedNodes map[string][]*snc.LVMVolumeGroup, cachedLVGs map[string]*snc.LVMVolumeGroup, log *logger.Logger) bool {
+	log.Debug("[filterNodeForBoundReplicatedVolumePVC] filter node %s, pvc %s/%s", nodeName, pvc.Namespace, pvc.Name)
 	nodeIsOk := false
 	replica, found := filterInput.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
 	if found {
@@ -256,10 +260,12 @@ func filterNodeForBoundReplicatedVolumePVC(nodeName string, pvc *corev1.Persiste
 		nodeIsOk = isOk
 	}
 
+	log.Info(fmt.Sprintf("[filterNodeForBoundReplicatedVolumePVC] node filter status: %t", nodeIsOk))
 	return nodeIsOk
 }
 
 func filterNodeForNotBoundReplicatedVolumePVC(nodeName string, pvc *corev1.PersistentVolumeClaim, filterInput *FilterInput, cachedLVGs map[string]*snc.LVMVolumeGroup, sharedNodes map[string][]*snc.LVMVolumeGroup, log *logger.Logger) bool {
+	log.Debug("[filterNodeForNotBoundReplicatedVolumePVC] filter node %s, pvc %s/%s", nodeName, pvc.Namespace, pvc.Name)
 	nodeIsOk := false
 	pvcRSC := filterInput.ReplicatedSCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
 
@@ -281,5 +287,6 @@ func filterNodeForNotBoundReplicatedVolumePVC(nodeName string, pvc *corev1.Persi
 		nodeIsOk = ok
 	}
 
+	log.Info(fmt.Sprintf("[filterNodeForNotBoundReplicatedVolumePVC] node filter status: %t", nodeIsOk))
 	return nodeIsOk
 }

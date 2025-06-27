@@ -113,42 +113,37 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		DefaultDivisor:             s.defaultDivisor,
 		DRBDResourceReplicaMap:     drbdReplicaMap,
 	}
-
 	return res, nil
 }
 
 func scoreNodeForNotBoundLocalVolumePVC(nodeName string, input *PrioritizeInput, pvc *corev1.PersistentVolumeClaim, schedulerCache *cache.CacheManager, log *logger.Logger) int {
+	log.Info("[scoreNodeForNotBoundLocalVolumePVC] scoring node %s, pvc %s/%s", nodeName, pvc.Namespace, pvc.Name)
 	score := 0
 	lvgsFromNode := input.LVGScoringInfo.NodeToLVGs[nodeName]
 	lvgsFromSC := input.LVGScoringInfo.SCLVGs[*pvc.Spec.StorageClassName]
 
 	sharedLVG := findMatchedLVGs(lvgsFromNode, lvgsFromSC)
-
 	lvg := input.LVGScoringInfo.LVGs[sharedLVG.Name]
-	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] lvg name %s", lvg.Name))
 	pvcReq := input.PVCRequests[pvc.Name]
-	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] pvc space request %+v", pvcReq))
+	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] pvc %s/%s space request %+v", pvc.Namespace, pvc.Name, pvcReq))
 	freeSpace, err := calculateFreeSpace(lvg, schedulerCache, &pvcReq, sharedLVG, log, pvc, nodeName)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] unable to calculate free space for LVMVolumeGroup %s, PVC: %s, node: %s", lvg.Name, pvc.Name, nodeName))
 		return score
 	}
-	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] freeSpace %+v", freeSpace))
+	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] pvc %s/%s freeSpace %s", pvc.Namespace, pvc.Name, freeSpace.String()))
 	totalFreeSpaceLeftPercent := getFreeSpaceLeftAsPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
 
-	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] totalFreeSpaceLeftPercent %d", totalFreeSpaceLeftPercent))
 	averageFreeSpace := int64(0)
 	if len(input.PodRelatedPVCs) > 0 {
 		averageFreeSpace = totalFreeSpaceLeftPercent / int64(len(input.PodRelatedPVCs))
 	}
-	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] averageFreeSpace %d", averageFreeSpace))
 	score += getNodeScore(averageFreeSpace, 1/input.DefaultDivisor)
-
-	log.Info(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] node %s, pvc %s, score %d", nodeName, pvc.Name, score))
 	return score
 }
 
 func scoreNodeForNotBoundReplicatedVolumePVC(nodeName string, input *PrioritizeInput, pvc *corev1.PersistentVolumeClaim, schedulerCache *cache.CacheManager, log *logger.Logger) int {
+	log.Info("[scoreNodeForNotBoundReplicatedVolumePVC] scoring node %s, pvc %s/%s", nodeName, pvc.Namespace, pvc.Name)
 	score := 0
 	pvcRSC := input.ReplicatedSCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
 	lvgsFromNode := input.LVGScoringInfo.NodeToLVGs[nodeName]
@@ -179,6 +174,7 @@ func scoreNodeForNotBoundReplicatedVolumePVC(nodeName string, input *PrioritizeI
 }
 
 func scoreNodeForBoundReplicatedVolumePVC(nodeName string, input *PrioritizeInput, pvc *corev1.PersistentVolumeClaim, schedulerCache *cache.CacheManager, log *logger.Logger) int {
+	log.Info("[scoreNodeForBoundReplicatedVolumePVC] scoring node %s, pvc %s/%s", nodeName, pvc.Namespace, pvc.Name)
 	score := 0
 	pvcRSC := input.ReplicatedSCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
 	lvgsFromNode := input.LVGScoringInfo.NodeToLVGs[nodeName]
