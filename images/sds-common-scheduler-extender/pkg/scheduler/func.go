@@ -702,8 +702,9 @@ func extractRequestedSize(
 ) (map[string]PVCRequest, error) {
 	pvcRequests := make(map[string]PVCRequest, len(pvcs))
 	for _, pvc := range pvcs {
-		sc := scs[*pvc.Spec.StorageClassName]
 		log.Debug(fmt.Sprintf("[extractRequestedSize] PVC %s/%s has status phase: %s", pvc.Namespace, pvc.Name, pvc.Status.Phase))
+		
+		sc := scs[*pvc.Spec.StorageClassName]
 		switch pvc.Status.Phase {
 		case corev1.ClaimPending:
 			switch sc.Parameters[consts.LvmTypeParamKey] {
@@ -712,7 +713,7 @@ func extractRequestedSize(
 				if reqSize < 0 {
 					reqSize = 0
 				}
-				log.Debug(fmt.Sprintf("[extractRequestedSize] thic reqSize %d, %d", reqSize, pvc.Spec.Resources.Requests.Storage().Value()))
+				log.Debug(fmt.Sprintf("[extractRequestedSize] thic reqSize %d", reqSize))
 				pvcRequests[pvc.Name] = PVCRequest{
 					DeviceType:    consts.Thick,
 					RequestedSize: reqSize,
@@ -722,7 +723,7 @@ func extractRequestedSize(
 				if reqSize < 0 {
 					reqSize = 0
 				}
-				log.Debug(fmt.Sprintf("[extractRequestedSize] thin reqSize %d, %d", reqSize, pvc.Spec.Resources.Requests.Storage().Value()))
+				log.Debug(fmt.Sprintf("[extractRequestedSize] thin reqSize %d", reqSize))
 				pvcRequests[pvc.Name] = PVCRequest{
 					DeviceType:    consts.Thin,
 					RequestedSize: reqSize,
@@ -827,37 +828,6 @@ func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map
 	fmt.Printf("[getStorageClassesUsedByPVCs] result: %+v\n", result)
 	return result, nil
 }
-
-func filterPVCsByProvisioner(log *logger.Logger, podRelatedPVCs map[string]*corev1.PersistentVolumeClaim, scsUsedByPodPVCs map[string]*v1.StorageClass) (map[string]*corev1.PersistentVolumeClaim, map[string]*corev1.PersistentVolumeClaim) {
-	replicatedPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(podRelatedPVCs))
-	localPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(podRelatedPVCs))
-
-	for _, pvc := range podRelatedPVCs {
-		sc := scsUsedByPodPVCs[*pvc.Spec.StorageClassName]
-		if sc.Provisioner == consts.SdsLocalVolumeProvisioner {
-			localPVCs[pvc.Name] = pvc
-			continue
-		}
-		if sc.Provisioner == consts.SdsReplicatedVolumeProvisioner {
-			replicatedPVCs[pvc.Name] = pvc
-			continue
-		}
-		log.Debug(fmt.Sprintf("[filterNotManagedPVC] filter out PVC %s/%s due to used Storage class %s is not managed by sds-replicated-volume-provisioner", pvc.Name, pvc.Namespace, sc.Name))
-	}
-
-	return replicatedPVCs, localPVCs
-}
-
-// func getSortedLVGsFromStorageClasses(replicatedSCs map[string]*srv.ReplicatedStorageClass, spMap map[string]*srv.ReplicatedStoragePool) (map[string][]srv.ReplicatedStoragePoolLVMVolumeGroups, error) {
-// 	result := make(map[string][]srv.ReplicatedStoragePoolLVMVolumeGroups, len(replicatedSCs))
-
-// 	for _, sc := range replicatedSCs {
-// 		pool := spMap[sc.Spec.StoragePool]
-// 		result[sc.Name] = pool.Spec.LVMVolumeGroups
-// 	}
-
-// 	return result, nil
-// }
 
 func CreateLVGsMapFromStorageClasses(scs map[string]*v1.StorageClass) (map[string][]LVMVolumeGroup, error) {
 	result := make(map[string][]LVMVolumeGroup, len(scs))

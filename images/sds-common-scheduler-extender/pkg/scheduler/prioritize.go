@@ -32,13 +32,11 @@ import (
 )
 
 func (s *scheduler) Prioritize(inputData ExtenderArgs) ([]HostPriority, error) {
+	s.log.Debug(fmt.Sprintf("[prioritize] prioritizing for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
 	nodeNames, err := getNodeNames(inputData, s.log)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get node names: %w", err)
 	}
-
-	s.log.Debug(fmt.Sprintf("[prioritize] prioritizing for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-	s.log.Trace(fmt.Sprintf("[prioritize] Pod: %+v, Nodes: %+v", inputData.Pod, nodeNames))
 
 	input, err := s.collectPrioritizeInput(inputData.Pod, nodeNames)
 	if err != nil {
@@ -63,26 +61,12 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		return nil, fmt.Errorf("unable to get StorageClasses: %w", err)
 	}
 
-	replicatedPVCs, localPVCs := filterPVCsByProvisioner(s.log, pvcs, scsUsedByPodPVCs)
-	if len(replicatedPVCs) == 0 && len(localPVCs) == 0 {
-		s.log.Warning(fmt.Sprintf("[filter] Pod %s/%s uses unmanaged PVCs. replicatedPVCs length %d, localPVCs length %d", pod.Namespace, pod.Name, len(replicatedPVCs), len(localPVCs)))
-		return nil, errors.New("no managed PVCs found")
-	}
-
-	replicatedAndLocalPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(replicatedPVCs)+len(localPVCs))
-	for name, pvc := range replicatedPVCs {
-		replicatedAndLocalPVCs[name] = pvc
-	}
-	for name, pvc := range localPVCs {
-		replicatedAndLocalPVCs[name] = pvc
-	}
-
 	pvMap, err := getPersistentVolumes(s.ctx, s.client, s.log)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get PersistentVolumes: %w", err)
 	}
 
-	pvcRequests, err := extractRequestedSize(s.log, replicatedAndLocalPVCs, scsUsedByPodPVCs, pvMap)
+	pvcRequests, err := extractRequestedSize(s.log, pvcs, scsUsedByPodPVCs, pvMap)
 	if err != nil {
 		return nil, fmt.Errorf("unable to extract PVC request sizes: %w", err)
 	}
@@ -121,10 +105,8 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		NodeNames:                  nodeNames,
 		ReplicatedSCSUsedByPodPVCs: replicatedSCSUsedByPodPVCs,
 		LocalSCSUsedByPodPVCs:      localSCSUsedByPodPVCs,
-		ReplicatedProvisionPVCs:    replicatedPVCs,
-		ReplicatedAndLocalPVC:      replicatedAndLocalPVCs,
+		PodRelatedPVCs:             pvcs,
 		LVGScoringInfo:             lvgInfo,
-		LocalProvisionPVCs:         localPVCs,
 		SCSUsedByPodPVCs:           scsUsedByPodPVCs,
 		PVCRequests:                pvcRequests,
 		StoragePoolMap:             storagePoolMap,
@@ -155,10 +137,9 @@ func scoreNodeForNotBoundLocalVolumePVC(nodeName string, input *PrioritizeInput,
 	totalFreeSpaceLeftPercent := getFreeSpaceLeftAsPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
 
 	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] totalFreeSpaceLeftPercent %d", totalFreeSpaceLeftPercent))
-	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] ReplicatedAndLocalPVC length %d", len(input.ReplicatedAndLocalPVC)))
 	averageFreeSpace := int64(0)
-	if len(input.ReplicatedAndLocalPVC) > 0 {
-		averageFreeSpace = totalFreeSpaceLeftPercent / int64(len(input.ReplicatedAndLocalPVC))
+	if len(input.PodRelatedPVCs) > 0 {
+		averageFreeSpace = totalFreeSpaceLeftPercent / int64(len(input.PodRelatedPVCs))
 	}
 	log.Trace(fmt.Sprintf("[scoreNodeForNotBoundLocalVolumePVC] averageFreeSpace %d", averageFreeSpace))
 	score += getNodeScore(averageFreeSpace, 1/input.DefaultDivisor)
@@ -188,8 +169,8 @@ func scoreNodeForNotBoundReplicatedVolumePVC(nodeName string, input *PrioritizeI
 		totalFreeSpaceLeftPercent := getFreeSpaceLeftAsPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
 
 		averageFreeSpace := int64(0)
-		if len(input.ReplicatedAndLocalPVC) > 0 {
-			averageFreeSpace = totalFreeSpaceLeftPercent / int64(len(input.ReplicatedAndLocalPVC))
+		if len(input.PodRelatedPVCs) > 0 {
+			averageFreeSpace = totalFreeSpaceLeftPercent / int64(len(input.PodRelatedPVCs))
 		}
 		score += getNodeScore(averageFreeSpace, 1/input.DefaultDivisor)
 	}
@@ -228,8 +209,8 @@ func scoreNodeForBoundReplicatedVolumePVC(nodeName string, input *PrioritizeInpu
 		totalFreeSpaceLeftPercent := getFreeSpaceLeftAsPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
 
 		averageFreeSpace := int64(0)
-		if len(input.ReplicatedAndLocalPVC) > 0 {
-			averageFreeSpace = totalFreeSpaceLeftPercent / int64(len(input.ReplicatedAndLocalPVC))
+		if len(input.PodRelatedPVCs) > 0 {
+			averageFreeSpace = totalFreeSpaceLeftPercent / int64(len(input.PodRelatedPVCs))
 		}
 		score += getNodeScore(averageFreeSpace, 1/input.DefaultDivisor)
 	}
@@ -266,10 +247,9 @@ func (s *scheduler) scoreNodesParallel(input *PrioritizeInput) ([]HostPriority, 
 
 func (s *scheduler) scoreSingleNode(input *PrioritizeInput, nodeName string) int {
 	s.log.Debug(fmt.Sprintf("[scoreSingleNode] scoring node %s", nodeName))
-	s.log.Info(fmt.Sprintf("[scoreSingleNode] test %d", len(input.ReplicatedAndLocalPVC)))
 
 	score := 0
-	for _, pvc := range input.ReplicatedAndLocalPVC {
+	for _, pvc := range input.PodRelatedPVCs {
 		sc := input.SCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
 		s.log.Info(fmt.Sprintf("[scoreSingleNode] sc provisioner %s", sc.Provisioner))
 		s.log.Info(fmt.Sprintf("[scoreSingleNode] sc name %s", sc.Name))

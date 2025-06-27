@@ -61,26 +61,12 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		return nil, fmt.Errorf("unable to get StorageClasses: %w", err)
 	}
 
-	replicatedPVCs, localPVCs := filterPVCsByProvisioner(s.log, podRelatedPVCs, scsUsedByPodPVCs)
-	if len(replicatedPVCs) == 0 && len(localPVCs) == 0 {
-		s.log.Warning(fmt.Sprintf("[filter] Pod %s/%s uses unmanaged PVCs. replicatedPVCs length %d, localPVCs length %d", pod.Namespace, pod.Name, len(replicatedPVCs), len(localPVCs)))
-		return nil, errors.New("no managed PVCs found")
-	}
-
 	pvMap, err := getPersistentVolumes(s.ctx, s.client, s.log)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get PersistentVolumes: %w", err)
 	}
 
-	replicatedAndLocalPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(replicatedPVCs)+len(localPVCs))
-	for name, pvc := range replicatedPVCs {
-		replicatedAndLocalPVCs[name] = pvc
-	}
-	for name, pvc := range localPVCs {
-		replicatedAndLocalPVCs[name] = pvc
-	}
-
-	pvcSizeRequests, err := extractRequestedSize(s.log, replicatedAndLocalPVCs, scsUsedByPodPVCs, pvMap)
+	pvcSizeRequests, err := extractRequestedSize(s.log, podRelatedPVCs, scsUsedByPodPVCs, pvMap)
 	if err != nil {
 		return nil, fmt.Errorf("unable to extract PVC request sizes: %w", err)
 	}
@@ -113,9 +99,7 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 	return &FilterInput{
 		Pod:                        pod,
 		NodeNames:                  nodeNames,
-		ReplicatedProvisionPVCs:    replicatedPVCs,
-		LocalProvisionPVCs:         localPVCs,
-		ReplicatedAndLocalPVC:      replicatedAndLocalPVCs,
+		PodRelatedPVCs:             podRelatedPVCs,
 		SCSUsedByPodPVCs:           scsUsedByPodPVCs,
 		PVCSizeRequests:            pvcSizeRequests,
 		ReplicatedSCSUsedByPodPVCs: replicatedSCSUsedByPodPVCs,
@@ -146,7 +130,7 @@ func (s *scheduler) filterNodesParallel(input *FilterInput) (*ExtenderFilterResu
 			defer wg.Done()
 
 			nodeIsOk := false
-			for _, pvc := range input.ReplicatedAndLocalPVC {
+			for _, pvc := range input.PodRelatedPVCs {
 				sc := input.SCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
 
 				if sc.Provisioner == consts.SdsReplicatedVolumeProvisioner {

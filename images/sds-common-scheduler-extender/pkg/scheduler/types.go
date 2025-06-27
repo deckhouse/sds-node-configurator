@@ -64,9 +64,7 @@ type HostPriority struct {
 type FilterInput struct {
 	Pod                        *v1.Pod
 	NodeNames                  []string
-	ReplicatedProvisionPVCs    map[string]*v1.PersistentVolumeClaim
-	LocalProvisionPVCs         map[string]*v1.PersistentVolumeClaim
-	ReplicatedAndLocalPVC      map[string]*v1.PersistentVolumeClaim
+	PodRelatedPVCs             map[string]*v1.PersistentVolumeClaim
 	SCSUsedByPodPVCs           map[string]*storagev1.StorageClass
 	PVCSizeRequests            map[string]PVCRequest
 	ReplicatedSCSUsedByPodPVCs map[string]*srv.ReplicatedStorageClass
@@ -96,7 +94,7 @@ type PrioritizeInput struct {
 	NodeNames                  []string
 	ReplicatedProvisionPVCs    map[string]*v1.PersistentVolumeClaim
 	LocalProvisionPVCs         map[string]*v1.PersistentVolumeClaim
-	ReplicatedAndLocalPVC      map[string]*v1.PersistentVolumeClaim
+	PodRelatedPVCs             map[string]*v1.PersistentVolumeClaim
 	ReplicatedSCSUsedByPodPVCs map[string]*srv.ReplicatedStorageClass
 	LocalSCSUsedByPodPVCs      map[string]*slv.LocalStorageClass
 	LVGScoringInfo             *LVGScoringInfo
