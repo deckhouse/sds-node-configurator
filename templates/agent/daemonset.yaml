@@ -91,7 +91,7 @@ spec:
         - /sds-utils
         - /opt/deckhouse/sds
         securityContext:
-          readOnlyRootFilesystem: true        
+          readOnlyRootFilesystem: true
         volumeMounts:
         - mountPath: /opt/deckhouse/sds
           name: opt-deckhouse-sds
@@ -147,6 +147,7 @@ spec:
         readinessProbe:
           httpGet:
             path: /readyz
+            host: 127.0.0.1
             port: 4228
             scheme: HTTP
           initialDelaySeconds: 5
@@ -155,6 +156,7 @@ spec:
         livenessProbe:
           httpGet:
             path: /healthz
+            host: 127.0.0.1
             port: 4228
             scheme: HTTP
           periodSeconds: 1
@@ -164,6 +166,10 @@ spec:
             containerPort: 4202
             protocol: TCP
         env:
+          - name: HEALTH_PROBE_BIND_ADDRESS
+            value: 127.0.0.1:4228
+          - name: METRICS_PORT
+            value: 127.0.0.1:4202
           - name: NODE_NAME
             valueFrom:
               fieldRef:
