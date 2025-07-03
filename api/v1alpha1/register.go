@@ -27,7 +27,7 @@ const (
 	APIVersion = "v1alpha1"
 )
 
-//go:generate go run sigs.k8s.io/controller-tools/cmd/controller-gen object:headerFile=../../hack/boilerplate.txt
+//go:generate go tool controller-gen object:headerFile=../../hack/boilerplate.txt
 
 // SchemeGroupVersion is group version used to register these objects
 var (

@@ -20,12 +20,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-//go:generate go run sigs.k8s.io/controller-tools/cmd/controller-gen paths=$GOFILE crd output:crd:dir=../../crds/filter
+//go:generate go tool controller-gen paths=$GOFILE crd output:crd:dir=../../crds/filter
 
 // +groupName=storage.deckhouse.io
 
 // +kubebuilder:resource:scope=Cluster,shortName=bdf
 // +kubebuilder:object:root=true
+// +kubebuilder:metadata:labels={"module=sds-node-configurator","heritage=deckhouse","backup.deckhouse.io/cluster-config=true"}
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // The filters on BlockDevice list
