@@ -27,6 +27,8 @@ const (
 	APIVersion = "v1alpha1"
 )
 
+//go:generate go tool controller-gen object:headerFile=../../hack/boilerplate.txt
+
 // SchemeGroupVersion is group version used to register these objects
 var (
 	SchemeGroupVersion = schema.GroupVersion{
@@ -40,6 +42,8 @@ var (
 var knownTypes = []runtime.Object{
 	&BlockDevice{},
 	&BlockDeviceList{},
+	&BlockDeviceFilter{},
+	&BlockDeviceFilterList{},
 	&LVMVolumeGroup{},
 	&LVMVolumeGroupList{},
 	&LVMLogicalVolume{},

@@ -8,6 +8,7 @@ clientgoscheme
 configurator
 dmsetup
 extv
+finalizer
 finalizers
 fstype
 golangci

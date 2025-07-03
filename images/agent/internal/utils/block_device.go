@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-//go:generate go run go.uber.org/mock/mockgen -copyright_file ../../../../hack/boilerplate.txt -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE
+//go:generate go tool mockgen -copyright_file ../../../../hack/boilerplate.txt -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE
 
 package utils
 

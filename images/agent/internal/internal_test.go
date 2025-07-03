@@ -1,6 +1,3 @@
-//go:build tools
-// +build tools
-
 /*
 Copyright 2025 Flant JSC
 
@@ -17,9 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package tools
+package internal_test
 
 import (
-	_ "k8s.io/code-generator"
-	_ "sigs.k8s.io/controller-tools/cmd/controller-gen"
+	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
+
+func TestUtils(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "utils Suite")
+}

@@ -21,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type LVMVolumeGroupList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
@@ -28,6 +29,7 @@ type LVMVolumeGroupList struct {
 	Items []LVMVolumeGroup `json:"items"`
 }
 
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type LVMVolumeGroup struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -36,6 +38,7 @@ type LVMVolumeGroup struct {
 	Status LVMVolumeGroupStatus `json:"status,omitempty"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMVolumeGroupSpec struct {
 	ActualVGNameOnTheNode string                       `json:"actualVGNameOnTheNode"`
 	BlockDeviceSelector   *metav1.LabelSelector        `json:"blockDeviceSelector"`
@@ -44,6 +47,7 @@ type LVMVolumeGroupSpec struct {
 	Local                 LVMVolumeGroupLocalSpec      `json:"local"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMVolumeGroupStatus struct {
 	AllocatedSize        resource.Quantity              `json:"allocatedSize"`
 	Nodes                []LVMVolumeGroupNode           `json:"nodes"`
@@ -57,6 +61,7 @@ type LVMVolumeGroupStatus struct {
 	VGFree               resource.Quantity              `json:"vgFree"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMVolumeGroupDevice struct {
 	BlockDevice string            `json:"blockDevice"`
 	DevSize     resource.Quantity `json:"devSize"`
@@ -65,11 +70,13 @@ type LVMVolumeGroupDevice struct {
 	Path        string            `json:"path"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMVolumeGroupNode struct {
 	Devices []LVMVolumeGroupDevice `json:"devices"`
 	Name    string                 `json:"name"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMVolumeGroupThinPoolStatus struct {
 	Name            string            `json:"name"`
 	ActualSize      resource.Quantity `json:"actualSize"`
@@ -81,12 +88,14 @@ type LVMVolumeGroupThinPoolStatus struct {
 	Message         string            `json:"message"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMVolumeGroupThinPoolSpec struct {
 	Name            string `json:"name"`
 	Size            string `json:"size"`
 	AllocationLimit string `json:"allocationLimit"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMVolumeGroupLocalSpec struct {
 	NodeName string `json:"nodeName"`
 }
