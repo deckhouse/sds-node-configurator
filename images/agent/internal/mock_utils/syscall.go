@@ -12,8 +12,9 @@ package mock_utils
 import (
 	reflect "reflect"
 
-	utils "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	gomock "go.uber.org/mock/gomock"
+
+	utils "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 // MockSysCall is a mock of SysCall interface.

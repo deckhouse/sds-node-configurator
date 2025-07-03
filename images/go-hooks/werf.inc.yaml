@@ -1,35 +1,47 @@
 ---
-image: {{ $.ImageName }}-artifact
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
+fromImage: builder/src
+final: false
+git:
+  - add: {{ .ModuleDir }}/hooks/go
+    to: /src/hooks/go
+    stageDependencies:
+      install:
+        - '**/go.mod'
+        - '**/go.sum'
+        - '**/*.go'
+  - add: {{ .ModuleDir }}/api
+    to: /src/api
+    stageDependencies:
+      install:
+        - '**/go.mod'
+        - '**/go.sum'
+        - '**/*.go'
+
+shell:
+  install:
+    - echo "src artifact"
+
+---
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-artifact
 fromImage: builder/golang-alpine
 final: false
 
-git:
-  - add: /hooks/go
-    to: /usr/src/app/hooks/go
-    stageDependencies:
-      install:
-        - '**/go.mod'
-        - '**/go.sum'
-      beforeSetup:
-        - '**/*.go'
-  - add: /api
-    to: /usr/src/app/api
-    stageDependencies:
-      install:
-        - '**/go.mod'
-        - '**/go.sum'
-      beforeSetup:
-        - '**/*.go'
+import:
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
+    add: /src
+    to: /usr/src/app
+    before: install
 
 mount:
-- fromPath: ~/go-pkg-cache
-  to: /go/pkg
+{{ include "mount points for golang builds" . }}
+
+secrets:
+- id: GOPROXY
+  value: {{ .GOPROXY }}
 
 shell:
   install:
     - cd /usr/src/app/hooks/go
-    - go mod download
-  beforeSetup:
-    - |
-      cd /usr/src/app/hooks/go;
-      CGO_ENABLED=0 go build -a -gcflags=all="-l -B" -ldflags="-w -s" -o /usr/local/bin/go-hooks *.go;
+    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
+    - CGO_ENABLED=0 go build -a -gcflags=all="-l -B" -ldflags="-w -s" -o /go-hooks *.go;

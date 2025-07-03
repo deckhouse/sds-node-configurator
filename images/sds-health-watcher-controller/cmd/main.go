@@ -31,8 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	mc "github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/api"
 	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/config"
 	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/controller"
 	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/kubutils"
@@ -42,7 +42,7 @@ import (
 
 var (
 	resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
-		mc.AddToScheme,
+		d8commonapi.AddToScheme,
 		v1alpha1.AddToScheme,
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,

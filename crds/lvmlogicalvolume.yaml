@@ -5,7 +5,7 @@ metadata:
   name: lvmlogicalvolumes.storage.deckhouse.io
   labels:
     heritage: deckhouse
-    module: storage
+    module: sds-node-configurator
     backup.deckhouse.io/cluster-config: "true"
 spec:
   group: storage.deckhouse.io
