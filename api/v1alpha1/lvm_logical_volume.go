@@ -21,6 +21,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// +k8s:deepcopy-gen=true
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type LVMLogicalVolumeList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
@@ -28,6 +30,8 @@ type LVMLogicalVolumeList struct {
 	Items []LVMLogicalVolume `json:"items"`
 }
 
+// +k8s:deepcopy-gen=true
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type LVMLogicalVolume struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -42,6 +46,7 @@ const (
 	VolumeCleanupRandomFillThreePass  = "RandomFillThreePass"
 )
 
+// +k8s:deepcopy-gen=true
 type LVMLogicalVolumeSpec struct {
 	ActualLVNameOnTheNode string                     `json:"actualLVNameOnTheNode"`
 	Type                  string                     `json:"type"`
@@ -53,13 +58,17 @@ type LVMLogicalVolumeSpec struct {
 	VolumeCleanup         *string                    `json:"volumeCleanup,omitempty"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMLogicalVolumeThinSpec struct {
 	PoolName string `json:"poolName"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMLogicalVolumeThickSpec struct {
 	Contiguous *bool `json:"contiguous,omitempty"`
 }
+
+// +k8s:deepcopy-gen=true
 type LVMLogicalVolumeStatus struct {
 	Phase      string            `json:"phase"`
 	Reason     string            `json:"reason"`
@@ -67,6 +76,7 @@ type LVMLogicalVolumeStatus struct {
 	Contiguous *bool             `json:"contiguous"`
 }
 
+// +k8s:deepcopy-gen=true
 type LVMLogicalVolumeSource struct {
 	// Either LVMLogicalVolume or LVMLogicalVolumeSnapshot
 	Kind string `json:"kind"`

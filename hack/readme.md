@@ -74,8 +74,16 @@ To add generation command in `.go` file add a comment
 
 For example to generate mock file:
 
+Install a tool
+
+```sh
+go get -tool go.uber.org/mock/mockgen
+```
+
+Add annotation
+
 ```go
-//go:generate go run go.uber.org/mock/mockgen -copyright_file ../../../../hack/boilerplate.txt -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE
+//go:generate go tool mockgen -copyright_file ../../../../hack/boilerplate.txt -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE
 ```
 
 To make tool available

@@ -31,6 +31,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/repository"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -39,8 +40,8 @@ const ReconcilerName = "lvm-logical-volume-extender-controller"
 type Reconciler struct {
 	cl       client.Client
 	log      logger.Logger
-	lvgCl    *utils.LVGClient
-	llvCl    *utils.LLVClient
+	lvgCl    *repository.LVGClient
+	llvCl    *repository.LLVClient
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
 	cfg      ReconcilerConfig
@@ -63,14 +64,14 @@ func NewReconciler(
 	return &Reconciler{
 		cl:  cl,
 		log: log,
-		lvgCl: utils.NewLVGClient(
+		lvgCl: repository.NewLVGClient(
 			cl,
 			log,
 			metrics,
 			cfg.NodeName,
 			ReconcilerName,
 		),
-		llvCl:    utils.NewLLVClient(cl, log),
+		llvCl:    repository.NewLLVClient(cl, log),
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		cfg:      cfg,
