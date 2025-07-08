@@ -99,7 +99,7 @@ func (d *Discoverer) Discover(ctx context.Context) (controller.Result, error) {
 	}
 	if shouldRequeue {
 		d.log.Warning(fmt.Sprintf("[RunBlockDeviceController] Reconciler needs a retry in %f", d.cfg.BlockDeviceScanInterval.Seconds()))
-		return controller.Result{RequeueAfter: d.cfg.BlockDeviceScanInterval}, err
+		return controller.Result{RequeueAfter: d.cfg.BlockDeviceScanInterval}, nil
 	}
 	d.log.Info("[RunBlockDeviceController] Reconciler successfully ended BlockDevice resources reconciliation")
 	return controller.Result{}, err
