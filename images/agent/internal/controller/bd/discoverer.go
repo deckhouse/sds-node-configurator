@@ -95,7 +95,7 @@ func (d *Discoverer) Discover(ctx context.Context) (controller.Result, error) {
 
 	shouldRequeue, err := d.blockDeviceReconcile(ctx)
 	if err != nil {
-		d.log.Error(err, "reconsailing block devices")
+		d.log.Error(err, "reconciling block devices")
 	}
 	if shouldRequeue {
 		d.log.Warning(fmt.Sprintf("[RunBlockDeviceController] Reconciler needs a retry in %f", d.cfg.BlockDeviceScanInterval.Seconds()))
