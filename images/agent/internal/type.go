@@ -74,6 +74,9 @@ type Device struct {
 	PkName     string            `json:"pkname"`
 	FSType     string            `json:"fstype"`
 	Rota       bool              `json:"rota"`
+
+	SerialInherited string
+	WWNInherited    string
 }
 
 type PVReport struct {

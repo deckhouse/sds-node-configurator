@@ -49,6 +49,9 @@ type BlockDeviceCandidate struct {
 	FSType                string
 	MachineID             string
 	PartUUID              string
+
+	SerialInherited string
+	WWNInherited    string
 }
 
 func isConsumable(device *Device) bool {
@@ -69,21 +72,23 @@ func isConsumable(device *Device) bool {
 
 func NewBlockDeviceCandidateByDevice(device *Device, nodeName string, machineID string) BlockDeviceCandidate {
 	return BlockDeviceCandidate{
-		NodeName:   nodeName,
-		Consumable: isConsumable(device),
-		Wwn:        device.Wwn,
-		Serial:     device.Serial,
-		Path:       device.Name,
-		Size:       device.Size,
-		Rota:       device.Rota,
-		Model:      device.Model,
-		HotPlug:    device.HotPlug,
-		KName:      device.KName,
-		PkName:     device.PkName,
-		Type:       device.Type,
-		FSType:     device.FSType,
-		MachineID:  machineID,
-		PartUUID:   device.PartUUID,
+		NodeName:        nodeName,
+		Consumable:      isConsumable(device),
+		Wwn:             device.Wwn,
+		Serial:          device.Serial,
+		Path:            device.Name,
+		Size:            device.Size,
+		Rota:            device.Rota,
+		Model:           device.Model,
+		HotPlug:         device.HotPlug,
+		KName:           device.KName,
+		PkName:          device.PkName,
+		Type:            device.Type,
+		FSType:          device.FSType,
+		MachineID:       machineID,
+		PartUUID:        device.PartUUID,
+		SerialInherited: device.SerialInherited,
+		WWNInherited:    device.WWNInherited,
 	}
 }
 

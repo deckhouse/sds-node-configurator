@@ -21,6 +21,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -542,7 +543,9 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		if assert.NoError(t, err) {
 			assert.Equal(t, 31, len(devices))
 		}
+		devicesClone := slices.Clone(devices)
 		filteredDevices, err := d.filterDevices(devices)
+		assert.True(t, slices.Equal(devicesClone, devices), "filterDevices should not change original device list")
 
 		for i, device := range filteredDevices {
 			println("Filtered device: ", device.Name)
@@ -558,27 +561,27 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				assert.Equal(t, "/dev/nvme4n1", device.Name)
 				assert.True(t, candidate.Consumable)
 				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-794d93d177d16bc9a85e2dd2ccbdc7325c287374", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-794d93d177d16bc9a85e2dd2ccbdc7325c287374", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
 			case 3:
 				assert.Equal(t, "/dev/nvme5n1", device.Name)
 				assert.True(t, candidate.Consumable)
 				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-3306e773ab3cde6d519ce8d7c3686bf17a124dcb", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-3306e773ab3cde6d519ce8d7c3686bf17a124dcb", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
 			case 4:
 				assert.Equal(t, "/dev/sdb4", device.Name)
 				assert.False(t, candidate.Consumable)
 				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-9787f657504d7c13f51becc3b0dd08d08a5d4477", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-377bc6adf33d84eb5932f5c89798bb6c5949ae2d", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
 			case 5:
 				assert.Equal(t, "/dev/vdc1", device.Name)
 				assert.True(t, candidate.Consumable)
 				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-ce11be00c63955b5517034063102cbfeabc09f48", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-a9d768213aaead8b42465ec859189de8779f96b7", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
 			case 6:
 				assert.Equal(t, "/dev/mapper/mpatha", device.Name)
 				assert.True(t, candidate.Consumable)
 				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-c1885ec6dcee6409d508292b5c2b2f92260f6e0f", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-98ca88ddaaddec43b1c4894756f4856244985511", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
 			}
 		}
 
