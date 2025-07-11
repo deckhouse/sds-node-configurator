@@ -14,579 +14,308 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package bd
+package bd_test
 
 import (
-	"bytes"
-	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"slices"
-	"testing"
 
-	"github.com/stretchr/testify/assert"
-	errors2 "k8s.io/apimachinery/pkg/api/errors"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
-//go:embed testdata/lsblk_output.json
-var testLsblkOutput []byte
+//go:embed testdata/lsblk_mpath.json
+var testLsblkMpathOutput []byte
 
-func setupDiscoverer() *Discoverer {
-	opts := DiscovererConfig{
-		NodeName:  "test-node",
-		MachineID: "test-id",
-	}
-	cl := test_utils.NewFakeClient()
-	metrics := monitoring.GetMetrics(opts.NodeName)
-	log, _ := logger.NewLogger("1")
-	sdsCache := cache.New()
+//go:embed testdata/lsblk_mpath_partitioned.json
+var testLsblkMpathPartitionedOutput []byte
 
-	return NewDiscoverer(cl, log, metrics, sdsCache, opts)
-}
+var _ = Describe("Discoverer", func() {
+	withDiscovererCreated(func(vars *DiscoverCreatedVars) {
+		thisNodeConsumableAPIDevices := []v1alpha1.BlockDevice{
+			internal.BlockDeviceCandidate{
+				NodeName:   NodeName,
+				MachineID:  MachineID,
+				Name:       "existingName1",
+				Consumable: true,
+			}.AsAPIBlockDevice(),
+		}
 
-func TestBlockDeviceCtrl(t *testing.T) {
-	ctx := context.Background()
+		otherNodeAPIDevices := []v1alpha1.BlockDevice{
+			internal.BlockDeviceCandidate{
+				NodeName:  "otherNode",
+				MachineID: "MachineID",
+				Name:      "existingName2",
+			}.AsAPIBlockDevice(),
+			internal.BlockDeviceCandidate{
+				NodeName:  "otherNode2",
+				MachineID: "MachineID2",
+				Name:      "existingName3",
+			}.AsAPIBlockDevice(),
+		}
 
-	t.Run("GetAPIBlockDevices", func(t *testing.T) {
-		t.Run("bds_exist_match_labels_and_expressions_return_bds", func(t *testing.T) {
-			const (
-				name1    = "name1"
-				name2    = "name2"
-				name3    = "name3"
-				hostName = "test-host"
-			)
+		DescribeTableSubtree("with initial devices",
+			Entry("no devices", []v1alpha1.BlockDevice{}),
+			Entry("only other Node and machineID devices", otherNodeAPIDevices),
+			Entry("consumable devices from the same node", thisNodeConsumableAPIDevices),
+			Entry("consumable devices from the same node some from another", append(slices.Clone(thisNodeConsumableAPIDevices), otherNodeAPIDevices...)),
+			// TODO: add proper case for these. We don't remove non-consumable device to keep recourse for tracking and history
+			// Entry("non consumable devices from the same node", thisNodeNonConsumableAPIDevices),
+			// Entry("devices from the same node", append(slices.Clone(thisNodeNonConsumableAPIDevices), thisNodeConsumableAPIDevices...),
 
-			d := setupDiscoverer()
-
-			bds := []v1alpha1.BlockDevice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: name1,
-						Labels: map[string]string{
-							"kubernetes.io/hostname":      hostName,
-							"kubernetes.io/metadata.name": name1,
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: name2,
-						Labels: map[string]string{
-							"kubernetes.io/hostname":      hostName,
-							"kubernetes.io/metadata.name": name2,
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: name3,
-						Labels: map[string]string{
-							"kubernetes.io/hostname":      hostName,
-							"kubernetes.io/metadata.name": name3,
-						},
-					},
-				},
-			}
-
-			for _, bd := range bds {
-				err := d.cl.Create(ctx, &bd)
-				if err != nil {
-					t.Error(err)
-				}
-			}
-
-			defer func() {
-				for _, bd := range bds {
-					err := d.cl.Delete(ctx, &bd)
-					if err != nil {
-						t.Error(err)
-					}
-				}
-			}()
-
-			lvg := &v1alpha1.LVMVolumeGroup{
-				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"kubernetes.io/hostname": hostName,
-						},
-						MatchExpressions: []metav1.LabelSelectorRequirement{
+			func(initalBlockDevices []v1alpha1.BlockDevice) {
+				withDevicesCreated(initalBlockDevices, func() {
+					DescribeTableSubtree("when initially appears",
+						Entry("no devices", []internal.Device{}, []string{}),
+						Entry("one device", []internal.Device{
 							{
-								Key:      "kubernetes.io/metadata.name",
-								Operator: metav1.LabelSelectorOpIn,
-								Values:   []string{name1, name2},
-							},
-						},
-					},
-				},
-			}
-
-			actualBd, err := d.bdCl.GetAPIBlockDevices(ctx, DiscovererName, lvg.Spec.BlockDeviceSelector)
-			if assert.NoError(t, err) {
-				assert.Equal(t, 2, len(actualBd))
-
-				_, ok := actualBd[name1]
-				assert.True(t, ok)
-				_, ok = actualBd[name2]
-				assert.True(t, ok)
-				_, ok = actualBd[name3]
-				assert.False(t, ok)
-			}
-		})
-
-		t.Run("bds_exist_only_match_labels_return_bds", func(t *testing.T) {
-			const (
-				name1    = "name11"
-				name2    = "name22"
-				name3    = "name33"
-				hostName = "test-host"
-			)
-
-			d := setupDiscoverer()
-
-			bds := []v1alpha1.BlockDevice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: name1,
-						Labels: map[string]string{
-							"kubernetes.io/hostname":      hostName,
-							"kubernetes.io/metadata.name": name1,
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: name2,
-						Labels: map[string]string{
-							"kubernetes.io/hostname":      hostName,
-							"kubernetes.io/metadata.name": name2,
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: name3,
-						Labels: map[string]string{
-							"kubernetes.io/hostname":      "other-host",
-							"kubernetes.io/metadata.name": name3,
-						},
-					},
-				},
-			}
-
-			for _, bd := range bds {
-				err := d.cl.Create(ctx, &bd)
-				if err != nil {
-					t.Error(err)
-				}
-			}
-
-			defer func() {
-				for _, bd := range bds {
-					err := d.cl.Delete(ctx, &bd)
-					if err != nil {
-						t.Error(err)
-					}
-				}
-			}()
-
-			lvg := &v1alpha1.LVMVolumeGroup{
-				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{"kubernetes.io/hostname": hostName},
-					},
-				},
-			}
-
-			actualBd, err := d.bdCl.GetAPIBlockDevices(ctx, DiscovererName, lvg.Spec.BlockDeviceSelector)
-			if assert.NoError(t, err) {
-				assert.Equal(t, 2, len(actualBd))
-
-				_, ok := actualBd[name1]
-				assert.True(t, ok)
-				_, ok = actualBd[name2]
-				assert.True(t, ok)
-				_, ok = actualBd[name3]
-				assert.False(t, ok)
-			}
-		})
-
-		t.Run("bds_exist_only_match_expressions_return_bds", func(t *testing.T) {
-			const (
-				name1    = "name111"
-				name2    = "name222"
-				name3    = "name333"
-				hostName = "test-host"
-			)
-
-			d := setupDiscoverer()
-
-			bds := []v1alpha1.BlockDevice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: name1,
-						Labels: map[string]string{
-							"kubernetes.io/hostname":      hostName,
-							"kubernetes.io/metadata.name": name1,
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: name2,
-						Labels: map[string]string{
-							"kubernetes.io/hostname":      hostName,
-							"kubernetes.io/metadata.name": name2,
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: name3,
-						Labels: map[string]string{
-							"kubernetes.io/hostname":      hostName,
-							"kubernetes.io/metadata.name": name3,
-						},
-					},
-				},
-			}
-
-			for _, bd := range bds {
-				err := d.cl.Create(ctx, &bd)
-				if err != nil {
-					t.Error(err)
-				}
-			}
-
-			defer func() {
-				for _, bd := range bds {
-					err := d.cl.Delete(ctx, &bd)
-					if err != nil {
-						t.Error(err)
-					}
-				}
-			}()
-
-			lvg := &v1alpha1.LVMVolumeGroup{
-				Spec: v1alpha1.LVMVolumeGroupSpec{
-					BlockDeviceSelector: &metav1.LabelSelector{
-						MatchExpressions: []metav1.LabelSelectorRequirement{
+								Name:   "testDeviceName",
+								KName:  "/dev/name",
+								Model:  "very good-model",
+								Serial: "testSerial",
+								Wwn:    "testWWN",
+								Type:   "testType",
+								Size:   resource.MustParse("1G"),
+							}}, []string{}),
+						Entry("two devices", []internal.Device{
 							{
-								Key:      "kubernetes.io/metadata.name",
-								Operator: metav1.LabelSelectorOpIn,
-								Values:   []string{name1, name2},
+								Name:   "testDeviceName1",
+								KName:  "/dev/name1",
+								Model:  "very good-model1",
+								Serial: "testSerial1",
+								Wwn:    "testWWN1",
+								Type:   "testType1",
+								Size:   resource.MustParse("1G"),
 							},
-						},
-					},
-				},
-			}
+							{
+								Name:   "testDeviceName2",
+								KName:  "/dev/name2",
+								Model:  "very good-model2",
+								Serial: "testSerial2",
+								Wwn:    "testWWN2",
+								Type:   "testType2",
+								Size:   resource.MustParse("2G"),
+							}}, []string{}),
+						Entry("mpath devices", func() []internal.Device {
+							var devices internal.Devices
+							err := json.Unmarshal(testLsblkMpathOutput, &devices)
+							Expect(err).ShouldNot(HaveOccurred())
+							return devices.BlockDevices
+						}(), []string{"/dev/sdii", "/dev/sdik", "/dev/sdij", "/dev/sdio"}),
+						Entry("mpath partitioned devices", func() []internal.Device {
+							var devices internal.Devices
+							err := json.Unmarshal(testLsblkMpathPartitionedOutput, &devices)
+							Expect(err).ShouldNot(HaveOccurred())
+							return devices.BlockDevices
+						}(), []string{
+							// mpath parts
+							"/dev/sdil", "/dev/sdim", "/dev/sdin",
+							// has children
+							"/dev/dm-74",
+							// too small
+							"/dev/dm-82", "/dev/dm-83"}),
+						func(internalDevices []internal.Device, filteredOutKNames []string) {
+							withInternalDevicesCacheUpdated(internalDevices, &vars.sdsCache, func() {
+								DescribeTableSubtree("with block device filters",
+									func() []TableEntry {
+										remainingAfterFilteringDevices := slices.DeleteFunc(slices.Clone(internalDevices), func(device internal.Device) bool {
+											return slices.Contains(filteredOutKNames, device.KName)
+										})
 
-			actualBd, err := d.bdCl.GetAPIBlockDevices(ctx, DiscovererName, lvg.Spec.BlockDeviceSelector)
-			if assert.NoError(t, err) {
-				assert.Equal(t, 2, len(actualBd))
-				_, ok := actualBd[name1]
-				assert.True(t, ok)
-				_, ok = actualBd[name2]
-				assert.True(t, ok)
-				_, ok = actualBd[name3]
-				assert.False(t, ok)
-			}
-		})
+										filterEntries := []TableEntry{
+											Entry("no filters", []metav1.LabelSelector{}, remainingAfterFilteringDevices),
+										}
+
+										for i, device := range remainingAfterFilteringDevices {
+											remainingDevices := slices.Delete(slices.Clone(remainingAfterFilteringDevices), i, i+1)
+											if device.Wwn != "" {
+												filterEntries = append(filterEntries,
+													Entry(fmt.Sprintf("device %v filtered by WWN", i), []metav1.LabelSelector{
+														{
+															MatchExpressions: []metav1.LabelSelectorRequirement{
+																{
+																	Key:      v1alpha1.BlockDeviceWWNLabelKey,
+																	Operator: metav1.LabelSelectorOpNotIn,
+																	Values:   []string{device.Wwn},
+																},
+															},
+														},
+													}, slices.DeleteFunc(slices.Clone(remainingDevices), func(d internal.Device) bool {
+														return device.Wwn == d.Wwn
+													})))
+											}
+											if device.Serial != "" {
+												filterEntries = append(filterEntries,
+													Entry(fmt.Sprintf("device %v filtered by Serial", i), []metav1.LabelSelector{
+														{
+															MatchExpressions: []metav1.LabelSelectorRequirement{
+																{
+																	Key:      v1alpha1.BlockDeviceSerialLabelKey,
+																	Operator: metav1.LabelSelectorOpNotIn,
+																	Values:   []string{device.Serial},
+																},
+															},
+														},
+													}, slices.DeleteFunc(slices.Clone(remainingDevices), func(d internal.Device) bool {
+														return device.Serial == d.Serial
+													})))
+											}
+										}
+										return filterEntries
+									}(),
+									func(selectors []metav1.LabelSelector, remainingInternalDevices []internal.Device) {
+										withBlockDeviceFiltersCreated(selectors, func() {
+											whenSuccessfullyDiscovered(vars, func() {
+												It("adds devices to api", func(ctx SpecContext) {
+													expectAPIDevicesMatchedToInternalDevices(ctx, remainingInternalDevices)
+												})
+
+												DescribeTableSubtree("when internal device list has changed",
+													func() []TableEntry {
+														deviceChangeEntries := []TableEntry{
+															Entry("all devices removed", []internal.Device{}, []internal.Device{}),
+														}
+
+														hasChildren := func(device internal.Device) bool {
+															for _, d := range internalDevices {
+																if d.PkName == device.KName {
+																	return true
+																}
+															}
+															return false
+														}
+
+														for i, device := range remainingInternalDevices {
+															if hasChildren(device) {
+																continue
+															}
+															newDevices := slices.Delete(slices.Clone(remainingInternalDevices), i, i+1)
+															Expect(newDevices).Should(HaveLen(len(remainingInternalDevices) - 1))
+															newInternalDevices := slices.DeleteFunc(slices.Clone(internalDevices), func(d internal.Device) bool {
+																return device.KName == d.KName
+															})
+															Expect(newInternalDevices).Should(HaveLen(len(internalDevices) - 1))
+															deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v is removed", i), newDevices, newInternalDevices))
+														}
+
+														for i, device := range remainingInternalDevices {
+															if hasChildren(device) {
+																continue
+															}
+															newDevice := internal.Device{
+																Name:   "testDeviceNameNew",
+																KName:  "/dev/kname",
+																PkName: device.PkName,
+																Model:  "very good-modelNew",
+																Serial: "testSerialNew",
+																Wwn:    "testWWNNew",
+																Type:   "testTypeNew",
+																Size:   resource.MustParse("10G"),
+															}
+															internalDevicesIndex := slices.IndexFunc(slices.Clone(internalDevices), func(d internal.Device) bool {
+																return device.KName == d.KName
+															})
+															newInternalDevices := slices.Replace(slices.Clone(internalDevices), internalDevicesIndex, internalDevicesIndex+1, newDevice)
+															newDevices := slices.Replace(slices.Clone(remainingInternalDevices), i, i+1, newDevice)
+															deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v is replaced", i), newDevices, newInternalDevices))
+														}
+
+														for i, device := range remainingInternalDevices {
+															newDevices := slices.Clone(remainingInternalDevices)
+															newDevices[i].Size = resource.MustParse("3G")
+															newInternalDevices := slices.Clone(internalDevices)
+															internalDevicesIndex := slices.IndexFunc(newInternalDevices, func(d internal.Device) bool {
+																return device.KName == d.KName
+															})
+															newInternalDevices[internalDevicesIndex].Size = newDevices[i].Size
+															deviceChangeEntries = append(deviceChangeEntries, Entry(fmt.Sprintf("device %v size has changed", i), newDevices, newInternalDevices))
+														}
+														return deviceChangeEntries
+													}(),
+													func(expectedDevices, updatedInternalDevices []internal.Device) {
+														JustBeforeEach(func(ctx SpecContext) {
+															expectAPIDevicesMatchedToInternalDevices(ctx, remainingInternalDevices)
+														})
+
+														withInternalDevicesCacheUpdated(updatedInternalDevices, &vars.sdsCache, func() {
+															whenSuccessfullyDiscovered(vars, func() {
+																It("updates devices", func(ctx SpecContext) {
+																	expectAPIDevicesMatchedToInternalDevices(ctx, expectedDevices)
+																})
+															})
+														})
+													})
+
+												DescribeTableSubtree("when device filtered out", func() []TableEntry {
+													filterChangeEntries := []TableEntry{}
+													for i, device := range remainingInternalDevices {
+														newRemainingDevices := slices.Delete(slices.Clone(remainingInternalDevices), i, i+1)
+														if device.Wwn != "" {
+															selectorsWithWWN := slices.Clone(selectors)
+															selectorsWithWWN = append(selectorsWithWWN, metav1.LabelSelector{
+																MatchExpressions: []metav1.LabelSelectorRequirement{
+																	{
+																		Key:      v1alpha1.BlockDeviceWWNLabelKey,
+																		Operator: metav1.LabelSelectorOpNotIn,
+																		Values:   []string{device.Wwn},
+																	},
+																},
+															})
+															filterChangeEntries = append(filterChangeEntries, Entry(
+																fmt.Sprintf("device %v filtered out by WWN", i), selectorsWithWWN, newRemainingDevices))
+														}
+														if device.Serial != "" {
+															selectorsWithSerial := slices.Clone(selectors)
+															selectorsWithSerial = append(selectorsWithSerial, metav1.LabelSelector{
+																MatchExpressions: []metav1.LabelSelectorRequirement{
+																	{
+																		Key:      v1alpha1.BlockDeviceSerialLabelKey,
+																		Operator: metav1.LabelSelectorOpNotIn,
+																		Values:   []string{device.Serial},
+																	},
+																},
+															})
+															filterChangeEntries = append(filterChangeEntries, Entry(
+																fmt.Sprintf("device %v filtered out by Serial", i), selectorsWithSerial, newRemainingDevices))
+														}
+													}
+													return filterChangeEntries
+												}(), func(newLabelSelectors []metav1.LabelSelector, newRemainingDevices []internal.Device) {
+													JustBeforeEach(func(ctx SpecContext) {
+														expectAPIDevicesMatchedToInternalDevices(ctx, remainingInternalDevices)
+													})
+
+													withBlockDeviceFiltersReplaced(newLabelSelectors, func() {
+														whenSuccessfullyDiscovered(vars, func() {
+															It("Removes the device", func(ctx SpecContext) {
+																expectAPIDevicesMatchedToInternalDevices(ctx, newRemainingDevices)
+															})
+
+															When("filters are returned to previous state", func() {
+																withBlockDeviceFiltersReplaced(selectors, func() {
+																	whenSuccessfullyDiscovered(vars, func() {
+																		It("device is back", func(ctx SpecContext) {
+																			expectAPIDevicesMatchedToInternalDevices(ctx, remainingInternalDevices)
+																		})
+																	})
+																})
+															})
+														})
+													})
+												})
+											})
+										})
+									})
+							})
+						})
+				})
+			})
 	})
-
-	t.Run("shouldDeleteBlockDevice", func(t *testing.T) {
-		t.Run("returns_true", func(t *testing.T) {
-			bd := v1alpha1.BlockDevice{
-				Status: v1alpha1.BlockDeviceStatus{
-					NodeName:   "node",
-					Consumable: true,
-				},
-			}
-			actual := map[string]struct{}{}
-
-			assert.True(t, shouldDeleteBlockDevice(bd, actual, "node"))
-		})
-
-		t.Run("returns_false_cause_of_dif_node", func(t *testing.T) {
-			bd := v1alpha1.BlockDevice{
-				Status: v1alpha1.BlockDeviceStatus{
-					NodeName:   "node",
-					Consumable: true,
-				},
-			}
-			actual := map[string]struct{}{}
-
-			assert.False(t, shouldDeleteBlockDevice(bd, actual, "dif-node"))
-		})
-
-		t.Run("returns_false_cause_of_not_consumable", func(t *testing.T) {
-			bd := v1alpha1.BlockDevice{
-				Status: v1alpha1.BlockDeviceStatus{
-					NodeName:   "node",
-					Consumable: false,
-				},
-			}
-			actual := map[string]struct{}{}
-
-			assert.False(t, shouldDeleteBlockDevice(bd, actual, "node"))
-		})
-
-		t.Run("returns_false_cause_of_not_deprecated", func(t *testing.T) {
-			const name = "test"
-			bd := v1alpha1.BlockDevice{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: name,
-				},
-				Status: v1alpha1.BlockDeviceStatus{
-					NodeName:   "node",
-					Consumable: true,
-				},
-			}
-			actual := map[string]struct{}{
-				name: {},
-			}
-
-			assert.False(t, shouldDeleteBlockDevice(bd, actual, "node"))
-		})
-	})
-
-	t.Run("RemoveDeprecatedAPIDevices", func(t *testing.T) {
-		const (
-			goodName = "test-candidate1"
-			badName  = "test-candidate2"
-		)
-
-		d := setupDiscoverer()
-
-		candidates := []internal.BlockDeviceCandidate{
-			{
-				NodeName:              d.cfg.NodeName,
-				Consumable:            false,
-				PVUuid:                "142412421",
-				VGUuid:                "123123123",
-				LVMVolumeGroupName:    "test-lvg",
-				ActualVGNameOnTheNode: "test-vg",
-				Wwn:                   "12414212",
-				Serial:                "1412412412412",
-				Path:                  "/dev/vdb",
-				Size:                  resource.MustParse("1G"),
-				Rota:                  false,
-				Model:                 "124124-adf",
-				Name:                  goodName,
-				HotPlug:               false,
-				MachineID:             "1245151241241",
-			},
-		}
-
-		bds := map[string]v1alpha1.BlockDevice{
-			goodName: {
-				ObjectMeta: metav1.ObjectMeta{
-					Name: goodName,
-				},
-			},
-			badName: {
-				ObjectMeta: metav1.ObjectMeta{
-					Name: badName,
-				},
-				Status: v1alpha1.BlockDeviceStatus{
-					Consumable: true,
-					NodeName:   d.cfg.NodeName,
-				},
-			},
-		}
-
-		for _, bd := range bds {
-			err := d.cl.Create(ctx, &bd)
-			if err != nil {
-				t.Error(err)
-			}
-		}
-
-		defer func() {
-			for _, bd := range bds {
-				_ = d.cl.Delete(ctx, &bd)
-			}
-		}()
-
-		for _, bd := range bds {
-			createdBd := &v1alpha1.BlockDevice{}
-			err := d.cl.Get(ctx, client.ObjectKey{
-				Name: bd.Name,
-			}, createdBd)
-			if err != nil {
-				t.Error(err)
-			}
-			assert.Equal(t, bd.Name, createdBd.Name)
-		}
-
-		d.removeDeprecatedAPIDevices(ctx, candidates, bds)
-
-		_, ok := bds[badName]
-		assert.False(t, ok)
-
-		deleted := &v1alpha1.BlockDevice{}
-		err := d.cl.Get(ctx, client.ObjectKey{
-			Name: badName,
-		}, deleted)
-		if assert.True(t, errors2.IsNotFound(err)) {
-			assert.Equal(t, "", deleted.Name)
-		}
-	})
-
-	t.Run("GetBlockDeviceCandidates", func(t *testing.T) {
-		devices := []internal.Device{
-			{
-				Name:   "valid1",
-				KName:  "/dev/kname1",
-				Size:   resource.MustParse("1G"),
-				Serial: "131412",
-			},
-			{
-				Name:   "valid2",
-				KName:  "/dev/kname2",
-				Size:   resource.MustParse("1G"),
-				Serial: "12412412",
-			},
-			{
-				Name:   "valid3",
-				KName:  "/dev/kname3",
-				Size:   resource.MustParse("1G"),
-				Serial: "4214215",
-			},
-			{
-				Name:   "invalid",
-				KName:  "/dev/kname4",
-				FSType: "ext4",
-				Size:   resource.MustParse("1G"),
-			},
-		}
-
-		d := setupDiscoverer()
-
-		d.sdsCache.StoreDevices(devices, bytes.Buffer{})
-
-		candidates, err := d.getBlockDeviceCandidates()
-		assert.Equal(t, nil, err)
-		assert.Equal(t, 3, len(candidates))
-		for i := range candidates {
-			assert.Equal(t, devices[i].Name, candidates[i].Path)
-			assert.Equal(t, d.cfg.MachineID, candidates[i].MachineID)
-			assert.Equal(t, d.cfg.NodeName, candidates[i].NodeName)
-		}
-	})
-
-	t.Run("CreateUniqDeviceName", func(t *testing.T) {
-		nodeName := "testNode"
-		can := internal.BlockDeviceCandidate{
-			NodeName: nodeName,
-			Wwn:      "ZX128ZX128ZX128",
-			Path:     "/dev/sda",
-			Size:     resource.Quantity{},
-			Model:    "HARD-DRIVE",
-		}
-
-		deviceName := createUniqDeviceName(can)
-		assert.Equal(t, "dev-", deviceName[0:4], "device name does not start with dev-")
-		assert.Equal(t, len(deviceName[4:]), 40, "device name does not contains sha1 sum")
-	})
-
-	t.Run("CheckTag", func(t *testing.T) {
-		t.Run("Have tag_Returns true and tag", func(t *testing.T) {
-			expectedName := "testName"
-			tags := fmt.Sprintf("storage.deckhouse.io/enabled=true,storage.deckhouse.io/lvmVolumeGroupName=%s", expectedName)
-
-			shouldBeTrue, actualName := utils.ReadValueFromTags(tags, internal.LVMVolumeGroupTag)
-			if assert.True(t, shouldBeTrue) {
-				assert.Equal(t, expectedName, actualName)
-			}
-		})
-
-		t.Run("Haven't tag_Returns false and empty", func(t *testing.T) {
-			tags := "someWeirdTags=oMGwtFIsThis"
-
-			shouldBeFalse, actualName := utils.ReadValueFromTags(tags, internal.LVMVolumeGroupTag)
-			if assert.False(t, shouldBeFalse) {
-				assert.Equal(t, "", actualName)
-			}
-		})
-	})
-
-	t.Run("hasValidSize", func(t *testing.T) {
-		sizes := []string{"2G", "1G", "1.5G", "0.9G", "100M"}
-		expected := []bool{true, true, true, false, false}
-
-		for i, size := range sizes {
-			s, err := resource.ParseQuantity(size)
-			if assert.NoError(t, err) {
-				valid, err := hasValidSize(s)
-				if assert.NoError(t, err) {
-					assert.Equal(t, expected[i], valid)
-				}
-			}
-		}
-	})
-
-	t.Run("validateTestLSBLKOutput", func(t *testing.T) {
-		d := setupDiscoverer()
-		devices, err := utils.NewCommands().UnmarshalDevices(testLsblkOutput)
-		if assert.NoError(t, err) {
-			assert.Equal(t, 31, len(devices))
-		}
-		devicesClone := slices.Clone(devices)
-		filteredDevices, err := d.filterDevices(devices)
-		assert.True(t, slices.Equal(devicesClone, devices), "filterDevices should not change original device list")
-
-		for i, device := range filteredDevices {
-			println("Filtered device: ", device.Name)
-			candidate := internal.NewBlockDeviceCandidateByDevice(&device, "test-node", "test-machine")
-			switch i {
-			case 0:
-				assert.Equal(t, "/dev/md1", device.Name)
-				assert.False(t, candidate.Consumable)
-			case 1:
-				assert.Equal(t, "/dev/md127", device.Name)
-				assert.False(t, candidate.Consumable)
-			case 2:
-				assert.Equal(t, "/dev/nvme4n1", device.Name)
-				assert.True(t, candidate.Consumable)
-				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-794d93d177d16bc9a85e2dd2ccbdc7325c287374", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
-			case 3:
-				assert.Equal(t, "/dev/nvme5n1", device.Name)
-				assert.True(t, candidate.Consumable)
-				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-3306e773ab3cde6d519ce8d7c3686bf17a124dcb", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
-			case 4:
-				assert.Equal(t, "/dev/sdb4", device.Name)
-				assert.False(t, candidate.Consumable)
-				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-377bc6adf33d84eb5932f5c89798bb6c5949ae2d", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
-			case 5:
-				assert.Equal(t, "/dev/vdc1", device.Name)
-				assert.True(t, candidate.Consumable)
-				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-a9d768213aaead8b42465ec859189de8779f96b7", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
-			case 6:
-				assert.Equal(t, "/dev/mapper/mpatha", device.Name)
-				assert.True(t, candidate.Consumable)
-				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-98ca88ddaaddec43b1c4894756f4856244985511", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
-			}
-		}
-
-		if assert.NoError(t, err) {
-			assert.Equal(t, 7, len(filteredDevices))
-		}
-	})
-}
+})
