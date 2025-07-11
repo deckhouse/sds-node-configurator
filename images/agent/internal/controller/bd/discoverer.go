@@ -337,21 +337,21 @@ func visitParents(devicesByKName map[string]*internal.Device, device *internal.D
 //
 // In mpath case we should copy serial and wwn from the parent device
 // Also mpath devices appears once but their parents multiple times. So only way to filter them out is to remove them by "fstype": "mpath_member"
-func (d *Discoverer) filterDevices(devices2 []internal.Device) ([]internal.Device, error) {
-	d.log.Trace(fmt.Sprintf("[filterDevices] devices before type filtration: %+v", devices2))
+func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device, error) {
+	d.log.Trace(fmt.Sprintf("[filterDevices] devices before type filtration: %+v", devices))
 
-	filteredDevices := slices.Clone(devices2)
+	filteredDevices := slices.Clone(devices)
 	start := time.Now()
 	// arrange devices by pkname to fast access
 	devicesByKName := make(map[string]*internal.Device, len(filteredDevices))
 	for _, device := range filteredDevices {
 		if device.KName == "" {
-			return devices2, fmt.Errorf("empty kname is unexpected for device: %v", device)
+			return devices, fmt.Errorf("empty kname is unexpected for device: %v", device)
 		}
 		firstDevice, alreadyExists := devicesByKName[device.KName]
 		if alreadyExists {
 			d.log.Error(ErrDeviceListInvalid, "second device with same kname", "first", firstDevice, "second", device)
-			return devices2, fmt.Errorf("%w: second device with kname %s found", ErrDeviceListInvalid, device.KName)
+			return devices, fmt.Errorf("%w: second device with kname %s found", ErrDeviceListInvalid, device.KName)
 		}
 		devicesByKName[device.KName] = &device
 	}
