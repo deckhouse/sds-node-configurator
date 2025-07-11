@@ -49,6 +49,9 @@ type BlockDeviceCandidate struct {
 	FSType                string
 	MachineID             string
 	PartUUID              string
+
+	SerialInherited string
+	WWNInherited    string
 }
 
 func isConsumable(device *Device) bool {
@@ -69,21 +72,23 @@ func isConsumable(device *Device) bool {
 
 func NewBlockDeviceCandidateByDevice(device *Device, nodeName string, machineID string) BlockDeviceCandidate {
 	return BlockDeviceCandidate{
-		NodeName:   nodeName,
-		Consumable: isConsumable(device),
-		Wwn:        device.Wwn,
-		Serial:     device.Serial,
-		Path:       device.Name,
-		Size:       device.Size,
-		Rota:       device.Rota,
-		Model:      device.Model,
-		HotPlug:    device.HotPlug,
-		KName:      device.KName,
-		PkName:     device.PkName,
-		Type:       device.Type,
-		FSType:     device.FSType,
-		MachineID:  machineID,
-		PartUUID:   device.PartUUID,
+		NodeName:        nodeName,
+		Consumable:      isConsumable(device),
+		Wwn:             device.Wwn,
+		Serial:          device.Serial,
+		Path:            device.Name,
+		Size:            device.Size,
+		Rota:            device.Rota,
+		Model:           device.Model,
+		HotPlug:         device.HotPlug,
+		KName:           device.KName,
+		PkName:          device.PkName,
+		Type:            device.Type,
+		FSType:          device.FSType,
+		MachineID:       machineID,
+		PartUUID:        device.PartUUID,
+		SerialInherited: device.SerialInherited,
+		WWNInherited:    device.WWNInherited,
 	}
 }
 
@@ -98,8 +103,8 @@ func (candidate *BlockDeviceCandidate) asAPIBlockDeviceStatus() v1alpha1.BlockDe
 		PartUUID:              candidate.PartUUID,
 		LVMVolumeGroupName:    candidate.LVMVolumeGroupName,
 		ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
-		Wwn:                   candidate.Wwn,
-		Serial:                candidate.Serial,
+		Wwn:                   candidate.GetWWN(),
+		Serial:                candidate.GetSerial(),
 		Path:                  candidate.Path,
 		Size:                  *resource.NewQuantity(candidate.Size.Value(), resource.BinarySI),
 		Model:                 candidate.Model,
@@ -134,8 +139,8 @@ func (candidate *BlockDeviceCandidate) HasBlockDeviceDiff(blockDevice v1alpha1.B
 		candidate.PartUUID != blockDevice.Status.PartUUID ||
 		candidate.LVMVolumeGroupName != blockDevice.Status.LVMVolumeGroupName ||
 		candidate.ActualVGNameOnTheNode != blockDevice.Status.ActualVGNameOnTheNode ||
-		candidate.Wwn != blockDevice.Status.Wwn ||
-		candidate.Serial != blockDevice.Status.Serial ||
+		candidate.GetWWN() != blockDevice.Status.Wwn ||
+		candidate.GetSerial() != blockDevice.Status.Serial ||
 		candidate.Path != blockDevice.Status.Path ||
 		candidate.Size.Value() != blockDevice.Status.Size.Value() ||
 		candidate.Rota != blockDevice.Status.Rota ||
@@ -145,6 +150,20 @@ func (candidate *BlockDeviceCandidate) HasBlockDeviceDiff(blockDevice v1alpha1.B
 		candidate.FSType != blockDevice.Status.FsType ||
 		candidate.MachineID != blockDevice.Status.MachineID ||
 		!reflect.DeepEqual(newBlockDeviceLabels(&blockDevice), blockDevice.Labels)
+}
+
+func (candidate *BlockDeviceCandidate) GetSerial() string {
+	if candidate.Serial != "" {
+		return candidate.Serial
+	}
+	return candidate.SerialInherited
+}
+
+func (candidate *BlockDeviceCandidate) GetWWN() string {
+	if candidate.Wwn != "" {
+		return candidate.Wwn
+	}
+	return candidate.WWNInherited
 }
 
 // Creates new labels as map, keeping unrelated labels device already has

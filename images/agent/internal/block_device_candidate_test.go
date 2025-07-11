@@ -132,8 +132,8 @@ var _ = Describe("Block device candidate", func() {
 			Expect(blockDevice.Status.VGUuid).Should(BeEquivalentTo(candidate.VGUuid))
 			Expect(blockDevice.Status.LVMVolumeGroupName).Should(BeEquivalentTo(candidate.LVMVolumeGroupName))
 			Expect(blockDevice.Status.ActualVGNameOnTheNode).Should(BeEquivalentTo(candidate.ActualVGNameOnTheNode))
-			Expect(blockDevice.Status.Wwn).Should(BeEquivalentTo(candidate.Wwn))
-			Expect(blockDevice.Status.Serial).Should(BeEquivalentTo(candidate.Serial))
+			Expect(blockDevice.Status.Wwn).Should(BeEquivalentTo(candidate.GetWWN()))
+			Expect(blockDevice.Status.Serial).Should(BeEquivalentTo(candidate.GetSerial()))
 			Expect(blockDevice.Status.Path).Should(BeEquivalentTo(candidate.Path))
 			Expect(blockDevice.Status.Size.Format).Should(BeEquivalentTo(resource.BinarySI))
 			Expect(blockDevice.Status.Size.Value()).Should(BeEquivalentTo(candidate.Size.Value()))
@@ -216,6 +216,26 @@ var _ = Describe("Block device candidate", func() {
 					v1alpha1.BlockDeviceHotPlugLabelKey:            strconv.FormatBool(candidate.HotPlug),
 					v1alpha1.BlockDeviceMachineIDLabelKey:          candidate.MachineID,
 				}
+			})
+
+			When("Serial inhereted", func() {
+				BeforeEach(func() {
+					candidate.SerialInherited = candidate.Serial
+					candidate.Serial = ""
+				})
+				It("has the same labels", func() {
+					Expect(blockDevice.Labels).To(BeEquivalentTo(expectedLabels))
+				})
+			})
+
+			When("WWN inhereted", func() {
+				BeforeEach(func() {
+					candidate.WWNInherited = candidate.Wwn
+					candidate.Wwn = ""
+				})
+				It("has the same labels", func() {
+					Expect(blockDevice.Labels).To(BeEquivalentTo(expectedLabels))
+				})
 			})
 
 			JustBeforeEach(func() {
