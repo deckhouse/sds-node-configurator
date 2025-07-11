@@ -44,8 +44,8 @@ type DiscoverCreatedVars struct {
 }
 
 var (
-	MachineID = "testMachineID"
-	NodeName  = "testNodeName"
+	MachineID string
+	NodeName  string
 	k8client  client.Client
 )
 
@@ -58,11 +58,16 @@ func withDiscovererCreated(foo func(vars *DiscoverCreatedVars)) {
 	)
 
 	BeforeEach(func() {
+		MachineID = "testMachineID"
+		NodeName = "testNodeName"
+		k8client = nil
+	})
+
+	JustBeforeEach(func() {
 		config = bd.DiscovererConfig{
 			MachineID: MachineID,
 			NodeName:  NodeName,
 		}
-
 		metrics = monitoring.GetMetrics("")
 		log = logger.NewLoggerWrap(GinkgoLogr)
 		vars.sdsCache = cache.New()
@@ -190,7 +195,7 @@ func whenDiscovered(vars *DiscoverCreatedVars, foo func(discoverResult *controll
 			Expect(k8client.List(ctx, &deviceListAfterDiscover)).ShouldNot(HaveOccurred())
 
 			By("Checking if other machine devices are not changed")
-			expectOtherMachineDevicesAreNotchanged(
+			expectOtherMachineDevicesAreNotChanged(
 				deviceListBeforeDiscover.Items,
 				splitBlockDevicesByMachineID(deviceListAfterDiscover.Items),
 			)
@@ -211,7 +216,7 @@ func whenSuccessfullyDiscovered(vars *DiscoverCreatedVars, foo func()) {
 	})
 }
 
-func expectOtherMachineDevicesAreNotchanged(before []v1alpha1.BlockDevice, afterByMachineID map[string][]v1alpha1.BlockDevice) {
+func expectOtherMachineDevicesAreNotChanged(before []v1alpha1.BlockDevice, afterByMachineID map[string][]v1alpha1.BlockDevice) {
 	initialByMachineID := splitBlockDevicesByMachineID(before)
 	for machineID := range afterByMachineID {
 		if machineID == MachineID {
