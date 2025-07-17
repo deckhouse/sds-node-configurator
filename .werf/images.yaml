@@ -1,4 +1,6 @@
 {{- $ImagesBuildFiles := .Files.Glob "images/*/{Dockerfile,werf.inc.yaml}" }}
+# Context inside folder images
+{{- $Root := . }}
 
 {{- range $path, $content := $ImagesBuildFiles  }}
   {{- $ctx := dict }}
@@ -6,10 +8,13 @@
   {{- $_ := set $ctx "SOURCE_REPO" (env "SOURCE_REPO" "https://github.com") }}
   {{- $_ := set $ctx "MODULE_EDITION" $.MODULE_EDITION }}
   {{- $_ := set $ctx "Versions" $.VERSIONS }}
+  {{- $_ := set $ctx "Constants" $.CONSTANTS }}
   {{- $_ := set $ctx "ImagePath" (printf "/images/%s" $ctx.ImageName) }}
   {{- $_ := set $ctx "ModuleNamePrefix" "" }}
   {{- $_ := set $ctx "ModuleDir" "/" }}
   {{- $_ := set $ctx "GOPROXY" (env "GOPROXY" "https://proxy.golang.org,direct") }}
+  {{- $_ := set $ctx "Commit" $Root.Commit }}
+  {{- $_ := set $ctx "ProjectName" (printf "%s/%s" $Root.SVACE_PROJECT_PREFIX $ctx.ImageName ) }}
 ---
   {{- /* For Dockerfile just render it from the folder. */ -}}
   {{- if not (regexMatch "/werf.inc.yaml$" $path) }}
