@@ -17,7 +17,8 @@ config:
   secrets:
     allowValueIds:
       - GOPROXY
-      - SOURCE_REPO  
+      - SOURCE_REPO
+      - GOLANG_VERSION
   stapel:
     mount:
       allowBuildDir: true
