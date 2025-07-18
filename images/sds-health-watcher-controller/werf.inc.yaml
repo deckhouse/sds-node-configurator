@@ -43,7 +43,7 @@ shell:
     - cd /src/images/{{ $.ImageName }}/cmd
     - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
     - |
-      {{- include "image-build.build" (set $ "BuildCommand" (printf "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags=\"-s -w\" -tags \"%s\" -o /%s" $.ImageName .MODULE_EDITION)) | nindent 6 }}
+      {{- include "image-build.build" (set $ "BuildCommand" (printf "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags=\"-s -w\" -tags \"%s\" -o /%s" .MODULE_EDITION $.ImageName)) | nindent 6 }}
     - chmod +x /{{ $.ImageName }}
 
 ---
