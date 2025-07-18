@@ -89,7 +89,7 @@ shell:
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
-fromImage: builder/golang-alpine
+fromImage: {{ eq $.Constants.SVACE_ENABLED "false" | ternary "builder/golang-alpine" "builder/alt-go-svace" }}
 final: false
 
 import:
