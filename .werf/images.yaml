@@ -14,6 +14,13 @@
   {{- $_ := set $ctx "GOPROXY" (env "GOPROXY" "https://proxy.golang.org,direct") }}
   {{- $_ := set $ctx "Commit" $Root.Commit }}
   {{- $_ := set $ctx "ProjectName" (printf "%s/%s" $Root.SVACE_PROJECT_PREFIX $ctx.ImageName ) }}
+# svace analyze toggler
+  {{- $_ := set $ctx "SVACE_ENABLED" (env "SVACE_ENABLED" "false") }}
+  {{- $_ := set $ctx "SVACE_IMAGE_SUFFIX" "" }}
+  {{- if ne $ctx.SVACE_ENABLED "false" }}{{ $_ := set $ctx "SVACE_IMAGE_SUFFIX" "/svace" }}{{ end }}
+  {{- $_ := set $ctx "SVACE_ANALYZE_HOST" (env "SVACE_ANALYZE_HOST" "example.host") }}
+  {{- $_ := set $ctx "SVACE_ANALYZE_SSH_USER" (env "SVACE_ANALYZE_SSH_USER" "user") }}
+
 ---
   {{- /* For Dockerfile just render it from the folder. */ -}}
   {{- if not (regexMatch "/werf.inc.yaml$" $path) }}

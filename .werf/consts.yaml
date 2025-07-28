@@ -6,10 +6,3 @@
 {{- $_ := set $versions "UTIL_LINUX" "v2.39.3" }}
 {{- $_ := set $versions "LVM2" "d786a8f820d54ce87a919e6af5426c333c173b11" }}
 {{- $_ := set . "VERSIONS" $versions }}
-
-# svace analyze toggler
-{{- $_ := set $ctx "SVACE_ENABLED" (env "SVACE_ENABLED" "false") }}
-{{- $_ := set $ctx "SVACE_IMAGE_SUFFIX" "" }}
-{{- if ne $ctx.SVACE_ENABLED "false" }}{{ $_ := set $ctx "SVACE_IMAGE_SUFFIX" "/svace" }}{{ end }}
-{{- $_ := set $ctx "SVACE_ANALYZE_HOST" (env "SVACE_ANALYZE_HOST" "example.host") }}
-{{- $_ := set $ctx "SVACE_ANALYZE_SSH_USER" (env "SVACE_ANALYZE_SSH_USER" "user") }}
