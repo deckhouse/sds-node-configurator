@@ -10,7 +10,7 @@
 # custom constants
 {{- $constants := dict }}
 {{- $_ := set $constants "ALT_CLEANUP_CMD" "rm -rf /var/lib/apt/lists/* /var/cache/apt/* && mkdir -p /var/lib/apt/lists/partial /var/cache/apt/archives/partial" }}
-{{- $_ := set $constants "SVACE_PROJECT_PREFIX" "csi-ceph" }}
+{{- $_ := set $constants "SVACE_PROJECT_PREFIX" "sds-node-configurator" }}
 {{- $_ := set $constants "SVACE_ENABLED" (env "SVACE_ENABLED" "false") }}
 {{- $_ := set $constants "SVACE_ANALYZE_HOST" (env "SVACE_ANALYZE_HOST" "example.host") }}
 {{- $_ := set $constants "SVACE_ANALYZE_SSH_USER" (env "SVACE_ANALYZE_SSH_USER" "user") }}
