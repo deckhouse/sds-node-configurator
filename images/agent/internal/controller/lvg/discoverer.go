@@ -34,6 +34,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/repository"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -42,8 +43,8 @@ const DiscovererName = "lvm-volume-group-discover-controller"
 type Discoverer struct {
 	cl       client.Client
 	log      logger.Logger
-	lvgCl    *utils.LVGClient
-	bdCl     *utils.BDClient
+	lvgCl    *repository.LVGClient
+	bdCl     *repository.BDClient
 	metrics  monitoring.Metrics
 	sdsCache *cache.Cache
 	cfg      DiscovererConfig
@@ -66,8 +67,8 @@ func NewDiscoverer(
 	return &Discoverer{
 		cl:       cl,
 		log:      log,
-		lvgCl:    utils.NewLVGClient(cl, log, metrics, cfg.NodeName, DiscovererName),
-		bdCl:     utils.NewBDClient(cl, metrics),
+		lvgCl:    repository.NewLVGClient(cl, log, metrics, cfg.NodeName, DiscovererName),
+		bdCl:     repository.NewBDClient(cl, metrics),
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		cfg:      cfg,

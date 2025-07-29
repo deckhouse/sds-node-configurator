@@ -36,6 +36,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/bd"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/bdf"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llv"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llv_extender"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lvg"
@@ -162,6 +163,25 @@ func main() {
 	)
 	if err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupDiscoverController")
+		os.Exit(1)
+	}
+
+	err = controller.AddReconciler(
+		mgr,
+		log,
+		bdf.NewReconciler(
+			mgr.GetClient(),
+			log,
+			metrics,
+			rediscoverBlockDevices,
+			bdf.ReconcilerConfig{
+				NodeName: cfgParams.NodeName,
+				Loglevel: cfgParams.Loglevel,
+			},
+		),
+	)
+	if err != nil {
+		log.Error(err, "[main] unable to run BlockDeviceFilter controller")
 		os.Exit(1)
 	}
 

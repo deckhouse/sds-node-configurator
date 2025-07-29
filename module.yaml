@@ -1,4 +1,5 @@
 name: sds-node-configurator
+stage: "General Availability"
 weight: 900
 descriptions:
   en: "sds node configurator module"

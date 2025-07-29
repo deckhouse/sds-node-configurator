@@ -1,0 +1,48 @@
+{
+    "apiVersion": "storage.deckhouse.io/v1alpha1",
+    "kind": "BlockDevice",
+    "metadata": {
+        "creationTimestamp": "2025-04-18T15:14:11Z",
+        "generation": 11,
+        "labels": {
+            "kubernetes.io/hostname": "virtlab-pt-0",
+            "kubernetes.io/metadata.name": "dev-367a550b2ef0fde8d31f0d8a620751a0a4b9aa6f",
+            "status.blockdevice.storage.deckhouse.io/actualvgnameonthenode": "vg-750",
+            "status.blockdevice.storage.deckhouse.io/fstype": "LVM2_member",
+            "status.blockdevice.storage.deckhouse.io/hotplug": "false",
+            "status.blockdevice.storage.deckhouse.io/lvmvolumegroupname": "vg-750-virtlab-pt-0",
+            "status.blockdevice.storage.deckhouse.io/machineid": "cb139975cdb4463d9b359829f17cfe3e",
+            "status.blockdevice.storage.deckhouse.io/model": "",
+            "status.blockdevice.storage.deckhouse.io/partuuid": "313fb265-7210-404a-9330-1c968b613681",
+            "status.blockdevice.storage.deckhouse.io/pvuuid": "Kx1jFv-HRDP-PpMX-alZd-t6dJ-CZhU-Ar3Ne0",
+            "status.blockdevice.storage.deckhouse.io/rota": "false",
+            "status.blockdevice.storage.deckhouse.io/serial": "",
+            "status.blockdevice.storage.deckhouse.io/size": "761990Mi",
+            "status.blockdevice.storage.deckhouse.io/type": "part",
+            "status.blockdevice.storage.deckhouse.io/vguuid": "QUWnQs-lY7f-VyOW-pnWA-7SZe-zgr4-dFOlC2",
+            "status.blockdevice.storage.deckhouse.io/wwn": "eui-0025384151a09d55"
+        },
+        "name": "dev-367a550b2ef0fde8d31f0d8a620751a0a4b9aa6f",
+        "resourceVersion": "36335759",
+        "uid": "e7c9ef60-07eb-470b-903e-d2c9e29be7fe"
+    },
+    "status": {
+        "actualVGNameOnTheNode": "vg-750",
+        "consumable": false,
+        "fsType": "LVM2_member",
+        "hotPlug": false,
+        "lvmVolumeGroupName": "vg-750-virtlab-pt-0",
+        "machineId": "cb139975cdb4463d9b359829f17cfe3e",
+        "model": "",
+        "nodeName": "virtlab-pt-0",
+        "partUUID": "313fb265-7210-404a-9330-1c968b613681",
+        "path": "/dev/nvme1n1p6",
+        "pvUUID": "Kx1jFv-HRDP-PpMX-alZd-t6dJ-CZhU-Ar3Ne0",
+        "rota": false,
+        "serial": "S6Z1NU0Y103443F",
+        "size": "761990Mi",
+        "type": "part",
+        "vgUUID": "QUWnQs-lY7f-VyOW-pnWA-7SZe-zgr4-dFOlC2",
+        "wwn": "eui.0025384151a09d55"
+    }
+}

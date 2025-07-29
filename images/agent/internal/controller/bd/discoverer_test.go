@@ -21,7 +21,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"strconv"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -40,7 +40,7 @@ import (
 )
 
 //go:embed testdata/lsblk_output.json
-var testLsblkOutput string
+var testLsblkOutput []byte
 
 func setupDiscoverer() *Discoverer {
 	opts := DiscovererConfig{
@@ -448,21 +448,25 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		devices := []internal.Device{
 			{
 				Name:   "valid1",
+				KName:  "/dev/kname1",
 				Size:   resource.MustParse("1G"),
 				Serial: "131412",
 			},
 			{
 				Name:   "valid2",
+				KName:  "/dev/kname2",
 				Size:   resource.MustParse("1G"),
 				Serial: "12412412",
 			},
 			{
 				Name:   "valid3",
+				KName:  "/dev/kname3",
 				Size:   resource.MustParse("1G"),
 				Serial: "4214215",
 			},
 			{
 				Name:   "invalid",
+				KName:  "/dev/kname4",
 				FSType: "ext4",
 				Size:   resource.MustParse("1G"),
 			},
@@ -472,62 +476,14 @@ func TestBlockDeviceCtrl(t *testing.T) {
 
 		d.sdsCache.StoreDevices(devices, bytes.Buffer{})
 
-		candidates := d.getBlockDeviceCandidates()
-
+		candidates, err := d.getBlockDeviceCandidates()
+		assert.Equal(t, nil, err)
 		assert.Equal(t, 3, len(candidates))
 		for i := range candidates {
 			assert.Equal(t, devices[i].Name, candidates[i].Path)
 			assert.Equal(t, d.cfg.MachineID, candidates[i].MachineID)
 			assert.Equal(t, d.cfg.NodeName, candidates[i].NodeName)
 		}
-	})
-
-	t.Run("CheckConsumable", func(t *testing.T) {
-		t.Run("Good device returns true", func(t *testing.T) {
-			goodDevice := internal.Device{
-				Name:       "goodName",
-				MountPoint: "",
-				PartUUID:   "",
-				HotPlug:    false,
-				Model:      "",
-				Serial:     "",
-				Size:       resource.Quantity{},
-				Type:       "",
-				Wwn:        "",
-				KName:      "",
-				PkName:     "",
-				FSType:     "",
-				Rota:       false,
-			}
-
-			shouldBeTrue := checkConsumable(goodDevice)
-			assert.True(t, shouldBeTrue)
-		})
-
-		t.Run("Bad devices return false", func(t *testing.T) {
-			badDevices := internal.Devices{BlockDevices: []internal.Device{
-				{
-					MountPoint: "",
-					HotPlug:    true,
-					FSType:     "",
-				},
-				{
-					MountPoint: "bad",
-					HotPlug:    false,
-					FSType:     "",
-				},
-				{
-					MountPoint: "",
-					HotPlug:    false,
-					FSType:     "bad",
-				},
-			}}
-
-			for _, badDevice := range badDevices.BlockDevices {
-				shouldBeFalse := checkConsumable(badDevice)
-				assert.False(t, shouldBeFalse)
-			}
-		})
 	})
 
 	t.Run("CreateUniqDeviceName", func(t *testing.T) {
@@ -581,160 +537,19 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		}
 	})
 
-	t.Run("ConfigureBlockDeviceLabels", func(t *testing.T) {
-		blockDevice := v1alpha1.BlockDevice{
-			Status: v1alpha1.BlockDeviceStatus{
-				Type:                  "testTYPE",
-				FsType:                "testFS",
-				NodeName:              "test_node",
-				Consumable:            false,
-				PVUuid:                "testPV",
-				VGUuid:                "testVGUID",
-				LVMVolumeGroupName:    "testLVGName",
-				ActualVGNameOnTheNode: "testNameOnNode",
-				Wwn:                   "testWWN",
-				Serial:                "testSERIAL",
-				Path:                  "testPATH",
-				Size:                  resource.MustParse("0"),
-				Model:                 "Very good model-1241",
-				Rota:                  false,
-				HotPlug:               false,
-				MachineID:             "testMACHINE",
-			},
-		}
-		blockDevice.Labels = map[string]string{
-			"some-custom-label1": "v",
-			"some-custom-label2": "v",
-		}
-
-		expectedLabels := map[string]string{
-			internal.MetadataNameLabelKey:                  blockDevice.ObjectMeta.Name,
-			internal.HostNameLabelKey:                      blockDevice.Status.NodeName,
-			internal.BlockDeviceTypeLabelKey:               blockDevice.Status.Type,
-			internal.BlockDeviceFSTypeLabelKey:             blockDevice.Status.FsType,
-			internal.BlockDevicePVUUIDLabelKey:             blockDevice.Status.PVUuid,
-			internal.BlockDeviceVGUUIDLabelKey:             blockDevice.Status.VGUuid,
-			internal.BlockDevicePartUUIDLabelKey:           blockDevice.Status.PartUUID,
-			internal.BlockDeviceLVMVolumeGroupNameLabelKey: blockDevice.Status.LVMVolumeGroupName,
-			internal.BlockDeviceActualVGNameLabelKey:       blockDevice.Status.ActualVGNameOnTheNode,
-			internal.BlockDeviceWWNLabelKey:                blockDevice.Status.Wwn,
-			internal.BlockDeviceSerialLabelKey:             blockDevice.Status.Serial,
-			internal.BlockDeviceSizeLabelKey:               blockDevice.Status.Size.String(),
-			internal.BlockDeviceModelLabelKey:              "Very-good-model-1241",
-			internal.BlockDeviceRotaLabelKey:               strconv.FormatBool(blockDevice.Status.Rota),
-			internal.BlockDeviceHotPlugLabelKey:            strconv.FormatBool(blockDevice.Status.HotPlug),
-			internal.BlockDeviceMachineIDLabelKey:          blockDevice.Status.MachineID,
-			"some-custom-label1":                           "v",
-			"some-custom-label2":                           "v",
-		}
-
-		assert.Equal(t, expectedLabels, configureBlockDeviceLabels(blockDevice))
-	})
-
-	t.Run("hasBlockDeviceDiff", func(t *testing.T) {
-		candidates := []internal.BlockDeviceCandidate{
-			// same state
-			{
-				NodeName:              "test_node",
-				Consumable:            false,
-				PVUuid:                "testPV",
-				VGUuid:                "testVGUID",
-				LVMVolumeGroupName:    "testLVGName",
-				ActualVGNameOnTheNode: "testNameOnNode",
-				Wwn:                   "testWWN",
-				Serial:                "testSERIAL",
-				Path:                  "testPATH",
-				Size:                  resource.Quantity{},
-				Rota:                  false,
-				Model:                 "testMODEL",
-				Name:                  "testNAME",
-				HotPlug:               false,
-				KName:                 "testKNAME",
-				PkName:                "testPKNAME",
-				Type:                  "testTYPE",
-				FSType:                "testFS",
-				MachineID:             "testMACHINE",
-			},
-			// diff state
-			{
-				NodeName:              "test_node",
-				Consumable:            true,
-				PVUuid:                "testPV2",
-				VGUuid:                "testVGUID2",
-				LVMVolumeGroupName:    "testLVGName2",
-				ActualVGNameOnTheNode: "testNameOnNode2",
-				Wwn:                   "testWWN2",
-				Serial:                "testSERIAL2",
-				Path:                  "testPATH2",
-				Size:                  resource.Quantity{},
-				Rota:                  true,
-				Model:                 "testMODEL2",
-				Name:                  "testNAME",
-				HotPlug:               true,
-				KName:                 "testKNAME2",
-				PkName:                "testPKNAME2",
-				Type:                  "testTYPE2",
-				FSType:                "testFS2",
-				MachineID:             "testMACHINE2",
-			},
-		}
-		blockDevice := v1alpha1.BlockDevice{
-			Status: v1alpha1.BlockDeviceStatus{
-				Type:                  "testTYPE",
-				FsType:                "testFS",
-				NodeName:              "test_node",
-				Consumable:            false,
-				PVUuid:                "testPV",
-				VGUuid:                "testVGUID",
-				LVMVolumeGroupName:    "testLVGName",
-				ActualVGNameOnTheNode: "testNameOnNode",
-				Wwn:                   "testWWN",
-				Serial:                "testSERIAL",
-				Path:                  "testPATH",
-				Size:                  resource.MustParse("0"),
-				Model:                 "testMODEL",
-				Rota:                  false,
-				HotPlug:               false,
-				MachineID:             "testMACHINE",
-			},
-		}
-		labels := configureBlockDeviceLabels(blockDevice)
-		blockDevice.Labels = labels
-		expected := []bool{false, true}
-
-		for i, candidate := range candidates {
-			actual := hasBlockDeviceDiff(blockDevice, candidate)
-			assert.Equal(t, expected[i], actual)
-		}
-	})
-
 	t.Run("validateTestLSBLKOutput", func(t *testing.T) {
 		d := setupDiscoverer()
-		testLsblkOutputBytes := []byte(testLsblkOutput)
-		devices, err := utils.NewCommands().UnmarshalDevices(testLsblkOutputBytes)
+		devices, err := utils.NewCommands().UnmarshalDevices(testLsblkOutput)
 		if assert.NoError(t, err) {
 			assert.Equal(t, 31, len(devices))
 		}
+		devicesClone := slices.Clone(devices)
 		filteredDevices, err := d.filterDevices(devices)
+		assert.True(t, slices.Equal(devicesClone, devices), "filterDevices should not change original device list")
 
 		for i, device := range filteredDevices {
 			println("Filtered device: ", device.Name)
-			candidate := internal.BlockDeviceCandidate{
-				NodeName:   "test-node",
-				Consumable: checkConsumable(device),
-				Wwn:        device.Wwn,
-				Serial:     device.Serial,
-				Path:       device.Name,
-				Size:       device.Size,
-				Rota:       device.Rota,
-				Model:      device.Model,
-				HotPlug:    device.HotPlug,
-				KName:      device.KName,
-				PkName:     device.PkName,
-				Type:       device.Type,
-				FSType:     device.FSType,
-				PartUUID:   device.PartUUID,
-			}
+			candidate := internal.NewBlockDeviceCandidateByDevice(&device, "test-node", "test-machine")
 			switch i {
 			case 0:
 				assert.Equal(t, "/dev/md1", device.Name)
@@ -746,27 +561,27 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				assert.Equal(t, "/dev/nvme4n1", device.Name)
 				assert.True(t, candidate.Consumable)
 				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-794d93d177d16bc9a85e2dd2ccbdc7325c287374", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-794d93d177d16bc9a85e2dd2ccbdc7325c287374", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
 			case 3:
 				assert.Equal(t, "/dev/nvme5n1", device.Name)
 				assert.True(t, candidate.Consumable)
 				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-3306e773ab3cde6d519ce8d7c3686bf17a124dcb", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-3306e773ab3cde6d519ce8d7c3686bf17a124dcb", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
 			case 4:
-				assert.Equal(t, "/dev/sda4", device.Name)
+				assert.Equal(t, "/dev/sdb4", device.Name)
 				assert.False(t, candidate.Consumable)
 				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-377bc6adf33d84eb5932f5c89798bb6c5949ae2d", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-377bc6adf33d84eb5932f5c89798bb6c5949ae2d", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
 			case 5:
 				assert.Equal(t, "/dev/vdc1", device.Name)
 				assert.True(t, candidate.Consumable)
 				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-a9d768213aaead8b42465ec859189de8779f96b7", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-a9d768213aaead8b42465ec859189de8779f96b7", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
 			case 6:
 				assert.Equal(t, "/dev/mapper/mpatha", device.Name)
 				assert.True(t, candidate.Consumable)
 				candidateName := d.createCandidateName(candidate, devices)
-				assert.Equal(t, "dev-98ca88ddaaddec43b1c4894756f4856244985511", candidateName, "device name generated incorrectly")
+				assert.Equal(t, "dev-98ca88ddaaddec43b1c4894756f4856244985511", candidateName, "generated device name unstable with previous release. Don't fix the test. Fix the code.")
 			}
 		}
 
