@@ -1,0 +1,16 @@
+---
+image: choose-edition
+fromImage: builder/alt
+fromCacheVersion: {{ div .Commit.Date.Unix (mul 60 60 24 30) }}
+
+git:
+  - add: /openapi
+    to: /openapi
+    stageDependencies:
+      setup:
+        - '**/*'
+shell:
+  setup:
+    - cd /openapi
+    - if [[ {{ .MODULE_EDITION }} == "ce" ]]; then cp -fv values_ce.yaml values.yaml; fi
+    - rm -rf values_*.yaml
