@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
+
+	corev1 "k8s.io/api/core/v1"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	corev1 "k8s.io/api/core/v1"
 )
 
 // Filter processes the filtering logic for a given request.
@@ -152,8 +152,7 @@ func (s *scheduler) filterNodesParallel(input *FilterInput, lvgInfo *LVGInfo) (*
 				return
 			}
 			// TODO improve this part of the code later
-			errMessages := []string{srvErr.Error(), slvErr.Error()}
-			nodeErr := fmt.Errorf(strings.Join(errMessages, ", "))
+			nodeErr := errors.Join(srvErr, slvErr)
 			s.log.Debug(fmt.Sprintf("[filterNodesParallel] node %s is bad to schedule a pod to. Reason: %s", nodeName, nodeErr.Error()))
 			resCh <- ResultWithError{NodeName: nodeName, Err: nodeErr}
 		}(nodeName)

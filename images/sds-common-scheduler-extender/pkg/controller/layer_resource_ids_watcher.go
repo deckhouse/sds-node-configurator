@@ -4,16 +4,16 @@ import (
 	"context"
 	"fmt"
 
-	lapi "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	"k8s.io/client-go/util/workqueue"
-
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	lapi "github.com/deckhouse/sds-replicated-volume/api/linstor"
 )
 
 const (

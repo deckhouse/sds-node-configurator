@@ -11,26 +11,25 @@ import (
 	"syscall"
 	"time"
 
-	slv "github.com/deckhouse/sds-local-volume/api/v1alpha1"
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	lapi "github.com/deckhouse/sds-replicated-volume/api/linstor"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	"github.com/spf13/cobra"
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/yaml"
 
+	slv "github.com/deckhouse/sds-local-volume/api/v1alpha1"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/controller"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/kubutils"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/scheduler"
-
-	"github.com/spf13/cobra"
-	"k8s.io/apimachinery/pkg/runtime"
+	lapi "github.com/deckhouse/sds-replicated-volume/api/linstor"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 )
 
 const (
@@ -219,7 +218,7 @@ func subMain(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 
-	//TODO may be this approach needs to be simplified somehow
+	// TODO may be this approach needs to be simplified somehow
 	filteringHandler := scheduler.BodyUnmarshalMiddleware(
 		scheduler.LogMiddleware(
 			scheduler.PodCheckMiddleware(ctx, client, http.HandlerFunc(handler.Filter), log),
