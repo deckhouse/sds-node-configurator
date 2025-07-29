@@ -3,10 +3,10 @@ package scheduler
 import (
 	"context"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
-
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type scheduler struct {

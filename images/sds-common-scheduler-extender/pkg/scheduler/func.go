@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -11,15 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
-
-	slv "github.com/deckhouse/sds-local-volume/api/v1alpha1"
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	v1 "k8s.io/api/storage/v1"
@@ -27,6 +17,15 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
+
+	slv "github.com/deckhouse/sds-local-volume/api/v1alpha1"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 )
 
 const (
@@ -51,14 +50,14 @@ func shouldProcessPod(ctx context.Context, cl client.Client, pvcMap map[string]*
 		pvcName := volume.PersistentVolumeClaim.ClaimName
 		pvc, found := pvcMap[pvcName]
 		if !found {
-			return nil, fmt.Errorf("[ShouldProcessPod] error getting PVC %s/%s: %v", pod.Namespace, pvcName)
+			return nil, fmt.Errorf("[ShouldProcessPod] error getting PVC %s/%s", pod.Namespace, pvcName)
 		}
 
 		log.Trace(fmt.Sprintf("[ShouldProcessPod] Successfully get PVC %s/%s: %+v", pod.Namespace, pvcName, pvc))
 
 		discoveredProvisioner, err := getProvisionerFromPVC(ctx, cl, log, pvc)
 		if err != nil {
-			return nil, fmt.Errorf("[ShouldProcessPod] error getting provisioner from PVC %s/%s: %v", pod.Namespace, pvcName)
+			return nil, fmt.Errorf("[ShouldProcessPod] error getting provisioner from PVC %s/%s: %w", pod.Namespace, pvcName, err)
 		}
 		log.Trace(fmt.Sprintf("[ShouldProcessPod] discovered provisioner: %s", discoveredProvisioner))
 		if slices.Contains(targetProvisioners, discoveredProvisioner) {
@@ -76,7 +75,7 @@ func shouldProcessPod(ctx context.Context, cl client.Client, pvcMap map[string]*
 	}
 
 	log.Trace(fmt.Sprintf("[ShouldProcessPod] can't find targetProvisioner in pod volumes. Skip pod: %s/%s", pod.Namespace, pod.Name))
-	return nil, errors.New(fmt.Sprintf("[ShouldProcessPod] can't find targetProvisioner in pod volumes. Skip pod: %s/%s", pod.Namespace, pod.Name))
+	return nil, fmt.Errorf("[ShouldProcessPod] can't find targetProvisioner in pod volumes. Skip pod: %s/%s", pod.Namespace, pod.Name)
 }
 
 func getProvisionerFromPVC(ctx context.Context, cl client.Client, log *logger.Logger, pvc *corev1.PersistentVolumeClaim) (string, error) {
@@ -421,7 +420,7 @@ func calculateFreeSpace(
 
 		reserved, err := schedulerCache.GetLVGThickReservedSpace(lvg.Name)
 		if err != nil {
-			return freeSpace, errors.New(fmt.Sprintf("[scoreNodes] unable to count reserved space for the LVMVolumeGroup %s", lvg.Name))
+			return freeSpace, fmt.Errorf("[scoreNodes] unable to count reserved space for the LVMVolumeGroup %s", lvg.Name)
 		}
 		log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s PVC Space reservation: %s", lvg.Name, resource.NewQuantity(reserved, resource.BinarySI)))
 
@@ -430,7 +429,7 @@ func calculateFreeSpace(
 	case consts.Thin:
 		thinPool := findMatchedThinPool(lvg.Status.ThinPools, commonLVG.Thin.PoolName)
 		if thinPool == nil {
-			return freeSpace, errors.New(fmt.Sprintf("[scoreNodes] unable to match Storage Class's ThinPools with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName))
+			return freeSpace, fmt.Errorf("[scoreNodes] unable to match Storage Class's ThinPools with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
 		}
 
 		freeSpace = thinPool.AvailableSpace

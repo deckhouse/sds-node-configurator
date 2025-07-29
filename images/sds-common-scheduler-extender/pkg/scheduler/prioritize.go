@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"sync"
 
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 )
 
 func (s *scheduler) Prioritize(inputData ExtenderArgs) ([]HostPriority, error) {
