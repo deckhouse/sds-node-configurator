@@ -24,7 +24,7 @@ shell:
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-artifact
-fromImage: builder/golang-alpine
+fromImage: {{ eq .SVACE_ENABLED "false" | ternary "builder/golang-alpine" "builder/alt-go-svace" }}
 final: false
 
 import:
@@ -44,4 +44,6 @@ shell:
   install:
     - cd /usr/src/app/hooks/go
     - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
-    - CGO_ENABLED=0 go build -a -gcflags=all="-l -B" -ldflags="-w -s" -o /go-hooks *.go;
+    - export GOOS=linux GOARCH=amd64 CGO_ENABLED=0
+    - |
+      {{- include "image-build.build" (set $ "BuildCommand" `go build -a -gcflags=all="-l -B" -ldflags="-w -s" -o /go-hooks *.go;`) | nindent 6 }}
