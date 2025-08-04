@@ -59,7 +59,7 @@ shell:
   install:
     - apt-get update
     - apt-get -y install glibc-utils curl
-    - {{ $.Root.ALT_CLEANUP_CMD }}
+    {{- include "alt packages clean" . | nindent 4 }}
     - chmod +x /binary_replace.sh
     - /binary_replace.sh -i "{{ $csiBinaries }}" -o /relocate
 
