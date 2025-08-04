@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
@@ -229,9 +230,38 @@ func RunSdsInfraWatcher(
 				}
 			}
 
-			if len(unmanagedNodes) == 0 && len(notReadyPods) == 0 {
-				log.Info("[RunSdsInfraWatcher] no problems with sds-node-configurator agent's pods were found")
-				for _, lvg := range lvgs {
+			// Find active pods (not in notReadyPods)
+			activePods := make(map[string]v1.Pod)
+			for podName, pod := range sdsPods {
+				if _, exists := notReadyPods[podName]; !exists {
+					activePods[podName] = pod
+				}
+			}
+
+			// Find LVGs that should be updated to True status (have active pods)
+			lvgsWithActivePods := make([]v1alpha1.LVMVolumeGroup, 0)
+			for _, lvg := range lvgs {
+				shouldUpdate := false
+				for _, node := range lvg.Status.Nodes {
+					for _, activePod := range activePods {
+						if activePod.Spec.NodeName == node.Name {
+							shouldUpdate = true
+							break
+						}
+					}
+					if shouldUpdate {
+						break
+					}
+				}
+				if shouldUpdate {
+					lvgsWithActivePods = append(lvgsWithActivePods, lvg)
+				}
+			}
+
+			// Update status for LVGs that have active pods
+			if len(lvgsWithActivePods) > 0 {
+				log.Info("[RunSdsInfraWatcher] found LVGs with active sds-node-configurator agent's pods")
+				for _, lvg := range lvgsWithActivePods {
 					err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, agentReadyType, "PodReady", "pod is ready to manage the resource")
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to add a condition to the LVMVolumeGroup %s", lvg.Name))
