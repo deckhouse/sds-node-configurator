@@ -25,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/config"
 	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
 	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/monitoring"
@@ -118,16 +119,39 @@ func RunSdsInfraWatcher(
 				log.Info("[RunSdsInfraWatcher] every LVMVolumeGroup node is in a Running state")
 			}
 
-			if len(missedNodes) == 0 && len(notReadyNodes) == 0 {
-				for _, lvg := range lvgs {
-					log.Debug(fmt.Sprintf("[RunSdsInfraWatcher] tries to update the LVMVolumeGroup %s condition %s to True", lvg.Name, nodeReadyType))
-					err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, nodeReadyType, "NodesReady", "selected nodes were found in the cluster and have Ready state")
-					if err != nil {
-						log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to add a condition to the LVMVolumeGroup %s", lvg.Name))
-						continue
+			// Create a list of LVGs that are not in notReadyNodes and missedNodes
+			allProblemNodes := make(map[string]bool)
+			for _, node := range missedNodes {
+				allProblemNodes[node] = true
+			}
+			for _, node := range notReadyNodes {
+				allProblemNodes[node] = true
+			}
+
+			// Find LVGs that should be updated to True status
+			lvgsToUpdate := make([]v1alpha1.LVMVolumeGroup, 0)
+			for _, lvg := range lvgs {
+				shouldUpdate := true
+				for _, node := range lvg.Status.Nodes {
+					if allProblemNodes[node.Name] {
+						shouldUpdate = false
+						break
 					}
-					log.Info(fmt.Sprintf("[RunSdsInfraWatcher] successfully reconciled the LVMVolumeGroup %s condition %s to status True", lvg.Name, nodeReadyType))
 				}
+				if shouldUpdate {
+					lvgsToUpdate = append(lvgsToUpdate, lvg)
+				}
+			}
+
+			// Update status for LVGs that are not in problem nodes
+			for _, lvg := range lvgsToUpdate {
+				log.Debug(fmt.Sprintf("[RunSdsInfraWatcher] tries to update the LVMVolumeGroup %s condition %s to True", lvg.Name, nodeReadyType))
+				err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, nodeReadyType, "NodesReady", "selected nodes were found in the cluster and have Ready state")
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to add a condition to the LVMVolumeGroup %s", lvg.Name))
+					continue
+				}
+				log.Info(fmt.Sprintf("[RunSdsInfraWatcher] successfully reconciled the LVMVolumeGroup %s condition %s to status True", lvg.Name, nodeReadyType))
 			}
 
 			log.Info("[RunSdsInfraWatcher] check if every sds-node-configurator agent's pod is healthy")
