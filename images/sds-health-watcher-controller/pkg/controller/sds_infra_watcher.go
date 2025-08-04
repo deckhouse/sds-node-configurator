@@ -120,20 +120,20 @@ func RunSdsInfraWatcher(
 			}
 
 			// Create a list of LVGs that are not in notReadyNodes and missedNodes
-			allProblemNodes := make(map[string]bool)
+			allProblemNodes := make(map[string]struct{}, len(missedNodes)+len(notReadyNodes))
 			for _, node := range missedNodes {
-				allProblemNodes[node] = true
+				allProblemNodes[node] = struct{}{}
 			}
 			for _, node := range notReadyNodes {
-				allProblemNodes[node] = true
+				allProblemNodes[node] = struct{}{}
 			}
 
 			// Find LVGs that should be updated to True status
-			lvgsToUpdate := make([]v1alpha1.LVMVolumeGroup, 0)
+			lvgsToUpdate := make([]v1alpha1.LVMVolumeGroup, 0, len(lvgs))
 			for _, lvg := range lvgs {
 				shouldUpdate := true
 				for _, node := range lvg.Status.Nodes {
-					if allProblemNodes[node.Name] {
+					if _, found := allProblemNodes[node.Name]; found {
 						shouldUpdate = false
 						break
 					}
