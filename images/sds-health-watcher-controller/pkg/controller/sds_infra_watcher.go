@@ -231,7 +231,7 @@ func RunSdsInfraWatcher(
 			}
 
 			// Find active pods (not in notReadyPods)
-			activePods := make(map[string]v1.Pod)
+			activePods := make(map[string]v1.Pod, len(sdsPods))
 			for _, pod := range sdsPods {
 				if _, exists := notReadyPods[pod.Name]; !exists {
 					activePods[pod.Name] = pod
@@ -239,7 +239,7 @@ func RunSdsInfraWatcher(
 			}
 
 			// Find LVGs that should be updated to True status (have active pods)
-			lvgsWithActivePods := make([]v1alpha1.LVMVolumeGroup, 0)
+			lvgsWithActivePods := make([]v1alpha1.LVMVolumeGroup, 0, len(lvgs))
 			for _, lvg := range lvgs {
 				shouldUpdate := false
 				for _, node := range lvg.Status.Nodes {
