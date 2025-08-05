@@ -232,9 +232,9 @@ func RunSdsInfraWatcher(
 
 			// Find active pods (not in notReadyPods)
 			activePods := make(map[string]v1.Pod)
-			for podName, pod := range sdsPods {
-				if _, exists := notReadyPods[podName]; !exists {
-					activePods[podName] = pod
+			for _, pod := range sdsPods {
+				if _, exists := notReadyPods[pod.Name]; !exists {
+					activePods[pod.Name] = pod
 				}
 			}
 
