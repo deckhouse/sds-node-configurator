@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -25,8 +26,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-
-	"errors"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/config"
@@ -136,7 +135,7 @@ func RunSdsInfraWatcher(
 			for _, lvg := range lvgs {
 				shouldUpdate := true
 				multipleNodes := false
-				
+
 				if len(lvg.Status.Nodes) > 1 {
 					firstName := lvg.Status.Nodes[0].Name
 					for _, node := range lvg.Status.Nodes[1:] {
@@ -262,7 +261,7 @@ func RunSdsInfraWatcher(
 			for _, lvg := range lvgs {
 				shouldUpdate := false
 				multipleNodes := false
-				
+
 				if len(lvg.Status.Nodes) > 1 {
 					firstName := lvg.Status.Nodes[0].Name
 					for _, node := range lvg.Status.Nodes[1:] {

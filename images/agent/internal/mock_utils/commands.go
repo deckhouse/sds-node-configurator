@@ -14,10 +14,11 @@ import (
 	context "context"
 	reflect "reflect"
 
+	gomock "go.uber.org/mock/gomock"
+
 	internal "github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	logger "github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	monitoring "github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
-	gomock "go.uber.org/mock/gomock"
 )
 
 // MockCommands is a mock of Commands interface.
