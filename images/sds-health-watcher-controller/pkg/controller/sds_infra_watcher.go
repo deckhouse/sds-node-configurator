@@ -133,6 +133,14 @@ func RunSdsInfraWatcher(
 			lvgsToUpdate := make([]v1alpha1.LVMVolumeGroup, 0, len(lvgs))
 			for _, lvg := range lvgs {
 				shouldUpdate := true
+				if len(lvg.Status.Nodes) > 1 {
+					firstName := lvg.Status.Nodes[0].Name
+					for _, node := range lvg.Status.Nodes[1:] {
+						if node.Name != firstName {
+							panic(fmt.Sprintf("[RunSdsInfraWatcher] found different node names in lvg.Status.Nodes for %s: %+v", lvg.Name, lvg.Status.Nodes))
+						}
+					}
+				}
 				for _, node := range lvg.Status.Nodes {
 					if _, found := allProblemNodes[node.Name]; found {
 						shouldUpdate = false
@@ -242,6 +250,14 @@ func RunSdsInfraWatcher(
 			lvgsWithActivePods := make([]v1alpha1.LVMVolumeGroup, 0, len(lvgs))
 			for _, lvg := range lvgs {
 				shouldUpdate := false
+				if len(lvg.Status.Nodes) > 1 {
+					firstName := lvg.Status.Nodes[0].Name
+					for _, node := range lvg.Status.Nodes[1:] {
+						if node.Name != firstName {
+							panic(fmt.Sprintf("[RunSdsInfraWatcher] found different node names in lvg.Status.Nodes for %s: %+v", lvg.Name, lvg.Status.Nodes))
+						}
+					}
+				}
 				for _, node := range lvg.Status.Nodes {
 					for _, activePod := range activePods {
 						if activePod.Spec.NodeName == node.Name {
