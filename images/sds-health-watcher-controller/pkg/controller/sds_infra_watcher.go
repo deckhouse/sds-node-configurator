@@ -26,6 +26,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"errors"
+
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/config"
 	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
@@ -137,7 +139,9 @@ func RunSdsInfraWatcher(
 					firstName := lvg.Status.Nodes[0].Name
 					for _, node := range lvg.Status.Nodes[1:] {
 						if node.Name != firstName {
-							panic(fmt.Sprintf("[RunSdsInfraWatcher] found different node names in lvg.Status.Nodes for %s: %+v", lvg.Name, lvg.Status.Nodes))
+							errMsg := fmt.Sprintf("[RunSdsInfraWatcher] found different node names in lvg.Status.Nodes for %s: %+v", lvg.Name, lvg.Status.Nodes)
+							log.Error(errors.New(errMsg), errMsg)
+							continue
 						}
 					}
 				}
@@ -254,7 +258,9 @@ func RunSdsInfraWatcher(
 					firstName := lvg.Status.Nodes[0].Name
 					for _, node := range lvg.Status.Nodes[1:] {
 						if node.Name != firstName {
-							panic(fmt.Sprintf("[RunSdsInfraWatcher] found different node names in lvg.Status.Nodes for %s: %+v", lvg.Name, lvg.Status.Nodes))
+							errMsg := fmt.Sprintf("[RunSdsInfraWatcher] found different node names in lvg.Status.Nodes for %s: %+v", lvg.Name, lvg.Status.Nodes)
+							log.Error(errors.New(errMsg), errMsg)
+							continue
 						}
 					}
 				}
