@@ -239,6 +239,15 @@ func (cm *CacheManager) PrintTheCacheLog() {
 	}
 	cm.log.Cache("[PVC and LVG ENDS]")
 
+	cm.log.Cache("[Replica and LVG BEGINS]")
+	for key, lvgs := range cm.cache.storage.ReplicaLVGs {
+		cm.log.Cache(fmt.Sprintf("[Replica: %s]", key))
+		for _, lvgName := range lvgs {
+			cm.log.Cache(fmt.Sprintf("      LVMVolumeGroup: %s", lvgName))
+		}
+	}
+	cm.log.Cache("[Replica and LVG ENDS]")
+
 	cm.log.Cache("[Node and LVG BEGINS]")
 	for nodeName, lvgs := range cm.cache.storage.NodeLVGs {
 		cm.log.Cache(fmt.Sprintf("[Node: %s]", nodeName))
@@ -250,6 +259,36 @@ func (cm *CacheManager) PrintTheCacheLog() {
 	cm.log.Cache("[Node and LVG ENDS]")
 
 	cm.log.Cache("*******************CACHE END*******************")
+}
+
+func (cm *CacheManager) ReserveThickReplica(lvgName, replicaKey string, requestedBytes int64) error {
+	cm.locker.Lock()
+	defer func() {
+		cm.isUpdated = true
+		cm.locker.Unlock()
+	}()
+
+	return cm.cache.ReserveThickReplica(lvgName, replicaKey, requestedBytes)
+}
+
+func (cm *CacheManager) ReserveThinReplica(lvgName, thinPoolName, replicaKey string, requestedBytes int64) error {
+	cm.locker.Lock()
+	defer func() {
+		cm.isUpdated = true
+		cm.locker.Unlock()
+	}()
+
+	return cm.cache.ReserveThinReplica(lvgName, thinPoolName, replicaKey, requestedBytes)
+}
+
+func (cm *CacheManager) RemoveReplicaReservations(replicaKey, selectedThickLVG, selectedThinLVG, selectedThinPool string, clearNonSelected, clearSelected bool) {
+	cm.locker.Lock()
+	defer func() {
+		cm.isUpdated = true
+		cm.locker.Unlock()
+	}()
+
+	cm.cache.RemoveReplicaReservations(replicaKey, selectedThickLVG, selectedThinLVG, selectedThinPool, clearNonSelected, clearSelected)
 }
 
 func (cm *CacheManager) TryGetLVG(name string) *snc.LVMVolumeGroup {

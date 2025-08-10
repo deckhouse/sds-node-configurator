@@ -61,6 +61,49 @@ type HostPriority struct {
 	Score int `json:"score"`
 }
 
+// ReplicaEvaluateArgs is the request body for evaluating placements for a DRBD replica
+type ReplicaEvaluateArgs struct {
+	// Explicit candidates:
+	// For Thick: provide LVG names in CandidatesThick.
+	// For Thin: provide pairs in CandidatesThin (LVG, ThinPool).
+	CandidatesThick []string            `json:"candidatesThick,omitempty"`
+	CandidatesThin  []ThinCandidateItem `json:"candidatesThin,omitempty"`
+	// Requested size in bytes for the replica reservation
+	RequestedBytes int64 `json:"requestedBytes"`
+	// Whether to reserve space in cache for all filtered candidates
+	Reserve bool `json:"reserve"`
+	// A unique key that identifies the replica across requests (e.g., namespace/name of DRBDResourceReplica)
+	ReplicaKey string `json:"replicaKey"`
+}
+
+type ThinCandidateItem struct {
+	LVGName  string `json:"lvgName"`
+	ThinPool string `json:"thinPool"`
+}
+
+// ReplicaEvaluateResult is a combined result of filtering and prioritization for replicas
+type ReplicaEvaluateResult struct {
+	NodeNames   []string          `json:"nodenames"`
+	FailedNodes map[string]string `json:"failedNodes,omitempty"`
+	Priorities  []HostPriority    `json:"priorities"`
+}
+
+// ReplicaCleanupArgs is the request body for cleaning up reservations for a replica
+type ReplicaCleanupArgs struct {
+	// Unique replica key, same as used in evaluation
+	ReplicaKey string `json:"replicaKey"`
+	// Selected target for cleanup:
+	// For Thick: set SelectedThickLVG
+	SelectedThickLVG string `json:"selectedThickLVG,omitempty"`
+	// For Thin: set both SelectedThinLVG and SelectedThinPool
+	SelectedThinLVG  string `json:"selectedThinLVG,omitempty"`
+	SelectedThinPool string `json:"selectedThinPool,omitempty"`
+	// If true, remove reservations on all nodes except SelectedNode
+	ClearNonSelected bool `json:"clearNonSelected,omitempty"`
+	// If true, remove reservation on SelectedNode (e.g., after replica successfully created)
+	ClearSelected bool `json:"clearSelected,omitempty"`
+}
+
 // FilterInput holds input data for filtering nodes
 type FilterInput struct {
 	Pod                        *v1.Pod

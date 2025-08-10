@@ -253,6 +253,9 @@ func subMain(ctx context.Context) error {
 
 	mux.Handle("/scheduler/filter", filteringHandler)
 	mux.Handle("/scheduler/prioritize", prioritizingHandler)
+	// Replica endpoints
+	mux.HandleFunc("/replica/evaluate", handler.ReplicaEvaluate)
+	mux.HandleFunc("/replica/cleanup", handler.ReplicaCleanup)
 	mux.HandleFunc("/status", handler.Status)
 
 	serv := &http.Server{

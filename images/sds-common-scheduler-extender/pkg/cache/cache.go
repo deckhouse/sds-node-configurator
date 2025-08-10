@@ -47,12 +47,18 @@ type Storage struct {
 	Lvgs     map[string]*LvgCache `json:"lvgs"`
 	PvcLVGs  map[string][]string  `json:"pvc_lvgs"`
 	NodeLVGs map[string][]string  `json:"node_lvgs"`
+	// ReplicaLVGs stores mapping replicaKey -> LVG names where reservations were created
+	ReplicaLVGs map[string][]string `json:"replica_lvgs"`
 }
 
 type LvgCache struct {
 	Lvg       *snc.LVMVolumeGroup             `json:"lvg"`
 	ThickPVCs map[string]*pvcCache            `json:"thick_pvcs"`
 	ThinPools map[string]map[string]*pvcCache `json:"thin_pools"`
+	// ThickReplicas holds replica reservations for thick devices: replicaKey -> reservation
+	ThickReplicas map[string]*replicaCache `json:"thick_replicas"`
+	// ThinReplicaPools holds replica reservations for thin devices: thinPoolName -> (replicaKey -> reservation)
+	ThinReplicaPools map[string]map[string]*replicaCache `json:"thin_replica_pools"`
 }
 
 type pvcCache struct {
@@ -61,12 +67,18 @@ type pvcCache struct {
 	Provisioner  string                        `json:"provisioner"`
 }
 
+type replicaCache struct {
+	Key       string `json:"key"`
+	Requested int64  `json:"requested_bytes"`
+}
+
 func NewCache(log *logger.Logger) *Cache {
 	return &Cache{
 		storage: &Storage{
-			Lvgs:     make(map[string]*LvgCache),
-			PvcLVGs:  make(map[string][]string),
-			NodeLVGs: make(map[string][]string),
+			Lvgs:        make(map[string]*LvgCache),
+			PvcLVGs:     make(map[string][]string),
+			NodeLVGs:    make(map[string][]string),
+			ReplicaLVGs: make(map[string][]string),
 		},
 		log: log,
 	}
@@ -164,6 +176,10 @@ func (c *Cache) GetLVGThickReservedSpace(lvgName string) (int64, error) {
 		space += pvcCh.PVC.Spec.Resources.Requests.Storage().Value()
 	}
 
+	for _, r := range lvg.ThickReplicas {
+		space += r.Requested
+	}
+
 	return space, nil
 }
 
@@ -174,15 +190,19 @@ func (c *Cache) GetLVGThinReservedSpace(lvgName string, thinPoolName string) (in
 		return 0, nil
 	}
 
-	pvcMap, found := lvgCh.ThinPools[thinPoolName]
-	if !found {
-		c.log.Debug(fmt.Sprintf("[GetLVGThinReservedSpace] the Thin pool %s of the LVMVolumeGroup %s was not found in the cache. Returns 0", lvgName, thinPoolName))
-		return 0, nil
+	var space int64
+	if pvcMap, found := lvgCh.ThinPools[thinPoolName]; found {
+		for _, pvcCh := range pvcMap {
+			space += pvcCh.PVC.Spec.Resources.Requests.Storage().Value()
+		}
+	} else {
+		c.log.Debug(fmt.Sprintf("[GetLVGThinReservedSpace] the Thin pool %s of the LVMVolumeGroup %s was not found in the PVC cache. Continue with replica reservations only", thinPoolName, lvgName))
 	}
 
-	var space int64
-	for _, pvcCh := range pvcMap {
-		space += pvcCh.PVC.Spec.Resources.Requests.Storage().Value()
+	if rMap, ok := lvgCh.ThinReplicaPools[thinPoolName]; ok {
+		for _, r := range rMap {
+			space += r.Requested
+		}
 	}
 
 	return space, nil
@@ -310,6 +330,116 @@ func (c *Cache) AddLVGToPVC(lvgName, pvcKey string) {
 	lvgsForPVC = append(lvgsForPVC, lvgName)
 	c.log.Trace(fmt.Sprintf("[addLVGToPVC] LVMVolumeGroups from the cache for PVC %s after append: %v", pvcKey, lvgsForPVC))
 	c.storage.PvcLVGs[pvcKey] = lvgsForPVC
+}
+
+// ReserveThickReplica stores a thick replica reservation for given LVG and node
+func (c *Cache) ReserveThickReplica(lvgName string, replicaKey string, requestedBytes int64) error {
+	lvgCh, found := c.storage.Lvgs[lvgName]
+	if !found {
+		return fmt.Errorf("the LVMVolumeGroup %s was not found in the cache", lvgName)
+	}
+
+	if lvgCh.ThickReplicas == nil {
+		lvgCh.ThickReplicas = make(map[string]*replicaCache)
+	}
+	lvgCh.ThickReplicas[replicaKey] = &replicaCache{Key: replicaKey, Requested: requestedBytes}
+
+	// index LVG by replica key for fast cleanup
+	c.addLVGToReplica(replicaKey, lvgName)
+	c.log.Debug(fmt.Sprintf("[ReserveThickReplica] reserved %d bytes in LVG %s for replica %s", requestedBytes, lvgName, replicaKey))
+	return nil
+}
+
+// ReserveThinReplica stores a thin replica reservation for given LVG, thin pool and node
+func (c *Cache) ReserveThinReplica(lvgName, thinPoolName, replicaKey string, requestedBytes int64) error {
+	lvgCh, found := c.storage.Lvgs[lvgName]
+	if !found {
+		return fmt.Errorf("the LVMVolumeGroup %s was not found in the cache", lvgName)
+	}
+
+	if lvgCh.ThinReplicaPools == nil {
+		lvgCh.ThinReplicaPools = make(map[string]map[string]*replicaCache)
+	}
+	if _, ok := lvgCh.ThinReplicaPools[thinPoolName]; !ok {
+		lvgCh.ThinReplicaPools[thinPoolName] = make(map[string]*replicaCache)
+	}
+	lvgCh.ThinReplicaPools[thinPoolName][replicaKey] = &replicaCache{Key: replicaKey, Requested: requestedBytes}
+
+	// index LVG by replica key for fast cleanup
+	c.addLVGToReplica(replicaKey, lvgName)
+	c.log.Debug(fmt.Sprintf("[ReserveThinReplica] reserved %d bytes in LVG %s thin pool %s for replica %s", requestedBytes, lvgName, thinPoolName, replicaKey))
+	return nil
+}
+
+// RemoveReplicaReservations removes reservations for a replica based on provided flags
+func (c *Cache) RemoveReplicaReservations(replicaKey string, selectedThickLVG string, selectedThinLVG string, selectedThinPool string, clearNonSelected, clearSelected bool) {
+	lvgs, found := c.storage.ReplicaLVGs[replicaKey]
+	if !found {
+		c.log.Debug(fmt.Sprintf("[RemoveReplicaReservations] no reservations found for replica %s", replicaKey))
+		return
+	}
+
+	keptLVGs := make([]string, 0, len(lvgs))
+	for _, lvgName := range lvgs {
+		lvgCh, ok := c.storage.Lvgs[lvgName]
+		if !ok {
+			continue
+		}
+
+		// thick: keep only selectedThickLVG when clearNonSelected; remove selected when clearSelected
+		if _, ok := lvgCh.ThickReplicas[replicaKey]; ok {
+			if clearNonSelected {
+				if lvgName != selectedThickLVG {
+					delete(lvgCh.ThickReplicas, replicaKey)
+					c.log.Debug(fmt.Sprintf("[RemoveReplicaReservations] removed thick reservation for replica %s from LVG %s (non-selected)", replicaKey, lvgName))
+				} else {
+					keptLVGs = append(keptLVGs, lvgName)
+				}
+			} else if clearSelected && lvgName == selectedThickLVG {
+				delete(lvgCh.ThickReplicas, replicaKey)
+				c.log.Debug(fmt.Sprintf("[RemoveReplicaReservations] removed thick reservation for replica %s from LVG %s (selected)", replicaKey, lvgName))
+			} else {
+				keptLVGs = append(keptLVGs, lvgName)
+			}
+		}
+
+		// thin
+		for thinPoolName, rMap := range lvgCh.ThinReplicaPools {
+			if _, ok := rMap[replicaKey]; ok {
+				if clearNonSelected {
+					if !(lvgName == selectedThinLVG && thinPoolName == selectedThinPool) {
+						delete(rMap, replicaKey)
+						c.log.Debug(fmt.Sprintf("[RemoveReplicaReservations] removed thin reservation for replica %s from LVG %s pool %s (non-selected)", replicaKey, lvgName, thinPoolName))
+					} else {
+						keptLVGs = append(keptLVGs, lvgName)
+					}
+				} else if clearSelected && lvgName == selectedThinLVG && thinPoolName == selectedThinPool {
+					delete(rMap, replicaKey)
+					c.log.Debug(fmt.Sprintf("[RemoveReplicaReservations] removed thin reservation for replica %s from LVG %s pool %s (selected)", replicaKey, lvgName, thinPoolName))
+				} else {
+					keptLVGs = append(keptLVGs, lvgName)
+				}
+			}
+		}
+	}
+
+	// update index
+	if len(keptLVGs) == 0 {
+		delete(c.storage.ReplicaLVGs, replicaKey)
+	} else {
+		c.storage.ReplicaLVGs[replicaKey] = keptLVGs
+	}
+}
+
+func (c *Cache) addLVGToReplica(replicaKey, lvgName string) {
+	l := c.storage.ReplicaLVGs[replicaKey]
+	if l == nil {
+		l = make([]string, 0, 3)
+	}
+	if !slices.Contains(l, lvgName) {
+		l = append(l, lvgName)
+	}
+	c.storage.ReplicaLVGs[replicaKey] = l
 }
 
 func (c *Cache) shouldAddPVC(pvc *v1.PersistentVolumeClaim, lvgCh *LvgCache, pvcKey, lvgName, thinPoolName string) (bool, error) {
