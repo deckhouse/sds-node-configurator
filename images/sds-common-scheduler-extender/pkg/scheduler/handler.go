@@ -28,6 +28,8 @@ import (
 type FiltererPrioritizer interface {
 	Filter(inputData ExtenderArgs) (*ExtenderFilterResult, error)
 	Prioritize(inputData ExtenderArgs) ([]HostPriority, error)
+	ReplicaEvaluate(args ReplicaEvaluateArgs) (*ReplicaEvaluateResult, error)
+	ReplicaCleanup(args ReplicaCleanupArgs) error
 }
 
 type Handler struct {
@@ -112,4 +114,47 @@ func (h *Handler) Prioritize(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	Status(w, r)
+}
+
+func (h *Handler) ReplicaEvaluate(w http.ResponseWriter, r *http.Request) {
+	h.log.Debug("[ReplicaEvaluate] starts evaluating replica")
+	var args ReplicaEvaluateArgs
+	reader := http.MaxBytesReader(w, r.Body, 10<<20)
+	if err := json.NewDecoder(reader).Decode(&args); err != nil {
+		h.log.Error(err, "[ReplicaEvaluate] unable to decode request body")
+		http.Error(w, "unable to decode request", http.StatusBadRequest)
+		return
+	}
+
+	res, err := h.scheduler.ReplicaEvaluate(args)
+	if err != nil {
+		h.log.Error(err, "[ReplicaEvaluate] evaluation failed")
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("content-type", "application/json")
+	if err := json.NewEncoder(w).Encode(res); err != nil {
+		h.log.Error(err, "[ReplicaEvaluate] unable to encode response")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (h *Handler) ReplicaCleanup(w http.ResponseWriter, r *http.Request) {
+	h.log.Debug("[ReplicaCleanup] starts cleanup")
+	var args ReplicaCleanupArgs
+	reader := http.MaxBytesReader(w, r.Body, 10<<20)
+	if err := json.NewDecoder(reader).Decode(&args); err != nil {
+		h.log.Error(err, "[ReplicaCleanup] unable to decode request body")
+		http.Error(w, "unable to decode request", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.scheduler.ReplicaCleanup(args); err != nil {
+		h.log.Error(err, "[ReplicaCleanup] cleanup failed")
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }

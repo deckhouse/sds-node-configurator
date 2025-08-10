@@ -165,21 +165,23 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInf
 	s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroups from node %s: %+v", nodeName, lvgsFromNode))
 	var totalFreeSpaceLeftPercent int64
 	nodeScore := 0
+	processedPVCsCount := int64(0)
 
-	PVCs := make(map[string]*corev1.PersistentVolumeClaim, len(input.LocalProvisionPVCs)+len(input.ReplicatedProvisionPVCs))
-	for name, pvc := range input.LocalProvisionPVCs {
-		PVCs[name] = pvc
-	}
-	for name, pvc := range input.ReplicatedProvisionPVCs {
-		PVCs[name] = pvc
-	}
+	// 1) Handle replicated PVCs: must check DRBD replica peers
+	for _, pvc := range input.ReplicatedProvisionPVCs {
+		s.log.Info(fmt.Sprintf("[scoreSingleNode] replicated pvc: %+v", pvc))
 
-	for _, pvc := range PVCs {
 		replica := input.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
-		s.log.Info(fmt.Sprintf("[scoreSingleNode] pvc: %+v", pvc))
-		s.log.Info(fmt.Sprintf("[scoreSingleNode] replica: %+v", replica))
-		s.log.Info(fmt.Sprintf("[scoreSingleNode] node Name %s", nodeName))
-		peer := replica.Spec.Peers[nodeName]
+		if replica == nil {
+			s.log.Warning(fmt.Sprintf("[scoreSingleNode] no DRBD replica found for PVC %s (volume %s). returning 0 for node %s", pvc.Name, pvc.Spec.VolumeName, nodeName))
+			return 0
+		}
+
+		peer, ok := replica.Spec.Peers[nodeName]
+		if !ok {
+			s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s has no peer for pvc %s replica, returning 0 score points", nodeName, pvc.Name))
+			return 0
+		}
 		if peer.Diskless {
 			s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s is diskless for pvc %s, returning 0 score points", nodeName, pvc.Name))
 			return 0
@@ -210,13 +212,46 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInf
 		s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroup %s freeSpace: %s", lvg.Name, freeSpace.String()))
 		s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroup %s total size: %s", lvg.Name, lvg.Status.VGSize.String()))
 		totalFreeSpaceLeftPercent += getFreeSpaceLeftAsPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
+		processedPVCsCount++
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] totalFreeSpaceLeftPercent: %d", totalFreeSpaceLeftPercent))
+	}
 
+	// 2) Handle local PVCs: no DRBD checks
+	for _, pvc := range input.LocalProvisionPVCs {
+		s.log.Info(fmt.Sprintf("[scoreSingleNode] local pvc: %+v", pvc))
+
+		pvcReq := input.PVCRequests[pvc.Name]
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] pvc %s size request: %+v", pvc.Name, pvcReq))
+
+		lvgsFromSC := lvgInfo.SCLVGs[*pvc.Spec.StorageClassName]
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroups %+v from SC: %s", lvgsFromSC, *pvc.Spec.StorageClassName))
+		commonLVG := findMatchedLVGs(lvgsFromNode, lvgsFromSC)
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] Common LVMVolumeGroup %+v of node %s and SC %s", commonLVG, nodeName, *pvc.Spec.StorageClassName))
+
+		if commonLVG == nil {
+			s.log.Warning(fmt.Sprintf("[scoreSingleNode] unable to match Storage Class's LVMVolumeGroup with node %s for Storage Class %s", nodeName, *pvc.Spec.StorageClassName))
+			continue
+		}
+
+		nodeScore += 10
+		lvg := lvgInfo.LVGs[commonLVG.Name]
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroup %s data: %+v", lvg.Name, lvg))
+
+		freeSpace, err := calculateFreeSpace(lvg, s.cacheMgr, &pvcReq, commonLVG, s.log, pvc, nodeName)
+		if err != nil {
+			s.log.Error(err, fmt.Sprintf("[scoreSingleNode] unable to calculate free space for LVMVolumeGroup %s, PVC: %s, node: %s", lvg.Name, pvc.Name, nodeName))
+			continue
+		}
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroup %s freeSpace: %s", lvg.Name, freeSpace.String()))
+		s.log.Trace(fmt.Sprintf("[scoreSingleNode] LVMVolumeGroup %s total size: %s", lvg.Name, lvg.Status.VGSize.String()))
+		totalFreeSpaceLeftPercent += getFreeSpaceLeftAsPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
+		processedPVCsCount++
 		s.log.Trace(fmt.Sprintf("[scoreSingleNode] totalFreeSpaceLeftPercent: %d", totalFreeSpaceLeftPercent))
 	}
 
 	averageFreeSpace := int64(0)
-	if len(PVCs) > 0 {
-		averageFreeSpace = totalFreeSpaceLeftPercent / int64(len(PVCs))
+	if processedPVCsCount > 0 {
+		averageFreeSpace = totalFreeSpaceLeftPercent / processedPVCsCount
 	}
 	s.log.Trace(fmt.Sprintf("[scoreNodes] average free space left for node %s: %d%%", nodeName, averageFreeSpace))
 

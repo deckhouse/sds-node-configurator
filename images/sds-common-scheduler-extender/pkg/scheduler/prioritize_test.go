@@ -1,3 +1,235 @@
+package scheduler
+
+import (
+	"context"
+	"testing"
+
+	v1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+)
+
+func TestPrioritize_LocalPVC_NoDRBD_NoPanic(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = snc.AddToScheme(scheme)
+	_ = v1.AddToScheme(scheme)
+	_ = storagev1.AddToScheme(scheme)
+	_ = srv.AddToScheme(scheme)
+	_ = srv2.AddToScheme(scheme)
+
+	// Local SC (Thick) with LVG mapping
+	scLocal := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "sc-local"},
+		Provisioner: consts.SdsLocalVolumeProvisioner,
+		Parameters: map[string]string{
+			consts.LvmTypeParamKey:         consts.Thick,
+			consts.LVMVolumeGroupsParamKey: "- name: lvg-1\n",
+		},
+	}
+
+	// LVG on node-a
+	lvg := &snc.LVMVolumeGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+		Spec:       snc.LVMVolumeGroupSpec{Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-a"}},
+		Status: snc.LVMVolumeGroupStatus{
+			Nodes:  []snc.LVMVolumeGroupNode{{Name: "node-a"}},
+			VGSize: *resource.NewQuantity(100*1024*1024*1024, resource.BinarySI),
+			VGFree: *resource.NewQuantity(80*1024*1024*1024, resource.BinarySI),
+		},
+	}
+
+	// Pod uses one local PVC
+	pvc := &v1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-local", Namespace: "default"},
+		Spec: v1.PersistentVolumeClaimSpec{
+			StorageClassName: ptr("sc-local"),
+			Resources:        v1.VolumeResourceRequirements{Requests: v1.ResourceList{v1.ResourceStorage: resource.MustParse("5Gi")}},
+		},
+		Status: v1.PersistentVolumeClaimStatus{Phase: v1.ClaimPending},
+	}
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "default"},
+		Spec: v1.PodSpec{Volumes: []v1.Volume{{
+			Name:         "v1",
+			VolumeSource: v1.VolumeSource{PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc-local"}},
+		}}},
+	}
+
+	cl := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(scLocal, lvg, pvc).Build()
+	log, _ := logger.NewLogger(logger.Verbosity("4"))
+	c := cache.NewCache(log)
+	cm := cache.NewCacheManager(c, nil, log)
+	cm.AddLVG(lvg)
+	s := NewScheduler(context.TODO(), cl, log, cm, 1)
+
+	res, err := s.Prioritize(ExtenderArgs{Pod: pod, NodeNames: &[]string{"node-a"}})
+	if err != nil {
+		t.Fatalf("Prioritize returned error: %v", err)
+	}
+	if len(res) != 1 || res[0].Host != "node-a" {
+		t.Fatalf("expected one result for node-a, got %+v", res)
+	}
+}
+
+func TestPrioritize_ReplicatedPVC_MissingReplica_ScoreZero(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = snc.AddToScheme(scheme)
+	_ = v1.AddToScheme(scheme)
+	_ = storagev1.AddToScheme(scheme)
+	_ = srv.AddToScheme(scheme)
+	_ = srv2.AddToScheme(scheme)
+
+	scRep := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "sc-rep"},
+		Provisioner: consts.SdsReplicatedVolumeProvisioner,
+		Parameters: map[string]string{
+			consts.LvmTypeParamKey:         consts.Thick,
+			consts.LVMVolumeGroupsParamKey: "- name: lvg-r\n",
+		},
+	}
+	lvg := &snc.LVMVolumeGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: "lvg-r"},
+		Spec:       snc.LVMVolumeGroupSpec{Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-a"}},
+		Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-a"}}, VGSize: *resource.NewQuantity(100*1024*1024*1024, resource.BinarySI), VGFree: *resource.NewQuantity(90*1024*1024*1024, resource.BinarySI)},
+	}
+
+	pv := &v1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "vol-1"},
+		Spec:       v1.PersistentVolumeSpec{Capacity: v1.ResourceList{v1.ResourceStorage: resource.MustParse("1Gi")}},
+	}
+	pvc := &v1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-rep", Namespace: "default"},
+		Spec:       v1.PersistentVolumeClaimSpec{StorageClassName: ptr("sc-rep"), VolumeName: "vol-1", Resources: v1.VolumeResourceRequirements{Requests: v1.ResourceList{v1.ResourceStorage: resource.MustParse("2Gi")}}},
+		Status:     v1.PersistentVolumeClaimStatus{Phase: v1.ClaimBound},
+	}
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "default"}, Spec: v1.PodSpec{Volumes: []v1.Volume{{Name: "v1", VolumeSource: v1.VolumeSource{PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc-rep"}}}}}}
+
+	// No DRBDResourceReplica with name "vol-1" on purpose
+	cl := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(scRep, lvg, pvc, pv).Build()
+	log, _ := logger.NewLogger(logger.Verbosity("4"))
+	cm := cache.NewCacheManager(cache.NewCache(log), nil, log)
+	cm.AddLVG(lvg)
+	s := NewScheduler(context.TODO(), cl, log, cm, 1)
+
+	res, err := s.Prioritize(ExtenderArgs{Pod: pod, NodeNames: &[]string{"node-a"}})
+	if err != nil {
+		t.Fatalf("Prioritize returned error: %v", err)
+	}
+	if len(res) != 1 || res[0].Host != "node-a" {
+		t.Fatalf("expected one result for node-a, got %+v", res)
+	}
+	if res[0].Score != 0 {
+		t.Fatalf("expected score 0 for missing replica, got %d", res[0].Score)
+	}
+}
+
+func TestPrioritize_ReplicatedPVC_MissingPeer_ScoreZero(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = snc.AddToScheme(scheme)
+	_ = v1.AddToScheme(scheme)
+	_ = storagev1.AddToScheme(scheme)
+	_ = srv.AddToScheme(scheme)
+	_ = srv2.AddToScheme(scheme)
+
+	scRep := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "sc-rep"},
+		Provisioner: consts.SdsReplicatedVolumeProvisioner,
+		Parameters: map[string]string{
+			consts.LvmTypeParamKey:         consts.Thick,
+			consts.LVMVolumeGroupsParamKey: "- name: lvg-r\n",
+		},
+	}
+	lvg := &snc.LVMVolumeGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: "lvg-r"},
+		Spec:       snc.LVMVolumeGroupSpec{Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-a"}},
+		Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-a"}}, VGSize: *resource.NewQuantity(100*1024*1024*1024, resource.BinarySI), VGFree: *resource.NewQuantity(90*1024*1024*1024, resource.BinarySI)},
+	}
+
+	pv := &v1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: "vol-1"}, Spec: v1.PersistentVolumeSpec{Capacity: v1.ResourceList{v1.ResourceStorage: resource.MustParse("1Gi")}}}
+	pvc := &v1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "pvc-rep", Namespace: "default"}, Spec: v1.PersistentVolumeClaimSpec{StorageClassName: ptr("sc-rep"), VolumeName: "vol-1", Resources: v1.VolumeResourceRequirements{Requests: v1.ResourceList{v1.ResourceStorage: resource.MustParse("2Gi")}}}, Status: v1.PersistentVolumeClaimStatus{Phase: v1.ClaimBound}}
+
+	// Create replica object but without any Peers for node-a
+	replica := &srv2.DRBDResourceReplica{ObjectMeta: metav1.ObjectMeta{Name: "vol-1"}}
+
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "default"}, Spec: v1.PodSpec{Volumes: []v1.Volume{{Name: "v1", VolumeSource: v1.VolumeSource{PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc-rep"}}}}}}
+
+	cl := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(scRep, lvg, pvc, pv, replica).Build()
+	log, _ := logger.NewLogger(logger.Verbosity("4"))
+	cm := cache.NewCacheManager(cache.NewCache(log), nil, log)
+	cm.AddLVG(lvg)
+	s := NewScheduler(context.TODO(), cl, log, cm, 1)
+
+	res, err := s.Prioritize(ExtenderArgs{Pod: pod, NodeNames: &[]string{"node-a"}})
+	if err != nil {
+		t.Fatalf("Prioritize returned error: %v", err)
+	}
+	if len(res) != 1 || res[0].Host != "node-a" {
+		t.Fatalf("expected one result for node-a, got %+v", res)
+	}
+	if res[0].Score != 0 {
+		t.Fatalf("expected score 0 for missing peer, got %d", res[0].Score)
+	}
+}
+
+func TestPrioritize_MixedPVCs_LocalPlusReplicatedMissingReplica_NoPanic(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = snc.AddToScheme(scheme)
+	_ = v1.AddToScheme(scheme)
+	_ = storagev1.AddToScheme(scheme)
+	_ = srv.AddToScheme(scheme)
+	_ = srv2.AddToScheme(scheme)
+
+	// Local SC
+	scLocal := &storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "sc-local"}, Provisioner: consts.SdsLocalVolumeProvisioner, Parameters: map[string]string{consts.LvmTypeParamKey: consts.Thick, consts.LVMVolumeGroupsParamKey: "- name: lvg-1\n"}}
+	// Replicated SC
+	scRep := &storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "sc-rep"}, Provisioner: consts.SdsReplicatedVolumeProvisioner, Parameters: map[string]string{consts.LvmTypeParamKey: consts.Thick, consts.LVMVolumeGroupsParamKey: "- name: lvg-1\n"}}
+
+	// One LVG on node-a
+	lvg := &snc.LVMVolumeGroup{ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"}, Spec: snc.LVMVolumeGroupSpec{Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-a"}}, Status: snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-a"}}, VGSize: *resource.NewQuantity(100*1024*1024*1024, resource.BinarySI), VGFree: *resource.NewQuantity(90*1024*1024*1024, resource.BinarySI)}}
+
+	// PVCs: one local, one replicated (bound to vol-1)
+	pvcLocal := &v1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "pvc-local", Namespace: "default"}, Spec: v1.PersistentVolumeClaimSpec{StorageClassName: ptr("sc-local"), Resources: v1.VolumeResourceRequirements{Requests: v1.ResourceList{v1.ResourceStorage: resource.MustParse("1Gi")}}}, Status: v1.PersistentVolumeClaimStatus{Phase: v1.ClaimPending}}
+	pv := &v1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: "vol-1"}, Spec: v1.PersistentVolumeSpec{Capacity: v1.ResourceList{v1.ResourceStorage: resource.MustParse("1Gi")}}}
+	pvcRep := &v1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "pvc-rep", Namespace: "default"}, Spec: v1.PersistentVolumeClaimSpec{StorageClassName: ptr("sc-rep"), VolumeName: "vol-1", Resources: v1.VolumeResourceRequirements{Requests: v1.ResourceList{v1.ResourceStorage: resource.MustParse("2Gi")}}}, Status: v1.PersistentVolumeClaimStatus{Phase: v1.ClaimBound}}
+
+	// Pod uses both PVCs
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "default"}, Spec: v1.PodSpec{Volumes: []v1.Volume{
+		{Name: "v-local", VolumeSource: v1.VolumeSource{PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc-local"}}},
+		{Name: "v-rep", VolumeSource: v1.VolumeSource{PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc-rep"}}},
+	}}}
+
+	// Intentionally DO NOT create DRBDResourceReplica for vol-1 to simulate missing replica
+	cl := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(scLocal, scRep, lvg, pvcLocal, pv, pvcRep).Build()
+	log, _ := logger.NewLogger(logger.Verbosity("4"))
+	cm := cache.NewCacheManager(cache.NewCache(log), nil, log)
+	cm.AddLVG(lvg)
+	s := NewScheduler(context.TODO(), cl, log, cm, 1)
+
+	res, err := s.Prioritize(ExtenderArgs{Pod: pod, NodeNames: &[]string{"node-a"}})
+	if err != nil {
+		t.Fatalf("Prioritize returned error: %v", err)
+	}
+	if len(res) != 1 || res[0].Host != "node-a" {
+		t.Fatalf("expected one result for node-a, got %+v", res)
+	}
+	// With replicated PVC not placeable, overall score for node should be 0
+	if res[0].Score != 0 {
+		t.Fatalf("expected score 0 for mixed PVCs with missing replica, got %d", res[0].Score)
+	}
+}
+
+// ptr is defined in replica_test.go and reused here.
+
 /*
 Copyright YEAR Flant JSC
 
@@ -14,7 +246,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package scheduler
+// The large commented block below was legacy and accidentally duplicated package declarations.
+// Keeping it commented to preserve history without breaking compilation.
+// package scheduler
 
 // import (
 // 	"testing"
