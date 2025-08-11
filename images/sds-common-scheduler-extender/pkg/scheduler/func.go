@@ -185,7 +185,8 @@ func getlvmVolumeGroups(ctx context.Context, cl client.Client, log *logger.Logge
 
 	lvmMap := make(map[string]*snc.LVMVolumeGroup, len(lvmList.Items))
 	for _, lvm := range lvmList.Items {
-		lvmMap[lvm.Name] = &lvm
+		lvmCopy := lvm
+		lvmMap[lvmCopy.Name] = &lvmCopy
 	}
 
 	log.Trace("[getlvmVolumeGroups]", "LVM volume groups map", lvmMap)
@@ -202,7 +203,12 @@ func getNodeWithLvmVgsMap(ctx context.Context, cl client.Client, log *logger.Log
 
 	nodeToLvmMap := make(map[string][]*snc.LVMVolumeGroup, len(lvmList.Items))
 	for _, lvm := range lvmList.Items {
-		nodeToLvmMap[lvm.Spec.Local.NodeName] = append(nodeToLvmMap[lvm.Spec.Local.NodeName], &lvm)
+		if lvm.Spec.Local.NodeName == "" {
+			log.Warning("[getNodeWithLvmVgsMap]", fmt.Sprintf("LVMVolumeGroup %s has empty NodeName in Spec.Local, skipping", lvm.Name))
+			continue
+		}
+		lvmCopy := lvm
+		nodeToLvmMap[lvmCopy.Spec.Local.NodeName] = append(nodeToLvmMap[lvmCopy.Spec.Local.NodeName], &lvmCopy)
 	}
 
 	log.Trace("[getNodeWithLvmVgsMap]", "node to LVM volume groups map", nodeToLvmMap)
@@ -237,7 +243,8 @@ func getDRBDNodesMap(ctx context.Context, cl client.Client, log *logger.Logger) 
 
 	lvgMap := make(map[string]*snc.LVMVolumeGroup, len(lvgList.Items))
 	for _, lvg := range lvgList.Items {
-		lvgMap[lvg.Name] = &lvg
+		lvgCopy := lvg
+		lvgMap[lvgCopy.Name] = &lvgCopy
 	}
 	log.Trace("[getDRBDNodesMap]", "LVM volume group map", lvgMap)
 
@@ -254,6 +261,11 @@ func getDRBDNodesMap(ctx context.Context, cl client.Client, log *logger.Logger) 
 			lvg, found := lvgMap[rscLVG.Name]
 			if !found {
 				log.Warning("[getDRBDNodesMap]", fmt.Sprintf("no LVM volume group %s found, skipping iteration", rscLVG.Name))
+				continue
+			}
+			if lvg.Spec.Local.NodeName == "" {
+				log.Warning("[getDRBDNodesMap]", fmt.Sprintf("LVMVolumeGroup %s has empty NodeName in Spec.Local, skipping", lvg.Name))
+				continue
 			}
 			result[lvg.Spec.Local.NodeName] = struct{}{}
 		}
@@ -290,7 +302,8 @@ func getPersistentVolumes(ctx context.Context, cl client.Client, log *logger.Log
 
 	pvMap := make(map[string]*corev1.PersistentVolume, len(pvs.Items))
 	for _, pv := range pvs.Items {
-		pvMap[pv.Name] = &pv
+		pvCopy := pv
+		pvMap[pvCopy.Name] = &pvCopy
 	}
 
 	log.Trace("[getPersistentVolumes]", "persistent volumes map", pvMap)
