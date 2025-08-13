@@ -51,6 +51,9 @@ shell:
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}
 fromImage: base/distroless
 
+git:
+{{- include "image mount points" . }}
+
 import:
   - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
     add: /{{ $.ImageName }}
