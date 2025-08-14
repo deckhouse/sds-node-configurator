@@ -19,6 +19,7 @@
   {{- $_ := set $ctx "GOPROXY" (env "GOPROXY" "https://proxy.golang.org,direct") }}
   {{- $_ := set $ctx "Commit" $Root.Commit }}
   {{- $_ := set $ctx "ProjectName" (printf "%s/%s" $ctx.SVACE_PROJECT_PREFIX $ctx.ImageName ) }}
+  {{- $_ := set $ctx "Files" $.Files }}
 
 ---
   {{- /* For Dockerfile just render it from the folder. */ -}}

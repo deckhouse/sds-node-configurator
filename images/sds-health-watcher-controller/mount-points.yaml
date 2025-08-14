@@ -1,0 +1,4 @@
+dirs:
+  - /dev/
+  - /sys/
+  - /host-root/
