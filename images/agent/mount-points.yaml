@@ -1,4 +1,3 @@
 dirs:
   - /dev/
-  - /sys/
   - /run/udev/
