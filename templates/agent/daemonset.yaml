@@ -129,7 +129,7 @@ spec:
         volumeMounts:
           - mountPath: /dev/
             name: host-device-dir
-          - mountPath: /sys/
+          - mountPath: /sys/fs/cgroup
             name: host-sys-dir
           - mountPath: /run/udev/
             name: host-run-udev-dir
@@ -193,7 +193,7 @@ spec:
         volumeMounts:
         - mountPath: /dev/
           name: host-device-dir
-        - mountPath: /sys/
+        - mountPath: /sys/fs/cgroup
           name: host-sys-dir
         - mountPath: /run/udev/
           name: host-run-udev-dir
@@ -213,7 +213,7 @@ spec:
           type: ""
         name: host-device-dir
       - hostPath:
-          path: /sys/
+          path: /sys/fs/cgroup
           type: Directory
         name: host-sys-dir
       - hostPath:
