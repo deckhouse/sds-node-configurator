@@ -131,6 +131,8 @@ spec:
             name: host-device-dir
           - mountPath: /sys/
             name: host-sys-dir
+          - mountPath: /sys/fs/cgroup
+            name: host-sys-fs-cgroup
           - mountPath: /run/udev/
             name: host-run-udev-dir
         resources:
@@ -195,6 +197,8 @@ spec:
           name: host-device-dir
         - mountPath: /sys/
           name: host-sys-dir
+        - mountPath: /sys/fs/cgroup
+          name: host-sys-fs-cgroup
         - mountPath: /run/udev/
           name: host-run-udev-dir
         resources:
@@ -216,6 +220,10 @@ spec:
           path: /sys/
           type: Directory
         name: host-sys-dir
+      - hostPath:
+          path: /sys/fs/cgroup
+          type: Directory
+        name: host-sys-fs-cgroup
       - hostPath:
           path: /run/udev/
           type: Directory
