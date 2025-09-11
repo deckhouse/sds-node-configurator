@@ -122,12 +122,12 @@ func main() {
 	go func() {
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("/metrics", promhttp.Handler())
-		
+
 		metricsServer := &http.Server{
 			Addr:    cfgParams.MetricsPort,
 			Handler: metricsMux,
 		}
-		
+
 		log.Info(fmt.Sprintf("[main] starting metrics server on %s", cfgParams.MetricsPort))
 		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error(err, "[main] metrics server failed to start")
