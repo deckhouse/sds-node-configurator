@@ -9,7 +9,7 @@ metadata:
 spec:
   podMetricsEndpoints:
   - targetPort: 4202
-    scheme: https
+    scheme: http
     path: /metrics
     bearerTokenSecret:
       name: "prometheus-token"
