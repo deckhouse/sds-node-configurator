@@ -19,11 +19,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	goruntime "runtime"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -107,7 +105,7 @@ func main() {
 	managerOpts := manager.Options{
 		Scheme:                 scheme,
 		Logger:                 log.GetLogger(),
-		Metrics:                server.Options{BindAddress: "0"}, // Disable controller-runtime metrics server
+		Metrics:                server.Options{BindAddress: cfgParams.MetricsPort},
 		HealthProbeBindAddress: cfgParams.HealthProbeBindAddress,
 	}
 
@@ -117,23 +115,6 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("[main] successfully created kubernetes manager")
-
-	// Start metrics HTTP server
-	go func() {
-		metricsMux := http.NewServeMux()
-		metricsMux.Handle("/metrics", promhttp.Handler())
-
-		metricsServer := &http.Server{
-			Addr:    cfgParams.MetricsPort,
-			Handler: metricsMux,
-		}
-
-		log.Info(fmt.Sprintf("[main] starting metrics server on %s", cfgParams.MetricsPort))
-		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error(err, "[main] metrics server failed to start")
-			os.Exit(1)
-		}
-	}()
 
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 	commands := utils.NewCommands()
