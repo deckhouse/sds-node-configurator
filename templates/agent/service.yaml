@@ -12,7 +12,7 @@ spec:
   ports:
   - name: metrics
     port: 4202
-    targetPort: 4202
+    targetPort: metrics
     protocol: TCP
   type: ClusterIP
 {{- end }}
