@@ -1,0 +1,5 @@
+Changes:
+  - Numerous documentation fixes
+  - Added LVMVolumeGroupSet and LVMLogicalVolumeSnapshots
+  - Fixed work with labels and finalizers in some internal objects
+  - Added dm_snapshot loading when needed

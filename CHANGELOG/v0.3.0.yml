@@ -1,0 +1,5 @@
+Changes:
+  - Added thin provisioning configuration in mc for automatic dm_thin_pool module loading
+  - Images moved to distroless
+  - Added labels to BlockDevices entity (for future use in BlockDevicesSelectors)
+  - Multiple bug fixes and documentation improvements

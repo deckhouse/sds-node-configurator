@@ -1,0 +1,3 @@
+Changes:
+  - Removed support for sds-drbd module
+  - Added hiding of csi-scsi-generic devices

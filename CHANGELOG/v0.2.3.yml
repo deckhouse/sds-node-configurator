@@ -1,0 +1,8 @@
+Changes:
+  - Added internal cache for performance improvement
+  - Added health and readiness checks to controller
+  - Improved resource display in cli
+  - Now LVM volume groups are deleted when corresponding k8s resource is deleted, not when annotation is added
+  - Added LVM volume group size specification in percentages
+  - Added AllocationLimit support in LVM volume group
+  - Added support for contiguous volumes in sds-local-volume

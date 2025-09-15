@@ -1,0 +1,2 @@
+Changes:
+  - Fix for supporting BlockDevice serial numbers up to 63 characters long

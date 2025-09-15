@@ -1,0 +1,4 @@
+Changes:
+  - LvmVolumeGroups resources will be migrated to LVMVolumeGroups
+  - Exact BlockDevices lists in LVMVolumeGroups will be migrated to selectors
+  - Multiple fixes in controllers and documentation

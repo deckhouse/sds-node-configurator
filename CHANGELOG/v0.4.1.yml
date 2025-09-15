@@ -1,0 +1,3 @@
+Changes:
+  - Fixed potential issue with missing labels in LvmVolumeGroup->LVMVolumeGroup migration hook
+  - Added controller that tracks labels on BlockDevice resources for quick updates of LVMVolumeGroup resources
