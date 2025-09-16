@@ -1,0 +1,18 @@
+Changes:
+  - Added LVMLogicalVolumeWatcher CRDs
+  - Added more test cases
+  - Added AreSizesEqualWithinDelta function
+  - Fixed resize for thinPools
+  - Added tests to LvmLogicalVolumeWatcher controller
+  - Fixed naming in LVMLogicalVolume
+  - Added node affinity
+  - Enhanced LVMLogicalVolume handling with logging, size display, and event processing
+  - Statically linked nsenter, lsblk and lvm utils
+  - Fixed serial discovery by switching to dynamic lsblk
+  - Rewrote bin-copier script in Golang
+  - Moved lsblk and its libraries inside the agent image
+  - Added age field
+  - Implemented stderr filtering for LVM commands
+  - Added bench-tests for LVMLogicalVolume controller
+  - Changed size type from string to quantity
+  - Added parallel reconciliation to lvm_logical_volume_watcher and VG size validation to lvm_volume_group_watcher

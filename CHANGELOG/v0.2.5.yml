@@ -1,0 +1,2 @@
+Changes:
+  - Added metrics and their collection in Prometheus, health check ports moved to correct ones

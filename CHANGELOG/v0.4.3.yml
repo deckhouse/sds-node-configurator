@@ -1,0 +1,2 @@
+Changes:
+  - Fixed crash of BlockDevices migration script when finalizers are missing on resources

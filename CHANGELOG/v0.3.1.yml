@@ -1,0 +1,2 @@
+Changes:
+  - Updated golang to current 1.22.6 to close known vulnerabilities

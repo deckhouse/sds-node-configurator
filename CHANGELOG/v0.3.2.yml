@@ -1,0 +1,2 @@
+Changes:
+  - Fix in sds-health-watcher-controller which could incorrectly handle the status of some nodes

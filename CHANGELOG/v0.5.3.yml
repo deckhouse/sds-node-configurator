@@ -1,0 +1,2 @@
+Changes:
+  - Fixed bug preventing LVG status updates when missed/notready nodes are present in the cluster
