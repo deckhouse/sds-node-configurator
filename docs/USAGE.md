@@ -31,6 +31,16 @@ It contains all the information about the device in question.
 * The size of the block device is greater than 1 Gi.
 * If the device is a virtual disk, it must have a serial number.
 
+#### Creating a partition on a block device
+
+If a partition is created on a block device, the controller will automatically create a `BlockDevice` resource for this partition.
+
+Example of creating a partition on a block device:
+
+```shell
+fdisk /dev/sdb
+```
+
 The controller will use the information from the custom resource to handle `LVMVolumeGroup` resources going forward.
 
 ### Updating a `BlockDevice` resource
@@ -55,7 +65,7 @@ Currently, only local `Volume Groups` are supported.
 
 ### Creating an `LVMVolumeGroup` resource
 
-There are two ways to create an `LVMVolumeGroup` resource:
+There are three ways to create an `LVMVolumeGroup` resource:
 * Automatically:
   * The controller automatically scans for information about the existing `LVM Volume Groups` on nodes and creates a resource if an `LVM Volume Group` is tagged with the `storage.deckhouse.io/enabled=true` LVM tag and there is no matching Kubernetes resource for it.
   * In this case, the controller populates all `Spec` fields of the resource but `thinPools` on its own. A user should manually add an information about thin-pools on the node to the `Spec` field, if they want to make the controller manage the thin-pools. 
@@ -63,6 +73,11 @@ There are two ways to create an `LVMVolumeGroup` resource:
   * The user manually creates the resource by filling in only the `metadata.name` and `spec` fields. In it, they specify the desired state of the new `Volume Group`.
   * This configuration is then validated to ensure its correctness.
   * After successful validation, the controller uses the provided configuration to create the specified `LVM Volume Group` on the node and update the user resource with the actual information about the state of the created `LVM Volume Group`.
+* Manual VG creation on the node:
+  * The user manually creates an `LVM Volume Group` on the node using standard LVM commands.
+  * After creating the VG, the user adds the LVM tag `storage.deckhouse.io/enabled=true` to transfer control to the controller.
+  * The controller will automatically detect the VG with this tag and create a corresponding `LVMVolumeGroup` resource.
+    * Detailed instructions for adding an existing VG to Kubernetes are described in the [FAQ](../FAQ.md) section.
   * An example of a resource for creating a local `LVM Volume Group` from multiple `BlockDevices`:
 
     ```yaml
