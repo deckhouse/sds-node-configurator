@@ -1,2 +1,2 @@
 Changes:
-  - Added release notes
+  - Fix sys-fs-cgroup error for containerdv2 support
