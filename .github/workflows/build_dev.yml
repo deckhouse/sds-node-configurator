@@ -185,9 +185,8 @@ jobs:
       - name: Setup test environment
         run: |
           # Подготовка kubeconfig для тестов
-          # Тест ищет конфиг по пути ../../sds-e2e-cfg/kube-hypervisor.config относительно testkit_v2
           mkdir -p /tmp/sds-e2e-cfg
-          echo "${{ secrets.E2E_KUBECONFIG }}" | base64 -d > /tmp/sds-e2e-cfg/kube-hypervisor.config
+          echo "${{ secrets.E2E_CLUSTER_KUBECONFIG }}" | base64 -d > /tmp/sds-e2e-cfg/kube-hypervisor.config
           chmod 600 /tmp/sds-e2e-cfg/kube-hypervisor.config
           
           # Подготовка SSH ключа
@@ -224,16 +223,16 @@ jobs:
           echo "Test files: ./tests/tools.go ${TEST_FILES}"
           echo "Namespace: ${TEST_NAMESPACE}"
           echo "SSH Host: ${{ secrets.E2E_SSH_HOST }}"
-          echo "Kubeconfig: /tmp/sds-e2e-cfg/kube-hypervisor.config"
+          echo "Kubeconfig file: kube-hypervisor.config"
           
           # Запуск тестов - передаем файлы как аргументы (как в вашем скрипте)
-          # Используем абсолютный путь к kubeconfig
+          # Передаем только имя файла, тест сам найдет его в нужной директории
           go test -v -timeout 60m ./tests/tools.go ${TEST_FILES} \
             -debug \
             -verbose \
             -sshhost ${{ secrets.E2E_SSH_HOST }} \
             -sshkey ~/.ssh/e2e_key \
-            -hypervisorkconfig /tmp/sds-e2e-cfg/kube-hypervisor.config \
+            -hypervisorkconfig kube-hypervisor.config \
             -skipoptional \
             -keepstate \
             -clustertype "Ubuntu 22 + Ubuntu 24 + Debian 11" \
