@@ -178,7 +178,7 @@ jobs:
       - name: Clone sds-e2e repository
         run: |
           rm -rf /tmp/sds-e2e
-          git clone https://github.com/deckhouse/sds-e2e.git /tmp/sds-e2e
+          git clone --branch main https://github.com/deckhouse/sds-e2e.git /tmp/sds-e2e
           cd /tmp/sds-e2e/testkit_v2
           go mod download
 
@@ -201,46 +201,30 @@ jobs:
       - name: Run E2E smoke tests
         env:
           LICENSE_KEY: ${{ secrets.E2E_DECKHOUSE_LICENSE }}
+          licensekey: ${{ secrets.E2E_DECKHOUSE_LICENSE }}
         run: |
           cd /tmp/sds-e2e/testkit_v2
           
-          # Определяем фильтр тестов через -run (запускаем только нужные, компилируя весь пакет)
+          # Определяем конкретные файлы тестов для каждого модуля
+          # Важно: передаем их как аргументы ПОСЛЕ ./tests/tools.go
           MODULE_NAME="${{ vars.MODULE_NAME }}"
           if [[ "$MODULE_NAME" == *"sds-node-configurator"* ]]; then
-            TEST_RUN="TestNodeHealthCheck|TestLvg"
+            TEST_FILES="tests/00_healthcheck_test.go tests/01_sds_nc_test.go"
           elif [[ "$MODULE_NAME" == *"sds-replicated-volume"* ]]; then
-            TEST_RUN="TestNodeHealthCheck|TestPVC"
+            TEST_FILES="tests/00_healthcheck_test.go tests/03_sds_lv_test.go"
           elif [[ "$MODULE_NAME" == *"data-export"* ]]; then
-            TEST_RUN="TestNodeHealthCheck|TestDataExport"
+            TEST_FILES="tests/00_healthcheck_test.go tests/base_test.go"
           else
-            TEST_RUN="TestNodeHealthCheck"
+            TEST_FILES="tests/00_healthcheck_test.go"
           fi
           
-          echo "Running tests from ./tests/ with filter: ${TEST_RUN}"
+          echo "Running smoke tests for: ${MODULE_NAME}"
+          echo "Test files: ./tests/tools.go ${TEST_FILES}"
           echo "Namespace: ${TEST_NAMESPACE}"
           echo "SSH Host: ${{ secrets.E2E_SSH_HOST }}"
           
-          # Проверяем структуру и ищем определения
-          echo "=== Available test files ==="
-          ls -la tests/*.go || true
-          echo ""
-          echo "=== Checking for build tags ==="
-          grep -n "//go:build\|// +build" tests/*.go || echo "No build tags found"
-          echo ""
-          echo "=== Searching for HvStorageClass definition ==="
-          grep -rn "type HvStorageClass\|const HvStorageClass" tests/ util/ 2>/dev/null || echo "HvStorageClass not found"
-          echo ""
-          echo "=== Searching for util.Errf definition ==="
-          grep -rn "func Errf" tests/ util/ 2>/dev/null || echo "Errf not found"
-          echo ""
-          
-          # Временно переименуем проблемные файлы, чтобы они не компилировались
-          if [ -f tests/99_finalizer_test.go ]; then
-            mv tests/99_finalizer_test.go tests/99_finalizer_test.go.skip || true
-          fi
-          
-          # Запуск тестов
-          go test -v -timeout 60m -run "${TEST_RUN}" ./tests/ \
+          # Запуск тестов - передаем файлы как аргументы (как в вашем скрипте)
+          go test -v -timeout 60m ./tests/tools.go ${TEST_FILES} \
             -debug \
             -verbose \
             -sshhost ${{ secrets.E2E_SSH_HOST }} \
@@ -250,11 +234,6 @@ jobs:
             -keepstate \
             -clustertype "Ubuntu 22 + Ubuntu 24 + Debian 11" \
             -namespace ${TEST_NAMESPACE} || TEST_EXIT_CODE=$?
-          
-          # Возвращаем файлы обратно
-          if [ -f tests/99_finalizer_test.go.skip ]; then
-            mv tests/99_finalizer_test.go.skip tests/99_finalizer_test.go || true
-          fi
           
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE:-0}" >> $GITHUB_ENV
           exit ${TEST_EXIT_CODE:-0}
