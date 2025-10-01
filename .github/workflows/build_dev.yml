@@ -204,25 +204,43 @@ jobs:
         run: |
           cd /tmp/sds-e2e/testkit_v2
           
-          # Определяем конкретные тестовые файлы в зависимости от модуля
-          # Важно: указываем только нужные файлы, чтобы избежать компиляции несвязанных тестов
+          # Определяем фильтр тестов через -run (запускаем только нужные, компилируя весь пакет)
           MODULE_NAME="${{ vars.MODULE_NAME }}"
           if [[ "$MODULE_NAME" == *"sds-node-configurator"* ]]; then
-            TEST_FILES="./tests/tools.go ./tests/00_healthcheck_test.go ./tests/01_sds_nc_test.go"
+            TEST_RUN="TestNodeHealthCheck|TestLvg"
           elif [[ "$MODULE_NAME" == *"sds-replicated-volume"* ]]; then
-            TEST_FILES="./tests/tools.go ./tests/00_healthcheck_test.go ./tests/03_sds_lv_test.go"
+            TEST_RUN="TestNodeHealthCheck|TestPVC"
           elif [[ "$MODULE_NAME" == *"data-export"* ]]; then
-            TEST_FILES="./tests/tools.go ./tests/00_healthcheck_test.go ./tests/base_test.go"
+            TEST_RUN="TestNodeHealthCheck|TestDataExport"
           else
-            TEST_FILES="./tests/tools.go ./tests/00_healthcheck_test.go"
+            TEST_RUN="TestNodeHealthCheck"
           fi
           
-          echo "Running test files: ${TEST_FILES}"
+          echo "Running tests from ./tests/ with filter: ${TEST_RUN}"
           echo "Namespace: ${TEST_NAMESPACE}"
           echo "SSH Host: ${{ secrets.E2E_SSH_HOST }}"
           
-          # Запуск тестов (указываем конкретные файлы, а не весь пакет)
-          go test -v -timeout 60m ${TEST_FILES} \
+          # Проверяем структуру и ищем определения
+          echo "=== Available test files ==="
+          ls -la tests/*.go || true
+          echo ""
+          echo "=== Checking for build tags ==="
+          grep -n "//go:build\|// +build" tests/*.go || echo "No build tags found"
+          echo ""
+          echo "=== Searching for HvStorageClass definition ==="
+          grep -rn "type HvStorageClass\|const HvStorageClass" tests/ util/ 2>/dev/null || echo "HvStorageClass not found"
+          echo ""
+          echo "=== Searching for util.Errf definition ==="
+          grep -rn "func Errf" tests/ util/ 2>/dev/null || echo "Errf not found"
+          echo ""
+          
+          # Временно переименуем проблемные файлы, чтобы они не компилировались
+          if [ -f tests/99_finalizer_test.go ]; then
+            mv tests/99_finalizer_test.go tests/99_finalizer_test.go.skip || true
+          fi
+          
+          # Запуск тестов
+          go test -v -timeout 60m -run "${TEST_RUN}" ./tests/ \
             -debug \
             -verbose \
             -sshhost ${{ secrets.E2E_SSH_HOST }} \
@@ -232,6 +250,11 @@ jobs:
             -keepstate \
             -clustertype "Ubuntu 22 + Ubuntu 24 + Debian 11" \
             -namespace ${TEST_NAMESPACE} || TEST_EXIT_CODE=$?
+          
+          # Возвращаем файлы обратно
+          if [ -f tests/99_finalizer_test.go.skip ]; then
+            mv tests/99_finalizer_test.go.skip tests/99_finalizer_test.go || true
+          fi
           
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE:-0}" >> $GITHUB_ENV
           exit ${TEST_EXIT_CODE:-0}
