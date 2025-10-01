@@ -252,7 +252,7 @@ jobs:
           echo "Cleanup completed"
 
       - name: Upload test logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: e2e-smoke-test-logs-${{ vars.MODULE_NAME }}-${{ github.run_id }}
