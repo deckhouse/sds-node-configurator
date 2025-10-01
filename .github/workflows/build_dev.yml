@@ -204,25 +204,25 @@ jobs:
         run: |
           cd /tmp/sds-e2e/testkit_v2
           
-          # Определяем фильтр тестов в зависимости от модуля (через -run)
+          # Определяем конкретные тестовые файлы в зависимости от модуля
+          # Важно: указываем только нужные файлы, чтобы избежать компиляции несвязанных тестов
           MODULE_NAME="${{ vars.MODULE_NAME }}"
           if [[ "$MODULE_NAME" == *"sds-node-configurator"* ]]; then
-            TEST_RUN="-run '^(TestNodeHealthCheck|TestLvg)$'"
+            TEST_FILES="./tests/tools.go ./tests/00_healthcheck_test.go ./tests/01_sds_nc_test.go"
           elif [[ "$MODULE_NAME" == *"sds-replicated-volume"* ]]; then
-            TEST_RUN="-run '^(TestNodeHealthCheck|TestPVC)$'"
+            TEST_FILES="./tests/tools.go ./tests/00_healthcheck_test.go ./tests/03_sds_lv_test.go"
           elif [[ "$MODULE_NAME" == *"data-export"* ]]; then
-            TEST_RUN="-run '^(TestNodeHealthCheck|TestDataExport)$'"
+            TEST_FILES="./tests/tools.go ./tests/00_healthcheck_test.go ./tests/base_test.go"
           else
-            TEST_RUN="-run '^TestNodeHealthCheck$'"
+            TEST_FILES="./tests/tools.go ./tests/00_healthcheck_test.go"
           fi
           
-          echo "Running tests from: github.com/deckhouse/sds-e2e/tests"
-          echo "Test filter: ${TEST_RUN}"
+          echo "Running test files: ${TEST_FILES}"
           echo "Namespace: ${TEST_NAMESPACE}"
           echo "SSH Host: ${{ secrets.E2E_SSH_HOST }}"
           
-          # Запуск тестов (используем полный путь модуля)
-          go test -v -timeout 60m ${TEST_RUN} github.com/deckhouse/sds-e2e/tests \
+          # Запуск тестов (указываем конкретные файлы, а не весь пакет)
+          go test -v -timeout 60m ${TEST_FILES} \
             -debug \
             -verbose \
             -sshhost ${{ secrets.E2E_SSH_HOST }} \
