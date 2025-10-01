@@ -162,7 +162,7 @@ jobs:
           svacer_import_password: "${{ secrets.SVACER_IMPORT_PASSWORD }}"
           svace_analyze_ssh_private_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
 
- # E2E smoke тесты - запускаются после сборки при наличии лейбла e2e-smoke-test
+  # E2E smoke тесты - запускаются после сборки при наличии лейбла e2e-smoke-test
   run_e2e_smoke_tests:
     if: ${{ contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test') }}
     name: Run E2E Smoke Tests
@@ -170,231 +170,111 @@ jobs:
     needs:
       - dev_setup_build
     steps:
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v3
+      - name: Setup Go
+        uses: actions/setup-go@v4
         with:
-          version: 'latest'
+          go-version: '1.22'
 
-      - name: Setup kubeconfig
+      - name: Clone sds-e2e repository
         run: |
+          rm -rf /tmp/sds-e2e
+          git clone https://github.com/deckhouse/sds-e2e.git /tmp/sds-e2e
+          cd /tmp/sds-e2e/testkit_v2
+          go mod download
+
+      - name: Setup test environment
+        run: |
+          # Подготовка kubeconfig
           mkdir -p ~/.kube
-          echo "${{ secrets.E2E_CLUSTER_KUBECONFIG }}" | base64 -d > ~/.kube/e2e-cluster-config
+          echo "${{ secrets.E2E_KUBECONFIG }}" | base64 -d > ~/.kube/e2e-config
+          
+          # Подготовка SSH ключа
+          mkdir -p ~/.ssh
+          echo "${{ secrets.E2E_SSH_PRIVATE_KEY }}" > ~/.ssh/e2e_key
+          chmod 600 ~/.ssh/e2e_key
+          
+          # Генерируем уникальный namespace для тестов
+          TEST_NAMESPACE="e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}"
+          echo "TEST_NAMESPACE=${TEST_NAMESPACE}" >> $GITHUB_ENV
+          echo "Generated namespace: ${TEST_NAMESPACE}"
 
-      - name: Create E2E test Job in cluster
+      - name: Run E2E smoke tests
+        env:
+          LICENSE_KEY: ${{ secrets.E2E_DECKHOUSE_LICENSE }}
         run: |
-          export KUBECONFIG=~/.kube/e2e-cluster-config
+          cd /tmp/sds-e2e/testkit_v2
           
-          # Генерируем уникальное имя для job
-          JOB_NAME="e2e-test-${{ vars.MODULE_NAME }}-${{ github.run_id }}"
-          NAMESPACE="e2e-tests"
-          
-          # Создаем namespace если не существует
-          kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-          
-          # Создаем secrets для тестов
-          kubectl create secret generic e2e-test-secrets \
-            --from-literal=ssh-host="${{ secrets.SSH_HOST }}" \
-            --from-literal=license="${{ secrets.DECKHOUSE_LICENSE }}" \
-            --namespace=$NAMESPACE \
-            --dry-run=client -o yaml | kubectl apply -f -
-          
-          # Создаем kubeconfig secret
-          echo "${{ secrets.KUBECONFIG_HYPERVISOR }}" | base64 -d > /tmp/hypervisor-kubeconfig
-          kubectl create secret generic e2e-kubeconfigs \
-            --from-file=hypervisor=/tmp/hypervisor-kubeconfig \
-            --namespace=$NAMESPACE \
-            --dry-run=client -o yaml | kubectl apply -f -
-          rm /tmp/hypervisor-kubeconfig
-          
-          # Создаем SSH key secret
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > /tmp/ssh-key
-          kubectl create secret generic e2e-ssh-key \
-            --from-file=id_rsa=/tmp/ssh-key \
-            --namespace=$NAMESPACE \
-            --dry-run=client -o yaml | kubectl apply -f -
-          rm /tmp/ssh-key
-          
-          # Параметры для smoke тестов (быстрые, на hypervisor)
-          TEST_ARGS="-v -timeout 30m -verbose -debug -stand metal -hypervisorkconfig /etc/e2e/kubeconfigs/hypervisor -sshhost \$(cat /etc/e2e/secrets/ssh-host) -sshkey /etc/e2e/ssh/id_rsa"
-          
-          # Smoke тесты - запускаем через -run чтобы фильтровать конкретные тесты
+          # Определяем паттерн тестов в зависимости от модуля
           MODULE_NAME="${{ vars.MODULE_NAME }}"
           if [[ "$MODULE_NAME" == *"sds-node-configurator"* ]]; then
-            TEST_PATTERN="./tests/"
-            TEST_RUN="-run '^(TestNodeHealthCheck|TestLvg)$'"
+            TEST_PATTERN="./tests/00_healthcheck_test.go ./tests/01_sds_nc_test.go"
           elif [[ "$MODULE_NAME" == *"sds-replicated-volume"* ]]; then
-            TEST_PATTERN="./tests/"
-            TEST_RUN="-run '^(TestNodeHealthCheck|TestPVC)$'"
+            TEST_PATTERN="./tests/00_healthcheck_test.go ./tests/03_sds_lv_test.go"
           elif [[ "$MODULE_NAME" == *"data-export"* ]]; then
-            TEST_PATTERN="./tests/"
-            TEST_RUN="-run '^(TestNodeHealthCheck|TestDataExport)$'"
+            TEST_PATTERN="./tests/00_healthcheck_test.go ./tests/base_test.go"
           else
-            TEST_PATTERN="./tests/"
-            TEST_RUN="-run '^TestNodeHealthCheck$'"
+            TEST_PATTERN="./tests/00_healthcheck_test.go"
           fi
           
-          # Создаем Job манифест
-          cat <<EOF | kubectl apply -f -
-          apiVersion: batch/v1
-          kind: Job
-          metadata:
-            name: ${JOB_NAME}
-            namespace: ${NAMESPACE}
-            labels:
-              app: e2e-tests
-              module: ${{ vars.MODULE_NAME }}
-              pr: "${{ github.event.pull_request.number }}"
-              run-id: "${{ github.run_id }}"
-          spec:
-            ttlSecondsAfterFinished: 86400  # Удалить через 24 часа
-            backoffLimit: 0  # Не перезапускать при ошибке
-            template:
-              metadata:
-                labels:
-                  app: e2e-tests
-                  module: ${{ vars.MODULE_NAME }}
-              spec:
-                restartPolicy: Never
-                containers:
-                - name: e2e-tests
-                  image: golang:1.24
-                  command:
-                  - /bin/bash
-                  - -c
-                  - |
-                    set -e
-                    echo "Cloning sds-e2e repository..."
-                    git clone https://github.com/deckhouse/sds-e2e.git /workspace/sds-e2e
-                    cd /workspace/sds-e2e/testkit_v2
-                    
-                    echo "Installing dependencies..."
-                    go mod download
-                    
-                    echo "Running E2E tests..."
-                    echo "Module: ${MODULE_NAME}"
-                    echo "Test pattern: ${TEST_PATTERN}"
-                    echo "Test run filter: ${TEST_RUN}"
-                    echo "Test args: ${TEST_ARGS}"
-                    
-                    export LICENSE_KEY=\$(cat /etc/e2e/secrets/license)
-                    go test ${TEST_ARGS} ${TEST_RUN} ${TEST_PATTERN}
-                  env:
-                  - name: MODULE_NAME
-                    value: "${{ vars.MODULE_NAME }}"
-                  - name: TEST_PATTERN
-                    value: "${TEST_PATTERN}"
-                  - name: TEST_RUN
-                    value: "${TEST_RUN}"
-                  - name: TEST_ARGS
-                    value: "${TEST_ARGS}"
-                  - name: MODULE_UNDER_TEST
-                    value: "${{ vars.MODULE_NAME }}"
-                  - name: TEST_TYPE
-                    value: "smoke"
-                  - name: PR_NUMBER
-                    value: "${{ github.event.pull_request.number }}"
-                  - name: COMMIT_SHA
-                    value: "${{ github.sha }}"
-                  volumeMounts:
-                  - name: e2e-secrets
-                    mountPath: /etc/e2e/secrets
-                    readOnly: true
-                  - name: e2e-kubeconfigs
-                    mountPath: /etc/e2e/kubeconfigs
-                    readOnly: true
-                  - name: e2e-ssh-key
-                    mountPath: /etc/e2e/ssh
-                    readOnly: true
-                  resources:
-                    requests:
-                      memory: "4Gi"
-                      cpu: "2"
-                    limits:
-                      memory: "8Gi"
-                      cpu: "4"
-                volumes:
-                - name: e2e-secrets
-                  secret:
-                    secretName: e2e-test-secrets
-                - name: e2e-kubeconfigs
-                  secret:
-                    secretName: e2e-kubeconfigs
-                - name: e2e-ssh-key
-                  secret:
-                    secretName: e2e-ssh-key
-                    defaultMode: 0600
-          EOF
+          echo "Running tests: ${TEST_PATTERN}"
+          echo "Namespace: ${TEST_NAMESPACE}"
+          echo "SSH Host: ${{ secrets.E2E_SSH_HOST }}"
           
-          echo "Job ${JOB_NAME} created in namespace ${NAMESPACE}"
-          echo "JOB_NAME=${JOB_NAME}" >> $GITHUB_ENV
-          echo "NAMESPACE=${NAMESPACE}" >> $GITHUB_ENV
+          # Запуск тестов
+          go test -v -timeout 60m ./tests/tools.go ${TEST_PATTERN} \
+            -debug \
+            -verbose \
+            -sshhost ${{ secrets.E2E_SSH_HOST }} \
+            -sshkey ~/.ssh/e2e_key \
+            -hypervisorkconfig ~/.kube/e2e-config \
+            -skipoptional \
+            -keepstate \
+            -clustertype "Ubuntu 22 + Ubuntu 24 + Debian 11" \
+            -namespace ${TEST_NAMESPACE} || TEST_EXIT_CODE=$?
+          
+          echo "TEST_EXIT_CODE=${TEST_EXIT_CODE:-0}" >> $GITHUB_ENV
+          exit ${TEST_EXIT_CODE:-0}
 
-      - name: Wait for E2E tests to complete
-        run: |
-          export KUBECONFIG=~/.kube/e2e-cluster-config
-          
-          echo "Waiting for Job ${JOB_NAME} to complete..."
-          
-          # Ждем завершения Job (максимум 90 минут)
-          kubectl wait --for=condition=complete --timeout=90m \
-            job/${JOB_NAME} -n ${NAMESPACE} || true
-          
-          # Проверяем статус
-          JOB_STATUS=$(kubectl get job ${JOB_NAME} -n ${NAMESPACE} -o jsonpath='{.status.conditions[0].type}')
-          
-          echo "Job status: ${JOB_STATUS}"
-          
-          # Получаем логи
-          POD_NAME=$(kubectl get pods -n ${NAMESPACE} -l job-name=${JOB_NAME} -o jsonpath='{.items[0].metadata.name}')
-          echo "Pod name: ${POD_NAME}"
-          
-          echo "=== E2E Test Logs ==="
-          kubectl logs ${POD_NAME} -n ${NAMESPACE} || true
-          echo "====================="
-          
-          # Проверяем успешность
-          if [ "${JOB_STATUS}" != "Complete" ]; then
-            echo "Job failed or timed out"
-            exit 1
-          fi
-          
-          echo "E2E tests completed successfully!"
-
-      - name: Save test logs as artifact
+      - name: Cleanup test resources
         if: always()
         run: |
-          export KUBECONFIG=~/.kube/e2e-cluster-config
+          export KUBECONFIG=~/.kube/e2e-config
           
-          POD_NAME=$(kubectl get pods -n ${NAMESPACE} -l job-name=${JOB_NAME} -o jsonpath='{.items[0].metadata.name}')
-          mkdir -p test-logs
-          kubectl logs ${POD_NAME} -n ${NAMESPACE} > test-logs/e2e-test-logs.txt 2>&1 || true
+          echo "Cleaning up namespace: ${TEST_NAMESPACE}"
+          
+          # Удаляем созданные тестами ресурсы
+          kubectl delete namespace ${TEST_NAMESPACE} --ignore-not-found=true --timeout=5m || true
+          
+          # Дополнительная очистка VD и VM если остались
+          kubectl delete vd -n ${TEST_NAMESPACE} --all --ignore-not-found=true --timeout=2m || true
+          kubectl delete vm -n ${TEST_NAMESPACE} --all --ignore-not-found=true --timeout=2m || true
+          
+          echo "Cleanup completed"
 
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
+      - name: Upload test logs
+        uses: actions/upload-artifact@v3
         if: always()
         with:
-          name: e2e-smoke-test-results-${{ vars.MODULE_NAME }}-${{ github.run_id }}
-          path: test-logs/
+          name: e2e-smoke-test-logs-${{ vars.MODULE_NAME }}-${{ github.run_id }}
+          path: /tmp/sds-e2e/testkit_v2/*.log
           retention-days: 7
+          if-no-files-found: ignore
 
       - name: Comment PR with results
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const status = '${{ job.status }}' === 'success' ? '✅' : '❌';
-            const statusText = '${{ job.status }}' === 'success' ? 'passed' : 'failed';
+            const exitCode = process.env.TEST_EXIT_CODE || '0';
+            const status = exitCode === '0' ? '✅' : '❌';
+            const statusText = exitCode === '0' ? 'passed' : 'failed';
             
             const comment = `## E2E Smoke Tests Results ${status}
             
             **Module:** ${{ vars.MODULE_NAME }}
             **Test Type:** Smoke tests
-            **Job Name:** \`${process.env.JOB_NAME}\`
-            **Namespace:** \`${process.env.NAMESPACE}\`
-            
-            Smoke tests ${statusText}!
-            
-            Tests were executed in a Kubernetes Job in the e2e cluster (hypervisor environment).
+            **Namespace:** \`${process.env.TEST_NAMESPACE}\`
+            **Status:** Tests ${statusText}
             
             <details>
             <summary>View Details</summary>
@@ -402,14 +282,13 @@ jobs:
             - **Workflow:** ${{ github.workflow }}
             - **Run ID:** ${{ github.run_id }}
             - **Commit:** ${{ github.sha }}
+            - **PR:** #${{ github.event.pull_request.number }}
             - **Triggered by:** \`e2e-smoke-test\` label
-            - **Cluster:** E2E dedicated cluster
-            - **Duration:** ~10-15 minutes
+            - **Exit Code:** ${exitCode}
             
-            **View logs in cluster:**
-            \`\`\`bash
-            kubectl logs -n ${process.env.NAMESPACE} -l job-name=${process.env.JOB_NAME}
-            \`\`\`
+            Tests were executed directly on the GitHub Actions runner against the e2e cluster.
+            
+            **Artifacts:** Test logs are available in workflow artifacts (if any).
             
             </details>`;
             
@@ -421,13 +300,3 @@ jobs:
                 body: comment
               });
             }
-
-      - name: Cleanup test Job
-        if: always()
-        run: |
-          export KUBECONFIG=~/.kube/e2e-cluster-config
-          
-          # Удаляем Job (Pod удалится автоматически)
-          kubectl delete job ${JOB_NAME} -n ${NAMESPACE} --ignore-not-found=true || true
-          
-          echo "Cleaned up Job ${JOB_NAME} in namespace ${NAMESPACE}"
