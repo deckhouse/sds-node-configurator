@@ -216,13 +216,13 @@ jobs:
             TEST_RUN="-run '^TestNodeHealthCheck$'"
           fi
           
-          echo "Running tests from: ./tests/"
+          echo "Running tests from: github.com/deckhouse/sds-e2e/tests"
           echo "Test filter: ${TEST_RUN}"
           echo "Namespace: ${TEST_NAMESPACE}"
           echo "SSH Host: ${{ secrets.E2E_SSH_HOST }}"
           
-          # Запуск тестов (весь пакет с фильтром)
-          go test -v -timeout 60m ${TEST_RUN} ./tests/ \
+          # Запуск тестов (используем полный путь модуля)
+          go test -v -timeout 60m ${TEST_RUN} github.com/deckhouse/sds-e2e/tests \
             -debug \
             -verbose \
             -sshhost ${{ secrets.E2E_SSH_HOST }} \
