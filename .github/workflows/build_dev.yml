@@ -175,15 +175,10 @@ jobs:
         with:
           version: 'latest'
 
-      - name: Setup kubectl
+      - name: Setup kubeconfig
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.E2E_CLUSTER_KUBECONFIG }}" | base64 -d > ~/.kube/e2e-cluster-config
-          export KUBECONFIG=~/.kube/e2e-cluster-config
-          
-          # Проверка доступа к кластеру
-          kubectl cluster-info
-          kubectl get nodes
 
       - name: Create E2E test Job in cluster
         run: |
