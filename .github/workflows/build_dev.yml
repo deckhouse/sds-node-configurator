@@ -204,24 +204,25 @@ jobs:
         run: |
           cd /tmp/sds-e2e/testkit_v2
           
-          # Определяем паттерн тестов в зависимости от модуля
+          # Определяем фильтр тестов в зависимости от модуля (через -run)
           MODULE_NAME="${{ vars.MODULE_NAME }}"
           if [[ "$MODULE_NAME" == *"sds-node-configurator"* ]]; then
-            TEST_PATTERN="./tests/00_healthcheck_test.go ./tests/01_sds_nc_test.go"
+            TEST_RUN="-run '^(TestNodeHealthCheck|TestLvg)$'"
           elif [[ "$MODULE_NAME" == *"sds-replicated-volume"* ]]; then
-            TEST_PATTERN="./tests/00_healthcheck_test.go ./tests/03_sds_lv_test.go"
+            TEST_RUN="-run '^(TestNodeHealthCheck|TestPVC)$'"
           elif [[ "$MODULE_NAME" == *"data-export"* ]]; then
-            TEST_PATTERN="./tests/00_healthcheck_test.go ./tests/base_test.go"
+            TEST_RUN="-run '^(TestNodeHealthCheck|TestDataExport)$'"
           else
-            TEST_PATTERN="./tests/00_healthcheck_test.go"
+            TEST_RUN="-run '^TestNodeHealthCheck$'"
           fi
           
-          echo "Running tests: ${TEST_PATTERN}"
+          echo "Running tests from: ./tests/"
+          echo "Test filter: ${TEST_RUN}"
           echo "Namespace: ${TEST_NAMESPACE}"
           echo "SSH Host: ${{ secrets.E2E_SSH_HOST }}"
           
-          # Запуск тестов
-          go test -v -timeout 60m ./tests/tools.go ${TEST_PATTERN} \
+          # Запуск тестов (весь пакет с фильтром)
+          go test -v -timeout 60m ${TEST_RUN} ./tests/ \
             -debug \
             -verbose \
             -sshhost ${{ secrets.E2E_SSH_HOST }} \
