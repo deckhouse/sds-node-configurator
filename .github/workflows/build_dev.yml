@@ -161,3 +161,138 @@ jobs:
           svacer_import_user: "${{ secrets.SVACER_IMPORT_USER }}"
           svacer_import_password: "${{ secrets.SVACER_IMPORT_PASSWORD }}"
           svace_analyze_ssh_private_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
+
+  # E2E smoke тесты - запускаются после сборки при наличии лейбла e2e-smoke-test
+  run_e2e_smoke_tests:
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test') }}
+    name: Run E2E Smoke Tests
+    runs-on: [self-hosted, regular]
+    needs:
+      - dev_setup_build
+    env:
+      E2E_NAMESPACE: "e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}"
+    steps:
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
+
+      - name: Clone sds-e2e repository
+        run: |
+          git clone https://github.com/deckhouse/sds-e2e.git /tmp/sds-e2e
+          cd /tmp/sds-e2e
+          echo "E2E repo cloned successfully"
+
+      - name: Setup test environment
+        run: |
+          # Создаем директорию для credentials
+          mkdir -p ~/.kube ~/.ssh
+          
+          # Сохраняем kubeconfig
+          echo "${{ secrets.E2E_CLUSTER_KUBECONFIG }}" | base64 -d > ~/.kube/e2e-cluster.config
+          
+          # Сохраняем SSH ключ
+          echo "${{ secrets.E2E_SSH_PRIVATE_KEY }}" > ~/.ssh/e2e_rsa
+          chmod 600 ~/.ssh/e2e_rsa
+          
+          echo "Test environment prepared"
+
+      - name: Run E2E tests
+        id: run_tests
+        run: |
+          cd /tmp/sds-e2e/testkit_v2
+          
+          # Экспортируем переменные
+          export LICENSE_KEY="${{ secrets.E2E_DECKHOUSE_LICENSE }}"
+          
+          # Определяем тесты для запуска в зависимости от модуля
+          MODULE_NAME="${{ vars.MODULE_NAME }}"
+          if [[ "$MODULE_NAME" == *"sds-node-configurator"* ]]; then
+            TEST_PATTERN="./tests/00_healthcheck_test.go ./tests/01_sds_nc_test.go"
+          elif [[ "$MODULE_NAME" == *"sds-replicated-volume"* ]]; then
+            TEST_PATTERN="./tests/00_healthcheck_test.go ./tests/03_sds_lv_test.go"
+          elif [[ "$MODULE_NAME" == *"data-export"* ]]; then
+            TEST_PATTERN="./tests/00_healthcheck_test.go ./tests/base_test.go"
+          else
+            TEST_PATTERN="./tests/00_healthcheck_test.go"
+          fi
+          
+          echo "Running tests: ${TEST_PATTERN}"
+          echo "Namespace: ${E2E_NAMESPACE}"
+          
+          # Запускаем тесты
+          go test -v -timeout 30m ${TEST_PATTERN} \
+            -debug \
+            -verbose \
+            -sshhost "${{ secrets.E2E_SSH_HOST }}" \
+            -sshkey ~/.ssh/e2e_rsa \
+            -hypervisorkconfig ~/.kube/e2e-cluster.config \
+            -skipoptional \
+            -keepstate \
+            -clustertype "Ubuntu 22 + Ubuntu 24 + Debian 11" \
+            -namespace "${E2E_NAMESPACE}" \
+            2>&1 | tee /tmp/e2e-test-output.log
+          
+          TEST_EXIT_CODE=${PIPESTATUS[0]}
+          echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV
+          exit ${TEST_EXIT_CODE}
+
+      - name: Cleanup E2E resources
+        if: always()
+        run: |
+          echo "Cleaning up E2E resources..."
+          export KUBECONFIG=~/.kube/e2e-cluster.config
+          
+          # Удаляем namespace (удалит все ресурсы внутри: VD, VM и т.д.)
+          kubectl delete namespace "${E2E_NAMESPACE}" --ignore-not-found=true --timeout=5m || true
+          
+          echo "Cleanup completed for namespace ${E2E_NAMESPACE}"
+
+      - name: Upload test logs
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: e2e-smoke-test-logs-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}
+          path: /tmp/e2e-test-output.log
+          retention-days: 7
+
+      - name: Comment PR with results
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const exitCode = process.env.TEST_EXIT_CODE || '1';
+            const status = exitCode === '0' ? '✅' : '❌';
+            const statusText = exitCode === '0' ? 'passed' : 'failed';
+            
+            const comment = `## E2E Smoke Tests Results ${status}
+            
+            **Module:** ${{ vars.MODULE_NAME }}
+            **Test Type:** Smoke tests
+            **Namespace:** \`${process.env.E2E_NAMESPACE}\`
+            **Status:** ${statusText}
+            
+            <details>
+            <summary>View Details</summary>
+            
+            - **Workflow:** ${{ github.workflow }}
+            - **Run ID:** ${{ github.run_id }}
+            - **Commit:** ${{ github.sha }}
+            - **Triggered by:** \`e2e-smoke-test\` label
+            - **Duration:** ~10-15 minutes
+            
+            Tests were executed on the GitHub Actions runner and connected directly to the E2E cluster.
+            
+            **Download logs:**
+            [View artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            
+            </details>`;
+            
+            if (context.eventName === "pull_request" || context.eventName === "pull_request_target") {
+              github.rest.issues.createComment({
+                issue_number: context.payload.pull_request.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
