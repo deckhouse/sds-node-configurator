@@ -184,9 +184,11 @@ jobs:
 
       - name: Setup test environment
         run: |
-          # Подготовка kubeconfig
-          mkdir -p ~/.kube
-          echo "${{ secrets.E2E_KUBECONFIG }}" | base64 -d > ~/.kube/e2e-config
+          # Подготовка kubeconfig для тестов
+          # Тест ищет конфиг по пути ../../sds-e2e-cfg/kube-hypervisor.config относительно testkit_v2
+          mkdir -p /tmp/sds-e2e-cfg
+          echo "${{ secrets.E2E_KUBECONFIG }}" | base64 -d > /tmp/sds-e2e-cfg/kube-hypervisor.config
+          chmod 600 /tmp/sds-e2e-cfg/kube-hypervisor.config
           
           # Подготовка SSH ключа
           mkdir -p ~/.ssh
@@ -222,6 +224,7 @@ jobs:
           echo "Test files: ./tests/tools.go ${TEST_FILES}"
           echo "Namespace: ${TEST_NAMESPACE}"
           echo "SSH Host: ${{ secrets.E2E_SSH_HOST }}"
+          echo "Kubeconfig: ../../sds-e2e-cfg/kube-hypervisor.config"
           
           # Запуск тестов - передаем файлы как аргументы (как в вашем скрипте)
           go test -v -timeout 60m ./tests/tools.go ${TEST_FILES} \
@@ -229,7 +232,7 @@ jobs:
             -verbose \
             -sshhost ${{ secrets.E2E_SSH_HOST }} \
             -sshkey ~/.ssh/e2e_key \
-            -hypervisorkconfig ~/.kube/e2e-config \
+            -hypervisorkconfig ../../sds-e2e-cfg/kube-hypervisor.config \
             -skipoptional \
             -keepstate \
             -clustertype "Ubuntu 22 + Ubuntu 24 + Debian 11" \
@@ -241,18 +244,8 @@ jobs:
       - name: Cleanup test resources
         if: always()
         run: |
-          export KUBECONFIG=~/.kube/e2e-config
-          
-          echo "Cleaning up namespace: ${TEST_NAMESPACE}"
-          
-          # Удаляем созданные тестами ресурсы
-          kubectl delete namespace ${TEST_NAMESPACE} --ignore-not-found=true --timeout=5m || true
-          
-          # Дополнительная очистка VD и VM если остались
-          kubectl delete vd -n ${TEST_NAMESPACE} --all --ignore-not-found=true --timeout=2m || true
-          kubectl delete vm -n ${TEST_NAMESPACE} --all --ignore-not-found=true --timeout=2m || true
-          
-          echo "Cleanup completed"
+          echo "Cleanup is handled by e2e tests themselves (via -keepstate flag or test teardown)"
+          echo "Namespace: ${TEST_NAMESPACE}"
 
       - name: Upload test logs
         uses: actions/upload-artifact@v4
