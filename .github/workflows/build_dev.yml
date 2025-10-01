@@ -170,6 +170,11 @@ jobs:
     needs:
       - dev_setup_build
     steps:
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
       - name: Setup kubectl
         run: |
           mkdir -p ~/.kube
