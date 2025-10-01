@@ -257,7 +257,7 @@ jobs:
                 restartPolicy: Never
                 containers:
                 - name: e2e-tests
-                  image: golang:1.22
+                  image: golang:1.24
                   command:
                   - /bin/bash
                   - -c
@@ -370,7 +370,7 @@ jobs:
           kubectl logs ${POD_NAME} -n ${NAMESPACE} > test-logs/e2e-test-logs.txt 2>&1 || true
 
       - name: Upload test results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: e2e-smoke-test-results-${{ vars.MODULE_NAME }}-${{ github.run_id }}
