@@ -178,7 +178,7 @@ jobs:
       - name: Clone sds-e2e repository
         run: |
           rm -rf /tmp/sds-e2e
-          git clone --branch main https://github.com/deckhouse/sds-e2e.git /tmp/sds-e2e
+          git clone --branch ndemchuk-e2e-tests https://github.com/deckhouse/sds-e2e.git /tmp/sds-e2e
           cd /tmp/sds-e2e/testkit_v2
           go mod download
 
