@@ -234,7 +234,6 @@ jobs:
             -sshkey ~/.ssh/e2e_key \
             -hypervisorkconfig kube-hypervisor.config \
             -skipoptional \
-            -keepstate \
             -clustertype "Ubuntu 22 + Ubuntu 24 + Debian 11" \
             -namespace ${TEST_NAMESPACE} || TEST_EXIT_CODE=$?
           
