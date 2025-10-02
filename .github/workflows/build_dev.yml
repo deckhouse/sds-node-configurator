@@ -178,7 +178,7 @@ jobs:
       - name: Clone sds-e2e repository
         run: |
           rm -rf /tmp/sds-e2e
-          git clone --branch ndemchuk-e2e-tests https://github.com/deckhouse/sds-e2e.git /tmp/sds-e2e
+          git clone --branch main https://github.com/deckhouse/sds-e2e.git /tmp/sds-e2e
           cd /tmp/sds-e2e/testkit_v2
           go mod download
 
@@ -212,11 +212,11 @@ jobs:
 
           MODULE_NAME="${{ vars.MODULE_NAME }}"
           if [[ "$MODULE_NAME" == *"sds-node-configurator"* ]]; then
-            TEST_FILES="tests/01_sds_nc_test.go"
+            TEST_FILES="./tests/01_sds_nc_test.go"
           elif [[ "$MODULE_NAME" == *"sds-replicated-volume"* ]]; then
             TEST_FILES="tests/03_sds_lv_test.go"
           elif [[ "$MODULE_NAME" == *"data-export"* ]]; then
-            TEST_FILES="tests/base_test.go"
+            TEST_FILES="./tests/base_test.go"
           else
             echo "Warning: No specific tests defined for module ${MODULE_NAME}"
             TEST_FILES=""
