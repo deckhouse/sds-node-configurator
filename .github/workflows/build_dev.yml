@@ -206,30 +206,29 @@ jobs:
         run: |
           cd /tmp/sds-e2e/testkit_v2
           
-          # DRAFT
-          # Определяем конкретные файлы тестов для каждого модуля
-          # Важно: передаем их как аргументы ПОСЛЕ ./tests/tools.go
-
+          # Определяем конкретные файлы тестов для каждого модуля с абсолютными путями
+          BASE_PATH="/tmp/sds-e2e/testkit_v2/tests"
           MODULE_NAME="${{ vars.MODULE_NAME }}"
+          
           if [[ "$MODULE_NAME" == *"sds-node-configurator"* ]]; then
-            TEST_FILES="./tests/01_sds_nc_test.go"
+            TEST_FILES="${BASE_PATH}/01_sds_nc_test.go"
           elif [[ "$MODULE_NAME" == *"sds-replicated-volume"* ]]; then
-            TEST_FILES="tests/03_sds_lv_test.go"
+            TEST_FILES="${BASE_PATH}/03_sds_lv_test.go"
           elif [[ "$MODULE_NAME" == *"data-export"* ]]; then
-            TEST_FILES="./tests/base_test.go"
+            TEST_FILES="${BASE_PATH}/base_test.go"
           else
             echo "Warning: No specific tests defined for module ${MODULE_NAME}"
             TEST_FILES=""
           fi
           
           echo "Running smoke tests for: ${MODULE_NAME}"
-          echo "Test files: ./tests/tools.go ${TEST_FILES}"
+          echo "Test files: ${BASE_PATH}/tools.go ${TEST_FILES}"
           echo "Namespace: ${TEST_NAMESPACE}"
           echo "SSH Host: ${{ secrets.E2E_SSH_HOST }}"
           echo "Kubeconfig file: kube-hypervisor.config"
           
-          
-          go test -v -timeout 60m ./tests/tools.go ${TEST_FILES} \
+          # Запуск тестов с абсолютными путями
+          go test -v -timeout 60m ${BASE_PATH}/tools.go ${TEST_FILES} \
             -debug \
             -verbose \
             -sshhost ${{ secrets.E2E_SSH_HOST }} \
