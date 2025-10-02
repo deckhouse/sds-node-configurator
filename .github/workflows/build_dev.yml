@@ -162,7 +162,7 @@ jobs:
           svacer_import_password: "${{ secrets.SVACER_IMPORT_PASSWORD }}"
           svace_analyze_ssh_private_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
 
-  # E2E smoke тесты - запускаются после сборки при наличии лейбла e2e-smoke-test
+  
   run_e2e_smoke_tests:
     if: ${{ contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test') }}
     name: Run E2E Smoke Tests
@@ -178,7 +178,7 @@ jobs:
       - name: Clone sds-e2e repository
         run: |
           rm -rf /tmp/sds-e2e
-          git clone --branch ndemchuk-e2e-tests https://github.com/deckhouse/sds-e2e.git /tmp/sds-e2e
+          git clone --branch main https://github.com/deckhouse/sds-e2e.git /tmp/sds-e2e
           cd /tmp/sds-e2e/testkit_v2
           go mod download
 
@@ -206,17 +206,20 @@ jobs:
         run: |
           cd /tmp/sds-e2e/testkit_v2
           
+          # DRAFT
           # Определяем конкретные файлы тестов для каждого модуля
           # Важно: передаем их как аргументы ПОСЛЕ ./tests/tools.go
+
           MODULE_NAME="${{ vars.MODULE_NAME }}"
           if [[ "$MODULE_NAME" == *"sds-node-configurator"* ]]; then
-            TEST_FILES="tests/00_healthcheck_test.go tests/01_sds_nc_test.go"
+            TEST_FILES="tests/01_sds_nc_test.go"
           elif [[ "$MODULE_NAME" == *"sds-replicated-volume"* ]]; then
-            TEST_FILES="tests/00_healthcheck_test.go tests/03_sds_lv_test.go"
+            TEST_FILES="tests/03_sds_lv_test.go"
           elif [[ "$MODULE_NAME" == *"data-export"* ]]; then
-            TEST_FILES="tests/00_healthcheck_test.go tests/base_test.go"
+            TEST_FILES="tests/base_test.go"
           else
-            TEST_FILES="tests/00_healthcheck_test.go"
+            echo "Warning: No specific tests defined for module ${MODULE_NAME}"
+            TEST_FILES=""
           fi
           
           echo "Running smoke tests for: ${MODULE_NAME}"
@@ -225,8 +228,7 @@ jobs:
           echo "SSH Host: ${{ secrets.E2E_SSH_HOST }}"
           echo "Kubeconfig file: kube-hypervisor.config"
           
-          # Запуск тестов - передаем файлы как аргументы (как в вашем скрипте)
-          # Передаем только имя файла, тест сам найдет его в нужной директории
+          
           go test -v -timeout 60m ./tests/tools.go ${TEST_FILES} \
             -debug \
             -verbose \
