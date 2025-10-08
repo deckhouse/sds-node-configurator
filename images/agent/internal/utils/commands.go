@@ -289,7 +289,7 @@ func (commands) CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []stri
 }
 
 func (commands) CreateThinPool(thinPoolName, vgName string, size int64) (string, error) {
-	args := []string{"lvcreate", "-L", fmt.Sprintf("%dk", size/1024), "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
+	args := []string{"lvcreate", "-ay", "-L", fmt.Sprintf("%dk", size/1024), "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -303,7 +303,7 @@ func (commands) CreateThinPool(thinPoolName, vgName string, size int64) (string,
 }
 
 func (commands) CreateThinPoolFullVGSpace(thinPoolName, vgName string) (string, error) {
-	args := []string{"lvcreate", "-l", "100%FREE", "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
+	args := []string{"lvcreate", "-ay", "-l", "100%FREE", "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -325,7 +325,7 @@ func (commands) CreateThinLogicalVolumeSnapshot(name string, sourceVgName string
 }
 
 func createSnapshotVolume(name string, sourceVgName string, sourceName string, tags []string) (string, error) {
-	args := []string{"lvcreate", "-s", "-kn", "-n", name, fmt.Sprintf("%s/%s", sourceVgName, sourceName), "-y"}
+	args := []string{"lvcreate", "-ay", "-s", "-kn", "-n", name, fmt.Sprintf("%s/%s", sourceVgName, sourceName), "-y"}
 
 	for _, tag := range tags {
 		args = append(args, "--addtag")
@@ -349,7 +349,7 @@ func createSnapshotVolume(name string, sourceVgName string, sourceName string, t
 }
 
 func (commands) CreateThinLogicalVolume(vgName, tpName, lvName string, size int64) (string, error) {
-	args := []string{"lvcreate", "-T", fmt.Sprintf("%s/%s", vgName, tpName), "-n", lvName, "-V", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
+	args := []string{"lvcreate", "-ay", "-T", fmt.Sprintf("%s/%s", vgName, tpName), "-n", lvName, "-V", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -367,7 +367,7 @@ func (commands) CreateThinLogicalVolume(vgName, tpName, lvName string, size int6
 }
 
 func (commands) CreateThickLogicalVolume(vgName, lvName string, size int64, contiguous bool) (string, error) {
-	args := []string{"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
+	args := []string{"lvcreate", "-ay", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
 	if contiguous {
 		args = append(args, "--contiguous", "y")
 	}
