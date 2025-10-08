@@ -63,6 +63,7 @@ type Commands interface {
 	VGChangeAddTag(vGName, tag string) (string, error)
 	VGChangeDelTag(vGName, tag string) (string, error)
 	LVChangeDelTag(lv internal.LVData, tag string) (string, error)
+	ActivateLV(vgName, lvName string) (string, error)
 	UnmarshalDevices(out []byte) ([]internal.Device, error)
 	ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, ctrlName string) error
 }
@@ -345,6 +346,12 @@ func createSnapshotVolume(name string, sourceVgName string, sourceName string, t
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
+	// Принудительная активация созданного снимка логического тома
+	activateCmd, activateErr := commands{}.ActivateLV(sourceVgName, name)
+	if activateErr != nil {
+		return cmd.String(), fmt.Errorf("unable to activate LV: %s, err: %w", activateCmd, activateErr)
+	}
+
 	return cmd.String(), nil
 }
 
@@ -361,6 +368,12 @@ func (commands) CreateThinLogicalVolume(vgName, tpName, lvName string, size int6
 	err := cmd.Run()
 	if err != nil {
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+
+	// Принудительная активация созданного логического тома
+	activateCmd, activateErr := commands{}.ActivateLV(vgName, lvName)
+	if activateErr != nil {
+		return cmd.String(), fmt.Errorf("unable to activate LV: %s, err: %w", activateCmd, activateErr)
 	}
 
 	return cmd.String(), nil
@@ -380,6 +393,12 @@ func (commands) CreateThickLogicalVolume(vgName, lvName string, size int64, cont
 
 	if err := cmd.Run(); err != nil {
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+
+	// Принудительная активация созданного логического тома
+	activateCmd, activateErr := commands{}.ActivateLV(vgName, lvName)
+	if activateErr != nil {
+		return cmd.String(), fmt.Errorf("unable to activate LV: %s, err: %w", activateCmd, activateErr)
 	}
 
 	return cmd.String(), nil
@@ -526,6 +545,21 @@ func (commands) LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
 	tmpStr := filepath.Join("/dev/%s/%s", lv.VGName, lv.LVName)
 	var outs, stdErr bytes.Buffer
 	args := []string{"lvchange", tmpStr, "--deltag", tag}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stdErr: %s", cmd.String(), err, stdErr.String())
+	}
+	return cmd.String(), nil
+}
+
+func (commands) ActivateLV(vgName, lvName string) (string, error) {
+	tmpStr := filepath.Join("/dev/%s/%s", vgName, lvName)
+	var outs, stdErr bytes.Buffer
+	args := []string{"lvchange", "-ay", tmpStr}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
