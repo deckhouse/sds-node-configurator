@@ -63,7 +63,6 @@ type Commands interface {
 	VGChangeAddTag(vGName, tag string) (string, error)
 	VGChangeDelTag(vGName, tag string) (string, error)
 	LVChangeDelTag(lv internal.LVData, tag string) (string, error)
-	ActivateLV(vgName, lvName string) (string, error)
 	UnmarshalDevices(out []byte) ([]internal.Device, error)
 	ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, ctrlName string) error
 }
@@ -290,7 +289,7 @@ func (commands) CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []stri
 }
 
 func (commands) CreateThinPool(thinPoolName, vgName string, size int64) (string, error) {
-	args := []string{"lvcreate", "-L", fmt.Sprintf("%dk", size/1024), "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
+	args := []string{"lvcreate", "-ay", "-L", fmt.Sprintf("%dk", size/1024), "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -304,7 +303,7 @@ func (commands) CreateThinPool(thinPoolName, vgName string, size int64) (string,
 }
 
 func (commands) CreateThinPoolFullVGSpace(thinPoolName, vgName string) (string, error) {
-	args := []string{"lvcreate", "-l", "100%FREE", "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
+	args := []string{"lvcreate", "-ay", "-l", "100%FREE", "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -326,7 +325,7 @@ func (commands) CreateThinLogicalVolumeSnapshot(name string, sourceVgName string
 }
 
 func createSnapshotVolume(name string, sourceVgName string, sourceName string, tags []string) (string, error) {
-	args := []string{"lvcreate", "-s", "-kn", "-n", name, fmt.Sprintf("%s/%s", sourceVgName, sourceName), "-y"}
+	args := []string{"lvcreate", "-ay", "-s", "-kn", "-n", name, fmt.Sprintf("%s/%s", sourceVgName, sourceName), "-y"}
 
 	for _, tag := range tags {
 		args = append(args, "--addtag")
@@ -346,17 +345,11 @@ func createSnapshotVolume(name string, sourceVgName string, sourceName string, t
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
-	// Принудительная активация созданного снимка логического тома
-	activateCmd, activateErr := commands{}.ActivateLV(sourceVgName, name)
-	if activateErr != nil {
-		return cmd.String(), fmt.Errorf("unable to activate LV: %s, err: %w", activateCmd, activateErr)
-	}
-
 	return cmd.String(), nil
 }
 
 func (commands) CreateThinLogicalVolume(vgName, tpName, lvName string, size int64) (string, error) {
-	args := []string{"lvcreate", "-T", fmt.Sprintf("%s/%s", vgName, tpName), "-n", lvName, "-V", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
+	args := []string{"lvcreate", "-ay", "-T", fmt.Sprintf("%s/%s", vgName, tpName), "-n", lvName, "-V", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -370,17 +363,11 @@ func (commands) CreateThinLogicalVolume(vgName, tpName, lvName string, size int6
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 
-	// Принудительная активация созданного логического тома
-	activateCmd, activateErr := commands{}.ActivateLV(vgName, lvName)
-	if activateErr != nil {
-		return cmd.String(), fmt.Errorf("unable to activate LV: %s, err: %w", activateCmd, activateErr)
-	}
-
 	return cmd.String(), nil
 }
 
 func (commands) CreateThickLogicalVolume(vgName, lvName string, size int64, contiguous bool) (string, error) {
-	args := []string{"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
+	args := []string{"lvcreate", "-ay", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
 	if contiguous {
 		args = append(args, "--contiguous", "y")
 	}
@@ -393,12 +380,6 @@ func (commands) CreateThickLogicalVolume(vgName, lvName string, size int64, cont
 
 	if err := cmd.Run(); err != nil {
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
-	}
-
-	// Принудительная активация созданного логического тома
-	activateCmd, activateErr := commands{}.ActivateLV(vgName, lvName)
-	if activateErr != nil {
-		return cmd.String(), fmt.Errorf("unable to activate LV: %s, err: %w", activateCmd, activateErr)
 	}
 
 	return cmd.String(), nil
@@ -545,21 +526,6 @@ func (commands) LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
 	tmpStr := filepath.Join("/dev/%s/%s", lv.VGName, lv.LVName)
 	var outs, stdErr bytes.Buffer
 	args := []string{"lvchange", tmpStr, "--deltag", tag}
-	extendedArgs := lvmStaticExtendedArgs(args)
-	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
-	cmd.Stdout = &outs
-	cmd.Stderr = &stdErr
-
-	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stdErr: %s", cmd.String(), err, stdErr.String())
-	}
-	return cmd.String(), nil
-}
-
-func (commands) ActivateLV(vgName, lvName string) (string, error) {
-	tmpStr := filepath.Join("/dev/%s/%s", vgName, lvName)
-	var outs, stdErr bytes.Buffer
-	args := []string{"lvchange", "-ay", tmpStr}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
