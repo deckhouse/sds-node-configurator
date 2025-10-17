@@ -1,4 +1,4 @@
-{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2" }}
+{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /usr/sbin/thin_dump /usr/sbin/pdata_tools" }}
 
 # Do not remove. It's used in external tests.
 ---
@@ -68,6 +68,7 @@ shell:
       gettext \
       flex \
       glibc-core \
+      thin-provisioning-tools \
       cross-glibc-x86_64
     - cd /src/util-linux
     - ./autogen.sh
