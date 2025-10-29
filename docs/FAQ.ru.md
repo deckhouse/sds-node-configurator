@@ -1,119 +1,91 @@
 ---
-title: " Модуль sds-node-configurator: FAQ"
-description: "Модуль sds-node-configurator, Deckhouse Kubernetes Platform. Частые вопросы и ответы."
+title: "Модуль sds-node-configurator: FAQ"
+description: "Модуль sds-node-configurator: частые вопросы и ответы."
 ---
 {{< alert level="warning" >}}
-Работоспособность модуля гарантируется только при использовании стоковых ядер, поставляемых вместе с [поддерживаемыми дистрибутивами](https://deckhouse.ru/documentation/v1/supported_versions.html#linux).
+Работоспособность модуля гарантируется только при использовании стоковых ядер, поставляемых вместе с [поддерживаемыми дистрибутивами](/products/kubernetes-platform/documentation/v1/reference/supported_versions.html#linux).
 
 Работоспособность модуля при использовании других ядер или дистрибутивов возможна, но не гарантируется.
 {{< /alert >}}
 
-## Почему в кластере не создаются ресурсы `BlockDevice` и `LVMVolumeGroup`?
+## Ресурсы BlockDevice и LVMVolumeGroup не создаются в кластере
 
-* В большинстве случаев `BlockDevice`-ресурсы могут не создаваться по причине того, что существующие девайсы не проходят фильтрацию на стороне контроллера. Пожалуйста, убедитесь, что ваши девайсы соответствуют указанным [требованиям](./usage.html#требования-контроллера-к-девайсу).
+- Ресурсы [BlockDevice](./cr.html#blockdevice) могут не создаваться, если устройства не проходят фильтрацию контроллера. Убедитесь, что устройства соответствуют [требованиям](./usage.html#требования-контроллера-к-устройству).
 
-* `LVMVolumeGroup`-ресурсы могут не создаваться по причине отсутствия в кластере `BlockDevice`-ресурсов, так как их имена используются в спецификации `LVMVolumeGroup`.
+- Ресурсы [LVMVolumeGroup](./cr.html#lvmvolumegroup) могут не создаваться из-за отсутствия в кластере ресурсов [BlockDevice](./cr.html#blockdevice), так как их имена используются в спецификации [LVMVolumeGroup](./cr.html#lvmvolumegroup).
 
-* В том случае, если `BlockDevice`-ресурсы существуют, а `LVMVolumeGroup`-ресурсы отсутствуют, пожалуйста, убедитесь, что у существующих `LVM Volume Group` на узле имеется специальный тег `storage.deckhouse.io/enabled=true`.
+- Если ресурсы [BlockDevice](./cr.html#blockdevice) существуют, а ресурсы [LVMVolumeGroup](./cr.html#lvmvolumegroup) отсутствуют, убедитесь, что у существующих групп томов LVM на узле имеется LVM-тег `storage.deckhouse.io/enabled=true`.
 
-## Я выполнил команду на удаление ресурса `LVMVolumeGroup`, но и ресурс, и `Volume Group` осталась. Почему так?
+## Ресурс LVMVolumeGroup и группа томов остались после попытки удаления
 
-Такая ситуация возможна в двух случаях: 
+Такая ситуация возможна в двух случаях:
 
-1. В `Volume Group` имеются `LV`. 
-Контроллер не берет ответственность за удаление LV с узла, поэтому, если в созданной с помощью ресурса `Volume Group` имеются какие-либо логические тома, Вам необходимо вручную удалить их на узле. После этого и ресурс, и `Volume Group` (вместе с `PV`) будут удалены автоматически.
+1. В группе томов имеются логические тома (Logical Volume).
 
-2. На ресурсе имеется аннотация `storage.deckhouse.io/deletion-protection`.
-Данная аннотация защищает удаление ресурса и, как следствие, созданной им `Volume Group`. Вам необходимо самостоятельно убрать аннотацию командой 
-```shell
-kubectl annotate lvg %lvg-name% storage.deckhouse.io/deletion-protection-
-```
+   Контроллер не отвечает за удаление логических томов с узла. Если в созданной с помощью ресурса группе томов имеются логические тома, удалите их вручную на узле. После этого ресурс и группа томов вместе с физическими томами (Physical Volume) будут удалены автоматически.
 
-После выполнения данной команды и ресурс, и `Volume Group` будут удалены автоматически.
+1. На ресурсе имеется аннотация `storage.deckhouse.io/deletion-protection`.
 
-## Я пытаюсь создать `Volume Group`, используя ресурс `LVMVolumeGroup`, но у меня ничего не получается. Почему?
+   Данная аннотация защищает от удаления ресурс и созданную им группу томов. Удалите аннотацию, выполнив команду:
 
-Скорее всего, ваш ресурс не проходит валидацию со стороны контроллера (при этом, валидация со стороны Kubernetes прошла успешно).
-С конкретной причиной неработоспособности вы можете ознакомиться в самом ресурсе в поле `status.message` либо обратиться
-к логам контроллера.
+   ```shell
+   d8 k annotate lvg %lvg-name% storage.deckhouse.io/deletion-protection-
+   ```
 
-Как правило, проблема кроется в некорректно указанных ресурсах `BlockDevice`. Пожалуйста, убедитесь, что выбранные
-ресурсы удовлетворяют следующим требованиям:
-- Поле `Consumable` имеет значение `true`.
-- Для `Volume Group` типа `Local` указанные `BlockDevice` принадлежат одному узлу.<!-- > - Для `Volume Group` типа `Shared` указан единственный ресурс `BlockDevice`. -->
-- Указаны актуальные имена ресурсов `BlockDevice`.
+   После выполнения команды ресурс и группа томов будут удалены автоматически.
 
-С полным списком ожидаемых значений вы можете ознакомиться с помощью [CR-референса](./cr.html) `LVMVolumeGroup`-ресурса.
+## Не удаётся создать группу томов с помощью ресурса LVMVolumeGroup
 
-## Что произойдет, если я отключу один из девайсов в `Volume Group`? Соответствующий ресурс `LVMVolumeGroup` удалится?
+Ресурс не проходит валидацию контроллера (валидация Kubernetes прошла успешно). Причину можно увидеть в поле `status.message` ресурса или в логах контроллера.
 
-Ресурс `LVMVolumeGroup` будет существовать до тех пор, пока существует соответствующая `Volume Group`. До тех пор, пока
-существует хоть один девайс, `Volume Group` будет существовать, но в «нездоровом» состоянии.
-Эти проблемы будут отображены в `status` ресурса.
+Чаще всего проблема связана с некорректно указанными ресурсами [BlockDevice](./cr.html#blockdevice). Убедитесь, что выбранные ресурсы удовлетворяют следующим требованиям:
 
-После восстановления отключенного девайса на узле, `LVM Volume Group` восстановит свою работоспособность и соответствующий ресурс `LVMVolumeGroup` также отобразит актуальное состояние.
+- Поле `status.consumable` имеет значение `true`.
+- Для групп томов типа `Local` указанные ресурсы [BlockDevice](./cr.html#blockdevice) принадлежат одному узлу.<!-- > - Для групп томов типа `Shared` указан единственный ресурс [BlockDevice](./cr.html#blockdevice). -->
+- Указаны актуальные имена ресурсов [BlockDevice](./cr.html#blockdevice).
 
-## Как передать контроллеру управление существующей на узле `LVM Volume Group`?
+Полный список ожидаемых значений доступен в описании ресурса [LVMVolumeGroup](./cr.html#lvmvolumegroup).
 
-Достаточно добавить LVM-тег `storage.deckhouse.io/enabled=true` на `LVM Volume Group` на узле: 
+## Отключение устройства в группе томов
+
+Ресурс [LVMVolumeGroup](./cr.html#lvmvolumegroup) существует до тех пор, пока существует соответствующая группа томов. Пока существует хотя бы одно устройство, группа томов сохраняется, но помечается как неработоспособная. Текущее состояние отражается в поле `status` ресурса.
+
+После восстановления отключённого устройства на узле группа томов LVM восстановит работоспособность, а соответствующий ресурс [LVMVolumeGroup](./cr.html#lvmvolumegroup) отобразит актуальное состояние.
+
+## Передача управления существующей группой томов LVM контроллеру
+
+Добавьте LVM-тег `storage.deckhouse.io/enabled=true` на группу томов LVM на узле:
 
 ```shell
 vgchange myvg-0 --addtag storage.deckhouse.io/enabled=true
 ```
 
-## Я хочу, чтобы контроллер перестал следить за `LVM Volume Group` на узле. Как мне это сделать?
+## Остановка отслеживания группы томов LVM контроллером
 
-Достаточно удалить LVM-тег `storage.deckhouse.io/enabled=true` у нужной `LVM Volume Group` на узле:
+Удалите LVM-тег `storage.deckhouse.io/enabled=true` у нужной группы томов LVM на узле:
 
 ```shell
 vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true
 ```
 
-После этого контроллер перестанет отслеживать выбранную `Volume Group` и самостоятельно удалит связанный с ней ресурс `LVMVolumeGroup`.
+После этого контроллер перестанет отслеживать выбранную группу томов и самостоятельно удалит связанный с ней ресурс [LVMVolumeGroup](./cr.html#lvmvolumegroup).
 
-## Я не вешал LVM-тег `storage.deckhouse.io/enabled=true` на `Volume Group`, но он появился. Как это возможно?
+## LVM-тег `storage.deckhouse.io/enabled=true` появился автоматически
 
-Это возможно в случае, если вы создавали `LVM Volume Group` через ресурс `LVMVolumeGroup` (в таком случае контроллер автоматически вешает данный LVM-тег на созданную `LVM Volume Group`). Либо на данной `Volume Group` или ее `Thin-pool` был LVM-тег модуля `linstor` — `linstor-*`.
+LVM-тег появляется в следующих случаях:
 
-При миграции с встроенного модуля `linstor` на модули `sds-node-configurator` и `sds-replicated-volume` автоматически происходит изменение LVM-тегов `linstor-*` на LVM-тег `storage.deckhouse.io/enabled=true` в `Volume Group`. Таким образом, управление этими `Volume Group` передается модулю `sds-node-configurator`.
+- Группа томов LVM создана через ресурс [LVMVolumeGroup](./cr.html#lvmvolumegroup). В этом случае контроллер автоматически добавляет LVM-тег `storage.deckhouse.io/enabled=true` на созданную группу томов LVM.
+- На группе томов или её thin pool был LVM-тег модуля `linstor` — `linstor-*`.
 
-## Как использовать ресурс `LVMVolumeGroupSet` для создания `LVMVolumeGroup`?
+При миграции с встроенного модуля `linstor` на модули `sds-node-configurator` и `sds-replicated-volume` LVM-теги `linstor-*` автоматически заменяются на `storage.deckhouse.io/enabled=true` в группах томов. Управление этими группами томов передаётся модулю `sds-node-configurator`.
 
-Для создания `LVMVolumeGroup` с помощью `LVMVolumeGroupSet` необходимо указать в спецификации `LVMVolumeGroupSet` селекторы для узлов и шаблон для создаваемых ресурсов `LVMVolumeGroup`. На данный момент поддерживается только стратегия `PerNode`, при которой контроллер создаст по одному ресурсу `LVMVolumeGroup` из шаблона для каждого узла, удовлетворяющего селектору.
+## Создание LVMVolumeGroup с помощью ресурса LVMVolumeGroupSet
 
-Пример спецификации `LVMVolumeGroupSet`:
+Для создания ресурсов [LVMVolumeGroup](./cr.html#lvmvolumegroup) с помощью [LVMVolumeGroupSet](./cr.html#lvmvolumegroupset) укажите в спецификации [LVMVolumeGroupSet](./cr.html#lvmvolumegroupset) селекторы для узлов и шаблон для создаваемых ресурсов [LVMVolumeGroup](./cr.html#lvmvolumegroup).
 
-```yaml
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: LVMVolumeGroupSet
-metadata:
-  name: my-lvm-volume-group-set
-  labels:
-    my-label: my-value
-spec:
-  strategy: PerNode
-  nodeSelector:
-    matchLabels:
-      node-role.kubernetes.io/worker: ""
-  lvmVolumeGroupTemplate:
-    metadata:
-      labels:
-        my-label-for-lvg: my-value-for-lvg
-    spec:
-      type: Local
-      blockDeviceSelector:
-        matchLabels:
-          status.blockdevice.storage.deckhouse.io/model: <model>
-      actualVGNameOnTheNode: <actual-vg-name-on-the-node>
+Поддерживается только стратегия `PerNode`: контроллер создаёт по одному ресурсу [LVMVolumeGroup](./cr.html#lvmvolumegroup) из шаблона для каждого узла, соответствующего селектору.
 
-
-```
-
-## Как использовать ресурс `LVMVolumeGroupSet` для создания `LVMVolumeGroup`?
-
-Для создания `LVMVolumeGroup` с помощью `LVMVolumeGroupSet` необходимо указать в спецификации `LVMVolumeGroupSet` селекторы для узлов и шаблон для создаваемых ресурсов `LVMVolumeGroup`. На данный момент поддерживается только стратегия `PerNode`, при которой контроллер создаст по одному ресурсу `LVMVolumeGroup` из шаблона для каждого узла, удовлетворяющего селектору.
-
-Пример спецификации `LVMVolumeGroupSet`:
+Пример спецификации [LVMVolumeGroupSet](./cr.html#lvmvolumegroupset):
 
 ```yaml
 apiVersion: storage.deckhouse.io/v1alpha1
@@ -141,32 +113,59 @@ spec:
 
 ```
 
-## Какие лейблы добавляются контроллером на ресурсы BlockDevices
+## Изменение UUID у групп томов при клонировании виртуальных машин
 
-* status.blockdevice.storage.deckhouse.io/type - тип LVM
+UUID у групп томов можно изменить только при отсутствии активных логических томов в группе томов.
 
-* status.blockdevice.storage.deckhouse.io/fstype - тип файловой системы
+Если в группе томов есть активные логические тома, выполните следующие действия:
 
-* status.blockdevice.storage.deckhouse.io/pvuuid - UUID PV
+1. Отмонтируйте логический том, выполнив команду:
 
-* status.blockdevice.storage.deckhouse.io/vguuid - UUID VG
+   ```shell
+   umount /mount/point
+   ```
 
-* status.blockdevice.storage.deckhouse.io/partuuid - UUID раздела
+1. Деактивируйте логический том или группу томов, выполнив команду:
 
-* status.blockdevice.storage.deckhouse.io/lvmvolumegroupname - имя этого ресурса
+    - Для деактивации конкретного логического тома выполните команду, изменив <LV_NAME> на имя логического тома:
 
-* status.blockdevice.storage.deckhouse.io/actualvgnameonthenode - название VolumeGroup на ноде
+      ```shell
+      lvchange -an <LV_NAME>
+      ```
 
-* status.blockdevice.storage.deckhouse.io/wwn - идентификатор WWN (World Wide Name) для устройства
+    - Для деактивации всех логических томов в группе выполните команду, изменив <VG_NAME> на имя группы томов:
 
-* status.blockdevice.storage.deckhouse.io/serial - серийный номер устройства
+      ```shell
+      lvchange -an <VG_NAME>
+      ```
 
-* status.blockdevice.storage.deckhouse.io/size - раздел
+1. После деактивации всех логических томов измените UUID у групп томов, выполнив команду:
 
-* status.blockdevice.storage.deckhouse.io/model - модель устройства
+   ```shell
+   vgchange -u <VG_NAME>
+   ```
 
-* status.blockdevice.storage.deckhouse.io/rota - является ли ротационным  устройством
+   Команда сгенерирует новые UUID для указанной группы томов. Для изменения UUID всех групп томов на виртуальной машине выполните:
 
-* status.blockdevice.storage.deckhouse.io/hotplug - возможность hot подключения
+   ```shell
+   vgchange -u
+   ```
 
-* status.blockdevice.storage.deckhouse.io/machineid - ID сервера, на котором установлено блочное устройство
+При необходимости команду можно добавить в скрипт `cloud-init` для автоматического выполнения при создании виртуальных машин.
+
+## Лейблы, добавляемые контроллером на ресурсы BlockDevice
+
+- status.blockdevice.storage.deckhouse.io/type — тип LVM.
+- status.blockdevice.storage.deckhouse.io/fstype — тип файловой системы.
+- status.blockdevice.storage.deckhouse.io/pvuuid — UUID физического тома.
+- status.blockdevice.storage.deckhouse.io/vguuid — UUID группы томов.
+- status.blockdevice.storage.deckhouse.io/partuuid — UUID раздела.
+- status.blockdevice.storage.deckhouse.io/lvmvolumegroupname — имя ресурса [LVMVolumeGroup](./cr.html#lvmvolumegroup), к которому относится устройство.
+- status.blockdevice.storage.deckhouse.io/actualvgnameonthenode — имя группы томов на узле.
+- status.blockdevice.storage.deckhouse.io/wwn — идентификатор WWN (World Wide Name) для устройства.
+- status.blockdevice.storage.deckhouse.io/serial — серийный номер устройства.
+- status.blockdevice.storage.deckhouse.io/size — размер устройства.
+- status.blockdevice.storage.deckhouse.io/model — модель устройства.
+- status.blockdevice.storage.deckhouse.io/rota — указывает, является ли устройство ротационным.
+- status.blockdevice.storage.deckhouse.io/hotplug — указывает возможность горячей замены устройства (HotPlug).
+- status.blockdevice.storage.deckhouse.io/machineid — идентификатор сервера, на котором установлено блочное устройство.
