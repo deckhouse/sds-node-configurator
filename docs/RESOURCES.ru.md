@@ -1,6 +1,7 @@
 ---
-title: "Модуль sds-node-configurator: примеры использования"
-description: "Примеры использования модуля sds-node-configurator: работа с BlockDevice и LVMVolumeGroup ресурсами."
+title: "Модуль sds-node-configurator: работа с ресурсами"
+linkTitle: "Работа с ресурсами"
+description: "Создание и управление ресурсами BlockDevice и LVMVolumeGroup."
 ---
 
 {{< alert level="warning" >}}
@@ -110,11 +111,11 @@ spec:
     nodeName: "node-0"
   blockDeviceSelector:
     matchExpressions:
-    - key: kubernetes.io/metadata.name
-      operator: In
-      values:
-      - dev-07ad52cef2348996b72db262011f1b5f896bb68f
-      - dev-e90e8915902bd6c371e59f89254c0fd644126da7
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+          - dev-07ad52cef2348996b72db262011f1b5f896bb68f
+          - dev-e90e8915902bd6c371e59f89254c0fd644126da7
   actualVGNameOnTheNode: "vg-0"
 ```
 
@@ -150,15 +151,15 @@ spec:
     nodeName: "node-0"
   blockDeviceSelector:
     matchExpressions:
-    - key: kubernetes.io/metadata.name
-      operator: In
-      values:
-      - dev-07ad52cef2348996b72db262011f1b5f896bb68f
-      - dev-e90e8915902bd6c371e59f89254c0fd644126da7
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+          - dev-07ad52cef2348996b72db262011f1b5f896bb68f
+          - dev-e90e8915902bd6c371e59f89254c0fd644126da7
   actualVGNameOnTheNode: "vg-0"
   thinPools:
-  - name: thin-1
-    size: 250Gi
+    - name: thin-1
+      size: 250Gi
 ```
 
 Создание группы томов LVM с thin pool и выбором всех устройств на узле (используется `matchLabels`):
@@ -177,8 +178,8 @@ spec:
       kubernetes.io/hostname: node-0
   actualVGNameOnTheNode: "vg-0"
   thinPools:
-  - name: thin-1
-    size: 250Gi
+    - name: thin-1
+      size: 250Gi
 ```
 
 {{< alert level="info" >}}

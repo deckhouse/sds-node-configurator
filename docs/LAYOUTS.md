@@ -356,7 +356,7 @@ Below is the process of configuring additional disks using the following types a
 
 {{< alert level="warning" >}}
 Below is the order of actions for configuring additional disks for the case of primary cluster deployment and configuration when connecting to nodes via SSH.
-If you already have a working cluster and you are adding additional disks to its nodes, it is recommended to create and configure Volume Groups using the [LVMVolumeGroup](./usage.html#2-user-creation) resource, instead of executing the commands below on the node.
+If you already have a working cluster and you are adding additional disks to its nodes, it is recommended to create and configure Volume Groups using the [LVMVolumeGroup](./resources.html#user-creation) resource, instead of executing the commands below on the node.
 {{< /alert >}}
 
 Configure additional disks on the node according to the [«Full mirror»](#full-mirror) scenario:
@@ -509,7 +509,7 @@ In addition, the PARTLABEL attribute cannot be set in `MBR`, which may be useful
 
 {{< alert level="warning" >}}
 Below is the order of actions for configuring additional disks for the case of primary cluster deployment and configuration when connecting to nodes via SSH.
-If you already have a working cluster and you are adding additional disks to its nodes, it is recommended to create and configure Volume Groups using the [LVMVolumeGroup](./usage.html#2-user-creation) resource, instead of executing the commands below on the node.
+If you already have a working cluster and you are adding additional disks to its nodes, it is recommended to create and configure Volume Groups using the [LVMVolumeGroup](./resources.html#user-creation) resource, instead of executing the commands below on the node.
 {{< /alert >}}
 
 In this scenario, two partitions are created on each disk:

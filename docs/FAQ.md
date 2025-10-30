@@ -10,7 +10,7 @@ Module functionality when using other kernels or distributions is possible but n
 
 ## BlockDevice and LVMVolumeGroup resources are not created in the cluster
 
-- [BlockDevice](./cr.html#blockdevice) resources may not be created if devices do not pass controller filtering. Ensure that devices meet the [requirements](./usage.html#controller-requirements-for-devices).
+- [BlockDevice](./cr.html#blockdevice) resources may not be created if devices do not pass controller filtering. Ensure that devices meet the [requirements](./resources.html#controller-requirements-for-devices).
 
 - [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources may not be created due to the absence of [BlockDevice](./cr.html#blockdevice) resources in the cluster, as their names are used in the [LVMVolumeGroup](./cr.html#lvmvolumegroup) specification.
 

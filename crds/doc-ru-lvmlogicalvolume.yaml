@@ -48,6 +48,16 @@ spec:
                         Если установлено значение `true`, логический том будет создан с атрибутом `contiguous`.
                         
                         > Используйте этот атрибут с осторожностью, так как он может привести к невозможности создания LV, несмотря на наличие свободного пространства.
+                source:
+                  description: |
+                    Источник тома, если указан.
+                  properties:
+                    kind:
+                      description: |
+                        Тип источника. Тип LVMLogicalVolume означает, что текущий ресурс — это клон. Тип LVMLogicalVolumeSnapshot означает, что текущий ресурс — это восстановленный том.
+                    name:
+                      description: |
+                        Имя ресурса, из которого создан текущий ресурс.
             status:
               description: |
                 Описывает состояние ресурса.
@@ -64,36 +74,29 @@ spec:
                 contiguous:
                   description: |
                     Показывает, создан ли логический том с атрибутом `contiguous`.
-                source:
-                  description: |
-                    Источник тома, если указан.
-                  properties:
-                    kind:
-                      description: |
-                        Тип источника. Тип LVMLogicalVolume означает, что текущий ресурс — это клон. Тип LVMLogicalVolumeSnapshot означает, что текущий ресурс — это восстановленный том.
-                    name:
-                      description: |
-                        Имя ресурса, из которого создан текущий ресурс.
       subresources:
         status: {}
       additionalPrinterColumns:
+        - jsonPath: .spec.actualLVNameOnTheNode
+          name: LV Name
+          type: string
+          description: Фактическое имя LV на узле.
         - jsonPath: .status.phase
           name: Phase
           type: string
-          description: The current resource status.
+          description: Текущее состояние ресурса.
         - jsonPath: .spec.lvmVolumeGroupName
           name: LVMVolumeGroup
           type: string
-          description: The selected LVMVolumeGroup resource.
+          description: Выбранный ресурс LVMVolumeGroup.
         - jsonPath: .spec.thin.poolName
           name: ThinPool
-          type: string
-          description: The selected ThinPool in LVMVolumeGroup. Might be empty if the LVMVolumeGroup is thick.
+          description: Выбранный ThinPool в LVMVolumeGroup. Может быть пустым, если LVMVolumeGroup является thick.
         - jsonPath: .status.actualSize
           name: Size
           type: string
-          description: Actual LVMLogicalVolume size.
+          description: Фактический размер LVMLogicalVolume.
         - jsonPath: .metadata.creationTimestamp
           name: Age
           type: date
-          description: The age of this resource
+          description: Возраст этого ресурса

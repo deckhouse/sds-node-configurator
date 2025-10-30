@@ -21,11 +21,11 @@ The `sds-node-configurator` module manages block devices and LVM on Kubernetes c
 
   > Warning: reducing block device sizes is not supported.
 
-- Creation/expansion/deletion of LVM Volume Groups on the node according to [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource settings. [Usage examples](./usage.html#working-with-lvmvolumegroup-resources)
+- Creation/expansion/deletion of LVM Volume Groups on the node according to [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource settings. [Usage examples](./resources.html#working-with-lvmvolumegroup-resources)
 
 ## Documentation
 
-- [Usage examples](./usage.html): Practical examples of creating, modifying and deleting [BlockDevice](./cr.html#blockdevice) and [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources.
+- [Working with resources](./resources.html): Practical examples of creating, modifying and deleting [BlockDevice](./cr.html#blockdevice) and [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources.
 - [Custom Resources](./cr.html): Module CRD reference.
 - [Configuration](./configuration.html): Module parameter configuration.
 - [Configuration scenarios](./layouts.html): Typical disk subsystem configuration scenarios for various storage configurations.
