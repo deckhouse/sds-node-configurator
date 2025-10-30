@@ -1,7 +1,7 @@
 ---
-title: "Модуль sds-node-configurator: сценарии конфигурации sds-модулей"
+title: "Модуль sds-node-configurator: сценарии конфигурации SDS модулей"
 linkTitle: "Сценарии конфигурации"
-description: "Сценарии конфигурации sds-модулей с помощью sds-node-configurator"
+description: "Сценарии конфигурации SDS модулей с помощью sds-node-configurator."
 ---
 
 {{< alert level="warning" >}}
@@ -51,9 +51,9 @@ description: "Сценарии конфигурации sds-модулей с п
 
 1. При установке операционной системы:
 
-    - создайте группу томов с именем `main` на зеркале;
-    - создайте логический том с именем `root` в группе томов `main`;
-    - установите операционную систему на логический том `root`.
+   - создайте группу томов с именем `main` на зеркале;
+   - создайте логический том с именем `root` в группе томов `main`;
+   - установите операционную систему на логический том `root`.
 
 1. Установите тег `storage.deckhouse.io/enabled=true` для группы томов `main`, выполнив команду:
 
@@ -68,6 +68,7 @@ description: "Сценарии конфигурации sds-модулей с п
 #### Пример настройки модулей SDS (одинаковые диски, «Полное зеркало»)
 
 Настройте три узла по сценарию [«Полное зеркало»](#полное-зеркало). После настройки в кластере будут созданы три ресурса [LVMVolumeGroup](./cr.html#lvmvolumegroup) со случайно сгенерированными именами.
+В будущем будет возможность указать имя для ресурсов [LVMVolumeGroup](./cr.html#lvmvolumegroup), создаваемых при автоматическом обнаружении групп томов, путём добавления тега `LVM` с желаемым именем ресурса.
 
 Выведите список ресурсов [LVMVolumeGroup](./cr.html#lvmvolumegroup), выполнив команду:
 
@@ -210,6 +211,7 @@ EOF
 #### Пример настройки модулей SDS (одинаковые диски, «Частичное зеркало»)
 
 Пример описывает настройку трёх узлов по сценарию [«Частичное зеркало»](#частичное-зеркало). После настройки в кластере будут созданы шесть ресурсов [LVMVolumeGroup](./cr.html#lvmvolumegroup) со случайно сгенерированными именами.
+В будущем будет возможность указать имя для ресурсов [LVMVolumeGroup](./cr.html#lvmvolumegroup), создаваемых при автоматическом обнаружении групп томов, путём добавления тега `LVM` с желаемым именем ресурса.
 
 Выведите список ресурсов [LVMVolumeGroup](./cr.html#lvmvolumegroup), выполнив команду:
 
@@ -299,7 +301,7 @@ EOF
    metadata:
      name: replicated-sc-r1
    spec:
-     storagePool: data-safe # Для этого ресурса указано replication: None, репликация данных для постоянных томов (PV), созданных с этим StorageClass, выполняться не будет
+     storagePool: data-safe # Обратите внимание, что для этого ресурса следует использовать `data-safe`, поскольку у него указано `replication: None`, что означает, что репликация данных для постоянных томов (PV), созданных с этим StorageClass, выполняться не будет
      replication: None
      reclaimPolicy: Delete
      topology: Ignored # При указании данной топологии в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone)
@@ -309,7 +311,7 @@ EOF
    metadata:
      name: replicated-sc-r2
    spec:
-     storagePool: data-unsafe # Для этого ресурса указано replication: Availability, будет выполняться репликация данных для постоянных томов, созданных с этим StorageClass
+     storagePool: data-unsafe # Обратите внимание, что для этого ресурса следует использовать `data-unsafe`, поскольку у него указано `replication: Availability`, что означает, что будет выполняться репликация данных для постоянных томов (PV), созданных с этим StorageClass
      replication: Availability
      reclaimPolicy: Delete
      topology: Ignored # При указании данной топологии в кластере не должно быть зон
@@ -319,7 +321,7 @@ EOF
    metadata:
      name: replicated-sc-r3
    spec:
-     storagePool: data-unsafe # Для этого ресурса указано replication: ConsistencyAndAvailability, будет выполняться репликация данных для постоянных томов, созданных с этим StorageClass
+     storagePool: data-unsafe # Обратите внимание, что для этого ресурса следует использовать `data-unsafe`, поскольку у него указано `replication: ConsistencyAndAvailability`, что означает, что будет выполняться репликация данных для постоянных томов (PV), созданных с этим StorageClass
      replication: ConsistencyAndAvailability
      reclaimPolicy: Delete
      topology: Ignored # При указании данной топологии в кластере не должно быть зон
@@ -380,6 +382,7 @@ EOF
 #### Пример настройки модулей SDS (комбинированное хранилище, «Полное зеркало»)
 
 Пример описывает настройку трёх узлов по сценарию [«Полное зеркало»](#полное-зеркало). После настройки в кластере будут созданы три ресурса [LVMVolumeGroup](./cr.html#lvmvolumegroup) со случайно сгенерированными именами.
+В будущем будет возможность указать имя для ресурсов [LVMVolumeGroup](./cr.html#lvmvolumegroup), создаваемых при автоматическом обнаружении групп томов, путём добавления тега `LVM` с желаемым именем ресурса.
 
 Выведите список ресурсов [LVMVolumeGroup](./cr.html#lvmvolumegroup), выполнив команду:
 
@@ -544,6 +547,7 @@ EOF
 #### Пример настройки модулей SDS (комбинированное хранилище, «Частичное зеркало»)
 
 Пример описывает настройку трёх узлов по сценарию [«Частичное зеркало»](#частичное-зеркало). После настройки в кластере будут созданы шесть ресурсов [LVMVolumeGroup](./cr.html#lvmvolumegroup) со случайно сгенерированными именами.
+В будущем будет возможность указать имя для ресурсов [LVMVolumeGroup](./cr.html#lvmvolumegroup), создаваемых при автоматическом обнаружении групп томов, путём добавления тега `LVM` с желаемым именем ресурса.
 
 Выведите список ресурсов [LVMVolumeGroup](./cr.html#lvmvolumegroup), выполнив команду:
 
@@ -563,7 +567,7 @@ vg-e0f00cab-03b3-49cf-a2f6-595628a2593c   0/0         True                    Re
 vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2   0/0         True                    Ready   worker-1   25596Mi   0                <vg-name>-unsafe   108s
 ```
 
-где `<vg-name>` — префикс имени, присвоенного группе томов, созданной на предыдущем шаге.
+`<vg-name>` — префикс имени, присвоенного группе томов, созданной на предыдущем шаге.
 
 ##### Настройка модуля `sds-local-volume` (комбинированное хранилище, «Частичное зеркало»)
 
@@ -661,7 +665,7 @@ EOF
    metadata:
      name: replicated-sc-ssd-nvme-r1
    spec:
-     storagePool: data-<vg-name>-safe # Для этого ресурса указано replication: None, репликация данных для постоянных томов, созданных с этим StorageClass, выполняться не будет
+     storagePool: data-<vg-name>-safe # Обратите внимание, что для этого ресурса следует использовать `data-<vg-name>-safe`, поскольку у него указано `replication: None`, что означает, что репликация данных для постоянных томов (PV), созданных с этим StorageClass, выполняться не будет
      replication: None
      reclaimPolicy: Delete
      topology: Ignored # При указании данной топологии в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone)
@@ -671,7 +675,7 @@ EOF
    metadata:
      name: replicated-sc-ssd-nvme-r2
    spec:
-     storagePool: data-<vg-name>-unsafe # Для этого ресурса указано replication: Availability, будет выполняться репликация данных для постоянных томов, созданных с этим StorageClass
+     storagePool: data-<vg-name>-unsafe # Обратите внимание, что для этого ресурса следует использовать `data-<vg-name>-unsafe`, поскольку у него указано `replication: Availability`, что означает, что будет выполняться репликация данных для постоянных томов (PV), созданных с этим StorageClass
      replication: Availability
      reclaimPolicy: Delete
      topology: Ignored # При указании данной топологии в кластере не должно быть зон
@@ -681,7 +685,7 @@ EOF
    metadata:
      name: replicated-sc-ssd-nvme-r3
    spec:
-     storagePool: data-<vg-name>-unsafe # Для этого ресурса указано replication: ConsistencyAndAvailability, будет выполняться репликация данных для постоянных томов, созданных с этим StorageClass
+     storagePool: data-<vg-name>-unsafe # Обратите внимание, что для этого ресурса следует использовать `data-<vg-name>-unsafe`, поскольку у него указано `replication: ConsistencyAndAvailability`, что означает, что будет выполняться репликация данных для постоянных томов (PV), созданных с этим StorageClass
      replication: ConsistencyAndAvailability
      reclaimPolicy: Delete
      topology: Ignored # При указании данной топологии в кластере не должно быть зон
@@ -703,4 +707,3 @@ EOF
    > - `data-ssd-nvme-safe` — для дисков NVMe SSD.
    > - `data-ssd-sata-safe` — для дисков SATA SSD.
    > - `data-hdd-safe` — для дисков HDD.
-

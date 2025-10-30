@@ -1,94 +1,82 @@
 ---
-title: "Module sds-node-configurator: sds-module configuration scenarios"
+title: "sds-node-configurator module: SDS modules configuration scenarios"
 linkTitle: "Configuration scenarios"
-description: "Sds-module configuration scenarios using sds-node-configurator"
+description: "SDS modules configuration scenarios using sds-node-configurator."
 ---
 
 {{< alert level="warning" >}}
-The module's functionality is guaranteed only when using stock kernels provided with [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
+Module functionality is guaranteed only when using stock kernels provided with [supported distributions](/products/kubernetes-platform/documentation/v1/reference/supported_versions.html#linux).
 
-The module may work with other kernels or distributions, but this is not guaranteed.
+Module functionality when using other kernels or distributions is possible but not guaranteed.
 {{< /alert >}}
 
 {{< alert level="info" >}}
-If you create virtual machines by cloning, you must change the UUID of the volume groups (VG) on the cloned VMs. To do this, run the `vgchange -u` command. This will generate new UUID for all VG on the virtual machine. You can add this to the `cloud-init` script if needed.
-
-You can only change the UUID of a VG if it has no active logical volumes (LV). To deactivate a logical volume, unmount it and run the following command:
-
-```shell
-lvchange -an <VG_or_LV_NAME>
-```
-
-, where `<VG_or_LV_NAME>` — the name of a VG, to deactivate all LV in the VG, or the name of a LV, to deactivate a specific LV.
+If you create virtual machines by cloning, change the UUID of Volume Groups on VMs created this way. Cloned Volume Groups have identical UUIDs, which can lead to conflicts. For detailed instructions, see the section [«Changing UUID of Volume Groups when cloning virtual machines»](./faq.html#changing-uuid-of-volume-groups-when-cloning-virtual-machines).
 {{< /alert >}}
 
-## Configuration methods and scenarios for node disk subsystems
+## Methods and scenarios for configuring node disk subsystem
 
-On this page, you can find two methods for configuring the disk subsystem on Kubernetes cluster nodes,
-depending on storage conditions:
+There are two methods for configuring the disk subsystem on Kubernetes cluster nodes depending on storage organization conditions:
 
-- [Storage with identical disks](#storage-with-identical-disks)
-- [Combined storage](#combined-storage)
+- [Storage with identical disks](#storage-with-identical-disks).
+- [Combined storage](#combined-storage).
 
-Each configuration method comes with two configuration scenarios:
+For each disk subsystem configuration method on nodes, there are two configuration scenarios:
 
-- "Full mirror". We recommend using this scenario due to its simplicity and reliability.
-- "Partial mirror".
+- [«Full mirror»](#full-mirror): Recommended to use as it is reliable and simple to configure.
+- [«Partial mirror»](#partial-mirror).
 
-The following table contains details, advantages, and disadvantages of each scenario:
+Features, pros and cons of scenarios are shown in the table:
 
-| Configuration scenario | Details                                                                                                                                                                                                                                         | Advantages | Disadvantages                                                                                                               |
-| ---------------------- |-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------| ---------- |-----------------------------------------------------------------------------------------------------------------------------|
-| "Full mirror" | <ul><li>Disks aren't partitioned. A mirror is made of entire disks</li><li>A single VG is used for the root system and data</li></ul>                                                                                                              | <ul><li>Reliable</li><li>Easy to configure and use</li><li>Convenient for allocating space between different software-defined storages (SDS)</li></ul> | <ul><li>Overhead disk space for SDS, which replicate data on their own</li></ul>                                            |
-| "Partial mirror" | <ul><li>Disks are divided in two partitions</li><li>The first partition on each disk is used to create a mirror. It stores a VG where the operating system (OS) is installed</li><li>The second partition is used as a VG for data, without mirroring</li></ul> | <ul><li>Reliable</li><li>The most efficient disk space use</li></ul> | <ul><li>Difficult to configure and use</li><li>Very difficult to reallocate space between safe and unsafe partitions</li></ul> |
+| Configuration scenario | Implementation features                                                                                                                                                                                                                                | Pros                                                                                                                    | Cons                                                                                                                          |
+|-----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| «Full mirror»      | <ul><li>Disks are not divided into partitions, mirror is made from entire disks</li><li>One Volume Group is used for root system and for data</li></ul>                                                                                            | <ul><li>Reliable</li><li>Simple to configure and use</li><li>Convenient to distribute space between different SDS</li></ul> | <ul><li>Excessive disk space for software-defined storage (SDS) that replicate data themselves</li></ul>         |
+| «Partial mirror»   | <ul><li>Disks are divided into 2 partitions</li><li>Mirror is created from first partitions of each disk. A Volume Group is created on it where the OS is installed</li><li>Volume group for data is created from second disk partitions without mirroring</li></ul> | <ul><li>Reliable</li><li>Maximum efficient use of space</li></ul>                                                      | <ul><li>Complex to configure and use</li><li>Very difficult to redistribute space between safe and unsafe partitions</li></ul> |
 
-The following diagram depicts the differences in disk subsystem configuration depending on the selected scenario:
+Differences in disk subsystem configuration depending on the selected scenario are shown in the diagram:
 
-![Configuration scenarios compared](images/sds-node-configurator-scenaries.png)
+![Differences depending on selected configuration scenario](images/sds-node-configurator-scenaries.png)
 
 ## Storage with identical disks
 
-In this scenario, you will be using a single-type disks on a node.
+Use this method when the node has disks of the same type.
 
 ### Full mirror
 
-We recommend using this configuration scenario due to its simplicity and reliability.
+This scenario is recommended to use as it is reliable and simple to configure.
 
-To configure a node according to this scenario, do the following:
+Configure the node according to this scenario:
 
-1. Assemble a mirror of the entire disks (hardware or software).
-   This mirror will be used for both the root system and data.
-2. When installing the OS:
-   - Create a VG named `main` on the mirror.
-   - Create an LV named `root` in the `main` VG.
-   - Install the OS on the `root` LV.
-3. Add the `storage.deckhouse.io/enabled=true` tag to the `main` VG using the following command:
+1. Assemble a mirror from entire disks (hardware or software). This mirror will be used simultaneously for the root system and for data.
+
+1. When installing the operating system:
+
+   - Create a Volume Group named `main` on the mirror.
+   - Create a Logical Volume named `root` in the `main` Volume Group.
+   - Install the operating system on the `root` Logical Volume.
+
+1. Set the `storage.deckhouse.io/enabled=true` tag for the `main` Volume Group by running the command:
 
    ```shell
    vgchange main --addtag storage.deckhouse.io/enabled=true
    ```
 
-4. Add the prepared node to the Deckhouse cluster.
+1. Add the prepared node to the cluster.
 
-   If the node matches the `nodeSelector` specified in `spec.nodeSelector` of the `sds-replicated-volume`
-   or `sds-local-volume` modules, the `sds-node-configurator` module agent will start on that node.
-   It will detect the `main` VG and add a corresponding `LVMVolumeGroup` resource to the Deckhouse cluster.
-   The LVMVolumeGroup resource can then be used to create volumes in the `sds-replicated-volume` or `sds-local-volume` modules.
+   If the node matches the `nodeSelector` specified in `spec.nodeSelector` of `sds-replicated-volume` or `sds-local-volume` modules, the `sds-node-configurator` module agent will start on the node. The agent will discover the `main` Volume Group and create the corresponding [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource in the cluster. The resource can be used to create volumes in `sds-replicated-volume` or `sds-local-volume` modules.
 
-#### Example of SDS module configuration (identical disks, "Full mirror")
+#### SDS modules configuration example (identical disks, «Full mirror»)
 
-In this example, it's assumed that you have configured three nodes following the "Full mirror" scenario.
-In this case, the Deckhouse cluster will have three LVMVolumeGroup resources with randomly generated names.
-In the future, it will be possible to specify a name for the LVMVolumeGroup resources
-created during automatic VG discovery by adding the `LVM` tag with the desired resource name.
+Configure three nodes according to the [«Full mirror»](#full-mirror) scenario. After configuration, three [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources with randomly generated names will be created in the cluster.
+In the future, it will be possible to specify names for [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources created during automatic Volume Group discovery by adding an `LVM` tag with the desired resource name.
 
-To list the LVMVolumeGroup resources, run the following command:
+List [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources by running the command:
 
 ```shell
-kubectl get lvmvolumegroups.storage.deckhouse.io
+d8 k get lvmvolumegroups.storage.deckhouse.io
 ```
 
-In the output, you should see the following list:
+Example output:
 
 ```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG     AGE
@@ -97,14 +85,12 @@ vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Re
 vg-c7863e12-c143-42bb-8e33-d578ce50d6c7   0/0         True                    Ready   worker-1   25596Mi   0                main   108s
 ```
 
-##### Configuring the `sds-local-volume` module (identical disks, "Full mirror")
+##### `sds-local-volume` module configuration (identical disks, «Full mirror»)
 
-To configure the `sds-local-volume` module following the "Full mirror" scenario,
-create a LocalStorageClass resource and include all your LVMVolumeGroup resources
-to use the `main` VG on all your nodes in the `sds-local-volume` module:
+Configure the `sds-local-volume` module according to the [«Full mirror»](#full-mirror) scenario: create a [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource and add all [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that the `main` Volume Group is used on all nodes in the `sds-local-volume` module. Run the command:
 
-```yaml
-kubectl apply -f -<<EOF
+```shell
+d8 k apply -f -<<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: LocalStorageClass
 metadata:
@@ -121,15 +107,14 @@ spec:
 EOF
 ```
 
-##### Configuring the `sds-replicated-volume` module (identical disks, "Full mirror")
+##### `sds-replicated-volume` module configuration (identical disks, «Full mirror»)
 
-To configure the `sds-replicated-volume` module according to the "Full mirror" scenario, do the following:
+Configure the `sds-replicated-volume` module according to the [«Full mirror»](#full-mirror) scenario:
 
-1. Create a ReplicatedStoragePool resource and add all your LVMVolumeGroup resources
-   to use the `main` VG on all your nodes in the `sds-replicated-volume` module:
+1. Create a [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource and add all [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that the `main` Volume Group is used on all nodes in the `sds-replicated-volume` module. Run the command:
 
-   ```yaml
-   kubectl apply -f -<<EOF
+   ```shell
+   d8 k apply -f -<<EOF
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStoragePool
    metadata:
@@ -143,11 +128,10 @@ To configure the `sds-replicated-volume` module according to the "Full mirror" s
    EOF
    ```
 
-2. Create a ReplicatedStorageClass resource
-   and specify a name of the previously created ReplicatedStoragePool resource in the `storagePool` field:
+1. Create a [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass) resource and specify the name of the previously created [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource in the `storagePool` field. Run the command:
 
-   ```yaml
-   kubectl apply -f -<<EOF
+   ```shell
+   d8 k apply -f -<<EOF
    ---
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStorageClass
@@ -157,7 +141,7 @@ To configure the `sds-replicated-volume` module according to the "Full mirror" s
      storagePool: data
      replication: None
      reclaimPolicy: Delete
-     topology: Ignored # When specifying this topology, ensure the cluster has no zones (nodes labeled with `topology.kubernetes.io/zone`).
+     topology: Ignored # When specifying this topology, there should be no zones in the cluster (nodes with topology.kubernetes.io/zone labels)
    ---
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStorageClass
@@ -167,7 +151,7 @@ To configure the `sds-replicated-volume` module according to the "Full mirror" s
      storagePool: data
      replication: Availability
      reclaimPolicy: Delete
-     topology: Ignored
+     topology: Ignored # When specifying this topology, there should be no zones
    ---
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStorageClass
@@ -177,62 +161,65 @@ To configure the `sds-replicated-volume` module according to the "Full mirror" s
      storagePool: data
      replication: ConsistencyAndAvailability
      reclaimPolicy: Delete
-     topology: Ignored
+     topology: Ignored # When specifying this topology, there should be no zones
    EOF
    ```
 
 ### Partial mirror
 
 {{< alert level="warning" >}}
-Using partitions with the same PARTUUID is not supported, as well as changing the PARTUUID of a partition used for creating a VG. When creating a partition table, we recommended that you choose the `GPT` format, as PARTUUID in `MBR` are pseudo-random and contain the partition number. Additionally, `MBR` does not support PARTLABEL, which can be helpful to identify a partition in Deckhouse later.
+Using partitions with identical PARTUUID is not supported, as well as changing PARTUUID of a partition that is used to create a Volume Group.
+When creating a partition table, it is recommended to choose the `GPT` format, as PARTUUID in `MBR` is pseudo-random and contains the partition number.
+In addition, the PARTLABEL attribute cannot be set in `MBR`, which may be useful for subsequent partition identification.
 {{< /alert >}}
 
-In this scenario, two partitions on each disk are used:
-one for the root system and SDS data storage that is not replicated,
-and another for SDS data that is replicated.
-The first partition of each disk is used to create a mirror,
-and the second is used to create a separate VG without mirroring.
-This approach maximizes the efficient use of disk space.
+In this scenario, two partitions are created on each disk:
 
-To configure a node according to this scenario, do the following:
+- The first partition is used to create a mirror where the root system and SDS data that are not replicated are placed.
+- The second partition is used to create a separate Volume Group without mirroring for SDS data that are replicated.
 
-1. When installing the OS:
-   - Create two partitions on each disk.
-   - Create a mirror from the first partitions on each disk.
-   - Create a VG named `main-safe` on the mirror.
-   - Create an LV named `root` in the `main-safe` VG.
-   - Install the OS on the `root` LV.
-2. Add the `storage.deckhouse.io/enabled=true` tag to the `main-safe` VG using the following command:
+This allows for maximum efficient use of disk space.
+
+Configure the node according to the [«Partial mirror»](#partial-mirror) scenario:
+
+1. When installing the operating system:
+
+    - Create two partitions on each disk.
+    - Assemble a mirror from the first partitions on each disk.
+    - Create a Volume Group named `main-safe` on the mirror.
+    - Create a Logical Volume named `root` in the `main-safe` Volume Group.
+    - Install the operating system on the `root` Logical Volume.
+
+1. Set the `storage.deckhouse.io/enabled=true` tag for the `main-safe` Volume Group by running the command:
 
    ```shell
    vgchange main-safe --addtag storage.deckhouse.io/enabled=true
    ```
 
-3. Create a VG named `main-unsafe` from the second partitions of each disk.
-4. Add the `storage.deckhouse.io/enabled=true` tag to the `main-unsafe` VG using the following command:
+1. Create a Volume Group named `main-unsafe` from the second partitions of each disk.
+
+1. Set the `storage.deckhouse.io/enabled=true` tag for the `main-unsafe` Volume Group by running the command:
 
    ```shell
    vgchange main-unsafe --addtag storage.deckhouse.io/enabled=true
    ```
 
-5. Add the prepared node to the Deckhouse cluster.
+1. Add the prepared node to the cluster.
 
-   If the node matches the `nodeSelector` specified in `spec.nodeSelector` of the `sds-replicated-volume` or `sds-local-volume` modules, the `sds-node-configurator` module agent will start on that node. It will detect the `main-safe` and `main-unsafe` VG and add a corresponding LVMVolumeGroup resources to the Deckhouse cluster. These LVMVolumeGroup resources can then be used to create volumes in the `sds-replicated-volume` or `sds-local-volume` modules.
+   If the node matches the `nodeSelector` specified in `spec.nodeSelector` of `sds-replicated-volume` or `sds-local-volume` modules, the `sds-node-configurator` module agent will start on the node. The agent will discover the `main-safe` and `main-unsafe` Volume Groups and create the corresponding [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources in the cluster. The resources can be used to create volumes in `sds-replicated-volume` or `sds-local-volume` modules.
 
-#### Example of SDS module configuration (identical disks, "Partial mirror")
+#### SDS modules configuration example (identical disks, «Partial mirror»)
 
-In this example, it's assumed that you have configured three nodes following the "Partial mirror" scenario.
-In this case, the Deckhouse cluster will have six LVMVolumeGroup resources with randomly generated names.
-In the future, it will be possible to specify a name for the LVMVolumeGroup resources created during automatic VG discovery
-by adding the `LVM` tag with the desired resource name.
+This example describes configuring three nodes according to the [«Partial mirror»](#partial-mirror) scenario. After configuration, six [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources with randomly generated names will be created in the cluster.
+In the future, it will be possible to specify names for [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources created during automatic Volume Group discovery by adding an `LVM` tag with the desired resource name.
 
-To list the LVMVolumeGroup resources, run the following command:
+List [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources by running the command:
 
 ```shell
-kubectl get lvmvolumegroups.storage.deckhouse.io
+d8 k get lvmvolumegroups.storage.deckhouse.io
 ```
 
-In the output, you should see the following list:
+Example output:
 
 ```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG            AGE
@@ -244,14 +231,12 @@ vg-e0f00cab-03b3-49cf-a2f6-595628a2593c   0/0         True                    Re
 vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2   0/0         True                    Ready   worker-1   25596Mi   0                main-unsafe   108s
 ```
 
-##### Configuring the `sds-local-volume` module (identical disks, "Partial mirror")
+##### `sds-local-volume` module configuration (identical disks, «Partial mirror»)
 
-To configure the `sds-local-volume` module following the "Partial mirror" scenario,
-create a LocalStorageClass resource and include the LVMVolumeGroup resources
-to use only the `main-safe` VG on all your nodes in the `sds-local-volume` module:
+Configure the `sds-local-volume` module according to the [«Partial mirror»](#partial-mirror) scenario: create a [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource and add [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that only the `main-safe` Volume Group is used on all nodes in the `sds-local-volume` module. Run the command:
 
-```yaml
-kubectl apply -f -<<EOF
+```shell
+d8 k apply -f -<<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: LocalStorageClass
 metadata:
@@ -268,16 +253,14 @@ spec:
 EOF
 ```
 
-##### Configuring the `sds-replicated-volume` module (identical disks, "Partial mirror")
+##### `sds-replicated-volume` module configuration (identical disks, «Partial mirror»)
 
-To configure the `sds-replicated-volume` module according to the "Partial mirror" scenario, do the following:
+Configure the `sds-replicated-volume` module according to the [«Partial mirror»](#partial-mirror) scenario:
 
-1. Create a ReplicatedStoragePool resource named `data-safe` and include LVMVolumeGroup resources
-   to use only the `main-safe` VG on all your nodes in the `sds-replicated-volume` module
-   in ReplicatedStorageClass with the `replication: None` parameter:
+1. Create a [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource named `data-safe` and add [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that only the `main-safe` Volume Group is used on all nodes in the `sds-replicated-volume` module in [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass) with `replication: None` parameter. Run the command:
 
-   ```yaml
-   kubectl apply -f -<<EOF
+   ```shell
+   d8 k apply -f -<<EOF
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStoragePool
    metadata:
@@ -291,12 +274,10 @@ To configure the `sds-replicated-volume` module according to the "Partial mirror
    EOF
    ```
 
-2. Create a ReplicatedStoragePool resource named `data-unsafe` and include the LVMVolumeGroup resources
-   to use only the `main-unsafe` VG on all your nodes in the `sds-replicated-volume` module
-   in ReplicatedStorageClass with `replication: Availability` or `replication: ConsistencyAndAvailability` parameter:
+1. Create a [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource named `data-unsafe` and add [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that only the `main-unsafe` Volume Group is used on all nodes in the `sds-replicated-volume` module in [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass) with `replication: Availability` or `replication: ConsistencyAndAvailability` parameter. Run the command:
 
-   ```yaml
-   kubectl apply -f -<<EOF
+   ```shell
+   d8 k apply -f -<<EOF
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStoragePool
    metadata:
@@ -310,133 +291,122 @@ To configure the `sds-replicated-volume` module according to the "Partial mirror
    EOF
    ```
 
-3. Create a ReplicatedStorageClass resource and specify a name of the previously created ReplicatedStoragePool resources
-   in the `storagePool` field to use the `main-safe` and `main-unsafe` VG on all your nodes:
+1. Create a [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass) resource and specify the names of previously created [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resources in the `storagePool` field, so that both `main-safe` and `main-unsafe` Volume Groups are used on all nodes. Run the command:
 
-   ```yaml
-   kubectl apply -f -<<EOF
+   ```shell
+   d8 k apply -f -<<EOF
    ---
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStorageClass
    metadata:
      name: replicated-sc-r1
    spec:
-     storagePool: data-safe # Note that you should use `data-safe` for this resource because it has `replication: None`, meaning there will be no replication of data for persistent volumes (PV) created with this StorageClass.
+     storagePool: data-safe # Note that `data-safe` should be used for this resource, since it has `replication: None` specified, which means that data replication for persistent volumes (PV) created with this StorageClass will not be performed
      replication: None
      reclaimPolicy: Delete
-     topology: Ignored # When specifying this topology, ensure the cluster has no zones (nodes labeled with `topology.kubernetes.io/zone`).
+     topology: Ignored # When specifying this topology, there should be no zones in the cluster (nodes with topology.kubernetes.io/zone labels)
    ---
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStorageClass
    metadata:
      name: replicated-sc-r2
    spec:
-     storagePool: data-unsafe # Note that you should use `data-unsafe` for this resource because it has `replication: Availability`, meaning there will be replication of data for PV created with this StorageClass.
+     storagePool: data-unsafe # Note that `data-unsafe` should be used for this resource, since it has `replication: Availability` specified, which means that data replication for persistent volumes (PV) created with this StorageClass will be performed
      replication: Availability
      reclaimPolicy: Delete
-     topology: Ignored
+     topology: Ignored # When specifying this topology, there should be no zones
    ---
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStorageClass
    metadata:
      name: replicated-sc-r3
    spec:
-     storagePool: data-unsafe # Note that you should use `data-unsafe` for this resource because it has `replication: ConsistencyAndAvailability`, meaning there will be replication of data for PV created with this StorageClass.
+     storagePool: data-unsafe # Note that `data-unsafe` should be used for this resource, since it has `replication: ConsistencyAndAvailability` specified, which means that data replication for persistent volumes (PV) created with this StorageClass will be performed
      replication: ConsistencyAndAvailability
      reclaimPolicy: Delete
-     topology: Ignored
+     topology: Ignored # When specifying this topology, there should be no zones
    EOF
    ```
 
 ## Combined storage
 
-With the combined storage, you will be using various disk types on a node.
+Use combined storage when using disks of different types simultaneously on the node.
 
-In the case when you use various disk types to create a storage,
-we recommended that you create a mirror from single-type disks and install the OS following the ["Full mirror" scenario](#full-mirror)
-but don't use it for SDS.
+When combining disks of different types to create storage, it is recommended to make a mirror from disks of one type and install the operating system on it according to the [«Full mirror»](#full-mirror) scenario, but not use it for SDS.
 
-For SDS, we recommend using disks of other types (hereinafter, additional disks),
-different from the ones used for the mirror with the OS.
+For SDS, use disks of other types (hereinafter — additional disks) that differ from those used for the mirror under the operating system.
 
-The following table contains recommendations on using additional disks depending on the type:
+Recommendations for using additional disks depending on their type:
 
-| Disk type | Recommended use |
-| --------- | --------------- |
-| NVMe SSD | To create volumes that require high performance. |
-| SATA SSD | To create volumes that do not require high performance. |
-| HDD      | To create volumes that do not require high performance. |
+| Disk type | Recommended usage purposes                        |
+|-----------|---------------------------------------------------------|
+| NVMe SSD  | Creating volumes requiring high performance    |
+| SATA SSD  | Creating volumes not requiring high performance |
+| HDD       | Creating volumes not requiring high performance |
 
-You can configure additional disks following either the "Full mirror" or "Partial mirror" scenario.
+Additional disks can be configured according to any of the [«Full mirror»](#full-mirror) or [«Partial mirror»](#partial-mirror) scenarios.
 
-In the following sections, you can find configuration scenarios for additional disks of these types:
+Below is the process of configuring additional disks using the following types as an example:
 
 - NVMe SSD.
 - SATA SSD.
 - HDD.
 
-### Configuring additional disks ("Full mirror")
+### Additional disks configuration (Full mirror)
 
 {{< alert level="warning" >}}
-The following procedure describes configuration of additional disks for initial cluster deployment and configuration
-when you connect to nodes using SSH.
-If you have an already running cluster and you need to connect additional disks to its nodes,
-we recommend that you create and configure a VG using the [LVMVolumeGroup resource](./usage.html#creating-an-lvmvolumegroup-resource),
-instead of running the commands below.
+Below is the order of actions for configuring additional disks for the case of primary cluster deployment and configuration when connecting to nodes via SSH.
+If you already have a working cluster and you are adding additional disks to its nodes, it is recommended to create and configure Volume Groups using the [LVMVolumeGroup](./usage.html#2-user-creation) resource, instead of executing the commands below on the node.
 {{< /alert >}}
 
-To configure additional disks on a node according to the "Full mirror" scenario, do the following:
+Configure additional disks on the node according to the [«Full mirror»](#full-mirror) scenario:
 
-1. Create a mirror from all additional disks of a single type (hardware or software).
-2. Create a VG named `vg-name` on the mirror.
-3. Assign the `storage.deckhouse.io/enabled=true` tag for `vg-name` VG using the following command:
+1. Assemble a mirror from all additional disks of a certain type entirely (hardware or software).
+1. Create a Volume Group named `<vg-name>` on the mirror.
+1. Set the `storage.deckhouse.io/enabled=true` tag for the `<vg-name>` Volume Group by running the command:
 
    ```shell
    vgchange <vg-name> --addtag storage.deckhouse.io/enabled=true
    ```
 
 {{< alert level="info" >}}
-In the example command, replace `<vg-name>` with a corresponding VG name, depending on the type of additional disks.
+Replace `<vg-name>` with an informative name depending on the type of additional disks.
 
-Example of VG names for various disk types:
+Examples of Volume Group names for additional disks of different types:
 
-- `ssd-nvme`: For NVMe SSD.
-- `ssd-sata`: For SATA SSD.
-- `hdd`: For HDD.
+- `ssd-nvme`: For NVMe SSD disks.
+- `ssd-sata`: For SATA SSD disks.
+- `hdd`: For HDD disks.
 {{< /alert >}}
 
-#### Example of SDS module configuration (combined storage, "Full mirror")
+#### SDS modules configuration example (combined storage, «Full mirror»)
 
-In this example, it's assumed that you have configured three nodes following the "Full mirror" scenario.
-In this case, the Deckhouse cluster will have three LVMVolumeGroup resources with randomly generated names.
-In the future, it will be possible to specify a name for the LVMVolumeGroup resources
-created during automatic VG discovery by adding the `LVM` tag with the desired resource name.
+This example describes configuring three nodes according to the [«Full mirror»](#full-mirror) scenario. After configuration, three [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources with randomly generated names will be created in the cluster.
+In the future, it will be possible to specify names for [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources created during automatic Volume Group discovery by adding an `LVM` tag with the desired resource name.
 
-To list the LVMVolumeGroup resources, run the following command:
+List [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources by running the command:
 
 ```shell
-kubectl get lvmvolumegroups.storage.deckhouse.io
+d8 k get lvmvolumegroups.storage.deckhouse.io
 ```
 
-In the output, you should see the following list:
+Example output:
 
 ```console
-NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG         AGE
+NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG          AGE
 vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                <vg-name>   61s
 vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                <vg-name>   4m17s
 vg-c7863e12-c143-42bb-8e33-d578ce50d6c7   0/0         True                    Ready   worker-1   25596Mi   0                <vg-name>   108s
 ```
 
-Where `<vg-name>` is the name you assigned previously.
+`<vg-name>`: The name assigned to the Volume Group on the mirror in the previous step.
 
-##### Configuring the `sds-local-volume` module (combined storage, "Full mirror")
+##### `sds-local-volume` module configuration (combined storage, «Full mirror»)
 
-To configure the `sds-local-volume` module following the "Full mirror" scenario,
-create a LocalStorageClass resource and include all LVMVolumeGroup resources
-to use the `<vg-name>` VG on all nodes in the `sds-local-volume` module:
+Configure the `sds-local-volume` module according to the [«Full mirror»](#full-mirror) scenario: create a [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource and add all [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that the `<vg-name>` Volume Group is used on all nodes in the `sds-local-volume` module. Run the command:
 
-```yaml
-kubectl apply -f -<<EOF
+```shell
+d8 k apply -f -<<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: LocalStorageClass
 metadata:
@@ -454,25 +424,23 @@ EOF
 ```
 
 {{< alert level="info" >}}
-In the example configuration, replace `<local-storage-class-name>` with a corresponding name,
-depending on the type of additional disks.
+In the example above, replace `<local-storage-class-name>` with an informative name, depending on the type of additional disks.
 
-Examples of the LocalStorageClass resource names for additional disks of various types:
+Examples of informative names for [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource for additional disks of different types:
 
-- `local-sc-ssd-nvme`: For NVMe SSD.
-- `local-sc-ssd-sata`: For SATA SSD.
-- `local-sc-ssd-hdd`: For HDD.
+- `local-sc-ssd-nvme`: For NVMe SSD disks.
+- `local-sc-ssd-sata`: For SATA SSD disks.
+- `local-sc-ssd-hdd`: For HDD disks.
 {{< /alert >}}
 
-##### Configuring the `sds-replicated-volume` module (combined storage, "Full mirror")
+##### `sds-replicated-volume` module configuration (combined storage, «Full mirror»)
 
-To configure the `sds-replicated-volume` module according to the "Full mirror" scenario, do the following:
+Configure the `sds-replicated-volume` module according to the [«Full mirror»](#full-mirror) scenario:
 
-1. Create a ReplicatedStoragePool resource and include all LVMVolumeGroup resources
-   to use the `<vg-name>` VG on all nodes in the `sds-replicated-volume` module:
+1. Create a [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource and add all [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that the `<vg-name>` Volume Group is used on all nodes in the `sds-replicated-volume` module. Run the command:
 
-   ```yaml
-   kubectl apply -f -<<EOF
+   ```shell
+   d8 k apply -f -<<EOF
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStoragePool
    metadata:
@@ -486,20 +454,18 @@ To configure the `sds-replicated-volume` module according to the "Full mirror" s
    EOF
    ```
 
-   > In the example configuration, replace `<replicated-storage-pool-name>` with a corresponding name,
-   > depending on the type of additional disks.
+   > Replace `<replicated-storage-pool-name>` with an informative name depending on the type of additional disks.
    >
-   > Examples of the ReplicatedStoragePool resource names for additional disks of various types:
+   > Examples of informative names for [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource for additional disks of different types:
    >
-   > - `data-ssd-nvme`: For NVMe SSD.
-   > - `data-ssd-sata`: For SATA SSD.
-   > - `data-hdd`: For HDD.
+   > - `data-ssd-nvme`: For NVMe SSD disks.
+   > - `data-ssd-sata`: For SATA SSD disks.
+   > - `data-hdd`: For HDD disks.
 
-2. Create a ReplicatedStorageClass resource
-   and specify a name of the previously created ReplicatedStoragePool resource in the `storagePool` field:
+1. Create a [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass) resource and specify the name of the previously created [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource in the `storagePool` field. Run the command:
 
-   ```yaml
-   kubectl apply -f -<<EOF
+   ```shell
+   d8 k apply -f -<<EOF
    ---
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStorageClass
@@ -509,7 +475,7 @@ To configure the `sds-replicated-volume` module according to the "Full mirror" s
      storagePool: <replicated-storage-pool-name>
      replication: None
      reclaimPolicy: Delete
-     topology: Ignored # When specifying this topology, ensure the cluster has no zones (nodes labeled with `topology.kubernetes.io/zone`).
+     topology: Ignored # When specifying this topology, there should be no zones in the cluster (nodes with topology.kubernetes.io/zone labels)
    ---
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStorageClass
@@ -519,7 +485,7 @@ To configure the `sds-replicated-volume` module according to the "Full mirror" s
      storagePool: <replicated-storage-pool-name>
      replication: Availability
      reclaimPolicy: Delete
-     topology: Ignored
+     topology: Ignored # When specifying this topology, there should be no zones
    ---
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStorageClass
@@ -529,66 +495,67 @@ To configure the `sds-replicated-volume` module according to the "Full mirror" s
      storagePool: <replicated-storage-pool-name>
      replication: ConsistencyAndAvailability
      reclaimPolicy: Delete
-     topology: Ignored
+     topology: Ignored # When specifying this topology, there should be no zones
    EOF
    ```
 
-### Configuring additional disks ("Partial mirror")
+### Additional disks configuration (Partial mirror)
 
 {{< alert level="warning" >}}
-Using partitions with the same PARTUUID is not supported, as well as changing the PARTUUID of a partition used for creating a VG. When creating a partition table, we recommended that you choose the `GPT` format, as PARTUUID in `MBR` are pseudo-random and contain the partition number. Additionally, `MBR` does not support PARTLABEL, which can be helpful to identify a partition in Deckhouse later.
+Using partitions with identical PARTUUID is not supported, as well as changing PARTUUID of a partition that is used to create a Volume Group.
+When creating a partition table, it is recommended to choose the `GPT` format, as PARTUUID in `MBR` is pseudo-random and contains the partition number.
+In addition, the PARTLABEL attribute cannot be set in `MBR`, which may be useful for subsequent partition identification.
 {{< /alert >}}
 
 {{< alert level="warning" >}}
-The following procedure describes configuration of additional disks for initial cluster deployment and configuration
-when you connect to nodes using SSH.
-If you have an already running cluster and you need to connect additional disks to its nodes,
-we recommend that you create and configure a VG using the [LVMVolumeGroup resource](./usage.html#creating-an-lvmvolumegroup-resource),
-instead of running the commands below.
+Below is the order of actions for configuring additional disks for the case of primary cluster deployment and configuration when connecting to nodes via SSH.
+If you already have a working cluster and you are adding additional disks to its nodes, it is recommended to create and configure Volume Groups using the [LVMVolumeGroup](./usage.html#2-user-creation) resource, instead of executing the commands below on the node.
 {{< /alert >}}
 
-In the "Partial mirror" scenario, you will be using two partitions on each disk:
-one to store non-replicable SDS data
-and the other one to store replicable SDS data.
-The first partition of each disk is used to create a mirror,
-while the second partition is used to create a separate VG without mirroring.
-This approach maximizes the efficient use of disk space.
+In this scenario, two partitions are created on each disk:
 
-To configure a node with additional disks according to the "Partial mirror" scenario, do the following:
+- The first partition is used to create a mirror for SDS data that are not replicated.
+- The second partition is used to create a separate Volume Group without mirroring for SDS data that are replicated.
+
+This allows for maximum efficient use of disk space.
+
+Configure the node with additional disks according to the [«Partial mirror»](#partial-mirror) scenario:
 
 1. Create two partitions on each additional disk.
-2. Create a mirror from the first partitions on each disk.
-3. Create a VG named `<vg-name>-safe` on the mirror.
-4. Create a VG named `<vg-name>-unsafe` from the second partitions on each disk.
-5. Assign the `storage.deckhouse.io/enabled=true` tag for the `ssd-nvme-safe` and `ssd-nvme-unsafe` VG using the following commands:
+
+1. Assemble a mirror from the first partitions on each disk.
+
+1. Create a Volume Group named `<vg-name>-safe` on the mirror.
+
+1. Create a Volume Group named `<vg-name>-unsafe` from the second partitions of each disk.
+
+1. Set the `storage.deckhouse.io/enabled=true` tag for the `<vg-name>-safe` and `<vg-name>-unsafe` Volume Groups by running the commands:
 
    ```shell
-   vgchange ssd-nvme-safe --addtag storage.deckhouse.io/enabled=true
-   vgchange ssd-nvme-unsafe --addtag storage.deckhouse.io/enabled=true
+   vgchange <vg-name>-safe --addtag storage.deckhouse.io/enabled=true
+   vgchange <vg-name>-unsafe --addtag storage.deckhouse.io/enabled=true
    ```
 
-   > In the example commands, replace `<vg-name>` with a corresponding VG name, depending on the type of additional disks.
+   > Replace `<vg-name>` with an informative prefix depending on the type of additional disks.
    >
-   > Example of VG names for various disk types:
+   > Examples of informative prefix `<vg-name>` for additional disks of different types:
    >
-   > - `ssd-nvme`: For NVMe SSD.
-   > - `ssd-sata`: For SATA SSD.
-   > - `hdd`: For HDD.
+   > - `ssd-nvme`: For NVMe SSD disks.
+   > - `ssd-sata`: For SATA SSD disks.
+   > - `hdd`: For HDD disks.
 
-#### Example of SDS module configuration (combined storage, "Partial mirror")
+#### SDS modules configuration example (combined storage, «Partial mirror»)
 
-In this example, it's assumed that you have configured three nodes following the "Partial mirror" scenario.
-In this case, the Deckhouse cluster will have six LVMVolumeGroup resources with randomly generated names.
-In the future, it will be possible to specify a name for the LVMVolumeGroup resources
-created during automatic VG discovery by adding the `LVM` tag with the desired resource name.
+This example describes configuring three nodes according to the [«Partial mirror»](#partial-mirror) scenario. After configuration, six [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources with randomly generated names will be created in the cluster.
+In the future, it will be possible to specify names for [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources created during automatic Volume Group discovery by adding an `LVM` tag with the desired resource name.
 
-To list the LVMVolumeGroup resources, run the following command:
+List [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources by running the command:
 
 ```shell
-kubectl get lvmvolumegroups.storage.deckhouse.io
+d8 k get lvmvolumegroups.storage.deckhouse.io
 ```
 
-In the output, you should see the following list:
+Example output:
 
 ```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG                AGE
@@ -600,16 +567,14 @@ vg-e0f00cab-03b3-49cf-a2f6-595628a2593c   0/0         True                    Re
 vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2   0/0         True                    Ready   worker-1   25596Mi   0                <vg-name>-unsafe   108s
 ```
 
-Where `<vg-name>` is the name you assigned previously.
+`<vg-name>`: The prefix of the name assigned to the Volume Group created in the previous step.
 
-##### Configuring the `sds-local-volume` module (combined storage, "Partial mirror")
+##### `sds-local-volume` module configuration (combined storage, «Partial mirror»)
 
-To configure the `sds-local-volume` module following the "Partial mirror" scenario,
-create a LocalStorageClass resource and include LVMVolumeGroup resources
-to use only the `<vg-name>-safe` VG on all nodes in the `sds-local-volume` module:
+Configure the `sds-local-volume` module according to the [«Partial mirror»](#partial-mirror) scenario: create a [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource and add [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that only the `<vg-name>-safe` Volume Group is used on all nodes in the `sds-local-volume` module. Run the command:
 
-```yaml
-kubectl apply -f -<<EOF
+```shell
+d8 k apply -f -<<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: LocalStorageClass
 metadata:
@@ -627,26 +592,23 @@ EOF
 ```
 
 {{< alert level="info" >}}
-In the example configuration, replace `<local-storage-class-name>` with a corresponding name,
-depending on the type of additional disks.
+In the example above, replace `<local-storage-class-name>` with an informative name, depending on the type of additional disks.
 
-Examples of the LocalStorageClass resource names for additional disks of various types:
+Examples of informative names for [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource for additional disks of different types:
 
-- `local-sc-ssd-nvme`: For NVMe SSD.
-- `local-sc-ssd-sata`: For SATA SSD.
-- `local-sc-ssd-hdd`: For HDD.
+- `local-sc-ssd-nvme`: For NVMe SSD disks.
+- `local-sc-ssd-sata`: For SATA SSD disks.
+- `local-sc-hdd`: For HDD disks.
 {{< /alert >}}
 
-##### Configuring the `sds-replicated-volume` module (combined storage, "Partial mirror")
+##### `sds-replicated-volume` module configuration (combined storage, «Partial mirror»)
 
-To configure the `sds-replicated-volume` module according to the "Partial mirror" scenario, do the following:
+Configure the `sds-replicated-volume` module according to the [«Partial mirror»](#partial-mirror) scenario:
 
-1. Create a ReplicatedStoragePool resource named `data-<vg-name>-safe` and include LVMVolumeGroup resources
-   for using only the `<vg-name>-safe` VG on all nodes in the `sds-replicated-volume` module in ReplicatedStorageClass
-   with the `replication: None` parameter:
+1. Create a [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource named `data-<vg-name>-safe` and add [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that only the `<vg-name>-safe` Volume Group is used on all nodes in the `sds-replicated-volume` module in [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass) with `replication: None` parameter. Run the command:
 
-   ```yaml
-   kubectl apply -f -<<EOF
+   ```shell
+   d8 k apply -f -<<EOF
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStoragePool
    metadata:
@@ -660,21 +622,18 @@ To configure the `sds-replicated-volume` module according to the "Partial mirror
    EOF
    ```
 
-   > In the example configuration, replace `data-<vg-name>-safe` with a corresponding VG name,
-   > depending on the type of additional disks.
+   > Replace `data-<vg-name>-safe` with an informative name depending on the type of additional disks.
    >
-   > Example of the ReplicatedStoragePool resource names for additional disks of various types:
+   > Examples of informative names for [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource for additional disks of different types:
    >
-   > - `data-ssd-nvme-safe`: For NVMe SSD.
-   > - `data-ssd-sata-safe`: For SATA SSD.
-   > - `data-hdd-safe`: For HDD.
+   > - `data-ssd-nvme-safe`: For NVMe SSD disks.
+   > - `data-ssd-sata-safe`: For SATA SSD disks.
+   > - `data-hdd-safe`: For HDD disks.
 
-2. Create a ReplicatedStoragePool resource named `data-<vg-name>-unsafe` and include LVMVolumeGroup resources
-   for using only the `<vg-name>-unsafe` VG on all nodes in the `sds-replicated-volume` module in ReplicatedStorageClass
-   with the `replication: Availability` or `replication: ConsistencyAndAvailability` parameter:
+1. Create a [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource named `data-<vg-name>-unsafe` and add [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that only the `<vg-name>-unsafe` Volume Group is used on all nodes in the `sds-replicated-volume` module in [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass) with `replication: Availability` or `replication: ConsistencyAndAvailability` parameter. Run the command:
 
-   ```yaml
-   kubectl apply -f -<<EOF
+   ```shell
+   d8 k apply -f -<<EOF
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStoragePool
    metadata:
@@ -688,66 +647,63 @@ To configure the `sds-replicated-volume` module according to the "Partial mirror
    EOF
    ```
 
-   > In the example configuration, replace `data-<vg-name>-unsafe` with a corresponding VG name,
-   > depending on the type of additional disks.
+   > In the example above, replace `data-<vg-name>-unsafe` with an informative name, depending on the type of additional disks.
    >
-   > Example of the ReplicatedStoragePool resource names for additional disks of various types:
+   > Examples of informative names for [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource for additional disks of different types:
    >
-   > - `data-ssd-nvme-unsafe`: For NVMe SSD.
-   > - `data-ssd-sata-unsafe`: For SATA SSD.
-   > - `data-hdd-unsafe`: For HDD.
+   > - `data-ssd-nvme-unsafe`: For NVMe SSD disks.
+   > - `data-ssd-sata-unsafe`: For SATA SSD disks.
+   > - `data-hdd-unsafe`: For HDD disks.
 
-3. Create a ReplicatedStorageClass resource and specify a name of the previously created ReplicatedStoragePool resources
-   for using `<vg-name>-safe` and `<vg-name>-unsafe` VG on all nodes:
+1. Create a [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass) resource and specify the names of previously created [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resources in the `storagePool` field, so that both `<vg-name>-safe` and `<vg-name>-unsafe` Volume Groups are used on all nodes. Run the command:
 
-   ```yaml
-   kubectl apply -f -<<EOF
+   ```shell
+   d8 k apply -f -<<EOF
    ---
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStorageClass
    metadata:
      name: replicated-sc-ssd-nvme-r1
    spec:
-     storagePool: data-<vg-name>-safe # Note that you should use `data-<vg-name>-safe` for this resource because it has `replication: None`, meaning there will be no replication of data for PV created with this StorageClass.
+     storagePool: data-<vg-name>-safe # Note that `data-<vg-name>-safe` should be used for this resource, since it has `replication: None` specified, which means that data replication for persistent volumes (PV) created with this StorageClass will not be performed
      replication: None
      reclaimPolicy: Delete
-     topology: Ignored # When specifying this topology, ensure the cluster has no zones (nodes labeled with `topology.kubernetes.io/zone`).
+     topology: Ignored # When specifying this topology, there should be no zones in the cluster (nodes with topology.kubernetes.io/zone labels)
    ---
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStorageClass
    metadata:
      name: replicated-sc-ssd-nvme-r2
    spec:
-     storagePool: data-<vg-name>-unsafe # Note that you should use `data-<vg-name>-unsafe` for this resource because it has `replication: Availability`, meaning there will be replication of data for PV created with this StorageClass.
+     storagePool: data-<vg-name>-unsafe # Note that `data-<vg-name>-unsafe` should be used for this resource, since it has `replication: Availability` specified, which means that data replication for persistent volumes (PV) created with this StorageClass will be performed
      replication: Availability
      reclaimPolicy: Delete
-     topology: Ignored
+     topology: Ignored # When specifying this topology, there should be no zones
    ---
    apiVersion: storage.deckhouse.io/v1alpha1
    kind: ReplicatedStorageClass
    metadata:
      name: replicated-sc-ssd-nvme-r3
    spec:
-     storagePool: data-<vg-name>-unsafe # Note that you should use `data-<vg-name>-unsafe` for this resource because it has `replication: ConsistencyAndAvailability`, meaning there will be replication of data for PV created with this StorageClass.
+     storagePool: data-<vg-name>-unsafe # Note that `data-<vg-name>-unsafe` should be used for this resource, since it has `replication: ConsistencyAndAvailability` specified, which means that data replication for persistent volumes (PV) created with this StorageClass will be performed
      replication: ConsistencyAndAvailability
      reclaimPolicy: Delete
-     topology: Ignored
+     topology: Ignored # When specifying this topology, there should be no zones
    EOF
    ```
 
-   > In the example configuration, replace `data-<vg-name>-unsafe` with a corresponding VG name,
-   > depending on the type of additional disks.
+   > Replace `data-<vg-name>-unsafe` with an informative name depending on the type of additional disks.
    >
-   > Example of the ReplicatedStoragePool resource names for additional disks of various types:
+   > Examples of informative names for [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource for additional disks of different types:
    >
-   > - `data-ssd-nvme-unsafe`: For NVMe SSD.
-   > - `data-ssd-sata-unsafe`: For SATA SSD.
-   > - `data-hdd-unsafe`: For HDD.
+   > - `data-ssd-nvme-unsafe`: For NVMe SSD disks.
+   > - `data-ssd-sata-unsafe`: For SATA SSD disks.
+   > - `data-hdd-unsafe`: For HDD disks.
    >
-   > Replace `data-<vg-name>-safe` with a corresponding VG name, depending on the type of additional disks.
+   > Replace `data-<vg-name>-safe` with an informative name depending on the type of additional disks.
    >
-   > Example of the ReplicatedStoragePool resource names for additional disks of various types:
+   > Examples of informative names for [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource for additional disks of different types:
    >
-   > - `data-ssd-nvme-safe`: For NVMe SSD.
-   > - `data-ssd-sata-safe`: For SATA SSD.
-   > - `data-hdd-safe`: For HDD.
+   > - `data-ssd-nvme-safe`: For NVMe SSD disks.
+   > - `data-ssd-sata-safe`: For SATA SSD disks.
+   > - `data-hdd-safe`: For HDD disks.

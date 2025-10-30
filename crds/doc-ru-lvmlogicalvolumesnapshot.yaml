@@ -1,0 +1,48 @@
+spec:
+  versions:
+    - name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: |
+            Ресурс LVMLogicalVolumeSnapshot определяет хранилище, на котором будет создан VolumeSnapshot.
+          properties:
+            spec:
+              properties:
+                actualSnapshotNameOnTheNode:
+                  description: |
+                    Имя снимка тома на узле.
+                lvmLogicalVolumeName:
+                  description: |
+                    Имя ресурса LVMLogicalVolume, с которого создается снимок.
+            status:
+              description: |
+                Описывает состояние ресурса.
+              properties:
+                nodeName:
+                  description: |
+                    Имя Kubernetes-узла, на котором находится снимок.
+                actualVGNameOnTheNode:
+                  description: |
+                    Фактическое имя группы томов на узле, в которой находится снимок.
+                actualLVNameOnTheNode:
+                  description: |
+                    Фактическое имя тома на узле, с которого создан снимок.
+                phase:
+                  description: |
+                    Текущая фаза ресурса.
+                    
+                    Возможные значения:
+                    
+                    - `Created` — снимок создан успешно;
+                    - `Pending` — снимок в процессе создания;
+                    - `Failed` — ошибка при создании снимка.
+                reason:
+                  description: |
+                    Причина выставленной фазы.
+                size:
+                  description: |
+                    Размер снимка LV на узле.
+                usedSize:
+                  description: |
+                    Используемый размер снимка LV на узле.
+

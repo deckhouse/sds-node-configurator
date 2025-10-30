@@ -1,62 +1,58 @@
 ---
-title: "The sds-node-configurator module: FAQ"
-description: "Deckhouse Kubernetes Platform. The sds-node-configurator module. Common questions and answers."
+title: "sds-node-configurator module: FAQ"
+description: "sds-node-configurator module: frequently asked questions and answers."
 ---
-
 {{< alert level="warning" >}}
-The module is guaranteed to work only with stock kernels that are shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
+Module functionality is guaranteed only when using stock kernels provided with [supported distributions](/products/kubernetes-platform/documentation/v1/reference/supported_versions.html#linux).
 
-The module may work with other kernels or distributions, but its stable operation and availability of all features is not guaranteed.
+Module functionality when using other kernels or distributions is possible but not guaranteed.
 {{< /alert >}}
 
-## Why does creating BlockDevice and LVMVolumeGroup resources in a cluster fail?
+## BlockDevice and LVMVolumeGroup resources are not created in the cluster
 
-- In most cases, the creation of BlockDevice resources fails because the existing devices fail filtering by the controller. Make sure that your devices meet the [requirements](./usage.html#the-conditions-the-controller-imposes-on-the-device).
+- [BlockDevice](./cr.html#blockdevice) resources may not be created if devices do not pass controller filtering. Ensure that devices meet the [requirements](./usage.html#controller-requirements-for-devices).
 
-- Creating LVMVolumeGroup resources may fail due to the absence of BlockDevice resources in the cluster, as their names are used in the LVMVolumeGroup specification.
+- [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources may not be created due to the absence of [BlockDevice](./cr.html#blockdevice) resources in the cluster, as their names are used in the [LVMVolumeGroup](./cr.html#lvmvolumegroup) specification.
 
-- If the BlockDevice resources are present and the LVMVolumeGroup resources are not, make sure the existing `LVM Volume Group` on the node has the special tag `storage.deckhouse.io/enabled=true` attached.
+- If [BlockDevice](./cr.html#blockdevice) resources exist but [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources are missing, ensure that existing LVM Volume Groups on the node have the LVM tag `storage.deckhouse.io/enabled=true`.
 
-## I have deleted the LVMVolumeGroup resource, but the resource and its `Volume Group` are still there. What do I do?
+## LVMVolumeGroup resource and Volume Group remain after deletion attempt
 
-Such a situation is possible in two cases:
+This situation can occur in two cases:
 
-1. The `Volume Group` contains `LV`.
+1. The Volume Group contains Logical Volumes.
 
-   The controller does not take responsibility for removing LV from the node, so if there are any logical volumes in the `Volume Group` created by the resource, you need to manually delete them on the node. After this, both the resource and the `Volume Group` (along with the `PV`) will be deleted automatically.
+   The controller is not responsible for deleting Logical Volumes from the node. If the Volume Group created using the resource contains Logical Volumes, delete them manually on the node. After that, the resource and Volume Group along with Physical Volumes will be automatically deleted.
 
-2. The resource has an annotation `storage.deckhouse.io/deletion-protection`.
+1. The resource has the `storage.deckhouse.io/deletion-protection` annotation.
 
-   This annotation protects the resource from deletion and, as a result, the `Volume Group` created by it. You need to remove the annotation manually with the command:
+   This annotation protects the resource and the Volume Group it created from deletion. Remove the annotation by running the command:
 
    ```shell
-   kubectl annotate lvg %lvg-name% storage.deckhouse.io/deletion-protection-
+   d8 k annotate lvg %lvg-name% storage.deckhouse.io/deletion-protection-
    ```
 
-   After the command is executed, both the LVMVolumeGroup resource and `Volume Group` will be deleted automatically.
+   After executing the command, the resource and Volume Group will be automatically deleted.
 
-## I'm trying to create a `Volume Group` using the LVMVolumeGroup resource, but I'm not getting anywhere. Why?
+## Unable to create Volume Group using LVMVolumeGroup resource
 
-Most likely, your resource fails controller validation even if it has passed the Kubernetes validation successfully.
-The exact cause of the failure can be found in the `status.message` field of the resource.
-You can also refer to the controller's logs.
+The resource does not pass controller validation (Kubernetes validation was successful). The reason can be seen in the `status.message` field of the resource or in the controller logs.
 
-The problem usually stems from incorrectly-defined BlockDevice resources. Make sure these resources meet the following requirements:
+Most often the problem is related to incorrectly specified [BlockDevice](./cr.html#blockdevice) resources. Ensure that the selected resources meet the following requirements:
 
-- The `Consumable` field is set to `true`.
-- For a `Volume Group` of the `Local` type, the specified BlockDevice resources belong to the same node.<!-- > - For a `Volume Group` of the `Shared` type, the specified BlockDevice is the only resource. -->
-- The current names of the BlockDevice resources are specified.
+- The `status.consumable` field has the value `true`.
+- For `Local` type Volume Groups, the specified [BlockDevice](./cr.html#blockdevice) resources belong to the same node.<!-- > - For `Shared` type Volume Groups, a single [BlockDevice](./cr.html#blockdevice) resource is specified. -->
+- Current [BlockDevice](./cr.html#blockdevice) resource names are specified.
 
-A full list of expected values can be found in the [CR reference](./cr.html) of the LVMVolumeGroup resource.
+The complete list of expected values is available in the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource description.
 
-## What happens if I unplug one of the devices in a `Volume Group`? Will the linked LVMVolumeGroup resource be deleted?
+## Device disconnection in Volume Group
 
-The LVMVolumeGroup resource will persist as long as the corresponding `Volume Group` exists. As long as at least one device exists, the `Volume Group` will be there, albeit in an unhealthy state.
-Note that these issues will be reflected in the resource's `status`.
+The [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource exists as long as the corresponding Volume Group exists. As long as at least one device exists, the Volume Group is preserved but marked as non-functional. The current state is reflected in the `status` field of the resource.
 
-Once the unplugged device is plugged back in and reactivated, the `LVM Volume Group` will regain its functionality while the corresponding LVMVolumeGroup resource will also be updated to reflect the current state.
+After restoring the disconnected device on the node, the LVM Volume Group will restore functionality, and the corresponding [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource will display the current state.
 
-## How to transfer control of an existing `LVM Volume Group` on the node to the controller?
+## Transferring control of existing LVM Volume Group to controller
 
 Add the LVM tag `storage.deckhouse.io/enabled=true` to the LVM Volume Group on the node:
 
@@ -64,57 +60,32 @@ Add the LVM tag `storage.deckhouse.io/enabled=true` to the LVM Volume Group on t
 vgchange myvg-0 --addtag storage.deckhouse.io/enabled=true
 ```
 
-## How do I get the controller to stop monitoring the `LVM Volume Group` on the node?
+## Stopping LVM Volume Group tracking by controller
 
-Delete the `storage.deckhouse.io/enabled=true` LVM tag for the target `Volume Group` on the node:
+Remove the LVM tag `storage.deckhouse.io/enabled=true` from the desired LVM Volume Group on the node:
 
 ```shell
 vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true
 ```
 
-The controller will then stop tracking the selected `Volume Group` and delete the associated LVMVolumeGroup resource automatically.
+After this, the controller will stop tracking the selected Volume Group and will independently delete the associated [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource.
 
-## I haven't added the `storage.deckhouse.io/enabled=true` LVM tag to the `Volume Group`, but it is there. How is this possible?
+## LVM tag `storage.deckhouse.io/enabled=true` appeared automatically
 
-This can happen if you created the `LVM Volume Group` using the LVMVolumeGroup resource, in which case the controller will automatically add this LVM tag to the created `LVM Volume Group`. This is also possible if the `Volume Group` or its `Thin-pool` already had the `linstor-*` LVM tag of the `linstor` module.
+The LVM tag appears in the following cases:
 
-When you switch from the `linstor` module to the `sds-node-configurator` and `sds-replicated-volume` modules, the `linstor-*` LVM tags are automatically replaced with the `storage.deckhouse.io/enabled=true` LVM tag in the `Volume Group`. This way, the `sds-node-configurator` gains control over these `Volume Groups`.
+- LVM Volume Group was created through the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource. In this case, the controller automatically adds the LVM tag `storage.deckhouse.io/enabled=true` to the created LVM Volume Group.
+- The Volume Group or its thin pool had the `linstor` module LVM tag — `linstor-*`.
 
-## How to use the LVMVolumeGroupSet resource to create LVMVolumeGroup?
+When migrating from the built-in `linstor` module to `sds-node-configurator` and `sds-replicated-volume` modules, `linstor-*` LVM tags are automatically replaced with `storage.deckhouse.io/enabled=true` in Volume Groups. Management of these Volume Groups is transferred to the `sds-node-configurator` module.
 
-To create an LVMVolumeGroup using the LVMVolumeGroupSet resource, you need to specify node selectors and a template for the LVMVolumeGroup resources in the LVMVolumeGroupSet specification. Currently, only the `PerNode` strategy is supported. With this strategy, the controller will create one LVMVolumeGroup resource from the template for each node that matches the selector.
+## Creating LVMVolumeGroup using LVMVolumeGroupSet resource
 
-Example of an LVMVolumeGroupSet specification:
+To create [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources using [LVMVolumeGroupSet](./cr.html#lvmvolumegroupset), specify node selectors and a template for the created [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources in the [LVMVolumeGroupSet](./cr.html#lvmvolumegroupset) specification.
 
-```yaml
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: LVMVolumeGroupSet
-metadata:
-  name: my-lvm-volume-group-set
-  labels:
-    my-label: my-value
-spec:
-  strategy: PerNode
-  nodeSelector:
-    matchLabels:
-      node-role.kubernetes.io/worker: ""
-  lvmVolumeGroupTemplate:
-    metadata:
-      labels:
-        my-label-for-lvg: my-value-for-lvg
-    spec:
-      type: Local
-      blockDeviceSelector:
-        matchLabels:
-          status.blockdevice.storage.deckhouse.io/model: <model>
-      actualVGNameOnTheNode: <actual-vg-name-on-the-node>
-```
+Only the `PerNode` strategy is supported: the controller creates one [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource from the template for each node matching the selector.
 
-## How to use the LVMVolumeGroupSet resource to create LVMVolumeGroup?
-
-To create an LVMVolumeGroup using the LVMVolumeGroupSet resource, you need to specify node selectors and a template for the LVMVolumeGroup resources in the LVMVolumeGroupSet specification. Currently, only the `PerNode` strategy is supported. With this strategy, the controller will create one LVMVolumeGroup resource from the template for each node that matches the selector.
-
-Example of an LVMVolumeGroupSet specification:
+Example [LVMVolumeGroupSet](./cr.html#lvmvolumegroupset) specification:
 
 ```yaml
 apiVersion: storage.deckhouse.io/v1alpha1
@@ -132,40 +103,66 @@ spec:
     metadata:
       labels:
         my-label-for-lvg: my-value-for-lvg
-    spec:
-      type: Local
-      blockDeviceSelector:
-        matchLabels:
-          status.blockdevice.storage.deckhouse.io/model: <model>
-      actualVGNameOnTheNode: <actual-vg-name-on-the-node>
+    type: Local
+    blockDeviceSelector:
+      matchLabels:
+        status.blockdevice.storage.deckhouse.io/model: <model>
+    actualVGNameOnTheNode: <actual-vg-name-on-the-node>
 ```
 
-## Which labels are added by the controller to BlockDevice resources
+## Changing UUID of Volume Groups when cloning virtual machines
 
-* status.blockdevice.storage.deckhouse.io/type - LVM type
+UUID of Volume Groups can only be changed when there are no active Logical Volumes in the Volume Group.
 
-* status.blockdevice.storage.deckhouse.io/fstype - filesystem type
+If the Volume Group has active Logical Volumes, perform the following steps:
 
-* status.blockdevice.storage.deckhouse.io/pvuuid - PV UUID
+1. Unmount the Logical Volume by running the command:
 
-* status.blockdevice.storage.deckhouse.io/vguuid - VG UUID
+   ```shell
+   umount /mount/point
+   ```
 
-* status.blockdevice.storage.deckhouse.io/partuuid - partition UUID
+1. Deactivate the Logical Volume or Volume Group by running the command:
 
-* status.blockdevice.storage.deckhouse.io/lvmvolumegroupname - resource name
+    - To deactivate a specific Logical Volume, run the command, changing <LV_NAME> to the Logical Volume name:
 
-* status.blockdevice.storage.deckhouse.io/actualvgnameonthenode - actual VG name on the node
+      ```shell
+      lvchange -an <LV_NAME>
+      ```
 
-* status.blockdevice.storage.deckhouse.io/wwn - WWN (World Wide Name) identifier for the device
+    - To deactivate all Logical Volumes in the group, run the command, changing <VG_NAME> to the Volume Group name:
 
-* status.blockdevice.storage.deckhouse.io/serial - device serial number
+      ```shell
+      lvchange -an <VG_NAME>
+      ```
 
-* status.blockdevice.storage.deckhouse.io/size - size
+1. After deactivating all Logical Volumes, change the UUID of Volume Groups by running the command:
 
-* status.blockdevice.storage.deckhouse.io/model - device model
+   ```shell
+   vgchange -u <VG_NAME>
+   ```
 
-* status.blockdevice.storage.deckhouse.io/rota - whether it is a rotational device
+   The command will generate new UUIDs for the specified Volume Group. To change UUIDs of all Volume Groups on the virtual machine, run:
 
-* status.blockdevice.storage.deckhouse.io/hotplug - hot-plug capability
+   ```shell
+   vgchange -u
+   ```
 
-* status.blockdevice.storage.deckhouse.io/machineid - ID of the server on which the block device is installed
+If necessary, the command can be added to the `cloud-init` script for automatic execution when creating virtual machines.
+
+## Labels added by controller to BlockDevice resources
+
+- status.blockdevice.storage.deckhouse.io/type: LVM type.
+- status.blockdevice.storage.deckhouse.io/fstype: Filesystem type.
+- status.blockdevice.storage.deckhouse.io/pvuuid: Physical Volume UUID.
+- status.blockdevice.storage.deckhouse.io/vguuid: Volume Group UUID.
+- status.blockdevice.storage.deckhouse.io/partuuid: Partition UUID.
+- status.blockdevice.storage.deckhouse.io/lvmvolumegroupname: Name of the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource to which the device belongs.
+- status.blockdevice.storage.deckhouse.io/actualvgnameonthenode: Volume Group name on the node.
+- status.blockdevice.storage.deckhouse.io/wwn: WWN (World Wide Name) identifier for the device.
+- status.blockdevice.storage.deckhouse.io/serial: Device serial number.
+- status.blockdevice.storage.deckhouse.io/size: Device size.
+- status.blockdevice.storage.deckhouse.io/model: Device model.
+- status.blockdevice.storage.deckhouse.io/rota: Indicates whether the device is rotational.
+- status.blockdevice.storage.deckhouse.io/hotplug: Indicates device hot-plug capability.
+- status.blockdevice.storage.deckhouse.io/machineid: Identifier of the server where the block device is installed.

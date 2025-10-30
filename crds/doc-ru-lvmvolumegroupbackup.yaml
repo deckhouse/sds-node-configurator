@@ -4,4 +4,147 @@ spec:
       schema:
         openAPIV3Schema:
           description: |
-            Ресурс, сохраняющий состояние lvmvolumegroups ресурсов для совершения миграции kind с LvmVolumeGroup до LVMVolumeGroup.
+            Ресурс, сохраняющий информацию из ресурсов lvmvolumegroups для миграции их kind с LvmVolumeGroup на LVMVolumeGroup.
+          properties:
+            spec:
+              properties:
+                type:
+                  description: |
+                    Тип группы томов.
+                    
+                    Возможные значения:
+                    
+                    - `Local` — локальная группа томов; используемые устройства не являются распределёнными (не Shared LUN).
+                blockDeviceNames:
+                  description: |
+                    Массив имён ресурсов блочных устройств для создания группы томов.
+                    
+                    > Учтите, что выбранные блочные устройства должны принадлежать одному узлу для локальной группы томов.
+                actualVGNameOnTheNode:
+                  description: |
+                    Желаемое имя группы томов. Должно быть уникальным для узла, на котором она находится.
+                    
+                    > Это поле неизменяемое.
+                thinPools:
+                  description: |
+                    Желаемая конфигурация thin pool.
+                  items:
+                    properties:
+                      name:
+                        description: |
+                          Желаемое имя thin pool.
+                          
+                          > Это поле неизменяемое.
+                      size:
+                        description: |
+                          Желаемый размер thin pool. Может быть указан как в численном формате, так и в процентах от общего размера группы томов.
+                          
+                          > При указании размера в процентах thin pool будет автоматически расширен при расширении группы томов.
+                      allocationLimit:
+                        description: |
+                          Предел расширения thin pool.
+            status:
+              properties:
+                thinPoolReady:
+                  description: |
+                    Отображает количество здоровых и общее количество thin pool.
+                configurationApplied:
+                  description: |
+                    Показывает, была ли последняя конфигурация успешно применена.
+                phase:
+                  description: |
+                    Общее состояние ресурса LVMVolumeGroup.
+                conditions:
+                  description: |
+                    Условия ресурса LVMVolumeGroup.
+                  items:
+                    properties:
+                      type:
+                        description: |
+                          Тип условия.
+                      status:
+                        description: |
+                          Статус условия.
+                      reason:
+                        description: |
+                          Причина текущего статуса.
+                      message:
+                        description: |
+                          Информация о текущем статусе.
+                      lastTransitionTime:
+                        description: |
+                          Время последнего изменения условия.
+                      observedGeneration:
+                        description: |
+                          Версия ресурса, на которой было применено условие.
+                vgUUID:
+                  description: |
+                    UUID группы томов.
+                vgSize:
+                  description: |
+                    Ёмкость группы томов.
+                vgFree:
+                  description: |
+                    Свободное место в группе томов.
+                allocatedSize:
+                  description: |
+                    Объём пространства, занимаемый в данный момент в группе томов.
+                thinPools:
+                  description: |
+                    Текущее состояние thin pool группы томов.
+                    
+                    > Может быть пустым, если в группе томов нет ни одного thin pool.
+                  items:
+                    properties:
+                      name:
+                        description: |
+                          Имя thin pool.
+                      actualSize:
+                        description: |
+                          Ёмкость thin pool.
+                      usedSize:
+                        description: |
+                          Используемый размер thin pool.
+                      allocatedSize:
+                        description: |
+                          Общий размер запрошенных логических томов в thin pool.
+                      allocationLimit:
+                        description: |
+                          Предел расширения thin pool.
+                      availableSpace:
+                        description: |
+                          Свободное место в thin pool.
+                      ready:
+                        description: |
+                          Статус работоспособности thin pool.
+                      message:
+                        description: |
+                          Информация о статусе.
+                nodes:
+                  description: |
+                    Информация об узлах, на которых находится группа томов.
+                  items:
+                    properties:
+                      name:
+                        description: |
+                          Имя узла.
+                      devices:
+                        description: |
+                          Информация об устройствах, используемых в группе томов на текущем узле.
+                        items:
+                          properties:
+                            path:
+                              description: |
+                                Путь к устройству на узле (например, /dev/sda).
+                            pvSize:
+                              description: |
+                                Размер физического тома.
+                            devSize:
+                              description: |
+                                Размер блочного устройства.
+                            pvUUID:
+                              description: |
+                                UUID физического тома LVM.
+                            blockDevice:
+                              description: |
+                                Имя соответствующего ресурса блочного устройства.

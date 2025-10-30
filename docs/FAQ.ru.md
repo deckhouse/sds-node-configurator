@@ -103,14 +103,11 @@ spec:
     metadata:
       labels:
         my-label-for-lvg: my-value-for-lvg
-    spec:
-      type: Local
-      blockDeviceSelector:
-        matchLabels:
-          status.blockdevice.storage.deckhouse.io/model: <model>
-      actualVGNameOnTheNode: <actual-vg-name-on-the-node>
-
-
+    type: Local
+    blockDeviceSelector:
+      matchLabels:
+        status.blockdevice.storage.deckhouse.io/model: <model>
+    actualVGNameOnTheNode: <actual-vg-name-on-the-node>
 ```
 
 ## Изменение UUID у групп томов при клонировании виртуальных машин

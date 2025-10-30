@@ -24,7 +24,7 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: | 
+          description: |
             The LVMLogicalVolume resource defines the storage where a PV will be created.
           required:
             - spec
@@ -73,9 +73,9 @@ spec:
                 size:
                   x-kubernetes-int-or-string: true
                   description: |
-                   The desired LV size. It can be specified as a numerical value or percentage of the total VG or thin pool space. For thin pools, the total space is calculated as the actual thin pool size multiplied by the `allocationLimit` value.
+                    The desired LV size. It can be specified as a numerical value or percentage of the total VG or thin pool space. For thin pools, the total space is calculated as the actual thin pool size multiplied by the `allocationLimit` value.
                     
-                   > Note that if you specify a percentage, the LV will be automatically extended when VG, thin pool, or thin pool's `allocationLimit` value is increased.
+                    > Note that if you specify a percentage, the LV will be automatically extended when VG, thin pool, or thin pool's `allocationLimit` value is increased.
                   minLength: 1
                   pattern: '^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$|^[1-9][0-9]?%$|100%'
                 lvmVolumeGroupName:
@@ -91,8 +91,7 @@ spec:
                   type: string
                   enum: [RandomFillThreePass, RandomFillSinglePass, Discard]
                   description: |
-                    The volume cleanup method after the PV is deleted.
-                    If this parameter is not set, there's no guarantee that the data will be completely deleted.
+                    The volume cleanup method after the PV is deleted. If this parameter is not set, there's no guarantee that the data will be completely deleted.
 
                     Allowed values:
 
@@ -102,7 +101,7 @@ spec:
                 thin:
                   type: object
                   description: |
-                    Defines the used thin pool. Required only for Thin LV.
+                    Defines the used thin pool. Specified only for Thin LV.
                   x-kubernetes-validations:
                     - rule: self == oldSelf
                       message: Value is immutable.

@@ -58,8 +58,8 @@ spec:
                     > Optional: exists only if the device is used as a LVM Physical Volume.
                 vgUUID:
                   type: string
-                  description: | 
-                    The UUID of the LVM Volume Group to which this device belongs to as a Physical Volume.
+                  description: |
+                    The UUID of the LVM Volume Group to which this device belongs as a Physical Volume.
 
                     > Optional: exists only if the device is used as a Physical Volume and is included in a Volume Group.
                 partUUID:
@@ -70,8 +70,8 @@ spec:
                     > Optional: exists only if the device is a partition.
                 lvmVolumeGroupName:
                   type: string
-                  description: | 
-                    The LVMVolumeGroup resource name. 
+                  description: |
+                    The LVMVolumeGroup resource name.
                     
                     > Optional: exists only if the device is used as a Physical Volume, is included in a Volume Group, and is specified in an LVMVolumeGroup resource.
                 actualVGNameOnTheNode:
@@ -107,19 +107,19 @@ spec:
                 rota:
                   type: boolean
                   description: |
-                    The device media type. Might be:
-                    - 'true' (for HHD)
-                    - 'false' (for SSD)
+                    The device media type. Can be:
+                    - `true`: For HDD;
+                    - `false`: For SSD.
                 hotPlug:
                   type: boolean
                   description: |
-                    The device connection type. Might be:
-                    - 'true' (if the device has been hotPlugged)
-                    - 'false' (otherwise)
+                    The device connection type. Can be:
+                    - `true`: If the device has been hot-plugged;
+                    - `false`: Otherwise.
                 machineId:
                   type: string
                   description: |
-                    The unique identifier of the machine the device is on (normally at /etc/machine-id)
+                    The unique identifier of the machine the device is on (normally at /etc/machine-id).
 
                             
       additionalPrinterColumns:
