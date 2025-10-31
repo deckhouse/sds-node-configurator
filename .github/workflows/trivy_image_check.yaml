@@ -3,7 +3,6 @@ name: Build and checks
 on:
   schedule:
     - cron: "0 01 * * 0,3" # Regular CVE scan
-    - cron: "0 15 * * 6" # Regular static analysis
   pull_request:
     types: [opened, reopened, labeled, synchronize]
   push:
@@ -30,11 +29,11 @@ on:
 
 jobs:
   build_dev:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event.schedule == '0 15 * * 6'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/build_dev.yml
     secrets: inherit
     with:
-      svace_enabled: ${{ inputs.svace_enabled == true || github.event_name == 'schedule' }}
+      svace_enabled: ${{ github.event.inputs.svace_enabled && true || false }}
   cve_scan_on_pr:
     if: github.event_name == 'pull_request'
     name: CVE scan for PR
