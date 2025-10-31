@@ -10,7 +10,7 @@ env:
   GOPROXY: ${{ secrets.GOPROXY }}
   SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
   SOURCE_REPO_SSH_KEY: ${{ secrets.SOURCE_REPO_SSH_KEY }}
-  BASE_IMAGES_VERSION: "v0.5.32"
+  BASE_IMAGES_VERSION: "v0.5.37"
 
 on:
   #pull_request:
@@ -138,13 +138,13 @@ jobs:
           module_tag: ${{ env.MODULES_MODULE_TAG }}
           source_repo: ${{ secrets.SOURCE_REPO }}
           source_repo_ssh_key: ${{ secrets.SOURCE_REPO_SSH_KEY }}
-          svace_enabled: ${{ contains(github.event.pull_request.labels.*.name, 'analyze/svace') || github.event.inputs.svace_enabled }}
+          svace_enabled: ${{ contains(github.event.pull_request.labels.*.name, 'analyze/svace') || inputs.svace_enabled == true }}
           svace_analyze_host: "${{ secrets.SVACE_ANALYZE_HOST }}"
           svace_analyze_ssh_user: "${{ secrets.SVACE_ANALYZE_SSH_USER }}"
           svace_analyze_ssh_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
 
   analyze_build:
-    if: ${{ contains(github.event.pull_request.labels.*.name, 'analyze/svace') || github.event.inputs.svace_enabled == 'true' }}
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'analyze/svace') || inputs.svace_enabled == true }}
     name: Analyze build
     runs-on: [self-hosted, large]
     needs:

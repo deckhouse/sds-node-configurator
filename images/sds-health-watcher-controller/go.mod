@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller
 
-go 1.24.8
+go 1.24.9
 
 require (
 	github.com/cloudflare/cfssl v1.6.5
