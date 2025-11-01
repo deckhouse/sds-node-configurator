@@ -4,89 +4,122 @@ spec:
       schema:
         openAPIV3Schema:
           description: |
-            Интерфейс для одновременного создания нескольких LVMVolumeGroup ресурсов по общему шаблону.
+            Интерфейс для одновременного создания нескольких ресурсов LVMVolumeGroup по общему шаблону.
           properties:
             spec:
               properties:
                 strategy:
                   description: |
-                    Стратегия (правила) создания LVMVolumeGroup ресурсов по текущему ресурсу.
+                    Стратегия (правило) создания ресурсов LVMVolumeGroup данным набором.
                 nodeSelector:
                   description: |
-                    Желаемый selector для узлов, которые будут использованы LVMVolumeGroup ресурсами.
+                    Селектор узлов, которые будут использованы ресурсами LVMVolumeGroup.
                   properties:
                     matchLabels:
                       description: |
-                        Желаемые метки.
+                        Метки для селектора узлов.
                     matchExpressions:
                       description: |
-                        Желаемые выражения.
+                        Выражения для селектора узлов.
+                      items:
+                        properties:
+                          key:
+                            description: |
+                              Ключ метки для проверки.
+                          operator:
+                            description: |
+                              Оператор для сравнения значений.
+                          values:
+                            description: |
+                              Массив значений для сравнения. Требуется, если оператор `In` или `NotIn`.
                 lvmVolumeGroupTemplate:
                   description: |
-                    Общий шаблон для LVMVolumeGroup ресурсов, созданных с помощью данного ресурса.
+                    Общий шаблон для ресурсов LVMVolumeGroup, создаваемых данным набором.
                   properties:
                     blockDeviceSelector:
                       description: |
-                        Желаемый селектор для BlockDevice ресурсов, используемый в LVMVolumeGroup ресурсах.
+                        Селектор ресурсов BlockDevice, используемый в конфигурации ресурсов LVMVolumeGroup.
                       properties:
                         matchLabels:
                           description: |
-                            Желаемые метки.
+                            Метки для селектора блочных устройств.
                         matchExpressions:
                           description: |
-                            Желаемые выражения.
+                            Выражения для селектора блочных устройств.
+                          items:
+                            properties:
+                              key:
+                                description: |
+                                  Ключ метки для проверки.
+                              operator:
+                                description: |
+                                  Оператор для сравнения значений.
+                              values:
+                                description: |
+                                  Массив значений для сравнения. Требуется, если оператор `In` или `NotIn`.
                     metadata:
                       description: |
-                        Метаинформация для LVMVolumeGroup ресурсов.
+                        Метаданные ресурсов LVMVolumeGroup.
                       properties:
                         labels:
                           description: |
-                            Обязательные метки для LVMVolumeGroup ресурсов.
+                            Обязательные метки для ресурсов LVMVolumeGroup.
                     type:
                       description: |
-                        Тип Volume Group. Может быть: 
-                        - Local, то есть локальным, если используемые девайсы не являются распределенными (не Shared LUN).
+                        Тип группы томов в ресурсах LVMVolumeGroup.
+                        
+                        Возможные значения:
+                        
+                        - `Local` — локальная группа томов; используемые устройства не являются распределёнными (не Shared LUN).
                     actualVGNameOnTheNode:
                       description: |
-                        Желаемое имя для Volume Group. Должно быть уникальным в рамках узла, на котором будет располагаться.
+                        Желаемое имя группы томов в ресурсах LVMVolumeGroup. Должно быть уникальным для узла, на котором она находится.
                         
-                        > Неизменяемое поле.
-                        > Обратите внимание, что указанное имя Volume Group будет одинаковым для каждого LVMVolumeGroup ресурса.
+                        > Это поле неизменяемое.
+                        > Указанное имя группы томов будет общим для каждого ресурса LVMVolumeGroup, созданного данным набором.
                     thinPools:
                       description: |
-                        Желаемая конфигурация для Thin-pool'ов текущей Volume Group.
+                        Желаемая конфигурация thin pool в ресурсах LVMVolumeGroup.
                         
-                        > Обратите внимание, что данная конфигурация будет одинаковой для каждого LVMVolumeGroup ресурса.
+                        > Указанная конфигурация будет общей для каждого ресурса LVMVolumeGroup, созданного данным набором.
                       items:
                         properties:
                           name:
                             description: |
                               Желаемое имя thin pool.
                               
-                              > Неизменяемое поле.
+                              > Это поле неизменяемое.
                           size:
                             description: |
-                              Желаемый размер thin pool. Может быть указан как в численном, так и процентном отношении к общему размеру VG. 
+                              Желаемый размер thin pool. Может быть указан как в численном формате, так и в процентах от общего размера группы томов.
                               
-                              > Обратите внимание, что при указании размера в процентах thin pool будет автоматически расширен при расширении VG.
+                              > При указании размера в процентах thin pool будет автоматически расширен при расширении группы томов.
                           allocationLimit:
                             description: |
-                              Максимальная степень расширения thin pool-а. По умолчанию 150%.
+                              Предел расширения thin pool.
             status:
               type: object
               properties:
                 createdLVMVolumeGroups:
                   description: |
-                    Короткая информация о LVMVolumeGroup ресурсах, созданных по текущему ресурсу.
+                    Краткая информация о ресурсах LVMVolumeGroup, созданных данным набором.
+                  items:
+                    properties:
+                      lvmVolumeGroupName:
+                        description: |
+                          Имя созданного ресурса LVMVolumeGroup.
+                      nodeName:
+                        description: |
+                          Имя узла, на котором создан ресурс LVMVolumeGroup.
                 currentLVMVolumeGroupsCount:
                   description: |
-                    Текущее количество созданных LVMVolumeGroup ресурсов.
+                    Текущее количество ресурсов LVMVolumeGroup, созданных данным набором.
                 desiredLVMVolumeGroupsCount:
                   description: |
-                    Желаемое количество созданных LVMVolumeGroup ресурсов.
+                    Желаемое количество ресурсов LVMVolumeGroup, которые должны быть созданы данным набором.
                 phase:
                   description: |
-                    Показывает статус создания LVMVolumeGroup ресурсов.
+                    Фаза создания ресурсов LVMVolumeGroup.
                 reason:
                   description: |
-                    Показывает причину текущего статуса.
+                    Причина текущей фазы.
