@@ -13,15 +13,15 @@ The `sds-node-configurator` module manages block devices and LVM on Kubernetes c
 
 - Automatic discovery of block devices and creation/update/deletion of corresponding [BlockDevice resources](./cr.html#blockdevice).
 
-  > Warning: manual creation and modification of `BlockDevice` resource is prohibited.
+  > **Warning**. Manual creation and modification of BlockDevice resource is prohibited.
 
 - Automatic discovery of LVM Volume Groups with LVM tag `storage.deckhouse.io/enabled=true` and thin pools on them on nodes, as well as management of corresponding [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources. The module automatically creates an [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource if it doesn't exist yet for the discovered LVM Volume Group.
 
 - Scanning LVM Physical Volumes on nodes that are part of managed LVM Volume Groups. When underlying block devices are expanded, corresponding LVM Physical Volumes are automatically increased (performs `pvresize`).
 
-  > Warning: reducing block device sizes is not supported.
+  > **Warning**. Reducing block device sizes is not supported.
 
-- Creation/expansion/deletion of LVM Volume Groups on the node according to [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource settings. [Usage examples](./resources.html#working-with-lvmvolumegroup-resources)
+- Creation/expansion/deletion of LVM Volume Groups on the node according to [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource settings. To see examples, refer to [Working with LVMVolumeGroup resources](./resources.html#working-with-lvmvolumegroup-resources).
 
 ## Documentation
 

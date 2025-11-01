@@ -27,8 +27,8 @@ spec:
           description: |
             An interface for managing Volume Groups and Thin pools on the nodes.
             
-            > These resources might be created both by a user and the sds-node-configurator controller. The sds-node-configurator controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. The controller will fill in both the 'spec' and 'status' fields.
-            > The `spec.thinPools` field must be filled in by yourself.
+            > These resources might be created both by a user and the `sds-node-configurator` controller. `sds-node-configurator` controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. Controller will fill in both the 'spec' and 'status' fields.
+            > `spec.thinPools` field must be filled in by yourself.
           required:
             - spec
           properties:
@@ -46,7 +46,7 @@ spec:
                 type:
                   type: string
                   description: |
-                    The type of a Volume Group.
+                    Type of a Volume Group.
                     
                     Possible values:
                     
@@ -59,14 +59,14 @@ spec:
                 local:
                   type: object
                   description: |
-                    The desired configuration for a local Volume Group.
+                    Desired configuration for a local Volume Group.
                   required:
                     - nodeName
                   properties:
                     nodeName:
                       type: string
                       description: |
-                        The desired node for the LVM Volume Group.
+                        Desired node for the LVM Volume Group.
                         
                         > This field is immutable.
                       x-kubernetes-validations:
@@ -75,25 +75,31 @@ spec:
                 blockDeviceSelector:
                   type: object
                   description: |
-                    The desired block device selector.
+                    Desired block device selector.
+                    
+                    > Note: Selected block devices must belong to the same node for a volume group of type ‘Local’.
                   properties:
                     matchLabels:
                       type: object
                       description: |
-                        The desired block device selector labels.
+                        Desired block device selector labels.
                       additionalProperties:
                         type: string
                     matchExpressions:
                       type: array
                       description: |
-                        The desired block device selector expressions.
+                        Desired block device selector expressions.
                       items:
                         type: object
                         properties:
                           key:
                             type: string
+                            description: |
+                              Label key to check.
                           operator:
                             type: string
+                            description: |
+                              Operator used to compare values.
                             enum:
                               - In
                               - NotIn
@@ -101,12 +107,14 @@ spec:
                               - DoesNotExist
                           values:
                             type: array
+                            description: |
+                              Array of values to compare. Required if the operator is `In` or `NotIn`.
                             items:
                               type: string
                 actualVGNameOnTheNode:
                   type: string
                   description: |
-                    The desired name of a Volume Group. Must be unique for the node it is on.
+                    Desired name of a Volume Group. Must be unique for the node it is on.
                     
                     > This field is immutable.
                   x-kubernetes-validations:
@@ -115,23 +123,23 @@ spec:
                 thinPools:
                   type: array
                   description: |
-                    The desired thin pool configuration.
+                    Desired thin pool configuration.
                   items:
                     type: object
                     properties:
                       name:
                         type: string
                         description: |
-                          The desired thin pool name.
+                          Desired thin pool name.
                           
                           > This field is immutable.
                       size:
                         x-kubernetes-int-or-string: true
                         pattern: '^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$|^[1-9][0-9]?%$|100%'
                         description: |
-                          The desired thin pool size. Might be specified as number or percent size of total VG space.
+                          Desired thin pool size. Might be specified as number or percent size of total Volume Group space.
                           
-                          > Note, that if you specify the percent size, the thin pool will be automatically extended when VG is extended.
+                          > Note, that if you specify the percent size, the thin pool will be automatically extended when Volume Group is extended.
                       allocationLimit:
                         type: string
                         pattern: '^[1-9][0-9]{2,3}%$'
@@ -155,7 +163,7 @@ spec:
                 phase:
                   type: string
                   description: |
-                    The general LVMVolumeGroup condition.
+                    General LVMVolumeGroup condition.
                   enum:
                     - Pending
                     - Ready
@@ -164,7 +172,7 @@ spec:
                     - ""
                 conditions:
                   description: |
-                    The LVMVolumeGroup conditions.
+                    LVMVolumeGroup conditions.
                   type: array
                   items:
                     type: object
@@ -172,7 +180,7 @@ spec:
                       type:
                         type: string
                         description: |
-                          The condition type.
+                          Condition type.
                         enum:
                           - VGConfigurationApplied
                           - VGReady
@@ -182,43 +190,43 @@ spec:
                       status:
                         type: string
                         description: |
-                          The condition status.
+                          Condition status.
                       reason:
                         type: string
                         description: |
-                          The reason for the current status.
+                          Reason for the current status.
                       message:
                         type: string
                         description: |
-                          The information about the current status.
+                          Information about the current status.
                       lastTransitionTime:
                         type: string
                         description: |
-                          The time the condition was updated.
+                          Time the condition was updated.
                       observedGeneration:
                         type: integer
                         description: |
-                          The resource version when the condition was applied.
+                          Resource version when the condition was applied.
                 vgUUID:
                   type: string
                   description: |
-                    The Volume Group UUID.
+                    Volume Group UUID.
                 vgSize:
                   type: string
                   description: |
-                    The Volume Group capacity.
+                    Volume Group capacity.
                 vgFree:
                   type: string
                   description: |
-                    The Volume Group free space.
+                    Volume Group free space.
                 allocatedSize:
                   type: string
                   description: |
-                    The amount of space currently occupied on the Volume Group.
+                    Amount of space currently occupied on the Volume Group.
                 thinPools:
                   type: array
                   description: |
-                    The current state of the Volume Group's thin pools.
+                    Current state of the Volume Group's thin pools.
                     
                     > Might be empty if there are no thin pools in the Volume Group.
                   items:
@@ -231,15 +239,15 @@ spec:
                       name:
                         type: string
                         description: |
-                          The thin pool name.
+                          Thin pool name.
                       actualSize:
                         type: string
                         description: |
-                          The thin pool capacity.
+                          Thin pool capacity.
                       usedSize:
                         type: string
                         description: |
-                          The thin pool used size.
+                          Thin pool used size.
                       allocatedSize:
                         type: string
                         description: |
@@ -257,7 +265,7 @@ spec:
                       ready:
                         type: boolean
                         description: |
-                          The thin pool health status.
+                          Thin pool health status.
                       message:
                         type: string
                         description: |
@@ -272,7 +280,7 @@ spec:
                       name:
                         type: string
                         description: |
-                          The node name.
+                          Node name.
                       devices:
                         type: array
                         description: |
@@ -283,23 +291,23 @@ spec:
                             path:
                               type: string
                               description: |
-                                The device path on the node (e.g., /dev/sda).
+                                Device path on the node (e.g., `/dev/sda`).
                             pvSize:
                               type: string
                               description: |
-                                The Physical Volume size.
+                                Physical Volume size.
                             devSize:
                               type: string
                               description: |
-                                The block device size.
+                                Block device size.
                             pvUUID:
                               type: string
                               description: |
-                                The LVM Physical Volume UUID.
+                                LVM Physical Volume UUID.
                             blockDevice:
                               type: string
                               description: |
-                                The name of the corresponding block device resource.
+                                Name of the corresponding block device resource.
       subresources:
         status: {}
       additionalPrinterColumns:
@@ -318,19 +326,19 @@ spec:
         - jsonPath: .status.nodes..name
           name: node
           type: string
-          description: The node the VG is on.
+          description: Node the Volume Group is on.
         - jsonPath: .status.vgSize
           name: size
           type: string
-          description: Total VG size.
+          description: Total Volume Group size.
         - jsonPath: .status.allocatedSize
           name: allocated size
           type: string
-          description: Actual VG size.
+          description: Actual Volume Group size.
         - jsonPath: .spec.actualVGNameOnTheNode
           name: VG
           type: string
-          description: Actual VG name.
+          description: Actual Volume Group name.
         - jsonPath: .spec.type
           name: type
           type: string
@@ -339,4 +347,4 @@ spec:
         - jsonPath: .metadata.creationTimestamp
           name: Age
           type: date
-          description: The age of this resource.
+          description: Age of this resource.

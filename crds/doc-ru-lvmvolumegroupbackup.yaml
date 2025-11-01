@@ -135,7 +135,7 @@ spec:
                           properties:
                             path:
                               description: |
-                                Путь к устройству на узле (например, /dev/sda).
+                                Путь к устройству на узле (например, `/dev/sda`).
                             pvSize:
                               description: |
                                 Размер физического тома.

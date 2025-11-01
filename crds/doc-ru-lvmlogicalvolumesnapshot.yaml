@@ -4,7 +4,7 @@ spec:
       schema:
         openAPIV3Schema:
           description: |
-            Ресурс LVMLogicalVolumeSnapshot определяет хранилище, на котором будет создан VolumeSnapshot.
+            Ресурс LVMLogicalVolumeSnapshot определяет хранилище, в котором будет создан VolumeSnapshot.
           properties:
             spec:
               properties:
@@ -41,8 +41,8 @@ spec:
                     Причина выставленной фазы.
                 size:
                   description: |
-                    Размер снимка LV на узле.
+                    Размер снимка Logical Volume на узле.
                 usedSize:
                   description: |
-                    Используемый размер снимка LV на узле.
+                    Используемый размер снимка Logical Volume на узле.
 

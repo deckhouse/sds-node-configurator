@@ -40,9 +40,9 @@ description: "Модуль sds-node-configurator: частые вопросы и
 
 Чаще всего проблема связана с некорректно указанными ресурсами [BlockDevice](./cr.html#blockdevice). Убедитесь, что выбранные ресурсы удовлетворяют следующим требованиям:
 
-- Поле `status.consumable` имеет значение `true`.
-- Для групп томов типа `Local` указанные ресурсы [BlockDevice](./cr.html#blockdevice) принадлежат одному узлу.<!-- > - Для групп томов типа `Shared` указан единственный ресурс [BlockDevice](./cr.html#blockdevice). -->
-- Указаны актуальные имена ресурсов [BlockDevice](./cr.html#blockdevice).
+- поле `status.consumable` имеет значение `true`;
+- для групп томов типа `Local` указанные ресурсы [BlockDevice](./cr.html#blockdevice) принадлежат одному узлу;<!-- > - Для групп томов типа `Shared` указан единственный ресурс [BlockDevice](./cr.html#blockdevice). -->
+- указаны актуальные имена ресурсов [BlockDevice](./cr.html#blockdevice).
 
 Полный список ожидаемых значений доступен в описании ресурса [LVMVolumeGroup](./cr.html#lvmvolumegroup).
 
@@ -77,7 +77,7 @@ LVM-тег появляется в следующих случаях:
 - Группа томов LVM создана через ресурс [LVMVolumeGroup](./cr.html#lvmvolumegroup). В этом случае контроллер автоматически добавляет LVM-тег `storage.deckhouse.io/enabled=true` на созданную группу томов LVM.
 - На группе томов или её thin pool был LVM-тег модуля `linstor` — `linstor-*`.
 
-При миграции с встроенного модуля `linstor` на модули `sds-node-configurator` и `sds-replicated-volume` LVM-теги `linstor-*` автоматически заменяются на `storage.deckhouse.io/enabled=true` в группах томов. Управление этими группами томов передаётся модулю `sds-node-configurator`.
+При миграции со встроенного модуля `linstor` на модули `sds-node-configurator` и `sds-replicated-volume` LVM-теги `linstor-*` автоматически заменяются на `storage.deckhouse.io/enabled=true` в группах томов. Управление этими группами томов передаётся модулю `sds-node-configurator`.
 
 ## Создание LVMVolumeGroup с помощью ресурса LVMVolumeGroupSet
 
@@ -124,13 +124,13 @@ UUID у групп томов можно изменить только при о
 
 1. Деактивируйте логический том или группу томов, выполнив команду:
 
-    - Для деактивации конкретного логического тома выполните команду, изменив <LV_NAME> на имя логического тома:
+    - Для деактивации конкретного логического тома выполните команду, изменив `<LV_NAME>` на имя логического тома:
 
       ```shell
       lvchange -an <LV_NAME>
       ```
 
-    - Для деактивации всех логических томов в группе выполните команду, изменив <VG_NAME> на имя группы томов:
+    - Для деактивации всех логических томов в группе выполните команду, изменив `<VG_NAME>` на имя группы томов:
 
       ```shell
       lvchange -an <VG_NAME>
@@ -152,17 +152,17 @@ UUID у групп томов можно изменить только при о
 
 ## Лейблы, добавляемые контроллером на ресурсы BlockDevice
 
-- status.blockdevice.storage.deckhouse.io/type — тип LVM.
-- status.blockdevice.storage.deckhouse.io/fstype — тип файловой системы.
-- status.blockdevice.storage.deckhouse.io/pvuuid — UUID физического тома.
-- status.blockdevice.storage.deckhouse.io/vguuid — UUID группы томов.
-- status.blockdevice.storage.deckhouse.io/partuuid — UUID раздела.
-- status.blockdevice.storage.deckhouse.io/lvmvolumegroupname — имя ресурса [LVMVolumeGroup](./cr.html#lvmvolumegroup), к которому относится устройство.
-- status.blockdevice.storage.deckhouse.io/actualvgnameonthenode — имя группы томов на узле.
-- status.blockdevice.storage.deckhouse.io/wwn — идентификатор WWN (World Wide Name) для устройства.
-- status.blockdevice.storage.deckhouse.io/serial — серийный номер устройства.
-- status.blockdevice.storage.deckhouse.io/size — размер устройства.
-- status.blockdevice.storage.deckhouse.io/model — модель устройства.
-- status.blockdevice.storage.deckhouse.io/rota — указывает, является ли устройство ротационным.
-- status.blockdevice.storage.deckhouse.io/hotplug — указывает возможность горячей замены устройства (HotPlug).
-- status.blockdevice.storage.deckhouse.io/machineid — идентификатор сервера, на котором установлено блочное устройство.
+- `status.blockdevice.storage.deckhouse.io/type` — тип LVM.
+- `status.blockdevice.storage.deckhouse.io/fstype` — тип файловой системы.
+- `status.blockdevice.storage.deckhouse.io/pvuuid` — UUID физического тома.
+- `status.blockdevice.storage.deckhouse.io/vguuid` — UUID группы томов.
+- `status.blockdevice.storage.deckhouse.io/partuuid` — UUID раздела.
+- `status.blockdevice.storage.deckhouse.io/lvmvolumegroupname` — имя ресурса [LVMVolumeGroup](./cr.html#lvmvolumegroup), к которому относится устройство.
+- `status.blockdevice.storage.deckhouse.io/actualvgnameonthenode` — имя группы томов на узле.
+- `status.blockdevice.storage.deckhouse.io/wwn` — идентификатор WWN (World Wide Name) для устройства.
+- `status.blockdevice.storage.deckhouse.io/serial` — серийный номер устройства.
+- `status.blockdevice.storage.deckhouse.io/size` — размер устройства.
+- `status.blockdevice.storage.deckhouse.io/model` — модель устройства.
+- `status.blockdevice.storage.deckhouse.io/rota` — указывает, является ли устройство ротационным.
+- `status.blockdevice.storage.deckhouse.io/hotplug` — указывает возможность горячей замены устройства (HotPlug).
+- `status.blockdevice.storage.deckhouse.io/machineid` — идентификатор сервера, на котором установлено блочное устройство.

@@ -11,8 +11,8 @@ Module functionality when using other kernels or distributions is possible but n
 {{< /alert >}}
 
 The controller works with two types of resources:
-- [BlockDevice](./cr.html#blockdevice);
-- [LVMVolumeGroup](./cr.html#lvmvolumegroup).
+- [BlockDevice](./cr.html#blockdevice)
+- [LVMVolumeGroup](./cr.html#lvmvolumegroup)
 
 ## Working with BlockDevice resources
 
@@ -20,7 +20,7 @@ The controller works with two types of resources:
 
 The controller regularly scans devices on the node. If a device meets the controller requirements, a [BlockDevice](./cr.html#blockdevice) resource with a unique name is created, containing complete information about the device.
 
-#### Controller requirements for device
+#### Controller requirements for devices
 
 For the controller to create a [BlockDevice](./cr.html#blockdevice) resource for a device, it must meet the following requirements:
 
@@ -51,8 +51,8 @@ The controller automatically updates information in the resource when the state 
 ### Deleting a BlockDevice resource
 
 The controller will automatically delete the resource if the corresponding block device becomes unavailable. Deletion will only occur in the following cases:
-- if the resource was in Consumable status;
-- if the block device belongs to a Volume Group that does not have the LVM tag `storage.deckhouse.io/enabled=true` (this Volume Group is not managed by the module controller).
+- If the resource was in Consumable status.
+- If the block device belongs to a Volume Group that does not have the LVM tag `storage.deckhouse.io/enabled=true` (this Volume Group is not managed by the module controller).
 
 {{< alert level="info" >}}
 The controller performs all listed operations automatically without user intervention.
@@ -68,7 +68,7 @@ If the resource is manually deleted, it will be recreated by the controller.
 
 ### Creating an LVMVolumeGroup resource
 
-An [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource can be created in three ways:
+An [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource can be created in three ways described below.
 
 #### Automatic creation
 
@@ -76,7 +76,7 @@ The controller automatically scans LVM Volume Groups on nodes. If an LVM Volume 
 
 In this case, the controller automatically fills all fields in the `spec` section of the resource, except `thinPools`. To manage an existing thin pool on the node, you need to manually add information about it to the `spec` section of the resource.
 
-#### User creation
+#### Creation by a user
 
 The user manually creates the resource by filling in the `metadata.name` and `spec` fields, specifying the desired state of the new Volume Group.
 
@@ -89,8 +89,6 @@ The user manually creates a Volume Group on the node using standard LVM commands
 After creating the Volume Group, the user adds the LVM tag `storage.deckhouse.io/enabled=true` to transfer control to the controller.
 
 The controller automatically discovers the Volume Group with this tag and creates the corresponding [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource.
-
-Detailed instructions for adding an existing Volume Group to Kubernetes are described in the [FAQ](./faq.html) section.
 
 #### Examples of creating LVMVolumeGroup resources
 
@@ -226,7 +224,7 @@ If the deleting [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource contains a L
 
 ### Extracting a BlockDevice resource from LVMVolumeGroup
 
-To extract a [BlockDevice](./cr.html#blockdevice) resource from an [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource, you need to:
+To extract a [BlockDevice](./cr.html#blockdevice) resource from an [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource, do the following:
 
 1. Modify the `spec.blockDeviceSelector` field of the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource (add other selectors) or modify the corresponding labels on the [BlockDevice](./cr.html#blockdevice) resource so they no longer match the [LVMVolumeGroup](./cr.html#lvmvolumegroup) selectors.
 1. Manually execute the `pvmove`, `vgreduce`, and `pvremove` commands on the node.

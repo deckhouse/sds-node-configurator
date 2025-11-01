@@ -124,13 +124,13 @@ If the Volume Group has active Logical Volumes, perform the following steps:
 
 1. Deactivate the Logical Volume or Volume Group by running the command:
 
-    - To deactivate a specific Logical Volume, run the command, changing <LV_NAME> to the Logical Volume name:
+    - To deactivate a specific Logical Volume, run the command, changing `<LV_NAME>` to the Logical Volume name:
 
       ```shell
       lvchange -an <LV_NAME>
       ```
 
-    - To deactivate all Logical Volumes in the group, run the command, changing <VG_NAME> to the Volume Group name:
+    - To deactivate all Logical Volumes in the group, run the command, changing `<VG_NAME>` to the Volume Group name:
 
       ```shell
       lvchange -an <VG_NAME>
@@ -152,17 +152,17 @@ If necessary, the command can be added to the `cloud-init` script for automatic 
 
 ## Labels added by controller to BlockDevice resources
 
-- status.blockdevice.storage.deckhouse.io/type: LVM type.
-- status.blockdevice.storage.deckhouse.io/fstype: Filesystem type.
-- status.blockdevice.storage.deckhouse.io/pvuuid: Physical Volume UUID.
-- status.blockdevice.storage.deckhouse.io/vguuid: Volume Group UUID.
-- status.blockdevice.storage.deckhouse.io/partuuid: Partition UUID.
-- status.blockdevice.storage.deckhouse.io/lvmvolumegroupname: Name of the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource to which the device belongs.
-- status.blockdevice.storage.deckhouse.io/actualvgnameonthenode: Volume Group name on the node.
-- status.blockdevice.storage.deckhouse.io/wwn: WWN (World Wide Name) identifier for the device.
-- status.blockdevice.storage.deckhouse.io/serial: Device serial number.
-- status.blockdevice.storage.deckhouse.io/size: Device size.
-- status.blockdevice.storage.deckhouse.io/model: Device model.
-- status.blockdevice.storage.deckhouse.io/rota: Indicates whether the device is rotational.
-- status.blockdevice.storage.deckhouse.io/hotplug: Indicates device hot-plug capability.
-- status.blockdevice.storage.deckhouse.io/machineid: Identifier of the server where the block device is installed.
+- `status.blockdevice.storage.deckhouse.io/type`: LVM type.
+- `status.blockdevice.storage.deckhouse.io/fstype`: Filesystem type.
+- `status.blockdevice.storage.deckhouse.io/pvuuid`: Physical Volume UUID.
+- `status.blockdevice.storage.deckhouse.io/vguuid`: Volume Group UUID.
+- `status.blockdevice.storage.deckhouse.io/partuuid`: Partition UUID.
+- `status.blockdevice.storage.deckhouse.io/lvmvolumegroupname`: Name of the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource to which the device belongs.
+- `status.blockdevice.storage.deckhouse.io/actualvgnameonthenode`: Volume Group name on the node.
+- `status.blockdevice.storage.deckhouse.io/wwn`: WWN (World Wide Name) identifier for the device.
+- `status.blockdevice.storage.deckhouse.io/serial`: Device serial number.
+- `status.blockdevice.storage.deckhouse.io/size`: Device size.
+- `status.blockdevice.storage.deckhouse.io/model`: Device model.
+- `status.blockdevice.storage.deckhouse.io/rota`: Indicates whether the device is rotational.
+- `status.blockdevice.storage.deckhouse.io/hotplug`: Indicates device hot-plug capability.
+- `status.blockdevice.storage.deckhouse.io/machineid`: Identifier of the server where the block device is installed.

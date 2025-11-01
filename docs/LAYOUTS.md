@@ -11,27 +11,27 @@ Module functionality when using other kernels or distributions is possible but n
 {{< /alert >}}
 
 {{< alert level="info" >}}
-If you create virtual machines by cloning, change the UUID of Volume Groups on VMs created this way. Cloned Volume Groups have identical UUIDs, which can lead to conflicts. For detailed instructions, see the section [«Changing UUID of Volume Groups when cloning virtual machines»](./faq.html#changing-uuid-of-volume-groups-when-cloning-virtual-machines).
+If you create virtual machines by cloning, change the UUID of Volume Groups on VMs created this way. Cloned Volume Groups have identical UUIDs, which can lead to conflicts. For detailed instructions, see the section ["Changing UUID of Volume Groups when cloning virtual machines"](./faq.html#changing-uuid-of-volume-groups-when-cloning-virtual-machines).
 {{< /alert >}}
 
 ## Methods and scenarios for configuring node disk subsystem
 
 There are two methods for configuring the disk subsystem on Kubernetes cluster nodes depending on storage organization conditions:
 
-- [Storage with identical disks](#storage-with-identical-disks).
-- [Combined storage](#combined-storage).
+- [Storage with identical disks](#storage-with-identical-disks)
+- [Combined storage](#combined-storage)
 
 For each disk subsystem configuration method on nodes, there are two configuration scenarios:
 
-- [«Full mirror»](#full-mirror): Recommended to use as it is reliable and simple to configure.
-- [«Partial mirror»](#partial-mirror).
+- ["Full mirror"](#full-mirror): Recommended to use as it is reliable and simple to configure.
+- ["Partial mirror"](#partial-mirror).
 
 Features, pros and cons of scenarios are shown in the table:
 
 | Configuration scenario | Implementation features                                                                                                                                                                                                                                | Pros                                                                                                                    | Cons                                                                                                                          |
 |-----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
-| «Full mirror»      | <ul><li>Disks are not divided into partitions, mirror is made from entire disks</li><li>One Volume Group is used for root system and for data</li></ul>                                                                                            | <ul><li>Reliable</li><li>Simple to configure and use</li><li>Convenient to distribute space between different SDS</li></ul> | <ul><li>Excessive disk space for software-defined storage (SDS) that replicate data themselves</li></ul>         |
-| «Partial mirror»   | <ul><li>Disks are divided into 2 partitions</li><li>Mirror is created from first partitions of each disk. A Volume Group is created on it where the OS is installed</li><li>Volume group for data is created from second disk partitions without mirroring</li></ul> | <ul><li>Reliable</li><li>Maximum efficient use of space</li></ul>                                                      | <ul><li>Complex to configure and use</li><li>Very difficult to redistribute space between safe and unsafe partitions</li></ul> |
+| "Full mirror"      | <ul><li>Disks are not divided into partitions, mirror is made from entire disks</li><li>One Volume Group is used for root system and for data</li></ul>                                                                                            | <ul><li>Reliable</li><li>Simple to configure and use</li><li>Convenient to distribute space between different SDS</li></ul> | <ul><li>Excessive disk space for software-defined storage (SDS) that replicate data themselves</li></ul>         |
+| "Partial mirror"   | <ul><li>Disks are divided into 2 partitions</li><li>Mirror is created from first partitions of each disk. A Volume Group is created on it where the OS is installed</li><li>Volume group for data is created from second disk partitions without mirroring</li></ul> | <ul><li>Reliable</li><li>Maximum efficient use of space</li></ul>                                                      | <ul><li>Complex to configure and use</li><li>Very difficult to redistribute space between safe and unsafe partitions</li></ul> |
 
 Differences in disk subsystem configuration depending on the selected scenario are shown in the diagram:
 
@@ -65,9 +65,9 @@ Configure the node according to this scenario:
 
    If the node matches the `nodeSelector` specified in `spec.nodeSelector` of `sds-replicated-volume` or `sds-local-volume` modules, the `sds-node-configurator` module agent will start on the node. The agent will discover the `main` Volume Group and create the corresponding [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource in the cluster. The resource can be used to create volumes in `sds-replicated-volume` or `sds-local-volume` modules.
 
-#### SDS modules configuration example (identical disks, «Full mirror»)
+#### SDS modules configuration example (identical disks, "Full mirror")
 
-Configure three nodes according to the [«Full mirror»](#full-mirror) scenario. After configuration, three [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources with randomly generated names will be created in the cluster.
+Configure three nodes according to the ["Full mirror"](#full-mirror) scenario. After configuration, three [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources with randomly generated names will be created in the cluster.
 In the future, it will be possible to specify names for [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources created during automatic Volume Group discovery by adding an `LVM` tag with the desired resource name.
 
 List [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources by running the command:
@@ -85,9 +85,9 @@ vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Re
 vg-c7863e12-c143-42bb-8e33-d578ce50d6c7   0/0         True                    Ready   worker-1   25596Mi   0                main   108s
 ```
 
-##### `sds-local-volume` module configuration (identical disks, «Full mirror»)
+##### `sds-local-volume` module configuration (identical disks, "Full mirror")
 
-Configure the `sds-local-volume` module according to the [«Full mirror»](#full-mirror) scenario: create a [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource and add all [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that the `main` Volume Group is used on all nodes in the `sds-local-volume` module. Run the command:
+Configure the `sds-local-volume` module according to the ["Full mirror"](#full-mirror) scenario: create a [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource and add all [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that the `main` Volume Group is used on all nodes in the `sds-local-volume` module. Run the command:
 
 ```shell
 d8 k apply -f -<<EOF
@@ -107,9 +107,9 @@ spec:
 EOF
 ```
 
-##### `sds-replicated-volume` module configuration (identical disks, «Full mirror»)
+##### `sds-replicated-volume` module configuration (identical disks, "Full mirror")
 
-Configure the `sds-replicated-volume` module according to the [«Full mirror»](#full-mirror) scenario:
+Configure the `sds-replicated-volume` module according to the ["Full mirror"](#full-mirror) scenario:
 
 1. Create a [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource and add all [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that the `main` Volume Group is used on all nodes in the `sds-replicated-volume` module. Run the command:
 
@@ -180,7 +180,7 @@ In this scenario, two partitions are created on each disk:
 
 This allows for maximum efficient use of disk space.
 
-Configure the node according to the [«Partial mirror»](#partial-mirror) scenario:
+Configure the node according to the ["Partial mirror"](#partial-mirror) scenario:
 
 1. When installing the operating system:
 
@@ -208,9 +208,9 @@ Configure the node according to the [«Partial mirror»](#partial-mirror) scenar
 
    If the node matches the `nodeSelector` specified in `spec.nodeSelector` of `sds-replicated-volume` or `sds-local-volume` modules, the `sds-node-configurator` module agent will start on the node. The agent will discover the `main-safe` and `main-unsafe` Volume Groups and create the corresponding [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources in the cluster. The resources can be used to create volumes in `sds-replicated-volume` or `sds-local-volume` modules.
 
-#### SDS modules configuration example (identical disks, «Partial mirror»)
+#### SDS modules configuration example (identical disks, "Partial mirror")
 
-This example describes configuring three nodes according to the [«Partial mirror»](#partial-mirror) scenario. After configuration, six [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources with randomly generated names will be created in the cluster.
+This example describes configuring three nodes according to the ["Partial mirror"](#partial-mirror) scenario. After configuration, six [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources with randomly generated names will be created in the cluster.
 In the future, it will be possible to specify names for [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources created during automatic Volume Group discovery by adding an `LVM` tag with the desired resource name.
 
 List [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources by running the command:
@@ -231,9 +231,9 @@ vg-e0f00cab-03b3-49cf-a2f6-595628a2593c   0/0         True                    Re
 vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2   0/0         True                    Ready   worker-1   25596Mi   0                main-unsafe   108s
 ```
 
-##### `sds-local-volume` module configuration (identical disks, «Partial mirror»)
+##### `sds-local-volume` module configuration (identical disks, "Partial mirror")
 
-Configure the `sds-local-volume` module according to the [«Partial mirror»](#partial-mirror) scenario: create a [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource and add [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that only the `main-safe` Volume Group is used on all nodes in the `sds-local-volume` module. Run the command:
+Configure the `sds-local-volume` module according to the ["Partial mirror"](#partial-mirror) scenario: create a [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource and add [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that only the `main-safe` Volume Group is used on all nodes in the `sds-local-volume` module. Run the command:
 
 ```shell
 d8 k apply -f -<<EOF
@@ -253,9 +253,9 @@ spec:
 EOF
 ```
 
-##### `sds-replicated-volume` module configuration (identical disks, «Partial mirror»)
+##### `sds-replicated-volume` module configuration (identical disks, "Partial mirror")
 
-Configure the `sds-replicated-volume` module according to the [«Partial mirror»](#partial-mirror) scenario:
+Configure the `sds-replicated-volume` module according to the ["Partial mirror"](#partial-mirror) scenario:
 
 1. Create a [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource named `data-safe` and add [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that only the `main-safe` Volume Group is used on all nodes in the `sds-replicated-volume` module in [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass) with `replication: None` parameter. Run the command:
 
@@ -332,7 +332,7 @@ Configure the `sds-replicated-volume` module according to the [«Partial mirror�
 
 Use combined storage when using disks of different types simultaneously on the node.
 
-When combining disks of different types to create storage, it is recommended to make a mirror from disks of one type and install the operating system on it according to the [«Full mirror»](#full-mirror) scenario, but not use it for SDS.
+When combining disks of different types to create storage, it is recommended to make a mirror from disks of one type and install the operating system on it according to the ["Full mirror"](#full-mirror) scenario, but not use it for SDS.
 
 For SDS, use disks of other types (hereinafter — additional disks) that differ from those used for the mirror under the operating system.
 
@@ -344,7 +344,7 @@ Recommendations for using additional disks depending on their type:
 | SATA SSD  | Creating volumes not requiring high performance |
 | HDD       | Creating volumes not requiring high performance |
 
-Additional disks can be configured according to any of the [«Full mirror»](#full-mirror) or [«Partial mirror»](#partial-mirror) scenarios.
+Additional disks can be configured according to any of the ["Full mirror"](#full-mirror) or ["Partial mirror"](#partial-mirror) scenarios.
 
 Below is the process of configuring additional disks using the following types as an example:
 
@@ -356,10 +356,10 @@ Below is the process of configuring additional disks using the following types a
 
 {{< alert level="warning" >}}
 Below is the order of actions for configuring additional disks for the case of primary cluster deployment and configuration when connecting to nodes via SSH.
-If you already have a working cluster and you are adding additional disks to its nodes, it is recommended to create and configure Volume Groups using the [LVMVolumeGroup](./resources.html#user-creation) resource, instead of executing the commands below on the node.
+If you already have a working cluster and you are adding additional disks to its nodes, it is recommended to create and configure Volume Groups using the [LVMVolumeGroup](./resources.html#creation-by-a-user) resource, instead of executing the commands below on the node.
 {{< /alert >}}
 
-Configure additional disks on the node according to the [«Full mirror»](#full-mirror) scenario:
+Configure additional disks on the node according to the ["Full mirror"](#full-mirror) scenario:
 
 1. Assemble a mirror from all additional disks of a certain type entirely (hardware or software).
 1. Create a Volume Group named `<vg-name>` on the mirror.
@@ -379,9 +379,9 @@ Examples of Volume Group names for additional disks of different types:
 - `hdd`: For HDD disks.
 {{< /alert >}}
 
-#### SDS modules configuration example (combined storage, «Full mirror»)
+#### SDS modules configuration example (combined storage, "Full mirror")
 
-This example describes configuring three nodes according to the [«Full mirror»](#full-mirror) scenario. After configuration, three [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources with randomly generated names will be created in the cluster.
+This example describes configuring three nodes according to the ["Full mirror"](#full-mirror) scenario. After configuration, three [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources with randomly generated names will be created in the cluster.
 In the future, it will be possible to specify names for [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources created during automatic Volume Group discovery by adding an `LVM` tag with the desired resource name.
 
 List [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources by running the command:
@@ -401,9 +401,9 @@ vg-c7863e12-c143-42bb-8e33-d578ce50d6c7   0/0         True                    Re
 
 `<vg-name>`: The name assigned to the Volume Group on the mirror in the previous step.
 
-##### `sds-local-volume` module configuration (combined storage, «Full mirror»)
+##### `sds-local-volume` module configuration (combined storage, "Full mirror")
 
-Configure the `sds-local-volume` module according to the [«Full mirror»](#full-mirror) scenario: create a [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource and add all [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that the `<vg-name>` Volume Group is used on all nodes in the `sds-local-volume` module. Run the command:
+Configure the `sds-local-volume` module according to the ["Full mirror"](#full-mirror) scenario: create a [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource and add all [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that the `<vg-name>` Volume Group is used on all nodes in the `sds-local-volume` module. Run the command:
 
 ```shell
 d8 k apply -f -<<EOF
@@ -433,9 +433,9 @@ Examples of informative names for [LocalStorageClass](/modules/sds-local-volume/
 - `local-sc-ssd-hdd`: For HDD disks.
 {{< /alert >}}
 
-##### `sds-replicated-volume` module configuration (combined storage, «Full mirror»)
+##### `sds-replicated-volume` module configuration (combined storage, "Full mirror")
 
-Configure the `sds-replicated-volume` module according to the [«Full mirror»](#full-mirror) scenario:
+Configure the `sds-replicated-volume` module according to the ["Full mirror"](#full-mirror) scenario:
 
 1. Create a [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource and add all [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that the `<vg-name>` Volume Group is used on all nodes in the `sds-replicated-volume` module. Run the command:
 
@@ -509,7 +509,7 @@ In addition, the PARTLABEL attribute cannot be set in `MBR`, which may be useful
 
 {{< alert level="warning" >}}
 Below is the order of actions for configuring additional disks for the case of primary cluster deployment and configuration when connecting to nodes via SSH.
-If you already have a working cluster and you are adding additional disks to its nodes, it is recommended to create and configure Volume Groups using the [LVMVolumeGroup](./resources.html#user-creation) resource, instead of executing the commands below on the node.
+If you already have a working cluster and you are adding additional disks to its nodes, it is recommended to create and configure Volume Groups using the [LVMVolumeGroup](./resources.html#creation-by-a-user) resource, instead of executing the commands below on the node.
 {{< /alert >}}
 
 In this scenario, two partitions are created on each disk:
@@ -519,7 +519,7 @@ In this scenario, two partitions are created on each disk:
 
 This allows for maximum efficient use of disk space.
 
-Configure the node with additional disks according to the [«Partial mirror»](#partial-mirror) scenario:
+Configure the node with additional disks according to the ["Partial mirror"](#partial-mirror) scenario:
 
 1. Create two partitions on each additional disk.
 
@@ -544,9 +544,9 @@ Configure the node with additional disks according to the [«Partial mirror»](#
    > - `ssd-sata`: For SATA SSD disks.
    > - `hdd`: For HDD disks.
 
-#### SDS modules configuration example (combined storage, «Partial mirror»)
+#### SDS modules configuration example (combined storage, "Partial mirror")
 
-This example describes configuring three nodes according to the [«Partial mirror»](#partial-mirror) scenario. After configuration, six [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources with randomly generated names will be created in the cluster.
+This example describes configuring three nodes according to the ["Partial mirror"](#partial-mirror) scenario. After configuration, six [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources with randomly generated names will be created in the cluster.
 In the future, it will be possible to specify names for [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources created during automatic Volume Group discovery by adding an `LVM` tag with the desired resource name.
 
 List [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources by running the command:
@@ -569,9 +569,9 @@ vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2   0/0         True                    Re
 
 `<vg-name>`: The prefix of the name assigned to the Volume Group created in the previous step.
 
-##### `sds-local-volume` module configuration (combined storage, «Partial mirror»)
+##### `sds-local-volume` module configuration (combined storage, "Partial mirror")
 
-Configure the `sds-local-volume` module according to the [«Partial mirror»](#partial-mirror) scenario: create a [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource and add [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that only the `<vg-name>-safe` Volume Group is used on all nodes in the `sds-local-volume` module. Run the command:
+Configure the `sds-local-volume` module according to the ["Partial mirror"](#partial-mirror) scenario: create a [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) resource and add [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that only the `<vg-name>-safe` Volume Group is used on all nodes in the `sds-local-volume` module. Run the command:
 
 ```shell
 d8 k apply -f -<<EOF
@@ -601,9 +601,9 @@ Examples of informative names for [LocalStorageClass](/modules/sds-local-volume/
 - `local-sc-hdd`: For HDD disks.
 {{< /alert >}}
 
-##### `sds-replicated-volume` module configuration (combined storage, «Partial mirror»)
+##### `sds-replicated-volume` module configuration (combined storage, "Partial mirror")
 
-Configure the `sds-replicated-volume` module according to the [«Partial mirror»](#partial-mirror) scenario:
+Configure the `sds-replicated-volume` module according to the ["Partial mirror"](#partial-mirror) scenario:
 
 1. Create a [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource named `data-<vg-name>-safe` and add [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that only the `<vg-name>-safe` Volume Group is used on all nodes in the `sds-replicated-volume` module in [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass) with `replication: None` parameter. Run the command:
 

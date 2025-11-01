@@ -39,7 +39,7 @@ spec:
                 strategy:
                   type: string
                   description: |
-                    The strategy (rule) to provide LVMVolumeGroup resources by the set.
+                    Strategy (rule) to provide LVMVolumeGroup resources by the set.
                   x-kubernetes-validations:
                     - rule: self == oldSelf
                       message: "The strategy field is immutable."
@@ -48,29 +48,29 @@ spec:
                 nodeSelector:
                   type: object
                   description: |
-                    The node selector for nodes that will be used by LVMVolumeGroups.
+                    Node selector for nodes that will be used by LVMVolumeGroups.
                   properties:
                     matchLabels:
                       type: object
                       description: |
-                        The labels for the node selector.
+                        Labels for the node selector.
                       additionalProperties:
                         type: string
                     matchExpressions:
                       type: array
                       description: |
-                        The expressions for the node selector.
+                        Expressions for the node selector.
                       items:
                         type: object
                         properties:
                           key:
                             type: string
                             description: |
-                              The label key to check.
+                              Label key to check.
                           operator:
                             type: string
                             description: |
-                              The operator for comparing values.
+                              Operator for comparing values.
                             enum:
                               - In
                               - NotIn
@@ -85,7 +85,7 @@ spec:
                 lvmVolumeGroupTemplate:
                   type: object
                   description: |
-                    The common template for LVMVolumeGroup resources provided by the set.
+                    Common template for LVMVolumeGroup resources provided by the set.
                   required:
                     - type
                     - actualVGNameOnTheNode
@@ -94,29 +94,29 @@ spec:
                     blockDeviceSelector:
                       type: object
                       description: |
-                        The BlockDevice resources selector used in LVMVolumeGroups configurations.
+                        BlockDevice resources selector used in LVMVolumeGroups configurations.
                       properties:
                         matchLabels:
                           type: object
                           description: |
-                            The labels for the block device selector.
+                            Labels for the block device selector.
                           additionalProperties:
                             type: string
                         matchExpressions:
                           type: array
                           description: |
-                            The expressions for the block device selector.
+                            Expressions for the block device selector.
                           items:
                             type: object
                             properties:
                               key:
                                 type: string
                                 description: |
-                                  The label key to check.
+                                  Label key to check.
                               operator:
                                 type: string
                                 description: |
-                                  The operator for comparing values.
+                                  Operator for comparing values.
                                 enum:
                                   - In
                                   - NotIn
@@ -142,7 +142,7 @@ spec:
                     type:
                       type: string
                       description: |
-                        The type of a VolumeGroup in LVMVolumeGroups.
+                        Type of a VolumeGroup in LVMVolumeGroups.
                         
                         Possible values:
                         
@@ -155,7 +155,7 @@ spec:
                     actualVGNameOnTheNode:
                       type: string
                       description: |
-                        The desired name of a Volume Group in LVMVolumeGroups. Must be unique for the node it is on.
+                        Desired name of a Volume Group in LVMVolumeGroups. Must be unique for the node it is on.
                         
                         > This field is immutable.
                         > Note that this Volume Group name will be common for every LVMVolumeGroup created by the set.
@@ -165,7 +165,7 @@ spec:
                     thinPools:
                       type: array
                       description: |
-                        The desired thin pool configuration in LVMVolumeGroups.
+                        Desired thin pool configuration in LVMVolumeGroups.
                         
                         > Note that the configuration will be common for every LVMVolumeGroup created by the set.
                       items:
@@ -174,22 +174,22 @@ spec:
                           name:
                             type: string
                             description: |
-                              The desired thin pool name.
+                              Desired thin pool name.
                               
                               > This field is immutable.
                           size:
                             x-kubernetes-int-or-string: true
                             pattern: '^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$|^[1-9][0-9]?%$|100%'
                             description: |
-                              The desired thin pool size. Might be specified as a number or percentage of total VG space.
+                              Desired thin pool size. Might be specified as a number or percentage of total Volume Group space.
                               
-                              > Note that if you specify the percent size, the thin pool will be automatically extended when VG is extended.
+                              > Note that if you specify the percent size, the thin pool will be automatically extended when Volume Group is extended.
                           allocationLimit:
                             type: string
                             pattern: '^[1-9][0-9]{2,3}%$'
                             default: "150%"
                             description: |
-                              Thin pool oversize limit. Default: 150%.
+                              Thin pool oversize limit.
                         required:
                           - name
                           - size
@@ -206,23 +206,23 @@ spec:
                       lvmVolumeGroupName:
                         type: string
                         description: |
-                          The name of the created LVMVolumeGroup resource.
+                          Name of the created LVMVolumeGroup resource.
                       nodeName:
                         type: string
                         description: |
-                          The name of the node where the LVMVolumeGroup resource was created.
+                          Name of the node where the LVMVolumeGroup resource was created.
                 currentLVMVolumeGroupsCount:
                   type: integer
                   description: |
-                    The current number of LVMVolumeGroups created by the set.
+                    Current number of LVMVolumeGroups created by the set.
                 desiredLVMVolumeGroupsCount:
                   type: integer
                   description: |
-                    The desired number of LVMVolumeGroups that should be created by the set.
+                    Desired number of LVMVolumeGroups that should be created by the set.
                 phase:
                   type: string
                   description: |
-                    The LVMVolumeGroups creation phase.
+                    LVMVolumeGroups creation phase.
                   enum:
                     - Created
                     - Pending
@@ -231,18 +231,18 @@ spec:
                 reason:
                   type: string
                   description: |
-                    The reason for the current phase.
+                    Reason for the current phase.
       subresources:
         status: { }
       additionalPrinterColumns:
         - jsonPath: .spec.strategy
           name: Strategy
           type: string
-          description: The specified LVMVolumeGroups strategy creation.
+          description: Specified LVMVolumeGroups strategy creation.
         - jsonPath: .spec.lvmVolumeGroupTemplate.actualVGNameOnTheNode
           name: VG
           type: string
-          description: Actual VG name.
+          description: Actual Volume Group name.
         - jsonPath: .spec.lvmVolumeGroupTemplate.type
           name: type
           type: string
@@ -263,4 +263,4 @@ spec:
         - jsonPath: .metadata.creationTimestamp
           name: Age
           type: date
-          description: The age of this resource.
+          description: Age of this resource.
