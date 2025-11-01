@@ -11,7 +11,7 @@ Module functionality when using other kernels or distributions is possible but n
 {{< /alert >}}
 
 {{< alert level="info" >}}
-If you create virtual machines by cloning, change the UUID of Volume Groups on VMs created this way. Cloned Volume Groups have identical UUIDs, which can lead to conflicts. For detailed instructions, see the section ["Changing UUID of Volume Groups when cloning virtual machines"](./faq.html#changing-uuid-of-volume-groups-when-cloning-virtual-machines).
+If you create virtual machines by cloning, change the UUID of Volume Groups on VMs created this way. Cloned Volume Groups have identical UUIDs, which can lead to conflicts. For detailed instructions, see the section ["How do I change the UUID of Volume Groups when cloning virtual machines?"](./faq.html#how-do-i-change-the-uuid-of-volume-groups-when-cloning-virtual-machines).
 {{< /alert >}}
 
 ## Methods and scenarios for configuring node disk subsystem
