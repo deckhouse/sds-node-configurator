@@ -1,6 +1,7 @@
 ---
 title: "Модуль sds-node-configurator"
 description: "Модуль sds-node-configurator: управление блочными устройствами и LVM"
+weight: 1
 ---
 
 {{< alert level="warning" >}}

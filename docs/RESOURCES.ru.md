@@ -2,6 +2,7 @@
 title: "Модуль sds-node-configurator: работа с ресурсами"
 linkTitle: "Работа с ресурсами"
 description: "Создание и управление ресурсами BlockDevice и LVMVolumeGroup."
+weight: 5
 ---
 
 {{< alert level="warning" >}}

@@ -1,6 +1,7 @@
 ---
 title: "sds-node-configurator module: FAQ"
 description: "sds-node-configurator module: frequently asked questions and answers."
+weight: 2
 ---
 {{< alert level="warning" >}}
 Module functionality is guaranteed only when using stock kernels provided with [supported distributions](/products/kubernetes-platform/documentation/v1/reference/supported_versions.html#linux).

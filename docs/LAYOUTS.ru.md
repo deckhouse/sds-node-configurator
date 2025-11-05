@@ -2,6 +2,7 @@
 title: "Модуль sds-node-configurator: сценарии конфигурации SDS модулей"
 linkTitle: "Сценарии конфигурации"
 description: "Сценарии конфигурации SDS модулей с помощью sds-node-configurator."
+weight: 6
 ---
 
 {{< alert level="warning" >}}

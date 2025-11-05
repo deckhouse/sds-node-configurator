@@ -2,6 +2,7 @@
 title: "sds-node-configurator module: SDS modules configuration scenarios"
 linkTitle: "Configuration scenarios"
 description: "SDS modules configuration scenarios using sds-node-configurator."
+weight: 6
 ---
 
 {{< alert level="warning" >}}

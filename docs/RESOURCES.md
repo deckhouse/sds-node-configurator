@@ -2,6 +2,7 @@
 title: "sds-node-configurator module: working with resources"
 linkTitle: "Working with resources"
 description: "Creating and managing BlockDevice and LVMVolumeGroup resources."
+weight: 5
 ---
 
 {{< alert level="warning" >}}

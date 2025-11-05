@@ -1,6 +1,7 @@
 ---
 title: "Модуль sds-node-configurator: FAQ"
 description: "Модуль sds-node-configurator: частые вопросы и ответы."
+weight: 2
 ---
 {{< alert level="warning" >}}
 Работоспособность модуля гарантируется только при использовании стоковых ядер, поставляемых вместе с [поддерживаемыми дистрибутивами](/products/kubernetes-platform/documentation/v1/reference/supported_versions.html#linux).

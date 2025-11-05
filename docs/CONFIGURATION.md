@@ -1,6 +1,7 @@
 ---
 title: "The sds-node-configurator module: settings"
 description: "Settings of the sds-node-configurator module. Deckhouse Kubernetes Platform."
+weight: 4
 ---
 
 {{< alert level="warning" >}}

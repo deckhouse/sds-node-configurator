@@ -1,6 +1,7 @@
 ---
 title: "sds-node-configurator module"
 description: "sds-node-configurator module: block device and LVM management"
+weight: 1
 ---
 
 {{< alert level="warning" >}}
