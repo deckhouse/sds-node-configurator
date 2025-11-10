@@ -58,7 +58,7 @@ const (
 	defaultCacheCheckInterval     = 1
 	defaultCachePVCTTL            = 3600
 	defaultCachePVCCheckInterval  = 3600
-	defaultLogLevel               = "3"
+	defaultLogLevel               = "2"
 )
 
 type Config struct {
@@ -149,7 +149,7 @@ func subMain(ctx context.Context) error {
 		}
 	}
 
-	log, err := logger.NewLogger(logger.Verbosity("4"))
+	log, err := logger.NewLogger(logger.Verbosity(config.LogLevel))
 	if err != nil {
 		print(fmt.Sprintf("[subMain] unable to initialize logger, err: %s", err))
 		return err
