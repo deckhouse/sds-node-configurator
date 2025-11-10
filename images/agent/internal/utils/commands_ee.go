@@ -47,9 +47,7 @@ func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta, devID str
 	if devID != "" {
 		args = append(args, "--dev-id", devID)
 	}
-	cmd = exec.CommandContext(ctx,
-		internal.NSENTERCmd,
-		nsentrerExpendedArgs(internal.ThinDumpCmd, args...)...)
+	cmd = exec.CommandContext(ctx, internal.ThinDumpCmd, args...)
 
 	var output bytes.Buffer
 	cmd.Stdout = &output

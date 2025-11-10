@@ -1,0 +1,2 @@
+Changes:
+  - Fixed volume cleanup for thin volumes in some OSes
