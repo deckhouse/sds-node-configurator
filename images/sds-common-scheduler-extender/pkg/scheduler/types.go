@@ -24,7 +24,6 @@ import (
 	slv "github.com/deckhouse/sds-local-volume/api/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 )
 
 // ExtenderArgs is copied from https://godoc.org/k8s.io/kubernetes/pkg/scheduler/api/v1#ExtenderArgs
@@ -115,8 +114,7 @@ type FilterInput struct {
 	ReplicatedSCSUsedByPodPVCs map[string]*srv.ReplicatedStorageClass
 	LocalSCSUsedByPodPVCs      map[string]*slv.LocalStorageClass
 	// DRBDResourceMap            map[string]*srv.DRBDResource
-	DRBDNodesMap           map[string]struct{}
-	DRBDResourceReplicaMap map[string]*srv2.DRBDResourceReplica
+	DRBDNodesMap map[string]struct{}
 }
 
 // LVGInfo holds LVMVolumeGroup-related data
@@ -143,7 +141,6 @@ type PrioritizeInput struct {
 	PVCRequests             map[string]PVCRequest
 	StoragePoolMap          map[string]*srv.ReplicatedStoragePool
 	DefaultDivisor          float64
-	DRBDResourceReplicaMap  map[string]*srv2.DRBDResourceReplica
 }
 
 // LVGScoreInfo holds LVMVolumeGroup-related data for scoring

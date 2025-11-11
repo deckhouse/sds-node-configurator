@@ -25,7 +25,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 )
 
 func (s *scheduler) Prioritize(inputData ExtenderArgs) ([]HostPriority, error) {
@@ -93,16 +92,6 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		storagePoolMap[storagePool.Name] = &storagePool
 	}
 
-	drbdReplicaList, err := getDRBDReplicaList(s.ctx, s.client)
-	if err != nil {
-		return nil, fmt.Errorf("unable to list DRBD replicas: %w", err)
-	}
-
-	drbdReplicaMap := make(map[string]*srv2.DRBDResourceReplica, len(drbdReplicaList.Items))
-	for _, replica := range drbdReplicaList.Items {
-		drbdReplicaMap[replica.Name] = &replica
-	}
-
 	res := &PrioritizeInput{
 		Pod:                     pod,
 		NodeNames:               nodeNames,
@@ -112,7 +101,6 @@ func (s *scheduler) collectPrioritizeInput(pod *v1.Pod, nodeNames []string) (*Pr
 		PVCRequests:             pvcRequests,
 		StoragePoolMap:          storagePoolMap,
 		DefaultDivisor:          s.defaultDivisor,
-		DRBDResourceReplicaMap:  drbdReplicaMap,
 	}
 	// b, _ := json.MarshalIndent(res, "", "  ")
 	// s.log.Trace(fmt.Sprintf("[collectPrioritizeInput] PrioritizeInput: %+v", string(b)))
@@ -170,22 +158,6 @@ func (s *scheduler) scoreSingleNode(input *PrioritizeInput, lvgInfo *LVGScoreInf
 	// 1) Handle replicated PVCs: must check DRBD replica peers
 	for _, pvc := range input.ReplicatedProvisionPVCs {
 		s.log.Info(fmt.Sprintf("[scoreSingleNode] replicated pvc: %+v", pvc))
-
-		replica := input.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
-		if replica == nil {
-			s.log.Warning(fmt.Sprintf("[scoreSingleNode] no DRBD replica found for PVC %s (volume %s). returning 0 for node %s", pvc.Name, pvc.Spec.VolumeName, nodeName))
-			return 0
-		}
-
-		peer, ok := replica.Spec.Peers[nodeName]
-		if !ok {
-			s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s has no peer for pvc %s replica, returning 0 score points", nodeName, pvc.Name))
-			return 0
-		}
-		if peer.Diskless {
-			s.log.Info(fmt.Sprintf("[scoreSingleNode] node %s is diskless for pvc %s, returning 0 score points", nodeName, pvc.Name))
-			return 0
-		}
 
 		pvcReq := input.PVCRequests[pvc.Name]
 		s.log.Trace(fmt.Sprintf("[scoreSingleNode] pvc %s size request: %+v", pvc.Name, pvcReq))

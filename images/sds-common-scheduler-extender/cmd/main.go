@@ -45,7 +45,6 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/scheduler"
 	lapi "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 )
 
 const (
@@ -84,7 +83,6 @@ var resourcesSchemeFuncs = []func(*runtime.Scheme) error{
 	sv1.AddToScheme,
 	slv.AddToScheme,
 	lapi.AddToScheme,
-	srv2.AddToScheme,
 }
 
 var config = &Config{

@@ -17,7 +17,6 @@ limitations under the License.
 package scheduler
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -26,7 +25,6 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
-	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 )
 
 // Filter processes the filtering logic for a given request.
@@ -91,18 +89,6 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		return nil, fmt.Errorf("unable to filter replicated StorageClasses: %w", err)
 	}
 
-	drbdReplicaList, err := getDRBDReplicaList(s.ctx, s.client)
-	if err != nil {
-		return nil, fmt.Errorf("unable to list DRBD replicas: %w", err)
-	}
-
-	drbdReplicaMap := make(map[string]*srv2.DRBDResourceReplica, len(drbdReplicaList.Items))
-	for _, replica := range drbdReplicaList.Items {
-		drbdReplicaMap[replica.Name] = &replica
-	}
-	b, _ := json.MarshalIndent(drbdReplicaMap, "", "  ")
-	fmt.Printf("[collectFilterInput] drbdReplicaMap %+v\n", string(b))
-
 	drbdNodesMap, err := getDRBDNodesMap(s.ctx, s.client, s.log)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get DRBD nodes map: %w", err)
@@ -117,7 +103,6 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		ReplicatedSCSUsedByPodPVCs: replicatedSCSUsedByPodPVCs,
 		LocalSCSUsedByPodPVCs:      localSCSUsedByPodPVCs,
 		DRBDNodesMap:               drbdNodesMap,
-		DRBDResourceReplicaMap:     drbdReplicaMap,
 	}, nil
 }
 
@@ -216,10 +201,6 @@ func (s *scheduler) filterSingleNodeSRV(nodeName string, filterInput *FilterInpu
 	nodeLvgs := commonNodes[nodeName]
 	for _, pvc := range filterInput.ReplicatedProvisionPVCs {
 		log.Debug("[filterSingleNodeSRV] processing PVC", "pvc", pvc.Name, "node", nodeName)
-		replica := filterInput.DRBDResourceReplicaMap[pvc.Spec.VolumeName]
-		peer := replica.Spec.Peers[nodeName]
-		isNodeDiskless := peer.Diskless
-
 		lvgsFromSC := lvgInfo.SCLVGs[*pvc.Spec.StorageClassName]
 		pvcRSC := filterInput.ReplicatedSCSUsedByPodPVCs[*pvc.Spec.StorageClassName]
 		sharedLVG := findSharedLVG(nodeLvgs, lvgsFromSC)
@@ -236,8 +217,6 @@ func (s *scheduler) filterSingleNodeSRV(nodeName string, filterInput *FilterInpu
 				if !hasEnoughSpace {
 					return fmt.Errorf("[filterSingleNodeSRV] node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
 				}
-			} else if !isNodeDiskless {
-				return fmt.Errorf("[filterSingleNodeSRV] node %s is not diskful for PV %s", nodeName, pvc.Spec.VolumeName)
 			}
 
 		case "EventuallyLocal":
@@ -248,9 +227,6 @@ func (s *scheduler) filterSingleNodeSRV(nodeName string, filterInput *FilterInpu
 				if !hasEnoughSpace {
 					return fmt.Errorf("[filterSingleNodeSRV] node does not have enough space in LVG %s for PVC %s/%s", sharedLVG.Name, pvc.Namespace, pvc.Name)
 				}
-			} else if isNodeDiskless {
-				log.Trace("[filterSingleNodeSRV]", "node is diskful for EventuallyLocal PVC", "node", nodeName, "pvc", pvc.Name)
-				return nil
 			} else if sharedLVG == nil || !hasEnoughSpace {
 				return fmt.Errorf("[filterSingleNodeSRV] node %s does not meet EventuallyLocal criteria for PVC %s", nodeName, pvc.Name)
 			}

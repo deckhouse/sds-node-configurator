@@ -41,7 +41,6 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 )
 
 const (
@@ -321,18 +320,6 @@ func getLayerStorageVolumes(ctx context.Context, cl client.Client) (*lsrv.LayerS
 	}
 
 	return layerStorageVolumes, nil
-}
-
-func getDRBDReplicaList(ctx context.Context, cl client.Client) (*srv2.DRBDResourceReplicaList, error) {
-	cwt, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	rrl := &srv2.DRBDResourceReplicaList{}
-	if err := cl.List(cwt, rrl); err != nil {
-		return nil, err
-	}
-
-	return rrl, nil
 }
 
 func getNodeNames(inputData ExtenderArgs, log *logger.Logger) ([]string, error) {
