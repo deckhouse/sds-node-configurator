@@ -1,24 +1,33 @@
 ---
-title: "The sds-node-configurator module"
-description: "General Concepts and Principles of the sds-node-configurator module. Deckhouse Kubernetes Platform."
+title: "sds-node-configurator module"
+description: "sds-node-configurator module: block device and LVM management"
+weight: 1
 ---
 
 {{< alert level="warning" >}}
-The module is guaranteed to work only with stock kernels that are shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
+Module functionality is guaranteed only when using stock kernels provided with [supported distributions](/products/kubernetes-platform/documentation/v1/reference/supported_versions.html#linux).
 
-The module may work with other kernels or distributions, but its stable operation and availability of all features is not guaranteed.
+Module functionality when using other kernels or distributions is possible but not guaranteed.
 {{< /alert >}}
 
-The module manages `LVM` on cluster nodes through [Kubernetes custom resources](./cr.html) by performing the following operations:
+The `sds-node-configurator` module manages block devices and LVM on Kubernetes cluster nodes through [Kubernetes custom resources](./cr.html). Main module capabilities:
 
-  - Discovering block devices and creating/updating/deleting their corresponding [BlockDevice resources](./cr.html#blockdevice).
+- Automatic discovery of block devices and creation/update/deletion of corresponding [BlockDevice resources](./cr.html#blockdevice).
 
-   > **Caution!** Manual creation and modification of the `BlockDevice` resource is prohibited.
+  > **Warning**. Manual creation and modification of BlockDevice resource is prohibited.
 
-  - Discovering `LVM Volume Groups` on the nodes with the `storage.deckhouse.io/enabled=true` LVM tag attached and `Thin-pools` running on them as well as managing the corresponding [LVMVolumeGroup resources](./cr.html#lvmvolumegroup). The module automatically creates an `LVMVolumeGroup` resource if it does not yet exist for a discovered `LVM Volume Group`.
+- Automatic discovery of LVM Volume Groups with LVM tag `storage.deckhouse.io/enabled=true` and thin pools on them on nodes, as well as management of corresponding [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources. The module automatically creates an [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource if it doesn't exist yet for the discovered LVM Volume Group.
 
-  - Scanning `LVM Physical Volumes` on the nodes that are part of managed `LVM Volume Groups`. In case the size of underlying block device expands, the corresponding `LVM Physical Volumes` will be automatically expanded as well (`pvresize` will occur).
+- Scanning LVM Physical Volumes on nodes that are part of managed LVM Volume Groups. When underlying block devices are expanded, corresponding LVM Physical Volumes are automatically increased (performs `pvresize`).
 
-  > **Caution!** Downsizing a block device is not supported.
+  > **Warning**. Reducing block device sizes is not supported.
 
-  - Creating/expanding/deleting `LVM Volume Groups` on the node according to the changes the user has made to the `LVMVolumeGroup` resources. [Usage examples](./usage.html#lvmvolumegroup-resources)
+- Creation/expansion/deletion of LVM Volume Groups on the node according to [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource settings. To see examples, refer to [Working with LVMVolumeGroup resources](./resources.html#working-with-lvmvolumegroup-resources).
+
+## Documentation
+
+- [Working with resources](./resources.html): Practical examples of creating, modifying and deleting [BlockDevice](./cr.html#blockdevice) and [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources.
+- [Custom Resources](./cr.html): Module CRD reference.
+- [Configuration](./configuration.html): Module parameter configuration.
+- [Configuration scenarios](./layouts.html): Typical disk subsystem configuration scenarios for various storage configurations.
+- [FAQ](./faq.html): Frequently asked questions and answers.

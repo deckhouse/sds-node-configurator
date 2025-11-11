@@ -25,7 +25,7 @@ spec:
         openAPIV3Schema:
           type: object
           description: |
-            The resource displays up-to-date information about available block devices on nodes that can be used by the sds-node-configurator controller for LVM operations.
+            The resource displays up-to-date information about available block devices on nodes that can be used by the `sds-node-configurator` controller for LVM operations.
             
             > The resource is created and managed by the controller only. Manual modification of the resource is prohibited.
           properties:
@@ -36,7 +36,7 @@ spec:
                 type:
                   type: string
                   description: |
-                    The device's type (disk, part, RAID, and others).
+                    The device's type (disk, partition, RAID, and others).
                 fsType:
                   type: string
                   enum: [LVM2_member, ""]
@@ -45,7 +45,7 @@ spec:
                 nodeName:
                   type: string
                   description: |
-                    The name of the kubernetes node the device is on.
+                    The name of the Kubernetes node the device is on.
                 consumable:
                   type: boolean
                   description: |
@@ -55,37 +55,37 @@ spec:
                   description: |
                     The LVM Physical Volume UUID.
                     
-                    > Optional: exists only if the device is used as a LVM Physical Volume.
+                    > **Optional**: exists only if the device is used as a LVM Physical Volume.
                 vgUUID:
                   type: string
-                  description: | 
-                    The UUID of the LVM Volume Group to which this device belongs to as a Physical Volume.
+                  description: |
+                    The UUID of the LVM Volume Group to which this device belongs as a Physical Volume.
 
-                    > Optional: exists only if the device is used as a Physical Volume and is included in a Volume Group.
+                    > **Optional**: exists only if the device is used as a Physical Volume and is included in a Volume Group.
                 partUUID:
                   type: string
                   description: |
                     The UUID of the partition.
 
-                    > Optional: exists only if the device is a partition.
+                    > **Optional**: exists only if the device is a partition.
                 lvmVolumeGroupName:
                   type: string
-                  description: | 
-                    The LVMVolumeGroup resource name. 
+                  description: |
+                    The LVMVolumeGroup resource name.
                     
-                    > Optional: exists only if the device is used as a Physical Volume, is included in a Volume Group, and is specified in an LVMVolumeGroup resource.
+                    > **Optional**: exists only if the device is used as a Physical Volume, is included in a Volume Group, and is specified in an LVMVolumeGroup resource.
                 actualVGNameOnTheNode:
                   type: string
                   description: |
                     The actual name of the LVM Volume Group the device is included in.
                     
-                    > Optional: exists if only the device is used as a Physical Volume and is included in a Volume Group.
+                    > **Optional**: exists if only the device is used as a Physical Volume and is included in a Volume Group.
                 wwn:
                   type: string
                   description: |
                     The device unique wwn (World Wide Name) identifier.
                     
-                    > Optional: might be empty if WWN is not supported for this type of disk by the manufacturer.
+                    > **Optional**: might not exist if WWN is not supported for this type of disk by the manufacturer.
                 serial:
                   type: string
                   description: |
@@ -101,36 +101,36 @@ spec:
                 model:
                   type: string
                   description: |
-                    The device model.
+                    Device model.
                     
-                    > Optional: might be empty if not supported by the manufacturer for this type of disk.
+                    > **Optional**: might not exist if the manufacturer does not provide this information for the given type of disks.
                 rota:
                   type: boolean
                   description: |
-                    The device media type. Might be:
-                    - 'true' (for HHD)
-                    - 'false' (for SSD)
+                    Device disk type. Can be:
+                    - `true`: For HDD;
+                    - `false`: For SSD.
                 hotPlug:
                   type: boolean
                   description: |
-                    The device connection type. Might be:
-                    - 'true' (if the device has been hotPlugged)
-                    - 'false' (otherwise)
+                    Device connection type. Can be:
+                    - `true`: If the device has been hot-plugged;
+                    - `false`: Otherwise.
                 machineId:
                   type: string
                   description: |
-                    The unique identifier of the machine the device is on (normally at /etc/machine-id)
+                    Unique identifier of the machine the device is on (normally at `/etc/machine-id`).
 
                             
       additionalPrinterColumns:
         - jsonPath: .status.nodeName
           name: Node
           type: string
-          description: The node the block device is on.
+          description: Node the block device is on.
         - jsonPath: .status.consumable
           name: Consumable
           type: boolean
-          description: Defines whether the current block device can be used by sds-node-configurator.
+          description: Defines whether the current block device can be used by `sds-node-configurator`.
         - jsonPath: .status.size
           name: Size
           type: string
@@ -142,14 +142,14 @@ spec:
         - jsonPath: .status.actualVGNameOnTheNode
           name: VG
           type: string
-          description: The Volume Group the block device is in.
+          description: Volume Group the block device is in.
           priority: 1
         - jsonPath: .status.lvmVolumeGroupName
           name: LVMVolumeGroup
           type: string
-          description: The LVMVolumeGroup resource the block device is in.
+          description: LVMVolumeGroup resource the block device is in.
           priority: 1
         - jsonPath: .metadata.creationTimestamp
           name: Age
           type: date
-          description: The age of this resource
+          description: Age of this resource

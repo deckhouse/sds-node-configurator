@@ -1,6 +1,7 @@
 ---
 title: "The sds-node-configurator module: Custom Resources"
 description: "BlockDevice and LVMVolumeGroup custom resources. The sds-node-configurator module of Deckhouse Kubernetes Platform."
+weight: 3
 ---
 
 {{< alert level="warning" >}}
