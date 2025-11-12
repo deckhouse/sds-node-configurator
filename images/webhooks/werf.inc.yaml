@@ -55,11 +55,10 @@ git:
 {{- include "image mount points" . }}
 
 import:
-  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
+  - image: {{ $.ImageName }}-golang-artifact
     add: /{{ $.ImageName }}
     to: /{{ $.ImageName }}
-    before: install
-
-imageSpec:
-  config:
-    entrypoint: ["/{{ $.ImageName }}"]
+    before: setup
+docker:
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
+  USER: deckhouse:deckhouse
