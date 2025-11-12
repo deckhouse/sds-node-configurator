@@ -52,7 +52,9 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 		return nil, fmt.Errorf("unable to get PVCs for Pod %s/%s: %w", pod.Name, pod.Namespace, err)
 	}
 	if len(podRelatedPVCs) == 0 {
-		return nil, errors.New("no PVCs found for Pod")
+		s.log.Debug(fmt.Sprintf("[filter] no PVCs found for Pod %s/%s", pod.Namespace, pod.Name))
+		// TODO: not error
+		return nil, err
 	}
 
 	scsUsedByPodPVCs, err := getStorageClassesUsedByPVCs(s.ctx, s.client, podRelatedPVCs)
@@ -63,6 +65,7 @@ func (s *scheduler) collectFilterInput(pod *corev1.Pod, nodeNames []string) (*Fi
 	replicatedPVCs, localPVCs := filterPVCsByProvisioner(s.log, podRelatedPVCs, scsUsedByPodPVCs)
 	if len(replicatedPVCs) == 0 && len(localPVCs) == 0 {
 		s.log.Warning(fmt.Sprintf("[filter] Pod %s/%s uses unmanaged PVCs. replicatedPVCs length %d, localPVCs length %d", pod.Namespace, pod.Name, len(replicatedPVCs), len(localPVCs)))
+		// TODO: not error
 		return nil, errors.New("no managed PVCs found")
 	}
 
