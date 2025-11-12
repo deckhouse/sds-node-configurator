@@ -144,7 +144,9 @@ func (s *scheduler) filterNodesParallel(input *FilterInput, lvgInfo *LVGInfo) (*
 		go func(nodeName string) {
 			defer wg.Done()
 
-			srvErr := s.filterSingleNodeSRV(nodeName, input, lvgInfo, commonNodes, s.log)
+			// TODO: uncomment this when we will have a way to filter out PVCs by Storage class
+			//srvErr := s.filterSingleNodeSRV(nodeName, input, lvgInfo, commonNodes, s.log)
+			var srvErr error
 			slvErr := s.filterSingleNodeSLV(nodeName, input, lvgInfo, commonNodes, s.log)
 
 			if srvErr == nil && slvErr == nil {
@@ -153,7 +155,8 @@ func (s *scheduler) filterNodesParallel(input *FilterInput, lvgInfo *LVGInfo) (*
 				return
 			}
 			// TODO improve this part of the code later
-			nodeErr := errors.Join(srvErr, slvErr)
+			//nodeErr := errors.Join(srvErr, slvErr)
+			nodeErr := slvErr
 			s.log.Debug(fmt.Sprintf("[filterNodesParallel] node %s is bad to schedule a pod to. Reason: %s", nodeName, nodeErr.Error()))
 			resCh <- ResultWithError{NodeName: nodeName, Err: nodeErr}
 		}(nodeName)
