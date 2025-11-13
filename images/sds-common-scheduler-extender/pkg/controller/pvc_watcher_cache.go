@@ -50,7 +50,7 @@ func RunPVCWatcherCacheController(
 ) error {
 	log.Info("[RunPVCWatcherCacheController] starts the work")
 
-	c, err := controller.New("test-pvc-watcher", mgr, controller.Options{
+	c, err := controller.New(PVCWatcherCacheCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(_ context.Context, _ reconcile.Request) (reconcile.Result, error) {
 			return reconcile.Result{}, nil
 		}),

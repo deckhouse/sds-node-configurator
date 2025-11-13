@@ -47,7 +47,7 @@ func accessLogHandler(ctx context.Context, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		startTime := time.Now()
 
-		accessLogRW := &accessLogResponseWriter{ResponseWriter: w}
+		accessLogRW := &accessLogResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
 		next.ServeHTTP(accessLogRW, r)
 		status := accessLogRW.statusCode
