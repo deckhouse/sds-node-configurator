@@ -65,29 +65,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Info(fmt.Sprintf("[main] Go Version:%s ", goruntime.Version()))
-	log.Info(fmt.Sprintf("[main] OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
+	mainLog := log.WithName("main")
 
-	log.Info("[main] CfgParams has been successfully created")
-	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.MetricsPort, cfgParams.MetricsPort))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.ScanIntervalSec))
+	mainLog.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
+	mainLog.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
+
+	mainLog.Info("CfgParams has been successfully created")
+	mainLog.Info(fmt.Sprintf("%s = %s", config.LogLevel, cfgParams.Loglevel))
+	mainLog.Info(fmt.Sprintf("%s = %s", config.MetricsPort, cfgParams.MetricsPort))
+	mainLog.Info(fmt.Sprintf("%s = %s", config.ScanInterval, cfgParams.ScanIntervalSec))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
-		log.Error(err, "[main] unable to KubernetesDefaultConfigCreate")
+		mainLog.Error(err, "unable to KubernetesDefaultConfigCreate")
 	}
-	log.Info("[main] kubernetes config has been successfully created.")
+	mainLog.Info("kubernetes config has been successfully created.")
 
 	scheme := runtime.NewScheme()
 	for _, f := range resourcesSchemeFuncs {
 		err := f(scheme)
 		if err != nil {
-			log.Error(err, "[main] unable to add scheme to func")
+			mainLog.Error(err, "unable to add scheme to func")
 			os.Exit(1)
 		}
 	}
-	log.Info("[main] successfully read scheme CR")
+	mainLog.Info("successfully read scheme CR")
 
 	managerOpts := manager.Options{
 		Scheme:                 scheme,
@@ -98,61 +100,61 @@ func main() {
 
 	mgr, err := manager.New(kConfig, managerOpts)
 	if err != nil {
-		log.Error(err, "[main] unable to manager.New")
+		mainLog.Error(err, "unable to manager.New")
 		os.Exit(1)
 	}
-	log.Info("[main] successfully created kubernetes manager")
+	mainLog.Info("successfully created kubernetes manager")
 
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 	controller.RunSdsInfraWatcher(ctx, mgr, *cfgParams, metrics, *log)
 
 	err = controller.RunLVGConditionsWatcher(mgr, *cfgParams, *log)
 	if err != nil {
-		log.Error(err, "[main] unable to run LVGConditionsWatcher controller")
+		mainLog.Error(err, "unable to run LVGConditionsWatcher controller")
 		os.Exit(1)
 	}
 
 	err = controller.RunLVGStatusWatcher(mgr, *log)
 	if err != nil {
-		log.Error(err, "[main] unable to run LVGConfigurationWatcher controller")
+		mainLog.Error(err, "unable to run LVGConfigurationWatcher controller")
 		os.Exit(1)
 	}
 
 	err = controller.RunMCWatcher(mgr, *log)
 	if err != nil {
-		log.Error(err, "[main] unable to run MCWatcher controller")
+		mainLog.Error(err, "unable to run MCWatcher controller")
 		os.Exit(1)
 	}
 
 	err = controller.RunBlockDeviceLabelsWatcher(mgr, *log, *cfgParams)
 	if err != nil {
-		log.Error(err, "[main] unable to run BlockDeviceWatcher controller")
+		mainLog.Error(err, "unable to run BlockDeviceWatcher controller")
 		os.Exit(1)
 	}
 
 	err = controller.RunLVMVolumeGroupSetWatcher(mgr, *log, *cfgParams, metrics)
 	if err != nil {
-		log.Error(err, "[main] unable to run RunLVMVolumeGroupSetWatcher controller")
+		mainLog.Error(err, "unable to run RunLVMVolumeGroupSetWatcher controller")
 		os.Exit(1)
 	}
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
+		mainLog.Error(err, "unable to mgr.AddHealthzCheck")
 		os.Exit(1)
 	}
-	log.Info("[main] successfully AddHealthzCheck")
+	mainLog.Info("successfully AddHealthzCheck")
 
 	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		log.Error(err, "[main] unable to mgr.AddReadyzCheck")
+		mainLog.Error(err, "unable to mgr.AddReadyzCheck")
 		os.Exit(1)
 	}
-	log.Info("[main] successfully AddReadyzCheck")
+	mainLog.Info("successfully AddReadyzCheck")
 
 	err = mgr.Start(ctx)
 	if err != nil {
-		log.Error(err, "[main] unable to mgr.Start")
+		mainLog.Error(err, "unable to mgr.Start")
 		os.Exit(1)
 	}
 
-	log.Info("[main] successfully starts the manager")
+	mainLog.Info("successfully starts the manager")
 }

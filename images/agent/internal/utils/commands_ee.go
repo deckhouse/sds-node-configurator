@@ -19,14 +19,15 @@ import (
 )
 
 func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta, devID string) (out []byte, err error) {
-	log.Trace(fmt.Sprintf("[ThinDumpRaw] calling for tpool %s tmeta %s devID %s", tpool, tmeta, devID))
+	log = log.WithName("ThinDumpRaw").WithValues("tpool", tpool, "tmeta", tmeta, "devID", devID)
+	log.Trace("calling for tpool tmeta devID")
 	cmd := exec.CommandContext(
 		ctx,
 		internal.NSENTERCmd,
 		nsentrerExpendedArgs(internal.DMSetupCmd, "message", tpool, "0", "reserve_metadata_snap")...)
-	log.Debug(fmt.Sprintf("[ThinDumpRaw] running %v", cmd))
+	log.Debug("running command", "command", cmd.String())
 	if err = cmd.Run(); err != nil {
-		log.Error(err, fmt.Sprintf("[ThinDumpRaw] can't reserve metadata snapshot for %s", tpool))
+		log.Error(err, "can't reserve metadata snapshot")
 		err = fmt.Errorf("reserving metadata snapshot: %w", err)
 		return
 	}
@@ -36,9 +37,9 @@ func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta, devID str
 			internal.NSENTERCmd,
 			nsentrerExpendedArgs(internal.DMSetupCmd, "message", tpool, "0", "release_metadata_snap")...)
 
-		log.Debug(fmt.Sprintf("[ThinDumpRaw] running %v", cmd))
+		log.Debug("running command", "command", cmd)
 		if errRelease := cmd.Run(); errRelease != nil {
-			log.Error(errRelease, fmt.Sprintf("[ThinDumpRaw] can't release metadata snapshot for %s", tpool))
+			log.Error(errRelease, "can't release metadata snapshot")
 			err = errors.Join(err, errRelease)
 		}
 	}()
@@ -52,12 +53,12 @@ func ThinDumpRaw(ctx context.Context, log logger.Logger, tpool, tmeta, devID str
 	var output bytes.Buffer
 	cmd.Stdout = &output
 
-	log.Debug(fmt.Sprintf("[ThinDumpRaw] running %v", cmd))
+	log.Debug("running command", "command", cmd)
 	if err = cmd.Run(); err != nil {
-		log.Error(err, fmt.Sprintf("[ThinDumpRaw] can't get metadata %s", tmeta))
+		log.Error(err, "can't get metadata")
 		err = fmt.Errorf("dumping metadata: %w", err)
 		return
 	}
-	log.Trace(fmt.Sprintf("[ThinDumpRaw] device map is: %s", output.Bytes()))
+	log.Trace("device map", "output", output)
 	return output.Bytes(), nil
 }

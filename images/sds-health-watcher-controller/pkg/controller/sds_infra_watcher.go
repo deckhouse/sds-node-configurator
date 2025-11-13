@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -51,74 +50,85 @@ func RunSdsInfraWatcher(
 	metrics monitoring.Metrics,
 	log logger.Logger,
 ) {
-	log.Info("[RunSdsInfraWatcher] starts the work")
+	log = log.WithName("RunSdsInfraWatcher")
+	log.Info("starts the work")
 	cl := mgr.GetClient()
 
 	go func() {
 		for {
 			time.Sleep(cfg.ScanIntervalSec)
-			log.Info("[RunSdsInfraWatcher] starts the reconciliation loop")
+			log.Info("starts the reconciliation loop")
 
-			log.Debug("[RunSdsInfraWatcher] tries to get LVMVolumeGroups")
+			log.Debug("tries to get LVMVolumeGroups")
 			lvgs, err := GetLVMVolumeGroups(ctx, cl, metrics)
 			if err != nil {
-				log.Error(err, "[RunSdsInfraWatcher] unable to get LVMVolumeGroups")
+				log.Error(err, "unable to get LVMVolumeGroups")
 				continue
 			}
-			log.Debug("[RunSdsInfraWatcher] successfully got LVMVolumeGroups")
+			log.Debug("successfully got LVMVolumeGroups")
 			if len(lvgs) == 0 {
-				log.Info("[RunSdsInfraWatcher] no LVMVolumeGroups found")
+				log.Info("no LVMVolumeGroups found")
 				continue
 			}
 			for _, lvg := range lvgs {
-				log.Trace(fmt.Sprintf("[RunSdsInfraWatcher] LVMVolumeGroup %s conditions: %+v", lvg.Name, lvg.Status.Conditions))
+				log.Trace("LVMVolumeGroup conditions",
+					"lvgName", lvg.Name,
+					"conditions", lvg.Status.Conditions)
 			}
 
-			log.Info("[RunSdsInfraWatcher] LVMVolumeGroups found. Starts to check their health")
-			log.Info("[RunSdsInfraWatcher] check if every LVMVolumeGroup node does exist")
+			log.Info("LVMVolumeGroups found. Starts to check their health")
+			log.Info("check if every LVMVolumeGroup node does exist")
 			lvgNodeNames := getNodeNamesFromLVGs(lvgs)
-			log.Trace(fmt.Sprintf("[RunSdsInfraWatcher] used nodes %v", lvgNodeNames))
+			log.Trace("used nodes", "nodes", lvgNodeNames)
 
-			log.Debug("[RunSdsInfraWatcher] tries to collect nodes used by LVMVolumeGroups")
+			log.Debug("tries to collect nodes used by LVMVolumeGroups")
 			usedNodes, missedNodes, err := getNodesByNames(ctx, cl, lvgNodeNames)
 			if err != nil {
-				log.Error(err, "[RunSdsInfraWatcher] unable to get nodes")
+				log.Error(err, "unable to get nodes")
 				continue
 			}
-			log.Debug("[RunSdsInfraWatcher] successfully collected nodes used by LVMVolumeGroups")
+			log.Debug("successfully collected nodes used by LVMVolumeGroups")
 
 			if len(missedNodes) > 0 {
-				log.Warning(fmt.Sprintf("[RunSdsInfraWatcher] some LVMVolumeGroups use missing nodes: %v. Turn those LVMVolumeGroups condition NodeReady to False", missedNodes))
+				log.Warning("some LVMVolumeGroups use missing nodes. Turn those LVMVolumeGroups condition NodeReady to False",
+					"missedNodes", missedNodes)
 				lvgsWithMissedNodes := findLVMVolumeGroupsByNodeNames(lvgs, missedNodes)
 				for _, lvg := range lvgsWithMissedNodes {
+					log := log.WithValues(
+						"lvgName", lvg.Name,
+						"conditionType", nodeReadyType)
 					err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, nodeReadyType, "MissingNode", "unable to find the used nodes")
 					if err != nil {
-						log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to add a condition to the LVMVolumeGroup %s", lvg.Name))
+						log.Error(err, "unable to add a condition to the LVMVolumeGroup")
 						continue
 					}
 
-					log.Info(fmt.Sprintf("[RunSdsInfraWatcher] successfully reconciled the LVMVolumeGroup %s phase and condition %s due to missing nodes", lvg.Name, nodeReadyType))
+					log.Info("successfully reconciled the LVMVolumeGroup phase and condition due to missing nodes")
 				}
 			} else {
-				log.Info("[RunSdsInfraWatcher] no missing nodes used by LVMVolumeGroups were found")
+				log.Info("no missing nodes used by LVMVolumeGroups were found")
 			}
 
-			log.Debug("[RunSdsInfraWatcher] check if every used node is Ready")
+			log.Debug("check if every used node is Ready")
 			notReadyNodes := getNotReadyNodes(usedNodes)
 			if len(notReadyNodes) > 0 {
-				log.Warning(fmt.Sprintf("[RunSdsInfraWatcher] some LVMVolumeGroup nodes are not Ready: %v. Turn those LVMVolumeGroups condition NodeReady to False", notReadyNodes))
+				log.Warning("some LVMVolumeGroup nodes are not Ready. Turn those LVMVolumeGroups condition NodeReady to False",
+					"notReadyNodes", notReadyNodes)
 				lvgsNotReady := findLVMVolumeGroupsByNodeNames(lvgs, notReadyNodes)
 				for _, lvg := range lvgsNotReady {
+					log := log.WithValues(
+						"lvgName", lvg.Name,
+						"conditionType", nodeReadyType)
 					err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, nodeReadyType, "NodeNotReady", "some of used nodes is not ready")
 					if err != nil {
-						log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to add a condition to the LVMVolumeGroup %s", lvg.Name))
+						log.Error(err, "unable to add a condition to the LVMVolumeGroup")
 						continue
 					}
 
-					log.Info(fmt.Sprintf("[RunSdsInfraWatcher] successfully reconciled the LVMVolumeGroup %s phase and condition %s due to nodes are not in a Running state", lvg.Name, nodeReadyType))
+					log.Info("successfully reconciled the LVMVolumeGroup phase and condition due to nodes are not in a Running state")
 				}
 			} else {
-				log.Info("[RunSdsInfraWatcher] every LVMVolumeGroup node is in a Running state")
+				log.Info("every LVMVolumeGroup node is in a Running state")
 			}
 
 			// Create a list of LVGs that are not in notReadyNodes and missedNodes
@@ -140,8 +150,11 @@ func RunSdsInfraWatcher(
 					firstName := lvg.Status.Nodes[0].Name
 					for _, node := range lvg.Status.Nodes[1:] {
 						if node.Name != firstName {
-							errMsg := fmt.Sprintf("[RunSdsInfraWatcher] found different node names in lvg.Status.Nodes for %s: %+v", lvg.Name, lvg.Status.Nodes)
-							log.Error(errors.New(errMsg), errMsg)
+							log.Error(
+								errors.New("found different node names in lvg.Status.Nodes"),
+								"found different node names in lvg.Status.Nodes",
+								"lvgName", lvg.Name,
+								"nodes", lvg.Status.Nodes)
 							multipleNodes = true
 						}
 					}
@@ -164,67 +177,79 @@ func RunSdsInfraWatcher(
 
 			// Update status for LVGs that are not in problem nodes
 			for _, lvg := range lvgsToUpdate {
-				log.Debug(fmt.Sprintf("[RunSdsInfraWatcher] tries to update the LVMVolumeGroup %s condition %s to True", lvg.Name, nodeReadyType))
+				log := log.WithValues(
+					"lvgName", lvg.Name,
+					"conditionType", nodeReadyType)
+				log.Debug("tries to update the LVMVolumeGroup condition to True")
 				err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, nodeReadyType, "NodesReady", "selected nodes were found in the cluster and have Ready state")
 				if err != nil {
-					log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to add a condition to the LVMVolumeGroup %s", lvg.Name))
+					log.Error(err, "unable to add a condition to the LVMVolumeGroup")
 					continue
 				}
-				log.Info(fmt.Sprintf("[RunSdsInfraWatcher] successfully reconciled the LVMVolumeGroup %s condition %s to status True", lvg.Name, nodeReadyType))
+				log.Info("successfully reconciled the LVMVolumeGroup condition to status True")
 			}
 
-			log.Info("[RunSdsInfraWatcher] check if every sds-node-configurator agent's pod is healthy")
-			log.Debug(fmt.Sprintf("[RunSdsInfraWatcher] tries to get pods by the selector %v", sdsNodeConfiguratorSelector))
+			log.Info("check if every sds-node-configurator agent's pod is healthy")
+			log.Debug("tries to get pods by the selector",
+				"selector", sdsNodeConfiguratorSelector)
 			sdsPods, err := getPodsBySelector(ctx, cl, sdsNodeConfiguratorSelector)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to get pods by the seletor %v", sdsNodeConfiguratorSelector))
+				log.Error(err, "unable to get pods by the selector",
+					"selector", sdsNodeConfiguratorSelector)
 				continue
 			}
-			log.Debug(fmt.Sprintf("[RunSdsInfraWatcher] successfully got pods by the selector %v", sdsNodeConfiguratorSelector))
+			log.Debug("successfully got pods by the selector",
+				"selector", sdsNodeConfiguratorSelector)
 
 			if len(sdsPods) == 0 {
-				log.Warning("[RunSdsInfraWatcher] no sds-node-configurator agent's pods found, update every LVMVolumeGroup condition AgentReady to False")
+				log.Warning("no sds-node-configurator agent's pods found, update every LVMVolumeGroup condition AgentReady to False")
 
 				for _, lvg := range lvgs {
-					log.Debug(fmt.Sprintf("[RunSdsInfraWatcher] tries to update the LVMVolumeGroup %s condition %s to status False due to a missing agent's pod", lvg.Name, agentReadyType))
+					log := log.WithValues(
+						"lvgName", lvg.Name,
+						"conditionType", agentReadyType)
+					log.Debug("tries to update the LVMVolumeGroup condition to status False due to a missing agent's pod")
 					err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, agentReadyType, "NoPod", "unable to find any agent's pod")
 					if err != nil {
-						log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to add a condition %s to the LVMVolumeGroup %s", agentReadyType, lvg.Name))
+						log.Error(err, "unable to add a condition to the LVMVolumeGroup")
 						continue
 					}
 
-					log.Info(fmt.Sprintf("[RunSdsInfraWatcher] successfully reconciled the LVMVolumeGroup %s phase and condition %s due to missing pods", lvg.Name, agentReadyType))
+					log.Info("successfully reconciled the LVMVolumeGroup phase and condition due to missing pods")
 				}
 
-				log.Info("[RunSdsInfraWatcher] successfully updated every LVMVolumeGroup status.phase to NotReady due to no sds-node-configurator agent's pods are running")
+				log.Info("successfully updated every LVMVolumeGroup status.phase to NotReady due to no sds-node-configurator agent's pods are running")
 				continue
 			}
 
-			log.Debug("[RunSdsInfraWatcher] sds-node-configurator agent's pods were found. Check if some pods are missing")
+			log.Debug("sds-node-configurator agent's pods were found. Check if some pods are missing")
 			for _, p := range sdsPods {
-				log.Trace(fmt.Sprintf("[RunSdsInfraWatcher] found a pod: %s", p.Name))
+				log.Trace("found a pod", "podName", p.Name)
 			}
 
 			unmanagedNodes := getNodeNamesWithoutAgent(usedNodes, sdsPods)
 			if len(unmanagedNodes) > 0 {
-				log.Warning("[RunSdsInfraWatcher] some LVMVolumeGroups are not managed due to corresponding sds-node-configurator agent's pods are not running. Turn such LVMVolumeGroups to NotReady phase")
-				log.Trace(fmt.Sprintf("[RunSdsInfraWatcher] nodes without the agent: %v", unmanagedNodes))
+				log.Warning("some LVMVolumeGroups are not managed due to corresponding sds-node-configurator agent's pods are not running. Turn such LVMVolumeGroups to NotReady phase")
+				log.Trace("nodes without the agent", "unmanagedNodes", unmanagedNodes)
 				lvgsWithoutPod := findLVMVolumeGroupsByNodeNames(lvgs, unmanagedNodes)
 				for _, lvg := range lvgsWithoutPod {
-					log.Debug(fmt.Sprintf("[RunSdsInfraWatcher] tries to add a condition %s status False due the LVMVolumeGroup %s node is not managed by a sds-node-configurator agent's pod", agentReadyType, lvg.Name))
+					log := log.WithValues(
+						"lvgName", lvg.Name,
+						"conditionType", agentReadyType)
+					log.Debug("tries to add a condition status False due the LVMVolumeGroup node is not managed by a sds-node-configurator agent's pod")
 					err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, agentReadyType, "PodNotFound", "unable to find an agent's pod")
 					if err != nil {
-						log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to add a condition to the LVMVolumeGroup %s", lvg.Name))
+						log.Error(err, "unable to add a condition to the LVMVolumeGroup")
 						continue
 					}
 
-					log.Info(fmt.Sprintf("[RunSdsInfraWatcher] successfully reconciled the LVMVolumeGroup %s condition %s due to missing pods", lvg.Name, agentReadyType))
+					log.Info("successfully reconciled the LVMVolumeGroup condition due to missing pods")
 				}
 			} else {
-				log.Info("[RunSdsInfraWatcher] no missing sds-node-configurator agent's pods were found")
+				log.Info("no missing sds-node-configurator agent's pods were found")
 			}
 
-			log.Debug("[RunSdsInfraWatcher] check if every agent's pod is in a Ready state")
+			log.Debug("check if every agent's pod is in a Ready state")
 			notReadyPods := getNotReadyPods(sdsPods)
 			if len(notReadyPods) > 0 {
 				podsNames := make([]string, 0, len(notReadyPods))
@@ -232,19 +257,23 @@ func RunSdsInfraWatcher(
 					podsNames = append(podsNames, name)
 				}
 
-				log.Warning(fmt.Sprintf("[RunSdsInfraWatcher] there is some sds-node-configurator agent's pods that is not Ready, pods: %s. Turn the LVMVolumeGroups condition AgentReady to False", strings.Join(podsNames, ",")))
+				log.Warning("there is some sds-node-configurator agent's pods that is not Ready. Turn the LVMVolumeGroups condition AgentReady to False", "pods", strings.Join(podsNames, ","))
 				nodeNames := getNodeNamesFromPods(notReadyPods)
-				log.Trace(fmt.Sprintf("[RunSdsInfraWatcher] node names with not Ready sds-node-configurator agent's pods: %v", nodeNames))
+				log.Trace("node names with not Ready sds-node-configurator agent's pods",
+					"nodeNames", nodeNames)
 				lvgsNotReady := findLVMVolumeGroupsByNodeNames(lvgs, nodeNames)
 				for _, lvg := range lvgsNotReady {
-					log.Warning(fmt.Sprintf("[RunSdsInfraWatcher] the LVMVolumeGroup %s is managed by not Ready pod, turns the condition %s to False", lvg.Name, agentReadyType))
+					log := log.WithValues(
+						"lvgName", lvg.Name,
+						"conditionType", agentReadyType)
+					log.Warning("the LVMVolumeGroup is managed by not Ready pod, turns the condition to False")
 					err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionFalse, agentReadyType, "PodNotReady", "the pod is not Ready")
 					if err != nil {
-						log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to add a condition to the LVMVolumeGroup %s", lvg.Name))
+						log.Error(err, "unable to add a condition to the LVMVolumeGroup")
 						continue
 					}
 
-					log.Info(fmt.Sprintf("[RunSdsInfraWatcher] successfully reconciled the LVMVolumeGroup %s phase and condition %s due to the pod is not Ready", lvg.Name, agentReadyType))
+					log.Info("successfully reconciled the LVMVolumeGroup phase and condition due to the pod is not Ready")
 				}
 			}
 
@@ -266,8 +295,11 @@ func RunSdsInfraWatcher(
 					firstName := lvg.Status.Nodes[0].Name
 					for _, node := range lvg.Status.Nodes[1:] {
 						if node.Name != firstName {
-							errMsg := fmt.Sprintf("[RunSdsInfraWatcher] found different node names in lvg.Status.Nodes for %s: %+v", lvg.Name, lvg.Status.Nodes)
-							log.Error(errors.New(errMsg), errMsg)
+							log.Error(
+								errors.New("found different node names in lvg.Status.Nodes"),
+								"found different node names in lvg.Status.Nodes",
+								"lvgName", lvg.Name,
+								"nodes", lvg.Status.Nodes)
 							multipleNodes = true
 						}
 					}
@@ -295,14 +327,15 @@ func RunSdsInfraWatcher(
 
 			// Update status for LVGs that have active pods
 			if len(lvgsWithActivePods) > 0 {
-				log.Info("[RunSdsInfraWatcher] found LVGs with active sds-node-configurator agent's pods")
+				log.Info("found LVGs with active sds-node-configurator agent's pods")
 				for _, lvg := range lvgsWithActivePods {
+					log := log.WithValues("lvgName", lvg.Name)
 					err = updateLVGConditionIfNeeded(ctx, cl, log, &lvg, metav1.ConditionTrue, agentReadyType, "PodReady", "pod is ready to manage the resource")
 					if err != nil {
-						log.Error(err, fmt.Sprintf("[RunSdsInfraWatcher] unable to add a condition to the LVMVolumeGroup %s", lvg.Name))
+						log.Error(err, "unable to add a condition to the LVMVolumeGroup")
 						continue
 					}
-					log.Info(fmt.Sprintf("[RunSdsInfraWatcher] successfully reconciled the LVMVolumeGroup %s", lvg.Name))
+					log.Info("successfully reconciled the LVMVolumeGroup")
 				}
 			}
 		}

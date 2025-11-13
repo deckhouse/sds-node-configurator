@@ -87,3 +87,11 @@ func (l Logger) Trace(message string, keysAndValues ...interface{}) {
 func (l Logger) Cache(message string, keysAndValues ...interface{}) {
 	l.log.V(cacheLvl).Info(fmt.Sprintf("CACHE %s", message), keysAndValues...)
 }
+
+func (l Logger) WithName(name string) Logger {
+	return Logger{log: l.log.WithName(name)}
+}
+
+func (l Logger) WithValues(keysAndValues ...interface{}) Logger {
+	return Logger{log: l.log.WithValues(keysAndValues...)}
+}

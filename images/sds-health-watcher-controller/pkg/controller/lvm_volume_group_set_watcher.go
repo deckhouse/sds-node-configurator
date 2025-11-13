@@ -58,64 +58,69 @@ func RunLVMVolumeGroupSetWatcher(
 	cfg config.Options,
 	metrics monitoring.Metrics,
 ) error {
+	log = log.WithName("RunLVMVolumeGroupSetWatcher")
 	cl := mgr.GetClient()
 
 	c, err := controller.New(LVMVolumeGroupSetCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-			log.Info(fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] tries to reconcile the request of the LVMVolumeGroupSet %s", request.Name))
+			log := log.WithName("Reconcile").WithValues("lvgSetName", request.Name)
+			log.Info("tries to reconcile the request of the LVMVolumeGroupSet")
 			lvgSet := &v1alpha1.LVMVolumeGroupSet{}
 			err := cl.Get(ctx, request.NamespacedName, lvgSet)
 			if err != nil {
 				if errors.IsNotFound(err) {
-					log.Warning(fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] seems like the LVMVolumeGroupSet %s has been deleted. Stop the reconcile", lvgSet.Name))
+					log.Warning("seems like the LVMVolumeGroupSet has been deleted. Stop the reconcile")
 					return reconcile.Result{}, nil
 				}
 
-				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] unable to get the LVMVolumeGroupSet %s", request.Name))
+				log.Error(err, "unable to get the LVMVolumeGroupSet")
 				return reconcile.Result{}, err
 			}
 
+			log = log.WithValues("lvgSetName", lvgSet.Name)
 			shouldRequeue, err := reconcileLVMVolumeGroupSet(ctx, cl, log, metrics, lvgSet)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] unable to reconcile the LVMVolumeGroupSet %s", lvgSet.Name))
+				log.Error(err, "unable to reconcile the LVMVolumeGroupSet")
 				return reconcile.Result{}, err
 			}
 
 			if shouldRequeue {
-				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] the LVMVolumeGroupSet %s request should be requeued in %s", lvgSet.Name, cfg.ScanIntervalSec.String()))
+				log.Warning("the LVMVolumeGroupSet request should be requeued", "requeueIn", cfg.ScanIntervalSec)
 				return reconcile.Result{RequeueAfter: cfg.ScanIntervalSec}, nil
 			}
 
-			log.Info(fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] successfully reconciled the request of the LVMVolumeGroupSet %s", request.Name))
+			log.Info("successfully reconciled the request of the LVMVolumeGroupSet")
 			return reconcile.Result{}, nil
 		}),
 	})
 	if err != nil {
-		log.Error(err, "[RunLVMVolumeGroupSetWatcher] unable to create the controller")
+		log.Error(err, "unable to create the controller")
 		return err
 	}
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LVMVolumeGroupSet{}, handler.TypedFuncs[*v1alpha1.LVMVolumeGroupSet, reconcile.Request]{
 		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LVMVolumeGroupSet], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log.Info(fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] createFunc got a create event for the LVMVolumeGroupSet, name: %s", e.Object.GetName()))
+			log := log.WithName("CreateFunc").WithValues("lvgSetName", e.Object.GetName())
+			log.Info("createFunc got a create event for the LVMVolumeGroupSet")
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 			q.Add(request)
-			log.Info(fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] createFunc added a request for the LVMVolumeGroupSet %s to the Reconcilers queue", e.Object.GetName()))
+			log.Info("createFunc added a request for the LVMVolumeGroupSet to the Reconcilers queue")
 		},
 		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LVMVolumeGroupSet], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log.Info(fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] UpdateFunc got a update event for the LVMVolumeGroupSet %s", e.ObjectNew.GetName()))
+			log := log.WithName("UpdateFunc").WithValues("lvgSetName", e.ObjectNew.GetName())
+			log.Info("UpdateFunc got an update event for the LVMVolumeGroupSet")
 			if !shouldLVGSetWatcherReconcileUpdateEvent(e.ObjectOld, e.ObjectNew) {
-				log.Info(fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] update event for the LVMVolumeGroupSet %s should not be reconciled as not target changed were made", e.ObjectNew.Name))
+				log.Info("update event for the LVMVolumeGroupSet should not be reconciled as not target changed were made")
 				return
 			}
 
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 			q.Add(request)
-			log.Info(fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] updateFunc added a request for the LVMVolumeGroupSet %s to the Reconcilers queue", e.ObjectNew.Name))
+			log.Info("updateFunc added a request for the LVMVolumeGroupSet to the Reconcilers queue")
 		},
 	}))
 	if err != nil {
-		log.Error(err, "[RunLVMVolumeGroupSetWatcher] the controller is unable to watch the LVMVolumeGroupSet resources")
+		log.Error(err, "the controller is unable to watch the LVMVolumeGroupSet resources")
 		return err
 	}
 
@@ -127,24 +132,25 @@ func shouldLVGSetWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alpha1.LVMVolumeG
 }
 
 func reconcileLVMVolumeGroupSet(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvgSet *v1alpha1.LVMVolumeGroupSet) (bool, error) {
-	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] starts the reconciliation of the LVMVolumeGroupSet %s", lvgSet.Name))
+	log = log.WithName("reconcileLVMVolumeGroupSet")
+	log.Debug("starts the reconciliation of the LVMVolumeGroupSet")
 	err := updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, v1alpha1.PhasePending, reasonWorkInProgress)
 	if err != nil {
 		return false, err
 	}
 
-	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] tries to get nodes by the LVMVolumeGroupSet %s nodeSelector", lvgSet.Name))
+	log.Debug("tries to get nodes by the LVMVolumeGroupSet nodeSelector")
 	nodes, err := GetNodes(ctx, cl, metrics, lvgSet.Spec.NodeSelector)
 	if err != nil {
 		return false, err
 	}
-	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] successfully got nodes by the LVMVolumeGroupSet %s nodeSelector", lvgSet.Name))
-	log.Trace(fmt.Sprintf("[reconcileLVMVolumeGroupSet] nodes: %+v", nodes))
+	log.Debug("successfully got nodes by the LVMVolumeGroupSet nodeSelector")
+	log.Trace("nodes", "nodes", nodes)
 
-	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] starts to validate the LVMVolumeGroupSet %s nodes", lvgSet.Name))
+	log.Debug("starts to validate the LVMVolumeGroupSet nodes")
 	valid, reason := validateLVMVolumeGroupSetNodes(nodes)
 	if !valid {
-		log.Warning(fmt.Sprintf("[reconcileLVMVolumeGroupSet] the LVMVolumeGroupSet %s nodes are invalid: %s", lvgSet.Name, reason))
+		log.Warning("the LVMVolumeGroupSet nodes are invalid", "reason", reason)
 		err = updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, phaseNotCreated, reason)
 		if err != nil {
 			return false, err
@@ -152,19 +158,19 @@ func reconcileLVMVolumeGroupSet(ctx context.Context, cl client.Client, log logge
 
 		return true, nil
 	}
-	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] the LVMVolumeGroupSet %s nodes are valid", lvgSet.Name))
+	log.Debug("the LVMVolumeGroupSet nodes are valid")
 
-	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] tries to provide LVMVolumeGroups by the LVMVolumeGroupSet %s", lvgSet.Name))
+	log.Debug("tries to provide LVMVolumeGroups by the LVMVolumeGroupSet")
 	err = provideLVMVolumeGroupsBySet(ctx, cl, log, metrics, lvgSet, nodes)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[reconcileLVMVolumeGroupSet] unable to provide LVMVolumeGroups by LVMVolumeGroupSet %s", lvgSet.Name))
+		log.Error(err, "unable to provide LVMVolumeGroups by LVMVolumeGroupSet")
 		updErr := updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, phaseNotCreated, err.Error())
 		if updErr != nil {
 			return false, updErr
 		}
 		return false, err
 	}
-	log.Debug(fmt.Sprintf("[reconcileLVMVolumeGroupSet] successfully provided LVMVolumeGroups by the LVMVolumeGroupSet %s", lvgSet.Name))
+	log.Debug("successfully provided LVMVolumeGroups by the LVMVolumeGroupSet")
 
 	err = updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, phaseCreated, "")
 	if err != nil {
@@ -175,16 +181,23 @@ func reconcileLVMVolumeGroupSet(ctx context.Context, cl client.Client, log logge
 }
 
 func provideLVMVolumeGroupsBySet(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvgSet *v1alpha1.LVMVolumeGroupSet, nodes map[string]v1.Node) error {
+	log = log.
+		WithName("provideLVMVolumeGroupsBySet").
+		WithValues(
+			"lvgSetName", lvgSet.Name,
+			"strategy", lvgSet.Spec.Strategy)
 	//nolint:gocritic
 	switch lvgSet.Spec.Strategy {
 	case strategyPerNode:
-		log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySet] the LVMVolumeGroupSet %s has strategy %s, tries to provide the LVMVolumeGroups", lvgSet.Name, strategyPerNode))
+		log.Debug("the LVMVolumeGroupSet has strategy, tries to provide the LVMVolumeGroups",
+			"strategy", strategyPerNode)
 		err := provideLVMVolumeGroupsPerNode(ctx, cl, log, metrics, lvgSet, nodes)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[provideLVMVolumeGroupsBySet] unable to provide LVMVolumeGroups by the LVMVolumeGroupSet %s with strategy %s", lvgSet.Name, strategyPerNode))
+			log.Error(err, "unable to provide LVMVolumeGroups by the LVMVolumeGroupSet with strategy")
 			return err
 		}
-		log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsBySet] successfully provided LVMVolumeGroups by the LVMVolumeGroupSet %s with strategy %s", lvgSet.Name, strategyPerNode))
+		log.Debug("successfully provided LVMVolumeGroups by the LVMVolumeGroupSet with strategy",
+			"strategy", strategyPerNode)
 	default:
 		return fmt.Errorf("LVMVolumeGroupSet %s strategy %s is not implemented", lvgSet.Name, lvgSet.Spec.Strategy)
 	}
@@ -193,44 +206,46 @@ func provideLVMVolumeGroupsBySet(ctx context.Context, cl client.Client, log logg
 }
 
 func provideLVMVolumeGroupsPerNode(ctx context.Context, cl client.Client, log logger.Logger, metrics monitoring.Metrics, lvgSet *v1alpha1.LVMVolumeGroupSet, nodes map[string]v1.Node) error {
-	log.Debug("[provideLVMVolumeGroupsPerNode] tries to get LVMVolumeGroups")
+	log = log.WithName("provideLVMVolumeGroupsPerNode")
+	log.Debug("tries to get LVMVolumeGroups")
 	currentLVGs, err := GetLVMVolumeGroups(ctx, cl, metrics)
 	if err != nil {
-		log.Error(err, "[provideLVMVolumeGroupsPerNode] unable to get LVMVolumeGroups")
+		log.Error(err, "unable to get LVMVolumeGroups")
 		return err
 	}
-	log.Debug("[provideLVMVolumeGroupsPerNode] successfully got LVMVolumeGroups")
-	log.Trace(fmt.Sprintf("[provideLVMVolumeGroupsPerNode] current LVMVolumeGroups: %+v", currentLVGs))
+	log.Debug("successfully got LVMVolumeGroups")
+	log.Trace("current LVMVolumeGroups", "currentLVGs", currentLVGs)
 
 	for _, node := range nodes {
 		configuredLVG := configureLVGBySet(lvgSet, node)
-		log.Trace(fmt.Sprintf("[provideLVMVolumeGroupsPerNode] configurated LVMVolumeGroup: %+v", configuredLVG))
+		log := log.WithValues("lvgName", configuredLVG.Name, "nodeName", node.Name)
+		log.Trace("configurated LVMVolumeGroup", "configuredLVG", configuredLVG)
 
 		currentLVG := matchConfiguredLVGWithExistingOne(configuredLVG, currentLVGs)
 		if currentLVG != nil {
-			log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsPerNode] tries to update the LVMVolumeGroup %s", currentLVG.Name))
+			log.Debug("tries to update the LVMVolumeGroup")
 			err = updateLVMVolumeGroupByConfiguredFromSet(ctx, cl, currentLVG, configuredLVG)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[provideLVMVolumeGroupsPerNode] unable to update the LVMVolumeGroup %s", currentLVG.Name))
+				log.Error(err, "unable to update the LVMVolumeGroup")
 				return err
 			}
-			log.Info(fmt.Sprintf("[provideLVMVolumeGroupsPerNode] LVMVolumeGroup %s has been successfully updated", currentLVG.Name))
+			log.Info("LVMVolumeGroup has been successfully updated")
 		} else {
-			log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsPerNode] tries to create the LVMVolumeGroup %s", configuredLVG.Name))
+			log.Debug("tries to create the LVMVolumeGroup")
 			err = createLVMVolumeGroup(ctx, cl, configuredLVG)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[provideLVMVolumeGroupsPerNode] unable to create the LVMVolumeGroup %s", configuredLVG.Name))
+				log.Error(err, "unable to create the LVMVolumeGroup")
 				return err
 			}
 
-			log.Info(fmt.Sprintf("[provideLVMVolumeGroupsPerNode] the LVMVolumeGroup %s has been created", configuredLVG.Name))
-			log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsPerNode] tries to update the LVMVolumeGroupSet %s status by the created LVMVolumeGroup %s", lvgSet.Name, configuredLVG.Name))
+			log.Info("the LVMVolumeGroup has been created")
+			log.Debug("tries to update the LVMVolumeGroupSet status by the created LVMVolumeGroup")
 			err = updateLVMVolumeGroupSetStatusByLVGIfNeeded(ctx, cl, log, lvgSet, configuredLVG, nodes)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[provideLVMVolumeGroupsPerNode] unable to update the LVMVolumeGroupSet %s", lvgSet.Name))
+				log.Error(err, "unable to update the LVMVolumeGroupSet")
 				return err
 			}
-			log.Debug(fmt.Sprintf("[provideLVMVolumeGroupsPerNode] successfully updated the LVMVolumeGroupSet %s status by the created LVMVolumeGroup %s", lvgSet.Name, configuredLVG.Name))
+			log.Debug("successfully updated the LVMVolumeGroupSet status by the created LVMVolumeGroup")
 		}
 	}
 
@@ -255,14 +270,15 @@ func updateLVMVolumeGroupByConfiguredFromSet(ctx context.Context, cl client.Clie
 }
 
 func updateLVMVolumeGroupSetStatusByLVGIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvgSet *v1alpha1.LVMVolumeGroupSet, lvg *v1alpha1.LVMVolumeGroup, nodes map[string]v1.Node) error {
+	log = log.WithName("updateLVMVolumeGroupSetStatusByLVGIfNeeded").WithValues("lvgSetName", lvgSet.Name, "lvgName", lvg.Name)
 	for _, createdLVG := range lvgSet.Status.CreatedLVGs {
 		if createdLVG.LVMVolumeGroupName == lvg.Name {
-			log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetStatusByLVGIfNeeded] no need to update the LVMVolumeGroupSet status %s by the LVMVolumeGroup %s", lvgSet.Name, lvg.Name))
+			log.Debug("no need to update the LVMVolumeGroupSet status by the LVMVolumeGroup")
 			return nil
 		}
 	}
 
-	log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetStatusByLVGIfNeeded] the LVMVolumeGroupSet status %s should be updated by the LVMVolumeGroup %s", lvgSet.Name, lvg.Name))
+	log.Debug("the LVMVolumeGroupSet status should be updated by the LVMVolumeGroup")
 	if cap(lvgSet.Status.CreatedLVGs) == 0 {
 		lvgSet.Status.CreatedLVGs = make([]v1alpha1.LVMVolumeGroupSetStatusLVG, 0, len(nodes))
 	}
@@ -331,22 +347,30 @@ func GetNodes(ctx context.Context, cl client.Client, metrics monitoring.Metrics,
 }
 
 func updateLVMVolumeGroupSetPhaseIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvgSet *v1alpha1.LVMVolumeGroupSet, phase, reason string) error {
-	log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetPhaseIfNeeded] tries to update the LVMVolumeGroupSet %s status phase to %s and reason to %s", lvgSet.Name, phase, reason))
+	log = log.
+		WithName("updateLVMVolumeGroupSetPhaseIfNeeded").
+		WithValues(
+			"lvgSetName", lvgSet.Name,
+			"phase", phase,
+			"reason", reason)
+	log.Debug("tries to update the LVMVolumeGroupSet status phase and reason")
 	if lvgSet.Status.Phase == phase && lvgSet.Status.Reason == reason {
-		log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetPhaseIfNeeded] no need to update phase or reason of the LVMVolumeGroupSet %s as they are same", lvgSet.Name))
+		log.Debug("no need to update phase or reason of the LVMVolumeGroupSet as they are same")
 		return nil
 	}
 
-	log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetPhaseIfNeeded] the LVMVolumeGroupSet %s status phase %s and reason %s should be updated to the phase %s and reason %s", lvgSet.Name, lvgSet.Status.Phase, lvgSet.Status.Reason, phase, reason))
+	log.Debug("the LVMVolumeGroupSet status phase and reason should be updated",
+		"currentPhase", lvgSet.Status.Phase,
+		"currentReason", lvgSet.Status.Reason)
 	lvgSet.Status.Phase = phase
 	lvgSet.Status.Reason = reason
 	err := cl.Status().Update(ctx, lvgSet)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[updateLVMVolumeGroupSetPhaseIfNeeded] unable to update the LVMVolumeGroupSet %s", lvgSet.Name))
+		log.Error(err, "unable to update the LVMVolumeGroupSet")
 		return err
 	}
 
-	log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetPhaseIfNeeded] successfully updated the LVMVolumeGroupSet %s to phase %s and reason %s", lvgSet.Name, phase, reason))
+	log.Debug("successfully updated the LVMVolumeGroupSet to phase and reason")
 	return nil
 }
 

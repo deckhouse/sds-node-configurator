@@ -61,33 +61,36 @@ type SingleMapping struct {
 }
 
 func ThinDump(ctx context.Context, log logger.Logger, tpool, tmeta, devID string) (superblock Superblock, err error) {
-	log.Trace(fmt.Sprintf("[ThinDump] calling for tpool %s tmeta %s devID %s", tpool, tmeta, devID))
+	log = log.WithName("ThinDump").WithValues("tpool", tpool, "tmeta", tmeta, "devID", devID)
 
 	var rawOut []byte
 	rawOut, err = ThinDumpRaw(ctx, log, tpool, tmeta, devID)
 	if err != nil {
+		log.Error(err, "Calling ThinDumpRaw")
 		return
 	}
 
-	log.Debug("[ThinDump] unmarshaling")
+	log.Debug("unmarshaling")
 	if err = xml.Unmarshal(rawOut, &superblock); err != nil {
-		log.Error(err, "[ThinDump] unmarshaling error")
+		log.Error(err, "unmarshaling error")
 		err = fmt.Errorf("parsing metadata: %w", err)
 		return
 	}
 
-	log.Trace(fmt.Sprintf("[ThinDump] unmarshaled: %v", superblock))
+	log.Trace("unmarshaled", "superblock", superblock)
 
 	return superblock, nil
 }
 
 func ThinVolumeUsedRanges(_ context.Context, log logger.Logger, superblock Superblock, deviceID LVMThinDeviceID) (blockRanges RangeCover, err error) {
-	log.Trace(fmt.Sprintf("[ThinVolumeUsedRanges] calling for deviceId %d", deviceID))
+	log = log.WithName("ThinVolumeUsedRanges").WithValues("deviceID", deviceID)
+	log.Trace("calling for deviceId")
 	for _, device := range superblock.Devices {
 		if device.DevID != deviceID {
 			continue
 		}
 
+		log := log.WithValues("devID", device.DevID)
 		blockRanges = make(RangeCover, 0, len(device.RangeMappings)+len(device.SingleMappings))
 
 		for _, mapping := range device.RangeMappings {
@@ -101,6 +104,7 @@ func ThinVolumeUsedRanges(_ context.Context, log logger.Logger, superblock Super
 		blockRanges, err = blockRanges.Merged()
 		if err != nil {
 			err = fmt.Errorf("finding used ranges: %w", err)
+			log.Error(err, "merging ranges")
 			return
 		}
 

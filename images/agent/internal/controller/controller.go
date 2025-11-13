@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"time"
 
@@ -75,7 +74,7 @@ func AddReconciler[T client.Object](
 		panic("T is not a struct pointer")
 	}
 
-	tname := t.Elem().Name()
+	typeName := t.Elem().Name()
 
 	c, err := controller.New(
 		reconciler.Name(),
@@ -102,34 +101,36 @@ func AddReconciler[T client.Object](
 					e event.TypedCreateEvent[T],
 					q workqueue.TypedRateLimitingInterface[reconcile.Request],
 				) {
+					objLog := log.WithName("CreateFunc").WithValues("type", typeName, "name", e.Object.GetName())
 					if !reconciler.ShouldReconcileCreate(e.Object) {
-						log.Debug(fmt.Sprintf("createFunc skipped a request for the %s %s to the Reconcilers queue", tname, e.Object.GetName()))
+						objLog.Debug("createFunc skipped a request to the Reconcilers queue")
 						return
 					}
 
-					log.Info(fmt.Sprintf("createFunc got a create event for the %s, name: %s", tname, e.Object.GetName()))
+					objLog.Info("createFunc got a create event")
 
 					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 					q.Add(request)
 
-					log.Info(fmt.Sprintf("createFunc added a request for the %s %s to the Reconcilers queue", tname, e.Object.GetName()))
+					objLog.Info("createFunc added a request to the Reconcilers queue")
 				},
 				UpdateFunc: func(
 					_ context.Context,
 					e event.TypedUpdateEvent[T],
 					q workqueue.TypedRateLimitingInterface[reconcile.Request],
 				) {
-					log.Info(fmt.Sprintf("UpdateFunc got a update event for the %s %s", tname, e.ObjectNew.GetName()))
+					objLog := log.WithName("UpdateFunc").WithValues("type", typeName, "name", e.ObjectNew.GetName())
+					objLog.Info("UpdateFunc got a update event")
 
 					if !reconciler.ShouldReconcileUpdate(e.ObjectOld, e.ObjectNew) {
-						log.Debug(fmt.Sprintf("updateFunc skipped a request for the %s %s to the Reconcilers queue", tname, e.ObjectNew.GetName()))
+						objLog.Debug("updateFunc skipped a request to the Reconcilers queue")
 						return
 					}
 
 					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 					q.Add(request)
 
-					log.Info(fmt.Sprintf("updateFunc added a request for the %s %s to the Reconcilers queue", tname, e.ObjectNew.GetName()))
+					objLog.Info("updateFunc added a request to the Reconcilers queue")
 				},
 			},
 		),
@@ -160,7 +161,8 @@ func AddDiscoverer(
 
 func makeDiscovererDispatcher(log logger.Logger, discoverer Discoverer) reconcile.Func {
 	return reconcile.Func(func(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-		log.Info(fmt.Sprintf("[DiscovererDispatcher] %s discoverer starts", discoverer.Name()))
+		log := log.WithName("DiscovererDispatcher").WithValues("discovererName", discoverer.Name())
+		log.Info("discoverer starts")
 
 		result, err := discoverer.Discover(ctx)
 
@@ -176,18 +178,19 @@ func makeReconcileDispatcher[T client.Object](
 	cl := mgr.GetClient()
 	return reconcile.Func(func(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 		// load object being reconciled
-		log.Info(fmt.Sprintf("[ReconcileDispatcher] Reconciler starts to reconcile the request %s", req.NamespacedName.String()))
+		log := log.WithName("ReconcileDispatcher").WithValues("namespacedName", req.NamespacedName)
+		log.Info("Reconciler starts to reconcile the request")
 
 		t := reflect.TypeFor[T]()
 		obj := reflect.New(t.Elem()).Interface().(T)
 
 		if err := cl.Get(ctx, req.NamespacedName, obj); err != nil {
 			if errors.IsNotFound(err) {
-				log.Warning(fmt.Sprintf("[ReconcileDispatcher] seems like the object was deleted as unable to get it, err: %s. Stop to reconcile", err.Error()))
+				log.Warning("seems like the object was deleted as unable to get it. Stop to reconcile", "error", err)
 				return reconcile.Result{}, nil
 			}
 
-			log.Error(err, fmt.Sprintf("[ReconcileDispatcher] unable to get an object by NamespacedName %s", req.NamespacedName.String()))
+			log.Error(err, "unable to get an object by NamespacedName")
 			return reconcile.Result{}, err
 		}
 

@@ -18,7 +18,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -73,6 +72,7 @@ func (lvgCl *LVGClient) UpdateLVGConditionIfNeeded(
 	status v1.ConditionStatus,
 	conType, reason, message string,
 ) error {
+	log := lvgCl.log.WithName("UpdateLVGConditionIfNeeded").WithValues("lvgName", lvg.Name, "conditionType", conType)
 	exist := false
 	index := 0
 	newCondition := v1.Condition{
@@ -85,38 +85,46 @@ func (lvgCl *LVGClient) UpdateLVGConditionIfNeeded(
 	}
 
 	if lvg.Status.Conditions == nil {
-		lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] the LVMVolumeGroup %s conditions is nil. Initialize them", lvg.Name))
+		log.Debug("the LVMVolumeGroup conditions is nil. Initialize them")
 		lvg.Status.Conditions = make([]v1.Condition, 0, 5)
 	}
 
 	if len(lvg.Status.Conditions) > 0 {
-		lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] there are some conditions in the LVMVolumeGroup %s. Tries to find a condition %s", lvg.Name, conType))
+		log.Debug("there are some conditions in the LVMVolumeGroup. Tries to find a condition")
 		for i, c := range lvg.Status.Conditions {
 			if c.Type == conType {
 				if checkIfEqualConditions(c, newCondition) {
-					lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no need to update condition %s in the LVMVolumeGroup %s as new and old condition states are the same", conType, lvg.Name))
+					log.Debug("no need to update condition as new and old condition states are the same")
 					return nil
 				}
 
 				index = i
 				exist = true
-				lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was found in the LVMVolumeGroup %s at the index %d", conType, lvg.Name, i))
+				log := log.WithValues("index", index)
+				log.Debug("a condition was found in the LVMVolumeGroup at the index")
 			}
 		}
 
 		if !exist {
-			lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was not found. Append it in the end of the LVMVolumeGroup %s conditions", conType, lvg.Name))
+			log.Debug("a condition was not found. Append it in the end of the LVMVolumeGroup conditions")
 			lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
 		} else {
-			lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] insert the condition %s status %s reason %s message %s at index %d of the LVMVolumeGroup %s conditions", conType, status, reason, message, index, lvg.Name))
+			log := log.WithValues("index", index)
+			log.Debug("insert the condition at index of the LVMVolumeGroup conditions",
+				"status", status,
+				"reason", reason,
+				"message", message)
 			lvg.Status.Conditions[index] = newCondition
 		}
 	} else {
-		lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no conditions were found in the LVMVolumeGroup %s. Append the condition %s in the end", lvg.Name, conType))
+		log.Debug("no conditions were found in the LVMVolumeGroup. Append the condition in the end")
 		lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
 	}
 
-	lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] tries to update the condition type %s status %s reason %s message %s of the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
+	log.Debug("tries to update the condition",
+		"status", status,
+		"reason", reason,
+		"message", message)
 	return lvgCl.cl.Status().Update(ctx, lvg)
 }
 
@@ -124,12 +132,13 @@ func (lvgCl *LVGClient) DeleteLVMVolumeGroup(
 	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
 ) error {
-	lvgCl.log.Debug(fmt.Sprintf(`[DeleteLVMVolumeGroup] Node "%s" does not belong to VG "%s". It will be removed from LVM resource, name "%s"'`, lvgCl.currentNodeName, lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
+	log := lvgCl.log.WithName("DeleteLVMVolumeGroup").WithValues("lvgName", lvg.Name, "nodeName", lvgCl.currentNodeName, "vgName", lvg.Spec.ActualVGNameOnTheNode)
+	log.Debug("Node does not belong to VG. It will be removed from LVM resource")
 	for i, node := range lvg.Status.Nodes {
 		if node.Name == lvgCl.currentNodeName {
 			// delete node
 			lvg.Status.Nodes = append(lvg.Status.Nodes[:i], lvg.Status.Nodes[i+1:]...)
-			lvgCl.log.Info(fmt.Sprintf(`[DeleteLVMVolumeGroup] deleted node "%s" from LVMVolumeGroup "%s"`, node.Name, lvg.Name))
+			log.Info("deleted node from LVMVolumeGroup", "deletedNodeName", node.Name)
 		}
 	}
 
@@ -143,7 +152,7 @@ func (lvgCl *LVGClient) DeleteLVMVolumeGroup(
 			lvgCl.metrics.APIMethodsErrors(lvgCl.controllerName, "delete").Inc()
 			return err
 		}
-		lvgCl.log.Info(fmt.Sprintf("[DeleteLVMVolumeGroup] the LVMVolumeGroup %s deleted", lvg.Name))
+		log.Info("the LVMVolumeGroup deleted")
 	}
 
 	return nil
