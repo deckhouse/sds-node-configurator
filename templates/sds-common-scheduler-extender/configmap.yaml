@@ -1,0 +1,23 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sds-common-scheduler-extender
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+data:
+  scheduler-extender-config.yaml: |-
+    listen: ":8099"
+    health-probe-bind-address: ":8081"
+    default-divisor: 1
+{{- if eq .Values.sdsNodeConfigurator.logLevel "ERROR" }}
+    log-level: "0"
+{{- else if eq .Values.sdsNodeConfigurator.logLevel "WARN" }}
+    log-level: "1"
+{{- else if eq .Values.sdsNodeConfigurator.logLevel "INFO" }}
+    log-level: "2"
+{{- else if eq .Values.sdsNodeConfigurator.logLevel "DEBUG" }}
+    log-level: "3"
+{{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
+    log-level: "4"
+{{- end }}

@@ -1,0 +1,118 @@
+{{- define "sds_common_scheduler_extender_resources" }}
+cpu: 10m
+memory: 25Mi
+{{- end }}
+
+{{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: sds-common-scheduler-extender
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+spec:
+  targetRef:
+    apiVersion: "apps/v1"
+    kind: Deployment
+    name: sds-common-scheduler-extender
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: sds-common-scheduler-extender
+      minAllowed:
+        {{- include "sds_common_scheduler_extender_resources" . | nindent 8 }}
+      maxAllowed:
+        memory: 40Mi
+        cpu: 20m
+{{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sds-common-scheduler-extender
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender" )) | nindent 2 }}
+spec:
+  minAvailable: {{ include "helm_lib_is_ha_to_value" (list . 1 0) }}
+  selector:
+    matchLabels:
+      app: sds-common-scheduler-extender
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sds-common-scheduler-extender
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender" )) | nindent 2 }}
+spec:
+  {{- include "helm_lib_deployment_strategy_and_replicas_for_ha" . | nindent 2 }}
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: sds-common-scheduler-extender
+  template:
+    metadata:
+      annotations:
+        checksum/ca: {{ .Values.sdsNodeConfigurator.internal.customSchedulerExtenderCert.ca | sha256sum | quote }}
+      labels:
+        app: sds-common-scheduler-extender
+    spec:
+      {{- include "helm_lib_priority_class" (tuple . "system-cluster-critical") | nindent 6 }}
+      {{- include "helm_lib_node_selector" (tuple . "system") | nindent 6 }}
+      {{- include "helm_lib_tolerations" (tuple . "system") | nindent 6 }}
+      {{- include "helm_lib_module_pod_security_context_run_as_user_nobody" . | nindent 6 }}
+      {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 6 }}
+      imagePullSecrets:
+        - name: {{ .Chart.Name }}-module-registry
+      containers:
+        - name: sds-common-scheduler-extender
+          {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
+          image: {{ include "helm_lib_module_image" (list . "sdsCommonSchedulerExtender") }}
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            failureThreshold: 8
+            httpGet:
+              path: /healthz
+              port: 8081
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+              scheme: HTTP
+            periodSeconds: 1
+            failureThreshold: 3
+          args:
+            - sds-common-scheduler-extender
+            - --config=/etc/sds-common-scheduler-extender/scheduler-extender-config.yaml
+          volumeMounts:
+          - name: scheduler-extender-config
+            mountPath: /etc/sds-common-scheduler-extender
+            readOnly: true
+          - name: scheduler-extender-certs
+            mountPath: /etc/sds-common-scheduler-extender/certs
+            readOnly: true
+          resources:
+            requests:
+              {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
+              {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+              {{- include "sds_common_scheduler_extender_resources" . | nindent 14 }}
+              {{- end }}
+          ports:
+           - containerPort: 8099
+             protocol: TCP
+             name: http
+      volumes:
+      - name: scheduler-extender-config
+        configMap:
+          defaultMode: 420
+          name: sds-common-scheduler-extender
+      - name: scheduler-extender-certs
+        secret:
+            secretName: common-scheduler-extender-https-certs
+      serviceAccountName: sds-common-scheduler-extender

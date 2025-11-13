@@ -1,0 +1,3 @@
+dirs:
+  - /etc/sds-common-scheduler-extender
+  - /etc/sds-common-scheduler-extender/certs
