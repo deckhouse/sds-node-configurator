@@ -87,15 +87,6 @@ var rootCmd = &cobra.Command{
 	Use:     "sds-common-scheduler-extender",
 	Version: "development",
 	Short:   "a scheduler-extender for sds modules",
-	Long: `A scheduler-extender for sds modules.
-The extender implements filter and prioritize verbs.
-The filter verb is "filter" and served at "/filter" via HTTP.
-It filters out nodes that have less storage capacity than requested.
-The prioritize verb is "prioritize" and served at "/prioritize" via HTTP.
-It scores nodes with this formula:
-    min(10, max(0, log2(capacity >> 30 / divisor)))
-The default divisor is 1.  It can be changed with a command-line option.
-`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		// to avoid printing usage information when error is returned
 		cmd.SilenceUsage = true
