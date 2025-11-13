@@ -50,13 +50,11 @@ func accessLogHandler(ctx context.Context, next http.Handler) http.Handler {
 		accessLogRW := &accessLogResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
 		next.ServeHTTP(accessLogRW, r)
-		status := accessLogRW.statusCode
 
 		fields := []interface{}{
-			"type", "access",
 			"response_time", time.Since(startTime).Seconds(),
 			"protocol", r.Proto,
-			"http_status_code", status,
+			"http_status_code", accessLogRW.statusCode,
 			"http_method", r.Method,
 			"url", r.RequestURI,
 			"http_host", r.Host,
@@ -71,6 +69,6 @@ func accessLogHandler(ctx context.Context, next http.Handler) http.Handler {
 		if len(ua) > 0 {
 			fields = append(fields, "http_user_agent", ua)
 		}
-		logger.Info("access", fields...)
+		logger.Info("[accessLogHandler] access", fields...)
 	})
 }
