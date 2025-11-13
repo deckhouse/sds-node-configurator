@@ -228,62 +228,67 @@ func (d *Discoverer) removeDeprecatedAPIDevices(
 }
 
 func (d *Discoverer) getBlockDeviceCandidates() ([]internal.BlockDeviceCandidate, error) {
+	log := d.log.WithName("getBlockDeviceCandidates")
 	var candidates []internal.BlockDeviceCandidate
 	devices, _ := d.sdsCache.GetDevices()
 	if len(devices) == 0 {
-		d.log.Debug("[GetBlockDeviceCandidates] no devices found, returns empty candidates")
+		log.Debug("no devices found, returns empty candidates")
 		return candidates, nil
 	}
 
 	filteredDevices, err := d.filterDevices(devices)
 	if err != nil {
-		d.log.Error(err, "[GetBlockDeviceCandidates] unable to filter devices")
+		log.Error(err, "unable to filter devices")
 		return nil, fmt.Errorf("filtering devices: %w", err)
 	}
 
 	if len(filteredDevices) == 0 {
-		d.log.Debug("[GetBlockDeviceCandidates] no filtered devices left, returns empty candidates")
+		log.Debug("no filtered devices left, returns empty candidates")
 		return candidates, nil
 	}
 
 	pvs, _ := d.sdsCache.GetPVs()
 	if len(pvs) == 0 {
-		d.log.Debug("[GetBlockDeviceCandidates] no PVs found")
+		log.Debug("no PVs found")
 	}
 
 	var delFlag bool
 	candidates = make([]internal.BlockDeviceCandidate, 0, len(filteredDevices))
 
 	for _, device := range filteredDevices {
-		d.log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Process device: %+v", device))
+		log := log.WithValues("device", device)
+		log.Trace("Processing device")
 		candidate := internal.NewBlockDeviceCandidateByDevice(&device, d.cfg.NodeName, d.cfg.MachineID)
 
-		d.log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Get following candidate: %+v", candidate))
+		log.Trace("Get candidate", "candidate", candidate)
 		candidateName := d.createCandidateName(candidate, devices)
 
 		if candidateName == "" {
-			d.log.Trace("[GetBlockDeviceCandidates] candidateName is empty. Skipping device")
+			log.Trace("candidateName is empty. Skipping device")
 			continue
 		}
 
 		candidate.Name = candidateName
-		d.log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] Generated a unique candidate name: %s", candidate.Name))
+		log.Trace("Generated a unique candidate name", "name", candidate.Name)
 
 		delFlag = false
 		for _, pv := range pvs {
 			if pv.PVName == device.Name {
-				d.log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] The device is a PV. Found PV name: %s", pv.PVName))
+				log := log.WithValues("pvName", pv.PVName)
+				log.Trace("The device is a PV")
 				if candidate.FSType == internal.LVMFSType {
 					hasTag, lvmVGName := utils.ReadValueFromTags(pv.VGTags, internal.LVMVolumeGroupTag)
 					if hasTag {
-						d.log.Debug(fmt.Sprintf("[GetBlockDeviceCandidates] PV %s of BlockDevice %s has tag, fill the VG information", pv.PVName, candidate.Name))
+						log.Debug("PV of BlockDevice has tag, fill the VG information")
 						candidate.PVUuid = pv.PVUuid
 						candidate.VGUuid = pv.VGUuid
 						candidate.ActualVGNameOnTheNode = pv.VGName
 						candidate.LVMVolumeGroupName = lvmVGName
 					} else {
 						if len(pv.VGName) != 0 {
-							d.log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] The device is a PV with VG named %s that lacks our tag %s. Removing it from Kubernetes", pv.VGName, internal.LVMTags[0]))
+							log.Trace("The device is a PV with VG that lacks our tag. Removing it from Kubernetes",
+								"vgName", pv.VGName,
+								"tags", internal.LVMTags)
 							delFlag = true
 						} else {
 							candidate.PVUuid = pv.PVUuid
@@ -292,11 +297,11 @@ func (d *Discoverer) getBlockDeviceCandidates() ([]internal.BlockDeviceCandidate
 				}
 			}
 		}
-		d.log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] delFlag: %t", delFlag))
 		if delFlag {
+			log.Trace("has delFlag. Skipping")
 			continue
 		}
-		d.log.Trace(fmt.Sprintf("[GetBlockDeviceCandidates] configured candidate %+v", candidate))
+		log.Trace("configured candidate")
 		candidates = append(candidates, candidate)
 	}
 

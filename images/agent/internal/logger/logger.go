@@ -62,6 +62,18 @@ func NewLoggerWrap(log logr.Logger) Logger {
 	return Logger{log: log}
 }
 
+// WithName creates a new Logger instance with an additional name component.
+// The name is used to identify the source of log messages.
+func (l Logger) WithName(name string) Logger {
+	return NewLoggerWrap(l.GetLogger().WithName(name))
+}
+
+// WithValues creates a new Logger instance with additional key-value pairs.
+// These key-value pairs will be included in all subsequent log messages from this logger.
+func (l Logger) WithValues(keysAndValues ...any) Logger {
+	return NewLoggerWrap(l.GetLogger().WithValues(keysAndValues...))
+}
+
 func (l Logger) GetLogger() logr.Logger {
 	return l.log
 }
