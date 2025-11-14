@@ -420,7 +420,7 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 			}
 
 			if !found {
-				log.Trace("Can't find wwn for device", "name")
+				log.Trace("Can't find wwn for device")
 			}
 		}
 	}
