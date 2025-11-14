@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-//go:generate go tool mockgen -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE
+//go:generate go tool mockgen -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE -copyright_file=../../../../hack/boilerplate.txt
 
 package utils
 
@@ -547,16 +547,17 @@ func (commands) UnmarshalDevices(out []byte) ([]internal.Device, error) {
 }
 
 func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, ctrlName string) error {
+	log = log.WithName("ReTag")
 	// thin pool
-	log.Debug("[ReTag] start re-tagging LV")
+	log.Debug("start re-tagging LV")
 	start := time.Now()
 	lvs, cmdStr, _, err := c.GetAllLVs(ctx)
 	metrics.UtilsCommandsDuration(ctrlName, "lvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.UtilsCommandsExecutionCount(ctrlName, "lvs").Inc()
-	log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+	log.Debug("exec cmd", "command", cmdStr)
 	if err != nil {
 		metrics.UtilsCommandsErrorsCount(ctrlName, "lvs").Inc()
-		log.Error(err, "[ReTag] unable to GetAllLVs")
+		log.Error(err, "unable to GetAllLVs")
 		return err
 	}
 
@@ -568,14 +569,15 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics monitor
 			}
 
 			if strings.Contains(tag, internal.LVMTags[1]) {
+				log := log.WithValues("lvName", lv.LVName, "vgName", lv.VGName, "tag", tag)
 				start = time.Now()
 				cmdStr, err = c.LVChangeDelTag(lv, tag)
 				metrics.UtilsCommandsDuration(ctrlName, "lvchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
 				metrics.UtilsCommandsExecutionCount(ctrlName, "lvchange").Inc()
-				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+				log.Debug("exec cmd", "command", cmdStr)
 				if err != nil {
 					metrics.UtilsCommandsErrorsCount(ctrlName, "lvchange").Inc()
-					log.Error(err, "[ReTag] unable to LVChangeDelTag")
+					log.Error(err, "unable to LVChangeDelTag")
 					return err
 				}
 
@@ -583,26 +585,26 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics monitor
 				cmdStr, err = c.VGChangeAddTag(lv.VGName, internal.LVMTags[0])
 				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
 				metrics.UtilsCommandsExecutionCount(ctrlName, "vgchange").Inc()
-				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+				log.Debug("exec cmd", "command", cmdStr)
 				if err != nil {
 					metrics.UtilsCommandsErrorsCount(ctrlName, "vgchange").Inc()
-					log.Error(err, "[ReTag] unable to VGChangeAddTag")
+					log.Error(err, "unable to VGChangeAddTag")
 					return err
 				}
 			}
 		}
 	}
-	log.Debug("[ReTag] end re-tagging LV")
+	log.Debug("end re-tagging LV")
 
-	log.Debug("[ReTag] start re-tagging LVM")
+	log.Debug("start re-tagging LVM")
 	start = time.Now()
 	vgs, cmdStr, _, err := c.GetAllVGs(ctx)
 	metrics.UtilsCommandsDuration(ctrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
 	metrics.UtilsCommandsExecutionCount(ctrlName, "vgs").Inc()
-	log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+	log.Debug("exec cmd", "command", cmdStr)
 	if err != nil {
 		metrics.UtilsCommandsErrorsCount(ctrlName, cmdStr).Inc()
-		log.Error(err, "[ReTag] unable to GetAllVGs")
+		log.Error(err, "unable to GetAllVGs")
 		return err
 	}
 
@@ -614,14 +616,15 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics monitor
 			}
 
 			if strings.Contains(tag, internal.LVMTags[1]) {
+				log := log.WithValues("vgName", vg.VGName, "tag", tag)
 				start = time.Now()
 				cmdStr, err = c.VGChangeDelTag(vg.VGName, tag)
 				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
 				metrics.UtilsCommandsExecutionCount(ctrlName, "vgchange").Inc()
-				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+				log.Debug("exec cmd", "command", cmdStr)
 				if err != nil {
 					metrics.UtilsCommandsErrorsCount(ctrlName, "vgchange").Inc()
-					log.Error(err, "[ReTag] unable to VGChangeDelTag")
+					log.Error(err, "unable to VGChangeDelTag")
 					return err
 				}
 
@@ -629,16 +632,16 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics monitor
 				cmdStr, err = c.VGChangeAddTag(vg.VGName, internal.LVMTags[0])
 				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
 				metrics.UtilsCommandsExecutionCount(ctrlName, "vgchange").Inc()
-				log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", cmdStr))
+				log.Debug("exec cmd", "command", cmdStr)
 				if err != nil {
 					metrics.UtilsCommandsErrorsCount(ctrlName, "vgchange").Inc()
-					log.Error(err, "[ReTag] unable to VGChangeAddTag")
+					log.Error(err, "unable to VGChangeAddTag")
 					return err
 				}
 			}
 		}
 	}
-	log.Debug("[ReTag] stop re-tagging LVM")
+	log.Debug("stop re-tagging LVM")
 
 	return nil
 }

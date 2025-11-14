@@ -105,38 +105,42 @@ func (r *Reconciler) Reconcile(
 	req controller.ReconcileRequest[*v1alpha1.LVMVolumeGroup],
 ) (controller.Result, error) {
 	lvg := req.Object
+	log := r.log.WithName("Reconcile")
+	if lvg != nil {
+		log = log.WithValues("lvgName", lvg.Name)
+	}
 
 	if !r.shouldLLVExtenderReconcileEvent(lvg) {
-		r.log.Info(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] no need to reconcile a request for the LVMVolumeGroup %s", lvg.Name))
+		log.Info("no need to reconcile a request for the LVMVolumeGroup")
 		return controller.Result{}, nil
 	}
 
 	shouldRequeue := r.ReconcileLVMLogicalVolumeExtension(ctx, lvg)
 	if shouldRequeue {
-		r.log.Warning(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] Reconciler needs a retry for the LVMVolumeGroup %s. Retry in %s", lvg.Name, r.cfg.VolumeGroupScanInterval.String()))
+		log.Warning("Reconciler needs a retry for the LVMVolumeGroup", "retryIn", r.cfg.VolumeGroupScanInterval)
 		return controller.Result{
 			RequeueAfter: r.cfg.VolumeGroupScanInterval,
 		}, nil
 	}
 
-	r.log.Info(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] successfully reconciled LVMLogicalVolumes for the LVMVolumeGroup %s", lvg.Name))
+	log.Info("successfully reconciled LVMLogicalVolumes for the LVMVolumeGroup")
 	return controller.Result{}, nil
 }
 
 func (r *Reconciler) shouldLLVExtenderReconcileEvent(newLVG *v1alpha1.LVMVolumeGroup) bool {
 	// for new LVMVolumeGroups
 	if reflect.DeepEqual(newLVG.Status, v1alpha1.LVMVolumeGroupStatus{}) {
-		r.log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as its Status is not initialized yet", newLVG.Name))
+		r.log.Debug("the LVMVolumeGroup should not be reconciled as its Status is not initialized yet", "lvgName", newLVG.Name)
 		return false
 	}
 
 	if !utils.LVGBelongsToNode(newLVG, r.cfg.NodeName) {
-		r.log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as it does not belong to the node %s", newLVG.Name, r.cfg.NodeName))
+		r.log.Debug("the LVMVolumeGroup should not be reconciled as it does not belong to the node", "lvgName", newLVG.Name, "nodeName", r.cfg.NodeName)
 		return false
 	}
 
 	if newLVG.Status.Phase != internal.PhaseReady {
-		r.log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as its Status.Phase is not Ready", newLVG.Name))
+		r.log.Debug("the LVMVolumeGroup should not be reconciled as its Status.Phase is not Ready", "lvgName", newLVG.Name)
 		return false
 	}
 
@@ -147,83 +151,89 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
 ) bool {
-	r.log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] tries to get LLV resources with percent size for the LVMVolumeGroup %s", lvg.Name))
+	log := r.log.WithName("ReconcileLVMLogicalVolumeExtension").WithValues("lvgName", lvg.Name)
+	log.Debug("tries to get LLV resources with percent size for the LVMVolumeGroup")
 	llvs, err := r.getAllLLVsWithPercentSize(ctx, lvg.Name)
 	if err != nil {
-		r.log.Error(err, "[ReconcileLVMLogicalVolumeExtension] unable to get LLV resources")
+		log.Error(err, "unable to get LLV resources")
 		return true
 	}
-	r.log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] successfully got LLV resources for the LVMVolumeGroup %s", lvg.Name))
+	log.Debug("successfully got LLV resources for the LVMVolumeGroup")
 
 	if len(llvs) == 0 {
-		r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] no LVMLogicalVolumes with percent size were found for the LVMVolumeGroup %s", lvg.Name))
+		log.Info("no LVMLogicalVolumes with percent size were found for the LVMVolumeGroup")
 		return false
 	}
 
 	shouldRetry := false
 	for _, llv := range llvs {
-		r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] starts to reconcile the LVMLogicalVolume %s", llv.Name))
+		log := log.WithValues("llvName", llv.Name)
+		log.Info("starts to reconcile the LVMLogicalVolume")
 		llvRequestedSize, err := utils.GetLLVRequestedSize(&llv, lvg)
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to get requested size of the LVMLogicalVolume %s", llv.Name))
+			log.Error(err, "unable to get requested size of the LVMLogicalVolume")
 			shouldRetry = true
 			continue
 		}
-		r.log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] successfully got the requested size of the LVMLogicalVolume %s, size: %s", llv.Name, llvRequestedSize.String()))
+		log.Debug("successfully got the requested size of the LVMLogicalVolume", "size", llvRequestedSize)
 
 		lv := r.sdsCache.FindLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 		if lv == nil {
 			err = fmt.Errorf("lv %s not found", llv.Spec.ActualLVNameOnTheNode)
-			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to find LV %s of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name))
+			log.Error(err, "unable to find LV of the LVMLogicalVolume", "lvName", llv.Spec.ActualLVNameOnTheNode)
 			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, err.Error())
 			if err != nil {
-				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
+				log.Error(err, "unable to update the LVMLogicalVolume")
 			}
 			shouldRetry = true
 			continue
 		}
 
 		if utils.AreSizesEqualWithinDelta(llvRequestedSize, lv.Data.LVSize, internal.ResizeDelta) {
-			r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] the LVMLogicalVolume %s should not be extended", llv.Name))
+			log.Info("the LVMLogicalVolume should not be extended")
 			continue
 		}
 
 		if llvRequestedSize.Value() < lv.Data.LVSize.Value() {
-			r.log.Warning(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] the LVMLogicalVolume %s requested size %s is less than actual one on the node %s", llv.Name, llvRequestedSize.String(), lv.Data.LVSize.String()))
+			log.Warning("the LVMLogicalVolume requested size is less than actual one on the node",
+				"requestedSize", llvRequestedSize,
+				"actualSize", lv.Data.LVSize)
 			continue
 		}
 
 		freeSpace := utils.GetFreeLVGSpaceForLLV(lvg, &llv)
 		if llvRequestedSize.Value()+internal.ResizeDelta.Value() > freeSpace.Value() {
 			err = errors.New("not enough space")
-			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to extend the LV %s of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name))
+			log.Error(err, "unable to extend the LV of the LVMLogicalVolume", "lvName", llv.Spec.ActualLVNameOnTheNode)
 			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
 			if err != nil {
-				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
+				log.Error(err, "unable to update the LVMLogicalVolume")
 				shouldRetry = true
 			}
 			continue
 		}
 
-		r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] the LVMLogicalVolume %s should be extended from %s to %s size", llv.Name, llv.Status.ActualSize.String(), llvRequestedSize.String()))
+		log.Info("the LVMLogicalVolume should be extended",
+			"fromSize", llv.Status.ActualSize,
+			"toSize", llvRequestedSize)
 		err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseResizing, "")
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
+			log.Error(err, "unable to update the LVMLogicalVolume")
 			shouldRetry = true
 			continue
 		}
 
 		cmd, err := r.commands.ExtendLV(llvRequestedSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to extend LV %s of the LVMLogicalVolume %s, cmd: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, cmd))
+			log.Error(err, "unable to extend LV of the LVMLogicalVolume", "lvName", llv.Spec.ActualLVNameOnTheNode, "cmd", cmd)
 			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
 			if err != nil {
-				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
+				log.Error(err, "unable to update the LVMLogicalVolume")
 			}
 			shouldRetry = true
 			continue
 		}
-		r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] the LVMLogicalVolume %s has been successfully extended", llv.Name))
+		log.Info("the LVMLogicalVolume has been successfully extended")
 
 		var (
 			maxAttempts     = 5
@@ -232,22 +242,22 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 		for currentAttempts < maxAttempts {
 			lv = r.sdsCache.FindLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 			if utils.AreSizesEqualWithinDelta(lv.Data.LVSize, llvRequestedSize, internal.ResizeDelta) {
-				r.log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] LV %s of the LVMLogicalVolume %s was successfully updated in the cache", lv.Data.LVName, llv.Name))
+				log.Debug("LV of the LVMLogicalVolume was successfully updated in the cache", "lvName", lv.Data.LVName)
 				break
 			}
 
-			r.log.Warning(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] LV %s size of the LVMLogicalVolume %s was not yet updated in the cache, retry...", lv.Data.LVName, llv.Name))
+			log.Warning("LV size of the LVMLogicalVolume was not yet updated in the cache, retry...", "lvName", lv.Data.LVName)
 			currentAttempts++
 			time.Sleep(1 * time.Second)
 		}
 
 		if currentAttempts == maxAttempts {
 			err = fmt.Errorf("LV %s is not updated in the cache", lv.Data.LVName)
-			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to resize the LVMLogicalVolume %s", llv.Name))
+			log.Error(err, "unable to resize the LVMLogicalVolume")
 			shouldRetry = true
 
 			if err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, err.Error()); err != nil {
-				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
+				log.Error(err, "unable to update the LVMLogicalVolume")
 			}
 			continue
 		}

@@ -72,35 +72,37 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Info(fmt.Sprintf("[main] Go Version:%s ", goruntime.Version()))
-	log.Info(fmt.Sprintf("[main] OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
+	mainLog := log.WithName("main")
 
-	log.Info(fmt.Sprintf("[main] Feature SnapshotsEnabled: %t", feature.SnapshotsEnabled()))
-	log.Info(fmt.Sprintf("[main] Feature VolumeCleanupEnabled: %t", feature.VolumeCleanupEnabled()))
+	mainLog.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
+	mainLog.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
-	log.Info("[main] CfgParams has been successfully created")
-	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.NodeName, cfgParams.NodeName))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.MachineID, cfgParams.MachineID))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.BlockDeviceScanInterval.String()))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ThrottleInterval, cfgParams.ThrottleInterval.String()))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDuration.String()))
+	mainLog.Info(fmt.Sprintf("Feature SnapshotsEnabled: %t", feature.SnapshotsEnabled()))
+	mainLog.Info(fmt.Sprintf("Feature VolumeCleanupEnabled: %t", feature.VolumeCleanupEnabled()))
+
+	mainLog.Info("CfgParams has been successfully created")
+	mainLog.Info(fmt.Sprintf("%s = %s", config.LogLevel, cfgParams.Loglevel))
+	mainLog.Info(fmt.Sprintf("%s = %s", config.NodeName, cfgParams.NodeName))
+	mainLog.Info(fmt.Sprintf("%s = %s", config.MachineID, cfgParams.MachineID))
+	mainLog.Info(fmt.Sprintf("%s = %s", config.ScanInterval, cfgParams.BlockDeviceScanInterval.String()))
+	mainLog.Info(fmt.Sprintf("%s = %s", config.ThrottleInterval, cfgParams.ThrottleInterval.String()))
+	mainLog.Info(fmt.Sprintf("%s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDuration.String()))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
-		log.Error(err, "[main] unable to KubernetesDefaultConfigCreate")
+		mainLog.Error(err, "unable to KubernetesDefaultConfigCreate")
 	}
-	log.Info("[main] kubernetes config has been successfully created.")
+	mainLog.Info("kubernetes config has been successfully created.")
 
 	scheme := runtime.NewScheme()
 	for _, f := range resourcesSchemeFuncs {
 		err := f(scheme)
 		if err != nil {
-			log.Error(err, "[main] unable to add scheme to func")
+			mainLog.Error(err, "unable to add scheme to func")
 			os.Exit(1)
 		}
 	}
-	log.Info("[main] successfully read scheme CR")
+	mainLog.Info("successfully read scheme CR")
 
 	managerOpts := manager.Options{
 		Scheme:                 scheme,
@@ -111,17 +113,17 @@ func main() {
 
 	mgr, err := manager.New(kConfig, managerOpts)
 	if err != nil {
-		log.Error(err, "[main] unable to manager.New")
+		mainLog.Error(err, "unable to manager.New")
 		os.Exit(1)
 	}
-	log.Info("[main] successfully created kubernetes manager")
+	mainLog.Info("successfully created kubernetes manager")
 
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 	commands := utils.NewCommands()
 
-	log.Info("[main] ReTag starts")
+	mainLog.Info("ReTag starts")
 	if err := commands.ReTag(ctx, log, metrics, bd.DiscovererName); err != nil {
-		log.Error(err, "[main] unable to run ReTag")
+		mainLog.Error(err, "unable to run ReTag")
 	}
 
 	sdsCache := cache.New()
@@ -142,7 +144,7 @@ func main() {
 		),
 	)
 	if err != nil {
-		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
+		mainLog.Error(err, "unable to controller.RunBlockDeviceController")
 		os.Exit(1)
 	}
 
@@ -162,7 +164,7 @@ func main() {
 		),
 	)
 	if err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupDiscoverController")
+		mainLog.Error(err, "unable to controller.RunLVMVolumeGroupDiscoverController")
 		os.Exit(1)
 	}
 
@@ -181,7 +183,7 @@ func main() {
 		),
 	)
 	if err != nil {
-		log.Error(err, "[main] unable to run BlockDeviceFilter controller")
+		mainLog.Error(err, "unable to run BlockDeviceFilter controller")
 		os.Exit(1)
 	}
 
@@ -202,7 +204,7 @@ func main() {
 		),
 	)
 	if err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
+		mainLog.Error(err, "unable to controller.RunLVMVolumeGroupWatcherController")
 		os.Exit(1)
 	}
 
@@ -215,7 +217,7 @@ func main() {
 			rediscoverBlockDevices,
 			rediscoverLVGs,
 		); err != nil {
-			log.Error(err, "[main] unable to run scanner")
+			mainLog.Error(err, "unable to run scanner")
 			os.Exit(1)
 		}
 	}()
@@ -238,7 +240,7 @@ func main() {
 		),
 	)
 	if err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
+		mainLog.Error(err, "unable to controller.RunLVMVolumeGroupWatcherController")
 		os.Exit(1)
 	}
 
@@ -258,29 +260,29 @@ func main() {
 		),
 	)
 	if err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMLogicalVolumeExtenderWatcherController")
+		mainLog.Error(err, "unable to controller.RunLVMLogicalVolumeExtenderWatcherController")
 		os.Exit(1)
 	}
 
 	addLLVSReconciler(mgr, log, metrics, sdsCache, commands, cfgParams)
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
+		mainLog.Error(err, "unable to mgr.AddHealthzCheck")
 		os.Exit(1)
 	}
-	log.Info("[main] successfully AddHealthzCheck")
+	mainLog.Info("successfully AddHealthzCheck")
 
 	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		log.Error(err, "[main] unable to mgr.AddReadyzCheck")
+		mainLog.Error(err, "unable to mgr.AddReadyzCheck")
 		os.Exit(1)
 	}
-	log.Info("[main] successfully AddReadyzCheck")
+	mainLog.Info("successfully AddReadyzCheck")
 
 	err = mgr.Start(ctx)
 	if err != nil {
-		log.Error(err, "[main] unable to mgr.Start")
+		mainLog.Error(err, "unable to mgr.Start")
 		os.Exit(1)
 	}
 
-	log.Info("[main] successfully starts the manager")
+	mainLog.Info("successfully starts the manager")
 }

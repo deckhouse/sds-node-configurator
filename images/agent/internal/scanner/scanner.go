@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/pilebones/go-udev/netlink"
@@ -62,16 +61,17 @@ func (s *scanner) Run(
 	bdCtrl func(context.Context) (controller.Result, error),
 	lvgDiscoverCtrl func(context.Context) (controller.Result, error),
 ) error {
-	log.Info("[RunScanner] starts the work")
+	log = log.WithName("RunScanner")
+	log.Info("starts the work")
 
 	t := throttler.New(cfg.ThrottleInterval)
 
 	conn := new(netlink.UEventConn)
 	if err := conn.Connect(netlink.UdevEvent); err != nil {
-		log.Error(err, "[RunScanner] Failed to connect to Netlink")
+		log.Error(err, "Failed to connect to Netlink")
 		return err
 	}
-	log.Debug("[RunScanner] system socket connection succeeded")
+	log.Debug("system socket connection succeeded")
 
 	errChan := make(chan error)
 	eventChan := make(chan netlink.UEvent)
@@ -86,7 +86,7 @@ func (s *scanner) Run(
 	}
 	quit := conn.Monitor(eventChan, errChan, matcher)
 
-	log.Info("[RunScanner] start to listen to events")
+	log.Info("start to listen to events")
 
 	duration := 1 * time.Second
 	timer := time.NewTimer(duration)
@@ -94,62 +94,64 @@ func (s *scanner) Run(
 		select {
 		case device, open := <-eventChan:
 			timer.Reset(duration)
-			log.Debug(fmt.Sprintf("[RunScanner] event triggered for device: %s", device.Env["DEVNAME"]))
-			log.Trace(fmt.Sprintf("[RunScanner] device from the event: %s", device.String()))
+			deviceName := device.Env["DEVNAME"]
+			log := log.WithValues("deviceName", deviceName)
+			log.Debug("event triggered for device")
+			log.Trace("device from the event", "device", device.String())
 			if !open {
 				err := errors.New("EventChan has been closed when monitor udev event")
-				log.Error(err, "[RunScanner] unable to read from the event channel")
+				log.Error(err, "unable to read from the event channel")
 				return err
 			}
 
 			t.Do(func() {
-				log.Info("[RunScanner] start to fill the cache")
+				log.Info("start to fill the cache")
 				err := s.fillTheCache(ctx, log, sdsCache, cfg)
 				if err != nil {
-					log.Error(err, "[RunScanner] unable to fill the cache. Retry")
+					log.Error(err, "unable to fill the cache. Retry")
 					go func() {
 						eventChan <- device
 					}()
 					return
 				}
-				log.Info("[RunScanner] successfully filled the cache")
+				log.Info("successfully filled the cache")
 
 				err = runControllersReconcile(ctx, log, bdCtrl, lvgDiscoverCtrl)
 				if err != nil {
-					log.Error(err, "[RunScanner] unable to run controllers reconciliations")
+					log.Error(err, "unable to run controllers reconciliations")
 				}
 
-				log.Info("[RunScanner] successfully ran the controllers reconcile funcs")
+				log.Info("successfully ran the controllers reconcile funcs")
 			})
 
 		case err := <-errChan:
-			log.Error(err, "[RunScanner] Monitor udev event error")
+			log.Error(err, "Monitor udev event error")
 			quit = conn.Monitor(eventChan, errChan, matcher)
 			timer.Reset(duration)
 			continue
 
 		case <-quit:
 			err := errors.New("receive quit signal when monitor udev event")
-			log.Error(err, "[RunScanner] unable to read from the event channel")
+			log.Error(err, "unable to read from the event channel")
 			return err
 
 		case <-timer.C:
-			log.Info("[RunScanner] events ran out. Start to fill the cache")
+			log.Info("events ran out. Start to fill the cache")
 			err := s.fillTheCache(ctx, log, sdsCache, cfg)
 			if err != nil {
-				log.Error(err, "[RunScanner] unable to fill the cache after all events passed. Retry")
+				log.Error(err, "unable to fill the cache after all events passed. Retry")
 				timer.Reset(duration)
 				continue
 			}
 
-			log.Info("[RunScanner] successfully filled the cache after all events passed")
+			log.Info("successfully filled the cache after all events passed")
 
 			err = runControllersReconcile(ctx, log, bdCtrl, lvgDiscoverCtrl)
 			if err != nil {
-				log.Error(err, "[RunScanner] unable to run controllers reconciliations")
+				log.Error(err, "unable to run controllers reconciliations")
 			}
 
-			log.Info("[RunScanner] successfully ran the controllers reconcile funcs")
+			log.Info("successfully ran the controllers reconcile funcs")
 		}
 	}
 }
@@ -160,97 +162,102 @@ func runControllersReconcile(
 	bdCtrl func(context.Context) (controller.Result, error),
 	lvgDiscoverCtrl func(context.Context) (controller.Result, error),
 ) error {
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s reconcile", bd.DiscovererName))
+	log = log.WithName("runControllersReconcile")
+	log = log.WithValues("discovererName", bd.DiscovererName)
+	log.Info("run reconcile")
 	bdRes, err := bdCtrl(ctx)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[runControllersReconcile] an error occurred while %s reconcile", bd.DiscovererName))
+		log.Error(err, "an error occurred while reconcile")
 		return err
 	}
 
 	if bdRes.RequeueAfter > 0 {
 		go func() {
 			for bdRes.RequeueAfter > 0 {
-				log.Warning(fmt.Sprintf("[runControllersReconcile] BlockDevices reconcile needs a retry in %s", bdRes.RequeueAfter.String()))
+				log.Warning("BlockDevices reconcile needs a retry", "retryIn", bdRes.RequeueAfter)
 				time.Sleep(bdRes.RequeueAfter)
 				bdRes, err = bdCtrl(ctx)
 			}
 
-			log.Info("[runControllersReconcile] successfully reconciled BlockDevices after a retry")
+			log.Info("successfully reconciled BlockDevices after a retry")
 		}()
 	}
 
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s successfully reconciled", bd.DiscovererName))
+	log.Info("run successfully reconciled")
 
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s reconcile", lvg.DiscovererName))
+	log = log.WithValues("discovererName", lvg.DiscovererName)
+	log.Info("run reconcile")
 	lvgRes, err := lvgDiscoverCtrl(ctx)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[runControllersReconcile] an error occurred while %s reconcile", lvg.DiscovererName))
+		log.Error(err, "an error occurred while reconcile")
 		return err
 	}
 	if lvgRes.RequeueAfter > 0 {
 		go func() {
 			for lvgRes.RequeueAfter > 0 {
-				log.Warning(fmt.Sprintf("[runControllersReconcile] LVMVolumeGroups reconcile needs a retry in %s", lvgRes.RequeueAfter.String()))
+				log.Warning("LVMVolumeGroups reconcile needs a retry", "retryIn", lvgRes.RequeueAfter)
 				time.Sleep(lvgRes.RequeueAfter)
 				lvgRes, err = lvgDiscoverCtrl(ctx)
 			}
 
-			log.Info("[runControllersReconcile] successfully reconciled LVMVolumeGroups after a retry")
+			log.Info("successfully reconciled LVMVolumeGroups after a retry")
 		}()
 	}
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s successfully reconciled", lvg.DiscovererName))
+	log.Info("run successfully reconciled")
 
 	return nil
 }
 
 func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Config) error {
+	log = log.WithName("fillTheCache")
 	// the scan operations order is very important as it guarantees the consistent and reliable data from the node
 	realClock := clock.RealClock{}
 	now := time.Now()
 	lvs, lvsErr, err := s.scanLVs(ctx, log, cfg)
-	log.Trace(fmt.Sprintf("[fillTheCache] LVS command runs for: %s", realClock.Since(now).String()))
+	log.Trace("LVS command runs", "duration", realClock.Since(now))
 	if err != nil {
 		return err
 	}
 
 	now = time.Now()
 	vgs, vgsErr, err := s.scanVGs(ctx, log, cfg)
-	log.Trace(fmt.Sprintf("[fillTheCache] VGS command runs for: %s", realClock.Since(now).String()))
+	log.Trace("VGS command runs", "duration", realClock.Since(now))
 	if err != nil {
 		return err
 	}
 
 	now = time.Now()
 	pvs, pvsErr, err := s.scanPVs(ctx, log, cfg)
-	log.Trace(fmt.Sprintf("[fillTheCache] PVS command runs for: %s", realClock.Since(now).String()))
+	log.Trace("PVS command runs", "duration", realClock.Since(now))
 	if err != nil {
 		return err
 	}
 
 	now = time.Now()
 	devices, devErr, err := s.scanDevices(ctx, log, cfg)
-	log.Trace(fmt.Sprintf("[fillTheCache] LSBLK command runs for: %s", realClock.Since(now).String()))
+	log.Trace("LSBLK command runs", "duration", realClock.Since(now))
 	if err != nil {
 		return err
 	}
 
-	log.Debug("[fillTheCache] successfully scanned entities. Starts to fill the cache")
+	log.Debug("successfully scanned entities. Starts to fill the cache")
 	cache.StoreDevices(devices, devErr)
 	cache.StorePVs(pvs, pvsErr)
 	cache.StoreVGs(vgs, vgsErr)
 	cache.StoreLVs(lvs, lvsErr)
-	log.Debug("[fillTheCache] successfully filled the cache")
+	log.Debug("successfully filled the cache")
 	cache.PrintTheCache(log)
 
 	return nil
 }
 
 func (s *scanner) scanDevices(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.Device, bytes.Buffer, error) {
+	log = log.WithName("ScanDevices")
 	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
 	defer cancel()
 	devices, cmdStr, stdErr, err := s.commands.GetBlockDevices(ctx)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[ScanDevices] unable to scan the devices, cmd: %s", cmdStr))
+		log.Error(err, "unable to scan the devices", "command", cmdStr)
 		return nil, stdErr, err
 	}
 
@@ -258,11 +265,12 @@ func (s *scanner) scanDevices(ctx context.Context, log logger.Logger, cfg config
 }
 
 func (s *scanner) scanPVs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.PVData, bytes.Buffer, error) {
+	log = log.WithName("ScanPVs")
 	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
 	defer cancel()
 	pvs, cmdStr, stdErr, err := s.commands.GetAllPVs(ctx)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[ScanPVs] unable to scan the PVs, cmd: %s", cmdStr))
+		log.Error(err, "unable to scan the PVs", "command", cmdStr)
 		return nil, stdErr, err
 	}
 
@@ -270,11 +278,12 @@ func (s *scanner) scanPVs(ctx context.Context, log logger.Logger, cfg config.Con
 }
 
 func (s *scanner) scanVGs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.VGData, bytes.Buffer, error) {
+	log = log.WithName("ScanVGs")
 	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
 	defer cancel()
 	vgs, cmdStr, stdErr, err := s.commands.GetAllVGs(ctx)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[ScanVGs] unable to scan the VGs, cmd: %s", cmdStr))
+		log.Error(err, "unable to scan the VGs", "command", cmdStr)
 		return nil, stdErr, err
 	}
 
@@ -282,11 +291,12 @@ func (s *scanner) scanVGs(ctx context.Context, log logger.Logger, cfg config.Con
 }
 
 func (s *scanner) scanLVs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.LVData, bytes.Buffer, error) {
+	log = log.WithName("ScanLVs")
 	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
 	defer cancel()
 	lvs, cmdStr, stdErr, err := s.commands.GetAllLVs(ctx)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[ScanLVs] unable to scan LVs, cmd: %s", cmdStr))
+		log.Error(err, "unable to scan LVs", "command", cmdStr)
 		return nil, stdErr, err
 	}
 

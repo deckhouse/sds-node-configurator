@@ -174,6 +174,11 @@ func GetLVMVolumeGroups(ctx context.Context, cl client.Client, metrics monitorin
 }
 
 func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, status metav1.ConditionStatus, conType, reason, message string) error {
+	log = log.
+		WithName("updateLVGConditionIfNeeded").
+		WithValues(
+			"lvgName", lvg.Name,
+			"conditionType", conType)
 	exist := false
 	index := 0
 	newCondition := metav1.Condition{
@@ -186,35 +191,37 @@ func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logge
 	}
 
 	if lvg.Status.Conditions == nil {
-		log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] the LVMVolumeGroup %s conditions is nil. Initialize them", lvg.Name))
+		log.Debug("the LVMVolumeGroup conditions is nil. Initialize them")
 		lvg.Status.Conditions = make([]metav1.Condition, 0, 2)
 	}
 
 	if len(lvg.Status.Conditions) > 0 {
-		log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] there are some conditions in the LVMVolumeGroup %s. Tries to find a condition %s", lvg.Name, conType))
+		log.Debug("there are some conditions in the LVMVolumeGroup. Tries to find a condition")
 		for i, c := range lvg.Status.Conditions {
 			if c.Type == conType {
-				log.Trace(fmt.Sprintf("[updateLVGConditionIfNeeded] old condition: %+v, new condition: %+v", c, newCondition))
+				log.Trace("old condition and new condition",
+					"oldCondition", c,
+					"newCondition", newCondition)
 				if checkIfEqualConditions(c, newCondition) {
-					log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no need to update condition %s in the LVMVolumeGroup %s as new and old condition states are the same", conType, lvg.Name))
+					log.Debug("no need to update condition in the LVMVolumeGroup as new and old condition states are the same")
 					return nil
 				}
 
 				index = i
 				exist = true
-				log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was found in the LVMVolumeGroup %s at the index %d", conType, lvg.Name, i))
+				log.Debug("a condition was found in the LVMVolumeGroup at the index", "index", i)
 			}
 		}
 
 		if !exist {
-			log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was not found. Append it in the end of the LVMVolumeGroup %s conditions", conType, lvg.Name))
+			log.Debug("a condition was not found. Append it in the end of the LVMVolumeGroup conditions")
 			lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
 		} else {
-			log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] insert the condition %s at index %d of the LVMVolumeGroup %s conditions", conType, index, lvg.Name))
+			log.Debug("insert the condition at index of the LVMVolumeGroup conditions", "index", index)
 			lvg.Status.Conditions[index] = newCondition
 		}
 	} else {
-		log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no conditions were found in the LVMVolumeGroup %s. Append the condition %s in the end", lvg.Name, conType))
+		log.Debug("no conditions were found in the LVMVolumeGroup. Append the condition in the end")
 		lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
 	}
 

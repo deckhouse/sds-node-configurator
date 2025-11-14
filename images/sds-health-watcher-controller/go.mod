@@ -6,7 +6,7 @@ require (
 	github.com/cloudflare/cfssl v1.6.5
 	github.com/deckhouse/sds-common-lib v0.5.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250114161813-c1a8b09cd47d
-	github.com/go-logr/logr v1.4.2
+	github.com/go-logr/logr v1.4.3
 	github.com/prometheus/client_golang v1.22.0
 	github.com/stretchr/testify v1.10.0
 	gopkg.in/yaml.v3 v3.0.1

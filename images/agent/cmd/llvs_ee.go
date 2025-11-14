@@ -30,12 +30,13 @@ func addLLVSReconciler(
 	commands utils.Commands,
 	cfgParams *config.Config,
 ) {
+	log = log.WithName("addLLVSReconciler")
 	if !feature.SnapshotsEnabled() {
-		log.Info("[addLLVSReconciler] Snapshot feature is disabled")
+		log.Info("Snapshot feature is disabled")
 		return
 	}
 
-	log.Info("[addLLVSReconciler] Snapshot feature is enabled. Adding LLVS reconciler")
+	log.Info("Snapshot feature is enabled. Adding LLVS reconciler")
 
 	err := controller.AddReconciler(
 		mgr,
@@ -55,7 +56,7 @@ func addLLVSReconciler(
 		),
 	)
 	if err != nil {
-		log.Error(err, "[main] unable to start llvs.NewReconciler")
+		log.Error(err, "unable to start llvs.NewReconciler")
 		os.Exit(1)
 	}
 }

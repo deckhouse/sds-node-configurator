@@ -5,7 +5,7 @@ go 1.24.9
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250130211935-b68366dfd0f8
 	github.com/deckhouse/sds-node-configurator/lib/go/common v0.0.0-00010101000000-000000000000
-	github.com/go-logr/logr v1.4.2
+	github.com/go-logr/logr v1.4.3
 	github.com/google/go-cmp v0.7.0
 	github.com/gosimple/slug v1.14.0
 	github.com/onsi/ginkgo/v2 v2.21.0

@@ -45,60 +45,66 @@ func RunLVGStatusWatcher(
 	mgr manager.Manager,
 	log logger.Logger,
 ) error {
+	log = log.WithName("RunLVGStatusWatcher")
 	cl := mgr.GetClient()
 
 	c, err := controller.New(LVGStatusWatcherCtrl, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-			log.Info(fmt.Sprintf("[RunLVGStatusWatcher] Reconciler got a request %s", request.String()))
+			log := log.WithName("Reconcile").WithValues("lvgName", request.Name)
+			log.Info("Reconciler got a request")
 
 			lvg := &v1alpha1.LVMVolumeGroup{}
 			err := cl.Get(ctx, request.NamespacedName, lvg)
 			if err != nil {
 				if errors2.IsNotFound(err) {
-					log.Warning(fmt.Sprintf("[RunLVGStatusWatcher] seems like the LVMVolumeGroup was deleted as it is unable to get it, err: %s. Stop to reconcile the resource", err.Error()))
+					log.Warning("seems like the LVMVolumeGroup was deleted as it is unable to get it. Stop to reconcile the resource",
+						"error", err)
 					return reconcile.Result{}, nil
 				}
-				log.Error(err, fmt.Sprintf("[RunLVGStatusWatcher] unable to get the LVMVolumeGroup %s", lvg.Name))
+				log.Error(err, "unable to get the LVMVolumeGroup")
 				return reconcile.Result{}, err
 			}
 
 			if lvg.Name == "" {
-				log.Info(fmt.Sprintf("[RunLVGStatusWatcher] seems like the LVMVolumeGroup for the request %s was deleted. Reconcile will stop.", request.Name))
+				log.Info("seems like the LVMVolumeGroup for the request was deleted. Reconcile will stop")
 				return reconcile.Result{}, nil
 			}
 
+			log = log.WithValues("lvgName", lvg.Name)
 			err = reconcileLVGStatus(ctx, cl, log, lvg)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVGStatusWatcher] unable to reconcile the LVMVolumeGroup %s", lvg.Name))
+				log.Error(err, "unable to reconcile the LVMVolumeGroup")
 				return reconcile.Result{}, err
 			}
 
-			log.Info(fmt.Sprintf("[RunLVGStatusWatcher] Reconciler successfully reconciled the LVMVolumeGroup %s", lvg.Name))
+			log.Info("Reconciler successfully reconciled the LVMVolumeGroup")
 			return reconcile.Result{}, nil
 		}),
 	})
 
 	if err != nil {
-		log.Error(err, "[RunLVGStatusWatcher] unable to create a controller")
+		log.Error(err, "unable to create a controller")
 		return err
 	}
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LVMVolumeGroup{}, handler.TypedFuncs[*v1alpha1.LVMVolumeGroup, reconcile.Request]{
 		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LVMVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log.Info(fmt.Sprintf("[RunLVGStatusWatcher] got a create event for the LVMVolumeGroup %s", e.Object.GetName()))
+			log := log.WithName("CreateFunc").WithValues("lvgName", e.Object.GetName())
+			log.Info("got a create event for the LVMVolumeGroup")
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 			q.Add(request)
-			log.Info(fmt.Sprintf("[RunLVGStatusWatcher] CreateFunc added a request for the LVMVolumeGroup %s to the Reconcilers queue", e.Object.GetName()))
+			log.Info("CreateFunc added a request for the LVMVolumeGroup to the Reconcilers queue")
 		},
 		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LVMVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log.Info(fmt.Sprintf("[RunLVGStatusWatcher] got an update event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
+			log := log.WithName("UpdateFunc").WithValues("lvgName", e.ObjectNew.GetName())
+			log.Info("got an update event for the LVMVolumeGroup")
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 			q.Add(request)
-			log.Info(fmt.Sprintf("[RunLVGStatusWatcher] UpdateFunc added a request for the LVMVolumeGroup %s to the Reconcilers queue", e.ObjectNew.GetName()))
+			log.Info("UpdateFunc added a request for the LVMVolumeGroup to the Reconcilers queue")
 		},
 	}))
 	if err != nil {
-		log.Error(err, "[RunLVGStatusWatcher] unable to watch the events")
+		log.Error(err, "unable to watch the events")
 		return err
 	}
 
@@ -106,14 +112,17 @@ func RunLVGStatusWatcher(
 }
 
 func reconcileLVGStatus(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup) error {
-	log.Debug(fmt.Sprintf("[reconcileLVGStatus] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
+	log = log.WithName("reconcileLVGStatus")
+	log.Debug("starts to reconcile the LVMVolumeGroup")
 	shouldUpdate := false
 
-	log.Debug(fmt.Sprintf("[reconcileLVGStatus] starts to check ThinPools Ready status for the LVMVolumeGroup %s", lvg.Name))
+	log.Debug("starts to check ThinPools Ready status for the LVMVolumeGroup")
 	totalTPCount := getUniqueThinPoolCount(lvg.Spec.ThinPools, lvg.Status.ThinPools)
 	actualTPCount := getActualThinPoolReadyCount(lvg.Status.ThinPools)
 	if totalTPCount > actualTPCount {
-		log.Warning(fmt.Sprintf("[reconcileLVGStatus] some ThinPools of the LVMVolumeGroup %s is not Ready", lvg.Name))
+		log.Warning("some ThinPools of the LVMVolumeGroup is not Ready",
+			"totalTPCount", totalTPCount,
+			"actualTPCount", actualTPCount)
 	}
 	tpReady := fmt.Sprintf("%d/%d", actualTPCount, totalTPCount)
 	if lvg.Status.ThinPoolReady != tpReady {

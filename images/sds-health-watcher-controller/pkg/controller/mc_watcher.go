@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/cloudflare/cfssl/log"
 	"k8s.io/apimachinery/pkg/types"
@@ -47,37 +46,47 @@ func RunMCWatcher(
 	mgr manager.Manager,
 	log logger.Logger,
 ) error {
+	log = log.WithName("RunMCWatcher")
 	cl := mgr.GetClient()
 
 	c, err := controller.New(MCWatcherCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-			log.Info(fmt.Sprintf("[RunMCWatcher] Reconciler got a request %s", request.String()))
+			log := log.
+				WithName("Reconcile").
+				WithValues("moduleConfigName", request.Name)
+			log.Info("Reconciler got a request")
 			checkMCThinPoolsEnabled(ctx, cl)
 			return reconcile.Result{}, nil
 		}),
 	})
 
 	if err != nil {
-		log.Error(err, "[RunMCWatcher] unable to create a controller")
+		log.Error(err, "unable to create a controller")
 		return err
 	}
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &d8commonapi.ModuleConfig{}, handler.TypedFuncs[*d8commonapi.ModuleConfig, reconcile.Request]{
 		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*d8commonapi.ModuleConfig], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log.Info(fmt.Sprintf("[RunMCWatcher] got a create event for the ModuleConfig %s", e.Object.GetName()))
+			log := log.
+				WithName("CreateFunc").
+				WithValues("moduleConfigName", e.Object.GetName())
+			log.Info("got a create event for the ModuleConfig")
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 			q.Add(request)
-			log.Info(fmt.Sprintf("[RunMCWatcher] added the ModuleConfig %s to the Reconcilers queue", e.Object.GetName()))
+			log.Info("added the ModuleConfig to the Reconcilers queue")
 		},
 		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*d8commonapi.ModuleConfig], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log.Info(fmt.Sprintf("[RunMCWatcher] got a update event for the ModuleConfig %s", e.ObjectNew.GetName()))
+			log := log.
+				WithName("UpdateFunc").
+				WithValues("moduleConfigName", e.ObjectNew.GetName())
+			log.Info("got an update event for the ModuleConfig")
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 			q.Add(request)
-			log.Info(fmt.Sprintf("[RunMCWatcher] added the ModuleConfig %s to the Reconcilers queue", e.ObjectNew.GetName()))
+			log.Info("added the ModuleConfig to the Reconcilers queue")
 		},
 	}))
 	if err != nil {
-		log.Error(err, "[RunMCWatcher] unable to watch the events")
+		log.Error(err, "unable to watch the events")
 		return err
 	}
 

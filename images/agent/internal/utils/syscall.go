@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-//go:generate go tool mockgen -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE
+//go:generate go tool mockgen -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE -copyright_file=../../../../hack/boilerplate.txt
 package utils
 
 import (

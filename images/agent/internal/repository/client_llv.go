@@ -18,7 +18,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -48,10 +47,11 @@ func (llvCl *LLVClient) UpdatePhaseIfNeeded(
 	phase string,
 	reason string,
 ) error {
+	log := llvCl.log.WithName("UpdatePhaseIfNeeded").WithValues("llvName", llv.Name)
 	if llv.Status != nil &&
 		llv.Status.Phase == phase &&
 		llv.Status.Reason == reason {
-		llvCl.log.Debug(fmt.Sprintf("[updateLVMLogicalVolumePhaseIfNeeded] no need to update the LVMLogicalVolume %s phase and reason", llv.Name))
+		log.Debug("no need to update the LVMLogicalVolume phase and reason")
 		return nil
 	}
 
@@ -62,13 +62,14 @@ func (llvCl *LLVClient) UpdatePhaseIfNeeded(
 	llv.Status.Phase = phase
 	llv.Status.Reason = reason
 
-	llvCl.log.Debug(fmt.Sprintf("[updateLVMLogicalVolumePhaseIfNeeded] tries to update the LVMLogicalVolume %s status with phase: %s, reason: %s", llv.Name, phase, reason))
+	log = log.WithValues("phase", phase, "reason", reason)
+	log.Debug("tries to update the LVMLogicalVolume status")
 	err := llvCl.cl.Status().Update(ctx, llv)
 	if err != nil {
 		return err
 	}
 
-	llvCl.log.Debug(fmt.Sprintf("[updateLVMLogicalVolumePhaseIfNeeded] updated LVMLogicalVolume %s status.phase to %s and reason to %s", llv.Name, phase, reason))
+	log.Debug("updated LVMLogicalVolume status")
 	return nil
 }
 
@@ -77,6 +78,7 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 	llv *v1alpha1.LVMLogicalVolume,
 	actualSize resource.Quantity,
 ) error {
+	log := llvCl.log.WithName("UpdatePhaseToCreatedIfNeeded").WithValues("llvName", llv.Name)
 	var contiguous *bool
 	if llv.Spec.Thick != nil && llv.Spec.Thick.Contiguous != nil {
 		if *llv.Spec.Thick.Contiguous {
@@ -90,7 +92,7 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 		llv.Status.Contiguous != contiguous
 
 	if !updateNeeded {
-		llvCl.log.Info(fmt.Sprintf("[UpdatePhaseToCreatedIfNeeded] no need to update the LVMLogicalVolume %s", llv.Name))
+		log.Info("no need to update the LVMLogicalVolume")
 		return nil
 	}
 
@@ -100,10 +102,10 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 	llv.Status.Contiguous = contiguous
 	err := llvCl.cl.Status().Update(ctx, llv)
 	if err != nil {
-		llvCl.log.Error(err, fmt.Sprintf("[UpdatePhaseToCreatedIfNeeded] unable to update the LVMLogicalVolume %s", llv.Name))
+		log.Error(err, "unable to update the LVMLogicalVolume")
 		return err
 	}
 
-	llvCl.log.Info(fmt.Sprintf("[UpdatePhaseToCreatedIfNeeded] the LVMLogicalVolume %s was successfully updated", llv.Name))
+	log.Info("the LVMLogicalVolume was successfully updated")
 	return nil
 }
