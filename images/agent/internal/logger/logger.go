@@ -17,7 +17,6 @@ limitations under the License.
 package logger
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/go-logr/logr"
@@ -79,21 +78,21 @@ func (l Logger) GetLogger() logr.Logger {
 }
 
 func (l Logger) Error(err error, message string, keysAndValues ...interface{}) {
-	l.log.Error(err, fmt.Sprintf("ERROR %s", message), keysAndValues...)
+	l.log.WithValues("level", "ERROR").Error(err, message, keysAndValues...)
 }
 
 func (l Logger) Warning(message string, keysAndValues ...interface{}) {
-	l.log.V(warnLvl).Info(fmt.Sprintf("WARNING %s", message), keysAndValues...)
+	l.log.V(warnLvl).WithValues("level", "WARNING").Info(message, keysAndValues...)
 }
 
 func (l Logger) Info(message string, keysAndValues ...interface{}) {
-	l.log.V(infoLvl).Info(fmt.Sprintf("INFO %s", message), keysAndValues...)
+	l.log.V(infoLvl).WithValues("level", "WARNING").Info(message, keysAndValues...)
 }
 
 func (l Logger) Debug(message string, keysAndValues ...interface{}) {
-	l.log.V(debugLvl).Info(fmt.Sprintf("DEBUG %s", message), keysAndValues...)
+	l.log.V(debugLvl).WithValues("level", "DEBUG").Info(message, keysAndValues...)
 }
 
 func (l Logger) Trace(message string, keysAndValues ...interface{}) {
-	l.log.V(traceLvl).Info(fmt.Sprintf("TRACE %s", message), keysAndValues...)
+	l.log.V(traceLvl).WithValues("level", "TRACE").Info(message, keysAndValues...)
 }
