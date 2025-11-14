@@ -86,7 +86,7 @@ func (l Logger) Warning(message string, keysAndValues ...interface{}) {
 }
 
 func (l Logger) Info(message string, keysAndValues ...interface{}) {
-	l.log.V(infoLvl).WithValues("level", "WARNING").Info(message, keysAndValues...)
+	l.log.V(infoLvl).WithValues("level", "INFO").Info(message, keysAndValues...)
 }
 
 func (l Logger) Debug(message string, keysAndValues ...interface{}) {
