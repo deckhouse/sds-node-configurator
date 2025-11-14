@@ -171,7 +171,9 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) (bool, error) {
 
 		device := candidate.AsAPIBlockDevice()
 		if !deviceMatchesSelector(&device) {
-			log.Debug("block device doesn't match labels and will not be created")
+			log.Debug("block device doesn't match labels and will not be created",
+				"selector", selector,
+				"deviceLabels", device.Labels)
 			continue
 		}
 
