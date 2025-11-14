@@ -40,7 +40,7 @@ import (
 func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	s.log.Debug("[filter] starts the serving")
 	var inputData ExtenderArgs
-	reader := http.MaxBytesReader(w, r.Body, 10<<20)
+	reader := http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
 	err := json.NewDecoder(reader).Decode(&inputData)
 	if err != nil {
 		s.log.Error(err, "[filter] unable to decode a request")
@@ -74,6 +74,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !shouldProcess {
+		// Then answer for a kube-scheduler may be an empty body with 200 (scheduler interprets this as no change). TODO: check this.
 		s.log.Debug(fmt.Sprintf("[filter] Pod %s/%s should not be processed. Return the same nodes", inputData.Pod.Namespace, inputData.Pod.Name))
 		filteredNodes := &ExtenderFilterResult{
 			NodeNames: &nodeNames,
