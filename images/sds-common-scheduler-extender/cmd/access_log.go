@@ -17,12 +17,11 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"net"
 	"net/http"
 	"time"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 )
 
 type accessLogResponseWriter struct {
@@ -42,14 +41,13 @@ func (w *accessLogResponseWriter) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
-func accessLogHandler(ctx context.Context, next http.Handler) http.Handler {
-	logger := log.FromContext(ctx)
+func accessLogHandler(log logger.Logger, schedulerHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		startTime := time.Now()
 
 		accessLogRW := &accessLogResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
-		next.ServeHTTP(accessLogRW, r)
+		schedulerHandler.ServeHTTP(accessLogRW, r)
 
 		fields := []interface{}{
 			"response_time", time.Since(startTime).Seconds(),
@@ -69,6 +67,6 @@ func accessLogHandler(ctx context.Context, next http.Handler) http.Handler {
 		if len(ua) > 0 {
 			fields = append(fields, "http_user_agent", ua)
 		}
-		logger.Info("[accessLogHandler] access", fields...)
+		log.Info("[accessLogHandler]", fields...)
 	})
 }

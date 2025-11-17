@@ -125,27 +125,30 @@ func subMain(ctx context.Context) error {
 
 	log, err := logger.NewLogger(logger.Verbosity(config.LogLevel))
 	if err != nil {
-		print(fmt.Sprintf("[subMain] unable to initialize logger, err: %s", err))
+		print(fmt.Sprintf("unable to initialize logger, err: %s", err))
 		return err
 	}
-	log.Info(fmt.Sprintf("[subMain] logger has been initialized, log level: %s", config.LogLevel))
+	mainLog := log.WithName("main")
+	mainLog.Info(fmt.Sprintf("logger has been initialized, log level: %s", config.LogLevel))
+
+	// Set the logger for the controller-runtime
 	ctrl.SetLogger(log.GetLogger())
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
-		log.Error(err, "[subMain] unable to KubernetesDefaultConfigCreate")
+		mainLog.Error(err, "unable to KubernetesDefaultConfigCreate")
 		return err
 	}
-	log.Info("[subMain] kubernetes config has been successfully created.")
+	mainLog.Info("kubernetes config has been successfully created.")
 
 	scheme := runtime.NewScheme()
 	for _, f := range resourcesSchemeFuncs {
 		if err := f(scheme); err != nil {
-			log.Error(err, "[subMain] unable to add scheme to func")
+			mainLog.Error(err, "unable to add scheme to func")
 			return err
 		}
 	}
-	log.Info("[subMain] successfully read scheme CR")
+	mainLog.Info("successfully read scheme CR")
 
 	managerOpts := manager.Options{
 		Scheme:                 scheme,
@@ -156,56 +159,56 @@ func subMain(ctx context.Context) error {
 
 	mgr, err := manager.New(kConfig, managerOpts)
 	if err != nil {
-		log.Error(err, "[subMain] unable to create manager for creating controllers")
+		mainLog.Error(err, "unable to create manager for creating controllers")
 		return err
 	}
 
-	schedulerCache := cache.NewCache(*log, config.PVCExpiredDurationSec)
-	log.Info("[subMain] scheduler cache was initialized")
+	schedulerCache := cache.NewCache(log, config.PVCExpiredDurationSec)
+	mainLog.Info("scheduler cache was initialized")
 
-	h, err := scheduler.NewHandler(ctx, mgr.GetClient(), *log, schedulerCache, config.DefaultDivisor)
+	schedulerHandler, err := scheduler.NewHandler(ctx, mgr.GetClient(), log, schedulerCache, config.DefaultDivisor)
 	if err != nil {
-		log.Error(err, "[subMain] unable to create http.Handler of the scheduler extender")
+		mainLog.Error(err, "unable to create http.Handler of the scheduler extender")
 		return err
 	}
-	log.Info("[subMain] scheduler handler initialized")
+	mainLog.Info("scheduler handler initialized")
 
-	if _, err = controller.RunLVGWatcherCacheController(mgr, *log, schedulerCache); err != nil {
-		log.Error(err, fmt.Sprintf("[subMain] unable to run %s controller", controller.LVGWatcherCacheCtrlName))
+	if _, err = controller.RunLVGWatcherCacheController(mgr, log, schedulerCache); err != nil {
+		mainLog.Error(err, fmt.Sprintf("unable to run %s controller", controller.LVGWatcherCacheCtrlName))
 		return err
 	}
-	log.Info(fmt.Sprintf("[subMain] successfully ran %s controller", controller.LVGWatcherCacheCtrlName))
+	mainLog.Info(fmt.Sprintf("successfully ran %s controller", controller.LVGWatcherCacheCtrlName))
 
-	if err = controller.RunPVCWatcherCacheController(mgr, *log, schedulerCache); err != nil {
-		log.Error(err, fmt.Sprintf("[subMain] unable to run %s controller", controller.PVCWatcherCacheCtrlName))
+	if err = controller.RunPVCWatcherCacheController(mgr, log, schedulerCache); err != nil {
+		mainLog.Error(err, fmt.Sprintf("unable to run %s controller", controller.PVCWatcherCacheCtrlName))
 		return err
 	}
-	log.Info(fmt.Sprintf("[subMain] successfully ran %s controller", controller.PVCWatcherCacheCtrlName))
+	mainLog.Info(fmt.Sprintf("successfully ran %s controller", controller.PVCWatcherCacheCtrlName))
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		log.Error(err, "[subMain] unable to mgr.AddHealthzCheck")
+		mainLog.Error(err, "unable to mgr.AddHealthzCheck")
 		return err
 	}
-	log.Info("[subMain] successfully AddHealthzCheck")
+	mainLog.Info("successfully AddHealthzCheck")
 
 	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		log.Error(err, "[subMain] unable to mgr.AddReadyzCheck")
+		mainLog.Error(err, "unable to mgr.AddReadyzCheck")
 		return err
 	}
-	log.Info("[subMain] successfully AddReadyzCheck")
+	mainLog.Info("successfully AddReadyzCheck")
 
 	serv := &http.Server{
 		Addr:         config.ListenAddr,
-		Handler:      accessLogHandler(ctx, h),
+		Handler:      accessLogHandler(log, schedulerHandler),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
-	log.Info("[subMain] server was initialized")
+	mainLog.Info("server was initialized")
 
 	return runServer(ctx, serv, mgr, log)
 }
 
-func runServer(ctx context.Context, serv *http.Server, mgr manager.Manager, log *logger.Logger) error {
+func runServer(ctx context.Context, serv *http.Server, mgr manager.Manager, log logger.Logger) error {
 	ctx, stop := context.WithCancel(ctx)
 
 	var wg sync.WaitGroup
