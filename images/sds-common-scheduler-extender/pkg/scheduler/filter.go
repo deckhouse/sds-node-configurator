@@ -74,7 +74,6 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !shouldProcess {
-		// Then answer for a kube-scheduler may be an empty body with 200 (scheduler interprets this as no change). TODO: check this.
 		s.log.Debug(fmt.Sprintf("[filter] Pod %s/%s should not be processed. Return the same nodes", inputData.Pod.Namespace, inputData.Pod.Name))
 		filteredNodes := &ExtenderFilterResult{
 			NodeNames: &nodeNames,
@@ -85,7 +84,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		err = json.NewEncoder(w).Encode(filteredNodes)
 		if err != nil {
 			s.log.Error(err, "[filter] unable to encode a response")
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 		return

@@ -84,7 +84,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		err = json.NewEncoder(w).Encode(nodeScores)
 		if err != nil {
 			s.log.Error(err, fmt.Sprintf("[prioritize] unable to encode a response for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
 	}
