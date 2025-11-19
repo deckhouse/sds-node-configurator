@@ -34,121 +34,143 @@ import (
 )
 
 func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
-	s.log.Debug("[prioritize] starts serving")
+	servingLog := s.log.WithName("prioritize")
+
+	servingLog.Debug("starts the serving the request")
+
 	var inputData ExtenderArgs
 	reader := http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
 	err := json.NewDecoder(reader).Decode(&inputData)
 	if err != nil {
-		s.log.Error(err, "[prioritize] unable to decode a request")
-		http.Error(w, "Bad Request.", http.StatusBadRequest)
+		servingLog.Error(err, "unable to decode a request")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	s.log.Trace(fmt.Sprintf("[prioritize] input data: %+v", inputData))
+	servingLog.Trace(fmt.Sprintf("input data: %+v", inputData))
 
 	if inputData.Pod == nil {
-		s.log.Error(errors.New("no pod in the request"), "[prioritize] unable to get a Pod from the request")
+		servingLog.Error(errors.New("no pod in the request"), "unable to get a Pod from the request")
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+
+	servingLog = servingLog.WithValues("Pod", fmt.Sprintf("%s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
 
 	nodeNames, err := getNodeNames(inputData)
 	if err != nil {
-		s.log.Error(err, "[prioritize] unable to get node names from the request")
+		servingLog.Error(err, "unable to get node names from the request")
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+	servingLog.Trace(fmt.Sprintf("NodeNames from the request: %+v", nodeNames))
 
-	s.log.Debug(fmt.Sprintf("[prioritize] starts the prioritizeing for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-	s.log.Trace(fmt.Sprintf("[prioritize] Pod from the request: %+v", inputData.Pod))
-	s.log.Trace(fmt.Sprintf("[prioritize] node names from the request: %v", nodeNames))
-
-	s.log.Debug(fmt.Sprintf("[prioritize] Find out if the Pod %s/%s should be processed", inputData.Pod.Namespace, inputData.Pod.Name))
-
-	// Check if the Pod should be processed
+	servingLog.Debug("Find out if the Pod should be processed")
 	targetProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
-	shouldProcess, err := shouldProcessPod(s.ctx, s.client, s.log, inputData.Pod, targetProvisioners)
+	shouldProcess, err := shouldProcessPod(s.ctx, s.client, servingLog, inputData.Pod, targetProvisioners)
 	if err != nil {
-		s.log.Error(err, "[prioritize] unable to check if the Pod should be processed")
-		http.Error(w, "bad request", http.StatusBadRequest)
+		servingLog.Error(err, "unable to check if the Pod should be processed")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	if !shouldProcess {
-		s.log.Debug(fmt.Sprintf("[prioritize] Pod %s/%s should not be processed. Return the same nodes with 0 score", inputData.Pod.Namespace, inputData.Pod.Name))
-		nodeScores := make([]HostPriority, 0, len(nodeNames))
-		for _, nodeName := range nodeNames {
-			nodeScores = append(nodeScores, HostPriority{
-				Host:  nodeName,
-				Score: 0,
-			})
-		}
-
-		s.log.Trace(fmt.Sprintf("[prioritize] node scores: %+v", nodeScores))
-		w.Header().Set("content-type", "application/json")
-		err = json.NewEncoder(w).Encode(nodeScores)
-		if err != nil {
-			s.log.Error(err, fmt.Sprintf("[prioritize] unable to encode a response for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+		servingLog.Debug("Pod should not be processed. Return the same nodes with 0 score")
+		if err := writeNodeScoresResponse(w, servingLog, nodeNames, 0); err != nil {
+			servingLog.Error(err, "unable to write node scores response")
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
 	}
-	s.log.Debug(fmt.Sprintf("[prioritize] Pod %s/%s should be processed", inputData.Pod.Namespace, inputData.Pod.Name))
+	servingLog.Debug("Pod should be processed")
 
-	pvcs, err := getUsedPVC(s.ctx, s.client, s.log, inputData.Pod)
+	pvcs, err := getUsedPVC(s.ctx, s.client, servingLog, inputData.Pod)
 	if err != nil {
-		s.log.Error(err, fmt.Sprintf("[prioritize] unable to get PVC from the Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+		servingLog.Error(err, "unable to get PVC from the Pod")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	if len(pvcs) == 0 {
-		s.log.Error(fmt.Errorf("no PVC was found for pod %s in namespace %s", inputData.Pod.Name, inputData.Pod.Namespace), fmt.Sprintf("[prioritize] unable to get used PVC for Pod %s", inputData.Pod.Name))
-		http.Error(w, "bad request", http.StatusBadRequest)
+		servingLog.Error(errors.New("no PVC was found"), "unable to get PVC from the Pod")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	for _, pvc := range pvcs {
-		s.log.Trace(fmt.Sprintf("[prioritize] Pod %s/%s uses PVC: %s", inputData.Pod.Namespace, inputData.Pod.Name, pvc.Name))
+		servingLog.Trace(fmt.Sprintf("Pod uses PVC: %s", pvc.Name))
 	}
 
 	scs, err := getStorageClassesUsedByPVCs(s.ctx, s.client, pvcs)
 	if err != nil {
-		s.log.Error(err, fmt.Sprintf("[prioritize] unable to get StorageClasses from the PVC for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-		http.Error(w, "bad request", http.StatusBadRequest)
+		servingLog.Error(err, "unable to get StorageClasses from the PVC")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	for _, sc := range scs {
-		s.log.Trace(fmt.Sprintf("[prioritize] Pod %s/%s uses Storage Class: %s", inputData.Pod.Namespace, inputData.Pod.Name, sc.Name))
+		servingLog.Trace(fmt.Sprintf("Pod uses StorageClass: %s", sc.Name))
 	}
-
-	managedPVCs := filterNotManagedPVC(s.log, pvcs, scs, targetProvisioners)
-	for _, pvc := range managedPVCs {
-		s.log.Trace(fmt.Sprintf("[prioritize] prioritizeed managed PVC %s/%s", pvc.Namespace, pvc.Name))
-	}
-
-	s.log.Debug(fmt.Sprintf("[prioritize] starts to extract pvcRequests size for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-	pvcRequests, err := extractRequestedSize(s.ctx, s.client, s.log, managedPVCs, scs)
-	if err != nil {
-		s.log.Error(err, fmt.Sprintf("[prioritize] unable to extract request size for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-		http.Error(w, "bad request", http.StatusBadRequest)
-	}
-	s.log.Debug(fmt.Sprintf("[prioritize] successfully extracted the pvcRequests size for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-
-	s.log.Debug(fmt.Sprintf("[prioritize] starts to score the nodes for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-	result, err := scoreNodes(s.log, s.cache, &nodeNames, managedPVCs, scs, pvcRequests, s.defaultDivisor)
-	if err != nil {
-		s.log.Error(err, fmt.Sprintf("[prioritize] unable to score nodes for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-		http.Error(w, "bad request", http.StatusBadRequest)
+	if len(scs) != len(pvcs) {
+		servingLog.Error(errors.New("number of StorageClasses does not match the number of PVCs"), "unable to get StorageClasses from the PVC")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	s.log.Debug(fmt.Sprintf("[prioritize] successfully scored the nodes for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+
+	managedPVCs := filterNotManagedPVC(servingLog, pvcs, scs, targetProvisioners)
+	for _, pvc := range managedPVCs {
+		servingLog.Trace(fmt.Sprintf("prioritizeed managed PVC %s/%s", pvc.Namespace, pvc.Name))
+	}
+	if len(managedPVCs) == 0 {
+		servingLog.Warning("Pod uses PVCs which are not managed by our modules. Return the same nodes with 0 score")
+		if err := writeNodeScoresResponse(w, servingLog, nodeNames, 0); err != nil {
+			servingLog.Error(err, "unable to write node scores response")
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	servingLog.Debug("starts to extract pvcRequests size for Pod")
+	pvcRequests, err := extractRequestedSize(s.ctx, s.client, servingLog, managedPVCs, scs)
+	if err != nil {
+		servingLog.Error(err, "unable to extract request size")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	servingLog.Debug("successfully extracted the pvcRequests size for Pod")
+
+	servingLog.Debug("starts to score the nodes for Pod")
+	result, err := scoreNodes(servingLog, s.cache, &nodeNames, managedPVCs, scs, pvcRequests, s.defaultDivisor)
+	if err != nil {
+		servingLog.Error(err, "unable to score nodes")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	servingLog.Debug("successfully scored the nodes for Pod")
 
 	w.Header().Set("content-type", "application/json")
 	err = json.NewEncoder(w).Encode(result)
 	if err != nil {
-		s.log.Error(err, fmt.Sprintf("[prioritize] unable to encode a response for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		servingLog.Error(err, "unable to encode a response for a Pod")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
 	}
-	s.log.Debug("[prioritize] ends serving")
+
+	servingLog.Debug("ends the serving the request")
 }
 
+func writeNodeScoresResponse(w http.ResponseWriter, log logger.Logger, nodeNames []string, score int) error {
+	scores := make([]HostPriority, 0, len(nodeNames))
+	for _, nodeName := range nodeNames {
+		scores = append(scores, HostPriority{
+			Host:  nodeName,
+			Score: score,
+		})
+	}
+	log.Trace(fmt.Sprintf("node scores: %+v", scores))
+
+	w.Header().Set("content-type", "application/json")
+	err := json.NewEncoder(w).Encode(scores)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 func scoreNodes(
 	log logger.Logger,
 	schedulerCache *cache.Cache,

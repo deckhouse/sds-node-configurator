@@ -40,7 +40,7 @@ import (
 func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	servingLog := s.log.WithName("filter")
 
-	servingLog.Debug("starts serving")
+	servingLog.Debug("starts the serving the request")
 
 	var inputData ExtenderArgs
 	reader := http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
@@ -86,18 +86,17 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	}
 	servingLog.Debug("Pod should be processed")
 
-	pvcs, err := getUsedPVC(s.ctx, s.client, s.log, inputData.Pod)
+	pvcs, err := getUsedPVC(s.ctx, s.client, servingLog, inputData.Pod)
 	if err != nil {
-		servingLog.Error(err, "unable to get used PVC for a Pod in the namespace")
+		servingLog.Error(err, "unable to get PVC from the Pod")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	if len(pvcs) == 0 {
-		servingLog.Error(errors.New("no PVC was found"), "unable to get used PVC for a Pod in the namespace")
+		servingLog.Error(errors.New("no PVC was found"), "unable to get PVC from the Pod")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-
 	for _, pvc := range pvcs {
 		servingLog.Trace(fmt.Sprintf("Pod uses PVC: %s", pvc.Name))
 
@@ -121,12 +120,12 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		servingLog.Trace(fmt.Sprintf("Pod uses StorageClass: %s", sc.Name))
 	}
 	if len(scs) != len(pvcs) {
-		servingLog.Error(errors.New("no PVC was found"), "unable to get used PVC for a Pod in the namespace")
+		servingLog.Error(errors.New("number of StorageClasses does not match the number of PVCs"), "unable to get StorageClasses from the PVC")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	managedPVCs := filterNotManagedPVC(s.log, pvcs, scs, targetProvisioners)
+	managedPVCs := filterNotManagedPVC(servingLog, pvcs, scs, targetProvisioners)
 	for _, pvc := range managedPVCs {
 		servingLog.Trace(fmt.Sprintf("filtered managed PVC %s/%s", pvc.Namespace, pvc.Name))
 	}
@@ -170,11 +169,14 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	servingLog.Cache("cache after the PVC reservation")
 	s.cache.PrintTheCacheLog()
 
-	if err := writeNodeNamesResponse(w, servingLog, *filteredNodes.NodeNames); err != nil {
-		servingLog.Error(err, "unable to write node names response")
+	w.Header().Set("content-type", "application/json")
+	err = json.NewEncoder(w).Encode(filteredNodes)
+	if err != nil {
+		servingLog.Error(err, "unable to encode a response for a Pod")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+
 	servingLog.Debug("ends the serving the request")
 }
 
