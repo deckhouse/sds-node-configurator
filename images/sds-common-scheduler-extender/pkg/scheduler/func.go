@@ -22,7 +22,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	v1 "k8s.io/api/storage/v1"
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -175,19 +174,19 @@ func filterNotManagedPVC(log logger.Logger, pvcs map[string]*corev1.PersistentVo
 }
 
 // Get all StorageClasses used by the PVCs
-func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map[string]*corev1.PersistentVolumeClaim) (map[string]*v1.StorageClass, error) {
-	scs := &v1.StorageClassList{}
+func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map[string]*corev1.PersistentVolumeClaim) (map[string]*storagev1.StorageClass, error) {
+	scs := &storagev1.StorageClassList{}
 	err := cl.List(ctx, scs)
 	if err != nil {
 		return nil, err
 	}
 
-	scMap := make(map[string]v1.StorageClass, len(scs.Items))
+	scMap := make(map[string]storagev1.StorageClass, len(scs.Items))
 	for _, sc := range scs.Items {
 		scMap[sc.Name] = sc
 	}
 
-	result := make(map[string]*v1.StorageClass, len(pvcs))
+	result := make(map[string]*storagev1.StorageClass, len(pvcs))
 	for _, pvc := range pvcs {
 		if pvc.Spec.StorageClassName == nil {
 			err = fmt.Errorf("no StorageClass specified for PVC %s", pvc.Name)
