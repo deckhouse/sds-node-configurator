@@ -38,158 +38,157 @@ import (
 )
 
 func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
-	s.log.Debug("[filter] starts the serving")
+	servingLog := s.log.WithName("filter")
+
+	servingLog.Debug("starts serving")
+
 	var inputData ExtenderArgs
 	reader := http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
 	err := json.NewDecoder(reader).Decode(&inputData)
 	if err != nil {
-		s.log.Error(err, "[filter] unable to decode a request")
-		http.Error(w, "bad request", http.StatusBadRequest)
+		servingLog.Error(err, "unable to decode a request")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	s.log.Trace(fmt.Sprintf("[filter] input data: %+v", inputData))
+	servingLog.Trace(fmt.Sprintf("input data: %+v", inputData))
 
 	if inputData.Pod == nil {
-		s.log.Error(errors.New("no pod in the request"), "[filter] unable to get a Pod from the request")
+		servingLog.Error(errors.New("no pod in the request"), "unable to get a Pod from the request")
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+
+	servingLog = servingLog.WithValues("Pod", fmt.Sprintf("%s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
 
 	nodeNames, err := getNodeNames(inputData)
 	if err != nil {
-		s.log.Error(err, "[filter] unable to get node names from the request")
+		servingLog.Error(err, "unable to get node names from the request")
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+	servingLog.Trace(fmt.Sprintf("NodeNames from the request: %+v", nodeNames))
 
-	s.log.Debug(fmt.Sprintf("[filter] starts the filtering for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-	s.log.Trace(fmt.Sprintf("[filter] Pod from the request: %+v", inputData.Pod))
-	s.log.Trace(fmt.Sprintf("[filter] Node names from the request: %+v", nodeNames))
-
-	s.log.Debug(fmt.Sprintf("[filter] Find out if the Pod %s/%s should be processed", inputData.Pod.Namespace, inputData.Pod.Name))
-	shouldProcess, err := shouldProcessPod(s.ctx, s.client, s.log, inputData.Pod, consts.SdsLocalVolumeProvisioner)
+	servingLog.Debug("Find out if the Pod should be processed")
+	targetProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
+	shouldProcess, err := shouldProcessPod(s.ctx, s.client, servingLog, inputData.Pod, targetProvisioners)
 	if err != nil {
-		s.log.Error(err, "[filter] unable to check if the Pod should be processed")
-		http.Error(w, "bad request", http.StatusBadRequest)
+		servingLog.Error(err, "unable to check if the Pod should be processed")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	if !shouldProcess {
-		s.log.Debug(fmt.Sprintf("[filter] Pod %s/%s should not be processed. Return the same nodes", inputData.Pod.Namespace, inputData.Pod.Name))
-		filteredNodes := &ExtenderFilterResult{
-			NodeNames: &nodeNames,
-		}
-		s.log.Trace(fmt.Sprintf("[filter] filtered nodes: %+v", filteredNodes))
-
-		w.Header().Set("content-type", "application/json")
-		err = json.NewEncoder(w).Encode(filteredNodes)
-		if err != nil {
-			s.log.Error(err, "[filter] unable to encode a response")
+		servingLog.Debug("Pod should not be processed. Return the same nodes")
+		if err := writeNodeNamesResponse(w, servingLog, nodeNames); err != nil {
+			servingLog.Error(err, "unable to write node names response")
 			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
 		}
 		return
 	}
-	s.log.Debug(fmt.Sprintf("[filter] Pod %s/%s should be processed", inputData.Pod.Namespace, inputData.Pod.Name))
+	servingLog.Debug("Pod should be processed")
 
 	pvcs, err := getUsedPVC(s.ctx, s.client, s.log, inputData.Pod)
 	if err != nil {
-		s.log.Error(err, fmt.Sprintf("[filter] unable to get used PVC for a Pod %s in the namespace %s", inputData.Pod.Name, inputData.Pod.Namespace))
+		servingLog.Error(err, "unable to get used PVC for a Pod in the namespace")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	if len(pvcs) == 0 {
-		s.log.Error(fmt.Errorf("no PVC was found for pod %s in namespace %s", inputData.Pod.Name, inputData.Pod.Namespace), fmt.Sprintf("[filter] unable to get used PVC for Pod %s", inputData.Pod.Name))
-		http.Error(w, "bad request", http.StatusBadRequest)
+		servingLog.Error(errors.New("no PVC was found"), "unable to get used PVC for a Pod in the namespace")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	for _, pvc := range pvcs {
-		s.log.Trace(fmt.Sprintf("[filter] Pod %s/%s uses PVC: %s", inputData.Pod.Namespace, inputData.Pod.Name, pvc.Name))
+		servingLog.Trace(fmt.Sprintf("Pod uses PVC: %s", pvc.Name))
 
 		// this might happen when the extender-scheduler recovers after failure, populates the cache with PVC-watcher controller and then
 		// the kube scheduler post a request to schedule the pod with the PVC.
 		if s.cache.CheckIsPVCStored(pvc) {
-			s.log.Debug(fmt.Sprintf("[filter] PVC %s/%s has been already stored in the cache. Old state will be removed from the cache", pvc.Namespace, pvc.Name))
+			servingLog.Debug(fmt.Sprintf("PVC %s/%s has been already stored in the cache. Old state will be removed from the cache", pvc.Namespace, pvc.Name))
 			s.cache.RemovePVCFromTheCache(pvc)
 		} else {
-			s.log.Debug(fmt.Sprintf("[filter] PVC %s/%s was not found in the scheduler cache", pvc.Namespace, pvc.Name))
+			servingLog.Debug(fmt.Sprintf("PVC %s/%s was not found in the scheduler cache", pvc.Namespace, pvc.Name))
 		}
 	}
 
 	scs, err := getStorageClassesUsedByPVCs(s.ctx, s.client, pvcs)
 	if err != nil {
-		s.log.Error(err, "[filter] unable to get StorageClasses from the PVC")
-		http.Error(w, "bad request", http.StatusBadRequest)
+		servingLog.Error(err, "unable to get StorageClasses from the PVC")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	for _, sc := range scs {
-		s.log.Trace(fmt.Sprintf("[filter] Pod %s/%s uses StorageClass: %s", inputData.Pod.Namespace, inputData.Pod.Name, sc.Name))
+		servingLog.Trace(fmt.Sprintf("Pod uses StorageClass: %s", sc.Name))
+	}
+	if len(scs) != len(pvcs) {
+		servingLog.Error(errors.New("no PVC was found"), "unable to get used PVC for a Pod in the namespace")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
 	}
 
-	managedPVCs := filterNotManagedPVC(s.log, pvcs, scs)
+	managedPVCs := filterNotManagedPVC(s.log, pvcs, scs, targetProvisioners)
 	for _, pvc := range managedPVCs {
-		s.log.Trace(fmt.Sprintf("[filter] filtered managed PVC %s/%s", pvc.Namespace, pvc.Name))
+		servingLog.Trace(fmt.Sprintf("filtered managed PVC %s/%s", pvc.Namespace, pvc.Name))
 	}
-
 	if len(managedPVCs) == 0 {
-		s.log.Warning(fmt.Sprintf("[filter] Pod %s/%s uses PVCs which are not managed by the module. Unable to filter and score the nodes", inputData.Pod.Namespace, inputData.Pod.Name))
+		servingLog.Warning("Pod uses PVCs which are not managed by our modules. Return the same nodes")
+		if err := writeNodeNamesResponse(w, servingLog, nodeNames); err != nil {
+			servingLog.Error(err, "unable to write node names response")
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 
-	s.log.Debug(fmt.Sprintf("[filter] starts to extract PVC requested sizes for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-	pvcRequests, err := extractRequestedSize(s.ctx, s.client, s.log, managedPVCs, scs)
+	servingLog.Debug("starts to extract PVC requested sizes")
+	pvcRequests, err := extractRequestedSize(s.ctx, s.client, servingLog, managedPVCs, scs)
 	if err != nil {
-		s.log.Error(err, fmt.Sprintf("[filter] unable to extract request size for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-		http.Error(w, "bad request", http.StatusBadRequest)
+		servingLog.Error(err, "unable to extract request size")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	s.log.Debug(fmt.Sprintf("[filter] successfully extracted the PVC requested sizes of a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+	servingLog.Debug("successfully extracted the PVC requested sizes")
 
-	s.log.Debug(fmt.Sprintf("[filter] starts to filter the nodes from the request for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-	filteredNodes, err := filterNodes(s.log, s.cache, &nodeNames, inputData.Pod, managedPVCs, scs, pvcRequests)
+	servingLog.Debug("starts to filter the nodes from the request")
+	filteredNodes, err := filterNodes(servingLog, s.cache, &nodeNames, inputData.Pod, managedPVCs, scs, pvcRequests)
 	if err != nil {
-		s.log.Error(err, "[filter] unable to filter the nodes")
-		http.Error(w, "bad request", http.StatusBadRequest)
+		servingLog.Error(err, "unable to filter the nodes")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	s.log.Debug(fmt.Sprintf("[filter] successfully filtered the nodes from the request for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+	servingLog.Debug("successfully filtered the nodes from the request")
 
-	s.log.Debug(fmt.Sprintf("[filter] starts to populate the cache for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-	s.log.Cache(fmt.Sprintf("[filter] cache before the PVC reservation for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+	servingLog.Debug("starts to populate the cache")
+	servingLog.Cache("cache before the PVC reservation")
 	s.cache.PrintTheCacheLog()
-	err = populateCache(s.log, filteredNodes.NodeNames, inputData.Pod, s.cache, managedPVCs, scs)
+	err = populateCache(servingLog, filteredNodes.NodeNames, inputData.Pod, s.cache, managedPVCs, scs)
 	if err != nil {
-		s.log.Error(err, "[filter] unable to populate cache")
-		http.Error(w, "bad request", http.StatusBadRequest)
+		servingLog.Error(err, "unable to populate cache")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	s.log.Debug(fmt.Sprintf("[filter] successfully populated the cache for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
-	s.log.Cache(fmt.Sprintf("[filter] cache after the PVC reservation for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+	servingLog.Debug("successfully populated the cache")
+	servingLog.Cache("cache after the PVC reservation")
 	s.cache.PrintTheCacheLog()
 
-	w.Header().Set("content-type", "application/json")
-	err = json.NewEncoder(w).Encode(filteredNodes)
-	if err != nil {
-		s.log.Error(err, "[filter] unable to encode a response")
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	if err := writeNodeNamesResponse(w, servingLog, *filteredNodes.NodeNames); err != nil {
+		servingLog.Error(err, "unable to write node names response")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	s.log.Debug(fmt.Sprintf("[filter] ends the serving the request for a Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+	servingLog.Debug("ends the serving the request")
 }
 
-func filterNotManagedPVC(log logger.Logger, pvcs map[string]*corev1.PersistentVolumeClaim, scs map[string]*v1.StorageClass) map[string]*corev1.PersistentVolumeClaim {
-	filteredPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(pvcs))
-	for _, pvc := range pvcs {
-		sc := scs[*pvc.Spec.StorageClassName]
-		if sc.Provisioner != consts.SdsLocalVolumeProvisioner {
-			log.Debug(fmt.Sprintf("[filterNotManagedPVC] filter out PVC %s/%s due to used Storage class %s is not managed by sds-local-volume-provisioner", pvc.Name, pvc.Namespace, sc.Name))
-			continue
-		}
-
-		filteredPVCs[pvc.Name] = pvc
+func writeNodeNamesResponse(w http.ResponseWriter, log logger.Logger, nodeNames []string) error {
+	filteredNodes := &ExtenderFilterResult{
+		NodeNames: &nodeNames,
 	}
+	log.Trace(fmt.Sprintf("filtered nodes: %+v", filteredNodes))
 
-	return filteredPVCs
+	w.Header().Set("content-type", "application/json")
+	if err := json.NewEncoder(w).Encode(filteredNodes); err != nil {
+		return err
+	}
+	return nil
 }
 
 func populateCache(log logger.Logger, nodeNames *[]string, pod *corev1.Pod, schedulerCache *cache.Cache, pvcs map[string]*corev1.PersistentVolumeClaim, scs map[string]*v1.StorageClass) error {
@@ -680,70 +679,4 @@ func getPersistentVolumes(ctx context.Context, cl client.Client) (map[string]cor
 	}
 
 	return pvMap, nil
-}
-
-func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map[string]*corev1.PersistentVolumeClaim) (map[string]*v1.StorageClass, error) {
-	scs := &v1.StorageClassList{}
-	err := cl.List(ctx, scs)
-	if err != nil {
-		return nil, err
-	}
-
-	scMap := make(map[string]v1.StorageClass, len(scs.Items))
-	for _, sc := range scs.Items {
-		scMap[sc.Name] = sc
-	}
-
-	result := make(map[string]*v1.StorageClass, len(pvcs))
-	for _, pvc := range pvcs {
-		if pvc.Spec.StorageClassName == nil {
-			err = fmt.Errorf("no StorageClass specified for PVC %s", pvc.Name)
-			return nil, err
-		}
-
-		scName := *pvc.Spec.StorageClassName
-		if sc, match := scMap[scName]; match {
-			result[sc.Name] = &sc
-		}
-	}
-
-	return result, nil
-}
-
-func getUsedPVC(ctx context.Context, cl client.Client, log logger.Logger, pod *corev1.Pod) (map[string]*corev1.PersistentVolumeClaim, error) {
-	pvcMap, err := getAllPVCsFromNamespace(ctx, cl, pod.Namespace)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[getUsedPVC] unable to get all PVC for Pod %s in the namespace %s", pod.Name, pod.Namespace))
-		return nil, err
-	}
-
-	for pvcName := range pvcMap {
-		log.Trace(fmt.Sprintf("[getUsedPVC] PVC %s is in namespace %s", pod.Namespace, pvcName))
-	}
-
-	usedPvc := make(map[string]*corev1.PersistentVolumeClaim, len(pod.Spec.Volumes))
-	for _, volume := range pod.Spec.Volumes {
-		if volume.PersistentVolumeClaim != nil {
-			log.Trace(fmt.Sprintf("[getUsedPVC] Pod %s/%s uses PVC %s", pod.Namespace, pod.Name, volume.PersistentVolumeClaim.ClaimName))
-			pvc := pvcMap[volume.PersistentVolumeClaim.ClaimName]
-			usedPvc[volume.PersistentVolumeClaim.ClaimName] = &pvc
-		}
-	}
-
-	return usedPvc, err
-}
-
-func getAllPVCsFromNamespace(ctx context.Context, cl client.Client, namespace string) (map[string]corev1.PersistentVolumeClaim, error) {
-	list := &corev1.PersistentVolumeClaimList{}
-	err := cl.List(ctx, list, &client.ListOptions{Namespace: namespace})
-	if err != nil {
-		return nil, err
-	}
-
-	pvcs := make(map[string]corev1.PersistentVolumeClaim, len(list.Items))
-	for _, pvc := range list.Items {
-		pvcs[pvc.Name] = pvc
-	}
-
-	return pvcs, nil
 }

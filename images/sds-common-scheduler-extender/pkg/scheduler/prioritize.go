@@ -36,7 +36,7 @@ import (
 func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	s.log.Debug("[prioritize] starts serving")
 	var inputData ExtenderArgs
-	reader := http.MaxBytesReader(w, r.Body, 10<<20)
+	reader := http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
 	err := json.NewDecoder(reader).Decode(&inputData)
 	if err != nil {
 		s.log.Error(err, "[prioritize] unable to decode a request")
@@ -63,7 +63,10 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	s.log.Trace(fmt.Sprintf("[prioritize] node names from the request: %v", nodeNames))
 
 	s.log.Debug(fmt.Sprintf("[prioritize] Find out if the Pod %s/%s should be processed", inputData.Pod.Namespace, inputData.Pod.Name))
-	shouldProcess, err := shouldProcessPod(s.ctx, s.client, s.log, inputData.Pod, consts.SdsLocalVolumeProvisioner)
+
+	// Check if the Pod should be processed
+	targetProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
+	shouldProcess, err := shouldProcessPod(s.ctx, s.client, s.log, inputData.Pod, targetProvisioners)
 	if err != nil {
 		s.log.Error(err, "[prioritize] unable to check if the Pod should be processed")
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -115,7 +118,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		s.log.Trace(fmt.Sprintf("[prioritize] Pod %s/%s uses Storage Class: %s", inputData.Pod.Namespace, inputData.Pod.Name, sc.Name))
 	}
 
-	managedPVCs := filterNotManagedPVC(s.log, pvcs, scs)
+	managedPVCs := filterNotManagedPVC(s.log, pvcs, scs, targetProvisioners)
 	for _, pvc := range managedPVCs {
 		s.log.Trace(fmt.Sprintf("[prioritize] prioritizeed managed PVC %s/%s", pvc.Namespace, pvc.Name))
 	}

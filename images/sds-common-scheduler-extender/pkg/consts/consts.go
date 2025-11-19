@@ -17,7 +17,8 @@ limitations under the License.
 package consts
 
 const (
-	SdsLocalVolumeProvisioner = "local.csi.storage.deckhouse.io"
+	SdsLocalVolumeProvisioner      = "local.csi.storage.deckhouse.io"
+	SdsReplicatedVolumeProvisioner = "replicated.csi.storage.deckhouse.io"
 
 	LvmTypeParamKey         = "local.csi.storage.deckhouse.io/lvm-type"
 	LVMVolumeGroupsParamKey = "local.csi.storage.deckhouse.io/lvm-volume-groups"
