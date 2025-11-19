@@ -125,17 +125,17 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	servingLog.Debug("starts to extract pvcRequests size for Pod")
+	servingLog.Debug("starts to extract PVC requested sizes")
 	pvcRequests, err := extractRequestedSize(s.ctx, s.client, servingLog, managedPVCs, scs)
 	if err != nil {
 		servingLog.Error(err, "unable to extract request size")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	servingLog.Debug("successfully extracted the pvcRequests size for Pod")
+	servingLog.Debug("successfully extracted the PVC requested sizes")
 
 	servingLog.Debug("starts to score the nodes for Pod")
-	result, err := scoreNodes(servingLog, s.cache, &nodeNames, managedPVCs, scs, pvcRequests, s.defaultDivisor)
+	scoredNodes, err := scoreNodes(servingLog, s.cache, &nodeNames, managedPVCs, scs, pvcRequests, s.defaultDivisor)
 	if err != nil {
 		servingLog.Error(err, "unable to score nodes")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -144,7 +144,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("successfully scored the nodes for Pod")
 
 	w.Header().Set("content-type", "application/json")
-	err = json.NewEncoder(w).Encode(result)
+	err = json.NewEncoder(w).Encode(scoredNodes)
 	if err != nil {
 		servingLog.Error(err, "unable to encode a response for a Pod")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
