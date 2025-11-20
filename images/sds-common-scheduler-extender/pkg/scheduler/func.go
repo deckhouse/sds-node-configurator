@@ -25,6 +25,8 @@ import (
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 )
 
@@ -158,7 +160,20 @@ func getAllPVCsFromNamespace(ctx context.Context, cl client.Client, namespace st
 }
 
 // Filter out PVCs which are not managed by our modules (i.e. PVCs which are managed by other provisioners)
-func filterNotManagedPVC(log logger.Logger, pvcs map[string]*corev1.PersistentVolumeClaim, scs map[string]*storagev1.StorageClass, targetProvisioners []string) map[string]*corev1.PersistentVolumeClaim {
+func filterNotManagedPVC(ctx context.Context, cl client.Client, log logger.Logger, pvcs map[string]*corev1.PersistentVolumeClaim, scs map[string]*storagev1.StorageClass, targetProvisioners []string) (map[string]*corev1.PersistentVolumeClaim, error) {
+	useLinstor := true
+	var err error
+	for _, pvc := range pvcs {
+		if scs[*pvc.Spec.StorageClassName].Provisioner == consts.SdsReplicatedVolumeProvisioner {
+			useLinstor, err = getUseLinstor(ctx, cl, log)
+			if err != nil {
+				return nil, err
+			}
+
+			break
+		}
+	}
+
 	filteredPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(pvcs))
 	for _, pvc := range pvcs {
 		sc := scs[*pvc.Spec.StorageClassName]
@@ -167,10 +182,15 @@ func filterNotManagedPVC(log logger.Logger, pvcs map[string]*corev1.PersistentVo
 			continue
 		}
 
+		if useLinstor && sc.Provisioner == consts.SdsReplicatedVolumeProvisioner {
+			log.Debug(fmt.Sprintf("[filterNotManagedPVC] filter out PVC %s/%s due to used StorageClass %s is managed by the Linstor", pvc.Name, pvc.Namespace, sc.Name))
+			continue
+		}
+
 		filteredPVCs[pvc.Name] = pvc
 	}
 
-	return filteredPVCs
+	return filteredPVCs, nil
 }
 
 // Get all StorageClasses used by the PVCs
@@ -200,4 +220,25 @@ func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map
 	}
 
 	return result, nil
+}
+
+// Get useLinstor value from the sds-replication-volume ModuleConfig
+func getUseLinstor(ctx context.Context, cl client.Client, log logger.Logger) (bool, error) {
+	mc := &d8commonapi.ModuleConfig{}
+	err := cl.Get(ctx, client.ObjectKey{Name: "sds-replication-volume"}, mc)
+	if err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			log.Debug("[getUseLinstor] ModuleConfig sds-replication-volume not found. Assume useLinstor is true")
+			return true, nil
+		}
+		return false, err
+	}
+
+	if value, exists := mc.Spec.Settings["useLinstor"]; exists && value == true {
+		log.Debug("[getUseLinstor] ModuleConfig sds-replication-volume found. Assume useLinstor is true")
+		return true, nil
+	}
+
+	log.Debug("[getUseLinstor] ModuleConfig sds-replication-volume found. Assume useLinstor is false")
+	return false, nil
 }

@@ -68,7 +68,6 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	}
 	servingLog.Trace(fmt.Sprintf("NodeNames from the request: %+v", nodeNames))
 
-	servingLog.Debug("Find out if the Pod should be processed")
 	targetProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
 	shouldProcess, err := shouldProcessPod(s.ctx, s.client, servingLog, inputData.Pod, targetProvisioners)
 	if err != nil {
@@ -125,7 +124,12 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	managedPVCs := filterNotManagedPVC(servingLog, pvcs, scs, targetProvisioners)
+	managedPVCs, err := filterNotManagedPVC(s.ctx, s.client, servingLog, pvcs, scs, targetProvisioners)
+	if err != nil {
+		servingLog.Error(err, "unable to filter not managed PVC")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
 	for _, pvc := range managedPVCs {
 		servingLog.Trace(fmt.Sprintf("filtered managed PVC %s/%s", pvc.Namespace, pvc.Name))
 	}
