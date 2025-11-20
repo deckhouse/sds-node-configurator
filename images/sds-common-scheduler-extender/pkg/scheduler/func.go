@@ -257,11 +257,6 @@ func extractRequestedSize(
 	pvcs map[string]*corev1.PersistentVolumeClaim,
 	scs map[string]*storagev1.StorageClass,
 ) (map[string]PVCRequest, error) {
-	pvs, err := getPersistentVolumes(ctx, cl)
-	if err != nil {
-		return nil, err
-	}
-
 	pvcRequests := make(map[string]PVCRequest, len(pvcs))
 	for _, pvc := range pvcs {
 		sc := scs[*pvc.Spec.StorageClassName]
@@ -283,7 +278,10 @@ func extractRequestedSize(
 			}
 
 		case corev1.ClaimBound:
-			pv := pvs[pvc.Spec.VolumeName]
+			pv := &corev1.PersistentVolume{}
+			if err := cl.Get(ctx, client.ObjectKey{Name: pvc.Spec.VolumeName}, pv); err != nil {
+				return nil, fmt.Errorf("[extractRequestedSize] error getting PV %s: %v", pvc.Spec.VolumeName, err)
+			}
 			switch sc.Parameters[consts.LvmTypeParamKey] {
 			case consts.Thick:
 				pvcRequests[pvc.Name] = PVCRequest{
@@ -304,19 +302,4 @@ func extractRequestedSize(
 	}
 
 	return pvcRequests, nil
-}
-
-func getPersistentVolumes(ctx context.Context, cl client.Client) (map[string]corev1.PersistentVolume, error) {
-	pvs := &corev1.PersistentVolumeList{}
-	err := cl.List(ctx, pvs)
-	if err != nil {
-		return nil, err
-	}
-
-	pvMap := make(map[string]corev1.PersistentVolume, len(pvs.Items))
-	for _, pv := range pvs.Items {
-		pvMap[pv.Name] = pv
-	}
-
-	return pvMap, nil
 }
