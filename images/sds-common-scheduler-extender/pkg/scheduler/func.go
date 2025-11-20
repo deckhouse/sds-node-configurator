@@ -231,21 +231,21 @@ func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map
 // Get useLinstor value from the sds-replication-volume ModuleConfig
 func getUseLinstor(ctx context.Context, cl client.Client, log logger.Logger) (bool, error) {
 	mc := &d8commonapi.ModuleConfig{}
-	err := cl.Get(ctx, client.ObjectKey{Name: "sds-replication-volume"}, mc)
+	err := cl.Get(ctx, client.ObjectKey{Name: "sds-replicated-volume"}, mc)
 	if err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			log.Debug("[getUseLinstor] ModuleConfig sds-replication-volume not found. Assume useLinstor is true")
+			log.Debug("[getUseLinstor] ModuleConfig sds-replicated-volume not found. Assume useLinstor is true")
 			return true, nil
 		}
-		return false, err
+		return true, err
 	}
 
 	if value, exists := mc.Spec.Settings["useLinstor"]; exists && value == true {
-		log.Debug("[getUseLinstor] ModuleConfig sds-replication-volume found. Assume useLinstor is true")
+		log.Debug("[getUseLinstor] ModuleConfig sds-replicated-volume found. Assume useLinstor is true")
 		return true, nil
 	}
 
-	log.Debug("[getUseLinstor] ModuleConfig sds-replication-volume found. Assume useLinstor is false")
+	log.Debug("[getUseLinstor] ModuleConfig sds-replicated-volume found. Assume useLinstor is false")
 	return false, nil
 }
 

@@ -25,7 +25,7 @@ import (
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/storage/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
@@ -180,7 +180,7 @@ func scoreNodes(
 	schedulerCache *cache.Cache,
 	nodeNames *[]string,
 	pvcs map[string]*corev1.PersistentVolumeClaim,
-	scs map[string]*v1.StorageClass,
+	scs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 	divisor float64,
 ) ([]HostPriority, error) {

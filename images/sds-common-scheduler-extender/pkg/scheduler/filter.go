@@ -24,7 +24,7 @@ import (
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/storage/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/yaml"
@@ -195,7 +195,7 @@ func writeNodeNamesResponse(w http.ResponseWriter, log logger.Logger, nodeNames 
 	return nil
 }
 
-func populateCache(log logger.Logger, nodeNames *[]string, pod *corev1.Pod, schedulerCache *cache.Cache, pvcs map[string]*corev1.PersistentVolumeClaim, scs map[string]*v1.StorageClass) error {
+func populateCache(log logger.Logger, nodeNames *[]string, pod *corev1.Pod, schedulerCache *cache.Cache, pvcs map[string]*corev1.PersistentVolumeClaim, scs map[string]*storagev1.StorageClass) error {
 	for _, nodeName := range *nodeNames {
 		for _, volume := range pod.Spec.Volumes {
 			if volume.PersistentVolumeClaim != nil {
@@ -249,7 +249,7 @@ func filterNodes(
 	nodeNames *[]string,
 	pod *corev1.Pod,
 	pvcs map[string]*corev1.PersistentVolumeClaim,
-	scs map[string]*v1.StorageClass,
+	scs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 ) (*ExtenderFilterResult, error) {
 	// Param "pvcRequests" is a total amount of the pvcRequests space (both Thick and Thin) for Pod (i.e. from every PVC)
@@ -510,7 +510,7 @@ func findMatchedLVG(nodeLVGs []*snc.LVMVolumeGroup, scLVGs LVMVolumeGroups) *LVM
 	return nil
 }
 
-func getCommonNodesByStorageClasses(scs map[string]*v1.StorageClass, nodesWithLVGs map[string][]*snc.LVMVolumeGroup) (map[string][]*snc.LVMVolumeGroup, error) {
+func getCommonNodesByStorageClasses(scs map[string]*storagev1.StorageClass, nodesWithLVGs map[string][]*snc.LVMVolumeGroup) (map[string][]*snc.LVMVolumeGroup, error) {
 	result := make(map[string][]*snc.LVMVolumeGroup, len(nodesWithLVGs))
 
 	for nodeName, lvgs := range nodesWithLVGs {
@@ -567,7 +567,7 @@ func RemoveUnusedLVGs(lvgs map[string]*snc.LVMVolumeGroup, scsLVGs map[string]LV
 	return result
 }
 
-func GetSortedLVGsFromStorageClasses(scs map[string]*v1.StorageClass) (map[string]LVMVolumeGroups, error) {
+func GetSortedLVGsFromStorageClasses(scs map[string]*storagev1.StorageClass) (map[string]LVMVolumeGroups, error) {
 	result := make(map[string]LVMVolumeGroups, len(scs))
 
 	for _, sc := range scs {
@@ -590,7 +590,7 @@ type LVMVolumeGroup struct {
 }
 type LVMVolumeGroups []LVMVolumeGroup
 
-func ExtractLVGsFromSC(sc *v1.StorageClass) (LVMVolumeGroups, error) {
+func ExtractLVGsFromSC(sc *storagev1.StorageClass) (LVMVolumeGroups, error) {
 	var lvmVolumeGroups LVMVolumeGroups
 	err := yaml.Unmarshal([]byte(sc.Parameters[consts.LVMVolumeGroupsParamKey]), &lvmVolumeGroups)
 	if err != nil {

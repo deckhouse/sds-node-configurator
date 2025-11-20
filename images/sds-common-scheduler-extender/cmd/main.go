@@ -27,9 +27,10 @@ import (
 	"syscall"
 	"time"
 
+	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	"github.com/spf13/cobra"
-	v1 "k8s.io/api/core/v1"
-	sv1 "k8s.io/api/storage/v1"
+	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -69,8 +70,9 @@ var cfgFilePath string
 var resourcesSchemeFuncs = []func(*runtime.Scheme) error{
 	slv.AddToScheme,
 	snc.AddToScheme,
-	v1.AddToScheme,
-	sv1.AddToScheme,
+	corev1.AddToScheme,
+	storagev1.AddToScheme,
+	d8commonapi.AddToScheme,
 }
 
 var config = &Config{
