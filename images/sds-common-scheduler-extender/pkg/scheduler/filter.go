@@ -17,7 +17,6 @@ limitations under the License.
 package scheduler
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,7 +27,6 @@ import (
 	v1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/strings/slices"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -243,66 +241,6 @@ func populateCache(log logger.Logger, nodeNames *[]string, pod *corev1.Pod, sche
 	}
 
 	return nil
-}
-
-type PVCRequest struct {
-	DeviceType    string
-	RequestedSize int64
-}
-
-func extractRequestedSize(
-	ctx context.Context,
-	cl client.Client,
-	log logger.Logger,
-	pvcs map[string]*corev1.PersistentVolumeClaim,
-	scs map[string]*v1.StorageClass,
-) (map[string]PVCRequest, error) {
-	pvs, err := getPersistentVolumes(ctx, cl)
-	if err != nil {
-		return nil, err
-	}
-
-	pvcRequests := make(map[string]PVCRequest, len(pvcs))
-	for _, pvc := range pvcs {
-		sc := scs[*pvc.Spec.StorageClassName]
-		log.Debug(fmt.Sprintf("[extractRequestedSize] PVC %s/%s has status phase: %s", pvc.Namespace, pvc.Name, pvc.Status.Phase))
-		switch pvc.Status.Phase {
-		case corev1.ClaimPending:
-			switch sc.Parameters[consts.LvmTypeParamKey] {
-			case consts.Thick:
-				pvcRequests[pvc.Name] = PVCRequest{
-					DeviceType:    consts.Thick,
-					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value(),
-				}
-			case consts.Thin:
-				pvcRequests[pvc.Name] = PVCRequest{
-					DeviceType:    consts.Thin,
-					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value(),
-				}
-			}
-
-		case corev1.ClaimBound:
-			pv := pvs[pvc.Spec.VolumeName]
-			switch sc.Parameters[consts.LvmTypeParamKey] {
-			case consts.Thick:
-				pvcRequests[pvc.Name] = PVCRequest{
-					DeviceType:    consts.Thick,
-					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value() - pv.Spec.Capacity.Storage().Value(),
-				}
-			case consts.Thin:
-				pvcRequests[pvc.Name] = PVCRequest{
-					DeviceType:    consts.Thin,
-					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value() - pv.Spec.Capacity.Storage().Value(),
-				}
-			}
-		}
-	}
-
-	for name, req := range pvcRequests {
-		log.Trace(fmt.Sprintf("[extractRequestedSize] pvc %s has requested size: %d, device type: %s", name, req.RequestedSize, req.DeviceType))
-	}
-
-	return pvcRequests, nil
 }
 
 func filterNodes(
@@ -670,19 +608,4 @@ func SortLVGsByNodeName(lvgs map[string]*snc.LVMVolumeGroup) map[string][]*snc.L
 	}
 
 	return sorted
-}
-
-func getPersistentVolumes(ctx context.Context, cl client.Client) (map[string]corev1.PersistentVolume, error) {
-	pvs := &corev1.PersistentVolumeList{}
-	err := cl.List(ctx, pvs)
-	if err != nil {
-		return nil, err
-	}
-
-	pvMap := make(map[string]corev1.PersistentVolume, len(pvs.Items))
-	for _, pv := range pvs.Items {
-		pvMap[pv.Name] = pv
-	}
-
-	return pvMap, nil
 }

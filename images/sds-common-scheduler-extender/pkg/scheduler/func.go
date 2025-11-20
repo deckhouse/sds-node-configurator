@@ -35,6 +35,12 @@ const (
 	annotationStorageProvisioner     = "volume.kubernetes.io/storage-provisioner"
 )
 
+// PVCRequest is a request for a PVC
+type PVCRequest struct {
+	DeviceType    string
+	RequestedSize int64
+}
+
 // If the Pod has at least one volume with a provisioner handled by this scheduler extender then return true, otherwise return false.
 func shouldProcessPod(ctx context.Context, cl client.Client, log logger.Logger, pod *corev1.Pod, targetProvisioners []string) (bool, error) {
 	log.Trace(fmt.Sprintf("[ShouldProcessPod] targetProvisioners=%+v, pod: %+v", targetProvisioners, pod))
@@ -241,4 +247,76 @@ func getUseLinstor(ctx context.Context, cl client.Client, log logger.Logger) (bo
 
 	log.Debug("[getUseLinstor] ModuleConfig sds-replication-volume found. Assume useLinstor is false")
 	return false, nil
+}
+
+// Extract requested size from the PVC
+func extractRequestedSize(
+	ctx context.Context,
+	cl client.Client,
+	log logger.Logger,
+	pvcs map[string]*corev1.PersistentVolumeClaim,
+	scs map[string]*storagev1.StorageClass,
+) (map[string]PVCRequest, error) {
+	pvs, err := getPersistentVolumes(ctx, cl)
+	if err != nil {
+		return nil, err
+	}
+
+	pvcRequests := make(map[string]PVCRequest, len(pvcs))
+	for _, pvc := range pvcs {
+		sc := scs[*pvc.Spec.StorageClassName]
+		log.Debug(fmt.Sprintf("[extractRequestedSize] PVC %s/%s has status phase: %s", pvc.Namespace, pvc.Name, pvc.Status.Phase))
+
+		switch pvc.Status.Phase {
+		case corev1.ClaimPending:
+			switch sc.Parameters[consts.LvmTypeParamKey] {
+			case consts.Thick:
+				pvcRequests[pvc.Name] = PVCRequest{
+					DeviceType:    consts.Thick,
+					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value(),
+				}
+			case consts.Thin:
+				pvcRequests[pvc.Name] = PVCRequest{
+					DeviceType:    consts.Thin,
+					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value(),
+				}
+			}
+
+		case corev1.ClaimBound:
+			pv := pvs[pvc.Spec.VolumeName]
+			switch sc.Parameters[consts.LvmTypeParamKey] {
+			case consts.Thick:
+				pvcRequests[pvc.Name] = PVCRequest{
+					DeviceType:    consts.Thick,
+					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value() - pv.Spec.Capacity.Storage().Value(),
+				}
+			case consts.Thin:
+				pvcRequests[pvc.Name] = PVCRequest{
+					DeviceType:    consts.Thin,
+					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value() - pv.Spec.Capacity.Storage().Value(),
+				}
+			}
+		}
+	}
+
+	for name, req := range pvcRequests {
+		log.Trace(fmt.Sprintf("[extractRequestedSize] pvc %s has requested size: %d, device type: %s", name, req.RequestedSize, req.DeviceType))
+	}
+
+	return pvcRequests, nil
+}
+
+func getPersistentVolumes(ctx context.Context, cl client.Client) (map[string]corev1.PersistentVolume, error) {
+	pvs := &corev1.PersistentVolumeList{}
+	err := cl.List(ctx, pvs)
+	if err != nil {
+		return nil, err
+	}
+
+	pvMap := make(map[string]corev1.PersistentVolume, len(pvs.Items))
+	for _, pv := range pvs.Items {
+		pvMap[pv.Name] = pv
+	}
+
+	return pvMap, nil
 }
