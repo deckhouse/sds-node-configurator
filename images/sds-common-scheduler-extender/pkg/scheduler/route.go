@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -160,6 +161,8 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	pvcTotalCount := 0
+	var totalReserved int64
+	var sb strings.Builder
 	lvgs := s.cache.GetAllLVG()
 	for _, lvg := range lvgs {
 		pvcs, err := s.cache.GetAllPVCForLVG(lvg.Name)
@@ -168,9 +171,28 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, _ *http.Request) {
 		}
 
 		pvcTotalCount += len(pvcs)
+
+		// sum thick reserved
+		thickReserved, err := s.cache.GetLVGThickReservedSpace(lvg.Name)
+		if err != nil {
+			s.log.Error(err, "unable to get thick reserved space")
+		}
+		totalReserved += thickReserved
+		// sum thin reserved across all thin pools
+		for _, tp := range lvg.Status.ThinPools {
+			thinReserved, err := s.cache.GetLVGThinReservedSpace(lvg.Name, tp.Name)
+			if err != nil {
+				s.log.Error(err, "unable to get thin reserved space")
+				continue
+			}
+			totalReserved += thinReserved
+		}
 	}
 
-	_, err := w.Write([]byte(fmt.Sprintf("Filter request count: %d, Prioritize request count: %d, The amount of PVC in the cache from ALL LVG: %d\n", s.filterRequestCount, pvcTotalCount, s.prioritizeRequestCount)))
+	sb.WriteString(fmt.Sprintf("Filter request count: %d, Prioritize request count: %d\n", s.filterRequestCount, s.prioritizeRequestCount))
+	sb.WriteString(fmt.Sprintf("Total reserved (thick+thin) across all PVCs (%d items): %s\n", pvcTotalCount, resource.NewQuantity(totalReserved, resource.BinarySI).String()))
+
+	_, err := w.Write([]byte(sb.String()))
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, err = w.Write([]byte("unable to write the cache"))
