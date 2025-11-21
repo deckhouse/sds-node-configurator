@@ -29,21 +29,24 @@ import (
 )
 
 type scheduler struct {
-	defaultDivisor float64
-	log            logger.Logger
-	client         client.Client
-	ctx            context.Context
-	cache          *cache.Cache
-	requestCount   int
+	defaultDivisor         float64
+	log                    logger.Logger
+	client                 client.Client
+	ctx                    context.Context
+	cache                  *cache.Cache
+	filterRequestCount     int
+	prioritizeRequestCount int
 }
 
 func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/scheduler/filter":
+		s.filterRequestCount++
 		s.log.Debug("[ServeHTTP] filter route starts handling the request")
 		s.filter(w, r)
 		s.log.Debug("[ServeHTTP] filter route ends handling the request")
 	case "/scheduler/prioritize":
+		s.prioritizeRequestCount++
 		s.log.Debug("[ServeHTTP] prioritize route starts handling the request")
 		s.prioritize(w, r)
 		s.log.Debug("[ServeHTTP] prioritize route ends handling the request")
@@ -167,12 +170,12 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, _ *http.Request) {
 		pvcTotalCount += len(pvcs)
 	}
 
-	_, err := w.Write([]byte(fmt.Sprintf("Filter request count: %d , PVC Count from ALL LVG: %d", s.requestCount, pvcTotalCount)))
+	_, err := w.Write([]byte(fmt.Sprintf("Filter request count: %d, Prioritize request count: %d, The amount of PVC in the cache from ALL LVG: %d\n", s.filterRequestCount, pvcTotalCount, s.prioritizeRequestCount)))
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, err = w.Write([]byte("unable to write the cache"))
 		if err != nil {
-			s.log.Error(err, "error write response")
+			s.log.Error(err, "error write response for cache stat")
 		}
 	}
 }

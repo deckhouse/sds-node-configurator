@@ -766,8 +766,8 @@ func (c *Cache) PrintTheCacheLog() {
 		}
 	}
 	c.mtx.RUnlock()
-
 	c.log.Cache("[LVMVolumeGroups ENDS]")
+
 	c.log.Cache("[PVC and LVG BEGINS]")
 	// Build pvc -> lvgs mapping for printing purposes
 	c.mtx.RLock()
@@ -792,8 +792,8 @@ func (c *Cache) PrintTheCacheLog() {
 		}
 	}
 	c.mtx.RUnlock()
-
 	c.log.Cache("[PVC and LVG ENDS]")
+
 	c.log.Cache("[Node and LVG BEGINS]")
 	// Build node -> lvgs mapping
 	c.mtx.RLock()
