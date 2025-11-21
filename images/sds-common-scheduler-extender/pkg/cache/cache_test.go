@@ -18,11 +18,12 @@ package cache
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -30,422 +31,132 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 )
 
-func TestCache(t *testing.T) {
+func TestCache_ClearBoundExpiredPVC(t *testing.T) {
 	log := logger.Logger{}
-	t.Run("clearBoundExpiredPVC", func(t *testing.T) {
-		const (
-			thickBoundExpiredPVC    = "thick-bound-expired-pvc"
-			thickPendingExpiredPVC  = "thick-pending-expired-pvc"
-			thickBoundNotExpiredPVC = "thick-bound-not-expired-pvc"
+	const (
+		lvgName                = "lvg-name"
+		tpName                 = "thin-pool"
+		thickBoundExpiredPVC   = "thick-bound-expired-pvc"
+		thickPendingExpiredPVC = "thick-pending-expired-pvc"
+		thickBoundFreshPVC     = "thick-bound-not-expired-pvc"
+		thinBoundExpiredPVC    = "thin-bound-expired-pvc"
+		thinPendingExpiredPVC  = "thin-pending-expired-pvc"
+		thinBoundFreshPVC      = "thin-bound-not-expired-pvc"
+	)
 
-			thinBoundExpiredPVC    = "thin-bound-expired-pvc"
-			thinPendingExpiredPVC  = "thin-pending-expired-pvc"
-			thinBoundNotExpiredPVC = "thin-bound-not-expired-pvc"
-		)
-		ch := NewCache(log, DefaultPVCExpiredDurationSec)
-		expiredTime := time.Now().Add((-DefaultPVCExpiredDurationSec - 1) * time.Second)
-		thickPVCs := map[string]*pvcCache{
-			"/" + thickBoundExpiredPVC: {
-				pvc: &v1.PersistentVolumeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:              thickBoundExpiredPVC,
-						CreationTimestamp: metav1.NewTime(expiredTime),
-					},
-					Status: v1.PersistentVolumeClaimStatus{
-						Phase: v1.ClaimBound,
-					},
-				},
-			},
-			"/" + thickPendingExpiredPVC: {
-				pvc: &v1.PersistentVolumeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:              thickPendingExpiredPVC,
-						CreationTimestamp: metav1.NewTime(expiredTime),
-					},
-					Status: v1.PersistentVolumeClaimStatus{
-						Phase: v1.ClaimPending,
-					},
-				},
-			},
-			"/" + thickBoundNotExpiredPVC: {
-				pvc: &v1.PersistentVolumeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:              thickBoundNotExpiredPVC,
-						CreationTimestamp: metav1.NewTime(time.Now()),
-					},
-					Status: v1.PersistentVolumeClaimStatus{
-						Phase: v1.ClaimBound,
-					},
-				},
-			},
-		}
-		thinPVCs := map[string]*pvcCache{
-			"/" + thinBoundExpiredPVC: {
-				pvc: &v1.PersistentVolumeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:              thinBoundExpiredPVC,
-						CreationTimestamp: metav1.NewTime(expiredTime),
-					},
-					Status: v1.PersistentVolumeClaimStatus{
-						Phase: v1.ClaimBound,
-					},
-				},
-			},
-			"/" + thinPendingExpiredPVC: {
-				pvc: &v1.PersistentVolumeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:              thinPendingExpiredPVC,
-						CreationTimestamp: metav1.NewTime(expiredTime),
-					},
-					Status: v1.PersistentVolumeClaimStatus{
-						Phase: v1.ClaimPending,
-					},
-				},
-			},
-			"/" + thinBoundNotExpiredPVC: {
-				pvc: &v1.PersistentVolumeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:              thinBoundNotExpiredPVC,
-						CreationTimestamp: metav1.NewTime(time.Now()),
-					},
-					Status: v1.PersistentVolumeClaimStatus{
-						Phase: v1.ClaimBound,
-					},
-				},
-			},
-		}
+	ch := NewCache(log, DefaultPVCExpiredDurationSec)
+	expiredTime := time.Now().Add((-DefaultPVCExpiredDurationSec - 1) * time.Second)
 
-		const tpName = "thin-pool"
-		thinPools := map[string]*thinPoolCache{
-			tpName: {},
-		}
-		for pvcName, pvc := range thinPVCs {
-			thinPools[tpName].pvcs.Store(pvcName, pvc)
-		}
+	// Seed internals directly to simulate already-reserved entries with various phases.
+	ch.mtx.Lock()
+	ch.lvgByName[lvgName] = &lvgEntry{
+		lvg: &snc.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: lvgName},
+		},
+		thickByPVC: make(map[string]*pvcEntry),
+		thinByPool: map[string]*thinPoolEntry{
+			tpName: {pvcs: make(map[string]*pvcEntry)},
+		},
+	}
+	// Thick
+	ch.lvgByName[lvgName].thickByPVC["/"+thickBoundExpiredPVC] = &pvcEntry{
+		pvc: &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: thickBoundExpiredPVC, CreationTimestamp: metav1.NewTime(expiredTime)},
+			Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
+		},
+	}
+	ch.lvgByName[lvgName].thickByPVC["/"+thickPendingExpiredPVC] = &pvcEntry{
+		pvc: &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: thickPendingExpiredPVC, CreationTimestamp: metav1.NewTime(expiredTime)},
+			Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+		},
+	}
+	ch.lvgByName[lvgName].thickByPVC["/"+thickBoundFreshPVC] = &pvcEntry{
+		pvc: &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: thickBoundFreshPVC, CreationTimestamp: metav1.NewTime(time.Now())},
+			Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
+		},
+	}
+	// Thin
+	ch.lvgByName[lvgName].thinByPool[tpName].pvcs["/"+thinBoundExpiredPVC] = &pvcEntry{
+		pvc: &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: thinBoundExpiredPVC, CreationTimestamp: metav1.NewTime(expiredTime)},
+			Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
+		},
+	}
+	ch.lvgByName[lvgName].thinByPool[tpName].pvcs["/"+thinPendingExpiredPVC] = &pvcEntry{
+		pvc: &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: thinPendingExpiredPVC, CreationTimestamp: metav1.NewTime(expiredTime)},
+			Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+		},
+	}
+	ch.lvgByName[lvgName].thinByPool[tpName].pvcs["/"+thinBoundFreshPVC] = &pvcEntry{
+		pvc: &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: thinBoundFreshPVC, CreationTimestamp: metav1.NewTime(time.Now())},
+			Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
+		},
+	}
+	ch.mtx.Unlock()
 
-		const lvgName = "lvg-name"
-		lvgs := map[string]*lvgCache{
-			lvgName: {},
-		}
+	ch.clearBoundExpiredPVC()
 
-		for name, pvc := range thickPVCs {
-			lvgs[lvgName].thickPVCs.Store(name, pvc)
-		}
-		for name, tp := range thinPools {
-			lvgs[lvgName].thinPools.Store(name, tp)
-		}
-
-		ch.lvgs.Store(lvgName, lvgs[lvgName])
-		ch.pvcLVGs.Store("/"+thickBoundExpiredPVC, []string{lvgName})
-		ch.pvcLVGs.Store("/"+thickPendingExpiredPVC, []string{lvgName})
-		ch.pvcLVGs.Store("/"+thickBoundNotExpiredPVC, []string{lvgName})
-		ch.pvcLVGs.Store("/"+thinBoundExpiredPVC, []string{lvgName})
-		ch.pvcLVGs.Store("/"+thinBoundNotExpiredPVC, []string{lvgName})
-		ch.pvcLVGs.Store("/"+thinPendingExpiredPVC, []string{lvgName})
-
-		ch.clearBoundExpiredPVC()
-
-		lvgCh, _ := ch.lvgs.Load(lvgName)
-		_, found := lvgCh.(*lvgCache).thickPVCs.Load("/" + thickBoundExpiredPVC)
-		assert.False(t, found)
-		_, found = lvgCh.(*lvgCache).thickPVCs.Load("/" + thickPendingExpiredPVC)
-		assert.True(t, found)
-		_, found = lvgCh.(*lvgCache).thickPVCs.Load("/" + thickBoundNotExpiredPVC)
-		assert.True(t, found)
-
-		tpCh, _ := lvgCh.(*lvgCache).thinPools.Load(tpName)
-		_, found = tpCh.(*thinPoolCache).pvcs.Load("/" + thinBoundExpiredPVC)
-		assert.False(t, found)
-		_, found = tpCh.(*thinPoolCache).pvcs.Load("/" + thinPendingExpiredPVC)
-		assert.True(t, found)
-		_, found = tpCh.(*thinPoolCache).pvcs.Load("/" + thinBoundNotExpiredPVC)
-		assert.True(t, found)
-	})
+	ch.mtx.RLock()
+	defer ch.mtx.RUnlock()
+	// Thick assertions
+	_, found := ch.lvgByName[lvgName].thickByPVC["/"+thickBoundExpiredPVC]
+	assert.False(t, found)
+	_, found = ch.lvgByName[lvgName].thickByPVC["/"+thickPendingExpiredPVC]
+	assert.True(t, found)
+	_, found = ch.lvgByName[lvgName].thickByPVC["/"+thickBoundFreshPVC]
+	assert.True(t, found)
+	// Thin assertions
+	_, found = ch.lvgByName[lvgName].thinByPool[tpName].pvcs["/"+thinBoundExpiredPVC]
+	assert.False(t, found)
+	_, found = ch.lvgByName[lvgName].thinByPool[tpName].pvcs["/"+thinPendingExpiredPVC]
+	assert.True(t, found)
+	_, found = ch.lvgByName[lvgName].thinByPool[tpName].pvcs["/"+thinBoundFreshPVC]
+	assert.True(t, found)
 }
 
-func BenchmarkCache_DeleteLVG(b *testing.B) {
-	cache := NewCache(logger.Logger{}, DefaultPVCExpiredDurationSec)
+func TestCache_ReservedSpace_PublicAPI(t *testing.T) {
+	log := logger.Logger{}
+	ch := NewCache(log, DefaultPVCExpiredDurationSec)
 	lvg := &snc.LVMVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "first",
-		},
-	}
-
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			cache.AddLVG(lvg)
-			if _, found := cache.lvgs.Load(lvg.Name); found {
-				// b.Log("lvg found, delete it")
-				cache.DeleteLVG(lvg.Name)
-			}
-		}
-	})
-}
-
-func BenchmarkCache_GetLVGReservedSpace(b *testing.B) {
-	cache := NewCache(logger.Logger{}, DefaultPVCExpiredDurationSec)
-	lvg := &snc.LVMVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "first",
-		},
-	}
-
-	cache.AddLVG(lvg)
-
-	pvcs := []v1.PersistentVolumeClaim{
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "test-pvc-1",
-			},
-			Spec: v1.PersistentVolumeClaimSpec{
-				Resources: v1.VolumeResourceRequirements{
-					Requests: v1.ResourceList{
-						"pvc": *resource.NewQuantity(1000000, resource.BinarySI),
-					},
-				},
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "test-pvc-2",
-			},
-			Spec: v1.PersistentVolumeClaimSpec{
-				Resources: v1.VolumeResourceRequirements{
-					Requests: v1.ResourceList{
-						"pvc": *resource.NewQuantity(2000000, resource.BinarySI),
-					},
-				},
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "test-pvc-3",
-			},
-			Spec: v1.PersistentVolumeClaimSpec{
-				Resources: v1.VolumeResourceRequirements{
-					Requests: v1.ResourceList{
-						"pvc": *resource.NewQuantity(30000000, resource.BinarySI),
-					},
-				},
-			},
-		},
-	}
-
-	for _, pvc := range pvcs {
-		err := cache.AddThickPVC(lvg.Name, &pvc)
-		if err != nil {
-			b.Error(err)
-		}
-	}
-
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			_, err := cache.GetLVGThickReservedSpace(lvg.Name)
-			if err != nil {
-				b.Error(err)
-			}
-		}
-	})
-}
-
-func BenchmarkCache_AddPVC(b *testing.B) {
-	cache := NewCache(logger.Logger{}, DefaultPVCExpiredDurationSec)
-
-	lvg1 := &snc.LVMVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "first",
-		},
+		ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
 		Status: snc.LVMVolumeGroupStatus{
-			Nodes: []snc.LVMVolumeGroupNode{
-				{Name: "test-node1"},
+			ThinPools: []snc.LVMVolumeGroupThinPoolStatus{{Name: "tp-1"}},
+		},
+	}
+	ch.AddLVG(lvg)
+
+	pvc1 := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-1", Namespace: "ns"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: *resource.NewQuantity(1<<20, resource.BinarySI)},
 			},
 		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
 	}
-	lvg2 := &snc.LVMVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "second",
-		},
-		Status: snc.LVMVolumeGroupStatus{
-			Nodes: []snc.LVMVolumeGroupNode{
-				{Name: "test-node2"},
-			},
-		},
-	}
-	lvg3 := &snc.LVMVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "third",
-		},
-		Status: snc.LVMVolumeGroupStatus{
-			Nodes: []snc.LVMVolumeGroupNode{
-				{Name: "test-node3"},
-			},
-		},
-	}
-	cache.AddLVG(lvg1)
-	cache.AddLVG(lvg2)
-	cache.AddLVG(lvg3)
+	pvc2 := pvc1.DeepCopy()
+	pvc2.Name = "pvc-2"
+	pvc2.Spec.Resources.Requests[corev1.ResourceStorage] = *resource.NewQuantity(2<<20, resource.BinarySI)
 
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			pvc := &v1.PersistentVolumeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pvc",
-					Namespace: "test-ns",
-				},
-				Status: v1.PersistentVolumeClaimStatus{
-					Phase: v1.ClaimPending,
-				},
-			}
+	assert.NoError(t, ch.AddThickPVC(lvg.Name, pvc1))
+	assert.NoError(t, ch.AddThickPVC(lvg.Name, pvc2))
+	sum, err := ch.GetLVGThickReservedSpace(lvg.Name)
+	assert.NoError(t, err)
+	assert.Equal(t, int64((1<<20)+(2<<20)), sum)
 
-			err := cache.AddThickPVC(lvg1.Name, pvc)
-			if err != nil {
-				b.Error(err)
-			}
-			err = cache.AddThickPVC(lvg2.Name, pvc)
-			if err != nil {
-				b.Error(err)
-			}
-			err = cache.AddThickPVC(lvg3.Name, pvc)
-			if err != nil {
-				b.Error(err)
-			}
-
-			lvgs := cache.GetLVGNamesForPVC(pvc)
-			b.Log(lvgs)
-		}
-	})
-}
-
-func BenchmarkCache_GetAllLVG(b *testing.B) {
-	cache := NewCache(logger.Logger{}, DefaultPVCExpiredDurationSec)
-	lvgs := map[string]*lvgCache{
-		"first": {
-			lvg: &snc.LVMVolumeGroup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "first",
-				},
-			},
-		},
-		"second": {
-			lvg: &snc.LVMVolumeGroup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "second",
-				},
-			},
-		},
-	}
-
-	for _, lvg := range lvgs {
-		cache.lvgs.Store(lvg.lvg.Name, lvg)
-	}
-
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			mp := cache.GetAllLVG()
-
-			if len(mp) != 2 {
-				b.Error("not enough LVG")
-			}
-		}
-	})
-}
-
-func BenchmarkCache_GetLVGNamesByNodeName(b *testing.B) {
-	cache := NewCache(logger.Logger{}, DefaultPVCExpiredDurationSec)
-	lvgs := []string{
-		"first",
-		"second",
-		"third",
-	}
-	nodeName := "test-node"
-
-	cache.nodeLVGs.Store(nodeName, lvgs)
-
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			l := cache.GetLVGNamesByNodeName(nodeName)
-			if len(l) != 3 {
-				b.Error("not enough LVG")
-			}
-		}
-	})
-}
-
-func BenchmarkCache_TryGetLVG(b *testing.B) {
-	cache := NewCache(logger.Logger{}, DefaultPVCExpiredDurationSec)
-	name := "test-name"
-
-	lvg := &snc.LVMVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-	}
-	cache.AddLVG(lvg)
-
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			l := cache.TryGetLVG(lvg.Name)
-			if l == nil {
-				b.Error("nil LVG from cache")
-			}
-		}
-	})
-}
-
-func BenchmarkCache_AddLVG(b *testing.B) {
-	cache := NewCache(logger.Logger{}, DefaultPVCExpiredDurationSec)
-	i := 0
-
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			i++
-			lvg1 := &snc.LVMVolumeGroup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: fmt.Sprintf("test-lvg-%d", i),
-				},
-				Status: snc.LVMVolumeGroupStatus{
-					Nodes: []snc.LVMVolumeGroupNode{
-						{
-							Name: "test-1",
-						},
-					},
-				},
-			}
-
-			lvg2 := &snc.LVMVolumeGroup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: fmt.Sprintf("test-lvg-%d", i+1),
-				},
-				Status: snc.LVMVolumeGroupStatus{
-					Nodes: []snc.LVMVolumeGroupNode{
-						{
-							Name: "test-1",
-						},
-					},
-				},
-			}
-
-			lvg3 := &snc.LVMVolumeGroup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: fmt.Sprintf("test-lvg-%d", i+2),
-				},
-				Status: snc.LVMVolumeGroupStatus{
-					Nodes: []snc.LVMVolumeGroupNode{
-						{
-							Name: "test-1",
-						},
-					},
-				},
-			}
-
-			cache.AddLVG(lvg1)
-			cache.AddLVG(lvg2)
-			cache.AddLVG(lvg3)
-
-			lvgs, _ := cache.nodeLVGs.Load("test-1")
-			b.Log(lvgs.([]string))
-		}
-	})
+	// Thin
+	pvc3 := pvc1.DeepCopy()
+	pvc3.Name = "pvc-3"
+	pvc3.Spec.Resources.Requests[corev1.ResourceStorage] = *resource.NewQuantity(3<<20, resource.BinarySI)
+	assert.NoError(t, ch.AddThinPVC(lvg.Name, "tp-1", pvc1))
+	assert.NoError(t, ch.AddThinPVC(lvg.Name, "tp-1", pvc3))
+	thinSum, err := ch.GetLVGThinReservedSpace(lvg.Name, "tp-1")
+	assert.NoError(t, err)
+	assert.Equal(t, int64((1<<20)+(3<<20)), thinSum)
 }
 
 func TestCache_UpdateLVG(t *testing.T) {
@@ -479,275 +190,125 @@ func TestCache_UpdateLVG(t *testing.T) {
 	assert.Equal(t, newLVG.Status.AllocatedSize, updatedLvg.Status.AllocatedSize)
 }
 
-func BenchmarkCache_UpdateLVG(b *testing.B) {
-	cache := NewCache(logger.Logger{}, DefaultPVCExpiredDurationSec)
-	name := "test-name"
-	i := 0
+// Concurrency/race-oriented tests per Go race detector guidance:
+// https://go.dev/doc/articles/race_detector
+func TestCache_Race_AddUpdateRead(t *testing.T) {
+	log := logger.Logger{}
+	ch := NewCache(log, DefaultPVCExpiredDurationSec)
 
 	lvg := &snc.LVMVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-	}
-	cache.AddLVG(lvg)
-
-	_, found := cache.lvgs.Load(name)
-	if !found {
-		b.Error("not found LVG")
-	}
-
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			i++
-			updated := &snc.LVMVolumeGroup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: name,
-				},
-				Status: snc.LVMVolumeGroupStatus{
-					AllocatedSize: resource.MustParse(fmt.Sprintf("2%dGi", i)),
-				},
-			}
-			b.Logf("updates the LVG with allocated size: %s", updated.Status.AllocatedSize.String())
-			err := cache.UpdateLVG(updated)
-			if err != nil {
-				b.Error(err)
-			}
-		}
-	})
-}
-
-func BenchmarkCache_UpdatePVC(b *testing.B) {
-	cache := NewCache(logger.Logger{}, DefaultPVCExpiredDurationSec)
-	i := 0
-	lvg := &snc.LVMVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-lvg",
-		},
+		ObjectMeta: metav1.ObjectMeta{Name: "lvg-race"},
 		Status: snc.LVMVolumeGroupStatus{
-			Nodes: []snc.LVMVolumeGroupNode{
-				{
-					Name: "test-node",
-				},
-			},
+			Nodes:     []snc.LVMVolumeGroupNode{{Name: "node-1"}},
+			ThinPools: []snc.LVMVolumeGroupThinPoolStatus{{Name: "tp-1"}},
 		},
 	}
-	cache.AddLVG(lvg)
+	ch.AddLVG(lvg)
 
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			i++
-			pvc := &v1.PersistentVolumeClaim{
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+
+	// Writers: add/update PVCs
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			pvc := &corev1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      fmt.Sprintf("test-pvc-%d", i),
-					Namespace: "test-ns",
+					Name:      fmt.Sprintf("pvc-%d", i),
+					Namespace: "ns",
 				},
-			}
-
-			updatedPVC := &v1.PersistentVolumeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      fmt.Sprintf("test-pvc-%d", i),
-					Namespace: "test-ns",
-					Annotations: map[string]string{
-						SelectedNodeAnnotation: "test-node",
+				Spec: corev1.PersistentVolumeClaimSpec{
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceStorage: *resource.NewQuantity(int64(1<<20+i), resource.BinarySI)},
 					},
 				},
+				Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
 			}
-			err := cache.UpdateThickPVC(lvg.Name, pvc)
-			if err != nil {
-				b.Error(err)
+			_ = ch.AddThickPVC(lvg.Name, pvc)
+			_ = ch.AddThinPVC(lvg.Name, "tp-1", pvc)
+
+			// Update with selected node annotation
+			pvc.Annotations = map[string]string{SelectedNodeAnnotation: "node-1"}
+			_ = ch.UpdateThickPVC(lvg.Name, pvc)
+			_ = ch.UpdateThinPVC(lvg.Name, "tp-1", pvc)
+		}(i)
+	}
+
+	// Readers: query functions
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_ = ch.GetAllLVG()
+			_ = ch.GetLVGNamesByNodeName("node-1")
+			_, _ = ch.GetAllPVCForLVG(lvg.Name)
+			_, _ = ch.GetLVGThickReservedSpace(lvg.Name)
+			_, _ = ch.GetLVGThinReservedSpace(lvg.Name, "tp-1")
+		}()
+	}
+
+	// Removers
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			pvc := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pvc-%d", i), Namespace: "ns"},
 			}
-			err = cache.UpdateThickPVC(lvg.Name, updatedPVC)
-			if err != nil {
-				b.Error(err)
-			}
-		}
-	})
+			ch.RemovePVCFromTheCache(pvc)
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
 }
 
-func BenchmarkCache_FullLoad(b *testing.B) {
-	cache := NewCache(logger.Logger{}, DefaultPVCExpiredDurationSec)
+func TestCache_Race_AddDeleteLVG_GetAll(t *testing.T) {
+	log := logger.Logger{}
+	ch := NewCache(log, DefaultPVCExpiredDurationSec)
 
-	const (
-		nodeName = "test-node"
-	)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
 
-	i := 0
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			i++
-
-			lvgs := []*snc.LVMVolumeGroup{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: fmt.Sprintf("test-lvg-%d", i),
-					},
-					Status: snc.LVMVolumeGroupStatus{
-						Nodes: []snc.LVMVolumeGroupNode{
-							{
-								Name: nodeName,
-							},
-						},
-						AllocatedSize: resource.MustParse(fmt.Sprintf("1%dGi", i)),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: fmt.Sprintf("test-lvg-%d", i+1),
-					},
-					Status: snc.LVMVolumeGroupStatus{
-						Nodes: []snc.LVMVolumeGroupNode{
-							{
-								Name: nodeName,
-							},
-						},
-						AllocatedSize: resource.MustParse(fmt.Sprintf("1%dGi", i)),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: fmt.Sprintf("test-lvg-%d", i+2),
-					},
-					Status: snc.LVMVolumeGroupStatus{
-						Nodes: []snc.LVMVolumeGroupNode{
-							{
-								Name: nodeName,
-							},
-						},
-						AllocatedSize: resource.MustParse(fmt.Sprintf("1%dGi", i)),
-					},
-				},
+	// Add/Update LVGs
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			lvg := &snc.LVMVolumeGroup{
+				ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("lvg-%d", i)},
 			}
+			ch.AddLVG(lvg)
+			lvg.Status.AllocatedSize = resource.MustParse(fmt.Sprintf("%dGi", 1+i))
+			_ = ch.UpdateLVG(lvg)
+		}(i)
+	}
 
-			for _, lvg := range lvgs {
-				cache.AddLVG(lvg)
-				pvcs := []*v1.PersistentVolumeClaim{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      fmt.Sprintf("test-pvc-%d", i),
-							Namespace: "test-ns",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      fmt.Sprintf("test-pvc-%d", i+1),
-							Namespace: "test-ns",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      fmt.Sprintf("test-pvc-%d", i+2),
-							Namespace: "test-ns",
-						},
-					},
-				}
+	// Readers
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_ = ch.GetAllLVG()
+		}()
+	}
 
-				for _, pvc := range pvcs {
-					err := cache.AddThickPVC(lvg.Name, pvc)
-					if err != nil {
-						b.Error(err)
-					}
+	// Deleters
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			ch.DeleteLVG(fmt.Sprintf("lvg-%d", i))
+		}(i)
+	}
 
-					cache.GetLVGNamesForPVC(pvc)
-				}
-			}
-
-			updatedLvgs := []*snc.LVMVolumeGroup{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: fmt.Sprintf("test-lvg-%d", i),
-					},
-					Status: snc.LVMVolumeGroupStatus{
-						AllocatedSize: resource.MustParse(fmt.Sprintf("1%dGi", i+1)),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: fmt.Sprintf("test-lvg-%d", i+1),
-					},
-					Status: snc.LVMVolumeGroupStatus{
-						AllocatedSize: resource.MustParse(fmt.Sprintf("1%dGi", i+1)),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: fmt.Sprintf("test-lvg-%d", i+2),
-					},
-					Status: snc.LVMVolumeGroupStatus{
-						AllocatedSize: resource.MustParse(fmt.Sprintf("1%dGi", i+1)),
-					},
-				},
-			}
-
-			for _, lvg := range updatedLvgs {
-				var err error
-				for err != nil {
-					err = cache.UpdateLVG(lvg)
-				}
-
-				pvcs := []*v1.PersistentVolumeClaim{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      fmt.Sprintf("test-pvc-%d", i),
-							Namespace: "test-ns",
-							Annotations: map[string]string{
-								SelectedNodeAnnotation: nodeName,
-							},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      fmt.Sprintf("test-pvc-%d", i+1),
-							Namespace: "test-ns",
-							Annotations: map[string]string{
-								SelectedNodeAnnotation: nodeName,
-							},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      fmt.Sprintf("test-pvc-%d", i+2),
-							Namespace: "test-ns",
-							Annotations: map[string]string{
-								SelectedNodeAnnotation: nodeName,
-							},
-						},
-					},
-				}
-
-				for d, pvc := range pvcs {
-					for err != nil {
-						err = cache.UpdateThickPVC(lvg.Name, pvc)
-					}
-
-					for err != nil {
-						err = cache.AddThinPVC(lvg.Name, fmt.Sprintf("test-thin-%d", d), pvc)
-					}
-
-					for err != nil {
-						err = cache.UpdateThinPVC(lvg.Name, fmt.Sprintf("test-thin-%d", d), pvc)
-					}
-
-					cache.GetLVGNamesForPVC(pvc)
-				}
-			}
-
-			lvgMp := cache.GetAllLVG()
-			for lvgName := range lvgMp {
-				_, err := cache.GetAllPVCForLVG(lvgName)
-				if err != nil {
-					b.Error(err)
-				}
-				_, err = cache.GetLVGThickReservedSpace(lvgName)
-				if err != nil {
-					b.Error(err)
-				}
-				_, err = cache.GetLVGThinReservedSpace(lvgName, "test-thin")
-				if err != nil {
-					b.Error(err)
-				}
-			}
-
-			cache.GetLVGNamesByNodeName(nodeName)
-		}
-	})
+	close(start)
+	wg.Wait()
 }
