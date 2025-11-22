@@ -27,7 +27,6 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/strings/slices"
-	"sigs.k8s.io/yaml"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
@@ -67,34 +66,21 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	servingLog.Trace(fmt.Sprintf("NodeNames from the request: %+v", nodeNames))
 
 	targetProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
-	shouldProcess, err := shouldProcessPod(s.ctx, s.client, servingLog, inputData.Pod, targetProvisioners)
+	managedPVCs, err := getManagedPVCsFromPod(s.ctx, s.client, servingLog, inputData.Pod, targetProvisioners)
 	if err != nil {
-		servingLog.Error(err, "unable to check if the Pod should be processed")
+		servingLog.Error(err, "unable to get managed PVCs from the Pod")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	if !shouldProcess {
-		servingLog.Debug("Pod should not be processed. Return the same nodes")
+	if len(managedPVCs) == 0 {
+		servingLog.Debug("Pod uses PVCs which are not managed by our modules. Return the same nodes")
 		if err := writeNodeNamesResponse(w, servingLog, nodeNames); err != nil {
 			servingLog.Error(err, "unable to write node names response")
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
 	}
-	servingLog.Debug("Pod should be processed")
-
-	pvcs, err := getUsedPVC(s.ctx, s.client, servingLog, inputData.Pod)
-	if err != nil {
-		servingLog.Error(err, "unable to get PVC from the Pod")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	if len(pvcs) == 0 {
-		servingLog.Error(errors.New("no PVC was found"), "unable to get PVC from the Pod")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	for _, pvc := range pvcs {
+	for _, pvc := range managedPVCs {
 		servingLog.Trace(fmt.Sprintf("Pod uses PVC: %s", pvc.Name))
 
 		// this might happen when the extender-scheduler recovers after failure, populates the cache with PVC-watcher controller and then
@@ -107,41 +93,23 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	scs, err := getStorageClassesUsedByPVCs(s.ctx, s.client, pvcs)
+	scUsedByPVCs, err := getStorageClassesUsedByPVCs(s.ctx, s.client, managedPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to get StorageClasses from the PVC")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	for _, sc := range scs {
+	for _, sc := range scUsedByPVCs {
 		servingLog.Trace(fmt.Sprintf("Pod uses StorageClass: %s", sc.Name))
 	}
-	if len(scs) != len(pvcs) {
+	if len(scUsedByPVCs) != len(managedPVCs) {
 		servingLog.Error(errors.New("number of StorageClasses does not match the number of PVCs"), "unable to get StorageClasses from the PVC")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	managedPVCs, err := filterNotManagedPVC(s.ctx, s.client, servingLog, pvcs, scs, targetProvisioners)
-	if err != nil {
-		servingLog.Error(err, "unable to filter not managed PVC")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	for _, pvc := range managedPVCs {
-		servingLog.Trace(fmt.Sprintf("filtered managed PVC %s/%s", pvc.Namespace, pvc.Name))
-	}
-	if len(managedPVCs) == 0 {
-		servingLog.Warning("Pod uses PVCs which are not managed by our modules. Return the same nodes")
-		if err := writeNodeNamesResponse(w, servingLog, nodeNames); err != nil {
-			servingLog.Error(err, "unable to write node names response")
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-		}
-		return
-	}
-
 	servingLog.Debug("starts to extract PVC requested sizes")
-	pvcRequests, err := extractRequestedSize(s.ctx, s.client, servingLog, managedPVCs, scs)
+	pvcRequests, err := extractRequestedSize(s.ctx, s.client, servingLog, managedPVCs, scUsedByPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to extract request size")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -150,7 +118,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("successfully extracted the PVC requested sizes")
 
 	servingLog.Debug("starts to filter the nodes from the request")
-	filteredNodes, err := filterNodes(servingLog, s.cache, &nodeNames, inputData.Pod, managedPVCs, scs, pvcRequests)
+	filteredNodes, err := filterNodes(servingLog, s.cache, &nodeNames, inputData.Pod, managedPVCs, scUsedByPVCs, pvcRequests)
 	if err != nil {
 		servingLog.Error(err, "unable to filter the nodes")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -161,7 +129,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("starts to populate the cache")
 	servingLog.Cache("cache before the PVC reservation")
 	s.cache.PrintTheCacheLog()
-	err = populateCache(servingLog, filteredNodes.NodeNames, inputData.Pod, s.cache, managedPVCs, scs)
+	err = populateCache(servingLog, filteredNodes.NodeNames, inputData.Pod, s.cache, managedPVCs, scUsedByPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to populate cache")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -195,54 +163,6 @@ func writeNodeNamesResponse(w http.ResponseWriter, log logger.Logger, nodeNames 
 	return nil
 }
 
-func populateCache(log logger.Logger, nodeNames *[]string, pod *corev1.Pod, schedulerCache *cache.Cache, pvcs map[string]*corev1.PersistentVolumeClaim, scs map[string]*storagev1.StorageClass) error {
-	for _, nodeName := range *nodeNames {
-		for _, volume := range pod.Spec.Volumes {
-			if volume.PersistentVolumeClaim != nil {
-				log.Debug(fmt.Sprintf("[populateCache] reconcile the PVC %s for Pod %s/%s on node %s", volume.PersistentVolumeClaim.ClaimName, pod.Namespace, pod.Name, nodeName))
-				lvgNamesForTheNode := schedulerCache.GetLVGNamesByNodeName(nodeName)
-				log.Trace(fmt.Sprintf("[populateCache] LVMVolumeGroups from cache for the node %s: %v", nodeName, lvgNamesForTheNode))
-				pvc := pvcs[volume.PersistentVolumeClaim.ClaimName]
-				sc := scs[*pvc.Spec.StorageClassName]
-
-				lvgsForPVC, err := ExtractLVGsFromSC(sc)
-				if err != nil {
-					return err
-				}
-
-				switch sc.Parameters[consts.LvmTypeParamKey] {
-				case consts.Thick:
-					log.Debug(fmt.Sprintf("[populateCache] Storage Class %s has device type Thick, so the cache will be populated by PVC space requests", sc.Name))
-					log.Trace(fmt.Sprintf("[populateCache] LVMVolumeGroups from Storage Class %s for PVC %s/%s: %+v", sc.Name, pvc.Namespace, pvc.Name, lvgsForPVC))
-					for _, lvg := range lvgsForPVC {
-						if slices.Contains(lvgNamesForTheNode, lvg.Name) {
-							log.Trace(fmt.Sprintf("[populateCache] PVC %s/%s will reserve space in LVMVolumeGroup %s cache", pvc.Namespace, pvc.Name, lvg.Name))
-							err = schedulerCache.AddThickPVC(lvg.Name, pvc)
-							if err != nil {
-								return err
-							}
-						}
-					}
-				case consts.Thin:
-					log.Debug(fmt.Sprintf("[populateCache] Storage Class %s has device type Thin, so the cache will be populated by PVC space requests", sc.Name))
-					log.Trace(fmt.Sprintf("[populateCache] LVMVolumeGroups from Storage Class %s for PVC %s/%s: %+v", sc.Name, pvc.Namespace, pvc.Name, lvgsForPVC))
-					for _, lvg := range lvgsForPVC {
-						if slices.Contains(lvgNamesForTheNode, lvg.Name) {
-							log.Trace(fmt.Sprintf("[populateCache] PVC %s/%s will reserve space in LVMVolumeGroup %s Thin Pool %s cache", pvc.Namespace, pvc.Name, lvg.Name, lvg.Thin.PoolName))
-							err = schedulerCache.AddThinPVC(lvg.Name, lvg.Thin.PoolName, pvc)
-							if err != nil {
-								return err
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
 func filterNodes(
 	log logger.Logger,
 	schedulerCache *cache.Cache,
@@ -264,18 +184,19 @@ func filterNodes(
 		log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s in the cache", lvg.Name))
 	}
 
-	log.Debug(fmt.Sprintf("[filterNodes] starts to get LVMVolumeGroups for Storage Classes for a Pod %s/%s", pod.Namespace, pod.Name))
-	scLVGs, err := GetSortedLVGsFromStorageClasses(scs)
+	log.Debug("[filterNodes] starts to get LVMVolumeGroups for Storage Classes")
+	scLVGs, err := GetLVGsFromStorageClasses(scs)
 	if err != nil {
 		return nil, err
 	}
-	log.Debug(fmt.Sprintf("[filterNodes] successfully got LVMVolumeGroups for Storage Classes for a Pod %s/%s", pod.Namespace, pod.Name))
-	for scName, sortedLVGs := range scLVGs {
-		for _, lvg := range sortedLVGs {
+	log.Debug("[filterNodes] successfully got LVMVolumeGroups for Storage Classes")
+	for scName, lvmVolumeGroups := range scLVGs {
+		for _, lvg := range lvmVolumeGroups {
 			log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s belongs to Storage Class %s", lvg.Name, scName))
 		}
 	}
 
+	// TODO: This feature is no longer needed?
 	usedLVGs := RemoveUnusedLVGs(lvgs, scLVGs)
 	for _, lvg := range usedLVGs {
 		log.Trace(fmt.Sprintf("[filterNodes] the LVMVolumeGroup %s is actually used. VG size: %s, allocatedSize: %s", lvg.Name, lvg.Status.VGSize.String(), lvg.Status.AllocatedSize.String()))
@@ -459,6 +380,54 @@ func filterNodes(
 	return result, nil
 }
 
+func populateCache(log logger.Logger, nodeNames *[]string, pod *corev1.Pod, schedulerCache *cache.Cache, pvcs map[string]*corev1.PersistentVolumeClaim, scs map[string]*storagev1.StorageClass) error {
+	for _, nodeName := range *nodeNames {
+		for _, volume := range pod.Spec.Volumes {
+			if volume.PersistentVolumeClaim != nil {
+				log.Debug(fmt.Sprintf("[populateCache] reconcile the PVC %s for Pod %s/%s on node %s", volume.PersistentVolumeClaim.ClaimName, pod.Namespace, pod.Name, nodeName))
+				lvgNamesForTheNode := schedulerCache.GetLVGNamesByNodeName(nodeName)
+				log.Trace(fmt.Sprintf("[populateCache] LVMVolumeGroups from cache for the node %s: %v", nodeName, lvgNamesForTheNode))
+				pvc := pvcs[volume.PersistentVolumeClaim.ClaimName]
+				sc := scs[*pvc.Spec.StorageClassName]
+
+				lvgsForPVC, err := ExtractLVGsFromSC(sc)
+				if err != nil {
+					return err
+				}
+
+				switch sc.Parameters[consts.LvmTypeParamKey] {
+				case consts.Thick:
+					log.Debug(fmt.Sprintf("[populateCache] Storage Class %s has device type Thick, so the cache will be populated by PVC space requests", sc.Name))
+					log.Trace(fmt.Sprintf("[populateCache] LVMVolumeGroups from Storage Class %s for PVC %s/%s: %+v", sc.Name, pvc.Namespace, pvc.Name, lvgsForPVC))
+					for _, lvg := range lvgsForPVC {
+						if slices.Contains(lvgNamesForTheNode, lvg.Name) {
+							log.Trace(fmt.Sprintf("[populateCache] PVC %s/%s will reserve space in LVMVolumeGroup %s cache", pvc.Namespace, pvc.Name, lvg.Name))
+							err = schedulerCache.AddThickPVC(lvg.Name, pvc)
+							if err != nil {
+								return err
+							}
+						}
+					}
+				case consts.Thin:
+					log.Debug(fmt.Sprintf("[populateCache] Storage Class %s has device type Thin, so the cache will be populated by PVC space requests", sc.Name))
+					log.Trace(fmt.Sprintf("[populateCache] LVMVolumeGroups from Storage Class %s for PVC %s/%s: %+v", sc.Name, pvc.Namespace, pvc.Name, lvgsForPVC))
+					for _, lvg := range lvgsForPVC {
+						if slices.Contains(lvgNamesForTheNode, lvg.Name) {
+							log.Trace(fmt.Sprintf("[populateCache] PVC %s/%s will reserve space in LVMVolumeGroup %s Thin Pool %s cache", pvc.Namespace, pvc.Name, lvg.Name, lvg.Thin.PoolName))
+							err = schedulerCache.AddThinPVC(lvg.Name, lvg.Thin.PoolName, pvc)
+							if err != nil {
+								return err
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 func getLVGThinFreeSpaces(lvgs map[string]*snc.LVMVolumeGroup) map[string]map[string]int64 {
 	result := make(map[string]map[string]int64, len(lvgs))
 
@@ -546,66 +515,4 @@ func getCommonNodesByStorageClasses(scs map[string]*storagev1.StorageClass, node
 	}
 
 	return result, nil
-}
-
-func RemoveUnusedLVGs(lvgs map[string]*snc.LVMVolumeGroup, scsLVGs map[string]LVMVolumeGroups) map[string]*snc.LVMVolumeGroup {
-	result := make(map[string]*snc.LVMVolumeGroup, len(lvgs))
-	usedLvgs := make(map[string]struct{}, len(lvgs))
-
-	for _, scLvgs := range scsLVGs {
-		for _, lvg := range scLvgs {
-			usedLvgs[lvg.Name] = struct{}{}
-		}
-	}
-
-	for _, lvg := range lvgs {
-		if _, used := usedLvgs[lvg.Name]; used {
-			result[lvg.Name] = lvg
-		}
-	}
-
-	return result
-}
-
-func GetSortedLVGsFromStorageClasses(scs map[string]*storagev1.StorageClass) (map[string]LVMVolumeGroups, error) {
-	result := make(map[string]LVMVolumeGroups, len(scs))
-
-	for _, sc := range scs {
-		lvgs, err := ExtractLVGsFromSC(sc)
-		if err != nil {
-			return nil, err
-		}
-
-		result[sc.Name] = append(result[sc.Name], lvgs...)
-	}
-
-	return result, nil
-}
-
-type LVMVolumeGroup struct {
-	Name string `yaml:"name"`
-	Thin struct {
-		PoolName string `yaml:"poolName"`
-	} `yaml:"Thin"`
-}
-type LVMVolumeGroups []LVMVolumeGroup
-
-func ExtractLVGsFromSC(sc *storagev1.StorageClass) (LVMVolumeGroups, error) {
-	var lvmVolumeGroups LVMVolumeGroups
-	err := yaml.Unmarshal([]byte(sc.Parameters[consts.LVMVolumeGroupsParamKey]), &lvmVolumeGroups)
-	if err != nil {
-		return nil, err
-	}
-	return lvmVolumeGroups, nil
-}
-
-func SortLVGsByNodeName(lvgs map[string]*snc.LVMVolumeGroup) map[string][]*snc.LVMVolumeGroup {
-	sorted := make(map[string][]*snc.LVMVolumeGroup, len(lvgs))
-	for _, lvg := range lvgs {
-		for _, node := range lvg.Status.Nodes {
-			sorted[node.Name] = append(sorted[node.Name], lvg)
-		}
-	}
-
-	return sorted
 }

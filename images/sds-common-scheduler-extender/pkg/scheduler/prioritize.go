@@ -65,72 +65,38 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	servingLog.Trace(fmt.Sprintf("NodeNames from the request: %+v", nodeNames))
 
 	targetProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
-	shouldProcess, err := shouldProcessPod(s.ctx, s.client, servingLog, inputData.Pod, targetProvisioners)
+	managedPVCs, err := getManagedPVCsFromPod(s.ctx, s.client, servingLog, inputData.Pod, targetProvisioners)
 	if err != nil {
-		servingLog.Error(err, "unable to check if the Pod should be processed")
+		servingLog.Error(err, "unable to get managed PVCs from the Pod")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	if !shouldProcess {
-		servingLog.Debug("Pod should not be processed. Return the same nodes with 0 score")
+	if len(managedPVCs) == 0 {
+		servingLog.Debug("Pod uses PVCs which are not managed by our modules. Return the same nodes")
 		if err := writeNodeScoresResponse(w, servingLog, nodeNames, 0); err != nil {
-			servingLog.Error(err, "unable to write node scores response")
+			servingLog.Error(err, "unable to write node names response")
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
 	}
-	servingLog.Debug("Pod should be processed")
 
-	pvcs, err := getUsedPVC(s.ctx, s.client, servingLog, inputData.Pod)
-	if err != nil {
-		servingLog.Error(err, "unable to get PVC from the Pod")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	if len(pvcs) == 0 {
-		servingLog.Error(errors.New("no PVC was found"), "unable to get PVC from the Pod")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	for _, pvc := range pvcs {
-		servingLog.Trace(fmt.Sprintf("Pod uses PVC: %s", pvc.Name))
-	}
-
-	scs, err := getStorageClassesUsedByPVCs(s.ctx, s.client, pvcs)
+	scUsedByPVCs, err := getStorageClassesUsedByPVCs(s.ctx, s.client, managedPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to get StorageClasses from the PVC")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	for _, sc := range scs {
+	for _, sc := range scUsedByPVCs {
 		servingLog.Trace(fmt.Sprintf("Pod uses StorageClass: %s", sc.Name))
 	}
-	if len(scs) != len(pvcs) {
+	if len(scUsedByPVCs) != len(managedPVCs) {
 		servingLog.Error(errors.New("number of StorageClasses does not match the number of PVCs"), "unable to get StorageClasses from the PVC")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	managedPVCs, err := filterNotManagedPVC(s.ctx, s.client, servingLog, pvcs, scs, targetProvisioners)
-	if err != nil {
-		servingLog.Error(err, "unable to filter not managed PVC")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	for _, pvc := range managedPVCs {
-		servingLog.Trace(fmt.Sprintf("prioritizeed managed PVC %s/%s", pvc.Namespace, pvc.Name))
-	}
-	if len(managedPVCs) == 0 {
-		servingLog.Warning("Pod uses PVCs which are not managed by our modules. Return the same nodes with 0 score")
-		if err := writeNodeScoresResponse(w, servingLog, nodeNames, 0); err != nil {
-			servingLog.Error(err, "unable to write node scores response")
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-		}
-		return
-	}
-
 	servingLog.Debug("starts to extract PVC requested sizes")
-	pvcRequests, err := extractRequestedSize(s.ctx, s.client, servingLog, managedPVCs, scs)
+	pvcRequests, err := extractRequestedSize(s.ctx, s.client, servingLog, managedPVCs, scUsedByPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to extract request size")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -139,7 +105,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("successfully extracted the PVC requested sizes")
 
 	servingLog.Debug("starts to score the nodes for Pod")
-	scoredNodes, err := scoreNodes(servingLog, s.cache, &nodeNames, managedPVCs, scs, pvcRequests, s.defaultDivisor)
+	scoredNodes, err := scoreNodes(servingLog, s.cache, &nodeNames, managedPVCs, scUsedByPVCs, pvcRequests, s.defaultDivisor)
 	if err != nil {
 		servingLog.Error(err, "unable to score nodes")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -185,7 +151,7 @@ func scoreNodes(
 	divisor float64,
 ) ([]HostPriority, error) {
 	lvgs := schedulerCache.GetAllLVG()
-	scLVGs, err := GetSortedLVGsFromStorageClasses(scs)
+	scLVGs, err := GetLVGsFromStorageClasses(scs)
 	if err != nil {
 		return nil, err
 	}

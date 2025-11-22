@@ -26,8 +26,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	"github.com/stretchr/testify/assert/yaml"
 )
 
 const (
@@ -41,71 +43,72 @@ type PVCRequest struct {
 	RequestedSize int64
 }
 
-// If the Pod has at least one volume with a provisioner handled by this scheduler extender then return true, otherwise return false.
-func shouldProcessPod(ctx context.Context, cl client.Client, log logger.Logger, pod *corev1.Pod, targetProvisioners []string) (bool, error) {
-	log.Trace(fmt.Sprintf("[ShouldProcessPod] targetProvisioners=%+v, pod: %+v", targetProvisioners, pod))
+type LVMVolumeGroup struct {
+	Name string `yaml:"name"`
+	Thin struct {
+		PoolName string `yaml:"poolName"`
+	} `yaml:"Thin"`
+}
+type LVMVolumeGroups []LVMVolumeGroup
+
+// discoverProvisionerForPVC tries to detect a provisioner for the given PVC using:
+// 1) PVC annotations
+// 2) StorageClass referenced by the PVC
+// 3) PV bound to the PVC
+func discoverProvisionerForPVC(
+	ctx context.Context,
+	cl client.Client,
+	log logger.Logger,
+	pvc *corev1.PersistentVolumeClaim,
+) (string, error) {
 	var discoveredProvisioner string
 
-	for _, volume := range pod.Spec.Volumes {
-		if volume.PersistentVolumeClaim != nil {
-			log.Trace(fmt.Sprintf("[ShouldProcessPod] process volume: %+v that has pvc: %+v", volume, volume.PersistentVolumeClaim))
-			pvcName := volume.PersistentVolumeClaim.ClaimName
-			pvc := &corev1.PersistentVolumeClaim{}
-			err := cl.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pvcName}, pvc)
-			if err != nil {
-				return false, fmt.Errorf("[ShouldProcessPod] error getting PVC %s: %v", pvcName, err)
-			}
+	log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] get pvc: %+v", pvc))
+	log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] check provisioner in pvc annotations: %+v", pvc.Annotations))
 
-			log.Trace(fmt.Sprintf("[ShouldProcessPod] get pvc: %+v", pvc))
-			log.Trace(fmt.Sprintf("[ShouldProcessPod] check provisioner in pvc annotations: %+v", pvc.Annotations))
+	// Get provisioner from PVC annotations
+	discoveredProvisioner = pvc.Annotations[annotationStorageProvisioner]
+	if discoveredProvisioner != "" {
+		log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] discovered provisioner in pvc annotations: %s", discoveredProvisioner))
+		return discoveredProvisioner, nil
+	}
 
-			// Get provisioner from PVC annotations
-			discoveredProvisioner = pvc.Annotations[annotationStorageProvisioner]
-			if discoveredProvisioner != "" {
-				log.Trace(fmt.Sprintf("[ShouldProcessPod] discovered provisioner in pvc annotations: %s", discoveredProvisioner))
-			} else {
-				discoveredProvisioner = pvc.Annotations[annotationBetaStorageProvisioner]
-				log.Trace(fmt.Sprintf("[ShouldProcessPod] discovered provisioner in beta pvc annotations: %s", discoveredProvisioner))
-			}
+	discoveredProvisioner = pvc.Annotations[annotationBetaStorageProvisioner]
+	if discoveredProvisioner != "" {
+		log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] discovered provisioner in beta pvc annotations: %s", discoveredProvisioner))
+		return discoveredProvisioner, nil
+	}
 
-			// Get provisioner from StorageClass
-			if discoveredProvisioner == "" && pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != "" {
-				log.Trace(fmt.Sprintf("[ShouldProcessPod] can't find provisioner in pvc annotations, check in storageClass with name: %s", *pvc.Spec.StorageClassName))
-				storageClass := &storagev1.StorageClass{}
-				err = cl.Get(ctx, client.ObjectKey{Name: *pvc.Spec.StorageClassName}, storageClass)
-				if err != nil {
-					return false, fmt.Errorf("[ShouldProcessPod] error getting StorageClass %s: %v", *pvc.Spec.StorageClassName, err)
-				}
-				discoveredProvisioner = storageClass.Provisioner
-				log.Trace(fmt.Sprintf("[ShouldProcessPod] discover provisioner %s in storageClass: %+v", discoveredProvisioner, storageClass))
-			}
-
-			// Get provisioner from PV
-			if discoveredProvisioner == "" && pvc.Spec.VolumeName != "" {
-				log.Trace(fmt.Sprintf("[ShouldProcessPod] can't find provisioner in pvc annotations and StorageClass, check in PV with name: %s", pvc.Spec.VolumeName))
-				pv := &corev1.PersistentVolume{}
-				err := cl.Get(ctx, client.ObjectKey{Name: pvc.Spec.VolumeName}, pv)
-				if err != nil {
-					return false, fmt.Errorf("[ShouldProcessPod] error getting PV %s: %v", pvc.Spec.VolumeName, err)
-				}
-
-				if pv.Spec.CSI != nil {
-					discoveredProvisioner = pv.Spec.CSI.Driver
-				}
-
-				log.Trace(fmt.Sprintf("[ShouldProcessPod] discover provisioner %s in PV: %+v", discoveredProvisioner, pv))
-			}
-			log.Trace(fmt.Sprintf("[ShouldProcessPod] discovered provisioner: %s", discoveredProvisioner))
-
-			if slices.Contains(targetProvisioners, discoveredProvisioner) {
-				log.Trace(fmt.Sprintf("[ShouldProcessPod] provisioner matches targetProvisioners %+v. Pod: %s/%s", targetProvisioners, pod.Namespace, pod.Name))
-				return true, nil
-			}
-			log.Trace(fmt.Sprintf("[ShouldProcessPod] provisioner %s doesn't match targetProvisioners %+v. Skip volume %s.", discoveredProvisioner, targetProvisioners, volume.Name))
+	// Get provisioner from StorageClass
+	if pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != "" {
+		log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] can't find provisioner in pvc annotations, check in storageClass with name: %s", *pvc.Spec.StorageClassName))
+		storageClass := &storagev1.StorageClass{}
+		if err := cl.Get(ctx, client.ObjectKey{Name: *pvc.Spec.StorageClassName}, storageClass); err != nil {
+			return "", fmt.Errorf("[discoverProvisionerForPVC] error getting StorageClass %s: %v", *pvc.Spec.StorageClassName, err)
+		}
+		discoveredProvisioner = storageClass.Provisioner
+		log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] discover provisioner %s in storageClass: %+v", discoveredProvisioner, storageClass))
+		if discoveredProvisioner != "" {
+			return discoveredProvisioner, nil
 		}
 	}
-	log.Trace(fmt.Sprintf("[ShouldProcessPod] can't find targetProvisioners %+v in pod volumes. Skip pod: %s/%s", targetProvisioners, pod.Namespace, pod.Name))
-	return false, nil
+
+	// Get provisioner from PV
+	if pvc.Spec.VolumeName != "" {
+		log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] can't find provisioner in pvc annotations and StorageClass, check in PV with name: %s", pvc.Spec.VolumeName))
+		pv := &corev1.PersistentVolume{}
+		if err := cl.Get(ctx, client.ObjectKey{Name: pvc.Spec.VolumeName}, pv); err != nil {
+			return "", fmt.Errorf("[discoverProvisionerForPVC] error getting PV %s: %v", pvc.Spec.VolumeName, err)
+		}
+
+		if pv.Spec.CSI != nil {
+			discoveredProvisioner = pv.Spec.CSI.Driver
+		}
+
+		log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] discover provisioner %s in PV: %+v", discoveredProvisioner, pv))
+	}
+
+	return discoveredProvisioner, nil
 }
 
 // Get all node names from the request
@@ -125,78 +128,53 @@ func getNodeNames(inputData ExtenderArgs) ([]string, error) {
 	return nil, fmt.Errorf("no nodes provided")
 }
 
-// Get all PVCs used by the Pod
-func getUsedPVC(ctx context.Context, cl client.Client, log logger.Logger, pod *corev1.Pod) (map[string]*corev1.PersistentVolumeClaim, error) {
-	pvcMap, err := getAllPVCsFromNamespace(ctx, cl, pod.Namespace)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[getUsedPVC] unable to get all PVC for Pod %s in the namespace %s", pod.Name, pod.Namespace))
-		return nil, err
-	}
-
-	for pvcName := range pvcMap {
-		log.Trace(fmt.Sprintf("[getUsedPVC] PVC %s is in namespace %s", pod.Namespace, pvcName))
-	}
-
-	usedPvc := make(map[string]*corev1.PersistentVolumeClaim, len(pod.Spec.Volumes))
+// Get all PVCs from the Pod which are managed by our modules
+func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Logger, pod *corev1.Pod, targetProvisioners []string) (map[string]*corev1.PersistentVolumeClaim, error) {
+	var discoveredProvisioner string
+	managedPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(pod.Spec.Volumes))
+	var useLinstor *bool
 	for _, volume := range pod.Spec.Volumes {
 		if volume.PersistentVolumeClaim != nil {
-			log.Trace(fmt.Sprintf("[getUsedPVC] Pod %s/%s uses PVC %s", pod.Namespace, pod.Name, volume.PersistentVolumeClaim.ClaimName))
-			pvc := pvcMap[volume.PersistentVolumeClaim.ClaimName]
-			usedPvc[volume.PersistentVolumeClaim.ClaimName] = &pvc
-		}
-	}
+			pvcName := volume.PersistentVolumeClaim.ClaimName
+			log = log.WithValues("PVC", pvcName)
 
-	return usedPvc, err
-}
-
-// Get all PVCs from the namespace
-func getAllPVCsFromNamespace(ctx context.Context, cl client.Client, namespace string) (map[string]corev1.PersistentVolumeClaim, error) {
-	list := &corev1.PersistentVolumeClaimList{}
-	err := cl.List(ctx, list, &client.ListOptions{Namespace: namespace})
-	if err != nil {
-		return nil, err
-	}
-
-	pvcs := make(map[string]corev1.PersistentVolumeClaim, len(list.Items))
-	for _, pvc := range list.Items {
-		pvcs[pvc.Name] = pvc
-	}
-
-	return pvcs, nil
-}
-
-// Filter out PVCs which are not managed by our modules (i.e. PVCs which are managed by other provisioners)
-func filterNotManagedPVC(ctx context.Context, cl client.Client, log logger.Logger, pvcs map[string]*corev1.PersistentVolumeClaim, scs map[string]*storagev1.StorageClass, targetProvisioners []string) (map[string]*corev1.PersistentVolumeClaim, error) {
-	useLinstor := true
-	var err error
-	for _, pvc := range pvcs {
-		if scs[*pvc.Spec.StorageClassName].Provisioner == consts.SdsReplicatedVolumeProvisioner {
-			useLinstor, err = getUseLinstor(ctx, cl, log)
+			pvc := &corev1.PersistentVolumeClaim{}
+			err := cl.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pvcName}, pvc)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting PVC: %v", err)
 			}
 
-			break
+			discoveredProvisioner, err = discoverProvisionerForPVC(ctx, cl, log, pvc)
+			if err != nil {
+				return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting provisioner: %v", err)
+			}
+			log.Trace(fmt.Sprintf("[getManagedPVCsFromPod] discovered provisioner: %s", discoveredProvisioner))
+
+			if !slices.Contains(targetProvisioners, discoveredProvisioner) {
+				log.Debug(fmt.Sprintf("[getManagedPVCsFromPod] provisioner not matches targetProvisioners %+v", targetProvisioners))
+				continue
+			}
+
+			if discoveredProvisioner == consts.SdsReplicatedVolumeProvisioner {
+				if useLinstor == nil {
+					useLinstor, err = getUseLinstor(ctx, cl, log)
+					if err != nil {
+						return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting useLinstor: %v", err)
+					}
+				}
+
+				if *useLinstor {
+					log.Debug("[getManagedPVCsFromPod] filter out PVC due to used provisioner is managed by the Linstor")
+					continue
+				}
+			}
+
+			log.Debug("[getManagedPVCsFromPod] add PVC to the managed PVCs")
+			managedPVCs[pvcName] = pvc
 		}
 	}
 
-	filteredPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(pvcs))
-	for _, pvc := range pvcs {
-		sc := scs[*pvc.Spec.StorageClassName]
-		if !slices.Contains(targetProvisioners, sc.Provisioner) {
-			log.Debug(fmt.Sprintf("[filterNotManagedPVC] filter out PVC %s/%s due to used StorageClass %s is not managed by our modules", pvc.Name, pvc.Namespace, sc.Name))
-			continue
-		}
-
-		if useLinstor && sc.Provisioner == consts.SdsReplicatedVolumeProvisioner {
-			log.Debug(fmt.Sprintf("[filterNotManagedPVC] filter out PVC %s/%s due to used StorageClass %s is managed by the Linstor", pvc.Name, pvc.Namespace, sc.Name))
-			continue
-		}
-
-		filteredPVCs[pvc.Name] = pvc
-	}
-
-	return filteredPVCs, nil
+	return managedPVCs, nil
 }
 
 // Get all StorageClasses used by the PVCs
@@ -229,24 +207,27 @@ func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map
 }
 
 // Get useLinstor value from the sds-replication-volume ModuleConfig
-func getUseLinstor(ctx context.Context, cl client.Client, log logger.Logger) (bool, error) {
+func getUseLinstor(ctx context.Context, cl client.Client, log logger.Logger) (*bool, error) {
+	// local variables to return pointers to
+	_true := true
+	_false := false
 	mc := &d8commonapi.ModuleConfig{}
 	err := cl.Get(ctx, client.ObjectKey{Name: "sds-replicated-volume"}, mc)
 	if err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			log.Debug("[getUseLinstor] ModuleConfig sds-replicated-volume not found. Assume useLinstor is true")
-			return true, nil
+			return &_true, nil
 		}
-		return true, err
+		return &_true, err
 	}
 
 	if value, exists := mc.Spec.Settings["useLinstor"]; exists && value == true {
 		log.Debug("[getUseLinstor] ModuleConfig sds-replicated-volume found. Assume useLinstor is true")
-		return true, nil
+		return &_true, nil
 	}
 
 	log.Debug("[getUseLinstor] ModuleConfig sds-replicated-volume found. Assume useLinstor is false")
-	return false, nil
+	return &_false, nil
 }
 
 // Extract requested size from the PVC
@@ -302,4 +283,65 @@ func extractRequestedSize(
 	}
 
 	return pvcRequests, nil
+}
+
+// Get LVMVolumeGroups from StorageClasses
+func GetLVGsFromStorageClasses(scs map[string]*storagev1.StorageClass) (map[string]LVMVolumeGroups, error) {
+	result := make(map[string]LVMVolumeGroups, len(scs))
+
+	for _, sc := range scs {
+		lvgs, err := ExtractLVGsFromSC(sc)
+		if err != nil {
+			return nil, err
+		}
+
+		result[sc.Name] = append(result[sc.Name], lvgs...)
+	}
+
+	return result, nil
+}
+
+// Extract LVMVolumeGroups from StorageClass
+func ExtractLVGsFromSC(sc *storagev1.StorageClass) (LVMVolumeGroups, error) {
+	var lvmVolumeGroups LVMVolumeGroups
+	err := yaml.Unmarshal([]byte(sc.Parameters[consts.LVMVolumeGroupsParamKey]), &lvmVolumeGroups)
+	if err != nil {
+		return nil, err
+	}
+	return lvmVolumeGroups, nil
+}
+
+// Remove unused LVMVolumeGroups
+// lvgs - all LVMVolumeGroups in the cache
+// scsLVGs - LVMVolumeGroups for each StorageClass
+// return - map of used LVMVolumeGroups
+func RemoveUnusedLVGs(lvgs map[string]*snc.LVMVolumeGroup, scsLVGs map[string]LVMVolumeGroups) map[string]*snc.LVMVolumeGroup {
+	result := make(map[string]*snc.LVMVolumeGroup, len(lvgs))
+	usedLvgs := make(map[string]struct{}, len(lvgs))
+
+	for _, scLvgs := range scsLVGs {
+		for _, lvg := range scLvgs {
+			usedLvgs[lvg.Name] = struct{}{}
+		}
+	}
+
+	for _, lvg := range lvgs {
+		if _, used := usedLvgs[lvg.Name]; used {
+			result[lvg.Name] = lvg
+		}
+	}
+
+	return result
+}
+
+// Sort LVMVolumeGroups by node name
+func SortLVGsByNodeName(lvgs map[string]*snc.LVMVolumeGroup) map[string][]*snc.LVMVolumeGroup {
+	sorted := make(map[string][]*snc.LVMVolumeGroup, len(lvgs))
+	for _, lvg := range lvgs {
+		for _, node := range lvg.Status.Nodes {
+			sorted[node.Name] = append(sorted[node.Name], lvg)
+		}
+	}
+
+	return sorted
 }
