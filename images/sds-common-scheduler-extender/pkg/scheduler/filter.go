@@ -81,7 +81,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, pvc := range managedPVCs {
-		servingLog.Trace(fmt.Sprintf("Pod uses PVC: %s", pvc.Name))
+		servingLog.Trace(fmt.Sprintf("managed PVC: %s", pvc.Name))
 
 		// this might happen when the extender-scheduler recovers after failure, populates the cache with PVC-watcher controller and then
 		// the kube scheduler post a request to schedule the pod with the PVC.

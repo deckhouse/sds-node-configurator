@@ -79,6 +79,9 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	for _, pvc := range managedPVCs {
+		servingLog.Trace(fmt.Sprintf("managed PVC: %s", pvc.Name))
+	}
 
 	scUsedByPVCs, err := getStorageClassesUsedByPVCs(s.ctx, s.client, managedPVCs)
 	if err != nil {
