@@ -177,6 +177,8 @@ func (c *Cache) GetLVGNamesByNodeName(nodeName string) []string {
 }
 
 // GetAllLVG returns all the LVMVolumeGroups resources stored in the cache.
+//
+// Return: map[lvgName]*snc.LVMVolumeGroup
 func (c *Cache) GetAllLVG() map[string]*snc.LVMVolumeGroup {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()

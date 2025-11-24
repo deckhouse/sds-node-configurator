@@ -105,6 +105,15 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	if len(pvcRequests) == 0 {
+		servingLog.Debug("No PVC requests found. Return the same nodes with 0 score")
+		if err := writeNodeScoresResponse(w, servingLog, nodeNames, 0); err != nil {
+			servingLog.Error(err, "unable to write node scores response")
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+	servingLog.Trace(fmt.Sprintf("PVC requests: %+v", pvcRequests))
 	servingLog.Debug("successfully extracted the PVC requested sizes")
 
 	servingLog.Debug("starts to score the nodes for Pod")
@@ -153,13 +162,24 @@ func scoreNodes(
 	pvcRequests map[string]PVCRequest,
 	divisor float64,
 ) ([]HostPriority, error) {
-	lvgs := schedulerCache.GetAllLVG()
+	allLVGs := schedulerCache.GetAllLVG()
+	for _, lvg := range allLVGs {
+		log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s in the cache", lvg.Name))
+	}
+
+	log.Debug("[scoreNodes] starts to get LVMVolumeGroups for Storage Classes")
 	scLVGs, err := GetLVGsFromStorageClasses(scs)
 	if err != nil {
 		return nil, err
 	}
+	log.Debug("[scoreNodes] successfully got LVMVolumeGroups for Storage Classes")
+	for scName, lvmVolumeGroups := range scLVGs {
+		for _, lvg := range lvmVolumeGroups {
+			log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s belongs to Storage Class %s", lvg.Name, scName))
+		}
+	}
 
-	usedLVGs := RemoveUnusedLVGs(lvgs, scLVGs)
+	usedLVGs := RemoveUnusedLVGs(allLVGs, scLVGs)
 	for lvgName := range usedLVGs {
 		log.Trace(fmt.Sprintf("[scoreNodes] used LVMVolumeGroup %s", lvgName))
 	}
@@ -198,7 +218,7 @@ func scoreNodes(
 				log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s is common for storage class %s and node %s", commonLVG.Name, *pvc.Spec.StorageClassName, nodeName))
 
 				var freeSpace resource.Quantity
-				lvg := lvgs[commonLVG.Name]
+				lvg := allLVGs[commonLVG.Name]
 				switch pvcReq.DeviceType {
 				case consts.Thick:
 					freeSpace = lvg.Status.VGFree

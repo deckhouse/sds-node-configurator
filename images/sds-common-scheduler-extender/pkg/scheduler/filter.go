@@ -115,6 +115,15 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	if len(pvcRequests) == 0 {
+		servingLog.Debug("No PVC requests found. Return the same nodes")
+		if err := writeNodeNamesResponse(w, servingLog, nodeNames); err != nil {
+			servingLog.Error(err, "unable to write node names response")
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+	servingLog.Trace(fmt.Sprintf("PVC requests: %+v", pvcRequests))
 	servingLog.Debug("successfully extracted the PVC requested sizes")
 
 	servingLog.Debug("starts to filter the nodes from the request")
@@ -172,32 +181,26 @@ func filterNodes(
 	scs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 ) (*ExtenderFilterResult, error) {
-	// Param "pvcRequests" is a total amount of the pvcRequests space (both Thick and Thin) for Pod (i.e. from every PVC)
-	if len(pvcRequests) == 0 {
-		return &ExtenderFilterResult{
-			NodeNames: nodeNames,
-		}, nil
-	}
-
-	lvgs := schedulerCache.GetAllLVG()
-	for _, lvg := range lvgs {
+	allLVGs := schedulerCache.GetAllLVG()
+	for _, lvg := range allLVGs {
 		log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s in the cache", lvg.Name))
 	}
 
-	log.Debug("[filterNodes] starts to get LVMVolumeGroups for Storage Classes")
+	// TODO: This place is for the future feature to separate LVMVolumeGroups by provisioners
+
+	log.Debug("[filterNodes] starts to get LVMVolumeGroups for each Storage Class")
 	scLVGs, err := GetLVGsFromStorageClasses(scs)
 	if err != nil {
 		return nil, err
 	}
-	log.Debug("[filterNodes] successfully got LVMVolumeGroups for Storage Classes")
+	log.Debug("[filterNodes] successfully got LVMVolumeGroups for each Storage Class")
 	for scName, lvmVolumeGroups := range scLVGs {
 		for _, lvg := range lvmVolumeGroups {
 			log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s belongs to Storage Class %s", lvg.Name, scName))
 		}
 	}
 
-	// TODO: This feature is no longer needed?
-	usedLVGs := RemoveUnusedLVGs(lvgs, scLVGs)
+	usedLVGs := RemoveUnusedLVGs(allLVGs, scLVGs)
 	for _, lvg := range usedLVGs {
 		log.Trace(fmt.Sprintf("[filterNodes] the LVMVolumeGroup %s is actually used. VG size: %s, allocatedSize: %s", lvg.Name, lvg.Status.VGSize.String(), lvg.Status.AllocatedSize.String()))
 	}
@@ -314,7 +317,7 @@ func filterNodes(
 					lvgsThickFree[commonLVG.Name] -= pvcReq.RequestedSize
 					thickMapMtx.Unlock()
 				case consts.Thin:
-					lvg := lvgs[commonLVG.Name]
+					lvg := allLVGs[commonLVG.Name]
 
 					// we try to find specific ThinPool which the PVC can use in the LVMVolumeGroup
 					targetThinPool := findMatchedThinPool(lvg.Status.ThinPools, commonLVG.Thin.PoolName)

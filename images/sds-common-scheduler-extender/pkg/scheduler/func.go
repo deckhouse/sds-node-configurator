@@ -230,7 +230,23 @@ func getUseLinstor(ctx context.Context, cl client.Client, log logger.Logger) (*b
 	return &_false, nil
 }
 
-// Extract requested size from the PVC
+// extractRequestedSize extracts the requested size from the PVC based on the PVC status phase and the StorageClass parameters.
+//
+// Return: map[pvcName]PVCRequest
+// Example:
+//
+//	{
+//	  "pvc1": {
+//	    "deviceType": "Thick",
+//	    "requestedSize": 100
+//	  }
+//	}
+//	{
+//	  "pvc2": {
+//	    "deviceType": "Thin",
+//	    "requestedSize": 200
+//	  }
+//	}
 func extractRequestedSize(
 	ctx context.Context,
 	cl client.Client,
@@ -278,14 +294,12 @@ func extractRequestedSize(
 		}
 	}
 
-	for name, req := range pvcRequests {
-		log.Trace(fmt.Sprintf("[extractRequestedSize] pvc %s has requested size: %d, device type: %s", name, req.RequestedSize, req.DeviceType))
-	}
-
 	return pvcRequests, nil
 }
 
 // Get LVMVolumeGroups from StorageClasses
+//
+// Return: map[scName]LVMVolumeGroups
 func GetLVGsFromStorageClasses(scs map[string]*storagev1.StorageClass) (map[string]LVMVolumeGroups, error) {
 	result := make(map[string]LVMVolumeGroups, len(scs))
 
@@ -311,10 +325,13 @@ func ExtractLVGsFromSC(sc *storagev1.StorageClass) (LVMVolumeGroups, error) {
 	return lvmVolumeGroups, nil
 }
 
-// Remove unused LVMVolumeGroups
-// lvgs - all LVMVolumeGroups in the cache
+// Remove LVMVolumeGroups, which are not used in StorageClasses
+//
+// Params:
+// lvgs - all LVMVolumeGroups in the cache;
 // scsLVGs - LVMVolumeGroups for each StorageClass
-// return - map of used LVMVolumeGroups
+//
+// Return: map[lvgName]*snc.LVMVolumeGroup
 func RemoveUnusedLVGs(lvgs map[string]*snc.LVMVolumeGroup, scsLVGs map[string]LVMVolumeGroups) map[string]*snc.LVMVolumeGroup {
 	result := make(map[string]*snc.LVMVolumeGroup, len(lvgs))
 	usedLvgs := make(map[string]struct{}, len(lvgs))
