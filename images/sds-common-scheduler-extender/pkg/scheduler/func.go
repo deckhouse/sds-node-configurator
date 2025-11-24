@@ -351,8 +351,11 @@ func RemoveUnusedLVGs(lvgs map[string]*snc.LVMVolumeGroup, scsLVGs map[string]LV
 	return result
 }
 
-// Sort LVMVolumeGroups by node name
-func SortLVGsByNodeName(lvgs map[string]*snc.LVMVolumeGroup) map[string][]*snc.LVMVolumeGroup {
+// Params:
+// lvgs - LVMVolumeGroups;
+//
+// Return: map[nodeName][]*snc.LVMVolumeGroup
+func LVMVolumeGroupsByNodeName(lvgs map[string]*snc.LVMVolumeGroup) map[string][]*snc.LVMVolumeGroup {
 	sorted := make(map[string][]*snc.LVMVolumeGroup, len(lvgs))
 	for _, lvg := range lvgs {
 		for _, node := range lvg.Status.Nodes {

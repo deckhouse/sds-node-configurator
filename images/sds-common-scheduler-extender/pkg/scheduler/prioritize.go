@@ -184,7 +184,7 @@ func scoreNodes(
 		log.Trace(fmt.Sprintf("[scoreNodes] used LVMVolumeGroup %s", lvgName))
 	}
 
-	nodeLVGs := SortLVGsByNodeName(usedLVGs)
+	nodeLVGs := LVMVolumeGroupsByNodeName(usedLVGs)
 	for n, ls := range nodeLVGs {
 		for _, l := range ls {
 			log.Trace(fmt.Sprintf("[scoreNodes] the LVMVolumeGroup %s belongs to node %s", l.Name, n))

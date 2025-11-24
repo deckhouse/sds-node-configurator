@@ -188,15 +188,15 @@ func filterNodes(
 
 	// TODO: This place is for the future feature to separate LVMVolumeGroups by provisioners
 
-	log.Debug("[filterNodes] starts to get LVMVolumeGroups for each Storage Class")
+	log.Debug("[filterNodes] starts to get LVMVolumeGroups for each StorageClasses")
 	scLVGs, err := GetLVGsFromStorageClasses(scs)
 	if err != nil {
 		return nil, err
 	}
-	log.Debug("[filterNodes] successfully got LVMVolumeGroups for each Storage Class")
+	log.Debug("[filterNodes] successfully got LVMVolumeGroups for each StorageClasses")
 	for scName, lvmVolumeGroups := range scLVGs {
 		for _, lvg := range lvmVolumeGroups {
-			log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s belongs to Storage Class %s", lvg.Name, scName))
+			log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s belongs to StorageClass %s", lvg.Name, scName))
 		}
 	}
 
@@ -206,7 +206,7 @@ func filterNodes(
 	}
 
 	lvgsThickFree := getLVGThickFreeSpaces(usedLVGs)
-	log.Trace(fmt.Sprintf("[filterNodes] for a Pod %s/%s current LVMVolumeGroups Thick FreeSpace on the node: %+v", pod.Namespace, pod.Name, lvgsThickFree))
+	log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroups Thick FreeSpace: %+v", lvgsThickFree))
 	for lvgName, freeSpace := range lvgsThickFree {
 		log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s Thick free space %s", lvgName, resource.NewQuantity(freeSpace, resource.BinarySI)))
 		reservedSpace, err := schedulerCache.GetLVGThickReservedSpace(lvgName)
@@ -217,10 +217,10 @@ func filterNodes(
 		log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s reserved PVC space %s", lvgName, resource.NewQuantity(reservedSpace, resource.BinarySI)))
 		lvgsThickFree[lvgName] -= reservedSpace
 	}
-	log.Trace(fmt.Sprintf("[filterNodes] for a Pod %s/%s current LVMVolumeGroups Thick FreeSpace with reserved PVC: %+v", pod.Namespace, pod.Name, lvgsThickFree))
+	log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroups Thick FreeSpace with reserved PVC: %+v", lvgsThickFree))
 
 	lvgsThinFree := getLVGThinFreeSpaces(usedLVGs)
-	log.Trace(fmt.Sprintf("[filterNodes] for a Pod %s/%s current LVMVolumeGroups Thin FreeSpace on the node: %+v", pod.Namespace, pod.Name, lvgsThinFree))
+	log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroups Thin FreeSpace: %+v", lvgsThinFree))
 	for lvgName, thinPools := range lvgsThinFree {
 		for tpName, freeSpace := range thinPools {
 			log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s Thin Pool %s free space %s", lvgName, tpName, resource.NewQuantity(freeSpace, resource.BinarySI)))
@@ -234,7 +234,7 @@ func filterNodes(
 		}
 	}
 
-	nodeLVGs := SortLVGsByNodeName(usedLVGs)
+	nodeLVGs := LVMVolumeGroupsByNodeName(usedLVGs)
 	for n, ls := range nodeLVGs {
 		for _, l := range ls {
 			log.Trace(fmt.Sprintf("[filterNodes] the LVMVolumeGroup %s belongs to node %s", l.Name, n))
@@ -244,11 +244,11 @@ func filterNodes(
 	// these are the nodes which might store every PVC from the Pod
 	commonNodes, err := getCommonNodesByStorageClasses(scs, nodeLVGs)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[filterNodes] unable to get common nodes for PVCs from the Pod %s/%s", pod.Namespace, pod.Name))
+		log.Error(err, "[filterNodes] unable to get common nodes for PVCs")
 		return nil, err
 	}
 	for nodeName := range commonNodes {
-		log.Trace(fmt.Sprintf("[filterNodes] Node %s is a common for every storage class", nodeName))
+		log.Trace(fmt.Sprintf("[filterNodes] Node %s is a common for every StorageClasses", nodeName))
 	}
 
 	result := &ExtenderFilterResult{
@@ -273,9 +273,9 @@ func filterNodes(
 			}()
 
 			if _, common := commonNodes[nodeName]; !common {
-				log.Debug(fmt.Sprintf("[filterNodes] node %s is not common for used Storage Classes %+v", nodeName, scs))
+				log.Debug(fmt.Sprintf("[filterNodes] node %s is not common for used StorageClasses %+v", nodeName, scs))
 				failedNodesMapMtx.Lock()
-				result.FailedNodes[nodeName] = fmt.Sprintf("node %s is not common for used Storage Classes", nodeName)
+				result.FailedNodes[nodeName] = fmt.Sprintf("node %s is not common for used StorageClasses", nodeName)
 				failedNodesMapMtx.Unlock()
 				return
 			}
@@ -368,16 +368,16 @@ func filterNodes(
 	}
 	close(errs)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[filterNodes] unable to filter nodes for the Pod %s/%s, last error: %s", pod.Namespace, pod.Name, err.Error()))
+		log.Error(err, fmt.Sprintf("[filterNodes] unable to filter nodes for the Pod, last error: %s", err.Error()))
 		return nil, err
 	}
 
 	for _, nodeName := range *result.NodeNames {
-		log.Trace(fmt.Sprintf("[filterNodes] for a Pod %s/%s there is a suitable node: %s", pod.Namespace, pod.Name, nodeName))
+		log.Trace(fmt.Sprintf("[filterNodes] for a Pod there is a suitable node: %s", nodeName))
 	}
 
 	for node, reason := range result.FailedNodes {
-		log.Trace(fmt.Sprintf("[filterNodes] for a Pod %s/%s there is a failed node: %s, reason: %s", pod.Namespace, pod.Name, node, reason))
+		log.Trace(fmt.Sprintf("[filterNodes] for a Pod there is a failed node: %s, reason: %s", node, reason))
 	}
 
 	return result, nil
@@ -431,6 +431,23 @@ func populateCache(log logger.Logger, nodeNames *[]string, pod *corev1.Pod, sche
 	return nil
 }
 
+// Params:
+// lvgs - all LVMVolumeGroups in the cache;
+//
+// Return: map[lvgName]map[string]int64
+// Example:
+//
+//	{
+//	  "vg0": {
+//	    "tp0": 100,
+//	    "tp1": 200,
+//	  },
+//	}
+//
+// Description:
+// This function returns a map of ThinPools free spaces for each LVMVolumeGroup.
+//
+// .status.thinPools[].availableSpace is the free space of the ThinPool.
 func getLVGThinFreeSpaces(lvgs map[string]*snc.LVMVolumeGroup) map[string]map[string]int64 {
 	result := make(map[string]map[string]int64, len(lvgs))
 
@@ -447,6 +464,21 @@ func getLVGThinFreeSpaces(lvgs map[string]*snc.LVMVolumeGroup) map[string]map[st
 	return result
 }
 
+// Params:
+// lvgs - all LVMVolumeGroups in the cache;
+//
+// Return: map[lvgName]int64
+// Example:
+//
+//	{
+//	  "vg0": 100,
+//	  "vg1": 200,
+//	}
+//
+// Description:
+// This function returns a map of Thick free spaces for each LVMVolumeGroup.
+//
+// .status.VGFree is the free space of the LVMVolumeGroup.
 func getLVGThickFreeSpaces(lvgs map[string]*snc.LVMVolumeGroup) map[string]int64 {
 	result := make(map[string]int64, len(lvgs))
 
@@ -457,6 +489,17 @@ func getLVGThickFreeSpaces(lvgs map[string]*snc.LVMVolumeGroup) map[string]int64
 	return result
 }
 
+// Params:
+// thinPools - ThinPools of the LVMVolumeGroup;
+// name - name of the ThinPool to find;
+//
+// Return: *snc.LVMVolumeGroupThinPoolStatus
+// Example:
+//
+//	{
+//	  "name": "tp0",
+//	  "availableSpace": 100,
+//	}
 func findMatchedThinPool(thinPools []snc.LVMVolumeGroupThinPoolStatus, name string) *snc.LVMVolumeGroupThinPoolStatus {
 	for _, tp := range thinPools {
 		if tp.Name == name {
@@ -467,6 +510,19 @@ func findMatchedThinPool(thinPools []snc.LVMVolumeGroupThinPoolStatus, name stri
 	return nil
 }
 
+// Params:
+// nodeLVGs - LVMVolumeGroups on the node;
+// scLVGs - LVMVolumeGroups for the Storage Class;
+//
+// Return: *LVMVolumeGroup
+// Example:
+//
+//	{
+//	  "name": "vg0",
+//	  "status": {
+//	    "nodes": ["node1", "node2"],
+//	  },
+//	}
 func findMatchedLVG(nodeLVGs []*snc.LVMVolumeGroup, scLVGs LVMVolumeGroups) *LVMVolumeGroup {
 	nodeLVGNames := make(map[string]struct{}, len(nodeLVGs))
 	for _, lvg := range nodeLVGs {
@@ -482,6 +538,23 @@ func findMatchedLVG(nodeLVGs []*snc.LVMVolumeGroup, scLVGs LVMVolumeGroups) *LVM
 	return nil
 }
 
+// Params:
+// scs - Storage Classes;
+// nodesWithLVGs - LVMVolumeGroups on the nodes;
+//
+// Return: map[nodeName][]*snc.LVMVolumeGroup
+// Example:
+//
+//	{
+//	  "node1": [
+//	    {
+//	      "name": "vg0",
+//	      "status": {
+//	        "nodes": ["node1", "node2"],
+//	      },
+//	    },
+//	  ],
+//	}
 func getCommonNodesByStorageClasses(scs map[string]*storagev1.StorageClass, nodesWithLVGs map[string][]*snc.LVMVolumeGroup) (map[string][]*snc.LVMVolumeGroup, error) {
 	result := make(map[string][]*snc.LVMVolumeGroup, len(nodesWithLVGs))
 
