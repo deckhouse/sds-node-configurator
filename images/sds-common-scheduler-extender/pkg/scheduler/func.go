@@ -129,6 +129,15 @@ func getNodeNames(inputData ExtenderArgs) ([]string, error) {
 }
 
 // Get all PVCs from the Pod which are managed by our modules
+//
+// Params:
+// ctx - context;
+// cl - client;
+// log - logger;
+// pod - Pod;
+// targetProvisioners - target provisioners;
+//
+// Return: map[pvcName]*corev1.PersistentVolumeClaim
 func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Logger, pod *corev1.Pod, targetProvisioners []string) (map[string]*corev1.PersistentVolumeClaim, error) {
 	var discoveredProvisioner string
 	managedPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(pod.Spec.Volumes))
@@ -178,6 +187,13 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 }
 
 // Get all StorageClasses used by the PVCs
+//
+// Params:
+// ctx - context;
+// cl - client;
+// pvcs - PVCs;
+//
+// Return: map[scName]*storagev1.StorageClass
 func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map[string]*corev1.PersistentVolumeClaim) (map[string]*storagev1.StorageClass, error) {
 	scs := &storagev1.StorageClassList{}
 	err := cl.List(ctx, scs)

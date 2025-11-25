@@ -177,8 +177,8 @@ func filterNodes(
 	schedulerCache *cache.Cache,
 	nodeNames *[]string,
 	pod *corev1.Pod,
-	pvcs map[string]*corev1.PersistentVolumeClaim,
-	scs map[string]*storagev1.StorageClass,
+	managedPVCs map[string]*corev1.PersistentVolumeClaim,
+	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 ) (*ExtenderFilterResult, error) {
 	allLVGs := schedulerCache.GetAllLVG()
@@ -189,7 +189,7 @@ func filterNodes(
 	// TODO: This place is for the future feature to separate LVMVolumeGroups by provisioners
 
 	log.Debug("[filterNodes] starts to get LVMVolumeGroups for each StorageClasses")
-	scLVGs, err := GetLVGsFromStorageClasses(scs)
+	scLVGs, err := GetLVGsFromStorageClasses(scUsedByPVCs)
 	if err != nil {
 		return nil, err
 	}
@@ -200,11 +200,13 @@ func filterNodes(
 		}
 	}
 
+	// list of LVMVolumeGroups which are used by the PVCs
 	usedLVGs := RemoveUnusedLVGs(allLVGs, scLVGs)
 	for _, lvg := range usedLVGs {
 		log.Trace(fmt.Sprintf("[filterNodes] the LVMVolumeGroup %s is actually used. VG size: %s, allocatedSize: %s", lvg.Name, lvg.Status.VGSize.String(), lvg.Status.AllocatedSize.String()))
 	}
 
+	// get the free space for the Thick LVMVolumeGroups
 	lvgsThickFree := getLVGThickFreeSpaces(usedLVGs)
 	log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroups Thick FreeSpace: %+v", lvgsThickFree))
 	for lvgName, freeSpace := range lvgsThickFree {
@@ -219,6 +221,7 @@ func filterNodes(
 	}
 	log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroups Thick FreeSpace with reserved PVC: %+v", lvgsThickFree))
 
+	// get the free space for the Thin LVMVolumeGroups
 	lvgsThinFree := getLVGThinFreeSpaces(usedLVGs)
 	log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroups Thin FreeSpace: %+v", lvgsThinFree))
 	for lvgName, thinPools := range lvgsThinFree {
@@ -233,22 +236,15 @@ func filterNodes(
 			lvgsThinFree[lvgName][tpName] -= reservedSpace
 		}
 	}
+	log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroups Thin FreeSpace with reserved PVC: %+v", lvgsThinFree))
 
+	// get the LVMVolumeGroups by node name
+	// these are the nodes which might store every PVC from the Pod
 	nodeLVGs := LVMVolumeGroupsByNodeName(usedLVGs)
 	for n, ls := range nodeLVGs {
 		for _, l := range ls {
 			log.Trace(fmt.Sprintf("[filterNodes] the LVMVolumeGroup %s belongs to node %s", l.Name, n))
 		}
-	}
-
-	// these are the nodes which might store every PVC from the Pod
-	commonNodes, err := getCommonNodesByStorageClasses(scs, nodeLVGs)
-	if err != nil {
-		log.Error(err, "[filterNodes] unable to get common nodes for PVCs")
-		return nil, err
-	}
-	for nodeName := range commonNodes {
-		log.Trace(fmt.Sprintf("[filterNodes] Node %s is a common for every StorageClasses", nodeName))
 	}
 
 	result := &ExtenderFilterResult{
@@ -262,7 +258,7 @@ func filterNodes(
 
 	wg := &sync.WaitGroup{}
 	wg.Add(len(*nodeNames))
-	errs := make(chan error, len(*nodeNames)*len(pvcs))
+	errs := make(chan error, len(*nodeNames)*len(managedPVCs))
 
 	for i, nodeName := range *nodeNames {
 		go func(i int, nodeName string) {
@@ -272,20 +268,19 @@ func filterNodes(
 				wg.Done()
 			}()
 
-			if _, common := commonNodes[nodeName]; !common {
-				log.Debug(fmt.Sprintf("[filterNodes] node %s is not common for used StorageClasses %+v", nodeName, scs))
+			// we get all LVMVolumeGroups from the node-applicant
+			lvgsFromNode, exists := nodeLVGs[nodeName]
+			if !exists {
+				log.Debug(fmt.Sprintf("[filterNodes] node %s does not have any LVMVolumeGroups from used StorageClasses", nodeName))
 				failedNodesMapMtx.Lock()
-				result.FailedNodes[nodeName] = fmt.Sprintf("node %s is not common for used StorageClasses", nodeName)
+				result.FailedNodes[nodeName] = fmt.Sprintf("node %s does not have any LVMVolumeGroups from used StorageClasses", nodeName)
 				failedNodesMapMtx.Unlock()
 				return
 			}
-
-			// we get all LVMVolumeGroups from the node-applicant (which is common for all the PVCs)
-			lvgsFromNode := commonNodes[nodeName]
 			hasEnoughSpace := true
 
 			// now we iterate all over the PVCs to see if we can place all of them on the node (does the node have enough space)
-			for _, pvc := range pvcs {
+			for _, pvc := range managedPVCs {
 				pvcReq := pvcRequests[pvc.Name]
 
 				// we get LVGs which might be used by the PVC
@@ -536,59 +531,4 @@ func findMatchedLVG(nodeLVGs []*snc.LVMVolumeGroup, scLVGs LVMVolumeGroups) *LVM
 	}
 
 	return nil
-}
-
-// Params:
-// scs - Storage Classes;
-// nodesWithLVGs - LVMVolumeGroups on the nodes;
-//
-// Return: map[nodeName][]*snc.LVMVolumeGroup
-// Example:
-//
-//	{
-//	  "node1": [
-//	    {
-//	      "name": "vg0",
-//	      "status": {
-//	        "nodes": ["node1", "node2"],
-//	      },
-//	    },
-//	  ],
-//	}
-func getCommonNodesByStorageClasses(scs map[string]*storagev1.StorageClass, nodesWithLVGs map[string][]*snc.LVMVolumeGroup) (map[string][]*snc.LVMVolumeGroup, error) {
-	result := make(map[string][]*snc.LVMVolumeGroup, len(nodesWithLVGs))
-
-	for nodeName, lvgs := range nodesWithLVGs {
-		lvgNames := make(map[string]struct{}, len(lvgs))
-		for _, l := range lvgs {
-			lvgNames[l.Name] = struct{}{}
-		}
-
-		nodeIncludesLVG := true
-		for _, sc := range scs {
-			scLvgs, err := ExtractLVGsFromSC(sc)
-			if err != nil {
-				return nil, err
-			}
-
-			contains := false
-			for _, lvg := range scLvgs {
-				if _, exist := lvgNames[lvg.Name]; exist {
-					contains = true
-					break
-				}
-			}
-
-			if !contains {
-				nodeIncludesLVG = false
-				break
-			}
-		}
-
-		if nodeIncludesLVG {
-			result[nodeName] = lvgs
-		}
-	}
-
-	return result, nil
 }

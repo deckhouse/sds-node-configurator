@@ -198,9 +198,9 @@ func scoreNodes(
 
 	for i, nodeName := range *nodeNames {
 		go func(i int, nodeName string) {
-			log.Debug(fmt.Sprintf("[scoreNodes] gourutine %d starts the work for the node %s", i, nodeName))
+			log.Trace(fmt.Sprintf("[scoreNodes] gourutine %d starts the work for the node %s", i, nodeName))
 			defer func() {
-				log.Debug(fmt.Sprintf("[scoreNodes] gourutine %d ends the work for the node %s", i, nodeName))
+				log.Trace(fmt.Sprintf("[scoreNodes] gourutine %d ends the work for the node %s", i, nodeName))
 				wg.Done()
 			}()
 
@@ -260,7 +260,7 @@ func scoreNodes(
 		}(i, nodeName)
 	}
 	wg.Wait()
-
+	log.Debug("[scoreNodes] goroutines work is done")
 	if len(errs) != 0 {
 		for err = range errs {
 			log.Error(err, "[scoreNodes] an error occurs while scoring the nodes")

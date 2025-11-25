@@ -223,7 +223,7 @@ func (c *Cache) GetLVGThinReservedSpace(lvgName string, thinPoolName string) (in
 
 	tp, found := entry.thinByPool[thinPoolName]
 	if !found || tp == nil {
-		c.log.Debug(fmt.Sprintf("[GetLVGThinReservedSpace] the Thin pool %s of the LVMVolumeGroup %s was not found in the cache. Returns 0", lvgName, thinPoolName))
+		c.log.Debug(fmt.Sprintf("[GetLVGThinReservedSpace] the Thin pool %s of the LVMVolumeGroup %s was not found in the cache. Returns 0", thinPoolName, lvgName))
 		return 0, nil
 	}
 
