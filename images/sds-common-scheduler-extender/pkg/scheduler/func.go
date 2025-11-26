@@ -47,7 +47,7 @@ type LVMVolumeGroup struct {
 	Name string `yaml:"name"`
 	Thin struct {
 		PoolName string `yaml:"poolName"`
-	} `yaml:"Thin"`
+	} `yaml:"thin"`
 }
 type LVMVolumeGroups []LVMVolumeGroup
 
