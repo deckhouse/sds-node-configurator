@@ -105,6 +105,8 @@ func (c *Cache) clearBoundExpiredPVC() {
 		}
 		if time.Since(pvc.CreationTimestamp.Time) > c.expiredDuration {
 			c.log.Warning(fmt.Sprintf("[clearBoundExpiredPVC] PVC %s is in a Bound state and expired, remove it from the cache", pvc.Name))
+
+			// TODO: RemovePVFromTheCache(pvc.Spec.VolumeName) - since we are adding our API to the scheduler-extender, we need to remove the PV from the cache.
 			c.RemovePVCFromTheCache(pvc)
 		} else {
 			c.log.Trace(fmt.Sprintf("[clearBoundExpiredPVC] PVC %s is in a Bound state but not expired yet.", pvc.Name))
