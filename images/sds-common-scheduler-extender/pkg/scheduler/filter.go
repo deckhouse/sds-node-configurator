@@ -268,7 +268,7 @@ func filterNodes(
 				wg.Done()
 			}()
 
-			// we get all LVMVolumeGroups from the node-applicant
+			// if the node does not have any LVMVolumeGroups from used StorageClasses, then this node is not suitable
 			lvgsFromNode, exists := nodeLVGs[nodeName]
 			if !exists {
 				log.Debug(fmt.Sprintf("[filterNodes] node %s does not have any LVMVolumeGroups from used StorageClasses", nodeName))
@@ -277,8 +277,8 @@ func filterNodes(
 				failedNodesMapMtx.Unlock()
 				return
 			}
-			hasEnoughSpace := true
 
+			hasEnoughSpace := true
 			// now we iterate all over the PVCs to see if we can place all of them on the node (does the node have enough space)
 			for _, pvc := range managedPVCs {
 				pvcReq := pvcRequests[pvc.Name]
@@ -378,15 +378,22 @@ func filterNodes(
 	return result, nil
 }
 
-func populateCache(log logger.Logger, nodeNames *[]string, pod *corev1.Pod, schedulerCache *cache.Cache, pvcs map[string]*corev1.PersistentVolumeClaim, scs map[string]*storagev1.StorageClass) error {
-	for _, nodeName := range *nodeNames {
+func populateCache(
+	log logger.Logger,
+	filteredNodeNames *[]string,
+	pod *corev1.Pod,
+	schedulerCache *cache.Cache,
+	managedPVCS map[string]*corev1.PersistentVolumeClaim,
+	scUsedByPVCs map[string]*storagev1.StorageClass,
+) error {
+	for _, nodeName := range *filteredNodeNames {
 		for _, volume := range pod.Spec.Volumes {
 			if volume.PersistentVolumeClaim != nil {
-				log.Debug(fmt.Sprintf("[populateCache] reconcile the PVC %s for Pod %s/%s on node %s", volume.PersistentVolumeClaim.ClaimName, pod.Namespace, pod.Name, nodeName))
+				log.Debug(fmt.Sprintf("[populateCache] reconcile the PVC %s on node %s", volume.PersistentVolumeClaim.ClaimName, nodeName))
 				lvgNamesForTheNode := schedulerCache.GetLVGNamesByNodeName(nodeName)
 				log.Trace(fmt.Sprintf("[populateCache] LVMVolumeGroups from cache for the node %s: %v", nodeName, lvgNamesForTheNode))
-				pvc := pvcs[volume.PersistentVolumeClaim.ClaimName]
-				sc := scs[*pvc.Spec.StorageClassName]
+				pvc := managedPVCS[volume.PersistentVolumeClaim.ClaimName]
+				sc := scUsedByPVCs[*pvc.Spec.StorageClassName]
 
 				lvgsForPVC, err := ExtractLVGsFromSC(sc)
 				if err != nil {
@@ -482,53 +489,4 @@ func getLVGThickFreeSpaces(lvgs map[string]*snc.LVMVolumeGroup) map[string]int64
 	}
 
 	return result
-}
-
-// Params:
-// thinPools - ThinPools of the LVMVolumeGroup;
-// name - name of the ThinPool to find;
-//
-// Return: *snc.LVMVolumeGroupThinPoolStatus
-// Example:
-//
-//	{
-//	  "name": "tp0",
-//	  "availableSpace": 100,
-//	}
-func findMatchedThinPool(thinPools []snc.LVMVolumeGroupThinPoolStatus, name string) *snc.LVMVolumeGroupThinPoolStatus {
-	for _, tp := range thinPools {
-		if tp.Name == name {
-			return &tp
-		}
-	}
-
-	return nil
-}
-
-// Params:
-// nodeLVGs - LVMVolumeGroups on the node;
-// scLVGs - LVMVolumeGroups for the Storage Class;
-//
-// Return: *LVMVolumeGroup
-// Example:
-//
-//	{
-//	  "name": "vg0",
-//	  "status": {
-//	    "nodes": ["node1", "node2"],
-//	  },
-//	}
-func findMatchedLVG(nodeLVGs []*snc.LVMVolumeGroup, scLVGs LVMVolumeGroups) *LVMVolumeGroup {
-	nodeLVGNames := make(map[string]struct{}, len(nodeLVGs))
-	for _, lvg := range nodeLVGs {
-		nodeLVGNames[lvg.Name] = struct{}{}
-	}
-
-	for _, lvg := range scLVGs {
-		if _, match := nodeLVGNames[lvg.Name]; match {
-			return &lvg
-		}
-	}
-
-	return nil
 }

@@ -153,12 +153,13 @@ func writeNodeScoresResponse(w http.ResponseWriter, log logger.Logger, nodeNames
 	}
 	return nil
 }
+
 func scoreNodes(
 	log logger.Logger,
 	schedulerCache *cache.Cache,
 	nodeNames *[]string,
-	pvcs map[string]*corev1.PersistentVolumeClaim,
-	scs map[string]*storagev1.StorageClass,
+	managedPVCs map[string]*corev1.PersistentVolumeClaim,
+	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 	divisor float64,
 ) ([]HostPriority, error) {
@@ -168,7 +169,7 @@ func scoreNodes(
 	}
 
 	log.Debug("[scoreNodes] starts to get LVMVolumeGroups for Storage Classes")
-	scLVGs, err := GetLVGsFromStorageClasses(scs)
+	scLVGs, err := GetLVGsFromStorageClasses(scUsedByPVCs)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +195,7 @@ func scoreNodes(
 	result := make([]HostPriority, 0, len(*nodeNames))
 	wg := &sync.WaitGroup{}
 	wg.Add(len(*nodeNames))
-	errs := make(chan error, len(pvcs)*len(*nodeNames))
+	errs := make(chan error, len(managedPVCs)*len(*nodeNames))
 
 	for i, nodeName := range *nodeNames {
 		go func(i int, nodeName string) {
@@ -206,7 +207,7 @@ func scoreNodes(
 
 			lvgsFromNode := nodeLVGs[nodeName]
 			var totalFreeSpaceLeft int64
-			for _, pvc := range pvcs {
+			for _, pvc := range managedPVCs {
 				pvcReq := pvcRequests[pvc.Name]
 				lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
 				commonLVG := findMatchedLVG(lvgsFromNode, lvgsFromSC)
@@ -241,6 +242,7 @@ func scoreNodes(
 						return
 					}
 
+					// TODO: here we should get the free space with the reserved space for the PVC?
 					freeSpace = thinPool.AvailableSpace
 				}
 
@@ -248,7 +250,7 @@ func scoreNodes(
 				totalFreeSpaceLeft += getFreeSpaceLeftPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
 			}
 
-			averageFreeSpace := totalFreeSpaceLeft / int64(len(pvcs))
+			averageFreeSpace := totalFreeSpaceLeft / int64(len(managedPVCs))
 			log.Trace(fmt.Sprintf("[scoreNodes] average free space left for the node: %s", nodeName))
 			score := getNodeScore(averageFreeSpace, divisor)
 			log.Trace(fmt.Sprintf("[scoreNodes] node %s has score %d with average free space left (after all PVC bounded), percent %d", nodeName, score, averageFreeSpace))

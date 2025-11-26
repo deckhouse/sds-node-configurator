@@ -381,3 +381,52 @@ func LVMVolumeGroupsByNodeName(lvgs map[string]*snc.LVMVolumeGroup) map[string][
 
 	return sorted
 }
+
+// Params:
+// nodeLVGs - LVMVolumeGroups on the node;
+// scLVGs - LVMVolumeGroups for the Storage Class;
+//
+// Return: *LVMVolumeGroup
+// Example:
+//
+//	{
+//	  "name": "vg0",
+//	  "status": {
+//	    "nodes": ["node1", "node2"],
+//	  },
+//	}
+func findMatchedLVG(nodeLVGs []*snc.LVMVolumeGroup, scLVGs LVMVolumeGroups) *LVMVolumeGroup {
+	nodeLVGNames := make(map[string]struct{}, len(nodeLVGs))
+	for _, lvg := range nodeLVGs {
+		nodeLVGNames[lvg.Name] = struct{}{}
+	}
+
+	for _, lvg := range scLVGs {
+		if _, match := nodeLVGNames[lvg.Name]; match {
+			return &lvg
+		}
+	}
+
+	return nil
+}
+
+// Params:
+// thinPools - ThinPools of the LVMVolumeGroup;
+// name - name of the ThinPool to find;
+//
+// Return: *snc.LVMVolumeGroupThinPoolStatus
+// Example:
+//
+//	{
+//	  "name": "tp0",
+//	  "availableSpace": 100,
+//	}
+func findMatchedThinPool(thinPools []snc.LVMVolumeGroupThinPoolStatus, name string) *snc.LVMVolumeGroupThinPoolStatus {
+	for _, tp := range thinPools {
+		if tp.Name == name {
+			return &tp
+		}
+	}
+
+	return nil
+}
