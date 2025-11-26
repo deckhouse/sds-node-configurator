@@ -8,8 +8,8 @@ metadata:
   {{- include "helm_lib_module_labels" (list $ (dict "prometheus" "main")) | nindent 2 }}
 spec:
   podMetricsEndpoints:
-  - targetPort: 4202
-    scheme: http
+  - targetPort: 9001
+    scheme: https
     path: /metrics
     bearerTokenSecret:
       name: "prometheus-token"

@@ -61,6 +61,13 @@ rules:
       - get
       - list
       - watch
+  - apiGroups:
+      - apps
+    resources:
+      - daemonsets
+      - daemonsets/prometheus-metrics
+    verbs:
+      - get
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
