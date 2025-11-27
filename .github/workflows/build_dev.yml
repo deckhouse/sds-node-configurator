@@ -161,3 +161,160 @@ jobs:
           svacer_import_user: "${{ secrets.SVACER_IMPORT_USER }}"
           svacer_import_password: "${{ secrets.SVACER_IMPORT_PASSWORD }}"
           svace_analyze_ssh_private_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
+
+  
+  run_e2e_smoke_tests:
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test') }}
+    name: Run E2E Smoke Tests
+    runs-on: [self-hosted, regular]
+    needs:
+      - dev_setup_build
+    steps:
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
+
+      - name: Clone sds-e2e repository
+        run: |
+          rm -rf /tmp/sds-e2e
+          git clone --branch ndemchuk-e2e-tests https://github.com/deckhouse/sds-e2e.git /tmp/sds-e2e
+          cd /tmp/sds-e2e/testkit_v2
+          go mod download
+
+      - name: Setup test environment
+        run: |
+          # Подготовка kubeconfig для тестов
+          mkdir -p /tmp/sds-e2e-cfg
+          echo "${{ secrets.E2E_CLUSTER_KUBECONFIG }}" | base64 -d > /tmp/sds-e2e-cfg/kube-hypervisor.config
+          chmod 600 /tmp/sds-e2e-cfg/kube-hypervisor.config
+          
+          # Подготовка SSH ключа
+          mkdir -p ~/.ssh
+          echo "${{ secrets.E2E_SSH_PRIVATE_KEY }}" > ~/.ssh/e2e_key
+          chmod 600 ~/.ssh/e2e_key
+          
+          # Генерируем уникальный namespace для тестов
+          TEST_NAMESPACE="e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}"
+          echo "TEST_NAMESPACE=${TEST_NAMESPACE}" >> $GITHUB_ENV
+          echo "Generated namespace: ${TEST_NAMESPACE}"
+
+      - name: Run E2E smoke tests
+        env:
+          LICENSE_KEY: ${{ secrets.E2E_DECKHOUSE_LICENSE }}
+          licensekey: ${{ secrets.E2E_DECKHOUSE_LICENSE }}
+        run: |
+          cd /tmp/sds-e2e/testkit_v2
+          
+          # Определяем конкретные файлы тестов для каждого модуля
+          MODULE_NAME="${{ vars.MODULE_NAME }}"
+          
+          if [[ "$MODULE_NAME" == *"sds-node-configurator"* ]]; then
+            TEST_FILES="tests/01_sds_nc_test.go"
+          elif [[ "$MODULE_NAME" == *"sds-replicated-volume"* ]]; then
+            TEST_FILES="tests/03_sds_lv_test.go"
+          elif [[ "$MODULE_NAME" == *"data-export"* ]]; then
+            TEST_FILES="tests/base_test.go"
+          else
+            echo "Warning: No specific tests defined for module ${MODULE_NAME}"
+            TEST_FILES=""
+          fi
+          
+          echo "Running smoke tests for: ${MODULE_NAME}"
+          echo "Test files: ./tests/tools.go ${TEST_FILES}"
+          echo "Namespace: ${TEST_NAMESPACE}"
+          echo "SSH Host: ${{ secrets.E2E_SSH_HOST }}"
+          echo "Kubeconfig file: kube-hypervisor.config"
+          
+          # Запуск тестов с относительными путями
+          go test -v -timeout 60m ./tests/tools.go ${TEST_FILES} \
+            -debug \
+            -verbose \
+            -sshhost ${{ secrets.E2E_SSH_HOST }} \
+            -sshkey ~/.ssh/e2e_key \
+            -hypervisorkconfig kube-hypervisor.config \
+            -skipoptional \
+            -clustertype "Ubuntu 22 + Ubuntu 24 + Debian 11" \
+            -namespace ${TEST_NAMESPACE} || TEST_EXIT_CODE=$?
+          
+          echo "TEST_EXIT_CODE=${TEST_EXIT_CODE:-0}" >> $GITHUB_ENV
+          exit ${TEST_EXIT_CODE:-0}
+
+      - name: Cleanup test resources
+        if: always()
+        run: |
+          echo "Cleanup is handled by e2e tests themselves (via -keepstate flag or test teardown)"
+          echo "Namespace: ${TEST_NAMESPACE}"
+
+      - name: Upload test logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-smoke-test-logs-${{ vars.MODULE_NAME }}-${{ github.run_id }}
+          path: /tmp/sds-e2e/testkit_v2/*.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Comment PR with results
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const exitCode = process.env.TEST_EXIT_CODE || '0';
+            const status = exitCode === '0' ? '✅' : '❌';
+            const statusText = exitCode === '0' ? 'passed' : 'failed';
+            
+            const comment = `## E2E Smoke Tests Results ${status}
+            
+            **Module:** ${{ vars.MODULE_NAME }}
+            **Test Type:** Smoke tests
+            **Namespace:** \`${process.env.TEST_NAMESPACE}\`
+            **Status:** Tests ${statusText}
+            
+            <details>
+            <summary>View Details</summary>
+            
+            - **Workflow:** ${{ github.workflow }}
+            - **Run ID:** ${{ github.run_id }}
+            - **Commit:** ${{ github.sha }}
+            - **PR:** #${{ github.event.pull_request.number }}
+            - **Triggered by:** \`e2e-smoke-test\` label
+            - **Exit Code:** ${exitCode}
+            
+            Tests were executed directly on the GitHub Actions runner against the e2e cluster.
+            
+            **Artifacts:** Test logs are available in workflow artifacts (if any).
+            
+            </details>`;
+            
+            if (context.eventName === "pull_request" || context.eventName === "pull_request_target") {
+              github.rest.issues.createComment({
+                issue_number: context.payload.pull_request.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+
+      - name: Remove e2e-smoke-test label
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            if (context.eventName === "pull_request" || context.eventName === "pull_request_target") {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                  name: 'e2e-smoke-test'
+                });
+                console.log('✅ Label "e2e-smoke-test" removed successfully');
+              } catch (error) {
+                if (error.status === 404) {
+                  console.log('ℹ️ Label "e2e-smoke-test" was not found on the PR');
+                } else {
+                  console.log('⚠️ Failed to remove label:', error.message);
+                }
+              }
+            }
