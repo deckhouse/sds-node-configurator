@@ -34,7 +34,7 @@ const (
 	DefaultPVCExpiredDurationSec = 30
 
 	pvcPerLVGCount         = 150
-	lvgsPerPVCCount        = 5
+	lvgsPerPVCDefaultCount = 5
 	lvgsPerNodeCount       = 5
 	SelectedNodeAnnotation = "volume.kubernetes.io/selected-node"
 )
@@ -602,7 +602,7 @@ func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *corev1.Persist
 	defer c.mtx.Unlock()
 
 	// Build list of LVG names for this PVC on the fly
-	lvgNamesForPVC := make([]string, 0, lvgsPerPVCCount)
+	lvgNamesForPVC := make([]string, 0, lvgsPerPVCDefaultCount)
 	for lvgName, entry := range c.lvgByName {
 		switch deviceType {
 		case consts.Thin:
@@ -673,9 +673,9 @@ func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *corev1.Persist
 	for _, lvgName := range lvgNamesForPVC {
 		if lvgName == selectedLVGName {
 			c.log.Debug(fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] the LVMVolumeGroup %s will be saved for PVC %s cache as used", lvgName, pvcKey))
-			cleared = append(cleared, lvgName)
 		} else {
 			c.log.Debug(fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] the LVMVolumeGroup %s will be removed from PVC %s cache as not used", lvgName, pvcKey))
+			cleared = append(cleared, lvgName)
 		}
 	}
 	c.log.Trace(fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] cleared LVMVolumeGroups for PVC %s: %v", pvcKey, cleared))

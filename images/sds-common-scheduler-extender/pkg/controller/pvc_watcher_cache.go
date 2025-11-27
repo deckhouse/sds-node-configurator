@@ -73,7 +73,7 @@ func RunPVCWatcherCacheController(
 
 			selectedNodeName, wasSelected := pvc.Annotations[cache.SelectedNodeAnnotation]
 			if !wasSelected || pvc.Status.Phase == corev1.ClaimBound || pvc.DeletionTimestamp != nil {
-				log.Debug(fmt.Sprintf("[RunPVCWatcherCacheController] PVC %s/%s should not be reconciled by CreateFunc due to no selected node annotation found or deletion timestamp is not nil", pvc.Namespace, pvc.Name))
+				log.Debug(fmt.Sprintf("[RunPVCWatcherCacheController] PVC %s/%s should not be reconciled by CreateFunc due to no selected node annotation found or deletion timestamp is not nil or status phase is bound", pvc.Namespace, pvc.Name))
 				return
 			}
 			log.Debug(fmt.Sprintf("[RunPVCWatcherCacheController] PVC %s/%s has selected node annotation, it will be reconciled in CreateFunc", pvc.Namespace, pvc.Name))
