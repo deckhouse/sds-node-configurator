@@ -125,6 +125,11 @@ func subMain(ctx context.Context) error {
 		}
 	}
 
+	// Override log level from environment variable if set
+	if envLogLevel := os.Getenv("LOG_LEVEL"); envLogLevel != "" {
+		config.LogLevel = envLogLevel
+	}
+
 	log, err := logger.NewLogger(logger.Verbosity(config.LogLevel))
 	if err != nil {
 		print(fmt.Sprintf("unable to initialize logger, err: %s", err))

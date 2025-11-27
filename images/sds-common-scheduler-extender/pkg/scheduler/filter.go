@@ -147,10 +147,19 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	servingLog.Cache("cache after the PVC reservation")
 	s.cache.PrintTheCacheLog()
 
-	w.Header().Set("content-type", "application/json")
-	err = json.NewEncoder(w).Encode(filteredNodes)
+	// Log response body at DEBUG level
+	responseJSON, err := json.Marshal(filteredNodes)
 	if err != nil {
-		servingLog.Error(err, "unable to encode a response for a Pod")
+		servingLog.Error(err, "unable to marshal response")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	servingLog.Debug(fmt.Sprintf("response: %s", string(responseJSON)))
+
+	w.Header().Set("content-type", "application/json")
+	_, err = w.Write(responseJSON)
+	if err != nil {
+		servingLog.Error(err, "unable to write response")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -164,8 +173,15 @@ func writeNodeNamesResponse(w http.ResponseWriter, log logger.Logger, nodeNames 
 	}
 	log.Trace(fmt.Sprintf("filtered nodes: %+v", filteredNodes))
 
+	// Log response body at DEBUG level
+	responseJSON, err := json.Marshal(filteredNodes)
+	if err != nil {
+		return err
+	}
+	log.Debug(fmt.Sprintf("response: %s", string(responseJSON)))
+
 	w.Header().Set("content-type", "application/json")
-	if err := json.NewEncoder(w).Encode(filteredNodes); err != nil {
+	if _, err := w.Write(responseJSON); err != nil {
 		return err
 	}
 	return nil

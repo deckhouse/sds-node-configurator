@@ -80,6 +80,8 @@ func (s *scheduler) filterAndPrioritize(w http.ResponseWriter, r *http.Request) 
 		response := FilterPrioritizeResponse{
 			LVGs: []LVGScore{},
 		}
+		responseJSON, _ := json.Marshal(response)
+		servingLog.Debug(fmt.Sprintf("response: %s", string(responseJSON)))
 		w.Header().Set("content-type", "application/json")
 		json.NewEncoder(w).Encode(response)
 		return
@@ -102,10 +104,19 @@ func (s *scheduler) filterAndPrioritize(w http.ResponseWriter, r *http.Request) 
 		LVGs: scoredLVGs,
 	}
 
-	w.Header().Set("content-type", "application/json")
-	err = json.NewEncoder(w).Encode(response)
+	// Log response body at DEBUG level
+	responseJSON, err := json.Marshal(response)
 	if err != nil {
-		servingLog.Error(err, "unable to encode response")
+		servingLog.Error(err, "unable to marshal response")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	servingLog.Debug(fmt.Sprintf("response: %s", string(responseJSON)))
+
+	w.Header().Set("content-type", "application/json")
+	_, err = w.Write(responseJSON)
+	if err != nil {
+		servingLog.Error(err, "unable to write response")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 	}
 }

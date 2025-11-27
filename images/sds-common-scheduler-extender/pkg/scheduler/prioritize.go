@@ -122,10 +122,19 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	}
 	servingLog.Debug("successfully scored the nodes for Pod")
 
-	w.Header().Set("content-type", "application/json")
-	err = json.NewEncoder(w).Encode(scoredNodes)
+	// Log response body at DEBUG level
+	responseJSON, err := json.Marshal(scoredNodes)
 	if err != nil {
-		servingLog.Error(err, "unable to encode a response for a Pod")
+		servingLog.Error(err, "unable to marshal response")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	servingLog.Debug(fmt.Sprintf("response: %s", string(responseJSON)))
+
+	w.Header().Set("content-type", "application/json")
+	_, err = w.Write(responseJSON)
+	if err != nil {
+		servingLog.Error(err, "unable to write response")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -143,9 +152,15 @@ func writeNodeScoresResponse(w http.ResponseWriter, log logger.Logger, nodeNames
 	}
 	log.Trace(fmt.Sprintf("node scores: %+v", scores))
 
-	w.Header().Set("content-type", "application/json")
-	err := json.NewEncoder(w).Encode(scores)
+	// Log response body at DEBUG level
+	responseJSON, err := json.Marshal(scores)
 	if err != nil {
+		return err
+	}
+	log.Debug(fmt.Sprintf("response: %s", string(responseJSON)))
+
+	w.Header().Set("content-type", "application/json")
+	if _, err := w.Write(responseJSON); err != nil {
 		return err
 	}
 	return nil
