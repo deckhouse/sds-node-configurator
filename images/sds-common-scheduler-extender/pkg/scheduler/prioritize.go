@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"sync"
 
@@ -218,36 +217,17 @@ func scoreNodes(
 				}
 				log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s is common for storage class %s and node %s", commonLVG.Name, *pvc.Spec.StorageClassName, nodeName))
 
-				var freeSpace resource.Quantity
+				// Use common function to get available space in LVG
 				lvg := allLVGs[commonLVG.Name]
-				switch pvcReq.DeviceType {
-				case consts.Thick:
-					freeSpace = lvg.Status.VGFree
-					log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s free Thick space before PVC reservation: %s", lvg.Name, freeSpace.String()))
-					reserved, err := schedulerCache.GetLVGThickReservedSpace(lvg.Name)
-					if err != nil {
-						log.Error(err, fmt.Sprintf("[scoreNodes] unable to count reserved space for the LVMVolumeGroup %s", lvg.Name))
-						continue
-					}
-					log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s PVC Space reservation: %s", lvg.Name, resource.NewQuantity(reserved, resource.BinarySI)))
-					spaceWithReserved := freeSpace.Value() - reserved
-					freeSpace = *resource.NewQuantity(spaceWithReserved, resource.BinarySI)
-					log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s free Thick space after PVC reservation: %s", lvg.Name, freeSpace.String()))
-				case consts.Thin:
-					thinPool := findMatchedThinPool(lvg.Status.ThinPools, commonLVG.Thin.PoolName)
-					if thinPool == nil {
-						err = fmt.Errorf("unable to match Storage Class's ThinPools with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
-						log.Error(err, "[scoreNodes] an error occurs while searching for target LVMVolumeGroup")
-						errs <- err
-						return
-					}
-
-					// TODO: here we should get the free space with the reserved space for the PVC?
-					freeSpace = thinPool.AvailableSpace
+				spaceInfo, err := getLVGAvailableSpace(schedulerCache, lvg, pvcReq.DeviceType, commonLVG.Thin.PoolName)
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[scoreNodes] unable to get available space for LVG %s", lvg.Name))
+					errs <- err
+					return
 				}
 
-				log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s total size: %s", lvg.Name, lvg.Status.VGSize.String()))
-				totalFreeSpaceLeft += getFreeSpaceLeftPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
+				log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s available space: %s, total size: %s", lvg.Name, resource.NewQuantity(spaceInfo.AvailableSpace, resource.BinarySI), resource.NewQuantity(spaceInfo.TotalSize, resource.BinarySI)))
+				totalFreeSpaceLeft += getFreeSpaceLeftPercent(spaceInfo.AvailableSpace, pvcReq.RequestedSize, spaceInfo.TotalSize)
 			}
 
 			averageFreeSpace := totalFreeSpaceLeft / int64(len(managedPVCs))
@@ -280,23 +260,4 @@ func scoreNodes(
 	}
 
 	return result, nil
-}
-
-func getFreeSpaceLeftPercent(freeSize, requestedSpace, totalSize int64) int64 {
-	leftFreeSize := freeSize - requestedSpace
-	fraction := float64(leftFreeSize) / float64(totalSize)
-	percent := fraction * 100
-	return int64(percent)
-}
-
-func getNodeScore(freeSpace int64, divisor float64) int {
-	converted := int(math.Round(math.Log2(float64(freeSpace) / divisor)))
-	switch {
-	case converted < 1:
-		return 1
-	case converted > 10:
-		return 10
-	default:
-		return converted
-	}
 }

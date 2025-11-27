@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"math"
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -27,6 +28,7 @@ import (
 
 	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	"github.com/stretchr/testify/assert/yaml"
@@ -429,4 +431,153 @@ func findMatchedThinPool(thinPools []snc.LVMVolumeGroupThinPoolStatus, name stri
 	}
 
 	return nil
+}
+
+// LVGSpaceInfo contains information about available space in LVG
+type LVGSpaceInfo struct {
+	AvailableSpace int64 // available space considering reservations
+	TotalSize      int64 // total LVG size
+}
+
+// getLVGAvailableSpace gets available space in LVG considering reservations
+// Works directly with LVG, without node binding
+//
+// Params:
+//   - schedulerCache - scheduler cache
+//   - lvg - LVMVolumeGroup from cache
+//   - deviceType - device type ("Thick" or "Thin")
+//   - thinPoolName - thin pool name (required for thin, can be empty for thick)
+//
+// Return:
+//   - LVGSpaceInfo with available space information
+//   - error if an error occurred
+func getLVGAvailableSpace(
+	schedulerCache *cache.Cache,
+	lvg *snc.LVMVolumeGroup,
+	deviceType string,
+	thinPoolName string,
+) (LVGSpaceInfo, error) {
+	var availableSpace int64
+	var totalSize int64
+
+	switch deviceType {
+	case consts.Thick:
+		freeSpace := lvg.Status.VGFree.Value()
+		reserved, err := schedulerCache.GetLVGThickReservedSpace(lvg.Name)
+		if err != nil {
+			return LVGSpaceInfo{}, fmt.Errorf("unable to get reserved space for LVG %s: %w", lvg.Name, err)
+		}
+		availableSpace = freeSpace - reserved
+		totalSize = lvg.Status.VGSize.Value()
+
+	case consts.Thin:
+		if thinPoolName == "" {
+			return LVGSpaceInfo{}, fmt.Errorf("thinPoolName is required for thin volumes")
+		}
+
+		thinPool := findMatchedThinPool(lvg.Status.ThinPools, thinPoolName)
+		if thinPool == nil {
+			return LVGSpaceInfo{}, fmt.Errorf("thin pool %s not found in LVG %s", thinPoolName, lvg.Name)
+		}
+
+		freeSpace := thinPool.AvailableSpace.Value()
+		reserved, err := schedulerCache.GetLVGThinReservedSpace(lvg.Name, thinPoolName)
+		if err != nil {
+			return LVGSpaceInfo{}, fmt.Errorf("unable to get reserved space for thin pool %s: %w", thinPoolName, err)
+		}
+		availableSpace = freeSpace - reserved
+		totalSize = lvg.Status.VGSize.Value()
+
+	default:
+		return LVGSpaceInfo{}, fmt.Errorf("unknown device type: %s", deviceType)
+	}
+
+	return LVGSpaceInfo{
+		AvailableSpace: availableSpace,
+		TotalSize:      totalSize,
+	}, nil
+}
+
+// checkLVGHasSpace checks if LVG has enough space for the requested size
+// Works directly with LVG, without node binding
+//
+// Params:
+//   - schedulerCache - scheduler cache
+//   - lvg - LVMVolumeGroup from cache
+//   - deviceType - device type ("Thick" or "Thin")
+//   - thinPoolName - thin pool name (required for thin, can be empty for thick)
+//   - requestedSize - requested size in bytes
+//
+// Return:
+//   - true if there is enough space
+//   - error if an error occurred
+func checkLVGHasSpace(
+	schedulerCache *cache.Cache,
+	lvg *snc.LVMVolumeGroup,
+	deviceType string,
+	thinPoolName string,
+	requestedSize int64,
+) (bool, error) {
+	spaceInfo, err := getLVGAvailableSpace(schedulerCache, lvg, deviceType, thinPoolName)
+	if err != nil {
+		return false, err
+	}
+
+	return spaceInfo.AvailableSpace >= requestedSize, nil
+}
+
+// calculateLVGScore calculates score for LVG based on available space
+// Uses the same logic as getFreeSpaceLeftPercent and getNodeScore from prioritize.go
+// Works directly with LVG, without node binding
+//
+// Params:
+//   - schedulerCache - scheduler cache
+//   - lvg - LVMVolumeGroup from cache
+//   - deviceType - device type ("Thick" or "Thin")
+//   - thinPoolName - thin pool name (required for thin, can be empty for thick)
+//   - requestedSize - requested size in bytes
+//   - divisor - divisor for score calculation
+//
+// Return:
+//   - score for LVG (1-10)
+//   - error if an error occurred
+func calculateLVGScore(
+	schedulerCache *cache.Cache,
+	lvg *snc.LVMVolumeGroup,
+	deviceType string,
+	thinPoolName string,
+	requestedSize int64,
+	divisor float64,
+) (int, error) {
+	spaceInfo, err := getLVGAvailableSpace(schedulerCache, lvg, deviceType, thinPoolName)
+	if err != nil {
+		return 0, err
+	}
+
+	// Use the same logic as in prioritize.go
+	freeSpaceLeft := getFreeSpaceLeftPercent(spaceInfo.AvailableSpace, requestedSize, spaceInfo.TotalSize)
+	score := getNodeScore(freeSpaceLeft, divisor)
+
+	return score, nil
+}
+
+// getFreeSpaceLeftPercent calculates the percentage of free space left after placing the requested volume
+func getFreeSpaceLeftPercent(freeSize, requestedSpace, totalSize int64) int64 {
+	leftFreeSize := freeSize - requestedSpace
+	fraction := float64(leftFreeSize) / float64(totalSize)
+	percent := fraction * 100
+	return int64(percent)
+}
+
+// getNodeScore calculates score based on free space
+func getNodeScore(freeSpace int64, divisor float64) int {
+	converted := int(math.Round(math.Log2(float64(freeSpace) / divisor)))
+	switch {
+	case converted < 1:
+		return 1
+	case converted > 10:
+		return 10
+	default:
+		return converted
+	}
 }

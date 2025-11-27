@@ -295,46 +295,30 @@ func filterNodes(
 				}
 				log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s is common for storage class %s and node %s", commonLVG.Name, *pvc.Spec.StorageClassName, nodeName))
 
-				// see what kind of space does the PVC need
+				// Use common function to check available space in LVG
+				lvg := allLVGs[commonLVG.Name]
+				hasSpace, err := checkLVGHasSpace(schedulerCache, lvg, pvcReq.DeviceType, commonLVG.Thin.PoolName, pvcReq.RequestedSize)
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[filterNodes] unable to check space for LVG %s", commonLVG.Name))
+					errs <- err
+					return
+				}
+
+				if !hasSpace {
+					log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s does not have enough space for PVC %s (requested: %s)", commonLVG.Name, pvc.Name, resource.NewQuantity(pvcReq.RequestedSize, resource.BinarySI)))
+					hasEnoughSpace = false
+					break
+				}
+
+				// Subtract requested space from precomputed free spaces for next iteration
 				switch pvcReq.DeviceType {
 				case consts.Thick:
-					thickMapMtx.RLock()
-					freeSpace := lvgsThickFree[commonLVG.Name]
-					thickMapMtx.RUnlock()
-
-					log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s Thick free space: %s, PVC requested space: %s", commonLVG.Name, resource.NewQuantity(freeSpace, resource.BinarySI), resource.NewQuantity(pvcReq.RequestedSize, resource.BinarySI)))
-					if freeSpace < pvcReq.RequestedSize {
-						hasEnoughSpace = false
-						break
-					}
-
 					thickMapMtx.Lock()
 					lvgsThickFree[commonLVG.Name] -= pvcReq.RequestedSize
 					thickMapMtx.Unlock()
 				case consts.Thin:
-					lvg := allLVGs[commonLVG.Name]
-
-					// we try to find specific ThinPool which the PVC can use in the LVMVolumeGroup
-					targetThinPool := findMatchedThinPool(lvg.Status.ThinPools, commonLVG.Thin.PoolName)
-					if targetThinPool == nil {
-						err = fmt.Errorf("unable to match Storage Class's ThinPools with the node's one, Storage Class: %s; node: %s; lvg Thin pools: %+v; Thin.poolName from StorageClass: %s", *pvc.Spec.StorageClassName, nodeName, lvg.Status.ThinPools, commonLVG.Thin.PoolName)
-						errs <- err
-						return
-					}
-
-					thinMapMtx.RLock()
-					freeSpace := lvgsThinFree[lvg.Name][targetThinPool.Name]
-					thinMapMtx.RUnlock()
-
-					log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s Thin Pool %s free space: %s, PVC requested space: %s", lvg.Name, targetThinPool.Name, resource.NewQuantity(freeSpace, resource.BinarySI), resource.NewQuantity(pvcReq.RequestedSize, resource.BinarySI)))
-
-					if freeSpace < pvcReq.RequestedSize {
-						hasEnoughSpace = false
-						break
-					}
-
 					thinMapMtx.Lock()
-					lvgsThinFree[lvg.Name][targetThinPool.Name] -= pvcReq.RequestedSize
+					lvgsThinFree[lvg.Name][commonLVG.Thin.PoolName] -= pvcReq.RequestedSize
 					thinMapMtx.Unlock()
 				}
 
