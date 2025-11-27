@@ -59,3 +59,35 @@ type ExtenderFilterResult struct {
 
 // FailedNodesMap is copied from https://godoc.org/k8s.io/kubernetes/pkg/scheduler/api/v1#FailedNodesMap
 type FailedNodesMap map[string]string
+
+// FilterPrioritizeRequest is the request structure for the filter-prioritize endpoint
+type FilterPrioritizeRequest struct {
+	LVGs   []LVGInput  `json:"lvgs"`
+	Volume VolumeInput `json:"volume"`
+}
+
+// LVGInput represents an LVG input in the filter-prioritize request
+type LVGInput struct {
+	Name         string `json:"name"`
+	ThinPoolName string `json:"thinPoolName,omitempty"` // required for thin volumes, can be empty for thick
+}
+
+// VolumeInput represents volume information in the filter-prioritize request
+type VolumeInput struct {
+	Name string `json:"name"` // volume name (used for reservation)
+	Size int64  `json:"size"` // size in bytes
+	Type string `json:"type"` // "thin" or "thick"
+}
+
+// FilterPrioritizeResponse is the response structure for the filter-prioritize endpoint
+type FilterPrioritizeResponse struct {
+	LVGs  []LVGScore `json:"lvgs"`
+	Error string     `json:"error,omitempty"`
+}
+
+// LVGScore represents a scored LVG in the filter-prioritize response
+type LVGScore struct {
+	Name  string `json:"name"`
+	Score int    `json:"score"`
+	// thinPoolName is not needed in response, as client knows it from request
+}

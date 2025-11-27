@@ -58,6 +58,10 @@ func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.log.Debug("[ServeHTTP] prioritize route starts handling the request")
 		s.prioritize(w, r)
 		s.log.Debug("[ServeHTTP] prioritize route ends handling the request")
+	case "/api/v1/volumes/filter-prioritize":
+		s.log.Debug("[ServeHTTP] filter-prioritize route starts handling the request")
+		s.filterAndPrioritize(w, r)
+		s.log.Debug("[ServeHTTP] filter-prioritize route ends handling the request")
 	case "/status":
 		s.log.Debug("[ServeHTTP] status route starts handling the request")
 		status(w, r)
