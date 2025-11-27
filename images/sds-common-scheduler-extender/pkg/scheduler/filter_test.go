@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -24,6 +25,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 	v12 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
@@ -31,58 +35,103 @@ import (
 
 func TestFilter(t *testing.T) {
 	log := logger.Logger{}
-	t.Run("filterNotManagedPVC", func(t *testing.T) {
+	ctx := context.Background()
+	t.Run("getManagedPVCsFromPod filters PVCs by provisioner", func(t *testing.T) {
 		sc1 := "sc1"
 		sc2 := "sc2"
 		sc3 := "sc3"
-		scs := map[string]*v12.StorageClass{
-			sc1: {
+
+		objects := []runtime.Object{
+			&v1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: sc1,
-				},
-				Provisioner: consts.SdsLocalVolumeProvisioner,
-			},
-			sc2: {
-				ObjectMeta: metav1.ObjectMeta{
-					Name: sc2,
-				},
-				Provisioner: consts.SdsLocalVolumeProvisioner,
-			},
-			sc3: {
-				ObjectMeta: metav1.ObjectMeta{
-					Name: sc3,
-				},
-			},
-		}
-		pvcs := map[string]*v1.PersistentVolumeClaim{
-			"first": {
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "first",
+					Name:      "first",
+					Namespace: "default",
 				},
 				Spec: v1.PersistentVolumeClaimSpec{
 					StorageClassName: &sc1,
 				},
 			},
-			"second": {
+			&v1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "second",
+					Name:      "second",
+					Namespace: "default",
 				},
 				Spec: v1.PersistentVolumeClaimSpec{
 					StorageClassName: &sc2,
 				},
 			},
-			"third": {
+			&v1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "third",
+					Name:      "third",
+					Namespace: "default",
 				},
 				Spec: v1.PersistentVolumeClaimSpec{
 					StorageClassName: &sc3,
 				},
 			},
+			&v12.StorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: sc1,
+				},
+				Provisioner: consts.SdsLocalVolumeProvisioner,
+			},
+			&v12.StorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: sc2,
+				},
+				Provisioner: consts.SdsLocalVolumeProvisioner,
+			},
+			&v12.StorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: sc3,
+				},
+			},
 		}
 
-		filtered := filterNotManagedPVC(log, pvcs, scs)
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod",
+				Namespace: "default",
+			},
+			Spec: v1.PodSpec{
+				Volumes: []v1.Volume{
+					{
+						Name: "volume1",
+						VolumeSource: v1.VolumeSource{
+							PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+								ClaimName: "first",
+							},
+						},
+					},
+					{
+						Name: "volume2",
+						VolumeSource: v1.VolumeSource{
+							PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+								ClaimName: "second",
+							},
+						},
+					},
+					{
+						Name: "volume3",
+						VolumeSource: v1.VolumeSource{
+							PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+								ClaimName: "third",
+							},
+						},
+					},
+				},
+			},
+		}
 
+		s := scheme.Scheme
+		_ = v1.AddToScheme(s)
+		_ = v12.AddToScheme(s)
+
+		cl := fake.NewFakeClient(objects...)
+		targetProvisioners := []string{consts.SdsLocalVolumeProvisioner}
+		filtered, err := getManagedPVCsFromPod(ctx, cl, log, pod, targetProvisioners)
+
+		assert.NoError(t, err)
 		if assert.Equal(t, 2, len(filtered)) {
 			_, ok := filtered["first"]
 			assert.True(t, ok)
