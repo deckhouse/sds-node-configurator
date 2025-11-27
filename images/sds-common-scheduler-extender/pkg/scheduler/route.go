@@ -20,13 +20,19 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+)
+
+const (
+	envTargetProvisioners = "TARGET_PROVISIONERS"
 )
 
 type scheduler struct {
@@ -35,6 +41,7 @@ type scheduler struct {
 	client                 client.Client
 	ctx                    context.Context
 	cache                  *cache.Cache
+	targetProvisioners     []string
 	filterRequestCount     int
 	prioritizeRequestCount int
 }
@@ -68,14 +75,49 @@ func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getTargetProvisioners reads target provisioners from environment variable.
+// If TARGET_PROVISIONERS is not set, returns default provisioners.
+// The environment variable can contain comma-separated list of provisioners.
+func getTargetProvisioners(log logger.Logger) []string {
+	envValue := os.Getenv(envTargetProvisioners)
+	if envValue == "" {
+		// Return default provisioners if environment variable is not set
+		defaultProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
+		log.Info(fmt.Sprintf("TARGET_PROVISIONERS environment variable is not set, using default provisioners: %v", defaultProvisioners))
+		return defaultProvisioners
+	}
+
+	// Parse comma-separated provisioners
+	provisioners := strings.Split(envValue, ",")
+	result := make([]string, 0, len(provisioners))
+	for _, p := range provisioners {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+
+	if len(result) == 0 {
+		// Fallback to default if parsing resulted in empty list
+		defaultProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
+		log.Warning(fmt.Sprintf("TARGET_PROVISIONERS environment variable is set but empty after parsing, using default provisioners: %v", defaultProvisioners))
+		return defaultProvisioners
+	}
+
+	log.Info(fmt.Sprintf("Using target provisioners from TARGET_PROVISIONERS environment variable: %v", result))
+	return result
+}
+
 // NewHandler return new http.Handler of the scheduler extender
 func NewHandler(ctx context.Context, cl client.Client, log logger.Logger, lvgCache *cache.Cache, defaultDiv float64) (http.Handler, error) {
+	targetProvisioners := getTargetProvisioners(log)
 	return &scheduler{
-		defaultDivisor: defaultDiv,
-		log:            log,
-		client:         cl,
-		ctx:            ctx,
-		cache:          lvgCache,
+		defaultDivisor:     defaultDiv,
+		log:                log,
+		client:             cl,
+		ctx:                ctx,
+		cache:              lvgCache,
+		targetProvisioners: targetProvisioners,
 	}, nil
 }
 
