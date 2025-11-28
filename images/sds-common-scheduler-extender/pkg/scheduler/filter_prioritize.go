@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
@@ -43,6 +44,14 @@ func (s *scheduler) filterAndPrioritize(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Normalize volume type (accept both "thick"/"Thick" and "thin"/"Thin")
+	volumeTypeLower := strings.ToLower(req.Volume.Type)
+	if volumeTypeLower == "thick" {
+		req.Volume.Type = consts.Thick
+	} else if volumeTypeLower == "thin" {
+		req.Volume.Type = consts.Thin
+	}
+
 	// Validation
 	if len(req.LVGs) == 0 {
 		http.Error(w, "lvgs list is empty", http.StatusBadRequest)
@@ -53,7 +62,7 @@ func (s *scheduler) filterAndPrioritize(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if req.Volume.Type != consts.Thick && req.Volume.Type != consts.Thin {
-		http.Error(w, "invalid volume type", http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("invalid volume type: %s (expected 'thick' or 'thin')", req.Volume.Type), http.StatusBadRequest)
 		return
 	}
 
