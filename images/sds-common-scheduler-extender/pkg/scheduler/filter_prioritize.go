@@ -76,6 +76,13 @@ func (s *scheduler) filterAndPrioritize(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Log request details for debugging
+	servingLog.Debug(fmt.Sprintf("request: volume=%s, size=%d bytes (%.2f Gi), type=%s, lvgs count=%d", 
+		req.Volume.Name, req.Volume.Size, float64(req.Volume.Size)/(1024*1024*1024), req.Volume.Type, len(req.LVGs)))
+	for i, lvg := range req.LVGs {
+		servingLog.Debug(fmt.Sprintf("request: lvg[%d]=%s, thinPoolName=%s", i, lvg.Name, lvg.ThinPoolName))
+	}
+
 	// Filter LVGs by available space
 	// Uses common function checkLVGHasSpace
 	filteredLVGs, err := s.filterLVGs(servingLog, req.LVGs, req.Volume)
@@ -135,6 +142,8 @@ func (s *scheduler) filterAndPrioritize(w http.ResponseWriter, r *http.Request) 
 func (s *scheduler) filterLVGs(log logger.Logger, lvgs []LVGInput, volume VolumeInput) ([]LVGInput, error) {
 	var filtered []LVGInput
 
+	log.Debug(fmt.Sprintf("[filterLVGs] starting to filter %d LVGs for volume type %s, size %d bytes", len(lvgs), volume.Type, volume.Size))
+
 	for _, lvgInput := range lvgs {
 		lvg := s.cache.TryGetLVG(lvgInput.Name)
 		if lvg == nil {
@@ -142,18 +151,35 @@ func (s *scheduler) filterLVGs(log logger.Logger, lvgs []LVGInput, volume Volume
 			continue
 		}
 
-		// Use common function to check available space
-		hasSpace, err := checkLVGHasSpace(s.cache, lvg, volume.Type, lvgInput.ThinPoolName, volume.Size)
+		log.Debug(fmt.Sprintf("[filterLVGs] LVG %s found in cache, checking available space", lvgInput.Name))
+
+		// Get detailed space information for logging
+		spaceInfo, err := getLVGAvailableSpace(s.cache, lvg, volume.Type, lvgInput.ThinPoolName)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[filterLVGs] unable to check space for LVG %s", lvgInput.Name))
+			log.Error(err, fmt.Sprintf("[filterLVGs] unable to get available space for LVG %s", lvgInput.Name))
 			continue
 		}
 
+		// Log detailed space information
+		requestedSizeGi := float64(volume.Size) / (1024 * 1024 * 1024)
+		availableSizeGi := float64(spaceInfo.AvailableSpace) / (1024 * 1024 * 1024)
+		totalSizeGi := float64(spaceInfo.TotalSize) / (1024 * 1024 * 1024)
+		log.Debug(fmt.Sprintf("[filterLVGs] LVG %s: requested=%.2f Gi, available=%.2f Gi, total=%.2f Gi", 
+			lvgInput.Name, requestedSizeGi, availableSizeGi, totalSizeGi))
+
+		// Check if LVG has enough space
+		hasSpace := spaceInfo.AvailableSpace >= volume.Size
 		if hasSpace {
+			log.Debug(fmt.Sprintf("[filterLVGs] LVG %s has enough space (available: %d bytes >= requested: %d bytes), adding to filtered list", 
+				lvgInput.Name, spaceInfo.AvailableSpace, volume.Size))
 			filtered = append(filtered, lvgInput)
+		} else {
+			log.Debug(fmt.Sprintf("[filterLVGs] LVG %s does not have enough space (available: %d bytes < requested: %d bytes), skipping", 
+				lvgInput.Name, spaceInfo.AvailableSpace, volume.Size))
 		}
 	}
 
+	log.Debug(fmt.Sprintf("[filterLVGs] filtered %d LVGs out of %d requested", len(filtered), len(lvgs)))
 	return filtered, nil
 }
 
