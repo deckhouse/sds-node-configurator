@@ -245,8 +245,8 @@ spec:
             - /healthz
             - /readyz
             upstreams:
-            - upstream: http://127.0.0.1:9000/
-              path: /
+            - upstream: http://127.0.0.1:9000/metrics
+              path: /metrics
               authorization:
                 resourceAttributes:
                   namespace: d8-{{ .Chart.Name }}
