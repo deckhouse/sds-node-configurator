@@ -212,6 +212,7 @@ func main() {
 			log,
 			*cfgParams,
 			sdsCache,
+			metrics,
 			rediscoverBlockDevices,
 			rediscoverLVGs,
 		); err != nil {

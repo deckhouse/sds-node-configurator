@@ -33,6 +33,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/bd"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lvg"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/throttler"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
@@ -42,6 +43,7 @@ type Scanner interface {
 		log logger.Logger,
 		cfg config.Config,
 		sdsCache *cache.Cache,
+		metrics monitoring.Metrics,
 		bdCtrl func(context.Context) (controller.Result, error),
 		lvgDiscoverCtrl func(context.Context) (controller.Result, error)) error
 }
@@ -59,6 +61,7 @@ func (s *scanner) Run(
 	log logger.Logger,
 	cfg config.Config,
 	sdsCache *cache.Cache,
+	metrics monitoring.Metrics,
 	bdCtrl func(context.Context) (controller.Result, error),
 	lvgDiscoverCtrl func(context.Context) (controller.Result, error),
 ) error {
@@ -104,7 +107,7 @@ func (s *scanner) Run(
 
 			t.Do(func() {
 				log.Info("[RunScanner] start to fill the cache")
-				err := s.fillTheCache(ctx, log, sdsCache, cfg)
+				err := s.fillTheCache(ctx, log, sdsCache, cfg, metrics)
 				if err != nil {
 					log.Error(err, "[RunScanner] unable to fill the cache. Retry")
 					go func() {
@@ -135,7 +138,7 @@ func (s *scanner) Run(
 
 		case <-timer.C:
 			log.Info("[RunScanner] events ran out. Start to fill the cache")
-			err := s.fillTheCache(ctx, log, sdsCache, cfg)
+			err := s.fillTheCache(ctx, log, sdsCache, cfg, metrics)
 			if err != nil {
 				log.Error(err, "[RunScanner] unable to fill the cache after all events passed. Retry")
 				timer.Reset(duration)
@@ -203,7 +206,7 @@ func runControllersReconcile(
 	return nil
 }
 
-func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Config) error {
+func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Config, metrics monitoring.Metrics) error {
 	// the scan operations order is very important as it guarantees the consistent and reliable data from the node
 	realClock := clock.RealClock{}
 	now := time.Now()
@@ -241,6 +244,9 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	cache.StoreLVs(lvs, lvsErr)
 	log.Debug("[fillTheCache] successfully filled the cache")
 	cache.PrintTheCache(log)
+
+	// Update LVM metrics
+	metrics.UpdateLVMMetrics(lvs)
 
 	return nil
 }
