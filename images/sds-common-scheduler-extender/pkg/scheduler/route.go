@@ -47,33 +47,36 @@ type scheduler struct {
 }
 
 func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Get logger with trace ID from request context
+	requestLog := logger.WithTraceIDLogger(r.Context(), s.log)
+
 	switch r.URL.Path {
 	case "/scheduler/filter":
 		s.filterRequestCount++
-		s.log.Debug("[ServeHTTP] filter route starts handling the request")
+		requestLog.Debug("[ServeHTTP] filter route starts handling the request")
 		s.filter(w, r)
-		s.log.Debug("[ServeHTTP] filter route ends handling the request")
+		requestLog.Debug("[ServeHTTP] filter route ends handling the request")
 	case "/scheduler/prioritize":
 		s.prioritizeRequestCount++
-		s.log.Debug("[ServeHTTP] prioritize route starts handling the request")
+		requestLog.Debug("[ServeHTTP] prioritize route starts handling the request")
 		s.prioritize(w, r)
-		s.log.Debug("[ServeHTTP] prioritize route ends handling the request")
+		requestLog.Debug("[ServeHTTP] prioritize route ends handling the request")
 	case "/api/v1/volumes/filter-prioritize":
-		s.log.Debug("[ServeHTTP] filter-prioritize route starts handling the request")
+		requestLog.Debug("[ServeHTTP] filter-prioritize route starts handling the request")
 		s.filterAndPrioritize(w, r)
-		s.log.Debug("[ServeHTTP] filter-prioritize route ends handling the request")
+		requestLog.Debug("[ServeHTTP] filter-prioritize route ends handling the request")
 	case "/status":
-		s.log.Debug("[ServeHTTP] status route starts handling the request")
+		requestLog.Debug("[ServeHTTP] status route starts handling the request")
 		status(w, r)
-		s.log.Debug("[ServeHTTP] status route ends handling the request")
+		requestLog.Debug("[ServeHTTP] status route ends handling the request")
 	case "/cache":
-		s.log.Debug("[ServeHTTP] cache route starts handling the request")
+		requestLog.Debug("[ServeHTTP] cache route starts handling the request")
 		s.getCache(w, r)
-		s.log.Debug("[ServeHTTP] cache route ends handling the request")
+		requestLog.Debug("[ServeHTTP] cache route ends handling the request")
 	case "/stat":
-		s.log.Debug("[ServeHTTP] stat route starts handling the request")
+		requestLog.Debug("[ServeHTTP] stat route starts handling the request")
 		s.getCacheStat(w, r)
-		s.log.Debug("[ServeHTTP] stat route ends handling the request")
+		requestLog.Debug("[ServeHTTP] stat route ends handling the request")
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}
@@ -133,7 +136,8 @@ func status(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-func (s *scheduler) getCache(w http.ResponseWriter, _ *http.Request) {
+func (s *scheduler) getCache(w http.ResponseWriter, r *http.Request) {
+	requestLog := logger.WithTraceIDLogger(r.Context(), s.log)
 	w.WriteHeader(http.StatusOK)
 
 	s.cache.PrintTheCacheLog()
@@ -145,7 +149,7 @@ func (s *scheduler) getCache(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, err = w.Write([]byte("unable to write the cache"))
 			if err != nil {
-				s.log.Error(err, "error write response")
+				requestLog.Error(err, "error write response")
 			}
 		}
 
@@ -154,7 +158,7 @@ func (s *scheduler) getCache(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, err = w.Write([]byte("unable to write the cache"))
 			if err != nil {
-				s.log.Error(err, "error write response")
+				requestLog.Error(err, "error write response")
 			}
 		}
 
@@ -163,14 +167,14 @@ func (s *scheduler) getCache(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, err = w.Write([]byte("unable to write the cache"))
 			if err != nil {
-				s.log.Error(err, "error write response")
+				requestLog.Error(err, "error write response")
 			}
 		}
 		for _, pvc := range thickPvcs {
 			_, err = w.Write([]byte(fmt.Sprintf("\t\tThick PVC: %s, reserved: %s, selected node: %s\n", pvc.Name, pvc.Spec.Resources.Requests.Storage().String(), pvc.Annotations[cache.SelectedNodeAnnotation])))
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				s.log.Error(err, "error write response")
+				requestLog.Error(err, "error write response")
 			}
 		}
 
@@ -178,32 +182,33 @@ func (s *scheduler) getCache(w http.ResponseWriter, _ *http.Request) {
 			thinReserved, err := s.cache.GetLVGThinReservedSpace(lvg.Name, tp.Name)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				s.log.Error(err, "error write response")
+				requestLog.Error(err, "error write response")
 			}
 			_, err = w.Write([]byte(fmt.Sprintf("\tThinPool: %s, reserved: %s\n", tp.Name, resource.NewQuantity(thinReserved, resource.BinarySI).String())))
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				s.log.Error(err, "error write response")
+				requestLog.Error(err, "error write response")
 			}
 
 			thinPvcs, err := s.cache.GetAllPVCFromLVGThinPool(lvg.Name, tp.Name)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				s.log.Error(err, "error write response")
+				requestLog.Error(err, "error write response")
 			}
 
 			for _, pvc := range thinPvcs {
 				_, err = w.Write([]byte(fmt.Sprintf("\t\tThin PVC: %s, reserved: %s, selected node:%s\n", pvc.Name, pvc.Spec.Resources.Requests.Storage().String(), pvc.Annotations[cache.SelectedNodeAnnotation])))
 				if err != nil {
 					w.WriteHeader(http.StatusInternalServerError)
-					s.log.Error(err, "error write response")
+					requestLog.Error(err, "error write response")
 				}
 			}
 		}
 	}
 }
 
-func (s *scheduler) getCacheStat(w http.ResponseWriter, _ *http.Request) {
+func (s *scheduler) getCacheStat(w http.ResponseWriter, r *http.Request) {
+	requestLog := logger.WithTraceIDLogger(r.Context(), s.log)
 	w.WriteHeader(http.StatusOK)
 
 	pvcTotalCount := 0
@@ -213,7 +218,7 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, _ *http.Request) {
 	for _, lvg := range lvgs {
 		pvcs, err := s.cache.GetAllPVCForLVG(lvg.Name)
 		if err != nil {
-			s.log.Error(err, "something bad")
+			requestLog.Error(err, "something bad")
 		}
 
 		pvcTotalCount += len(pvcs)
@@ -221,14 +226,14 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, _ *http.Request) {
 		// sum thick reserved
 		thickReserved, err := s.cache.GetLVGThickReservedSpace(lvg.Name)
 		if err != nil {
-			s.log.Error(err, "unable to get thick reserved space")
+			requestLog.Error(err, "unable to get thick reserved space")
 		}
 		totalReserved += thickReserved
 		// sum thin reserved across all thin pools
 		for _, tp := range lvg.Status.ThinPools {
 			thinReserved, err := s.cache.GetLVGThinReservedSpace(lvg.Name, tp.Name)
 			if err != nil {
-				s.log.Error(err, "unable to get thin reserved space")
+				requestLog.Error(err, "unable to get thin reserved space")
 				continue
 			}
 			totalReserved += thinReserved
@@ -243,7 +248,7 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, err = w.Write([]byte("unable to write the cache"))
 		if err != nil {
-			s.log.Error(err, "error write response for cache stat")
+			requestLog.Error(err, "error write response for cache stat")
 		}
 	}
 }

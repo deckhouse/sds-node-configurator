@@ -28,7 +28,7 @@ import (
 )
 
 func (s *scheduler) filterAndPrioritize(w http.ResponseWriter, r *http.Request) {
-	servingLog := s.log.WithName("filter-and-prioritize")
+	servingLog := logger.WithTraceIDLogger(r.Context(), s.log).WithName("filter-and-prioritize")
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

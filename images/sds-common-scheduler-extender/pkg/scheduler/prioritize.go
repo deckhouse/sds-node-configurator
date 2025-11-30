@@ -32,7 +32,7 @@ import (
 )
 
 func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
-	servingLog := s.log.WithName("prioritize")
+	servingLog := logger.WithTraceIDLogger(r.Context(), s.log).WithName("prioritize")
 
 	servingLog.Debug("starts the serving the request")
 

@@ -35,7 +35,7 @@ import (
 )
 
 func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
-	servingLog := s.log.WithName("filter")
+	servingLog := logger.WithTraceIDLogger(r.Context(), s.log).WithName("filter")
 
 	servingLog.Debug("starts the serving the request")
 

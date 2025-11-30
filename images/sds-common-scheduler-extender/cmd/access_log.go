@@ -45,11 +45,20 @@ func accessLogHandler(log logger.Logger, schedulerHandler http.Handler) http.Han
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		startTime := time.Now()
 
+		// Generate trace ID for this request
+		traceID := logger.GenerateTraceID()
+		ctx := logger.WithTraceID(r.Context(), traceID)
+		r = r.WithContext(ctx)
+
+		// Create logger with trace ID
+		requestLog := logger.WithTraceIDLogger(ctx, log)
+
 		accessLogRW := &accessLogResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
 		schedulerHandler.ServeHTTP(accessLogRW, r)
 
 		fields := []interface{}{
+			"traceid", traceID,
 			"response_time", time.Since(startTime).Seconds(),
 			"protocol", r.Proto,
 			"http_status_code", accessLogRW.statusCode,
@@ -67,6 +76,6 @@ func accessLogHandler(log logger.Logger, schedulerHandler http.Handler) http.Han
 		if len(ua) > 0 {
 			fields = append(fields, "http_user_agent", ua)
 		}
-		log.Info("[accessLogHandler]", fields...)
+		requestLog.Info("[accessLogHandler]", fields...)
 	})
 }
