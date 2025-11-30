@@ -17,16 +17,19 @@ limitations under the License.
 package scheduler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/strings/slices"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
@@ -125,8 +128,20 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	servingLog.Trace(fmt.Sprintf("PVC requests: %+v", pvcRequests))
 	servingLog.Debug("successfully extracted the PVC requested sizes")
 
+	// Check if there are replicated PVCs that require node information
+	var nodes map[string]*corev1.Node
+	if hasReplicatedPVCs(managedPVCs, scUsedByPVCs) {
+		servingLog.Debug("Pod has replicated PVCs, fetching node information")
+		nodes, err = getNodes(s.ctx, s.client, nodeNames)
+		if err != nil {
+			servingLog.Error(err, "unable to get nodes")
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	servingLog.Debug("starts to filter the nodes from the request")
-	filteredNodes, err := filterNodes(servingLog, s.cache, &nodeNames, inputData.Pod, managedPVCs, scUsedByPVCs, pvcRequests)
+	filteredNodes, err := filterNodes(servingLog, s.ctx, s.client, s.cache, &nodeNames, nodes, inputData.Pod, managedPVCs, scUsedByPVCs, pvcRequests)
 	if err != nil {
 		servingLog.Error(err, "unable to filter the nodes")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -189,8 +204,11 @@ func writeNodeNamesResponse(w http.ResponseWriter, log logger.Logger, nodeNames 
 
 func filterNodes(
 	log logger.Logger,
+	ctx context.Context,
+	cl client.Client,
 	schedulerCache *cache.Cache,
 	nodeNames *[]string,
+	nodes map[string]*corev1.Node,
 	pod *corev1.Pod,
 	managedPVCs map[string]*corev1.PersistentVolumeClaim,
 	scUsedByPVCs map[string]*storagev1.StorageClass,
@@ -201,64 +219,52 @@ func filterNodes(
 		log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s in the cache", lvg.Name))
 	}
 
-	// TODO: This place is for the future feature to separate LVMVolumeGroups by provisioners
+	// Separate PVCs by provisioner
+	localPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsLocalVolumeProvisioner)
+	replicatedPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsReplicatedVolumeProvisioner)
 
-	log.Debug("[filterNodes] starts to get LVMVolumeGroups for each StorageClasses")
-	scLVGs, err := GetLVGsFromStorageClasses(scUsedByPVCs)
-	if err != nil {
-		return nil, err
-	}
-	log.Debug("[filterNodes] successfully got LVMVolumeGroups for each StorageClasses")
-	for scName, lvmVolumeGroups := range scLVGs {
-		for _, lvg := range lvmVolumeGroups {
-			log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s belongs to StorageClass %s", lvg.Name, scName))
-		}
-	}
+	log.Debug(fmt.Sprintf("[filterNodes] local PVCs count: %d, replicated PVCs count: %d", len(localPVCs), len(replicatedPVCs)))
 
-	// list of LVMVolumeGroups which are used by the PVCs
-	usedLVGs := RemoveUnusedLVGs(allLVGs, scLVGs)
-	for _, lvg := range usedLVGs {
-		log.Trace(fmt.Sprintf("[filterNodes] the LVMVolumeGroup %s is actually used. VG size: %s, allocatedSize: %s", lvg.Name, lvg.Status.VGSize.String(), lvg.Status.AllocatedSize.String()))
-	}
+	// Get LVGs from StorageClasses only for local PVCs
+	var scLVGs map[string]LVMVolumeGroups
+	var usedLVGs map[string]*snc.LVMVolumeGroup
+	var nodeLVGs map[string][]*snc.LVMVolumeGroup
+	var err error
 
-	// get the free space for the Thick LVMVolumeGroups
-	lvgsThickFree := getLVGThickFreeSpaces(usedLVGs)
-	log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroups Thick FreeSpace: %+v", lvgsThickFree))
-	for lvgName, freeSpace := range lvgsThickFree {
-		log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s Thick free space %s", lvgName, resource.NewQuantity(freeSpace, resource.BinarySI)))
-		reservedSpace, err := schedulerCache.GetLVGThickReservedSpace(lvgName)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[filterNodes] unable to count cache reserved space for the LVMVolumeGroup %s", lvgName))
-			continue
-		}
-		log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s reserved PVC space %s", lvgName, resource.NewQuantity(reservedSpace, resource.BinarySI)))
-		lvgsThickFree[lvgName] -= reservedSpace
-	}
-	log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroups Thick FreeSpace with reserved PVC: %+v", lvgsThickFree))
-
-	// get the free space for the Thin LVMVolumeGroups
-	lvgsThinFree := getLVGThinFreeSpaces(usedLVGs)
-	log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroups Thin FreeSpace: %+v", lvgsThinFree))
-	for lvgName, thinPools := range lvgsThinFree {
-		for tpName, freeSpace := range thinPools {
-			log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s Thin Pool %s free space %s", lvgName, tpName, resource.NewQuantity(freeSpace, resource.BinarySI)))
-			reservedSpace, err := schedulerCache.GetLVGThinReservedSpace(lvgName, tpName)
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[filterNodes] unable to count cache reserved space for the Thin pool %s of the LVMVolumeGroup %s", tpName, lvgName))
-				continue
+	if len(localPVCs) > 0 {
+		log.Debug("[filterNodes] starts to get LVMVolumeGroups for local StorageClasses")
+		localSCs := make(map[string]*storagev1.StorageClass)
+		for _, pvc := range localPVCs {
+			if pvc.Spec.StorageClassName != nil {
+				if sc, exists := scUsedByPVCs[*pvc.Spec.StorageClassName]; exists {
+					localSCs[sc.Name] = sc
+				}
 			}
-			log.Trace(fmt.Sprintf("[filterNodes] current LVMVolumeGroup %s Thin pool %s reserved PVC space %s", lvgName, tpName, resource.NewQuantity(reservedSpace, resource.BinarySI)))
-			lvgsThinFree[lvgName][tpName] -= reservedSpace
 		}
-	}
-	log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroups Thin FreeSpace with reserved PVC: %+v", lvgsThinFree))
 
-	// get the LVMVolumeGroups by node name
-	// these are the nodes which might store every PVC from the Pod
-	nodeLVGs := LVMVolumeGroupsByNodeName(usedLVGs)
-	for n, ls := range nodeLVGs {
-		for _, l := range ls {
-			log.Trace(fmt.Sprintf("[filterNodes] the LVMVolumeGroup %s belongs to node %s", l.Name, n))
+		scLVGs, err = GetLVGsFromStorageClasses(localSCs)
+		if err != nil {
+			return nil, err
+		}
+		log.Debug("[filterNodes] successfully got LVMVolumeGroups for local StorageClasses")
+		for scName, lvmVolumeGroups := range scLVGs {
+			for _, lvg := range lvmVolumeGroups {
+				log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s belongs to StorageClass %s", lvg.Name, scName))
+			}
+		}
+
+		// list of LVMVolumeGroups which are used by the local PVCs
+		usedLVGs = RemoveUnusedLVGs(allLVGs, scLVGs)
+		for _, lvg := range usedLVGs {
+			log.Trace(fmt.Sprintf("[filterNodes] the LVMVolumeGroup %s is actually used. VG size: %s, allocatedSize: %s", lvg.Name, lvg.Status.VGSize.String(), lvg.Status.AllocatedSize.String()))
+		}
+
+		// get the LVMVolumeGroups by node name
+		nodeLVGs = LVMVolumeGroupsByNodeName(usedLVGs)
+		for n, ls := range nodeLVGs {
+			for _, l := range ls {
+				log.Trace(fmt.Sprintf("[filterNodes] the LVMVolumeGroup %s belongs to node %s", l.Name, n))
+			}
 		}
 	}
 
@@ -267,9 +273,8 @@ func filterNodes(
 		FailedNodes: FailedNodesMap{},
 	}
 
-	thickMapMtx := &sync.RWMutex{}
-	thinMapMtx := &sync.RWMutex{}
 	failedNodesMapMtx := &sync.Mutex{}
+	resultNodesMtx := &sync.Mutex{}
 
 	wg := &sync.WaitGroup{}
 	wg.Add(len(*nodeNames))
@@ -277,80 +282,45 @@ func filterNodes(
 
 	for i, nodeName := range *nodeNames {
 		go func(i int, nodeName string) {
-			log.Trace(fmt.Sprintf("[filterNodes] gourutine %d starts the work with node %s", i, nodeName))
+			log.Trace(fmt.Sprintf("[filterNodes] goroutine %d starts the work with node %s", i, nodeName))
 			defer func() {
-				log.Trace(fmt.Sprintf("[filterNodes] gourutine %d ends the work with node %s", i, nodeName))
+				log.Trace(fmt.Sprintf("[filterNodes] goroutine %d ends the work with node %s", i, nodeName))
 				wg.Done()
 			}()
 
-			// if the node does not have any LVMVolumeGroups from used StorageClasses, then this node is not suitable
-			lvgsFromNode, exists := nodeLVGs[nodeName]
-			if !exists {
-				log.Debug(fmt.Sprintf("[filterNodes] node %s does not have any LVMVolumeGroups from used StorageClasses", nodeName))
+			var failReasons []string
+
+			// === Filter for LOCAL PVCs ===
+			if len(localPVCs) > 0 {
+				ok, reason := filterNodeForLocalPVCs(log, schedulerCache, allLVGs, nodeName, nodeLVGs, localPVCs, scLVGs, pvcRequests)
+				if !ok && reason != "" {
+					failReasons = append(failReasons, fmt.Sprintf("[local] %s", reason))
+				}
+			}
+
+			// === Filter for REPLICATED PVCs ===
+			if len(replicatedPVCs) > 0 {
+				node := nodes[nodeName]
+				if node == nil {
+					failReasons = append(failReasons, fmt.Sprintf("[replicated] node %s not found", nodeName))
+				} else {
+					ok, reason := filterNodeForReplicatedPVCs(log, ctx, cl, schedulerCache, nodeName, node, replicatedPVCs, scUsedByPVCs, pvcRequests)
+					if !ok && reason != "" {
+						failReasons = append(failReasons, fmt.Sprintf("[replicated] %s", reason))
+					}
+				}
+			}
+
+			if len(failReasons) > 0 {
 				failedNodesMapMtx.Lock()
-				result.FailedNodes[nodeName] = fmt.Sprintf("node %s does not have any LVMVolumeGroups from used StorageClasses", nodeName)
+				result.FailedNodes[nodeName] = strings.Join(failReasons, "; ")
 				failedNodesMapMtx.Unlock()
 				return
 			}
 
-			hasEnoughSpace := true
-			// now we iterate all over the PVCs to see if we can place all of them on the node (does the node have enough space)
-			for _, pvc := range managedPVCs {
-				pvcReq := pvcRequests[pvc.Name]
-
-				// we get LVGs which might be used by the PVC
-				lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
-
-				// we get the specific LVG which the PVC can use on the node as we support only one specified LVG in the Storage Class on each node
-				commonLVG := findMatchedLVG(lvgsFromNode, lvgsFromSC)
-				if commonLVG == nil {
-					err = fmt.Errorf("unable to match Storage Class's LVMVolumeGroup with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
-					errs <- err
-					return
-				}
-				log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s is common for storage class %s and node %s", commonLVG.Name, *pvc.Spec.StorageClassName, nodeName))
-
-				// Use common function to check available space in LVG
-				lvg := allLVGs[commonLVG.Name]
-				hasSpace, err := checkLVGHasSpace(schedulerCache, lvg, pvcReq.DeviceType, commonLVG.Thin.PoolName, pvcReq.RequestedSize)
-				if err != nil {
-					log.Error(err, fmt.Sprintf("[filterNodes] unable to check space for LVG %s", commonLVG.Name))
-					errs <- err
-					return
-				}
-
-				if !hasSpace {
-					log.Trace(fmt.Sprintf("[filterNodes] LVMVolumeGroup %s does not have enough space for PVC %s (requested: %s)", commonLVG.Name, pvc.Name, resource.NewQuantity(pvcReq.RequestedSize, resource.BinarySI)))
-					hasEnoughSpace = false
-					break
-				}
-
-				// Subtract requested space from precomputed free spaces for next iteration
-				switch pvcReq.DeviceType {
-				case consts.Thick:
-					thickMapMtx.Lock()
-					lvgsThickFree[commonLVG.Name] -= pvcReq.RequestedSize
-					thickMapMtx.Unlock()
-				case consts.Thin:
-					thinMapMtx.Lock()
-					lvgsThinFree[lvg.Name][commonLVG.Thin.PoolName] -= pvcReq.RequestedSize
-					thinMapMtx.Unlock()
-				}
-
-				if !hasEnoughSpace {
-					// we break as if only one PVC can't get enough space, the node does not fit
-					break
-				}
-			}
-
-			if !hasEnoughSpace {
-				failedNodesMapMtx.Lock()
-				result.FailedNodes[nodeName] = "not enough space"
-				failedNodesMapMtx.Unlock()
-				return
-			}
-
+			resultNodesMtx.Lock()
 			*result.NodeNames = append(*result.NodeNames, nodeName)
+			resultNodesMtx.Unlock()
 		}(i, nodeName)
 	}
 	wg.Wait()
@@ -377,6 +347,55 @@ func filterNodes(
 	return result, nil
 }
 
+// filterNodeForLocalPVCs filters node for local PVCs
+func filterNodeForLocalPVCs(
+	log logger.Logger,
+	schedulerCache *cache.Cache,
+	allLVGs map[string]*snc.LVMVolumeGroup,
+	nodeName string,
+	nodeLVGs map[string][]*snc.LVMVolumeGroup,
+	localPVCs map[string]*corev1.PersistentVolumeClaim,
+	scLVGs map[string]LVMVolumeGroups,
+	pvcRequests map[string]PVCRequest,
+) (bool, string) {
+	// if the node does not have any LVMVolumeGroups from used StorageClasses, then this node is not suitable
+	lvgsFromNode, exists := nodeLVGs[nodeName]
+	if !exists {
+		log.Debug(fmt.Sprintf("[filterNodeForLocalPVCs] node %s does not have any LVMVolumeGroups from used StorageClasses", nodeName))
+		return false, fmt.Sprintf("node %s does not have any LVMVolumeGroups from used StorageClasses", nodeName)
+	}
+
+	// now we iterate all over the PVCs to see if we can place all of them on the node
+	for _, pvc := range localPVCs {
+		pvcReq := pvcRequests[pvc.Name]
+
+		// we get LVGs which might be used by the PVC
+		lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
+
+		// we get the specific LVG which the PVC can use on the node
+		commonLVG := findMatchedLVG(lvgsFromNode, lvgsFromSC)
+		if commonLVG == nil {
+			return false, fmt.Sprintf("unable to match Storage Class's LVMVolumeGroup with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
+		}
+		log.Trace(fmt.Sprintf("[filterNodeForLocalPVCs] LVMVolumeGroup %s is common for storage class %s and node %s", commonLVG.Name, *pvc.Spec.StorageClassName, nodeName))
+
+		// Use common function to check available space in LVG
+		lvg := allLVGs[commonLVG.Name]
+		hasSpace, err := checkLVGHasSpace(schedulerCache, lvg, pvcReq.DeviceType, commonLVG.Thin.PoolName, pvcReq.RequestedSize)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[filterNodeForLocalPVCs] unable to check space for LVG %s", commonLVG.Name))
+			return false, fmt.Sprintf("error checking space for LVG %s: %v", commonLVG.Name, err)
+		}
+
+		if !hasSpace {
+			log.Trace(fmt.Sprintf("[filterNodeForLocalPVCs] LVMVolumeGroup %s does not have enough space for PVC %s (requested: %s)", commonLVG.Name, pvc.Name, resource.NewQuantity(pvcReq.RequestedSize, resource.BinarySI)))
+			return false, fmt.Sprintf("LVMVolumeGroup %s does not have enough space for PVC %s", commonLVG.Name, pvc.Name)
+		}
+	}
+
+	return true, ""
+}
+
 func populateCache(
 	log logger.Logger,
 	filteredNodeNames *[]string,
@@ -388,11 +407,22 @@ func populateCache(
 	for _, nodeName := range *filteredNodeNames {
 		for _, volume := range pod.Spec.Volumes {
 			if volume.PersistentVolumeClaim != nil {
+				pvc := managedPVCS[volume.PersistentVolumeClaim.ClaimName]
+				if pvc == nil {
+					continue
+				}
+
+				sc := scUsedByPVCs[*pvc.Spec.StorageClassName]
+
+				// Only cache local PVCs, replicated PVCs use different mechanism
+				if sc.Provisioner != consts.SdsLocalVolumeProvisioner {
+					log.Debug(fmt.Sprintf("[populateCache] PVC %s uses provisioner %s, skipping cache population", pvc.Name, sc.Provisioner))
+					continue
+				}
+
 				log.Debug(fmt.Sprintf("[populateCache] reconcile the PVC %s on node %s", volume.PersistentVolumeClaim.ClaimName, nodeName))
 				lvgNamesForTheNode := schedulerCache.GetLVGNamesByNodeName(nodeName)
 				log.Trace(fmt.Sprintf("[populateCache] LVMVolumeGroups from cache for the node %s: %v", nodeName, lvgNamesForTheNode))
-				pvc := managedPVCS[volume.PersistentVolumeClaim.ClaimName]
-				sc := scUsedByPVCs[*pvc.Spec.StorageClassName]
 
 				lvgsForPVC, err := ExtractLVGsFromSC(sc)
 				if err != nil {

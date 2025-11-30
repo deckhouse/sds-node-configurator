@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,8 +27,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 )
 
@@ -114,7 +118,11 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("successfully extracted the PVC requested sizes")
 
 	servingLog.Debug("starts to score the nodes for Pod")
-	scoredNodes, err := scoreNodes(servingLog, s.cache, &nodeNames, managedPVCs, scUsedByPVCs, pvcRequests, s.defaultDivisor)
+	// TODO: In future, retrieve replica locations from DRBD/Linstor for replicated PVCs
+	// For now, pass empty map as we don't have replica information yet
+	replicaLocations := make(map[string][]string)
+	
+	scoredNodes, err := scoreNodes(servingLog, s.ctx, s.client, s.cache, &nodeNames, managedPVCs, scUsedByPVCs, pvcRequests, replicaLocations, s.defaultDivisor)
 	if err != nil {
 		servingLog.Error(err, "unable to score nodes")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -168,11 +176,14 @@ func writeNodeScoresResponse(w http.ResponseWriter, log logger.Logger, nodeNames
 
 func scoreNodes(
 	log logger.Logger,
+	ctx context.Context,
+	cl client.Client,
 	schedulerCache *cache.Cache,
 	nodeNames *[]string,
 	managedPVCs map[string]*corev1.PersistentVolumeClaim,
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
+	replicaLocations map[string][]string,
 	divisor float64,
 ) ([]HostPriority, error) {
 	allLVGs := schedulerCache.GetAllLVG()
@@ -180,78 +191,166 @@ func scoreNodes(
 		log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s in the cache", lvg.Name))
 	}
 
-	log.Debug("[scoreNodes] starts to get LVMVolumeGroups for Storage Classes")
-	scLVGs, err := GetLVGsFromStorageClasses(scUsedByPVCs)
-	if err != nil {
-		return nil, err
-	}
-	log.Debug("[scoreNodes] successfully got LVMVolumeGroups for Storage Classes")
-	for scName, lvmVolumeGroups := range scLVGs {
-		for _, lvg := range lvmVolumeGroups {
-			log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s belongs to Storage Class %s", lvg.Name, scName))
+	// Separate PVCs by provisioner
+	localPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsLocalVolumeProvisioner)
+	replicatedPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsReplicatedVolumeProvisioner)
+
+	log.Debug(fmt.Sprintf("[scoreNodes] local PVCs count: %d, replicated PVCs count: %d", len(localPVCs), len(replicatedPVCs)))
+
+	// Get LVGs from StorageClasses only for local PVCs
+	var scLVGs map[string]LVMVolumeGroups
+	var usedLVGs map[string]*snc.LVMVolumeGroup
+	var nodeLVGs map[string][]*snc.LVMVolumeGroup
+	var err error
+
+	if len(localPVCs) > 0 {
+		log.Debug("[scoreNodes] starts to get LVMVolumeGroups for local Storage Classes")
+		localSCs := make(map[string]*storagev1.StorageClass)
+		for _, pvc := range localPVCs {
+			if pvc.Spec.StorageClassName != nil {
+				if sc, exists := scUsedByPVCs[*pvc.Spec.StorageClassName]; exists {
+					localSCs[sc.Name] = sc
+				}
+			}
 		}
-	}
 
-	usedLVGs := RemoveUnusedLVGs(allLVGs, scLVGs)
-	for lvgName := range usedLVGs {
-		log.Trace(fmt.Sprintf("[scoreNodes] used LVMVolumeGroup %s", lvgName))
-	}
+		scLVGs, err = GetLVGsFromStorageClasses(localSCs)
+		if err != nil {
+			return nil, err
+		}
+		log.Debug("[scoreNodes] successfully got LVMVolumeGroups for local Storage Classes")
+		for scName, lvmVolumeGroups := range scLVGs {
+			for _, lvg := range lvmVolumeGroups {
+				log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s belongs to Storage Class %s", lvg.Name, scName))
+			}
+		}
 
-	nodeLVGs := LVMVolumeGroupsByNodeName(usedLVGs)
-	for n, ls := range nodeLVGs {
-		for _, l := range ls {
-			log.Trace(fmt.Sprintf("[scoreNodes] the LVMVolumeGroup %s belongs to node %s", l.Name, n))
+		usedLVGs = RemoveUnusedLVGs(allLVGs, scLVGs)
+		for lvgName := range usedLVGs {
+			log.Trace(fmt.Sprintf("[scoreNodes] used LVMVolumeGroup %s", lvgName))
+		}
+
+		nodeLVGs = LVMVolumeGroupsByNodeName(usedLVGs)
+		for n, ls := range nodeLVGs {
+			for _, l := range ls {
+				log.Trace(fmt.Sprintf("[scoreNodes] the LVMVolumeGroup %s belongs to node %s", l.Name, n))
+			}
 		}
 	}
 
 	result := make([]HostPriority, 0, len(*nodeNames))
+	resultMtx := &sync.Mutex{}
 	wg := &sync.WaitGroup{}
 	wg.Add(len(*nodeNames))
 	errs := make(chan error, len(managedPVCs)*len(*nodeNames))
 
 	for i, nodeName := range *nodeNames {
 		go func(i int, nodeName string) {
-			log.Trace(fmt.Sprintf("[scoreNodes] gourutine %d starts the work for the node %s", i, nodeName))
+			log.Trace(fmt.Sprintf("[scoreNodes] goroutine %d starts the work for the node %s", i, nodeName))
 			defer func() {
-				log.Trace(fmt.Sprintf("[scoreNodes] gourutine %d ends the work for the node %s", i, nodeName))
+				log.Trace(fmt.Sprintf("[scoreNodes] goroutine %d ends the work for the node %s", i, nodeName))
 				wg.Done()
 			}()
 
-			lvgsFromNode := nodeLVGs[nodeName]
-			var totalFreeSpaceLeft int64
-			for _, pvc := range managedPVCs {
-				pvcReq := pvcRequests[pvc.Name]
-				lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
-				commonLVG := findMatchedLVG(lvgsFromNode, lvgsFromSC)
-				if commonLVG == nil {
-					err = fmt.Errorf("unable to match Storage Class's LVMVolumeGroup with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
-					errs <- err
-					return
-				}
-				log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s is common for storage class %s and node %s", commonLVG.Name, *pvc.Spec.StorageClassName, nodeName))
+			var totalScore int64
+			pvcCount := 0
 
-				// Use common function to get available space in LVG
-				lvg := allLVGs[commonLVG.Name]
-				spaceInfo, err := getLVGAvailableSpace(schedulerCache, lvg, pvcReq.DeviceType, commonLVG.Thin.PoolName)
-				if err != nil {
-					log.Error(err, fmt.Sprintf("[scoreNodes] unable to get available space for LVG %s", lvg.Name))
-					errs <- err
-					return
-				}
+			// === Score LOCAL PVCs ===
+			if len(localPVCs) > 0 {
+				lvgsFromNode := nodeLVGs[nodeName]
+				for _, pvc := range localPVCs {
+					pvcReq := pvcRequests[pvc.Name]
+					lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
+					commonLVG := findMatchedLVG(lvgsFromNode, lvgsFromSC)
+					if commonLVG == nil {
+						log.Debug(fmt.Sprintf("[scoreNodes] unable to match local LVG for SC %s on node %s, scoring 0", *pvc.Spec.StorageClassName, nodeName))
+						pvcCount++
+						continue
+					}
+					log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s is common for storage class %s and node %s", commonLVG.Name, *pvc.Spec.StorageClassName, nodeName))
 
-				log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s available space: %s, total size: %s", lvg.Name, resource.NewQuantity(spaceInfo.AvailableSpace, resource.BinarySI), resource.NewQuantity(spaceInfo.TotalSize, resource.BinarySI)))
-				totalFreeSpaceLeft += getFreeSpaceLeftPercent(spaceInfo.AvailableSpace, pvcReq.RequestedSize, spaceInfo.TotalSize)
+					// Use common function to get available space in LVG
+					lvg := allLVGs[commonLVG.Name]
+					spaceInfo, err := getLVGAvailableSpace(schedulerCache, lvg, pvcReq.DeviceType, commonLVG.Thin.PoolName)
+					if err != nil {
+						log.Error(err, fmt.Sprintf("[scoreNodes] unable to get available space for LVG %s", lvg.Name))
+						pvcCount++
+						continue
+					}
+
+					log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s available space: %s, total size: %s", lvg.Name, resource.NewQuantity(spaceInfo.AvailableSpace, resource.BinarySI), resource.NewQuantity(spaceInfo.TotalSize, resource.BinarySI)))
+					totalScore += getFreeSpaceLeftPercent(spaceInfo.AvailableSpace, pvcReq.RequestedSize, spaceInfo.TotalSize)
+					pvcCount++
+				}
 			}
 
-			averageFreeSpace := totalFreeSpaceLeft / int64(len(managedPVCs))
-			log.Trace(fmt.Sprintf("[scoreNodes] average free space left for the node: %s", nodeName))
-			score := getNodeScore(averageFreeSpace, divisor)
-			log.Trace(fmt.Sprintf("[scoreNodes] node %s has score %d with average free space left (after all PVC bounded), percent %d", nodeName, score, averageFreeSpace))
+			// === Score REPLICATED PVCs ===
+			if len(replicatedPVCs) > 0 {
+				for _, pvc := range replicatedPVCs {
+					pvcReq := pvcRequests[pvc.Name]
+					sc := scUsedByPVCs[*pvc.Spec.StorageClassName]
 
+					// Get RSC (name = SC name)
+					rsc, err := getReplicatedStorageClass(ctx, cl, sc.Name)
+					if err != nil {
+						log.Error(err, fmt.Sprintf("[scoreNodes] unable to get RSC for SC %s", sc.Name))
+						pvcCount++
+						continue
+					}
+
+					// Get RSP
+					rsp, err := getReplicatedStoragePool(ctx, cl, rsc.Spec.StoragePool)
+					if err != nil {
+						log.Error(err, fmt.Sprintf("[scoreNodes] unable to get RSP %s", rsc.Spec.StoragePool))
+						pvcCount++
+						continue
+					}
+
+					volumeAccess := rsc.Spec.VolumeAccess
+					if volumeAccess == "" {
+						volumeAccess = consts.VolumeAccessPreferablyLocal
+					}
+
+					// For Bound PVC with volumeAccess != Local/EventuallyLocal:
+					// score 0 if no LVG or no space (to prefer nodes with actual storage over diskless)
+					if pvc.Status.Phase == corev1.ClaimBound &&
+						volumeAccess != consts.VolumeAccessLocal &&
+						volumeAccess != consts.VolumeAccessEventuallyLocal {
+
+						hasLVGAndSpace, _ := checkNodeHasLVGWithSpaceForReplicated(log, schedulerCache, nodeName, rsp, pvcReq.RequestedSize)
+						if !hasLVGAndSpace {
+							log.Debug(fmt.Sprintf("[scoreNodes] node %s has no LVG/space for replicated PVC %s, scoring 0 for this PVC", nodeName, pvc.Name))
+							// pvcScore = 0, just increment count
+							pvcCount++
+							continue
+						}
+					}
+
+					// Calculate score based on available space
+					pvcScore := calculateReplicatedPVCScore(log, schedulerCache, nodeName, rsp, pvcReq, divisor)
+					totalScore += pvcScore
+					pvcCount++
+				}
+			}
+
+			// Calculate replica bonus
+			replicaBonus := calculateReplicaBonus(nodeName, managedPVCs, replicaLocations)
+			totalScore += replicaBonus
+
+			var averageScore int64
+			if pvcCount > 0 {
+				averageScore = totalScore / int64(pvcCount)
+			}
+			log.Trace(fmt.Sprintf("[scoreNodes] average score for the node %s: %d (total: %d, pvcCount: %d, replicaBonus: %d)", nodeName, averageScore, totalScore, pvcCount, replicaBonus))
+			score := getNodeScore(averageScore, divisor)
+			log.Trace(fmt.Sprintf("[scoreNodes] node %s has final score %d", nodeName, score))
+
+			resultMtx.Lock()
 			result = append(result, HostPriority{
 				Host:  nodeName,
 				Score: score,
 			})
+			resultMtx.Unlock()
 		}(i, nodeName)
 	}
 	wg.Wait()

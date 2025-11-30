@@ -277,19 +277,45 @@ func extractRequestedSize(
 		sc := scs[*pvc.Spec.StorageClassName]
 		log.Debug(fmt.Sprintf("[extractRequestedSize] PVC %s/%s has status phase: %s", pvc.Namespace, pvc.Name, pvc.Status.Phase))
 
+		// Determine device type based on provisioner
+		var deviceType string
+		isReplicated := sc.Provisioner == consts.SdsReplicatedVolumeProvisioner
+
+		if isReplicated {
+			// For replicated PVCs, get device type from RSP
+			rsc, err := getReplicatedStorageClassForExtract(ctx, cl, sc.Name)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[extractRequestedSize] unable to get RSC for SC %s", sc.Name))
+				continue
+			}
+			rsp, err := getReplicatedStoragePoolForExtract(ctx, cl, rsc.Spec.StoragePool)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[extractRequestedSize] unable to get RSP %s", rsc.Spec.StoragePool))
+				continue
+			}
+			switch rsp.Spec.Type {
+			case consts.RSPTypeLVM:
+				deviceType = consts.Thick
+			case consts.RSPTypeLVMThin:
+				deviceType = consts.Thin
+			default:
+				deviceType = consts.Thick
+			}
+		} else {
+			// For local PVCs, get device type from SC parameters
+			deviceType = sc.Parameters[consts.LvmTypeParamKey]
+		}
+
+		if deviceType == "" {
+			log.Debug(fmt.Sprintf("[extractRequestedSize] unable to determine device type for PVC %s/%s", pvc.Namespace, pvc.Name))
+			continue
+		}
+
 		switch pvc.Status.Phase {
 		case corev1.ClaimPending:
-			switch sc.Parameters[consts.LvmTypeParamKey] {
-			case consts.Thick:
-				pvcRequests[pvc.Name] = PVCRequest{
-					DeviceType:    consts.Thick,
-					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value(),
-				}
-			case consts.Thin:
-				pvcRequests[pvc.Name] = PVCRequest{
-					DeviceType:    consts.Thin,
-					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value(),
-				}
+			pvcRequests[pvc.Name] = PVCRequest{
+				DeviceType:    deviceType,
+				RequestedSize: pvc.Spec.Resources.Requests.Storage().Value(),
 			}
 
 		case corev1.ClaimBound:
@@ -297,22 +323,34 @@ func extractRequestedSize(
 			if err := cl.Get(ctx, client.ObjectKey{Name: pvc.Spec.VolumeName}, pv); err != nil {
 				return nil, fmt.Errorf("[extractRequestedSize] error getting PV %s: %v", pvc.Spec.VolumeName, err)
 			}
-			switch sc.Parameters[consts.LvmTypeParamKey] {
-			case consts.Thick:
-				pvcRequests[pvc.Name] = PVCRequest{
-					DeviceType:    consts.Thick,
-					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value() - pv.Spec.Capacity.Storage().Value(),
-				}
-			case consts.Thin:
-				pvcRequests[pvc.Name] = PVCRequest{
-					DeviceType:    consts.Thin,
-					RequestedSize: pvc.Spec.Resources.Requests.Storage().Value() - pv.Spec.Capacity.Storage().Value(),
-				}
+			pvcRequests[pvc.Name] = PVCRequest{
+				DeviceType:    deviceType,
+				RequestedSize: pvc.Spec.Resources.Requests.Storage().Value() - pv.Spec.Capacity.Storage().Value(),
 			}
 		}
 	}
 
 	return pvcRequests, nil
+}
+
+// getReplicatedStorageClassForExtract retrieves RSC by SC name for extractRequestedSize
+func getReplicatedStorageClassForExtract(ctx context.Context, cl client.Client, scName string) (*snc.ReplicatedStorageClass, error) {
+	rsc := &snc.ReplicatedStorageClass{}
+	err := cl.Get(ctx, client.ObjectKey{Name: scName}, rsc)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get ReplicatedStorageClass %s: %w", scName, err)
+	}
+	return rsc, nil
+}
+
+// getReplicatedStoragePoolForExtract retrieves RSP by name for extractRequestedSize
+func getReplicatedStoragePoolForExtract(ctx context.Context, cl client.Client, rspName string) (*snc.ReplicatedStoragePool, error) {
+	rsp := &snc.ReplicatedStoragePool{}
+	err := cl.Get(ctx, client.ObjectKey{Name: rspName}, rsp)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get ReplicatedStoragePool %s: %w", rspName, err)
+	}
+	return rsp, nil
 }
 
 // Get LVMVolumeGroups from StorageClasses

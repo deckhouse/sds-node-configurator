@@ -25,4 +25,22 @@ const (
 
 	Thick = "Thick"
 	Thin  = "Thin"
+
+	// ReplicatedStorageClass VolumeAccess modes
+	VolumeAccessLocal           = "Local"
+	VolumeAccessEventuallyLocal = "EventuallyLocal"
+	VolumeAccessPreferablyLocal = "PreferablyLocal"
+	VolumeAccessAny             = "Any"
+
+	// ReplicatedStorageClass Topology modes
+	TopologyTransZonal = "TransZonal"
+	TopologyZonal      = "Zonal"
+	TopologyIgnored    = "Ignored"
+
+	// ReplicatedStoragePool Types
+	RSPTypeLVM     = "LVM"     // Thick volumes
+	RSPTypeLVMThin = "LVMThin" // Thin volumes
+
+	// Labels for replicated volumes
+	LabelReplicatedNode = "storage.deckhouse.io/sds-replicated-volume-node"
 )
