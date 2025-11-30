@@ -17,6 +17,7 @@ limitations under the License.
 package monitoring
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -215,6 +216,8 @@ func getLVType(lv internal.LVData) string {
 func (m Metrics) UpdateLVMMetrics(lvs []internal.LVData) {
 	// Track current LVs to remove metrics for deleted ones
 	currentLVs := make(map[string]bool)
+
+	fmt.Println("lvs", lvs)
 
 	for _, lv := range lvs {
 		// Skip internal LVM volumes (they start with [ and end with ])
