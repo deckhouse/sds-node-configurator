@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"reflect"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -82,22 +81,9 @@ func RunLVGWatcherCacheController(
 				log.Info(fmt.Sprintf("[RunLVGWatcherCacheController] cache was added for the LVMVolumeGroup %s", lvg.Name))
 			}
 
-			log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] starts to clear the cache for the LVMVolumeGroup %s", lvg.Name))
-			pvcs, err := cache.GetAllPVCForLVG(lvg.Name)
+			err = cache.ClearBoundPVCsFromLVG(lvg.Name)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVGWatcherCacheController] unable to get all PVC for the LVMVolumeGroup %s", lvg.Name))
-				return
-			}
-
-			for _, pvc := range pvcs {
-				log.Trace(fmt.Sprintf("[RunLVGWatcherCacheController] cached PVC %s/%s belongs to LVMVolumeGroup %s", pvc.Namespace, pvc.Name, lvg.Name))
-				log.Trace(fmt.Sprintf("[RunLVGWatcherCacheController] PVC %s/%s has status phase %s", pvc.Namespace, pvc.Name, pvc.Status.Phase))
-				if pvc.Status.Phase == corev1.ClaimBound {
-					log.Trace(fmt.Sprintf("[RunLVGWatcherCacheController] cached PVC %s/%s has Status.Phase Bound. It will be removed from the cache for LVMVolumeGroup %s", pvc.Namespace, pvc.Name, lvg.Name))
-					cache.RemovePVCFromTheCache(pvc)
-
-					log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] PVC %s/%s was removed from the cache for LVMVolumeGroup %s", pvc.Namespace, pvc.Name, lvg.Name))
-				}
+				log.Error(err, fmt.Sprintf("[RunLVGWatcherCacheController] unable to clear bound PVCs for the LVMVolumeGroup %s", lvg.Name))
 			}
 
 			log.Info(fmt.Sprintf("[RunLVGWatcherCacheController] cache for the LVMVolumeGroup %s was reconciled by CreateFunc", lvg.Name))
@@ -123,20 +109,9 @@ func RunLVGWatcherCacheController(
 			}
 			log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] the LVMVolumeGroup %s should be reconciled by Update Func", newLvg.Name))
 
-			cachedPVCs, err := cache.GetAllPVCForLVG(newLvg.Name)
+			err = cache.ClearBoundPVCsFromLVG(newLvg.Name)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVGWatcherCacheController] unable to get all PVC for the LVMVolumeGroup %s", newLvg.Name))
-				return
-			}
-
-			for _, pvc := range cachedPVCs {
-				log.Trace(fmt.Sprintf("[RunLVGWatcherCacheController] PVC %s/%s from the cache belongs to LVMVolumeGroup %s", pvc.Namespace, pvc.Name, newLvg.Name))
-				log.Trace(fmt.Sprintf("[RunLVGWatcherCacheController] PVC %s/%s has status phase %s", pvc.Namespace, pvc.Name, pvc.Status.Phase))
-				if pvc.Status.Phase == corev1.ClaimBound {
-					log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] PVC %s/%s from the cache has Status.Phase Bound. It will be removed from the reserved space in the LVMVolumeGroup %s", pvc.Namespace, pvc.Name, newLvg.Name))
-					cache.RemovePVCFromTheCache(pvc)
-					log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] PVC %s/%s was removed from the LVMVolumeGroup %s in the cache", pvc.Namespace, pvc.Name, newLvg.Name))
-				}
+				log.Error(err, fmt.Sprintf("[RunLVGWatcherCacheController] unable to clear bound PVCs for the LVMVolumeGroup %s", newLvg.Name))
 			}
 
 			log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] Update Func ends reconciliation the LVMVolumeGroup %s cache", newLvg.Name))

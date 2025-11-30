@@ -49,18 +49,23 @@ type Cache struct {
 type lvgEntry struct {
 	lvg           *snc.LVMVolumeGroup
 	thickByPVC    map[string]*pvcEntry      // map[pvcKey]*pvcEntry
-	thickByVolume map[string]int64          // map[volumeName]size - for thick volumes
+	thickByVolume map[string]*volumeEntry   // map[volumeName]*volumeEntry - for thick volumes
 	thinByPool    map[string]*thinPoolEntry // map[thinPoolName]*thinPoolEntry
 }
 
 type thinPoolEntry struct {
-	pvcs    map[string]*pvcEntry // map[pvcKey]*pvcEntry
-	volumes map[string]int64     // map[volumeName]size - for thin volumes
+	pvcs    map[string]*pvcEntry    // map[pvcKey]*pvcEntry
+	volumes map[string]*volumeEntry // map[volumeName]*volumeEntry - for thin volumes
 }
 
 type pvcEntry struct {
 	pvc          *corev1.PersistentVolumeClaim
 	selectedNode string
+}
+
+type volumeEntry struct {
+	size      int64
+	createdAt time.Time
 }
 
 // NewCache initialize new cache.
@@ -76,6 +81,7 @@ func NewCache(logger logger.Logger, pvcExpDurSec int) *Cache {
 
 		for range timer.C {
 			ch.clearBoundExpiredPVC()
+			ch.clearExpiredVolumes()
 			timer.Reset(ch.expiredDuration)
 		}
 	}()
@@ -117,6 +123,55 @@ func (c *Cache) clearBoundExpiredPVC() {
 	c.log.Debug("[clearBoundExpiredPVC] finished the expired PVC clearing")
 }
 
+func (c *Cache) clearExpiredVolumes() {
+	c.log.Debug("[clearExpiredVolumes] starts to clear expired volumes")
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+
+	for lvgName, entry := range c.lvgByName {
+		// Clear expired thick volumes
+		for volumeName, ve := range entry.thickByVolume {
+			if time.Since(ve.createdAt) > c.expiredDuration {
+				c.log.Warning(fmt.Sprintf("[clearExpiredVolumes] thick volume %s in LVG %s expired, remove it from the cache", volumeName, lvgName))
+				delete(entry.thickByVolume, volumeName)
+			}
+		}
+
+		// Clear expired thin volumes
+		for thinPoolName, tp := range entry.thinByPool {
+			for volumeName, ve := range tp.volumes {
+				if time.Since(ve.createdAt) > c.expiredDuration {
+					c.log.Warning(fmt.Sprintf("[clearExpiredVolumes] thin volume %s in LVG %s Thin Pool %s expired, remove it from the cache", volumeName, lvgName, thinPoolName))
+					delete(tp.volumes, volumeName)
+				}
+			}
+		}
+	}
+	c.log.Debug("[clearExpiredVolumes] finished the expired volumes clearing")
+}
+
+// ClearBoundPVCsFromLVG removes all Bound PVCs from the cache for the specified LVG without waiting for expiration.
+// Unlike clearBoundExpiredPVC, this function removes Bound PVCs immediately.
+func (c *Cache) ClearBoundPVCsFromLVG(lvgName string) error {
+	c.log.Debug(fmt.Sprintf("[ClearBoundPVCsFromLVG] starts to clear the cache for the LVMVolumeGroup %s", lvgName))
+	pvcs, err := c.GetAllPVCForLVG(lvgName)
+	if err != nil {
+		c.log.Error(err, fmt.Sprintf("[ClearBoundPVCsFromLVG] unable to get all PVC for the LVMVolumeGroup %s", lvgName))
+		return err
+	}
+
+	for _, pvc := range pvcs {
+		c.log.Trace(fmt.Sprintf("[ClearBoundPVCsFromLVG] cached PVC %s/%s belongs to LVMVolumeGroup %s", pvc.Namespace, pvc.Name, lvgName))
+		c.log.Trace(fmt.Sprintf("[ClearBoundPVCsFromLVG] PVC %s/%s has status phase %s", pvc.Namespace, pvc.Name, pvc.Status.Phase))
+		if pvc.Status.Phase == corev1.ClaimBound {
+			c.log.Trace(fmt.Sprintf("[ClearBoundPVCsFromLVG] cached PVC %s/%s has Status.Phase Bound. It will be removed from the cache for LVMVolumeGroup %s", pvc.Namespace, pvc.Name, lvgName))
+			c.RemovePVCFromTheCache(pvc)
+			c.log.Debug(fmt.Sprintf("[ClearBoundPVCsFromLVG] PVC %s/%s was removed from the cache for LVMVolumeGroup %s", pvc.Namespace, pvc.Name, lvgName))
+		}
+	}
+	return nil
+}
+
 // AddLVG adds selected LVMVolumeGroup resource to the cache. If it is already stored, does nothing.
 func (c *Cache) AddLVG(lvg *snc.LVMVolumeGroup) {
 	c.mtx.Lock()
@@ -130,7 +185,7 @@ func (c *Cache) AddLVG(lvg *snc.LVMVolumeGroup) {
 	c.lvgByName[lvg.Name] = &lvgEntry{
 		lvg:           lvg,
 		thickByPVC:    make(map[string]*pvcEntry),
-		thickByVolume: make(map[string]int64),
+		thickByVolume: make(map[string]*volumeEntry),
 		thinByPool:    make(map[string]*thinPoolEntry),
 	}
 
@@ -214,8 +269,8 @@ func (c *Cache) GetLVGThickReservedSpace(lvgName string) (int64, error) {
 		space += pe.pvc.Spec.Resources.Requests.Storage().Value()
 	}
 	// Consider volumes
-	for _, size := range entry.thickByVolume {
-		space += size
+	for _, ve := range entry.thickByVolume {
+		space += ve.size
 	}
 
 	return space, nil
@@ -243,8 +298,8 @@ func (c *Cache) GetLVGThinReservedSpace(lvgName string, thinPoolName string) (in
 		space += pe.pvc.Spec.Resources.Requests.Storage().Value()
 	}
 	// Consider volumes
-	for _, size := range tp.volumes {
-		space += size
+	for _, ve := range tp.volumes {
+		space += ve.size
 	}
 
 	return space, nil
@@ -483,7 +538,7 @@ func (c *Cache) addThinPoolIfNotExists(lvgCh *lvgEntry, thinPoolName string) err
 
 	lvgCh.thinByPool[thinPoolName] = &thinPoolEntry{
 		pvcs:    make(map[string]*pvcEntry),
-		volumes: make(map[string]int64),
+		volumes: make(map[string]*volumeEntry),
 	}
 	return nil
 }
@@ -698,42 +753,23 @@ func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *corev1.Persist
 }
 
 // RemovePVCFromTheCache completely removes selected PVC in the cache.
-// Also removes volume reservations associated with the PVC's VolumeName.
 func (c *Cache) RemovePVCFromTheCache(pvc *corev1.PersistentVolumeClaim) {
 	pvcKey := configurePVCKey(pvc)
-	volumeName := pvc.Spec.VolumeName // PV name is used as volume name for reservation
 
-	c.log.Debug(fmt.Sprintf("[RemovePVCFromTheCache] run full cache wipe for PVC %s and volume %s", pvcKey, volumeName))
+	c.log.Debug(fmt.Sprintf("[RemovePVCFromTheCache] run full cache wipe for PVC %s", pvcKey))
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
-	for lvgName, entry := range c.lvgByName {
+	for _, entry := range c.lvgByName {
 		// Remove PVC entry
 		delete(entry.thickByPVC, pvcKey)
 		for _, tp := range entry.thinByPool {
 			delete(tp.pvcs, pvcKey)
 		}
-
-		// Remove volume reservations (try to remove from both places - thick and thin)
-		// This is safe, as if volume doesn't exist in one place, operation simply does nothing
-		if volumeName != "" {
-			// Try to remove from thick
-			if _, exists := entry.thickByVolume[volumeName]; exists {
-				delete(entry.thickByVolume, volumeName)
-				c.log.Debug(fmt.Sprintf("[RemovePVCFromTheCache] removed thick volume reservation %s from LVG %s", volumeName, lvgName))
-			}
-
-			// Try to remove from all thin pools
-			for thinPoolName, tp := range entry.thinByPool {
-				if _, exists := tp.volumes[volumeName]; exists {
-					delete(tp.volumes, volumeName)
-					c.log.Debug(fmt.Sprintf("[RemovePVCFromTheCache] removed thin volume reservation %s from LVG %s Thin Pool %s", volumeName, lvgName, thinPoolName))
-				}
-			}
-		}
 	}
 }
 
-// AddThickVolume reserves space for a thick volume in the specified LVG
+// AddThickVolume reserves space for a thick volume in the specified LVG.
+// If volume already exists, updates its size and creation time.
 func (c *Cache) AddThickVolume(lvgName string, volumeName string, size int64) error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -743,13 +779,22 @@ func (c *Cache) AddThickVolume(lvgName string, volumeName string, size int64) er
 		return fmt.Errorf("the LVMVolumeGroup %s was not found in the cache", lvgName)
 	}
 
-	entry.thickByVolume[volumeName] = size
-
-	c.log.Debug(fmt.Sprintf("[AddThickVolume] volume %s with size %d added to LVG %s", volumeName, size, lvgName))
+	if existingVolume, exists := entry.thickByVolume[volumeName]; exists {
+		existingVolume.size = size
+		existingVolume.createdAt = time.Now()
+		c.log.Debug(fmt.Sprintf("[AddThickVolume] volume %s already exists in LVG %s, updated size to %d and reset creation time", volumeName, lvgName, size))
+	} else {
+		entry.thickByVolume[volumeName] = &volumeEntry{
+			size:      size,
+			createdAt: time.Now(),
+		}
+		c.log.Debug(fmt.Sprintf("[AddThickVolume] volume %s with size %d added to LVG %s", volumeName, size, lvgName))
+	}
 	return nil
 }
 
-// AddThinVolume reserves space for a thin volume in the specified LVG and thin pool
+// AddThinVolume reserves space for a thin volume in the specified LVG and thin pool.
+// If volume already exists, updates its size and creation time.
 func (c *Cache) AddThinVolume(lvgName string, thinPoolName string, volumeName string, size int64) error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -769,9 +814,17 @@ func (c *Cache) AddThinVolume(lvgName string, thinPoolName string, volumeName st
 		return fmt.Errorf("thin pool %s not found", thinPoolName)
 	}
 
-	thinPoolCh.volumes[volumeName] = size
-
-	c.log.Debug(fmt.Sprintf("[AddThinVolume] volume %s with size %d added to LVG %s Thin Pool %s", volumeName, size, lvgName, thinPoolName))
+	if existingVolume, exists := thinPoolCh.volumes[volumeName]; exists {
+		existingVolume.size = size
+		existingVolume.createdAt = time.Now()
+		c.log.Debug(fmt.Sprintf("[AddThinVolume] volume %s already exists in LVG %s Thin Pool %s, updated size to %d and reset creation time", volumeName, lvgName, thinPoolName, size))
+	} else {
+		thinPoolCh.volumes[volumeName] = &volumeEntry{
+			size:      size,
+			createdAt: time.Now(),
+		}
+		c.log.Debug(fmt.Sprintf("[AddThinVolume] volume %s with size %d added to LVG %s Thin Pool %s", volumeName, size, lvgName, thinPoolName))
+	}
 	return nil
 }
 
