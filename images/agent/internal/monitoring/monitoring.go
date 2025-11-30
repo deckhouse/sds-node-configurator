@@ -192,11 +192,22 @@ func getLVType(lv internal.LVData) string {
 	if len(lv.LVAttr) > 0 && lv.LVAttr[0] == 't' {
 		return "thin_pool"
 	}
-	// Check if it's a thin volume (has PoolName)
+	// Check if it's a thin volume (has PoolName and is not a thin pool)
 	if lv.PoolName != "" {
 		return "thin_volume"
 	}
-	// Otherwise it's a regular/thick volume
+	// Check if it's a thick volume (first character of LVAttr is '-' and no PoolName)
+	// Thick volumes have '-' as first character and empty PoolName
+	if len(lv.LVAttr) > 0 && lv.LVAttr[0] == '-' {
+		return "thick"
+	}
+	// If LVAttr is empty or has unexpected value, but PoolName is empty,
+	// it's likely a thick volume (thick volumes don't have PoolName)
+	// This handles edge cases where LVAttr might be empty or malformed
+	if lv.PoolName == "" {
+		return "thick"
+	}
+	// Otherwise it's a regular volume (fallback for any other type)
 	return "regular"
 }
 
