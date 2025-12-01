@@ -17,6 +17,7 @@ limitations under the License.
 package monitoring
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -112,6 +113,30 @@ var (
 		Name:      "lvm_volume_group_used_percent",
 		Help:      "Used percentage of LVM volume group.",
 	}, []string{"node", "volume_group"})
+
+	lvmThinPoolSizeBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvm_thin_pool_size_bytes",
+		Help:      "Size of LVM thin pool in bytes.",
+	}, []string{"node", "volume_group", "thin_pool"})
+
+	lvmThinPoolUsedBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvm_thin_pool_used_bytes",
+		Help:      "Used size of LVM thin pool in bytes.",
+	}, []string{"node", "volume_group", "thin_pool"})
+
+	lvmThinPoolUsedPercent = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvm_thin_pool_used_percent",
+		Help:      "Used percentage of LVM thin pool.",
+	}, []string{"node", "volume_group", "thin_pool"})
+
+	lvmThinPoolMetadataUsedPercent = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvm_thin_pool_metadata_used_percent",
+		Help:      "Used percentage of LVM thin pool metadata.",
+	}, []string{"node", "volume_group", "thin_pool"})
 )
 
 func init() {
@@ -126,6 +151,10 @@ func init() {
 	metrics.Registry.MustRegister(lvmVolumeGroupFreeBytes)
 	metrics.Registry.MustRegister(lvmVolumeGroupUsedBytes)
 	metrics.Registry.MustRegister(lvmVolumeGroupUsedPercent)
+	metrics.Registry.MustRegister(lvmThinPoolSizeBytes)
+	metrics.Registry.MustRegister(lvmThinPoolUsedBytes)
+	metrics.Registry.MustRegister(lvmThinPoolUsedPercent)
+	metrics.Registry.MustRegister(lvmThinPoolMetadataUsedPercent)
 }
 
 type Metrics struct {
@@ -196,8 +225,29 @@ func (m Metrics) LVMVolumeGroupUsedPercent(volumeGroup string) prometheus.Gauge 
 	return lvmVolumeGroupUsedPercent.WithLabelValues(m.node, volumeGroup)
 }
 
-// UpdateLVMMetrics updates metrics for LVM volume groups
-func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData) {
+func (m Metrics) LVMThinPoolSizeBytes(volumeGroup, thinPool string) prometheus.Gauge {
+	return lvmThinPoolSizeBytes.WithLabelValues(m.node, volumeGroup, thinPool)
+}
+
+func (m Metrics) LVMThinPoolUsedBytes(volumeGroup, thinPool string) prometheus.Gauge {
+	return lvmThinPoolUsedBytes.WithLabelValues(m.node, volumeGroup, thinPool)
+}
+
+func (m Metrics) LVMThinPoolUsedPercent(volumeGroup, thinPool string) prometheus.Gauge {
+	return lvmThinPoolUsedPercent.WithLabelValues(m.node, volumeGroup, thinPool)
+}
+
+func (m Metrics) LVMThinPoolMetadataUsedPercent(volumeGroup, thinPool string) prometheus.Gauge {
+	return lvmThinPoolMetadataUsedPercent.WithLabelValues(m.node, volumeGroup, thinPool)
+}
+
+// isThinPool determines if an LVM logical volume is a thin pool
+func isThinPool(lv internal.LVData) bool {
+	return len(lv.LVAttr) > 0 && lv.LVAttr[0] == 't'
+}
+
+// UpdateLVMMetrics updates metrics for LVM volume groups and thin pools
+func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData) {
 	// Track current VGs to remove metrics for deleted ones
 	currentVGs := make(map[string]bool)
 
@@ -224,7 +274,52 @@ func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData) {
 		m.LVMVolumeGroupUsedPercent(vg.VGName).Set(usedPercent)
 	}
 
-	// Remove metrics for VGs that no longer exist
+	// Update metrics for thin pools
+	currentThinPools := make(map[string]bool)
+	for _, lv := range lvs {
+		// Skip internal LVM volumes (they start with [ and end with ])
+		if strings.HasPrefix(lv.LVName, "[") && strings.HasSuffix(lv.LVName, "]") {
+			continue
+		}
+
+		// Only process thin pools
+		if !isThinPool(lv) {
+			continue
+		}
+
+		key := m.node + ":" + lv.VGName + ":" + lv.LVName
+		currentThinPools[key] = true
+
+		// Update size metric
+		sizeBytes := float64(lv.LVSize.Value())
+		m.LVMThinPoolSizeBytes(lv.VGName, lv.LVName).Set(sizeBytes)
+
+		// Calculate and update used bytes and percent
+		var usedBytes float64
+		var usedPercent float64
+		var metadataUsedPercent float64
+
+		if lv.DataPercent != "" {
+			dataPercent, err := strconv.ParseFloat(lv.DataPercent, 64)
+			if err == nil {
+				usedPercent = dataPercent
+				usedBytes = sizeBytes * dataPercent / 100.0
+			}
+		}
+
+		if lv.MetadataPercent != "" {
+			metadataPercent, err := strconv.ParseFloat(lv.MetadataPercent, 64)
+			if err == nil {
+				metadataUsedPercent = metadataPercent
+			}
+		}
+
+		m.LVMThinPoolUsedBytes(lv.VGName, lv.LVName).Set(usedBytes)
+		m.LVMThinPoolUsedPercent(lv.VGName, lv.LVName).Set(usedPercent)
+		m.LVMThinPoolMetadataUsedPercent(lv.VGName, lv.LVName).Set(metadataUsedPercent)
+	}
+
+	// Remove metrics for VGs and thin pools that no longer exist
 	// We need to reset all metrics and then set only current ones
 	// This is a limitation of Prometheus - we can't easily remove specific label combinations
 	// So we'll keep the metrics but they'll be stale until next update

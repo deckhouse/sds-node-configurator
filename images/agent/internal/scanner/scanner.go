@@ -246,7 +246,7 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	cache.PrintTheCache(log)
 
 	// Update LVM metrics
-	metrics.UpdateLVMMetrics(vgs)
+	metrics.UpdateLVMMetrics(vgs, lvs)
 
 	return nil
 }
