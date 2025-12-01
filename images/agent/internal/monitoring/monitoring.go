@@ -17,8 +17,6 @@ limitations under the License.
 package monitoring
 
 import (
-	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -91,23 +89,29 @@ var (
 		Help:      "How many LVMVolumeGroup resources are in Nooperational state.",
 	}, []string{"resource"})
 
-	lvmLogicalVolumeSizeBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	lvmVolumeGroupSizeBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
-		Name:      "lvm_logical_volume_size_bytes",
-		Help:      "Size of LVM logical volume in bytes.",
-	}, []string{"node", "volume_group", "logical_volume", "lv_type"})
+		Name:      "lvm_volume_group_size_bytes",
+		Help:      "Size of LVM volume group in bytes.",
+	}, []string{"node", "volume_group"})
 
-	lvmLogicalVolumeUsedBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	lvmVolumeGroupFreeBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
-		Name:      "lvm_logical_volume_used_bytes",
-		Help:      "Used size of LVM logical volume in bytes.",
-	}, []string{"node", "volume_group", "logical_volume", "lv_type"})
+		Name:      "lvm_volume_group_free_bytes",
+		Help:      "Free size of LVM volume group in bytes.",
+	}, []string{"node", "volume_group"})
 
-	lvmLogicalVolumeUsedPercent = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	lvmVolumeGroupUsedBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
-		Name:      "lvm_logical_volume_used_percent",
-		Help:      "Used percentage of LVM logical volume.",
-	}, []string{"node", "volume_group", "logical_volume", "lv_type"})
+		Name:      "lvm_volume_group_used_bytes",
+		Help:      "Used size of LVM volume group in bytes.",
+	}, []string{"node", "volume_group"})
+
+	lvmVolumeGroupUsedPercent = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvm_volume_group_used_percent",
+		Help:      "Used percentage of LVM volume group.",
+	}, []string{"node", "volume_group"})
 )
 
 func init() {
@@ -118,9 +122,10 @@ func init() {
 	metrics.Registry.MustRegister(apiMethodsExecutionCount)
 	metrics.Registry.MustRegister(apiMethodsErrorsCount)
 	metrics.Registry.MustRegister(noOperationalResourcesCount)
-	metrics.Registry.MustRegister(lvmLogicalVolumeSizeBytes)
-	metrics.Registry.MustRegister(lvmLogicalVolumeUsedBytes)
-	metrics.Registry.MustRegister(lvmLogicalVolumeUsedPercent)
+	metrics.Registry.MustRegister(lvmVolumeGroupSizeBytes)
+	metrics.Registry.MustRegister(lvmVolumeGroupFreeBytes)
+	metrics.Registry.MustRegister(lvmVolumeGroupUsedBytes)
+	metrics.Registry.MustRegister(lvmVolumeGroupUsedPercent)
 }
 
 type Metrics struct {
@@ -175,81 +180,51 @@ func (m Metrics) NoOperationalResourcesCount(resourceName string) prometheus.Gau
 	return noOperationalResourcesCount.WithLabelValues(strings.ToLower(resourceName))
 }
 
-func (m Metrics) LVMLogicalVolumeSizeBytes(volumeGroup, logicalVolume, lvType string) prometheus.Gauge {
-	return lvmLogicalVolumeSizeBytes.WithLabelValues(m.node, volumeGroup, logicalVolume, lvType)
+func (m Metrics) LVMVolumeGroupSizeBytes(volumeGroup string) prometheus.Gauge {
+	return lvmVolumeGroupSizeBytes.WithLabelValues(m.node, volumeGroup)
 }
 
-func (m Metrics) LVMLogicalVolumeUsedBytes(volumeGroup, logicalVolume, lvType string) prometheus.Gauge {
-	return lvmLogicalVolumeUsedBytes.WithLabelValues(m.node, volumeGroup, logicalVolume, lvType)
+func (m Metrics) LVMVolumeGroupFreeBytes(volumeGroup string) prometheus.Gauge {
+	return lvmVolumeGroupFreeBytes.WithLabelValues(m.node, volumeGroup)
 }
 
-func (m Metrics) LVMLogicalVolumeUsedPercent(volumeGroup, logicalVolume, lvType string) prometheus.Gauge {
-	return lvmLogicalVolumeUsedPercent.WithLabelValues(m.node, volumeGroup, logicalVolume, lvType)
+func (m Metrics) LVMVolumeGroupUsedBytes(volumeGroup string) prometheus.Gauge {
+	return lvmVolumeGroupUsedBytes.WithLabelValues(m.node, volumeGroup)
 }
 
-// getLVType determines the type of LVM logical volume
-func getLVType(lv internal.LVData) string {
-	// Check if it's a thin pool (first character of LVAttr is 't')
-	if len(lv.LVAttr) > 0 && lv.LVAttr[0] == 't' {
-		return "thin_pool"
-	}
-	// Check if it's a thin volume (has PoolName and is not a thin pool)
-	if lv.PoolName != "" {
-		return "thin_volume"
-	}
-	// Check if it's a thick volume (first character of LVAttr is '-' and no PoolName)
-	// Thick volumes have '-' as first character and empty PoolName
-	if len(lv.LVAttr) > 0 && lv.LVAttr[0] == '-' {
-		return "thick"
-	}
-	// If LVAttr is empty or has unexpected value, but PoolName is empty,
-	// it's likely a thick volume (thick volumes don't have PoolName)
-	// This handles edge cases where LVAttr might be empty or malformed
-	if lv.PoolName == "" {
-		return "thick"
-	}
-	// Otherwise it's a regular volume (fallback for any other type)
-	return "regular"
+func (m Metrics) LVMVolumeGroupUsedPercent(volumeGroup string) prometheus.Gauge {
+	return lvmVolumeGroupUsedPercent.WithLabelValues(m.node, volumeGroup)
 }
 
-// UpdateLVMMetrics updates metrics for LVM logical volumes
-func (m Metrics) UpdateLVMMetrics(lvs []internal.LVData) {
-	// Track current LVs to remove metrics for deleted ones
-	currentLVs := make(map[string]bool)
+// UpdateLVMMetrics updates metrics for LVM volume groups
+func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData) {
+	// Track current VGs to remove metrics for deleted ones
+	currentVGs := make(map[string]bool)
 
-	fmt.Println("lvs", lvs)
-
-	for _, lv := range lvs {
-		// Skip internal LVM volumes (they start with [ and end with ])
-		if strings.HasPrefix(lv.LVName, "[") && strings.HasSuffix(lv.LVName, "]") {
-			continue
-		}
-
-		lvType := getLVType(lv)
-		key := m.node + ":" + lv.VGName + ":" + lv.LVName + ":" + lvType
-		currentLVs[key] = true
+	for _, vg := range vgs {
+		key := m.node + ":" + vg.VGName
+		currentVGs[key] = true
 
 		// Update size metric
-		sizeBytes := float64(lv.LVSize.Value())
-		m.LVMLogicalVolumeSizeBytes(lv.VGName, lv.LVName, lvType).Set(sizeBytes)
+		sizeBytes := float64(vg.VGSize.Value())
+		m.LVMVolumeGroupSizeBytes(vg.VGName).Set(sizeBytes)
+
+		// Update free bytes metric
+		freeBytes := float64(vg.VGFree.Value())
+		m.LVMVolumeGroupFreeBytes(vg.VGName).Set(freeBytes)
 
 		// Calculate and update used bytes and percent
-		var usedBytes float64
+		usedBytes := sizeBytes - freeBytes
 		var usedPercent float64
-
-		if lv.DataPercent != "" {
-			dataPercent, err := strconv.ParseFloat(lv.DataPercent, 64)
-			if err == nil {
-				usedPercent = dataPercent
-				usedBytes = sizeBytes * dataPercent / 100.0
-			}
+		if sizeBytes > 0 {
+			usedPercent = (usedBytes / sizeBytes) * 100.0
 		}
 
-		m.LVMLogicalVolumeUsedBytes(lv.VGName, lv.LVName, lvType).Set(usedBytes)
-		m.LVMLogicalVolumeUsedPercent(lv.VGName, lv.LVName, lvType).Set(usedPercent)
+		m.LVMVolumeGroupUsedBytes(vg.VGName).Set(usedBytes)
+		m.LVMVolumeGroupUsedPercent(vg.VGName).Set(usedPercent)
 	}
 
-	// Remove metrics for LVs that no longer exist
+	// Remove metrics for VGs that no longer exist
 	// We need to reset all metrics and then set only current ones
 	// This is a limitation of Prometheus - we can't easily remove specific label combinations
 	// So we'll keep the metrics but they'll be stale until next update
