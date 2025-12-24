@@ -81,9 +81,6 @@ spec:
         seLinuxOptions:
           level: s0
           type: spc_t
-        allowPrivilegeEscalation: true
-        seccompProfile:
-          type: RuntimeDefault
       initContainers:
       - name: sds-utils-installer
         image: {{ include "helm_lib_module_image" (list . "sdsUtilsInstaller") }}
@@ -94,6 +91,9 @@ spec:
         - /opt/deckhouse/sds
         securityContext:
           readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
         volumeMounts:
         - mountPath: /opt/deckhouse/sds
           name: opt-deckhouse-sds
@@ -128,6 +128,9 @@ spec:
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: true  
+          seccompProfile:
+            type: RuntimeDefault
         volumeMounts:
           - mountPath: /dev/
             name: host-device-dir
