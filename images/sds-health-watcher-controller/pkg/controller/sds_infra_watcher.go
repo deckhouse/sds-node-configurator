@@ -45,18 +45,24 @@ var (
 )
 
 func RunSdsInfraWatcher(
-	ctx context.Context,
 	mgr manager.Manager,
 	cfg config.Options,
 	metrics monitoring.Metrics,
 	log logger.Logger,
-) {
-	log.Info("[RunSdsInfraWatcher] starts the work")
-	cl := mgr.GetClient()
+) error {
+	log.Info("[RunSdsInfraWatcher] registering runnable with the manager")
 
-	go func() {
+	return mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		log.Info("[RunSdsInfraWatcher] starts the work")
+		cl := mgr.GetClient()
+
 		for {
-			time.Sleep(cfg.ScanIntervalSec)
+			select {
+			case <-ctx.Done():
+				log.Info("[RunSdsInfraWatcher] context cancelled, stopping")
+				return nil
+			case <-time.After(cfg.ScanIntervalSec):
+			}
 			log.Info("[RunSdsInfraWatcher] starts the reconciliation loop")
 
 			log.Debug("[RunSdsInfraWatcher] tries to get LVMVolumeGroups")
@@ -306,5 +312,5 @@ func RunSdsInfraWatcher(
 				}
 			}
 		}
-	}()
+	}))
 }

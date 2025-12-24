@@ -110,7 +110,11 @@ func main() {
 	log.Info("[main] successfully created kubernetes manager")
 
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
-	controller.RunSdsInfraWatcher(ctx, mgr, *cfgParams, metrics, *log)
+	err = controller.RunSdsInfraWatcher(mgr, *cfgParams, metrics, *log)
+	if err != nil {
+		log.Error(err, "[main] unable to run SdsInfraWatcher controller")
+		os.Exit(1)
+	}
 
 	err = controller.RunLVGConditionsWatcher(mgr, *cfgParams, *log)
 	if err != nil {
