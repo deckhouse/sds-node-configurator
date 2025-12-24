@@ -80,6 +80,7 @@ spec:
       serviceAccountName: sds-health-watcher-controller
       containers:
         - name: sds-health-watcher-controller
+          {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 10 }}
           image: {{ include "helm_lib_module_image" (list . "sdsHealthWatcherController") }}
           imagePullPolicy: IfNotPresent
           readinessProbe:
@@ -107,15 +108,6 @@ spec:
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
               {{- include "sds_health_watcher_controller_resources" . | nindent 14 }}
 {{- end }}
-          securityContext:
-            privileged: true
-            readOnlyRootFilesystem: true
-            seLinuxOptions:
-              level: s0
-              type: spc_t
-            allowPrivilegeEscalation: true
-            seccompProfile:
-              type: RuntimeDefault
           env:
             - name: LOG_LEVEL
 {{- if eq .Values.sdsNodeConfigurator.logLevel "ERROR" }}
@@ -129,16 +121,6 @@ spec:
 {{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
               value: "4"
 {{- end }}
-          volumeMounts:
-            - name: host-device-dir
-              mountPath: /dev/
-            - name: host-sys-dir
-              mountPath: /sys/
-            - name: host-sys-fs-cgroup
-              mountPath: /sys/fs/cgroup
-            - name: host-root
-              mountPath: /host-root/
-              mountPropagation: HostToContainer
         - name: webhooks
           {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 10 }}
           command:
@@ -177,21 +159,6 @@ spec:
               mountPath: /etc/webhook/certs
               readOnly: true
       volumes:
-        - name: host-device-dir
-          hostPath:
-            path: /dev
-            type: ""
-        - name: host-sys-dir
-          hostPath:
-            path: /sys/
-            type: Directory
-        - name: host-sys-fs-cgroup
-          hostPath:
-            path: /sys/fs/cgroup
-            type: Directory
-        - name: host-root
-          hostPath:
-            path: /
         - name: webhook-certs
           secret:
             secretName: webhooks-https-certs
