@@ -1,5 +1,5 @@
 linters-settings:
-  containter:
+  container:
     exclude-rules:
       no-new-privileges:
         - kind: DaemonSet
