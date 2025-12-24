@@ -28,8 +28,7 @@ spec:
       action: keep
   selector:
     matchLabels:
-      app.kubernetes.io/instance: sds-health-watcher-controller
-      app.kubernetes.io/managed-by: Helm
+      app: sds-health-watcher-controller
   namespaceSelector:
     matchNames:
     - d8-{{ .Chart.Name }}
