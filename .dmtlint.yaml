@@ -1,4 +1,13 @@
 linters-settings:
+  container:
+    exclude-rules:
+      no-new-privileges:
+        - kind: DaemonSet
+          name: sds-node-configurator
+          container: sds-node-configurator-agent
+        - kind: DaemonSet
+          name: sds-node-configurator
+          container: thin-volumes-enabler
   module:
     oss:
       disable: true

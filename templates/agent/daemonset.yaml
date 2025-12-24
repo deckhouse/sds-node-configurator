@@ -91,6 +91,9 @@ spec:
         - /opt/deckhouse/sds
         securityContext:
           readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
         volumeMounts:
         - mountPath: /opt/deckhouse/sds
           name: opt-deckhouse-sds
@@ -125,6 +128,9 @@ spec:
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: true  
+          seccompProfile:
+            type: RuntimeDefault
         volumeMounts:
           - mountPath: /dev/
             name: host-device-dir
@@ -191,6 +197,9 @@ spec:
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: true
+          seccompProfile:
+            type: RuntimeDefault
         volumeMounts:
         - mountPath: /dev/
           name: host-device-dir

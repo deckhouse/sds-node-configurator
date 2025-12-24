@@ -15,9 +15,10 @@ webhooks:
     clientConfig:
       service:
         namespace: "d8-{{ .Chart.Name }}"
-        name: "webhooks"
+        name: "sds-health-watcher-controller"
         path: "/llvs-validate"
       caBundle: {{ .Values.sdsNodeConfigurator.internal.customWebhookCert.ca | b64enc | quote }}
     admissionReviewVersions: ["v1", "v1beta1"]
     sideEffects: None
     timeoutSeconds: 5
+

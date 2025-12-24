@@ -52,6 +52,14 @@ rules:
       - update
       - create
   - apiGroups:
+      - "storage.deckhouse.io"
+    resources:
+      - lvmlogicalvolumesnapshots
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
       - ""
     resources:
       - nodes
@@ -95,5 +103,3 @@ roleRef:
   kind: ClusterRole
   name: d8:{{ .Chart.Name }}:sds-health-watcher-controller
   apiGroup: rbac.authorization.k8s.io
-
-
