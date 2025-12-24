@@ -1,0 +1,5 @@
+Changes:
+  - Updated base images and lib-helm versions
+  - Set default value for `enableThinProvisioning` to `true`
+  - Docs improvements
+  - Fixed templates security context
