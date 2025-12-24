@@ -3,3 +3,4 @@ Changes:
   - Set default value for `enableThinProvisioning` to `true`
   - Docs improvements
   - Fixed templates security context
+  - Added support for HA mode
