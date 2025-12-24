@@ -121,6 +121,14 @@ spec:
 {{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
               value: "4"
 {{- end }}
+            - name: LEADER_ELECTION
+              value: "true"
+            - name: LEADER_ELECTION_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: LEADER_ELECTION_ID
+              value: "sds-health-watcher-controller-leader-election"
         - name: webhooks
           {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 10 }}
           command:

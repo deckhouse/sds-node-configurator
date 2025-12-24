@@ -31,14 +31,22 @@ const (
 	MetricsPort                          = "METRICS_PORT"
 	DefaultHealthProbeBindAddressEnvName = "HEALTH_PROBE_BIND_ADDRESS"
 	DefaultHealthProbeBindAddress        = ":8081"
+
+	LeaderElectionEnvName          = "LEADER_ELECTION"
+	LeaderElectionNamespaceEnvName = "LEADER_ELECTION_NAMESPACE"
+	LeaderElectionIDEnvName        = "LEADER_ELECTION_ID"
+	DefaultLeaderElectionID        = "sds-health-watcher-controller-leader-election"
 )
 
 type Options struct {
-	Loglevel               logger.Verbosity
-	MetricsPort            string
-	ScanIntervalSec        time.Duration
-	NodeName               string
-	HealthProbeBindAddress string
+	Loglevel                logger.Verbosity
+	MetricsPort             string
+	ScanIntervalSec         time.Duration
+	NodeName                string
+	HealthProbeBindAddress  string
+	LeaderElection          bool
+	LeaderElectionNamespace string
+	LeaderElectionID        string
 }
 
 func NewConfig() (*Options, error) {
@@ -70,6 +78,20 @@ func NewConfig() (*Options, error) {
 			return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", ScanInterval, err)
 		}
 		opts.ScanIntervalSec = time.Duration(interval) * time.Second
+	}
+
+	leaderElection := os.Getenv(LeaderElectionEnvName)
+	if leaderElection == "" || leaderElection == "true" {
+		opts.LeaderElection = true
+	} else {
+		opts.LeaderElection = false
+	}
+
+	opts.LeaderElectionNamespace = os.Getenv(LeaderElectionNamespaceEnvName)
+
+	opts.LeaderElectionID = os.Getenv(LeaderElectionIDEnvName)
+	if opts.LeaderElectionID == "" {
+		opts.LeaderElectionID = DefaultLeaderElectionID
 	}
 
 	return &opts, nil

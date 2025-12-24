@@ -72,6 +72,9 @@ func main() {
 	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.MetricsPort, cfgParams.MetricsPort))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.ScanIntervalSec))
+	log.Info(fmt.Sprintf("[main] %s = %t", config.LeaderElectionEnvName, cfgParams.LeaderElection))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.LeaderElectionNamespaceEnvName, cfgParams.LeaderElectionNamespace))
+	log.Info(fmt.Sprintf("[main] %s = %s", config.LeaderElectionIDEnvName, cfgParams.LeaderElectionID))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
@@ -90,10 +93,13 @@ func main() {
 	log.Info("[main] successfully read scheme CR")
 
 	managerOpts := manager.Options{
-		Scheme:                 scheme,
-		Logger:                 log.GetLogger(),
-		Metrics:                server.Options{BindAddress: cfgParams.MetricsPort},
-		HealthProbeBindAddress: cfgParams.HealthProbeBindAddress,
+		Scheme:                  scheme,
+		Logger:                  log.GetLogger(),
+		Metrics:                 server.Options{BindAddress: cfgParams.MetricsPort},
+		HealthProbeBindAddress:  cfgParams.HealthProbeBindAddress,
+		LeaderElection:          cfgParams.LeaderElection,
+		LeaderElectionID:        cfgParams.LeaderElectionID,
+		LeaderElectionNamespace: cfgParams.LeaderElectionNamespace,
 	}
 
 	mgr, err := manager.New(kConfig, managerOpts)
