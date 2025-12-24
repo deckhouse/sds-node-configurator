@@ -17,5 +17,5 @@ properties:
     default: INFO
   enableThinProvisioning:
     type: boolean
-    default: false
+    default: true
     description: Enable support of thin LVM volumes.
