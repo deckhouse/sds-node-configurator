@@ -126,6 +126,13 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 
 	filteredLVGs := filterLVGsByNode(currentLVMVGs, d.cfg.NodeName)
 
+	// Store managed VG names in cache for metrics filtering
+	managedVGNames := make([]string, 0, len(filteredLVGs))
+	for vgName := range filteredLVGs {
+		managedVGNames = append(managedVGNames, vgName)
+	}
+	d.sdsCache.StoreManagedVGs(managedVGNames)
+
 	d.log.Debug("[RunLVMVolumeGroupDiscoverController] tries to get LVMVolumeGroup candidates")
 	candidates, err := d.GetLVMVolumeGroupCandidates(blockDevices)
 	if err != nil {

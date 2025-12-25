@@ -279,12 +279,18 @@ func isThinPool(lv internal.LVData) bool {
 	return len(lv.LVAttr) > 0 && lv.LVAttr[0] == 't'
 }
 
-// UpdateLVMMetrics updates metrics for LVM volume groups and thin pools
-func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData) {
+// UpdateLVMMetrics updates metrics for LVM volume groups, thin pools, and logical volumes.
+// Only VGs and LVs that belong to managed VGs (from LVMVolumeGroup resources) are included.
+func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData, managedVGs map[string]struct{}) {
 	// Track current VGs to remove metrics for deleted ones
 	currentVGs := make(map[string]bool)
 
 	for _, vg := range vgs {
+		// Skip VGs that are not managed by LVMVolumeGroup resources
+		if _, managed := managedVGs[vg.VGName]; !managed {
+			continue
+		}
+
 		key := m.node + ":" + vg.VGName
 		currentVGs[key] = true
 
@@ -312,6 +318,11 @@ func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData) 
 	currentLVs := make(map[string]bool)
 
 	for _, lv := range lvs {
+		// Skip LVs that belong to VGs not managed by LVMVolumeGroup resources
+		if _, managed := managedVGs[lv.VGName]; !managed {
+			continue
+		}
+
 		// Skip internal LVM volumes (they start with [ and end with ])
 		if strings.HasPrefix(lv.LVName, "[") && strings.HasSuffix(lv.LVName, "]") {
 			continue

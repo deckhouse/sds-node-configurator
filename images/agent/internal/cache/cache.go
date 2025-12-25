@@ -40,6 +40,8 @@ type Cache struct {
 	vgsErrs    bytes.Buffer
 	lvs        map[string]*LVData
 	lvsErrs    bytes.Buffer
+	// managedVGs contains VG names from LVMVolumeGroup resources on this node
+	managedVGs map[string]struct{}
 }
 
 type LVData struct {
@@ -229,4 +231,32 @@ func (c *Cache) PrintTheCache(log logger.Logger) {
 
 func (c *Cache) configureLVKey(vgName, lvName string) string {
 	return fmt.Sprintf("%s/%s", vgName, lvName)
+}
+
+// StoreManagedVGs stores the set of VG names that are managed by LVMVolumeGroup resources on this node
+func (c *Cache) StoreManagedVGs(vgNames []string) {
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	c.managedVGs = make(map[string]struct{}, len(vgNames))
+	for _, name := range vgNames {
+		c.managedVGs[name] = struct{}{}
+	}
+}
+
+// GetManagedVGs returns the set of VG names that are managed by LVMVolumeGroup resources
+func (c *Cache) GetManagedVGs() map[string]struct{} {
+	c.m.RLock()
+	defer c.m.RUnlock()
+
+	if c.managedVGs == nil {
+		return make(map[string]struct{})
+	}
+
+	dst := make(map[string]struct{}, len(c.managedVGs))
+	for k, v := range c.managedVGs {
+		dst[k] = v
+	}
+
+	return dst
 }

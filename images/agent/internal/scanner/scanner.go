@@ -245,8 +245,9 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	log.Debug("[fillTheCache] successfully filled the cache")
 	cache.PrintTheCache(log)
 
-	// Update LVM metrics
-	metrics.UpdateLVMMetrics(vgs, lvs)
+	// Update LVM metrics only for VGs managed by LVMVolumeGroup resources
+	managedVGs := cache.GetManagedVGs()
+	metrics.UpdateLVMMetrics(vgs, lvs, managedVGs)
 
 	return nil
 }
