@@ -181,6 +181,12 @@ var (
 		Name:      "lvg_thin_pool_allocated_size_bytes",
 		Help:      "Allocated size of thin pool from LVMVolumeGroup status in bytes.",
 	}, []string{"node", "lvg_name", "volume_group", "thin_pool"})
+
+	lvgThinPoolUsedSizeBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvg_thin_pool_used_size_bytes",
+		Help:      "Used size of thin pool from LVMVolumeGroup status in bytes.",
+	}, []string{"node", "lvg_name", "volume_group", "thin_pool"})
 )
 
 func init() {
@@ -206,6 +212,7 @@ func init() {
 	metrics.Registry.MustRegister(lvgVGFreeBytes)
 	metrics.Registry.MustRegister(lvgThinPoolActualSizeBytes)
 	metrics.Registry.MustRegister(lvgThinPoolAllocatedSizeBytes)
+	metrics.Registry.MustRegister(lvgThinPoolUsedSizeBytes)
 }
 
 type Metrics struct {
@@ -318,6 +325,10 @@ func (m Metrics) LVGThinPoolActualSizeBytes(lvgName, volumeGroup, thinPool strin
 
 func (m Metrics) LVGThinPoolAllocatedSizeBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
 	return lvgThinPoolAllocatedSizeBytes.WithLabelValues(m.node, lvgName, volumeGroup, thinPool)
+}
+
+func (m Metrics) LVGThinPoolUsedSizeBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
+	return lvgThinPoolUsedSizeBytes.WithLabelValues(m.node, lvgName, volumeGroup, thinPool)
 }
 
 // isThinPool determines if an LVM logical volume is a thin pool
@@ -458,6 +469,7 @@ func (m Metrics) UpdateLVGStatusMetrics(lvgs map[string]v1alpha1.LVMVolumeGroup)
 		for _, tp := range lvg.Status.ThinPools {
 			m.LVGThinPoolActualSizeBytes(lvg.Name, vgName, tp.Name).Set(float64(tp.ActualSize.Value()))
 			m.LVGThinPoolAllocatedSizeBytes(lvg.Name, vgName, tp.Name).Set(float64(tp.AllocatedSize.Value()))
+			m.LVGThinPoolUsedSizeBytes(lvg.Name, vgName, tp.Name).Set(float64(tp.UsedSize.Value()))
 		}
 	}
 }
