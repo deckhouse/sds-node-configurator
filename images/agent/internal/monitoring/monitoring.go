@@ -25,6 +25,7 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
@@ -155,6 +156,31 @@ var (
 		Name:      "lvm_logical_volume_used_percent",
 		Help:      "Used percentage of LVM logical volume.",
 	}, []string{"node", "volume_group", "logical_volume"})
+
+	// LVMVolumeGroup status metrics
+	lvgVGSizeBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvg_vg_size_bytes",
+		Help:      "VG size from LVMVolumeGroup status in bytes.",
+	}, []string{"node", "lvg_name", "volume_group"})
+
+	lvgVGFreeBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvg_vg_free_bytes",
+		Help:      "VG free space from LVMVolumeGroup status in bytes.",
+	}, []string{"node", "lvg_name", "volume_group"})
+
+	lvgThinPoolActualSizeBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvg_thin_pool_actual_size_bytes",
+		Help:      "Actual size of thin pool from LVMVolumeGroup status in bytes.",
+	}, []string{"node", "lvg_name", "volume_group", "thin_pool"})
+
+	lvgThinPoolAllocatedSizeBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvg_thin_pool_allocated_size_bytes",
+		Help:      "Allocated size of thin pool from LVMVolumeGroup status in bytes.",
+	}, []string{"node", "lvg_name", "volume_group", "thin_pool"})
 )
 
 func init() {
@@ -176,6 +202,10 @@ func init() {
 	metrics.Registry.MustRegister(lvmLogicalVolumeSizeBytes)
 	metrics.Registry.MustRegister(lvmLogicalVolumeUsedBytes)
 	metrics.Registry.MustRegister(lvmLogicalVolumeUsedPercent)
+	metrics.Registry.MustRegister(lvgVGSizeBytes)
+	metrics.Registry.MustRegister(lvgVGFreeBytes)
+	metrics.Registry.MustRegister(lvgThinPoolActualSizeBytes)
+	metrics.Registry.MustRegister(lvgThinPoolAllocatedSizeBytes)
 }
 
 type Metrics struct {
@@ -272,6 +302,22 @@ func (m Metrics) LVMLogicalVolumeUsedBytes(volumeGroup, logicalVolume string) pr
 
 func (m Metrics) LVMLogicalVolumeUsedPercent(volumeGroup, logicalVolume string) prometheus.Gauge {
 	return lvmLogicalVolumeUsedPercent.WithLabelValues(m.node, volumeGroup, logicalVolume)
+}
+
+func (m Metrics) LVGVGSizeBytes(lvgName, volumeGroup string) prometheus.Gauge {
+	return lvgVGSizeBytes.WithLabelValues(m.node, lvgName, volumeGroup)
+}
+
+func (m Metrics) LVGVGFreeBytes(lvgName, volumeGroup string) prometheus.Gauge {
+	return lvgVGFreeBytes.WithLabelValues(m.node, lvgName, volumeGroup)
+}
+
+func (m Metrics) LVGThinPoolActualSizeBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
+	return lvgThinPoolActualSizeBytes.WithLabelValues(m.node, lvgName, volumeGroup, thinPool)
+}
+
+func (m Metrics) LVGThinPoolAllocatedSizeBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
+	return lvgThinPoolAllocatedSizeBytes.WithLabelValues(m.node, lvgName, volumeGroup, thinPool)
 }
 
 // isThinPool determines if an LVM logical volume is a thin pool
@@ -396,4 +442,22 @@ func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData, 
 	// This is a limitation of Prometheus - we can't easily remove specific label combinations
 	// So we'll keep the metrics but they'll be stale until next update
 	// In practice, this is acceptable as metrics will be updated on next scan
+}
+
+// UpdateLVGStatusMetrics updates metrics based on LVMVolumeGroup resource status.
+// This includes VG size/free and thin pool actual/allocated sizes from the LVG status.
+func (m Metrics) UpdateLVGStatusMetrics(lvgs map[string]v1alpha1.LVMVolumeGroup) {
+	for _, lvg := range lvgs {
+		vgName := lvg.Spec.ActualVGNameOnTheNode
+
+		// Update VG metrics from LVG status
+		m.LVGVGSizeBytes(lvg.Name, vgName).Set(float64(lvg.Status.VGSize.Value()))
+		m.LVGVGFreeBytes(lvg.Name, vgName).Set(float64(lvg.Status.VGFree.Value()))
+
+		// Update thin pool metrics from LVG status
+		for _, tp := range lvg.Status.ThinPools {
+			m.LVGThinPoolActualSizeBytes(lvg.Name, vgName, tp.Name).Set(float64(tp.ActualSize.Value()))
+			m.LVGThinPoolAllocatedSizeBytes(lvg.Name, vgName, tp.Name).Set(float64(tp.AllocatedSize.Value()))
+		}
+	}
 }

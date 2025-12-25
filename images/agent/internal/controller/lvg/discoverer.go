@@ -216,6 +216,9 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 		return true
 	}
 
+	// Update LVMVolumeGroup status metrics
+	d.metrics.UpdateLVGStatusMetrics(filteredLVGs)
+
 	d.log.Info("[RunLVMVolumeGroupDiscoverController] END discovery loop")
 	d.metrics.ReconcileDuration(DiscovererName).Observe(d.metrics.GetEstimatedTimeInSeconds(reconcileStart))
 	d.metrics.ReconcilesCountTotal(DiscovererName).Inc()
