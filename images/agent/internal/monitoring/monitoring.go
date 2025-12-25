@@ -137,6 +137,24 @@ var (
 		Name:      "lvm_thin_pool_metadata_used_percent",
 		Help:      "Used percentage of LVM thin pool metadata.",
 	}, []string{"node", "volume_group", "thin_pool"})
+
+	lvmLogicalVolumeSizeBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvm_logical_volume_size_bytes",
+		Help:      "Size of LVM logical volume in bytes.",
+	}, []string{"node", "volume_group", "logical_volume"})
+
+	lvmLogicalVolumeUsedBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvm_logical_volume_used_bytes",
+		Help:      "Used size of LVM logical volume in bytes.",
+	}, []string{"node", "volume_group", "logical_volume"})
+
+	lvmLogicalVolumeUsedPercent = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvm_logical_volume_used_percent",
+		Help:      "Used percentage of LVM logical volume.",
+	}, []string{"node", "volume_group", "logical_volume"})
 )
 
 func init() {
@@ -155,6 +173,9 @@ func init() {
 	metrics.Registry.MustRegister(lvmThinPoolUsedBytes)
 	metrics.Registry.MustRegister(lvmThinPoolUsedPercent)
 	metrics.Registry.MustRegister(lvmThinPoolMetadataUsedPercent)
+	metrics.Registry.MustRegister(lvmLogicalVolumeSizeBytes)
+	metrics.Registry.MustRegister(lvmLogicalVolumeUsedBytes)
+	metrics.Registry.MustRegister(lvmLogicalVolumeUsedPercent)
 }
 
 type Metrics struct {
@@ -241,6 +262,18 @@ func (m Metrics) LVMThinPoolMetadataUsedPercent(volumeGroup, thinPool string) pr
 	return lvmThinPoolMetadataUsedPercent.WithLabelValues(m.node, volumeGroup, thinPool)
 }
 
+func (m Metrics) LVMLogicalVolumeSizeBytes(volumeGroup, logicalVolume string) prometheus.Gauge {
+	return lvmLogicalVolumeSizeBytes.WithLabelValues(m.node, volumeGroup, logicalVolume)
+}
+
+func (m Metrics) LVMLogicalVolumeUsedBytes(volumeGroup, logicalVolume string) prometheus.Gauge {
+	return lvmLogicalVolumeUsedBytes.WithLabelValues(m.node, volumeGroup, logicalVolume)
+}
+
+func (m Metrics) LVMLogicalVolumeUsedPercent(volumeGroup, logicalVolume string) prometheus.Gauge {
+	return lvmLogicalVolumeUsedPercent.WithLabelValues(m.node, volumeGroup, logicalVolume)
+}
+
 // isThinPool determines if an LVM logical volume is a thin pool
 func isThinPool(lv internal.LVData) bool {
 	return len(lv.LVAttr) > 0 && lv.LVAttr[0] == 't'
@@ -274,52 +307,80 @@ func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData) 
 		m.LVMVolumeGroupUsedPercent(vg.VGName).Set(usedPercent)
 	}
 
-	// Update metrics for thin pools
+	// Update metrics for thin pools and logical volumes
 	currentThinPools := make(map[string]bool)
+	currentLVs := make(map[string]bool)
+
 	for _, lv := range lvs {
 		// Skip internal LVM volumes (they start with [ and end with ])
 		if strings.HasPrefix(lv.LVName, "[") && strings.HasSuffix(lv.LVName, "]") {
 			continue
 		}
 
-		// Only process thin pools
-		if !isThinPool(lv) {
-			continue
-		}
+		lvKey := m.node + ":" + lv.VGName + ":" + lv.LVName
 
-		key := m.node + ":" + lv.VGName + ":" + lv.LVName
-		currentThinPools[key] = true
+		if isThinPool(lv) {
+			// Process thin pools
+			currentThinPools[lvKey] = true
 
-		// Update size metric
-		sizeBytes := float64(lv.LVSize.Value())
-		m.LVMThinPoolSizeBytes(lv.VGName, lv.LVName).Set(sizeBytes)
+			// Update size metric
+			sizeBytes := float64(lv.LVSize.Value())
+			m.LVMThinPoolSizeBytes(lv.VGName, lv.LVName).Set(sizeBytes)
 
-		// Calculate and update used bytes and percent
-		var usedBytes float64
-		var usedPercent float64
-		var metadataUsedPercent float64
+			// Calculate and update used bytes and percent
+			var usedBytes float64
+			var usedPercent float64
+			var metadataUsedPercent float64
 
-		if lv.DataPercent != "" {
-			dataPercent, err := strconv.ParseFloat(lv.DataPercent, 64)
-			if err == nil {
-				usedPercent = dataPercent
-				usedBytes = sizeBytes * dataPercent / 100.0
+			if lv.DataPercent != "" {
+				dataPercent, err := strconv.ParseFloat(lv.DataPercent, 64)
+				if err == nil {
+					usedPercent = dataPercent
+					usedBytes = sizeBytes * dataPercent / 100.0
+				}
 			}
-		}
 
-		if lv.MetadataPercent != "" {
-			metadataPercent, err := strconv.ParseFloat(lv.MetadataPercent, 64)
-			if err == nil {
-				metadataUsedPercent = metadataPercent
+			if lv.MetadataPercent != "" {
+				metadataPercent, err := strconv.ParseFloat(lv.MetadataPercent, 64)
+				if err == nil {
+					metadataUsedPercent = metadataPercent
+				}
 			}
-		}
 
-		m.LVMThinPoolUsedBytes(lv.VGName, lv.LVName).Set(usedBytes)
-		m.LVMThinPoolUsedPercent(lv.VGName, lv.LVName).Set(usedPercent)
-		m.LVMThinPoolMetadataUsedPercent(lv.VGName, lv.LVName).Set(metadataUsedPercent)
+			m.LVMThinPoolUsedBytes(lv.VGName, lv.LVName).Set(usedBytes)
+			m.LVMThinPoolUsedPercent(lv.VGName, lv.LVName).Set(usedPercent)
+			m.LVMThinPoolMetadataUsedPercent(lv.VGName, lv.LVName).Set(metadataUsedPercent)
+		} else {
+			// Process regular logical volumes (both thick and thin)
+			currentLVs[lvKey] = true
+
+			// Update size metric
+			sizeBytes := float64(lv.LVSize.Value())
+			m.LVMLogicalVolumeSizeBytes(lv.VGName, lv.LVName).Set(sizeBytes)
+
+			// Calculate and update used bytes and percent
+			var usedBytes float64
+			var usedPercent float64
+
+			if lv.DataPercent != "" {
+				// Thin volume - has DataPercent
+				dataPercent, err := strconv.ParseFloat(lv.DataPercent, 64)
+				if err == nil {
+					usedPercent = dataPercent
+					usedBytes = sizeBytes * dataPercent / 100.0
+				}
+			} else {
+				// Thick volume - 100% of allocated size is used
+				usedBytes = sizeBytes
+				usedPercent = 100.0
+			}
+
+			m.LVMLogicalVolumeUsedBytes(lv.VGName, lv.LVName).Set(usedBytes)
+			m.LVMLogicalVolumeUsedPercent(lv.VGName, lv.LVName).Set(usedPercent)
+		}
 	}
 
-	// Remove metrics for VGs and thin pools that no longer exist
+	// Remove metrics for VGs, thin pools, and LVs that no longer exist
 	// We need to reset all metrics and then set only current ones
 	// This is a limitation of Prometheus - we can't easily remove specific label combinations
 	// So we'll keep the metrics but they'll be stale until next update
