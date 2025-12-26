@@ -61,6 +61,25 @@ rules:
       - get
       - list
       - watch
+  - apiGroups:
+      - apps
+    resources:
+      - daemonsets
+      - daemonsets/prometheus-metrics
+    verbs:
+      - get
+  - apiGroups: 
+      - authentication.k8s.io
+    resources:
+      - tokenreviews
+    verbs:
+      - create
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - subjectaccessreviews
+    verbs:
+      - create
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1

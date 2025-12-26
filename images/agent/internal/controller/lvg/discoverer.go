@@ -126,6 +126,13 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 
 	filteredLVGs := filterLVGsByNode(currentLVMVGs, d.cfg.NodeName)
 
+	// Store managed VG names in cache for metrics filtering
+	managedVGNames := make([]string, 0, len(filteredLVGs))
+	for vgName := range filteredLVGs {
+		managedVGNames = append(managedVGNames, vgName)
+	}
+	d.sdsCache.StoreManagedVGs(managedVGNames)
+
 	d.log.Debug("[RunLVMVolumeGroupDiscoverController] tries to get LVMVolumeGroup candidates")
 	candidates, err := d.GetLVMVolumeGroupCandidates(blockDevices)
 	if err != nil {
@@ -208,6 +215,9 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] some problems have been occurred while iterating the lvmvolumegroup resources. Retry the reconcile in %s", d.cfg.VolumeGroupScanInterval.String()))
 		return true
 	}
+
+	// Update LVMVolumeGroup status metrics
+	d.metrics.UpdateLVGStatusMetrics(filteredLVGs)
 
 	d.log.Info("[RunLVMVolumeGroupDiscoverController] END discovery loop")
 	d.metrics.ReconcileDuration(DiscovererName).Observe(d.metrics.GetEstimatedTimeInSeconds(reconcileStart))
