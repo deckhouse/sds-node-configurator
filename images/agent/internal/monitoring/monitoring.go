@@ -187,6 +187,12 @@ var (
 		Name:      "lvg_thin_pool_used_size_bytes",
 		Help:      "Used size of thin pool from LVMVolumeGroup status in bytes.",
 	}, []string{"node", "lvg_name", "volume_group", "thin_pool"})
+
+	lvgThinPoolAllocationLimitBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvg_thin_pool_allocation_limit_bytes",
+		Help:      "Maximum allocatable size of thin pool considering allocation limit (actual_size * allocation_limit / 100) in bytes.",
+	}, []string{"node", "lvg_name", "volume_group", "thin_pool"})
 )
 
 func init() {
@@ -213,6 +219,7 @@ func init() {
 	metrics.Registry.MustRegister(lvgThinPoolActualSizeBytes)
 	metrics.Registry.MustRegister(lvgThinPoolAllocatedSizeBytes)
 	metrics.Registry.MustRegister(lvgThinPoolUsedSizeBytes)
+	metrics.Registry.MustRegister(lvgThinPoolAllocationLimitBytes)
 }
 
 type Metrics struct {
@@ -329,6 +336,10 @@ func (m Metrics) LVGThinPoolAllocatedSizeBytes(lvgName, volumeGroup, thinPool st
 
 func (m Metrics) LVGThinPoolUsedSizeBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
 	return lvgThinPoolUsedSizeBytes.WithLabelValues(m.node, lvgName, volumeGroup, thinPool)
+}
+
+func (m Metrics) LVGThinPoolAllocationLimitBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
+	return lvgThinPoolAllocationLimitBytes.WithLabelValues(m.node, lvgName, volumeGroup, thinPool)
 }
 
 // isThinPool determines if an LVM logical volume is a thin pool
@@ -467,9 +478,22 @@ func (m Metrics) UpdateLVGStatusMetrics(lvgs map[string]v1alpha1.LVMVolumeGroup)
 
 		// Update thin pool metrics from LVG status
 		for _, tp := range lvg.Status.ThinPools {
-			m.LVGThinPoolActualSizeBytes(lvg.Name, vgName, tp.Name).Set(float64(tp.ActualSize.Value()))
+			actualSize := float64(tp.ActualSize.Value())
+			m.LVGThinPoolActualSizeBytes(lvg.Name, vgName, tp.Name).Set(actualSize)
 			m.LVGThinPoolAllocatedSizeBytes(lvg.Name, vgName, tp.Name).Set(float64(tp.AllocatedSize.Value()))
 			m.LVGThinPoolUsedSizeBytes(lvg.Name, vgName, tp.Name).Set(float64(tp.UsedSize.Value()))
+
+			// Calculate allocation limit in bytes: actualSize * allocationLimit / 100
+			// AllocationLimit is stored as "150%" string, default is 150%
+			allocationLimitPercent := 150.0 // default value
+			if tp.AllocationLimit != "" {
+				limitStr := strings.TrimSuffix(tp.AllocationLimit, "%")
+				if parsed, err := strconv.ParseFloat(limitStr, 64); err == nil {
+					allocationLimitPercent = parsed
+				}
+			}
+			allocationLimitBytes := actualSize * allocationLimitPercent / 100.0
+			m.LVGThinPoolAllocationLimitBytes(lvg.Name, vgName, tp.Name).Set(allocationLimitBytes)
 		}
 	}
 }
