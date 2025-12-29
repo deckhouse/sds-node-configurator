@@ -540,9 +540,6 @@ func (m *Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData,
 // This includes VG size/free and thin pool actual/allocated sizes from the LVG status.
 // Returns collected parsing errors that should be logged by the caller.
 func (m *Metrics) UpdateLVGStatusMetrics(lvgs map[string]v1alpha1.LVMVolumeGroup) []error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	var errs []error
 
 	currentLVGVGs := make(map[string]bool)
@@ -591,6 +588,9 @@ func (m *Metrics) UpdateLVGStatusMetrics(lvgs map[string]v1alpha1.LVMVolumeGroup
 			m.LVGThinPoolAllocationLimitBytes(lvg.Name, vgName, tp.Name).Set(allocationLimitBytes)
 		}
 	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	// Remove stale LVG VG metrics
 	for key := range m.previousLVGVGs {
