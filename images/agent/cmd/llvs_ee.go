@@ -25,7 +25,7 @@ import (
 func addLLVSReconciler(
 	mgr manager.Manager,
 	log logger.Logger,
-	metrics monitoring.Metrics,
+	metrics *monitoring.Metrics,
 	sdsCache *cache.Cache,
 	commands utils.Commands,
 	cfgParams *config.Config,

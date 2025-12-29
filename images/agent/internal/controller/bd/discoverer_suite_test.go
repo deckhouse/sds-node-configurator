@@ -53,7 +53,7 @@ func withDiscovererCreated(foo func(vars *DiscoverCreatedVars)) {
 	var (
 		vars    DiscoverCreatedVars
 		log     logger.Logger
-		metrics monitoring.Metrics
+		metrics *monitoring.Metrics
 		config  bd.DiscovererConfig
 	)
 

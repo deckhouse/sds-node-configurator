@@ -64,7 +64,7 @@ type Commands interface {
 	VGChangeDelTag(vGName, tag string) (string, error)
 	LVChangeDelTag(lv internal.LVData, tag string) (string, error)
 	UnmarshalDevices(out []byte) ([]internal.Device, error)
-	ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, ctrlName string) error
+	ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string) error
 }
 
 type commands struct {
@@ -546,7 +546,7 @@ func (commands) UnmarshalDevices(out []byte) ([]internal.Device, error) {
 	return devices.BlockDevices, nil
 }
 
-func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, ctrlName string) error {
+func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string) error {
 	// thin pool
 	log.Debug("[ReTag] start re-tagging LV")
 	start := time.Now()

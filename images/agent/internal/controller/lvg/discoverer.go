@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -45,7 +46,7 @@ type Discoverer struct {
 	log      logger.Logger
 	lvgCl    *repository.LVGClient
 	bdCl     *repository.BDClient
-	metrics  monitoring.Metrics
+	metrics  *monitoring.Metrics
 	sdsCache *cache.Cache
 	cfg      DiscovererConfig
 	commands utils.Commands
@@ -59,7 +60,7 @@ type DiscovererConfig struct {
 func NewDiscoverer(
 	cl client.Client,
 	log logger.Logger,
-	metrics monitoring.Metrics,
+	metrics *monitoring.Metrics,
 	sdsCache *cache.Cache,
 	commands utils.Commands,
 	cfg DiscovererConfig,
@@ -125,6 +126,9 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 	}
 
 	filteredLVGs := filterLVGsByNode(currentLVMVGs, d.cfg.NodeName)
+
+	// Store managed VG names in cache for metrics filtering
+	d.sdsCache.StoreManagedVGs(maps.Keys(filteredLVGs))
 
 	d.log.Debug("[RunLVMVolumeGroupDiscoverController] tries to get LVMVolumeGroup candidates")
 	candidates, err := d.GetLVMVolumeGroupCandidates(blockDevices)
@@ -207,6 +211,13 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 	if shouldRequeue {
 		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] some problems have been occurred while iterating the lvmvolumegroup resources. Retry the reconcile in %s", d.cfg.VolumeGroupScanInterval.String()))
 		return true
+	}
+
+	// Update LVMVolumeGroup status metrics
+	if errs := d.metrics.UpdateLVGStatusMetrics(filteredLVGs); len(errs) > 0 {
+		for _, err := range errs {
+			d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] metrics update error: %v", err))
+		}
 	}
 
 	d.log.Info("[RunLVMVolumeGroupDiscoverController] END discovery loop")

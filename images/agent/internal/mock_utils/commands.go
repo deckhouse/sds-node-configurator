@@ -376,7 +376,7 @@ func (mr *MockCommandsMockRecorder) LVChangeDelTag(lv, tag any) *gomock.Call {
 }
 
 // ReTag mocks base method.
-func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics monitoring.Metrics, ctrlName string) error {
+func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ReTag", ctx, log, metrics, ctrlName)
 	ret0, _ := ret[0].(error)
