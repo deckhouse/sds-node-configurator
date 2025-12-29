@@ -42,7 +42,7 @@ type Reconciler struct {
 	log      logger.Logger
 	lvgCl    *repository.LVGClient
 	llvCl    *repository.LLVClient
-	metrics  monitoring.Metrics
+	metrics  *monitoring.Metrics
 	sdsCache *cache.Cache
 	cfg      ReconcilerConfig
 	commands utils.Commands
@@ -56,7 +56,7 @@ type ReconcilerConfig struct {
 func NewReconciler(
 	cl client.Client,
 	log logger.Logger,
-	metrics monitoring.Metrics,
+	metrics *monitoring.Metrics,
 	sdsCache *cache.Cache,
 	commands utils.Commands,
 	cfg ReconcilerConfig,

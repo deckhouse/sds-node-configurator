@@ -33,13 +33,13 @@ type LVGClient struct {
 	cl                              client.Client
 	log                             logger.Logger
 	currentNodeName, controllerName string
-	metrics                         monitoring.Metrics
+	metrics                         *monitoring.Metrics
 }
 
 func NewLVGClient(
 	cl client.Client,
 	log logger.Logger,
-	metrics monitoring.Metrics,
+	metrics *monitoring.Metrics,
 	currentNodeName string,
 	controllerName string,
 ) *LVGClient {

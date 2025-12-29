@@ -19,6 +19,8 @@ package cache
 import (
 	"bytes"
 	"fmt"
+	"iter"
+	"maps"
 	"reflect"
 	"sync"
 
@@ -233,13 +235,14 @@ func (c *Cache) configureLVKey(vgName, lvName string) string {
 	return fmt.Sprintf("%s/%s", vgName, lvName)
 }
 
-// StoreManagedVGs stores the set of VG names that are managed by LVMVolumeGroup resources on this node
-func (c *Cache) StoreManagedVGs(vgNames []string) {
+// StoreManagedVGs stores the set of VG names that are managed by LVMVolumeGroup resources on this node.
+// It accepts an iterator over VG names to avoid unnecessary allocations.
+func (c *Cache) StoreManagedVGs(vgNames iter.Seq[string]) {
 	c.m.Lock()
 	defer c.m.Unlock()
 
-	c.managedVGs = make(map[string]struct{}, len(vgNames))
-	for _, name := range vgNames {
+	c.managedVGs = make(map[string]struct{})
+	for name := range vgNames {
 		c.managedVGs[name] = struct{}{}
 	}
 }
@@ -253,10 +256,5 @@ func (c *Cache) GetManagedVGs() map[string]struct{} {
 		return make(map[string]struct{})
 	}
 
-	dst := make(map[string]struct{}, len(c.managedVGs))
-	for k, v := range c.managedVGs {
-		dst[k] = v
-	}
-
-	return dst
+	return maps.Clone(c.managedVGs)
 }

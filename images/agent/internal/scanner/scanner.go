@@ -43,7 +43,7 @@ type Scanner interface {
 		log logger.Logger,
 		cfg config.Config,
 		sdsCache *cache.Cache,
-		metrics monitoring.Metrics,
+		metrics *monitoring.Metrics,
 		bdCtrl func(context.Context) (controller.Result, error),
 		lvgDiscoverCtrl func(context.Context) (controller.Result, error)) error
 }
@@ -61,7 +61,7 @@ func (s *scanner) Run(
 	log logger.Logger,
 	cfg config.Config,
 	sdsCache *cache.Cache,
-	metrics monitoring.Metrics,
+	metrics *monitoring.Metrics,
 	bdCtrl func(context.Context) (controller.Result, error),
 	lvgDiscoverCtrl func(context.Context) (controller.Result, error),
 ) error {
@@ -206,7 +206,7 @@ func runControllersReconcile(
 	return nil
 }
 
-func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Config, metrics monitoring.Metrics) error {
+func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Config, metrics *monitoring.Metrics) error {
 	// the scan operations order is very important as it guarantees the consistent and reliable data from the node
 	realClock := clock.RealClock{}
 	now := time.Now()
@@ -247,7 +247,11 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 
 	// Update LVM metrics only for VGs managed by LVMVolumeGroup resources
 	managedVGs := cache.GetManagedVGs()
-	metrics.UpdateLVMMetrics(vgs, lvs, managedVGs)
+	if errs := metrics.UpdateLVMMetrics(vgs, lvs, managedVGs); len(errs) > 0 {
+		for _, err := range errs {
+			log.Warning(fmt.Sprintf("[fillTheCache] metrics update error: %v", err))
+		}
+	}
 
 	return nil
 }

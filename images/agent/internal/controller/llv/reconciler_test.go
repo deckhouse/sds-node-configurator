@@ -789,7 +789,7 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 func setupReconciler() *Reconciler {
 	cl := test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{})
 	log := logger.Logger{}
-	metrics := monitoring.Metrics{}
+	metrics := monitoring.GetMetrics("")
 
 	return NewReconciler(cl, log, metrics, cache.New(), utils.NewCommands(), ReconcilerConfig{})
 }

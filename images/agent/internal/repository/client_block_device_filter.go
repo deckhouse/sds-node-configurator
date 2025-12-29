@@ -31,10 +31,10 @@ import (
 
 type BlockDeviceFilterClient struct {
 	cl      client.Client
-	metrics monitoring.Metrics
+	metrics *monitoring.Metrics
 }
 
-func NewBlockDeviceFilterClient(cl client.Client, metrics monitoring.Metrics) *BlockDeviceFilterClient {
+func NewBlockDeviceFilterClient(cl client.Client, metrics *monitoring.Metrics) *BlockDeviceFilterClient {
 	return &BlockDeviceFilterClient{
 		cl:      cl,
 		metrics: metrics,

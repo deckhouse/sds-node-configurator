@@ -30,10 +30,10 @@ import (
 
 type BDClient struct {
 	cl      client.Client
-	metrics monitoring.Metrics
+	metrics *monitoring.Metrics
 }
 
-func NewBDClient(cl client.Client, metrics monitoring.Metrics) *BDClient {
+func NewBDClient(cl client.Client, metrics *monitoring.Metrics) *BDClient {
 	return &BDClient{
 		cl:      cl,
 		metrics: metrics,

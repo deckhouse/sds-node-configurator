@@ -32,7 +32,7 @@ const ReconcilerName = "block-device-filter-watcher-controller"
 type Reconciler struct {
 	client                 client.Client
 	log                    logger.Logger
-	metrics                monitoring.Metrics
+	metrics                *monitoring.Metrics
 	runBlockDeviceDiscover func(context.Context) (controller.Result, error)
 	cfg                    ReconcilerConfig
 }
@@ -45,7 +45,7 @@ type ReconcilerConfig struct {
 func NewReconciler(
 	client client.Client,
 	log logger.Logger,
-	metrics monitoring.Metrics,
+	metrics *monitoring.Metrics,
 	runBlockDeviceDiscover func(context.Context) (controller.Result, error),
 	cfg ReconcilerConfig,
 ) *Reconciler {

@@ -57,7 +57,7 @@ type Discoverer struct {
 	log                     logger.Logger
 	bdCl                    *repository.BDClient
 	blockDeviceFilterClient *repository.BlockDeviceFilterClient
-	metrics                 monitoring.Metrics
+	metrics                 *monitoring.Metrics
 	sdsCache                *cache.Cache
 	cfg                     DiscovererConfig
 }
@@ -71,7 +71,7 @@ type DiscovererConfig struct {
 func NewDiscoverer(
 	cl client.Client,
 	log logger.Logger,
-	metrics monitoring.Metrics,
+	metrics *monitoring.Metrics,
 	sdsCache *cache.Cache,
 	cfg DiscovererConfig,
 ) *Discoverer {

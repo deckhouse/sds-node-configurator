@@ -17,8 +17,10 @@ limitations under the License.
 package monitoring
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -225,120 +227,133 @@ func init() {
 type Metrics struct {
 	node string
 	c    clock.Clock
+
+	// State for tracking previous metrics to cleanup stale ones
+	mu                sync.Mutex
+	previousVGs       map[string]bool
+	previousThinPools map[string]bool
+	previousLVs       map[string]bool
+	previousLVGVGs    map[string]bool
+	previousLVGTPs    map[string]bool
 }
 
-func GetMetrics(nodeName string) Metrics {
-	return Metrics{
-		node: nodeName,
-		c:    clock.RealClock{},
+func GetMetrics(nodeName string) *Metrics {
+	return &Metrics{
+		node:              nodeName,
+		c:                 clock.RealClock{},
+		previousVGs:       make(map[string]bool),
+		previousThinPools: make(map[string]bool),
+		previousLVs:       make(map[string]bool),
+		previousLVGVGs:    make(map[string]bool),
+		previousLVGTPs:    make(map[string]bool),
 	}
 }
 
-func (m Metrics) GetEstimatedTimeInSeconds(since time.Time) float64 {
+func (m *Metrics) GetEstimatedTimeInSeconds(since time.Time) float64 {
 	return m.c.Since(since).Seconds()
 }
 
-func (m Metrics) ReconcilesCountTotal(controllerName string) prometheus.Counter {
+func (m *Metrics) ReconcilesCountTotal(controllerName string) prometheus.Counter {
 	return reconcilesCountTotal.WithLabelValues(m.node, controllerName)
 }
 
-func (m Metrics) ReconcileDuration(controllerName string) prometheus.Observer {
+func (m *Metrics) ReconcileDuration(controllerName string) prometheus.Observer {
 	return reconcileDuration.WithLabelValues(m.node, controllerName)
 }
 
-func (m Metrics) UtilsCommandsDuration(controllerName, command string) prometheus.Observer {
+func (m *Metrics) UtilsCommandsDuration(controllerName, command string) prometheus.Observer {
 	return utilsCommandsDuration.WithLabelValues(m.node, controllerName, strings.ToLower(command))
 }
 
-func (m Metrics) UtilsCommandsExecutionCount(controllerName, command string) prometheus.Counter {
+func (m *Metrics) UtilsCommandsExecutionCount(controllerName, command string) prometheus.Counter {
 	return utilsCommandsExecutionCount.WithLabelValues(m.node, controllerName, strings.ToLower(command))
 }
 
-func (m Metrics) UtilsCommandsErrorsCount(controllerName, command string) prometheus.Counter {
+func (m *Metrics) UtilsCommandsErrorsCount(controllerName, command string) prometheus.Counter {
 	return utilsCommandsErrorsCount.WithLabelValues(m.node, controllerName, strings.ToLower(command))
 }
 
-func (m Metrics) APIMethodsDuration(controllerName, method string) prometheus.Observer {
+func (m *Metrics) APIMethodsDuration(controllerName, method string) prometheus.Observer {
 	return apiMethodsDuration.WithLabelValues(m.node, controllerName, strings.ToLower(method))
 }
 
-func (m Metrics) APIMethodsExecutionCount(controllerName, method string) prometheus.Counter {
+func (m *Metrics) APIMethodsExecutionCount(controllerName, method string) prometheus.Counter {
 	return apiMethodsExecutionCount.WithLabelValues(m.node, controllerName, strings.ToLower(method))
 }
 
-func (m Metrics) APIMethodsErrors(controllerName, method string) prometheus.Counter {
+func (m *Metrics) APIMethodsErrors(controllerName, method string) prometheus.Counter {
 	return apiMethodsErrorsCount.WithLabelValues(m.node, controllerName, strings.ToLower(method))
 }
 
-func (m Metrics) NoOperationalResourcesCount(resourceName string) prometheus.Gauge {
+func (m *Metrics) NoOperationalResourcesCount(resourceName string) prometheus.Gauge {
 	return noOperationalResourcesCount.WithLabelValues(strings.ToLower(resourceName))
 }
 
-func (m Metrics) LVMVolumeGroupSizeBytes(volumeGroup string) prometheus.Gauge {
+func (m *Metrics) LVMVolumeGroupSizeBytes(volumeGroup string) prometheus.Gauge {
 	return lvmVolumeGroupSizeBytes.WithLabelValues(m.node, volumeGroup)
 }
 
-func (m Metrics) LVMVolumeGroupFreeBytes(volumeGroup string) prometheus.Gauge {
+func (m *Metrics) LVMVolumeGroupFreeBytes(volumeGroup string) prometheus.Gauge {
 	return lvmVolumeGroupFreeBytes.WithLabelValues(m.node, volumeGroup)
 }
 
-func (m Metrics) LVMVolumeGroupUsedBytes(volumeGroup string) prometheus.Gauge {
+func (m *Metrics) LVMVolumeGroupUsedBytes(volumeGroup string) prometheus.Gauge {
 	return lvmVolumeGroupUsedBytes.WithLabelValues(m.node, volumeGroup)
 }
 
-func (m Metrics) LVMVolumeGroupUsedPercent(volumeGroup string) prometheus.Gauge {
+func (m *Metrics) LVMVolumeGroupUsedPercent(volumeGroup string) prometheus.Gauge {
 	return lvmVolumeGroupUsedPercent.WithLabelValues(m.node, volumeGroup)
 }
 
-func (m Metrics) LVMThinPoolSizeBytes(volumeGroup, thinPool string) prometheus.Gauge {
+func (m *Metrics) LVMThinPoolSizeBytes(volumeGroup, thinPool string) prometheus.Gauge {
 	return lvmThinPoolSizeBytes.WithLabelValues(m.node, volumeGroup, thinPool)
 }
 
-func (m Metrics) LVMThinPoolUsedBytes(volumeGroup, thinPool string) prometheus.Gauge {
+func (m *Metrics) LVMThinPoolUsedBytes(volumeGroup, thinPool string) prometheus.Gauge {
 	return lvmThinPoolUsedBytes.WithLabelValues(m.node, volumeGroup, thinPool)
 }
 
-func (m Metrics) LVMThinPoolUsedPercent(volumeGroup, thinPool string) prometheus.Gauge {
+func (m *Metrics) LVMThinPoolUsedPercent(volumeGroup, thinPool string) prometheus.Gauge {
 	return lvmThinPoolUsedPercent.WithLabelValues(m.node, volumeGroup, thinPool)
 }
 
-func (m Metrics) LVMThinPoolMetadataUsedPercent(volumeGroup, thinPool string) prometheus.Gauge {
+func (m *Metrics) LVMThinPoolMetadataUsedPercent(volumeGroup, thinPool string) prometheus.Gauge {
 	return lvmThinPoolMetadataUsedPercent.WithLabelValues(m.node, volumeGroup, thinPool)
 }
 
-func (m Metrics) LVMLogicalVolumeSizeBytes(volumeGroup, logicalVolume string) prometheus.Gauge {
+func (m *Metrics) LVMLogicalVolumeSizeBytes(volumeGroup, logicalVolume string) prometheus.Gauge {
 	return lvmLogicalVolumeSizeBytes.WithLabelValues(m.node, volumeGroup, logicalVolume)
 }
 
-func (m Metrics) LVMLogicalVolumeUsedBytes(volumeGroup, logicalVolume string) prometheus.Gauge {
+func (m *Metrics) LVMLogicalVolumeUsedBytes(volumeGroup, logicalVolume string) prometheus.Gauge {
 	return lvmLogicalVolumeUsedBytes.WithLabelValues(m.node, volumeGroup, logicalVolume)
 }
 
-func (m Metrics) LVMLogicalVolumeUsedPercent(volumeGroup, logicalVolume string) prometheus.Gauge {
+func (m *Metrics) LVMLogicalVolumeUsedPercent(volumeGroup, logicalVolume string) prometheus.Gauge {
 	return lvmLogicalVolumeUsedPercent.WithLabelValues(m.node, volumeGroup, logicalVolume)
 }
 
-func (m Metrics) LVGVGSizeBytes(lvgName, volumeGroup string) prometheus.Gauge {
+func (m *Metrics) LVGVGSizeBytes(lvgName, volumeGroup string) prometheus.Gauge {
 	return lvgVGSizeBytes.WithLabelValues(m.node, lvgName, volumeGroup)
 }
 
-func (m Metrics) LVGVGFreeBytes(lvgName, volumeGroup string) prometheus.Gauge {
+func (m *Metrics) LVGVGFreeBytes(lvgName, volumeGroup string) prometheus.Gauge {
 	return lvgVGFreeBytes.WithLabelValues(m.node, lvgName, volumeGroup)
 }
 
-func (m Metrics) LVGThinPoolActualSizeBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
+func (m *Metrics) LVGThinPoolActualSizeBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
 	return lvgThinPoolActualSizeBytes.WithLabelValues(m.node, lvgName, volumeGroup, thinPool)
 }
 
-func (m Metrics) LVGThinPoolAllocatedSizeBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
+func (m *Metrics) LVGThinPoolAllocatedSizeBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
 	return lvgThinPoolAllocatedSizeBytes.WithLabelValues(m.node, lvgName, volumeGroup, thinPool)
 }
 
-func (m Metrics) LVGThinPoolUsedSizeBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
+func (m *Metrics) LVGThinPoolUsedSizeBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
 	return lvgThinPoolUsedSizeBytes.WithLabelValues(m.node, lvgName, volumeGroup, thinPool)
 }
 
-func (m Metrics) LVGThinPoolAllocationLimitBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
+func (m *Metrics) LVGThinPoolAllocationLimitBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
 	return lvgThinPoolAllocationLimitBytes.WithLabelValues(m.node, lvgName, volumeGroup, thinPool)
 }
 
@@ -349,7 +364,13 @@ func isThinPool(lv internal.LVData) bool {
 
 // UpdateLVMMetrics updates metrics for LVM volume groups, thin pools, and logical volumes.
 // Only VGs and LVs that belong to managed VGs (from LVMVolumeGroup resources) are included.
-func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData, managedVGs map[string]struct{}) {
+// Returns collected parsing errors that should be logged by the caller.
+func (m *Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData, managedVGs map[string]struct{}) []error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var errs []error
+
 	// Track current VGs to remove metrics for deleted ones
 	currentVGs := make(map[string]bool)
 
@@ -380,6 +401,20 @@ func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData, 
 		m.LVMVolumeGroupUsedBytes(vg.VGName).Set(usedBytes)
 		m.LVMVolumeGroupUsedPercent(vg.VGName).Set(usedPercent)
 	}
+
+	// Remove stale VG metrics
+	for key := range m.previousVGs {
+		if !currentVGs[key] {
+			parts := strings.SplitN(key, ":", 2)
+			if len(parts) == 2 {
+				lvmVolumeGroupSizeBytes.DeleteLabelValues(parts[0], parts[1])
+				lvmVolumeGroupFreeBytes.DeleteLabelValues(parts[0], parts[1])
+				lvmVolumeGroupUsedBytes.DeleteLabelValues(parts[0], parts[1])
+				lvmVolumeGroupUsedPercent.DeleteLabelValues(parts[0], parts[1])
+			}
+		}
+	}
+	m.previousVGs = currentVGs
 
 	// Update metrics for thin pools and logical volumes
 	currentThinPools := make(map[string]bool)
@@ -413,7 +448,10 @@ func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData, 
 
 			if lv.DataPercent != "" {
 				dataPercent, err := strconv.ParseFloat(lv.DataPercent, 64)
-				if err == nil {
+				if err != nil {
+					errs = append(errs, fmt.Errorf("failed to parse DataPercent %q for thin pool %s/%s: %w",
+						lv.DataPercent, lv.VGName, lv.LVName, err))
+				} else {
 					usedPercent = dataPercent
 					usedBytes = sizeBytes * dataPercent / 100.0
 				}
@@ -421,7 +459,10 @@ func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData, 
 
 			if lv.MetadataPercent != "" {
 				metadataPercent, err := strconv.ParseFloat(lv.MetadataPercent, 64)
-				if err == nil {
+				if err != nil {
+					errs = append(errs, fmt.Errorf("failed to parse MetadataPercent %q for thin pool %s/%s: %w",
+						lv.MetadataPercent, lv.VGName, lv.LVName, err))
+				} else {
 					metadataUsedPercent = metadataPercent
 				}
 			}
@@ -444,7 +485,13 @@ func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData, 
 			if lv.DataPercent != "" {
 				// Thin volume - has DataPercent
 				dataPercent, err := strconv.ParseFloat(lv.DataPercent, 64)
-				if err == nil {
+				if err != nil {
+					errs = append(errs, fmt.Errorf("failed to parse DataPercent %q for LV %s/%s: %w",
+						lv.DataPercent, lv.VGName, lv.LVName, err))
+					// Fallback to thick volume behavior on parse error
+					usedBytes = sizeBytes
+					usedPercent = 100.0
+				} else {
 					usedPercent = dataPercent
 					usedBytes = sizeBytes * dataPercent / 100.0
 				}
@@ -459,18 +506,58 @@ func (m Metrics) UpdateLVMMetrics(vgs []internal.VGData, lvs []internal.LVData, 
 		}
 	}
 
-	// Remove metrics for VGs, thin pools, and LVs that no longer exist
-	// We need to reset all metrics and then set only current ones
-	// This is a limitation of Prometheus - we can't easily remove specific label combinations
-	// So we'll keep the metrics but they'll be stale until next update
-	// In practice, this is acceptable as metrics will be updated on next scan
+	// Remove stale thin pool metrics
+	for key := range m.previousThinPools {
+		if !currentThinPools[key] {
+			parts := strings.SplitN(key, ":", 3)
+			if len(parts) == 3 {
+				lvmThinPoolSizeBytes.DeleteLabelValues(parts[0], parts[1], parts[2])
+				lvmThinPoolUsedBytes.DeleteLabelValues(parts[0], parts[1], parts[2])
+				lvmThinPoolUsedPercent.DeleteLabelValues(parts[0], parts[1], parts[2])
+				lvmThinPoolMetadataUsedPercent.DeleteLabelValues(parts[0], parts[1], parts[2])
+			}
+		}
+	}
+	m.previousThinPools = currentThinPools
+
+	// Remove stale LV metrics
+	for key := range m.previousLVs {
+		if !currentLVs[key] {
+			parts := strings.SplitN(key, ":", 3)
+			if len(parts) == 3 {
+				lvmLogicalVolumeSizeBytes.DeleteLabelValues(parts[0], parts[1], parts[2])
+				lvmLogicalVolumeUsedBytes.DeleteLabelValues(parts[0], parts[1], parts[2])
+				lvmLogicalVolumeUsedPercent.DeleteLabelValues(parts[0], parts[1], parts[2])
+			}
+		}
+	}
+	m.previousLVs = currentLVs
+
+	return errs
 }
 
 // UpdateLVGStatusMetrics updates metrics based on LVMVolumeGroup resource status.
 // This includes VG size/free and thin pool actual/allocated sizes from the LVG status.
-func (m Metrics) UpdateLVGStatusMetrics(lvgs map[string]v1alpha1.LVMVolumeGroup) {
+// Returns collected parsing errors that should be logged by the caller.
+func (m *Metrics) UpdateLVGStatusMetrics(lvgs map[string]v1alpha1.LVMVolumeGroup) []error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var errs []error
+
+	currentLVGVGs := make(map[string]bool)
+	currentLVGTPs := make(map[string]bool)
+
 	for _, lvg := range lvgs {
 		vgName := lvg.Spec.ActualVGNameOnTheNode
+
+		// Skip LVGs that don't have VG created yet
+		if vgName == "" {
+			continue
+		}
+
+		vgKey := m.node + ":" + lvg.Name + ":" + vgName
+		currentLVGVGs[vgKey] = true
 
 		// Update VG metrics from LVG status
 		m.LVGVGSizeBytes(lvg.Name, vgName).Set(float64(lvg.Status.VGSize.Value()))
@@ -478,6 +565,9 @@ func (m Metrics) UpdateLVGStatusMetrics(lvgs map[string]v1alpha1.LVMVolumeGroup)
 
 		// Update thin pool metrics from LVG status
 		for _, tp := range lvg.Status.ThinPools {
+			tpKey := m.node + ":" + lvg.Name + ":" + vgName + ":" + tp.Name
+			currentLVGTPs[tpKey] = true
+
 			actualSize := float64(tp.ActualSize.Value())
 			m.LVGThinPoolActualSizeBytes(lvg.Name, vgName, tp.Name).Set(actualSize)
 			m.LVGThinPoolAllocatedSizeBytes(lvg.Name, vgName, tp.Name).Set(float64(tp.AllocatedSize.Value()))
@@ -488,7 +578,12 @@ func (m Metrics) UpdateLVGStatusMetrics(lvgs map[string]v1alpha1.LVMVolumeGroup)
 			allocationLimitPercent := 150.0 // default value
 			if tp.AllocationLimit != "" {
 				limitStr := strings.TrimSuffix(tp.AllocationLimit, "%")
-				if parsed, err := strconv.ParseFloat(limitStr, 64); err == nil {
+				parsed, err := strconv.ParseFloat(limitStr, 64)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("failed to parse AllocationLimit %q for thin pool %s in LVG %s: %w",
+						tp.AllocationLimit, tp.Name, lvg.Name, err))
+					// Keep default value of 150%
+				} else {
 					allocationLimitPercent = parsed
 				}
 			}
@@ -496,4 +591,32 @@ func (m Metrics) UpdateLVGStatusMetrics(lvgs map[string]v1alpha1.LVMVolumeGroup)
 			m.LVGThinPoolAllocationLimitBytes(lvg.Name, vgName, tp.Name).Set(allocationLimitBytes)
 		}
 	}
+
+	// Remove stale LVG VG metrics
+	for key := range m.previousLVGVGs {
+		if !currentLVGVGs[key] {
+			parts := strings.SplitN(key, ":", 3)
+			if len(parts) == 3 {
+				lvgVGSizeBytes.DeleteLabelValues(parts[0], parts[1], parts[2])
+				lvgVGFreeBytes.DeleteLabelValues(parts[0], parts[1], parts[2])
+			}
+		}
+	}
+	m.previousLVGVGs = currentLVGVGs
+
+	// Remove stale LVG thin pool metrics
+	for key := range m.previousLVGTPs {
+		if !currentLVGTPs[key] {
+			parts := strings.SplitN(key, ":", 4)
+			if len(parts) == 4 {
+				lvgThinPoolActualSizeBytes.DeleteLabelValues(parts[0], parts[1], parts[2], parts[3])
+				lvgThinPoolAllocatedSizeBytes.DeleteLabelValues(parts[0], parts[1], parts[2], parts[3])
+				lvgThinPoolUsedSizeBytes.DeleteLabelValues(parts[0], parts[1], parts[2], parts[3])
+				lvgThinPoolAllocationLimitBytes.DeleteLabelValues(parts[0], parts[1], parts[2], parts[3])
+			}
+		}
+	}
+	m.previousLVGTPs = currentLVGTPs
+
+	return errs
 }

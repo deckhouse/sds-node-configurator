@@ -32,7 +32,7 @@ import (
 
 var _ = Describe("BlockDeviceFilterClient", func() {
 	var ctx context.Context
-	var metrics monitoring.Metrics
+	var metrics *monitoring.Metrics
 	var fakeClient client.WithWatch
 	var filterClient *repository.BlockDeviceFilterClient
 	controllerName := "testController"
