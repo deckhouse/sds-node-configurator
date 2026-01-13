@@ -35,7 +35,7 @@ const (
 	LeaderElectionEnvName          = "LEADER_ELECTION"
 	LeaderElectionNamespaceEnvName = "LEADER_ELECTION_NAMESPACE"
 	LeaderElectionIDEnvName        = "LEADER_ELECTION_ID"
-	DefaultLeaderElectionID        = "sds-health-watcher-controller-leader-election"
+	DefaultLeaderElectionID        = "controller-leader-election"
 )
 
 type Options struct {
