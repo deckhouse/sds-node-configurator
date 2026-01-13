@@ -22,7 +22,7 @@ spec:
     kind: DaemonSet
     name: sds-node-configurator
   updatePolicy:
-    updateMode: "Auto"
+    updateMode: "Initial"
   resourcePolicy:
     containerPolicies:
     - containerName: "sds-node-configurator-agent"
