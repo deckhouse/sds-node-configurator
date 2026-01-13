@@ -19,6 +19,7 @@
   "webhookCertPath" "internal.customWebhookCert"
   "onMasterNode" true
   "podSecurityContext" "nobody"
+  "controllerMetricsPort" 8080
   "additionalControllerEnvs" $leaderElectionEnvs
 }}
 {{ include "helm_lib_module_controller_manifests" (list . $config) }}
