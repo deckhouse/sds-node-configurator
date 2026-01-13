@@ -15,7 +15,6 @@
 
 {{- $config := dict
   "valuesKey" "sdsNodeConfigurator"
-  "controllerImageName" "sdsHealthWatcherController"
   "webhookEnabled" true
   "webhookCertPath" "internal.customWebhookCert"
   "onMasterNode" true
