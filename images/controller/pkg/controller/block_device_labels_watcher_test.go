@@ -25,8 +25,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/internal"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/controller/internal"
+	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/logger"
 )
 
 func TestRunBlockDeviceLabelsWatcher(t *testing.T) {

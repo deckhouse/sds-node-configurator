@@ -14,7 +14,6 @@
 }}
 
 {{- $config := dict
-  "fullname" "sds-health-watcher-controller"
   "valuesKey" "sdsNodeConfigurator"
   "controllerImageName" "sdsHealthWatcherController"
   "webhookEnabled" true

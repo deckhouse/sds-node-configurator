@@ -1,4 +1,4 @@
-module github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller
+module github.com/deckhouse/sds-node-configurator/images/controller
 
 go 1.24.9
 
