@@ -1,105 +1,15 @@
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: sds-health-watcher-controller
-  namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-health-watcher-controller")) | nindent 2 }}
-
----
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: d8:{{ .Chart.Name }}:sds-health-watcher-controller
-  namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-health-watcher-controller")) | nindent 2 }}
-rules:
-  - apiGroups:
-      - "apiextensions.k8s.io"
-    resources:
-      - customresourcedefinitions
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - "storage.deckhouse.io"
-    resources:
-      - blockdevices
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - "storage.deckhouse.io"
-    resources:
-      - lvmvolumegroupsets
-      - lvmvolumegroupsets/status
-    verbs:
-      - get
-      - list
-      - watch
-      - update
-  - apiGroups:
-      - "storage.deckhouse.io"
-    resources:
-      - lvmvolumegroups
-      - lvmvolumegroups/status
-    verbs:
-      - get
-      - list
-      - watch
-      - update
-      - create
-  - apiGroups:
-      - "storage.deckhouse.io"
-    resources:
-      - lvmlogicalvolumesnapshots
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - ""
-    resources:
-      - nodes
-      - pods
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - coordination.k8s.io
-    resources:
-      - leases
-    verbs:
-      - get
-      - list
-      - watch
-      - update
-      - create
-      - delete
-  - apiGroups:
-      - "deckhouse.io"
-    resources:
-      - "moduleconfigs"
-    verbs:
-      - get
-      - list
-      - watch
-      - update
-      - patch
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: d8:{{ .Chart.Name }}:sds-health-watcher-controller
-  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-health-watcher-controller")) | nindent 2 }}
-subjects:
-  - kind: ServiceAccount
-    name: sds-health-watcher-controller
-    namespace: d8-{{ .Chart.Name }}
-roleRef:
-  kind: ClusterRole
-  name: d8:{{ .Chart.Name }}:sds-health-watcher-controller
-  apiGroup: rbac.authorization.k8s.io
+{{- /* RBAC */ -}}
+{{- $rbacConfig := dict
+  "fullname" "sds-health-watcher-controller"
+  "clusterRoleRules" (list
+    (dict "apiGroups" (list "apiextensions.k8s.io") "resources" (list "customresourcedefinitions") "verbs" (list "get" "list" "watch"))
+    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "blockdevices") "verbs" (list "get" "list" "watch"))
+    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmvolumegroupsets" "lvmvolumegroupsets/status") "verbs" (list "get" "list" "watch" "update"))
+    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmvolumegroups" "lvmvolumegroups/status") "verbs" (list "get" "list" "watch" "update" "create"))
+    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmlogicalvolumesnapshots") "verbs" (list "get" "list" "watch"))
+    (dict "apiGroups" (list "") "resources" (list "nodes" "pods") "verbs" (list "get" "list" "watch"))
+    (dict "apiGroups" (list "coordination.k8s.io") "resources" (list "leases") "verbs" (list "get" "list" "watch" "update" "create" "delete"))
+    (dict "apiGroups" (list "deckhouse.io") "resources" (list "moduleconfigs") "verbs" (list "get" "list" "watch" "update" "patch"))
+  )
+}}
+{{ include "helm_lib_module_controller_rbac" (list . $rbacConfig) }}

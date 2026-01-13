@@ -1,0 +1,36 @@
+{{- /* Webhook TLS Certs Secret */ -}}
+{{- $secretConfig := dict
+  "valuesKey" "sdsNodeConfigurator"
+  "webhookCertPath" "internal.customWebhookCert"
+  "appLabel" "sds-health-watcher-controller"
+}}
+{{ include "helm_lib_module_webhook_certs_secret" (list . $secretConfig) }}
+
+{{- /* Controller Deployment */ -}}
+{{- $leaderElectionEnvs := list
+  (dict "name" "LEADER_ELECTION" "value" "true")
+  (dict "name" "LEADER_ELECTION_NAMESPACE" "valueFrom" (dict "fieldRef" (dict "fieldPath" "metadata.namespace")))
+  (dict "name" "LEADER_ELECTION_ID" "value" "sds-health-watcher-controller-leader-election")
+}}
+
+{{- $config := dict
+  "fullname" "sds-health-watcher-controller"
+  "valuesKey" "sdsNodeConfigurator"
+  "controllerImageName" "sdsHealthWatcherController"
+  "webhookEnabled" true
+  "webhookCertPath" "internal.customWebhookCert"
+  "onMasterNode" true
+  "podSecurityContext" "nobody"
+  "additionalControllerEnvs" $leaderElectionEnvs
+}}
+{{ include "helm_lib_module_controller_manifests" (list . $config) }}
+
+{{- /* ValidatingWebhookConfiguration for LVMLogicalVolumeSnapshots */ -}}
+{{- $llvsWebhookConfig := dict
+  "name" "llvs-validation"
+  "webhookName" "llvs-validation"
+  "valuesKey" "sdsNodeConfigurator"
+  "path" "/llvs-validate"
+  "rules" (list (dict "apiGroups" (list "storage.deckhouse.io") "apiVersions" (list "v1alpha1") "operations" (list "*") "resources" (list "lvmlogicalvolumesnapshots") "scope" "Cluster"))
+}}
+{{ include "helm_lib_module_validating_webhook_configuration" (list . $llvsWebhookConfig) }}
