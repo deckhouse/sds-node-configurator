@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/monitoring"
 )
 
 func TestHealthWatcher(t *testing.T) {

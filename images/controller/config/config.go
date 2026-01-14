@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/logger"
 )
 
 const (
@@ -35,7 +35,7 @@ const (
 	LeaderElectionEnvName          = "LEADER_ELECTION"
 	LeaderElectionNamespaceEnvName = "LEADER_ELECTION_NAMESPACE"
 	LeaderElectionIDEnvName        = "LEADER_ELECTION_ID"
-	DefaultLeaderElectionID        = "sds-health-watcher-controller-leader-election"
+	DefaultLeaderElectionID        = "controller-leader-election"
 )
 
 type Options struct {

@@ -37,9 +37,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/config"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/logger"
-	"github.com/deckhouse/sds-node-configurator/images/sds-health-watcher-controller/pkg/monitoring"
+	"github.com/deckhouse/sds-node-configurator/images/controller/config"
+	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/monitoring"
 )
 
 const (
