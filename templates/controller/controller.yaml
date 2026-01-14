@@ -23,6 +23,15 @@
 }}
 {{ include "helm_lib_module_controller_manifests" (list . $config) }}
 
+{{- /* Webhook Service with metrics port */ -}}
+{{- $serviceConfig := dict
+  "selectorApp" "controller"
+  "additionalPorts" (list
+    (dict "name" "metrics" "port" 8080 "targetPort" "metrics")
+  )
+}}
+{{ include "helm_lib_module_webhook_service" (list . $serviceConfig) }}
+
 {{- /* ValidatingWebhookConfiguration for LVMLogicalVolumeSnapshots */ -}}
 {{- $llvsWebhookConfig := dict
   "name" "llvs-validation"
