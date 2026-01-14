@@ -2,7 +2,6 @@
 {{- $secretConfig := dict
   "valuesKey" "sdsNodeConfigurator"
   "webhookCertPath" "internal.customWebhookCert"
-  "appLabel" "sds-health-watcher-controller"
 }}
 {{ include "helm_lib_module_webhook_certs_secret" (list . $secretConfig) }}
 
