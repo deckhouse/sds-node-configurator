@@ -25,8 +25,7 @@
 
 {{- /* Webhook Service with metrics port */ -}}
 {{- $serviceConfig := dict
-  "selectorApp" "controller"
-  "additionalPorts" (list
+    "additionalPorts" (list
     (dict "name" "metrics" "port" 8080 "targetPort" "metrics")
   )
 }}
