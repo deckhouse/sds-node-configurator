@@ -1,0 +1,18 @@
+{{- if or (or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion)) (semverCompare ">=1.64" .Values.global.deckhouseVersion) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sds-common-scheduler-extender
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender" )) | nindent 2 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8099
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: sds-common-scheduler-extender
+{{- end }}

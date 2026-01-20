@@ -1,0 +1,187 @@
+{{- if or (or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion)) (semverCompare ">=1.64" .Values.global.deckhouseVersion) }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sds-common-scheduler-extender
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender-volume-scheduler
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:volume-scheduler
+subjects:
+  - kind: ServiceAccount
+    name: sds-common-scheduler-extender
+    namespace: d8-{{ .Chart.Name }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create", "get", "update"]
+  - apiGroups: [ "storage.deckhouse.io" ]
+    resources: [ "lvmvolumegroups", "localstorageclasses", "replicatedstorageclasses" ]
+    verbs: [ "list", "watch", "get"]
+  - apiGroups: ["v1"]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["list", "watch", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender
+subjects:
+  - kind: ServiceAccount
+    name: sds-common-scheduler-extender
+    namespace: d8-{{ .Chart.Name }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:rsc-reader
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+rules:
+  - apiGroups: ["storage.deckhouse.io"]
+    resources: ["replicatedstorageclasses", "replicatedstoragepools"]
+    verbs: ["get", "update", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:rsc-reader
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:rsc-reader
+subjects:
+  - kind: ServiceAccount
+    name: sds-common-scheduler-extender
+    namespace: d8-{{ .Chart.Name }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:configmap-manager
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["list", "watch", "get", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:configmap-manager
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:configmap-manager
+subjects:
+  - kind: ServiceAccount
+    name: sds-common-scheduler-extender
+    namespace: d8-{{ .Chart.Name }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:layerstoragevolumes-manager
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+rules:
+  - apiGroups: ["internal.linstor.linbit.com"]
+    resources: ["layerstoragevolumes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:layerstoragevolumes-manager
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+subjects:
+  - kind: ServiceAccount
+    name: sds-common-scheduler-extender
+    namespace: d8-{{ .Chart.Name }}
+roleRef:
+  kind: ClusterRole
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:layerstoragevolumes-manager
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:resource-manager
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+rules:
+  - apiGroups: ["storage.deckhouse.io"]
+    resources: ["drbdresourcereplicas"]
+    verbs: ["get", "update", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:resource-manager
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:resource-manager
+subjects:
+  - kind: ServiceAccount
+    name: sds-common-scheduler-extender
+    namespace: d8-{{ .Chart.Name }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:crd-resource-manager
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+rules:
+  - apiGroups: ["internal.linstor.linbit.com"]
+    resources: ["layerresourceids"]
+    verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:crd-resource-manager
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: d8:{{ .Chart.Name }}:sds-common-scheduler-extender:crd-resource-manager
+subjects:
+  - kind: ServiceAccount
+    name: sds-common-scheduler-extender
+    namespace: d8-{{ .Chart.Name }}
