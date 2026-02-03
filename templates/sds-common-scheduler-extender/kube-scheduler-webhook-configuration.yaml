@@ -1,0 +1,22 @@
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: KubeSchedulerWebhookConfiguration
+metadata:
+  name: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 2 }}
+webhooks:
+- weight: 5
+  # Do NOT change to "Fail" under any circumstances.
+  #
+  # When the scheduler-extender pod is (re)scheduled after restart/failure, the extender is not ready.
+  # With "Fail", kube-scheduler gets an error and refuses to schedule its own pod → pod stays Pending → extender never starts → scheduler can't schedule anything.
+  # Deadlock: pod never runs.
+  failurePolicy: Ignore
+  clientConfig:
+    service:
+      name: sds-common-scheduler-extender
+      namespace: d8-{{ .Chart.Name }}
+      port: 8099
+      path: /scheduler
+    caBundle: {{ .Values.sdsNodeConfigurator.internal.customSchedulerExtenderCert.ca | b64enc }}
+  timeoutSeconds: 5
