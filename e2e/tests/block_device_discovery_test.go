@@ -140,9 +140,9 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 
 			// Шаг 9: Проверка, что FSType пустой для неразмеченного диска
 			By("Шаг 9: Проверка FSType (должен быть пустым для неразмеченного диска)")
-			Expect(foundBD.Status.FSType).To(BeEmpty(),
+			Expect(foundBD.Status.FsType).To(BeEmpty(),
 				fmt.Sprintf("FSType должен быть пустым для неразмеченного диска, получено: %s",
-					foundBD.Status.FSType))
+					foundBD.Status.FsType))
 
 			// Шаг 10: Проверка, что PVUuid пустой для неразмеченного диска
 			By("Шаг 10: Проверка PVUuid (должен быть пустым)")
@@ -192,10 +192,9 @@ func printBlockDeviceInfo(bd *v1alpha1.BlockDevice) {
 	GinkgoWriter.Printf("WWN: %s\n", bd.Status.Wwn)
 	GinkgoWriter.Printf("Model: %s\n", bd.Status.Model)
 	GinkgoWriter.Printf("Consumable: %t\n", bd.Status.Consumable)
-	GinkgoWriter.Printf("FSType: %s\n", bd.Status.FSType)
+	GinkgoWriter.Printf("FSType: %s\n", bd.Status.FsType)
 	GinkgoWriter.Printf("MachineID: %s\n", bd.Status.MachineID)
 	GinkgoWriter.Printf("Rota: %t\n", bd.Status.Rota)
 	GinkgoWriter.Printf("HotPlug: %t\n", bd.Status.HotPlug)
 	GinkgoWriter.Println("=============================================\n")
 }
-

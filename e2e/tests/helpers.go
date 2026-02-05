@@ -18,7 +18,6 @@ package tests
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	. "github.com/onsi/gomega"
@@ -29,26 +28,22 @@ import (
 )
 
 // WaitForBlockDevice ожидает появления BlockDevice с заданным именем
-func WaitForBlockDevice(ctx context.Context, cl client.Client, name string, timeout time.Duration) (*v1alpha1.BlockDevice, error) {
+func WaitForBlockDevice(ctx context.Context, cl client.Client, name string, timeout time.Duration) *v1alpha1.BlockDevice {
 	bd := &v1alpha1.BlockDevice{}
-	err := Eventually(func(g Gomega) {
+	Eventually(func(g Gomega) {
 		err := cl.Get(ctx, types.NamespacedName{Name: name}, bd)
 		g.Expect(err).NotTo(HaveOccurred())
 	}, timeout, 5*time.Second).Should(Succeed())
 
-	if err != nil {
-		return nil, fmt.Errorf("BlockDevice %s не появился в течение %s", name, timeout)
-	}
-
-	return bd, nil
+	return bd
 }
 
 // WaitForBlockDeviceByPath ожидает появления BlockDevice с заданным путем на ноде
-func WaitForBlockDeviceByPath(ctx context.Context, cl client.Client, nodeName, path string, timeout time.Duration) (*v1alpha1.BlockDevice, error) {
+func WaitForBlockDeviceByPath(ctx context.Context, cl client.Client, nodeName, path string, timeout time.Duration) *v1alpha1.BlockDevice {
 	var foundBD *v1alpha1.BlockDevice
 	blockDevicesList := &v1alpha1.BlockDeviceList{}
 
-	err := Eventually(func(g Gomega) {
+	Eventually(func(g Gomega) {
 		err := cl.List(ctx, blockDevicesList, &client.ListOptions{})
 		g.Expect(err).NotTo(HaveOccurred())
 
@@ -63,11 +58,7 @@ func WaitForBlockDeviceByPath(ctx context.Context, cl client.Client, nodeName, p
 		g.Expect(foundBD).NotTo(BeNil())
 	}, timeout, 10*time.Second).Should(Succeed())
 
-	if err != nil {
-		return nil, fmt.Errorf("BlockDevice с path=%s на ноде %s не появился в течение %s", path, nodeName, timeout)
-	}
-
-	return foundBD, nil
+	return foundBD
 }
 
 // DeleteBlockDeviceIfExists удаляет BlockDevice, если он существует
@@ -101,17 +92,10 @@ func GetAllBlockDevicesOnNode(ctx context.Context, cl client.Client, nodeName st
 }
 
 // WaitForBlockDeviceDeletion ожидает удаления BlockDevice
-func WaitForBlockDeviceDeletion(ctx context.Context, cl client.Client, name string, timeout time.Duration) error {
+func WaitForBlockDeviceDeletion(ctx context.Context, cl client.Client, name string, timeout time.Duration) {
 	bd := &v1alpha1.BlockDevice{}
-	err := Eventually(func(g Gomega) {
+	Eventually(func(g Gomega) {
 		err := cl.Get(ctx, types.NamespacedName{Name: name}, bd)
 		g.Expect(err).To(HaveOccurred())
 	}, timeout, 5*time.Second).Should(Succeed())
-
-	if err != nil {
-		return fmt.Errorf("BlockDevice %s не был удален в течение %s", name, timeout)
-	}
-
-	return nil
 }
-
