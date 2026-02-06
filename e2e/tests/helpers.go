@@ -27,7 +27,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
-// WaitForBlockDevice ожидает появления BlockDevice с заданным именем
+// WaitForBlockDevice waits for a BlockDevice with the given name to appear.
 func WaitForBlockDevice(ctx context.Context, cl client.Client, name string, timeout time.Duration) *v1alpha1.BlockDevice {
 	bd := &v1alpha1.BlockDevice{}
 	Eventually(func(g Gomega) {
@@ -38,7 +38,7 @@ func WaitForBlockDevice(ctx context.Context, cl client.Client, name string, time
 	return bd
 }
 
-// WaitForBlockDeviceByPath ожидает появления BlockDevice с заданным путем на ноде
+// WaitForBlockDeviceByPath waits for a BlockDevice with the given path on the node to appear.
 func WaitForBlockDeviceByPath(ctx context.Context, cl client.Client, nodeName, path string, timeout time.Duration) *v1alpha1.BlockDevice {
 	var foundBD *v1alpha1.BlockDevice
 	blockDevicesList := &v1alpha1.BlockDeviceList{}
@@ -61,19 +61,19 @@ func WaitForBlockDeviceByPath(ctx context.Context, cl client.Client, nodeName, p
 	return foundBD
 }
 
-// DeleteBlockDeviceIfExists удаляет BlockDevice, если он существует
+// DeleteBlockDeviceIfExists deletes the BlockDevice if it exists.
 func DeleteBlockDeviceIfExists(ctx context.Context, cl client.Client, name string) error {
 	bd := &v1alpha1.BlockDevice{}
 	err := cl.Get(ctx, types.NamespacedName{Name: name}, bd)
 	if err != nil {
-		// Если объект не найден, это нормально
+		// If the object is not found, that's expected
 		return client.IgnoreNotFound(err)
 	}
 
 	return cl.Delete(ctx, bd)
 }
 
-// GetAllBlockDevicesOnNode возвращает все BlockDevice на заданной ноде
+// GetAllBlockDevicesOnNode returns all BlockDevices on the given node.
 func GetAllBlockDevicesOnNode(ctx context.Context, cl client.Client, nodeName string) ([]v1alpha1.BlockDevice, error) {
 	blockDevicesList := &v1alpha1.BlockDeviceList{}
 	err := cl.List(ctx, blockDevicesList, &client.ListOptions{})
@@ -91,7 +91,7 @@ func GetAllBlockDevicesOnNode(ctx context.Context, cl client.Client, nodeName st
 	return result, nil
 }
 
-// WaitForBlockDeviceDeletion ожидает удаления BlockDevice
+// WaitForBlockDeviceDeletion waits for the BlockDevice to be deleted.
 func WaitForBlockDeviceDeletion(ctx context.Context, cl client.Client, name string, timeout time.Duration) {
 	bd := &v1alpha1.BlockDevice{}
 	Eventually(func(g Gomega) {

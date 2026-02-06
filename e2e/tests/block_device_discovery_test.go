@@ -30,7 +30,7 @@ import (
 )
 
 var _ = Describe("BlockDevice Discovery E2E", func() {
-	Context("Автоматическое обнаружение нового блочного устройства", func() {
+	Context("Automatic discovery of a new block device", func() {
 		var (
 			nodeName           string
 			expectedDevicePath string
@@ -43,30 +43,30 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 			expectedDevicePath = GetExpectedDevicePath()
 			expectedSerial = GetExpectedDeviceSerial()
 
-			By(fmt.Sprintf("Используем ноду: %s", nodeName))
-			By(fmt.Sprintf("Ожидаем устройство по пути: %s", expectedDevicePath))
-			By(fmt.Sprintf("С серийным номером: %s", expectedSerial))
+			By(fmt.Sprintf("Using node: %s", nodeName))
+			By(fmt.Sprintf("Expected device path: %s", expectedDevicePath))
+			By(fmt.Sprintf("Expected serial: %s", expectedSerial))
 
-			// Вычисляем ожидаемое имя BlockDevice на основе серийника
+			// Compute expected BlockDevice name from serial
 			if expectedSerial != "" {
 				expectedBDName = generateBlockDeviceName(nodeName, expectedSerial, "", "")
-				By(fmt.Sprintf("Ожидаемое имя BlockDevice: %s", expectedBDName))
+				By(fmt.Sprintf("Expected BlockDevice name: %s", expectedBDName))
 			}
 		})
 
-		It("Должен обнаружить новый неразмеченный диск и создать объект BlockDevice", func() {
-			By("Шаг 1: Ожидание появления BlockDevice в кластере")
+		It("Should discover a new unformatted disk and create a BlockDevice object", func() {
+			By("Step 1: Waiting for BlockDevice to appear in the cluster")
 
 			var foundBD *v1alpha1.BlockDevice
 			var blockDevicesList v1alpha1.BlockDeviceList
 
-			// Ожидаем появления BlockDevice в течение 5 минут
-			// (время может варьироваться в зависимости от интервала сканирования агента)
+			// Wait for BlockDevice to appear within 5 minutes
+			// (time may vary depending on the agent's scan interval)
 			Eventually(func(g Gomega) {
 				err := k8sClient.List(ctx, &blockDevicesList, &client.ListOptions{})
 				g.Expect(err).NotTo(HaveOccurred())
 
-				// Ищем BlockDevice с нужным путем и нодой
+				// Find BlockDevice with the expected path and node
 				for i := range blockDevicesList.Items {
 					bd := &blockDevicesList.Items[i]
 					if bd.Status.NodeName == nodeName && bd.Status.Path == expectedDevicePath {
@@ -76,114 +76,114 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 				}
 
 				g.Expect(foundBD).NotTo(BeNil(), fmt.Sprintf(
-					"BlockDevice с path=%s и nodeName=%s не найден. Всего BlockDevices: %d",
+					"BlockDevice with path=%s and nodeName=%s not found. Total BlockDevices: %d",
 					expectedDevicePath, nodeName, len(blockDevicesList.Items),
 				))
 			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
-			By(fmt.Sprintf("Найден BlockDevice: %s", foundBD.Name))
+			By(fmt.Sprintf("Found BlockDevice: %s", foundBD.Name))
 
-			// Шаг 2: Проверка, что имя ресурса соответствует ожидаемому (если задан серийник)
-			By("Шаг 2: Проверка имени BlockDevice на основе серийного номера")
+			// Step 2: Verify resource name matches expected (when serial is set)
+			By("Step 2: Verifying BlockDevice name based on serial number")
 			if expectedSerial != "" {
 				Expect(foundBD.Name).To(Equal(expectedBDName),
-					fmt.Sprintf("Имя BlockDevice не соответствует ожидаемому. "+
-						"Ожидалось: %s, получено: %s", expectedBDName, foundBD.Name))
+					fmt.Sprintf("BlockDevice name does not match expected. "+
+						"Expected: %s, got: %s", expectedBDName, foundBD.Name))
 			}
 
-			// Шаг 3: Проверка status.nodeName
-			By("Шаг 3: Проверка status.nodeName")
+			// Step 3: Verify status.nodeName
+			By("Step 3: Verifying status.nodeName")
 			Expect(foundBD.Status.NodeName).To(Equal(nodeName),
-				fmt.Sprintf("NodeName не соответствует ожидаемому. "+
-					"Ожидалось: %s, получено: %s", nodeName, foundBD.Status.NodeName))
+				fmt.Sprintf("NodeName does not match expected. "+
+					"Expected: %s, got: %s", nodeName, foundBD.Status.NodeName))
 
-			// Шаг 4: Проверка status.path
-			By("Шаг 4: Проверка status.path")
+			// Step 4: Verify status.path
+			By("Step 4: Verifying status.path")
 			Expect(foundBD.Status.Path).To(Equal(expectedDevicePath),
-				fmt.Sprintf("Path не соответствует ожидаемому. "+
-					"Ожидалось: %s, получено: %s", expectedDevicePath, foundBD.Status.Path))
+				fmt.Sprintf("Path does not match expected. "+
+					"Expected: %s, got: %s", expectedDevicePath, foundBD.Status.Path))
 
-			// Шаг 5: Проверка размера устройства
-			By("Шаг 5: Проверка размера устройства (должен быть > 0)")
+			// Step 5: Verify device size
+			By("Step 5: Verifying device size (must be > 0)")
 			Expect(foundBD.Status.Size.IsZero()).To(BeFalse(),
-				"Размер устройства не должен быть равен 0")
+				"Device size must not be zero")
 			minSize := resource.MustParse("1Gi")
 			Expect(foundBD.Status.Size.Cmp(minSize)).To(BeNumerically(">=", 0),
-				fmt.Sprintf("Размер устройства должен быть >= 1Gi. Получено: %s",
+				fmt.Sprintf("Device size must be >= 1Gi. Got: %s",
 					foundBD.Status.Size.String()))
 
-			By(fmt.Sprintf("Размер устройства: %s", foundBD.Status.Size.String()))
+			By(fmt.Sprintf("Device size: %s", foundBD.Status.Size.String()))
 
-			// Шаг 6: Проверка серийного номера
-			By("Шаг 6: Проверка серийного номера")
+			// Step 6: Verify serial number
+			By("Step 6: Verifying serial number")
 			if expectedSerial != "" {
 				Expect(foundBD.Status.Serial).To(Equal(expectedSerial),
-					fmt.Sprintf("Серийный номер не соответствует ожидаемому. "+
-						"Ожидалось: %s, получено: %s", expectedSerial, foundBD.Status.Serial))
+					fmt.Sprintf("Serial number does not match expected. "+
+						"Expected: %s, got: %s", expectedSerial, foundBD.Status.Serial))
 			} else {
 				Expect(foundBD.Status.Serial).NotTo(BeEmpty(),
-					"Серийный номер устройства не должен быть пустым")
+					"Device serial number must not be empty")
 			}
 
-			By(fmt.Sprintf("Серийный номер устройства: %s", foundBD.Status.Serial))
+			By(fmt.Sprintf("Device serial number: %s", foundBD.Status.Serial))
 
-			// Шаг 7: Проверка, что устройство является потребляемым (consumable)
-			By("Шаг 7: Проверка состояния consumable")
+			// Step 7: Verify device is consumable
+			By("Step 7: Verifying consumable state")
 			Expect(foundBD.Status.Consumable).To(BeTrue(),
-				"Устройство должно быть помечено как consumable для неразмеченного диска")
+				"Device must be marked as consumable for an unformatted disk")
 
-			// Шаг 8: Проверка типа устройства
-			By("Шаг 8: Проверка типа устройства")
+			// Step 8: Verify device type
+			By("Step 8: Verifying device type")
 			Expect(foundBD.Status.Type).NotTo(BeEmpty(),
-				"Тип устройства не должен быть пустым")
-			By(fmt.Sprintf("Тип устройства: %s", foundBD.Status.Type))
+				"Device type must not be empty")
+			By(fmt.Sprintf("Device type: %s", foundBD.Status.Type))
 
-			// Шаг 9: Проверка, что FSType пустой для неразмеченного диска
-			By("Шаг 9: Проверка FSType (должен быть пустым для неразмеченного диска)")
+			// Step 9: Verify FSType is empty for unformatted disk
+			By("Step 9: Verifying FSType (must be empty for unformatted disk)")
 			Expect(foundBD.Status.FsType).To(BeEmpty(),
-				fmt.Sprintf("FSType должен быть пустым для неразмеченного диска, получено: %s",
+				fmt.Sprintf("FSType must be empty for unformatted disk, got: %s",
 					foundBD.Status.FsType))
 
-			// Шаг 10: Проверка, что PVUuid пустой для неразмеченного диска
-			By("Шаг 10: Проверка PVUuid (должен быть пустым)")
+			// Step 10: Verify PVUuid is empty for unformatted disk
+			By("Step 10: Verifying PVUuid (must be empty)")
 			Expect(foundBD.Status.PVUuid).To(BeEmpty(),
-				"PVUuid должен быть пустым для неразмеченного диска")
+				"PVUuid must be empty for unformatted disk")
 
-			// Шаг 11: Проверка, что VGUuid пустой для неразмеченного диска
-			By("Шаг 11: Проверка VGUuid (должен быть пустым)")
+			// Step 11: Verify VGUuid is empty for unformatted disk
+			By("Step 11: Verifying VGUuid (must be empty)")
 			Expect(foundBD.Status.VGUuid).To(BeEmpty(),
-				"VGUuid должен быть пустым для неразмеченного диска")
+				"VGUuid must be empty for unformatted disk")
 
-			// Шаг 12: Проверка machineID
-			By("Шаг 12: Проверка machineID")
+			// Step 12: Verify machineID
+			By("Step 12: Verifying machineID")
 			Expect(foundBD.Status.MachineID).NotTo(BeEmpty(),
-				"MachineID не должен быть пустым")
+				"MachineID must not be empty")
 			By(fmt.Sprintf("MachineID: %s", foundBD.Status.MachineID))
 
-			// Итоговая информация
-			By("✓ Все проверки пройдены успешно!")
+			// Summary
+			By("✓ All checks passed successfully!")
 			printBlockDeviceInfo(foundBD)
 		})
 
-		It("Должен корректно обрабатывать отключение устройства", func() {
-			By("Примечание: Этот тест требует ручного отключения устройства")
-			Skip("Автоматическое тестирование отключения устройства требует дополнительной инфраструктуры")
+		It("Should correctly handle device disconnection", func() {
+			By("Note: This test requires manual device disconnection")
+			Skip("Automated testing of device disconnection requires additional infrastructure")
 		})
 	})
 })
 
-// generateBlockDeviceName генерирует имя BlockDevice на основе параметров
-// Логика должна соответствовать функции createUniqDeviceName из discoverer.go
+// generateBlockDeviceName generates a BlockDevice name from the given parameters.
+// Logic must match createUniqDeviceName in discoverer.go.
 func generateBlockDeviceName(nodeName, serial, wwn, partUUID string) string {
-	// Используем пустую модель, так как она неизвестна на этапе теста
+	// Use empty model as it is unknown at test time
 	temp := fmt.Sprintf("%s%s%s%s%s", nodeName, wwn, "" /* model */, serial, partUUID)
 	return fmt.Sprintf("dev-%x", sha1.Sum([]byte(temp)))
 }
 
-// printBlockDeviceInfo выводит подробную информацию о BlockDevice
+// printBlockDeviceInfo prints detailed information about the BlockDevice.
 func printBlockDeviceInfo(bd *v1alpha1.BlockDevice) {
-	GinkgoWriter.Println("\n========== Информация о BlockDevice ==========")
-	GinkgoWriter.Printf("Имя: %s\n", bd.Name)
+	GinkgoWriter.Println("\n========== BlockDevice information ==========")
+	GinkgoWriter.Printf("Name: %s\n", bd.Name)
 	GinkgoWriter.Printf("NodeName: %s\n", bd.Status.NodeName)
 	GinkgoWriter.Printf("Path: %s\n", bd.Status.Path)
 	GinkgoWriter.Printf("Size: %s\n", bd.Status.Size.String())

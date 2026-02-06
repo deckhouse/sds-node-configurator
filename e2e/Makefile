@@ -1,73 +1,73 @@
-# Makefile для E2E тестов sds-node-configurator
+# Makefile for sds-node-configurator E2E tests
 
 .PHONY: help
-help: ## Показать эту справку
+help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: deps
-deps: ## Установить зависимости
+deps: ## Install dependencies
 	go mod download
 	go mod tidy
 
 .PHONY: test
-test: ## Запустить все e2e тесты
-	go test -v -timeout 15m ./tests/
+test: ## Run all e2e tests
+	ginkgo -v --progress ./tests/
 
 .PHONY: test-verbose
-test-verbose: ## Запустить тесты с подробным выводом
-	go test -v -timeout 15m ./tests/ -ginkgo.v
+test-verbose: ## Run tests with verbose output
+	ginkgo -v --progress ./tests/
 
 .PHONY: test-focus
-test-focus: ## Запустить конкретный тест (использование: make test-focus FOCUS="имя теста")
+test-focus: ## Run a specific test (usage: make test-focus FOCUS="test name")
 	@if [ -z "$(FOCUS)" ]; then \
-		echo "Ошибка: укажите FOCUS=<имя теста>"; \
+		echo "Error: specify FOCUS=<test name>"; \
 		exit 1; \
 	fi
-	go test -v -timeout 15m ./tests/ -ginkgo.focus="$(FOCUS)"
+	ginkgo -v --progress --focus="$(FOCUS)" ./tests/
 
 .PHONY: install-ginkgo
-install-ginkgo: ## Установить Ginkgo CLI
+install-ginkgo: ## Install Ginkgo CLI
 	go install github.com/onsi/ginkgo/v2/ginkgo@latest
 
 .PHONY: test-ginkgo
-test-ginkgo: ## Запустить тесты через Ginkgo CLI
+test-ginkgo: ## Run tests via Ginkgo CLI
 	ginkgo -v --progress ./tests/
 
 .PHONY: test-watch
-test-watch: ## Запустить тесты в режиме наблюдения (автоперезапуск при изменениях)
+test-watch: ## Run tests in watch mode (auto-restart on changes)
 	ginkgo watch -v ./tests/
 
 .PHONY: clean
-clean: ## Очистить временные файлы
+clean: ## Clean temporary files
 	go clean -testcache
 
 .PHONY: check-env
-check-env: ## Проверить переменные окружения для тестов
-	@echo "Проверка переменных окружения для E2E тестов:"
+check-env: ## Check environment variables for tests
+	@echo "Checking environment variables for E2E tests:"
 	@echo "  E2E_NODE_NAME:      ${E2E_NODE_NAME}"
 	@echo "  E2E_DEVICE_PATH:    ${E2E_DEVICE_PATH}"
 	@echo "  E2E_DEVICE_SERIAL:  ${E2E_DEVICE_SERIAL}"
 	@echo ""
 	@if [ -z "${E2E_NODE_NAME}" ]; then \
-		echo "⚠️  E2E_NODE_NAME не задан, будет использовано значение по умолчанию: worker-0"; \
+		echo "⚠️  E2E_NODE_NAME not set, default will be used: worker-0"; \
 	fi
 	@if [ -z "${E2E_DEVICE_PATH}" ]; then \
-		echo "⚠️  E2E_DEVICE_PATH не задан, будет использовано значение по умолчанию: /dev/vdb"; \
+		echo "⚠️  E2E_DEVICE_PATH not set, default will be used: /dev/sdb"; \
 	fi
 	@if [ -z "${E2E_DEVICE_SERIAL}" ]; then \
-		echo "⚠️  E2E_DEVICE_SERIAL не задан (рекомендуется задать для проверки имени BlockDevice)"; \
+		echo "⚠️  E2E_DEVICE_SERIAL not set (recommended for BlockDevice name verification)"; \
 	fi
 
 .PHONY: lint
-lint: ## Проверить код линтером
+lint: ## Run linter on code
 	golangci-lint run ./...
 
-# Примеры использования с параметрами
+# Example usage with parameters
 .PHONY: example-test
-example-test: ## Пример запуска теста с параметрами
-	@echo "Запуск E2E теста с примером параметров:"
+example-test: ## Example of running test with parameters
+	@echo "Running E2E test with example parameters:"
 	E2E_NODE_NAME=worker-0 \
-	E2E_DEVICE_PATH=/dev/vdb \
+	E2E_DEVICE_PATH=/dev/sdb \
 	E2E_DEVICE_SERIAL=TEST-001 \
 	$(MAKE) test
 

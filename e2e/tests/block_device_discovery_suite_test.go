@@ -60,7 +60,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	// Проверяем, что мы можем подключиться к кластеру
+	// Verify we can connect to the cluster
 	_, err = k8sClient.RESTMapper().RESTMapping(v1alpha1.GroupVersion.WithKind("BlockDevice").GroupKind())
 	Expect(err).NotTo(HaveOccurred())
 })
@@ -70,28 +70,28 @@ var _ = AfterSuite(func() {
 	cancel()
 })
 
-// GetNodeName возвращает имя ноды для тестирования
-// Можно задать через переменную окружения E2E_NODE_NAME
+// GetNodeName returns the node name for testing.
+// Can be set via the E2E_NODE_NAME environment variable.
 func GetNodeName() string {
 	nodeName := os.Getenv("E2E_NODE_NAME")
 	if nodeName == "" {
-		nodeName = "worker-0" // значение по умолчанию
+		nodeName = "worker-0" // default value
 	}
 	return nodeName
 }
 
-// GetExpectedDeviceSerial возвращает ожидаемый серийный номер устройства
-// Должен быть задан через переменную окружения E2E_DEVICE_SERIAL
+// GetExpectedDeviceSerial returns the expected device serial number.
+// Must be set via the E2E_DEVICE_SERIAL environment variable.
 func GetExpectedDeviceSerial() string {
 	return os.Getenv("E2E_DEVICE_SERIAL")
 }
 
-// GetExpectedDevicePath возвращает путь к устройству
-// По умолчанию /dev/vdb
+// GetExpectedDevicePath returns the path to the device.
+// Defaults to /dev/sdb.
 func GetExpectedDevicePath() string {
 	path := os.Getenv("E2E_DEVICE_PATH")
 	if path == "" {
-		path = "/dev/vdb"
+		path = "/dev/sdb"
 	}
 	return path
 }
