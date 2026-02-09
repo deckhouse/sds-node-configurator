@@ -77,7 +77,7 @@ func (s *scheduler) filterAndPrioritize(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Log request details for debugging
-	servingLog.Debug(fmt.Sprintf("request: volume=%s, size=%d bytes (%.2f Gi), type=%s, lvgs count=%d", 
+	servingLog.Debug(fmt.Sprintf("request: volume=%s, size=%d bytes (%.2f Gi), type=%s, lvgs count=%d",
 		req.Volume.Name, req.Volume.Size, float64(req.Volume.Size)/(1024*1024*1024), req.Volume.Type, len(req.LVGs)))
 	for i, lvg := range req.LVGs {
 		servingLog.Debug(fmt.Sprintf("request: lvg[%d]=%s, thinPoolName=%s", i, lvg.Name, lvg.ThinPoolName))
@@ -164,17 +164,17 @@ func (s *scheduler) filterLVGs(log logger.Logger, lvgs []LVGInput, volume Volume
 		requestedSizeGi := float64(volume.Size) / (1024 * 1024 * 1024)
 		availableSizeGi := float64(spaceInfo.AvailableSpace) / (1024 * 1024 * 1024)
 		totalSizeGi := float64(spaceInfo.TotalSize) / (1024 * 1024 * 1024)
-		log.Debug(fmt.Sprintf("[filterLVGs] LVG %s: requested=%.2f Gi, available=%.2f Gi, total=%.2f Gi", 
+		log.Debug(fmt.Sprintf("[filterLVGs] LVG %s: requested=%.2f Gi, available=%.2f Gi, total=%.2f Gi",
 			lvgInput.Name, requestedSizeGi, availableSizeGi, totalSizeGi))
 
 		// Check if LVG has enough space
 		hasSpace := spaceInfo.AvailableSpace >= volume.Size
 		if hasSpace {
-			log.Debug(fmt.Sprintf("[filterLVGs] LVG %s has enough space (available: %d bytes >= requested: %d bytes), adding to filtered list", 
+			log.Debug(fmt.Sprintf("[filterLVGs] LVG %s has enough space (available: %d bytes >= requested: %d bytes), adding to filtered list",
 				lvgInput.Name, spaceInfo.AvailableSpace, volume.Size))
 			filtered = append(filtered, lvgInput)
 		} else {
-			log.Debug(fmt.Sprintf("[filterLVGs] LVG %s does not have enough space (available: %d bytes < requested: %d bytes), skipping", 
+			log.Debug(fmt.Sprintf("[filterLVGs] LVG %s does not have enough space (available: %d bytes < requested: %d bytes), skipping",
 				lvgInput.Name, spaceInfo.AvailableSpace, volume.Size))
 		}
 	}
@@ -203,8 +203,9 @@ func (s *scheduler) scoreLVGs(log logger.Logger, lvgs []LVGInput, volume VolumeI
 		}
 
 		lvgScore := LVGScore{
-			Name:  lvgInput.Name,
-			Score: score,
+			Name:         lvgInput.Name,
+			ThinPoolName: lvgInput.ThinPoolName,
+			Score:        score,
 		}
 
 		scored = append(scored, lvgScore)

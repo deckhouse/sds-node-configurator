@@ -87,7 +87,7 @@ type FilterPrioritizeResponse struct {
 
 // LVGScore represents a scored LVG in the filter-prioritize response
 type LVGScore struct {
-	Name  string `json:"name"`
-	Score int    `json:"score"`
-	// thinPoolName is not needed in response, as client knows it from request
+	Name         string `json:"name"`
+	ThinPoolName string `json:"thinPoolName,omitempty"`
+	Score        int    `json:"score"`
 }
