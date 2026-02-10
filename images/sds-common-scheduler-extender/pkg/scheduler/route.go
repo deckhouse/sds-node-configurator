@@ -37,14 +37,15 @@ const (
 )
 
 type scheduler struct {
-	defaultDivisor         float64
-	log                    logger.Logger
-	client                 client.Client
-	ctx                    context.Context
-	cache                  *cache.Cache
-	targetProvisioners     []string
-	filterRequestCount     int
-	prioritizeRequestCount int
+	client                     client.Client
+	ctx                        context.Context
+	log                        logger.Logger
+	cache                      *cache.Cache
+	defaultDivisor             float64
+	targetProvisioners         []string
+	filterRequestCount         int
+	prioritizeRequestCount     int
+	filterAndScoreRequestCount int
 }
 
 func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +64,7 @@ func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.prioritize(w, r)
 		requestLog.Debug("[ServeHTTP] prioritize route ends handling the request")
 	case "/v1/lvg/filter-and-score":
+		s.filterAndScoreRequestCount++
 		requestLog.Debug("[ServeHTTP] filter-and-score route starts handling the request")
 		s.filterAndScore(w, r)
 		requestLog.Debug("[ServeHTTP] filter-and-score route ends handling the request")
@@ -191,7 +193,7 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, r *http.Request) {
 	activeCount := len(reservations) - expiredCount
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Filter request count: %d, Prioritize request count: %d\n", s.filterRequestCount, s.prioritizeRequestCount))
+	sb.WriteString(fmt.Sprintf("Filter request count: %d, Prioritize request count: %d, Filter-and-score request count: %d\n", s.filterRequestCount, s.prioritizeRequestCount, s.filterAndScoreRequestCount))
 	sb.WriteString(fmt.Sprintf("Pools: %d, Reservations: %d (active: %d, expired: %d)\n", len(pools), len(reservations), activeCount, expiredCount))
 	sb.WriteString(fmt.Sprintf("Total reserved across all pools: %s\n", resource.NewQuantity(totalReserved, resource.BinarySI).String()))
 
