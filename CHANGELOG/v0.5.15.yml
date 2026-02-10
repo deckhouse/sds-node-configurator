@@ -1,0 +1,4 @@
+Changes:
+  - Added metrics for LVM volumes
+  - Module-sdk update for CVE fix
+  - Refactoring manifests
