@@ -20,20 +20,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 )
 
-func (s *scheduler) bindVolume(w http.ResponseWriter, r *http.Request) {
-	servingLog := logger.WithTraceIDLogger(r.Context(), s.log).WithName("bind-volume")
+func (s *scheduler) narrowReservation(w http.ResponseWriter, r *http.Request) {
+	servingLog := logger.WithTraceIDLogger(r.Context(), s.log).WithName("narrow-reservation")
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var req BindVolumeRequest
+	var req NarrowReservationRequest
 	reader := http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
 	err := json.NewDecoder(reader).Decode(&req)
 	if err != nil {
@@ -43,30 +44,36 @@ func (s *scheduler) bindVolume(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validation
-	if req.Volume.Name == "" {
-		http.Error(w, "volume name is required", http.StatusBadRequest)
+	if req.ReservationID == "" {
+		http.Error(w, "reservationID is required", http.StatusBadRequest)
+		return
+	}
+	if req.LVG.Name == "" {
+		http.Error(w, "lvg name is required", http.StatusBadRequest)
 		return
 	}
 
-	// Convert to cache types
-	keepLVGs := make([]cache.LVGRef, len(req.SelectedLVGs))
-	for i, lvg := range req.SelectedLVGs {
-		keepLVGs[i] = cache.LVGRef{
-			Name:         lvg.Name,
-			ThinPoolName: lvg.ThinPoolName,
-		}
+	ttl, err := time.ParseDuration(req.ReservationTTL)
+	if err != nil {
+		servingLog.Error(err, "unable to parse reservation TTL")
+		http.Error(w, "invalid reservationTTL", http.StatusBadRequest)
+		return
 	}
 
-	servingLog.Debug(fmt.Sprintf("request: volume=%s, selectedLVGs count=%d", req.Volume.Name, len(req.SelectedLVGs)))
-	for i, lvg := range req.SelectedLVGs {
-		servingLog.Debug(fmt.Sprintf("request: selectedLVG[%d]=%s, thinPoolName=%s", i, lvg.Name, lvg.ThinPoolName))
+	keepPool := cache.StoragePoolKey{
+		LVGName:      req.LVG.Name,
+		ThinPoolName: req.LVG.ThinPoolName,
 	}
 
-	// Remove reservations for unselected LVGs (type inferred from keep; when empty, removes from both)
-	s.cache.RemoveVolumeReservationsExcept(req.Volume.Name, keepLVGs)
+	servingLog.Debug(fmt.Sprintf("request: reservationID=%s, keepPool=%s, ttl=%s", req.ReservationID, keepPool.String(), ttl))
+
+	ok := s.cache.NarrowReservation(req.ReservationID, []cache.StoragePoolKey{keepPool}, ttl)
+	if !ok {
+		servingLog.Debug(fmt.Sprintf("reservation %s not found", req.ReservationID))
+	}
 
 	// Build response
-	response := BindVolumeResponse{}
+	response := NarrowReservationResponse{}
 	responseJSON, err := json.Marshal(response)
 	if err != nil {
 		servingLog.Error(err, "unable to marshal response")
@@ -76,9 +83,7 @@ func (s *scheduler) bindVolume(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug(fmt.Sprintf("response: %s", string(responseJSON)))
 
 	w.Header().Set("content-type", "application/json")
-	_, err = w.Write(responseJSON)
-	if err != nil {
+	if _, err = w.Write(responseJSON); err != nil {
 		servingLog.Error(err, "unable to write response")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
 	}
 }

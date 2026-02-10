@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -61,14 +62,14 @@ func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		requestLog.Debug("[ServeHTTP] prioritize route starts handling the request")
 		s.prioritize(w, r)
 		requestLog.Debug("[ServeHTTP] prioritize route ends handling the request")
-	case "/api/v1/volumes/filter-prioritize":
-		requestLog.Debug("[ServeHTTP] filter-prioritize route starts handling the request")
-		s.filterAndPrioritize(w, r)
-		requestLog.Debug("[ServeHTTP] filter-prioritize route ends handling the request")
-	case "/api/v1/volumes/bind":
-		requestLog.Debug("[ServeHTTP] bind route starts handling the request")
-		s.bindVolume(w, r)
-		requestLog.Debug("[ServeHTTP] bind route ends handling the request")
+	case "/v1/lvg/filter-and-score":
+		requestLog.Debug("[ServeHTTP] filter-and-score route starts handling the request")
+		s.filterAndScore(w, r)
+		requestLog.Debug("[ServeHTTP] filter-and-score route ends handling the request")
+	case "/v1/lvg/narrow-reservation":
+		requestLog.Debug("[ServeHTTP] narrow-reservation route starts handling the request")
+		s.narrowReservation(w, r)
+		requestLog.Debug("[ServeHTTP] narrow-reservation route ends handling the request")
 	case "/status":
 		requestLog.Debug("[ServeHTTP] status route starts handling the request")
 		status(w, r)
@@ -87,18 +88,14 @@ func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // getTargetProvisioners reads target provisioners from environment variable.
-// If TARGET_PROVISIONERS is not set, returns default provisioners.
-// The environment variable can contain comma-separated list of provisioners.
 func getTargetProvisioners(log logger.Logger) []string {
 	envValue := os.Getenv(envTargetProvisioners)
 	if envValue == "" {
-		// Return default provisioners if environment variable is not set
 		defaultProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
 		log.Info(fmt.Sprintf("TARGET_PROVISIONERS environment variable is not set, using default provisioners: %v", defaultProvisioners))
 		return defaultProvisioners
 	}
 
-	// Parse comma-separated provisioners
 	provisioners := strings.Split(envValue, ",")
 	result := make([]string, 0, len(provisioners))
 	for _, p := range provisioners {
@@ -109,7 +106,6 @@ func getTargetProvisioners(log logger.Logger) []string {
 	}
 
 	if len(result) == 0 {
-		// Fallback to default if parsing resulted in empty list
 		defaultProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
 		log.Warning(fmt.Sprintf("TARGET_PROVISIONERS environment variable is set but empty after parsing, using default provisioners: %v", defaultProvisioners))
 		return defaultProvisioners
@@ -144,69 +140,28 @@ func (s *scheduler) getCache(w http.ResponseWriter, r *http.Request) {
 	requestLog := logger.WithTraceIDLogger(r.Context(), s.log)
 	w.WriteHeader(http.StatusOK)
 
-	s.cache.PrintTheCacheLog()
-
-	lvgs := s.cache.GetAllLVG()
-	for _, lvg := range lvgs {
-		reserved, err := s.cache.GetLVGThickReservedSpace(lvg.Name)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_, err = w.Write([]byte("unable to write the cache"))
-			if err != nil {
-				requestLog.Error(err, "error write response")
-			}
+	// Print pools
+	pools := s.cache.GetAllPools()
+	for key, reservedSize := range pools {
+		line := fmt.Sprintf("Pool: %s, reserved: %s\n", key.String(), resource.NewQuantity(reservedSize, resource.BinarySI).String())
+		if _, err := w.Write([]byte(line)); err != nil {
+			requestLog.Error(err, "error writing pool info")
+			return
 		}
+	}
 
-		_, err = w.Write([]byte(fmt.Sprintf("LVMVolumeGroup: %s Thick Reserved: %s\n", lvg.Name, resource.NewQuantity(reserved, resource.BinarySI).String())))
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_, err = w.Write([]byte("unable to write the cache"))
-			if err != nil {
-				requestLog.Error(err, "error write response")
-			}
+	// Print reservations
+	reservations := s.cache.GetAllReservations()
+	for id, info := range reservations {
+		line := fmt.Sprintf("Reservation: %s, size: %s, expires: %s, pools: [", id, resource.NewQuantity(info.Size, resource.BinarySI).String(), info.ExpiresAt.Format("15:04:05"))
+		poolStrs := make([]string, 0, len(info.Pools))
+		for _, p := range info.Pools {
+			poolStrs = append(poolStrs, p.String())
 		}
-
-		thickPvcs, err := s.cache.GetAllThickPVCLVG(lvg.Name)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_, err = w.Write([]byte("unable to write the cache"))
-			if err != nil {
-				requestLog.Error(err, "error write response")
-			}
-		}
-		for _, pvc := range thickPvcs {
-			_, err = w.Write([]byte(fmt.Sprintf("\t\tThick PVC: %s, reserved: %s, selected node: %s\n", pvc.Name, pvc.Spec.Resources.Requests.Storage().String(), pvc.Annotations[cache.SelectedNodeAnnotation])))
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				requestLog.Error(err, "error write response")
-			}
-		}
-
-		for _, tp := range lvg.Status.ThinPools {
-			thinReserved, err := s.cache.GetLVGThinReservedSpace(lvg.Name, tp.Name)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				requestLog.Error(err, "error write response")
-			}
-			_, err = w.Write([]byte(fmt.Sprintf("\tThinPool: %s, reserved: %s\n", tp.Name, resource.NewQuantity(thinReserved, resource.BinarySI).String())))
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				requestLog.Error(err, "error write response")
-			}
-
-			thinPvcs, err := s.cache.GetAllPVCFromLVGThinPool(lvg.Name, tp.Name)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				requestLog.Error(err, "error write response")
-			}
-
-			for _, pvc := range thinPvcs {
-				_, err = w.Write([]byte(fmt.Sprintf("\t\tThin PVC: %s, reserved: %s, selected node:%s\n", pvc.Name, pvc.Spec.Resources.Requests.Storage().String(), pvc.Annotations[cache.SelectedNodeAnnotation])))
-				if err != nil {
-					w.WriteHeader(http.StatusInternalServerError)
-					requestLog.Error(err, "error write response")
-				}
-			}
+		line += strings.Join(poolStrs, ", ") + "]\n"
+		if _, err := w.Write([]byte(line)); err != nil {
+			requestLog.Error(err, "error writing reservation info")
+			return
 		}
 	}
 }
@@ -215,44 +170,25 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, r *http.Request) {
 	requestLog := logger.WithTraceIDLogger(r.Context(), s.log)
 	w.WriteHeader(http.StatusOK)
 
-	pvcTotalCount := 0
+	pools := s.cache.GetAllPools()
+	reservations := s.cache.GetAllReservations()
+
 	var totalReserved int64
-	var sb strings.Builder
-	lvgs := s.cache.GetAllLVG()
-	for _, lvg := range lvgs {
-		pvcs, err := s.cache.GetAllPVCForLVG(lvg.Name)
-		if err != nil {
-			requestLog.Error(err, "something bad")
-		}
-
-		pvcTotalCount += len(pvcs)
-
-		// sum thick reserved
-		thickReserved, err := s.cache.GetLVGThickReservedSpace(lvg.Name)
-		if err != nil {
-			requestLog.Error(err, "unable to get thick reserved space")
-		}
-		totalReserved += thickReserved
-		// sum thin reserved across all thin pools
-		for _, tp := range lvg.Status.ThinPools {
-			thinReserved, err := s.cache.GetLVGThinReservedSpace(lvg.Name, tp.Name)
-			if err != nil {
-				requestLog.Error(err, "unable to get thin reserved space")
-				continue
-			}
-			totalReserved += thinReserved
-		}
+	for _, reservedSize := range pools {
+		totalReserved += reservedSize
 	}
 
+	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Filter request count: %d, Prioritize request count: %d\n", s.filterRequestCount, s.prioritizeRequestCount))
-	sb.WriteString(fmt.Sprintf("Total reserved (thick+thin) across all PVCs (%d items): %s\n", pvcTotalCount, resource.NewQuantity(totalReserved, resource.BinarySI).String()))
+	sb.WriteString(fmt.Sprintf("Pools: %d, Reservations: %d\n", len(pools), len(reservations)))
+	sb.WriteString(fmt.Sprintf("Total reserved across all pools: %s\n", resource.NewQuantity(totalReserved, resource.BinarySI).String()))
 
-	_, err := w.Write([]byte(sb.String()))
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, err = w.Write([]byte("unable to write the cache"))
-		if err != nil {
-			requestLog.Error(err, "error write response for cache stat")
-		}
+	result, err := json.Marshal(pools)
+	if err == nil {
+		sb.WriteString(fmt.Sprintf("Pools detail: %s\n", string(result)))
+	}
+
+	if _, err := w.Write([]byte(sb.String())); err != nil {
+		requestLog.Error(err, "error write response for cache stat")
 	}
 }

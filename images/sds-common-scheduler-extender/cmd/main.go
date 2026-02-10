@@ -33,6 +33,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/yaml"
@@ -47,22 +48,20 @@ import (
 )
 
 const (
-	defaultDivisor    = 1
-	defaultListenAddr = ":8000"
-	defaultCacheSize  = 10
-	defaultcertFile   = "/etc/sds-common-scheduler-extender/certs/tls.crt"
-	defaultkeyFile    = "/etc/sds-common-scheduler-extender/certs/tls.key"
+	defaultDivisor          = 1
+	defaultListenAddr       = ":8000"
+	defaultcertFile         = "/etc/sds-common-scheduler-extender/certs/tls.crt"
+	defaultkeyFile          = "/etc/sds-common-scheduler-extender/certs/tls.key"
+	defaultCleanupInterval  = 30 * time.Second
 )
 
 type Config struct {
 	ListenAddr             string  `json:"listen"`
 	DefaultDivisor         float64 `json:"default-divisor"`
 	LogLevel               string  `json:"log-level"`
-	CacheSize              int     `json:"cache-size"`
 	HealthProbeBindAddress string  `json:"health-probe-bind-address"`
 	CertFile               string  `json:"cert-file"`
 	KeyFile                string  `json:"key-file"`
-	PVCExpiredDurationSec  int     `json:"pvc-expired-duration-sec"`
 }
 
 var cfgFilePath string
@@ -76,13 +75,11 @@ var resourcesSchemeFuncs = []func(*runtime.Scheme) error{
 }
 
 var config = &Config{
-	ListenAddr:            defaultListenAddr,
-	DefaultDivisor:        defaultDivisor,
-	LogLevel:              "2",
-	CacheSize:             defaultCacheSize,
-	CertFile:              defaultcertFile,
-	KeyFile:               defaultkeyFile,
-	PVCExpiredDurationSec: cache.DefaultPVCExpiredDurationSec,
+	ListenAddr:     defaultListenAddr,
+	DefaultDivisor: defaultDivisor,
+	LogLevel:       "2",
+	CertFile:       defaultcertFile,
+	KeyFile:        defaultkeyFile,
 }
 
 var rootCmd = &cobra.Command{
@@ -170,7 +167,26 @@ func subMain(ctx context.Context) error {
 		return err
 	}
 
-	schedulerCache := cache.NewCache(log, config.PVCExpiredDurationSec)
+	// Register field indexer for LVMVolumeGroup -> node name mapping.
+	// This enables efficient node-to-LVG lookups via client.MatchingFields.
+	// Also implicitly starts the LVG informer when the manager starts.
+	err = mgr.GetFieldIndexer().IndexField(ctx, &snc.LVMVolumeGroup{}, scheduler.IndexFieldLVGNodeName,
+		func(obj client.Object) []string {
+			lvg := obj.(*snc.LVMVolumeGroup)
+			names := make([]string, 0, len(lvg.Status.Nodes))
+			for _, node := range lvg.Status.Nodes {
+				names = append(names, node.Name)
+			}
+			return names
+		},
+	)
+	if err != nil {
+		mainLog.Error(err, "unable to register field indexer for LVMVolumeGroup")
+		return err
+	}
+	mainLog.Info("successfully registered LVMVolumeGroup field indexer on status.nodes.name")
+
+	schedulerCache := cache.NewCache(log, defaultCleanupInterval)
 	mainLog.Info("scheduler cache was initialized")
 
 	schedulerHandler, err := scheduler.NewHandler(ctx, mgr.GetClient(), log, schedulerCache, config.DefaultDivisor)
@@ -180,17 +196,17 @@ func subMain(ctx context.Context) error {
 	}
 	mainLog.Info("scheduler handler initialized")
 
-	if _, err = controller.RunLVGWatcherCacheController(mgr, log, schedulerCache); err != nil {
-		mainLog.Error(err, fmt.Sprintf("unable to run %s controller", controller.LVGWatcherCacheCtrlName))
-		return err
-	}
-	mainLog.Info(fmt.Sprintf("successfully ran %s controller", controller.LVGWatcherCacheCtrlName))
-
 	if err = controller.RunPVCWatcherCacheController(mgr, log, schedulerCache); err != nil {
 		mainLog.Error(err, fmt.Sprintf("unable to run %s controller", controller.PVCWatcherCacheCtrlName))
 		return err
 	}
 	mainLog.Info(fmt.Sprintf("successfully ran %s controller", controller.PVCWatcherCacheCtrlName))
+
+	if err = controller.RunLLVWatcherCacheController(mgr, log, schedulerCache); err != nil {
+		mainLog.Error(err, fmt.Sprintf("unable to run %s controller", controller.LLVWatcherCacheCtrlName))
+		return err
+	}
+	mainLog.Info(fmt.Sprintf("successfully ran %s controller", controller.LLVWatcherCacheCtrlName))
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		mainLog.Error(err, "unable to mgr.AddHealthzCheck")
