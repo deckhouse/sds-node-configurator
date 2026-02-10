@@ -312,3 +312,148 @@ func TestCache_Race_AddDeleteLVG_GetAll(t *testing.T) {
 	close(start)
 	wg.Wait()
 }
+
+func TestCache_RemoveVolumeReservationsExcept_Thick(t *testing.T) {
+	log := logger.Logger{}
+	ch := NewCache(log, DefaultPVCExpiredDurationSec)
+
+	// Seed three LVGs with thick volume reservations for the same volume
+	ch.mtx.Lock()
+	for _, name := range []string{"lvg-a", "lvg-b", "lvg-c"} {
+		ch.lvgByName[name] = &lvgEntry{
+			lvg:           &snc.LVMVolumeGroup{ObjectMeta: metav1.ObjectMeta{Name: name}},
+			thickByPVC:    make(map[string]*pvcEntry),
+			thickByVolume: map[string]*volumeEntry{"vol-1": {size: 1024, createdAt: time.Now()}},
+			thinByPool:    make(map[string]*thinPoolEntry),
+		}
+	}
+	ch.mtx.Unlock()
+
+	// Bind vol-1 to lvg-a only
+	ch.RemoveVolumeReservationsExcept("vol-1", "Thick", []LVGRef{{Name: "lvg-a"}})
+
+	ch.mtx.RLock()
+	defer ch.mtx.RUnlock()
+
+	// lvg-a should keep the reservation
+	assert.Contains(t, ch.lvgByName["lvg-a"].thickByVolume, "vol-1")
+	// lvg-b and lvg-c should have the reservation removed
+	assert.NotContains(t, ch.lvgByName["lvg-b"].thickByVolume, "vol-1")
+	assert.NotContains(t, ch.lvgByName["lvg-c"].thickByVolume, "vol-1")
+}
+
+func TestCache_RemoveVolumeReservationsExcept_Thin(t *testing.T) {
+	log := logger.Logger{}
+	ch := NewCache(log, DefaultPVCExpiredDurationSec)
+
+	// Seed LVGs with thin volume reservations
+	ch.mtx.Lock()
+	ch.lvgByName["lvg-a"] = &lvgEntry{
+		lvg:           &snc.LVMVolumeGroup{ObjectMeta: metav1.ObjectMeta{Name: "lvg-a"}},
+		thickByPVC:    make(map[string]*pvcEntry),
+		thickByVolume: make(map[string]*volumeEntry),
+		thinByPool: map[string]*thinPoolEntry{
+			"tp-1": {pvcs: make(map[string]*pvcEntry), volumes: map[string]*volumeEntry{"vol-1": {size: 1024, createdAt: time.Now()}}},
+			"tp-2": {pvcs: make(map[string]*pvcEntry), volumes: map[string]*volumeEntry{"vol-1": {size: 1024, createdAt: time.Now()}}},
+		},
+	}
+	ch.lvgByName["lvg-b"] = &lvgEntry{
+		lvg:           &snc.LVMVolumeGroup{ObjectMeta: metav1.ObjectMeta{Name: "lvg-b"}},
+		thickByPVC:    make(map[string]*pvcEntry),
+		thickByVolume: make(map[string]*volumeEntry),
+		thinByPool: map[string]*thinPoolEntry{
+			"tp-1": {pvcs: make(map[string]*pvcEntry), volumes: map[string]*volumeEntry{"vol-1": {size: 1024, createdAt: time.Now()}}},
+		},
+	}
+	ch.mtx.Unlock()
+
+	// Bind vol-1 to lvg-a/tp-1 only
+	ch.RemoveVolumeReservationsExcept("vol-1", "Thin", []LVGRef{{Name: "lvg-a", ThinPoolName: "tp-1"}})
+
+	ch.mtx.RLock()
+	defer ch.mtx.RUnlock()
+
+	// lvg-a/tp-1 should keep the reservation
+	assert.Contains(t, ch.lvgByName["lvg-a"].thinByPool["tp-1"].volumes, "vol-1")
+	// lvg-a/tp-2 should have the reservation removed
+	assert.NotContains(t, ch.lvgByName["lvg-a"].thinByPool["tp-2"].volumes, "vol-1")
+	// lvg-b/tp-1 should have the reservation removed
+	assert.NotContains(t, ch.lvgByName["lvg-b"].thinByPool["tp-1"].volumes, "vol-1")
+}
+
+func TestCache_RemoveVolumeReservationsExcept_MultipleKeep(t *testing.T) {
+	log := logger.Logger{}
+	ch := NewCache(log, DefaultPVCExpiredDurationSec)
+
+	// Seed three LVGs with thin volume reservations
+	ch.mtx.Lock()
+	for _, name := range []string{"lvg-a", "lvg-b", "lvg-c"} {
+		ch.lvgByName[name] = &lvgEntry{
+			lvg:           &snc.LVMVolumeGroup{ObjectMeta: metav1.ObjectMeta{Name: name}},
+			thickByPVC:    make(map[string]*pvcEntry),
+			thickByVolume: make(map[string]*volumeEntry),
+			thinByPool: map[string]*thinPoolEntry{
+				"tp-1": {pvcs: make(map[string]*pvcEntry), volumes: map[string]*volumeEntry{"vol-1": {size: 1024, createdAt: time.Now()}}},
+			},
+		}
+	}
+	ch.mtx.Unlock()
+
+	// Bind vol-1 to lvg-a/tp-1 and lvg-b/tp-1 (two replicas)
+	ch.RemoveVolumeReservationsExcept("vol-1", "Thin", []LVGRef{
+		{Name: "lvg-a", ThinPoolName: "tp-1"},
+		{Name: "lvg-b", ThinPoolName: "tp-1"},
+	})
+
+	ch.mtx.RLock()
+	defer ch.mtx.RUnlock()
+
+	assert.Contains(t, ch.lvgByName["lvg-a"].thinByPool["tp-1"].volumes, "vol-1")
+	assert.Contains(t, ch.lvgByName["lvg-b"].thinByPool["tp-1"].volumes, "vol-1")
+	assert.NotContains(t, ch.lvgByName["lvg-c"].thinByPool["tp-1"].volumes, "vol-1")
+}
+
+func TestCache_RemoveVolumeReservationsExcept_NoReservations(t *testing.T) {
+	log := logger.Logger{}
+	ch := NewCache(log, DefaultPVCExpiredDurationSec)
+
+	// Seed LVG with no volume reservations
+	ch.mtx.Lock()
+	ch.lvgByName["lvg-a"] = &lvgEntry{
+		lvg:           &snc.LVMVolumeGroup{ObjectMeta: metav1.ObjectMeta{Name: "lvg-a"}},
+		thickByPVC:    make(map[string]*pvcEntry),
+		thickByVolume: make(map[string]*volumeEntry),
+		thinByPool:    make(map[string]*thinPoolEntry),
+	}
+	ch.mtx.Unlock()
+
+	// Should not panic on empty cache
+	ch.RemoveVolumeReservationsExcept("vol-1", "Thick", []LVGRef{{Name: "lvg-a"}})
+	ch.RemoveVolumeReservationsExcept("vol-1", "Thin", nil)
+}
+
+func TestCache_RemoveVolumeReservationsExcept_EmptyKeep(t *testing.T) {
+	log := logger.Logger{}
+	ch := NewCache(log, DefaultPVCExpiredDurationSec)
+
+	// Seed two LVGs with thick volume reservations
+	ch.mtx.Lock()
+	for _, name := range []string{"lvg-a", "lvg-b"} {
+		ch.lvgByName[name] = &lvgEntry{
+			lvg:           &snc.LVMVolumeGroup{ObjectMeta: metav1.ObjectMeta{Name: name}},
+			thickByPVC:    make(map[string]*pvcEntry),
+			thickByVolume: map[string]*volumeEntry{"vol-1": {size: 1024, createdAt: time.Now()}},
+			thinByPool:    make(map[string]*thinPoolEntry),
+		}
+	}
+	ch.mtx.Unlock()
+
+	// Empty keep = remove from all LVGs
+	ch.RemoveVolumeReservationsExcept("vol-1", "Thick", nil)
+
+	ch.mtx.RLock()
+	defer ch.mtx.RUnlock()
+
+	assert.NotContains(t, ch.lvgByName["lvg-a"].thickByVolume, "vol-1")
+	assert.NotContains(t, ch.lvgByName["lvg-b"].thickByVolume, "vol-1")
+}

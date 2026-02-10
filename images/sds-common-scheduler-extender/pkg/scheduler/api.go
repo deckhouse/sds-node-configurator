@@ -91,3 +91,16 @@ type LVGScore struct {
 	ThinPoolName string `json:"thinPoolName,omitempty"`
 	Score        int    `json:"score"`
 }
+
+// BindVolumeRequest is the request structure for the bind endpoint.
+// The client sends the volume info and the list of LVGs that were actually selected,
+// so the extender can release reservations for all other (unselected) LVGs.
+type BindVolumeRequest struct {
+	Volume       VolumeInput `json:"volume"`
+	SelectedLVGs []LVGInput  `json:"selectedLVGs"`
+}
+
+// BindVolumeResponse is the response structure for the bind endpoint.
+type BindVolumeResponse struct {
+	Error string `json:"error,omitempty"`
+}

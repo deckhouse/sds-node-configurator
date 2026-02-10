@@ -828,6 +828,58 @@ func (c *Cache) AddThinVolume(lvgName string, thinPoolName string, volumeName st
 	return nil
 }
 
+// LVGRef identifies an LVG (and optionally a thin pool) for volume binding.
+type LVGRef struct {
+	Name         string
+	ThinPoolName string
+}
+
+// RemoveVolumeReservationsExcept removes volume reservations from all LVGs/thinpools
+// except the ones listed in keep. This is used by the bind endpoint to clean up
+// reservations for LVGs that were not selected after filter-prioritize.
+func (c *Cache) RemoveVolumeReservationsExcept(volumeName, volumeType string, keep []LVGRef) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+
+	switch volumeType {
+	case consts.Thick:
+		keepSet := make(map[string]struct{}, len(keep))
+		for _, ref := range keep {
+			keepSet[ref.Name] = struct{}{}
+		}
+		for lvgName, entry := range c.lvgByName {
+			if _, kept := keepSet[lvgName]; kept {
+				continue
+			}
+			if _, exists := entry.thickByVolume[volumeName]; exists {
+				delete(entry.thickByVolume, volumeName)
+				c.log.Debug(fmt.Sprintf("[RemoveVolumeReservationsExcept] removed thick volume %s from LVG %s (not selected)", volumeName, lvgName))
+			}
+		}
+
+	case consts.Thin:
+		type thinKey struct {
+			lvgName      string
+			thinPoolName string
+		}
+		keepSet := make(map[thinKey]struct{}, len(keep))
+		for _, ref := range keep {
+			keepSet[thinKey{lvgName: ref.Name, thinPoolName: ref.ThinPoolName}] = struct{}{}
+		}
+		for lvgName, entry := range c.lvgByName {
+			for thinPoolName, tp := range entry.thinByPool {
+				if _, kept := keepSet[thinKey{lvgName: lvgName, thinPoolName: thinPoolName}]; kept {
+					continue
+				}
+				if _, exists := tp.volumes[volumeName]; exists {
+					delete(tp.volumes, volumeName)
+					c.log.Debug(fmt.Sprintf("[RemoveVolumeReservationsExcept] removed thin volume %s from LVG %s Thin Pool %s (not selected)", volumeName, lvgName, thinPoolName))
+				}
+			}
+		}
+	}
+}
+
 // RemoveThickVolume removes volume reservation for a thick volume
 func (c *Cache) RemoveThickVolume(lvgName string, volumeName string) {
 	c.mtx.Lock()
