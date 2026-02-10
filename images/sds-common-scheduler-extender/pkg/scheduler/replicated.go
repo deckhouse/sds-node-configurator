@@ -103,6 +103,9 @@ func findLVGForNodeInRSP(
 		if err := cl.Get(ctx, client.ObjectKey{Name: lvgRef.Name}, lvg); err != nil {
 			continue
 		}
+		if ok, _ := isLVGSchedulable(lvg); !ok {
+			continue
+		}
 		if lvgHasNode(lvg, nodeName) {
 			return lvg, lvgRef, true
 		}

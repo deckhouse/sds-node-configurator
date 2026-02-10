@@ -65,6 +65,19 @@ type LVGSpaceInfo struct {
 	TotalSize      int64 // total LVG size
 }
 
+// --- LVG readiness check ---
+
+// isLVGSchedulable checks whether an LVG is eligible for scheduling.
+// Returns (true, "") if schedulable, or (false, reason) if not.
+// Extend this function to add new readiness conditions (e.g. Unschedulable field).
+func isLVGSchedulable(lvg *snc.LVMVolumeGroup) (bool, string) {
+	if lvg.Status.Phase != snc.PhaseReady {
+		return false, fmt.Sprintf("LVG %s is not ready (phase: %s)", lvg.Name, lvg.Status.Phase)
+	}
+	// Future: check lvg.Status.Unschedulable, etc.
+	return true, ""
+}
+
 // --- Available space helpers (combine informer cache + reservation cache) ---
 
 // getAvailableSpace computes available space for a storage pool by combining
@@ -78,6 +91,10 @@ func getAvailableSpace(
 	lvg := &snc.LVMVolumeGroup{}
 	if err := cl.Get(ctx, client.ObjectKey{Name: key.LVGName}, lvg); err != nil {
 		return LVGSpaceInfo{}, fmt.Errorf("unable to get LVG %s: %w", key.LVGName, err)
+	}
+
+	if ok, reason := isLVGSchedulable(lvg); !ok {
+		return LVGSpaceInfo{}, fmt.Errorf("%s", reason)
 	}
 
 	var totalFree int64
@@ -482,10 +499,13 @@ func findMatchedThinPool(thinPools []snc.LVMVolumeGroupThinPoolStatus, name stri
 }
 
 // findMatchedSCLVG finds a common LVG between node LVGs and SC LVGs.
+// Only considers LVGs that pass the isLVGSchedulable check.
 func findMatchedSCLVG(nodeLVGs []snc.LVMVolumeGroup, scLVGs SCLVMVolumeGroups) *SCLVMVolumeGroup {
 	nodeLVGNames := make(map[string]struct{}, len(nodeLVGs))
 	for _, lvg := range nodeLVGs {
-		nodeLVGNames[lvg.Name] = struct{}{}
+		if ok, _ := isLVGSchedulable(&lvg); ok {
+			nodeLVGNames[lvg.Name] = struct{}{}
+		}
 	}
 
 	for _, lvg := range scLVGs {
