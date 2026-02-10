@@ -72,11 +72,11 @@ type LVGInput struct {
 	ThinPoolName string `json:"thinPoolName,omitempty"` // required for thin volumes, can be empty for thick
 }
 
-// VolumeInput represents volume information in the filter-prioritize request
+// VolumeInput represents volume information in the filter-prioritize request.
+// Type is inferred from thinPoolName in LVGs: if any LVG has thinPoolName, thin; else thick.
 type VolumeInput struct {
 	Name string `json:"name"` // volume name (used for reservation)
 	Size int64  `json:"size"` // size in bytes
-	Type string `json:"type"` // "thin" or "thick"
 }
 
 // FilterPrioritizeResponse is the response structure for the filter-prioritize endpoint

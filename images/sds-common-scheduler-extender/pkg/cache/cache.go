@@ -835,29 +835,39 @@ type LVGRef struct {
 }
 
 // RemoveVolumeReservationsExcept removes volume reservations from all LVGs/thinpools
-// except the ones listed in keep. This is used by the bind endpoint to clean up
-// reservations for LVGs that were not selected after filter-prioritize.
-func (c *Cache) RemoveVolumeReservationsExcept(volumeName, volumeType string, keep []LVGRef) {
+// except the ones listed in keep. Type is inferred from keep: any ref with ThinPoolName
+// means thin; else thick. When keep is empty, removes from both thick and thin.
+func (c *Cache) RemoveVolumeReservationsExcept(volumeName string, keep []LVGRef) {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
-	switch volumeType {
-	case consts.Thick:
-		keepSet := make(map[string]struct{}, len(keep))
-		for _, ref := range keep {
-			keepSet[ref.Name] = struct{}{}
-		}
+	if len(keep) == 0 {
+		// Cannot infer type; remove from both thick and thin
 		for lvgName, entry := range c.lvgByName {
-			if _, kept := keepSet[lvgName]; kept {
-				continue
-			}
 			if _, exists := entry.thickByVolume[volumeName]; exists {
 				delete(entry.thickByVolume, volumeName)
-				c.log.Debug(fmt.Sprintf("[RemoveVolumeReservationsExcept] removed thick volume %s from LVG %s (not selected)", volumeName, lvgName))
+				c.log.Debug(fmt.Sprintf("[RemoveVolumeReservationsExcept] removed thick volume %s from LVG %s (empty keep)", volumeName, lvgName))
+			}
+			for thinPoolName, tp := range entry.thinByPool {
+				if _, exists := tp.volumes[volumeName]; exists {
+					delete(tp.volumes, volumeName)
+					c.log.Debug(fmt.Sprintf("[RemoveVolumeReservationsExcept] removed thin volume %s from LVG %s Thin Pool %s (empty keep)", volumeName, lvgName, thinPoolName))
+				}
 			}
 		}
+		return
+	}
 
-	case consts.Thin:
+	// Infer type from keep: any ref with ThinPoolName → thin
+	isThin := false
+	for _, ref := range keep {
+		if ref.ThinPoolName != "" {
+			isThin = true
+			break
+		}
+	}
+
+	if isThin {
 		type thinKey struct {
 			lvgName      string
 			thinPoolName string
@@ -875,6 +885,20 @@ func (c *Cache) RemoveVolumeReservationsExcept(volumeName, volumeType string, ke
 					delete(tp.volumes, volumeName)
 					c.log.Debug(fmt.Sprintf("[RemoveVolumeReservationsExcept] removed thin volume %s from LVG %s Thin Pool %s (not selected)", volumeName, lvgName, thinPoolName))
 				}
+			}
+		}
+	} else {
+		keepSet := make(map[string]struct{}, len(keep))
+		for _, ref := range keep {
+			keepSet[ref.Name] = struct{}{}
+		}
+		for lvgName, entry := range c.lvgByName {
+			if _, kept := keepSet[lvgName]; kept {
+				continue
+			}
+			if _, exists := entry.thickByVolume[volumeName]; exists {
+				delete(entry.thickByVolume, volumeName)
+				c.log.Debug(fmt.Sprintf("[RemoveVolumeReservationsExcept] removed thick volume %s from LVG %s (not selected)", volumeName, lvgName))
 			}
 		}
 	}

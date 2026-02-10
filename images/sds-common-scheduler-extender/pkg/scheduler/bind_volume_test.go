@@ -49,7 +49,7 @@ func TestBindVolume(t *testing.T) {
 		s := &scheduler{log: log, cache: ch}
 
 		reqBody := BindVolumeRequest{
-			Volume:       VolumeInput{Name: "vol-1", Type: "thick"},
+			Volume:       VolumeInput{Name: "vol-1", Size: 1024},
 			SelectedLVGs: []LVGInput{{Name: "lvg-a"}},
 		}
 		body, _ := json.Marshal(reqBody)
@@ -97,7 +97,7 @@ func TestBindVolume(t *testing.T) {
 		s := &scheduler{log: log, cache: ch}
 
 		reqBody := BindVolumeRequest{
-			Volume:       VolumeInput{Name: "vol-1", Type: "thin"},
+			Volume:       VolumeInput{Name: "vol-1", Size: 1024},
 			SelectedLVGs: []LVGInput{{Name: "lvg-a", ThinPoolName: "tp-1"}},
 		}
 		body, _ := json.Marshal(reqBody)
@@ -125,25 +125,7 @@ func TestBindVolume(t *testing.T) {
 		s := &scheduler{log: log, cache: ch}
 
 		reqBody := BindVolumeRequest{
-			Volume:       VolumeInput{Name: "", Type: "thick"},
-			SelectedLVGs: []LVGInput{{Name: "lvg-a"}},
-		}
-		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/volumes/bind", bytes.NewReader(body))
-		w := httptest.NewRecorder()
-
-		s.bindVolume(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("invalid volume type returns 400", func(t *testing.T) {
-		log := logger.Logger{}
-		ch := cache.NewCache(log, cache.DefaultPVCExpiredDurationSec)
-		s := &scheduler{log: log, cache: ch}
-
-		reqBody := BindVolumeRequest{
-			Volume:       VolumeInput{Name: "vol-1", Type: "invalid"},
+			Volume:       VolumeInput{Name: "", Size: 1024},
 			SelectedLVGs: []LVGInput{{Name: "lvg-a"}},
 		}
 		body, _ := json.Marshal(reqBody)
@@ -165,7 +147,7 @@ func TestBindVolume(t *testing.T) {
 		s := &scheduler{log: log, cache: ch}
 
 		reqBody := BindVolumeRequest{
-			Volume:       VolumeInput{Name: "vol-1", Type: "thick"},
+			Volume:       VolumeInput{Name: "vol-1", Size: 1024},
 			SelectedLVGs: []LVGInput{},
 		}
 		body, _ := json.Marshal(reqBody)

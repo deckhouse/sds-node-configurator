@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strings"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
@@ -44,14 +43,6 @@ func (s *scheduler) filterAndPrioritize(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Normalize volume type (accept both "thick"/"Thick" and "thin"/"Thin")
-	volumeTypeLower := strings.ToLower(req.Volume.Type)
-	if volumeTypeLower == "thick" {
-		req.Volume.Type = consts.Thick
-	} else if volumeTypeLower == "thin" {
-		req.Volume.Type = consts.Thin
-	}
-
 	// Validation
 	if len(req.LVGs) == 0 {
 		http.Error(w, "lvgs list is empty", http.StatusBadRequest)
@@ -61,31 +52,46 @@ func (s *scheduler) filterAndPrioritize(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "invalid volume data", http.StatusBadRequest)
 		return
 	}
-	if req.Volume.Type != consts.Thick && req.Volume.Type != consts.Thin {
-		http.Error(w, fmt.Sprintf("invalid volume type: %s (expected 'thick' or 'thin')", req.Volume.Type), http.StatusBadRequest)
-		return
-	}
 
-	// Validate thinPoolName for thin volumes
-	if req.Volume.Type == consts.Thin {
+	// Infer volume type from thinPoolName: any non-empty → thin; all empty → thick
+	isThin := false
+	for _, lvg := range req.LVGs {
+		if lvg.ThinPoolName != "" {
+			isThin = true
+			break
+		}
+	}
+	// Consistency check: if thin, all must have thinPoolName; if thick, all must have empty
+	if isThin {
 		for _, lvg := range req.LVGs {
 			if lvg.ThinPoolName == "" {
-				http.Error(w, "thinPoolName is required for thin volumes", http.StatusBadRequest)
+				http.Error(w, "thinPoolName is required for all LVGs when any LVG has thinPoolName (thin volume)", http.StatusBadRequest)
+				return
+			}
+		}
+	} else {
+		for _, lvg := range req.LVGs {
+			if lvg.ThinPoolName != "" {
+				http.Error(w, "thinPoolName must be empty for all LVGs when volume is thick", http.StatusBadRequest)
 				return
 			}
 		}
 	}
+	volumeType := consts.Thick
+	if isThin {
+		volumeType = consts.Thin
+	}
 
 	// Log request details for debugging
-	servingLog.Debug(fmt.Sprintf("request: volume=%s, size=%d bytes (%.2f Gi), type=%s, lvgs count=%d",
-		req.Volume.Name, req.Volume.Size, float64(req.Volume.Size)/(1024*1024*1024), req.Volume.Type, len(req.LVGs)))
+	servingLog.Debug(fmt.Sprintf("request: volume=%s, size=%d bytes (%.2f Gi), type=%s (inferred), lvgs count=%d",
+		req.Volume.Name, req.Volume.Size, float64(req.Volume.Size)/(1024*1024*1024), volumeType, len(req.LVGs)))
 	for i, lvg := range req.LVGs {
 		servingLog.Debug(fmt.Sprintf("request: lvg[%d]=%s, thinPoolName=%s", i, lvg.Name, lvg.ThinPoolName))
 	}
 
 	// Filter LVGs by available space
 	// Uses common function checkLVGHasSpace
-	filteredLVGs, err := s.filterLVGs(servingLog, req.LVGs, req.Volume)
+	filteredLVGs, err := s.filterLVGs(servingLog, req.LVGs, req.Volume, volumeType)
 	if err != nil {
 		servingLog.Error(err, "unable to filter LVGs")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -105,10 +111,10 @@ func (s *scheduler) filterAndPrioritize(w http.ResponseWriter, r *http.Request) 
 
 	// Score filtered LVGs
 	// Uses common function calculateLVGScore
-	scoredLVGs := s.scoreLVGs(servingLog, filteredLVGs, req.Volume)
+	scoredLVGs := s.scoreLVGs(servingLog, filteredLVGs, req.Volume, volumeType)
 
 	// Reserve space for all filtered LVGs
-	err = s.reserveSpaceForVolumes(servingLog, filteredLVGs, req.Volume)
+	err = s.reserveSpaceForVolumes(servingLog, filteredLVGs, req.Volume, volumeType)
 	if err != nil {
 		servingLog.Error(err, "unable to reserve space")
 		// Don't return error, as filtering and scoring are already done
@@ -139,10 +145,10 @@ func (s *scheduler) filterAndPrioritize(w http.ResponseWriter, r *http.Request) 
 
 // filterLVGs filters LVGs by available space
 // Uses common function checkLVGHasSpace
-func (s *scheduler) filterLVGs(log logger.Logger, lvgs []LVGInput, volume VolumeInput) ([]LVGInput, error) {
+func (s *scheduler) filterLVGs(log logger.Logger, lvgs []LVGInput, volume VolumeInput, volumeType string) ([]LVGInput, error) {
 	var filtered []LVGInput
 
-	log.Debug(fmt.Sprintf("[filterLVGs] starting to filter %d LVGs for volume type %s, size %d bytes", len(lvgs), volume.Type, volume.Size))
+	log.Debug(fmt.Sprintf("[filterLVGs] starting to filter %d LVGs for volume type %s, size %d bytes", len(lvgs), volumeType, volume.Size))
 
 	for _, lvgInput := range lvgs {
 		lvg := s.cache.TryGetLVG(lvgInput.Name)
@@ -154,7 +160,7 @@ func (s *scheduler) filterLVGs(log logger.Logger, lvgs []LVGInput, volume Volume
 		log.Debug(fmt.Sprintf("[filterLVGs] LVG %s found in cache, checking available space", lvgInput.Name))
 
 		// Get detailed space information for logging
-		spaceInfo, err := getLVGAvailableSpace(s.cache, lvg, volume.Type, lvgInput.ThinPoolName)
+		spaceInfo, err := getLVGAvailableSpace(s.cache, lvg, volumeType, lvgInput.ThinPoolName)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[filterLVGs] unable to get available space for LVG %s", lvgInput.Name))
 			continue
@@ -185,7 +191,7 @@ func (s *scheduler) filterLVGs(log logger.Logger, lvgs []LVGInput, volume Volume
 
 // scoreLVGs scores LVGs
 // Uses common function calculateLVGScore
-func (s *scheduler) scoreLVGs(log logger.Logger, lvgs []LVGInput, volume VolumeInput) []LVGScore {
+func (s *scheduler) scoreLVGs(log logger.Logger, lvgs []LVGInput, volume VolumeInput, volumeType string) []LVGScore {
 	var scored []LVGScore
 
 	for _, lvgInput := range lvgs {
@@ -196,7 +202,7 @@ func (s *scheduler) scoreLVGs(log logger.Logger, lvgs []LVGInput, volume VolumeI
 		}
 
 		// Use common function to calculate score
-		score, err := calculateLVGScore(s.cache, lvg, volume.Type, lvgInput.ThinPoolName, volume.Size, s.defaultDivisor)
+		score, err := calculateLVGScore(s.cache, lvg, volumeType, lvgInput.ThinPoolName, volume.Size, s.defaultDivisor)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[scoreLVGs] unable to calculate score for LVG %s", lvgInput.Name))
 			continue
@@ -219,9 +225,9 @@ func (s *scheduler) scoreLVGs(log logger.Logger, lvgs []LVGInput, volume VolumeI
 	return scored
 }
 
-func (s *scheduler) reserveSpaceForVolumes(log logger.Logger, lvgs []LVGInput, volume VolumeInput) error {
+func (s *scheduler) reserveSpaceForVolumes(log logger.Logger, lvgs []LVGInput, volume VolumeInput, volumeType string) error {
 	for _, lvgInput := range lvgs {
-		switch volume.Type {
+		switch volumeType {
 		case consts.Thick:
 			err := s.cache.AddThickVolume(lvgInput.Name, volume.Name, volume.Size)
 			if err != nil {

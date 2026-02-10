@@ -20,10 +20,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 )
 
@@ -44,28 +42,10 @@ func (s *scheduler) bindVolume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Normalize volume type
-	volumeTypeLower := strings.ToLower(req.Volume.Type)
-	if volumeTypeLower == "thick" {
-		req.Volume.Type = consts.Thick
-	} else if volumeTypeLower == "thin" {
-		req.Volume.Type = consts.Thin
-	}
-
 	// Validation
 	if req.Volume.Name == "" {
 		http.Error(w, "volume name is required", http.StatusBadRequest)
 		return
-	}
-	if req.Volume.Type != consts.Thick && req.Volume.Type != consts.Thin {
-		http.Error(w, fmt.Sprintf("invalid volume type: %s (expected 'thick' or 'thin')", req.Volume.Type), http.StatusBadRequest)
-		return
-	}
-
-	servingLog.Debug(fmt.Sprintf("request: volume=%s, type=%s, selectedLVGs count=%d",
-		req.Volume.Name, req.Volume.Type, len(req.SelectedLVGs)))
-	for i, lvg := range req.SelectedLVGs {
-		servingLog.Debug(fmt.Sprintf("request: selectedLVG[%d]=%s, thinPoolName=%s", i, lvg.Name, lvg.ThinPoolName))
 	}
 
 	// Convert to cache types
@@ -77,8 +57,13 @@ func (s *scheduler) bindVolume(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Remove reservations for unselected LVGs
-	s.cache.RemoveVolumeReservationsExcept(req.Volume.Name, req.Volume.Type, keepLVGs)
+	servingLog.Debug(fmt.Sprintf("request: volume=%s, selectedLVGs count=%d", req.Volume.Name, len(req.SelectedLVGs)))
+	for i, lvg := range req.SelectedLVGs {
+		servingLog.Debug(fmt.Sprintf("request: selectedLVG[%d]=%s, thinPoolName=%s", i, lvg.Name, lvg.ThinPoolName))
+	}
+
+	// Remove reservations for unselected LVGs (type inferred from keep; when empty, removes from both)
+	s.cache.RemoveVolumeReservationsExcept(req.Volume.Name, keepLVGs)
 
 	// Build response
 	response := BindVolumeResponse{}
