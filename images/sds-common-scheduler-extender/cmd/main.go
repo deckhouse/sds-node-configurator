@@ -27,7 +27,6 @@ import (
 	"syscall"
 	"time"
 
-	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -38,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/yaml"
 
+	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	slv "github.com/deckhouse/sds-local-volume/api/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
@@ -48,11 +48,11 @@ import (
 )
 
 const (
-	defaultDivisor          = 1
-	defaultListenAddr       = ":8000"
-	defaultcertFile         = "/etc/sds-common-scheduler-extender/certs/tls.crt"
-	defaultkeyFile          = "/etc/sds-common-scheduler-extender/certs/tls.key"
-	defaultCleanupInterval  = 30 * time.Second
+	defaultDivisor         = 1
+	defaultListenAddr      = ":8000"
+	defaultcertFile        = "/etc/sds-common-scheduler-extender/certs/tls.crt"
+	defaultkeyFile         = "/etc/sds-common-scheduler-extender/certs/tls.key"
+	defaultCleanupInterval = 30 * time.Second
 )
 
 type Config struct {

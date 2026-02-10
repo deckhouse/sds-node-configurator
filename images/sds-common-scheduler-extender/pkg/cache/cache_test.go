@@ -86,7 +86,7 @@ func TestRemoveReservation(t *testing.T) {
 	assert.Equal(t, int64(0), c.GetReservedSpace(pool1))
 }
 
-func TestRemoveReservation_NotFound(t *testing.T) {
+func TestRemoveReservation_NotFound(_ *testing.T) {
 	c := newTestCache()
 	// Should not panic
 	c.RemoveReservation("nonexistent")

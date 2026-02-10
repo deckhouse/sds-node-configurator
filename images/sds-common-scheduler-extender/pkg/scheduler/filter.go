@@ -135,7 +135,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	servingLog.Debug("starts to filter the nodes from the request")
-	filteredNodes, err := filterNodes(servingLog, s.ctx, s.client, s.cache, &nodeNames, nodes, inputData.Pod, managedPVCs, scUsedByPVCs, pvcRequests)
+	filteredNodes, err := filterNodes(s.ctx, servingLog, s.client, s.cache, &nodeNames, nodes, managedPVCs, scUsedByPVCs, pvcRequests)
 	if err != nil {
 		servingLog.Error(err, "unable to filter the nodes")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -145,7 +145,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 
 	// Create reservations for each PVC across all filtered nodes
 	servingLog.Debug("starts to create reservations")
-	err = createReservations(servingLog, s.ctx, s.client, s.cache, filteredNodes.NodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
+	err = createReservations(s.ctx, servingLog, s.client, s.cache, filteredNodes.NodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
 	if err != nil {
 		servingLog.Error(err, "unable to create reservations")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -192,13 +192,12 @@ func writeNodeNamesResponse(w http.ResponseWriter, log logger.Logger, nodeNames 
 }
 
 func filterNodes(
-	log logger.Logger,
 	ctx context.Context,
+	log logger.Logger,
 	cl client.Client,
 	schedulerCache *cache.Cache,
 	nodeNames *[]string,
 	nodes map[string]*corev1.Node,
-	pod *corev1.Pod,
 	managedPVCs map[string]*corev1.PersistentVolumeClaim,
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
@@ -254,7 +253,7 @@ func filterNodes(
 
 			// === Filter for LOCAL PVCs ===
 			if len(localPVCs) > 0 {
-				ok, reason := filterNodeForLocalPVCs(log, ctx, cl, schedulerCache, nodeName, localPVCs, scLVGs, pvcRequests)
+				ok, reason := filterNodeForLocalPVCs(ctx, log, cl, schedulerCache, nodeName, localPVCs, scLVGs, pvcRequests)
 				if !ok && reason != "" {
 					failReasons = append(failReasons, fmt.Sprintf("[local] %s", reason))
 				}
@@ -266,7 +265,7 @@ func filterNodes(
 				if node == nil {
 					failReasons = append(failReasons, fmt.Sprintf("[replicated] node %s not found", nodeName))
 				} else {
-					ok, reason := filterNodeForReplicatedPVCs(log, ctx, cl, schedulerCache, nodeName, node, replicatedPVCs, scUsedByPVCs, pvcRequests)
+					ok, reason := filterNodeForReplicatedPVCs(ctx, log, cl, schedulerCache, nodeName, node, replicatedPVCs, scUsedByPVCs, pvcRequests)
 					if !ok && reason != "" {
 						failReasons = append(failReasons, fmt.Sprintf("[replicated] %s", reason))
 					}
@@ -303,8 +302,8 @@ func filterNodes(
 
 // filterNodeForLocalPVCs filters node for local PVCs using client.Client for LVG lookups.
 func filterNodeForLocalPVCs(
-	log logger.Logger,
 	ctx context.Context,
+	log logger.Logger,
 	cl client.Client,
 	schedulerCache *cache.Cache,
 	nodeName string,
@@ -353,8 +352,8 @@ func filterNodeForLocalPVCs(
 
 // createReservations creates reservations for each PVC across all filtered nodes.
 func createReservations(
-	log logger.Logger,
 	ctx context.Context,
+	log logger.Logger,
 	cl client.Client,
 	schedulerCache *cache.Cache,
 	filteredNodeNames *[]string,

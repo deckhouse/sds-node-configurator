@@ -195,7 +195,11 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, r *http.Request) {
 	sb.WriteString(fmt.Sprintf("Pools: %d, Reservations: %d (active: %d, expired: %d)\n", len(pools), len(reservations), activeCount, expiredCount))
 	sb.WriteString(fmt.Sprintf("Total reserved across all pools: %s\n", resource.NewQuantity(totalReserved, resource.BinarySI).String()))
 
-	result, err := json.Marshal(pools)
+	poolsForJSON := make(map[string]int64, len(pools))
+	for k, v := range pools {
+		poolsForJSON[k.String()] = v
+	}
+	result, err := json.Marshal(poolsForJSON)
 	if err == nil {
 		sb.WriteString(fmt.Sprintf("Pools detail: %s\n", string(result)))
 	}

@@ -101,7 +101,7 @@ func (s *scheduler) filterAndScore(w http.ResponseWriter, r *http.Request) {
 		responseJSON, _ := json.Marshal(response)
 		servingLog.Debug(fmt.Sprintf("response: %s", string(responseJSON)))
 		w.Header().Set("content-type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 		return
 	}
 

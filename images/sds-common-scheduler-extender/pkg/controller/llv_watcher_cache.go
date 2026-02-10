@@ -63,7 +63,7 @@ func RunLLVWatcherCacheController(
 		&handler.TypedEnqueueRequestForObject[*snc.LVMLogicalVolume]{},
 		predicate.TypedFuncs[*snc.LVMLogicalVolume]{
 			// Ignore Create events -- LLV is created in Pending phase, reservation already exists
-			CreateFunc: func(e event.TypedCreateEvent[*snc.LVMLogicalVolume]) bool {
+			CreateFunc: func(_ event.TypedCreateEvent[*snc.LVMLogicalVolume]) bool {
 				return false
 			},
 			// Only reconcile when Status.Phase transitions to Created
@@ -82,7 +82,7 @@ func RunLLVWatcherCacheController(
 				return newCreated && !oldCreated
 			},
 			// Always reconcile on delete (cleanup if deleted before reaching Created)
-			DeleteFunc: func(e event.TypedDeleteEvent[*snc.LVMLogicalVolume]) bool {
+			DeleteFunc: func(_ event.TypedDeleteEvent[*snc.LVMLogicalVolume]) bool {
 				return true
 			},
 		},

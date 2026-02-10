@@ -112,7 +112,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("starts to score the nodes for Pod")
 	replicaLocations := make(map[string][]string) // TODO: retrieve from DRBD/Linstor
 
-	scoredNodes, err := scoreNodes(servingLog, s.ctx, s.client, s.cache, &nodeNames, managedPVCs, scUsedByPVCs, pvcRequests, replicaLocations, s.defaultDivisor)
+	scoredNodes, err := scoreNodes(s.ctx, servingLog, s.client, s.cache, &nodeNames, managedPVCs, scUsedByPVCs, pvcRequests, replicaLocations, s.defaultDivisor)
 	if err != nil {
 		servingLog.Error(err, "unable to score nodes")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -121,7 +121,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("successfully scored the nodes for Pod")
 
 	// Narrow reservations to the final node list (prioritize may receive fewer nodes than filter)
-	narrowReservationsToFinalNodes(servingLog, s.ctx, s.client, s.cache, nodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
+	narrowReservationsToFinalNodes(s.ctx, servingLog, s.client, s.cache, nodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
 
 	// Log response body at DEBUG level
 	responseJSON, err := json.Marshal(scoredNodes)
@@ -166,8 +166,8 @@ func writeNodeScoresResponse(w http.ResponseWriter, log logger.Logger, nodeNames
 }
 
 func scoreNodes(
-	log logger.Logger,
 	ctx context.Context,
+	log logger.Logger,
 	cl client.Client,
 	schedulerCache *cache.Cache,
 	nodeNames *[]string,
@@ -281,8 +281,7 @@ func scoreNodes(
 					if pvc.Status.Phase == corev1.ClaimBound &&
 						volumeAccess != consts.VolumeAccessLocal &&
 						volumeAccess != consts.VolumeAccessEventuallyLocal {
-
-						hasLVGAndSpace, _ := checkNodeHasLVGWithSpaceForReplicated(log, ctx, cl, schedulerCache, nodeName, rsp, pvcReq.RequestedSize)
+						hasLVGAndSpace, _ := checkNodeHasLVGWithSpaceForReplicated(ctx, log, cl, schedulerCache, nodeName, rsp, pvcReq.RequestedSize)
 						if !hasLVGAndSpace {
 							log.Debug(fmt.Sprintf("[scoreNodes] node %s has no LVG/space for replicated PVC %s, scoring 0", nodeName, pvc.Name))
 							pvcCount++
@@ -290,7 +289,7 @@ func scoreNodes(
 						}
 					}
 
-					pvcScore := calculateReplicatedPVCScore(log, ctx, cl, schedulerCache, nodeName, rsp, pvcReq, divisor)
+					pvcScore := calculateReplicatedPVCScore(ctx, log, cl, schedulerCache, nodeName, rsp, pvcReq, divisor)
 					totalScore += pvcScore
 					pvcCount++
 				}
@@ -334,8 +333,8 @@ func scoreNodes(
 // StoragePoolKeys from the final node list. This releases reserved space on nodes
 // that were filtered out by kube's own filters or other extenders between filter and prioritize.
 func narrowReservationsToFinalNodes(
-	log logger.Logger,
 	ctx context.Context,
+	log logger.Logger,
 	cl client.Client,
 	schedulerCache *cache.Cache,
 	finalNodeNames []string,

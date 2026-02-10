@@ -96,7 +96,7 @@ func findLVGForNodeInRSP(
 	cl client.Client,
 	nodeName string,
 	rsp *snc.ReplicatedStoragePool,
-) (*snc.LVMVolumeGroup, *snc.ReplicatedStoragePoolLVG, bool) {
+) (*snc.ReplicatedStoragePoolLVG, bool) {
 	for i := range rsp.Spec.LvmVolumeGroups {
 		lvgRef := &rsp.Spec.LvmVolumeGroups[i]
 		lvg := &snc.LVMVolumeGroup{}
@@ -107,10 +107,10 @@ func findLVGForNodeInRSP(
 			continue
 		}
 		if lvgHasNode(lvg, nodeName) {
-			return lvg, lvgRef, true
+			return lvgRef, true
 		}
 	}
-	return nil, nil, false
+	return nil, false
 }
 
 // checkNodeHasLVGFromRSP checks if node has any LVG from RSP
@@ -120,7 +120,7 @@ func checkNodeHasLVGFromRSP(
 	nodeName string,
 	rsp *snc.ReplicatedStoragePool,
 ) bool {
-	_, _, found := findLVGForNodeInRSP(ctx, cl, nodeName, rsp)
+	_, found := findLVGForNodeInRSP(ctx, cl, nodeName, rsp)
 	return found
 }
 
@@ -136,8 +136,8 @@ func storagePoolKeyFromRSPLVG(lvgRef *snc.ReplicatedStoragePoolLVG, deviceType s
 // checkNodeHasLVGWithSpaceForReplicated checks if node has LVG with enough space for replicated PVC.
 // Uses client.Client for LVG lookups and reservation cache for reserved space.
 func checkNodeHasLVGWithSpaceForReplicated(
-	log logger.Logger,
 	ctx context.Context,
+	log logger.Logger,
 	cl client.Client,
 	reservationCache *cache.Cache,
 	nodeName string,
@@ -146,7 +146,7 @@ func checkNodeHasLVGWithSpaceForReplicated(
 ) (bool, string) {
 	deviceType := getDeviceTypeFromRSP(rsp)
 
-	_, lvgRef, found := findLVGForNodeInRSP(ctx, cl, nodeName, rsp)
+	lvgRef, found := findLVGForNodeInRSP(ctx, cl, nodeName, rsp)
 	if !found {
 		return false, fmt.Sprintf("no LVG from RSP %s found on node %s", rsp.Name, nodeName)
 	}
@@ -182,7 +182,7 @@ func filterNodesByVolumeZone(
 	log logger.Logger,
 	nodeNames []string,
 	pvc *corev1.PersistentVolumeClaim,
-	rsc *snc.ReplicatedStorageClass,
+	_ *snc.ReplicatedStorageClass,
 ) []string {
 	log.Debug(fmt.Sprintf("[filterNodesByVolumeZone] TODO: implement zone-based filtering for Zonal topology, PVC %s/%s", pvc.Namespace, pvc.Name))
 	return nodeNames
@@ -212,8 +212,8 @@ func filterPVCsByProvisioner(
 
 // filterNodeForReplicatedPVCs filters node for replicated PVCs
 func filterNodeForReplicatedPVCs(
-	log logger.Logger,
 	ctx context.Context,
+	log logger.Logger,
 	cl client.Client,
 	schedulerCache *cache.Cache,
 	nodeName string,
@@ -268,7 +268,7 @@ func filterNodeForReplicatedPVCs(
 		switch pvc.Status.Phase {
 		case corev1.ClaimPending:
 			if requiresLVGCheck(volumeAccess) {
-				ok, reason := checkNodeHasLVGWithSpaceForReplicated(log, ctx, cl, schedulerCache, nodeName, rsp, pvcReq.RequestedSize)
+				ok, reason := checkNodeHasLVGWithSpaceForReplicated(ctx, log, cl, schedulerCache, nodeName, rsp, pvcReq.RequestedSize)
 				if !ok {
 					failReasons = append(failReasons, fmt.Sprintf("PVC %s: %s", pvc.Name, reason))
 				}
@@ -280,7 +280,7 @@ func filterNodeForReplicatedPVCs(
 				log.Debug(fmt.Sprintf("[filterNodeForReplicatedPVCs] TODO: filter by replicas for Local, pvc=%s", pvc.Name))
 
 			case consts.VolumeAccessEventuallyLocal:
-				ok, reason := checkNodeHasLVGWithSpaceForReplicated(log, ctx, cl, schedulerCache, nodeName, rsp, pvcReq.RequestedSize)
+				ok, reason := checkNodeHasLVGWithSpaceForReplicated(ctx, log, cl, schedulerCache, nodeName, rsp, pvcReq.RequestedSize)
 				if !ok {
 					failReasons = append(failReasons, fmt.Sprintf("PVC %s: %s", pvc.Name, reason))
 				}
@@ -299,8 +299,8 @@ func filterNodeForReplicatedPVCs(
 
 // calculateReplicatedPVCScore calculates score for replicated PVC using client.Client and reservation cache.
 func calculateReplicatedPVCScore(
-	log logger.Logger,
 	ctx context.Context,
+	log logger.Logger,
 	cl client.Client,
 	reservationCache *cache.Cache,
 	nodeName string,
@@ -310,7 +310,7 @@ func calculateReplicatedPVCScore(
 ) int64 {
 	deviceType := getDeviceTypeFromRSP(rsp)
 
-	_, lvgRef, found := findLVGForNodeInRSP(ctx, cl, nodeName, rsp)
+	lvgRef, found := findLVGForNodeInRSP(ctx, cl, nodeName, rsp)
 	if !found {
 		return 0
 	}
