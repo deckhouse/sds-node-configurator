@@ -153,7 +153,11 @@ func (s *scheduler) getCache(w http.ResponseWriter, r *http.Request) {
 	// Print reservations
 	reservations := s.cache.GetAllReservations()
 	for id, info := range reservations {
-		line := fmt.Sprintf("Reservation: %s, size: %s, expires: %s, pools: [", id, resource.NewQuantity(info.Size, resource.BinarySI).String(), info.ExpiresAt.Format("15:04:05"))
+		prefix := "Reservation"
+		if info.Expired {
+			prefix = "[EXPIRED] Reservation"
+		}
+		line := fmt.Sprintf("%s: %s, size: %s, expires: %s, pools: [", prefix, id, resource.NewQuantity(info.Size, resource.BinarySI).String(), info.ExpiresAt.Format("15:04:05"))
 		poolStrs := make([]string, 0, len(info.Pools))
 		for _, p := range info.Pools {
 			poolStrs = append(poolStrs, p.String())
@@ -178,9 +182,17 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, r *http.Request) {
 		totalReserved += reservedSize
 	}
 
+	var expiredCount int
+	for _, info := range reservations {
+		if info.Expired {
+			expiredCount++
+		}
+	}
+	activeCount := len(reservations) - expiredCount
+
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Filter request count: %d, Prioritize request count: %d\n", s.filterRequestCount, s.prioritizeRequestCount))
-	sb.WriteString(fmt.Sprintf("Pools: %d, Reservations: %d\n", len(pools), len(reservations)))
+	sb.WriteString(fmt.Sprintf("Pools: %d, Reservations: %d (active: %d, expired: %d)\n", len(pools), len(reservations), activeCount, expiredCount))
 	sb.WriteString(fmt.Sprintf("Total reserved across all pools: %s\n", resource.NewQuantity(totalReserved, resource.BinarySI).String()))
 
 	result, err := json.Marshal(pools)

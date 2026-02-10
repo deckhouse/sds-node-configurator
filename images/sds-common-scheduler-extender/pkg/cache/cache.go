@@ -43,11 +43,6 @@ func (k StoragePoolKey) String() string {
 	return k.LVGName + "/" + k.ThinPoolName
 }
 
-// PoolEntry holds the pre-calculated total reserved size for a storage pool.
-type PoolEntry struct {
-	reservedSize int64
-}
-
 // Reservation tracks a single reservation across one or more storage pools.
 type Reservation struct {
 	expiresAt time.Time
@@ -60,15 +55,16 @@ type ReservationInfo struct {
 	Size      int64
 	ExpiresAt time.Time
 	Pools     []StoragePoolKey
+	Expired   bool
 }
 
-// Cache is a pure reservation store. It tracks reserved space per storage pool
-// and supports TTL-based expiration of reservations.
+// Cache is a pure reservation store. Reserved space per pool is computed lazily
+// by iterating reservations and skipping expired entries.
+// A background ticker periodically removes expired reservations to free memory.
 // LVG resources are NOT stored here; they are read from the controller-runtime
 // informer cache via client.Client.
 type Cache struct {
 	mtx          sync.RWMutex
-	pools        map[StoragePoolKey]*PoolEntry
 	reservations map[string]*Reservation
 	log          logger.Logger
 }
@@ -76,7 +72,6 @@ type Cache struct {
 // NewCache creates a new reservation cache and starts a background cleanup goroutine.
 func NewCache(log logger.Logger, cleanupInterval time.Duration) *Cache {
 	c := &Cache{
-		pools:        make(map[StoragePoolKey]*PoolEntry),
 		reservations: make(map[string]*Reservation),
 		log:          log,
 	}
@@ -84,25 +79,35 @@ func NewCache(log logger.Logger, cleanupInterval time.Duration) *Cache {
 	return c
 }
 
-// GetReservedSpace returns the pre-calculated reserved size for a given pool. O(1) lookup.
+// GetReservedSpace computes reserved size for a pool by summing active (non-expired) reservations.
 func (c *Cache) GetReservedSpace(key StoragePoolKey) int64 {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 
-	entry, ok := c.pools[key]
-	if !ok {
-		return 0
+	now := time.Now()
+	var reserved int64
+	for _, r := range c.reservations {
+		if now.After(r.expiresAt) {
+			continue
+		}
+		if _, ok := r.pools[key]; ok {
+			reserved += r.size
+		}
 	}
-	return entry.reservedSize
+	return reserved
 }
 
 // GetReservation returns reservation data for debugging/inspection.
+// Returns false if the reservation does not exist or is expired.
 func (c *Cache) GetReservation(id string) (int64, []StoragePoolKey, bool) {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 
 	r, ok := c.reservations[id]
 	if !ok {
+		return 0, nil, false
+	}
+	if time.Now().After(r.expiresAt) {
 		return 0, nil, false
 	}
 	keys := make([]StoragePoolKey, 0, len(r.pools))
@@ -112,16 +117,20 @@ func (c *Cache) GetReservation(id string) (int64, []StoragePoolKey, bool) {
 	return r.size, keys, true
 }
 
-// HasReservation checks whether a reservation with the given ID exists.
+// HasReservation checks whether an active (non-expired) reservation with the given ID exists.
 func (c *Cache) HasReservation(id string) bool {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
-	_, ok := c.reservations[id]
-	return ok
+
+	r, ok := c.reservations[id]
+	if !ok {
+		return false
+	}
+	return !time.Now().After(r.expiresAt)
 }
 
 // AddReservation adds a new reservation. If a reservation with the same ID already exists,
-// it is removed first (idempotent replace). For each pool, increments reservedSize.
+// it is removed first (idempotent replace).
 func (c *Cache) AddReservation(id string, ttl time.Duration, size int64, poolKeys []StoragePoolKey) {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -135,7 +144,6 @@ func (c *Cache) AddReservation(id string, ttl time.Duration, size int64, poolKey
 	poolSet := make(map[StoragePoolKey]struct{}, len(poolKeys))
 	for _, key := range poolKeys {
 		poolSet[key] = struct{}{}
-		c.addToPool(key, size)
 	}
 
 	c.reservations[id] = &Reservation{
@@ -147,7 +155,7 @@ func (c *Cache) AddReservation(id string, ttl time.Duration, size int64, poolKey
 	c.log.Debug(fmt.Sprintf("[AddReservation] reservation %s added: size=%d, pools=%d, ttl=%s", id, size, len(poolSet), ttl))
 }
 
-// RemoveReservation removes a reservation and decrements reservedSize for each affected pool.
+// RemoveReservation removes a reservation.
 func (c *Cache) RemoveReservation(id string) {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -175,10 +183,9 @@ func (c *Cache) NarrowReservation(id string, keepPools []StoragePoolKey, newTTL 
 	}
 
 	removedCount := 0
-	// Remove reservation from pools NOT in keepSet
+	// Remove pool keys NOT in keepSet
 	for poolKey := range r.pools {
 		if _, keep := keepSet[poolKey]; !keep {
-			c.subtractFromPool(poolKey, r.size)
 			delete(r.pools, poolKey)
 			removedCount++
 		}
@@ -197,23 +204,32 @@ func (c *Cache) NarrowReservation(id string, keepPools []StoragePoolKey, newTTL 
 	return true
 }
 
-// GetAllPools returns a snapshot of all pools and their reserved sizes. For debug endpoints.
+// GetAllPools computes an aggregated view of reserved sizes per pool from active reservations.
+// For debug endpoints.
 func (c *Cache) GetAllPools() map[StoragePoolKey]int64 {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 
-	result := make(map[StoragePoolKey]int64, len(c.pools))
-	for key, entry := range c.pools {
-		result[key] = entry.reservedSize
+	now := time.Now()
+	result := make(map[StoragePoolKey]int64)
+	for _, r := range c.reservations {
+		if now.After(r.expiresAt) {
+			continue
+		}
+		for key := range r.pools {
+			result[key] += r.size
+		}
 	}
 	return result
 }
 
-// GetAllReservations returns a snapshot of all reservations. For debug endpoints.
+// GetAllReservations returns a snapshot of all reservations (including expired).
+// Expired entries are marked with Expired=true. For debug endpoints.
 func (c *Cache) GetAllReservations() map[string]ReservationInfo {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 
+	now := time.Now()
 	result := make(map[string]ReservationInfo, len(c.reservations))
 	for id, r := range c.reservations {
 		pools := make([]StoragePoolKey, 0, len(r.pools))
@@ -224,6 +240,7 @@ func (c *Cache) GetAllReservations() map[string]ReservationInfo {
 			Size:      r.size,
 			ExpiresAt: r.expiresAt,
 			Pools:     pools,
+			Expired:   now.After(r.expiresAt),
 		}
 	}
 	return result
@@ -231,36 +248,10 @@ func (c *Cache) GetAllReservations() map[string]ReservationInfo {
 
 // --- Internal helpers (called under held lock) ---
 
-// addToPool increments reserved size for a pool, creating the entry if needed.
-func (c *Cache) addToPool(key StoragePoolKey, size int64) {
-	entry, ok := c.pools[key]
-	if !ok {
-		entry = &PoolEntry{}
-		c.pools[key] = entry
-	}
-	entry.reservedSize += size
-}
-
-// subtractFromPool decrements reserved size for a pool. Removes entry if it reaches 0.
-func (c *Cache) subtractFromPool(key StoragePoolKey, size int64) {
-	entry, ok := c.pools[key]
-	if !ok {
-		return
-	}
-	entry.reservedSize -= size
-	if entry.reservedSize <= 0 {
-		delete(c.pools, key)
-	}
-}
-
-// removeReservation removes a reservation and updates all affected pools.
+// removeReservation removes a reservation from the map.
 func (c *Cache) removeReservation(id string) {
-	r, ok := c.reservations[id]
-	if !ok {
+	if _, ok := c.reservations[id]; !ok {
 		return
-	}
-	for poolKey := range r.pools {
-		c.subtractFromPool(poolKey, r.size)
 	}
 	delete(c.reservations, id)
 	c.log.Debug(fmt.Sprintf("[removeReservation] reservation %s removed", id))
@@ -286,7 +277,7 @@ func (c *Cache) cleanupExpired() {
 	for id, r := range c.reservations {
 		if now.After(r.expiresAt) {
 			c.log.Debug(fmt.Sprintf("[cleanupExpired] removing expired reservation %s", id))
-			c.removeReservation(id)
+			delete(c.reservations, id)
 		}
 	}
 }

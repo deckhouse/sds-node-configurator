@@ -28,7 +28,6 @@ import (
 func newTestCache() *Cache {
 	log, _ := logger.NewLogger("0")
 	return &Cache{
-		pools:        make(map[StoragePoolKey]*PoolEntry),
 		reservations: make(map[string]*Reservation),
 		log:          log,
 	}
@@ -193,11 +192,42 @@ func TestCleanupExpired(t *testing.T) {
 	// Wait for the short one to expire
 	time.Sleep(10 * time.Millisecond)
 
-	c.cleanupExpired()
+	// Lazy check: GetReservedSpace should already skip the expired reservation
+	assert.Equal(t, int64(200), c.GetReservedSpace(pool))
 
+	// HasReservation should also report expired reservation as not found
 	assert.False(t, c.HasReservation("res1"))
 	assert.True(t, c.HasReservation("res2"))
+
+	// cleanupExpired frees memory (removes expired entries from map)
+	c.cleanupExpired()
+
+	// After cleanup, the reservation entry is physically gone
+	c.mtx.RLock()
+	_, inMap := c.reservations["res1"]
+	c.mtx.RUnlock()
+	assert.False(t, inMap, "expired reservation should be removed from map after cleanup")
+
+	assert.True(t, c.HasReservation("res2"))
 	assert.Equal(t, int64(200), c.GetReservedSpace(pool))
+}
+
+func TestGetReservedSpace_SkipsExpired(t *testing.T) {
+	c := newTestCache()
+
+	pool := StoragePoolKey{LVGName: "lvg1"}
+
+	// Add reservation with very short TTL
+	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool})
+
+	// Before expiration, space is reserved
+	assert.Equal(t, int64(100), c.GetReservedSpace(pool))
+
+	// Wait for TTL to expire
+	time.Sleep(10 * time.Millisecond)
+
+	// GetReservedSpace should return 0 without explicit cleanup
+	assert.Equal(t, int64(0), c.GetReservedSpace(pool))
 }
 
 func TestGetAllPools(t *testing.T) {
@@ -212,6 +242,23 @@ func TestGetAllPools(t *testing.T) {
 	assert.Len(t, pools, 2)
 	assert.Equal(t, int64(100), pools[pool1])
 	assert.Equal(t, int64(100), pools[pool2])
+}
+
+func TestGetAllPools_SkipsExpired(t *testing.T) {
+	c := newTestCache()
+
+	pool1 := StoragePoolKey{LVGName: "lvg1"}
+	pool2 := StoragePoolKey{LVGName: "lvg2"}
+
+	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool1})
+	c.AddReservation("res2", 1*time.Hour, 200, []StoragePoolKey{pool2})
+
+	time.Sleep(10 * time.Millisecond)
+
+	pools := c.GetAllPools()
+	// Only active reservation's pool should be present
+	assert.Len(t, pools, 1)
+	assert.Equal(t, int64(200), pools[pool2])
 }
 
 func TestGetAllReservations(t *testing.T) {
@@ -229,10 +276,34 @@ func TestGetAllReservations(t *testing.T) {
 	r1 := reservations["res1"]
 	assert.Equal(t, int64(100), r1.Size)
 	assert.Len(t, r1.Pools, 1)
+	assert.False(t, r1.Expired)
 
 	r2 := reservations["res2"]
 	assert.Equal(t, int64(200), r2.Size)
 	assert.Len(t, r2.Pools, 2)
+	assert.False(t, r2.Expired)
+}
+
+func TestGetAllReservations_MarksExpired(t *testing.T) {
+	c := newTestCache()
+
+	pool := StoragePoolKey{LVGName: "lvg1"}
+
+	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool})
+	c.AddReservation("res2", 1*time.Hour, 200, []StoragePoolKey{pool})
+
+	time.Sleep(10 * time.Millisecond)
+
+	reservations := c.GetAllReservations()
+	assert.Len(t, reservations, 2)
+
+	r1 := reservations["res1"]
+	assert.True(t, r1.Expired, "expired reservation should be marked as Expired")
+	assert.Equal(t, int64(100), r1.Size)
+
+	r2 := reservations["res2"]
+	assert.False(t, r2.Expired, "active reservation should not be marked as Expired")
+	assert.Equal(t, int64(200), r2.Size)
 }
 
 func TestStoragePoolKey_String(t *testing.T) {
