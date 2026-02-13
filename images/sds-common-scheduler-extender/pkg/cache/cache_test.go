@@ -17,298 +17,319 @@ limitations under the License.
 package cache
 
 import (
-	"fmt"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 )
 
-func TestCache_ClearBoundExpiredPVC(t *testing.T) {
-	log := logger.Logger{}
-	const (
-		lvgName                = "lvg-name"
-		tpName                 = "thin-pool"
-		thickBoundExpiredPVC   = "thick-bound-expired-pvc"
-		thickPendingExpiredPVC = "thick-pending-expired-pvc"
-		thickBoundFreshPVC     = "thick-bound-not-expired-pvc"
-		thinBoundExpiredPVC    = "thin-bound-expired-pvc"
-		thinPendingExpiredPVC  = "thin-pending-expired-pvc"
-		thinBoundFreshPVC      = "thin-bound-not-expired-pvc"
-	)
-
-	ch := NewCache(log, DefaultPVCExpiredDurationSec)
-	expiredTime := time.Now().Add((-DefaultPVCExpiredDurationSec - 1) * time.Second)
-
-	// Seed internals directly to simulate already-reserved entries with various phases.
-	ch.mtx.Lock()
-	ch.lvgByName[lvgName] = &lvgEntry{
-		lvg: &snc.LVMVolumeGroup{
-			ObjectMeta: metav1.ObjectMeta{Name: lvgName},
-		},
-		thickByPVC: make(map[string]*pvcEntry),
-		thinByPool: map[string]*thinPoolEntry{
-			tpName: {pvcs: make(map[string]*pvcEntry)},
-		},
+func newTestCache() *Cache {
+	log, _ := logger.NewLogger("0")
+	return &Cache{
+		reservations: make(map[string]*Reservation),
+		log:          log,
 	}
-	// Thick
-	ch.lvgByName[lvgName].thickByPVC["/"+thickBoundExpiredPVC] = &pvcEntry{
-		pvc: &corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: thickBoundExpiredPVC, CreationTimestamp: metav1.NewTime(expiredTime)},
-			Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
-		},
-	}
-	ch.lvgByName[lvgName].thickByPVC["/"+thickPendingExpiredPVC] = &pvcEntry{
-		pvc: &corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: thickPendingExpiredPVC, CreationTimestamp: metav1.NewTime(expiredTime)},
-			Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
-		},
-	}
-	ch.lvgByName[lvgName].thickByPVC["/"+thickBoundFreshPVC] = &pvcEntry{
-		pvc: &corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: thickBoundFreshPVC, CreationTimestamp: metav1.NewTime(time.Now())},
-			Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
-		},
-	}
-	// Thin
-	ch.lvgByName[lvgName].thinByPool[tpName].pvcs["/"+thinBoundExpiredPVC] = &pvcEntry{
-		pvc: &corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: thinBoundExpiredPVC, CreationTimestamp: metav1.NewTime(expiredTime)},
-			Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
-		},
-	}
-	ch.lvgByName[lvgName].thinByPool[tpName].pvcs["/"+thinPendingExpiredPVC] = &pvcEntry{
-		pvc: &corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: thinPendingExpiredPVC, CreationTimestamp: metav1.NewTime(expiredTime)},
-			Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
-		},
-	}
-	ch.lvgByName[lvgName].thinByPool[tpName].pvcs["/"+thinBoundFreshPVC] = &pvcEntry{
-		pvc: &corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: thinBoundFreshPVC, CreationTimestamp: metav1.NewTime(time.Now())},
-			Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
-		},
-	}
-	ch.mtx.Unlock()
-
-	ch.clearBoundExpiredPVC()
-
-	ch.mtx.RLock()
-	defer ch.mtx.RUnlock()
-	// Thick assertions
-	_, found := ch.lvgByName[lvgName].thickByPVC["/"+thickBoundExpiredPVC]
-	assert.False(t, found)
-	_, found = ch.lvgByName[lvgName].thickByPVC["/"+thickPendingExpiredPVC]
-	assert.True(t, found)
-	_, found = ch.lvgByName[lvgName].thickByPVC["/"+thickBoundFreshPVC]
-	assert.True(t, found)
-	// Thin assertions
-	_, found = ch.lvgByName[lvgName].thinByPool[tpName].pvcs["/"+thinBoundExpiredPVC]
-	assert.False(t, found)
-	_, found = ch.lvgByName[lvgName].thinByPool[tpName].pvcs["/"+thinPendingExpiredPVC]
-	assert.True(t, found)
-	_, found = ch.lvgByName[lvgName].thinByPool[tpName].pvcs["/"+thinBoundFreshPVC]
-	assert.True(t, found)
 }
 
-func TestCache_ReservedSpace_PublicAPI(t *testing.T) {
-	log := logger.Logger{}
-	ch := NewCache(log, DefaultPVCExpiredDurationSec)
-	lvg := &snc.LVMVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
-		Status: snc.LVMVolumeGroupStatus{
-			ThinPools: []snc.LVMVolumeGroupThinPoolStatus{{Name: "tp-1"}},
-		},
-	}
-	ch.AddLVG(lvg)
+func TestAddReservation(t *testing.T) {
+	c := newTestCache()
 
-	pvc1 := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "pvc-1", Namespace: "ns"},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceStorage: *resource.NewQuantity(1<<20, resource.BinarySI)},
-			},
-		},
-		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
-	}
-	pvc2 := pvc1.DeepCopy()
-	pvc2.Name = "pvc-2"
-	pvc2.Spec.Resources.Requests[corev1.ResourceStorage] = *resource.NewQuantity(2<<20, resource.BinarySI)
+	pool1 := StoragePoolKey{LVGName: "lvg1", ThinPoolName: ""}
+	pool2 := StoragePoolKey{LVGName: "lvg2", ThinPoolName: "tp1"}
 
-	assert.NoError(t, ch.AddThickPVC(lvg.Name, pvc1))
-	assert.NoError(t, ch.AddThickPVC(lvg.Name, pvc2))
-	sum, err := ch.GetLVGThickReservedSpace(lvg.Name)
-	assert.NoError(t, err)
-	assert.Equal(t, int64((1<<20)+(2<<20)), sum)
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1, pool2})
 
-	// Thin
-	pvc3 := pvc1.DeepCopy()
-	pvc3.Name = "pvc-3"
-	pvc3.Spec.Resources.Requests[corev1.ResourceStorage] = *resource.NewQuantity(3<<20, resource.BinarySI)
-	assert.NoError(t, ch.AddThinPVC(lvg.Name, "tp-1", pvc1))
-	assert.NoError(t, ch.AddThinPVC(lvg.Name, "tp-1", pvc3))
-	thinSum, err := ch.GetLVGThinReservedSpace(lvg.Name, "tp-1")
-	assert.NoError(t, err)
-	assert.Equal(t, int64((1<<20)+(3<<20)), thinSum)
+	assert.True(t, c.HasReservation("res1"))
+	assert.Equal(t, int64(100), c.GetReservedSpace(pool1))
+	assert.Equal(t, int64(100), c.GetReservedSpace(pool2))
+
+	size, pools, found := c.GetReservation("res1")
+	assert.True(t, found)
+	assert.Equal(t, int64(100), size)
+	assert.Len(t, pools, 2)
 }
 
-func TestCache_UpdateLVG(t *testing.T) {
-	cache := NewCache(logger.Logger{}, DefaultPVCExpiredDurationSec)
-	name := "test-lvg"
-	lvg := &snc.LVMVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Status: snc.LVMVolumeGroupStatus{
-			AllocatedSize: resource.MustParse("1Gi"),
-		},
-	}
-	cache.AddLVG(lvg)
+func TestAddReservation_Idempotent(t *testing.T) {
+	c := newTestCache()
 
-	newLVG := &snc.LVMVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Status: snc.LVMVolumeGroupStatus{
-			AllocatedSize: resource.MustParse("2Gi"),
-		},
-	}
+	pool1 := StoragePoolKey{LVGName: "lvg1"}
+	pool2 := StoragePoolKey{LVGName: "lvg2"}
 
-	err := cache.UpdateLVG(newLVG)
-	if err != nil {
-		t.Error(err)
-	}
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1, pool2})
+	assert.Equal(t, int64(100), c.GetReservedSpace(pool1))
+	assert.Equal(t, int64(100), c.GetReservedSpace(pool2))
 
-	updatedLvg := cache.TryGetLVG(name)
-	assert.Equal(t, newLVG.Status.AllocatedSize, updatedLvg.Status.AllocatedSize)
+	// Replace with different pools and size
+	pool3 := StoragePoolKey{LVGName: "lvg3"}
+	c.AddReservation("res1", 30*time.Second, 200, []StoragePoolKey{pool3})
+
+	// Old pools should be freed
+	assert.Equal(t, int64(0), c.GetReservedSpace(pool1))
+	assert.Equal(t, int64(0), c.GetReservedSpace(pool2))
+	// New pool should have the new size
+	assert.Equal(t, int64(200), c.GetReservedSpace(pool3))
 }
 
-// Concurrency/race-oriented tests per Go race detector guidance:
-// https://go.dev/doc/articles/race_detector
-func TestCache_Race_AddUpdateRead(t *testing.T) {
-	log := logger.Logger{}
-	ch := NewCache(log, DefaultPVCExpiredDurationSec)
+func TestRemoveReservation(t *testing.T) {
+	c := newTestCache()
 
-	lvg := &snc.LVMVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{Name: "lvg-race"},
-		Status: snc.LVMVolumeGroupStatus{
-			Nodes:     []snc.LVMVolumeGroupNode{{Name: "node-1"}},
-			ThinPools: []snc.LVMVolumeGroupThinPoolStatus{{Name: "tp-1"}},
-		},
-	}
-	ch.AddLVG(lvg)
+	pool1 := StoragePoolKey{LVGName: "lvg1"}
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1})
 
-	var wg sync.WaitGroup
-	start := make(chan struct{})
+	assert.Equal(t, int64(100), c.GetReservedSpace(pool1))
 
-	// Writers: add/update PVCs
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			<-start
-			pvc := &corev1.PersistentVolumeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      fmt.Sprintf("pvc-%d", i),
-					Namespace: "ns",
-				},
-				Spec: corev1.PersistentVolumeClaimSpec{
-					Resources: corev1.VolumeResourceRequirements{
-						Requests: corev1.ResourceList{corev1.ResourceStorage: *resource.NewQuantity(int64(1<<20+i), resource.BinarySI)},
-					},
-				},
-				Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
-			}
-			_ = ch.AddThickPVC(lvg.Name, pvc)
-			_ = ch.AddThinPVC(lvg.Name, "tp-1", pvc)
+	c.RemoveReservation("res1")
 
-			// Update with selected node annotation
-			pvc.Annotations = map[string]string{SelectedNodeAnnotation: "node-1"}
-			_ = ch.UpdateThickPVC(lvg.Name, pvc)
-			_ = ch.UpdateThinPVC(lvg.Name, "tp-1", pvc)
-		}(i)
-	}
-
-	// Readers: query functions
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			_ = ch.GetAllLVG()
-			_ = ch.GetLVGNamesByNodeName("node-1")
-			_, _ = ch.GetAllPVCForLVG(lvg.Name)
-			_, _ = ch.GetLVGThickReservedSpace(lvg.Name)
-			_, _ = ch.GetLVGThinReservedSpace(lvg.Name, "tp-1")
-		}()
-	}
-
-	// Removers
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			<-start
-			pvc := &corev1.PersistentVolumeClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pvc-%d", i), Namespace: "ns"},
-			}
-			ch.RemovePVCFromTheCache(pvc)
-		}(i)
-	}
-
-	close(start)
-	wg.Wait()
+	assert.False(t, c.HasReservation("res1"))
+	assert.Equal(t, int64(0), c.GetReservedSpace(pool1))
 }
 
-func TestCache_Race_AddDeleteLVG_GetAll(t *testing.T) {
-	log := logger.Logger{}
-	ch := NewCache(log, DefaultPVCExpiredDurationSec)
+func TestRemoveReservation_NotFound(_ *testing.T) {
+	c := newTestCache()
+	// Should not panic
+	c.RemoveReservation("nonexistent")
+}
 
-	var wg sync.WaitGroup
-	start := make(chan struct{})
+func TestNarrowReservation_SinglePool(t *testing.T) {
+	c := newTestCache()
 
-	// Add/Update LVGs
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			<-start
-			lvg := &snc.LVMVolumeGroup{
-				ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("lvg-%d", i)},
-			}
-			ch.AddLVG(lvg)
-			lvg.Status.AllocatedSize = resource.MustParse(fmt.Sprintf("%dGi", 1+i))
-			_ = ch.UpdateLVG(lvg)
-		}(i)
-	}
+	pool1 := StoragePoolKey{LVGName: "lvg1"}
+	pool2 := StoragePoolKey{LVGName: "lvg2"}
+	pool3 := StoragePoolKey{LVGName: "lvg3"}
 
-	// Readers
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			_ = ch.GetAllLVG()
-		}()
-	}
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1, pool2, pool3})
 
-	// Deleters
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			<-start
-			ch.DeleteLVG(fmt.Sprintf("lvg-%d", i))
-		}(i)
-	}
+	assert.Equal(t, int64(100), c.GetReservedSpace(pool1))
+	assert.Equal(t, int64(100), c.GetReservedSpace(pool2))
+	assert.Equal(t, int64(100), c.GetReservedSpace(pool3))
 
-	close(start)
-	wg.Wait()
+	// Narrow to pool2 only
+	ok := c.NarrowReservation("res1", []StoragePoolKey{pool2}, 30*time.Second)
+	assert.True(t, ok)
+
+	assert.Equal(t, int64(0), c.GetReservedSpace(pool1))
+	assert.Equal(t, int64(100), c.GetReservedSpace(pool2))
+	assert.Equal(t, int64(0), c.GetReservedSpace(pool3))
+
+	size, pools, found := c.GetReservation("res1")
+	assert.True(t, found)
+	assert.Equal(t, int64(100), size)
+	assert.Len(t, pools, 1)
+	assert.Equal(t, pool2, pools[0])
+}
+
+func TestNarrowReservation_MultiplePools(t *testing.T) {
+	c := newTestCache()
+
+	pool1 := StoragePoolKey{LVGName: "lvg1"}
+	pool2 := StoragePoolKey{LVGName: "lvg2"}
+	pool3 := StoragePoolKey{LVGName: "lvg3"}
+
+	c.AddReservation("res1", 30*time.Second, 50, []StoragePoolKey{pool1, pool2, pool3})
+
+	// Keep pool1 and pool3
+	ok := c.NarrowReservation("res1", []StoragePoolKey{pool1, pool3}, 30*time.Second)
+	assert.True(t, ok)
+
+	assert.Equal(t, int64(50), c.GetReservedSpace(pool1))
+	assert.Equal(t, int64(0), c.GetReservedSpace(pool2))
+	assert.Equal(t, int64(50), c.GetReservedSpace(pool3))
+}
+
+func TestNarrowReservation_NotFound(t *testing.T) {
+	c := newTestCache()
+
+	ok := c.NarrowReservation("nonexistent", []StoragePoolKey{{LVGName: "lvg1"}}, 30*time.Second)
+	assert.False(t, ok)
+}
+
+func TestNarrowReservation_EmptyKeepPools(t *testing.T) {
+	c := newTestCache()
+
+	pool1 := StoragePoolKey{LVGName: "lvg1"}
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1})
+
+	// Narrow with empty keep = removes all pools, reservation removed entirely
+	ok := c.NarrowReservation("res1", []StoragePoolKey{}, 30*time.Second)
+	assert.True(t, ok)
+
+	assert.False(t, c.HasReservation("res1"))
+	assert.Equal(t, int64(0), c.GetReservedSpace(pool1))
+}
+
+func TestMultipleReservations_SamePool(t *testing.T) {
+	c := newTestCache()
+
+	pool := StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp1"}
+
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool})
+	c.AddReservation("res2", 30*time.Second, 200, []StoragePoolKey{pool})
+
+	// Pool should have sum of both reservations
+	assert.Equal(t, int64(300), c.GetReservedSpace(pool))
+
+	c.RemoveReservation("res1")
+	assert.Equal(t, int64(200), c.GetReservedSpace(pool))
+
+	c.RemoveReservation("res2")
+	assert.Equal(t, int64(0), c.GetReservedSpace(pool))
+}
+
+func TestCleanupExpired(t *testing.T) {
+	c := newTestCache()
+
+	pool := StoragePoolKey{LVGName: "lvg1"}
+
+	// Add reservation with very short TTL
+	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool})
+	// Add reservation with long TTL
+	c.AddReservation("res2", 1*time.Hour, 200, []StoragePoolKey{pool})
+
+	assert.Equal(t, int64(300), c.GetReservedSpace(pool))
+
+	// Wait for the short one to expire
+	time.Sleep(10 * time.Millisecond)
+
+	// Lazy check: GetReservedSpace should already skip the expired reservation
+	assert.Equal(t, int64(200), c.GetReservedSpace(pool))
+
+	// HasReservation should also report expired reservation as not found
+	assert.False(t, c.HasReservation("res1"))
+	assert.True(t, c.HasReservation("res2"))
+
+	// cleanupExpired frees memory (removes expired entries from map)
+	c.cleanupExpired()
+
+	// After cleanup, the reservation entry is physically gone
+	c.mtx.RLock()
+	_, inMap := c.reservations["res1"]
+	c.mtx.RUnlock()
+	assert.False(t, inMap, "expired reservation should be removed from map after cleanup")
+
+	assert.True(t, c.HasReservation("res2"))
+	assert.Equal(t, int64(200), c.GetReservedSpace(pool))
+}
+
+func TestGetReservedSpace_SkipsExpired(t *testing.T) {
+	c := newTestCache()
+
+	pool := StoragePoolKey{LVGName: "lvg1"}
+
+	// Add reservation with very short TTL
+	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool})
+
+	// Before expiration, space is reserved
+	assert.Equal(t, int64(100), c.GetReservedSpace(pool))
+
+	// Wait for TTL to expire
+	time.Sleep(10 * time.Millisecond)
+
+	// GetReservedSpace should return 0 without explicit cleanup
+	assert.Equal(t, int64(0), c.GetReservedSpace(pool))
+}
+
+func TestGetAllPools(t *testing.T) {
+	c := newTestCache()
+
+	pool1 := StoragePoolKey{LVGName: "lvg1"}
+	pool2 := StoragePoolKey{LVGName: "lvg2", ThinPoolName: "tp1"}
+
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1, pool2})
+
+	pools := c.GetAllPools()
+	assert.Len(t, pools, 2)
+	assert.Equal(t, int64(100), pools[pool1])
+	assert.Equal(t, int64(100), pools[pool2])
+}
+
+func TestGetAllPools_SkipsExpired(t *testing.T) {
+	c := newTestCache()
+
+	pool1 := StoragePoolKey{LVGName: "lvg1"}
+	pool2 := StoragePoolKey{LVGName: "lvg2"}
+
+	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool1})
+	c.AddReservation("res2", 1*time.Hour, 200, []StoragePoolKey{pool2})
+
+	time.Sleep(10 * time.Millisecond)
+
+	pools := c.GetAllPools()
+	// Only active reservation's pool should be present
+	assert.Len(t, pools, 1)
+	assert.Equal(t, int64(200), pools[pool2])
+}
+
+func TestGetAllReservations(t *testing.T) {
+	c := newTestCache()
+
+	pool1 := StoragePoolKey{LVGName: "lvg1"}
+	pool2 := StoragePoolKey{LVGName: "lvg2"}
+
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1})
+	c.AddReservation("res2", 30*time.Second, 200, []StoragePoolKey{pool1, pool2})
+
+	reservations := c.GetAllReservations()
+	assert.Len(t, reservations, 2)
+
+	r1 := reservations["res1"]
+	assert.Equal(t, int64(100), r1.Size)
+	assert.Len(t, r1.Pools, 1)
+	assert.False(t, r1.Expired)
+
+	r2 := reservations["res2"]
+	assert.Equal(t, int64(200), r2.Size)
+	assert.Len(t, r2.Pools, 2)
+	assert.False(t, r2.Expired)
+}
+
+func TestGetAllReservations_MarksExpired(t *testing.T) {
+	c := newTestCache()
+
+	pool := StoragePoolKey{LVGName: "lvg1"}
+
+	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool})
+	c.AddReservation("res2", 1*time.Hour, 200, []StoragePoolKey{pool})
+
+	time.Sleep(10 * time.Millisecond)
+
+	reservations := c.GetAllReservations()
+	assert.Len(t, reservations, 2)
+
+	r1 := reservations["res1"]
+	assert.True(t, r1.Expired, "expired reservation should be marked as Expired")
+	assert.Equal(t, int64(100), r1.Size)
+
+	r2 := reservations["res2"]
+	assert.False(t, r2.Expired, "active reservation should not be marked as Expired")
+	assert.Equal(t, int64(200), r2.Size)
+}
+
+func TestStoragePoolKey_String(t *testing.T) {
+	thick := StoragePoolKey{LVGName: "lvg1"}
+	assert.Equal(t, "lvg1", thick.String())
+
+	thin := StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp1"}
+	assert.Equal(t, "lvg1/tp1", thin.String())
+}
+
+func TestNarrowReservation_UpdatesTTL(t *testing.T) {
+	c := newTestCache()
+
+	pool1 := StoragePoolKey{LVGName: "lvg1"}
+	pool2 := StoragePoolKey{LVGName: "lvg2"}
+
+	c.AddReservation("res1", 1*time.Second, 100, []StoragePoolKey{pool1, pool2})
+
+	// Narrow with a longer TTL
+	c.NarrowReservation("res1", []StoragePoolKey{pool1}, 1*time.Hour)
+
+	// Wait for the original TTL to expire
+	time.Sleep(2 * time.Second)
+
+	c.cleanupExpired()
+
+	// Reservation should still be alive due to updated TTL
+	assert.True(t, c.HasReservation("res1"))
 }

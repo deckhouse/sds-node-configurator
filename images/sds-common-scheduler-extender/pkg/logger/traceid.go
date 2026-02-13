@@ -65,4 +65,3 @@ func WithTraceIDLogger(ctx context.Context, log Logger) Logger {
 	}
 	return log.WithValues(traceIDKeyName, traceID)
 }
-

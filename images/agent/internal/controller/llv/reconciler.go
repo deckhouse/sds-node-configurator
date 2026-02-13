@@ -369,10 +369,17 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 
 	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] adds the LV %s to the cache", llv.Spec.ActualLVNameOnTheNode))
 	r.sdsCache.AddLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] tries to get the LV %s actual size", llv.Spec.ActualLVNameOnTheNode))
-	actualSize := r.getLVActualSize(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+
+	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] tries to get the LV %s actual size directly from LVM", llv.Spec.ActualLVNameOnTheNode))
+	lvData, cmd, _, getLVErr := r.commands.GetLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] ran cmd: %s", cmd))
+	if getLVErr != nil {
+		r.log.Warning(fmt.Sprintf("[reconcileLLVCreateFunc] unable to get LV %s info from LVM: %s, will retry", llv.Spec.ActualLVNameOnTheNode, getLVErr.Error()))
+		return true, nil
+	}
+	actualSize := lvData.LVSize
 	if actualSize.Value() == 0 {
-		r.log.Warning(fmt.Sprintf("[reconcileLLVCreateFunc] unable to get actual size for LV %s in VG %s (likely LV was not found in the cache), retry...", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode))
+		r.log.Warning(fmt.Sprintf("[reconcileLLVCreateFunc] LV %s in VG %s returned zero size from LVM, retry...", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode))
 		return true, nil
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] successfully got the LV %s actual size", llv.Spec.ActualLVNameOnTheNode))
@@ -472,12 +479,16 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 
 	r.log.Info(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully extended LV %s in VG %s for LVMLogicalVolume resource with name: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Name))
 
-	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] tries to get LVMLogicalVolume %s actual size after the extension", llv.Name))
-	newActualSize := r.getLVActualSize(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-
-	// this case might be triggered if sds cache will not update lv state in time
-	if newActualSize.Value() == actualSize.Value() {
-		r.log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s of the LVMLogicalVolume %s was extended but cache is not updated yet. It will be retried", llv.Spec.ActualLVNameOnTheNode, llv.Name))
+	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] tries to get LVMLogicalVolume %s actual size after the extension directly from LVM", llv.Name))
+	lvData, getLVCmd, _, getLVErr := r.commands.GetLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] ran cmd: %s", getLVCmd))
+	if getLVErr != nil {
+		r.log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] unable to get LV %s info from LVM after extension: %s, will retry", llv.Spec.ActualLVNameOnTheNode, getLVErr.Error()))
+		return true, nil
+	}
+	newActualSize := lvData.LVSize
+	if newActualSize.Value() == 0 || newActualSize.Value() == actualSize.Value() {
+		r.log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s of the LVMLogicalVolume %s was extended but LVM still reports old size %s, will retry", llv.Spec.ActualLVNameOnTheNode, llv.Name, newActualSize.String()))
 		return true, nil
 	}
 

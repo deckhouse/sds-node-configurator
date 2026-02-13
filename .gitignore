@@ -44,9 +44,16 @@ __pycache__/
 /lib/python/dist/
 
 # dev
-images/agent/dev
-images/agent/Makefile
+hack.sh
+**/Dockerfile-dev
+.secret
+images/**/Makefile
 local_build.sh
 /base_images.yml
+
+# local caches (Cursor/Go/direnv, etc.)
+.cache/
+.direnv/
+.gocache/
 
 images/sds-common-scheduler-extender/REVIEW.md
