@@ -17,10 +17,12 @@ limitations under the License.
 package consts
 
 const (
-	ModuleName                        string = "sdsNodeConfigurator"
-	ModuleNamespace                   string = "d8-sds-node-configurator"
-	ModulePluralName                  string = "sds-node-configurator"
-	WebhookCertCn                     string = "webhooks"
-	SdsCommonSchedulerExtenderCertCn  string = "sds-common-scheduler-extender"
-	CommonSchedulerExtenderSecretName string = "common-scheduler-extender-https-certs"
+	SdsReplicatedVolumeProvisioner = "replicated.csi.storage.deckhouse.io"
+	SdsLocalVolumeProvisioner      = "local.csi.storage.deckhouse.io"
+
+	LvmTypeParamKey         = "csi.storage.deckhouse.io/lvm-type"
+	LVMVolumeGroupsParamKey = "csi.storage.deckhouse.io/lvm-volume-groups"
+
+	Thick = "Thick"
+	Thin  = "Thin"
 )
