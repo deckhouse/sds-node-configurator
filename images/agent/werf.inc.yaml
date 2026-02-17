@@ -26,7 +26,7 @@ secrets:
 shell:
   install:
     - git config --global advice.detachedHead false
-    - git clone --depth 1 --branch {{ .Versions.UTIL_LINUX }} $(cat /run/secrets/SOURCE_REPO)/util-linux/util-linux.git /src/util-linux
+    - git clone --depth 1 --branch v{{ include "get_oss_version_by_id" (list "util_linux" .) }} $(cat /run/secrets/SOURCE_REPO)/util-linux/util-linux.git /src/util-linux
     - rm -rf /src/util-linux/.git
     - rm -rf /src/.git
 
