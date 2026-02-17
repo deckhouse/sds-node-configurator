@@ -244,12 +244,12 @@ var _ = Describe("Cleaning up volume", func() {
 										gomock.InOrder(func() (calls []any) {
 											for pass := 0; pass < passCount; pass++ {
 												for _, byteRange := range expectedByteRangeCover {
-													var offset int64 = byteRange.Start
+													var offset = byteRange.Start
 													deviceSizeRemain := deviceSize - byteRange.Start
 													for remainInRange := byteRange.Count; remainInRange > 0; {
-														var toRead int = int(min(remainInRange, int64(bufferSize)))
-														var read int = int(min(readLimit, int64(toRead)))
-														var written int = int(min(deviceSizeRemain, int64(read)))
+														var toRead = int(min(remainInRange, int64(bufferSize)))
+														var read = int(min(readLimit, int64(toRead)))
+														var written = int(min(deviceSizeRemain, int64(read)))
 
 														calls = append(calls, input.EXPECT().Read(LengthFormatter(gomock.Len(toRead))).Return(read, nil))
 														if read != 0 {

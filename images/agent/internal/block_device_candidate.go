@@ -181,7 +181,7 @@ func newBlockDeviceLabels(blockDevice *v1alpha1.BlockDevice) map[string]string {
 	slug.MaxLength = 63
 	slug.EnableSmartTruncate = false
 	maps.Copy(result, map[string]string{
-		MetadataNameLabelKey:                           slug.Make(blockDevice.ObjectMeta.Name),
+		MetadataNameLabelKey:                           slug.Make(blockDevice.Name),
 		HostNameLabelKey:                               slug.Make(blockDevice.Status.NodeName),
 		v1alpha1.BlockDeviceTypeLabelKey:               slug.Make(blockDevice.Status.Type),
 		v1alpha1.BlockDeviceFSTypeLabelKey:             slug.Make(blockDevice.Status.FsType),

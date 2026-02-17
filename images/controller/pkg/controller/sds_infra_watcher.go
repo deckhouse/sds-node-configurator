@@ -61,7 +61,7 @@ func RunSdsInfraWatcher(
 			case <-ctx.Done():
 				log.Info("[RunSdsInfraWatcher] context cancelled, stopping")
 				return nil
-			case <-time.After(cfg.ScanIntervalSec):
+			case <-time.After(cfg.ScanInterval):
 			}
 			log.Info("[RunSdsInfraWatcher] starts the reconciliation loop")
 

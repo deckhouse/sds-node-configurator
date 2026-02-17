@@ -41,7 +41,7 @@ const (
 type Options struct {
 	Loglevel                logger.Verbosity
 	MetricsPort             string
-	ScanIntervalSec         time.Duration
+	ScanInterval            time.Duration
 	NodeName                string
 	HealthProbeBindAddress  string
 	LeaderElection          bool
@@ -71,13 +71,13 @@ func NewConfig() (*Options, error) {
 
 	scanInt := os.Getenv(ScanInterval)
 	if scanInt == "" {
-		opts.ScanIntervalSec = 5 * time.Second
+		opts.ScanInterval = 5 * time.Second
 	} else {
 		interval, err := strconv.Atoi(scanInt)
 		if err != nil {
 			return nil, fmt.Errorf("[NewConfig] unable to get %s, error: %w", ScanInterval, err)
 		}
-		opts.ScanIntervalSec = time.Duration(interval) * time.Second
+		opts.ScanInterval = time.Duration(interval) * time.Second
 	}
 
 	leaderElection := os.Getenv(LeaderElectionEnvName)

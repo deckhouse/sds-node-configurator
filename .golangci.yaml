@@ -32,6 +32,10 @@ linters:
         text: 'exported: .*'
       - path: (.+)\.go$
         text: could not import
+      - path: (.+)\.go$
+        text: avoid package names that conflict
+      - path: (.+)\.go$
+        text: avoid meaningless package names
     paths:
       - third_party$
       - builtin$

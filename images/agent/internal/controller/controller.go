@@ -176,7 +176,7 @@ func makeReconcileDispatcher[T client.Object](
 	cl := mgr.GetClient()
 	return reconcile.Func(func(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 		// load object being reconciled
-		log.Info(fmt.Sprintf("[ReconcileDispatcher] Reconciler starts to reconcile the request %s", req.NamespacedName.String()))
+		log.Info(fmt.Sprintf("[ReconcileDispatcher] Reconciler starts to reconcile the request %s", req.String()))
 
 		t := reflect.TypeFor[T]()
 		obj := reflect.New(t.Elem()).Interface().(T)
@@ -187,7 +187,7 @@ func makeReconcileDispatcher[T client.Object](
 				return reconcile.Result{}, nil
 			}
 
-			log.Error(err, fmt.Sprintf("[ReconcileDispatcher] unable to get an object by NamespacedName %s", req.NamespacedName.String()))
+			log.Error(err, fmt.Sprintf("[ReconcileDispatcher] unable to get an object by NamespacedName %s", req.String()))
 			return reconcile.Result{}, err
 		}
 
