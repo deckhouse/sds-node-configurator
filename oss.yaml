@@ -1,0 +1,12 @@
+- name: util-linux
+  link: https://github.com/util-linux/util-linux
+  description: A collection of essential Linux utilities.
+  license: GPL-2.0
+  id: util_linux
+  version: 2.39.3
+- name: LVM2
+  link: https://github.com/lvmteam/lvm2
+  description: Logical Volume Manager 2 for Linux.
+  license: GPL-2.0
+  id: lvm2
+  version: d786a8f820d54ce87a919e6af5426c333c173b11

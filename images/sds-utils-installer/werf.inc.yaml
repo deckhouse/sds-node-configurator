@@ -28,7 +28,7 @@ shell:
     - git config --global advice.detachedHead false
     - git clone --depth 1 $(cat /run/secrets/SOURCE_REPO)/lvmteam/lvm2.git /src/lvm2
     - cd /src/lvm2
-    - git fetch --depth 1 origin {{ .Versions.LVM2 }}
+    - git fetch --depth 1 origin {{ include "get_oss_version_by_id" (list "lvm2" .) }}
     - rm -rf /src/lvm2/.git
 
 ---

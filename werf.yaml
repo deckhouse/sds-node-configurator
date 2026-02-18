@@ -1,4 +1,4 @@
-project: sds-replicated-volume
+project: sds-node-configurator
 configVersion: 1
 build:
   imageSpec:

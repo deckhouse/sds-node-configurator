@@ -79,9 +79,9 @@ func RunLVGConditionsWatcher(
 			}
 
 			if shouldRequeue {
-				log.Warning(fmt.Sprintf("[RunLVGConditionsWatcher] the LVMVolumeGroup %s request will be requeued in %s", lvg.Name, cfg.ScanIntervalSec.String()))
+				log.Warning(fmt.Sprintf("[RunLVGConditionsWatcher] the LVMVolumeGroup %s request will be requeued in %s", lvg.Name, cfg.ScanInterval.String()))
 				return reconcile.Result{
-					RequeueAfter: cfg.ScanIntervalSec,
+					RequeueAfter: cfg.ScanInterval,
 				}, nil
 			}
 

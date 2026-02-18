@@ -82,8 +82,8 @@ func RunLVMVolumeGroupSetWatcher(
 			}
 
 			if shouldRequeue {
-				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] the LVMVolumeGroupSet %s request should be requeued in %s", lvgSet.Name, cfg.ScanIntervalSec.String()))
-				return reconcile.Result{RequeueAfter: cfg.ScanIntervalSec}, nil
+				log.Warning(fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] the LVMVolumeGroupSet %s request should be requeued in %s", lvgSet.Name, cfg.ScanInterval.String()))
+				return reconcile.Result{RequeueAfter: cfg.ScanInterval}, nil
 			}
 
 			log.Info(fmt.Sprintf("[RunLVMVolumeGroupSetWatcher] successfully reconciled the request of the LVMVolumeGroupSet %s", request.Name))

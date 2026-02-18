@@ -199,7 +199,7 @@ var _ = Describe("Block device candidate", func() {
 				blockDevice.Status.MachineID = "prevMachineId"
 
 				expectedLabels = map[string]string{
-					internal.MetadataNameLabelKey:                  blockDevice.ObjectMeta.Name,
+					internal.MetadataNameLabelKey:                  blockDevice.Name,
 					internal.HostNameLabelKey:                      candidate.NodeName,
 					v1alpha1.BlockDeviceTypeLabelKey:               candidate.Type,
 					v1alpha1.BlockDeviceFSTypeLabelKey:             candidate.FSType,

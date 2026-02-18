@@ -77,8 +77,8 @@ func RunBlockDeviceLabelsWatcher(
 			}
 
 			if shouldRequeue {
-				log.Warning(fmt.Sprintf("[RunBlockDeviceLabelsWatcher] the request for the BlockDevice %s should be requeued in %s", bd.Name, cfg.ScanIntervalSec.String()))
-				return reconcile.Result{RequeueAfter: cfg.ScanIntervalSec}, nil
+				log.Warning(fmt.Sprintf("[RunBlockDeviceLabelsWatcher] the request for the BlockDevice %s should be requeued in %s", bd.Name, cfg.ScanInterval.String()))
+				return reconcile.Result{RequeueAfter: cfg.ScanInterval}, nil
 			}
 
 			log.Info(fmt.Sprintf("[RunBlockDeviceLabelsWatcher] the BlockDevice %s was successfully reconciled", bd.Name))
