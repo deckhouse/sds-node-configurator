@@ -9,7 +9,6 @@
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmlogicalvolumesnapshots") "verbs" (list "get" "list" "watch"))
     (dict "apiGroups" (list "") "resources" (list "nodes" "pods") "verbs" (list "get" "list" "watch"))
     (dict "apiGroups" (list "coordination.k8s.io") "resources" (list "leases") "verbs" (list "get" "list" "watch" "update" "create" "delete"))
-    (dict "apiGroups" (list "deckhouse.io") "resources" (list "moduleconfigs") "verbs" (list "get" "list" "watch" "update" "patch"))
   )
 }}
 {{ include "helm_lib_module_controller_rbac" (list . $rbacConfig) }}

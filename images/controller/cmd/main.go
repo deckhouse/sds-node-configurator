@@ -127,12 +127,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = controller.RunMCWatcher(mgr, *log)
-	if err != nil {
-		log.Error(err, "[main] unable to run MCWatcher controller")
-		os.Exit(1)
-	}
-
 	err = controller.RunBlockDeviceLabelsWatcher(mgr, *log, *cfgParams)
 	if err != nil {
 		log.Error(err, "[main] unable to run BlockDeviceWatcher controller")
