@@ -1,8 +1,9 @@
 # Makefile для E2E тестов sds-node-configurator
 
 E2E_IMAGE ?= e2e-tests:latest
-E2E_NODE_NAME ?= worker-0
-# E2E_DEVICE_PATH: if set, test expects this exact path (e.g. /dev/vdb); if unset, any /dev/sdX or /dev/vdX on the node is accepted
+# E2E_NODE_NAME: if set, only BlockDevices on this node are considered; if unset, any node is accepted
+E2E_NODE_NAME ?=
+# E2E_DEVICE_PATH: if set, test expects this exact path; if unset, any block device with size > 0 is accepted
 E2E_DEVICE_PATH ?=
 E2E_DEVICE_SERIAL ?=
 

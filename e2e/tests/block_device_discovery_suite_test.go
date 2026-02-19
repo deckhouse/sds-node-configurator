@@ -70,14 +70,11 @@ var _ = AfterSuite(func() {
 	cancel()
 })
 
-// GetNodeName returns the node name for testing.
-// Can be set via the E2E_NODE_NAME environment variable.
+// GetNodeName returns the node name for optional filtering.
+// When set via E2E_NODE_NAME, only BlockDevices on that node are considered.
+// When unset, any node is accepted (node name can vary per cluster).
 func GetNodeName() string {
-	nodeName := os.Getenv("E2E_NODE_NAME")
-	if nodeName == "" {
-		nodeName = "worker-0" // default value
-	}
-	return nodeName
+	return os.Getenv("E2E_NODE_NAME")
 }
 
 // GetExpectedDeviceSerial returns the expected device serial number.

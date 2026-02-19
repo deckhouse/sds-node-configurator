@@ -44,19 +44,17 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 			expectedDevicePath = GetExpectedDevicePath()
 			expectedSerial = GetExpectedDeviceSerial()
 
-			By(fmt.Sprintf("Using node: %s", nodeName))
+			if nodeName != "" {
+				By(fmt.Sprintf("Filter by node: %s", nodeName))
+			} else {
+				By("Filter by node: any (node name not required)")
+			}
 			if expectedDevicePath != "" {
 				By(fmt.Sprintf("Expected device path: %s", expectedDevicePath))
 			} else {
-				By("Expected device path: any block device on the node (path not filtered)")
+				By("Expected device path: any block device (path not filtered)")
 			}
 			By(fmt.Sprintf("Expected serial: %s", expectedSerial))
-
-			// Compute expected BlockDevice name from serial
-			if expectedSerial != "" {
-				expectedBDName = generateBlockDeviceName(nodeName, expectedSerial, "", "")
-				By(fmt.Sprintf("Expected BlockDevice name: %s", expectedBDName))
-			}
 		})
 
 		It("Should discover a new unformatted disk and create a BlockDevice object", func() {
@@ -72,7 +70,8 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 			By(fmt.Sprintf("BlockDevices in cluster: %d. %s", len(blockDevicesList.Items), diag))
 
 			// Wait for BlockDevice to appear within 5 minutes.
-			// If E2E_DEVICE_PATH is set, match that path on the node; otherwise accept any BlockDevice on the node with size > 0.
+			// If E2E_NODE_NAME is set, only consider that node; else any node.
+			// If E2E_DEVICE_PATH is set, match that path; otherwise accept any BlockDevice with size > 0 and path /dev/...
 			Eventually(func(g Gomega) {
 				foundBD = nil
 				err := k8sClient.List(ctx, &blockDevicesList, &client.ListOptions{})
@@ -80,7 +79,7 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 
 				for i := range blockDevicesList.Items {
 					bd := &blockDevicesList.Items[i]
-					if bd.Status.NodeName != nodeName {
+					if nodeName != "" && bd.Status.NodeName != nodeName {
 						continue
 					}
 					if expectedDevicePath != "" {
@@ -88,12 +87,9 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 							continue
 						}
 					} else {
-						// Any block device on the node with non-zero size (skip invalid/empty)
 						if bd.Status.Size.IsZero() {
 							continue
 						}
-						// Prefer whole-disk paths (e.g. /dev/sda, /dev/vdb, /dev/nvme0n1), skip partitions if we have a whole disk
-						// For now accept any path that looks like /dev/...
 						if bd.Status.Path == "" || !strings.HasPrefix(bd.Status.Path, "/dev/") {
 							continue
 						}
@@ -102,17 +98,20 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 					return
 				}
 
-				// Build a hint for debugging: what nodes/paths do we actually have?
 				hint := formatBlockDevicesHint(blockDevicesList.Items, nodeName)
 				g.Expect(foundBD).NotTo(BeNil(), fmt.Sprintf(
-					"BlockDevice on nodeName=%s not found (path filter: %s). Total BlockDevices: %d. %s",
-					nodeName, orPathFilter(expectedDevicePath), len(blockDevicesList.Items), hint,
+					"No matching BlockDevice (node filter: %s, path filter: %s). Total BlockDevices: %d. %s",
+					orNodeFilter(nodeName), orPathFilter(expectedDevicePath), len(blockDevicesList.Items), hint,
 				))
 			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
-			// Use the found device path for subsequent checks (so Step 4 passes when path was not specified)
+			// Use the found device for all subsequent checks (node/path can vary per cluster)
+			nodeName = foundBD.Status.NodeName
 			expectedDevicePath = foundBD.Status.Path
-			By(fmt.Sprintf("Found BlockDevice: %s (path: %s)", foundBD.Name, expectedDevicePath))
+			if expectedSerial != "" {
+				expectedBDName = generateBlockDeviceName(nodeName, expectedSerial, "", "")
+			}
+			By(fmt.Sprintf("Found BlockDevice: %s (node: %s, path: %s)", foundBD.Name, nodeName, expectedDevicePath))
 
 			// Step 2: Verify resource name matches expected (when serial is set)
 			By("Step 2: Verifying BlockDevice name based on serial number")
@@ -210,6 +209,13 @@ func orPathFilter(path string) string {
 	return "path=" + path
 }
 
+func orNodeFilter(node string) string {
+	if node == "" {
+		return "any"
+	}
+	return "node=" + node
+}
+
 // formatBlockDevicesHint returns a short summary of existing BlockDevices for error messages.
 func formatBlockDevicesHint(items []v1alpha1.BlockDevice, expectedNode string) string {
 	if len(items) == 0 {
@@ -231,7 +237,7 @@ func formatBlockDevicesHint(items []v1alpha1.BlockDevice, expectedNode string) s
 		lines = append(lines, fmt.Sprintf("%s: nodeName=%s path=%s size=%s", bd.Name, n, path, size))
 	}
 	hint := "Existing BlockDevices: " + strings.Join(lines, "; ")
-	if !nodesSeen[expectedNode] {
+	if expectedNode != "" && !nodesSeen[expectedNode] {
 		var nodes []string
 		for n := range nodesSeen {
 			nodes = append(nodes, n)
