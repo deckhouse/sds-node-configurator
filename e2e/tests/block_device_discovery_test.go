@@ -65,6 +65,12 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 			var foundBD *v1alpha1.BlockDevice
 			var blockDevicesList v1alpha1.BlockDeviceList
 
+			// Diagnostic: list once and print what we see (so we know if List is empty or node names differ).
+			err := k8sClient.List(ctx, &blockDevicesList, &client.ListOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			diag := formatBlockDevicesHint(blockDevicesList.Items, nodeName)
+			By(fmt.Sprintf("BlockDevices in cluster: %d. %s", len(blockDevicesList.Items), diag))
+
 			// Wait for BlockDevice to appear within 5 minutes.
 			// If E2E_DEVICE_PATH is set, match that path on the node; otherwise accept any BlockDevice on the node with size > 0.
 			Eventually(func(g Gomega) {
