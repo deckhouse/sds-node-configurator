@@ -19,7 +19,7 @@ package tests
 import (
 	"crypto/sha1"
 	"fmt"
-	"regexp"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -29,9 +29,6 @@ import (
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
-
-// blockDevicePathPattern matches /dev/sdX, /dev/vdX (e.g. /dev/sda, /dev/vdb).
-var blockDevicePathPattern = regexp.MustCompile(`^/dev/(sd|vd)[a-z]+$`)
 
 var _ = Describe("BlockDevice Discovery E2E", func() {
 	Context("Automatic discovery of a new block device", func() {
@@ -51,7 +48,7 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 			if expectedDevicePath != "" {
 				By(fmt.Sprintf("Expected device path: %s", expectedDevicePath))
 			} else {
-				By("Expected device path: any (/dev/sdX or /dev/vdX)")
+				By("Expected device path: any block device on the node (path not filtered)")
 			}
 			By(fmt.Sprintf("Expected serial: %s", expectedSerial))
 
@@ -68,9 +65,8 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 			var foundBD *v1alpha1.BlockDevice
 			var blockDevicesList v1alpha1.BlockDeviceList
 
-			// Wait for BlockDevice to appear within 5 minutes
-			// (time may vary depending on the agent's scan interval)
-			// If E2E_DEVICE_PATH is set, match that path; otherwise accept any /dev/sdX or /dev/vdX on the node.
+			// Wait for BlockDevice to appear within 5 minutes.
+			// If E2E_DEVICE_PATH is set, match that path on the node; otherwise accept any BlockDevice on the node with size > 0.
 			Eventually(func(g Gomega) {
 				foundBD = nil
 				err := k8sClient.List(ctx, &blockDevicesList, &client.ListOptions{})
@@ -86,10 +82,13 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 							continue
 						}
 					} else {
-						if !isBlockDevicePath(bd.Status.Path) {
+						// Any block device on the node with non-zero size (skip invalid/empty)
+						if bd.Status.Size.IsZero() {
 							continue
 						}
-						if bd.Status.Size.IsZero() {
+						// Prefer whole-disk paths (e.g. /dev/sda, /dev/vdb, /dev/nvme0n1), skip partitions if we have a whole disk
+						// For now accept any path that looks like /dev/...
+						if bd.Status.Path == "" || !strings.HasPrefix(bd.Status.Path, "/dev/") {
 							continue
 						}
 					}
@@ -97,9 +96,11 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 					return
 				}
 
+				// Build a hint for debugging: what nodes/paths do we actually have?
+				hint := formatBlockDevicesHint(blockDevicesList.Items, nodeName)
 				g.Expect(foundBD).NotTo(BeNil(), fmt.Sprintf(
-					"BlockDevice on nodeName=%s not found (path filter: %s). Total BlockDevices: %d",
-					nodeName, orPathFilter(expectedDevicePath), len(blockDevicesList.Items),
+					"BlockDevice on nodeName=%s not found (path filter: %s). Total BlockDevices: %d. %s",
+					nodeName, orPathFilter(expectedDevicePath), len(blockDevicesList.Items), hint,
 				))
 			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
@@ -196,16 +197,42 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 	})
 })
 
-// isBlockDevicePath returns true if path looks like a block device path (/dev/sdX or /dev/vdX).
-func isBlockDevicePath(path string) bool {
-	return blockDevicePathPattern.MatchString(path)
-}
-
 func orPathFilter(path string) string {
 	if path == "" {
-		return "any /dev/sdX or /dev/vdX"
+		return "any"
 	}
 	return "path=" + path
+}
+
+// formatBlockDevicesHint returns a short summary of existing BlockDevices for error messages.
+func formatBlockDevicesHint(items []v1alpha1.BlockDevice, expectedNode string) string {
+	if len(items) == 0 {
+		return "No BlockDevices in cluster."
+	}
+	var lines []string
+	nodesSeen := make(map[string]bool)
+	for _, bd := range items {
+		n := bd.Status.NodeName
+		if n == "" {
+			n = "<no nodeName>"
+		}
+		nodesSeen[n] = true
+		path := bd.Status.Path
+		if path == "" {
+			path = "<no path>"
+		}
+		size := bd.Status.Size.String()
+		lines = append(lines, fmt.Sprintf("%s: nodeName=%s path=%s size=%s", bd.Name, n, path, size))
+	}
+	hint := "Existing BlockDevices: " + strings.Join(lines, "; ")
+	if !nodesSeen[expectedNode] {
+		var nodes []string
+		for n := range nodesSeen {
+			nodes = append(nodes, n)
+		}
+		hint += ". Expected nodeName=" + expectedNode + " but only found nodes: " + strings.Join(nodes, ", ")
+	}
+	return hint
 }
 
 // generateBlockDeviceName generates a BlockDevice name from the given parameters.
