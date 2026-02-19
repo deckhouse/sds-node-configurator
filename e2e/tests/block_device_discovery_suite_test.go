@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -61,7 +61,7 @@ var _ = BeforeSuite(func() {
 	Expect(k8sClient).NotTo(BeNil())
 
 	// Verify we can connect to the cluster
-	_, err = k8sClient.RESTMapper().RESTMapping(v1alpha1.GroupVersion.WithKind("BlockDevice").GroupKind())
+	_, err = k8sClient.RESTMapper().RESTMapping(v1alpha1.SchemeGroupVersion.WithKind("BlockDevice").GroupKind())
 	Expect(err).NotTo(HaveOccurred())
 })
 

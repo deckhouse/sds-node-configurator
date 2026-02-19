@@ -1,254 +1,179 @@
-# E2E tests for sds-node-configurator
+# E2E тесты для sds-node-configurator
 
-This directory contains end-to-end (e2e) tests for the `sds-node-configurator` module.
+Данный каталог содержит end-to-end (e2e) тесты для модуля `sds-node-configurator`.
 
-## Description
+## Описание
 
-E2E tests are intended to verify the full lifecycle of the module in a real Kubernetes cluster. The tests use the [Ginkgo](https://onsi.github.io/ginkgo/) framework for organizing test scenarios and [Gomega](https://onsi.github.io/gomega/) for assertions.
+E2E тесты предназначены для проверки полного цикла работы модуля в реальном Kubernetes кластере. Тесты используют фреймворк [Ginkgo](https://onsi.github.io/ginkgo/) для организации тестовых сценариев и [Gomega](https://onsi.github.io/gomega/) для утверждений (assertions).
 
-## Prerequisites
+## Предварительные требования
 
-1. **Kubernetes cluster**: An accessible Kubernetes cluster with the `sds-node-configurator` module installed
-2. **kubectl**: Configured access to the cluster via kubectl (file `~/.kube/config`)
-3. **Go**: Go version 1.24.9 or higher
-4. **Permissions**: Sufficient permissions to create/read/delete BlockDevice resources
+1. **Kubernetes кластер**: Доступный Kubernetes кластер с установленным модулем `sds-node-configurator`
+2. **kubectl**: Настроенный доступ к кластеру через kubectl
+3. **Docker**: Для сборки образа тестов (при запуске в кластере)
 
-## Test structure
+## Структура
 
 ```
 e2e/
-├── README.md                                    # This file
-├── go.mod                                       # Go module for e2e tests
-├── go.sum                                       # Go dependencies
+├── Dockerfile                                   # Образ для запуска тестов в кластере
+├── Makefile                                     # Команды для сборки и запуска
+├── README.md                                    # Данный файл
+├── go.mod                                       # Go модуль
+├── go.sum                                       # Зависимости
+├── manifests/
+│   ├── rbac.yaml                                # ServiceAccount, ClusterRole, ClusterRoleBinding
+│   └── job.yaml                                 # Job для запуска тестов
 └── tests/
-    ├── block_device_discovery_suite_test.go     # Test environment initialization
-    ├── block_device_discovery_test.go           # Main e2e tests
-    └── helpers.go                               # Helper functions
+    ├── block_device_discovery_suite_test.go     # Инициализация Ginkgo suite
+    ├── block_device_discovery_test.go           # Основные тесты
+    └── helpers.go                               # Вспомогательные функции
 ```
 
-## Test scenarios
+## Тестовые сценарии
 
-### 1. Automatic discovery of a new block device
+### 1. Автоматическое обнаружение нового блочного устройства
 
-**Scenario**: `Should discover a new unformatted disk and create a BlockDevice object`
+**Сценарий**: `Должен обнаружить новый неразмеченный диск и создать объект BlockDevice`
 
-**Description**:
-- A new unformatted disk appears on the node (e.g. `/dev/sdb`)
-- After some time, a BlockDevice object appears in the cluster
-- All fields of the object are verified for correctness
+**Описание**:
+- На ноде появляется новый неразмеченный диск (например, `/dev/sdb`)
+- Через некоторое время в кластере появляется объект BlockDevice
+- Проверяется корректность всех полей объекта
 
-**Checks**:
-- ✅ BlockDevice object exists
-- ✅ `status.nodeName` matches the node name
-- ✅ `status.path` matches the device path
-- ✅ `status.size` is greater than 0 (minimum 1Gi)
-- ✅ `status.serial` contains the device serial number
-- ✅ `status.consumable` = true for unformatted disk
-- ✅ `status.fsType` is empty for unformatted disk
-- ✅ BlockDevice resource name is computed from the serial number
+**Проверки**:
+- ✅ Объект BlockDevice существует
+- ✅ `status.nodeName` соответствует имени ноды
+- ✅ `status.path` соответствует пути к устройству
+- ✅ `status.size` больше 0 (минимум 1Gi)
+- ✅ `status.serial` содержит серийный номер устройства
+- ✅ `status.consumable` = true для неразмеченного диска
+- ✅ `status.fsType` пустой для неразмеченного диска
 
-## Running tests
+## Запуск тестов в кластере
 
-### Environment setup
+### 1. Сборка образа
 
-1. **Install dependencies**:
 ```bash
 cd e2e
-go mod tidy
+
+# Собрать образ
+make docker-build E2E_IMAGE=your-registry/e2e-tests:latest
+
+# Отправить в registry
+make docker-push E2E_IMAGE=your-registry/e2e-tests:latest
 ```
 
-2. **Prepare the test node**:
-   - Ensure the `sds-node-configurator` agent is running on the node
-   - Attach a new block device to the node
-   - Ensure the device has a serial number (check with `lsblk -o NAME,SERIAL`)
-
-### Running tests
-
-#### Running via Ginkgo suite
+### 2. Запуск тестов
 
 ```bash
-# Install Ginkgo CLI (if not already installed)
-go install github.com/onsi/ginkgo/v2/ginkgo@latest
+# Запустить тесты в кластере
+make run-in-cluster \
+  E2E_IMAGE=your-registry/e2e-tests:latest \
+  E2E_NODE_NAME=worker-0 \
+  E2E_DEVICE_PATH=/dev/sdb \
+  E2E_DEVICE_SERIAL=<серийный номер>
 
+# Просмотреть логи
+make logs
+
+# Проверить статус
+make status
+```
+
+### 3. Очистка
+
+```bash
+make cleanup
+```
+
+## Переменные окружения
+
+| Переменная         | Описание                              | Значение по умолчанию |
+|--------------------|---------------------------------------|-----------------------|
+| `E2E_IMAGE`        | Docker образ с тестами                | `e2e-tests:latest`    |
+| `E2E_NODE_NAME`    | Имя ноды для тестирования             | `worker-0`            |
+| `E2E_DEVICE_PATH`  | Путь к блочному устройству            | `/dev/sdb`            |
+| `E2E_DEVICE_SERIAL`| Ожидаемый серийный номер устройства   | (не задан)            |
+
+## Пример полного цикла
+
+```bash
 cd e2e
-ginkgo -v --progress ./tests/
 
-# Run with parameters
-export E2E_NODE_NAME="worker-0"
-export E2E_DEVICE_PATH="/dev/sdb"
-export E2E_DEVICE_SERIAL="<device serial number>"
-ginkgo -v --progress ./tests/
+# 1. Проверить серийный номер диска на ноде
+kubectl debug node/worker-0 -it --image=alpine -- lsblk -o NAME,SERIAL
 
-# Run a specific test
-ginkgo -v --progress --focus="Automatic discovery" ./tests/
+# 2. Собрать и отправить образ
+make docker-build E2E_IMAGE=registry.example.com/e2e-tests:v1
+make docker-push E2E_IMAGE=registry.example.com/e2e-tests:v1
+
+# 3. Запустить тесты
+make run-in-cluster \
+  E2E_IMAGE=registry.example.com/e2e-tests:v1 \
+  E2E_NODE_NAME=worker-0 \
+  E2E_DEVICE_PATH=/dev/sdb \
+  E2E_DEVICE_SERIAL=ABC123
+
+# 4. Следить за выполнением
+make logs
+
+# 5. Очистить после выполнения
+make cleanup
 ```
 
-## Environment variables
+## Отладка
 
-| Variable           | Description                              | Default    |
-|--------------------|------------------------------------------|------------|
-| `E2E_NODE_NAME`    | Node name for testing                    | `worker-0` |
-| `E2E_DEVICE_PATH`  | Path to the block device                 | `/dev/sdb` |
-| `E2E_DEVICE_SERIAL`| Expected device serial number            | (not set)  |
-
-## Usage examples
-
-### Test 1: Basic device discovery check
+### Просмотр логов агента
 
 ```bash
-# 1. Attach a disk to the node and check its serial number
-lsblk -o NAME,SERIAL
-
-# 2. Run the test
-export E2E_NODE_NAME="worker-0"
-export E2E_DEVICE_PATH="/dev/sdb"
-export E2E_DEVICE_SERIAL="<serial from lsblk>"
-
-cd e2e
-ginkgo -v --progress --timeout 10m ./tests/
-```
-
-### Test 2: Check on a different node
-
-```bash
-export E2E_NODE_NAME="worker-1"
-export E2E_DEVICE_PATH="/dev/sdc"
-export E2E_DEVICE_SERIAL="<device serial number>"
-
-cd e2e
-ginkgo -v --progress ./tests/
-```
-
-## Debugging
-
-### Viewing agent logs
-
-```bash
-# Find the agent pod on the target node
+# Найти под агента на нужной ноде
 kubectl get pods -n d8-sds-node-configurator -o wide | grep <node-name>
 
-# View logs
+# Просмотреть логи
 kubectl logs -n d8-sds-node-configurator <agent-pod-name> -f
 ```
 
-### Checking BlockDevice state
+### Проверка состояния BlockDevice
 
 ```bash
-# List all BlockDevices
+# Получить список всех BlockDevice
 kubectl get blockdevice
 
-# Get detailed information
+# Получить детальную информацию
 kubectl describe blockdevice <bd-name>
 
-# Get BlockDevices on a specific node
+# Получить BlockDevice на конкретной ноде
 kubectl get blockdevice -l kubernetes.io/hostname=<node-name>
 ```
 
-### Manual cleanup after tests
+## Устранение неполадок
 
+### Тест не находит BlockDevice
+
+**Возможные причины**:
+1. Агент не запущен на ноде
+2. Диск не появился в системе (проверьте `lsblk` на ноде)
+3. Интервал сканирования агента слишком большой
+4. Диск отфильтрован (проверьте фильтры BlockDeviceFilter)
+
+**Решение**:
 ```bash
-# Delete BlockDevice
-kubectl delete blockdevice <bd-name>
-
-# Detach the disk from the node (depends on attachment method)
-```
-
-## Troubleshooting
-
-### Test does not find BlockDevice
-
-**Possible causes**:
-1. Agent is not running on the node
-2. Disk did not appear in the system (check `lsblk` on the node)
-3. Agent scan interval is too long
-4. Disk is filtered (check BlockDeviceFilter filters)
-
-**Solution**:
-```bash
-# Check agent status
+# Проверьте статус агента
 kubectl get pods -n d8-sds-node-configurator -o wide
 
-# Check agent logs
+# Проверьте логи агента
 kubectl logs -n d8-sds-node-configurator <agent-pod> | grep "block-device-controller"
 
-# Check device on the node
-kubectl debug node/<node-name> -it --image=ubuntu -- lsblk
+# Проверьте устройство на ноде
+kubectl debug node/<node-name> -it --image=alpine -- lsblk
 ```
 
-### Incorrect BlockDevice name
+### Таймаут при ожидании BlockDevice
 
-**Cause**: BlockDevice name is generated from a hash of `nodeName`, `wwn`, `model`, `serial`, and `partUUID`.
+Тесты ожидают появления BlockDevice в течение 5 минут. Если агент сканирует устройства реже, увеличьте таймаут в коде теста или проверьте настройки агента.
 
-**Solution**: Ensure the device serial number is set correctly:
-```bash
-# On the node, check the serial
-udevadm info --query=all --name=/dev/vdb | grep ID_SERIAL
-```
+## Дополнительная информация
 
-### Timeout waiting for BlockDevice
-
-**Solution**: Increase the test timeout:
-```bash
-ginkgo -v --progress --timeout 15m ./tests/
-```
-
-## CI/CD integration
-
-### Example for GitHub Actions
-
-```yaml
-name: E2E Tests
-
-on:
-  pull_request:
-  push:
-    branches: [main]
-
-jobs:
-  e2e:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.24'
-      
-      - name: Set up Kubernetes cluster
-        uses: helm/kind-action@v1
-      
-      - name: Deploy sds-node-configurator
-        run: |
-          # Deploy your module here
-          kubectl apply -f deploy/
-      
-      - name: Run E2E tests
-        run: |
-          cd e2e
-          ginkgo -v --progress --timeout 15m ./tests/
-        env:
-          E2E_NODE_NAME: kind-control-plane
-          E2E_DEVICE_PATH: /dev/sdb
-```
-
-## Additional information
-
-- [Ginkgo documentation](https://onsi.github.io/ginkgo/)
-- [Gomega documentation](https://onsi.github.io/gomega/)
-- [sds-node-configurator documentation](../docs/)
-- [BlockDevice API documentation](../api/v1alpha1/block_device.go)
-
-## Contributing
-
-When adding new e2e tests:
-
-1. Follow the structure of existing tests
-2. Use descriptive names for test scenarios
-3. Add comments for complex logic
-4. Update this README when adding new scenarios
-5. Use helper functions from `helpers.go`
-
-## Contact
-
-If you have questions or issues, please create an issue in the project repository.
+- [Документация Ginkgo](https://onsi.github.io/ginkgo/)
+- [Документация Gomega](https://onsi.github.io/gomega/)
