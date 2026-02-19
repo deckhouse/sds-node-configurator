@@ -2,7 +2,8 @@
 
 E2E_IMAGE ?= e2e-tests:latest
 E2E_NODE_NAME ?= worker-0
-E2E_DEVICE_PATH ?= /dev/sdb
+# E2E_DEVICE_PATH: if set, test expects this exact path (e.g. /dev/vdb); if unset, any /dev/sdX or /dev/vdX on the node is accepted
+E2E_DEVICE_PATH ?=
 E2E_DEVICE_SERIAL ?=
 
 .PHONY: help

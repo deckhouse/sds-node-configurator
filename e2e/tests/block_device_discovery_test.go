@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package tests
 import (
 	"crypto/sha1"
 	"fmt"
+	"regexp"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -28,6 +29,9 @@ import (
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
+
+// blockDevicePathPattern matches /dev/sdX, /dev/vdX (e.g. /dev/sda, /dev/vdb).
+var blockDevicePathPattern = regexp.MustCompile(`^/dev/(sd|vd)[a-z]+$`)
 
 var _ = Describe("BlockDevice Discovery E2E", func() {
 	Context("Automatic discovery of a new block device", func() {
@@ -44,7 +48,11 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 			expectedSerial = GetExpectedDeviceSerial()
 
 			By(fmt.Sprintf("Using node: %s", nodeName))
-			By(fmt.Sprintf("Expected device path: %s", expectedDevicePath))
+			if expectedDevicePath != "" {
+				By(fmt.Sprintf("Expected device path: %s", expectedDevicePath))
+			} else {
+				By("Expected device path: any (/dev/sdX or /dev/vdX)")
+			}
 			By(fmt.Sprintf("Expected serial: %s", expectedSerial))
 
 			// Compute expected BlockDevice name from serial
@@ -62,26 +70,42 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 
 			// Wait for BlockDevice to appear within 5 minutes
 			// (time may vary depending on the agent's scan interval)
+			// If E2E_DEVICE_PATH is set, match that path; otherwise accept any /dev/sdX or /dev/vdX on the node.
 			Eventually(func(g Gomega) {
+				foundBD = nil
 				err := k8sClient.List(ctx, &blockDevicesList, &client.ListOptions{})
 				g.Expect(err).NotTo(HaveOccurred())
 
-				// Find BlockDevice with the expected path and node
 				for i := range blockDevicesList.Items {
 					bd := &blockDevicesList.Items[i]
-					if bd.Status.NodeName == nodeName && bd.Status.Path == expectedDevicePath {
-						foundBD = bd
-						return
+					if bd.Status.NodeName != nodeName {
+						continue
 					}
+					if expectedDevicePath != "" {
+						if bd.Status.Path != expectedDevicePath {
+							continue
+						}
+					} else {
+						if !isBlockDevicePath(bd.Status.Path) {
+							continue
+						}
+						if bd.Status.Size.IsZero() {
+							continue
+						}
+					}
+					foundBD = bd
+					return
 				}
 
 				g.Expect(foundBD).NotTo(BeNil(), fmt.Sprintf(
-					"BlockDevice with path=%s and nodeName=%s not found. Total BlockDevices: %d",
-					expectedDevicePath, nodeName, len(blockDevicesList.Items),
+					"BlockDevice on nodeName=%s not found (path filter: %s). Total BlockDevices: %d",
+					nodeName, orPathFilter(expectedDevicePath), len(blockDevicesList.Items),
 				))
 			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
-			By(fmt.Sprintf("Found BlockDevice: %s", foundBD.Name))
+			// Use the found device path for subsequent checks (so Step 4 passes when path was not specified)
+			expectedDevicePath = foundBD.Status.Path
+			By(fmt.Sprintf("Found BlockDevice: %s (path: %s)", foundBD.Name, expectedDevicePath))
 
 			// Step 2: Verify resource name matches expected (when serial is set)
 			By("Step 2: Verifying BlockDevice name based on serial number")
@@ -171,6 +195,18 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 		})
 	})
 })
+
+// isBlockDevicePath returns true if path looks like a block device path (/dev/sdX or /dev/vdX).
+func isBlockDevicePath(path string) bool {
+	return blockDevicePathPattern.MatchString(path)
+}
+
+func orPathFilter(path string) string {
+	if path == "" {
+		return "any /dev/sdX or /dev/vdX"
+	}
+	return "path=" + path
+}
 
 // generateBlockDeviceName generates a BlockDevice name from the given parameters.
 // Logic must match createUniqDeviceName in discoverer.go.

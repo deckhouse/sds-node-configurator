@@ -86,12 +86,8 @@ func GetExpectedDeviceSerial() string {
 	return os.Getenv("E2E_DEVICE_SERIAL")
 }
 
-// GetExpectedDevicePath returns the path to the device.
-// Defaults to /dev/sdb.
+// GetExpectedDevicePath returns the path to the device when set via E2E_DEVICE_PATH.
+// If unset, the test will accept any block device path on the node (/dev/sdX, /dev/vdX, etc.).
 func GetExpectedDevicePath() string {
-	path := os.Getenv("E2E_DEVICE_PATH")
-	if path == "" {
-		path = "/dev/sdb"
-	}
-	return path
+	return os.Getenv("E2E_DEVICE_PATH")
 }
