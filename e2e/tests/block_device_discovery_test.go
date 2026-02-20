@@ -31,7 +31,7 @@ import (
 )
 
 var _ = Describe("BlockDevice Discovery E2E", func() {
-	Context("Automatic discovery of a new block device", func() {
+	Context("Discovery of a manually added block device", func() {
 		var (
 			nodeName           string
 			expectedDevicePath string
@@ -58,16 +58,18 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 		})
 
 		It("Should discover a new unformatted disk and create a BlockDevice object", func() {
-			By("Step 1: Waiting for BlockDevice to appear in the cluster")
+			By("Step 1: Manually add a new unformatted block device to a node (e.g. attach a volume). The test will then wait for the BlockDevice to appear.")
 
 			var foundBD *v1alpha1.BlockDevice
 			var blockDevicesList v1alpha1.BlockDeviceList
 
-			// Diagnostic: list once and print what we see (so we know if List is empty or node names differ).
+			// Snapshot before waiting (for diagnostics).
 			err := k8sClient.List(ctx, &blockDevicesList, &client.ListOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			diag := formatBlockDevicesHint(blockDevicesList.Items, nodeName)
-			By(fmt.Sprintf("BlockDevices in cluster: %d. %s", len(blockDevicesList.Items), diag))
+			By(fmt.Sprintf("BlockDevices in cluster before wait: %d. %s", len(blockDevicesList.Items), diag))
+
+			By("Step 2: Waiting for BlockDevice to appear in the cluster (up to 5 minutes)")
 
 			// Wait for BlockDevice to appear within 5 minutes.
 			// If E2E_NODE_NAME is set, only consider that node; else any node.
@@ -113,28 +115,28 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 			}
 			By(fmt.Sprintf("Found BlockDevice: %s (node: %s, path: %s)", foundBD.Name, nodeName, expectedDevicePath))
 
-			// Step 2: Verify resource name matches expected (when serial is set)
-			By("Step 2: Verifying BlockDevice name based on serial number")
+			// Step 3: Verify resource name matches expected (when serial is set)
+			By("Step 3: Verifying BlockDevice name based on serial number")
 			if expectedSerial != "" {
 				Expect(foundBD.Name).To(Equal(expectedBDName),
 					fmt.Sprintf("BlockDevice name does not match expected. "+
 						"Expected: %s, got: %s", expectedBDName, foundBD.Name))
 			}
 
-			// Step 3: Verify status.nodeName
-			By("Step 3: Verifying status.nodeName")
+			// Step 4: Verify status.nodeName
+			By("Step 4: Verifying status.nodeName")
 			Expect(foundBD.Status.NodeName).To(Equal(nodeName),
 				fmt.Sprintf("NodeName does not match expected. "+
 					"Expected: %s, got: %s", nodeName, foundBD.Status.NodeName))
 
-			// Step 4: Verify status.path
-			By("Step 4: Verifying status.path")
+			// Step 5: Verify status.path
+			By("Step 5: Verifying status.path")
 			Expect(foundBD.Status.Path).To(Equal(expectedDevicePath),
 				fmt.Sprintf("Path does not match expected. "+
 					"Expected: %s, got: %s", expectedDevicePath, foundBD.Status.Path))
 
-			// Step 5: Verify device size
-			By("Step 5: Verifying device size (must be > 0)")
+			// Step 6: Verify device size
+			By("Step 6: Verifying device size (must be > 0)")
 			Expect(foundBD.Status.Size.IsZero()).To(BeFalse(),
 				"Device size must not be zero")
 			minSize := resource.MustParse("1Gi")
@@ -144,8 +146,8 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 
 			By(fmt.Sprintf("Device size: %s", foundBD.Status.Size.String()))
 
-			// Step 6: Verify serial number
-			By("Step 6: Verifying serial number")
+			// Step 7: Verify serial number
+			By("Step 7: Verifying serial number")
 			if expectedSerial != "" {
 				Expect(foundBD.Status.Serial).To(Equal(expectedSerial),
 					fmt.Sprintf("Serial number does not match expected. "+
@@ -157,35 +159,35 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 
 			By(fmt.Sprintf("Device serial number: %s", foundBD.Status.Serial))
 
-			// Step 7: Verify device is consumable
-			By("Step 7: Verifying consumable state")
+			// Step 8: Verify device is consumable
+			By("Step 8: Verifying consumable state")
 			Expect(foundBD.Status.Consumable).To(BeTrue(),
 				"Device must be marked as consumable for an unformatted disk")
 
-			// Step 8: Verify device type
-			By("Step 8: Verifying device type")
+			// Step 9: Verify device type
+			By("Step 9: Verifying device type")
 			Expect(foundBD.Status.Type).NotTo(BeEmpty(),
 				"Device type must not be empty")
 			By(fmt.Sprintf("Device type: %s", foundBD.Status.Type))
 
-			// Step 9: Verify FSType is empty for unformatted disk
-			By("Step 9: Verifying FSType (must be empty for unformatted disk)")
+			// Step 10: Verify FSType is empty for unformatted disk
+			By("Step 10: Verifying FSType (must be empty for unformatted disk)")
 			Expect(foundBD.Status.FsType).To(BeEmpty(),
 				fmt.Sprintf("FSType must be empty for unformatted disk, got: %s",
 					foundBD.Status.FsType))
 
-			// Step 10: Verify PVUuid is empty for unformatted disk
-			By("Step 10: Verifying PVUuid (must be empty)")
+			// Step 11: Verify PVUuid is empty for unformatted disk
+			By("Step 11: Verifying PVUuid (must be empty)")
 			Expect(foundBD.Status.PVUuid).To(BeEmpty(),
 				"PVUuid must be empty for unformatted disk")
 
-			// Step 11: Verify VGUuid is empty for unformatted disk
-			By("Step 11: Verifying VGUuid (must be empty)")
+			// Step 12: Verify VGUuid is empty for unformatted disk
+			By("Step 12: Verifying VGUuid (must be empty)")
 			Expect(foundBD.Status.VGUuid).To(BeEmpty(),
 				"VGUuid must be empty for unformatted disk")
 
-			// Step 12: Verify machineID
-			By("Step 12: Verifying machineID")
+			// Step 13: Verify machineID
+			By("Step 13: Verifying machineID")
 			Expect(foundBD.Status.MachineID).NotTo(BeEmpty(),
 				"MachineID must not be empty")
 			By(fmt.Sprintf("MachineID: %s", foundBD.Status.MachineID))
