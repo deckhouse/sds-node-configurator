@@ -290,6 +290,7 @@ import (
 			Expect(tp.Ready).To(BeTrue(), "thin-pool should be Ready")
 
 			By("✓ LVMVolumeGroup Ready; thin-pool present and Ready; conditions without errors")
+			printLVMVolumeGroupInfo(&created)
 		})
 	})
 })
@@ -364,4 +365,66 @@ func printBlockDeviceInfo(bd *v1alpha1.BlockDevice) {
 	GinkgoWriter.Printf("Rota: %t\n", bd.Status.Rota)
 	GinkgoWriter.Printf("HotPlug: %t\n", bd.Status.HotPlug)
 	GinkgoWriter.Println("=============================================\n")
+}
+
+// printLVMVolumeGroupInfo prints detailed information about the LVMVolumeGroup (spec, labels, status, conditions).
+func printLVMVolumeGroupInfo(lvg *v1alpha1.LVMVolumeGroup) {
+	GinkgoWriter.Println("\n========== LVMVolumeGroup information ==========")
+	GinkgoWriter.Printf("Name: %s\n", lvg.Name)
+	GinkgoWriter.Println("--- Spec ---")
+	GinkgoWriter.Printf("  Type: %s\n", lvg.Spec.Type)
+	GinkgoWriter.Printf("  ActualVGNameOnTheNode: %s\n", lvg.Spec.ActualVGNameOnTheNode)
+	GinkgoWriter.Printf("  Local.NodeName: %s\n", lvg.Spec.Local.NodeName)
+	if lvg.Spec.BlockDeviceSelector != nil {
+		if len(lvg.Spec.BlockDeviceSelector.MatchLabels) > 0 {
+			GinkgoWriter.Printf("  BlockDeviceSelector.MatchLabels: %v\n", lvg.Spec.BlockDeviceSelector.MatchLabels)
+		}
+		if len(lvg.Spec.BlockDeviceSelector.MatchExpressions) > 0 {
+			GinkgoWriter.Printf("  BlockDeviceSelector.MatchExpressions: %d expression(s)\n", len(lvg.Spec.BlockDeviceSelector.MatchExpressions))
+		}
+	}
+	for i, tp := range lvg.Spec.ThinPools {
+		GinkgoWriter.Printf("  ThinPools[%d]: Name=%s Size=%s AllocationLimit=%s\n", i, tp.Name, tp.Size, tp.AllocationLimit)
+	}
+	GinkgoWriter.Println("--- Labels ---")
+	if len(lvg.Labels) == 0 {
+		GinkgoWriter.Println("  (none)")
+	} else {
+		for k, v := range lvg.Labels {
+			GinkgoWriter.Printf("  %s: %s\n", k, v)
+		}
+	}
+	GinkgoWriter.Println("--- Status ---")
+	GinkgoWriter.Printf("  Phase: %s\n", lvg.Status.Phase)
+	GinkgoWriter.Printf("  VGSize: %s\n", lvg.Status.VGSize.String())
+	GinkgoWriter.Printf("  VGFree: %s\n", lvg.Status.VGFree.String())
+	GinkgoWriter.Printf("  AllocatedSize: %s\n", lvg.Status.AllocatedSize.String())
+	GinkgoWriter.Printf("  VGUuid: %s\n", lvg.Status.VGUuid)
+	GinkgoWriter.Printf("  ThinPoolReady: %s\n", lvg.Status.ThinPoolReady)
+	GinkgoWriter.Printf("  ConfigurationApplied: %s\n", lvg.Status.ConfigurationApplied)
+	for i, n := range lvg.Status.Nodes {
+		GinkgoWriter.Printf("  Nodes[%d]: Name=%s Devices=%d\n", i, n.Name, len(n.Devices))
+		for j, d := range n.Devices {
+			GinkgoWriter.Printf("    Devices[%d]: BlockDevice=%s Path=%s PVSize=%s\n", j, d.BlockDevice, d.Path, d.PVSize.String())
+		}
+	}
+	for i, tp := range lvg.Status.ThinPools {
+		GinkgoWriter.Printf("  ThinPools[%d]: Name=%s AllocationLimit=%s Ready=%t ActualSize=%s AvailableSpace=%s\n",
+			i, tp.Name, tp.AllocationLimit, tp.Ready, tp.ActualSize.String(), tp.AvailableSpace.String())
+		if tp.Message != "" {
+			GinkgoWriter.Printf("    Message: %s\n", tp.Message)
+		}
+	}
+	GinkgoWriter.Println("--- Conditions ---")
+	if len(lvg.Status.Conditions) == 0 {
+		GinkgoWriter.Println("  (none)")
+	} else {
+		for i, c := range lvg.Status.Conditions {
+			GinkgoWriter.Printf("  [%d] Type=%s Status=%s Reason=%s LastTransitionTime=%v\n", i, c.Type, c.Status, c.Reason, c.LastTransitionTime)
+			if c.Message != "" {
+				GinkgoWriter.Printf("      Message: %s\n", c.Message)
+			}
+		}
+	}
+	GinkgoWriter.Println("=================================================\n")
 }
