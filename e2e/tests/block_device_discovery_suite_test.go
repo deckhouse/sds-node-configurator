@@ -55,6 +55,7 @@ var _ = BeforeSuite(func() {
 
 	err = v1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
+	// core/v1 (Node, etc.) is already in client-go's scheme.Scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())

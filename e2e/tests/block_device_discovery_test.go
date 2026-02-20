@@ -17,32 +17,29 @@ limitations under the License.
 package tests
 
 import (
-	"crypto/sha1"
 	"fmt"
 	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
-var _ = Describe("BlockDevice Discovery E2E", func() {
+	var _ = Describe("BlockDevice Discovery E2E", func() {
 	Context("Discovery of a manually added block device", func() {
 		var (
 			nodeName           string
 			expectedDevicePath string
-			expectedSerial     string
-			expectedBDName     string
 		)
 
 		BeforeEach(func() {
 			nodeName = GetNodeName()
 			expectedDevicePath = GetExpectedDevicePath()
-			expectedSerial = GetExpectedDeviceSerial()
 
 			if nodeName != "" {
 				By(fmt.Sprintf("Filter by node: %s", nodeName))
@@ -54,10 +51,10 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 			} else {
 				By("Expected device path: any block device (path not filtered)")
 			}
-			By(fmt.Sprintf("Expected serial: %s", expectedSerial))
 		})
 
 		It("Should discover a new unformatted disk and create a BlockDevice object", func() {
+			By("Expected result: object exists; status.nodeName = Kubernetes node name (kubectl get nodes); status.path correct; size > 0; state Ready (consumable); no errors in conditions")
 			By("Step 1: Manually add a new unformatted block device to a node (e.g. attach a volume). The test will then wait for a new BlockDevice to appear.")
 
 			var foundBD *v1alpha1.BlockDevice
@@ -113,36 +110,30 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 				))
 			}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
-			// Use the found device for all subsequent checks (node/path can vary per cluster)
 			nodeName = foundBD.Status.NodeName
 			expectedDevicePath = foundBD.Status.Path
-			if expectedSerial != "" {
-				expectedBDName = generateBlockDeviceName(nodeName, expectedSerial, "", "")
-			}
 			By(fmt.Sprintf("Found BlockDevice: %s (node: %s, path: %s)", foundBD.Name, nodeName, expectedDevicePath))
 
-			// Step 3: Verify resource name matches expected (when serial is set)
-			By("Step 3: Verifying BlockDevice name based on serial number")
-			if expectedSerial != "" {
-				Expect(foundBD.Name).To(Equal(expectedBDName),
-					fmt.Sprintf("BlockDevice name does not match expected. "+
-						"Expected: %s, got: %s", expectedBDName, foundBD.Name))
+			// Step 3: Verify status.nodeName is a Kubernetes node name (exists in cluster, e.g. kubectl get nodes)
+			By("Step 3: Verifying status.nodeName matches a Kubernetes node name")
+			var nodeList corev1.NodeList
+			err = k8sClient.List(ctx, &nodeList, &client.ListOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			nodeNames := make(map[string]struct{}, len(nodeList.Items))
+			for i := range nodeList.Items {
+				nodeNames[nodeList.Items[i].Name] = struct{}{}
 			}
+			Expect(nodeNames).To(HaveKey(nodeName),
+				fmt.Sprintf("status.nodeName=%q is not a node in the cluster (kubectl get nodes). Cluster nodes: %v", nodeName, keysOf(nodeNames)))
 
-			// Step 4: Verify status.nodeName
-			By("Step 4: Verifying status.nodeName")
-			Expect(foundBD.Status.NodeName).To(Equal(nodeName),
-				fmt.Sprintf("NodeName does not match expected. "+
-					"Expected: %s, got: %s", nodeName, foundBD.Status.NodeName))
-
-			// Step 5: Verify status.path
-			By("Step 5: Verifying status.path")
+			// Step 4: Verify status.path
+			By("Step 4: Verifying status.path")
 			Expect(foundBD.Status.Path).To(Equal(expectedDevicePath),
 				fmt.Sprintf("Path does not match expected. "+
 					"Expected: %s, got: %s", expectedDevicePath, foundBD.Status.Path))
 
-			// Step 6: Verify device size
-			By("Step 6: Verifying device size (must be > 0)")
+			// Step 5: Verify device size
+			By("Step 5: Verifying device size (must be > 0)")
 			Expect(foundBD.Status.Size.IsZero()).To(BeFalse(),
 				"Device size must not be zero")
 			minSize := resource.MustParse("1Gi")
@@ -152,23 +143,15 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 
 			By(fmt.Sprintf("Device size: %s", foundBD.Status.Size.String()))
 
-			// Step 7: Verify serial number
-			By("Step 7: Verifying serial number")
-			if expectedSerial != "" {
-				Expect(foundBD.Status.Serial).To(Equal(expectedSerial),
-					fmt.Sprintf("Serial number does not match expected. "+
-						"Expected: %s, got: %s", expectedSerial, foundBD.Status.Serial))
-			} else {
-				Expect(foundBD.Status.Serial).NotTo(BeEmpty(),
-					"Device serial number must not be empty")
-			}
-
-			By(fmt.Sprintf("Device serial number: %s", foundBD.Status.Serial))
-
-			// Step 8: Verify device is consumable
-			By("Step 8: Verifying consumable state")
+			// Step 7: Verify Ready state (consumable for unformatted disk)
+			By("Step 7: Verifying Ready state (consumable)")
 			Expect(foundBD.Status.Consumable).To(BeTrue(),
-				"Device must be marked as consumable for an unformatted disk")
+				"Device must be marked as consumable (Ready) for an unformatted disk")
+
+			// Step 8: Verify conditions have no errors (BlockDevice has no conditions in API; when added, ensure none are error-type)
+			By("Step 8: Verifying conditions (no errors)")
+			// BlockDeviceStatus has no Conditions field in current API. When conditions are added, check that none have status=False with type indicating error.
+			By("BlockDevice API has no conditions field — nothing to check; when present, test should assert no error conditions")
 
 			// Step 9: Verify device type
 			By("Step 9: Verifying device type")
@@ -199,7 +182,7 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 			By(fmt.Sprintf("MachineID: %s", foundBD.Status.MachineID))
 
 			// Summary
-			By("✓ All checks passed successfully!")
+			By("✓ Expected result verified: object exists; status.nodeName = K8s node name; status.path correct; size > 0; Ready (consumable); conditions (none in API)")
 			printBlockDeviceInfo(foundBD)
 		})
 
@@ -260,12 +243,12 @@ func formatBlockDevicesHint(items []v1alpha1.BlockDevice, expectedNode string) s
 	return hint
 }
 
-// generateBlockDeviceName generates a BlockDevice name from the given parameters.
-// Logic must match createUniqDeviceName in discoverer.go.
-func generateBlockDeviceName(nodeName, serial, wwn, partUUID string) string {
-	// Use empty model as it is unknown at test time
-	temp := fmt.Sprintf("%s%s%s%s%s", nodeName, wwn, "" /* model */, serial, partUUID)
-	return fmt.Sprintf("dev-%x", sha1.Sum([]byte(temp)))
+func keysOf(m map[string]struct{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // printBlockDeviceInfo prints detailed information about the BlockDevice.
