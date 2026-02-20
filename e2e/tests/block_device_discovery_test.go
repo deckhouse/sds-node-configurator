@@ -25,12 +25,19 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
 	var _ = Describe("BlockDevice Discovery E2E", func() {
+	// Shared state for LVMVolumeGroup test (set by BlockDevice discovery test)
+	var (
+		discoveredNodeName string
+		discoveredBDName   string
+	)
+
 	Context("Discovery of a manually added block device", func() {
 		var (
 			nodeName           string
@@ -125,6 +132,7 @@ import (
 			}
 			Expect(nodeNames).To(HaveKey(nodeName),
 				fmt.Sprintf("status.nodeName=%q is not a node in the cluster (kubectl get nodes). Cluster nodes: %v", nodeName, keysOf(nodeNames)))
+			By(fmt.Sprintf("status.NodeName: %s", foundBD.Status.NodeName))
 
 			// Step 4: Verify status.path
 			By("Step 4: Verifying status.path")
@@ -184,16 +192,103 @@ import (
 			// Summary
 			By("✓ Expected result verified: object exists; status.nodeName = K8s node name; status.path correct; size > 0; Ready (consumable); conditions (none in API)")
 			printBlockDeviceInfo(foundBD)
-		})
 
-		It("Should correctly handle device disconnection", func() {
-			By("Note: This test requires manual device disconnection")
-			// Automated testing of device disconnection would require additional infrastructure (e.g. detach disk from node).
-			// Placeholder: verify that BlockDevices list is accessible; full disconnection scenario is manual.
-			var list v1alpha1.BlockDeviceList
-			err := k8sClient.List(ctx, &list, &client.ListOptions{})
+			// Shared state for LVMVolumeGroup test (same node, same BD)
+			discoveredNodeName = nodeName
+			discoveredBDName = foundBD.Name
+		})
+	})
+
+	Context("LVMVolumeGroup with one disk and thin-pool", func() {
+		It("Should create LVMVolumeGroup with one disk and thin-pool", func() {
+			By("Expected result: VG with name + tag storage.deckhouse.io/enabled=true; thin-pool with expected name/size; LVMVolumeGroup Phase Ready; conditions without errors")
+			By("Prerequisite: BlockDevice discovery test must have run first to set discoveredNodeName and discoveredBDName")
+
+			// Use the BD from the discovery test (same node) or any consumable BD if run standalone
+			var bdList v1alpha1.BlockDeviceList
+			err := k8sClient.List(ctx, &bdList, &client.ListOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			By(fmt.Sprintf("BlockDevices in cluster: %d (disconnection scenario not automated)", len(list.Items)))
+			var targetBD *v1alpha1.BlockDevice
+			for i := range bdList.Items {
+				bd := &bdList.Items[i]
+				if !bd.Status.Consumable || bd.Status.Size.IsZero() {
+					continue
+				}
+				if discoveredNodeName != "" && bd.Status.NodeName != discoveredNodeName {
+					continue
+				}
+				if discoveredBDName != "" && bd.Name == discoveredBDName {
+					targetBD = bd
+					break
+				}
+				if targetBD == nil {
+					targetBD = bd
+				}
+			}
+			Expect(targetBD).NotTo(BeNil(), "no consumable BlockDevice found (run BlockDevice discovery test first to use that node)")
+			nodeName := targetBD.Status.NodeName
+
+			vgName := "e2e-vg"
+			thinPoolName := "e2e-thin-pool"
+			thinPoolSize := "50%"
+
+			lvgName := "e2e-lvg-" + strings.ReplaceAll(strings.ReplaceAll(nodeName, ".", "-"), "_", "-")
+			lvg := &v1alpha1.LVMVolumeGroup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: lvgName,
+				},
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					ActualVGNameOnTheNode: vgName,
+					BlockDeviceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"kubernetes.io/hostname": nodeName,
+							"kubernetes.io/metadata.name": targetBD.Name,
+						},
+					},
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+						{Name: thinPoolName, Size: thinPoolSize},
+					},
+					Type: "Local",
+					Local: v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
+				},
+			}
+			By(fmt.Sprintf("Creating LVMVolumeGroup %s on node %s, VG %s, thin-pool %s %s", lvg.Name, nodeName, vgName, thinPoolName, thinPoolSize))
+			err = k8sClient.Create(ctx, lvg)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				_ = k8sClient.Delete(ctx, lvg)
+			}()
+
+			By("Waiting for LVMVolumeGroup to become Ready (up to 5 minutes)")
+			var created v1alpha1.LVMVolumeGroup
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, client.ObjectKeyFromObject(lvg), &created)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(created.Status.Phase).To(Equal(v1alpha1.PhaseReady),
+					"Phase should be Ready, got %s", created.Status.Phase)
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("Verifying conditions (no errors)")
+			for _, c := range created.Status.Conditions {
+				Expect(c.Status).NotTo(Equal(metav1.ConditionFalse),
+					"condition %s has status False: reason=%s message=%s", c.Type, c.Reason, c.Message)
+			}
+			By(fmt.Sprintf("LVMVolumeGroup Phase: %s", created.Status.Phase))
+
+			By("Verifying thin-pool in status")
+			Expect(created.Status.ThinPools).NotTo(BeEmpty(), "ThinPools status should not be empty")
+			var tp *v1alpha1.LVMVolumeGroupThinPoolStatus
+			for i := range created.Status.ThinPools {
+				if created.Status.ThinPools[i].Name == thinPoolName {
+					tp = &created.Status.ThinPools[i]
+					break
+				}
+			}
+			Expect(tp).NotTo(BeNil(), "thin-pool %q not found in status", thinPoolName)
+			Expect(tp.AllocationLimit).To(Equal(thinPoolSize), "thin-pool allocation limit should match spec")
+			Expect(tp.Ready).To(BeTrue(), "thin-pool should be Ready")
+
+			By("✓ LVMVolumeGroup Ready; thin-pool present and Ready; conditions without errors")
 		})
 	})
 })
