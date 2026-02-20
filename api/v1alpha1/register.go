@@ -52,6 +52,10 @@ var knownTypes = []runtime.Object{
 	&LVMVolumeGroupSetList{},
 	&LVMLogicalVolumeSnapshot{},
 	&LVMLogicalVolumeSnapshotList{},
+	&ReplicatedStorageClass{},
+	&ReplicatedStorageClassList{},
+	&ReplicatedStoragePool{},
+	&ReplicatedStoragePoolList{},
 }
 
 // Adds the list of known types to Scheme.

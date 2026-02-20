@@ -14,13 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package consts
+package kubutils
 
-const (
-	ModuleName                        string = "sdsNodeConfigurator"
-	ModuleNamespace                   string = "d8-sds-node-configurator"
-	ModulePluralName                  string = "sds-node-configurator"
-	WebhookCertCn                     string = "webhooks"
-	SdsCommonSchedulerExtenderCertCn  string = "sds-common-scheduler-extender"
-	CommonSchedulerExtenderSecretName string = "common-scheduler-extender-https-certs"
+import (
+	"fmt"
+
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
+
+func KubernetesDefaultConfigCreate() (*rest.Config, error) {
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		clientcmd.NewDefaultClientConfigLoadingRules(),
+		&clientcmd.ConfigOverrides{},
+	)
+
+	// Get a config to talk to API server
+	config, err := clientConfig.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("config kubernetes error %w", err)
+	}
+	return config, nil
+}
