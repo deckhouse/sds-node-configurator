@@ -243,7 +243,6 @@ import (
 					BlockDeviceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"kubernetes.io/hostname": nodeName,
-							"kubernetes.io/metadata.name": targetBD.Name,
 						},
 					},
 					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
@@ -258,6 +257,15 @@ import (
 			Expect(err).NotTo(HaveOccurred())
 			defer func() {
 				_ = k8sClient.Delete(ctx, lvg)
+			}()
+
+			// On failure, print current LVG state (phase, conditions) for debugging
+			defer func() {
+				var current v1alpha1.LVMVolumeGroup
+				if err := k8sClient.Get(ctx, client.ObjectKey{Name: lvg.Name}, &current); err == nil && current.Status.Phase != v1alpha1.PhaseReady {
+					GinkgoWriter.Println("\n--- LVMVolumeGroup did not become Ready; current state ---")
+					printLVMVolumeGroupInfo(&current)
+				}
 			}()
 
 			By("Waiting for LVMVolumeGroup to become Ready (up to 5 minutes)")
