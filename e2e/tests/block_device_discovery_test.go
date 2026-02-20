@@ -231,6 +231,7 @@ import (
 			vgName := "e2e-vg"
 			thinPoolName := "e2e-thin-pool"
 			thinPoolSize := "50%"
+			thinPoolAllocationLimit := "100%" // CRD pattern: ^[1-9][0-9]{2,3}%$
 
 			lvgName := "e2e-lvg-" + strings.ReplaceAll(strings.ReplaceAll(nodeName, ".", "-"), "_", "-")
 			lvg := &v1alpha1.LVMVolumeGroup{
@@ -246,7 +247,7 @@ import (
 						},
 					},
 					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
-						{Name: thinPoolName, Size: thinPoolSize},
+						{Name: thinPoolName, Size: thinPoolSize, AllocationLimit: thinPoolAllocationLimit},
 					},
 					Type: "Local",
 					Local: v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
@@ -285,7 +286,7 @@ import (
 				}
 			}
 			Expect(tp).NotTo(BeNil(), "thin-pool %q not found in status", thinPoolName)
-			Expect(tp.AllocationLimit).To(Equal(thinPoolSize), "thin-pool allocation limit should match spec")
+			Expect(tp.AllocationLimit).To(Equal(thinPoolAllocationLimit), "thin-pool allocation limit should match spec")
 			Expect(tp.Ready).To(BeTrue(), "thin-pool should be Ready")
 
 			By("✓ LVMVolumeGroup Ready; thin-pool present and Ready; conditions without errors")
