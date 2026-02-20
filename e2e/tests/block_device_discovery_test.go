@@ -58,22 +58,25 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 		})
 
 		It("Should discover a new unformatted disk and create a BlockDevice object", func() {
-			By("Step 1: Manually add a new unformatted block device to a node (e.g. attach a volume). The test will then wait for the BlockDevice to appear.")
+			By("Step 1: Manually add a new unformatted block device to a node (e.g. attach a volume). The test will then wait for a new BlockDevice to appear.")
 
 			var foundBD *v1alpha1.BlockDevice
 			var blockDevicesList v1alpha1.BlockDeviceList
 
-			// Snapshot before waiting (for diagnostics).
+			// Snapshot existing BlockDevices — we will wait for one that is NOT in this set (i.e. newly added).
 			err := k8sClient.List(ctx, &blockDevicesList, &client.ListOptions{})
 			Expect(err).NotTo(HaveOccurred())
+			initialNames := make(map[string]struct{}, len(blockDevicesList.Items))
+			for i := range blockDevicesList.Items {
+				initialNames[blockDevicesList.Items[i].Name] = struct{}{}
+			}
 			diag := formatBlockDevicesHint(blockDevicesList.Items, nodeName)
 			By(fmt.Sprintf("BlockDevices in cluster before wait: %d. %s", len(blockDevicesList.Items), diag))
 
-			By("Step 2: Waiting for BlockDevice to appear in the cluster (up to 5 minutes)")
+			By("Step 2: Waiting for a new BlockDevice to appear in the cluster (up to 5 minutes)")
 
-			// Wait for BlockDevice to appear within 5 minutes.
-			// If E2E_NODE_NAME is set, only consider that node; else any node.
-			// If E2E_DEVICE_PATH is set, match that path; otherwise accept any BlockDevice with size > 0 and path /dev/...
+			// Wait for a BlockDevice that was not present at the start (newly discovered after manual add).
+			// If E2E_NODE_NAME is set, only consider that node; if E2E_DEVICE_PATH is set, match that path.
 			Eventually(func(g Gomega) {
 				foundBD = nil
 				err := k8sClient.List(ctx, &blockDevicesList, &client.ListOptions{})
@@ -81,6 +84,9 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 
 				for i := range blockDevicesList.Items {
 					bd := &blockDevicesList.Items[i]
+					if _, existed := initialNames[bd.Name]; existed {
+						continue
+					}
 					if nodeName != "" && bd.Status.NodeName != nodeName {
 						continue
 					}
@@ -102,7 +108,7 @@ var _ = Describe("BlockDevice Discovery E2E", func() {
 
 				hint := formatBlockDevicesHint(blockDevicesList.Items, nodeName)
 				g.Expect(foundBD).NotTo(BeNil(), fmt.Sprintf(
-					"No matching BlockDevice (node filter: %s, path filter: %s). Total BlockDevices: %d. %s",
+					"No new BlockDevice appeared (node filter: %s, path filter: %s). Total BlockDevices: %d. %s",
 					orNodeFilter(nodeName), orPathFilter(expectedDevicePath), len(blockDevicesList.Items), hint,
 				))
 			}, 5*time.Minute, 10*time.Second).Should(Succeed())
