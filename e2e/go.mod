@@ -4,6 +4,7 @@ go 1.24.9
 
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250130211935-b68366dfd0f8
+	github.com/deckhouse/storage-e2e v0.0.0
 	github.com/onsi/ginkgo/v2 v2.21.0
 	github.com/onsi/gomega v1.35.1
 	k8s.io/apimachinery v0.33.0
@@ -55,4 +56,7 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-replace github.com/deckhouse/sds-node-configurator/api => ../api
+replace (
+	github.com/deckhouse/sds-node-configurator/api => ../api
+	github.com/deckhouse/storage-e2e => ../../storage-e2e
+)

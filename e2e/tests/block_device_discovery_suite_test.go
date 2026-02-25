@@ -31,6 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	e2econfig "github.com/deckhouse/storage-e2e/internal/config"
+	"github.com/deckhouse/storage-e2e/internal/logger"
+	"github.com/deckhouse/storage-e2e/pkg/cluster"
 )
 
 const e2eLVMVGPrefix = "e2e-lvg-"
@@ -40,6 +43,10 @@ var (
 	k8sClient client.Client
 	ctx       context.Context
 	cancel    context.CancelFunc
+
+	// testClusterResources is set when tests run with storage-e2e (TEST_CLUSTER_CREATE_MODE is set).
+	// Used for DKP cluster lifecycle and cleanup.
+	testClusterResources *cluster.TestClusterResources
 )
 
 func TestBlockDeviceDiscovery(t *testing.T) {
@@ -52,14 +59,32 @@ var _ = BeforeSuite(func() {
 
 	By("Bootstrapping test environment")
 
-	var err error
-	cfg, err = config.GetConfig()
-	Expect(err).NotTo(HaveOccurred())
-	Expect(cfg).NotTo(BeNil())
-
-	err = v1alpha1.AddToScheme(scheme.Scheme)
+	err := v1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 	// core/v1 (Node, etc.) is already in client-go's scheme.Scheme
+
+	// Preparatory step: when TEST_CLUSTER_CREATE_MODE is set, create or connect to DKP test cluster (storage-e2e).
+	// Otherwise use existing kubeconfig (e.g. KUBECONFIG / in-cluster).
+	if e2econfig.TestClusterCreateMode != "" {
+		By("Preparatory step: validating environment and initializing DKP test cluster")
+		err = e2econfig.ValidateEnvironment()
+		Expect(err).NotTo(HaveOccurred(), "Failed to validate storage-e2e environment (set TEST_CLUSTER_CREATE_MODE, SSH_HOST, SSH_USER, etc.)")
+		err = logger.Initialize()
+		Expect(err).NotTo(HaveOccurred(), "Failed to initialize logger")
+
+		By("Preparatory step: creating or connecting to DKP test cluster for tests")
+		cluster.OutputEnvironmentVariables()
+		testClusterResources = cluster.CreateOrConnectToTestCluster()
+		Expect(testClusterResources).NotTo(BeNil())
+		Expect(testClusterResources.Kubeconfig).NotTo(BeNil())
+		cfg = testClusterResources.Kubeconfig
+	} else {
+		By("Using kubeconfig from environment (TEST_CLUSTER_CREATE_MODE not set)")
+		var errCfg error
+		cfg, errCfg = config.GetConfig()
+		Expect(errCfg).NotTo(HaveOccurred())
+		Expect(cfg).NotTo(BeNil())
+	}
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
@@ -76,6 +101,14 @@ var _ = BeforeSuite(func() {
 
 var _ = AfterSuite(func() {
 	By("Tearing down the test environment")
+	if testClusterResources != nil {
+		cluster.CleanupTestClusterResources(testClusterResources)
+	}
+	if e2econfig.TestClusterCreateMode != "" {
+		if err := logger.Close(); err != nil {
+			GinkgoWriter.Printf("Warning: Failed to close logger: %v\n", err)
+		}
+	}
 	cancel()
 })
 
