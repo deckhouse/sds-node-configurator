@@ -81,9 +81,9 @@ d8 k get lvmvolumegroups.storage.deckhouse.io
 
 ```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG     AGE
-vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                main   61s
-vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                main   4m17s
-vg-c7863e12-c143-42bb-8e33-d578ce50d6c7   0/0         True                    Ready   worker-1   25596Mi   0                main   108s
+vg-014df517-39d1-4453-b7b3-9930c563627c   0/0         True                    Ready   worker-2   25596Mi   0                main   61s
+vg-014df517-39d1-4453-b7b3-9930c563627c   0/0         True                    Ready   worker-0   25596Mi   0                main   4m17s
+vg-014df517-39d1-4453-b7b3-9930c563627c   0/0         True                    Ready   worker-1   25596Mi   0                main   108s
 ```
 
 ##### Настройка модуля `sds-local-volume` (одинаковые диски, «Полное зеркало»)
@@ -99,9 +99,9 @@ metadata:
 spec:
   lvm:
     lvmVolumeGroups:
-      - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-      - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-      - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+      - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+      - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+      - name: vg-014df517-39d1-4453-b7b3-9930c563627c
     type: Thick
   reclaimPolicy: Delete
   volumeBindingMode: WaitForFirstConsumer
@@ -123,9 +123,9 @@ EOF
    spec:
      type: LVM
      lvmVolumeGroups:
-       - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-       - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-       - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+       - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+       - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+       - name: vg-014df517-39d1-4453-b7b3-9930c563627c
    EOF
    ```
 
@@ -224,9 +224,9 @@ d8 k get lvmvolumegroups.storage.deckhouse.io
 
 ```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG            AGE
-vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                main-safe     61s
-vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                main-safe     4m17s
-vg-c7863e12-c143-42bb-8e33-d578ce50d6c7   0/0         True                    Ready   worker-1   25596Mi   0                main-safe     108s
+vg-014df517-39d1-4453-b7b3-9930c563627c   0/0         True                    Ready   worker-2   25596Mi   0                main-safe     61s
+vg-014df517-39d1-4453-b7b3-9930c563627c   0/0         True                    Ready   worker-0   25596Mi   0                main-safe     4m17s
+vg-014df517-39d1-4453-b7b3-9930c563627c   0/0         True                    Ready   worker-1   25596Mi   0                main-safe     108s
 vg-deccf08a-44d4-45f2-aea9-6232c0eeef91   0/0         True                    Ready   worker-2   25596Mi   0                main-unsafe   61s
 vg-e0f00cab-03b3-49cf-a2f6-595628a2593c   0/0         True                    Ready   worker-0   25596Mi   0                main-unsafe   4m17s
 vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2   0/0         True                    Ready   worker-1   25596Mi   0                main-unsafe   108s
@@ -245,9 +245,9 @@ metadata:
 spec:
   lvm:
     lvmVolumeGroups:
-      - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-      - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-      - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+      - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+      - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+      - name: vg-014df517-39d1-4453-b7b3-9930c563627c
     type: Thick
   reclaimPolicy: Delete
   volumeBindingMode: WaitForFirstConsumer
@@ -269,9 +269,9 @@ EOF
    spec:
      type: LVM
      lvmVolumeGroups:
-       - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-       - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-       - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+       - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+       - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+       - name: vg-014df517-39d1-4453-b7b3-9930c563627c
    EOF
    ```
 
@@ -395,9 +395,9 @@ d8 k get lvmvolumegroups.storage.deckhouse.io
 
 ```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG          AGE
-vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                <vg-name>   61s
-vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                <vg-name>   4m17s
-vg-c7863e12-c143-42bb-8e33-d578ce50d6c7   0/0         True                    Ready   worker-1   25596Mi   0                <vg-name>   108s
+vg-014df517-39d1-4453-b7b3-9930c563627c   0/0         True                    Ready   worker-2   25596Mi   0                <vg-name>   61s
+vg-014df517-39d1-4453-b7b3-9930c563627c   0/0         True                    Ready   worker-0   25596Mi   0                <vg-name>   4m17s
+vg-014df517-39d1-4453-b7b3-9930c563627c   0/0         True                    Ready   worker-1   25596Mi   0                <vg-name>   108s
 ```
 
 `<vg-name>` — имя, присвоенное группе томов на зеркале на предыдущем шаге.
@@ -415,9 +415,9 @@ metadata:
 spec:
   lvm:
     lvmVolumeGroups:
-      - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-      - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-      - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+      - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+      - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+      - name: vg-014df517-39d1-4453-b7b3-9930c563627c
     type: Thick
   reclaimPolicy: Delete
   volumeBindingMode: WaitForFirstConsumer
@@ -449,9 +449,9 @@ EOF
    spec:
      type: LVM
      lvmVolumeGroups:
-       - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-       - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-       - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+       - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+       - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+       - name: vg-014df517-39d1-4453-b7b3-9930c563627c
    EOF
    ```
 
@@ -560,9 +560,9 @@ d8 k get lvmvolumegroups.storage.deckhouse.io
 
 ```console
 NAME                                      THINPOOLS   CONFIGURATION APPLIED   PHASE   NODE       SIZE      ALLOCATED SIZE   VG                AGE
-vg-08d3730c-9201-428d-966c-45795cba55a6   0/0         True                    Ready   worker-2   25596Mi   0                <vg-name>-safe     61s
-vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d   0/0         True                    Ready   worker-0   25596Mi   0                <vg-name>-safe     4m17s
-vg-c7863e12-c143-42bb-8e33-d578ce50d6c7   0/0         True                    Ready   worker-1   25596Mi   0                <vg-name>-safe     108s
+vg-014df517-39d1-4453-b7b3-9930c563627c   0/0         True                    Ready   worker-2   25596Mi   0                <vg-name>-safe     61s
+vg-014df517-39d1-4453-b7b3-9930c563627c   0/0         True                    Ready   worker-0   25596Mi   0                <vg-name>-safe     4m17s
+vg-014df517-39d1-4453-b7b3-9930c563627c   0/0         True                    Ready   worker-1   25596Mi   0                <vg-name>-safe     108s
 vg-deccf08a-44d4-45f2-aea9-6232c0eeef91   0/0         True                    Ready   worker-2   25596Mi   0                <vg-name>-unsafe   61s
 vg-e0f00cab-03b3-49cf-a2f6-595628a2593c   0/0         True                    Ready   worker-0   25596Mi   0                <vg-name>-unsafe   4m17s
 vg-fe679d22-2bc7-409c-85a9-9f0ee29a6ca2   0/0         True                    Ready   worker-1   25596Mi   0                <vg-name>-unsafe   108s
@@ -583,9 +583,9 @@ metadata:
 spec:
   lvm:
     lvmVolumeGroups:
-      - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-      - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-      - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+      - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+      - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+      - name: vg-014df517-39d1-4453-b7b3-9930c563627c
     type: Thick
   reclaimPolicy: Delete
   volumeBindingMode: WaitForFirstConsumer
@@ -617,9 +617,9 @@ EOF
    spec:
      type: LVM
      lvmVolumeGroups:
-       - name: vg-08d3730c-9201-428d-966c-45795cba55a6
-       - name: vg-b59ff9e1-6ef2-4761-b5d2-6172926d4f4d
-       - name: vg-c7863e12-c143-42bb-8e33-d578ce50d6c7
+       - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+       - name: vg-014df517-39d1-4453-b7b3-9930c563627c
+       - name: vg-014df517-39d1-4453-b7b3-9930c563627c
    EOF
    ```
 
