@@ -1,7 +1,6 @@
-# Расширение базового конфига — исключение для xxhash.h (false positive)
+# Use default gitleaks rules + module allowlist (incl. xxhash.h false positive)
 [extend]
-useDefault = false
-path = "/tmp/gitleaks.base.toml"
+useDefault = true
 
 [allowlist]
 paths = [
