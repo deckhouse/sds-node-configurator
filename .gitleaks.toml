@@ -5,5 +5,6 @@ path = "/tmp/gitleaks.base.toml"
 
 [allowlist]
 paths = [
+  '''(?:^|/)images/.*\.patch$''',
   '''src/sds-node-configurator__agent/util-linux/include/xxhash\.h$''',
 ]
