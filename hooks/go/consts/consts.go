@@ -22,3 +22,24 @@ const (
 	ModulePluralName string = "sds-node-configurator"
 	WebhookCertCn    string = "webhooks"
 )
+
+var AllowedProvisioners = []string{}
+
+var WebhookConfigurationsToDelete = []string{}
+
+var CRGVKsForFinalizerRemoval = []CRGVK{
+	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "LVMVolumeGroup", Namespaced: false},
+	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "LVMVolumeGroupBackup", Namespaced: false},
+	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "LVMLogicalVolume", Namespaced: false},
+	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "LVMLogicalVolumeSnapshot", Namespaced: false},
+	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "BlockDevice", Namespaced: false},
+	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "LVMVolumeGroupSet", Namespaced: false},
+	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "BlockDeviceFilter", Namespaced: false},
+}
+
+type CRGVK struct {
+	Group      string
+	Version    string
+	Kind       string
+	Namespaced bool
+}

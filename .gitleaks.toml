@@ -1,0 +1,9 @@
+# Use default gitleaks rules + module allowlist (incl. xxhash.h false positive)
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''(?:^|/)images/.*\.patch$''',
+  '''src/sds-node-configurator__agent/util-linux/include/xxhash\.h$''',
+]
