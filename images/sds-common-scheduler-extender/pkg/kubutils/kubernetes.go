@@ -14,15 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package kubutils
 
 import (
-	"github.com/deckhouse/module-sdk/pkg/app"
-	_ "github.com/deckhouse/sds-node-configurator/hooks/go/020-common-scheduler-extender-certs"
-	_ "github.com/deckhouse/sds-node-configurator/hooks/go/020-webhook-certs"
-	_ "github.com/deckhouse/sds-node-configurator/hooks/go/030-remove-finalizers-on-module-delete"
+	"fmt"
+
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
-func main() {
-	app.Run()
+func KubernetesDefaultConfigCreate() (*rest.Config, error) {
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		clientcmd.NewDefaultClientConfigLoadingRules(),
+		&clientcmd.ConfigOverrides{},
+	)
+
+	// Get a config to talk to API server
+	config, err := clientConfig.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("config kubernetes error %w", err)
+	}
+	return config, nil
 }
