@@ -87,6 +87,33 @@ make status
 make cleanup
 ```
 
+## Локальная конфигурация (не в репозитории)
+
+Папка `e2e/config/` добавлена в `.gitignore`. Для локального запуска тестов со storage-e2e (создание/подключение к кластеру) создайте в ней файлы с переменными окружения, например:
+
+- `e2e/config/test_exports` или `e2e/config/test_exports_storage_e2e` — скрипты с `export TEST_CLUSTER_CREATE_MODE=...`, `SSH_HOST`, `E2E_DKP_LICENSE_KEY` / `E2E_REGISTRY_DOCKER_CFG`, при необходимости `E2E_CLUSTER_KUBECONFIG` (конфиг) и `E2E_SSH_PRIVATE_KEY` (ключ) и т.д.
+
+Запуск с подгрузкой переменных:
+
+```bash
+source e2e/config/test_exports_storage_e2e   # или test_exports
+cd e2e && go test -v -run TestSdsNodeConfigurator ./tests/
+```
+
+### Кластер уже заблокирован (cluster is already locked)
+
+Если предыдущий запуск тестов завершился по Ctrl+C или упал до cleanup, лок на кластере не снимается. Ошибка: `failed to acquire cluster lock: cluster is already locked`.
+
+**Решение:** перед запуском один раз выставить принудительное снятие лока (только если уверены, что другой тест не использует кластер):
+
+```bash
+export TEST_CLUSTER_FORCE_LOCK_RELEASE='true'
+source e2e/config/test_exports_storage_e2e
+cd e2e && go test -v -run TestSdsNodeConfigurator ./tests/
+```
+
+Можно добавить `export TEST_CLUSTER_FORCE_LOCK_RELEASE='true'` в свой `e2e/config/test_exports_storage_e2e` для постоянного использования или убрать после первого успешного запуска.
+
 ## Переменные окружения
 
 | Переменная         | Описание                              | Значение по умолчанию |

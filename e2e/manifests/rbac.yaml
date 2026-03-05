@@ -14,6 +14,7 @@ rules:
       - storage.deckhouse.io
     resources:
       - blockdevices
+      - lvmvolumegroups
     verbs:
       - get
       - list

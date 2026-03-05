@@ -1,0 +1,20 @@
+{
+  "first_master_ip": "10.10.10.7",
+  "namespace": "e2e-demchuk",
+  "vm_names": [
+    "master-1-vn0e9",
+    "worker-1-by4q3",
+    "worker-4-1q7hj",
+    "worker-5-0an0t",
+    "bootstrap-node-1772644835"
+  ],
+  "setup_vm_name": "bootstrap-node-1772644835",
+  "master_hostnames": [
+    "master-1-vn0e9"
+  ],
+  "worker_hostnames": [
+    "worker-1-by4q3",
+    "worker-4-1q7hj",
+    "worker-5-0an0t"
+  ]
+}
