@@ -173,12 +173,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Clone storage-e2e (replace dependency for e2e/go.mod)
-        run: |
-          cd "$GITHUB_WORKSPACE/.."
-          git clone --depth 1 https://github.com/deckhouse/storage-e2e.git
-          ls -la storage-e2e/
-
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
         with:

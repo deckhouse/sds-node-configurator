@@ -22,6 +22,8 @@ github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/deckhouse/deckhouse v1.74.0 h1:a/gEuLKutoV6ReWaBWMDJ+VLlOkkCwS4VMvR/sHQscw=
 github.com/deckhouse/deckhouse v1.74.0/go.mod h1:qMuvDbP8AYghXkWmDjoFPc6r1w9uw/cWxl/hmvA0BzA=
+github.com/deckhouse/storage-e2e v0.0.0-20260303112441-16b274872c5f h1:G3vajzuxougb2c51LY9vumoCZ93XXb8NytNudmgpGxo=
+github.com/deckhouse/storage-e2e v0.0.0-20260303112441-16b274872c5f/go.mod h1:QrLhuLe+14+vxpK4+MX03sY6iazNzkQoITtWNMdf9Fs=
 github.com/deckhouse/virtualization/api v1.0.0 h1:q4TvC74tpjk25k0byXJCYP4HjvRexBSeI0cC8QeCMTQ=
 github.com/deckhouse/virtualization/api v1.0.0/go.mod h1:meTeGulR+xwnvt0pTGsoI14YhGe0lHUVyAfhZsoQyeQ=
 github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815/go.mod h1:WwZ+bS3ebgob9U8Nd0kOddGdZWjyMGR8Wziv+TBNwSE=
