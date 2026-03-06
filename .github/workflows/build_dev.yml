@@ -187,7 +187,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.24'
+          go-version: '1.25'
           cache-dependency-path: e2e/go.sum
 
       - name: Setup test environment
