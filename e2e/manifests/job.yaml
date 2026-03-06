@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: e2e-tests
+  namespace: d8-sds-node-configurator
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      serviceAccountName: e2e-tests
+      restartPolicy: Never
+      containers:
+        - name: e2e-tests
+          image: ${E2E_IMAGE}
+          env:
+            - name: E2E_NODE_NAME
+              value: "${E2E_NODE_NAME}"
+            - name: E2E_DEVICE_PATH
+              value: "${E2E_DEVICE_PATH}"
+            - name: E2E_DEVICE_SERIAL
+              value: "${E2E_DEVICE_SERIAL}"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
