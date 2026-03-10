@@ -191,6 +191,18 @@ jobs:
           printf '%s\n' "$E2E_SSH_PRIVATE_KEY" > ~/.ssh/e2e_ci_key
           chmod 600 ~/.ssh/e2e_ci_key
 
+          # SSH_* не задаём в env шага Run (иначе пустые значения перетирают). Пишем в файл, в Run делаем source.
+          if [ -z "${E2E_SSH_HOST}" ]; then
+            echo "::error::E2E_SSH_HOST is not set. Set repo variable or secret E2E_SSH_HOST."
+            exit 1
+          fi
+          E2E_ENV_FILE="e2e/e2e_env.sh"
+          printf 'export SSH_HOST=%q\n' "$E2E_SSH_HOST" >> "$E2E_ENV_FILE"
+          printf 'export SSH_USER=%q\n' "${E2E_SSH_USER:-cloud}" >> "$E2E_ENV_FILE"
+          printf 'export SSH_PRIVATE_KEY=%q\n' "$HOME/.ssh/e2e_ci_key" >> "$E2E_ENV_FILE"
+          [ -n "$E2E_SSH_JUMP_HOST" ] && printf 'export SSH_JUMP_HOST=%q\n' "$E2E_SSH_JUMP_HOST" >> "$E2E_ENV_FILE"
+          printf 'export SSH_JUMP_USER=%q\n' "${E2E_SSH_JUMP_USER:-${E2E_SSH_USER:-cloud}}" >> "$E2E_ENV_FILE"
+
           # Kubeconfig тестового кластера (E2E_CLUSTER_KUBECONFIG = content, base64). Пишем в файл и задаём KUBE_CONFIG_PATH для storage-e2e.
           mkdir -p ~/.kube
           if [ -n "$E2E_CLUSTER_KUBECONFIG" ]; then
@@ -205,6 +217,10 @@ jobs:
         env:
           E2E_SSH_PRIVATE_KEY: ${{ secrets.E2E_SSH_PRIVATE_KEY }}
           E2E_CLUSTER_KUBECONFIG: ${{ secrets.E2E_CLUSTER_KUBECONFIG }}
+          E2E_SSH_HOST: ${{ vars.E2E_SSH_HOST || secrets.E2E_SSH_HOST }}
+          E2E_SSH_USER: ${{ vars.E2E_SSH_USER || secrets.E2E_SSH_USER }}
+          E2E_SSH_JUMP_HOST: ${{ vars.E2E_SSH_JUMP_HOST || secrets.E2E_SSH_JUMP_HOST }}
+          E2E_SSH_JUMP_USER: ${{ vars.E2E_SSH_JUMP_USER || secrets.E2E_SSH_JUMP_USER }}
 
       - name: Run E2E tests (storage-e2e, TestSdsNodeConfigurator)
         id: run_tests
@@ -213,18 +229,20 @@ jobs:
           TEST_CLUSTER_NAMESPACE: e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}
           TEST_CLUSTER_STORAGE_CLASS: ${{ vars.E2E_TEST_CLUSTER_STORAGE_CLASS }}
           TEST_CLUSTER_CLEANUP: ${{ vars.E2E_TEST_CLUSTER_CLEANUP || 'false' }}
-          # storage-e2e читает DKP_LICENSE_KEY, REGISTRY_DOCKER_CFG, SSH_PRIVATE_KEY, KUBE_CONFIG_PATH (последний задаётся выше из E2E_CLUSTER_KUBECONFIG при наличии)
           DKP_LICENSE_KEY: ${{ secrets.E2E_DKP_LICENSE_KEY }}
           REGISTRY_DOCKER_CFG: ${{ secrets.E2E_REGISTRY_DOCKER_CFG }}
-          SSH_HOST: ${{ vars.E2E_SSH_HOST }}
-          SSH_USER: ${{ vars.E2E_SSH_USER || 'cloud' }}
-          SSH_PRIVATE_KEY: ~/.ssh/e2e_ci_key
-          SSH_JUMP_HOST: ${{ vars.E2E_SSH_JUMP_HOST }}
-          SSH_JUMP_USER: ${{ vars.E2E_SSH_JUMP_USER || vars.E2E_SSH_USER || 'cloud' }}
-          KUBE_CONFIG_PATH: ${{ vars.E2E_KUBE_CONFIG_PATH }}
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL || 'info' }}
+          # SSH_* не задаём здесь — пустые vars перетирали бы значения. Берём только из e2e_env.sh (source ниже).
         run: |
+          set -e
           cd e2e
+          if [ ! -f ./e2e_env.sh ]; then
+            echo "::error::e2e/e2e_env.sh not found. Setup step must create it (check E2E_SSH_HOST)."
+            exit 1
+          fi
+          set -a
+          . ./e2e_env.sh
+          set +a
           go mod tidy
           go mod download
           go test -v -count=1 -timeout 60m ./tests/ -run TestSdsNodeConfigurator 2>&1 | tee ../e2e-test-output.log
