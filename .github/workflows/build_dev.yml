@@ -186,16 +186,17 @@ jobs:
 
       - name: Setup test environment
         run: |
-          # SSH ключ для доступа к кластеру (storage-e2e)
+          # SSH ключ для доступа к кластеру (storage-e2e). Ключ — содержимое из secrets; пишем в файл, в env передаём путь (абсолютный, без ~), т.к. storage-e2e открывает SSH_PRIVATE_KEY как файл.
           mkdir -p ~/.ssh
           printf '%s\n' "$E2E_SSH_PRIVATE_KEY" > ~/.ssh/e2e_ci_key
           chmod 600 ~/.ssh/e2e_ci_key
+          echo "SSH_PRIVATE_KEY=$HOME/.ssh/e2e_ci_key" >> $GITHUB_ENV
 
           # Kubeconfig тестового кластера (E2E_CLUSTER_KUBECONFIG = content, base64). Пишем в файл и задаём KUBE_CONFIG_PATH для storage-e2e.
           mkdir -p ~/.kube
           if [ -n "$E2E_CLUSTER_KUBECONFIG" ]; then
             echo "$E2E_CLUSTER_KUBECONFIG" | base64 -d > ~/.kube/e2e-cluster-config
-            echo "KUBE_CONFIG_PATH=~/.kube/e2e-cluster-config" >> $GITHUB_ENV
+            echo "KUBE_CONFIG_PATH=$HOME/.kube/e2e-cluster-config" >> $GITHUB_ENV
           fi
 
           TEST_NAMESPACE="e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}"
@@ -216,7 +217,7 @@ jobs:
           REGISTRY_DOCKER_CFG: ${{ secrets.E2E_REGISTRY_DOCKER_CFG }}
           SSH_HOST: ${{ secrets.E2E_SSH_HOST }}
           SSH_USER: ${{ secrets.E2E_SSH_USER }}
-          SSH_PRIVATE_KEY: ${{ secrets.E2E_SSH_PRIVATE_KEY }}
+          # Путь к ключу задаётся в Setup (GITHUB_ENV), не передаём содержимое секрета — storage-e2e ожидает путь к файлу
           SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST }}
           SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER }}
           KUBE_CONFIG_PATH: ${{ vars.E2E_KUBE_CONFIG_PATH }}
