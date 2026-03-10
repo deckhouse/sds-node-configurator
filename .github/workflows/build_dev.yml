@@ -216,7 +216,7 @@ jobs:
           # storage-e2e читает DKP_LICENSE_KEY, REGISTRY_DOCKER_CFG, SSH_PRIVATE_KEY, KUBE_CONFIG_PATH (последний задаётся выше из E2E_CLUSTER_KUBECONFIG при наличии)
           DKP_LICENSE_KEY: ${{ secrets.E2E_DKP_LICENSE_KEY }}
           REGISTRY_DOCKER_CFG: ${{ secrets.E2E_REGISTRY_DOCKER_CFG }}
-          SSH_HOST: ${{ vars.E2E_SSH_HOST }}
+          SSH_HOST: ${{ vars.E2E_SSH_HOST || vars.SSH_HOST }}
           SSH_USER: ${{ vars.E2E_SSH_USER || 'cloud' }}
           SSH_PRIVATE_KEY: ~/.ssh/e2e_ci_key
           SSH_JUMP_HOST: ${{ vars.E2E_SSH_JUMP_HOST }}
