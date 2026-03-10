@@ -186,11 +186,16 @@ jobs:
 
       - name: Setup test environment
         run: |
-          # SSH ключ для доступа к кластеру (storage-e2e). Ключ — содержимое из secrets; пишем в файл, в env передаём путь (абсолютный, без ~), т.к. storage-e2e открывает SSH_PRIVATE_KEY как файл.
+          # SSH ключ для доступа к кластеру (storage-e2e). Приватный и публичный — содержимое из secrets; пишем в файлы, в env передаём пути (абсолютные). storage-e2e при создании VMs подставляет публичный ключ в authorized_keys.
           mkdir -p ~/.ssh
           printf '%s\n' "$E2E_SSH_PRIVATE_KEY" > ~/.ssh/e2e_ci_key
           chmod 600 ~/.ssh/e2e_ci_key
           echo "SSH_PRIVATE_KEY=$HOME/.ssh/e2e_ci_key" >> $GITHUB_ENV
+          if [ -n "$E2E_SSH_PUBLIC_KEY" ]; then
+            printf '%s\n' "$E2E_SSH_PUBLIC_KEY" > ~/.ssh/e2e_ci_key.pub
+            chmod 644 ~/.ssh/e2e_ci_key.pub
+            echo "SSH_PUBLIC_KEY=$HOME/.ssh/e2e_ci_key.pub" >> $GITHUB_ENV
+          fi
 
           # Kubeconfig тестового кластера (E2E_CLUSTER_KUBECONFIG = content, base64). Пишем в файл и задаём KUBE_CONFIG_PATH для storage-e2e.
           mkdir -p ~/.kube
@@ -204,6 +209,7 @@ jobs:
           echo "Generated namespace: ${TEST_NAMESPACE}"
         env:
           E2E_SSH_PRIVATE_KEY: ${{ secrets.E2E_SSH_PRIVATE_KEY }}
+          E2E_SSH_PUBLIC_KEY: ${{ secrets.E2E_SSH_PUBLIC_KEY }}
           E2E_CLUSTER_KUBECONFIG: ${{ secrets.E2E_CLUSTER_KUBECONFIG }}
 
       - name: Run E2E tests (storage-e2e, TestSdsNodeConfigurator)
