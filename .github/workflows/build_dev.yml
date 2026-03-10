@@ -208,10 +208,10 @@ jobs:
       - name: Run E2E tests (storage-e2e, TestSdsNodeConfigurator)
         id: run_tests
         env:
-          TEST_CLUSTER_CREATE_MODE: ${{ vars.E2E_TEST_CLUSTER_CREATE_MODE }}
+          TEST_CLUSTER_CREATE_MODE: ${{ secrets.E2E_TEST_CLUSTER_CREATE_MODE }}
           TEST_CLUSTER_NAMESPACE: e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}
           TEST_CLUSTER_STORAGE_CLASS: ${{ secrets.E2E_TEST_CLUSTER_STORAGE_CLASS }}
-          TEST_CLUSTER_CLEANUP: ${{ vars.E2E_TEST_CLUSTER_CLEANUP }}
+          TEST_CLUSTER_CLEANUP: ${{ secrets.E2E_TEST_CLUSTER_CLEANUP }}
           DKP_LICENSE_KEY: ${{ secrets.E2E_DECKHOUSE_LICENSE }}
           REGISTRY_DOCKER_CFG: ${{ secrets.E2E_REGISTRY_DOCKER_CFG }}
           SSH_HOST: ${{ secrets.E2E_SSH_HOST }}
