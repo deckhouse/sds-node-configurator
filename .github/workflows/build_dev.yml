@@ -255,8 +255,15 @@ jobs:
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
         run: |
           cd e2e
+          # storage-e2e пишет temp/ относительно своего модуля; в GOMOD по умолчанию модуль в read-only. Кэш в workspace + создаём temp.
+          export GOMODCACHE="$PWD/.gomodcache"
           go mod tidy
           go mod download
+          STORAGE_E2E_DIR=$(find "$GOMODCACHE" -type d -name "storage-e2e*" 2>/dev/null | head -1)
+          if [ -n "$STORAGE_E2E_DIR" ]; then
+            mkdir -p "$STORAGE_E2E_DIR/temp"
+            echo "Created writable temp dir: $STORAGE_E2E_DIR/temp"
+          fi
           go test -v -count=1 -timeout 60m ./tests/ -run TestSdsNodeConfigurator 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV

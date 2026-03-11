@@ -52,3 +52,4 @@ local_build.sh
 # e2e local env (keys, hosts) — do not commit to public repo
 e2e/config/
 e2e/temp/
+e2e/.gomodcache/
