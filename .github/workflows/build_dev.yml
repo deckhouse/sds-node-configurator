@@ -22,6 +22,11 @@ on:
         description: "Enable svace build and analyze"
         type: boolean
         required: false
+      run_e2e_smoke_tests:
+        description: "Run E2E smoke tests (when label e2e-smoke-test is on PR). Set to false when calling from Build and checks to avoid duplicate runs."
+        type: boolean
+        required: false
+        default: false
   push:
     branches:
       - main
@@ -162,9 +167,9 @@ jobs:
           svacer_import_password: "${{ secrets.SVACER_IMPORT_PASSWORD }}"
           svace_analyze_ssh_private_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
 
-  # E2E smoke тесты (storage-e2e) — только при прямом pull_request, не при вызове из "Build and checks" (workflow_call), чтобы не дублировать прогон
+  # E2E smoke тесты — только при прямом pull_request или при workflow_call с run_e2e_smoke_tests: true. Из "Build and checks" вызывают с run_e2e_smoke_tests: false, чтобы не дублировать.
   run_e2e_smoke_tests:
-    if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test') }}
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test') && (github.event_name != 'workflow_call' || inputs.run_e2e_smoke_tests == true) }}
     name: Run E2E Smoke Tests
     runs-on: [self-hosted, regular]
     needs:
