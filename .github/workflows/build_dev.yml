@@ -218,9 +218,15 @@ jobs:
           SSH_HOST: ${{ secrets.E2E_SSH_HOST }}
           SSH_USER: ${{ secrets.E2E_SSH_USER }}
         run: |
-          echo "Testing SSH connection (verbose) to ${SSH_USER}@${SSH_HOST}..."
-          ssh -vvv -o ConnectTimeout=15 -o StrictHostKeyChecking=no -i ~/.ssh/e2e_ci_key "${SSH_USER}@${SSH_HOST}" "echo OK" || true
-          echo "--- SSH diagnostic done ---"
+          echo "=== SSH diagnostic (host/port masked in log when from secrets) ==="
+          echo "SSH_HOST length: ${#SSH_HOST}, SSH_USER length: ${#SSH_USER}"
+          if [ -z "$SSH_HOST" ]; then echo "::error::SSH_HOST is empty"; exit 1; fi
+          echo "Probing port 22 (nc -zv)..."
+          nc -zv "$SSH_HOST" 22 2>&1 || true
+          echo "---"
+          echo "SSH verbose connect..."
+          ssh -vvv -o ConnectTimeout=15 -o StrictHostKeyChecking=no -i ~/.ssh/e2e_ci_key "${SSH_USER}@${SSH_HOST}" "echo OK" 2>&1 || true
+          echo "=== If above: 'Connection refused' = nothing listening on port 22 from this runner (firewall/network/host down). 'Timed out' = host unreachable. ==="
 
       - name: Run E2E tests (storage-e2e, TestSdsNodeConfigurator)
         id: run_tests
