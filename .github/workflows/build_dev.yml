@@ -162,9 +162,9 @@ jobs:
           svacer_import_password: "${{ secrets.SVACER_IMPORT_PASSWORD }}"
           svace_analyze_ssh_private_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
 
-  # E2E smoke тесты (storage-e2e) - запускаются после сборки при наличии лейбла e2e-smoke-test
+  # E2E smoke тесты (storage-e2e) — только при прямом pull_request, не при вызове из "Build and checks" (workflow_call), чтобы не дублировать прогон
   run_e2e_smoke_tests:
-    if: ${{ contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test') }}
+    if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test') }}
     name: Run E2E Smoke Tests
     runs-on: [self-hosted, regular]
     needs:
