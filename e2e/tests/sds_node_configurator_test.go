@@ -48,10 +48,10 @@ import (
 
 // e2e config defaults (must match storage-e2e internal/config when using setup.Init())
 const (
-	e2eDefaultNamespace       = "e2e-test-cluster"
-	e2eDefaultVMSSHUser       = "cloud"
-	e2eClusterCleanupTimeout  = 10 * time.Minute
-	e2eLVMVGPrefix            = "e2e-lvg-"
+	e2eDefaultNamespace      = "e2e-test-cluster"
+	e2eDefaultVMSSHUser      = "cloud"
+	e2eClusterCleanupTimeout = 10 * time.Minute
+	e2eLVMVGPrefix           = "e2e-lvg-"
 )
 
 func e2eConfigNamespace() string {
@@ -60,15 +60,15 @@ func e2eConfigNamespace() string {
 	}
 	return e2eDefaultNamespace
 }
-func e2eConfigStorageClass() string   { return os.Getenv("TEST_CLUSTER_STORAGE_CLASS") }
+func e2eConfigStorageClass() string       { return os.Getenv("TEST_CLUSTER_STORAGE_CLASS") }
 func e2eConfigTestClusterCleanup() string { return os.Getenv("TEST_CLUSTER_CLEANUP") }
-func e2eConfigSSHHost() string         { return os.Getenv("SSH_HOST") }
-func e2eConfigSSHUser() string        { return os.Getenv("SSH_USER") }
-func e2eConfigSSHJumpHost() string    { return os.Getenv("SSH_JUMP_HOST") }
-func e2eConfigSSHJumpUser() string    { return os.Getenv("SSH_JUMP_USER") }
-func e2eConfigSSHJumpKeyPath() string { return os.Getenv("SSH_JUMP_KEY_PATH") }
-func e2eConfigSSHPassphrase() string   { return os.Getenv("SSH_PASSPHRASE") }
-func e2eConfigLogLevel() string       { return os.Getenv("LOG_LEVEL") }
+func e2eConfigSSHHost() string            { return os.Getenv("SSH_HOST") }
+func e2eConfigSSHUser() string            { return os.Getenv("SSH_USER") }
+func e2eConfigSSHJumpHost() string        { return os.Getenv("SSH_JUMP_HOST") }
+func e2eConfigSSHJumpUser() string        { return os.Getenv("SSH_JUMP_USER") }
+func e2eConfigSSHJumpKeyPath() string     { return os.Getenv("SSH_JUMP_KEY_PATH") }
+func e2eConfigSSHPassphrase() string      { return os.Getenv("SSH_PASSPHRASE") }
+func e2eConfigLogLevel() string           { return os.Getenv("LOG_LEVEL") }
 func e2eConfigKubeConfigPath() string {
 	// KUBE_CONFIG_PATH is set by CI from E2E_CLUSTER_KUBECONFIG (written to file) or directly as path
 	return os.Getenv("KUBE_CONFIG_PATH")
@@ -96,11 +96,11 @@ func e2eConfigVMSSHUser() string {
 // expectedDisk is the expected (node, VD name) for one created VirtualDisk (same order as e2eDiskAttachments).
 // Serial: virtualization may use VirtualDisk.UID or VirtualMachineBlockDeviceAttachment.UID (hex MD5); we accept either.
 type expectedDisk struct {
-	Node                  string
-	VDDiskName            string
-	ExpectedSerialVD      string   // hex(MD5(VirtualDisk.UID))
-	ExpectedSerialVMBDA   string   // hex(MD5(VirtualMachineBlockDeviceAttachment.UID))
-	ExpectedBDName        string
+	Node                string
+	VDDiskName          string
+	ExpectedSerialVD    string // hex(MD5(VirtualDisk.UID))
+	ExpectedSerialVMBDA string // hex(MD5(VirtualMachineBlockDeviceAttachment.UID))
+	ExpectedBDName      string
 }
 
 // blockDeviceSerialFromVirtualDiskUID returns the BlockDevice serial (hex-encoded MD5 of UID).
@@ -119,16 +119,16 @@ func blockDeviceNameFromDiscoveryInput(nodeName, wwn, model, serial, partUUID st
 
 // nameSerialCheckRow is one row of the BlockDevice name/serial check table (expected vs actual).
 type nameSerialCheckRow struct {
-	Node                 string
-	VDName               string
-	BDName               string
-	ExpectedSerialVD     string
-	ExpectedSerialVMBDA  string
-	ActualSerial         string
-	SerialMatch          bool
-	ExpectedBDName       string
-	ActualBDName         string
-	NameMatch            bool
+	Node                string
+	VDName              string
+	BDName              string
+	ExpectedSerialVD    string
+	ExpectedSerialVMBDA string
+	ActualSerial        string
+	SerialMatch         bool
+	ExpectedBDName      string
+	ActualBDName        string
+	NameMatch           bool
 }
 
 // discoveryTableRow is one row of the discovery test summary (VD + BD + lsblk).
@@ -275,11 +275,6 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 	// - alwaysUseExisting: connect to existing cluster (no virtualization check, no VM creation)
 	// - alwaysCreateNew: create new cluster via VMs (full flow including virtualization check)
 	// - commander: use Deckhouse Commander
-	//
-	// For alwaysCreateNew, storage-e2e runs in order: Step 1 load config → Step 2 connect to base cluster (SSH to SSH_HOST) →
-	// Step 3 verify virtualization → Step 4 create namespace → Step 5 create VMs → ... If Step 2 fails (e.g. "connection refused"),
-	// the function returns and Step 5 (create VMs) is never run. So SSH_HOST must be reachable from the runner on port 22;
-	// it is the base cluster host (or jump host) where the framework gets kubeconfig and then creates VMs via the API.
 
 	It("should create test cluster", func() {
 		testClusterResources = cluster.CreateOrConnectToTestCluster()
@@ -294,9 +289,9 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 		const e2eDataDiskSize = "2Gi"
 
 		var (
-			nodeName             string
-			expectedDevicePath   string
-			e2eDiskAttachments   []*kubernetes.VirtualDiskAttachmentResult // multiple disks for parallel discovery test
+			nodeName           string
+			expectedDevicePath string
+			e2eDiskAttachments []*kubernetes.VirtualDiskAttachmentResult // multiple disks for parallel discovery test
 		)
 
 		BeforeEach(func() {
@@ -563,7 +558,7 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 					Node:                bd.Status.NodeName,
 					VDName:              exp.VDDiskName,
 					BDName:              bd.Name,
-					ExpectedSerialVD:   exp.ExpectedSerialVD,
+					ExpectedSerialVD:    exp.ExpectedSerialVD,
 					ExpectedSerialVMBDA: exp.ExpectedSerialVMBDA,
 					ActualSerial:        actualSerial,
 					SerialMatch:         serialMatch,
