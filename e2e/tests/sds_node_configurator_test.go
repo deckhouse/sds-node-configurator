@@ -275,6 +275,11 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 	// - alwaysUseExisting: connect to existing cluster (no virtualization check, no VM creation)
 	// - alwaysCreateNew: create new cluster via VMs (full flow including virtualization check)
 	// - commander: use Deckhouse Commander
+	//
+	// For alwaysCreateNew, storage-e2e runs in order: Step 1 load config → Step 2 connect to base cluster (SSH to SSH_HOST) →
+	// Step 3 verify virtualization → Step 4 create namespace → Step 5 create VMs → ... If Step 2 fails (e.g. "connection refused"),
+	// the function returns and Step 5 (create VMs) is never run. So SSH_HOST must be reachable from the runner on port 22;
+	// it is the base cluster host (or jump host) where the framework gets kubeconfig and then creates VMs via the API.
 
 	It("should create test cluster", func() {
 		testClusterResources = cluster.CreateOrConnectToTestCluster()
