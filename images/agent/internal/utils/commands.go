@@ -63,6 +63,10 @@ type Commands interface {
 	VGChangeAddTag(vGName, tag string) (string, error)
 	VGChangeDelTag(vGName, tag string) (string, error)
 	LVChangeDelTag(lv internal.LVData, tag string) (string, error)
+	VGActivate(vgName string, shared bool) (string, error)
+	LVActivate(vgName, lvName string) (string, error)
+	VGScan(ctx context.Context) (string, error)
+	PVScan(ctx context.Context) (string, error)
 	UnmarshalDevices(out []byte) ([]internal.Device, error)
 	ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string) error
 }
@@ -98,7 +102,7 @@ func (c *commands) GetBlockDevices(ctx context.Context) ([]internal.Device, stri
 
 func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	args := []string{"vgs", "-o", "+uuid,tags,shared", "--units", "B", "--nosuffix", "--reportformat", "json"}
+	args := []string{"vgs", "-o", "+uuid,tags,shared,vg_attr", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
@@ -121,7 +125,7 @@ func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command 
 func (commands) GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	vgData = internal.VGData{}
-	args := []string{"vgs", "-o", "+uuid,tags,shared", "--units", "B", "--nosuffix", "--reportformat", "json", vgName}
+	args := []string{"vgs", "-o", "+uuid,tags,shared,vg_attr", "--units", "B", "--nosuffix", "--reportformat", "json", vgName}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
@@ -533,6 +537,67 @@ func (commands) LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
 
 	if err := cmd.Run(); err != nil {
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stdErr: %s", cmd.String(), err, stdErr.String())
+	}
+	return cmd.String(), nil
+}
+
+func (commands) VGActivate(vgName string, shared bool) (string, error) {
+	activateFlag := "-ay"
+	if shared {
+		activateFlag = "-asy"
+	}
+	args := []string{"vgchange", activateFlag, vgName}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+func (commands) LVActivate(vgName, lvName string) (string, error) {
+	lvPath := filepath.Join("/dev", vgName, lvName)
+	args := []string{"lvchange", "-ay", lvPath}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+func (commands) VGScan(ctx context.Context) (string, error) {
+	args := []string{"vgscan", "--cache"}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+func (commands) PVScan(ctx context.Context) (string, error) {
+	args := []string{"pvscan", "--cache"}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 	return cmd.String(), nil
 }

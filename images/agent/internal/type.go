@@ -106,6 +106,7 @@ type VG struct {
 }
 
 type VGData struct {
+	VGAttr   string            `json:"vg_attr"`
 	VGFree   resource.Quantity `json:"vg_free"`
 	VGName   string            `json:"vg_name"`
 	VGShared string            `json:"vg_shared"`
