@@ -221,9 +221,10 @@ jobs:
           TEST_CLUSTER_CLEANUP: ${{ secrets.E2E_TEST_CLUSTER_CLEANUP }}
           DKP_LICENSE_KEY: ${{ secrets.E2E_DECKHOUSE_LICENSE }}
           REGISTRY_DOCKER_CFG: ${{ secrets.E2E_REGISTRY_DOCKER_CFG }}
+          # Доступ к базовому кластеру: логин (SSH_USER) и адрес (SSH_HOST). storage-e2e подключается как SSH_USER@SSH_HOST.
           SSH_HOST: ${{ secrets.E2E_SSH_HOST }}
           SSH_USER: ${{ secrets.E2E_SSH_USER }}
-          # Путь к ключу задаётся в Setup (GITHUB_ENV), не передаём содержимое секрета — storage-e2e ожидает путь к файлу
+          # Путь к ключу задаётся в Setup (GITHUB_ENV); storage-e2e ожидает путь к файлу
           SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST }}
           SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER }}
           KUBE_CONFIG_PATH: ${{ vars.E2E_KUBE_CONFIG_PATH }}

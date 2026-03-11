@@ -201,14 +201,15 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 				GinkgoWriter.Printf("      TEST_CLUSTER_STORAGE_CLASS: %s\n", e2eConfigStorageClass())
 			}
 
-			// SSH_HOST - no masking
+			// SSH_HOST (address) and SSH_USER (login): base cluster connection is SSH_USER@SSH_HOST
 			if e2eConfigSSHHost() != "" {
 				GinkgoWriter.Printf("      SSH_HOST: %s\n", e2eConfigSSHHost())
 			}
-
-			// SSH_USER - no masking
 			if e2eConfigSSHUser() != "" {
 				GinkgoWriter.Printf("      SSH_USER: %s\n", e2eConfigSSHUser())
+			}
+			if e2eConfigSSHHost() != "" && e2eConfigSSHUser() != "" {
+				GinkgoWriter.Printf("      Base cluster SSH: %s@%s\n", e2eConfigSSHUser(), e2eConfigSSHHost())
 			}
 
 			// SSH_JUMP_* - no masking (for jump host / bastion)
