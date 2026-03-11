@@ -212,6 +212,16 @@ jobs:
           E2E_SSH_PUBLIC_KEY: ${{ secrets.E2E_SSH_PUBLIC_KEY }}
           E2E_CLUSTER_KUBECONFIG: ${{ secrets.E2E_CLUSTER_KUBECONFIG }}
 
+      - name: Diagnose SSH to base cluster (ssh -vvv)
+        continue-on-error: true
+        env:
+          SSH_HOST: ${{ secrets.E2E_SSH_HOST }}
+          SSH_USER: ${{ secrets.E2E_SSH_USER }}
+        run: |
+          echo "Testing SSH connection (verbose) to ${SSH_USER}@${SSH_HOST}..."
+          ssh -vvv -o ConnectTimeout=15 -o StrictHostKeyChecking=no -i ~/.ssh/e2e_ci_key "${SSH_USER}@${SSH_HOST}" "echo OK" || true
+          echo "--- SSH diagnostic done ---"
+
       - name: Run E2E tests (storage-e2e, TestSdsNodeConfigurator)
         id: run_tests
         env:
