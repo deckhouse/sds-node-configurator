@@ -218,6 +218,7 @@ func TestCommands(t *testing.T) {
 			}
 			expectedVGs := internal.VG{VG: []internal.VGData{
 				{
+					VGAttr:   "wz--n-",
 					VGName:   "test-vg",
 					VGUUID:   "P14t8J-nfUE-hryT-LiTv-JdFD-Wqxg-R8taCa",
 					VGTags:   "test-tag",
