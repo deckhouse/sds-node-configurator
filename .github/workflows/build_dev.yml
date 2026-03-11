@@ -227,7 +227,7 @@ jobs:
           # Путь к ключу задаётся в Setup (GITHUB_ENV); storage-e2e ожидает путь к файлу
           SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST }}
           SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER }}
-          KUBE_CONFIG_PATH: ${{ vars.E2E_KUBE_CONFIG_PATH }}
+          # KUBE_CONFIG_PATH не задаём здесь — берётся из GITHUB_ENV (Setup пишет путь к файлу из E2E_CLUSTER_KUBECONFIG). Иначе пустой vars перетирает fallback, и при неудаче "sudo cat admin.conf" на мастере storage-e2e не находит kubeconfig.
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
         run: |
           cd e2e
