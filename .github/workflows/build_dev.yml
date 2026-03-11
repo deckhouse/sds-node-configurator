@@ -264,17 +264,34 @@ jobs:
 
       - name: Cleanup test resources
         if: always()
+        env:
+          SSH_HOST: ${{ secrets.E2E_SSH_HOST }}
+          SSH_USER: ${{ secrets.E2E_SSH_USER }}
+          SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST }}
+          SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER }}
         run: |
-          if [ -f ~/.kube/e2e-cluster-config ]; then
-            export KUBECONFIG=~/.kube/e2e-cluster-config
-            echo "Cleaning up namespace: ${TEST_NAMESPACE}"
-            kubectl delete namespace ${TEST_NAMESPACE} --ignore-not-found=true --timeout=5m || true
-            kubectl delete vd -n ${TEST_NAMESPACE} --all --ignore-not-found=true --timeout=2m || true
-            kubectl delete vm -n ${TEST_NAMESPACE} --all --ignore-not-found=true --timeout=2m || true
-            echo "Cleanup completed"
-          else
-            echo "No E2E_CLUSTER_KUBECONFIG, skip kubectl cleanup"
+          if [ ! -f ~/.kube/e2e-cluster-config ]; then
+            echo "No e2e-cluster-config, skip cleanup"
+            exit 0
           fi
+          # Kubeconfig указывает на 127.0.0.1:6445 — туннель, который жил только во время теста. Поднимаем туннель заново для cleanup.
+          if [ -n "$SSH_HOST" ] && [ -n "$SSH_USER" ] && [ -f ~/.ssh/e2e_ci_key ]; then
+            echo "Starting SSH tunnel for cleanup (localhost:6445 -> base cluster API)..."
+            if [ -n "$SSH_JUMP_HOST" ]; then
+              JUMP_USER="${SSH_JUMP_USER:-$SSH_USER}"
+              ssh -f -N -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i ~/.ssh/e2e_ci_key -J "${JUMP_USER}@${SSH_JUMP_HOST}" -L 6445:127.0.0.1:6445 "${SSH_USER}@${SSH_HOST}" || true
+            else
+              ssh -f -N -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i ~/.ssh/e2e_ci_key -L 6445:127.0.0.1:6445 "${SSH_USER}@${SSH_HOST}" || true
+            fi
+            sleep 2
+          fi
+          export KUBECONFIG=~/.kube/e2e-cluster-config
+          echo "Cleaning up namespace: ${TEST_NAMESPACE}"
+          kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=5m 2>/dev/null || true
+          kubectl delete vd -n "${TEST_NAMESPACE}" --all --ignore-not-found=true --timeout=2m 2>/dev/null || true
+          kubectl delete vm -n "${TEST_NAMESPACE}" --all --ignore-not-found=true --timeout=2m 2>/dev/null || true
+          echo "Cleanup completed"
+          pkill -f "ssh -f -N .* 6445:127.0.0.1:6445" 2>/dev/null || true
 
       - name: Upload test logs
         uses: actions/upload-artifact@v4
