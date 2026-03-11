@@ -195,6 +195,14 @@ jobs:
             printf '%s\n' "$E2E_SSH_PUBLIC_KEY" > ~/.ssh/e2e_ci_key.pub
             chmod 644 ~/.ssh/e2e_ci_key.pub
             echo "SSH_PUBLIC_KEY=$HOME/.ssh/e2e_ci_key.pub" >> $GITHUB_ENV
+            # Проверка: публичный ключ должен соответствовать приватному (иначе SSH к setup node даст "unable to authenticate")
+            DERIVED_PUB=$(ssh-keygen -y -f ~/.ssh/e2e_ci_key 2>/dev/null)
+            STORED_PUB=$(cat ~/.ssh/e2e_ci_key.pub)
+            if [ -z "$DERIVED_PUB" ] || [ "$DERIVED_PUB" != "$STORED_PUB" ]; then
+              echo "::error::E2E_SSH_PUBLIC_KEY does not match E2E_SSH_PRIVATE_KEY (not a key pair). VM auth will fail. Fix secrets so the public key is the one from: ssh-keygen -y -f <private_key_file>"
+              exit 1
+            fi
+            echo "SSH key pair verified (public matches private)"
           fi
 
           # Kubeconfig тестового кластера (E2E_CLUSTER_KUBECONFIG = content, base64). Пишем в файл и задаём KUBE_CONFIG_PATH для storage-e2e.
