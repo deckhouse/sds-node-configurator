@@ -272,6 +272,7 @@ jobs:
           go test -v -count=1 -timeout 60m ./tests/ -run TestSdsNodeConfigurator 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV
+          echo "${TEST_EXIT_CODE}" > ../e2e-test-exit-code.txt
           exit ${TEST_EXIT_CODE}
 
       - name: Cleanup test resources
@@ -319,7 +320,13 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const exitCode = process.env.TEST_EXIT_CODE || '0';
+            const fs = require('fs');
+            let exitCode = '1';
+            try {
+              exitCode = fs.readFileSync('e2e-test-exit-code.txt', 'utf8').trim() || '1';
+            } catch (_) {
+              exitCode = '1';
+            }
             const status = exitCode === '0' ? '✅' : '❌';
             const statusText = exitCode === '0' ? 'passed' : 'failed';
 
