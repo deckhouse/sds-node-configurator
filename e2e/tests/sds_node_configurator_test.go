@@ -52,6 +52,9 @@ const (
 	e2eDefaultVMSSHUser      = "cloud"
 	e2eClusterCleanupTimeout = 10 * time.Minute
 	e2eLVMVGPrefix           = "e2e-lvg-"
+
+	e2eVirtualDiskAttachMaxRetries   = 3
+	e2eVirtualDiskAttachRetryInterval = 1 * time.Minute
 )
 
 func e2eConfigNamespace() string {
@@ -91,6 +94,23 @@ func e2eConfigVMSSHUser() string {
 		return v
 	}
 	return e2eDefaultVMSSHUser
+}
+
+// attachVirtualDiskWithRetry calls AttachVirtualDiskToVM up to maxRetries times with retryInterval between attempts.
+// Tolerates transient webhook/network errors (e.g. "operation not permitted", webhook dial failures).
+func attachVirtualDiskWithRetry(ctx context.Context, baseKubeconfig *rest.Config, config kubernetes.VirtualDiskAttachmentConfig, maxRetries int, retryInterval time.Duration) (*kubernetes.VirtualDiskAttachmentResult, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		att, err := kubernetes.AttachVirtualDiskToVM(ctx, baseKubeconfig, config)
+		if err == nil {
+			return att, nil
+		}
+		lastErr = err
+		if attempt < maxRetries {
+			time.Sleep(retryInterval)
+		}
+	}
+	return nil, lastErr
 }
 
 // expectedDisk is the expected (node, VD name) for one created VirtualDisk (same order as e2eDiskAttachments).
@@ -415,13 +435,13 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 				go func(diskIdx int, vm string) {
 					defer wg.Done()
 					diskName := fmt.Sprintf("%s-%d", e2eDataDiskName, diskIdx)
-					att, attachErr := kubernetes.AttachVirtualDiskToVM(e2eCtx, baseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+					att, attachErr := attachVirtualDiskWithRetry(e2eCtx, baseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
 						VMName:           vm,
 						Namespace:        ns,
 						DiskName:         diskName,
 						DiskSize:         e2eDataDiskSize,
 						StorageClassName: storageClass,
-					})
+					}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
 					mu.Lock()
 					if attachErr != nil {
 						attachErrs = append(attachErrs, fmt.Errorf("VM %s: %w", vm, attachErr))
@@ -693,13 +713,13 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 
 			By("Attaching one VirtualDisk to guest VM " + targetVM + " for LVG")
 			var attachErr error
-			lvgE2eDiskAttachment, attachErr = kubernetes.AttachVirtualDiskToVM(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+			lvgE2eDiskAttachment, attachErr = attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
 				VMName:           targetVM,
 				Namespace:        ns,
 				DiskName:         e2eLVGDataDiskName,
 				DiskSize:         e2eLVGDataDiskSize,
 				StorageClassName: storageClass,
-			})
+			}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
 			Expect(attachErr).NotTo(HaveOccurred())
 
 			attachCtx, cancel := context.WithTimeout(e2eCtx, 5*time.Minute)
