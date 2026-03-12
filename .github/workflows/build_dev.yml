@@ -13,15 +13,18 @@ env:
   BASE_IMAGES_VERSION: "v0.5.56"
 
 on:
-  #pull_request:
-  # call from trivy_image_check.yaml, which in turn call from pull_request
-  # https://stackoverflow.com/a/71489231
+  # On PR, build_dev runs only via workflow_call from "Build and checks" (trivy_image_check.yaml) to avoid two runs (direct trigger + call).
   workflow_call:
     inputs:
       svace_enabled:
         description: "Enable svace build and analyze"
         type: boolean
         required: false
+      run_e2e_smoke_tests:
+        description: "Run E2E smoke tests (when label e2e-smoke-test is on PR). Set to false when calling from Build and checks to avoid duplicate runs."
+        type: boolean
+        required: false
+        default: false
   push:
     branches:
       - main
@@ -161,3 +164,198 @@ jobs:
           svacer_import_user: "${{ secrets.SVACER_IMPORT_USER }}"
           svacer_import_password: "${{ secrets.SVACER_IMPORT_PASSWORD }}"
           svace_analyze_ssh_private_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
+
+  # E2E smoke tests run only when the caller workflow passes run_e2e_smoke_tests: true (Build and checks sets it from e2e-smoke-test label on PR).
+  run_e2e_smoke_tests:
+    if: ${{ inputs.run_e2e_smoke_tests == true }}
+    name: Run E2E Smoke Tests
+    runs-on: [self-hosted, regular]
+    needs:
+      - dev_setup_build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # - name: Install kubectl
+      #   uses: azure/setup-kubectl@v3
+      #   with:
+      #     version: 'latest'
+
+      # - name: Setup Go
+      #   uses: actions/setup-go@v4
+      #   with:
+      #     go-version: '1.24.9'
+      #     cache-dependency-path: e2e/go.sum
+
+      - name: Setup test environment
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$E2E_SSH_PRIVATE_KEY" > ~/.ssh/e2e_ci_key
+          chmod 600 ~/.ssh/e2e_ci_key
+          echo "SSH_PRIVATE_KEY=$HOME/.ssh/e2e_ci_key" >> $GITHUB_ENV
+          if [ -n "$E2E_SSH_PUBLIC_KEY" ]; then
+            printf '%s\n' "$E2E_SSH_PUBLIC_KEY" > ~/.ssh/e2e_ci_key.pub
+            chmod 644 ~/.ssh/e2e_ci_key.pub
+            echo "SSH_PUBLIC_KEY=$HOME/.ssh/e2e_ci_key.pub" >> $GITHUB_ENV
+            DERIVED_PUB=$(ssh-keygen -y -f ~/.ssh/e2e_ci_key 2>/dev/null)
+            STORED_PUB=$(cat ~/.ssh/e2e_ci_key.pub)
+            if [ -z "$DERIVED_PUB" ] || [ "$DERIVED_PUB" != "$STORED_PUB" ]; then
+              echo "::error::E2E_SSH_PUBLIC_KEY does not match E2E_SSH_PRIVATE_KEY (not a key pair). VM auth will fail. Fix secrets so the public key is the one from: ssh-keygen -y -f <private_key_file>"
+              exit 1
+            fi
+            echo "SSH key pair verified (public matches private)"
+          fi
+
+          mkdir -p ~/.kube
+          if [ -n "$E2E_CLUSTER_KUBECONFIG" ]; then
+            echo "$E2E_CLUSTER_KUBECONFIG" | base64 -d > ~/.kube/e2e-cluster-config
+            echo "KUBE_CONFIG_PATH=$HOME/.kube/e2e-cluster-config" >> $GITHUB_ENV
+          fi
+
+          TEST_NAMESPACE="e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}"
+          echo "TEST_NAMESPACE=${TEST_NAMESPACE}" >> $GITHUB_ENV
+          echo "Generated namespace: ${TEST_NAMESPACE}"
+        env:
+          E2E_SSH_PRIVATE_KEY: ${{ secrets.E2E_SSH_PRIVATE_KEY }}
+          E2E_SSH_PUBLIC_KEY: ${{ secrets.E2E_SSH_PUBLIC_KEY }}
+          E2E_CLUSTER_KUBECONFIG: ${{ secrets.E2E_CLUSTER_KUBECONFIG }}
+
+      - name: Diagnose SSH to base cluster (ssh -vvv)
+        continue-on-error: true
+        env:
+          SSH_HOST: ${{ secrets.E2E_SSH_HOST }}
+          SSH_USER: ${{ secrets.E2E_SSH_USER }}
+        run: |
+          echo "SSH_HOST length: ${#SSH_HOST}, SSH_USER length: ${#SSH_USER}"
+          if [ -z "$SSH_HOST" ]; then echo "::error::SSH_HOST is empty"; exit 1; fi
+          echo "Probing port 22 (nc -zv)..."
+          nc -zv "$SSH_HOST" 22 2>&1 || true
+          echo "---"
+
+      - name: Run E2E tests (storage-e2e, TestSdsNodeConfigurator)
+        id: run_tests
+        env:
+          TEST_CLUSTER_CREATE_MODE: ${{ secrets.E2E_TEST_CLUSTER_CREATE_MODE }}
+          TEST_CLUSTER_NAMESPACE: e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}
+          TEST_CLUSTER_STORAGE_CLASS: ${{ secrets.E2E_TEST_CLUSTER_STORAGE_CLASS }}
+          TEST_CLUSTER_CLEANUP: ${{ secrets.E2E_TEST_CLUSTER_CLEANUP }}
+          DKP_LICENSE_KEY: ${{ secrets.E2E_DECKHOUSE_LICENSE }}
+          REGISTRY_DOCKER_CFG: ${{ secrets.E2E_REGISTRY_DOCKER_CFG }}
+          SSH_HOST: ${{ secrets.E2E_SSH_HOST }}
+          SSH_USER: ${{ secrets.E2E_SSH_USER }}
+          # Jump host for test cluster nodes (10.10.10.x). Without it the test connects to the node directly from runner → connection timed out. Default = base cluster (SSH_HOST).
+          SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST || secrets.E2E_SSH_HOST }}
+          SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER || secrets.E2E_SSH_USER }}
+          # Do not set KUBE_CONFIG_PATH here — it is taken from GITHUB_ENV (Setup writes the path to the file from E2E_CLUSTER_KUBECONFIG). Otherwise an empty vars value overwrites the fallback and storage-e2e cannot find kubeconfig when "sudo cat admin.conf" on the master fails.
+          LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
+        run: |
+          cd e2e
+          # storage-e2e writes temp/ relative to its module; in GOMOD the module is read-only by default. Cache in workspace and create temp dir.
+          export GOMODCACHE="$PWD/.gomodcache"
+          go mod tidy
+          go mod download
+          chmod -R u+w "$GOMODCACHE" 2>/dev/null || true
+          STORAGE_E2E_DIR=$(find "$GOMODCACHE" -type d -name "storage-e2e*" 2>/dev/null | head -1)
+          if [ -n "$STORAGE_E2E_DIR" ]; then
+            chmod -R u+w "$STORAGE_E2E_DIR"
+            mkdir -p "$STORAGE_E2E_DIR/temp"
+            chmod -R u+w "$STORAGE_E2E_DIR/temp"
+            echo "Created writable temp dir: $STORAGE_E2E_DIR/temp"
+          fi
+          go test -v -count=1 -timeout 60m ./tests/ -run TestSdsNodeConfigurator 2>&1 | tee ../e2e-test-output.log
+          TEST_EXIT_CODE=${PIPESTATUS[0]}
+          echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV
+          echo "${TEST_EXIT_CODE}" > ../e2e-test-exit-code.txt
+          exit ${TEST_EXIT_CODE}
+
+      - name: Cleanup test resources
+        if: always()
+        env:
+          SSH_HOST: ${{ secrets.E2E_SSH_HOST }}
+          SSH_USER: ${{ secrets.E2E_SSH_USER }}
+          SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST }}
+          SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER }}
+        run: |
+          if [ ! -f ~/.kube/e2e-cluster-config ]; then
+            echo "No e2e-cluster-config, skip cleanup"
+            exit 0
+          fi
+          if [ -n "$SSH_HOST" ] && [ -n "$SSH_USER" ] && [ -f ~/.ssh/e2e_ci_key ]; then
+            echo "Starting SSH tunnel for cleanup (localhost:6445 -> base cluster API)..."
+            if [ -n "$SSH_JUMP_HOST" ]; then
+              JUMP_USER="${SSH_JUMP_USER:-$SSH_USER}"
+              ssh -f -N -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i ~/.ssh/e2e_ci_key -J "${JUMP_USER}@${SSH_JUMP_HOST}" -L 6445:127.0.0.1:6445 "${SSH_USER}@${SSH_HOST}" || true
+            else
+              ssh -f -N -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i ~/.ssh/e2e_ci_key -L 6445:127.0.0.1:6445 "${SSH_USER}@${SSH_HOST}" || true
+            fi
+            sleep 2
+          fi
+          export KUBECONFIG=~/.kube/e2e-cluster-config
+          echo "Cleaning up namespace: ${TEST_NAMESPACE}"
+          kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=5m 2>/dev/null || true
+          kubectl delete vd -n "${TEST_NAMESPACE}" --all --ignore-not-found=true --timeout=2m 2>/dev/null || true
+          kubectl delete vm -n "${TEST_NAMESPACE}" --all --ignore-not-found=true --timeout=2m 2>/dev/null || true
+          echo "Cleanup completed"
+          pkill -f "ssh -f -N .* 6445:127.0.0.1:6445" 2>/dev/null || true
+
+      - name: Upload test logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-smoke-test-logs-${{ vars.MODULE_NAME }}-${{ github.run_id }}
+          path: e2e-test-output.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Comment PR with results
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let exitCode = '1';
+            try {
+              exitCode = fs.readFileSync('e2e-test-exit-code.txt', 'utf8').trim() || '1';
+            } catch (_) {
+              exitCode = '1';
+            }
+            const status = exitCode === '0' ? '✅' : '❌';
+            const statusText = exitCode === '0' ? 'passed' : 'failed';
+
+            const comment = `## E2E Smoke Tests Results ${status}
+
+            **Module:** ${{ vars.MODULE_NAME }}
+            **Framework:** storage-e2e
+            **Namespace:** \`${process.env.TEST_NAMESPACE}\`
+            **Status:** Tests ${statusText}
+
+
+            [View Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            - **Workflow:** ${{ github.workflow }}
+            - **Run ID:** ${{ github.run_id }}
+            - **Commit:** ${{ github.sha }}
+            - **PR:** #${{ github.event.pull_request.number }}
+            - **Triggered by:** \`e2e-smoke-test\` label
+            - **Exit Code:** ${exitCode}
+
+            Tests were executed via storage-e2e (BlockDevice discovery, LVMVolumeGroup).
+
+            **Artifacts:** Test logs are available in workflow artifacts.
+
+            `;
+
+            if (context.eventName === "pull_request" || context.eventName === "pull_request_target") {
+              github.rest.issues.createComment({
+                issue_number: context.payload.pull_request.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+
+      - name: Remove E2E gomod cache (avoid read-only files for next job)
+        if: always()
+        run: |
+          chmod -R u+w e2e/.gomodcache 2>/dev/null || true
+          rm -rf e2e/.gomodcache
