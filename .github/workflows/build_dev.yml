@@ -13,9 +13,7 @@ env:
   BASE_IMAGES_VERSION: "v0.5.46"
 
 on:
-  pull_request:
-  # call from trivy_image_check.yaml, which in turn call from pull_request
-  # https://stackoverflow.com/a/71489231
+  # На PR build_dev запускается только через workflow_call из "Build and checks" (trivy_image_check.yaml), чтобы не было двух прогонов (прямой + вызов).
   workflow_call:
     inputs:
       svace_enabled:
@@ -167,9 +165,9 @@ jobs:
           svacer_import_password: "${{ secrets.SVACER_IMPORT_PASSWORD }}"
           svace_analyze_ssh_private_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
 
-  # E2E smoke тесты — только при прямом pull_request или при workflow_call с run_e2e_smoke_tests: true. Из "Build and checks" вызывают с run_e2e_smoke_tests: false, чтобы не дублировать.
+  # E2E smoke тесты — только когда вызывающий workflow передал run_e2e_smoke_tests: true (Build and checks передаёт по лейблу e2e-smoke-test на PR).
   run_e2e_smoke_tests:
-    if: ${{ contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test') && (github.event_name != 'workflow_call' || inputs.run_e2e_smoke_tests == true) }}
+    if: ${{ inputs.run_e2e_smoke_tests == true }}
     name: Run E2E Smoke Tests
     runs-on: [self-hosted, regular]
     needs:
@@ -253,9 +251,9 @@ jobs:
           # Доступ к базовому кластеру: логин (SSH_USER) и адрес (SSH_HOST). storage-e2e подключается как SSH_USER@SSH_HOST.
           SSH_HOST: ${{ secrets.E2E_SSH_HOST }}
           SSH_USER: ${{ secrets.E2E_SSH_USER }}
-          # Путь к ключу задаётся в Setup (GITHUB_ENV); storage-e2e ожидает путь к файлу
-          SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST }}
-          SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER }}
+          # Jump host для доступа к нодам тестового кластера (10.10.10.x). Без него тест подключается к ноде напрямую с runner → connection timed out. По умолчанию = базовый кластер (SSH_HOST).
+          SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST || secrets.E2E_SSH_HOST }}
+          SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER || secrets.E2E_SSH_USER }}
           # KUBE_CONFIG_PATH не задаём здесь — берётся из GITHUB_ENV (Setup пишет путь к файлу из E2E_CLUSTER_KUBECONFIG). Иначе пустой vars перетирает fallback, и при неудаче "sudo cat admin.conf" на мастере storage-e2e не находит kubeconfig.
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
         run: |
