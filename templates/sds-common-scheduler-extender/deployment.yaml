@@ -17,7 +17,7 @@ spec:
     kind: Deployment
     name: sds-common-scheduler-extender
   updatePolicy:
-    updateMode: "Auto"
+    updateMode: "InPlaceOrRecreate"
   resourcePolicy:
     containerPolicies:
     - containerName: sds-common-scheduler-extender
@@ -68,7 +68,7 @@ spec:
         - name: {{ .Chart.Name }}-module-registry
       containers:
         - name: sds-common-scheduler-extender
-          {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
+          {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 10 }}
           image: {{ include "helm_lib_module_image" (list . "sdsCommonSchedulerExtender") }}
           imagePullPolicy: IfNotPresent
           livenessProbe:
