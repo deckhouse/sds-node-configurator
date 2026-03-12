@@ -278,7 +278,7 @@ func getNodeNames(inputData ExtenderArgs) ([]string, error) {
 func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Logger, pod *corev1.Pod, targetProvisioners []string) (map[string]*corev1.PersistentVolumeClaim, error) {
 	var discoveredProvisioner string
 	managedPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(pod.Spec.Volumes))
-	var useLinstor *bool
+	var newControlPlane *bool
 	for _, volume := range pod.Spec.Volumes {
 		if volume.PersistentVolumeClaim != nil {
 			pvcName := volume.PersistentVolumeClaim.ClaimName
@@ -302,14 +302,14 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 			}
 
 			if discoveredProvisioner == consts.SdsReplicatedVolumeProvisioner {
-				if useLinstor == nil {
-					useLinstor, err = getUseLinstor(ctx, cl, log)
+				if newControlPlane == nil {
+					newControlPlane, err = getNewControlPlane(ctx, cl, log)
 					if err != nil {
-						return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting useLinstor: %v", err)
+						return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting newControlPlane: %v", err)
 					}
 				}
 
-				if *useLinstor {
+				if !*newControlPlane {
 					log.Debug("[getManagedPVCsFromPod] filter out PVC due to used provisioner is managed by the Linstor")
 					continue
 				}
@@ -352,26 +352,28 @@ func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map
 	return result, nil
 }
 
-// Get useLinstor value from the sds-replication-volume ModuleConfig
-func getUseLinstor(ctx context.Context, cl client.Client, log logger.Logger) (*bool, error) {
+// getNewControlPlane checks whether the sds-replicated-volume module uses the new control plane
+// (as opposed to LINSTOR). When true, the extender handles replicated PVC scheduling;
+// when false (or MC not found), LINSTOR manages scheduling and the extender skips them.
+func getNewControlPlane(ctx context.Context, cl client.Client, log logger.Logger) (*bool, error) {
 	_true := true
 	_false := false
 	mc := &d8commonapi.ModuleConfig{}
 	err := cl.Get(ctx, client.ObjectKey{Name: "sds-replicated-volume"}, mc)
 	if err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			log.Debug("[getUseLinstor] ModuleConfig sds-replicated-volume not found. Assume useLinstor is true")
-			return &_true, nil
+			log.Debug("[getNewControlPlane] ModuleConfig sds-replicated-volume not found. Assume newControlPlane is false")
+			return &_false, nil
 		}
-		return &_true, err
+		return &_false, err
 	}
 
-	if value, exists := mc.Spec.Settings["useLinstor"]; exists && value == true {
-		log.Debug("[getUseLinstor] ModuleConfig sds-replicated-volume found. Assume useLinstor is true")
+	if value, exists := mc.Spec.Settings["newControlPlane"]; exists && value == true {
+		log.Debug("[getNewControlPlane] ModuleConfig sds-replicated-volume found, newControlPlane is true")
 		return &_true, nil
 	}
 
-	log.Debug("[getUseLinstor] ModuleConfig sds-replicated-volume found. Assume useLinstor is false")
+	log.Debug("[getNewControlPlane] ModuleConfig sds-replicated-volume found, newControlPlane is false")
 	return &_false, nil
 }
 
