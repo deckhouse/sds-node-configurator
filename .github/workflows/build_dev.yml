@@ -13,7 +13,7 @@ env:
   BASE_IMAGES_VERSION: "v0.5.46"
 
 on:
-  # На PR build_dev запускается только через workflow_call из "Build and checks" (trivy_image_check.yaml), чтобы не было двух прогонов (прямой + вызов).
+  # On PR, build_dev runs only via workflow_call from "Build and checks" (trivy_image_check.yaml) to avoid two runs (direct trigger + call).
   workflow_call:
     inputs:
       svace_enabled:
@@ -165,7 +165,7 @@ jobs:
           svacer_import_password: "${{ secrets.SVACER_IMPORT_PASSWORD }}"
           svace_analyze_ssh_private_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
 
-  # E2E smoke тесты — только когда вызывающий workflow передал run_e2e_smoke_tests: true (Build and checks передаёт по лейблу e2e-smoke-test на PR).
+  # E2E smoke tests run only when the caller workflow passes run_e2e_smoke_tests: true (Build and checks sets it from e2e-smoke-test label on PR).
   run_e2e_smoke_tests:
     if: ${{ inputs.run_e2e_smoke_tests == true }}
     name: Run E2E Smoke Tests
@@ -189,7 +189,6 @@ jobs:
 
       - name: Setup test environment
         run: |
-          # SSH ключ для доступа к кластеру (storage-e2e). Приватный и публичный — содержимое из secrets; пишем в файлы, в env передаём пути (абсолютные). storage-e2e при создании VMs подставляет публичный ключ в authorized_keys.
           mkdir -p ~/.ssh
           printf '%s\n' "$E2E_SSH_PRIVATE_KEY" > ~/.ssh/e2e_ci_key
           chmod 600 ~/.ssh/e2e_ci_key
@@ -198,7 +197,6 @@ jobs:
             printf '%s\n' "$E2E_SSH_PUBLIC_KEY" > ~/.ssh/e2e_ci_key.pub
             chmod 644 ~/.ssh/e2e_ci_key.pub
             echo "SSH_PUBLIC_KEY=$HOME/.ssh/e2e_ci_key.pub" >> $GITHUB_ENV
-            # Проверка: публичный ключ должен соответствовать приватному (иначе SSH к setup node даст "unable to authenticate")
             DERIVED_PUB=$(ssh-keygen -y -f ~/.ssh/e2e_ci_key 2>/dev/null)
             STORED_PUB=$(cat ~/.ssh/e2e_ci_key.pub)
             if [ -z "$DERIVED_PUB" ] || [ "$DERIVED_PUB" != "$STORED_PUB" ]; then
@@ -208,7 +206,6 @@ jobs:
             echo "SSH key pair verified (public matches private)"
           fi
 
-          # Kubeconfig тестового кластера (E2E_CLUSTER_KUBECONFIG = content, base64). Пишем в файл и задаём KUBE_CONFIG_PATH для storage-e2e.
           mkdir -p ~/.kube
           if [ -n "$E2E_CLUSTER_KUBECONFIG" ]; then
             echo "$E2E_CLUSTER_KUBECONFIG" | base64 -d > ~/.kube/e2e-cluster-config
@@ -229,15 +226,11 @@ jobs:
           SSH_HOST: ${{ secrets.E2E_SSH_HOST }}
           SSH_USER: ${{ secrets.E2E_SSH_USER }}
         run: |
-          echo "=== SSH diagnostic (host/port masked in log when from secrets) ==="
           echo "SSH_HOST length: ${#SSH_HOST}, SSH_USER length: ${#SSH_USER}"
           if [ -z "$SSH_HOST" ]; then echo "::error::SSH_HOST is empty"; exit 1; fi
           echo "Probing port 22 (nc -zv)..."
           nc -zv "$SSH_HOST" 22 2>&1 || true
           echo "---"
-          echo "SSH verbose connect..."
-          ssh -vvv -o ConnectTimeout=15 -o StrictHostKeyChecking=no -i ~/.ssh/e2e_ci_key "${SSH_USER}@${SSH_HOST}" "echo OK" 2>&1 || true
-          echo "=== If above: 'Connection refused' = nothing listening on port 22 from this runner (firewall/network/host down). 'Timed out' = host unreachable. ==="
 
       - name: Run E2E tests (storage-e2e, TestSdsNodeConfigurator)
         id: run_tests
@@ -248,17 +241,16 @@ jobs:
           TEST_CLUSTER_CLEANUP: ${{ secrets.E2E_TEST_CLUSTER_CLEANUP }}
           DKP_LICENSE_KEY: ${{ secrets.E2E_DECKHOUSE_LICENSE }}
           REGISTRY_DOCKER_CFG: ${{ secrets.E2E_REGISTRY_DOCKER_CFG }}
-          # Доступ к базовому кластеру: логин (SSH_USER) и адрес (SSH_HOST). storage-e2e подключается как SSH_USER@SSH_HOST.
           SSH_HOST: ${{ secrets.E2E_SSH_HOST }}
           SSH_USER: ${{ secrets.E2E_SSH_USER }}
-          # Jump host для доступа к нодам тестового кластера (10.10.10.x). Без него тест подключается к ноде напрямую с runner → connection timed out. По умолчанию = базовый кластер (SSH_HOST).
+          # Jump host for test cluster nodes (10.10.10.x). Without it the test connects to the node directly from runner → connection timed out. Default = base cluster (SSH_HOST).
           SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST || secrets.E2E_SSH_HOST }}
           SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER || secrets.E2E_SSH_USER }}
-          # KUBE_CONFIG_PATH не задаём здесь — берётся из GITHUB_ENV (Setup пишет путь к файлу из E2E_CLUSTER_KUBECONFIG). Иначе пустой vars перетирает fallback, и при неудаче "sudo cat admin.conf" на мастере storage-e2e не находит kubeconfig.
+          # Do not set KUBE_CONFIG_PATH here — it is taken from GITHUB_ENV (Setup writes the path to the file from E2E_CLUSTER_KUBECONFIG). Otherwise an empty vars value overwrites the fallback and storage-e2e cannot find kubeconfig when "sudo cat admin.conf" on the master fails.
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
         run: |
           cd e2e
-          # storage-e2e пишет temp/ относительно своего модуля; в GOMOD по умолчанию модуль в read-only. Кэш в workspace + создаём temp.
+          # storage-e2e writes temp/ relative to its module; in GOMOD the module is read-only by default. Cache in workspace and create temp dir.
           export GOMODCACHE="$PWD/.gomodcache"
           go mod tidy
           go mod download
@@ -287,7 +279,6 @@ jobs:
             echo "No e2e-cluster-config, skip cleanup"
             exit 0
           fi
-          # Kubeconfig указывает на 127.0.0.1:6445 — туннель, который жил только во время теста. Поднимаем туннель заново для cleanup.
           if [ -n "$SSH_HOST" ] && [ -n "$SSH_USER" ] && [ -f ~/.ssh/e2e_ci_key ]; then
             echo "Starting SSH tunnel for cleanup (localhost:6445 -> base cluster API)..."
             if [ -n "$SSH_JUMP_HOST" ]; then
