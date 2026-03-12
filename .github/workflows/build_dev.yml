@@ -353,3 +353,9 @@ jobs:
                 body: comment
               });
             }
+
+      - name: Remove E2E gomod cache (avoid read-only files for next job)
+        if: always()
+        run: |
+          chmod -R u+w e2e/.gomodcache 2>/dev/null || true
+          rm -rf e2e/.gomodcache
