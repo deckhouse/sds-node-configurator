@@ -57,3 +57,6 @@ local_build.sh
 .gocache/
 
 images/sds-common-scheduler-extender/REVIEW.md
+
+# test data
+test*.log
