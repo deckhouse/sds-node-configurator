@@ -45,6 +45,9 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 
 	servingLog.Debug("starts the serving the request")
 
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+
 	var inputData ExtenderArgs
 	reader := http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
 	err := json.NewDecoder(reader).Decode(&inputData)
@@ -71,7 +74,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	}
 	servingLog.Trace(fmt.Sprintf("NodeNames from the request: %+v", nodeNames))
 
-	managedPVCs, err := getManagedPVCsFromPod(s.ctx, s.client, servingLog, inputData.Pod, s.targetProvisioners)
+	managedPVCs, err := getManagedPVCsFromPod(ctx, s.client, servingLog, inputData.Pod, s.targetProvisioners)
 	if err != nil {
 		servingLog.Error(err, "unable to get managed PVCs from the Pod")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -94,7 +97,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	scUsedByPVCs, err := getStorageClassesUsedByPVCs(s.ctx, s.client, managedPVCs)
+	scUsedByPVCs, err := getStorageClassesUsedByPVCs(ctx, s.client, managedPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to get StorageClasses from the PVC")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -107,7 +110,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	servingLog.Debug("starts to extract PVC requested sizes")
-	pvcRequests, err := extractRequestedSize(s.ctx, s.client, servingLog, managedPVCs, scUsedByPVCs)
+	pvcRequests, err := extractRequestedSize(ctx, s.client, servingLog, managedPVCs, scUsedByPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to extract request size")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -126,7 +129,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	var nodes map[string]*corev1.Node
 	if hasReplicatedPVCs(managedPVCs, scUsedByPVCs) {
 		servingLog.Debug("Pod has replicated PVCs, fetching node information")
-		nodes, err = getNodes(s.ctx, s.client, nodeNames)
+		nodes, err = getNodes(ctx, s.client, nodeNames)
 		if err != nil {
 			servingLog.Error(err, "unable to get nodes")
 			http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -135,7 +138,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	servingLog.Debug("starts to filter the nodes from the request")
-	filteredNodes, err := filterNodes(s.ctx, servingLog, s.client, s.cache, &nodeNames, nodes, managedPVCs, scUsedByPVCs, pvcRequests)
+	filteredNodes, err := filterNodes(ctx, servingLog, s.client, s.cache, &nodeNames, nodes, managedPVCs, scUsedByPVCs, pvcRequests)
 	if err != nil {
 		servingLog.Error(err, "unable to filter the nodes")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -145,7 +148,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 
 	// Create reservations for each PVC across all filtered nodes
 	servingLog.Debug("starts to create reservations")
-	err = createReservations(s.ctx, servingLog, s.client, s.cache, filteredNodes.NodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
+	err = createReservations(ctx, servingLog, s.client, s.cache, filteredNodes.NodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
 	if err != nil {
 		servingLog.Error(err, "unable to create reservations")
 		http.Error(w, "internal server error", http.StatusInternalServerError)

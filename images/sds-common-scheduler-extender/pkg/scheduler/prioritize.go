@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -38,6 +39,9 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	servingLog := logger.WithTraceIDLogger(r.Context(), s.log).WithName("prioritize")
 
 	servingLog.Debug("starts the serving the request")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
 
 	var inputData ExtenderArgs
 	reader := http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
@@ -65,7 +69,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	}
 	servingLog.Trace(fmt.Sprintf("NodeNames from the request: %+v", nodeNames))
 
-	managedPVCs, err := getManagedPVCsFromPod(s.ctx, s.client, servingLog, inputData.Pod, s.targetProvisioners)
+	managedPVCs, err := getManagedPVCsFromPod(ctx, s.client, servingLog, inputData.Pod, s.targetProvisioners)
 	if err != nil {
 		servingLog.Error(err, "unable to get managed PVCs from the Pod")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -80,7 +84,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scUsedByPVCs, err := getStorageClassesUsedByPVCs(s.ctx, s.client, managedPVCs)
+	scUsedByPVCs, err := getStorageClassesUsedByPVCs(ctx, s.client, managedPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to get StorageClasses from the PVC")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -93,7 +97,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	servingLog.Debug("starts to extract PVC requested sizes")
-	pvcRequests, err := extractRequestedSize(s.ctx, s.client, servingLog, managedPVCs, scUsedByPVCs)
+	pvcRequests, err := extractRequestedSize(ctx, s.client, servingLog, managedPVCs, scUsedByPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to extract request size")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -112,7 +116,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("starts to score the nodes for Pod")
 	replicaLocations := make(map[string][]string) // TODO: retrieve from DRBD/Linstor
 
-	scoredNodes, err := scoreNodes(s.ctx, servingLog, s.client, s.cache, &nodeNames, managedPVCs, scUsedByPVCs, pvcRequests, replicaLocations, s.defaultDivisor)
+	scoredNodes, err := scoreNodes(ctx, servingLog, s.client, s.cache, &nodeNames, managedPVCs, scUsedByPVCs, pvcRequests, replicaLocations, s.defaultDivisor)
 	if err != nil {
 		servingLog.Error(err, "unable to score nodes")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -121,7 +125,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("successfully scored the nodes for Pod")
 
 	// Narrow reservations to the final node list (prioritize may receive fewer nodes than filter)
-	narrowReservationsToFinalNodes(s.ctx, servingLog, s.client, s.cache, nodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
+	narrowReservationsToFinalNodes(ctx, servingLog, s.client, s.cache, nodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
 
 	// Log response body at DEBUG level
 	responseJSON, err := json.Marshal(scoredNodes)
