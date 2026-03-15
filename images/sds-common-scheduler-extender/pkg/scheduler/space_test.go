@@ -280,10 +280,11 @@ func TestGetAvailableSpace_DoubleCountingSafety(t *testing.T) {
 
 func TestGetAvailableSpace_ThinPool(t *testing.T) {
 	ctx := context.Background()
-	// Thin pool: AllocatedSize=50Gi, 1 thin LLV 10Gi, no reservations, no unaccounted
-	// → available = 50 - 10 - 0 - 0 = 40Gi
+	// Thin pool: AllocatedSize=10Gi (1 Created LLV), AvailableSpace=40Gi
+	// totalCapacity = 10 + 40 = 50Gi
+	// → llvBased = 50 - 10 - 0 = 40Gi, baseFree = min(40, 40) = 40Gi
 	cl := newFakeClient(
-		readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 50*oneGiB, 40*oneGiB),
+		readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 10*oneGiB, 40*oneGiB),
 		thinLLV("llv-thin", "lvg1", "tp0", "10Gi", "Created"),
 	)
 	c := newTestCache()
@@ -293,6 +294,134 @@ func TestGetAvailableSpace_ThinPool(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(40)*oneGiB, info.AvailableSpace)
 	assert.Equal(t, int64(50)*oneGiB, info.TotalSize)
+}
+
+func TestGetAvailableSpace_ThinPool_Empty(t *testing.T) {
+	ctx := context.Background()
+	// Empty thin pool: AllocatedSize=0, AvailableSpace=400Gi, no LLVs
+	// totalCapacity = 0 + 400 = 400Gi
+	// → llvBased = 400 - 0 - 0 = 400Gi, baseFree = min(400, 400) = 400Gi
+	cl := newFakeClient(
+		readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 0, 400*oneGiB),
+	)
+	c := newTestCache()
+	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
+
+	info, err := getAvailableSpace(ctx, cl, c, key)
+	require.NoError(t, err)
+	assert.Equal(t, int64(400)*oneGiB, info.AvailableSpace)
+	assert.Equal(t, int64(400)*oneGiB, info.TotalSize)
+}
+
+func TestGetAvailableSpace_ThinPool_InFlightLLV(t *testing.T) {
+	ctx := context.Background()
+	// Thin pool: AllocatedSize=10Gi (1 Created), AvailableSpace=40Gi
+	// totalCapacity = 10 + 40 = 50Gi
+	// Created LLV: 10Gi, Pending LLV: 8Gi
+	// → llvBased = 50 - 18 - 0 = 32Gi, baseFree = min(32, 40) = 32Gi
+	cl := newFakeClient(
+		readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 10*oneGiB, 40*oneGiB),
+		thinLLV("llv-created", "lvg1", "tp0", "10Gi", "Created"),
+		thinLLV("llv-pending", "lvg1", "tp0", "8Gi", "Pending"),
+	)
+	c := newTestCache()
+	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
+
+	info, err := getAvailableSpace(ctx, cl, c, key)
+	require.NoError(t, err)
+	assert.Equal(t, int64(32)*oneGiB, info.AvailableSpace)
+}
+
+func TestGetAvailableSpace_ThinPool_WithReservation(t *testing.T) {
+	ctx := context.Background()
+	// Thin pool: AllocatedSize=0, AvailableSpace=400Gi, reservation=30Gi
+	// totalCapacity = 0 + 400 = 400Gi
+	// → llvBased = 400, baseFree = min(400, 400) = 400, available = 400 - 30 = 370Gi
+	cl := newFakeClient(
+		readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 0, 400*oneGiB),
+	)
+	c := newTestCache()
+	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
+	c.AddReservation("pvc-1", 60*time.Second, 30*oneGiB, []cache.StoragePoolKey{key})
+
+	info, err := getAvailableSpace(ctx, cl, c, key)
+	require.NoError(t, err)
+	assert.Equal(t, int64(370)*oneGiB, info.AvailableSpace)
+}
+
+func TestGetAvailableSpace_ThinPool_WithUnaccounted(t *testing.T) {
+	ctx := context.Background()
+	// Thin pool: AllocatedSize=20Gi, AvailableSpace=30Gi
+	// totalCapacity = 20 + 30 = 50Gi
+	// 1 Created LLV 10Gi, unaccounted=10Gi (manual thin LVs)
+	// → llvBased = 50 - 10 - 10 = 30Gi, baseFree = min(30, 30) = 30Gi
+	cl := newFakeClient(
+		readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 20*oneGiB, 30*oneGiB),
+		thinLLV("llv-thin", "lvg1", "tp0", "10Gi", "Created"),
+	)
+	c := newTestCache()
+	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
+	c.SetUnaccountedSpace(key, 10*oneGiB)
+
+	info, err := getAvailableSpace(ctx, cl, c, key)
+	require.NoError(t, err)
+	assert.Equal(t, int64(30)*oneGiB, info.AvailableSpace)
+}
+
+// --- CalibratePoolUnaccountedSpace thin pool tests ---
+
+func TestCalibratePool_ThinPool_NoManualLVs(t *testing.T) {
+	ctx := context.Background()
+	// Thin pool: AllocatedSize=10Gi, AvailableSpace=40Gi → totalCapacity=50Gi
+	// 1 Created LLV 10Gi → unaccounted = (50 - 10) - 40 = 0
+	lvg := readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 10*oneGiB, 40*oneGiB)
+	cl := newFakeClient(
+		lvg,
+		thinLLV("llv-thin", "lvg1", "tp0", "10Gi", "Created"),
+	)
+	c := newTestCache()
+	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
+
+	err := CalibratePoolUnaccountedSpace(ctx, cl, c, lvg, key)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), c.GetUnaccountedSpace(key))
+}
+
+func TestCalibratePool_ThinPool_ManualLVsExist(t *testing.T) {
+	ctx := context.Background()
+	// Thin pool: AllocatedSize=20Gi, AvailableSpace=30Gi → totalCapacity=50Gi
+	// 1 Created LLV 10Gi → expected free = 50 - 10 = 40, actual = 30
+	// unaccounted = 40 - 30 = 10Gi (manual thin LVs consuming 10Gi)
+	lvg := readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 20*oneGiB, 30*oneGiB)
+	cl := newFakeClient(
+		lvg,
+		thinLLV("llv-thin", "lvg1", "tp0", "10Gi", "Created"),
+	)
+	c := newTestCache()
+	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
+
+	err := CalibratePoolUnaccountedSpace(ctx, cl, c, lvg, key)
+	require.NoError(t, err)
+	assert.Equal(t, int64(10)*oneGiB, c.GetUnaccountedSpace(key))
+}
+
+func TestCalibratePool_ThinPool_InFlightIgnored(t *testing.T) {
+	ctx := context.Background()
+	// Thin pool: AllocatedSize=10Gi, AvailableSpace=40Gi → totalCapacity=50Gi
+	// Created LLV: 10Gi, Pending LLV: 8Gi (not reflected in AllocatedSize yet)
+	// Calibration uses only Created: unaccounted = (50 - 10) - 40 = 0
+	lvg := readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 10*oneGiB, 40*oneGiB)
+	cl := newFakeClient(
+		lvg,
+		thinLLV("llv-created", "lvg1", "tp0", "10Gi", "Created"),
+		thinLLV("llv-pending", "lvg1", "tp0", "8Gi", "Pending"),
+	)
+	c := newTestCache()
+	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
+
+	err := CalibratePoolUnaccountedSpace(ctx, cl, c, lvg, key)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), c.GetUnaccountedSpace(key))
 }
 
 func TestGetAvailableSpace_NotReady(t *testing.T) {

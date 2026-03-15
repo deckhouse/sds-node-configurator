@@ -220,7 +220,7 @@ func Test_filterAndScore(t *testing.T) {
 
 	t.Run("Thin pool LVG", func(t *testing.T) {
 		tpAvailable := int64(10 * 1024 * 1024 * 1024) // 10Gi
-		tpAllocated := int64(10 * 1024 * 1024 * 1024) // 10Gi
+		tpAllocated := int64(0)
 		vgSize := int64(100 * 1024 * 1024 * 1024)
 		cl := newFakeClient(readyLVGWithThinPool("lvg-thin", vgSize, "tp0", tpAllocated, tpAvailable))
 		c := newTestCache()

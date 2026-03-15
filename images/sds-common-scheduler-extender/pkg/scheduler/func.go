@@ -117,7 +117,7 @@ func getAvailableSpace(
 		if tp == nil {
 			return LVGSpaceInfo{}, fmt.Errorf("thin pool %s not found in LVG %s", key.ThinPoolName, key.LVGName)
 		}
-		totalCapacity = tp.AllocatedSize.Value()
+		totalCapacity = tp.AllocatedSize.Value() + tp.AvailableSpace.Value()
 		reportedFree = tp.AvailableSpace.Value()
 	}
 
@@ -263,7 +263,7 @@ func CalibratePoolUnaccountedSpace(
 		if tp == nil {
 			return fmt.Errorf("thin pool %s not found in LVG %s", key.ThinPoolName, key.LVGName)
 		}
-		totalCapacity = tp.AllocatedSize.Value()
+		totalCapacity = tp.AllocatedSize.Value() + tp.AvailableSpace.Value()
 		reportedFree = tp.AvailableSpace.Value()
 	}
 
