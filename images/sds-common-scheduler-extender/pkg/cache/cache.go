@@ -58,14 +58,17 @@ type ReservationInfo struct {
 	Expired   bool
 }
 
-// Cache is a pure reservation store. Reserved space per pool is computed lazily
-// by iterating reservations and skipping expired entries.
+// Cache is a reservation store combined with per-pool unaccounted space offsets.
+// Reserved space per pool is computed lazily by iterating reservations and
+// skipping expired entries. Unaccounted space tracks storage consumed by
+// non-LLV volumes (e.g. manually created LVs).
 // A background ticker periodically removes expired reservations to free memory.
 // LVG resources are NOT stored here; they are read from the controller-runtime
 // informer cache via client.Client.
 type Cache struct {
 	mtx          sync.RWMutex
 	reservations map[string]*Reservation
+	unaccounted  map[StoragePoolKey]int64
 	log          logger.Logger
 }
 
@@ -73,6 +76,7 @@ type Cache struct {
 func NewCache(log logger.Logger, cleanupInterval time.Duration) *Cache {
 	c := &Cache{
 		reservations: make(map[string]*Reservation),
+		unaccounted:  make(map[StoragePoolKey]int64),
 		log:          log,
 	}
 	c.startCleanupLoop(cleanupInterval)
@@ -244,6 +248,27 @@ func (c *Cache) GetAllReservations() map[string]ReservationInfo {
 		}
 	}
 	return result
+}
+
+// --- Unaccounted space (non-LLV volumes) ---
+
+// SetUnaccountedSpace stores the space consumed by volumes not tracked by LLV resources
+// on a given storage pool. This offset is calibrated from the difference between
+// LLV-computed free space and actual VGFree reported by the node agent.
+func (c *Cache) SetUnaccountedSpace(key StoragePoolKey, size int64) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+
+	c.unaccounted[key] = size
+}
+
+// GetUnaccountedSpace returns the stored unaccounted space for the pool.
+// Returns 0 if no calibration has been performed for this pool.
+func (c *Cache) GetUnaccountedSpace(key StoragePoolKey) int64 {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+
+	return c.unaccounted[key]
 }
 
 // --- Internal helpers (called under held lock) ---

@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert/yaml"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -40,6 +41,9 @@ const (
 
 	// IndexFieldLVGNodeName is the field indexer key for LVG -> node mapping.
 	IndexFieldLVGNodeName = "status.nodes.name"
+
+	// IndexFieldLLVLVGName is the field indexer key for LLV -> LVG name mapping.
+	IndexFieldLLVLVGName = "spec.lvmVolumeGroupName"
 )
 
 // PVCRequest is a request for a PVC
@@ -80,8 +84,13 @@ func isLVGSchedulable(lvg *snc.LVMVolumeGroup) (bool, string) {
 
 // --- Available space helpers (combine informer cache + reservation cache) ---
 
-// getAvailableSpace computes available space for a storage pool by combining
-// LVG capacity from the informer cache with reserved space from the reservation cache.
+// getAvailableSpace computes available space for a storage pool using
+// min(llvBased, vgFreeBased) - reserved.
+//
+// The LLV-based value (totalCapacity - sumAllLLV - unaccountedSpace) reacts
+// immediately when new LLV CRs appear, avoiding the VGFree staleness race.
+// VGFree serves as a safety net before calibration and when manual LVs are
+// created after the last calibration.
 func getAvailableSpace(
 	ctx context.Context,
 	cl client.Client,
@@ -97,27 +106,40 @@ func getAvailableSpace(
 		return LVGSpaceInfo{}, fmt.Errorf("%s", reason)
 	}
 
-	var totalFree int64
-	var totalSize int64
+	var totalCapacity int64
+	var reportedFree int64
 
 	if key.ThinPoolName == "" {
-		// Thick
-		totalFree = lvg.Status.VGFree.Value()
-		totalSize = lvg.Status.VGSize.Value()
+		totalCapacity = lvg.Status.VGSize.Value()
+		reportedFree = lvg.Status.VGFree.Value()
 	} else {
-		// Thin
 		tp := findMatchedThinPool(lvg.Status.ThinPools, key.ThinPoolName)
 		if tp == nil {
 			return LVGSpaceInfo{}, fmt.Errorf("thin pool %s not found in LVG %s", key.ThinPoolName, key.LVGName)
 		}
-		totalFree = tp.AvailableSpace.Value()
-		totalSize = lvg.Status.VGSize.Value()
+		totalCapacity = tp.AllocatedSize.Value()
+		reportedFree = tp.AvailableSpace.Value()
 	}
 
+	sumAll, err := sumLLVSpace(ctx, cl, key, false)
+	if err != nil {
+		return LVGSpaceInfo{}, fmt.Errorf("unable to compute LLV space for pool %s: %w", key, err)
+	}
+
+	unaccounted := reservationCache.GetUnaccountedSpace(key)
 	reserved := reservationCache.GetReservedSpace(key)
+
+	llvBased := totalCapacity - sumAll - unaccounted
+	baseFree := llvBased
+	if reportedFree < baseFree {
+		baseFree = reportedFree
+	}
+
+	available := baseFree - reserved
+
 	return LVGSpaceInfo{
-		AvailableSpace: totalFree - reserved,
-		TotalSize:      totalSize,
+		AvailableSpace: available,
+		TotalSize:      totalCapacity,
 	}, nil
 }
 
@@ -170,6 +192,111 @@ func getLVGsOnNode(ctx context.Context, cl client.Client, nodeName string) ([]sn
 		return nil, fmt.Errorf("unable to list LVGs for node %s: %w", nodeName, err)
 	}
 	return lvgList.Items, nil
+}
+
+// --- LLV space computation ---
+
+// sumLLVSpace sums spec.size for all LLVs on the given storage pool.
+// If onlyCreated is true, only LLVs with status.phase == Created are included.
+// For thick pools (key.ThinPoolName == ""), only LLVs without a thin spec are counted.
+// For thin pools, only LLVs matching the thin pool name are counted.
+func sumLLVSpace(ctx context.Context, cl client.Client, key cache.StoragePoolKey, onlyCreated bool) (int64, error) {
+	var llvList snc.LVMLogicalVolumeList
+	if err := cl.List(ctx, &llvList, client.MatchingFields{IndexFieldLLVLVGName: key.LVGName}); err != nil {
+		return 0, fmt.Errorf("unable to list LLVs for LVG %s: %w", key.LVGName, err)
+	}
+
+	var total int64
+	for i := range llvList.Items {
+		llv := &llvList.Items[i]
+
+		if key.ThinPoolName == "" {
+			if llv.Spec.Thin != nil {
+				continue
+			}
+		} else {
+			if llv.Spec.Thin == nil || llv.Spec.Thin.PoolName != key.ThinPoolName {
+				continue
+			}
+		}
+
+		if onlyCreated {
+			if llv.Status == nil || llv.Status.Phase != snc.PhaseCreated {
+				continue
+			}
+		}
+
+		size, err := resource.ParseQuantity(llv.Spec.Size)
+		if err != nil {
+			return 0, fmt.Errorf("unable to parse LLV %s spec.size %q: %w", llv.Name, llv.Spec.Size, err)
+		}
+		total += size.Value()
+	}
+	return total, nil
+}
+
+// --- Unaccounted space calibration ---
+
+// CalibratePoolUnaccountedSpace computes the space occupied by non-LLV volumes
+// on the given storage pool and stores it in the cache. Uses only Created LLVs
+// (whose sizes are reflected in VGFree/AvailableSpace) for calibration.
+func CalibratePoolUnaccountedSpace(
+	ctx context.Context,
+	cl client.Client,
+	schedulerCache *cache.Cache,
+	lvg *snc.LVMVolumeGroup,
+	key cache.StoragePoolKey,
+) error {
+	sumCreated, err := sumLLVSpace(ctx, cl, key, true)
+	if err != nil {
+		return fmt.Errorf("unable to compute created LLV space for pool %s: %w", key, err)
+	}
+
+	var totalCapacity int64
+	var reportedFree int64
+
+	if key.ThinPoolName == "" {
+		totalCapacity = lvg.Status.VGSize.Value()
+		reportedFree = lvg.Status.VGFree.Value()
+	} else {
+		tp := findMatchedThinPool(lvg.Status.ThinPools, key.ThinPoolName)
+		if tp == nil {
+			return fmt.Errorf("thin pool %s not found in LVG %s", key.ThinPoolName, key.LVGName)
+		}
+		totalCapacity = tp.AllocatedSize.Value()
+		reportedFree = tp.AvailableSpace.Value()
+	}
+
+	unaccounted := totalCapacity - sumCreated - reportedFree
+	if unaccounted < 0 {
+		unaccounted = 0
+	}
+
+	schedulerCache.SetUnaccountedSpace(key, unaccounted)
+	return nil
+}
+
+// CalibrateAllPoolsForLVG calibrates unaccounted space for the thick pool
+// and all thin pools of the given LVG.
+func CalibrateAllPoolsForLVG(
+	ctx context.Context,
+	cl client.Client,
+	schedulerCache *cache.Cache,
+	lvg *snc.LVMVolumeGroup,
+) error {
+	thickKey := cache.StoragePoolKey{LVGName: lvg.Name}
+	if err := CalibratePoolUnaccountedSpace(ctx, cl, schedulerCache, lvg, thickKey); err != nil {
+		return err
+	}
+
+	for _, tp := range lvg.Status.ThinPools {
+		thinKey := cache.StoragePoolKey{LVGName: lvg.Name, ThinPoolName: tp.Name}
+		if err := CalibratePoolUnaccountedSpace(ctx, cl, schedulerCache, lvg, thinKey); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // --- Score calculation helpers ---

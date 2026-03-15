@@ -186,6 +186,20 @@ func subMain(ctx context.Context) error {
 	}
 	mainLog.Info("successfully registered LVMVolumeGroup field indexer on status.nodes.name")
 
+	// Register field indexer for LVMLogicalVolume -> LVG name mapping.
+	// Enables efficient per-LVG LLV listings for available space computation.
+	err = mgr.GetFieldIndexer().IndexField(ctx, &snc.LVMLogicalVolume{}, scheduler.IndexFieldLLVLVGName,
+		func(obj client.Object) []string {
+			llv := obj.(*snc.LVMLogicalVolume)
+			return []string{llv.Spec.LVMVolumeGroupName}
+		},
+	)
+	if err != nil {
+		mainLog.Error(err, "unable to register field indexer for LVMLogicalVolume")
+		return err
+	}
+	mainLog.Info("successfully registered LVMLogicalVolume field indexer on spec.lvmVolumeGroupName")
+
 	schedulerCache := cache.NewCache(log, defaultCleanupInterval)
 	mainLog.Info("scheduler cache was initialized")
 
@@ -207,6 +221,12 @@ func subMain(ctx context.Context) error {
 		return err
 	}
 	mainLog.Info(fmt.Sprintf("successfully ran %s controller", controller.LLVWatcherCacheCtrlName))
+
+	if err = controller.RunLVGWatcherCacheController(mgr, log, schedulerCache); err != nil {
+		mainLog.Error(err, fmt.Sprintf("unable to run %s controller", controller.LVGWatcherCacheCtrlName))
+		return err
+	}
+	mainLog.Info(fmt.Sprintf("successfully ran %s controller", controller.LVGWatcherCacheCtrlName))
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		mainLog.Error(err, "unable to mgr.AddHealthzCheck")

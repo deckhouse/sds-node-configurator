@@ -29,6 +29,7 @@ func newTestCache() *Cache {
 	log, _ := logger.NewLogger("0")
 	return &Cache{
 		reservations: make(map[string]*Reservation),
+		unaccounted:  make(map[StoragePoolKey]int64),
 		log:          log,
 	}
 }
@@ -304,6 +305,27 @@ func TestGetAllReservations_MarksExpired(t *testing.T) {
 	r2 := reservations["res2"]
 	assert.False(t, r2.Expired, "active reservation should not be marked as Expired")
 	assert.Equal(t, int64(200), r2.Size)
+}
+
+func TestSetUnaccountedSpace(t *testing.T) {
+	c := newTestCache()
+
+	pool1 := StoragePoolKey{LVGName: "lvg1"}
+	pool2 := StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp1"}
+
+	assert.Equal(t, int64(0), c.GetUnaccountedSpace(pool1))
+	assert.Equal(t, int64(0), c.GetUnaccountedSpace(pool2))
+
+	c.SetUnaccountedSpace(pool1, 500)
+	assert.Equal(t, int64(500), c.GetUnaccountedSpace(pool1))
+	assert.Equal(t, int64(0), c.GetUnaccountedSpace(pool2))
+
+	c.SetUnaccountedSpace(pool2, 200)
+	assert.Equal(t, int64(500), c.GetUnaccountedSpace(pool1))
+	assert.Equal(t, int64(200), c.GetUnaccountedSpace(pool2))
+
+	c.SetUnaccountedSpace(pool1, 0)
+	assert.Equal(t, int64(0), c.GetUnaccountedSpace(pool1))
 }
 
 func TestStoragePoolKey_String(t *testing.T) {

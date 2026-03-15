@@ -57,7 +57,7 @@ func readyLVG(name string, vgSize, vgFree int64) *snc.LVMVolumeGroup {
 	}
 }
 
-func readyLVGWithThinPool(name string, vgSize int64, tpName string, tpAvailable int64) *snc.LVMVolumeGroup {
+func readyLVGWithThinPool(name string, vgSize int64, tpName string, tpAllocated, tpAvailable int64) *snc.LVMVolumeGroup {
 	return &snc.LVMVolumeGroup{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Status: snc.LVMVolumeGroupStatus{
@@ -67,6 +67,7 @@ func readyLVGWithThinPool(name string, vgSize int64, tpName string, tpAvailable 
 			ThinPools: []snc.LVMVolumeGroupThinPoolStatus{
 				{
 					Name:           tpName,
+					AllocatedSize:  *resource.NewQuantity(tpAllocated, resource.BinarySI),
 					AvailableSpace: *resource.NewQuantity(tpAvailable, resource.BinarySI),
 				},
 			},
@@ -90,9 +91,44 @@ func newTestCache() *cache.Cache {
 	return cache.NewCache(log, time.Hour)
 }
 
+func thickLLV(name, lvgName, size, phase string) *snc.LVMLogicalVolume {
+	llv := &snc.LVMLogicalVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: snc.LVMLogicalVolumeSpec{
+			LVMVolumeGroupName: lvgName,
+			Size:               size,
+			Type:               "Thick",
+		},
+	}
+	if phase != "" {
+		llv.Status = &snc.LVMLogicalVolumeStatus{Phase: phase}
+	}
+	return llv
+}
+
+func thinLLV(name, lvgName, thinPoolName, size, phase string) *snc.LVMLogicalVolume {
+	llv := &snc.LVMLogicalVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: snc.LVMLogicalVolumeSpec{
+			LVMVolumeGroupName: lvgName,
+			Size:               size,
+			Type:               "Thin",
+			Thin:               &snc.LVMLogicalVolumeThinSpec{PoolName: thinPoolName},
+		},
+	}
+	if phase != "" {
+		llv.Status = &snc.LVMLogicalVolumeStatus{Phase: phase}
+	}
+	return llv
+}
+
 func newFakeClient(objects ...client.Object) client.Client {
 	return fake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
 		WithObjects(objects...).
+		WithIndex(&snc.LVMLogicalVolume{}, IndexFieldLLVLVGName, func(obj client.Object) []string {
+			llv := obj.(*snc.LVMLogicalVolume)
+			return []string{llv.Spec.LVMVolumeGroupName}
+		}).
 		Build()
 }
