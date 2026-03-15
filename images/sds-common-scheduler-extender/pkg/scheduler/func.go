@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/stretchr/testify/assert/yaml"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -31,12 +33,17 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
-	"github.com/stretchr/testify/assert/yaml"
 )
 
 const (
 	annotationBetaStorageProvisioner = "volume.beta.kubernetes.io/storage-provisioner"
 	annotationStorageProvisioner     = "volume.kubernetes.io/storage-provisioner"
+
+	// IndexFieldLVGNodeName is the field indexer key for LVG -> node mapping.
+	IndexFieldLVGNodeName = "status.nodes.name"
+
+	// IndexFieldLLVLVGName is the field indexer key for LLV -> LVG name mapping.
+	IndexFieldLLVLVGName = "spec.lvmVolumeGroupName"
 )
 
 // PVCRequest is a request for a PVC
@@ -45,13 +52,277 @@ type PVCRequest struct {
 	RequestedSize int64
 }
 
-type LVMVolumeGroup struct {
+// SCLVMVolumeGroup represents an LVG reference from a StorageClass parameter.
+type SCLVMVolumeGroup struct {
 	Name string `yaml:"name"`
 	Thin struct {
 		PoolName string `yaml:"poolName"`
 	} `yaml:"thin"`
 }
-type LVMVolumeGroups []LVMVolumeGroup
+
+// SCLVMVolumeGroups is a list of SCLVMVolumeGroup.
+type SCLVMVolumeGroups []SCLVMVolumeGroup
+
+// LVGSpaceInfo contains information about available space in LVG
+type LVGSpaceInfo struct {
+	AvailableSpace int64 // available space considering reservations
+	TotalSize      int64 // total LVG size
+}
+
+// --- LVG readiness check ---
+
+// isLVGSchedulable checks whether an LVG is eligible for scheduling.
+// Returns (true, "") if schedulable, or (false, reason) if not.
+// Extend this function to add new readiness conditions (e.g. Unschedulable field).
+func isLVGSchedulable(lvg *snc.LVMVolumeGroup) (bool, string) {
+	if lvg.Status.Phase != snc.PhaseReady {
+		return false, fmt.Sprintf("LVG %s is not ready (phase: %s)", lvg.Name, lvg.Status.Phase)
+	}
+	// Future: check lvg.Status.Unschedulable, etc.
+	return true, ""
+}
+
+// --- Available space helpers (combine informer cache + reservation cache) ---
+
+// getAvailableSpace computes available space for a storage pool using
+// min(llvBased, vgFreeBased) - reserved.
+//
+// The LLV-based value (totalCapacity - sumAllLLV - unaccountedSpace) reacts
+// immediately when new LLV CRs appear, avoiding the VGFree staleness race.
+// VGFree serves as a safety net before calibration and when manual LVs are
+// created after the last calibration.
+func getAvailableSpace(
+	ctx context.Context,
+	cl client.Client,
+	reservationCache *cache.Cache,
+	key cache.StoragePoolKey,
+) (LVGSpaceInfo, error) {
+	lvg := &snc.LVMVolumeGroup{}
+	if err := cl.Get(ctx, client.ObjectKey{Name: key.LVGName}, lvg); err != nil {
+		return LVGSpaceInfo{}, fmt.Errorf("unable to get LVG %s: %w", key.LVGName, err)
+	}
+
+	if ok, reason := isLVGSchedulable(lvg); !ok {
+		return LVGSpaceInfo{}, fmt.Errorf("%s", reason)
+	}
+
+	var totalCapacity int64
+	var reportedFree int64
+
+	if key.ThinPoolName == "" {
+		totalCapacity = lvg.Status.VGSize.Value()
+		reportedFree = lvg.Status.VGFree.Value()
+	} else {
+		tp := findMatchedThinPool(lvg.Status.ThinPools, key.ThinPoolName)
+		if tp == nil {
+			return LVGSpaceInfo{}, fmt.Errorf("thin pool %s not found in LVG %s", key.ThinPoolName, key.LVGName)
+		}
+		totalCapacity = tp.AllocatedSize.Value() + tp.AvailableSpace.Value()
+		reportedFree = tp.AvailableSpace.Value()
+	}
+
+	sumAll, err := sumLLVSpace(ctx, cl, key, false)
+	if err != nil {
+		return LVGSpaceInfo{}, fmt.Errorf("unable to compute LLV space for pool %s: %w", key, err)
+	}
+
+	unaccounted := reservationCache.GetUnaccountedSpace(key)
+	reserved := reservationCache.GetReservedSpace(key)
+
+	llvBased := totalCapacity - sumAll - unaccounted
+	baseFree := llvBased
+	if reportedFree < baseFree {
+		baseFree = reportedFree
+	}
+
+	available := baseFree - reserved
+
+	return LVGSpaceInfo{
+		AvailableSpace: available,
+		TotalSize:      totalCapacity,
+	}, nil
+}
+
+// checkPoolHasSpace checks if a storage pool has enough space for the requested size.
+func checkPoolHasSpace(
+	ctx context.Context,
+	cl client.Client,
+	reservationCache *cache.Cache,
+	key cache.StoragePoolKey,
+	requestedSize int64,
+) (bool, error) {
+	spaceInfo, err := getAvailableSpace(ctx, cl, reservationCache, key)
+	if err != nil {
+		return false, err
+	}
+	return spaceInfo.AvailableSpace >= requestedSize, nil
+}
+
+// calculatePoolScore calculates a score (1-10) for a storage pool based on available space.
+func calculatePoolScore(
+	ctx context.Context,
+	cl client.Client,
+	reservationCache *cache.Cache,
+	key cache.StoragePoolKey,
+	requestedSize int64,
+	divisor float64,
+) (int, error) {
+	spaceInfo, err := getAvailableSpace(ctx, cl, reservationCache, key)
+	if err != nil {
+		return 0, err
+	}
+	freeSpaceLeft := getFreeSpaceLeftPercent(spaceInfo.AvailableSpace, requestedSize, spaceInfo.TotalSize)
+	score := getNodeScore(freeSpaceLeft, divisor)
+	return score, nil
+}
+
+// storagePoolKeyFromSCLVG creates a StoragePoolKey from an SCLVMVolumeGroup and device type.
+func storagePoolKeyFromSCLVG(scLVG SCLVMVolumeGroup, deviceType string) cache.StoragePoolKey {
+	key := cache.StoragePoolKey{LVGName: scLVG.Name}
+	if deviceType == consts.Thin {
+		key.ThinPoolName = scLVG.Thin.PoolName
+	}
+	return key
+}
+
+// getLVGsOnNode returns all LVMVolumeGroups on a node using the field indexer.
+func getLVGsOnNode(ctx context.Context, cl client.Client, nodeName string) ([]snc.LVMVolumeGroup, error) {
+	var lvgList snc.LVMVolumeGroupList
+	if err := cl.List(ctx, &lvgList, client.MatchingFields{IndexFieldLVGNodeName: nodeName}); err != nil {
+		return nil, fmt.Errorf("unable to list LVGs for node %s: %w", nodeName, err)
+	}
+	return lvgList.Items, nil
+}
+
+// --- LLV space computation ---
+
+// sumLLVSpace sums spec.size for all LLVs on the given storage pool.
+// If onlyCreated is true, only LLVs with status.phase == Created are included.
+// For thick pools (key.ThinPoolName == ""), only LLVs without a thin spec are counted.
+// For thin pools, only LLVs matching the thin pool name are counted.
+func sumLLVSpace(ctx context.Context, cl client.Client, key cache.StoragePoolKey, onlyCreated bool) (int64, error) {
+	var llvList snc.LVMLogicalVolumeList
+	if err := cl.List(ctx, &llvList, client.MatchingFields{IndexFieldLLVLVGName: key.LVGName}); err != nil {
+		return 0, fmt.Errorf("unable to list LLVs for LVG %s: %w", key.LVGName, err)
+	}
+
+	var total int64
+	for i := range llvList.Items {
+		llv := &llvList.Items[i]
+
+		if key.ThinPoolName == "" {
+			if llv.Spec.Thin != nil {
+				continue
+			}
+		} else {
+			if llv.Spec.Thin == nil || llv.Spec.Thin.PoolName != key.ThinPoolName {
+				continue
+			}
+		}
+
+		if onlyCreated {
+			if llv.Status == nil || llv.Status.Phase != snc.PhaseCreated {
+				continue
+			}
+		}
+
+		size, err := resource.ParseQuantity(llv.Spec.Size)
+		if err != nil {
+			return 0, fmt.Errorf("unable to parse LLV %s spec.size %q: %w", llv.Name, llv.Spec.Size, err)
+		}
+		total += size.Value()
+	}
+	return total, nil
+}
+
+// --- Unaccounted space calibration ---
+
+// CalibratePoolUnaccountedSpace computes the space occupied by non-LLV volumes
+// on the given storage pool and stores it in the cache. Uses only Created LLVs
+// (whose sizes are reflected in VGFree/AvailableSpace) for calibration.
+func CalibratePoolUnaccountedSpace(
+	ctx context.Context,
+	cl client.Client,
+	schedulerCache *cache.Cache,
+	lvg *snc.LVMVolumeGroup,
+	key cache.StoragePoolKey,
+) error {
+	sumCreated, err := sumLLVSpace(ctx, cl, key, true)
+	if err != nil {
+		return fmt.Errorf("unable to compute created LLV space for pool %s: %w", key, err)
+	}
+
+	var totalCapacity int64
+	var reportedFree int64
+
+	if key.ThinPoolName == "" {
+		totalCapacity = lvg.Status.VGSize.Value()
+		reportedFree = lvg.Status.VGFree.Value()
+	} else {
+		tp := findMatchedThinPool(lvg.Status.ThinPools, key.ThinPoolName)
+		if tp == nil {
+			return fmt.Errorf("thin pool %s not found in LVG %s", key.ThinPoolName, key.LVGName)
+		}
+		totalCapacity = tp.AllocatedSize.Value() + tp.AvailableSpace.Value()
+		reportedFree = tp.AvailableSpace.Value()
+	}
+
+	unaccounted := totalCapacity - sumCreated - reportedFree
+	if unaccounted < 0 {
+		unaccounted = 0
+	}
+
+	schedulerCache.SetUnaccountedSpace(key, unaccounted)
+	return nil
+}
+
+// CalibrateAllPoolsForLVG calibrates unaccounted space for the thick pool
+// and all thin pools of the given LVG.
+func CalibrateAllPoolsForLVG(
+	ctx context.Context,
+	cl client.Client,
+	schedulerCache *cache.Cache,
+	lvg *snc.LVMVolumeGroup,
+) error {
+	thickKey := cache.StoragePoolKey{LVGName: lvg.Name}
+	if err := CalibratePoolUnaccountedSpace(ctx, cl, schedulerCache, lvg, thickKey); err != nil {
+		return err
+	}
+
+	for _, tp := range lvg.Status.ThinPools {
+		thinKey := cache.StoragePoolKey{LVGName: lvg.Name, ThinPoolName: tp.Name}
+		if err := CalibratePoolUnaccountedSpace(ctx, cl, schedulerCache, lvg, thinKey); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// --- Score calculation helpers ---
+
+// getFreeSpaceLeftPercent calculates the percentage of free space left after placing the requested volume
+func getFreeSpaceLeftPercent(freeSize, requestedSpace, totalSize int64) int64 {
+	leftFreeSize := freeSize - requestedSpace
+	fraction := float64(leftFreeSize) / float64(totalSize)
+	percent := fraction * 100
+	return int64(percent)
+}
+
+// getNodeScore calculates score based on free space
+func getNodeScore(freeSpace int64, divisor float64) int {
+	converted := int(math.Round(math.Log2(float64(freeSpace) / divisor)))
+	switch {
+	case converted < 1:
+		return 1
+	case converted > 10:
+		return 10
+	default:
+		return converted
+	}
+}
+
+// --- PVC / StorageClass helpers (mostly unchanged) ---
 
 // discoverProvisionerForPVC tries to detect a provisioner for the given PVC using:
 // 1) PVC annotations
@@ -131,19 +402,10 @@ func getNodeNames(inputData ExtenderArgs) ([]string, error) {
 }
 
 // Get all PVCs from the Pod which are managed by our modules
-//
-// Params:
-// ctx - context;
-// cl - client;
-// log - logger;
-// pod - Pod;
-// targetProvisioners - target provisioners;
-//
-// Return: map[pvcName]*corev1.PersistentVolumeClaim
 func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Logger, pod *corev1.Pod, targetProvisioners []string) (map[string]*corev1.PersistentVolumeClaim, error) {
 	var discoveredProvisioner string
 	managedPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(pod.Spec.Volumes))
-	var useLinstor *bool
+	var newControlPlane *bool
 	for _, volume := range pod.Spec.Volumes {
 		if volume.PersistentVolumeClaim != nil {
 			pvcName := volume.PersistentVolumeClaim.ClaimName
@@ -167,14 +429,14 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 			}
 
 			if discoveredProvisioner == consts.SdsReplicatedVolumeProvisioner {
-				if useLinstor == nil {
-					useLinstor, err = getUseLinstor(ctx, cl, log)
+				if newControlPlane == nil {
+					newControlPlane, err = getNewControlPlane(ctx, cl, log)
 					if err != nil {
-						return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting useLinstor: %v", err)
+						return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting newControlPlane: %v", err)
 					}
 				}
 
-				if *useLinstor {
+				if !*newControlPlane {
 					log.Debug("[getManagedPVCsFromPod] filter out PVC due to used provisioner is managed by the Linstor")
 					continue
 				}
@@ -189,13 +451,6 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 }
 
 // Get all StorageClasses used by the PVCs
-//
-// Params:
-// ctx - context;
-// cl - client;
-// pvcs - PVCs;
-//
-// Return: map[scName]*storagev1.StorageClass
 func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map[string]*corev1.PersistentVolumeClaim) (map[string]*storagev1.StorageClass, error) {
 	scs := &storagev1.StorageClassList{}
 	err := cl.List(ctx, scs)
@@ -224,47 +479,32 @@ func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map
 	return result, nil
 }
 
-// Get useLinstor value from the sds-replication-volume ModuleConfig
-func getUseLinstor(ctx context.Context, cl client.Client, log logger.Logger) (*bool, error) {
-	// local variables to return pointers to
+// getNewControlPlane checks whether the sds-replicated-volume module uses the new control plane
+// (as opposed to LINSTOR). When true, the extender handles replicated PVC scheduling;
+// when false (or MC not found), LINSTOR manages scheduling and the extender skips them.
+func getNewControlPlane(ctx context.Context, cl client.Client, log logger.Logger) (*bool, error) {
 	_true := true
 	_false := false
 	mc := &d8commonapi.ModuleConfig{}
 	err := cl.Get(ctx, client.ObjectKey{Name: "sds-replicated-volume"}, mc)
 	if err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			log.Debug("[getUseLinstor] ModuleConfig sds-replicated-volume not found. Assume useLinstor is true")
-			return &_true, nil
+			log.Debug("[getNewControlPlane] ModuleConfig sds-replicated-volume not found. Assume newControlPlane is false")
+			return &_false, nil
 		}
-		return &_true, err
+		return &_false, err
 	}
 
-	if value, exists := mc.Spec.Settings["useLinstor"]; exists && value == true {
-		log.Debug("[getUseLinstor] ModuleConfig sds-replicated-volume found. Assume useLinstor is true")
+	if value, exists := mc.Spec.Settings["newControlPlane"]; exists && value == true {
+		log.Debug("[getNewControlPlane] ModuleConfig sds-replicated-volume found, newControlPlane is true")
 		return &_true, nil
 	}
 
-	log.Debug("[getUseLinstor] ModuleConfig sds-replicated-volume found. Assume useLinstor is false")
+	log.Debug("[getNewControlPlane] ModuleConfig sds-replicated-volume found, newControlPlane is false")
 	return &_false, nil
 }
 
 // extractRequestedSize extracts the requested size from the PVC based on the PVC status phase and the StorageClass parameters.
-//
-// Return: map[pvcName]PVCRequest
-// Example:
-//
-//	{
-//	  "pvc1": {
-//	    "deviceType": "Thick",
-//	    "requestedSize": 100
-//	  }
-//	}
-//	{
-//	  "pvc2": {
-//	    "deviceType": "Thin",
-//	    "requestedSize": 200
-//	  }
-//	}
 func extractRequestedSize(
 	ctx context.Context,
 	cl client.Client,
@@ -277,20 +517,19 @@ func extractRequestedSize(
 		sc := scs[*pvc.Spec.StorageClassName]
 		log.Debug(fmt.Sprintf("[extractRequestedSize] PVC %s/%s has status phase: %s", pvc.Namespace, pvc.Name, pvc.Status.Phase))
 
-		// Determine device type based on provisioner
 		var deviceType string
 		isReplicated := sc.Provisioner == consts.SdsReplicatedVolumeProvisioner
 
 		if isReplicated {
-			// For replicated PVCs, get device type from RSP
 			rsc, err := getReplicatedStorageClassForExtract(ctx, cl, sc.Name)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[extractRequestedSize] unable to get RSC for SC %s", sc.Name))
 				continue
 			}
-			rsp, err := getReplicatedStoragePoolForExtract(ctx, cl, rsc.Spec.StoragePool)
+			rspName := rsc.GetStoragePoolName()
+			rsp, err := getReplicatedStoragePoolForExtract(ctx, cl, rspName)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[extractRequestedSize] unable to get RSP %s", rsc.Spec.StoragePool))
+				log.Error(err, fmt.Sprintf("[extractRequestedSize] unable to get RSP %s", rspName))
 				continue
 			}
 			switch rsp.Spec.Type {
@@ -302,7 +541,6 @@ func extractRequestedSize(
 				deviceType = consts.Thick
 			}
 		} else {
-			// For local PVCs, get device type from SC parameters
 			deviceType = sc.Parameters[consts.LvmTypeParamKey]
 		}
 
@@ -353,27 +591,24 @@ func getReplicatedStoragePoolForExtract(ctx context.Context, cl client.Client, r
 	return rsp, nil
 }
 
-// Get LVMVolumeGroups from StorageClasses
-//
-// Return: map[scName]LVMVolumeGroups
-func GetLVGsFromStorageClasses(scs map[string]*storagev1.StorageClass) (map[string]LVMVolumeGroups, error) {
-	result := make(map[string]LVMVolumeGroups, len(scs))
+// --- SC LVG extraction helpers ---
 
+// GetLVGsFromStorageClasses gets LVMVolumeGroups from StorageClasses.
+func GetLVGsFromStorageClasses(scs map[string]*storagev1.StorageClass) (map[string]SCLVMVolumeGroups, error) {
+	result := make(map[string]SCLVMVolumeGroups, len(scs))
 	for _, sc := range scs {
 		lvgs, err := ExtractLVGsFromSC(sc)
 		if err != nil {
 			return nil, err
 		}
-
 		result[sc.Name] = append(result[sc.Name], lvgs...)
 	}
-
 	return result, nil
 }
 
-// Extract LVMVolumeGroups from StorageClass
-func ExtractLVGsFromSC(sc *storagev1.StorageClass) (LVMVolumeGroups, error) {
-	var lvmVolumeGroups LVMVolumeGroups
+// ExtractLVGsFromSC extracts LVMVolumeGroups from StorageClass parameters.
+func ExtractLVGsFromSC(sc *storagev1.StorageClass) (SCLVMVolumeGroups, error) {
+	var lvmVolumeGroups SCLVMVolumeGroups
 	err := yaml.Unmarshal([]byte(sc.Parameters[consts.LVMVolumeGroupsParamKey]), &lvmVolumeGroups)
 	if err != nil {
 		return nil, err
@@ -381,64 +616,26 @@ func ExtractLVGsFromSC(sc *storagev1.StorageClass) (LVMVolumeGroups, error) {
 	return lvmVolumeGroups, nil
 }
 
-// Remove LVMVolumeGroups, which are not used in StorageClasses
-//
-// Params:
-// lvgs - all LVMVolumeGroups in the cache;
-// scsLVGs - LVMVolumeGroups for each StorageClass
-//
-// Return: map[lvgName]*snc.LVMVolumeGroup
-func RemoveUnusedLVGs(lvgs map[string]*snc.LVMVolumeGroup, scsLVGs map[string]LVMVolumeGroups) map[string]*snc.LVMVolumeGroup {
-	result := make(map[string]*snc.LVMVolumeGroup, len(lvgs))
-	usedLvgs := make(map[string]struct{}, len(lvgs))
+// --- LVG matching helpers ---
 
-	for _, scLvgs := range scsLVGs {
-		for _, lvg := range scLvgs {
-			usedLvgs[lvg.Name] = struct{}{}
+// findMatchedThinPool finds a thin pool in the LVG by name.
+func findMatchedThinPool(thinPools []snc.LVMVolumeGroupThinPoolStatus, name string) *snc.LVMVolumeGroupThinPoolStatus {
+	for _, tp := range thinPools {
+		if tp.Name == name {
+			return &tp
 		}
 	}
-
-	for _, lvg := range lvgs {
-		if _, used := usedLvgs[lvg.Name]; used {
-			result[lvg.Name] = lvg
-		}
-	}
-
-	return result
+	return nil
 }
 
-// Params:
-// lvgs - LVMVolumeGroups;
-//
-// Return: map[nodeName][]*snc.LVMVolumeGroup
-func LVMVolumeGroupsByNodeName(lvgs map[string]*snc.LVMVolumeGroup) map[string][]*snc.LVMVolumeGroup {
-	sorted := make(map[string][]*snc.LVMVolumeGroup, len(lvgs))
-	for _, lvg := range lvgs {
-		for _, node := range lvg.Status.Nodes {
-			sorted[node.Name] = append(sorted[node.Name], lvg)
-		}
-	}
-
-	return sorted
-}
-
-// Params:
-// nodeLVGs - LVMVolumeGroups on the node;
-// scLVGs - LVMVolumeGroups for the Storage Class;
-//
-// Return: *LVMVolumeGroup
-// Example:
-//
-//	{
-//	  "name": "vg0",
-//	  "status": {
-//	    "nodes": ["node1", "node2"],
-//	  },
-//	}
-func findMatchedLVG(nodeLVGs []*snc.LVMVolumeGroup, scLVGs LVMVolumeGroups) *LVMVolumeGroup {
+// findMatchedSCLVG finds a common LVG between node LVGs and SC LVGs.
+// Only considers LVGs that pass the isLVGSchedulable check.
+func findMatchedSCLVG(nodeLVGs []snc.LVMVolumeGroup, scLVGs SCLVMVolumeGroups) *SCLVMVolumeGroup {
 	nodeLVGNames := make(map[string]struct{}, len(nodeLVGs))
 	for _, lvg := range nodeLVGs {
-		nodeLVGNames[lvg.Name] = struct{}{}
+		if ok, _ := isLVGSchedulable(&lvg); ok {
+			nodeLVGNames[lvg.Name] = struct{}{}
+		}
 	}
 
 	for _, lvg := range scLVGs {
@@ -446,176 +643,15 @@ func findMatchedLVG(nodeLVGs []*snc.LVMVolumeGroup, scLVGs LVMVolumeGroups) *LVM
 			return &lvg
 		}
 	}
-
 	return nil
 }
 
-// Params:
-// thinPools - ThinPools of the LVMVolumeGroup;
-// name - name of the ThinPool to find;
-//
-// Return: *snc.LVMVolumeGroupThinPoolStatus
-// Example:
-//
-//	{
-//	  "name": "tp0",
-//	  "availableSpace": 100,
-//	}
-func findMatchedThinPool(thinPools []snc.LVMVolumeGroupThinPoolStatus, name string) *snc.LVMVolumeGroupThinPoolStatus {
-	for _, tp := range thinPools {
-		if tp.Name == name {
-			return &tp
+// lvgHasNode checks if the LVG belongs to the specified node.
+func lvgHasNode(lvg *snc.LVMVolumeGroup, nodeName string) bool {
+	for _, n := range lvg.Status.Nodes {
+		if n.Name == nodeName {
+			return true
 		}
 	}
-
-	return nil
-}
-
-// LVGSpaceInfo contains information about available space in LVG
-type LVGSpaceInfo struct {
-	AvailableSpace int64 // available space considering reservations
-	TotalSize      int64 // total LVG size
-}
-
-// getLVGAvailableSpace gets available space in LVG considering reservations
-// Works directly with LVG, without node binding
-//
-// Params:
-//   - schedulerCache - scheduler cache
-//   - lvg - LVMVolumeGroup from cache
-//   - deviceType - device type ("Thick" or "Thin")
-//   - thinPoolName - thin pool name (required for thin, can be empty for thick)
-//
-// Return:
-//   - LVGSpaceInfo with available space information
-//   - error if an error occurred
-func getLVGAvailableSpace(
-	schedulerCache *cache.Cache,
-	lvg *snc.LVMVolumeGroup,
-	deviceType string,
-	thinPoolName string,
-) (LVGSpaceInfo, error) {
-	var availableSpace int64
-	var totalSize int64
-
-	switch deviceType {
-	case consts.Thick:
-		freeSpace := lvg.Status.VGFree.Value()
-		reserved, err := schedulerCache.GetLVGThickReservedSpace(lvg.Name)
-		if err != nil {
-			return LVGSpaceInfo{}, fmt.Errorf("unable to get reserved space for LVG %s: %w", lvg.Name, err)
-		}
-		availableSpace = freeSpace - reserved
-		totalSize = lvg.Status.VGSize.Value()
-
-	case consts.Thin:
-		if thinPoolName == "" {
-			return LVGSpaceInfo{}, fmt.Errorf("thinPoolName is required for thin volumes")
-		}
-
-		thinPool := findMatchedThinPool(lvg.Status.ThinPools, thinPoolName)
-		if thinPool == nil {
-			return LVGSpaceInfo{}, fmt.Errorf("thin pool %s not found in LVG %s", thinPoolName, lvg.Name)
-		}
-
-		freeSpace := thinPool.AvailableSpace.Value()
-		reserved, err := schedulerCache.GetLVGThinReservedSpace(lvg.Name, thinPoolName)
-		if err != nil {
-			return LVGSpaceInfo{}, fmt.Errorf("unable to get reserved space for thin pool %s: %w", thinPoolName, err)
-		}
-		availableSpace = freeSpace - reserved
-		totalSize = lvg.Status.VGSize.Value()
-
-	default:
-		return LVGSpaceInfo{}, fmt.Errorf("unknown device type: %s", deviceType)
-	}
-
-	return LVGSpaceInfo{
-		AvailableSpace: availableSpace,
-		TotalSize:      totalSize,
-	}, nil
-}
-
-// checkLVGHasSpace checks if LVG has enough space for the requested size
-// Works directly with LVG, without node binding
-//
-// Params:
-//   - schedulerCache - scheduler cache
-//   - lvg - LVMVolumeGroup from cache
-//   - deviceType - device type ("Thick" or "Thin")
-//   - thinPoolName - thin pool name (required for thin, can be empty for thick)
-//   - requestedSize - requested size in bytes
-//
-// Return:
-//   - true if there is enough space
-//   - error if an error occurred
-func checkLVGHasSpace(
-	schedulerCache *cache.Cache,
-	lvg *snc.LVMVolumeGroup,
-	deviceType string,
-	thinPoolName string,
-	requestedSize int64,
-) (bool, error) {
-	spaceInfo, err := getLVGAvailableSpace(schedulerCache, lvg, deviceType, thinPoolName)
-	if err != nil {
-		return false, err
-	}
-
-	return spaceInfo.AvailableSpace >= requestedSize, nil
-}
-
-// calculateLVGScore calculates score for LVG based on available space
-// Uses the same logic as getFreeSpaceLeftPercent and getNodeScore from prioritize.go
-// Works directly with LVG, without node binding
-//
-// Params:
-//   - schedulerCache - scheduler cache
-//   - lvg - LVMVolumeGroup from cache
-//   - deviceType - device type ("Thick" or "Thin")
-//   - thinPoolName - thin pool name (required for thin, can be empty for thick)
-//   - requestedSize - requested size in bytes
-//   - divisor - divisor for score calculation
-//
-// Return:
-//   - score for LVG (1-10)
-//   - error if an error occurred
-func calculateLVGScore(
-	schedulerCache *cache.Cache,
-	lvg *snc.LVMVolumeGroup,
-	deviceType string,
-	thinPoolName string,
-	requestedSize int64,
-	divisor float64,
-) (int, error) {
-	spaceInfo, err := getLVGAvailableSpace(schedulerCache, lvg, deviceType, thinPoolName)
-	if err != nil {
-		return 0, err
-	}
-
-	// Use the same logic as in prioritize.go
-	freeSpaceLeft := getFreeSpaceLeftPercent(spaceInfo.AvailableSpace, requestedSize, spaceInfo.TotalSize)
-	score := getNodeScore(freeSpaceLeft, divisor)
-
-	return score, nil
-}
-
-// getFreeSpaceLeftPercent calculates the percentage of free space left after placing the requested volume
-func getFreeSpaceLeftPercent(freeSize, requestedSpace, totalSize int64) int64 {
-	leftFreeSize := freeSize - requestedSpace
-	fraction := float64(leftFreeSize) / float64(totalSize)
-	percent := fraction * 100
-	return int64(percent)
-}
-
-// getNodeScore calculates score based on free space
-func getNodeScore(freeSpace int64, divisor float64) int {
-	converted := int(math.Round(math.Log2(float64(freeSpace) / divisor)))
-	switch {
-	case converted < 1:
-		return 1
-	case converted > 10:
-		return 10
-	default:
-		return converted
-	}
+	return false
 }

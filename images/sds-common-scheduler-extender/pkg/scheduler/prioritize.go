@@ -23,13 +23,13 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
@@ -39,6 +39,9 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	servingLog := logger.WithTraceIDLogger(r.Context(), s.log).WithName("prioritize")
 
 	servingLog.Debug("starts the serving the request")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
 
 	var inputData ExtenderArgs
 	reader := http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
@@ -66,7 +69,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	}
 	servingLog.Trace(fmt.Sprintf("NodeNames from the request: %+v", nodeNames))
 
-	managedPVCs, err := getManagedPVCsFromPod(s.ctx, s.client, servingLog, inputData.Pod, s.targetProvisioners)
+	managedPVCs, err := getManagedPVCsFromPod(ctx, s.client, servingLog, inputData.Pod, s.targetProvisioners)
 	if err != nil {
 		servingLog.Error(err, "unable to get managed PVCs from the Pod")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -80,18 +83,12 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	for _, pvc := range managedPVCs {
-		servingLog.Trace(fmt.Sprintf("managed PVC: %s", pvc.Name))
-	}
 
-	scUsedByPVCs, err := getStorageClassesUsedByPVCs(s.ctx, s.client, managedPVCs)
+	scUsedByPVCs, err := getStorageClassesUsedByPVCs(ctx, s.client, managedPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to get StorageClasses from the PVC")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
-	}
-	for _, sc := range scUsedByPVCs {
-		servingLog.Trace(fmt.Sprintf("Pod uses StorageClass: %s", sc.Name))
 	}
 	if len(scUsedByPVCs) != len(managedPVCs) {
 		servingLog.Error(errors.New("number of StorageClasses does not match the number of PVCs"), "unable to get StorageClasses from the PVC")
@@ -100,7 +97,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	servingLog.Debug("starts to extract PVC requested sizes")
-	pvcRequests, err := extractRequestedSize(s.ctx, s.client, servingLog, managedPVCs, scUsedByPVCs)
+	pvcRequests, err := extractRequestedSize(ctx, s.client, servingLog, managedPVCs, scUsedByPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to extract request size")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -114,21 +111,21 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	servingLog.Trace(fmt.Sprintf("PVC requests: %+v", pvcRequests))
 	servingLog.Debug("successfully extracted the PVC requested sizes")
 
 	servingLog.Debug("starts to score the nodes for Pod")
-	// TODO: In future, retrieve replica locations from DRBD/Linstor for replicated PVCs
-	// For now, pass empty map as we don't have replica information yet
-	replicaLocations := make(map[string][]string)
-	
-	scoredNodes, err := scoreNodes(servingLog, s.ctx, s.client, s.cache, &nodeNames, managedPVCs, scUsedByPVCs, pvcRequests, replicaLocations, s.defaultDivisor)
+	replicaLocations := make(map[string][]string) // TODO: retrieve from DRBD/Linstor
+
+	scoredNodes, err := scoreNodes(ctx, servingLog, s.client, s.cache, &nodeNames, managedPVCs, scUsedByPVCs, pvcRequests, replicaLocations, s.defaultDivisor)
 	if err != nil {
 		servingLog.Error(err, "unable to score nodes")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	servingLog.Debug("successfully scored the nodes for Pod")
+
+	// Narrow reservations to the final node list (prioritize may receive fewer nodes than filter)
+	narrowReservationsToFinalNodes(ctx, servingLog, s.client, s.cache, nodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
 
 	// Log response body at DEBUG level
 	responseJSON, err := json.Marshal(scoredNodes)
@@ -158,9 +155,7 @@ func writeNodeScoresResponse(w http.ResponseWriter, log logger.Logger, nodeNames
 			Score: score,
 		})
 	}
-	log.Trace(fmt.Sprintf("node scores: %+v", scores))
 
-	// Log response body at DEBUG level
 	responseJSON, err := json.Marshal(scores)
 	if err != nil {
 		return err
@@ -175,8 +170,8 @@ func writeNodeScoresResponse(w http.ResponseWriter, log logger.Logger, nodeNames
 }
 
 func scoreNodes(
-	log logger.Logger,
 	ctx context.Context,
+	log logger.Logger,
 	cl client.Client,
 	schedulerCache *cache.Cache,
 	nodeNames *[]string,
@@ -186,11 +181,6 @@ func scoreNodes(
 	replicaLocations map[string][]string,
 	divisor float64,
 ) ([]HostPriority, error) {
-	allLVGs := schedulerCache.GetAllLVG()
-	for _, lvg := range allLVGs {
-		log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s in the cache", lvg.Name))
-	}
-
 	// Separate PVCs by provisioner
 	localPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsLocalVolumeProvisioner)
 	replicatedPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsReplicatedVolumeProvisioner)
@@ -198,9 +188,7 @@ func scoreNodes(
 	log.Debug(fmt.Sprintf("[scoreNodes] local PVCs count: %d, replicated PVCs count: %d", len(localPVCs), len(replicatedPVCs)))
 
 	// Get LVGs from StorageClasses only for local PVCs
-	var scLVGs map[string]LVMVolumeGroups
-	var usedLVGs map[string]*snc.LVMVolumeGroup
-	var nodeLVGs map[string][]*snc.LVMVolumeGroup
+	var scLVGs map[string]SCLVMVolumeGroups
 	var err error
 
 	if len(localPVCs) > 0 {
@@ -217,24 +205,6 @@ func scoreNodes(
 		scLVGs, err = GetLVGsFromStorageClasses(localSCs)
 		if err != nil {
 			return nil, err
-		}
-		log.Debug("[scoreNodes] successfully got LVMVolumeGroups for local Storage Classes")
-		for scName, lvmVolumeGroups := range scLVGs {
-			for _, lvg := range lvmVolumeGroups {
-				log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s belongs to Storage Class %s", lvg.Name, scName))
-			}
-		}
-
-		usedLVGs = RemoveUnusedLVGs(allLVGs, scLVGs)
-		for lvgName := range usedLVGs {
-			log.Trace(fmt.Sprintf("[scoreNodes] used LVMVolumeGroup %s", lvgName))
-		}
-
-		nodeLVGs = LVMVolumeGroupsByNodeName(usedLVGs)
-		for n, ls := range nodeLVGs {
-			for _, l := range ls {
-				log.Trace(fmt.Sprintf("[scoreNodes] the LVMVolumeGroup %s belongs to node %s", l.Name, n))
-			}
 		}
 	}
 
@@ -257,30 +227,33 @@ func scoreNodes(
 
 			// === Score LOCAL PVCs ===
 			if len(localPVCs) > 0 {
-				lvgsFromNode := nodeLVGs[nodeName]
-				for _, pvc := range localPVCs {
-					pvcReq := pvcRequests[pvc.Name]
-					lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
-					commonLVG := findMatchedLVG(lvgsFromNode, lvgsFromSC)
-					if commonLVG == nil {
-						log.Debug(fmt.Sprintf("[scoreNodes] unable to match local LVG for SC %s on node %s, scoring 0", *pvc.Spec.StorageClassName, nodeName))
-						pvcCount++
-						continue
-					}
-					log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s is common for storage class %s and node %s", commonLVG.Name, *pvc.Spec.StorageClassName, nodeName))
+				// Get LVGs on this node via field indexer
+				nodeLVGs, err := getLVGsOnNode(ctx, cl, nodeName)
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[scoreNodes] unable to get LVGs for node %s", nodeName))
+				} else {
+					for _, pvc := range localPVCs {
+						pvcReq := pvcRequests[pvc.Name]
+						lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
+						commonLVG := findMatchedSCLVG(nodeLVGs, lvgsFromSC)
+						if commonLVG == nil {
+							log.Debug(fmt.Sprintf("[scoreNodes] unable to match local LVG for SC %s on node %s, scoring 0", *pvc.Spec.StorageClassName, nodeName))
+							pvcCount++
+							continue
+						}
 
-					// Use common function to get available space in LVG
-					lvg := allLVGs[commonLVG.Name]
-					spaceInfo, err := getLVGAvailableSpace(schedulerCache, lvg, pvcReq.DeviceType, commonLVG.Thin.PoolName)
-					if err != nil {
-						log.Error(err, fmt.Sprintf("[scoreNodes] unable to get available space for LVG %s", lvg.Name))
-						pvcCount++
-						continue
-					}
+						key := storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType)
+						spaceInfo, err := getAvailableSpace(ctx, cl, schedulerCache, key)
+						if err != nil {
+							log.Error(err, fmt.Sprintf("[scoreNodes] unable to get available space for %s", key.String()))
+							pvcCount++
+							continue
+						}
 
-					log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s available space: %s, total size: %s", lvg.Name, resource.NewQuantity(spaceInfo.AvailableSpace, resource.BinarySI), resource.NewQuantity(spaceInfo.TotalSize, resource.BinarySI)))
-					totalScore += getFreeSpaceLeftPercent(spaceInfo.AvailableSpace, pvcReq.RequestedSize, spaceInfo.TotalSize)
-					pvcCount++
+						log.Trace(fmt.Sprintf("[scoreNodes] pool %s available space: %s, total size: %s", key.String(), resource.NewQuantity(spaceInfo.AvailableSpace, resource.BinarySI), resource.NewQuantity(spaceInfo.TotalSize, resource.BinarySI)))
+						totalScore += getFreeSpaceLeftPercent(spaceInfo.AvailableSpace, pvcReq.RequestedSize, spaceInfo.TotalSize)
+						pvcCount++
+					}
 				}
 			}
 
@@ -290,7 +263,6 @@ func scoreNodes(
 					pvcReq := pvcRequests[pvc.Name]
 					sc := scUsedByPVCs[*pvc.Spec.StorageClassName]
 
-					// Get RSC (name = SC name)
 					rsc, err := getReplicatedStorageClass(ctx, cl, sc.Name)
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[scoreNodes] unable to get RSC for SC %s", sc.Name))
@@ -298,10 +270,10 @@ func scoreNodes(
 						continue
 					}
 
-					// Get RSP
-					rsp, err := getReplicatedStoragePool(ctx, cl, rsc.Spec.StoragePool)
+					rspName := rsc.GetStoragePoolName()
+					rsp, err := getReplicatedStoragePool(ctx, cl, rspName)
 					if err != nil {
-						log.Error(err, fmt.Sprintf("[scoreNodes] unable to get RSP %s", rsc.Spec.StoragePool))
+						log.Error(err, fmt.Sprintf("[scoreNodes] unable to get RSP %s", rspName))
 						pvcCount++
 						continue
 					}
@@ -311,23 +283,18 @@ func scoreNodes(
 						volumeAccess = consts.VolumeAccessPreferablyLocal
 					}
 
-					// For Bound PVC with volumeAccess != Local/EventuallyLocal:
-					// score 0 if no LVG or no space (to prefer nodes with actual storage over diskless)
 					if pvc.Status.Phase == corev1.ClaimBound &&
 						volumeAccess != consts.VolumeAccessLocal &&
 						volumeAccess != consts.VolumeAccessEventuallyLocal {
-
-						hasLVGAndSpace, _ := checkNodeHasLVGWithSpaceForReplicated(log, schedulerCache, nodeName, rsp, pvcReq.RequestedSize)
+						hasLVGAndSpace, _ := checkNodeHasLVGWithSpaceForReplicated(ctx, log, cl, schedulerCache, nodeName, rsp, pvcReq.RequestedSize)
 						if !hasLVGAndSpace {
-							log.Debug(fmt.Sprintf("[scoreNodes] node %s has no LVG/space for replicated PVC %s, scoring 0 for this PVC", nodeName, pvc.Name))
-							// pvcScore = 0, just increment count
+							log.Debug(fmt.Sprintf("[scoreNodes] node %s has no LVG/space for replicated PVC %s, scoring 0", nodeName, pvc.Name))
 							pvcCount++
 							continue
 						}
 					}
 
-					// Calculate score based on available space
-					pvcScore := calculateReplicatedPVCScore(log, schedulerCache, nodeName, rsp, pvcReq, divisor)
+					pvcScore := calculateReplicatedPVCScore(ctx, log, cl, schedulerCache, nodeName, rsp, pvcReq, divisor)
 					totalScore += pvcScore
 					pvcCount++
 				}
@@ -341,9 +308,8 @@ func scoreNodes(
 			if pvcCount > 0 {
 				averageScore = totalScore / int64(pvcCount)
 			}
-			log.Trace(fmt.Sprintf("[scoreNodes] average score for the node %s: %d (total: %d, pvcCount: %d, replicaBonus: %d)", nodeName, averageScore, totalScore, pvcCount, replicaBonus))
 			score := getNodeScore(averageScore, divisor)
-			log.Trace(fmt.Sprintf("[scoreNodes] node %s has final score %d", nodeName, score))
+			log.Trace(fmt.Sprintf("[scoreNodes] node %s has final score %d (avg: %d, total: %d, pvcs: %d, replicaBonus: %d)", nodeName, score, averageScore, totalScore, pvcCount, replicaBonus))
 
 			resultMtx.Lock()
 			result = append(result, HostPriority{
@@ -365,11 +331,65 @@ func scoreNodes(
 		return nil, err
 	}
 
-	log.Trace("[scoreNodes] final result")
-	for _, n := range result {
-		log.Trace(fmt.Sprintf("[scoreNodes] host: %s", n.Host))
-		log.Trace(fmt.Sprintf("[scoreNodes] score: %d", n.Score))
-	}
-
 	return result, nil
+}
+
+// narrowReservationsToFinalNodes narrows reservations for each PVC to only include
+// StoragePoolKeys from the final node list. This releases reserved space on nodes
+// that were filtered out by kube's own filters or other extenders between filter and prioritize.
+func narrowReservationsToFinalNodes(
+	ctx context.Context,
+	log logger.Logger,
+	cl client.Client,
+	schedulerCache *cache.Cache,
+	finalNodeNames []string,
+	managedPVCs map[string]*corev1.PersistentVolumeClaim,
+	scUsedByPVCs map[string]*storagev1.StorageClass,
+	pvcRequests map[string]PVCRequest,
+) {
+	for _, pvc := range managedPVCs {
+		sc := scUsedByPVCs[*pvc.Spec.StorageClassName]
+
+		// Only narrow local PVCs (replicated use a different mechanism)
+		if sc.Provisioner != consts.SdsLocalVolumeProvisioner {
+			continue
+		}
+
+		pvcReq, exists := pvcRequests[pvc.Name]
+		if !exists {
+			continue
+		}
+
+		lvgsFromSC, err := ExtractLVGsFromSC(sc)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[narrowReservationsToFinalNodes] unable to extract LVGs from SC %s", sc.Name))
+			continue
+		}
+
+		// Collect StoragePoolKeys from the final node list
+		var keepPools []cache.StoragePoolKey
+		for _, nodeName := range finalNodeNames {
+			nodeLVGs, err := getLVGsOnNode(ctx, cl, nodeName)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[narrowReservationsToFinalNodes] unable to get LVGs for node %s", nodeName))
+				continue
+			}
+
+			commonLVG := findMatchedSCLVG(nodeLVGs, lvgsFromSC)
+			if commonLVG == nil {
+				continue
+			}
+
+			key := storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType)
+			keepPools = append(keepPools, key)
+		}
+
+		if len(keepPools) > 0 {
+			pvcKey := pvc.Namespace + "/" + pvc.Name
+			ok := schedulerCache.NarrowReservation(pvcKey, keepPools, defaultReservationTTL)
+			if ok {
+				log.Debug(fmt.Sprintf("[narrowReservationsToFinalNodes] narrowed reservation %s to %d pools", pvcKey, len(keepPools)))
+			}
+		}
+	}
 }

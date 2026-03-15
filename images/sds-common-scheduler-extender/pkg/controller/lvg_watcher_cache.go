@@ -19,129 +19,94 @@ package controller
 import (
 	"context"
 	"fmt"
-	"reflect"
 
-	"k8s.io/client-go/util/workqueue"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/scheduler"
 )
 
 const (
 	LVGWatcherCacheCtrlName = "lvg-watcher-cache-controller"
 )
 
+// RunLVGWatcherCacheController creates a controller that watches LVMVolumeGroup resources.
+// On every Create (including initial informer sync at startup) and Update event, it
+// recalibrates the unaccounted space offset for all storage pools on the LVG.
 func RunLVGWatcherCacheController(
 	mgr manager.Manager,
 	log logger.Logger,
-	cache *cache.Cache,
-) (controller.Controller, error) {
+	schedulerCache *cache.Cache,
+) error {
 	log.Info("[RunLVGWatcherCacheController] starts the work")
 
 	c, err := controller.New(LVGWatcherCacheCtrlName, mgr, controller.Options{
-		Reconciler: reconcile.Func(func(_ context.Context, _ reconcile.Request) (reconcile.Result, error) {
-			return reconcile.Result{}, nil
-		}),
+		Reconciler: &lvgReconciler{
+			cl:    mgr.GetClient(),
+			cache: schedulerCache,
+			log:   log,
+		},
 	})
 	if err != nil {
-		log.Error(err, "[RunCacheWatcherController] unable to create a controller")
-		return nil, err
+		log.Error(err, "[RunLVGWatcherCacheController] unable to create controller")
+		return err
 	}
 
-	err = c.Watch(source.Kind(mgr.GetCache(), &snc.LVMVolumeGroup{}, handler.TypedFuncs[*snc.LVMVolumeGroup, reconcile.Request]{
-		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*snc.LVMVolumeGroup], _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log.Info(fmt.Sprintf("[RunLVGWatcherCacheController] CreateFunc starts the cache reconciliation for the LVMVolumeGroup %s", e.Object.GetName()))
-
-			lvg := e.Object
-			if lvg.DeletionTimestamp != nil {
-				log.Info(fmt.Sprintf("[RunLVGWatcherCacheController] the LVMVolumeGroup %s should not be reconciled", lvg.Name))
-				return
-			}
-
-			log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] tries to get the LVMVolumeGroup %s from the cache", lvg.Name))
-			existedLVG := cache.TryGetLVG(lvg.Name)
-			if existedLVG != nil {
-				log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] the LVMVolumeGroup %s was found in the cache. It will be updated", lvg.Name))
-				err := cache.UpdateLVG(lvg)
-				if err != nil {
-					log.Error(err, fmt.Sprintf("[RunLVGWatcherCacheController] unable to update the LVMVolumeGroup %s in the cache", lvg.Name))
-				} else {
-					log.Info(fmt.Sprintf("[RunLVGWatcherCacheController] cache was updated for the LVMVolumeGroup %s", lvg.Name))
-				}
-			} else {
-				log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] the LVMVolumeGroup %s was not found. It will be added to the cache", lvg.Name))
-				cache.AddLVG(lvg)
-				log.Info(fmt.Sprintf("[RunLVGWatcherCacheController] cache was added for the LVMVolumeGroup %s", lvg.Name))
-			}
-
-			err = cache.ClearBoundPVCsFromLVG(lvg.Name)
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVGWatcherCacheController] unable to clear bound PVCs for the LVMVolumeGroup %s", lvg.Name))
-			}
-
-			log.Info(fmt.Sprintf("[RunLVGWatcherCacheController] cache for the LVMVolumeGroup %s was reconciled by CreateFunc", lvg.Name))
+	err = c.Watch(source.Kind(mgr.GetCache(), &snc.LVMVolumeGroup{},
+		&handler.TypedEnqueueRequestForObject[*snc.LVMVolumeGroup]{},
+		predicate.TypedFuncs[*snc.LVMVolumeGroup]{
+			CreateFunc: func(_ event.TypedCreateEvent[*snc.LVMVolumeGroup]) bool {
+				return true
+			},
+			UpdateFunc: func(_ event.TypedUpdateEvent[*snc.LVMVolumeGroup]) bool {
+				return true
+			},
+			DeleteFunc: func(_ event.TypedDeleteEvent[*snc.LVMVolumeGroup]) bool {
+				return false
+			},
 		},
-		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*snc.LVMVolumeGroup], _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log.Info(fmt.Sprintf("[RunCacheWatcherController] UpdateFunc starts the cache reconciliation for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
-			oldLvg := e.ObjectOld
-			newLvg := e.ObjectNew
-			err := cache.UpdateLVG(newLvg)
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVGWatcherCacheController] unable to update the LVMVolumeGroup %s cache", newLvg.Name))
-				return
-			}
-			log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] successfully updated the LVMVolumeGroup %s in the cache", newLvg.Name))
-
-			log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] starts to calculate the size difference for LVMVolumeGroup %s", newLvg.Name))
-			log.Trace(fmt.Sprintf("[RunLVGWatcherCacheController] old state LVMVolumeGroup %s has size %s", oldLvg.Name, oldLvg.Status.AllocatedSize.String()))
-			log.Trace(fmt.Sprintf("[RunLVGWatcherCacheController] new state LVMVolumeGroup %s has size %s", newLvg.Name, newLvg.Status.AllocatedSize.String()))
-
-			if !shouldReconcileLVG(oldLvg, newLvg) {
-				log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] the LVMVolumeGroup %s should not be reconciled", newLvg.Name))
-				return
-			}
-			log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] the LVMVolumeGroup %s should be reconciled by Update Func", newLvg.Name))
-
-			err = cache.ClearBoundPVCsFromLVG(newLvg.Name)
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[RunLVGWatcherCacheController] unable to clear bound PVCs for the LVMVolumeGroup %s", newLvg.Name))
-			}
-
-			log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] Update Func ends reconciliation the LVMVolumeGroup %s cache", newLvg.Name))
-		},
-		DeleteFunc: func(_ context.Context, e event.TypedDeleteEvent[*snc.LVMVolumeGroup], _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log.Info(fmt.Sprintf("[RunCacheWatcherController] DeleteFunc starts the cache reconciliation for the LVMVolumeGroup %s", e.Object.GetName()))
-			lvg := e.Object
-			cache.DeleteLVG(lvg.Name)
-			log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] LVMVolumeGroup %s was deleted from the cache", lvg.Name))
-		},
-	},
-	),
-	)
+	))
 	if err != nil {
-		log.Error(err, "[RunCacheWatcherController] unable to watch the events")
-		return nil, err
+		log.Error(err, "[RunLVGWatcherCacheController] unable to controller Watch")
+		return err
 	}
 
-	return c, nil
+	log.Info("[RunLVGWatcherCacheController] controller started successfully")
+	return nil
 }
 
-func shouldReconcileLVG(oldLVG, newLVG *snc.LVMVolumeGroup) bool {
-	if newLVG.DeletionTimestamp != nil {
-		return false
+type lvgReconciler struct {
+	cl    client.Client
+	cache *cache.Cache
+	log   logger.Logger
+}
+
+func (r *lvgReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	r.log.Debug(fmt.Sprintf("[lvgReconciler] reconciling LVG %s, recalibrating unaccounted space", req.Name))
+
+	lvg := &snc.LVMVolumeGroup{}
+	if err := r.cl.Get(ctx, req.NamespacedName, lvg); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			r.log.Debug(fmt.Sprintf("[lvgReconciler] LVG %s not found (deleted), skipping", req.Name))
+			return reconcile.Result{}, nil
+		}
+		return reconcile.Result{}, fmt.Errorf("unable to get LVG %s: %w", req.Name, err)
 	}
 
-	if oldLVG.Status.AllocatedSize.Value() == newLVG.Status.AllocatedSize.Value() &&
-		reflect.DeepEqual(oldLVG.Status.ThinPools, newLVG.Status.ThinPools) {
-		return false
+	if err := scheduler.CalibrateAllPoolsForLVG(ctx, r.cl, r.cache, lvg); err != nil {
+		r.log.Error(err, fmt.Sprintf("[lvgReconciler] failed to calibrate LVG %s", req.Name))
+		return reconcile.Result{}, err
 	}
 
-	return true
+	r.log.Debug(fmt.Sprintf("[lvgReconciler] successfully calibrated unaccounted space for LVG %s", req.Name))
+	return reconcile.Result{}, nil
 }

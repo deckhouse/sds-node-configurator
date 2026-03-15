@@ -20,6 +20,8 @@ import (
 	apiv1 "k8s.io/api/core/v1"
 )
 
+// === Kubernetes scheduler extender contract (unchanged) ===
+
 // ExtenderArgs is copied from https://godoc.org/k8s.io/kubernetes/pkg/scheduler/api/v1#ExtenderArgs
 type ExtenderArgs struct {
 	// Pod being scheduled
@@ -60,34 +62,44 @@ type ExtenderFilterResult struct {
 // FailedNodesMap is copied from https://godoc.org/k8s.io/kubernetes/pkg/scheduler/api/v1#FailedNodesMap
 type FailedNodesMap map[string]string
 
-// FilterPrioritizeRequest is the request structure for the filter-prioritize endpoint
-type FilterPrioritizeRequest struct {
-	LVGs   []LVGInput  `json:"lvgs"`
-	Volume VolumeInput `json:"volume"`
-}
+// === /v1/lvg/filter-and-score API ===
 
-// LVGInput represents an LVG input in the filter-prioritize request
-type LVGInput struct {
+// LVMVolumeGroupInput represents a single LVM Volume Group in a request.
+type LVMVolumeGroupInput struct {
 	Name         string `json:"name"`
-	ThinPoolName string `json:"thinPoolName,omitempty"` // required for thin volumes, can be empty for thick
+	ThinPoolName string `json:"thinPoolName,omitempty"`
 }
 
-// VolumeInput represents volume information in the filter-prioritize request
-type VolumeInput struct {
-	Name string `json:"name"` // volume name (used for reservation)
-	Size int64  `json:"size"` // size in bytes
-	Type string `json:"type"` // "thin" or "thick"
+// ScoredLVMVolumeGroup is an LVMVolumeGroupInput with an assigned capacity score.
+type ScoredLVMVolumeGroup struct {
+	LVMVolumeGroupInput
+	Score int `json:"score"`
 }
 
-// FilterPrioritizeResponse is the response structure for the filter-prioritize endpoint
-type FilterPrioritizeResponse struct {
-	LVGs  []LVGScore `json:"lvgs"`
-	Error string     `json:"error,omitempty"`
+// FilterAndScoreRequest is the request for /v1/lvg/filter-and-score.
+type FilterAndScoreRequest struct {
+	ReservationID  string                `json:"reservationID"`
+	ReservationTTL string                `json:"reservationTTL"` // duration string, e.g. "30s"
+	Size           int64                 `json:"size"`
+	LVGS           []LVMVolumeGroupInput `json:"lvgs"`
 }
 
-// LVGScore represents a scored LVG in the filter-prioritize response
-type LVGScore struct {
-	Name  string `json:"name"`
-	Score int    `json:"score"`
-	// thinPoolName is not needed in response, as client knows it from request
+// FilterAndScoreResponse is the response for /v1/lvg/filter-and-score.
+type FilterAndScoreResponse struct {
+	LVGS  []ScoredLVMVolumeGroup `json:"lvgs"`
+	Error string                 `json:"error,omitempty"`
+}
+
+// === /v1/lvg/narrow-reservation API ===
+
+// NarrowReservationRequest is the request for /v1/lvg/narrow-reservation.
+type NarrowReservationRequest struct {
+	ReservationID  string              `json:"reservationID"`
+	ReservationTTL string              `json:"reservationTTL"`
+	LVG            LVMVolumeGroupInput `json:"lvg"`
+}
+
+// NarrowReservationResponse is the response for /v1/lvg/narrow-reservation.
+type NarrowReservationResponse struct {
+	Error string `json:"error,omitempty"`
 }

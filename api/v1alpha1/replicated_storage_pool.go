@@ -22,20 +22,20 @@ import (
 )
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type ReplicatedStoragePoolList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata"`
-
-	Items []ReplicatedStoragePool `json:"items"`
-}
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type ReplicatedStoragePool struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   ReplicatedStoragePoolSpec   `json:"spec"`
 	Status ReplicatedStoragePoolStatus `json:"status,omitempty"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type ReplicatedStoragePoolList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	Items []ReplicatedStoragePool `json:"items"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -56,10 +56,28 @@ type ReplicatedStoragePoolLVG struct {
 
 // +k8s:deepcopy-gen=true
 type ReplicatedStoragePoolStatus struct {
-	// Phase is the current state: Updating, Failed, Completed
-	Phase string `json:"phase,omitempty"`
-	// Reason provides additional information about the current state
-	Reason string `json:"reason,omitempty"`
+	Phase   string `json:"phase,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+	// EligibleNodes lists nodes eligible for this storage pool.
+	EligibleNodes []ReplicatedStoragePoolEligibleNode `json:"eligibleNodes,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type ReplicatedStoragePoolEligibleNode struct {
+	NodeName        string                                 `json:"nodeName"`
+	Unschedulable   bool                                   `json:"unschedulable"`
+	NodeReady       bool                                   `json:"nodeReady"`
+	AgentReady      bool                                   `json:"agentReady"`
+	LVMVolumeGroups []ReplicatedStoragePoolEligibleNodeLVG `json:"lvmVolumeGroups,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type ReplicatedStoragePoolEligibleNodeLVG struct {
+	Name          string `json:"name"`
+	ThinPoolName  string `json:"thinPoolName,omitempty"`
+	Unschedulable bool   `json:"unschedulable"`
+	Ready         bool   `json:"ready"`
 }
 
 // DeepCopyInto copies the receiver into out
@@ -68,7 +86,7 @@ func (in *ReplicatedStoragePool) DeepCopyInto(out *ReplicatedStoragePool) {
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	in.Spec.DeepCopyInto(&out.Spec)
-	out.Status = in.Status
+	in.Status.DeepCopyInto(&out.Status)
 }
 
 // DeepCopy creates a deep copy of ReplicatedStoragePool
@@ -159,6 +177,13 @@ func (in *ReplicatedStoragePoolLVG) DeepCopy() *ReplicatedStoragePoolLVG {
 // DeepCopyInto copies the receiver into out
 func (in *ReplicatedStoragePoolStatus) DeepCopyInto(out *ReplicatedStoragePoolStatus) {
 	*out = *in
+	if in.EligibleNodes != nil {
+		in, out := &in.EligibleNodes, &out.EligibleNodes
+		*out = make([]ReplicatedStoragePoolEligibleNode, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 }
 
 // DeepCopy creates a deep copy of ReplicatedStoragePoolStatus
@@ -171,3 +196,37 @@ func (in *ReplicatedStoragePoolStatus) DeepCopy() *ReplicatedStoragePoolStatus {
 	return out
 }
 
+// DeepCopyInto copies the receiver into out
+func (in *ReplicatedStoragePoolEligibleNode) DeepCopyInto(out *ReplicatedStoragePoolEligibleNode) {
+	*out = *in
+	if in.LVMVolumeGroups != nil {
+		in, out := &in.LVMVolumeGroups, &out.LVMVolumeGroups
+		*out = make([]ReplicatedStoragePoolEligibleNodeLVG, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy creates a deep copy of ReplicatedStoragePoolEligibleNode
+func (in *ReplicatedStoragePoolEligibleNode) DeepCopy() *ReplicatedStoragePoolEligibleNode {
+	if in == nil {
+		return nil
+	}
+	out := new(ReplicatedStoragePoolEligibleNode)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies the receiver into out
+func (in *ReplicatedStoragePoolEligibleNodeLVG) DeepCopyInto(out *ReplicatedStoragePoolEligibleNodeLVG) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of ReplicatedStoragePoolEligibleNodeLVG
+func (in *ReplicatedStoragePoolEligibleNodeLVG) DeepCopy() *ReplicatedStoragePoolEligibleNodeLVG {
+	if in == nil {
+		return nil
+	}
+	out := new(ReplicatedStoragePoolEligibleNodeLVG)
+	in.DeepCopyInto(out)
+	return out
+}

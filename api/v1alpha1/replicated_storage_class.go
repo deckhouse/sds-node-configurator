@@ -22,14 +22,6 @@ import (
 )
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type ReplicatedStorageClassList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata"`
-
-	Items []ReplicatedStorageClass `json:"items"`
-}
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type ReplicatedStorageClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -38,28 +30,44 @@ type ReplicatedStorageClass struct {
 	Status ReplicatedStorageClassStatus `json:"status,omitempty"`
 }
 
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type ReplicatedStorageClassList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	Items []ReplicatedStorageClass `json:"items"`
+}
+
 // +k8s:deepcopy-gen=true
 type ReplicatedStorageClassSpec struct {
-	// StoragePool is the name of the ReplicatedStoragePool resource
-	StoragePool string `json:"storagePool"`
-	// ReclaimPolicy defines what happens to the volume when the PVC is deleted (Delete or Retain)
-	ReclaimPolicy string `json:"reclaimPolicy"`
-	// Replication mode: None, Availability, ConsistencyAndAvailability
-	Replication string `json:"replication,omitempty"`
-	// VolumeAccess mode: Local, EventuallyLocal, PreferablyLocal, Any
-	VolumeAccess string `json:"volumeAccess,omitempty"`
-	// Topology mode: TransZonal, Zonal, Ignored
-	Topology string `json:"topology"`
-	// Zones is the list of zones where volumes should be replicated
-	Zones []string `json:"zones,omitempty"`
+	// Deprecated: Use Storage instead.
+	StoragePool string `json:"storagePool,omitempty"`
+	// Storage defines the storage backend configuration (type + LVMVolumeGroups).
+	Storage       ReplicatedStorageClassStorage `json:"storage,omitempty"`
+	ReclaimPolicy string                        `json:"reclaimPolicy"`
+	Replication   string                        `json:"replication,omitempty"`
+	VolumeAccess  string                        `json:"volumeAccess,omitempty"`
+	Topology      string                        `json:"topology"`
+	Zones         []string                      `json:"zones,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type ReplicatedStorageClassStorage struct {
+	Type            string                     `json:"type,omitempty"`
+	LVMVolumeGroups []ReplicatedStoragePoolLVG `json:"lvmVolumeGroups,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
 type ReplicatedStorageClassStatus struct {
-	// Phase is the current state: Failed, Created
-	Phase string `json:"phase,omitempty"`
-	// Reason provides additional information about the current state
-	Reason string `json:"reason,omitempty"`
+	Phase           string `json:"phase,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+	Message         string `json:"message,omitempty"`
+	StoragePoolName string `json:"storagePoolName,omitempty"`
+}
+
+// GetStoragePoolName returns the RSP name from status.storagePoolName.
+func (rsc *ReplicatedStorageClass) GetStoragePoolName() string {
+	return rsc.Status.StoragePoolName
 }
 
 // DeepCopyInto copies the receiver into out
@@ -124,6 +132,7 @@ func (in *ReplicatedStorageClassList) DeepCopyObject() runtime.Object {
 // DeepCopyInto copies the receiver into out
 func (in *ReplicatedStorageClassSpec) DeepCopyInto(out *ReplicatedStorageClassSpec) {
 	*out = *in
+	in.Storage.DeepCopyInto(&out.Storage)
 	if in.Zones != nil {
 		in, out := &in.Zones, &out.Zones
 		*out = make([]string, len(*in))
@@ -142,6 +151,26 @@ func (in *ReplicatedStorageClassSpec) DeepCopy() *ReplicatedStorageClassSpec {
 }
 
 // DeepCopyInto copies the receiver into out
+func (in *ReplicatedStorageClassStorage) DeepCopyInto(out *ReplicatedStorageClassStorage) {
+	*out = *in
+	if in.LVMVolumeGroups != nil {
+		in, out := &in.LVMVolumeGroups, &out.LVMVolumeGroups
+		*out = make([]ReplicatedStoragePoolLVG, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy creates a deep copy of ReplicatedStorageClassStorage
+func (in *ReplicatedStorageClassStorage) DeepCopy() *ReplicatedStorageClassStorage {
+	if in == nil {
+		return nil
+	}
+	out := new(ReplicatedStorageClassStorage)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies the receiver into out
 func (in *ReplicatedStorageClassStatus) DeepCopyInto(out *ReplicatedStorageClassStatus) {
 	*out = *in
 }
@@ -155,4 +184,3 @@ func (in *ReplicatedStorageClassStatus) DeepCopy() *ReplicatedStorageClassStatus
 	in.DeepCopyInto(out)
 	return out
 }
-

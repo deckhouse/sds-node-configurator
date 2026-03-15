@@ -86,4 +86,94 @@ var _ = Describe("BlockDeviceFilterClient", func() {
 			Expect(requirements).Should(HaveLen(1))
 		})
 	})
+
+	When("NotIn with nil values", func() {
+		JustBeforeEach(func() {
+			Expect(fakeClient.Create(ctx, &v1alpha1.BlockDeviceFilter{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "filter-with-nil-values",
+				},
+				Spec: v1alpha1.BlockDeviceFilterSpec{
+					BlockDeviceSelector: &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      v1alpha1.BlockDeviceWWNLabelKey,
+								Operator: metav1.LabelSelectorOpNotIn,
+							},
+						},
+					},
+				},
+			})).ShouldNot(HaveOccurred())
+		})
+
+		It("does not return error and skips the invalid expression", func() {
+			selector, err := filterClient.GetAPIBlockDeviceFilters(ctx, controllerName)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			requirements, _ := selector.Requirements()
+			Expect(requirements).Should(BeEmpty())
+		})
+	})
+
+	When("In with empty values", func() {
+		JustBeforeEach(func() {
+			Expect(fakeClient.Create(ctx, &v1alpha1.BlockDeviceFilter{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "filter-with-empty-values",
+				},
+				Spec: v1alpha1.BlockDeviceFilterSpec{
+					BlockDeviceSelector: &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      v1alpha1.BlockDeviceWWNLabelKey,
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{},
+							},
+						},
+					},
+				},
+			})).ShouldNot(HaveOccurred())
+		})
+
+		It("does not return error and skips the invalid expression", func() {
+			selector, err := filterClient.GetAPIBlockDeviceFilters(ctx, controllerName)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			requirements, _ := selector.Requirements()
+			Expect(requirements).Should(BeEmpty())
+		})
+	})
+
+	When("mix of valid and invalid expressions", func() {
+		JustBeforeEach(func() {
+			Expect(fakeClient.Create(ctx, &v1alpha1.BlockDeviceFilter{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "filter-mixed",
+				},
+				Spec: v1alpha1.BlockDeviceFilterSpec{
+					BlockDeviceSelector: &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      v1alpha1.BlockDeviceWWNLabelKey,
+								Operator: metav1.LabelSelectorOpNotIn,
+								Values:   []string{"validWWN"},
+							},
+							{
+								Key:      v1alpha1.BlockDeviceWWNLabelKey,
+								Operator: metav1.LabelSelectorOpNotIn,
+							},
+						},
+					},
+				},
+			})).ShouldNot(HaveOccurred())
+		})
+
+		It("keeps valid expressions and skips invalid ones", func() {
+			selector, err := filterClient.GetAPIBlockDeviceFilters(ctx, controllerName)
+			Expect(err).ShouldNot(HaveOccurred())
+
+			requirements, _ := selector.Requirements()
+			Expect(requirements).Should(HaveLen(1))
+		})
+	})
 })
