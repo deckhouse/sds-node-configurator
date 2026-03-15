@@ -526,9 +526,10 @@ func extractRequestedSize(
 				log.Error(err, fmt.Sprintf("[extractRequestedSize] unable to get RSC for SC %s", sc.Name))
 				continue
 			}
-			rsp, err := getReplicatedStoragePoolForExtract(ctx, cl, rsc.Spec.StoragePool)
+			rspName := rsc.GetStoragePoolName()
+			rsp, err := getReplicatedStoragePoolForExtract(ctx, cl, rspName)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[extractRequestedSize] unable to get RSP %s", rsc.Spec.StoragePool))
+				log.Error(err, fmt.Sprintf("[extractRequestedSize] unable to get RSP %s", rspName))
 				continue
 			}
 			switch rsp.Spec.Type {

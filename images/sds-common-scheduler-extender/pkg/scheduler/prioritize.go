@@ -270,9 +270,10 @@ func scoreNodes(
 						continue
 					}
 
-					rsp, err := getReplicatedStoragePool(ctx, cl, rsc.Spec.StoragePool)
+					rspName := rsc.GetStoragePoolName()
+					rsp, err := getReplicatedStoragePool(ctx, cl, rspName)
 					if err != nil {
-						log.Error(err, fmt.Sprintf("[scoreNodes] unable to get RSP %s", rsc.Spec.StoragePool))
+						log.Error(err, fmt.Sprintf("[scoreNodes] unable to get RSP %s", rspName))
 						pvcCount++
 						continue
 					}

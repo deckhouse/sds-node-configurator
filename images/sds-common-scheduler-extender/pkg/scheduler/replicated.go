@@ -236,7 +236,8 @@ func filterNodeForReplicatedPVCs(
 		}
 
 		// Get RSP
-		rsp, err := getReplicatedStoragePool(ctx, cl, rsc.Spec.StoragePool)
+		rspName := rsc.GetStoragePoolName()
+		rsp, err := getReplicatedStoragePool(ctx, cl, rspName)
 		if err != nil {
 			failReasons = append(failReasons, fmt.Sprintf("PVC %s: unable to get RSP: %v", pvc.Name, err))
 			continue
