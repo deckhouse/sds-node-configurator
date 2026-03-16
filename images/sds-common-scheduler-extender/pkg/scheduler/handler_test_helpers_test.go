@@ -57,16 +57,16 @@ func readyLVG(name string, vgSize, vgFree int64) *snc.LVMVolumeGroup {
 	}
 }
 
-func readyLVGWithThinPool(name string, vgSize int64, tpName string, tpAllocated, tpAvailable int64) *snc.LVMVolumeGroup {
+func readyLVGWithThinPool(name string, tpAllocated, tpAvailable int64) *snc.LVMVolumeGroup {
 	return &snc.LVMVolumeGroup{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Status: snc.LVMVolumeGroupStatus{
 			Phase:  snc.PhaseReady,
-			VGSize: *resource.NewQuantity(vgSize, resource.BinarySI),
+			VGSize: *resource.NewQuantity(hundredGiB, resource.BinarySI),
 			VGFree: *resource.NewQuantity(0, resource.BinarySI),
 			ThinPools: []snc.LVMVolumeGroupThinPoolStatus{
 				{
-					Name:           tpName,
+					Name:           "tp0",
 					AllocatedSize:  *resource.NewQuantity(tpAllocated, resource.BinarySI),
 					AvailableSpace: *resource.NewQuantity(tpAvailable, resource.BinarySI),
 				},
@@ -106,11 +106,11 @@ func thickLLV(name, lvgName, size, phase string) *snc.LVMLogicalVolume {
 	return llv
 }
 
-func thinLLV(name, lvgName, thinPoolName, size, phase string) *snc.LVMLogicalVolume {
+func thinLLV(name, thinPoolName, size, phase string) *snc.LVMLogicalVolume {
 	llv := &snc.LVMLogicalVolume{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: snc.LVMLogicalVolumeSpec{
-			LVMVolumeGroupName: lvgName,
+			LVMVolumeGroupName: "lvg1",
 			Size:               size,
 			Type:               "Thin",
 			Thin:               &snc.LVMLogicalVolumeThinSpec{PoolName: thinPoolName},

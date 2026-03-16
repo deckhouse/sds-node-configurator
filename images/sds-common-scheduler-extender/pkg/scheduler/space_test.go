@@ -56,10 +56,10 @@ func TestSumLLVSpace_ThickOnly(t *testing.T) {
 func TestSumLLVSpace_ThinOnly(t *testing.T) {
 	ctx := context.Background()
 	cl := newFakeClient(
-		thinLLV("llv-thin-1", "lvg1", "tp0", "8Gi", "Created"),
-		thinLLV("llv-thin-2", "lvg1", "tp0", "4Gi", "Pending"),
-		thinLLV("llv-thin-3", "lvg1", "tp1", "2Gi", "Created"), // different thin pool
-		thickLLV("llv-thick", "lvg1", "16Gi", "Created"),       // thick, not thin
+		thinLLV("llv-thin-1", "tp0", "8Gi", "Created"),
+		thinLLV("llv-thin-2", "tp0", "4Gi", "Pending"),
+		thinLLV("llv-thin-3", "tp1", "2Gi", "Created"),   // different thin pool
+		thickLLV("llv-thick", "lvg1", "16Gi", "Created"), // thick, not thin
 	)
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
 
@@ -284,8 +284,8 @@ func TestGetAvailableSpace_ThinPool(t *testing.T) {
 	// totalCapacity = 10 + 40 = 50Gi
 	// → llvBased = 50 - 10 - 0 = 40Gi, baseFree = min(40, 40) = 40Gi
 	cl := newFakeClient(
-		readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 10*oneGiB, 40*oneGiB),
-		thinLLV("llv-thin", "lvg1", "tp0", "10Gi", "Created"),
+		readyLVGWithThinPool("lvg1", 10*oneGiB, 40*oneGiB),
+		thinLLV("llv-thin", "tp0", "10Gi", "Created"),
 	)
 	c := newTestCache()
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
@@ -302,7 +302,7 @@ func TestGetAvailableSpace_ThinPool_Empty(t *testing.T) {
 	// totalCapacity = 0 + 400 = 400Gi
 	// → llvBased = 400 - 0 - 0 = 400Gi, baseFree = min(400, 400) = 400Gi
 	cl := newFakeClient(
-		readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 0, 400*oneGiB),
+		readyLVGWithThinPool("lvg1", 0, 400*oneGiB),
 	)
 	c := newTestCache()
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
@@ -320,9 +320,9 @@ func TestGetAvailableSpace_ThinPool_InFlightLLV(t *testing.T) {
 	// Created LLV: 10Gi, Pending LLV: 8Gi
 	// → llvBased = 50 - 18 - 0 = 32Gi, baseFree = min(32, 40) = 32Gi
 	cl := newFakeClient(
-		readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 10*oneGiB, 40*oneGiB),
-		thinLLV("llv-created", "lvg1", "tp0", "10Gi", "Created"),
-		thinLLV("llv-pending", "lvg1", "tp0", "8Gi", "Pending"),
+		readyLVGWithThinPool("lvg1", 10*oneGiB, 40*oneGiB),
+		thinLLV("llv-created", "tp0", "10Gi", "Created"),
+		thinLLV("llv-pending", "tp0", "8Gi", "Pending"),
 	)
 	c := newTestCache()
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
@@ -338,7 +338,7 @@ func TestGetAvailableSpace_ThinPool_WithReservation(t *testing.T) {
 	// totalCapacity = 0 + 400 = 400Gi
 	// → llvBased = 400, baseFree = min(400, 400) = 400, available = 400 - 30 = 370Gi
 	cl := newFakeClient(
-		readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 0, 400*oneGiB),
+		readyLVGWithThinPool("lvg1", 0, 400*oneGiB),
 	)
 	c := newTestCache()
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
@@ -356,8 +356,8 @@ func TestGetAvailableSpace_ThinPool_WithUnaccounted(t *testing.T) {
 	// 1 Created LLV 10Gi, unaccounted=10Gi (manual thin LVs)
 	// → llvBased = 50 - 10 - 10 = 30Gi, baseFree = min(30, 30) = 30Gi
 	cl := newFakeClient(
-		readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 20*oneGiB, 30*oneGiB),
-		thinLLV("llv-thin", "lvg1", "tp0", "10Gi", "Created"),
+		readyLVGWithThinPool("lvg1", 20*oneGiB, 30*oneGiB),
+		thinLLV("llv-thin", "tp0", "10Gi", "Created"),
 	)
 	c := newTestCache()
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
@@ -374,10 +374,10 @@ func TestCalibratePool_ThinPool_NoManualLVs(t *testing.T) {
 	ctx := context.Background()
 	// Thin pool: AllocatedSize=10Gi, AvailableSpace=40Gi → totalCapacity=50Gi
 	// 1 Created LLV 10Gi → unaccounted = (50 - 10) - 40 = 0
-	lvg := readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 10*oneGiB, 40*oneGiB)
+	lvg := readyLVGWithThinPool("lvg1", 10*oneGiB, 40*oneGiB)
 	cl := newFakeClient(
 		lvg,
-		thinLLV("llv-thin", "lvg1", "tp0", "10Gi", "Created"),
+		thinLLV("llv-thin", "tp0", "10Gi", "Created"),
 	)
 	c := newTestCache()
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
@@ -392,10 +392,10 @@ func TestCalibratePool_ThinPool_ManualLVsExist(t *testing.T) {
 	// Thin pool: AllocatedSize=20Gi, AvailableSpace=30Gi → totalCapacity=50Gi
 	// 1 Created LLV 10Gi → expected free = 50 - 10 = 40, actual = 30
 	// unaccounted = 40 - 30 = 10Gi (manual thin LVs consuming 10Gi)
-	lvg := readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 20*oneGiB, 30*oneGiB)
+	lvg := readyLVGWithThinPool("lvg1", 20*oneGiB, 30*oneGiB)
 	cl := newFakeClient(
 		lvg,
-		thinLLV("llv-thin", "lvg1", "tp0", "10Gi", "Created"),
+		thinLLV("llv-thin", "tp0", "10Gi", "Created"),
 	)
 	c := newTestCache()
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
@@ -410,11 +410,11 @@ func TestCalibratePool_ThinPool_InFlightIgnored(t *testing.T) {
 	// Thin pool: AllocatedSize=10Gi, AvailableSpace=40Gi → totalCapacity=50Gi
 	// Created LLV: 10Gi, Pending LLV: 8Gi (not reflected in AllocatedSize yet)
 	// Calibration uses only Created: unaccounted = (50 - 10) - 40 = 0
-	lvg := readyLVGWithThinPool("lvg1", hundredGiB, "tp0", 10*oneGiB, 40*oneGiB)
+	lvg := readyLVGWithThinPool("lvg1", 10*oneGiB, 40*oneGiB)
 	cl := newFakeClient(
 		lvg,
-		thinLLV("llv-created", "lvg1", "tp0", "10Gi", "Created"),
-		thinLLV("llv-pending", "lvg1", "tp0", "8Gi", "Pending"),
+		thinLLV("llv-created", "tp0", "10Gi", "Created"),
+		thinLLV("llv-pending", "tp0", "8Gi", "Pending"),
 	)
 	c := newTestCache()
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
