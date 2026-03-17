@@ -17,16 +17,22 @@ limitations under the License.
 package scheduler
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 )
 
@@ -238,6 +244,152 @@ func TestShouldProcessPod(t *testing.T) {
 				t.Errorf("Expected shouldProcess to be %v, but got %v", tc.expectedShouldProcess, shouldProcess)
 			}
 		})
+	}
+}
+
+func TestTwoPVCsSameStorageClass_Filter(t *testing.T) {
+	scName := "shared-sc"
+	provisioner := consts.SdsLocalVolumeProvisioner
+
+	sc := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: scName},
+		Provisioner: provisioner,
+		Parameters: map[string]string{
+			consts.LvmTypeParamKey:         consts.Thick,
+			consts.LVMVolumeGroupsParamKey: `[{"name":"lvg1"}]`,
+		},
+	}
+	pvc1 := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc1", Namespace: "default"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			},
+		},
+	}
+	pvc2 := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc2", Namespace: "default"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			},
+		},
+	}
+
+	hundredGiB := int64(100 * 1024 * 1024 * 1024)
+	cl := newFakeClient(sc, pvc1, pvc2, readyLVG("lvg1", hundredGiB, hundredGiB))
+	c := newTestCache()
+	s := newTestScheduler(cl, c)
+	s.targetProvisioners = []string{provisioner}
+
+	nodeNames := []string{"node1"}
+	args := ExtenderArgs{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				Volumes: []corev1.Volume{
+					{Name: "v1", VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc1"},
+					}},
+					{Name: "v2", VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc2"},
+					}},
+				},
+			},
+		},
+		NodeNames: &nodeNames,
+	}
+
+	body, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/filter", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	s.filter(w, req)
+
+	if w.Code == http.StatusInternalServerError {
+		t.Fatalf("filter returned 500 for two PVCs sharing the same StorageClass; body: %s", w.Body.String())
+	}
+}
+
+func TestTwoPVCsSameStorageClass_Prioritize(t *testing.T) {
+	scName := "shared-sc"
+	provisioner := consts.SdsLocalVolumeProvisioner
+
+	sc := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: scName},
+		Provisioner: provisioner,
+		Parameters: map[string]string{
+			consts.LvmTypeParamKey:         consts.Thick,
+			consts.LVMVolumeGroupsParamKey: `[{"name":"lvg1"}]`,
+		},
+	}
+	pvc1 := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc1", Namespace: "default"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			},
+		},
+	}
+	pvc2 := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc2", Namespace: "default"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			},
+		},
+	}
+
+	hundredGiB := int64(100 * 1024 * 1024 * 1024)
+	cl := newFakeClient(sc, pvc1, pvc2, readyLVG("lvg1", hundredGiB, hundredGiB))
+	c := newTestCache()
+	s := newTestScheduler(cl, c)
+	s.targetProvisioners = []string{provisioner}
+
+	nodeNames := []string{"node1"}
+	args := ExtenderArgs{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				Volumes: []corev1.Volume{
+					{Name: "v1", VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc1"},
+					}},
+					{Name: "v2", VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc2"},
+					}},
+				},
+			},
+		},
+		NodeNames: &nodeNames,
+	}
+
+	body, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/prioritize", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	s.prioritize(w, req)
+
+	if w.Code == http.StatusInternalServerError {
+		t.Fatalf("prioritize returned 500 for two PVCs sharing the same StorageClass; body: %s", w.Body.String())
 	}
 }
 

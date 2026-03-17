@@ -450,30 +450,26 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 	return managedPVCs, nil
 }
 
-// Get all StorageClasses used by the PVCs
+// getStorageClassesUsedByPVCs fetches only the StorageClasses referenced by PVCs.
 func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map[string]*corev1.PersistentVolumeClaim) (map[string]*storagev1.StorageClass, error) {
-	scs := &storagev1.StorageClassList{}
-	err := cl.List(ctx, scs)
-	if err != nil {
-		return nil, err
-	}
-
-	scMap := make(map[string]storagev1.StorageClass, len(scs.Items))
-	for _, sc := range scs.Items {
-		scMap[sc.Name] = sc
-	}
-
-	result := make(map[string]*storagev1.StorageClass, len(pvcs))
+	uniqueSCNames := make(map[string]struct{}, len(pvcs))
 	for _, pvc := range pvcs {
 		if pvc.Spec.StorageClassName == nil {
-			err = fmt.Errorf("no StorageClass specified for PVC %s", pvc.Name)
-			return nil, err
+			return nil, fmt.Errorf("no StorageClass specified for PVC %s", pvc.Name)
 		}
+		uniqueSCNames[*pvc.Spec.StorageClassName] = struct{}{}
+	}
 
-		scName := *pvc.Spec.StorageClassName
-		if sc, match := scMap[scName]; match {
-			result[sc.Name] = &sc
+	result := make(map[string]*storagev1.StorageClass, len(uniqueSCNames))
+	for scName := range uniqueSCNames {
+		sc := &storagev1.StorageClass{}
+		if err := cl.Get(ctx, client.ObjectKey{Name: scName}, sc); err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				continue
+			}
+			return nil, fmt.Errorf("unable to get StorageClass %s: %w", scName, err)
 		}
+		result[sc.Name] = sc
 	}
 
 	return result, nil
@@ -523,14 +519,12 @@ func extractRequestedSize(
 		if isReplicated {
 			rsc, err := getReplicatedStorageClassForExtract(ctx, cl, sc.Name)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[extractRequestedSize] unable to get RSC for SC %s", sc.Name))
-				continue
+				return nil, fmt.Errorf("[extractRequestedSize] unable to get RSC for SC %s: %w", sc.Name, err)
 			}
 			rspName := rsc.GetStoragePoolName()
 			rsp, err := getReplicatedStoragePoolForExtract(ctx, cl, rspName)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[extractRequestedSize] unable to get RSP %s", rspName))
-				continue
+				return nil, fmt.Errorf("[extractRequestedSize] unable to get RSP %s: %w", rspName, err)
 			}
 			switch rsp.Spec.Type {
 			case consts.RSPTypeLVM:
@@ -545,8 +539,7 @@ func extractRequestedSize(
 		}
 
 		if deviceType == "" {
-			log.Debug(fmt.Sprintf("[extractRequestedSize] unable to determine device type for PVC %s/%s", pvc.Namespace, pvc.Name))
-			continue
+			return nil, fmt.Errorf("[extractRequestedSize] unable to determine device type for PVC %s/%s", pvc.Namespace, pvc.Name)
 		}
 
 		switch pvc.Status.Phase {

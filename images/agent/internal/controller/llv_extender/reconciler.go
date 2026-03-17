@@ -173,12 +173,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 
 		lv := r.sdsCache.FindLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 		if lv == nil {
-			err = fmt.Errorf("lv %s not found", llv.Spec.ActualLVNameOnTheNode)
-			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to find LV %s of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name))
-			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, err.Error())
-			if err != nil {
-				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
-			}
+			r.log.Warning(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] LV %s of the LVMLogicalVolume %s not found in cache, will retry", llv.Spec.ActualLVNameOnTheNode, llv.Name))
 			shouldRetry = true
 			continue
 		}
@@ -228,11 +223,8 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 		lvData, getLVCmd, _, getLVErr := r.commands.GetLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 		r.log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] ran cmd: %s", getLVCmd))
 		if getLVErr != nil {
-			r.log.Error(getLVErr, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to get LV %s info from LVM after extension", llv.Spec.ActualLVNameOnTheNode))
+			r.log.Error(getLVErr, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to get LV %s info from LVM after extension, will retry", llv.Spec.ActualLVNameOnTheNode))
 			shouldRetry = true
-			if err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, getLVErr.Error()); err != nil {
-				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
-			}
 			continue
 		}
 		lv = &cache.LVData{Data: lvData, Exist: true}

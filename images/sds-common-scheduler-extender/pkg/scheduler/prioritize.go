@@ -90,10 +90,17 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	if len(scUsedByPVCs) != len(managedPVCs) {
-		servingLog.Error(errors.New("number of StorageClasses does not match the number of PVCs"), "unable to get StorageClasses from the PVC")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
+	for pvcName, pvc := range managedPVCs {
+		if pvc.Spec.StorageClassName == nil {
+			servingLog.Error(fmt.Errorf("PVC %s has no StorageClassName", pvcName), "unable to get StorageClass from PVC")
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		if _, found := scUsedByPVCs[*pvc.Spec.StorageClassName]; !found {
+			servingLog.Error(fmt.Errorf("StorageClass %s not found for PVC %s", *pvc.Spec.StorageClassName, pvcName), "unable to get StorageClass from PVC")
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	servingLog.Debug("starts to extract PVC requested sizes")
