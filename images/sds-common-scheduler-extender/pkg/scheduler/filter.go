@@ -77,7 +77,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	managedPVCs, err := getManagedPVCsFromPod(ctx, s.client, servingLog, inputData.Pod, s.targetProvisioners)
 	if err != nil {
 		servingLog.Error(err, "unable to get managed PVCs from the Pod")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to get managed PVCs: %s", err))
 		return
 	}
 	if len(managedPVCs) == 0 {
@@ -100,18 +100,18 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	scUsedByPVCs, err := getStorageClassesUsedByPVCs(ctx, s.client, managedPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to get StorageClasses from the PVC")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to get StorageClasses: %s", err))
 		return
 	}
 	for pvcName, pvc := range managedPVCs {
 		if pvc.Spec.StorageClassName == nil {
 			servingLog.Error(fmt.Errorf("PVC %s has no StorageClassName", pvcName), "unable to get StorageClass from PVC")
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("PVC %s has no StorageClassName", pvcName))
 			return
 		}
 		if _, found := scUsedByPVCs[*pvc.Spec.StorageClassName]; !found {
 			servingLog.Error(fmt.Errorf("StorageClass %s not found for PVC %s", *pvc.Spec.StorageClassName, pvcName), "unable to get StorageClass from PVC")
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("StorageClass %s not found for PVC %s", *pvc.Spec.StorageClassName, pvcName))
 			return
 		}
 	}
@@ -120,7 +120,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	pvcRequests, err := extractRequestedSize(ctx, s.client, servingLog, managedPVCs, scUsedByPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to extract request size")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to extract request size: %s", err))
 		return
 	}
 	if len(pvcRequests) == 0 {
@@ -139,7 +139,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		nodes, err = getNodes(ctx, s.client, nodeNames)
 		if err != nil {
 			servingLog.Error(err, "unable to get nodes")
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to get nodes: %s", err))
 			return
 		}
 	}
@@ -148,7 +148,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	filteredNodes, err := filterNodes(ctx, servingLog, s.client, s.cache, &nodeNames, nodes, managedPVCs, scUsedByPVCs, pvcRequests)
 	if err != nil {
 		servingLog.Error(err, "unable to filter the nodes")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to filter nodes: %s", err))
 		return
 	}
 	servingLog.Debug("successfully filtered the nodes from the request")
@@ -181,6 +181,34 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	servingLog.Debug("ends the serving the request")
+}
+
+// writeFailAllNodesResponse returns HTTP 200 with an empty node list and all nodes in FailedNodes.
+// Unlike http.Error (which returns 500 and gets silently ignored due to failurePolicy: Ignore),
+// this approach makes the scheduler see "no suitable nodes" → Pod stays Pending.
+func writeFailAllNodesResponse(w http.ResponseWriter, log logger.Logger, nodeNames []string, reason string) {
+	failedNodes := make(FailedNodesMap, len(nodeNames))
+	for _, name := range nodeNames {
+		failedNodes[name] = reason
+	}
+	emptyList := []string{}
+	result := &ExtenderFilterResult{
+		NodeNames:   &emptyList,
+		FailedNodes: failedNodes,
+	}
+
+	responseJSON, err := json.Marshal(result)
+	if err != nil {
+		log.Error(err, "unable to marshal fail-all response, falling back to 500")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	log.Debug(fmt.Sprintf("fail-all response: %s", string(responseJSON)))
+
+	w.Header().Set("content-type", "application/json")
+	if _, err := w.Write(responseJSON); err != nil {
+		log.Error(err, "unable to write fail-all response")
+	}
 }
 
 func writeNodeNamesResponse(w http.ResponseWriter, log logger.Logger, nodeNames []string) error {

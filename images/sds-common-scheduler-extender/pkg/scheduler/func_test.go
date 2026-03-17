@@ -24,6 +24,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -391,6 +393,123 @@ func TestTwoPVCsSameStorageClass_Prioritize(t *testing.T) {
 	if w.Code == http.StatusInternalServerError {
 		t.Fatalf("prioritize returned 500 for two PVCs sharing the same StorageClass; body: %s", w.Body.String())
 	}
+}
+
+func TestFilter_MissingSC_RejectsAllNodes(t *testing.T) {
+	scName := "non-existent-sc"
+	provisioner := consts.SdsLocalVolumeProvisioner
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pvc1",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"volume.beta.kubernetes.io/storage-provisioner": provisioner,
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+		},
+	}
+
+	cl := newFakeClient(pvc)
+	c := newTestCache()
+	s := newTestScheduler(cl, c)
+	s.targetProvisioners = []string{provisioner}
+
+	nodeNames := []string{"node1", "node2"}
+	args := ExtenderArgs{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				Volumes: []corev1.Volume{
+					{Name: "v1", VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc1"},
+					}},
+				},
+			},
+		},
+		NodeNames: &nodeNames,
+	}
+
+	body, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/filter", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	s.filter(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "filter must return 200 so the scheduler does not ignore the response")
+
+	var result ExtenderFilterResult
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+	assert.Empty(t, *result.NodeNames, "filtered node list must be empty")
+	assert.Len(t, result.FailedNodes, 2, "all input nodes must be in FailedNodes")
+	for _, nodeName := range nodeNames {
+		reason, ok := result.FailedNodes[nodeName]
+		assert.True(t, ok, "node %s must be in FailedNodes", nodeName)
+		assert.Contains(t, reason, "StorageClass", "reason must mention StorageClass")
+	}
+}
+
+func TestFilter_FailedExtractSize_RejectsAllNodes(t *testing.T) {
+	scName := "bad-sc"
+	provisioner := consts.SdsLocalVolumeProvisioner
+
+	sc := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: scName},
+		Provisioner: provisioner,
+		Parameters:  map[string]string{},
+	}
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc1", Namespace: "default"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			},
+		},
+	}
+
+	cl := newFakeClient(sc, pvc)
+	c := newTestCache()
+	s := newTestScheduler(cl, c)
+	s.targetProvisioners = []string{provisioner}
+
+	nodeNames := []string{"node1"}
+	args := ExtenderArgs{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				Volumes: []corev1.Volume{
+					{Name: "v1", VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc1"},
+					}},
+				},
+			},
+		},
+		NodeNames: &nodeNames,
+	}
+
+	body, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/filter", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	s.filter(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "filter must return 200 so the scheduler does not ignore the response")
+
+	var result ExtenderFilterResult
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+	assert.Empty(t, *result.NodeNames, "filtered node list must be empty")
+	assert.NotEmpty(t, result.FailedNodes, "FailedNodes must contain a reason")
 }
 
 func stringPtr(s string) *string {
