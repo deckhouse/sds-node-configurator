@@ -280,10 +280,9 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 						d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, statusTp.Name))
 						messageBldr.WriteString(fmt.Sprintf("Unable to find ThinPool %s. ", statusTp.Name))
 						lvg.Status.ThinPools[i].Ready = false
-					} else if !utils.AreSizesEqualWithinDelta(candidate.VGSize, statusTp.ActualSize, internal.ResizeDelta) &&
-						candidateTp.ActualSize.Value()+internal.ResizeDelta.Value() < statusTp.ActualSize.Value() {
-						// that means thin-pool is not 100%VG space
-						// use candidate VGSize as lvg.Status.VGSize might not be updated yet
+					} else if candidate.VGSize.Value() != statusTp.ActualSize.Value() &&
+						candidateTp.ActualSize.Value() < statusTp.ActualSize.Value() {
+						// thin-pool is not 100%VG space and actual size on the node is less than status
 						d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s ThinPool %s size %s is less than status one %s", lvg.Name, statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String()))
 						messageBldr.WriteString(fmt.Sprintf("ThinPool %s on the node has size %s which is less than status one %s. ", statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String()))
 					}
@@ -391,6 +390,7 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(bds map[string]v1alpha1.BlockDe
 			VGSize:                *resource.NewQuantity(vg.VGSize.Value(), resource.BinarySI),
 			VGFree:                *resource.NewQuantity(vg.VGFree.Value(), resource.BinarySI),
 			VGUUID:                vg.VGUUID,
+			ExtentSize:            *resource.NewQuantity(vg.VGExtentSize.Value(), resource.BinarySI),
 			Nodes:                 d.configureCandidateNodeDevices(sortedPVs, sortedBDs, vg, d.cfg.NodeName),
 		}
 
@@ -429,6 +429,7 @@ func (d *Discoverer) CreateLVMVolumeGroupByCandidate(
 			VGSize:        candidate.VGSize,
 			VGUuid:        candidate.VGUUID,
 			VGFree:        candidate.VGFree,
+			ExtentSize:    candidate.ExtentSize,
 		},
 	}
 
@@ -501,6 +502,7 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	lvg.Status.VGSize = candidate.VGSize
 	lvg.Status.VGFree = candidate.VGFree
 	lvg.Status.VGUuid = candidate.VGUUID
+	lvg.Status.ExtentSize = candidate.ExtentSize
 
 	start := time.Now()
 	err = d.cl.Status().Update(ctx, lvg)

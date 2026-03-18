@@ -59,6 +59,7 @@ type LVMVolumeGroupStatus struct {
 	ThinPoolReady        string                         `json:"thinPoolReady"`
 	ConfigurationApplied string                         `json:"configurationApplied"`
 	VGFree               resource.Quantity              `json:"vgFree"`
+	ExtentSize           resource.Quantity              `json:"extentSize"`
 }
 
 // +k8s:deepcopy-gen=true
