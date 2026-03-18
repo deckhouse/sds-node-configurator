@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -87,14 +87,16 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 	var activationErrors []error
 	for _, vg := range managedVGs {
 		shared := vg.VGShared != ""
-		cmd, err := commands.VGActivate(vg.VGName, shared)
+		cmd, err := commands.VGActivate(ctx, vg.VGName, shared)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ActivateVGs] failed to activate VG %s (shared=%t, cmd: %s)", vg.VGName, shared, cmd))
 			metrics.UtilsCommandsErrorsCount(activationControllerName, "vgchange").Inc()
+			metrics.LVMActivationTotal(vg.VGName, "error").Inc()
 			activationErrors = append(activationErrors, fmt.Errorf("VG %s: %w", vg.VGName, err))
 			continue
 		}
 		metrics.UtilsCommandsExecutionCount(activationControllerName, "vgchange").Inc()
+		metrics.LVMActivationTotal(vg.VGName, "success").Inc()
 		log.Info(fmt.Sprintf("[ActivateVGs] activated VG %s (shared=%t)", vg.VGName, shared))
 	}
 
@@ -105,7 +107,7 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 }
 
 func EnsureVGActivation(
-	_ context.Context,
+	ctx context.Context,
 	log logger.Logger,
 	commands Commands,
 	metrics *monitoring.Metrics,
@@ -144,17 +146,21 @@ func EnsureVGActivation(
 	}
 
 	log.Info(fmt.Sprintf("[EnsureActivation] activating %d VGs with inactive LVs", len(vgsToActivate)))
+	activated := false
 	for _, vg := range vgsToActivate {
 		shared := vg.VGShared != ""
-		cmd, err := commands.VGActivate(vg.VGName, shared)
+		cmd, err := commands.VGActivate(ctx, vg.VGName, shared)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[EnsureActivation] failed to activate VG %s (cmd: %s)", vg.VGName, cmd))
 			metrics.UtilsCommandsErrorsCount(activationControllerName, "vgchange").Inc()
+			metrics.LVMActivationTotal(vg.VGName, "error").Inc()
 			continue
 		}
 		metrics.UtilsCommandsExecutionCount(activationControllerName, "vgchange").Inc()
+		metrics.LVMActivationTotal(vg.VGName, "success").Inc()
 		log.Info(fmt.Sprintf("[EnsureActivation] activated VG %s (shared=%t)", vg.VGName, shared))
+		activated = true
 	}
 
-	return true
+	return activated
 }

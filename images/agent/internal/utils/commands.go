@@ -63,8 +63,8 @@ type Commands interface {
 	VGChangeAddTag(vGName, tag string) (string, error)
 	VGChangeDelTag(vGName, tag string) (string, error)
 	LVChangeDelTag(lv internal.LVData, tag string) (string, error)
-	VGActivate(vgName string, shared bool) (string, error)
-	LVActivate(vgName, lvName string) (string, error)
+	VGActivate(ctx context.Context, vgName string, shared bool) (string, error)
+	LVActivate(ctx context.Context, vgName, lvName string) (string, error)
 	VGScan(ctx context.Context) (string, error)
 	PVScan(ctx context.Context) (string, error)
 	UnmarshalDevices(out []byte) ([]internal.Device, error)
@@ -541,14 +541,14 @@ func (commands) LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
 	return cmd.String(), nil
 }
 
-func (commands) VGActivate(vgName string, shared bool) (string, error) {
+func (commands) VGActivate(ctx context.Context, vgName string, shared bool) (string, error) {
 	activateFlag := "-ay"
 	if shared {
 		activateFlag = "-asy"
 	}
 	args := []string{"vgchange", activateFlag, vgName}
 	extendedArgs := lvmStaticExtendedArgs(args)
-	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -559,11 +559,11 @@ func (commands) VGActivate(vgName string, shared bool) (string, error) {
 	return cmd.String(), nil
 }
 
-func (commands) LVActivate(vgName, lvName string) (string, error) {
+func (commands) LVActivate(ctx context.Context, vgName, lvName string) (string, error) {
 	lvPath := filepath.Join("/dev", vgName, lvName)
 	args := []string{"lvchange", "-ay", lvPath}
 	extendedArgs := lvmStaticExtendedArgs(args)
-	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

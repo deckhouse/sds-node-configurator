@@ -344,18 +344,18 @@ func (mr *MockCommandsMockRecorder) GetVG(vgName any) *gomock.Call {
 }
 
 // LVActivate mocks base method.
-func (m *MockCommands) LVActivate(vgName, lvName string) (string, error) {
+func (m *MockCommands) LVActivate(ctx context.Context, vgName, lvName string) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "LVActivate", vgName, lvName)
+	ret := m.ctrl.Call(m, "LVActivate", ctx, vgName, lvName)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // LVActivate indicates an expected call of LVActivate.
-func (mr *MockCommandsMockRecorder) LVActivate(vgName, lvName any) *gomock.Call {
+func (mr *MockCommandsMockRecorder) LVActivate(ctx, vgName, lvName any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVActivate", reflect.TypeOf((*MockCommands)(nil).LVActivate), vgName, lvName)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVActivate", reflect.TypeOf((*MockCommands)(nil).LVActivate), ctx, vgName, lvName)
 }
 
 // LVChangeDelTag mocks base method.
@@ -478,18 +478,18 @@ func (mr *MockCommandsMockRecorder) UnmarshalDevices(out any) *gomock.Call {
 }
 
 // VGActivate mocks base method.
-func (m *MockCommands) VGActivate(vgName string, shared bool) (string, error) {
+func (m *MockCommands) VGActivate(ctx context.Context, vgName string, shared bool) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "VGActivate", vgName, shared)
+	ret := m.ctrl.Call(m, "VGActivate", ctx, vgName, shared)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // VGActivate indicates an expected call of VGActivate.
-func (mr *MockCommandsMockRecorder) VGActivate(vgName, shared any) *gomock.Call {
+func (mr *MockCommandsMockRecorder) VGActivate(ctx, vgName, shared any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGActivate", reflect.TypeOf((*MockCommands)(nil).VGActivate), vgName, shared)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGActivate", reflect.TypeOf((*MockCommands)(nil).VGActivate), ctx, vgName, shared)
 }
 
 // VGChangeAddTag mocks base method.
