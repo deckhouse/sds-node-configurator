@@ -8,9 +8,9 @@ E2E тесты предназначены для проверки полного
 
 ## Предварительные требования
 
-1. **Kubernetes кластер**: Доступный Kubernetes кластер с установленным модулем `sds-node-configurator`
-2. **Go 1.22+**: Для запуска тестов
-3. **SSH доступ**: К мастер-ноде кластера (для storage-e2e)
+1. **Kubernetes кластер** с модулем `sds-node-configurator`; для сценариев Common Scheduler Extender — также `sds-local-volume` и настроенный scheduler extender при необходимости
+2. **Go 1.25+** (см. `go.mod`)
+3. **SSH доступ** к мастер-ноде (для storage-e2e), при необходимости jump host
 
 ## Структура
 
@@ -23,9 +23,11 @@ e2e/
 ├── go.sum                # Зависимости
 ├── config/               # Локальные конфиги (в .gitignore)
 └── tests/
-    ├── sds_node_configurator_suite_test.go  # Инициализация Ginkgo suite
-    ├── sds_node_configurator_test.go        # Основные тесты
-    └── cluster_config.yml                   # Конфигурация тестового кластера
+    ├── e2e_suite_test.go              # TestE2E, BeforeSuite/AfterSuite
+    ├── e2e_shared_test.go             # общие хелперы
+    ├── common_scheduler_test.go       # Common Scheduler Extender
+    ├── sds_node_configurator_test.go  # BlockDevice, LVMVolumeGroup
+    └── cluster_config.yml             # Конфигурация вложенного кластера (storage-e2e)
 ```
 
 ## Быстрый старт
@@ -62,10 +64,16 @@ make test
 Или конкретный тест:
 
 ```bash
-make test-focus FOCUS="TestSdsNodeConfigurator"
+make test-focus FOCUS="TestE2E"
 ```
 
+Один вход как в CI: `go test -v -count=1 -timeout 60m ./tests/ -run '^TestE2E$'` — сначала сценарии Common Scheduler, затем sds-node-configurator (порядок файлов в пакете).
+
 ## Тестовые сценарии
+
+### Common Scheduler Extender
+
+Сценарии в `common_scheduler_test.go`: фильтрация нод по LVMVolumeGroup для local PVC, Pending при нехватке места, конкурентные PVC. См. также [E2E_USAGE.md](E2E_USAGE.md).
 
 ### BlockDevice Discovery
 
@@ -84,6 +92,12 @@ make test-focus FOCUS="TestSdsNodeConfigurator"
 
 - Создание LVMVolumeGroup на основе BlockDevice
 - Проверка статуса и capacity
+
+### Отладка scheduler-extender
+
+```bash
+kubectl logs -n d8-sds-node-configurator -l app=sds-common-scheduler-extender -f
+```
 
 ## Кластер заблокирован (cluster is already locked)
 
