@@ -237,6 +237,22 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 		return err
 	}
 
+	if activated := utils.EnsureVGActivation(ctx, log, s.commands, metrics, vgs, lvs); activated {
+		log.Info("[fillTheCache] LVs were activated, re-scanning LVs and VGs")
+		now = time.Now()
+		lvs, lvsErr, err = s.scanLVs(ctx, log, cfg)
+		log.Trace(fmt.Sprintf("[fillTheCache] LVS re-scan runs for: %s", realClock.Since(now).String()))
+		if err != nil {
+			return err
+		}
+		now = time.Now()
+		vgs, vgsErr, err = s.scanVGs(ctx, log, cfg)
+		log.Trace(fmt.Sprintf("[fillTheCache] VGS re-scan runs for: %s", realClock.Since(now).String()))
+		if err != nil {
+			return err
+		}
+	}
+
 	log.Debug("[fillTheCache] successfully scanned entities. Starts to fill the cache")
 	cache.StoreDevices(devices, devErr)
 	cache.StorePVs(pvs, pvsErr)
