@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# Required environment variables (используются имена E2E_*; storage-e2e ожидает DKP_LICENSE_KEY, REGISTRY_DOCKER_CFG — задаём из E2E_* ниже)
+# TEST_CLUSTER_CREATE_MODE: alwaysUseExisting = use existing cluster (SSH_HOST = master, lock via TEST_CLUSTER_NAMESPACE);
+#                           alwaysCreateNew   = create cluster from scratch (VMs + DKP).
+# export TEST_CLUSTER_CREATE_MODE='alwaysCreateNew'
+export TEST_CLUSTER_CREATE_MODE='alwaysUseExisting'
+export E2E_DKP_LICENSE_KEY='yWsmRcifxz4bnaMhsaCMvefxPj6wacmN'
+export E2E_REGISTRY_DOCKER_CFG='eyJhdXRocyI6eyJkZXYtcmVnaXN0cnkuZGVja2hvdXNlLmlvIjp7ImF1dGgiOiJiR2xqWlc1elpTMTBiMnRsYmpwNVYzTnRVbU5wWm5oNk5HSnVZVTFvYzJGRFRYWmxabmhRYWpaM1lXTnRUZz09In19fQ=='
+export DKP_LICENSE_KEY="${E2E_DKP_LICENSE_KEY}"
+export REGISTRY_DOCKER_CFG="${E2E_REGISTRY_DOCKER_CFG}"
+
+# export SSH_USER='n.demchuk'
+# export SSH_HOST='94.26.231.181'
+export TEST_CLUSTER_STORAGE_CLASS='linstor-r1'
+export SSH_PASSPHRASE=''
+
+# Kubeconfig: либо путь (KUBE_CONFIG_PATH), либо сам конфиг в E2E_CLUSTER_KUBECONFIG (base64). При E2E_CLUSTER_KUBECONFIG пишем в файл и задаём KUBE_CONFIG_PATH.
+if [ -n "$E2E_CLUSTER_KUBECONFIG" ]; then
+  export KUBE_CONFIG_PATH="${KUBE_CONFIG_PATH:-/tmp/e2e-kubeconfig-$$}"
+  echo "$E2E_CLUSTER_KUBECONFIG" | base64 -d > "$KUBE_CONFIG_PATH"
+else
+  [ -z "$KUBE_CONFIG_PATH" ] && export KUBE_CONFIG_PATH='~/.kube/config_e2e'
+fi
+
+# SSH: используется E2E_SSH_PRIVATE_KEY (содержимое ключа). Пишем во временный файл, storage-e2e читает SSH_PRIVATE_KEY (путь).
+# Пример для локального запуска: export E2E_SSH_PRIVATE_KEY="$(cat ~/.ssh/e2e_tests_rsa)"
+if [ -n "$E2E_SSH_PRIVATE_KEY" ]; then
+  export SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-/tmp/e2e-ssh-key-$$}"
+  printf '%s\n' "$E2E_SSH_PRIVATE_KEY" > "$SSH_PRIVATE_KEY"
+  chmod 600 "$SSH_PRIVATE_KEY"
+else
+  [ -z "$SSH_PRIVATE_KEY" ] && export SSH_PRIVATE_KEY='~/.ssh/e2e_tests_rsa'
+  [ -z "$SSH_PUBLIC_KEY" ] && export SSH_PUBLIC_KEY='~/.ssh/e2e_tests_rsa.pub'
+fi
+
+# Optional environment variables with defaults
+export YAML_CONFIG_FILENAME='cluster_config.yml'
+export SSH_VM_USER='cloud'
+export TEST_CLUSTER_NAMESPACE='e2e-demchuk'
+export TEST_CLUSTER_CLEANUP='false'  # Set to 'true' to enable cleanup after tests
+export LOG_LEVEL='debug'  # Set to 'debug' for detailed logs, 'info' for normal logs
+# Доступ к мастеру тестового кластера через базовый
+export SSH_JUMP_HOST='94.26.231.181'
+export SSH_JUMP_USER='n.demchuk'
+export SSH_HOST='10.10.10.13'
+export SSH_USER='cloud'
