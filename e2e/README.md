@@ -4,49 +4,53 @@
 
 ## Описание
 
-E2E тесты проверяют работу модуля в реальном Kubernetes кластере. Используются [storage-e2e](https://github.com/deckhouse/storage-e2e), [Ginkgo](https://onsi.github.io/ginkgo/) и [Gomega](https://onsi.github.io/gomega/).
+E2E тесты предназначены для проверки полного цикла работы модуля в реальном Kubernetes кластере. Используются [storage-e2e](https://github.com/deckhouse/storage-e2e), [Ginkgo](https://onsi.github.io/ginkgo/) и [Gomega](https://onsi.github.io/gomega/).
 
 ## Предварительные требования
 
-1. **Kubernetes кластер** с модулем `sds-node-configurator`
-2. Для scheduler-extender: `sds-local-volume` и настроенный extender при необходимости
+1. **Kubernetes кластер** с установленным модулем `sds-node-configurator`
+2. Для сценариев scheduler-extender: модуль `sds-local-volume` (local PVC) и при необходимости настроенный **Common Scheduler Extender**
 3. **kubectl** с доступом к кластеру
 4. **Go 1.25+** (см. `go.mod`)
 5. **SSH** к мастер-ноде при использовании вложенного кластера (storage-e2e)
-6. Для local-тестов: Ready **LVMVolumeGroup** и **StorageClass**
+6. Для local-volume тестов: хотя бы один Ready **LVMVolumeGroup** и **StorageClass**
 
 ## Структура
 
 ```
 e2e/
-├── Dockerfile
-├── Makefile
+├── Dockerfile              # образ для Job в кластере
+├── Makefile                # deps, go test, docker, Job
 ├── README.md
-├── E2E_USAGE.md          # CI, smoke, секреты, label e2e-smoke-test
+├── E2E_USAGE.md            # CI, smoke, секреты, label e2e-smoke-test
 ├── go.mod / go.sum
-├── config/               # локально, в .gitignore
-├── manifests/            # Job / RBAC для запуска в кластере
+├── config/                 # локально, в .gitignore
+├── manifests/              # RBAC и Job
 └── tests/
     ├── common_scheduler_suite_test.go   # TestCommonScheduler
-    ├── common_scheduler_test.go
+    ├── common_scheduler_test.go       # scheduler extender
     ├── sds_node_configurator_suite_test.go  # TestSdsNodeConfigurator, BeforeSuite/AfterSuite
-    ├── sds_node_configurator_test.go
-    └── cluster_config.yml
+    ├── sds_node_configurator_test.go  # BlockDevice, LVMVolumeGroup
+    └── cluster_config.yml             # вложенный кластер (storage-e2e)
 ```
 
 ## Быстрый старт (локально)
 
-Создайте `e2e/config/test_exports_storage_e2e` (не коммитится):
+Папка `e2e/config/` в `.gitignore`. Создайте переменные окружения (пример):
 
 ```bash
+# e2e/config/test_exports_storage_e2e
 export TEST_CLUSTER_CREATE_MODE='alwaysUseExisting'  # или alwaysCreateNew
 export TEST_CLUSTER_NAMESPACE='<test_namespace>'
 export TEST_CLUSTER_STORAGE_CLASS='<test_storage_class>'
 export TEST_CLUSTER_CLEANUP='false'
+
 export SSH_HOST='<master-ip>'
 export SSH_USER='<ssh-user>'
 export SSH_PRIVATE_KEY='/path/to/ssh/key'
+
 export KUBE_CONFIG_PATH='/path/to/kubeconfig'
+
 export DKP_LICENSE_KEY='<license>'
 export REGISTRY_DOCKER_CFG='<base64-encoded>'
 ```
@@ -56,8 +60,7 @@ source e2e/config/test_exports_storage_e2e
 cd e2e
 make deps
 make test                    # оба suite: TestCommonScheduler и TestSdsNodeConfigurator
-# как в CI (только модульный suite):
-make test-go                 # go test -run TestSdsNodeConfigurator
+make test-go                 # как в CI: только TestSdsNodeConfigurator
 ```
 
 Фокус по имени теста:
@@ -75,21 +78,18 @@ ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
 
 ## Тестовые сценарии
 
+### Модуль sds-node-configurator (BlockDevice / LVM)
+
+- **BlockDevice discovery**: появление диска; корректные `status.nodeName`, `status.path`, `status.size`, `consumable`.
+- **LVMVolumeGroup**: создание на основе BlockDevice, статус и capacity.
+
 ### Common Scheduler Extender
 
-Сценарии в `common_scheduler_test.go`: фильтрация нод по LVMVolumeGroup для local PVC, Pending при нехватке места, конкурентные PVC. См. [E2E_USAGE.md](E2E_USAGE.md).
-
-### BlockDevice Discovery
-
-- На ноде появляется новый неразмеченный диск
-- В кластере появляется объект BlockDevice с корректными полями
-
-### LVMVolumeGroup
-
-- Создание LVMVolumeGroup на основе BlockDevice
-- Проверка статуса и capacity
+Сценарии в `common_scheduler_test.go`: фильтрация нод по LVMVolumeGroup для local PVC, Pending при нехватке места, резервация при конкурентных PVC. См. [E2E_USAGE.md](E2E_USAGE.md).
 
 ## Кластер заблокирован (cluster is already locked)
+
+Если предыдущий запуск прервался до cleanup:
 
 ```bash
 export TEST_CLUSTER_FORCE_LOCK_RELEASE='true'
@@ -108,9 +108,21 @@ make logs
 make cleanup
 ```
 
+## Переменные окружения
+
+| Переменная | Описание |
+|------------|----------|
+| `TEST_CLUSTER_CREATE_MODE` | Режим кластера (`alwaysUseExisting` и т.д.) |
+| `TEST_CLUSTER_NAMESPACE` | Namespace тестов |
+| `TEST_CLUSTER_STORAGE_CLASS` | StorageClass для PVC |
+| `SSH_HOST`, `SSH_USER`, `KUBE_CONFIG_PATH` | Доступ к кластеру |
+| `DKP_LICENSE_KEY`, `REGISTRY_DOCKER_CFG` | При необходимости для nested setup |
+
+См. также `config/test_exports_storage_e2e`.
+
 ## Отладка
 
-**Агент / BlockDevice / LVMVolumeGroup:**
+### Агент / BlockDevice / LVMVolumeGroup
 
 ```bash
 kubectl get pods -n d8-sds-node-configurator -o wide
@@ -118,7 +130,7 @@ kubectl get blockdevice
 kubectl get lvmvolumegroup
 ```
 
-**Scheduler extender:**
+### Scheduler extender
 
 ```bash
 kubectl logs -n d8-sds-node-configurator -l app=sds-common-scheduler-extender -f
@@ -148,6 +160,6 @@ kubectl describe lvmvolumegroup <lvg-name>
 
 ## Дополнительная информация
 
-- [E2E_USAGE.md](E2E_USAGE.md) — smoke в CI, секреты, label `e2e-smoke-test`
+- [E2E_USAGE.md](E2E_USAGE.md) — CI и детальный локальный запуск
 - [storage-e2e](https://github.com/deckhouse/storage-e2e)
 - [Ginkgo](https://onsi.github.io/ginkgo/)

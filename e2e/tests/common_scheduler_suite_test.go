@@ -21,7 +21,20 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/deckhouse/storage-e2e/pkg/setup"
 )
+
+var _ = BeforeSuite(func() {
+	err := setup.Init()
+	Expect(err).NotTo(HaveOccurred(), "Failed to initialize storage-e2e setup")
+})
+
+var _ = AfterSuite(func() {
+	if err := setup.Close(); err != nil {
+		GinkgoWriter.Printf("Warning: Failed to close logger: %v\n", err)
+	}
+})
 
 func TestCommonScheduler(t *testing.T) {
 	RegisterFailHandler(Fail)
