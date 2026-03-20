@@ -207,11 +207,6 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 
 			ns := e2eConfigNamespace()
 
-			if testClusterResources.BaseKubeconfig != nil {
-				GinkgoWriter.Printf("    ▶️ Cleaning up e2e VirtualDisks...\n")
-				cleanupE2EVirtualDisks(ctx, testClusterResources.BaseKubeconfig, ns, e2eVirtualDiskPrefix)
-			}
-
 			if k8sClient != nil {
 				GinkgoWriter.Printf("    ▶️ Cleaning up e2e Pods and PVCs...\n")
 				cleanupE2EPodsAndPVCsWithWait(ctx, k8sClient, 2*time.Minute)
@@ -221,6 +216,11 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 
 				GinkgoWriter.Printf("    ▶️ Cleaning up e2e LVMVolumeGroups...\n")
 				cleanupE2ELVMVolumeGroups(ctx, k8sClient)
+			}
+
+			if testClusterResources.BaseKubeconfig != nil {
+				GinkgoWriter.Printf("    ▶️ Cleaning up e2e VirtualDisks...\n")
+				cleanupE2EVirtualDisks(ctx, testClusterResources.BaseKubeconfig, ns, e2eVirtualDiskPrefix)
 			}
 
 			cleanupEnabled := e2eConfigTestClusterCleanup() == "true" || e2eConfigTestClusterCleanup() == "True"
@@ -244,13 +244,13 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 	})
 
 	////////////////////////////////////
-	// ---=== SETUP: CREATE VIRTUAL DISKS ===--- //
+	// ---=== TEST 0: PREFLIGHT SETUP ===--- //
 	////////////////////////////////////
 
-	Context("Setup: Create virtual disks and LVMVolumeGroups", func() {
+	Context("[Test 0] Preflight setup", func() {
 		const e2eDataDiskSize = "10Gi"
 
-		It("Should create virtual disks on cluster nodes", func() {
+		It("[0.1] Create virtual disks on cluster nodes", func() {
 			ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx, createdLVGs)
 
 			var clusterVMs []string
@@ -414,7 +414,7 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 				"All BlockDevices from new VirtualDisks should be consumable, but these are not: %v", notConsumable)
 		})
 
-		It("Should create LVMVolumeGroups from BlockDevices (one per node)", func() {
+		It("[0.2] Create LVMVolumeGroups from BlockDevices (one per node)", func() {
 			Expect(createdBlockDevices).NotTo(BeEmpty(), "BlockDevices must be created first")
 
 			bdsByNode := make(map[string][]*v1alpha1.BlockDevice)
@@ -480,7 +480,7 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 			printLVGsSummary(e2eCtx, k8sClient, createdLVGs)
 		})
 
-		It("Should create LocalStorageClass and wait for StorageClass", func() {
+		It("[0.3] Create LocalStorageClass and wait for StorageClass", func() {
 			Expect(createdLVGs).NotTo(BeEmpty(), "LVMVolumeGroups must be created first")
 			Expect(testClusterResources).NotTo(BeNil())
 			Expect(testClusterResources.Kubeconfig).NotTo(BeNil())
@@ -556,13 +556,14 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 	// ---=== SCHEDULER TESTS ===--- //
 	////////////////////////////////////
 
-	Context("Scheduler Extender: Space consolidation tests", func() {
-		It("Should fill storage with small volumes to maximum capacity", func() {
+	Context("Scheduler Extender: Volume scheduling tests", func() {
+		It("[Test 1] Fill storage with small volumes (1Gi)", func() {
 			Expect(createdLVGs).NotTo(BeEmpty(), "LVMVolumeGroups must be created first")
 			Expect(e2eStorageClassName).NotTo(BeEmpty(), "StorageClass must be created first")
 
 			By("Cleaning up previous test resources")
 			cleanupE2EPodsAndPVCsWithWait(e2eCtx, k8sClient, 3*time.Minute)
+			waitForLVGSpaceRecovery(e2eCtx, k8sClient, createdLVGs, 2*time.Minute)
 
 			currentAvailable := getTotalAvailableSpace(e2eCtx, k8sClient, createdLVGs)
 			Expect(currentAvailable).To(BeNumerically(">", 0), "No available space in LVMVolumeGroups")
@@ -594,21 +595,25 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 
 			successCount, scheduledCount := createPVCsAndPodsWithSizes(e2eCtx, k8sClient, volumeSizes, e2eStorageClassName, "small")
 
-			By(fmt.Sprintf("Results: %d/%d PVCs created, %d/%d Pods scheduled", successCount, len(volumeSizes), scheduledCount, successCount))
+			GinkgoWriter.Printf("\n%s\n", strings.Repeat("*", 60))
+			GinkgoWriter.Printf("*** TEST 1 RESULTS: %d/%d PVCs, %d/%d Pods scheduled ***\n", successCount, len(volumeSizes), scheduledCount, successCount)
+			GinkgoWriter.Printf("%s\n", strings.Repeat("*", 60))
 			Expect(scheduledCount).To(Equal(successCount),
 				"All created PVCs must have scheduled Pods")
 			Expect(successCount).To(Equal(len(volumeSizes)),
 				"All planned PVCs must be created successfully")
 
-			printSchedulingSummary("small volumes", len(volumeSizes), successCount, scheduledCount, volumeSize)
+			printSchedulingSummary("small volumes (1Gi)", len(volumeSizes), successCount, scheduledCount, volumeSize)
+			printLVGStats(e2eCtx, k8sClient, createdLVGs)
 		})
 
-		It("Should fill storage with medium volumes to maximum capacity", func() {
+		It("[Test 2] Fill storage with medium volumes (5Gi)", func() {
 			Expect(createdLVGs).NotTo(BeEmpty(), "LVMVolumeGroups must be created first")
 			Expect(e2eStorageClassName).NotTo(BeEmpty(), "StorageClass must be created first")
 
 			By("Cleaning up previous test resources")
 			cleanupE2EPodsAndPVCsWithWait(e2eCtx, k8sClient, 3*time.Minute)
+			waitForLVGSpaceRecovery(e2eCtx, k8sClient, createdLVGs, 2*time.Minute)
 
 			currentAvailable := getTotalAvailableSpace(e2eCtx, k8sClient, createdLVGs)
 			Expect(currentAvailable).To(BeNumerically(">", 0), "No available space in LVMVolumeGroups")
@@ -640,21 +645,25 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 
 			successCount, scheduledCount := createPVCsAndPodsWithSizes(e2eCtx, k8sClient, volumeSizes, e2eStorageClassName, "medium")
 
-			By(fmt.Sprintf("Results: %d/%d PVCs created, %d/%d Pods scheduled", successCount, len(volumeSizes), scheduledCount, successCount))
+			GinkgoWriter.Printf("\n%s\n", strings.Repeat("*", 60))
+			GinkgoWriter.Printf("*** TEST 2 RESULTS: %d/%d PVCs, %d/%d Pods scheduled ***\n", successCount, len(volumeSizes), scheduledCount, successCount)
+			GinkgoWriter.Printf("%s\n", strings.Repeat("*", 60))
 			Expect(scheduledCount).To(Equal(successCount),
 				"All created PVCs must have scheduled Pods")
 			Expect(successCount).To(Equal(len(volumeSizes)),
 				"All planned PVCs must be created successfully")
 
-			printSchedulingSummary("medium volumes", len(volumeSizes), successCount, scheduledCount, volumeSize)
+			printSchedulingSummary("medium volumes (5Gi)", len(volumeSizes), successCount, scheduledCount, volumeSize)
+			printLVGStats(e2eCtx, k8sClient, createdLVGs)
 		})
 
-		It("Should fill storage with large volumes to maximum capacity", func() {
+		It("[Test 3] Fill storage with large volumes (10Gi)", func() {
 			Expect(createdLVGs).NotTo(BeEmpty(), "LVMVolumeGroups must be created first")
 			Expect(e2eStorageClassName).NotTo(BeEmpty(), "StorageClass must be created first")
 
 			By("Cleaning up previous test resources")
 			cleanupE2EPodsAndPVCsWithWait(e2eCtx, k8sClient, 3*time.Minute)
+			waitForLVGSpaceRecovery(e2eCtx, k8sClient, createdLVGs, 2*time.Minute)
 
 			currentAvailable := getTotalAvailableSpace(e2eCtx, k8sClient, createdLVGs)
 			Expect(currentAvailable).To(BeNumerically(">", 0), "No available space in LVMVolumeGroups")
@@ -670,8 +679,12 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 				volumeSizes := []int64{currentAvailable}
 				By(fmt.Sprintf("Available space < 10Gi, creating single volume of %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
 				successCount, scheduledCount := createPVCsAndPodsWithSizes(e2eCtx, k8sClient, volumeSizes, e2eStorageClassName, "large")
+				GinkgoWriter.Printf("\n%s\n", strings.Repeat("*", 60))
+				GinkgoWriter.Printf("*** TEST 3 RESULTS: %d/%d PVCs, %d/%d Pods scheduled ***\n", successCount, 1, scheduledCount, successCount)
+				GinkgoWriter.Printf("%s\n", strings.Repeat("*", 60))
 				Expect(scheduledCount).To(Equal(successCount))
-				printSchedulingSummary("large volumes", 1, successCount, scheduledCount, currentAvailable)
+				printSchedulingSummary("large volumes (10Gi)", 1, successCount, scheduledCount, currentAvailable)
+				printLVGStats(e2eCtx, k8sClient, createdLVGs)
 				return
 			}
 			
@@ -695,13 +708,99 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 
 			successCount, scheduledCount := createPVCsAndPodsWithSizes(e2eCtx, k8sClient, volumeSizes, e2eStorageClassName, "large")
 
-			By(fmt.Sprintf("Results: %d/%d PVCs created, %d/%d Pods scheduled", successCount, len(volumeSizes), scheduledCount, successCount))
+			GinkgoWriter.Printf("\n%s\n", strings.Repeat("*", 60))
+			GinkgoWriter.Printf("*** TEST 3 RESULTS: %d/%d PVCs, %d/%d Pods scheduled ***\n", successCount, len(volumeSizes), scheduledCount, successCount)
+			GinkgoWriter.Printf("%s\n", strings.Repeat("*", 60))
 			Expect(scheduledCount).To(Equal(successCount),
 				"All created PVCs must have scheduled Pods")
 			Expect(successCount).To(Equal(len(volumeSizes)),
 				"All planned PVCs must be created successfully")
 
-			printSchedulingSummary("large volumes", len(volumeSizes), successCount, scheduledCount, volumeSize)
+			printSchedulingSummary("large volumes (10Gi)", len(volumeSizes), successCount, scheduledCount, volumeSize)
+			printLVGStats(e2eCtx, k8sClient, createdLVGs)
+		})
+
+		It("[Test 4] Fill storage with mixed volumes (1Gi+5Gi+10Gi)", func() {
+			Expect(createdLVGs).NotTo(BeEmpty(), "LVMVolumeGroups must be created first")
+			Expect(e2eStorageClassName).NotTo(BeEmpty(), "StorageClass must be created first")
+
+			By("Cleaning up previous test resources")
+			cleanupE2EPodsAndPVCsWithWait(e2eCtx, k8sClient, 3*time.Minute)
+			waitForLVGSpaceRecovery(e2eCtx, k8sClient, createdLVGs, 2*time.Minute)
+
+			currentAvailable := getTotalAvailableSpace(e2eCtx, k8sClient, createdLVGs)
+			Expect(currentAvailable).To(BeNumerically(">", 0), "No available space in LVMVolumeGroups")
+			By(fmt.Sprintf("Current available space: %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
+
+			smallSize := int64(1 * 1024 * 1024 * 1024)  // 1Gi
+			mediumSize := int64(5 * 1024 * 1024 * 1024) // 5Gi
+			largeSize := int64(10 * 1024 * 1024 * 1024) // 10Gi
+			minVolumeSize := int64(500 * 1024 * 1024)   // 500Mi minimum for remainder
+
+			var volumeSizes []int64
+			remaining := currentAvailable
+
+			numLarge := int(remaining / largeSize / 3)
+			for i := 0; i < numLarge; i++ {
+				volumeSizes = append(volumeSizes, largeSize)
+				remaining -= largeSize
+			}
+
+			numMedium := int(remaining / mediumSize / 2)
+			for i := 0; i < numMedium; i++ {
+				volumeSizes = append(volumeSizes, mediumSize)
+				remaining -= mediumSize
+			}
+
+			numSmall := int(remaining / smallSize)
+			for i := 0; i < numSmall; i++ {
+				volumeSizes = append(volumeSizes, smallSize)
+				remaining -= smallSize
+			}
+
+			if remaining >= minVolumeSize {
+				volumeSizes = append(volumeSizes, remaining)
+			}
+
+			totalPlanned := int64(0)
+			for _, s := range volumeSizes {
+				totalPlanned += s
+			}
+			utilization := float64(totalPlanned) / float64(currentAvailable) * 100
+
+			actualLarge := 0
+			actualMedium := 0
+			actualSmall := 0
+			actualRemainder := 0
+			for _, s := range volumeSizes {
+				switch {
+				case s == largeSize:
+					actualLarge++
+				case s == mediumSize:
+					actualMedium++
+				case s == smallSize:
+					actualSmall++
+				default:
+					actualRemainder++
+				}
+			}
+
+			By(fmt.Sprintf("Planning %d mixed volumes: %d large (10Gi) + %d medium (5Gi) + %d small (1Gi) + %d remainder = %.2f Gi (%.1f%% utilization)",
+				len(volumeSizes), actualLarge, actualMedium, actualSmall, actualRemainder,
+				float64(totalPlanned)/(1024*1024*1024), utilization))
+
+			successCount, scheduledCount := createPVCsAndPodsWithSizes(e2eCtx, k8sClient, volumeSizes, e2eStorageClassName, "mixed")
+
+			GinkgoWriter.Printf("\n%s\n", strings.Repeat("*", 60))
+			GinkgoWriter.Printf("*** TEST 4 RESULTS: %d/%d PVCs, %d/%d Pods scheduled ***\n", successCount, len(volumeSizes), scheduledCount, successCount)
+			GinkgoWriter.Printf("%s\n", strings.Repeat("*", 60))
+			Expect(scheduledCount).To(Equal(successCount),
+				"All created PVCs must have scheduled Pods")
+			Expect(successCount).To(Equal(len(volumeSizes)),
+				"All planned PVCs must be created successfully")
+
+			printSchedulingSummary("mixed volumes (1Gi+5Gi+10Gi)", len(volumeSizes), successCount, scheduledCount, 0)
+			printLVGStats(e2eCtx, k8sClient, createdLVGs)
 		})
 	})
 })
@@ -1186,10 +1285,53 @@ func getTotalAvailableSpace(ctx context.Context, cl client.Client, lvgs []*v1alp
 	return total
 }
 
+func getTotalVGSize(ctx context.Context, cl client.Client, lvgs []*v1alpha1.LVMVolumeGroup) int64 {
+	var total int64
+	for _, lvg := range lvgs {
+		var current v1alpha1.LVMVolumeGroup
+		if err := cl.Get(ctx, client.ObjectKeyFromObject(lvg), &current); err != nil {
+			continue
+		}
+		if current.Status.Phase == v1alpha1.PhaseReady {
+			total += current.Status.VGSize.Value()
+		}
+	}
+	return total
+}
+
+func waitForLVGSpaceRecovery(ctx context.Context, cl client.Client, lvgs []*v1alpha1.LVMVolumeGroup, timeout time.Duration) {
+	expectedSize := getTotalVGSize(ctx, cl, lvgs)
+	if expectedSize == 0 {
+		return
+	}
+	deadline := time.Now().Add(timeout)
+	
+	for time.Now().Before(deadline) {
+		currentFree := getTotalAvailableSpace(ctx, cl, lvgs)
+		if currentFree >= expectedSize {
+			GinkgoWriter.Printf("LVG space fully recovered: %.2f Gi free (100%%)\n", 
+				float64(currentFree)/(1024*1024*1024))
+			return
+		}
+		GinkgoWriter.Printf("Waiting for LVG space recovery: %.2f Gi free (%.1f%% of %.2f Gi)\n",
+			float64(currentFree)/(1024*1024*1024), float64(currentFree)/float64(expectedSize)*100, float64(expectedSize)/(1024*1024*1024))
+		time.Sleep(5 * time.Second)
+	}
+	currentFree := getTotalAvailableSpace(ctx, cl, lvgs)
+	GinkgoWriter.Printf("Warning: LVG space recovery timeout, current free: %.2f Gi (%.1f%%)\n",
+		float64(currentFree)/(1024*1024*1024), float64(currentFree)/float64(expectedSize)*100)
+}
+
 func createPVCsAndPodsWithSizes(ctx context.Context, cl client.Client, volumeSizes []int64, storageClass, sizeLabel string) (successCount, scheduledCount int) {
+	total := len(volumeSizes)
+	GinkgoWriter.Printf("Creating %d PVCs and Pods...\n", total)
 	for i, volumeSize := range volumeSizes {
 		pvcName := fmt.Sprintf("%s%s-%d", e2ePVCPrefix, sizeLabel, i)
 		podName := fmt.Sprintf("%s%s-%d", e2ePodPrefix, sizeLabel, i)
+
+		if (i+1)%10 == 0 || i == total-1 {
+			GinkgoWriter.Printf("  Creating PVC/Pod %d/%d...\n", i+1, total)
+		}
 
 		pvc := &corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1347,7 +1489,9 @@ func createPVCsAndPods(ctx context.Context, cl client.Client, numVolumes int, vo
 }
 
 func waitForPodsScheduled(ctx context.Context, cl client.Client, sizeLabel string, expectedCount int, timeout time.Duration) int {
+	GinkgoWriter.Printf("Waiting for %d Pods to be scheduled (timeout: %v)...\n", expectedCount, timeout)
 	deadline := time.Now().Add(timeout)
+	lastReported := 0
 	for time.Now().Before(deadline) {
 		var podList corev1.PodList
 		if err := cl.List(ctx, &podList, &client.ListOptions{Namespace: "default"}); err != nil {
@@ -1367,7 +1511,13 @@ func waitForPodsScheduled(ctx context.Context, cl client.Client, sizeLabel strin
 		}
 
 		if scheduledCount >= expectedCount {
+			GinkgoWriter.Printf("  All %d/%d Pods scheduled\n", scheduledCount, expectedCount)
 			return scheduledCount
+		}
+
+		if scheduledCount != lastReported {
+			GinkgoWriter.Printf("  Pods scheduled: %d/%d\n", scheduledCount, expectedCount)
+			lastReported = scheduledCount
 		}
 
 		time.Sleep(5 * time.Second)
@@ -1422,6 +1572,48 @@ func printSchedulingSummary(testName string, attempted, created, scheduled int, 
 		GinkgoWriter.Printf("Success rate: %.1f%%\n", float64(scheduled)/float64(created)*100)
 	}
 	GinkgoWriter.Println("=========================================\n")
+}
+
+func printLVGStats(ctx context.Context, cl client.Client, lvgs []*v1alpha1.LVMVolumeGroup) {
+	GinkgoWriter.Println("\n========== LVMVolumeGroup Statistics ==========")
+	var totalSize, totalUsed, totalFree int64
+	readyCount := 0
+	for _, lvg := range lvgs {
+		var current v1alpha1.LVMVolumeGroup
+		if err := cl.Get(ctx, client.ObjectKeyFromObject(lvg), &current); err != nil {
+			GinkgoWriter.Printf("  %s: failed to get status: %v\n", lvg.Name, err)
+			continue
+		}
+		if current.Status.Phase != v1alpha1.PhaseReady {
+			GinkgoWriter.Printf("  %s: not ready (phase: %s)\n", lvg.Name, current.Status.Phase)
+			continue
+		}
+		readyCount++
+		vgSize := current.Status.VGSize.Value()
+		vgFree := current.Status.VGFree.Value()
+		vgUsed := vgSize - vgFree
+		usedPercent := float64(0)
+		freePercent := float64(0)
+		if vgSize > 0 {
+			usedPercent = float64(vgUsed) / float64(vgSize) * 100
+			freePercent = float64(vgFree) / float64(vgSize) * 100
+		}
+		GinkgoWriter.Printf("  %s:\n", current.Name)
+		GinkgoWriter.Printf("    Total:  %12d bytes (%.2f Gi)\n", vgSize, float64(vgSize)/(1024*1024*1024))
+		GinkgoWriter.Printf("    Used:   %12d bytes (%.2f Gi) - %.1f%%\n", vgUsed, float64(vgUsed)/(1024*1024*1024), usedPercent)
+		GinkgoWriter.Printf("    Free:   %12d bytes (%.2f Gi) - %.1f%%\n", vgFree, float64(vgFree)/(1024*1024*1024), freePercent)
+		totalSize += vgSize
+		totalUsed += vgUsed
+		totalFree += vgFree
+	}
+	if readyCount > 1 && totalSize > 0 {
+		GinkgoWriter.Println("  ----------------------------------------")
+		GinkgoWriter.Printf("  TOTAL:\n")
+		GinkgoWriter.Printf("    Total:  %12d bytes (%.2f Gi)\n", totalSize, float64(totalSize)/(1024*1024*1024))
+		GinkgoWriter.Printf("    Used:   %12d bytes (%.2f Gi) - %.1f%%\n", totalUsed, float64(totalUsed)/(1024*1024*1024), float64(totalUsed)/float64(totalSize)*100)
+		GinkgoWriter.Printf("    Free:   %12d bytes (%.2f Gi) - %.1f%%\n", totalFree, float64(totalFree)/(1024*1024*1024), float64(totalFree)/float64(totalSize)*100)
+	}
+	GinkgoWriter.Println("================================================\n")
 }
 
 func printPVCAndPodStatus(ctx context.Context, cl client.Client, sizeLabel string) {
