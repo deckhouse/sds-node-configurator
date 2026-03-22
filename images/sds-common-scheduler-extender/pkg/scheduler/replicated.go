@@ -26,11 +26,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func getReplicatedStorageClass(ctx context.Context, cl client.Client, scName string) (*srv.ReplicatedStorageClass, error) {
@@ -57,7 +56,7 @@ func rscStoragePoolName(rsc *srv.ReplicatedStorageClass) string {
 	if rsc.Status.StoragePoolName != "" {
 		return rsc.Status.StoragePoolName
 	}
-	return rsc.Spec.StoragePool
+	return rsc.Spec.StoragePool //nolint:staticcheck // backward compat fallback
 }
 
 func getDeviceTypeFromRSP(rsp *srv.ReplicatedStoragePool) string {
@@ -117,16 +116,6 @@ func findLVGForNodeInRSP(
 	return nil, false
 }
 
-func checkNodeHasLVGFromRSP(
-	ctx context.Context,
-	cl client.Client,
-	nodeName string,
-	rsp *srv.ReplicatedStoragePool,
-) bool {
-	_, found := findLVGForNodeInRSP(ctx, cl, nodeName, rsp)
-	return found
-}
-
 func storagePoolKeyFromRSPLVG(lvgRef *srv.ReplicatedStoragePoolLVMVolumeGroups, deviceType string) cache.StoragePoolKey {
 	key := cache.StoragePoolKey{LVGName: lvgRef.Name}
 	if deviceType == consts.Thin {
@@ -166,7 +155,7 @@ func checkNodeHasLVGWithSpaceForReplicated(
 }
 
 // getReplicaNodesForBoundPVC resolves a bound PVC to the set of node names
-// that host Diskful replicas. Chain: PVC -> PV -> RV (via CSI VolumeHandle) ->
+// that host Diskful replicas. Chain: PVC -> RV ->
 // datamesh members with HasBackingVolume().
 func getReplicaNodesForBoundPVC(
 	ctx context.Context,
@@ -177,20 +166,7 @@ func getReplicaNodesForBoundPVC(
 		return nil, fmt.Errorf("PVC %s/%s is bound but has no volume name", pvc.Namespace, pvc.Name)
 	}
 
-	pv := &corev1.PersistentVolume{}
-	if err := cl.Get(ctx, client.ObjectKey{Name: pvc.Spec.VolumeName}, pv); err != nil {
-		return nil, fmt.Errorf("unable to get PV %s: %w", pvc.Spec.VolumeName, err)
-	}
-
-	if pv.Spec.CSI == nil {
-		return nil, fmt.Errorf("PV %s has no CSI spec", pv.Name)
-	}
-
-	rvName := pv.Spec.CSI.VolumeHandle
-	if rvName == "" {
-		return nil, fmt.Errorf("PV %s has empty CSI VolumeHandle", pv.Name)
-	}
-
+	rvName := pvc.Spec.VolumeName
 	rv := &srv.ReplicatedVolume{}
 	if err := cl.Get(ctx, client.ObjectKey{Name: rvName}, rv); err != nil {
 		return nil, fmt.Errorf("unable to get ReplicatedVolume %s: %w", rvName, err)
@@ -228,39 +204,6 @@ func buildReplicaLocations(
 		}
 	}
 	return result
-}
-
-// filterNodesByVolumeReplicas filters nodes to only those hosting diskful
-// replicas of the given bound PVC.
-func filterNodesByVolumeReplicas(
-	ctx context.Context,
-	log logger.Logger,
-	cl client.Client,
-	nodeNames []string,
-	pvc *corev1.PersistentVolumeClaim,
-) []string {
-	replicaNodes, err := getReplicaNodesForBoundPVC(ctx, cl, pvc)
-	if err != nil {
-		log.Warning(fmt.Sprintf("[filterNodesByVolumeReplicas] unable to resolve replica nodes for PVC %s/%s: %v; not filtering", pvc.Namespace, pvc.Name, err))
-		return nodeNames
-	}
-	if len(replicaNodes) == 0 {
-		log.Warning(fmt.Sprintf("[filterNodesByVolumeReplicas] no diskful replicas found for PVC %s/%s; not filtering", pvc.Namespace, pvc.Name))
-		return nodeNames
-	}
-
-	replicaSet := make(map[string]struct{}, len(replicaNodes))
-	for _, n := range replicaNodes {
-		replicaSet[n] = struct{}{}
-	}
-
-	var filtered []string
-	for _, n := range nodeNames {
-		if _, ok := replicaSet[n]; ok {
-			filtered = append(filtered, n)
-		}
-	}
-	return filtered
 }
 
 // filterNodesByVolumeZone is a stub for filtering by volume zone.

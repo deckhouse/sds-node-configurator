@@ -827,14 +827,16 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 			size := resource.MustParse("201Mi")
 			aligned, err := utils.AlignSizeToExtent(size, extentSize)
 			assert.NoError(t, err)
-			assert.Equal(t, resource.MustParse("204Mi").Value(), aligned.Value())
+			expected := resource.MustParse("204Mi")
+			assert.Equal(t, expected.Value(), aligned.Value())
 		})
 
 		t.Run("already_aligned_stays_same", func(t *testing.T) {
 			size := resource.MustParse("204Mi")
 			aligned, err := utils.AlignSizeToExtent(size, extentSize)
 			assert.NoError(t, err)
-			assert.Equal(t, resource.MustParse("204Mi").Value(), aligned.Value())
+			expected := resource.MustParse("204Mi")
+			assert.Equal(t, expected.Value(), aligned.Value())
 		})
 
 		t.Run("returns_error_for_zero_extent", func(t *testing.T) {
