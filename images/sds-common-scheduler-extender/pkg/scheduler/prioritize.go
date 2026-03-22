@@ -30,6 +30,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
@@ -121,7 +123,9 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("successfully extracted the PVC requested sizes")
 
 	servingLog.Debug("starts to score the nodes for Pod")
-	replicaLocations := make(map[string][]string) // TODO: retrieve from DRBD/Linstor
+
+	replicatedPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsReplicatedVolumeProvisioner)
+	replicaLocations := buildReplicaLocations(ctx, servingLog, s.client, replicatedPVCs)
 
 	scoredNodes, err := scoreNodes(ctx, servingLog, s.client, s.cache, &nodeNames, managedPVCs, scUsedByPVCs, pvcRequests, replicaLocations, s.defaultDivisor)
 	if err != nil {
@@ -277,7 +281,7 @@ func scoreNodes(
 						continue
 					}
 
-					rspName := rsc.GetStoragePoolName()
+					rspName := rscStoragePoolName(rsc)
 					rsp, err := getReplicatedStoragePool(ctx, cl, rspName)
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[scoreNodes] unable to get RSP %s", rspName))
@@ -287,17 +291,27 @@ func scoreNodes(
 
 					volumeAccess := rsc.Spec.VolumeAccess
 					if volumeAccess == "" {
-						volumeAccess = consts.VolumeAccessPreferablyLocal
+						volumeAccess = srv.VolumeAccessPreferablyLocal
 					}
 
-					if pvc.Status.Phase == corev1.ClaimBound &&
-						volumeAccess != consts.VolumeAccessLocal &&
-						volumeAccess != consts.VolumeAccessEventuallyLocal {
-						hasLVGAndSpace, _ := checkNodeHasLVGWithSpaceForReplicated(ctx, log, cl, schedulerCache, nodeName, rsp, pvcReq.RequestedSize)
-						if !hasLVGAndSpace {
-							log.Debug(fmt.Sprintf("[scoreNodes] node %s has no LVG/space for replicated PVC %s, scoring 0", nodeName, pvc.Name))
+					if pvc.Status.Phase == corev1.ClaimBound {
+						switch volumeAccess {
+						case srv.VolumeAccessLocal:
+							if nodeHasReplicaForPVC(nodeName, pvc.Name, replicaLocations) {
+								totalScore += 100
+							}
 							pvcCount++
 							continue
+
+						case srv.VolumeAccessPreferablyLocal, srv.VolumeAccessEventuallyLocal:
+							if nodeHasReplicaForPVC(nodeName, pvc.Name, replicaLocations) {
+								totalScore += 100
+								pvcCount++
+								continue
+							}
+
+						case srv.VolumeAccessAny:
+							// no replica consideration
 						}
 					}
 
@@ -307,16 +321,12 @@ func scoreNodes(
 				}
 			}
 
-			// Calculate replica bonus
-			replicaBonus := calculateReplicaBonus(nodeName, managedPVCs, replicaLocations)
-			totalScore += replicaBonus
-
 			var averageScore int64
 			if pvcCount > 0 {
 				averageScore = totalScore / int64(pvcCount)
 			}
 			score := getNodeScore(averageScore, divisor)
-			log.Trace(fmt.Sprintf("[scoreNodes] node %s has final score %d (avg: %d, total: %d, pvcs: %d, replicaBonus: %d)", nodeName, score, averageScore, totalScore, pvcCount, replicaBonus))
+			log.Trace(fmt.Sprintf("[scoreNodes] node %s has final score %d (avg: %d, total: %d, pvcs: %d)", nodeName, score, averageScore, totalScore, pvcCount))
 
 			resultMtx.Lock()
 			result = append(result, HostPriority{
