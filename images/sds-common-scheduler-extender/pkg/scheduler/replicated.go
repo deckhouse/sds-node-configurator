@@ -26,11 +26,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func getReplicatedStorageClass(ctx context.Context, cl client.Client, scName string) (*srv.ReplicatedStorageClass, error) {
@@ -57,7 +56,7 @@ func rscStoragePoolName(rsc *srv.ReplicatedStorageClass) string {
 	if rsc.Status.StoragePoolName != "" {
 		return rsc.Status.StoragePoolName
 	}
-	return rsc.Spec.StoragePool
+	return rsc.Spec.StoragePool //nolint:staticcheck // backward compat fallback
 }
 
 func getDeviceTypeFromRSP(rsp *srv.ReplicatedStoragePool) string {

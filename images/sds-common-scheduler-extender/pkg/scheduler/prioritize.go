@@ -30,11 +30,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
@@ -235,6 +234,8 @@ func scoreNodes(
 
 			var totalScore int64
 			pvcCount := 0
+			replicaHits := 0
+			replicaTotalPVCs := 0
 
 			// === Score LOCAL PVCs ===
 			if len(localPVCs) > 0 {
@@ -297,15 +298,17 @@ func scoreNodes(
 					if pvc.Status.Phase == corev1.ClaimBound {
 						switch volumeAccess {
 						case srv.VolumeAccessLocal:
+							replicaTotalPVCs++
 							if nodeHasReplicaForPVC(nodeName, pvc.Name, replicaLocations) {
-								totalScore += 100
+								replicaHits++
 							}
 							pvcCount++
 							continue
 
 						case srv.VolumeAccessPreferablyLocal, srv.VolumeAccessEventuallyLocal:
+							replicaTotalPVCs++
 							if nodeHasReplicaForPVC(nodeName, pvc.Name, replicaLocations) {
-								totalScore += 100
+								replicaHits++
 								pvcCount++
 								continue
 							}
@@ -325,8 +328,15 @@ func scoreNodes(
 			if pvcCount > 0 {
 				averageScore = totalScore / int64(pvcCount)
 			}
-			score := getNodeScore(averageScore, divisor)
-			log.Trace(fmt.Sprintf("[scoreNodes] node %s has final score %d (avg: %d, total: %d, pvcs: %d)", nodeName, score, averageScore, totalScore, pvcCount))
+			baseScore := getNodeScore(averageScore, divisor)
+			score := baseScore
+			if replicaTotalPVCs > 0 && replicaHits > 0 {
+				replicaScore := 10 * replicaHits / replicaTotalPVCs
+				if replicaScore > score {
+					score = replicaScore
+				}
+			}
+			log.Trace(fmt.Sprintf("[scoreNodes] node %s has final score %d (base: %d, total: %d, pvcs: %d, replicaHits: %d/%d)", nodeName, score, baseScore, totalScore, pvcCount, replicaHits, replicaTotalPVCs))
 
 			resultMtx.Lock()
 			result = append(result, HostPriority{
