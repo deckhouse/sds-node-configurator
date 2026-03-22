@@ -20,6 +20,8 @@ import (
 	"context"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -27,12 +29,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 )
 
 func init() {
 	_ = snc.AddToScheme(scheme.Scheme)
+	_ = srv.AddToScheme(scheme.Scheme)
+	_ = corev1.AddToScheme(scheme.Scheme)
+	_ = storagev1.AddToScheme(scheme.Scheme)
 }
 
 func newTestScheduler(cl client.Client, c *cache.Cache) *scheduler {
@@ -164,4 +172,126 @@ func newFakeClient(objects ...client.Object) client.Client {
 			return []string{llv.Spec.LVMVolumeGroupName}
 		}).
 		Build()
+}
+
+func testRSC(name string, volumeAccess srv.ReplicatedStorageClassVolumeAccess, storagePoolName string) *srv.ReplicatedStorageClass {
+	return &srv.ReplicatedStorageClass{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: srv.ReplicatedStorageClassSpec{
+			VolumeAccess: volumeAccess,
+		},
+		Status: srv.ReplicatedStorageClassStatus{
+			StoragePoolName: storagePoolName,
+		},
+	}
+}
+
+func testRSP(name string, rspType srv.ReplicatedStoragePoolType, lvgNames ...string) *srv.ReplicatedStoragePool {
+	lvgs := make([]srv.ReplicatedStoragePoolLVMVolumeGroups, len(lvgNames))
+	for i, n := range lvgNames {
+		lvgs[i] = srv.ReplicatedStoragePoolLVMVolumeGroups{Name: n}
+	}
+	return &srv.ReplicatedStoragePool{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: srv.ReplicatedStoragePoolSpec{
+			Type:            rspType,
+			LVMVolumeGroups: lvgs,
+		},
+	}
+}
+
+func testRV(name string, members []srv.DatameshMember) *srv.ReplicatedVolume {
+	return &srv.ReplicatedVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Status: srv.ReplicatedVolumeStatus{
+			Datamesh: srv.ReplicatedVolumeDatamesh{
+				Members: members,
+			},
+		},
+	}
+}
+
+func diskfulMember(nodeName string) srv.DatameshMember {
+	return srv.DatameshMember{
+		Name:     "member-" + nodeName,
+		Type:     srv.DatameshMemberTypeDiskful,
+		NodeName: nodeName,
+	}
+}
+
+func disklessMember(nodeName string) srv.DatameshMember {
+	return srv.DatameshMember{
+		Name:     "tiebreaker-" + nodeName,
+		Type:     srv.DatameshMemberTypeTieBreaker,
+		NodeName: nodeName,
+	}
+}
+
+func testBoundPVC(name, namespace, scName, pvName string) *corev1.PersistentVolumeClaim {
+	return &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+			VolumeName:       pvName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{
+			Phase: corev1.ClaimBound,
+		},
+	}
+}
+
+func testPV(name, csiVolumeHandle string) *corev1.PersistentVolume {
+	return &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: corev1.PersistentVolumeSpec{
+			PersistentVolumeSource: corev1.PersistentVolumeSource{
+				CSI: &corev1.CSIPersistentVolumeSource{
+					Driver:       consts.SdsReplicatedVolumeProvisioner,
+					VolumeHandle: csiVolumeHandle,
+				},
+			},
+			Capacity: corev1.ResourceList{
+				corev1.ResourceStorage: resource.MustParse("1Gi"),
+			},
+		},
+	}
+}
+
+func testNode(name string, withReplicatedLabel bool) *corev1.Node {
+	labels := map[string]string{}
+	if withReplicatedLabel {
+		labels[srv.AgentNodeLabelKey] = ""
+	}
+	return &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: labels,
+		},
+	}
+}
+
+func testSC(name, provisioner string) *storagev1.StorageClass {
+	return &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: name},
+		Provisioner: provisioner,
+	}
+}
+
+func readyLVGOnNode(name string, nodeName string, vgSize, vgFree int64) *snc.LVMVolumeGroup {
+	return &snc.LVMVolumeGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Status: snc.LVMVolumeGroupStatus{
+			Phase:  snc.PhaseReady,
+			VGSize: *resource.NewQuantity(vgSize, resource.BinarySI),
+			VGFree: *resource.NewQuantity(vgFree, resource.BinarySI),
+			Nodes: []snc.LVMVolumeGroupNode{
+				{Name: nodeName},
+			},
+		},
+	}
 }
