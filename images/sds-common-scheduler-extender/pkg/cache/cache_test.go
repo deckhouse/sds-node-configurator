@@ -40,7 +40,7 @@ func TestAddReservation(t *testing.T) {
 	pool1 := StoragePoolKey{LVGName: "lvg1", ThinPoolName: ""}
 	pool2 := StoragePoolKey{LVGName: "lvg2", ThinPoolName: "tp1"}
 
-	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1, pool2})
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1, pool2}, false)
 
 	assert.True(t, c.HasReservation("res1"))
 	assert.Equal(t, int64(100), c.GetReservedSpace(pool1))
@@ -58,13 +58,13 @@ func TestAddReservation_Idempotent(t *testing.T) {
 	pool1 := StoragePoolKey{LVGName: "lvg1"}
 	pool2 := StoragePoolKey{LVGName: "lvg2"}
 
-	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1, pool2})
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1, pool2}, false)
 	assert.Equal(t, int64(100), c.GetReservedSpace(pool1))
 	assert.Equal(t, int64(100), c.GetReservedSpace(pool2))
 
 	// Replace with different pools and size
 	pool3 := StoragePoolKey{LVGName: "lvg3"}
-	c.AddReservation("res1", 30*time.Second, 200, []StoragePoolKey{pool3})
+	c.AddReservation("res1", 30*time.Second, 200, []StoragePoolKey{pool3}, false)
 
 	// Old pools should be freed
 	assert.Equal(t, int64(0), c.GetReservedSpace(pool1))
@@ -77,7 +77,7 @@ func TestRemoveReservation(t *testing.T) {
 	c := newTestCache()
 
 	pool1 := StoragePoolKey{LVGName: "lvg1"}
-	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1})
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1}, false)
 
 	assert.Equal(t, int64(100), c.GetReservedSpace(pool1))
 
@@ -100,7 +100,7 @@ func TestNarrowReservation_SinglePool(t *testing.T) {
 	pool2 := StoragePoolKey{LVGName: "lvg2"}
 	pool3 := StoragePoolKey{LVGName: "lvg3"}
 
-	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1, pool2, pool3})
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1, pool2, pool3}, false)
 
 	assert.Equal(t, int64(100), c.GetReservedSpace(pool1))
 	assert.Equal(t, int64(100), c.GetReservedSpace(pool2))
@@ -128,7 +128,7 @@ func TestNarrowReservation_MultiplePools(t *testing.T) {
 	pool2 := StoragePoolKey{LVGName: "lvg2"}
 	pool3 := StoragePoolKey{LVGName: "lvg3"}
 
-	c.AddReservation("res1", 30*time.Second, 50, []StoragePoolKey{pool1, pool2, pool3})
+	c.AddReservation("res1", 30*time.Second, 50, []StoragePoolKey{pool1, pool2, pool3}, false)
 
 	// Keep pool1 and pool3
 	ok := c.NarrowReservation("res1", []StoragePoolKey{pool1, pool3}, 30*time.Second)
@@ -150,7 +150,7 @@ func TestNarrowReservation_EmptyKeepPools(t *testing.T) {
 	c := newTestCache()
 
 	pool1 := StoragePoolKey{LVGName: "lvg1"}
-	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1})
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1}, false)
 
 	// Narrow with empty keep = removes all pools, reservation removed entirely
 	ok := c.NarrowReservation("res1", []StoragePoolKey{}, 30*time.Second)
@@ -165,8 +165,8 @@ func TestMultipleReservations_SamePool(t *testing.T) {
 
 	pool := StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp1"}
 
-	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool})
-	c.AddReservation("res2", 30*time.Second, 200, []StoragePoolKey{pool})
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool}, false)
+	c.AddReservation("res2", 30*time.Second, 200, []StoragePoolKey{pool}, false)
 
 	// Pool should have sum of both reservations
 	assert.Equal(t, int64(300), c.GetReservedSpace(pool))
@@ -184,9 +184,9 @@ func TestCleanupExpired(t *testing.T) {
 	pool := StoragePoolKey{LVGName: "lvg1"}
 
 	// Add reservation with very short TTL
-	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool})
+	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool}, false)
 	// Add reservation with long TTL
-	c.AddReservation("res2", 1*time.Hour, 200, []StoragePoolKey{pool})
+	c.AddReservation("res2", 1*time.Hour, 200, []StoragePoolKey{pool}, false)
 
 	assert.Equal(t, int64(300), c.GetReservedSpace(pool))
 
@@ -219,7 +219,7 @@ func TestGetReservedSpace_SkipsExpired(t *testing.T) {
 	pool := StoragePoolKey{LVGName: "lvg1"}
 
 	// Add reservation with very short TTL
-	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool})
+	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool}, false)
 
 	// Before expiration, space is reserved
 	assert.Equal(t, int64(100), c.GetReservedSpace(pool))
@@ -237,7 +237,7 @@ func TestGetAllPools(t *testing.T) {
 	pool1 := StoragePoolKey{LVGName: "lvg1"}
 	pool2 := StoragePoolKey{LVGName: "lvg2", ThinPoolName: "tp1"}
 
-	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1, pool2})
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1, pool2}, false)
 
 	pools := c.GetAllPools()
 	assert.Len(t, pools, 2)
@@ -251,8 +251,8 @@ func TestGetAllPools_SkipsExpired(t *testing.T) {
 	pool1 := StoragePoolKey{LVGName: "lvg1"}
 	pool2 := StoragePoolKey{LVGName: "lvg2"}
 
-	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool1})
-	c.AddReservation("res2", 1*time.Hour, 200, []StoragePoolKey{pool2})
+	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool1}, false)
+	c.AddReservation("res2", 1*time.Hour, 200, []StoragePoolKey{pool2}, false)
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -268,8 +268,8 @@ func TestGetAllReservations(t *testing.T) {
 	pool1 := StoragePoolKey{LVGName: "lvg1"}
 	pool2 := StoragePoolKey{LVGName: "lvg2"}
 
-	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1})
-	c.AddReservation("res2", 30*time.Second, 200, []StoragePoolKey{pool1, pool2})
+	c.AddReservation("res1", 30*time.Second, 100, []StoragePoolKey{pool1}, false)
+	c.AddReservation("res2", 30*time.Second, 200, []StoragePoolKey{pool1, pool2}, false)
 
 	reservations := c.GetAllReservations()
 	assert.Len(t, reservations, 2)
@@ -290,8 +290,8 @@ func TestGetAllReservations_MarksExpired(t *testing.T) {
 
 	pool := StoragePoolKey{LVGName: "lvg1"}
 
-	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool})
-	c.AddReservation("res2", 1*time.Hour, 200, []StoragePoolKey{pool})
+	c.AddReservation("res1", 1*time.Millisecond, 100, []StoragePoolKey{pool}, false)
+	c.AddReservation("res2", 1*time.Hour, 200, []StoragePoolKey{pool}, false)
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -342,7 +342,7 @@ func TestNarrowReservation_UpdatesTTL(t *testing.T) {
 	pool1 := StoragePoolKey{LVGName: "lvg1"}
 	pool2 := StoragePoolKey{LVGName: "lvg2"}
 
-	c.AddReservation("res1", 1*time.Second, 100, []StoragePoolKey{pool1, pool2})
+	c.AddReservation("res1", 1*time.Second, 100, []StoragePoolKey{pool1, pool2}, false)
 
 	// Narrow with a longer TTL
 	c.NarrowReservation("res1", []StoragePoolKey{pool1}, 1*time.Hour)
@@ -354,4 +354,44 @@ func TestNarrowReservation_UpdatesTTL(t *testing.T) {
 
 	// Reservation should still be alive due to updated TTL
 	assert.True(t, c.HasReservation("res1"))
+}
+
+func TestIsReservationReplicated(t *testing.T) {
+	c := newTestCache()
+
+	pool := StoragePoolKey{LVGName: "lvg1"}
+
+	c.AddReservation("local-pvc", 30*time.Second, 100, []StoragePoolKey{pool}, false)
+	c.AddReservation("replicated-pvc", 30*time.Second, 100, []StoragePoolKey{pool}, true)
+
+	assert.False(t, c.IsReservationReplicated("local-pvc"))
+	assert.True(t, c.IsReservationReplicated("replicated-pvc"))
+	assert.False(t, c.IsReservationReplicated("nonexistent"))
+}
+
+func TestIsReservationReplicated_Expired(t *testing.T) {
+	c := newTestCache()
+
+	pool := StoragePoolKey{LVGName: "lvg1"}
+	c.AddReservation("rep", 1*time.Millisecond, 100, []StoragePoolKey{pool}, true)
+
+	time.Sleep(10 * time.Millisecond)
+
+	assert.False(t, c.IsReservationReplicated("rep"))
+}
+
+func TestAddReservation_ReplicatedFlag(t *testing.T) {
+	c := newTestCache()
+
+	pool := StoragePoolKey{LVGName: "lvg1"}
+
+	c.AddReservation("pvc1", 30*time.Second, 100, []StoragePoolKey{pool}, true)
+
+	reservations := c.GetAllReservations()
+	assert.True(t, reservations["pvc1"].Replicated)
+
+	// Idempotent replace preserves new flag value
+	c.AddReservation("pvc1", 30*time.Second, 100, []StoragePoolKey{pool}, false)
+	reservations = c.GetAllReservations()
+	assert.False(t, reservations["pvc1"].Replicated)
 }

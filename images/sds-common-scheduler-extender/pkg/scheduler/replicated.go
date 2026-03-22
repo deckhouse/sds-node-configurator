@@ -135,6 +135,22 @@ func storagePoolKeyFromRSPLVG(lvgRef *srv.ReplicatedStoragePoolLVMVolumeGroups, 
 	return key
 }
 
+// getReplicatedPoolKeyForNode resolves the StoragePoolKey for a replicated PVC on a given node.
+// Returns the key and true if the node has an LVG from the RSP, false otherwise.
+func getReplicatedPoolKeyForNode(
+	ctx context.Context,
+	cl client.Client,
+	nodeName string,
+	rsp *srv.ReplicatedStoragePool,
+	deviceType string,
+) (cache.StoragePoolKey, bool) {
+	lvgRef, found := findLVGForNodeInRSP(ctx, cl, nodeName, rsp)
+	if !found {
+		return cache.StoragePoolKey{}, false
+	}
+	return storagePoolKeyFromRSPLVG(lvgRef, deviceType), true
+}
+
 func checkNodeHasLVGWithSpaceForReplicated(
 	ctx context.Context,
 	log logger.Logger,

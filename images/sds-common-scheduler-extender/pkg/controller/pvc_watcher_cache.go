@@ -155,6 +155,11 @@ func narrowReservationToNode(
 		return
 	}
 
+	if schedulerCache.IsReservationReplicated(pvcKey) {
+		log.Debug(fmt.Sprintf("[narrowReservationToNode] PVC %s has replicated reservation, skipping narrow on selected-node", pvcKey))
+		return
+	}
+
 	// Get all LVGs on the selected node via field indexer
 	var lvgList snc.LVMVolumeGroupList
 	if err := cl.List(ctx, &lvgList, client.MatchingFields{scheduler.IndexFieldLVGNodeName: selectedNodeName}); err != nil {

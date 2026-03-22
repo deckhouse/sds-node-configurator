@@ -228,7 +228,7 @@ func TestGetAvailableSpace_WithReservation(t *testing.T) {
 	)
 	c := newTestCache()
 	key := cache.StoragePoolKey{LVGName: "lvg1"}
-	c.AddReservation("pvc-1", 60*time.Second, 16*oneGiB, []cache.StoragePoolKey{key})
+	c.AddReservation("pvc-1", 60*time.Second, 16*oneGiB, []cache.StoragePoolKey{key}, false)
 
 	info, err := getAvailableSpace(ctx, cl, c, key)
 	require.NoError(t, err)
@@ -265,7 +265,7 @@ func TestGetAvailableSpace_DoubleCountingSafety(t *testing.T) {
 	)
 	c := newTestCache()
 	key := cache.StoragePoolKey{LVGName: "lvg1"}
-	c.AddReservation("pvc-new", 60*time.Second, 16*oneGiB, []cache.StoragePoolKey{key})
+	c.AddReservation("pvc-new", 60*time.Second, 16*oneGiB, []cache.StoragePoolKey{key}, false)
 
 	info, err := getAvailableSpace(ctx, cl, c, key)
 	require.NoError(t, err)
@@ -342,7 +342,7 @@ func TestGetAvailableSpace_ThinPool_WithReservation(t *testing.T) {
 	)
 	c := newTestCache()
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
-	c.AddReservation("pvc-1", 60*time.Second, 30*oneGiB, []cache.StoragePoolKey{key})
+	c.AddReservation("pvc-1", 60*time.Second, 30*oneGiB, []cache.StoragePoolKey{key}, false)
 
 	info, err := getAvailableSpace(ctx, cl, c, key)
 	require.NoError(t, err)

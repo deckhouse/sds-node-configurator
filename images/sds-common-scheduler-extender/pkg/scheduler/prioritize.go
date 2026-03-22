@@ -366,39 +366,60 @@ func narrowReservationsToFinalNodes(
 ) {
 	for _, pvc := range managedPVCs {
 		sc := scUsedByPVCs[*pvc.Spec.StorageClassName]
-
-		// Only narrow local PVCs (replicated use a different mechanism)
-		if sc.Provisioner != consts.SdsLocalVolumeProvisioner {
-			continue
-		}
-
 		pvcReq, exists := pvcRequests[pvc.Name]
 		if !exists {
 			continue
 		}
 
-		lvgsFromSC, err := ExtractLVGsFromSC(sc)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[narrowReservationsToFinalNodes] unable to extract LVGs from SC %s", sc.Name))
-			continue
-		}
-
-		// Collect StoragePoolKeys from the final node list
 		var keepPools []cache.StoragePoolKey
-		for _, nodeName := range finalNodeNames {
-			nodeLVGs, err := getLVGsOnNode(ctx, cl, nodeName)
+
+		switch sc.Provisioner {
+		case consts.SdsLocalVolumeProvisioner:
+			lvgsFromSC, err := ExtractLVGsFromSC(sc)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[narrowReservationsToFinalNodes] unable to get LVGs for node %s", nodeName))
+				log.Error(err, fmt.Sprintf("[narrowReservationsToFinalNodes] unable to extract LVGs from SC %s", sc.Name))
 				continue
 			}
 
-			commonLVG := findMatchedSCLVG(nodeLVGs, lvgsFromSC)
-			if commonLVG == nil {
-				continue
+			for _, nodeName := range finalNodeNames {
+				nodeLVGs, err := getLVGsOnNode(ctx, cl, nodeName)
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[narrowReservationsToFinalNodes] unable to get LVGs for node %s", nodeName))
+					continue
+				}
+
+				commonLVG := findMatchedSCLVG(nodeLVGs, lvgsFromSC)
+				if commonLVG == nil {
+					continue
+				}
+
+				key := storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType)
+				keepPools = append(keepPools, key)
 			}
 
-			key := storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType)
-			keepPools = append(keepPools, key)
+		case consts.SdsReplicatedVolumeProvisioner:
+			rsc, err := getReplicatedStorageClass(ctx, cl, sc.Name)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[narrowReservationsToFinalNodes] unable to get RSC for SC %s", sc.Name))
+				continue
+			}
+			rsp, err := getReplicatedStoragePool(ctx, cl, rscStoragePoolName(rsc))
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[narrowReservationsToFinalNodes] unable to get RSP for RSC %s", rsc.Name))
+				continue
+			}
+			deviceType := getDeviceTypeFromRSP(rsp)
+
+			for _, nodeName := range finalNodeNames {
+				key, found := getReplicatedPoolKeyForNode(ctx, cl, nodeName, rsp, deviceType)
+				if !found {
+					continue
+				}
+				keepPools = append(keepPools, key)
+			}
+
+		default:
+			continue
 		}
 
 		if len(keepPools) > 0 {

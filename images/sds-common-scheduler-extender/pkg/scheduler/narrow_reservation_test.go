@@ -113,7 +113,7 @@ func Test_narrowReservation(t *testing.T) {
 		c := newTestCache()
 		s := newTestScheduler(cl, c)
 
-		c.AddReservation("ns/pvc", 60*time.Second, oneGiB, []cache.StoragePoolKey{pool1, pool2})
+		c.AddReservation("ns/pvc", 60*time.Second, oneGiB, []cache.StoragePoolKey{pool1, pool2}, false)
 		assert.True(t, c.HasReservation("ns/pvc"))
 		assert.Equal(t, oneGiB, c.GetReservedSpace(pool1))
 		assert.Equal(t, oneGiB, c.GetReservedSpace(pool2))
@@ -157,7 +157,7 @@ func Test_narrowReservation(t *testing.T) {
 		c := newTestCache()
 		s := newTestScheduler(cl, c)
 
-		c.AddReservation("ns/pvc", 60*time.Second, oneGiB, []cache.StoragePoolKey{pool1})
+		c.AddReservation("ns/pvc", 60*time.Second, oneGiB, []cache.StoragePoolKey{pool1}, false)
 		assert.True(t, c.HasReservation("ns/pvc"))
 
 		// Narrow to lvg2 which is not in the reservation - reservation gets removed

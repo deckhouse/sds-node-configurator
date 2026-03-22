@@ -124,8 +124,8 @@ func (s *scheduler) filterAndScore(w http.ResponseWriter, r *http.Request) {
 		return scored[i].Score > scored[j].Score
 	})
 
-	// Reserve space for all filtered pools
-	s.cache.AddReservation(req.ReservationID, ttl, req.Size, filteredKeys)
+	// Reserve space for all filtered pools (used by RVR controller for replicated volumes)
+	s.cache.AddReservation(req.ReservationID, ttl, req.Size, filteredKeys, true)
 
 	// Build response
 	response := FilterAndScoreResponse{LVGS: scored}

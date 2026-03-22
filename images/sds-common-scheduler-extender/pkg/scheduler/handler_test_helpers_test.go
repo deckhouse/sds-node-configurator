@@ -138,6 +138,14 @@ func newFakeClient(objects ...client.Object) client.Client {
 			llv := obj.(*snc.LVMLogicalVolume)
 			return []string{llv.Spec.LVMVolumeGroupName}
 		}).
+		WithIndex(&snc.LVMVolumeGroup{}, IndexFieldLVGNodeName, func(obj client.Object) []string {
+			lvg := obj.(*snc.LVMVolumeGroup)
+			var nodes []string
+			for _, n := range lvg.Status.Nodes {
+				nodes = append(nodes, n.Name)
+			}
+			return nodes
+		}).
 		Build()
 }
 

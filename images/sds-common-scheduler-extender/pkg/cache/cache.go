@@ -45,17 +45,19 @@ func (k StoragePoolKey) String() string {
 
 // Reservation tracks a single reservation across one or more storage pools.
 type Reservation struct {
-	expiresAt time.Time
-	size      int64
-	pools     map[StoragePoolKey]struct{}
+	expiresAt  time.Time
+	size       int64
+	pools      map[StoragePoolKey]struct{}
+	replicated bool // PVC watcher should not narrow replicated reservations on selected-node
 }
 
 // ReservationInfo is an exported snapshot of a Reservation for debug/inspection.
 type ReservationInfo struct {
-	Size      int64
-	ExpiresAt time.Time
-	Pools     []StoragePoolKey
-	Expired   bool
+	Size       int64
+	ExpiresAt  time.Time
+	Pools      []StoragePoolKey
+	Expired    bool
+	Replicated bool
 }
 
 // Cache is a reservation store combined with per-pool unaccounted space offsets.
@@ -133,9 +135,28 @@ func (c *Cache) HasReservation(id string) bool {
 	return !time.Now().After(r.expiresAt)
 }
 
+// IsReservationReplicated returns true if the reservation exists, is active, and is marked
+// as replicated. Replicated reservations should not be narrowed to a single node by the
+// PVC watcher because replicated volumes need space on multiple nodes for replicas.
+func (c *Cache) IsReservationReplicated(id string) bool {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+
+	r, ok := c.reservations[id]
+	if !ok {
+		return false
+	}
+	if time.Now().After(r.expiresAt) {
+		return false
+	}
+	return r.replicated
+}
+
 // AddReservation adds a new reservation. If a reservation with the same ID already exists,
 // it is removed first (idempotent replace).
-func (c *Cache) AddReservation(id string, ttl time.Duration, size int64, poolKeys []StoragePoolKey) {
+// When replicated is true, the PVC watcher will skip narrowing this reservation on selected-node
+// because replicated volumes need space reserved on multiple nodes for replicas.
+func (c *Cache) AddReservation(id string, ttl time.Duration, size int64, poolKeys []StoragePoolKey, replicated bool) {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
@@ -151,12 +172,13 @@ func (c *Cache) AddReservation(id string, ttl time.Duration, size int64, poolKey
 	}
 
 	c.reservations[id] = &Reservation{
-		expiresAt: time.Now().Add(ttl),
-		size:      size,
-		pools:     poolSet,
+		expiresAt:  time.Now().Add(ttl),
+		size:       size,
+		pools:      poolSet,
+		replicated: replicated,
 	}
 
-	c.log.Debug(fmt.Sprintf("[AddReservation] reservation %s added: size=%d, pools=%d, ttl=%s", id, size, len(poolSet), ttl))
+	c.log.Debug(fmt.Sprintf("[AddReservation] reservation %s added: size=%d, pools=%d, ttl=%s, replicated=%v", id, size, len(poolSet), ttl, replicated))
 }
 
 // RemoveReservation removes a reservation.
@@ -241,10 +263,11 @@ func (c *Cache) GetAllReservations() map[string]ReservationInfo {
 			pools = append(pools, k)
 		}
 		result[id] = ReservationInfo{
-			Size:      r.size,
-			ExpiresAt: r.expiresAt,
-			Pools:     pools,
-			Expired:   now.After(r.expiresAt),
+			Size:       r.size,
+			ExpiresAt:  r.expiresAt,
+			Pools:      pools,
+			Expired:    now.After(r.expiresAt),
+			Replicated: r.replicated,
 		}
 	}
 	return result

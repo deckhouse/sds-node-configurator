@@ -405,46 +405,70 @@ func createReservations(
 
 	for _, pvc := range managedPVCs {
 		sc := scUsedByPVCs[*pvc.Spec.StorageClassName]
-
-		// Only create reservations for local PVCs; replicated PVCs use a different mechanism
-		if sc.Provisioner != consts.SdsLocalVolumeProvisioner {
-			log.Debug(fmt.Sprintf("[createReservations] PVC %s uses provisioner %s, skipping", pvc.Name, sc.Provisioner))
-			continue
-		}
-
 		pvcReq, exists := pvcRequests[pvc.Name]
 		if !exists {
 			continue
 		}
 
-		lvgsFromSC, err := ExtractLVGsFromSC(sc)
-		if err != nil {
-			return err
-		}
-
-		// Collect StoragePoolKeys across all filtered nodes
 		var poolKeys []cache.StoragePoolKey
-		for _, nodeName := range *filteredNodeNames {
-			nodeLVGs, err := getLVGsOnNode(ctx, cl, nodeName)
+		replicated := false
+
+		switch sc.Provisioner {
+		case consts.SdsLocalVolumeProvisioner:
+			lvgsFromSC, err := ExtractLVGsFromSC(sc)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[createReservations] unable to get LVGs for node %s", nodeName))
-				continue
+				return err
 			}
 
-			commonLVG := findMatchedSCLVG(nodeLVGs, lvgsFromSC)
-			if commonLVG == nil {
-				continue
+			for _, nodeName := range *filteredNodeNames {
+				nodeLVGs, err := getLVGsOnNode(ctx, cl, nodeName)
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[createReservations] unable to get LVGs for node %s", nodeName))
+					continue
+				}
+
+				commonLVG := findMatchedSCLVG(nodeLVGs, lvgsFromSC)
+				if commonLVG == nil {
+					continue
+				}
+
+				key := storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType)
+				poolKeys = append(poolKeys, key)
+				log.Trace(fmt.Sprintf("[createReservations] PVC %s/%s will reserve space in %s (node %s)", pvc.Namespace, pvc.Name, key.String(), nodeName))
 			}
 
-			key := storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType)
-			poolKeys = append(poolKeys, key)
-			log.Trace(fmt.Sprintf("[createReservations] PVC %s/%s will reserve space in %s (node %s)", pvc.Namespace, pvc.Name, key.String(), nodeName))
+		case consts.SdsReplicatedVolumeProvisioner:
+			replicated = true
+			rsc, err := getReplicatedStorageClass(ctx, cl, sc.Name)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[createReservations] unable to get RSC for SC %s", sc.Name))
+				continue
+			}
+			rsp, err := getReplicatedStoragePool(ctx, cl, rscStoragePoolName(rsc))
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[createReservations] unable to get RSP for RSC %s", rsc.Name))
+				continue
+			}
+			deviceType := getDeviceTypeFromRSP(rsp)
+
+			for _, nodeName := range *filteredNodeNames {
+				key, found := getReplicatedPoolKeyForNode(ctx, cl, nodeName, rsp, deviceType)
+				if !found {
+					continue
+				}
+				poolKeys = append(poolKeys, key)
+				log.Trace(fmt.Sprintf("[createReservations] PVC %s/%s will reserve replicated space in %s (node %s)", pvc.Namespace, pvc.Name, key.String(), nodeName))
+			}
+
+		default:
+			log.Debug(fmt.Sprintf("[createReservations] PVC %s uses unknown provisioner %s, skipping", pvc.Name, sc.Provisioner))
+			continue
 		}
 
 		if len(poolKeys) > 0 {
 			pvcKey := pvc.Namespace + "/" + pvc.Name
-			schedulerCache.AddReservation(pvcKey, defaultReservationTTL, pvcReq.RequestedSize, poolKeys)
-			log.Debug(fmt.Sprintf("[createReservations] reservation created for PVC %s: size=%d, pools=%d", pvcKey, pvcReq.RequestedSize, len(poolKeys)))
+			schedulerCache.AddReservation(pvcKey, defaultReservationTTL, pvcReq.RequestedSize, poolKeys, replicated)
+			log.Debug(fmt.Sprintf("[createReservations] reservation created for PVC %s: size=%d, pools=%d, replicated=%v", pvcKey, pvcReq.RequestedSize, len(poolKeys), replicated))
 		}
 	}
 
