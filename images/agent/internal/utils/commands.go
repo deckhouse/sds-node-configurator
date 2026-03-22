@@ -252,7 +252,7 @@ func (commands) CreatePV(path string) (string, error) {
 
 func (commands) CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
 	tmpStr := fmt.Sprintf("storage.deckhouse.io/lvmVolumeGroupName=%s", lvmVolumeGroupName)
-	args := []string{"vgcreate", vgName}
+	args := []string{"vgcreate", "--autobackup", "n", vgName}
 	args = append(args, pvNames...)
 	args = append(args, "--addtag", "storage.deckhouse.io/enabled=true", "--addtag", tmpStr)
 
@@ -271,7 +271,7 @@ func (commands) CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []strin
 
 func (commands) CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
 	tmpStr := fmt.Sprintf("storage.deckhouse.io/lvmVolumeGroupName=%s", lvmVolumeGroupName)
-	args := []string{"vgcreate", "--shared", vgName}
+	args := []string{"vgcreate", "--autobackup", "n", "--shared", vgName}
 	args = append(args, pvNames...)
 	args = append(args, "--addtag", "storage.deckhouse.io/enabled=true", "--addtag", "--addtag", tmpStr)
 
@@ -289,7 +289,7 @@ func (commands) CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []stri
 }
 
 func (commands) CreateThinPool(thinPoolName, vgName string, size int64) (string, error) {
-	args := []string{"lvcreate", "-ay", "-L", fmt.Sprintf("%dk", size/1024), "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
+	args := []string{"lvcreate", "--autobackup", "n", "-ay", "-L", fmt.Sprintf("%dk", size/1024), "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -303,7 +303,7 @@ func (commands) CreateThinPool(thinPoolName, vgName string, size int64) (string,
 }
 
 func (commands) CreateThinPoolFullVGSpace(thinPoolName, vgName string) (string, error) {
-	args := []string{"lvcreate", "-ay", "-l", "100%FREE", "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
+	args := []string{"lvcreate", "--autobackup", "n", "-ay", "-l", "100%FREE", "-T", fmt.Sprintf("%s/%s", vgName, thinPoolName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -325,7 +325,7 @@ func (commands) CreateThinLogicalVolumeSnapshot(name string, sourceVgName string
 }
 
 func createSnapshotVolume(name string, sourceVgName string, sourceName string, tags []string) (string, error) {
-	args := []string{"lvcreate", "-ay", "-s", "-kn", "-n", name, fmt.Sprintf("%s/%s", sourceVgName, sourceName), "-y"}
+	args := []string{"lvcreate", "--autobackup", "n", "-ay", "-s", "-kn", "-n", name, fmt.Sprintf("%s/%s", sourceVgName, sourceName), "-y"}
 
 	for _, tag := range tags {
 		args = append(args, "--addtag")
@@ -349,7 +349,7 @@ func createSnapshotVolume(name string, sourceVgName string, sourceName string, t
 }
 
 func (commands) CreateThinLogicalVolume(vgName, tpName, lvName string, size int64) (string, error) {
-	args := []string{"lvcreate", "-ay", "-T", fmt.Sprintf("%s/%s", vgName, tpName), "-n", lvName, "-V", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
+	args := []string{"lvcreate", "--autobackup", "n", "-ay", "-T", fmt.Sprintf("%s/%s", vgName, tpName), "-n", lvName, "-V", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -367,7 +367,7 @@ func (commands) CreateThinLogicalVolume(vgName, tpName, lvName string, size int6
 }
 
 func (commands) CreateThickLogicalVolume(vgName, lvName string, size int64, contiguous bool) (string, error) {
-	args := []string{"lvcreate", "-ay", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
+	args := []string{"lvcreate", "--autobackup", "n", "-ay", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", fmt.Sprintf("%dk", size/1024), "-W", "y", "-y"}
 	if contiguous {
 		args = append(args, "--contiguous", "y")
 	}
@@ -386,7 +386,7 @@ func (commands) CreateThickLogicalVolume(vgName, lvName string, size int64, cont
 }
 
 func (commands) ExtendVG(vgName string, paths []string) (string, error) {
-	args := []string{"vgextend", vgName}
+	args := []string{"vgextend", "--autobackup", "n", vgName}
 	args = append(args, paths...)
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
@@ -402,7 +402,7 @@ func (commands) ExtendVG(vgName string, paths []string) (string, error) {
 }
 
 func (commands) ExtendLV(size int64, vgName, lvName string) (string, error) {
-	args := []string{"lvextend", "-L", fmt.Sprintf("%dk", size/1024), filepath.Join("/dev", vgName, lvName)}
+	args := []string{"lvextend", "--autobackup", "n", "-L", fmt.Sprintf("%dk", size/1024), filepath.Join("/dev", vgName, lvName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -419,7 +419,7 @@ func (commands) ExtendLV(size int64, vgName, lvName string) (string, error) {
 }
 
 func (commands) ExtendLVFullVGSpace(vgName, lvName string) (string, error) {
-	args := []string{"lvextend", "-l", "100%VG", filepath.Join("/dev", vgName, lvName)}
+	args := []string{"lvextend", "--autobackup", "n", "-l", "100%VG", filepath.Join("/dev", vgName, lvName)}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -481,7 +481,7 @@ func (commands) RemovePV(pvNames []string) (string, error) {
 }
 
 func (commands) RemoveLV(vgName, lvName string) (string, error) {
-	args := []string{"lvremove", filepath.Join("/dev", vgName, lvName), "-y"}
+	args := []string{"lvremove", "--autobackup", "n", filepath.Join("/dev", vgName, lvName), "-y"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -496,7 +496,7 @@ func (commands) RemoveLV(vgName, lvName string) (string, error) {
 
 func (commands) VGChangeAddTag(vGName, tag string) (string, error) {
 	var outs, stdErr bytes.Buffer
-	args := []string{"vgchange", vGName, "--addtag", tag}
+	args := []string{"vgchange", "--autobackup", "n", vGName, "--addtag", tag}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
@@ -510,7 +510,7 @@ func (commands) VGChangeAddTag(vGName, tag string) (string, error) {
 
 func (commands) VGChangeDelTag(vGName, tag string) (string, error) {
 	var outs, stdErr bytes.Buffer
-	args := []string{"vgchange", vGName, "--deltag", tag}
+	args := []string{"vgchange", "--autobackup", "n", vGName, "--deltag", tag}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
@@ -525,7 +525,7 @@ func (commands) VGChangeDelTag(vGName, tag string) (string, error) {
 func (commands) LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
 	tmpStr := filepath.Join("/dev/%s/%s", lv.VGName, lv.LVName)
 	var outs, stdErr bytes.Buffer
-	args := []string{"lvchange", tmpStr, "--deltag", tag}
+	args := []string{"lvchange", "--autobackup", "n", tmpStr, "--deltag", tag}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
