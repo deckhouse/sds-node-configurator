@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	defaultReservationTTL = 600 * time.Second
+	defaultReservationTTL = 60 * time.Second
 )
 
 func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {

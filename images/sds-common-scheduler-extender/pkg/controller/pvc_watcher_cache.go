@@ -39,7 +39,7 @@ import (
 
 const (
 	PVCWatcherCacheCtrlName = "pvc-watcher-cache-controller"
-	defaultNarrowTTL        = 600 * time.Second
+	defaultNarrowTTL        = 60 * time.Second
 )
 
 func RunPVCWatcherCacheController(
