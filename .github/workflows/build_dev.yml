@@ -189,10 +189,10 @@ jobs:
 
       - name: Setup test environment
         run: |
-          # Use /tmp for temp files (cleaned up at the end)
-          E2E_SSH_KEY_PATH="/tmp/e2e_ci_key"
-          E2E_SSH_PUB_PATH="/tmp/e2e_ci_key.pub"
-          E2E_KUBECONFIG_PATH="/tmp/e2e-kubeconfig"
+          # Create temp files with mktemp (unique names, auto-cleanup friendly)
+          E2E_SSH_KEY_PATH=$(mktemp /tmp/e2e_ssh_key.XXXXXX)
+          E2E_SSH_PUB_PATH=$(mktemp /tmp/e2e_ssh_pub.XXXXXX)
+          E2E_KUBECONFIG_PATH=$(mktemp /tmp/e2e_kubeconfig.XXXXXX)
 
           echo "E2E_SSH_KEY_PATH=${E2E_SSH_KEY_PATH}" >> $GITHUB_ENV
           echo "E2E_SSH_PUB_PATH=${E2E_SSH_PUB_PATH}" >> $GITHUB_ENV
@@ -379,5 +379,5 @@ jobs:
       - name: Cleanup temp files (SSH keys, kubeconfig)
         if: always()
         run: |
-          rm -f /tmp/e2e_ci_key /tmp/e2e_ci_key.pub /tmp/e2e-kubeconfig 2>/dev/null || true
+          rm -f "$E2E_SSH_KEY_PATH" "$E2E_SSH_PUB_PATH" "$E2E_KUBECONFIG_PATH" 2>/dev/null || true
           echo "Temp files cleaned"
