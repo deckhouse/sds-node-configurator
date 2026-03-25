@@ -34,6 +34,7 @@ jobs:
     secrets: inherit
     with:
       svace_enabled: ${{ github.event.inputs.svace_enabled && true || false }}
+      run_e2e_smoke_tests: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test') }}
   cve_scan_on_pr:
     if: github.event_name == 'pull_request'
     name: CVE scan for PR
