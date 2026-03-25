@@ -4,40 +4,72 @@
 
 ## Описание
 
-E2E тесты предназначены для проверки полного цикла работы модуля в реальном Kubernetes кластере. Тесты используют фреймворк [Ginkgo](https://onsi.github.io/ginkgo/) для организации тестовых сценариев и [Gomega](https://onsi.github.io/gomega/) для утверждений (assertions).
+E2E тесты предназначены для проверки полного цикла работы модуля в реальном Kubernetes кластере. Тесты используют фреймворк [storage-e2e](https://github.com/deckhouse/storage-e2e) для управления тестовым кластером и [Ginkgo](https://onsi.github.io/ginkgo/) / [Gomega](https://onsi.github.io/gomega/) для организации тестовых сценариев.
 
 ## Предварительные требования
 
 1. **Kubernetes кластер**: Доступный Kubernetes кластер с установленным модулем `sds-node-configurator`
-2. **kubectl**: Настроенный доступ к кластеру через kubectl
-3. **Docker**: Для сборки образа тестов (при запуске в кластере)
+2. **Go 1.22+**: Для запуска тестов
+3. **SSH доступ**: К мастер-ноде кластера (для storage-e2e)
 
 ## Структура
 
 ```
 e2e/
-├── Dockerfile                                   # Образ для запуска тестов в кластере
-├── Makefile                                     # Команды для сборки и запуска
-├── README.md                                    # Данный файл
-├── go.mod                                       # Go модуль
-├── go.sum                                       # Зависимости
-├── manifests/
-│   ├── rbac.yaml                                # ServiceAccount, ClusterRole, ClusterRoleBinding
-│   └── job.yaml                                 # Job для запуска тестов
+├── Makefile              # Команды для запуска тестов
+├── README.md             # Данный файл
+├── E2E_USAGE.md          # Подробная инструкция по запуску
+├── go.mod                # Go модуль
+├── go.sum                # Зависимости
+├── config/               # Локальные конфиги (в .gitignore)
 └── tests/
-    ├── block_device_discovery_suite_test.go     # Инициализация Ginkgo suite
-    ├── block_device_discovery_test.go           # Основные тесты
-    └── helpers.go                               # Вспомогательные функции
+    ├── sds_node_configurator_suite_test.go  # Инициализация Ginkgo suite
+    ├── sds_node_configurator_test.go        # Основные тесты
+    └── cluster_config.yml                   # Конфигурация тестового кластера
+```
+
+## Быстрый старт
+
+### 1. Подготовьте конфигурацию
+
+Папка `e2e/config/` в `.gitignore`. Создайте там файл с переменными окружения:
+
+```bash
+# e2e/config/test_exports_storage_e2e
+export TEST_CLUSTER_CREATE_MODE='alwaysUseExisting'
+export TEST_CLUSTER_NAMESPACE='e2e-test'
+export TEST_CLUSTER_STORAGE_CLASS='linstor-r1'
+export TEST_CLUSTER_CLEANUP='false'
+
+export SSH_HOST='<master-ip>'
+export SSH_USER='<ssh-user>'
+export SSH_PRIVATE_KEY='/path/to/ssh/key'
+
+export KUBE_CONFIG_PATH='/path/to/kubeconfig'
+
+export DKP_LICENSE_KEY='<license>'
+export REGISTRY_DOCKER_CFG='<base64-encoded>'
+```
+
+### 2. Запустите тесты
+
+```bash
+source e2e/config/test_exports_storage_e2e
+cd e2e
+make test
+```
+
+Или конкретный тест:
+
+```bash
+make test-focus FOCUS="TestSdsNodeConfigurator"
 ```
 
 ## Тестовые сценарии
 
-### 1. Автоматическое обнаружение нового блочного устройства
+### BlockDevice Discovery
 
-**Сценарий**: `Должен обнаружить новый неразмеченный диск и создать объект BlockDevice`
-
-**Описание**:
-- На ноде появляется новый неразмеченный диск (например, `/dev/sdb`)
+- На ноде появляется новый неразмеченный диск
 - Через некоторое время в кластере появляется объект BlockDevice
 - Проверяется корректность всех полей объекта
 
@@ -45,108 +77,22 @@ e2e/
 - ✅ Объект BlockDevice существует
 - ✅ `status.nodeName` соответствует имени ноды
 - ✅ `status.path` соответствует пути к устройству
-- ✅ `status.size` больше 0 (минимум 1Gi)
-- ✅ `status.serial` содержит серийный номер устройства
+- ✅ `status.size` больше 0
 - ✅ `status.consumable` = true для неразмеченного диска
-- ✅ `status.fsType` пустой для неразмеченного диска
 
-## Запуск тестов в кластере
+### LVMVolumeGroup
 
-### 1. Сборка образа
+- Создание LVMVolumeGroup на основе BlockDevice
+- Проверка статуса и capacity
 
-```bash
-cd e2e
+## Кластер заблокирован (cluster is already locked)
 
-# Собрать образ
-make docker-build E2E_IMAGE=your-registry/e2e-tests:latest
-
-# Отправить в registry
-make docker-push E2E_IMAGE=your-registry/e2e-tests:latest
-```
-
-### 2. Запуск тестов
-
-```bash
-# Запустить тесты в кластере
-make run-in-cluster \
-  E2E_IMAGE=your-registry/e2e-tests:latest \
-  E2E_NODE_NAME=worker-0 \
-  E2E_DEVICE_PATH=/dev/sdb \
-  E2E_DEVICE_SERIAL=<серийный номер>
-
-# Просмотреть логи
-make logs
-
-# Проверить статус
-make status
-```
-
-### 3. Очистка
-
-```bash
-make cleanup
-```
-
-## Локальная конфигурация (не в репозитории)
-
-Папка `e2e/config/` добавлена в `.gitignore`. Для локального запуска тестов со storage-e2e (создание/подключение к кластеру) создайте в ней файлы с переменными окружения, например:
-
-- `e2e/config/test_exports` или `e2e/config/test_exports_storage_e2e` — скрипты с `export TEST_CLUSTER_CREATE_MODE=...`, `SSH_HOST`, `E2E_DKP_LICENSE_KEY` / `E2E_REGISTRY_DOCKER_CFG`, при необходимости `E2E_CLUSTER_KUBECONFIG` (конфиг) и `E2E_SSH_PRIVATE_KEY` (ключ) и т.д.
-
-Запуск с подгрузкой переменных:
-
-```bash
-source e2e/config/test_exports_storage_e2e   # или test_exports
-cd e2e && go test -v -run TestSdsNodeConfigurator ./tests/
-```
-
-### Кластер уже заблокирован (cluster is already locked)
-
-Если предыдущий запуск тестов завершился по Ctrl+C или упал до cleanup, лок на кластере не снимается. Ошибка: `failed to acquire cluster lock: cluster is already locked`.
-
-**Решение:** перед запуском один раз выставить принудительное снятие лока (только если уверены, что другой тест не использует кластер):
+Если предыдущий запуск тестов завершился по Ctrl+C или упал до cleanup:
 
 ```bash
 export TEST_CLUSTER_FORCE_LOCK_RELEASE='true'
 source e2e/config/test_exports_storage_e2e
-cd e2e && go test -v -run TestSdsNodeConfigurator ./tests/
-```
-
-Можно добавить `export TEST_CLUSTER_FORCE_LOCK_RELEASE='true'` в свой `e2e/config/test_exports_storage_e2e` для постоянного использования или убрать после первого успешного запуска.
-
-## Переменные окружения
-
-| Переменная         | Описание                              | Значение по умолчанию |
-|--------------------|---------------------------------------|-----------------------|
-| `E2E_IMAGE`        | Docker образ с тестами                | `e2e-tests:latest`    |
-| `E2E_NODE_NAME`    | Имя ноды для тестирования             | `worker-0`            |
-| `E2E_DEVICE_PATH`  | Путь к блочному устройству            | `/dev/sdb`            |
-| `E2E_DEVICE_SERIAL`| Ожидаемый серийный номер устройства   | (не задан)            |
-
-## Пример полного цикла
-
-```bash
-cd e2e
-
-# 1. Проверить серийный номер диска на ноде
-kubectl debug node/worker-0 -it --image=alpine -- lsblk -o NAME,SERIAL
-
-# 2. Собрать и отправить образ
-make docker-build E2E_IMAGE=registry.example.com/e2e-tests:v1
-make docker-push E2E_IMAGE=registry.example.com/e2e-tests:v1
-
-# 3. Запустить тесты
-make run-in-cluster \
-  E2E_IMAGE=registry.example.com/e2e-tests:v1 \
-  E2E_NODE_NAME=worker-0 \
-  E2E_DEVICE_PATH=/dev/sdb \
-  E2E_DEVICE_SERIAL=ABC123
-
-# 4. Следить за выполнением
-make logs
-
-# 5. Очистить после выполнения
-make cleanup
+cd e2e && make test
 ```
 
 ## Отладка
@@ -154,53 +100,27 @@ make cleanup
 ### Просмотр логов агента
 
 ```bash
-# Найти под агента на нужной ноде
 kubectl get pods -n d8-sds-node-configurator -o wide | grep <node-name>
-
-# Просмотреть логи
 kubectl logs -n d8-sds-node-configurator <agent-pod-name> -f
 ```
 
-### Проверка состояния BlockDevice
+### Проверка BlockDevice
 
 ```bash
-# Получить список всех BlockDevice
 kubectl get blockdevice
-
-# Получить детальную информацию
 kubectl describe blockdevice <bd-name>
-
-# Получить BlockDevice на конкретной ноде
 kubectl get blockdevice -l kubernetes.io/hostname=<node-name>
 ```
 
-## Устранение неполадок
+### Проверка LVMVolumeGroup
 
-### Тест не находит BlockDevice
-
-**Возможные причины**:
-1. Агент не запущен на ноде
-2. Диск не появился в системе (проверьте `lsblk` на ноде)
-3. Интервал сканирования агента слишком большой
-4. Диск отфильтрован (проверьте фильтры BlockDeviceFilter)
-
-**Решение**:
 ```bash
-# Проверьте статус агента
-kubectl get pods -n d8-sds-node-configurator -o wide
-
-# Проверьте логи агента
-kubectl logs -n d8-sds-node-configurator <agent-pod> | grep "block-device-controller"
-
-# Проверьте устройство на ноде
-kubectl debug node/<node-name> -it --image=alpine -- lsblk
+kubectl get lvmvolumegroup
+kubectl describe lvmvolumegroup <lvg-name>
 ```
-
-### Таймаут при ожидании BlockDevice
-
-Тесты ожидают появления BlockDevice в течение 5 минут. Если агент сканирует устройства реже, увеличьте таймаут в коде теста или проверьте настройки агента.
 
 ## Дополнительная информация
 
-- [Документация Ginkgo](https://onsi.github.io/ginkgo/)
-- [Документация Gomega](https://onsi.github.io/gomega/)
+- [E2E_USAGE.md](E2E_USAGE.md) — подробная инструкция по CI и локальному запуску
+- [storage-e2e](https://github.com/deckhouse/storage-e2e) — фреймворк для E2E тестов
+- [Ginkgo](https://onsi.github.io/ginkgo/) — тестовый фреймворк
