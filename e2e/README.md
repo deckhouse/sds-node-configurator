@@ -36,9 +36,9 @@ e2e/
 
 ```bash
 # e2e/config/test_exports_storage_e2e
-export TEST_CLUSTER_CREATE_MODE='alwaysUseExisting'
-export TEST_CLUSTER_NAMESPACE='e2e-test'
-export TEST_CLUSTER_STORAGE_CLASS='linstor-r1'
+export TEST_CLUSTER_CREATE_MODE=`alwaysUseExisting` or `alwaysCreateNew`
+export TEST_CLUSTER_NAMESPACE='<test_namespace>'
+export TEST_CLUSTER_STORAGE_CLASS='<test_storage_class>'
 export TEST_CLUSTER_CLEANUP='false'
 
 export SSH_HOST='<master-ip>'
