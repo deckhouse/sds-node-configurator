@@ -189,32 +189,41 @@ jobs:
 
       - name: Setup test environment
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$E2E_SSH_PRIVATE_KEY" > ~/.ssh/e2e_ci_key
-          chmod 600 ~/.ssh/e2e_ci_key
-          echo "SSH_PRIVATE_KEY=$HOME/.ssh/e2e_ci_key" >> $GITHUB_ENV
+          # Use /tmp for temp files (cleaned up at the end)
+          E2E_SSH_KEY_PATH="/tmp/e2e_ci_key"
+          E2E_SSH_PUB_PATH="/tmp/e2e_ci_key.pub"
+          E2E_KUBECONFIG_PATH="/tmp/e2e-kubeconfig"
+
+          echo "E2E_SSH_KEY_PATH=${E2E_SSH_KEY_PATH}" >> $GITHUB_ENV
+          echo "E2E_SSH_PUB_PATH=${E2E_SSH_PUB_PATH}" >> $GITHUB_ENV
+          echo "E2E_KUBECONFIG_PATH=${E2E_KUBECONFIG_PATH}" >> $GITHUB_ENV
+
+          printf '%s\n' "$E2E_SSH_PRIVATE_KEY" > "${E2E_SSH_KEY_PATH}"
+          chmod 600 "${E2E_SSH_KEY_PATH}"
+          echo "SSH_PRIVATE_KEY=${E2E_SSH_KEY_PATH}" >> $GITHUB_ENV
+
           if [ -n "$E2E_SSH_PUBLIC_KEY" ]; then
-            printf '%s\n' "$E2E_SSH_PUBLIC_KEY" > ~/.ssh/e2e_ci_key.pub
-            chmod 644 ~/.ssh/e2e_ci_key.pub
-            echo "SSH_PUBLIC_KEY=$HOME/.ssh/e2e_ci_key.pub" >> $GITHUB_ENV
-            DERIVED_PUB=$(ssh-keygen -y -f ~/.ssh/e2e_ci_key 2>/dev/null)
-            STORED_PUB=$(cat ~/.ssh/e2e_ci_key.pub)
+            printf '%s\n' "$E2E_SSH_PUBLIC_KEY" > "${E2E_SSH_PUB_PATH}"
+            chmod 644 "${E2E_SSH_PUB_PATH}"
+            echo "SSH_PUBLIC_KEY=${E2E_SSH_PUB_PATH}" >> $GITHUB_ENV
+            DERIVED_PUB=$(ssh-keygen -y -f "${E2E_SSH_KEY_PATH}" 2>/dev/null)
+            STORED_PUB=$(cat "${E2E_SSH_PUB_PATH}")
             if [ -z "$DERIVED_PUB" ] || [ "$DERIVED_PUB" != "$STORED_PUB" ]; then
-              echo "::error::E2E_SSH_PUBLIC_KEY does not match E2E_SSH_PRIVATE_KEY (not a key pair). VM auth will fail. Fix secrets so the public key is the one from: ssh-keygen -y -f <private_key_file>"
+              echo "::error::E2E_SSH_PUBLIC_KEY does not match E2E_SSH_PRIVATE_KEY (not a key pair). VM auth will fail."
               exit 1
             fi
-            echo "SSH key pair verified (public matches private)"
+            echo "SSH key pair verified"
           fi
 
-          mkdir -p ~/.kube
           if [ -n "$E2E_CLUSTER_KUBECONFIG" ]; then
-            echo "$E2E_CLUSTER_KUBECONFIG" | base64 -d > ~/.kube/e2e-cluster-config
-            echo "KUBE_CONFIG_PATH=$HOME/.kube/e2e-cluster-config" >> $GITHUB_ENV
+            echo "$E2E_CLUSTER_KUBECONFIG" | base64 -d > "${E2E_KUBECONFIG_PATH}"
+            chmod 600 "${E2E_KUBECONFIG_PATH}"
+            echo "KUBE_CONFIG_PATH=${E2E_KUBECONFIG_PATH}" >> $GITHUB_ENV
           fi
 
           TEST_NAMESPACE="e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}"
           echo "TEST_NAMESPACE=${TEST_NAMESPACE}" >> $GITHUB_ENV
-          echo "Generated namespace: ${TEST_NAMESPACE}"
+          echo "Namespace: ${TEST_NAMESPACE}"
         env:
           E2E_SSH_PRIVATE_KEY: ${{ secrets.E2E_SSH_PRIVATE_KEY }}
           E2E_SSH_PUBLIC_KEY: ${{ secrets.E2E_SSH_PUBLIC_KEY }}
@@ -250,18 +259,8 @@ jobs:
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
         run: |
           cd e2e
-          # storage-e2e writes temp/ relative to its module; in GOMOD the module is read-only by default. Cache in workspace and create temp dir.
-          export GOMODCACHE="$PWD/.gomodcache"
           go mod tidy
           go mod download
-          chmod -R u+w "$GOMODCACHE" 2>/dev/null || true
-          STORAGE_E2E_DIR=$(find "$GOMODCACHE" -type d -name "storage-e2e*" 2>/dev/null | head -1)
-          if [ -n "$STORAGE_E2E_DIR" ]; then
-            chmod -R u+w "$STORAGE_E2E_DIR"
-            mkdir -p "$STORAGE_E2E_DIR/temp"
-            chmod -R u+w "$STORAGE_E2E_DIR/temp"
-            echo "Created writable temp dir: $STORAGE_E2E_DIR/temp"
-          fi
           go test -v -count=1 -timeout 60m ./tests/ -run TestSdsNodeConfigurator 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV
@@ -276,27 +275,32 @@ jobs:
           SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST }}
           SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER }}
         run: |
-          if [ ! -f ~/.kube/e2e-cluster-config ]; then
-            echo "No e2e-cluster-config, skip cleanup"
-            exit 0
-          fi
-          if [ -n "$SSH_HOST" ] && [ -n "$SSH_USER" ] && [ -f ~/.ssh/e2e_ci_key ]; then
-            echo "Starting SSH tunnel for cleanup (localhost:6445 -> base cluster API)..."
-            if [ -n "$SSH_JUMP_HOST" ]; then
-              JUMP_USER="${SSH_JUMP_USER:-$SSH_USER}"
-              ssh -f -N -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i ~/.ssh/e2e_ci_key -J "${JUMP_USER}@${SSH_JUMP_HOST}" -L 6445:127.0.0.1:6445 "${SSH_USER}@${SSH_HOST}" || true
-            else
-              ssh -f -N -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i ~/.ssh/e2e_ci_key -L 6445:127.0.0.1:6445 "${SSH_USER}@${SSH_HOST}" || true
+          SSH_TUNNEL_PID=""
+          if [ -z "$E2E_KUBECONFIG_PATH" ] || [ ! -f "$E2E_KUBECONFIG_PATH" ]; then
+            echo "No kubeconfig at E2E_KUBECONFIG_PATH=$E2E_KUBECONFIG_PATH, skip k8s cleanup"
+          else
+            if [ -n "$SSH_HOST" ] && [ -n "$SSH_USER" ] && [ -f "$E2E_SSH_KEY_PATH" ]; then
+              echo "Starting SSH tunnel for cleanup (localhost:6445 -> base cluster API)..."
+              if [ -n "$SSH_JUMP_HOST" ]; then
+                JUMP_USER="${SSH_JUMP_USER:-$SSH_USER}"
+                ssh -N -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i "$E2E_SSH_KEY_PATH" -J "${JUMP_USER}@${SSH_JUMP_HOST}" -L 6445:127.0.0.1:6445 "${SSH_USER}@${SSH_HOST}" &
+              else
+                ssh -N -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i "$E2E_SSH_KEY_PATH" -L 6445:127.0.0.1:6445 "${SSH_USER}@${SSH_HOST}" &
+              fi
+              SSH_TUNNEL_PID=$!
+              sleep 2
             fi
-            sleep 2
+            export KUBECONFIG="$E2E_KUBECONFIG_PATH"
+            echo "Cleaning up namespace: ${TEST_NAMESPACE}"
+            kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=5m 2>/dev/null || true
+            kubectl delete vd -n "${TEST_NAMESPACE}" --all --ignore-not-found=true --timeout=2m 2>/dev/null || true
+            kubectl delete vm -n "${TEST_NAMESPACE}" --all --ignore-not-found=true --timeout=2m 2>/dev/null || true
+            echo "K8s cleanup completed"
           fi
-          export KUBECONFIG=~/.kube/e2e-cluster-config
-          echo "Cleaning up namespace: ${TEST_NAMESPACE}"
-          kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=5m 2>/dev/null || true
-          kubectl delete vd -n "${TEST_NAMESPACE}" --all --ignore-not-found=true --timeout=2m 2>/dev/null || true
-          kubectl delete vm -n "${TEST_NAMESPACE}" --all --ignore-not-found=true --timeout=2m 2>/dev/null || true
-          echo "Cleanup completed"
-          pkill -f "ssh -f -N .* 6445:127.0.0.1:6445" 2>/dev/null || true
+          # Kill SSH tunnel by PID (not pkill) to avoid killing tunnels from parallel jobs
+          if [ -n "$SSH_TUNNEL_PID" ]; then
+            kill "$SSH_TUNNEL_PID" 2>/dev/null || true
+          fi
 
       - name: Upload test logs
         uses: actions/upload-artifact@v4
@@ -372,8 +376,8 @@ jobs:
               console.log('Label e2e-smoke-test not on PR (already removed or never added)');
             }
 
-      - name: Remove E2E gomod cache (avoid read-only files for next job)
+      - name: Cleanup temp files (SSH keys, kubeconfig)
         if: always()
         run: |
-          chmod -R u+w e2e/.gomodcache 2>/dev/null || true
-          rm -rf e2e/.gomodcache
+          rm -f /tmp/e2e_ci_key /tmp/e2e_ci_key.pub /tmp/e2e-kubeconfig 2>/dev/null || true
+          echo "Temp files cleaned"
