@@ -195,6 +195,12 @@ var (
 		Name:      "lvg_thin_pool_allocation_limit_bytes",
 		Help:      "Maximum allocatable size of thin pool considering allocation limit (actual_size * allocation_limit / 100) in bytes.",
 	}, []string{"node", "lvg_name", "volume_group", "thin_pool"})
+
+	lvmActivationTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "lvm_activation_total",
+		Help:      "Total number of LVM VG activation attempts.",
+	}, []string{"node", "volume_group", "result"})
 )
 
 func init() {
@@ -222,6 +228,7 @@ func init() {
 	metrics.Registry.MustRegister(lvgThinPoolAllocatedSizeBytes)
 	metrics.Registry.MustRegister(lvgThinPoolUsedSizeBytes)
 	metrics.Registry.MustRegister(lvgThinPoolAllocationLimitBytes)
+	metrics.Registry.MustRegister(lvmActivationTotal)
 }
 
 type Metrics struct {
@@ -355,6 +362,10 @@ func (m *Metrics) LVGThinPoolUsedSizeBytes(lvgName, volumeGroup, thinPool string
 
 func (m *Metrics) LVGThinPoolAllocationLimitBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
 	return lvgThinPoolAllocationLimitBytes.WithLabelValues(m.node, lvgName, volumeGroup, thinPool)
+}
+
+func (m *Metrics) LVMActivationTotal(volumeGroup, result string) prometheus.Counter {
+	return lvmActivationTotal.WithLabelValues(m.node, volumeGroup, result)
 }
 
 // isThinPool determines if an LVM logical volume is a thin pool

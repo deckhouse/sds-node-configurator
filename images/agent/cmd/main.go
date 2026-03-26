@@ -124,6 +124,12 @@ func main() {
 		log.Error(err, "[main] unable to run ReTag")
 	}
 
+	log.Info("[main] ActivateVGs starts")
+	if err := utils.ActivateAllManagedVGs(ctx, log, commands, metrics); err != nil {
+		log.Error(err, "[main] unable to activate managed VGs")
+	}
+	log.Info("[main] ActivateVGs completed")
+
 	sdsCache := cache.New()
 
 	rediscoverBlockDevices, err := controller.AddDiscoverer(
