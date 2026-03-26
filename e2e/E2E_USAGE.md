@@ -20,10 +20,12 @@ E2E runs as part of **Build and push for dev** when the **Build and checks** wor
 ### 1. Trigger E2E on a PR
 
 1. Open your pull request.
-2. Add the label **`e2e-smoke-test`** to the PR.
-3. Push or re-run the workflow. The **Build and checks** workflow will call `build_dev.yml` with `run_e2e_smoke_tests: true`, and the E2E job will run after the image is built.
+2. Add the label **`e2e-smoke-test`** to the PR (this sends a `labeled` event and should start **Build and checks** if Actions are allowed for this PR).
+3. The **Build and checks** workflow calls `build_dev.yml`; the **Run E2E Smoke Tests** job runs only when the PR has the `e2e-smoke-test` label, after the dev image build.
 
 Removing the label or not adding it means E2E smoke tests will not run.
+
+**Draft PRs:** If nothing appears under **Actions** when you add the label, the repository or organization may be configured to **skip workflows for draft pull requests**. In that case either mark the PR as ready for review (a `ready_for_review` run is included) or change the Actions policy for draft PRs in **Settings → Actions** (exact option depends on your GitHub plan).
 
 ### 2. Required repository configuration
 
