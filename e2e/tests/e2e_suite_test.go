@@ -26,7 +26,6 @@ import (
 )
 
 var _ = BeforeSuite(func() {
-	// Validate environment and initialize logger (storage-e2e setup for cluster/kubernetes)
 	err := setup.Init()
 	Expect(err).NotTo(HaveOccurred(), "Failed to initialize storage-e2e setup")
 })
@@ -37,11 +36,13 @@ var _ = AfterSuite(func() {
 	}
 })
 
-func TestSdsNodeConfigurator(t *testing.T) {
+// TestE2E is the single entry point for all Ginkgo specs in this package.
+// Spec order follows file registration order: common_scheduler_test.go (Common Scheduler Extender)
+// runs before sds_node_configurator_test.go (Sds Node Configurator).
+func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
-	// Configure Ginkgo to show verbose output
 	suiteConfig, reporterConfig := GinkgoConfiguration()
 	reporterConfig.Verbose = true
 	reporterConfig.ShowNodeEvents = false
-	RunSpecs(t, "Sds Node Configurator Suite", suiteConfig, reporterConfig)
+	RunSpecs(t, "sds-node-configurator e2e", suiteConfig, reporterConfig)
 }

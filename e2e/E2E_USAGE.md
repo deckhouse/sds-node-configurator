@@ -5,7 +5,7 @@ This guide explains how to run the **storage-e2e** smoke tests for `sds-node-con
 ## What the test does
 
 - Uses the [storage-e2e](https://github.com/deckhouse/storage-e2e) framework.
-- Suite: `TestSdsNodeConfigurator` in `e2e/tests/`.
+- Entry point: `TestE2E` in `e2e/tests/e2e_suite_test.go` (single Ginkgo run: Common Scheduler scenarios first, then Sds Node Configurator — see file order / `Describe` order).
 - Covers BlockDevice discovery and LVMVolumeGroup flows on a test cluster (existing or created via framework).
 - Test cluster is reached via SSH (base cluster host or jump host) and kubeconfig (often through an SSH tunnel to the API).
 
@@ -98,7 +98,8 @@ make test
 Or run specific test:
 
 ```bash
-make test-focus FOCUS="TestSdsNodeConfigurator"
+# Ginkgo focus on a spec name; CI runs: go test ./tests/ -run '^TestE2E$'
+make test-focus FOCUS="Should schedule Pod with local PVC"
 ```
 
 ### 3. Cluster lock (stale lock)

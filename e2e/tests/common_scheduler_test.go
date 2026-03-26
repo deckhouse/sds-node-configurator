@@ -18,11 +18,8 @@ package tests
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"fmt"
 	"math/rand"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,80 +44,10 @@ import (
 	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
 )
 
-const (
-	e2eDefaultNamespace      = "e2e-test-cluster"
-	e2eDefaultVMSSHUser      = "cloud"
-	e2eClusterCleanupTimeout = 10 * time.Minute
-	e2eLVMVGPrefix           = "e2e-lvg-"
-	e2eLocalStorageClassName = "e2e-local-sc"
-	e2ePVCPrefix             = "e2e-pvc-"
-	e2ePodPrefix             = "e2e-pod-"
-	e2eVirtualDiskPrefix     = "e2e-scheduler-data-disk"
-
-	e2eVirtualDiskAttachMaxRetries    = 3
-	e2eVirtualDiskAttachRetryInterval = 1 * time.Minute
-)
-
 var localStorageClassGVR = schema.GroupVersionResource{
 	Group:    "storage.deckhouse.io",
 	Version:  "v1alpha1",
 	Resource: "localstorageclasses",
-}
-
-func e2eConfigNamespace() string {
-	if v := os.Getenv("TEST_CLUSTER_NAMESPACE"); v != "" {
-		return v
-	}
-	return e2eDefaultNamespace
-}
-func e2eConfigStorageClass() string       { return os.Getenv("TEST_CLUSTER_STORAGE_CLASS") }
-func e2eConfigTestClusterCleanup() string { return os.Getenv("TEST_CLUSTER_CLEANUP") }
-func e2eConfigSSHHost() string            { return os.Getenv("SSH_HOST") }
-func e2eConfigSSHUser() string            { return os.Getenv("SSH_USER") }
-func e2eConfigSSHJumpHost() string        { return os.Getenv("SSH_JUMP_HOST") }
-func e2eConfigSSHJumpUser() string        { return os.Getenv("SSH_JUMP_USER") }
-func e2eConfigSSHJumpKeyPath() string     { return os.Getenv("SSH_JUMP_KEY_PATH") }
-func e2eConfigSSHPassphrase() string      { return os.Getenv("SSH_PASSPHRASE") }
-func e2eConfigLogLevel() string           { return os.Getenv("LOG_LEVEL") }
-func e2eConfigKubeConfigPath() string     { return os.Getenv("KUBE_CONFIG_PATH") }
-func e2eConfigDKPLicenseKey() string {
-	if v := os.Getenv("E2E_DKP_LICENSE_KEY"); v != "" {
-		return v
-	}
-	return os.Getenv("DKP_LICENSE_KEY")
-}
-func e2eConfigRegistryDockerCfg() string {
-	if v := os.Getenv("E2E_REGISTRY_DOCKER_CFG"); v != "" {
-		return v
-	}
-	return os.Getenv("REGISTRY_DOCKER_CFG")
-}
-func e2eConfigTestClusterCreateMode() string { return os.Getenv("TEST_CLUSTER_CREATE_MODE") }
-func e2eConfigVMSSHUser() string {
-	if v := os.Getenv("SSH_VM_USER"); v != "" {
-		return v
-	}
-	return e2eDefaultVMSSHUser
-}
-
-func attachVirtualDiskWithRetry(ctx context.Context, baseKubeconfig *rest.Config, config kubernetes.VirtualDiskAttachmentConfig, maxRetries int, retryInterval time.Duration) (*kubernetes.VirtualDiskAttachmentResult, error) {
-	var lastErr error
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		att, err := kubernetes.AttachVirtualDiskToVM(ctx, baseKubeconfig, config)
-		if err == nil {
-			return att, nil
-		}
-		lastErr = err
-		if attempt < maxRetries {
-			time.Sleep(retryInterval)
-		}
-	}
-	return nil, lastErr
-}
-
-func blockDeviceSerialFromVirtualDiskUID(uid string) string {
-	h := md5.Sum([]byte(uid))
-	return hex.EncodeToString(h[:])
 }
 
 var _ = Describe("Common Scheduler Extender", Ordered, func() {
@@ -140,7 +67,7 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 	BeforeAll(func() {
 		e2eRunID = fmt.Sprintf("%d", time.Now().Unix())
 		By(fmt.Sprintf("Generated unique run ID: %s", e2eRunID))
-		
+
 		By("Outputting environment variables", func() {
 			GinkgoWriter.Printf("    📋 Environment variables (without default values):\n")
 
@@ -251,7 +178,7 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 		const e2eDataDiskSize = "10Gi"
 
 		It("Should create virtual disks on cluster nodes", func() {
-			ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx, createdLVGs)
+			ensureSchedulerE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
 
 			var clusterVMs []string
 			var baseKubeconfig *rest.Config
@@ -261,14 +188,14 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 
 			By("Cleaning up existing e2e LVMLogicalVolumes (orphan PVCs)")
 			cleanupE2ELVMLogicalVolumes(e2eCtx, k8sClient)
-			
+
 			By("Cleaning up existing e2e LVMVolumeGroups (to release LVM signatures)")
 			cleanupE2ELVMVolumeGroups(e2eCtx, k8sClient)
-			
+
 			if testClusterResources.BaseKubeconfig != nil {
 				By("Cleaning up e2e VirtualDisks and attachments before tests")
 				cleanupE2EVirtualDisks(e2eCtx, testClusterResources.BaseKubeconfig, ns, e2eVirtualDiskPrefix)
-				
+
 				By("Force deleting ALL non-consumable BlockDevices")
 				forceDeleteAllNonConsumableBlockDevices(e2eCtx, k8sClient, 2*time.Minute)
 			}
@@ -406,11 +333,11 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 			var notConsumable []string
 			for _, bd := range createdBlockDevices {
 				if !bd.Status.Consumable {
-					notConsumable = append(notConsumable, fmt.Sprintf("%s (fsType=%s, pvUUID=%s)", 
+					notConsumable = append(notConsumable, fmt.Sprintf("%s (fsType=%s, pvUUID=%s)",
 						bd.Name, bd.Status.FsType, bd.Status.PVUuid))
 				}
 			}
-			Expect(notConsumable).To(BeEmpty(), 
+			Expect(notConsumable).To(BeEmpty(),
 				"All BlockDevices from new VirtualDisks should be consumable, but these are not: %v", notConsumable)
 		})
 
@@ -569,11 +496,11 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 			By(fmt.Sprintf("Current available space: %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
 
 			volumeSize := int64(1 * 1024 * 1024 * 1024) // 1Gi
-			minVolumeSize := int64(500 * 1024 * 1024) // 500Mi minimum for remainder
-			
+			minVolumeSize := int64(500 * 1024 * 1024)   // 500Mi minimum for remainder
+
 			numVolumes := int(currentAvailable / volumeSize)
 			remainder := currentAvailable % volumeSize
-			
+
 			var volumeSizes []int64
 			for i := 0; i < numVolumes; i++ {
 				volumeSizes = append(volumeSizes, volumeSize)
@@ -581,7 +508,7 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 			if remainder >= minVolumeSize {
 				volumeSizes = append(volumeSizes, remainder)
 			}
-			
+
 			totalPlanned := int64(0)
 			for _, s := range volumeSizes {
 				totalPlanned += s
@@ -614,12 +541,12 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 			Expect(currentAvailable).To(BeNumerically(">", 0), "No available space in LVMVolumeGroups")
 			By(fmt.Sprintf("Current available space: %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
 
-			volumeSize := int64(5 * 1024 * 1024 * 1024) // 5Gi
+			volumeSize := int64(5 * 1024 * 1024 * 1024)    // 5Gi
 			minVolumeSize := int64(1 * 1024 * 1024 * 1024) // 1Gi minimum for remainder
-			
+
 			numVolumes := int(currentAvailable / volumeSize)
 			remainder := currentAvailable % volumeSize
-			
+
 			var volumeSizes []int64
 			for i := 0; i < numVolumes; i++ {
 				volumeSizes = append(volumeSizes, volumeSize)
@@ -627,7 +554,7 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 			if remainder >= minVolumeSize {
 				volumeSizes = append(volumeSizes, remainder)
 			}
-			
+
 			totalPlanned := int64(0)
 			for _, s := range volumeSizes {
 				totalPlanned += s
@@ -660,12 +587,12 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 			Expect(currentAvailable).To(BeNumerically(">", 0), "No available space in LVMVolumeGroups")
 			By(fmt.Sprintf("Current available space: %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
 
-			volumeSize := int64(10 * 1024 * 1024 * 1024) // 10Gi
+			volumeSize := int64(10 * 1024 * 1024 * 1024)   // 10Gi
 			minVolumeSize := int64(1 * 1024 * 1024 * 1024) // 1Gi minimum for remainder
-			
+
 			numVolumes := int(currentAvailable / volumeSize)
 			remainder := currentAvailable % volumeSize
-			
+
 			if numVolumes == 0 && currentAvailable >= minVolumeSize {
 				volumeSizes := []int64{currentAvailable}
 				By(fmt.Sprintf("Available space < 10Gi, creating single volume of %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
@@ -674,7 +601,7 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 				printSchedulingSummary("large volumes", 1, successCount, scheduledCount, currentAvailable)
 				return
 			}
-			
+
 			var volumeSizes []int64
 			for i := 0; i < numVolumes; i++ {
 				volumeSizes = append(volumeSizes, volumeSize)
@@ -682,7 +609,7 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 			if remainder >= minVolumeSize {
 				volumeSizes = append(volumeSizes, remainder)
 			}
-			
+
 			totalPlanned := int64(0)
 			for _, s := range volumeSizes {
 				totalPlanned += s
@@ -706,7 +633,7 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 	})
 })
 
-func ensureE2EK8sClient(resources *cluster.TestClusterResources, k8s *client.Client, ctx context.Context, lvgsToCleanup []*v1alpha1.LVMVolumeGroup) {
+func ensureSchedulerE2EK8sClient(resources *cluster.TestClusterResources, k8s *client.Client, ctx context.Context) {
 	if *k8s != nil {
 		return
 	}
@@ -764,7 +691,7 @@ func forceDeleteAllNonConsumableBlockDevices(ctx context.Context, cl client.Clie
 		GinkgoWriter.Printf("Failed to list BlockDevices: %v\n", err)
 		return
 	}
-	
+
 	var toDelete []*v1alpha1.BlockDevice
 	for i := range bdList.Items {
 		bd := &bdList.Items[i]
@@ -772,18 +699,18 @@ func forceDeleteAllNonConsumableBlockDevices(ctx context.Context, cl client.Clie
 			toDelete = append(toDelete, bd)
 		}
 	}
-	
+
 	if len(toDelete) == 0 {
 		GinkgoWriter.Println("No non-consumable BlockDevices found")
 		return
 	}
-	
+
 	GinkgoWriter.Printf("Force deleting %d non-consumable BlockDevices\n", len(toDelete))
-	
+
 	for _, bd := range toDelete {
-		GinkgoWriter.Printf("  Removing finalizers and deleting BD %s (%s on %s, fsType=%s)\n", 
+		GinkgoWriter.Printf("  Removing finalizers and deleting BD %s (%s on %s, fsType=%s)\n",
 			bd.Name, bd.Status.Path, bd.Status.NodeName, bd.Status.FsType)
-		
+
 		if len(bd.Finalizers) > 0 {
 			bdCopy := bd.DeepCopy()
 			bdCopy.Finalizers = nil
@@ -791,31 +718,31 @@ func forceDeleteAllNonConsumableBlockDevices(ctx context.Context, cl client.Clie
 				GinkgoWriter.Printf("    Failed to remove finalizers: %v\n", err)
 			}
 		}
-		
+
 		if err := cl.Delete(ctx, bd); err != nil {
 			GinkgoWriter.Printf("    Failed to delete: %v\n", err)
 		}
 	}
-	
+
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if err := cl.List(ctx, &bdList, &client.ListOptions{}); err != nil {
 			time.Sleep(5 * time.Second)
 			continue
 		}
-		
+
 		remaining := 0
 		for i := range bdList.Items {
 			if !bdList.Items[i].Status.Consumable {
 				remaining++
 			}
 		}
-		
+
 		if remaining == 0 {
 			GinkgoWriter.Println("All non-consumable BlockDevices deleted")
 			return
 		}
-		
+
 		GinkgoWriter.Printf("Waiting for %d non-consumable BlockDevices to be deleted...\n", remaining)
 		time.Sleep(5 * time.Second)
 	}
@@ -830,28 +757,28 @@ func waitForBlockDevicesConsumable(ctx context.Context, cl client.Client, timeou
 			time.Sleep(5 * time.Second)
 			continue
 		}
-		
+
 		if len(bdList.Items) == 0 {
 			GinkgoWriter.Println("No BlockDevices found, nothing to wait for")
 			return
 		}
-		
+
 		allConsumable := true
 		var notConsumable []string
 		for i := range bdList.Items {
 			bd := &bdList.Items[i]
 			if !bd.Status.Consumable {
 				allConsumable = false
-				notConsumable = append(notConsumable, fmt.Sprintf("%s (fsType=%s, pvUUID=%s)", 
+				notConsumable = append(notConsumable, fmt.Sprintf("%s (fsType=%s, pvUUID=%s)",
 					bd.Name, bd.Status.FsType, bd.Status.PVUuid))
 			}
 		}
-		
+
 		if allConsumable {
 			GinkgoWriter.Printf("All %d BlockDevices are now consumable\n", len(bdList.Items))
 			return
 		}
-		
+
 		GinkgoWriter.Printf("Waiting for %d BlockDevices to become consumable: %v\n", len(notConsumable), notConsumable)
 		time.Sleep(10 * time.Second)
 	}
@@ -862,13 +789,13 @@ func cleanupE2EBlockDevices(ctx context.Context, cl client.Client, timeout time.
 	if cl == nil {
 		return
 	}
-	
+
 	var bdList v1alpha1.BlockDeviceList
 	if err := cl.List(ctx, &bdList, &client.ListOptions{}); err != nil {
 		GinkgoWriter.Printf("Failed to list BlockDevices: %v\n", err)
 		return
 	}
-	
+
 	var toDelete []string
 	for i := range bdList.Items {
 		bd := &bdList.Items[i]
@@ -876,12 +803,12 @@ func cleanupE2EBlockDevices(ctx context.Context, cl client.Client, timeout time.
 			toDelete = append(toDelete, bd.Name)
 		}
 	}
-	
+
 	if len(toDelete) == 0 {
 		GinkgoWriter.Println("No non-consumable BlockDevices to delete")
 		return
 	}
-	
+
 	GinkgoWriter.Printf("Deleting %d non-consumable BlockDevices: %v\n", len(toDelete), toDelete)
 	for _, name := range toDelete {
 		bd := &v1alpha1.BlockDevice{}
@@ -890,26 +817,26 @@ func cleanupE2EBlockDevices(ctx context.Context, cl client.Client, timeout time.
 			GinkgoWriter.Printf("Failed to delete BlockDevice %s: %v\n", name, err)
 		}
 	}
-	
+
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if err := cl.List(ctx, &bdList, &client.ListOptions{}); err != nil {
 			time.Sleep(5 * time.Second)
 			continue
 		}
-		
+
 		remaining := 0
 		for i := range bdList.Items {
 			if !bdList.Items[i].Status.Consumable {
 				remaining++
 			}
 		}
-		
+
 		if remaining == 0 {
 			GinkgoWriter.Println("All non-consumable BlockDevices deleted")
 			return
 		}
-		
+
 		GinkgoWriter.Printf("Waiting for BlockDevices deletion: %d remaining\n", remaining)
 		time.Sleep(5 * time.Second)
 	}
@@ -983,7 +910,7 @@ func cleanupE2ELVMLogicalVolumes(ctx context.Context, cl client.Client) {
 		GinkgoWriter.Printf("List LVMLogicalVolumes failed (skip cleanup): %v\n", err)
 		return
 	}
-	
+
 	var toDelete []string
 	for i := range list.Items {
 		llv := &list.Items[i]
@@ -991,30 +918,30 @@ func cleanupE2ELVMLogicalVolumes(ctx context.Context, cl client.Client) {
 			toDelete = append(toDelete, llv.Name)
 		}
 	}
-	
+
 	if len(toDelete) == 0 {
 		return
 	}
-	
+
 	GinkgoWriter.Printf("Deleting %d LVMLogicalVolume(s) referencing e2e LVGs\n", len(toDelete))
 	for _, name := range toDelete {
 		var llv v1alpha1.LVMLogicalVolume
 		if err := cl.Get(ctx, client.ObjectKey{Name: name}, &llv); err != nil {
 			continue
 		}
-		
+
 		if len(llv.Finalizers) > 0 {
 			llv.Finalizers = nil
 			if err := cl.Update(ctx, &llv); err != nil {
 				GinkgoWriter.Printf("  Failed to remove finalizers from LLV %s: %v\n", name, err)
 			}
 		}
-		
+
 		if err := cl.Delete(ctx, &llv); err != nil {
 			GinkgoWriter.Printf("  Failed to delete LLV %s: %v\n", name, err)
 		}
 	}
-	
+
 	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
 		err := cl.List(ctx, &list, &client.ListOptions{})
@@ -1059,11 +986,11 @@ func cleanupE2ELVMVolumeGroups(ctx context.Context, cl client.Client) {
 		lvg.Name = name
 		_ = cl.Delete(ctx, lvg)
 	}
-	
+
 	GinkgoWriter.Println("Waiting for sds-node-configurator to cleanup VGs (up to 3 minutes)...")
 	deadline := time.Now().Add(3 * time.Minute)
 	forceRemoveAfter := time.Now().Add(2 * time.Minute)
-	
+
 	for time.Now().Before(deadline) {
 		err := cl.List(ctx, &list, &client.ListOptions{})
 		if err != nil {
@@ -1079,7 +1006,7 @@ func cleanupE2ELVMVolumeGroups(ctx context.Context, cl client.Client) {
 			GinkgoWriter.Println("All e2e LVMVolumeGroups removed (VGs cleaned by sds-node-configurator)")
 			return
 		}
-		
+
 		if time.Now().After(forceRemoveAfter) {
 			GinkgoWriter.Printf("Force removing %d stuck LVMVolumeGroups\n", len(remaining))
 			for _, name := range remaining {
@@ -1093,7 +1020,7 @@ func cleanupE2ELVMVolumeGroups(ctx context.Context, cl client.Client) {
 				}
 			}
 		}
-		
+
 		GinkgoWriter.Printf("Waiting for %d LVMVolumeGroups to be deleted...\n", len(remaining))
 		time.Sleep(10 * time.Second)
 	}
@@ -1162,14 +1089,6 @@ func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, timeou
 		time.Sleep(5 * time.Second)
 	}
 	GinkgoWriter.Println("Warning: some e2e Pods/PVCs may still exist after cleanup timeout")
-}
-
-func keysOf(m map[string]struct{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
 
 func getTotalAvailableSpace(ctx context.Context, cl client.Client, lvgs []*v1alpha1.LVMVolumeGroup) int64 {

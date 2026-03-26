@@ -18,11 +18,13 @@ package tests
 
 import (
 	"context"
-	"crypto/md5"
 	"crypto/sha1"
+<<<<<<< HEAD
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+=======
+>>>>>>> 355a404 (fixed duplicate consts and such)
 	"fmt"
 	"math/rand"
 	"os"
@@ -54,6 +56,7 @@ import (
 	"github.com/deckhouse/storage-e2e/pkg/ssh"
 )
 
+<<<<<<< HEAD
 // e2e config defaults (must match storage-e2e internal/config when using setup.Init())
 const (
 	e2eDefaultNamespace      = "e2e-test-cluster"
@@ -152,6 +155,8 @@ func runLsblkViaDirectSSHWithRetry(ctx context.Context, testKubeconfig *rest.Con
 	return nil, lastErr
 }
 
+=======
+>>>>>>> 355a404 (fixed duplicate consts and such)
 // expectedDisk is the expected (node, VD name) for one created VirtualDisk (same order as e2eDiskAttachments).
 // Serial: virtualization may use VirtualDisk.UID or VirtualMachineBlockDeviceAttachment.UID (hex MD5); we accept either.
 type expectedDisk struct {
@@ -160,13 +165,6 @@ type expectedDisk struct {
 	ExpectedSerialVD    string // hex(MD5(VirtualDisk.UID))
 	ExpectedSerialVMBDA string // hex(MD5(VirtualMachineBlockDeviceAttachment.UID))
 	ExpectedBDName      string
-}
-
-// blockDeviceSerialFromVirtualDiskUID returns the BlockDevice serial (hex-encoded MD5 of UID).
-// Virtualization uses VirtualDisk.UID: see kvbuilder.GenerateSerialFromObject(vd) in deckhouse/virtualization.
-func blockDeviceSerialFromVirtualDiskUID(uid string) string {
-	h := md5.Sum([]byte(uid))
-	return hex.EncodeToString(h[:])
 }
 
 // blockDeviceNameFromDiscoveryInput returns the BlockDevice name (same formula as agent createUniqDeviceName: dev-SHA1(nodeName+wwn+model+serial+partUUID)).
@@ -956,14 +954,6 @@ func formatBlockDevicesHint(items []v1alpha1.BlockDevice, expectedNode string) s
 		hint += ". Expected nodeName=" + expectedNode + " but only found nodes: " + strings.Join(nodes, ", ")
 	}
 	return hint
-}
-
-func keysOf(m map[string]struct{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
 
 // runLsblkViaDirectSSH connects to the node by IP the same way we connect to the master (SSH_HOST / jump → node).
