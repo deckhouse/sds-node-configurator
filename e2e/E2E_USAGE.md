@@ -92,14 +92,15 @@ From the repo root:
 ```bash
 source e2e/config/test_exports_storage_e2e
 cd e2e
-make test
+go mod tidy
+ginkgo -v --progress ./tests/
 ```
 
 Or run specific test:
 
 ```bash
 # Ginkgo focus on a spec name; CI runs: go test ./tests/ -run '^TestE2E$'
-make test-focus FOCUS="Should schedule Pod with local PVC"
+ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
 ```
 
 ### 3. Cluster lock (stale lock)
@@ -111,7 +112,7 @@ To release the lock once (only when no other run is using the cluster):
 ```bash
 export TEST_CLUSTER_FORCE_LOCK_RELEASE='true'
 source e2e/config/test_exports_storage_e2e
-cd e2e && make test
+cd e2e && ginkgo -v --progress ./tests/
 ```
 
 For `alwaysUseExisting`, this suite retries once after clearing a stale lock: first it tries deleting ConfigMap `default/e2e-cluster-lock` via `KUBE_CONFIG_PATH` (works when the API URL is reachable directly). If that fails (common when `server` is `https://127.0.0.1:…` and no tunnel is running yet), it opens the same SSH + port-forward as the test connect and releases the lock. Disable with `E2E_NO_CLUSTER_LOCK_RETRY=true` (e.g. shared cluster).
@@ -152,4 +153,4 @@ If test cluster nodes (e.g. 10.10.10.x) are not reachable directly from your mac
 ## See also
 
 - [README.md](README.md) — test scenarios, debugging, troubleshooting.
-- [Makefile](Makefile) — `make test`, `make test-focus FOCUS="..."` for local runs.
+- Local runs: `ginkgo -v --progress ./tests/` or `go test -v -count=1 -timeout 60m ./tests/ -run '^TestE2E$'` (same as CI).

@@ -28,9 +28,9 @@ e2e/
 ├── manifests/              # RBAC и Job
 └── tests/
     ├── e2e_suite_test.go      # TestE2E, BeforeSuite/AfterSuite (storage-e2e)
-    ├── e2e_shared_test.go     # общие хелперы
-    ├── common_scheduler_test.go
-    ├── sds_node_configurator_test.go
+    ├── e2e_shared_test.go     # общие константы и хелперы
+    ├── common_scheduler_test.go   # Common Scheduler Extender
+    ├── sds_node_configurator_test.go  # BlockDevice, LVMVolumeGroup
     └── cluster_config.yml     # вложенный кластер (storage-e2e)
 ```
 
@@ -58,9 +58,10 @@ export REGISTRY_DOCKER_CFG='<base64-encoded>'
 ```bash
 source e2e/config/test_exports_storage_e2e
 cd e2e
+go mod tidy
 make deps
 make test                    # полный прогон (TestE2E)
-make test-go                 # как в CI: -run '^TestE2E$' (сначала Common Scheduler, затем модуль)
+make test-go                 # как в CI: -run '^TestE2E$'
 ```
 
 Фокус по имени теста:
@@ -69,17 +70,16 @@ make test-go                 # как в CI: -run '^TestE2E$' (сначала Co
 make test-focus FOCUS="TestE2E"
 ```
 
-Один вход, как в CI по label `e2e-smoke-test`: `TestE2E` — сначала сценарии **Common Scheduler Extender**, затем **Sds Node Configurator** (порядок спеков по файлам: `common_scheduler_test.go`, затем `sds_node_configurator_test.go`).
+Один вход, как в CI по label `e2e-smoke-test`: `TestE2E` — сначала **Common Scheduler Extender**, затем **Sds Node Configurator** (порядок спеков: `common_scheduler_test.go`, затем `sds_node_configurator_test.go`).
 
 ```bash
 go test -v -count=1 -timeout 60m ./tests/ -run '^TestE2E$'
-# или
-make test-go
 ```
 
-Ginkgo-сценарий по имени (нужен `ginkgo` в PATH):
+Альтернатива через [Ginkgo CLI](https://github.com/onsi/ginkgo):
 
 ```bash
+ginkgo -v --progress ./tests/
 ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
 ```
 
