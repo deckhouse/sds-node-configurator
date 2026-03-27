@@ -19,8 +19,10 @@ on:
         description: "Enable svace build and analyze"
         type: boolean
         required: false
+      # Set only from "Build and checks" (trivy_image_check.yaml). Do not rely on github.event.pull_request
+      # inside this reusable workflow — github.event may not match the caller's pull_request payload.
       run_e2e_smoke_tests:
-        description: "Run E2E smoke tests (when label e2e-smoke-test is on PR). Set to false when calling from Build and checks to avoid duplicate runs."
+        description: "Run E2E smoke tests (PR has label e2e-smoke-test)"
         type: boolean
         required: false
         default: false
@@ -164,7 +166,7 @@ jobs:
           svacer_import_password: "${{ secrets.SVACER_IMPORT_PASSWORD }}"
           svace_analyze_ssh_private_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
 
-  # E2E smoke tests run only when the caller workflow passes run_e2e_smoke_tests: true (Build and checks sets it from e2e-smoke-test label on PR).
+  # E2E: gate by input from caller (trivy) so label detection uses the same github.event as the top-level workflow.
   run_e2e_smoke_tests:
     if: ${{ inputs.run_e2e_smoke_tests == true }}
     name: Run E2E Smoke Tests
@@ -240,7 +242,7 @@ jobs:
           nc -zv "$SSH_HOST" 22 2>&1 || true
           echo "---"
 
-      - name: Run E2E tests (storage-e2e, TestSdsNodeConfigurator)
+      - name: Run E2E tests (storage-e2e, TestE2E — scheduler then sds-node-configurator)
         id: run_tests
         env:
           TEST_CLUSTER_CREATE_MODE: ${{ secrets.E2E_TEST_CLUSTER_CREATE_MODE }}
@@ -264,9 +266,7 @@ jobs:
           cd e2e
           go mod tidy
           go mod download
-          # Go extracts modules with read-only dirs; storage-e2e PrepareBootstrapConfig mkdirs temp/ inside the module copy.
-          chmod -R u+w "${GOMODCACHE}" 2>/dev/null || true
-          go test -v -count=1 -timeout 60m ./tests/ -run TestSdsNodeConfigurator 2>&1 | tee ../e2e-test-output.log
+          go test -v -count=1 -timeout 60m ./tests/ -run '^TestE2E$' 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV
           echo "${TEST_EXIT_CODE}" > ../e2e-test-exit-code.txt
@@ -348,7 +348,7 @@ jobs:
             - **Triggered by:** \`e2e-smoke-test\` label
             - **Exit Code:** ${exitCode}
 
-            Tests were executed via storage-e2e (BlockDevice discovery, LVMVolumeGroup).
+            Tests were executed via storage-e2e (`TestE2E`: Common Scheduler Extender, then Sds Node Configurator).
 
             **Artifacts:** Test logs are available in workflow artifacts.
 

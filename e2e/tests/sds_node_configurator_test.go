@@ -19,12 +19,9 @@ package tests
 import (
 	"context"
 	"crypto/sha1"
-<<<<<<< HEAD
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-=======
->>>>>>> 355a404 (fixed duplicate consts and such)
 	"fmt"
 	"math/rand"
 	"os"
@@ -36,9 +33,9 @@ import (
 	"sync"
 	"time"
 
+	virtv1alpha2 "github.com/deckhouse/virtualization/api/core/v1alpha2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	virtv1alpha2 "github.com/deckhouse/virtualization/api/core/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -56,20 +53,19 @@ import (
 	"github.com/deckhouse/storage-e2e/pkg/ssh"
 )
 
-<<<<<<< HEAD
 // e2e config defaults (must match storage-e2e internal/config when using setup.Init())
 const (
-	e2eDefaultNamespace      = "e2e-test-cluster"
-	e2eDefaultVMSSHUser      = "cloud"
+	e2eDefaultNamespace          = "e2e-test-cluster"
+	e2eDefaultVMSSHUser          = "cloud"
 	e2eClusterCleanupTimeout     = 10 * time.Minute
 	e2eUseExistingClusterTimeout = 90 * time.Minute // storage-e2e ClusterCreationTimeout (connect + lock + health)
 	e2eLVMVGPrefix               = "e2e-lvg-"
 
-	e2eVirtualDiskAttachMaxRetries   = 3
+	e2eVirtualDiskAttachMaxRetries    = 3
 	e2eVirtualDiskAttachRetryInterval = 1 * time.Minute
 
 	// Direct SSH to nodes for lsblk can hit transient "handshake failed: EOF" (sshd/network) after heavy I/O.
-	e2eLsblkSSHMaxRetries   = 6
+	e2eLsblkSSHMaxRetries    = 6
 	e2eLsblkSSHRetryInterval = 15 * time.Second
 
 	// alwaysCreateNew: aligned with github.com/deckhouse/storage-e2e/internal/config
@@ -155,8 +151,6 @@ func runLsblkViaDirectSSHWithRetry(ctx context.Context, testKubeconfig *rest.Con
 	return nil, lastErr
 }
 
-=======
->>>>>>> 355a404 (fixed duplicate consts and such)
 // expectedDisk is the expected (node, VD name) for one created VirtualDisk (same order as e2eDiskAttachments).
 // Serial: virtualization may use VirtualDisk.UID or VirtualMachineBlockDeviceAttachment.UID (hex MD5); we accept either.
 type expectedDisk struct {
