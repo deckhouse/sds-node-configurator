@@ -342,6 +342,21 @@ jobs:
           cd e2e
           go mod tidy
           go mod download
+          # PrepareBootstrapConfig (storage-e2e) resolves paths via runtime.Caller from pkg/cluster/cluster.go inside the
+          # module copy, so it writes temp/ under GOMODCACHE/.../storage-e2e@.../ — not under the checkout. Go extracts
+          # modules read-only; without this, mkdir .../temp fails with permission denied on self-hosted runners.
+          if [ -n "${GOMODCACHE:-}" ] && [ -d "${GOMODCACHE}/github.com/deckhouse" ]; then
+            echo "Making storage-e2e module in GOMODCACHE writable for bootstrap temp/..."
+            shopt -s nullglob
+            for d in "${GOMODCACHE}"/github.com/deckhouse/storage-e2e@*; do
+              if [ -d "$d" ]; then
+                chmod -R u+w "$d" || true
+                mkdir -p "$d/temp/cluster" || true
+                chmod -R u+w "$d/temp" 2>/dev/null || true
+              fi
+            done
+            shopt -u nullglob
+          fi
           go test -v -count=1 -timeout 60m ./tests/ -run '^TestE2E$' 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV

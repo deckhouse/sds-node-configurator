@@ -77,14 +77,18 @@ clean: ## Clean test cache
 	go clean -testcache
 
 .PHONY: fix-mod-permissions
-fix-mod-permissions: ## Workaround: writable storage-e2e module in GOPATH
-	@GOPATH=$${GOPATH:-$$HOME/go}; \
-	for dir in $$GOPATH/pkg/mod/github.com/deckhouse/storage-e2e@*; do \
-		if [ -d "$$dir" ]; then \
-			echo "Fixing permissions for $$dir"; \
-			chmod -R +w "$$dir" 2>/dev/null || true; \
-			mkdir -p "$$dir/temp/cluster" 2>/dev/null || true; \
-		fi; \
+fix-mod-permissions: ## Writable storage-e2e in GOMODCACHE or GOPATH (PrepareBootstrapConfig writes temp/ under module path)
+	@GOMODCACHE=$${GOMODCACHE:-$(CURDIR)/.gomodcache}; \
+	GOPATH=$${GOPATH:-$$HOME/go}; \
+	for root in "$$GOMODCACHE" "$$GOPATH/pkg/mod"; do \
+		[ -d "$$root" ] || continue; \
+		for dir in "$$root"/github.com/deckhouse/storage-e2e@*; do \
+			if [ -d "$$dir" ]; then \
+				echo "Fixing permissions for $$dir"; \
+				chmod -R +w "$$dir" 2>/dev/null || true; \
+				mkdir -p "$$dir/temp/cluster" 2>/dev/null || true; \
+			fi; \
+		done; \
 	done
 
 .PHONY: check-env
