@@ -245,6 +245,10 @@ jobs:
       - name: Run E2E tests (storage-e2e, TestE2E — scheduler then sds-node-configurator)
         id: run_tests
         env:
+          # Self-hosted runners often use a shared read-only module dir under /opt/.../go/pkg/mod.
+          # storage-e2e writes temp/bootstrap state under the storage-e2e module path — use a writable cache.
+          GOMODCACHE: ${{ github.workspace }}/e2e/.gomodcache
+          GOCACHE: ${{ github.workspace }}/e2e/.gocache
           TEST_CLUSTER_CREATE_MODE: ${{ secrets.E2E_TEST_CLUSTER_CREATE_MODE }}
           TEST_CLUSTER_NAMESPACE: e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}
           TEST_CLUSTER_STORAGE_CLASS: ${{ secrets.E2E_TEST_CLUSTER_STORAGE_CLASS }}
@@ -259,9 +263,6 @@ jobs:
           # Do not set KUBE_CONFIG_PATH here — it is taken from GITHUB_ENV (Setup writes the path to the file from E2E_CLUSTER_KUBECONFIG). Otherwise an empty vars value overwrites the fallback and storage-e2e cannot find kubeconfig when "sudo cat admin.conf" on the master fails.
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
         run: |
-          # Project-local caches (self-hosted runners may inherit a read-only global GOMODCACHE).
-          export GOMODCACHE="${GITHUB_WORKSPACE}/e2e/.gomodcache"
-          export GOCACHE="${GITHUB_WORKSPACE}/e2e/.gocache"
           mkdir -p "${GOMODCACHE}" "${GOCACHE}"
           cd e2e
           go mod tidy

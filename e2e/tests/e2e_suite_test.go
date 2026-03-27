@@ -17,6 +17,7 @@ limitations under the License.
 package tests
 
 import (
+	"os"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -42,6 +43,10 @@ var _ = AfterSuite(func() {
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
 	suiteConfig, reporterConfig := GinkgoConfiguration()
+	// Two root Describe(Ordered) blocks each create a cluster; stop after first failure (CI also sets CI=true).
+	if os.Getenv("CI") != "" {
+		suiteConfig.FailFast = true
+	}
 	reporterConfig.Verbose = true
 	reporterConfig.ShowNodeEvents = false
 	RunSpecs(t, "sds-node-configurator e2e", suiteConfig, reporterConfig)

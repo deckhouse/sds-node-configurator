@@ -126,19 +126,20 @@ If test cluster nodes (e.g. 10.10.10.x) are not reachable directly from your mac
 - `SSH_JUMP_HOST` — jump host (often the base cluster master).
 - `SSH_JUMP_USER` — user on the jump host (defaults to `SSH_USER` if unset).
 
-### 5. `permission denied` under `GOPATH/pkg/mod/.../storage-e2e/.../temp`
+### 5. `permission denied` under `.../pkg/mod/.../storage-e2e/.../temp`
 
-The storage-e2e library writes bootstrap state under a `temp/` directory derived from call-stack paths; on self-hosted runners the module cache is often read-only. Run `make deps` from `e2e/` (it runs `fix-mod-permissions`) before tests, or manually:
+The storage-e2e library writes bootstrap state under a `temp/` directory inside the **checked-out** `storage-e2e` module in the Go module cache. On self-hosted runners that cache is often under a **shared read-only** path (e.g. `/opt/.../go/pkg/mod`), so `mkdir` fails even after `chmod`.
+
+**Fix (recommended):** point the module cache at a writable directory (CI uses this):
 
 ```bash
-GOPATH="$(go env GOPATH)"
-for d in "$GOPATH"/pkg/mod/github.com/deckhouse/storage-e2e@*; do
-  chmod -R u+w "$d" 2>/dev/null || true
-  mkdir -p "$d/temp/cluster" 2>/dev/null || true
-done
+export GOMODCACHE="$(pwd)/e2e/.gomodcache"
+export GOCACHE="$(pwd)/e2e/.gocache"
+mkdir -p "$GOMODCACHE" "$GOCACHE"
+cd e2e && go mod download && go test ...
 ```
 
-CI runs the same chmod/`mkdir` before `go test`.
+**Alternative (local):** `make deps` from `e2e/` runs `fix-mod-permissions` (chmod + `mkdir` under your current `GOPATH`/`GOMODCACHE`), which helps only if that cache is writable by your user.
 
 ---
 
