@@ -126,7 +126,19 @@ If test cluster nodes (e.g. 10.10.10.x) are not reachable directly from your mac
 - `SSH_JUMP_HOST` — jump host (often the base cluster master).
 - `SSH_JUMP_USER` — user on the jump host (defaults to `SSH_USER` if unset).
 
-**Bastion user vs cluster node user (storage-e2e):** With a jump host, the framework connects as `SSH_JUMP_USER@SSH_JUMP_HOST`, then as **`SSH_USER@SSH_HOST`** to reach the test cluster (kubeconfig / API path). It does **not** use `SSH_VM_USER` for that second hop. Typical Deckhouse lab: bastion login `you@bastion`, nodes `cloud@10.x.x.x` — set `SSH_JUMP_USER` to your bastion account and `SSH_USER` to the SSH account on cluster nodes (often `cloud`). Keep `SSH_VM_USER` aligned with node SSH (often also `cloud`).
+### 5. `permission denied` under `GOPATH/pkg/mod/.../storage-e2e/.../temp`
+
+The storage-e2e library writes bootstrap state under a `temp/` directory derived from call-stack paths; on self-hosted runners the module cache is often read-only. Run `make deps` from `e2e/` (it runs `fix-mod-permissions`) before tests, or manually:
+
+```bash
+GOPATH="$(go env GOPATH)"
+for d in "$GOPATH"/pkg/mod/github.com/deckhouse/storage-e2e@*; do
+  chmod -R u+w "$d" 2>/dev/null || true
+  mkdir -p "$d/temp/cluster" 2>/dev/null || true
+done
+```
+
+CI runs the same chmod/`mkdir` before `go test`.
 
 ---
 
