@@ -23,17 +23,20 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 
+	"github.com/deckhouse/storage-e2e/pkg/cluster"
 	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // Defaults (align with storage-e2e internal/config when using setup.Init()).
@@ -51,8 +54,7 @@ const (
 	e2eVirtualDiskAttachMaxRetries    = 3
 	e2eVirtualDiskAttachRetryInterval = 1 * time.Minute
 
-	// Pre-wait before cluster.CreateTestCluster: storage-e2e step 3 uses a 10s timeout with no retry;
-	// Deckhouse Module "virtualization" often stays in Reconciling longer than that.
+	// Pre-wait before cluster.CreateTestCluster (after SSH+tunnel): storage-e2e step 3 uses a short Get with no Reconciling retry.
 	e2eVirtualizationModuleWaitDefault = 25 * time.Minute
 )
 
@@ -95,27 +97,38 @@ func moduleVirtualizationIsReady(obj *unstructured.Unstructured) (phase string, 
 	return phase, false
 }
 
-// waitForVirtualizationModuleReadyIfNeeded polls Module/virtualization until status.phase is Ready.
-// storage-e2e step 3 uses a single short Get; we wait while phase is Reconciling etc.
-// Does not use storage-e2e kubernetes.WaitForModuleReady: that helper never applies the deadline when GetModule errors (infinite loop).
-// No-op if TEST_CLUSTER_CREATE_MODE is not alwaysCreateNew, KUBE_CONFIG_PATH is unset, or E2E_SKIP_VIRTUALIZATION_MODULE_WAIT=true.
-func waitForVirtualizationModuleReadyIfNeeded(ctx context.Context) error {
-	if os.Getenv("E2E_SKIP_VIRTUALIZATION_MODULE_WAIT") == "true" {
-		GinkgoWriter.Printf("    ⏭️  Skipping virtualization Module pre-wait (E2E_SKIP_VIRTUALIZATION_MODULE_WAIT=true)\n")
-		return nil
+// e2eTestTempDirFromStack returns e2e/temp/<test-file-name>/ (same layout as storage-e2e CreateTestCluster kubeconfig dir).
+func e2eTestTempDirFromStack() (string, error) {
+	for i := 1; i <= 20; i++ {
+		_, file, _, ok := runtime.Caller(i)
+		if !ok {
+			break
+		}
+		if !strings.Contains(filepath.ToSlash(file), "/tests/") {
+			continue
+		}
+		dir := filepath.Dir(file)
+		for filepath.Base(dir) != "tests" {
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+		if filepath.Base(dir) != "tests" {
+			continue
+		}
+		repoRoot := filepath.Dir(dir)
+		testFileName := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+		return filepath.Join(repoRoot, "temp", testFileName), nil
 	}
-	if e2eConfigTestClusterCreateMode() != testClusterModeCreateNew {
-		return nil
-	}
-	path := e2eConfigKubeConfigPath()
-	if path == "" {
-		return nil
-	}
-	cfg, err := clientcmd.BuildConfigFromFlags("", path)
-	if err != nil {
-		return fmt.Errorf("load kubeconfig for virtualization wait: %w", err)
-	}
-	// Avoid hanging forever on a stuck TCP dial / TLS handshake (rest.Timeout alone may not cap dial).
+	return "", fmt.Errorf("could not determine e2e temp dir from call stack (expected caller under tests/)")
+}
+
+// waitForVirtualizationModuleReadyWithRestConfig polls Module/virtualization until Ready (phase or IsReady).
+// cfg must come from an active API connection (e.g. after SSH tunnel from cluster.ConnectToCluster).
+func waitForVirtualizationModuleReadyWithRestConfig(ctx context.Context, baseCfg *rest.Config) error {
+	cfg := rest.CopyConfig(baseCfg)
 	cfg.Timeout = 30 * time.Second
 	cfg.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		d := net.Dialer{Timeout: 15 * time.Second}
@@ -169,6 +182,102 @@ func waitForVirtualizationModuleReadyIfNeeded(ctx context.Context) error {
 		}
 		time.Sleep(poll)
 	}
+}
+
+// waitForVirtualizationModuleReadyIfNeeded polls Module/virtualization before CreateTestCluster so storage-e2e step 3
+// (short timeout, phase-only) does not fail while the module is still Reconciling.
+//
+// KUBE_CONFIG_PATH alone is not sufficient: CI kubeconfig points at 127.0.0.1:<tunnel-port>, but the SSH tunnel only
+// exists after cluster.ConnectToCluster inside CreateTestCluster. We open the same SSH+tunnel here, wait, then close.
+// No-op if TEST_CLUSTER_CREATE_MODE is not alwaysCreateNew or E2E_SKIP_VIRTUALIZATION_MODULE_WAIT=true.
+func waitForVirtualizationModuleReadyIfNeeded(ctx context.Context) error {
+	if os.Getenv("E2E_SKIP_VIRTUALIZATION_MODULE_WAIT") == "true" {
+		GinkgoWriter.Printf("    ⏭️  Skipping virtualization Module pre-wait (E2E_SKIP_VIRTUALIZATION_MODULE_WAIT=true)\n")
+		return nil
+	}
+	if e2eConfigTestClusterCreateMode() != testClusterModeCreateNew {
+		return nil
+	}
+
+	sshHost := e2eConfigSSHHost()
+	sshUser := e2eConfigSSHUser()
+	if sshHost == "" || sshUser == "" {
+		return nil
+	}
+
+	sshKeyPath, err := cluster.GetSSHPrivateKeyPath()
+	if err != nil {
+		return fmt.Errorf("ssh key for virtualization pre-wait: %w", err)
+	}
+
+	kubeconfigDir, err := e2eTestTempDirFromStack()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(kubeconfigDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir kubeconfig dir for virtualization pre-wait: %w", err)
+	}
+
+	useJump := e2eConfigSSHJumpHost() != ""
+	jumpUser := e2eConfigSSHJumpUser()
+	if jumpUser == "" {
+		jumpUser = sshUser
+	}
+	jumpHost := e2eConfigSSHJumpHost()
+	jumpKeyPath := e2eConfigSSHJumpKeyPath()
+	if jumpKeyPath == "" {
+		jumpKeyPath = sshKeyPath
+	}
+
+	opts := cluster.ConnectClusterOptions{
+		SSHUser:             sshUser,
+		SSHHost:             sshHost,
+		SSHKeyPath:          sshKeyPath,
+		UseJumpHost:         useJump,
+		KubeconfigOutputDir: kubeconfigDir,
+	}
+	if useJump {
+		opts = cluster.ConnectClusterOptions{
+			SSHUser:             jumpUser,
+			SSHHost:             jumpHost,
+			SSHKeyPath:          jumpKeyPath,
+			UseJumpHost:         true,
+			TargetUser:          sshUser,
+			TargetHost:          sshHost,
+			TargetKeyPath:       sshKeyPath,
+			KubeconfigOutputDir: kubeconfigDir,
+		}
+	}
+
+	GinkgoWriter.Printf("    🔌 Connecting to base cluster (SSH) for virtualization Module pre-wait...\n")
+
+	connectTimeout := 20 * time.Minute
+	if v := os.Getenv("E2E_VIRTUALIZATION_MODULE_CONNECT_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			connectTimeout = d
+		}
+	}
+	connectCtx, cancelConnect := context.WithTimeout(ctx, connectTimeout)
+	defer cancelConnect()
+
+	base, err := cluster.ConnectToCluster(connectCtx, opts)
+	if err != nil {
+		return fmt.Errorf("connect to base cluster for virtualization pre-wait: %w", err)
+	}
+	defer func() {
+		if base.TunnelInfo != nil && base.TunnelInfo.StopFunc != nil {
+			_ = base.TunnelInfo.StopFunc()
+		}
+		if base.SSHClient != nil {
+			_ = base.SSHClient.Close()
+		}
+	}()
+
+	if err := waitForVirtualizationModuleReadyWithRestConfig(ctx, base.Kubeconfig); err != nil {
+		return err
+	}
+	GinkgoWriter.Printf("    🔌 Closed pre-wait SSH tunnel; proceeding to CreateTestCluster\n")
+	return nil
 }
 
 func e2eConfigNamespace() string {
