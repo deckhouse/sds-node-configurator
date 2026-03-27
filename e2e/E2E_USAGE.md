@@ -141,6 +141,10 @@ cd e2e && go mod download && go test ...
 
 **Alternative (local):** `make deps` from `e2e/` runs `fix-mod-permissions` (chmod + `mkdir` under your current `GOPATH`/`GOMODCACHE`), which helps only if that cache is writable by your user.
 
+### 6. Virtualization module stuck in `Reconciling`
+
+storage-e2e checks the Deckhouse `Module/virtualization` once with a short timeout. While the module is **Reconciling** (not `Error`), the e2e suite polls until **Ready** using `KUBE_CONFIG_PATH` before creating a nested cluster (`TEST_CLUSTER_CREATE_MODE=alwaysCreateNew`). Override wait duration with `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` (Go duration, e.g. `30m`).
+
 ---
 
 ## Quick reference: environment variables
@@ -160,8 +164,8 @@ cd e2e && go mod download && go test ...
 | `DKP_LICENSE_KEY` | If create mode | License for cluster creation. |
 | `REGISTRY_DOCKER_CFG` | If create mode | Registry auth (base64). |
 | `LOG_LEVEL` | No | e.g. `debug`, `info`. |
-| `TEST_CLUSTER_FORCE_LOCK_RELEASE` | No | Set to `true` once to clear a stale lock (read at process start by storage-e2e). |
-| `E2E_NO_CLUSTER_LOCK_RETRY` | No | If `true`, do not delete lock ConfigMap + retry (default: retry once when lock denied). |
+| `TEST_CLUSTER_FORCE_LOCK_RELEASE` | No | Set to `true` once to clear a stale lock. |
+| `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` | No | Max wait for Module `virtualization` Ready before nested cluster create (default ~25m). |
 
 ---
 

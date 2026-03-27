@@ -20,11 +20,15 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+
 	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // Defaults (align with storage-e2e internal/config when using setup.Init()).
@@ -41,7 +45,38 @@ const (
 
 	e2eVirtualDiskAttachMaxRetries    = 3
 	e2eVirtualDiskAttachRetryInterval = 1 * time.Minute
+
+	// Pre-wait before cluster.CreateTestCluster: storage-e2e step 3 uses a 10s timeout with no retry;
+	// Deckhouse Module "virtualization" often stays in Reconciling longer than that.
+	e2eVirtualizationModuleWaitDefault = 25 * time.Minute
 )
+
+const testClusterModeCreateNew = "alwaysCreateNew"
+
+// waitForVirtualizationModuleReadyIfNeeded polls the base-cluster kubeconfig until Module virtualization is Ready.
+// storage-e2e CreateTestCluster fails immediately if phase != Ready; this matches WaitForModuleReady retry behavior.
+// No-op if TEST_CLUSTER_CREATE_MODE is not alwaysCreateNew or KUBE_CONFIG_PATH is unset.
+func waitForVirtualizationModuleReadyIfNeeded(ctx context.Context) error {
+	if e2eConfigTestClusterCreateMode() != testClusterModeCreateNew {
+		return nil
+	}
+	path := e2eConfigKubeConfigPath()
+	if path == "" {
+		return nil
+	}
+	cfg, err := clientcmd.BuildConfigFromFlags("", path)
+	if err != nil {
+		return fmt.Errorf("load kubeconfig for virtualization wait: %w", err)
+	}
+	timeout := e2eVirtualizationModuleWaitDefault
+	if v := os.Getenv("E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			timeout = d
+		}
+	}
+	GinkgoWriter.Printf("    ⏳ Waiting for Deckhouse module %q to become Ready on base cluster (timeout %s, Reconciling is ok)...\n", "virtualization", timeout)
+	return kubernetes.WaitForModuleReady(ctx, cfg, "virtualization", timeout)
+}
 
 func e2eConfigNamespace() string {
 	if v := os.Getenv("TEST_CLUSTER_NAMESPACE"); v != "" {

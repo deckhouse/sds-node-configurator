@@ -19,7 +19,6 @@ package tests
 import (
 	"context"
 	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
