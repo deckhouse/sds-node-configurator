@@ -264,6 +264,36 @@ jobs:
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
         run: |
           mkdir -p "${GOMODCACHE}" "${GOCACHE}"
+
+          # Kubeconfig from E2E_CLUSTER_KUBECONFIG often points at https://127.0.0.1:6445 (API via SSH port-forward).
+          # The tunnel was only started in the later Cleanup step, so Module/virtualization pre-wait and storage-e2e
+          # had no reachable API — first client calls could hang until TCP timeouts. Mirror Cleanup's tunnel here.
+          E2E_SSH_TUNNEL_PID=""
+          e2e_stop_ssh_tunnel() {
+            if [ -n "${E2E_SSH_TUNNEL_PID:-}" ]; then
+              kill "${E2E_SSH_TUNNEL_PID}" 2>/dev/null || true
+              wait "${E2E_SSH_TUNNEL_PID}" 2>/dev/null || true
+            fi
+          }
+          trap e2e_stop_ssh_tunnel EXIT
+
+          if [ -n "${E2E_KUBECONFIG_PATH:-}" ] && [ -f "$E2E_KUBECONFIG_PATH" ] && \
+             grep -qE 'server:.*https://(127\.0\.0\.1|localhost):6445' "$E2E_KUBECONFIG_PATH" && \
+             [ -n "${SSH_HOST:-}" ] && [ -n "${SSH_USER:-}" ] && [ -f "${E2E_SSH_KEY_PATH:-}" ]; then
+            echo "Starting SSH tunnel for E2E (localhost:6445 -> base cluster apiserver, same as Cleanup)..."
+            if [ -n "${SSH_JUMP_HOST:-}" ]; then
+              JUMP_USER="${SSH_JUMP_USER:-$SSH_USER}"
+              ssh -N -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i "$E2E_SSH_KEY_PATH" \
+                -J "${JUMP_USER}@${SSH_JUMP_HOST}" -L 6445:127.0.0.1:6445 "${SSH_USER}@${SSH_HOST}" &
+            else
+              ssh -N -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i "$E2E_SSH_KEY_PATH" \
+                -L 6445:127.0.0.1:6445 "${SSH_USER}@${SSH_HOST}" &
+            fi
+            E2E_SSH_TUNNEL_PID=$!
+            sleep 2
+            nc -zv 127.0.0.1 6445 2>&1 || echo "::warning::Tunnel port 6445 not accepting connections yet (tests may still retry)."
+          fi
+
           cd e2e
           go mod tidy
           go mod download

@@ -143,7 +143,7 @@ cd e2e && go mod download && go test ...
 
 ### 6. Virtualization module stuck in `Reconciling`
 
-storage-e2e checks the Deckhouse `Module/virtualization` once with a short timeout. While the module is **Reconciling** (not `Error`), the e2e suite polls until **Ready** using `KUBE_CONFIG_PATH` before creating a nested cluster (`TEST_CLUSTER_CREATE_MODE=alwaysCreateNew`). Override wait duration with `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` (Go duration, e.g. `30m`).
+storage-e2e checks the Deckhouse `Module/virtualization` once with a short timeout. Before nested cluster creation (`TEST_CLUSTER_CREATE_MODE=alwaysCreateNew`), the suite polls `Module/virtualization` via the Kubernetes API until `status.phase == Ready` (uses `KUBE_CONFIG_PATH`). Override total wait with `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` (e.g. `30m`). To disable this pre-wait entirely, set `E2E_SKIP_VIRTUALIZATION_MODULE_WAIT=true`.
 
 ---
 
@@ -166,6 +166,7 @@ storage-e2e checks the Deckhouse `Module/virtualization` once with a short timeo
 | `LOG_LEVEL` | No | e.g. `debug`, `info`. |
 | `TEST_CLUSTER_FORCE_LOCK_RELEASE` | No | Set to `true` once to clear a stale lock. |
 | `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` | No | Max wait for Module `virtualization` Ready before nested cluster create (default ~25m). |
+| `E2E_SKIP_VIRTUALIZATION_MODULE_WAIT` | No | Set to `true` to skip the Module pre-wait (not recommended if you hit Reconciling flakes). |
 
 ---
 

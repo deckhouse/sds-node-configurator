@@ -21,12 +21,17 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"os"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 
 	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -53,10 +58,52 @@ const (
 
 const testClusterModeCreateNew = "alwaysCreateNew"
 
-// waitForVirtualizationModuleReadyIfNeeded polls the base-cluster kubeconfig until Module virtualization is Ready.
-// storage-e2e CreateTestCluster fails immediately if phase != Ready; this matches WaitForModuleReady retry behavior.
-// No-op if TEST_CLUSTER_CREATE_MODE is not alwaysCreateNew or KUBE_CONFIG_PATH is unset.
+var deckhouseModuleGVR = schema.GroupVersionResource{
+	Group:    "deckhouse.io",
+	Version:  "v1alpha1",
+	Resource: "modules",
+}
+
+// deckhouseModuleConditionIsReady matches ModuleConditionIsReady in deckhouse.io API.
+const deckhouseModuleConditionIsReady = "IsReady"
+
+// moduleVirtualizationIsReady returns true if status.phase is Ready or condition IsReady is True.
+// Some clusters keep phase as Reconciling while IsReady becomes True first.
+func moduleVirtualizationIsReady(obj *unstructured.Unstructured) (phase string, isReady bool) {
+	p, found, _ := unstructured.NestedString(obj.Object, "status", "phase")
+	if found {
+		phase = p
+	}
+	if phase == "Ready" {
+		return phase, true
+	}
+	conditions, found, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	if !found {
+		return phase, false
+	}
+	for _, c := range conditions {
+		cm, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		t, _ := cm["type"].(string)
+		st, _ := cm["status"].(string)
+		if t == deckhouseModuleConditionIsReady && st == "True" {
+			return phase, true
+		}
+	}
+	return phase, false
+}
+
+// waitForVirtualizationModuleReadyIfNeeded polls Module/virtualization until status.phase is Ready.
+// storage-e2e step 3 uses a single short Get; we wait while phase is Reconciling etc.
+// Does not use storage-e2e kubernetes.WaitForModuleReady: that helper never applies the deadline when GetModule errors (infinite loop).
+// No-op if TEST_CLUSTER_CREATE_MODE is not alwaysCreateNew, KUBE_CONFIG_PATH is unset, or E2E_SKIP_VIRTUALIZATION_MODULE_WAIT=true.
 func waitForVirtualizationModuleReadyIfNeeded(ctx context.Context) error {
+	if os.Getenv("E2E_SKIP_VIRTUALIZATION_MODULE_WAIT") == "true" {
+		GinkgoWriter.Printf("    ⏭️  Skipping virtualization Module pre-wait (E2E_SKIP_VIRTUALIZATION_MODULE_WAIT=true)\n")
+		return nil
+	}
 	if e2eConfigTestClusterCreateMode() != testClusterModeCreateNew {
 		return nil
 	}
@@ -68,14 +115,60 @@ func waitForVirtualizationModuleReadyIfNeeded(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("load kubeconfig for virtualization wait: %w", err)
 	}
+	// Avoid hanging forever on a stuck TCP dial / TLS handshake (rest.Timeout alone may not cap dial).
+	cfg.Timeout = 30 * time.Second
+	cfg.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		d := net.Dialer{Timeout: 15 * time.Second}
+		return d.DialContext(ctx, network, addr)
+	}
+
 	timeout := e2eVirtualizationModuleWaitDefault
 	if v := os.Getenv("E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			timeout = d
 		}
 	}
-	GinkgoWriter.Printf("    ⏳ Waiting for Deckhouse module %q to become Ready on base cluster (timeout %s, Reconciling is ok)...\n", "virtualization", timeout)
-	return kubernetes.WaitForModuleReady(ctx, cfg, "virtualization", timeout)
+	deadline := time.Now().Add(timeout)
+	poll := 3 * time.Second
+	reqTimeout := 30 * time.Second
+
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("dynamic client for virtualization wait: %w", err)
+	}
+
+	GinkgoWriter.Printf("    ⏳ Waiting for Deckhouse module %q to become Ready (timeout %s, polling every %s)...\n",
+		"virtualization", timeout, poll)
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout after %v waiting for Module/virtualization phase Ready (see logs above)", timeout)
+		}
+
+		getCtx, cancel := context.WithTimeout(ctx, reqTimeout)
+		obj, err := dyn.Resource(deckhouseModuleGVR).Get(getCtx, "virtualization", metav1.GetOptions{})
+		cancel()
+
+		if err != nil {
+			GinkgoWriter.Printf("    … Module/virtualization get: %v\n", err)
+			time.Sleep(poll)
+			continue
+		}
+		phase, ready := moduleVirtualizationIsReady(obj)
+		if ready {
+			GinkgoWriter.Printf("    ✅ Module/virtualization is ready (phase=%q, IsReady or phase Ready)\n", phase)
+			return nil
+		}
+		if phase == "" {
+			GinkgoWriter.Printf("    … Module/virtualization: no status.phase yet (waiting)\n")
+		} else {
+			GinkgoWriter.Printf("    … Module/virtualization phase=%q (waiting for Ready or IsReady=True)\n", phase)
+		}
+		time.Sleep(poll)
+	}
 }
 
 func e2eConfigNamespace() string {
