@@ -150,18 +150,7 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 				cleanupE2ELVMVolumeGroups(ctx, k8sClient)
 			}
 
-			cleanupEnabled := e2eConfigTestClusterCleanup() == "true" || e2eConfigTestClusterCleanup() == "True"
-			if cleanupEnabled {
-				GinkgoWriter.Printf("    ▶️ Cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is enabled - all VMs will be removed)...\n")
-			} else {
-				GinkgoWriter.Printf("    ▶️ Cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is not enabled - only bootstrap node will be removed)...\n")
-			}
-			err := cluster.CleanupTestCluster(ctx, testClusterResources)
-			if err != nil {
-				GinkgoWriter.Printf("    ⚠️  Warning: Cleanup errors occurred: %v\n", err)
-			} else {
-				GinkgoWriter.Printf("    ✅ Test cluster resources cleaned up successfully\n")
-			}
+			// Nested cluster teardown runs in AfterSuite (e2eCleanupSharedTestClusterAfterSuite) so Sds Node Configurator can reuse VMs.
 		}
 	})
 
@@ -170,6 +159,7 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 		Expect(waitForVirtualizationModuleReadyIfNeeded(context.Background())).To(Succeed(),
 			"virtualization module should become Ready on base cluster (retry while Reconciling)")
 		testClusterResources = cluster.CreateOrConnectToTestCluster()
+		e2eSetSharedTestClusterResources(testClusterResources)
 	})
 
 	////////////////////////////////////

@@ -32,6 +32,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
+	e2eCleanupSharedTestClusterAfterSuite()
 	if err := setup.Close(); err != nil {
 		GinkgoWriter.Printf("Warning: Failed to close logger: %v\n", err)
 	}
@@ -43,7 +44,7 @@ var _ = AfterSuite(func() {
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
 	suiteConfig, reporterConfig := GinkgoConfiguration()
-	// Two root Describe(Ordered) blocks each create a cluster; stop after first failure (CI also sets CI=true).
+	// Two root Describe(Ordered) blocks share one nested cluster (second reuses AfterSuite cleanup); fail fast in CI.
 	if os.Getenv("CI") != "" {
 		suiteConfig.FailFast = true
 	}

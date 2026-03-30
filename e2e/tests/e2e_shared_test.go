@@ -318,6 +318,42 @@ func e2eConfigRegistryDockerCfg() string {
 
 func e2eConfigTestClusterCreateMode() string { return os.Getenv("TEST_CLUSTER_CREATE_MODE") }
 
+// e2eSharedTestClusterResources is the single nested test cluster for a full TestE2E run (both Ordered Describes).
+// The first suite that calls CreateOrConnectToTestCluster registers it here; the second reuses it.
+// CleanupTestCluster runs once in AfterSuite — intermediate AfterAll blocks must not destroy VMs.
+var e2eSharedTestClusterResources *cluster.TestClusterResources
+
+func e2eSetSharedTestClusterResources(r *cluster.TestClusterResources) {
+	e2eSharedTestClusterResources = r
+}
+
+func e2eTakeSharedTestClusterResourcesIfReady() *cluster.TestClusterResources {
+	return e2eSharedTestClusterResources
+}
+
+// e2eCleanupSharedTestClusterAfterSuite tears down nested cluster resources (respects TEST_CLUSTER_CLEANUP).
+func e2eCleanupSharedTestClusterAfterSuite() {
+	if e2eSharedTestClusterResources == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
+	defer cancel()
+
+	cleanupEnabled := e2eConfigTestClusterCleanup() == "true" || e2eConfigTestClusterCleanup() == "True"
+	if cleanupEnabled {
+		GinkgoWriter.Printf("    ▶️ AfterSuite: cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is enabled - all VMs will be removed)...\n")
+	} else {
+		GinkgoWriter.Printf("    ▶️ AfterSuite: cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is not enabled - only bootstrap node will be removed)...\n")
+	}
+	err := cluster.CleanupTestCluster(ctx, e2eSharedTestClusterResources)
+	if err != nil {
+		GinkgoWriter.Printf("    ⚠️  Warning: AfterSuite cluster cleanup errors: %v\n", err)
+	} else {
+		GinkgoWriter.Printf("    ✅ AfterSuite: test cluster resources cleaned up successfully\n")
+	}
+	e2eSharedTestClusterResources = nil
+}
+
 func e2eConfigVMSSHUser() string {
 	if v := os.Getenv("SSH_VM_USER"); v != "" {
 		return v
