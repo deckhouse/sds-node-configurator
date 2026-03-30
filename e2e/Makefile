@@ -87,6 +87,11 @@ fix-mod-permissions: ## Writable storage-e2e in GOMODCACHE or GOPATH (PrepareBoo
 				echo "Fixing permissions for $$dir"; \
 				chmod -R +w "$$dir" 2>/dev/null || true; \
 				mkdir -p "$$dir/temp/cluster" 2>/dev/null || true; \
+				cfg="$$dir/internal/config/config.go"; \
+				if [ -f "$$cfg" ] && grep -q 'SecretsWaitTimeout   = 2 \* time\.Minute' "$$cfg" 2>/dev/null; then \
+					sed -i 's/SecretsWaitTimeout   = 2 \* time\.Minute/SecretsWaitTimeout   = 15 * time.Minute/' "$$cfg"; \
+					echo "Patched SecretsWaitTimeout to 15m in $$dir"; \
+				fi; \
 			fi; \
 		done; \
 	done

@@ -353,6 +353,12 @@ jobs:
                 chmod -R u+w "$d" || true
                 mkdir -p "$d/temp/cluster" || true
                 chmod -R u+w "$d/temp" 2>/dev/null || true
+                # SecretsWaitTimeout is 2m in upstream; worker bootstrap secret often appears later.
+                cfg="$d/internal/config/config.go"
+                if [ -f "$cfg" ] && grep -q 'SecretsWaitTimeout   = 2 \* time\.Minute' "$cfg"; then
+                  sed -i 's/SecretsWaitTimeout   = 2 \* time\.Minute/SecretsWaitTimeout   = 15 * time.Minute/' "$cfg"
+                  echo "Patched SecretsWaitTimeout to 15m in storage-e2e ($d)"
+                fi
               fi
             done
             shopt -u nullglob
@@ -439,7 +445,7 @@ jobs:
             - **Triggered by:** \`e2e-smoke-test\` label
             - **Exit Code:** ${exitCode}
 
-            Tests were executed via storage-e2e (`TestE2E`: Common Scheduler Extender, then Sds Node Configurator).
+            Tests were executed via storage-e2e (TestE2E: Common Scheduler Extender, then Sds Node Configurator).
 
             **Artifacts:** Test logs are available in workflow artifacts.
 
