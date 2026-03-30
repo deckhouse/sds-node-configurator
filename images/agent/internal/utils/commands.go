@@ -78,26 +78,11 @@ func NewCommands() Commands {
 	return &commands{}
 }
 
-func (c *commands) GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
-	var outs bytes.Buffer
-	args := []string{"-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
-	cmd := exec.CommandContext(ctx, internal.LSBLKCmd, args...)
-	cmd.Stdout = &outs
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if err != nil {
-		return nil, cmd.String(), stderr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
-	}
-
-	devices, err := c.UnmarshalDevices(outs.Bytes())
-	if err != nil {
-		return nil, cmd.String(), stderr, fmt.Errorf("unable to unmarshal devices, err: %w", err)
-	}
-
-	return devices, cmd.String(), stderr, nil
+// Deprecated: GetBlockDevices is no longer used in the production path.
+// Block device discovery is now handled by udev DeviceMap.Snapshot().
+// This method is kept to satisfy the Commands interface.
+func (c *commands) GetBlockDevices(_ context.Context) ([]internal.Device, string, bytes.Buffer, error) {
+	return nil, "", bytes.Buffer{}, fmt.Errorf("GetBlockDevices is deprecated: use udev DeviceMap instead")
 }
 
 func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {

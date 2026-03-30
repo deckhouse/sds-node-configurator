@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/pilebones/go-udev/crawler"
 	"github.com/pilebones/go-udev/netlink"
 	"k8s.io/utils/clock"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/throttler"
+	udevpkg "github.com/deckhouse/sds-node-configurator/images/agent/internal/udev"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -49,11 +51,15 @@ type Scanner interface {
 }
 
 type scanner struct {
-	commands utils.Commands
+	commands  utils.Commands
+	deviceMap *udevpkg.DeviceMap
 }
 
 func NewScanner(commands utils.Commands) Scanner {
-	return &scanner{commands: commands}
+	return &scanner{
+		commands:  commands,
+		deviceMap: udevpkg.NewDeviceMap(),
+	}
 }
 
 func (s *scanner) Run(
@@ -89,6 +95,8 @@ func (s *scanner) Run(
 	}
 	quit := conn.Monitor(eventChan, errChan, matcher)
 
+	s.crawlDevices(log, matcher)
+
 	log.Info("[RunScanner] start to listen to events")
 
 	duration := 1 * time.Second
@@ -104,6 +112,8 @@ func (s *scanner) Run(
 				log.Error(err, "[RunScanner] unable to read from the event channel")
 				return err
 			}
+
+			s.deviceMap.HandleEvent(&device)
 
 			t.Do(func() {
 				log.Info("[RunScanner] start to fill the cache")
@@ -126,8 +136,9 @@ func (s *scanner) Run(
 			})
 
 		case err := <-errChan:
-			log.Error(err, "[RunScanner] Monitor udev event error")
+			log.Error(err, "[RunScanner] Monitor udev event error, restarting monitor and re-crawling devices")
 			quit = conn.Monitor(eventChan, errChan, matcher)
+			s.crawlDevices(log, matcher)
 			timer.Reset(duration)
 			continue
 
@@ -232,7 +243,7 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 
 	now = time.Now()
 	devices, devErr, err := s.scanDevices(ctx, log, cfg)
-	log.Trace(fmt.Sprintf("[fillTheCache] LSBLK command runs for: %s", realClock.Since(now).String()))
+	log.Trace(fmt.Sprintf("[fillTheCache] device scan runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
@@ -272,16 +283,37 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	return nil
 }
 
-func (s *scanner) scanDevices(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.Device, bytes.Buffer, error) {
-	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
-	defer cancel()
-	devices, cmdStr, stdErr, err := s.commands.GetBlockDevices(ctx)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[ScanDevices] unable to scan the devices, cmd: %s", cmdStr))
-		return nil, stdErr, err
-	}
+func (s *scanner) scanDevices(_ context.Context, _ logger.Logger, _ config.Config) ([]internal.Device, bytes.Buffer, error) {
+	devices := s.deviceMap.Snapshot()
+	return devices, bytes.Buffer{}, nil
+}
 
-	return devices, stdErr, nil
+// crawlDevices performs a full udev crawl and replaces the device map contents.
+// Used at startup and after netlink monitor reconnection to recover from
+// potentially lost events.
+func (s *scanner) crawlDevices(log logger.Logger, matcher netlink.Matcher) {
+	crawlerQueue := make(chan crawler.Device)
+	crawlerErrors := make(chan error)
+	crawlerQuit := crawler.ExistingDevices(crawlerQueue, crawlerErrors, matcher)
+
+	var devices []crawler.Device
+	done := false
+	for !done {
+		select {
+		case dev, open := <-crawlerQueue:
+			if !open {
+				done = true
+			} else {
+				devices = append(devices, dev)
+			}
+		case err := <-crawlerErrors:
+			log.Error(err, "[crawlDevices] crawler error")
+		}
+	}
+	close(crawlerQuit)
+
+	s.deviceMap.FillFromCrawler(devices)
+	log.Info(fmt.Sprintf("[crawlDevices] crawl found %d devices", len(devices)))
 }
 
 func (s *scanner) scanPVs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.PVData, bytes.Buffer, error) {
