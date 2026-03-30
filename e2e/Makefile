@@ -12,16 +12,6 @@ deps: ## Download dependencies
 	go mod tidy
 	@$(MAKE) fix-mod-permissions
 
-# === Docker image ===
-
-.PHONY: docker-build
-docker-build: ## Build Docker image with tests (context: repo root)
-	docker build -t $(E2E_IMAGE) -f Dockerfile ..
-
-.PHONY: docker-push
-docker-push: ## Push image to registry
-	docker push $(E2E_IMAGE)
-
 # === Run in cluster (Job) ===
 
 .PHONY: deploy-rbac
@@ -91,6 +81,11 @@ fix-mod-permissions: ## Writable storage-e2e in GOMODCACHE or GOPATH (PrepareBoo
 				if [ -f "$$cfg" ] && grep -q 'SecretsWaitTimeout   = 2 \* time\.Minute' "$$cfg" 2>/dev/null; then \
 					sed -i 's/SecretsWaitTimeout   = 2 \* time\.Minute/SecretsWaitTimeout   = 15 * time.Minute/' "$$cfg"; \
 					echo "Patched SecretsWaitTimeout to 15m in $$dir"; \
+				fi; \
+				RP="$(CURDIR)/patches/storage-e2e-reconnect-after-add-nodes.patch"; \
+				if [ -f "$$RP" ] && [ -f "$$dir/pkg/cluster/cluster.go" ] && ! grep -q 'refresh SSH tunnel after node bootstrap' "$$dir/pkg/cluster/cluster.go" 2>/dev/null; then \
+					patch -p0 --batch -d "$$dir" -i "$$RP" || exit 1; \
+					echo "Applied reconnect-after-add-nodes patch in $$dir"; \
 				fi; \
 			fi; \
 		done; \

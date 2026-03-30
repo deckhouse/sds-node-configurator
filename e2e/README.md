@@ -19,8 +19,7 @@ E2E тесты предназначены для проверки полного
 
 ```
 e2e/
-├── Dockerfile              # образ для Job в кластере
-├── Makefile                # deps, go test, docker, Job
+├── Makefile                # deps, go test, Job (образ задаётся снаружи)
 ├── README.md
 ├── E2E_USAGE.md            # CI, smoke, секреты, label e2e-smoke-test
 ├── go.mod / go.sum
@@ -106,10 +105,10 @@ cd e2e && make test
 
 ## Запуск в кластере (Job)
 
+Соберите и опубликуйте образ с тестовым бинарником самостоятельно (в репозитории нет `Dockerfile` для e2e). Затем:
+
 ```bash
 cd e2e
-make docker-build E2E_IMAGE=your-registry/e2e-tests:latest
-make docker-push E2E_IMAGE=your-registry/e2e-tests:latest
 make run-in-cluster E2E_IMAGE=your-registry/e2e-tests:latest
 make logs
 make cleanup
