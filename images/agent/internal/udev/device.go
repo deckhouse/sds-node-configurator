@@ -237,6 +237,9 @@ func ResolveDeviceType(props UdevProperties, devName string) string {
 	if strings.HasPrefix(bare, "loop") {
 		return "loop"
 	}
+	if strings.HasPrefix(bare, "sr") {
+		return "rom"
+	}
 	if strings.HasPrefix(props.DMUUID, "LVM-") {
 		return "lvm"
 	}

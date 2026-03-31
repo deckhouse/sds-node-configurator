@@ -272,8 +272,8 @@ func TestSnapshot_Partition(t *testing.T) {
 	procSelfMountInfo = mountInfoPath
 	t.Cleanup(func() { procSelfMountInfo = origMountInfo })
 
+	createPartitionSymlink(t, root, "sda", "sda1")
 	writeFakeSysfsFile(t, "sda1", "size", "1048576\n")
-	writeFakeSysfsFile(t, "sda1", "partition", "1\n")
 	writeFakeSysfsFile(t, "sda", "queue/rotational", "0\n")
 	writeFakeSysfsFile(t, "sda", "removable", "0\n")
 

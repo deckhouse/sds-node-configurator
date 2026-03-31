@@ -77,19 +77,19 @@ func writeFakeSysBlockFile(t *testing.T, devName, relPath, content string) {
 
 func TestParseUdevProperties_FullEnv(t *testing.T) {
 	env := map[string]string{
-		"DEVNAME":           "sda",
-		"DEVTYPE":           "disk",
-		"MAJOR":             "8",
-		"MINOR":             "0",
-		"ID_SERIAL_SHORT":   "WD-ABC123",
-		"ID_SERIAL":         "WDC_WD10EZEX_WD-ABC123",
-		"ID_MODEL":          "WDC_WD10EZEX",
-		"ID_WWN":            "0x50014ee2b5e7c5a0",
-		"ID_FS_TYPE":        "ext4",
+		"DEVNAME":            "sda",
+		"DEVTYPE":            "disk",
+		"MAJOR":              "8",
+		"MINOR":              "0",
+		"ID_SERIAL_SHORT":    "WD-ABC123",
+		"ID_SERIAL":          "WDC_WD10EZEX_WD-ABC123",
+		"ID_MODEL":           "WDC_WD10EZEX",
+		"ID_WWN":             "0x50014ee2b5e7c5a0",
+		"ID_FS_TYPE":         "ext4",
 		"ID_PART_ENTRY_UUID": "abcd-1234",
-		"DM_NAME":           "",
-		"DM_UUID":           "",
-		"MD_LEVEL":          "",
+		"DM_NAME":            "",
+		"DM_UUID":            "",
+		"MD_LEVEL":           "",
 	}
 	props := ParseUdevProperties(env)
 
@@ -171,6 +171,8 @@ func TestResolveDeviceType(t *testing.T) {
 		{"partition", UdevProperties{DevType: "partition"}, "/dev/sda1", "part"},
 		{"plain disk", UdevProperties{DevType: "disk"}, "/dev/sda", "disk"},
 		{"nvme disk", UdevProperties{DevType: "disk"}, "/dev/nvme0n1", "disk"},
+		{"CD-ROM sr0", UdevProperties{DevType: "disk"}, "/dev/sr0", "rom"},
+		{"CD-ROM sr1", UdevProperties{}, "/dev/sr1", "rom"},
 		{"empty props", UdevProperties{}, "/dev/sda", "disk"},
 	}
 	for _, tt := range tests {
