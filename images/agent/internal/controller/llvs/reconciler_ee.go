@@ -285,9 +285,29 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 		)
 		r.sdsCache.AddLV(llvs.Status.ActualVGNameOnTheNode, llvs.ActualSnapshotNameOnTheNode())
 
-		llvs.Status.Reason = "Waiting for created volume to become discovered"
+		r.log.Debug(fmt.Sprintf("[reconcileLLVSCreateFunc] tries to get snapshot %s actual data directly from LVM", llvs.ActualSnapshotNameOnTheNode()))
+		lvData, getLVCmd, _, getLVErr := r.commands.GetLV(llvs.Status.ActualVGNameOnTheNode, llvs.ActualSnapshotNameOnTheNode())
+		r.log.Debug(fmt.Sprintf("[reconcileLLVSCreateFunc] ran cmd: %s", getLVCmd))
+		if getLVErr != nil {
+			r.log.Warning(fmt.Sprintf("[reconcileLLVSCreateFunc] unable to get snapshot %s info from LVM: %s, will retry", llvs.ActualSnapshotNameOnTheNode(), getLVErr.Error()))
+			llvs.Status.Reason = "Waiting for created volume to become discovered"
+			err = r.cl.Status().Update(ctx, llvs)
+			return true, err
+		}
+		snapshotLVData = &cache.LVData{Data: lvData, Exist: true}
+		r.log.Info("[reconcileLLVSCreateFunc] updating LLVS size")
+		size := resource.NewQuantity(snapshotLVData.Data.LVSize.Value(), resource.BinarySI)
+		usedSize, err := snapshotLVData.Data.GetUsedSize()
+		if err != nil {
+			r.log.Error(err, "error parsing LV size")
+			return true, err
+		}
+		llvs.Status.Size = *size
+		llvs.Status.UsedSize = *usedSize
+		llvs.Status.Phase = v1alpha1.PhaseCreated
+		llvs.Status.Reason = ""
 		err = r.cl.Status().Update(ctx, llvs)
-		return true, err
+		return false, err
 	case reflect.ValueOf(snapshotLVData.Data).IsZero():
 		// still "Waiting for created volume to become discovered"
 		r.log.Info("[reconcileLLVSCreateFunc] waiting for created volume to become discovered")
