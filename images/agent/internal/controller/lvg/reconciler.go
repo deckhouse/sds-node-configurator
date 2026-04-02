@@ -536,6 +536,8 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 		if freshVG, _, _, getErr := r.commands.GetVG(lvg.Spec.ActualVGNameOnTheNode); getErr == nil {
 			v := freshVG
 			vgAfterCreate = &v
+		} else {
+			r.log.Warning(fmt.Sprintf("[reconcileLVGCreateFunc] unable to get VG %s after creation, will use default extent size for thin-pool alignment: %v", lvg.Spec.ActualVGNameOnTheNode, getErr))
 		}
 		extentForThinPools := extentSizeForThinPoolAlign(lvg, vgAfterCreate)
 
@@ -632,16 +634,12 @@ func (r *Reconciler) shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alph
 		return true
 	}
 
+	extentSize := extentSizeForThinPoolAlign(newLVG, nil)
 	for _, n := range newLVG.Status.Nodes {
 		for _, d := range n.Devices {
-			if newLVG.Status.ExtentSize.Value() > 0 {
-				alignedPV, _ := utils.AlignSizeToExtent(d.PVSize, newLVG.Status.ExtentSize)
-				alignedDev, _ := utils.AlignSizeToExtent(d.DevSize, newLVG.Status.ExtentSize)
-				if alignedPV.Value() != alignedDev.Value() {
-					r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s PV size is different to device size", newLVG.Name))
-					return true
-				}
-			} else if d.PVSize.Value() != d.DevSize.Value() {
+			alignedPV, _ := utils.AlignSizeToExtent(d.PVSize, extentSize)
+			alignedDev, _ := utils.AlignSizeToExtent(d.DevSize, extentSize)
+			if alignedPV.Value() != alignedDev.Value() {
 				r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s PV size is different to device size", newLVG.Name))
 				return true
 			}
@@ -915,7 +913,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 			} else {
 				if actualThinPool, created := actualThinPools[specTp.Name]; !created {
 					r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] thin-pool %s of the LVMVolumeGroup %s is not yet created, adds its requested size", specTp.Name, lvg.Name))
-					addingThinPoolSize += tpRequestedSize.Value()
+					addingThinPoolSize += alignedTpSize.Value()
 				} else {
 					r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] thin-pool %s of the LVMVolumeGroup %s is already created, check its requested size", specTp.Name, lvg.Name))
 					if alignedTpSize.Value() < actualThinPool.LVSize.Value() {
@@ -1086,10 +1084,13 @@ func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolu
 		return nil
 	}
 
+	vg := r.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode)
+	extentSize := extentSizeForThinPoolAlign(lvg, vg)
+
 	errs := strings.Builder{}
 	for _, n := range lvg.Status.Nodes {
 		for _, d := range n.Devices {
-			if d.DevSize.Value()-d.PVSize.Value() > lvg.Status.ExtentSize.Value() {
+			if d.DevSize.Value()-d.PVSize.Value() > extentSize.Value() {
 				if isApplied(lvg) {
 					err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 					if err != nil {
