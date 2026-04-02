@@ -41,6 +41,21 @@ import (
 
 const ReconcilerName = "lvm-volume-group-watcher-controller"
 
+// lvmDefaultPhysicalExtent is LVM's default PE when vgcreate is run without --physicalextentsize.
+var lvmDefaultPhysicalExtent = resource.MustParse("4Mi")
+
+// extentSizeForThinPoolAlign returns a positive extent size for AlignSizeToExtent.
+// Status.ExtentSize stays zero until the discoverer runs; it is also zero before the VG exists.
+func extentSizeForThinPoolAlign(lvg *v1alpha1.LVMVolumeGroup, vg *internal.VGData) resource.Quantity {
+	if lvg != nil && lvg.Status.ExtentSize.Value() > 0 {
+		return lvg.Status.ExtentSize
+	}
+	if vg != nil && vg.VGExtentSize.Value() > 0 {
+		return vg.VGExtentSize
+	}
+	return lvmDefaultPhysicalExtent
+}
+
 type Reconciler struct {
 	cl       client.Client
 	log      logger.Logger
@@ -517,6 +532,13 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 	if lvg.Spec.ThinPools != nil {
 		r.log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] the LVMVolumeGroup %s has thin-pools. Tries to create them", lvg.Name))
 
+		var vgAfterCreate *internal.VGData
+		if freshVG, _, _, getErr := r.commands.GetVG(lvg.Spec.ActualVGNameOnTheNode); getErr == nil {
+			v := freshVG
+			vgAfterCreate = &v
+		}
+		extentForThinPools := extentSizeForThinPoolAlign(lvg, vgAfterCreate)
+
 		for _, tp := range lvg.Spec.ThinPools {
 			vgSize := countVGSizeByBlockDevices(blockDevices)
 			tpRequestedSize, err := utils.GetRequestedSizeFromString(tp.Size, vgSize)
@@ -526,7 +548,7 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 			}
 
 			var cmd string
-			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, lvg.Status.ExtentSize)
+			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentForThinPools)
 			if alignErr != nil {
 				r.log.Error(alignErr, fmt.Sprintf("[reconcileLVGCreateFunc] unable to align thin-pool %s size for LVMVolumeGroup %s", tp.Name, lvg.Name))
 				return false, alignErr
@@ -535,8 +557,8 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 				r.log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] Thin-pool %s of the LVMVolumeGroup %s will be created with full VG space size", tp.Name, lvg.Name))
 				cmd, err = r.commands.CreateThinPoolFullVGSpace(tp.Name, lvg.Spec.ActualVGNameOnTheNode)
 			} else {
-				r.log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] Thin-pool %s of the LVMVolumeGroup %s will be created with size %s", tp.Name, lvg.Name, tpRequestedSize.String()))
-				cmd, err = r.commands.CreateThinPool(tp.Name, lvg.Spec.ActualVGNameOnTheNode, tpRequestedSize.Value())
+				r.log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] Thin-pool %s of the LVMVolumeGroup %s will be created with size %s", tp.Name, lvg.Name, alignedTpSize.String()))
+				cmd, err = r.commands.CreateThinPool(tp.Name, lvg.Spec.ActualVGNameOnTheNode, alignedTpSize.Value())
 			}
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to create thin-pool %s of the LVMVolumeGroup %s, cmd: %s", tp.Name, lvg.Name, cmd))
@@ -760,7 +782,7 @@ func (r *Reconciler) validateLVGForCreateFunc(
 				continue
 			}
 
-			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, lvg.Status.ExtentSize)
+			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentSizeForThinPoolAlign(lvg, nil))
 			if alignErr != nil {
 				reason.WriteString(fmt.Sprintf("Unable to align thin-pool %s size: %s. ", tp.Name, alignErr.Error()))
 				continue
@@ -771,7 +793,7 @@ func (r *Reconciler) validateLVGForCreateFunc(
 				}
 			}
 
-			totalThinPoolSize += tpRequestedSize.Value()
+			totalThinPoolSize += alignedTpSize.Value()
 		}
 		r.log.Trace(fmt.Sprintf("[validateLVGForCreateFunc] LVMVolumeGroup %s thin-pools requested space: %d", lvg.Name, totalThinPoolSize))
 
@@ -880,7 +902,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 			}
 
 			r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] the LVMVolumeGroup %s thin-pool %s requested size %s, Status VG size %s", lvg.Name, specTp.Name, tpRequestedSize.String(), lvg.Status.VGSize.String()))
-			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, lvg.Status.ExtentSize)
+			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentSizeForThinPoolAlign(lvg, vg))
 			if alignErr != nil {
 				reason.WriteString(fmt.Sprintf("Unable to align thin-pool %s size: %s. ", specTp.Name, alignErr.Error()))
 				continue
@@ -999,7 +1021,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 
 			var cmd string
 			start := time.Now()
-			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, lvg.Status.ExtentSize)
+			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentSizeForThinPoolAlign(lvg, &vg))
 			if alignErr != nil {
 				r.log.Error(alignErr, fmt.Sprintf("[ReconcileThinPoolsIfNeeded] unable to align thin-pool %s size for LVMVolumeGroup %s", specTp.Name, lvg.Name))
 				errs.WriteString(fmt.Sprintf("unable to align thin-pool %s size, err: %s. ", specTp.Name, alignErr.Error()))
@@ -1009,8 +1031,8 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 				r.log.Debug(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] thin-pool %s of the LVMVolumeGroup %s will be created with size 100FREE", specTp.Name, lvg.Name))
 				cmd, err = r.commands.CreateThinPoolFullVGSpace(specTp.Name, vg.VGName)
 			} else {
-				r.log.Debug(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] thin-pool %s of the LVMVolumeGroup %s will be created with size %s", specTp.Name, lvg.Name, tpRequestedSize.String()))
-				cmd, err = r.commands.CreateThinPool(specTp.Name, vg.VGName, tpRequestedSize.Value())
+				r.log.Debug(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] thin-pool %s of the LVMVolumeGroup %s will be created with size %s", specTp.Name, lvg.Name, alignedTpSize.String()))
+				cmd, err = r.commands.CreateThinPool(specTp.Name, vg.VGName, alignedTpSize.Value())
 			}
 			r.metrics.UtilsCommandsDuration(ReconcilerName, "lvcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 			r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "lvcreate").Inc()
@@ -1023,7 +1045,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 
 			r.log.Info(fmt.Sprintf("[ReconcileThinPoolsIfNeeded] thin-pool %s of the LVMVolumeGroup %s has been successfully created", specTp.Name, lvg.Name))
 		} else {
-			alignedTpSizeForResize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, lvg.Status.ExtentSize)
+			alignedTpSizeForResize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentSizeForThinPoolAlign(lvg, &vg))
 			if alignErr != nil {
 				r.log.Error(alignErr, fmt.Sprintf("[ReconcileThinPoolsIfNeeded] unable to align thin-pool %s size for LVMVolumeGroup %s", specTp.Name, lvg.Name))
 				errs.WriteString(fmt.Sprintf("unable to align thin-pool %s size, err: %s. ", specTp.Name, alignErr.Error()))
@@ -1378,7 +1400,8 @@ func (r *Reconciler) extendThinPool(lvg *v1alpha1.LVMVolumeGroup, specThinPool v
 
 	var cmd string
 	start := time.Now()
-	alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, lvg.Status.ExtentSize)
+	vg := r.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode)
+	alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentSizeForThinPoolAlign(lvg, vg))
 	if alignErr != nil {
 		r.log.Error(alignErr, fmt.Sprintf("[ExtendThinPool] unable to align thin-pool %s size for LVMVolumeGroup %s", specThinPool.Name, lvg.Name))
 		return alignErr
