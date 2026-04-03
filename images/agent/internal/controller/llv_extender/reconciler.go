@@ -227,9 +227,6 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 		if getLVErr != nil {
 			r.log.Error(getLVErr, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to get LV %s info from LVM after extension, will retry", llv.Spec.ActualLVNameOnTheNode))
 			shouldRetry = true
-			if err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, getLVErr.Error()); err != nil {
-				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
-			}
 			continue
 		}
 		lv = &cache.LVData{Data: lvData, Exist: true}
