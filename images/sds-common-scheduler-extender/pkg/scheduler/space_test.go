@@ -48,9 +48,9 @@ func TestSumLLVSpace_ThickOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(30)*oneGiB, total)
 
-	created, err := sumLLVSpace(ctx, cl, key, true)
+	onDisk, err := sumLLVSpace(ctx, cl, key, true)
 	require.NoError(t, err)
-	assert.Equal(t, int64(10)*oneGiB, created)
+	assert.Equal(t, int64(10)*oneGiB, onDisk)
 }
 
 func TestSumLLVSpace_ThinOnly(t *testing.T) {
@@ -67,9 +67,9 @@ func TestSumLLVSpace_ThinOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(12)*oneGiB, total)
 
-	created, err := sumLLVSpace(ctx, cl, key, true)
+	onDisk, err := sumLLVSpace(ctx, cl, key, true)
 	require.NoError(t, err)
-	assert.Equal(t, int64(8)*oneGiB, created)
+	assert.Equal(t, int64(8)*oneGiB, onDisk)
 }
 
 func TestSumLLVSpace_NoLLVs(t *testing.T) {
@@ -93,9 +93,62 @@ func TestSumLLVSpace_NilStatus(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(10)*oneGiB, total)
 
-	created, err := sumLLVSpace(ctx, cl, key, true)
+	onDisk, err := sumLLVSpace(ctx, cl, key, true)
 	require.NoError(t, err)
-	assert.Equal(t, int64(0), created)
+	assert.Equal(t, int64(0), onDisk)
+}
+
+func TestSumLLVSpace_FailedWithActualSize(t *testing.T) {
+	ctx := context.Background()
+	cl := newFakeClient(
+		readyLVG("lvg1", hundredGiB, hundredGiB),
+		thickLLV("llv-created", "lvg1", "20Gi", "Created"),
+		thickFailedLLVOnDisk("llv-failed", "lvg1", "40Gi", 41*oneGiB),
+	)
+	key := cache.StoragePoolKey{LVGName: "lvg1"}
+
+	total, err := sumLLVSpace(ctx, cl, key, false)
+	require.NoError(t, err)
+	assert.Equal(t, int64(60)*oneGiB, total, "sumAll should include both Created and Failed LLVs")
+
+	onDisk, err := sumLLVSpace(ctx, cl, key, true)
+	require.NoError(t, err)
+	assert.Equal(t, int64(60)*oneGiB, onDisk, "onlyOnDisk should include Failed LLV with actualSize > 0")
+}
+
+func TestSumLLVSpace_FailedWithoutActualSize(t *testing.T) {
+	ctx := context.Background()
+	cl := newFakeClient(
+		readyLVG("lvg1", hundredGiB, hundredGiB),
+		thickLLV("llv-created", "lvg1", "20Gi", "Created"),
+		thickLLV("llv-failed", "lvg1", "10Gi", "Failed"),
+	)
+	key := cache.StoragePoolKey{LVGName: "lvg1"}
+
+	total, err := sumLLVSpace(ctx, cl, key, false)
+	require.NoError(t, err)
+	assert.Equal(t, int64(30)*oneGiB, total)
+
+	onDisk, err := sumLLVSpace(ctx, cl, key, true)
+	require.NoError(t, err)
+	assert.Equal(t, int64(20)*oneGiB, onDisk, "onlyOnDisk should NOT include Failed LLV with zero actualSize")
+}
+
+func TestSumLLVSpace_ThinFailedWithActualSize(t *testing.T) {
+	ctx := context.Background()
+	cl := newFakeClient(
+		thinLLV("llv-created", "tp0", "10Gi", "Created"),
+		thinFailedLLVOnDisk("llv-failed", "tp0", "8Gi", 9*oneGiB),
+	)
+	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
+
+	total, err := sumLLVSpace(ctx, cl, key, false)
+	require.NoError(t, err)
+	assert.Equal(t, int64(18)*oneGiB, total)
+
+	onDisk, err := sumLLVSpace(ctx, cl, key, true)
+	require.NoError(t, err)
+	assert.Equal(t, int64(18)*oneGiB, onDisk, "onlyOnDisk should include thin Failed LLV with actualSize > 0")
 }
 
 // --- CalibratePoolUnaccountedSpace tests ---
@@ -138,7 +191,7 @@ func TestCalibratePool_InFlightLLVsIgnoredForCalibration(t *testing.T) {
 	ctx := context.Background()
 	// VGSize=100Gi, VGFree=80Gi
 	// Created LLV: 20Gi (reflected in VGFree), Pending LLV: 10Gi (not reflected)
-	// Calibration uses only Created: unaccounted = (100-20) - 80 = 0
+	// Calibration uses only on-disk LLVs: unaccounted = (100-20) - 80 = 0
 	lvg := readyLVG("lvg1", hundredGiB, 80*oneGiB)
 	cl := newFakeClient(
 		lvg,
@@ -409,7 +462,7 @@ func TestCalibratePool_ThinPool_InFlightIgnored(t *testing.T) {
 	ctx := context.Background()
 	// Thin pool: AllocatedSize=10Gi, AvailableSpace=40Gi → totalCapacity=50Gi
 	// Created LLV: 10Gi, Pending LLV: 8Gi (not reflected in AllocatedSize yet)
-	// Calibration uses only Created: unaccounted = (50 - 10) - 40 = 0
+	// Calibration uses only on-disk LLVs: unaccounted = (50 - 10) - 40 = 0
 	lvg := readyLVGWithThinPool("lvg1", 10*oneGiB, 40*oneGiB)
 	cl := newFakeClient(
 		lvg,
@@ -422,6 +475,97 @@ func TestCalibratePool_ThinPool_InFlightIgnored(t *testing.T) {
 	err := CalibratePoolUnaccountedSpace(ctx, cl, c, lvg, key)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), c.GetUnaccountedSpace(key))
+}
+
+func TestCalibratePool_FailedLLVOnDisk(t *testing.T) {
+	ctx := context.Background()
+	// VGSize=100Gi, VGFree=40Gi
+	// Created LLV: 20Gi, Failed LLV (on disk): 40Gi (actualSize=41Gi due to rounding)
+	// Both are on disk → sumOnDisk = 20 + 40 = 60Gi
+	// unaccounted = 100 - 60 - 40 = 0
+	lvg := readyLVG("lvg1", hundredGiB, 40*oneGiB)
+	cl := newFakeClient(
+		lvg,
+		thickLLV("llv-created", "lvg1", "20Gi", "Created"),
+		thickFailedLLVOnDisk("llv-failed", "lvg1", "40Gi", 41*oneGiB),
+	)
+	c := newTestCache()
+	key := cache.StoragePoolKey{LVGName: "lvg1"}
+
+	err := CalibratePoolUnaccountedSpace(ctx, cl, c, lvg, key)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), c.GetUnaccountedSpace(key))
+}
+
+func TestCalibratePool_ThinPool_FailedLLVOnDisk(t *testing.T) {
+	ctx := context.Background()
+	// Thin pool: AllocatedSize=30Gi (2 LVs on disk), AvailableSpace=20Gi
+	// totalCapacity = 30 + 20 = 50Gi
+	// Created LLV: 10Gi, Failed LLV (on disk): 20Gi → sumOnDisk = 30Gi
+	// unaccounted = 50 - 30 - 20 = 0
+	lvg := readyLVGWithThinPool("lvg1", 30*oneGiB, 20*oneGiB)
+	cl := newFakeClient(
+		lvg,
+		thinLLV("llv-created", "tp0", "10Gi", "Created"),
+		thinFailedLLVOnDisk("llv-failed", "tp0", "20Gi", 21*oneGiB),
+	)
+	c := newTestCache()
+	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
+
+	err := CalibratePoolUnaccountedSpace(ctx, cl, c, lvg, key)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), c.GetUnaccountedSpace(key))
+}
+
+func TestGetAvailableSpace_FailedLLVOnDisk_NoDoubleCount(t *testing.T) {
+	ctx := context.Background()
+	// Thin pool: AllocatedSize=30Gi, AvailableSpace=20Gi → totalCapacity=50Gi
+	// Created LLV: 10Gi, Failed LLV on disk: 20Gi
+	// sumAll = 30Gi, sumOnDisk = 30Gi (Failed LLV has actualSize)
+	// unaccounted = 50 - 30 - 20 = 0
+	// llvBased = 50 - 30 - 0 = 20Gi
+	// baseFree = min(20, 20) = 20Gi → available = 20Gi
+	// Previously this would be: sumOnDisk=10Gi (only Created), unaccounted=20,
+	// llvBased = 50-30-20 = 0, available = 0 (or negative with more Failed LLVs)
+	cl := newFakeClient(
+		readyLVGWithThinPool("lvg1", 30*oneGiB, 20*oneGiB),
+		thinLLV("llv-created", "tp0", "10Gi", "Created"),
+		thinFailedLLVOnDisk("llv-failed", "tp0", "20Gi", 21*oneGiB),
+	)
+	c := newTestCache()
+	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
+
+	info, err := getAvailableSpace(ctx, cl, c, key)
+	require.NoError(t, err)
+	assert.Equal(t, int64(20)*oneGiB, info.AvailableSpace,
+		"available space must not be reduced by Failed LLVs that are already on disk")
+	assert.Equal(t, int64(50)*oneGiB, info.TotalSize)
+}
+
+func TestGetAvailableSpace_FailedLLVOnDisk_ManyFailed(t *testing.T) {
+	ctx := context.Background()
+	// Regression test simulating production scenario:
+	// Thin pool: AllocatedSize=80Gi, AvailableSpace=20Gi → totalCapacity=100Gi
+	// Created LLVs: 40Gi, Failed LLVs on disk: 40Gi, Pending LLV: 5Gi
+	// sumAll = 85Gi, sumOnDisk = 80Gi (Created + Failed with actualSize)
+	// unaccounted = 100 - 80 - 20 = 0
+	// llvBased = 100 - 85 - 0 = 15Gi (correctly subtracts only the Pending 5Gi)
+	// baseFree = min(15, 20) = 15Gi → available = 15Gi
+	cl := newFakeClient(
+		readyLVGWithThinPool("lvg1", 80*oneGiB, 20*oneGiB),
+		thinLLV("llv-created-1", "tp0", "20Gi", "Created"),
+		thinLLV("llv-created-2", "tp0", "20Gi", "Created"),
+		thinFailedLLVOnDisk("llv-failed-1", "tp0", "20Gi", 21*oneGiB),
+		thinFailedLLVOnDisk("llv-failed-2", "tp0", "20Gi", 21*oneGiB),
+		thinLLV("llv-pending", "tp0", "5Gi", "Pending"),
+	)
+	c := newTestCache()
+	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
+
+	info, err := getAvailableSpace(ctx, cl, c, key)
+	require.NoError(t, err)
+	assert.Equal(t, int64(15)*oneGiB, info.AvailableSpace,
+		"available space should only be reduced by the truly Pending LLV, not by Failed LLVs on disk")
 }
 
 func TestGetAvailableSpace_NotReady(t *testing.T) {
