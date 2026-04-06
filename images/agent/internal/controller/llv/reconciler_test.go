@@ -235,6 +235,49 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 				assert.Equal(t, "No LV name specified. Zero size for LV. No thin pool specified. ", reason)
 			}
 		})
+
+		t.Run("actual_size_larger_than_requested_is_valid", func(t *testing.T) {
+			const (
+				lvgName = "test-lvg"
+				tpName  = "data-thin"
+			)
+
+			r := setupReconciler()
+
+			lvg := &v1alpha1.LVMVolumeGroup{
+				ObjectMeta: v1.ObjectMeta{
+					Name: lvgName,
+				},
+				Status: v1alpha1.LVMVolumeGroupStatus{
+					ExtentSize: resource.MustParse("4Mi"),
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolStatus{
+						{
+							Name:            tpName,
+							AllocationLimit: internal.AllocationLimitDefaultValue,
+						},
+					},
+				},
+			}
+
+			llv := &v1alpha1.LVMLogicalVolume{
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					ActualLVNameOnTheNode: "test-lv",
+					Type:                  internal.Thin,
+					Size:                  "40Gi",
+					LVMVolumeGroupName:    lvgName,
+					Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: tpName},
+				},
+				Status: &v1alpha1.LVMLogicalVolumeStatus{
+					Phase:      v1alpha1.PhaseCreated,
+					ActualSize: resource.MustParse("40972Mi"),
+				},
+			}
+
+			v, reason := r.validateLVMLogicalVolume(llv, lvg)
+			if assert.True(t, v) {
+				assert.Equal(t, 0, len(reason))
+			}
+		})
 	})
 
 	t.Run("getThinPoolAvailableSpace", func(t *testing.T) {

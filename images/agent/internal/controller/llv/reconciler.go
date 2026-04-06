@@ -704,17 +704,6 @@ func (r *Reconciler) validateLVMLogicalVolume(llv *v1alpha1.LVMLogicalVolume, lv
 		reason.WriteString("Zero size for LV. ")
 	}
 
-	if llv.Status != nil {
-		alignedReqSize, alignErr := utils.AlignSizeToExtent(llvRequestedSize, lvg.Status.ExtentSize)
-		if alignErr != nil {
-			if llvRequestedSize.Value() < llv.Status.ActualSize.Value() {
-				reason.WriteString("Desired LV size is less than actual one. ")
-			}
-		} else if alignedReqSize.Value() < llv.Status.ActualSize.Value() {
-			reason.WriteString("Desired LV size is less than actual one. ")
-		}
-	}
-
 	switch llv.Spec.Type {
 	case internal.Thin:
 		if llv.Spec.Thin == nil {
