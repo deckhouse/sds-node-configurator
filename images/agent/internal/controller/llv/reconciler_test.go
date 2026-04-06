@@ -761,27 +761,28 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 		}
 	})
 
-	t.Run("AreSizesEqualWithinDelta", func(t *testing.T) {
-		t.Run("returns_true", func(t *testing.T) {
-			size := 10000000000
+	t.Run("AlignSizeToExtent", func(t *testing.T) {
+		extentSize := resource.MustParse("4Mi")
 
-			left := resource.NewQuantity(int64(size), resource.BinarySI)
-			right := resource.NewQuantity(int64(size)+internal.ResizeDelta.Value()-1, resource.BinarySI)
-
-			equal := utils.AreSizesEqualWithinDelta(*left, *right, internal.ResizeDelta)
-
-			assert.True(t, equal)
+		t.Run("aligns_up_to_extent_boundary", func(t *testing.T) {
+			size := resource.MustParse("201Mi")
+			aligned, err := utils.AlignSizeToExtent(size, extentSize)
+			assert.NoError(t, err)
+			assert.Equal(t, resource.MustParse("204Mi").Value(), aligned.Value())
 		})
 
-		t.Run("returns_false", func(t *testing.T) {
-			size := 10000000000
+		t.Run("already_aligned_stays_same", func(t *testing.T) {
+			size := resource.MustParse("204Mi")
+			aligned, err := utils.AlignSizeToExtent(size, extentSize)
+			assert.NoError(t, err)
+			assert.Equal(t, resource.MustParse("204Mi").Value(), aligned.Value())
+		})
 
-			left := resource.NewQuantity(int64(size), resource.BinarySI)
-			right := resource.NewQuantity(int64(size)+internal.ResizeDelta.Value(), resource.BinarySI)
-
-			equal := utils.AreSizesEqualWithinDelta(*left, *right, internal.ResizeDelta)
-
-			assert.False(t, equal)
+		t.Run("returns_error_for_zero_extent", func(t *testing.T) {
+			size := resource.MustParse("100Mi")
+			zeroExtent := resource.MustParse("0")
+			_, err := utils.AlignSizeToExtent(size, zeroExtent)
+			assert.Error(t, err)
 		})
 	})
 }

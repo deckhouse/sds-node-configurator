@@ -36,6 +36,7 @@ type LVMVolumeGroupCandidate struct {
 	VGSize                resource.Quantity
 	VGFree                resource.Quantity
 	VGUUID                string
+	ExtentSize            resource.Quantity
 	Nodes                 map[string][]LVMVGDevice
 }
 
@@ -106,13 +107,14 @@ type VG struct {
 }
 
 type VGData struct {
-	VGAttr   string            `json:"vg_attr"`
-	VGFree   resource.Quantity `json:"vg_free"`
-	VGName   string            `json:"vg_name"`
-	VGShared string            `json:"vg_shared"`
-	VGSize   resource.Quantity `json:"vg_size"`
-	VGTags   string            `json:"vg_tags"`
-	VGUUID   string            `json:"vg_uuid"`
+	VGAttr       string            `json:"vg_attr"`
+	VGFree       resource.Quantity `json:"vg_free"`
+	VGName       string            `json:"vg_name"`
+	VGShared     string            `json:"vg_shared"`
+	VGSize       resource.Quantity `json:"vg_size"`
+	VGTags       string            `json:"vg_tags"`
+	VGUUID       string            `json:"vg_uuid"`
+	VGExtentSize resource.Quantity `json:"vg_extent_size"`
 }
 
 type LVReport struct {
