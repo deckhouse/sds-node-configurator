@@ -122,6 +122,39 @@ func thinLLV(name, thinPoolName, size, phase string) *snc.LVMLogicalVolume {
 	return llv
 }
 
+func thickFailedLLVOnDisk(name, lvgName, specSize string, actualSize int64) *snc.LVMLogicalVolume {
+	return &snc.LVMLogicalVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: snc.LVMLogicalVolumeSpec{
+			LVMVolumeGroupName: lvgName,
+			Size:               specSize,
+			Type:               "Thick",
+		},
+		Status: &snc.LVMLogicalVolumeStatus{
+			Phase:      "Failed",
+			Reason:     "Desired LV size is less than actual one.",
+			ActualSize: *resource.NewQuantity(actualSize, resource.BinarySI),
+		},
+	}
+}
+
+func thinFailedLLVOnDisk(name, thinPoolName, specSize string, actualSize int64) *snc.LVMLogicalVolume {
+	return &snc.LVMLogicalVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: snc.LVMLogicalVolumeSpec{
+			LVMVolumeGroupName: "lvg1",
+			Size:               specSize,
+			Type:               "Thin",
+			Thin:               &snc.LVMLogicalVolumeThinSpec{PoolName: thinPoolName},
+		},
+		Status: &snc.LVMLogicalVolumeStatus{
+			Phase:      "Failed",
+			Reason:     "Desired LV size is less than actual one.",
+			ActualSize: *resource.NewQuantity(actualSize, resource.BinarySI),
+		},
+	}
+}
+
 func newFakeClient(objects ...client.Object) client.Client {
 	return fake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
