@@ -706,7 +706,11 @@ func (r *Reconciler) validateLVMLogicalVolume(llv *v1alpha1.LVMLogicalVolume, lv
 
 	if llv.Status != nil {
 		alignedReqSize, alignErr := utils.AlignSizeToExtent(llvRequestedSize, lvg.Status.ExtentSize)
-		if alignErr == nil && alignedReqSize.Value() < llv.Status.ActualSize.Value() {
+		if alignErr != nil {
+			if llvRequestedSize.Value() < llv.Status.ActualSize.Value() {
+				reason.WriteString("Desired LV size is less than actual one. ")
+			}
+		} else if alignedReqSize.Value() < llv.Status.ActualSize.Value() {
 			reason.WriteString("Desired LV size is less than actual one. ")
 		}
 	}

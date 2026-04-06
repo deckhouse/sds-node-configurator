@@ -280,11 +280,14 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 						d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, statusTp.Name))
 						messageBldr.WriteString(fmt.Sprintf("Unable to find ThinPool %s. ", statusTp.Name))
 						lvg.Status.ThinPools[i].Ready = false
-					} else if candidate.VGSize.Value() != statusTp.ActualSize.Value() &&
-						candidateTp.ActualSize.Value() < statusTp.ActualSize.Value() {
-						// thin-pool is not 100%VG space and actual size on the node is less than status
-						d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s ThinPool %s size %s is less than status one %s", lvg.Name, statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String()))
-						messageBldr.WriteString(fmt.Sprintf("ThinPool %s on the node has size %s which is less than status one %s. ", statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String()))
+					} else {
+						extentSize := extentSizeForThinPoolAlign(&lvg, nil)
+						vgTpDiff := candidate.VGSize.Value() - statusTp.ActualSize.Value()
+						isFullVG := vgTpDiff >= 0 && vgTpDiff <= extentSize.Value()
+						if !isFullVG && candidateTp.ActualSize.Value()+extentSize.Value() < statusTp.ActualSize.Value() {
+							d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s ThinPool %s size %s is less than status one %s", lvg.Name, statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String()))
+							messageBldr.WriteString(fmt.Sprintf("ThinPool %s on the node has size %s which is less than status one %s. ", statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String()))
+						}
 					}
 				}
 			}
