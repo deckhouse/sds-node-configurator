@@ -298,6 +298,15 @@ func (r *Reconciler) ReconcileLVMLogicalVolume(ctx context.Context, llv *v1alpha
 	return false, nil
 }
 
+// llvExtentSize returns the LVG extent size, falling back to 4Mi (LVM default)
+// when the discoverer has not yet populated Status.ExtentSize.
+func llvExtentSize(lvg *v1alpha1.LVMVolumeGroup) resource.Quantity {
+	if lvg.Status.ExtentSize.Value() > 0 {
+		return lvg.Status.ExtentSize
+	}
+	return resource.MustParse("4Mi")
+}
+
 func (r *Reconciler) reconcileLLVCreateFunc(
 	ctx context.Context,
 	llv *v1alpha1.LVMLogicalVolume,
@@ -319,7 +328,7 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 		return false, err
 	}
 
-	alignedRequestSize, err := utils.AlignSizeToExtent(llvRequestSize, lvg.Status.ExtentSize)
+	alignedRequestSize, err := utils.AlignSizeToExtent(llvRequestSize, llvExtentSize(lvg))
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to align size for LVMLogicalVolume %s", llv.Name))
 		return true, err
@@ -429,7 +438,7 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully counted the LVMLogicalVolume %s requested size: %s", llv.Name, llvRequestSize.String()))
 
-	alignedRequestSize, err := utils.AlignSizeToExtent(llvRequestSize, lvg.Status.ExtentSize)
+	alignedRequestSize, err := utils.AlignSizeToExtent(llvRequestSize, llvExtentSize(lvg))
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to align size for LVMLogicalVolume %s", llv.Name))
 		return true, err

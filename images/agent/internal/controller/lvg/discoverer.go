@@ -841,7 +841,8 @@ func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LVMVolumeGroup, candi
 		candidate.VGSize.Value() != lvg.Status.VGSize.Value() ||
 		candidate.VGFree.Value() != lvg.Status.VGFree.Value() ||
 		candidate.VGUUID != lvg.Status.VGUuid ||
-		hasStatusNodesDiff(log, convertLVMVGNodes(candidate.Nodes), lvg.Status.Nodes)
+		hasStatusNodesDiff(log, convertLVMVGNodes(candidate.Nodes), lvg.Status.Nodes) ||
+		candidate.ExtentSize.Value() != lvg.Status.ExtentSize.Value()
 }
 
 func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LVMVolumeGroupNode) bool {
