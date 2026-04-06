@@ -850,6 +850,25 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 
 			assert.True(t, hasLVMVolumeGroupDiff(logger.Logger{}, lvmVolumeGroup, candidate))
 		})
+
+		t.Run("should_return_true_when_extent_size_differs", func(t *testing.T) {
+			size10G := resource.MustParse("10G")
+
+			candidate := internal.LVMVolumeGroupCandidate{
+				AllocatedSize: size10G,
+				VGSize:        size10G,
+				ExtentSize:    resource.MustParse("4Mi"),
+			}
+
+			lvmVolumeGroup := v1alpha1.LVMVolumeGroup{
+				Status: v1alpha1.LVMVolumeGroupStatus{
+					AllocatedSize: resource.MustParse("9765625Ki"),
+					VGSize:        resource.MustParse("9765625Ki"),
+				},
+			}
+
+			assert.True(t, hasLVMVolumeGroupDiff(logger.Logger{}, lvmVolumeGroup, candidate))
+		})
 	})
 
 	t.Run("updateLVGConditionIfNeeded", func(t *testing.T) {

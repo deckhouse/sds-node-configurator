@@ -280,6 +280,22 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 		})
 	})
 
+	t.Run("llvExtentSize", func(t *testing.T) {
+		t.Run("returns_status_extent_size_when_positive", func(t *testing.T) {
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Status: v1alpha1.LVMVolumeGroupStatus{
+					ExtentSize: resource.MustParse("8Mi"),
+				},
+			}
+			assert.Equal(t, resource.MustParse("8Mi"), llvExtentSize(lvg))
+		})
+
+		t.Run("falls_back_to_4Mi_when_zero", func(t *testing.T) {
+			lvg := &v1alpha1.LVMVolumeGroup{}
+			assert.Equal(t, resource.MustParse("4Mi"), llvExtentSize(lvg))
+		})
+	})
+
 	t.Run("getThinPoolAvailableSpace", func(t *testing.T) {
 		free, err := utils.GetThinPoolAvailableSpace(
 			resource.MustParse("10Gi"),
