@@ -85,6 +85,27 @@ make test-focus FOCUS="TestSdsNodeConfigurator"
 - Создание LVMVolumeGroup на основе BlockDevice
 - Проверка статуса и capacity
 
+### Block Device Size Reduction
+
+- Создаётся VirtualDisk, обнаруживается BlockDevice, создаётся LVMVolumeGroup, ожидается Ready
+- Оригинальный диск отсоединяется и удаляется, подключается диск меньшего размера (симуляция уменьшения устройства)
+- Проверяется, что LVMVolumeGroup переходит в состояние ошибки
+
+**Проверки**:
+- ✅ LVMVolumeGroup Phase != Ready после замены устройства
+- ✅ Conditions содержат хотя бы одну запись с status=False (VG/PV ошибка)
+- ✅ Phase в состоянии NotReady, Pending или Failed
+
+### Manual BlockDevice Creation/Modification
+
+- Пользователь создаёт поддельный объект BlockDevice вручную
+- Пользователь изменяет status.size существующего BlockDevice
+
+**Проверки**:
+- ✅ Поддельный BlockDevice (consumable=true, реальный nodeName, несуществующий path) удаляется агентом
+- ✅ API отклоняет создание, если активен validating webhook
+- ✅ Изменённый status.size восстанавливается агентом до реального значения при следующем сканировании
+
 ## Кластер заблокирован (cluster is already locked)
 
 Если предыдущий запуск тестов завершился по Ctrl+C или упал до cleanup:
