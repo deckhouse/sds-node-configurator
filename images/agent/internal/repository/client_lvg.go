@@ -22,6 +22,7 @@ import (
 	"time"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -73,51 +74,58 @@ func (lvgCl *LVGClient) UpdateLVGConditionIfNeeded(
 	status v1.ConditionStatus,
 	conType, reason, message string,
 ) error {
-	exist := false
-	index := 0
-	newCondition := v1.Condition{
-		Type:               conType,
-		Status:             status,
-		ObservedGeneration: lvg.Generation,
-		LastTransitionTime: v1.NewTime(time.Now()),
-		Reason:             reason,
-		Message:            message,
-	}
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		fresh := &v1alpha1.LVMVolumeGroup{}
+		if err := lvgCl.cl.Get(ctx, client.ObjectKeyFromObject(lvg), fresh); err != nil {
+			return err
+		}
 
-	if lvg.Status.Conditions == nil {
-		lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] the LVMVolumeGroup %s conditions is nil. Initialize them", lvg.Name))
-		lvg.Status.Conditions = make([]v1.Condition, 0, 5)
-	}
+		newCondition := v1.Condition{
+			Type:               conType,
+			Status:             status,
+			ObservedGeneration: fresh.Generation,
+			LastTransitionTime: v1.NewTime(time.Now()),
+			Reason:             reason,
+			Message:            message,
+		}
 
-	if len(lvg.Status.Conditions) > 0 {
-		lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] there are some conditions in the LVMVolumeGroup %s. Tries to find a condition %s", lvg.Name, conType))
-		for i, c := range lvg.Status.Conditions {
-			if c.Type == conType {
-				if checkIfEqualConditions(c, newCondition) {
-					lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no need to update condition %s in the LVMVolumeGroup %s as new and old condition states are the same", conType, lvg.Name))
-					return nil
+		if fresh.Status.Conditions == nil {
+			lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] the LVMVolumeGroup %s conditions is nil. Initialize them", fresh.Name))
+			fresh.Status.Conditions = make([]v1.Condition, 0, 5)
+		}
+
+		exist := false
+		if len(fresh.Status.Conditions) > 0 {
+			lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] there are some conditions in the LVMVolumeGroup %s. Tries to find a condition %s", fresh.Name, conType))
+			for i, c := range fresh.Status.Conditions {
+				if c.Type == conType {
+					if checkIfEqualConditions(c, newCondition) {
+						lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no need to update condition %s in the LVMVolumeGroup %s as new and old condition states are the same", conType, fresh.Name))
+						return nil
+					}
+
+					lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was found in the LVMVolumeGroup %s at the index %d", conType, fresh.Name, i))
+					fresh.Status.Conditions[i] = newCondition
+					exist = true
+					break
 				}
-
-				index = i
-				exist = true
-				lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was found in the LVMVolumeGroup %s at the index %d", conType, lvg.Name, i))
 			}
 		}
 
 		if !exist {
-			lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was not found. Append it in the end of the LVMVolumeGroup %s conditions", conType, lvg.Name))
-			lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
-		} else {
-			lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] insert the condition %s status %s reason %s message %s at index %d of the LVMVolumeGroup %s conditions", conType, status, reason, message, index, lvg.Name))
-			lvg.Status.Conditions[index] = newCondition
+			lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was not found in the LVMVolumeGroup %s. Append it", conType, fresh.Name))
+			fresh.Status.Conditions = append(fresh.Status.Conditions, newCondition)
 		}
-	} else {
-		lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no conditions were found in the LVMVolumeGroup %s. Append the condition %s in the end", lvg.Name, conType))
-		lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
-	}
 
-	lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] tries to update the condition type %s status %s reason %s message %s of the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
-	return lvgCl.cl.Status().Update(ctx, lvg)
+		lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] tries to update the condition type %s status %s reason %s message %s of the LVMVolumeGroup %s", conType, status, reason, message, fresh.Name))
+		if err := lvgCl.cl.Status().Update(ctx, fresh); err != nil {
+			return err
+		}
+
+		lvg.Status = fresh.Status
+		lvg.ResourceVersion = fresh.ResourceVersion
+		return nil
+	})
 }
 
 func (lvgCl *LVGClient) DeleteLVMVolumeGroup(
