@@ -638,16 +638,9 @@ func (r *Reconciler) shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alph
 		return true
 	}
 
-	extentSize := extentSizeForThinPoolAlign(newLVG, nil)
-	for _, n := range newLVG.Status.Nodes {
-		for _, d := range n.Devices {
-			alignedPV, _ := utils.AlignSizeToExtent(d.PVSize, extentSize)
-			alignedDev, _ := utils.AlignSizeToExtent(d.DevSize, extentSize)
-			if alignedPV.Value() != alignedDev.Value() {
-				r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s PV size is different to device size", newLVG.Name))
-				return true
-			}
-		}
+	if !reflect.DeepEqual(oldLVG.Status.Nodes, newLVG.Status.Nodes) {
+		r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s status nodes have changed", newLVG.Name))
+		return true
 	}
 
 	return false
