@@ -113,8 +113,8 @@ func (r *Reconciler) ShouldReconcileUpdate(objectOld *v1alpha1.LVMVolumeGroup, o
 }
 
 // ShouldReconcileCreate implements controller.Reconciler.
-func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMVolumeGroup) bool {
-	return true
+func (r *Reconciler) ShouldReconcileCreate(obj *v1alpha1.LVMVolumeGroup) bool {
+	return checkIfLVGBelongsToNode(obj, r.cfg.NodeName)
 }
 
 // Reconcile implements controller.Reconciler.
@@ -605,6 +605,10 @@ func (r *Reconciler) shouldUpdateLVGLabels(lvg *v1alpha1.LVMVolumeGroup, labelKe
 }
 
 func (r *Reconciler) shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alpha1.LVMVolumeGroup) bool {
+	if !checkIfLVGBelongsToNode(newLVG, r.cfg.NodeName) {
+		return false
+	}
+
 	if newLVG.DeletionTimestamp != nil {
 		r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has deletionTimestamp", newLVG.Name))
 		return true

@@ -90,13 +90,13 @@ func (r *Reconciler) MaxConcurrentReconciles() int {
 }
 
 // ShouldReconcileUpdate implements controller.Reconciler.
-func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.LVMVolumeGroup, _ *v1alpha1.LVMVolumeGroup) bool {
-	return true
+func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.LVMVolumeGroup, objectNew *v1alpha1.LVMVolumeGroup) bool {
+	return objectNew.Spec.Local.NodeName == r.cfg.NodeName
 }
 
 // ShouldReconcileCreate implements controller.Reconciler.
-func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMVolumeGroup) bool {
-	return true
+func (r *Reconciler) ShouldReconcileCreate(obj *v1alpha1.LVMVolumeGroup) bool {
+	return obj.Spec.Local.NodeName == r.cfg.NodeName
 }
 
 // Reconcile implements controller.Reconciler.
