@@ -58,7 +58,7 @@ func (dm *DeviceMap) HandleEvent(event *netlink.UEvent) {
 
 	key, err := devKey(env)
 	if err != nil {
-		dm.log.Error(err, "[HandleEvent] devkey for event %v", event)
+		dm.log.Error(err, fmt.Sprintf("[HandleEvent] devkey for event %v", event))
 		return
 	}
 
@@ -83,7 +83,7 @@ func (dm *DeviceMap) FillFromCrawler(devices []crawler.Device) {
 		env := MergeEnvWithUdevDB(dev.Env)
 		key, err := devKey(env)
 		if err != nil {
-			dm.log.Error(err, "[FillFromCrawler] devkey for event %v", dev)
+			dm.log.Error(err, fmt.Sprintf("[FillFromCrawler] devkey for device %s", dev.KObj))
 			continue
 		}
 		newDevices[key] = env
