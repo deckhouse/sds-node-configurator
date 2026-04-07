@@ -95,6 +95,22 @@ cd e2e
 make test
 ```
 
+### `permission denied` under `.../go/pkg/mod/.../storage-e2e/.../temp`
+
+storage-e2e creates bootstrap temp directories inside the **extracted module** in `GOMODCACHE`. On self-hosted runners the global cache (e.g. `/opt/.../go/pkg/mod`) is often **read-only**, which causes `mkdir .../temp: permission denied`.
+
+**CI** sets `GOMODCACHE` / `GOCACHE` to `e2e/.gomodcache` and `e2e/.gocache` under the workspace (see `build_dev.yml`). **Locally**, use `make test` / `make deps` (they point `GOMODCACHE` at `e2e/.gomodcache` and run `fix-mod-permissions`), or export:
+
+```bash
+export GOMODCACHE="$(pwd)/e2e/.gomodcache"
+export GOCACHE="$(pwd)/e2e/.gocache"
+mkdir -p "$GOMODCACHE" "$GOCACHE"
+```
+
+### Orphan VMs after a failed nested cluster create
+
+If `TEST_CLUSTER_CREATE_MODE=alwaysCreateNew` and cluster creation fails after VMs exist (e.g. at `PrepareBootstrapConfig`), the suite used to leave VMs behind. This repo applies a small **storage-e2e patch** (see `e2e/patches/`) and runs **orphan cleanup** from `cluster-state.json` when the spec `should create test cluster` fails. Full removal of master/worker VMs still follows upstream rules: set `TEST_CLUSTER_CLEANUP=true` when you want every VM deleted after a successful run.
+
 Or run specific test:
 
 ```bash

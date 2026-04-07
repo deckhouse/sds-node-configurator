@@ -53,7 +53,7 @@ const (
 	e2eClusterCleanupTimeout = 10 * time.Minute
 	e2eLVMVGPrefix           = "e2e-lvg-"
 
-	e2eVirtualDiskAttachMaxRetries   = 3
+	e2eVirtualDiskAttachMaxRetries    = 3
 	e2eVirtualDiskAttachRetryInterval = 1 * time.Minute
 )
 
@@ -266,6 +266,15 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 			}
 		})
 		e2eCtx = context.Background()
+	})
+
+	AfterEach(func() {
+		if CurrentSpecReport().LeafNodeText != "should create test cluster" || !CurrentSpecReport().Failed() {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
+		defer cancel()
+		e2eTryCleanupOrphanNestedClusterFromStateFile(ctx, "sds_node_configurator_test")
 	})
 
 	AfterAll(func() {

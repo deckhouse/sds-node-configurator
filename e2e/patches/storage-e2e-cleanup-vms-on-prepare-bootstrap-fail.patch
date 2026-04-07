@@ -1,0 +1,20 @@
+--- pkg/cluster/cluster.go
++++ pkg/cluster/cluster.go
+@@ -599,6 +599,16 @@
+ 	logger.Step(10, "Preparing bootstrap configuration")
+ 	// Step 10: Prepare bootstrap config
+ 	bootstrapConfig, err := PrepareBootstrapConfig(clusterDefinition)
+ 	if err != nil {
++		// VMs exist and cluster-state.json was saved at step 6; remove them so a prepare-bootstrap failure
++		// (e.g. read-only module cache) does not leak virtualization resources.
++		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), config.ClusterCleanupTimeout)
++		_ = RemoveAllVMs(cleanupCtx, &VMResources{
++			VirtClient:  virtClient,
++			Namespace:   namespace,
++			VMNames:     vmNames,
++			SetupVMName: vmResources.SetupVMName,
++		})
++		cleanupCancel()
+ 		setupSSHClient.Close()
+ 		baseClusterResources.SSHClient.Close()
+ 		baseClusterResources.TunnelInfo.StopFunc()
