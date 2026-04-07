@@ -80,6 +80,16 @@ make test-focus FOCUS="TestSdsNodeConfigurator"
 - ✅ `status.size` больше 0
 - ✅ `status.consumable` = true для неразмеченного диска
 
+### BlockDevice Disappearance
+
+- На ноде появляется новый неразмеченный диск и для него создаётся `BlockDevice`
+- Затем диск отсоединяется и удаляется
+- Проверяется, что агент удаляет соответствующий `BlockDevice`
+
+**Проверки**:
+- ✅ Новый `BlockDevice` сначала обнаруживается и имеет `status.consumable=true`
+- ✅ После пропажи диска соответствующий `BlockDevice` удаляется агентом
+
 ### LVMVolumeGroup
 
 - Создание LVMVolumeGroup на основе BlockDevice

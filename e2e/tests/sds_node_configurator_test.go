@@ -116,6 +116,27 @@ func attachVirtualDiskWithRetry(ctx context.Context, baseKubeconfig *rest.Config
 	return nil, lastErr
 }
 
+func restartSDSNodeConfiguratorAgentOnNode(ctx context.Context, k8sClient client.Client, nodeName string) {
+	var podList corev1.PodList
+	Expect(k8sClient.List(ctx, &podList,
+		client.InNamespace("d8-sds-node-configurator"),
+		client.MatchingLabels{"app": "sds-node-configurator"},
+	)).To(Succeed())
+
+	found := false
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if pod.Spec.NodeName == nodeName {
+			By(fmt.Sprintf("Deleting agent pod %s on node %s to force rescan", pod.Name, nodeName))
+			Expect(k8sClient.Delete(ctx, pod)).To(Succeed())
+			found = true
+			break
+		}
+	}
+
+	Expect(found).To(BeTrue(), "sds-node-configurator pod should exist on node %s", nodeName)
+}
+
 // expectedDisk is the expected (node, VD name) for one created VirtualDisk (same order as e2eDiskAttachments).
 // Serial: virtualization may use VirtualDisk.UID or VirtualMachineBlockDeviceAttachment.UID (hex MD5); we accept either.
 type expectedDisk struct {
@@ -668,6 +689,109 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 
 			printDiscoveryTable(summary)
 		})
+
+		It("Should delete a BlockDevice after the backing disk disappears", func() {
+			ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+			if testClusterResources.BaseKubeconfig == nil {
+				Skip("BlockDevice disappearance test requires nested virtualization (base cluster kubeconfig)")
+			}
+
+			ns := e2eConfigNamespace()
+			storageClass := e2eConfigStorageClass()
+			Expect(storageClass).NotTo(BeEmpty(), "TEST_CLUSTER_STORAGE_CLASS is required for VirtualDisk")
+
+			var clusterVMs []string
+			if testClusterResources.VMResources != nil {
+				for _, name := range testClusterResources.VMResources.VMNames {
+					if name != testClusterResources.VMResources.SetupVMName {
+						clusterVMs = append(clusterVMs, name)
+					}
+				}
+			}
+			if len(clusterVMs) == 0 {
+				vmNames, listErr := kubernetes.ListVirtualMachineNames(e2eCtx, testClusterResources.BaseKubeconfig, ns)
+				Expect(listErr).NotTo(HaveOccurred(), "list VirtualMachines on base cluster")
+				Expect(vmNames).NotTo(BeEmpty(), "no VirtualMachines in namespace %s on base cluster", ns)
+				clusterVMs = vmNames
+			}
+
+			targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
+			diskName := fmt.Sprintf("%s-missing-%d", e2eDataDiskName, rand.Intn(100000))
+
+			var blockDevicesList v1alpha1.BlockDeviceList
+			Expect(k8sClient.List(e2eCtx, &blockDevicesList, &client.ListOptions{})).To(Succeed())
+			initialNames := make(map[string]struct{}, len(blockDevicesList.Items))
+			for i := range blockDevicesList.Items {
+				initialNames[blockDevicesList.Items[i].Name] = struct{}{}
+			}
+
+			By(fmt.Sprintf("Step 1: Attaching VirtualDisk %s (%s) to VM %s", diskName, e2eDataDiskSize, targetVM))
+			diskAttachment, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+				VMName:           targetVM,
+				Namespace:        ns,
+				DiskName:         diskName,
+				DiskSize:         e2eDataDiskSize,
+				StorageClassName: storageClass,
+			}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+			Expect(err).NotTo(HaveOccurred())
+			e2eDiskAttachments = append(e2eDiskAttachments, diskAttachment)
+
+			attachCtx, cancel := context.WithTimeout(e2eCtx, 5*time.Minute)
+			defer cancel()
+			Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns, diskAttachment.AttachmentName, 10*time.Second)).To(Succeed())
+
+			By("Step 2: Waiting for the new BlockDevice to appear")
+			var discoveredBD v1alpha1.BlockDevice
+			Eventually(func(g Gomega) {
+				var list v1alpha1.BlockDeviceList
+				g.Expect(k8sClient.List(e2eCtx, &list, &client.ListOptions{})).To(Succeed())
+
+				var matches []v1alpha1.BlockDevice
+				for i := range list.Items {
+					bd := list.Items[i]
+					if _, existed := initialNames[bd.Name]; existed {
+						continue
+					}
+					if bd.Status.NodeName != targetVM {
+						continue
+					}
+					if !bd.Status.Consumable || bd.Status.Path == "" || bd.Status.Size.IsZero() {
+						continue
+					}
+					matches = append(matches, bd)
+				}
+
+				g.Expect(matches).To(HaveLen(1),
+					"expected exactly one new consumable BlockDevice on node %s after attaching %s; got %d",
+					targetVM, diskName, len(matches))
+				discoveredBD = matches[0]
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
+			By(fmt.Sprintf("Discovered BlockDevice %s on node %s (path=%s, size=%s)",
+				discoveredBD.Name, discoveredBD.Status.NodeName, discoveredBD.Status.Path, discoveredBD.Status.Size.String()))
+
+			By("Step 3: Detaching and deleting the VirtualDisk to simulate device loss")
+			Expect(kubernetes.DetachAndDeleteVirtualDisk(
+				e2eCtx,
+				testClusterResources.BaseKubeconfig,
+				ns,
+				diskAttachment.AttachmentName,
+				diskAttachment.DiskName,
+			)).To(Succeed())
+			e2eDiskAttachments = nil
+
+			By("Step 4: Restarting sds-node-configurator agent on the target node to trigger BD rescan")
+			restartSDSNodeConfiguratorAgentOnNode(e2eCtx, k8sClient, discoveredBD.Status.NodeName)
+
+			By("Step 5: Waiting for the BlockDevice to be deleted after device loss")
+			Eventually(func(g Gomega) {
+				var bd v1alpha1.BlockDevice
+				err := k8sClient.Get(e2eCtx, client.ObjectKey{Name: discoveredBD.Name}, &bd)
+				g.Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+					"BlockDevice %s should be deleted after the backing disk disappears; current err=%v consumable=%t node=%s path=%s",
+					discoveredBD.Name, err, bd.Status.Consumable, bd.Status.NodeName, bd.Status.Path)
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
+			By(fmt.Sprintf("BlockDevice %s was deleted after the disk disappeared", discoveredBD.Name))
+		})
 	})
 
 	Context("LVMVolumeGroup with one disk and thin-pool", func() {
@@ -1090,19 +1214,7 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred(), "set status on fake BlockDevice")
 
 			By("Step 4: Restarting sds-node-configurator agent on the target node to trigger BD rescan")
-			var podList corev1.PodList
-			Expect(k8sClient.List(e2eCtx, &podList,
-				client.InNamespace("d8-sds-node-configurator"),
-				client.MatchingLabels{"app": "sds-node-configurator"},
-			)).To(Succeed())
-			for i := range podList.Items {
-				pod := &podList.Items[i]
-				if pod.Spec.NodeName == realNodeName {
-					By(fmt.Sprintf("Deleting agent pod %s on node %s to force rescan", pod.Name, realNodeName))
-					Expect(k8sClient.Delete(e2eCtx, pod)).To(Succeed())
-					break
-				}
-			}
+			restartSDSNodeConfiguratorAgentOnNode(e2eCtx, k8sClient, realNodeName)
 
 			By("Step 5: Waiting for the agent to delete the fake BlockDevice (up to 5 minutes)")
 			Eventually(func(g Gomega) {
@@ -1181,19 +1293,7 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 			By(fmt.Sprintf("Size temporarily modified to %s", modified.Status.Size.String()))
 
 			By("Step 3: Restarting sds-node-configurator agent on the target node to trigger BD rescan")
-			var podList corev1.PodList
-			Expect(k8sClient.List(e2eCtx, &podList,
-				client.InNamespace("d8-sds-node-configurator"),
-				client.MatchingLabels{"app": "sds-node-configurator"},
-			)).To(Succeed())
-			for i := range podList.Items {
-				pod := &podList.Items[i]
-				if pod.Spec.NodeName == targetBD.Status.NodeName {
-					By(fmt.Sprintf("Deleting agent pod %s on node %s to force rescan", pod.Name, targetBD.Status.NodeName))
-					Expect(k8sClient.Delete(e2eCtx, pod)).To(Succeed())
-					break
-				}
-			}
+			restartSDSNodeConfiguratorAgentOnNode(e2eCtx, k8sClient, targetBD.Status.NodeName)
 
 			By("Step 4: Waiting for the agent to revert the size to the real value (up to 5 minutes)")
 			Eventually(func(g Gomega) {
