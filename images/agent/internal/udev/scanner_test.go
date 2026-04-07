@@ -26,7 +26,16 @@ import (
 	"github.com/pilebones/go-udev/netlink"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
+
+func testLogger(t *testing.T) logger.Logger {
+	t.Helper()
+	log, err := logger.NewLogger(logger.TraceLevel)
+	require.NoError(t, err)
+	return log
+}
 
 func makeEnv(major, minor, devname string) map[string]string {
 	return map[string]string{
@@ -39,7 +48,7 @@ func makeEnv(major, minor, devname string) map[string]string {
 // ================== HandleEvent ==================
 
 func TestHandleEvent_Add(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 	event := &netlink.UEvent{
 		Action: netlink.ADD,
 		KObj:   "/devices/pci/block/sda",
@@ -51,7 +60,7 @@ func TestHandleEvent_Add(t *testing.T) {
 }
 
 func TestHandleEvent_Change_Updates(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.ADD,
 		Env:    makeEnv("8", "0", "sda"),
@@ -72,7 +81,7 @@ func TestHandleEvent_Change_Updates(t *testing.T) {
 }
 
 func TestHandleEvent_Remove(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.ADD,
 		Env:    makeEnv("8", "0", "sda"),
@@ -87,7 +96,7 @@ func TestHandleEvent_Remove(t *testing.T) {
 }
 
 func TestHandleEvent_NoMajorMinor_Ignored(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.ADD,
 		Env:    map[string]string{"DEVNAME": "sda"},
@@ -96,7 +105,7 @@ func TestHandleEvent_NoMajorMinor_Ignored(t *testing.T) {
 }
 
 func TestHandleEvent_Sequence_AddChangeRemove(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 
 	dm.HandleEvent(&netlink.UEvent{Action: netlink.ADD, Env: makeEnv("8", "0", "sda")})
 	assert.Equal(t, 1, dm.Len())
@@ -117,13 +126,13 @@ func TestHandleEvent_Sequence_AddChangeRemove(t *testing.T) {
 }
 
 func TestHandleEvent_Bind(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 	dm.HandleEvent(&netlink.UEvent{Action: netlink.BIND, Env: makeEnv("8", "0", "sda")})
 	assert.Equal(t, 1, dm.Len())
 }
 
 func TestHandleEvent_Unbind(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 	dm.HandleEvent(&netlink.UEvent{Action: netlink.ADD, Env: makeEnv("8", "0", "sda")})
 	dm.HandleEvent(&netlink.UEvent{Action: netlink.UNBIND, Env: makeEnv("8", "0", "sda")})
 	assert.Equal(t, 0, dm.Len())
@@ -132,7 +141,7 @@ func TestHandleEvent_Unbind(t *testing.T) {
 // ================== FillFromCrawler ==================
 
 func TestFillFromCrawler_BulkLoad(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 	devices := []crawler.Device{
 		{KObj: "/devices/pci/block/sda", Env: makeEnv("8", "0", "sda")},
 		{KObj: "/devices/pci/block/sda/sda1", Env: makeEnv("8", "1", "sda1")},
@@ -143,7 +152,7 @@ func TestFillFromCrawler_BulkLoad(t *testing.T) {
 }
 
 func TestFillFromCrawler_SkipsNoMajorMinor(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 	devices := []crawler.Device{
 		{KObj: "/devices/pci/block/sda", Env: makeEnv("8", "0", "sda")},
 		{KObj: "/devices/virtual/block/loop0", Env: map[string]string{"DEVNAME": "loop0"}},
@@ -153,7 +162,7 @@ func TestFillFromCrawler_SkipsNoMajorMinor(t *testing.T) {
 }
 
 func TestFillFromCrawler_Empty(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 	dm.FillFromCrawler(nil)
 	assert.Equal(t, 0, dm.Len())
 }
@@ -161,21 +170,13 @@ func TestFillFromCrawler_Empty(t *testing.T) {
 // ================== Snapshot ==================
 
 func TestSnapshot_WithFakeSysfs(t *testing.T) {
-	root := withFakeSysfs(t)
-
-	fakeMountInfo := `22 1 8:0 / / rw,relatime shared:1 - ext4 /dev/sda rw
-`
-	mountInfoPath := root + "/mountinfo"
-	require.NoError(t, writeFile(mountInfoPath, fakeMountInfo))
-	origMountInfo := procSelfMountInfo
-	procSelfMountInfo = mountInfoPath
-	t.Cleanup(func() { procSelfMountInfo = origMountInfo })
+	withFakeSysfs(t)
 
 	writeFakeSysfsFile(t, "sda", "size", "2097152\n")
 	writeFakeSysfsFile(t, "sda", "queue/rotational", "1\n")
 	writeFakeSysfsFile(t, "sda", "removable", "0\n")
 
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.ADD,
 		Env: map[string]string{
@@ -188,10 +189,11 @@ func TestSnapshot_WithFakeSysfs(t *testing.T) {
 		},
 	})
 
-	devices := dm.Snapshot()
+	devices, _ := dm.Snapshot()
 	require.Len(t, devices, 1)
 
 	dev := devices[0]
+	assert.Equal(t, "8:0", dev.DevID)
 	assert.Equal(t, "/dev/sda", dev.Name)
 	assert.Equal(t, "/dev/sda", dev.KName)
 	assert.Equal(t, "disk", dev.Type)
@@ -200,37 +202,32 @@ func TestSnapshot_WithFakeSysfs(t *testing.T) {
 	assert.False(t, dev.HotPlug)
 	assert.Equal(t, "TestDisk", dev.Model)
 	assert.Equal(t, "SN123", dev.Serial)
-	assert.Equal(t, "/", dev.MountPoint)
+	assert.Equal(t, "", dev.MountPoint)
 	assert.Equal(t, "", dev.PkName)
 }
 
 func TestSnapshot_SkipsDevicesWithoutSize(t *testing.T) {
 	withFakeSysfs(t)
 
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.ADD,
 		Env:    makeEnv("8", "0", "sda"),
 	})
 
-	devices := dm.Snapshot()
+	devices, _ := dm.Snapshot()
 	assert.Empty(t, devices, "device without sysfs size file should be skipped")
 }
 
 func TestSnapshot_Empty(t *testing.T) {
-	dm := NewDeviceMap()
-	devices := dm.Snapshot()
+	dm := NewDeviceMap(testLogger(t))
+	devices, errs := dm.Snapshot()
 	assert.Empty(t, devices)
+	assert.Empty(t, errs)
 }
 
 func TestSnapshot_DMDevice(t *testing.T) {
-	root := withFakeSysfs(t)
-
-	mountInfoPath := root + "/mountinfo"
-	require.NoError(t, writeFile(mountInfoPath, ""))
-	origMountInfo := procSelfMountInfo
-	procSelfMountInfo = mountInfoPath
-	t.Cleanup(func() { procSelfMountInfo = origMountInfo })
+	withFakeSysfs(t)
 
 	writeFakeSysfsFile(t, "dm-0", "size", "4194304\n")
 	writeFakeSysfsFile(t, "dm-0", "queue/rotational", "0\n")
@@ -240,7 +237,7 @@ func TestSnapshot_DMDevice(t *testing.T) {
 	require.NoError(t, mkdirAll(slavesDir))
 	require.NoError(t, writeFile(slavesDir+"/sda", ""))
 
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.ADD,
 		Env: map[string]string{
@@ -253,7 +250,7 @@ func TestSnapshot_DMDevice(t *testing.T) {
 		},
 	})
 
-	devices := dm.Snapshot()
+	devices, _ := dm.Snapshot()
 	require.Len(t, devices, 1)
 
 	dev := devices[0]
@@ -266,18 +263,12 @@ func TestSnapshot_DMDevice(t *testing.T) {
 func TestSnapshot_Partition(t *testing.T) {
 	root := withFakeSysfs(t)
 
-	mountInfoPath := root + "/mountinfo"
-	require.NoError(t, writeFile(mountInfoPath, ""))
-	origMountInfo := procSelfMountInfo
-	procSelfMountInfo = mountInfoPath
-	t.Cleanup(func() { procSelfMountInfo = origMountInfo })
-
 	createPartitionSymlink(t, root, "sda", "sda1")
 	writeFakeSysfsFile(t, "sda1", "size", "1048576\n")
 	writeFakeSysfsFile(t, "sda", "queue/rotational", "0\n")
 	writeFakeSysfsFile(t, "sda", "removable", "0\n")
 
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(testLogger(t))
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.ADD,
 		Env: map[string]string{
@@ -289,7 +280,7 @@ func TestSnapshot_Partition(t *testing.T) {
 		},
 	})
 
-	devices := dm.Snapshot()
+	devices, _ := dm.Snapshot()
 	require.Len(t, devices, 1)
 
 	dev := devices[0]
@@ -298,6 +289,89 @@ func TestSnapshot_Partition(t *testing.T) {
 	assert.Equal(t, "/dev/sda", dev.PkName)
 	assert.Equal(t, "uuid-1234", dev.PartUUID)
 	assert.False(t, dev.Rota)
+}
+
+// ================== error path tests ==================
+
+func TestHandleEvent_OnlyMajor_Ignored(t *testing.T) {
+	dm := NewDeviceMap(testLogger(t))
+	dm.HandleEvent(&netlink.UEvent{
+		Action: netlink.ADD,
+		Env:    map[string]string{"MAJOR": "8", "DEVNAME": "sda"},
+	})
+	assert.Equal(t, 0, dm.Len(), "device with MAJOR but no MINOR should be ignored")
+}
+
+func TestHandleEvent_OnlyMinor_Ignored(t *testing.T) {
+	dm := NewDeviceMap(testLogger(t))
+	dm.HandleEvent(&netlink.UEvent{
+		Action: netlink.ADD,
+		Env:    map[string]string{"MINOR": "0", "DEVNAME": "sda"},
+	})
+	assert.Equal(t, 0, dm.Len(), "device with MINOR but no MAJOR should be ignored")
+}
+
+func TestFillFromCrawler_PartialMajorMinor_Skipped(t *testing.T) {
+	dm := NewDeviceMap(testLogger(t))
+	devices := []crawler.Device{
+		{KObj: "/devices/block/sda", Env: makeEnv("8", "0", "sda")},
+		{KObj: "/devices/block/bad1", Env: map[string]string{"MAJOR": "8", "DEVNAME": "bad1"}},
+		{KObj: "/devices/block/bad2", Env: map[string]string{"MINOR": "1", "DEVNAME": "bad2"}},
+	}
+	dm.FillFromCrawler(devices)
+	assert.Equal(t, 1, dm.Len(), "only the device with both MAJOR and MINOR should remain")
+}
+
+func TestSnapshot_BrokenSysfs_SkipsOnlyBroken(t *testing.T) {
+	withFakeSysfs(t)
+
+	writeFakeSysfsFile(t, "sda", "size", "2097152\n")
+	writeFakeSysfsFile(t, "sda", "queue/rotational", "0\n")
+	writeFakeSysfsFile(t, "sda", "removable", "0\n")
+	// sdb has no size file -- simulates broken sysfs
+
+	dm := NewDeviceMap(testLogger(t))
+	dm.HandleEvent(&netlink.UEvent{
+		Action: netlink.ADD,
+		Env:    makeEnv("8", "0", "sda"),
+	})
+	dm.HandleEvent(&netlink.UEvent{
+		Action: netlink.ADD,
+		Env:    makeEnv("8", "16", "sdb"),
+	})
+
+	devices, errs := dm.Snapshot()
+	assert.Len(t, devices, 1, "only sda (with valid sysfs) should appear")
+	assert.Equal(t, "/dev/sda", devices[0].Name)
+	assert.NotEmpty(t, errs, "should have an error about sdb")
+}
+
+func TestSnapshot_EmptyDeviceName_Skipped(t *testing.T) {
+	withFakeSysfs(t)
+
+	writeFakeSysfsFile(t, "sda", "size", "2097152\n")
+	writeFakeSysfsFile(t, "sda", "queue/rotational", "0\n")
+	writeFakeSysfsFile(t, "sda", "removable", "0\n")
+
+	dm := NewDeviceMap(testLogger(t))
+	// Add a device where DEVNAME is present (so sysfs lookup works) but
+	// ParseUdevProperties + ResolveDeviceName yield an empty name.
+	// This happens when env has DEVNAME but no DM_NAME and no DevName in props
+	// after ParseUdevProperties returns empty DevName.
+	dm.mu.Lock()
+	dm.devices["8:99"] = map[string]string{
+		"MAJOR": "8",
+		"MINOR": "99",
+		// DEVNAME is present so sysfs name resolves to "sda" (reusing the same sysfs entry)
+		// but we clear it to force empty DevName from ParseUdevProperties
+	}
+	dm.mu.Unlock()
+
+	devices, errs := dm.Snapshot()
+	for _, d := range devices {
+		assert.NotEmpty(t, d.Name, "no device with empty name should appear in snapshot")
+	}
+	assert.NotEmpty(t, errs, "should have an error about the skipped device")
 }
 
 // ================== helpers ==================

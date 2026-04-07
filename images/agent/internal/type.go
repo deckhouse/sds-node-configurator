@@ -61,6 +61,7 @@ type Devices struct {
 }
 
 type Device struct {
+	DevID      string            `json:"-"`
 	Name       string            `json:"name"`
 	MountPoint string            `json:"mountpoint"`
 	PartUUID   string            `json:"partuuid"`

@@ -17,7 +17,6 @@ limitations under the License.
 package bd
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
@@ -474,7 +473,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 
 		d := setupDiscoverer()
 
-		d.sdsCache.StoreDevices(devices, bytes.Buffer{})
+		d.sdsCache.StoreDevices(devices, nil)
 
 		candidates, err := d.getBlockDeviceCandidates()
 		assert.Equal(t, nil, err)

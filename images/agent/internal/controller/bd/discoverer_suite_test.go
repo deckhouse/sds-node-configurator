@@ -17,7 +17,6 @@ limitations under the License.
 package bd_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
@@ -90,7 +89,7 @@ func withDevicesCreated(devices []v1alpha1.BlockDevice, foo func()) {
 
 func withInternalDevicesCacheUpdated(internalDevices []internal.Device, sdsCache **cache.Cache, foo func()) {
 	JustBeforeEach(func() {
-		(*sdsCache).StoreDevices(internalDevices, bytes.Buffer{})
+		(*sdsCache).StoreDevices(internalDevices, nil)
 	})
 
 	foo()
