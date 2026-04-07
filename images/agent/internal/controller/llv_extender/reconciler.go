@@ -140,6 +140,11 @@ func (r *Reconciler) shouldLLVExtenderReconcileEvent(newLVG *v1alpha1.LVMVolumeG
 		return false
 	}
 
+	if newLVG.Status.ExtentSize.Value() == 0 {
+		r.log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as its ExtentSize is not populated yet", newLVG.Name))
+		return false
+	}
+
 	return true
 }
 
