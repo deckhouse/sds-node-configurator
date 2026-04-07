@@ -37,7 +37,6 @@ import (
 )
 
 type Commands interface {
-	GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error)
 	GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error)
 	GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.Buffer, err error)
 	GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error)
@@ -76,13 +75,6 @@ type commands struct {
 
 func NewCommands() Commands {
 	return &commands{}
-}
-
-// Deprecated: GetBlockDevices is no longer used in the production path.
-// Block device discovery is now handled by udev DeviceMap.Snapshot().
-// This method is kept to satisfy the Commands interface.
-func (c *commands) GetBlockDevices(_ context.Context) ([]internal.Device, string, bytes.Buffer, error) {
-	return nil, "", bytes.Buffer{}, fmt.Errorf("GetBlockDevices is deprecated: use udev DeviceMap instead")
 }
 
 func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {

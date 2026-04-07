@@ -26,7 +26,7 @@ import (
 )
 
 func TestCommands(t *testing.T) {
-	t.Run("GetBlockDevices", func(t *testing.T) {
+	t.Run("UnmarshalDevices", func(t *testing.T) {
 		t.Run("UnmarshalDevices_Expects_Success", func(t *testing.T) {
 			js := `{
    "blockdevices": [

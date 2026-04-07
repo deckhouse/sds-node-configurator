@@ -29,9 +29,8 @@ import (
 	fs "io/fs"
 	reflect "reflect"
 
-	gomock "go.uber.org/mock/gomock"
-
 	utils "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
+	gomock "go.uber.org/mock/gomock"
 )
 
 // MockDiscarder is a mock of Discarder interface.
