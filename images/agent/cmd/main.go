@@ -213,12 +213,8 @@ func main() {
 	}
 
 	go func() {
-		if err = scanner.NewScanner(commands).Run(
+		if err = scanner.NewScanner(commands, log, *cfgParams, sdsCache, metrics).Run(
 			ctx,
-			log,
-			*cfgParams,
-			sdsCache,
-			metrics,
 			rediscoverBlockDevices,
 			rediscoverLVGs,
 		); err != nil {

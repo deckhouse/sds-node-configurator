@@ -275,23 +275,6 @@ func (mr *MockCommandsMockRecorder) GetAllVGs(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAllVGs", reflect.TypeOf((*MockCommands)(nil).GetAllVGs), ctx)
 }
 
-// GetBlockDevices mocks base method.
-func (m *MockCommands) GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetBlockDevices", ctx)
-	ret0, _ := ret[0].([]internal.Device)
-	ret1, _ := ret[1].(string)
-	ret2, _ := ret[2].(bytes.Buffer)
-	ret3, _ := ret[3].(error)
-	return ret0, ret1, ret2, ret3
-}
-
-// GetBlockDevices indicates an expected call of GetBlockDevices.
-func (mr *MockCommandsMockRecorder) GetBlockDevices(ctx any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBlockDevices", reflect.TypeOf((*MockCommands)(nil).GetBlockDevices), ctx)
-}
-
 // GetLV mocks base method.
 func (m *MockCommands) GetLV(vgName, lvName string) (internal.LVData, string, bytes.Buffer, error) {
 	m.ctrl.T.Helper()

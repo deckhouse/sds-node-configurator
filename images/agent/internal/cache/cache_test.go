@@ -76,7 +76,7 @@ func TestCache(t *testing.T) {
 			},
 		}
 
-		sdsCache.StoreDevices(devices, bytes.Buffer{})
+		sdsCache.StoreDevices(devices, nil)
 		sdsCache.StorePVs(pvs, bytes.Buffer{})
 		sdsCache.StoreVGs(vgs, bytes.Buffer{})
 		sdsCache.StoreLVs(lvs, bytes.Buffer{})
@@ -213,7 +213,7 @@ func BenchmarkCache(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			sdsCache.StoreDevices(devices, bytes.Buffer{})
+			sdsCache.StoreDevices(devices, nil)
 			sdsCache.StorePVs(pvs, bytes.Buffer{})
 			sdsCache.StoreVGs(vgs, bytes.Buffer{})
 			sdsCache.StoreLVs(lvs, bytes.Buffer{})

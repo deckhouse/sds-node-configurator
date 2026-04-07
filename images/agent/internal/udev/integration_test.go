@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 // TestSnapshotMatchesLsblk fills a DeviceMap from the udev crawler,
@@ -62,12 +63,18 @@ func TestSnapshotMatchesLsblk(t *testing.T) {
 	}
 	close(crawlerQuit)
 
-	dm := NewDeviceMap()
+	log, err := logger.NewLogger(logger.TraceLevel)
+	require.NoError(t, err)
+
+	dm := NewDeviceMap(log)
 	dm.FillFromCrawler(crawlerDevices)
 
 	t.Logf("Crawler found %d raw devices, DeviceMap has %d entries", len(crawlerDevices), dm.Len())
 
-	snapshot := dm.Snapshot()
+	snapshot, snapshotErrs := dm.Snapshot()
+	for _, e := range snapshotErrs {
+		t.Logf("Snapshot error: %s", e)
+	}
 	t.Logf("Snapshot produced %d devices", len(snapshot))
 	require.NotEmpty(t, snapshot, "Snapshot should find at least one device on a real system")
 

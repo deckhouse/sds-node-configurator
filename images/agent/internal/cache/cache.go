@@ -35,7 +35,7 @@ const (
 type Cache struct {
 	m          sync.RWMutex
 	devices    []internal.Device
-	deviceErrs bytes.Buffer
+	deviceErrs []string
 	pvs        []internal.PVData
 	pvsErrs    bytes.Buffer
 	vgs        []internal.VGData
@@ -57,12 +57,12 @@ func New() *Cache {
 	}
 }
 
-func (c *Cache) StoreDevices(devices []internal.Device, stdErr bytes.Buffer) {
+func (c *Cache) StoreDevices(devices []internal.Device, errs []string) {
 	c.devices = devices
-	c.deviceErrs = stdErr
+	c.deviceErrs = errs
 }
 
-func (c *Cache) GetDevices() ([]internal.Device, bytes.Buffer) {
+func (c *Cache) GetDevices() ([]internal.Device, []string) {
 	dst := make([]internal.Device, len(c.devices))
 	copy(dst, c.devices)
 
@@ -201,8 +201,12 @@ func (c *Cache) PrintTheCache(log logger.Logger) {
 	for _, d := range c.devices {
 		log.Trace(fmt.Sprintf("     Device Name: %s, size: %s, fsType: %s, serial: %s, wwn: %s", d.Name, d.Size.String(), d.FSType, d.Serial, d.Wwn))
 	}
-	log.Trace("[ERRS]")
-	log.Trace(c.deviceErrs.String())
+	if len(c.deviceErrs) > 0 {
+		log.Trace("[ERRS]")
+		for _, e := range c.deviceErrs {
+			log.Trace(fmt.Sprintf("     %s", e))
+		}
+	}
 	log.Trace("[Devices ENDS]")
 	log.Trace("[PVs BEGIN]")
 	for _, pv := range c.pvs {
