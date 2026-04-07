@@ -45,7 +45,7 @@ func withFakeSysfs(t *testing.T) string {
 
 // withFakeUdevDB creates a temporary directory mimicking /run/udev/data
 // and overrides the package-level path var.
-func withFakeUdevDB(t *testing.T) string {
+func withFakeUdevDB(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
 
@@ -56,7 +56,6 @@ func withFakeUdevDB(t *testing.T) string {
 	})
 
 	require.NoError(t, os.MkdirAll(runUdevDataPath, 0o755))
-	return root
 }
 
 func writeFakeSysfsFile(t *testing.T, devName, fileName, content string) {

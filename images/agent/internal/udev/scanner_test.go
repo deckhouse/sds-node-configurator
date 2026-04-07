@@ -37,9 +37,9 @@ func testLogger(t *testing.T) logger.Logger {
 	return log
 }
 
-func makeEnv(major, minor, devname string) map[string]string {
+func makeEnv(minor, devname string) map[string]string {
 	return map[string]string{
-		"MAJOR":   major,
+		"MAJOR":   "8",
 		"MINOR":   minor,
 		"DEVNAME": devname,
 	}
@@ -52,7 +52,7 @@ func TestHandleEvent_Add(t *testing.T) {
 	event := &netlink.UEvent{
 		Action: netlink.ADD,
 		KObj:   "/devices/pci/block/sda",
-		Env:    makeEnv("8", "0", "sda"),
+		Env:    makeEnv("0", "sda"),
 	}
 	dm.HandleEvent(event)
 
@@ -63,10 +63,10 @@ func TestHandleEvent_Change_Updates(t *testing.T) {
 	dm := NewDeviceMap(testLogger(t))
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.ADD,
-		Env:    makeEnv("8", "0", "sda"),
+		Env:    makeEnv("0", "sda"),
 	})
 
-	env := makeEnv("8", "0", "sda")
+	env := makeEnv("0", "sda")
 	env["ID_FS_TYPE"] = "ext4"
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.CHANGE,
@@ -84,13 +84,13 @@ func TestHandleEvent_Remove(t *testing.T) {
 	dm := NewDeviceMap(testLogger(t))
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.ADD,
-		Env:    makeEnv("8", "0", "sda"),
+		Env:    makeEnv("0", "sda"),
 	})
 	assert.Equal(t, 1, dm.Len())
 
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.REMOVE,
-		Env:    makeEnv("8", "0", "sda"),
+		Env:    makeEnv("0", "sda"),
 	})
 	assert.Equal(t, 0, dm.Len())
 }
@@ -107,34 +107,34 @@ func TestHandleEvent_NoMajorMinor_Ignored(t *testing.T) {
 func TestHandleEvent_Sequence_AddChangeRemove(t *testing.T) {
 	dm := NewDeviceMap(testLogger(t))
 
-	dm.HandleEvent(&netlink.UEvent{Action: netlink.ADD, Env: makeEnv("8", "0", "sda")})
+	dm.HandleEvent(&netlink.UEvent{Action: netlink.ADD, Env: makeEnv("0", "sda")})
 	assert.Equal(t, 1, dm.Len())
 
-	dm.HandleEvent(&netlink.UEvent{Action: netlink.ADD, Env: makeEnv("8", "1", "sda1")})
+	dm.HandleEvent(&netlink.UEvent{Action: netlink.ADD, Env: makeEnv("1", "sda1")})
 	assert.Equal(t, 2, dm.Len())
 
-	env := makeEnv("8", "0", "sda")
+	env := makeEnv("0", "sda")
 	env["ID_MODEL"] = "SSD"
 	dm.HandleEvent(&netlink.UEvent{Action: netlink.CHANGE, Env: env})
 	assert.Equal(t, 2, dm.Len())
 
-	dm.HandleEvent(&netlink.UEvent{Action: netlink.REMOVE, Env: makeEnv("8", "1", "sda1")})
+	dm.HandleEvent(&netlink.UEvent{Action: netlink.REMOVE, Env: makeEnv("1", "sda1")})
 	assert.Equal(t, 1, dm.Len())
 
-	dm.HandleEvent(&netlink.UEvent{Action: netlink.REMOVE, Env: makeEnv("8", "0", "sda")})
+	dm.HandleEvent(&netlink.UEvent{Action: netlink.REMOVE, Env: makeEnv("0", "sda")})
 	assert.Equal(t, 0, dm.Len())
 }
 
 func TestHandleEvent_Bind(t *testing.T) {
 	dm := NewDeviceMap(testLogger(t))
-	dm.HandleEvent(&netlink.UEvent{Action: netlink.BIND, Env: makeEnv("8", "0", "sda")})
+	dm.HandleEvent(&netlink.UEvent{Action: netlink.BIND, Env: makeEnv("0", "sda")})
 	assert.Equal(t, 1, dm.Len())
 }
 
 func TestHandleEvent_Unbind(t *testing.T) {
 	dm := NewDeviceMap(testLogger(t))
-	dm.HandleEvent(&netlink.UEvent{Action: netlink.ADD, Env: makeEnv("8", "0", "sda")})
-	dm.HandleEvent(&netlink.UEvent{Action: netlink.UNBIND, Env: makeEnv("8", "0", "sda")})
+	dm.HandleEvent(&netlink.UEvent{Action: netlink.ADD, Env: makeEnv("0", "sda")})
+	dm.HandleEvent(&netlink.UEvent{Action: netlink.UNBIND, Env: makeEnv("0", "sda")})
 	assert.Equal(t, 0, dm.Len())
 }
 
@@ -143,9 +143,9 @@ func TestHandleEvent_Unbind(t *testing.T) {
 func TestFillFromCrawler_BulkLoad(t *testing.T) {
 	dm := NewDeviceMap(testLogger(t))
 	devices := []crawler.Device{
-		{KObj: "/devices/pci/block/sda", Env: makeEnv("8", "0", "sda")},
-		{KObj: "/devices/pci/block/sda/sda1", Env: makeEnv("8", "1", "sda1")},
-		{KObj: "/devices/pci/block/sdb", Env: makeEnv("8", "16", "sdb")},
+		{KObj: "/devices/pci/block/sda", Env: makeEnv("0", "sda")},
+		{KObj: "/devices/pci/block/sda/sda1", Env: makeEnv("1", "sda1")},
+		{KObj: "/devices/pci/block/sdb", Env: makeEnv("16", "sdb")},
 	}
 	dm.FillFromCrawler(devices)
 	assert.Equal(t, 3, dm.Len())
@@ -154,7 +154,7 @@ func TestFillFromCrawler_BulkLoad(t *testing.T) {
 func TestFillFromCrawler_SkipsNoMajorMinor(t *testing.T) {
 	dm := NewDeviceMap(testLogger(t))
 	devices := []crawler.Device{
-		{KObj: "/devices/pci/block/sda", Env: makeEnv("8", "0", "sda")},
+		{KObj: "/devices/pci/block/sda", Env: makeEnv("0", "sda")},
 		{KObj: "/devices/virtual/block/loop0", Env: map[string]string{"DEVNAME": "loop0"}},
 	}
 	dm.FillFromCrawler(devices)
@@ -212,7 +212,7 @@ func TestSnapshot_SkipsDevicesWithoutSize(t *testing.T) {
 	dm := NewDeviceMap(testLogger(t))
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.ADD,
-		Env:    makeEnv("8", "0", "sda"),
+		Env:    makeEnv("0", "sda"),
 	})
 
 	devices, _ := dm.Snapshot()
@@ -314,7 +314,7 @@ func TestHandleEvent_OnlyMinor_Ignored(t *testing.T) {
 func TestFillFromCrawler_PartialMajorMinor_Skipped(t *testing.T) {
 	dm := NewDeviceMap(testLogger(t))
 	devices := []crawler.Device{
-		{KObj: "/devices/block/sda", Env: makeEnv("8", "0", "sda")},
+		{KObj: "/devices/block/sda", Env: makeEnv("0", "sda")},
 		{KObj: "/devices/block/bad1", Env: map[string]string{"MAJOR": "8", "DEVNAME": "bad1"}},
 		{KObj: "/devices/block/bad2", Env: map[string]string{"MINOR": "1", "DEVNAME": "bad2"}},
 	}
@@ -333,11 +333,11 @@ func TestSnapshot_BrokenSysfs_SkipsOnlyBroken(t *testing.T) {
 	dm := NewDeviceMap(testLogger(t))
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.ADD,
-		Env:    makeEnv("8", "0", "sda"),
+		Env:    makeEnv("0", "sda"),
 	})
 	dm.HandleEvent(&netlink.UEvent{
 		Action: netlink.ADD,
-		Env:    makeEnv("8", "16", "sdb"),
+		Env:    makeEnv("16", "sdb"),
 	})
 
 	devices, errs := dm.Snapshot()
