@@ -219,6 +219,10 @@ spec:
                   type: string
                   description: |
                     Volume Group free space.
+                extentSize:
+                  type: string
+                  description: |
+                    Physical extent size of the Volume Group.
                 allocatedSize:
                   type: string
                   description: |

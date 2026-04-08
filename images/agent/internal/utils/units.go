@@ -17,14 +17,17 @@ limitations under the License.
 package utils
 
 import (
-	"math"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-func AreSizesEqualWithinDelta(leftSize, rightSize, allowedDelta resource.Quantity) bool {
-	leftSizeFloat := float64(leftSize.Value())
-	rightSizeFloat := float64(rightSize.Value())
-
-	return math.Abs(leftSizeFloat-rightSizeFloat) < float64(allowedDelta.Value())
+func AlignSizeToExtent(size, extentSize resource.Quantity) (resource.Quantity, error) {
+	sizeBytes := size.Value()
+	extentBytes := extentSize.Value()
+	if extentBytes <= 0 {
+		return resource.Quantity{}, fmt.Errorf("extent size must be positive, got %d", extentBytes)
+	}
+	aligned := ((sizeBytes + extentBytes - 1) / extentBytes) * extentBytes
+	return *resource.NewQuantity(aligned, resource.BinarySI), nil
 }

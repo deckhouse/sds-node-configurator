@@ -178,18 +178,20 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 			continue
 		}
 
-		if utils.AreSizesEqualWithinDelta(llvRequestedSize, lv.Data.LVSize, internal.ResizeDelta) {
-			r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] the LVMLogicalVolume %s should not be extended", llv.Name))
+		alignedRequestedSize, err := utils.AlignSizeToExtent(llvRequestedSize, lvg.Status.ExtentSize)
+		if err != nil {
+			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to align size for LVMLogicalVolume %s", llv.Name))
+			shouldRetry = true
 			continue
 		}
 
-		if llvRequestedSize.Value() < lv.Data.LVSize.Value() {
-			r.log.Warning(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] the LVMLogicalVolume %s requested size %s is less than actual one on the node %s", llv.Name, llvRequestedSize.String(), lv.Data.LVSize.String()))
+		if lv.Data.LVSize.Value() >= alignedRequestedSize.Value() {
+			r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] the LVMLogicalVolume %s should not be extended (actual %s >= aligned requested %s)", llv.Name, lv.Data.LVSize.String(), alignedRequestedSize.String()))
 			continue
 		}
 
 		freeSpace := utils.GetFreeLVGSpaceForLLV(lvg, &llv)
-		if llvRequestedSize.Value()+internal.ResizeDelta.Value() > freeSpace.Value() {
+		if alignedRequestedSize.Value() > freeSpace.Value() {
 			err = errors.New("not enough space")
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to extend the LV %s of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name))
 			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
@@ -208,7 +210,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 			continue
 		}
 
-		cmd, err := r.commands.ExtendLV(llvRequestedSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+		cmd, err := r.commands.ExtendLV(alignedRequestedSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to extend LV %s of the LVMLogicalVolume %s, cmd: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, cmd))
 			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
@@ -228,12 +230,12 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 			continue
 		}
 		lv = &cache.LVData{Data: lvData, Exist: true}
-		if !utils.AreSizesEqualWithinDelta(lv.Data.LVSize, llvRequestedSize, internal.ResizeDelta) {
-			r.log.Warning(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] LV %s of the LVMLogicalVolume %s was extended but LVM reports size %s, expected %s, will retry", lv.Data.LVName, llv.Name, lv.Data.LVSize.String(), llvRequestedSize.String()))
+		if lv.Data.LVSize.Value() < alignedRequestedSize.Value() {
+			r.log.Warning(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] LV %s of the LVMLogicalVolume %s was extended but LVM reports size %s, expected at least %s, will retry", lv.Data.LVName, llv.Name, lv.Data.LVSize.String(), alignedRequestedSize.String()))
 			shouldRetry = true
 			continue
 		}
-		r.log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] LV %s of the LVMLogicalVolume %s has actual size %s matching requested", lv.Data.LVName, llv.Name, lv.Data.LVSize.String()))
+		r.log.Debug(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] LV %s of the LVMLogicalVolume %s has actual size %s matching aligned request", lv.Data.LVName, llv.Name, lv.Data.LVSize.String()))
 
 		if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, &llv, lv.Data.LVSize); err != nil {
 			shouldRetry = true
