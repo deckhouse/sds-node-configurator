@@ -191,7 +191,7 @@ spec:
 {{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
             value: "4"
 {{- end }}
-        # Privileged mode is required to use nsenter and execute host-level commands like lvm and lsblk.
+        # Privileged mode is required to use nsenter and execute host-level commands like lvm.
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true

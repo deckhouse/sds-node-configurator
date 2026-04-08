@@ -66,7 +66,6 @@ type Commands interface {
 	LVActivate(ctx context.Context, vgName, lvName string) (string, error)
 	VGScan(ctx context.Context) (string, error)
 	PVScan(ctx context.Context) (string, error)
-	UnmarshalDevices(out []byte) ([]internal.Device, error)
 	ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string) error
 }
 
@@ -576,15 +575,6 @@ func (commands) PVScan(ctx context.Context) (string, error) {
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 	return cmd.String(), nil
-}
-
-func (commands) UnmarshalDevices(out []byte) ([]internal.Device, error) {
-	var devices internal.Devices
-	if err := json.Unmarshal(out, &devices); err != nil {
-		return nil, err
-	}
-
-	return devices.BlockDevices, nil
 }
 
 func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string) error {

@@ -19,6 +19,7 @@ package bd
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"testing"
@@ -538,7 +539,10 @@ func TestBlockDeviceCtrl(t *testing.T) {
 
 	t.Run("validateTestLSBLKOutput", func(t *testing.T) {
 		d := setupDiscoverer()
-		devices, err := utils.NewCommands().UnmarshalDevices(testLsblkOutput)
+		var parsed internal.Devices
+		err := json.Unmarshal(testLsblkOutput, &parsed)
+		assert.NoError(t, err)
+		devices := parsed.BlockDevices
 		if assert.NoError(t, err) {
 			assert.Equal(t, 31, len(devices))
 		}
