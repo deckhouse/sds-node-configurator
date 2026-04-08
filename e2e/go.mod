@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-node-configurator/e2e
 
-go 1.25.7
+go 1.25.8
 
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260114125558-7fd7152586ff

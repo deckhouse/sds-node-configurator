@@ -1,9 +1,8 @@
 module github.com/deckhouse/sds-node-configurator/images/controller
 
-go 1.25.7
+go 1.25.8
 
 require (
-	github.com/cloudflare/cfssl v1.6.5
 	github.com/deckhouse/sds-common-lib v0.5.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250114161813-c1a8b09cd47d
 	github.com/go-logr/logr v1.4.2
