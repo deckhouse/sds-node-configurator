@@ -353,11 +353,16 @@ jobs:
                 chmod -R u+w "$d" || true
                 mkdir -p "$d/temp/cluster" || true
                 chmod -R u+w "$d/temp" 2>/dev/null || true
-                # SecretsWaitTimeout is 2m in upstream; worker bootstrap secret often appears later.
                 cfg="$d/internal/config/config.go"
+                # SecretsWaitTimeout is 2m in upstream; worker bootstrap secret often appears later.
                 if [ -f "$cfg" ] && grep -q 'SecretsWaitTimeout   = 2 \* time\.Minute' "$cfg"; then
                   sed -i 's/SecretsWaitTimeout   = 2 \* time\.Minute/SecretsWaitTimeout   = 15 * time.Minute/' "$cfg"
                   echo "Patched SecretsWaitTimeout to 15m in storage-e2e ($d)"
+                fi
+                # VMsRunningTimeout is 20m in upstream; on busy base clusters VMs may take longer.
+                if [ -f "$cfg" ] && grep -q 'VMsRunningTimeout.*= 20 \* time\.Minute' "$cfg"; then
+                  sed -i 's/VMsRunningTimeout\(.*\)= 20 \* time\.Minute/VMsRunningTimeout\1= 30 * time.Minute/' "$cfg"
+                  echo "Patched VMsRunningTimeout to 30m in storage-e2e ($d)"
                 fi
                 RECONNECT_PATCH="${GITHUB_WORKSPACE}/e2e/patches/storage-e2e-reconnect-after-add-nodes.patch"
                 if [ -f "$RECONNECT_PATCH" ] && [ -f "$d/pkg/cluster/cluster.go" ]; then
@@ -370,7 +375,7 @@ jobs:
             done
             shopt -u nullglob
           fi
-          go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$' 2>&1 | tee ../e2e-test-output.log
+          go test -v -count=1 -timeout 90m ./tests/ -run '^TestSdsNodeConfigurator$' 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV
           echo "${TEST_EXIT_CODE}" > ../e2e-test-exit-code.txt

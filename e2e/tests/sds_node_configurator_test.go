@@ -322,6 +322,8 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 	// - commander: use Deckhouse Commander
 
 	It("should create test cluster", func() {
+		Expect(waitForVirtualizationModuleReadyIfNeeded(context.Background())).To(Succeed(),
+			"virtualization module should become Ready on base cluster (retry while Reconciling)")
 		testClusterResources = cluster.CreateOrConnectToTestCluster()
 
 		if nestedKubeconfigPath := os.Getenv("NESTED_KUBE_CONFIG_PATH"); nestedKubeconfigPath != "" {
