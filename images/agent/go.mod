@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-node-configurator/images/agent
 
-go 1.25.8
+go 1.25.9
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250130211935-b68366dfd0f8
 	github.com/deckhouse/sds-node-configurator/lib/go/common v0.0.0-00010101000000-000000000000
