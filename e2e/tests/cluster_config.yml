@@ -37,13 +37,14 @@ clusterDefinition:
       coreFraction: 20
       ram: 8
       diskSize: 20
-    - hostname: "worker-5"
-      hostType: "vm"
-      osType: "Ubuntu 24.04 6.8.0-53-generic" # See internal/config/images.go
-      cpu: 2
-      coreFraction: 20
-      ram: 8
-      diskSize: 20
+    # Temporarily disabled to reduce CI cluster footprint.
+    # - hostname: "worker-5"
+    #   hostType: "vm"
+    #   osType: "Ubuntu 24.04 6.8.0-53-generic" # See internal/config/images.go
+    #   cpu: 2
+    #   coreFraction: 20
+    #   ram: 8
+    #   diskSize: 20
   # DKP parameters
   dkpParameters:
     kubernetesVersion: "Automatic"
