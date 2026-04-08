@@ -195,7 +195,7 @@ func (commands) GetLV(vgName, lvName string) (lvData internal.LVData, command st
 
 func (commands) GetAllPVs(ctx context.Context) (data []internal.PVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json"}
+	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid,pe_start", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
@@ -218,7 +218,7 @@ func (commands) GetAllPVs(ctx context.Context) (data []internal.PVData, command 
 func (commands) GetPV(pvName string) (pvData internal.PVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	pvData = internal.PVData{}
-	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json", pvName}
+	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid,pe_start", "--units", "B", "--nosuffix", "--reportformat", "json", pvName}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
