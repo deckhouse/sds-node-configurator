@@ -30,13 +30,14 @@ clusterDefinition:
     #   coreFraction: 50
     #   ram: 2
     #   diskSize: 50
-    - hostname: "worker-4"
-      hostType: "vm"
-      osType: "AltLinux Server 11" # See internal/config/images.go
-      cpu: 2
-      coreFraction: 20
-      ram: 8
-      diskSize: 20
+    # Temporarily disabled to reduce CI cluster footprint (VM startup timeouts).
+    # - hostname: "worker-4"
+    #   hostType: "vm"
+    #   osType: "AltLinux Server 11" # See internal/config/images.go
+    #   cpu: 2
+    #   coreFraction: 20
+    #   ram: 8
+    #   diskSize: 20
     # Temporarily disabled to reduce CI cluster footprint.
     # - hostname: "worker-5"
     #   hostType: "vm"
