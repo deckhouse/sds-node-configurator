@@ -541,8 +541,14 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 		}
 		extentForThinPools := extentSizeForThinPoolAlign(lvg, vgAfterCreate)
 
+		var vgSize resource.Quantity
+		if vgAfterCreate != nil {
+			vgSize = vgAfterCreate.VGSize
+		} else {
+			vgSize = countVGSizeByBlockDevices(blockDevices)
+		}
+
 		for _, tp := range lvg.Spec.ThinPools {
-			vgSize := countVGSizeByBlockDevices(blockDevices)
 			tpRequestedSize, err := utils.GetRequestedSizeFromString(tp.Size, vgSize)
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to get thin-pool %s requested size of the LVMVolumeGroup %s", tp.Name, lvg.Name))
