@@ -270,8 +270,13 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				Spec: v1alpha1.LVMVolumeGroupSpec{
 					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
 						{
-							Name:            "new-thin",
-							Size:            "4G",
+							Name:            "first-thin",
+							Size:            "100%",
+							AllocationLimit: "150%",
+						},
+						{
+							Name:            "second-thin",
+							Size:            "1G",
 							AllocationLimit: "150%",
 						},
 					},

@@ -67,6 +67,10 @@ fdisk /dev/sdb
 
 Ресурсы [LVMVolumeGroup](./cr.html#lvmvolumegroup) предназначены для взаимодействия с группами томов LVM (LVM Volume Group) на узлах и отображения актуальной информации об их состоянии.
 
+### Совместное использование одной LVM VG в модулях sds-replicated-volume и sds-local-volume
+
+Если одну и ту же группу томов LVM (LVG) нужно использовать одновременно в **sds-replicated-volume** и **sds-local-volume**, создайте в этой группе томов несколько thin pool и разнесите их по модулям: один thin pool укажите в [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool), другой — в [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass), используя записи `thinPools` в ресурсе [LVMVolumeGroup](./cr.html#lvmvolumegroup).
+
 ### Создание ресурса LVMVolumeGroup
 
 Ресурс [LVMVolumeGroup](./cr.html#lvmvolumegroup) может быть создан тремя способами, описанными далее.

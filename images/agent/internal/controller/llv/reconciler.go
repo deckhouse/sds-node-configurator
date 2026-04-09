@@ -319,17 +319,20 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 		return false, err
 	}
 
+	alignedRequestSize, err := utils.AlignSizeToExtent(llvRequestSize, lvg.Status.ExtentSize)
+	if err != nil {
+		r.log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to align size for LVMLogicalVolume %s", llv.Name))
+		return true, err
+	}
+
 	freeSpace := utils.GetFreeLVGSpaceForLLV(lvg, llv)
-	r.log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s, LV: %s, VG: %s type: %s requested size: %s, free space: %s", llv.Name, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Type, llvRequestSize.String(), freeSpace.String()))
+	r.log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LVMLogicalVolume %s, LV: %s, VG: %s type: %s requested size: %s, aligned size: %s, free space: %s", llv.Name, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Type, llvRequestSize.String(), alignedRequestSize.String(), freeSpace.String()))
 
-	if !utils.AreSizesEqualWithinDelta(llvRequestSize, freeSpace, internal.ResizeDelta) {
-		if freeSpace.Value() < llvRequestSize.Value()+internal.ResizeDelta.Value() {
-			err = errors.New("not enough space")
-			r.log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] the LV %s requested size %s of the LVMLogicalVolume %s is more than the actual free space %s", llv.Spec.ActualLVNameOnTheNode, llvRequestSize.String(), llv.Name, freeSpace.String()))
+	if freeSpace.Value() < alignedRequestSize.Value() {
+		err = errors.New("not enough space")
+		r.log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] the LV %s aligned requested size %s of the LVMLogicalVolume %s is more than the actual free space %s", llv.Spec.ActualLVNameOnTheNode, alignedRequestSize.String(), llv.Name, freeSpace.String()))
 
-			// we return true cause the user might manage LVMVolumeGroup free space without changing the LLV
-			return true, err
-		}
+		return true, err
 	}
 
 	var cmd string
@@ -369,10 +372,17 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 
 	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] adds the LV %s to the cache", llv.Spec.ActualLVNameOnTheNode))
 	r.sdsCache.AddLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] tries to get the LV %s actual size", llv.Spec.ActualLVNameOnTheNode))
-	actualSize := r.getLVActualSize(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+
+	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] tries to get the LV %s actual size directly from LVM", llv.Spec.ActualLVNameOnTheNode))
+	lvData, cmd, _, getLVErr := r.commands.GetLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] ran cmd: %s", cmd))
+	if getLVErr != nil {
+		r.log.Warning(fmt.Sprintf("[reconcileLLVCreateFunc] unable to get LV %s info from LVM: %s, will retry", llv.Spec.ActualLVNameOnTheNode, getLVErr.Error()))
+		return true, nil
+	}
+	actualSize := lvData.LVSize
 	if actualSize.Value() == 0 {
-		r.log.Warning(fmt.Sprintf("[reconcileLLVCreateFunc] unable to get actual size for LV %s in VG %s (likely LV was not found in the cache), retry...", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode))
+		r.log.Warning(fmt.Sprintf("[reconcileLLVCreateFunc] LV %s in VG %s returned zero size from LVM, retry...", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode))
 		return true, nil
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] successfully got the LV %s actual size", llv.Spec.ActualLVNameOnTheNode))
@@ -419,8 +429,14 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully counted the LVMLogicalVolume %s requested size: %s", llv.Name, llvRequestSize.String()))
 
-	if utils.AreSizesEqualWithinDelta(actualSize, llvRequestSize, internal.ResizeDelta) {
-		r.log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s has the same actual size %s as the requested size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, actualSize.String(), llvRequestSize.String()))
+	alignedRequestSize, err := utils.AlignSizeToExtent(llvRequestSize, lvg.Status.ExtentSize)
+	if err != nil {
+		r.log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to align size for LVMLogicalVolume %s", llv.Name))
+		return true, err
+	}
+
+	if actualSize.Value() >= alignedRequestSize.Value() {
+		r.log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s actual size %s is already >= aligned requested size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, actualSize.String(), alignedRequestSize.String()))
 
 		if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, llv, actualSize); err != nil {
 			return true, err
@@ -431,16 +447,15 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 		return false, nil
 	}
 
-	extendingSize := subtractQuantity(llvRequestSize, actualSize)
+	extendingSize := subtractQuantity(alignedRequestSize, actualSize)
 	r.log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s has extending size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, extendingSize.String()))
 	if extendingSize.Value() < 0 {
-		err = fmt.Errorf("specified LV size %dB is less than actual one on the node %dB", llvRequestSize.Value(), actualSize.Value())
+		err = fmt.Errorf("specified LV size %dB is less than actual one on the node %dB", alignedRequestSize.Value(), actualSize.Value())
 		r.log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to extend the LVMLogicalVolume %s", llv.Name))
 		return false, err
 	}
 
 	r.log.Info(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s should be resized", llv.Name))
-	// this check prevents infinite resource updates after retry
 	if llv.Status.Phase != v1alpha1.PhaseFailed {
 		err := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, v1alpha1.PhaseResizing, "")
 		if err != nil {
@@ -452,14 +467,11 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 	freeSpace := utils.GetFreeLVGSpaceForLLV(lvg, llv)
 	r.log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LVMLogicalVolume %s, LV: %s, VG: %s, type: %s, extending size: %s, free space: %s", llv.Name, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Type, extendingSize.String(), freeSpace.String()))
 
-	if !utils.AreSizesEqualWithinDelta(freeSpace, extendingSize, internal.ResizeDelta) {
-		if freeSpace.Value() < extendingSize.Value()+internal.ResizeDelta.Value() {
-			err = errors.New("not enough space")
-			r.log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s requested size %s of the LVMLogicalVolume %s is more than actual free space %s", llv.Spec.ActualLVNameOnTheNode, llvRequestSize.String(), llv.Name, freeSpace.String()))
+	if freeSpace.Value() < extendingSize.Value() {
+		err = errors.New("not enough space")
+		r.log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s aligned requested size %s of the LVMLogicalVolume %s is more than actual free space %s", llv.Spec.ActualLVNameOnTheNode, alignedRequestSize.String(), llv.Name, freeSpace.String()))
 
-			// returns true cause a user might manage LVG free space without changing the LLV
-			return true, err
-		}
+		return true, err
 	}
 
 	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s of the LVMLogicalVolume %s will be extended with size: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, llvRequestSize.String()))
@@ -472,12 +484,16 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 
 	r.log.Info(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully extended LV %s in VG %s for LVMLogicalVolume resource with name: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Name))
 
-	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] tries to get LVMLogicalVolume %s actual size after the extension", llv.Name))
-	newActualSize := r.getLVActualSize(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-
-	// this case might be triggered if sds cache will not update lv state in time
-	if newActualSize.Value() == actualSize.Value() {
-		r.log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s of the LVMLogicalVolume %s was extended but cache is not updated yet. It will be retried", llv.Spec.ActualLVNameOnTheNode, llv.Name))
+	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] tries to get LVMLogicalVolume %s actual size after the extension directly from LVM", llv.Name))
+	lvData, getLVCmd, _, getLVErr := r.commands.GetLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] ran cmd: %s", getLVCmd))
+	if getLVErr != nil {
+		r.log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] unable to get LV %s info from LVM after extension: %s, will retry", llv.Spec.ActualLVNameOnTheNode, getLVErr.Error()))
+		return true, nil
+	}
+	newActualSize := lvData.LVSize
+	if newActualSize.Value() == 0 || newActualSize.Value() == actualSize.Value() {
+		r.log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s of the LVMLogicalVolume %s was extended but LVM still reports old size %s, will retry", llv.Spec.ActualLVNameOnTheNode, llv.Name, newActualSize.String()))
 		return true, nil
 	}
 
@@ -689,7 +705,12 @@ func (r *Reconciler) validateLVMLogicalVolume(llv *v1alpha1.LVMLogicalVolume, lv
 	}
 
 	if llv.Status != nil {
-		if llvRequestedSize.Value()+internal.ResizeDelta.Value() < llv.Status.ActualSize.Value() {
+		alignedReqSize, alignErr := utils.AlignSizeToExtent(llvRequestedSize, lvg.Status.ExtentSize)
+		if alignErr != nil {
+			if llvRequestedSize.Value() < llv.Status.ActualSize.Value() {
+				reason.WriteString("Desired LV size is less than actual one. ")
+			}
+		} else if alignedReqSize.Value() < llv.Status.ActualSize.Value() {
 			reason.WriteString("Desired LV size is less than actual one. ")
 		}
 	}
