@@ -24,7 +24,7 @@ import (
 	"strings"
 )
 
-// Filesystem paths are vars so tests can override them with tmpdir.
+// Package-level paths; tests may override.
 var (
 	sysClassBlockPath = "/sys/class/block"
 	sysBlockPath      = "/sys/block"
@@ -34,7 +34,7 @@ var (
 
 const sectorSize = 512
 
-// UdevProperties contains typed fields extracted from a udev env map.
+// UdevProperties holds selected keys from a merged udev uevent/database map.
 type UdevProperties struct {
 	DevName  string
 	DevType  string
@@ -49,8 +49,6 @@ type UdevProperties struct {
 	DMUUID   string
 	MDLevel  string
 }
-
-// ================== sysfs readers ==================
 
 func ReadSysfsSize(devName string) (int64, error) {
 	data, err := os.ReadFile(filepath.Join(sysClassBlockPath, devName, "size"))
@@ -82,14 +80,8 @@ func ReadSysfsRemovable(devName string) (bool, error) {
 	return strings.TrimSpace(string(data)) == "1", nil
 }
 
-// ReadSysfsHotplug checks whether a block device is hotpluggable by walking
-// the sysfs device ancestor chain and looking for a "removable" attribute
-// containing "removable" (vs "fixed"). This mirrors lsblk's HOTPLUG column
-// (sysfs_blkdev_is_hotpluggable in util-linux), which is different from the
-// block device's own "removable" attribute (RM column).
-//
-// A USB hard drive has removable=0 at the block device level but a parent
-// directory (the USB port) is marked "removable", so HOTPLUG=true.
+// ReadSysfsHotplug reports hot-plug by walking sysfs ancestors for
+// removable=removable vs fixed (not the block device RM sysfs file alone).
 func ReadSysfsHotplug(devName string) (bool, error) {
 	devName = resolveParentForPartition(devName)
 
@@ -134,9 +126,8 @@ func ReadSysfsSlaves(devName string) ([]string, error) {
 	return names, nil
 }
 
-// resolveParentForPartition returns the parent disk name for partitions
-// so that rotational/removable can be read from the parent.
-// For non-partitions returns devName unchanged.
+// resolveParentForPartition returns the parent disk for partitions so
+// rotational/removable read the backing device; else devName unchanged.
 func resolveParentForPartition(devName string) string {
 	if !isPartition(devName) {
 		return devName
@@ -146,8 +137,6 @@ func resolveParentForPartition(devName string) string {
 	}
 	return devName
 }
-
-// ================== udev DB ==================
 
 func ReadUdevDB(major, minor int) (map[string]string, error) {
 	path := fmt.Sprintf("%s/b%d:%d", runUdevDataPath, major, minor)
@@ -171,9 +160,7 @@ func ReadUdevDB(major, minor int) (map[string]string, error) {
 	return props, nil
 }
 
-// MergeEnvWithUdevDB enriches the env map from a crawler/netlink event
-// with additional properties from /run/udev/data/bMAJOR:MINOR.
-// Existing env keys take precedence over udev DB keys.
+// MergeEnvWithUdevDB adds /run/udev/data/b<major>:<minor>; event keys win.
 func MergeEnvWithUdevDB(env map[string]string) map[string]string {
 	majorStr, hasMajor := env["MAJOR"]
 	minorStr, hasMinor := env["MINOR"]
@@ -198,8 +185,6 @@ func MergeEnvWithUdevDB(env map[string]string) map[string]string {
 	}
 	return merged
 }
-
-// ================== mapping ==================
 
 func ParseUdevProperties(env map[string]string) UdevProperties {
 	major, _ := strconv.Atoi(env["MAJOR"])
@@ -275,10 +260,8 @@ func ResolveKernelName(devName string) string {
 	return "/dev/" + devName
 }
 
-// ResolveParentDevice determines the parent kernel device name (PkName).
-// For partitions: the parent disk. For DM/MD: the first slave device.
-// Partition check comes first so that MD partitions (md0p1) resolve to
-// their parent array (md0) rather than attempting a slaves lookup.
+// ResolveParentDevice returns PkName: sysfs parent for partitions (first);
+// for dm-* / md* the first slave. Partition-first avoids md0p1 -> wrong path.
 func ResolveParentDevice(devName string) string {
 	if isPartition(devName) {
 		if parent := parentFromSysfs(devName); parent != "" {
@@ -294,20 +277,13 @@ func ResolveParentDevice(devName string) string {
 	return ""
 }
 
-// isPartition checks if the device has a "partition" file in sysfs,
-// which is the authoritative way to distinguish partitions from
-// whole devices whose names happen to end with digits (loop0, nbd0, sr0).
 func isPartition(devName string) bool {
 	partitionFile := filepath.Join(sysClassBlockPath, devName, "partition")
 	_, err := os.Stat(partitionFile)
 	return err == nil
 }
 
-// parentFromSysfs reads the sysfs symlink for a partition device to determine
-// its parent disk. In sysfs, /sys/class/block/<partition> is a symlink like
-// ../../devices/.../block/<parent_disk>/<partition>, so the parent directory
-// name in the symlink target is the parent disk name. This works for all
-// naming schemes: sda1->sda, nvme0n1p1->nvme0n1, mmcblk0p1->mmcblk0, nbd0p1->nbd0.
+// parentFromSysfs returns the parent block name from /sys/class/block/<part> symlink.
 func parentFromSysfs(devName string) string {
 	link, err := os.Readlink(filepath.Join(sysClassBlockPath, devName))
 	if err != nil {
@@ -324,24 +300,7 @@ func SysfsDevName(devPath string) string {
 	return strings.TrimPrefix(devPath, "/dev/")
 }
 
-func readSysfsFile(devName, fileName string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(sysClassBlockPath, devName, fileName))
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-// DeviceKey builds a "major:minor" key from separate values.
+// DeviceKey returns "major:minor".
 func DeviceKey(major, minor int) string {
 	return strconv.Itoa(major) + ":" + strconv.Itoa(minor)
-}
-
-// ReadDevMajorMinor reads the dev file from sysfs and returns "major:minor".
-func ReadDevMajorMinor(devName string) (string, error) {
-	data, err := readSysfsFile(devName, "dev")
-	if err != nil {
-		return "", fmt.Errorf("reading dev for %s: %w", devName, err)
-	}
-	return strings.TrimSpace(data), nil
 }
