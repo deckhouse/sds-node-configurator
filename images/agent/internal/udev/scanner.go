@@ -29,8 +29,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
-// DeviceMap is an in-memory store of block device udev properties,
-// keyed by "major:minor". Updated incrementally by netlink events.
+// DeviceMap stores merged udev env per "major:minor"; netlink updates incrementally.
 type DeviceMap struct {
 	mu      sync.RWMutex
 	devices map[string]map[string]string // key = "major:minor", value = merged env map
@@ -52,7 +51,7 @@ func devKey(env map[string]string) (string, error) {
 	return major + ":" + minor, nil
 }
 
-// HandleEvent processes a netlink UEvent and updates the device map.
+// HandleEvent applies a netlink uevent to the map.
 func (dm *DeviceMap) HandleEvent(event *netlink.UEvent) {
 	env := MergeEnvWithUdevDB(event.Env)
 
@@ -73,10 +72,7 @@ func (dm *DeviceMap) HandleEvent(event *netlink.UEvent) {
 	}
 }
 
-// FillFromCrawler replaces the entire device map with devices from crawler results.
-// For each device, it merges udev DB properties on top of the uevent env.
-// This is safe to call multiple times (e.g. after netlink reconnect) --
-// old entries not present in the new crawl are removed.
+// FillFromCrawler replaces the map from a full crawl (MergeEnvWithUdevDB per device).
 func (dm *DeviceMap) FillFromCrawler(devices []crawler.Device) {
 	newDevices := make(map[string]map[string]string, len(devices))
 	for _, dev := range devices {
@@ -94,10 +90,7 @@ func (dm *DeviceMap) FillFromCrawler(devices []crawler.Device) {
 	dm.devices = newDevices
 }
 
-// Snapshot converts the current device map into a slice of internal.Device,
-// reading additional properties from sysfs. Mount-point enrichment is handled
-// separately by the caller (scanner) to decouple mount info failures from
-// device discovery.
+// Snapshot builds internal.Device from the map plus sysfs; mount paths are filled elsewhere.
 func (dm *DeviceMap) Snapshot() ([]internal.Device, []string) {
 	dm.mu.RLock()
 	envsCopy := make(map[string]map[string]string, len(dm.devices))
@@ -166,7 +159,7 @@ func (dm *DeviceMap) Snapshot() ([]internal.Device, []string) {
 	return result, errs
 }
 
-// Len returns the number of tracked devices.
+// Len returns the number of devices in the map.
 func (dm *DeviceMap) Len() int {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
