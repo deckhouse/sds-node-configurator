@@ -41,8 +41,7 @@ func NewBlockDeviceFilterClient(cl client.Client, metrics *monitoring.Metrics) *
 	}
 }
 
-// GetAPIBlockDevices returns map of BlockDevice resources with BlockDevice as a key. You might specify a selector to get a subset or
-// leave it as nil to get all the resources.
+// GetAPIBlockDeviceFilters returns a combined label selector built from all BlockDeviceFilter resources.
 func (c *BlockDeviceFilterClient) GetAPIBlockDeviceFilters(
 	ctx context.Context,
 	controllerName string,
@@ -59,7 +58,9 @@ func (c *BlockDeviceFilterClient) GetAPIBlockDeviceFilters(
 
 	resultRequirements := make(labels.Requirements, 0, len(list.Items))
 	for _, item := range list.Items {
-		selector, err := metav1.LabelSelectorAsSelector(item.Spec.BlockDeviceSelector)
+		sanitized := sanitizeLabelSelector(item.Spec.BlockDeviceSelector)
+
+		selector, err := metav1.LabelSelectorAsSelector(sanitized)
 		if err != nil {
 			return nil, fmt.Errorf("parsing selector %s: %w", item.Name, err)
 		}
@@ -69,4 +70,33 @@ func (c *BlockDeviceFilterClient) GetAPIBlockDeviceFilters(
 	}
 
 	return labels.NewSelector().Add(resultRequirements...), nil
+}
+
+// sanitizeLabelSelector removes matchExpressions with In/NotIn operators that
+// have nil or empty Values. Such expressions are invalid for
+// metav1.LabelSelectorAsSelector but may appear in user-created resources.
+//
+// Semantically, NotIn with an empty set is vacuously true (matches everything),
+// and In with an empty set is vacuously false (matches nothing). Both are
+// dropped because they cannot be represented as valid label requirements.
+func sanitizeLabelSelector(sel *metav1.LabelSelector) *metav1.LabelSelector {
+	if sel == nil {
+		return sel
+	}
+
+	if len(sel.MatchExpressions) == 0 {
+		return sel
+	}
+
+	sanitized := sel.DeepCopy()
+	filtered := make([]metav1.LabelSelectorRequirement, 0, len(sanitized.MatchExpressions))
+	for _, expr := range sanitized.MatchExpressions {
+		if (expr.Operator == metav1.LabelSelectorOpIn || expr.Operator == metav1.LabelSelectorOpNotIn) && len(expr.Values) == 0 {
+			continue
+		}
+		filtered = append(filtered, expr)
+	}
+	sanitized.MatchExpressions = filtered
+
+	return sanitized
 }

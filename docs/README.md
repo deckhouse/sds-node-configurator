@@ -10,6 +10,10 @@ Module functionality is guaranteed only when using stock kernels provided with [
 Module functionality when using other kernels or distributions is possible but not guaranteed.
 {{< /alert >}}
 
+{{< alert level="info" >}}
+Please note that for full module functionality, you must enable at least one of (or both) the [sds-replicated-volume](/modules/sds-replicated-volume/) and [sds-local-volume](/modules/sds-local-volume/) modules.
+{{< /alert >}}
+
 The `sds-node-configurator` module manages block devices and LVM on Kubernetes cluster nodes through [Kubernetes custom resources](./cr.html). Main module capabilities:
 
 - Automatic discovery of block devices and creation/update/deletion of corresponding [BlockDevice resources](./cr.html#blockdevice).
