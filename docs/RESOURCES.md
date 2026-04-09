@@ -67,6 +67,10 @@ If the resource is manually deleted, it will be recreated by the controller.
 
 [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources are designed to interact with LVM Volume Groups on nodes and display current information about their state.
 
+### Using one LVM Volume Group with both SDS storage modules
+
+If the same LVM Volume Group must be used with **sds-replicated-volume** and **sds-local-volume** at the same time, create several thin pools in that volume group and bind them separately: reference one thin pool in [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) and another in [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass), using the `thinPools` entries declared in the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource.
+
 ### Creating an LVMVolumeGroup resource
 
 An [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource can be created in three ways described below.
