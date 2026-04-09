@@ -29,7 +29,7 @@ var (
 	sysClassBlockPath = "/sys/class/block"
 	sysBlockPath      = "/sys/block"
 	runUdevDataPath   = "/run/udev/data"
-	procSelfMountInfo = "/proc/self/mountinfo"
+	procSelfMountInfo = "/proc/1/mountinfo"
 )
 
 const sectorSize = 512

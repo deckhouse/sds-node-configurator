@@ -23,7 +23,10 @@ import (
 	"strings"
 )
 
-// ParseMountInfo reads /proc/self/mountinfo and returns a map of "major:minor" -> mount point.
+// ParseMountInfo reads /proc/1/mountinfo (the host init process) and returns a map
+// of "major:minor" -> mount point. We read PID 1's mountinfo because the agent runs
+// in a container with hostPID: true, and /proc/self/mountinfo would only show the
+// container's mount namespace (overlayfs, tmpfs), not the actual host block device mounts.
 // See https://www.kernel.org/doc/Documentation/filesystems/proc.txt (section 3.5)
 // Format: 36 35 98:0 /mnt1 /mnt2 rw,noatime master:1 - ext3 /dev/root rw,errors=continue
 // Fields: [0]=mount_id [1]=parent_id [2]=major:minor [3]=root [4]=mount_point ...
