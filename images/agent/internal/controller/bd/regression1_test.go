@@ -25,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
 //go:embed testdata/case1_lsblk_output.json
@@ -37,14 +37,16 @@ var case1BdRightNaming []byte
 // Real life use case
 var _ = Describe("Regression1", func() {
 	withDiscovererCreated(func(vars *DiscoverCreatedVars) {
-		internalDevices, err := utils.NewCommands().UnmarshalDevices(case1LsblkOutput)
+		var parsed internal.Devices
+		err := json.Unmarshal(case1LsblkOutput, &parsed)
 		Expect(err).ToNot(HaveOccurred())
+		internalDevices := parsed.BlockDevices
 
 		var expectedDevice v1alpha1.BlockDevice
 		err = json.Unmarshal(case1BdRightNaming, &expectedDevice)
 		Expect(err).ShouldNot(HaveOccurred())
 
-		// TODO: Test if LVM data the same. Currently we don't use any LVM data only lsblk
+		// TODO: Test if LVM data the same. Currently we don't use any LVM data, only device info from udev
 		expectedDevice.Status.PVUuid = ""
 		expectedDevice.Status.VGUuid = ""
 		expectedDevice.Status.LVMVolumeGroupName = ""

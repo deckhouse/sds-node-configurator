@@ -445,21 +445,6 @@ func (mr *MockCommandsMockRecorder) ResizePV(pvName any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResizePV", reflect.TypeOf((*MockCommands)(nil).ResizePV), pvName)
 }
 
-// UnmarshalDevices mocks base method.
-func (m *MockCommands) UnmarshalDevices(out []byte) ([]internal.Device, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UnmarshalDevices", out)
-	ret0, _ := ret[0].([]internal.Device)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// UnmarshalDevices indicates an expected call of UnmarshalDevices.
-func (mr *MockCommandsMockRecorder) UnmarshalDevices(out any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnmarshalDevices", reflect.TypeOf((*MockCommands)(nil).UnmarshalDevices), out)
-}
-
 // VGActivate mocks base method.
 func (m *MockCommands) VGActivate(ctx context.Context, vgName string, shared bool) (string, error) {
 	m.ctrl.T.Helper()
