@@ -80,8 +80,9 @@ func ReadSysfsRemovable(devName string) (bool, error) {
 	return strings.TrimSpace(string(data)) == "1", nil
 }
 
-// ReadSysfsHotplug reports hot-plug by walking sysfs ancestors for
-// removable=removable vs fixed (not the block device RM sysfs file alone).
+// ReadSysfsHotplug mirrors util-linux sysfs_blkdev_is_hotpluggable() (lib/sysfs.c):
+// walk the device path upward, appending /removable at each level; "removable" -> true,
+// "fixed" -> false. This is not the same as the block dev's own "removable" sysfs byte (RM column).
 func ReadSysfsHotplug(devName string) (bool, error) {
 	devName = resolveParentForPartition(devName)
 
@@ -216,26 +217,116 @@ func ParseUdevProperties(env map[string]string) UdevProperties {
 	}
 }
 
+// scsiTypeName maps sysfs device/type (SCSI peripheral type) to lsblk TYPE strings.
+// Matches blkdev_scsi_type_to_name() in util-linux lib/blkdev.c; lsblk lowercases in get_type().
+func scsiTypeName(code int) string {
+	switch code {
+	case 0x00:
+		return "disk"
+	case 0x01:
+		return "tape"
+	case 0x02:
+		return "printer"
+	case 0x03:
+		return "processor"
+	case 0x04:
+		return "worm"
+	case 0x05:
+		return "rom"
+	case 0x06:
+		return "scanner"
+	case 0x07:
+		return "mo-disk"
+	case 0x08:
+		return "changer"
+	case 0x09:
+		return "comm"
+	case 0x0c:
+		return "raid"
+	case 0x0d:
+		return "enclosure"
+	case 0x0e:
+		return "rbc"
+	case 0x11:
+		return "osd"
+	case 0x7f:
+		return "no-lun"
+	default:
+		return ""
+	}
+}
+
+func readScsiTypeFromSysfs(devShort string) (string, bool) {
+	if devShort == "" {
+		return "", false
+	}
+	data, err := os.ReadFile(filepath.Join(sysClassBlockPath, devShort, "device", "type"))
+	if err != nil {
+		return "", false
+	}
+	code, err := strconv.ParseInt(strings.TrimSpace(string(data)), 0, 32)
+	if err != nil {
+		return "", false
+	}
+	name := scsiTypeName(int(code))
+	if name == "" {
+		return "", false
+	}
+	return name, true
+}
+
+// dmTypeFromDMUUID derives TYPE from dm uuid prefix (same source as sysfs dm/uuid, udev DM_UUID):
+// substring before first '-', lowercased; kpartx uses a "part*" prefix trimmed to "part" (lsblk get_type).
+func dmTypeFromDMUUID(dmUUID string) string {
+	if dmUUID == "" {
+		return "dm"
+	}
+	prefix := dmUUID
+	if i := strings.Index(dmUUID, "-"); i >= 0 {
+		prefix = dmUUID[:i]
+	}
+	if prefix == "" {
+		return "dm"
+	}
+	if len(prefix) >= 4 && strings.EqualFold(prefix[:4], "part") {
+		prefix = "part"
+	}
+	return strings.ToLower(prefix)
+}
+
+// ResolveDeviceType returns the lsblk-style TYPE (util-linux misc-utils/lsblk.c get_type()).
+// Raw udev DEVTYPE is not enough: order is partition, device-mapper, loop, md, then SCSI device/type or "disk".
+// DM uses the DM_UUID prefix before the first '-'. If sysfs device/type is missing, sr* is treated as rom.
 func ResolveDeviceType(props UdevProperties, devName string) string {
-	bare := strings.TrimPrefix(devName, "/dev/")
+	bare := SysfsDevName(devName)
+	if bare == "" {
+		bare = SysfsDevName(props.DevName)
+	}
+
+	if props.DevType == "partition" {
+		return "part"
+	}
+
+	if strings.HasPrefix(bare, "dm-") {
+		return dmTypeFromDMUUID(props.DMUUID)
+	}
 
 	if strings.HasPrefix(bare, "loop") {
 		return "loop"
 	}
+
+	if strings.HasPrefix(bare, "md") {
+		if lvl := strings.TrimSpace(props.MDLevel); lvl != "" {
+			return strings.ToLower(lvl)
+		}
+		return "md"
+	}
+
+	if name, ok := readScsiTypeFromSysfs(bare); ok {
+		return name
+	}
 	if strings.HasPrefix(bare, "sr") {
 		return "rom"
-	}
-	if strings.HasPrefix(props.DMUUID, "LVM-") {
-		return "lvm"
-	}
-	if strings.HasPrefix(props.DMUUID, "mpath-") {
-		return "mpath"
-	}
-	if props.MDLevel != "" {
-		return props.MDLevel
-	}
-	if props.DevType == "partition" {
-		return "part"
 	}
 	return "disk"
 }

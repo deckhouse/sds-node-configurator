@@ -161,17 +161,23 @@ func TestResolveDeviceType(t *testing.T) {
 		devName  string
 		expected string
 	}{
-		{"loop device", UdevProperties{}, "/dev/loop0", "loop"},
-		{"loop with partition suffix", UdevProperties{}, "/dev/loop0p1", "loop"},
+		{"partition before loop name", UdevProperties{DevType: "partition"}, "/dev/loop0p1", "part"},
+		{"loop device", UdevProperties{DevType: "disk"}, "/dev/loop0", "loop"},
 		{"LVM volume", UdevProperties{DMUUID: "LVM-abc123"}, "/dev/dm-0", "lvm"},
-		{"multipath", UdevProperties{DMUUID: "mpath-xyz"}, "/dev/dm-1", "mpath"},
+		{"multipath lower", UdevProperties{DMUUID: "mpath-xyz"}, "/dev/dm-1", "mpath"},
+		{"multipath upper prefix", UdevProperties{DMUUID: "MPATH-xyz"}, "/dev/dm-1", "mpath"},
+		{"crypt dm", UdevProperties{DMUUID: "CRYPT-LUKS2-deadbeef"}, "/dev/dm-2", "crypt"},
+		{"dm no uuid", UdevProperties{}, "/dev/dm-9", "dm"},
+		{"dm kpartx part prefix", UdevProperties{DMUUID: "part7-00002-abcdef"}, "/dev/dm-3", "part"},
 		{"MD RAID1", UdevProperties{MDLevel: "raid1"}, "/dev/md0", "raid1"},
 		{"MD RAID5", UdevProperties{MDLevel: "raid5"}, "/dev/md1", "raid5"},
+		{"MD level lowercased", UdevProperties{MDLevel: "RAID10"}, "/dev/md2", "raid10"},
+		{"MD no level", UdevProperties{DevType: "disk"}, "/dev/md3", "md"},
 		{"partition", UdevProperties{DevType: "partition"}, "/dev/sda1", "part"},
-		{"plain disk", UdevProperties{DevType: "disk"}, "/dev/sda", "disk"},
-		{"nvme disk", UdevProperties{DevType: "disk"}, "/dev/nvme0n1", "disk"},
-		{"CD-ROM sr0", UdevProperties{DevType: "disk"}, "/dev/sr0", "rom"},
-		{"CD-ROM sr1", UdevProperties{}, "/dev/sr1", "rom"},
+		{"plain disk no sysfs", UdevProperties{DevType: "disk"}, "/dev/sda", "disk"},
+		{"nvme disk no sysfs", UdevProperties{DevType: "disk"}, "/dev/nvme0n1", "disk"},
+		{"CD-ROM sr0 no sysfs", UdevProperties{DevType: "disk"}, "/dev/sr0", "rom"},
+		{"CD-ROM sr1 no sysfs", UdevProperties{}, "/dev/sr1", "rom"},
 		{"empty props", UdevProperties{}, "/dev/sda", "disk"},
 	}
 	for _, tt := range tests {
@@ -179,6 +185,25 @@ func TestResolveDeviceType(t *testing.T) {
 			assert.Equal(t, tt.expected, ResolveDeviceType(tt.props, tt.devName))
 		})
 	}
+}
+
+func TestResolveDeviceType_ScsiTypeFromSysfs(t *testing.T) {
+	withFakeSysfs(t)
+	writeFakeSysfsFile(t, "sda", "device/type", "0\n")
+	assert.Equal(t, "disk", ResolveDeviceType(UdevProperties{DevType: "disk"}, "/dev/sda"))
+
+	writeFakeSysfsFile(t, "sdb", "device/type", "5\n")
+	assert.Equal(t, "rom", ResolveDeviceType(UdevProperties{DevType: "disk"}, "/dev/sdb"))
+
+	writeFakeSysfsFile(t, "sdc", "device/type", "0x0c\n")
+	assert.Equal(t, "raid", ResolveDeviceType(UdevProperties{DevType: "disk"}, "/dev/sdc"))
+}
+
+func TestScsiTypeName(t *testing.T) {
+	assert.Equal(t, "disk", scsiTypeName(0))
+	assert.Equal(t, "rom", scsiTypeName(5))
+	assert.Equal(t, "raid", scsiTypeName(0x0c))
+	assert.Equal(t, "", scsiTypeName(0xff))
 }
 
 // ================== ResolveDeviceName ==================
