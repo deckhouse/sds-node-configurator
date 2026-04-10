@@ -38,6 +38,10 @@ jobs:
 
   go_test_coverage:
     name: Go test coverage for images
+    runs-on: [self-hosted, regular]
+
+    steps:
+      - name: Checkout repository
         uses: actions/checkout@v2
 
       - name: Run Go test coverage count
