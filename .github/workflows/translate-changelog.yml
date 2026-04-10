@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
+          token: ${{ secrets.RELEASE_PAT }}
 
       - name: Translate changelog and create PR
         uses: deckhouse/modules-actions/translate-changelog@v12
