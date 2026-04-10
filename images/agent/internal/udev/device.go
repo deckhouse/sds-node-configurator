@@ -191,11 +191,8 @@ func ParseUdevProperties(env map[string]string) UdevProperties {
 	major, _ := strconv.Atoi(env["MAJOR"])
 	minor, _ := strconv.Atoi(env["MINOR"])
 
-	serial := env["ID_SERIAL_SHORT"]
-	if serial == "" {
-		serial = env["ID_SERIAL"]
-	}
-
+	// Model / serial / WWN follow lsblk get_properties_by_udev() (misc-utils/lsblk-properties.c)
+	// so BlockDevice identity matches `lsblk -J` on main (pre-netlink) for the same hardware.
 	devName := env["DEVNAME"]
 	if devName != "" && !strings.HasPrefix(devName, "/dev/") {
 		devName = "/dev/" + devName
@@ -206,9 +203,9 @@ func ParseUdevProperties(env map[string]string) UdevProperties {
 		DevType:  env["DEVTYPE"],
 		Major:    major,
 		Minor:    minor,
-		Serial:   serial,
-		Model:    env["ID_MODEL"],
-		WWN:      env["ID_WWN"],
+		Serial:   serialFromUdevEnv(env),
+		Model:    modelFromUdevEnv(env),
+		WWN:      wwnFromUdevEnv(env),
 		FSType:   env["ID_FS_TYPE"],
 		PartUUID: env["ID_PART_ENTRY_UUID"],
 		DMName:   env["DM_NAME"],
