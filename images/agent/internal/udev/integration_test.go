@@ -1,5 +1,3 @@
-//go:build integration
-
 /*
 Copyright 2025 Flant JSC
 
