@@ -1,0 +1,6 @@
+Изменения:
+- CVE fixes
+- Transition to a common scheduler for SDS
+- Replacing a fixed resize delta with automatic determination of the LVM partition
+  size delta
+- Automatic activation of LVM partitions during volume operations
