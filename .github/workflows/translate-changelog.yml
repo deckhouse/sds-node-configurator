@@ -22,3 +22,4 @@ jobs:
         with:
           changelog_path: "CHANGELOG"
           python_version: "3.11"
+          github_token: ${{ secrets.RELEASE_PAT }}
