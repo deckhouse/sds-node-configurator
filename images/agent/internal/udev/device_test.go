@@ -114,6 +114,44 @@ func TestParseUdevProperties_SerialFallback(t *testing.T) {
 	assert.Equal(t, "WDC_WD10EZEX_WD-ABC123", props.Serial, "Falls back to ID_SERIAL")
 }
 
+func TestParseUdevProperties_SerialScsiChainAndNormalize(t *testing.T) {
+	env := map[string]string{
+		"DEVNAME":            "/dev/sda",
+		"MAJOR":              "8",
+		"MINOR":              "0",
+		"SCSI_IDENT_SERIAL":  "  SG3  ID  ",
+		"ID_SCSI_SERIAL":     "scsi",
+		"ID_SERIAL_SHORT":    "short",
+		"ID_SERIAL":          "long",
+	}
+	props := ParseUdevProperties(env)
+	assert.Equal(t, "SG3 ID", props.Serial)
+}
+
+func TestParseUdevProperties_WwnPrefersExtension(t *testing.T) {
+	env := map[string]string{
+		"DEVNAME":               "/dev/sda",
+		"MAJOR":                 "8",
+		"MINOR":                 "0",
+		"ID_WWN":                "0x5000",
+		"ID_WWN_WITH_EXTENSION": "0x5000deadbeef",
+	}
+	props := ParseUdevProperties(env)
+	assert.Equal(t, "0x5000deadbeef", props.WWN)
+}
+
+func TestParseUdevProperties_ModelFromEnc(t *testing.T) {
+	env := map[string]string{
+		"DEVNAME":      "/dev/sda",
+		"MAJOR":        "8",
+		"MINOR":        "0",
+		"ID_MODEL":     "IGNORED_WHEN_ENC",
+		"ID_MODEL_ENC": `Vendor\x20Disk\x20Name`,
+	}
+	props := ParseUdevProperties(env)
+	assert.Equal(t, "Vendor Disk Name", props.Model)
+}
+
 func TestParseUdevProperties_DevNamePrefixAdded(t *testing.T) {
 	env := map[string]string{
 		"DEVNAME": "sda",
