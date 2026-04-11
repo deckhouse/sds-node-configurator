@@ -64,3 +64,7 @@ test*.log
 e2e/config/
 e2e/temp/
 e2e/.gomodcache/
+e2e/.gocache/
+
+# storage-e2e cluster-state / kubeconfig (repo root, next to e2e/)
+temp/

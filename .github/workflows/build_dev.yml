@@ -243,6 +243,10 @@ jobs:
       - name: Run E2E tests (storage-e2e, TestSdsNodeConfigurator)
         id: run_tests
         env:
+          # Self-hosted runners often use a shared read-only module dir under /opt/.../go/pkg/mod.
+          # storage-e2e writes bootstrap state under the storage-e2e module path — use a writable cache.
+          GOMODCACHE: ${{ github.workspace }}/e2e/.gomodcache
+          GOCACHE: ${{ github.workspace }}/e2e/.gocache
           TEST_CLUSTER_CREATE_MODE: ${{ secrets.E2E_TEST_CLUSTER_CREATE_MODE }}
           TEST_CLUSTER_NAMESPACE: e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}
           TEST_CLUSTER_STORAGE_CLASS: ${{ secrets.E2E_TEST_CLUSTER_STORAGE_CLASS }}
@@ -257,9 +261,42 @@ jobs:
           # Do not set KUBE_CONFIG_PATH here — it is taken from GITHUB_ENV (Setup writes the path to the file from E2E_CLUSTER_KUBECONFIG). Otherwise an empty vars value overwrites the fallback and storage-e2e cannot find kubeconfig when "sudo cat admin.conf" on the master fails.
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
         run: |
+          mkdir -p "${GOMODCACHE}" "${GOCACHE}"
           cd e2e
           go mod tidy
           go mod download
+          # PrepareBootstrapConfig resolves paths inside the module copy; chmod + patches (see e2e/Makefile fix-mod-permissions).
+          if [ -n "${GOMODCACHE:-}" ] && [ -d "${GOMODCACHE}/github.com/deckhouse" ]; then
+            echo "Making storage-e2e module in GOMODCACHE writable for bootstrap temp/..."
+            shopt -s nullglob
+            for d in "${GOMODCACHE}"/github.com/deckhouse/storage-e2e@*; do
+              if [ -d "$d" ]; then
+                chmod -R u+w "$d" || true
+                mkdir -p "$d/temp/cluster" || true
+                chmod -R u+w "$d/temp" 2>/dev/null || true
+                cfg="$d/internal/config/config.go"
+                if [ -f "$cfg" ] && grep -q 'SecretsWaitTimeout   = 2 \* time\.Minute' "$cfg"; then
+                  sed -i 's/SecretsWaitTimeout   = 2 \* time\.Minute/SecretsWaitTimeout   = 15 * time.Minute/' "$cfg"
+                  echo "Patched SecretsWaitTimeout to 15m in storage-e2e ($d)"
+                fi
+                RECONNECT_PATCH="${GITHUB_WORKSPACE}/e2e/patches/storage-e2e-reconnect-after-add-nodes.patch"
+                if [ -f "$RECONNECT_PATCH" ] && [ -f "$d/pkg/cluster/cluster.go" ]; then
+                  if ! grep -q 'refresh SSH tunnel after node bootstrap' "$d/pkg/cluster/cluster.go" 2>/dev/null; then
+                    patch -p0 --batch -d "$d" -i "$RECONNECT_PATCH" || { echo "::error::storage-e2e reconnect patch failed (wrong module version?)"; exit 1; }
+                    echo "Applied storage-e2e reconnect-after-add-nodes patch ($d)"
+                  fi
+                fi
+                BOOTSTRAP_FAIL_PATCH="${GITHUB_WORKSPACE}/e2e/patches/storage-e2e-cleanup-vms-on-prepare-bootstrap-fail.patch"
+                if [ -f "$BOOTSTRAP_FAIL_PATCH" ] && [ -f "$d/pkg/cluster/cluster.go" ]; then
+                  if ! grep -q 'cluster-state.json was saved at step 6' "$d/pkg/cluster/cluster.go" 2>/dev/null; then
+                    patch -p0 --batch -d "$d" -i "$BOOTSTRAP_FAIL_PATCH" || { echo "::error::storage-e2e prepare-bootstrap-fail cleanup patch failed (wrong module version?)"; exit 1; }
+                    echo "Applied storage-e2e cleanup-on-prepare-bootstrap-fail patch ($d)"
+                  fi
+                fi
+              fi
+            done
+            shopt -u nullglob
+          fi
           go test -v -count=1 -timeout 60m ./tests/ -run TestSdsNodeConfigurator 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV
