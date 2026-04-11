@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,11 +52,16 @@ import (
 const (
 	e2eDefaultNamespace      = "e2e-test-cluster"
 	e2eDefaultVMSSHUser      = "cloud"
-	e2eClusterCleanupTimeout = 10 * time.Minute
-	e2eLVMVGPrefix           = "e2e-lvg-"
+	e2eClusterCleanupTimeout     = 10 * time.Minute
+	e2eUseExistingClusterTimeout = 90 * time.Minute // storage-e2e ClusterCreationTimeout (connect + lock + health)
+	e2eLVMVGPrefix               = "e2e-lvg-"
 
 	e2eVirtualDiskAttachMaxRetries   = 3
 	e2eVirtualDiskAttachRetryInterval = 1 * time.Minute
+
+	// Direct SSH to nodes for lsblk can hit transient "handshake failed: EOF" (sshd/network) after heavy I/O.
+	e2eLsblkSSHMaxRetries   = 6
+	e2eLsblkSSHRetryInterval = 15 * time.Second
 )
 
 func e2eConfigNamespace() string {
@@ -107,6 +114,23 @@ func attachVirtualDiskWithRetry(ctx context.Context, baseKubeconfig *rest.Config
 		}
 		lastErr = err
 		if attempt < maxRetries {
+			time.Sleep(retryInterval)
+		}
+	}
+	return nil, lastErr
+}
+
+// runLsblkViaDirectSSHWithRetry wraps runLsblkViaDirectSSH for transient SSH errors (EOF during handshake, reset).
+func runLsblkViaDirectSSHWithRetry(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser string, maxRetries int, retryInterval time.Duration) (map[string]lsblkLine, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		lines, err := runLsblkViaDirectSSH(ctx, testKubeconfig, nodeName, sshUser)
+		if err == nil {
+			return lines, nil
+		}
+		lastErr = err
+		if attempt < maxRetries {
+			GinkgoWriter.Printf("      lsblk SSH to %s attempt %d/%d failed: %v; retry in %v\n", nodeName, attempt, maxRetries, err, retryInterval)
 			time.Sleep(retryInterval)
 		}
 	}
@@ -231,6 +255,11 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 			if e2eConfigSSHHost() != "" && e2eConfigSSHUser() != "" {
 				GinkgoWriter.Printf("      Base cluster SSH: %s@%s\n", e2eConfigSSHUser(), e2eConfigSSHHost())
 			}
+			// storage-e2e UseExistingCluster: jump → SSH_JUMP_USER@SSH_JUMP_HOST, then SSH_USER@SSH_HOST (not SSH_VM_USER).
+			GinkgoWriter.Printf("      SSH_VM_USER (worker VM / direct node SSH): %s\n", e2eConfigVMSSHUser())
+			if e2eConfigSSHJumpHost() != "" {
+				GinkgoWriter.Printf("      (with jump) bastion: SSH_JUMP_USER@SSH_JUMP_HOST (default SSH_USER if SSH_JUMP_USER unset); target nodes: SSH_USER@SSH_HOST\n")
+			}
 
 			// SSH_JUMP_* - no masking (for jump host / bastion)
 			if e2eConfigSSHJumpHost() != "" {
@@ -256,6 +285,9 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 			// KUBE_CONFIG_PATH - set from path or by CI from E2E_CLUSTER_KUBECONFIG (content written to file)
 			if e2eConfigKubeConfigPath() != "" {
 				GinkgoWriter.Printf("      KUBE_CONFIG_PATH: %s\n", e2eConfigKubeConfigPath())
+			}
+			if v := os.Getenv("E2E_NO_CLUSTER_LOCK_RETRY"); v != "" {
+				GinkgoWriter.Printf("      E2E_NO_CLUSTER_LOCK_RETRY: %s (disable auto-delete+retry on stale lock)\n", v)
 			}
 			// E2E_* for BlockDevice discovery (optional)
 			if v := os.Getenv("E2E_NODE_NAME"); v != "" {
@@ -292,12 +324,28 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 	})
 
 	// ---=== TEST CLUSTER IS CREATED AND READY HERE ===--- //
-	// CreateOrConnectToTestCluster respects TEST_CLUSTER_CREATE_MODE:
-	// - alwaysUseExisting: connect to existing cluster (no virtualization check, no VM creation)
-	// - alwaysCreateNew: create new cluster via VMs (full flow including virtualization check)
-	// - commander: use Deckhouse Commander
+	// For alwaysCreateNew we call CreateTestCluster + WaitForTestClusterReady explicitly so on failure we delete
+	// the test namespace on the base cluster (VMs) before the spec ends. Other modes use storage-e2e as-is.
 
 	It("should create test cluster", func() {
+		if e2eConfigTestClusterCreateMode() == "alwaysCreateNew" {
+			testClusterResources = createE2EAlwaysNewClusterWithSyncCleanupOnFailure()
+			return
+		}
+		if e2eConfigTestClusterCreateMode() == "alwaysUseExisting" {
+			By("Connecting to existing cluster", func() {
+				GinkgoWriter.Printf("    ▶️ Connecting to existing cluster (mode: alwaysUseExisting)\n")
+				var err error
+				testClusterResources, err = e2eConnectUseExistingClusterOnceOrRetryAfterLockDelete()
+				if err != nil {
+					GinkgoWriter.Printf("    ❌ Failed to connect to existing cluster: %v\n", err)
+					e2ePrintStaleClusterLockHint(err)
+				}
+				Expect(err).NotTo(HaveOccurred(), "Should connect to existing cluster successfully")
+				GinkgoWriter.Printf("    ✅ Connected to existing cluster successfully (cluster lock acquired)\n")
+			})
+			return
+		}
 		testClusterResources = cluster.CreateOrConnectToTestCluster()
 	}) // should create test cluster
 
@@ -619,7 +667,7 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 			}
 			sshUser := e2eConfigVMSSHUser()
 			for nodeName := range nodesToLsblk {
-				lines, err := runLsblkViaDirectSSH(e2eCtx, testClusterResources.Kubeconfig, nodeName, sshUser)
+				lines, err := runLsblkViaDirectSSHWithRetry(e2eCtx, testClusterResources.Kubeconfig, nodeName, sshUser, e2eLsblkSSHMaxRetries, e2eLsblkSSHRetryInterval)
 				Expect(err).NotTo(HaveOccurred(), "lsblk on node %s must succeed (SSH to node for discovery verification)", nodeName)
 				lsblkByNode[nodeName] = lines
 			}
@@ -758,7 +806,9 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 
 			vgName := "e2e-vg"
 			thinPoolName := "e2e-thin-pool"
-			thinPoolSize := "50%"
+			// Not 50%: half of a 2Gi disk rounds to 1Gi in spec while LVM may allocate slightly more
+			// bytes (alignment), and VGConfigurationApplied then fails ValidationFailed (requested < actual).
+			thinPoolSize := "60%"
 			thinPoolAllocationLimit := "100%"
 
 			lvgName := "e2e-lvg-" + strings.ReplaceAll(strings.ReplaceAll(nodeName, ".", "-"), "_", "-")
@@ -1180,4 +1230,20 @@ func cleanupE2ELVMVolumeGroupsSdsNodeConfigurator(ctx context.Context, cl client
 		time.Sleep(5 * time.Second)
 	}
 	GinkgoWriter.Printf("Warning: some e2e LVMVolumeGroups may still exist after cleanup\n")
+}
+
+// e2eClusterStateJSONPath returns the path to storage-e2e cluster-state.json for this test file
+// (same layout as getClusterStatePath in github.com/deckhouse/storage-e2e/pkg/cluster).
+// Must be called from this file so runtime.Caller resolves to sds_node_configurator_test.go.
+func e2eClusterStateJSONPath() (string, error) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", fmt.Errorf("runtime.Caller failed")
+	}
+	repoRoot, err := filepath.Abs(filepath.Join(filepath.Dir(file), "..", ".."))
+	if err != nil {
+		return "", err
+	}
+	base := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+	return filepath.Join(repoRoot, "temp", base, "cluster-state.json"), nil
 }
