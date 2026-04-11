@@ -64,3 +64,4 @@ test*.log
 e2e/config/
 e2e/temp/
 e2e/.gomodcache/
+e2e/.gocache/
