@@ -44,7 +44,29 @@ jobs:
     continue-on-error: true
     name: Lint
     steps:
+      # Previous runs may leave e2e/.gomodcache (read-only module trees); actions/checkout@v4 fails to wipe workspace (EACCES).
+      - name: Prepare workspace for checkout (self-hosted)
+        run: |
+          set -euo pipefail
+          WS="${GITHUB_WORKSPACE}"
+          prune_dir() {
+            local p="$1"
+            [ -e "$p" ] || return 0
+            chmod -R u+w "$p" 2>/dev/null || true
+            if rm -rf "$p" 2>/dev/null; then
+              return 0
+            fi
+            if command -v sudo >/dev/null 2>&1; then
+              sudo chmod -R u+w "$p" 2>/dev/null || true
+              sudo rm -rf "$p" 2>/dev/null || true
+            fi
+          }
+          for d in e2e/.gomodcache e2e/.gocache e2e/temp; do
+            prune_dir "${WS}/${d}"
+          done
       - uses: actions/checkout@v4
+        with:
+          clean: false
       - name: Copy openapi/values_ce.yaml to openapi/values.yaml
         run: |
           if [ -f openapi/values_ce.yaml ]; then
@@ -123,7 +145,28 @@ jobs:
           echo MODULES_MODULE_TAG=$MODULES_MODULE_TAG
           echo MODULE_EDITION=$MODULE_EDITION
 
+      - name: Prepare workspace for checkout (self-hosted)
+        run: |
+          set -euo pipefail
+          WS="${GITHUB_WORKSPACE}"
+          prune_dir() {
+            local p="$1"
+            [ -e "$p" ] || return 0
+            chmod -R u+w "$p" 2>/dev/null || true
+            if rm -rf "$p" 2>/dev/null; then
+              return 0
+            fi
+            if command -v sudo >/dev/null 2>&1; then
+              sudo chmod -R u+w "$p" 2>/dev/null || true
+              sudo rm -rf "$p" 2>/dev/null || true
+            fi
+          }
+          for d in e2e/.gomodcache e2e/.gocache e2e/temp; do
+            prune_dir "${WS}/${d}"
+          done
       - uses: actions/checkout@v4
+        with:
+          clean: false
 
       - name: Download base images and auth prepare
         run: |
@@ -174,8 +217,29 @@ jobs:
     needs:
       - dev_setup_build
     steps:
+      - name: Prepare workspace for checkout (self-hosted)
+        run: |
+          set -euo pipefail
+          WS="${GITHUB_WORKSPACE}"
+          prune_dir() {
+            local p="$1"
+            [ -e "$p" ] || return 0
+            chmod -R u+w "$p" 2>/dev/null || true
+            if rm -rf "$p" 2>/dev/null; then
+              return 0
+            fi
+            if command -v sudo >/dev/null 2>&1; then
+              sudo chmod -R u+w "$p" 2>/dev/null || true
+              sudo rm -rf "$p" 2>/dev/null || true
+            fi
+          }
+          for d in e2e/.gomodcache e2e/.gocache e2e/temp; do
+            prune_dir "${WS}/${d}"
+          done
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          clean: false
 
       # - name: Install kubectl
       #   uses: azure/setup-kubectl@v3
@@ -245,10 +309,9 @@ jobs:
       - name: Run E2E tests (storage-e2e, TestE2E — scheduler then sds-node-configurator)
         id: run_tests
         env:
-          # Self-hosted runners often use a shared read-only module dir under /opt/.../go/pkg/mod.
-          # storage-e2e writes temp/bootstrap state under the storage-e2e module path — use a writable cache.
-          GOMODCACHE: ${{ github.workspace }}/e2e/.gomodcache
-          GOCACHE: ${{ github.workspace }}/e2e/.gocache
+          # Writable module cache; keep outside the repo checkout so actions/checkout (workspace wipe) never hits EACCES on extracted modules.
+          GOMODCACHE: ${{ runner.temp }}/e2e-gomodcache
+          GOCACHE: ${{ runner.temp }}/e2e-gocache
           TEST_CLUSTER_CREATE_MODE: ${{ secrets.E2E_TEST_CLUSTER_CREATE_MODE }}
           TEST_CLUSTER_NAMESPACE: e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}
           TEST_CLUSTER_STORAGE_CLASS: ${{ secrets.E2E_TEST_CLUSTER_STORAGE_CLASS }}
@@ -489,4 +552,12 @@ jobs:
         if: always()
         run: |
           rm -f "$E2E_SSH_KEY_PATH" "$E2E_SSH_PUB_PATH" "$E2E_KUBECONFIG_PATH" 2>/dev/null || true
+          WS="${GITHUB_WORKSPACE}"
+          for d in e2e/.gomodcache e2e/.gocache e2e/temp; do
+            p="${WS}/${d}"
+            if [ -e "$p" ]; then
+              chmod -R u+w "$p" 2>/dev/null || true
+              rm -rf "$p" 2>/dev/null || true
+            fi
+          done
           echo "Temp files cleaned"
