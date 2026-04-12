@@ -56,6 +56,15 @@ const (
 
 	// Pre-wait before cluster.CreateTestCluster (after SSH+tunnel): storage-e2e step 3 uses a short Get with no Reconciling retry.
 	e2eVirtualizationModuleWaitDefault = 25 * time.Minute
+
+	// Direct SSH to nodes for lsblk can hit transient "handshake failed: EOF" (sshd/network) after heavy I/O.
+	e2eLsblkSSHMaxRetries    = 6
+	e2eLsblkSSHRetryInterval = 15 * time.Second
+
+	// alwaysCreateNew / alwaysUseExisting timeouts (sds suite cluster helpers).
+	e2eClusterCreationTimeout      = 90 * time.Minute
+	e2eModuleDeployTimeout         = 15 * time.Minute
+	e2eUseExistingClusterTimeout   = 90 * time.Minute // storage-e2e ClusterCreationTimeout (connect + lock + health)
 )
 
 const testClusterModeCreateNew = "alwaysCreateNew"
@@ -359,6 +368,22 @@ func e2eConfigVMSSHUser() string {
 		return v
 	}
 	return e2eDefaultVMSSHUser
+}
+
+// e2ePrintStaleClusterLockHint logs guidance when alwaysUseExisting fails on the cluster lock.
+func e2ePrintStaleClusterLockHint(err error) {
+	if err == nil {
+		return
+	}
+	GinkgoWriter.Printf("    Hint: if the lock is stale, run once with TEST_CLUSTER_FORCE_LOCK_RELEASE=true or delete ConfigMap %s/%s. (%v)\n",
+		cluster.ClusterLockNamespace, cluster.ClusterLockConfigMapName, err)
+}
+
+// e2eConnectUseExistingClusterOnceOrRetryAfterLockDelete connects via storage-e2e UseExistingCluster (SSH, lock, health checks).
+func e2eConnectUseExistingClusterOnceOrRetryAfterLockDelete() (*cluster.TestClusterResources, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), e2eUseExistingClusterTimeout)
+	defer cancel()
+	return cluster.UseExistingCluster(ctx)
 }
 
 // attachVirtualDiskWithRetry calls AttachVirtualDiskToVM up to maxRetries times with retryInterval between attempts.

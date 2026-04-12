@@ -306,6 +306,29 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 		e2eCtx = context.Background()
 	})
 
+	AfterAll(func() {
+		// Cleanup test cluster resources
+		// Note: Bootstrap node (setup VM) is always removed.
+		// Test cluster VMs (masters and workers) are only removed if TEST_CLUSTER_CLEANUP='true' or 'True'
+		if testClusterResources != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
+			defer cancel()
+
+			cleanupEnabled := e2eConfigTestClusterCleanup() == "true" || e2eConfigTestClusterCleanup() == "True"
+			if cleanupEnabled {
+				GinkgoWriter.Printf("    ▶️ Cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is enabled - all VMs will be removed)...\n")
+			} else {
+				GinkgoWriter.Printf("    ▶️ Cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is not enabled - only bootstrap node will be removed)...\n")
+			}
+			err := cluster.CleanupTestCluster(ctx, testClusterResources)
+			if err != nil {
+				GinkgoWriter.Printf("    ⚠️  Warning: Cleanup errors occurred: %v\n", err)
+			} else {
+				GinkgoWriter.Printf("    ✅ Test cluster resources cleaned up successfully\n")
+			}
+		}
+	})
+
 	// ---=== TEST CLUSTER IS CREATED AND READY HERE ===--- //
 	// alwaysCreateNew: CreateTestCluster + WaitForTestClusterReady; on failure we clean base cluster (see createE2EAlwaysNewClusterWithCleanupOnFailure).
 
@@ -328,8 +351,23 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 			})
 			return
 		}
+		if e2eConfigTestClusterCreateMode() == "alwaysUseExisting" {
+			By("Connecting to existing cluster", func() {
+				GinkgoWriter.Printf("    ▶️ Connecting to existing cluster (mode: alwaysUseExisting)\n")
+				var err error
+				testClusterResources, err = e2eConnectUseExistingClusterOnceOrRetryAfterLockDelete()
+				if err != nil {
+					GinkgoWriter.Printf("    ❌ Failed to connect to existing cluster: %v\n", err)
+					e2ePrintStaleClusterLockHint(err)
+				}
+				Expect(err).NotTo(HaveOccurred(), "Should connect to existing cluster successfully")
+				GinkgoWriter.Printf("    ✅ Connected to existing cluster successfully (cluster lock acquired)\n")
+			})
+			return
+		}
+		Expect(waitForVirtualizationModuleReadyIfNeeded(context.Background())).To(Succeed(),
+			"virtualization module should become Ready on base cluster (retry while Reconciling)")
 		testClusterResources = cluster.CreateOrConnectToTestCluster()
-		e2eSetSharedTestClusterResources(testClusterResources)
 	}) // should create test cluster
 
 	////////////////////////////////////
