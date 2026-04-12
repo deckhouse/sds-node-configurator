@@ -370,22 +370,6 @@ func e2eConfigVMSSHUser() string {
 	return e2eDefaultVMSSHUser
 }
 
-// e2ePrintStaleClusterLockHint logs guidance when alwaysUseExisting fails on the cluster lock.
-func e2ePrintStaleClusterLockHint(err error) {
-	if err == nil {
-		return
-	}
-	GinkgoWriter.Printf("    Hint: if the lock is stale, run once with TEST_CLUSTER_FORCE_LOCK_RELEASE=true or delete ConfigMap %s/%s. (%v)\n",
-		cluster.ClusterLockNamespace, cluster.ClusterLockConfigMapName, err)
-}
-
-// e2eConnectUseExistingClusterOnceOrRetryAfterLockDelete connects via storage-e2e UseExistingCluster (SSH, lock, health checks).
-func e2eConnectUseExistingClusterOnceOrRetryAfterLockDelete() (*cluster.TestClusterResources, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), e2eUseExistingClusterTimeout)
-	defer cancel()
-	return cluster.UseExistingCluster(ctx)
-}
-
 // attachVirtualDiskWithRetry calls AttachVirtualDiskToVM up to maxRetries times with retryInterval between attempts.
 func attachVirtualDiskWithRetry(ctx context.Context, baseKubeconfig *rest.Config, config kubernetes.VirtualDiskAttachmentConfig, maxRetries int, retryInterval time.Duration) (*kubernetes.VirtualDiskAttachmentResult, error) {
 	var lastErr error
