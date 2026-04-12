@@ -1,10 +1,11 @@
 module github.com/deckhouse/sds-node-configurator/e2e
 
-go 1.24.9
+go 1.25.7
 
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260114125558-7fd7152586ff
 	github.com/deckhouse/storage-e2e v0.0.0-20260303112441-16b274872c5f
+	github.com/deckhouse/virtualization/api v1.0.0
 	github.com/onsi/ginkgo/v2 v2.23.3
 	github.com/onsi/gomega v1.37.0
 	k8s.io/api v0.34.1
@@ -17,7 +18,6 @@ require (
 	github.com/Masterminds/semver/v3 v3.3.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/deckhouse/deckhouse v1.74.0 // indirect
-	github.com/deckhouse/virtualization/api v1.0.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect

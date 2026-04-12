@@ -21,9 +21,13 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,10 +36,14 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	virtv1alpha2 "github.com/deckhouse/virtualization/api/core/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	k8sclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,12 +58,26 @@ import (
 const (
 	e2eDefaultNamespace      = "e2e-test-cluster"
 	e2eDefaultVMSSHUser      = "cloud"
-	e2eClusterCleanupTimeout = 10 * time.Minute
-	e2eLVMVGPrefix           = "e2e-lvg-"
+	e2eClusterCleanupTimeout     = 10 * time.Minute
+	e2eUseExistingClusterTimeout = 90 * time.Minute // storage-e2e ClusterCreationTimeout (connect + lock + health)
+	e2eLVMVGPrefix               = "e2e-lvg-"
 
 	e2eVirtualDiskAttachMaxRetries   = 3
 	e2eVirtualDiskAttachRetryInterval = 1 * time.Minute
+
+	// Direct SSH to nodes for lsblk can hit transient "handshake failed: EOF" (sshd/network) after heavy I/O.
+	e2eLsblkSSHMaxRetries   = 6
+	e2eLsblkSSHRetryInterval = 15 * time.Second
+
+	// alwaysCreateNew: aligned with github.com/deckhouse/storage-e2e/internal/config
+	e2eClusterCreationTimeout = 90 * time.Minute
+	e2eModuleDeployTimeout    = 15 * time.Minute
 )
+
+// clusterResumeState mirrors storage-e2e cluster-state.json (namespace after VMs are created).
+type clusterResumeState struct {
+	Namespace string `json:"namespace"`
+}
 
 func e2eConfigNamespace() string {
 	if v := os.Getenv("TEST_CLUSTER_NAMESPACE"); v != "" {
@@ -107,6 +129,23 @@ func attachVirtualDiskWithRetry(ctx context.Context, baseKubeconfig *rest.Config
 		}
 		lastErr = err
 		if attempt < maxRetries {
+			time.Sleep(retryInterval)
+		}
+	}
+	return nil, lastErr
+}
+
+// runLsblkViaDirectSSHWithRetry wraps runLsblkViaDirectSSH for transient SSH errors (EOF during handshake, reset).
+func runLsblkViaDirectSSHWithRetry(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser string, maxRetries int, retryInterval time.Duration) (map[string]lsblkLine, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		lines, err := runLsblkViaDirectSSH(ctx, testKubeconfig, nodeName, sshUser)
+		if err == nil {
+			return lines, nil
+		}
+		lastErr = err
+		if attempt < maxRetries {
+			GinkgoWriter.Printf("      lsblk SSH to %s attempt %d/%d failed: %v; retry in %v\n", nodeName, attempt, maxRetries, err, retryInterval)
 			time.Sleep(retryInterval)
 		}
 	}
@@ -231,6 +270,11 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 			if e2eConfigSSHHost() != "" && e2eConfigSSHUser() != "" {
 				GinkgoWriter.Printf("      Base cluster SSH: %s@%s\n", e2eConfigSSHUser(), e2eConfigSSHHost())
 			}
+			// storage-e2e UseExistingCluster: jump → SSH_JUMP_USER@SSH_JUMP_HOST, then SSH_USER@SSH_HOST (not SSH_VM_USER).
+			GinkgoWriter.Printf("      SSH_VM_USER (worker VM / direct node SSH): %s\n", e2eConfigVMSSHUser())
+			if e2eConfigSSHJumpHost() != "" {
+				GinkgoWriter.Printf("      (with jump) bastion: SSH_JUMP_USER@SSH_JUMP_HOST (default SSH_USER if SSH_JUMP_USER unset); target nodes: SSH_USER@SSH_HOST\n")
+			}
 
 			// SSH_JUMP_* - no masking (for jump host / bastion)
 			if e2eConfigSSHJumpHost() != "" {
@@ -256,6 +300,9 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 			// KUBE_CONFIG_PATH - set from path or by CI from E2E_CLUSTER_KUBECONFIG (content written to file)
 			if e2eConfigKubeConfigPath() != "" {
 				GinkgoWriter.Printf("      KUBE_CONFIG_PATH: %s\n", e2eConfigKubeConfigPath())
+			}
+			if v := os.Getenv("E2E_NO_CLUSTER_LOCK_RETRY"); v != "" {
+				GinkgoWriter.Printf("      E2E_NO_CLUSTER_LOCK_RETRY: %s (disable auto-delete+retry on stale lock)\n", v)
 			}
 			// E2E_* for BlockDevice discovery (optional)
 			if v := os.Getenv("E2E_NODE_NAME"); v != "" {
@@ -292,12 +339,27 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 	})
 
 	// ---=== TEST CLUSTER IS CREATED AND READY HERE ===--- //
-	// CreateOrConnectToTestCluster respects TEST_CLUSTER_CREATE_MODE:
-	// - alwaysUseExisting: connect to existing cluster (no virtualization check, no VM creation)
-	// - alwaysCreateNew: create new cluster via VMs (full flow including virtualization check)
-	// - commander: use Deckhouse Commander
+	// alwaysCreateNew: CreateTestCluster + WaitForTestClusterReady; on failure we clean base cluster (see createE2EAlwaysNewClusterWithCleanupOnFailure).
 
 	It("should create test cluster", func() {
+		if e2eConfigTestClusterCreateMode() == "alwaysCreateNew" {
+			testClusterResources = createE2EAlwaysNewClusterWithCleanupOnFailure()
+			return
+		}
+		if e2eConfigTestClusterCreateMode() == "alwaysUseExisting" {
+			By("Connecting to existing cluster", func() {
+				GinkgoWriter.Printf("    ▶️ Connecting to existing cluster (mode: alwaysUseExisting)\n")
+				var err error
+				testClusterResources, err = e2eConnectUseExistingClusterOnceOrRetryAfterLockDelete()
+				if err != nil {
+					GinkgoWriter.Printf("    ❌ Failed to connect to existing cluster: %v\n", err)
+					e2ePrintStaleClusterLockHint(err)
+				}
+				Expect(err).NotTo(HaveOccurred(), "Should connect to existing cluster successfully")
+				GinkgoWriter.Printf("    ✅ Connected to existing cluster successfully (cluster lock acquired)\n")
+			})
+			return
+		}
 		testClusterResources = cluster.CreateOrConnectToTestCluster()
 	}) // should create test cluster
 
@@ -619,7 +681,7 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 			}
 			sshUser := e2eConfigVMSSHUser()
 			for nodeName := range nodesToLsblk {
-				lines, err := runLsblkViaDirectSSH(e2eCtx, testClusterResources.Kubeconfig, nodeName, sshUser)
+				lines, err := runLsblkViaDirectSSHWithRetry(e2eCtx, testClusterResources.Kubeconfig, nodeName, sshUser, e2eLsblkSSHMaxRetries, e2eLsblkSSHRetryInterval)
 				Expect(err).NotTo(HaveOccurred(), "lsblk on node %s must succeed (SSH to node for discovery verification)", nodeName)
 				lsblkByNode[nodeName] = lines
 			}
@@ -758,7 +820,9 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 
 			vgName := "e2e-vg"
 			thinPoolName := "e2e-thin-pool"
-			thinPoolSize := "50%"
+			// Not 50%: half of a 2Gi disk rounds to 1Gi in spec while LVM may allocate slightly more
+			// bytes (alignment), and VGConfigurationApplied then fails ValidationFailed (requested < actual).
+			thinPoolSize := "60%"
 			thinPoolAllocationLimit := "100%"
 
 			lvgName := "e2e-lvg-" + strings.ReplaceAll(strings.ReplaceAll(nodeName, ".", "-"), "_", "-")
@@ -1180,4 +1244,237 @@ func cleanupE2ELVMVolumeGroupsSdsNodeConfigurator(ctx context.Context, cl client
 		time.Sleep(5 * time.Second)
 	}
 	GinkgoWriter.Printf("Warning: some e2e LVMVolumeGroups may still exist after cleanup\n")
+}
+
+// e2eClusterStateJSONPath returns the path to storage-e2e cluster-state.json for this test file
+// (same layout as getClusterStatePath in github.com/deckhouse/storage-e2e/pkg/cluster).
+// Must be called from this file so runtime.Caller resolves to sds_node_configurator_test.go.
+func e2eClusterStateJSONPath() (string, error) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", fmt.Errorf("runtime.Caller failed")
+	}
+	repoRoot, err := filepath.Abs(filepath.Join(filepath.Dir(file), "..", ".."))
+	if err != nil {
+		return "", err
+	}
+	base := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+	return filepath.Join(repoRoot, "temp", base, "cluster-state.json"), nil
+}
+
+func e2eNewVirtClient(cfg *rest.Config) (client.Client, error) {
+	sch := k8sruntime.NewScheme()
+	if err := virtv1alpha2.SchemeBuilder.AddToScheme(sch); err != nil {
+		return nil, err
+	}
+	return client.New(cfg, client.Options{Scheme: sch})
+}
+
+// e2eCleanupBaseClusterNamespaceWorkload deletes namespaced virtualization objects on the base cluster in order:
+// VirtualMachineBlockDeviceAttachment → VirtualDisk → VirtualMachine, then the namespace (Deckhouse DVP).
+func e2eCleanupBaseClusterNamespaceWorkload(ctx context.Context, cfg *rest.Config, ns string) {
+	cl, err := e2eNewVirtClient(cfg)
+	if err != nil {
+		GinkgoWriter.Printf("    ⚠️  cleanup: virt client: %v (will still try namespace delete)\n", err)
+		e2eDeleteNamespaceBestEffort(ctx, cfg, ns)
+		return
+	}
+
+	var vmbdaList virtv1alpha2.VirtualMachineBlockDeviceAttachmentList
+	if err := cl.List(ctx, &vmbdaList, client.InNamespace(ns)); err != nil {
+		GinkgoWriter.Printf("    ⚠️  cleanup: list VMBDA: %v\n", err)
+	} else {
+		for i := range vmbdaList.Items {
+			if err := cl.Delete(ctx, &vmbdaList.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+				GinkgoWriter.Printf("    ⚠️  cleanup: delete VMBDA %s: %v\n", vmbdaList.Items[i].Name, err)
+			}
+		}
+	}
+
+	var vdList virtv1alpha2.VirtualDiskList
+	if err := cl.List(ctx, &vdList, client.InNamespace(ns)); err != nil {
+		GinkgoWriter.Printf("    ⚠️  cleanup: list VirtualDisk: %v\n", err)
+	} else {
+		for i := range vdList.Items {
+			if err := cl.Delete(ctx, &vdList.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+				GinkgoWriter.Printf("    ⚠️  cleanup: delete VirtualDisk %s: %v\n", vdList.Items[i].Name, err)
+			}
+		}
+	}
+
+	var vmList virtv1alpha2.VirtualMachineList
+	if err := cl.List(ctx, &vmList, client.InNamespace(ns)); err != nil {
+		GinkgoWriter.Printf("    ⚠️  cleanup: list VirtualMachine: %v\n", err)
+	} else {
+		for i := range vmList.Items {
+			if err := cl.Delete(ctx, &vmList.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+				GinkgoWriter.Printf("    ⚠️  cleanup: delete VirtualMachine %s: %v\n", vmList.Items[i].Name, err)
+			}
+		}
+	}
+
+	e2eDeleteNamespaceBestEffort(ctx, cfg, ns)
+}
+
+func e2eDeleteNamespaceBestEffort(ctx context.Context, cfg *rest.Config, ns string) {
+	cs, err := k8sclient.NewForConfig(cfg)
+	if err != nil {
+		GinkgoWriter.Printf("    ⚠️  cleanup: kubernetes client: %v\n", err)
+		return
+	}
+	delCtx, cancel := context.WithTimeout(ctx, e2eClusterCleanupTimeout)
+	defer cancel()
+	err = cs.CoreV1().Namespaces().Delete(delCtx, ns, metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		GinkgoWriter.Printf("    ℹ️  cleanup: namespace %q already gone\n", ns)
+		return
+	}
+	if err != nil {
+		GinkgoWriter.Printf("    ⚠️  cleanup: delete namespace %q: %v\n", ns, err)
+		return
+	}
+	GinkgoWriter.Printf("    ✅ cleanup: namespace %q deletion submitted\n", ns)
+}
+
+func kubeconfigDirForNamespaceDelete(clusterStatePath string, _ error) (dir string, tmpToRemove string, err error) {
+	if clusterStatePath != "" {
+		d := filepath.Dir(clusterStatePath)
+		if mkErr := os.MkdirAll(d, 0755); mkErr != nil {
+			return "", "", mkErr
+		}
+		return d, "", nil
+	}
+	d, mkErr := os.MkdirTemp("", "e2e-ns-del-kube-*")
+	if mkErr != nil {
+		return "", "", mkErr
+	}
+	return d, d, nil
+}
+
+// e2eSyncCleanupBaseClusterNamespace connects to the base cluster, removes VMBDA/VD/VM in namespace, then deletes the namespace.
+// Used when alwaysCreateNew fails mid-run so resources are not left until AfterAll.
+func e2eSyncCleanupBaseClusterNamespace(ctx context.Context, clusterStatePath string, statePathErr error) {
+	kubeconfigDir, cleanupDir, err := kubeconfigDirForNamespaceDelete(clusterStatePath, statePathErr)
+	if err != nil {
+		GinkgoWriter.Printf("    ⚠️  cleanup: %v\n", err)
+		return
+	}
+	if cleanupDir != "" {
+		defer func() { _ = os.RemoveAll(cleanupDir) }()
+	}
+
+	var ns string
+	if clusterStatePath != "" {
+		data, readErr := os.ReadFile(clusterStatePath)
+		if readErr == nil {
+			var st clusterResumeState
+			if json.Unmarshal(data, &st) == nil && st.Namespace != "" {
+				ns = st.Namespace
+			}
+		} else if !errors.Is(readErr, os.ErrNotExist) {
+			GinkgoWriter.Printf("    ⚠️  cleanup: read %s: %v\n", clusterStatePath, readErr)
+		}
+	}
+	if ns == "" {
+		ns = e2eConfigNamespace()
+		GinkgoWriter.Printf("    ▶️  cleanup: namespace from TEST_CLUSTER_NAMESPACE=%q\n", ns)
+	} else {
+		GinkgoWriter.Printf("    ▶️  cleanup: namespace from cluster-state.json: %q\n", ns)
+	}
+
+	sshHost := e2eConfigSSHHost()
+	sshUser := e2eConfigSSHUser()
+	if sshHost == "" || sshUser == "" {
+		GinkgoWriter.Printf("    ⚠️  cleanup: SSH_HOST or SSH_USER not set, skip base cluster cleanup\n")
+		return
+	}
+
+	sshKeyPath, err := cluster.GetSSHPrivateKeyPath()
+	if err != nil {
+		GinkgoWriter.Printf("    ⚠️  cleanup: SSH key: %v\n", err)
+		return
+	}
+
+	useJump := e2eConfigSSHJumpHost() != ""
+	var opts cluster.ConnectClusterOptions
+	if !useJump {
+		opts = cluster.ConnectClusterOptions{
+			SSHUser: sshUser, SSHHost: sshHost, SSHKeyPath: sshKeyPath,
+			UseJumpHost:         false,
+			KubeconfigOutputDir: kubeconfigDir,
+		}
+	} else {
+		jumpUser := e2eConfigSSHJumpUser()
+		if jumpUser == "" {
+			jumpUser = sshUser
+		}
+		jumpKey := e2eConfigSSHJumpKeyPath()
+		if jumpKey == "" {
+			jumpKey = sshKeyPath
+		}
+		opts = cluster.ConnectClusterOptions{
+			SSHUser: jumpUser, SSHHost: e2eConfigSSHJumpHost(), SSHKeyPath: jumpKey,
+			UseJumpHost: true, TargetUser: sshUser, TargetHost: sshHost, TargetKeyPath: sshKeyPath,
+			KubeconfigOutputDir: kubeconfigDir,
+		}
+	}
+
+	baseRes, err := cluster.ConnectToCluster(ctx, opts)
+	if err != nil {
+		GinkgoWriter.Printf("    ⚠️  cleanup: connect to base cluster: %v\n", err)
+		return
+	}
+	defer func() {
+		if baseRes.TunnelInfo != nil && baseRes.TunnelInfo.StopFunc != nil {
+			_ = baseRes.TunnelInfo.StopFunc()
+		}
+		if baseRes.SSHClient != nil {
+			_ = baseRes.SSHClient.Close()
+		}
+	}()
+
+	GinkgoWriter.Printf("    ▶️  cleanup: ordered teardown VMBDA → VirtualDisk → VirtualMachine → Namespace %q\n", ns)
+	e2eCleanupBaseClusterNamespaceWorkload(ctx, baseRes.Kubeconfig, ns)
+
+	if clusterStatePath != "" {
+		_ = os.Remove(clusterStatePath)
+	}
+}
+
+// createE2EAlwaysNewClusterWithCleanupOnFailure runs CreateTestCluster + WaitForTestClusterReady for alwaysCreateNew.
+// On failure, cleans the base cluster namespace (VD/VM/ns) inside the same spec before Gomega fails.
+func createE2EAlwaysNewClusterWithCleanupOnFailure() *cluster.TestClusterResources {
+	statePath, statePathErr := e2eClusterStateJSONPath()
+
+	yamlName := os.Getenv("YAML_CONFIG_FILENAME")
+	if yamlName == "" {
+		yamlName = "cluster_config.yml"
+	}
+
+	createCtx, cancel := context.WithTimeout(context.Background(), e2eClusterCreationTimeout)
+	defer cancel()
+
+	res, err := cluster.CreateTestCluster(createCtx, yamlName)
+	if err != nil {
+		GinkgoWriter.Printf("    ▶️  CreateTestCluster failed; cleaning base cluster namespace before spec exits...\n")
+		e2eSyncCleanupBaseClusterNamespace(context.Background(), statePath, statePathErr)
+		Expect(err).NotTo(HaveOccurred(), "Test cluster should be created successfully")
+	}
+
+	waitCtx, cancel2 := context.WithTimeout(context.Background(), e2eModuleDeployTimeout)
+	defer cancel2()
+	err = cluster.WaitForTestClusterReady(waitCtx, res)
+	if err != nil {
+		GinkgoWriter.Printf("    ▶️  WaitForTestClusterReady failed; cleaning base cluster then storage-e2e cleanup...\n")
+		e2eSyncCleanupBaseClusterNamespace(context.Background(), statePath, statePathErr)
+		cctx, ccancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
+		cleanupErr := cluster.CleanupTestCluster(cctx, res)
+		ccancel()
+		if cleanupErr != nil {
+			GinkgoWriter.Printf("    ⚠️  CleanupTestCluster after failed readiness: %v\n", cleanupErr)
+		}
+		Expect(err).NotTo(HaveOccurred(), "Test cluster should become ready")
+	}
+
+	return res
 }

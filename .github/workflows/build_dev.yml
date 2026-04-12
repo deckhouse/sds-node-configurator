@@ -257,9 +257,15 @@ jobs:
           # Do not set KUBE_CONFIG_PATH here — it is taken from GITHUB_ENV (Setup writes the path to the file from E2E_CLUSTER_KUBECONFIG). Otherwise an empty vars value overwrites the fallback and storage-e2e cannot find kubeconfig when "sudo cat admin.conf" on the master fails.
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
         run: |
+          # Project-local caches (self-hosted runners may inherit a read-only global GOMODCACHE).
+          export GOMODCACHE="${GITHUB_WORKSPACE}/e2e/.gomodcache"
+          export GOCACHE="${GITHUB_WORKSPACE}/e2e/.gocache"
+          mkdir -p "${GOMODCACHE}" "${GOCACHE}"
           cd e2e
           go mod tidy
           go mod download
+          # Go extracts modules with read-only dirs; storage-e2e PrepareBootstrapConfig mkdirs temp/ inside the module copy.
+          chmod -R u+w "${GOMODCACHE}" 2>/dev/null || true
           go test -v -count=1 -timeout 60m ./tests/ -run TestSdsNodeConfigurator 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV

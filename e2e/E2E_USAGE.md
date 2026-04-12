@@ -79,7 +79,7 @@ The directory `e2e/config/` is in `.gitignore`. Create there a script that expor
 Set at least:
 
 - `TEST_CLUSTER_CREATE_MODE` — `alwaysUseExisting` or `alwaysCreateNew`.
-- `SSH_HOST`, `SSH_USER` — base cluster (and jump host if needed).
+- `SSH_HOST`, `SSH_USER` — test cluster SSH target and user on those nodes; with jump, also set `SSH_JUMP_HOST` / `SSH_JUMP_USER` (see §4).
 - `SSH_PRIVATE_KEY` (path) — SSH key for cluster/VMs.
 - `KUBE_CONFIG_PATH` (path) — test cluster kubeconfig.
 - `TEST_CLUSTER_STORAGE_CLASS`, `TEST_CLUSTER_NAMESPACE`, `TEST_CLUSTER_CLEANUP`.
@@ -113,12 +113,16 @@ source e2e/config/test_exports_storage_e2e
 cd e2e && make test
 ```
 
+For `alwaysUseExisting`, this suite retries once after clearing a stale lock: first it tries deleting ConfigMap `default/e2e-cluster-lock` via `KUBE_CONFIG_PATH` (works when the API URL is reachable directly). If that fails (common when `server` is `https://127.0.0.1:…` and no tunnel is running yet), it opens the same SSH + port-forward as the test connect and releases the lock. Disable with `E2E_NO_CLUSTER_LOCK_RETRY=true` (e.g. shared cluster).
+
 ### 4. Jump host (test cluster nodes)
 
 If test cluster nodes (e.g. 10.10.10.x) are not reachable directly from your machine, set:
 
 - `SSH_JUMP_HOST` — jump host (often the base cluster master).
 - `SSH_JUMP_USER` — user on the jump host (defaults to `SSH_USER` if unset).
+
+**Bastion user vs cluster node user (storage-e2e):** With a jump host, the framework connects as `SSH_JUMP_USER@SSH_JUMP_HOST`, then as **`SSH_USER@SSH_HOST`** to reach the test cluster (kubeconfig / API path). It does **not** use `SSH_VM_USER` for that second hop. Typical Deckhouse lab: bastion login `you@bastion`, nodes `cloud@10.x.x.x` — set `SSH_JUMP_USER` to your bastion account and `SSH_USER` to the SSH account on cluster nodes (often `cloud`). Keep `SSH_VM_USER` aligned with node SSH (often also `cloud`).
 
 ---
 
@@ -127,8 +131,8 @@ If test cluster nodes (e.g. 10.10.10.x) are not reachable directly from your mac
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `TEST_CLUSTER_CREATE_MODE` | Yes | `alwaysUseExisting` \| `alwaysCreateNew` |
-| `SSH_HOST` | Yes | Base cluster SSH host (and default jump host). |
-| `SSH_USER` | Yes | SSH user. |
+| `SSH_HOST` | Yes | Test cluster SSH target (master/API host or node); with jump, second hop address. |
+| `SSH_USER` | Yes | SSH user **on test cluster nodes** for the `SSH_HOST` hop (with jump: not the bastion user; set `SSH_JUMP_USER` for that). |
 | `SSH_PRIVATE_KEY` | Yes | Path to private SSH key file. |
 | `KUBE_CONFIG_PATH` | Yes | Path to test cluster kubeconfig. |
 | `TEST_CLUSTER_NAMESPACE` | Yes | Namespace used for test cluster / lock. |
@@ -139,7 +143,8 @@ If test cluster nodes (e.g. 10.10.10.x) are not reachable directly from your mac
 | `DKP_LICENSE_KEY` | If create mode | License for cluster creation. |
 | `REGISTRY_DOCKER_CFG` | If create mode | Registry auth (base64). |
 | `LOG_LEVEL` | No | e.g. `debug`, `info`. |
-| `TEST_CLUSTER_FORCE_LOCK_RELEASE` | No | Set to `true` once to clear a stale lock. |
+| `TEST_CLUSTER_FORCE_LOCK_RELEASE` | No | Set to `true` once to clear a stale lock (read at process start by storage-e2e). |
+| `E2E_NO_CLUSTER_LOCK_RETRY` | No | If `true`, do not delete lock ConfigMap + retry (default: retry once when lock denied). |
 
 ---
 
