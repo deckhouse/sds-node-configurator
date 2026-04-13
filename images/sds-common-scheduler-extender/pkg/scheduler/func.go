@@ -197,10 +197,13 @@ func getLVGsOnNode(ctx context.Context, cl client.Client, nodeName string) ([]sn
 // --- LLV space computation ---
 
 // sumLLVSpace sums spec.size for all LLVs on the given storage pool.
-// If onlyCreated is true, only LLVs with status.phase == Created are included.
+// If onlyOnDisk is true, only LLVs whose space is reflected on disk are included:
+// phase == Created OR status.actualSize > 0 (e.g. Failed LLVs that were already
+// provisioned). This prevents double-counting of on-disk LLVs that are not in
+// Created phase (their space is already captured by reportedFree / availableSpace).
 // For thick pools (key.ThinPoolName == ""), only LLVs without a thin spec are counted.
 // For thin pools, only LLVs matching the thin pool name are counted.
-func sumLLVSpace(ctx context.Context, cl client.Client, key cache.StoragePoolKey, onlyCreated bool) (int64, error) {
+func sumLLVSpace(ctx context.Context, cl client.Client, key cache.StoragePoolKey, onlyOnDisk bool) (int64, error) {
 	var llvList snc.LVMLogicalVolumeList
 	if err := cl.List(ctx, &llvList, client.MatchingFields{IndexFieldLLVLVGName: key.LVGName}); err != nil {
 		return 0, fmt.Errorf("unable to list LLVs for LVG %s: %w", key.LVGName, err)
@@ -220,8 +223,11 @@ func sumLLVSpace(ctx context.Context, cl client.Client, key cache.StoragePoolKey
 			}
 		}
 
-		if onlyCreated {
-			if llv.Status == nil || llv.Status.Phase != snc.PhaseCreated {
+		if onlyOnDisk {
+			if llv.Status == nil {
+				continue
+			}
+			if llv.Status.Phase != snc.PhaseCreated && llv.Status.ActualSize.IsZero() {
 				continue
 			}
 		}
@@ -238,8 +244,9 @@ func sumLLVSpace(ctx context.Context, cl client.Client, key cache.StoragePoolKey
 // --- Unaccounted space calibration ---
 
 // CalibratePoolUnaccountedSpace computes the space occupied by non-LLV volumes
-// on the given storage pool and stores it in the cache. Uses only Created LLVs
-// (whose sizes are reflected in VGFree/AvailableSpace) for calibration.
+// on the given storage pool and stores it in the cache. Uses on-disk LLVs
+// (Created phase OR actualSize > 0) whose sizes are reflected in
+// VGFree/AvailableSpace for calibration.
 func CalibratePoolUnaccountedSpace(
 	ctx context.Context,
 	cl client.Client,
@@ -247,9 +254,9 @@ func CalibratePoolUnaccountedSpace(
 	lvg *snc.LVMVolumeGroup,
 	key cache.StoragePoolKey,
 ) error {
-	sumCreated, err := sumLLVSpace(ctx, cl, key, true)
+	sumOnDisk, err := sumLLVSpace(ctx, cl, key, true)
 	if err != nil {
-		return fmt.Errorf("unable to compute created LLV space for pool %s: %w", key, err)
+		return fmt.Errorf("unable to compute on-disk LLV space for pool %s: %w", key, err)
 	}
 
 	var totalCapacity int64
@@ -267,7 +274,7 @@ func CalibratePoolUnaccountedSpace(
 		reportedFree = tp.AvailableSpace.Value()
 	}
 
-	unaccounted := totalCapacity - sumCreated - reportedFree
+	unaccounted := totalCapacity - sumOnDisk - reportedFree
 	if unaccounted < 0 {
 		unaccounted = 0
 	}
