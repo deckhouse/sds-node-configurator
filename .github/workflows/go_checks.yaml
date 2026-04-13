@@ -42,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
 
       - name: Run Go test coverage count
         uses: deckhouse/modules-actions/go_test_coverage@v12
