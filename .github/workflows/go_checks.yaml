@@ -42,11 +42,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-<<<<<<< HEAD
-        uses: actions/checkout@v2
-=======
         uses: actions/checkout@v4
->>>>>>> 69abdf7 ([internal] add e2e tests to CI (#196))
 
       - name: Run Go test coverage count
         uses: deckhouse/modules-actions/go_test_coverage@v12
