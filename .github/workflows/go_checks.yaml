@@ -60,4 +60,4 @@ jobs:
       - name: Run Go modules version check
         uses: deckhouse/modules-actions/go_modules_check@v12
         with:
-          go_version: "1.25.8"
+          go_version: "1.25.9"
