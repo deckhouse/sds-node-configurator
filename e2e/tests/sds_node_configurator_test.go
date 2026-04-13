@@ -1668,26 +1668,63 @@ func e2eNestedTestClusterOrNil() *cluster.TestClusterResources {
 	return e2eNestedTestCluster
 }
 
+// e2eModuleRootDir returns the e2e Go module root (directory containing ./tests), from this source file.
+func e2eModuleRootDir() string {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return ""
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), ".."))
+}
+
+// e2eFindClusterStateJSONPathForCleanup returns cluster-state.json if present under temp/<test_stem>/ for any
+// test file that may have invoked CreateTestCluster (storage-e2e saves state per calling test file name).
+func e2eFindClusterStateJSONPathForCleanup() string {
+	root := e2eModuleRootDir()
+	if root == "" {
+		return ""
+	}
+	for _, base := range []string{"common_scheduler_test", "sds_node_configurator_test"} {
+		p := filepath.Join(root, "temp", base, "cluster-state.json")
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
 func e2eCleanupNestedTestClusterAfterSuite() {
-	if e2eNestedTestCluster == nil {
+	if e2eNestedTestCluster != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
+		defer cancel()
+
+		cleanupEnabled := e2eConfigTestClusterCleanup() == "true" || e2eConfigTestClusterCleanup() == "True"
+		if cleanupEnabled {
+			GinkgoWriter.Printf("    ▶️ AfterSuite: cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is enabled - all VMs will be removed)...\n")
+		} else {
+			GinkgoWriter.Printf("    ▶️ AfterSuite: cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is not enabled - only bootstrap node will be removed)...\n")
+		}
+		err := cluster.CleanupTestCluster(ctx, e2eNestedTestCluster)
+		if err != nil {
+			GinkgoWriter.Printf("    ⚠️  Warning: AfterSuite cluster cleanup errors: %v\n", err)
+		} else {
+			GinkgoWriter.Printf("    ✅ AfterSuite: test cluster resources cleaned up successfully\n")
+		}
+		e2eNestedTestCluster = nil
+		return
+	}
+
+	// CreateTestCluster may create VMs and write cluster-state.json, then fail (e.g. during dhctl bootstrap).
+	// It returns (nil, err), so e2eRegisterNestedTestCluster never runs — same gap as covered by
+	// createE2EAlwaysNewClusterWithCleanupOnFailure for the Sds Describe. Tear down the namespace workload here.
+	if e2eConfigTestClusterCreateMode() != testClusterModeCreateNew {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
 	defer cancel()
-
-	cleanupEnabled := e2eConfigTestClusterCleanup() == "true" || e2eConfigTestClusterCleanup() == "True"
-	if cleanupEnabled {
-		GinkgoWriter.Printf("    ▶️ AfterSuite: cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is enabled - all VMs will be removed)...\n")
-	} else {
-		GinkgoWriter.Printf("    ▶️ AfterSuite: cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is not enabled - only bootstrap node will be removed)...\n")
-	}
-	err := cluster.CleanupTestCluster(ctx, e2eNestedTestCluster)
-	if err != nil {
-		GinkgoWriter.Printf("    ⚠️  Warning: AfterSuite cluster cleanup errors: %v\n", err)
-	} else {
-		GinkgoWriter.Printf("    ✅ AfterSuite: test cluster resources cleaned up successfully\n")
-	}
-	e2eNestedTestCluster = nil
+	statePath := e2eFindClusterStateJSONPathForCleanup()
+	GinkgoWriter.Printf("    ▶️ AfterSuite: no registered nested cluster — best-effort VM/namespace cleanup (failed mid-CreateTestCluster; cluster-state=%q)\n", statePath)
+	e2eSyncCleanupBaseClusterNamespace(ctx, statePath, nil)
 }
 
 func e2eConfigVMSSHUser() string {
