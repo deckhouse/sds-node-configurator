@@ -27,9 +27,9 @@ e2e/
 ├── manifests/              # RBAC и Job
 └── tests/
     ├── e2e_suite_test.go      # TestE2E, BeforeSuite/AfterSuite (storage-e2e)
-    ├── e2e_shared_test.go     # общие константы и хелперы
+    ├── e2e_cluster_lock_test.go  # lock retry / очистка lock для alwaysUseExisting
     ├── common_scheduler_test.go   # Common Scheduler Extender
-    ├── sds_node_configurator_test.go  # BlockDevice, LVMVolumeGroup
+    ├── sds_node_configurator_test.go  # общие хелперы/конфиг, BlockDevice, LVMVolumeGroup
     └── cluster_config.yml     # вложенный кластер (storage-e2e)
 ```
 

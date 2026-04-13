@@ -18,11 +18,14 @@ package tests
 
 import (
 	"context"
+	"crypto/md5"
 	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -38,6 +41,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -230,35 +234,23 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 		e2eCtx = context.Background()
 	})
 
-	AfterAll(func() {
-		// Cleanup test cluster resources
-		// Note: Bootstrap node (setup VM) is always removed.
-		// Test cluster VMs (masters and workers) are only removed if TEST_CLUSTER_CLEANUP='true' or 'True'
-		if testClusterResources != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
-			defer cancel()
-
-			cleanupEnabled := e2eConfigTestClusterCleanup() == "true" || e2eConfigTestClusterCleanup() == "True"
-			if cleanupEnabled {
-				GinkgoWriter.Printf("    ▶️ Cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is enabled - all VMs will be removed)...\n")
-			} else {
-				GinkgoWriter.Printf("    ▶️ Cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is not enabled - only bootstrap node will be removed)...\n")
-			}
-			err := cluster.CleanupTestCluster(ctx, testClusterResources)
-			if err != nil {
-				GinkgoWriter.Printf("    ⚠️  Warning: Cleanup errors occurred: %v\n", err)
-			} else {
-				GinkgoWriter.Printf("    ✅ Test cluster resources cleaned up successfully\n")
-			}
-		}
-	})
+	// Full nested cluster teardown runs once in AfterSuite (e2eCleanupNestedTestClusterAfterSuite), after both Describes.
+	// Do not call CleanupTestCluster here — one cluster per TestE2E run; Common Scheduler Extender creates and registers it first.
 
 	// ---=== TEST CLUSTER IS CREATED AND READY HERE ===--- //
+	// CI: one nested cluster for the whole TestE2E run — register in AfterSuite for cleanup even if a spec fails.
 	// alwaysCreateNew: CreateTestCluster + WaitForTestClusterReady; on failure we clean base cluster (see createE2EAlwaysNewClusterWithCleanupOnFailure).
 
 	It("should create test cluster", func() {
+		if r := e2eNestedTestClusterOrNil(); r != nil {
+			testClusterResources = r
+			GinkgoWriter.Printf("    ▶️ Using nested test cluster already created by Common Scheduler Extender (same TestE2E run)\n")
+			return
+		}
+
 		if e2eConfigTestClusterCreateMode() == "alwaysCreateNew" {
 			testClusterResources = createE2EAlwaysNewClusterWithCleanupOnFailure()
+			e2eRegisterNestedTestCluster(testClusterResources)
 			return
 		}
 		if e2eConfigTestClusterCreateMode() == "alwaysUseExisting" {
@@ -273,25 +265,13 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 				Expect(err).NotTo(HaveOccurred(), "Should connect to existing cluster successfully")
 				GinkgoWriter.Printf("    ✅ Connected to existing cluster successfully (cluster lock acquired)\n")
 			})
-			return
-		}
-		if e2eConfigTestClusterCreateMode() == "alwaysUseExisting" {
-			By("Connecting to existing cluster", func() {
-				GinkgoWriter.Printf("    ▶️ Connecting to existing cluster (mode: alwaysUseExisting)\n")
-				var err error
-				testClusterResources, err = e2eConnectUseExistingClusterOnceOrRetryAfterLockDelete()
-				if err != nil {
-					GinkgoWriter.Printf("    ❌ Failed to connect to existing cluster: %v\n", err)
-					e2ePrintStaleClusterLockHint(err)
-				}
-				Expect(err).NotTo(HaveOccurred(), "Should connect to existing cluster successfully")
-				GinkgoWriter.Printf("    ✅ Connected to existing cluster successfully (cluster lock acquired)\n")
-			})
+			e2eRegisterNestedTestCluster(testClusterResources)
 			return
 		}
 		Expect(waitForVirtualizationModuleReadyIfNeeded(context.Background())).To(Succeed(),
 			"virtualization module should become Ready on base cluster (retry while Reconciling)")
 		testClusterResources = cluster.CreateOrConnectToTestCluster()
+		e2eRegisterNestedTestCluster(testClusterResources)
 	}) // should create test cluster
 
 	////////////////////////////////////
@@ -1400,4 +1380,347 @@ func createE2EAlwaysNewClusterWithCleanupOnFailure() *cluster.TestClusterResourc
 	}
 
 	return res
+}
+
+// --- Defaults, env helpers, and nested test cluster lifecycle (full TestE2E: one cluster, AfterSuite cleanup) ---
+// Align consts with storage-e2e internal/config when using setup.Init().
+
+const (
+	e2eDefaultNamespace      = "e2e-test-cluster"
+	e2eDefaultVMSSHUser      = "cloud"
+	e2eClusterCleanupTimeout = 10 * time.Minute
+	e2eLVMVGPrefix           = "e2e-lvg-"
+
+	e2eLocalStorageClassName = "e2e-local-sc"
+	e2ePVCPrefix             = "e2e-pvc-"
+	e2ePodPrefix             = "e2e-pod-"
+	e2eVirtualDiskPrefix     = "e2e-scheduler-data-disk"
+
+	e2eVirtualDiskAttachMaxRetries    = 3
+	e2eVirtualDiskAttachRetryInterval = 1 * time.Minute
+
+	e2eVirtualizationModuleWaitDefault = 25 * time.Minute
+
+	e2eLsblkSSHMaxRetries    = 6
+	e2eLsblkSSHRetryInterval = 15 * time.Second
+
+	e2eClusterCreationTimeout    = 90 * time.Minute
+	e2eModuleDeployTimeout       = 15 * time.Minute
+	e2eUseExistingClusterTimeout = 90 * time.Minute
+)
+
+const testClusterModeCreateNew = "alwaysCreateNew"
+
+var deckhouseModuleGVR = schema.GroupVersionResource{
+	Group:    "deckhouse.io",
+	Version:  "v1alpha1",
+	Resource: "modules",
+}
+
+const deckhouseModuleConditionIsReady = "IsReady"
+
+func moduleVirtualizationIsReady(obj *unstructured.Unstructured) (phase string, isReady bool) {
+	p, found, _ := unstructured.NestedString(obj.Object, "status", "phase")
+	if found {
+		phase = p
+	}
+	if phase == "Ready" {
+		return phase, true
+	}
+	conditions, found, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	if !found {
+		return phase, false
+	}
+	for _, c := range conditions {
+		cm, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		t, _ := cm["type"].(string)
+		st, _ := cm["status"].(string)
+		if t == deckhouseModuleConditionIsReady && st == "True" {
+			return phase, true
+		}
+	}
+	return phase, false
+}
+
+func e2eTestTempDirFromStack() (string, error) {
+	for i := 1; i <= 20; i++ {
+		_, file, _, ok := runtime.Caller(i)
+		if !ok {
+			break
+		}
+		if !strings.Contains(filepath.ToSlash(file), "/tests/") {
+			continue
+		}
+		dir := filepath.Dir(file)
+		for filepath.Base(dir) != "tests" {
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+		if filepath.Base(dir) != "tests" {
+			continue
+		}
+		repoRoot := filepath.Dir(dir)
+		testFileName := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+		return filepath.Join(repoRoot, "temp", testFileName), nil
+	}
+	return "", fmt.Errorf("could not determine e2e temp dir from call stack (expected caller under tests/)")
+}
+
+func waitForVirtualizationModuleReadyWithRestConfig(ctx context.Context, baseCfg *rest.Config) error {
+	cfg := rest.CopyConfig(baseCfg)
+	cfg.Timeout = 30 * time.Second
+	cfg.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		d := net.Dialer{Timeout: 15 * time.Second}
+		return d.DialContext(ctx, network, addr)
+	}
+
+	timeout := e2eVirtualizationModuleWaitDefault
+	if v := os.Getenv("E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			timeout = d
+		}
+	}
+	deadline := time.Now().Add(timeout)
+	poll := 3 * time.Second
+	reqTimeout := 30 * time.Second
+
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("dynamic client for virtualization wait: %w", err)
+	}
+
+	GinkgoWriter.Printf("    ⏳ Waiting for Deckhouse module %q to become Ready (timeout %s, polling every %s)...\n",
+		"virtualization", timeout, poll)
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout after %v waiting for Module/virtualization phase Ready (see logs above)", timeout)
+		}
+
+		getCtx, cancel := context.WithTimeout(ctx, reqTimeout)
+		obj, err := dyn.Resource(deckhouseModuleGVR).Get(getCtx, "virtualization", metav1.GetOptions{})
+		cancel()
+
+		if err != nil {
+			GinkgoWriter.Printf("    … Module/virtualization get: %v\n", err)
+			time.Sleep(poll)
+			continue
+		}
+		phase, ready := moduleVirtualizationIsReady(obj)
+		if ready {
+			GinkgoWriter.Printf("    ✅ Module/virtualization is ready (phase=%q, IsReady or phase Ready)\n", phase)
+			return nil
+		}
+		if phase == "" {
+			GinkgoWriter.Printf("    … Module/virtualization: no status.phase yet (waiting)\n")
+		} else {
+			GinkgoWriter.Printf("    … Module/virtualization phase=%q (waiting for Ready or IsReady=True)\n", phase)
+		}
+		time.Sleep(poll)
+	}
+}
+
+func waitForVirtualizationModuleReadyIfNeeded(ctx context.Context) error {
+	if os.Getenv("E2E_SKIP_VIRTUALIZATION_MODULE_WAIT") == "true" {
+		GinkgoWriter.Printf("    ⏭️  Skipping virtualization Module pre-wait (E2E_SKIP_VIRTUALIZATION_MODULE_WAIT=true)\n")
+		return nil
+	}
+	if e2eConfigTestClusterCreateMode() != testClusterModeCreateNew {
+		return nil
+	}
+
+	sshHost := e2eConfigSSHHost()
+	sshUser := e2eConfigSSHUser()
+	if sshHost == "" || sshUser == "" {
+		return nil
+	}
+
+	sshKeyPath, err := cluster.GetSSHPrivateKeyPath()
+	if err != nil {
+		return fmt.Errorf("ssh key for virtualization pre-wait: %w", err)
+	}
+
+	kubeconfigDir, err := e2eTestTempDirFromStack()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(kubeconfigDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir kubeconfig dir for virtualization pre-wait: %w", err)
+	}
+
+	useJump := e2eConfigSSHJumpHost() != ""
+	jumpUser := e2eConfigSSHJumpUser()
+	if jumpUser == "" {
+		jumpUser = sshUser
+	}
+	jumpHost := e2eConfigSSHJumpHost()
+	jumpKeyPath := e2eConfigSSHJumpKeyPath()
+	if jumpKeyPath == "" {
+		jumpKeyPath = sshKeyPath
+	}
+
+	opts := cluster.ConnectClusterOptions{
+		SSHUser:             sshUser,
+		SSHHost:             sshHost,
+		SSHKeyPath:          sshKeyPath,
+		UseJumpHost:         useJump,
+		KubeconfigOutputDir: kubeconfigDir,
+	}
+	if useJump {
+		opts = cluster.ConnectClusterOptions{
+			SSHUser:             jumpUser,
+			SSHHost:             jumpHost,
+			SSHKeyPath:          jumpKeyPath,
+			UseJumpHost:         true,
+			TargetUser:          sshUser,
+			TargetHost:          sshHost,
+			TargetKeyPath:       sshKeyPath,
+			KubeconfigOutputDir: kubeconfigDir,
+		}
+	}
+
+	GinkgoWriter.Printf("    🔌 Connecting to base cluster (SSH) for virtualization Module pre-wait...\n")
+
+	connectTimeout := 20 * time.Minute
+	if v := os.Getenv("E2E_VIRTUALIZATION_MODULE_CONNECT_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			connectTimeout = d
+		}
+	}
+	connectCtx, cancelConnect := context.WithTimeout(ctx, connectTimeout)
+	defer cancelConnect()
+
+	base, err := cluster.ConnectToCluster(connectCtx, opts)
+	if err != nil {
+		return fmt.Errorf("connect to base cluster for virtualization pre-wait: %w", err)
+	}
+	defer func() {
+		if base.TunnelInfo != nil && base.TunnelInfo.StopFunc != nil {
+			_ = base.TunnelInfo.StopFunc()
+		}
+		if base.SSHClient != nil {
+			_ = base.SSHClient.Close()
+		}
+	}()
+
+	if err := waitForVirtualizationModuleReadyWithRestConfig(ctx, base.Kubeconfig); err != nil {
+		return err
+	}
+	GinkgoWriter.Printf("    🔌 Closed pre-wait SSH tunnel; proceeding to CreateTestCluster\n")
+	return nil
+}
+
+func e2eConfigNamespace() string {
+	if v := os.Getenv("TEST_CLUSTER_NAMESPACE"); v != "" {
+		return v
+	}
+	return e2eDefaultNamespace
+}
+
+func e2eConfigStorageClass() string       { return os.Getenv("TEST_CLUSTER_STORAGE_CLASS") }
+func e2eConfigTestClusterCleanup() string { return os.Getenv("TEST_CLUSTER_CLEANUP") }
+func e2eConfigSSHHost() string            { return os.Getenv("SSH_HOST") }
+func e2eConfigSSHUser() string            { return os.Getenv("SSH_USER") }
+func e2eConfigSSHJumpHost() string        { return os.Getenv("SSH_JUMP_HOST") }
+func e2eConfigSSHJumpUser() string        { return os.Getenv("SSH_JUMP_USER") }
+func e2eConfigSSHJumpKeyPath() string     { return os.Getenv("SSH_JUMP_KEY_PATH") }
+func e2eConfigSSHPassphrase() string      { return os.Getenv("SSH_PASSPHRASE") }
+func e2eConfigLogLevel() string           { return os.Getenv("LOG_LEVEL") }
+
+func e2eConfigKubeConfigPath() string {
+	return os.Getenv("KUBE_CONFIG_PATH")
+}
+
+func e2eConfigDKPLicenseKey() string {
+	if v := os.Getenv("E2E_DKP_LICENSE_KEY"); v != "" {
+		return v
+	}
+	return os.Getenv("DKP_LICENSE_KEY")
+}
+
+func e2eConfigRegistryDockerCfg() string {
+	if v := os.Getenv("E2E_REGISTRY_DOCKER_CFG"); v != "" {
+		return v
+	}
+	return os.Getenv("REGISTRY_DOCKER_CFG")
+}
+
+func e2eConfigTestClusterCreateMode() string { return os.Getenv("TEST_CLUSTER_CREATE_MODE") }
+
+// e2eNestedTestCluster is the single nested cluster for a full TestE2E run (both Ordered Describes).
+// Common Scheduler Extender registers it after CreateOrConnect; AfterSuite runs e2eCleanupNestedTestClusterAfterSuite.
+var e2eNestedTestCluster *cluster.TestClusterResources
+
+func e2eRegisterNestedTestCluster(r *cluster.TestClusterResources) {
+	e2eNestedTestCluster = r
+}
+
+func e2eNestedTestClusterOrNil() *cluster.TestClusterResources {
+	return e2eNestedTestCluster
+}
+
+func e2eCleanupNestedTestClusterAfterSuite() {
+	if e2eNestedTestCluster == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
+	defer cancel()
+
+	cleanupEnabled := e2eConfigTestClusterCleanup() == "true" || e2eConfigTestClusterCleanup() == "True"
+	if cleanupEnabled {
+		GinkgoWriter.Printf("    ▶️ AfterSuite: cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is enabled - all VMs will be removed)...\n")
+	} else {
+		GinkgoWriter.Printf("    ▶️ AfterSuite: cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is not enabled - only bootstrap node will be removed)...\n")
+	}
+	err := cluster.CleanupTestCluster(ctx, e2eNestedTestCluster)
+	if err != nil {
+		GinkgoWriter.Printf("    ⚠️  Warning: AfterSuite cluster cleanup errors: %v\n", err)
+	} else {
+		GinkgoWriter.Printf("    ✅ AfterSuite: test cluster resources cleaned up successfully\n")
+	}
+	e2eNestedTestCluster = nil
+}
+
+func e2eConfigVMSSHUser() string {
+	if v := os.Getenv("SSH_VM_USER"); v != "" {
+		return v
+	}
+	return e2eDefaultVMSSHUser
+}
+
+func attachVirtualDiskWithRetry(ctx context.Context, baseKubeconfig *rest.Config, config kubernetes.VirtualDiskAttachmentConfig, maxRetries int, retryInterval time.Duration) (*kubernetes.VirtualDiskAttachmentResult, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		att, err := kubernetes.AttachVirtualDiskToVM(ctx, baseKubeconfig, config)
+		if err == nil {
+			return att, nil
+		}
+		lastErr = err
+		if attempt < maxRetries {
+			time.Sleep(retryInterval)
+		}
+	}
+	return nil, lastErr
+}
+
+func blockDeviceSerialFromVirtualDiskUID(uid string) string {
+	h := md5.Sum([]byte(uid))
+	return hex.EncodeToString(h[:])
+}
+
+func keysOf(m map[string]struct{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

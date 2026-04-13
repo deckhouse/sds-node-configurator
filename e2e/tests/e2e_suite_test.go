@@ -32,7 +32,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
-	e2eCleanupSharedTestClusterAfterSuite()
+	e2eCleanupNestedTestClusterAfterSuite()
 	if err := setup.Close(); err != nil {
 		GinkgoWriter.Printf("Warning: Failed to close logger: %v\n", err)
 	}
