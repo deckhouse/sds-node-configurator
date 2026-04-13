@@ -138,7 +138,7 @@ func TestSumLLVSpace_ThinFailedWithActualSize(t *testing.T) {
 	ctx := context.Background()
 	cl := newFakeClient(
 		thinLLV("llv-created", "tp0", "10Gi", "Created"),
-		thinFailedLLVOnDisk("llv-failed", "tp0", "8Gi", 9*oneGiB),
+		thinFailedLLVOnDisk("llv-failed", "8Gi", 9*oneGiB),
 	)
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
 
@@ -507,7 +507,7 @@ func TestCalibratePool_ThinPool_FailedLLVOnDisk(t *testing.T) {
 	cl := newFakeClient(
 		lvg,
 		thinLLV("llv-created", "tp0", "10Gi", "Created"),
-		thinFailedLLVOnDisk("llv-failed", "tp0", "20Gi", 21*oneGiB),
+		thinFailedLLVOnDisk("llv-failed", "20Gi", 21*oneGiB),
 	)
 	c := newTestCache()
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
@@ -530,7 +530,7 @@ func TestGetAvailableSpace_FailedLLVOnDisk_NoDoubleCount(t *testing.T) {
 	cl := newFakeClient(
 		readyLVGWithThinPool("lvg1", 30*oneGiB, 20*oneGiB),
 		thinLLV("llv-created", "tp0", "10Gi", "Created"),
-		thinFailedLLVOnDisk("llv-failed", "tp0", "20Gi", 21*oneGiB),
+		thinFailedLLVOnDisk("llv-failed", "20Gi", 21*oneGiB),
 	)
 	c := newTestCache()
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
@@ -555,8 +555,8 @@ func TestGetAvailableSpace_FailedLLVOnDisk_ManyFailed(t *testing.T) {
 		readyLVGWithThinPool("lvg1", 80*oneGiB, 20*oneGiB),
 		thinLLV("llv-created-1", "tp0", "20Gi", "Created"),
 		thinLLV("llv-created-2", "tp0", "20Gi", "Created"),
-		thinFailedLLVOnDisk("llv-failed-1", "tp0", "20Gi", 21*oneGiB),
-		thinFailedLLVOnDisk("llv-failed-2", "tp0", "20Gi", 21*oneGiB),
+		thinFailedLLVOnDisk("llv-failed-1", "20Gi", 21*oneGiB),
+		thinFailedLLVOnDisk("llv-failed-2", "20Gi", 21*oneGiB),
 		thinLLV("llv-pending", "tp0", "5Gi", "Pending"),
 	)
 	c := newTestCache()
