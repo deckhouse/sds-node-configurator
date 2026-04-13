@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: e2e-tests
+  namespace: d8-sds-node-configurator
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      serviceAccountName: e2e-tests
+      restartPolicy: Never
+      containers:
+        - name: e2e-tests
+          image: ${E2E_IMAGE}
+          env:
+            - name: TEST_CLUSTER_CREATE_MODE
+              value: "alwaysUseExisting"
+            - name: TEST_CLUSTER_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: TEST_CLUSTER_STORAGE_CLASS
+              value: "${TEST_CLUSTER_STORAGE_CLASS}"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

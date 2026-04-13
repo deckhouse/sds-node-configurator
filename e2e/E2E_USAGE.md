@@ -5,7 +5,7 @@ This guide explains how to run the **storage-e2e** smoke tests for `sds-node-con
 ## What the test does
 
 - Uses the [storage-e2e](https://github.com/deckhouse/storage-e2e) framework.
-- Suite: `TestSdsNodeConfigurator` in `e2e/tests/`.
+- Entry point: `TestSdsNodeConfigurator` in `e2e/tests/sds_node_configurator_suite_test.go` (single Ginkgo run; nested cluster in `BeforeSuite`; Common Scheduler + Sds specs in package).
 - Covers BlockDevice discovery and LVMVolumeGroup flows on a test cluster (existing or created via framework).
 - Test cluster is reached via SSH (base cluster host or jump host) and kubeconfig (often through an SSH tunnel to the API).
 
@@ -20,10 +20,12 @@ E2E runs as part of **Build and push for dev** when the **Build and checks** wor
 ### 1. Trigger E2E on a PR
 
 1. Open your pull request.
-2. Add the label **`e2e-smoke-test`** to the PR.
-3. Push or re-run the workflow. The **Build and checks** workflow will call `build_dev.yml` with `run_e2e_smoke_tests: true`, and the E2E job will run after the image is built.
+2. Add the label **`e2e-smoke-test`** to the PR (this sends a `labeled` event and should start **Build and checks** if Actions are allowed for this PR).
+3. The **Build and checks** workflow calls `build_dev.yml`; the **Run E2E Smoke Tests** job runs only when the PR has the `e2e-smoke-test` label, after the dev image build.
 
 Removing the label or not adding it means E2E smoke tests will not run.
+
+**Draft PRs:** If nothing appears under **Actions** when you add the label, the repository or organization may be configured to **skip workflows for draft pull requests**. In that case either mark the PR as ready for review (a `ready_for_review` run is included) or change the Actions policy for draft PRs in **Settings → Actions** (exact option depends on your GitHub plan).
 
 ### 2. Required repository configuration
 
@@ -92,13 +94,15 @@ From the repo root:
 ```bash
 source e2e/config/test_exports_storage_e2e
 cd e2e
-make test
+go mod tidy
+ginkgo -v --progress ./tests/
 ```
 
 Or run specific test:
 
 ```bash
-make test-focus FOCUS="TestSdsNodeConfigurator"
+# Ginkgo focus on a spec name; CI runs: go test ./tests/ -run '^TestSdsNodeConfigurator$'
+ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
 ```
 
 ### 3. Cluster lock (stale lock)
@@ -110,7 +114,7 @@ To release the lock once (only when no other run is using the cluster):
 ```bash
 export TEST_CLUSTER_FORCE_LOCK_RELEASE='true'
 source e2e/config/test_exports_storage_e2e
-cd e2e && make test
+cd e2e && ginkgo -v --progress ./tests/
 ```
 
 For `alwaysUseExisting`, this suite retries once after clearing a stale lock: first it tries deleting ConfigMap `default/e2e-cluster-lock` via `KUBE_CONFIG_PATH` (works when the API URL is reachable directly). If that fails (common when `server` is `https://127.0.0.1:…` and no tunnel is running yet), it opens the same SSH + port-forward as the test connect and releases the lock. Disable with `E2E_NO_CLUSTER_LOCK_RETRY=true` (e.g. shared cluster).
@@ -122,7 +126,24 @@ If test cluster nodes (e.g. 10.10.10.x) are not reachable directly from your mac
 - `SSH_JUMP_HOST` — jump host (often the base cluster master).
 - `SSH_JUMP_USER` — user on the jump host (defaults to `SSH_USER` if unset).
 
-**Bastion user vs cluster node user (storage-e2e):** With a jump host, the framework connects as `SSH_JUMP_USER@SSH_JUMP_HOST`, then as **`SSH_USER@SSH_HOST`** to reach the test cluster (kubeconfig / API path). It does **not** use `SSH_VM_USER` for that second hop. Typical Deckhouse lab: bastion login `you@bastion`, nodes `cloud@10.x.x.x` — set `SSH_JUMP_USER` to your bastion account and `SSH_USER` to the SSH account on cluster nodes (often `cloud`). Keep `SSH_VM_USER` aligned with node SSH (often also `cloud`).
+### 5. `permission denied` under `.../pkg/mod/.../storage-e2e/.../temp`
+
+The storage-e2e library writes bootstrap state under a `temp/` directory inside the **checked-out** `storage-e2e` module in the Go module cache. On self-hosted runners that cache is often under a **shared read-only** path (e.g. `/opt/.../go/pkg/mod`), so `mkdir` fails even after `chmod`.
+
+**Fix (recommended):** point the module cache at a writable directory (CI uses this):
+
+```bash
+export GOMODCACHE="$(pwd)/e2e/.gomodcache"
+export GOCACHE="$(pwd)/e2e/.gocache"
+mkdir -p "$GOMODCACHE" "$GOCACHE"
+cd e2e && go mod download && go test ...
+```
+
+**Alternative (local):** `make deps` from `e2e/` runs `fix-mod-permissions` (chmod + `mkdir` under your current `GOPATH`/`GOMODCACHE`), which helps only if that cache is writable by your user.
+
+### 6. Virtualization module stuck in `Reconciling`
+
+storage-e2e checks the Deckhouse `Module/virtualization` once with a short timeout. Before nested cluster creation (`TEST_CLUSTER_CREATE_MODE=alwaysCreateNew`), the suite polls `Module/virtualization` via the Kubernetes API until `status.phase == Ready` (uses `KUBE_CONFIG_PATH`). Override total wait with `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` (e.g. `30m`). To disable this pre-wait entirely, set `E2E_SKIP_VIRTUALIZATION_MODULE_WAIT=true`.
 
 ---
 
@@ -143,12 +164,13 @@ If test cluster nodes (e.g. 10.10.10.x) are not reachable directly from your mac
 | `DKP_LICENSE_KEY` | If create mode | License for cluster creation. |
 | `REGISTRY_DOCKER_CFG` | If create mode | Registry auth (base64). |
 | `LOG_LEVEL` | No | e.g. `debug`, `info`. |
-| `TEST_CLUSTER_FORCE_LOCK_RELEASE` | No | Set to `true` once to clear a stale lock (read at process start by storage-e2e). |
-| `E2E_NO_CLUSTER_LOCK_RETRY` | No | If `true`, do not delete lock ConfigMap + retry (default: retry once when lock denied). |
+| `TEST_CLUSTER_FORCE_LOCK_RELEASE` | No | Set to `true` once to clear a stale lock. |
+| `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` | No | Max wait for Module `virtualization` Ready before nested cluster create (default ~25m). |
+| `E2E_SKIP_VIRTUALIZATION_MODULE_WAIT` | No | Set to `true` to skip the Module pre-wait (not recommended if you hit Reconciling flakes). |
 
 ---
 
 ## See also
 
 - [README.md](README.md) — test scenarios, debugging, troubleshooting.
-- [Makefile](Makefile) — `make test`, `make test-focus FOCUS="..."` for local runs.
+- Local runs: `ginkgo -v --progress ./tests/` or `go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$'` (same as CI).

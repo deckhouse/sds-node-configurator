@@ -1,0 +1,21 @@
+--- pkg/cluster/cluster.go
++++ pkg/cluster/cluster.go
+@@ -748,6 +748,18 @@
+ 	}
+ 	logger.StepComplete(17, "Nodes added to cluster")
+ 
++	// Re-establish SSH tunnel to test cluster API: long AddNodesToCluster leaves the port-forward idle;
++	// the next Kubernetes request often fails with EOF until we reconnect.
++	logger.Debug("Reconnecting to test cluster (refresh SSH tunnel after node bootstrap)")
++	testClusterResources.SSHClient.Close()
++	testClusterResources.TunnelInfo.StopFunc()
++	testClusterResources, err = ConnectToCluster(ctx, testConnectOpts)
++	if err != nil {
++		setupSSHClient.Close()
++		baseClusterResources.SSHClient.Close()
++		return nil, fmt.Errorf("failed to reconnect to test cluster after adding nodes: %w", err)
++	}
++
+ 	logger.Info("Waiting for all nodes to become Ready (this may take up to %v)", config.NodesReadyTimeout)
+ 	// Wait for all nodes to become Ready
+ 	nodesReadyCtx, cancel := context.WithTimeout(ctx, config.NodesReadyTimeout)

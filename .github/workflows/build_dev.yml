@@ -19,8 +19,10 @@ on:
         description: "Enable svace build and analyze"
         type: boolean
         required: false
+      # Set only from "Build and checks" (trivy_image_check.yaml). Do not rely on github.event.pull_request
+      # inside this reusable workflow — github.event may not match the caller's pull_request payload.
       run_e2e_smoke_tests:
-        description: "Run E2E smoke tests (when label e2e-smoke-test is on PR). Set to false when calling from Build and checks to avoid duplicate runs."
+        description: "Run E2E smoke tests (PR has label e2e-smoke-test)"
         type: boolean
         required: false
         default: false
@@ -42,7 +44,29 @@ jobs:
     continue-on-error: true
     name: Lint
     steps:
+      # Previous runs may leave e2e/.gomodcache (read-only module trees); actions/checkout@v4 fails to wipe workspace (EACCES).
+      - name: Prepare workspace for checkout (self-hosted)
+        run: |
+          set -euo pipefail
+          WS="${GITHUB_WORKSPACE}"
+          prune_dir() {
+            local p="$1"
+            [ -e "$p" ] || return 0
+            chmod -R u+w "$p" 2>/dev/null || true
+            if rm -rf "$p" 2>/dev/null; then
+              return 0
+            fi
+            if command -v sudo >/dev/null 2>&1; then
+              sudo chmod -R u+w "$p" 2>/dev/null || true
+              sudo rm -rf "$p" 2>/dev/null || true
+            fi
+          }
+          for d in e2e/.gomodcache e2e/.gocache e2e/temp; do
+            prune_dir "${WS}/${d}"
+          done
       - uses: actions/checkout@v4
+        with:
+          clean: false
       - name: Copy openapi/values_ce.yaml to openapi/values.yaml
         run: |
           if [ -f openapi/values_ce.yaml ]; then
@@ -121,7 +145,28 @@ jobs:
           echo MODULES_MODULE_TAG=$MODULES_MODULE_TAG
           echo MODULE_EDITION=$MODULE_EDITION
 
+      - name: Prepare workspace for checkout (self-hosted)
+        run: |
+          set -euo pipefail
+          WS="${GITHUB_WORKSPACE}"
+          prune_dir() {
+            local p="$1"
+            [ -e "$p" ] || return 0
+            chmod -R u+w "$p" 2>/dev/null || true
+            if rm -rf "$p" 2>/dev/null; then
+              return 0
+            fi
+            if command -v sudo >/dev/null 2>&1; then
+              sudo chmod -R u+w "$p" 2>/dev/null || true
+              sudo rm -rf "$p" 2>/dev/null || true
+            fi
+          }
+          for d in e2e/.gomodcache e2e/.gocache e2e/temp; do
+            prune_dir "${WS}/${d}"
+          done
       - uses: actions/checkout@v4
+        with:
+          clean: false
 
       - name: Download base images and auth prepare
         run: |
@@ -164,7 +209,7 @@ jobs:
           svacer_import_password: "${{ secrets.SVACER_IMPORT_PASSWORD }}"
           svace_analyze_ssh_private_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
 
-  # E2E smoke tests run only when the caller workflow passes run_e2e_smoke_tests: true (Build and checks sets it from e2e-smoke-test label on PR).
+  # E2E: gate by input from caller (trivy) so label detection uses the same github.event as the top-level workflow.
   run_e2e_smoke_tests:
     if: ${{ inputs.run_e2e_smoke_tests == true }}
     name: Run E2E Smoke Tests
@@ -172,8 +217,29 @@ jobs:
     needs:
       - dev_setup_build
     steps:
+      - name: Prepare workspace for checkout (self-hosted)
+        run: |
+          set -euo pipefail
+          WS="${GITHUB_WORKSPACE}"
+          prune_dir() {
+            local p="$1"
+            [ -e "$p" ] || return 0
+            chmod -R u+w "$p" 2>/dev/null || true
+            if rm -rf "$p" 2>/dev/null; then
+              return 0
+            fi
+            if command -v sudo >/dev/null 2>&1; then
+              sudo chmod -R u+w "$p" 2>/dev/null || true
+              sudo rm -rf "$p" 2>/dev/null || true
+            fi
+          }
+          for d in e2e/.gomodcache e2e/.gocache e2e/temp; do
+            prune_dir "${WS}/${d}"
+          done
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          clean: false
 
       # - name: Install kubectl
       #   uses: azure/setup-kubectl@v3
@@ -240,9 +306,12 @@ jobs:
           nc -zv "$SSH_HOST" 22 2>&1 || true
           echo "---"
 
-      - name: Run E2E tests (storage-e2e, TestSdsNodeConfigurator)
+      - name: Run E2E tests (storage-e2e, TestSdsNodeConfigurator — scheduler then sds-node-configurator)
         id: run_tests
         env:
+          # Writable module cache; keep outside the repo checkout so actions/checkout (workspace wipe) never hits EACCES on extracted modules.
+          GOMODCACHE: ${{ runner.temp }}/e2e-gomodcache
+          GOCACHE: ${{ runner.temp }}/e2e-gocache
           TEST_CLUSTER_CREATE_MODE: ${{ secrets.E2E_TEST_CLUSTER_CREATE_MODE }}
           TEST_CLUSTER_NAMESPACE: e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}
           TEST_CLUSTER_STORAGE_CLASS: ${{ secrets.E2E_TEST_CLUSTER_STORAGE_CLASS }}
@@ -254,19 +323,117 @@ jobs:
           # Jump host for test cluster nodes (10.10.10.x). Without it the test connects to the node directly from runner → connection timed out. Default = base cluster (SSH_HOST).
           SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST || secrets.E2E_SSH_HOST }}
           SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER || secrets.E2E_SSH_USER }}
+          # API SSH tunnel must match Cleanup: use ProxyJump only when E2E_SSH_JUMP_HOST secret is set. Do not fall back to SSH_HOST here — ssh -J user@host user@host breaks the forward.
+          E2E_TUNNEL_SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST }}
+          E2E_TUNNEL_SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER }}
           # Do not set KUBE_CONFIG_PATH here — it is taken from GITHUB_ENV (Setup writes the path to the file from E2E_CLUSTER_KUBECONFIG). Otherwise an empty vars value overwrites the fallback and storage-e2e cannot find kubeconfig when "sudo cat admin.conf" on the master fails.
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
         run: |
-          # Project-local caches (self-hosted runners may inherit a read-only global GOMODCACHE).
-          export GOMODCACHE="${GITHUB_WORKSPACE}/e2e/.gomodcache"
-          export GOCACHE="${GITHUB_WORKSPACE}/e2e/.gocache"
           mkdir -p "${GOMODCACHE}" "${GOCACHE}"
+
+          # Kubeconfig from E2E_CLUSTER_KUBECONFIG often points at https://127.0.0.1:6445 (API via SSH port-forward).
+          # The tunnel was only started in the later Cleanup step, so Module/virtualization pre-wait and storage-e2e
+          # had no reachable API — first client calls could hang until TCP timeouts. Mirror Cleanup's tunnel here.
+          E2E_SSH_TUNNEL_PID=""
+          e2e_stop_ssh_tunnel() {
+            if [ -n "${E2E_SSH_TUNNEL_PID:-}" ]; then
+              kill "${E2E_SSH_TUNNEL_PID}" 2>/dev/null || true
+              wait "${E2E_SSH_TUNNEL_PID}" 2>/dev/null || true
+            fi
+          }
+          trap e2e_stop_ssh_tunnel EXIT
+
+          # Use the same file as KUBE_CONFIG_PATH (Setup writes both E2E_KUBECONFIG_PATH and KUBE_CONFIG_PATH).
+          # Pick a server: line that points at loopback — the *first* server: in the file may be another cluster.
+          E2E_KC_FILE="${E2E_KUBECONFIG_PATH:-${KUBE_CONFIG_PATH:-}}"
+          echo "E2E kubeconfig path: E2E_KUBECONFIG_PATH=${E2E_KUBECONFIG_PATH:-} KUBE_CONFIG_PATH=${KUBE_CONFIG_PATH:-} -> E2E_KC_FILE=${E2E_KC_FILE:-}"
+          E2E_NEED_TUNNEL=false
+          E2E_LOCAL_API_PORT=""
+          SERVER_LINE=""
+          if [ -n "${E2E_KC_FILE}" ] && [ -f "$E2E_KC_FILE" ]; then
+            # Do not require ^ so BOM or odd indentation still matches; avoid missing the loopback cluster.
+            SERVER_LINE="$(grep -F 'server:' "$E2E_KC_FILE" | grep -E '127\.0\.0\.1|localhost|\[::1\]' | head -1 || true)"
+            if [ -n "$SERVER_LINE" ]; then
+              E2E_NEED_TUNNEL=true
+              E2E_LOCAL_API_PORT="$(printf '%s' "$SERVER_LINE" | sed -n 's/.*127\.0\.0\.1:\([0-9][0-9]*\).*/\1/p')"
+              if [ -z "$E2E_LOCAL_API_PORT" ]; then
+                E2E_LOCAL_API_PORT="$(printf '%s' "$SERVER_LINE" | sed -n 's/.*localhost:\([0-9][0-9]*\).*/\1/p')"
+              fi
+              if [ -z "$E2E_LOCAL_API_PORT" ]; then
+                E2E_LOCAL_API_PORT="$(printf '%s' "$SERVER_LINE" | sed -n 's/.*\[::1\]:\([0-9][0-9]*\).*/\1/p')"
+              fi
+              [ -z "$E2E_LOCAL_API_PORT" ] && E2E_LOCAL_API_PORT=6445
+            fi
+            if [ "$E2E_NEED_TUNNEL" != true ] && grep -qE '127\.0\.0\.1:644[35]|localhost:644[35]' "$E2E_KC_FILE" 2>/dev/null; then
+              echo "::warning::Loopback apiserver URL found in kubeconfig but server: line was not matched; forcing tunnel (local port 6445)."
+              E2E_NEED_TUNNEL=true
+              E2E_LOCAL_API_PORT=6445
+            fi
+          fi
+
+          if [ "$E2E_NEED_TUNNEL" = true ] && [ -n "${SSH_HOST:-}" ] && [ -n "${SSH_USER:-}" ] && [ -f "${E2E_SSH_KEY_PATH:-}" ]; then
+            echo "Starting SSH tunnel for E2E (localhost:${E2E_LOCAL_API_PORT} -> 127.0.0.1:6445 on ${SSH_HOST}, same as Cleanup)..."
+            echo "Kubeconfig server (sanitized): $(printf '%s' "$SERVER_LINE" | sed 's/[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/x.x.x.x/g')"
+            # Exit if port-forward cannot be established (otherwise ssh keeps running without -L and tests see connection refused).
+            SSH_OPTS="-N -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3"
+            TUNNEL_JUMP_USER="${E2E_TUNNEL_SSH_JUMP_USER:-$SSH_USER}"
+            if [ -n "${E2E_TUNNEL_SSH_JUMP_HOST:-}" ]; then
+              ssh $SSH_OPTS -i "$E2E_SSH_KEY_PATH" \
+                -J "${TUNNEL_JUMP_USER}@${E2E_TUNNEL_SSH_JUMP_HOST}" \
+                -L "${E2E_LOCAL_API_PORT}:127.0.0.1:6445" "${SSH_USER}@${SSH_HOST}" &
+            else
+              ssh $SSH_OPTS -i "$E2E_SSH_KEY_PATH" \
+                -L "${E2E_LOCAL_API_PORT}:127.0.0.1:6445" "${SSH_USER}@${SSH_HOST}" &
+            fi
+            E2E_SSH_TUNNEL_PID=$!
+            sleep 3
+            if ! kill -0 "$E2E_SSH_TUNNEL_PID" 2>/dev/null; then
+              echo "::error::SSH tunnel process exited immediately (check SSH host, key, and jump). Forward: -L ${E2E_LOCAL_API_PORT}:127.0.0.1:6445"
+              exit 1
+            fi
+            if command -v nc >/dev/null 2>&1; then
+              if ! nc -zv 127.0.0.1 "$E2E_LOCAL_API_PORT" 2>&1; then
+                echo "::error::Nothing listening on 127.0.0.1:${E2E_LOCAL_API_PORT} after SSH forward; kubeconfig must use the same port."
+                exit 1
+              fi
+            fi
+          elif [ "$E2E_NEED_TUNNEL" = true ]; then
+            echo "::error::Kubeconfig uses loopback API but SSH is not configured (SSH_HOST/SSH_USER/E2E_SSH_KEY_PATH). Cannot reach apiserver."
+            exit 1
+          fi
+
           cd e2e
           go mod tidy
           go mod download
-          # Go extracts modules with read-only dirs; storage-e2e PrepareBootstrapConfig mkdirs temp/ inside the module copy.
-          chmod -R u+w "${GOMODCACHE}" 2>/dev/null || true
-          go test -v -count=1 -timeout 60m ./tests/ -run TestSdsNodeConfigurator 2>&1 | tee ../e2e-test-output.log
+          # PrepareBootstrapConfig (storage-e2e) resolves paths via runtime.Caller from pkg/cluster/cluster.go inside the
+          # module copy, so it writes temp/ under GOMODCACHE/.../storage-e2e@.../ — not under the checkout. Go extracts
+          # modules read-only; without this, mkdir .../temp fails with permission denied on self-hosted runners.
+          if [ -n "${GOMODCACHE:-}" ] && [ -d "${GOMODCACHE}/github.com/deckhouse" ]; then
+            echo "Making storage-e2e module in GOMODCACHE writable for bootstrap temp/..."
+            shopt -s nullglob
+            for d in "${GOMODCACHE}"/github.com/deckhouse/storage-e2e@*; do
+              if [ -d "$d" ]; then
+                chmod -R u+w "$d" || true
+                mkdir -p "$d/temp/cluster" || true
+                chmod -R u+w "$d/temp" 2>/dev/null || true
+                # SecretsWaitTimeout is 2m in upstream; worker bootstrap secret often appears later.
+                cfg="$d/internal/config/config.go"
+                if [ -f "$cfg" ] && grep -q 'SecretsWaitTimeout   = 2 \* time\.Minute' "$cfg"; then
+                  sed -i 's/SecretsWaitTimeout   = 2 \* time\.Minute/SecretsWaitTimeout   = 15 * time.Minute/' "$cfg"
+                  echo "Patched SecretsWaitTimeout to 15m in storage-e2e ($d)"
+                fi
+                RECONNECT_PATCH="${GITHUB_WORKSPACE}/e2e/patches/storage-e2e-reconnect-after-add-nodes.patch"
+                if [ -f "$RECONNECT_PATCH" ] && [ -f "$d/pkg/cluster/cluster.go" ]; then
+                  if ! grep -q 'refresh SSH tunnel after node bootstrap' "$d/pkg/cluster/cluster.go" 2>/dev/null; then
+                    patch -p0 --batch -d "$d" -i "$RECONNECT_PATCH" || { echo "::error::storage-e2e reconnect patch failed (wrong module version?)"; exit 1; }
+                    echo "Applied storage-e2e reconnect-after-add-nodes patch ($d)"
+                  fi
+                fi
+              fi
+            done
+            shopt -u nullglob
+          fi
+          go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$' 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV
           echo "${TEST_EXIT_CODE}" > ../e2e-test-exit-code.txt
@@ -348,7 +515,7 @@ jobs:
             - **Triggered by:** \`e2e-smoke-test\` label
             - **Exit Code:** ${exitCode}
 
-            Tests were executed via storage-e2e (BlockDevice discovery, LVMVolumeGroup).
+            Tests were executed via storage-e2e (TestSdsNodeConfigurator: Common Scheduler Extender, then Sds Node Configurator).
 
             **Artifacts:** Test logs are available in workflow artifacts.
 
@@ -385,4 +552,12 @@ jobs:
         if: always()
         run: |
           rm -f "$E2E_SSH_KEY_PATH" "$E2E_SSH_PUB_PATH" "$E2E_KUBECONFIG_PATH" 2>/dev/null || true
+          WS="${GITHUB_WORKSPACE}"
+          for d in e2e/.gomodcache e2e/.gocache e2e/temp; do
+            p="${WS}/${d}"
+            if [ -e "$p" ]; then
+              chmod -R u+w "$p" 2>/dev/null || true
+              rm -rf "$p" 2>/dev/null || true
+            fi
+          done
           echo "Temp files cleaned"

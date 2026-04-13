@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: "0 01 * * 0,3" # Regular CVE scan
   pull_request:
-    types: [opened, reopened, labeled, synchronize]
+    types: [opened, reopened, labeled, synchronize, ready_for_review]
   push:
     branches:
       - main

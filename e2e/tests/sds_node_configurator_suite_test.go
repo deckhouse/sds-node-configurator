@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,7 @@ limitations under the License.
 package tests
 
 import (
+	"os"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -26,12 +27,14 @@ import (
 )
 
 var _ = BeforeSuite(func() {
-	// Validate environment and initialize logger (storage-e2e setup for cluster/kubernetes)
 	err := setup.Init()
 	Expect(err).NotTo(HaveOccurred(), "Failed to initialize storage-e2e setup")
+	// Before any spec: Ginkgo may shuffle root Ordered Describes; nested cluster must exist first.
+	e2eEnsureSharedNestedTestCluster()
 })
 
 var _ = AfterSuite(func() {
+	e2eCleanupNestedTestClusterAfterSuite()
 	if err := setup.Close(); err != nil {
 		GinkgoWriter.Printf("Warning: Failed to close logger: %v\n", err)
 	}
@@ -39,8 +42,10 @@ var _ = AfterSuite(func() {
 
 func TestSdsNodeConfigurator(t *testing.T) {
 	RegisterFailHandler(Fail)
-	// Configure Ginkgo to show verbose output
 	suiteConfig, reporterConfig := GinkgoConfiguration()
+	if os.Getenv("CI") != "" {
+		suiteConfig.FailFast = true
+	}
 	reporterConfig.Verbose = true
 	reporterConfig.ShowNodeEvents = false
 	RunSpecs(t, "Sds Node Configurator Suite", suiteConfig, reporterConfig)
