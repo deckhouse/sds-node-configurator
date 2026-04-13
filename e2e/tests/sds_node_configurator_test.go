@@ -34,11 +34,12 @@ import (
 	"sync"
 	"time"
 
+	virtv1alpha2 "github.com/deckhouse/virtualization/api/core/v1alpha2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	virtv1alpha2 "github.com/deckhouse/virtualization/api/core/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -57,8 +58,8 @@ import (
 
 // e2e config defaults (must match storage-e2e internal/config when using setup.Init())
 const (
-	e2eDefaultNamespace      = "e2e-test-cluster"
-	e2eDefaultVMSSHUser      = "cloud"
+	e2eDefaultNamespace          = "e2e-test-cluster"
+	e2eDefaultVMSSHUser          = "cloud"
 	e2eClusterCleanupTimeout     = 10 * time.Minute
 	e2eUseExistingClusterTimeout = 90 * time.Minute // storage-e2e ClusterCreationTimeout (connect + lock + health)
 	e2eLVMVGPrefix               = "e2e-lvg-"
@@ -67,7 +68,7 @@ const (
 	e2eVirtualDiskAttachRetryInterval = 1 * time.Minute
 
 	// Direct SSH to nodes for lsblk can hit transient "handshake failed: EOF" (sshd/network) after heavy I/O.
-	e2eLsblkSSHMaxRetries   = 6
+	e2eLsblkSSHMaxRetries    = 6
 	e2eLsblkSSHRetryInterval = 15 * time.Second
 
 	// alwaysCreateNew: aligned with github.com/deckhouse/storage-e2e/internal/config
@@ -1727,6 +1728,76 @@ func cleanupE2ELVMVolumeGroupsSdsNodeConfigurator(ctx context.Context, cl client
 		time.Sleep(5 * time.Second)
 	}
 	GinkgoWriter.Printf("Warning: some e2e LVMVolumeGroups may still exist after cleanup\n")
+}
+
+func restartSDSNodeConfiguratorAgentOnNode(ctx context.Context, cl client.Client, nodeName string) {
+	const (
+		namespace = "d8-sds-node-configurator"
+		appLabel  = "sds-node-configurator"
+	)
+
+	Expect(nodeName).NotTo(BeEmpty(), "node name is required to restart sds-node-configurator")
+
+	var podToRestart corev1.Pod
+	Eventually(func(g Gomega) {
+		var podList corev1.PodList
+		g.Expect(cl.List(ctx, &podList, client.InNamespace(namespace), client.MatchingLabels{"app": appLabel})).To(Succeed())
+
+		found := false
+		for i := range podList.Items {
+			pod := podList.Items[i]
+			if pod.Spec.NodeName != nodeName || pod.DeletionTimestamp != nil {
+				continue
+			}
+			podToRestart = pod
+			found = true
+			break
+		}
+
+		g.Expect(found).To(BeTrue(), "no sds-node-configurator pod found on node %s", nodeName)
+	}, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+	GinkgoWriter.Printf("    Restarting sds-node-configurator pod %s on node %s\n", podToRestart.Name, nodeName)
+	Expect(cl.Delete(ctx, &podToRestart)).To(Succeed(), "delete sds-node-configurator pod %s on node %s", podToRestart.Name, nodeName)
+
+	Eventually(func(g Gomega) {
+		var deleted corev1.Pod
+		err := cl.Get(ctx, client.ObjectKey{Namespace: namespace, Name: podToRestart.Name}, &deleted)
+		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "old pod %s should disappear before replacement becomes ready; err=%v", podToRestart.Name, err)
+	}, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+	Eventually(func(g Gomega) {
+		var podList corev1.PodList
+		g.Expect(cl.List(ctx, &podList, client.InNamespace(namespace), client.MatchingLabels{"app": appLabel})).To(Succeed())
+
+		var replacement *corev1.Pod
+		for i := range podList.Items {
+			pod := &podList.Items[i]
+			if pod.Spec.NodeName != nodeName || pod.DeletionTimestamp != nil {
+				continue
+			}
+			if pod.Name == podToRestart.Name || pod.UID == podToRestart.UID {
+				continue
+			}
+			replacement = pod
+			break
+		}
+
+		g.Expect(replacement).NotTo(BeNil(), "replacement sds-node-configurator pod on node %s not found yet", nodeName)
+		g.Expect(replacement.Status.Phase).To(Equal(corev1.PodRunning),
+			"replacement pod %s on node %s is not running yet (phase=%s)", replacement.Name, nodeName, replacement.Status.Phase)
+		g.Expect(isPodReady(replacement)).To(BeTrue(),
+			"replacement pod %s on node %s is not Ready yet", replacement.Name, nodeName)
+	}, 5*time.Minute, 10*time.Second).Should(Succeed())
+}
+
+func isPodReady(pod *corev1.Pod) bool {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 // e2eClusterStateJSONPath returns the path to storage-e2e cluster-state.json for this test file
