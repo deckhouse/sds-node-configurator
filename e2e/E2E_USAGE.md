@@ -126,7 +126,24 @@ If test cluster nodes (e.g. 10.10.10.x) are not reachable directly from your mac
 - `SSH_JUMP_HOST` — jump host (often the base cluster master).
 - `SSH_JUMP_USER` — user on the jump host (defaults to `SSH_USER` if unset).
 
-**Bastion user vs cluster node user (storage-e2e):** With a jump host, the framework connects as `SSH_JUMP_USER@SSH_JUMP_HOST`, then as **`SSH_USER@SSH_HOST`** to reach the test cluster (kubeconfig / API path). It does **not** use `SSH_VM_USER` for that second hop. Typical Deckhouse lab: bastion login `you@bastion`, nodes `cloud@10.x.x.x` — set `SSH_JUMP_USER` to your bastion account and `SSH_USER` to the SSH account on cluster nodes (often `cloud`). Keep `SSH_VM_USER` aligned with node SSH (often also `cloud`).
+### 5. `permission denied` under `.../pkg/mod/.../storage-e2e/.../temp`
+
+The storage-e2e library writes bootstrap state under a `temp/` directory inside the **checked-out** `storage-e2e` module in the Go module cache. On self-hosted runners that cache is often under a **shared read-only** path (e.g. `/opt/.../go/pkg/mod`), so `mkdir` fails even after `chmod`.
+
+**Fix (recommended):** point the module cache at a writable directory (CI uses this):
+
+```bash
+export GOMODCACHE="$(pwd)/e2e/.gomodcache"
+export GOCACHE="$(pwd)/e2e/.gocache"
+mkdir -p "$GOMODCACHE" "$GOCACHE"
+cd e2e && go mod download && go test ...
+```
+
+**Alternative (local):** `make deps` from `e2e/` runs `fix-mod-permissions` (chmod + `mkdir` under your current `GOPATH`/`GOMODCACHE`), which helps only if that cache is writable by your user.
+
+### 6. Virtualization module stuck in `Reconciling`
+
+storage-e2e checks the Deckhouse `Module/virtualization` once with a short timeout. Before nested cluster creation (`TEST_CLUSTER_CREATE_MODE=alwaysCreateNew`), the suite polls `Module/virtualization` via the Kubernetes API until `status.phase == Ready` (uses `KUBE_CONFIG_PATH`). Override total wait with `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` (e.g. `30m`). To disable this pre-wait entirely, set `E2E_SKIP_VIRTUALIZATION_MODULE_WAIT=true`.
 
 ---
 
@@ -147,8 +164,9 @@ If test cluster nodes (e.g. 10.10.10.x) are not reachable directly from your mac
 | `DKP_LICENSE_KEY` | If create mode | License for cluster creation. |
 | `REGISTRY_DOCKER_CFG` | If create mode | Registry auth (base64). |
 | `LOG_LEVEL` | No | e.g. `debug`, `info`. |
-| `TEST_CLUSTER_FORCE_LOCK_RELEASE` | No | Set to `true` once to clear a stale lock (read at process start by storage-e2e). |
-| `E2E_NO_CLUSTER_LOCK_RETRY` | No | If `true`, do not delete lock ConfigMap + retry (default: retry once when lock denied). |
+| `TEST_CLUSTER_FORCE_LOCK_RELEASE` | No | Set to `true` once to clear a stale lock. |
+| `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` | No | Max wait for Module `virtualization` Ready before nested cluster create (default ~25m). |
+| `E2E_SKIP_VIRTUALIZATION_MODULE_WAIT` | No | Set to `true` to skip the Module pre-wait (not recommended if you hit Reconciling flakes). |
 
 ---
 
