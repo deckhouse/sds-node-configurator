@@ -46,6 +46,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	k8sclient "k8s.io/client-go/kubernetes"
@@ -1785,6 +1786,40 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 
 				By("✓ LVMVolumeGroup Ready; thin-pool present and Ready; conditions without errors")
 				printLVMVolumeGroupInfo(&created)
+
+				By("=== PV Resize Test ===")
+				By("Patching VirtualDisk to increase size (simulate block device expansion)")
+				dynClient, err := dynamic.NewForConfig(testClusterResources.BaseKubeconfig)
+				Expect(err).NotTo(HaveOccurred())
+
+				vdGVR := schema.GroupVersionResource{Group: "virtualization.deckhouse.io", Version: "v1alpha2", Resource: "virtualdisks"}
+				newSize := "3Gi"
+				patchBytes := []byte(fmt.Sprintf(`{"spec":{"persistentVolumeClaim":{"size":"%s"}}}`, newSize))
+
+				_, err = dynClient.Resource(vdGVR).Namespace(ns).Patch(e2eCtx, lvgE2eDiskAttachment.DiskName, types.MergePatchType, patchBytes, metav1.PatchOptions{})
+				Expect(err).NotTo(HaveOccurred(), "Failed to patch VirtualDisk %s to size %s", lvgE2eDiskAttachment.DiskName, newSize)
+
+				By("Waiting for BlockDevice in test cluster to reflect new size (3Gi)")
+				Eventually(func(g Gomega) {
+					var bd v1alpha1.BlockDevice
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: targetBD.Name}, &bd)).To(Succeed())
+					bdSize := bd.Status.Size.Value()
+					expectedMinBytes := int64(2.5 * 1024 * 1024 * 1024)
+					g.Expect(bdSize).To(BeNumerically(">", expectedMinBytes), "BlockDevice size should increase to approximately 3Gi")
+				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
+				By("Waiting for LVMVolumeGroup to be Ready with new VGSize")
+				Eventually(func(g Gomega) {
+					var updated v1alpha1.LVMVolumeGroup
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: lvg.Name}, &updated)).To(Succeed())
+					g.Expect(updated.Status.Phase).To(Equal(v1alpha1.PhaseReady), "Phase should be Ready after resize")
+
+					vgSize := updated.Status.VGSize.Value()
+					expectedMinBytes := int64(2.5 * 1024 * 1024 * 1024)
+					g.Expect(vgSize).To(BeNumerically(">", expectedMinBytes), "VGSize should be updated to approximately 3Gi")
+				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
+				By("✓ PV Resize Test Passed")
 			})
 
 			const (
@@ -2313,7 +2348,6 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 		defer cancel()
 		e2eSuiteSharedStorageCleanup(ctx)
 	})
-
 }) // Describe: sds-node-configurator module e2e
 
 // e2eSuiteVirtualDiskPrefix matches all test VirtualDisks in the e2e namespace (scheduler, Sds LVG, discovery disks).

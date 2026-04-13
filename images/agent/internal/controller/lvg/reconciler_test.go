@@ -305,6 +305,78 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			valid, _ := r.validateLVGForUpdateFunc(lvg, bds)
 			assert.False(t, valid)
 		})
+
+		t.Run("with_100_percent_thin_pools_returns_true", func(t *testing.T) {
+			r := setupReconciler()
+
+			const (
+				firstBd  = "first"
+				secondBd = "second"
+
+				firstPath  = "first-path"
+				secondPath = "second-path"
+
+				vgName = "test-vg"
+			)
+
+			bds := map[string]v1alpha1.BlockDevice{
+				firstBd: {
+					ObjectMeta: v1.ObjectMeta{
+						Name: firstBd,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Size:       resource.MustParse("1G"),
+						Consumable: true,
+						Path:       firstPath,
+					},
+				},
+				secondBd: {
+					ObjectMeta: v1.ObjectMeta{
+						Name: secondBd,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Size:       resource.MustParse("2G"),
+						Consumable: true,
+						Path:       secondPath,
+					},
+				},
+			}
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+						{
+							Name:            "first-thin",
+							Size:            "100%",
+							AllocationLimit: "150%",
+						},
+					},
+					ActualVGNameOnTheNode: vgName,
+				},
+			}
+
+			// so second block device is new one
+			pvs := []internal.PVData{
+				{
+					PVName: firstPath,
+				},
+			}
+
+			vgs := []internal.VGData{
+				{
+					VGName: vgName,
+					VGSize: resource.MustParse("1G"),
+					VGFree: resource.MustParse("1G"),
+				},
+			}
+
+			r.sdsCache.StorePVs(pvs, bytes.Buffer{})
+			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
+
+			valid, reason := r.validateLVGForUpdateFunc(lvg, bds)
+			if assert.True(t, valid) {
+				assert.Equal(t, "", reason)
+			}
+		})
 	})
 
 	t.Run("validateLVGForCreateFunc", func(t *testing.T) {
@@ -451,6 +523,48 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 			valid, _ := r.validateLVGForCreateFunc(lvg, bds)
 			assert.False(t, valid)
+		})
+
+		t.Run("with_100_percent_thin_pools_returns_true", func(t *testing.T) {
+			r := setupReconciler()
+			const (
+				firstBd  = "first"
+				secondBd = "second"
+			)
+			bds := map[string]v1alpha1.BlockDevice{
+				firstBd: {
+					ObjectMeta: v1.ObjectMeta{
+						Name: firstBd,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Size:       resource.MustParse("1G"),
+						Consumable: true,
+					},
+				},
+				secondBd: {
+					ObjectMeta: v1.ObjectMeta{
+						Name: secondBd,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Size:       resource.MustParse("1G"),
+						Consumable: true,
+					},
+				},
+			}
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+						{
+							Size: "100%",
+						},
+					},
+				},
+			}
+
+			valid, reason := r.validateLVGForCreateFunc(lvg, bds)
+			if assert.True(t, valid) {
+				assert.Equal(t, "", reason)
+			}
 		})
 	})
 
