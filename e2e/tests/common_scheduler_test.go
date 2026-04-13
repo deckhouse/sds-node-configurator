@@ -154,8 +154,8 @@ var _ = Describe("Common Scheduler Extender", Ordered, func() {
 		}
 	})
 
-	// ---=== TEST CLUSTER IS CREATED AND READY HERE ===--- //
-	It("should create test cluster", func() {
+	// ---=== TEST CLUSTER IS CREATED AND READY HERE (single CreateOrConnect for full TestE2E) ===--- //
+	It("should create shared nested test cluster for TestE2E", func() {
 		Expect(waitForVirtualizationModuleReadyIfNeeded(context.Background())).To(Succeed(),
 			"virtualization module should become Ready on base cluster (retry while Reconciling)")
 		testClusterResources = cluster.CreateOrConnectToTestCluster()

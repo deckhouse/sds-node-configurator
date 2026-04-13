@@ -44,7 +44,7 @@ var _ = AfterSuite(func() {
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
 	suiteConfig, reporterConfig := GinkgoConfiguration()
-	// Two root Describe(Ordered) blocks share one nested cluster (second reuses AfterSuite cleanup); fail fast in CI.
+	// Two root Describe(Ordered) blocks share one nested cluster (Common Scheduler creates it; Sds reuses in BeforeAll; AfterSuite cleanup); fail fast in CI.
 	if os.Getenv("CI") != "" {
 		suiteConfig.FailFast = true
 	}

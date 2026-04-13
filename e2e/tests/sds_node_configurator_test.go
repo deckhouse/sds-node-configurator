@@ -232,29 +232,22 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 			}
 		})
 		e2eCtx = context.Background()
-	})
 
-	// Full nested cluster teardown runs once in AfterSuite (e2eCleanupNestedTestClusterAfterSuite), after both Describes.
-	// Do not call CleanupTestCluster here — one cluster per TestE2E run; Common Scheduler Extender creates and registers it first.
+		// One nested cluster per TestE2E: Common Scheduler Extender runs first (file order) and creates + registers it.
+		// Do not use a second It("should create test cluster") here — duplicate names looked like the cluster was created twice.
+		By("Resolving nested test cluster for Sds Node Configurator suite", func() {
+			if r := e2eNestedTestClusterOrNil(); r != nil {
+				testClusterResources = r
+				GinkgoWriter.Printf("    ▶️ Using nested test cluster already created by Common Scheduler Extender (same TestE2E run)\n")
+				return
+			}
 
-	// ---=== TEST CLUSTER IS CREATED AND READY HERE ===--- //
-	// CI: one nested cluster for the whole TestE2E run — register in AfterSuite for cleanup even if a spec fails.
-	// alwaysCreateNew: CreateTestCluster + WaitForTestClusterReady; on failure we clean base cluster (see createE2EAlwaysNewClusterWithCleanupOnFailure).
-
-	It("should create test cluster", func() {
-		if r := e2eNestedTestClusterOrNil(); r != nil {
-			testClusterResources = r
-			GinkgoWriter.Printf("    ▶️ Using nested test cluster already created by Common Scheduler Extender (same TestE2E run)\n")
-			return
-		}
-
-		if e2eConfigTestClusterCreateMode() == "alwaysCreateNew" {
-			testClusterResources = createE2EAlwaysNewClusterWithCleanupOnFailure()
-			e2eRegisterNestedTestCluster(testClusterResources)
-			return
-		}
-		if e2eConfigTestClusterCreateMode() == "alwaysUseExisting" {
-			By("Connecting to existing cluster", func() {
+			if e2eConfigTestClusterCreateMode() == "alwaysCreateNew" {
+				testClusterResources = createE2EAlwaysNewClusterWithCleanupOnFailure()
+				e2eRegisterNestedTestCluster(testClusterResources)
+				return
+			}
+			if e2eConfigTestClusterCreateMode() == "alwaysUseExisting" {
 				GinkgoWriter.Printf("    ▶️ Connecting to existing cluster (mode: alwaysUseExisting)\n")
 				var err error
 				testClusterResources, err = e2eConnectUseExistingClusterOnceOrRetryAfterLockDelete()
@@ -264,15 +257,17 @@ var _ = Describe("Sds Node Configurator", Ordered, func() {
 				}
 				Expect(err).NotTo(HaveOccurred(), "Should connect to existing cluster successfully")
 				GinkgoWriter.Printf("    ✅ Connected to existing cluster successfully (cluster lock acquired)\n")
-			})
+				e2eRegisterNestedTestCluster(testClusterResources)
+				return
+			}
+			Expect(waitForVirtualizationModuleReadyIfNeeded(context.Background())).To(Succeed(),
+				"virtualization module should become Ready on base cluster (retry while Reconciling)")
+			testClusterResources = cluster.CreateOrConnectToTestCluster()
 			e2eRegisterNestedTestCluster(testClusterResources)
-			return
-		}
-		Expect(waitForVirtualizationModuleReadyIfNeeded(context.Background())).To(Succeed(),
-			"virtualization module should become Ready on base cluster (retry while Reconciling)")
-		testClusterResources = cluster.CreateOrConnectToTestCluster()
-		e2eRegisterNestedTestCluster(testClusterResources)
-	}) // should create test cluster
+		})
+	})
+
+	// Nested cluster teardown: AfterSuite (e2eCleanupNestedTestClusterAfterSuite). Do not call CleanupTestCluster from this Describe.
 
 	////////////////////////////////////
 	// ---=== TESTS START HERE ===--- //
