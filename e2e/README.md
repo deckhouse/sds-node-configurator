@@ -26,10 +26,9 @@ e2e/
 ├── config/                 # локально, в .gitignore
 ├── manifests/              # RBAC и Job
 └── tests/
-    ├── e2e_suite_test.go      # TestE2E, BeforeSuite/AfterSuite (storage-e2e)
+    ├── sds_node_configurator_suite_test.go  # TestSdsNodeConfigurator, BeforeSuite/AfterSuite (storage-e2e)
     ├── e2e_cluster_lock_test.go  # lock retry / очистка lock для alwaysUseExisting
-    ├── common_scheduler_test.go   # Common Scheduler Extender
-    ├── sds_node_configurator_test.go  # общие хелперы/конфиг, BlockDevice, LVMVolumeGroup
+    ├── sds_node_configurator_test.go  # один корневой Ordered: Common Scheduler Extender, затем Sds Node Configurator; хелперы
     └── cluster_config.yml     # вложенный кластер (storage-e2e)
 ```
 
@@ -59,20 +58,20 @@ source e2e/config/test_exports_storage_e2e
 cd e2e
 go mod tidy
 make deps
-make test                    # полный прогон (TestE2E)
-make test-go                 # как в CI: -run '^TestE2E$'
+make test                    # полный прогон (TestSdsNodeConfigurator)
+make test-go                 # как в CI: -run '^TestSdsNodeConfigurator$'
 ```
 
 Фокус по имени теста:
 
 ```bash
-make test-focus FOCUS="TestE2E"
+make test-focus FOCUS="TestSdsNodeConfigurator"
 ```
 
-Один вход, как в CI по label `e2e-smoke-test`: `TestE2E` — сначала **Common Scheduler Extender**, затем **Sds Node Configurator** (порядок спеков: `common_scheduler_test.go`, затем `sds_node_configurator_test.go`).
+Один вход, как в CI по label `e2e-smoke-test`: `TestSdsNodeConfigurator` — сначала **Common Scheduler Extender**, затем **Sds Node Configurator** (вложенные `Describe(..., Ordered)` в одном файле `sds_node_configurator_test.go`, внешний `Describe` тоже `Ordered`).
 
 ```bash
-go test -v -count=1 -timeout 60m ./tests/ -run '^TestE2E$'
+go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$'
 ```
 
 Альтернатива через [Ginkgo CLI](https://github.com/onsi/ginkgo):
@@ -91,7 +90,7 @@ ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
 
 ### Common Scheduler Extender
 
-Сценарии в `common_scheduler_test.go`: фильтрация нод по LVMVolumeGroup для local PVC, Pending при нехватке места, резервация при конкурентных PVC. См. [E2E_USAGE.md](E2E_USAGE.md).
+Сценарии Common Scheduler Extender (в том же файле): фильтрация нод по LVMVolumeGroup для local PVC, Pending при нехватке места, резервация при конкурентных PVC. См. [E2E_USAGE.md](E2E_USAGE.md).
 
 ## Кластер заблокирован (cluster is already locked)
 

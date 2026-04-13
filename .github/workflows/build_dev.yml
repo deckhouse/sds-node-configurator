@@ -306,7 +306,7 @@ jobs:
           nc -zv "$SSH_HOST" 22 2>&1 || true
           echo "---"
 
-      - name: Run E2E tests (storage-e2e, TestE2E — scheduler then sds-node-configurator)
+      - name: Run E2E tests (storage-e2e, TestSdsNodeConfigurator — scheduler then sds-node-configurator)
         id: run_tests
         env:
           # Writable module cache; keep outside the repo checkout so actions/checkout (workspace wipe) never hits EACCES on extracted modules.
@@ -433,7 +433,7 @@ jobs:
             done
             shopt -u nullglob
           fi
-          go test -v -count=1 -timeout 60m ./tests/ -run '^TestE2E$' 2>&1 | tee ../e2e-test-output.log
+          go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$' 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV
           echo "${TEST_EXIT_CODE}" > ../e2e-test-exit-code.txt
@@ -515,7 +515,7 @@ jobs:
             - **Triggered by:** \`e2e-smoke-test\` label
             - **Exit Code:** ${exitCode}
 
-            Tests were executed via storage-e2e (TestE2E: Common Scheduler Extender, then Sds Node Configurator).
+            Tests were executed via storage-e2e (TestSdsNodeConfigurator: Common Scheduler Extender, then Sds Node Configurator).
 
             **Artifacts:** Test logs are available in workflow artifacts.
 
