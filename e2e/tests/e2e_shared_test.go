@@ -37,10 +37,49 @@ import (
 )
 
 const (
-	testClusterModeCreateNew = "alwaysCreateNew"
+	testClusterModeCreateNew   = "alwaysCreateNew"
+	testClusterModeUseExisting = "alwaysUseExisting"
 
 	e2eVirtualizationModuleWaitDefault = 25 * time.Minute
 )
+
+func e2eConfigNamespace() string {
+	if v := os.Getenv("TEST_CLUSTER_NAMESPACE"); v != "" {
+		return v
+	}
+	return e2eDefaultNamespace
+}
+
+func e2eConfigStorageClass() string       { return os.Getenv("TEST_CLUSTER_STORAGE_CLASS") }
+func e2eConfigTestClusterCleanup() string { return os.Getenv("TEST_CLUSTER_CLEANUP") }
+func e2eConfigSSHHost() string            { return os.Getenv("SSH_HOST") }
+func e2eConfigSSHUser() string            { return os.Getenv("SSH_USER") }
+func e2eConfigSSHJumpHost() string        { return os.Getenv("SSH_JUMP_HOST") }
+func e2eConfigSSHJumpUser() string        { return os.Getenv("SSH_JUMP_USER") }
+func e2eConfigSSHJumpKeyPath() string     { return os.Getenv("SSH_JUMP_KEY_PATH") }
+func e2eConfigSSHPassphrase() string      { return os.Getenv("SSH_PASSPHRASE") }
+func e2eConfigLogLevel() string           { return os.Getenv("LOG_LEVEL") }
+func e2eConfigTestClusterCreateMode() string {
+	return os.Getenv("TEST_CLUSTER_CREATE_MODE")
+}
+
+func e2eConfigKubeConfigPath() string {
+	return os.Getenv("KUBE_CONFIG_PATH")
+}
+
+func e2eConfigDKPLicenseKey() string {
+	if v := os.Getenv("E2E_DKP_LICENSE_KEY"); v != "" {
+		return v
+	}
+	return os.Getenv("DKP_LICENSE_KEY")
+}
+
+func e2eConfigRegistryDockerCfg() string {
+	if v := os.Getenv("E2E_REGISTRY_DOCKER_CFG"); v != "" {
+		return v
+	}
+	return os.Getenv("REGISTRY_DOCKER_CFG")
+}
 
 var deckhouseModuleGVR = schema.GroupVersionResource{
 	Group:    "deckhouse.io",
