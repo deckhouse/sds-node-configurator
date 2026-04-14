@@ -1,8 +1,4 @@
 linters-settings:
-  # Patches under e2e/ (dhctl overlay) are not image patches; the only *.patch in the module is there.
-  images:
-    patches:
-      disable: true
   container:
     exclude-rules:
       no-new-privileges:
