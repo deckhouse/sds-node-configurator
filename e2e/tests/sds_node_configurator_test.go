@@ -2552,7 +2552,9 @@ func e2eIsRetryableCreateTestClusterError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, `failed calling webhook "vd.virtualization-controller.validate.d8-virtualization"`) ||
 		strings.Contains(msg, "connect: operation not permitted") ||
-		strings.Contains(msg, "TLS handshake timeout")
+		strings.Contains(msg, "TLS handshake timeout") ||
+		strings.Contains(msg, "timeout waiting for VM") ||
+		strings.Contains(msg, "to become Running")
 }
 
 // e2eEnsureSharedNestedTestCluster creates or connects to the test cluster once for the whole suite run.
