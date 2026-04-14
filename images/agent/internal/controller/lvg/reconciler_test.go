@@ -1059,7 +1059,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			}
 
 			assert.Equal(t, v1.ConditionTrue, lvg.Status.Conditions[0].Status)
-			assert.Equal(t, curTime.Time.Unix(), lvg.Status.Conditions[0].LastTransitionTime.Time.Unix())
+			assert.Equal(t, curTime.Unix(), lvg.Status.Conditions[0].LastTransitionTime.Unix())
 		})
 	})
 
