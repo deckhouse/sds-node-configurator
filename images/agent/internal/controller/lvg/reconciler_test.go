@@ -1033,7 +1033,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			const (
 				lvgName = "test-name-2"
 			)
-			curTime := v1.NewTime(time.Now())
+			curTime := v1.NewTime(time.Now().Truncate(time.Second))
 			lvg := &v1alpha1.LVMVolumeGroup{}
 			lvg.Name = lvgName
 			lvg.Generation = 1
@@ -1058,7 +1058,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				t.Error(err)
 			}
 
-			assert.Equal(t, curTime, lvg.Status.Conditions[0].LastTransitionTime)
+			assert.Equal(t, v1.ConditionTrue, lvg.Status.Conditions[0].Status)
+			assert.Equal(t, curTime.Time.Unix(), lvg.Status.Conditions[0].LastTransitionTime.Time.Unix())
 		})
 	})
 
@@ -1081,10 +1082,22 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 	})
 
 	t.Run("shouldLVGWatcherReconcileUpdateEvent", func(t *testing.T) {
+		const testNode = "test_node"
+
+		t.Run("non_local_lvg_returns_false", func(t *testing.T) {
+			r := setupReconciler()
+			oldLVG := &v1alpha1.LVMVolumeGroup{}
+			newLVG := &v1alpha1.LVMVolumeGroup{}
+			newLVG.Spec.Local.NodeName = "other_node"
+			newLVG.DeletionTimestamp = &v1.Time{}
+			assert.False(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
+		})
+
 		t.Run("deletion_timestamp_not_nil_returns_true", func(t *testing.T) {
 			r := setupReconciler()
 			oldLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG := &v1alpha1.LVMVolumeGroup{}
+			newLVG.Spec.Local.NodeName = testNode
 			newLVG.DeletionTimestamp = &v1.Time{}
 			assert.True(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
 		})
@@ -1092,7 +1105,9 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 		t.Run("spec_is_diff_returns_true", func(t *testing.T) {
 			r := setupReconciler()
 			oldLVG := &v1alpha1.LVMVolumeGroup{}
+			oldLVG.Spec.Local.NodeName = testNode
 			newLVG := &v1alpha1.LVMVolumeGroup{}
+			newLVG.Spec.Local.NodeName = testNode
 			oldLVG.Spec.BlockDeviceSelector = &v1.LabelSelector{MatchLabels: map[string]string{"first": "second"}}
 			newLVG.Spec.BlockDeviceSelector = &v1.LabelSelector{MatchLabels: map[string]string{"second": "second"}}
 			assert.True(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
@@ -1103,6 +1118,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			oldLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG.Name = "test-name"
+			newLVG.Spec.Local.NodeName = testNode
 			newLVG.Labels = map[string]string{internal.LVGMetadataNameLabelKey: "test-name"}
 			newLVG.Status.Conditions = []v1.Condition{
 				{
@@ -1118,6 +1134,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			oldLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG.Name = "test-name"
+			newLVG.Spec.Local.NodeName = testNode
 			newLVG.Status.Conditions = []v1.Condition{
 				{
 					Type:   internal.TypeVGConfigurationApplied,
@@ -1133,6 +1150,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			oldLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG := &v1alpha1.LVMVolumeGroup{}
 			newLVG.Name = "test-name"
+			newLVG.Spec.Local.NodeName = testNode
 			newLVG.Status.Conditions = []v1.Condition{
 				{
 					Type:   internal.TypeVGConfigurationApplied,
@@ -1143,10 +1161,13 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			assert.True(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
 		})
 
-		t.Run("dev_size_and_pv_size_are_diff_returns_true", func(t *testing.T) {
+		t.Run("status_nodes_changed_returns_true", func(t *testing.T) {
 			r := setupReconciler()
 			oldLVG := &v1alpha1.LVMVolumeGroup{}
+			oldLVG.Spec.Local.NodeName = testNode
 			newLVG := &v1alpha1.LVMVolumeGroup{}
+			newLVG.Spec.Local.NodeName = testNode
+			newLVG.Labels = map[string]string{internal.LVGMetadataNameLabelKey: newLVG.Name}
 			newLVG.Status.Nodes = []v1alpha1.LVMVolumeGroupNode{
 				{
 					Devices: []v1alpha1.LVMVolumeGroupDevice{
@@ -1160,6 +1181,45 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 			assert.True(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
+		})
+
+		t.Run("only_conditions_changed_nodes_identical_returns_false", func(t *testing.T) {
+			r := setupReconciler()
+			nodes := []v1alpha1.LVMVolumeGroupNode{
+				{
+					Devices: []v1alpha1.LVMVolumeGroupDevice{
+						{
+							BlockDevice: "test",
+							DevSize:     resource.MustParse("10G"),
+							PVSize:      resource.MustParse("10G"),
+						},
+					},
+					Name: testNode,
+				},
+			}
+			oldLVG := &v1alpha1.LVMVolumeGroup{}
+			oldLVG.Spec.Local.NodeName = testNode
+			oldLVG.Labels = map[string]string{internal.LVGMetadataNameLabelKey: "test-lvg"}
+			oldLVG.Name = "test-lvg"
+			oldLVG.Status.Nodes = nodes
+			oldLVG.Status.Conditions = []v1.Condition{
+				{
+					Type:   internal.TypeVGConfigurationApplied,
+					Reason: internal.ReasonApplied,
+					Status: v1.ConditionTrue,
+				},
+			}
+
+			newLVG := oldLVG.DeepCopy()
+			newLVG.Status.Conditions = []v1.Condition{
+				{
+					Type:   internal.TypeVGConfigurationApplied,
+					Reason: internal.ReasonApplied,
+					Status: v1.ConditionFalse,
+				},
+			}
+
+			assert.False(t, r.shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG))
 		})
 	})
 
@@ -1314,6 +1374,65 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 		if assert.EqualError(t, err, "lvmvolumegroups.storage.deckhouse.io \"another-name\" not found") {
 			assert.Nil(t, actual)
+		}
+	})
+
+	t.Run("ShouldReconcileCreate", func(t *testing.T) {
+		t.Run("local_lvg_returns_true", func(t *testing.T) {
+			r := setupReconciler()
+			lvg := &v1alpha1.LVMVolumeGroup{}
+			lvg.Spec.Local.NodeName = "test_node"
+			assert.True(t, r.ShouldReconcileCreate(lvg))
+		})
+
+		t.Run("non_local_lvg_returns_false", func(t *testing.T) {
+			r := setupReconciler()
+			lvg := &v1alpha1.LVMVolumeGroup{}
+			lvg.Spec.Local.NodeName = "other_node"
+			assert.False(t, r.ShouldReconcileCreate(lvg))
+		})
+	})
+
+	t.Run("updateLVGConditionIfNeeded_early_return_propagates_resource_version", func(t *testing.T) {
+		r := setupReconciler()
+		const lvgName = "test-rv-propagation"
+		lvg := &v1alpha1.LVMVolumeGroup{}
+		lvg.Name = lvgName
+		lvg.Generation = 1
+		lvg.Status.Conditions = []v1.Condition{
+			{
+				Type:               internal.TypeVGConfigurationApplied,
+				Status:             v1.ConditionTrue,
+				ObservedGeneration: 1,
+				LastTransitionTime: v1.NewTime(time.Now().Truncate(time.Second)),
+				Reason:             "",
+				Message:            "",
+			},
+		}
+
+		err := r.cl.Create(ctx, lvg)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+
+		defer func() {
+			_ = r.cl.Delete(ctx, lvg)
+		}()
+
+		serverLVG := &v1alpha1.LVMVolumeGroup{}
+		err = r.cl.Get(ctx, client.ObjectKey{Name: lvgName}, serverLVG)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		serverRV := serverLVG.ResourceVersion
+
+		lvg.ResourceVersion = ""
+
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, "", "")
+		if assert.NoError(t, err) {
+			assert.Equal(t, serverRV, lvg.ResourceVersion)
 		}
 	})
 }
