@@ -319,6 +319,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				storageClass := e2eConfigStorageClass()
 				Expect(storageClass).NotTo(BeEmpty(), "TEST_CLUSTER_STORAGE_CLASS is required for VirtualDisk")
 
+				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+
 				By("Cleaning up existing e2e LVMLogicalVolumes (orphan PVCs)")
 				cleanupE2ELVMLogicalVolumes(e2eCtx, k8sClient)
 
