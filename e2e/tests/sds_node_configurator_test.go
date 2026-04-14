@@ -2929,6 +2929,11 @@ func cleanupE2EVirtualDisks(ctx context.Context, kubeconfig *rest.Config, namesp
 }
 
 func cleanupE2ELVMLogicalVolumes(ctx context.Context, cl client.Client) {
+	if cl == nil {
+		GinkgoWriter.Println("Skip LVMLogicalVolumes cleanup: Kubernetes client is not initialized")
+		return
+	}
+
 	var list v1alpha1.LVMLogicalVolumeList
 	err := cl.List(ctx, &list, &client.ListOptions{})
 	if err != nil {
@@ -2990,6 +2995,11 @@ func cleanupE2ELVMLogicalVolumes(ctx context.Context, cl client.Client) {
 }
 
 func cleanupE2ELVMVolumeGroups(ctx context.Context, cl client.Client) {
+	if cl == nil {
+		GinkgoWriter.Println("Skip LVMVolumeGroups cleanup: Kubernetes client is not initialized")
+		return
+	}
+
 	var list v1alpha1.LVMVolumeGroupList
 	err := cl.List(ctx, &list, &client.ListOptions{})
 	if err != nil {
