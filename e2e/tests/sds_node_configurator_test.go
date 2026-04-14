@@ -1893,11 +1893,26 @@ func ensureE2EK8sClient(resources *cluster.TestClusterResources, k8s *client.Cli
 	Expect(resources.Kubeconfig).NotTo(BeNil())
 	err := v1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
-	var err2 error
-	*k8s, err2 = client.New(resources.Kubeconfig, client.Options{Scheme: scheme.Scheme})
-	Expect(err2).NotTo(HaveOccurred())
-	_, err2 = (*k8s).RESTMapper().RESTMapping(v1alpha1.SchemeGroupVersion.WithKind("BlockDevice").GroupKind())
-	Expect(err2).NotTo(HaveOccurred())
+	var (
+		discoveredClient client.Client
+		lastErr          error
+	)
+	Eventually(func() error {
+		tmpClient, err := client.New(resources.Kubeconfig, client.Options{Scheme: scheme.Scheme})
+		if err != nil {
+			lastErr = err
+			return err
+		}
+		_, err = tmpClient.RESTMapper().RESTMapping(v1alpha1.SchemeGroupVersion.WithKind("BlockDevice").GroupKind())
+		if err != nil {
+			lastErr = err
+			return err
+		}
+		discoveredClient = tmpClient
+		lastErr = nil
+		return nil
+	}, 2*time.Minute, 5*time.Second).Should(Succeed(), "BlockDevice REST mapping should become available: %v", lastErr)
+	*k8s = discoveredClient
 	By("Cleaning up existing e2e LVMVolumeGroups (prefix " + e2eLVMVGPrefix + ")")
 	cleanupE2ELVMVolumeGroupsSdsNodeConfigurator(ctx, *k8s)
 }
