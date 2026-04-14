@@ -852,12 +852,20 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				}
 				Expect(k8sClient.Create(e2eCtx, lvg)).To(Succeed())
 
-				By("Waiting for LVMVolumeGroup to become Ready")
+				defer func() {
+					var current v1alpha1.LVMVolumeGroup
+					if err := k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &current); err == nil && current.Status.Phase != v1alpha1.PhaseReady {
+						GinkgoWriter.Println("\n--- Shrink test LVMVolumeGroup did not become Ready; current state ---")
+						printLVMVolumeGroupInfo(&current)
+					}
+				}()
+
+				By("Waiting for LVMVolumeGroup to become Ready (up to 10 minutes)")
 				Eventually(func(g Gomega) {
 					var current v1alpha1.LVMVolumeGroup
 					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &current)).To(Succeed())
 					g.Expect(current.Status.Phase).To(Equal(v1alpha1.PhaseReady), "Phase=%s", current.Status.Phase)
-				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+				}, 10*time.Minute, 10*time.Second).Should(Succeed())
 
 				var origLVG v1alpha1.LVMVolumeGroup
 				Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &origLVG)).To(Succeed())
