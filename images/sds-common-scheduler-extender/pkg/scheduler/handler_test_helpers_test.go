@@ -138,14 +138,14 @@ func thickFailedLLVOnDisk(name, lvgName, specSize string, actualSize int64) *snc
 	}
 }
 
-func thinFailedLLVOnDisk(name, thinPoolName, specSize string, actualSize int64) *snc.LVMLogicalVolume {
+func thinFailedLLVOnDisk(name, specSize string, actualSize int64) *snc.LVMLogicalVolume {
 	return &snc.LVMLogicalVolume{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: snc.LVMLogicalVolumeSpec{
 			LVMVolumeGroupName: "lvg1",
 			Size:               specSize,
 			Type:               "Thin",
-			Thin:               &snc.LVMLogicalVolumeThinSpec{PoolName: thinPoolName},
+			Thin:               &snc.LVMLogicalVolumeThinSpec{PoolName: "tp0"},
 		},
 		Status: &snc.LVMLogicalVolumeStatus{
 			Phase:      "Failed",

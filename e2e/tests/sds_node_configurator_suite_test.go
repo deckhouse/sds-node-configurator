@@ -19,6 +19,7 @@ package tests
 import (
 	"os"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -45,6 +46,7 @@ func TestSdsNodeConfigurator(t *testing.T) {
 	suiteConfig, reporterConfig := GinkgoConfiguration()
 	if os.Getenv("CI") != "" {
 		suiteConfig.FailFast = true
+		suiteConfig.Timeout = 110 * time.Minute
 	}
 	reporterConfig.Verbose = true
 	reporterConfig.ShowNodeEvents = false

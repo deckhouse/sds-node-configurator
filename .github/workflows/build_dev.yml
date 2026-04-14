@@ -309,9 +309,10 @@ jobs:
       - name: Run E2E tests (storage-e2e, TestSdsNodeConfigurator — scheduler then sds-node-configurator)
         id: run_tests
         env:
-          # Writable module cache; keep outside the repo checkout so actions/checkout (workspace wipe) never hits EACCES on extracted modules.
-          GOMODCACHE: ${{ runner.temp }}/e2e-gomodcache
-          GOCACHE: ${{ runner.temp }}/e2e-gocache
+          # Use per-run caches outside the checkout so self-hosted runners do not leave read-only
+          # module trees under the workspace that break later actions/checkout cleanup.
+          GOMODCACHE: ${{ runner.temp }}/sds-node-configurator-e2e-${{ github.run_id }}-${{ github.run_attempt }}/gomodcache
+          GOCACHE: ${{ runner.temp }}/sds-node-configurator-e2e-${{ github.run_id }}-${{ github.run_attempt }}/gocache
           TEST_CLUSTER_CREATE_MODE: ${{ secrets.E2E_TEST_CLUSTER_CREATE_MODE }}
           TEST_CLUSTER_NAMESPACE: e2e-${{ vars.MODULE_NAME }}-pr${{ github.event.pull_request.number }}-${{ github.run_id }}
           TEST_CLUSTER_STORAGE_CLASS: ${{ secrets.E2E_TEST_CLUSTER_STORAGE_CLASS }}
@@ -433,7 +434,7 @@ jobs:
             done
             shopt -u nullglob
           fi
-          go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$' 2>&1 | tee ../e2e-test-output.log
+          go test -v -count=1 -timeout 120m ./tests/ -run '^TestSdsNodeConfigurator$' 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV
           echo "${TEST_EXIT_CODE}" > ../e2e-test-exit-code.txt
@@ -515,7 +516,7 @@ jobs:
             - **Triggered by:** \`e2e-smoke-test\` label
             - **Exit Code:** ${exitCode}
 
-            Tests were executed via storage-e2e (TestSdsNodeConfigurator: Common Scheduler Extender, then Sds Node Configurator).
+            Tests were executed via storage-e2e (TestSdsNodeConfigurator).
 
             **Artifacts:** Test logs are available in workflow artifacts.
 
@@ -552,6 +553,12 @@ jobs:
         if: always()
         run: |
           rm -f "$E2E_SSH_KEY_PATH" "$E2E_SSH_PUB_PATH" "$E2E_KUBECONFIG_PATH" 2>/dev/null || true
+          for p in "${GOMODCACHE:-}" "${GOCACHE:-}"; do
+            if [ -n "$p" ] && [ -e "$p" ]; then
+              chmod -R u+w "$p" 2>/dev/null || true
+              rm -rf "$p" 2>/dev/null || true
+            fi
+          done
           WS="${GITHUB_WORKSPACE}"
           for d in e2e/.gomodcache e2e/.gocache e2e/temp; do
             p="${WS}/${d}"

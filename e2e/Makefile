@@ -43,15 +43,15 @@ cleanup: ## Delete Job and RBAC
 # === Local run ===
 
 .PHONY: test
-test: ## Run full E2E suite (TestSdsNodeConfigurator — все Ginkgo-спеки в пакете)
+test: ## Run full E2E suite (TestE2E — все Ginkgo-спеки в пакете)
 	go test -v -count=1 -timeout 60m ./tests/
 
 .PHONY: test-go
-test-go: ## Как в CI smoke: только TestSdsNodeConfigurator (Common Scheduler, затем Sds Node Configurator)
-	go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$$'
+test-go: ## Как в CI smoke: только TestE2E (Common Scheduler, затем Sds Node Configurator)
+	go test -v -count=1 -timeout 60m ./tests/ -run '^TestE2E$$'
 
 .PHONY: test-focus
-test-focus: ## Run by test name (make test-focus FOCUS="TestSdsNodeConfigurator")
+test-focus: ## Run by test name (make test-focus FOCUS="TestE2E")
 	@if [ -z "$(FOCUS)" ]; then \
 		echo "Error: specify FOCUS=<test name>"; \
 		exit 1; \
