@@ -638,7 +638,7 @@ func (r *Reconciler) shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alph
 		return true
 	}
 
-	if !reflect.DeepEqual(oldLVG.Status.Nodes, newLVG.Status.Nodes) {
+	if hasStatusNodesDiff(r.log, oldLVG.Status.Nodes, newLVG.Status.Nodes) {
 		r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s status nodes have changed", newLVG.Name))
 		return true
 	}
@@ -693,7 +693,7 @@ func (r *Reconciler) syncThinPoolsAllocationLimit(ctx context.Context, lvg *v1al
 	}
 
 	if updated {
-		fmt.Printf("%+v", lvg.Status.ThinPools)
+		r.log.Trace(fmt.Sprintf("[syncThinPoolsAllocationLimit] LVMVolumeGroup %s ThinPools: %+v", lvg.Name, lvg.Status.ThinPools))
 		r.log.Debug(fmt.Sprintf("[syncThinPoolsAllocationLimit] tries to update the LVMVolumeGroup %s", lvg.Name))
 		err = r.cl.Status().Update(ctx, lvg)
 		if err != nil {

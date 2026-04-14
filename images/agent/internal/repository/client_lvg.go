@@ -68,6 +68,9 @@ func (lvgCl *LVGClient) GetLVMVolumeGroup(ctx context.Context, name string) (*v1
 	return obj, nil
 }
 
+// UpdateLVGConditionIfNeeded updates a condition on the LVMVolumeGroup with retry on conflict.
+// On success, lvg.Status and lvg.ResourceVersion are replaced with server-side values.
+// Callers must not hold unsaved in-memory Status modifications before calling this method.
 func (lvgCl *LVGClient) UpdateLVGConditionIfNeeded(
 	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
@@ -101,6 +104,8 @@ func (lvgCl *LVGClient) UpdateLVGConditionIfNeeded(
 				if c.Type == conType {
 					if checkIfEqualConditions(c, newCondition) {
 						lvgCl.log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no need to update condition %s in the LVMVolumeGroup %s as new and old condition states are the same", conType, fresh.Name))
+						lvg.Status = fresh.Status
+						lvg.ResourceVersion = fresh.ResourceVersion
 						return nil
 					}
 
