@@ -2386,6 +2386,34 @@ func e2eDeleteNamespaceBestEffort(ctx context.Context, cfg *rest.Config, ns stri
 		return
 	}
 	GinkgoWriter.Printf("    ✅ cleanup: namespace %q deletion submitted\n", ns)
+	e2eWaitNamespaceDeletedBestEffort(ctx, cs, ns)
+}
+
+func e2eWaitNamespaceDeletedBestEffort(ctx context.Context, cs *k8sclient.Clientset, ns string) {
+	waitCtx, cancel := context.WithTimeout(ctx, e2eClusterCleanupTimeout)
+	defer cancel()
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		_, err := cs.CoreV1().Namespaces().Get(waitCtx, ns, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			GinkgoWriter.Printf("    ✅ cleanup: namespace %q deleted\n", ns)
+			return
+		}
+		if err != nil {
+			GinkgoWriter.Printf("    ⚠️  cleanup: get namespace %q: %v\n", ns, err)
+			return
+		}
+
+		select {
+		case <-waitCtx.Done():
+			GinkgoWriter.Printf("    ⚠️  cleanup: timed out waiting for namespace %q deletion: %v\n", ns, waitCtx.Err())
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func kubeconfigDirForNamespaceDelete(clusterStatePath string, _ error) (dir string, tmpToRemove string, err error) {
