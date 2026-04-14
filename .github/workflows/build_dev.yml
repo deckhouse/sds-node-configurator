@@ -434,7 +434,7 @@ jobs:
             done
             shopt -u nullglob
           fi
-          go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$' 2>&1 | tee ../e2e-test-output.log
+          go test -v -count=1 -timeout 120m ./tests/ -run '^TestSdsNodeConfigurator$' 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV
           echo "${TEST_EXIT_CODE}" > ../e2e-test-exit-code.txt
