@@ -20,7 +20,7 @@ const (
 	// LVGUpdateTriggerLabel if you change this value, you must change its value in controller/pkg/block_device_labels_watcher.go as well
 	LVGUpdateTriggerLabel = "storage.deckhouse.io/update-trigger"
 
-	PartType = "part"
+	PartType                     = "part"
 	MultiPathType                = "mpath"
 	CDROMDeviceType              = "rom"
 	DRBDName                     = "/dev/drbd"
