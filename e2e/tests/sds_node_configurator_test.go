@@ -2499,13 +2499,28 @@ func createE2EAlwaysNewClusterWithCleanupOnFailure() *cluster.TestClusterResourc
 		yamlName = "cluster_config.yml"
 	}
 
-	createCtx, cancel := context.WithTimeout(context.Background(), e2eClusterCreationTimeout)
-	defer cancel()
+	var (
+		res *cluster.TestClusterResources
+		err error
+	)
 
-	res, err := cluster.CreateTestCluster(createCtx, yamlName)
-	if err != nil {
-		GinkgoWriter.Printf("    ▶️  CreateTestCluster failed; cleaning base cluster namespace before spec exits...\n")
+	for attempt := 1; attempt <= 3; attempt++ {
+		createCtx, cancel := context.WithTimeout(context.Background(), e2eClusterCreationTimeout)
+		res, err = cluster.CreateTestCluster(createCtx, yamlName)
+		cancel()
+		if err == nil {
+			break
+		}
+
+		GinkgoWriter.Printf("    ▶️  CreateTestCluster failed (attempt %d/3); cleaning base cluster namespace before spec exits...\n", attempt)
 		e2eSyncCleanupBaseClusterNamespace(context.Background(), statePath, statePathErr)
+
+		if attempt < 3 && e2eIsRetryableCreateTestClusterError(err) {
+			GinkgoWriter.Printf("    ↻ Retrying CreateTestCluster after transient virtualization error: %v\n", err)
+			time.Sleep(15 * time.Second)
+			continue
+		}
+
 		Expect(err).NotTo(HaveOccurred(), "Test cluster should be created successfully")
 	}
 
@@ -2525,6 +2540,17 @@ func createE2EAlwaysNewClusterWithCleanupOnFailure() *cluster.TestClusterResourc
 	}
 
 	return res
+}
+
+func e2eIsRetryableCreateTestClusterError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := err.Error()
+	return strings.Contains(msg, `failed calling webhook "vd.virtualization-controller.validate.d8-virtualization"`) ||
+		strings.Contains(msg, "connect: operation not permitted") ||
+		strings.Contains(msg, "TLS handshake timeout")
 }
 
 // e2eEnsureSharedNestedTestCluster creates or connects to the test cluster once for the whole suite run.
