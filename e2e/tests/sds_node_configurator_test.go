@@ -2711,6 +2711,11 @@ var vmbdaGVR = schema.GroupVersionResource{
 }
 
 func forceDeleteAllNonConsumableBlockDevices(ctx context.Context, cl client.Client, timeout time.Duration) {
+	if cl == nil {
+		GinkgoWriter.Println("Skip BlockDevices cleanup: Kubernetes client is not initialized")
+		return
+	}
+
 	var bdList v1alpha1.BlockDeviceList
 	if err := cl.List(ctx, &bdList, &client.ListOptions{}); err != nil {
 		GinkgoWriter.Printf("Failed to list BlockDevices: %v\n", err)
