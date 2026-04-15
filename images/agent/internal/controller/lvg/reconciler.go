@@ -113,8 +113,8 @@ func (r *Reconciler) ShouldReconcileUpdate(objectOld *v1alpha1.LVMVolumeGroup, o
 }
 
 // ShouldReconcileCreate implements controller.Reconciler.
-func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMVolumeGroup) bool {
-	return true
+func (r *Reconciler) ShouldReconcileCreate(obj *v1alpha1.LVMVolumeGroup) bool {
+	return checkIfLVGBelongsToNode(obj, r.cfg.NodeName)
 }
 
 // Reconcile implements controller.Reconciler.
@@ -605,6 +605,10 @@ func (r *Reconciler) shouldUpdateLVGLabels(lvg *v1alpha1.LVMVolumeGroup, labelKe
 }
 
 func (r *Reconciler) shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alpha1.LVMVolumeGroup) bool {
+	if !checkIfLVGBelongsToNode(newLVG, r.cfg.NodeName) {
+		return false
+	}
+
 	if newLVG.DeletionTimestamp != nil {
 		r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s has deletionTimestamp", newLVG.Name))
 		return true
@@ -634,16 +638,9 @@ func (r *Reconciler) shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alph
 		return true
 	}
 
-	extentSize := extentSizeForThinPoolAlign(newLVG, nil)
-	for _, n := range newLVG.Status.Nodes {
-		for _, d := range n.Devices {
-			alignedPV, _ := utils.AlignSizeToExtent(d.PVSize, extentSize)
-			alignedDev, _ := utils.AlignSizeToExtent(d.DevSize, extentSize)
-			if alignedPV.Value() != alignedDev.Value() {
-				r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s PV size is different to device size", newLVG.Name))
-				return true
-			}
-		}
+	if hasStatusNodesDiff(r.log, oldLVG.Status.Nodes, newLVG.Status.Nodes) {
+		r.log.Debug(fmt.Sprintf("[shouldLVGWatcherReconcileUpdateEvent] update event should be reconciled as the LVMVolumeGroup %s status nodes have changed", newLVG.Name))
+		return true
 	}
 
 	return false
@@ -696,7 +693,7 @@ func (r *Reconciler) syncThinPoolsAllocationLimit(ctx context.Context, lvg *v1al
 	}
 
 	if updated {
-		fmt.Printf("%+v", lvg.Status.ThinPools)
+		r.log.Trace(fmt.Sprintf("[syncThinPoolsAllocationLimit] LVMVolumeGroup %s ThinPools: %+v", lvg.Name, lvg.Status.ThinPools))
 		r.log.Debug(fmt.Sprintf("[syncThinPoolsAllocationLimit] tries to update the LVMVolumeGroup %s", lvg.Name))
 		err = r.cl.Status().Update(ctx, lvg)
 		if err != nil {
@@ -1094,7 +1091,7 @@ func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolu
 				if isApplied(lvg) {
 					err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 					if err != nil {
-						r.log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
+						r.log.Error(err, fmt.Sprintf("[ResizePVIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
 						return err
 					}
 				}
@@ -1160,7 +1157,7 @@ func (r *Reconciler) extendVGIfNeeded(
 	if isApplied(lvg) {
 		err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[UpdateVGTagIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
+			r.log.Error(err, fmt.Sprintf("[ExtendVGIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
 			return err
 		}
 	}

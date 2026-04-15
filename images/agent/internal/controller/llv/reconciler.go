@@ -225,6 +225,11 @@ func (r *Reconciler) Reconcile(
 		return controller.Result{RequeueAfter: r.cfg.VolumeGroupScanInterval}, nil
 	}
 
+	if lvg.Status.ExtentSize.Value() == 0 {
+		r.log.Warning(fmt.Sprintf("[Reconcile] LVMVolumeGroup %s has zero ExtentSize (discoverer has not populated it yet), retry in %s", lvg.Name, r.cfg.VolumeGroupScanInterval.String()))
+		return controller.Result{RequeueAfter: r.cfg.VolumeGroupScanInterval}, nil
+	}
+
 	r.log.Debug(fmt.Sprintf("[Reconcile] tries to add the finalizer %s to the LVMLogicalVolume %s", internal.SdsNodeConfiguratorFinalizer, llv.Name))
 	added, err := r.addLLVFinalizerIfNotExist(ctx, llv)
 	if err != nil {

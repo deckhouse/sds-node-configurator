@@ -90,13 +90,13 @@ func (r *Reconciler) MaxConcurrentReconciles() int {
 }
 
 // ShouldReconcileUpdate implements controller.Reconciler.
-func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.LVMVolumeGroup, _ *v1alpha1.LVMVolumeGroup) bool {
-	return true
+func (r *Reconciler) ShouldReconcileUpdate(_ *v1alpha1.LVMVolumeGroup, objectNew *v1alpha1.LVMVolumeGroup) bool {
+	return objectNew.Spec.Local.NodeName == r.cfg.NodeName
 }
 
 // ShouldReconcileCreate implements controller.Reconciler.
-func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMVolumeGroup) bool {
-	return true
+func (r *Reconciler) ShouldReconcileCreate(obj *v1alpha1.LVMVolumeGroup) bool {
+	return obj.Spec.Local.NodeName == r.cfg.NodeName
 }
 
 // Reconcile implements controller.Reconciler.
@@ -130,13 +130,13 @@ func (r *Reconciler) shouldLLVExtenderReconcileEvent(newLVG *v1alpha1.LVMVolumeG
 		return false
 	}
 
-	if !utils.LVGBelongsToNode(newLVG, r.cfg.NodeName) {
-		r.log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as it does not belong to the node %s", newLVG.Name, r.cfg.NodeName))
+	if newLVG.Status.Phase != internal.PhaseReady {
+		r.log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as its Status.Phase is not Ready", newLVG.Name))
 		return false
 	}
 
-	if newLVG.Status.Phase != internal.PhaseReady {
-		r.log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as its Status.Phase is not Ready", newLVG.Name))
+	if newLVG.Status.ExtentSize.Value() == 0 {
+		r.log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as its ExtentSize is not populated yet", newLVG.Name))
 		return false
 	}
 
