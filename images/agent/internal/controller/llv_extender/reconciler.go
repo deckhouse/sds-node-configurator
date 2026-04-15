@@ -130,11 +130,6 @@ func (r *Reconciler) shouldLLVExtenderReconcileEvent(newLVG *v1alpha1.LVMVolumeG
 		return false
 	}
 
-	if !utils.LVGBelongsToNode(newLVG, r.cfg.NodeName) {
-		r.log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as it does not belong to the node %s", newLVG.Name, r.cfg.NodeName))
-		return false
-	}
-
 	if newLVG.Status.Phase != internal.PhaseReady {
 		r.log.Debug(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] the LVMVolumeGroup %s should not be reconciled as its Status.Phase is not Ready", newLVG.Name))
 		return false

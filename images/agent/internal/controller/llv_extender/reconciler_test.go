@@ -73,20 +73,6 @@ func TestLLVExtender(t *testing.T) {
 			assert.False(t, r.shouldLLVExtenderReconcileEvent(lvg))
 		})
 
-		t.Run("not_belonging_to_node_returns_false", func(t *testing.T) {
-			r := setupExtenderReconciler()
-			lvg := &v1alpha1.LVMVolumeGroup{
-				Status: v1alpha1.LVMVolumeGroupStatus{
-					Phase: internal.PhaseReady,
-					Nodes: []v1alpha1.LVMVolumeGroupNode{
-						{Name: "other_node"},
-					},
-					ExtentSize: resource.MustParse("4Mi"),
-				},
-			}
-			assert.False(t, r.shouldLLVExtenderReconcileEvent(lvg))
-		})
-
 		t.Run("not_ready_phase_returns_false", func(t *testing.T) {
 			r := setupExtenderReconciler()
 			lvg := &v1alpha1.LVMVolumeGroup{
