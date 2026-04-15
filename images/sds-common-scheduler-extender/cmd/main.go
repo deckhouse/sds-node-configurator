@@ -45,6 +45,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/kubutils"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/scheduler"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 const (
@@ -69,6 +70,7 @@ var cfgFilePath string
 var resourcesSchemeFuncs = []func(*runtime.Scheme) error{
 	slv.AddToScheme,
 	snc.AddToScheme,
+	srv.AddToScheme,
 	corev1.AddToScheme,
 	storagev1.AddToScheme,
 	d8commonapi.AddToScheme,

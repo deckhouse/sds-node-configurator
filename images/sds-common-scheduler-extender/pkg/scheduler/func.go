@@ -20,12 +20,12 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/stretchr/testify/assert/yaml"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
@@ -33,6 +33,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 const (
@@ -528,15 +529,15 @@ func extractRequestedSize(
 			if err != nil {
 				return nil, fmt.Errorf("[extractRequestedSize] unable to get RSC for SC %s: %w", sc.Name, err)
 			}
-			rspName := rsc.GetStoragePoolName()
+			rspName := rscStoragePoolName(rsc)
 			rsp, err := getReplicatedStoragePoolForExtract(ctx, cl, rspName)
 			if err != nil {
 				return nil, fmt.Errorf("[extractRequestedSize] unable to get RSP %s: %w", rspName, err)
 			}
 			switch rsp.Spec.Type {
-			case consts.RSPTypeLVM:
+			case srv.ReplicatedStoragePoolTypeLVM:
 				deviceType = consts.Thick
-			case consts.RSPTypeLVMThin:
+			case srv.ReplicatedStoragePoolTypeLVMThin:
 				deviceType = consts.Thin
 			default:
 				deviceType = consts.Thick
@@ -571,9 +572,8 @@ func extractRequestedSize(
 	return pvcRequests, nil
 }
 
-// getReplicatedStorageClassForExtract retrieves RSC by SC name for extractRequestedSize
-func getReplicatedStorageClassForExtract(ctx context.Context, cl client.Client, scName string) (*snc.ReplicatedStorageClass, error) {
-	rsc := &snc.ReplicatedStorageClass{}
+func getReplicatedStorageClassForExtract(ctx context.Context, cl client.Client, scName string) (*srv.ReplicatedStorageClass, error) {
+	rsc := &srv.ReplicatedStorageClass{}
 	err := cl.Get(ctx, client.ObjectKey{Name: scName}, rsc)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get ReplicatedStorageClass %s: %w", scName, err)
@@ -581,9 +581,8 @@ func getReplicatedStorageClassForExtract(ctx context.Context, cl client.Client, 
 	return rsc, nil
 }
 
-// getReplicatedStoragePoolForExtract retrieves RSP by name for extractRequestedSize
-func getReplicatedStoragePoolForExtract(ctx context.Context, cl client.Client, rspName string) (*snc.ReplicatedStoragePool, error) {
-	rsp := &snc.ReplicatedStoragePool{}
+func getReplicatedStoragePoolForExtract(ctx context.Context, cl client.Client, rspName string) (*srv.ReplicatedStoragePool, error) {
+	rsp := &srv.ReplicatedStoragePool{}
 	err := cl.Get(ctx, client.ObjectKey{Name: rspName}, rsp)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get ReplicatedStoragePool %s: %w", rspName, err)
