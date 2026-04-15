@@ -82,7 +82,7 @@ fix-mod-permissions: ## Writable storage-e2e in GOMODCACHE or GOPATH (PrepareBoo
 					sed -i 's/SecretsWaitTimeout   = 2 \* time\.Minute/SecretsWaitTimeout   = 15 * time.Minute/' "$$cfg"; \
 					echo "Patched SecretsWaitTimeout to 15m in $$dir"; \
 				fi; \
-				RP="$(CURDIR)/patches/storage-e2e-reconnect-after-add-nodes.patch"; \
+				RP="$(CURDIR)/patches/storage-e2e-reconnect-after-add-nodes.diff"; \
 				if [ -f "$$RP" ] && [ -f "$$dir/pkg/cluster/cluster.go" ] && ! grep -q 'refresh SSH tunnel after node bootstrap' "$$dir/pkg/cluster/cluster.go" 2>/dev/null; then \
 					patch -p0 --batch -d "$$dir" -i "$$RP" || exit 1; \
 					echo "Applied reconnect-after-add-nodes patch in $$dir"; \

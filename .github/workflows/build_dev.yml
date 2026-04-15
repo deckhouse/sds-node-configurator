@@ -422,7 +422,7 @@ jobs:
                   sed -i 's/SecretsWaitTimeout   = 2 \* time\.Minute/SecretsWaitTimeout   = 15 * time.Minute/' "$cfg"
                   echo "Patched SecretsWaitTimeout to 15m in storage-e2e ($d)"
                 fi
-                RECONNECT_PATCH="${GITHUB_WORKSPACE}/e2e/patches/storage-e2e-reconnect-after-add-nodes.patch"
+                RECONNECT_PATCH="${GITHUB_WORKSPACE}/e2e/patches/storage-e2e-reconnect-after-add-nodes.diff"
                 if [ -f "$RECONNECT_PATCH" ] && [ -f "$d/pkg/cluster/cluster.go" ]; then
                   if ! grep -q 'refresh SSH tunnel after node bootstrap' "$d/pkg/cluster/cluster.go" 2>/dev/null; then
                     patch -p0 --batch -d "$d" -i "$RECONNECT_PATCH" || { echo "::error::storage-e2e reconnect patch failed (wrong module version?)"; exit 1; }
