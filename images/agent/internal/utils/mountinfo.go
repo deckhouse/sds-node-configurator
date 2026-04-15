@@ -23,6 +23,13 @@ import (
 	"strings"
 )
 
+// ProcHostMountInfo is the mountinfo of PID 1 (the host's init process).
+// The agent runs with hostPID: true (see templates/agent/daemonset.yaml), so PID 1
+// in the pod's PID namespace is the host's init. /proc/1/mountinfo therefore
+// exposes the host's mount namespace (see proc_pid_mountinfo(5)).
+// This is equivalent to `nsenter -t 1 -m -- cat /proc/self/mountinfo` (the same
+// PID 1 reference used by all LVM commands, see nsentrerExpendedArgs) but avoids
+// spawning a separate process.
 const ProcHostMountInfo = "/proc/1/mountinfo"
 
 // ParseMountInfo parses a mountinfo file (see proc(5)) into a map of "major:minor" → mount-point path.
@@ -33,8 +40,6 @@ const ProcHostMountInfo = "/proc/1/mountinfo"
 //
 // When a device appears multiple times (e.g. bind mounts), the last mount point wins,
 // matching lsblk MOUNTPOINT semantics ("usually the last mounted instance").
-// For the current use case (determining whether a device is mounted at all)
-// the specific path does not matter — any non-empty value is sufficient.
 //
 // Mount-point paths are decoded from kernel octal escapes (\NNN) so the returned
 // strings match real filesystem paths (parity with lsblk output).
