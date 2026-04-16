@@ -20,6 +20,8 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/pilebones/go-udev/crawler"
 )
 
 // ErrUnknownAction is returned by HandleEvent when the uevent action
@@ -93,4 +95,36 @@ func (dm *DeviceMap) Len() int {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
 	return len(dm.devices)
+}
+
+// FillFromCrawler atomically replaces the device map contents with devices
+// obtained from a sysfs crawler. Each device's env is enriched with the udev
+// database before parsing, because crawler only provides basic kernel uevent
+// properties (MAJOR, MINOR, DEVNAME, DEVTYPE) without udev-enriched fields
+// (serial, model, wwn). Devices that fail to parse are skipped and their
+// errors are collected in the returned slice.
+func (dm *DeviceMap) FillFromCrawler(devices []crawler.Device, udevDBPath string) []error {
+	newDevices := make(map[string]Properties, len(devices))
+	var errs []error
+	for _, dev := range devices {
+		env, enrichErr := EnrichWithUdevDB(udevDBPath, dev.Env)
+		if enrichErr != nil {
+			errs = append(errs, fmt.Errorf("crawler device %s: %w", dev.KObj, enrichErr))
+		}
+
+		props, err := ParseProperties(env)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("crawler device %s: %w", dev.KObj, err))
+			continue
+		}
+
+		key := DeviceKey(props.Major, props.Minor)
+		newDevices[key] = props
+	}
+
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+	dm.devices = newDevices
+
+	return errs
 }
