@@ -17,6 +17,7 @@ limitations under the License.
 package udev
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -117,7 +118,7 @@ func TestHandleEvent_UnknownAction_ReturnsError(t *testing.T) {
 	dm := NewDeviceMap()
 	err := dm.HandleEvent("explode", makeEnv("8", "0", "sda"))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown action")
+	assert.True(t, errors.Is(err, ErrUnknownAction))
 	assert.Equal(t, 0, dm.Len())
 }
 
@@ -196,16 +197,20 @@ func TestAll_EmptyMap(t *testing.T) {
 func TestDeviceMap_ConcurrentAccess(t *testing.T) {
 	dm := NewDeviceMap()
 
+	errs := make([]error, 100)
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func(minor int) {
 			defer wg.Done()
 			env := makeEnv("8", fmt.Sprintf("%d", minor), fmt.Sprintf("sd%d", minor))
-			_ = dm.HandleEvent("add", env)
+			errs[minor] = dm.HandleEvent("add", env)
 		}(i)
 	}
 	wg.Wait()
 
+	for i, err := range errs {
+		assert.NoError(t, err, "goroutine %d returned error", i)
+	}
 	assert.Equal(t, 100, dm.Len())
 }
