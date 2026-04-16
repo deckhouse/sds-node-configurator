@@ -1613,14 +1613,6 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				storageClass := e2eConfigStorageClass()
 				Expect(storageClass).NotTo(BeEmpty(), "TEST_CLUSTER_STORAGE_CLASS is required for VirtualDisk")
 
-				var blockDevicesList v1alpha1.BlockDeviceList
-				err := k8sClient.List(e2eCtx, &blockDevicesList, &client.ListOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				initialNames := make(map[string]struct{}, len(blockDevicesList.Items))
-				for i := range blockDevicesList.Items {
-					initialNames[blockDevicesList.Items[i].Name] = struct{}{}
-				}
-
 				By("Attaching VirtualDisk for LVG delete test to guest VM " + targetVM)
 				var attachErr error
 				lvgE2eDiskAttachment, attachErr = attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
@@ -1636,27 +1628,9 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				defer cancel()
 				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns, lvgE2eDiskAttachment.AttachmentName, 10*time.Second)).To(Succeed())
 
-				var targetBD *v1alpha1.BlockDevice
-				Eventually(func(g Gomega) {
-					var list v1alpha1.BlockDeviceList
-					g.Expect(k8sClient.List(e2eCtx, &list, &client.ListOptions{})).To(Succeed())
-					targetBD = nil
-					for i := range list.Items {
-						bd := &list.Items[i]
-						if _, existed := initialNames[bd.Name]; existed {
-							continue
-						}
-						if bd.Status.NodeName != targetVM {
-							continue
-						}
-						if !bd.Status.Consumable || bd.Status.Size.IsZero() || bd.Status.Path == "" || !strings.HasPrefix(bd.Status.Path, "/dev/") {
-							continue
-						}
-						targetBD = bd
-						return
-					}
-					g.Expect(targetBD).NotTo(BeNil(), "new consumable BlockDevice on node %s not found yet", targetVM)
-				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+				By("Waiting for BlockDevice for this VirtualDisk only (serial = md5(VD/VMBDA UID); avoids wrong disk / leftover LVM on same node)")
+				targetBD := e2eWaitConsumableBlockDeviceForVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, k8sClient, ns,
+					lvgE2eDiskAttachment.DiskName, lvgE2eDiskAttachment.AttachmentName, targetVM)
 
 				nodeName := targetBD.Status.NodeName
 				bdMetaName := targetBD.Labels["kubernetes.io/metadata.name"]
@@ -1685,7 +1659,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					},
 				}
 				By(fmt.Sprintf("Creating LVMVolumeGroup %s (VG %s, no thin pool) for delete test", lvgName, vgName))
-				err = k8sClient.Create(e2eCtx, lvg)
+				err := k8sClient.Create(e2eCtx, lvg)
 				Expect(err).NotTo(HaveOccurred())
 				defer func() {
 					err := k8sClient.Delete(e2eCtx, lvg)
@@ -1695,6 +1669,12 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				var ready v1alpha1.LVMVolumeGroup
 				Eventually(func(g Gomega) {
 					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &ready)).To(Succeed())
+					if ready.Status.Phase != v1alpha1.PhaseReady {
+						GinkgoWriter.Printf("LVMVolumeGroup %s phase=%s (delete-cr test, waiting for Ready)\n", lvg.Name, ready.Status.Phase)
+						for _, c := range ready.Status.Conditions {
+							GinkgoWriter.Printf("  condition %s status=%s reason=%s msg=%s\n", c.Type, c.Status, c.Reason, c.Message)
+						}
+					}
 					g.Expect(ready.Status.Phase).To(Equal(v1alpha1.PhaseReady))
 				}, 5*time.Minute, 10*time.Second).Should(Succeed())
 				printLVMVolumeGroupInfo(&ready)
