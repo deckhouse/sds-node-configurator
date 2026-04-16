@@ -19,9 +19,12 @@ package udev
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
+	"github.com/pilebones/go-udev/crawler"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -190,6 +193,77 @@ func TestAll_EmptyMap(t *testing.T) {
 	all := dm.All()
 	assert.NotNil(t, all)
 	assert.Empty(t, all)
+}
+
+// ================== FillFromCrawler ==================
+
+func TestFillFromCrawler_ReplacesAll(t *testing.T) {
+	dm := NewDeviceMap()
+	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "99", "old")))
+
+	devices := []crawler.Device{
+		{KObj: "/devices/pci/block/sda", Env: makeEnv("8", "0", "sda")},
+		{KObj: "/devices/pci/block/sdb", Env: makeEnv("8", "16", "sdb")},
+	}
+	errs := dm.FillFromCrawler(devices, "/nonexistent")
+	assert.Equal(t, 2, dm.Len(), "old device replaced by crawler results")
+
+	_, hasOld := dm.All()["8:99"]
+	assert.False(t, hasOld, "previous device must be gone after FillFromCrawler")
+
+	assert.NotEmpty(t, errs, "enrichment errors expected for /nonexistent path")
+}
+
+func TestFillFromCrawler_SkipsBadDevices(t *testing.T) {
+	dm := NewDeviceMap()
+	devices := []crawler.Device{
+		{KObj: "/devices/block/sda", Env: makeEnv("8", "0", "sda")},
+		{KObj: "/devices/block/bad", Env: map[string]string{"DEVNAME": "bad"}},
+	}
+	errs := dm.FillFromCrawler(devices, "/nonexistent")
+	assert.Equal(t, 1, dm.Len())
+	assert.NotEmpty(t, errs)
+}
+
+func TestFillFromCrawler_NilClearsMap(t *testing.T) {
+	dm := NewDeviceMap()
+	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "0", "sda")))
+	errs := dm.FillFromCrawler(nil, "/nonexistent")
+	assert.Equal(t, 0, dm.Len(), "nil crawler input clears the map")
+	assert.Empty(t, errs)
+}
+
+func TestFillFromCrawler_ParsesProperties(t *testing.T) {
+	dm := NewDeviceMap()
+	env := map[string]string{
+		"MAJOR": "8", "MINOR": "0", "DEVNAME": "sda",
+		"DEVTYPE": "disk", "ID_MODEL": "CrawledDisk",
+	}
+	devices := []crawler.Device{{KObj: "/devices/block/sda", Env: env}}
+	dm.FillFromCrawler(devices, "/nonexistent")
+
+	all := dm.All()
+	assert.Equal(t, "CrawledDisk", all["8:0"].Model)
+	assert.Equal(t, "/dev/sda", all["8:0"].DevName)
+}
+
+func TestFillFromCrawler_WithUdevDB(t *testing.T) {
+	dir := newTestUdevDB(t)
+	dbContent := "E:ID_SERIAL_SHORT=DB-SERIAL\nE:ID_WWN=0xdeadbeef\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b8:0"), []byte(dbContent), 0o644))
+
+	dm := NewDeviceMap()
+	env := makeEnv("8", "0", "sda")
+	env["ID_MODEL"] = "TestDisk"
+	devices := []crawler.Device{{KObj: "/devices/block/sda", Env: env}}
+	errs := dm.FillFromCrawler(devices, dir)
+	assert.Empty(t, errs)
+
+	all := dm.All()
+	props := all["8:0"]
+	assert.Equal(t, "DB-SERIAL", props.Serial, "serial from udev DB")
+	assert.Equal(t, "0xdeadbeef", props.WWN, "wwn from udev DB")
+	assert.Equal(t, "TestDisk", props.Model, "model from event env")
 }
 
 // ================== Concurrency ==================
