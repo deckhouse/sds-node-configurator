@@ -17,21 +17,24 @@ limitations under the License.
 package udev
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 )
+
+var ErrUnknownAction = errors.New("unknown action")
 
 // DeviceMap is a thread-safe in-memory store of block device properties
 // keyed by "major:minor". It is populated by netlink events (HandleEvent)
 // and provides a consistent snapshot via All().
 type DeviceMap struct {
 	mu      sync.RWMutex
-	devices map[string]UdevProperties
+	devices map[string]Properties
 }
 
 func NewDeviceMap() *DeviceMap {
 	return &DeviceMap{
-		devices: make(map[string]UdevProperties),
+		devices: make(map[string]Properties),
 	}
 }
 
@@ -39,7 +42,7 @@ func NewDeviceMap() *DeviceMap {
 // directly from the kernel (add, change, remove, bind, unbind, move, online,
 // offline). The env map is the raw udev environment from the event.
 func (dm *DeviceMap) HandleEvent(action string, env map[string]string) error {
-	props, err := ParseUdevProperties(env)
+	props, err := ParseProperties(env)
 	if err != nil {
 		return fmt.Errorf("handle event (action=%s, DEVNAME=%s): %w", action, env["DEVNAME"], err)
 	}
@@ -55,7 +58,7 @@ func (dm *DeviceMap) HandleEvent(action string, env map[string]string) error {
 	case "remove", "unbind", "offline":
 		delete(dm.devices, key)
 	default:
-		return fmt.Errorf("unknown action %q for device %s", action, key)
+		return fmt.Errorf("%w %q for device %s", ErrUnknownAction, action, key)
 	}
 
 	return nil
@@ -63,11 +66,11 @@ func (dm *DeviceMap) HandleEvent(action string, env map[string]string) error {
 
 // All returns a shallow copy of the device map. Callers may modify the
 // returned map without affecting the DeviceMap.
-func (dm *DeviceMap) All() map[string]UdevProperties {
+func (dm *DeviceMap) All() map[string]Properties {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
 
-	cp := make(map[string]UdevProperties, len(dm.devices))
+	cp := make(map[string]Properties, len(dm.devices))
 	for k, v := range dm.devices {
 		cp[k] = v
 	}

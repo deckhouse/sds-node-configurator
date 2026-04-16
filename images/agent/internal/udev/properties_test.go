@@ -23,9 +23,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ================== ParseUdevProperties ==================
+// ================== ParseProperties ==================
 
-func TestParseUdevProperties_FullEnv(t *testing.T) {
+func TestParseProperties_FullEnv(t *testing.T) {
 	env := map[string]string{
 		"DEVNAME":            "sda",
 		"DEVTYPE":            "disk",
@@ -41,7 +41,7 @@ func TestParseUdevProperties_FullEnv(t *testing.T) {
 		"DM_UUID":            "",
 		"MD_LEVEL":           "",
 	}
-	props, err := ParseUdevProperties(env)
+	props, err := ParseProperties(env)
 	require.NoError(t, err)
 
 	assert.Equal(t, "/dev/sda", props.DevName)
@@ -55,19 +55,19 @@ func TestParseUdevProperties_FullEnv(t *testing.T) {
 	assert.Equal(t, "abcd-1234", props.PartUUID)
 }
 
-func TestParseUdevProperties_SerialFallback(t *testing.T) {
+func TestParseProperties_SerialFallback(t *testing.T) {
 	env := map[string]string{
 		"DEVNAME":   "/dev/sda",
 		"MAJOR":     "8",
 		"MINOR":     "0",
 		"ID_SERIAL": "WDC_WD10EZEX_WD-ABC123",
 	}
-	props, err := ParseUdevProperties(env)
+	props, err := ParseProperties(env)
 	require.NoError(t, err)
 	assert.Equal(t, "WDC_WD10EZEX_WD-ABC123", props.Serial, "Falls back to ID_SERIAL")
 }
 
-func TestParseUdevProperties_SerialScsiChainAndNormalize(t *testing.T) {
+func TestParseProperties_SerialScsiChainAndNormalize(t *testing.T) {
 	env := map[string]string{
 		"DEVNAME":           "/dev/sda",
 		"MAJOR":             "8",
@@ -77,12 +77,12 @@ func TestParseUdevProperties_SerialScsiChainAndNormalize(t *testing.T) {
 		"ID_SERIAL_SHORT":   "short",
 		"ID_SERIAL":         "long",
 	}
-	props, err := ParseUdevProperties(env)
+	props, err := ParseProperties(env)
 	require.NoError(t, err)
 	assert.Equal(t, "SG3 ID", props.Serial)
 }
 
-func TestParseUdevProperties_WwnPrefersExtension(t *testing.T) {
+func TestParseProperties_WwnPrefersExtension(t *testing.T) {
 	env := map[string]string{
 		"DEVNAME":               "/dev/sda",
 		"MAJOR":                 "8",
@@ -90,12 +90,12 @@ func TestParseUdevProperties_WwnPrefersExtension(t *testing.T) {
 		"ID_WWN":                "0x5000",
 		"ID_WWN_WITH_EXTENSION": "0x5000deadbeef",
 	}
-	props, err := ParseUdevProperties(env)
+	props, err := ParseProperties(env)
 	require.NoError(t, err)
 	assert.Equal(t, "0x5000deadbeef", props.WWN)
 }
 
-func TestParseUdevProperties_ModelFromEnc(t *testing.T) {
+func TestParseProperties_ModelFromEnc(t *testing.T) {
 	env := map[string]string{
 		"DEVNAME":      "/dev/sda",
 		"MAJOR":        "8",
@@ -103,60 +103,60 @@ func TestParseUdevProperties_ModelFromEnc(t *testing.T) {
 		"ID_MODEL":     "IGNORED_WHEN_ENC",
 		"ID_MODEL_ENC": `Vendor\x20Disk\x20Name`,
 	}
-	props, err := ParseUdevProperties(env)
+	props, err := ParseProperties(env)
 	require.NoError(t, err)
 	assert.Equal(t, "Vendor Disk Name", props.Model)
 }
 
-func TestParseUdevProperties_DevNamePrefixAdded(t *testing.T) {
+func TestParseProperties_DevNamePrefixAdded(t *testing.T) {
 	env := map[string]string{
 		"DEVNAME": "sda",
 		"MAJOR":   "8",
 		"MINOR":   "0",
 	}
-	props, err := ParseUdevProperties(env)
+	props, err := ParseProperties(env)
 	require.NoError(t, err)
 	assert.Equal(t, "/dev/sda", props.DevName, "Adds /dev/ prefix when missing")
 }
 
-func TestParseUdevProperties_DevNameAlreadyPrefixed(t *testing.T) {
+func TestParseProperties_DevNameAlreadyPrefixed(t *testing.T) {
 	env := map[string]string{
 		"DEVNAME": "/dev/nvme0n1",
 		"MAJOR":   "259",
 		"MINOR":   "0",
 	}
-	props, err := ParseUdevProperties(env)
+	props, err := ParseProperties(env)
 	require.NoError(t, err)
 	assert.Equal(t, "/dev/nvme0n1", props.DevName)
 }
 
-func TestParseUdevProperties_MissingMajor(t *testing.T) {
-	_, err := ParseUdevProperties(map[string]string{"DEVNAME": "/dev/sda"})
+func TestParseProperties_MissingMajor(t *testing.T) {
+	_, err := ParseProperties(map[string]string{"DEVNAME": "/dev/sda"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "MAJOR")
 }
 
-func TestParseUdevProperties_MissingMinor(t *testing.T) {
-	_, err := ParseUdevProperties(map[string]string{"MAJOR": "8"})
+func TestParseProperties_MissingMinor(t *testing.T) {
+	_, err := ParseProperties(map[string]string{"MAJOR": "8"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "MINOR")
 }
 
-func TestParseUdevProperties_InvalidMajor(t *testing.T) {
-	props, err := ParseUdevProperties(map[string]string{
+func TestParseProperties_InvalidMajor(t *testing.T) {
+	props, err := ParseProperties(map[string]string{
 		"MAJOR": "abc", "MINOR": "0",
 	})
 	require.Error(t, err)
-	assert.Equal(t, UdevProperties{}, props)
+	assert.Equal(t, Properties{}, props)
 	assert.Contains(t, err.Error(), "MAJOR")
 }
 
-func TestParseUdevProperties_InvalidMinor(t *testing.T) {
-	props, err := ParseUdevProperties(map[string]string{
+func TestParseProperties_InvalidMinor(t *testing.T) {
+	props, err := ParseProperties(map[string]string{
 		"MAJOR": "8", "MINOR": "xyz",
 	})
 	require.Error(t, err)
-	assert.Equal(t, UdevProperties{}, props)
+	assert.Equal(t, Properties{}, props)
 	assert.Contains(t, err.Error(), "MINOR")
 }
 
