@@ -63,6 +63,16 @@ func TestReadUdevDB_FileNotExist(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestReadUdevDB_ValueContainsEquals(t *testing.T) {
+	dir := newTestUdevDB(t)
+	content := "E:ID_SERIAL=WDC_WD10EZEX=extra\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b8:0"), []byte(content), 0o644))
+
+	props, err := ReadUdevDB(dir, 8, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "WDC_WD10EZEX=extra", props["ID_SERIAL"])
+}
+
 func TestReadUdevDB_EmptyFile(t *testing.T) {
 	dir := newTestUdevDB(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "b8:0"), nil, 0o644))
@@ -101,6 +111,14 @@ func TestEnrichWithUdevDB_InvalidMajor_ReturnsOriginal(t *testing.T) {
 	result, err := EnrichWithUdevDB("/nonexistent", env)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid MAJOR")
+	assert.Equal(t, env, result)
+}
+
+func TestEnrichWithUdevDB_InvalidMinor_ReturnsOriginal(t *testing.T) {
+	env := map[string]string{"MAJOR": "8", "MINOR": "xyz"}
+	result, err := EnrichWithUdevDB("/nonexistent", env)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid MINOR")
 	assert.Equal(t, env, result)
 }
 

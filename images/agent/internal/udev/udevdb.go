@@ -39,7 +39,7 @@ func ReadUdevDB(basePath string, major, minor int) (map[string]string, error) {
 		if !ok {
 			continue
 		}
-		if idx := strings.Index(after, "="); idx >= 0 {
+		if idx := strings.Index(after, "="); idx > 0 {
 			props[after[:idx]] = after[idx+1:]
 		}
 	}
