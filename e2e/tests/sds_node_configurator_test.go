@@ -64,6 +64,11 @@ type clusterResumeState struct {
 	Namespace string `json:"namespace"`
 }
 
+// e2eSavedLVGForVGRemoveInfo records the pvresize LVMVolumeGroup for the follow-up "remove VG" spec.
+type e2eSavedLVGForVGRemoveInfo struct {
+	lvgName, nodeName, vgNameOnNode, blockDeviceName string
+}
+
 // runLsblkViaDirectSSHWithRetry wraps runLsblkViaDirectSSH for transient SSH errors (EOF during handshake, reset).
 func runLsblkViaDirectSSHWithRetry(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser string, maxRetries int, retryInterval time.Duration) (map[string]lsblkLine, error) {
 	var lastErr error
@@ -546,7 +551,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				Expect(e2eStorageClassName).NotTo(BeEmpty(), "StorageClass must be created first")
 
 				By("Cleaning up previous test resources")
-				cleanupE2EPodsAndPVCsWithWait(e2eCtx, k8sClient, 3*time.Minute)
+				schedulerCleanupWorkloadBeforeNextFill(e2eCtx, k8sClient)
 
 				By("Waiting for LVMVolumeGroup VGFree to reflect freed space after PVC deletion (async)")
 				currentAvailable := waitForSchedulerVGFreeAfterPVCleanup(e2eCtx, k8sClient, createdLVGs)
@@ -592,7 +597,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				Expect(e2eStorageClassName).NotTo(BeEmpty(), "StorageClass must be created first")
 
 				By("Cleaning up previous test resources")
-				cleanupE2EPodsAndPVCsWithWait(e2eCtx, k8sClient, 3*time.Minute)
+				schedulerCleanupWorkloadBeforeNextFill(e2eCtx, k8sClient)
 
 				By("Waiting for LVMVolumeGroup VGFree to reflect freed space after PVC deletion (async)")
 				currentAvailable := waitForSchedulerVGFreeAfterPVCleanup(e2eCtx, k8sClient, createdLVGs)
@@ -638,7 +643,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				Expect(e2eStorageClassName).NotTo(BeEmpty(), "StorageClass must be created first")
 
 				By("Cleaning up previous test resources")
-				cleanupE2EPodsAndPVCsWithWait(e2eCtx, k8sClient, 3*time.Minute)
+				schedulerCleanupWorkloadBeforeNextFill(e2eCtx, k8sClient)
 
 				By("Waiting for LVMVolumeGroup VGFree to reflect freed space after PVC deletion (async)")
 				currentAvailable := waitForSchedulerVGFreeAfterPVCleanup(e2eCtx, k8sClient, createdLVGs)
@@ -1207,6 +1212,12 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			const e2eLVGDataDiskName = "e2e-lvg-data-disk"
 			const e2eLVGDataDiskSize = "2Gi"
 
+			// Populated by the pvresize test: reused by "Should remove VG when LVMVolumeGroup CR is deleted" (no second disk/LVG).
+			var (
+				e2eSavedLVGForVGRemoveTest          *e2eSavedLVGForVGRemoveInfo
+				e2eDeferVDCleanupUntilLVGDeleteTest bool
+			)
+
 			var (
 				lvgE2eDiskAttachment *kubernetes.VirtualDiskAttachmentResult
 				sdsLvgE2eRunID       string
@@ -1233,6 +1244,12 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			})
 
 			AfterEach(func() {
+				if e2eDeferVDCleanupUntilLVGDeleteTest {
+					// pvresize test retained LVG + disk for the follow-up "remove VG" test; skip one VD cleanup.
+					e2eDeferVDCleanupUntilLVGDeleteTest = false
+					GinkgoWriter.Println("Skipping VirtualDisk cleanup this AfterEach (disk kept for LVG delete test)")
+					return
+				}
 				if lvgE2eDiskAttachment == nil || testClusterResources == nil || testClusterResources.BaseKubeconfig == nil {
 					return
 				}
@@ -1471,7 +1488,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				By(fmt.Sprintf("Creating LVMVolumeGroup %s (VG %s) for pvresize test", lvgName, vgName))
 				err = k8sClient.Create(e2eCtx, lvg)
 				Expect(err).NotTo(HaveOccurred())
-				defer func() { _ = k8sClient.Delete(e2eCtx, lvg) }()
+				// LVG + VirtualDisk are kept for the next test "Should remove VG when LVMVolumeGroup CR is deleted" (no second attach).
 
 				defer func() {
 					var current v1alpha1.LVMVolumeGroup
@@ -1581,103 +1598,36 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &final)).To(Succeed())
 				By("✓ After disk resize: LVMVolumeGroup Ready, VGFree and PV size increased, no error conditions")
 				printLVMVolumeGroupInfo(&final)
-			})
 
-			const (
-				e2eLVGDeleteCRDiskName = "e2e-lvg-delete-cr-disk"
-				e2eLVGDeleteCRDiskSize = "2Gi"
-			)
+				e2eSavedLVGForVGRemoveTest = &e2eSavedLVGForVGRemoveInfo{
+					lvgName:         lvg.Name,
+					nodeName:        nodeName,
+					vgNameOnNode:    lvg.Spec.ActualVGNameOnTheNode,
+					blockDeviceName: targetBD.Name,
+				}
+				e2eDeferVDCleanupUntilLVGDeleteTest = true
+			})
 
 			It("Should remove VG from node when LVMVolumeGroup CR is deleted", func() {
 				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
-				By("Expected: delete CR → vgremove on node; CR gone; BlockDevice remains (LVG without thin pool so VG has no LVs blocking removal)")
-
 				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "test requires nested virtualization (base cluster)")
-				ns := e2eConfigNamespace()
-				var clusterVMs []string
-				if testClusterResources.VMResources != nil {
-					for _, name := range testClusterResources.VMResources.VMNames {
-						if name != testClusterResources.VMResources.SetupVMName {
-							clusterVMs = append(clusterVMs, name)
-						}
-					}
-				}
-				if len(clusterVMs) == 0 {
-					vmNames, listErr := kubernetes.ListVirtualMachineNames(e2eCtx, testClusterResources.BaseKubeconfig, ns)
-					Expect(listErr).NotTo(HaveOccurred(), "list VirtualMachines on base cluster")
-					Expect(vmNames).NotTo(BeEmpty(), "no VirtualMachines in namespace %s", ns)
-					clusterVMs = vmNames
-				}
 
-				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
-				storageClass := e2eConfigStorageClass()
-				Expect(storageClass).NotTo(BeEmpty(), "TEST_CLUSTER_STORAGE_CLASS is required for VirtualDisk")
+				Expect(e2eSavedLVGForVGRemoveTest).NotTo(BeNil(),
+					"the pvresize test must run first and leave a Ready LVMVolumeGroup + attached VirtualDisk")
 
-				By("Attaching VirtualDisk for LVG delete test to guest VM " + targetVM)
-				var attachErr error
-				lvgE2eDiskAttachment, attachErr = attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
-					VMName:           targetVM,
-					Namespace:        ns,
-					DiskName:         e2eLVGDeleteCRDiskName,
-					DiskSize:         e2eLVGDeleteCRDiskSize,
-					StorageClassName: storageClass,
-				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
-				Expect(attachErr).NotTo(HaveOccurred())
+				By("Chain: (1) pvresize test created a Ready LVMVolumeGroup with thin pool on one node and left the CR + VirtualDisk; " +
+					"(2) this test deletes only the LVMVolumeGroup CR; (3) agent should remove the VG on the node when allowed; " +
+					"(4) BlockDevice CR should remain (disk stays attached)")
+				s := e2eSavedLVGForVGRemoveTest
+				lvgName := s.lvgName
+				nodeName := s.nodeName
+				vgName := s.vgNameOnNode
+				bdName := s.blockDeviceName
 
-				attachCtx, cancel := context.WithTimeout(e2eCtx, 5*time.Minute)
-				defer cancel()
-				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns, lvgE2eDiskAttachment.AttachmentName, 10*time.Second)).To(Succeed())
-
-				By("Waiting for BlockDevice for this VirtualDisk only (serial = md5(VD/VMBDA UID); avoids wrong disk / leftover LVM on same node)")
-				targetBD := e2eWaitConsumableBlockDeviceForVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, k8sClient, ns,
-					lvgE2eDiskAttachment.DiskName, lvgE2eDiskAttachment.AttachmentName, targetVM)
-
-				nodeName := targetBD.Status.NodeName
-				bdMetaName := targetBD.Labels["kubernetes.io/metadata.name"]
-				if bdMetaName == "" {
-					bdMetaName = targetBD.Name
-				}
-				bdName := targetBD.Name
-
-				vgName := "e2e-vg-delete-cr"
-				lvgName := "e2e-lvg-delete-cr-" + strings.ReplaceAll(strings.ReplaceAll(nodeName, ".", "-"), "_", "-")
-
-				// No ThinPools: a thin pool leaves LVs on the node; current delete reconciliation then blocks with
-				// "Delete used LVs first" until those LVs are removed. This test only checks CR delete → VG gone.
-				lvg := &v1alpha1.LVMVolumeGroup{
-					ObjectMeta: metav1.ObjectMeta{Name: lvgName},
-					Spec: v1alpha1.LVMVolumeGroupSpec{
-						ActualVGNameOnTheNode: vgName,
-						BlockDeviceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"kubernetes.io/hostname":      nodeName,
-								"kubernetes.io/metadata.name": bdMetaName,
-							},
-						},
-						Type:  "Local",
-						Local: v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
-					},
-				}
-				By(fmt.Sprintf("Creating LVMVolumeGroup %s (VG %s, no thin pool) for delete test", lvgName, vgName))
-				err := k8sClient.Create(e2eCtx, lvg)
-				Expect(err).NotTo(HaveOccurred())
-				defer func() {
-					err := k8sClient.Delete(e2eCtx, lvg)
-					_ = client.IgnoreNotFound(err)
-				}()
-
-				var ready v1alpha1.LVMVolumeGroup
-				Eventually(func(g Gomega) {
-					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &ready)).To(Succeed())
-					if ready.Status.Phase != v1alpha1.PhaseReady {
-						GinkgoWriter.Printf("LVMVolumeGroup %s phase=%s (delete-cr test, waiting for Ready)\n", lvg.Name, ready.Status.Phase)
-						for _, c := range ready.Status.Conditions {
-							GinkgoWriter.Printf("  condition %s status=%s reason=%s msg=%s\n", c.Type, c.Status, c.Reason, c.Message)
-						}
-					}
-					g.Expect(ready.Status.Phase).To(Equal(v1alpha1.PhaseReady))
-				}, 5*time.Minute, 10*time.Second).Should(Succeed())
-				printLVMVolumeGroupInfo(&ready)
+				var lvgCur v1alpha1.LVMVolumeGroup
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: lvgName}, &lvgCur)).To(Succeed())
+				Expect(lvgCur.Status.Phase).To(Equal(v1alpha1.PhaseReady), "LVG from pvresize must still be Ready before delete")
+				printLVMVolumeGroupInfo(&lvgCur)
 
 				vmSSH := e2eConfigVMSSHUser()
 				vgsCmd := "vgs -o vg_name --noheadings 2>/dev/null || sudo -n vgs -o vg_name --noheadings 2>/dev/null"
@@ -1697,7 +1647,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					"VG %q should exist on node before delete; vgs output above", vgName)
 
 				By("Deleting LVMVolumeGroup CR")
-				Expect(k8sClient.Delete(e2eCtx, lvg)).To(Succeed())
+				Expect(k8sClient.Delete(e2eCtx, &lvgCur)).To(Succeed())
 
 				By("Waiting for LVMVolumeGroup CR to be removed from API")
 				Eventually(func(g Gomega) {
@@ -1733,6 +1683,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				Expect(bdAfter.Status.Path).NotTo(BeEmpty(), "BlockDevice should still report device path")
 				GinkgoWriter.Printf("    BlockDevice %s still present: path=%s size=%s\n", bdName, bdAfter.Status.Path, bdAfter.Status.Size.String())
 
+				e2eSavedLVGForVGRemoveTest = nil
 				By("✓ LVMVolumeGroup CR deleted; VG removed on node; BlockDevice still in API")
 			})
 		})
@@ -3440,8 +3391,8 @@ func ensureSchedulerE2EK8sClient(resources *cluster.TestClusterResources, k8s *c
 	By("Cleaning up existing e2e resources")
 	cleanupE2ELocalStorageClasses(ctx, resources.Kubeconfig)
 	cleanupE2ELVMVolumeGroups(ctx, *k8s)
-	cleanupE2EPVCs(ctx, *k8s)
 	cleanupE2EPods(ctx, *k8s)
+	cleanupE2EPVCs(ctx, *k8s)
 }
 
 func cleanupE2ELocalStorageClasses(ctx context.Context, kubeconfig *rest.Config) {
@@ -3885,7 +3836,7 @@ func cleanupE2ELVMVolumeGroups(ctx context.Context, cl client.Client) {
 
 func cleanupE2EPVCs(ctx context.Context, cl client.Client) {
 	var list corev1.PersistentVolumeClaimList
-	err := cl.List(ctx, &list, &client.ListOptions{})
+	err := cl.List(ctx, &list, client.InNamespace(metav1.NamespaceDefault))
 	if err != nil {
 		return
 	}
@@ -3898,50 +3849,71 @@ func cleanupE2EPVCs(ctx context.Context, cl client.Client) {
 
 func cleanupE2EPods(ctx context.Context, cl client.Client) {
 	var list corev1.PodList
-	err := cl.List(ctx, &list, &client.ListOptions{})
+	err := cl.List(ctx, &list, client.InNamespace(metav1.NamespaceDefault))
 	if err != nil {
 		return
 	}
 	for i := range list.Items {
 		if strings.HasPrefix(list.Items[i].Name, e2ePodPrefix) {
-			_ = cl.Delete(ctx, &list.Items[i])
+			p := list.Items[i]
+			_ = cl.Delete(ctx, &p, client.GracePeriodSeconds(0))
 		}
 	}
 }
 
+func countE2EPodsDefault(ctx context.Context, cl client.Client) int {
+	var podList corev1.PodList
+	if err := cl.List(ctx, &podList, client.InNamespace(metav1.NamespaceDefault)); err != nil {
+		GinkgoWriter.Printf("count e2e pods: list failed: %v\n", err)
+		return 999999
+	}
+	n := 0
+	for i := range podList.Items {
+		if strings.HasPrefix(podList.Items[i].Name, e2ePodPrefix) {
+			n++
+		}
+	}
+	return n
+}
+
+func countE2EPVCsDefault(ctx context.Context, cl client.Client) int {
+	var pvcList corev1.PersistentVolumeClaimList
+	if err := cl.List(ctx, &pvcList, client.InNamespace(metav1.NamespaceDefault)); err != nil {
+		GinkgoWriter.Printf("count e2e PVCs: list failed: %v\n", err)
+		return 999999
+	}
+	n := 0
+	for i := range pvcList.Items {
+		if strings.HasPrefix(pvcList.Items[i].Name, e2ePVCPrefix) {
+			n++
+		}
+	}
+	return n
+}
+
+// cleanupE2EPodsAndPVCsWithWait deletes e2e Pods first and waits until they are gone before deleting PVCs.
+// Deleting PVCs while Pods still mount the volume leaves PVCs stuck in Terminating and blocks the test.
 func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, timeout time.Duration) {
-	cleanupE2EPods(ctx, cl)
-	cleanupE2EPVCs(ctx, cl)
-
 	deadline := time.Now().Add(timeout)
+
+	cleanupE2EPods(ctx, cl)
 	for time.Now().Before(deadline) {
-		var podList corev1.PodList
-		var pvcList corev1.PersistentVolumeClaimList
-
-		podCount := 0
-		pvcCount := 0
-
-		if err := cl.List(ctx, &podList, &client.ListOptions{Namespace: "default"}); err == nil {
-			for i := range podList.Items {
-				if strings.HasPrefix(podList.Items[i].Name, e2ePodPrefix) {
-					podCount++
-				}
-			}
+		n := countE2EPodsDefault(ctx, cl)
+		if n == 0 {
+			break
 		}
+		GinkgoWriter.Printf("Waiting for e2e Pods to terminate before PVC cleanup: %d remaining\n", n)
+		time.Sleep(3 * time.Second)
+	}
 
-		if err := cl.List(ctx, &pvcList, &client.ListOptions{Namespace: "default"}); err == nil {
-			for i := range pvcList.Items {
-				if strings.HasPrefix(pvcList.Items[i].Name, e2ePVCPrefix) {
-					pvcCount++
-				}
-			}
-		}
-
+	cleanupE2EPVCs(ctx, cl)
+	for time.Now().Before(deadline) {
+		podCount := countE2EPodsDefault(ctx, cl)
+		pvcCount := countE2EPVCsDefault(ctx, cl)
 		if podCount == 0 && pvcCount == 0 {
 			GinkgoWriter.Println("All e2e Pods and PVCs deleted")
 			return
 		}
-
 		GinkgoWriter.Printf("Waiting for cleanup: %d pods, %d PVCs remaining\n", podCount, pvcCount)
 		time.Sleep(5 * time.Second)
 	}
@@ -3960,6 +3932,15 @@ func getTotalAvailableSpace(ctx context.Context, cl client.Client, lvgs []*v1alp
 		}
 	}
 	return total
+}
+
+// schedulerCleanupWorkloadBeforeNextFill removes e2e Pods/PVCs, then LVMLogicalVolumes tied to e2e LVGs.
+// Deleting PVCs alone is not enough: thin LVs remain on the VG until LLV CRs are removed; otherwise the next test
+// or LVMVolumeGroup teardown hits "Delete used LVs first" and PV can stay Released with no PVC.
+func schedulerCleanupWorkloadBeforeNextFill(ctx context.Context, cl client.Client) {
+	cleanupE2EPodsAndPVCsWithWait(ctx, cl, 3*time.Minute)
+	By("Removing LVMLogicalVolumes for e2e LVGs after PVC deletion (thin LVs must leave the VG)")
+	cleanupE2ELVMLogicalVolumes(ctx, cl)
 }
 
 // waitForSchedulerVGFreeAfterPVCleanup polls until sum(VGFree) > 0. PVC/Pod deletion returns before thin LVs and
