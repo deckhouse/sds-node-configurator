@@ -22,7 +22,7 @@ import (
 	"strings"
 )
 
-type UdevProperties struct {
+type Properties struct {
 	DevName  string
 	DevType  string
 	Major    int
@@ -37,18 +37,18 @@ type UdevProperties struct {
 	MDLevel  string
 }
 
-func ParseUdevProperties(env map[string]string) (UdevProperties, error) {
+func ParseProperties(env map[string]string) (Properties, error) {
 	major, err := strconv.Atoi(env["MAJOR"])
 	if err != nil {
-		return UdevProperties{}, fmt.Errorf("parse MAJOR: %w", err)
+		return Properties{}, fmt.Errorf("parse MAJOR: %w", err)
 	}
 
 	minor, err := strconv.Atoi(env["MINOR"])
 	if err != nil {
-		return UdevProperties{}, fmt.Errorf("parse MINOR: %w", err)
+		return Properties{}, fmt.Errorf("parse MINOR: %w", err)
 	}
 
-	return UdevProperties{
+	return Properties{
 		DevName:  ensureDevPrefix(env["DEVNAME"]),
 		DevType:  env["DEVTYPE"],
 		Major:    major,
