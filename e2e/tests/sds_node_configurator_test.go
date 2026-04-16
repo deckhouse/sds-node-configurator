@@ -548,8 +548,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				By("Cleaning up previous test resources")
 				cleanupE2EPodsAndPVCsWithWait(e2eCtx, k8sClient, 3*time.Minute)
 
-				currentAvailable := getTotalAvailableSpace(e2eCtx, k8sClient, createdLVGs)
-				Expect(currentAvailable).To(BeNumerically(">", 0), "No available space in LVMVolumeGroups")
+				By("Waiting for LVMVolumeGroup VGFree to reflect freed space after PVC deletion (async)")
+				currentAvailable := waitForSchedulerVGFreeAfterPVCleanup(e2eCtx, k8sClient, createdLVGs)
 				By(fmt.Sprintf("Current available space: %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
 
 				volumeSize := int64(1 * 1024 * 1024 * 1024) // 1Gi
@@ -594,8 +594,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				By("Cleaning up previous test resources")
 				cleanupE2EPodsAndPVCsWithWait(e2eCtx, k8sClient, 3*time.Minute)
 
-				currentAvailable := getTotalAvailableSpace(e2eCtx, k8sClient, createdLVGs)
-				Expect(currentAvailable).To(BeNumerically(">", 0), "No available space in LVMVolumeGroups")
+				By("Waiting for LVMVolumeGroup VGFree to reflect freed space after PVC deletion (async)")
+				currentAvailable := waitForSchedulerVGFreeAfterPVCleanup(e2eCtx, k8sClient, createdLVGs)
 				By(fmt.Sprintf("Current available space: %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
 
 				volumeSize := int64(5 * 1024 * 1024 * 1024)    // 5Gi
@@ -640,8 +640,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				By("Cleaning up previous test resources")
 				cleanupE2EPodsAndPVCsWithWait(e2eCtx, k8sClient, 3*time.Minute)
 
-				currentAvailable := getTotalAvailableSpace(e2eCtx, k8sClient, createdLVGs)
-				Expect(currentAvailable).To(BeNumerically(">", 0), "No available space in LVMVolumeGroups")
+				By("Waiting for LVMVolumeGroup VGFree to reflect freed space after PVC deletion (async)")
+				currentAvailable := waitForSchedulerVGFreeAfterPVCleanup(e2eCtx, k8sClient, createdLVGs)
 				By(fmt.Sprintf("Current available space: %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
 
 				volumeSize := int64(10 * 1024 * 1024 * 1024)   // 10Gi
@@ -3959,6 +3959,18 @@ func getTotalAvailableSpace(ctx context.Context, cl client.Client, lvgs []*v1alp
 			total += current.Status.VGFree.Value()
 		}
 	}
+	return total
+}
+
+// waitForSchedulerVGFreeAfterPVCleanup polls until sum(VGFree) > 0. PVC/Pod deletion returns before thin LVs and
+// LVMLogicalVolumes are fully gone and before the agent updates LVMVolumeGroup status.
+func waitForSchedulerVGFreeAfterPVCleanup(ctx context.Context, cl client.Client, lvgs []*v1alpha1.LVMVolumeGroup) int64 {
+	var total int64
+	Eventually(func(g Gomega) {
+		total = getTotalAvailableSpace(ctx, cl, lvgs)
+		g.Expect(total).To(BeNumerically(">", 0),
+			"VGFree should recover after PVC/Pod cleanup (async LLV/thin LV teardown)")
+	}, 10*time.Minute, 5*time.Second).Should(Succeed())
 	return total
 }
 
