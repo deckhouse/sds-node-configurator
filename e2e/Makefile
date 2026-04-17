@@ -82,6 +82,10 @@ fix-mod-permissions: ## Writable storage-e2e in GOMODCACHE or GOPATH (PrepareBoo
 					sed -i 's/SecretsWaitTimeout   = 2 \* time\.Minute/SecretsWaitTimeout   = 15 * time.Minute/' "$$cfg"; \
 					echo "Patched SecretsWaitTimeout to 15m in $$dir"; \
 				fi; \
+				if [ -f "$$cfg" ] && grep -q 'DockerInstallTimeout     = 10 \* time\.Minute' "$$cfg" 2>/dev/null; then \
+					sed -i 's/DockerInstallTimeout     = 10 \* time\.Minute/DockerInstallTimeout     = 30 * time.Minute/' "$$cfg"; \
+					echo "Patched DockerInstallTimeout to 30m in $$dir"; \
+				fi; \
 				RP="$(CURDIR)/patches/storage-e2e-reconnect-after-add-nodes.diff"; \
 				if [ -f "$$RP" ] && [ -f "$$dir/pkg/cluster/cluster.go" ] && ! grep -q 'refresh SSH tunnel after node bootstrap' "$$dir/pkg/cluster/cluster.go" 2>/dev/null; then \
 					patch -p0 --batch -d "$$dir" -i "$$RP" || exit 1; \

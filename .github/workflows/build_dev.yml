@@ -422,6 +422,11 @@ jobs:
                   sed -i 's/SecretsWaitTimeout   = 2 \* time\.Minute/SecretsWaitTimeout   = 15 * time.Minute/' "$cfg"
                   echo "Patched SecretsWaitTimeout to 15m in storage-e2e ($d)"
                 fi
+                # DockerInstallTimeout is 10m in upstream; cloud-init + apt docker.io on slow disks can exceed it.
+                if [ -f "$cfg" ] && grep -q 'DockerInstallTimeout     = 10 \* time\.Minute' "$cfg"; then
+                  sed -i 's/DockerInstallTimeout     = 10 \* time\.Minute/DockerInstallTimeout     = 30 * time.Minute/' "$cfg"
+                  echo "Patched DockerInstallTimeout to 30m in storage-e2e ($d)"
+                fi
                 RECONNECT_PATCH="${GITHUB_WORKSPACE}/e2e/patches/storage-e2e-reconnect-after-add-nodes.diff"
                 if [ -f "$RECONNECT_PATCH" ] && [ -f "$d/pkg/cluster/cluster.go" ]; then
                   if ! grep -q 'refresh SSH tunnel after node bootstrap' "$d/pkg/cluster/cluster.go" 2>/dev/null; then
