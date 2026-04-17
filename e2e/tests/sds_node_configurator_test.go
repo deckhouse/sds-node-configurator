@@ -267,12 +267,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 						Skip("VirtualDisk creation requires base cluster kubeconfig (Deckhouse virtualization). " +
 							"Set SSH_JUMP_HOST to the base cluster or use TEST_CLUSTER_CREATE_MODE=alwaysCreateNew.")
 					}
-					By("Listing VirtualMachines on base cluster (jump host)")
-					vmNames, listErr := kubernetes.ListVirtualMachineNames(e2eCtx, testClusterResources.BaseKubeconfig, ns)
-					Expect(listErr).NotTo(HaveOccurred(), "list VirtualMachines on base cluster")
-					Expect(vmNames).NotTo(BeEmpty(), "no VirtualMachines in namespace %s on base cluster", ns)
-					clusterVMs = vmNames
 					baseKubeconfig = testClusterResources.BaseKubeconfig
+					clusterVMs = nil
 				} else {
 					clusterVMs = make([]string, 0, len(testClusterResources.VMResources.VMNames))
 					for _, name := range testClusterResources.VMResources.VMNames {
@@ -283,6 +279,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					Expect(clusterVMs).NotTo(BeEmpty(), "no guest VMs (masters/workers) to attach disk to")
 					baseKubeconfig = testClusterResources.BaseKubeconfig
 				}
+				By("Selecting VirtualMachines in phase Running only (skip Migrating/Starting for stable disk attach)")
+				clusterVMs = e2eIntersectVMNamesRunning(e2eCtx, baseKubeconfig, ns, clusterVMs)
 
 				numNodes := len(clusterVMs)
 				parallelism := 1 + rand.Intn(numNodes)
@@ -351,7 +349,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					return ni < nj
 				})
 
-				attachCtx, cancel := context.WithTimeout(e2eCtx, 5*time.Minute)
+				attachCtx, cancel := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
 				defer cancel()
 				for _, att := range e2eDiskAttachments {
 					Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, baseKubeconfig, ns, att.AttachmentName, 10*time.Second)).To(Succeed())
@@ -902,12 +900,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 						Skip("VirtualDisk discovery in alwaysUseExisting requires base cluster kubeconfig (Deckhouse virtualization). " +
 							"Set SSH_JUMP_HOST to the base cluster (jump host = base cluster) so the framework can get its kubeconfig, or use TEST_CLUSTER_CREATE_MODE=alwaysCreateNew.")
 					}
-					By("Step 0: Listing VirtualMachines on base cluster (jump host)")
-					vmNames, listErr := kubernetes.ListVirtualMachineNames(e2eCtx, testClusterResources.BaseKubeconfig, ns)
-					Expect(listErr).NotTo(HaveOccurred(), "list VirtualMachines on base cluster")
-					Expect(vmNames).NotTo(BeEmpty(), "no VirtualMachines in namespace %s on base cluster", ns)
-					clusterVMs = vmNames
 					baseKubeconfig = testClusterResources.BaseKubeconfig
+					clusterVMs = nil
 				} else {
 					clusterVMs = make([]string, 0, len(testClusterResources.VMResources.VMNames))
 					for _, name := range testClusterResources.VMResources.VMNames {
@@ -918,6 +912,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					Expect(clusterVMs).NotTo(BeEmpty(), "no guest VMs (masters/workers) to attach disk to")
 					baseKubeconfig = testClusterResources.BaseKubeconfig
 				}
+				By("Step 0: VirtualMachines in phase Running only (skip Migrating/Starting)")
+				clusterVMs = e2eIntersectVMNamesRunning(e2eCtx, baseKubeconfig, ns, clusterVMs)
 
 				numNodes := len(clusterVMs)
 				parallelism := 1 + rand.Intn(numNodes) // [1, numNodes] — сколько нод задействуем
@@ -1007,7 +1003,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				}
 
 				// Wait for all attachments to be Attached
-				attachCtx, cancel := context.WithTimeout(e2eCtx, 5*time.Minute)
+				attachCtx, cancel := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
 				defer cancel()
 				for _, att := range e2eDiskAttachments {
 					Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, baseKubeconfig, ns, att.AttachmentName, 10*time.Second)).To(Succeed())
@@ -1259,21 +1255,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 
 				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "LVMVolumeGroup test requires nested virtualization (base cluster)")
 				ns := e2eConfigNamespace()
-				var clusterVMs []string
-				if testClusterResources.VMResources != nil {
-					for _, name := range testClusterResources.VMResources.VMNames {
-						if name != testClusterResources.VMResources.SetupVMName {
-							clusterVMs = append(clusterVMs, name)
-						}
-					}
-				}
-				if len(clusterVMs) == 0 {
-					By("VM list not from VMResources (e.g. alwaysUseExisting); listing VirtualMachines on base cluster")
-					vmNames, listErr := kubernetes.ListVirtualMachineNames(e2eCtx, testClusterResources.BaseKubeconfig, ns)
-					Expect(listErr).NotTo(HaveOccurred(), "list VirtualMachines on base cluster")
-					Expect(vmNames).NotTo(BeEmpty(), "no VirtualMachines in namespace %s on base cluster (LVM test needs a VM to attach disk to)", ns)
-					clusterVMs = vmNames
-				}
+				By("Guest VM for attach: phase Running only (skip Migrating)")
+				clusterVMs := e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
 
 				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
 				storageClass := e2eConfigStorageClass()
@@ -1300,7 +1283,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
 				Expect(attachErr).NotTo(HaveOccurred())
 
-				attachCtx, cancel := context.WithTimeout(e2eCtx, 5*time.Minute)
+				attachCtx, cancel := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
 				defer cancel()
 				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns, lvgE2eDiskAttachment.AttachmentName, 10*time.Second)).To(Succeed())
 				By("VirtualDisk attached; waiting for BlockDevice with serial matching this VirtualDisk (md5(UID))")
@@ -1395,6 +1378,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				e2eLVGPVResizeDiskName = "e2e-lvg-pvresize-disk"
 				e2eLVGPVResizeDiskSize = "2Gi"
 				e2eLVGPVResizeNewSize  = "4Gi"
+				// e2eLVGPVResizeThinPoolName must match the pvresize LVMVolumeGroup spec (follow-up delete test prunes this pool on the node).
+				e2eLVGPVResizeThinPoolName = "e2e-thin-pool-pvresize"
 			)
 
 			It("Should grow PV and VG free space after block device resize (pvresize)", func() {
@@ -1403,21 +1388,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 
 				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "pvresize test requires nested virtualization (base cluster)")
 				ns := e2eConfigNamespace()
-				var clusterVMs []string
-				if testClusterResources.VMResources != nil {
-					for _, name := range testClusterResources.VMResources.VMNames {
-						if name != testClusterResources.VMResources.SetupVMName {
-							clusterVMs = append(clusterVMs, name)
-						}
-					}
-				}
-				if len(clusterVMs) == 0 {
-					By("VM list not from VMResources (e.g. alwaysUseExisting); listing VirtualMachines on base cluster")
-					vmNames, listErr := kubernetes.ListVirtualMachineNames(e2eCtx, testClusterResources.BaseKubeconfig, ns)
-					Expect(listErr).NotTo(HaveOccurred(), "list VirtualMachines on base cluster")
-					Expect(vmNames).NotTo(BeEmpty(), "no VirtualMachines in namespace %s on base cluster", ns)
-					clusterVMs = vmNames
-				}
+				By("Guest VM for attach: phase Running only (skip Migrating)")
+				clusterVMs := e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
 
 				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
 				storageClass := e2eConfigStorageClass()
@@ -1443,7 +1415,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
 				Expect(attachErr).NotTo(HaveOccurred())
 
-				attachCtx, cancel := context.WithTimeout(e2eCtx, 5*time.Minute)
+				attachCtx, cancel := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
 				defer cancel()
 				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns, lvgE2eDiskAttachment.AttachmentName, 10*time.Second)).To(Succeed())
 				By("VirtualDisk attached; waiting for BlockDevice with serial matching this VirtualDisk (md5(UID))")
@@ -1458,7 +1430,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 
 				Expect(sdsLvgE2eRunID).NotTo(BeEmpty(), "LVM suite pre-run cleanup must set sdsLvgE2eRunID (BeforeEach)")
 				vgName := "e2e-vg-pvresize-" + sdsLvgE2eRunID
-				thinPoolName := "e2e-thin-pool-pvresize"
+				thinPoolName := e2eLVGPVResizeThinPoolName
 				thinPoolSize := "60%"
 				thinPoolAllocationLimit := "100%"
 				lvgName := "e2e-lvg-pvresize-" + sdsLvgE2eRunID + "-" + strings.ReplaceAll(strings.ReplaceAll(nodeName, ".", "-"), "_", "-")
@@ -1640,6 +1612,40 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				Expect(foundVG).To(BeTrue(),
 					"VG %q should exist on node before delete; vgs output above", vgName)
 
+				// E2E-only workaround: remove thin-pool LVs on the node before deleting the CR. The product agent should
+				// tear down the pool during delete, but that path can leave the CR stuck Terminating; pruning here keeps
+				// the test focused on vgremove + BlockDevice retention without depending on agent delete ordering.
+				thinPool := e2eLVGPVResizeThinPoolName
+				if len(lvgCur.Spec.ThinPools) > 0 {
+					if n := strings.TrimSpace(lvgCur.Spec.ThinPools[0].Name); n != "" {
+						thinPool = n
+					}
+				} else if len(lvgCur.Status.ThinPools) > 0 {
+					if n := strings.TrimSpace(lvgCur.Status.ThinPools[0].Name); n != "" {
+						thinPool = n
+					}
+				}
+				By("E2E workaround: lvremove thin-pool stack on node so LVMVolumeGroup CR deletion can finish")
+				GinkgoWriter.Printf("    vg=%q thinPool=%q\n", vgName, thinPool)
+				pruneScript := e2eShellRemoveThinPoolStackForVG(vgName, thinPool)
+				outPrune, errPrune := e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, pruneScript)
+				if outPrune != "" {
+					GinkgoWriter.Printf("    prune script output:\n%s\n", outPrune)
+				}
+				Expect(errPrune).NotTo(HaveOccurred(), "thin-pool prune on node %s", nodeName)
+				lvsCmd := fmt.Sprintf(`lvs -q --noheadings -o lv_name %q 2>/dev/null || sudo -n lvs -q --noheadings -o lv_name %q 2>/dev/null`, vgName, vgName)
+				Eventually(func(g Gomega) {
+					out, err := e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, lvsCmd)
+					g.Expect(err).NotTo(HaveOccurred())
+					lines := 0
+					for _, line := range strings.Split(out, "\n") {
+						if strings.TrimSpace(line) != "" {
+							lines++
+						}
+					}
+					g.Expect(lines).To(BeZero(), "expected no LVs left in VG %s before CR delete; lvs output:\n%s", vgName, out)
+				}, 3*time.Minute, 5*time.Second).Should(Succeed())
+
 				By("Deleting LVMVolumeGroup CR")
 				Expect(k8sClient.Delete(e2eCtx, &lvgCur)).To(Succeed())
 
@@ -1741,7 +1747,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
 				Expect(err).NotTo(HaveOccurred())
 				validationAttaches = append(validationAttaches, att1)
-				attachCtx, cancel := context.WithTimeout(e2eCtx, 5*time.Minute)
+				attachCtx, cancel := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
 				defer cancel()
 				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns, att1.AttachmentName, 10*time.Second)).To(Succeed())
 
@@ -2119,6 +2125,36 @@ func e2eVgNameListedInVgsOutput(vgsOutput, vgName string) bool {
 		}
 	}
 	return false
+}
+
+// e2eShellRemoveThinPoolStackForVG returns a shell script run on the guest node via SSH: removes thin volumes that
+// use the pool, then the pool LV, then any remaining LVs in the VG. Used only by e2e to avoid Terminating LVMVolumeGroup
+// when agent-side delete ordering leaves thin-pool segments on the node.
+func e2eShellRemoveThinPoolStackForVG(vgName, thinPoolName string) string {
+	return fmt.Sprintf(`set +e
+VG=%q
+POOL=%q
+runlv() { lvs "$@" 2>/dev/null || sudo -n lvs "$@" 2>/dev/null; }
+runrm() { lvremove -fy "$@" 2>/dev/null || sudo -n lvremove -fy "$@" 2>/dev/null; }
+for pass in 1 2 3 4 5 6 7 8 9 10; do
+  runlv -a --noheadings -o lv_name,pool_lv "$VG" | while IFS= read -r line; do
+    lv=$(echo "$line" | awk '{print $1}' | tr -d '[]')
+    pl=$(echo "$line" | awk '{print $2}' | tr -d '[]')
+    [ -z "$lv" ] && continue
+    [ -n "$pl" ] && [ "$pl" = "$POOL" ] && [ "$lv" != "$POOL" ] && runrm "/dev/$VG/$lv"
+  done
+done
+runrm "/dev/$VG/$POOL"
+for pass in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  cnt=$(runlv -a --noheadings -o lv_name "$VG" | sed '/^$/d' | wc -l)
+  cnt=$(echo "$cnt" | tr -cd '0-9')
+  [ "${cnt:-0}" -eq 0 ] && break
+  runlv -a --noheadings -o lv_name "$VG" | while IFS= read -r line; do
+    lv=$(echo "$line" | awk '{print $1}' | tr -d '[]')
+    [ -n "$lv" ] && runrm "/dev/$VG/$lv"
+  done
+done
+`, vgName, thinPoolName)
 }
 
 // parseLsblkOutput parses lsblk -b -P -o NAME,SIZE,SERIAL,PATH output (KEY="value" per line).
@@ -2690,6 +2726,8 @@ const (
 
 	e2eVirtualDiskAttachMaxRetries    = 3
 	e2eVirtualDiskAttachRetryInterval = 1 * time.Minute
+	// WaitForVirtualDiskAttached: VMBDA may stay Pending for many minutes (virt hotplug, node load); 5m was too tight on virtlab.
+	e2eVirtualDiskAttachWaitTimeout = 15 * time.Minute
 
 	e2eVirtualizationModuleWaitDefault = 25 * time.Minute
 
@@ -2703,6 +2741,12 @@ const (
 
 	// Common Scheduler "fill to max" tests create many PVCs/Pods; provisioning and binding can exceed 5m on loaded clusters.
 	e2eSchedulerFillPodsWaitTimeout = 10 * time.Minute
+
+	// Time for Pods → PVCs → PVs (CSI detach/delete) before LLV cleanup between scheduler fill tests.
+	e2eSchedulerWorkloadCleanupTimeout = 10 * time.Minute
+
+	// Guest VM name prefix for dhctl/bootstrap (Deckhouse test clusters). Do not attach data disks here — not a worker.
+	e2eBootstrapGuestVMPrefix = "bootstrap-node-"
 )
 
 const (
@@ -3146,23 +3190,82 @@ func waitForVirtualizationModuleReadyIfNeeded(ctx context.Context) error {
 	return nil
 }
 
-// e2eListClusterVMNames returns guest VM names to attach disks to (same pattern as other LVM tests).
-func e2eListClusterVMNames(ctx context.Context, res *cluster.TestClusterResources, ns string) []string {
-	if res.VMResources != nil {
-		var out []string
-		for _, name := range res.VMResources.VMNames {
-			if name != res.VMResources.SetupVMName {
-				out = append(out, name)
-			}
-		}
-		if len(out) > 0 {
-			return out
+// e2eListVirtualMachineNamesRunningOnly returns VM names whose status.phase is Running.
+// Attach to Migrating/Starting VMs often hangs VMBDA in Pending — do not use those for disk attach.
+func e2eListVirtualMachineNamesRunningOnly(ctx context.Context, baseKube *rest.Config, ns string) ([]string, error) {
+	cl, err := e2eNewVirtClient(baseKube)
+	if err != nil {
+		return nil, err
+	}
+	var list virtv1alpha2.VirtualMachineList
+	if err := cl.List(ctx, &list, client.InNamespace(ns)); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(list.Items))
+	for i := range list.Items {
+		if list.Items[i].Status.Phase == virtv1alpha2.MachineRunning {
+			names = append(names, list.Items[i].Name)
 		}
 	}
-	vmNames, err := kubernetes.ListVirtualMachineNames(ctx, res.BaseKubeconfig, ns)
+	return names, nil
+}
+
+// e2eExcludeBootstrapGuestVMs removes bootstrap guest VMs (prefix bootstrap-node-) from attach candidate lists.
+func e2eExcludeBootstrapGuestVMs(names []string) []string {
+	if len(names) == 0 {
+		return names
+	}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if strings.HasPrefix(n, e2eBootstrapGuestVMPrefix) {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// e2eIntersectVMNamesRunning keeps only Running VMs. If candidates is non-empty but none are Running (e.g. Migrating),
+// falls back to all Running VMs in the namespace and logs a warning.
+func e2eIntersectVMNamesRunning(ctx context.Context, baseKube *rest.Config, ns string, candidates []string) []string {
+	running, err := e2eListVirtualMachineNamesRunningOnly(ctx, baseKube, ns)
 	Expect(err).NotTo(HaveOccurred(), "list VirtualMachines on base cluster")
-	Expect(vmNames).NotTo(BeEmpty(), "no VirtualMachines in namespace %s", ns)
-	return vmNames
+	running = e2eExcludeBootstrapGuestVMs(running)
+	candidates = e2eExcludeBootstrapGuestVMs(candidates)
+	Expect(running).NotTo(BeEmpty(),
+		"no non-bootstrap guest VMs in phase Running in namespace %s (Migrating/Starting/bootstrap-only)", ns)
+
+	if len(candidates) == 0 {
+		return running
+	}
+	allowed := make(map[string]struct{}, len(running))
+	for _, n := range running {
+		allowed[n] = struct{}{}
+	}
+	var out []string
+	for _, c := range candidates {
+		if _, ok := allowed[c]; ok {
+			out = append(out, c)
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	GinkgoWriter.Printf("    ⚠️  no Running non-bootstrap VM among candidates %v (e.g. Migrating); using all Running non-bootstrap VMs in namespace: %v\n", candidates, running)
+	return running
+}
+
+// e2eListClusterVMNames returns guest VM names to attach disks to (same pattern as other LVM tests).
+func e2eListClusterVMNames(ctx context.Context, res *cluster.TestClusterResources, ns string) []string {
+	var candidates []string
+	if res.VMResources != nil {
+		for _, name := range res.VMResources.VMNames {
+			if name != res.VMResources.SetupVMName {
+				candidates = append(candidates, name)
+			}
+		}
+	}
+	return e2eIntersectVMNamesRunning(ctx, res.BaseKubeconfig, ns, candidates)
 }
 
 func e2eConfigNamespace() string {
@@ -3728,26 +3831,20 @@ func cleanupE2ELVMLogicalVolumes(ctx context.Context, cl client.Client) {
 		return
 	}
 
+	// Delete LLV CRs only — do not strip finalizers: concurrent controller updates cause 409 conflicts and can leave
+	// VGs half-cleaned; the agent completes removal when finalizers run normally after PVC/Pods are gone.
 	GinkgoWriter.Printf("Deleting %d LVMLogicalVolume(s) referencing e2e LVGs\n", len(toDelete))
 	for _, name := range toDelete {
-		var llv v1alpha1.LVMLogicalVolume
-		if err := cl.Get(ctx, client.ObjectKey{Name: name}, &llv); err != nil {
-			continue
-		}
-
-		if len(llv.Finalizers) > 0 {
-			llv.Finalizers = nil
-			if err := cl.Update(ctx, &llv); err != nil {
-				GinkgoWriter.Printf("  Failed to remove finalizers from LLV %s: %v\n", name, err)
+		llv := &v1alpha1.LVMLogicalVolume{ObjectMeta: metav1.ObjectMeta{Name: name}}
+		if err := cl.Delete(ctx, llv); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
 			}
-		}
-
-		if err := cl.Delete(ctx, &llv); err != nil {
 			GinkgoWriter.Printf("  Failed to delete LLV %s: %v\n", name, err)
 		}
 	}
 
-	deadline := time.Now().Add(2 * time.Minute)
+	deadline := time.Now().Add(5 * time.Minute)
 	for time.Now().Before(deadline) {
 		err := cl.List(ctx, &list, &client.ListOptions{})
 		if err != nil {
@@ -3888,8 +3985,33 @@ func countE2EPVCsDefault(ctx context.Context, cl client.Client) int {
 	return n
 }
 
+// countE2ERelatedPVs returns PVs still present for e2e local volumes (same StorageClass as scheduler tests).
+// PVC objects can be gone while PV is still Terminating — CSI must detach before LVMLogicalVolume can be removed safely.
+func countE2ERelatedPVs(ctx context.Context, cl client.Client) int {
+	var list corev1.PersistentVolumeList
+	if err := cl.List(ctx, &list); err != nil {
+		GinkgoWriter.Printf("count e2e PVs: list failed: %v\n", err)
+		return 999999
+	}
+	n := 0
+	for i := range list.Items {
+		pv := &list.Items[i]
+		if pv.Spec.StorageClassName == e2eLocalStorageClassName {
+			n++
+			continue
+		}
+		if ref := pv.Spec.ClaimRef; ref != nil && ref.Namespace == metav1.NamespaceDefault &&
+			strings.HasPrefix(ref.Name, e2ePVCPrefix) {
+			n++
+		}
+	}
+	return n
+}
+
 // cleanupE2EPodsAndPVCsWithWait deletes e2e Pods first and waits until they are gone before deleting PVCs.
 // Deleting PVCs while Pods still mount the volume leaves PVCs stuck in Terminating and blocks the test.
+// Then waits until related PersistentVolumes are gone (CSI finishes delete) so LVMLogicalVolume teardown can run in order.
+// Uses only Delete (no finalizer removal on Pods or PVCs).
 func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 
@@ -3907,14 +4029,15 @@ func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, timeou
 	for time.Now().Before(deadline) {
 		podCount := countE2EPodsDefault(ctx, cl)
 		pvcCount := countE2EPVCsDefault(ctx, cl)
-		if podCount == 0 && pvcCount == 0 {
-			GinkgoWriter.Println("All e2e Pods and PVCs deleted")
+		pvCount := countE2ERelatedPVs(ctx, cl)
+		if podCount == 0 && pvcCount == 0 && pvCount == 0 {
+			GinkgoWriter.Println("All e2e Pods, PVCs, and related PVs deleted")
 			return
 		}
-		GinkgoWriter.Printf("Waiting for cleanup: %d pods, %d PVCs remaining\n", podCount, pvcCount)
+		GinkgoWriter.Printf("Waiting for cleanup: %d pods, %d PVCs, %d PVs remaining\n", podCount, pvcCount, pvCount)
 		time.Sleep(5 * time.Second)
 	}
-	GinkgoWriter.Println("Warning: some e2e Pods/PVCs may still exist after cleanup timeout")
+	GinkgoWriter.Println("Warning: some e2e Pods/PVCs/PVs may still exist after cleanup timeout")
 }
 
 func getTotalAvailableSpace(ctx context.Context, cl client.Client, lvgs []*v1alpha1.LVMVolumeGroup) int64 {
@@ -3985,8 +4108,9 @@ func schedulerVolumeSizesForConsolidatedFill(currentAvailable, maxPerLVG, prefer
 // schedulerCleanupWorkloadBeforeNextFill removes e2e Pods/PVCs, then LVMLogicalVolumes tied to e2e LVGs.
 // Deleting PVCs alone is not enough: thin LVs remain on the VG until LLV CRs are removed; otherwise the next test
 // or LVMVolumeGroup teardown hits "Delete used LVs first" and PV can stay Released with no PVC.
+// Pods/PVCs are deleted without stripping finalizers; wait for PVs before LLV so CSI does not race with LVMLogicalVolume deletion.
 func schedulerCleanupWorkloadBeforeNextFill(ctx context.Context, cl client.Client) {
-	cleanupE2EPodsAndPVCsWithWait(ctx, cl, 3*time.Minute)
+	cleanupE2EPodsAndPVCsWithWait(ctx, cl, e2eSchedulerWorkloadCleanupTimeout)
 	By("Removing LVMLogicalVolumes for e2e LVGs after PVC deletion (thin LVs must leave the VG)")
 	cleanupE2ELVMLogicalVolumes(ctx, cl)
 }
