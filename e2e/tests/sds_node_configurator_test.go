@@ -549,41 +549,38 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			It("Should fill storage with small volumes to maximum capacity", func() {
 				Expect(createdLVGs).NotTo(BeEmpty(), "LVMVolumeGroups must be created first")
 				Expect(e2eStorageClassName).NotTo(BeEmpty(), "StorageClass must be created first")
+				Expect(totalAvailableSpace).To(BeNumerically(">", 0),
+					"baseline sum(VGFree) must be recorded when LVMVolumeGroups became Ready")
 
 				By("Cleaning up previous test resources")
 				schedulerCleanupWorkloadBeforeNextFill(e2eCtx, k8sClient)
 
-				By("Waiting for LVMVolumeGroup VGFree to reflect freed space after PVC deletion (async)")
-				currentAvailable := waitForSchedulerVGFreeAfterPVCleanup(e2eCtx, k8sClient, createdLVGs)
-				By(fmt.Sprintf("Current available space: %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
+				By("Waiting until sum(VGFree) recovers to initial storage budget (same as after LVG Ready)")
+				currentAvailable := waitForSchedulerStorageFreedToBaseline(e2eCtx, k8sClient, createdLVGs, totalAvailableSpace)
+				By(fmt.Sprintf("Current available space: %.2f Gi (baseline budget %.2f Gi)",
+					float64(currentAvailable)/(1024*1024*1024), float64(totalAvailableSpace)/(1024*1024*1024)))
 
-				planCap := schedulerCapacityForMaxFillTest(currentAvailable)
-				By(fmt.Sprintf("Planning budget: %.2f Gi (94%% of VGFree; avoids thin-LVM overcommit vs reported free)",
-					float64(planCap)/(1024*1024*1024)))
+				maxPerLVG := getMaxVGFreeAcrossLVGs(e2eCtx, k8sClient, createdLVGs)
+				By(fmt.Sprintf("Max VGFree on one LVMVolumeGroup: %.2f Gi (each PVC must fit a single LVG; sum VGFree can be higher)",
+					float64(maxPerLVG)/(1024*1024*1024)))
 
-				volumeSize := int64(1 * 1024 * 1024 * 1024) // 1Gi
-				minVolumeSize := int64(500 * 1024 * 1024)   // 500Mi minimum for remainder
-
-				numVolumes := int(planCap / volumeSize)
-				remainder := planCap % volumeSize
-
-				var volumeSizes []int64
-				for i := 0; i < numVolumes; i++ {
-					volumeSizes = append(volumeSizes, volumeSize)
-				}
-				if remainder >= minVolumeSize {
-					volumeSizes = append(volumeSizes, remainder)
-				}
+				preferredUnit := int64(1 * 1024 * 1024 * 1024) // 1Gi
+				minVolumeSize := int64(500 * 1024 * 1024)     // 500Mi minimum for remainder
+				volumeSizes := schedulerVolumeSizesForConsolidatedFill(currentAvailable, maxPerLVG, preferredUnit, minVolumeSize)
+				Expect(volumeSizes).NotTo(BeEmpty(),
+					"no schedulable volume plan (max VGFree per LVG vs min remainder)")
 
 				totalPlanned := int64(0)
 				for _, s := range volumeSizes {
 					totalPlanned += s
 				}
-				utilization := schedulerPlanningUtilizationPercent(totalPlanned, planCap)
+				utilization := float64(0)
+				if currentAvailable > 0 {
+					utilization = float64(totalPlanned) / float64(currentAvailable) * 100
+				}
 
-				By(fmt.Sprintf("Planning %d volumes: %d x %dMi + remainder %dMi = %.2f Gi (%.1f%% of planning budget)",
-					len(volumeSizes), numVolumes, volumeSize/(1024*1024), remainder/(1024*1024),
-					float64(totalPlanned)/(1024*1024*1024), utilization))
+				By(fmt.Sprintf("Planning %d volumes, total %.2f Gi (%.1f%% of sum VGFree); preferred unit %d Mi (capped by max per LVG)",
+					len(volumeSizes), float64(totalPlanned)/(1024*1024*1024), utilization, preferredUnit/(1024*1024)))
 
 				successCount, scheduledCount := createPVCsAndPodsWithSizes(e2eCtx, k8sClient, volumeSizes, e2eStorageClassName, "small")
 
@@ -593,47 +590,44 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				Expect(successCount).To(Equal(len(volumeSizes)),
 					"All planned PVCs must be created successfully")
 
-				printSchedulingSummary("small volumes", len(volumeSizes), successCount, scheduledCount, volumeSize)
+				printSchedulingSummary("small volumes", len(volumeSizes), successCount, scheduledCount, preferredUnit)
 			})
 
 			It("Should fill storage with medium volumes to maximum capacity", func() {
 				Expect(createdLVGs).NotTo(BeEmpty(), "LVMVolumeGroups must be created first")
 				Expect(e2eStorageClassName).NotTo(BeEmpty(), "StorageClass must be created first")
+				Expect(totalAvailableSpace).To(BeNumerically(">", 0),
+					"baseline sum(VGFree) must be recorded when LVMVolumeGroups became Ready")
 
 				By("Cleaning up previous test resources")
 				schedulerCleanupWorkloadBeforeNextFill(e2eCtx, k8sClient)
 
-				By("Waiting for LVMVolumeGroup VGFree to reflect freed space after PVC deletion (async)")
-				currentAvailable := waitForSchedulerVGFreeAfterPVCleanup(e2eCtx, k8sClient, createdLVGs)
-				By(fmt.Sprintf("Current available space: %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
+				By("Waiting until sum(VGFree) recovers to initial storage budget (same as after LVG Ready)")
+				currentAvailable := waitForSchedulerStorageFreedToBaseline(e2eCtx, k8sClient, createdLVGs, totalAvailableSpace)
+				By(fmt.Sprintf("Current available space: %.2f Gi (baseline budget %.2f Gi)",
+					float64(currentAvailable)/(1024*1024*1024), float64(totalAvailableSpace)/(1024*1024*1024)))
 
-				planCap := schedulerCapacityForMaxFillTest(currentAvailable)
-				By(fmt.Sprintf("Planning budget: %.2f Gi (94%% of VGFree; avoids thin-LVM overcommit vs reported free)",
-					float64(planCap)/(1024*1024*1024)))
+				maxPerLVG := getMaxVGFreeAcrossLVGs(e2eCtx, k8sClient, createdLVGs)
+				By(fmt.Sprintf("Max VGFree on one LVMVolumeGroup: %.2f Gi (each PVC must fit a single LVG; sum VGFree can be higher)",
+					float64(maxPerLVG)/(1024*1024*1024)))
 
-				volumeSize := int64(5 * 1024 * 1024 * 1024)    // 5Gi
+				preferredUnit := int64(5 * 1024 * 1024 * 1024) // 5Gi
 				minVolumeSize := int64(1 * 1024 * 1024 * 1024) // 1Gi minimum for remainder
-
-				numVolumes := int(planCap / volumeSize)
-				remainder := planCap % volumeSize
-
-				var volumeSizes []int64
-				for i := 0; i < numVolumes; i++ {
-					volumeSizes = append(volumeSizes, volumeSize)
-				}
-				if remainder >= minVolumeSize {
-					volumeSizes = append(volumeSizes, remainder)
-				}
+				volumeSizes := schedulerVolumeSizesForConsolidatedFill(currentAvailable, maxPerLVG, preferredUnit, minVolumeSize)
+				Expect(volumeSizes).NotTo(BeEmpty(),
+					"no schedulable volume plan (max VGFree per LVG vs min remainder)")
 
 				totalPlanned := int64(0)
 				for _, s := range volumeSizes {
 					totalPlanned += s
 				}
-				utilization := schedulerPlanningUtilizationPercent(totalPlanned, planCap)
+				utilization := float64(0)
+				if currentAvailable > 0 {
+					utilization = float64(totalPlanned) / float64(currentAvailable) * 100
+				}
 
-				By(fmt.Sprintf("Planning %d volumes: %d x %dMi + remainder %dMi = %.2f Gi (%.1f%% of planning budget)",
-					len(volumeSizes), numVolumes, volumeSize/(1024*1024), remainder/(1024*1024),
-					float64(totalPlanned)/(1024*1024*1024), utilization))
+				By(fmt.Sprintf("Planning %d volumes, total %.2f Gi (%.1f%% of sum VGFree); preferred unit %d Mi (capped by max per LVG)",
+					len(volumeSizes), float64(totalPlanned)/(1024*1024*1024), utilization, preferredUnit/(1024*1024)))
 
 				successCount, scheduledCount := createPVCsAndPodsWithSizes(e2eCtx, k8sClient, volumeSizes, e2eStorageClassName, "medium")
 
@@ -643,56 +637,44 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				Expect(successCount).To(Equal(len(volumeSizes)),
 					"All planned PVCs must be created successfully")
 
-				printSchedulingSummary("medium volumes", len(volumeSizes), successCount, scheduledCount, volumeSize)
+				printSchedulingSummary("medium volumes", len(volumeSizes), successCount, scheduledCount, preferredUnit)
 			})
 
 			It("Should fill storage with large volumes to maximum capacity", func() {
 				Expect(createdLVGs).NotTo(BeEmpty(), "LVMVolumeGroups must be created first")
 				Expect(e2eStorageClassName).NotTo(BeEmpty(), "StorageClass must be created first")
+				Expect(totalAvailableSpace).To(BeNumerically(">", 0),
+					"baseline sum(VGFree) must be recorded when LVMVolumeGroups became Ready")
 
 				By("Cleaning up previous test resources")
 				schedulerCleanupWorkloadBeforeNextFill(e2eCtx, k8sClient)
 
-				By("Waiting for LVMVolumeGroup VGFree to reflect freed space after PVC deletion (async)")
-				currentAvailable := waitForSchedulerVGFreeAfterPVCleanup(e2eCtx, k8sClient, createdLVGs)
-				By(fmt.Sprintf("Current available space: %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
+				By("Waiting until sum(VGFree) recovers to initial storage budget (same as after LVG Ready)")
+				currentAvailable := waitForSchedulerStorageFreedToBaseline(e2eCtx, k8sClient, createdLVGs, totalAvailableSpace)
+				By(fmt.Sprintf("Current available space: %.2f Gi (baseline budget %.2f Gi)",
+					float64(currentAvailable)/(1024*1024*1024), float64(totalAvailableSpace)/(1024*1024*1024)))
 
-				planCap := schedulerCapacityForMaxFillTest(currentAvailable)
-				By(fmt.Sprintf("Planning budget: %.2f Gi (94%% of VGFree; avoids thin-LVM overcommit vs reported free)",
-					float64(planCap)/(1024*1024*1024)))
+				maxPerLVG := getMaxVGFreeAcrossLVGs(e2eCtx, k8sClient, createdLVGs)
+				By(fmt.Sprintf("Max VGFree on one LVMVolumeGroup: %.2f Gi (each PVC must fit a single LVG; sum VGFree can be higher)",
+					float64(maxPerLVG)/(1024*1024*1024)))
 
-				volumeSize := int64(10 * 1024 * 1024 * 1024)   // 10Gi
-				minVolumeSize := int64(1 * 1024 * 1024 * 1024) // 1Gi minimum for remainder
-
-				numVolumes := int(planCap / volumeSize)
-				remainder := planCap % volumeSize
-
-				if numVolumes == 0 && planCap >= minVolumeSize {
-					volumeSizes := []int64{planCap}
-					By(fmt.Sprintf("Available space < 10Gi, creating single volume of %.2f Gi", float64(planCap)/(1024*1024*1024)))
-					successCount, scheduledCount := createPVCsAndPodsWithSizes(e2eCtx, k8sClient, volumeSizes, e2eStorageClassName, "large")
-					Expect(scheduledCount).To(Equal(successCount))
-					printSchedulingSummary("large volumes", 1, successCount, scheduledCount, planCap)
-					return
-				}
-
-				var volumeSizes []int64
-				for i := 0; i < numVolumes; i++ {
-					volumeSizes = append(volumeSizes, volumeSize)
-				}
-				if remainder >= minVolumeSize {
-					volumeSizes = append(volumeSizes, remainder)
-				}
+				preferredUnit := int64(10 * 1024 * 1024 * 1024) // 10Gi
+				minVolumeSize := int64(1 * 1024 * 1024 * 1024)  // 1Gi minimum for remainder
+				volumeSizes := schedulerVolumeSizesForConsolidatedFill(currentAvailable, maxPerLVG, preferredUnit, minVolumeSize)
+				Expect(volumeSizes).NotTo(BeEmpty(),
+					"no schedulable volume plan (max VGFree per LVG vs min remainder)")
 
 				totalPlanned := int64(0)
 				for _, s := range volumeSizes {
 					totalPlanned += s
 				}
-				utilization := schedulerPlanningUtilizationPercent(totalPlanned, planCap)
+				utilization := float64(0)
+				if currentAvailable > 0 {
+					utilization = float64(totalPlanned) / float64(currentAvailable) * 100
+				}
 
-				By(fmt.Sprintf("Planning %d volumes: %d x %dGi + remainder %dMi = %.2f Gi (%.1f%% of planning budget)",
-					len(volumeSizes), numVolumes, volumeSize/(1024*1024*1024), remainder/(1024*1024),
-					float64(totalPlanned)/(1024*1024*1024), utilization))
+				By(fmt.Sprintf("Planning %d volumes, total %.2f Gi (%.1f%% of sum VGFree); preferred unit %d Gi (capped by max per LVG)",
+					len(volumeSizes), float64(totalPlanned)/(1024*1024*1024), utilization, preferredUnit/(1024*1024*1024)))
 
 				successCount, scheduledCount := createPVCsAndPodsWithSizes(e2eCtx, k8sClient, volumeSizes, e2eStorageClassName, "large")
 
@@ -702,7 +684,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				Expect(successCount).To(Equal(len(volumeSizes)),
 					"All planned PVCs must be created successfully")
 
-				printSchedulingSummary("large volumes", len(volumeSizes), successCount, scheduledCount, volumeSize)
+				printSchedulingSummary("large volumes", len(volumeSizes), successCount, scheduledCount, preferredUnit)
 			})
 		})
 
@@ -3949,6 +3931,57 @@ func getTotalAvailableSpace(ctx context.Context, cl client.Client, lvgs []*v1alp
 	return total
 }
 
+// getMaxVGFreeAcrossLVGs returns the largest VGFree among Ready e2e LVMVolumeGroups. A single PVC is satisfied by
+// one LVG on one node — sum(VGFree) over the cluster can exceed this (fragmented free space after prior tests).
+func getMaxVGFreeAcrossLVGs(ctx context.Context, cl client.Client, lvgs []*v1alpha1.LVMVolumeGroup) int64 {
+	var maxFree int64
+	for _, lvg := range lvgs {
+		var current v1alpha1.LVMVolumeGroup
+		if err := cl.Get(ctx, client.ObjectKeyFromObject(lvg), &current); err != nil {
+			continue
+		}
+		if current.Status.Phase != v1alpha1.PhaseReady {
+			continue
+		}
+		v := current.Status.VGFree.Value()
+		if v > maxFree {
+			maxFree = v
+		}
+	}
+	return maxFree
+}
+
+// schedulerVolumeSizesForConsolidatedFill builds PVC sizes that sum to at most currentAvailable (sum of VGFree),
+// with each request <= maxPerLVG. preferredUnit is capped by maxPerLVG; leftover bytes are drained in chunks
+// <= maxPerLVG so every volume can schedule on some node with local LVM.
+func schedulerVolumeSizesForConsolidatedFill(currentAvailable, maxPerLVG, preferredUnit, minRemainder int64) []int64 {
+	if currentAvailable <= 0 || maxPerLVG <= 0 {
+		return nil
+	}
+	unit := preferredUnit
+	if unit > maxPerLVG {
+		unit = maxPerLVG
+	}
+	if unit <= 0 {
+		return nil
+	}
+	var sizes []int64
+	left := currentAvailable
+	for left >= unit {
+		sizes = append(sizes, unit)
+		left -= unit
+	}
+	for left >= minRemainder {
+		sz := min(maxPerLVG, left)
+		if sz < minRemainder {
+			break
+		}
+		sizes = append(sizes, sz)
+		left -= sz
+	}
+	return sizes
+}
+
 // schedulerCleanupWorkloadBeforeNextFill removes e2e Pods/PVCs, then LVMLogicalVolumes tied to e2e LVGs.
 // Deleting PVCs alone is not enough: thin LVs remain on the VG until LLV CRs are removed; otherwise the next test
 // or LVMVolumeGroup teardown hits "Delete used LVs first" and PV can stay Released with no PVC.
@@ -3958,34 +3991,23 @@ func schedulerCleanupWorkloadBeforeNextFill(ctx context.Context, cl client.Clien
 	cleanupE2ELVMLogicalVolumes(ctx, cl)
 }
 
-// waitForSchedulerVGFreeAfterPVCleanup polls until sum(VGFree) > 0. PVC/Pod deletion returns before thin LVs and
-// LVMLogicalVolumes are fully gone and before the agent updates LVMVolumeGroup status.
-func waitForSchedulerVGFreeAfterPVCleanup(ctx context.Context, cl client.Client, lvgs []*v1alpha1.LVMVolumeGroup) int64 {
+// waitForSchedulerStorageFreedToBaseline waits until sum(VGFree) across Ready e2e LVMVolumeGroups returns to the
+// baseline recorded after LVG became Ready (totalAvailableSpace). Pod/PVC deletion finishes before thin LVs and
+// LLV CRs are gone; waiting only for VGFree > 0 under-fills the next "100% utilization" test.
+func waitForSchedulerStorageFreedToBaseline(ctx context.Context, cl client.Client, lvgs []*v1alpha1.LVMVolumeGroup, baselineFreeBytes int64) int64 {
+	if baselineFreeBytes <= 0 {
+		return 0
+	}
+	// Allow 1% slack for status rounding vs first observation; require ~full recovery of the initial budget.
+	minExpected := baselineFreeBytes * 99 / 100
 	var total int64
 	Eventually(func(g Gomega) {
 		total = getTotalAvailableSpace(ctx, cl, lvgs)
-		g.Expect(total).To(BeNumerically(">", 0),
-			"VGFree should recover after PVC/Pod cleanup (async LLV/thin LV teardown)")
-	}, 10*time.Minute, 5*time.Second).Should(Succeed())
+		g.Expect(total).To(BeNumerically(">=", minExpected),
+			"sum(VGFree) must recover to ~initial storage budget after Pod/PVC/LLV cleanup (baseline=%d min=%d got=%d)",
+			baselineFreeBytes, minExpected, total)
+	}, 15*time.Minute, 5*time.Second).Should(Succeed())
 	return total
-}
-
-// schedulerCapacityForMaxFillTest returns a byte budget for "fill to max" tests. Planning N×fixed-size volumes
-// for 100% of sum(VGFree) often leaves the last PVCs Pending: thin-LV metadata, alignment, and extender rounding
-// mean reported VGFree is not fully splittable into equal chunks.
-func schedulerCapacityForMaxFillTest(reportedVGFree int64) int64 {
-	const headroomPercent = 94
-	if reportedVGFree <= 0 {
-		return 0
-	}
-	return reportedVGFree * headroomPercent / 100
-}
-
-func schedulerPlanningUtilizationPercent(totalPlanned, planCap int64) float64 {
-	if planCap <= 0 {
-		return 0
-	}
-	return float64(totalPlanned) / float64(planCap) * 100
 }
 
 func createPVCsAndPodsWithSizes(ctx context.Context, cl client.Client, volumeSizes []int64, storageClass, sizeLabel string) (successCount, scheduledCount int) {
