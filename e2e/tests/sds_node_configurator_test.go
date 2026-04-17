@@ -557,11 +557,15 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				currentAvailable := waitForSchedulerVGFreeAfterPVCleanup(e2eCtx, k8sClient, createdLVGs)
 				By(fmt.Sprintf("Current available space: %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
 
+				planCap := schedulerCapacityForMaxFillTest(currentAvailable)
+				By(fmt.Sprintf("Planning budget: %.2f Gi (94%% of VGFree; avoids thin-LVM overcommit vs reported free)",
+					float64(planCap)/(1024*1024*1024)))
+
 				volumeSize := int64(1 * 1024 * 1024 * 1024) // 1Gi
 				minVolumeSize := int64(500 * 1024 * 1024)   // 500Mi minimum for remainder
 
-				numVolumes := int(currentAvailable / volumeSize)
-				remainder := currentAvailable % volumeSize
+				numVolumes := int(planCap / volumeSize)
+				remainder := planCap % volumeSize
 
 				var volumeSizes []int64
 				for i := 0; i < numVolumes; i++ {
@@ -575,9 +579,9 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				for _, s := range volumeSizes {
 					totalPlanned += s
 				}
-				utilization := float64(totalPlanned) / float64(currentAvailable) * 100
+				utilization := schedulerPlanningUtilizationPercent(totalPlanned, planCap)
 
-				By(fmt.Sprintf("Planning %d volumes: %d x %dMi + remainder %dMi = %.2f Gi (%.1f%% utilization)",
+				By(fmt.Sprintf("Planning %d volumes: %d x %dMi + remainder %dMi = %.2f Gi (%.1f%% of planning budget)",
 					len(volumeSizes), numVolumes, volumeSize/(1024*1024), remainder/(1024*1024),
 					float64(totalPlanned)/(1024*1024*1024), utilization))
 
@@ -603,11 +607,15 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				currentAvailable := waitForSchedulerVGFreeAfterPVCleanup(e2eCtx, k8sClient, createdLVGs)
 				By(fmt.Sprintf("Current available space: %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
 
+				planCap := schedulerCapacityForMaxFillTest(currentAvailable)
+				By(fmt.Sprintf("Planning budget: %.2f Gi (94%% of VGFree; avoids thin-LVM overcommit vs reported free)",
+					float64(planCap)/(1024*1024*1024)))
+
 				volumeSize := int64(5 * 1024 * 1024 * 1024)    // 5Gi
 				minVolumeSize := int64(1 * 1024 * 1024 * 1024) // 1Gi minimum for remainder
 
-				numVolumes := int(currentAvailable / volumeSize)
-				remainder := currentAvailable % volumeSize
+				numVolumes := int(planCap / volumeSize)
+				remainder := planCap % volumeSize
 
 				var volumeSizes []int64
 				for i := 0; i < numVolumes; i++ {
@@ -621,9 +629,9 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				for _, s := range volumeSizes {
 					totalPlanned += s
 				}
-				utilization := float64(totalPlanned) / float64(currentAvailable) * 100
+				utilization := schedulerPlanningUtilizationPercent(totalPlanned, planCap)
 
-				By(fmt.Sprintf("Planning %d volumes: %d x %dMi + remainder %dMi = %.2f Gi (%.1f%% utilization)",
+				By(fmt.Sprintf("Planning %d volumes: %d x %dMi + remainder %dMi = %.2f Gi (%.1f%% of planning budget)",
 					len(volumeSizes), numVolumes, volumeSize/(1024*1024), remainder/(1024*1024),
 					float64(totalPlanned)/(1024*1024*1024), utilization))
 
@@ -649,18 +657,22 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				currentAvailable := waitForSchedulerVGFreeAfterPVCleanup(e2eCtx, k8sClient, createdLVGs)
 				By(fmt.Sprintf("Current available space: %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
 
+				planCap := schedulerCapacityForMaxFillTest(currentAvailable)
+				By(fmt.Sprintf("Planning budget: %.2f Gi (94%% of VGFree; avoids thin-LVM overcommit vs reported free)",
+					float64(planCap)/(1024*1024*1024)))
+
 				volumeSize := int64(10 * 1024 * 1024 * 1024)   // 10Gi
 				minVolumeSize := int64(1 * 1024 * 1024 * 1024) // 1Gi minimum for remainder
 
-				numVolumes := int(currentAvailable / volumeSize)
-				remainder := currentAvailable % volumeSize
+				numVolumes := int(planCap / volumeSize)
+				remainder := planCap % volumeSize
 
-				if numVolumes == 0 && currentAvailable >= minVolumeSize {
-					volumeSizes := []int64{currentAvailable}
-					By(fmt.Sprintf("Available space < 10Gi, creating single volume of %.2f Gi", float64(currentAvailable)/(1024*1024*1024)))
+				if numVolumes == 0 && planCap >= minVolumeSize {
+					volumeSizes := []int64{planCap}
+					By(fmt.Sprintf("Available space < 10Gi, creating single volume of %.2f Gi", float64(planCap)/(1024*1024*1024)))
 					successCount, scheduledCount := createPVCsAndPodsWithSizes(e2eCtx, k8sClient, volumeSizes, e2eStorageClassName, "large")
 					Expect(scheduledCount).To(Equal(successCount))
-					printSchedulingSummary("large volumes", 1, successCount, scheduledCount, currentAvailable)
+					printSchedulingSummary("large volumes", 1, successCount, scheduledCount, planCap)
 					return
 				}
 
@@ -676,9 +688,9 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				for _, s := range volumeSizes {
 					totalPlanned += s
 				}
-				utilization := float64(totalPlanned) / float64(currentAvailable) * 100
+				utilization := schedulerPlanningUtilizationPercent(totalPlanned, planCap)
 
-				By(fmt.Sprintf("Planning %d volumes: %d x %dGi + remainder %dMi = %.2f Gi (%.1f%% utilization)",
+				By(fmt.Sprintf("Planning %d volumes: %d x %dGi + remainder %dMi = %.2f Gi (%.1f%% of planning budget)",
 					len(volumeSizes), numVolumes, volumeSize/(1024*1024*1024), remainder/(1024*1024),
 					float64(totalPlanned)/(1024*1024*1024), utilization))
 
@@ -2706,6 +2718,9 @@ const (
 	e2eModuleDeployTimeout         = 15 * time.Minute
 	e2eStorageModuleReadyTimeout   = 30 * time.Minute // alwaysUseExisting: wait for Module Ready after ModuleConfig
 	e2eUseExistingClusterTimeout   = 90 * time.Minute
+
+	// Common Scheduler "fill to max" tests create many PVCs/Pods; provisioning and binding can exceed 5m on loaded clusters.
+	e2eSchedulerFillPodsWaitTimeout = 10 * time.Minute
 )
 
 const (
@@ -3955,6 +3970,24 @@ func waitForSchedulerVGFreeAfterPVCleanup(ctx context.Context, cl client.Client,
 	return total
 }
 
+// schedulerCapacityForMaxFillTest returns a byte budget for "fill to max" tests. Planning N×fixed-size volumes
+// for 100% of sum(VGFree) often leaves the last PVCs Pending: thin-LV metadata, alignment, and extender rounding
+// mean reported VGFree is not fully splittable into equal chunks.
+func schedulerCapacityForMaxFillTest(reportedVGFree int64) int64 {
+	const headroomPercent = 94
+	if reportedVGFree <= 0 {
+		return 0
+	}
+	return reportedVGFree * headroomPercent / 100
+}
+
+func schedulerPlanningUtilizationPercent(totalPlanned, planCap int64) float64 {
+	if planCap <= 0 {
+		return 0
+	}
+	return float64(totalPlanned) / float64(planCap) * 100
+}
+
 func createPVCsAndPodsWithSizes(ctx context.Context, cl client.Client, volumeSizes []int64, storageClass, sizeLabel string) (successCount, scheduledCount int) {
 	for i, volumeSize := range volumeSizes {
 		pvcName := fmt.Sprintf("%s%s-%d", e2ePVCPrefix, sizeLabel, i)
@@ -4029,7 +4062,7 @@ func createPVCsAndPodsWithSizes(ctx context.Context, cl client.Client, volumeSiz
 		}
 	}
 
-	scheduledCount = waitForPodsScheduled(ctx, cl, sizeLabel, successCount, 5*time.Minute)
+	scheduledCount = waitForPodsScheduled(ctx, cl, sizeLabel, successCount, e2eSchedulerFillPodsWaitTimeout)
 	printPVCAndPodStatus(ctx, cl, sizeLabel)
 	return successCount, scheduledCount
 }
@@ -4108,7 +4141,7 @@ func createPVCsAndPods(ctx context.Context, cl client.Client, numVolumes int, vo
 		}
 	}
 
-	scheduledCount = waitForPodsScheduled(ctx, cl, sizeLabel, successCount, 5*time.Minute)
+	scheduledCount = waitForPodsScheduled(ctx, cl, sizeLabel, successCount, e2eSchedulerFillPodsWaitTimeout)
 
 	printPVCAndPodStatus(ctx, cl, sizeLabel)
 
