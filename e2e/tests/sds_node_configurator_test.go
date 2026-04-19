@@ -700,7 +700,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			}
 			ns := e2eConfigNamespace()
 			By("Common Scheduler AfterAll: cleaning up LVM, PVCs, LocalStorageClass, VirtualDisks, BlockDevices before Sds Node Configurator")
-			cleanupE2EPodsAndPVCsWithWait(ctx, k8sCl, 2*time.Minute)
+			cleanupE2EPodsAndPVCsWithWait(ctx, k8sCl, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
 			cleanupE2ELVMLogicalVolumes(ctx, k8sCl)
 			cleanupE2ELVMVolumeGroups(ctx, k8sCl)
 			cleanupE2ELocalStorageClasses(ctx, res.Kubeconfig)
@@ -1221,7 +1221,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					prepCtx, prepCancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
 					defer prepCancel()
 					By("LVMVolumeGroup suite: cleaning orphan LVM/PVC/VirtualDisks/BlockDevices before thin-pool and pvresize tests")
-					cleanupE2EPodsAndPVCsWithWait(prepCtx, k8sClient, 2*time.Minute)
+					cleanupE2EPodsAndPVCsWithWait(prepCtx, k8sClient, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
 					cleanupE2ELVMLogicalVolumes(prepCtx, k8sClient)
 					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
 					cleanupE2ELocalStorageClasses(prepCtx, testClusterResources.Kubeconfig)
@@ -1747,9 +1747,9 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
 				Expect(err).NotTo(HaveOccurred())
 				validationAttaches = append(validationAttaches, att1)
-				attachCtx, cancel := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
-				defer cancel()
-				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns, att1.AttachmentName, 10*time.Second)).To(Succeed())
+				attachCtx1, cancel1 := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
+				defer cancel1()
+				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx1, testClusterResources.BaseKubeconfig, ns, att1.AttachmentName, 10*time.Second)).To(Succeed())
 
 				Eventually(func(g Gomega) {
 					var after v1alpha1.BlockDeviceList
@@ -1771,7 +1771,9 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
 				Expect(err).NotTo(HaveOccurred())
 				validationAttaches = append(validationAttaches, att2)
-				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns, att2.AttachmentName, 10*time.Second)).To(Succeed())
+				attachCtx2, cancel2 := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
+				defer cancel2()
+				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx2, testClusterResources.BaseKubeconfig, ns, att2.AttachmentName, 10*time.Second)).To(Succeed())
 
 				largeBD := e2eWaitConsumableBlockDeviceForVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, k8sClient, ns,
 					att2.DiskName, att2.AttachmentName, targetVM)
@@ -1804,7 +1806,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					var cur v1alpha1.LVMVolumeGroup
 					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: midLvgName}, &cur)).To(Succeed())
 					g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady))
-				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
 				var midReady v1alpha1.LVMVolumeGroup
 				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: midLvgName}, &midReady)).To(Succeed())
 				By("Intermediate LVMVolumeGroup Ready (before delete)")
@@ -1922,7 +1924,7 @@ func e2eSuiteSharedStorageCleanup(ctx context.Context) {
 		cleanupE2EVirtualDisks(ctx, res.BaseKubeconfig, ns, e2eSuiteVirtualDiskPrefix)
 	}
 	GinkgoWriter.Printf("    ▶️ AfterAll (suite): cleaning up e2e Pods and PVCs...\n")
-	cleanupE2EPodsAndPVCsWithWait(ctx, k8sCl, 2*time.Minute)
+	cleanupE2EPodsAndPVCsWithWait(ctx, k8sCl, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
 	GinkgoWriter.Printf("    ▶️ AfterAll (suite): cleaning up e2e LocalStorageClasses...\n")
 	cleanupE2ELocalStorageClasses(ctx, res.Kubeconfig)
 	GinkgoWriter.Printf("    ▶️ AfterAll (suite): cleaning up e2e LVMLogicalVolumes (orphan PVCs)...\n")
@@ -2736,14 +2738,21 @@ const (
 
 	e2eClusterCreationTimeout      = 90 * time.Minute
 	e2eModuleDeployTimeout         = 15 * time.Minute
+	// LVMVolumeGroup Pending → Ready on busy CI can exceed 5m (agent + node LVM).
+	e2eLVMVolumeGroupReadyTimeout = 15 * time.Minute
 	e2eStorageModuleReadyTimeout   = 30 * time.Minute // alwaysUseExisting: wait for Module Ready after ModuleConfig
 	e2eUseExistingClusterTimeout   = 90 * time.Minute
 
 	// Common Scheduler "fill to max" tests create many PVCs/Pods; provisioning and binding can exceed 5m on loaded clusters.
 	e2eSchedulerFillPodsWaitTimeout = 10 * time.Minute
 
-	// Time for Pods → PVCs → PVs (CSI detach/delete) before LLV cleanup between scheduler fill tests.
-	e2eSchedulerWorkloadCleanupTimeout = 10 * time.Minute
+	// Scheduler cleanup: pod termination and CSI PV teardown must not share one deadline — many PVs delete serially.
+	e2eSchedulerPodCleanupTimeout = 5 * time.Minute
+	e2eSchedulerPVDeleteTimeout   = 25 * time.Minute
+
+	// Suite/AfterAll: short pod wait; PVC deletion returns quickly while PV finalizers need a separate budget.
+	e2eSuitePodPVCleanupPodTimeout = 2 * time.Minute
+	e2eSuitePodPVCleanupPVTimeout  = 15 * time.Minute
 
 	// Guest VM name prefix for dhctl/bootstrap (Deckhouse test clusters). Do not attach data disks here — not a worker.
 	e2eBootstrapGuestVMPrefix = "bootstrap-node-"
@@ -3277,6 +3286,21 @@ func e2eConfigNamespace() string {
 
 func e2eConfigStorageClass() string       { return os.Getenv("TEST_CLUSTER_STORAGE_CLASS") }
 func e2eConfigTestClusterCleanup() string { return os.Getenv("TEST_CLUSTER_CLEANUP") }
+
+// e2eShouldDeleteBaseNamespaceAfterSuite controls deletion of TEST_CLUSTER_NAMESPACE on the base (virtualization) cluster
+// in AfterSuite. storage-e2e CleanupTestCluster removes VMs but does not delete the namespace; namespace teardown must
+// run while BaseKubeconfig still works (before CleanupTestCluster stops the base tunnel).
+// Set TEST_CLUSTER_DELETE_NAMESPACE=false to keep the namespace. If unset, defaults to when TEST_CLUSTER_CLEANUP is enabled.
+func e2eShouldDeleteBaseNamespaceAfterSuite() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("TEST_CLUSTER_DELETE_NAMESPACE"))) {
+	case "true", "1", "yes":
+		return true
+	case "false", "0", "no":
+		return false
+	default:
+		return e2eConfigTestClusterCleanup() == "true" || e2eConfigTestClusterCleanup() == "True"
+	}
+}
 func e2eConfigSSHHost() string            { return os.Getenv("SSH_HOST") }
 func e2eConfigSSHUser() string            { return os.Getenv("SSH_USER") }
 func e2eConfigSSHJumpHost() string        { return os.Getenv("SSH_JUMP_HOST") }
@@ -3353,6 +3377,17 @@ func e2eCleanupNestedTestClusterAfterSuite() {
 		} else {
 			GinkgoWriter.Printf("    ▶️ AfterSuite: cleaning up test cluster resources (TEST_CLUSTER_CLEANUP is not enabled - only bootstrap node will be removed)...\n")
 		}
+
+		if e2eShouldDeleteBaseNamespaceAfterSuite() && e2eNestedTestCluster.BaseKubeconfig != nil {
+			ns := e2eConfigNamespace()
+			if ns != "" {
+				GinkgoWriter.Printf("    ▶️ AfterSuite: deleting base cluster namespace %q (VMBDA → VirtualDisk → VirtualMachine → Namespace; storage-e2e CleanupTestCluster does not remove the namespace)\n", ns)
+				e2eCleanupBaseClusterNamespaceWorkload(ctx, e2eNestedTestCluster.BaseKubeconfig, ns)
+			}
+		} else if e2eShouldDeleteBaseNamespaceAfterSuite() && e2eNestedTestCluster.BaseKubeconfig == nil {
+			GinkgoWriter.Printf("    ⚠️  AfterSuite: skip namespace delete — BaseKubeconfig is nil\n")
+		}
+
 		err := cluster.CleanupTestCluster(ctx, e2eNestedTestCluster)
 		if err != nil {
 			GinkgoWriter.Printf("    ⚠️  Warning: AfterSuite cluster cleanup errors: %v\n", err)
@@ -4011,12 +4046,14 @@ func countE2ERelatedPVs(ctx context.Context, cl client.Client) int {
 // cleanupE2EPodsAndPVCsWithWait deletes e2e Pods first and waits until they are gone before deleting PVCs.
 // Deleting PVCs while Pods still mount the volume leaves PVCs stuck in Terminating and blocks the test.
 // Then waits until related PersistentVolumes are gone (CSI finishes delete) so LVMLogicalVolume teardown can run in order.
+// podPhaseTimeout and pvPhaseTimeout are independent: time spent waiting for Pods must not reduce the CSI budget for
+// deleting many PVs (detach + DeleteVolume + finalizers), which serializes in the controller on loaded clusters.
 // Uses only Delete (no finalizer removal on Pods or PVCs).
-func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
+func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, podPhaseTimeout, pvPhaseTimeout time.Duration) {
+	podDeadline := time.Now().Add(podPhaseTimeout)
 
 	cleanupE2EPods(ctx, cl)
-	for time.Now().Before(deadline) {
+	for time.Now().Before(podDeadline) {
 		n := countE2EPodsDefault(ctx, cl)
 		if n == 0 {
 			break
@@ -4026,7 +4063,8 @@ func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, timeou
 	}
 
 	cleanupE2EPVCs(ctx, cl)
-	for time.Now().Before(deadline) {
+	pvDeadline := time.Now().Add(pvPhaseTimeout)
+	for time.Now().Before(pvDeadline) {
 		podCount := countE2EPodsDefault(ctx, cl)
 		pvcCount := countE2EPVCsDefault(ctx, cl)
 		pvCount := countE2ERelatedPVs(ctx, cl)
@@ -4110,7 +4148,12 @@ func schedulerVolumeSizesForConsolidatedFill(currentAvailable, maxPerLVG, prefer
 // or LVMVolumeGroup teardown hits "Delete used LVs first" and PV can stay Released with no PVC.
 // Pods/PVCs are deleted without stripping finalizers; wait for PVs before LLV so CSI does not race with LVMLogicalVolume deletion.
 func schedulerCleanupWorkloadBeforeNextFill(ctx context.Context, cl client.Client) {
-	cleanupE2EPodsAndPVCsWithWait(ctx, cl, e2eSchedulerWorkloadCleanupTimeout)
+	cleanupE2EPodsAndPVCsWithWait(ctx, cl, e2eSchedulerPodCleanupTimeout, e2eSchedulerPVDeleteTimeout)
+	// If cleanupE2EPodsAndPVCsWithWait hit its deadline, PVs can remain Released while CSI waits for detach/delete.
+	// Deleting LVMLogicalVolume CRs in that window makes the provisioner error (LLV not found) and leaves PV stuck.
+	n := countE2ERelatedPVs(ctx, cl)
+	Expect(n).To(BeZero(),
+		"e2e-related PVs must be gone before LVMLogicalVolume cleanup; leftover PVs mean CSI has not finished delete/detach (see VolumeAttachments, VolumeFailedDelete)")
 	By("Removing LVMLogicalVolumes for e2e LVGs after PVC deletion (thin LVs must leave the VG)")
 	cleanupE2ELVMLogicalVolumes(ctx, cl)
 }
