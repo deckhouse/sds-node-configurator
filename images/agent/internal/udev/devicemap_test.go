@@ -17,6 +17,7 @@ limitations under the License.
 package udev
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -40,13 +41,13 @@ func makeEnv(major, minor, devname string) map[string]string {
 // ================== HandleEvent — add/change/remove ==================
 
 func TestHandleEvent_Add(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "0", "sda")))
 	assert.Equal(t, 1, dm.Len())
 }
 
 func TestHandleEvent_Change_Updates(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "0", "sda")))
 
 	env := makeEnv("8", "0", "sda")
@@ -59,7 +60,7 @@ func TestHandleEvent_Change_Updates(t *testing.T) {
 }
 
 func TestHandleEvent_Remove(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "0", "sda")))
 	require.NoError(t, dm.HandleEvent("remove", makeEnv("8", "0", "sda")))
 	assert.Equal(t, 0, dm.Len())
@@ -68,32 +69,32 @@ func TestHandleEvent_Remove(t *testing.T) {
 // ================== HandleEvent — bind/unbind/move/online/offline ==================
 
 func TestHandleEvent_Bind(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	require.NoError(t, dm.HandleEvent("bind", makeEnv("8", "0", "sda")))
 	assert.Equal(t, 1, dm.Len())
 }
 
 func TestHandleEvent_Unbind(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "0", "sda")))
 	require.NoError(t, dm.HandleEvent("unbind", makeEnv("8", "0", "sda")))
 	assert.Equal(t, 0, dm.Len())
 }
 
 func TestHandleEvent_Move(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	require.NoError(t, dm.HandleEvent("move", makeEnv("8", "0", "sda")))
 	assert.Equal(t, 1, dm.Len())
 }
 
 func TestHandleEvent_Online(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	require.NoError(t, dm.HandleEvent("online", makeEnv("8", "0", "sda")))
 	assert.Equal(t, 1, dm.Len())
 }
 
 func TestHandleEvent_Offline(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "0", "sda")))
 	require.NoError(t, dm.HandleEvent("offline", makeEnv("8", "0", "sda")))
 	assert.Equal(t, 0, dm.Len())
@@ -102,14 +103,14 @@ func TestHandleEvent_Offline(t *testing.T) {
 // ================== HandleEvent — error cases ==================
 
 func TestHandleEvent_NoMajorMinor_ReturnsError(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	err := dm.HandleEvent("add", map[string]string{"DEVNAME": "sda"})
 	require.Error(t, err)
 	assert.Equal(t, 0, dm.Len())
 }
 
 func TestHandleEvent_InvalidMajorMinor_ReturnsError(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	err := dm.HandleEvent("add", map[string]string{
 		"MAJOR": "abc", "MINOR": "xyz", "DEVNAME": "sda",
 	})
@@ -118,7 +119,7 @@ func TestHandleEvent_InvalidMajorMinor_ReturnsError(t *testing.T) {
 }
 
 func TestHandleEvent_UnknownAction_ReturnsError(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	err := dm.HandleEvent("explode", makeEnv("8", "0", "sda"))
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUnknownAction))
@@ -128,7 +129,7 @@ func TestHandleEvent_UnknownAction_ReturnsError(t *testing.T) {
 // ================== HandleEvent — parsing ==================
 
 func TestHandleEvent_ParsesProperties(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	env := map[string]string{
 		"MAJOR": "8", "MINOR": "0", "DEVNAME": "sda",
 		"DEVTYPE": "disk", "ID_MODEL": "TestDisk",
@@ -148,7 +149,7 @@ func TestHandleEvent_ParsesProperties(t *testing.T) {
 }
 
 func TestHandleEvent_UsesDeviceKeyFromParsedMajorMinor(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	require.NoError(t, dm.HandleEvent("add", makeEnv("259", "1", "nvme0n1")))
 
 	all := dm.All()
@@ -159,7 +160,7 @@ func TestHandleEvent_UsesDeviceKeyFromParsedMajorMinor(t *testing.T) {
 // ================== HandleEvent — sequence ==================
 
 func TestHandleEvent_Sequence(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "0", "sda")))
 	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "1", "sda1")))
 	assert.Equal(t, 2, dm.Len())
@@ -172,7 +173,7 @@ func TestHandleEvent_Sequence(t *testing.T) {
 }
 
 func TestHandleEvent_RemoveNonexistent_NoError(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	require.NoError(t, dm.HandleEvent("remove", makeEnv("8", "0", "sda")))
 	assert.Equal(t, 0, dm.Len())
 }
@@ -180,7 +181,7 @@ func TestHandleEvent_RemoveNonexistent_NoError(t *testing.T) {
 // ================== All — copy safety ==================
 
 func TestAll_ReturnsCopy(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "0", "sda")))
 
 	all := dm.All()
@@ -189,7 +190,7 @@ func TestAll_ReturnsCopy(t *testing.T) {
 }
 
 func TestAll_EmptyMap(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	all := dm.All()
 	assert.NotNil(t, all)
 	assert.Empty(t, all)
@@ -198,49 +199,49 @@ func TestAll_EmptyMap(t *testing.T) {
 // ================== FillFromCrawler ==================
 
 func TestFillFromCrawler_ReplacesAll(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("/nonexistent")
 	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "99", "old")))
 
 	devices := []crawler.Device{
 		{KObj: "/devices/pci/block/sda", Env: makeEnv("8", "0", "sda")},
 		{KObj: "/devices/pci/block/sdb", Env: makeEnv("8", "16", "sdb")},
 	}
-	errs := dm.FillFromCrawler(devices, "/nonexistent")
+	err := dm.FillFromCrawler(context.Background(), devices)
 	assert.Equal(t, 2, dm.Len(), "old device replaced by crawler results")
 
 	_, hasOld := dm.All()["8:99"]
 	assert.False(t, hasOld, "previous device must be gone after FillFromCrawler")
 
-	assert.NotEmpty(t, errs, "enrichment errors expected for /nonexistent path")
+	assert.NoError(t, err, "missing udev DB files (ErrNotExist) are silently ignored")
 }
 
 func TestFillFromCrawler_SkipsBadDevices(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("/nonexistent")
 	devices := []crawler.Device{
 		{KObj: "/devices/block/sda", Env: makeEnv("8", "0", "sda")},
 		{KObj: "/devices/block/bad", Env: map[string]string{"DEVNAME": "bad"}},
 	}
-	errs := dm.FillFromCrawler(devices, "/nonexistent")
+	err := dm.FillFromCrawler(context.Background(), devices)
 	assert.Equal(t, 1, dm.Len())
-	assert.NotEmpty(t, errs)
+	assert.Error(t, err, "parse error for bad device expected")
 }
 
-func TestFillFromCrawler_NilClearsMap(t *testing.T) {
-	dm := NewDeviceMap()
+func TestFillFromCrawler_NilReturnsError(t *testing.T) {
+	dm := NewDeviceMap("/nonexistent")
 	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "0", "sda")))
-	errs := dm.FillFromCrawler(nil, "/nonexistent")
-	assert.Equal(t, 0, dm.Len(), "nil crawler input clears the map")
-	assert.Empty(t, errs)
+	err := dm.FillFromCrawler(context.Background(), nil)
+	assert.Error(t, err, "nil devices must be rejected")
+	assert.Equal(t, 1, dm.Len(), "map must not be wiped on nil input")
 }
 
 func TestFillFromCrawler_ParsesProperties(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("/nonexistent")
 	env := map[string]string{
 		"MAJOR": "8", "MINOR": "0", "DEVNAME": "sda",
 		"DEVTYPE": "disk", "ID_MODEL": "CrawledDisk",
 	}
 	devices := []crawler.Device{{KObj: "/devices/block/sda", Env: env}}
-	dm.FillFromCrawler(devices, "/nonexistent")
+	_ = dm.FillFromCrawler(context.Background(), devices)
 
 	all := dm.All()
 	assert.Equal(t, "CrawledDisk", all["8:0"].Model)
@@ -252,12 +253,12 @@ func TestFillFromCrawler_WithUdevDB(t *testing.T) {
 	dbContent := "E:ID_SERIAL_SHORT=DB-SERIAL\nE:ID_WWN=0xdeadbeef\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "b8:0"), []byte(dbContent), 0o644))
 
-	dm := NewDeviceMap()
+	dm := NewDeviceMap(dir)
 	env := makeEnv("8", "0", "sda")
 	env["ID_MODEL"] = "TestDisk"
 	devices := []crawler.Device{{KObj: "/devices/block/sda", Env: env}}
-	errs := dm.FillFromCrawler(devices, dir)
-	assert.Empty(t, errs)
+	err := dm.FillFromCrawler(context.Background(), devices)
+	assert.NoError(t, err)
 
 	all := dm.All()
 	props := all["8:0"]
@@ -266,10 +267,23 @@ func TestFillFromCrawler_WithUdevDB(t *testing.T) {
 	assert.Equal(t, "TestDisk", props.Model, "model from event env")
 }
 
+func TestFillFromCrawler_CancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	dm := NewDeviceMap("/nonexistent")
+	devices := []crawler.Device{
+		{KObj: "/devices/block/sda", Env: makeEnv("8", "0", "sda")},
+	}
+	err := dm.FillFromCrawler(ctx, devices)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
 // ================== Concurrency ==================
 
 func TestDeviceMap_ConcurrentAccess(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 
 	errs := make([]error, 100)
 	var wg sync.WaitGroup
@@ -290,7 +304,9 @@ func TestDeviceMap_ConcurrentAccess(t *testing.T) {
 }
 
 func TestDeviceMap_ConcurrentReadWrite(t *testing.T) {
-	dm := NewDeviceMap()
+	t.Parallel()
+
+	dm := NewDeviceMap("")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
@@ -313,7 +329,7 @@ func TestDeviceMap_ConcurrentReadWrite(t *testing.T) {
 }
 
 func TestDeviceMap_ConcurrentAddRemoveSameKey(t *testing.T) {
-	dm := NewDeviceMap()
+	dm := NewDeviceMap("")
 	env := makeEnv("8", "0", "sda")
 
 	var wg sync.WaitGroup

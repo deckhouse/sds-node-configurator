@@ -69,10 +69,17 @@ func ParseProperties(env map[string]string) (Properties, error) {
 	}, nil
 }
 
+var serialKeyPriority = []string{
+	"SCSI_IDENT_SERIAL",
+	"ID_SCSI_SERIAL",
+	"ID_SERIAL_SHORT",
+	"ID_SERIAL",
+}
+
 // serialFromUdevEnv follows the lsblk get_properties_by_udev() priority chain:
 // SCSI_IDENT_SERIAL -> ID_SCSI_SERIAL -> ID_SERIAL_SHORT -> ID_SERIAL.
 func serialFromUdevEnv(env map[string]string) string {
-	for _, key := range []string{"SCSI_IDENT_SERIAL", "ID_SCSI_SERIAL", "ID_SERIAL_SHORT", "ID_SERIAL"} {
+	for _, key := range serialKeyPriority {
 		if v := env[key]; v != "" {
 			return normalizeWhitespace(v)
 		}

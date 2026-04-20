@@ -17,29 +17,37 @@ limitations under the License.
 package udev
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/pilebones/go-udev/crawler"
 )
 
-// ErrUnknownAction is returned by HandleEvent when the uevent action
-// is not one of the recognized kernel actions.
+// ErrUnknownAction is returned (wrapped) by HandleEvent when the uevent
+// action is not one of the recognized kernel actions; callers can check
+// via errors.Is.
 var ErrUnknownAction = errors.New("unknown action")
 
 // DeviceMap is a thread-safe in-memory store of block device properties
-// keyed by "major:minor". It is populated by netlink events (HandleEvent)
-// and provides a consistent snapshot via All().
+// keyed by "major:minor". It is populated by FillFromCrawler at startup
+// and by HandleEvent from netlink events thereafter. A consistent snapshot
+// is available via All().
 type DeviceMap struct {
-	mu      sync.RWMutex
-	devices map[string]Properties
+	mu         sync.RWMutex
+	devices    map[string]Properties
+	udevDBPath string
 }
 
 // NewDeviceMap returns an empty, ready-to-use DeviceMap.
-func NewDeviceMap() *DeviceMap {
+// udevDBPath is the directory containing udev database files
+// (typically /run/udev/data).
+func NewDeviceMap(udevDBPath string) *DeviceMap {
 	return &DeviceMap{
-		devices: make(map[string]Properties),
+		devices:    make(map[string]Properties),
+		udevDBPath: udevDBPath,
 	}
 }
 
@@ -53,6 +61,9 @@ func NewDeviceMap() *DeviceMap {
 // event carries a fully enriched property set, and a device in the offline or
 // unbound state is unavailable for I/O — there is no value in keeping it in
 // the map.
+//
+// Returns ErrUnknownAction (wrapped) when the action is not one of the
+// listed values; callers can check via errors.Is.
 func (dm *DeviceMap) HandleEvent(action string, env map[string]string) error {
 	props, err := ParseProperties(env)
 	if err != nil {
@@ -101,14 +112,28 @@ func (dm *DeviceMap) Len() int {
 // obtained from a sysfs crawler. Each device's env is enriched with the udev
 // database before parsing, because crawler only provides basic kernel uevent
 // properties (MAJOR, MINOR, DEVNAME, DEVTYPE) without udev-enriched fields
-// (serial, model, wwn). Devices that fail to parse are skipped and their
-// errors are collected in the returned slice.
-func (dm *DeviceMap) FillFromCrawler(devices []crawler.Device, udevDBPath string) []error {
+// (serial, model, wwn). Devices that fail to parse are skipped; enrichment
+// failures where the udev DB file simply does not exist are treated as normal
+// (the device is kept with raw env). All other errors are collected and
+// returned via errors.Join.
+//
+// A nil devices slice is treated as an error to prevent accidental map wipes.
+func (dm *DeviceMap) FillFromCrawler(ctx context.Context, devices []crawler.Device) error {
+	if devices == nil {
+		return errors.New("FillFromCrawler: nil devices slice")
+	}
+
 	newDevices := make(map[string]Properties, len(devices))
-	var errs []error
+	errs := make([]error, 0, len(devices))
+
 	for _, dev := range devices {
-		env, enrichErr := EnrichWithUdevDB(udevDBPath, dev.Env)
-		if enrichErr != nil {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+			break
+		}
+
+		env, enrichErr := EnrichWithUdevDB(dm.udevDBPath, dev.Env)
+		if enrichErr != nil && !errors.Is(enrichErr, os.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("crawler device %s: %w", dev.KObj, enrichErr))
 		}
 
@@ -126,5 +151,5 @@ func (dm *DeviceMap) FillFromCrawler(devices []crawler.Device, udevDBPath string
 	defer dm.mu.Unlock()
 	dm.devices = newDevices
 
-	return errs
+	return errors.Join(errs...)
 }
