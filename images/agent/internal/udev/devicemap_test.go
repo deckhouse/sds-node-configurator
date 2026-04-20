@@ -214,3 +214,47 @@ func TestDeviceMap_ConcurrentAccess(t *testing.T) {
 	}
 	assert.Equal(t, 100, dm.Len())
 }
+
+func TestDeviceMap_ConcurrentReadWrite(t *testing.T) {
+	dm := NewDeviceMap()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(minor int) {
+			defer wg.Done()
+			env := makeEnv("8", fmt.Sprintf("%d", minor), fmt.Sprintf("sd%d", minor))
+			_ = dm.HandleEvent("add", env)
+		}(i)
+	}
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = dm.All()
+			_ = dm.Len()
+		}()
+	}
+	wg.Wait()
+}
+
+func TestDeviceMap_ConcurrentAddRemoveSameKey(t *testing.T) {
+	dm := NewDeviceMap()
+	env := makeEnv("8", "0", "sda")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if i%2 == 0 {
+				_ = dm.HandleEvent("add", env)
+			} else {
+				_ = dm.HandleEvent("remove", env)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	assert.True(t, dm.Len() <= 1, "at most one entry for the key")
+}
