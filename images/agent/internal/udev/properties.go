@@ -22,6 +22,8 @@ import (
 	"strings"
 )
 
+// Properties is the parsed, normalized subset of a udev environment that
+// matches lsblk's field-resolution rules for block device metadata.
 type Properties struct {
 	DevName  string
 	DevType  string
@@ -37,13 +39,16 @@ type Properties struct {
 	MDLevel  string
 }
 
+// ParseProperties parses a raw udev environment map into Properties.
+// MAJOR and MINOR are required and must be non-negative integers;
+// any parse error yields a zero Properties and a wrapped error.
 func ParseProperties(env map[string]string) (Properties, error) {
-	major, err := strconv.Atoi(env["MAJOR"])
+	major, err := strconv.ParseUint(env["MAJOR"], 10, 32)
 	if err != nil {
 		return Properties{}, fmt.Errorf("parse MAJOR: %w", err)
 	}
 
-	minor, err := strconv.Atoi(env["MINOR"])
+	minor, err := strconv.ParseUint(env["MINOR"], 10, 32)
 	if err != nil {
 		return Properties{}, fmt.Errorf("parse MINOR: %w", err)
 	}
@@ -51,8 +56,8 @@ func ParseProperties(env map[string]string) (Properties, error) {
 	return Properties{
 		DevName:  ensureDevPrefix(env["DEVNAME"]),
 		DevType:  env["DEVTYPE"],
-		Major:    major,
-		Minor:    minor,
+		Major:    int(major),
+		Minor:    int(minor),
 		Serial:   serialFromUdevEnv(env),
 		Model:    modelFromUdevEnv(env),
 		WWN:      wwnFromUdevEnv(env),
@@ -92,22 +97,9 @@ func wwnFromUdevEnv(env map[string]string) string {
 }
 
 // normalizeWhitespace collapses whitespace runs and trims edges,
-// matching util-linux normalize_whitespace() used by lsblk after reading udev properties.
+// approximating util-linux normalize_whitespace() for ASCII inputs.
 func normalizeWhitespace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
-}
-
-func hexVal(c byte) int {
-	switch {
-	case c >= '0' && c <= '9':
-		return int(c - '0')
-	case c >= 'a' && c <= 'f':
-		return int(c-'a') + 10
-	case c >= 'A' && c <= 'F':
-		return int(c-'A') + 10
-	default:
-		return -1
-	}
 }
 
 // unhexmangle decodes udev \xHH escape sequences,
@@ -116,11 +108,12 @@ func unhexmangle(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for i := 0; i < len(s); {
-		if i+3 < len(s) && s[i] == '\\' && s[i+1] == 'x' &&
-			hexVal(s[i+2]) >= 0 && hexVal(s[i+3]) >= 0 {
-			b.WriteByte(byte(hexVal(s[i+2])<<4 | hexVal(s[i+3])))
-			i += 4
-			continue
+		if i+3 < len(s) && s[i] == '\\' && s[i+1] == 'x' {
+			if v, err := strconv.ParseUint(s[i+2:i+4], 16, 8); err == nil {
+				b.WriteByte(byte(v))
+				i += 4
+				continue
+			}
 		}
 		b.WriteByte(s[i])
 		i++
