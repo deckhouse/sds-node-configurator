@@ -46,8 +46,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	k8sclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -262,25 +262,13 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					forceDeleteAllNonConsumableBlockDevices(e2eCtx, k8sClient, 2*time.Minute)
 				}
 
-				if testClusterResources.BaseKubeconfig == nil || testClusterResources.VMResources == nil {
-					if testClusterResources.BaseKubeconfig == nil {
-						Skip("VirtualDisk creation requires base cluster kubeconfig (Deckhouse virtualization). " +
-							"Set SSH_JUMP_HOST to the base cluster or use TEST_CLUSTER_CREATE_MODE=alwaysCreateNew.")
-					}
-					baseKubeconfig = testClusterResources.BaseKubeconfig
-					clusterVMs = nil
-				} else {
-					clusterVMs = make([]string, 0, len(testClusterResources.VMResources.VMNames))
-					for _, name := range testClusterResources.VMResources.VMNames {
-						if name != testClusterResources.VMResources.SetupVMName {
-							clusterVMs = append(clusterVMs, name)
-						}
-					}
-					Expect(clusterVMs).NotTo(BeEmpty(), "no guest VMs (masters/workers) to attach disk to")
-					baseKubeconfig = testClusterResources.BaseKubeconfig
+				if testClusterResources.BaseKubeconfig == nil {
+					Skip("VirtualDisk creation requires base cluster kubeconfig (Deckhouse virtualization). " +
+						"Set SSH_JUMP_HOST to the base cluster or use TEST_CLUSTER_CREATE_MODE=alwaysCreateNew.")
 				}
+				baseKubeconfig = testClusterResources.BaseKubeconfig
 				By("Selecting VirtualMachines in phase Running only (skip Migrating/Starting for stable disk attach)")
-				clusterVMs = e2eIntersectVMNamesRunning(e2eCtx, baseKubeconfig, ns, clusterVMs)
+				clusterVMs = e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
 
 				numNodes := len(clusterVMs)
 				parallelism := 1 + rand.Intn(numNodes)
@@ -467,6 +455,104 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				printLVGsSummary(e2eCtx, k8sClient, createdLVGs)
 			})
 
+			It("Should delete a BlockDevice after the backing disk disappears", func() {
+				const missingDiskPrefix = "e2e-blockdevice-missing-disk"
+
+				ensureSchedulerE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+				if testClusterResources.BaseKubeconfig == nil {
+					Skip("BlockDevice disappearance test requires nested virtualization (base cluster kubeconfig)")
+				}
+
+				ns := e2eConfigNamespace()
+				storageClass := e2eConfigStorageClass()
+				Expect(storageClass).NotTo(BeEmpty(), "TEST_CLUSTER_STORAGE_CLASS is required for VirtualDisk")
+
+				By("Guest VM for attach: phase Running only (skip Migrating)")
+				clusterVMs := e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
+
+				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
+				diskName := fmt.Sprintf("%s-%d", missingDiskPrefix, rand.Intn(100000))
+
+				var blockDevicesList v1alpha1.BlockDeviceList
+				Expect(k8sClient.List(e2eCtx, &blockDevicesList, &client.ListOptions{})).To(Succeed())
+				initialNames := make(map[string]struct{}, len(blockDevicesList.Items))
+				for i := range blockDevicesList.Items {
+					initialNames[blockDevicesList.Items[i].Name] = struct{}{}
+				}
+
+				By(fmt.Sprintf("Step 1: Attaching VirtualDisk %s (%s) to VM %s", diskName, e2eDataDiskSize, targetVM))
+				diskAttachment, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+					VMName:           targetVM,
+					Namespace:        ns,
+					DiskName:         diskName,
+					DiskSize:         e2eDataDiskSize,
+					StorageClassName: storageClass,
+				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+				Expect(err).NotTo(HaveOccurred())
+				e2eDiskAttachments = append(e2eDiskAttachments, diskAttachment)
+
+				attachCtx, cancel := context.WithTimeout(e2eCtx, 5*time.Minute)
+				defer cancel()
+				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns, diskAttachment.AttachmentName, 10*time.Second)).To(Succeed())
+
+				By("Step 2: Waiting for the new BlockDevice to appear")
+				var discoveredBD v1alpha1.BlockDevice
+				Eventually(func(g Gomega) {
+					var list v1alpha1.BlockDeviceList
+					g.Expect(k8sClient.List(e2eCtx, &list, &client.ListOptions{})).To(Succeed())
+
+					var matches []v1alpha1.BlockDevice
+					for i := range list.Items {
+						bd := list.Items[i]
+						if _, existed := initialNames[bd.Name]; existed {
+							continue
+						}
+						if bd.Status.NodeName != targetVM {
+							continue
+						}
+						if !bd.Status.Consumable || bd.Status.Path == "" || bd.Status.Size.IsZero() {
+							continue
+						}
+						matches = append(matches, bd)
+					}
+
+					g.Expect(matches).To(HaveLen(1),
+						"expected exactly one new consumable BlockDevice on node %s after attaching %s; got %d",
+						targetVM, diskName, len(matches))
+					discoveredBD = matches[0]
+				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+				By(fmt.Sprintf("Discovered BlockDevice %s on node %s (path=%s, size=%s)",
+					discoveredBD.Name, discoveredBD.Status.NodeName, discoveredBD.Status.Path, discoveredBD.Status.Size.String()))
+
+				By("Step 3: Detaching and deleting the VirtualDisk to simulate device loss")
+				Expect(kubernetes.DetachAndDeleteVirtualDisk(
+					e2eCtx,
+					testClusterResources.BaseKubeconfig,
+					ns,
+					diskAttachment.AttachmentName,
+					diskAttachment.DiskName,
+				)).To(Succeed())
+				for i, att := range e2eDiskAttachments {
+					if att != nil && att.DiskName == diskAttachment.DiskName {
+						e2eDiskAttachments = append(e2eDiskAttachments[:i], e2eDiskAttachments[i+1:]...)
+						break
+					}
+				}
+
+				By("Step 4: Restarting sds-node-configurator agent on the target node to trigger BD rescan")
+				restartSDSNodeConfiguratorAgentOnNode(e2eCtx, k8sClient, discoveredBD.Status.NodeName)
+
+				By("Step 5: Waiting for the BlockDevice to be deleted after device loss")
+				Eventually(func(g Gomega) {
+					var bd v1alpha1.BlockDevice
+					err := k8sClient.Get(e2eCtx, client.ObjectKey{Name: discoveredBD.Name}, &bd)
+					g.Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+						"BlockDevice %s should be deleted after the backing disk disappears; current err=%v consumable=%t node=%s path=%s",
+						discoveredBD.Name, err, bd.Status.Consumable, bd.Status.NodeName, bd.Status.Path)
+				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+				By(fmt.Sprintf("BlockDevice %s was deleted after the disk disappeared", discoveredBD.Name))
+			})
+
 			It("Should create LocalStorageClass and wait for StorageClass", func() {
 				Expect(createdLVGs).NotTo(BeEmpty(), "LVMVolumeGroups must be created first")
 				Expect(testClusterResources).NotTo(BeNil())
@@ -543,6 +629,345 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 		// ---=== SCHEDULER TESTS ===--- //
 		////////////////////////////////////
 
+		Context("Block device size reduction", func() {
+			const (
+				e2eShrinkOrigDiskName  = "e2e-shrink-orig-disk"
+				e2eShrinkOrigDiskSize  = "4Gi"
+				e2eShrinkSmallDiskName = "e2e-shrink-small-disk"
+				e2eShrinkSmallDiskSize = "1Gi"
+			)
+
+			var (
+				origDiskAttachment  *kubernetes.VirtualDiskAttachmentResult
+				smallDiskAttachment *kubernetes.VirtualDiskAttachmentResult
+				shrinkLVGName       string
+			)
+
+			AfterEach(func() {
+				if shrinkLVGName != "" && k8sClient != nil {
+					lvg := &v1alpha1.LVMVolumeGroup{}
+					if err := k8sClient.Get(e2eCtx, client.ObjectKey{Name: shrinkLVGName}, lvg); err == nil {
+						if CurrentSpecReport().Failed() {
+							GinkgoWriter.Println("\n--- Shrink test LVMVolumeGroup state on failure ---")
+							printLVMVolumeGroupInfo(lvg)
+						}
+						if len(lvg.Finalizers) > 0 {
+							lvg.Finalizers = nil
+							_ = k8sClient.Update(e2eCtx, lvg)
+						}
+						_ = k8sClient.Delete(e2eCtx, lvg)
+					}
+					shrinkLVGName = ""
+				}
+				if testClusterResources == nil || testClusterResources.BaseKubeconfig == nil {
+					return
+				}
+				ns := e2eConfigNamespace()
+				if origDiskAttachment != nil {
+					_ = kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns, origDiskAttachment.AttachmentName, origDiskAttachment.DiskName)
+					origDiskAttachment = nil
+				}
+				if smallDiskAttachment != nil {
+					_ = kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns, smallDiskAttachment.AttachmentName, smallDiskAttachment.DiskName)
+					smallDiskAttachment = nil
+				}
+			})
+
+			It("Should detect device loss after replacing disk with a smaller one and report VG inconsistency", func() {
+				ensureSchedulerE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+				if testClusterResources.BaseKubeconfig == nil {
+					Skip("Block device shrink test requires nested virtualization (base cluster kubeconfig)")
+				}
+				ns := e2eConfigNamespace()
+				storageClass := e2eConfigStorageClass()
+				Expect(storageClass).NotTo(BeEmpty(), "TEST_CLUSTER_STORAGE_CLASS required")
+
+				By("Guest VM for attach: phase Running only (skip Migrating)")
+				clusterVMs := e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
+				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
+
+				var bdList v1alpha1.BlockDeviceList
+				Expect(k8sClient.List(e2eCtx, &bdList)).To(Succeed())
+				initialBDs := make(map[string]struct{}, len(bdList.Items))
+				for _, bd := range bdList.Items {
+					initialBDs[bd.Name] = struct{}{}
+				}
+
+				By(fmt.Sprintf("Step 1: Attaching original VirtualDisk (%s) to VM %s", e2eShrinkOrigDiskSize, targetVM))
+				var err error
+				origDiskAttachment, err = attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+					VMName:           targetVM,
+					Namespace:        ns,
+					DiskName:         e2eShrinkOrigDiskName,
+					DiskSize:         e2eShrinkOrigDiskSize,
+					StorageClassName: storageClass,
+				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+				Expect(err).NotTo(HaveOccurred())
+
+				attachCtx, attachCancel := context.WithTimeout(e2eCtx, 5*time.Minute)
+				defer attachCancel()
+				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns, origDiskAttachment.AttachmentName, 10*time.Second)).To(Succeed())
+
+				By("Step 2: Waiting for BlockDevice discovery")
+				var targetBD *v1alpha1.BlockDevice
+				Eventually(func(g Gomega) {
+					var list v1alpha1.BlockDeviceList
+					g.Expect(k8sClient.List(e2eCtx, &list)).To(Succeed())
+					targetBD = nil
+					for i := range list.Items {
+						bd := &list.Items[i]
+						if _, existed := initialBDs[bd.Name]; existed {
+							continue
+						}
+						if bd.Status.NodeName != targetVM || !bd.Status.Consumable || bd.Status.Size.IsZero() || !strings.HasPrefix(bd.Status.Path, "/dev/") {
+							continue
+						}
+						targetBD = bd
+						return
+					}
+					g.Expect(targetBD).NotTo(BeNil(), "new consumable BlockDevice on node %s not found yet", targetVM)
+				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
+				By(fmt.Sprintf("Found BD %s (size=%s, path=%s)", targetBD.Name, targetBD.Status.Size.String(), targetBD.Status.Path))
+				printBlockDeviceInfo(targetBD)
+
+				nodeName := targetBD.Status.NodeName
+				bdMetaName := targetBD.Labels["kubernetes.io/metadata.name"]
+				if bdMetaName == "" {
+					bdMetaName = targetBD.Name
+				}
+
+				By("Step 3: Creating LVMVolumeGroup on the discovered BlockDevice")
+				shrinkLVGName = "e2e-lvg-shrink-" + strings.ReplaceAll(strings.ReplaceAll(nodeName, ".", "-"), "_", "-")
+				lvg := &v1alpha1.LVMVolumeGroup{
+					ObjectMeta: metav1.ObjectMeta{Name: shrinkLVGName},
+					Spec: v1alpha1.LVMVolumeGroupSpec{
+						ActualVGNameOnTheNode: "e2e-shrink-vg",
+						BlockDeviceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"kubernetes.io/hostname":      nodeName,
+								"kubernetes.io/metadata.name": bdMetaName,
+							},
+						},
+						Type:  "Local",
+						Local: v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
+					},
+				}
+				Expect(k8sClient.Create(e2eCtx, lvg)).To(Succeed())
+
+				By("Waiting for LVMVolumeGroup to become Ready (up to 10 minutes)")
+				Eventually(func(g Gomega) {
+					var current v1alpha1.LVMVolumeGroup
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &current)).To(Succeed())
+					g.Expect(current.Status.Phase).To(Equal(v1alpha1.PhaseReady), "Phase=%s", current.Status.Phase)
+				}, 10*time.Minute, 10*time.Second).Should(Succeed())
+
+				var origLVG v1alpha1.LVMVolumeGroup
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &origLVG)).To(Succeed())
+				origVGSize := origLVG.Status.VGSize.DeepCopy()
+				By(fmt.Sprintf("LVMVolumeGroup Ready: VGSize=%s", origVGSize.String()))
+				printLVMVolumeGroupInfo(&origLVG)
+
+				By("Step 4: Detaching and deleting the original VirtualDisk (simulating device removal)")
+				Expect(kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns, origDiskAttachment.AttachmentName, origDiskAttachment.DiskName)).To(Succeed())
+				origDiskAttachment = nil
+
+				By(fmt.Sprintf("Step 5: Attaching a smaller VirtualDisk (%s) to VM %s", e2eShrinkSmallDiskSize, targetVM))
+				smallDiskAttachment, err = attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+					VMName:           targetVM,
+					Namespace:        ns,
+					DiskName:         e2eShrinkSmallDiskName,
+					DiskSize:         e2eShrinkSmallDiskSize,
+					StorageClassName: storageClass,
+				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+				Expect(err).NotTo(HaveOccurred())
+
+				attachCtx2, attachCancel2 := context.WithTimeout(e2eCtx, 5*time.Minute)
+				defer attachCancel2()
+				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx2, testClusterResources.BaseKubeconfig, ns, smallDiskAttachment.AttachmentName, 10*time.Second)).To(Succeed())
+
+				By("Step 6: Waiting for LVMVolumeGroup to leave Ready state (VG lost its backing device)")
+				Eventually(func(g Gomega) {
+					var current v1alpha1.LVMVolumeGroup
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: shrinkLVGName}, &current)).To(Succeed())
+					g.Expect(current.Status.Phase).NotTo(Equal(v1alpha1.PhaseReady),
+						"Phase should not be Ready after device replacement; Phase=%s VGSize=%s (was %s)",
+						current.Status.Phase, current.Status.VGSize.String(), origVGSize.String())
+				}, 5*time.Minute, 15*time.Second).Should(Succeed())
+
+				By("Step 7: Verifying LVMVolumeGroup conditions contain error information")
+				var finalLVG v1alpha1.LVMVolumeGroup
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: shrinkLVGName}, &finalLVG)).To(Succeed())
+				printLVMVolumeGroupInfo(&finalLVG)
+
+				hasErrorCondition := false
+				for _, c := range finalLVG.Status.Conditions {
+					if c.Status == metav1.ConditionFalse {
+						hasErrorCondition = true
+						GinkgoWriter.Printf("    Condition %s: status=%s reason=%s message=%s\n",
+							c.Type, c.Status, c.Reason, c.Message)
+					}
+				}
+				Expect(hasErrorCondition).To(BeTrue(),
+					"LVMVolumeGroup should have at least one condition with status=False indicating device/VG issue")
+				Expect(finalLVG.Status.Phase).To(BeElementOf(
+					v1alpha1.PhaseNotReady, v1alpha1.PhasePending, v1alpha1.PhaseFailed, ""),
+					"Phase should indicate non-ready state, got %s", finalLVG.Status.Phase)
+			})
+		})
+
+		Context("Manual BlockDevice creation and modification", func() {
+			const e2eFakeBDPrefix = "dev-e2e-fake-manual-"
+
+			It("Should delete a manually created BlockDevice that does not correspond to a real device", func() {
+				ensureSchedulerE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+
+				By("Step 1: Getting a real node name from the cluster")
+				var nodeList corev1.NodeList
+				Expect(k8sClient.List(e2eCtx, &nodeList)).To(Succeed())
+				Expect(nodeList.Items).NotTo(BeEmpty(), "cluster must have at least one node")
+				realNodeName := nodeList.Items[0].Name
+
+				fakeBDName := e2eFakeBDPrefix + strconv.Itoa(rand.Intn(100000))
+
+				By(fmt.Sprintf("Step 2: Creating fake BlockDevice %s with nodeName=%s", fakeBDName, realNodeName))
+				fakeBD := &v1alpha1.BlockDevice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: fakeBDName,
+						Labels: map[string]string{
+							"kubernetes.io/hostname":      realNodeName,
+							"kubernetes.io/metadata.name": fakeBDName,
+						},
+					},
+				}
+				err := k8sClient.Create(e2eCtx, fakeBD)
+				if apierrors.IsForbidden(err) || apierrors.IsInvalid(err) {
+					errMsg := strings.ToLower(err.Error())
+					isManualProtection := strings.Contains(errMsg, "manual") ||
+						strings.Contains(errMsg, "prohibit") ||
+						strings.Contains(errMsg, "blockdevice") ||
+						strings.Contains(errMsg, "managed by controller")
+					Expect(isManualProtection).To(BeTrue(),
+						"API rejected BlockDevice creation, but the error does not look like manual-management protection (could be RBAC/schema issue): %v", err)
+					By(fmt.Sprintf("API correctly rejected manual BlockDevice creation: %v", err))
+					return
+				}
+				Expect(err).NotTo(HaveOccurred(), "create fake BlockDevice")
+
+				By("Step 3: Updating fake BlockDevice status (consumable=true, real node, fake path)")
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: fakeBDName}, fakeBD)).To(Succeed())
+				fakeBD.Status = v1alpha1.BlockDeviceStatus{
+					NodeName:   realNodeName,
+					Consumable: true,
+					Path:       "/dev/e2e-nonexistent-device",
+					Size:       resource.MustParse("1Gi"),
+					Type:       "disk",
+					MachineID:  "e2e-fake-machine-id",
+				}
+				err = k8sClient.Update(e2eCtx, fakeBD)
+				if err != nil {
+					err = k8sClient.Status().Update(e2eCtx, fakeBD)
+				}
+				Expect(err).NotTo(HaveOccurred(), "set status on fake BlockDevice")
+
+				By("Step 4: Restarting sds-node-configurator agent on the target node to trigger BD rescan")
+				restartSDSNodeConfiguratorAgentOnNode(e2eCtx, k8sClient, realNodeName)
+
+				By("Step 5: Waiting for the agent to delete the fake BlockDevice (up to 5 minutes)")
+				Eventually(func(g Gomega) {
+					var bd v1alpha1.BlockDevice
+					err := k8sClient.Get(e2eCtx, client.ObjectKey{Name: fakeBDName}, &bd)
+					g.Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+						"fake BlockDevice %s should be deleted by the agent; current state: err=%v, consumable=%t, nodeName=%s",
+						fakeBDName, err, bd.Status.Consumable, bd.Status.NodeName)
+				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+				By(fmt.Sprintf("Fake BlockDevice %s was deleted by the agent", fakeBDName))
+			})
+
+			It("Should revert manual modifications to an existing BlockDevice status", func() {
+				ensureSchedulerE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+
+				By("Step 1: Finding an existing BlockDevice in the cluster")
+				var bdList v1alpha1.BlockDeviceList
+				Expect(k8sClient.List(e2eCtx, &bdList)).To(Succeed())
+				if len(bdList.Items) == 0 {
+					Skip("No BlockDevices in cluster to test modification revert")
+				}
+
+				var targetBD *v1alpha1.BlockDevice
+				for i := range bdList.Items {
+					bd := &bdList.Items[i]
+					if bd.Status.Path != "" && bd.Status.Size.Value() > 0 && bd.Status.Consumable {
+						targetBD = bd
+						break
+					}
+				}
+				if targetBD == nil {
+					Skip("No consumable BlockDevice with valid path and size found")
+				}
+
+				originalSize := targetBD.Status.Size.DeepCopy()
+				originalPath := targetBD.Status.Path
+				By(fmt.Sprintf("Target BD: %s (node=%s, path=%s, size=%s)",
+					targetBD.Name, targetBD.Status.NodeName, originalPath, originalSize.String()))
+
+				DeferCleanup(func() {
+					var bd v1alpha1.BlockDevice
+					if err := k8sClient.Get(e2eCtx, client.ObjectKey{Name: targetBD.Name}, &bd); err != nil {
+						return
+					}
+					if bd.Status.Size.Equal(originalSize) {
+						return
+					}
+
+					bd.Status.Size = originalSize
+					err := k8sClient.Update(e2eCtx, &bd)
+					if err != nil {
+						_ = k8sClient.Status().Update(e2eCtx, &bd)
+					}
+				})
+
+				By("Step 2: Modifying BlockDevice status.size to a fake value")
+				var bdToModify v1alpha1.BlockDevice
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: targetBD.Name}, &bdToModify)).To(Succeed())
+				fakeSize := resource.MustParse("999Ti")
+				bdToModify.Status.Size = fakeSize
+				err := k8sClient.Update(e2eCtx, &bdToModify)
+				if err != nil {
+					err = k8sClient.Status().Update(e2eCtx, &bdToModify)
+				}
+				if err != nil {
+					GinkgoWriter.Printf("    Could not modify BD status (may lack permissions): %v\n", err)
+					Skip("Cannot update BlockDevice status: " + err.Error())
+				}
+
+				var modified v1alpha1.BlockDevice
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: targetBD.Name}, &modified)).To(Succeed())
+				Expect(modified.Status.Size.Equal(fakeSize)).To(BeTrue(),
+					"size should be modified to %s, got %s", fakeSize.String(), modified.Status.Size.String())
+				By(fmt.Sprintf("Size temporarily modified to %s", modified.Status.Size.String()))
+
+				By("Step 3: Restarting sds-node-configurator agent on the target node to trigger BD rescan")
+				restartSDSNodeConfiguratorAgentOnNode(e2eCtx, k8sClient, targetBD.Status.NodeName)
+
+				By("Step 4: Waiting for the agent to revert the size to the real value (up to 5 minutes)")
+				Eventually(func(g Gomega) {
+					var bd v1alpha1.BlockDevice
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: targetBD.Name}, &bd)).To(Succeed())
+					g.Expect(bd.Status.Size.Equal(originalSize)).To(BeTrue(),
+						"agent should have reverted size to original %s; current size=%s",
+						originalSize.String(), bd.Status.Size.String())
+				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
+				var reverted v1alpha1.BlockDevice
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: targetBD.Name}, &reverted)).To(Succeed())
+				By(fmt.Sprintf("Agent reverted size: %s (original was %s)", reverted.Status.Size.String(), originalSize.String()))
+				Expect(reverted.Status.Size.Equal(originalSize)).To(BeTrue(),
+					"size should be restored to exact original value %s, got %s", originalSize.String(), reverted.Status.Size.String())
+				Expect(reverted.Status.Path).To(Equal(originalPath), "path should remain unchanged")
+			})
+		})
+
 		Context("Scheduler Extender: Space consolidation tests", func() {
 			It("Should fill storage with small volumes to maximum capacity", func() {
 				Expect(createdLVGs).NotTo(BeEmpty(), "LVMVolumeGroups must be created first")
@@ -563,7 +988,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					float64(maxPerLVG)/(1024*1024*1024)))
 
 				preferredUnit := int64(1 * 1024 * 1024 * 1024) // 1Gi
-				minVolumeSize := int64(500 * 1024 * 1024)     // 500Mi minimum for remainder
+				minVolumeSize := int64(500 * 1024 * 1024)      // 500Mi minimum for remainder
 				volumeSizes := schedulerVolumeSizesForConsolidatedFill(currentAvailable, maxPerLVG, preferredUnit, minVolumeSize)
 				Expect(volumeSizes).NotTo(BeEmpty(),
 					"no schedulable volume plan (max VGFree per LVG vs min remainder)")
@@ -895,25 +1320,13 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				storageClass := e2eConfigStorageClass()
 				Expect(storageClass).NotTo(BeEmpty(), "TEST_CLUSTER_STORAGE_CLASS is required for VirtualDisk")
 
-				if testClusterResources.BaseKubeconfig == nil || testClusterResources.VMResources == nil {
-					if testClusterResources.BaseKubeconfig == nil {
-						Skip("VirtualDisk discovery in alwaysUseExisting requires base cluster kubeconfig (Deckhouse virtualization). " +
-							"Set SSH_JUMP_HOST to the base cluster (jump host = base cluster) so the framework can get its kubeconfig, or use TEST_CLUSTER_CREATE_MODE=alwaysCreateNew.")
-					}
-					baseKubeconfig = testClusterResources.BaseKubeconfig
-					clusterVMs = nil
-				} else {
-					clusterVMs = make([]string, 0, len(testClusterResources.VMResources.VMNames))
-					for _, name := range testClusterResources.VMResources.VMNames {
-						if name != testClusterResources.VMResources.SetupVMName {
-							clusterVMs = append(clusterVMs, name)
-						}
-					}
-					Expect(clusterVMs).NotTo(BeEmpty(), "no guest VMs (masters/workers) to attach disk to")
-					baseKubeconfig = testClusterResources.BaseKubeconfig
+				if testClusterResources.BaseKubeconfig == nil {
+					Skip("VirtualDisk discovery in alwaysUseExisting requires base cluster kubeconfig (Deckhouse virtualization). " +
+						"Set SSH_JUMP_HOST to the base cluster (jump host = base cluster) so the framework can get its kubeconfig, or use TEST_CLUSTER_CREATE_MODE=alwaysCreateNew.")
 				}
+				baseKubeconfig = testClusterResources.BaseKubeconfig
 				By("Step 0: VirtualMachines in phase Running only (skip Migrating/Starting)")
-				clusterVMs = e2eIntersectVMNamesRunning(e2eCtx, baseKubeconfig, ns, clusterVMs)
+				clusterVMs = e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
 
 				numNodes := len(clusterVMs)
 				parallelism := 1 + rand.Intn(numNodes) // [1, numNodes] — сколько нод задействуем
@@ -2429,6 +2842,76 @@ func cleanupE2ELVMVolumeGroupsSdsNodeConfigurator(ctx context.Context, cl client
 	GinkgoWriter.Printf("Warning: some e2e LVMVolumeGroups may still exist after cleanup\n")
 }
 
+func restartSDSNodeConfiguratorAgentOnNode(ctx context.Context, cl client.Client, nodeName string) {
+	const (
+		namespace = "d8-sds-node-configurator"
+		appLabel  = "sds-node-configurator"
+	)
+
+	Expect(nodeName).NotTo(BeEmpty(), "node name is required to restart sds-node-configurator")
+
+	var podToRestart corev1.Pod
+	Eventually(func(g Gomega) {
+		var podList corev1.PodList
+		g.Expect(cl.List(ctx, &podList, client.InNamespace(namespace), client.MatchingLabels{"app": appLabel})).To(Succeed())
+
+		found := false
+		for i := range podList.Items {
+			pod := podList.Items[i]
+			if pod.Spec.NodeName != nodeName || pod.DeletionTimestamp != nil {
+				continue
+			}
+			podToRestart = pod
+			found = true
+			break
+		}
+
+		g.Expect(found).To(BeTrue(), "no sds-node-configurator pod found on node %s", nodeName)
+	}, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+	GinkgoWriter.Printf("    Restarting sds-node-configurator pod %s on node %s\n", podToRestart.Name, nodeName)
+	Expect(cl.Delete(ctx, &podToRestart)).To(Succeed(), "delete sds-node-configurator pod %s on node %s", podToRestart.Name, nodeName)
+
+	Eventually(func(g Gomega) {
+		var deleted corev1.Pod
+		err := cl.Get(ctx, client.ObjectKey{Namespace: namespace, Name: podToRestart.Name}, &deleted)
+		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "old pod %s should disappear before replacement becomes ready; err=%v", podToRestart.Name, err)
+	}, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+	Eventually(func(g Gomega) {
+		var podList corev1.PodList
+		g.Expect(cl.List(ctx, &podList, client.InNamespace(namespace), client.MatchingLabels{"app": appLabel})).To(Succeed())
+
+		var replacement *corev1.Pod
+		for i := range podList.Items {
+			pod := &podList.Items[i]
+			if pod.Spec.NodeName != nodeName || pod.DeletionTimestamp != nil {
+				continue
+			}
+			if pod.Name == podToRestart.Name || pod.UID == podToRestart.UID {
+				continue
+			}
+			replacement = pod
+			break
+		}
+
+		g.Expect(replacement).NotTo(BeNil(), "replacement sds-node-configurator pod on node %s not found yet", nodeName)
+		g.Expect(replacement.Status.Phase).To(Equal(corev1.PodRunning),
+			"replacement pod %s on node %s is not running yet (phase=%s)", replacement.Name, nodeName, replacement.Status.Phase)
+		g.Expect(isPodReady(replacement)).To(BeTrue(),
+			"replacement pod %s on node %s is not Ready yet", replacement.Name, nodeName)
+	}, 5*time.Minute, 10*time.Second).Should(Succeed())
+}
+
+func isPodReady(pod *corev1.Pod) bool {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
 // e2eClusterStateJSONPath returns the path to storage-e2e cluster-state.json for this test file
 // (same layout as getClusterStatePath in github.com/deckhouse/storage-e2e/pkg/cluster).
 // Must be called from this file so runtime.Caller resolves to sds_node_configurator_test.go.
@@ -2736,12 +3219,12 @@ const (
 	e2eLsblkSSHMaxRetries    = 6
 	e2eLsblkSSHRetryInterval = 15 * time.Second
 
-	e2eClusterCreationTimeout      = 90 * time.Minute
-	e2eModuleDeployTimeout         = 15 * time.Minute
+	e2eClusterCreationTimeout = 90 * time.Minute
+	e2eModuleDeployTimeout    = 15 * time.Minute
 	// LVMVolumeGroup Pending → Ready on busy CI can exceed 5m (agent + node LVM).
 	e2eLVMVolumeGroupReadyTimeout = 15 * time.Minute
-	e2eStorageModuleReadyTimeout   = 30 * time.Minute // alwaysUseExisting: wait for Module Ready after ModuleConfig
-	e2eUseExistingClusterTimeout   = 90 * time.Minute
+	e2eStorageModuleReadyTimeout  = 30 * time.Minute // alwaysUseExisting: wait for Module Ready after ModuleConfig
+	e2eUseExistingClusterTimeout  = 90 * time.Minute
 
 	// Common Scheduler "fill to max" tests create many PVCs/Pods; provisioning and binding can exceed 5m on loaded clusters.
 	e2eSchedulerFillPodsWaitTimeout = 10 * time.Minute
@@ -3301,13 +3784,13 @@ func e2eShouldDeleteBaseNamespaceAfterSuite() bool {
 		return e2eConfigTestClusterCleanup() == "true" || e2eConfigTestClusterCleanup() == "True"
 	}
 }
-func e2eConfigSSHHost() string            { return os.Getenv("SSH_HOST") }
-func e2eConfigSSHUser() string            { return os.Getenv("SSH_USER") }
-func e2eConfigSSHJumpHost() string        { return os.Getenv("SSH_JUMP_HOST") }
-func e2eConfigSSHJumpUser() string        { return os.Getenv("SSH_JUMP_USER") }
-func e2eConfigSSHJumpKeyPath() string     { return os.Getenv("SSH_JUMP_KEY_PATH") }
-func e2eConfigSSHPassphrase() string      { return os.Getenv("SSH_PASSPHRASE") }
-func e2eConfigLogLevel() string           { return os.Getenv("LOG_LEVEL") }
+func e2eConfigSSHHost() string        { return os.Getenv("SSH_HOST") }
+func e2eConfigSSHUser() string        { return os.Getenv("SSH_USER") }
+func e2eConfigSSHJumpHost() string    { return os.Getenv("SSH_JUMP_HOST") }
+func e2eConfigSSHJumpUser() string    { return os.Getenv("SSH_JUMP_USER") }
+func e2eConfigSSHJumpKeyPath() string { return os.Getenv("SSH_JUMP_KEY_PATH") }
+func e2eConfigSSHPassphrase() string  { return os.Getenv("SSH_PASSPHRASE") }
+func e2eConfigLogLevel() string       { return os.Getenv("LOG_LEVEL") }
 
 func e2eConfigKubeConfigPath() string {
 	return os.Getenv("KUBE_CONFIG_PATH")
