@@ -828,7 +828,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				Expect(nodeList.Items).NotTo(BeEmpty(), "cluster must have at least one node")
 				realNodeName := nodeList.Items[0].Name
 
-				fakeBDName := e2eFakeBDPrefix + fmt.Sprintf("%d", rand.Intn(100000))
+				fakeBDName := e2eFakeBDPrefix + strconv.Itoa(rand.Intn(100000))
 
 				By(fmt.Sprintf("Step 2: Creating fake BlockDevice %s with nodeName=%s", fakeBDName, realNodeName))
 				fakeBD := &v1alpha1.BlockDevice{
