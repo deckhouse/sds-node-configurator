@@ -83,6 +83,16 @@ ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
 
 ## Тестовые сценарии
 
+### BlockDevice Disappearance
+
+- На ноде появляется новый неразмеченный диск и для него создаётся `BlockDevice`
+- Затем диск отсоединяется и удаляется
+- Проверяется, что агент удаляет соответствующий `BlockDevice`
+
+**Проверки**:
+- Новый `BlockDevice` сначала обнаруживается и имеет `status.consumable=true`
+- После пропажи диска соответствующий `BlockDevice` удаляется агентом
+
 ### Модуль sds-node-configurator (BlockDevice / LVM)
 
 - **BlockDevice discovery**: появление диска; корректные `status.nodeName`, `status.path`, `status.size`, `consumable`.
@@ -91,6 +101,27 @@ ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
 ### Common Scheduler Extender
 
 Сценарии Common Scheduler Extender (в том же файле): фильтрация нод по LVMVolumeGroup для local PVC, Pending при нехватке места, резервация при конкурентных PVC. См. [E2E_USAGE.md](E2E_USAGE.md).
+
+### Block Device Size Reduction
+
+- Создаётся VirtualDisk, обнаруживается BlockDevice, создаётся LVMVolumeGroup, ожидается `Ready`
+- Оригинальный диск отсоединяется и удаляется, подключается диск меньшего размера
+- Проверяется, что `LVMVolumeGroup` переходит в состояние ошибки
+
+**Проверки**:
+- `LVMVolumeGroup` `Phase != Ready` после замены устройства
+- `Conditions` содержат хотя бы одну запись с `status=False`
+- `Phase` переходит в `NotReady`, `Pending` или `Failed`
+
+### Manual BlockDevice Creation/Modification
+
+- Пользователь создаёт поддельный объект `BlockDevice` вручную
+- Пользователь изменяет `status.size` существующего `BlockDevice`
+
+**Проверки**:
+- Поддельный `BlockDevice` удаляется агентом
+- API отклоняет создание, если активен validating webhook
+- Изменённый `status.size` восстанавливается агентом до реального значения при следующем сканировании
 
 ## Кластер заблокирован (cluster is already locked)
 
