@@ -22,6 +22,8 @@ import (
 	"sync"
 )
 
+// ErrUnknownAction is returned by HandleEvent when the uevent action
+// is not one of the recognized kernel actions.
 var ErrUnknownAction = errors.New("unknown action")
 
 // DeviceMap is a thread-safe in-memory store of block device properties
@@ -32,6 +34,7 @@ type DeviceMap struct {
 	devices map[string]Properties
 }
 
+// NewDeviceMap returns an empty, ready-to-use DeviceMap.
 func NewDeviceMap() *DeviceMap {
 	return &DeviceMap{
 		devices: make(map[string]Properties),
@@ -41,6 +44,13 @@ func NewDeviceMap() *DeviceMap {
 // HandleEvent processes a single netlink uevent. The action string comes
 // directly from the kernel (add, change, remove, bind, unbind, move, online,
 // offline). The env map is the raw udev environment from the event.
+//
+// Add-like actions (add, change, bind, move, online) insert or overwrite the
+// device entry. Remove-like actions (remove, unbind, offline) delete it.
+// This is intentional: we listen on the UdevEvent multicast group, so every
+// event carries a fully enriched property set, and a device in the offline or
+// unbound state is unavailable for I/O — there is no value in keeping it in
+// the map.
 func (dm *DeviceMap) HandleEvent(action string, env map[string]string) error {
 	props, err := ParseProperties(env)
 	if err != nil {
@@ -49,16 +59,17 @@ func (dm *DeviceMap) HandleEvent(action string, env map[string]string) error {
 
 	key := DeviceKey(props.Major, props.Minor)
 
-	dm.mu.Lock()
-	defer dm.mu.Unlock()
-
 	switch action {
 	case "add", "change", "bind", "move", "online":
+		dm.mu.Lock()
 		dm.devices[key] = props
+		dm.mu.Unlock()
 	case "remove", "unbind", "offline":
+		dm.mu.Lock()
 		delete(dm.devices, key)
+		dm.mu.Unlock()
 	default:
-		return fmt.Errorf("%w %q for device %s", ErrUnknownAction, action, key)
+		return fmt.Errorf("handle event: %w %q for device %s", ErrUnknownAction, action, key)
 	}
 
 	return nil
