@@ -19,6 +19,7 @@ package udev
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -28,19 +29,19 @@ const DefaultRunUdevDataPath = "/run/udev/data"
 // ReadUdevDB reads /run/udev/data/b<major>:<minor> and returns the E: properties
 // as a key-value map. Non-E: lines (N:, S:, I:, etc.) are ignored.
 func ReadUdevDB(basePath string, major, minor int) (map[string]string, error) {
-	path := fmt.Sprintf("%s/b%d:%d", basePath, major, minor)
+	path := filepath.Join(basePath, fmt.Sprintf("b%d:%d", major, minor))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading udev db %s: %w", path, err)
 	}
 	props := make(map[string]string)
 	for _, line := range strings.Split(string(data), "\n") {
-		after, ok := strings.CutPrefix(strings.TrimSpace(line), "E:")
+		after, ok := strings.CutPrefix(line, "E:")
 		if !ok {
 			continue
 		}
-		if idx := strings.Index(after, "="); idx > 0 {
-			props[after[:idx]] = after[idx+1:]
+		if idx := strings.IndexByte(after, '='); idx > 0 {
+			props[after[:idx]] = strings.TrimRight(after[idx+1:], "\r\n")
 		}
 	}
 	return props, nil
