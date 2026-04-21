@@ -153,9 +153,12 @@ func TestCommands(t *testing.T) {
       "report": [
           {
               "pv": [
-                  {"pv_name":"/dev/vdb", "vg_name":"vgtest", "pv_fmt":"lvm2", "pv_attr":"a--", "pv_size":"10G", 
-"pv_free":"1020.00m", "pv_used":"0 ", "pv_uuid":"BmuLLu-9ZSf-eqpf-qR3H-23rQ-fIl7-Ouyl5X", "vg_tags":"", 
-"vg_uuid":"JnCFQZ-TTfE-Ed2C-nKoH-yzPH-4fMA-CKwIv7"}
+                  {"pv_name":"/dev/vdb", "vg_name":"vgtest", "pv_fmt":"lvm2", "pv_attr":"a--", "pv_size":"10G",
+"pv_free":"1020.00m", "pv_used":"0 ", "pv_uuid":"BmuLLu-9ZSf-eqpf-qR3H-23rQ-fIl7-Ouyl5X", "vg_tags":"",
+"vg_uuid":"JnCFQZ-TTfE-Ed2C-nKoH-yzPH-4fMA-CKwIv7", "pe_start":"1048576"},
+                  {"pv_name":"/dev/vdc", "vg_name":"vgtest", "pv_fmt":"lvm2", "pv_attr":"a--", "pv_size":"10G",
+"pv_free":"2048.00m", "pv_used":"0 ", "pv_uuid":"CmuLLu-9ZSf-eqpf-qR3H-23rQ-fIl7-Ouyl5X", "vg_tags":"",
+"vg_uuid":"JnCFQZ-TTfE-Ed2C-nKoH-yzPH-4fMA-CKwIv7", "pe_start":"2097152"}
               ]
           }
       ]
@@ -164,15 +167,34 @@ func TestCommands(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
+			peStart1Mi, err := resource.ParseQuantity("1048576")
+			if err != nil {
+				t.Error(err)
+			}
+			peStart2Mi, err := resource.ParseQuantity("2097152")
+			if err != nil {
+				t.Error(err)
+			}
 			expectedPVs := internal.PV{PV: []internal.PVData{
 				{
-					PVName: "/dev/vdb",
-					VGName: "vgtest",
-					PVUsed: "0 ",
-					PVUuid: "BmuLLu-9ZSf-eqpf-qR3H-23rQ-fIl7-Ouyl5X",
-					VGTags: "",
-					VGUuid: "JnCFQZ-TTfE-Ed2C-nKoH-yzPH-4fMA-CKwIv7",
-					PVSize: size10G,
+					PVName:  "/dev/vdb",
+					VGName:  "vgtest",
+					PVUsed:  "0 ",
+					PVUuid:  "BmuLLu-9ZSf-eqpf-qR3H-23rQ-fIl7-Ouyl5X",
+					VGTags:  "",
+					VGUuid:  "JnCFQZ-TTfE-Ed2C-nKoH-yzPH-4fMA-CKwIv7",
+					PVSize:  size10G,
+					PEStart: peStart1Mi,
+				},
+				{
+					PVName:  "/dev/vdc",
+					VGName:  "vgtest",
+					PVUsed:  "0 ",
+					PVUuid:  "CmuLLu-9ZSf-eqpf-qR3H-23rQ-fIl7-Ouyl5X",
+					VGTags:  "",
+					VGUuid:  "JnCFQZ-TTfE-Ed2C-nKoH-yzPH-4fMA-CKwIv7",
+					PVSize:  size10G,
+					PEStart: peStart2Mi,
 				},
 			}}
 
