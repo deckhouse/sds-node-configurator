@@ -1,3 +1,5 @@
 dirs:
   - /dev/
   - /run/udev/
+  - /sys/
+  - /sys/fs/cgroup
