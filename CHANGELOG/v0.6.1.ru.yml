@@ -1,0 +1,8 @@
+Изменения:
+  - Добавлено определение точек монтирования через парсер mountinfo в агенте
+  - Добавлен учёт locality реплик в scheduler-extender для replicated-томов
+  - Исправлены гонки и зацикливание реконсиляции в контроллерах LVG/LLV
+  - Учтён ExtentSize при сравнении в discoverer и добавлен fallback 4Mi в контроллере LLV
+  - Убрана ложная пометка LLV как Failed при actualSize > spec.size
+  - Исправлено двойное вычитание Failed LLV с actualSize при подсчёте свободного места в scheduler-extender
+  - Обновление базовых образов и lib-helm
