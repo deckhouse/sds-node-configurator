@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/mock/gomock"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,6 +34,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
@@ -377,6 +379,73 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				assert.Equal(t, "", reason)
 			}
 		})
+
+		t.Run("with_two_half_size_thin_pools_returns_true_due_to_per_pool_extent_tolerance", func(t *testing.T) {
+			r := setupReconciler()
+
+			const (
+				firstBd = "first"
+
+				firstPath = "first-path"
+
+				vgName = "test-vg"
+			)
+
+			bds := map[string]v1alpha1.BlockDevice{
+				firstBd: {
+					ObjectMeta: v1.ObjectMeta{
+						Name: firstBd,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Size:       resource.MustParse("2G"),
+						Consumable: true,
+						Path:       firstPath,
+					},
+				},
+			}
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+						{
+							Name: "first-thin",
+							// Decimal units are intentional: each 50% pool aligns slightly above 1G,
+							// so together they need two extents of tolerance, not one.
+							Size:            "50%",
+							AllocationLimit: "150%",
+						},
+						{
+							Name:            "second-thin",
+							Size:            "50%",
+							AllocationLimit: "150%",
+						},
+					},
+					ActualVGNameOnTheNode: vgName,
+				},
+			}
+
+			pvs := []internal.PVData{
+				{
+					PVName: firstPath,
+				},
+			}
+
+			vgs := []internal.VGData{
+				{
+					VGName:       vgName,
+					VGSize:       resource.MustParse("2G"),
+					VGFree:       resource.MustParse("2G"),
+					VGExtentSize: resource.MustParse("4Mi"),
+				},
+			}
+
+			r.sdsCache.StorePVs(pvs, bytes.Buffer{})
+			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
+
+			valid, reason := r.validateLVGForUpdateFunc(lvg, bds)
+			if assert.True(t, valid) {
+				assert.Equal(t, "", reason)
+			}
+		})
 	})
 
 	t.Run("validateLVGForCreateFunc", func(t *testing.T) {
@@ -566,6 +635,125 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				assert.Equal(t, "", reason)
 			}
 		})
+
+		t.Run("with_decimal_size_thin_pool_returns_true_due_to_extent_tolerance", func(t *testing.T) {
+			r := setupReconciler()
+
+			const (
+				firstBd  = "first"
+				secondBd = "second"
+			)
+
+			bds := map[string]v1alpha1.BlockDevice{
+				firstBd: {
+					ObjectMeta: v1.ObjectMeta{
+						Name: firstBd,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Size:       resource.MustParse("1G"),
+						Consumable: true,
+					},
+				},
+				secondBd: {
+					ObjectMeta: v1.ObjectMeta{
+						Name: secondBd,
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						Size:       resource.MustParse("1G"),
+						Consumable: true,
+					},
+				},
+			}
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+						{
+							Name: "thin",
+							// Decimal units are intentional here: AlignSizeToExtent(2G, 4Mi) becomes
+							// slightly bigger than 2G, so this assertion depends on one-extent tolerance.
+							Size: "2G",
+						},
+					},
+				},
+			}
+
+			valid, reason := r.validateLVGForCreateFunc(lvg, bds)
+			if assert.True(t, valid) {
+				assert.Equal(t, "", reason)
+			}
+		})
+	})
+
+	t.Run("resizePVIfNeeded", func(t *testing.T) {
+		type testCase struct {
+			name        string
+			devSize     string
+			pvs         []internal.PVData
+			expectCalls int
+		}
+
+		for _, tc := range []testCase{
+			{
+				name:        "does_not_resize_when_missing_space_is_less_than_extent",
+				devSize:     "1005242879",
+				pvs:         []internal.PVData{{PVName: "/dev/sdb", PEStart: resource.MustParse("1048576")}},
+				expectCalls: 0,
+			},
+			{
+				name:        "resizes_when_missing_space_equals_extent",
+				devSize:     "1005242880",
+				pvs:         []internal.PVData{{PVName: "/dev/sdb", PEStart: resource.MustParse("1048576")}},
+				expectCalls: 1,
+			},
+			{
+				name:        "does_not_resize_when_pv_is_missing_from_cache",
+				devSize:     "1005242880",
+				pvs:         nil,
+				expectCalls: 0,
+			},
+			{
+				name:        "does_not_resize_when_pe_start_is_zero",
+				devSize:     "1005242880",
+				pvs:         []internal.PVData{{PVName: "/dev/sdb", PEStart: resource.MustParse("0")}},
+				expectCalls: 0,
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				defer ctrl.Finish()
+
+				mockCommands := mock_utils.NewMockCommands(ctrl)
+				if tc.expectCalls > 0 {
+					mockCommands.EXPECT().ResizePV("/dev/sdb").Return("pvresize /dev/sdb", nil).Times(tc.expectCalls)
+				}
+
+				r := setupReconcilerWithCommands(mockCommands)
+				lvg := &v1alpha1.LVMVolumeGroup{
+					Spec: v1alpha1.LVMVolumeGroupSpec{
+						ActualVGNameOnTheNode: "test-vg",
+					},
+					Status: v1alpha1.LVMVolumeGroupStatus{
+						Nodes: []v1alpha1.LVMVolumeGroupNode{
+							{
+								Name: "test-node",
+								Devices: []v1alpha1.LVMVolumeGroupDevice{
+									{
+										BlockDevice: "sdb",
+										Path:        "/dev/sdb",
+										PVSize:      resource.MustParse("1G"),
+										DevSize:     resource.MustParse(tc.devSize),
+									},
+								},
+							},
+						},
+						ExtentSize: resource.MustParse("4Mi"),
+					},
+				}
+
+				err := r.resizePVIfNeeded(ctx, lvg, tc.pvs)
+				assert.NoError(t, err)
+			})
+		}
 	})
 
 	t.Run("identifyLVGReconcileFunc", func(t *testing.T) {
@@ -1552,11 +1740,15 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 }
 
 func setupReconciler() *Reconciler {
+	return setupReconcilerWithCommands(utils.NewCommands())
+}
+
+func setupReconcilerWithCommands(commands utils.Commands) *Reconciler {
 	return NewReconciler(
 		test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{}, &v1alpha1.LVMLogicalVolume{}),
 		logger.Logger{},
 		monitoring.GetMetrics(""),
 		cache.New(),
-		utils.NewCommands(),
+		commands,
 		ReconcilerConfig{NodeName: "test_node"})
 }
