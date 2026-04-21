@@ -1,0 +1,10 @@
+Изменения:
+- Added detection of mount points via the mountinfo parser in the agent
+- Added locality of replicas to scheduler-extender for replicated volumes
+- Fixed reconciliation races and loops in LVG/LLV controllers
+- ExtentSize was taken into account when comparing in discoverer and fallback 4Mi
+  was added in the LLV controller
+- Removed false marking of LLV as Failed when actualSize > spec.size
+- Fixed double subtraction of Failed LLV from actualSize when calculating free space
+  in scheduler-extender
+- Updating base images and lib-helm

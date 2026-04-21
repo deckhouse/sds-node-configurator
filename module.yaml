@@ -4,5 +4,5 @@ descriptions:
   en: "Manages block devices and LVM on cluster nodes."
   ru: "Управляет блочными устройствами и LVM на узлах кластера."
 requirements:
-  deckhouse: ">= 1.71"
+  deckhouse: ">= 1.72"
 namespace: "d8-sds-node-configurator"
