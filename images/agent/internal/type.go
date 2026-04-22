@@ -89,8 +89,8 @@ type PV struct {
 }
 
 type PVData struct {
-	PVName string            `json:"pv_name,omitempty"`
-	VGName string            `json:"vg_name,omitempty"`
+	PVName  string            `json:"pv_name,omitempty"`
+	VGName  string            `json:"vg_name,omitempty"`
 	PVSize  resource.Quantity `json:"pv_size,omitempty"`
 	PVUsed  string            `json:"pv_used,omitempty"`
 	PVUuid  string            `json:"pv_uuid,omitempty"`
