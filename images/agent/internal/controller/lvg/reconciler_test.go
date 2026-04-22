@@ -19,6 +19,7 @@ package lvg
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -754,6 +755,132 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				assert.NoError(t, err)
 			})
 		}
+	})
+
+	t.Run("reconcileLVGCreateFunc", func(t *testing.T) {
+		t.Run("returns_retry_when_get_vg_after_create_fails", func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			const (
+				lvgName      = "test-lvg"
+				vgName       = "test-vg"
+				bdName       = "test-bd"
+				bdPath       = "/dev/sdb"
+				thinPoolName = "tp0"
+			)
+
+			mockCommands := mock_utils.NewMockCommands(ctrl)
+			mockCommands.EXPECT().CreatePV(bdPath).Return("pvcreate /dev/sdb", nil)
+			mockCommands.EXPECT().CreateVGLocal(vgName, lvgName, []string{bdPath}).Return("vgcreate test-vg /dev/sdb", nil)
+
+			getVGErr := errors.New("temporary getvg error")
+			mockCommands.EXPECT().GetVG(vgName).Return(internal.VGData{}, "", bytes.Buffer{}, getVGErr)
+
+			r := setupReconcilerWithCommands(mockCommands)
+			lvg := &v1alpha1.LVMVolumeGroup{
+				ObjectMeta: v1.ObjectMeta{
+					Name: lvgName,
+				},
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					Type:                  internal.Local,
+					ActualVGNameOnTheNode: vgName,
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+						{
+							Name: thinPoolName,
+							Size: "50%",
+						},
+					},
+				},
+			}
+			blockDevices := map[string]v1alpha1.BlockDevice{
+				bdName: {
+					ObjectMeta: v1.ObjectMeta{Name: bdName},
+					Status: v1alpha1.BlockDeviceStatus{
+						Path:       bdPath,
+						Size:       resource.MustParse("2G"),
+						Consumable: true,
+					},
+				},
+			}
+
+			assert.NoError(t, r.cl.Create(ctx, lvg))
+
+			requeue, err := r.reconcileLVGCreateFunc(ctx, lvg, blockDevices)
+			assert.True(t, requeue, "GetVG failure after vgcreate should trigger retry")
+			assert.ErrorIs(t, err, getVGErr)
+		})
+
+		t.Run("uses_actual_vg_size_for_percent_thin_pool_after_create", func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			const (
+				lvgName      = "test-lvg"
+				vgName       = "test-vg"
+				bdName       = "test-bd"
+				bdPath       = "/dev/sdb"
+				thinPoolName = "tp0"
+			)
+
+			rawTotalVGSize := resource.MustParse("2G")
+			actualVGSize := resource.MustParse("1G")
+			actualVG := internal.VGData{
+				VGName:       vgName,
+				VGSize:       actualVGSize,
+				VGExtentSize: resource.MustParse("4Mi"),
+			}
+
+			expectedRequestedSize, err := utils.GetRequestedSizeFromString("50%", actualVGSize)
+			assert.NoError(t, err)
+			expectedAlignedSize, err := utils.AlignSizeToExtent(expectedRequestedSize, actualVG.VGExtentSize)
+			assert.NoError(t, err)
+
+			rawRequestedSize, err := utils.GetRequestedSizeFromString("50%", rawTotalVGSize)
+			assert.NoError(t, err)
+			rawAlignedSize, err := utils.AlignSizeToExtent(rawRequestedSize, actualVG.VGExtentSize)
+			assert.NoError(t, err)
+			assert.NotEqual(t, rawAlignedSize.Value(), expectedAlignedSize.Value(), "test input must distinguish raw block-device sum from actual VG size")
+
+			mockCommands := mock_utils.NewMockCommands(ctrl)
+			mockCommands.EXPECT().CreatePV(bdPath).Return("pvcreate /dev/sdb", nil)
+			mockCommands.EXPECT().CreateVGLocal(vgName, lvgName, []string{bdPath}).Return("vgcreate test-vg /dev/sdb", nil)
+			mockCommands.EXPECT().GetVG(vgName).Return(actualVG, "", bytes.Buffer{}, nil)
+			mockCommands.EXPECT().CreateThinPool(thinPoolName, vgName, expectedAlignedSize.Value()).Return("lvcreate thin pool", nil)
+
+			r := setupReconcilerWithCommands(mockCommands)
+			lvg := &v1alpha1.LVMVolumeGroup{
+				ObjectMeta: v1.ObjectMeta{
+					Name: lvgName,
+				},
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					Type:                  internal.Local,
+					ActualVGNameOnTheNode: vgName,
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+						{
+							Name: thinPoolName,
+							Size: "50%",
+						},
+					},
+				},
+			}
+			blockDevices := map[string]v1alpha1.BlockDevice{
+				bdName: {
+					ObjectMeta: v1.ObjectMeta{Name: bdName},
+					Status: v1alpha1.BlockDeviceStatus{
+						Path:       bdPath,
+						Size:       rawTotalVGSize,
+						Consumable: true,
+					},
+				},
+			}
+
+			assert.NoError(t, r.cl.Create(ctx, lvg))
+
+			requeue, err := r.reconcileLVGCreateFunc(ctx, lvg, blockDevices)
+			assert.False(t, requeue)
+			assert.NoError(t, err)
+		})
 	})
 
 	t.Run("identifyLVGReconcileFunc", func(t *testing.T) {
