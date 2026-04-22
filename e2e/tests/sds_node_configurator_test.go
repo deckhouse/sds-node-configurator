@@ -1329,7 +1329,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				clusterVMs = e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
 
 				numNodes := len(clusterVMs)
-				parallelism := 1 + rand.Intn(numNodes) // [1, numNodes] — сколько нод задействуем
+				parallelism := 1 + rand.Intn(numNodes) // [1, numNodes] — how many nodes to use
 				if parallelism > numNodes {
 					parallelism = numNodes
 				}
@@ -1342,7 +1342,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				// Second random: disks per node, 1..5
 				disksPerNode := make([]int, parallelism)
 				for i := 0; i < parallelism; i++ {
-					disksPerNode[i] = 1 + rand.Intn(5) // [1, 5] дисков на ноду
+					disksPerNode[i] = 1 + rand.Intn(5) // [1, 5] disks per node
 				}
 				var createPlan []string // createPlan[k] = VM name for k-th disk
 				for i, vm := range targetVMs {
@@ -2292,7 +2292,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			})
 		})
 
-		// Обнаружение уже существующей VG с тегом (автоимпорт): on-node LVM + tag → LVMVolumeGroup CR + status thin-pool.
+		// Discovery of a pre-existing tagged VG (auto-import): on-node LVM + tag → LVMVolumeGroup CR + thin-pool in status.
 		Context("LVMVolumeGroup auto-import (pre-existing VG with tag)", func() {
 			var (
 				e2eVgImportSuiteOnce     sync.Once
