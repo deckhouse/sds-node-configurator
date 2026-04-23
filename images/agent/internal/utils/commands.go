@@ -37,7 +37,6 @@ import (
 )
 
 type Commands interface {
-	GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error)
 	GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error)
 	GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.Buffer, err error)
 	GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error)
@@ -76,28 +75,6 @@ type commands struct {
 
 func NewCommands() Commands {
 	return &commands{}
-}
-
-func (c *commands) GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
-	var outs bytes.Buffer
-	args := []string{"-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
-	cmd := exec.CommandContext(ctx, internal.LSBLKCmd, args...)
-	cmd.Stdout = &outs
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if err != nil {
-		return nil, cmd.String(), stderr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
-	}
-
-	devices, err := c.UnmarshalDevices(outs.Bytes())
-	if err != nil {
-		return nil, cmd.String(), stderr, fmt.Errorf("unable to unmarshal devices, err: %w", err)
-	}
-
-	return devices, cmd.String(), stderr, nil
 }
 
 func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
