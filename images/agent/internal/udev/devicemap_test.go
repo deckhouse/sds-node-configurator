@@ -33,10 +33,9 @@ import (
 // newTestDeviceMap builds a DeviceMap wired to the supplied sysfs provider,
 // so tests can operate against a fake /sys tree without mutating globals.
 // The fakeSysfs helper used to construct the provider lives in sysfs_test.go.
-func newTestDeviceMap(udevDBPath string, sysfs *SysFSDataProvider) *DeviceMap {
+func newTestDeviceMap(sysfs *SysFSDataProvider) *DeviceMap {
 	return &DeviceMap{
 		devices:           make(map[string]Properties),
-		udevDBPath:        udevDBPath,
 		resolver:          NewResolver(sysfs),
 		sysFsDataProvider: sysfs,
 	}
@@ -306,7 +305,7 @@ func TestSnapshot_BuildsDevices(t *testing.T) {
 	require.NoError(t, os.MkdirAll(f.classBlockPath, 0o755))
 	require.NoError(t, os.Symlink(devicesPath, filepath.Join(f.classBlockPath, "sda")))
 
-	dm := newTestDeviceMap("", f.provider)
+	dm := newTestDeviceMap(f.provider)
 	env := map[string]string{
 		"MAJOR": "8", "MINOR": "0", "DEVNAME": "sda",
 		"DEVTYPE": "disk", "ID_MODEL": "TestDisk",
@@ -337,7 +336,7 @@ func TestSnapshot_BuildsDevices(t *testing.T) {
 func TestSnapshot_SkipsDeviceWithNoSize(t *testing.T) {
 	f := newFakeSysfs(t)
 
-	dm := newTestDeviceMap("", f.provider)
+	dm := newTestDeviceMap(f.provider)
 	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "0", "sda")))
 
 	devices, errs := dm.Snapshot(nil)
@@ -367,7 +366,7 @@ func TestSnapshot_DMDevice(t *testing.T) {
 	devDir := filepath.Join(f.classBlockPath, "dm-0")
 	require.NoError(t, os.MkdirAll(devDir, 0o755))
 
-	dm := newTestDeviceMap("", f.provider)
+	dm := newTestDeviceMap(f.provider)
 	env := map[string]string{
 		"MAJOR": "253", "MINOR": "0", "DEVNAME": "dm-0",
 		"DEVTYPE": "disk", "DM_NAME": "vg0-lv0", "DM_UUID": "LVM-abc123",
@@ -398,7 +397,7 @@ func TestSnapshot_NoMountPoint(t *testing.T) {
 	devDir := filepath.Join(f.classBlockPath, "sda")
 	require.NoError(t, os.MkdirAll(devDir, 0o755))
 
-	dm := newTestDeviceMap("", f.provider)
+	dm := newTestDeviceMap(f.provider)
 	require.NoError(t, dm.HandleEvent("add", makeEnv("8", "0", "sda")))
 
 	devices, errs := dm.Snapshot(map[string]string{"999:999": "/mnt/other"})
