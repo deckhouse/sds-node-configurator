@@ -4,11 +4,11 @@ metadata:
   labels:
     heritage: deckhouse
     module: sds-node-configurator
-    rbac.deckhouse.io/aggregate-to-sds-node-configurator-as: viewer
+    rbac.deckhouse.io/aggregate-to-storage-as: viewer
     rbac.deckhouse.io/kind: manage
     rbac.deckhouse.io/level: module
     rbac.deckhouse.io/namespace: d8-sds-node-configurator
-  name: d8:manage:permission:subsystem:sds-node-configurator:view_resources
+  name: d8:manage:permission:module:sds-node-configurator:view_resources
 rules:
   - apiGroups:
       - storage.deckhouse.io
