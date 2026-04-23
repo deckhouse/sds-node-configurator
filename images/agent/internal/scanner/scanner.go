@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/pilebones/go-udev/crawler"
 	"github.com/pilebones/go-udev/netlink"
 	"k8s.io/utils/clock"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/throttler"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/udev"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -49,7 +51,8 @@ type Scanner interface {
 }
 
 type scanner struct {
-	commands utils.Commands
+	commands  utils.Commands
+	deviceMap *udev.DeviceMap
 }
 
 func NewScanner(commands utils.Commands) Scanner {
@@ -87,6 +90,19 @@ func (s *scanner) Run(
 			},
 		},
 	}
+	s.deviceMap = udev.NewDeviceMap(udev.DefaultRunUdevDataPath)
+
+	crawlerDevs, crawlErr := s.collectCrawlerDevices(ctx, matcher)
+	if crawlErr != nil {
+		log.Error(crawlErr, "[RunScanner] Failed to collect crawler devices")
+	}
+
+	fillErr := s.deviceMap.FillFromCrawler(ctx, crawlerDevs)
+	if fillErr != nil {
+		log.Error(fillErr, "[RunScanner] Failed to fill device map")
+	}
+	log.Info(fmt.Sprintf("[RunScanner] initial crawl found %d block devices", s.deviceMap.Len()))
+
 	quit := conn.Monitor(eventChan, errChan, matcher)
 
 	log.Info("[RunScanner] start to listen to events")
@@ -103,6 +119,10 @@ func (s *scanner) Run(
 				err := errors.New("EventChan has been closed when monitor udev event")
 				log.Error(err, "[RunScanner] unable to read from the event channel")
 				return err
+			}
+
+			if err := s.deviceMap.HandleEvent(device.Action, device.Env); err != nil {
+				log.Error(err, fmt.Sprintf("[RunScanner] handle event error: %s", device.String()))
 			}
 
 			t.Do(func() {
@@ -128,6 +148,15 @@ func (s *scanner) Run(
 		case err := <-errChan:
 			log.Error(err, "[RunScanner] Monitor udev event error")
 			quit = conn.Monitor(eventChan, errChan, matcher)
+			devs, crErr := s.collectCrawlerDevices(ctx, matcher)
+			if crErr != nil {
+				log.Error(crErr, "[RunScanner] unable to collect crawler devices")
+			}
+			fErr := s.deviceMap.FillFromCrawler(ctx, devs)
+			if fErr != nil {
+				log.Error(fErr, fmt.Sprintf("[RunScanner] unable to fill device map"))
+			}
+			log.Info(fmt.Sprintf("[RunScanner] re-crawl found %d block devices", s.deviceMap.Len()))
 			timer.Reset(duration)
 			continue
 
@@ -231,8 +260,8 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	}
 
 	now = time.Now()
-	devices, devErr, err := s.scanDevices(ctx, log, cfg)
-	log.Trace(fmt.Sprintf("[fillTheCache] LSBLK command runs for: %s", realClock.Since(now).String()))
+	devices, devErr, err := s.scanDevices()
+	log.Trace(fmt.Sprintf("[fillTheCache] device scan runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
@@ -272,16 +301,52 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	return nil
 }
 
-func (s *scanner) scanDevices(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.Device, bytes.Buffer, error) {
-	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
-	defer cancel()
-	devices, cmdStr, stdErr, err := s.commands.GetBlockDevices(ctx)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[ScanDevices] unable to scan the devices, cmd: %s", cmdStr))
-		return nil, stdErr, err
+func (s *scanner) collectCrawlerDevices(ctx context.Context, matcher netlink.Matcher) ([]crawler.Device, error) {
+	queue := make(chan crawler.Device)
+	errs := make(chan error)
+	crawler.ExistingDevices(queue, errs, matcher)
+
+	result := make([]crawler.Device, 0)
+	var crawlErr error
+
+	for queue != nil && errs != nil {
+		select {
+		case <-ctx.Done():
+			if crawlErr != nil {
+				return result, errors.Join(crawlErr, ctx.Err())
+			}
+			return result, ctx.Err()
+		case dev, ok := <-queue:
+			if !ok {
+				queue = nil
+				continue
+			}
+			result = append(result, dev)
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				continue
+			}
+			if err != nil {
+				crawlErr = errors.Join(crawlErr, err)
+			}
+		}
 	}
 
-	return devices, stdErr, nil
+	return result, crawlErr
+}
+
+func (s *scanner) scanDevices() ([]internal.Device, bytes.Buffer, error) {
+	var stderr bytes.Buffer
+	mounts, err := utils.ParseMountInfo(utils.ProcHostMountInfo)
+	if err != nil {
+		return []internal.Device{}, stderr, fmt.Errorf("[scanDevices] failed to parse mountinfo: %v", err)
+	}
+	devices, errs := s.deviceMap.Snapshot(mounts)
+	for _, e := range errs {
+		stderr.WriteString(e.Error() + "\n")
+	}
+	return devices, stderr, nil
 }
 
 func (s *scanner) scanPVs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.PVData, bytes.Buffer, error) {
