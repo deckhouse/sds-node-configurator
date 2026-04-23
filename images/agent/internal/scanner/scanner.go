@@ -154,7 +154,7 @@ func (s *scanner) Run(
 			}
 			fErr := s.deviceMap.FillFromCrawler(ctx, devs)
 			if fErr != nil {
-				log.Error(fErr, fmt.Sprintf("[RunScanner] unable to fill device map"))
+				log.Error(fErr, "[RunScanner] unable to fill device map")
 			}
 			log.Info(fmt.Sprintf("[RunScanner] re-crawl found %d block devices", s.deviceMap.Len()))
 			timer.Reset(duration)
