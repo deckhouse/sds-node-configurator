@@ -385,6 +385,20 @@ func testLocalThinSC(name, lvgName, thinPoolName string) *storagev1.StorageClass
 	}
 }
 
+// testLocalRawFileSC returns a StorageClass that mimics what the LSC controller
+// in sds-local-volume creates for a LocalStorageClass with `spec.rawFile` set:
+// same provisioner as LVM-backed local SCs, but with the `type=rawfile` marker
+// and no LVM parameters.
+func testLocalRawFileSC(name string) *storagev1.StorageClass {
+	return &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: name},
+		Provisioner: consts.SdsLocalVolumeProvisioner,
+		Parameters: map[string]string{
+			consts.LocalStorageTypeParamKey: consts.LocalStorageTypeRawFile,
+		},
+	}
+}
+
 func testPendingPVC(name, namespace, scName string) *corev1.PersistentVolumeClaim {
 	return &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},

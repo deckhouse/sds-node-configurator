@@ -23,6 +23,19 @@ const (
 	LvmTypeParamKey         = "local.csi.storage.deckhouse.io/lvm-type"
 	LVMVolumeGroupsParamKey = "local.csi.storage.deckhouse.io/lvm-volume-groups"
 
+	// LocalStorageTypeParamKey identifies the backing storage type of a
+	// LocalStorageClass-derived StorageClass. The LSC controller in
+	// sds-local-volume sets it to either "lvm" or "rawfile".
+	LocalStorageTypeParamKey = "local.csi.storage.deckhouse.io/type"
+
+	// LocalStorageTypeRawFile marks a StorageClass produced by a
+	// LocalStorageClass with `spec.rawFile` (loop-device-backed) configuration.
+	// Such StorageClasses MUST NOT be processed by the LVM-aware code paths of
+	// this extender: they have no `lvm-type` / `lvm-volume-groups` parameters
+	// and node placement is enforced by `allowedTopologies` on the StorageClass
+	// itself.
+	LocalStorageTypeRawFile = "rawfile"
+
 	Thick = "Thick"
 	Thin  = "Thin"
 )
