@@ -16,6 +16,7 @@ rules:
       - blockdevices
       - lvmvolumegroups
       - lvmlogicalvolumes
+      - localstorageclasses
     verbs:
       - get
       - list
@@ -31,6 +32,11 @@ rules:
       - persistentvolumeclaims
       - persistentvolumes
       - nodes
+      - namespaces
+      - events
+      - configmaps
+      - secrets
+      - leases
     verbs:
       - get
       - list
@@ -47,7 +53,22 @@ rules:
       - get
       - list
       - watch
+  - apiGroups:
+      - deckhouse.io
+    resources:
+      - modules
+      - moduleconfigs
+      - modulepulloverrides
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
 ---
+
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -60,3 +81,19 @@ subjects:
   - kind: ServiceAccount
     name: e2e-tests
     namespace: d8-sds-node-configurator
+---
+# Allow kubernetes-admin (used by admin.conf kubeconfig in storage-e2e and CI) to also use the e2e-tests ClusterRole.
+# This fixes "forbidden: User \"kubernetes-admin\" cannot list resource" during Common Scheduler AfterAll cleanup.
+# Previously there was an attempt to use kubernetes-super-admin; this binds the existing admin user instead.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubernetes-admin-e2e-tests
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: e2e-tests
+subjects:
+  - kind: User
+    name: kubernetes-admin
+    apiGroup: rbac.authorization.k8s.io
