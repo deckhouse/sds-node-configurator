@@ -578,6 +578,20 @@ func getNewControlPlane(ctx context.Context, cl client.Client, log logger.Logger
 	return &_false, nil
 }
 
+// isRawFileLocalSC reports whether the given StorageClass is produced by a
+// LocalStorageClass with `spec.rawFile` (loop-device-backed) configuration.
+//
+// Such StorageClasses share the local-volume provisioner with LVM-backed ones
+// but expose no LVM parameters and rely on `allowedTopologies` for node
+// placement, so they MUST be skipped by the LVM-aware code paths of this
+// extender.
+func isRawFileLocalSC(sc *storagev1.StorageClass) bool {
+	if sc == nil || sc.Provisioner != consts.SdsLocalVolumeProvisioner {
+		return false
+	}
+	return sc.Parameters[consts.LocalStorageTypeParamKey] == consts.LocalStorageTypeRawFile
+}
+
 // extractRequestedSize extracts the requested size from the PVC based on the PVC
 // binding state (pvc.Spec.VolumeName) and the StorageClass parameters.
 //
@@ -588,6 +602,10 @@ func getNewControlPlane(ctx context.Context, cl client.Client, log logger.Logger
 // silently drops the PVC. Spec.VolumeName, on the other hand, is set in the same
 // transaction as the binding and matches what the upstream VolumeBinding plugin
 // uses to decide whether a PVC is bound.
+//
+// PVCs whose StorageClass is rawfile-backed (see isRawFileLocalSC) are silently
+// skipped: the extender has nothing useful to compute for them, and node
+// placement is enforced via `allowedTopologies` on the StorageClass.
 func extractRequestedSize(
 	ctx context.Context,
 	cl client.Client,
@@ -599,6 +617,11 @@ func extractRequestedSize(
 	for _, pvc := range pvcs {
 		sc := scs[*pvc.Spec.StorageClassName]
 		log.Debug(fmt.Sprintf("[extractRequestedSize] PVC %s/%s has status phase: %q, spec.volumeName: %q", pvc.Namespace, pvc.Name, pvc.Status.Phase, pvc.Spec.VolumeName))
+
+		if isRawFileLocalSC(sc) {
+			log.Debug(fmt.Sprintf("[extractRequestedSize] PVC %s/%s uses rawfile-backed StorageClass %s, skipping LVM-aware extraction", pvc.Namespace, pvc.Name, sc.Name))
+			continue
+		}
 
 		var deviceType string
 		isReplicated := sc.Provisioner == consts.SdsReplicatedVolumeProvisioner
