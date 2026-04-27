@@ -18,6 +18,7 @@ config:
     allowValueIds:
       - GOPROXY
       - SOURCE_REPO
+      - DISTRO_PACKAGES_PROXY
   stapel:
     mount:
       allowBuildDir: true
