@@ -1611,7 +1611,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			})
 		})
 
-		Context("LVMVolumeGroup with one disk and thin-pool", func() {
+		Context("LVMVolumeGroup with one disk and thin-pool", Ordered, func() {
 			const e2eLVGDataDiskName = "e2e-lvg-data-disk"
 			const e2eLVGDataDiskSize = "2Gi"
 
@@ -1891,6 +1891,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
 				for _, c := range readyLVG.Status.Conditions {
+					Expect(c.Reason).NotTo(Equal("PVResizeFailed"),
+						"initial: PVResizeFailed must not appear before resize converges")
 					Expect(c.Status).NotTo(Equal(metav1.ConditionFalse),
 						"initial: condition %s is False: reason=%s message=%s", c.Type, c.Reason, c.Message)
 				}
@@ -1943,12 +1945,30 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 						"BlockDevice %s size should grow after PVC resize (was %d)", targetBD.Name, baselineBDSize)
 				}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
+				By("Waiting for pvs on the node to reflect larger PV size")
+				Eventually(func(g Gomega) {
+					pvSize, err := getPVSizeViaDirectSSHWithRetry(
+						e2eCtx,
+						testClusterResources.Kubeconfig,
+						nodeName,
+						e2eConfigVMSSHUser(),
+						targetBD.Status.Path,
+						e2eLsblkSSHMaxRetries,
+						e2eLsblkSSHRetryInterval,
+					)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(pvSize).To(BeNumerically(">", baselinePVSize),
+						"pvs should report grown PV size (baseline %d)", baselinePVSize)
+				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
 				By("Waiting for LVMVolumeGroup: Ready, larger VGFree and PV after pvresize")
 				Eventually(func(g Gomega) {
 					var cur v1alpha1.LVMVolumeGroup
 					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &cur)).To(Succeed())
 					g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady), "phase=%s", cur.Status.Phase)
 					for _, c := range cur.Status.Conditions {
+						g.Expect(c.Reason).NotTo(Equal("PVResizeFailed"),
+							"PVResizeFailed condition should not appear after successful resize")
 						g.Expect(c.Status).NotTo(Equal(metav1.ConditionFalse),
 							"condition %s False: reason=%s message=%s", c.Type, c.Reason, c.Message)
 					}
@@ -1975,6 +1995,22 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 
 				var final v1alpha1.LVMVolumeGroup
 				Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &final)).To(Succeed())
+				for _, c := range final.Status.Conditions {
+					Expect(c.Reason).NotTo(Equal("PVResizeFailed"),
+						"PVResizeFailed condition should stay absent after resize converges")
+				}
+
+				resizeCount, err := countResizePVSuccessLogs(e2eCtx, testClusterResources.Kubeconfig, nodeName, targetBD.Status.Path)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(resizeCount).To(BeNumerically(">=", 1), "expected at least one successful pvresize log entry")
+
+				Consistently(func() int {
+					count, logErr := countResizePVSuccessLogs(e2eCtx, testClusterResources.Kubeconfig, nodeName, targetBD.Status.Path)
+					Expect(logErr).NotTo(HaveOccurred())
+					return count
+				}, 45*time.Second, 15*time.Second).Should(Equal(resizeCount),
+					"pvresize invocation count should stay stable after convergence")
+
 				By("✓ After disk resize: LVMVolumeGroup Ready, VGFree and PV size increased, no error conditions")
 				printLVMVolumeGroupInfo(&final)
 
@@ -2530,6 +2566,98 @@ func e2eExecOnTestClusterNodeSSH(ctx context.Context, testKubeconfig *rest.Confi
 		return out, fmt.Errorf("exec on node %s: %w", nodeName, err)
 	}
 	return out, nil
+}
+
+func getPVSizeViaDirectSSHWithRetry(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser, pvPath string, maxRetries int, retryInterval time.Duration) (int64, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		size, err := getPVSizeViaDirectSSH(ctx, testKubeconfig, nodeName, sshUser, pvPath)
+		if err == nil {
+			return size, nil
+		}
+		lastErr = err
+		if attempt < maxRetries {
+			GinkgoWriter.Printf("      pvs SSH to %s attempt %d/%d failed: %v; retry in %v\n", nodeName, attempt, maxRetries, err, retryInterval)
+			time.Sleep(retryInterval)
+		}
+	}
+
+	return 0, lastErr
+}
+
+func getPVSizeViaDirectSSH(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser, pvPath string) (int64, error) {
+	type pvsReport struct {
+		Report []struct {
+			PV []struct {
+				PVName string `json:"pv_name"`
+				PVSize string `json:"pv_size"`
+			} `json:"pv"`
+		} `json:"report"`
+	}
+
+	out, err := e2eExecOnTestClusterNodeSSH(
+		ctx,
+		testKubeconfig,
+		nodeName,
+		sshUser,
+		fmt.Sprintf("pvs --units B --nosuffix -o pv_name,pv_size --reportformat json %q", pvPath),
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	var report pvsReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		return 0, fmt.Errorf("parse pvs output for %s on node %s: %w", pvPath, nodeName, err)
+	}
+	for _, r := range report.Report {
+		for _, pv := range r.PV {
+			if pv.PVName != pvPath {
+				continue
+			}
+
+			size, parseErr := strconv.ParseInt(strings.TrimSpace(pv.PVSize), 10, 64)
+			if parseErr != nil {
+				return 0, fmt.Errorf("parse pv_size %q for %s on node %s: %w", pv.PVSize, pvPath, nodeName, parseErr)
+			}
+
+			return size, nil
+		}
+	}
+
+	return 0, fmt.Errorf("PV %s not found in pvs output on node %s", pvPath, nodeName)
+}
+
+func countResizePVSuccessLogs(ctx context.Context, testKubeconfig *rest.Config, nodeName, pvPath string) (int, error) {
+	clientset, err := k8sclient.NewForConfig(testKubeconfig)
+	if err != nil {
+		return 0, fmt.Errorf("build kubernetes client for logs: %w", err)
+	}
+
+	pods, err := clientset.CoreV1().Pods("d8-sds-node-configurator").List(ctx, metav1.ListOptions{
+		LabelSelector: "app=sds-node-configurator",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("list sds-node-configurator pods on node %s: %w", nodeName, err)
+	}
+	if len(pods.Items) == 0 {
+		return 0, fmt.Errorf("no sds-node-configurator pod found on node %s", nodeName)
+	}
+
+	sort.Slice(pods.Items, func(i, j int) bool {
+		return pods.Items[i].CreationTimestamp.Before(&pods.Items[j].CreationTimestamp)
+	})
+
+	podName := pods.Items[len(pods.Items)-1].Name
+	data, err := clientset.CoreV1().Pods("d8-sds-node-configurator").GetLogs(podName, &corev1.PodLogOptions{
+		Container: "sds-node-configurator-agent",
+	}).DoRaw(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("read logs for pod %s: %w", podName, err)
+	}
+
+	return strings.Count(string(data), fmt.Sprintf("[ResizePVIfNeeded] successfully resized PV %s", pvPath)), nil
 }
 
 // e2eVgNameListedInVgsOutput returns true if a line in vgs output (one VG name per line) equals vgName.

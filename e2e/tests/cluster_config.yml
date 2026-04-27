@@ -3,7 +3,7 @@ clusterDefinition:
   masters: # Master nodes configuration
     - hostname: "master-1"
       hostType: "vm"
-      osType: "Ubuntu 22.04 6.2.0-39-generic" # See internal/config/images.go
+      osType: "RedOS 8.0 6.6.26-1.red80.x86_64" # See internal/config/images.go
       cpu: 4
       coreFraction: 20
       ram: 8
