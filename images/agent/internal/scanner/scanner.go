@@ -124,6 +124,7 @@ func (s *scanner) Run(
 			if err := s.deviceMap.HandleEvent(device.Action, device.Env); err != nil {
 				log.Error(err, fmt.Sprintf("[RunScanner] handle event error: %s", device.String()))
 			}
+			log.Info(fmt.Sprintf("Success handle netlink event on action %s", device.Action.String()))
 
 			t.Do(func() {
 				log.Info("[RunScanner] start to fill the cache")
