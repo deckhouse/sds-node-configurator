@@ -24,6 +24,10 @@ import (
 	"sync"
 
 	"github.com/pilebones/go-udev/crawler"
+	"github.com/pilebones/go-udev/netlink"
+	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
 // ErrUnknownAction is returned (wrapped) by HandleEvent when the uevent
@@ -36,18 +40,23 @@ var ErrUnknownAction = errors.New("unknown action")
 // and by HandleEvent from netlink events thereafter. A consistent snapshot
 // is available via All().
 type DeviceMap struct {
-	mu         sync.RWMutex
-	devices    map[string]Properties
-	udevDBPath string
+	mu                sync.RWMutex
+	devices           map[string]Properties
+	udevDBPath        string
+	resolver          *Resolver
+	sysFsDataProvider *SysFSDataProvider
 }
 
 // NewDeviceMap returns an empty, ready-to-use DeviceMap.
 // udevDBPath is the directory containing udev database files
 // (typically /run/udev/data).
 func NewDeviceMap(udevDBPath string) *DeviceMap {
+	sysfsProvider := NewSysFSDataProvider(SysClassBlockPath, SysBlockPath)
 	return &DeviceMap{
-		devices:    make(map[string]Properties),
-		udevDBPath: udevDBPath,
+		devices:           make(map[string]Properties),
+		udevDBPath:        udevDBPath,
+		resolver:          NewResolver(sysfsProvider),
+		sysFsDataProvider: sysfsProvider,
 	}
 }
 
@@ -64,7 +73,7 @@ func NewDeviceMap(udevDBPath string) *DeviceMap {
 //
 // Returns ErrUnknownAction (wrapped) when the action is not one of the
 // listed values; callers can check via errors.Is.
-func (dm *DeviceMap) HandleEvent(action string, env map[string]string) error {
+func (dm *DeviceMap) HandleEvent(action netlink.KObjAction, env map[string]string) error {
 	props, err := ParseProperties(env)
 	if err != nil {
 		return fmt.Errorf("handle event (action=%s, DEVNAME=%s): %w", action, env["DEVNAME"], err)
@@ -73,11 +82,11 @@ func (dm *DeviceMap) HandleEvent(action string, env map[string]string) error {
 	key := DeviceKey(props.Major, props.Minor)
 
 	switch action {
-	case "add", "change", "bind", "move", "online":
+	case netlink.ADD, netlink.CHANGE, netlink.BIND, netlink.MOVE, netlink.ONLINE:
 		dm.mu.Lock()
 		dm.devices[key] = props
 		dm.mu.Unlock()
-	case "remove", "unbind", "offline":
+	case netlink.REMOVE, netlink.UNBIND, netlink.OFFLINE:
 		dm.mu.Lock()
 		delete(dm.devices, key)
 		dm.mu.Unlock()
@@ -152,4 +161,61 @@ func (dm *DeviceMap) FillFromCrawler(ctx context.Context, devices []crawler.Devi
 	dm.devices = newDevices
 
 	return errors.Join(errs...)
+}
+
+// Snapshot builds []internal.Device from the current map plus sysfs attributes.
+// The mounts map (from utils.ParseMountInfo) maps "major:minor" to mount point.
+// Devices that cannot be read from sysfs are skipped and their errors collected.
+func (dm *DeviceMap) Snapshot(mounts map[string]string) ([]internal.Device, []error) {
+	all := dm.All()
+	var errs []error
+	result := make([]internal.Device, 0, len(all))
+
+	for devID, props := range all {
+		sysName := dm.sysFsDataProvider.SysfsDevName(props.DevName)
+		if sysName == "" {
+			errs = append(errs, fmt.Errorf("skipping device %s: no DEVNAME", devID))
+			continue
+		}
+
+		sizeBytes, err := dm.sysFsDataProvider.ReadSysfsSize(sysName)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("skipping device %s (%s): %w", devID, sysName, err))
+			continue
+		}
+
+		name := dm.resolver.DeviceName(props)
+		if name == "" {
+			errs = append(errs, fmt.Errorf("skipping device %s (%s): resolved name is empty", devID, sysName))
+			continue
+		}
+
+		rota, rotaErr := dm.sysFsDataProvider.ReadSysfsRotational(sysName)
+		if rotaErr != nil {
+			errs = append(errs, fmt.Errorf("device %s (%s): %w", devID, sysName, rotaErr))
+		}
+		hotplug, hotplugErr := dm.sysFsDataProvider.ReadSysfsHotplug(sysName)
+		if hotplugErr != nil {
+			errs = append(errs, fmt.Errorf("device %s (%s): %w", devID, sysName, hotplugErr))
+		}
+
+		dev := internal.Device{
+			Name:       name,
+			MountPoint: mounts[devID],
+			PartUUID:   props.PartUUID,
+			HotPlug:    hotplug,
+			Model:      props.Model,
+			Serial:     props.Serial,
+			Size:       *resource.NewQuantity(sizeBytes, resource.BinarySI),
+			Type:       dm.resolver.DeviceType(props, props.DevName),
+			Wwn:        props.WWN,
+			KName:      dm.resolver.KernelName(sysName),
+			PkName:     dm.resolver.ParentDevice(sysName),
+			FSType:     props.FSType,
+			Rota:       rota,
+		}
+		result = append(result, dev)
+	}
+
+	return result, errs
 }
