@@ -191,8 +191,11 @@ func scoreNodes(
 	replicaLocations map[string][]string,
 	divisor float64,
 ) ([]HostPriority, error) {
-	// Separate PVCs by provisioner
-	localPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsLocalVolumeProvisioner)
+	// Separate PVCs by provisioner. For local-volume PVCs we additionally
+	// require the StorageClass to be LVM-backed: rawfile-backed local PVCs
+	// have no LVM parameters and rely on `allowedTopologies` for placement,
+	// so the LVM-aware scoring path MUST skip them entirely.
+	localPVCs := filterLocalLVMPVCs(managedPVCs, scUsedByPVCs)
 	replicatedPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsReplicatedVolumeProvisioner)
 
 	log.Debug(fmt.Sprintf("[scoreNodes] local PVCs count: %d, replicated PVCs count: %d", len(localPVCs), len(replicatedPVCs)))
@@ -377,8 +380,12 @@ func narrowReservationsToFinalNodes(
 	for _, pvc := range managedPVCs {
 		sc := scUsedByPVCs[*pvc.Spec.StorageClassName]
 
-		// Only narrow local PVCs (replicated use a different mechanism)
+		// Only narrow LVM-backed local PVCs (replicated use a different
+		// mechanism, and rawfile-backed local PVCs have no reservation).
 		if sc.Provisioner != consts.SdsLocalVolumeProvisioner {
+			continue
+		}
+		if isRawFileLocalSC(sc) {
 			continue
 		}
 
