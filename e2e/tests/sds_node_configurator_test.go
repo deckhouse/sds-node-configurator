@@ -331,9 +331,14 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				wg.Wait()
 				Expect(attachErrs).To(BeEmpty(), "all VirtualDisk attaches should succeed: %v", attachErrs)
 
+				diskPrefix := fmt.Sprintf("%s-%s-", e2eVirtualDiskPrefix, e2eRunID)
+				for _, att := range e2eDiskAttachments {
+					_, err := strconv.Atoi(strings.TrimPrefix(att.DiskName, diskPrefix))
+					Expect(err).NotTo(HaveOccurred(), "disk name must be %s<index>, got %q", diskPrefix, att.DiskName)
+				}
 				sort.Slice(e2eDiskAttachments, func(i, j int) bool {
-					ni, _ := strconv.Atoi(strings.TrimPrefix(e2eDiskAttachments[i].DiskName, e2eVirtualDiskPrefix+"-"))
-					nj, _ := strconv.Atoi(strings.TrimPrefix(e2eDiskAttachments[j].DiskName, e2eVirtualDiskPrefix+"-"))
+					ni, _ := strconv.Atoi(strings.TrimPrefix(e2eDiskAttachments[i].DiskName, diskPrefix))
+					nj, _ := strconv.Atoi(strings.TrimPrefix(e2eDiskAttachments[j].DiskName, diskPrefix))
 					return ni < nj
 				})
 
@@ -342,37 +347,22 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				for _, att := range e2eDiskAttachments {
 					Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, baseKubeconfig, ns, att.AttachmentName, 10*time.Second)).To(Succeed())
 				}
-				By("All VirtualDisks attached; fetching their UIDs for BlockDevice matching")
+				By("Discovering BlockDevices per VirtualDisk (serial + node, same as LVM tests). Batch matching by serial alone misses disks when multiple nodes are used.")
 
-				baseDynClient, err := dynamic.NewForConfig(baseKubeconfig)
-				Expect(err).NotTo(HaveOccurred(), "create dynamic client for base cluster")
-
-				expectedSerials := make(map[string]string)
+				createdBlockDevices = nil
 				for _, att := range e2eDiskAttachments {
-					vd, err := baseDynClient.Resource(virtualDiskGVR).Namespace(ns).Get(e2eCtx, att.DiskName, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred(), "get VirtualDisk %s", att.DiskName)
-					vdUID := string(vd.GetUID())
-					serial := blockDeviceSerialFromVirtualDiskUID(vdUID)
-					expectedSerials[serial] = att.DiskName
-					GinkgoWriter.Printf("  VirtualDisk %s (UID=%s) -> expected BD serial: %s\n", att.DiskName, vdUID, serial)
+					Expect(strings.HasPrefix(att.DiskName, diskPrefix)).To(BeTrue(), "unexpected disk name shape %q", att.DiskName)
+					idxStr := strings.TrimPrefix(att.DiskName, diskPrefix)
+					diskIdx, err := strconv.Atoi(idxStr)
+					Expect(err).NotTo(HaveOccurred(), "parse disk index from %q", att.DiskName)
+					Expect(diskIdx).To(BeNumerically(">=", 0))
+					Expect(diskIdx).To(BeNumerically("<", len(createPlan)), "disk index %d vs createPlan len %d", diskIdx, len(createPlan))
+					targetVM := createPlan[diskIdx]
+					By(fmt.Sprintf("Waiting for consumable BlockDevice for %s on node %s (up to %v)", att.DiskName, targetVM, e2eSchedulerSetupBlockDeviceDiscoveryTimeout))
+					bd := e2eWaitConsumableBlockDeviceForVirtualDiskWithTimeout(e2eCtx, baseKubeconfig, k8sClient, ns,
+						att.DiskName, att.AttachmentName, targetVM, e2eSchedulerSetupBlockDeviceDiscoveryTimeout, 10*time.Second)
+					createdBlockDevices = append(createdBlockDevices, bd)
 				}
-
-				By(fmt.Sprintf("Waiting for %d BlockDevices with matching serials (up to 3 minutes)", len(expectedSerials)))
-				Eventually(func(g Gomega) {
-					var list v1alpha1.BlockDeviceList
-					g.Expect(k8sClient.List(e2eCtx, &list, &client.ListOptions{})).To(Succeed())
-					createdBlockDevices = nil
-					foundSerials := make(map[string]bool)
-					for i := range list.Items {
-						bd := &list.Items[i]
-						if _, expected := expectedSerials[bd.Status.Serial]; expected {
-							createdBlockDevices = append(createdBlockDevices, bd)
-							foundSerials[bd.Status.Serial] = true
-						}
-					}
-					g.Expect(len(createdBlockDevices)).To(Equal(len(expectedSerials)),
-						"expected %d BlockDevices matching VirtualDisks, got %d", len(expectedSerials), len(createdBlockDevices))
-				}, 3*time.Minute, 10*time.Second).Should(Succeed())
 
 				By(fmt.Sprintf("Found %d BlockDevices corresponding to created VirtualDisks", len(createdBlockDevices)))
 				printBlockDevicesSummary(createdBlockDevices)
@@ -2799,6 +2789,11 @@ func formatBlockDevicesHint(items []v1alpha1.BlockDevice, expectedNode string) s
 // as the discovery tests: Status.Serial must equal hex(md5(VirtualDisk.UID)) or hex(md5(VMBDA.UID)).
 // This avoids picking another disk on the same node (leftover LVM, other e2e disks).
 func e2eWaitConsumableBlockDeviceForVirtualDisk(ctx context.Context, baseKube *rest.Config, k8sClient client.Client, ns, diskName, attachmentName, targetVM string) *v1alpha1.BlockDevice {
+	return e2eWaitConsumableBlockDeviceForVirtualDiskWithTimeout(ctx, baseKube, k8sClient, ns, diskName, attachmentName, targetVM, 5*time.Minute, 10*time.Second)
+}
+
+// e2eWaitConsumableBlockDeviceForVirtualDiskWithTimeout is used when many disks are discovered in one spec (e.g. scheduler setup).
+func e2eWaitConsumableBlockDeviceForVirtualDiskWithTimeout(ctx context.Context, baseKube *rest.Config, k8sClient client.Client, ns, diskName, attachmentName, targetVM string, timeout, poll time.Duration) *v1alpha1.BlockDevice {
 	baseDyn, err := dynamic.NewForConfig(baseKube)
 	Expect(err).NotTo(HaveOccurred(), "dynamic client for base cluster (read VirtualDisk / VMBDA UIDs)")
 	vdObj, err := baseDyn.Resource(virtualDiskGVR).Namespace(ns).Get(ctx, diskName, metav1.GetOptions{})
@@ -2807,6 +2802,7 @@ func e2eWaitConsumableBlockDeviceForVirtualDisk(ctx context.Context, baseKube *r
 	Expect(err).NotTo(HaveOccurred(), "get VirtualMachineBlockDeviceAttachment %s", attachmentName)
 	serialVD := blockDeviceSerialFromVirtualDiskUID(string(vdObj.GetUID()))
 	serialAtt := blockDeviceSerialFromVirtualDiskUID(string(attObj.GetUID()))
+	GinkgoWriter.Printf("    %s: expect BD serial %s or %s on node %s\n", diskName, serialVD, serialAtt, targetVM)
 
 	var picked *v1alpha1.BlockDevice
 	Eventually(func(g Gomega) {
@@ -2832,7 +2828,7 @@ func e2eWaitConsumableBlockDeviceForVirtualDisk(ctx context.Context, baseKube *r
 		g.Expect(picked).NotTo(BeNil(),
 			"BlockDevice for VirtualDisk %q: want Status.Serial %q or %q on node %q, consumable, with /dev path. %s",
 			diskName, serialVD, serialAtt, targetVM, formatBlockDevicesHint(list.Items, targetVM))
-	}, 5*time.Minute, 10*time.Second).Should(Succeed())
+	}, timeout, poll).Should(Succeed())
 	return picked
 }
 
@@ -3609,6 +3605,8 @@ const (
 
 	// Common Scheduler "fill to max" tests create many PVCs/Pods; provisioning and binding can exceed 5m on loaded clusters.
 	e2eSchedulerFillPodsWaitTimeout = 10 * time.Minute
+	// Setup: parallel VirtualDisks → BlockDevice CRs may lag agent discovery; 3m was flaky with ~9 disks on loaded stands.
+	e2eSchedulerSetupBlockDeviceDiscoveryTimeout = 15 * time.Minute
 
 	// Scheduler cleanup: pod termination and CSI PV teardown must not share one deadline — many PVs delete serially.
 	e2eSchedulerPodCleanupTimeout = 5 * time.Minute
@@ -4854,11 +4852,14 @@ func cleanupE2EPods(ctx context.Context, cl client.Client) {
 	}
 }
 
+// count sentinel when List fails (e.g. SSH tunnel to nested cluster closed) — do not treat as a real count.
+const e2eCountAPIError = -1
+
 func countE2EPodsDefault(ctx context.Context, cl client.Client) int {
 	var podList corev1.PodList
 	if err := cl.List(ctx, &podList, client.InNamespace(metav1.NamespaceDefault)); err != nil {
 		GinkgoWriter.Printf("count e2e pods: list failed: %v\n", err)
-		return 999999
+		return e2eCountAPIError
 	}
 	n := 0
 	for i := range podList.Items {
@@ -4873,7 +4874,7 @@ func countE2EPVCsDefault(ctx context.Context, cl client.Client) int {
 	var pvcList corev1.PersistentVolumeClaimList
 	if err := cl.List(ctx, &pvcList, client.InNamespace(metav1.NamespaceDefault)); err != nil {
 		GinkgoWriter.Printf("count e2e PVCs: list failed: %v\n", err)
-		return 999999
+		return e2eCountAPIError
 	}
 	n := 0
 	for i := range pvcList.Items {
@@ -4890,7 +4891,7 @@ func countE2ERelatedPVs(ctx context.Context, cl client.Client) int {
 	var list corev1.PersistentVolumeList
 	if err := cl.List(ctx, &list); err != nil {
 		GinkgoWriter.Printf("count e2e PVs: list failed: %v\n", err)
-		return 999999
+		return e2eCountAPIError
 	}
 	n := 0
 	for i := range list.Items {
@@ -4922,6 +4923,10 @@ func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, podPha
 		if n == 0 {
 			break
 		}
+		if n == e2eCountAPIError {
+			GinkgoWriter.Printf("Waiting for e2e Pods: API list failed (SSH tunnel closed or API unreachable); skip pod wait\n")
+			break
+		}
 		GinkgoWriter.Printf("Waiting for e2e Pods to terminate before PVC cleanup: %d remaining\n", n)
 		time.Sleep(3 * time.Second)
 	}
@@ -4932,6 +4937,10 @@ func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, podPha
 		podCount := countE2EPodsDefault(ctx, cl)
 		pvcCount := countE2EPVCsDefault(ctx, cl)
 		pvCount := countE2ERelatedPVs(ctx, cl)
+		if podCount == e2eCountAPIError || pvcCount == e2eCountAPIError || pvCount == e2eCountAPIError {
+			GinkgoWriter.Printf("Cleanup wait: API list failed (tunnel closed?); stopping wait — verify resources manually if needed\n")
+			return
+		}
 		if podCount == 0 && pvcCount == 0 && pvCount == 0 {
 			GinkgoWriter.Println("All e2e Pods, PVCs, and related PVs deleted")
 			return
@@ -5016,6 +5025,7 @@ func schedulerCleanupWorkloadBeforeNextFill(ctx context.Context, cl client.Clien
 	// If cleanupE2EPodsAndPVCsWithWait hit its deadline, PVs can remain Released while CSI waits for detach/delete.
 	// Deleting LVMLogicalVolume CRs in that window makes the provisioner error (LLV not found) and leaves PV stuck.
 	n := countE2ERelatedPVs(ctx, cl)
+	Expect(n).NotTo(Equal(e2eCountAPIError), "cannot list PVs (API unreachable — SSH tunnel to test cluster may be closed)")
 	Expect(n).To(BeZero(),
 		"e2e-related PVs must be gone before LVMLogicalVolume cleanup; leftover PVs mean CSI has not finished delete/detach (see VolumeAttachments, VolumeFailedDelete)")
 	By("Removing LVMLogicalVolumes for e2e LVGs after PVC deletion (thin LVs must leave the VG)")
