@@ -1,0 +1,12 @@
+--- pkg/cluster/setup.go
++++ pkg/cluster/setup.go
+@@ -564,8 +564,8 @@
+ 	// Note: We don't use --ssh-agent-private-keys anymore, dhctl will use SSH_AUTH_SOCK
+ 	// Docker needs to run with sudo for access to docker socket
+ 	installImage := fmt.Sprintf("%s/install:%s", registryRepo, devBranch)
+ 	bootstrapCmd := fmt.Sprintf(
+-		"sudo -u %s bash -c 'export SSH_AUTH_SOCK=%s; sudo docker run --network=host --pull=always -v \"/home/%s/config.yml:/config.yml\" -v \"%s:/tmp/ssh-agent.sock\" -e SSH_AUTH_SOCK=/tmp/ssh-agent.sock %s dhctl bootstrap --ssh-host=%s --ssh-user=%s --config=/config.yml > %s 2>&1'",
+-		config.VMSSHUser, actualAgentSocket, config.VMSSHUser, actualAgentSocket, installImage, masterIP, config.VMSSHUser, remoteLogPath,
++		"sudo -u %s bash -c 'export SSH_AUTH_SOCK=%s; sudo docker run --network=host --pull=always -v \"/home/%s/config.yml:/config.yml\" -v \"/home/%s/.ssh/id_rsa:/root/.ssh/id_rsa:ro\" -v \"%s:/tmp/ssh-agent.sock\" -e SSH_AUTH_SOCK=/tmp/ssh-agent.sock %s dhctl bootstrap --ssh-host=%s --ssh-user=%s --config=/config.yml > %s 2>&1'",
++		config.VMSSHUser, actualAgentSocket, config.VMSSHUser, config.VMSSHUser, actualAgentSocket, installImage, masterIP, config.VMSSHUser, remoteLogPath,
+ 	)
