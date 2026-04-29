@@ -434,6 +434,14 @@ jobs:
                     echo "Applied storage-e2e reconnect-after-add-nodes patch ($d)"
                   fi
                 fi
+                # dhctl (lib-connection) expects ~/.ssh/id_rsa in the install container; storage-e2e only mounts ssh-agent.
+                DHCTL_AGENT_PATCH="${GITHUB_WORKSPACE}/e2e/patches/storage-e2e-dhctl-bootstrap-ssh-agent-env.diff"
+                if [ -f "$DHCTL_AGENT_PATCH" ] && [ -f "$d/pkg/cluster/setup.go" ]; then
+                  if ! grep -q 'FORCE_NO_PRIVATE_KEYS=true' "$d/pkg/cluster/setup.go" 2>/dev/null; then
+                    patch -p0 --batch -d "$d" -i "$DHCTL_AGENT_PATCH" || { echo "::error::storage-e2e dhctl bootstrap ssh-agent env patch failed (wrong module version?)"; exit 1; }
+                    echo "Applied storage-e2e dhctl bootstrap ssh-agent env patch ($d)"
+                  fi
+                fi
               fi
             done
             shopt -u nullglob
