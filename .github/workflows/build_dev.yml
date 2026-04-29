@@ -434,12 +434,16 @@ jobs:
                     echo "Applied storage-e2e reconnect-after-add-nodes patch ($d)"
                   fi
                 fi
-                # dhctl (lib-connection) expects ~/.ssh/id_rsa in the install container; storage-e2e only mounts ssh-agent.
-                DHCTL_AGENT_PATCH="${GITHUB_WORKSPACE}/e2e/patches/storage-e2e-dhctl-bootstrap-ssh-agent-env.diff"
-                if [ -f "$DHCTL_AGENT_PATCH" ] && [ -f "$d/pkg/cluster/setup.go" ]; then
-                  if ! grep -q 'FORCE_NO_PRIVATE_KEYS=true' "$d/pkg/cluster/setup.go" 2>/dev/null; then
-                    patch -p0 --batch -d "$d" -i "$DHCTL_AGENT_PATCH" || { echo "::error::storage-e2e dhctl bootstrap ssh-agent env patch failed (wrong module version?)"; exit 1; }
-                    echo "Applied storage-e2e dhctl bootstrap ssh-agent env patch ($d)"
+                # dhctl (lib-connection) defaults to ~/.ssh/id_rsa inside the install container; mount the same key as ssh-agent uses.
+                DHCTL_MOUNT_PATCH="${GITHUB_WORKSPACE}/e2e/patches/storage-e2e-dhctl-bootstrap-mount-ssh-key.diff"
+                DHCTL_ENV_TO_MOUNT="${GITHUB_WORKSPACE}/e2e/patches/storage-e2e-dhctl-bootstrap-env-to-mount.diff"
+                if [ -f "$d/pkg/cluster/setup.go" ] && ! grep -q 'id_rsa:/root/.ssh/id_rsa' "$d/pkg/cluster/setup.go" 2>/dev/null; then
+                  if grep -q 'FORCE_NO_PRIVATE_KEYS=true' "$d/pkg/cluster/setup.go" 2>/dev/null && [ -f "$DHCTL_ENV_TO_MOUNT" ]; then
+                    patch -p0 --batch -d "$d" -i "$DHCTL_ENV_TO_MOUNT" || { echo "::error::storage-e2e dhctl env→mount patch failed (wrong module version?)"; exit 1; }
+                    echo "Applied storage-e2e dhctl bootstrap env→mount patch ($d)"
+                  elif [ -f "$DHCTL_MOUNT_PATCH" ]; then
+                    patch -p0 --batch -d "$d" -i "$DHCTL_MOUNT_PATCH" || { echo "::error::storage-e2e dhctl bootstrap mount-key patch failed (wrong module version?)"; exit 1; }
+                    echo "Applied storage-e2e dhctl bootstrap mount-key patch ($d)"
                   fi
                 fi
               fi
