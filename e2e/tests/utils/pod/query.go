@@ -19,29 +19,29 @@ import (
 	"context"
 	"fmt"
 
-	corev1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func ListPods(ctx context.Context, k8sClient client.Client, options ...client.ListOption) ([]corev1.Pod, error) {
-	var podList corev1.PodList
+func ListPods(ctx context.Context, k8sClient client.Client, options ...client.ListOption) ([]v1.Pod, error) {
+	var podList v1.PodList
 	err := k8sClient.List(ctx, &podList, options...)
 	if err != nil {
-		return nil, fmt.Errorf("[ListPods] failed to list pods: %w", err)
+		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
 
 	return podList.Items, nil
 }
 
-func FindRunningPodOnNode(ctx context.Context, k8sClient client.Client, nodeName string, options ...client.ListOption) (corev1.Pod, error) {
+func FindRunningPodOnNode(ctx context.Context, k8sClient client.Client, nodeName string, options ...client.ListOption) (*v1.Pod, error) {
 	pods, err := ListPods(ctx, k8sClient, options...)
 	if err != nil {
-		return corev1.Pod{}, fmt.Errorf("[FindRunningPodOnNode] failed to list pods: %w", err)
+		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
 
 	pod, findErr := FindFirstRunningPodOnNode(pods, nodeName)
 	if findErr != nil {
-		return pod, fmt.Errorf("[FindRunningPodOnNode] failed to find running pods: %w", findErr)
+		return nil, fmt.Errorf("failed to find running pods: %w", findErr)
 	}
 
 	return pod, nil
