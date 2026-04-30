@@ -20,31 +20,31 @@ import (
 	"fmt"
 	"io"
 
-	corev1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
-func GetLogs(ctx context.Context, cs *kubernetes.Clientset, namespace, podName string, options corev1.PodLogOptions) (string, error) {
+func GetLogs(ctx context.Context, cs *kubernetes.Clientset, namespace, podName string, options v1.PodLogOptions) (string, error) {
 	if cs == nil {
-		return "", fmt.Errorf("[GetLogs] kubernetes clientset is nil")
+		return "", fmt.Errorf("kubernetes clientset is nil")
 	}
 	if namespace == "" {
-		return "", fmt.Errorf("[GetLogs] namespace must not be empty")
+		return "", fmt.Errorf("namespace must not be empty")
 	}
 	if podName == "" {
-		return "", fmt.Errorf("[GetLogs] pod name must not be empty")
+		return "", fmt.Errorf("pod name must not be empty")
 	}
 
 	req := cs.CoreV1().Pods(namespace).GetLogs(podName, &options)
 	stream, err := req.Stream(ctx)
 	if err != nil {
-		return "", fmt.Errorf("[GetLogs] failed to stream logs: %w", err)
+		return "", fmt.Errorf("failed to stream logs: %w", err)
 	}
 	defer stream.Close()
 
 	bytes, err := io.ReadAll(stream)
 	if err != nil {
-		return "", fmt.Errorf("[GetLogs] failed to read logs: %w", err)
+		return "", fmt.Errorf("failed to read logs: %w", err)
 	}
 
 	return string(bytes), nil

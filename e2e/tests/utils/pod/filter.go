@@ -18,20 +18,19 @@ package pod
 import (
 	"fmt"
 
-	corev1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 )
 
-func FindFirstRunningPodOnNode(pods []corev1.Pod, nodeName string) (corev1.Pod, error) {
-	for _, pod := range pods {
-		if pod.Spec.NodeName != nodeName || pod.DeletionTimestamp != nil {
-			continue
-		}
-		if pod.Status.Phase != corev1.PodRunning {
+func FindFirstRunningPodOnNode(pods []v1.Pod, nodeName string) (*v1.Pod, error) {
+	for i := range pods {
+		pod := &pods[i]
+		if pod.Spec.NodeName != nodeName ||
+			pod.DeletionTimestamp != nil ||
+			pod.Status.Phase != v1.PodRunning {
 			continue
 		}
 
 		return pod, nil
 	}
-
-	return corev1.Pod{}, fmt.Errorf("[FindFirstRunningPodOnNode] failed to find running pod")
+	return nil, fmt.Errorf("no running pod found on node %s", nodeName)
 }
