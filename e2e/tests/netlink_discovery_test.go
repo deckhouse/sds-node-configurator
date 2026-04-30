@@ -176,7 +176,7 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 				return logText
 			}, time.Minute, 2*time.Second).Should(MatchRegexp(netlinkAddEventLogPattern))
 		}, SpecTimeout(2*time.Minute))
-		Context("when VirtualDisk is detached and deleted", func() {
+		When("VirtualDisk is detached and deleted", func() {
 			var removeSince metav1.Time
 
 			BeforeEach(func() {
