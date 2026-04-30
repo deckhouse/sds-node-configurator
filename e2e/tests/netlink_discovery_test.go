@@ -1,17 +1,17 @@
 /*
-Copyright 2026 Flant JSC
+	Copyright 2026 Flant JSC
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+		http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
 */
 
 package tests
@@ -46,7 +46,7 @@ const (
 	netlinkRemoveEventLogPattern = `(?i)\[HandleEvent\].*udev event.*action=remove`
 )
 
-var _ = Describe("BlockDevice netlink discovery", Ordered, func() {
+var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, func() {
 	var (
 		testClusterResources *cluster.TestClusterResources
 		e2eCtx               context.Context
@@ -67,9 +67,7 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, func() {
 		if netlinkDiskAttach != nil && testClusterResources != nil && testClusterResources.BaseKubeconfig != nil {
 			ns := e2eConfigNamespace()
 			err := kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns, netlinkDiskAttach.AttachmentName, netlinkDiskAttach.DiskName)
-			if err != nil {
-				GinkgoWriter.Printf("Error deleting netlink disk: %v\n", err)
-			}
+			Expect(err).NotTo(HaveOccurred(), "failed to cleanup netlink disk in AfterEach")
 			netlinkDiskAttach = nil
 		}
 		if netlinkBDName != "" {
@@ -85,102 +83,129 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, func() {
 	//   4. Detach + delete the VirtualDisk.
 	//   5. Eventually (≤ 30s) the BlockDevice is gone (apierrors.IsNotFound on Get).
 	//   6. Agent logs contain `[HandleEvent] udev event ... action=remove`.
-	It("should create BlockDevice on netlink ADD and delete it on netlink REMOVE", func() {
-		ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
-		Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "test requires nested virtualization")
-
-		e2eNS := e2eConfigNamespace()
-		Expect(e2eNS).NotTo(BeEmpty())
-
-		e2eStorageClass := e2eConfigStorageClass()
-		Expect(e2eStorageClass).NotTo(BeEmpty(), "TEST_CLUSTER_STORAGE_CLASS is required for VirtualDisk")
-
-		vms := e2eListClusterVMNames(e2eCtx, testClusterResources, e2eNS)
-		Expect(vms).NotTo(BeEmpty())
-		targetVM := vms[0]
-
-		addSince := metav1.NewTime(time.Now())
-
-		attachResult, attachError := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
-			VMName:           targetVM,
-			Namespace:        e2eNS,
-			DiskName:         fmt.Sprintf("e2e-netlink-%d", time.Now().UnixNano()),
-			DiskSize:         netlinkDiskSize,
-			StorageClassName: e2eStorageClass,
-		}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
-		Expect(attachError).NotTo(HaveOccurred(), "Failed to attach virtual disk")
-		Expect(attachResult).NotTo(BeNil(), "Failed to attach virtual disk")
-
-		netlinkDiskAttach = attachResult
-
-		attachCtx, attachCancel := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
-		defer attachCancel()
-		Expect(kubernetes.WaitForVirtualDiskAttached(
-			attachCtx, testClusterResources.BaseKubeconfig,
-			e2eNS, netlinkDiskAttach.AttachmentName, 10*time.Second),
-		).NotTo(HaveOccurred(), "Failed to attach virtual disk")
-
-		blockDevice := e2eWaitConsumableBlockDeviceForVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, k8sClient, e2eNS, netlinkDiskAttach.DiskName, netlinkDiskAttach.AttachmentName, targetVM)
-		Expect(blockDevice).NotTo(BeNil())
-		Expect(blockDevice.Status.Type).To(Equal("disk"))
-
-		// allow small hypervisor alignment overhead up to 16Mi
-		wantSize := resource.MustParse(netlinkDiskSize)
-		maxSize := wantSize.DeepCopy()
-		maxSize.Add(resource.MustParse("16Mi"))
-
-		Expect(blockDevice.Status.Size.Cmp(wantSize)).NotTo(BeNumerically("<", 0),
-			"BD size must be >= requested %s, got %s", wantSize.String(), blockDevice.Status.Size.String())
-
-		Expect(blockDevice.Status.Size.Cmp(maxSize)).NotTo(BeNumerically(">", 0),
-			"BD size must be <= requested size + 16Mi (%s), got %s", maxSize.String(), blockDevice.Status.Size.String())
-		Expect(blockDevice.Status.NodeName).To(Equal(targetVM))
-
-		netlinkBDName = blockDevice.Name
-
-		agentPodName, fnErr := pod.FindNameOnNode(
-			e2eCtx,
-			k8sClient,
-			targetVM,
-			client.InNamespace(netlinkAgentNamespace),
-			client.MatchingLabels{"app": netlinkAgentAppLabel},
+	When("a new VirtualDisk is attached to a node", func() {
+		var (
+			e2eNs       string
+			targetVM    string
+			addSince    metav1.Time
+			blockDevice *v1alpha1.BlockDevice
+			agentPod    corev1.Pod
+			cs          *k8sclient.Clientset
 		)
-		Expect(fnErr).NotTo(HaveOccurred())
-		Expect(agentPodName).NotTo(BeEmpty())
 
-		cs, csErr := k8sclient.NewForConfig(testClusterResources.Kubeconfig)
-		Expect(csErr).NotTo(HaveOccurred())
+		BeforeEach(func() {
+			By("preparing Kubernetes clients and target VM")
+			ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+			Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "test requires nested virtualization")
 
-		logOpts := corev1.PodLogOptions{
-			Container:  netlinkAgentContainer,
-			SinceTime:  &addSince,
-			Timestamps: true,
-		}
+			e2eNs = e2eConfigNamespace()
+			Expect(e2eNs).NotTo(BeEmpty())
+			e2eStorageClass := e2eConfigStorageClass()
+			Expect(e2eStorageClass).NotTo(BeEmpty(), "TEST_CLUSTER_STORAGE_CLASS is required for VirtualDisk")
 
-		logText, logErr := pod.GetLogs(e2eCtx, cs, netlinkAgentNamespace, agentPodName, logOpts)
-		Expect(logErr).NotTo(HaveOccurred())
-		Expect(logText).Should(MatchRegexp(netlinkAddEventLogPattern))
+			vms := e2eListClusterVMNames(e2eCtx, testClusterResources, e2eNs)
+			Expect(vms).NotTo(BeEmpty())
+			targetVM = vms[0]
 
-		removeSince := metav1.NewTime(time.Now())
-		Expect(kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig,
-			e2eNS, netlinkDiskAttach.AttachmentName, netlinkDiskAttach.DiskName)).To(Succeed())
+			addSince = metav1.NewTime(time.Now())
 
-		netlinkDiskAttach = nil
+			By("attaching VirtualDisk and waiting until it is attached")
+			attachResult, attachError := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+				VMName:           targetVM,
+				Namespace:        e2eNs,
+				DiskName:         fmt.Sprintf("e2e-netlink-%d", time.Now().UnixNano()),
+				DiskSize:         netlinkDiskSize,
+				StorageClassName: e2eStorageClass,
+			}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+			Expect(attachError).NotTo(HaveOccurred(), "Failed to attach virtual disk")
+			Expect(attachResult).NotTo(BeNil(), "Failed to attach virtual disk")
 
-		Eventually(func(g Gomega) {
-			var bd v1alpha1.BlockDevice
-			err := k8sClient.Get(e2eCtx, client.ObjectKey{Name: netlinkBDName}, &bd)
-			g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "BlockDevice %s should be deleted after detach; err=%v", netlinkBDName, err)
-		}, 30*time.Second, time.Second).Should(Succeed())
+			netlinkDiskAttach = attachResult
 
-		removeLogOpts := corev1.PodLogOptions{
-			Container:  netlinkAgentContainer,
-			SinceTime:  &removeSince,
-			Timestamps: true,
-		}
+			attachCtx, attachCancel := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
+			defer attachCancel()
+			Expect(kubernetes.WaitForVirtualDiskAttached(
+				attachCtx, testClusterResources.BaseKubeconfig,
+				e2eNs, netlinkDiskAttach.AttachmentName, 10*time.Second),
+			).NotTo(HaveOccurred(), "Failed to attach virtual disk")
 
-		removeLogText, removeLogErr := pod.GetLogs(e2eCtx, cs, netlinkAgentNamespace, agentPodName, removeLogOpts)
-		Expect(removeLogErr).NotTo(HaveOccurred())
-		Expect(removeLogText).Should(MatchRegexp(netlinkRemoveEventLogPattern))
+			By("resolving BlockDevice and agent pod for assertions")
+			blockDevice = e2eWaitConsumableBlockDeviceForVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, k8sClient, e2eNs, netlinkDiskAttach.DiskName, netlinkDiskAttach.AttachmentName, targetVM)
+			Expect(blockDevice).NotTo(BeNil())
+			Expect(blockDevice.Status.Type).To(Equal("disk"))
+
+			netlinkBDName = blockDevice.Name
+
+			var fnErr error
+			agentPod, fnErr = pod.FindRunningPodOnNode(
+				e2eCtx,
+				k8sClient,
+				targetVM,
+				client.InNamespace(netlinkAgentNamespace),
+				client.MatchingLabels{"app": netlinkAgentAppLabel},
+			)
+			Expect(fnErr).NotTo(HaveOccurred())
+			Expect(agentPod.Name).NotTo(BeEmpty())
+
+			var csErr error
+			cs, csErr = k8sclient.NewForConfig(testClusterResources.Kubeconfig)
+			Expect(csErr).NotTo(HaveOccurred())
+		})
+		It("creates BlockDevice with expected attributes", func() {
+			// allow small hypervisor alignment overhead up to 16Mi
+			wantSize := resource.MustParse(netlinkDiskSize)
+			maxSize := wantSize.DeepCopy()
+			maxSize.Add(resource.MustParse("16Mi"))
+
+			Expect(blockDevice.Status.Size.Cmp(wantSize)).NotTo(BeNumerically("<", 0),
+				"BD size must be >= requested %s, got %s", wantSize.String(), blockDevice.Status.Size.String())
+
+			Expect(blockDevice.Status.Size.Cmp(maxSize)).NotTo(BeNumerically(">", 0),
+				"BD size must be <= requested size + 16Mi (%s), got %s", maxSize.String(), blockDevice.Status.Size.String())
+			Expect(blockDevice.Status.NodeName).To(Equal(targetVM))
+		})
+		It("writes udev add event to agent logs", func(ctx SpecContext) {
+			logOpts := corev1.PodLogOptions{
+				Container:  netlinkAgentContainer,
+				SinceTime:  &addSince,
+				Timestamps: true,
+			}
+			Eventually(func(g Gomega) string {
+				logText, logErr := pod.GetLogs(ctx, cs, netlinkAgentNamespace, agentPod.Name, logOpts)
+				g.Expect(logErr).NotTo(HaveOccurred())
+				return logText
+			}, time.Minute, 2*time.Second).Should(MatchRegexp(netlinkAddEventLogPattern))
+		}, SpecTimeout(2*time.Minute))
+		Context("when VirtualDisk is detached and deleted", func() {
+			var removeSince metav1.Time
+
+			BeforeEach(func() {
+				removeSince = metav1.NewTime(time.Now())
+				Expect(kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig,
+					e2eNs, netlinkDiskAttach.AttachmentName, netlinkDiskAttach.DiskName)).To(Succeed())
+
+				netlinkDiskAttach = nil
+			})
+
+			It("removes the corresponding BlockDevice CR", func(ctx SpecContext) {
+				Eventually(func(g Gomega) {
+					var bd v1alpha1.BlockDevice
+					err := k8sClient.Get(ctx, client.ObjectKey{Name: netlinkBDName}, &bd)
+					g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "BlockDevice %s should be deleted after detach; err=%v", netlinkBDName, err)
+				}, 30*time.Second, time.Second).Should(Succeed())
+			}, SpecTimeout(1*time.Minute))
+			It("writes udev remove event to agent logs", func(ctx SpecContext) {
+				removeLogOpts := corev1.PodLogOptions{
+					Container:  netlinkAgentContainer,
+					SinceTime:  &removeSince,
+					Timestamps: true,
+				}
+				Eventually(func(g Gomega) string {
+					removeLogText, removeLogErr := pod.GetLogs(ctx, cs, netlinkAgentNamespace, agentPod.Name, removeLogOpts)
+					g.Expect(removeLogErr).NotTo(HaveOccurred())
+					return removeLogText
+				}, time.Minute, 2*time.Second).Should(MatchRegexp(netlinkRemoveEventLogPattern))
+			}, SpecTimeout(2*time.Minute))
+		})
 	})
 })
