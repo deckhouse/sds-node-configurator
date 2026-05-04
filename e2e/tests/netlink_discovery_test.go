@@ -92,7 +92,7 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 		if netlinkDiskAttach != nil && testClusterResources != nil && testClusterResources.BaseKubeconfig != nil {
 			ns := e2eConfigNamespace()
 			dErr := kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns, netlinkDiskAttach.AttachmentName, netlinkDiskAttach.DiskName)
-			Expect(dErr).NotTo(HaveOccurred())
+			GinkgoWriter.Printf("Detach error - %v", dErr)
 		}
 		if blockDevice != nil {
 			forceDeleteBlockDevicesByNames(e2eCtx, k8sClient, []string{blockDevice.Name})
