@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert/yaml"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -379,7 +380,7 @@ func discoverProvisionerForPVC(
 			if discoveredProvisioner != "" {
 				return discoveredProvisioner, nil
 			}
-		case client.IgnoreNotFound(err) == nil:
+		case apierrors.IsNotFound(err):
 			log.Debug(fmt.Sprintf("[discoverProvisionerForPVC] StorageClass %s not found, falling back to PV-based provisioner discovery", *pvc.Spec.StorageClassName))
 		default:
 			return "", fmt.Errorf("[discoverProvisionerForPVC] error getting StorageClass %s: %v", *pvc.Spec.StorageClassName, err)
@@ -496,7 +497,7 @@ func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map
 	for scName := range uniqueSCNames {
 		sc := &storagev1.StorageClass{}
 		if err := cl.Get(ctx, client.ObjectKey{Name: scName}, sc); err != nil {
-			if client.IgnoreNotFound(err) == nil {
+			if apierrors.IsNotFound(err) {
 				continue
 			}
 			return nil, fmt.Errorf("unable to get StorageClass %s: %w", scName, err)
@@ -509,8 +510,9 @@ func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map
 
 // dropPVCsWithMissingSC removes from managedPVCs all PVCs whose StorageClass is
 // not present in scs (either StorageClassName is empty/nil or the SC object does
-// not exist in the cluster). It returns the list of dropped PVC names so the
-// caller can log them.
+// not exist in the cluster). It returns the list of dropped PVCs so the caller
+// can log them and emit additional diagnostics (e.g. for Pending PVCs whose
+// volume can never be provisioned without an existing StorageClass).
 //
 // Removing such PVCs (instead of failing the whole pod-scheduling request) is the
 // behavior consistent with the upstream kube-scheduler VolumeBinding plugin:
@@ -519,20 +521,36 @@ func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map
 func dropPVCsWithMissingSC(
 	managedPVCs map[string]*corev1.PersistentVolumeClaim,
 	scs map[string]*storagev1.StorageClass,
-) []string {
-	var dropped []string
+) []*corev1.PersistentVolumeClaim {
+	var dropped []*corev1.PersistentVolumeClaim
 	for pvcName, pvc := range managedPVCs {
 		if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName == "" {
-			dropped = append(dropped, pvcName)
+			dropped = append(dropped, pvc)
 			delete(managedPVCs, pvcName)
 			continue
 		}
 		if _, ok := scs[*pvc.Spec.StorageClassName]; !ok {
-			dropped = append(dropped, pvcName)
+			dropped = append(dropped, pvc)
 			delete(managedPVCs, pvcName)
 		}
 	}
 	return dropped
+}
+
+// formatDroppedPVCsForLog returns a "namespace/name" list and a separate list of
+// Pending PVCs that reference a missing StorageClass — those will never be
+// dynamically provisioned and the resulting Pod will get stuck in
+// ContainerCreating with FailedMount, so the operator deserves a louder warning
+// than the generic "dropped from scheduling decision" message.
+func formatDroppedPVCsForLog(dropped []*corev1.PersistentVolumeClaim) (allKeys []string, pendingKeys []string) {
+	for _, pvc := range dropped {
+		key := pvc.Namespace + "/" + pvc.Name
+		allKeys = append(allKeys, key)
+		if pvc.Status.Phase == corev1.ClaimPending {
+			pendingKeys = append(pendingKeys, key)
+		}
+	}
+	return allKeys, pendingKeys
 }
 
 // getNewControlPlane checks whether the sds-replicated-volume module uses the new control plane

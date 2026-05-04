@@ -111,7 +111,11 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	// actionable scheduling decision to make for them, so we skip these PVCs
 	// instead of failing the whole pod-scheduling request.
 	if dropped := dropPVCsWithMissingSC(managedPVCs, scUsedByPVCs); len(dropped) > 0 {
-		servingLog.Warning(fmt.Sprintf("dropping PVCs without an existing StorageClass from scheduling decision: %v", dropped))
+		allKeys, pendingKeys := formatDroppedPVCsForLog(dropped)
+		servingLog.Warning(fmt.Sprintf("dropping PVCs without an existing StorageClass from scheduling decision: %v", allKeys))
+		if len(pendingKeys) > 0 {
+			servingLog.Warning(fmt.Sprintf("Pending PVCs reference a missing StorageClass and will never be dynamically provisioned (the Pod will likely get stuck in ContainerCreating with FailedMount): %v", pendingKeys))
+		}
 	}
 	if len(managedPVCs) == 0 {
 		servingLog.Debug("After filtering out PVCs with missing StorageClass, no managed PVCs left. Return the same nodes")

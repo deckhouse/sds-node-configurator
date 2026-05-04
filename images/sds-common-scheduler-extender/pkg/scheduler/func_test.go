@@ -682,6 +682,207 @@ func TestFilter_MixedManagedPVCs_OneMissingSC(t *testing.T) {
 	// not cause node1 to be rejected.
 	assert.Contains(t, *result.NodeNames, "node1", "node1 with a matching LVG must remain")
 	assert.NotContains(t, *result.NodeNames, "node2", "node2 without any LVG must be filtered out by the local PVC")
+	// node2's failure reason must be the missing LVG, not the missing SC of the
+	// sibling PVC — otherwise dropPVCsWithMissingSC would have leaked into the
+	// per-node failure reasons.
+	if reason, ok := result.FailedNodes["node2"]; ok {
+		assert.NotContains(t, reason, "sc-missing", "node2 reason must not mention the dropped PVC's StorageClass")
+		assert.NotContains(t, reason, "pvc-bad", "node2 reason must not mention the dropped PVC")
+	}
+}
+
+// TestPrioritize_MixedManagedPVCs_OneMissingSC mirrors the filter-side test for
+// the prioritize endpoint: a PVC referencing a missing StorageClass must be
+// dropped from the scoring decision, but sibling PVCs whose StorageClass exists
+// must still produce sensible per-node scores.
+func TestPrioritize_MixedManagedPVCs_OneMissingSC(t *testing.T) {
+	scGood := "sc-good"
+	scBad := "sc-missing"
+	provisioner := consts.SdsLocalVolumeProvisioner
+
+	scGoodObj := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: scGood},
+		Provisioner: provisioner,
+		Parameters: map[string]string{
+			consts.LvmTypeParamKey:         consts.Thick,
+			consts.LVMVolumeGroupsParamKey: "- name: lvg1\n",
+		},
+	}
+	pvcGood := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-good", Namespace: "default"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scGood,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
+	pvcBad := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pvc-bad",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"volume.beta.kubernetes.io/storage-provisioner": provisioner,
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scBad,
+		},
+	}
+	hundredGiB := int64(100 * 1024 * 1024 * 1024)
+	lvg := readyLVGOnNode("lvg1", "node1", hundredGiB, hundredGiB)
+
+	cl := newFakeClient(scGoodObj, pvcGood, pvcBad, lvg)
+	c := newTestCache()
+	s := newTestScheduler(cl, c)
+	s.targetProvisioners = []string{provisioner}
+
+	nodeNames := []string{"node1", "node2"}
+	args := ExtenderArgs{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				Volumes: []corev1.Volume{
+					{Name: "v1", VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc-good"},
+					}},
+					{Name: "v2", VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc-bad"},
+					}},
+				},
+			},
+		},
+		NodeNames: &nodeNames,
+	}
+	body, err := json.Marshal(args)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/prioritize", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	s.prioritize(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "prioritize must return 200")
+
+	var scores []HostPriority
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &scores))
+	gotNodes := make([]string, 0, len(scores))
+	for _, hp := range scores {
+		gotNodes = append(gotNodes, hp.Host)
+	}
+	// Both nodes must be scored: prioritize never removes nodes (filter does),
+	// it only attaches priorities. The presence of pvc-bad with a missing SC
+	// must not abort the request.
+	assert.ElementsMatch(t, nodeNames, gotNodes, "prioritize must return a score for every input node")
+}
+
+// TestDropPVCsWithMissingSC exercises the helper directly with the four cases
+// it has to handle: (a) PVC with nil StorageClassName; (b) PVC with empty
+// StorageClassName; (c) PVC referencing a non-existent SC; (d) PVC whose SC
+// exists. Only (d) must remain in the input map. The pointer identity of the
+// dropped entries must match the inputs (the helper returns the original PVC
+// objects, not copies, so callers can inspect their phase, namespace, etc.).
+func TestDropPVCsWithMissingSC(t *testing.T) {
+	scExisting := "sc-existing"
+	scMissing := "sc-missing"
+	emptySC := ""
+
+	pvcNilSC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-nil-sc", Namespace: "ns1"},
+		Spec:       corev1.PersistentVolumeClaimSpec{StorageClassName: nil},
+		Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
+	pvcEmptySC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-empty-sc", Namespace: "ns1"},
+		Spec:       corev1.PersistentVolumeClaimSpec{StorageClassName: &emptySC},
+		Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
+	}
+	pvcMissingSC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-missing-sc", Namespace: "ns1"},
+		Spec:       corev1.PersistentVolumeClaimSpec{StorageClassName: &scMissing},
+		Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
+	pvcGood := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-good", Namespace: "ns1"},
+		Spec:       corev1.PersistentVolumeClaimSpec{StorageClassName: &scExisting},
+		Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
+	}
+
+	managed := map[string]*corev1.PersistentVolumeClaim{
+		"pvc-nil-sc":     pvcNilSC,
+		"pvc-empty-sc":   pvcEmptySC,
+		"pvc-missing-sc": pvcMissingSC,
+		"pvc-good":       pvcGood,
+	}
+	scs := map[string]*storagev1.StorageClass{
+		scExisting: {ObjectMeta: metav1.ObjectMeta{Name: scExisting}},
+	}
+
+	dropped := dropPVCsWithMissingSC(managed, scs)
+
+	require.Len(t, managed, 1, "only the PVC with an existing SC must remain in the input map")
+	assert.Same(t, pvcGood, managed["pvc-good"], "pvc-good must remain (by pointer identity)")
+
+	require.Len(t, dropped, 3, "exactly three PVCs must be dropped")
+	droppedNames := make([]string, 0, len(dropped))
+	for _, p := range dropped {
+		droppedNames = append(droppedNames, p.Name)
+	}
+	assert.ElementsMatch(t,
+		[]string{"pvc-nil-sc", "pvc-empty-sc", "pvc-missing-sc"},
+		droppedNames,
+		"dropped set must contain nil-SC, empty-SC and missing-SC PVCs",
+	)
+
+	// The helper must hand back the original PVC objects (not copies) so the
+	// caller can read namespace/phase for richer diagnostics.
+	for _, p := range dropped {
+		assert.Equal(t, "ns1", p.Namespace, "namespace must be preserved on dropped PVCs")
+	}
+
+	allKeys, pendingKeys := formatDroppedPVCsForLog(dropped)
+	assert.ElementsMatch(t,
+		[]string{"ns1/pvc-nil-sc", "ns1/pvc-empty-sc", "ns1/pvc-missing-sc"},
+		allKeys,
+		"formatDroppedPVCsForLog must produce namespace/name keys for every dropped PVC",
+	)
+	assert.ElementsMatch(t,
+		[]string{"ns1/pvc-nil-sc", "ns1/pvc-missing-sc"},
+		pendingKeys,
+		"only Pending PVCs (here: nil-SC and missing-SC) must appear in the pending-keys subset",
+	)
+}
+
+// TestDropPVCsWithMissingSC_NoOp asserts that when every managed PVC already
+// has an existing StorageClass the helper is a no-op: nothing is removed and
+// the returned slice is empty.
+func TestDropPVCsWithMissingSC_NoOp(t *testing.T) {
+	scA := "sc-a"
+	scB := "sc-b"
+
+	pvcA := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-a", Namespace: "ns1"},
+		Spec:       corev1.PersistentVolumeClaimSpec{StorageClassName: &scA},
+	}
+	pvcB := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-b", Namespace: "ns1"},
+		Spec:       corev1.PersistentVolumeClaimSpec{StorageClassName: &scB},
+	}
+
+	managed := map[string]*corev1.PersistentVolumeClaim{
+		"pvc-a": pvcA,
+		"pvc-b": pvcB,
+	}
+	scs := map[string]*storagev1.StorageClass{
+		scA: {ObjectMeta: metav1.ObjectMeta{Name: scA}},
+		scB: {ObjectMeta: metav1.ObjectMeta{Name: scB}},
+	}
+
+	dropped := dropPVCsWithMissingSC(managed, scs)
+	assert.Empty(t, dropped, "no PVCs must be dropped when every SC exists")
+	assert.Len(t, managed, 2, "input map must be unchanged")
 }
 
 func TestFilter_FailedExtractSize_RejectsAllNodes(t *testing.T) {
