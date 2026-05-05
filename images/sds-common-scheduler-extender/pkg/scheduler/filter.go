@@ -250,8 +250,11 @@ func filterNodes(
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 ) (*ExtenderFilterResult, error) {
-	// Separate PVCs by provisioner
-	localPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsLocalVolumeProvisioner)
+	// Separate PVCs by provisioner. For local-volume PVCs we additionally
+	// require the StorageClass to be LVM-backed: rawfile-backed local PVCs
+	// have no LVM parameters and rely on `allowedTopologies` for placement,
+	// so the LVM-aware filter path MUST skip them entirely.
+	localPVCs := filterLocalLVMPVCs(managedPVCs, scUsedByPVCs)
 	replicatedPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsReplicatedVolumeProvisioner)
 
 	log.Debug(fmt.Sprintf("[filterNodes] local PVCs count: %d, replicated PVCs count: %d", len(localPVCs), len(replicatedPVCs)))
@@ -416,9 +419,15 @@ func createReservations(
 	for _, pvc := range managedPVCs {
 		sc := scUsedByPVCs[*pvc.Spec.StorageClassName]
 
-		// Only create reservations for local PVCs; replicated PVCs use a different mechanism
+		// Only create reservations for LVM-backed local PVCs; replicated PVCs
+		// use a different mechanism, and rawfile-backed local PVCs have no
+		// LVMVolumeGroups to reserve space in.
 		if sc.Provisioner != consts.SdsLocalVolumeProvisioner {
 			log.Debug(fmt.Sprintf("[createReservations] PVC %s uses provisioner %s, skipping", pvc.Name, sc.Provisioner))
+			continue
+		}
+		if isRawFileLocalSC(sc) {
+			log.Debug(fmt.Sprintf("[createReservations] PVC %s uses rawfile-backed StorageClass %s, skipping", pvc.Name, sc.Name))
 			continue
 		}
 
