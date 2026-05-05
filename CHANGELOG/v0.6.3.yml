@@ -1,0 +1,2 @@
+Изменения:
+- scheduler-extender: PVCs with a missing StorageClass no longer block pod scheduling
