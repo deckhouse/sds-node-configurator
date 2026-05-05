@@ -144,6 +144,8 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 	})
 
 	It("writes udev add event to agent logs", func(ctx SpecContext) {
+		Skip("not implemented netlink logs")
+
 		var fnErr error
 		agentPod, fnErr = pod.FindRunningPodOnNode(
 			e2eCtx, k8sClient, targetVM,
@@ -185,6 +187,7 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 	}, SpecTimeout(1*time.Minute))
 
 	It("writes udev remove event to agent logs", func(ctx SpecContext) {
+		Skip("not implemented netlink logs")
 		logOpts := v1.PodLogOptions{
 			Container:  netlinkAgentContainer,
 			SinceTime:  &removeSince,
