@@ -428,7 +428,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 	}
 
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] starts to resize PV of the LVMVolumeGroup %s", lvg.Name))
-	err = r.resizePVIfNeeded(ctx, lvg)
+	err = r.resizePVIfNeeded(ctx, lvg, pvs)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to resize PV of the LVMVolumeGroup %s", lvg.Name))
 		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "PVResizeFailed", fmt.Sprintf("unable to resize PV, err: %s", err.Error()))
@@ -537,12 +537,14 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 			v := freshVG
 			vgAfterCreate = &v
 		} else {
-			r.log.Warning(fmt.Sprintf("[reconcileLVGCreateFunc] unable to get VG %s after creation, will use default extent size for thin-pool alignment: %v", lvg.Spec.ActualVGNameOnTheNode, getErr))
+			r.log.Warning(fmt.Sprintf("[reconcileLVGCreateFunc] unable to get VG %s after creation, will retry on the next reconcile: %v", lvg.Spec.ActualVGNameOnTheNode, getErr))
+			return true, getErr
 		}
 		extentForThinPools := extentSizeForThinPoolAlign(lvg, vgAfterCreate)
 
+		vgSize := vgAfterCreate.VGSize
+
 		for _, tp := range lvg.Spec.ThinPools {
-			vgSize := countVGSizeByBlockDevices(blockDevices)
 			tpRequestedSize, err := utils.GetRequestedSizeFromString(tp.Size, vgSize)
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to get thin-pool %s requested size of the LVMVolumeGroup %s", tp.Name, lvg.Name))
@@ -764,6 +766,8 @@ func (r *Reconciler) validateLVGForCreateFunc(
 		r.log.Trace(fmt.Sprintf("[validateLVGForCreateFunc] the LVMVolumeGroup %s has thin-pools %v", lvg.Name, lvg.Spec.ThinPools))
 		r.log.Trace(fmt.Sprintf("[validateLVGForCreateFunc] total LVMVolumeGroup %s size: %s", lvg.Name, totalVGSize.String()))
 
+		// VG is usually absent on fresh create, but can already be present in cache on retries.
+		extent := extentSizeForThinPoolAlign(lvg, r.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode))
 		var totalThinPoolSize int64
 		for _, tp := range lvg.Spec.ThinPools {
 			tpRequestedSize, err := utils.GetRequestedSizeFromString(tp.Size, totalVGSize)
@@ -777,7 +781,7 @@ func (r *Reconciler) validateLVGForCreateFunc(
 				continue
 			}
 
-			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentSizeForThinPoolAlign(lvg, nil))
+			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extent)
 			if alignErr != nil {
 				reason.WriteString(fmt.Sprintf("Unable to align thin-pool %s size: %s. ", tp.Name, alignErr.Error()))
 				continue
@@ -792,10 +796,14 @@ func (r *Reconciler) validateLVGForCreateFunc(
 		}
 		r.log.Trace(fmt.Sprintf("[validateLVGForCreateFunc] LVMVolumeGroup %s thin-pools requested space: %d", lvg.Name, totalThinPoolSize))
 
-		if totalThinPoolSize > totalVGSize.Value() {
-			r.log.Trace(fmt.Sprintf("[validateLVGForCreateFunc] total thin pool size: %s, total vg size: %s", resource.NewQuantity(totalThinPoolSize, resource.BinarySI).String(), totalVGSize.String()))
+		extentSizeVal := extent.Value()
+		extentTolerance := int64(len(lvg.Spec.ThinPools)) * extentSizeVal
+		allowedSpace := totalVGSize.Value() + extentTolerance
+
+		if totalThinPoolSize > allowedSpace {
+			r.log.Trace(fmt.Sprintf("[validateLVGForCreateFunc] total thin pool size: %s, allowed space: %d", resource.NewQuantity(totalThinPoolSize, resource.BinarySI).String(), allowedSpace))
 			r.log.Warning(fmt.Sprintf("[validateLVGForCreateFunc] requested thin pool size is more than VG total size for the LVMVolumeGroup %s", lvg.Name))
-			reason.WriteString(fmt.Sprintf("Required space for thin-pools %d is more than VG size %d.", totalThinPoolSize, totalVGSize.Value()))
+			reason.WriteString(fmt.Sprintf("Required space for thin-pools %d is more than allowed space %d (VG size %d + extent tolerance %d). ", totalThinPoolSize, allowedSpace, totalVGSize.Value(), extentTolerance))
 		}
 	}
 
@@ -873,6 +881,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 		// check if added thin-pools has valid requested size
 		var (
 			addingThinPoolSize int64
+			addingPoolsCount   int
 			hasFullThinPool    = false
 		)
 
@@ -911,6 +920,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 				if actualThinPool, created := actualThinPools[specTp.Name]; !created {
 					r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] thin-pool %s of the LVMVolumeGroup %s is not yet created, adds its requested size", specTp.Name, lvg.Name))
 					addingThinPoolSize += alignedTpSize.Value()
+					addingPoolsCount++
 				} else {
 					r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] thin-pool %s of the LVMVolumeGroup %s is already created, check its requested size", specTp.Name, lvg.Name))
 					if alignedTpSize.Value() < actualThinPool.LVSize.Value() {
@@ -923,6 +933,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 					if thinPoolSizeDiff > 0 {
 						r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] the LVMVolumeGroup %s Spec.ThinPool %s size %s more than Status one: %s", lvg.Name, specTp.Name, tpRequestedSize.String(), actualThinPool.LVSize.String()))
 						addingThinPoolSize += thinPoolSizeDiff
+						addingPoolsCount++
 					}
 				}
 			}
@@ -932,8 +943,14 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 			allocatedSize := getVGAllocatedSize(*vg)
 			totalFreeSpace := newTotalVGSize.Value() - allocatedSize.Value()
 			r.log.Trace(fmt.Sprintf("[validateLVGForUpdateFunc] new LVMVolumeGroup %s thin-pools requested %d size, additional BlockDevices space %d, total: %d", lvg.Name, addingThinPoolSize, additionBlockDeviceSpace, totalFreeSpace))
-			if addingThinPoolSize != 0 && addingThinPoolSize > totalFreeSpace {
-				reason.WriteString("Added thin-pools requested sizes are more than allowed free space in VG.")
+
+			ext := extentSizeForThinPoolAlign(lvg, vg)
+			extentSizeVal := ext.Value()
+			extentTolerance := int64(addingPoolsCount) * extentSizeVal
+			allowedFreeSpace := totalFreeSpace + extentTolerance
+
+			if addingThinPoolSize != 0 && addingThinPoolSize > allowedFreeSpace {
+				reason.WriteString(fmt.Sprintf("Added thin-pools requested size %d is more than allowed free space %d (free space %d + extent tolerance %d). ", addingThinPoolSize, allowedFreeSpace, totalFreeSpace, extentTolerance))
 			}
 		}
 	}
@@ -1075,7 +1092,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 	return nil
 }
 
-func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) error {
+func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup, pvs []internal.PVData) error {
 	if len(lvg.Status.Nodes) == 0 {
 		r.log.Warning(fmt.Sprintf("[ResizePVIfNeeded] the LVMVolumeGroup %s nodes are empty. Wait for the next update", lvg.Name))
 		return nil
@@ -1083,11 +1100,25 @@ func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolu
 
 	vg := r.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode)
 	extentSize := extentSizeForThinPoolAlign(lvg, vg)
+	peStartByPath := make(map[string]int64, len(pvs))
+	for _, pv := range pvs {
+		peStartByPath[pv.PVName] = pv.PEStart.Value()
+	}
 
 	errs := strings.Builder{}
 	for _, n := range lvg.Status.Nodes {
 		for _, d := range n.Devices {
-			if d.DevSize.Value()-d.PVSize.Value() > extentSize.Value() {
+			peStart, found := peStartByPath[d.Path]
+			if !found {
+				r.log.Debug(fmt.Sprintf("[ResizePVIfNeeded] PV %s not in cache yet, skip resizing for now", d.Path))
+				continue
+			}
+			if peStart == 0 {
+				r.log.Warning(fmt.Sprintf("[ResizePVIfNeeded] PV %s has pe_start=0 reported by pvs, skip resizing for now", d.Path))
+				continue
+			}
+
+			if d.DevSize.Value()-(d.PVSize.Value()+peStart) >= extentSize.Value() {
 				if isApplied(lvg) {
 					err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 					if err != nil {
