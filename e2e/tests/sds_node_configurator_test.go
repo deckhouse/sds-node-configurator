@@ -331,9 +331,14 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				wg.Wait()
 				Expect(attachErrs).To(BeEmpty(), "all VirtualDisk attaches should succeed: %v", attachErrs)
 
+				diskPrefix := fmt.Sprintf("%s-%s-", e2eVirtualDiskPrefix, e2eRunID)
+				for _, att := range e2eDiskAttachments {
+					_, err := strconv.Atoi(strings.TrimPrefix(att.DiskName, diskPrefix))
+					Expect(err).NotTo(HaveOccurred(), "disk name must be %s<index>, got %q", diskPrefix, att.DiskName)
+				}
 				sort.Slice(e2eDiskAttachments, func(i, j int) bool {
-					ni, _ := strconv.Atoi(strings.TrimPrefix(e2eDiskAttachments[i].DiskName, e2eVirtualDiskPrefix+"-"))
-					nj, _ := strconv.Atoi(strings.TrimPrefix(e2eDiskAttachments[j].DiskName, e2eVirtualDiskPrefix+"-"))
+					ni, _ := strconv.Atoi(strings.TrimPrefix(e2eDiskAttachments[i].DiskName, diskPrefix))
+					nj, _ := strconv.Atoi(strings.TrimPrefix(e2eDiskAttachments[j].DiskName, diskPrefix))
 					return ni < nj
 				})
 
@@ -342,37 +347,22 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				for _, att := range e2eDiskAttachments {
 					Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, baseKubeconfig, ns, att.AttachmentName, 10*time.Second)).To(Succeed())
 				}
-				By("All VirtualDisks attached; fetching their UIDs for BlockDevice matching")
+				By("Discovering BlockDevices per VirtualDisk (serial + node, same as LVM tests). Batch matching by serial alone misses disks when multiple nodes are used.")
 
-				baseDynClient, err := dynamic.NewForConfig(baseKubeconfig)
-				Expect(err).NotTo(HaveOccurred(), "create dynamic client for base cluster")
-
-				expectedSerials := make(map[string]string)
+				createdBlockDevices = nil
 				for _, att := range e2eDiskAttachments {
-					vd, err := baseDynClient.Resource(virtualDiskGVR).Namespace(ns).Get(e2eCtx, att.DiskName, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred(), "get VirtualDisk %s", att.DiskName)
-					vdUID := string(vd.GetUID())
-					serial := blockDeviceSerialFromVirtualDiskUID(vdUID)
-					expectedSerials[serial] = att.DiskName
-					GinkgoWriter.Printf("  VirtualDisk %s (UID=%s) -> expected BD serial: %s\n", att.DiskName, vdUID, serial)
+					Expect(strings.HasPrefix(att.DiskName, diskPrefix)).To(BeTrue(), "unexpected disk name shape %q", att.DiskName)
+					idxStr := strings.TrimPrefix(att.DiskName, diskPrefix)
+					diskIdx, err := strconv.Atoi(idxStr)
+					Expect(err).NotTo(HaveOccurred(), "parse disk index from %q", att.DiskName)
+					Expect(diskIdx).To(BeNumerically(">=", 0))
+					Expect(diskIdx).To(BeNumerically("<", len(createPlan)), "disk index %d vs createPlan len %d", diskIdx, len(createPlan))
+					targetVM := createPlan[diskIdx]
+					By(fmt.Sprintf("Waiting for consumable BlockDevice for %s on node %s (up to %v)", att.DiskName, targetVM, e2eSchedulerSetupBlockDeviceDiscoveryTimeout))
+					bd := e2eWaitConsumableBlockDeviceForVirtualDiskWithTimeout(e2eCtx, baseKubeconfig, k8sClient, ns,
+						att.DiskName, att.AttachmentName, targetVM, e2eSchedulerSetupBlockDeviceDiscoveryTimeout, 10*time.Second)
+					createdBlockDevices = append(createdBlockDevices, bd)
 				}
-
-				By(fmt.Sprintf("Waiting for %d BlockDevices with matching serials (up to 3 minutes)", len(expectedSerials)))
-				Eventually(func(g Gomega) {
-					var list v1alpha1.BlockDeviceList
-					g.Expect(k8sClient.List(e2eCtx, &list, &client.ListOptions{})).To(Succeed())
-					createdBlockDevices = nil
-					foundSerials := make(map[string]bool)
-					for i := range list.Items {
-						bd := &list.Items[i]
-						if _, expected := expectedSerials[bd.Status.Serial]; expected {
-							createdBlockDevices = append(createdBlockDevices, bd)
-							foundSerials[bd.Status.Serial] = true
-						}
-					}
-					g.Expect(len(createdBlockDevices)).To(Equal(len(expectedSerials)),
-						"expected %d BlockDevices matching VirtualDisks, got %d", len(expectedSerials), len(createdBlockDevices))
-				}, 3*time.Minute, 10*time.Second).Should(Succeed())
 
 				By(fmt.Sprintf("Found %d BlockDevices corresponding to created VirtualDisks", len(createdBlockDevices)))
 				printBlockDevicesSummary(createdBlockDevices)
@@ -1329,7 +1319,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				clusterVMs = e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
 
 				numNodes := len(clusterVMs)
-				parallelism := 1 + rand.Intn(numNodes) // [1, numNodes] — сколько нод задействуем
+				parallelism := 1 + rand.Intn(numNodes) // [1, numNodes] — how many nodes to use
 				if parallelism > numNodes {
 					parallelism = numNodes
 				}
@@ -1342,7 +1332,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				// Second random: disks per node, 1..5
 				disksPerNode := make([]int, parallelism)
 				for i := 0; i < parallelism; i++ {
-					disksPerNode[i] = 1 + rand.Intn(5) // [1, 5] дисков на ноду
+					disksPerNode[i] = 1 + rand.Intn(5) // [1, 5] disks per node
 				}
 				var createPlan []string // createPlan[k] = VM name for k-th disk
 				for i, vm := range targetVMs {
@@ -2101,6 +2091,385 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			})
 		})
 
+		Context("Multiple LVMVolumeGroups on one node", func() {
+			const (
+				e2eMultiLvgMinDisks  = 2
+				e2eMultiLvgMaxDisks  = 5
+				e2eMultiLvgSizeMinGi = 2
+				e2eMultiLvgSizeMaxGi = 10
+			)
+
+			var (
+				multiLvgAttachments []*kubernetes.VirtualDiskAttachmentResult
+				multiLvgRunID       string
+				multiLvgSuiteOnce   sync.Once
+			)
+
+			BeforeEach(func() {
+				multiLvgSuiteOnce.Do(func() {
+					ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+					multiLvgRunID = fmt.Sprintf("%d", time.Now().Unix())
+					prepCtx, prepCancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
+					defer prepCancel()
+					By("Multiple LVMVolumeGroups on one node: cleanup before test")
+					cleanupE2EPodsAndPVCsWithWait(prepCtx, k8sClient, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
+					cleanupE2ELVMLogicalVolumes(prepCtx, k8sClient)
+					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
+					cleanupE2ELocalStorageClasses(prepCtx, testClusterResources.Kubeconfig)
+					if testClusterResources.BaseKubeconfig != nil {
+						cleanupE2EVirtualDisks(prepCtx, testClusterResources.BaseKubeconfig, e2eConfigNamespace(), e2eSuiteVirtualDiskPrefix)
+					}
+					forceDeleteAllNonConsumableBlockDevices(prepCtx, k8sClient, 2*time.Minute)
+					forceDeleteAllBlockDevices(prepCtx, k8sClient, 3*time.Minute)
+				})
+			})
+
+			AfterEach(func() {
+				if testClusterResources == nil || testClusterResources.BaseKubeconfig == nil {
+					return
+				}
+				ns := e2eConfigNamespace()
+				for _, att := range multiLvgAttachments {
+					if att == nil {
+						continue
+					}
+					By("Cleaning up multi-LVG test VirtualDisk " + att.DiskName)
+					_ = kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns, att.AttachmentName, att.DiskName)
+				}
+				multiLvgAttachments = nil
+			})
+
+			It("Should create independent LVMVolumeGroups on the same node (random 2–5 disks, 2–10 Gi each)", func() {
+				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "requires nested virtualization")
+				Expect(multiLvgRunID).NotTo(BeEmpty(), "BeforeEach must set multiLvgRunID")
+
+				nDisks := e2eMultiLvgMinDisks + rand.Intn(e2eMultiLvgMaxDisks-e2eMultiLvgMinDisks+1) // 2..5 inclusive
+
+				ns := e2eConfigNamespace()
+				storageClass := e2eConfigStorageClass()
+				Expect(storageClass).NotTo(BeEmpty())
+				By("Guest VM for attach: phase Running only")
+				clusterVMs := e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
+				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
+
+				type multiDisk struct {
+					diskName  string
+					diskSize  string
+					att       *kubernetes.VirtualDiskAttachmentResult
+					bd        *v1alpha1.BlockDevice
+					meta      string
+					lvgName   string
+					vgName    string
+				}
+				disks := make([]multiDisk, 0, nDisks)
+				for i := 0; i < nDisks; i++ {
+					szGi := e2eMultiLvgSizeMinGi + rand.Intn(e2eMultiLvgSizeMaxGi-e2eMultiLvgSizeMinGi+1) // 2..10
+					disks = append(disks, multiDisk{
+						diskName: fmt.Sprintf("e2e-multi-lvg-d%d-%s-%d", i+1, multiLvgRunID, rand.Intn(100000)),
+						diskSize: fmt.Sprintf("%dGi", szGi),
+					})
+				}
+				By(fmt.Sprintf("Attaching %d VirtualDisks to the same VM %q (per-disk size 2..10 Gi random)", nDisks, targetVM))
+				for i := range disks {
+					att, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+						VMName: targetVM, Namespace: ns, DiskName: disks[i].diskName,
+						DiskSize: disks[i].diskSize, StorageClassName: storageClass,
+					}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+					Expect(err).NotTo(HaveOccurred(), "attach disk %s", disks[i].diskName)
+					GinkgoWriter.Printf("    disk %d/%d: name=%s size=%s\n", i+1, nDisks, disks[i].diskName, disks[i].diskSize)
+					disks[i].att = att
+					multiLvgAttachments = append(multiLvgAttachments, att)
+				}
+				for i := range disks {
+					attachCtx, cancel := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
+					Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns, disks[i].att.AttachmentName, 10*time.Second)).To(Succeed())
+					cancel()
+				}
+				nodeName := ""
+				metaSeen := make(map[string]struct{})
+				for i := range disks {
+					bd := e2eWaitConsumableBlockDeviceForVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, k8sClient, ns,
+						disks[i].att.DiskName, disks[i].att.AttachmentName, targetVM)
+					disks[i].bd = bd
+					if nodeName == "" {
+						nodeName = bd.Status.NodeName
+					} else {
+						Expect(bd.Status.NodeName).To(Equal(nodeName), "all BlockDevices must be on the same node")
+					}
+					meta := bd.Labels["kubernetes.io/metadata.name"]
+					if meta == "" {
+						meta = bd.Name
+					}
+					Expect(metaSeen).NotTo(HaveKey(meta), "expected distinct BlockDevice selectors, duplicate meta %q", meta)
+					metaSeen[meta] = struct{}{}
+					disks[i].meta = meta
+				}
+
+				nodeSafe := strings.ReplaceAll(strings.ReplaceAll(nodeName, ".", "-"), "_", "-")
+				for i := range disks {
+					idx := i + 1
+					disks[i].lvgName = fmt.Sprintf("e2e-lvg-multi-%d-%s-%s", idx, multiLvgRunID, nodeSafe)
+					disks[i].vgName = fmt.Sprintf("e2e-vg-multi-%d-%s", idx, multiLvgRunID)
+					lvg := &v1alpha1.LVMVolumeGroup{
+						ObjectMeta: metav1.ObjectMeta{Name: disks[i].lvgName},
+						Spec: v1alpha1.LVMVolumeGroupSpec{
+							ActualVGNameOnTheNode: disks[i].vgName,
+							BlockDeviceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/hostname":      nodeName,
+									"kubernetes.io/metadata.name": disks[i].meta,
+								},
+							},
+							Type:  "Local",
+							Local: v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
+						},
+					}
+					By(fmt.Sprintf("Creating LVMVolumeGroup %s (VG %s) — BlockDevice %s", disks[i].lvgName, disks[i].vgName, disks[i].bd.Name))
+					Expect(k8sClient.Create(e2eCtx, lvg)).To(Succeed())
+				}
+				defer func() {
+					for i := len(disks) - 1; i >= 0; i-- {
+						_ = client.IgnoreNotFound(k8sClient.Delete(e2eCtx, &v1alpha1.LVMVolumeGroup{ObjectMeta: metav1.ObjectMeta{Name: disks[i].lvgName}}))
+					}
+				}()
+
+				By(fmt.Sprintf("Waiting for %d LVMVolumeGroup(s) to become Ready (independent VGs on one node)", nDisks))
+				Eventually(func(g Gomega) {
+					for i := range disks {
+						var cur v1alpha1.LVMVolumeGroup
+						g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: disks[i].lvgName}, &cur)).To(Succeed())
+						g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady), "LVMVolumeGroup %s phase", disks[i].lvgName)
+					}
+				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
+
+				readies := make([]v1alpha1.LVMVolumeGroup, len(disks))
+				for i := range disks {
+					Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: disks[i].lvgName}, &readies[i])).To(Succeed())
+				}
+				vgNameSet := make(map[string]struct{}, len(readies))
+				vgUUIDSet := make(map[string]struct{}, len(readies))
+				allHaveUUID := true
+				for i := range readies {
+					vgNameSet[readies[i].Spec.ActualVGNameOnTheNode] = struct{}{}
+					u := readies[i].Status.VGUuid
+					if u == "" {
+						allHaveUUID = false
+					} else {
+						vgUUIDSet[u] = struct{}{}
+					}
+				}
+				Expect(vgNameSet).To(HaveLen(len(disks)), "each LVMVolumeGroup must have a unique spec VG name on the node")
+				if allHaveUUID {
+					Expect(vgUUIDSet).To(HaveLen(len(disks)), "when every LVMVolumeGroup reports vgUUID, values must be pairwise distinct")
+				}
+				for i := range readies {
+					for _, c := range readies[i].Status.Conditions {
+						Expect(c.Status).NotTo(Equal(metav1.ConditionFalse),
+							"LVMVolumeGroup %s: condition %s False — %s: %s", readies[i].Name, c.Type, c.Reason, c.Message)
+					}
+					printLVMVolumeGroupInfo(&readies[i])
+				}
+
+				vmSSH := e2eConfigVMSSHUser()
+				vgsCmd := "vgs -o vg_name --noheadings 2>/dev/null || sudo -n vgs -o vg_name --noheadings 2>/dev/null"
+				outVgs, errVgs := e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, vgsCmd)
+				Expect(errVgs).NotTo(HaveOccurred())
+				for i := range disks {
+					Expect(e2eVgNameListedInVgsOutput(outVgs, disks[i].vgName)).To(BeTrue(), "vgs should list %q; output:\n%s", disks[i].vgName, outVgs)
+				}
+				By("✓ Ready LVMVolumeGroups on one node; all distinct VGs in vgs; no False conditions")
+			})
+		})
+
+		// Discovery of a pre-existing tagged VG (auto-import): on-node LVM + tag → LVMVolumeGroup CR + thin-pool in status.
+		Context("LVMVolumeGroup auto-import (pre-existing VG with tag)", func() {
+			var (
+				e2eVgImportSuiteOnce     sync.Once
+				e2eVgImportRunID         string
+				e2eVgImportAttachment    *kubernetes.VirtualDiskAttachmentResult
+				e2eVgImportNodeName      string
+				e2eVgImportDevicePath    string
+				e2eVgImportActualVGName  string
+				e2eVgImportThinPoolName  string
+				e2eVgImportLVMVolumeName string
+			)
+
+			BeforeEach(func() {
+				e2eVgImportSuiteOnce.Do(func() {
+					ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+					e2eVgImportRunID = fmt.Sprintf("%d", time.Now().Unix())
+					prepCtx, prepCancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
+					defer prepCancel()
+					By("LVM auto-import suite: cleanup before test")
+					cleanupE2EPodsAndPVCsWithWait(prepCtx, k8sClient, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
+					cleanupE2ELVMLogicalVolumes(prepCtx, k8sClient)
+					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
+					cleanupE2ELocalStorageClasses(prepCtx, testClusterResources.Kubeconfig)
+					if testClusterResources.BaseKubeconfig != nil {
+						cleanupE2EVirtualDisks(prepCtx, testClusterResources.BaseKubeconfig, e2eConfigNamespace(), e2eSuiteVirtualDiskPrefix)
+					}
+					forceDeleteAllNonConsumableBlockDevices(prepCtx, k8sClient, 2*time.Minute)
+					forceDeleteAllBlockDevices(prepCtx, k8sClient, 3*time.Minute)
+				})
+			})
+
+			AfterEach(func() {
+				if testClusterResources == nil || testClusterResources.Kubeconfig == nil {
+					return
+				}
+				vmSSH := e2eConfigVMSSHUser()
+				if e2eVgImportNodeName != "" && e2eVgImportActualVGName != "" {
+					By("auto-import cleanup: vgchange --deltag (stop controller tracking)")
+					_, _ = e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, e2eVgImportNodeName, vmSSH,
+						fmt.Sprintf(`sudo -n vgchange %q --deltag storage.deckhouse.io/enabled=true 2>&1 || true`, e2eVgImportActualVGName))
+					deadline := time.Now().Add(5 * time.Minute)
+					for time.Now().Before(deadline) {
+						var list v1alpha1.LVMVolumeGroupList
+						_ = k8sClient.List(e2eCtx, &list, &client.ListOptions{})
+						gone := true
+						for i := range list.Items {
+							if list.Items[i].Spec.ActualVGNameOnTheNode == e2eVgImportActualVGName {
+								gone = false
+								break
+							}
+						}
+						if gone {
+							break
+						}
+						time.Sleep(3 * time.Second)
+					}
+					if e2eVgImportLVMVolumeName != "" {
+						By("auto-import cleanup: remove thin LV stack then VG (best effort)")
+						prune := e2eShellRemoveThinPoolStackForVG(e2eVgImportActualVGName, e2eVgImportThinPoolName)
+						_, _ = e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, e2eVgImportNodeName, vmSSH, prune)
+					}
+					_, _ = e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, e2eVgImportNodeName, vmSSH,
+						fmt.Sprintf(`sudo -n vgremove -ff %q 2>&1 || true`, e2eVgImportActualVGName))
+					if e2eVgImportDevicePath != "" {
+						_, _ = e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, e2eVgImportNodeName, vmSSH,
+							fmt.Sprintf(`sudo -n pvremove -ff %q 2>&1 || true`, e2eVgImportDevicePath))
+					}
+				}
+				if testClusterResources.BaseKubeconfig != nil && e2eVgImportAttachment != nil {
+					ns := e2eConfigNamespace()
+					_ = kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns,
+						e2eVgImportAttachment.AttachmentName, e2eVgImportAttachment.DiskName)
+				}
+				e2eVgImportAttachment = nil
+				e2eVgImportNodeName, e2eVgImportDevicePath, e2eVgImportActualVGName = "", "", ""
+				e2eVgImportThinPoolName, e2eVgImportLVMVolumeName = "", ""
+			})
+
+			It("Should discover LVMVolumeGroup for manually created VG with tag; thin-pool in status; controller management", func() {
+				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "requires nested virtualization / base cluster")
+				Expect(e2eVgImportRunID).NotTo(BeEmpty())
+
+				ns := e2eConfigNamespace()
+				storageClass := e2eConfigStorageClass()
+				Expect(storageClass).NotTo(BeEmpty())
+				clusterVMs := e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
+				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
+
+				manualVG := fmt.Sprintf("e2e-vgimport-%s", e2eVgImportRunID)
+				thinPoolLV := fmt.Sprintf("e2e-tp-import-%s", e2eVgImportRunID)
+				diskName := fmt.Sprintf("e2e-vgimport-disk-%s", e2eVgImportRunID)
+				diskSize := "3Gi"
+
+				By("Attaching a dedicated VirtualDisk for on-node manual VG + thin-pool")
+				att, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+					VMName: targetVM, Namespace: ns, DiskName: diskName,
+					DiskSize: diskSize, StorageClassName: storageClass,
+				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+				Expect(err).NotTo(HaveOccurred())
+				e2eVgImportAttachment = att
+
+				attachCtx, cancel := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
+				defer cancel()
+				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns, att.AttachmentName, 10*time.Second)).To(Succeed())
+
+				targetBD := e2eWaitConsumableBlockDeviceForVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, k8sClient, ns,
+					att.DiskName, att.AttachmentName, targetVM)
+				devPath := strings.TrimSpace(targetBD.Status.Path)
+				Expect(devPath).NotTo(BeEmpty(), "BlockDevice must report device path for LVM on node")
+				nodeName := targetBD.Status.NodeName
+				e2eVgImportNodeName = nodeName
+				e2eVgImportDevicePath = devPath
+				e2eVgImportActualVGName = manualVG
+				e2eVgImportThinPoolName = thinPoolLV
+				// lvs(8) / pool LV name: thin pool is usually the name after -T
+				e2eVgImportLVMVolumeName = thinPoolLV
+
+				vmSSH := e2eConfigVMSSHUser()
+				By(fmt.Sprintf("On node %s: pvcreate → vgcreate %s → thin-pool %s → vgchange --addtag storage.deckhouse.io/enabled=true", nodeName, manualVG, thinPoolLV))
+				lvmScript := fmt.Sprintf(`set -e
+DEV=%q
+VG=%q
+TP=%q
+sudo -n pvcreate -y "$DEV" 2>&1
+sudo -n vgcreate "$VG" "$DEV" 2>&1
+sudo -n lvcreate -L 700M -T "$VG/$TP" 2>&1
+sudo -n vgchange "$VG" --addtag storage.deckhouse.io/enabled=true 2>&1
+`, devPath, manualVG, thinPoolLV)
+				out, errLvm := e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, lvmScript)
+				if out != "" {
+					GinkgoWriter.Printf("    on-node LVM script output:\n%s\n", out)
+				}
+				Expect(errLvm).NotTo(HaveOccurred(), "create VG + thin-pool + tag on node %s", nodeName)
+
+				var lvgName string
+				By(fmt.Sprintf("Waiting for agent to create LVMVolumeGroup CR (auto-import) for tagged VG on node (up to %s — discoverer may not see the new VG until the next rescan)", e2eLVMVolumeGroupAutoImportDiscoveryTimeout))
+				Eventually(func(g Gomega) {
+					var list v1alpha1.LVMVolumeGroupList
+					g.Expect(k8sClient.List(e2eCtx, &list, &client.ListOptions{})).To(Succeed())
+					found := false
+					for i := range list.Items {
+						if list.Items[i].Spec.ActualVGNameOnTheNode == manualVG {
+							lvgName = list.Items[i].Name
+							found = true
+							break
+						}
+					}
+					g.Expect(found).To(BeTrue(), "expected a LVMVolumeGroup whose spec.actualVGNameOnTheNode is %q (auto-discovered from tagged VG)", manualVG)
+				}, e2eLVMVolumeGroupAutoImportDiscoveryTimeout, 5*time.Second).Should(Succeed())
+				Expect(lvgName).NotTo(BeEmpty())
+
+				By("Waiting for LVMVolumeGroup Ready; thin-pool in status; controller has applied configuration")
+				Eventually(func(g Gomega) {
+					var cur v1alpha1.LVMVolumeGroup
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: lvgName}, &cur)).To(Succeed())
+					g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady), "LVMVolumeGroup %s (auto-import) should reach Ready; phase=%s", lvgName, cur.Status.Phase)
+					g.Expect(len(cur.Status.ThinPools) > 0).To(BeTrue(), "status should list at least one thin-pool; got ThinPools=%v", cur.Status.ThinPools)
+					tpoolOK := false
+					for i := range cur.Status.ThinPools {
+						if strings.TrimSpace(cur.Status.ThinPools[i].Name) == thinPoolLV {
+							tpoolOK = true
+							break
+						}
+					}
+					if !tpoolOK && len(cur.Status.ThinPools) > 0 {
+						GinkgoWriter.Printf("    thin-pool name in status differs from %q: %#v\n", thinPoolLV, cur.Status.ThinPools)
+					}
+					g.Expect(tpoolOK).To(BeTrue(), "status.thinPools should include thin-pool %q (or align with node LV name); got: %+v", thinPoolLV, cur.Status.ThinPools)
+					var cfg *metav1.Condition
+					for i := range cur.Status.Conditions {
+						if cur.Status.Conditions[i].Type == "VGConfigurationApplied" {
+							cfg = &cur.Status.Conditions[i]
+							break
+						}
+					}
+					g.Expect(cfg).NotTo(BeNil(), "expected VGConfigurationApplied condition")
+					g.Expect(cfg.Status).To(Equal(metav1.ConditionTrue), "controller should have applied / reconciled config for imported VG: reason=%s msg=%s", cfg.Reason, cfg.Message)
+				}, e2eLVMVolumeGroupReadyTimeout, 8*time.Second).Should(Succeed())
+
+				var final v1alpha1.LVMVolumeGroup
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: lvgName}, &final)).To(Succeed())
+				printLVMVolumeGroupInfo(&final)
+				By("✓ Auto-import: LVMVolumeGroup exists, Ready, thin-pool in status, VGConfigurationApplied True")
+			})
+		})
+
 		Context("LVMVolumeGroup validation (disk not usable)", func() {
 			const (
 				lvgConditionVGConfigurationApplied = "VGConfigurationApplied"
@@ -2420,6 +2789,11 @@ func formatBlockDevicesHint(items []v1alpha1.BlockDevice, expectedNode string) s
 // as the discovery tests: Status.Serial must equal hex(md5(VirtualDisk.UID)) or hex(md5(VMBDA.UID)).
 // This avoids picking another disk on the same node (leftover LVM, other e2e disks).
 func e2eWaitConsumableBlockDeviceForVirtualDisk(ctx context.Context, baseKube *rest.Config, k8sClient client.Client, ns, diskName, attachmentName, targetVM string) *v1alpha1.BlockDevice {
+	return e2eWaitConsumableBlockDeviceForVirtualDiskWithTimeout(ctx, baseKube, k8sClient, ns, diskName, attachmentName, targetVM, 5*time.Minute, 10*time.Second)
+}
+
+// e2eWaitConsumableBlockDeviceForVirtualDiskWithTimeout is used when many disks are discovered in one spec (e.g. scheduler setup).
+func e2eWaitConsumableBlockDeviceForVirtualDiskWithTimeout(ctx context.Context, baseKube *rest.Config, k8sClient client.Client, ns, diskName, attachmentName, targetVM string, timeout, poll time.Duration) *v1alpha1.BlockDevice {
 	baseDyn, err := dynamic.NewForConfig(baseKube)
 	Expect(err).NotTo(HaveOccurred(), "dynamic client for base cluster (read VirtualDisk / VMBDA UIDs)")
 	vdObj, err := baseDyn.Resource(virtualDiskGVR).Namespace(ns).Get(ctx, diskName, metav1.GetOptions{})
@@ -2428,6 +2802,7 @@ func e2eWaitConsumableBlockDeviceForVirtualDisk(ctx context.Context, baseKube *r
 	Expect(err).NotTo(HaveOccurred(), "get VirtualMachineBlockDeviceAttachment %s", attachmentName)
 	serialVD := blockDeviceSerialFromVirtualDiskUID(string(vdObj.GetUID()))
 	serialAtt := blockDeviceSerialFromVirtualDiskUID(string(attObj.GetUID()))
+	GinkgoWriter.Printf("    %s: expect BD serial %s or %s on node %s\n", diskName, serialVD, serialAtt, targetVM)
 
 	var picked *v1alpha1.BlockDevice
 	Eventually(func(g Gomega) {
@@ -2453,7 +2828,7 @@ func e2eWaitConsumableBlockDeviceForVirtualDisk(ctx context.Context, baseKube *r
 		g.Expect(picked).NotTo(BeNil(),
 			"BlockDevice for VirtualDisk %q: want Status.Serial %q or %q on node %q, consumable, with /dev path. %s",
 			diskName, serialVD, serialAtt, targetVM, formatBlockDevicesHint(list.Items, targetVM))
-	}, 5*time.Minute, 10*time.Second).Should(Succeed())
+	}, timeout, poll).Should(Succeed())
 	return picked
 }
 
@@ -3223,11 +3598,15 @@ const (
 	e2eModuleDeployTimeout    = 15 * time.Minute
 	// LVMVolumeGroup Pending → Ready on busy CI can exceed 5m (agent + node LVM).
 	e2eLVMVolumeGroupReadyTimeout = 15 * time.Minute
+	// Auto-import: tagged on-node VG may be picked up only on a later discoverer rescan; wait without restarting the agent.
+	e2eLVMVolumeGroupAutoImportDiscoveryTimeout = 20 * time.Minute
 	e2eStorageModuleReadyTimeout  = 30 * time.Minute // alwaysUseExisting: wait for Module Ready after ModuleConfig
 	e2eUseExistingClusterTimeout  = 90 * time.Minute
 
 	// Common Scheduler "fill to max" tests create many PVCs/Pods; provisioning and binding can exceed 5m on loaded clusters.
 	e2eSchedulerFillPodsWaitTimeout = 10 * time.Minute
+	// Setup: parallel VirtualDisks → BlockDevice CRs may lag agent discovery; 3m was flaky with ~9 disks on loaded stands.
+	e2eSchedulerSetupBlockDeviceDiscoveryTimeout = 15 * time.Minute
 
 	// Scheduler cleanup: pod termination and CSI PV teardown must not share one deadline — many PVs delete serially.
 	e2eSchedulerPodCleanupTimeout = 5 * time.Minute
@@ -4473,11 +4852,14 @@ func cleanupE2EPods(ctx context.Context, cl client.Client) {
 	}
 }
 
+// count sentinel when List fails (e.g. SSH tunnel to nested cluster closed) — do not treat as a real count.
+const e2eCountAPIError = -1
+
 func countE2EPodsDefault(ctx context.Context, cl client.Client) int {
 	var podList corev1.PodList
 	if err := cl.List(ctx, &podList, client.InNamespace(metav1.NamespaceDefault)); err != nil {
 		GinkgoWriter.Printf("count e2e pods: list failed: %v\n", err)
-		return 999999
+		return e2eCountAPIError
 	}
 	n := 0
 	for i := range podList.Items {
@@ -4492,7 +4874,7 @@ func countE2EPVCsDefault(ctx context.Context, cl client.Client) int {
 	var pvcList corev1.PersistentVolumeClaimList
 	if err := cl.List(ctx, &pvcList, client.InNamespace(metav1.NamespaceDefault)); err != nil {
 		GinkgoWriter.Printf("count e2e PVCs: list failed: %v\n", err)
-		return 999999
+		return e2eCountAPIError
 	}
 	n := 0
 	for i := range pvcList.Items {
@@ -4509,7 +4891,7 @@ func countE2ERelatedPVs(ctx context.Context, cl client.Client) int {
 	var list corev1.PersistentVolumeList
 	if err := cl.List(ctx, &list); err != nil {
 		GinkgoWriter.Printf("count e2e PVs: list failed: %v\n", err)
-		return 999999
+		return e2eCountAPIError
 	}
 	n := 0
 	for i := range list.Items {
@@ -4541,6 +4923,10 @@ func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, podPha
 		if n == 0 {
 			break
 		}
+		if n == e2eCountAPIError {
+			GinkgoWriter.Printf("Waiting for e2e Pods: API list failed (SSH tunnel closed or API unreachable); skip pod wait\n")
+			break
+		}
 		GinkgoWriter.Printf("Waiting for e2e Pods to terminate before PVC cleanup: %d remaining\n", n)
 		time.Sleep(3 * time.Second)
 	}
@@ -4551,6 +4937,10 @@ func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, podPha
 		podCount := countE2EPodsDefault(ctx, cl)
 		pvcCount := countE2EPVCsDefault(ctx, cl)
 		pvCount := countE2ERelatedPVs(ctx, cl)
+		if podCount == e2eCountAPIError || pvcCount == e2eCountAPIError || pvCount == e2eCountAPIError {
+			GinkgoWriter.Printf("Cleanup wait: API list failed (tunnel closed?); stopping wait — verify resources manually if needed\n")
+			return
+		}
 		if podCount == 0 && pvcCount == 0 && pvCount == 0 {
 			GinkgoWriter.Println("All e2e Pods, PVCs, and related PVs deleted")
 			return
@@ -4635,6 +5025,7 @@ func schedulerCleanupWorkloadBeforeNextFill(ctx context.Context, cl client.Clien
 	// If cleanupE2EPodsAndPVCsWithWait hit its deadline, PVs can remain Released while CSI waits for detach/delete.
 	// Deleting LVMLogicalVolume CRs in that window makes the provisioner error (LLV not found) and leaves PV stuck.
 	n := countE2ERelatedPVs(ctx, cl)
+	Expect(n).NotTo(Equal(e2eCountAPIError), "cannot list PVs (API unreachable — SSH tunnel to test cluster may be closed)")
 	Expect(n).To(BeZero(),
 		"e2e-related PVs must be gone before LVMLogicalVolume cleanup; leftover PVs mean CSI has not finished delete/detach (see VolumeAttachments, VolumeFailedDelete)")
 	By("Removing LVMLogicalVolumes for e2e LVGs after PVC deletion (thin LVs must leave the VG)")

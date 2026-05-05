@@ -91,6 +91,17 @@ fix-mod-permissions: ## Writable storage-e2e in GOMODCACHE or GOPATH (PrepareBoo
 					patch -p0 --batch -d "$$dir" -i "$$RP" || exit 1; \
 					echo "Applied reconnect-after-add-nodes patch in $$dir"; \
 				fi; \
+				DM="$(CURDIR)/patches/storage-e2e-dhctl-bootstrap-mount-ssh-key.diff"; \
+				DE2M="$(CURDIR)/patches/storage-e2e-dhctl-bootstrap-env-to-mount.diff"; \
+				if [ -f "$$dir/pkg/cluster/setup.go" ] && ! grep -q 'id_rsa:/root/.ssh/id_rsa' "$$dir/pkg/cluster/setup.go" 2>/dev/null; then \
+					if grep -q 'FORCE_NO_PRIVATE_KEYS=true' "$$dir/pkg/cluster/setup.go" 2>/dev/null && [ -f "$$DE2M" ]; then \
+						patch -p0 --batch -d "$$dir" -i "$$DE2M" || exit 1; \
+						echo "Applied dhctl bootstrap env→mount patch in $$dir"; \
+					elif [ -f "$$DM" ]; then \
+						patch -p0 --batch -d "$$dir" -i "$$DM" || exit 1; \
+						echo "Applied dhctl bootstrap mount-key patch in $$dir"; \
+					fi; \
+				fi; \
 			fi; \
 		done; \
 	done
