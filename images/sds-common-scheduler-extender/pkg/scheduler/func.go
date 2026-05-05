@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert/yaml"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -360,17 +361,29 @@ func discoverProvisionerForPVC(
 		return discoveredProvisioner, nil
 	}
 
-	// Get provisioner from StorageClass
+	// Get provisioner from StorageClass.
+	//
+	// Tolerate a missing StorageClass: in Kubernetes, storageClassName is a
+	// matching label between PV and PVC, not a hard reference, so PVs can
+	// legitimately reference a non-existent SC (statically provisioned PVs,
+	// PVs that survived their SC being deleted, SC migrations, etc.). In
+	// such cases we fall through to PV-based provisioner discovery instead
+	// of failing the whole scheduling request.
 	if pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != "" {
 		log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] can't find provisioner in pvc annotations, check in storageClass with name: %s", *pvc.Spec.StorageClassName))
 		storageClass := &storagev1.StorageClass{}
-		if err := cl.Get(ctx, client.ObjectKey{Name: *pvc.Spec.StorageClassName}, storageClass); err != nil {
+		err := cl.Get(ctx, client.ObjectKey{Name: *pvc.Spec.StorageClassName}, storageClass)
+		switch {
+		case err == nil:
+			discoveredProvisioner = storageClass.Provisioner
+			log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] discover provisioner %s in storageClass: %+v", discoveredProvisioner, storageClass))
+			if discoveredProvisioner != "" {
+				return discoveredProvisioner, nil
+			}
+		case apierrors.IsNotFound(err):
+			log.Debug(fmt.Sprintf("[discoverProvisionerForPVC] StorageClass %s not found, falling back to PV-based provisioner discovery", *pvc.Spec.StorageClassName))
+		default:
 			return "", fmt.Errorf("[discoverProvisionerForPVC] error getting StorageClass %s: %v", *pvc.Spec.StorageClassName, err)
-		}
-		discoveredProvisioner = storageClass.Provisioner
-		log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] discover provisioner %s in storageClass: %+v", discoveredProvisioner, storageClass))
-		if discoveredProvisioner != "" {
-			return discoveredProvisioner, nil
 		}
 	}
 
@@ -459,11 +472,23 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 }
 
 // getStorageClassesUsedByPVCs fetches only the StorageClasses referenced by PVCs.
+//
+// It is intentionally tolerant towards PVCs without a StorageClassName and towards
+// references to non-existent StorageClass objects: in both cases the corresponding
+// entry is just absent from the returned map. Such PVCs represent statically
+// provisioned PersistentVolumes (or PVCs that survived their StorageClass being
+// removed/renamed) — both are valid scenarios per the Kubernetes API contract,
+// where storageClassName is a matching label rather than a hard reference to a
+// StorageClass object (see https://kubernetes.io/docs/concepts/storage/persistent-volumes/#class).
+//
+// Callers should drop PVCs whose StorageClass is missing from the returned map
+// (e.g. via dropPVCsWithMissingSC) instead of failing the whole scheduling
+// request.
 func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map[string]*corev1.PersistentVolumeClaim) (map[string]*storagev1.StorageClass, error) {
 	uniqueSCNames := make(map[string]struct{}, len(pvcs))
 	for _, pvc := range pvcs {
-		if pvc.Spec.StorageClassName == nil {
-			return nil, fmt.Errorf("no StorageClass specified for PVC %s", pvc.Name)
+		if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName == "" {
+			continue
 		}
 		uniqueSCNames[*pvc.Spec.StorageClassName] = struct{}{}
 	}
@@ -472,7 +497,7 @@ func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map
 	for scName := range uniqueSCNames {
 		sc := &storagev1.StorageClass{}
 		if err := cl.Get(ctx, client.ObjectKey{Name: scName}, sc); err != nil {
-			if client.IgnoreNotFound(err) == nil {
+			if apierrors.IsNotFound(err) {
 				continue
 			}
 			return nil, fmt.Errorf("unable to get StorageClass %s: %w", scName, err)
@@ -481,6 +506,51 @@ func getStorageClassesUsedByPVCs(ctx context.Context, cl client.Client, pvcs map
 	}
 
 	return result, nil
+}
+
+// dropPVCsWithMissingSC removes from managedPVCs all PVCs whose StorageClass is
+// not present in scs (either StorageClassName is empty/nil or the SC object does
+// not exist in the cluster). It returns the list of dropped PVCs so the caller
+// can log them and emit additional diagnostics (e.g. for Pending PVCs whose
+// volume can never be provisioned without an existing StorageClass).
+//
+// Removing such PVCs (instead of failing the whole pod-scheduling request) is the
+// behavior consistent with the upstream kube-scheduler VolumeBinding plugin:
+// for bound PVCs it relies on the PV's nodeAffinity and never consults the
+// StorageClass, so a PV referencing a missing StorageClass schedules normally.
+func dropPVCsWithMissingSC(
+	managedPVCs map[string]*corev1.PersistentVolumeClaim,
+	scs map[string]*storagev1.StorageClass,
+) []*corev1.PersistentVolumeClaim {
+	var dropped []*corev1.PersistentVolumeClaim
+	for pvcName, pvc := range managedPVCs {
+		if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName == "" {
+			dropped = append(dropped, pvc)
+			delete(managedPVCs, pvcName)
+			continue
+		}
+		if _, ok := scs[*pvc.Spec.StorageClassName]; !ok {
+			dropped = append(dropped, pvc)
+			delete(managedPVCs, pvcName)
+		}
+	}
+	return dropped
+}
+
+// formatDroppedPVCsForLog returns a "namespace/name" list and a separate list of
+// Pending PVCs that reference a missing StorageClass — those will never be
+// dynamically provisioned and the resulting Pod will get stuck in
+// ContainerCreating with FailedMount, so the operator deserves a louder warning
+// than the generic "dropped from scheduling decision" message.
+func formatDroppedPVCsForLog(dropped []*corev1.PersistentVolumeClaim) (allKeys []string, pendingKeys []string) {
+	for _, pvc := range dropped {
+		key := pvc.Namespace + "/" + pvc.Name
+		allKeys = append(allKeys, key)
+		if pvc.Status.Phase == corev1.ClaimPending {
+			pendingKeys = append(pendingKeys, key)
+		}
+	}
+	return allKeys, pendingKeys
 }
 
 // getNewControlPlane checks whether the sds-replicated-volume module uses the new control plane

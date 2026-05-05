@@ -103,17 +103,27 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to get StorageClasses: %s", err))
 		return
 	}
-	for pvcName, pvc := range managedPVCs {
-		if pvc.Spec.StorageClassName == nil {
-			servingLog.Error(fmt.Errorf("PVC %s has no StorageClassName", pvcName), "unable to get StorageClass from PVC")
-			writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("PVC %s has no StorageClassName", pvcName))
-			return
+
+	// Drop managed PVCs whose StorageClass is missing or unset. Such PVCs are
+	// valid in Kubernetes (e.g. statically provisioned PVs, PVs that survived
+	// the deletion of their StorageClass) and the upstream kube-scheduler does
+	// not require the SC object for already-bound PVCs. The extender has no
+	// actionable scheduling decision to make for them, so we skip these PVCs
+	// instead of failing the whole pod-scheduling request.
+	if dropped := dropPVCsWithMissingSC(managedPVCs, scUsedByPVCs); len(dropped) > 0 {
+		allKeys, pendingKeys := formatDroppedPVCsForLog(dropped)
+		servingLog.Warning(fmt.Sprintf("dropping PVCs without an existing StorageClass from scheduling decision: %v", allKeys))
+		if len(pendingKeys) > 0 {
+			servingLog.Warning(fmt.Sprintf("Pending PVCs reference a missing StorageClass and will never be dynamically provisioned (the Pod will likely get stuck in ContainerCreating with FailedMount): %v", pendingKeys))
 		}
-		if _, found := scUsedByPVCs[*pvc.Spec.StorageClassName]; !found {
-			servingLog.Error(fmt.Errorf("StorageClass %s not found for PVC %s", *pvc.Spec.StorageClassName, pvcName), "unable to get StorageClass from PVC")
-			writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("StorageClass %s not found for PVC %s", *pvc.Spec.StorageClassName, pvcName))
-			return
+	}
+	if len(managedPVCs) == 0 {
+		servingLog.Debug("After filtering out PVCs with missing StorageClass, no managed PVCs left. Return the same nodes")
+		if err := writeNodeNamesResponse(w, servingLog, nodeNames); err != nil {
+			servingLog.Error(err, "unable to write node names response")
+			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
+		return
 	}
 
 	servingLog.Debug("starts to extract PVC requested sizes")

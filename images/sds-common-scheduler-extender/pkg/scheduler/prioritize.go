@@ -91,17 +91,25 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	for pvcName, pvc := range managedPVCs {
-		if pvc.Spec.StorageClassName == nil {
-			servingLog.Error(fmt.Errorf("PVC %s has no StorageClassName", pvcName), "unable to get StorageClass from PVC")
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
+
+	// Drop managed PVCs whose StorageClass is missing or unset. See filter.go
+	// for the rationale: the upstream kube-scheduler does not require the SC
+	// object for bound PVCs, and refusing to score for the whole pod when one
+	// PVC's SC is gone would break statically provisioned PVs and SC migrations.
+	if dropped := dropPVCsWithMissingSC(managedPVCs, scUsedByPVCs); len(dropped) > 0 {
+		allKeys, pendingKeys := formatDroppedPVCsForLog(dropped)
+		servingLog.Warning(fmt.Sprintf("dropping PVCs without an existing StorageClass from prioritize decision: %v", allKeys))
+		if len(pendingKeys) > 0 {
+			servingLog.Warning(fmt.Sprintf("Pending PVCs reference a missing StorageClass and will never be dynamically provisioned (the Pod will likely get stuck in ContainerCreating with FailedMount): %v", pendingKeys))
 		}
-		if _, found := scUsedByPVCs[*pvc.Spec.StorageClassName]; !found {
-			servingLog.Error(fmt.Errorf("StorageClass %s not found for PVC %s", *pvc.Spec.StorageClassName, pvcName), "unable to get StorageClass from PVC")
+	}
+	if len(managedPVCs) == 0 {
+		servingLog.Debug("After filtering out PVCs with missing StorageClass, no managed PVCs left. Return the same nodes with 0 score")
+		if err := writeNodeScoresResponse(w, servingLog, nodeNames, 0); err != nil {
+			servingLog.Error(err, "unable to write node scores response")
 			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
 		}
+		return
 	}
 
 	servingLog.Debug("starts to extract PVC requested sizes")
