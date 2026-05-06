@@ -1,11 +1,11 @@
 module github.com/deckhouse/sds-node-configurator/e2e
 
-go 1.25.7
+go 1.26.0
 
 require (
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260114125558-7fd7152586ff
-	github.com/deckhouse/storage-e2e v0.0.0-20260303112441-16b274872c5f
+	github.com/deckhouse/storage-e2e v0.0.0-20260424122328-be05f0b1b4cc
 	github.com/deckhouse/virtualization/api v1.0.0
 	github.com/onsi/ginkgo/v2 v2.23.3
 	github.com/onsi/gomega v1.37.0

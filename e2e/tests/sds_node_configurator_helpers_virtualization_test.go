@@ -477,7 +477,8 @@ func waitForVirtualizationModuleReadyIfNeeded(ctx context.Context) error {
 		return nil
 	}
 
-	sshKeyPath, err := cluster.GetSSHPrivateKeyPath()
+	//sshKeyPath, err := cluster.GetSSHPrivateKeyPath()
+	sshKeyPath, err := "", fmt.Errorf("cluster.GetSSHPrivateKeyPath() fn not found, need to found another implementation")
 	if err != nil {
 		return fmt.Errorf("ssh key for virtualization pre-wait: %w", err)
 	}

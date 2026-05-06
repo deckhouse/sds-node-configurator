@@ -33,9 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/storage-e2e/pkg/cluster"
-	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
-	"github.com/deckhouse/storage-e2e/pkg/ssh"
 )
 
 // clusterResumeState mirrors storage-e2e cluster-state.json (namespace after VMs are created).
@@ -108,37 +105,38 @@ func formatBlockDevicesHint(items []v1alpha1.BlockDevice, expectedNode string) s
 // runLsblkViaDirectSSH connects to the node by IP the same way we connect to the master (SSH_HOST / jump → node).
 // Gets node IP from the test cluster API and uses the same SSH credentials (jump host if set, VM user, key).
 func runLsblkViaDirectSSH(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser string) (map[string]lsblkLine, error) {
-	nodeIP, err := kubernetes.GetNodeInternalIP(ctx, testKubeconfig, nodeName)
-	if err != nil {
-		return nil, fmt.Errorf("get IP for node %s: %w", nodeName, err)
-	}
-	keyPath, err := cluster.GetSSHPrivateKeyPath()
-	if err != nil {
-		return nil, fmt.Errorf("get SSH key path: %w", err)
-	}
-	jumpKeyPath := e2eConfigSSHJumpKeyPath()
-	if jumpKeyPath == "" {
-		jumpKeyPath = keyPath
-	}
-	var sshClient ssh.Client
-	if e2eConfigSSHJumpHost() != "" {
-		jumpUser := e2eConfigSSHJumpUser()
-		if jumpUser == "" {
-			jumpUser = e2eConfigSSHUser()
-		}
-		sshClient, err = ssh.NewClientWithJumpHost(jumpUser, e2eConfigSSHJumpHost(), jumpKeyPath, sshUser, nodeIP, keyPath)
-	} else {
-		sshClient, err = ssh.NewClient(sshUser, nodeIP, keyPath)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("SSH to node %s (%s@%s): %w", nodeName, sshUser, nodeIP, err)
-	}
-	defer sshClient.Close()
-	out, err := sshClient.Exec(ctx, "lsblk -b -P -o NAME,SIZE,SERIAL,PATH -n")
-	if err != nil {
-		return nil, fmt.Errorf("run lsblk on node %s (%s@%s): %w", nodeName, sshUser, nodeIP, err)
-	}
-	return parseLsblkOutput(out), nil
+	return nil, fmt.Errorf("Need to implement")
+	//nodeIP, err := kubernetes.GetNodeInternalIP(ctx, testKubeconfig, nodeName)
+	//if err != nil {
+	//	return nil, fmt.Errorf("get IP for node %s: %w", nodeName, err)
+	//}
+	//keyPath, err := cluster.GetSSHPrivateKeyPath()
+	//if err != nil {
+	//	return nil, fmt.Errorf("get SSH key path: %w", err)
+	//}
+	//jumpKeyPath := e2eConfigSSHJumpKeyPath()
+	//if jumpKeyPath == "" {
+	//	jumpKeyPath = keyPath
+	//}
+	//var sshClient ssh.Client
+	//if e2eConfigSSHJumpHost() != "" {
+	//	jumpUser := e2eConfigSSHJumpUser()
+	//	if jumpUser == "" {
+	//		jumpUser = e2eConfigSSHUser()
+	//	}
+	//	sshClient, err = ssh.NewClientWithJumpHost(jumpUser, e2eConfigSSHJumpHost(), jumpKeyPath, sshUser, nodeIP, keyPath)
+	//} else {
+	//	sshClient, err = ssh.NewClient(sshUser, nodeIP, keyPath)
+	//}
+	//if err != nil {
+	//	return nil, fmt.Errorf("SSH to node %s (%s@%s): %w", nodeName, sshUser, nodeIP, err)
+	//}
+	//defer sshClient.Close()
+	//out, err := sshClient.Exec(ctx, "lsblk -b -P -o NAME,SIZE,SERIAL,PATH -n")
+	//if err != nil {
+	//	return nil, fmt.Errorf("run lsblk on node %s (%s@%s): %w", nodeName, sshUser, nodeIP, err)
+	//}
+	//return parseLsblkOutput(out), nil
 }
 
 // e2eExecOnTestClusterNodeSSH runs a shell command on a test cluster node (same SSH path as lsblk: jump host + node IP).
@@ -153,37 +151,38 @@ func runLsblkViaDirectSSH(ctx context.Context, testKubeconfig *rest.Config, node
 // DEBUG lines (SSH key loaded / ssh-agent) per hop, so a single Exec can produce several [DEBUG] lines.
 // To reduce noise, run tests with a lower log level for storage-e2e if supported (e.g. LOG_LEVEL=info).
 func e2eExecOnTestClusterNodeSSH(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser, command string) (string, error) {
-	nodeIP, err := kubernetes.GetNodeInternalIP(ctx, testKubeconfig, nodeName)
-	if err != nil {
-		return "", fmt.Errorf("get IP for node %s: %w", nodeName, err)
-	}
-	keyPath, err := cluster.GetSSHPrivateKeyPath()
-	if err != nil {
-		return "", fmt.Errorf("get SSH key path: %w", err)
-	}
-	jumpKeyPath := e2eConfigSSHJumpKeyPath()
-	if jumpKeyPath == "" {
-		jumpKeyPath = keyPath
-	}
-	var sshClient ssh.Client
-	if e2eConfigSSHJumpHost() != "" {
-		jumpUser := e2eConfigSSHJumpUser()
-		if jumpUser == "" {
-			jumpUser = e2eConfigSSHUser()
-		}
-		sshClient, err = ssh.NewClientWithJumpHost(jumpUser, e2eConfigSSHJumpHost(), jumpKeyPath, sshUser, nodeIP, keyPath)
-	} else {
-		sshClient, err = ssh.NewClient(sshUser, nodeIP, keyPath)
-	}
-	if err != nil {
-		return "", fmt.Errorf("SSH to node %s (%s@%s): %w", nodeName, sshUser, nodeIP, err)
-	}
-	defer sshClient.Close()
-	out, err := sshClient.Exec(ctx, command)
-	if err != nil {
-		return out, fmt.Errorf("exec on node %s: %w", nodeName, err)
-	}
-	return out, nil
+	return "", fmt.Errorf("Need to implement")
+	//nodeIP, err := kubernetes.GetNodeInternalIP(ctx, testKubeconfig, nodeName)
+	//if err != nil {
+	//	return "", fmt.Errorf("get IP for node %s: %w", nodeName, err)
+	//}
+	//keyPath, err := cluster.GetSSHPrivateKeyPath()
+	//if err != nil {
+	//	return "", fmt.Errorf("get SSH key path: %w", err)
+	//}
+	//jumpKeyPath := e2eConfigSSHJumpKeyPath()
+	//if jumpKeyPath == "" {
+	//	jumpKeyPath = keyPath
+	//}
+	//var sshClient ssh.Client
+	//if e2eConfigSSHJumpHost() != "" {
+	//	jumpUser := e2eConfigSSHJumpUser()
+	//	if jumpUser == "" {
+	//		jumpUser = e2eConfigSSHUser()
+	//	}
+	//	sshClient, err = ssh.NewClientWithJumpHost(jumpUser, e2eConfigSSHJumpHost(), jumpKeyPath, sshUser, nodeIP, keyPath)
+	//} else {
+	//	sshClient, err = ssh.NewClient(sshUser, nodeIP, keyPath)
+	//}
+	//if err != nil {
+	//	return "", fmt.Errorf("SSH to node %s (%s@%s): %w", nodeName, sshUser, nodeIP, err)
+	//}
+	//defer sshClient.Close()
+	//out, err := sshClient.Exec(ctx, command)
+	//if err != nil {
+	//	return out, fmt.Errorf("exec on node %s: %w", nodeName, err)
+	//}
+	//return out, nil
 }
 
 // e2eVgNameListedInVgsOutput returns true if a line in vgs output (one VG name per line) equals vgName.

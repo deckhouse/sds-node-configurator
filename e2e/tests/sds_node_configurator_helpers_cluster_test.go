@@ -233,7 +233,8 @@ func e2eSyncCleanupBaseClusterNamespace(ctx context.Context, clusterStatePath st
 		return
 	}
 
-	sshKeyPath, err := cluster.GetSSHPrivateKeyPath()
+	//sshKeyPath, err := cluster.GetSSHPrivateKeyPath()
+	sshKeyPath, err := "", fmt.Errorf("cluster.GetSSHPrivateKeyPath() fn not found, need to found another implementation")
 	if err != nil {
 		GinkgoWriter.Printf("    ⚠️  cleanup: SSH key: %v\n", err)
 		return
