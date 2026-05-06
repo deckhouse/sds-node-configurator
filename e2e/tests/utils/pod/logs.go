@@ -1,0 +1,51 @@
+/*
+Copyright 2026 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+package pod
+
+import (
+	"context"
+	"fmt"
+	"io"
+
+	"k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes"
+)
+
+func GetLogs(ctx context.Context, cs *kubernetes.Clientset, namespace, podName string, options v1.PodLogOptions) (string, error) {
+	if cs == nil {
+		return "", fmt.Errorf("kubernetes clientset is nil")
+	}
+	if namespace == "" {
+		return "", fmt.Errorf("namespace must not be empty")
+	}
+	if podName == "" {
+		return "", fmt.Errorf("pod name must not be empty")
+	}
+
+	req := cs.CoreV1().Pods(namespace).GetLogs(podName, &options)
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to stream logs: %w", err)
+	}
+	defer stream.Close()
+
+	bytes, err := io.ReadAll(stream)
+	if err != nil {
+		return "", fmt.Errorf("failed to read logs: %w", err)
+	}
+
+	return string(bytes), nil
+}
