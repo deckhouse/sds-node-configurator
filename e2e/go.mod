@@ -3,11 +3,13 @@ module github.com/deckhouse/sds-node-configurator/e2e
 go 1.25.7
 
 require (
+	github.com/caarlos0/env/v11 v11.4.1
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260114125558-7fd7152586ff
 	github.com/deckhouse/storage-e2e v0.0.0-20260303112441-16b274872c5f
 	github.com/deckhouse/virtualization/api v1.0.0
 	github.com/onsi/ginkgo/v2 v2.23.3
 	github.com/onsi/gomega v1.37.0
+	github.com/stretchr/testify v1.11.1
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
 	k8s.io/client-go v0.34.1
@@ -43,7 +45,8 @@ require (
 	github.com/openshift/custom-resource-status v1.1.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pkg/sftp v1.13.10 // indirect
-	github.com/spf13/pflag v1.0.7 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
