@@ -44,8 +44,8 @@ type SSH struct {
 }
 
 type Jump struct {
-	Host           string `env:"JUMP_HOST"`
-	User           string `env:"JUMP_USER"`
+	Host           string `env:"HOST"`
+	User           string `env:"USER"`
 	PrivateKeyPath string `env:"KEY_PATH"`
 }
 

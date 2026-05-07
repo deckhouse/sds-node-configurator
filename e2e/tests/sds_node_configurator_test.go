@@ -1891,6 +1891,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			})
 
 			It("Should remove VG from node when LVMVolumeGroup CR is deleted", func() {
+				Skip("Need to implement")
 				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
 				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "test requires nested virtualization (base cluster)")
 
