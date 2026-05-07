@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deckhouse/sds-node-configurator/e2e/cfg"
 	"github.com/deckhouse/storage-e2e/pkg/cluster"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -86,16 +87,8 @@ func e2eTryDeleteClusterLockViaKubeconfig(ctx context.Context) error {
 // e2eForceReleaseClusterLockViaSSH opens the same SSH + API tunnel as UseExistingCluster (step 1) and deletes the lock ConfigMap.
 // Use when KUBE_CONFIG_PATH uses 127.0.0.1 and nothing is listening until storage-e2e establishes the tunnel.
 func e2eForceReleaseClusterLockViaSSH(ctx context.Context) error {
-	sshHost := e2eConfigSSHHost()
-	sshUser := e2eConfigSSHUser()
-	if sshHost == "" || sshUser == "" {
-		return fmt.Errorf("SSH_HOST and SSH_USER are required for SSH lock release")
-	}
-	//sshKeyPath, err := cluster.GetSSHPrivateKeyPath()
-	sshKeyPath, err := "", fmt.Errorf("cluster.GetSSHPrivateKeyPath() fn not found, need to found another implementation")
-	if err != nil {
-		return err
-	}
+	e2eCfg := cfg.Load()
+
 	tmpDir, err := os.MkdirTemp("", "e2e-lock-release-kube-*")
 	if err != nil {
 		return err
@@ -103,23 +96,16 @@ func e2eForceReleaseClusterLockViaSSH(ctx context.Context) error {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	var opts cluster.ConnectClusterOptions
-	if e2eConfigSSHJumpHost() != "" {
-		jumpUser := e2eConfigSSHJumpUser()
-		if jumpUser == "" {
-			jumpUser = sshUser
-		}
-		jumpKey := e2eConfigSSHJumpKeyPath()
-		if jumpKey == "" {
-			jumpKey = sshKeyPath
-		}
+
+	if e2eCfg.SSH.Jump.Host != "" {
 		opts = cluster.ConnectClusterOptions{
-			SSHUser: jumpUser, SSHHost: e2eConfigSSHJumpHost(), SSHKeyPath: jumpKey,
-			UseJumpHost: true, TargetUser: sshUser, TargetHost: sshHost, TargetKeyPath: sshKeyPath,
+			SSHUser: e2eCfg.SSH.Jump.User, SSHHost: e2eCfg.SSH.Jump.Host, SSHKeyPath: e2eCfg.SSH.Jump.PrivateKeyPath,
+			UseJumpHost: true, TargetUser: e2eCfg.SSH.User, TargetHost: e2eCfg.SSH.Host, TargetKeyPath: e2eCfg.SSH.PrivateKey,
 			KubeconfigOutputDir: tmpDir,
 		}
 	} else {
 		opts = cluster.ConnectClusterOptions{
-			SSHUser: sshUser, SSHHost: sshHost, SSHKeyPath: sshKeyPath,
+			SSHUser: e2eCfg.SSH.User, SSHHost: e2eCfg.SSH.Host, SSHKeyPath: e2eCfg.SSH.PrivateKey,
 			UseJumpHost: false, KubeconfigOutputDir: tmpDir,
 		}
 	}

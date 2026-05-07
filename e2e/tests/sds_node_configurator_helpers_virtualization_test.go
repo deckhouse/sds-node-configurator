@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deckhouse/sds-node-configurator/e2e/cfg"
 	virtv1alpha2 "github.com/deckhouse/virtualization/api/core/v1alpha2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -471,17 +472,7 @@ func waitForVirtualizationModuleReadyIfNeeded(ctx context.Context) error {
 		return nil
 	}
 
-	sshHost := e2eConfigSSHHost()
-	sshUser := e2eConfigSSHUser()
-	if sshHost == "" || sshUser == "" {
-		return nil
-	}
-
-	//sshKeyPath, err := cluster.GetSSHPrivateKeyPath()
-	sshKeyPath, err := "", fmt.Errorf("cluster.GetSSHPrivateKeyPath() fn not found, need to found another implementation")
-	if err != nil {
-		return fmt.Errorf("ssh key for virtualization pre-wait: %w", err)
-	}
+	e2eCfg := cfg.Load()
 
 	kubeconfigDir, err := e2eTestTempDirFromStack()
 	if err != nil {
@@ -491,34 +482,18 @@ func waitForVirtualizationModuleReadyIfNeeded(ctx context.Context) error {
 		return fmt.Errorf("mkdir kubeconfig dir for virtualization pre-wait: %w", err)
 	}
 
-	useJump := e2eConfigSSHJumpHost() != ""
-	jumpUser := e2eConfigSSHJumpUser()
-	if jumpUser == "" {
-		jumpUser = sshUser
-	}
-	jumpHost := e2eConfigSSHJumpHost()
-	jumpKeyPath := e2eConfigSSHJumpKeyPath()
-	if jumpKeyPath == "" {
-		jumpKeyPath = sshKeyPath
-	}
+	var opts cluster.ConnectClusterOptions
 
-	opts := cluster.ConnectClusterOptions{
-		SSHUser:             sshUser,
-		SSHHost:             sshHost,
-		SSHKeyPath:          sshKeyPath,
-		UseJumpHost:         useJump,
-		KubeconfigOutputDir: kubeconfigDir,
-	}
-	if useJump {
+	if e2eCfg.SSH.Jump.Host != "" {
 		opts = cluster.ConnectClusterOptions{
-			SSHUser:             jumpUser,
-			SSHHost:             jumpHost,
-			SSHKeyPath:          jumpKeyPath,
-			UseJumpHost:         true,
-			TargetUser:          sshUser,
-			TargetHost:          sshHost,
-			TargetKeyPath:       sshKeyPath,
+			SSHUser: e2eCfg.SSH.Jump.User, SSHHost: e2eCfg.SSH.Jump.Host, SSHKeyPath: e2eCfg.SSH.Jump.PrivateKeyPath,
+			UseJumpHost: true, TargetUser: e2eCfg.SSH.User, TargetHost: e2eCfg.SSH.Host, TargetKeyPath: e2eCfg.SSH.PrivateKey,
 			KubeconfigOutputDir: kubeconfigDir,
+		}
+	} else {
+		opts = cluster.ConnectClusterOptions{
+			SSHUser: e2eCfg.SSH.User, SSHHost: e2eCfg.SSH.Host, SSHKeyPath: e2eCfg.SSH.PrivateKey,
+			UseJumpHost: false, KubeconfigOutputDir: kubeconfigDir,
 		}
 	}
 

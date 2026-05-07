@@ -26,6 +26,7 @@ import (
 	"runtime"
 	"strings"
 
+	e2ecfg "github.com/deckhouse/sds-node-configurator/e2e/cfg"
 	virtv1alpha2 "github.com/deckhouse/virtualization/api/core/v1alpha2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -219,6 +220,7 @@ func e2eSyncCleanupBaseClusterNamespace(ctx context.Context, clusterStatePath st
 			GinkgoWriter.Printf("    ⚠️  cleanup: read %s: %v\n", clusterStatePath, readErr)
 		}
 	}
+	cfg := e2ecfg.Load()
 	if ns == "" {
 		ns = e2eConfigNamespace()
 		GinkgoWriter.Printf("    ▶️  cleanup: namespace from TEST_CLUSTER_NAMESPACE=%q\n", ns)
@@ -226,40 +228,17 @@ func e2eSyncCleanupBaseClusterNamespace(ctx context.Context, clusterStatePath st
 		GinkgoWriter.Printf("    ▶️  cleanup: namespace from cluster-state.json: %q\n", ns)
 	}
 
-	sshHost := e2eConfigSSHHost()
-	sshUser := e2eConfigSSHUser()
-	if sshHost == "" || sshUser == "" {
-		GinkgoWriter.Printf("    ⚠️  cleanup: SSH_HOST or SSH_USER not set, skip base cluster cleanup\n")
-		return
-	}
-
-	//sshKeyPath, err := cluster.GetSSHPrivateKeyPath()
-	sshKeyPath, err := "", fmt.Errorf("cluster.GetSSHPrivateKeyPath() fn not found, need to found another implementation")
-	if err != nil {
-		GinkgoWriter.Printf("    ⚠️  cleanup: SSH key: %v\n", err)
-		return
-	}
-
-	useJump := e2eConfigSSHJumpHost() != ""
 	var opts cluster.ConnectClusterOptions
-	if !useJump {
+	if cfg.SSH.Jump.Host != "" {
 		opts = cluster.ConnectClusterOptions{
-			SSHUser: sshUser, SSHHost: sshHost, SSHKeyPath: sshKeyPath,
+			SSHUser: cfg.SSH.User, SSHHost: cfg.SSH.Host, SSHKeyPath: cfg.SSH.PrivateKey,
 			UseJumpHost:         false,
 			KubeconfigOutputDir: kubeconfigDir,
 		}
 	} else {
-		jumpUser := e2eConfigSSHJumpUser()
-		if jumpUser == "" {
-			jumpUser = sshUser
-		}
-		jumpKey := e2eConfigSSHJumpKeyPath()
-		if jumpKey == "" {
-			jumpKey = sshKeyPath
-		}
 		opts = cluster.ConnectClusterOptions{
-			SSHUser: jumpUser, SSHHost: e2eConfigSSHJumpHost(), SSHKeyPath: jumpKey,
-			UseJumpHost: true, TargetUser: sshUser, TargetHost: sshHost, TargetKeyPath: sshKeyPath,
+			SSHUser: cfg.SSH.User, SSHHost: cfg.SSH.Jump.Host, SSHKeyPath: cfg.SSH.Jump.PrivateKeyPath,
+			UseJumpHost: true, TargetUser: cfg.SSH.User, TargetHost: cfg.SSH.Host, TargetKeyPath: cfg.SSH.PrivateKey,
 			KubeconfigOutputDir: kubeconfigDir,
 		}
 	}
