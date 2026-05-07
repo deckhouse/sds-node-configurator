@@ -23,14 +23,9 @@ import (
 	e2ecfg "github.com/deckhouse/sds-node-configurator/e2e/cfg"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
-	"github.com/deckhouse/storage-e2e/pkg/setup"
 )
 
 var _ = BeforeSuite(func() {
-	err := setup.Init()
-	Expect(err).NotTo(HaveOccurred(), "Failed to initialize storage-e2e setup")
-
 	_, cfgErr := e2ecfg.New()
 	Expect(cfgErr).NotTo(HaveOccurred(), "Failed to load config")
 	// Before any spec: Ginkgo may shuffle root Ordered Describes; nested cluster must exist first.
@@ -39,9 +34,6 @@ var _ = BeforeSuite(func() {
 
 var _ = AfterSuite(func() {
 	e2eCleanupNestedTestClusterAfterSuite()
-	if err := setup.Close(); err != nil {
-		GinkgoWriter.Printf("Warning: Failed to close logger: %v\n", err)
-	}
 })
 
 func TestSdsNodeConfigurator(t *testing.T) {
