@@ -105,6 +105,7 @@ func formatBlockDevicesHint(items []v1alpha1.BlockDevice, expectedNode string) s
 // runLsblkViaDirectSSH connects to the node by IP the same way we connect to the master (SSH_HOST / jump → node).
 // Gets node IP from the test cluster API and uses the same SSH credentials (jump host if set, VM user, key).
 func runLsblkViaDirectSSH(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser string) (map[string]lsblkLine, error) {
+	// TODO: After migration on main storage-e2e we lost  kubernetes.GetNodeInternalIP and pkg.ssh so it would not be work, need to implement own solution
 	return nil, fmt.Errorf("Need to implement")
 	//nodeIP, err := kubernetes.GetNodeInternalIP(ctx, testKubeconfig, nodeName)
 	//if err != nil {
@@ -151,6 +152,7 @@ func runLsblkViaDirectSSH(ctx context.Context, testKubeconfig *rest.Config, node
 // DEBUG lines (SSH key loaded / ssh-agent) per hop, so a single Exec can produce several [DEBUG] lines.
 // To reduce noise, run tests with a lower log level for storage-e2e if supported (e.g. LOG_LEVEL=info).
 func e2eExecOnTestClusterNodeSSH(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser, command string) (string, error) {
+	// TODO: After migration on main storage-e2e we lost  kubernetes.GetNodeInternalIP and pkg.ssh so it would not be work, need to implement own solution
 	return "", fmt.Errorf("Need to implement")
 	//nodeIP, err := kubernetes.GetNodeInternalIP(ctx, testKubeconfig, nodeName)
 	//if err != nil {
