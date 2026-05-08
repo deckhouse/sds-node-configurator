@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -139,12 +140,33 @@ func e2eDebugPublicKeyFingerprintFromPrivate(path string) (string, string) {
 	return gossh.FingerprintSHA256(signer.PublicKey()), ""
 }
 
+func e2eDebugPublicKeyTypeFromPrivate(path string) (string, string) {
+	if strings.TrimSpace(path) == "" {
+		return "", "private key path is empty"
+	}
+	keyPath := e2eDebugExpandPath(strings.TrimSpace(path))
+	raw, err := os.ReadFile(keyPath)
+	if err != nil {
+		return "", fmt.Sprintf("read private key file: %v", err)
+	}
+	signer, err := gossh.ParsePrivateKey(raw)
+	if err != nil {
+		return "", fmt.Sprintf("parse private key: %v", err)
+	}
+	return signer.PublicKey().Type(), ""
+}
+
 func e2eDebugKeyPairMeta(privatePath, publicKeyEnv string) map[string]any {
 	privFP, privErr := e2eDebugPublicKeyFingerprintFromPrivate(privatePath)
 	pubFP, pubErr := e2eDebugPublicKeyFingerprintFromEnv(publicKeyEnv)
 	meta := map[string]any{
 		"privatePublicFingerprint":    privFP,
 		"configuredPublicFingerprint": pubFP,
+	}
+	if keyType, keyTypeErr := e2eDebugPublicKeyTypeFromPrivate(privatePath); keyTypeErr == "" {
+		meta["privateKeyType"] = keyType
+	} else {
+		meta["privateKeyTypeErr"] = keyTypeErr
 	}
 	if privErr != "" {
 		meta["privateFingerprintErr"] = privErr
@@ -267,10 +289,12 @@ func e2eDebugLogSetupNodeCloudInitBeforeCleanup(ctx context.Context, ns string) 
 	injectedPubKey := e2eDebugExtractCloudInitPubKey(userData)
 	injectedFP, injectedErr := e2eDebugFingerprintFromAuthorizedKey(injectedPubKey)
 	expectedFP, expectedErr := e2eDebugPublicKeyFingerprintFromEnv(os.Getenv("SSH_PUBLIC_KEY"))
+	setupIP := strings.TrimSpace(setupVM.Status.IPAddress)
 	data := map[string]any{
 		"namespace":                 ns,
 		"setupVMName":               setupVM.Name,
 		"setupVMPhase":              setupVM.Status.Phase,
+		"setupVMIP":                 setupIP,
 		"userDataHasCloudUser":      strings.Contains(userData, "name: cloud"),
 		"userDataHasAuthorizedKey":  injectedPubKey != "",
 		"injectedPubKeyFingerprint": injectedFP,
@@ -285,6 +309,61 @@ func e2eDebugLogSetupNodeCloudInitBeforeCleanup(ctx context.Context, ns string) 
 	}
 	e2eDebugLog("pre-fix", "H5", "sds_node_configurator_helpers_cluster_test.go:e2eDebugLogSetupNodeCloudInitBeforeCleanup",
 		"setup-node cloud-init diagnostics", data)
+
+	targetUser := "cloud"
+	if strings.TrimSpace(os.Getenv("SSH_VM_USER")) != "" {
+		targetUser = strings.TrimSpace(os.Getenv("SSH_VM_USER"))
+	}
+	probeData := map[string]any{
+		"targetUser": targetUser,
+		"setupVMIP":  setupIP,
+	}
+	if setupIP == "" {
+		probeData["probeSkipped"] = "setupVMIP is empty"
+		e2eDebugLog("pre-fix", "H6", "sds_node_configurator_helpers_cluster_test.go:e2eDebugLogSetupNodeCloudInitBeforeCleanup",
+			"openssh auth probe skipped", probeData)
+		return
+	}
+
+	keyPath := e2eDebugExpandPath(strings.TrimSpace(cfg.SSH.PrivateKey))
+	args := []string{
+		"-vvv",
+		"-o", "BatchMode=yes",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "ConnectTimeout=15",
+		"-i", keyPath,
+	}
+	jumpHost := strings.TrimSpace(cfg.SSH.Jump.Host)
+	if jumpHost != "" {
+		jumpUser := strings.TrimSpace(cfg.SSH.Jump.User)
+		if jumpUser == "" {
+			jumpUser = strings.TrimSpace(cfg.SSH.User)
+		}
+		args = append(args, "-J", fmt.Sprintf("%s@%s", jumpUser, jumpHost))
+		probeData["jumpUser"] = jumpUser
+		probeData["jumpHostSet"] = true
+	} else {
+		probeData["jumpHostSet"] = false
+	}
+	args = append(args, fmt.Sprintf("%s@%s", targetUser, setupIP), "true")
+	cmd := exec.Command("ssh", args...)
+	out, cmdErr := cmd.CombinedOutput()
+	outStr := string(out)
+	lines := strings.Split(outStr, "\n")
+	if len(lines) > 40 {
+		lines = lines[len(lines)-40:]
+	}
+	probeData["sshExitErr"] = ""
+	if cmdErr != nil {
+		probeData["sshExitErr"] = cmdErr.Error()
+	}
+	probeData["containsNoMutualSignature"] = strings.Contains(outStr, "no mutual signature")
+	probeData["containsNoSupportedMethods"] = strings.Contains(outStr, "no supported methods remain")
+	probeData["containsPermissionDenied"] = strings.Contains(outStr, "Permission denied")
+	probeData["probeOutputTail"] = strings.Join(lines, "\n")
+	e2eDebugLog("pre-fix", "H6", "sds_node_configurator_helpers_cluster_test.go:e2eDebugLogSetupNodeCloudInitBeforeCleanup",
+		"openssh auth probe result", probeData)
 }
 
 // clusterResumeState mirrors storage-e2e cluster-state.json (namespace after VMs are created).
