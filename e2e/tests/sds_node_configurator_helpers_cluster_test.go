@@ -41,6 +41,7 @@ import (
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/storage-e2e/pkg/cluster"
+	gossh "golang.org/x/crypto/ssh"
 )
 
 const (
@@ -62,12 +63,9 @@ func e2eDebugLog(runID, hypothesisID, location, message string, data map[string]
 	if err != nil {
 		return
 	}
-	f, err := os.OpenFile(e2eDebugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	_, _ = f.Write(append(b, '\n'))
+	// #region agent log
+	// Mirror debug payload to CI output so investigation does not depend on runner filesystem access.
+	GinkgoWriter.Printf("    [agent-debug] %s\n", string(b))
 }
 
 func e2eDebugKeyMeta(path string) map[string]any {
@@ -91,6 +89,72 @@ func e2eDebugKeyMeta(path string) map[string]any {
 	}
 	sum := sha256.Sum256(content)
 	meta["sha256"] = hex.EncodeToString(sum[:])
+	return meta
+}
+
+func e2eDebugExpandPath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return filepath.Join(home, path[2:])
+	}
+	return path
+}
+
+func e2eDebugPublicKeyFingerprintFromEnv(publicKeyEnv string) (string, string) {
+	if strings.TrimSpace(publicKeyEnv) == "" {
+		return "", "public key env is empty"
+	}
+	pubData := []byte(strings.TrimSpace(publicKeyEnv))
+	if strings.Contains(publicKeyEnv, "/") || strings.HasPrefix(publicKeyEnv, "~") {
+		path := e2eDebugExpandPath(strings.TrimSpace(publicKeyEnv))
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Sprintf("read public key file: %v", err)
+		}
+		pubData = content
+	}
+	pub, _, _, _, err := gossh.ParseAuthorizedKey(pubData)
+	if err != nil {
+		return "", fmt.Sprintf("parse public key: %v", err)
+	}
+	return gossh.FingerprintSHA256(pub), ""
+}
+
+func e2eDebugPublicKeyFingerprintFromPrivate(path string) (string, string) {
+	if strings.TrimSpace(path) == "" {
+		return "", "private key path is empty"
+	}
+	keyPath := e2eDebugExpandPath(strings.TrimSpace(path))
+	raw, err := os.ReadFile(keyPath)
+	if err != nil {
+		return "", fmt.Sprintf("read private key file: %v", err)
+	}
+	signer, err := gossh.ParsePrivateKey(raw)
+	if err != nil {
+		return "", fmt.Sprintf("parse private key: %v", err)
+	}
+	return gossh.FingerprintSHA256(signer.PublicKey()), ""
+}
+
+func e2eDebugKeyPairMeta(privatePath, publicKeyEnv string) map[string]any {
+	privFP, privErr := e2eDebugPublicKeyFingerprintFromPrivate(privatePath)
+	pubFP, pubErr := e2eDebugPublicKeyFingerprintFromEnv(publicKeyEnv)
+	meta := map[string]any{
+		"privatePublicFingerprint":    privFP,
+		"configuredPublicFingerprint": pubFP,
+	}
+	if privErr != "" {
+		meta["privateFingerprintErr"] = privErr
+	}
+	if pubErr != "" {
+		meta["configuredPublicFingerprintErr"] = pubErr
+	}
+	if privErr == "" && pubErr == "" {
+		meta["fingerprintMatch"] = privFP == pubFP
+	}
 	return meta
 }
 
@@ -384,6 +448,10 @@ func createE2EAlwaysNewClusterWithCleanupOnFailure() *cluster.TestClusterResourc
 			"sshJumpHostSet":        os.Getenv("SSH_JUMP_HOST") != "",
 			"sshJumpUserSet":        os.Getenv("SSH_JUMP_USER") != "",
 			"sshJumpPrivateKeyMeta": e2eDebugKeyMeta(os.Getenv("SSH_JUMP_KEY_PATH")),
+			"sshPublicKeyMeta":      e2eDebugKeyMeta(os.Getenv("SSH_PUBLIC_KEY")),
+			"sshVMUser":             os.Getenv("SSH_VM_USER"),
+			"sshVMUserDefaultCloud": strings.TrimSpace(os.Getenv("SSH_VM_USER")) == "" || strings.TrimSpace(os.Getenv("SSH_VM_USER")) == "cloud",
+			"keyPairMeta":           e2eDebugKeyPairMeta(os.Getenv("SSH_PRIVATE_KEY"), os.Getenv("SSH_PUBLIC_KEY")),
 			"testClusterMode":       e2eConfigTestClusterCreateMode(),
 			"ciEnv":                 os.Getenv("CI") != "",
 			"runnerNameSet":         os.Getenv("RUNNER_NAME") != "",
