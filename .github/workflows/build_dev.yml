@@ -321,8 +321,8 @@ jobs:
           SSH_HOST: ${{ secrets.E2E_SSH_HOST }}
           SSH_USER: ${{ secrets.E2E_SSH_USER }}
           # Jump host for test cluster nodes (10.10.10.x). Without it the test connects to the node directly from runner → connection timed out. Default = base cluster (SSH_HOST).
-          SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST || secrets.E2E_SSH_HOST }}
-          SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER || secrets.E2E_SSH_USER }}
+          SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST  }}
+          SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER  }}
           # API SSH tunnel must match Cleanup: use ProxyJump only when E2E_SSH_JUMP_HOST secret is set. Do not fall back to SSH_HOST here — ssh -J user@host user@host breaks the forward.
           E2E_TUNNEL_SSH_JUMP_HOST: ${{ secrets.E2E_SSH_JUMP_HOST }}
           E2E_TUNNEL_SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER }}

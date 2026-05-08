@@ -21,11 +21,12 @@ import (
 )
 
 type Config struct {
-	TestCluster    TestCluster `envPrefix:"TEST_CLUSTER_"`
-	SSH            SSH         `envPrefix:"SSH_"`
-	KubeConfigPath string      `env:"KUBE_CONFIG_PATH,required"`
-	DKPLicenceKey  string      `env:"DKP_LICENSE_KEY"`
-	LogLevel       string      `env:"LOG_LEVEL" envDefault:"info"`
+	TestCluster       TestCluster `envPrefix:"TEST_CLUSTER_"`
+	SSH               SSH         `envPrefix:"SSH_"`
+	KubeConfigPath    string      `env:"KUBE_CONFIG_PATH,required"`
+	DKPLicenceKey     string      `env:"DKP_LICENSE_KEY"`
+	LogLevel          string      `env:"LOG_LEVEL" envDefault:"info"`
+	YamlClusterConfig string      `env:"YAML_CONFIG_FILENAME" envDefault:"cluster_config.yml"`
 }
 
 type TestCluster struct {

@@ -27,10 +27,18 @@ import (
 )
 
 var _ = BeforeSuite(func() {
-	_, cfgErr := e2ecfg.New()
+	conf, cfgErr := e2ecfg.New()
 	Expect(cfgErr).NotTo(HaveOccurred(), "Failed to load config")
 	// Before any spec: Ginkgo may shuffle root Ordered Describes; nested cluster must exist first.
 	cluster.OutputEnvironmentVariables()
+	Expect(conf).NotTo(BeNil())
+
+	//createCtx, cancel := context.WithTimeout(context.Background(), e2eClusterCreationTimeout)
+	//defer cancel()
+	//
+	//res, err := cluster.CreateTestCluster(createCtx, conf.YamlClusterConfig)
+	//Expect(err).NotTo(HaveOccurred(), "Test cluster should be created successfully")
+	//GinkgoWriter.Println(&res)
 	e2eEnsureSharedNestedTestCluster()
 })
 
