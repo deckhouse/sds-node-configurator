@@ -18,13 +18,10 @@ package tests
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -42,329 +39,7 @@ import (
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/storage-e2e/pkg/cluster"
-	gossh "golang.org/x/crypto/ssh"
 )
-
-const (
-	e2eDebugSessionID = "cb3cd1"
-)
-
-func e2eDebugLog(runID, hypothesisID, location, message string, data map[string]any) {
-	entry := map[string]any{
-		"sessionId":    e2eDebugSessionID,
-		"runId":        runID,
-		"hypothesisId": hypothesisID,
-		"location":     location,
-		"message":      message,
-		"data":         data,
-		"timestamp":    metav1.Now().UnixMilli(),
-	}
-	b, err := json.Marshal(entry)
-	if err != nil {
-		return
-	}
-	// #region agent log
-	// Mirror debug payload to CI output so investigation does not depend on runner filesystem access.
-	GinkgoWriter.Printf("    [agent-debug] %s\n", string(b))
-	// #endregion
-}
-
-func e2eDebugKeyMeta(path string) map[string]any {
-	meta := map[string]any{
-		"pathSet": path != "",
-	}
-	if path == "" {
-		return meta
-	}
-	st, err := os.Stat(path)
-	if err != nil {
-		meta["statErr"] = err.Error()
-		return meta
-	}
-	meta["mode"] = st.Mode().String()
-	meta["size"] = st.Size()
-	content, readErr := os.ReadFile(path)
-	if readErr != nil {
-		meta["readErr"] = readErr.Error()
-		return meta
-	}
-	sum := sha256.Sum256(content)
-	meta["sha256"] = hex.EncodeToString(sum[:])
-	return meta
-}
-
-func e2eDebugExpandPath(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return path
-		}
-		return filepath.Join(home, path[2:])
-	}
-	return path
-}
-
-func e2eDebugPublicKeyFingerprintFromEnv(publicKeyEnv string) (string, string) {
-	if strings.TrimSpace(publicKeyEnv) == "" {
-		return "", "public key env is empty"
-	}
-	pubData := []byte(strings.TrimSpace(publicKeyEnv))
-	if strings.Contains(publicKeyEnv, "/") || strings.HasPrefix(publicKeyEnv, "~") {
-		path := e2eDebugExpandPath(strings.TrimSpace(publicKeyEnv))
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Sprintf("read public key file: %v", err)
-		}
-		pubData = content
-	}
-	pub, _, _, _, err := gossh.ParseAuthorizedKey(pubData)
-	if err != nil {
-		return "", fmt.Sprintf("parse public key: %v", err)
-	}
-	return gossh.FingerprintSHA256(pub), ""
-}
-
-func e2eDebugPublicKeyFingerprintFromPrivate(path string) (string, string) {
-	if strings.TrimSpace(path) == "" {
-		return "", "private key path is empty"
-	}
-	keyPath := e2eDebugExpandPath(strings.TrimSpace(path))
-	raw, err := os.ReadFile(keyPath)
-	if err != nil {
-		return "", fmt.Sprintf("read private key file: %v", err)
-	}
-	signer, err := gossh.ParsePrivateKey(raw)
-	if err != nil {
-		return "", fmt.Sprintf("parse private key: %v", err)
-	}
-	return gossh.FingerprintSHA256(signer.PublicKey()), ""
-}
-
-func e2eDebugPublicKeyTypeFromPrivate(path string) (string, string) {
-	if strings.TrimSpace(path) == "" {
-		return "", "private key path is empty"
-	}
-	keyPath := e2eDebugExpandPath(strings.TrimSpace(path))
-	raw, err := os.ReadFile(keyPath)
-	if err != nil {
-		return "", fmt.Sprintf("read private key file: %v", err)
-	}
-	signer, err := gossh.ParsePrivateKey(raw)
-	if err != nil {
-		return "", fmt.Sprintf("parse private key: %v", err)
-	}
-	return signer.PublicKey().Type(), ""
-}
-
-func e2eDebugKeyPairMeta(privatePath, publicKeyEnv string) map[string]any {
-	privFP, privErr := e2eDebugPublicKeyFingerprintFromPrivate(privatePath)
-	pubFP, pubErr := e2eDebugPublicKeyFingerprintFromEnv(publicKeyEnv)
-	meta := map[string]any{
-		"privatePublicFingerprint":    privFP,
-		"configuredPublicFingerprint": pubFP,
-	}
-	if keyType, keyTypeErr := e2eDebugPublicKeyTypeFromPrivate(privatePath); keyTypeErr == "" {
-		meta["privateKeyType"] = keyType
-	} else {
-		meta["privateKeyTypeErr"] = keyTypeErr
-	}
-	if privErr != "" {
-		meta["privateFingerprintErr"] = privErr
-	}
-	if pubErr != "" {
-		meta["configuredPublicFingerprintErr"] = pubErr
-	}
-	if privErr == "" && pubErr == "" {
-		meta["fingerprintMatch"] = privFP == pubFP
-	}
-	return meta
-}
-
-func e2eDebugExtractCloudInitPubKey(userData string) string {
-	lines := strings.Split(userData, "\n")
-	inKeys := false
-	for _, raw := range lines {
-		line := strings.TrimSpace(raw)
-		if line == "ssh_authorized_keys:" {
-			inKeys = true
-			continue
-		}
-		if !inKeys {
-			continue
-		}
-		if strings.HasPrefix(line, "- ") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "- "))
-		}
-		if line != "" && !strings.HasPrefix(line, "#") {
-			break
-		}
-	}
-	return ""
-}
-
-func e2eDebugFingerprintFromAuthorizedKey(key string) (string, string) {
-	if strings.TrimSpace(key) == "" {
-		return "", "authorized key is empty"
-	}
-	pub, _, _, _, err := gossh.ParseAuthorizedKey([]byte(strings.TrimSpace(key)))
-	if err != nil {
-		return "", fmt.Sprintf("parse authorized key: %v", err)
-	}
-	return gossh.FingerprintSHA256(pub), ""
-}
-
-func e2eDebugLogSetupNodeCloudInitBeforeCleanup(ctx context.Context, ns string) {
-	cfg := e2ecfg.Load()
-	kubeconfigDir, cleanupDir, err := kubeconfigDirForNamespaceDelete("", nil)
-	if err != nil {
-		e2eDebugLog("pre-fix", "H5", "sds_node_configurator_helpers_cluster_test.go:e2eDebugLogSetupNodeCloudInitBeforeCleanup",
-			"failed to prepare kubeconfig dir for setup-node diagnostics", map[string]any{"error": err.Error()})
-		return
-	}
-	if cleanupDir != "" {
-		defer func() { _ = os.RemoveAll(cleanupDir) }()
-	}
-
-	var opts cluster.ConnectClusterOptions
-	if cfg.SSH.Jump.Host != "" {
-		opts = cluster.ConnectClusterOptions{
-			SSHUser: cfg.SSH.User, SSHHost: cfg.SSH.Host, SSHKeyPath: cfg.SSH.PrivateKey,
-			UseJumpHost:         false,
-			KubeconfigOutputDir: kubeconfigDir,
-		}
-	} else {
-		opts = cluster.ConnectClusterOptions{
-			SSHUser: cfg.SSH.User, SSHHost: cfg.SSH.Jump.Host, SSHKeyPath: cfg.SSH.Jump.PrivateKeyPath,
-			UseJumpHost: true, TargetUser: cfg.SSH.User, TargetHost: cfg.SSH.Host, TargetKeyPath: cfg.SSH.PrivateKey,
-			KubeconfigOutputDir: kubeconfigDir,
-		}
-	}
-
-	baseRes, err := cluster.ConnectToCluster(ctx, opts)
-	if err != nil {
-		e2eDebugLog("pre-fix", "H5", "sds_node_configurator_helpers_cluster_test.go:e2eDebugLogSetupNodeCloudInitBeforeCleanup",
-			"failed to connect to base cluster for setup-node diagnostics", map[string]any{"error": err.Error()})
-		return
-	}
-	defer func() {
-		if baseRes.TunnelInfo != nil && baseRes.TunnelInfo.StopFunc != nil {
-			_ = baseRes.TunnelInfo.StopFunc()
-		}
-		if baseRes.SSHClient != nil {
-			_ = baseRes.SSHClient.Close()
-		}
-	}()
-
-	virtCl, err := e2eNewVirtClient(baseRes.Kubeconfig)
-	if err != nil {
-		e2eDebugLog("pre-fix", "H5", "sds_node_configurator_helpers_cluster_test.go:e2eDebugLogSetupNodeCloudInitBeforeCleanup",
-			"failed to create virtualization client for setup-node diagnostics", map[string]any{"error": err.Error()})
-		return
-	}
-
-	var vmList virtv1alpha2.VirtualMachineList
-	if err := virtCl.List(ctx, &vmList, client.InNamespace(ns)); err != nil {
-		e2eDebugLog("pre-fix", "H5", "sds_node_configurator_helpers_cluster_test.go:e2eDebugLogSetupNodeCloudInitBeforeCleanup",
-			"failed to list vms for setup-node diagnostics", map[string]any{"error": err.Error(), "namespace": ns})
-		return
-	}
-
-	var setupVM *virtv1alpha2.VirtualMachine
-	for i := range vmList.Items {
-		if strings.HasPrefix(vmList.Items[i].Name, "bootstrap-node-") {
-			setupVM = &vmList.Items[i]
-			break
-		}
-	}
-	if setupVM == nil {
-		e2eDebugLog("pre-fix", "H5", "sds_node_configurator_helpers_cluster_test.go:e2eDebugLogSetupNodeCloudInitBeforeCleanup",
-			"setup VM not found in namespace", map[string]any{"namespace": ns, "vmCount": len(vmList.Items)})
-		return
-	}
-
-	userData := ""
-	if setupVM.Spec.Provisioning != nil {
-		userData = setupVM.Spec.Provisioning.UserData
-	}
-	injectedPubKey := e2eDebugExtractCloudInitPubKey(userData)
-	injectedFP, injectedErr := e2eDebugFingerprintFromAuthorizedKey(injectedPubKey)
-	expectedFP, expectedErr := e2eDebugPublicKeyFingerprintFromEnv(os.Getenv("SSH_PUBLIC_KEY"))
-	setupIP := strings.TrimSpace(setupVM.Status.IPAddress)
-	data := map[string]any{
-		"namespace":                 ns,
-		"setupVMName":               setupVM.Name,
-		"setupVMPhase":              setupVM.Status.Phase,
-		"setupVMIP":                 setupIP,
-		"userDataHasCloudUser":      strings.Contains(userData, "name: cloud"),
-		"userDataHasAuthorizedKey":  injectedPubKey != "",
-		"injectedPubKeyFingerprint": injectedFP,
-		"expectedPubKeyFingerprint": expectedFP,
-		"fingerprintMatch":          injectedErr == "" && expectedErr == "" && injectedFP == expectedFP,
-	}
-	if injectedErr != "" {
-		data["injectedPubKeyFingerprintErr"] = injectedErr
-	}
-	if expectedErr != "" {
-		data["expectedPubKeyFingerprintErr"] = expectedErr
-	}
-	e2eDebugLog("pre-fix", "H5", "sds_node_configurator_helpers_cluster_test.go:e2eDebugLogSetupNodeCloudInitBeforeCleanup",
-		"setup-node cloud-init diagnostics", data)
-
-	targetUser := "cloud"
-	if strings.TrimSpace(os.Getenv("SSH_VM_USER")) != "" {
-		targetUser = strings.TrimSpace(os.Getenv("SSH_VM_USER"))
-	}
-	probeData := map[string]any{
-		"targetUser": targetUser,
-		"setupVMIP":  setupIP,
-	}
-	if setupIP == "" {
-		probeData["probeSkipped"] = "setupVMIP is empty"
-		e2eDebugLog("pre-fix", "H6", "sds_node_configurator_helpers_cluster_test.go:e2eDebugLogSetupNodeCloudInitBeforeCleanup",
-			"openssh auth probe skipped", probeData)
-		return
-	}
-
-	keyPath := e2eDebugExpandPath(strings.TrimSpace(cfg.SSH.PrivateKey))
-	args := []string{
-		"-vvv",
-		"-o", "BatchMode=yes",
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		"-o", "ConnectTimeout=15",
-		"-i", keyPath,
-	}
-	jumpHost := strings.TrimSpace(cfg.SSH.Jump.Host)
-	if jumpHost != "" {
-		jumpUser := strings.TrimSpace(cfg.SSH.Jump.User)
-		if jumpUser == "" {
-			jumpUser = strings.TrimSpace(cfg.SSH.User)
-		}
-		args = append(args, "-J", fmt.Sprintf("%s@%s", jumpUser, jumpHost))
-		probeData["jumpUser"] = jumpUser
-		probeData["jumpHostSet"] = true
-	} else {
-		probeData["jumpHostSet"] = false
-	}
-	args = append(args, fmt.Sprintf("%s@%s", targetUser, setupIP), "true")
-	cmd := exec.Command("ssh", args...)
-	out, cmdErr := cmd.CombinedOutput()
-	outStr := string(out)
-	lines := strings.Split(outStr, "\n")
-	if len(lines) > 40 {
-		lines = lines[len(lines)-40:]
-	}
-	probeData["sshExitErr"] = ""
-	if cmdErr != nil {
-		probeData["sshExitErr"] = cmdErr.Error()
-	}
-	probeData["containsNoMutualSignature"] = strings.Contains(outStr, "no mutual signature")
-	probeData["containsNoSupportedMethods"] = strings.Contains(outStr, "no supported methods remain")
-	probeData["containsPermissionDenied"] = strings.Contains(outStr, "Permission denied")
-	probeData["probeOutputTail"] = strings.Join(lines, "\n")
-	e2eDebugLog("pre-fix", "H6", "sds_node_configurator_helpers_cluster_test.go:e2eDebugLogSetupNodeCloudInitBeforeCleanup",
-		"openssh auth probe result", probeData)
-}
 
 // clusterResumeState mirrors storage-e2e cluster-state.json (namespace after VMs are created).
 // e2eSuiteSharedStorageCleanup removes e2e VirtualDisks, PVCs/Pods, LocalStorageClasses, LVMLogicalVolumes, and LVMVolumeGroups
@@ -555,44 +230,12 @@ func e2eSyncCleanupBaseClusterNamespace(ctx context.Context, clusterStatePath st
 
 	var opts cluster.ConnectClusterOptions
 	if cfg.SSH.Jump.Host != "" {
-		// #region agent log
-		e2eDebugLog("pre-fix", "H3", "sds_node_configurator_helpers_cluster_test.go:e2eSyncCleanupBaseClusterNamespace",
-			"cleanup connect options branch selected",
-			map[string]any{
-				"branch":         "jump-host",
-				"jumpHostSet":    cfg.SSH.Jump.Host != "",
-				"jumpUserSet":    cfg.SSH.Jump.User != "",
-				"jumpKeyMeta":    e2eDebugKeyMeta(cfg.SSH.Jump.PrivateKeyPath),
-				"targetHostSet":  cfg.SSH.Host != "",
-				"targetUserSet":  cfg.SSH.User != "",
-				"targetKeyMeta":  e2eDebugKeyMeta(cfg.SSH.PrivateKey),
-				"kubeconfigDir":  kubeconfigDir,
-				"namespace":      ns,
-				"statePathKnown": clusterStatePath != "",
-			})
-		// #endregion
 		opts = cluster.ConnectClusterOptions{
 			SSHUser: cfg.SSH.User, SSHHost: cfg.SSH.Host, SSHKeyPath: cfg.SSH.PrivateKey,
 			UseJumpHost:         false,
 			KubeconfigOutputDir: kubeconfigDir,
 		}
 	} else {
-		// #region agent log
-		e2eDebugLog("pre-fix", "H3", "sds_node_configurator_helpers_cluster_test.go:e2eSyncCleanupBaseClusterNamespace",
-			"cleanup connect options branch selected",
-			map[string]any{
-				"branch":         "direct",
-				"jumpHostSet":    cfg.SSH.Jump.Host != "",
-				"jumpUserSet":    cfg.SSH.Jump.User != "",
-				"jumpKeyMeta":    e2eDebugKeyMeta(cfg.SSH.Jump.PrivateKeyPath),
-				"targetHostSet":  cfg.SSH.Host != "",
-				"targetUserSet":  cfg.SSH.User != "",
-				"targetKeyMeta":  e2eDebugKeyMeta(cfg.SSH.PrivateKey),
-				"kubeconfigDir":  kubeconfigDir,
-				"namespace":      ns,
-				"statePathKnown": clusterStatePath != "",
-			})
-		// #endregion
 		opts = cluster.ConnectClusterOptions{
 			SSHUser: cfg.SSH.User, SSHHost: cfg.SSH.Jump.Host, SSHKeyPath: cfg.SSH.Jump.PrivateKeyPath,
 			UseJumpHost: true, TargetUser: cfg.SSH.User, TargetHost: cfg.SSH.Host, TargetKeyPath: cfg.SSH.PrivateKey,
@@ -602,13 +245,6 @@ func e2eSyncCleanupBaseClusterNamespace(ctx context.Context, clusterStatePath st
 
 	baseRes, err := cluster.ConnectToCluster(ctx, opts)
 	if err != nil {
-		// #region agent log
-		e2eDebugLog("pre-fix", "H3", "sds_node_configurator_helpers_cluster_test.go:e2eSyncCleanupBaseClusterNamespace",
-			"cleanup connect to base cluster failed",
-			map[string]any{
-				"error": err.Error(),
-			})
-		// #endregion
 		GinkgoWriter.Printf("    ⚠️  cleanup: connect to base cluster: %v\n", err)
 		return
 	}
@@ -645,59 +281,8 @@ func createE2EAlwaysNewClusterWithCleanupOnFailure() *cluster.TestClusterResourc
 	createCtx, cancel := context.WithTimeout(context.Background(), e2eClusterCreationTimeout)
 	defer cancel()
 
-	// #region agent log
-	// storage-e2e uses SSH_VM_USER for Step 8 (setup-node SSH). If it is empty, auth may fail with valid keys.
-	if strings.TrimSpace(os.Getenv("SSH_VM_USER")) == "" {
-		_ = os.Setenv("SSH_VM_USER", "cloud")
-		e2eDebugLog("pre-fix", "H7", "sds_node_configurator_helpers_cluster_test.go:createE2EAlwaysNewClusterWithCleanupOnFailure",
-			"defaulted SSH_VM_USER for CreateTestCluster",
-			map[string]any{
-				"sshVMUserWasEmpty": true,
-				"sshVMUserNow":      os.Getenv("SSH_VM_USER"),
-			})
-	} else {
-		e2eDebugLog("pre-fix", "H7", "sds_node_configurator_helpers_cluster_test.go:createE2EAlwaysNewClusterWithCleanupOnFailure",
-			"using provided SSH_VM_USER for CreateTestCluster",
-			map[string]any{
-				"sshVMUserWasEmpty": false,
-				"sshVMUserNow":      os.Getenv("SSH_VM_USER"),
-			})
-	}
-	// #endregion
-
-	// #region agent log
-	e2eDebugLog("pre-fix", "H1", "sds_node_configurator_helpers_cluster_test.go:createE2EAlwaysNewClusterWithCleanupOnFailure",
-		"starting CreateTestCluster",
-		map[string]any{
-			"yamlName":              yamlName,
-			"sshHostSet":            os.Getenv("SSH_HOST") != "",
-			"sshUserSet":            os.Getenv("SSH_USER") != "",
-			"sshPrivateKeyMeta":     e2eDebugKeyMeta(os.Getenv("SSH_PRIVATE_KEY")),
-			"sshJumpHostSet":        os.Getenv("SSH_JUMP_HOST") != "",
-			"sshJumpUserSet":        os.Getenv("SSH_JUMP_USER") != "",
-			"sshJumpPrivateKeyMeta": e2eDebugKeyMeta(os.Getenv("SSH_JUMP_KEY_PATH")),
-			"sshPublicKeyMeta":      e2eDebugKeyMeta(os.Getenv("SSH_PUBLIC_KEY")),
-			"sshVMUser":             os.Getenv("SSH_VM_USER"),
-			"sshVMUserDefaultCloud": strings.TrimSpace(os.Getenv("SSH_VM_USER")) == "" || strings.TrimSpace(os.Getenv("SSH_VM_USER")) == "cloud",
-			"keyPairMeta":           e2eDebugKeyPairMeta(os.Getenv("SSH_PRIVATE_KEY"), os.Getenv("SSH_PUBLIC_KEY")),
-			"testClusterMode":       e2eConfigTestClusterCreateMode(),
-			"ciEnv":                 os.Getenv("CI") != "",
-			"runnerNameSet":         os.Getenv("RUNNER_NAME") != "",
-			"sshAuthSockSet":        os.Getenv("SSH_AUTH_SOCK") != "",
-		})
-	// #endregion
 	res, err := cluster.CreateTestCluster(createCtx, yamlName)
 	if err != nil {
-		// #region agent log
-		e2eDebugLog("pre-fix", "H4", "sds_node_configurator_helpers_cluster_test.go:createE2EAlwaysNewClusterWithCleanupOnFailure",
-			"CreateTestCluster returned error",
-			map[string]any{
-				"error": err.Error(),
-			})
-		// #endregion
-		// #region agent log
-		e2eDebugLogSetupNodeCloudInitBeforeCleanup(context.Background(), e2eConfigNamespace())
-		// #endregion
 		GinkgoWriter.Printf("    ▶️  CreateTestCluster failed; cleaning base cluster namespace before spec exits...\n")
 		e2eSyncCleanupBaseClusterNamespace(context.Background(), statePath, statePathErr)
 		Expect(err).NotTo(HaveOccurred(), "Test cluster should be created successfully")
