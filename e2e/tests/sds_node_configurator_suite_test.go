@@ -21,18 +21,13 @@ import (
 	"testing"
 
 	e2ecfg "github.com/deckhouse/sds-node-configurator/e2e/cfg"
-	"github.com/deckhouse/storage-e2e/pkg/cluster"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 var _ = BeforeSuite(func() {
-	cf, cfgErr := e2ecfg.New()
-	GinkgoWriter.Printf("%+v", cf)
+	_, cfgErr := e2ecfg.New()
 	Expect(cfgErr).NotTo(HaveOccurred(), "Failed to load config")
-	// TODO: need to delete
-	cluster.OutputEnvironmentVariables()
-	panic("Need to implement")
 	// Before any spec: Ginkgo may shuffle root Ordered Describes; nested cluster must exist first.
 	e2eEnsureSharedNestedTestCluster()
 })
