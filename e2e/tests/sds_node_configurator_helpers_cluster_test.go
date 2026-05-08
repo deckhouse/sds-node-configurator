@@ -646,6 +646,26 @@ func createE2EAlwaysNewClusterWithCleanupOnFailure() *cluster.TestClusterResourc
 	defer cancel()
 
 	// #region agent log
+	// storage-e2e uses SSH_VM_USER for Step 8 (setup-node SSH). If it is empty, auth may fail with valid keys.
+	if strings.TrimSpace(os.Getenv("SSH_VM_USER")) == "" {
+		_ = os.Setenv("SSH_VM_USER", "cloud")
+		e2eDebugLog("pre-fix", "H7", "sds_node_configurator_helpers_cluster_test.go:createE2EAlwaysNewClusterWithCleanupOnFailure",
+			"defaulted SSH_VM_USER for CreateTestCluster",
+			map[string]any{
+				"sshVMUserWasEmpty": true,
+				"sshVMUserNow":      os.Getenv("SSH_VM_USER"),
+			})
+	} else {
+		e2eDebugLog("pre-fix", "H7", "sds_node_configurator_helpers_cluster_test.go:createE2EAlwaysNewClusterWithCleanupOnFailure",
+			"using provided SSH_VM_USER for CreateTestCluster",
+			map[string]any{
+				"sshVMUserWasEmpty": false,
+				"sshVMUserNow":      os.Getenv("SSH_VM_USER"),
+			})
+	}
+	// #endregion
+
+	// #region agent log
 	e2eDebugLog("pre-fix", "H1", "sds_node_configurator_helpers_cluster_test.go:createE2EAlwaysNewClusterWithCleanupOnFailure",
 		"starting CreateTestCluster",
 		map[string]any{
