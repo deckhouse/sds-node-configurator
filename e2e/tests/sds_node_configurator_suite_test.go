@@ -17,6 +17,7 @@
 package tests
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -33,13 +34,13 @@ var _ = BeforeSuite(func() {
 	cluster.OutputEnvironmentVariables()
 	Expect(conf).NotTo(BeNil())
 
-	//createCtx, cancel := context.WithTimeout(context.Background(), e2eClusterCreationTimeout)
-	//defer cancel()
-	//
-	//res, err := cluster.CreateTestCluster(createCtx, conf.YamlClusterConfig)
-	//Expect(err).NotTo(HaveOccurred(), "Test cluster should be created successfully")
-	//GinkgoWriter.Println(&res)
-	e2eEnsureSharedNestedTestCluster()
+	createCtx, cancel := context.WithTimeout(context.Background(), e2eClusterCreationTimeout)
+	defer cancel()
+
+	res, err := cluster.CreateTestCluster(createCtx, conf.YamlClusterConfig)
+	Expect(err).NotTo(HaveOccurred(), "Test cluster should be created successfully")
+	GinkgoWriter.Println(&res)
+	//e2eEnsureSharedNestedTestCluster()
 })
 
 var _ = AfterSuite(func() {
