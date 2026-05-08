@@ -27,7 +27,8 @@ import (
 )
 
 var _ = BeforeSuite(func() {
-	_, cfgErr := e2ecfg.New()
+	cf, cfgErr := e2ecfg.New()
+	GinkgoWriter.Printf("%+v", cf)
 	Expect(cfgErr).NotTo(HaveOccurred(), "Failed to load config")
 	// TODO: need to delete
 	cluster.OutputEnvironmentVariables()
