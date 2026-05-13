@@ -1213,6 +1213,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			})
 
 			It("Should discover a new unformatted disk and create a BlockDevice object", func() {
+				Skip("Need to implement TODO on runLsblkViaDirectSSH, now it mocked with returning error")
 				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
 				By("Expected result: multiple disks on different nodes; each BlockDevice exists, consumable, size > 0")
 
@@ -1890,6 +1891,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			})
 
 			It("Should remove VG from node when LVMVolumeGroup CR is deleted", func() {
+				Skip("After migration storage-e2e need to fix TODO on e2eExecOnTestClusterNodeSSH")
 				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
 				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "test requires nested virtualization (base cluster)")
 
@@ -2029,6 +2031,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			// Order: (1) tiny disk — no BlockDevice CR; (2) large disk — intermediate LVG then delete + pvcreate so BD is not consumable;
 			// (3) final LVMVolumeGroup selects only that BD (does not touch other BlockDevices on the node).
 			It("Should fail LVMVolumeGroup when the only selected BlockDevice is not consumable", func() {
+				Skip("After migration storage-e2e need to fix TODO on e2eExecOnTestClusterNodeSSH")
 				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
 				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "needs nested virtualization")
 

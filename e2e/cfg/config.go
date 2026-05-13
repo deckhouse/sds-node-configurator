@@ -1,18 +1,19 @@
 /*
-Copyright 2026 Flant JSC
+	Copyright 2026 Flant JSC
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+		http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
 */
+
 package cfg
 
 import (
@@ -20,11 +21,12 @@ import (
 )
 
 type Config struct {
-	TestCluster    TestCluster `envPrefix:"TEST_CLUSTER_"`
-	SSH            SSH         `envPrefix:"SSH_"`
-	KubeConfigPath string      `env:"KUBE_CONFIG_PATH,required"`
-	DKPLicenceKey  string      `env:"DKP_LICENSE_KEY"`
-	LogLevel       string      `env:"LOG_LEVEL" envDefault:"info"`
+	TestCluster       TestCluster `envPrefix:"TEST_CLUSTER_"`
+	SSH               SSH         `envPrefix:"SSH_"`
+	KubeConfigPath    string      `env:"KUBE_CONFIG_PATH,required"`
+	DKPLicenceKey     string      `env:"DKP_LICENSE_KEY"`
+	LogLevel          string      `env:"LOG_LEVEL" envDefault:"info"`
+	YamlClusterConfig string      `env:"YAML_CONFIG_FILENAME" envDefault:"cluster_config.yml"`
 }
 
 type TestCluster struct {
@@ -37,9 +39,16 @@ type TestCluster struct {
 type SSH struct {
 	User       string `env:"USER,required"`
 	Host       string `env:"HOST,required"`
-	JumpHost   string `env:"JUMP_HOST"`
-	JumpUser   string `env:"JUMP_USER"`
 	PrivateKey string `env:"PRIVATE_KEY,required"`
+	Passphrase string `env:"PASSPHRASE"`
+	Jump       Jump   `envPrefix:"JUMP_"`
+	VmUser     string `env:"VM_USER"`
+}
+
+type Jump struct {
+	Host           string `env:"HOST"`
+	User           string `env:"USER"`
+	PrivateKeyPath string `env:"KEY_PATH"`
 }
 
 var cfg Config
