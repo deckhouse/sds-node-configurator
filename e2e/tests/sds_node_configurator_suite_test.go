@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	e2ecfg "github.com/deckhouse/sds-node-configurator/e2e/cfg"
-	"github.com/deckhouse/storage-e2e/pkg/cluster"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -29,9 +28,8 @@ import (
 var _ = BeforeSuite(func() {
 	conf, cfgErr := e2ecfg.New()
 	Expect(cfgErr).NotTo(HaveOccurred(), "Failed to load config")
-	// Before any spec: Ginkgo may shuffle root Ordered Describes; nested cluster must exist first.
-	cluster.OutputEnvironmentVariables()
 	Expect(conf).NotTo(BeNil())
+	// Before any spec: Ginkgo may shuffle root Ordered Describes; nested cluster must exist first.
 	e2eEnsureSharedNestedTestCluster()
 })
 
