@@ -21,11 +21,13 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -124,14 +126,19 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 		d.log.Info("[RunLVMVolumeGroupDiscoverController] no BlockDevices were found")
 		return false
 	}
+	d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] BlockDevices: %+v", blockDevices))
 
 	filteredLVGs := filterLVGsByNode(currentLVMVGs, d.cfg.NodeName)
+	filteredBlockDevices := filterBlockDevicesByNodeName(blockDevices, d.cfg.NodeName)
+	d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] Filtered LVMVolumeGroups: %+v", filteredLVGs))
+	d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] Filtered BlockDevices: %+v", filteredBlockDevices))
 
 	// Store managed VG names in cache for metrics filtering
 	d.sdsCache.StoreManagedVGs(maps.Keys(filteredLVGs))
 
 	d.log.Debug("[RunLVMVolumeGroupDiscoverController] tries to get LVMVolumeGroup candidates")
-	candidates, err := d.GetLVMVolumeGroupCandidates(blockDevices)
+
+	candidates, err := d.GetLVMVolumeGroupCandidates(filteredBlockDevices)
 	if err != nil {
 		d.log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to run GetLVMVolumeGroupCandidates")
 		for _, lvg := range filteredLVGs {
@@ -157,9 +164,9 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 
 	shouldRequeue := false
 	for _, candidate := range candidates {
+		d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] candidate: %+v", candidate))
 		if lvg, exist := filteredLVGs[candidate.ActualVGNameOnTheNode]; exist {
 			d.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is already exist. Tries to update it", lvg.Name))
-			d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] candidate: %+v", candidate))
 			d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] lvg: %+v", lvg))
 
 			if !hasLVMVolumeGroupDiff(d.log, lvg, candidate) {
@@ -507,6 +514,13 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	lvg.Status.VGUuid = candidate.VGUUID
 	lvg.Status.ExtentSize = candidate.ExtentSize
 
+	_, err = updateBlockDeviceSelectorIfNeeded(lvg.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
+	if err != nil {
+		return fmt.Errorf("updating block device selectors: %w", err)
+	}
+
+	d.log.Trace(fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] updated LVMVolumeGroup: %+v", lvg))
+
 	start := time.Now()
 	err = d.cl.Status().Update(ctx, lvg)
 	d.metrics.APIMethodsDuration(DiscovererName, "update").Observe(d.metrics.GetEstimatedTimeInSeconds(start))
@@ -836,13 +850,20 @@ func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LVMVolumeGroup, candi
 	log.Trace(fmt.Sprintf(`VGUUID, candidate: %s, lvg: %s`, candidate.VGUUID, lvg.Status.VGUuid))
 	log.Trace(fmt.Sprintf(`Nodes, candidate: %+v, lvg: %+v`, convertLVMVGNodes(candidate.Nodes), lvg.Status.Nodes))
 
+	notMatchedBlockDeviceNames, err := notMatchedBlockDeviceNames(lvg.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
+	if err != nil {
+		log.Error(err, "[hasLVMVolumeGroupDiff] unable to parse blockDeviceSelector")
+		notMatchedBlockDeviceNames = []string{}
+	}
+
 	return candidate.AllocatedSize.Value() != lvg.Status.AllocatedSize.Value() ||
 		hasStatusPoolDiff(convertedStatusPools, lvg.Status.ThinPools) ||
 		candidate.VGSize.Value() != lvg.Status.VGSize.Value() ||
 		candidate.VGFree.Value() != lvg.Status.VGFree.Value() ||
 		candidate.VGUUID != lvg.Status.VGUuid ||
 		candidate.ExtentSize.Value() != lvg.Status.ExtentSize.Value() ||
-		hasStatusNodesDiff(log, convertLVMVGNodes(candidate.Nodes), lvg.Status.Nodes)
+		hasStatusNodesDiff(log, convertLVMVGNodes(candidate.Nodes), lvg.Status.Nodes) ||
+		len(notMatchedBlockDeviceNames) > 0
 }
 
 func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LVMVolumeGroupNode) bool {
@@ -905,6 +926,99 @@ func configureBlockDeviceSelector(candidate internal.LVMVolumeGroupCandidate) *m
 			},
 		},
 	}
+}
+
+func notMatchedBlockDeviceNames(labelSelector *metav1.LabelSelector, blockDeviceNames []string) ([]string, error) {
+	fullSelector, err := metav1.LabelSelectorAsSelector(labelSelector)
+	if err != nil {
+		return nil, fmt.Errorf("parsing label selector: %w", err)
+	}
+
+	requirements, _ := fullSelector.Requirements()
+	blockDeviceRequirements := requirements[0:0]
+	for _, requirement := range requirements {
+		if requirement.Key() == internal.MetadataNameLabelKey {
+			blockDeviceRequirements = append(blockDeviceRequirements, requirement)
+		}
+	}
+
+	blockDeviceNameSelector := labels.NewSelector().Add(blockDeviceRequirements...)
+	var notMatchedBlockDeviceNames []string
+	for _, blockDeviceName := range blockDeviceNames {
+		if blockDeviceNameSelector.Matches(labels.Set{
+			internal.MetadataNameLabelKey: blockDeviceName,
+		}) {
+			continue
+		}
+		notMatchedBlockDeviceNames = append(notMatchedBlockDeviceNames, blockDeviceName)
+	}
+	return notMatchedBlockDeviceNames, nil
+}
+
+func appendDeviceNamesToLabelSelector(labelSelector *metav1.LabelSelector, blockDeviceNames []string) {
+	if len(blockDeviceNames) == 0 {
+		return
+	}
+
+	var expressionToAddTo *[]string
+
+	// find existing expression to add
+	for i, expression := range labelSelector.MatchExpressions {
+		if expression.Key == internal.MetadataNameLabelKey && expression.Operator == metav1.LabelSelectorOpIn {
+			expressionToAddTo = &labelSelector.MatchExpressions[i].Values
+			break
+		}
+	}
+
+	if expressionToAddTo == nil {
+		// Create new expression in list
+		labelSelector.MatchExpressions = append(labelSelector.MatchExpressions, metav1.LabelSelectorRequirement{
+			Key:      internal.MetadataNameLabelKey,
+			Operator: metav1.LabelSelectorOpIn,
+			Values:   []string{},
+		})
+		expressionToAddTo = &labelSelector.MatchExpressions[len(labelSelector.MatchExpressions)-1].Values
+	}
+
+	*expressionToAddTo = append(*expressionToAddTo, blockDeviceNames...)
+	value, exists := labelSelector.MatchLabels[internal.MetadataNameLabelKey]
+	if exists {
+		*expressionToAddTo = append(*expressionToAddTo, value)
+		delete(labelSelector.MatchLabels, internal.MetadataNameLabelKey)
+	}
+}
+
+// Add missing block device to label selector.
+//
+// If labelSelector is provided it will be changed by this call.
+//
+// If labelSelector is created or updated it will be returned in updatedLabelSelector argument.
+//
+// If labelSelector was not changed the updatedLabelSelector will be nil.
+func updateBlockDeviceSelectorIfNeeded(labelSelector *metav1.LabelSelector, blockDeviceNames []string) (updatedLabelSelector *metav1.LabelSelector, err error) {
+	if labelSelector == nil {
+		return &metav1.LabelSelector{
+			MatchExpressions: []metav1.LabelSelectorRequirement{
+				{
+					Key:      internal.MetadataNameLabelKey,
+					Operator: metav1.LabelSelectorOpIn,
+					Values:   slices.Clone(blockDeviceNames),
+				},
+			},
+		}, nil
+	}
+
+	notMatchedBlockDeviceNames, err := notMatchedBlockDeviceNames(labelSelector, blockDeviceNames)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(notMatchedBlockDeviceNames) == 0 {
+		return nil, nil
+	}
+
+	appendDeviceNamesToLabelSelector(labelSelector, notMatchedBlockDeviceNames)
+	return labelSelector, nil
 }
 
 func convertLVMVGNodes(nodes map[string][]internal.LVMVGDevice) []v1alpha1.LVMVolumeGroupNode {
