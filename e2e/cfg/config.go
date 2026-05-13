@@ -42,6 +42,7 @@ type SSH struct {
 	PrivateKey string `env:"PRIVATE_KEY,required"`
 	Passphrase string `env:"PASSPHRASE"`
 	Jump       Jump   `envPrefix:"JUMP_"`
+	VmUser     string `env:"VM_USER"`
 }
 
 type Jump struct {

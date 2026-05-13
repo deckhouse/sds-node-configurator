@@ -231,14 +231,14 @@ func e2eSyncCleanupBaseClusterNamespace(ctx context.Context, clusterStatePath st
 	var opts cluster.ConnectClusterOptions
 	if cfg.SSH.Jump.Host != "" {
 		opts = cluster.ConnectClusterOptions{
-			SSHUser: cfg.SSH.User, SSHHost: cfg.SSH.Host, SSHKeyPath: cfg.SSH.PrivateKey,
-			UseJumpHost:         false,
+			SSHUser: cfg.SSH.User, SSHHost: cfg.SSH.Jump.Host, SSHKeyPath: cfg.SSH.Jump.PrivateKeyPath,
+			UseJumpHost: true, TargetUser: cfg.SSH.User, TargetHost: cfg.SSH.Host, TargetKeyPath: cfg.SSH.PrivateKey,
 			KubeconfigOutputDir: kubeconfigDir,
 		}
 	} else {
 		opts = cluster.ConnectClusterOptions{
-			SSHUser: cfg.SSH.User, SSHHost: cfg.SSH.Jump.Host, SSHKeyPath: cfg.SSH.Jump.PrivateKeyPath,
-			UseJumpHost: true, TargetUser: cfg.SSH.User, TargetHost: cfg.SSH.Host, TargetKeyPath: cfg.SSH.PrivateKey,
+			SSHUser: cfg.SSH.User, SSHHost: cfg.SSH.Host, SSHKeyPath: cfg.SSH.PrivateKey,
+			UseJumpHost:         false,
 			KubeconfigOutputDir: kubeconfigDir,
 		}
 	}
