@@ -20,12 +20,9 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -143,119 +140,17 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 		return true, err
 	}
 
-	if len(lvg.Status.Conditions) < targetConCount {
-		log.Info(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s misses some conditions, wait for them to got configured", lvg.Name))
-		log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s conditions current count: %d, target count: %d", lvg.Name, len(lvg.Status.Conditions), targetConCount))
-		err = updateLVMVolumeGroupPhaseIfNeeded(ctx, cl, lvg, v1alpha1.PhasePending)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to update the LVMVolumeGroup %s phase", lvg.Name))
-			return true, err
-		}
-
-		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.TypeReady, internal.ReasonPending, "wait for conditions to got configured")
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeReady, lvg.Name))
-			return true, err
-		}
-
+	phase, readyStatus, readyReason, readyMessage, changed := decideLVGReadyAndPhase(lvg.Status.Conditions, targetConCount)
+	if !changed {
+		log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s Ready condition/phase are already consistent, nothing to update", lvg.Name))
 		return false, nil
 	}
 
-	log.Info(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s conditions are fully configured. Check their states", lvg.Name))
-
-	ready := true
-	falseConditions := make([]string, 0, len(lvg.Status.Conditions))
-	for _, c := range lvg.Status.Conditions {
-		log.Debug(fmt.Sprintf("[reconcileLVGConditions] check condition %s of the LVMVolumeGroup %s", c.Type, lvg.Name))
-		log.Trace(fmt.Sprintf("[reconcileLVGConditions] check condition %+v of the LVMVolumeGroup %s", c, lvg.Name))
-		if c.Type == internal.TypeReady {
-			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the condition %s of the LVMVolumeGroup %s is ours, skip it", c.Type, lvg.Name))
-			continue
-		}
-
-		if c.Status == metav1.ConditionTrue {
-			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s condition %s has status True", lvg.Name, c.Type))
-			continue
-		}
-
-		if c.Reason == internal.ReasonCreating {
-			ready = false
-			falseConditions = nil
-			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s condition %s has Creating reason. Turn the LVMVolumeGroup Ready condition and phase to Pending", lvg.Name, c.Type))
-			err = updateLVMVolumeGroupPhaseIfNeeded(ctx, cl, lvg, v1alpha1.PhasePending)
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to update the LVMVolumeGroup %s phase", lvg.Name))
-				return true, err
-			}
-
-			err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.TypeReady, internal.ReasonPending, fmt.Sprintf("condition %s has Creating reason", c.Type))
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeReady, lvg.Name))
-				return true, err
-			}
-
-			break
-		}
-
-		if c.Reason == internal.ReasonTerminating {
-			ready = false
-			falseConditions = nil
-			log.Debug(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s condition %s has Terminating reason. Turn the LVMVolumeGroup Ready condition and phase to Terminating", lvg.Name, c.Type))
-			err := updateLVMVolumeGroupPhaseIfNeeded(ctx, cl, lvg, v1alpha1.PhaseTerminating)
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to update the LVMVolumeGroup %s phase", lvg.Name))
-				return true, err
-			}
-
-			err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.TypeReady, internal.ReasonTerminating, fmt.Sprintf("condition %s has Terminating reason", c.Type))
-			if err != nil {
-				log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeReady, lvg.Name))
-				return true, err
-			}
-			break
-		}
-
-		if c.Status == metav1.ConditionFalse &&
-			!slices.Contains(acceptableReasons, c.Reason) {
-			log.Warning(fmt.Sprintf("[reconcileLVGConditions] the condition %s of the LVMVolumeGroup %s has status False and its reason is not acceptable", c.Type, lvg.Name))
-			falseConditions = append(falseConditions, c.Type)
-			ready = false
-		}
+	if err := updateLVGReadyConditionAndPhaseIfNeeded(ctx, cl, lvg, readyStatus, readyReason, readyMessage, phase); err != nil {
+		log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to atomically update the LVMVolumeGroup %s Ready condition and phase", lvg.Name))
+		return true, err
 	}
 
-	if len(falseConditions) > 0 {
-		err := updateLVMVolumeGroupPhaseIfNeeded(ctx, cl, lvg, v1alpha1.PhaseNotReady)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to update the LVMVolumeGroup %s phase", lvg.Name))
-			return true, err
-		}
-
-		err = updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionFalse, internal.TypeReady, "InvalidConditionStates", fmt.Sprintf("conditions %s has False status", strings.Join(falseConditions, ",")))
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeReady, lvg.Name))
-			return true, err
-		}
-
-		log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully reconciled the LVMVolumeGroup %s condition %s to NotReady", lvg.Name, internal.TypeReady))
-	}
-
-	if ready {
-		log.Info(fmt.Sprintf("[reconcileLVGConditions] the LVMVolumeGroup %s has no conditions with status False", lvg.Name))
-
-		log.Debug(fmt.Sprintf("[reconcileLVGConditions] tries to add a condition %s to the LVMVolumeGroup %s", internal.TypeReady, lvg.Name))
-		err := updateLVGConditionIfNeeded(ctx, cl, log, lvg, metav1.ConditionTrue, internal.TypeReady, "ValidConditionStates", "every condition has a proper state")
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to update the condition %s of the LVMVolumeGroup %s", internal.TypeReady, lvg.Name))
-			return true, err
-		}
-
-		err = updateLVMVolumeGroupPhaseIfNeeded(ctx, cl, lvg, v1alpha1.PhaseReady)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[reconcileLVGConditions] unable to update the LVMVolumeGroup %s phase", lvg.Name))
-		}
-		log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully reconciled the LVMVolumeGroup %s phase to Ready", lvg.Name))
-		log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully reconciled conditions of the LVMVolumeGroup %s", lvg.Name))
-	}
-
+	log.Info(fmt.Sprintf("[reconcileLVGConditions] successfully reconciled the LVMVolumeGroup %s to phase=%s readyStatus=%s", lvg.Name, phase, readyStatus))
 	return false, nil
 }

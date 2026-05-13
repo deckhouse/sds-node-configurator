@@ -328,6 +328,10 @@ jobs:
           E2E_TUNNEL_SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER }}
           # Do not set KUBE_CONFIG_PATH here — it is taken from GITHUB_ENV (Setup writes the path to the file from E2E_CLUSTER_KUBECONFIG). Otherwise an empty vars value overwrites the fallback and storage-e2e cannot find kubeconfig when "sudo cat admin.conf" on the master fails.
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
+          # ReportAfterSuite in e2e/tests/sds_node_configurator_suite_test.go writes JUnit/JSON
+          # reports into this dir. We put them next to e2e-test-output.log so the "Upload test
+          # reports" step picks them up alongside the existing log.
+          E2E_REPORT_DIR: ${{ github.workspace }}/e2e
         run: |
           mkdir -p "${GOMODCACHE}" "${GOCACHE}"
 
@@ -485,6 +489,19 @@ jobs:
         with:
           name: e2e-smoke-test-logs-${{ vars.MODULE_NAME }}-${{ github.run_id }}
           path: e2e-test-output.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload test reports (JUnit/JSON)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-smoke-test-reports-${{ vars.MODULE_NAME }}-${{ github.run_id }}
+          # E2E_REPORT_DIR in the test step is ${{ github.workspace }}/e2e, which matches
+          # where ReportAfterSuite writes e2e-junit-report.xml and e2e-report.json.
+          path: |
+            e2e/e2e-junit-report.xml
+            e2e/e2e-report.json
           retention-days: 7
           if-no-files-found: ignore
 

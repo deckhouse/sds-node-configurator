@@ -28,7 +28,14 @@ spec:
 
     bb-event-on 'bb-sync-file-changed' '_on_multipath_config_changed'
     _on_multipath_config_changed() {
-      if systemctl is-enabled --quiet multipathd 2>/dev/null; then
+      # Reload only when multipathd is actually running. `is-enabled` is true for units
+      # that will auto-start on boot even if they are stopped right now (observed on
+      # RedOS 8: multipathd.service is enabled but inactive by default), and
+      # `systemctl reload` on an inactive unit exits non-zero with
+      # "multipathd.service is not active, cannot reload." — that failure then
+      # propagates out of the bb-sync-file event handler and bashible retries the
+      # whole step forever. `is-active` is the right predicate for "reload now".
+      if systemctl is-active --quiet multipathd 2>/dev/null; then
         systemctl reload multipathd
       fi
     }

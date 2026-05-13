@@ -56,6 +56,9 @@ local_build.sh
 .direnv/
 .gocache/
 
+# hack/go-lint.sh installs golangci-lint here
+hack/.bin/
+
 images/sds-common-scheduler-extender/REVIEW.md
 
 # test data
