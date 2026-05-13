@@ -620,6 +620,94 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		}
 	})
 
+	t.Run("UpdateLVMVolumeGroup_persists_spec_blockDeviceSelector", func(t *testing.T) {
+		// Regression test: the discoverer must persist Spec.BlockDeviceSelector to the API
+		// server. Status().Update() cannot write to spec, so a separate Update() is required.
+
+		const LVMVGName = "test_lvm_selector_persist"
+
+		d := setupDiscoverer(nil)
+
+		// Pre-existing LVG with a selector that already covers dev1.
+		lvg := &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: LVMVGName},
+			Spec: v1alpha1.LVMVolumeGroupSpec{
+				BlockDeviceSelector: &metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      internal.MetadataNameLabelKey,
+							Operator: metav1.LabelSelectorOpIn,
+							Values:   []string{"dev1"},
+						},
+					},
+				},
+			},
+			Status: v1alpha1.LVMVolumeGroupStatus{
+				AllocatedSize: *resource.NewQuantity(500, resource.BinarySI),
+			},
+		}
+		assert.NoError(t, d.cl.Create(ctx, lvg))
+
+		stored := &v1alpha1.LVMVolumeGroup{}
+		assert.NoError(t, d.cl.Get(ctx, client.ObjectKey{Name: LVMVGName}, stored))
+
+		// Candidate adds two new devices not yet covered by the selector and bumps the
+		// allocated size; both spec and status must end up updated on the API server.
+		candidate := internal.LVMVolumeGroupCandidate{
+			LVMVGName:         LVMVGName,
+			AllocatedSize:     *resource.NewQuantity(1500, resource.BinarySI),
+			BlockDevicesNames: []string{"dev1", "dev2", "dev3"},
+		}
+		assert.NoError(t, d.UpdateLVMVolumeGroupByCandidate(ctx, stored, candidate))
+
+		got := &v1alpha1.LVMVolumeGroup{}
+		assert.NoError(t, d.cl.Get(ctx, client.ObjectKey{Name: LVMVGName}, got))
+
+		assert.Equal(t, candidate.AllocatedSize.Value(), got.Status.AllocatedSize.Value(),
+			"status should be updated")
+
+		notMatched, err := notMatchedBlockDeviceNames(got.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
+		assert.NoError(t, err)
+		assert.Empty(t, notMatched,
+			"Spec.BlockDeviceSelector must cover all candidate devices; got selector=%+v",
+			got.Spec.BlockDeviceSelector)
+	})
+
+	t.Run("UpdateLVMVolumeGroup_creates_spec_blockDeviceSelector_when_nil", func(t *testing.T) {
+		// Regression test: when an existing LVG has no selector at all (legacy), the
+		// discoverer should populate it on the next reconcile so the controller-runtime
+		// watcher can correlate BlockDevices to this LVG.
+
+		const LVMVGName = "test_lvm_selector_create"
+
+		d := setupDiscoverer(nil)
+
+		lvg := &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: LVMVGName},
+		}
+		assert.NoError(t, d.cl.Create(ctx, lvg))
+
+		stored := &v1alpha1.LVMVolumeGroup{}
+		assert.NoError(t, d.cl.Get(ctx, client.ObjectKey{Name: LVMVGName}, stored))
+
+		candidate := internal.LVMVolumeGroupCandidate{
+			LVMVGName:         LVMVGName,
+			AllocatedSize:     *resource.NewQuantity(2000, resource.BinarySI),
+			BlockDevicesNames: []string{"devA", "devB"},
+		}
+		assert.NoError(t, d.UpdateLVMVolumeGroupByCandidate(ctx, stored, candidate))
+
+		got := &v1alpha1.LVMVolumeGroup{}
+		assert.NoError(t, d.cl.Get(ctx, client.ObjectKey{Name: LVMVGName}, got))
+
+		if assert.NotNil(t, got.Spec.BlockDeviceSelector,
+			"Spec.BlockDeviceSelector must be created from candidate devices") {
+			notMatched, err := notMatchedBlockDeviceNames(got.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
+			assert.NoError(t, err)
+			assert.Empty(t, notMatched)
+		}
+	})
+
 	t.Run("filterResourcesByNode_returns_current_node_resources", func(t *testing.T) {
 		var (
 			currentNode  = "test_node"

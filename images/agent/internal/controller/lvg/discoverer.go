@@ -480,6 +480,29 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 		return updErr
 	}
 
+	// Persist the spec.BlockDeviceSelector update (if any) first: Status().Update() below
+	// cannot write to spec, and the regular Update() preserves status on the API side, so
+	// touching spec after we've populated the status fields would wipe them. Update()
+	// refreshes lvg.ResourceVersion in place, so the subsequent Status().Update() picks up
+	// the new revision.
+	updatedSelector, err := updateBlockDeviceSelectorIfNeeded(lvg.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
+	if err != nil {
+		return fmt.Errorf("updating block device selector for LVMVolumeGroup %q: %w", lvg.Name, err)
+	}
+	if updatedSelector != nil {
+		lvg.Spec.BlockDeviceSelector = updatedSelector
+		d.log.Debug(fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] update LVMVolumeGroup %q spec.blockDeviceSelector", lvg.Name))
+
+		start := time.Now()
+		err = d.cl.Update(ctx, lvg)
+		d.metrics.APIMethodsDuration(DiscovererName, "update").Observe(d.metrics.GetEstimatedTimeInSeconds(start))
+		d.metrics.APIMethodsExecutionCount(DiscovererName, "update").Inc()
+		if err != nil {
+			d.metrics.APIMethodsErrors(DiscovererName, "update").Inc()
+			return fmt.Errorf(`[UpdateLVMVolumeGroupByCandidate] unable to update LVMVolumeGroup spec, name: %q, err: %w`, lvg.Name, err)
+		}
+	}
+
 	// The resource.Status.Nodes can not be just re-written, it needs to be updated directly by a node.
 	// We take all current resources nodes and convert them to map for better performance further.
 	resourceNodes := make(map[string][]v1alpha1.LVMVolumeGroupDevice, len(lvg.Status.Nodes))
@@ -513,11 +536,6 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	lvg.Status.VGFree = candidate.VGFree
 	lvg.Status.VGUuid = candidate.VGUUID
 	lvg.Status.ExtentSize = candidate.ExtentSize
-
-	_, err = updateBlockDeviceSelectorIfNeeded(lvg.Spec.BlockDeviceSelector, candidate.BlockDevicesNames)
-	if err != nil {
-		return fmt.Errorf("updating block device selectors: %w", err)
-	}
 
 	d.log.Trace(fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] updated LVMVolumeGroup: %+v", lvg))
 
