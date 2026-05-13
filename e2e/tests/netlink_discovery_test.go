@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/e2e/cfg"
 	"github.com/deckhouse/sds-node-configurator/e2e/tests/utils/pod"
 	"github.com/deckhouse/storage-e2e/pkg/cluster"
 	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
@@ -52,8 +53,8 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 		e2eCtx               context.Context
 		k8sClient            client.Client
 		cs                   *k8sclient.Clientset
+		conf                 *cfg.Config
 
-		e2eNs    string
 		targetVM string
 
 		netlinkDiskAttach *kubernetes.VirtualDiskAttachmentResult
@@ -74,12 +75,9 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 		ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
 		Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "test requires nested virtualization")
 
-		e2eNs = e2eConfigNamespace()
-		Expect(e2eNs).ToNot(BeEmpty())
-		e2eStorageClass := e2eConfigStorageClass()
-		Expect(e2eStorageClass).ToNot(BeEmpty(), "TEST_CLUSTER_STORAGE_CLASS is required for VirtualDisk")
+		conf = cfg.Load()
 
-		vms := e2eListClusterVMNames(e2eCtx, testClusterResources, e2eNs)
+		vms := e2eListClusterVMNames(e2eCtx, testClusterResources, conf.TestCluster.Namespace)
 		Expect(vms).NotTo(BeEmpty())
 		targetVM = vms[0]
 
@@ -104,10 +102,10 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 
 		attachResult, attachError := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
 			VMName:           targetVM,
-			Namespace:        e2eNs,
+			Namespace:        conf.TestCluster.Namespace,
 			DiskName:         fmt.Sprintf("e2e-netlink-%d", time.Now().UnixNano()),
 			DiskSize:         netlinkDiskSize,
-			StorageClassName: e2eConfigStorageClass(),
+			StorageClassName: conf.TestCluster.StorageClass,
 		}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
 		Expect(attachError).NotTo(HaveOccurred(), "failed to attach virtual disk")
 		Expect(attachResult).NotTo(BeNil())
@@ -118,12 +116,12 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 		defer attachCancel()
 		Expect(kubernetes.WaitForVirtualDiskAttached(
 			attachCtx, testClusterResources.BaseKubeconfig,
-			e2eNs, netlinkDiskAttach.AttachmentName, 10*time.Second,
+			conf.TestCluster.Namespace, netlinkDiskAttach.AttachmentName, 10*time.Second,
 		)).NotTo(HaveOccurred(), "virtual disk did not become attached in time")
 
 		blockDevice = e2eWaitConsumableBlockDeviceForVirtualDisk(
 			e2eCtx, testClusterResources.BaseKubeconfig, k8sClient,
-			e2eNs, netlinkDiskAttach.DiskName, netlinkDiskAttach.AttachmentName, targetVM,
+			conf.TestCluster.Namespace, netlinkDiskAttach.DiskName, netlinkDiskAttach.AttachmentName, targetVM,
 		)
 		Expect(blockDevice).NotTo(BeNil())
 	})
@@ -172,7 +170,7 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 		removeSince = metav1.NewTime(time.Now())
 		Expect(kubernetes.DetachAndDeleteVirtualDisk(
 			e2eCtx, testClusterResources.BaseKubeconfig,
-			e2eNs, netlinkDiskAttach.AttachmentName, netlinkDiskAttach.DiskName,
+			conf.TestCluster.Namespace, netlinkDiskAttach.AttachmentName, netlinkDiskAttach.DiskName,
 		)).To(Succeed())
 
 		netlinkDiskAttach = nil // prevent AfterAll double-cleanup
