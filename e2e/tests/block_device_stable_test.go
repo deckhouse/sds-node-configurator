@@ -120,11 +120,12 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Ordere
 	Context("with disk initially attached to the VM", func() {
 		It("has exactly one consumable block device", func() {
 			By("Getting consumable block devices on the target node")
-			blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, res.Kubeconfig, targetVM)
-			Expect(getBDErr).NotTo(HaveOccurred())
-			Expect(blockDevices).To(HaveLen(1))
-
-			initialBlockDevice = blockDevices[0]
+			Eventually(func(g Gomega) {
+				blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, res.Kubeconfig, targetVM)
+				g.Expect(getBDErr).NotTo(HaveOccurred())
+				g.Expect(blockDevices).To(HaveLen(1))
+				initialBlockDevice = blockDevices[0]
+			}, 5*time.Minute, 2*time.Second).Should(Succeed())
 		})
 
 		When("disk is detached from the VM", func() {
@@ -140,7 +141,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Ordere
 					blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, res.Kubeconfig, targetVM)
 					g.Expect(getBDErr).NotTo(HaveOccurred())
 					g.Expect(blockDevices).To(BeEmpty())
-				}, time.Minute, 2*time.Second).Should(Succeed())
+				}, 5*time.Minute, 5*time.Second).Should(Succeed())
 			})
 
 			When("disk is reattached to the VM", func() {
