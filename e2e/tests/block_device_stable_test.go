@@ -84,6 +84,26 @@ var _ = Describe("BlockDeviceStable", Ordered, func() {
 		Expect(attachWaitErr).NotTo(HaveOccurred())
 
 		virtualDiskAttachmentResult = attachResult
+
+		if os.Getenv("GITHUB_EVENT_NAME") == "pull_request" {
+			By("Getting ModulePullOverride spec")
+			dyn, err := kubernetes.NewDynamicClientWithRetry(ctx, res.Kubeconfig)
+			Expect(err).NotTo(HaveOccurred())
+
+			mpoGVR := schema.GroupVersionResource{
+				Group:    "deckhouse.io",
+				Version:  "v1alpha2",
+				Resource: "modulepulloverrides",
+			}
+
+			mpo, err := dyn.Resource(mpoGVR).Get(ctx, "sds-node-configurator", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			spec, found, err := unstructured.NestedMap(mpo.Object, "spec")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(found).To(BeTrue())
+			GinkgoWriter.Printf("ImageTag: %s", spec["imageTag"])
+		}
 	})
 
 	AfterAll(func() {
@@ -157,58 +177,41 @@ var _ = Describe("BlockDeviceStable", Ordered, func() {
 		})
 
 		When("Restarting sds-node-configurator agent", func() {
-			restartAt := time.Now()
+			BeforeAll(func() {
+				restartAt := time.Now()
 
-			err := k8sClient.DeleteAllOf(
-				ctx,
-				&v1.Pod{},
-				client.InNamespace(consts.SdsNodeConfiguratorAgentNamespace),
-				client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentAppLabel},
-				client.MatchingFields{"spec.nodeName": targetVM},
-			)
-			Expect(err).NotTo(HaveOccurred())
-
-			Eventually(func(g Gomega) {
-				var pods v1.PodList
-				g.Expect(k8sClient.List(
+				err := k8sClient.DeleteAllOf(
 					ctx,
-					&pods,
+					&v1.Pod{},
 					client.InNamespace(consts.SdsNodeConfiguratorAgentNamespace),
 					client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentAppLabel},
 					client.MatchingFields{"spec.nodeName": targetVM},
-				)).To(Succeed())
+				)
+				Expect(err).NotTo(HaveOccurred())
 
-				g.Expect(pods.Items).To(HaveLen(1))
-				p := pods.Items[0]
+				Eventually(func(g Gomega) {
+					var pods v1.PodList
+					g.Expect(k8sClient.List(
+						ctx,
+						&pods,
+						client.InNamespace(consts.SdsNodeConfiguratorAgentNamespace),
+						client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentAppLabel},
+						client.MatchingFields{"spec.nodeName": targetVM},
+					)).To(Succeed())
 
-				g.Expect(p.CreationTimestamp.Time.After(restartAt)).To(BeTrue(), "ожидаем новый pod после рестарта")
-				g.Expect(p.DeletionTimestamp).To(BeNil())
-				g.Expect(p.Status.Phase).To(Equal(v1.PodRunning))
-				g.Expect(isPodReady(&p)).To(BeTrue())
-			}, 5*time.Minute, 5*time.Second).Should(Succeed())
+					g.Expect(pods.Items).To(HaveLen(1))
+					p := pods.Items[0]
+
+					g.Expect(p.CreationTimestamp.Time.After(restartAt)).To(BeTrue(), "ожидаем новый pod после рестарта")
+					g.Expect(p.DeletionTimestamp).To(BeNil())
+					g.Expect(p.Status.Phase).To(Equal(v1.PodRunning))
+					g.Expect(isPodReady(&p)).To(BeTrue())
+				}, 5*time.Minute, 5*time.Second).Should(Succeed())
+			})
+
 			It("sdasdas", func() {
 				By("Getting sdasdasd on node - %s")
 			})
 		})
-
-		if os.Getenv("GITHUB_EVENT_NAME") == "pull_request" {
-			By("Getting ModulePullOverride spec")
-			dyn, err := kubernetes.NewDynamicClientWithRetry(ctx, res.Kubeconfig)
-			Expect(err).NotTo(HaveOccurred())
-
-			mpoGVR := schema.GroupVersionResource{
-				Group:    "deckhouse.io",
-				Version:  "v1alpha2",
-				Resource: "modulepulloverrides",
-			}
-
-			mpo, err := dyn.Resource(mpoGVR).Get(ctx, "sds-node-configurator", metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-
-			spec, found, err := unstructured.NestedMap(mpo.Object, "spec")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(found).To(BeTrue())
-			GinkgoWriter.Printf("ImageTag: %s", spec["imageTag"])
-		}
 	})
 })
