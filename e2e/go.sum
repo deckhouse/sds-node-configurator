@@ -24,8 +24,10 @@ github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/deckhouse/deckhouse v1.74.0 h1:a/gEuLKutoV6ReWaBWMDJ+VLlOkkCwS4VMvR/sHQscw=
 github.com/deckhouse/deckhouse v1.74.0/go.mod h1:qMuvDbP8AYghXkWmDjoFPc6r1w9uw/cWxl/hmvA0BzA=
-github.com/deckhouse/storage-e2e v0.0.0-20260507080012-c7702ad03b8a h1:kUhUIHG5gcdJaHJlb2Lhh6EFOteroBHRiFwb6kWbWU8=
-github.com/deckhouse/storage-e2e v0.0.0-20260507080012-c7702ad03b8a/go.mod h1:XZNxsSGcxa4G2hXCN8x3YWD2FRiDmBntGP2RulfY+6s=
+github.com/deckhouse/storage-e2e v0.0.0-20260514074746-0c9390535d62 h1:dMx0qcsb1O3/VD8nT/rymskCtpGR4OnCqL+yMvlGGII=
+github.com/deckhouse/storage-e2e v0.0.0-20260514074746-0c9390535d62/go.mod h1:XZNxsSGcxa4G2hXCN8x3YWD2FRiDmBntGP2RulfY+6s=
+github.com/deckhouse/storage-e2e v0.0.0-20260514131150-0190e0b5acf6 h1:pdJevPMH/FVgAg1lixYE0uuMe8OIT93oRQsxTTTtjUc=
+github.com/deckhouse/storage-e2e v0.0.0-20260514131150-0190e0b5acf6/go.mod h1:XZNxsSGcxa4G2hXCN8x3YWD2FRiDmBntGP2RulfY+6s=
 github.com/deckhouse/virtualization/api v1.8.0 h1:wR4Ivcg56OWJRGWrZjEL+0mQrHFEG0gKn0xrq1yzjy0=
 github.com/deckhouse/virtualization/api v1.8.0/go.mod h1:jqKdfrs7bhU5kbn6JTJUix8N180UkugJIa3TnOTqdmA=
 github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815/go.mod h1:WwZ+bS3ebgob9U8Nd0kOddGdZWjyMGR8Wziv+TBNwSE=

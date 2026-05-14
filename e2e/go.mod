@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260114125558-7fd7152586ff
-	github.com/deckhouse/storage-e2e v0.0.0-20260507080012-c7702ad03b8a
+	github.com/deckhouse/storage-e2e v0.0.0-20260514131150-0190e0b5acf6
 	github.com/deckhouse/virtualization/api v1.8.0
 	github.com/onsi/ginkgo/v2 v2.23.3
 	github.com/onsi/gomega v1.37.0

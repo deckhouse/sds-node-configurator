@@ -17,10 +17,12 @@
 package tests
 
 import (
+	"context"
 	"os"
 	"testing"
 
 	e2ecfg "github.com/deckhouse/sds-node-configurator/e2e/cfg"
+	"github.com/deckhouse/storage-e2e/pkg/cluster"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -34,6 +36,21 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
+	res := e2eNestedTestClusterOrNil()
+	if res != nil {
+		locked, lockErr := cluster.IsClusterLocked(context.Background(), res.Kubeconfig)
+		if lockErr != nil {
+			GinkgoWriter.Println(lockErr)
+		}
+		if locked {
+			releaseErr := cluster.ReleaseClusterLock(context.Background(), res.Kubeconfig)
+			if releaseErr != nil {
+				GinkgoWriter.Println(releaseErr)
+			}
+			GinkgoWriter.Println("Released cluster lock")
+		}
+	}
+
 	e2eCleanupNestedTestClusterAfterSuite()
 })
 
