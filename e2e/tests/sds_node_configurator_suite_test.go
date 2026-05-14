@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	e2ecfg "github.com/deckhouse/sds-node-configurator/e2e/cfg"
 	"github.com/deckhouse/storage-e2e/pkg/cluster"
@@ -38,12 +39,14 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	res := e2eNestedTestClusterOrNil()
 	if res != nil {
-		locked, lockErr := cluster.IsClusterLocked(context.Background(), res.Kubeconfig)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		locked, lockErr := cluster.IsClusterLocked(ctx, res.Kubeconfig)
 		if lockErr != nil {
 			GinkgoWriter.Println(lockErr)
 		}
 		if locked {
-			releaseErr := cluster.ReleaseClusterLock(context.Background(), res.Kubeconfig)
+			releaseErr := cluster.ReleaseClusterLock(ctx, res.Kubeconfig)
 			if releaseErr != nil {
 				GinkgoWriter.Println(releaseErr)
 			}
