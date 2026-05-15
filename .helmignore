@@ -1,9 +1,11 @@
 *.md
+CHANGELOG
+api
 crds
-# charts
 docs
 enabled
 hooks
+hack
 images
 images_digests.json
 lib
@@ -13,4 +15,7 @@ openapi
 release.yaml
 scripts
 template_tests
+testing
+tools
 werf*.yaml
+e2e
