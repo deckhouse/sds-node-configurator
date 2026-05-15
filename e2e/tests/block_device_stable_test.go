@@ -206,46 +206,68 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Ordere
 						Expect(blockDevices[0]).To(Equal(initialBlockDevice))
 					})
 				})
-			})
 
-			When("running in pull_request and agent is updated to PR version", func() {
-				BeforeAll(func() {
-					if os.Getenv("GITHUB_EVENT_NAME") != "pull_request" {
-						Skip("PR-only scenario")
-					}
+				When("running in pull_request and agent imageTag is switched to main", func() {
+					var (
+						originalImageTag string
+					)
 
-					mpo, err := dyn.Resource(mpoGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
+					BeforeAll(func() {
+						if os.Getenv("GITHUB_EVENT_NAME") != "pull_request" {
+							Skip("PR-only scenario")
+						}
 
-					err = unstructured.SetNestedField(mpo.Object, conf.ModulesImageTag, "spec", "imageTag")
-					Expect(err).NotTo(HaveOccurred())
+						mpo, err := dyn.Resource(mpoGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
+						Expect(err).NotTo(HaveOccurred())
 
-					_, err = dyn.Resource(mpoGVR).Update(ctx, mpo, metav1.UpdateOptions{})
-					Expect(err).NotTo(HaveOccurred())
+						currentImageTag, found, err := unstructured.NestedString(mpo.Object, "spec", "imageTag")
+						Expect(err).NotTo(HaveOccurred())
+						Expect(found).To(BeTrue(), "expected spec.imageTag to be set")
 
-					Expect(kubernetes.WaitForModuleReady(ctx, res.Kubeconfig, consts.SdsNodeConfiguratorAgentName, 10*time.Minute)).To(Succeed())
-				})
+						originalImageTag = currentImageTag
 
-				It("has the same consumable block device", func() {
-					By("Checking that consumable BlockDevice name remains unchanged after agent update")
-					Expect(initialBlockDevice.Name).NotTo(BeEmpty())
-					Eventually(func(g Gomega) {
-						blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, res.Kubeconfig, targetVM)
-						g.Expect(getBDErr).NotTo(HaveOccurred())
-						g.Expect(blockDevices).To(HaveLen(1))
-						g.Expect(blockDevices[0].Name).To(Equal(initialBlockDevice.Name))
-					}, 5*time.Minute, 5*time.Second).Should(Succeed())
-				})
+						err = unstructured.SetNestedField(mpo.Object, conf.ModulesImageTag, "spec", "imageTag")
+						Expect(err).NotTo(HaveOccurred())
 
-				AfterAll(func() {
-					mpo, err := dyn.Resource(mpoGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
+						_, err = dyn.Resource(mpoGVR).Update(ctx, mpo, metav1.UpdateOptions{})
+						Expect(err).NotTo(HaveOccurred())
 
-					err = unstructured.SetNestedField(mpo.Object, "main", "spec", "imageTag")
-					Expect(err).NotTo(HaveOccurred())
+						Expect(kubernetes.WaitForModuleReady(
+							ctx,
+							res.Kubeconfig,
+							consts.SdsNodeConfiguratorAgentName,
+							10*time.Minute,
+						)).To(Succeed())
+					})
 
-					_, err = dyn.Resource(mpoGVR).Update(ctx, mpo, metav1.UpdateOptions{})
-					Expect(err).NotTo(HaveOccurred())
+					AfterAll(func() {
+						mpo, err := dyn.Resource(mpoGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
+						Expect(err).NotTo(HaveOccurred())
+
+						err = unstructured.SetNestedField(mpo.Object, originalImageTag, "spec", "imageTag")
+						Expect(err).NotTo(HaveOccurred())
+
+						_, err = dyn.Resource(mpoGVR).Update(ctx, mpo, metav1.UpdateOptions{})
+						Expect(err).NotTo(HaveOccurred())
+
+						Expect(kubernetes.WaitForModuleReady(
+							ctx,
+							res.Kubeconfig,
+							consts.SdsNodeConfiguratorAgentName,
+							10*time.Minute,
+						)).To(Succeed())
+					})
+
+					It("has the same consumable block device after agent imageTag switch", func() {
+						By("Checking that consumable block device remains unchanged after imageTag switch")
+						Expect(initialBlockDevice.Name).NotTo(BeEmpty())
+						Eventually(func(g Gomega) {
+							blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, res.Kubeconfig, targetVM)
+							g.Expect(getBDErr).NotTo(HaveOccurred())
+							g.Expect(blockDevices).To(HaveLen(1))
+							g.Expect(blockDevices[0].Name).To(Equal(initialBlockDevice.Name))
+						}, 5*time.Minute, 5*time.Second).Should(Succeed())
+					})
 				})
 			})
 		})
