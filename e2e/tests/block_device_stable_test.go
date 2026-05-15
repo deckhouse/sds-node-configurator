@@ -19,7 +19,7 @@ package tests
 import (
 	"context"
 	"os"
-	"slices"
+	"strings"
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/e2e/cfg"
@@ -65,8 +65,14 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Ordere
 		vms, listVmErr := kubernetes.ListVirtualMachineNames(ctx, res.BaseKubeconfig, conf.TestCluster.Namespace)
 		Expect(listVmErr).NotTo(HaveOccurred())
 		Expect(vms).NotTo(BeEmpty())
-		slices.Sort(vms)
-		targetVM = vms[0]
+
+		for _, vm := range vms {
+			if strings.HasPrefix(vm, "bootstrap-node-") {
+				continue
+			}
+			targetVM = vm
+			break
+		}
 
 		By("Attaching a virtual disk to the target VM")
 		attachResult, attachErr := kubernetes.AttachVirtualDiskToVM(ctx, res.BaseKubeconfig,
