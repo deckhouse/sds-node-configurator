@@ -1,9 +1,10 @@
 *.md
+CHANGELOG
 crds
-# charts
 docs
 enabled
 hooks
+hack
 images
 images_digests.json
 lib
@@ -14,3 +15,4 @@ release.yaml
 scripts
 template_tests
 werf*.yaml
+e2e
