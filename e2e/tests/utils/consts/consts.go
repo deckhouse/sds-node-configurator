@@ -18,5 +18,5 @@ package consts
 
 const (
 	SdsNodeConfiguratorAgentNamespace = "d8-sds-node-configurator"
-	SdsNodeConfiguratorAgentAppLabel  = "sds-node-configurator"
+	SdsNodeConfiguratorAgentName      = "sds-node-configurator"
 )

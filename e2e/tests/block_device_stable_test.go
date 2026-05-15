@@ -32,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -45,6 +46,9 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Ordere
 		targetVM                    string
 		initialBlockDevice          kubernetes.BlockDevice
 		virtualDiskAttachmentResult *kubernetes.VirtualDiskAttachmentResult
+
+		mpoGVR schema.GroupVersionResource
+		dyn    dynamic.Interface
 	)
 
 	BeforeAll(func() {
@@ -83,25 +87,15 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Ordere
 
 		virtualDiskAttachmentResult = attachResult
 
-		if os.Getenv("GITHUB_EVENT_NAME") == "pull_request" {
-			By("Reading ModulePullOverride spec for debug output in pull_request runs")
-			dyn, err := kubernetes.NewDynamicClientWithRetry(ctx, res.Kubeconfig)
-			Expect(err).NotTo(HaveOccurred())
-
-			mpoGVR := schema.GroupVersionResource{
-				Group:    "deckhouse.io",
-				Version:  "v1alpha2",
-				Resource: "modulepulloverrides",
-			}
-
-			mpo, err := dyn.Resource(mpoGVR).Get(ctx, "sds-node-configurator", metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-
-			spec, found, err := unstructured.NestedMap(mpo.Object, "spec")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(found).To(BeTrue())
-			GinkgoWriter.Printf("ImageTag: %s", spec["imageTag"])
+		By("Preparing GVR and K8s dynamic clients")
+		mpoGVR = schema.GroupVersionResource{
+			Group:    "deckhouse.io",
+			Version:  "v1alpha2",
+			Resource: "modulepulloverrides",
 		}
+		var dynErr error
+		dyn, dynErr = kubernetes.NewDynamicClientWithRetry(ctx, res.Kubeconfig)
+		Expect(dynErr).NotTo(HaveOccurred())
 	})
 
 	AfterAll(func() {
@@ -179,7 +173,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Ordere
 							ctx,
 							&v1.Pod{},
 							client.InNamespace(consts.SdsNodeConfiguratorAgentNamespace),
-							client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentAppLabel},
+							client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentName},
 							client.MatchingFields{"spec.nodeName": targetVM},
 						)
 						Expect(err).NotTo(HaveOccurred())
@@ -191,7 +185,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Ordere
 								ctx,
 								&pods,
 								client.InNamespace(consts.SdsNodeConfiguratorAgentNamespace),
-								client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentAppLabel},
+								client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentName},
 								client.MatchingFields{"spec.nodeName": targetVM},
 							)).To(Succeed())
 
@@ -211,6 +205,47 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Ordere
 						Expect(blockDevices).To(HaveLen(1))
 						Expect(blockDevices[0]).To(Equal(initialBlockDevice))
 					})
+				})
+			})
+
+			When("running in pull_request and agent is updated to PR version", func() {
+				BeforeAll(func() {
+					if os.Getenv("GITHUB_EVENT_NAME") != "pull_request" {
+						Skip("PR-only scenario")
+					}
+
+					mpo, err := dyn.Resource(mpoGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+
+					err = unstructured.SetNestedField(mpo.Object, conf.ModulesImageTag, "spec", "imageTag")
+					Expect(err).NotTo(HaveOccurred())
+
+					_, err = dyn.Resource(mpoGVR).Update(ctx, mpo, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
+
+					Expect(kubernetes.WaitForModuleReady(ctx, res.Kubeconfig, consts.SdsNodeConfiguratorAgentName, 10*time.Minute)).To(Succeed())
+				})
+
+				It("has the same consumable block device", func() {
+					By("Checking that consumable BlockDevice name remains unchanged after agent update")
+					Expect(initialBlockDevice.Name).NotTo(BeEmpty())
+					Eventually(func(g Gomega) {
+						blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, res.Kubeconfig, targetVM)
+						g.Expect(getBDErr).NotTo(HaveOccurred())
+						g.Expect(blockDevices).To(HaveLen(1))
+						g.Expect(blockDevices[0].Name).To(Equal(initialBlockDevice.Name))
+					}, 5*time.Minute, 5*time.Second).Should(Succeed())
+				})
+
+				AfterAll(func() {
+					mpo, err := dyn.Resource(mpoGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+
+					err = unstructured.SetNestedField(mpo.Object, "main", "spec", "imageTag")
+					Expect(err).NotTo(HaveOccurred())
+
+					_, err = dyn.Resource(mpoGVR).Update(ctx, mpo, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
 				})
 			})
 		})
