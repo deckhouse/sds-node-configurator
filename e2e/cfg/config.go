@@ -27,6 +27,7 @@ type Config struct {
 	DKPLicenceKey     string      `env:"DKP_LICENSE_KEY"`
 	LogLevel          string      `env:"LOG_LEVEL" envDefault:"info"`
 	YamlClusterConfig string      `env:"YAML_CONFIG_FILENAME" envDefault:"cluster_config.yml"`
+	ModulesImageTag   string      `env:"MODULES_MODULE_TAG,required" envDefault:"main"`
 }
 
 type TestCluster struct {
