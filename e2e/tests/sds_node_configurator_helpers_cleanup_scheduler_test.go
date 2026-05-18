@@ -511,16 +511,145 @@ func cleanupE2EPVCs(ctx context.Context, cl client.Client) {
 	}
 }
 
-func cleanupE2EPods(ctx context.Context, cl client.Client) {
+func isE2ESchedulerPodName(name string) bool {
+	return strings.HasPrefix(name, e2ePodPrefix)
+}
+
+// cleanupE2EPods issues Delete (grace 0, foreground) for every e2e-pod-* in default. Safe to call repeatedly.
+func cleanupE2EPods(ctx context.Context, cl client.Client) int {
 	var list corev1.PodList
-	err := cl.List(ctx, &list, client.InNamespace(metav1.NamespaceDefault))
-	if err != nil {
+	if err := cl.List(ctx, &list, client.InNamespace(metav1.NamespaceDefault)); err != nil {
+		GinkgoWriter.Printf("list e2e pods for delete: %v\n", err)
+		return 0
+	}
+	foreground := client.PropagationPolicy(metav1.DeletePropagationForeground)
+	requested := 0
+	for i := range list.Items {
+		if !isE2ESchedulerPodName(list.Items[i].Name) {
+			continue
+		}
+		p := list.Items[i]
+		err := cl.Delete(ctx, &p, client.GracePeriodSeconds(0), foreground)
+		if err != nil && !apierrors.IsNotFound(err) {
+			GinkgoWriter.Printf("delete pod %s (phase=%s): %v\n", p.Name, p.Status.Phase, err)
+			continue
+		}
+		requested++
+	}
+	return requested
+}
+
+// forceFinalizeStuckE2EPods removes finalizers from e2e Pods already in deletion (volume unmount can block for minutes).
+func forceFinalizeStuckE2EPods(ctx context.Context, cl client.Client) int {
+	var list corev1.PodList
+	if err := cl.List(ctx, &list, client.InNamespace(metav1.NamespaceDefault)); err != nil {
+		GinkgoWriter.Printf("list e2e pods for force finalize: %v\n", err)
+		return 0
+	}
+	finalized := 0
+	for i := range list.Items {
+		if !isE2ESchedulerPodName(list.Items[i].Name) {
+			continue
+		}
+		p := list.Items[i]
+		if p.DeletionTimestamp == nil {
+			continue
+		}
+		var fresh corev1.Pod
+		if err := cl.Get(ctx, client.ObjectKeyFromObject(&p), &fresh); err != nil {
+			if !apierrors.IsNotFound(err) {
+				GinkgoWriter.Printf("get pod %s for force finalize: %v\n", p.Name, err)
+			}
+			continue
+		}
+		if len(fresh.Finalizers) == 0 {
+			continue
+		}
+		fresh.Finalizers = nil
+		if err := cl.Update(ctx, &fresh); err != nil && !apierrors.IsNotFound(err) {
+			GinkgoWriter.Printf("strip finalizers on pod %s: %v\n", fresh.Name, err)
+			continue
+		}
+		deletingFor := time.Since(fresh.DeletionTimestamp.Time).Round(time.Second)
+		GinkgoWriter.Printf("Force-finalized stuck pod %s (phase=%s, deletingFor=%s)\n", fresh.Name, fresh.Status.Phase, deletingFor)
+		finalized++
+	}
+	return finalized
+}
+
+func logSampleStuckE2EPods(ctx context.Context, cl client.Client, max int) {
+	var list corev1.PodList
+	if err := cl.List(ctx, &list, client.InNamespace(metav1.NamespaceDefault)); err != nil {
 		return
 	}
+	logged := 0
 	for i := range list.Items {
-		if strings.HasPrefix(list.Items[i].Name, e2ePodPrefix) {
-			p := list.Items[i]
-			_ = cl.Delete(ctx, &p, client.GracePeriodSeconds(0))
+		p := list.Items[i]
+		if !isE2ESchedulerPodName(p.Name) {
+			continue
+		}
+		deletingFor := "—"
+		if p.DeletionTimestamp != nil {
+			deletingFor = time.Since(p.DeletionTimestamp.Time).Round(time.Second).String()
+		}
+		GinkgoWriter.Printf("  e2e pod %s phase=%s node=%s deletingFor=%s finalizers=%v\n",
+			p.Name, p.Status.Phase, p.Spec.NodeName, deletingFor, p.Finalizers)
+		logged++
+		if logged >= max {
+			break
+		}
+	}
+}
+
+// waitE2EPodsGone retries Delete on each poll and force-finalizes Pods stuck in Terminating without progress.
+func waitE2EPodsGone(ctx context.Context, cl client.Client, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	lastCount := -1
+	lastProgress := time.Now()
+	lastDetailLog := time.Time{}
+
+	for time.Now().Before(deadline) {
+		cleanupE2EPods(ctx, cl)
+
+		n := countE2EPodsDefault(ctx, cl)
+		if n == 0 {
+			return
+		}
+		if n < lastCount {
+			lastProgress = time.Now()
+		}
+		lastCount = n
+
+		if time.Since(lastProgress) >= e2ePodCleanupStuckWithoutProgress {
+			if forceFinalizeStuckE2EPods(ctx, cl) > 0 {
+				lastProgress = time.Now()
+			}
+		}
+
+		if time.Since(lastDetailLog) >= e2ePodCleanupLogStuckInterval {
+			GinkgoWriter.Printf("Waiting for e2e Pods to terminate before PVC cleanup: %d remaining (sample):\n", n)
+			logSampleStuckE2EPods(ctx, cl, 5)
+			lastDetailLog = time.Now()
+		} else {
+			GinkgoWriter.Printf("Waiting for e2e Pods to terminate before PVC cleanup: %d remaining\n", n)
+		}
+		time.Sleep(e2ePodCleanupPollInterval)
+	}
+
+	if n := countE2EPodsDefault(ctx, cl); n > 0 {
+		GinkgoWriter.Printf("Pod cleanup deadline reached with %d e2e Pods left; forcing removal\n", n)
+		cleanupE2EPods(ctx, cl)
+		forceFinalizeStuckE2EPods(ctx, cl)
+		graceDeadline := time.Now().Add(30 * time.Second)
+		for time.Now().Before(graceDeadline) {
+			if countE2EPodsDefault(ctx, cl) == 0 {
+				return
+			}
+			time.Sleep(2 * time.Second)
+		}
+		if n := countE2EPodsDefault(ctx, cl); n > 0 {
+			GinkgoWriter.Printf("Warning: %d e2e Pods still present after force cleanup:\n", n)
+			logSampleStuckE2EPods(ctx, cl, 10)
 		}
 	}
 }
@@ -586,30 +715,16 @@ func countE2ERelatedPVs(ctx context.Context, cl client.Client) int {
 // Then waits until related PersistentVolumes are gone (CSI finishes delete) so LVMLogicalVolume teardown can run in order.
 // podPhaseTimeout and pvPhaseTimeout are independent: time spent waiting for Pods must not reduce the CSI budget for
 // deleting many PVs (detach + DeleteVolume + finalizers), which serializes in the controller on loaded clusters.
-// Uses only Delete (no finalizer removal on Pods or PVCs).
-
-// cleanupE2EPodsAndPVCsWithWait deletes e2e Pods first and waits until they are gone before deleting PVCs.
-// Deleting PVCs while Pods still mount the volume leaves PVCs stuck in Terminating and blocks the test.
-// Then waits until related PersistentVolumes are gone (CSI finishes delete) so LVMLogicalVolume teardown can run in order.
-// podPhaseTimeout and pvPhaseTimeout are independent: time spent waiting for Pods must not reduce the CSI budget for
-// deleting many PVs (detach + DeleteVolume + finalizers), which serializes in the controller on loaded clusters.
-// Uses only Delete (no finalizer removal on Pods or PVCs).
+// Stuck Pods in Terminating (RWO volume detach) are force-finalized after e2ePodCleanupStuckWithoutProgress without progress.
 func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, podPhaseTimeout, pvPhaseTimeout time.Duration) {
-	podDeadline := time.Now().Add(podPhaseTimeout)
-
-	cleanupE2EPods(ctx, cl)
-	for time.Now().Before(podDeadline) {
-		n := countE2EPodsDefault(ctx, cl)
-		if n == 0 {
-			break
-		}
-		GinkgoWriter.Printf("Waiting for e2e Pods to terminate before PVC cleanup: %d remaining\n", n)
-		time.Sleep(3 * time.Second)
-	}
+	waitE2EPodsGone(ctx, cl, podPhaseTimeout)
 
 	cleanupE2EPVCs(ctx, cl)
 	pvDeadline := time.Now().Add(pvPhaseTimeout)
 	for time.Now().Before(pvDeadline) {
+		if countE2EPodsDefault(ctx, cl) > 0 {
+			cleanupE2EPods(ctx, cl)
+		}
 		podCount := countE2EPodsDefault(ctx, cl)
 		pvcCount := countE2EPVCsDefault(ctx, cl)
 		pvCount := countE2ERelatedPVs(ctx, cl)

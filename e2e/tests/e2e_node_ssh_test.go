@@ -25,7 +25,9 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"time"
 
+	. "github.com/onsi/ginkgo/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
@@ -34,6 +36,8 @@ import (
 
 	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
 )
+
+const e2eSSHJumpDialRetries = 5
 
 // e2eNodeSSHClient runs commands on a test-cluster worker VM (direct or via jump host).
 type e2eNodeSSHClient struct {
@@ -158,7 +162,7 @@ func e2eCreateSSHClientConfig(user, keyPath string) (*gossh.ClientConfig, error)
 		if !strings.Contains(err.Error(), "ssh: this private key is passphrase protected") {
 			return nil, fmt.Errorf("parse private key %s: %w", expanded, err)
 		}
-		pass := os.Getenv("SSH_PASSPHRASE")
+		pass := e2eConfigSSHPassphrase()
 		if pass == "" {
 			return nil, fmt.Errorf("SSH key %s is passphrase protected: set SSH_PASSPHRASE", expanded)
 		}
@@ -195,9 +199,34 @@ func e2eDialSSH(user, host, keyPath string) (*gossh.Client, error) {
 	return gossh.Dial("tcp", e2eSSHAddr(host), cfg)
 }
 
+// e2eResolveJumpHost picks the SSH bastion for node InternalIPs (10.10.10.x). The CI runner cannot dial them directly.
+//
+// SSH_JUMP_* is optional. By default we hop via SSH_HOST (same as storage-e2e bootstrap: SSH_USER@SSH_HOST → SSH_VM_USER@node).
+//   - alwaysCreateNew: SSH_HOST is the base cluster master.
+//   - alwaysUseExisting: SSH_HOST is the test cluster master (must route to worker InternalIPs).
+func e2eResolveJumpHost(nodeIP string) (host, source string) {
+	if h := strings.TrimSpace(e2eConfigSSHJumpHost()); h != "" {
+		return h, "SSH_JUMP_HOST (optional override)"
+	}
+	ip := net.ParseIP(strings.TrimSpace(nodeIP))
+	if ip != nil && ip.IsPrivate() {
+		if h := strings.TrimSpace(e2eConfigSSHHost()); h != "" {
+			return h, "SSH_HOST"
+		}
+	}
+	return "", ""
+}
+
 func e2eNewNodeSSHClient(sshUser, nodeIP, keyPath string) (*e2eNodeSSHClient, error) {
-	jumpHost := os.Getenv("SSH_JUMP_HOST")
+	jumpHost, jumpSource := e2eResolveJumpHost(nodeIP)
 	if jumpHost == "" {
+		ip := net.ParseIP(strings.TrimSpace(nodeIP))
+		if ip != nil && ip.IsPrivate() {
+			return nil, fmt.Errorf(
+				"node has private IP %s but SSH_HOST is empty: set SSH_HOST to a host that can reach the node (base cluster for alwaysCreateNew, test master for alwaysUseExisting)",
+				nodeIP,
+			)
+		}
 		target, err := e2eDialSSH(sshUser, nodeIP, keyPath)
 		if err != nil {
 			return nil, fmt.Errorf("SSH to node %s@%s: %w", sshUser, nodeIP, err)
@@ -205,43 +234,62 @@ func e2eNewNodeSSHClient(sshUser, nodeIP, keyPath string) (*e2eNodeSSHClient, er
 		return &e2eNodeSSHClient{target: target}, nil
 	}
 
-	jumpUser := os.Getenv("SSH_JUMP_USER")
+	jumpUser := strings.TrimSpace(e2eConfigSSHJumpUser())
 	if jumpUser == "" {
-		jumpUser = os.Getenv("SSH_USER")
+		jumpUser = strings.TrimSpace(e2eConfigSSHUser())
 	}
-	jumpKeyPath := os.Getenv("SSH_JUMP_KEY_PATH")
+	jumpKeyPath := strings.TrimSpace(e2eConfigSSHJumpKeyPath())
 	if jumpKeyPath == "" {
 		jumpKeyPath = keyPath
 	}
 
+	GinkgoWriter.Printf("      SSH hop to node %s@%s via %s@%s (%s)\n", sshUser, nodeIP, jumpUser, jumpHost, jumpSource)
+
 	jumpClient, err := e2eDialSSH(jumpUser, jumpHost, jumpKeyPath)
 	if err != nil {
-		return nil, fmt.Errorf("SSH to jump host %s@%s: %w", jumpUser, jumpHost, err)
+		return nil, fmt.Errorf("SSH to bastion %s@%s (%s): %w", jumpUser, jumpHost, jumpSource, err)
 	}
 
 	targetAddr := e2eSSHAddr(nodeIP)
-	targetConn, err := jumpClient.Dial("tcp", targetAddr)
-	if err != nil {
-		_ = jumpClient.Close()
-		return nil, fmt.Errorf("dial node %s through jump host: %w", targetAddr, err)
-	}
-
 	targetCfg, err := e2eCreateSSHClientConfig(sshUser, keyPath)
 	if err != nil {
-		_ = targetConn.Close()
 		_ = jumpClient.Close()
 		return nil, err
 	}
 
-	targetClientConn, targetChans, targetReqs, err := gossh.NewClientConn(targetConn, targetAddr, targetCfg)
-	if err != nil {
-		_ = targetConn.Close()
+	var (
+		targetClient *gossh.Client
+		lastErr      error
+	)
+	for attempt := 0; attempt < e2eSSHJumpDialRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+		targetConn, dialErr := jumpClient.Dial("tcp", targetAddr)
+		if dialErr != nil {
+			lastErr = fmt.Errorf("dial %s via %s@%s: %w", targetAddr, jumpUser, jumpHost, dialErr)
+			continue
+		}
+		targetClientConn, targetChans, targetReqs, connErr := gossh.NewClientConn(targetConn, targetAddr, targetCfg)
+		if connErr != nil {
+			_ = targetConn.Close()
+			lastErr = fmt.Errorf("SSH handshake to %s@%s via bastion: %w", sshUser, nodeIP, connErr)
+			continue
+		}
+		targetClient = gossh.NewClient(targetClientConn, targetChans, targetReqs)
+		lastErr = nil
+		break
+	}
+	if targetClient == nil {
 		_ = jumpClient.Close()
-		return nil, fmt.Errorf("SSH handshake to node %s@%s: %w", sshUser, nodeIP, err)
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		return nil, fmt.Errorf("SSH to %s@%s via %s@%s failed after %d attempts", sshUser, nodeIP, jumpUser, jumpHost, e2eSSHJumpDialRetries)
 	}
 
 	return &e2eNodeSSHClient{
-		target: gossh.NewClient(targetClientConn, targetChans, targetReqs),
+		target: targetClient,
 		jump:   jumpClient,
 	}, nil
 }

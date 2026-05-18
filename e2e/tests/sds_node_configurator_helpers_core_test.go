@@ -141,6 +141,10 @@ const (
 	// Scheduler cleanup: pod termination and CSI PV teardown must not share one deadline — many PVs delete serially.
 	e2eSchedulerPodCleanupTimeout = 5 * time.Minute
 	e2eSchedulerPVDeleteTimeout   = 25 * time.Minute
+	// Many fill-test Pods (busybox + RWO volume) can stay Terminating until volumes detach; force-finalize when stuck.
+	e2ePodCleanupStuckWithoutProgress = 90 * time.Second
+	e2ePodCleanupPollInterval           = 3 * time.Second
+	e2ePodCleanupLogStuckInterval       = 30 * time.Second
 
 	// Suite/AfterAll: short pod wait; PVC deletion returns quickly while PV finalizers need a separate budget.
 	e2eSuitePodPVCleanupPodTimeout = 2 * time.Minute
