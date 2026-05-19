@@ -130,6 +130,10 @@ const (
 	e2eModuleDeployTimeout    = 15 * time.Minute
 	// LVMVolumeGroup Pending → Ready on busy CI can exceed 5m (agent + node LVM).
 	e2eLVMVolumeGroupReadyTimeout = 15 * time.Minute
+	// Auto-import: BD discoverer must link PV to BlockDevice before LVG discoverer can create a CR.
+	e2eBlockDeviceVGLinkageTimeout = 10 * time.Minute
+	// Tagged VG auto-import: LVMVolumeGroup CR after BD linkage + agent rescan (nested CI may miss udev).
+	e2eLVMVolumeGroupAutoImportDiscoveryTimeout = 15 * time.Minute
 	e2eStorageModuleReadyTimeout  = 30 * time.Minute // alwaysUseExisting: wait for Module Ready after ModuleConfig
 	e2eUseExistingClusterTimeout  = 90 * time.Minute
 
@@ -139,6 +143,10 @@ const (
 	// Scheduler cleanup: pod termination and CSI PV teardown must not share one deadline — many PVs delete serially.
 	e2eSchedulerPodCleanupTimeout = 5 * time.Minute
 	e2eSchedulerPVDeleteTimeout   = 25 * time.Minute
+	// Many fill-test Pods (busybox + RWO volume) can stay Terminating until volumes detach; force-finalize when stuck.
+	e2ePodCleanupStuckWithoutProgress = 90 * time.Second
+	e2ePodCleanupPollInterval           = 3 * time.Second
+	e2ePodCleanupLogStuckInterval       = 30 * time.Second
 
 	// Suite/AfterAll: short pod wait; PVC deletion returns quickly while PV finalizers need a separate budget.
 	e2eSuitePodPVCleanupPodTimeout = 2 * time.Minute
