@@ -47,14 +47,14 @@ const (
 	netlinkChangeEventLogPattern = `(?i)\[HandleEvent\].*udev event.*action=change`
 )
 
-var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, func(ctx context.Context) {
+var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, func() {
 	var (
 		testClusterResources *cluster.TestClusterResources
 		k8sClient            client.Client
 		cs                   *k8sclient.Clientset
 		conf                 *cfg.Config
-
-		targetVM string
+		ctx                  context.Context
+		targetVM             string
 
 		netlinkDiskAttach *kubernetes.VirtualDiskAttachmentResult
 		blockDevice       *v1alpha1.BlockDevice
@@ -66,6 +66,7 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 	)
 
 	BeforeAll(func() {
+		ctx = context.Background()
 		testClusterResources = e2eNestedTestClusterOrNil()
 		Expect(testClusterResources).NotTo(BeNil(),
 			"nested cluster must be created in BeforeSuite (e2eEnsureSharedNestedTestCluster)")
