@@ -2330,8 +2330,17 @@ sudo -n vgchange "$VG" --addtag storage.deckhouse.io/enabled=true 2>&1
 				}
 				Expect(errLvm).NotTo(HaveOccurred(), "create VG + thin-pool + tag on node %s", nodeName)
 
+				By("Triggering LVM inventory rescan on node (pvscan + udev) so agent cache can see the new VG")
+				e2eTriggerLVMDiscoveryOnNode(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH)
+
+				By(fmt.Sprintf("Waiting for BlockDevice %s to be linked to VG %s (up to %s)", targetBD.Name, manualVG, e2eBlockDeviceVGLinkageTimeout))
+				e2eWaitBlockDeviceLinkedToVG(e2eCtx, k8sClient, targetBD.Name, manualVG, e2eBlockDeviceVGLinkageTimeout)
+
+				By("Restarting sds-node-configurator agent on the node (nested CI often misses udev; same pattern as BD rescan tests)")
+				restartSDSNodeConfiguratorAgentOnNode(e2eCtx, k8sClient, nodeName)
+
 				var lvgName string
-				By(fmt.Sprintf("Waiting for agent to create LVMVolumeGroup CR (auto-import) for tagged VG on node (up to %s — discoverer may not see the new VG until the next rescan)", e2eLVMVolumeGroupAutoImportDiscoveryTimeout))
+				By(fmt.Sprintf("Waiting for agent to create LVMVolumeGroup CR (auto-import) for tagged VG on node (up to %s)", e2eLVMVolumeGroupAutoImportDiscoveryTimeout))
 				Eventually(func(g Gomega) {
 					var list v1alpha1.LVMVolumeGroupList
 					g.Expect(k8sClient.List(e2eCtx, &list, &client.ListOptions{})).To(Succeed())

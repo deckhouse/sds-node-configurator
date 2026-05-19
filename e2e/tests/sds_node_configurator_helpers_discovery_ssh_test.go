@@ -29,6 +29,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -115,6 +116,26 @@ func runLsblkViaDirectSSH(ctx context.Context, testKubeconfig *rest.Config, node
 		return nil, fmt.Errorf("run lsblk on node %s (%s@%s): %w", nodeName, sshUser, nodeIP, err)
 	}
 	return parseLsblkOutput(out), nil
+}
+
+// e2eTriggerLVMDiscoveryOnNode nudges the agent scanner (udev + pvscan) after on-node LVM changes.
+func e2eTriggerLVMDiscoveryOnNode(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser string) {
+	script := `sudo -n pvscan --cache 2>&1 || true
+sudo -n udevadm trigger --subsystem-match=block --action=change 2>&1 || true`
+	_, _ = e2eExecOnTestClusterNodeSSH(ctx, testKubeconfig, nodeName, sshUser, script)
+}
+
+// e2eWaitBlockDeviceLinkedToVG waits until the BD discoverer has linked the device to the given VG.
+func e2eWaitBlockDeviceLinkedToVG(ctx context.Context, cl client.Client, bdName, vgName string, timeout time.Duration) {
+	Eventually(func(g Gomega) {
+		var bd v1alpha1.BlockDevice
+		g.Expect(cl.Get(ctx, client.ObjectKey{Name: bdName}, &bd)).To(Succeed())
+		g.Expect(strings.TrimSpace(bd.Status.ActualVGNameOnTheNode)).To(Equal(vgName),
+			"BlockDevice %s should report status.actualVGNameOnTheNode=%q (agent BD discoverer); got %q, pvUuid=%q vgUuid=%q consumable=%v path=%q",
+			bdName, vgName, bd.Status.ActualVGNameOnTheNode, bd.Status.PVUuid, bd.Status.VGUuid, bd.Status.Consumable, bd.Status.Path)
+		g.Expect(strings.TrimSpace(bd.Status.VGUuid)).NotTo(BeEmpty(), "BlockDevice %s should have status.vgUuid set", bdName)
+		g.Expect(strings.TrimSpace(bd.Status.PVUuid)).NotTo(BeEmpty(), "BlockDevice %s should have status.pvUuid set", bdName)
+	}, timeout, 5*time.Second).Should(Succeed())
 }
 
 // e2eExecOnTestClusterNodeSSH runs a shell command on a test cluster node (same SSH path as lsblk: jump host + node IP).

@@ -130,8 +130,10 @@ const (
 	e2eModuleDeployTimeout    = 15 * time.Minute
 	// LVMVolumeGroup Pending → Ready on busy CI can exceed 5m (agent + node LVM).
 	e2eLVMVolumeGroupReadyTimeout = 15 * time.Minute
-	// Tagged VG auto-import: discoverer may not see a new VG until the next rescan.
-	e2eLVMVolumeGroupAutoImportDiscoveryTimeout = 20 * time.Minute
+	// Auto-import: BD discoverer must link PV to BlockDevice before LVG discoverer can create a CR.
+	e2eBlockDeviceVGLinkageTimeout = 10 * time.Minute
+	// Tagged VG auto-import: LVMVolumeGroup CR after BD linkage + agent rescan (nested CI may miss udev).
+	e2eLVMVolumeGroupAutoImportDiscoveryTimeout = 15 * time.Minute
 	e2eStorageModuleReadyTimeout  = 30 * time.Minute // alwaysUseExisting: wait for Module Ready after ModuleConfig
 	e2eUseExistingClusterTimeout  = 90 * time.Minute
 
