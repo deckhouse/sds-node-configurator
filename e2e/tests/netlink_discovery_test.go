@@ -61,6 +61,7 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 		agentPod          *v1.Pod
 
 		addSince    metav1.Time
+		changeSince metav1.Time
 		removeSince metav1.Time
 	)
 
@@ -163,6 +164,69 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 			g.Expect(logErr).NotTo(HaveOccurred())
 			return logText
 		}, time.Minute, 2*time.Second).Should(MatchRegexp(netlinkAddEventLogPattern))
+	})
+
+	It("updates BlockDevice after VirtualDisk resize (CHANGE)", func() {
+		Expect(netlinkDiskAttach).NotTo(BeNil(), "disk must be attached in previous step")
+		Expect(blockDevice).NotTo(BeNil(), "blockDevice must be discovered in previous step")
+
+		bdName := blockDevice.Name
+		bdNode := blockDevice.Status.NodeName
+		baselineBDSize := blockDevice.Status.Size.Value()
+
+		changeSince = metav1.NewTime(time.Now())
+
+		By(fmt.Sprintf("Growing VirtualDisk %s from %s to %s", netlinkDiskAttach.DiskName, netlinkDiskSize, netlinkDiskResizedSize))
+		Expect(e2ePatchVirtualDiskSize(
+			ctx,
+			testClusterResources.BaseKubeconfig,
+			conf.TestCluster.Namespace,
+			netlinkDiskAttach.DiskName,
+			netlinkDiskResizedSize,
+		)).To(Succeed())
+
+		By("Waiting until the same BlockDevice reflects increased size")
+		Eventually(func(g Gomega) {
+			var bd v1alpha1.BlockDevice
+			err := k8sClient.Get(ctx, client.ObjectKey{Name: bdName}, &bd)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			g.Expect(bd.Status.Type).To(Equal("disk"))
+			g.Expect(bd.Status.NodeName).To(Equal(bdNode), "BlockDevice should stay on the same node after resize")
+
+			g.Expect(bd.Status.Size.Value()).To(BeNumerically(">", baselineBDSize),
+				"BlockDevice size should increase after VirtualDisk resize (was %d)", baselineBDSize)
+
+			maxSize := resource.MustParse(netlinkDiskResizedSize)
+			maxSize.Add(resource.MustParse("16Mi"))
+			g.Expect(bd.Status.Size.Cmp(maxSize)).NotTo(BeNumerically(">", 0),
+				"BD size must be <= requested resized size + 16Mi (%s), got %s", maxSize.String(), bd.Status.Size.String())
+
+			blockDevice = &bd
+		}, 2*time.Minute, 2*time.Second).Should(Succeed())
+	})
+
+	It("writes udev change event to agent logs", func(ctx SpecContext) {
+		Skip("not implemented netlink logs")
+
+		var fnErr error
+		agentPod, fnErr = pod.FindRunningPodOnNode(
+			ctx, k8sClient, targetVM,
+			client.InNamespace(consts.SdsNodeConfiguratorAgentNamespace),
+			client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentName},
+		)
+		Expect(fnErr).NotTo(HaveOccurred())
+
+		logOpts := v1.PodLogOptions{
+			Container:  consts.SdsNodeConfiguratorAgentContainer,
+			SinceTime:  &changeSince,
+			Timestamps: true,
+		}
+		Eventually(func(g Gomega) string {
+			logText, logErr := pod.GetLogs(ctx, cs, consts.SdsNodeConfiguratorAgentNamespace, agentPod.Name, logOpts)
+			g.Expect(logErr).NotTo(HaveOccurred())
+			return logText
+		}, time.Minute, 2*time.Second).Should(MatchRegexp(netlinkChangeEventLogPattern))
 	})
 
 	It("removes BlockDevice after VirtualDisk detach", func() {
