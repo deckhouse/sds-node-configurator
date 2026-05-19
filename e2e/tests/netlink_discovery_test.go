@@ -142,7 +142,7 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 			"BD size must be <= requested size + 16Mi (%s), got %s", maxSize.String(), blockDevice.Status.Size.String())
 	})
 
-	It("writes udev add event to agent logs", func(ctx SpecContext) {
+	It("writes udev add event to agent logs", func() {
 		Skip("not implemented netlink logs")
 
 		var fnErr error
@@ -163,9 +163,9 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 			g.Expect(logErr).NotTo(HaveOccurred())
 			return logText
 		}, time.Minute, 2*time.Second).Should(MatchRegexp(netlinkAddEventLogPattern))
-	}, SpecTimeout(2*time.Minute))
+	})
 
-	It("removes BlockDevice after VirtualDisk detach", func(ctx SpecContext) {
+	It("removes BlockDevice after VirtualDisk detach", func() {
 		Expect(netlinkDiskAttach).NotTo(BeNil(), "disk must be attached in previous step")
 
 		removeSince = metav1.NewTime(time.Now())
@@ -183,9 +183,9 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 			g.Expect(apierrors.IsNotFound(err)).To(BeTrue(),
 				"BlockDevice %s should be deleted after detach; err=%v", bdName, err)
 		}, 30*time.Second, time.Second).Should(Succeed())
-	}, SpecTimeout(1*time.Minute))
+	})
 
-	It("writes udev remove event to agent logs", func(ctx SpecContext) {
+	It("writes udev remove event to agent logs", func() {
 		Skip("not implemented netlink logs")
 		logOpts := v1.PodLogOptions{
 			Container:  consts.SdsNodeConfiguratorAgentContainer,
@@ -197,5 +197,5 @@ var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, fu
 			g.Expect(logErr).NotTo(HaveOccurred())
 			return logText
 		}, time.Minute, 2*time.Second).Should(MatchRegexp(netlinkRemoveEventLogPattern))
-	}, SpecTimeout(2*time.Minute))
+	})
 })
