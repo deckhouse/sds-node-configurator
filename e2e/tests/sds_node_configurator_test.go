@@ -2003,6 +2003,199 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			})
 		})
 
+		Context("LVMVolumeGroup extend with second disk", func() {
+			const (
+				e2eLVGExtendDisk1Name = "e2e-lvg-extend-disk1"
+				e2eLVGExtendDisk2Name = "e2e-lvg-extend-disk2"
+				e2eLVGExtendDisk1Size = "2Gi"
+				e2eLVGExtendDisk2Size = "3Gi"
+			)
+
+			var (
+				lvgExtendSuiteOnce sync.Once
+				lvgExtendRunID     string
+				lvgExtendAttaches  []*kubernetes.VirtualDiskAttachmentResult
+			)
+
+			BeforeEach(func() {
+				lvgExtendSuiteOnce.Do(func() {
+					ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+					lvgExtendRunID = fmt.Sprintf("%d", time.Now().Unix())
+					prepCtx, prepCancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
+					defer prepCancel()
+					By("LVMVolumeGroup extend suite: cleanup before test")
+					cleanupE2EPodsAndPVCsWithWait(prepCtx, k8sClient, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
+					cleanupE2ELVMLogicalVolumes(prepCtx, k8sClient)
+					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
+					cleanupE2ELocalStorageClasses(prepCtx, testClusterResources.Kubeconfig)
+					if testClusterResources.BaseKubeconfig != nil {
+						cleanupE2EVirtualDisks(prepCtx, testClusterResources.BaseKubeconfig, e2eConfigNamespace(), e2eSuiteVirtualDiskPrefix)
+					}
+					forceDeleteAllNonConsumableBlockDevices(prepCtx, k8sClient, 2*time.Minute)
+					forceDeleteAllBlockDevices(prepCtx, k8sClient, 3*time.Minute)
+				})
+			})
+
+			AfterEach(func() {
+				if testClusterResources == nil || testClusterResources.BaseKubeconfig == nil {
+					return
+				}
+				ns := e2eConfigNamespace()
+				for _, att := range lvgExtendAttaches {
+					if att == nil {
+						continue
+					}
+					By("Cleaning up LVMVolumeGroup extend VirtualDisk " + att.DiskName)
+					_ = kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns, att.AttachmentName, att.DiskName)
+				}
+				lvgExtendAttaches = nil
+			})
+
+			It("Should vgextend LVMVolumeGroup when a second disk is added to BlockDeviceSelector", func() {
+				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "requires nested virtualization / base cluster")
+				Expect(lvgExtendRunID).NotTo(BeEmpty())
+
+				ns := e2eConfigNamespace()
+				storageClass := e2eConfigStorageClass()
+				Expect(storageClass).NotTo(BeEmpty())
+				clusterVMs := e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
+				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
+
+				vgName := fmt.Sprintf("e2e-vg-extend-%s", lvgExtendRunID)
+				nodeSafe := func(n string) string {
+					return strings.ReplaceAll(strings.ReplaceAll(n, ".", "-"), "_", "-")
+				}
+
+				By("Step 1: attach first VirtualDisk and create LVMVolumeGroup on a single BlockDevice")
+				att1, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+					VMName: targetVM, Namespace: ns, DiskName: e2eLVGExtendDisk1Name,
+					DiskSize: e2eLVGExtendDisk1Size, StorageClassName: storageClass,
+				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+				Expect(err).NotTo(HaveOccurred())
+				lvgExtendAttaches = append(lvgExtendAttaches, att1)
+
+				attachCtx1, cancel1 := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
+				defer cancel1()
+				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx1, testClusterResources.BaseKubeconfig, ns, att1.AttachmentName, 10*time.Second)).To(Succeed())
+
+				bd1 := e2eWaitConsumableBlockDeviceForVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, k8sClient, ns,
+					att1.DiskName, att1.AttachmentName, targetVM)
+				nodeName := bd1.Status.NodeName
+				bd1Meta := bd1.Labels["kubernetes.io/metadata.name"]
+				if bd1Meta == "" {
+					bd1Meta = bd1.Name
+				}
+
+				lvgName := fmt.Sprintf("e2e-lvg-extend-%s-%s", lvgExtendRunID, nodeSafe(nodeName))
+				lvg := &v1alpha1.LVMVolumeGroup{
+					ObjectMeta: metav1.ObjectMeta{Name: lvgName},
+					Spec: v1alpha1.LVMVolumeGroupSpec{
+						ActualVGNameOnTheNode: vgName,
+						BlockDeviceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"kubernetes.io/hostname":      nodeName,
+								"kubernetes.io/metadata.name": bd1Meta,
+							},
+						},
+						Type:  "Local",
+						Local: v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
+					},
+				}
+				Expect(k8sClient.Create(e2eCtx, lvg)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(e2eCtx, lvg) }()
+
+				var readyOneDisk v1alpha1.LVMVolumeGroup
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &readyOneDisk)).To(Succeed())
+					g.Expect(readyOneDisk.Status.Phase).To(Equal(v1alpha1.PhaseReady))
+				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
+
+				baselineVGFree := readyOneDisk.Status.VGFree.Value()
+				baselineVGSize := readyOneDisk.Status.VGSize.Value()
+				Expect(baselineVGFree).To(BeNumerically(">", 0))
+				Expect(baselineVGSize).To(BeNumerically(">", 0))
+				Expect(e2eCountDevicesOnLVGNode(&readyOneDisk, nodeName)).To(Equal(1),
+					"status should list one device before extend")
+				GinkgoWriter.Printf("    LVMVolumeGroup with one PV: VGSize=%s VGFree=%s\n",
+					readyOneDisk.Status.VGSize.String(), readyOneDisk.Status.VGFree.String())
+
+				By("Step 2: attach second VirtualDisk and wait for a new consumable BlockDevice on the same node")
+				att2, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+					VMName: targetVM, Namespace: ns, DiskName: e2eLVGExtendDisk2Name,
+					DiskSize: e2eLVGExtendDisk2Size, StorageClassName: storageClass,
+				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+				Expect(err).NotTo(HaveOccurred())
+				lvgExtendAttaches = append(lvgExtendAttaches, att2)
+
+				attachCtx2, cancel2 := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
+				defer cancel2()
+				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx2, testClusterResources.BaseKubeconfig, ns, att2.AttachmentName, 10*time.Second)).To(Succeed())
+
+				bd2 := e2eWaitConsumableBlockDeviceForVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, k8sClient, ns,
+					att2.DiskName, att2.AttachmentName, targetVM)
+				Expect(bd2.Status.NodeName).To(Equal(nodeName), "second disk must land on the same node as the LVMVolumeGroup")
+				bd2Meta := bd2.Labels["kubernetes.io/metadata.name"]
+				if bd2Meta == "" {
+					bd2Meta = bd2.Name
+				}
+				Expect(bd2Meta).NotTo(Equal(bd1Meta), "BlockDevice selectors must be distinct")
+
+				By("Step 3: patch LVMVolumeGroup BlockDeviceSelector to include both BlockDevices")
+				var cur v1alpha1.LVMVolumeGroup
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &cur)).To(Succeed())
+				cur.Spec.BlockDeviceSelector = &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"kubernetes.io/hostname": nodeName,
+					},
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      "kubernetes.io/metadata.name",
+							Operator: metav1.LabelSelectorOpIn,
+							Values:   []string{bd1Meta, bd2Meta},
+						},
+					},
+				}
+				Expect(k8sClient.Update(e2eCtx, &cur)).To(Succeed())
+
+				By("Step 4: wait for vgextend — Ready, two devices in status, larger VG free/size")
+				Eventually(func(g Gomega) {
+					var extended v1alpha1.LVMVolumeGroup
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &extended)).To(Succeed())
+					g.Expect(extended.Status.Phase).To(Equal(v1alpha1.PhaseReady), "phase=%s", extended.Status.Phase)
+					for _, c := range extended.Status.Conditions {
+						g.Expect(c.Status).NotTo(Equal(metav1.ConditionFalse),
+							"condition %s False: reason=%s message=%s", c.Type, c.Reason, c.Message)
+					}
+					g.Expect(e2eCountDevicesOnLVGNode(&extended, nodeName)).To(Equal(2),
+						"status.nodes should list two BlockDevices after vgextend")
+					g.Expect(extended.Status.VGFree.Value()).To(BeNumerically(">", baselineVGFree),
+						"VGFree should grow after adding second PV (baseline %d)", baselineVGFree)
+					g.Expect(extended.Status.VGSize.Value()).To(BeNumerically(">", baselineVGSize),
+						"VGSize should grow after vgextend (baseline %d)", baselineVGSize)
+					devices := e2eDevicesOnLVGNode(&extended, nodeName)
+					g.Expect(devices).To(HaveKey(bd1.Name), "status should include first BlockDevice %s", bd1.Name)
+					g.Expect(devices).To(HaveKey(bd2.Name), "status should include second BlockDevice %s", bd2.Name)
+				}, e2eLVMVolumeGroupReadyTimeout, 15*time.Second).Should(Succeed())
+
+				vmSSH := e2eConfigVMSSHUser()
+				By("Step 5: verify on node that VG has two physical volumes (pvs)")
+				Eventually(func(g Gomega) {
+					pvCount, out, errSSH := e2eCountPVsInVGOnNode(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, vgName)
+					if errSSH != nil {
+						GinkgoWriter.Printf("    pvs on node %s: err=%v out=%q\n", nodeName, errSSH, out)
+					}
+					g.Expect(errSSH).NotTo(HaveOccurred())
+					g.Expect(pvCount).To(Equal(2), "VG %q should have 2 PVs on node; pvs output: %q", vgName, strings.TrimSpace(out))
+				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
+				var final v1alpha1.LVMVolumeGroup
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &final)).To(Succeed())
+				printLVMVolumeGroupInfo(&final)
+				By("✓ LVMVolumeGroup extended: two PVs in VG, VGFree/VGSize grew, Phase Ready")
+			})
+		})
+
 		Context("Multiple LVMVolumeGroups on one node", func() {
 			const (
 				e2eMultiLvgMinDisks  = 2
