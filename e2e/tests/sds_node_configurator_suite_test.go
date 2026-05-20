@@ -54,6 +54,7 @@ var _ = AfterSuite(func() {
 		}
 	}
 
+	e2eCloseNodeSSHCache()
 	e2eCleanupNestedTestClusterAfterSuite()
 })
 

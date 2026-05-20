@@ -2317,14 +2317,9 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					g.Expect(tp.Ready).To(BeTrue())
 				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
 
-				Eventually(func(g Gomega) {
-					present, out, errSSH := e2eThinPoolDataLVPresentOnNode(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, vgName, thinPoolName)
-					if errSSH != nil {
-						GinkgoWriter.Printf("    lvs thin-pool check: err=%v out=%q\n", errSSH, out)
-					}
-					g.Expect(errSSH).NotTo(HaveOccurred())
-					g.Expect(present).To(BeTrue(), "thin-pool data LV should exist before manual removal; lvs: %q", strings.TrimSpace(out))
-				}, 2*time.Minute, 5*time.Second).Should(Succeed())
+				present, lvsOut, errLvs := e2eThinPoolDataLVPresentOnNode(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, vgName, thinPoolName)
+				Expect(errLvs).NotTo(HaveOccurred())
+				Expect(present).To(BeTrue(), "thin-pool data LV should exist before manual removal (status already Ready); lvs: %q", strings.TrimSpace(lvsOut))
 				printLVMVolumeGroupInfo(&ready)
 
 				By("Step 2: manually remove thin-pool stack on the node (pool + metadata segments; VG and PV stay)")
