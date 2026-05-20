@@ -152,7 +152,39 @@ func e2eExecOnTestClusterNodeSSH(ctx context.Context, testKubeconfig *rest.Confi
 	return out, nil
 }
 
-// e2eVgNameListedInVgsOutput returns true if a line in vgs output (one VG name per line) equals vgName.
+// e2eCountPVsInVGOnNode returns how many PVs belong to vgName according to pvs on the node.
+func e2eCountPVsInVGOnNode(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser, vgName string) (int, string, error) {
+	quotedVG := strconv.Quote(vgName)
+	cmd := fmt.Sprintf(`sudo -n pvs -o pv_name --noheadings -S vg_name --select vg_name=%s 2>/dev/null | sed '/^$/d' | wc -l`, quotedVG)
+	out, err := e2eExecOnTestClusterNodeSSH(ctx, testKubeconfig, nodeName, sshUser, cmd)
+	if err != nil {
+		return 0, out, err
+	}
+	n, parseErr := strconv.Atoi(strings.TrimSpace(out))
+	if parseErr != nil {
+		return 0, out, fmt.Errorf("parse PV count from %q: %w", strings.TrimSpace(out), parseErr)
+	}
+	return n, out, nil
+}
+
+func e2eCountDevicesOnLVGNode(lvg *v1alpha1.LVMVolumeGroup, nodeName string) int {
+	return len(e2eDevicesOnLVGNode(lvg, nodeName))
+}
+
+func e2eDevicesOnLVGNode(lvg *v1alpha1.LVMVolumeGroup, nodeName string) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, n := range lvg.Status.Nodes {
+		if n.Name != nodeName {
+			continue
+		}
+		for _, d := range n.Devices {
+			if d.BlockDevice != "" {
+				out[d.BlockDevice] = struct{}{}
+			}
+		}
+	}
+	return out
+}
 
 // e2eVgNameListedInVgsOutput returns true if a line in vgs output (one VG name per line) equals vgName.
 func e2eVgNameListedInVgsOutput(vgsOutput, vgName string) bool {
