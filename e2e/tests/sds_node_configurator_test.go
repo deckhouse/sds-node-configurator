@@ -2207,30 +2207,9 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			)
 
 			var (
-				thinPoolRestoreOnce      sync.Once
-				thinPoolRestoreRunID     string
-				thinPoolRestoreAttach    *kubernetes.VirtualDiskAttachmentResult
+				thinPoolRestoreAttach     *kubernetes.VirtualDiskAttachmentResult
 				thinPoolRestoreAllocLimit = "100%"
 			)
-
-			BeforeEach(func() {
-				thinPoolRestoreOnce.Do(func() {
-					ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
-					thinPoolRestoreRunID = fmt.Sprintf("%d", time.Now().Unix())
-					prepCtx, prepCancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
-					defer prepCancel()
-					By("thin-pool restore suite: cleanup before test")
-					cleanupE2EPodsAndPVCsWithWait(prepCtx, k8sClient, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
-					cleanupE2ELVMLogicalVolumes(prepCtx, k8sClient)
-					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
-					cleanupE2ELocalStorageClasses(prepCtx, testClusterResources.Kubeconfig)
-					if testClusterResources.BaseKubeconfig != nil {
-						cleanupE2EVirtualDisks(prepCtx, testClusterResources.BaseKubeconfig, e2eConfigNamespace(), e2eSuiteVirtualDiskPrefix)
-					}
-					forceDeleteAllNonConsumableBlockDevices(prepCtx, k8sClient, 2*time.Minute)
-					forceDeleteAllBlockDevices(prepCtx, k8sClient, 3*time.Minute)
-				})
-			})
 
 			AfterEach(func() {
 				if thinPoolRestoreAttach == nil || testClusterResources == nil || testClusterResources.BaseKubeconfig == nil {
@@ -2246,7 +2225,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			It("Should recreate thin-pool when the pool LV was removed manually on the node", func() {
 				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
 				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "requires nested virtualization")
-				Expect(thinPoolRestoreRunID).NotTo(BeEmpty())
+				thinPoolRestoreRunID := fmt.Sprintf("%d", time.Now().Unix())
 
 				ns := e2eConfigNamespace()
 				storageClass := e2eConfigStorageClass()
