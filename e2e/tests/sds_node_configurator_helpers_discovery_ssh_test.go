@@ -167,6 +167,19 @@ func e2eCountPVsInVGOnNode(ctx context.Context, testKubeconfig *rest.Config, nod
 	return n, out, nil
 }
 
+// e2eThinPoolDataLVPresentOnNode returns true when vgName has a thin-pool data LV named thinPoolName (lv_attr starts with "t").
+func e2eThinPoolDataLVPresentOnNode(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser, vgName, thinPoolName string) (bool, string, error) {
+	quotedVG := strconv.Quote(vgName)
+	quotedPool := strconv.Quote(thinPoolName)
+	cmd := fmt.Sprintf(`out=$(sudo -n lvs -a -o lv_name,lv_attr --noheadings %s 2>/dev/null | sed 's/[][]//g' | awk -v p=%s '$1==p && $2 ~ /^t/ {print "yes"; exit} END {print "no"}')
+echo "${out:-no}"`, quotedVG, quotedPool)
+	out, err := e2eExecOnTestClusterNodeSSH(ctx, testKubeconfig, nodeName, sshUser, cmd)
+	if err != nil {
+		return false, out, err
+	}
+	return strings.TrimSpace(out) == "yes", out, nil
+}
+
 func e2eCountDevicesOnLVGNode(lvg *v1alpha1.LVMVolumeGroup, nodeName string) int {
 	return len(e2eDevicesOnLVGNode(lvg, nodeName))
 }

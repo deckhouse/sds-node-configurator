@@ -2196,6 +2196,193 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			})
 		})
 
+		// Agent reconcileThinPoolsIfNeeded recreates spec thin-pools missing on the node (lv_attr "t").
+		// Manual removal must drop thin volumes, pool data LV, and leftover segments (_tmeta/_tdata) — see e2eShellRemoveThinPoolStackForVG.
+		Context("thin-pool removed manually", func() {
+			const (
+				e2eThinPoolRestoreDiskName = "e2e-lvg-tp-restore-disk"
+				e2eThinPoolRestoreDiskSize = "2Gi"
+				e2eThinPoolRestorePoolName = "e2e-thin-pool-restore"
+				e2eThinPoolRestorePoolSize = "60%"
+			)
+
+			var (
+				thinPoolRestoreOnce      sync.Once
+				thinPoolRestoreRunID     string
+				thinPoolRestoreAttach    *kubernetes.VirtualDiskAttachmentResult
+				thinPoolRestoreAllocLimit = "100%"
+			)
+
+			BeforeEach(func() {
+				thinPoolRestoreOnce.Do(func() {
+					ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+					thinPoolRestoreRunID = fmt.Sprintf("%d", time.Now().Unix())
+					prepCtx, prepCancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
+					defer prepCancel()
+					By("thin-pool restore suite: cleanup before test")
+					cleanupE2EPodsAndPVCsWithWait(prepCtx, k8sClient, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
+					cleanupE2ELVMLogicalVolumes(prepCtx, k8sClient)
+					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
+					cleanupE2ELocalStorageClasses(prepCtx, testClusterResources.Kubeconfig)
+					if testClusterResources.BaseKubeconfig != nil {
+						cleanupE2EVirtualDisks(prepCtx, testClusterResources.BaseKubeconfig, e2eConfigNamespace(), e2eSuiteVirtualDiskPrefix)
+					}
+					forceDeleteAllNonConsumableBlockDevices(prepCtx, k8sClient, 2*time.Minute)
+					forceDeleteAllBlockDevices(prepCtx, k8sClient, 3*time.Minute)
+				})
+			})
+
+			AfterEach(func() {
+				if thinPoolRestoreAttach == nil || testClusterResources == nil || testClusterResources.BaseKubeconfig == nil {
+					return
+				}
+				ns := e2eConfigNamespace()
+				By("Cleaning up thin-pool restore VirtualDisk " + thinPoolRestoreAttach.DiskName)
+				_ = kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns,
+					thinPoolRestoreAttach.AttachmentName, thinPoolRestoreAttach.DiskName)
+				thinPoolRestoreAttach = nil
+			})
+
+			It("Should recreate thin-pool when the pool LV was removed manually on the node", func() {
+				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "requires nested virtualization")
+				Expect(thinPoolRestoreRunID).NotTo(BeEmpty())
+
+				ns := e2eConfigNamespace()
+				storageClass := e2eConfigStorageClass()
+				Expect(storageClass).NotTo(BeEmpty())
+				clusterVMs := e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
+				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
+				vmSSH := e2eConfigVMSSHUser()
+
+				vgName := "e2e-vg-tp-restore-" + thinPoolRestoreRunID
+				thinPoolName := e2eThinPoolRestorePoolName
+				nodeSafe := func(n string) string {
+					return strings.ReplaceAll(strings.ReplaceAll(n, ".", "-"), "_", "-")
+				}
+
+				By("Step 1: attach VirtualDisk and create LVMVolumeGroup with thin-pool")
+				att, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+					VMName: targetVM, Namespace: ns, DiskName: e2eThinPoolRestoreDiskName,
+					DiskSize: e2eThinPoolRestoreDiskSize, StorageClassName: storageClass,
+				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+				Expect(err).NotTo(HaveOccurred())
+				thinPoolRestoreAttach = att
+
+				attachCtx, cancel := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
+				defer cancel()
+				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns, att.AttachmentName, 10*time.Second)).To(Succeed())
+
+				bd := e2eWaitConsumableBlockDeviceForVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, k8sClient, ns,
+					att.DiskName, att.AttachmentName, targetVM)
+				nodeName := bd.Status.NodeName
+				bdMeta := bd.Labels["kubernetes.io/metadata.name"]
+				if bdMeta == "" {
+					bdMeta = bd.Name
+				}
+
+				lvgName := fmt.Sprintf("e2e-lvg-tp-restore-%s-%s", thinPoolRestoreRunID, nodeSafe(nodeName))
+				lvg := &v1alpha1.LVMVolumeGroup{
+					ObjectMeta: metav1.ObjectMeta{Name: lvgName},
+					Spec: v1alpha1.LVMVolumeGroupSpec{
+						ActualVGNameOnTheNode: vgName,
+						BlockDeviceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"kubernetes.io/hostname":      nodeName,
+								"kubernetes.io/metadata.name": bdMeta,
+							},
+						},
+						ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+							{Name: thinPoolName, Size: e2eThinPoolRestorePoolSize, AllocationLimit: thinPoolRestoreAllocLimit},
+						},
+						Type:  "Local",
+						Local: v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
+					},
+				}
+				Expect(k8sClient.Create(e2eCtx, lvg)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(e2eCtx, lvg) }()
+
+				var ready v1alpha1.LVMVolumeGroup
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &ready)).To(Succeed())
+					g.Expect(ready.Status.Phase).To(Equal(v1alpha1.PhaseReady))
+					var tp *v1alpha1.LVMVolumeGroupThinPoolStatus
+					for i := range ready.Status.ThinPools {
+						if ready.Status.ThinPools[i].Name == thinPoolName {
+							tp = &ready.Status.ThinPools[i]
+							break
+						}
+					}
+					g.Expect(tp).NotTo(BeNil())
+					g.Expect(tp.Ready).To(BeTrue())
+				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
+
+				Eventually(func(g Gomega) {
+					present, out, errSSH := e2eThinPoolDataLVPresentOnNode(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, vgName, thinPoolName)
+					if errSSH != nil {
+						GinkgoWriter.Printf("    lvs thin-pool check: err=%v out=%q\n", errSSH, out)
+					}
+					g.Expect(errSSH).NotTo(HaveOccurred())
+					g.Expect(present).To(BeTrue(), "thin-pool data LV should exist before manual removal; lvs: %q", strings.TrimSpace(out))
+				}, 2*time.Minute, 5*time.Second).Should(Succeed())
+				printLVMVolumeGroupInfo(&ready)
+
+				By("Step 2: manually remove thin-pool stack on the node (pool + metadata segments; VG and PV stay)")
+				removeScript := e2eShellRemoveThinPoolStackForVG(vgName, thinPoolName)
+				outRemove, errRemove := e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, removeScript)
+				if outRemove != "" {
+					GinkgoWriter.Printf("    thin-pool remove script output:\n%s\n", outRemove)
+				}
+				Expect(errRemove).NotTo(HaveOccurred(), "manual thin-pool removal on node %s", nodeName)
+
+				Eventually(func(g Gomega) {
+					present, out, errSSH := e2eThinPoolDataLVPresentOnNode(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, vgName, thinPoolName)
+					g.Expect(errSSH).NotTo(HaveOccurred())
+					g.Expect(present).To(BeFalse(), "thin-pool data LV should be gone after manual removal; lvs: %q", strings.TrimSpace(out))
+				}, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+				vgsOut, errVgs := e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH,
+					fmt.Sprintf("sudo -n vgs --noheadings -o vg_name %s 2>/dev/null || true", strconv.Quote(vgName)))
+				Expect(errVgs).NotTo(HaveOccurred())
+				Expect(e2eVgNameListedInVgsOutput(vgsOut, vgName)).To(BeTrue(), "VG %q must remain after thin-pool removal; vgs: %q", vgName, strings.TrimSpace(vgsOut))
+
+				By("Step 3: nudge agent and wait for controller to recreate thin-pool")
+				e2eTriggerLVMDiscoveryOnNode(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH)
+				restartSDSNodeConfiguratorAgentOnNode(e2eCtx, k8sClient, nodeName)
+
+				Eventually(func(g Gomega) {
+					var cur v1alpha1.LVMVolumeGroup
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &cur)).To(Succeed())
+					g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady))
+					var tp *v1alpha1.LVMVolumeGroupThinPoolStatus
+					for i := range cur.Status.ThinPools {
+						if cur.Status.ThinPools[i].Name == thinPoolName {
+							tp = &cur.Status.ThinPools[i]
+							break
+						}
+					}
+					g.Expect(tp).NotTo(BeNil(), "status.thinPools should list %q", thinPoolName)
+					g.Expect(tp.Ready).To(BeTrue(), "recreated thin-pool should be Ready; ThinPools=%+v", cur.Status.ThinPools)
+					for _, c := range cur.Status.Conditions {
+						if c.Type == "VGConfigurationApplied" {
+							g.Expect(c.Status).To(Equal(metav1.ConditionTrue), "VGConfigurationApplied: %s %s", c.Reason, c.Message)
+						}
+					}
+				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
+
+				Eventually(func(g Gomega) {
+					present, out, errSSH := e2eThinPoolDataLVPresentOnNode(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, vgName, thinPoolName)
+					g.Expect(errSSH).NotTo(HaveOccurred())
+					g.Expect(present).To(BeTrue(), "thin-pool data LV should exist after agent reconcile; lvs: %q", strings.TrimSpace(out))
+				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
+
+				var final v1alpha1.LVMVolumeGroup
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &final)).To(Succeed())
+				printLVMVolumeGroupInfo(&final)
+				By("✓ Thin-pool removed manually; agent recreated pool; LVMVolumeGroup Ready")
+			})
+		})
+
 		Context("Multiple LVMVolumeGroups on one node", func() {
 			const (
 				e2eMultiLvgMinDisks  = 2
