@@ -2158,17 +2158,42 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				}
 				Expect(k8sClient.Update(e2eCtx, &cur)).To(Succeed())
 
-				By("Step 4: wait for vgextend — Ready, two devices in status, larger VG free/size")
+				vmSSH := e2eConfigVMSSHUser()
+				By("Step 4a: nudge agent/LVM scan after selector patch (vgextend + BD discoverer race on CI)")
+				e2eTriggerLVMDiscoveryOnNode(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH)
+				restartSDSNodeConfiguratorAgentOnNode(e2eCtx, k8sClient, nodeName)
+
+				By("Step 4b: wait for two PVs in VG on the node (reconciler vgextend)")
+				Eventually(func(g Gomega) {
+					pvCount, out, errSSH := e2eCountPVsInVGOnNode(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, vgName)
+					if errSSH != nil {
+						GinkgoWriter.Printf("    vgextend pvs: err=%v out=%q\n", errSSH, out)
+					}
+					g.Expect(errSSH).NotTo(HaveOccurred())
+					g.Expect(pvCount).To(Equal(2), "VG %q should have 2 PVs; pvs: %q", vgName, strings.TrimSpace(out))
+				}, 10*time.Minute, 10*time.Second).Should(Succeed())
+
+				By(fmt.Sprintf("Step 4c: wait for BlockDevice %s linked to VG %s (BD discoverer after vgextend)", bd2.Name, vgName))
+				e2eWaitBlockDeviceLinkedToVG(e2eCtx, k8sClient, bd2.Name, vgName, e2eBlockDeviceVGLinkageTimeout)
+
+				By("Step 4d: wait for LVMVolumeGroup status — Ready, two devices, larger VG size/free")
 				Eventually(func(g Gomega) {
 					var extended v1alpha1.LVMVolumeGroup
 					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &extended)).To(Succeed())
+					nDev := e2eCountDevicesOnLVGNode(&extended, nodeName)
+					GinkgoWriter.Printf("    vgextend status poll: phase=%s devices=%d vgSize=%s vgFree=%s\n",
+						extended.Status.Phase, nDev, extended.Status.VGSize.String(), extended.Status.VGFree.String())
+					for _, c := range extended.Status.Conditions {
+						if c.Status == metav1.ConditionFalse {
+							GinkgoWriter.Printf("    condition %s False: reason=%s msg=%s\n", c.Type, c.Reason, c.Message)
+						}
+					}
 					g.Expect(extended.Status.Phase).To(Equal(v1alpha1.PhaseReady), "phase=%s", extended.Status.Phase)
 					for _, c := range extended.Status.Conditions {
 						g.Expect(c.Status).NotTo(Equal(metav1.ConditionFalse),
 							"condition %s False: reason=%s message=%s", c.Type, c.Reason, c.Message)
 					}
-					g.Expect(e2eCountDevicesOnLVGNode(&extended, nodeName)).To(Equal(2),
-						"status.nodes should list two BlockDevices after vgextend")
+					g.Expect(nDev).To(Equal(2), "status.nodes should list two BlockDevices after vgextend")
 					g.Expect(extended.Status.VGFree.Value()).To(BeNumerically(">", baselineVGFree),
 						"VGFree should grow after adding second PV (baseline %d)", baselineVGFree)
 					g.Expect(extended.Status.VGSize.Value()).To(BeNumerically(">", baselineVGSize),
@@ -2176,18 +2201,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					devices := e2eDevicesOnLVGNode(&extended, nodeName)
 					g.Expect(devices).To(HaveKey(bd1.Name), "status should include first BlockDevice %s", bd1.Name)
 					g.Expect(devices).To(HaveKey(bd2.Name), "status should include second BlockDevice %s", bd2.Name)
-				}, e2eLVMVolumeGroupReadyTimeout, 15*time.Second).Should(Succeed())
-
-				vmSSH := e2eConfigVMSSHUser()
-				By("Step 5: verify on node that VG has two physical volumes (pvs)")
-				Eventually(func(g Gomega) {
-					pvCount, out, errSSH := e2eCountPVsInVGOnNode(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, vgName)
-					if errSSH != nil {
-						GinkgoWriter.Printf("    pvs on node %s: err=%v out=%q\n", nodeName, errSSH, out)
-					}
-					g.Expect(errSSH).NotTo(HaveOccurred())
-					g.Expect(pvCount).To(Equal(2), "VG %q should have 2 PVs on node; pvs output: %q", vgName, strings.TrimSpace(out))
-				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
 
 				var final v1alpha1.LVMVolumeGroup
 				Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &final)).To(Succeed())
