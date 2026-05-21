@@ -239,6 +239,35 @@ func filterPVCsByProvisioner(
 	return result
 }
 
+// filterLocalLVMPVCs returns the subset of PVCs whose StorageClass is the
+// local-volume provisioner AND is LVM-backed (i.e. NOT a rawfile-backed
+// LocalStorageClass). The LVM-aware filter/score/reservation paths only handle
+// LVM-backed local PVCs; rawfile-backed PVCs are passed through to the default
+// scheduler and constrained by `allowedTopologies` on their StorageClass.
+func filterLocalLVMPVCs(
+	pvcs map[string]*corev1.PersistentVolumeClaim,
+	scs map[string]*storagev1.StorageClass,
+) map[string]*corev1.PersistentVolumeClaim {
+	result := make(map[string]*corev1.PersistentVolumeClaim)
+	for name, pvc := range pvcs {
+		if pvc.Spec.StorageClassName == nil {
+			continue
+		}
+		sc, exists := scs[*pvc.Spec.StorageClassName]
+		if !exists {
+			continue
+		}
+		if sc.Provisioner != consts.SdsLocalVolumeProvisioner {
+			continue
+		}
+		if isRawFileLocalSC(sc) {
+			continue
+		}
+		result[name] = pvc
+	}
+	return result
+}
+
 func filterNodeForReplicatedPVCs(
 	ctx context.Context,
 	log logger.Logger,
