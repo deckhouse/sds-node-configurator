@@ -1,4 +1,4 @@
-Изменения:
+Changes:
 - Added detection of mount points via the mountinfo parser in the agent
 - Added locality of replicas to scheduler-extender for replicated volumes
 - Fixed reconciliation races and loops in LVG/LLV controllers
