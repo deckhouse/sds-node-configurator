@@ -25,6 +25,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -38,6 +39,17 @@ import (
 )
 
 const e2eSSHJumpDialRetries = 5
+
+type e2eNodeSSHEntry struct {
+	client *e2eNodeSSHClient
+	nodeIP string
+}
+
+var (
+	e2eNodeSSHCacheMu sync.Mutex
+	e2eNodeSSHCache   = make(map[string]*e2eNodeSSHEntry)
+	e2eSSHHopLogged   sync.Map // hop route string → struct{}
+)
 
 // e2eNodeSSHClient runs commands on a test-cluster worker VM (direct or via jump host).
 type e2eNodeSSHClient struct {
@@ -243,7 +255,10 @@ func e2eNewNodeSSHClient(sshUser, nodeIP, keyPath string) (*e2eNodeSSHClient, er
 		jumpKeyPath = keyPath
 	}
 
-	GinkgoWriter.Printf("      SSH hop to node %s@%s via %s@%s (%s)\n", sshUser, nodeIP, jumpUser, jumpHost, jumpSource)
+	hopKey := fmt.Sprintf("%s@%s|%s@%s|%s", jumpUser, jumpHost, sshUser, nodeIP, jumpSource)
+	if _, loaded := e2eSSHHopLogged.LoadOrStore(hopKey, struct{}{}); !loaded {
+		GinkgoWriter.Printf("      SSH hop to node %s@%s via %s@%s (%s)\n", sshUser, nodeIP, jumpUser, jumpHost, jumpSource)
+	}
 
 	jumpClient, err := e2eDialSSH(jumpUser, jumpHost, jumpKeyPath)
 	if err != nil {
@@ -311,7 +326,22 @@ func e2eGetNodeInternalIP(ctx context.Context, kubeconfig *rest.Config, nodeName
 	return "", fmt.Errorf("node %s has no InternalIP", nodeName)
 }
 
+func e2eNodeSSHCacheKey(nodeName, sshUser string) string {
+	return nodeName + "\x00" + sshUser
+}
+
+// e2eConnectToTestClusterNode returns a cached SSH client per (nodeName, sshUser) for the suite run.
+// Reuses the jump tunnel instead of redialing on every Eventually poll; call e2eCloseNodeSSHCache in AfterSuite.
 func e2eConnectToTestClusterNode(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser string) (*e2eNodeSSHClient, string, error) {
+	key := e2eNodeSSHCacheKey(nodeName, sshUser)
+
+	e2eNodeSSHCacheMu.Lock()
+	if e, ok := e2eNodeSSHCache[key]; ok && e != nil && e.client != nil {
+		e2eNodeSSHCacheMu.Unlock()
+		return e.client, e.nodeIP, nil
+	}
+	e2eNodeSSHCacheMu.Unlock()
+
 	nodeIP, err := e2eGetNodeInternalIP(ctx, testKubeconfig, nodeName)
 	if err != nil {
 		return nil, "", err
@@ -324,5 +354,24 @@ func e2eConnectToTestClusterNode(ctx context.Context, testKubeconfig *rest.Confi
 	if err != nil {
 		return nil, nodeIP, err
 	}
+
+	e2eNodeSSHCacheMu.Lock()
+	defer e2eNodeSSHCacheMu.Unlock()
+	if e, ok := e2eNodeSSHCache[key]; ok && e != nil && e.client != nil {
+		_ = client.Close()
+		return e.client, e.nodeIP, nil
+	}
+	e2eNodeSSHCache[key] = &e2eNodeSSHEntry{client: client, nodeIP: nodeIP}
 	return client, nodeIP, nil
+}
+
+func e2eCloseNodeSSHCache() {
+	e2eNodeSSHCacheMu.Lock()
+	defer e2eNodeSSHCacheMu.Unlock()
+	for k, e := range e2eNodeSSHCache {
+		if e != nil && e.client != nil {
+			_ = e.client.Close()
+		}
+		delete(e2eNodeSSHCache, k)
+	}
 }

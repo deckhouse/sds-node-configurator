@@ -110,7 +110,6 @@ func runLsblkViaDirectSSH(ctx context.Context, testKubeconfig *rest.Config, node
 	if err != nil {
 		return nil, fmt.Errorf("SSH to node %s: %w", nodeName, err)
 	}
-	defer sshClient.Close()
 	out, err := sshClient.Exec(ctx, "lsblk -b -P -o NAME,SIZE,SERIAL,PATH -n")
 	if err != nil {
 		return nil, fmt.Errorf("run lsblk on node %s (%s@%s): %w", nodeName, sshUser, nodeIP, err)
@@ -144,7 +143,6 @@ func e2eExecOnTestClusterNodeSSH(ctx context.Context, testKubeconfig *rest.Confi
 	if err != nil {
 		return "", fmt.Errorf("SSH to node %s (%s@%s): %w", nodeName, sshUser, nodeIP, err)
 	}
-	defer sshClient.Close()
 	out, err := sshClient.Exec(ctx, command)
 	if err != nil {
 		return out, fmt.Errorf("exec on node %s: %w", nodeName, err)
@@ -165,6 +163,25 @@ func e2eCountPVsInVGOnNode(ctx context.Context, testKubeconfig *rest.Config, nod
 		return 0, out, fmt.Errorf("parse PV count from %q: %w", strings.TrimSpace(out), parseErr)
 	}
 	return n, out, nil
+}
+
+// e2eThinPoolDataLVPresentOnNode returns true when vgName has a thin-pool data LV for thinPoolName (lv_attr starts with "t").
+// Matches spec pool name or LVM segment names like <pool>_tdata.
+func e2eThinPoolDataLVPresentOnNode(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser, vgName, thinPoolName string) (bool, string, error) {
+	quotedVG := strconv.Quote(vgName)
+	quotedPool := strconv.Quote(thinPoolName)
+	cmd := fmt.Sprintf(`sudo -n lvs -a -o lv_name,lv_attr --noheadings %s 2>/dev/null | sed 's/[][]//g' | awk -v p=%s '
+  $2 ~ /^t/ && ($1 == p || $1 == p "_tdata") { found=1 }
+  END { if (found) print "yes"; else print "no" }'`, quotedVG, quotedPool)
+	out, err := e2eExecOnTestClusterNodeSSH(ctx, testKubeconfig, nodeName, sshUser, cmd)
+	if err != nil {
+		return false, out, err
+	}
+	answer := strings.TrimSpace(out)
+	if idx := strings.Index(answer, "\n"); idx >= 0 {
+		answer = strings.TrimSpace(answer[:idx])
+	}
+	return answer == "yes", out, nil
 }
 
 func e2eCountDevicesOnLVGNode(lvg *v1alpha1.LVMVolumeGroup, nodeName string) int {
