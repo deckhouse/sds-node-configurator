@@ -578,7 +578,16 @@ func getNewControlPlane(ctx context.Context, cl client.Client, log logger.Logger
 	return &_false, nil
 }
 
-// extractRequestedSize extracts the requested size from the PVC based on the PVC status phase and the StorageClass parameters.
+// extractRequestedSize extracts the requested size from the PVC based on the PVC
+// binding state (pvc.Spec.VolumeName) and the StorageClass parameters.
+//
+// Rationale for using Spec.VolumeName instead of Status.Phase: Status.Phase is set
+// by kube-controller-manager in a separate status update after the PVC is created.
+// A Pod scheduled together with its PVC reaches the extender before that update
+// happens, so Status.Phase is observed empty and a Status.Phase-based switch
+// silently drops the PVC. Spec.VolumeName, on the other hand, is set in the same
+// transaction as the binding and matches what the upstream VolumeBinding plugin
+// uses to decide whether a PVC is bound.
 func extractRequestedSize(
 	ctx context.Context,
 	cl client.Client,
@@ -589,7 +598,7 @@ func extractRequestedSize(
 	pvcRequests := make(map[string]PVCRequest, len(pvcs))
 	for _, pvc := range pvcs {
 		sc := scs[*pvc.Spec.StorageClassName]
-		log.Debug(fmt.Sprintf("[extractRequestedSize] PVC %s/%s has status phase: %s", pvc.Namespace, pvc.Name, pvc.Status.Phase))
+		log.Debug(fmt.Sprintf("[extractRequestedSize] PVC %s/%s has status phase: %q, spec.volumeName: %q", pvc.Namespace, pvc.Name, pvc.Status.Phase, pvc.Spec.VolumeName))
 
 		var deviceType string
 		isReplicated := sc.Provisioner == consts.SdsReplicatedVolumeProvisioner
@@ -620,22 +629,20 @@ func extractRequestedSize(
 			return nil, fmt.Errorf("[extractRequestedSize] unable to determine device type for PVC %s/%s", pvc.Namespace, pvc.Name)
 		}
 
-		switch pvc.Status.Phase {
-		case corev1.ClaimPending:
-			pvcRequests[pvc.Name] = PVCRequest{
-				DeviceType:    deviceType,
-				RequestedSize: pvc.Spec.Resources.Requests.Storage().Value(),
-			}
-
-		case corev1.ClaimBound:
+		var requestedSize int64
+		if pvc.Spec.VolumeName == "" {
+			requestedSize = pvc.Spec.Resources.Requests.Storage().Value()
+		} else {
 			pv := &corev1.PersistentVolume{}
 			if err := cl.Get(ctx, client.ObjectKey{Name: pvc.Spec.VolumeName}, pv); err != nil {
 				return nil, fmt.Errorf("[extractRequestedSize] error getting PV %s: %v", pvc.Spec.VolumeName, err)
 			}
-			pvcRequests[pvc.Name] = PVCRequest{
-				DeviceType:    deviceType,
-				RequestedSize: pvc.Spec.Resources.Requests.Storage().Value() - pv.Spec.Capacity.Storage().Value(),
-			}
+			requestedSize = pvc.Spec.Resources.Requests.Storage().Value() - pv.Spec.Capacity.Storage().Value()
+		}
+
+		pvcRequests[pvc.Name] = PVCRequest{
+			DeviceType:    deviceType,
+			RequestedSize: requestedSize,
 		}
 	}
 

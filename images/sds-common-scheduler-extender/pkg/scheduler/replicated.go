@@ -191,7 +191,11 @@ func buildReplicaLocations(
 ) map[string][]string {
 	result := make(map[string][]string, len(replicatedPVCs))
 	for _, pvc := range replicatedPVCs {
-		if pvc.Status.Phase != corev1.ClaimBound {
+		// A PVC is bound iff Spec.VolumeName is set. Status.Phase is updated by
+		// kube-controller-manager separately and may lag behind the binding, so
+		// relying on it is racy when a PVC was just bound (or, conversely, when
+		// it was freshly created and the controller has not yet set Pending).
+		if pvc.Spec.VolumeName == "" {
 			continue
 		}
 		nodes, err := getReplicaNodesForBoundPVC(ctx, cl, pvc)
@@ -284,20 +288,25 @@ func filterNodeForReplicatedPVCs(
 			continue
 		}
 
-		if rsc.Spec.Topology == srv.TopologyZonal && pvc.Status.Phase == corev1.ClaimBound {
+		// Use Spec.VolumeName as the source of truth for "bound" vs "pending".
+		// Status.Phase is set by kube-controller-manager in a separate status
+		// update and lags the binding, so a freshly created PVC may still have
+		// Status.Phase == "" when the extender is consulted. See the comment on
+		// extractRequestedSize for the longer rationale.
+		isBound := pvc.Spec.VolumeName != ""
+
+		if rsc.Spec.Topology == srv.TopologyZonal && isBound {
 			log.Debug(fmt.Sprintf("[filterNodeForReplicatedPVCs] TODO: zone filtering for Zonal topology, pvc=%s", pvc.Name))
 		}
 
-		switch pvc.Status.Phase {
-		case corev1.ClaimPending:
+		if !isBound {
 			if requiresLVGCheck(volumeAccess) {
 				ok, reason := checkNodeHasLVGWithSpaceForReplicated(ctx, log, cl, schedulerCache, nodeName, rsp, pvcReq.RequestedSize)
 				if !ok {
 					failReasons = append(failReasons, fmt.Sprintf("PVC %s: %s", pvc.Name, reason))
 				}
 			}
-
-		case corev1.ClaimBound:
+		} else {
 			switch volumeAccess {
 			case srv.VolumeAccessLocal:
 				replicaNodes, err := getReplicaNodesForBoundPVC(ctx, cl, pvc)

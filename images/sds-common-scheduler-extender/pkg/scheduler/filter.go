@@ -133,14 +133,15 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to extract request size: %s", err))
 		return
 	}
-	if len(pvcRequests) == 0 {
-		servingLog.Debug("No PVC requests found. Return the same nodes")
-		if err := writeNodeNamesResponse(w, servingLog, nodeNames); err != nil {
-			servingLog.Error(err, "unable to write node names response")
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-		}
-		return
-	}
+	// NB: we intentionally do not short-circuit here when len(pvcRequests) == 0.
+	// For local PVCs, returning all incoming nodes would be unsafe: kube-scheduler
+	// could pick a node without a matching LVMVolumeGroup and the CSI provisioner
+	// would then fail with "error during SelectLVG". The invariant we enforce is
+	// that whenever managedPVCs contains at least one local PVC, the response must
+	// be a subset of nodes that have an LVG matching every local PVC's StorageClass.
+	// filterNodes / filterNodeForLocalPVCs enforces this even if pvcRequests is
+	// somehow empty for a PVC (LVG-match check via findMatchedSCLVG always runs;
+	// the space check trivially passes when RequestedSize == 0).
 
 	// Check if there are replicated PVCs that require node information
 	var nodes map[string]*corev1.Node

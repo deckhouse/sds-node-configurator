@@ -943,6 +943,248 @@ func TestFilter_FailedExtractSize_RejectsAllNodes(t *testing.T) {
 	assert.NotEmpty(t, result.FailedNodes, "FailedNodes must contain a reason")
 }
 
+// TestExtractRequestedSize_PhaseLag locks in the regression fix for the
+// race described in the scheduler-extender bug report: when a Pod and its PVC
+// are created together, kube-scheduler may consult the extender before
+// kube-controller-manager has updated PVC.Status.Phase. extractRequestedSize
+// MUST decide "bound vs pending" via PVC.Spec.VolumeName so that an empty
+// Status.Phase does not silently drop the PVC from the request map (which
+// previously made filter/prioritize return all nodes for a local PVC and
+// caused the CSI provisioner to fail with "error during SelectLVG").
+func TestExtractRequestedSize_PhaseLag(t *testing.T) {
+	scName := "local-sc"
+	provisioner := consts.SdsLocalVolumeProvisioner
+
+	sc := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: scName},
+		Provisioner: provisioner,
+		Parameters: map[string]string{
+			consts.LvmTypeParamKey:         consts.Thick,
+			consts.LVMVolumeGroupsParamKey: `[{"name":"lvg1"}]`,
+		},
+	}
+	scs := map[string]*storagev1.StorageClass{scName: sc}
+
+	requestQty := resource.MustParse("100Mi")
+	pvCapacity := resource.MustParse("100Mi")
+	pvName := "pv-bound-1"
+
+	pvFreshlyCreatedNoPhase := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-empty-phase", Namespace: "default"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: requestQty},
+			},
+		},
+	}
+	pvcExplicitlyPending := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-pending", Namespace: "default"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: requestQty},
+			},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
+	pvcBound := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-bound", Namespace: "default"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+			VolumeName:       pvName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: requestQty},
+			},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
+	}
+	pv := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: pvName},
+		Spec: corev1.PersistentVolumeSpec{
+			Capacity:         corev1.ResourceList{corev1.ResourceStorage: pvCapacity},
+			StorageClassName: scName,
+		},
+	}
+
+	cl := newFakeClient(pv)
+	log, _ := logger.NewLogger("0")
+
+	t.Run("empty phase is treated as pending (regression)", func(t *testing.T) {
+		pvcs := map[string]*corev1.PersistentVolumeClaim{
+			pvFreshlyCreatedNoPhase.Name: pvFreshlyCreatedNoPhase,
+		}
+		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs)
+		require.NoError(t, err)
+		require.Contains(t, got, pvFreshlyCreatedNoPhase.Name, "PVC with empty Status.Phase must NOT be dropped")
+		assert.Equal(t, requestQty.Value(), got[pvFreshlyCreatedNoPhase.Name].RequestedSize)
+		assert.Equal(t, consts.Thick, got[pvFreshlyCreatedNoPhase.Name].DeviceType)
+	})
+
+	t.Run("explicit pending phase still requests full size", func(t *testing.T) {
+		pvcs := map[string]*corev1.PersistentVolumeClaim{
+			pvcExplicitlyPending.Name: pvcExplicitlyPending,
+		}
+		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs)
+		require.NoError(t, err)
+		require.Contains(t, got, pvcExplicitlyPending.Name)
+		assert.Equal(t, requestQty.Value(), got[pvcExplicitlyPending.Name].RequestedSize)
+	})
+
+	t.Run("bound PVC reports resize delta", func(t *testing.T) {
+		pvcs := map[string]*corev1.PersistentVolumeClaim{pvcBound.Name: pvcBound}
+		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs)
+		require.NoError(t, err)
+		require.Contains(t, got, pvcBound.Name)
+		assert.Equal(t, requestQty.Value()-pvCapacity.Value(), got[pvcBound.Name].RequestedSize,
+			"bound PVC must report only the resize delta (requested - pv.capacity)")
+	})
+
+	t.Run("bound PVC with phase still empty also reports resize delta", func(t *testing.T) {
+		pvcBoundNoPhase := pvcBound.DeepCopy()
+		pvcBoundNoPhase.Name = "pvc-bound-no-phase"
+		pvcBoundNoPhase.Status = corev1.PersistentVolumeClaimStatus{}
+		pvcs := map[string]*corev1.PersistentVolumeClaim{pvcBoundNoPhase.Name: pvcBoundNoPhase}
+		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs)
+		require.NoError(t, err)
+		require.Contains(t, got, pvcBoundNoPhase.Name,
+			"a PVC with Spec.VolumeName set but empty Status.Phase must be treated as bound, not dropped")
+		assert.Equal(t, requestQty.Value()-pvCapacity.Value(), got[pvcBoundNoPhase.Name].RequestedSize)
+	})
+}
+
+// TestFilter_LocalPVC_EmptyPhase_NoMatchingLVG is the end-to-end regression for
+// the original bug: a Pod with a freshly-created local PVC (Status.Phase empty)
+// is consulted on a set of nodes where none has a matching LVMVolumeGroup for
+// the StorageClass. The filter MUST NOT pass through "all nodes" -- it must
+// return an empty NodeNames list with per-node reasons populated in FailedNodes
+// so that the Pod stays Pending instead of being scheduled onto a node where
+// the CSI provisioner cannot create the volume.
+func TestFilter_LocalPVC_EmptyPhase_NoMatchingLVG(t *testing.T) {
+	scName := "local-sc"
+	provisioner := consts.SdsLocalVolumeProvisioner
+
+	sc := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: scName},
+		Provisioner: provisioner,
+		Parameters: map[string]string{
+			consts.LvmTypeParamKey:         consts.Thick,
+			consts.LVMVolumeGroupsParamKey: `[{"name":"lvg-not-on-any-node"}]`,
+		},
+	}
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-empty-phase", Namespace: "default"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("100Mi")},
+			},
+		},
+	}
+
+	cl := newFakeClient(sc, pvc)
+	c := newTestCache()
+	s := newTestScheduler(cl, c)
+	s.targetProvisioners = []string{provisioner}
+
+	nodeNames := []string{"node1", "node2", "node3"}
+	args := ExtenderArgs{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				Volumes: []corev1.Volume{
+					{Name: "v1", VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc-empty-phase"},
+					}},
+				},
+			},
+		},
+		NodeNames: &nodeNames,
+	}
+	body, err := json.Marshal(args)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/filter", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	s.filter(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "filter must return 200 so kube-scheduler honors the response")
+
+	var result ExtenderFilterResult
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+	require.NotNil(t, result.NodeNames)
+	assert.Empty(t, *result.NodeNames, "no node has a matching LVG -- filter MUST NOT return any node")
+	assert.Len(t, result.FailedNodes, len(nodeNames), "every input node must be reported with a reason")
+}
+
+// TestFilter_LocalPVC_EmptyPhase_KeepsMatchingNode verifies that the same
+// empty-phase PVC, when paired with a node that DOES have a matching LVG, is
+// allowed through. This locks in the invariant that the response is exactly
+// "subset of nodes with a matching LVG" -- neither all nodes nor an empty
+// list.
+func TestFilter_LocalPVC_EmptyPhase_KeepsMatchingNode(t *testing.T) {
+	scName := "local-sc"
+	provisioner := consts.SdsLocalVolumeProvisioner
+
+	sc := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: scName},
+		Provisioner: provisioner,
+		Parameters: map[string]string{
+			consts.LvmTypeParamKey:         consts.Thick,
+			consts.LVMVolumeGroupsParamKey: `[{"name":"lvg1"}]`,
+		},
+	}
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-empty-phase", Namespace: "default"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("100Mi")},
+			},
+		},
+	}
+	hundredGiB := int64(100 * 1024 * 1024 * 1024)
+	lvg := readyLVGOnNode("lvg1", "node-with-lvg", hundredGiB, hundredGiB)
+
+	cl := newFakeClient(sc, pvc, lvg)
+	c := newTestCache()
+	s := newTestScheduler(cl, c)
+	s.targetProvisioners = []string{provisioner}
+
+	nodeNames := []string{"node-with-lvg", "node-without-lvg"}
+	args := ExtenderArgs{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				Volumes: []corev1.Volume{
+					{Name: "v1", VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "pvc-empty-phase"},
+					}},
+				},
+			},
+		},
+		NodeNames: &nodeNames,
+	}
+	body, err := json.Marshal(args)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/filter", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	s.filter(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var result ExtenderFilterResult
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+	require.NotNil(t, result.NodeNames)
+	assert.Equal(t, []string{"node-with-lvg"}, *result.NodeNames,
+		"only the node with a matching LVG must pass; all-nodes pass-through would re-introduce the SelectLVG bug")
+	if assert.Len(t, result.FailedNodes, 1) {
+		_, hasFailed := result.FailedNodes["node-without-lvg"]
+		assert.True(t, hasFailed, "node-without-lvg must be in FailedNodes with a reason")
+	}
+}
+
 func stringPtr(s string) *string {
 	return &s
 }
