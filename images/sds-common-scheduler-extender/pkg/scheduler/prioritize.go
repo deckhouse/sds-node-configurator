@@ -119,14 +119,10 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	if len(pvcRequests) == 0 {
-		servingLog.Debug("No PVC requests found. Return the same nodes with 0 score")
-		if err := writeNodeScoresResponse(w, servingLog, nodeNames, 0); err != nil {
-			servingLog.Error(err, "unable to write node scores response")
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-		}
-		return
-	}
+	// Mirror of filter: do not short-circuit when len(pvcRequests) == 0. Scoring
+	// always runs so the response is consistent with the filter contract (the
+	// filter never returns "all nodes" for a local PVC; therefore prioritize
+	// must score whatever the scheduler actually passed us).
 	servingLog.Debug("successfully extracted the PVC requested sizes")
 
 	servingLog.Debug("starts to score the nodes for Pod")
@@ -303,7 +299,12 @@ func scoreNodes(
 						volumeAccess = srv.VolumeAccessPreferablyLocal
 					}
 
-					if pvc.Status.Phase == corev1.ClaimBound {
+					// Use Spec.VolumeName, not Status.Phase, to detect binding:
+					// Status.Phase is updated by kube-controller-manager separately
+					// and lags behind binding, so a freshly bound (or freshly created)
+					// PVC may temporarily show an out-of-date phase here. See the
+					// rationale on extractRequestedSize.
+					if pvc.Spec.VolumeName != "" {
 						switch volumeAccess {
 						case srv.VolumeAccessLocal:
 							replicaTotalPVCs++
