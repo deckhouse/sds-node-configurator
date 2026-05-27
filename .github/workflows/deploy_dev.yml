@@ -56,7 +56,7 @@ jobs:
         shell: bash
 
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@fix-docker-config-sharing
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}

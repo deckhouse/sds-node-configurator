@@ -42,12 +42,12 @@ jobs:
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@fix-docker-config-sharing
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@fix-docker-config-sharing
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
@@ -85,12 +85,12 @@ jobs:
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@fix-docker-config-sharing
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@fix-docker-config-sharing
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
@@ -128,12 +128,12 @@ jobs:
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@fix-docker-config-sharing
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@fix-docker-config-sharing
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
@@ -171,12 +171,12 @@ jobs:
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@fix-docker-config-sharing
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@fix-docker-config-sharing
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
@@ -214,12 +214,12 @@ jobs:
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@fix-docker-config-sharing
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/setup@v4
+      - uses: deckhouse/modules-actions/setup@fix-docker-config-sharing
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
