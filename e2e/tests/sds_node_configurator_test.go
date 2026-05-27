@@ -2046,7 +2046,7 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				GinkgoWriter.Printf("    BlockDevice %s still present: path=%s size=%s\n", bdName, bdAfter.Status.Path, bdAfter.Status.Size.String())
 
 				e2eSavedLVGForVGRemoveTest = nil
-				By("✓ LVMVolumeGroup CR deleted; VG removed on node; BlockDevice still in API")
+				By("LVMVolumeGroup CR deleted; VG removed on node; BlockDevice still in API")
 			})
 		})
 
@@ -2073,7 +2073,7 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				validationAttaches = nil
 			})
 
-			// Order: (1) tiny disk — no BlockDevice CR; (2) large disk — intermediate LVG then delete + pvcreate so BD is not consumable;
+			// Order: (1) tiny disk - no BlockDevice CR; (2) large disk - intermediate LVG then delete + pvcreate so BD is not consumable;
 			// (3) final LVMVolumeGroup selects only that BD (does not touch other BlockDevices on the node).
 			It("Should fail LVMVolumeGroup when the only selected BlockDevice is not consumable", func() {
 				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
@@ -2088,7 +2088,7 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				runID := strconv.FormatInt(time.Now().UnixNano(), 10)
 				smallDiskName := "e2e-lvg-val-s-" + runID
 				largeDiskName := "e2e-lvg-val-l-" + runID
-				smallSize := fmt.Sprintf("%dMi", 5+rand.Intn(995)) // 5..999 Mi — below agent minimum, expect no BD
+				smallSize := fmt.Sprintf("%dMi", 5+rand.Intn(995)) // 5..999 Mi, below agent minimum, expect no BD
 				largeSize := fmt.Sprintf("%dGi", 5+rand.Intn(11))  // 5..15 Gi
 				midLvgName := "e2e-lvg-val-mid-" + runID
 				midVgName := "e2e-vg-val-mid-" + runID
@@ -2126,7 +2126,7 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 						"disks below minimum size must not get BlockDevice CRs; new name(s): %v", newOnes)
 				}, 4*time.Minute, 15*time.Second).Should(Succeed())
 
-				By("Step 2: attach large disk; intermediate LVM, delete, pvcreate — BD must become not consumable")
+				By("Step 2: attach large disk; intermediate LVM, delete, pvcreate - BD must become not consumable")
 				att2, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
 					VMName: targetVM, Namespace: ns, DiskName: largeDiskName,
 					DiskSize: largeSize, StorageClassName: storageClass,
@@ -2186,7 +2186,7 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				largePath := largeBD.Status.Path
 				Expect(largePath).NotTo(BeEmpty())
 
-				By("pvcreate after agent pvremoved PV on LVG delete (orphan PV → not consumable)")
+				By("pvcreate after agent pvremoved PV on LVG delete (orphan PV -> not consumable)")
 				_, errPV := e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH,
 					fmt.Sprintf("sudo -n pvcreate -y %q 2>&1", largePath))
 				Expect(errPV).NotTo(HaveOccurred(), "pvcreate")
@@ -2200,7 +2200,7 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: largeBD.Name}, &largeBDAfterPV)).To(Succeed())
 				printBlockDeviceInfo(&largeBDAfterPV)
 
-				By("Step 3: LVMVolumeGroup selecting only this BlockDevice — expect ValidationFailed")
+				By("Step 3: LVMVolumeGroup selecting only this BlockDevice - expect ValidationFailed")
 				e2ePrintBlockDevicesConsumableSummary(e2eCtx, k8sClient, []string{largeBD.Name}, "single BD in selector")
 
 				finalLvg := &v1alpha1.LVMVolumeGroup{
@@ -2248,7 +2248,7 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				Expect(errVgs).NotTo(HaveOccurred())
 				Expect(e2eVgNameListedInVgsOutput(out, finalVgName)).To(BeFalse(), "vgs:\n%s", out)
 
-				By("✓ ValidationFailed on single non-consumable BD; other cluster BlockDevices were not in selector")
+				By("ValidationFailed on single non-consumable BD; other cluster BlockDevices were not in selector")
 			})
 		})
 

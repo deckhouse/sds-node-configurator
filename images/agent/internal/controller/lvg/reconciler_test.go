@@ -89,7 +89,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			// so second block device is new one
+			// Only the first BlockDevice already belongs to the VG; the second one is new.
 			pvs := []internal.PVData{
 				{
 					PVName: firstPath,
@@ -148,7 +148,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			// so second block device is new one
+			// Only the first BlockDevice already belongs to the VG; the second one is new.
 			pvs := []internal.PVData{
 				{
 					PVName: firstPath,
@@ -210,7 +210,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			// so second block device is new one
+			// Only the first BlockDevice already belongs to the VG; the second one is new.
 			pvs := []internal.PVData{
 				{
 					PVName: firstPath,
@@ -287,7 +287,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			// so second block device is new one
+			// Only the first BlockDevice already belongs to the VG; the second one is new.
 			pvs := []internal.PVData{
 				{
 					PVName: firstPath,
@@ -357,7 +357,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			// so second block device is new one
+			// Only the first BlockDevice already belongs to the VG; the second one is new.
 			pvs := []internal.PVData{
 				{
 					PVName: firstPath,
