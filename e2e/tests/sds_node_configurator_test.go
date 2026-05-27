@@ -652,9 +652,12 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 					Spec: v1alpha1.LVMVolumeGroupSpec{
 						ActualVGNameOnTheNode: "e2e-shrink-vg",
 						BlockDeviceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"kubernetes.io/hostname":      nodeName,
-								"kubernetes.io/metadata.name": bdMetaName,
+							MatchExpressions: []metav1.LabelSelectorRequirement{
+								{
+									Key:      "kubernetes.io/metadata.name",
+									Operator: metav1.LabelSelectorOpIn,
+									Values:   []string{bdMetaName},
+								},
 							},
 						},
 						Type:  "Local",
@@ -667,7 +670,10 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				Eventually(func(g Gomega) {
 					var current v1alpha1.LVMVolumeGroup
 					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &current)).To(Succeed())
-					g.Expect(current.Status.Phase).To(Equal(v1alpha1.PhaseReady), "Phase=%s", current.Status.Phase)
+					g.Expect(current.Status.Phase).To(Equal(v1alpha1.PhaseReady),
+						"Phase=%s Conditions=%s VGSize=%s VGFree=%s",
+						current.Status.Phase, formatLVMVolumeGroupConditions(current.Status.Conditions),
+						current.Status.VGSize.String(), current.Status.VGFree.String())
 				}, 10*time.Minute, 10*time.Second).Should(Succeed())
 
 				var origLVG v1alpha1.LVMVolumeGroup

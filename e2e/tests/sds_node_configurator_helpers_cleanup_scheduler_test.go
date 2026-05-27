@@ -77,6 +77,18 @@ func printLVMVolumeGroupInfo(lvg *v1alpha1.LVMVolumeGroup) {
 	GinkgoWriter.Println("=================================================\n")
 }
 
+func formatLVMVolumeGroupConditions(conditions []metav1.Condition) string {
+	if len(conditions) == 0 {
+		return "<none>"
+	}
+
+	parts := make([]string, 0, len(conditions))
+	for _, c := range conditions {
+		parts = append(parts, fmt.Sprintf("%s=%s/%s:%s", c.Type, c.Status, c.Reason, c.Message))
+	}
+	return strings.Join(parts, "; ")
+}
+
 func restartSDSNodeConfiguratorAgentOnNode(ctx context.Context, cl client.Client, nodeName string) {
 	const (
 		namespace = "d8-sds-node-configurator"
