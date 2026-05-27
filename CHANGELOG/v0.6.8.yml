@@ -1,0 +1,6 @@
+Changes:
+- Fixed race in scheduler-extender when PVC.Status.Phase is empty: PVC binding decision
+    is now made based on Spec.VolumeName, nodes without a suitable LVMVolumeGroup
+    are always rejected
+- Agent is now also scheduled on sds-elastic data nodes
+- Updating base images and lib-helm to 1.72.0
