@@ -214,10 +214,10 @@ func getPVSizeViaDirectSSH(ctx context.Context, testKubeconfig *rest.Config, nod
 		testKubeconfig,
 		nodeName,
 		sshUser,
-		fmt.Sprintf("pvs --units B --nosuffix -o pv_name,pv_size --reportformat json %q", pvPath),
+		fmt.Sprintf("sudo -n pvs --units B --nosuffix -o pv_name,pv_size --reportformat json %q 2>&1", pvPath),
 	)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("run pvs for %s on node %s: %w; output:\n%s", pvPath, nodeName, err, out)
 	}
 
 	var report pvsReport
