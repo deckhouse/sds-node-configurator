@@ -61,10 +61,13 @@ var _ = AfterSuite(func() {
 func TestSdsNodeConfigurator(t *testing.T) {
 	RegisterFailHandler(Fail)
 	suiteConfig, reporterConfig := GinkgoConfiguration()
+	suiteTimeout := e2eTestSuiteTimeout()
+	suiteConfig.Timeout = suiteTimeout
 	if os.Getenv("CI") != "" {
 		suiteConfig.FailFast = true
 	}
 	reporterConfig.Verbose = true
 	reporterConfig.ShowNodeEvents = false
+	t.Logf("E2E suite timeout: %v (override with E2E_TEST_TIMEOUT)", suiteTimeout)
 	RunSpecs(t, "Sds Node Configurator Suite", suiteConfig, reporterConfig)
 }

@@ -43,6 +43,7 @@ cleanup: ## Delete Job and RBAC
 # === Local run ===
 # CI smoke uses label e2e-tests (everything except max-VG stress). Override: make test-go GINKGO_LABEL_FILTER=stress-test
 GINKGO_LABEL_FILTER ?= e2e-tests
+E2E_TEST_TIMEOUT ?= 90m
 
 .PHONY: test
 test: ## Run E2E smoke (label e2e-tests, без max-VG stress) — как CI
@@ -50,7 +51,7 @@ test: ## Run E2E smoke (label e2e-tests, без max-VG stress) — как CI
 
 .PHONY: test-go
 test-go: ## Как в CI smoke: TestSdsNodeConfigurator + -ginkgo.label-filter=e2e-tests
-	go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$$' \
+	go test -v -count=1 -timeout "$(E2E_TEST_TIMEOUT)" ./tests/ -run '^TestSdsNodeConfigurator$$' \
 		-ginkgo.label-filter="$(GINKGO_LABEL_FILTER)"
 
 .PHONY: test-stress

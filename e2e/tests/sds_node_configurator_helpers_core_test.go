@@ -153,6 +153,10 @@ const (
 	e2eSuitePodPVCleanupPodTimeout = 2 * time.Minute
 	e2eSuitePodPVCleanupPVTimeout  = 15 * time.Minute
 
+	// Full smoke suite (BeforeSuite cluster + scheduler + module e2e) exceeds 60m on CI; override via E2E_TEST_TIMEOUT.
+	e2eTestTimeoutDefaultLocal = 90 * time.Minute
+	e2eTestTimeoutDefaultCI    = 3 * time.Hour
+
 	// Guest VM name prefix for dhctl/bootstrap (Deckhouse test clusters). Do not attach data disks here — not a worker.
 	e2eBootstrapGuestVMPrefix = "bootstrap-node-"
 )
@@ -248,6 +252,19 @@ func e2eConfigRegistryDockerCfg() string {
 }
 
 func e2eConfigTestClusterCreateMode() string { return os.Getenv("TEST_CLUSTER_CREATE_MODE") }
+
+// e2eTestSuiteTimeout is the Ginkgo suite / go test -timeout budget for TestSdsNodeConfigurator.
+func e2eTestSuiteTimeout() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("E2E_TEST_TIMEOUT")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	if os.Getenv("CI") != "" {
+		return e2eTestTimeoutDefaultCI
+	}
+	return e2eTestTimeoutDefaultLocal
+}
 
 // Stress e2e: many independent LVMVolumeGroups (1 PV = 1 VG) on one node.
 const (

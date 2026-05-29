@@ -72,7 +72,7 @@ make test-focus FOCUS="TestSdsNodeConfigurator"
 Один вход, как в CI по label `e2e-smoke-test`: `TestSdsNodeConfigurator` — сначала **Common Scheduler Extender**, затем **Sds Node Configurator** (вложенные `Describe(..., Ordered)` в одном файле `sds_node_configurator_test.go`, внешний `Describe` тоже `Ordered`).
 
 ```bash
-go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$'
+go test -v -count=1 -timeout 3h ./tests/ -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter=e2e-tests
 ```
 
 Альтернатива через [Ginkgo CLI](https://github.com/onsi/ginkgo):

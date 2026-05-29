@@ -2245,10 +2245,17 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
 				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "requires nested virtualization")
 				thinPoolRestoreRunID := fmt.Sprintf("%d", time.Now().Unix())
+				diskName := fmt.Sprintf("%s-%s", e2eThinPoolRestoreDiskName, thinPoolRestoreRunID)
 
 				ns := e2eConfigNamespace()
 				storageClass := e2eConfigStorageClass()
 				Expect(storageClass).NotTo(BeEmpty())
+				if testClusterResources.BaseKubeconfig != nil {
+					_ = kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns,
+						diskName+"-attachment", diskName)
+					_ = kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns,
+						e2eThinPoolRestoreDiskName+"-attachment", e2eThinPoolRestoreDiskName)
+				}
 				clusterVMs := e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
 				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
 				vmSSH := e2eConfigVMSSHUser()
@@ -2261,7 +2268,7 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 
 				By("Step 1: attach VirtualDisk and create LVMVolumeGroup with thin-pool")
 				att, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
-					VMName: targetVM, Namespace: ns, DiskName: e2eThinPoolRestoreDiskName,
+					VMName: targetVM, Namespace: ns, DiskName: diskName,
 					DiskSize: e2eThinPoolRestoreDiskSize, StorageClassName: storageClass,
 				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
 				Expect(err).NotTo(HaveOccurred())
