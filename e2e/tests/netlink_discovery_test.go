@@ -47,7 +47,7 @@ const (
 	netlinkChangeEventLogPattern = `(?i)\[HandleEvent\].*udev event.*action=change`
 )
 
-var _ = Describe("BlockDevice netlink discovery", Ordered, ContinueOnFailure, func() {
+var _ = Describe("BlockDevice netlink discovery", Label("e2e-tests"), Ordered, ContinueOnFailure, func() {
 	var (
 		testClusterResources *cluster.TestClusterResources
 		k8sClient            client.Client

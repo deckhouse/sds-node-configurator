@@ -105,6 +105,28 @@ Or run specific test:
 ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
 ```
 
+### Ginkgo labels (CI / local filter)
+
+Specs are tagged for selective runs:
+
+| Label | Specs |
+|-------|--------|
+| `e2e-tests` | Smoke e2e (scheduler, BlockDevice, LVMVolumeGroup, …) — **default in CI** |
+| `stress-test` | Max independent LVMVolumeGroups per node (`sds_node_configurator_stress_max_vgs_test.go`) |
+
+```bash
+# Smoke only (same as CI default)
+go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter=e2e-tests
+
+# Stress only
+go test -v -count=1 -timeout 240m ./tests/ -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter=stress-test
+
+# Override in CI via env
+export E2E_GINKGO_LABEL_FILTER=stress-test
+```
+
+Focus only: `ginkgo -v --label-filter=stress-test ./tests/`
+
 ### 3. Cluster lock (stale lock)
 
 If a previous run was interrupted (e.g. Ctrl+C) or failed before cleanup, the framework may leave the cluster locked. You will see: `failed to acquire cluster lock: cluster is already locked`.
@@ -167,10 +189,20 @@ storage-e2e checks the Deckhouse `Module/virtualization` once with a short timeo
 | `TEST_CLUSTER_FORCE_LOCK_RELEASE` | No | Set to `true` once to clear a stale lock. |
 | `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` | No | Max wait for Module `virtualization` Ready before nested cluster create (default ~25m). |
 | `E2E_SKIP_VIRTUALIZATION_MODULE_WAIT` | No | Set to `true` to skip the Module pre-wait (not recommended if you hit Reconciling flakes). |
+| `E2E_GINKGO_LABEL_FILTER` | No | Ginkgo label filter for CI/local (default in workflow: `e2e-tests`). Use `stress-test` for max-VG stress. |
+
+### Stress: maximum VGs per node
+
+Spec **`Stress: maximum independent LVMVolumeGroups per node`** (`sds_node_configurator_stress_max_vgs_test.go`), label **`stress-test`** (excluded from CI smoke; smoke uses **`e2e-tests`**). LVM2 has no fixed VG count limit; the test ramps **one VirtualDisk → one BlockDevice → one LVMVolumeGroup (one VG)** per slot on a single node in batches and prints an empirical report (`Ready` count, on-node `vgs`/`pvs` totals).
+
+Optional tuning: `E2E_STRESS_MAX_VG_TARGET` (default 30), `E2E_STRESS_MAX_VG_BATCH_SIZE`, `E2E_STRESS_MAX_VG_DISK_SIZE`, `E2E_STRESS_MAX_VG_STRICT`, `E2E_STRESS_MAX_VG_MIN_READY`.
+
+Focus or label: `ginkgo -v --label-filter=stress-test ./tests/`
 
 ---
 
 ## See also
 
 - [README.md](README.md) — test scenarios, debugging, troubleshooting.
-- Local runs: `ginkgo -v --progress ./tests/` or `go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$'` (same as CI).
+- Local smoke (same as CI): `make -C e2e test-go` or `go test ... -ginkgo.label-filter=e2e-tests`
+- Full package including stress: `go test ... -ginkgo.label-filter='e2e-tests || stress-test'` or `-ginkgo.label-filter=stress-test` for stress only

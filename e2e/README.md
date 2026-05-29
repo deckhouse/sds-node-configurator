@@ -29,6 +29,7 @@ e2e/
     ├── sds_node_configurator_suite_test.go  # TestSdsNodeConfigurator, BeforeSuite/AfterSuite (storage-e2e)
     ├── e2e_cluster_lock_test.go  # lock retry / очистка lock для alwaysUseExisting
     ├── sds_node_configurator_test.go  # один корневой Ordered: Common Scheduler Extender, затем Sds Node Configurator; хелперы
+    ├── sds_node_configurator_stress_max_vgs_test.go  # stress: макс. число VG на одной ноде
     └── cluster_config.yml     # вложенный кластер (storage-e2e)
 ```
 
@@ -97,6 +98,10 @@ ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
 
 - **BlockDevice discovery**: появление диска; корректные `status.nodeName`, `status.path`, `status.size`, `consumable`.
 - **LVMVolumeGroup**: создание на основе BlockDevice, статус и capacity.
+
+### Stress: максимум VG на одной ноде
+
+Spec в `sds_node_configurator_stress_max_vgs_test.go`, Ginkgo-лейбл **`stress-test`** (остальные e2e — **`e2e-tests`**). CI smoke по умолчанию: `-ginkgo.label-filter=e2e-tests`. Подробнее — [E2E_USAGE.md](E2E_USAGE.md).
 
 ### Common Scheduler Extender
 

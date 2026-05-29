@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -168,6 +169,72 @@ func ensureSchedulerE2EK8sClient(resources *cluster.TestClusterResources, k8s *c
 	cleanupE2EPVCs(ctx, *k8s)
 }
 
+func waitForLocalStorageClassDeleted(ctx context.Context, dynClient dynamic.Interface, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		_, err := dynClient.Resource(localStorageClassGVR).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for LocalStorageClass %s to be deleted", name)
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
+func e2eForceDeleteLocalStorageClass(ctx context.Context, dynClient dynamic.Interface, name string) {
+	obj, err := dynClient.Resource(localStorageClassGVR).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return
+	}
+	if err != nil {
+		GinkgoWriter.Printf("force delete LSC %s: get: %v\n", name, err)
+		return
+	}
+	obj.SetFinalizers(nil)
+	if _, err := dynClient.Resource(localStorageClassGVR).Update(ctx, obj, metav1.UpdateOptions{}); err != nil {
+		GinkgoWriter.Printf("force delete LSC %s: update finalizers: %v\n", name, err)
+	}
+	_ = dynClient.Resource(localStorageClassGVR).Delete(ctx, name, metav1.DeleteOptions{})
+}
+
+// ensureE2ELocalStorageClassAbsent deletes e2e-local-sc (and matching StorageClass) and waits until gone.
+// Needed when a prior run left LocalStorageClass in Terminating ("already exists" on recreate).
+func ensureE2ELocalStorageClassAbsent(ctx context.Context, kubeconfig *rest.Config, k8sCl client.Client, name string) {
+	dynClient, err := dynamic.NewForConfig(kubeconfig)
+	if err != nil {
+		GinkgoWriter.Printf("ensure LSC absent: dynamic client: %v\n", err)
+		return
+	}
+
+	if _, err := dynClient.Resource(localStorageClassGVR).Get(ctx, name, metav1.GetOptions{}); err == nil {
+		GinkgoWriter.Printf("Deleting LocalStorageClass %s before recreate\n", name)
+		_ = dynClient.Resource(localStorageClassGVR).Delete(ctx, name, metav1.DeleteOptions{})
+	}
+	if err := waitForLocalStorageClassDeleted(ctx, dynClient, name, 3*time.Minute); err != nil {
+		GinkgoWriter.Printf("ensure LSC absent: %v; force deleting\n", err)
+		e2eForceDeleteLocalStorageClass(ctx, dynClient, name)
+		_ = waitForLocalStorageClassDeleted(ctx, dynClient, name, time.Minute)
+	}
+
+	if k8sCl == nil {
+		return
+	}
+	var sc storagev1.StorageClass
+	if err := k8sCl.Get(ctx, client.ObjectKey{Name: name}, &sc); apierrors.IsNotFound(err) {
+		return
+	} else if err != nil {
+		GinkgoWriter.Printf("ensure LSC absent: get StorageClass %s: %v\n", name, err)
+		return
+	}
+	GinkgoWriter.Printf("Deleting leftover StorageClass %s\n", name)
+	_ = client.IgnoreNotFound(k8sCl.Delete(ctx, &sc))
+}
+
 func cleanupE2ELocalStorageClasses(ctx context.Context, kubeconfig *rest.Config) {
 	dynClient, err := dynamic.NewForConfig(kubeconfig)
 	if err != nil {
@@ -181,9 +248,16 @@ func cleanupE2ELocalStorageClasses(ctx context.Context, kubeconfig *rest.Config)
 	}
 
 	for _, item := range lscList.Items {
-		if strings.HasPrefix(item.GetName(), "e2e-") {
-			GinkgoWriter.Printf("Deleting LocalStorageClass %s\n", item.GetName())
-			_ = dynClient.Resource(localStorageClassGVR).Delete(ctx, item.GetName(), metav1.DeleteOptions{})
+		if !strings.HasPrefix(item.GetName(), "e2e-") {
+			continue
+		}
+		name := item.GetName()
+		GinkgoWriter.Printf("Deleting LocalStorageClass %s\n", name)
+		_ = dynClient.Resource(localStorageClassGVR).Delete(ctx, name, metav1.DeleteOptions{})
+		if err := waitForLocalStorageClassDeleted(ctx, dynClient, name, 3*time.Minute); err != nil {
+			GinkgoWriter.Printf("  %v; force deleting\n", err)
+			e2eForceDeleteLocalStorageClass(ctx, dynClient, name)
+			_ = waitForLocalStorageClassDeleted(ctx, dynClient, name, time.Minute)
 		}
 	}
 }

@@ -18,6 +18,7 @@ package tests
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -247,6 +248,74 @@ func e2eConfigRegistryDockerCfg() string {
 }
 
 func e2eConfigTestClusterCreateMode() string { return os.Getenv("TEST_CLUSTER_CREATE_MODE") }
+
+// Stress e2e: many independent LVMVolumeGroups (1 PV = 1 VG) on one node.
+const (
+	e2eStressMaxVGTargetEnv       = "E2E_STRESS_MAX_VG_TARGET"
+	e2eStressMaxVGDiskSizeEnv     = "E2E_STRESS_MAX_VG_DISK_SIZE"
+	e2eStressMaxVGBatchSizeEnv    = "E2E_STRESS_MAX_VG_BATCH_SIZE"
+	e2eStressMaxVGStrictEnv       = "E2E_STRESS_MAX_VG_STRICT"
+	e2eStressMaxVGMinReadyEnv     = "E2E_STRESS_MAX_VG_MIN_READY"
+	e2eStressMaxVGDefaultTarget   = 30
+	e2eStressMaxVGDefaultBatch    = 5
+	e2eStressMaxVGDefaultDiskSize = "1Gi"
+	e2eStressMaxVGNamePrefix      = "e2e-stress-vg-"
+	e2eStressMaxLVGNamePrefix     = "e2e-lvg-stress-"
+)
+
+func e2eStressMaxVGTarget() int {
+	return e2eEnvIntPositive(e2eStressMaxVGTargetEnv, e2eStressMaxVGDefaultTarget)
+}
+
+func e2eStressMaxVGBatchSize() int {
+	b := e2eEnvIntPositive(e2eStressMaxVGBatchSizeEnv, e2eStressMaxVGDefaultBatch)
+	if t := e2eStressMaxVGTarget(); b > t {
+		return t
+	}
+	return b
+}
+
+func e2eStressMaxVGDiskSize() string {
+	if v := strings.TrimSpace(os.Getenv(e2eStressMaxVGDiskSizeEnv)); v != "" {
+		return v
+	}
+	return e2eStressMaxVGDefaultDiskSize
+}
+
+func e2eStressMaxVGStrict() bool { return e2eEnvBool(e2eStressMaxVGStrictEnv) }
+
+func e2eStressMaxVGMinReady(target int) int {
+	if v := strings.TrimSpace(os.Getenv(e2eStressMaxVGMinReadyEnv)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	if e2eStressMaxVGStrict() {
+		return target
+	}
+	return 1
+}
+
+func e2eEnvBool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func e2eEnvIntPositive(name string, defaultVal int) int {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return defaultVal
+	}
+	return n
+}
 
 // e2eNestedTestCluster is the single nested cluster for a full suite run (both Ordered Describes).
 // Common Scheduler Extender registers it after CreateOrConnect; AfterSuite runs e2eCleanupNestedTestClusterAfterSuite.

@@ -18,6 +18,7 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -36,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var _ = Describe("Block device stability with explicit lifecycle stages", Ordered, func() {
+var _ = Describe("Block device stability with explicit lifecycle stages", Label("e2e-tests"), Ordered, func() {
 	var (
 		ctx       context.Context
 		res       *cluster.TestClusterResources
@@ -73,13 +74,23 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Ordere
 			targetVM = vm
 			break
 		}
+		Expect(targetVM).NotTo(BeEmpty(), "need a non-bootstrap VM for block device stability test")
 
-		By("Attaching a virtual disk to the target VM")
+		ns := conf.TestCluster.Namespace
+		// Fixed names from older runs / interrupted AfterAll — detach best-effort before create.
+		for _, legacy := range []struct{ disk, att string }{
+			{"block-device-stable-readable", "block-device-stable-readable-attachment"},
+		} {
+			_ = kubernetes.DetachAndDeleteVirtualDisk(ctx, res.BaseKubeconfig, ns, legacy.att, legacy.disk)
+		}
+
+		diskName := fmt.Sprintf("e2e-bd-stable-%d", time.Now().Unix())
+		By("Attaching a virtual disk to the target VM: " + diskName)
 		attachResult, attachErr := kubernetes.AttachVirtualDiskToVM(ctx, res.BaseKubeconfig,
 			kubernetes.VirtualDiskAttachmentConfig{
 				VMName:           targetVM,
-				Namespace:        conf.TestCluster.Namespace,
-				DiskName:         "block-device-stable-readable",
+				Namespace:        ns,
+				DiskName:         diskName,
 				DiskSize:         "5Gi",
 				StorageClassName: conf.TestCluster.StorageClass,
 			})

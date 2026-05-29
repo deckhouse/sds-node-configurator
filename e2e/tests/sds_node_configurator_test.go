@@ -46,7 +46,7 @@ import (
 	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
 )
 
-var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
+var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered, func() {
 
 	Describe("Common Scheduler Extender", Ordered, func() {
 		var (
@@ -468,6 +468,9 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				for i, lvg := range createdLVGs {
 					lvgNames[i] = lvg.Name
 				}
+
+				By(fmt.Sprintf("Ensuring LocalStorageClass %s is absent before create", e2eLocalStorageClassName))
+				ensureE2ELocalStorageClassAbsent(e2eCtx, testClusterResources.Kubeconfig, k8sClient, e2eLocalStorageClassName)
 
 				By(fmt.Sprintf("Creating LocalStorageClass %s with LVMVolumeGroups: %v", e2eLocalStorageClassName, lvgNames))
 
