@@ -197,42 +197,58 @@ func e2eForceDeleteLocalStorageClass(ctx context.Context, dynClient dynamic.Inte
 	}
 	obj.SetFinalizers(nil)
 	if _, err := dynClient.Resource(localStorageClassGVR).Update(ctx, obj, metav1.UpdateOptions{}); err != nil {
-		GinkgoWriter.Printf("force delete LSC %s: update finalizers: %v\n", name, err)
+		GinkgoWriter.Printf("force delete LSC %s: clear finalizers: %v\n", name, err)
 	}
-	_ = dynClient.Resource(localStorageClassGVR).Delete(ctx, name, metav1.DeleteOptions{})
+	propagation := metav1.DeletePropagationForeground
+	_ = dynClient.Resource(localStorageClassGVR).Delete(ctx, name, metav1.DeleteOptions{
+		PropagationPolicy: &propagation,
+	})
 }
 
 // ensureE2ELocalStorageClassAbsent deletes e2e-local-sc (and matching StorageClass) and waits until gone.
 // Needed when a prior run left LocalStorageClass in Terminating ("already exists" on recreate).
-func ensureE2ELocalStorageClassAbsent(ctx context.Context, kubeconfig *rest.Config, k8sCl client.Client, name string) {
+func ensureE2ELocalStorageClassAbsent(ctx context.Context, kubeconfig *rest.Config, k8sCl client.Client, name string) error {
 	dynClient, err := dynamic.NewForConfig(kubeconfig)
 	if err != nil {
-		GinkgoWriter.Printf("ensure LSC absent: dynamic client: %v\n", err)
-		return
+		return fmt.Errorf("dynamic client: %w", err)
 	}
 
-	if _, err := dynClient.Resource(localStorageClassGVR).Get(ctx, name, metav1.GetOptions{}); err == nil {
-		GinkgoWriter.Printf("Deleting LocalStorageClass %s before recreate\n", name)
-		_ = dynClient.Resource(localStorageClassGVR).Delete(ctx, name, metav1.DeleteOptions{})
+	propagation := metav1.DeletePropagationForeground
+	deleteOpts := metav1.DeleteOptions{PropagationPolicy: &propagation}
+
+	obj, getErr := dynClient.Resource(localStorageClassGVR).Get(ctx, name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(getErr):
+		// gone
+	case getErr != nil:
+		return fmt.Errorf("get LocalStorageClass %s: %w", name, getErr)
+	default:
+		if obj.GetDeletionTimestamp() == nil {
+			GinkgoWriter.Printf("Deleting LocalStorageClass %s before recreate\n", name)
+			_ = dynClient.Resource(localStorageClassGVR).Delete(ctx, name, deleteOpts)
+		} else {
+			GinkgoWriter.Printf("Waiting for LocalStorageClass %s to finish deleting\n", name)
+		}
 	}
-	if err := waitForLocalStorageClassDeleted(ctx, dynClient, name, 3*time.Minute); err != nil {
-		GinkgoWriter.Printf("ensure LSC absent: %v; force deleting\n", err)
+
+	if err := waitForLocalStorageClassDeleted(ctx, dynClient, name, 5*time.Minute); err != nil {
+		GinkgoWriter.Printf("ensure LSC absent: %v; force deleting %s\n", err, name)
 		e2eForceDeleteLocalStorageClass(ctx, dynClient, name)
-		_ = waitForLocalStorageClassDeleted(ctx, dynClient, name, time.Minute)
+		if err2 := waitForLocalStorageClassDeleted(ctx, dynClient, name, 2*time.Minute); err2 != nil {
+			return fmt.Errorf("LocalStorageClass %s still present after force delete: %w", name, err2)
+		}
 	}
 
-	if k8sCl == nil {
-		return
+	if k8sCl != nil {
+		var sc storagev1.StorageClass
+		if err := k8sCl.Get(ctx, client.ObjectKey{Name: name}, &sc); err == nil {
+			GinkgoWriter.Printf("Deleting leftover StorageClass %s\n", name)
+			_ = client.IgnoreNotFound(k8sCl.Delete(ctx, &sc))
+		} else if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("get StorageClass %s: %w", name, err)
+		}
 	}
-	var sc storagev1.StorageClass
-	if err := k8sCl.Get(ctx, client.ObjectKey{Name: name}, &sc); apierrors.IsNotFound(err) {
-		return
-	} else if err != nil {
-		GinkgoWriter.Printf("ensure LSC absent: get StorageClass %s: %v\n", name, err)
-		return
-	}
-	GinkgoWriter.Printf("Deleting leftover StorageClass %s\n", name)
-	_ = client.IgnoreNotFound(k8sCl.Delete(ctx, &sc))
+	return nil
 }
 
 func cleanupE2ELocalStorageClasses(ctx context.Context, kubeconfig *rest.Config) {

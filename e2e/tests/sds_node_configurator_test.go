@@ -156,6 +156,9 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				By("Cleaning up existing e2e LVMVolumeGroups (to release LVM signatures)")
 				cleanupE2ELVMVolumeGroups(e2eCtx, k8sClient)
 
+				By("Ensuring no leftover LocalStorageClass from a previous run")
+				Expect(ensureE2ELocalStorageClassAbsent(e2eCtx, testClusterResources.Kubeconfig, k8sClient, e2eLocalStorageClassName)).To(Succeed())
+
 				if testClusterResources.BaseKubeconfig != nil {
 					By("Cleaning up e2e VirtualDisks and attachments before tests")
 					cleanupE2EVirtualDisks(e2eCtx, testClusterResources.BaseKubeconfig, ns, e2eVirtualDiskPrefix)
@@ -469,11 +472,6 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 					lvgNames[i] = lvg.Name
 				}
 
-				By(fmt.Sprintf("Ensuring LocalStorageClass %s is absent before create", e2eLocalStorageClassName))
-				ensureE2ELocalStorageClassAbsent(e2eCtx, testClusterResources.Kubeconfig, k8sClient, e2eLocalStorageClassName)
-
-				By(fmt.Sprintf("Creating LocalStorageClass %s with LVMVolumeGroups: %v", e2eLocalStorageClassName, lvgNames))
-
 				lvmVolumeGroups := make([]interface{}, len(lvgNames))
 				for i, lvgName := range lvgNames {
 					lvmVolumeGroups[i] = map[string]interface{}{
@@ -499,8 +497,12 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 					},
 				}
 
-				_, err = dynamicClient.Resource(localStorageClassGVR).Create(e2eCtx, lsc, metav1.CreateOptions{})
-				Expect(err).NotTo(HaveOccurred(), "create LocalStorageClass")
+				By(fmt.Sprintf("Creating LocalStorageClass %s with LVMVolumeGroups: %v", e2eLocalStorageClassName, lvgNames))
+				Eventually(func(g Gomega) {
+					g.Expect(ensureE2ELocalStorageClassAbsent(e2eCtx, testClusterResources.Kubeconfig, k8sClient, e2eLocalStorageClassName)).To(Succeed())
+					_, createErr := dynamicClient.Resource(localStorageClassGVR).Create(e2eCtx, lsc.DeepCopy(), metav1.CreateOptions{})
+					g.Expect(createErr).NotTo(HaveOccurred(), "create LocalStorageClass")
+				}, 5*time.Minute, 10*time.Second).Should(Succeed(), "create LocalStorageClass after prior e2e-local-sc is fully removed")
 
 				By("Waiting for LocalStorageClass to reach Created phase (up to 3 minutes)")
 				Eventually(func(g Gomega) {
