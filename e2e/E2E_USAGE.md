@@ -95,15 +95,39 @@ From the repo root:
 source e2e/config/test_exports_storage_e2e
 cd e2e
 go mod tidy
-ginkgo -v --progress ./tests/
+ginkgo -v --progress --label-filter=e2e-tests ./tests/
 ```
 
 Or run specific test:
 
 ```bash
 # Ginkgo focus on a spec name; CI runs: go test ./tests/ -run '^TestSdsNodeConfigurator$'
-ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
+ginkgo -v --progress --label-filter=e2e-tests --focus="Should schedule Pod with local PVC" ./tests/
 ```
+
+### Ginkgo labels (CI / local filter)
+
+Specs are tagged for selective runs:
+
+| Label | Specs |
+|-------|--------|
+| `e2e-tests` | Smoke e2e (scheduler, BlockDevice, LVMVolumeGroup, …) — **default** (suite, CI, `make test`) |
+| `stress-test` | Max independent LVMVolumeGroups per node — **not run by default** |
+
+Without `-ginkgo.label-filter`, `TestSdsNodeConfigurator` applies label filter `e2e-tests` automatically. Stress runs only with `make test-stress`, `-ginkgo.label-filter=stress-test`, or `E2E_GINKGO_LABEL_FILTER=stress-test`. Full package: `E2E_GINKGO_LABEL_FILTER='e2e-tests || stress-test'` or `E2E_GINKGO_LABEL_FILTER=all`.
+
+```bash
+# Smoke only (same as CI default)
+go test -v -count=1 -timeout 3h30m ./tests/ -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter=e2e-tests
+
+# Stress only
+go test -v -count=1 -timeout 240m ./tests/ -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter=stress-test
+
+# Override in CI via env
+export E2E_GINKGO_LABEL_FILTER=stress-test
+```
+
+Focus only: `ginkgo -v --label-filter=stress-test ./tests/`
 
 ### 3. Cluster lock (stale lock)
 
@@ -114,7 +138,7 @@ To release the lock once (only when no other run is using the cluster):
 ```bash
 export TEST_CLUSTER_FORCE_LOCK_RELEASE='true'
 source e2e/config/test_exports_storage_e2e
-cd e2e && ginkgo -v --progress ./tests/
+cd e2e && ginkgo -v --progress --label-filter=e2e-tests ./tests/
 ```
 
 For `alwaysUseExisting`, this suite retries once after clearing a stale lock: first it tries deleting ConfigMap `default/e2e-cluster-lock` via `KUBE_CONFIG_PATH` (works when the API URL is reachable directly). If that fails (common when `server` is `https://127.0.0.1:…` and no tunnel is running yet), it opens the same SSH + port-forward as the test connect and releases the lock. Disable with `E2E_NO_CLUSTER_LOCK_RETRY=true` (e.g. shared cluster).
@@ -167,10 +191,21 @@ storage-e2e checks the Deckhouse `Module/virtualization` once with a short timeo
 | `TEST_CLUSTER_FORCE_LOCK_RELEASE` | No | Set to `true` once to clear a stale lock. |
 | `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` | No | Max wait for Module `virtualization` Ready before nested cluster create (default ~25m). |
 | `E2E_SKIP_VIRTUALIZATION_MODULE_WAIT` | No | Set to `true` to skip the Module pre-wait (not recommended if you hit Reconciling flakes). |
+| `E2E_GINKGO_LABEL_FILTER` | No | Ginkgo label filter for CI/local (default in workflow: `e2e-tests`). Use `stress-test` for max-VG stress. |
+| `E2E_TEST_TIMEOUT` | No | Ginkgo suite timeout only on CI (default `3h30m`). CI workflow uses a **fixed** `go test -timeout 3h30m` so org/repo vars cannot shorten it to `60m`. Local default `90m`. |
+
+### Stress: maximum VGs per node
+
+Spec **`Stress: maximum independent LVMVolumeGroups per node`** (`sds_node_configurator_stress_max_vgs_test.go`), label **`stress-test`** (excluded from CI smoke; smoke uses **`e2e-tests`**). LVM2 has no fixed VG count limit; the test ramps **one VirtualDisk → one BlockDevice → one LVMVolumeGroup (one VG)** per slot on a single node in batches and prints an empirical report (`Ready` count, on-node `vgs`/`pvs` totals).
+
+Optional tuning: `E2E_STRESS_MAX_VG_TARGET` (default 15), `E2E_STRESS_MAX_VM_BLOCK_DEVICES` (default 15; Deckhouse virt allows 16 block devices per VM), `E2E_STRESS_MAX_VG_BATCH_SIZE`, `E2E_STRESS_MAX_VG_DISK_SIZE`, `E2E_STRESS_MAX_VG_STRICT`, `E2E_STRESS_MAX_VG_MIN_READY`. The ramp stops gracefully when the VM attachment limit is hit.
+
+Focus or label: `ginkgo -v --label-filter=stress-test ./tests/`
 
 ---
 
 ## See also
 
 - [README.md](README.md) — test scenarios, debugging, troubleshooting.
-- Local runs: `ginkgo -v --progress ./tests/` or `go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$'` (same as CI).
+- Local smoke (same as CI): `make -C e2e test-go` or `go test ... -ginkgo.label-filter=e2e-tests`
+- Full package including stress: `go test ... -ginkgo.label-filter='e2e-tests || stress-test'` or `-ginkgo.label-filter=stress-test` for stress only
