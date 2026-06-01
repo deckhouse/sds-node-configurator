@@ -1472,7 +1472,7 @@ func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[str
 	}
 
 	for _, me := range lvg.Spec.BlockDeviceSelector.MatchExpressions {
-		if me.Key == internal.MetadataNameLabelKey {
+		if me.Key == internal.MetadataNameLabelKey && me.Operator == v1.LabelSelectorOpIn {
 			if len(me.Values) != len(blockDevices) {
 				missedBds := make([]string, 0, len(me.Values))
 				for _, bdName := range me.Values {
