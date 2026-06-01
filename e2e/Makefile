@@ -44,6 +44,7 @@ cleanup: ## Delete Job and RBAC
 # CI smoke uses label e2e-tests (everything except max-VG stress). Override: make test-go GINKGO_LABEL_FILTER=stress-test
 GINKGO_LABEL_FILTER ?= e2e-tests
 E2E_TEST_TIMEOUT ?= 90m
+# CI workflow uses go test -timeout 3h30m regardless of this var.
 
 .PHONY: test
 test: ## Run E2E smoke (label e2e-tests, без max-VG stress) — как CI

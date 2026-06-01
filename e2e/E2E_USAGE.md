@@ -118,7 +118,7 @@ Without `-ginkgo.label-filter`, `TestSdsNodeConfigurator` applies label filter `
 
 ```bash
 # Smoke only (same as CI default)
-go test -v -count=1 -timeout 3h ./tests/ -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter=e2e-tests
+go test -v -count=1 -timeout 3h30m ./tests/ -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter=e2e-tests
 
 # Stress only
 go test -v -count=1 -timeout 240m ./tests/ -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter=stress-test
@@ -192,7 +192,7 @@ storage-e2e checks the Deckhouse `Module/virtualization` once with a short timeo
 | `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` | No | Max wait for Module `virtualization` Ready before nested cluster create (default ~25m). |
 | `E2E_SKIP_VIRTUALIZATION_MODULE_WAIT` | No | Set to `true` to skip the Module pre-wait (not recommended if you hit Reconciling flakes). |
 | `E2E_GINKGO_LABEL_FILTER` | No | Ginkgo label filter for CI/local (default in workflow: `e2e-tests`). Use `stress-test` for max-VG stress. |
-| `E2E_TEST_TIMEOUT` | No | `go test -timeout` and Ginkgo suite timeout (CI default `3h`, local default `90m`). Example: `2h30m`. |
+| `E2E_TEST_TIMEOUT` | No | Ginkgo suite timeout only on CI (default `3h30m`). CI workflow uses a **fixed** `go test -timeout 3h30m` so org/repo vars cannot shorten it to `60m`. Local default `90m`. |
 
 ### Stress: maximum VGs per node
 

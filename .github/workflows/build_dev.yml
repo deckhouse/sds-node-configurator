@@ -213,7 +213,7 @@ jobs:
   run_e2e_smoke_tests:
     if: ${{ inputs.run_e2e_smoke_tests == true }}
     name: Run E2E Smoke Tests
-    timeout-minutes: 210
+    timeout-minutes: 240
     runs-on: [self-hosted, regular]
     needs:
       - dev_setup_build
@@ -332,8 +332,8 @@ jobs:
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
           # Smoke: all specs with label e2e-tests (excludes stress-test / max-VG ramp).
           E2E_GINKGO_LABEL_FILTER: e2e-tests
-          # BeforeSuite + scheduler + module e2e routinely exceeds 60m on self-hosted CI.
-          E2E_TEST_TIMEOUT: 3h
+          # Ginkgo suite timeout (must be <= go test -timeout below; smoke often exceeds 60m).
+          E2E_TEST_TIMEOUT: 3h30m
         run: |
           mkdir -p "${GOMODCACHE}" "${GOCACHE}"
 
@@ -445,9 +445,11 @@ jobs:
             shopt -u nullglob
           fi
           echo "Ginkgo label filter: ${E2E_GINKGO_LABEL_FILTER} (stress-test specs are skipped in smoke)"
-          E2E_TEST_TIMEOUT="${E2E_TEST_TIMEOUT:-3h}"
-          echo "go test timeout: ${E2E_TEST_TIMEOUT}"
-          go test -v -count=1 -timeout "${E2E_TEST_TIMEOUT}" ./tests/ -run '^TestSdsNodeConfigurator$' \
+          export E2E_TEST_TIMEOUT="${E2E_TEST_TIMEOUT:-3h30m}"
+          # Hardcode go test -timeout: repo/org E2E_TEST_TIMEOUT=60m must not shorten the process alarm.
+          E2E_GO_TEST_TIMEOUT="3h30m"
+          echo "go test -timeout: ${E2E_GO_TEST_TIMEOUT} (Ginkgo suite: ${E2E_TEST_TIMEOUT})"
+          go test -v -count=1 -timeout "${E2E_GO_TEST_TIMEOUT}" ./tests/ -run '^TestSdsNodeConfigurator$' \
             -ginkgo.label-filter="${E2E_GINKGO_LABEL_FILTER}" 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV

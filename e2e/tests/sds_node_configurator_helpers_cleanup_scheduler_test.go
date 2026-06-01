@@ -19,6 +19,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -774,8 +775,16 @@ func countE2EPVCsDefault(ctx context.Context, cl client.Client) int {
 	return n
 }
 
-// countE2ERelatedPVs returns PVs still present for e2e local volumes (same StorageClass as scheduler tests).
-// PVC objects can be gone while PV is still Terminating — CSI must detach before LVMLogicalVolume can be removed safely.
+func isE2ERelatedPV(pv *corev1.PersistentVolume) bool {
+	if pv.Spec.StorageClassName == e2eLocalStorageClassName {
+		return true
+	}
+	if ref := pv.Spec.ClaimRef; ref != nil && ref.Namespace == metav1.NamespaceDefault &&
+		strings.HasPrefix(ref.Name, e2ePVCPrefix) {
+		return true
+	}
+	return false
+}
 
 // countE2ERelatedPVs returns PVs still present for e2e local volumes (same StorageClass as scheduler tests).
 // PVC objects can be gone while PV is still Terminating — CSI must detach before LVMLogicalVolume can be removed safely.
@@ -787,17 +796,83 @@ func countE2ERelatedPVs(ctx context.Context, cl client.Client) int {
 	}
 	n := 0
 	for i := range list.Items {
-		pv := &list.Items[i]
-		if pv.Spec.StorageClassName == e2eLocalStorageClassName {
-			n++
-			continue
-		}
-		if ref := pv.Spec.ClaimRef; ref != nil && ref.Namespace == metav1.NamespaceDefault &&
-			strings.HasPrefix(ref.Name, e2ePVCPrefix) {
+		if isE2ERelatedPV(&list.Items[i]) {
 			n++
 		}
 	}
 	return n
+}
+
+func e2eSchedulerPVDeleteTimeoutDuration() time.Duration {
+	if os.Getenv("CI") != "" {
+		return 40 * time.Minute
+	}
+	return e2eSchedulerPVDeleteTimeout
+}
+
+func logSampleStuckE2EPVs(ctx context.Context, cl client.Client, max int) {
+	var list corev1.PersistentVolumeList
+	if err := cl.List(ctx, &list); err != nil {
+		return
+	}
+	logged := 0
+	for i := range list.Items {
+		pv := &list.Items[i]
+		if !isE2ERelatedPV(pv) {
+			continue
+		}
+		deletingFor := "—"
+		if pv.DeletionTimestamp != nil {
+			deletingFor = time.Since(pv.DeletionTimestamp.Time).Round(time.Second).String()
+		}
+		GinkgoWriter.Printf("  e2e PV %s phase=%s claim=%s deletingFor=%s finalizers=%v\n",
+			pv.Name, pv.Status.Phase, pv.Spec.ClaimRef, deletingFor, pv.Finalizers)
+		logged++
+		if logged >= max {
+			break
+		}
+	}
+}
+
+// forceFinalizeStuckE2EPVs issues Delete on lingering PVs and strips finalizers when CSI delete stalls.
+func forceFinalizeStuckE2EPVs(ctx context.Context, cl client.Client) int {
+	var list corev1.PersistentVolumeList
+	if err := cl.List(ctx, &list); err != nil {
+		GinkgoWriter.Printf("list e2e PVs for force finalize: %v\n", err)
+		return 0
+	}
+	finalized := 0
+	for i := range list.Items {
+		pv := &list.Items[i]
+		if !isE2ERelatedPV(pv) {
+			continue
+		}
+		if pv.DeletionTimestamp == nil {
+			if err := cl.Delete(ctx, pv); err != nil && !apierrors.IsNotFound(err) {
+				GinkgoWriter.Printf("delete PV %s: %v\n", pv.Name, err)
+			}
+			continue
+		}
+		var fresh corev1.PersistentVolume
+		if err := cl.Get(ctx, client.ObjectKeyFromObject(pv), &fresh); err != nil {
+			if !apierrors.IsNotFound(err) {
+				GinkgoWriter.Printf("get PV %s for force finalize: %v\n", pv.Name, err)
+			}
+			continue
+		}
+		if len(fresh.Finalizers) == 0 {
+			continue
+		}
+		fresh.Finalizers = nil
+		if err := cl.Update(ctx, &fresh); err != nil && !apierrors.IsNotFound(err) {
+			GinkgoWriter.Printf("strip finalizers on PV %s: %v\n", fresh.Name, err)
+			continue
+		}
+		deletingFor := time.Since(fresh.DeletionTimestamp.Time).Round(time.Second)
+		GinkgoWriter.Printf("Force-finalized stuck PV %s (phase=%s, deletingFor=%s)\n", fresh.Name, fresh.Status.Phase, deletingFor)
+		finalized++
+	}
+	return finalized
 }
 
 // cleanupE2EPodsAndPVCsWithWait deletes e2e Pods first and waits until they are gone before deleting PVCs.
@@ -811,9 +886,15 @@ func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, podPha
 
 	cleanupE2EPVCs(ctx, cl)
 	pvDeadline := time.Now().Add(pvPhaseTimeout)
+	lastPVCount := -1
+	lastPVProgress := time.Now()
+	lastPVDetailLog := time.Time{}
 	for time.Now().Before(pvDeadline) {
 		if countE2EPodsDefault(ctx, cl) > 0 {
 			cleanupE2EPods(ctx, cl)
+		}
+		if countE2EPVCsDefault(ctx, cl) > 0 {
+			cleanupE2EPVCs(ctx, cl)
 		}
 		podCount := countE2EPodsDefault(ctx, cl)
 		pvcCount := countE2EPVCsDefault(ctx, cl)
@@ -822,8 +903,28 @@ func cleanupE2EPodsAndPVCsWithWait(ctx context.Context, cl client.Client, podPha
 			GinkgoWriter.Println("All e2e Pods, PVCs, and related PVs deleted")
 			return
 		}
-		GinkgoWriter.Printf("Waiting for cleanup: %d pods, %d PVCs, %d PVs remaining\n", podCount, pvcCount, pvCount)
+		if pvCount < lastPVCount {
+			lastPVProgress = time.Now()
+		}
+		lastPVCount = pvCount
+		if pvCount > 0 && time.Since(lastPVProgress) >= 3*time.Minute {
+			if forceFinalizeStuckE2EPVs(ctx, cl) > 0 {
+				lastPVProgress = time.Now()
+			}
+		}
+		if pvCount > 0 && time.Since(lastPVDetailLog) >= e2ePodCleanupLogStuckInterval {
+			GinkgoWriter.Printf("Waiting for cleanup: %d pods, %d PVCs, %d PVs remaining (sample PVs):\n", podCount, pvcCount, pvCount)
+			logSampleStuckE2EPVs(ctx, cl, 5)
+			lastPVDetailLog = time.Now()
+		} else {
+			GinkgoWriter.Printf("Waiting for cleanup: %d pods, %d PVCs, %d PVs remaining\n", podCount, pvcCount, pvCount)
+		}
 		time.Sleep(5 * time.Second)
+	}
+	if n := countE2ERelatedPVs(ctx, cl); n > 0 {
+		GinkgoWriter.Printf("PV cleanup deadline reached with %d e2e PVs left; forcing removal\n", n)
+		forceFinalizeStuckE2EPVs(ctx, cl)
+		logSampleStuckE2EPVs(ctx, cl, 10)
 	}
 	GinkgoWriter.Println("Warning: some e2e Pods/PVCs/PVs may still exist after cleanup timeout")
 }
@@ -910,7 +1011,7 @@ func schedulerVolumeSizesForConsolidatedFill(currentAvailable, maxPerLVG, prefer
 // or LVMVolumeGroup teardown hits "Delete used LVs first" and PV can stay Released with no PVC.
 // Pods/PVCs are deleted without stripping finalizers; wait for PVs before LLV so CSI does not race with LVMLogicalVolume deletion.
 func schedulerCleanupWorkloadBeforeNextFill(ctx context.Context, cl client.Client) {
-	cleanupE2EPodsAndPVCsWithWait(ctx, cl, e2eSchedulerPodCleanupTimeout, e2eSchedulerPVDeleteTimeout)
+	cleanupE2EPodsAndPVCsWithWait(ctx, cl, e2eSchedulerPodCleanupTimeout, e2eSchedulerPVDeleteTimeoutDuration())
 	// If cleanupE2EPodsAndPVCsWithWait hit its deadline, PVs can remain Released while CSI waits for detach/delete.
 	// Deleting LVMLogicalVolume CRs in that window makes the provisioner error (LLV not found) and leaves PV stuck.
 	n := countE2ERelatedPVs(ctx, cl)

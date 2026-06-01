@@ -60,6 +60,8 @@ var _ = AfterSuite(func() {
 })
 
 func TestSdsNodeConfigurator(t *testing.T) {
+	e2eAssertCIGoTestTimeout(t)
+
 	RegisterFailHandler(Fail)
 	suiteConfig, reporterConfig := GinkgoConfiguration()
 	suiteTimeout := e2eTestSuiteTimeout()

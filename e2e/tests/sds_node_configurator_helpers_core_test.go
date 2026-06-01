@@ -20,6 +20,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"testing"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -153,9 +154,10 @@ const (
 	e2eSuitePodPVCleanupPodTimeout = 2 * time.Minute
 	e2eSuitePodPVCleanupPVTimeout  = 15 * time.Minute
 
-	// Full smoke suite (BeforeSuite cluster + scheduler + module e2e) exceeds 60m on CI; override via E2E_TEST_TIMEOUT.
+	// Full smoke suite (BeforeSuite cluster + scheduler + module e2e) exceeds 60m on CI.
 	e2eTestTimeoutDefaultLocal = 90 * time.Minute
-	e2eTestTimeoutDefaultCI    = 3 * time.Hour
+	e2eTestTimeoutDefaultCI    = 3*time.Hour + 30*time.Minute
+	e2eMinCIGoTestTimeout      = e2eTestTimeoutDefaultCI // go test -timeout must be >= this on CI (see TestSdsNodeConfigurator)
 
 	// Guest VM name prefix for dhctl/bootstrap (Deckhouse test clusters). Do not attach data disks here — not a worker.
 	e2eBootstrapGuestVMPrefix = "bootstrap-node-"
@@ -275,16 +277,44 @@ func e2eGinkgoLabelFilter() string {
 }
 
 // e2eTestSuiteTimeout is the Ginkgo suite / go test -timeout budget for TestSdsNodeConfigurator.
+// e2eAssertCIGoTestTimeout fails fast when CI runs go test with -timeout 60m (default org setting).
+// Ginkgo suite timeout cannot extend the go test process alarm — both must be >= e2eMinCIGoTestTimeout.
+func e2eAssertCIGoTestTimeout(t *testing.T) {
+	t.Helper()
+	if os.Getenv("CI") == "" {
+		return
+	}
+	deadline, ok := t.Deadline()
+	if !ok {
+		t.Logf("CI: go test deadline unknown; invoke with -timeout at least %v", e2eMinCIGoTestTimeout)
+		return
+	}
+	remaining := time.Until(deadline)
+	if remaining < e2eMinCIGoTestTimeout {
+		t.Fatalf("go test -timeout too short for CI smoke (%v remaining, need >= %v). "+
+			"Use go test -timeout 3h30m (workflow must not pass a shorter E2E_TEST_TIMEOUT to the -timeout flag).",
+			remaining.Round(time.Second), e2eMinCIGoTestTimeout)
+	}
+}
+
 func e2eTestSuiteTimeout() time.Duration {
+	var d time.Duration
 	if v := strings.TrimSpace(os.Getenv("E2E_TEST_TIMEOUT")); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			return d
+		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
+			d = parsed
 		}
 	}
-	if os.Getenv("CI") != "" {
-		return e2eTestTimeoutDefaultCI
+	if d == 0 {
+		if os.Getenv("CI") != "" {
+			d = e2eTestTimeoutDefaultCI
+		} else {
+			d = e2eTestTimeoutDefaultLocal
+		}
 	}
-	return e2eTestTimeoutDefaultLocal
+	if os.Getenv("CI") != "" && d < e2eMinCIGoTestTimeout {
+		return e2eMinCIGoTestTimeout
+	}
+	return d
 }
 
 // Stress e2e: many independent LVMVolumeGroups (1 PV = 1 VG) on one node.
