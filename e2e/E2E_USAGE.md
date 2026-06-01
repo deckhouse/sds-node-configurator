@@ -95,14 +95,14 @@ From the repo root:
 source e2e/config/test_exports_storage_e2e
 cd e2e
 go mod tidy
-ginkgo -v --progress ./tests/
+ginkgo -v --progress --label-filter=e2e-tests ./tests/
 ```
 
 Or run specific test:
 
 ```bash
 # Ginkgo focus on a spec name; CI runs: go test ./tests/ -run '^TestSdsNodeConfigurator$'
-ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
+ginkgo -v --progress --label-filter=e2e-tests --focus="Should schedule Pod with local PVC" ./tests/
 ```
 
 ### Ginkgo labels (CI / local filter)
@@ -111,8 +111,10 @@ Specs are tagged for selective runs:
 
 | Label | Specs |
 |-------|--------|
-| `e2e-tests` | Smoke e2e (scheduler, BlockDevice, LVMVolumeGroup, …) — **default in CI** |
-| `stress-test` | Max independent LVMVolumeGroups per node (`sds_node_configurator_stress_max_vgs_test.go`) |
+| `e2e-tests` | Smoke e2e (scheduler, BlockDevice, LVMVolumeGroup, …) — **default** (suite, CI, `make test`) |
+| `stress-test` | Max independent LVMVolumeGroups per node — **not run by default** |
+
+Without `-ginkgo.label-filter`, `TestSdsNodeConfigurator` applies label filter `e2e-tests` automatically. Stress runs only with `make test-stress`, `-ginkgo.label-filter=stress-test`, or `E2E_GINKGO_LABEL_FILTER=stress-test`. Full package: `E2E_GINKGO_LABEL_FILTER='e2e-tests || stress-test'` or `E2E_GINKGO_LABEL_FILTER=all`.
 
 ```bash
 # Smoke only (same as CI default)
@@ -136,7 +138,7 @@ To release the lock once (only when no other run is using the cluster):
 ```bash
 export TEST_CLUSTER_FORCE_LOCK_RELEASE='true'
 source e2e/config/test_exports_storage_e2e
-cd e2e && ginkgo -v --progress ./tests/
+cd e2e && ginkgo -v --progress --label-filter=e2e-tests ./tests/
 ```
 
 For `alwaysUseExisting`, this suite retries once after clearing a stale lock: first it tries deleting ConfigMap `default/e2e-cluster-lock` via `KUBE_CONFIG_PATH` (works when the API URL is reachable directly). If that fails (common when `server` is `https://127.0.0.1:…` and no tunnel is running yet), it opens the same SSH + port-forward as the test connect and releases the lock. Disable with `E2E_NO_CLUSTER_LOCK_RETRY=true` (e.g. shared cluster).
@@ -196,7 +198,7 @@ storage-e2e checks the Deckhouse `Module/virtualization` once with a short timeo
 
 Spec **`Stress: maximum independent LVMVolumeGroups per node`** (`sds_node_configurator_stress_max_vgs_test.go`), label **`stress-test`** (excluded from CI smoke; smoke uses **`e2e-tests`**). LVM2 has no fixed VG count limit; the test ramps **one VirtualDisk → one BlockDevice → one LVMVolumeGroup (one VG)** per slot on a single node in batches and prints an empirical report (`Ready` count, on-node `vgs`/`pvs` totals).
 
-Optional tuning: `E2E_STRESS_MAX_VG_TARGET` (default 30), `E2E_STRESS_MAX_VG_BATCH_SIZE`, `E2E_STRESS_MAX_VG_DISK_SIZE`, `E2E_STRESS_MAX_VG_STRICT`, `E2E_STRESS_MAX_VG_MIN_READY`.
+Optional tuning: `E2E_STRESS_MAX_VG_TARGET` (default 15), `E2E_STRESS_MAX_VM_BLOCK_DEVICES` (default 15; Deckhouse virt allows 16 block devices per VM), `E2E_STRESS_MAX_VG_BATCH_SIZE`, `E2E_STRESS_MAX_VG_DISK_SIZE`, `E2E_STRESS_MAX_VG_STRICT`, `E2E_STRESS_MAX_VG_MIN_READY`. The ramp stops gracefully when the VM attachment limit is hit.
 
 Focus or label: `ginkgo -v --label-filter=stress-test ./tests/`
 

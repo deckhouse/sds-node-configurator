@@ -61,12 +61,20 @@ func e2eStressBatchReadyTimeout(batchLen int) time.Duration {
 	return t
 }
 
-func e2eStressPrintReport(nodeName string, target, ready, batchSize int, strict bool, slots []stressVGSlot, vgCount, pvCount int) {
+func e2eStressPrintReport(nodeName string, target, ready, batchSize int, strict, stoppedEarly, virtLimitReached bool, slots []stressVGSlot, vgCount, pvCount int) {
 	GinkgoWriter.Printf("\n========== Stress: max independent VGs per node — report ==========\n")
 	GinkgoWriter.Printf("  node: %s\n", nodeName)
-	GinkgoWriter.Printf("  target LVMVolumeGroups: %d (batch size %d)\n", target, batchSize)
+	GinkgoWriter.Printf("  target LVMVolumeGroups: %d (batch size %d; capped by E2E_STRESS_MAX_VM_BLOCK_DEVICES=%d)\n",
+		target, batchSize, e2eStressMaxVMBlockDevices())
 	GinkgoWriter.Printf("  Ready LVMVolumeGroups: %d\n", ready)
 	GinkgoWriter.Printf("  strict mode (all target must be Ready): %v\n", strict)
+	if stoppedEarly {
+		if virtLimitReached {
+			GinkgoWriter.Println("  stopped early: Deckhouse virtualization VM block-device limit (16 attachments per VM).")
+		} else {
+			GinkgoWriter.Println("  stopped early: batch LVMVolumeGroup Ready timeout or no further attach progress.")
+		}
+	}
 	GinkgoWriter.Printf("  on-node vgs count (all VGs): %d\n", vgCount)
 	GinkgoWriter.Printf("  on-node pvs count (all PVs): %d\n", pvCount)
 	for _, s := range slots {
@@ -80,8 +88,9 @@ func e2eStressPrintReport(nodeName string, target, ready, batchSize int, strict 
 		GinkgoWriter.Printf("  [%02d] disk=%s lvg=%s vg=%s bd=%s phase=%s\n",
 			s.index, s.diskName, s.lvgName, s.vgName, stressBDName(s), phase)
 	}
-	GinkgoWriter.Println("  LVM2 has no documented hard cap on VG count; practical limits depend on metadata size,")
-	GinkgoWriter.Println("  udev/device-mapper, and agent/controller throughput. Use this report as an empirical ceiling.")
+	GinkgoWriter.Println("  LVM2 has no documented hard cap on VG count; on a single VM the Deckhouse virt controller")
+	GinkgoWriter.Println("  caps block-device attachments at 16 (leave headroom for boot disks — default stress target 15).")
+	GinkgoWriter.Println("  Beyond that, practical limits depend on metadata size, udev, and agent throughput.")
 	GinkgoWriter.Println("====================================================================\n")
 }
 
@@ -135,7 +144,8 @@ func e2eMarkStressSlotsReady(ctx context.Context, cl client.Client, slots []stre
 	return n
 }
 
-var _ = Describe("Stress: maximum independent LVMVolumeGroups per node", Label("stress-test"), Ordered, func() {
+// Label stress-test: excluded from default smoke (suite label filter e2e-tests). Run via make test-stress or E2E_GINKGO_LABEL_FILTER=stress-test.
+var _ = Describe("Stress: maximum independent LVMVolumeGroups per node", Label(e2eGinkgoLabelStressTest), Ordered, func() {
 	var (
 		e2eCtx      context.Context
 		res         *cluster.TestClusterResources
@@ -211,8 +221,10 @@ var _ = Describe("Stress: maximum independent LVMVolumeGroups per node", Label("
 		readyTotal := 0
 		batchNum := 0
 		stoppedEarly := false
+		virtLimitReached := false
 
-		By(fmt.Sprintf("Stress ramp: target=%d batch=%d diskSize=%s VM=%q", target, batchSize, diskSize, targetVM))
+		By(fmt.Sprintf("Stress ramp: target=%d batch=%d diskSize=%s VM=%q (max VM block devices=%d)",
+			target, batchSize, diskSize, targetVM, e2eStressMaxVMBlockDevices()))
 
 		for batchStart := 0; batchStart < target && !stoppedEarly; batchStart += batchSize {
 			batchEnd := batchStart + batchSize
@@ -234,15 +246,30 @@ var _ = Describe("Stress: maximum independent LVMVolumeGroups per node", Label("
 				slots = append(slots, slot)
 			}
 
+			batchEndAttached := batchEnd
 			for i := batchStart; i < batchEnd; i++ {
 				att, err := attachVirtualDiskWithRetry(e2eCtx, res.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
 					VMName: targetVM, Namespace: ns, DiskName: slots[i].diskName,
 					DiskSize: diskSize, StorageClassName: storageClass,
 				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+				if e2eVirtVMBlockDeviceLimitReached(err) {
+					GinkgoWriter.Printf("    VM %q block-device attachment limit reached at disk %s — stopping ramp (%d Ready so far)\n",
+						targetVM, slots[i].diskName, readyTotal)
+					stoppedEarly = true
+					virtLimitReached = true
+					slots = slots[:i]
+					batchEndAttached = i
+					break
+				}
 				Expect(err).NotTo(HaveOccurred(), "attach disk %s", slots[i].diskName)
 				slots[i].att = att
 				attachments = append(attachments, att)
 			}
+			if batchEndAttached == batchStart {
+				break
+			}
+			batchEnd = batchEndAttached
+			curBatch = batchEnd - batchStart
 
 			for i := batchStart; i < batchEnd; i++ {
 				attachCtx, cancel := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
@@ -308,6 +335,9 @@ var _ = Describe("Stress: maximum independent LVMVolumeGroups per node", Label("
 					GinkgoWriter.Printf("    batch %d OK: cumulative Ready=%d; on-node vgs=%d pvs=%d\n", batchNum, readyTotal, vgN, pvN)
 				}
 			}
+			if virtLimitReached {
+				break
+			}
 		}
 
 		vmSSH := e2eConfigVMSSHUser()
@@ -320,7 +350,7 @@ var _ = Describe("Stress: maximum independent LVMVolumeGroups per node", Label("
 			GinkgoWriter.Printf("    pvs count on node failed: %v (output %q)\n", errPV, pvOut)
 		}
 
-		e2eStressPrintReport(nodeName, target, readyTotal, batchSize, strict, slots, vgCount, pvCount)
+		e2eStressPrintReport(nodeName, target, readyTotal, batchSize, strict, stoppedEarly, virtLimitReached, slots, vgCount, pvCount)
 
 		if strict {
 			Expect(readyTotal).To(Equal(target),

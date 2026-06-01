@@ -65,7 +65,8 @@ test-focus: ## Run by test name (make test-focus FOCUS="TestSdsNodeConfigurator"
 		echo "Error: specify FOCUS=<test name>"; \
 		exit 1; \
 	fi
-	go test -v -count=1 -timeout 60m ./tests/ -run "$(FOCUS)"
+	go test -v -count=1 -timeout 60m ./tests/ -run "$(FOCUS)" \
+		-ginkgo.label-filter="$(GINKGO_LABEL_FILTER)"
 
 .PHONY: install-ginkgo
 install-ginkgo: ## Install Ginkgo CLI

@@ -692,6 +692,16 @@ func e2eAttachVirtualDiskToVM(ctx context.Context, baseKubeconfig *rest.Config, 
 	}, nil
 }
 
+// e2eVirtVMBlockDeviceLimitReached reports Deckhouse virtualization admission denying
+// another VirtualMachineBlockDeviceAttachment because the VM already has the maximum count.
+func e2eVirtVMBlockDeviceLimitReached(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "limit reached") && strings.Contains(msg, "maximum")
+}
+
 func attachVirtualDiskWithRetry(ctx context.Context, baseKubeconfig *rest.Config, config kubernetes.VirtualDiskAttachmentConfig, maxRetries int, retryInterval time.Duration) (*kubernetes.VirtualDiskAttachmentResult, error) {
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
@@ -700,6 +710,9 @@ func attachVirtualDiskWithRetry(ctx context.Context, baseKubeconfig *rest.Config
 			return att, nil
 		}
 		lastErr = err
+		if e2eVirtVMBlockDeviceLimitReached(err) {
+			break
+		}
 		if attempt < maxRetries {
 			time.Sleep(retryInterval)
 		}

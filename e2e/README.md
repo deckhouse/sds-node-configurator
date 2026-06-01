@@ -78,8 +78,8 @@ go test -v -count=1 -timeout 3h ./tests/ -run '^TestSdsNodeConfigurator$' -ginkg
 Альтернатива через [Ginkgo CLI](https://github.com/onsi/ginkgo):
 
 ```bash
-ginkgo -v --progress ./tests/
-ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
+ginkgo -v --progress --label-filter=e2e-tests ./tests/
+ginkgo -v --progress --label-filter=e2e-tests --focus="Should schedule Pod with local PVC" ./tests/
 ```
 
 ## Тестовые сценарии

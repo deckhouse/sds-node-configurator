@@ -253,6 +253,27 @@ func e2eConfigRegistryDockerCfg() string {
 
 func e2eConfigTestClusterCreateMode() string { return os.Getenv("TEST_CLUSTER_CREATE_MODE") }
 
+// Ginkgo label filters (see sds_node_configurator_suite_test.go).
+const (
+	e2eGinkgoLabelE2ETests   = "e2e-tests"
+	e2eGinkgoLabelStressTest = "stress-test"
+	e2eGinkgoLabelFilterEnv  = "E2E_GINKGO_LABEL_FILTER"
+)
+
+// e2eGinkgoLabelFilter is applied when go test is run without -ginkgo.label-filter.
+// Default smoke excludes stress-test; set E2E_GINKGO_LABEL_FILTER=all to run every spec.
+func e2eGinkgoLabelFilter() string {
+	v := strings.TrimSpace(os.Getenv(e2eGinkgoLabelFilterEnv))
+	switch strings.ToLower(v) {
+	case "", "default", "smoke":
+		return e2eGinkgoLabelE2ETests
+	case "all", "*", "!", "none":
+		return ""
+	default:
+		return v
+	}
+}
+
 // e2eTestSuiteTimeout is the Ginkgo suite / go test -timeout budget for TestSdsNodeConfigurator.
 func e2eTestSuiteTimeout() time.Duration {
 	if v := strings.TrimSpace(os.Getenv("E2E_TEST_TIMEOUT")); v != "" {
@@ -272,16 +293,27 @@ const (
 	e2eStressMaxVGDiskSizeEnv     = "E2E_STRESS_MAX_VG_DISK_SIZE"
 	e2eStressMaxVGBatchSizeEnv    = "E2E_STRESS_MAX_VG_BATCH_SIZE"
 	e2eStressMaxVGStrictEnv       = "E2E_STRESS_MAX_VG_STRICT"
-	e2eStressMaxVGMinReadyEnv     = "E2E_STRESS_MAX_VG_MIN_READY"
-	e2eStressMaxVGDefaultTarget   = 30
+	e2eStressMaxVGMinReadyEnv          = "E2E_STRESS_MAX_VG_MIN_READY"
+	e2eStressMaxVMBlockDevicesEnv      = "E2E_STRESS_MAX_VM_BLOCK_DEVICES"
+	e2eStressMaxVGDefaultTarget        = 15
+	e2eStressMaxVMBlockDevicesDefault  = 15 // Deckhouse virt: max 16 VMBDAs per VM; reserve one for boot/system disks
 	e2eStressMaxVGDefaultBatch    = 5
 	e2eStressMaxVGDefaultDiskSize = "1Gi"
 	e2eStressMaxVGNamePrefix      = "e2e-stress-vg-"
 	e2eStressMaxLVGNamePrefix     = "e2e-lvg-stress-"
 )
 
+func e2eStressMaxVMBlockDevices() int {
+	return e2eEnvIntPositive(e2eStressMaxVMBlockDevicesEnv, e2eStressMaxVMBlockDevicesDefault)
+}
+
 func e2eStressMaxVGTarget() int {
-	return e2eEnvIntPositive(e2eStressMaxVGTargetEnv, e2eStressMaxVGDefaultTarget)
+	target := e2eEnvIntPositive(e2eStressMaxVGTargetEnv, e2eStressMaxVGDefaultTarget)
+	maxVM := e2eStressMaxVMBlockDevices()
+	if target > maxVM {
+		return maxVM
+	}
+	return target
 }
 
 func e2eStressMaxVGBatchSize() int {
