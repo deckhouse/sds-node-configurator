@@ -157,7 +157,8 @@ const (
 	// Full smoke suite (BeforeSuite cluster + scheduler + module e2e) exceeds 60m on CI.
 	e2eTestTimeoutDefaultLocal = 90 * time.Minute
 	e2eTestTimeoutDefaultCI    = 3*time.Hour + 30*time.Minute
-	e2eMinCIGoTestTimeout      = e2eTestTimeoutDefaultCI // go test -timeout must be >= this on CI (see TestSdsNodeConfigurator)
+	e2eMinCIGoTestTimeout       = e2eTestTimeoutDefaultCI // go test -timeout must be ~this on CI (see TestSdsNodeConfigurator)
+	e2eCIGoTestTimeoutDetectMin = 2 * time.Hour           // fail only below this (catches 60m org defaults, not 3h30m−ε)
 
 	// Guest VM name prefix for dhctl/bootstrap (Deckhouse test clusters). Do not attach data disks here — not a worker.
 	e2eBootstrapGuestVMPrefix = "bootstrap-node-"
@@ -290,9 +291,10 @@ func e2eAssertCIGoTestTimeout(t *testing.T) {
 		return
 	}
 	remaining := time.Until(deadline)
-	if remaining < e2eMinCIGoTestTimeout {
+	// go test sets deadline slightly below -timeout (startup); Round for stable log output.
+	if remaining.Round(time.Second) < e2eCIGoTestTimeoutDetectMin {
 		t.Fatalf("go test -timeout too short for CI smoke (%v remaining, need >= %v). "+
-			"Use go test -timeout 3h30m (workflow must not pass a shorter E2E_TEST_TIMEOUT to the -timeout flag).",
+			"Use go test -timeout 3h30m (workflow must not pass a shorter value to the -timeout flag).",
 			remaining.Round(time.Second), e2eMinCIGoTestTimeout)
 	}
 }
