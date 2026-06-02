@@ -213,6 +213,7 @@ jobs:
   run_e2e_smoke_tests:
     if: ${{ inputs.run_e2e_smoke_tests == true }}
     name: Run E2E Smoke Tests
+    timeout-minutes: 240
     runs-on: [self-hosted, regular]
     needs:
       - dev_setup_build
@@ -329,6 +330,10 @@ jobs:
           E2E_TUNNEL_SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER }}
           # Do not set KUBE_CONFIG_PATH here — it is taken from GITHUB_ENV (Setup writes the path to the file from E2E_CLUSTER_KUBECONFIG). Otherwise an empty vars value overwrites the fallback and storage-e2e cannot find kubeconfig when "sudo cat admin.conf" on the master fails.
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
+          # Smoke: all specs with label e2e-tests (excludes stress-test / max-VG ramp).
+          E2E_GINKGO_LABEL_FILTER: e2e-tests
+          # Ginkgo suite timeout (must be <= go test -timeout below; smoke often exceeds 60m).
+          E2E_TEST_TIMEOUT: 3h30m
         run: |
           mkdir -p "${GOMODCACHE}" "${GOCACHE}"
 
@@ -439,7 +444,13 @@ jobs:
             done
             shopt -u nullglob
           fi
-          go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$' 2>&1 | tee ../e2e-test-output.log
+          echo "Ginkgo label filter: ${E2E_GINKGO_LABEL_FILTER} (stress-test specs are skipped in smoke)"
+          export E2E_TEST_TIMEOUT="${E2E_TEST_TIMEOUT:-3h30m}"
+          # Hardcode go test -timeout: repo/org E2E_TEST_TIMEOUT=60m must not shorten the process alarm.
+          E2E_GO_TEST_TIMEOUT="3h30m"
+          echo "go test -timeout: ${E2E_GO_TEST_TIMEOUT} (Ginkgo suite: ${E2E_TEST_TIMEOUT})"
+          go test -v -count=1 -timeout "${E2E_GO_TEST_TIMEOUT}" ./tests/ -run '^TestSdsNodeConfigurator$' \
+            -ginkgo.label-filter="${E2E_GINKGO_LABEL_FILTER}" 2>&1 | tee ../e2e-test-output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           echo "TEST_EXIT_CODE=${TEST_EXIT_CODE}" >> $GITHUB_ENV
           echo "${TEST_EXIT_CODE}" > ../e2e-test-exit-code.txt

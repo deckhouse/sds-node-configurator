@@ -18,7 +18,9 @@ package tests
 
 import (
 	"os"
+	"strconv"
 	"strings"
+	"testing"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -152,6 +154,12 @@ const (
 	e2eSuitePodPVCleanupPodTimeout = 2 * time.Minute
 	e2eSuitePodPVCleanupPVTimeout  = 15 * time.Minute
 
+	// Full smoke suite (BeforeSuite cluster + scheduler + module e2e) exceeds 60m on CI.
+	e2eTestTimeoutDefaultLocal = 90 * time.Minute
+	e2eTestTimeoutDefaultCI    = 3*time.Hour + 30*time.Minute
+	e2eMinCIGoTestTimeout       = e2eTestTimeoutDefaultCI // go test -timeout must be ~this on CI (see TestSdsNodeConfigurator)
+	e2eCIGoTestTimeoutDetectMin = 2 * time.Hour           // fail only below this (catches 60m org defaults, not 3h30m−ε)
+
 	// Guest VM name prefix for dhctl/bootstrap (Deckhouse test clusters). Do not attach data disks here — not a worker.
 	e2eBootstrapGuestVMPrefix = "bootstrap-node-"
 )
@@ -247,6 +255,148 @@ func e2eConfigRegistryDockerCfg() string {
 }
 
 func e2eConfigTestClusterCreateMode() string { return os.Getenv("TEST_CLUSTER_CREATE_MODE") }
+
+// Ginkgo label filters (see sds_node_configurator_suite_test.go).
+const (
+	e2eGinkgoLabelE2ETests   = "e2e-tests"
+	e2eGinkgoLabelStressTest = "stress-test"
+	e2eGinkgoLabelFilterEnv  = "E2E_GINKGO_LABEL_FILTER"
+)
+
+// e2eGinkgoLabelFilter is applied when go test is run without -ginkgo.label-filter.
+// Default smoke excludes stress-test; set E2E_GINKGO_LABEL_FILTER=all to run every spec.
+func e2eGinkgoLabelFilter() string {
+	v := strings.TrimSpace(os.Getenv(e2eGinkgoLabelFilterEnv))
+	switch strings.ToLower(v) {
+	case "", "default", "smoke":
+		return e2eGinkgoLabelE2ETests
+	case "all", "*", "!", "none":
+		return ""
+	default:
+		return v
+	}
+}
+
+// e2eTestSuiteTimeout is the Ginkgo suite / go test -timeout budget for TestSdsNodeConfigurator.
+// e2eAssertCIGoTestTimeout fails fast when CI runs go test with -timeout 60m (default org setting).
+// Ginkgo suite timeout cannot extend the go test process alarm — both must be >= e2eMinCIGoTestTimeout.
+func e2eAssertCIGoTestTimeout(t *testing.T) {
+	t.Helper()
+	if os.Getenv("CI") == "" {
+		return
+	}
+	deadline, ok := t.Deadline()
+	if !ok {
+		t.Logf("CI: go test deadline unknown; invoke with -timeout at least %v", e2eMinCIGoTestTimeout)
+		return
+	}
+	remaining := time.Until(deadline)
+	// go test sets deadline slightly below -timeout (startup); Round for stable log output.
+	if remaining.Round(time.Second) < e2eCIGoTestTimeoutDetectMin {
+		t.Fatalf("go test -timeout too short for CI smoke (%v remaining, need >= %v). "+
+			"Use go test -timeout 3h30m (workflow must not pass a shorter value to the -timeout flag).",
+			remaining.Round(time.Second), e2eMinCIGoTestTimeout)
+	}
+}
+
+func e2eTestSuiteTimeout() time.Duration {
+	var d time.Duration
+	if v := strings.TrimSpace(os.Getenv("E2E_TEST_TIMEOUT")); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
+			d = parsed
+		}
+	}
+	if d == 0 {
+		if os.Getenv("CI") != "" {
+			d = e2eTestTimeoutDefaultCI
+		} else {
+			d = e2eTestTimeoutDefaultLocal
+		}
+	}
+	if os.Getenv("CI") != "" && d < e2eMinCIGoTestTimeout {
+		return e2eMinCIGoTestTimeout
+	}
+	return d
+}
+
+// Stress e2e: many independent LVMVolumeGroups (1 PV = 1 VG) on one node.
+const (
+	e2eStressMaxVGTargetEnv       = "E2E_STRESS_MAX_VG_TARGET"
+	e2eStressMaxVGDiskSizeEnv     = "E2E_STRESS_MAX_VG_DISK_SIZE"
+	e2eStressMaxVGBatchSizeEnv    = "E2E_STRESS_MAX_VG_BATCH_SIZE"
+	e2eStressMaxVGStrictEnv       = "E2E_STRESS_MAX_VG_STRICT"
+	e2eStressMaxVGMinReadyEnv          = "E2E_STRESS_MAX_VG_MIN_READY"
+	e2eStressMaxVMBlockDevicesEnv      = "E2E_STRESS_MAX_VM_BLOCK_DEVICES"
+	e2eStressMaxVGDefaultTarget        = 15
+	e2eStressMaxVMBlockDevicesDefault  = 15 // Deckhouse virt: max 16 VMBDAs per VM; reserve one for boot/system disks
+	e2eStressMaxVGDefaultBatch    = 5
+	e2eStressMaxVGDefaultDiskSize = "1Gi"
+	e2eStressMaxVGNamePrefix      = "e2e-stress-vg-"
+	e2eStressMaxLVGNamePrefix     = "e2e-lvg-stress-"
+)
+
+func e2eStressMaxVMBlockDevices() int {
+	return e2eEnvIntPositive(e2eStressMaxVMBlockDevicesEnv, e2eStressMaxVMBlockDevicesDefault)
+}
+
+func e2eStressMaxVGTarget() int {
+	target := e2eEnvIntPositive(e2eStressMaxVGTargetEnv, e2eStressMaxVGDefaultTarget)
+	maxVM := e2eStressMaxVMBlockDevices()
+	if target > maxVM {
+		return maxVM
+	}
+	return target
+}
+
+func e2eStressMaxVGBatchSize() int {
+	b := e2eEnvIntPositive(e2eStressMaxVGBatchSizeEnv, e2eStressMaxVGDefaultBatch)
+	if t := e2eStressMaxVGTarget(); b > t {
+		return t
+	}
+	return b
+}
+
+func e2eStressMaxVGDiskSize() string {
+	if v := strings.TrimSpace(os.Getenv(e2eStressMaxVGDiskSizeEnv)); v != "" {
+		return v
+	}
+	return e2eStressMaxVGDefaultDiskSize
+}
+
+func e2eStressMaxVGStrict() bool { return e2eEnvBool(e2eStressMaxVGStrictEnv) }
+
+func e2eStressMaxVGMinReady(target int) int {
+	if v := strings.TrimSpace(os.Getenv(e2eStressMaxVGMinReadyEnv)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	if e2eStressMaxVGStrict() {
+		return target
+	}
+	return 1
+}
+
+func e2eEnvBool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func e2eEnvIntPositive(name string, defaultVal int) int {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return defaultVal
+	}
+	return n
+}
 
 // e2eNestedTestCluster is the single nested cluster for a full suite run (both Ordered Describes).
 // Common Scheduler Extender registers it after CreateOrConnect; AfterSuite runs e2eCleanupNestedTestClusterAfterSuite.

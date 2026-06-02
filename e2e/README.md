@@ -29,6 +29,7 @@ e2e/
     ├── sds_node_configurator_suite_test.go  # TestSdsNodeConfigurator, BeforeSuite/AfterSuite (storage-e2e)
     ├── e2e_cluster_lock_test.go  # lock retry / очистка lock для alwaysUseExisting
     ├── sds_node_configurator_test.go  # один корневой Ordered: Common Scheduler Extender, затем Sds Node Configurator; хелперы
+    ├── sds_node_configurator_stress_max_vgs_test.go  # stress: макс. число VG на одной ноде
     └── cluster_config.yml     # вложенный кластер (storage-e2e)
 ```
 
@@ -71,14 +72,14 @@ make test-focus FOCUS="TestSdsNodeConfigurator"
 Один вход, как в CI по label `e2e-smoke-test`: `TestSdsNodeConfigurator` — сначала **Common Scheduler Extender**, затем **Sds Node Configurator** (вложенные `Describe(..., Ordered)` в одном файле `sds_node_configurator_test.go`, внешний `Describe` тоже `Ordered`).
 
 ```bash
-go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$'
+go test -v -count=1 -timeout 3h30m ./tests/ -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter=e2e-tests
 ```
 
 Альтернатива через [Ginkgo CLI](https://github.com/onsi/ginkgo):
 
 ```bash
-ginkgo -v --progress ./tests/
-ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
+ginkgo -v --progress --label-filter=e2e-tests ./tests/
+ginkgo -v --progress --label-filter=e2e-tests --focus="Should schedule Pod with local PVC" ./tests/
 ```
 
 ## Тестовые сценарии
@@ -97,6 +98,10 @@ ginkgo -v --progress --focus="Should schedule Pod with local PVC" ./tests/
 
 - **BlockDevice discovery**: появление диска; корректные `status.nodeName`, `status.path`, `status.size`, `consumable`.
 - **LVMVolumeGroup**: создание на основе BlockDevice, статус и capacity.
+
+### Stress: максимум VG на одной ноде
+
+Spec в `sds_node_configurator_stress_max_vgs_test.go`, Ginkgo-лейбл **`stress-test`** (остальные e2e — **`e2e-tests`**). CI smoke по умолчанию: `-ginkgo.label-filter=e2e-tests`. Подробнее — [E2E_USAGE.md](E2E_USAGE.md).
 
 ### Common Scheduler Extender
 

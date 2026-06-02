@@ -46,7 +46,7 @@ import (
 	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
 )
 
-var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
+var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered, func() {
 
 	Describe("Common Scheduler Extender", Ordered, func() {
 		var (
@@ -155,6 +155,9 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 
 				By("Cleaning up existing e2e LVMVolumeGroups (to release LVM signatures)")
 				cleanupE2ELVMVolumeGroups(e2eCtx, k8sClient)
+
+				By("Ensuring no leftover LocalStorageClass from a previous run")
+				Expect(ensureE2ELocalStorageClassAbsent(e2eCtx, testClusterResources.Kubeconfig, k8sClient, e2eLocalStorageClassName)).To(Succeed())
 
 				if testClusterResources.BaseKubeconfig != nil {
 					By("Cleaning up e2e VirtualDisks and attachments before tests")
@@ -469,8 +472,6 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					lvgNames[i] = lvg.Name
 				}
 
-				By(fmt.Sprintf("Creating LocalStorageClass %s with LVMVolumeGroups: %v", e2eLocalStorageClassName, lvgNames))
-
 				lvmVolumeGroups := make([]interface{}, len(lvgNames))
 				for i, lvgName := range lvgNames {
 					lvmVolumeGroups[i] = map[string]interface{}{
@@ -496,8 +497,12 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					},
 				}
 
-				_, err = dynamicClient.Resource(localStorageClassGVR).Create(e2eCtx, lsc, metav1.CreateOptions{})
-				Expect(err).NotTo(HaveOccurred(), "create LocalStorageClass")
+				By(fmt.Sprintf("Creating LocalStorageClass %s with LVMVolumeGroups: %v", e2eLocalStorageClassName, lvgNames))
+				Eventually(func(g Gomega) {
+					g.Expect(ensureE2ELocalStorageClassAbsent(e2eCtx, testClusterResources.Kubeconfig, k8sClient, e2eLocalStorageClassName)).To(Succeed())
+					_, createErr := dynamicClient.Resource(localStorageClassGVR).Create(e2eCtx, lsc.DeepCopy(), metav1.CreateOptions{})
+					g.Expect(createErr).NotTo(HaveOccurred(), "create LocalStorageClass")
+				}, 5*time.Minute, 10*time.Second).Should(Succeed(), "create LocalStorageClass after prior e2e-local-sc is fully removed")
 
 				By("Waiting for LocalStorageClass to reach Created phase (up to 3 minutes)")
 				Eventually(func(g Gomega) {
@@ -2240,10 +2245,17 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
 				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "requires nested virtualization")
 				thinPoolRestoreRunID := fmt.Sprintf("%d", time.Now().Unix())
+				diskName := fmt.Sprintf("%s-%s", e2eThinPoolRestoreDiskName, thinPoolRestoreRunID)
 
 				ns := e2eConfigNamespace()
 				storageClass := e2eConfigStorageClass()
 				Expect(storageClass).NotTo(BeEmpty())
+				if testClusterResources.BaseKubeconfig != nil {
+					_ = kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns,
+						diskName+"-attachment", diskName)
+					_ = kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns,
+						e2eThinPoolRestoreDiskName+"-attachment", e2eThinPoolRestoreDiskName)
+				}
 				clusterVMs := e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
 				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
 				vmSSH := e2eConfigVMSSHUser()
@@ -2256,7 +2268,7 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 
 				By("Step 1: attach VirtualDisk and create LVMVolumeGroup with thin-pool")
 				att, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
-					VMName: targetVM, Namespace: ns, DiskName: e2eThinPoolRestoreDiskName,
+					VMName: targetVM, Namespace: ns, DiskName: diskName,
 					DiskSize: e2eThinPoolRestoreDiskSize, StorageClassName: storageClass,
 				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
 				Expect(err).NotTo(HaveOccurred())

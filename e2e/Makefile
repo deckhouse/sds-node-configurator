@@ -41,14 +41,24 @@ cleanup: ## Delete Job and RBAC
 	kubectl delete -f manifests/rbac.yaml --ignore-not-found
 
 # === Local run ===
+# CI smoke uses label e2e-tests (everything except max-VG stress). Override: make test-go GINKGO_LABEL_FILTER=stress-test
+GINKGO_LABEL_FILTER ?= e2e-tests
+E2E_TEST_TIMEOUT ?= 90m
+# CI workflow uses go test -timeout 3h30m regardless of this var.
 
 .PHONY: test
-test: ## Run full E2E suite (TestSdsNodeConfigurator — все Ginkgo-спеки в пакете)
-	go test -v -count=1 -timeout 60m ./tests/
+test: ## Run E2E smoke (label e2e-tests, без max-VG stress) — как CI
+	$(MAKE) test-go
 
 .PHONY: test-go
-test-go: ## Как в CI smoke: только TestSdsNodeConfigurator (Common Scheduler, затем Sds Node Configurator)
-	go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$$'
+test-go: ## Как в CI smoke: TestSdsNodeConfigurator + -ginkgo.label-filter=e2e-tests
+	go test -v -count=1 -timeout "$(E2E_TEST_TIMEOUT)" ./tests/ -run '^TestSdsNodeConfigurator$$' \
+		-ginkgo.label-filter="$(GINKGO_LABEL_FILTER)"
+
+.PHONY: test-stress
+test-stress: ## Только max-VG stress (label stress-test)
+	go test -v -count=1 -timeout 240m ./tests/ -run '^TestSdsNodeConfigurator$$' \
+		-ginkgo.label-filter=stress-test
 
 .PHONY: test-focus
 test-focus: ## Run by test name (make test-focus FOCUS="TestSdsNodeConfigurator")
@@ -56,7 +66,8 @@ test-focus: ## Run by test name (make test-focus FOCUS="TestSdsNodeConfigurator"
 		echo "Error: specify FOCUS=<test name>"; \
 		exit 1; \
 	fi
-	go test -v -count=1 -timeout 60m ./tests/ -run "$(FOCUS)"
+	go test -v -count=1 -timeout 60m ./tests/ -run "$(FOCUS)" \
+		-ginkgo.label-filter="$(GINKGO_LABEL_FILTER)"
 
 .PHONY: install-ginkgo
 install-ginkgo: ## Install Ginkgo CLI

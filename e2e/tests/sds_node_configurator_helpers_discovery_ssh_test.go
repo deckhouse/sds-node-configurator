@@ -150,6 +150,34 @@ func e2eExecOnTestClusterNodeSSH(ctx context.Context, testKubeconfig *rest.Confi
 	return out, nil
 }
 
+// e2eCountVGsOnNode returns the number of volume groups visible to vgs on the node (all VGs).
+func e2eCountVGsOnNode(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser string) (int, string, error) {
+	cmd := `vgs -o vg_name --noheadings 2>/dev/null | sed '/^$/d' | wc -l`
+	out, err := e2eExecOnTestClusterNodeSSH(ctx, testKubeconfig, nodeName, sshUser, cmd)
+	if err != nil {
+		return 0, out, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, out, fmt.Errorf("parse vg count %q: %w", strings.TrimSpace(out), err)
+	}
+	return n, out, nil
+}
+
+// e2eCountPVsOnNode returns the number of physical volumes visible to pvs on the node (all PVs).
+func e2eCountPVsOnNode(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser string) (int, string, error) {
+	cmd := `pvs -o pv_name --noheadings 2>/dev/null | sed '/^$/d' | wc -l`
+	out, err := e2eExecOnTestClusterNodeSSH(ctx, testKubeconfig, nodeName, sshUser, cmd)
+	if err != nil {
+		return 0, out, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, out, fmt.Errorf("parse pv count %q: %w", strings.TrimSpace(out), err)
+	}
+	return n, out, nil
+}
+
 // e2eCountPVsInVGOnNode returns how many PVs belong to vgName according to pvs on the node.
 func e2eCountPVsInVGOnNode(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser, vgName string) (int, string, error) {
 	quotedVG := strconv.Quote(vgName)

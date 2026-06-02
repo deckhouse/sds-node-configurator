@@ -816,6 +816,42 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			assert.Equal(t, "none of specified BlockDevices were found", reason)
 		})
 
+		t.Run("validation_passes_with_exists_operator_on_metadata_name", func(t *testing.T) {
+			const (
+				nodeName = "nodeName"
+			)
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					Local: v1alpha1.LVMVolumeGroupLocalSpec{
+						NodeName: nodeName,
+					},
+					BlockDeviceSelector: &v1.LabelSelector{
+						MatchExpressions: []v1.LabelSelectorRequirement{
+							{
+								Key:      internal.MetadataNameLabelKey,
+								Operator: v1.LabelSelectorOpExists,
+							},
+						},
+					},
+				},
+			}
+
+			bds := map[string]v1alpha1.BlockDevice{
+				"first": {
+					ObjectMeta: v1.ObjectMeta{
+						Name: "first",
+					},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName: nodeName,
+					},
+				},
+			}
+
+			valid, reason := validateSpecBlockDevices(lvg, bds)
+			assert.True(t, valid)
+			assert.Empty(t, reason)
+		})
+
 		t.Run("validation_fails_due_to_some_blockdevice_were_not_found", func(t *testing.T) {
 			const (
 				nodeName = "nodeName"

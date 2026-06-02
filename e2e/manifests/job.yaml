@@ -14,6 +14,8 @@ spec:
         - name: e2e-tests
           image: ${E2E_IMAGE}
           env:
+            - name: E2E_GINKGO_LABEL_FILTER
+              value: "e2e-tests"
             - name: TEST_CLUSTER_CREATE_MODE
               value: "alwaysUseExisting"
             - name: TEST_CLUSTER_NAMESPACE
