@@ -674,6 +674,7 @@ func legacyNonConsumableBlockDeviceMatches(
 
 	return candidate.Path != "" &&
 		candidate.Path == blockDevice.Status.Path &&
+		candidate.Type == blockDevice.Status.Type &&
 		candidate.Size.Value() == blockDevice.Status.Size.Value()
 }
 

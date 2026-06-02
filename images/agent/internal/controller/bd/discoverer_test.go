@@ -621,6 +621,31 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			assert.False(t, ok)
 		})
 
+		t.Run("returns_false_for_path_size_match_with_different_type", func(t *testing.T) {
+			candidate := internal.BlockDeviceCandidate{
+				NodeName:   "node-a",
+				Consumable: false,
+				Path:       "/dev/sdz",
+				Type:       "raid1",
+				Size:       resource.MustParse("2G"),
+			}
+			apiBlockDevices := map[string]v1alpha1.BlockDevice{
+				"same-node": {
+					ObjectMeta: metav1.ObjectMeta{Name: "same-node"},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName:   candidate.NodeName,
+						Consumable: false,
+						Path:       candidate.Path,
+						Type:       "disk",
+						Size:       candidate.Size,
+					},
+				},
+			}
+
+			_, ok := findLegacyNonConsumableBlockDevice(candidate, apiBlockDevices)
+			assert.False(t, ok)
+		})
+
 		t.Run("returns_false_for_ambiguous_matches", func(t *testing.T) {
 			candidate := internal.BlockDeviceCandidate{
 				NodeName:   "node-a",
