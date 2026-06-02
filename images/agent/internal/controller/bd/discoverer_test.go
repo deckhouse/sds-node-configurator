@@ -1,17 +1,17 @@
 /*
-Copyright 2025 Flant JSC
+	Copyright 2026 Flant JSC
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+		http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
 */
 
 package bd
@@ -486,6 +486,58 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		}
 	})
 
+	t.Run("BlockDeviceReconcile", func(t *testing.T) {
+		t.Run("updates_existing_non_consumable_block_device_when_new_hash_name_differs", func(t *testing.T) {
+			ctx := context.Background()
+			d := setupDiscoverer()
+
+			oldCandidate := internal.BlockDeviceCandidate{
+				NodeName:   d.cfg.NodeName,
+				MachineID:  d.cfg.MachineID,
+				Consumable: false,
+				Path:       "/dev/sdz",
+				KName:      "/dev/sdz",
+				Type:       "disk",
+				Serial:     "stable-serial",
+				Wwn:        "stable-wwn",
+				Model:      "legacy-model",
+				HotPlug:    true,
+				Size:       resource.MustParse("2G"),
+			}
+			oldCandidate.Name = createUniqDeviceName(oldCandidate)
+			oldBlockDevice := oldCandidate.AsAPIBlockDevice()
+			assert.NoError(t, d.cl.Create(ctx, &oldBlockDevice))
+
+			currentDevice := internal.Device{
+				Name:    oldCandidate.Path,
+				KName:   oldCandidate.KName,
+				Type:    oldCandidate.Type,
+				Serial:  oldCandidate.Serial,
+				Wwn:     oldCandidate.Wwn,
+				Model:   "current-model",
+				HotPlug: true,
+				Size:    oldCandidate.Size,
+			}
+			currentCandidate := internal.NewBlockDeviceCandidateByDevice(&currentDevice, d.cfg.NodeName, d.cfg.MachineID)
+			currentName := createUniqDeviceName(currentCandidate)
+			assert.NotEqual(t, oldCandidate.Name, currentName)
+
+			d.sdsCache.StoreDevices([]internal.Device{currentDevice}, bytes.Buffer{})
+
+			_, err := d.blockDeviceReconcile(ctx)
+			assert.NoError(t, err)
+
+			var list v1alpha1.BlockDeviceList
+			assert.NoError(t, d.cl.List(ctx, &list))
+			if assert.Len(t, list.Items, 1) {
+				assert.Equal(t, oldCandidate.Name, list.Items[0].Name)
+				assert.Equal(t, currentDevice.Model, list.Items[0].Status.Model)
+				assert.Equal(t, currentDevice.Name, list.Items[0].Status.Path)
+				assert.False(t, list.Items[0].Status.Consumable)
+			}
+		})
+	})
+
 	t.Run("CreateUniqDeviceName", func(t *testing.T) {
 		nodeName := "testNode"
 		can := internal.BlockDeviceCandidate{
@@ -499,6 +551,107 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		deviceName := createUniqDeviceName(can)
 		assert.Equal(t, "dev-", deviceName[0:4], "device name does not start with dev-")
 		assert.Equal(t, len(deviceName[4:]), 40, "device name does not contains sha1 sum")
+	})
+
+	t.Run("FindLegacyNonConsumableBlockDevice", func(t *testing.T) {
+		t.Run("matches_only_non_consumable_block_device_on_same_node", func(t *testing.T) {
+			candidate := internal.BlockDeviceCandidate{
+				NodeName:   "node-a",
+				Consumable: false,
+				Path:       "/dev/sdz",
+				Serial:     "serial",
+				Size:       resource.MustParse("2G"),
+			}
+			apiBlockDevices := map[string]v1alpha1.BlockDevice{
+				"same-node": {
+					ObjectMeta: metav1.ObjectMeta{Name: "same-node"},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName:   candidate.NodeName,
+						Consumable: false,
+						Path:       candidate.Path,
+						Size:       candidate.Size,
+					},
+				},
+				"other-node": {
+					ObjectMeta: metav1.ObjectMeta{Name: "other-node"},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName:   "node-b",
+						Consumable: false,
+						Path:       candidate.Path,
+						Size:       candidate.Size,
+					},
+				},
+				"consumable": {
+					ObjectMeta: metav1.ObjectMeta{Name: "consumable"},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName:   candidate.NodeName,
+						Consumable: true,
+						Path:       candidate.Path,
+						Size:       candidate.Size,
+					},
+				},
+			}
+
+			blockDevice, ok := findLegacyNonConsumableBlockDevice(candidate, apiBlockDevices)
+			if assert.True(t, ok) {
+				assert.Equal(t, "same-node", blockDevice.Name)
+			}
+		})
+
+		t.Run("returns_false_for_consumable_candidate", func(t *testing.T) {
+			candidate := internal.BlockDeviceCandidate{
+				NodeName:   "node-a",
+				Consumable: true,
+				Path:       "/dev/sdz",
+				Size:       resource.MustParse("2G"),
+			}
+			apiBlockDevices := map[string]v1alpha1.BlockDevice{
+				"same-node": {
+					ObjectMeta: metav1.ObjectMeta{Name: "same-node"},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName:   candidate.NodeName,
+						Consumable: false,
+						Path:       candidate.Path,
+						Size:       candidate.Size,
+					},
+				},
+			}
+
+			_, ok := findLegacyNonConsumableBlockDevice(candidate, apiBlockDevices)
+			assert.False(t, ok)
+		})
+
+		t.Run("returns_false_for_ambiguous_matches", func(t *testing.T) {
+			candidate := internal.BlockDeviceCandidate{
+				NodeName:   "node-a",
+				Consumable: false,
+				Path:       "/dev/sdz",
+				Size:       resource.MustParse("2G"),
+			}
+			apiBlockDevices := map[string]v1alpha1.BlockDevice{
+				"first": {
+					ObjectMeta: metav1.ObjectMeta{Name: "first"},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName:   candidate.NodeName,
+						Consumable: false,
+						Path:       candidate.Path,
+						Size:       candidate.Size,
+					},
+				},
+				"second": {
+					ObjectMeta: metav1.ObjectMeta{Name: "second"},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName:   candidate.NodeName,
+						Consumable: false,
+						Path:       candidate.Path,
+						Size:       candidate.Size,
+					},
+				},
+			}
+
+			_, ok := findLegacyNonConsumableBlockDevice(candidate, apiBlockDevices)
+			assert.False(t, ok)
+		})
 	})
 
 	t.Run("CheckTag", func(t *testing.T) {
