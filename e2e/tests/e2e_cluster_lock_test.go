@@ -24,7 +24,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deckhouse/sds-node-configurator/e2e/cfg"
 	"github.com/deckhouse/storage-e2e/pkg/cluster"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -87,27 +86,15 @@ func e2eTryDeleteClusterLockViaKubeconfig(ctx context.Context) error {
 // e2eForceReleaseClusterLockViaSSH opens the same SSH + API tunnel as UseExistingCluster (step 1) and deletes the lock ConfigMap.
 // Use when KUBE_CONFIG_PATH uses 127.0.0.1 and nothing is listening until storage-e2e establishes the tunnel.
 func e2eForceReleaseClusterLockViaSSH(ctx context.Context) error {
-	e2eCfg := cfg.Load()
-
 	tmpDir, err := os.MkdirTemp("", "e2e-lock-release-kube-*")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	var opts cluster.ConnectClusterOptions
-
-	if e2eCfg.SSH.Jump.Host != "" {
-		opts = cluster.ConnectClusterOptions{
-			SSHUser: e2eCfg.SSH.Jump.User, SSHHost: e2eCfg.SSH.Jump.Host, SSHKeyPath: e2eCfg.SSH.Jump.PrivateKeyPath,
-			UseJumpHost: true, TargetUser: e2eCfg.SSH.User, TargetHost: e2eCfg.SSH.Host, TargetKeyPath: e2eCfg.SSH.PrivateKey,
-			KubeconfigOutputDir: tmpDir,
-		}
-	} else {
-		opts = cluster.ConnectClusterOptions{
-			SSHUser: e2eCfg.SSH.User, SSHHost: e2eCfg.SSH.Host, SSHKeyPath: e2eCfg.SSH.PrivateKey,
-			UseJumpHost: false, KubeconfigOutputDir: tmpDir,
-		}
+	opts, err := e2eBaseClusterConnectOptions(tmpDir)
+	if err != nil {
+		return fmt.Errorf("base cluster SSH options: %w", err)
 	}
 
 	res, err := cluster.ConnectToCluster(ctx, opts)

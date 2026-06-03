@@ -28,6 +28,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -142,6 +143,144 @@ func isPodReady(pod *corev1.Pod) bool {
 		}
 	}
 	return false
+}
+
+// e2eManagedStorageSnapshot captures BlockDevice/LVMVolumeGroup identity and status on a node
+// before controller restart; used to assert no recreate/delete churn after the pod comes back.
+type e2eManagedStorageSnapshot struct {
+	NodeName               string
+	BlockDeviceNamesOnNode map[string]types.UID
+	BlockDeviceName        string
+	BlockDeviceUID         types.UID
+	BlockDeviceStatus      e2eBlockDeviceStatusSnapshot
+	LVMVolumeGroupName     string
+	LVMVolumeGroupUID      types.UID
+	LVMVolumeGroupStatus   e2eLVMVolumeGroupStatusSnapshot
+}
+
+type e2eBlockDeviceStatusSnapshot struct {
+	Path                  string
+	Size                  string
+	Consumable            bool
+	PVUuid                string
+	LVMVolumeGroupName    string
+	ActualVGNameOnTheNode string
+}
+
+type e2eLVMVolumeGroupStatusSnapshot struct {
+	Phase              string
+	VGSize             string
+	VGFree             string
+	ThinPoolNamesReady map[string]bool
+}
+
+func e2eBlockDevicesOnNode(ctx context.Context, cl client.Client, nodeName string) (map[string]types.UID, error) {
+	var list v1alpha1.BlockDeviceList
+	if err := cl.List(ctx, &list, &client.ListOptions{}); err != nil {
+		return nil, err
+	}
+	out := make(map[string]types.UID)
+	for i := range list.Items {
+		bd := &list.Items[i]
+		if bd.Status.NodeName != nodeName || bd.DeletionTimestamp != nil {
+			continue
+		}
+		out[bd.Name] = bd.UID
+	}
+	return out, nil
+}
+
+func e2eTakeManagedStorageSnapshot(ctx context.Context, cl client.Client, nodeName, blockDeviceName, lvgName string) (e2eManagedStorageSnapshot, error) {
+	bdsOnNode, err := e2eBlockDevicesOnNode(ctx, cl, nodeName)
+	if err != nil {
+		return e2eManagedStorageSnapshot{}, err
+	}
+
+	var bd v1alpha1.BlockDevice
+	if err := cl.Get(ctx, client.ObjectKey{Name: blockDeviceName}, &bd); err != nil {
+		return e2eManagedStorageSnapshot{}, err
+	}
+
+	var lvg v1alpha1.LVMVolumeGroup
+	if err := cl.Get(ctx, client.ObjectKey{Name: lvgName}, &lvg); err != nil {
+		return e2eManagedStorageSnapshot{}, err
+	}
+
+	thinReady := make(map[string]bool, len(lvg.Status.ThinPools))
+	for i := range lvg.Status.ThinPools {
+		tp := lvg.Status.ThinPools[i]
+		thinReady[tp.Name] = tp.Ready
+	}
+
+	return e2eManagedStorageSnapshot{
+		NodeName:               nodeName,
+		BlockDeviceNamesOnNode: bdsOnNode,
+		BlockDeviceName:        bd.Name,
+		BlockDeviceUID:         bd.UID,
+		BlockDeviceStatus: e2eBlockDeviceStatusSnapshot{
+			Path:                  bd.Status.Path,
+			Size:                  bd.Status.Size.String(),
+			Consumable:            bd.Status.Consumable,
+			PVUuid:                bd.Status.PVUuid,
+			LVMVolumeGroupName:    bd.Status.LVMVolumeGroupName,
+			ActualVGNameOnTheNode: bd.Status.ActualVGNameOnTheNode,
+		},
+		LVMVolumeGroupName:   lvg.Name,
+		LVMVolumeGroupUID:    lvg.UID,
+		LVMVolumeGroupStatus: e2eLVMVolumeGroupStatusSnapshot{
+			Phase:              lvg.Status.Phase,
+			VGSize:             lvg.Status.VGSize.String(),
+			VGFree:             lvg.Status.VGFree.String(),
+			ThinPoolNamesReady: thinReady,
+		},
+	}, nil
+}
+
+func e2eExpectManagedStorageStableAfterRestart(ctx context.Context, cl client.Client, before e2eManagedStorageSnapshot) {
+	Eventually(func(g Gomega) {
+		afterBDs, err := e2eBlockDevicesOnNode(ctx, cl, before.NodeName)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(afterBDs).To(Equal(before.BlockDeviceNamesOnNode),
+			"BlockDevice set on node %s must not change (no unexpected create/delete)", before.NodeName)
+
+		var bd v1alpha1.BlockDevice
+		g.Expect(cl.Get(ctx, client.ObjectKey{Name: before.BlockDeviceName}, &bd)).To(Succeed())
+		g.Expect(bd.UID).To(Equal(before.BlockDeviceUID), "BlockDevice %s must not be recreated", before.BlockDeviceName)
+		g.Expect(bd.DeletionTimestamp).To(BeNil())
+		g.Expect(bd.Status.Path).To(Equal(before.BlockDeviceStatus.Path))
+		g.Expect(bd.Status.Size.String()).To(Equal(before.BlockDeviceStatus.Size))
+		g.Expect(bd.Status.Consumable).To(Equal(before.BlockDeviceStatus.Consumable))
+		g.Expect(bd.Status.PVUuid).To(Equal(before.BlockDeviceStatus.PVUuid))
+		g.Expect(bd.Status.LVMVolumeGroupName).To(Equal(before.BlockDeviceStatus.LVMVolumeGroupName))
+		g.Expect(bd.Status.ActualVGNameOnTheNode).To(Equal(before.BlockDeviceStatus.ActualVGNameOnTheNode))
+
+		var lvg v1alpha1.LVMVolumeGroup
+		g.Expect(cl.Get(ctx, client.ObjectKey{Name: before.LVMVolumeGroupName}, &lvg)).To(Succeed())
+		g.Expect(lvg.UID).To(Equal(before.LVMVolumeGroupUID), "LVMVolumeGroup %s must not be recreated", before.LVMVolumeGroupName)
+		g.Expect(lvg.DeletionTimestamp).To(BeNil())
+		g.Expect(lvg.Status.Phase).To(Equal(v1alpha1.PhaseReady), "LVMVolumeGroup phase should converge to Ready")
+		g.Expect(lvg.Status.VGSize.String()).To(Equal(before.LVMVolumeGroupStatus.VGSize))
+		g.Expect(lvg.Status.VGFree.String()).To(Equal(before.LVMVolumeGroupStatus.VGFree))
+
+		g.Expect(len(lvg.Status.ThinPools)).To(Equal(len(before.LVMVolumeGroupStatus.ThinPoolNamesReady)),
+			"thin-pool count must stay the same")
+		for name, wasReady := range before.LVMVolumeGroupStatus.ThinPoolNamesReady {
+			var found *v1alpha1.LVMVolumeGroupThinPoolStatus
+			for i := range lvg.Status.ThinPools {
+				if lvg.Status.ThinPools[i].Name == name {
+					found = &lvg.Status.ThinPools[i]
+					break
+				}
+			}
+			g.Expect(found).NotTo(BeNil(), "thin-pool %q missing from status after restart", name)
+			g.Expect(found.Ready).To(Equal(wasReady), "thin-pool %q Ready flag changed unexpectedly", name)
+		}
+
+		for _, c := range lvg.Status.Conditions {
+			g.Expect(c.Status).NotTo(Equal(metav1.ConditionFalse),
+				"condition %s has status False after restart: reason=%s message=%s", c.Type, c.Reason, c.Message)
+		}
+	}, e2eLVMVolumeGroupReadyTimeout, 8*time.Second).Should(Succeed())
 }
 
 // e2eClusterStateJSONPath returns the path to storage-e2e cluster-state.json for this test file
