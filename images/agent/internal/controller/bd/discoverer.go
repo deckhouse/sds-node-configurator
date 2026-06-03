@@ -144,6 +144,13 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) (bool, error) {
 		if !exist {
 			legacyBlockDevice, found := findLegacyNonConsumableBlockDevice(candidate, apiBlockDevices)
 			if found {
+				d.log.Info(fmt.Sprintf(
+					`[RunBlockDeviceController] found legacy non-consumable BlockDevice, candidate name: "%s", legacy name: "%s", path: "%s"`,
+					candidate.Name, legacyBlockDevice.Name, candidate.Path,
+				))
+				// Adopt the legacy name only for this update path. The candidate
+				// slice keeps the new name, and old non-consumable devices are not
+				// removed by removeDeprecatedAPIDevices.
 				candidate.Name = legacyBlockDevice.Name
 				blockDevice = legacyBlockDevice
 				exist = true
@@ -665,16 +672,29 @@ func legacyNonConsumableBlockDeviceMatches(
 	if candidate.PVUuid != "" && candidate.PVUuid == blockDevice.Status.PVUuid {
 		return true
 	}
-	if candidate.VGUuid != "" && candidate.VGUuid == blockDevice.Status.VGUuid {
-		return true
-	}
 	if candidate.PartUUID != "" && candidate.PartUUID == blockDevice.Status.PartUUID {
 		return true
 	}
 
+	if sameBlockDeviceTypeAndSize(candidate, blockDevice) {
+		if wwn := candidate.GetWWN(); wwn != "" {
+			return wwn == blockDevice.Status.Wwn
+		}
+		if serial := candidate.GetSerial(); serial != "" {
+			return serial == blockDevice.Status.Serial
+		}
+		if blockDevice.Status.Wwn != "" || blockDevice.Status.Serial != "" {
+			return false
+		}
+	}
+
 	return candidate.Path != "" &&
 		candidate.Path == blockDevice.Status.Path &&
-		candidate.Type == blockDevice.Status.Type &&
+		sameBlockDeviceTypeAndSize(candidate, blockDevice)
+}
+
+func sameBlockDeviceTypeAndSize(candidate internal.BlockDeviceCandidate, blockDevice v1alpha1.BlockDevice) bool {
+	return candidate.Type == blockDevice.Status.Type &&
 		candidate.Size.Value() == blockDevice.Status.Size.Value()
 }
 

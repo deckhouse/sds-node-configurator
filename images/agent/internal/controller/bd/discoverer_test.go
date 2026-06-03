@@ -559,7 +559,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 				NodeName:   "node-a",
 				Consumable: false,
 				Path:       "/dev/sdz",
-				Serial:     "serial",
+				Type:       "disk",
 				Size:       resource.MustParse("2G"),
 			}
 			apiBlockDevices := map[string]v1alpha1.BlockDevice{
@@ -569,6 +569,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 						NodeName:   candidate.NodeName,
 						Consumable: false,
 						Path:       candidate.Path,
+						Type:       candidate.Type,
 						Size:       candidate.Size,
 					},
 				},
@@ -578,6 +579,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 						NodeName:   "node-b",
 						Consumable: false,
 						Path:       candidate.Path,
+						Type:       candidate.Type,
 						Size:       candidate.Size,
 					},
 				},
@@ -587,6 +589,7 @@ func TestBlockDeviceCtrl(t *testing.T) {
 						NodeName:   candidate.NodeName,
 						Consumable: true,
 						Path:       candidate.Path,
+						Type:       candidate.Type,
 						Size:       candidate.Size,
 					},
 				},
@@ -637,6 +640,93 @@ func TestBlockDeviceCtrl(t *testing.T) {
 						Consumable: false,
 						Path:       candidate.Path,
 						Type:       "disk",
+						Size:       candidate.Size,
+					},
+				},
+			}
+
+			_, ok := findLegacyNonConsumableBlockDevice(candidate, apiBlockDevices)
+			assert.False(t, ok)
+		})
+
+		t.Run("matches_by_serial_when_model_change_generates_new_name", func(t *testing.T) {
+			candidate := internal.BlockDeviceCandidate{
+				NodeName:   "node-a",
+				Consumable: false,
+				Path:       "/dev/sdz",
+				Type:       "disk",
+				Serial:     "stable-serial",
+				Model:      "new-model",
+				Size:       resource.MustParse("2G"),
+			}
+			apiBlockDevices := map[string]v1alpha1.BlockDevice{
+				"same-device": {
+					ObjectMeta: metav1.ObjectMeta{Name: "same-device"},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName:   candidate.NodeName,
+						Consumable: false,
+						Path:       "/dev/legacy-path",
+						Type:       candidate.Type,
+						Serial:     candidate.Serial,
+						Model:      "legacy-model",
+						Size:       candidate.Size,
+					},
+				},
+			}
+
+			blockDevice, ok := findLegacyNonConsumableBlockDevice(candidate, apiBlockDevices)
+			if assert.True(t, ok) {
+				assert.Equal(t, "same-device", blockDevice.Name)
+			}
+		})
+
+		t.Run("returns_false_for_same_vg_uuid_with_different_pv_uuid", func(t *testing.T) {
+			candidate := internal.BlockDeviceCandidate{
+				NodeName:   "node-a",
+				Consumable: false,
+				Path:       "/dev/sdz",
+				Type:       "disk",
+				PVUuid:     "pv-a",
+				VGUuid:     "shared-vg",
+				Size:       resource.MustParse("2G"),
+			}
+			apiBlockDevices := map[string]v1alpha1.BlockDevice{
+				"different-pv": {
+					ObjectMeta: metav1.ObjectMeta{Name: "different-pv"},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName:   candidate.NodeName,
+						Consumable: false,
+						Path:       "/dev/sdy",
+						Type:       candidate.Type,
+						PVUuid:     "pv-b",
+						VGUuid:     candidate.VGUuid,
+						Size:       candidate.Size,
+					},
+				},
+			}
+
+			_, ok := findLegacyNonConsumableBlockDevice(candidate, apiBlockDevices)
+			assert.False(t, ok)
+		})
+
+		t.Run("returns_false_for_path_type_size_match_with_different_serial", func(t *testing.T) {
+			candidate := internal.BlockDeviceCandidate{
+				NodeName:   "node-a",
+				Consumable: false,
+				Path:       "/dev/sdz",
+				Type:       "disk",
+				Serial:     "candidate-serial",
+				Size:       resource.MustParse("2G"),
+			}
+			apiBlockDevices := map[string]v1alpha1.BlockDevice{
+				"different-device": {
+					ObjectMeta: metav1.ObjectMeta{Name: "different-device"},
+					Status: v1alpha1.BlockDeviceStatus{
+						NodeName:   candidate.NodeName,
+						Consumable: false,
+						Path:       candidate.Path,
+						Type:       candidate.Type,
+						Serial:     "legacy-serial",
 						Size:       candidate.Size,
 					},
 				},
