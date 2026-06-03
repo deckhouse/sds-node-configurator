@@ -1,17 +1,17 @@
 /*
-Copyright 2025 Flant JSC
+	Copyright 2026 Flant JSC
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+		http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
 */
 
 package bd
@@ -141,6 +141,22 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) (bool, error) {
 	// create new API devices
 	for _, candidate := range candidates {
 		blockDevice, exist := apiBlockDevices[candidate.Name]
+		if !exist {
+			legacyBlockDevice, found := findLegacyNonConsumableBlockDevice(candidate, apiBlockDevices)
+			if found {
+				d.log.Info(fmt.Sprintf(
+					`[RunBlockDeviceController] found legacy non-consumable BlockDevice, candidate name: "%s", legacy name: "%s", path: "%s"`,
+					candidate.Name, legacyBlockDevice.Name, candidate.Path,
+				))
+				// Adopt the legacy name only for this update path. The candidate
+				// slice keeps the new name, and old non-consumable devices are not
+				// removed by removeDeprecatedAPIDevices.
+				candidate.Name = legacyBlockDevice.Name
+				blockDevice = legacyBlockDevice
+				exist = true
+			}
+		}
+
 		if exist {
 			addToDeleteListIfNotMatched := func(blockDevice v1alpha1.BlockDevice) {
 				if !deviceMatchesSelector(&blockDevice) {
@@ -619,6 +635,67 @@ func shouldDeleteBlockDevice(bd v1alpha1.BlockDevice, actualCandidates map[strin
 func isBlockDeviceDeprecated(blockDevice string, actualCandidates map[string]struct{}) bool {
 	_, ok := actualCandidates[blockDevice]
 	return !ok
+}
+
+func findLegacyNonConsumableBlockDevice(
+	candidate internal.BlockDeviceCandidate,
+	apiBlockDevices map[string]v1alpha1.BlockDevice,
+) (v1alpha1.BlockDevice, bool) {
+	if candidate.Consumable {
+		return v1alpha1.BlockDevice{}, false
+	}
+
+	var matched v1alpha1.BlockDevice
+	found := false
+	for _, blockDevice := range apiBlockDevices {
+		if !legacyNonConsumableBlockDeviceMatches(candidate, blockDevice) {
+			continue
+		}
+		if found {
+			return v1alpha1.BlockDevice{}, false
+		}
+		matched = blockDevice
+		found = true
+	}
+
+	return matched, found
+}
+
+func legacyNonConsumableBlockDeviceMatches(
+	candidate internal.BlockDeviceCandidate,
+	blockDevice v1alpha1.BlockDevice,
+) bool {
+	if blockDevice.Status.NodeName != candidate.NodeName || blockDevice.Status.Consumable {
+		return false
+	}
+
+	if candidate.PVUuid != "" && candidate.PVUuid == blockDevice.Status.PVUuid {
+		return true
+	}
+	if candidate.PartUUID != "" && candidate.PartUUID == blockDevice.Status.PartUUID {
+		return true
+	}
+
+	if sameBlockDeviceTypeAndSize(candidate, blockDevice) {
+		if wwn := candidate.GetWWN(); wwn != "" {
+			return wwn == blockDevice.Status.Wwn
+		}
+		if serial := candidate.GetSerial(); serial != "" {
+			return serial == blockDevice.Status.Serial
+		}
+		if blockDevice.Status.Wwn != "" || blockDevice.Status.Serial != "" {
+			return false
+		}
+	}
+
+	return candidate.Path != "" &&
+		candidate.Path == blockDevice.Status.Path &&
+		sameBlockDeviceTypeAndSize(candidate, blockDevice)
+}
+
+func sameBlockDeviceTypeAndSize(candidate internal.BlockDeviceCandidate, blockDevice v1alpha1.BlockDevice) bool {
+	return candidate.Type == blockDevice.Status.Type &&
+		candidate.Size.Value() == blockDevice.Status.Size.Value()
 }
 
 func hasValidSize(size resource.Quantity) (bool, error) {
