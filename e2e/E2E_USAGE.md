@@ -15,15 +15,15 @@ For test scenarios and debugging, see [README.md](README.md).
 
 ## Running in CI (GitHub Actions)
 
-E2E runs as part of **Build and push for dev** when the **Build and checks** workflow is triggered and the PR has the right label.
+E2E runs in a **separate** workflow **[E2E tests](.github/workflows/e2e-test.yml)** (not Build and checks / trivy). It calls the reusable pipeline in [storage-e2e](https://github.com/deckhouse/storage-e2e): `create-cluster` → `run-tests` → `teardown-cluster`.
 
 ### 1. Trigger E2E on a PR
 
 1. Open your pull request.
-2. Add the label **`e2e-smoke-test`** to the PR (this sends a `labeled` event and should start **Build and checks** if Actions are allowed for this PR).
-3. The **Build and checks** workflow calls `build_dev.yml`; the **Run E2E Smoke Tests** job runs only when the PR has the `e2e-smoke-test` label, after the dev image build.
+2. Add the label **`e2e-test`** to the PR.
+3. Workflow **E2E tests** starts; JUnit appears in PR checks from the **run-tests** job.
 
-Removing the label or not adding it means E2E smoke tests will not run.
+Removing the label or not adding it means E2E will not run. The label is removed automatically after the run finishes.
 
 **Draft PRs:** If nothing appears under **Actions** when you add the label, the repository or organization may be configured to **skip workflows for draft pull requests**. In that case either mark the PR as ready for review (a `ready_for_review` run is included) or change the Actions policy for draft PRs in **Settings → Actions** (exact option depends on your GitHub plan).
 
@@ -40,7 +40,7 @@ Configure the following in the repo **Settings → Secrets and variables → Act
 | `E2E_SSH_HOST` | SSH host for the base cluster (e.g. master node). Used for tunnel and as default jump host. |
 | `E2E_SSH_USER` | SSH user for the base cluster. |
 | `E2E_CLUSTER_KUBECONFIG` | Test cluster kubeconfig, **base64-encoded**. Written to a temp file; `KUBE_CONFIG_PATH` is set from it. |
-| `E2E_TEST_CLUSTER_CREATE_MODE` | `alwaysUseExisting` or `alwaysCreateNew` (use existing cluster or create via framework). |
+| `E2E_TEST_CLUSTER_CREATE_MODE` | Optional legacy secret; CI uses `cluster_provider` in `e2e-test.yml` (default `alwaysCreateNew`). |
 | `E2E_TEST_CLUSTER_STORAGE_CLASS` | Storage class name for the test cluster (e.g. `linstor-r1`). |
 | `E2E_TEST_CLUSTER_CLEANUP` | e.g. `true` / `false` — whether to clean up the test cluster after runs. |
 | `E2E_DECKHOUSE_LICENSE` | Deckhouse/DKP license key (if creating clusters). |
@@ -62,9 +62,11 @@ Configure the following in the repo **Settings → Secrets and variables → Act
 
 ### 3. Results
 
-- Workflow run: **Actions** → select the **Build and push for dev** run.
-- PR comment: a bot comment reports **E2E Smoke Tests Results** (passed/failed) with a link to the run and **Exit Code**.
-- Logs: download **e2e-smoke-test-logs-\<MODULE_NAME\>-\<run_id\>** from the workflow artifacts.
+- Workflow run: **Actions** → **E2E tests**.
+- PR comment: **E2E tests** passed/failed with a link to the run.
+- JUnit: **Checks** tab on the PR (job **run-tests**); artifacts **e2e-junit-\<run_id\>**, **e2e-cluster-session-\<run_id\>**.
+
+Manual run: **Actions** → **E2E tests** → **Run workflow** (optional `label_filter`, `cluster_provider`).
 
 ---
 

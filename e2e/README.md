@@ -21,7 +21,7 @@ E2E тесты предназначены для проверки полного
 e2e/
 ├── Makefile                # deps, go test, Job (образ задаётся снаружи)
 ├── README.md
-├── E2E_USAGE.md            # CI, smoke, секреты, label e2e-smoke-test
+├── E2E_USAGE.md            # CI, секреты, label e2e-test
 ├── go.mod / go.sum
 ├── config/                 # локально, в .gitignore
 ├── manifests/              # RBAC и Job
@@ -68,7 +68,7 @@ make test-go                 # как в CI: -run '^TestSdsNodeConfigurator$'
 make test-focus FOCUS="TestSdsNodeConfigurator"
 ```
 
-Один вход, как в CI по label `e2e-smoke-test`: `TestSdsNodeConfigurator` — сначала **Common Scheduler Extender**, затем **Sds Node Configurator** (вложенные `Describe(..., Ordered)` в одном файле `sds_node_configurator_test.go`, внешний `Describe` тоже `Ordered`).
+Один вход, как в CI по label `e2e-test`: `TestSdsNodeConfigurator` — сначала **Common Scheduler Extender**, затем **Sds Node Configurator** (вложенные `Describe(..., Ordered)` в одном файле `sds_node_configurator_test.go`, внешний `Describe` тоже `Ordered`).
 
 ```bash
 go test -v -count=1 -timeout 60m ./tests/ -run '^TestSdsNodeConfigurator$'

@@ -415,6 +415,21 @@ func e2eFindClusterStateJSONPathForCleanup() string {
 }
 
 func e2eCleanupNestedTestClusterAfterSuite() {
+	// CI run-tests job: cluster teardown is handled by storage-e2e teardown-cluster (separate workflow job).
+	if strings.TrimSpace(os.Getenv("E2E_CLUSTER_PHASE")) == "run" {
+		if e2eNestedTestCluster != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
+			defer cancel()
+			if err := cluster.CleanupExistingCluster(ctx, e2eNestedTestCluster); err != nil {
+				GinkgoWriter.Printf("    ⚠️  AfterSuite (run phase): release lock / close connections: %v\n", err)
+			} else {
+				GinkgoWriter.Printf("    ✅ AfterSuite (run phase): cluster lock released (VM teardown deferred to CI job)\n")
+			}
+			e2eNestedTestCluster = nil
+		}
+		return
+	}
+
 	if e2eNestedTestCluster != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), e2eClusterCleanupTimeout)
 		defer cancel()

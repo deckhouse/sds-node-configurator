@@ -1,0 +1,105 @@
+# E2E tests via storage-e2e reusable workflow (separate from Build and checks / trivy).
+# Add label `e2e-test` on a PR to start create-cluster → run-tests → teardown-cluster.
+
+name: E2E tests
+
+on:
+  pull_request:
+    types: [opened, reopened, labeled, synchronize, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      label_filter:
+        description: "Ginkgo label filter (empty = all tests)"
+        type: string
+        required: false
+        default: ""
+      cluster_provider:
+        description: "Cluster provider"
+        type: choice
+        options:
+          - alwaysCreateNew
+          - alwaysUseExisting
+          - commander
+        default: alwaysCreateNew
+      storage_e2e_ref:
+        description: "storage-e2e git ref"
+        type: string
+        default: ndemchuk-reusable-ci
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: e2e-test-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  e2e_tests:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e-test'))
+    name: storage-e2e
+    uses: deckhouse/storage-e2e/.github/workflows/e2e-reusable.yml@ndemchuk-reusable-ci
+    secrets: inherit
+    with:
+      module_path: e2e
+      cluster_provider: ${{ github.event_name == 'workflow_dispatch' && inputs.cluster_provider || 'alwaysCreateNew' }}
+      cluster_config: e2e/tests/cluster_config.yml
+      test_package: ./tests/
+      test_timeout: 60m
+      label_filter: ${{ github.event_name == 'workflow_dispatch' && inputs.label_filter || '' }}
+      storage_e2e_ref: ${{ github.event_name == 'workflow_dispatch' && inputs.storage_e2e_ref || 'ndemchuk-reusable-ci' }}
+      runner_labels: '["self-hosted","regular"]'
+
+  e2e_pr_feedback:
+    if: always() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e-test')
+    name: E2E PR feedback
+    needs: [e2e_tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment PR with E2E result
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const result = '${{ needs.e2e_tests.result }}';
+            const status = result === 'success' ? '✅' : '❌';
+            const statusText = result === 'success' ? 'passed' : 'failed';
+            const comment = `## E2E tests ${status}
+
+            **Module:** ${{ vars.MODULE_NAME }}
+            **Framework:** storage-e2e (create-cluster → run-tests → teardown-cluster)
+            **Status:** ${statusText}
+
+            [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            - **PR:** #${{ context.payload.pull_request.number }}
+            - **Triggered by:** \`e2e-test\` label
+            - **Job result:** ${result}
+
+            JUnit is published in **run-tests** job checks.
+            `;
+            await github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Remove e2e-test label from PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                name: 'e2e-test'
+              });
+            } catch (err) {
+              if (err.status !== 404) throw err;
+            }
