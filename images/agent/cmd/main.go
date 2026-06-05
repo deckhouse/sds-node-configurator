@@ -20,7 +20,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	goruntime "runtime"
+	"syscall"
 
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
@@ -59,7 +61,19 @@ var (
 )
 
 func main() {
-	ctx := context.Background()
+	// Keep main minimal so that `defer cancel()` from signal.NotifyContext
+	// (set up in run) is honored even on startup failures. Doing os.Exit
+	// next to a defer in the same function would skip the deferred cleanup
+	// (gocritic: exitAfterDefer).
+	os.Exit(run())
+}
+
+func run() int {
+	// Cancel ctx on SIGTERM/SIGINT so the controller-runtime manager (and
+	// any nsenter-backed LVM commands launched via exec.CommandContext)
+	// terminate gracefully instead of being killed mid-flight.
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
 
 	cfgParams, err := config.NewConfig()
 	if err != nil {
@@ -69,7 +83,7 @@ func main() {
 	log, err := logger.NewLogger(cfgParams.Loglevel)
 	if err != nil {
 		fmt.Printf("unable to create NewLogger, err: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	log.Info(fmt.Sprintf("[main] Go Version:%s ", goruntime.Version()))
@@ -97,7 +111,7 @@ func main() {
 		err := f(scheme)
 		if err != nil {
 			log.Error(err, "[main] unable to add scheme to func")
-			os.Exit(1)
+			return 1
 		}
 	}
 	log.Info("[main] successfully read scheme CR")
@@ -112,23 +126,36 @@ func main() {
 	mgr, err := manager.New(kConfig, managerOpts)
 	if err != nil {
 		log.Error(err, "[main] unable to manager.New")
-		os.Exit(1)
+		return 1
 	}
 	log.Info("[main] successfully created kubernetes manager")
 
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 	commands := utils.NewCommands()
 
-	log.Info("[main] ReTag starts")
-	if err := commands.ReTag(ctx, log, metrics, bd.DiscovererName); err != nil {
-		log.Error(err, "[main] unable to run ReTag")
-	}
+	// Run ReTag and VG activation only after the manager has started its
+	// HTTP servers (including health probes). These nsenter-backed LVM
+	// operations may take longer than the liveness probe failure window,
+	// so executing them synchronously before mgr.Start() makes kubelet
+	// SIGTERM the container with exit code 143 (no error in logs).
+	// The runnable also receives a cancellable context, so a graceful
+	// shutdown can interrupt long-running LVM commands.
+	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		log.Info("[main] ReTag starts")
+		if err := commands.ReTag(ctx, log, metrics, bd.DiscovererName, cfgParams.CmdDeadlineDuration); err != nil {
+			log.Error(err, "[main] unable to run ReTag")
+		}
 
-	log.Info("[main] ActivateVGs starts")
-	if err := utils.ActivateAllManagedVGs(ctx, log, commands, metrics); err != nil {
-		log.Error(err, "[main] unable to activate managed VGs")
+		log.Info("[main] ActivateVGs starts")
+		if err := utils.ActivateAllManagedVGs(ctx, log, commands, metrics, cfgParams.CmdDeadlineDuration); err != nil {
+			log.Error(err, "[main] unable to activate managed VGs")
+		}
+		log.Info("[main] ActivateVGs completed")
+		return nil
+	})); err != nil {
+		log.Error(err, "[main] unable to add startup tasks runnable")
+		return 1
 	}
-	log.Info("[main] ActivateVGs completed")
 
 	sdsCache := cache.New()
 
@@ -149,7 +176,7 @@ func main() {
 	)
 	if err != nil {
 		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
-		os.Exit(1)
+		return 1
 	}
 
 	rediscoverLVGs, err := controller.AddDiscoverer(
@@ -169,7 +196,7 @@ func main() {
 	)
 	if err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupDiscoverController")
-		os.Exit(1)
+		return 1
 	}
 
 	err = controller.AddReconciler(
@@ -188,7 +215,7 @@ func main() {
 	)
 	if err != nil {
 		log.Error(err, "[main] unable to run BlockDeviceFilter controller")
-		os.Exit(1)
+		return 1
 	}
 
 	err = controller.AddReconciler(
@@ -209,7 +236,7 @@ func main() {
 	)
 	if err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
-		os.Exit(1)
+		return 1
 	}
 
 	go func() {
@@ -246,7 +273,7 @@ func main() {
 	)
 	if err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
-		os.Exit(1)
+		return 1
 	}
 
 	err = controller.AddReconciler(
@@ -266,28 +293,29 @@ func main() {
 	)
 	if err != nil {
 		log.Error(err, "[main] unable to controller.RunLVMLogicalVolumeExtenderWatcherController")
-		os.Exit(1)
+		return 1
 	}
 
 	addLLVSReconciler(mgr, log, metrics, sdsCache, commands, cfgParams)
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
-		os.Exit(1)
+		return 1
 	}
 	log.Info("[main] successfully AddHealthzCheck")
 
 	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		log.Error(err, "[main] unable to mgr.AddReadyzCheck")
-		os.Exit(1)
+		return 1
 	}
 	log.Info("[main] successfully AddReadyzCheck")
 
 	err = mgr.Start(ctx)
 	if err != nil {
 		log.Error(err, "[main] unable to mgr.Start")
-		os.Exit(1)
+		return 1
 	}
 
 	log.Info("[main] successfully starts the manager")
+	return 0
 }

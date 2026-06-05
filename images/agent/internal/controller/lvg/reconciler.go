@@ -1356,7 +1356,7 @@ func (r *Reconciler) updateVGTagIfNeeded(
 		}
 
 		start := time.Now()
-		cmd, err := r.commands.VGChangeDelTag(vg.VGName, fmt.Sprintf("%s=%s", internal.LVMVolumeGroupTag, tagName))
+		cmd, err := r.commands.VGChangeDelTag(ctx, vg.VGName, fmt.Sprintf("%s=%s", internal.LVMVolumeGroupTag, tagName))
 		r.metrics.UtilsCommandsDuration(ReconcilerName, "vgchange").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgchange").Inc()
 		r.log.Debug(fmt.Sprintf("[UpdateVGTagIfNeeded] exec cmd: %s", cmd))
@@ -1367,7 +1367,7 @@ func (r *Reconciler) updateVGTagIfNeeded(
 		}
 
 		start = time.Now()
-		cmd, err = r.commands.VGChangeAddTag(vg.VGName, fmt.Sprintf("%s=%s", internal.LVMVolumeGroupTag, lvg.Name))
+		cmd, err = r.commands.VGChangeAddTag(ctx, vg.VGName, fmt.Sprintf("%s=%s", internal.LVMVolumeGroupTag, lvg.Name))
 		r.metrics.UtilsCommandsDuration(ReconcilerName, "vgchange").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
 		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgchange").Inc()
 		r.log.Debug(fmt.Sprintf("[UpdateVGTagIfNeeded] exec cmd: %s", cmd))

@@ -13,6 +13,7 @@ import (
 	bytes "bytes"
 	context "context"
 	reflect "reflect"
+	time "time"
 
 	internal "github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	logger "github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
@@ -359,18 +360,18 @@ func (mr *MockCommandsMockRecorder) LVActivate(ctx, vgName, lvName any) *gomock.
 }
 
 // LVChangeDelTag mocks base method.
-func (m *MockCommands) LVChangeDelTag(lv internal.LVData, tag string) (string, error) {
+func (m *MockCommands) LVChangeDelTag(ctx context.Context, lv internal.LVData, tag string) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "LVChangeDelTag", lv, tag)
+	ret := m.ctrl.Call(m, "LVChangeDelTag", ctx, lv, tag)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // LVChangeDelTag indicates an expected call of LVChangeDelTag.
-func (mr *MockCommandsMockRecorder) LVChangeDelTag(lv, tag any) *gomock.Call {
+func (mr *MockCommandsMockRecorder) LVChangeDelTag(ctx, lv, tag any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVChangeDelTag", reflect.TypeOf((*MockCommands)(nil).LVChangeDelTag), lv, tag)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVChangeDelTag", reflect.TypeOf((*MockCommands)(nil).LVChangeDelTag), ctx, lv, tag)
 }
 
 // PVScan mocks base method.
@@ -389,17 +390,17 @@ func (mr *MockCommandsMockRecorder) PVScan(ctx any) *gomock.Call {
 }
 
 // ReTag mocks base method.
-func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string) error {
+func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ReTag", ctx, log, metrics, ctrlName)
+	ret := m.ctrl.Call(m, "ReTag", ctx, log, metrics, ctrlName, cmdTimeout)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // ReTag indicates an expected call of ReTag.
-func (mr *MockCommandsMockRecorder) ReTag(ctx, log, metrics, ctrlName any) *gomock.Call {
+func (mr *MockCommandsMockRecorder) ReTag(ctx, log, metrics, ctrlName, cmdTimeout any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReTag", reflect.TypeOf((*MockCommands)(nil).ReTag), ctx, log, metrics, ctrlName)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReTag", reflect.TypeOf((*MockCommands)(nil).ReTag), ctx, log, metrics, ctrlName, cmdTimeout)
 }
 
 // RemoveLV mocks base method.
@@ -493,33 +494,33 @@ func (mr *MockCommandsMockRecorder) VGActivate(ctx, vgName, shared any) *gomock.
 }
 
 // VGChangeAddTag mocks base method.
-func (m *MockCommands) VGChangeAddTag(vGName, tag string) (string, error) {
+func (m *MockCommands) VGChangeAddTag(ctx context.Context, vGName, tag string) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "VGChangeAddTag", vGName, tag)
+	ret := m.ctrl.Call(m, "VGChangeAddTag", ctx, vGName, tag)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // VGChangeAddTag indicates an expected call of VGChangeAddTag.
-func (mr *MockCommandsMockRecorder) VGChangeAddTag(vGName, tag any) *gomock.Call {
+func (mr *MockCommandsMockRecorder) VGChangeAddTag(ctx, vGName, tag any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGChangeAddTag", reflect.TypeOf((*MockCommands)(nil).VGChangeAddTag), vGName, tag)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGChangeAddTag", reflect.TypeOf((*MockCommands)(nil).VGChangeAddTag), ctx, vGName, tag)
 }
 
 // VGChangeDelTag mocks base method.
-func (m *MockCommands) VGChangeDelTag(vGName, tag string) (string, error) {
+func (m *MockCommands) VGChangeDelTag(ctx context.Context, vGName, tag string) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "VGChangeDelTag", vGName, tag)
+	ret := m.ctrl.Call(m, "VGChangeDelTag", ctx, vGName, tag)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // VGChangeDelTag indicates an expected call of VGChangeDelTag.
-func (mr *MockCommandsMockRecorder) VGChangeDelTag(vGName, tag any) *gomock.Call {
+func (mr *MockCommandsMockRecorder) VGChangeDelTag(ctx, vGName, tag any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGChangeDelTag", reflect.TypeOf((*MockCommands)(nil).VGChangeDelTag), vGName, tag)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGChangeDelTag", reflect.TypeOf((*MockCommands)(nil).VGChangeDelTag), ctx, vGName, tag)
 }
 
 // VGScan mocks base method.
