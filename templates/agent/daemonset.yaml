@@ -158,6 +158,18 @@ spec:
       - name: sds-node-configurator-agent
         image: {{ include "helm_lib_module_image" (list . "agent") }}
         imagePullPolicy: IfNotPresent
+        # startupProbe must succeed before liveness/readiness start.
+        # The agent runs LVM operations (pvscan/vgscan/vgchange) via
+        # nsenter on the host and they may take a long time on nodes
+        # with many devices, so we allow up to ~5 minutes here.
+        startupProbe:
+          httpGet:
+            path: /healthz
+            host: 127.0.0.1
+            port: 4228
+            scheme: HTTP
+          periodSeconds: 2
+          failureThreshold: 150
         readinessProbe:
           httpGet:
             path: /readyz

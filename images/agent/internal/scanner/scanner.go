@@ -237,7 +237,7 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 		return err
 	}
 
-	if activated := utils.EnsureVGActivation(ctx, log, s.commands, metrics, vgs, lvs); activated {
+	if activated := utils.EnsureVGActivation(ctx, log, s.commands, metrics, vgs, lvs, cfg.CmdDeadlineDuration); activated {
 		log.Info("[fillTheCache] LVs were activated, re-scanning LVs and VGs")
 		now = time.Now()
 		lvs, lvsErr, err = s.scanLVs(ctx, log, cfg)

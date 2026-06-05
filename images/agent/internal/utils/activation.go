@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
@@ -61,22 +62,45 @@ func FilterVGsByTag(vgs []internal.VGData, tags []string) []internal.VGData {
 	return filtered
 }
 
-func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Commands, metrics *monitoring.Metrics) error {
+// runWithTimeout invokes fn under a child context with the given timeout, so a
+// stuck nsenter-backed LVM command does not block the caller indefinitely.
+// A non-positive timeout disables the deadline and is treated as "no timeout".
+func runWithTimeout[T any](ctx context.Context, timeout time.Duration, fn func(context.Context) (T, error)) (T, error) {
+	if timeout <= 0 {
+		return fn(ctx)
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return fn(ctx)
+}
+
+func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Commands, metrics *monitoring.Metrics, cmdTimeout time.Duration) error {
 	log.Info("[ActivateVGs] refreshing LVM metadata cache")
-	if cmd, err := commands.PVScan(ctx); err != nil {
+	if cmd, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+		return commands.PVScan(ctx)
+	}); err != nil {
 		log.Warning(fmt.Sprintf("[ActivateVGs] pvscan --cache failed (cmd: %s): %v", cmd, err))
 	}
-	if cmd, err := commands.VGScan(ctx); err != nil {
+	if cmd, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+		return commands.VGScan(ctx)
+	}); err != nil {
 		log.Warning(fmt.Sprintf("[ActivateVGs] vgscan --cache failed (cmd: %s): %v", cmd, err))
 	}
 
-	vgs, cmdStr, _, err := commands.GetAllVGs(ctx)
-	log.Debug(fmt.Sprintf("[ActivateVGs] exec cmd: %s", cmdStr))
+	type vgsResult struct {
+		data   []internal.VGData
+		cmdStr string
+	}
+	res, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (vgsResult, error) {
+		data, cmdStr, _, err := commands.GetAllVGs(ctx)
+		return vgsResult{data: data, cmdStr: cmdStr}, err
+	})
+	log.Debug(fmt.Sprintf("[ActivateVGs] exec cmd: %s", res.cmdStr))
 	if err != nil {
 		return fmt.Errorf("unable to get VGs: %w", err)
 	}
 
-	managedVGs := FilterVGsByTag(vgs, internal.LVMTags)
+	managedVGs := FilterVGsByTag(res.data, internal.LVMTags)
 	if len(managedVGs) == 0 {
 		log.Info("[ActivateVGs] no managed VGs found, nothing to activate")
 		return nil
@@ -87,7 +111,9 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 	var activationErrors []error
 	for _, vg := range managedVGs {
 		shared := vg.VGShared != ""
-		cmd, err := commands.VGActivate(ctx, vg.VGName, shared)
+		cmd, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+			return commands.VGActivate(ctx, vg.VGName, shared)
+		})
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ActivateVGs] failed to activate VG %s (shared=%t, cmd: %s)", vg.VGName, shared, cmd))
 			metrics.UtilsCommandsErrorsCount(activationControllerName, "vgchange").Inc()
@@ -113,6 +139,7 @@ func EnsureVGActivation(
 	metrics *monitoring.Metrics,
 	vgs []internal.VGData,
 	lvs []internal.LVData,
+	cmdTimeout time.Duration,
 ) bool {
 	managedVGs := FilterVGsByTag(vgs, internal.LVMTags)
 	if len(managedVGs) == 0 {
@@ -149,7 +176,9 @@ func EnsureVGActivation(
 	activated := false
 	for _, vg := range vgsToActivate {
 		shared := vg.VGShared != ""
-		cmd, err := commands.VGActivate(ctx, vg.VGName, shared)
+		cmd, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+			return commands.VGActivate(ctx, vg.VGName, shared)
+		})
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[EnsureActivation] failed to activate VG %s (cmd: %s)", vg.VGName, cmd))
 			metrics.UtilsCommandsErrorsCount(activationControllerName, "vgchange").Inc()
