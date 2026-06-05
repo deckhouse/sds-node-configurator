@@ -811,6 +811,19 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 	blockDevices map[string]v1alpha1.BlockDevice,
 ) (bool, string) {
 	reason := strings.Builder{}
+
+	// Bail out before any name-keyed cache lookups when the underlying VG name
+	// is ambiguous on the node. Without this, FindVG/FindLV would return data
+	// from an arbitrary VG of the same name and produce misleading reasons
+	// (e.g. "Added thin-pools requested sizes are more than allowed free space
+	// in VG") that hide the real problem.
+	allVGs, _ := r.sdsCache.GetVGs()
+	if duplicateVGs := findDuplicateVGNames(allVGs); len(duplicateVGs) > 0 {
+		if uuids, dup := duplicateVGs[lvg.Spec.ActualVGNameOnTheNode]; dup {
+			return false, duplicateVGMessage(lvg.Spec.ActualVGNameOnTheNode, uuids)
+		}
+	}
+
 	pvs, _ := r.sdsCache.GetPVs()
 	r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] check if every new BlockDevice of the LVMVolumeGroup %s is comsumable", lvg.Name))
 	actualPVPaths := make(map[string]struct{}, len(pvs))

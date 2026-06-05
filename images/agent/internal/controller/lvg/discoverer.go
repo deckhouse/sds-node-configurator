@@ -149,13 +149,46 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 		d.log.Debug("[RunLVMVolumeGroupDiscoverController] no candidates were found on the node")
 	}
 
+	shouldRequeue := false
+
+	// When LVM reports more than one VG with the same name, it stops resolving
+	// such VGs by name (`vgs <name>`/`lvs <name>` fail with
+	// `Multiple VGs found with the same name: skipping`). The agent's name-keyed
+	// caches (`cache.FindVG`/`FindLV`) and the discoverer's `filteredLVGs` map
+	// would silently mix LV data from unrelated VGs in that case, producing
+	// misleading conditions such as `ThinPool ... size X is less than status one Y`.
+	// Refuse to act on those LVGs and surface a single, actionable error message
+	// instead.
+	allVGs, _ := d.sdsCache.GetVGs()
+	duplicateVGs := findDuplicateVGNames(allVGs)
+	if len(duplicateVGs) > 0 {
+		for name, uuids := range duplicateVGs {
+			d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] VG name %q is used by multiple VGs on the node (UUIDs: %s); LVMVolumeGroup resources referencing it will be marked NotReady until the duplicate is resolved", name, strings.Join(uuids, ", ")))
+		}
+
+		for _, lvg := range filteredLVGs {
+			uuids, dup := duplicateVGs[lvg.Spec.ActualVGNameOnTheNode]
+			if !dup {
+				continue
+			}
+			if updErr := d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, metav1.ConditionFalse, internal.TypeVGReady, internal.ReasonScanFailed, duplicateVGMessage(lvg.Spec.ActualVGNameOnTheNode, uuids)); updErr != nil {
+				d.log.Error(updErr, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add VGReady=False condition for duplicate VG name to the LVMVolumeGroup %s", lvg.Name))
+				shouldRequeue = true
+			}
+		}
+
+		for vgName := range duplicateVGs {
+			delete(filteredLVGs, vgName)
+		}
+		candidates = filterCandidatesByDuplicateVGs(candidates, duplicateVGs)
+	}
+
 	candidates, err = d.ReconcileUnhealthyLVMVolumeGroups(ctx, candidates, filteredLVGs)
 	if err != nil {
 		d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error has occurred while clearing the LVMVolumeGroups resources. Requeue the request in %s", d.cfg.VolumeGroupScanInterval.String()))
 		return true
 	}
 
-	shouldRequeue := false
 	for _, candidate := range candidates {
 		if lvg, exist := filteredLVGs[candidate.ActualVGNameOnTheNode]; exist {
 			d.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is already exist. Tries to update it", lvg.Name))
