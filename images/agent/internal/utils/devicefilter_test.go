@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -92,7 +93,7 @@ func TestFilterForeignPVs(t *testing.T) {
 		return "", errors.New("unknown path")
 	}
 
-	got := FilterForeignPVs(context.Background(), log, resolver, pvs)
+	got := FilterForeignPVs(context.Background(), log, resolver, pvs, 0)
 	wantNames := []string{"/dev/nvme4n1p1", "/dev/nvme4n1p2", "/dev/md1"}
 	gotNames := make([]string, 0, len(got))
 	for _, pv := range got {
@@ -118,7 +119,7 @@ func TestFilterForeignPVs_keepsOnResolverError(t *testing.T) {
 		return p, nil
 	}
 
-	got := FilterForeignPVs(context.Background(), log, resolver, pvs)
+	got := FilterForeignPVs(context.Background(), log, resolver, pvs, 0)
 	assert.Len(t, got, 2, "transient resolver failure must not drop a PV")
 }
 
@@ -135,9 +136,58 @@ func TestFilterForeignPVs_emptyPVName(t *testing.T) {
 		return "", nil
 	}
 
-	got := FilterForeignPVs(context.Background(), log, resolver, pvs)
+	got := FilterForeignPVs(context.Background(), log, resolver, pvs, 0)
 	assert.Len(t, got, 1)
 	assert.Equal(t, 0, calls, "empty pv_name must not trigger the resolver")
+}
+
+// TestFilterForeignPVs_perCallTimeout pins the contract introduced for
+// PR #290 / scanner.fillTheCache: a hung resolver call must not block
+// the scan loop. With a tiny per-call deadline a resolver that respects
+// ctx must return a context.DeadlineExceeded-class error, the PV is
+// then conservatively kept in the cache (matching the "keep on resolver
+// error" branch verified above), and the overall call returns within a
+// few timeouts rather than hanging on the first PV.
+func TestFilterForeignPVs_perCallTimeout(t *testing.T) {
+	log, err := logger.NewLogger(logger.ErrorLevel)
+	if err != nil {
+		t.Fatalf("init logger: %v", err)
+	}
+
+	// Three PVs all backed by a "hung" resolver. If the per-call
+	// timeout were not honored, the test would hang here.
+	pvs := []internal.PVData{
+		{PVName: "/dev/hang-a", VGUuid: "a"},
+		{PVName: "/dev/hang-b", VGUuid: "b"},
+		{PVName: "/dev/hang-c", VGUuid: "c"},
+	}
+
+	calls := 0
+	resolver := func(ctx context.Context, _ string) (string, error) {
+		calls++
+		// Block until the per-call deadline fires.
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+
+	const perCallTimeout = 20 * time.Millisecond
+	// Allow generous slack vs perCallTimeout * len(pvs); on a heavily
+	// loaded CI runner go's scheduler can be sluggish, but we still
+	// want this test to fail loudly if the timeout is missing entirely
+	// (in which case it would hang until `go test -timeout`).
+	deadline := time.Now().Add(2 * time.Second)
+
+	start := time.Now()
+	got := FilterForeignPVs(context.Background(), log, resolver, pvs, perCallTimeout)
+	elapsed := time.Since(start)
+
+	if time.Now().After(deadline) {
+		t.Fatalf("FilterForeignPVs took too long (%s) — per-call timeout not honored", elapsed)
+	}
+	assert.Equal(t, len(pvs), calls, "resolver must be invoked once per non-empty PV")
+	assert.Len(t, got, len(pvs),
+		"PVs whose resolver hits the per-call timeout must be conservatively kept "+
+			"(same contract as the transient-error branch)")
 }
 
 func TestFilterVGsByPresentPVs(t *testing.T) {

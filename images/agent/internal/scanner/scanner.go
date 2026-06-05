@@ -262,8 +262,13 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	// description). Filter those out before feeding the cache so that the
 	// LVG/BD reconcile logic never sees duplicate VG names produced by
 	// foreign storage layers.
+	//
+	// cfg.CmdDeadlineDuration bounds every per-PV nsenter+readlink call:
+	// a hung resolver on a single foreign device cannot block the entire
+	// scan loop. This is the same per-command timeout contract every
+	// other lvm.static invocation in this function obeys (see PR #290).
 	beforePV := len(pvs)
-	pvs = utils.FilterForeignPVs(ctx, log, nil, pvs)
+	pvs = utils.FilterForeignPVs(ctx, log, nil, pvs, cfg.CmdDeadlineDuration)
 	if dropped := beforePV - len(pvs); dropped > 0 {
 		log.Info(fmt.Sprintf("[fillTheCache] dropped %d foreign PV(s) backed by rbd/drbd/nbd/loop devices", dropped))
 		beforeVG := len(vgs)

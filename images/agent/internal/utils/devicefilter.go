@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
@@ -97,6 +98,13 @@ func IsForeignDeviceBase(base string) bool {
 // assumption that a transient resolver failure must not silently hide
 // a legitimate PV.
 //
+// Each resolver call runs under runWithTimeout(cmdTimeout) so a hung
+// nsenter-backed readlink cannot block the scan loop indefinitely.
+// This mirrors the per-command timeout protection introduced in
+// PR #290 for every other lvm.static / nsenter invocation in
+// scanner.fillTheCache. A non-positive cmdTimeout disables the
+// per-call deadline (useful in unit tests with mock resolvers).
+//
 // resolver may be nil; HostNsenterCanonicalResolver is used in that
 // case.
 func FilterForeignPVs(
@@ -104,6 +112,7 @@ func FilterForeignPVs(
 	log logger.Logger,
 	resolver CanonicalPathResolver,
 	pvs []internal.PVData,
+	cmdTimeout time.Duration,
 ) []internal.PVData {
 	if resolver == nil {
 		resolver = HostNsenterCanonicalResolver
@@ -115,7 +124,9 @@ func FilterForeignPVs(
 			out = append(out, pv)
 			continue
 		}
-		resolved, err := resolver(ctx, pv.PVName)
+		resolved, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+			return resolver(ctx, pv.PVName)
+		})
 		if err != nil {
 			log.Warning(fmt.Sprintf(
 				"[FilterForeignPVs] unable to resolve canonical path for PV %q; keeping it: %v",
