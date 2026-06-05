@@ -41,6 +41,51 @@ import (
 	"github.com/deckhouse/storage-e2e/pkg/cluster"
 )
 
+// e2eBaseClusterConnectOptions builds storage-e2e ConnectClusterOptions for the base (virtualization) cluster.
+// Resolves SSH_PRIVATE_KEY (path or base64 PEM) and mirrors storage-e2e jump-host key fallbacks.
+func e2eBaseClusterConnectOptions(kubeconfigDir string) (cluster.ConnectClusterOptions, error) {
+	c := e2ecfg.Load()
+	sshKeyPath, err := e2eGetSSHPrivateKeyPath()
+	if err != nil {
+		return cluster.ConnectClusterOptions{}, err
+	}
+	sshUser := strings.TrimSpace(c.SSH.User)
+	sshHost := strings.TrimSpace(c.SSH.Host)
+	if sshUser == "" || sshHost == "" {
+		return cluster.ConnectClusterOptions{}, fmt.Errorf("SSH_USER and SSH_HOST must be set for base cluster connect")
+	}
+
+	jumpHost := strings.TrimSpace(c.SSH.Jump.Host)
+	if jumpHost != "" {
+		jumpUser := strings.TrimSpace(c.SSH.Jump.User)
+		if jumpUser == "" {
+			jumpUser = sshUser
+		}
+		jumpKeyPath := strings.TrimSpace(c.SSH.Jump.PrivateKeyPath)
+		if jumpKeyPath == "" {
+			jumpKeyPath = sshKeyPath
+		}
+		return cluster.ConnectClusterOptions{
+			SSHUser:             jumpUser,
+			SSHHost:             jumpHost,
+			SSHKeyPath:          jumpKeyPath,
+			UseJumpHost:         true,
+			TargetUser:          sshUser,
+			TargetHost:          sshHost,
+			TargetKeyPath:       sshKeyPath,
+			KubeconfigOutputDir: kubeconfigDir,
+		}, nil
+	}
+
+	return cluster.ConnectClusterOptions{
+		SSHUser:             sshUser,
+		SSHHost:             sshHost,
+		SSHKeyPath:          sshKeyPath,
+		UseJumpHost:         false,
+		KubeconfigOutputDir: kubeconfigDir,
+	}, nil
+}
+
 // clusterResumeState mirrors storage-e2e cluster-state.json (namespace after VMs are created).
 // e2eSuiteSharedStorageCleanup removes e2e VirtualDisks, PVCs/Pods, LocalStorageClasses, LVMLogicalVolumes, and LVMVolumeGroups
 // after both Common Scheduler and Sds Node Configurator Describes complete.
@@ -220,7 +265,6 @@ func e2eSyncCleanupBaseClusterNamespace(ctx context.Context, clusterStatePath st
 			GinkgoWriter.Printf("    ⚠️  cleanup: read %s: %v\n", clusterStatePath, readErr)
 		}
 	}
-	cfg := e2ecfg.Load()
 	if ns == "" {
 		ns = e2eConfigNamespace()
 		GinkgoWriter.Printf("    ▶️  cleanup: namespace from TEST_CLUSTER_NAMESPACE=%q\n", ns)
@@ -228,19 +272,10 @@ func e2eSyncCleanupBaseClusterNamespace(ctx context.Context, clusterStatePath st
 		GinkgoWriter.Printf("    ▶️  cleanup: namespace from cluster-state.json: %q\n", ns)
 	}
 
-	var opts cluster.ConnectClusterOptions
-	if cfg.SSH.Jump.Host != "" {
-		opts = cluster.ConnectClusterOptions{
-			SSHUser: cfg.SSH.User, SSHHost: cfg.SSH.Jump.Host, SSHKeyPath: cfg.SSH.Jump.PrivateKeyPath,
-			UseJumpHost: true, TargetUser: cfg.SSH.User, TargetHost: cfg.SSH.Host, TargetKeyPath: cfg.SSH.PrivateKey,
-			KubeconfigOutputDir: kubeconfigDir,
-		}
-	} else {
-		opts = cluster.ConnectClusterOptions{
-			SSHUser: cfg.SSH.User, SSHHost: cfg.SSH.Host, SSHKeyPath: cfg.SSH.PrivateKey,
-			UseJumpHost:         false,
-			KubeconfigOutputDir: kubeconfigDir,
-		}
+	opts, optsErr := e2eBaseClusterConnectOptions(kubeconfigDir)
+	if optsErr != nil {
+		GinkgoWriter.Printf("    ⚠️  cleanup: base cluster SSH options: %v\n", optsErr)
+		return
 	}
 
 	baseRes, err := cluster.ConnectToCluster(ctx, opts)

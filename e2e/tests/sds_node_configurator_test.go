@@ -2771,6 +2771,109 @@ sudo -n vgchange "$VG" --addtag storage.deckhouse.io/enabled=true 2>&1
 			})
 		})
 
+		Context("Controller pod restart preserves managed VG and BlockDevice state", func() {
+			const (
+				e2eRestartStateDiskName = "e2e-restart-state-disk"
+				e2eRestartStateDiskSize = "2Gi"
+			)
+
+			var (
+				restartStateAttachment *kubernetes.VirtualDiskAttachmentResult
+				restartStateRunID      string
+			)
+
+			AfterEach(func() {
+				if restartStateAttachment == nil || testClusterResources == nil || testClusterResources.BaseKubeconfig == nil {
+					return
+				}
+				ns := e2eConfigNamespace()
+				By("Cleaning up restart-state test VirtualDisk and attachment")
+				_ = kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns,
+					restartStateAttachment.AttachmentName, restartStateAttachment.DiskName)
+				restartStateAttachment = nil
+			})
+
+			It("Should preserve managed VG and BlockDevice state after controller pod restart", func() {
+				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+				By("Сценарий: управляемые VG и BlockDevice → перезапуск pod контроллера → без лишних create/delete, статусы сходятся")
+
+				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "restart-state test requires nested virtualization (base cluster)")
+				ns := e2eConfigNamespace()
+				storageClass := e2eConfigStorageClass()
+				Expect(storageClass).NotTo(BeEmpty(), "TEST_CLUSTER_STORAGE_CLASS is required for VirtualDisk")
+
+				restartStateRunID = fmt.Sprintf("%d", time.Now().Unix())
+				clusterVMs := e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
+				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
+
+				By("Step 1: attach disk and wait for consumable BlockDevice")
+				var attachErr error
+				restartStateAttachment, attachErr = attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+					VMName:           targetVM,
+					Namespace:        ns,
+					DiskName:         e2eRestartStateDiskName,
+					DiskSize:         e2eRestartStateDiskSize,
+					StorageClassName: storageClass,
+				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+				Expect(attachErr).NotTo(HaveOccurred())
+
+				attachCtx, cancel := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
+				defer cancel()
+				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx, testClusterResources.BaseKubeconfig, ns,
+					restartStateAttachment.AttachmentName, 10*time.Second)).To(Succeed())
+
+				targetBD := e2eWaitConsumableBlockDeviceForVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, k8sClient, ns,
+					restartStateAttachment.DiskName, restartStateAttachment.AttachmentName, targetVM)
+				nodeName := targetBD.Status.NodeName
+				bdMetaName := targetBD.Labels["kubernetes.io/metadata.name"]
+				if bdMetaName == "" {
+					bdMetaName = targetBD.Name
+				}
+
+				By("Step 1 (continued): create managed LVMVolumeGroup and wait for Ready")
+				vgName := "e2e-vg-restart-" + restartStateRunID
+				thinPoolName := "e2e-thin-pool-restart"
+				lvgName := "e2e-lvg-restart-" + restartStateRunID + "-" + strings.ReplaceAll(strings.ReplaceAll(nodeName, ".", "-"), "_", "-")
+				lvg := &v1alpha1.LVMVolumeGroup{
+					ObjectMeta: metav1.ObjectMeta{Name: lvgName},
+					Spec: v1alpha1.LVMVolumeGroupSpec{
+						ActualVGNameOnTheNode: vgName,
+						BlockDeviceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"kubernetes.io/hostname":      nodeName,
+								"kubernetes.io/metadata.name": bdMetaName,
+							},
+						},
+						ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+							{Name: thinPoolName, Size: "60%", AllocationLimit: "100%"},
+						},
+						Type:  "Local",
+						Local: v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
+					},
+				}
+				Expect(k8sClient.Create(e2eCtx, lvg)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(e2eCtx, lvg) }()
+
+				Eventually(func(g Gomega) {
+					var cur v1alpha1.LVMVolumeGroup
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: lvgName}, &cur)).To(Succeed())
+					g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady), "managed LVMVolumeGroup must be Ready before restart; phase=%s", cur.Status.Phase)
+				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
+
+				By("Step 2: snapshot BlockDevice/LVMVolumeGroup identity and status on the node")
+				snapshot, snapErr := e2eTakeManagedStorageSnapshot(e2eCtx, k8sClient, nodeName, targetBD.Name, lvgName)
+				Expect(snapErr).NotTo(HaveOccurred())
+				GinkgoWriter.Printf("    snapshot: %d BlockDevice(s) on node %s; BD=%s LVG=%s phase=%s\n",
+					len(snapshot.BlockDeviceNamesOnNode), nodeName, snapshot.BlockDeviceName, snapshot.LVMVolumeGroupName, snapshot.LVMVolumeGroupStatus.Phase)
+
+				By("Step 3: restart sds-node-configurator controller pod on the node")
+				restartSDSNodeConfiguratorAgentOnNode(e2eCtx, k8sClient, nodeName)
+
+				By("Step 4: verify no recreate/delete churn and statuses converge after controller is back")
+				e2eExpectManagedStorageStableAfterRestart(e2eCtx, k8sClient, snapshot)
+				By("✓ Managed VG and BlockDevice unchanged after controller pod restart")
+			})
+		})
 
 		Context("LVMVolumeGroup validation (disk not usable)", func() {
 			const (

@@ -26,7 +26,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deckhouse/sds-node-configurator/e2e/cfg"
 	virtv1alpha2 "github.com/deckhouse/virtualization/api/core/v1alpha2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -472,8 +471,6 @@ func waitForVirtualizationModuleReadyIfNeeded(ctx context.Context) error {
 		return nil
 	}
 
-	e2eCfg := cfg.Load()
-
 	kubeconfigDir, err := e2eTestTempDirFromStack()
 	if err != nil {
 		return err
@@ -482,19 +479,9 @@ func waitForVirtualizationModuleReadyIfNeeded(ctx context.Context) error {
 		return fmt.Errorf("mkdir kubeconfig dir for virtualization pre-wait: %w", err)
 	}
 
-	var opts cluster.ConnectClusterOptions
-
-	if e2eCfg.SSH.Jump.Host != "" {
-		opts = cluster.ConnectClusterOptions{
-			SSHUser: e2eCfg.SSH.Jump.User, SSHHost: e2eCfg.SSH.Jump.Host, SSHKeyPath: e2eCfg.SSH.Jump.PrivateKeyPath,
-			UseJumpHost: true, TargetUser: e2eCfg.SSH.User, TargetHost: e2eCfg.SSH.Host, TargetKeyPath: e2eCfg.SSH.PrivateKey,
-			KubeconfigOutputDir: kubeconfigDir,
-		}
-	} else {
-		opts = cluster.ConnectClusterOptions{
-			SSHUser: e2eCfg.SSH.User, SSHHost: e2eCfg.SSH.Host, SSHKeyPath: e2eCfg.SSH.PrivateKey,
-			UseJumpHost: false, KubeconfigOutputDir: kubeconfigDir,
-		}
+	opts, err := e2eBaseClusterConnectOptions(kubeconfigDir)
+	if err != nil {
+		return fmt.Errorf("base cluster SSH options: %w", err)
 	}
 
 	GinkgoWriter.Printf("    🔌 Connecting to base cluster (SSH) for virtualization Module pre-wait...\n")
