@@ -443,9 +443,15 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 				return true
 			}
 
-			if strings.HasPrefix(device.Name, internal.DRBDName) {
-				d.log.Trace("[filterDevices] filtered out", "name", device.Name, "kname", device.KName, "reason", "drbd")
-				return true
+			for _, foreign := range []struct{ prefix, reason string }{
+				{internal.DRBDName, "drbd"},
+				{internal.RBDName, "rbd"},
+				{internal.NBDName, "nbd"},
+			} {
+				if strings.HasPrefix(device.Name, foreign.prefix) {
+					d.log.Trace("[filterDevices] filtered out", "name", device.Name, "kname", device.KName, "reason", foreign.reason)
+					return true
+				}
 			}
 			if !hasValidType(device.Type) {
 				d.log.Trace(

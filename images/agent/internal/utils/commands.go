@@ -787,8 +787,36 @@ func nsentrerExpendedArgs(cmd string, args ...string) []string {
 	return append(nsenterArgs, args...)
 }
 
+// lvmStaticExtendedArgs builds the argv passed to nsenter+lvm.static for
+// every LVM subcommand the agent runs.
+//
+// In addition to plumbing args through nsentrerExpendedArgs, it injects a
+// --config override immediately after the LVM subcommand name (`vgs`,
+// `pvs`, `lvs`, `vgchange`, ...). The override does two things:
+//
+//   - rejects foreign-storage canonical paths from LVM's device scan
+//     (devices/global_filter, see internal.LVMGlobalFilter);
+//   - caps the size of /etc/lvm/archive on new metadata operations
+//     (backup/retain_min, backup/retain_days; see
+//     internal.LVMArchiveRetention).
+//
+// The --config flag must come AFTER the subcommand in lvm.static >=
+// 2.03.41; placing it before the subcommand makes lvm refuse to parse
+// the command line with "Specify options after a command".
+//
+// If args is empty (e.g. `lvm.static version`) the override is skipped
+// to keep the no-arg form working.
 func lvmStaticExtendedArgs(args []string) []string {
-	return nsentrerExpendedArgs(internal.LVMCmd, args...)
+	if len(args) == 0 {
+		return nsentrerExpendedArgs(internal.LVMCmd, args...)
+	}
+
+	configValue := internal.LVMGlobalFilter + " " + internal.LVMArchiveRetention
+	withConfig := make([]string, 0, len(args)+2)
+	withConfig = append(withConfig, args[0], "--config", configValue)
+	withConfig = append(withConfig, args[1:]...)
+
+	return nsentrerExpendedArgs(internal.LVMCmd, withConfig...)
 }
 
 // filterStdErr processes a bytes.Buffer containing stderr output and filters out specific
