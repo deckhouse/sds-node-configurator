@@ -1,11 +1,15 @@
 # E2E tests via storage-e2e reusable workflow (separate from Build and checks / trivy).
 # Add label `e2e-smoke-test` on a PR to start create-cluster → run-tests → teardown-cluster.
+# Draft PRs: GitHub skips most pull_request events; push to the PR branch with the label also triggers E2E.
 
 name: E2E tests
 
 on:
   pull_request:
     types: [opened, reopened, labeled, synchronize, ready_for_review]
+  push:
+    branches-ignore:
+      - main
   workflow_dispatch:
     inputs:
       label_filter:
@@ -33,14 +37,57 @@ permissions:
   issues: write
 
 concurrency:
-  group: e2e-test-${{ github.event.pull_request.number || github.run_id }}
+  group: e2e-smoke-test-${{ github.event.pull_request.number || github.ref_name || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  e2e_gate:
+    if: github.event_name == 'push'
+    name: Check PR label (draft PR fallback)
+    runs-on: ubuntu-latest
+    outputs:
+      run_e2e: ${{ steps.check.outputs.run_e2e }}
+      pr_number: ${{ steps.check.outputs.pr_number }}
+    steps:
+      - name: Check open PR for e2e-smoke-test label
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = context.ref.replace('refs/heads/', '');
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${branch}`,
+              state: 'open',
+            });
+            const pr = prs[0];
+            if (!pr) {
+              core.setOutput('run_e2e', 'false');
+              core.setOutput('pr_number', '');
+              return;
+            }
+            const hasLabel = pr.labels.some((label) => label.name === 'e2e-smoke-test');
+            core.setOutput('run_e2e', hasLabel ? 'true' : 'false');
+            core.setOutput('pr_number', String(pr.number));
+
   e2e_tests:
+    needs: [e2e_gate]
     if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test'))
+      always() && !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event_name == 'pull_request' && (
+            contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test') ||
+            (github.event.action == 'labeled' && github.event.label.name == 'e2e-smoke-test')
+          )
+        ) ||
+        (
+          github.event_name == 'push' &&
+          needs.e2e_gate.result == 'success' &&
+          needs.e2e_gate.outputs.run_e2e == 'true'
+        )
+      )
     name: storage-e2e
     uses: deckhouse/storage-e2e/.github/workflows/e2e-reusable.yml@ndemchuk-reusable-ci
     secrets: inherit
@@ -55,9 +102,22 @@ jobs:
       runner_labels: '["self-hosted","regular"]'
 
   e2e_pr_feedback:
-    if: always() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test')
+    if: |
+      always() && !cancelled() && (
+        (
+          github.event_name == 'pull_request' && (
+            contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test') ||
+            (github.event.action == 'labeled' && github.event.label.name == 'e2e-smoke-test')
+          )
+        ) ||
+        (
+          github.event_name == 'push' &&
+          needs.e2e_gate.result == 'success' &&
+          needs.e2e_gate.outputs.run_e2e == 'true'
+        )
+      )
     name: E2E PR feedback
-    needs: [e2e_tests]
+    needs: [e2e_tests, e2e_gate]
     runs-on: ubuntu-latest
     steps:
       - name: Comment PR with E2E result
@@ -67,6 +127,7 @@ jobs:
             const result = '${{ needs.e2e_tests.result }}';
             const status = result === 'success' ? '✅' : '❌';
             const statusText = result === 'success' ? 'passed' : 'failed';
+            const prNumber = context.payload.pull_request?.number || '${{ needs.e2e_gate.outputs.pr_number }}';
             const comment = `## E2E tests ${status}
 
             **Module:** ${{ vars.MODULE_NAME }}
@@ -75,14 +136,14 @@ jobs:
 
             [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
-            - **PR:** #${{ context.payload.pull_request.number }}
+            - **PR:** #${prNumber}
             - **Triggered by:** \`e2e-smoke-test\` label
             - **Job result:** ${result}
 
             JUnit is published in **run-tests** job checks.
             `;
             await github.rest.issues.createComment({
-              issue_number: context.payload.pull_request.number,
+              issue_number: Number(prNumber),
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: comment
@@ -93,11 +154,15 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const prNumber = context.payload.pull_request?.number || '${{ needs.e2e_gate.outputs.pr_number }}';
+            if (!prNumber) {
+              return;
+            }
             try {
               await github.rest.issues.removeLabel({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: context.payload.pull_request.number,
+                issue_number: Number(prNumber),
                 name: 'e2e-smoke-test'
               });
             } catch (err) {

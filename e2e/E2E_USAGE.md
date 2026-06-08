@@ -25,7 +25,7 @@ E2E runs in a **separate** workflow **[E2E tests](.github/workflows/e2e-test.yml
 
 Removing the label or not adding it means E2E will not run. The label is removed automatically after the run finishes.
 
-**Draft PRs:** If nothing appears under **Actions** when you add the label, the repository or organization may be configured to **skip workflows for draft pull requests**. In that case either mark the PR as ready for review (a `ready_for_review` run is included) or change the Actions policy for draft PRs in **Settings → Actions** (exact option depends on your GitHub plan).
+**Draft PRs:** GitHub does not run most `pull_request` workflows on draft PRs (only `ready_for_review`). If adding the label does nothing, either mark the PR as **Ready for review**, **push an empty commit** to the PR branch (the workflow also runs on `push` when the open PR has `e2e-smoke-test`), or run **E2E tests** manually via **Actions → Run workflow**.
 
 ### 2. Required repository configuration
 
