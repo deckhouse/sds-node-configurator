@@ -23,7 +23,9 @@ E2E runs in a **separate** workflow **[E2E tests](.github/workflows/e2e-test.yml
 2. Add the label **`e2e-smoke-test`** to the PR.
 3. Workflow **E2E tests** starts; JUnit appears in PR checks from the **run-tests** job.
 
-Removing the label or not adding it means E2E will not run. The label is removed automatically after the run finishes.
+Removing the label or not adding it means E2E will not run. The label is **not** removed automatically — remove it manually when the PR cluster should be destroyed (that triggers **teardown-only**).
+
+**Persistent cluster:** namespace `e2e-<module>-pr<N>` and session are cached per PR. Re-runs resume provisioning after partial failures (`TEST_CLUSTER_RESUME`). Pushes to the branch while the label is set reuse the cluster and run tests only.
 
 **Draft PRs:** GitHub does not run most `pull_request` workflows on draft PRs (only `ready_for_review`). If adding the label does nothing, either mark the PR as **Ready for review**, **push an empty commit** to the PR branch (the workflow also runs on `push` when the open PR has `e2e-smoke-test`), or run **E2E tests** manually via **Actions → Run workflow**.
 
@@ -63,10 +65,9 @@ Configure the following in the repo **Settings → Secrets and variables → Act
 ### 3. Results
 
 - Workflow run: **Actions** → **E2E tests**.
-- PR comment: **E2E tests** passed/failed with a link to the run.
-- JUnit: **Checks** tab on the PR (job **run-tests**); artifacts **e2e-junit-\<run_id\>**, **e2e-cluster-session-\<run_id\>**.
-
-Manual run: **Actions** → **E2E tests** → **Run workflow** (optional `label_filter`, `cluster_provider`).
+- PR comment after test runs (label stays on the PR).
+- Remove **`e2e-smoke-test`** manually → **teardown-cluster** job only.
+- JUnit: **Checks** tab (run-tests); cache/artifacts keyed by PR number.
 
 ---
 
