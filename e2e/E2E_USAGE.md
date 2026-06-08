@@ -20,7 +20,7 @@ E2E runs in a **separate** workflow **[E2E tests](.github/workflows/e2e-test.yml
 ### 1. Trigger E2E on a PR
 
 1. Open your pull request.
-2. Add the label **`e2e-test`** to the PR.
+2. Add the label **`e2e-smoke-test`** to the PR.
 3. Workflow **E2E tests** starts; JUnit appears in PR checks from the **run-tests** job.
 
 Removing the label or not adding it means E2E will not run. The label is removed automatically after the run finishes.

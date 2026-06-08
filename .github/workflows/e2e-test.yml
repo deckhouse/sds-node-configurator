@@ -1,5 +1,5 @@
 # E2E tests via storage-e2e reusable workflow (separate from Build and checks / trivy).
-# Add label `e2e-test` on a PR to start create-cluster → run-tests → teardown-cluster.
+# Add label `e2e-smoke-test` on a PR to start create-cluster → run-tests → teardown-cluster.
 
 name: E2E tests
 
@@ -40,7 +40,7 @@ jobs:
   e2e_tests:
     if: |
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e-test'))
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test'))
     name: storage-e2e
     uses: deckhouse/storage-e2e/.github/workflows/e2e-reusable.yml@ndemchuk-reusable-ci
     secrets: inherit
@@ -55,7 +55,7 @@ jobs:
       runner_labels: '["self-hosted","regular"]'
 
   e2e_pr_feedback:
-    if: always() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e-test')
+    if: always() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e-smoke-test')
     name: E2E PR feedback
     needs: [e2e_tests]
     runs-on: ubuntu-latest
@@ -76,7 +76,7 @@ jobs:
             [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
             - **PR:** #${{ context.payload.pull_request.number }}
-            - **Triggered by:** \`e2e-test\` label
+            - **Triggered by:** \`e2e-smoke-test\` label
             - **Job result:** ${result}
 
             JUnit is published in **run-tests** job checks.
@@ -88,7 +88,7 @@ jobs:
               body: comment
             });
 
-      - name: Remove e2e-test label from PR
+      - name: Remove e2e-smoke-test label from PR
         if: always()
         uses: actions/github-script@v7
         with:
@@ -98,7 +98,7 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.payload.pull_request.number,
-                name: 'e2e-test'
+                name: 'e2e-smoke-test'
               });
             } catch (err) {
               if (err.status !== 404) throw err;
