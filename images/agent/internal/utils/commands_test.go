@@ -318,3 +318,109 @@ func TestCommands(t *testing.T) {
 		})
 	})
 }
+
+// TestLvmStaticExtendedArgs pins three behaviors of the argv builder for
+// every lvm.static invocation that the agent runs through nsenter:
+//
+//  1. for a non-empty argument list the function injects a single
+//     "--config <LVMGlobalFilter + ' ' + LVMArchiveRetention>" pair
+//     IMMEDIATELY after the LVM subcommand (args[0]). Position matters
+//     here: lvm.static >= 2.03.41 rejects the command line as
+//     "Specify options after a command" if --config precedes the
+//     subcommand, see the function comment for the rationale;
+//
+//  2. the empty-args branch is preserved verbatim: no --config is
+//     injected and the resulting argv is identical to the legacy
+//     nsenter+lvm.static prefix. This guards against regressions for
+//     diagnostic invocations like `lvm.static version`;
+//
+//  3. the original args[1:] tail is preserved without reordering.
+//
+// The expected argv always begins with the fixed nsenter prefix
+// nsentrerExpendedArgs emits ("-t 1 -m -u -i -n -p -- /<NSENTERCmd
+// path>/lvm.static"), so the test simply rebuilds the full slice and
+// compares with assert.Equal — any future drift in either the prefix
+// or the --config placement fails loudly with a readable diff.
+func TestLvmStaticExtendedArgs(t *testing.T) {
+	configValue := internal.LVMGlobalFilter + " " + internal.LVMArchiveRetention
+	prefix := []string{"-t", "1", "-m", "-u", "-i", "-n", "-p", "--", internal.LVMCmd}
+
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "vgs_with_options_gets_config_after_subcommand",
+			args: []string{"vgs", "-o", "+uuid,tags,shared,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json"},
+			want: append(append([]string{}, prefix...),
+				"vgs", "--config", configValue,
+				"-o", "+uuid,tags,shared,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json",
+			),
+		},
+		{
+			name: "pvscan_cache_gets_config_after_subcommand",
+			args: []string{"pvscan", "--cache"},
+			want: append(append([]string{}, prefix...),
+				"pvscan", "--config", configValue,
+				"--cache",
+			),
+		},
+		{
+			name: "single_subcommand_still_gets_config",
+			args: []string{"vgscan"},
+			want: append(append([]string{}, prefix...),
+				"vgscan", "--config", configValue,
+			),
+		},
+		{
+			name: "vgcreate_with_pv_list_preserves_tail_order",
+			args: []string{"vgcreate", "vg-data", "/dev/sda", "/dev/sdb", "--addtag", "storage.deckhouse.io/enabled=true"},
+			want: append(append([]string{}, prefix...),
+				"vgcreate", "--config", configValue,
+				"vg-data", "/dev/sda", "/dev/sdb", "--addtag", "storage.deckhouse.io/enabled=true",
+			),
+		},
+		{
+			name: "empty_args_no_config_injected",
+			args: nil,
+			want: append([]string{}, prefix...),
+		},
+		{
+			name: "empty_slice_args_no_config_injected",
+			args: []string{},
+			want: append([]string{}, prefix...),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := lvmStaticExtendedArgs(tt.args)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+
+	t.Run("config_value_contains_all_foreign_prefixes_and_retention", func(t *testing.T) {
+		// Defensive cross-check: --config must reject all four foreign
+		// device prefixes the post-filter knows about (rbd/drbd/nbd/loop)
+		// and must cap /etc/lvm/archive growth. If either drops out due
+		// to a refactor, this assertion catches it before the next scan
+		// loop silently regresses.
+		got := lvmStaticExtendedArgs([]string{"vgs"})
+		// configValue is at index len(prefix)+2 (prefix..., "vgs",
+		// "--config", configValue).
+		require := len(prefix) + 2
+		if !assert.Greater(t, len(got), require, "argv too short — --config not injected?") {
+			return
+		}
+		actualConfig := got[require]
+		for _, p := range internal.ForeignDeviceBasePrefixes {
+			assert.Contains(t, actualConfig, "/dev/"+p,
+				"global_filter must reject /dev/%s* canonical paths", p)
+		}
+		assert.Contains(t, actualConfig, "backup/retain_min=",
+			"--config must cap /etc/lvm/archive growth via backup/retain_min")
+		assert.Contains(t, actualConfig, "backup/retain_days=",
+			"--config must cap /etc/lvm/archive growth via backup/retain_days")
+	})
+}

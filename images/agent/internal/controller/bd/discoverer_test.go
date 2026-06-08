@@ -857,4 +857,31 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			assert.Equal(t, 7, len(filteredDevices))
 		}
 	})
+
+	t.Run("filterDevices_drops_foreign_storage_prefixes", func(t *testing.T) {
+		d := setupDiscoverer()
+
+		// All five inputs have valid type/fstype/size so the only reason
+		// for the three foreign entries to disappear must be the prefix
+		// check we added (drbd/rbd/nbd). nvme4n1p1 and sdb are kept as
+		// the positive control.
+		size := resource.MustParse("10G")
+		devices := []internal.Device{
+			{Name: "/dev/nvme4n1p1", KName: "nvme4n1p1", Type: "part", FSType: internal.LVMFSType, Size: size, Serial: "n1p1", Wwn: "w1"},
+			{Name: "/dev/sdb", KName: "sdb", Type: "disk", FSType: internal.LVMFSType, Size: size, Serial: "sdb", Wwn: "w2"},
+			{Name: "/dev/drbd0", KName: "drbd0", Type: "disk", FSType: internal.LVMFSType, Size: size, Serial: "drbd", Wwn: "w3"},
+			{Name: "/dev/rbd9", KName: "rbd9", Type: "disk", FSType: internal.LVMFSType, Size: size, Serial: "rbd", Wwn: "w4"},
+			{Name: "/dev/nbd5", KName: "nbd5", Type: "disk", FSType: internal.LVMFSType, Size: size, Serial: "nbd", Wwn: "w5"},
+		}
+
+		got, err := d.filterDevices(devices)
+		assert.NoError(t, err)
+
+		names := make([]string, 0, len(got))
+		for _, dev := range got {
+			names = append(names, dev.Name)
+		}
+		assert.ElementsMatch(t, []string{"/dev/nvme4n1p1", "/dev/sdb"}, names,
+			"drbd/rbd/nbd devices must be filtered out at the BD discoverer level")
+	})
 }

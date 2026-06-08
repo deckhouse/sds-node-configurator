@@ -254,6 +254,33 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	}
 
 	log.Debug("[fillTheCache] successfully scanned entities. Starts to fill the cache")
+
+	// lvm.static bundled in /opt/deckhouse/sds/bin is built without udev
+	// integration and so reports PVs found on any block device it sees in
+	// /dev, including Ceph RBD images and loopback-mounted guest VM disks
+	// that happen to carry LVM signatures from nested LVM (see ADR / PR
+	// description). Filter those out before feeding the cache so that the
+	// LVG/BD reconcile logic never sees duplicate VG names produced by
+	// foreign storage layers.
+	//
+	// cfg.CmdDeadlineDuration bounds every per-PV nsenter+readlink call:
+	// a hung resolver on a single foreign device cannot block the entire
+	// scan loop. This is the same per-command timeout contract every
+	// other lvm.static invocation in this function obeys (see PR #290).
+	beforePV := len(pvs)
+	pvs = utils.FilterForeignPVs(ctx, log, nil, pvs, cfg.CmdDeadlineDuration)
+	if dropped := beforePV - len(pvs); dropped > 0 {
+		log.Info(fmt.Sprintf("[fillTheCache] dropped %d foreign PV(s) backed by rbd/drbd/nbd/loop devices", dropped))
+		beforeVG := len(vgs)
+		vgs = utils.FilterVGsByPresentPVs(vgs, pvs)
+		beforeLV := len(lvs)
+		lvs = utils.FilterLVsByPresentVGs(lvs, vgs)
+		log.Info(fmt.Sprintf(
+			"[fillTheCache] cache pruned to local view: VGs %d -> %d, LVs %d -> %d",
+			beforeVG, len(vgs), beforeLV, len(lvs),
+		))
+	}
+
 	cache.StoreDevices(devices, devErr)
 	cache.StorePVs(pvs, pvsErr)
 	cache.StoreVGs(vgs, vgsErr)

@@ -24,6 +24,8 @@ const (
 	MultiPathType                = "mpath"
 	CDROMDeviceType              = "rom"
 	DRBDName                     = "/dev/drbd"
+	RBDName                      = "/dev/rbd"
+	NBDName                      = "/dev/nbd"
 	LoopDeviceType               = "loop"
 	LVMDeviceType                = "lvm"
 	LVMFSType                    = "LVM2_member"
@@ -37,6 +39,25 @@ const (
 	LSBLKCmd                     = "/opt/deckhouse/sds/bin/lsblk.dynamic"
 	LVMCmd                       = "/opt/deckhouse/sds/bin/lvm.static"
 	ThinDumpCmd                  = "thin_dump"
+
+	// LVMGlobalFilter is passed via `lvm.static --config` for every LVM
+	// subcommand the agent runs. It rejects canonical names of block
+	// devices that always belong to a foreign storage layer (Ceph RBD,
+	// DRBD, NBD, loopback) so lvm.static does not even read PV labels
+	// from them when udev integration is unavailable.
+	//
+	// This is a best-effort hint for lvm.static only: due to its
+	// multi-alias rule (a device passes the filter if any of its aliases
+	// is accepted), a PV may still slip through via /dev/block/MAJ:MIN
+	// or /dev/disk/by-id/... aliases. The authoritative filter lives in
+	// pkg utils (FilterForeignPVs) and runs after lvm.static returns.
+	LVMGlobalFilter = `devices/global_filter=["r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|","a|.*|"]`
+
+	// LVMArchiveRetention caps the size of /etc/lvm/archive: keep at
+	// most the last 10 metadata snapshots and at most 7 days of history.
+	// This only affects new metadata-changing operations; existing
+	// archives must be pruned manually on impacted nodes.
+	LVMArchiveRetention = `backup/retain_min=10 backup/retain_days=7`
 
 	TypeVGConfigurationApplied = "VGConfigurationApplied"
 	TypeVGReady                = "VGReady"
@@ -74,6 +95,20 @@ var (
 	InvalidDeviceTypes = [...]string{LoopDeviceType, LVMDeviceType, CDROMDeviceType}
 	Finalizers         = []string{SdsNodeConfiguratorFinalizer}
 	LVMTags            = []string{"storage.deckhouse.io/enabled=true", "linstor-"}
+
+	// ForeignDeviceBasePrefixes lists canonical block-device basenames
+	// that always belong to a foreign storage layer and must never be
+	// considered an LVM PV by the agent regardless of what lvm.static
+	// reported. The list intentionally matches /proc/devices entries:
+	//
+	//   rbd   - Ceph RBD (kernel rbd module, major 251)
+	//   drbd  - DRBD     (sds-replicated-volume, major 147)
+	//   nbd   - network block device (major 43)
+	//   loop  - loopback (major 7) — typically backs QEMU/file-based VM disks
+	//
+	// Used after lvm.static returns the PV list, against the canonical
+	// path resolved via readlink -f in the host mount namespace.
+	ForeignDeviceBasePrefixes = []string{"rbd", "drbd", "nbd", "loop"}
 )
 
 const (
