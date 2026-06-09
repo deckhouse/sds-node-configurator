@@ -1,18 +1,22 @@
 # E2E tests via storage-e2e (separate workflow).
 #
-# Label `e2e-smoke-test` or `e2e-test` on a PR:
-#   - labeled / opened / reopened: create-cluster + run-tests
-#   - synchronize (push to PR branch): skip create-cluster, run-tests only (reuse cache)
+# Triggers:
+#   - pull_request labeled (e2e-smoke-test / e2e-test) — create-cluster + run-tests
+#     Requires this file on the default branch OR push below.
+#   - pull_request synchronize — reuse cluster (skip create-cluster) + run-tests
+#   - push to PR branch — fallback when label is set (works before merge to main)
+#   - pull_request unlabeled — teardown-only
 #
-# Remove label manually: teardown-cluster only.
-#
-# Do NOT use `on: push` — it uses a different concurrency group and breaks labeled/synchronize semantics.
+# Draft PRs: GitHub may skip pull_request; push to the branch with the label still triggers E2E.
 
 name: E2E tests
 
 on:
   pull_request:
     types: [opened, reopened, labeled, unlabeled, synchronize, ready_for_review]
+  push:
+    branches-ignore:
+      - main
   workflow_dispatch:
     inputs:
       pr_number:
@@ -49,7 +53,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: e2e-smoke-test-pr-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  group: e2e-smoke-test-${{ github.event.pull_request.number || github.event.inputs.pr_number || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -100,7 +104,7 @@ jobs:
               const hasLabel = prFull.labels.some((l) => isE2eLabel(l.name));
 
               core.info(
-                `action=${context.payload.action} eventLabel=${eventLabel} hasE2eLabel=${hasLabel} labels=${prFull.labels.map((l) => l.name).join(',')}`
+                `pull_request action=${context.payload.action} eventLabel=${eventLabel} hasE2eLabel=${hasLabel} labels=${prFull.labels.map((l) => l.name).join(',')}`
               );
 
               if (context.payload.action === 'unlabeled' && isE2eLabel(eventLabel)) {
@@ -130,6 +134,36 @@ jobs:
               return;
             }
 
+            if (context.eventName === 'push') {
+              const branch = context.ref.replace('refs/heads/', '');
+              const { data: prs } = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                head: `${context.repo.owner}:${branch}`,
+                state: 'open',
+              });
+              const pr = prs[0];
+              if (!pr) {
+                core.info(`push: no open PR for branch ${branch}`);
+                core.setOutput('run_e2e', 'false');
+                return;
+              }
+              const { data: prFull } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+              });
+              const hasLabel = prFull.labels.some((l) => isE2eLabel(l.name));
+              core.info(`push branch=${branch} pr=${pr.number} hasE2eLabel=${hasLabel}`);
+              if (hasLabel) {
+                core.setOutput('pr_number', String(pr.number));
+                core.setOutput('pipeline_mode', 'create-and-test');
+                core.setOutput('run_e2e', 'true');
+                core.setOutput('skip_create_cluster', 'true');
+                return;
+              }
+            }
+
             core.setOutput('run_e2e', 'false');
 
       - name: Debug gate outputs
@@ -143,14 +177,20 @@ jobs:
           echo "skip_create_cluster=${{ steps.resolve.outputs.skip_create_cluster }}"
 
   e2e:
-    name: e2e (${{ needs.e2e_gate.outputs.pipeline_mode }})
+    name: e2e (${{ needs.e2e_gate.outputs.pipeline_mode || 'create-and-test' }})
     needs: [e2e_gate]
-    if: needs.e2e_gate.outputs.run_e2e == 'true'
+    if: |
+      needs.e2e_gate.outputs.run_e2e == 'true' ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'e2e-smoke-test' || github.event.label.name == 'e2e-test')
+      )
     uses: deckhouse/storage-e2e/.github/workflows/e2e-reusable.yml@ndemchuk-reusable-ci
     secrets: inherit
     with:
-      pipeline_mode: ${{ needs.e2e_gate.outputs.pipeline_mode }}
-      pr_number: ${{ needs.e2e_gate.outputs.pr_number }}
+      pipeline_mode: ${{ needs.e2e_gate.outputs.pipeline_mode || 'create-and-test' }}
+      pr_number: ${{ needs.e2e_gate.outputs.pr_number || github.event.pull_request.number }}
       module_slug: ${{ vars.MODULE_NAME }}
       module_path: e2e
       cluster_provider: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.cluster_provider || 'alwaysCreateNew' }}
@@ -160,25 +200,24 @@ jobs:
       label_filter: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.label_filter || '' }}
       storage_e2e_ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.storage_e2e_ref || 'ndemchuk-reusable-ci' }}
       runner_labels: '["self-hosted","regular"]'
-      skip_create_cluster: ${{ needs.e2e_gate.outputs.skip_create_cluster == 'true' }}
+      skip_create_cluster: ${{ github.event.action != 'labeled' && needs.e2e_gate.outputs.skip_create_cluster == 'true' }}
 
   e2e_verify:
     name: Verify E2E completed
     needs: [e2e_gate, e2e]
-    if: always() && needs.e2e_gate.outputs.run_e2e == 'true' && needs.e2e_gate.outputs.pipeline_mode == 'create-and-test'
+    if: always() && needs.e2e.result != 'skipped' && (needs.e2e_gate.outputs.run_e2e == 'true' || github.event.action == 'labeled') && (needs.e2e_gate.outputs.pipeline_mode == 'create-and-test' || needs.e2e_gate.outputs.pipeline_mode == '' || github.event.action == 'labeled')
     runs-on: ubuntu-latest
     steps:
       - name: Require run-tests success
         run: |
           echo "e2e job result: ${{ needs.e2e.result }}"
           echo "run_tests_result: ${{ needs.e2e.outputs.run_tests_result }}"
-          echo "skip_create_cluster: ${{ needs.e2e_gate.outputs.skip_create_cluster }}"
           if [ "${{ needs.e2e.result }}" != "success" ]; then
             echo "::error::Reusable E2E workflow did not succeed"
             exit 1
           fi
           if [ "${{ needs.e2e.outputs.run_tests_result }}" != "success" ]; then
-            echo "::error::run-tests did not succeed (result=${{ needs.e2e.outputs.run_tests_result }}). For first run use labeled; for reuse push to PR branch (synchronize)."
+            echo "::error::run-tests did not succeed (result=${{ needs.e2e.outputs.run_tests_result }})"
             exit 1
           fi
 
@@ -192,7 +231,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const prNumber = '${{ needs.e2e_gate.outputs.pr_number }}';
+            const prNumber = '${{ needs.e2e_gate.outputs.pr_number || github.event.pull_request.number }}';
             const comment = `## E2E tests ✅
 
             **Module:** ${{ vars.MODULE_NAME }}
@@ -202,8 +241,7 @@ jobs:
             [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
             - **PR:** #${prNumber}
-            - **Label:** \`e2e-smoke-test\` / \`e2e-test\` (not removed automatically)
-            - Remove the label manually to run **teardown-cluster** only.
+            - **Label:** \`e2e-smoke-test\` / \`e2e-test\`
 
             JUnit is in **Checks** (run-tests job).
             `;
