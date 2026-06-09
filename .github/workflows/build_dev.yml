@@ -201,4 +201,3 @@ jobs:
           svacer_import_user: "${{ secrets.SVACER_IMPORT_USER }}"
           svacer_import_password: "${{ secrets.SVACER_IMPORT_PASSWORD }}"
           svace_analyze_ssh_private_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
-### bump
