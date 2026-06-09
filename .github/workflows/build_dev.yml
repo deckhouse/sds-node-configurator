@@ -54,7 +54,7 @@ jobs:
               sudo rm -rf "$p" 2>/dev/null || true
             fi
           }
-          for d in e2e/.gomodcache e2e/.gocache e2e/temp; do
+          for d in .e2e-gomodcache .e2e-gocache .e2e-artifacts e2e/.gomodcache e2e/.gocache e2e/temp; do
             prune_dir "${WS}/${d}"
           done
       - uses: actions/checkout@v4
@@ -154,7 +154,7 @@ jobs:
               sudo rm -rf "$p" 2>/dev/null || true
             fi
           }
-          for d in e2e/.gomodcache e2e/.gocache e2e/temp; do
+          for d in .e2e-gomodcache .e2e-gocache .e2e-artifacts e2e/.gomodcache e2e/.gocache e2e/temp; do
             prune_dir "${WS}/${d}"
           done
       - uses: actions/checkout@v4
