@@ -1,10 +1,7 @@
 # E2E tests via storage-e2e (separate workflow).
 #
-# Label `e2e-smoke-test` or `e2e-test` on a PR:
-#   - labeled / opened / reopened: create-cluster + run-tests
-#   - push / synchronize with label: skip create-cluster, run-tests only
-#
-# Remove label manually: teardown-cluster only.
+# Label `e2e-smoke-test` or `e2e-test` on a PR → create-cluster (reuse VMs or provision) + run-tests.
+# Remove label manually → teardown-cluster only (no create, no tests).
 # Push to PR branch is required when workflow file is not yet on default branch.
 
 name: E2E tests
@@ -62,7 +59,6 @@ jobs:
       pr_number: ${{ steps.resolve.outputs.pr_number }}
       pipeline_mode: ${{ steps.resolve.outputs.pipeline_mode }}
       run_e2e: ${{ steps.resolve.outputs.run_e2e }}
-      skip_create_cluster: ${{ steps.resolve.outputs.skip_create_cluster }}
     steps:
       - name: Resolve PR number and pipeline mode
         id: resolve
@@ -74,7 +70,6 @@ jobs:
             let prNumber = '';
             let pipelineMode = '';
             let runE2e = 'false';
-            let skipCreate = 'false';
 
             if (context.eventName === 'workflow_dispatch') {
               prNumber = String(context.payload.inputs.pr_number || '');
@@ -83,7 +78,6 @@ jobs:
               core.setOutput('pr_number', prNumber);
               core.setOutput('pipeline_mode', pipelineMode);
               core.setOutput('run_e2e', runE2e);
-              core.setOutput('skip_create_cluster', skipCreate);
               return;
             }
 
@@ -104,18 +98,10 @@ jobs:
               } else if (hasLabel || (context.payload.action === 'labeled' && isE2eLabel(eventLabel))) {
                 pipelineMode = 'create-and-test';
                 runE2e = 'true';
-                const isProvisionTrigger =
-                  (context.payload.action === 'labeled' && isE2eLabel(eventLabel)) ||
-                  context.payload.action === 'opened' ||
-                  context.payload.action === 'reopened';
-                if (!isProvisionTrigger) {
-                  skipCreate = 'true';
-                }
               }
               core.setOutput('pr_number', prNumber);
               core.setOutput('pipeline_mode', pipelineMode);
               core.setOutput('run_e2e', runE2e);
-              core.setOutput('skip_create_cluster', skipCreate);
               return;
             }
 
@@ -143,7 +129,6 @@ jobs:
                 core.setOutput('pr_number', String(pr.number));
                 core.setOutput('pipeline_mode', 'create-and-test');
                 core.setOutput('run_e2e', 'true');
-                core.setOutput('skip_create_cluster', 'true');
                 return;
               }
             }
@@ -158,7 +143,6 @@ jobs:
           echo "pr_number=${{ steps.resolve.outputs.pr_number }}"
           echo "pipeline_mode=${{ steps.resolve.outputs.pipeline_mode }}"
           echo "run_e2e=${{ steps.resolve.outputs.run_e2e }}"
-          echo "skip_create_cluster=${{ steps.resolve.outputs.skip_create_cluster }}"
 
   e2e:
     name: storage-e2e (${{ needs.e2e_gate.outputs.pipeline_mode }})
@@ -178,7 +162,6 @@ jobs:
       label_filter: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.label_filter || '' }}
       storage_e2e_ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.storage_e2e_ref || 'ndemchuk-reusable-ci' }}
       runner_labels: '["self-hosted","regular"]'
-      skip_create_cluster: ${{ needs.e2e_gate.outputs.skip_create_cluster == 'true' }}
 
   e2e_pr_feedback:
     name: E2E PR feedback
