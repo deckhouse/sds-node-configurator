@@ -1838,6 +1838,9 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				GinkgoWriter.Printf("    BlockDevice %s status size before resize: %s\n", targetBD.Name, bdBefore.Status.Size.String())
 				printLVMVolumeGroupInfo(&readyLVG)
 
+				resizeCountBefore, err := countResizePVSuccessLogs(e2eCtx, testClusterResources.Kubeconfig, nodeName, targetBD.Status.Path)
+				Expect(err).NotTo(HaveOccurred())
+
 				By(fmt.Sprintf("Growing VirtualDisk %s: %s -> %s", e2eLVGPVResizeDiskName, e2eLVGPVResizeDiskSize, e2eLVGPVResizeNewSize))
 				Expect(e2ePatchVirtualDiskSize(e2eCtx, testClusterResources.BaseKubeconfig, ns, e2eLVGPVResizeDiskName, e2eLVGPVResizeNewSize)).To(Succeed())
 
@@ -1913,18 +1916,20 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 						"PVResizeFailed condition should stay absent after resize converges")
 				}
 
-				resizeCount, err := countResizePVSuccessLogs(e2eCtx, testClusterResources.Kubeconfig, nodeName, targetBD.Status.Path)
+				resizeCountAfter, err := countResizePVSuccessLogs(e2eCtx, testClusterResources.Kubeconfig, nodeName, targetBD.Status.Path)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(resizeCount).To(BeNumerically(">=", 1), "expected at least one successful pvresize log entry")
+				Expect(resizeCountAfter).To(BeNumerically(">", resizeCountBefore),
+					"expected successful pvresize log count to increase after disk resize (before %d, after %d)",
+					resizeCountBefore, resizeCountAfter)
 
 				Consistently(func() int {
 					count, logErr := countResizePVSuccessLogs(e2eCtx, testClusterResources.Kubeconfig, nodeName, targetBD.Status.Path)
 					Expect(logErr).NotTo(HaveOccurred())
 					return count
-				}, 45*time.Second, 15*time.Second).Should(Equal(resizeCount),
+				}, 45*time.Second, 15*time.Second).Should(Equal(resizeCountAfter),
 					"pvresize invocation count should stay stable after convergence")
 
-				By("✓ After disk resize: LVMVolumeGroup Ready, VGFree and PV size increased, no error conditions")
+				By("After disk resize: LVMVolumeGroup Ready, VGFree and PV size increased, no error conditions")
 				printLVMVolumeGroupInfo(&final)
 
 				e2eSavedLVGForVGRemoveTest = &e2eSavedLVGForVGRemoveInfo{
