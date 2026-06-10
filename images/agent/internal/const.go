@@ -46,12 +46,18 @@ const (
 	// DRBD, NBD, loopback) so lvm.static does not even read PV labels
 	// from them when udev integration is unavailable.
 	//
-	// This is a best-effort hint for lvm.static only: due to its
-	// multi-alias rule (a device passes the filter if any of its aliases
-	// is accepted), a PV may still slip through via /dev/block/MAJ:MIN
-	// or /dev/disk/by-id/... aliases. The authoritative filter lives in
-	// pkg utils (FilterForeignPVs) and runs after lvm.static returns.
-	LVMGlobalFilter = `devices/global_filter=["r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|","a|.*|"]`
+	// There is intentionally no blanket "a|.*|" accept rule. When a
+	// device matches none of the reject patterns, LVM accepts it by
+	// default. Adding an explicit accept-all rule would override LVM's
+	// built-in device filter and cause it to scan non-standard paths
+	// (e.g. /dev/disk/by-diskseq/*), surfacing duplicate VG names when
+	// the same PV is visible through multiple aliases and breaking
+	// commands like lvremove that address LVs by VG name.
+	//
+	// The authoritative foreign-PV filter (FilterForeignPVs) still runs
+	// after lvm.static returns and catches any PVs that slip through
+	// via /dev/block/MAJ:MIN or /dev/disk/by-id/... aliases.
+	LVMGlobalFilter = `devices/global_filter=["r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|"]`
 
 	// LVMArchiveRetention caps the size of /etc/lvm/archive: keep at
 	// most the last 10 metadata snapshots and at most 7 days of history.
