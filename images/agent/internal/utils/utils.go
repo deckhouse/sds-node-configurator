@@ -53,6 +53,7 @@ func ReadValueFromTags(tags string, key string) (bool, string) {
 
 func GetRequestedSizeFromString(size string, targetSpace resource.Quantity) (resource.Quantity, error) {
 	if IsPercentSize(size) {
+		// User-facing CRD schemas constrain percent sizes to 1..100%; internal callers are expected to pass validated values.
 		strPercent := strings.Split(size, "%")[0]
 		percent, err := strconv.Atoi(strPercent)
 		if err != nil {

@@ -651,9 +651,12 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 					Spec: v1alpha1.LVMVolumeGroupSpec{
 						ActualVGNameOnTheNode: "e2e-shrink-vg",
 						BlockDeviceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"kubernetes.io/hostname":      nodeName,
-								"kubernetes.io/metadata.name": bdMetaName,
+							MatchExpressions: []metav1.LabelSelectorRequirement{
+								{
+									Key:      "kubernetes.io/metadata.name",
+									Operator: metav1.LabelSelectorOpIn,
+									Values:   []string{bdMetaName},
+								},
 							},
 						},
 						Type:  "Local",
@@ -666,7 +669,10 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				Eventually(func(g Gomega) {
 					var current v1alpha1.LVMVolumeGroup
 					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &current)).To(Succeed())
-					g.Expect(current.Status.Phase).To(Equal(v1alpha1.PhaseReady), "Phase=%s", current.Status.Phase)
+					g.Expect(current.Status.Phase).To(Equal(v1alpha1.PhaseReady),
+						"Phase=%s Conditions=%s VGSize=%s VGFree=%s",
+						current.Status.Phase, formatLVMVolumeGroupConditions(current.Status.Conditions),
+						current.Status.VGSize.String(), current.Status.VGFree.String())
 				}, 10*time.Minute, 10*time.Second).Should(Succeed())
 
 				var origLVG v1alpha1.LVMVolumeGroup
@@ -1518,7 +1524,7 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 			})
 		})
 
-		Context("LVMVolumeGroup with one disk and thin-pool", func() {
+		Context("LVMVolumeGroup with one disk and thin-pool", Ordered, func() {
 			const e2eLVGDataDiskName = "e2e-lvg-data-disk"
 			const e2eLVGDataDiskSize = "2Gi"
 
@@ -1798,6 +1804,8 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
 				for _, c := range readyLVG.Status.Conditions {
+					Expect(c.Reason).NotTo(Equal("PVResizeFailed"),
+						"initial: PVResizeFailed must not appear before resize converges")
 					Expect(c.Status).NotTo(Equal(metav1.ConditionFalse),
 						"initial: condition %s is False: reason=%s message=%s", c.Type, c.Reason, c.Message)
 				}
@@ -1830,6 +1838,9 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				GinkgoWriter.Printf("    BlockDevice %s status size before resize: %s\n", targetBD.Name, bdBefore.Status.Size.String())
 				printLVMVolumeGroupInfo(&readyLVG)
 
+				resizeCountBefore, err := countResizePVSuccessLogs(e2eCtx, testClusterResources.Kubeconfig, nodeName, targetBD.Status.Path)
+				Expect(err).NotTo(HaveOccurred())
+
 				By(fmt.Sprintf("Growing VirtualDisk %s: %s -> %s", e2eLVGPVResizeDiskName, e2eLVGPVResizeDiskSize, e2eLVGPVResizeNewSize))
 				Expect(e2ePatchVirtualDiskSize(e2eCtx, testClusterResources.BaseKubeconfig, ns, e2eLVGPVResizeDiskName, e2eLVGPVResizeNewSize)).To(Succeed())
 
@@ -1850,12 +1861,30 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 						"BlockDevice %s size should grow after PVC resize (was %d)", targetBD.Name, baselineBDSize)
 				}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
+				By("Waiting for pvs on the node to reflect larger PV size")
+				Eventually(func(g Gomega) {
+					pvSize, err := getPVSizeViaDirectSSHWithRetry(
+						e2eCtx,
+						testClusterResources.Kubeconfig,
+						nodeName,
+						e2eConfigVMSSHUser(),
+						targetBD.Status.Path,
+						e2eLsblkSSHMaxRetries,
+						e2eLsblkSSHRetryInterval,
+					)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(pvSize).To(BeNumerically(">", baselinePVSize),
+						"pvs should report grown PV size (baseline %d)", baselinePVSize)
+				}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
 				By("Waiting for LVMVolumeGroup: Ready, larger VGFree and PV after pvresize")
 				Eventually(func(g Gomega) {
 					var cur v1alpha1.LVMVolumeGroup
 					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &cur)).To(Succeed())
 					g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady), "phase=%s", cur.Status.Phase)
 					for _, c := range cur.Status.Conditions {
+						g.Expect(c.Reason).NotTo(Equal("PVResizeFailed"),
+							"PVResizeFailed condition should not appear after successful resize")
 						g.Expect(c.Status).NotTo(Equal(metav1.ConditionFalse),
 							"condition %s False: reason=%s message=%s", c.Type, c.Reason, c.Message)
 					}
@@ -1882,7 +1911,25 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 
 				var final v1alpha1.LVMVolumeGroup
 				Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &final)).To(Succeed())
-				By("✓ After disk resize: LVMVolumeGroup Ready, VGFree and PV size increased, no error conditions")
+				for _, c := range final.Status.Conditions {
+					Expect(c.Reason).NotTo(Equal("PVResizeFailed"),
+						"PVResizeFailed condition should stay absent after resize converges")
+				}
+
+				resizeCountAfter, err := countResizePVSuccessLogs(e2eCtx, testClusterResources.Kubeconfig, nodeName, targetBD.Status.Path)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(resizeCountAfter).To(BeNumerically(">", resizeCountBefore),
+					"expected successful pvresize log count to increase after disk resize (before %d, after %d)",
+					resizeCountBefore, resizeCountAfter)
+
+				Consistently(func() int {
+					count, logErr := countResizePVSuccessLogs(e2eCtx, testClusterResources.Kubeconfig, nodeName, targetBD.Status.Path)
+					Expect(logErr).NotTo(HaveOccurred())
+					return count
+				}, 45*time.Second, 15*time.Second).Should(Equal(resizeCountAfter),
+					"pvresize invocation count should stay stable after convergence")
+
+				By("After disk resize: LVMVolumeGroup Ready, VGFree and PV size increased, no error conditions")
 				printLVMVolumeGroupInfo(&final)
 
 				e2eSavedLVGForVGRemoveTest = &e2eSavedLVGForVGRemoveInfo{
@@ -2004,7 +2051,209 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				GinkgoWriter.Printf("    BlockDevice %s still present: path=%s size=%s\n", bdName, bdAfter.Status.Path, bdAfter.Status.Size.String())
 
 				e2eSavedLVGForVGRemoveTest = nil
-				By("✓ LVMVolumeGroup CR deleted; VG removed on node; BlockDevice still in API")
+				By("LVMVolumeGroup CR deleted; VG removed on node; BlockDevice still in API")
+			})
+		})
+
+		Context("LVMVolumeGroup validation (disk not usable)", func() {
+			const (
+				lvgConditionVGConfigurationApplied = "VGConfigurationApplied"
+				reasonValidationFailed             = "ValidationFailed"
+			)
+
+			var validationAttaches []*kubernetes.VirtualDiskAttachmentResult
+
+			AfterEach(func() {
+				if testClusterResources == nil || testClusterResources.BaseKubeconfig == nil {
+					return
+				}
+				ns := e2eConfigNamespace()
+				for _, att := range validationAttaches {
+					if att == nil {
+						continue
+					}
+					By("Cleaning up LVMVolumeGroup validation VirtualDisk " + att.DiskName)
+					_ = kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns, att.AttachmentName, att.DiskName)
+				}
+				validationAttaches = nil
+			})
+
+			// Order: (1) tiny disk - no BlockDevice CR; (2) large disk - intermediate LVG then delete + pvcreate so BD is not consumable;
+			// (3) final LVMVolumeGroup selects only that BD (does not touch other BlockDevices on the node).
+			It("Should fail LVMVolumeGroup when the only selected BlockDevice is not consumable", func() {
+				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
+				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "needs nested virtualization")
+
+				ns := e2eConfigNamespace()
+				storageClass := e2eConfigStorageClass()
+				Expect(storageClass).NotTo(BeEmpty())
+				clusterVMs := e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
+				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
+
+				runID := strconv.FormatInt(time.Now().UnixNano(), 10)
+				smallDiskName := "e2e-lvg-val-s-" + runID
+				largeDiskName := "e2e-lvg-val-l-" + runID
+				smallSize := fmt.Sprintf("%dMi", 5+rand.Intn(995)) // 5..999 Mi, below agent minimum, expect no BD
+				largeSize := fmt.Sprintf("%dGi", 5+rand.Intn(11))  // 5..15 Gi
+				midLvgName := "e2e-lvg-val-mid-" + runID
+				midVgName := "e2e-vg-val-mid-" + runID
+				finalLvgName := "e2e-lvg-val-final-" + runID
+				finalVgName := "e2e-vg-val-final-" + runID
+
+				var beforeList v1alpha1.BlockDeviceList
+				Expect(k8sClient.List(e2eCtx, &beforeList, &client.ListOptions{})).To(Succeed())
+				beforeNames := make(map[string]struct{}, len(beforeList.Items))
+				for i := range beforeList.Items {
+					beforeNames[beforeList.Items[i].Name] = struct{}{}
+				}
+
+				By("Step 1: attach small empty disk (no BlockDevice CR expected below minimum size)")
+				att1, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+					VMName: targetVM, Namespace: ns, DiskName: smallDiskName,
+					DiskSize: smallSize, StorageClassName: storageClass,
+				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+				Expect(err).NotTo(HaveOccurred())
+				validationAttaches = append(validationAttaches, att1)
+				attachCtx1, cancel1 := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
+				defer cancel1()
+				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx1, testClusterResources.BaseKubeconfig, ns, att1.AttachmentName, 10*time.Second)).To(Succeed())
+
+				Eventually(func(g Gomega) {
+					var after v1alpha1.BlockDeviceList
+					g.Expect(k8sClient.List(e2eCtx, &after, &client.ListOptions{})).To(Succeed())
+					var newOnes []string
+					for i := range after.Items {
+						if _, ok := beforeNames[after.Items[i].Name]; !ok {
+							newOnes = append(newOnes, after.Items[i].Name)
+						}
+					}
+					g.Expect(newOnes).To(BeEmpty(),
+						"disks below minimum size must not get BlockDevice CRs; new name(s): %v", newOnes)
+				}, 4*time.Minute, 15*time.Second).Should(Succeed())
+
+				By("Step 2: attach large disk; intermediate LVM, delete, pvcreate - BD must become not consumable")
+				att2, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
+					VMName: targetVM, Namespace: ns, DiskName: largeDiskName,
+					DiskSize: largeSize, StorageClassName: storageClass,
+				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
+				Expect(err).NotTo(HaveOccurred())
+				validationAttaches = append(validationAttaches, att2)
+				attachCtx2, cancel2 := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
+				defer cancel2()
+				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx2, testClusterResources.BaseKubeconfig, ns, att2.AttachmentName, 10*time.Second)).To(Succeed())
+
+				largeBD := e2eWaitConsumableBlockDeviceForVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, k8sClient, ns,
+					att2.DiskName, att2.AttachmentName, targetVM)
+				nodeName := largeBD.Status.NodeName
+				largeBdMeta := largeBD.Labels["kubernetes.io/metadata.name"]
+				if largeBdMeta == "" {
+					largeBdMeta = largeBD.Name
+				}
+
+				midLvg := &v1alpha1.LVMVolumeGroup{
+					ObjectMeta: metav1.ObjectMeta{Name: midLvgName},
+					Spec: v1alpha1.LVMVolumeGroupSpec{
+						ActualVGNameOnTheNode: midVgName,
+						BlockDeviceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"kubernetes.io/hostname":      nodeName,
+								"kubernetes.io/metadata.name": largeBdMeta,
+							},
+						},
+						Type:  "Local",
+						Local: v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
+					},
+				}
+				Expect(k8sClient.Create(e2eCtx, midLvg)).To(Succeed())
+				defer func() {
+					_ = client.IgnoreNotFound(k8sClient.Delete(e2eCtx, &v1alpha1.LVMVolumeGroup{ObjectMeta: metav1.ObjectMeta{Name: midLvgName}}))
+				}()
+
+				Eventually(func(g Gomega) {
+					var cur v1alpha1.LVMVolumeGroup
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: midLvgName}, &cur)).To(Succeed())
+					g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady))
+				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
+				var midReady v1alpha1.LVMVolumeGroup
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: midLvgName}, &midReady)).To(Succeed())
+				By("Intermediate LVMVolumeGroup Ready (before delete)")
+				printLVMVolumeGroupInfo(&midReady)
+
+				Expect(k8sClient.Delete(e2eCtx, midLvg)).To(Succeed())
+				Eventually(func(g Gomega) {
+					var cur v1alpha1.LVMVolumeGroup
+					err := k8sClient.Get(e2eCtx, client.ObjectKey{Name: midLvgName}, &cur)
+					g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "intermediate LVMVolumeGroup should be removed")
+				}, 10*time.Minute, 8*time.Second).Should(Succeed())
+
+				vmSSH := e2eConfigVMSSHUser()
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: largeBD.Name}, largeBD)).To(Succeed())
+				largePath := largeBD.Status.Path
+				Expect(largePath).NotTo(BeEmpty())
+
+				By("pvcreate after agent pvremoved PV on LVG delete (orphan PV -> not consumable)")
+				_, errPV := e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH,
+					fmt.Sprintf("sudo -n pvcreate -y %q 2>&1", largePath))
+				Expect(errPV).NotTo(HaveOccurred(), "pvcreate")
+
+				Eventually(func(g Gomega) {
+					var bd v1alpha1.BlockDevice
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: largeBD.Name}, &bd)).To(Succeed())
+					g.Expect(bd.Status.Consumable).To(BeFalse())
+				}, 3*time.Minute, 10*time.Second).Should(Succeed())
+				var largeBDAfterPV v1alpha1.BlockDevice
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: largeBD.Name}, &largeBDAfterPV)).To(Succeed())
+				printBlockDeviceInfo(&largeBDAfterPV)
+
+				By("Step 3: LVMVolumeGroup selecting only this BlockDevice - expect ValidationFailed")
+				e2ePrintBlockDevicesConsumableSummary(e2eCtx, k8sClient, []string{largeBD.Name}, "single BD in selector")
+
+				finalLvg := &v1alpha1.LVMVolumeGroup{
+					ObjectMeta: metav1.ObjectMeta{Name: finalLvgName},
+					Spec: v1alpha1.LVMVolumeGroupSpec{
+						ActualVGNameOnTheNode: finalVgName,
+						BlockDeviceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"kubernetes.io/hostname":      nodeName,
+								"kubernetes.io/metadata.name": largeBdMeta,
+							},
+						},
+						Type:  "Local",
+						Local: v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
+					},
+				}
+				Expect(k8sClient.Create(e2eCtx, finalLvg)).To(Succeed())
+				defer func() {
+					_ = client.IgnoreNotFound(k8sClient.Delete(e2eCtx, finalLvg))
+				}()
+
+				Eventually(func(g Gomega) {
+					var cur v1alpha1.LVMVolumeGroup
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: finalLvgName}, &cur)).To(Succeed())
+					g.Expect(cur.Status.Phase).NotTo(Equal(v1alpha1.PhaseReady))
+					var cfg *metav1.Condition
+					for i := range cur.Status.Conditions {
+						if cur.Status.Conditions[i].Type == lvgConditionVGConfigurationApplied {
+							cfg = &cur.Status.Conditions[i]
+							break
+						}
+					}
+					g.Expect(cfg).NotTo(BeNil())
+					g.Expect(cfg.Status).To(Equal(metav1.ConditionFalse))
+					g.Expect(cfg.Reason).To(Equal(reasonValidationFailed))
+					g.Expect(cfg.Message).To(ContainSubstring("not consumable"))
+				}, 3*time.Minute, 8*time.Second).Should(Succeed())
+
+				var finalDump v1alpha1.LVMVolumeGroup
+				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: finalLvgName}, &finalDump)).To(Succeed())
+				printLVMVolumeGroupInfo(&finalDump)
+
+				vgsCmd := "vgs -o vg_name --noheadings 2>/dev/null || sudo -n vgs -o vg_name --noheadings 2>/dev/null"
+				out, errVgs := e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, vgsCmd)
+				Expect(errVgs).NotTo(HaveOccurred())
+				Expect(e2eVgNameListedInVgsOutput(out, finalVgName)).To(BeFalse(), "vgs:\n%s", out)
+
+				By("ValidationFailed on single non-consumable BD; other cluster BlockDevices were not in selector")
 			})
 		})
 
@@ -2446,13 +2695,13 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
 
 				type multiDisk struct {
-					diskName  string
-					diskSize  string
-					att       *kubernetes.VirtualDiskAttachmentResult
-					bd        *v1alpha1.BlockDevice
-					meta      string
-					lvgName   string
-					vgName    string
+					diskName string
+					diskSize string
+					att      *kubernetes.VirtualDiskAttachmentResult
+					bd       *v1alpha1.BlockDevice
+					meta     string
+					lvgName  string
+					vgName   string
 				}
 				disks := make([]multiDisk, 0, nDisks)
 				for i := 0; i < nDisks; i++ {
@@ -2872,208 +3121,6 @@ sudo -n vgchange "$VG" --addtag storage.deckhouse.io/enabled=true 2>&1
 				By("Step 4: verify no recreate/delete churn and statuses converge after controller is back")
 				e2eExpectManagedStorageStableAfterRestart(e2eCtx, k8sClient, snapshot)
 				By("✓ Managed VG and BlockDevice unchanged after controller pod restart")
-			})
-		})
-
-		Context("LVMVolumeGroup validation (disk not usable)", func() {
-			const (
-				lvgConditionVGConfigurationApplied = "VGConfigurationApplied"
-				reasonValidationFailed             = "ValidationFailed"
-			)
-
-			var validationAttaches []*kubernetes.VirtualDiskAttachmentResult
-
-			AfterEach(func() {
-				if testClusterResources == nil || testClusterResources.BaseKubeconfig == nil {
-					return
-				}
-				ns := e2eConfigNamespace()
-				for _, att := range validationAttaches {
-					if att == nil {
-						continue
-					}
-					By("Cleaning up LVMVolumeGroup validation VirtualDisk " + att.DiskName)
-					_ = kubernetes.DetachAndDeleteVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, ns, att.AttachmentName, att.DiskName)
-				}
-				validationAttaches = nil
-			})
-
-			// Order: (1) tiny disk — no BlockDevice CR; (2) large disk — intermediate LVG then delete + pvcreate so BD is not consumable;
-			// (3) final LVMVolumeGroup selects only that BD (does not touch other BlockDevices on the node).
-			It("Should fail LVMVolumeGroup when the only selected BlockDevice is not consumable", func() {
-				ensureE2EK8sClient(testClusterResources, &k8sClient, e2eCtx)
-				Expect(testClusterResources.BaseKubeconfig).NotTo(BeNil(), "needs nested virtualization")
-
-				ns := e2eConfigNamespace()
-				storageClass := e2eConfigStorageClass()
-				Expect(storageClass).NotTo(BeEmpty())
-				clusterVMs := e2eListClusterVMNames(e2eCtx, testClusterResources, ns)
-				targetVM := clusterVMs[rand.Intn(len(clusterVMs))]
-
-				runID := strconv.FormatInt(time.Now().UnixNano(), 10)
-				smallDiskName := "e2e-lvg-val-s-" + runID
-				largeDiskName := "e2e-lvg-val-l-" + runID
-				smallSize := fmt.Sprintf("%dMi", 5+rand.Intn(995)) // 5..999 Mi — below agent minimum, expect no BD
-				largeSize := fmt.Sprintf("%dGi", 5+rand.Intn(11))  // 5..15 Gi
-				midLvgName := "e2e-lvg-val-mid-" + runID
-				midVgName := "e2e-vg-val-mid-" + runID
-				finalLvgName := "e2e-lvg-val-final-" + runID
-				finalVgName := "e2e-vg-val-final-" + runID
-
-				var beforeList v1alpha1.BlockDeviceList
-				Expect(k8sClient.List(e2eCtx, &beforeList, &client.ListOptions{})).To(Succeed())
-				beforeNames := make(map[string]struct{}, len(beforeList.Items))
-				for i := range beforeList.Items {
-					beforeNames[beforeList.Items[i].Name] = struct{}{}
-				}
-
-				By("Step 1: attach small empty disk (no BlockDevice CR expected below minimum size)")
-				att1, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
-					VMName: targetVM, Namespace: ns, DiskName: smallDiskName,
-					DiskSize: smallSize, StorageClassName: storageClass,
-				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
-				Expect(err).NotTo(HaveOccurred())
-				validationAttaches = append(validationAttaches, att1)
-				attachCtx1, cancel1 := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
-				defer cancel1()
-				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx1, testClusterResources.BaseKubeconfig, ns, att1.AttachmentName, 10*time.Second)).To(Succeed())
-
-				Eventually(func(g Gomega) {
-					var after v1alpha1.BlockDeviceList
-					g.Expect(k8sClient.List(e2eCtx, &after, &client.ListOptions{})).To(Succeed())
-					var newOnes []string
-					for i := range after.Items {
-						if _, ok := beforeNames[after.Items[i].Name]; !ok {
-							newOnes = append(newOnes, after.Items[i].Name)
-						}
-					}
-					g.Expect(newOnes).To(BeEmpty(),
-						"disks below minimum size must not get BlockDevice CRs; new name(s): %v", newOnes)
-				}, 4*time.Minute, 15*time.Second).Should(Succeed())
-
-				By("Step 2: attach large disk; intermediate LVM, delete, pvcreate — BD must become not consumable")
-				att2, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
-					VMName: targetVM, Namespace: ns, DiskName: largeDiskName,
-					DiskSize: largeSize, StorageClassName: storageClass,
-				}, e2eVirtualDiskAttachMaxRetries, e2eVirtualDiskAttachRetryInterval)
-				Expect(err).NotTo(HaveOccurred())
-				validationAttaches = append(validationAttaches, att2)
-				attachCtx2, cancel2 := context.WithTimeout(e2eCtx, e2eVirtualDiskAttachWaitTimeout)
-				defer cancel2()
-				Expect(kubernetes.WaitForVirtualDiskAttached(attachCtx2, testClusterResources.BaseKubeconfig, ns, att2.AttachmentName, 10*time.Second)).To(Succeed())
-
-				largeBD := e2eWaitConsumableBlockDeviceForVirtualDisk(e2eCtx, testClusterResources.BaseKubeconfig, k8sClient, ns,
-					att2.DiskName, att2.AttachmentName, targetVM)
-				nodeName := largeBD.Status.NodeName
-				largeBdMeta := largeBD.Labels["kubernetes.io/metadata.name"]
-				if largeBdMeta == "" {
-					largeBdMeta = largeBD.Name
-				}
-
-				midLvg := &v1alpha1.LVMVolumeGroup{
-					ObjectMeta: metav1.ObjectMeta{Name: midLvgName},
-					Spec: v1alpha1.LVMVolumeGroupSpec{
-						ActualVGNameOnTheNode: midVgName,
-						BlockDeviceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"kubernetes.io/hostname":      nodeName,
-								"kubernetes.io/metadata.name": largeBdMeta,
-							},
-						},
-						Type:  "Local",
-						Local: v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
-					},
-				}
-				Expect(k8sClient.Create(e2eCtx, midLvg)).To(Succeed())
-				defer func() {
-					_ = client.IgnoreNotFound(k8sClient.Delete(e2eCtx, &v1alpha1.LVMVolumeGroup{ObjectMeta: metav1.ObjectMeta{Name: midLvgName}}))
-				}()
-
-				Eventually(func(g Gomega) {
-					var cur v1alpha1.LVMVolumeGroup
-					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: midLvgName}, &cur)).To(Succeed())
-					g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady))
-				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
-				var midReady v1alpha1.LVMVolumeGroup
-				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: midLvgName}, &midReady)).To(Succeed())
-				By("Intermediate LVMVolumeGroup Ready (before delete)")
-				printLVMVolumeGroupInfo(&midReady)
-
-				Expect(k8sClient.Delete(e2eCtx, midLvg)).To(Succeed())
-				Eventually(func(g Gomega) {
-					var cur v1alpha1.LVMVolumeGroup
-					err := k8sClient.Get(e2eCtx, client.ObjectKey{Name: midLvgName}, &cur)
-					g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "intermediate LVMVolumeGroup should be removed")
-				}, 10*time.Minute, 8*time.Second).Should(Succeed())
-
-				vmSSH := e2eConfigVMSSHUser()
-				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: largeBD.Name}, largeBD)).To(Succeed())
-				largePath := largeBD.Status.Path
-				Expect(largePath).NotTo(BeEmpty())
-
-				By("pvcreate after agent pvremoved PV on LVG delete (orphan PV → not consumable)")
-				_, errPV := e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH,
-					fmt.Sprintf("sudo -n pvcreate -y %q 2>&1", largePath))
-				Expect(errPV).NotTo(HaveOccurred(), "pvcreate")
-
-				Eventually(func(g Gomega) {
-					var bd v1alpha1.BlockDevice
-					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: largeBD.Name}, &bd)).To(Succeed())
-					g.Expect(bd.Status.Consumable).To(BeFalse())
-				}, 3*time.Minute, 10*time.Second).Should(Succeed())
-				var largeBDAfterPV v1alpha1.BlockDevice
-				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: largeBD.Name}, &largeBDAfterPV)).To(Succeed())
-				printBlockDeviceInfo(&largeBDAfterPV)
-
-				By("Step 3: LVMVolumeGroup selecting only this BlockDevice — expect ValidationFailed")
-				e2ePrintBlockDevicesConsumableSummary(e2eCtx, k8sClient, []string{largeBD.Name}, "single BD in selector")
-
-				finalLvg := &v1alpha1.LVMVolumeGroup{
-					ObjectMeta: metav1.ObjectMeta{Name: finalLvgName},
-					Spec: v1alpha1.LVMVolumeGroupSpec{
-						ActualVGNameOnTheNode: finalVgName,
-						BlockDeviceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"kubernetes.io/hostname":      nodeName,
-								"kubernetes.io/metadata.name": largeBdMeta,
-							},
-						},
-						Type:  "Local",
-						Local: v1alpha1.LVMVolumeGroupLocalSpec{NodeName: nodeName},
-					},
-				}
-				Expect(k8sClient.Create(e2eCtx, finalLvg)).To(Succeed())
-				defer func() {
-					_ = client.IgnoreNotFound(k8sClient.Delete(e2eCtx, finalLvg))
-				}()
-
-				Eventually(func(g Gomega) {
-					var cur v1alpha1.LVMVolumeGroup
-					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: finalLvgName}, &cur)).To(Succeed())
-					g.Expect(cur.Status.Phase).NotTo(Equal(v1alpha1.PhaseReady))
-					var cfg *metav1.Condition
-					for i := range cur.Status.Conditions {
-						if cur.Status.Conditions[i].Type == lvgConditionVGConfigurationApplied {
-							cfg = &cur.Status.Conditions[i]
-							break
-						}
-					}
-					g.Expect(cfg).NotTo(BeNil())
-					g.Expect(cfg.Status).To(Equal(metav1.ConditionFalse))
-					g.Expect(cfg.Reason).To(Equal(reasonValidationFailed))
-					g.Expect(cfg.Message).To(ContainSubstring("not consumable"))
-				}, 3*time.Minute, 8*time.Second).Should(Succeed())
-
-				var finalDump v1alpha1.LVMVolumeGroup
-				Expect(k8sClient.Get(e2eCtx, client.ObjectKey{Name: finalLvgName}, &finalDump)).To(Succeed())
-				printLVMVolumeGroupInfo(&finalDump)
-
-				vgsCmd := "vgs -o vg_name --noheadings 2>/dev/null || sudo -n vgs -o vg_name --noheadings 2>/dev/null"
-				out, errVgs := e2eExecOnTestClusterNodeSSH(e2eCtx, testClusterResources.Kubeconfig, nodeName, vmSSH, vgsCmd)
-				Expect(errVgs).NotTo(HaveOccurred())
-				Expect(e2eVgNameListedInVgsOutput(out, finalVgName)).To(BeFalse(), "vgs:\n%s", out)
-
-				By("✓ ValidationFailed on single non-consumable BD; other cluster BlockDevices were not in selector")
 			})
 		})
 
