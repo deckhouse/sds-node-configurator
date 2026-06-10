@@ -1,0 +1,9 @@
+Changes:
+- The agent now ignores “foreign” block devices (rbd, drbd, nbd, loop) when scanning
+  LVM
+- Fixed handling of duplicate VG names: LVMVolumeGroup status is no longer corrupted
+- The blocking of the agent pod launch has been eliminated; added timeouts for LVM
+  commands
+- Improved stability of legacy block device names: matching by serial number or WWN
+    prevents re-creation when name changes
+- Fixed BlockDevice selector validation: the In operator is now the only valid one
