@@ -30,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
+	k8sclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -316,15 +317,111 @@ func cleanupE2ELocalStorageClasses(ctx context.Context, kubeconfig *rest.Config)
 
 	lscList, err := dynClient.Resource(localStorageClassGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
+		GinkgoWriter.Printf("List LocalStorageClasses failed (skip cleanup): %v\n", err)
 		return
 	}
 
+	var toDelete []string
 	for _, item := range lscList.Items {
 		if strings.HasPrefix(item.GetName(), "e2e-") {
-			GinkgoWriter.Printf("Deleting LocalStorageClass %s\n", item.GetName())
-			_ = dynClient.Resource(localStorageClassGVR).Delete(ctx, item.GetName(), metav1.DeleteOptions{})
+			toDelete = append(toDelete, item.GetName())
 		}
 	}
+	for _, name := range toDelete {
+		GinkgoWriter.Printf("Deleting LocalStorageClass %s\n", name)
+		if err := dynClient.Resource(localStorageClassGVR).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			GinkgoWriter.Printf("  delete LocalStorageClass %s: %v\n", name, err)
+		}
+	}
+
+	deadline := time.Now().Add(e2eLocalStorageClassCleanupTimeout)
+	forceRemoveAfter := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		lscList, err = dynClient.Resource(localStorageClassGVR).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			break
+		}
+		var remaining []string
+		for _, item := range lscList.Items {
+			if strings.HasPrefix(item.GetName(), "e2e-") {
+				remaining = append(remaining, item.GetName())
+			}
+		}
+		if len(remaining) == 0 {
+			GinkgoWriter.Println("All e2e LocalStorageClasses removed")
+			cleanupE2EStorageClasses(ctx, kubeconfig)
+			return
+		}
+
+		if time.Now().After(forceRemoveAfter) {
+			GinkgoWriter.Printf("Force removing %d stuck LocalStorageClass(es): %v\n", len(remaining), remaining)
+			for _, name := range remaining {
+				lsc, getErr := dynClient.Resource(localStorageClassGVR).Get(ctx, name, metav1.GetOptions{})
+				if getErr != nil {
+					continue
+				}
+				if len(lsc.GetFinalizers()) > 0 {
+					lsc.SetFinalizers(nil)
+					if _, updErr := dynClient.Resource(localStorageClassGVR).Update(ctx, lsc, metav1.UpdateOptions{}); updErr != nil {
+						GinkgoWriter.Printf("  failed to strip finalizers on LocalStorageClass %s: %v\n", name, updErr)
+					}
+				}
+				if lsc.GetDeletionTimestamp() == nil {
+					_ = dynClient.Resource(localStorageClassGVR).Delete(ctx, name, metav1.DeleteOptions{})
+				}
+			}
+		}
+
+		GinkgoWriter.Printf("Waiting for %d LocalStorageClass(es) to be deleted...\n", len(remaining))
+		time.Sleep(10 * time.Second)
+	}
+	GinkgoWriter.Println("Warning: timeout waiting for e2e LocalStorageClasses deletion")
+	cleanupE2EStorageClasses(ctx, kubeconfig)
+}
+
+// cleanupE2EStorageClasses removes Kubernetes StorageClass objects created from e2e LocalStorageClasses.
+func cleanupE2EStorageClasses(ctx context.Context, kubeconfig *rest.Config) {
+	cs, err := k8sclient.NewForConfig(kubeconfig)
+	if err != nil {
+		GinkgoWriter.Printf("Failed to create clientset for StorageClass cleanup: %v\n", err)
+		return
+	}
+
+	scList, err := cs.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		GinkgoWriter.Printf("List StorageClasses failed (skip cleanup): %v\n", err)
+		return
+	}
+
+	for _, sc := range scList.Items {
+		if !strings.HasPrefix(sc.Name, "e2e-") {
+			continue
+		}
+		GinkgoWriter.Printf("Deleting StorageClass %s\n", sc.Name)
+		if err := cs.StorageV1().StorageClasses().Delete(ctx, sc.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			GinkgoWriter.Printf("  delete StorageClass %s: %v\n", sc.Name, err)
+		}
+	}
+
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		scList, err = cs.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			break
+		}
+		remaining := 0
+		for _, sc := range scList.Items {
+			if strings.HasPrefix(sc.Name, "e2e-") {
+				remaining++
+			}
+		}
+		if remaining == 0 {
+			GinkgoWriter.Println("All e2e StorageClasses removed")
+			return
+		}
+		time.Sleep(5 * time.Second)
+	}
+	GinkgoWriter.Println("Warning: some e2e StorageClasses may still exist after cleanup")
 }
 
 func forceDeleteAllNonConsumableBlockDevices(ctx context.Context, cl client.Client, timeout time.Duration) {

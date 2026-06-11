@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	e2ecfg "github.com/deckhouse/sds-node-configurator/e2e/cfg"
 	virtv1alpha2 "github.com/deckhouse/virtualization/api/core/v1alpha2"
@@ -112,6 +113,37 @@ func e2eSuiteSharedStorageCleanup(ctx context.Context) {
 	cleanupE2ELVMLogicalVolumes(ctx, k8sCl)
 	GinkgoWriter.Printf("    ▶️ AfterAll (suite): cleaning up e2e LVMVolumeGroups...\n")
 	cleanupE2ELVMVolumeGroups(ctx, k8sCl)
+}
+
+// e2eCIWorkloadCleanup removes all test-created storage workloads from a persistent CI cluster.
+// Called from the e2e-complete job after run-tests (pass or fail). Does not tear down the cluster itself.
+func e2eCIWorkloadCleanup(ctx context.Context, res *cluster.TestClusterResources) {
+	if res == nil || res.Kubeconfig == nil {
+		GinkgoWriter.Println("CI workload cleanup: no test cluster kubeconfig (skip)")
+		return
+	}
+	k8sCl, err := e2eNewTestClusterK8sClient(res.Kubeconfig)
+	if err != nil {
+		GinkgoWriter.Printf("CI workload cleanup: k8s client: %v\n", err)
+		return
+	}
+	ns := e2eConfigNamespace()
+	if res.BaseKubeconfig != nil {
+		GinkgoWriter.Printf("▶️ CI workload cleanup: VirtualDisks / attachments (prefix %q)...\n", e2eSuiteVirtualDiskPrefix)
+		cleanupE2EVirtualDisks(ctx, res.BaseKubeconfig, ns, e2eSuiteVirtualDiskPrefix)
+	}
+	GinkgoWriter.Println("▶️ CI workload cleanup: Pods and PVCs...")
+	cleanupE2EPodsAndPVCsWithWait(ctx, k8sCl, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
+	GinkgoWriter.Println("▶️ CI workload cleanup: LVMLogicalVolumes...")
+	cleanupE2ELVMLogicalVolumes(ctx, k8sCl)
+	GinkgoWriter.Println("▶️ CI workload cleanup: LVMVolumeGroups...")
+	cleanupE2ELVMVolumeGroups(ctx, k8sCl)
+	GinkgoWriter.Println("▶️ CI workload cleanup: LocalStorageClasses and StorageClasses...")
+	cleanupE2ELocalStorageClasses(ctx, res.Kubeconfig)
+	GinkgoWriter.Println("▶️ CI workload cleanup: BlockDevices...")
+	forceDeleteAllNonConsumableBlockDevices(ctx, k8sCl, 3*time.Minute)
+	forceDeleteAllBlockDevices(ctx, k8sCl, 5*time.Minute)
+	GinkgoWriter.Println("✅ CI workload cleanup finished")
 }
 
 func e2eNewTestClusterK8sClient(cfg *rest.Config) (client.Client, error) {

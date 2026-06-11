@@ -152,6 +152,9 @@ const (
 	e2eSuitePodPVCleanupPodTimeout = 2 * time.Minute
 	e2eSuitePodPVCleanupPVTimeout  = 15 * time.Minute
 
+	// LocalStorageClass CR + derived StorageClass can stay Terminating after failed/interrupted runs.
+	e2eLocalStorageClassCleanupTimeout = 5 * time.Minute
+
 	// Guest VM name prefix for dhctl/bootstrap (Deckhouse test clusters). Do not attach data disks here — not a worker.
 	e2eBootstrapGuestVMPrefix = "bootstrap-node-"
 )
