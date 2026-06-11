@@ -44,8 +44,8 @@ var _ = Describe("CI workload cleanup", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 		defer cancel()
 
-		res, err := cluster.UseExistingCluster(ctx)
-		Expect(err).NotTo(HaveOccurred(), "connect to existing test cluster for workload cleanup")
+		res, err := cluster.ConnectExistingClusterForMaintenance(ctx)
+		Expect(err).NotTo(HaveOccurred(), "connect to test cluster for workload cleanup")
 
 		e2eCIWorkloadCleanup(ctx, res)
 	})
