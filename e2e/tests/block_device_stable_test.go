@@ -19,7 +19,6 @@ package tests
 import (
 	"context"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/e2e/cfg"
@@ -61,18 +60,11 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Ordere
 		ensureE2EK8sClient(res, &k8sClient, ctx)
 		Expect(k8sClient).NotTo(BeNil())
 
-		By("Listing virtual machines to select target VM")
-		vms, listVmErr := kubernetes.ListVirtualMachineNames(ctx, res.BaseKubeconfig, conf.TestCluster.Namespace)
+		By("Listing cluster-node guest VMs to select target VM (exclude orphan VMs in namespace)")
+		vms, listVmErr := kubernetes.ListVirtualMachineNamesOnClusterNodes(ctx, res.BaseKubeconfig, res.Kubeconfig, conf.TestCluster.Namespace)
 		Expect(listVmErr).NotTo(HaveOccurred())
 		Expect(vms).NotTo(BeEmpty())
-
-		for _, vm := range vms {
-			if strings.HasPrefix(vm, "bootstrap-node-") {
-				continue
-			}
-			targetVM = vm
-			break
-		}
+		targetVM = vms[0]
 
 		By("Attaching a virtual disk to the target VM")
 		attachResult, attachErr := kubernetes.AttachVirtualDiskToVM(ctx, res.BaseKubeconfig,

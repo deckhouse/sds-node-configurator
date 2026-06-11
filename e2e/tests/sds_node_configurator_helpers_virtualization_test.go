@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
 	virtv1alpha2 "github.com/deckhouse/virtualization/api/core/v1alpha2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -41,7 +42,6 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/storage-e2e/pkg/cluster"
-	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
 )
 
 // clusterResumeState mirrors storage-e2e cluster-state.json (namespace after VMs are created).
@@ -592,8 +592,18 @@ func e2eIntersectVMNamesRunning(ctx context.Context, baseKube *rest.Config, ns s
 
 // e2eListClusterVMNames returns guest VM names to attach disks to (same pattern as other LVM tests).
 func e2eListClusterVMNames(ctx context.Context, res *cluster.TestClusterResources, ns string) []string {
+	if res != nil && res.BaseKubeconfig != nil && res.Kubeconfig != nil {
+		nodeVMs, err := kubernetes.ListVirtualMachineNamesOnClusterNodes(ctx, res.BaseKubeconfig, res.Kubeconfig, ns)
+		if err == nil && len(nodeVMs) > 0 {
+			return nodeVMs
+		}
+		if err != nil {
+			GinkgoWriter.Printf("    ⚠️  ListVirtualMachineNamesOnClusterNodes: %v; falling back to virt list\n", err)
+		}
+	}
+
 	var candidates []string
-	if res.VMResources != nil {
+	if res != nil && res.VMResources != nil {
 		for _, name := range res.VMResources.VMNames {
 			if name != res.VMResources.SetupVMName {
 				candidates = append(candidates, name)
