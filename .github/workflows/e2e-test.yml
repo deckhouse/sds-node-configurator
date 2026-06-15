@@ -26,7 +26,7 @@ on:
           - teardown-only
         default: create-and-test
       label_filter:
-        description: "Ginkgo label filter"
+        description: "Ginkgo label filter (override default e2e-tests && !stress-test)"
         type: string
         required: false
         default: ""
@@ -159,7 +159,7 @@ jobs:
       cluster_config: e2e/tests/cluster_config.yml
       test_package: ./tests/
       test_timeout: 60m
-      label_filter: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.label_filter || '' }}
+      label_filter: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.label_filter || vars.E2E_GINKGO_LABEL_FILTER || '' }}
       storage_e2e_ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.storage_e2e_ref || 'ndemchuk-reusable-ci' }}
       runner_labels: '["self-hosted","regular"]'
 
