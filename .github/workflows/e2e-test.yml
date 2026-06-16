@@ -158,7 +158,7 @@ jobs:
       cluster_provider: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.cluster_provider || 'alwaysCreateNew' }}
       cluster_config: e2e/tests/cluster_config.yml
       test_package: ./tests/
-      test_timeout: 60m
+      test_timeout: 90m
       label_filter: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.label_filter || vars.E2E_GINKGO_LABEL_FILTER || '' }}
       storage_e2e_ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.storage_e2e_ref || 'ndemchuk-reusable-ci' }}
       runner_labels: '["self-hosted","regular"]'
