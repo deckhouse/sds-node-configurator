@@ -1,0 +1,3 @@
+Changes:
+- The general accept rule was removed from LVM global_filter, which led to scanning
+  of non-standard paths (/dev/disk/by-diskseq/*) and duplication of VG names
