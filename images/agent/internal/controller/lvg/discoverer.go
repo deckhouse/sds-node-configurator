@@ -469,10 +469,14 @@ func (d *Discoverer) CreateLVMVolumeGroupByCandidate(
 		},
 	}
 
+	if len(candidate.BlockDevicesNames) == 0 {
+		d.log.Warning(fmt.Sprintf("[CreateLVMVolumeGroupByCandidate] no BlockDevices found for VG %s, postponing LVMVolumeGroup creation until BlockDevices are discovered", candidate.ActualVGNameOnTheNode))
+		return lvmVolumeGroup, nil
+	}
+
 	for _, node := range candidate.Nodes {
 		for _, dev := range node {
-			i := len(dev.BlockDevice)
-			if i == 0 {
+			if len(dev.BlockDevice) == 0 {
 				d.log.Warning("The attempt to create the LVG resource failed because it was not possible to find a BlockDevice for it.")
 				return lvmVolumeGroup, nil
 			}
@@ -496,6 +500,14 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	lvg *v1alpha1.LVMVolumeGroup,
 	candidate internal.LVMVolumeGroupCandidate,
 ) error {
+	if len(candidate.BlockDevicesNames) > 0 && hasEmptyBlockDeviceSelector(lvg) {
+		d.log.Warning(fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] the LVMVolumeGroup %s has an empty blockDeviceSelector, updating it with discovered BlockDevices", lvg.Name))
+		lvg.Spec.BlockDeviceSelector = configureBlockDeviceSelector(candidate)
+		if err := d.cl.Update(ctx, lvg); err != nil {
+			return fmt.Errorf("[UpdateLVMVolumeGroupByCandidate] unable to fix empty blockDeviceSelector for LVMVolumeGroup %s: %w", lvg.Name, err)
+		}
+	}
+
 	// Check if VG has some problems
 	if candidate.Health == internal.NonOperational {
 		d.log.Warning(fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] candidate for LVMVolumeGroup %s has NonOperational health, message %s. Update the VGReady condition to False", lvg.Name, candidate.Message))
@@ -925,6 +937,18 @@ func hasStatusPoolDiff(first, second []v1alpha1.LVMVolumeGroupThinPoolStatus) bo
 		}
 	}
 
+	return false
+}
+
+func hasEmptyBlockDeviceSelector(lvg *v1alpha1.LVMVolumeGroup) bool {
+	if lvg.Spec.BlockDeviceSelector == nil {
+		return true
+	}
+	for _, me := range lvg.Spec.BlockDeviceSelector.MatchExpressions {
+		if me.Key == internal.MetadataNameLabelKey && me.Operator == metav1.LabelSelectorOpIn {
+			return len(me.Values) == 0
+		}
+	}
 	return false
 }
 
