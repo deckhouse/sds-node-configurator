@@ -1029,8 +1029,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 			By("Common Scheduler AfterAll: cleaning up LVM, PVCs, LocalStorageClass, VirtualDisks, BlockDevices before Sds Node Configurator")
 			cleanupE2EPodsAndPVCsWithWait(ctx, k8sCl, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
 			cleanupE2ELVMLogicalVolumes(ctx, k8sCl)
-			cleanupE2ELVMVolumeGroups(ctx, k8sCl)
 			cleanupE2ELocalStorageClasses(ctx, res.Kubeconfig)
+			cleanupE2ELVMVolumeGroups(ctx, k8sCl)
 			if res.BaseKubeconfig != nil {
 				cleanupE2EVirtualDisks(ctx, res.BaseKubeconfig, ns, e2eSuiteVirtualDiskPrefix)
 			}
@@ -1538,8 +1538,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					By("LVMVolumeGroup suite: cleaning orphan LVM/PVC/VirtualDisks/BlockDevices before thin-pool and pvresize tests")
 					cleanupE2EPodsAndPVCsWithWait(prepCtx, k8sClient, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
 					cleanupE2ELVMLogicalVolumes(prepCtx, k8sClient)
-					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
 					cleanupE2ELocalStorageClasses(prepCtx, testClusterResources.Kubeconfig)
+					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
 					if testClusterResources.BaseKubeconfig != nil {
 						cleanupE2EVirtualDisks(prepCtx, testClusterResources.BaseKubeconfig, e2eConfigNamespace(), e2eSuiteVirtualDiskPrefix)
 					}
@@ -2026,8 +2026,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					By("LVMVolumeGroup extend suite: cleanup before test")
 					cleanupE2EPodsAndPVCsWithWait(prepCtx, k8sClient, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
 					cleanupE2ELVMLogicalVolumes(prepCtx, k8sClient)
-					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
 					cleanupE2ELocalStorageClasses(prepCtx, testClusterResources.Kubeconfig)
+					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
 					if testClusterResources.BaseKubeconfig != nil {
 						cleanupE2EVirtualDisks(prepCtx, testClusterResources.BaseKubeconfig, e2eConfigNamespace(), e2eSuiteVirtualDiskPrefix)
 					}
@@ -2394,8 +2394,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					By("Multiple LVMVolumeGroups on one node: cleanup before test")
 					cleanupE2EPodsAndPVCsWithWait(prepCtx, k8sClient, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
 					cleanupE2ELVMLogicalVolumes(prepCtx, k8sClient)
-					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
 					cleanupE2ELocalStorageClasses(prepCtx, testClusterResources.Kubeconfig)
+					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
 					if testClusterResources.BaseKubeconfig != nil {
 						cleanupE2EVirtualDisks(prepCtx, testClusterResources.BaseKubeconfig, e2eConfigNamespace(), e2eSuiteVirtualDiskPrefix)
 					}
@@ -2584,8 +2584,8 @@ var _ = Describe("sds-node-configurator module e2e", Ordered, func() {
 					By("LVM auto-import suite: cleanup before test")
 					cleanupE2EPodsAndPVCsWithWait(prepCtx, k8sClient, e2eSuitePodPVCleanupPodTimeout, e2eSuitePodPVCleanupPVTimeout)
 					cleanupE2ELVMLogicalVolumes(prepCtx, k8sClient)
-					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
 					cleanupE2ELocalStorageClasses(prepCtx, testClusterResources.Kubeconfig)
+					cleanupE2ELVMVolumeGroups(prepCtx, k8sClient)
 					if testClusterResources.BaseKubeconfig != nil {
 						cleanupE2EVirtualDisks(prepCtx, testClusterResources.BaseKubeconfig, e2eConfigNamespace(), e2eSuiteVirtualDiskPrefix)
 					}
