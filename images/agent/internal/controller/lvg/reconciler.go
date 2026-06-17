@@ -919,7 +919,8 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 			}
 
 			r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] the LVMVolumeGroup %s thin-pool %s requested size %s, Status VG size %s", lvg.Name, specTp.Name, tpRequestedSize.String(), lvg.Status.VGSize.String()))
-			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentSizeForThinPoolAlign(lvg, vg))
+			extent := extentSizeForThinPoolAlign(lvg, vg)
+			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extent)
 			if alignErr != nil {
 				reason.WriteString(fmt.Sprintf("Unable to align thin-pool %s size: %s. ", specTp.Name, alignErr.Error()))
 				continue
@@ -936,9 +937,10 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 					addingPoolsCount++
 				} else {
 					r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] thin-pool %s of the LVMVolumeGroup %s is already created, check its requested size", specTp.Name, lvg.Name))
-					if alignedTpSize.Value() < actualThinPool.LVSize.Value() {
-						r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] the LVMVolumeGroup %s Spec.ThinPool %s size %s is less than Status one: %s", lvg.Name, specTp.Name, tpRequestedSize.String(), actualThinPool.LVSize.String()))
-						reason.WriteString(fmt.Sprintf("Requested Spec.ThinPool %s size %s is less than actual one %s. ", specTp.Name, tpRequestedSize.String(), actualThinPool.LVSize.String()))
+					allowedActualSize := alignedTpSize.Value() + extent.Value()
+					if actualThinPool.LVSize.Value() > allowedActualSize {
+						r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] the LVMVolumeGroup %s Spec.ThinPool %s aligned size %s plus extent tolerance %s is less than Status one: %s", lvg.Name, specTp.Name, alignedTpSize.String(), extent.String(), actualThinPool.LVSize.String()))
+						reason.WriteString(fmt.Sprintf("Requested Spec.ThinPool %s aligned size %s plus extent tolerance %s is less than actual one %s. ", specTp.Name, alignedTpSize.String(), extent.String(), actualThinPool.LVSize.String()))
 						continue
 					}
 

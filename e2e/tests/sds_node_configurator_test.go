@@ -1676,11 +1676,30 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 					g.Expect(created.Status.Phase).To(Equal(v1alpha1.PhaseReady), "Phase should be Ready, got %s", created.Status.Phase)
 				}, 5*time.Minute, 10*time.Second).Should(Succeed())
 
-				By("Verifying conditions (no errors)")
-				for _, c := range created.Status.Conditions {
-					Expect(c.Status).NotTo(Equal(metav1.ConditionFalse),
-						"condition %s has status False: reason=%s message=%s", c.Type, c.Reason, c.Message)
-				}
+				By("Waiting for VGConfigurationApplied=True after real LVM thin-pool discovery")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &created)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(created.Status.Phase).To(Equal(v1alpha1.PhaseReady), "Phase should stay Ready, got %s", created.Status.Phase)
+
+					var cfg *metav1.Condition
+					for i := range created.Status.Conditions {
+						if created.Status.Conditions[i].Type == "VGConfigurationApplied" {
+							cfg = &created.Status.Conditions[i]
+						}
+						g.Expect(created.Status.Conditions[i].Status).NotTo(Equal(metav1.ConditionFalse),
+							"condition %s has status False: reason=%s message=%s vgSize=%s extentSize=%s thinPools=%+v",
+							created.Status.Conditions[i].Type,
+							created.Status.Conditions[i].Reason,
+							created.Status.Conditions[i].Message,
+							created.Status.VGSize.String(),
+							created.Status.ExtentSize.String(),
+							created.Status.ThinPools)
+					}
+					g.Expect(cfg).NotTo(BeNil(), "expected VGConfigurationApplied condition; conditions=%s", formatLVMVolumeGroupConditions(created.Status.Conditions))
+					g.Expect(cfg.Status).To(Equal(metav1.ConditionTrue), "VGConfigurationApplied should be True: reason=%s message=%s", cfg.Reason, cfg.Message)
+					g.Expect(created.Status.ConfigurationApplied).To(Equal(string(metav1.ConditionTrue)), "status.configurationApplied should mirror VGConfigurationApplied")
+				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
 				By(fmt.Sprintf("LVMVolumeGroup Phase: %s", created.Status.Phase))
 
 				By("Verifying thin-pool in status")
@@ -2374,6 +2393,43 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				GinkgoWriter.Printf("    LVMVolumeGroup with one PV: VGSize=%s VGFree=%s\n",
 					readyOneDisk.Status.VGSize.String(), readyOneDisk.Status.VGFree.String())
 
+				By("Step 1b: create percent LVMLogicalVolume before VG extend")
+				llvName := fmt.Sprintf("e2e-llv-extend-%s-%s", lvgExtendRunID, nodeSafe(nodeName))
+				actualLVName := fmt.Sprintf("e2e-lv-extend-%s", lvgExtendRunID)
+				llv := &v1alpha1.LVMLogicalVolume{
+					ObjectMeta: metav1.ObjectMeta{Name: llvName},
+					Spec: v1alpha1.LVMLogicalVolumeSpec{
+						ActualLVNameOnTheNode: actualLVName,
+						Type:                  "Thick",
+						Size:                  "80%",
+						LVMVolumeGroupName:    lvgName,
+					},
+				}
+				Expect(k8sClient.Create(e2eCtx, llv)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(e2eCtx, llv) }()
+
+				var llvBeforeExtend v1alpha1.LVMLogicalVolume
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(llv), &llvBeforeExtend)).To(Succeed())
+					g.Expect(llvBeforeExtend.Status).NotTo(BeNil(), "LVMLogicalVolume status should be populated")
+					g.Expect(llvBeforeExtend.Status.Phase).To(Equal(v1alpha1.PhaseCreated),
+						"LLV should be Created before VG extend; phase=%s reason=%s actualSize=%s",
+						llvBeforeExtend.Status.Phase,
+						llvBeforeExtend.Status.Reason,
+						llvBeforeExtend.Status.ActualSize.String())
+					g.Expect(llvBeforeExtend.Status.ActualSize.Value()).To(BeNumerically(">", 0))
+				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
+				baselineLLVActualSize := llvBeforeExtend.Status.ActualSize.Value()
+				GinkgoWriter.Printf("    LVMLogicalVolume before VG extend: size=%s actual=%s\n", llv.Spec.Size, llvBeforeExtend.Status.ActualSize.String())
+
+				var lvgAfterLLV v1alpha1.LVMVolumeGroup
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &lvgAfterLLV)).To(Succeed())
+					g.Expect(lvgAfterLLV.Status.VGFree.Value()).To(BeNumerically("<", baselineVGFree),
+						"VGFree should drop after creating 80%% LLV; before=%d current=%d", baselineVGFree, lvgAfterLLV.Status.VGFree.Value())
+				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
+				baselineVGFreeAfterLLV := lvgAfterLLV.Status.VGFree.Value()
+
 				By("Step 2: attach second VirtualDisk and wait for a new consumable BlockDevice on the same node")
 				att2, err := attachVirtualDiskWithRetry(e2eCtx, testClusterResources.BaseKubeconfig, kubernetes.VirtualDiskAttachmentConfig{
 					VMName: targetVM, Namespace: ns, DiskName: e2eLVGExtendDisk2Name,
@@ -2448,8 +2504,8 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 							"condition %s False: reason=%s message=%s", c.Type, c.Reason, c.Message)
 					}
 					g.Expect(nDev).To(Equal(2), "status.nodes should list two BlockDevices after vgextend")
-					g.Expect(extended.Status.VGFree.Value()).To(BeNumerically(">", baselineVGFree),
-						"VGFree should grow after adding second PV (baseline %d)", baselineVGFree)
+					g.Expect(extended.Status.VGFree.Value()).To(BeNumerically(">", baselineVGFreeAfterLLV),
+						"VGFree should grow after adding second PV (baseline after LLV %d)", baselineVGFreeAfterLLV)
 					g.Expect(extended.Status.VGSize.Value()).To(BeNumerically(">", baselineVGSize),
 						"VGSize should grow after vgextend (baseline %d)", baselineVGSize)
 					devices := e2eDevicesOnLVGNode(&extended, nodeName)
@@ -2460,7 +2516,30 @@ var _ = Describe("sds-node-configurator module e2e", Label("e2e-tests"), Ordered
 				var final v1alpha1.LVMVolumeGroup
 				Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(lvg), &final)).To(Succeed())
 				printLVMVolumeGroupInfo(&final)
-				By("✓ LVMVolumeGroup extended: two PVs in VG, VGFree/VGSize grew, Phase Ready")
+
+				By("Step 5: wait for percent LVMLogicalVolume to extend after VG size grows")
+				expectedLLVSize := final.Status.VGSize.Value() * 80 / 100
+				extentSize := final.Status.ExtentSize.Value()
+				Expect(extentSize).To(BeNumerically(">", 0), "LVG extent size should be populated")
+				expectedAlignedLLVSize := ((expectedLLVSize + extentSize - 1) / extentSize) * extentSize
+				Eventually(func(g Gomega) {
+					var curLLV v1alpha1.LVMLogicalVolume
+					g.Expect(k8sClient.Get(e2eCtx, client.ObjectKeyFromObject(llv), &curLLV)).To(Succeed())
+					g.Expect(curLLV.Status).NotTo(BeNil(), "LVMLogicalVolume status should be populated")
+					g.Expect(curLLV.Status.Phase).To(Equal(v1alpha1.PhaseCreated),
+						"LLV should return to Created after percent resize; phase=%s reason=%s actualSize=%s",
+						curLLV.Status.Phase,
+						curLLV.Status.Reason,
+						curLLV.Status.ActualSize.String())
+					g.Expect(curLLV.Status.ActualSize.Value()).To(BeNumerically(">", baselineLLVActualSize),
+						"percent LLV should grow after VG extend (baseline %d)", baselineLLVActualSize)
+					g.Expect(curLLV.Status.ActualSize.Value()).To(BeNumerically(">=", expectedAlignedLLVSize),
+						"percent LLV should reach 80%% of extended VG; expected aligned %d, got %d",
+						expectedAlignedLLVSize,
+						curLLV.Status.ActualSize.Value())
+				}, e2eLVMVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
+
+				By("✓ LVMVolumeGroup extended: two PVs in VG, VGFree/VGSize grew, percent LVMLogicalVolume extended, Phase Ready")
 			})
 		})
 

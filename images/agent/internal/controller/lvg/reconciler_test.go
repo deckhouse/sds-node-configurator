@@ -447,6 +447,134 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				assert.Equal(t, "", reason)
 			}
 		})
+
+		t.Run("existing_thin_pool_one_extent_larger_than_aligned_request_returns_true", func(t *testing.T) {
+			r := setupReconciler()
+
+			const (
+				bdName       = "bd"
+				bdPath       = "/dev/sdb"
+				vgName       = "vg-1"
+				thinPoolName = "data-thin"
+			)
+
+			vgSize := *resource.NewQuantity(10988476*1024*1024, resource.BinarySI)
+			extentSize := resource.MustParse("4Mi")
+			requestedSize, err := utils.GetRequestedSizeFromString("85%", vgSize)
+			assert.NoError(t, err)
+			alignedSize, err := utils.AlignSizeToExtent(requestedSize, extentSize)
+			assert.NoError(t, err)
+			actualSize := *resource.NewQuantity(alignedSize.Value()+extentSize.Value(), resource.BinarySI)
+
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					ActualVGNameOnTheNode: vgName,
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+						{
+							Name:            thinPoolName,
+							Size:            "85%",
+							AllocationLimit: "200%",
+						},
+					},
+				},
+				Status: v1alpha1.LVMVolumeGroupStatus{
+					ExtentSize: extentSize,
+				},
+			}
+			bds := map[string]v1alpha1.BlockDevice{
+				bdName: {
+					ObjectMeta: v1.ObjectMeta{Name: bdName},
+					Status: v1alpha1.BlockDeviceStatus{
+						Path:       bdPath,
+						Size:       vgSize,
+						Consumable: false,
+					},
+				},
+			}
+
+			r.sdsCache.StorePVs([]internal.PVData{{PVName: bdPath}}, bytes.Buffer{})
+			r.sdsCache.StoreVGs([]internal.VGData{{
+				VGName:       vgName,
+				VGSize:       vgSize,
+				VGFree:       resource.MustParse("1Gi"),
+				VGExtentSize: extentSize,
+			}}, bytes.Buffer{})
+			r.sdsCache.StoreLVs([]internal.LVData{{
+				LVName: thinPoolName,
+				VGName: vgName,
+				LVAttr: "twi-aotz--",
+				LVSize: actualSize,
+			}}, bytes.Buffer{})
+
+			valid, reason := r.validateLVGForUpdateFunc(lvg, bds)
+			if assert.True(t, valid) {
+				assert.Equal(t, "", reason)
+			}
+		})
+
+		t.Run("existing_thin_pool_more_than_one_extent_larger_than_aligned_request_returns_false", func(t *testing.T) {
+			r := setupReconciler()
+
+			const (
+				bdName       = "bd"
+				bdPath       = "/dev/sdb"
+				vgName       = "vg-1"
+				thinPoolName = "data-thin"
+			)
+
+			vgSize := *resource.NewQuantity(10988476*1024*1024, resource.BinarySI)
+			extentSize := resource.MustParse("4Mi")
+			requestedSize, err := utils.GetRequestedSizeFromString("85%", vgSize)
+			assert.NoError(t, err)
+			alignedSize, err := utils.AlignSizeToExtent(requestedSize, extentSize)
+			assert.NoError(t, err)
+			actualSize := *resource.NewQuantity(alignedSize.Value()+extentSize.Value()+1, resource.BinarySI)
+
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					ActualVGNameOnTheNode: vgName,
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+						{
+							Name:            thinPoolName,
+							Size:            "85%",
+							AllocationLimit: "200%",
+						},
+					},
+				},
+				Status: v1alpha1.LVMVolumeGroupStatus{
+					ExtentSize: extentSize,
+				},
+			}
+			bds := map[string]v1alpha1.BlockDevice{
+				bdName: {
+					ObjectMeta: v1.ObjectMeta{Name: bdName},
+					Status: v1alpha1.BlockDeviceStatus{
+						Path:       bdPath,
+						Size:       vgSize,
+						Consumable: false,
+					},
+				},
+			}
+
+			r.sdsCache.StorePVs([]internal.PVData{{PVName: bdPath}}, bytes.Buffer{})
+			r.sdsCache.StoreVGs([]internal.VGData{{
+				VGName:       vgName,
+				VGSize:       vgSize,
+				VGFree:       resource.MustParse("1Gi"),
+				VGExtentSize: extentSize,
+			}}, bytes.Buffer{})
+			r.sdsCache.StoreLVs([]internal.LVData{{
+				LVName: thinPoolName,
+				VGName: vgName,
+				LVAttr: "twi-aotz--",
+				LVSize: actualSize,
+			}}, bytes.Buffer{})
+
+			valid, reason := r.validateLVGForUpdateFunc(lvg, bds)
+			if assert.False(t, valid) {
+				assert.Contains(t, reason, "Requested Spec.ThinPool")
+			}
+		})
 	})
 
 	t.Run("validateLVGForCreateFunc", func(t *testing.T) {
