@@ -17,6 +17,7 @@ limitations under the License.
 package utils
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -422,5 +423,89 @@ func TestLvmStaticExtendedArgs(t *testing.T) {
 			"--config must cap /etc/lvm/archive growth via backup/retain_min")
 		assert.Contains(t, actualConfig, "backup/retain_days=",
 			"--config must cap /etc/lvm/archive growth via backup/retain_days")
+	})
+}
+
+// TestUdevadmTriggerExtendedArgs pins the argv layout that the agent uses
+// to refresh the host udev DB after pvcreate/vgcreate. Three invariants are
+// verified explicitly:
+//
+//  1. the first three udevadm tokens are `trigger --action=change` — any
+//     accidental drop of `--action=change` would make the trigger emit the
+//     default "add" event and `lsblk` would still report fstype: null for
+//     the freshly created PVs;
+//
+//  2. a literal `--` end-of-options separator sits between the udevadm
+//     flags and the path list. This guards the (cheap to defend) edge case
+//     of a BlockDevice whose Status.Path begins with '-' and would
+//     otherwise be parsed by udevadm as a flag;
+//
+//  3. the whole command is wrapped by the standard nsenter prefix
+//     `-t 1 -m -u -i -n -p -- /<NSENTERCmd path>/udevadm`. udevadm relies
+//     on the host /run/udev socket which is reachable only inside PID 1's
+//     mount/ipc namespaces, so dropping any namespace flag would break the
+//     trigger silently.
+//
+// Path-list ordering must be preserved verbatim (no sort, no dedup):
+// downstream metrics group by path string, and reordering would break log
+// correlation.
+func TestUdevadmTriggerExtendedArgs(t *testing.T) {
+	prefix := []string{"-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "udevadm"}
+
+	tests := []struct {
+		name  string
+		paths []string
+		want  []string
+	}{
+		{
+			name:  "single_path",
+			paths: []string{"/dev/sda"},
+			want: append(append([]string{}, prefix...),
+				"trigger", "--action=change", "--", "/dev/sda",
+			),
+		},
+		{
+			name:  "multiple_paths_preserve_order",
+			paths: []string{"/dev/sdc", "/dev/sda", "/dev/sdb"},
+			want: append(append([]string{}, prefix...),
+				"trigger", "--action=change", "--", "/dev/sdc", "/dev/sda", "/dev/sdb",
+			),
+		},
+		{
+			name:  "path_starting_with_dash_is_isolated_by_end_of_options",
+			paths: []string{"--help"},
+			want: append(append([]string{}, prefix...),
+				"trigger", "--action=change", "--", "--help",
+			),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := udevadmTriggerExtendedArgs(tt.paths)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestUdevadmTriggerEmptyPathsIsNoop pins the defensive early-return for an
+// empty path list. Without it, `udevadm trigger --action=change` (no
+// positional args) would enqueue a change uevent for EVERY block device on
+// the host, producing a burst that disrupts other udev consumers
+// (multipathd, drbd, …). The function must return ("", nil) and must not
+// reach exec.CommandContext.
+func TestUdevadmTriggerEmptyPathsIsNoop(t *testing.T) {
+	c := commands{}
+
+	t.Run("nil_paths", func(t *testing.T) {
+		out, err := c.UdevadmTrigger(context.Background(), nil)
+		assert.NoError(t, err)
+		assert.Empty(t, out)
+	})
+
+	t.Run("empty_paths", func(t *testing.T) {
+		out, err := c.UdevadmTrigger(context.Background(), []string{})
+		assert.NoError(t, err)
+		assert.Empty(t, out)
 	})
 }

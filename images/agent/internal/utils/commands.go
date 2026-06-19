@@ -607,10 +607,22 @@ func (commands) PVScan(ctx context.Context) (string, error) {
 // the host udev re-probes them and updates its database. This is necessary
 // because lvm.static is built without udev integration: after pvcreate/vgcreate
 // the udev DB stays stale and lsblk never reports LVM2_member as fstype.
+//
+// Defensive contract:
+//   - When paths is empty the function returns ("", nil) without invoking
+//     udevadm. Running `udevadm trigger --action=change` with no positional
+//     arguments would otherwise trigger ALL matching devices on the host,
+//     producing a burst of uevents that can disturb other udev consumers
+//     (multipathd, sds-replicated-volume, etc.).
+//   - "--" end-of-options is inserted before the path list so that any path
+//     starting with '-' (an unexpected but cheap-to-defend case) is treated
+//     as a positional argument rather than as an udevadm flag.
 func (commands) UdevadmTrigger(ctx context.Context, paths []string) (string, error) {
-	args := []string{"udevadm", "trigger", "--action=change"}
-	args = append(args, paths...)
-	extendedArgs := nsentrerExpendedArgs(args[0], args[1:]...)
+	if len(paths) == 0 {
+		return "", nil
+	}
+
+	extendedArgs := udevadmTriggerExtendedArgs(paths)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -620,6 +632,23 @@ func (commands) UdevadmTrigger(ctx context.Context, paths []string) (string, err
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 	return cmd.String(), nil
+}
+
+// udevadmTriggerExtendedArgs builds the argv passed to nsenter+udevadm for
+// the change-uevent trigger after pvcreate/vgcreate. It is split out from
+// UdevadmTrigger so that argv construction can be unit-tested without
+// invoking exec.
+//
+// The first three argv slots are fixed (`udevadm`, `trigger`,
+// `--action=change`); a literal `--` end-of-options separator is appended
+// before the path list to guarantee that any path beginning with '-' is
+// treated as a positional argument rather than an udevadm flag. Callers
+// MUST guarantee len(paths) > 0; passing an empty slice would otherwise
+// trigger ALL block devices on the host (udevadm-trigger(8) default).
+func udevadmTriggerExtendedArgs(paths []string) []string {
+	args := []string{"udevadm", "trigger", "--action=change", "--"}
+	args = append(args, paths...)
+	return nsentrerExpendedArgs(args[0], args[1:]...)
 }
 
 func (commands) UnmarshalDevices(out []byte) ([]internal.Device, error) {
