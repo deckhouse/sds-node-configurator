@@ -1301,7 +1301,25 @@ func (r *Reconciler) extendVGComplex(extendPVs []string, vgName string) error {
 		r.log.Error(err, "ExtendVG ")
 		return err
 	}
+
+	r.triggerUdevForPaths(extendPVs)
+
 	return nil
+}
+
+// triggerUdevForPaths sends a "change" uevent for the given device paths so that
+// the host udev re-probes them. lvm.static is built without udev integration, so
+// after pvcreate/vgcreate the udev DB stays stale and lsblk never reports
+// LVM2_member as fstype — which blocks the BD discoverer from linking the device
+// to its VG.
+func (r *Reconciler) triggerUdevForPaths(paths []string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd, err := r.commands.UdevadmTrigger(ctx, paths)
+	if err != nil {
+		r.log.Warning(fmt.Sprintf("[triggerUdevForPaths] udevadm trigger failed for %v (non-fatal): %v, cmd: %s", paths, err, cmd))
+	}
 }
 
 func (r *Reconciler) createVGComplex(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) error {
@@ -1349,6 +1367,8 @@ func (r *Reconciler) createVGComplex(lvg *v1alpha1.LVMVolumeGroup, blockDevices 
 	}
 
 	r.log.Debug(fmt.Sprintf("[CreateVGComplex] successfully create VG %s of the LVMVolumeGroup %s", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
+
+	r.triggerUdevForPaths(paths)
 
 	return nil
 }

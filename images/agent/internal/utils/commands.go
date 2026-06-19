@@ -67,6 +67,7 @@ type Commands interface {
 	LVActivate(ctx context.Context, vgName, lvName string) (string, error)
 	VGScan(ctx context.Context) (string, error)
 	PVScan(ctx context.Context) (string, error)
+	UdevadmTrigger(ctx context.Context, paths []string) (string, error)
 	UnmarshalDevices(out []byte) ([]internal.Device, error)
 	ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error
 }
@@ -591,6 +592,25 @@ func (commands) VGScan(ctx context.Context) (string, error) {
 func (commands) PVScan(ctx context.Context) (string, error) {
 	args := []string{"pvscan", "--cache"}
 	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// UdevadmTrigger sends a "change" uevent for the given device paths so that
+// the host udev re-probes them and updates its database. This is necessary
+// because lvm.static is built without udev integration: after pvcreate/vgcreate
+// the udev DB stays stale and lsblk never reports LVM2_member as fstype.
+func (commands) UdevadmTrigger(ctx context.Context, paths []string) (string, error) {
+	args := []string{"udevadm", "trigger", "--action=change"}
+	args = append(args, paths...)
+	extendedArgs := nsentrerExpendedArgs(args[0], args[1:]...)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
