@@ -15,6 +15,7 @@ linters-settings:
     exclude-rules:
       directories:
         - hack/
+        - e2e/
   openapi:
     exclude-rules:
       enum:
