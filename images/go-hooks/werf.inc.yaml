@@ -1,37 +1,25 @@
 ---
-image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
-fromImage: builder/src
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-artifact
+from: {{ index $.Images (eq .SVACE_ENABLED "false" | ternary "builder/golang" "builder/alpine-svace") }}
 final: false
+
 git:
   - add: {{ .ModuleDir }}/hooks/go
-    to: /src/hooks/go
+    to: /usr/src/app/hooks/go
     stageDependencies:
       install:
         - '**/go.mod'
         - '**/go.sum'
+      beforeSetup:
         - '**/*.go'
   - add: {{ .ModuleDir }}/api
-    to: /src/api
+    to: /usr/src/app/api
     stageDependencies:
       install:
         - '**/go.mod'
         - '**/go.sum'
+      beforeSetup:
         - '**/*.go'
-
-shell:
-  install:
-    - echo "src artifact"
-
----
-image: {{ .ModuleNamePrefix }}{{ .ImageName }}-artifact
-fromImage: {{ eq .SVACE_ENABLED "false" | ternary "builder/golang-alpine" "builder/golang-alt-svace" }}
-final: false
-
-import:
-  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
-    add: /src
-    to: /usr/src/app
-    before: install
 
 mount:
 {{ include "mount points for golang builds" . }}
@@ -44,6 +32,8 @@ shell:
   install:
     - cd /usr/src/app/hooks/go
     - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
-    - export GOOS=linux GOARCH=amd64 CGO_ENABLED=0
+  beforeSetup:
     - |
+      cd /usr/src/app/hooks/go;
+      export CGO_ENABLED=0
       {{- include "image-build.build" (set $ "BuildCommand" `go build -a -gcflags=all="-l -B" -ldflags="-w -s" -o /go-hooks *.go;`) | nindent 6 }}

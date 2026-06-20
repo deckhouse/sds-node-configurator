@@ -34,16 +34,16 @@ const (
 	LVMVGHealthOperational       = "Operational"
 	LVMVGHealthNonOperational    = "NonOperational"
 	BlockDeviceValidSize         = "1G"
-	NSENTERCmd                   = "/opt/deckhouse/sds/bin/nsenter.static"
-	DMSetupCmd                   = "/opt/deckhouse/sds/bin/dmsetup.static"
+	NSENTERCmd                   = "/opt/deckhouse/sds/bin/nsenter"
+	DMSetupCmd                   = "/opt/deckhouse/sds/bin/dmsetup"
 	LSBLKCmd                     = "/opt/deckhouse/sds/bin/lsblk.dynamic"
-	LVMCmd                       = "/opt/deckhouse/sds/bin/lvm.static"
+	LVMCmd                       = "/opt/deckhouse/sds/bin/lvm"
 	ThinDumpCmd                  = "thin_dump"
 
-	// LVMGlobalFilter is passed via `lvm.static --config` for every LVM
+	// LVMGlobalFilter is passed via `lvm --config` for every LVM
 	// subcommand the agent runs. It rejects canonical names of block
 	// devices that always belong to a foreign storage layer (Ceph RBD,
-	// DRBD, NBD, loopback) so lvm.static does not even read PV labels
+	// DRBD, NBD, loopback) so lvm does not even read PV labels
 	// from them when udev integration is unavailable.
 	//
 	// There is intentionally no blanket "a|.*|" accept rule. When a
@@ -55,7 +55,7 @@ const (
 	// commands like lvremove that address LVs by VG name.
 	//
 	// The authoritative foreign-PV filter (FilterForeignPVs) still runs
-	// after lvm.static returns and catches any PVs that slip through
+	// after lvm returns and catches any PVs that slip through
 	// via /dev/block/MAJ:MIN or /dev/disk/by-id/... aliases.
 	LVMGlobalFilter = `devices/global_filter=["r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|"]`
 
@@ -104,7 +104,7 @@ var (
 
 	// ForeignDeviceBasePrefixes lists canonical block-device basenames
 	// that always belong to a foreign storage layer and must never be
-	// considered an LVM PV by the agent regardless of what lvm.static
+	// considered an LVM PV by the agent regardless of what lvm
 	// reported. The list intentionally matches /proc/devices entries:
 	//
 	//   rbd   - Ceph RBD (kernel rbd module, major 251)
@@ -112,7 +112,7 @@ var (
 	//   nbd   - network block device (major 43)
 	//   loop  - loopback (major 7) — typically backs QEMU/file-based VM disks
 	//
-	// Used after lvm.static returns the PV list, against the canonical
+	// Used after lvm returns the PV list, against the canonical
 	// path resolved via readlink -f in the host mount namespace.
 	ForeignDeviceBasePrefixes = []string{"rbd", "drbd", "nbd", "loop"}
 )

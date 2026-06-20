@@ -11,6 +11,10 @@ linters-settings:
   module:
     oss:
       disable: true
+  no-cyrillic:
+    exclude-rules:
+      directories:
+        - hack/
   openapi:
     exclude-rules:
       enum:

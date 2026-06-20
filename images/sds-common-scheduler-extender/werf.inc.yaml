@@ -1,6 +1,6 @@
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
-fromImage: builder/src
+from: {{ index $.Images "builder/src" }}
 final: false
 
 git:
@@ -17,11 +17,11 @@ git:
 
 shell:
   install:
-    - echo "src artifact"
+    - rm -rf /src/.git
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
-fromImage: {{ eq .SVACE_ENABLED "false" | ternary "builder/golang-alpine" "builder/golang-alt-svace" }}
+from: {{ index $.Images (eq .SVACE_ENABLED "false" | ternary "builder/golang" "builder/alpine-svace") }}
 final: false
 
 import:
@@ -48,8 +48,7 @@ shell:
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}
-fromImage: base/distroless
-
+from: {{ index $.Images "builder/distroless" }}
 git:
 {{- include "image mount points" . }}
 import:

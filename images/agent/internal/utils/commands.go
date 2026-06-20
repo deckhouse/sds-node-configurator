@@ -838,7 +838,7 @@ func filterStdErr(command string, stdErr bytes.Buffer) bytes.Buffer {
 	var filteredStdErr bytes.Buffer
 	stdErrScanner := bufio.NewScanner(&stdErr)
 	regexpPattern := `Regex version mismatch, expected: .+ actual: .+`
-	regexpSocketError := `File descriptor .+ leaked on lvm.static invocation. Parent PID .+: /opt/deckhouse/sds/bin/nsenter`
+	regexpSocketError := `File descriptor .+ leaked on lvm(\.static)? invocation. Parent PID .+: /opt/deckhouse/sds/bin/nsenter`
 	// this needs as if the controller were restarted and found existing LVG thin-pools with size equals 100%VG space,
 	// as the Thin-pool size on the node might be less than Spec one even with delta (because of metadata). So the controller
 	// will try to resize the Thin-pool with 100%VG space and will get the error.

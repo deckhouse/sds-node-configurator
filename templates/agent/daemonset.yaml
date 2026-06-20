@@ -115,7 +115,7 @@ spec:
         image: {{ include "helm_lib_module_image" (list . "agent") }}
         imagePullPolicy: IfNotPresent
         command:
-          - /opt/deckhouse/sds/bin/nsenter.static
+          - /opt/deckhouse/sds/bin/nsenter
           - -t
           - "1"
           - -m
