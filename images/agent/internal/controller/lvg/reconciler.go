@@ -41,6 +41,18 @@ import (
 
 const ReconcilerName = "lvm-volume-group-watcher-controller"
 
+// udevadmTriggerTimeout caps a single best-effort `udevadm trigger
+// --action=change <paths>` invocation that the reconciler issues after
+// pvcreate/vgcreate. The trigger only enqueues uevents in the kernel and
+// normally returns within ~100ms; 10s leaves a wide safety margin for
+// nodes under heavy stress without blocking a graceful shutdown for long.
+const udevadmTriggerTimeout = 10 * time.Second
+
+// udevadmTriggerCmdLabel is the metric label used for UdevadmTrigger in
+// UtilsCommandsDuration / UtilsCommandsExecutionCount / UtilsCommandsErrorsCount.
+// Keep it in sync with how operators query Prometheus.
+const udevadmTriggerCmdLabel = "udevadm-trigger"
+
 // lvmDefaultPhysicalExtent is LVM's default PE when vgcreate is run without --physicalextentsize.
 var lvmDefaultPhysicalExtent = resource.MustParse("4Mi")
 
@@ -518,7 +530,7 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 	r.log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] successfully validated the LVMVolumeGroup %s", lvg.Name))
 
 	r.log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] tries to create VG for the LVMVolumeGroup %s", lvg.Name))
-	err := r.createVGComplex(lvg, blockDevices)
+	err := r.createVGComplex(ctx, lvg, blockDevices)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to create VG for the LVMVolumeGroup %s", lvg.Name))
 		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "VGCreationFailed", fmt.Sprintf("unable to create VG, err: %s", err.Error()))
@@ -1177,7 +1189,7 @@ func (r *Reconciler) extendVGIfNeeded(
 
 	r.log.Debug(fmt.Sprintf("[ExtendVGIfNeeded] VG %s should be extended as there are some BlockDevices were added to Spec field of the LVMVolumeGroup %s", vg.VGName, lvg.Name))
 	paths := extractPathsFromBlockDevices(devicesToExtend, blockDevices)
-	err := r.extendVGComplex(paths, vg.VGName)
+	err := r.extendVGComplex(ctx, paths, vg.VGName)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[ExtendVGIfNeeded] unable to extend VG %s of the LVMVolumeGroup %s", vg.VGName, lvg.Name))
 		return err
@@ -1277,7 +1289,7 @@ func (r *Reconciler) deleteVGIfExist(vgName string) error {
 	return nil
 }
 
-func (r *Reconciler) extendVGComplex(extendPVs []string, vgName string) error {
+func (r *Reconciler) extendVGComplex(ctx context.Context, extendPVs []string, vgName string) error {
 	for _, pvPath := range extendPVs {
 		start := time.Now()
 		command, err := r.commands.CreatePV(pvPath)
@@ -1301,10 +1313,45 @@ func (r *Reconciler) extendVGComplex(extendPVs []string, vgName string) error {
 		r.log.Error(err, "ExtendVG ")
 		return err
 	}
+
+	r.triggerUdevForPaths(ctx, extendPVs)
+
 	return nil
 }
 
-func (r *Reconciler) createVGComplex(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) error {
+// triggerUdevForPaths sends a "change" uevent for the given device paths so that
+// the host udev re-probes them. lvm.static is built without udev integration, so
+// after pvcreate/vgcreate the udev DB stays stale and lsblk never reports
+// LVM2_member as fstype — which blocks the BD discoverer from linking the device
+// to its VG.
+//
+// The call is best-effort: a failure is logged as a warning and never propagates
+// to the caller. Operators observe the call frequency and error rate through
+// the UtilsCommands* metrics with cmd label "udevadm-trigger".
+//
+// The timeout is bounded by a child context derived from the caller's context,
+// so a SIGTERM from kubelet (or any cancellation of the reconcile loop) is
+// honoured immediately instead of being absorbed by a detached background ctx.
+func (r *Reconciler) triggerUdevForPaths(parent context.Context, paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(parent, udevadmTriggerTimeout)
+	defer cancel()
+
+	start := time.Now()
+	cmd, err := r.commands.UdevadmTrigger(ctx, paths)
+	r.metrics.UtilsCommandsDuration(ReconcilerName, udevadmTriggerCmdLabel).Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+	r.metrics.UtilsCommandsExecutionCount(ReconcilerName, udevadmTriggerCmdLabel).Inc()
+	r.log.Debug(cmd)
+	if err != nil {
+		r.metrics.UtilsCommandsErrorsCount(ReconcilerName, udevadmTriggerCmdLabel).Inc()
+		r.log.Warning(fmt.Sprintf("[triggerUdevForPaths] udevadm trigger failed for %v (non-fatal): %v, cmd: %s", paths, err, cmd))
+	}
+}
+
+func (r *Reconciler) createVGComplex(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) error {
 	paths := extractPathsFromBlockDevices(nil, blockDevices)
 
 	r.log.Trace(fmt.Sprintf("[CreateVGComplex] LVMVolumeGroup %s devices paths %v", lvg.Name, paths))
@@ -1349,6 +1396,8 @@ func (r *Reconciler) createVGComplex(lvg *v1alpha1.LVMVolumeGroup, blockDevices 
 	}
 
 	r.log.Debug(fmt.Sprintf("[CreateVGComplex] successfully create VG %s of the LVMVolumeGroup %s", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
+
+	r.triggerUdevForPaths(ctx, paths)
 
 	return nil
 }

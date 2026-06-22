@@ -389,6 +389,21 @@ func (mr *MockCommandsMockRecorder) PVScan(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PVScan", reflect.TypeOf((*MockCommands)(nil).PVScan), ctx)
 }
 
+// UdevadmTrigger mocks base method.
+func (m *MockCommands) UdevadmTrigger(ctx context.Context, paths []string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UdevadmTrigger", ctx, paths)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UdevadmTrigger indicates an expected call of UdevadmTrigger.
+func (mr *MockCommandsMockRecorder) UdevadmTrigger(ctx, paths any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UdevadmTrigger", reflect.TypeOf((*MockCommands)(nil).UdevadmTrigger), ctx, paths)
+}
+
 // ReTag mocks base method.
 func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error {
 	m.ctrl.T.Helper()
