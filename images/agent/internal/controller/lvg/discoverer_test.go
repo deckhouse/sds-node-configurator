@@ -514,6 +514,87 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		}
 	})
 
+	t.Run("CreateLVMVolumeGroup_skips_creation_when_no_block_devices", func(t *testing.T) {
+		const (
+			NodeName = "test-node"
+		)
+
+		d := setupDiscoverer(&DiscovererConfig{NodeName: NodeName})
+
+		candidate := internal.LVMVolumeGroupCandidate{
+			LVMVGName:             "test-lvg-empty-bds",
+			ActualVGNameOnTheNode: "test-vg",
+			BlockDevicesNames:     []string{},
+			Type:                  "Local",
+			AllocatedSize:         resource.MustParse("10G"),
+			VGSize:                resource.MustParse("10G"),
+			VGUUID:                "test-uuid",
+		}
+
+		created, err := d.CreateLVMVolumeGroupByCandidate(ctx, candidate)
+		assert.NoError(t, err)
+		assert.NotNil(t, created)
+
+		lvgs, err := d.GetAPILVMVolumeGroups(ctx)
+		assert.NoError(t, err)
+		_, exists := lvgs[candidate.LVMVGName]
+		assert.False(t, exists, "LVG should not be created when BlockDevicesNames is empty")
+	})
+
+	t.Run("hasEmptyBlockDeviceSelector", func(t *testing.T) {
+		t.Run("nil_selector_returns_true", func(t *testing.T) {
+			lvg := &v1alpha1.LVMVolumeGroup{}
+			assert.True(t, hasEmptyBlockDeviceSelector(lvg))
+		})
+
+		t.Run("empty_values_returns_true", func(t *testing.T) {
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					BlockDeviceSelector: &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      internal.MetadataNameLabelKey,
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{},
+							},
+						},
+					},
+				},
+			}
+			assert.True(t, hasEmptyBlockDeviceSelector(lvg))
+		})
+
+		t.Run("populated_values_returns_false", func(t *testing.T) {
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					BlockDeviceSelector: &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      internal.MetadataNameLabelKey,
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{"dev-abc123"},
+							},
+						},
+					},
+				},
+			}
+			assert.False(t, hasEmptyBlockDeviceSelector(lvg))
+		})
+
+		t.Run("no_metadata_name_expression_returns_false", func(t *testing.T) {
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					BlockDeviceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"kubernetes.io/hostname": "node-1",
+						},
+					},
+				},
+			}
+			assert.False(t, hasEmptyBlockDeviceSelector(lvg))
+		})
+	})
+
 	t.Run("GetLVMVolumeGroup", func(t *testing.T) {
 		const (
 			LVMVGName = "test_lvm-1"
