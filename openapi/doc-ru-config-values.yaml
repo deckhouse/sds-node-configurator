@@ -6,3 +6,7 @@ properties:
     description: Уровень логирования для приложений модуля.
   enableThinProvisioning:
     description: Включить поддержку thin-LVM-томов.
+  enableNetlinkBlockDeviceDiscovery:
+    description: |
+      Использовать netlink/sysfs вместо `lsblk` как источник данных для обнаружения блочных устройств в agent.
+      При выключенном флаге agent обнаруживает блочные устройства через `lsblk`.

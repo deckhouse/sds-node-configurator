@@ -1,17 +1,17 @@
 /*
-Copyright 2025 Flant JSC
+	Copyright 2026 Flant JSC
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+		http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
 */
 
 package config
@@ -39,7 +39,12 @@ const (
 	CmdDeadlineDuration                  = "CMD_DEADLINE_DURATION"
 	DefaultHealthProbeBindAddressEnvName = "HEALTH_PROBE_BIND_ADDRESS"
 	DefaultHealthProbeBindAddress        = ":4228"
+	NetlinkBlockDeviceDiscovery          = "ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY"
 )
+
+type Features struct {
+	NetlinkBlockDeviceDiscovery bool
+}
 
 type Config struct {
 	MachineID               string
@@ -53,6 +58,7 @@ type Config struct {
 	ThrottleInterval        time.Duration
 	CmdDeadlineDuration     time.Duration
 	HealthProbeBindAddress  string
+	Features                Features
 }
 
 func NewConfig() (*Config, error) {
@@ -127,7 +133,29 @@ func NewConfig() (*Config, error) {
 		cfg.CmdDeadlineDuration = time.Duration(duration) * time.Second
 	}
 
+	netlinkBlockDeviceDiscovery, err := getBoolEnv(NetlinkBlockDeviceDiscovery, false)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Features = Features{
+		NetlinkBlockDeviceDiscovery: netlinkBlockDeviceDiscovery,
+	}
+
 	return &cfg, nil
+}
+
+func getBoolEnv(name string, def bool) (bool, error) {
+	val := os.Getenv(name)
+	if val == "" {
+		return def, nil
+	}
+
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		return false, fmt.Errorf("[NewConfig] invalid value for %s: %q", name, val)
+	}
+
+	return parsed, nil
 }
 
 func getMachineID() (string, error) {

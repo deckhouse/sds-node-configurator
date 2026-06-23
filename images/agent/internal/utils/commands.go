@@ -1,17 +1,17 @@
 /*
-Copyright 2025 Flant JSC
+	Copyright 2026 Flant JSC
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+		http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
 */
 
 //go:generate go tool mockgen -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE
@@ -37,6 +37,7 @@ import (
 )
 
 type Commands interface {
+	GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error)
 	GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error)
 	GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.Buffer, err error)
 	GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error)
@@ -76,6 +77,28 @@ type commands struct {
 
 func NewCommands() Commands {
 	return &commands{}
+}
+
+func (c *commands) GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
+	var outs bytes.Buffer
+	args := []string{"-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
+	cmd := exec.CommandContext(ctx, internal.LSBLKCmd, args...)
+	cmd.Stdout = &outs
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		return nil, cmd.String(), stderr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+
+	devices, err := c.UnmarshalDevices(outs.Bytes())
+	if err != nil {
+		return nil, cmd.String(), stderr, fmt.Errorf("unable to unmarshal devices, err: %w", err)
+	}
+
+	return devices, cmd.String(), stderr, nil
 }
 
 func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
