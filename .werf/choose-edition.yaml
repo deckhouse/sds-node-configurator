@@ -1,6 +1,6 @@
 ---
 image: choose-edition
-fromImage: builder/alt
+from: {{ index $.Images "builder/golang-alt" }}
 fromCacheVersion: {{ div .Commit.Date.Unix (mul 60 60 24 30) }}
 
 git:

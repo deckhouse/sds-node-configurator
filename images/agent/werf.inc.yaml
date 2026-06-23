@@ -1,9 +1,9 @@
-{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /usr/sbin/thin_dump /usr/sbin/pdata_tools" }}
+{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /usr/sbin/thin_dump /usr/sbin/pdata_tools" }}
 
 # Do not remove. It's used in external tests.
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
-fromImage: builder/src
+from: {{ index $.Images "builder/src" }}
 final: false
 
 git:
@@ -32,7 +32,7 @@ shell:
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-binaries-artifact
-fromImage: builder/alt
+from: {{ index $.Images "builder/golang-alt" }}
 final: false
 
 import:
@@ -76,7 +76,7 @@ shell:
     - ./configure --prefix /opt/deckhouse/sds --with-udev
     - make install-strip
     - mkdir -p /opt/deckhouse/sds/lib/x86_64-linux-gnu/
-    - cp /src/util-linux/nsenter.static /opt/deckhouse/sds/bin/nsenter.static
+    - cp /src/util-linux/nsenter.static /opt/deckhouse/sds/bin/nsenter
     - cp /lib64/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1
     - cp /lib64/libc.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libc.so.6
     - cp /lib64/libcap.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2
@@ -89,7 +89,7 @@ shell:
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
-fromImage: {{ eq .SVACE_ENABLED "false" | ternary "builder/golang-alpine" "builder/golang-alt-svace" }}
+from: {{ index $.Images (eq .SVACE_ENABLED "false" | ternary "builder/golang" "builder/alpine-svace") }}
 final: false
 
 import:
@@ -116,7 +116,7 @@ shell:
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}
-fromImage: base/distroless
+from: {{ index $.Images "builder/distroless" }}
 git:
 {{- include "image mount points" . }}
 import:
