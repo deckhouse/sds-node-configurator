@@ -252,7 +252,6 @@ var _ = Describe("BlockDevice netlink discovery", Label("e2e-tests"), Ordered, C
 
 	It("writes udev remove event to agent logs", func() {
 		Skip("not implemented netlink logs")
-
 		logOpts := v1.PodLogOptions{
 			Container:  consts.SdsNodeConfiguratorAgentContainer,
 			SinceTime:  &removeSince,
