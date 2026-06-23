@@ -68,7 +68,6 @@ clusterDefinition:
       - name: "sds-node-configurator"
         version: 1
         enabled: true
-        modulePullOverride: "pr250" # imageTag for ModulePullOverride. Main is default value, used if not specified. Created always when rehistryRepo starts with dev-
         settings:
           enableThinProvisioning: true
         dependencies: []
