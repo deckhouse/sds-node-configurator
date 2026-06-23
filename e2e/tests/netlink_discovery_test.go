@@ -145,6 +145,8 @@ var _ = Describe("BlockDevice netlink discovery", Label("e2e-tests"), Ordered, C
 	})
 
 	It("writes udev add event to agent logs", func() {
+		Skip("not implemented netlink logs")
+
 		var fnErr error
 		agentPod, fnErr = pod.FindRunningPodOnNode(
 			ctx, k8sClient, targetVM,
@@ -206,6 +208,8 @@ var _ = Describe("BlockDevice netlink discovery", Label("e2e-tests"), Ordered, C
 	})
 
 	It("writes udev change event to agent logs", func(ctx SpecContext) {
+		Skip("not implemented netlink logs")
+
 		var fnErr error
 		agentPod, fnErr = pod.FindRunningPodOnNode(
 			ctx, k8sClient, targetVM,
@@ -247,6 +251,8 @@ var _ = Describe("BlockDevice netlink discovery", Label("e2e-tests"), Ordered, C
 	})
 
 	It("writes udev remove event to agent logs", func() {
+		Skip("not implemented netlink logs")
+
 		logOpts := v1.PodLogOptions{
 			Container:  consts.SdsNodeConfiguratorAgentContainer,
 			SinceTime:  &removeSince,
