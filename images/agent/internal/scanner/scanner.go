@@ -128,7 +128,6 @@ func (s *scanner) Run(
 					log.Error(err, fmt.Sprintf("[RunScanner] handle event error: %s", device.String()))
 				}
 				log.Info(fmt.Sprintf("[HandleEvent] udev event action=%s devname=%s", device.Action.String(), device.Env["DEVNAME"]))
-
 			}
 
 			t.Do(func() {
