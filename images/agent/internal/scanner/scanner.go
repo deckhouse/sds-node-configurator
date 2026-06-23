@@ -90,18 +90,20 @@ func (s *scanner) Run(
 			},
 		},
 	}
-	s.deviceMap = udev.NewDeviceMap(udev.DefaultRunUdevDataPath)
+	if cfg.Features.NetlinkBlockDeviceDiscovery {
+		s.deviceMap = udev.NewDeviceMap(udev.DefaultRunUdevDataPath)
 
-	crawlerDevs, crawlErr := s.collectCrawlerDevices(ctx, matcher)
-	if crawlErr != nil {
-		log.Error(crawlErr, "[RunScanner] Failed to collect crawler devices")
-	}
+		crawlerDevs, crawlErr := s.collectCrawlerDevices(ctx, matcher)
+		if crawlErr != nil {
+			log.Error(crawlErr, "[RunScanner] Failed to collect crawler devices")
+		}
 
-	fillErr := s.deviceMap.FillFromCrawler(ctx, crawlerDevs)
-	if fillErr != nil {
-		log.Error(fillErr, "[RunScanner] Failed to fill device map")
+		fillErr := s.deviceMap.FillFromCrawler(ctx, crawlerDevs)
+		if fillErr != nil {
+			log.Error(fillErr, "[RunScanner] Failed to fill device map")
+		}
+		log.Info(fmt.Sprintf("[RunScanner] initial crawl found %d block devices", s.deviceMap.Len()))
 	}
-	log.Info(fmt.Sprintf("[RunScanner] initial crawl found %d block devices", s.deviceMap.Len()))
 
 	quit := conn.Monitor(eventChan, errChan, matcher)
 
@@ -121,10 +123,13 @@ func (s *scanner) Run(
 				return err
 			}
 
-			if err := s.deviceMap.HandleEvent(device.Action, device.Env); err != nil {
-				log.Error(err, fmt.Sprintf("[RunScanner] handle event error: %s", device.String()))
+			if cfg.Features.NetlinkBlockDeviceDiscovery {
+				if err := s.deviceMap.HandleEvent(device.Action, device.Env); err != nil {
+					log.Error(err, fmt.Sprintf("[RunScanner] handle event error: %s", device.String()))
+				}
+				log.Info(fmt.Sprintf("[HandleEvent] udev event action=%s devname=%s", device.Action.String(), device.Env["DEVNAME"]))
+
 			}
-			log.Info(fmt.Sprintf("[HandleEvent] udev event action=%s devname=%s", device.Action.String(), device.Env["DEVNAME"]))
 
 			t.Do(func() {
 				log.Info("[RunScanner] start to fill the cache")
@@ -149,15 +154,17 @@ func (s *scanner) Run(
 		case err := <-errChan:
 			log.Error(err, "[RunScanner] Monitor udev event error")
 			quit = conn.Monitor(eventChan, errChan, matcher)
-			devs, crErr := s.collectCrawlerDevices(ctx, matcher)
-			if crErr != nil {
-				log.Error(crErr, "[RunScanner] unable to collect crawler devices")
+			if cfg.Features.NetlinkBlockDeviceDiscovery {
+				devs, crErr := s.collectCrawlerDevices(ctx, matcher)
+				if crErr != nil {
+					log.Error(crErr, "[RunScanner] unable to collect crawler devices")
+				}
+				fErr := s.deviceMap.FillFromCrawler(ctx, devs)
+				if fErr != nil {
+					log.Error(fErr, "[RunScanner] unable to fill device map")
+				}
+				log.Info(fmt.Sprintf("[RunScanner] re-crawl found %d block devices", s.deviceMap.Len()))
 			}
-			fErr := s.deviceMap.FillFromCrawler(ctx, devs)
-			if fErr != nil {
-				log.Error(fErr, "[RunScanner] unable to fill device map")
-			}
-			log.Info(fmt.Sprintf("[RunScanner] re-crawl found %d block devices", s.deviceMap.Len()))
 			timer.Reset(duration)
 			continue
 
@@ -261,9 +268,18 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	}
 
 	now = time.Now()
-	devices, devErr, err := s.scanDevices()
-	log.Trace(fmt.Sprintf("[fillTheCache] device scan runs for: %s", realClock.Since(now).String()))
-	if err != nil {
+	var devices []internal.Device
+	var devErr bytes.Buffer
+	var scanDevErr error
+	if cfg.Features.NetlinkBlockDeviceDiscovery {
+		devices, devErr, scanDevErr = s.scanDevicesNetlink()
+		log.Trace(fmt.Sprintf("[fillTheCache] device scan runs for: %s", realClock.Since(now).String()))
+	} else {
+		devices, devErr, scanDevErr = s.scanDevices(ctx, log, cfg)
+		log.Trace(fmt.Sprintf("[fillTheCache] LSBLK command runs for: %s", realClock.Since(now).String()))
+	}
+
+	if scanDevErr != nil {
 		return err
 	}
 
@@ -329,46 +345,22 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	return nil
 }
 
-func (s *scanner) collectCrawlerDevices(ctx context.Context, matcher netlink.Matcher) ([]crawler.Device, error) {
-	queue := make(chan crawler.Device)
-	errs := make(chan error)
-	crawler.ExistingDevices(queue, errs, matcher)
-
-	result := make([]crawler.Device, 0)
-	var crawlErr error
-
-	for queue != nil && errs != nil {
-		select {
-		case <-ctx.Done():
-			if crawlErr != nil {
-				return result, errors.Join(crawlErr, ctx.Err())
-			}
-			return result, ctx.Err()
-		case dev, ok := <-queue:
-			if !ok {
-				queue = nil
-				continue
-			}
-			result = append(result, dev)
-		case err, ok := <-errs:
-			if !ok {
-				errs = nil
-				continue
-			}
-			if err != nil {
-				crawlErr = errors.Join(crawlErr, err)
-			}
-		}
+func (s *scanner) scanDevices(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.Device, bytes.Buffer, error) {
+	ctx, cancel := context.WithTimeout(ctx, cfg.CmdDeadlineDuration)
+	defer cancel()
+	devices, cmdStr, stdErr, err := s.commands.GetBlockDevices(ctx)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[ScanDevices] unable to scan the devices, cmd: %s", cmdStr))
+		return nil, stdErr, err
 	}
-
-	return result, crawlErr
+	return devices, stdErr, nil
 }
 
-func (s *scanner) scanDevices() ([]internal.Device, bytes.Buffer, error) {
+func (s *scanner) scanDevicesNetlink() ([]internal.Device, bytes.Buffer, error) {
 	var stderr bytes.Buffer
 	mounts, err := utils.ParseMountInfo(utils.ProcHostMountInfo)
 	if err != nil {
-		return []internal.Device{}, stderr, fmt.Errorf("[scanDevices] failed to parse mountinfo: %v", err)
+		return []internal.Device{}, stderr, fmt.Errorf("[scanDevicesNetlink] failed to parse mountinfo: %v", err)
 	}
 	devices, errs := s.deviceMap.Snapshot(mounts)
 	for _, e := range errs {
@@ -411,4 +403,39 @@ func (s *scanner) scanLVs(ctx context.Context, log logger.Logger, cfg config.Con
 	}
 
 	return lvs, stdErr, nil
+}
+
+func (s *scanner) collectCrawlerDevices(ctx context.Context, matcher netlink.Matcher) ([]crawler.Device, error) {
+	queue := make(chan crawler.Device)
+	errs := make(chan error)
+	crawler.ExistingDevices(queue, errs, matcher)
+
+	result := make([]crawler.Device, 0)
+	var crawlErr error
+
+	for queue != nil && errs != nil {
+		select {
+		case <-ctx.Done():
+			if crawlErr != nil {
+				return result, errors.Join(crawlErr, ctx.Err())
+			}
+			return result, ctx.Err()
+		case dev, ok := <-queue:
+			if !ok {
+				queue = nil
+				continue
+			}
+			result = append(result, dev)
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				continue
+			}
+			if err != nil {
+				crawlErr = errors.Join(crawlErr, err)
+			}
+		}
+	}
+
+	return result, crawlErr
 }
