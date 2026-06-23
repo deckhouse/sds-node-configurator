@@ -1,17 +1,17 @@
 /*
-Copyright 2026 Flant JSC
+	Copyright 2026 Flant JSC
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+		http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
 */
 
 package udev
@@ -43,8 +43,6 @@ func NewSysFSDataProvider(sysClassBlockPath, sysBlockPath string) *SysFSDataProv
 	}
 }
 
-// SysfsDevName strips the /dev/ prefix to get the kernel name
-// as it appears in /sys/class/block/.
 func (s *SysFSDataProvider) SysfsDevName(devPath string) string {
 	return strings.TrimPrefix(devPath, "/dev/")
 }
@@ -72,9 +70,6 @@ func (s *SysFSDataProvider) ReadSysfsRotational(devName string) (bool, error) {
 	return strings.TrimSpace(string(data)) == "1", nil
 }
 
-// ReadSysfsHotplug mirrors util-linux sysfs_blkdev_is_hotpluggable() (lib/sysfs.c):
-// walk the device path upward, checking for a "removable" file at each level;
-// "removable" -> true, "fixed" -> false.
 func (s *SysFSDataProvider) ReadSysfsHotplug(devName string) (bool, error) {
 	devName = s.SysfsDevName(devName)
 	symlinkPath := filepath.Join(s.classBlockPath, devName)
@@ -118,8 +113,6 @@ func (s *SysFSDataProvider) ReadSysfsSlaves(devName string) ([]string, error) {
 	return names, nil
 }
 
-// resolveParentForPartition returns the parent disk name for partitions
-// so rotational reads target the backing device.
 func (s *SysFSDataProvider) resolveParentForPartition(devName string) string {
 	devName = s.SysfsDevName(devName)
 	if !s.IsPartition(devName) {
@@ -137,8 +130,6 @@ func (s *SysFSDataProvider) IsPartition(devName string) bool {
 	return err == nil
 }
 
-// ParentFromSysfs returns the parent block device name from the
-// /sys/class/block/<part> symlink structure.
 func (s *SysFSDataProvider) ParentFromSysfs(devName string) string {
 	devName = s.SysfsDevName(devName)
 	link, err := os.Readlink(filepath.Join(s.classBlockPath, devName))
@@ -152,8 +143,6 @@ func (s *SysFSDataProvider) ParentFromSysfs(devName string) string {
 	return parent
 }
 
-// scsiTypeName maps sysfs device/type (SCSI peripheral type) to lsblk TYPE strings.
-// Matches blkdev_scsi_type_to_name() in util-linux lib/blkdev.c.
 func (s *SysFSDataProvider) scsiTypeName(code int) string {
 	switch code {
 	case 0x00:
