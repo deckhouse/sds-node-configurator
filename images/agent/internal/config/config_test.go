@@ -1,17 +1,17 @@
 /*
-Copyright 2025 Flant JSC
+	Copyright 2026 Flant JSC
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+		http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
 */
 
 package config
@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewConfig(t *testing.T) {
@@ -132,5 +133,41 @@ func TestNewConfig(t *testing.T) {
 			assert.Equal(t, expMetricsPort, opts.MetricsPort)
 			assert.Equal(t, expMachineID, opts.MachineID)
 		}
+	})
+
+	t.Run("NetlinkBlockDeviceDiscoveryNotSet_ReturnsDefaultFalse", func(t *testing.T) {
+		require.NoError(t, os.Setenv(NodeName, "test-node"))
+		require.NoError(t, os.Setenv(MachineID, "test-id"))
+		defer os.Clearenv()
+
+		cfg, err := NewConfig()
+
+		if assert.NoError(t, err) {
+			assert.False(t, cfg.Features.NetlinkBlockDeviceDiscovery)
+		}
+	})
+
+	t.Run("NetlinkBlockDeviceDiscoveryTrue_ReturnsTrue", func(t *testing.T) {
+		require.NoError(t, os.Setenv(NodeName, "test-node"))
+		require.NoError(t, os.Setenv(MachineID, "test-id"))
+		require.NoError(t, os.Setenv(NetlinkBlockDeviceDiscovery, "true"))
+		defer os.Clearenv()
+
+		cfg, err := NewConfig()
+
+		if assert.NoError(t, err) {
+			assert.True(t, cfg.Features.NetlinkBlockDeviceDiscovery)
+		}
+	})
+
+	t.Run("NetlinkBlockDeviceDiscoveryInvalid_ReturnsError", func(t *testing.T) {
+		require.NoError(t, os.Setenv(NodeName, "test-node"))
+		require.NoError(t, os.Setenv(MachineID, "test-id"))
+		require.NoError(t, os.Setenv(NetlinkBlockDeviceDiscovery, "not-a-bool"))
+		defer os.Clearenv()
+
+		_, err := NewConfig()
+
+		assert.EqualError(t, err, fmt.Sprintf("[NewConfig] invalid value for %s: %q", NetlinkBlockDeviceDiscovery, "not-a-bool"))
 	})
 }

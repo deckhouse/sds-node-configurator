@@ -19,3 +19,9 @@ properties:
     type: boolean
     default: true
     description: Enable support of thin LVM volumes.
+  enableNetlinkBlockDeviceDiscovery:
+    type: boolean
+    default: false
+    description: |
+      Use netlink/sysfs instead of `lsblk` as the data source for block device discovery on the agent.
+      When disabled, the agent discovers block devices via `lsblk`.

@@ -208,6 +208,8 @@ spec:
 {{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
             value: "4"
 {{- end }}
+          - name: ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY
+            value: {{ .Values.sdsNodeConfigurator.enableNetlinkBlockDeviceDiscovery | quote }}
         # Privileged mode is required to use nsenter and execute host-level commands like lvm and lsblk.
         securityContext:
           privileged: true
