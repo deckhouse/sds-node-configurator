@@ -96,12 +96,13 @@ func (s *scanner) Run(
 		crawlerDevs, crawlErr := s.collectCrawlerDevices(ctx, matcher)
 		if crawlErr != nil {
 			log.Error(crawlErr, "[RunScanner] Failed to collect crawler devices")
+		} else {
+			fillErr := s.deviceMap.FillFromCrawler(ctx, crawlerDevs)
+			if fillErr != nil {
+				log.Error(fillErr, "[RunScanner] Failed to fill device map")
+			}
 		}
 
-		fillErr := s.deviceMap.FillFromCrawler(ctx, crawlerDevs)
-		if fillErr != nil {
-			log.Error(fillErr, "[RunScanner] Failed to fill device map")
-		}
 		log.Info(fmt.Sprintf("[RunScanner] initial crawl found %d block devices", s.deviceMap.Len()))
 	}
 
@@ -157,10 +158,11 @@ func (s *scanner) Run(
 				devs, crErr := s.collectCrawlerDevices(ctx, matcher)
 				if crErr != nil {
 					log.Error(crErr, "[RunScanner] unable to collect crawler devices")
-				}
-				fErr := s.deviceMap.FillFromCrawler(ctx, devs)
-				if fErr != nil {
-					log.Error(fErr, "[RunScanner] unable to fill device map")
+				} else {
+					fillErr := s.deviceMap.FillFromCrawler(ctx, devs)
+					if fillErr != nil {
+						log.Error(fillErr, "[RunScanner] Failed to fill device map")
+					}
 				}
 				log.Info(fmt.Sprintf("[RunScanner] re-crawl found %d block devices", s.deviceMap.Len()))
 			}
