@@ -64,6 +64,31 @@ func (f *fakeSysfs) createPartitionSymlink(t *testing.T, parent, part string) {
 	require.NoError(t, os.Symlink(targetDir, filepath.Join(f.classBlockPath, part)))
 }
 
+// linkBlockDevice points /sys/class/block/<dev> at the given real directory,
+// mimicking the symlink that the kernel creates for a gendisk.
+func (f *fakeSysfs) linkBlockDevice(t *testing.T, dev, targetDir string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
+	require.NoError(t, os.MkdirAll(f.classBlockPath, 0o755))
+	require.NoError(t, os.Symlink(targetDir, filepath.Join(f.classBlockPath, dev)))
+}
+
+// setSubsystem creates a bus directory and links <dir>/subsystem to it,
+// mimicking the sysfs "subsystem" symlink on a device node.
+func (f *fakeSysfs) setSubsystem(t *testing.T, dir, name string) {
+	t.Helper()
+	busDir := filepath.Join(f.root, "sys", "bus", name)
+	require.NoError(t, os.MkdirAll(busDir, 0o755))
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.Symlink(busDir, filepath.Join(dir, "subsystem")))
+}
+
+// writeBlockRemovable writes the gendisk 0/1 "removable" attribute for dev.
+func (f *fakeSysfs) writeBlockRemovable(t *testing.T, dev, value string) {
+	t.Helper()
+	f.writeFile(t, dev, "removable", value)
+}
+
 // ================== SysfsDevName ==================
 
 func TestSysfsDevName(t *testing.T) {
@@ -154,15 +179,12 @@ func TestReadSysfsHotplug_USBDisk(t *testing.T) {
 	devicesPath := filepath.Join(f.root, "devices", "pci0000:00", "0000:00:14.0", "usb1", "1-1", "1-1:1.0", "host0", "target0:0:0", "0:0:0:0", "block", "sdb")
 	usbPortPath := filepath.Join(f.root, "devices", "pci0000:00", "0000:00:14.0", "usb1", "1-1")
 
-	require.NoError(t, os.MkdirAll(devicesPath, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(usbPortPath, "removable"), []byte("removable\n"), 0o644))
-
-	require.NoError(t, os.MkdirAll(f.classBlockPath, 0o755))
-	require.NoError(t, os.Symlink(devicesPath, filepath.Join(f.classBlockPath, "sdb")))
+	f.linkBlockDevice(t, "sdb", devicesPath)
+	f.setSubsystem(t, usbPortPath, "usb")
 
 	hotplug, err := f.provider.ReadSysfsHotplug("sdb")
 	require.NoError(t, err)
-	assert.True(t, hotplug, "USB disk should be hotpluggable")
+	assert.True(t, hotplug, "USB disk should be hotpluggable via ancestor subsystem")
 }
 
 func TestReadSysfsHotplug_WithDevPrefix(t *testing.T) {
@@ -171,46 +193,55 @@ func TestReadSysfsHotplug_WithDevPrefix(t *testing.T) {
 	devicesPath := filepath.Join(f.root, "devices", "pci0000:00", "0000:00:14.0", "usb1", "1-1", "1-1:1.0", "host0", "target0:0:0", "0:0:0:0", "block", "sdb")
 	usbPortPath := filepath.Join(f.root, "devices", "pci0000:00", "0000:00:14.0", "usb1", "1-1")
 
-	require.NoError(t, os.MkdirAll(devicesPath, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(usbPortPath, "removable"), []byte("removable\n"), 0o644))
-
-	require.NoError(t, os.MkdirAll(f.classBlockPath, 0o755))
-	require.NoError(t, os.Symlink(devicesPath, filepath.Join(f.classBlockPath, "sdb")))
+	f.linkBlockDevice(t, "sdb", devicesPath)
+	f.setSubsystem(t, usbPortPath, "usb")
 
 	hotplug, err := f.provider.ReadSysfsHotplug("/dev/sdb")
 	require.NoError(t, err)
 	assert.True(t, hotplug)
 }
 
+func TestReadSysfsHotplug_OwnRemovableAttr(t *testing.T) {
+	f := newFakeSysfs(t)
+
+	devicesPath := filepath.Join(f.root, "devices", "pci0000:00", "0000:00:1f.2", "ata2", "host1", "target1:0:0", "1:0:0:0", "block", "sr0")
+	pciPath := filepath.Join(f.root, "devices", "pci0000:00", "0000:00:1f.2")
+
+	f.linkBlockDevice(t, "sr0", devicesPath)
+	f.setSubsystem(t, pciPath, "pci")
+	f.writeBlockRemovable(t, "sr0", "1\n")
+
+	hotplug, err := f.provider.ReadSysfsHotplug("sr0")
+	require.NoError(t, err)
+	assert.True(t, hotplug, "device with gendisk removable==1 should be hotpluggable")
+}
+
 func TestReadSysfsHotplug_SATADisk(t *testing.T) {
 	f := newFakeSysfs(t)
 
 	devicesPath := filepath.Join(f.root, "devices", "pci0000:00", "0000:00:1f.2", "ata1", "host0", "target0:0:0", "0:0:0:0", "block", "sda")
+	scsiDevicePath := filepath.Join(f.root, "devices", "pci0000:00", "0000:00:1f.2", "ata1", "host0", "target0:0:0", "0:0:0:0")
 	pciPath := filepath.Join(f.root, "devices", "pci0000:00", "0000:00:1f.2")
 
-	require.NoError(t, os.MkdirAll(devicesPath, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(pciPath, "removable"), []byte("fixed\n"), 0o644))
-
-	require.NoError(t, os.MkdirAll(f.classBlockPath, 0o755))
-	require.NoError(t, os.Symlink(devicesPath, filepath.Join(f.classBlockPath, "sda")))
+	f.linkBlockDevice(t, "sda", devicesPath)
+	f.setSubsystem(t, scsiDevicePath, "scsi")
+	f.setSubsystem(t, pciPath, "pci")
+	f.writeBlockRemovable(t, "sda", "0\n")
 
 	hotplug, err := f.provider.ReadSysfsHotplug("sda")
 	require.NoError(t, err)
-	assert.False(t, hotplug, "SATA disk should not be hotpluggable")
+	assert.False(t, hotplug, "fixed SATA/SCSI disk should not be hotpluggable")
 }
 
 func TestReadSysfsHotplug_NoRemovableFile(t *testing.T) {
 	f := newFakeSysfs(t)
 
 	devicesPath := filepath.Join(f.root, "devices", "virtual", "block", "dm-0")
-	require.NoError(t, os.MkdirAll(devicesPath, 0o755))
-
-	require.NoError(t, os.MkdirAll(f.classBlockPath, 0o755))
-	require.NoError(t, os.Symlink(devicesPath, filepath.Join(f.classBlockPath, "dm-0")))
+	f.linkBlockDevice(t, "dm-0", devicesPath)
 
 	hotplug, err := f.provider.ReadSysfsHotplug("dm-0")
 	require.NoError(t, err)
-	assert.False(t, hotplug, "virtual device with no removable file should not be hotpluggable")
+	assert.False(t, hotplug, "virtual device with no removable and no hotpluggable subsystem")
 }
 
 func TestReadSysfsHotplug_NotSymlink(t *testing.T) {
@@ -221,7 +252,15 @@ func TestReadSysfsHotplug_NotSymlink(t *testing.T) {
 
 	hotplug, err := f.provider.ReadSysfsHotplug("sda")
 	require.NoError(t, err)
-	assert.False(t, hotplug, "plain directory with no removable ancestors")
+	assert.False(t, hotplug, "plain directory with no removable and no hotpluggable subsystem")
+}
+
+func TestReadSysfsHotplug_Nonexistent(t *testing.T) {
+	f := newFakeSysfs(t)
+
+	hotplug, err := f.provider.ReadSysfsHotplug("nonexistent")
+	require.NoError(t, err)
+	assert.False(t, hotplug, "missing device entry should not error")
 }
 
 func TestReadSysfsHotplug_PartitionOnFixedDisk(t *testing.T) {
@@ -230,11 +269,8 @@ func TestReadSysfsHotplug_PartitionOnFixedDisk(t *testing.T) {
 	devicesPath := filepath.Join(f.root, "devices", "pci0000:00", "0000:00:1f.2", "ata1", "host0", "target0:0:0", "0:0:0:0", "block", "sda")
 	pciPath := filepath.Join(f.root, "devices", "pci0000:00", "0000:00:1f.2")
 
-	require.NoError(t, os.MkdirAll(devicesPath, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(pciPath, "removable"), []byte("fixed\n"), 0o644))
-
-	require.NoError(t, os.MkdirAll(f.classBlockPath, 0o755))
-	require.NoError(t, os.Symlink(devicesPath, filepath.Join(f.classBlockPath, "sda")))
+	f.linkBlockDevice(t, "sda", devicesPath)
+	f.setSubsystem(t, pciPath, "pci")
 
 	sda1DevicesPath := filepath.Join(devicesPath, "sda1")
 	require.NoError(t, os.MkdirAll(sda1DevicesPath, 0o755))
@@ -252,11 +288,8 @@ func TestReadSysfsHotplug_PartitionOnUSBDisk(t *testing.T) {
 	devicesPath := filepath.Join(f.root, "devices", "pci0000:00", "0000:00:14.0", "usb1", "1-1", "1-1:1.0", "host0", "target0:0:0", "0:0:0:0", "block", "sdb")
 	usbPortPath := filepath.Join(f.root, "devices", "pci0000:00", "0000:00:14.0", "usb1", "1-1")
 
-	require.NoError(t, os.MkdirAll(devicesPath, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(usbPortPath, "removable"), []byte("removable\n"), 0o644))
-
-	require.NoError(t, os.MkdirAll(f.classBlockPath, 0o755))
-	require.NoError(t, os.Symlink(devicesPath, filepath.Join(f.classBlockPath, "sdb")))
+	f.linkBlockDevice(t, "sdb", devicesPath)
+	f.setSubsystem(t, usbPortPath, "usb")
 
 	sdb1DevicesPath := filepath.Join(devicesPath, "sdb1")
 	require.NoError(t, os.MkdirAll(sdb1DevicesPath, 0o755))
@@ -265,7 +298,7 @@ func TestReadSysfsHotplug_PartitionOnUSBDisk(t *testing.T) {
 
 	hotplug, err := f.provider.ReadSysfsHotplug("sdb1")
 	require.NoError(t, err)
-	assert.True(t, hotplug, "partition on USB disk should be hotpluggable")
+	assert.True(t, hotplug, "partition on USB disk should be hotpluggable via ancestor subsystem")
 }
 
 // ================== ReadSysfsSlaves ==================

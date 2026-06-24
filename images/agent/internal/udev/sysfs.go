@@ -17,6 +17,7 @@
 package udev
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,6 +31,16 @@ const (
 
 	sectorSize = 512
 )
+
+// hotplugSubsystems lists the sysfs bus subsystems that lsblk treats as
+// hotpluggable (util-linux lib/sysfs.c, sysfs_blkdev_is_hotpluggable).
+var hotplugSubsystems = map[string]struct{}{
+	"usb":      {},
+	"ieee1394": {},
+	"pcmcia":   {},
+	"mmc":      {},
+	"memstick": {},
+}
 
 type SysFSDataProvider struct {
 	classBlockPath string
@@ -70,27 +81,38 @@ func (s *SysFSDataProvider) ReadSysfsRotational(devName string) (bool, error) {
 	return strings.TrimSpace(string(data)) == "1", nil
 }
 
+// ReadSysfsHotplug mirrors lsblk's sysfs_blkdev_is_hotpluggable
+// (util-linux lib/sysfs.c): a device is hotpluggable if its gendisk
+// "removable" integer attribute is 1, or if any ancestor in its sysfs
+// device chain belongs to a hotpluggable bus subsystem (usb, ieee1394,
+// pcmcia, mmc, memstick).
 func (s *SysFSDataProvider) ReadSysfsHotplug(devName string) (bool, error) {
 	devName = s.SysfsDevName(devName)
-	symlinkPath := filepath.Join(s.classBlockPath, devName)
-	resolved, err := filepath.EvalSymlinks(symlinkPath)
+
+	if removable, err := os.ReadFile(filepath.Join(s.classBlockPath, devName, "removable")); err == nil {
+		if strings.TrimSpace(string(removable)) == "1" {
+			return true, nil
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("reading removable for %s: %w", devName, err)
+	}
+
+	resolved, err := filepath.EvalSymlinks(filepath.Join(s.classBlockPath, devName))
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
 		return false, fmt.Errorf("resolving symlink for %s: %w", devName, err)
 	}
 
-	dir := resolved
-	for dir != "/" && dir != "." {
-		data, err := os.ReadFile(filepath.Join(dir, "removable"))
-		if err == nil {
-			content := strings.TrimSpace(string(data))
-			if content == "removable" {
-				return true, nil
-			}
-			if content == "fixed" {
-				return false, nil
-			}
+	for dir := resolved; dir != "/" && dir != "."; dir = filepath.Dir(dir) {
+		target, err := os.Readlink(filepath.Join(dir, "subsystem"))
+		if err != nil {
+			continue
 		}
-		dir = filepath.Dir(dir)
+		if _, ok := hotplugSubsystems[filepath.Base(target)]; ok {
+			return true, nil
+		}
 	}
 
 	return false, nil
