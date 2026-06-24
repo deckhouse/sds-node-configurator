@@ -279,7 +279,7 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	}
 
 	if scanDevErr != nil {
-		return err
+		return scanDevErr
 	}
 
 	if activated := utils.EnsureVGActivation(ctx, log, s.commands, metrics, vgs, lvs, cfg.CmdDeadlineDuration); activated {
