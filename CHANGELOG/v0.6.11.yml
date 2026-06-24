@@ -1,0 +1,6 @@
+Changes:
+- When transferring an existing VG under module control, an empty blockDeviceSelector
+  is no longer created
+- After pvcreate/vgcreate, the agent updates the udev database so that new devices
+  are reflected correctly
+- Updating container-base images to v1.1.2
