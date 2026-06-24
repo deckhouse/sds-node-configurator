@@ -100,7 +100,6 @@ func run() int {
 	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.BlockDeviceScanInterval.String()))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.ThrottleInterval, cfgParams.ThrottleInterval.String()))
 	log.Info(fmt.Sprintf("[main] %s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDuration.String()))
-	log.Info(fmt.Sprintf("[main] %s = %t", config.NetlinkBlockDeviceDiscovery, cfgParams.Features.NetlinkBlockDeviceDiscovery))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
