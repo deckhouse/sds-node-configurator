@@ -39,7 +39,10 @@ func isApplied(lvg *v1alpha1.LVMVolumeGroup) bool {
 }
 
 func isThinPool(lv internal.LVData) bool {
-	return string(lv.LVAttr[0]) == "t"
+	// LVAttr may be empty for an LV observed by lvs in a transient state
+	// (e.g. mid create/delete); guard the index to avoid panicking the
+	// whole discover reconcile. Mirrors utils.IsLVThinPool.
+	return len(lv.LVAttr) > 0 && lv.LVAttr[0] == 't'
 }
 
 func getVGAllocatedSize(vg internal.VGData) resource.Quantity {

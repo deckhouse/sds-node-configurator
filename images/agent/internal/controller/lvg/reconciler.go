@@ -1016,7 +1016,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 ) error {
 	actualThinPools := make(map[string]internal.LVData, len(lvs))
 	for _, lv := range lvs {
-		if string(lv.LVAttr[0]) == "t" {
+		if isThinPool(lv) {
 			actualThinPools[lv.LVName] = lv
 		}
 	}

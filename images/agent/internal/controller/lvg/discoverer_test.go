@@ -84,6 +84,31 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		assert.Equal(t, expected, actual)
 	})
 
+	t.Run("getThinPools_skips_lv_with_empty_attr_without_panicking", func(t *testing.T) {
+		// An LV observed by lvs in a transient state may have an empty
+		// lv_attr; getThinPools must not panic on it (index out of range).
+		lvs := []internal.LVData{
+			{
+				LVName: "lv_with_empty_attr",
+				LVAttr: "",
+			},
+			{
+				LVName: "thinPool",
+				LVAttr: "twi-aotz--",
+			},
+		}
+
+		expected := []internal.LVData{
+			{
+				LVName: "thinPool",
+				LVAttr: "twi-aotz--",
+			},
+		}
+
+		actual := getThinPools(lvs)
+		assert.Equal(t, expected, actual)
+	})
+
 	t.Run("checkVGHealth_returns_Operational", func(t *testing.T) {
 		const (
 			vgName = "testVg"
