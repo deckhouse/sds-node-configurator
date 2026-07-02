@@ -1,5 +1,7 @@
 name: sds-node-configurator
 stage: "General Availability"
+subsystems:
+  - storage
 descriptions:
   en: "Manages block devices and LVM on cluster nodes."
   ru: "Управляет блочными устройствами и LVM на узлах кластера."
