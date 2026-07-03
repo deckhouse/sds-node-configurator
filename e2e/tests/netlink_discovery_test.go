@@ -81,7 +81,7 @@ var _ = Describe("BlockDevice netlink discovery", Label("e2e-tests"), Ordered, C
 		Expect(vms).NotTo(BeEmpty())
 
 		for _, vm := range vms {
-			if strings.HasPrefix(vm, "bootstrap-node-") {
+			if strings.HasPrefix(vm, e2eBootstrapGuestVMPrefix) {
 				continue
 			}
 

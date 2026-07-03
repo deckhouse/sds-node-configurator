@@ -29,11 +29,11 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	gossh "golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
-	gossh "golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
 
 	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
 )
@@ -124,38 +124,56 @@ func e2eExpandPath(path string) (string, error) {
 	return filepath.Join(usr.HomeDir, strings.TrimPrefix(path, "~/")), nil
 }
 
-// e2eGetSSHPrivateKeyPath resolves SSH_PRIVATE_KEY (file path or base64 PEM) to a readable key file.
+// e2eGetSSHPrivateKeyPath resolves the node-SSH private key to a readable key
+// file. It accepts a file path, a base64-encoded PEM, or raw PEM content, from
+// SSH_PRIVATE_KEY with a fallback to E2E_DVP_BASE_CLUSTER_SSH_PRIVATE_KEY (the
+// dvp provider scheme supplies the base-cluster/VM key as raw PEM content, used
+// for both the bastion and the node hop).
 func e2eGetSSHPrivateKeyPath() (string, error) {
 	key := strings.TrimSpace(os.Getenv("SSH_PRIVATE_KEY"))
 	if key == "" {
+		key = strings.TrimSpace(os.Getenv("E2E_DVP_BASE_CLUSTER_SSH_PRIVATE_KEY"))
+	}
+	if key == "" {
 		key = "~/.ssh/id_rsa"
 	}
+
+	// Raw PEM content (e.g. the dvp base-cluster key): materialize to a temp file.
+	if strings.Contains(key, "-----BEGIN") {
+		return e2eWriteTempKeyFile([]byte(key))
+	}
+
 	looksLikePath := strings.Contains(key, "/") || strings.HasPrefix(key, "~") || strings.Contains(key, "\\")
 	if !looksLikePath {
 		decoded, err := base64.StdEncoding.DecodeString(key)
 		if err == nil && len(decoded) > 0 {
-			tmp, err := os.CreateTemp("", "e2e_ssh_private_key_*")
-			if err != nil {
-				return "", fmt.Errorf("create temp key file: %w", err)
-			}
-			name := tmp.Name()
-			if _, err := tmp.Write(decoded); err != nil {
-				_ = tmp.Close()
-				_ = os.Remove(name)
-				return "", fmt.Errorf("write temp key file: %w", err)
-			}
-			if err := tmp.Close(); err != nil {
-				_ = os.Remove(name)
-				return "", fmt.Errorf("close temp key file: %w", err)
-			}
-			if err := os.Chmod(name, 0o600); err != nil {
-				_ = os.Remove(name)
-				return "", fmt.Errorf("chmod temp key file: %w", err)
-			}
-			return name, nil
+			return e2eWriteTempKeyFile(decoded)
 		}
 	}
 	return e2eExpandPath(key)
+}
+
+// e2eWriteTempKeyFile writes private-key bytes to a 0600 temp file and returns its path.
+func e2eWriteTempKeyFile(data []byte) (string, error) {
+	tmp, err := os.CreateTemp("", "e2e_ssh_private_key_*")
+	if err != nil {
+		return "", fmt.Errorf("create temp key file: %w", err)
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return "", fmt.Errorf("write temp key file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", fmt.Errorf("close temp key file: %w", err)
+	}
+	if err := os.Chmod(name, 0o600); err != nil {
+		_ = os.Remove(name)
+		return "", fmt.Errorf("chmod temp key file: %w", err)
+	}
+	return name, nil
 }
 
 func e2eCreateSSHClientConfig(user, keyPath string) (*gossh.ClientConfig, error) {

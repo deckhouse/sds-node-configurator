@@ -12,12 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Thin caller for the storage-e2e reusable workflow.
-# The heavy e2e pipeline (resolve -> bootstrap -> run-tests -> teardown) lives in
-# deckhouse/storage-e2e/.github/workflows/e2e.yml. This job only gates on the
-# `e2e/run` PR label and delegates, inheriting the org/repo secrets.
-# Required PR labels: e2e/run, e2e/keep-cluster, e2e/label:* — see
-# https://github.com/deckhouse/storage-e2e#ci-reusable-workflow
+# Thin caller for the reusable storage-e2e pipeline (dvp provider). The heavy
+# e2e run only fires when the PR carries the `e2e/dvp/run` label (set it on the
+# PR to trigger). Other labels handled by the reusable pipeline:
+# `e2e/keep-cluster` (skip teardown), `e2e/label:<suite>` (Ginkgo label filter).
+# See storage-e2e docs/CI.md for the secrets/vars to configure.
+#
+# Flow: bootstrap (cmd/bootstrap-cluster: provision VMs on the DVP base cluster,
+# dhctl-bootstrap the nested cluster, join nodes, enable modules from
+# cluster_config) -> run-tests (the suite connects through the dvp provider:
+# dvp.Connect -> nested API, dvp.ConnectBase -> base cluster for VirtualDisk ops)
+# -> teardown (cmd/remove-cluster).
 
 name: E2E
 
@@ -27,12 +32,23 @@ on:
 
 jobs:
   e2e:
-    if: ${{ contains(github.event.pull_request.labels.*.name, 'e2e/run') }}
-    uses: deckhouse/storage-e2e/.github/workflows/e2e.yml@main
+    # Gate: run only when the PR is labeled e2e/dvp/run.
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'e2e/dvp/run') }}
+    uses: deckhouse/storage-e2e/.github/workflows/e2e.yml@feat/dvp-provider-connect
     with:
       module_slug: sds-node-configurator
+      # The e2e Go module lives under e2e/; tests are in e2e/tests/.
       module_path: e2e
       test_package: ./tests/
-      cluster_config: e2e/tests/cluster_config.yml
+      # Everything except the max-VG stress spec (matches the local `make test` smoke).
+      label_filter: "!stress-test"
+      # CI config: sds-node-configurator modulePullOverride is ${E2E_MODULE_IMAGE_TAG},
+      # resolved during bootstrap to the PR image tag below.
+      cluster_config: e2e/tests/cluster_config.ci.yml
+      # Bring up a fresh nested cluster on the DVP base cluster for each run.
       cluster_provider: dvp
+      # Check out the same storage-e2e ref for scripts / cmd / Go code.
+      storage_e2e_ref: feat/dvp-provider-connect
+      # Install the image built for this PR (build_dev publishes the pr<N> tag).
+      module_image_tag: pr${{ github.event.pull_request.number }}
     secrets: inherit

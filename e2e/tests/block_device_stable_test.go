@@ -68,7 +68,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 		Expect(vms).NotTo(BeEmpty())
 
 		for _, vm := range vms {
-			if strings.HasPrefix(vm, "bootstrap-node-") {
+			if strings.HasPrefix(vm, e2eBootstrapGuestVMPrefix) {
 				continue
 			}
 			targetVM = vm

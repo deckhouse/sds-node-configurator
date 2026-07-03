@@ -163,7 +163,7 @@ mkdir -p "$GOMODCACHE" "$GOCACHE"
 cd e2e && go mod download && go test ...
 ```
 
-**Alternative (local):** `make deps` from `e2e/` runs `fix-mod-permissions` (chmod + `mkdir` under your current `GOPATH`/`GOMODCACHE`), which helps only if that cache is writable by your user.
+> Note: the old `make fix-mod-permissions` workaround (chmod + `mkdir` inside the storage-e2e module cache, plus local source patches under `patches/`) has been removed. With storage-e2e ≥ the dvp-provider revision the suite no longer writes under the module path, so no cache patching is needed.
 
 ### 6. Virtualization module stuck in `Reconciling`
 

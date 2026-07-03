@@ -352,6 +352,17 @@ func e2eEnsureSharedNestedTestCluster() {
 	if e2eNestedTestCluster != nil {
 		return
 	}
+	// Provider-based scheme (E2E_TEST_CLUSTER_PROVIDER set, e.g. dvp): the cluster
+	// and its modules were brought up out-of-band by cmd/bootstrap-cluster, so the
+	// suite only connects. cluster.CreateOrConnectToTestCluster runs the provider
+	// connector (dvp.Connect -> nested API; dvp.ConnectBase -> base cluster for
+	// VirtualDisk ops, surfaced as res.BaseKubeconfig) and acquires the lock. This
+	// takes precedence over the legacy TEST_CLUSTER_CREATE_MODE branches below.
+	if os.Getenv("E2E_TEST_CLUSTER_PROVIDER") != "" {
+		r := cluster.CreateOrConnectToTestCluster()
+		e2eRegisterNestedTestCluster(r)
+		return
+	}
 	switch e2eConfigTestClusterCreateMode() {
 	case testClusterModeCreateNew:
 		r := createE2EAlwaysNewClusterWithCleanupOnFailure()
