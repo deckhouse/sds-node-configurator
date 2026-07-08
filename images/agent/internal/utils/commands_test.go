@@ -17,6 +17,7 @@ limitations under the License.
 package utils
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -508,4 +509,55 @@ func TestUdevadmTriggerEmptyPathsIsNoop(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Empty(t, out)
 	})
+}
+
+func TestFilterStdErr(t *testing.T) {
+	const cmd = "lvextend -l 100%VG /dev/vg/lv"
+
+	tests := []struct {
+		name     string
+		stdErr   string
+		filtered bool // true if the whole output is expected to be filtered out
+	}{
+		{
+			name:     "old_lvm_no_size_change",
+			stdErr:   "  No size change.",
+			filtered: true,
+		},
+		{
+			name:     "new_lvm_matches_existing_size",
+			stdErr:   "  New size (953801 extents) matches existing size (953801 extents).",
+			filtered: true,
+		},
+		{
+			name:     "regex_version_mismatch",
+			stdErr:   "Regex version mismatch, expected: 10.42 2022-12-11 actual: 10.34 2019-11-21",
+			filtered: true,
+		},
+		{
+			name:     "file_descriptor_leaked",
+			stdErr:   "File descriptor 7 leaked on lvm invocation. Parent PID 1: /opt/deckhouse/sds/bin/nsenter",
+			filtered: true,
+		},
+		{
+			name:     "real_error_is_kept",
+			stdErr:   "  Volume group \"vg\" not found.",
+			filtered: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			buf.WriteString(tt.stdErr)
+
+			result := filterStdErr(cmd, buf)
+
+			if tt.filtered {
+				assert.Equal(t, 0, result.Len(), "expected stderr to be fully filtered, got: %q", result.String())
+			} else {
+				assert.Contains(t, result.String(), tt.stdErr)
+			}
+		})
+	}
 }
