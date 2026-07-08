@@ -891,7 +891,10 @@ func filterStdErr(command string, stdErr bytes.Buffer) bytes.Buffer {
 	// this needs as if the controller were restarted and found existing LVG thin-pools with size equals 100%VG space,
 	// as the Thin-pool size on the node might be less than Spec one even with delta (because of metadata). So the controller
 	// will try to resize the Thin-pool with 100%VG space and will get the error.
-	regexpNoSizeChangeError := ` No size change.+`
+	// Different LVM versions report a no-op resize differently: older ones print "No size change.",
+	// newer ones (e.g. 2.03.16) print "New size (<n> extents) matches existing size (<n> extents).".
+	// Both mean the LV is already at the requested size and must be treated as a benign no-op.
+	regexpNoSizeChangeError := ` (No size change\..*|New size \(.+\) matches existing size \(.+\)\.)`
 	regex1, err := regexp.Compile(regexpPattern)
 	if err != nil {
 		return stdErr
