@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-node-configurator/images/controller
 
-go 1.26.4
+go 1.26.5
 require (
 	github.com/cloudflare/cfssl v1.6.5
 	github.com/deckhouse/sds-common-lib v0.5.0

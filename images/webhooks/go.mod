@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-node-configurator/images/webhooks
 
-go 1.26.4
+go 1.26.5
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250206203415-a9ffd855f5a3
 	github.com/deckhouse/sds-node-configurator/lib/go/common v0.0.0-00010101000000-000000000000
