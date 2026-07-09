@@ -1,6 +1,7 @@
 module github.com/deckhouse/sds-node-configurator/images/webhooks
 
 go 1.26.5
+
 require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250206203415-a9ffd855f5a3
 	github.com/deckhouse/sds-node-configurator/lib/go/common v0.0.0-00010101000000-000000000000
@@ -22,9 +23,9 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	golang.org/x/net v0.39.0 // indirect
-	golang.org/x/sys v0.32.0 // indirect
-	golang.org/x/text v0.24.0 // indirect
+	golang.org/x/net v0.54.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	k8s.io/api v0.33.0 // indirect
 	k8s.io/client-go v0.32.1 // indirect
