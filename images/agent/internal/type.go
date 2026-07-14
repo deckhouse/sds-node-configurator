@@ -89,13 +89,14 @@ type PV struct {
 }
 
 type PVData struct {
-	PVName string            `json:"pv_name,omitempty"`
-	VGName string            `json:"vg_name,omitempty"`
-	PVSize resource.Quantity `json:"pv_size,omitempty"`
-	PVUsed string            `json:"pv_used,omitempty"`
-	PVUuid string            `json:"pv_uuid,omitempty"`
-	VGTags string            `json:"vg_tags,omitempty"`
-	VGUuid string            `json:"vg_uuid,omitempty"`
+	PVName  string            `json:"pv_name,omitempty"`
+	VGName  string            `json:"vg_name,omitempty"`
+	PVSize  resource.Quantity `json:"pv_size,omitempty"`
+	PVUsed  string            `json:"pv_used,omitempty"`
+	PVUuid  string            `json:"pv_uuid,omitempty"`
+	VGTags  string            `json:"vg_tags,omitempty"`
+	VGUuid  string            `json:"vg_uuid,omitempty"`
+	PEStart resource.Quantity `json:"pe_start,omitempty"`
 }
 
 type VGReport struct {

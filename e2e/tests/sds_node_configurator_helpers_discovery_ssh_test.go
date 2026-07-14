@@ -21,6 +21,7 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -30,6 +31,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -176,6 +180,98 @@ func e2eCountPVsOnNode(ctx context.Context, testKubeconfig *rest.Config, nodeNam
 		return 0, out, fmt.Errorf("parse pv count %q: %w", strings.TrimSpace(out), err)
 	}
 	return n, out, nil
+}
+
+func getPVSizeViaDirectSSHWithRetry(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser, pvPath string, maxRetries int, retryInterval time.Duration) (int64, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		size, err := getPVSizeViaDirectSSH(ctx, testKubeconfig, nodeName, sshUser, pvPath)
+		if err == nil {
+			return size, nil
+		}
+		lastErr = err
+		if attempt < maxRetries {
+			GinkgoWriter.Printf("      pvs SSH to %s attempt %d/%d failed: %v; retry in %v\n", nodeName, attempt, maxRetries, err, retryInterval)
+			time.Sleep(retryInterval)
+		}
+	}
+
+	return 0, lastErr
+}
+
+func getPVSizeViaDirectSSH(ctx context.Context, testKubeconfig *rest.Config, nodeName, sshUser, pvPath string) (int64, error) {
+	type pvsReport struct {
+		Report []struct {
+			PV []struct {
+				PVName string `json:"pv_name"`
+				PVSize string `json:"pv_size"`
+			} `json:"pv"`
+		} `json:"report"`
+	}
+
+	out, err := e2eExecOnTestClusterNodeSSH(
+		ctx,
+		testKubeconfig,
+		nodeName,
+		sshUser,
+		fmt.Sprintf("sudo -n pvs --units B --nosuffix -o pv_name,pv_size --reportformat json %q 2>&1", pvPath),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("run pvs for %s on node %s: %w; output:\n%s", pvPath, nodeName, err, out)
+	}
+
+	var report pvsReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		return 0, fmt.Errorf("parse pvs output for %s on node %s: %w", pvPath, nodeName, err)
+	}
+	for _, r := range report.Report {
+		for _, pv := range r.PV {
+			if pv.PVName != pvPath {
+				continue
+			}
+
+			size, parseErr := strconv.ParseInt(strings.TrimSpace(pv.PVSize), 10, 64)
+			if parseErr != nil {
+				return 0, fmt.Errorf("parse pv_size %q for %s on node %s: %w", pv.PVSize, pvPath, nodeName, parseErr)
+			}
+
+			return size, nil
+		}
+	}
+
+	return 0, fmt.Errorf("PV %s not found in pvs output on node %s", pvPath, nodeName)
+}
+
+func countResizePVSuccessLogs(ctx context.Context, testKubeconfig *rest.Config, nodeName, pvPath string) (int, error) {
+	clientset, err := k8sclient.NewForConfig(testKubeconfig)
+	if err != nil {
+		return 0, fmt.Errorf("build kubernetes client for logs: %w", err)
+	}
+
+	pods, err := clientset.CoreV1().Pods("d8-sds-node-configurator").List(ctx, metav1.ListOptions{
+		LabelSelector: "app=sds-node-configurator",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("list sds-node-configurator pods on node %s: %w", nodeName, err)
+	}
+	if len(pods.Items) == 0 {
+		return 0, fmt.Errorf("no sds-node-configurator pod found on node %s", nodeName)
+	}
+
+	sort.Slice(pods.Items, func(i, j int) bool {
+		return pods.Items[i].CreationTimestamp.Before(&pods.Items[j].CreationTimestamp)
+	})
+
+	podName := pods.Items[len(pods.Items)-1].Name
+	data, err := clientset.CoreV1().Pods("d8-sds-node-configurator").GetLogs(podName, &corev1.PodLogOptions{
+		Container: "sds-node-configurator-agent",
+	}).DoRaw(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("read logs for pod %s: %w", podName, err)
+	}
+
+	return strings.Count(string(data), fmt.Sprintf("[ResizePVIfNeeded] successfully resized PV %s", pvPath)), nil
 }
 
 // e2eCountPVsInVGOnNode returns how many PVs belong to vgName according to pvs on the node.
