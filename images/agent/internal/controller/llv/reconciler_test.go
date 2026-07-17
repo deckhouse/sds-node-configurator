@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/mock/gomock"
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,6 +31,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
@@ -846,6 +848,110 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 			assert.Error(t, err)
 		})
 	})
+}
+
+// TestReconcileLLVCreateFunc_ClonedVolumeExtendedToRequestedSize pins the fix
+// for restore/clone from a snapshot or another LV: `lvcreate -s` produces an LV
+// of the origin size, not the requested size. When the requested (extent-aligned)
+// size is larger, the create path must extend the LV before reporting Created —
+// otherwise the CSI CreateVolume call waits forever for a size that never
+// materialises and the PVC stays Pending.
+func TestReconcileLLVCreateFunc_ClonedVolumeExtendedToRequestedSize(t *testing.T) {
+	const (
+		vgActual  = "test-vg"
+		poolName  = "test-pool"
+		llvName   = "restored-llv"
+		llvLVName = "restored-lv"
+		srcName   = "source-llv"
+		srcLVName = "source-lv"
+	)
+	ctx := context.Background()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockCmds := mock_utils.NewMockCommands(ctrl)
+	cl := test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{})
+	r := NewReconciler(cl, logger.Logger{}, monitoring.GetMetrics(""), cache.New(), mockCmds, ReconcilerConfig{})
+
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "test-lvg"},
+		Spec: v1alpha1.LVMVolumeGroupSpec{
+			ActualVGNameOnTheNode: vgActual,
+			Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: "node-1"},
+		},
+		Status: v1alpha1.LVMVolumeGroupStatus{
+			ExtentSize: resource.MustParse("4Mi"),
+			ThinPools: []v1alpha1.LVMVolumeGroupThinPoolStatus{
+				{
+					Name:            poolName,
+					ActualSize:      resource.MustParse("1Gi"),
+					AvailableSpace:  resource.MustParse("1Gi"),
+					AllocationLimit: "150%",
+				},
+			},
+		},
+	}
+
+	sourceLLV := &v1alpha1.LVMLogicalVolume{
+		ObjectMeta: v1.ObjectMeta{Name: srcName},
+		Spec: v1alpha1.LVMLogicalVolumeSpec{
+			ActualLVNameOnTheNode: srcLVName,
+			Type:                  internal.Thin,
+			LVMVolumeGroupName:    lvg.Name,
+			Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
+			Size:                  "36Mi",
+		},
+	}
+	assert.NoError(t, cl.Create(ctx, sourceLLV))
+
+	llv := &v1alpha1.LVMLogicalVolume{
+		ObjectMeta: v1.ObjectMeta{Name: llvName},
+		Spec: v1alpha1.LVMLogicalVolumeSpec{
+			ActualLVNameOnTheNode: llvLVName,
+			Type:                  internal.Thin,
+			LVMVolumeGroupName:    lvg.Name,
+			Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
+			Size:                  "52Mi",
+			Source:                &v1alpha1.LVMLogicalVolumeSource{Kind: "LVMLogicalVolume", Name: srcName},
+		},
+		Status: &v1alpha1.LVMLogicalVolumeStatus{Phase: v1alpha1.PhasePending},
+	}
+	assert.NoError(t, cl.Create(ctx, llv))
+
+	originSize := resource.MustParse("36Mi")    // size the clone inherits from the origin LV
+	requestedSize := resource.MustParse("52Mi") // PVC-requested size, already a multiple of the 4Mi extent
+
+	gomock.InOrder(
+		mockCmds.EXPECT().
+			CreateThinLogicalVolumeFromSource(llvLVName, vgActual, srcLVName).
+			Return("lvcreate -s", nil).
+			Times(1),
+		// right after the clone the LV still reports the origin size
+		mockCmds.EXPECT().
+			GetLV(vgActual, llvLVName).
+			Return(internal.LVData{LVName: llvLVName, VGName: vgActual, LVSize: originSize}, "lvs", bytes.Buffer{}, nil).
+			Times(1),
+		// the clone must be extended to the requested (aligned) size
+		mockCmds.EXPECT().
+			ExtendLV(requestedSize.Value(), vgActual, llvLVName).
+			Return("lvextend", nil).
+			Times(1),
+		// after the extension the LV reports the requested size
+		mockCmds.EXPECT().
+			GetLV(vgActual, llvLVName).
+			Return(internal.LVData{LVName: llvLVName, VGName: vgActual, LVSize: requestedSize}, "lvs", bytes.Buffer{}, nil).
+			Times(1),
+	)
+
+	shouldRequeue, err := r.reconcileLLVCreateFunc(ctx, llv, lvg)
+	assert.NoError(t, err)
+	assert.False(t, shouldRequeue)
+
+	updated := &v1alpha1.LVMLogicalVolume{}
+	assert.NoError(t, cl.Get(ctx, client.ObjectKey{Name: llvName}, updated))
+	assert.Equal(t, v1alpha1.PhaseCreated, updated.Status.Phase)
+	assert.Equal(t, requestedSize.Value(), updated.Status.ActualSize.Value())
 }
 
 func setupReconciler() *Reconciler {
