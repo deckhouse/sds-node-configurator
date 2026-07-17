@@ -20,111 +20,88 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/e2e/cfg"
 	"github.com/deckhouse/sds-node-configurator/e2e/tests/utils/consts"
 	"github.com/deckhouse/storage-e2e/pkg/cluster"
+	"github.com/deckhouse/storage-e2e/pkg/e2e"
 	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var _ = Describe("Block device stability with explicit lifecycle stages", Label("e2e-tests"), Ordered, func() {
+var _ = Describe("Block device stability with explicit lifecycle stages", Label("e2e-tests", "block-device-stable"), Ordered, func() {
 	var (
 		ctx       context.Context
 		res       *cluster.TestClusterResources
 		conf      *cfg.Config
 		k8sClient client.Client
 
-		targetVM                    string
-		initialBlockDevice          kubernetes.BlockDevice
-		virtualDiskAttachmentResult *kubernetes.VirtualDiskAttachmentResult
+		targetNode         string
+		initialBlockDevice kubernetes.BlockDevice
+		virtualDisk        *e2e.Disk
 
-		mpoGVR schema.GroupVersionResource
-		dyn    dynamic.Interface
-	)
+		cl *e2e.Cluster
 
-	BeforeAll(func() {
-		By("Preparing shared test context and Kubernetes clients")
-		ctx = context.Background()
-		res = e2eNestedTestClusterOrNil()
-		Expect(res).NotTo(BeNil())
-		conf = cfg.Load()
-		Expect(conf).NotTo(BeNil())
-		ensureE2EK8sClient(res, &k8sClient, ctx)
-		Expect(k8sClient).NotTo(BeNil())
-
-		By("Listing virtual machines to select target VM")
-		vms, listVmErr := kubernetes.ListVirtualMachineNames(ctx, res.BaseKubeconfig, conf.TestCluster.Namespace)
-		Expect(listVmErr).NotTo(HaveOccurred())
-		Expect(vms).NotTo(BeEmpty())
-
-		for _, vm := range vms {
-			if strings.HasPrefix(vm, "bootstrap-node-") {
-				continue
-			}
-			targetVM = vm
-			break
-		}
-		Expect(targetVM).NotTo(BeEmpty(), "need a non-bootstrap VM for block device stability test")
-
-		ns := conf.TestCluster.Namespace
-		// Fixed names from older runs / interrupted AfterAll — detach best-effort before create.
-		for _, legacy := range []struct{ disk, att string }{
-			{"block-device-stable-readable", "block-device-stable-readable-attachment"},
-		} {
-			_ = kubernetes.DetachAndDeleteVirtualDisk(ctx, res.BaseKubeconfig, ns, legacy.att, legacy.disk)
-		}
-
-		diskName := fmt.Sprintf("e2e-bd-stable-%d", time.Now().Unix())
-		By("Attaching a virtual disk to the target VM: " + diskName)
-		attachResult, attachErr := kubernetes.AttachVirtualDiskToVM(ctx, res.BaseKubeconfig,
-			kubernetes.VirtualDiskAttachmentConfig{
-				VMName:           targetVM,
-				Namespace:        ns,
-				DiskName:         diskName,
-				DiskSize:         "5Gi",
-				StorageClassName: conf.TestCluster.StorageClass,
-			})
-		Expect(attachErr).NotTo(HaveOccurred())
-		Expect(attachResult).NotTo(BeNil())
-
-		By("Waiting for virtual disk attachment to become ready")
-		attachWaitErr := kubernetes.WaitForVirtualDiskAttached(ctx, res.BaseKubeconfig, conf.TestCluster.Namespace,
-			attachResult.AttachmentName, 5*time.Second)
-		Expect(attachWaitErr).NotTo(HaveOccurred())
-
-		virtualDiskAttachmentResult = attachResult
-
-		By("Preparing GVR and K8s dynamic clients")
 		mpoGVR = schema.GroupVersionResource{
 			Group:    "deckhouse.io",
 			Version:  "v1alpha2",
 			Resource: "modulepulloverrides",
 		}
-		var dynErr error
-		dyn, dynErr = kubernetes.NewDynamicClientWithRetry(ctx, res.Kubeconfig)
-		Expect(dynErr).NotTo(HaveOccurred())
+	)
+
+	BeforeAll(func() {
+		By("Preparing shared test context and Kubernetes clients")
+		ctx = context.Background()
+
+		var clErr error
+		cl, clErr = e2e.Connect(ctx, e2e.WithTestName("block-device-stable"))
+		Expect(clErr).NotTo(HaveOccurred())
+
+		By("Listing virtual machines to select target VM")
+		nodeList, nlErr := cl.Clientset().CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		Expect(nlErr).NotTo(HaveOccurred(), "failed to list virtual machines")
+
+		targetNode = nodeList.Items[0].Name
+		diskName := fmt.Sprintf("e2e-bd-stable-%d", time.Now().Unix())
+
+		By("Attaching a virtual disk to the target VM: " + diskName)
+		disk, createDiskErr := cl.Disks().CreateDisk(ctx, e2e.DiskSpec{
+			Name:         diskName,
+			Size:         resource.MustParse("5Gi"),
+			StorageClass: conf.TestCluster.StorageClass,
+		})
+		Expect(createDiskErr).NotTo(HaveOccurred(), "failed to create disk")
+
+		attachErr := cl.Disks().AttachDisk(ctx, targetNode, disk.Name)
+		Expect(attachErr).NotTo(HaveOccurred(), "failed to attach disk")
 	})
 
 	AfterAll(func() {
-		if virtualDiskAttachmentResult == nil {
+		err := cl.Close(context.Background())
+		if err != nil {
+			GinkgoWriter.Println("Error closing cluster: ", err)
+		}
+		if virtualDisk == nil {
 			return
 		}
 
 		By("Cleaning up virtual disk attachment and virtual disk")
-		deleteVDErr := kubernetes.DetachAndDeleteVirtualDisk(ctx, res.BaseKubeconfig, conf.TestCluster.Namespace,
-			virtualDiskAttachmentResult.AttachmentName, virtualDiskAttachmentResult.DiskName)
-		if deleteVDErr != nil {
-			GinkgoWriter.Println(deleteVDErr)
+		detachErr := cl.Disks().DetachDisk(ctx, targetNode, virtualDisk.Name)
+		if detachErr != nil {
+			GinkgoWriter.Println("Error attempting to detach disk", virtualDisk.Name, detachErr)
+		}
+
+		deleteErr := cl.Disks().DeleteDisk(ctx, virtualDisk.Name)
+		if deleteErr != nil {
+			GinkgoWriter.Println("Error attempting to delete disk", virtualDisk.Name, deleteErr)
 		}
 	})
 
@@ -132,7 +109,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 		It("has exactly one consumable block device", func() {
 			By("Getting consumable block devices on the target node")
 			Eventually(func(g Gomega) {
-				blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, res.Kubeconfig, targetVM)
+				blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
 				g.Expect(getBDErr).NotTo(HaveOccurred())
 				g.Expect(blockDevices).To(HaveLen(1))
 				initialBlockDevice = blockDevices[0]
@@ -142,14 +119,13 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 		When("disk is detached from the VM", func() {
 			BeforeAll(func() {
 				By("Detaching the virtual disk from the VM")
-				detachErr := kubernetes.DetachAndDeleteVirtualDisk(ctx, res.BaseKubeconfig, conf.TestCluster.Namespace,
-					virtualDiskAttachmentResult.AttachmentName, "")
-				Expect(detachErr).NotTo(HaveOccurred())
+				detachErr := cl.Disks().DetachDisk(ctx, targetNode, initialBlockDevice.Name)
+				Expect(detachErr).NotTo(HaveOccurred(), "failed to detach disk")
 			})
 
 			It("has zero consumable block devices", func() {
 				Eventually(func(g Gomega) {
-					blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, res.Kubeconfig, targetVM)
+					blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
 					g.Expect(getBDErr).NotTo(HaveOccurred())
 					g.Expect(blockDevices).To(BeEmpty())
 				}, 5*time.Minute, 5*time.Second).Should(Succeed())
@@ -158,25 +134,12 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 			When("disk is reattached to the VM", func() {
 				BeforeAll(func() {
 					By("Reattaching the virtual disk to the VM")
-					reattachResult, reattachErr := kubernetes.ReattachVirtualDiskToVM(ctx, res.BaseKubeconfig,
-						kubernetes.VirtualDiskReattachmentConfig{
-							AttachmentName: virtualDiskAttachmentResult.AttachmentName,
-							VMName:         targetVM,
-							Namespace:      conf.TestCluster.Namespace,
-							DiskName:       virtualDiskAttachmentResult.DiskName,
-						})
-					Expect(reattachErr).NotTo(HaveOccurred())
-					Expect(reattachResult).NotTo(BeNil())
-
-					By("Waiting for virtual disk attachment to become ready")
-					waitReattachErr := kubernetes.WaitForVirtualDiskAttached(ctx, res.BaseKubeconfig, conf.TestCluster.Namespace,
-						reattachResult.AttachmentName, 5*time.Second)
-					Expect(waitReattachErr).NotTo(HaveOccurred())
-					virtualDiskAttachmentResult = reattachResult
+					reattachErr := cl.Disks().AttachDisk(ctx, targetNode, initialBlockDevice.Name)
+					Expect(reattachErr).NotTo(HaveOccurred(), "failed to reattach disk")
 				})
 
 				It("has the same consumable block device as before detach", func() {
-					blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, res.Kubeconfig, targetVM)
+					blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
 					Expect(getBDErr).NotTo(HaveOccurred())
 					Expect(blockDevices).To(HaveLen(1))
 					Expect(blockDevices[0]).To(Equal(initialBlockDevice))
@@ -191,7 +154,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 							&v1.Pod{},
 							client.InNamespace(consts.SdsNodeConfiguratorAgentNamespace),
 							client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentName},
-							client.MatchingFields{"spec.nodeName": targetVM},
+							client.MatchingFields{"spec.nodeName": targetNode},
 						)
 						Expect(err).NotTo(HaveOccurred())
 
@@ -203,7 +166,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 								&pods,
 								client.InNamespace(consts.SdsNodeConfiguratorAgentNamespace),
 								client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentName},
-								client.MatchingFields{"spec.nodeName": targetVM},
+								client.MatchingFields{"spec.nodeName": targetNode},
 							)).To(Succeed())
 
 							g.Expect(pods.Items).To(HaveLen(1))
@@ -217,14 +180,14 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 
 					It("keeps block device state stable after agent restart", func() {
 						By("Checking block device visibility on the target node after agent restart")
-						blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, res.Kubeconfig, targetVM)
+						blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
 						Expect(getBDErr).NotTo(HaveOccurred())
 						Expect(blockDevices).To(HaveLen(1))
 						Expect(blockDevices[0]).To(Equal(initialBlockDevice))
 					})
 				})
 
-				When("running in pull_request and agent imageTag is switched to main", func() {
+				When("running in pull_request and agent imageTag is switched to main", Label("regress"), func() {
 					var (
 						originalImageTag string
 					)
@@ -234,7 +197,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 							Skip("PR-only scenario")
 						}
 
-						mpo, err := dyn.Resource(mpoGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
+						mpo, err := cl.Dynamic().Resource(mpoGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
 						Expect(err).NotTo(HaveOccurred())
 
 						currentImageTag, found, err := unstructured.NestedString(mpo.Object, "spec", "imageTag")
@@ -246,7 +209,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 						err = unstructured.SetNestedField(mpo.Object, conf.ModulesImageTag, "spec", "imageTag")
 						Expect(err).NotTo(HaveOccurred())
 
-						_, err = dyn.Resource(mpoGVR).Update(ctx, mpo, metav1.UpdateOptions{})
+						_, err = cl.Dynamic().Resource(mpoGVR).Update(ctx, mpo, metav1.UpdateOptions{})
 						Expect(err).NotTo(HaveOccurred())
 
 						Expect(kubernetes.WaitForModuleReady(
@@ -258,13 +221,13 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 					})
 
 					AfterAll(func() {
-						mpo, err := dyn.Resource(mpoGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
+						mpo, err := cl.Dynamic().Resource(mpoGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
 						Expect(err).NotTo(HaveOccurred())
 
 						err = unstructured.SetNestedField(mpo.Object, originalImageTag, "spec", "imageTag")
 						Expect(err).NotTo(HaveOccurred())
 
-						_, err = dyn.Resource(mpoGVR).Update(ctx, mpo, metav1.UpdateOptions{})
+						_, err = cl.Dynamic().Resource(mpoGVR).Update(ctx, mpo, metav1.UpdateOptions{})
 						Expect(err).NotTo(HaveOccurred())
 
 						Expect(kubernetes.WaitForModuleReady(
@@ -279,7 +242,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 						By("Checking that consumable block device remains unchanged after imageTag switch")
 						Expect(initialBlockDevice.Name).NotTo(BeEmpty())
 						Eventually(func(g Gomega) {
-							blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, res.Kubeconfig, targetVM)
+							blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
 							g.Expect(getBDErr).NotTo(HaveOccurred())
 							g.Expect(blockDevices).To(HaveLen(1))
 							g.Expect(blockDevices[0].Name).To(Equal(initialBlockDevice.Name))
