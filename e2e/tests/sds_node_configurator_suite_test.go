@@ -17,14 +17,11 @@
 package tests
 
 import (
-	"context"
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	e2ecfg "github.com/deckhouse/sds-node-configurator/e2e/cfg"
-	"github.com/deckhouse/storage-e2e/pkg/cluster"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -33,30 +30,6 @@ var _ = BeforeSuite(func() {
 	conf, cfgErr := e2ecfg.New()
 	Expect(cfgErr).NotTo(HaveOccurred(), "Failed to load config")
 	Expect(conf).NotTo(BeNil())
-	// Before any spec: Ginkgo may shuffle root Ordered Describes; nested cluster must exist first.
-	e2eEnsureSharedNestedTestCluster()
-})
-
-var _ = AfterSuite(func() {
-	res := e2eNestedTestClusterOrNil()
-	if res != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		locked, lockErr := cluster.IsClusterLocked(ctx, res.Kubeconfig)
-		if lockErr != nil {
-			GinkgoWriter.Println(lockErr)
-		}
-		if locked {
-			releaseErr := cluster.ReleaseClusterLock(ctx, res.Kubeconfig)
-			if releaseErr != nil {
-				GinkgoWriter.Println(releaseErr)
-			}
-			GinkgoWriter.Println("Released cluster lock")
-		}
-	}
-
-	e2eCloseNodeSSHCache()
-	e2eCleanupNestedTestClusterAfterSuite()
 })
 
 func TestSdsNodeConfigurator(t *testing.T) {
