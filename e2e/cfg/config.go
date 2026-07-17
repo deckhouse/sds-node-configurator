@@ -23,24 +23,24 @@ import (
 type Config struct {
 	TestCluster       TestCluster `envPrefix:"TEST_CLUSTER_"`
 	SSH               SSH         `envPrefix:"SSH_"`
-	KubeConfigPath    string      `env:"KUBE_CONFIG_PATH,required"`
+	KubeConfigPath    string      `env:"KUBE_CONFIG_PATH"`
 	DKPLicenceKey     string      `env:"DKP_LICENSE_KEY"`
 	LogLevel          string      `env:"LOG_LEVEL" envDefault:"info"`
 	YamlClusterConfig string      `env:"YAML_CONFIG_FILENAME" envDefault:"cluster_config.yml"`
-	ModulesImageTag   string      `env:"MODULES_MODULE_TAG,required" envDefault:"main"`
+	ModulesImageTag   string      `env:"MODULES_MODULE_TAG" envDefault:"main"`
 }
 
 type TestCluster struct {
-	CreateMode   CreateMode `env:"CREATE_MODE,required"`
+	CreateMode   CreateMode `env:"CREATE_MODE"`
 	Namespace    string     `env:"NAMESPACE" envDefault:"e2e-test-cluster"`
-	StorageClass string     `env:"STORAGE_CLASS,required"`
+	StorageClass string     `env:"STORAGE_CLASS"`
 	Cleanup      bool       `env:"CLEANUP" envDefault:"false"`
 }
 
 type SSH struct {
-	User       string `env:"USER,required"`
-	Host       string `env:"HOST,required"`
-	PrivateKey string `env:"PRIVATE_KEY,required"`
+	User       string `env:"USER"`
+	Host       string `env:"HOST"`
+	PrivateKey string `env:"PRIVATE_KEY"`
 	Passphrase string `env:"PASSPHRASE"`
 	Jump       Jump   `envPrefix:"JUMP_"`
 	VmUser     string `env:"VM_USER"`
