@@ -24,7 +24,6 @@ import (
 
 	"github.com/deckhouse/sds-node-configurator/e2e/cfg"
 	"github.com/deckhouse/sds-node-configurator/e2e/tests/utils/consts"
-	"github.com/deckhouse/storage-e2e/pkg/cluster"
 	"github.com/deckhouse/storage-e2e/pkg/e2e"
 	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
 	. "github.com/onsi/ginkgo/v2"
@@ -34,15 +33,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var _ = Describe("Block device stability with explicit lifecycle stages", Label("e2e-tests", "block-device-stable"), Ordered, func() {
 	var (
-		ctx       context.Context
-		res       *cluster.TestClusterResources
-		conf      *cfg.Config
-		k8sClient client.Client
+		ctx  context.Context
+		conf *cfg.Config
 
 		targetNode         string
 		initialBlockDevice kubernetes.BlockDevice
@@ -60,6 +56,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 	BeforeAll(func() {
 		By("Preparing shared test context and Kubernetes clients")
 		ctx = context.Background()
+		conf = cfg.Load()
 
 		var clErr error
 		cl, clErr = e2e.Connect(ctx, e2e.WithTestName("block-device-stable"))
@@ -79,6 +76,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 			StorageClass: conf.TestCluster.StorageClass,
 		})
 		Expect(createDiskErr).NotTo(HaveOccurred(), "failed to create disk")
+		virtualDisk = disk
 
 		attachErr := cl.Disks().AttachDisk(ctx, targetNode, disk.Name)
 		Expect(attachErr).NotTo(HaveOccurred(), "failed to attach disk")
@@ -149,25 +147,22 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 					BeforeAll(func() {
 						restartAt := time.Now()
 
-						err := k8sClient.DeleteAllOf(
-							ctx,
-							&v1.Pod{},
-							client.InNamespace(consts.SdsNodeConfiguratorAgentNamespace),
-							client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentName},
-							client.MatchingFields{"spec.nodeName": targetNode},
-						)
+						podSelectors := metav1.ListOptions{
+							LabelSelector: "app=" + consts.SdsNodeConfiguratorAgentName,
+							FieldSelector: "spec.nodeName=" + targetNode,
+						}
+
+						err := cl.Clientset().CoreV1().
+							Pods(consts.SdsNodeConfiguratorAgentNamespace).
+							DeleteCollection(ctx, metav1.DeleteOptions{}, podSelectors)
 						Expect(err).NotTo(HaveOccurred())
 
 						Eventually(func(g Gomega) {
 							By("Waiting for sds-node-configurator-agent pod to be recreated and become ready")
-							var pods v1.PodList
-							g.Expect(k8sClient.List(
-								ctx,
-								&pods,
-								client.InNamespace(consts.SdsNodeConfiguratorAgentNamespace),
-								client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentName},
-								client.MatchingFields{"spec.nodeName": targetNode},
-							)).To(Succeed())
+							pods, listErr := cl.Clientset().CoreV1().
+								Pods(consts.SdsNodeConfiguratorAgentNamespace).
+								List(ctx, podSelectors)
+							g.Expect(listErr).NotTo(HaveOccurred())
 
 							g.Expect(pods.Items).To(HaveLen(1))
 							p := pods.Items[0]
@@ -214,7 +209,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 
 						Expect(kubernetes.WaitForModuleReady(
 							ctx,
-							res.Kubeconfig,
+							cl.RESTConfig(),
 							consts.SdsNodeConfiguratorAgentName,
 							10*time.Minute,
 						)).To(Succeed())
@@ -232,7 +227,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 
 						Expect(kubernetes.WaitForModuleReady(
 							ctx,
-							res.Kubeconfig,
+							cl.RESTConfig(),
 							consts.SdsNodeConfiguratorAgentName,
 							10*time.Minute,
 						)).To(Succeed())
