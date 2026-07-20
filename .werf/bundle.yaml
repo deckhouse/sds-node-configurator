@@ -66,3 +66,9 @@ git:
       - templates
       - Chart.yaml
       - module.yaml
+
+# Attach an OpenVEX attestation to the bundle image so trivy suppresses the
+# unfixable golang.org/x/crypto/openpgp advisory (GO-2026-5932) that would
+# otherwise be reported against the go-hooks binary embedded at /hooks/go-hooks.
+# Predicate: /known_vulnerabilities.vex (repo root, per the "vex mitigation" template).
+{{- include "vex mitigation" (list $ "bundle") }}
