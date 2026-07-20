@@ -35,7 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-var _ = Describe("Block device stability with explicit lifecycle stages", Label("e2e-tests", "block-device-stable"), Ordered, func() {
+var _ = Describe("Block device stability with explicit lifecycle stages", Label("sds-node-configurator", "block-device-stable"), Ordered, func() {
 	var (
 		ctx  context.Context
 		conf *cfg.Config
