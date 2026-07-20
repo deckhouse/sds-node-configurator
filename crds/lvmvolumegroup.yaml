@@ -38,9 +38,13 @@ spec:
                 - rule: |
                     (self.type == "Local" && has(self.local)) || self.type != "Local"
                   message: "The 'local' field is required when the 'type' field is 'Local'."
+                - rule: |
+                    has(self.blockDeviceSelector) || (has(self.fileDevices) && size(self.fileDevices) > 0)
+                  message: "At least one of 'blockDeviceSelector' or 'fileDevices' must be specified."
+                - rule: '!has(oldSelf.fileDevices) || oldSelf.fileDevices.all(o, has(self.fileDevices) && self.fileDevices.exists(n, n.directory == o.directory && n.size == o.size))'
+                  message: 'Existing fileDevices entries are immutable. Add a new entry instead of editing directory or size.'
               required:
                 - type
-                - blockDeviceSelector
                 - actualVGNameOnTheNode
               properties:
                 type:
@@ -120,6 +124,60 @@ spec:
                   x-kubernetes-validations:
                     - rule: self == oldSelf
                       message: "The actualVGNameOnTheNode field is immutable."
+                fileDevices:
+                  type: array
+                  maxItems: 32
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - directory
+                    - size
+                  description: |
+                    File-backed block devices to create as LVM PVs for this Volume Group.
+
+                    The agent will create a preallocated file in the specified directory,
+                    attach it as a loop device, and use it as a Physical Volume.
+                    File devices and block devices can be used together in the same VG.
+
+                    Existing entries are immutable: `directory` and `size` cannot be changed
+                    after creation, because the backing file's path is derived from them and
+                    the loop device captures its size at attach time. To increase capacity,
+                    add a new `fileDevices` entry instead of editing an existing one.
+                  items:
+                    type: object
+                    required:
+                      - directory
+                      - size
+                    properties:
+                      directory:
+                        type: string
+                        maxLength: 4096
+                        description: |
+                          Absolute directory on the node's filesystem where the backing file
+                          will be created.
+
+                          Must be the module's configured base directory
+                          (fileDevicesDirectory, default /opt/deckhouse/sds/file-devices) or a
+                          subdirectory of it; the agent rejects paths outside that subtree so a
+                          stray entry cannot fill an arbitrary host path.
+
+                          The agent creates the directory automatically (mkdir -p) if it does
+                          not exist. The path must be absolute and must not contain '..'
+                          segments. Provisioning fails if the path is on a read-only
+                          filesystem, a non-directory component is in the way, or there is not
+                          enough free space for the requested size.
+                      size:
+                        type: string
+                        maxLength: 32
+                        pattern: '^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$'
+                        description: |
+                          Size of the preallocated backing file. Must be at least 1Gi.
+
+                          Prefer binary units (`Gi`, `Mi`). Decimal units are accepted
+                          by the format but are smaller than they look: `1G` is 10^9 bytes,
+                          which is below the 1Gi (2^30 bytes) minimum and will be rejected
+                          by the agent. Because an existing entry's `size` is immutable and
+                          cannot be removed, a too-small value can only be corrected by
+                          deleting and recreating the LVMVolumeGroup, so set it correctly.
                 thinPools:
                   type: array
                   description: |
@@ -312,6 +370,32 @@ spec:
                               type: string
                               description: |
                                 Name of the corresponding block device resource.
+                      fileDevices:
+                        type: array
+                        description: |
+                          Information about the file-backed devices used in the Volume Group on the current node.
+                        items:
+                          type: object
+                          properties:
+                            filePath:
+                              type: string
+                              description: |
+                                Path to the backing file on the node.
+                            loopDevice:
+                              type: string
+                              description: |
+                                Loop device path (e.g., `/dev/loop0`).
+                            size:
+                              type: string
+                              description: |
+                                Size of the Physical Volume created on the backing file.
+                                This is slightly smaller than the requested `spec.fileDevices[].size`
+                                because LVM reserves space for PV metadata (the same way
+                                `status.nodes[].devices[].pvSize` differs from the raw device size).
+                            pvUUID:
+                              type: string
+                              description: |
+                                LVM Physical Volume UUID.
       subresources:
         status: {}
       additionalPrinterColumns:

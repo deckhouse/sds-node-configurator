@@ -196,6 +196,8 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: spec.nodeName
+          - name: FILE_DEVICES_DIRECTORY
+            value: {{ .Values.sdsNodeConfigurator.fileDevicesDirectory | quote }}
           - name: LOG_LEVEL
 {{- if eq .Values.sdsNodeConfigurator.logLevel "ERROR" }}
             value: "0"

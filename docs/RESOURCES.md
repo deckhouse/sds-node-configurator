@@ -195,6 +195,60 @@ The `spec.local` field is mandatory for the `Local` type. If there's a discrepan
 All selected block devices must belong to the same node for [LVMVolumeGroup](./cr.html#lvmvolumegroup) with type `Local`.
 {{< /alert >}}
 
+#### Creating an LVMVolumeGroup with file-backed devices
+
+When dedicated block devices are not available, you can allocate part of an existing filesystem for LVM by using file-backed devices (`spec.fileDevices`). The agent will create a preallocated file, attach it as a loop device, and use it as an LVM Physical Volume.
+
+Each `spec.fileDevices[].directory` must be inside the base directory configured by the `fileDevicesDirectory` module setting (default `/opt/deckhouse/sds/file-devices`); the agent rejects paths outside it so a stray entry cannot fill an arbitrary host path. To place backing files on a dedicated data disk, mount the disk on the node and set `fileDevicesDirectory` to its mount point in the module configuration.
+
+Creating a Volume Group backed by a 50Gi file on an existing filesystem:
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: LVMVolumeGroup
+metadata:
+  name: "vg-file-on-node-0"
+spec:
+  type: Local
+  local:
+    nodeName: "node-0"
+  actualVGNameOnTheNode: "vg-file"
+  fileDevices:
+    - directory: /opt/deckhouse/sds/file-devices
+      size: 50Gi
+```
+
+Combining block devices and file-backed devices in a single Volume Group:
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: LVMVolumeGroup
+metadata:
+  name: "vg-mixed-on-node-0"
+spec:
+  type: Local
+  local:
+    nodeName: "node-0"
+  blockDeviceSelector:
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+          - dev-07ad52cef2348996b72db262011f1b5f896bb68f
+  actualVGNameOnTheNode: "vg-mixed"
+  fileDevices:
+    - directory: /opt/deckhouse/sds/file-devices
+      size: 100Gi
+```
+
+{{< alert level="warning" >}}
+File-backed devices add overhead due to double indirection (LVM on loop device on filesystem). Use them only when dedicated block devices are not available.
+{{< /alert >}}
+
+{{< alert level="info" >}}
+The agent automatically recovers loop device mappings after a node reboot. File device resize is not supported in the current version.
+{{< /alert >}}
+
 ### Updating an LVMVolumeGroup resource
 
 To change the desired state of a Volume Group or thin pool on nodes, modify the `spec` field of the corresponding [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource. The controller automatically validates the new data and, if correct, makes the necessary changes to entities on the node.

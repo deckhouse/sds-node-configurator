@@ -43,8 +43,15 @@ const (
 	// LVMGlobalFilter is passed via `lvm --config` for every LVM
 	// subcommand the agent runs. It rejects canonical names of block
 	// devices that always belong to a foreign storage layer (Ceph RBD,
-	// DRBD, NBD, loopback) so lvm does not even read PV labels
-	// from them when udev integration is unavailable.
+	// DRBD, NBD) so lvm does not even read PV labels from them
+	// when udev integration is unavailable.
+	//
+	// Loop devices are intentionally NOT rejected: the agent manages
+	// file-backed loop devices as LVM PVs (spec.fileDevices). Unmanaged
+	// loop-backed VGs never become candidates (the discoverer only adopts
+	// VGs tagged storage.deckhouse.io/enabled=true) and are additionally
+	// dropped from the cache by utils.FilterForeignLoopPVs so they cannot
+	// collide by name with a managed VG.
 	//
 	// There is intentionally no blanket "a|.*|" accept rule. When a
 	// device matches none of the reject patterns, LVM accepts it by
@@ -57,7 +64,7 @@ const (
 	// The authoritative foreign-PV filter (FilterForeignPVs) still runs
 	// after lvm returns and catches any PVs that slip through
 	// via /dev/block/MAJ:MIN or /dev/disk/by-id/... aliases.
-	LVMGlobalFilter = `devices/global_filter=["r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|"]`
+	LVMGlobalFilter = `devices/global_filter=["r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|"]`
 
 	// LVMArchiveRetention caps the size of /etc/lvm/archive: keep at
 	// most the last 10 metadata snapshots and at most 7 days of history.
@@ -79,6 +86,13 @@ const (
 	ReasonScanFailed       = "ScanFailed"
 	ReasonUpdated          = "Updated"
 	ReasonApplied          = "Applied"
+	// ReasonAliasResolutionFailed is set when the agent has repeatedly failed
+	// to canonicalize the alias-form PV names it needs to decide whether a
+	// file-backed loop device is already part of the VG. Unlike the transient
+	// ReasonUpdating requeue, this reason signals a stuck resolver (e.g. a
+	// missing nsenter binary or a genuinely broken alias) that will not clear
+	// on its own, so it can be alerted on distinctly.
+	ReasonAliasResolutionFailed = "AliasResolutionFailed"
 
 	MetadataNameLabelKey = "kubernetes.io/metadata.name"
 	HostNameLabelKey     = "kubernetes.io/hostname"
@@ -94,6 +108,20 @@ const (
 	DeletionProtectionAnnotation = "storage.deckhouse.io/deletion-protection"
 	LVMVolumeGroupTag            = "storage.deckhouse.io/lvmVolumeGroupName"
 	LVGMetadataNameLabelKey      = "kubernetes.io/metadata.name"
+
+	// FileDeviceImageSuffix is the trailing component the agent appends
+	// to every backing file it creates for spec.fileDevices entries.
+	FileDeviceImageSuffix = ".img"
+
+	// FileDevicePrefix anchors the basename of every backing file the
+	// agent creates. The full pattern is `sds-<lvgName>-<hash>.img` and
+	// is the sole owner marker: the discoverer treats a loop PV as a
+	// managed file device only when its backing file's basename matches
+	// this pattern (see utils.IsManagedFileDevicePath). Reusing the LVG
+	// name in the basename means a foreign loop device backed by an
+	// unrelated file (a libvirt qcow2, a snap, …) is never misidentified
+	// as ours during discovery or cleanup.
+	FileDevicePrefix = "sds-"
 )
 
 var (
@@ -110,11 +138,17 @@ var (
 	//   rbd   - Ceph RBD (kernel rbd module, major 251)
 	//   drbd  - DRBD     (sds-replicated-volume, major 147)
 	//   nbd   - network block device (major 43)
-	//   loop  - loopback (major 7) — typically backs QEMU/file-based VM disks
+	//
+	// Loop devices (major 7) are NOT in this list: the agent manages
+	// file-backed loop devices as LVM PVs via spec.fileDevices.
+	// Unmanaged loop PVs forming a whole VG are dropped from the cache by
+	// utils.FilterForeignLoopPVs so they cannot collide by name with a
+	// managed VG; the discoverer additionally only acts on VGs tagged with
+	// storage.deckhouse.io/enabled=true.
 	//
 	// Used after lvm returns the PV list, against the canonical
 	// path resolved via readlink -f in the host mount namespace.
-	ForeignDeviceBasePrefixes = []string{"rbd", "drbd", "nbd", "loop"}
+	ForeignDeviceBasePrefixes = []string{"rbd", "drbd", "nbd"}
 )
 
 const (

@@ -151,6 +151,47 @@ If the Volume Group has active Logical Volumes, perform the following steps:
 
 If necessary, the command can be added to the `cloud-init` script for automatic execution when creating virtual machines.
 
+## How do file-backed devices (fileDevices) work?
+
+File-backed devices allow you to allocate part of an existing filesystem for LVM without dedicated block devices. The agent creates a preallocated file in the specified directory, attaches it as a loop device via `losetup`, and uses it as an LVM Physical Volume.
+
+### Limitations
+
+- **Confined to a base directory**: Each `directory` must be the `fileDevicesDirectory` module setting (default `/opt/deckhouse/sds/file-devices`) or a subdirectory of it. Paths outside this subtree are rejected so an arbitrary host path cannot be filled up. Point `fileDevicesDirectory` at a dedicated data disk to use a different location.
+- **Directory auto-created**: The agent creates the backing directory automatically (`mkdir -p`) on the node if it does not exist. The path must be absolute and free of `..` segments; provisioning fails only if the path is on a read-only filesystem or a non-directory component is in the way.
+- **No resize**: File device size cannot be changed after creation. To increase capacity, add a new `fileDevices` entry.
+- **Preallocated only**: Files are created with `fallocate`, which preallocates space on the filesystem. The agent refuses to create a backing file larger than the directory's free space, so a too-large entry is reported on the resource instead of filling the node.
+- **Minimum size**: Each file device must be at least 1Gi.
+- **Performance overhead**: LVM on a loop device over a filesystem adds double indirection. Use file-backed devices only when dedicated disks are not available.
+- **Host LVM filter**: NodeGroupConfiguration adds loop devices to the host-wide LVM `global_filter`, so unprivileged `lvm`/`pvs` on the node do not see them. The agent re-attaches managed backing files at startup and uses its own LVM config for managed Volume Groups.
+
+### Reclaiming space
+
+Backing files are preallocated with `fallocate`, so a file occupies its full size on the node's filesystem from the moment it is created and does **not** grow or shrink automatically as data is written or deleted inside the volume.
+
+Space can still be returned to the node's filesystem through the discard (TRIM) chain, which works end to end for these devices:
+
+`filesystem on the volume` → `thin LV` → `thin pool` (created with `discards=passdown` by default) → `/dev/loopN` → backing file.
+
+A loop device translates discards into `FALLOC_FL_PUNCH_HOLE` on its backing file, turning the reclaimed regions into holes and making the file sparse. To trigger reclamation after deleting data:
+
+- run `fstrim <mountpoint>` on the volume's filesystem periodically (for example via the `fstrim.timer` systemd unit), or
+- mount the volume with `-o discard` for continuous (online) discard.
+
+Caveats:
+
+- Only whole thin-pool chunks are reclaimed, so the effect depends on the pool's chunk size and alignment.
+- Snapshots pin the chunks they reference, so space shared with a snapshot is not freed until the snapshot is removed.
+- The backing file only shrinks after a write → delete → trim cycle; a freshly created file always occupies its full preallocated size.
+
+### Reboot recovery
+
+After a node reboot, the agent automatically re-establishes loop device mappings before activating Volume Groups. The backing file path is stored in `status.nodes[].fileDevices[].filePath`.
+
+### Deletion
+
+When an LVMVolumeGroup with file-backed devices is deleted, the agent detaches the loop devices and removes the backing files.
+
 ## What labels are added by the controller to BlockDevice resources?
 
 - `status.blockdevice.storage.deckhouse.io/type`: LVM type.

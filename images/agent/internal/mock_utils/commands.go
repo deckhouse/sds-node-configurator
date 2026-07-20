@@ -45,6 +45,52 @@ func (m *MockCommands) EXPECT() *MockCommandsMockRecorder {
 	return m.recorder
 }
 
+// EnsureFileDeviceDirectory mocks base method.
+func (m *MockCommands) EnsureFileDeviceDirectory(ctx context.Context, directory string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EnsureFileDeviceDirectory", ctx, directory)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// EnsureFileDeviceDirectory indicates an expected call of EnsureFileDeviceDirectory.
+func (mr *MockCommandsMockRecorder) EnsureFileDeviceDirectory(ctx, directory any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EnsureFileDeviceDirectory", reflect.TypeOf((*MockCommands)(nil).EnsureFileDeviceDirectory), ctx, directory)
+}
+
+// GetAvailableBytes mocks base method.
+func (m *MockCommands) GetAvailableBytes(ctx context.Context, directory string) (string, int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAvailableBytes", ctx, directory)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(int64)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// GetAvailableBytes indicates an expected call of GetAvailableBytes.
+func (mr *MockCommandsMockRecorder) GetAvailableBytes(ctx, directory any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAvailableBytes", reflect.TypeOf((*MockCommands)(nil).GetAvailableBytes), ctx, directory)
+}
+
+// CreateFileDevice mocks base method.
+func (m *MockCommands) CreateFileDevice(ctx context.Context, path string, sizeBytes int64) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateFileDevice", ctx, path, sizeBytes)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateFileDevice indicates an expected call of CreateFileDevice.
+func (mr *MockCommandsMockRecorder) CreateFileDevice(ctx, path, sizeBytes any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateFileDevice", reflect.TypeOf((*MockCommands)(nil).CreateFileDevice), ctx, path, sizeBytes)
+}
+
 // CreatePV mocks base method.
 func (m *MockCommands) CreatePV(path string) (string, error) {
 	m.ctrl.T.Helper()
@@ -180,6 +226,21 @@ func (mr *MockCommandsMockRecorder) CreateVGShared(vgName, lvmVolumeGroupName, p
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateVGShared", reflect.TypeOf((*MockCommands)(nil).CreateVGShared), vgName, lvmVolumeGroupName, pvNames)
 }
 
+// DetachLoopDevice mocks base method.
+func (m *MockCommands) DetachLoopDevice(ctx context.Context, loopDev string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DetachLoopDevice", ctx, loopDev)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DetachLoopDevice indicates an expected call of DetachLoopDevice.
+func (mr *MockCommandsMockRecorder) DetachLoopDevice(ctx, loopDev any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DetachLoopDevice", reflect.TypeOf((*MockCommands)(nil).DetachLoopDevice), ctx, loopDev)
+}
+
 // ExtendLV mocks base method.
 func (m *MockCommands) ExtendLV(size int64, vgName, lvName string) (string, error) {
 	m.ctrl.T.Helper()
@@ -223,6 +284,22 @@ func (m *MockCommands) ExtendVG(vgName string, paths []string) (string, error) {
 func (mr *MockCommandsMockRecorder) ExtendVG(vgName, paths any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendVG", reflect.TypeOf((*MockCommands)(nil).ExtendVG), vgName, paths)
+}
+
+// FindLoopDeviceByFile mocks base method.
+func (m *MockCommands) FindLoopDeviceByFile(ctx context.Context, filePath string) (string, string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FindLoopDeviceByFile", ctx, filePath)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// FindLoopDeviceByFile indicates an expected call of FindLoopDeviceByFile.
+func (mr *MockCommandsMockRecorder) FindLoopDeviceByFile(ctx, filePath any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindLoopDeviceByFile", reflect.TypeOf((*MockCommands)(nil).FindLoopDeviceByFile), ctx, filePath)
 }
 
 // GetAllLVs mocks base method.
@@ -310,6 +387,22 @@ func (mr *MockCommandsMockRecorder) GetLV(vgName, lvName any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLV", reflect.TypeOf((*MockCommands)(nil).GetLV), vgName, lvName)
 }
 
+// GetLoopBackingFile mocks base method.
+func (m *MockCommands) GetLoopBackingFile(ctx context.Context, loopDev string) (string, string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetLoopBackingFile", ctx, loopDev)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// GetLoopBackingFile indicates an expected call of GetLoopBackingFile.
+func (mr *MockCommandsMockRecorder) GetLoopBackingFile(ctx, loopDev any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLoopBackingFile", reflect.TypeOf((*MockCommands)(nil).GetLoopBackingFile), ctx, loopDev)
+}
+
 // GetPV mocks base method.
 func (m *MockCommands) GetPV(pvName string) (internal.PVData, string, bytes.Buffer, error) {
 	m.ctrl.T.Helper()
@@ -389,21 +482,6 @@ func (mr *MockCommandsMockRecorder) PVScan(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PVScan", reflect.TypeOf((*MockCommands)(nil).PVScan), ctx)
 }
 
-// UdevadmTrigger mocks base method.
-func (m *MockCommands) UdevadmTrigger(ctx context.Context, paths []string) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UdevadmTrigger", ctx, paths)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// UdevadmTrigger indicates an expected call of UdevadmTrigger.
-func (mr *MockCommandsMockRecorder) UdevadmTrigger(ctx, paths any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UdevadmTrigger", reflect.TypeOf((*MockCommands)(nil).UdevadmTrigger), ctx, paths)
-}
-
 // ReTag mocks base method.
 func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error {
 	m.ctrl.T.Helper()
@@ -416,6 +494,21 @@ func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics *mo
 func (mr *MockCommandsMockRecorder) ReTag(ctx, log, metrics, ctrlName, cmdTimeout any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReTag", reflect.TypeOf((*MockCommands)(nil).ReTag), ctx, log, metrics, ctrlName, cmdTimeout)
+}
+
+// RemoveFileDevice mocks base method.
+func (m *MockCommands) RemoveFileDevice(ctx context.Context, path string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveFileDevice", ctx, path)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemoveFileDevice indicates an expected call of RemoveFileDevice.
+func (mr *MockCommandsMockRecorder) RemoveFileDevice(ctx, path any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveFileDevice", reflect.TypeOf((*MockCommands)(nil).RemoveFileDevice), ctx, path)
 }
 
 // RemoveLV mocks base method.
@@ -476,6 +569,37 @@ func (m *MockCommands) ResizePV(pvName string) (string, error) {
 func (mr *MockCommandsMockRecorder) ResizePV(pvName any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResizePV", reflect.TypeOf((*MockCommands)(nil).ResizePV), pvName)
+}
+
+// SetupLoopDevice mocks base method.
+func (m *MockCommands) SetupLoopDevice(ctx context.Context, filePath string) (string, string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetupLoopDevice", ctx, filePath)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// SetupLoopDevice indicates an expected call of SetupLoopDevice.
+func (mr *MockCommandsMockRecorder) SetupLoopDevice(ctx, filePath any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetupLoopDevice", reflect.TypeOf((*MockCommands)(nil).SetupLoopDevice), ctx, filePath)
+}
+
+// UdevadmTrigger mocks base method.
+func (m *MockCommands) UdevadmTrigger(ctx context.Context, paths []string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UdevadmTrigger", ctx, paths)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UdevadmTrigger indicates an expected call of UdevadmTrigger.
+func (mr *MockCommandsMockRecorder) UdevadmTrigger(ctx, paths any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UdevadmTrigger", reflect.TypeOf((*MockCommands)(nil).UdevadmTrigger), ctx, paths)
 }
 
 // UnmarshalDevices mocks base method.

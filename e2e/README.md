@@ -99,6 +99,21 @@ ginkgo -v --progress --label-filter=e2e-tests --focus="Should schedule Pod with 
 - **BlockDevice discovery**: появление диска; корректные `status.nodeName`, `status.path`, `status.size`, `consumable`.
 - **LVMVolumeGroup**: создание на основе BlockDevice, статус и capacity.
 
+### LVMVolumeGroup на файлах (fileDevices)
+
+Context `LVMVolumeGroup with file-backed devices` (Ginkgo-лейбл **`e2e-tests`**, файл `sds_node_configurator_test.go`, хелперы — `sds_node_configurator_helpers_filedevices_test.go`). Кроме сценария «блочка + файл» (см. ниже) **не требует отдельного диска / nested-VM**: LVG создаётся с `spec.fileDevices` на любой ноде с работающим агентом; проверки на ноде идут по SSH. Файлы кладутся в дефолтный базовый каталог `/opt/deckhouse/sds/file-devices`.
+
+Сценарии:
+
+- **Создание и удаление**: file-only VG (`1Gi`) → `Ready`; в `status.nodes[].fileDevices` — `filePath` под базовым каталогом, `loopDevice` `/dev/loop*`, `pvUUID`; на ноде существуют backing-файл, loop-устройство и VG. После удаления LVG — backing-файл удалён, loop отсоединён.
+- **Thin-pool на файле**: file-only VG (`2Gi`) + thin-pool `50%` → `Ready`, data-LV thin-pool присутствует на ноде.
+- **Расширение**: добавление второй записи `fileDevices` → в статусе две записи, `vgSize` растёт, `Ready`.
+- **Reattach после рестарта агента**: рестарт пода агента → VG остаётся `Ready`, файл переподключён (loop снова привязан).
+- **Смешанный VG (блочка + файл)**: LVG с `blockDeviceSelector` (реальный диск) **и** `spec.fileDevices` → `Ready`; в статусе одновременно и `devices` (блочный PV), и `fileDevices` (loop-PV), на ноде VG состоит из ≥2 PV (один `/dev/loop*`, один блочный); после удаления backing-файл удалён, loop отсоединён. **Требует nested-VM** (подключает `VirtualDisk`); при отсутствии базового кластера тест `Skip`.
+- **Негатив (allowlist)**: `directory` вне базового каталога (`/tmp/...`) → `VGConfigurationApplied=False`, reason `ValidationFailed`, VG и каталог на ноде не создаются.
+
+> Требования: кластер собран из этой ветки (поле `fileDevices` и настройка `fileDevicesDirectory` существуют только здесь); на выбранной ноде в `/opt/deckhouse/sds` должно быть ≥3Gi свободного места (иначе сработает проверка свободного места агента). Смешанный сценарий дополнительно требует базового (nested-virtualization) кластера и `TEST_CLUSTER_STORAGE_CLASS`.
+
 ### Stress: максимум VG на одной ноде
 
 Spec в `sds_node_configurator_stress_max_vgs_test.go`, Ginkgo-лейбл **`stress-test`** (остальные e2e — **`e2e-tests`**). CI smoke по умолчанию: `-ginkgo.label-filter=e2e-tests`. Подробнее — [E2E_USAGE.md](E2E_USAGE.md).

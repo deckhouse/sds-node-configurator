@@ -48,11 +48,12 @@ type LVMVolumeGroupSetSpec struct {
 
 // +k8s:deepcopy-gen=true
 type LVMVolumeGroupTemplate struct {
-	Metadata              LVMVolumeGroupTemplateMeta   `json:"metadata"`
-	BlockDeviceSelector   *metav1.LabelSelector        `json:"blockDeviceSelector"`
-	ActualVGNameOnTheNode string                       `json:"actualVGNameOnTheNode"`
-	ThinPools             []LVMVolumeGroupThinPoolSpec `json:"thinPools"`
-	Type                  string                       `json:"type"`
+	Metadata              LVMVolumeGroupTemplateMeta     `json:"metadata"`
+	BlockDeviceSelector   *metav1.LabelSelector          `json:"blockDeviceSelector,omitempty"`
+	ActualVGNameOnTheNode string                         `json:"actualVGNameOnTheNode"`
+	ThinPools             []LVMVolumeGroupThinPoolSpec   `json:"thinPools"`
+	Type                  string                         `json:"type"`
+	FileDevices           []LVMVolumeGroupFileDeviceSpec `json:"fileDevices,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true

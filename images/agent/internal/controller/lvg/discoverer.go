@@ -131,7 +131,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 	d.sdsCache.StoreManagedVGs(maps.Keys(filteredLVGs))
 
 	d.log.Debug("[RunLVMVolumeGroupDiscoverController] tries to get LVMVolumeGroup candidates")
-	candidates, err := d.GetLVMVolumeGroupCandidates(blockDevices)
+	candidates, err := d.GetLVMVolumeGroupCandidates(ctx, blockDevices)
 	if err != nil {
 		d.log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to run GetLVMVolumeGroupCandidates")
 		for _, lvg := range filteredLVGs {
@@ -355,7 +355,7 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 	return candidates, nil
 }
 
-func (d *Discoverer) GetLVMVolumeGroupCandidates(bds map[string]v1alpha1.BlockDevice) ([]internal.LVMVolumeGroupCandidate, error) {
+func (d *Discoverer) GetLVMVolumeGroupCandidates(ctx context.Context, bds map[string]v1alpha1.BlockDevice) ([]internal.LVMVolumeGroupCandidate, error) {
 	vgs, vgErrs := d.sdsCache.GetVGs()
 	vgWithTag := filterVGByTag(vgs, internal.LVMTags)
 	candidates := make([]internal.LVMVolumeGroupCandidate, 0, len(vgWithTag))
@@ -427,8 +427,8 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(bds map[string]v1alpha1.BlockDe
 			VGFree:                *resource.NewQuantity(vg.VGFree.Value(), resource.BinarySI),
 			VGUUID:                vg.VGUUID,
 			ExtentSize:            *resource.NewQuantity(vg.VGExtentSize.Value(), resource.BinarySI),
-			Nodes:                 d.configureCandidateNodeDevices(sortedPVs, sortedBDs, vg, d.cfg.NodeName),
 		}
+		candidate.Nodes, candidate.FileDeviceNodes = d.configureCandidateNodeDevices(ctx, sortedPVs, sortedBDs, vg, d.cfg.NodeName)
 
 		candidates = append(candidates, candidate)
 	}
@@ -460,7 +460,7 @@ func (d *Discoverer) CreateLVMVolumeGroupByCandidate(
 		},
 		Status: v1alpha1.LVMVolumeGroupStatus{
 			AllocatedSize: candidate.AllocatedSize,
-			Nodes:         convertLVMVGNodes(candidate.Nodes),
+			Nodes:         convertLVMVGNodes(candidate.Nodes, candidate.FileDeviceNodes),
 			ThinPools:     thinPools,
 			VGSize:        candidate.VGSize,
 			VGUuid:        candidate.VGUUID,
@@ -545,7 +545,7 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	}
 
 	lvg.Status.AllocatedSize = candidate.AllocatedSize
-	lvg.Status.Nodes = convertLVMVGNodes(candidate.Nodes)
+	lvg.Status.Nodes = convertLVMVGNodes(candidate.Nodes, candidate.FileDeviceNodes)
 	lvg.Status.ThinPools = thinPools
 	lvg.Status.VGSize = candidate.VGSize
 	lvg.Status.VGFree = candidate.VGFree
@@ -569,22 +569,50 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	return err
 }
 
-func (d *Discoverer) configureCandidateNodeDevices(pvs map[string][]internal.PVData, bds map[string][]v1alpha1.BlockDevice, vg internal.VGData, currentNode string) map[string][]internal.LVMVGDevice {
+func (d *Discoverer) configureCandidateNodeDevices(ctx context.Context, pvs map[string][]internal.PVData, bds map[string][]v1alpha1.BlockDevice, vg internal.VGData, currentNode string) (map[string][]internal.LVMVGDevice, map[string][]internal.LVMVGFileDevice) {
 	filteredPV := pvs[vg.VGName+vg.VGUUID]
 	filteredBds := bds[vg.VGName+vg.VGUUID]
 	bdPathStatus := make(map[string]v1alpha1.BlockDevice, len(bds))
 	result := make(map[string][]internal.LVMVGDevice, len(filteredPV))
+	fileResult := make(map[string][]internal.LVMVGFileDevice)
 
 	for _, blockDevice := range filteredBds {
 		bdPathStatus[blockDevice.Status.Path] = blockDevice
 	}
 
+	// The agent stamps the owning LVMVolumeGroup name onto its VGs via
+	// the storage.deckhouse.io/lvmVolumeGroupName tag — use it as the
+	// authoritative owner for any loop PV that lives in this VG. An
+	// untagged VG (foreign LVM imported by hand and then tagged enabled)
+	// must never be claimed; in that case we leave file-device discovery
+	// off entirely for safety.
+	_, ownerLVGName := utils.ReadValueFromTags(vg.VGTags, internal.LVMVolumeGroupTag)
+
 	for _, pv := range filteredPV {
+		if strings.HasPrefix(pv.PVName, "/dev/loop") {
+			fileDev := d.buildFileDeviceFromLoopPV(ctx, pv, ownerLVGName, false)
+			if fileDev != nil {
+				fileResult[currentNode] = append(fileResult[currentNode], *fileDev)
+			}
+			continue
+		}
+
 		bd, exist := bdPathStatus[pv.PVName]
-		// this is very rare case which might occurred while VG extend operation goes. In this case, in the cache the controller
-		// sees a new PV included in the VG, but BlockDeviceDiscover did not update the corresponding BlockDevice resource on time,
-		// so the BlockDevice resource does not have any info, that it is in the VG.
 		if !exist {
+			// When udev integration is unavailable LVM may report a managed
+			// loop PV under a /dev/block/MAJ:MIN or /dev/disk/by-id alias
+			// instead of /dev/loopN (the same aliasing FilterForeignPVs
+			// resolves). Probe it as a loop device before giving up:
+			// buildFileDeviceFromLoopPV refuses anything whose backing file
+			// is not one of ours, and a non-loop device simply yields no
+			// backing file. The probe is quiet (Debug) so a genuine
+			// not-yet-registered BlockDevice does not spam warnings.
+			if ownerLVGName != "" {
+				if fileDev := d.buildFileDeviceFromLoopPV(ctx, pv, ownerLVGName, true); fileDev != nil {
+					fileResult[currentNode] = append(fileResult[currentNode], *fileDev)
+					continue
+				}
+			}
 			d.log.Warning(fmt.Sprintf("[configureCandidateNodeDevices] no BlockDevice resource is yet configured for PV %s in VG %s, retry on the next iteration", pv.PVName, vg.VGName))
 			continue
 		}
@@ -601,7 +629,98 @@ func (d *Discoverer) configureCandidateNodeDevices(pvs map[string][]internal.PVD
 		result[currentNode] = append(result[currentNode], device)
 	}
 
-	return result
+	return result, fileResult
+}
+
+// buildFileDeviceFromLoopPV resolves the backing file for a loop PV and
+// returns a managed file-device record iff the basename matches the
+// owner pattern produced by utils.BuildFileDevicePath. Any other loop
+// PV — a foreign losetup-attached qcow2, a snap squashfs loop that
+// somehow ended up in a VG, a manual experiment — is skipped with a
+// warning so the agent never writes its path into status (and therefore
+// never tries to rm it later during cleanup).
+//
+// expectedLVGName is the owner name pulled from the VG tag; when empty
+// the function refuses to claim any loop PV.
+//
+// probe is set when the PV is not a /dev/loopN node but an alias we are
+// only speculatively checking (it was not found among BlockDevices): in
+// that mode "not a loop" / "not ours" outcomes are expected and logged at
+// Debug instead of Warning, so an ordinary not-yet-registered BlockDevice
+// does not produce misleading warnings.
+//
+// NOTE: this is one of two places that canonicalize an alias-reported loop
+// PV. Here we resolve backing-file → canonical /dev/loopN via losetup (we
+// have the backing file and need the loop). The reconciler does the inverse
+// in Reconciler.loopAlreadyRegisteredAsPV (canonical loop is known, alias PV
+// names are resolved via readlink). They use different methods because their
+// inputs differ; keep their ownership/aliasing assumptions in sync.
+func (d *Discoverer) buildFileDeviceFromLoopPV(ctx context.Context, pv internal.PVData, expectedLVGName string, probe bool) *internal.LVMVGFileDevice {
+	if expectedLVGName == "" {
+		d.log.Warning(fmt.Sprintf("[buildFileDeviceFromLoopPV] VG of loop PV %s carries no %s tag; skipping file-device discovery", pv.PVName, internal.LVMVolumeGroupTag))
+		return nil
+	}
+
+	// A short timeout protects the discoverer's reconcile loop from a
+	// hung losetup: this call runs once per loop PV per cycle.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	cmd, backingFile, err := d.commands.GetLoopBackingFile(ctx, pv.PVName)
+	d.log.Debug(cmd)
+	if err != nil {
+		msg := fmt.Sprintf("[buildFileDeviceFromLoopPV] unable to read backing file for %s: %v", pv.PVName, err)
+		if probe {
+			d.log.Debug(msg)
+		} else {
+			d.log.Warning(msg)
+		}
+		return nil
+	}
+	if backingFile == "" {
+		return nil
+	}
+
+	if !utils.IsManagedFileDevicePath(backingFile, expectedLVGName) {
+		msg := fmt.Sprintf("[buildFileDeviceFromLoopPV] backing file %q of loop PV %s does not match managed pattern for LVG %s; skipping", backingFile, pv.PVName, expectedLVGName)
+		if probe {
+			d.log.Debug(msg)
+		} else {
+			d.log.Warning(msg)
+		}
+		return nil
+	}
+
+	// Status must record the canonical /dev/loopN device, never an alias.
+	// In the probe path pv.PVName is a /dev/disk/by-id or /dev/block alias;
+	// recording it verbatim makes status.loopDevice flip-flop between the
+	// alias and /dev/loopN across reconciles (whichever lvm happens to
+	// report), churning the resource with no-op updates. Re-resolve the
+	// canonical loop from the backing file; keep pv.PVName only if that fails.
+	loopDevice := pv.PVName
+	if !strings.HasPrefix(loopDevice, "/dev/loop") {
+		findCmd, canonical, ferr := d.commands.FindLoopDeviceByFile(ctx, backingFile)
+		d.log.Debug(findCmd)
+		if ferr != nil {
+			d.log.Debug(fmt.Sprintf("[buildFileDeviceFromLoopPV] unable to resolve canonical loop for %s: %v; keeping %s", backingFile, ferr, pv.PVName))
+		} else if canonical != "" {
+			loopDevice = canonical
+		}
+	}
+
+	return &internal.LVMVGFileDevice{
+		FilePath: backingFile,
+		// Size is the PV size, not the raw backing-file size: it is what lvm
+		// reports for this device and is always slightly smaller than the
+		// requested spec.fileDevices[].size (LVM metadata overhead). This
+		// mirrors how block devices expose status...devices[].pvSize, and keeps
+		// the value self-consistent across reconciles (hasStatusNodesDiff
+		// compares PV size against PV size, so it never churns). Callers that
+		// need the requested size must read spec, not status.
+		LoopDevice: loopDevice,
+		Size:       *resource.NewQuantity(pv.PVSize.Value(), resource.BinarySI),
+		PVUUID:     pv.PVUuid,
+	}
 }
 
 func checkVGHealth(vgIssues map[string]string, pvIssues map[string][]string, lvIssues map[string]map[string]string, vg internal.VGData) (health, message string) {
@@ -879,7 +998,7 @@ func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LVMVolumeGroup, candi
 	}
 	log.Trace(fmt.Sprintf(`VGSize, candidate: %s, lvg: %s`, candidate.VGSize.String(), lvg.Status.VGSize.String()))
 	log.Trace(fmt.Sprintf(`VGUUID, candidate: %s, lvg: %s`, candidate.VGUUID, lvg.Status.VGUuid))
-	log.Trace(fmt.Sprintf(`Nodes, candidate: %+v, lvg: %+v`, convertLVMVGNodes(candidate.Nodes), lvg.Status.Nodes))
+	log.Trace(fmt.Sprintf(`Nodes, candidate: %+v, lvg: %+v`, convertLVMVGNodes(candidate.Nodes, candidate.FileDeviceNodes), lvg.Status.Nodes))
 
 	return candidate.AllocatedSize.Value() != lvg.Status.AllocatedSize.Value() ||
 		hasStatusPoolDiff(convertedStatusPools, lvg.Status.ThinPools) ||
@@ -887,7 +1006,7 @@ func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LVMVolumeGroup, candi
 		candidate.VGFree.Value() != lvg.Status.VGFree.Value() ||
 		candidate.VGUUID != lvg.Status.VGUuid ||
 		candidate.ExtentSize.Value() != lvg.Status.ExtentSize.Value() ||
-		hasStatusNodesDiff(log, convertLVMVGNodes(candidate.Nodes), lvg.Status.Nodes)
+		hasStatusNodesDiff(log, convertLVMVGNodes(candidate.Nodes, candidate.FileDeviceNodes), lvg.Status.Nodes)
 }
 
 func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LVMVolumeGroupNode) bool {
@@ -914,6 +1033,45 @@ func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LVMVolumeGro
 				first[i].Devices[j].DevSize.Value() != second[i].Devices[j].DevSize.Value() {
 				return true
 			}
+		}
+
+		// File devices must be diffed too: a loop minor can change across
+		// reboots (ReattachFileDevices re-attaches via `losetup --find`), so
+		// without this the discoverer would never refresh a stale
+		// loopDevice/pvUUID in status, and cleanup on delete would later act
+		// on the stale value.
+		//
+		// Match by FilePath rather than by slice position: the candidate
+		// slice is built in raw `lvm pvs` report order (sortPVsByVG does not
+		// sort within a VG), and a loop PV can be reported under a /dev/loopN
+		// or an alias on different scans, so the two slices may list the same
+		// devices in a different order. A positional comparison would then
+		// flag a spurious diff and rewrite status on every reconcile.
+		if hasStatusFileDevicesDiff(first[i].FileDevices, second[i].FileDevices) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasStatusFileDevicesDiff(first, second []v1alpha1.LVMVolumeGroupFileDevice) bool {
+	if len(first) != len(second) {
+		return true
+	}
+
+	byPath := make(map[string]v1alpha1.LVMVolumeGroupFileDevice, len(second))
+	for _, fd := range second {
+		byPath[fd.FilePath] = fd
+	}
+
+	for _, fd := range first {
+		other, ok := byPath[fd.FilePath]
+		if !ok ||
+			fd.LoopDevice != other.LoopDevice ||
+			fd.PVUuid != other.PVUuid ||
+			fd.Size.Value() != other.Size.Value() {
+			return true
 		}
 	}
 
@@ -964,17 +1122,56 @@ func configureBlockDeviceSelector(candidate internal.LVMVolumeGroupCandidate) *m
 	}
 }
 
-func convertLVMVGNodes(nodes map[string][]internal.LVMVGDevice) []v1alpha1.LVMVolumeGroupNode {
-	lvmvgNodes := make([]v1alpha1.LVMVolumeGroupNode, 0, len(nodes))
+func convertLVMVGNodes(nodes map[string][]internal.LVMVGDevice, fileNodes map[string][]internal.LVMVGFileDevice) []v1alpha1.LVMVolumeGroupNode {
+	// Fast path for the overwhelmingly common case of no file devices
+	// (every pure block-device LVG): a single pass over nodes, no extra
+	// node-name set to allocate. This runs per LVG on every discover
+	// reconcile via hasLVMVolumeGroupDiff, so the allocation matters.
+	if len(fileNodes) == 0 {
+		lvmvgNodes := make([]v1alpha1.LVMVolumeGroupNode, 0, len(nodes))
+		for nodeName, nodeDevices := range nodes {
+			lvmvgNodes = append(lvmvgNodes, v1alpha1.LVMVolumeGroupNode{
+				Devices: convertLVMVGDevices(nodeDevices),
+				Name:    nodeName,
+			})
+		}
+		return lvmvgNodes
+	}
 
-	for nodeName, nodeDevices := range nodes {
-		lvmvgNodes = append(lvmvgNodes, v1alpha1.LVMVolumeGroupNode{
-			Devices: convertLVMVGDevices(nodeDevices),
+	allNodeNames := make(map[string]struct{}, len(nodes)+len(fileNodes))
+	for n := range nodes {
+		allNodeNames[n] = struct{}{}
+	}
+	for n := range fileNodes {
+		allNodeNames[n] = struct{}{}
+	}
+
+	lvmvgNodes := make([]v1alpha1.LVMVolumeGroupNode, 0, len(allNodeNames))
+	for nodeName := range allNodeNames {
+		node := v1alpha1.LVMVolumeGroupNode{
+			Devices: convertLVMVGDevices(nodes[nodeName]),
 			Name:    nodeName,
-		})
+		}
+		if fds := fileNodes[nodeName]; len(fds) > 0 {
+			node.FileDevices = convertLVMVGFileDevices(fds)
+		}
+		lvmvgNodes = append(lvmvgNodes, node)
 	}
 
 	return lvmvgNodes
+}
+
+func convertLVMVGFileDevices(devices []internal.LVMVGFileDevice) []v1alpha1.LVMVolumeGroupFileDevice {
+	result := make([]v1alpha1.LVMVolumeGroupFileDevice, 0, len(devices))
+	for _, dev := range devices {
+		result = append(result, v1alpha1.LVMVolumeGroupFileDevice{
+			FilePath:   dev.FilePath,
+			LoopDevice: dev.LoopDevice,
+			Size:       dev.Size,
+			PVUuid:     dev.PVUUID,
+		})
+	}
+	return result
 }
 
 func convertLVMVGDevices(devices []internal.LVMVGDevice) []v1alpha1.LVMVolumeGroupDevice {

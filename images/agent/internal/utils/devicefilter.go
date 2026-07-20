@@ -64,8 +64,9 @@ func HostNsenterCanonicalResolver(ctx context.Context, devPath string) (string, 
 // IsForeignDeviceBase reports whether the given canonical basename
 // belongs to a storage layer the agent must ignore. The check is a
 // strict prefix match against internal.ForeignDeviceBasePrefixes so it
-// catches partitions of foreign devices too (e.g. "rbd14p1", "loop970",
-// "drbd0").
+// catches partitions of foreign devices too (e.g. "rbd14p1", "nbd0p1",
+// "drbd0"). Loop devices are deliberately absent from the prefix list —
+// the agent manages file-backed loop devices as LVM PVs.
 func IsForeignDeviceBase(base string) bool {
 	for _, prefix := range internal.ForeignDeviceBasePrefixes {
 		if strings.HasPrefix(base, prefix) {
@@ -77,7 +78,18 @@ func IsForeignDeviceBase(base string) bool {
 
 // FilterForeignPVs returns a copy of pvs with PVs whose underlying
 // canonical device belongs to a foreign storage layer (Ceph RBD, DRBD,
-// NBD, loopback) removed.
+// NBD) removed.
+//
+// Loop devices are intentionally NOT dropped here: the agent manages
+// file-backed loop devices as LVM PVs (spec.fileDevices), so a blanket
+// loop reject would hide its own managed PVs. Ownership of a loop PV is
+// instead established later, in the discoverer, via the backing-file owner
+// pattern (IsManagedFileDevicePath) gated on the VG's
+// storage.deckhouse.io/lvmVolumeGroupName tag. Unmanaged loop PVs that
+// form a whole VG (e.g. nested LVM inside a file-backed guest VM disk) are
+// dropped separately by FilterForeignLoopPVs so they cannot collide by
+// name with a managed VG; see that function for why the tag filter alone
+// is not enough.
 //
 // lvm.static bundled with the agent has no udev integration and so it
 // enumerates devices via /dev/block/MAJOR:MINOR and /dev/disk/by-id/
@@ -98,7 +110,7 @@ func IsForeignDeviceBase(base string) bool {
 // assumption that a transient resolver failure must not silently hide
 // a legitimate PV.
 //
-// Each resolver call runs under runWithTimeout(cmdTimeout) so a hung
+// Each resolver call runs under RunWithTimeout(cmdTimeout) so a hung
 // nsenter-backed readlink cannot block the scan loop indefinitely.
 // This mirrors the per-command timeout protection introduced in
 // PR #290 for every other lvm.static / nsenter invocation in
@@ -124,7 +136,7 @@ func FilterForeignPVs(
 			out = append(out, pv)
 			continue
 		}
-		resolved, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+		resolved, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 			return resolver(ctx, pv.PVName)
 		})
 		if err != nil {
@@ -140,6 +152,81 @@ func FilterForeignPVs(
 			log.Info(fmt.Sprintf(
 				"[FilterForeignPVs] dropping PV %q backed by foreign device %q (VG=%q VG_UUID=%q)",
 				pv.PVName, resolved, pv.VGName, pv.VGUuid,
+			))
+			continue
+		}
+		out = append(out, pv)
+	}
+	return out
+}
+
+// FilterForeignLoopPVs drops PVs that belong to an unmanaged, purely
+// loop-backed Volume Group — e.g. nested LVM inside a guest VM's
+// file-backed disk attached on the host via losetup.
+//
+// Loop devices are not rejected by FilterForeignPVs because the agent
+// manages its own file-backed loop devices (spec.fileDevices) as PVs.
+// But an unmanaged loop-backed VG that reaches the cache is dangerous:
+// findDuplicateVGNames runs over every cached VG (before tag filtering),
+// so a guest VG that happens to share a name with a managed VG
+// (`data`, `vg0`, … are common defaults) is detected as a duplicate and
+// takes the *managed* LVMVolumeGroup offline (VGReady=False), and the
+// agent's name-keyed cache lookups (FindVG/FindLV) could mix the two.
+//
+// A VG is dropped here only when ALL of the following hold:
+//   - it is NOT tagged storage.deckhouse.io/enabled=true (managed VGs,
+//     including the agent's own file-backed ones, are always kept — the
+//     agent tags every VG it creates at vgcreate time);
+//   - it has at least one PV and every one of its PVs is a /dev/loop*
+//     device (a VG with any real block-device PV is a legitimate,
+//     potentially-adoptable local VG and must stay visible).
+//
+// This restores the pre-spec.fileDevices behaviour for foreign loop VGs
+// (loop PVs used to be rejected wholesale) while keeping managed
+// file-backed loop VGs. Bare loop PVs not part of any VG are kept; they
+// carry no VG name and cannot poison name resolution.
+//
+// Detection is by the /dev/loop name prefix, matching how the discoverer
+// itself classifies loop PVs (Discoverer.configureCandidateNodeDevices).
+// A managed loop PV occasionally reported under a /dev/disk or /dev/block
+// alias counts as "non-loop" here, which only makes the filter more
+// conservative (the VG is kept), never dropping a managed VG.
+func FilterForeignLoopPVs(log logger.Logger, vgs []internal.VGData, pvs []internal.PVData) []internal.PVData {
+	managed := make(map[string]struct{}, len(vgs))
+	for _, vg := range vgs {
+		if strings.Contains(vg.VGTags, internal.LVMTags[0]) {
+			managed[vg.VGUUID] = struct{}{}
+		}
+	}
+
+	hasAnyPV := make(map[string]bool, len(pvs))
+	hasNonLoopPV := make(map[string]bool, len(pvs))
+	for _, pv := range pvs {
+		if pv.VGUuid == "" {
+			continue
+		}
+		hasAnyPV[pv.VGUuid] = true
+		if !strings.HasPrefix(pv.PVName, "/dev/loop") {
+			hasNonLoopPV[pv.VGUuid] = true
+		}
+	}
+
+	isForeignLoopVG := func(vgUUID string) bool {
+		if vgUUID == "" {
+			return false
+		}
+		if _, ok := managed[vgUUID]; ok {
+			return false
+		}
+		return hasAnyPV[vgUUID] && !hasNonLoopPV[vgUUID]
+	}
+
+	out := make([]internal.PVData, 0, len(pvs))
+	for _, pv := range pvs {
+		if isForeignLoopVG(pv.VGUuid) {
+			log.Info(fmt.Sprintf(
+				"[FilterForeignLoopPVs] dropping PV %q of unmanaged loop-backed VG %q (VG_UUID=%q)",
+				pv.PVName, pv.VGName, pv.VGUuid,
 			))
 			continue
 		}

@@ -38,9 +38,9 @@ func TestIsForeignDeviceBase(t *testing.T) {
 		{"rbd with partition", "rbd14p1", true},
 		{"drbd canonical", "drbd0", true},
 		{"nbd canonical", "nbd5", true},
-		{"loop canonical", "loop970", true},
-		{"loop with high index", "loop1234", true},
 
+		{"loop canonical", "loop970", false},
+		{"loop with high index", "loop1234", false},
 		{"nvme canonical", "nvme4n1p1", false},
 		{"sda canonical", "sda1", false},
 		{"md raid", "md1", false},
@@ -70,8 +70,8 @@ func TestFilterForeignPVs(t *testing.T) {
 		{PVName: "/dev/md1", VGName: "vg0", VGUuid: "IZMRUl"},
 		{PVName: "/dev/block/251:144", VGName: "vg-1", VGUuid: "Czf0Sf"},                                 // -> rbd9
 		{PVName: "/dev/block/251:16", VGName: "vg-thin-data", VGUuid: "zR5ouf"},                          // -> rbd1
-		{PVName: "/dev/disk/by-id/lvm-pv-uuid-9Uuprg-IFQM-5c2y", VGName: "vg-1", VGUuid: "kHmPc6"},       // -> loop808
-		{PVName: "/dev/disk/by-id/lvm-pv-uuid-xl1soD-zQZM-BRAt", VGName: "vg-thin-data", VGUuid: "He4J"}, // -> loop485
+		{PVName: "/dev/disk/by-id/lvm-pv-uuid-9Uuprg-IFQM-5c2y", VGName: "vg-1", VGUuid: "kHmPc6"},       // -> loop808 (kept — loops are managed)
+		{PVName: "/dev/disk/by-id/lvm-pv-uuid-xl1soD-zQZM-BRAt", VGName: "vg-thin-data", VGUuid: "He4J"}, // -> loop485 (kept — loops are managed)
 	}
 
 	// Resolver mimics the readlink -f result observed on d8-virt-node-0
@@ -94,7 +94,11 @@ func TestFilterForeignPVs(t *testing.T) {
 	}
 
 	got := FilterForeignPVs(context.Background(), log, resolver, pvs, 0)
-	wantNames := []string{"/dev/nvme4n1p1", "/dev/nvme4n1p2", "/dev/md1"}
+	wantNames := []string{
+		"/dev/nvme4n1p1", "/dev/nvme4n1p2", "/dev/md1",
+		"/dev/disk/by-id/lvm-pv-uuid-9Uuprg-IFQM-5c2y",
+		"/dev/disk/by-id/lvm-pv-uuid-xl1soD-zQZM-BRAt",
+	}
 	gotNames := make([]string, 0, len(got))
 	for _, pv := range got {
 		gotNames = append(gotNames, pv.PVName)
@@ -188,6 +192,95 @@ func TestFilterForeignPVs_perCallTimeout(t *testing.T) {
 	assert.Len(t, got, len(pvs),
 		"PVs whose resolver hits the per-call timeout must be conservatively kept "+
 			"(same contract as the transient-error branch)")
+}
+
+func TestFilterForeignLoopPVs(t *testing.T) {
+	log, err := logger.NewLogger(logger.ErrorLevel)
+	if err != nil {
+		t.Fatalf("unable to create logger: %v", err)
+	}
+
+	const managedTag = "storage.deckhouse.io/enabled=true,storage.deckhouse.io/lvmVolumeGroupName=vg-managed"
+
+	tests := []struct {
+		name    string
+		vgs     []internal.VGData
+		pvs     []internal.PVData
+		wantPVs []string
+	}{
+		{
+			name: "drops an unmanaged loop-only VG",
+			vgs: []internal.VGData{
+				{VGName: "data", VGUUID: "foreign", VGTags: ""},
+			},
+			pvs: []internal.PVData{
+				{PVName: "/dev/loop7", VGUuid: "foreign", VGName: "data"},
+			},
+			wantPVs: nil,
+		},
+		{
+			name: "keeps a managed loop-only VG (enabled tag present)",
+			vgs: []internal.VGData{
+				{VGName: "vg-managed", VGUUID: "ours", VGTags: managedTag},
+			},
+			pvs: []internal.PVData{
+				{PVName: "/dev/loop3", VGUuid: "ours", VGName: "vg-managed"},
+			},
+			wantPVs: []string{"/dev/loop3"},
+		},
+		{
+			name: "keeps an unmanaged VG with a non-loop PV (adoptable block VG)",
+			vgs: []internal.VGData{
+				{VGName: "vg-block", VGUUID: "block", VGTags: ""},
+			},
+			pvs: []internal.PVData{
+				{PVName: "/dev/sdb", VGUuid: "block", VGName: "vg-block"},
+			},
+			wantPVs: []string{"/dev/sdb"},
+		},
+		{
+			name: "keeps an unmanaged mixed VG (one loop, one block PV)",
+			vgs: []internal.VGData{
+				{VGName: "vg-mixed", VGUUID: "mixed", VGTags: ""},
+			},
+			pvs: []internal.PVData{
+				{PVName: "/dev/loop9", VGUuid: "mixed", VGName: "vg-mixed"},
+				{PVName: "/dev/sdc", VGUuid: "mixed", VGName: "vg-mixed"},
+			},
+			wantPVs: []string{"/dev/loop9", "/dev/sdc"},
+		},
+		{
+			name: "keeps a bare loop PV not part of any VG",
+			vgs:  nil,
+			pvs: []internal.PVData{
+				{PVName: "/dev/loop1", VGUuid: ""},
+			},
+			wantPVs: []string{"/dev/loop1"},
+		},
+		{
+			name: "drops only the foreign loop VG, keeps the managed one with the same name",
+			vgs: []internal.VGData{
+				{VGName: "data", VGUUID: "foreign", VGTags: ""},
+				{VGName: "data", VGUUID: "ours", VGTags: managedTag},
+			},
+			pvs: []internal.PVData{
+				{PVName: "/dev/loop7", VGUuid: "foreign", VGName: "data"},
+				{PVName: "/dev/loop8", VGUuid: "ours", VGName: "data"},
+			},
+			wantPVs: []string{"/dev/loop8"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FilterForeignLoopPVs(log, tt.vgs, tt.pvs)
+			gotNames := make([]string, 0, len(got))
+			for _, pv := range got {
+				gotNames = append(gotNames, pv.PVName)
+			}
+			assert.ElementsMatch(t, tt.wantPVs, gotNames)
+		})
+	}
 }
 
 func TestFilterVGsByPresentPVs(t *testing.T) {

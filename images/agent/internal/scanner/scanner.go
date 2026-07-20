@@ -304,11 +304,17 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 
 	// lvm.static bundled in /opt/deckhouse/sds/bin is built without udev
 	// integration and so reports PVs found on any block device it sees in
-	// /dev, including Ceph RBD images and loopback-mounted guest VM disks
-	// that happen to carry LVM signatures from nested LVM (see ADR / PR
-	// description). Filter those out before feeding the cache so that the
-	// LVG/BD reconcile logic never sees duplicate VG names produced by
-	// foreign storage layers.
+	// /dev, including Ceph RBD/DRBD/NBD images that happen to carry LVM
+	// signatures from nested LVM (see ADR / PR description). Filter those out
+	// before feeding the cache so that the LVG/BD reconcile logic never sees
+	// duplicate VG names produced by foreign storage layers.
+	//
+	// FilterForeignPVs does NOT reject loop devices: the agent manages
+	// file-backed loop devices as LVM PVs (spec.fileDevices). Unmanaged loop
+	// PVs that form an entire VG are dropped just below by FilterForeignLoopPVs
+	// so a guest VM's nested-LVM loop VG cannot collide by name with a managed
+	// VG. A managed loop PV is kept because the agent tags every VG it creates
+	// with storage.deckhouse.io/enabled=true.
 	//
 	// cfg.CmdDeadlineDuration bounds every per-PV nsenter+readlink call:
 	// a hung resolver on a single foreign device cannot block the entire
@@ -317,7 +323,22 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	beforePV := len(pvs)
 	pvs = utils.FilterForeignPVs(ctx, log, nil, pvs, cfg.CmdDeadlineDuration)
 	if dropped := beforePV - len(pvs); dropped > 0 {
-		log.Info(fmt.Sprintf("[fillTheCache] dropped %d foreign PV(s) backed by rbd/drbd/nbd/loop devices", dropped))
+		log.Info(fmt.Sprintf("[fillTheCache] dropped %d foreign PV(s) backed by rbd/drbd/nbd devices", dropped))
+	}
+
+	// Also drop PVs of unmanaged, purely loop-backed VGs (nested LVM inside a
+	// guest VM's file-backed disk attached via losetup). Loop PVs are not
+	// rejected by FilterForeignPVs because the agent manages its own
+	// file-backed loop devices, but an unmanaged loop VG that shares a name
+	// with a managed VG would otherwise be detected as a duplicate by
+	// findDuplicateVGNames and take the managed LVMVolumeGroup offline.
+	beforeLoopPV := len(pvs)
+	pvs = utils.FilterForeignLoopPVs(log, vgs, pvs)
+	if dropped := beforeLoopPV - len(pvs); dropped > 0 {
+		log.Info(fmt.Sprintf("[fillTheCache] dropped %d PV(s) of unmanaged loop-backed VG(s)", dropped))
+	}
+
+	if len(pvs) < beforePV {
 		beforeVG := len(vgs)
 		vgs = utils.FilterVGsByPresentPVs(vgs, pvs)
 		beforeLV := len(lvs)
