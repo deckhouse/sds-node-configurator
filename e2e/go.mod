@@ -87,3 +87,8 @@ require (
 )
 
 replace github.com/deckhouse/sds-node-configurator/api => ../api
+
+tool (
+	github.com/deckhouse/storage-e2e/cmd/bootstrap-cluster
+	github.com/deckhouse/storage-e2e/cmd/remove-cluster
+)

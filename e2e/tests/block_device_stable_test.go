@@ -83,10 +83,12 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 	})
 
 	AfterAll(func() {
-		err := cl.Close(context.Background())
-		if err != nil {
-			GinkgoWriter.Println("Error closing cluster: ", err)
-		}
+		defer func() {
+			if err := cl.Close(context.Background()); err != nil {
+				GinkgoWriter.Println("Error closing cluster: ", err)
+			}
+		}()
+
 		if virtualDisk == nil {
 			return
 		}
@@ -117,7 +119,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 		When("disk is detached from the VM", func() {
 			BeforeAll(func() {
 				By("Detaching the virtual disk from the VM")
-				detachErr := cl.Disks().DetachDisk(ctx, targetNode, initialBlockDevice.Name)
+				detachErr := cl.Disks().DetachDisk(ctx, targetNode, virtualDisk.Name)
 				Expect(detachErr).NotTo(HaveOccurred(), "failed to detach disk")
 			})
 
@@ -132,7 +134,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 			When("disk is reattached to the VM", func() {
 				BeforeAll(func() {
 					By("Reattaching the virtual disk to the VM")
-					reattachErr := cl.Disks().AttachDisk(ctx, targetNode, initialBlockDevice.Name)
+					reattachErr := cl.Disks().AttachDisk(ctx, targetNode, virtualDisk.Name)
 					Expect(reattachErr).NotTo(HaveOccurred(), "failed to reattach disk")
 				})
 
