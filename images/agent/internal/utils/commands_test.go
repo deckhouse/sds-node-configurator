@@ -403,8 +403,8 @@ func TestLvmStaticExtendedArgs(t *testing.T) {
 	}
 
 	t.Run("config_value_contains_all_foreign_prefixes_and_retention", func(t *testing.T) {
-		// Defensive cross-check: --config must reject all four foreign
-		// device prefixes the post-filter knows about (rbd/drbd/nbd/loop)
+		// Defensive cross-check: --config must reject all foreign
+		// device prefixes the post-filter knows about (rbd/drbd/nbd)
 		// and must cap /etc/lvm/archive growth. If either drops out due
 		// to a refactor, this assertion catches it before the next scan
 		// loop silently regresses.
@@ -558,6 +558,68 @@ func TestFilterStdErr(t *testing.T) {
 			} else {
 				assert.Contains(t, result.String(), tt.stdErr)
 			}
+		})
+	}
+}
+
+// GetLoopBackingFile must strip the " (deleted)" marker losetup appends when
+// the backing file was unlinked while the loop is still attached. Without
+// stripping it, IsManagedFileDevicePath would not recognise the basename and
+// cleanup would refuse to detach the loop, stranding the minor on the node.
+func TestSanitizeBackingFilePath(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain", "/data/sds-vg-a-deadbeef0011.img", "/data/sds-vg-a-deadbeef0011.img"},
+		{"trailing newline", "/data/sds-vg-a-deadbeef0011.img\n", "/data/sds-vg-a-deadbeef0011.img"},
+		{"deleted marker", "/data/sds-vg-a-deadbeef0011.img (deleted)", "/data/sds-vg-a-deadbeef0011.img"},
+		{"deleted marker with newline", "/data/sds-vg-a-deadbeef0011.img (deleted)\n", "/data/sds-vg-a-deadbeef0011.img"},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeBackingFilePath(tt.in)
+			assert.Equal(t, tt.want, got)
+			if tt.want != "" {
+				assert.True(t, IsManagedFileDevicePath(got, "vg-a"),
+					"sanitized path must still be recognised as managed")
+			}
+		})
+	}
+}
+
+// parseStatfsAvailableBytes turns the "<block-size> <available-blocks>"
+// output of `stat -f -c "%S %a"` into a byte count; GetAvailableBytes relies
+// on it to refuse an oversized backing file before fallocate fills the node.
+func TestParseStatfsAvailableBytes(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    int64
+		wantErr bool
+	}{
+		{"plain", "4096 1000", 4096 * 1000, false},
+		{"trailing newline", "4096 1000\n", 4096 * 1000, false},
+		{"extra whitespace", "  4096   1000  ", 4096 * 1000, false},
+		{"zero available", "4096 0", 0, false},
+		{"empty", "", 0, true},
+		{"single field", "4096", 0, true},
+		{"too many fields", "4096 1000 7", 0, true},
+		{"non-numeric block size", "abc 1000", 0, true},
+		{"non-numeric available", "4096 abc", 0, true},
+		{"negative available", "4096 -1", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseStatfsAvailableBytes(tt.in)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

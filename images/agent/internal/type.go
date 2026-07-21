@@ -38,6 +38,7 @@ type LVMVolumeGroupCandidate struct {
 	VGUUID                string
 	ExtentSize            resource.Quantity
 	Nodes                 map[string][]LVMVGDevice
+	FileDeviceNodes       map[string][]LVMVGFileDevice
 }
 
 type LVMVGStatusThinPool struct {
@@ -55,6 +56,13 @@ type LVMVGDevice struct {
 	DevSize     resource.Quantity
 	PVUUID      string
 	BlockDevice string
+}
+
+type LVMVGFileDevice struct {
+	FilePath   string
+	LoopDevice string
+	Size       resource.Quantity
+	PVUUID     string
 }
 
 type Devices struct {

@@ -25,3 +25,16 @@ properties:
     description: |
       Use netlink/sysfs instead of `lsblk` as the data source for block device discovery on the agent.
       When disabled, the agent discovers block devices via `lsblk`.
+  fileDevicesDirectory:
+    type: string
+    default: /opt/deckhouse/sds/file-devices
+    pattern: '^/.*$'
+    description: |
+      Base directory on each node under which the agent is allowed to create
+      backing files for file-backed LVM devices (`spec.fileDevices`).
+
+      Every `spec.fileDevices[].directory` must be this directory or a
+      subdirectory of it; the agent rejects backing files outside this subtree
+      to prevent an arbitrary host path (for example `/` or `/var/lib/kubelet`)
+      from being filled up. Override it to point at a dedicated data disk
+      mounted on the node when the default location does not have enough space.

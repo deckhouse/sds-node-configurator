@@ -23,6 +23,7 @@ import (
 	"os/signal"
 	goruntime "runtime"
 	"syscall"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
@@ -147,6 +148,20 @@ func run() int {
 			log.Error(err, "[main] unable to run ReTag")
 		}
 
+		log.Info("[main] ReattachFileDevices starts")
+		// Best-effort fast path: re-establish loop mappings for file-backed
+		// PVs so ActivateVGs can see them right after a reboot. A failure
+		// here must NOT suppress ActivateAllManagedVGs — that would hold
+		// every healthy VG on the node (including pure block-device ones)
+		// hostage to one unrelated file device. The LVG reconciler retries
+		// reattach idempotently via provisionFileDevices on its next pass,
+		// so a transient losetup failure recovers without a pod restart.
+		if err := reattachFileDevicesAtStartup(ctx, log, mgr, commands, cfgParams.NodeName, cfgParams.CmdDeadlineDuration); err != nil {
+			log.Error(err, "[main] file device reattach failed; the LVG reconciler will retry, continuing to ActivateVGs")
+		} else {
+			log.Info("[main] ReattachFileDevices completed")
+		}
+
 		log.Info("[main] ActivateVGs starts")
 		if err := utils.ActivateAllManagedVGs(ctx, log, commands, metrics, cfgParams.CmdDeadlineDuration); err != nil {
 			log.Error(err, "[main] unable to activate managed VGs")
@@ -232,6 +247,8 @@ func run() int {
 				NodeName:                cfgParams.NodeName,
 				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
 				BlockDeviceScanInterval: cfgParams.BlockDeviceScanInterval,
+				CmdDeadlineDuration:     cfgParams.CmdDeadlineDuration,
+				FileDevicesDirectory:    cfgParams.FileDevicesDirectory,
 			},
 		),
 	)
@@ -319,4 +336,73 @@ func run() int {
 
 	log.Info("[main] successfully starts the manager")
 	return 0
+}
+
+func reattachFileDevicesAtStartup(ctx context.Context, log logger.Logger, mgr manager.Manager, commands utils.Commands, nodeName string, cmdTimeout time.Duration) error {
+	var lvgList v1alpha1.LVMVolumeGroupList
+	if err := mgr.GetAPIReader().List(ctx, &lvgList); err != nil {
+		log.Error(err, "[reattachFileDevicesAtStartup] unable to list LVMVolumeGroups")
+		return err
+	}
+
+	var items []utils.LVGWithFileDevices
+	for _, lvg := range lvgList.Items {
+		if lvg.Spec.Local.NodeName != nodeName {
+			continue
+		}
+
+		// Collect backing-file paths from BOTH the observed status and the
+		// desired spec. Status alone is not enough: a node can reboot after
+		// the LVG was provisioned but before the discoverer wrote
+		// status.nodes[].fileDevices, in which case reattach would find
+		// nothing and ActivateVGs would bring the VG up missing its loop PV.
+		// The spec path is deterministic (BuildFileDevicePath), so it lets
+		// reattach recover even without a status entry. ReattachFileDevices
+		// never creates files (only losetup --find on an existing backing
+		// file), so a spec entry whose file does not exist yet is a harmless
+		// best-effort miss the LVG reconciler provisions on its next pass.
+		seen := make(map[string]struct{})
+		fds := make([]utils.FileDeviceStatus, 0)
+		for _, node := range lvg.Status.Nodes {
+			if node.Name != nodeName {
+				continue
+			}
+			for _, fd := range node.FileDevices {
+				if fd.FilePath == "" {
+					continue
+				}
+				if _, ok := seen[fd.FilePath]; ok {
+					continue
+				}
+				seen[fd.FilePath] = struct{}{}
+				fds = append(fds, utils.FileDeviceStatus{
+					FilePath:   fd.FilePath,
+					LoopDevice: fd.LoopDevice,
+				})
+			}
+		}
+		for _, fd := range lvg.Spec.FileDevices {
+			path := utils.BuildFileDevicePath(fd.Directory, lvg.Name, fd.Size)
+			if _, ok := seen[path]; ok {
+				continue
+			}
+			seen[path] = struct{}{}
+			fds = append(fds, utils.FileDeviceStatus{FilePath: path})
+		}
+
+		if len(fds) == 0 {
+			continue
+		}
+		items = append(items, utils.LVGWithFileDevices{
+			LVGName:     lvg.Name,
+			FileDevices: fds,
+		})
+	}
+
+	if len(items) == 0 {
+		log.Debug("[reattachFileDevicesAtStartup] no file devices to reattach")
+		return nil
+	}
+
+	return utils.ReattachFileDevices(ctx, log, commands, cmdTimeout, items)
 }

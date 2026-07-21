@@ -18,6 +18,7 @@ package utils
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -62,10 +63,10 @@ func FilterVGsByTag(vgs []internal.VGData, tags []string) []internal.VGData {
 	return filtered
 }
 
-// runWithTimeout invokes fn under a child context with the given timeout, so a
+// RunWithTimeout invokes fn under a child context with the given timeout, so a
 // stuck nsenter-backed LVM command does not block the caller indefinitely.
 // A non-positive timeout disables the deadline and is treated as "no timeout".
-func runWithTimeout[T any](ctx context.Context, timeout time.Duration, fn func(context.Context) (T, error)) (T, error) {
+func RunWithTimeout[T any](ctx context.Context, timeout time.Duration, fn func(context.Context) (T, error)) (T, error) {
 	if timeout <= 0 {
 		return fn(ctx)
 	}
@@ -74,14 +75,94 @@ func runWithTimeout[T any](ctx context.Context, timeout time.Duration, fn func(c
 	return fn(ctx)
 }
 
+// ReattachFileDevices re-establishes loop device mappings for file-backed
+// PVs after a node reboot. It iterates status.nodes[].fileDevices of every
+// LVMVolumeGroup belonging to this node and runs `losetup --find --show`
+// for files whose loop device is not attached yet. Must be called BEFORE
+// ActivateAllManagedVGs so that LVM can see the PVs.
+//
+// On any partial failure the function still tries every remaining entry
+// (best-effort) and returns a non-nil error joining all per-device
+// failures so the caller can log/surface it. A non-nil return is NOT
+// fatal: the startup caller deliberately continues to
+// ActivateAllManagedVGs anyway, because holding every healthy VG on the
+// node (including pure block-device ones) hostage to one unrelated file
+// device would be worse. The LVG reconciler re-attaches idempotently via
+// provisionFileDevices on its next pass, so a transient losetup failure
+// recovers without a pod restart.
+func ReattachFileDevices(ctx context.Context, log logger.Logger, commands Commands, cmdTimeout time.Duration, lvgs []LVGWithFileDevices) error {
+	var failures []error
+	for _, item := range lvgs {
+		for _, fd := range item.FileDevices {
+			if fd.FilePath == "" {
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				return errors.Join(append(failures, fmt.Errorf("aborted: %w", err))...)
+			}
+
+			type findResult struct {
+				cmd     string
+				loopDev string
+			}
+			findRes, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (findResult, error) {
+				cmd, existing, err := commands.FindLoopDeviceByFile(ctx, fd.FilePath)
+				return findResult{cmd: cmd, loopDev: existing}, err
+			})
+			log.Debug(findRes.cmd)
+			if err != nil {
+				failures = append(failures, fmt.Errorf("LVG %s: query loop for %s: %w", item.LVGName, fd.FilePath, err))
+				log.Warning(fmt.Sprintf("[ReattachFileDevices] unable to query loop for %s: %v", fd.FilePath, err))
+				continue
+			}
+			if findRes.loopDev != "" {
+				log.Debug(fmt.Sprintf("[ReattachFileDevices] %s already attached to %s", fd.FilePath, findRes.loopDev))
+				continue
+			}
+
+			type setupResult struct {
+				cmd     string
+				loopDev string
+			}
+			setupRes, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (setupResult, error) {
+				cmd, loopDev, err := commands.SetupLoopDevice(ctx, fd.FilePath)
+				return setupResult{cmd: cmd, loopDev: loopDev}, err
+			})
+			log.Debug(setupRes.cmd)
+			if err != nil {
+				failures = append(failures, fmt.Errorf("LVG %s: setup loop for %s: %w", item.LVGName, fd.FilePath, err))
+				log.Error(err, fmt.Sprintf("[ReattachFileDevices] unable to reattach %s", fd.FilePath))
+				continue
+			}
+			log.Info(fmt.Sprintf("[ReattachFileDevices] reattached %s → %s (LVG %s)", fd.FilePath, setupRes.loopDev, item.LVGName))
+		}
+	}
+	if len(failures) > 0 {
+		return errors.Join(failures...)
+	}
+	return nil
+}
+
+// LVGWithFileDevices carries the minimal data needed by ReattachFileDevices.
+type LVGWithFileDevices struct {
+	LVGName     string
+	FileDevices []FileDeviceStatus
+}
+
+// FileDeviceStatus is the status-level record of a single file device.
+type FileDeviceStatus struct {
+	FilePath   string
+	LoopDevice string
+}
+
 func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Commands, metrics *monitoring.Metrics, cmdTimeout time.Duration) error {
 	log.Info("[ActivateVGs] refreshing LVM metadata cache")
-	if cmd, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+	if cmd, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 		return commands.PVScan(ctx)
 	}); err != nil {
 		log.Warning(fmt.Sprintf("[ActivateVGs] pvscan --cache failed (cmd: %s): %v", cmd, err))
 	}
-	if cmd, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+	if cmd, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 		return commands.VGScan(ctx)
 	}); err != nil {
 		log.Warning(fmt.Sprintf("[ActivateVGs] vgscan --cache failed (cmd: %s): %v", cmd, err))
@@ -91,7 +172,7 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 		data   []internal.VGData
 		cmdStr string
 	}
-	res, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (vgsResult, error) {
+	res, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (vgsResult, error) {
 		data, cmdStr, _, err := commands.GetAllVGs(ctx)
 		return vgsResult{data: data, cmdStr: cmdStr}, err
 	})
@@ -111,7 +192,7 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 	var activationErrors []error
 	for _, vg := range managedVGs {
 		shared := vg.VGShared != ""
-		cmd, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+		cmd, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 			return commands.VGActivate(ctx, vg.VGName, shared)
 		})
 		if err != nil {
@@ -176,7 +257,7 @@ func EnsureVGActivation(
 	activated := false
 	for _, vg := range vgsToActivate {
 		shared := vg.VGShared != ""
-		cmd, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+		cmd, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 			return commands.VGActivate(ctx, vg.VGName, shared)
 		})
 		if err != nil {

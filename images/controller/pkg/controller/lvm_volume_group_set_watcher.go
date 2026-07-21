@@ -250,6 +250,7 @@ func matchConfiguredLVGWithExistingOne(lvg *v1alpha1.LVMVolumeGroup, lvgs map[st
 func updateLVMVolumeGroupByConfiguredFromSet(ctx context.Context, cl client.Client, existing, configured *v1alpha1.LVMVolumeGroup) error {
 	existing.Spec.ThinPools = configured.Spec.ThinPools
 	existing.Spec.BlockDeviceSelector = configured.Spec.BlockDeviceSelector
+	existing.Spec.FileDevices = configured.Spec.FileDevices
 
 	return cl.Update(ctx, existing)
 }
@@ -293,6 +294,7 @@ func configureLVGBySet(lvgSet *v1alpha1.LVMVolumeGroupSet, node v1.Node) *v1alph
 			BlockDeviceSelector:   lvgSet.Spec.LVGTemplate.BlockDeviceSelector,
 			ThinPools:             lvgSet.Spec.LVGTemplate.ThinPools,
 			Type:                  lvgSet.Spec.LVGTemplate.Type,
+			FileDevices:           lvgSet.Spec.LVGTemplate.FileDevices,
 			Local: v1alpha1.LVMVolumeGroupLocalSpec{
 				NodeName: node.Name,
 			},

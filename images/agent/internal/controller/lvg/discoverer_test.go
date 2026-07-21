@@ -359,7 +359,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		mp := map[string][]v1alpha1.BlockDevice{vgName + vgUUID: bds}
 		ar := map[string][]internal.PVData{vgName + vgUUID: pvs}
 
-		actual := setupDiscoverer(nil).configureCandidateNodeDevices(ar, mp, vg, nodeName)
+		actual, _ := setupDiscoverer(nil).configureCandidateNodeDevices(context.Background(), ar, mp, vg, nodeName)
 
 		assert.Equal(t, expected, actual)
 	})
@@ -526,7 +526,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			},
 			Status: v1alpha1.LVMVolumeGroupStatus{
 				AllocatedSize: size10G,
-				Nodes:         convertLVMVGNodes(nodes),
+				Nodes:         convertLVMVGNodes(nodes, nil),
 				ThinPools:     thinPools,
 				VGSize:        size10G,
 				VGUuid:        VGUUID,
@@ -882,7 +882,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				},
 				Status: v1alpha1.LVMVolumeGroupStatus{
 					AllocatedSize: resource.MustParse("9765625Ki"),
-					Nodes:         convertLVMVGNodes(nodes),
+					Nodes:         convertLVMVGNodes(nodes, nil),
 					ThinPools:     thinPools,
 					VGSize:        resource.MustParse("9765625Ki"),
 				},
@@ -947,7 +947,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			lvmVolumeGroup := v1alpha1.LVMVolumeGroup{
 				Status: v1alpha1.LVMVolumeGroupStatus{
 					AllocatedSize: allocatedSize,
-					Nodes:         convertLVMVGNodes(nodes),
+					Nodes:         convertLVMVGNodes(nodes, nil),
 					ThinPools:     thinPools,
 					VGSize:        vgSize,
 					VGFree:        *resource.NewQuantity(vgFree.Value()+10000, resource.BinarySI),
@@ -1025,4 +1025,52 @@ func setupDiscoverer(opts *DiscovererConfig) *Discoverer {
 	}
 
 	return NewDiscoverer(cl, log, metrics, cache.New(), utils.NewCommands(), *opts)
+}
+
+// hasStatusFileDevicesDiff must match file devices by FilePath, not by slice
+// position: the candidate slice is built in raw `lvm pvs` report order while
+// status holds a previous reconcile's order, and a loop PV can be reported
+// under /dev/loopN or an alias on different scans. A positional comparison
+// would flag a spurious diff and churn status on every reconcile.
+func TestHasStatusFileDevicesDiff(t *testing.T) {
+	fdA := v1alpha1.LVMVolumeGroupFileDevice{
+		FilePath:   "/data/sds-vg-a-aaaaaaaaaaaa.img",
+		LoopDevice: "/dev/loop0",
+		PVUuid:     "uuid-a",
+		Size:       resource.MustParse("10Gi"),
+	}
+	fdB := v1alpha1.LVMVolumeGroupFileDevice{
+		FilePath:   "/data/sds-vg-a-bbbbbbbbbbbb.img",
+		LoopDevice: "/dev/loop1",
+		PVUuid:     "uuid-b",
+		Size:       resource.MustParse("20Gi"),
+	}
+
+	t.Run("same_set_different_order_is_not_a_diff", func(t *testing.T) {
+		first := []v1alpha1.LVMVolumeGroupFileDevice{fdA, fdB}
+		second := []v1alpha1.LVMVolumeGroupFileDevice{fdB, fdA}
+		assert.False(t, hasStatusFileDevicesDiff(first, second))
+	})
+
+	t.Run("changed_loop_device_is_a_diff", func(t *testing.T) {
+		moved := fdA
+		moved.LoopDevice = "/dev/loop7"
+		first := []v1alpha1.LVMVolumeGroupFileDevice{moved, fdB}
+		second := []v1alpha1.LVMVolumeGroupFileDevice{fdA, fdB}
+		assert.True(t, hasStatusFileDevicesDiff(first, second))
+	})
+
+	t.Run("different_length_is_a_diff", func(t *testing.T) {
+		first := []v1alpha1.LVMVolumeGroupFileDevice{fdA, fdB}
+		second := []v1alpha1.LVMVolumeGroupFileDevice{fdA}
+		assert.True(t, hasStatusFileDevicesDiff(first, second))
+	})
+
+	t.Run("different_file_path_is_a_diff", func(t *testing.T) {
+		renamed := fdB
+		renamed.FilePath = "/data/sds-vg-a-cccccccccccc.img"
+		first := []v1alpha1.LVMVolumeGroupFileDevice{fdA, renamed}
+		second := []v1alpha1.LVMVolumeGroupFileDevice{fdA, fdB}
+		assert.True(t, hasStatusFileDevicesDiff(first, second))
+	})
 }

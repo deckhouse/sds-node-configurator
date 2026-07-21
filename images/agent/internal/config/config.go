@@ -40,6 +40,13 @@ const (
 	DefaultHealthProbeBindAddressEnvName = "HEALTH_PROBE_BIND_ADDRESS"
 	DefaultHealthProbeBindAddress        = ":4228"
 	NetlinkBlockDeviceDiscovery          = "ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY"
+	FileDevicesDirectory                 = "FILE_DEVICES_DIRECTORY"
+	// DefaultFileDevicesDirectory is the base directory backing files are
+	// confined to when the module config does not override it. It lives under
+	// the module's own /opt/deckhouse/sds tree so a stray fileDevices entry
+	// cannot fill an arbitrary host path. Keep in sync with the
+	// fileDevicesDirectory default in openapi/config-values.yaml.
+	DefaultFileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
 )
 
 type Features struct {
@@ -59,6 +66,7 @@ type Config struct {
 	CmdDeadlineDuration     time.Duration
 	HealthProbeBindAddress  string
 	Features                Features
+	FileDevicesDirectory    string
 }
 
 func NewConfig() (*Config, error) {
@@ -90,6 +98,11 @@ func NewConfig() (*Config, error) {
 	cfg.HealthProbeBindAddress = os.Getenv(DefaultHealthProbeBindAddressEnvName)
 	if cfg.HealthProbeBindAddress == "" {
 		cfg.HealthProbeBindAddress = DefaultHealthProbeBindAddress
+	}
+
+	cfg.FileDevicesDirectory = os.Getenv(FileDevicesDirectory)
+	if cfg.FileDevicesDirectory == "" {
+		cfg.FileDevicesDirectory = DefaultFileDevicesDirectory
 	}
 
 	scanInt := os.Getenv(ScanInterval)

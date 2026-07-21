@@ -28,6 +28,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,6 +71,15 @@ type Commands interface {
 	UdevadmTrigger(ctx context.Context, paths []string) (string, error)
 	UnmarshalDevices(out []byte) ([]internal.Device, error)
 	ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error
+
+	CreateFileDevice(ctx context.Context, path string, sizeBytes int64) (string, error)
+	SetupLoopDevice(ctx context.Context, filePath string) (string, string, error)
+	DetachLoopDevice(ctx context.Context, loopDev string) (string, error)
+	FindLoopDeviceByFile(ctx context.Context, filePath string) (string, string, error)
+	GetLoopBackingFile(ctx context.Context, loopDev string) (string, string, error)
+	RemoveFileDevice(ctx context.Context, path string) (string, error)
+	EnsureFileDeviceDirectory(ctx context.Context, directory string) (string, error)
+	GetAvailableBytes(ctx context.Context, directory string) (string, int64, error)
 }
 
 type commands struct {
@@ -248,7 +258,17 @@ func (commands) CreatePV(path string) (string, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	// Route stderr through filterStdErr and treat the command as successful when
+	// the only output is a benign message (e.g. "File descriptor N leaked on lvm
+	// invocation"), mirroring ExtendLV. lvm.static run under nsenter routinely
+	// emits the fd-leak warning and exits non-zero even though pvcreate has
+	// already written the PV label; surfacing that as an error wrongly trips the
+	// create/extend rollback against a device that is in fact a healthy PV. A
+	// real pvcreate failure prints its own diagnostic line, which survives the
+	// filter, so genuine errors are still reported.
+	err := cmd.Run()
+	filteredStdErr := filterStdErr(cmd.String(), stderr)
+	if err != nil && filteredStdErr.Len() > 0 {
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderror = %s", cmd.String(), err, stderr.String())
 	}
 
@@ -673,7 +693,7 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 		data   []internal.LVData
 		cmdStr string
 	}
-	lvsRes, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (lvsResult, error) {
+	lvsRes, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (lvsResult, error) {
 		data, cmdStr, _, err := c.GetAllLVs(ctx)
 		return lvsResult{data: data, cmdStr: cmdStr}, err
 	})
@@ -695,7 +715,7 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 
 			if strings.Contains(tag, internal.LVMTags[1]) {
 				start = time.Now()
-				cmdStr, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+				cmdStr, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 					return c.LVChangeDelTag(ctx, lv, tag)
 				})
 				metrics.UtilsCommandsDuration(ctrlName, "lvchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
@@ -708,7 +728,7 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 				}
 
 				start = time.Now()
-				cmdStr, err = runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+				cmdStr, err = RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 					return c.VGChangeAddTag(ctx, lv.VGName, internal.LVMTags[0])
 				})
 				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
@@ -730,7 +750,7 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 		data   []internal.VGData
 		cmdStr string
 	}
-	vgsRes, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (vgsResult, error) {
+	vgsRes, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (vgsResult, error) {
 		data, cmdStr, _, err := c.GetAllVGs(ctx)
 		return vgsResult{data: data, cmdStr: cmdStr}, err
 	})
@@ -752,7 +772,7 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 
 			if strings.Contains(tag, internal.LVMTags[1]) {
 				start = time.Now()
-				cmdStr, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+				cmdStr, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 					return c.VGChangeDelTag(ctx, vg.VGName, tag)
 				})
 				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
@@ -765,7 +785,7 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 				}
 
 				start = time.Now()
-				cmdStr, err = runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+				cmdStr, err = RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 					return c.VGChangeAddTag(ctx, vg.VGName, internal.LVMTags[0])
 				})
 				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
@@ -782,6 +802,206 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 	log.Debug("[ReTag] stop re-tagging LVM")
 
 	return nil
+}
+
+func (commands) CreateFileDevice(ctx context.Context, path string, sizeBytes int64) (string, error) {
+	args := nsentrerExpendedArgs("/usr/bin/fallocate", "-l", strconv.FormatInt(sizeBytes, 10), path)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to create file device %s: %w, stderr: %s", path, err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+func (commands) SetupLoopDevice(ctx context.Context, filePath string) (string, string, error) {
+	// --nooverlap makes losetup reuse an already-attached loop for this
+	// backing file (printing it via --show) instead of binding a second
+	// minor to the same file. Without it, a race between the startup
+	// reattach and the reconciler's provision step — or an existing
+	// attachment that FindLoopDeviceByFile reported only under an alias —
+	// would leak an extra loop device that nothing ever reaps.
+	//
+	// --direct-io=on tells the loop driver to open the backing file with
+	// O_DIRECT so reads/writes bypass the backing filesystem's page cache.
+	// Our stack layers a filesystem on top of LVM on top of the loop on top
+	// of the node's filesystem; without direct I/O every page is cached
+	// twice (once for the volume's filesystem, once for the backing file),
+	// doubling the RAM footprint and throttling throughput. The kernel
+	// silently falls back to buffered I/O when the backing file's offset or
+	// sector size is not aligned (drivers/block/loop.c), so requesting it is
+	// always safe — at worst it is ignored.
+	args := nsentrerExpendedArgs("/sbin/losetup", "--find", "--nooverlap", "--direct-io=on", "--show", filePath)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), "", fmt.Errorf("unable to setup loop device for %s: %w, stderr: %s", filePath, err, stderr.String())
+	}
+	return cmd.String(), strings.TrimSpace(stdout.String()), nil
+}
+
+func (commands) DetachLoopDevice(ctx context.Context, loopDev string) (string, error) {
+	args := nsentrerExpendedArgs("/sbin/losetup", "-d", loopDev)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to detach loop device %s: %w, stderr: %s", loopDev, err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+func (commands) FindLoopDeviceByFile(ctx context.Context, filePath string) (string, string, error) {
+	args := nsentrerExpendedArgs("/sbin/losetup", "-j", filePath)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), "", fmt.Errorf("unable to find loop device for %s: %w, stderr: %s", filePath, err, stderr.String())
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	if output == "" {
+		return cmd.String(), "", nil
+	}
+	// `losetup -j <file>` prints one line per loop device bound to the
+	// file (`/dev/loopN: ... (backing-file)`). Parse the first line only
+	// — splitting the whole multi-line buffer on ":" would still yield the
+	// first device but silently hide the fact that several loops point at
+	// the same file. We return the first device and surface the extras in
+	// the command string so a leaked double-attach is at least visible.
+	lines := strings.Split(output, "\n")
+	first, _, _ := strings.Cut(lines[0], ":")
+	return cmd.String(), strings.TrimSpace(first), nil
+}
+
+// GetLoopBackingFile returns the canonical backing-file path that loopDev
+// is currently attached to. Empty string means the device is not attached.
+//
+// Implemented via `losetup --noheadings --output BACK-FILE <loopDev>` so
+// the agent does not have to spawn `cat /sys/block/<loop>/loop/backing_file`
+// in the host PID namespace just to read a single value. Goes through the
+// same nsenter wrapper as every other host command in this package so the
+// argv stays unit-testable.
+func (commands) GetLoopBackingFile(ctx context.Context, loopDev string) (string, string, error) {
+	args := nsentrerExpendedArgs("/sbin/losetup", "--noheadings", "--output", "BACK-FILE", loopDev)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), "", fmt.Errorf("unable to read backing file for %s: %w, stderr: %s", loopDev, err, stderr.String())
+	}
+	return cmd.String(), sanitizeBackingFilePath(stdout.String()), nil
+}
+
+// sanitizeBackingFilePath normalises the backing-file path losetup reports.
+// When the backing file has been unlinked while the loop is still attached,
+// losetup (like /sys/block/<loop>/loop/backing_file) appends a literal
+// " (deleted)" marker, e.g. "/data/sds-vg-a-deadbeef0011.img (deleted)".
+// Leaving the marker in place makes IsManagedFileDevicePath miss the basename
+// and cleanup refuse to detach the loop, stranding the minor on the node
+// forever. Strip the marker so ownership matching still recognises the file.
+func sanitizeBackingFilePath(out string) string {
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(out), "(deleted)"))
+}
+
+func (commands) RemoveFileDevice(ctx context.Context, path string) (string, error) {
+	args := nsentrerExpendedArgs("/bin/rm", "-f", path)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to remove file device %s: %w, stderr: %s", path, err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// EnsureFileDeviceDirectory creates directory (and any missing parents) on the
+// host so the backing file can be allocated into it. The agent runs in PID 1's
+// mount namespace, so this is `mkdir -p` against the node's root filesystem.
+// `mkdir -p` is idempotent (no error if the directory already exists) and fails
+// only when the path is genuinely unusable — a read-only filesystem, or a
+// non-directory component along the way.
+func (commands) EnsureFileDeviceDirectory(ctx context.Context, directory string) (string, error) {
+	args := nsentrerExpendedArgs("/bin/mkdir", "-p", directory)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to create directory %q on the node: %w, stderr: %s", directory, err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// GetAvailableBytes returns the number of bytes that can be allocated in
+// directory's filesystem without dipping into the superuser-reserved
+// blocks, so the caller can refuse an oversized backing file before
+// `fallocate` either fails halfway or fills the node's root filesystem and
+// trips kubelet's DiskPressure eviction.
+//
+// It reads the value with `stat -f` in PID 1's mount namespace (the agent
+// itself does not share the host mount namespace, so a Go syscall.Statfs
+// would measure the wrong filesystem): %S is the fundamental block size and
+// %a is the count of blocks available to a non-superuser. Using %a rather
+// than %f deliberately leaves the filesystem's reserve untouched, which
+// doubles as built-in headroom for the node.
+func (commands) GetAvailableBytes(ctx context.Context, directory string) (string, int64, error) {
+	args := nsentrerExpendedArgs("/usr/bin/stat", "-f", "-c", "%S %a", directory)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), 0, fmt.Errorf("unable to stat filesystem for %q: %w, stderr: %s", directory, err, stderr.String())
+	}
+
+	available, err := parseStatfsAvailableBytes(stdout.String())
+	if err != nil {
+		return cmd.String(), 0, fmt.Errorf("unable to parse free space for %q: %w", directory, err)
+	}
+	return cmd.String(), available, nil
+}
+
+// parseStatfsAvailableBytes parses the "<block-size> <available-blocks>"
+// output of `stat -f -c "%S %a"` into the number of available bytes.
+func parseStatfsAvailableBytes(out string) (int64, error) {
+	fields := strings.Fields(out)
+	if len(fields) != 2 {
+		return 0, fmt.Errorf("expected 2 fields, got %q", strings.TrimSpace(out))
+	}
+	blockSize, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid block size %q: %w", fields[0], err)
+	}
+	availBlocks, err := strconv.ParseInt(fields[1], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid available block count %q: %w", fields[1], err)
+	}
+	if blockSize < 0 || availBlocks < 0 {
+		return 0, fmt.Errorf("negative block size %d or available block count %d", blockSize, availBlocks)
+	}
+	return blockSize * availBlocks, nil
 }
 
 func unmarshalPVs(out []byte) ([]internal.PVData, error) {

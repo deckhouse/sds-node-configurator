@@ -110,6 +110,34 @@ func TestNewConfig(t *testing.T) {
 		assert.EqualError(t, err, expErrorMsg)
 	})
 
+	t.Run("FileDevicesDirectoryNotSet_ReturnsDefault", func(t *testing.T) {
+		err := os.Setenv(NodeName, "test-node")
+		assert.NoError(t, err)
+		err = os.Setenv(MachineID, "test-id")
+		assert.NoError(t, err)
+		defer os.Clearenv()
+
+		opts, err := NewConfig()
+		if assert.NoError(t, err) {
+			assert.Equal(t, DefaultFileDevicesDirectory, opts.FileDevicesDirectory)
+		}
+	})
+
+	t.Run("FileDevicesDirectorySet_IsHonoured", func(t *testing.T) {
+		err := os.Setenv(NodeName, "test-node")
+		assert.NoError(t, err)
+		err = os.Setenv(MachineID, "test-id")
+		assert.NoError(t, err)
+		err = os.Setenv(FileDevicesDirectory, "/mnt/data/file-devices")
+		assert.NoError(t, err)
+		defer os.Clearenv()
+
+		opts, err := NewConfig()
+		if assert.NoError(t, err) {
+			assert.Equal(t, "/mnt/data/file-devices", opts.FileDevicesDirectory)
+		}
+	})
+
 	t.Run("MetricsPortNotSet_ReturnsDefaultPort", func(t *testing.T) {
 		expNodeName := "test-node"
 		expMetricsPort := ":4202"

@@ -40,11 +40,18 @@ type LVMVolumeGroup struct {
 
 // +k8s:deepcopy-gen=true
 type LVMVolumeGroupSpec struct {
-	ActualVGNameOnTheNode string                       `json:"actualVGNameOnTheNode"`
-	BlockDeviceSelector   *metav1.LabelSelector        `json:"blockDeviceSelector"`
-	ThinPools             []LVMVolumeGroupThinPoolSpec `json:"thinPools"`
-	Type                  string                       `json:"type"`
-	Local                 LVMVolumeGroupLocalSpec      `json:"local"`
+	ActualVGNameOnTheNode string                         `json:"actualVGNameOnTheNode"`
+	BlockDeviceSelector   *metav1.LabelSelector          `json:"blockDeviceSelector,omitempty"`
+	ThinPools             []LVMVolumeGroupThinPoolSpec   `json:"thinPools"`
+	Type                  string                         `json:"type"`
+	Local                 LVMVolumeGroupLocalSpec        `json:"local"`
+	FileDevices           []LVMVolumeGroupFileDeviceSpec `json:"fileDevices,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type LVMVolumeGroupFileDeviceSpec struct {
+	Directory string            `json:"directory"`
+	Size      resource.Quantity `json:"size"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -73,8 +80,17 @@ type LVMVolumeGroupDevice struct {
 
 // +k8s:deepcopy-gen=true
 type LVMVolumeGroupNode struct {
-	Devices []LVMVolumeGroupDevice `json:"devices"`
-	Name    string                 `json:"name"`
+	Devices     []LVMVolumeGroupDevice     `json:"devices"`
+	FileDevices []LVMVolumeGroupFileDevice `json:"fileDevices,omitempty"`
+	Name        string                     `json:"name"`
+}
+
+// +k8s:deepcopy-gen=true
+type LVMVolumeGroupFileDevice struct {
+	FilePath   string            `json:"filePath"`
+	LoopDevice string            `json:"loopDevice"`
+	Size       resource.Quantity `json:"size"`
+	PVUuid     string            `json:"pvUUID"`
 }
 
 // +k8s:deepcopy-gen=true

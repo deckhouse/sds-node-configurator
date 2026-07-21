@@ -20,9 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"slices"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -68,6 +71,31 @@ func extentSizeForThinPoolAlign(lvg *v1alpha1.LVMVolumeGroup, vg *internal.VGDat
 	return lvmDefaultPhysicalExtent
 }
 
+// alignThinPoolSizeForValidation aligns a thin-pool's requested size to the
+// extent boundary for the create-time capacity check.
+//
+// Absolute sizes are rounded UP — that is the real number of extents LVM will
+// consume, so an oversized absolute pool must still be rejected.
+//
+// Percentage sizes (e.g. "100%") are rounded DOWN instead. During create
+// validation the VG size is the raw block-device/file sum, which is not
+// extent-aligned, so a "100%" request rounded up lands one extent past the VG
+// and would wrongly fail the capacity check — even though the pool is created
+// with %FREE and fits. A percentage of the VG can never legitimately exceed
+// it, so flooring is always safe and also makes split percentages (e.g.
+// "50%"+"50%") sum to at most the VG size.
+func alignThinPoolSizeForValidation(specSize string, requested, extentSize resource.Quantity) (resource.Quantity, error) {
+	if utils.IsPercentSize(specSize) {
+		extentBytes := extentSize.Value()
+		if extentBytes <= 0 {
+			return resource.Quantity{}, fmt.Errorf("extent size must be positive, got %d", extentBytes)
+		}
+		floored := (requested.Value() / extentBytes) * extentBytes
+		return *resource.NewQuantity(floored, resource.BinarySI), nil
+	}
+	return utils.AlignSizeToExtent(requested, extentSize)
+}
+
 type Reconciler struct {
 	cl       client.Client
 	log      logger.Logger
@@ -77,12 +105,39 @@ type Reconciler struct {
 	sdsCache *cache.Cache
 	cfg      ReconcilerConfig
 	commands utils.Commands
+	// resolver maps a /dev/* PV name to its canonical block device. It is
+	// only used to recognise a managed loop PV that lvm.static reported
+	// under a /dev/disk/by-id or /dev/block/MAJ:MIN alias. Defaults to
+	// utils.HostNsenterCanonicalResolver; overridable in tests.
+	resolver utils.CanonicalPathResolver
+
+	// aliasResolveFailures counts, per LVG name, how many consecutive
+	// extendFileDevicesIfNeeded rounds made no progress purely because
+	// alias-form PV names could not be resolved. It escalates the condition
+	// from a generic "Updating" retry to ReasonAliasResolutionFailed once the
+	// failures look persistent, so a stuck resolver is alertable instead of
+	// looking like an ordinary in-flight update. Reset on any round that makes
+	// progress or genuinely has nothing to do. The reconciler runs with
+	// MaxConcurrentReconciles==1, but the mutex keeps the map safe if that ever
+	// changes.
+	aliasResolveFailuresMu sync.Mutex
+	aliasResolveFailures   map[string]int
 }
+
+// aliasResolveFailureEscalationThreshold is the number of consecutive
+// resolver-only failed rounds after which extendFileDevicesIfNeeded switches
+// the VGConfigurationApplied reason to ReasonAliasResolutionFailed.
+const aliasResolveFailureEscalationThreshold = 3
 
 type ReconcilerConfig struct {
 	NodeName                string
 	BlockDeviceScanInterval time.Duration
 	VolumeGroupScanInterval time.Duration
+	CmdDeadlineDuration     time.Duration
+	// FileDevicesDirectory is the base directory backing files are confined
+	// to; spec.fileDevices[].directory must be this path or a subdirectory of
+	// it. Empty means "no restriction" (used by unit tests that do not care).
+	FileDevicesDirectory string
 }
 
 func NewReconciler(
@@ -103,11 +158,13 @@ func NewReconciler(
 			cfg.NodeName,
 			ReconcilerName,
 		),
-		bdCl:     repository.NewBDClient(cl, metrics),
-		metrics:  metrics,
-		sdsCache: sdsCache,
-		cfg:      cfg,
-		commands: commands,
+		bdCl:                 repository.NewBDClient(cl, metrics),
+		metrics:              metrics,
+		sdsCache:             sdsCache,
+		cfg:                  cfg,
+		commands:             commands,
+		resolver:             utils.HostNsenterCanonicalResolver,
+		aliasResolveFailures: make(map[string]int),
 	}
 }
 
@@ -176,47 +233,59 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully removed the label %s from the LVMVolumeGroup %s", internal.LVGUpdateTriggerLabel, lvg.Name))
 	}
 
-	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
-	blockDevices, err := r.bdCl.GetAPIBlockDevices(ctx, ReconcilerName, lvg.Spec.BlockDeviceSelector)
-	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %s", r.cfg.BlockDeviceScanInterval.String()))
-		err = r.lvgCl.UpdateLVGConditionIfNeeded(
-			ctx,
-			lvg,
-			v1.ConditionFalse,
-			internal.TypeVGConfigurationApplied,
-			"NoBlockDevices",
-			fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()),
-		)
+	// blockDeviceSelector is optional: a file-only LVMVolumeGroup (only
+	// spec.fileDevices) carries no selector. Listing block devices with a
+	// nil selector would match EVERY BlockDevice on the node (the repository
+	// maps an empty selector to "select all"), and validateSpecBlockDevices
+	// dereferences the nil selector. So skip block-device discovery and
+	// validation entirely when there is no selector, and reconcile only the
+	// file devices.
+	blockDevices := make(map[string]v1alpha1.BlockDevice)
+	if lvg.Spec.BlockDeviceSelector != nil {
+		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
+		blockDevices, err = r.bdCl.GetAPIBlockDevices(ctx, ReconcilerName, lvg.Spec.BlockDeviceSelector)
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.cfg.BlockDeviceScanInterval.String()))
+			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %s", r.cfg.BlockDeviceScanInterval.String()))
+			err = r.lvgCl.UpdateLVGConditionIfNeeded(
+				ctx,
+				lvg,
+				v1.ConditionFalse,
+				internal.TypeVGConfigurationApplied,
+				"NoBlockDevices",
+				fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()),
+			)
+			if err != nil {
+				r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.cfg.BlockDeviceScanInterval.String()))
+			}
+
+			return controller.Result{RequeueAfter: r.cfg.BlockDeviceScanInterval}, nil
 		}
+		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully got block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
 
-		return controller.Result{RequeueAfter: r.cfg.BlockDeviceScanInterval}, nil
-	}
-	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully got block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
+		blockDevices = filterBlockDevicesByNodeName(blockDevices, lvg.Spec.Local.NodeName)
 
-	blockDevices = filterBlockDevicesByNodeName(blockDevices, lvg.Spec.Local.NodeName)
+		valid, reason := validateSpecBlockDevices(lvg, blockDevices)
+		if !valid {
+			r.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupController] validation failed for the LVMVolumeGroup %s, reason: %s", lvg.Name, reason))
+			err = r.lvgCl.UpdateLVGConditionIfNeeded(
+				ctx,
+				lvg,
+				v1.ConditionFalse,
+				internal.TypeVGConfigurationApplied,
+				internal.ReasonValidationFailed,
+				reason,
+			)
+			if err != nil {
+				r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.cfg.VolumeGroupScanInterval.String()))
+				return controller.Result{}, err
+			}
 
-	valid, reason := validateSpecBlockDevices(lvg, blockDevices)
-	if !valid {
-		r.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupController] validation failed for the LVMVolumeGroup %s, reason: %s", lvg.Name, reason))
-		err = r.lvgCl.UpdateLVGConditionIfNeeded(
-			ctx,
-			lvg,
-			v1.ConditionFalse,
-			internal.TypeVGConfigurationApplied,
-			internal.ReasonValidationFailed,
-			reason,
-		)
-		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.cfg.VolumeGroupScanInterval.String()))
-			return controller.Result{}, err
+			return controller.Result{}, nil
 		}
-
-		return controller.Result{}, nil
+		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully validated BlockDevices of the LVMVolumeGroup %s", lvg.Name))
+	} else {
+		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s has no blockDeviceSelector (file-only); skipping block device discovery and validation", lvg.Name))
 	}
-	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully validated BlockDevices of the LVMVolumeGroup %s", lvg.Name))
 
 	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to add label %s to the LVMVolumeGroup %s", internal.LVGMetadataNameLabelKey, r.cfg.NodeName))
 	added, err = r.addLVGLabelIfNeeded(ctx, lvg, internal.LVGMetadataNameLabelKey, lvg.Name)
@@ -361,6 +430,15 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 		return true, err
 	}
 
+	if err := r.cleanupFileDevices(ctx, lvg); err != nil {
+		r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to clean up file devices for the LVMVolumeGroup %s", lvg.Name))
+		condErr := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, err.Error())
+		if condErr != nil {
+			r.log.Error(condErr, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
+		}
+		return true, err
+	}
+
 	removed, err := r.removeLVGFinalizerIfExist(ctx, lvg)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to remove a finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
@@ -383,6 +461,7 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 		return true, err
 	}
 
+	r.resetAliasResolveFailure(lvg.Name)
 	r.log.Info(fmt.Sprintf("[reconcileLVGDeleteFunc] successfully reconciled VG %s of the LVMVolumeGroup %s", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 	return false, nil
 }
@@ -396,7 +475,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] tries to validate the LVMVolumeGroup %s", lvg.Name))
 	pvs, _ := r.sdsCache.GetPVs()
-	valid, reason := r.validateLVGForUpdateFunc(lvg, blockDevices)
+	valid, reason := r.validateLVGForUpdateFunc(ctx, lvg, blockDevices)
 	if !valid {
 		r.log.Warning(fmt.Sprintf("[reconcileLVGUpdateFunc] the LVMVolumeGroup %s is not valid", lvg.Name))
 		err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, reason)
@@ -464,6 +543,19 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] successfully ended the extend operation for VG of the LVMVolumeGroup %s", lvg.Name))
 
+	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] starts to extend VG %s of the LVMVolumeGroup %s with file devices", vg.VGName, lvg.Name))
+	err = r.extendFileDevicesIfNeeded(ctx, lvg, vg, pvs)
+	if err != nil {
+		r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to extend VG of the LVMVolumeGroup %s with file devices", lvg.Name))
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "VGExtendFailed", fmt.Sprintf("unable to extend VG with file devices, err: %s", err.Error()))
+		if err != nil {
+			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
+		}
+
+		return true, err
+	}
+	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] successfully ended the file-device extend operation for VG of the LVMVolumeGroup %s", lvg.Name))
+
 	if lvg.Spec.ThinPools != nil {
 		r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] starts to reconcile thin-pools of the LVMVolumeGroup %s", lvg.Name))
 		lvs, _ := r.sdsCache.GetLVs()
@@ -517,7 +609,7 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 	}
 
 	r.log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] tries to validate the LVMVolumeGroup %s", lvg.Name))
-	valid, reason := r.validateLVGForCreateFunc(lvg, blockDevices)
+	valid, reason := r.validateLVGForCreateFunc(ctx, lvg, blockDevices)
 	if !valid {
 		r.log.Warning(fmt.Sprintf("[reconcileLVGCreateFunc] validation fails for the LVMVolumeGroup %s", lvg.Name))
 		err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, reason)
@@ -554,7 +646,14 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 		extentForThinPools := extentSizeForThinPoolAlign(lvg, vgAfterCreate)
 
 		for _, tp := range lvg.Spec.ThinPools {
+			// vgSize must account for file-backed PVs too: a file-only VG has
+			// no block devices, so countVGSizeByBlockDevices alone returns 0,
+			// which collapses every percentage thin-pool to 0 and forces every
+			// absolute-sized thin-pool into the full-VG-space branch (taking the
+			// whole VG instead of the requested size). Add the spec.fileDevices
+			// capacity, mirroring how validateLVGForCreateFunc computes totalVGSize.
 			vgSize := countVGSizeByBlockDevices(blockDevices)
+			vgSize.Add(countVGSizeByFileDevices(lvg))
 			tpRequestedSize, err := utils.GetRequestedSizeFromString(tp.Size, vgSize)
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to get thin-pool %s requested size of the LVMVolumeGroup %s", tp.Name, lvg.Name))
@@ -751,6 +850,7 @@ func (r *Reconciler) deleteLVGIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVol
 }
 
 func (r *Reconciler) validateLVGForCreateFunc(
+	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 ) (bool, string) {
@@ -771,6 +871,8 @@ func (r *Reconciler) validateLVGForCreateFunc(
 		r.log.Debug(fmt.Sprintf("[validateLVGForCreateFunc] all BlockDevices of the LVMVolumeGroup %s are consumable", lvg.Name))
 	}
 
+	r.validateFileDevices(ctx, lvg, &reason, &totalVGSize)
+
 	if lvg.Spec.ThinPools != nil {
 		r.log.Debug(fmt.Sprintf("[validateLVGForCreateFunc] the LVMVolumeGroup %s has thin-pools. Validate if VG size has enough space for the thin-pools", lvg.Name))
 		r.log.Trace(fmt.Sprintf("[validateLVGForCreateFunc] the LVMVolumeGroup %s has thin-pools %v", lvg.Name, lvg.Spec.ThinPools))
@@ -789,7 +891,7 @@ func (r *Reconciler) validateLVGForCreateFunc(
 				continue
 			}
 
-			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentSizeForThinPoolAlign(lvg, nil))
+			alignedTpSize, alignErr := alignThinPoolSizeForValidation(tp.Size, tpRequestedSize, extentSizeForThinPoolAlign(lvg, nil))
 			if alignErr != nil {
 				reason.WriteString(fmt.Sprintf("Unable to align thin-pool %s size: %s. ", tp.Name, alignErr.Error()))
 				continue
@@ -818,7 +920,96 @@ func (r *Reconciler) validateLVGForCreateFunc(
 	return true, ""
 }
 
+var minFileDeviceSize = resource.MustParse("1Gi")
+
+// isWithinBaseDir reports whether dir is base or a descendant of it. Both are
+// cleaned before comparison so trailing slashes and redundant separators do
+// not matter. dir is expected to be absolute and already free of '..'
+// segments (validateFileDevice enforces that first), so the prefix check
+// cannot be fooled into escaping base.
+func isWithinBaseDir(dir, base string) bool {
+	base = filepath.Clean(base)
+	dir = filepath.Clean(dir)
+	return dir == base || strings.HasPrefix(dir, base+string(filepath.Separator))
+}
+
+func (r *Reconciler) validateFileDevices(
+	ctx context.Context,
+	lvg *v1alpha1.LVMVolumeGroup,
+	reason *strings.Builder,
+	totalVGSize *resource.Quantity,
+) {
+	seen := make(map[string]int, len(lvg.Spec.FileDevices))
+	for i, fd := range lvg.Spec.FileDevices {
+		key := utils.BuildFileDevicePath(fd.Directory, lvg.Name, fd.Size)
+		if prev, ok := seen[key]; ok {
+			fmt.Fprintf(reason, "fileDevices[%d] collides with fileDevices[%d]: same backing file would be created. ", i, prev)
+			continue
+		}
+		seen[key] = i
+		r.validateFileDevice(ctx, fd, i, reason, totalVGSize)
+	}
+}
+
+func (r *Reconciler) validateFileDevice(
+	_ context.Context,
+	fd v1alpha1.LVMVolumeGroupFileDeviceSpec,
+	index int,
+	reason *strings.Builder,
+	totalVGSize *resource.Quantity,
+) {
+	if fd.Directory == "" {
+		fmt.Fprintf(reason, "fileDevices[%d].directory is empty. ", index)
+		return
+	}
+
+	// The agent runs in PID 1's mount namespace; an absolute path with
+	// no `..` segment is the minimum sanity check that keeps `fallocate`
+	// from creating runaway files outside whatever directory the cluster
+	// admin intended.
+	cleaned := filepath.Clean(fd.Directory)
+	if !filepath.IsAbs(cleaned) {
+		fmt.Fprintf(reason, "fileDevices[%d].directory %q must be an absolute path. ", index, fd.Directory)
+		return
+	}
+	if cleaned != fd.Directory && strings.Contains(fd.Directory, "..") {
+		fmt.Fprintf(reason, "fileDevices[%d].directory %q must not contain '..' segments. ", index, fd.Directory)
+		return
+	}
+
+	// Confine backing files to the configured base directory (module config
+	// fileDevicesDirectory, default /opt/deckhouse/sds/file-devices). Without
+	// this an arbitrary host path — `/`, `/etc`, `/var/lib/kubelet` — could be
+	// targeted, and one oversized file there fills the node's filesystem and
+	// trips kubelet DiskPressure eviction. An empty base disables the check
+	// (unit tests that do not exercise the allowlist).
+	if r.cfg.FileDevicesDirectory != "" && !isWithinBaseDir(cleaned, r.cfg.FileDevicesDirectory) {
+		fmt.Fprintf(reason, "fileDevices[%d].directory %q must be %q or a subdirectory of it. ", index, fd.Directory, r.cfg.FileDevicesDirectory)
+		return
+	}
+
+	if fd.Size.Value() < minFileDeviceSize.Value() {
+		// A common cause is a decimal unit (e.g. "1G" = 10^9 bytes) where a
+		// binary unit was meant ("1Gi" = 2^30 bytes); the former is below the
+		// minimum. Point the user at binary units so they do not get stuck on
+		// an immutable, too-small entry.
+		fmt.Fprintf(reason, "fileDevices[%d].size %s is less than the minimum %s; use a binary unit such as Gi. ", index, fd.Size.String(), minFileDeviceSize.String())
+		return
+	}
+
+	// The backing directory is created on demand by provisionFileDevices
+	// (mkdir -p in PID 1's mount namespace), so validation only enforces the
+	// structural rules above. A genuinely unusable path (read-only FS, a file
+	// where a directory is expected, …) surfaces as a provisioning error and
+	// is reported on the VGConfigurationApplied condition.
+
+	if totalVGSize != nil {
+		totalVGSize.Add(fd.Size)
+	}
+}
+
 func (r *Reconciler) validateLVGForUpdateFunc(
+	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 ) (bool, string) {
@@ -880,6 +1071,42 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 		}
 	}
 
+	r.validateFileDevices(ctx, lvg, &reason, nil)
+
+	// additionFileDeviceSpace mirrors additionBlockDeviceSpace for file
+	// devices: it accounts for spec.fileDevices entries that are not yet PVs
+	// in the VG (i.e. not yet reflected in status.nodes[].fileDevices). Without
+	// it, a combined "append a fileDevices entry + grow a thin-pool" edit would
+	// be validated against the current VG size, wrongly rejecting a valid
+	// request or forcing an absolute-sized thin-pool into the full-VG-space
+	// branch — the same defect the create path avoids via countVGSizeByFileDevices.
+	var additionFileDeviceSpace int64
+	if len(lvg.Spec.FileDevices) > 0 {
+		// Match by basename, not full path: status.nodes[].fileDevices[].FilePath
+		// is the loop's backing file as reported by `losetup --output BACK-FILE`,
+		// which canonicalizes symlink components of the directory (e.g. a spec
+		// directory /data symlinked to /mnt/disk1/data is reported as
+		// /mnt/disk1/data/...), while BuildFileDevicePath keeps the literal spec
+		// directory. The basename `sds-<lvgName>-<hash>.img` is identical on both
+		// sides (the hash is derived from the literal spec directory string and
+		// losetup leaves the basename untouched), so a full-path compare would
+		// miss an already-provisioned device whenever the directory is a symlink
+		// and count it as new on every reconcile, inflating the VG size used for
+		// thin-pool validation.
+		existingBasenames := make(map[string]struct{})
+		for _, n := range lvg.Status.Nodes {
+			for _, fd := range n.FileDevices {
+				existingBasenames[filepath.Base(fd.FilePath)] = struct{}{}
+			}
+		}
+		for _, fd := range lvg.Spec.FileDevices {
+			base := filepath.Base(utils.BuildFileDevicePath(fd.Directory, lvg.Name, fd.Size))
+			if _, ok := existingBasenames[base]; !ok {
+				additionFileDeviceSpace += fd.Size.Value()
+			}
+		}
+	}
+
 	if lvg.Spec.ThinPools != nil {
 		r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] the LVMVolumeGroup %s has thin-pools. Validate them", lvg.Name))
 		actualThinPools := make(map[string]internal.LVData, len(lvg.Spec.ThinPools))
@@ -907,7 +1134,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 			return false, reason.String()
 		}
 
-		newTotalVGSize := resource.NewQuantity(vg.VGSize.Value()+additionBlockDeviceSpace, resource.BinarySI)
+		newTotalVGSize := resource.NewQuantity(vg.VGSize.Value()+additionBlockDeviceSpace+additionFileDeviceSpace, resource.BinarySI)
 		for _, specTp := range lvg.Spec.ThinPools {
 			// might be a case when Thin-pool is already created, but is not shown in status
 			tpRequestedSize, err := utils.GetRequestedSizeFromString(specTp.Size, *newTotalVGSize)
@@ -1199,6 +1426,229 @@ func (r *Reconciler) extendVGIfNeeded(
 	return nil
 }
 
+// extendFileDevicesIfNeeded provisions any spec.fileDevices entries that
+// are not yet part of the VG and adds their loop devices as PVs. It is the
+// update-path counterpart of provisionFileDevices+createVGComplex and is
+// what makes the documented "add a new fileDevices entry to grow the VG"
+// flow actually take effect — without it, appending an entry would pass
+// validation and silently do nothing.
+//
+// provisionFileDevices is idempotent (it reuses already-attached loops and
+// only creates missing files), so calling it on every update is safe; only
+// loop devices that are not already PVs in the VG are handed to vgextend.
+func (r *Reconciler) extendFileDevicesIfNeeded(
+	ctx context.Context,
+	lvg *v1alpha1.LVMVolumeGroup,
+	vg internal.VGData,
+	pvs []internal.PVData,
+) (retErr error) {
+	if len(lvg.Spec.FileDevices) == 0 {
+		return nil
+	}
+
+	loopPaths, provisioned, err := r.provisionFileDevices(ctx, lvg)
+	if err != nil {
+		return fmt.Errorf("file device provisioning failed: %w", err)
+	}
+
+	// provisionFileDevices only rolls back artifacts it created within its own
+	// call; once it returns, the new loops/files survive. Unlike createVGComplex
+	// (which can roll back the whole VG via cleanupFileDevices because the VG is
+	// brand new), here the VG already holds healthy file devices we must NOT
+	// touch. So if a later step fails (condition update, vgextend), detach and
+	// remove ONLY the devices this provision call just created — they are not
+	// yet PVs in the VG. Otherwise a failed extend leaks a loop device and a
+	// preallocated file on the node (and orphans them entirely if the admin
+	// then removes the failing spec entry). Runs on a detached context because
+	// the failure is frequently the reconcile ctx being cancelled.
+	defer func() {
+		if retErr == nil || len(provisioned) == 0 {
+			return
+		}
+		rollbackCtx, cancel := r.newRollbackContext()
+		defer cancel()
+		r.rollbackProvisionedFileDevices(rollbackCtx, provisioned)
+	}()
+
+	// Build the set of current PVs from BOTH the caller's snapshot (captured at
+	// the top of reconcileLVGUpdateFunc) and a fresh cache read. A loop may have
+	// become a canonical /dev/loopN PV after that snapshot (a prior reconcile
+	// pvcreated it but failed before the VG was assembled, or the create-rollback
+	// kept it); the stale snapshot would not list it, the exact-name check below
+	// would miss it, and loopAlreadyRegisteredAsPV only inspects /dev/disk/
+	// /dev/block alias-form PVs (not canonical names) — so the loop would be
+	// handed to pvcreate again and fail "already a PV", wedging the condition
+	// every reconcile. Taking the union never drops a known PV, so the skip
+	// decision stays safe. createVGComplex re-reads GetPVs() before pvcreate for
+	// the same reason.
+	if freshPVs, _ := r.sdsCache.GetPVs(); len(freshPVs) > 0 {
+		pvs = append(append([]internal.PVData(nil), pvs...), freshPVs...)
+	}
+	pvsMap := make(map[string]struct{}, len(pvs))
+	for _, pv := range pvs {
+		pvsMap[pv.PVName] = struct{}{}
+	}
+
+	// provisionFileDevices always returns canonical /dev/loopN names, but
+	// lvm.static has no udev integration and frequently reports a managed
+	// loop PV under a /dev/disk/by-id or /dev/block/MAJ:MIN alias instead
+	// (the same aliasing the discoverer resolves). A literal name match
+	// would therefore miss an already-attached loop PV and wrongly hand it
+	// to pvcreate/vgextend again — pvcreate then fails because the device
+	// is already a PV, wedging the VGConfigurationApplied condition on
+	// every reconcile. Resolve alias-form PV names before deciding a loop
+	// is new.
+	pvsToExtend := make([]string, 0, len(loopPaths))
+	skippedOnResolverFailure := false
+	for _, loop := range loopPaths {
+		if _, exist := pvsMap[loop]; exist {
+			continue
+		}
+		registered, resolveFailed := r.loopAlreadyRegisteredAsPV(ctx, loop, pvs)
+		if registered {
+			if resolveFailed {
+				skippedOnResolverFailure = true
+				r.log.Warning(fmt.Sprintf("[extendFileDevicesIfNeeded] loop %s skipped because an alias PV could not be resolved; will retry on the next reconcile", loop))
+			} else {
+				r.log.Debug(fmt.Sprintf("[extendFileDevicesIfNeeded] loop %s is already a PV of VG %s under an alias; skipping", loop, vg.VGName))
+			}
+			continue
+		}
+		pvsToExtend = append(pvsToExtend, loop)
+	}
+
+	if len(pvsToExtend) == 0 {
+		// A skip forced by a resolver failure is not a real "nothing to do":
+		// the loop might genuinely not be a PV yet, but we could not confirm
+		// it this round. Returning nil here would mark the configuration
+		// applied and the new file device would never join the VG, silently.
+		// Surface it on the condition and return an error so the reconcile
+		// requeues. The rollback defer is a no-op in this case: a skipped loop
+		// was already attached, so provisionFileDevices reused it and recorded
+		// nothing in `provisioned`.
+		if skippedOnResolverFailure {
+			// Escalate once the failure looks persistent: a resolver that stays
+			// broken (missing nsenter binary, a genuinely dangling alias) would
+			// otherwise requeue forever under the generic "Updating" reason,
+			// indistinguishable from an ordinary in-flight update. After a few
+			// consecutive no-progress rounds switch to a dedicated reason and
+			// log at Error level so it can be alerted on.
+			streak := r.noteAliasResolveFailure(lvg.Name)
+			reason := internal.ReasonUpdating
+			msg := "unable to resolve alias PV names to decide whether file-backed loop devices are already part of the VG; retrying"
+			if streak >= aliasResolveFailureEscalationThreshold {
+				reason = internal.ReasonAliasResolutionFailed
+				msg = fmt.Sprintf("unable to resolve alias PV names for %d consecutive reconciles; file devices cannot be added to VG %s until path resolution recovers (check the nsenter binary and PV aliases on the node)", streak, vg.VGName)
+				r.log.Error(fmt.Errorf("alias PV resolution stuck"), fmt.Sprintf("[extendFileDevicesIfNeeded] %s (LVMVolumeGroup %s)", msg, lvg.Name))
+			}
+			if err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, reason, msg); err != nil {
+				r.log.Error(err, fmt.Sprintf("[extendFileDevicesIfNeeded] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
+			}
+			return fmt.Errorf("unable to resolve alias PV names for VG %s (attempt %d); retrying", vg.VGName, streak)
+		}
+		r.resetAliasResolveFailure(lvg.Name)
+		r.log.Debug(fmt.Sprintf("[extendFileDevicesIfNeeded] VG %s of the LVMVolumeGroup %s has no new file devices to add", vg.VGName, lvg.Name))
+		return nil
+	}
+
+	// We resolved enough to make progress this round; clear any prior
+	// resolver-failure streak so a transient blip does not eventually escalate.
+	r.resetAliasResolveFailure(lvg.Name)
+
+	if isApplied(lvg) {
+		if err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration"); err != nil {
+			r.log.Error(err, fmt.Sprintf("[extendFileDevicesIfNeeded] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
+			return err
+		}
+	}
+
+	r.log.Info(fmt.Sprintf("[extendFileDevicesIfNeeded] VG %s of the LVMVolumeGroup %s should be extended with file devices %v", vg.VGName, lvg.Name, pvsToExtend))
+	if err := r.extendVGComplex(ctx, pvsToExtend, vg.VGName); err != nil {
+		r.log.Error(err, fmt.Sprintf("[extendFileDevicesIfNeeded] unable to extend VG %s of the LVMVolumeGroup %s with file devices", vg.VGName, lvg.Name))
+		return err
+	}
+	r.log.Info(fmt.Sprintf("[extendFileDevicesIfNeeded] VG %s of the LVMVolumeGroup %s was extended with file devices", vg.VGName, lvg.Name))
+
+	return nil
+}
+
+// noteAliasResolveFailure records one more consecutive resolver-only failed
+// round for lvgName and returns the new streak length.
+func (r *Reconciler) noteAliasResolveFailure(lvgName string) int {
+	r.aliasResolveFailuresMu.Lock()
+	defer r.aliasResolveFailuresMu.Unlock()
+	r.aliasResolveFailures[lvgName]++
+	return r.aliasResolveFailures[lvgName]
+}
+
+// resetAliasResolveFailure clears the resolver-failure streak for lvgName
+// after a round that made progress or genuinely had nothing to do.
+func (r *Reconciler) resetAliasResolveFailure(lvgName string) {
+	r.aliasResolveFailuresMu.Lock()
+	defer r.aliasResolveFailuresMu.Unlock()
+	delete(r.aliasResolveFailures, lvgName)
+}
+
+// loopAlreadyRegisteredAsPV reports whether the canonical loop device is
+// already present in pvs under an alias name (e.g. /dev/disk/by-id/... or
+// /dev/block/MAJ:MIN). It only resolves alias-form PV names, so the common
+// case (lvm reports the canonical /dev/loopN) costs no extra host command.
+//
+// It returns two booleans: registered (skip the extend for this loop) and
+// resolveFailed (the skip was forced by an unresolvable alias rather than a
+// confirmed match). A resolver failure is treated conservatively as a match:
+// we cannot rule out that the unresolved alias IS this loop already
+// registered as a PV, and handing a possibly-already-registered loop to
+// pvcreate fails ("already a PV") and wedges the VGConfigurationApplied
+// condition. It is safer to skip the extend this round and let the next
+// reconcile retry once the resolver recovers; provisionFileDevices keeps the
+// loop attached idempotently in the meantime. The caller uses resolveFailed
+// to surface a retrying condition instead of silently reporting "nothing to
+// do" when every loop was skipped only because resolution failed.
+//
+// NOTE: this is one of two places that canonicalize an alias-reported loop
+// PV. Here the canonical /dev/loopN is known and alias PV names are resolved
+// via readlink (r.resolver). The discoverer does the inverse in
+// Discoverer.buildFileDeviceFromLoopPV (backing-file → canonical loop via
+// losetup). They use different methods because their inputs differ; keep
+// their ownership/aliasing assumptions in sync.
+func (r *Reconciler) loopAlreadyRegisteredAsPV(ctx context.Context, loop string, pvs []internal.PVData) (registered, resolveFailed bool) {
+	for _, pv := range pvs {
+		if !strings.HasPrefix(pv.PVName, "/dev/disk/") && !strings.HasPrefix(pv.PVName, "/dev/block/") {
+			continue
+		}
+		resolved, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (string, error) {
+			return r.resolver(ctx, pv.PVName)
+		})
+		if err != nil {
+			r.log.Warning(fmt.Sprintf("[loopAlreadyRegisteredAsPV] unable to resolve canonical path for PV %s: %v; treating loop %s as already registered to avoid a duplicate pvcreate", pv.PVName, err, loop))
+			resolveFailed = true
+			continue
+		}
+		if resolved == loop {
+			return true, false
+		}
+	}
+	// No confirmed match. If at least one alias PV could not be resolved,
+	// stay on the safe side and report the loop as already registered so the
+	// caller skips a potentially duplicate pvcreate; the next reconcile retries.
+	return resolveFailed, resolveFailed
+}
+
+// newRollbackContext returns a fresh, detached context (bounded by the
+// configured command deadline when set) for file-device cleanup that must run
+// even when the reconcile context is already cancelled. The failure that
+// triggers a rollback is frequently the reconcile ctx being cancelled (SIGTERM,
+// deadline), and exec.CommandContext refuses to start a process under an
+// already-cancelled context — which would strand the loop device and backing
+// file we just created. The returned cancel func is always safe to defer.
+func (r *Reconciler) newRollbackContext() (context.Context, context.CancelFunc) {
+	if r.cfg.CmdDeadlineDuration > 0 {
+		return context.WithTimeout(context.Background(), r.cfg.CmdDeadlineDuration)
+	}
+	return context.Background(), func() {}
+}
+
 func (r *Reconciler) tryGetVG(vgName string) (bool, internal.VGData) {
 	vgs, _ := r.sdsCache.GetVGs()
 	for _, vg := range vgs {
@@ -1351,11 +1801,429 @@ func (r *Reconciler) triggerUdevForPaths(parent context.Context, paths []string)
 	}
 }
 
-func (r *Reconciler) createVGComplex(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) error {
+// provisionFileDevices creates one preallocated backing file per
+// spec.fileDevices entry and attaches each as a loop device. It is
+// idempotent across reconcile retries: if a loop device is already
+// attached to the target file, it reuses that loop device instead of
+// creating a fresh one (`losetup --find --show` would otherwise hand
+// out a new minor on every call, slowly leaking up to the system-wide
+// loop limit).
+//
+// On any error mid-way the function rolls back everything it created
+// in *this* invocation — detaches loop devices it just attached and
+// removes files it just created — so a transient failure does not
+// leave dangling files in the data directory. Loop devices and files
+// that pre-existed (e.g. left behind by an earlier successful step)
+// are preserved on purpose: they will be picked up by the next
+// reconcile as "already attached".
+// provisionedFileDevice records a backing file + loop device that
+// provisionFileDevices newly created (fallocate + losetup) within a single
+// call. Reused, already-attached devices are NOT included, so a caller can
+// roll back exactly what this call added if a later step fails, without
+// touching pre-existing healthy file devices of the same LVG.
+type provisionedFileDevice struct {
+	filePath string
+	loopDev  string
+}
+
+func (r *Reconciler) provisionFileDevices(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) (loopPaths []string, provisioned []provisionedFileDevice, retErr error) {
+	if len(lvg.Spec.FileDevices) == 0 {
+		return nil, nil, nil
+	}
+
+	// Track resources we (and only we) just created so we can undo them
+	// on failure. We deliberately do NOT roll back pre-existing artifacts.
+	type rollback struct {
+		filePath       string
+		createdFile    bool
+		loopDev        string
+		attachedLoopOK bool
+	}
+	created := make([]rollback, 0, len(lvg.Spec.FileDevices))
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		rollbackCtx, cancel := r.newRollbackContext()
+		defer cancel()
+		for i := len(created) - 1; i >= 0; i-- {
+			rb := created[i]
+			if rb.attachedLoopOK && rb.loopDev != "" {
+				if cmd, err := r.commands.DetachLoopDevice(rollbackCtx, rb.loopDev); err != nil {
+					r.log.Warning(fmt.Sprintf("[provisionFileDevices][rollback] unable to detach %s: %v (cmd: %s)", rb.loopDev, err, cmd))
+				}
+			}
+			if rb.createdFile && rb.filePath != "" {
+				if cmd, err := r.commands.RemoveFileDevice(rollbackCtx, rb.filePath); err != nil {
+					r.log.Warning(fmt.Sprintf("[provisionFileDevices][rollback] unable to remove %s: %v (cmd: %s)", rb.filePath, err, cmd))
+				}
+			}
+		}
+	}()
+
+	loopPaths = make([]string, 0, len(lvg.Spec.FileDevices))
+	provisioned = make([]provisionedFileDevice, 0, len(lvg.Spec.FileDevices))
+	seenLoops := make(map[string]struct{}, len(lvg.Spec.FileDevices))
+	for _, fd := range lvg.Spec.FileDevices {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+
+		filePath := utils.BuildFileDevicePath(fd.Directory, lvg.Name, fd.Size)
+		sizeBytes := fd.Size.Value()
+
+		type findResult struct {
+			cmd     string
+			loopDev string
+		}
+		findRes, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (findResult, error) {
+			cmd, existing, err := r.commands.FindLoopDeviceByFile(ctx, filePath)
+			return findResult{cmd: cmd, loopDev: existing}, err
+		})
+		r.log.Debug(findRes.cmd)
+		if err != nil {
+			return nil, nil, fmt.Errorf("query loop for %s: %w", filePath, err)
+		}
+		if findRes.loopDev != "" {
+			r.log.Info(fmt.Sprintf("[provisionFileDevices] %s already attached to %s; reusing", filePath, findRes.loopDev))
+			if _, ok := seenLoops[findRes.loopDev]; !ok {
+				seenLoops[findRes.loopDev] = struct{}{}
+				loopPaths = append(loopPaths, findRes.loopDev)
+			}
+			continue
+		}
+
+		r.log.Info(fmt.Sprintf("[provisionFileDevices] creating file device %s (%d bytes) for LVMVolumeGroup %s", filePath, sizeBytes, lvg.Name))
+
+		// Create the backing directory on demand (mkdir -p, idempotent) so
+		// the admin does not have to pre-create it on every node. A failure
+		// here (read-only FS, a non-directory in the path) aborts the
+		// provision and is reported on the VGConfigurationApplied condition.
+		mkdirCmd, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (string, error) {
+			return r.commands.EnsureFileDeviceDirectory(ctx, fd.Directory)
+		})
+		r.log.Debug(mkdirCmd)
+		if err != nil {
+			r.log.Error(err, fmt.Sprintf("[provisionFileDevices] unable to create directory %s", fd.Directory))
+			return nil, nil, err
+		}
+
+		// Refuse to allocate a backing file larger than the free space of the
+		// node's filesystem. `fallocate -l` preallocates the full size, so
+		// without this guard a single oversized fileDevices entry (or a typo in
+		// `directory`/`size`) can fill the node's root filesystem and push
+		// kubelet into DiskPressure eviction — a node-level outage, not a mere
+		// condition error. The check is best-effort: if we cannot determine the
+		// free space we log and fall through to fallocate, which still fails
+		// cleanly on a genuine ENOSPC.
+		availableBytes, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (int64, error) {
+			cmd, available, err := r.commands.GetAvailableBytes(ctx, fd.Directory)
+			r.log.Debug(cmd)
+			return available, err
+		})
+		if err != nil {
+			r.log.Warning(fmt.Sprintf("[provisionFileDevices] unable to check free space in %s, proceeding (fallocate will still fail on ENOSPC): %v", fd.Directory, err))
+		} else if availableBytes < sizeBytes {
+			return nil, nil, fmt.Errorf(
+				"not enough free space in %q to create backing file %s: %d bytes available, %d bytes requested",
+				fd.Directory, filePath, availableBytes, sizeBytes,
+			)
+		}
+
+		rb := rollback{filePath: filePath}
+		createCmd, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (string, error) {
+			return r.commands.CreateFileDevice(ctx, filePath, sizeBytes)
+		})
+		r.log.Debug(createCmd)
+		if err != nil {
+			r.log.Error(err, fmt.Sprintf("[provisionFileDevices] unable to create file %s", filePath))
+			created = append(created, rb)
+			return nil, nil, err
+		}
+		rb.createdFile = true
+
+		type setupResult struct {
+			cmd     string
+			loopDev string
+		}
+		setupRes, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (setupResult, error) {
+			cmd, loopDev, err := r.commands.SetupLoopDevice(ctx, filePath)
+			return setupResult{cmd: cmd, loopDev: loopDev}, err
+		})
+		r.log.Debug(setupRes.cmd)
+		if err != nil {
+			r.log.Error(err, fmt.Sprintf("[provisionFileDevices] unable to setup loop device for %s", filePath))
+			created = append(created, rb)
+			return nil, nil, err
+		}
+		rb.loopDev = setupRes.loopDev
+		rb.attachedLoopOK = true
+		created = append(created, rb)
+		provisioned = append(provisioned, provisionedFileDevice{filePath: filePath, loopDev: setupRes.loopDev})
+
+		r.log.Info(fmt.Sprintf("[provisionFileDevices] file %s attached to %s", filePath, setupRes.loopDev))
+		if _, ok := seenLoops[setupRes.loopDev]; !ok {
+			seenLoops[setupRes.loopDev] = struct{}{}
+			loopPaths = append(loopPaths, setupRes.loopDev)
+		}
+	}
+	return loopPaths, provisioned, nil
+}
+
+// rollbackProvisionedFileDevices tears down ONLY the file devices this reconcile
+// just provisioned (created a fresh backing file and attached a fresh loop),
+// after a later step (pvcreate/vgcreate/vgextend/condition update) failed.
+//
+// It is the create/extend-path counterpart to cleanupFileDevices and MUST be
+// used instead of it on those paths: cleanupFileDevices walks spec+status and
+// would remove the backing file of a loop that another, concurrent reconcile —
+// or a pvcreate/vgcreate that materially succeeded but returned a non-zero
+// status — has already turned into a live PV of the VG. Removing such a file
+// leaves a PV backed by a deleted file while the VG keeps using it; the next
+// reconcile then re-provisions a second loop and the VG silently doubles in
+// size (observed on real clusters as one backing file attached to two loops,
+// one shown "(deleted)").
+//
+// As a hard safety net it lists the current PVs once, authoritatively (a fresh
+// `lvm pvs`, not the possibly-stale cache, because the result gates a
+// destructive teardown), and SKIPS any provisioned loop that is already an LVM
+// PV (matched canonically or via the /dev/disk//dev/block alias the discoverer
+// also resolves). If the PV listing fails it tears nothing down — a leaked
+// loop/file is recoverable (the next reconcile reuses it via
+// FindLoopDeviceByFile), corrupting a live VG is not — and it never removes a
+// backing file whose loop it could not detach, since the loop may still
+// reference it.
+func (r *Reconciler) rollbackProvisionedFileDevices(ctx context.Context, provisioned []provisionedFileDevice) {
+	if len(provisioned) == 0 {
+		return
+	}
+
+	pvs, cmd, _, err := r.commands.GetAllPVs(ctx)
+	r.log.Debug(cmd)
+	if err != nil {
+		r.log.Warning(fmt.Sprintf("[rollbackProvisionedFileDevices] unable to list PVs to confirm rollback is safe; leaving %d provisioned file device(s) in place (a leak is recoverable, corrupting a live VG is not): %v", len(provisioned), err))
+		return
+	}
+	pvNames := make(map[string]struct{}, len(pvs))
+	for _, pv := range pvs {
+		pvNames[pv.PVName] = struct{}{}
+	}
+
+	for i := len(provisioned) - 1; i >= 0; i-- {
+		p := provisioned[i]
+		if p.loopDev != "" {
+			_, isPV := pvNames[p.loopDev]
+			if !isPV {
+				// lvm.static without udev may report the loop PV under a
+				// /dev/disk or /dev/block alias instead of /dev/loopN.
+				if registered, resolveFailed := r.loopAlreadyRegisteredAsPV(ctx, p.loopDev, pvs); registered || resolveFailed {
+					isPV = true
+				}
+			}
+			if isPV {
+				r.log.Warning(fmt.Sprintf("[rollbackProvisionedFileDevices] loop %s (file %s) is already an LVM PV; skipping rollback so a concurrent or partially-succeeded create does not lose its backing storage", p.loopDev, p.filePath))
+				continue
+			}
+			if cmd, derr := r.commands.DetachLoopDevice(ctx, p.loopDev); derr != nil {
+				r.log.Warning(fmt.Sprintf("[rollbackProvisionedFileDevices] unable to detach %s: %v (cmd: %s); keeping backing file %s in place", p.loopDev, derr, cmd, p.filePath))
+				continue
+			}
+		}
+		if p.filePath != "" {
+			if cmd, rerr := r.commands.RemoveFileDevice(ctx, p.filePath); rerr != nil {
+				r.log.Warning(fmt.Sprintf("[rollbackProvisionedFileDevices] unable to remove %s: %v (cmd: %s)", p.filePath, rerr, cmd))
+			}
+		}
+	}
+}
+
+// cleanupFileDevices detaches loop devices and removes backing files
+// recorded for this LVG. It walks the union of status.nodes[].fileDevices
+// (what the discoverer last observed) and spec.fileDevices (what the
+// user asked for), so it cannot leak files that were created but never
+// reflected in status — e.g. when the agent crashed mid-provision.
+//
+// `rm` errors are logged as warnings and do not abort the cleanup
+// (a stale ENOENT after manual cleanup is harmless), but every
+// `losetup -d` failure is reported back as an error: a busy loop
+// device means there is still a live reference to the file (a mount,
+// an LV, a sidecar) and removing the LVG resource at this point would
+// strand state on the node.
+func (r *Reconciler) cleanupFileDevices(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) error {
+	type target struct {
+		filePath   string
+		loopDevice string
+	}
+	seen := make(map[string]target)
+	add := func(t target) {
+		if t.filePath == "" && t.loopDevice == "" {
+			return
+		}
+		key := t.filePath
+		if key == "" {
+			key = "loop:" + t.loopDevice
+		}
+		// Prefer the entry that carries both fields.
+		if prev, ok := seen[key]; ok {
+			if prev.loopDevice == "" && t.loopDevice != "" {
+				prev.loopDevice = t.loopDevice
+				seen[key] = prev
+			}
+			return
+		}
+		seen[key] = t
+	}
+	for _, node := range lvg.Status.Nodes {
+		for _, fd := range node.FileDevices {
+			add(target{filePath: fd.FilePath, loopDevice: fd.LoopDevice})
+		}
+	}
+	for _, fd := range lvg.Spec.FileDevices {
+		add(target{filePath: utils.BuildFileDevicePath(fd.Directory, lvg.Name, fd.Size)})
+	}
+
+	keys := make([]string, 0, len(seen))
+	for k := range seen {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var detachErrs []error
+	for _, key := range keys {
+		t := seen[key]
+		// Defense in depth: never act on a path whose basename does not
+		// match the agent's managed pattern. If it slipped into status
+		// via a foreign loop PV (or a bug), refuse to rm and warn.
+		if t.filePath != "" && !utils.IsManagedFileDevicePath(t.filePath, lvg.Name) {
+			r.log.Warning(fmt.Sprintf("[cleanupFileDevices] refusing to act on unmanaged path %q for LVG %s", t.filePath, lvg.Name))
+			continue
+		}
+
+		// The loop minor backing a file is NOT stable: after a reboot
+		// ReattachFileDevices re-attaches via `losetup --find` and may pick a
+		// different minor, and the kernel can later hand a freed minor to an
+		// unrelated file. So the loopDevice recorded in status can be stale or
+		// even point at a foreign device. Whenever we know the backing file,
+		// re-resolve the loop from it and never detach a device we have not
+		// just confirmed backs THIS file.
+		if t.filePath != "" {
+			loop, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (string, error) {
+				cmd, loop, err := r.commands.FindLoopDeviceByFile(ctx, t.filePath)
+				r.log.Debug(cmd)
+				return loop, err
+			})
+			if err != nil {
+				detachErrs = append(detachErrs, fmt.Errorf("query loop for %s: %w", t.filePath, err))
+				r.log.Error(err, fmt.Sprintf("[cleanupFileDevices] unable to query loop for %s", t.filePath))
+				continue
+			}
+			t.loopDevice = loop
+		} else if t.loopDevice != "" {
+			// A loop-only target (no backing-file path known) must be
+			// confirmed managed before we touch it: read its backing file and
+			// refuse unless the basename matches our owner pattern, so a
+			// stale/foreign minor recorded in status is never detached.
+			backing, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (string, error) {
+				cmd, backing, err := r.commands.GetLoopBackingFile(ctx, t.loopDevice)
+				r.log.Debug(cmd)
+				return backing, err
+			})
+			if err != nil {
+				detachErrs = append(detachErrs, fmt.Errorf("read backing file for %s: %w", t.loopDevice, err))
+				r.log.Error(err, fmt.Sprintf("[cleanupFileDevices] unable to read backing file for loop %s", t.loopDevice))
+				continue
+			}
+			if !utils.IsManagedFileDevicePath(backing, lvg.Name) {
+				r.log.Warning(fmt.Sprintf("[cleanupFileDevices] refusing to detach loop %s backed by unmanaged file %q for LVG %s", t.loopDevice, backing, lvg.Name))
+				continue
+			}
+		}
+
+		if t.loopDevice != "" {
+			cmd, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (string, error) {
+				return r.commands.DetachLoopDevice(ctx, t.loopDevice)
+			})
+			r.log.Debug(cmd)
+			if err != nil {
+				detachErrs = append(detachErrs, fmt.Errorf("detach %s: %w", t.loopDevice, err))
+				r.log.Error(err, fmt.Sprintf("[cleanupFileDevices] unable to detach loop %s", t.loopDevice))
+				continue
+			}
+		}
+		if t.filePath != "" {
+			cmd, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (string, error) {
+				return r.commands.RemoveFileDevice(ctx, t.filePath)
+			})
+			r.log.Debug(cmd)
+			if err != nil {
+				r.log.Warning(fmt.Sprintf("[cleanupFileDevices] unable to remove file %s: %v", t.filePath, err))
+			}
+		}
+	}
+	if len(detachErrs) > 0 {
+		return errors.Join(detachErrs...)
+	}
+	return nil
+}
+
+func (r *Reconciler) createVGComplex(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (retErr error) {
 	paths := extractPathsFromBlockDevices(nil, blockDevices)
 
+	loopPaths, provisioned, err := r.provisionFileDevices(ctx, lvg)
+	if err != nil {
+		return fmt.Errorf("file device provisioning failed: %w", err)
+	}
+	paths = append(paths, loopPaths...)
+
+	// If a later step (pvcreate/vgcreate) fails, tear down ONLY the file devices
+	// this call provisioned — and never one that already became a PV. This must
+	// NOT use the broad cleanupFileDevices (the delete-path cleanup): it walks
+	// spec+status and could remove the backing file of a loop that a concurrent
+	// reconcile, or a pvcreate/vgcreate that materially succeeded but returned a
+	// non-zero status, had already turned into a live PV of the VG — which the
+	// next reconcile then re-provisions with a second loop, doubling the VG.
+	// See rollbackProvisionedFileDevices. Runs on a detached context because the
+	// failure is frequently the reconcile ctx being cancelled.
+	if len(provisioned) > 0 {
+		defer func() {
+			if retErr == nil {
+				return
+			}
+			rollbackCtx, cancel := r.newRollbackContext()
+			defer cancel()
+			r.rollbackProvisionedFileDevices(rollbackCtx, provisioned)
+		}()
+	}
+
 	r.log.Trace(fmt.Sprintf("[CreateVGComplex] LVMVolumeGroup %s devices paths %v", lvg.Name, paths))
+
+	// Skip pvcreate for any device that is already an LVM PV. This guards a
+	// retry after a create that pvcreated a device but failed before vgcreate
+	// (SIGTERM, ctx cancel, a rollback whose detach failed): provisionFileDevices
+	// reuses the still-attached loop, and handing an already-PV device to
+	// pvcreate fails ("already a PV") and wedges the VGConfigurationApplied
+	// condition. The vgcreate below still consumes an existing PV, so skipping
+	// the redundant pvcreate is safe. Mirrors the already-a-PV guard in
+	// extendFileDevicesIfNeeded; loop PVs reported under an alias are resolved
+	// via loopAlreadyRegisteredAsPV.
+	existingPVs, _ := r.sdsCache.GetPVs()
+	existingPVNames := make(map[string]struct{}, len(existingPVs))
+	for _, pv := range existingPVs {
+		existingPVNames[pv.PVName] = struct{}{}
+	}
+
 	for _, path := range paths {
+		if _, ok := existingPVNames[path]; ok {
+			r.log.Info(fmt.Sprintf("[CreateVGComplex] %s is already a PV; skipping pvcreate", path))
+			continue
+		}
+		if strings.HasPrefix(path, "/dev/loop") {
+			if registered, _ := r.loopAlreadyRegisteredAsPV(ctx, path, existingPVs); registered {
+				r.log.Info(fmt.Sprintf("[CreateVGComplex] loop %s is already a PV (under an alias); skipping pvcreate", path))
+				continue
+			}
+		}
+
 		start := time.Now()
 		command, err := r.commands.CreatePV(path)
 		r.metrics.UtilsCommandsDuration(ReconcilerName, "pvcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
@@ -1533,6 +2401,14 @@ func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[str
 		}
 	}
 
+	// A file-only LVMVolumeGroup has no blockDeviceSelector; there are no
+	// match expressions to validate, and dereferencing the nil selector
+	// would panic. (The production caller already skips this function for
+	// file-only groups; this guard keeps it safe if called directly.)
+	if lvg.Spec.BlockDeviceSelector == nil {
+		return true, ""
+	}
+
 	for _, me := range lvg.Spec.BlockDeviceSelector.MatchExpressions {
 		if me.Key == internal.MetadataNameLabelKey && me.Operator == v1.LabelSelectorOpIn {
 			if len(me.Values) != len(blockDevices) {
@@ -1590,4 +2466,16 @@ func countVGSizeByBlockDevices(blockDevices map[string]v1alpha1.BlockDevice) res
 		totalVGSize += bd.Status.Size.Value()
 	}
 	return *resource.NewQuantity(totalVGSize, resource.BinarySI)
+}
+
+// countVGSizeByFileDevices sums the capacity contributed by spec.fileDevices.
+// File-backed PVs are part of the VG just like block devices, so thin-pool
+// sizing on the create path must include them; otherwise a file-only VG is
+// treated as zero-sized.
+func countVGSizeByFileDevices(lvg *v1alpha1.LVMVolumeGroup) resource.Quantity {
+	var totalSize int64
+	for _, fd := range lvg.Spec.FileDevices {
+		totalSize += fd.Size.Value()
+	}
+	return *resource.NewQuantity(totalSize, resource.BinarySI)
 }
