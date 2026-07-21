@@ -607,6 +607,10 @@ func e2eConfigVMSSHUser() string {
 	if v := os.Getenv("SSH_VM_USER"); v != "" {
 		return v
 	}
+	// dvp provider scheme: the node (VM) login user is E2E_DVP_VM_SSH_USER.
+	if v := os.Getenv("E2E_DVP_VM_SSH_USER"); v != "" {
+		return v
+	}
 	return e2eDefaultVMSSHUser
 }
 

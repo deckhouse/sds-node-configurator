@@ -136,8 +136,8 @@ const (
 	e2eBlockDeviceVGLinkageTimeout = 10 * time.Minute
 	// Tagged VG auto-import: LVMVolumeGroup CR after BD linkage + agent rescan (nested CI may miss udev).
 	e2eLVMVolumeGroupAutoImportDiscoveryTimeout = 15 * time.Minute
-	e2eStorageModuleReadyTimeout  = 30 * time.Minute // alwaysUseExisting: wait for Module Ready after ModuleConfig
-	e2eUseExistingClusterTimeout  = 90 * time.Minute
+	e2eStorageModuleReadyTimeout                = 30 * time.Minute // alwaysUseExisting: wait for Module Ready after ModuleConfig
+	e2eUseExistingClusterTimeout                = 90 * time.Minute
 
 	// Common Scheduler "fill to max" tests create many PVCs/Pods; provisioning and binding can exceed 5m on loaded clusters.
 	e2eSchedulerFillPodsWaitTimeout = 10 * time.Minute
@@ -147,21 +147,24 @@ const (
 	e2eSchedulerPVDeleteTimeout   = 25 * time.Minute
 	// Many fill-test Pods (busybox + RWO volume) can stay Terminating until volumes detach; force-finalize when stuck.
 	e2ePodCleanupStuckWithoutProgress = 90 * time.Second
-	e2ePodCleanupPollInterval           = 3 * time.Second
-	e2ePodCleanupLogStuckInterval       = 30 * time.Second
+	e2ePodCleanupPollInterval         = 3 * time.Second
+	e2ePodCleanupLogStuckInterval     = 30 * time.Second
 
 	// Suite/AfterAll: short pod wait; PVC deletion returns quickly while PV finalizers need a separate budget.
 	e2eSuitePodPVCleanupPodTimeout = 2 * time.Minute
 	e2eSuitePodPVCleanupPVTimeout  = 15 * time.Minute
 
 	// Full smoke suite (BeforeSuite cluster + scheduler + module e2e) exceeds 60m on CI.
-	e2eTestTimeoutDefaultLocal = 90 * time.Minute
-	e2eTestTimeoutDefaultCI    = 3*time.Hour + 30*time.Minute
+	e2eTestTimeoutDefaultLocal  = 90 * time.Minute
+	e2eTestTimeoutDefaultCI     = 3*time.Hour + 30*time.Minute
 	e2eMinCIGoTestTimeout       = e2eTestTimeoutDefaultCI // go test -timeout must be ~this on CI (see TestSdsNodeConfigurator)
 	e2eCIGoTestTimeoutDetectMin = 2 * time.Hour           // fail only below this (catches 60m org defaults, not 3h30m−ε)
 
 	// Guest VM name prefix for dhctl/bootstrap (Deckhouse test clusters). Do not attach data disks here — not a worker.
-	e2eBootstrapGuestVMPrefix = "bootstrap-node-"
+	// The dvp provider's setup VM is named exactly "bootstrap-node" (no run-id
+	// suffix); older flows used "bootstrap-node-<id>". Match both so the setup VM
+	// is never treated as a schedulable cluster node.
+	e2eBootstrapGuestVMPrefix = "bootstrap-node"
 )
 
 const (
@@ -198,7 +201,12 @@ func e2eConfigNamespace() string {
 	return e2eDefaultNamespace
 }
 
-func e2eConfigStorageClass() string { return os.Getenv("TEST_CLUSTER_STORAGE_CLASS") }
+// e2eConfigStorageClass returns the StorageClass used for VirtualDisks the specs
+// attach to the base cluster. Like the SSH coordinates it accepts both the
+// legacy TEST_CLUSTER_STORAGE_CLASS and the dvp-provider E2E_DVP_BASE_CLUSTER_STORAGE_CLASS.
+func e2eConfigStorageClass() string {
+	return e2eEnvOr("TEST_CLUSTER_STORAGE_CLASS", "E2E_DVP_BASE_CLUSTER_STORAGE_CLASS")
+}
 
 func e2eConfigTestClusterCleanup() string { return os.Getenv("TEST_CLUSTER_CLEANUP") }
 
@@ -222,9 +230,21 @@ func e2eShouldDeleteBaseNamespaceAfterSuite() bool {
 	}
 }
 
-func e2eConfigSSHHost() string { return os.Getenv("SSH_HOST") }
+// Node-SSH coordinates. Under the dvp provider scheme the suite is given only
+// E2E_DVP_BASE_CLUSTER_SSH_* (the DVP base cluster / bastion) + E2E_DVP_VM_SSH_USER,
+// not the legacy SSH_* set. These accessors therefore fall back to the DVP env so
+// the lsblk/VG specs can reach worker VMs (runner -> DVP base host -> node IP,
+// single jump, one key for both hops — mirrors storage-e2e's dvp connector).
+func e2eEnvOr(primary, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(primary)); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv(fallback))
+}
 
-func e2eConfigSSHUser() string { return os.Getenv("SSH_USER") }
+func e2eConfigSSHHost() string { return e2eEnvOr("SSH_HOST", "E2E_DVP_BASE_CLUSTER_SSH_HOST") }
+
+func e2eConfigSSHUser() string { return e2eEnvOr("SSH_USER", "E2E_DVP_BASE_CLUSTER_SSH_USER") }
 
 func e2eConfigSSHJumpHost() string { return os.Getenv("SSH_JUMP_HOST") }
 
@@ -232,7 +252,9 @@ func e2eConfigSSHJumpUser() string { return os.Getenv("SSH_JUMP_USER") }
 
 func e2eConfigSSHJumpKeyPath() string { return os.Getenv("SSH_JUMP_KEY_PATH") }
 
-func e2eConfigSSHPassphrase() string { return os.Getenv("SSH_PASSPHRASE") }
+func e2eConfigSSHPassphrase() string {
+	return e2eEnvOr("SSH_PASSPHRASE", "E2E_DVP_BASE_CLUSTER_SSH_PASSPHRASE")
+}
 
 func e2eConfigLogLevel() string { return os.Getenv("LOG_LEVEL") }
 
@@ -321,18 +343,18 @@ func e2eTestSuiteTimeout() time.Duration {
 
 // Stress e2e: many independent LVMVolumeGroups (1 PV = 1 VG) on one node.
 const (
-	e2eStressMaxVGTargetEnv       = "E2E_STRESS_MAX_VG_TARGET"
-	e2eStressMaxVGDiskSizeEnv     = "E2E_STRESS_MAX_VG_DISK_SIZE"
-	e2eStressMaxVGBatchSizeEnv    = "E2E_STRESS_MAX_VG_BATCH_SIZE"
-	e2eStressMaxVGStrictEnv       = "E2E_STRESS_MAX_VG_STRICT"
-	e2eStressMaxVGMinReadyEnv          = "E2E_STRESS_MAX_VG_MIN_READY"
-	e2eStressMaxVMBlockDevicesEnv      = "E2E_STRESS_MAX_VM_BLOCK_DEVICES"
-	e2eStressMaxVGDefaultTarget        = 15
-	e2eStressMaxVMBlockDevicesDefault  = 15 // Deckhouse virt: max 16 VMBDAs per VM; reserve one for boot/system disks
-	e2eStressMaxVGDefaultBatch    = 5
-	e2eStressMaxVGDefaultDiskSize = "1Gi"
-	e2eStressMaxVGNamePrefix      = "e2e-stress-vg-"
-	e2eStressMaxLVGNamePrefix     = "e2e-lvg-stress-"
+	e2eStressMaxVGTargetEnv           = "E2E_STRESS_MAX_VG_TARGET"
+	e2eStressMaxVGDiskSizeEnv         = "E2E_STRESS_MAX_VG_DISK_SIZE"
+	e2eStressMaxVGBatchSizeEnv        = "E2E_STRESS_MAX_VG_BATCH_SIZE"
+	e2eStressMaxVGStrictEnv           = "E2E_STRESS_MAX_VG_STRICT"
+	e2eStressMaxVGMinReadyEnv         = "E2E_STRESS_MAX_VG_MIN_READY"
+	e2eStressMaxVMBlockDevicesEnv     = "E2E_STRESS_MAX_VM_BLOCK_DEVICES"
+	e2eStressMaxVGDefaultTarget       = 15
+	e2eStressMaxVMBlockDevicesDefault = 15 // Deckhouse virt: max 16 VMBDAs per VM; reserve one for boot/system disks
+	e2eStressMaxVGDefaultBatch        = 5
+	e2eStressMaxVGDefaultDiskSize     = "1Gi"
+	e2eStressMaxVGNamePrefix          = "e2e-stress-vg-"
+	e2eStressMaxLVGNamePrefix         = "e2e-lvg-stress-"
 )
 
 func e2eStressMaxVMBlockDevices() int {

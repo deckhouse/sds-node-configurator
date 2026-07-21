@@ -10,7 +10,6 @@ help: ## Show help
 deps: ## Download dependencies
 	go mod download
 	go mod tidy
-	@$(MAKE) fix-mod-permissions
 
 # === Run in cluster (Job) ===
 
@@ -76,35 +75,6 @@ install-ginkgo: ## Install Ginkgo CLI
 .PHONY: clean
 clean: ## Clean test cache
 	go clean -testcache
-
-.PHONY: fix-mod-permissions
-fix-mod-permissions: ## Writable storage-e2e in GOMODCACHE or GOPATH (PrepareBootstrapConfig writes temp/ under module path)
-	@GOMODCACHE=$${GOMODCACHE:-$(CURDIR)/.gomodcache}; \
-	GOPATH=$${GOPATH:-$$HOME/go}; \
-	for root in "$$GOMODCACHE" "$$GOPATH/pkg/mod"; do \
-		[ -d "$$root" ] || continue; \
-		for dir in "$$root"/github.com/deckhouse/storage-e2e@*; do \
-			if [ -d "$$dir" ]; then \
-				echo "Fixing permissions for $$dir"; \
-				chmod -R +w "$$dir" 2>/dev/null || true; \
-				mkdir -p "$$dir/temp/cluster" 2>/dev/null || true; \
-				cfg="$$dir/internal/config/config.go"; \
-				if [ -f "$$cfg" ] && grep -q 'SecretsWaitTimeout   = 2 \* time\.Minute' "$$cfg" 2>/dev/null; then \
-					sed -i 's/SecretsWaitTimeout   = 2 \* time\.Minute/SecretsWaitTimeout   = 15 * time.Minute/' "$$cfg"; \
-					echo "Patched SecretsWaitTimeout to 15m in $$dir"; \
-				fi; \
-				if [ -f "$$cfg" ] && grep -q 'DockerInstallTimeout     = 10 \* time\.Minute' "$$cfg" 2>/dev/null; then \
-					sed -i 's/DockerInstallTimeout     = 10 \* time\.Minute/DockerInstallTimeout     = 30 * time.Minute/' "$$cfg"; \
-					echo "Patched DockerInstallTimeout to 30m in $$dir"; \
-				fi; \
-				RP="$(CURDIR)/patches/storage-e2e-reconnect-after-add-nodes.diff"; \
-				if [ -f "$$RP" ] && [ -f "$$dir/pkg/cluster/cluster.go" ] && ! grep -q 'refresh SSH tunnel after node bootstrap' "$$dir/pkg/cluster/cluster.go" 2>/dev/null; then \
-					patch -p0 --batch -d "$$dir" -i "$$RP" || exit 1; \
-					echo "Applied reconnect-after-add-nodes patch in $$dir"; \
-				fi; \
-			fi; \
-		done; \
-	done
 
 .PHONY: check-env
 check-env: ## Print relevant env vars

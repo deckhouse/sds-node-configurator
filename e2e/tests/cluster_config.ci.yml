@@ -1,0 +1,64 @@
+# CI-only nested cluster config for the storage-e2e reusable pipeline (dvp
+# provider). It differs from cluster_config.yml only in the sds-node-configurator
+# modulePullOverride: here it is the env reference ${E2E_MODULE_IMAGE_TAG},
+# resolved at cluster-config load time (config.ResolveModulePullOverrides via
+# os.LookupEnv) to the PR's image tag. The reusable pipeline exports
+# E2E_MODULE_IMAGE_TAG from the module_image_tag input (e.g. pr<N>). The local
+# loader would reject an unresolved ${...} if the var is unset, which is why this
+# lives in a separate file and cluster_config.yml keeps a literal "main" tag.
+#
+# The e2e specs attach/detach/resize node disks by creating VirtualDisks on the
+# DVP base cluster at run time, so nodes need only their OS disk here.
+clusterDefinition:
+  masters:
+    - hostname: "master-1"
+      hostType: "vm"
+      osType: "Ubuntu 22.04 6.2.0-39-generic" # See storage-e2e internal/config/images.go
+      cpu: 4
+      coreFraction: 50
+      ram: 8
+      diskSize: 60
+  workers:
+    - hostname: "worker-1"
+      hostType: "vm"
+      osType: "Ubuntu 22.04 6.2.0-39-generic"
+      cpu: 2
+      coreFraction: 50
+      ram: 8
+      diskSize: 30
+    - hostname: "worker-2"
+      hostType: "vm"
+      osType: "Ubuntu 22.04 6.2.0-39-generic"
+      cpu: 2
+      coreFraction: 50
+      ram: 8
+      diskSize: 30
+  dkpParameters:
+    kubernetesVersion: "Automatic"
+    podSubnetCIDR: "10.112.0.0/16"
+    serviceSubnetCIDR: "10.225.0.0/16"
+    clusterDomain: "cluster.local"
+    registryRepo: "dev-registry.deckhouse.io/sys/deckhouse-oss"
+    devBranch: "main"
+    modules:
+      - name: "snapshot-controller"
+        version: 1
+        enabled: true
+        modulePullOverride: "main"
+        dependencies: []
+      - name: "sds-node-configurator"
+        version: 1
+        enabled: true
+        settings:
+          enableThinProvisioning: true
+        # Resolved during bootstrap to the PR image tag (e.g. pr123). The
+        # pipeline exports E2E_MODULE_IMAGE_TAG from the module_image_tag input.
+        modulePullOverride: "${E2E_MODULE_IMAGE_TAG}"
+        dependencies: []
+      - name: "sds-local-volume"
+        version: 1
+        enabled: true
+        modulePullOverride: "main"
+        dependencies:
+          - "snapshot-controller"
+          - "sds-node-configurator"
