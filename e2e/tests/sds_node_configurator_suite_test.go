@@ -30,9 +30,6 @@ func TestSdsNodeConfigurator(t *testing.T) {
 	RegisterFailHandler(Fail)
 	suiteConfig, reporterConfig := GinkgoConfiguration()
 	suiteConfig.Timeout = suiteTimeout()
-	if suiteConfig.LabelFilter == "" {
-		suiteConfig.LabelFilter = suiteLabelFilter()
-	}
 	if os.Getenv("CI") != "" {
 		suiteConfig.FailFast = true
 	}
@@ -66,16 +63,4 @@ func suiteTimeout() time.Duration {
 	}
 
 	return timeout
-}
-
-func suiteLabelFilter() string {
-	raw := strings.TrimSpace(os.Getenv("E2E_GINKGO_LABEL_FILTER"))
-	switch strings.ToLower(raw) {
-	case "", "default", "smoke":
-		return "e2e-tests"
-	case "all", "*", "!", "none":
-		return ""
-	default:
-		return raw
-	}
 }
