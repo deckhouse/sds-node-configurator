@@ -82,6 +82,8 @@ ginkgo -v --progress --label-filter=e2e-tests ./tests/
 ginkgo -v --progress --label-filter=e2e-tests --focus="Should schedule Pod with local PVC" ./tests/
 ```
 
+> **Только последовательный запуск (serial-only).** НЕ передавай `ginkgo -p` / `--procs` / `--nodes` и не используй `go test -parallel` для spec-ов. Спеки делят один кластер через ref-counted cluster-lease в `e2e.Connect`, а выбор ноды/имена ресурсов общие (`Nodes().List()[0]`, общие префиксы `e2e-*`) — параллельные процессы будут конфликтовать за состояние кластера.
+
 ## Тестовые сценарии
 
 ### BlockDevice Disappearance
