@@ -65,6 +65,11 @@ var _ = Describe("LVMVolumeGroup thin-pool", Label("sds-node-configurator", "lvm
 		var clErr error
 		cl, clErr = e2e.Connect(ctx, e2e.WithTestName("lvmvolumegroup-thinpool"))
 		Expect(clErr).NotTo(HaveOccurred(), "failed to connect to cluster")
+		DeferCleanup(func() {
+			if err := cl.Close(context.Background()); err != nil {
+				GinkgoWriter.Println("Error closing cluster: ", err)
+			}
+		})
 
 		var k8sErr error
 		k8sClient, k8sErr = sdsclient.New(cl.RESTConfig())
@@ -79,12 +84,6 @@ var _ = Describe("LVMVolumeGroup thin-pool", Label("sds-node-configurator", "lvm
 	})
 
 	AfterAll(func() {
-		defer func() {
-			if err := cl.Close(context.Background()); err != nil {
-				GinkgoWriter.Println("Error closing cluster: ", err)
-			}
-		}()
-
 		By("Cleaning up e2e LVMVolumeGroups")
 		cleanupLVMVolumeGroups(ctx, k8sClient)
 

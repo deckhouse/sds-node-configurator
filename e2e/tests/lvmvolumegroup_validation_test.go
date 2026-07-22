@@ -61,6 +61,11 @@ var _ = Describe("LVMVolumeGroup validation", Label("sds-node-configurator", "lv
 		var clErr error
 		cl, clErr = e2e.Connect(ctx, e2e.WithTestName("lvmvolumegroup-validation"))
 		Expect(clErr).NotTo(HaveOccurred(), "failed to connect to cluster")
+		DeferCleanup(func() {
+			if err := cl.Close(context.Background()); err != nil {
+				GinkgoWriter.Println("Error closing cluster: ", err)
+			}
+		})
 
 		var k8sErr error
 		k8sClient, k8sErr = sdsclient.New(cl.RESTConfig())
@@ -94,12 +99,6 @@ var _ = Describe("LVMVolumeGroup validation", Label("sds-node-configurator", "lv
 		By("Force-deleting leftover BlockDevice CRs")
 		forceDeleteBlockDevicesByNames(ctx, k8sClient, createdBDNames)
 		createdBDNames = nil
-	})
-
-	AfterAll(func() {
-		if err := cl.Close(context.Background()); err != nil {
-			GinkgoWriter.Println("Error closing cluster: ", err)
-		}
 	})
 
 	// Order: (1) tiny disk — no BlockDevice CR; (2) large disk — intermediate LVG then delete + pvcreate so BD is not

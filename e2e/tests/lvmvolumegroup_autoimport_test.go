@@ -69,6 +69,11 @@ var _ = Describe("LVMVolumeGroup auto-import", Label("sds-node-configurator", "l
 		var clErr error
 		cl, clErr = e2e.Connect(ctx, e2e.WithTestName("lvmvolumegroup-autoimport"))
 		Expect(clErr).NotTo(HaveOccurred(), "failed to connect to cluster")
+		DeferCleanup(func() {
+			if err := cl.Close(context.Background()); err != nil {
+				GinkgoWriter.Println("Error closing cluster: ", err)
+			}
+		})
 
 		var k8sErr error
 		k8sClient, k8sErr = sdsclient.New(cl.RESTConfig())
@@ -135,14 +140,6 @@ var _ = Describe("LVMVolumeGroup auto-import", Label("sds-node-configurator", "l
 		cleanupLVMVolumeGroups(ctx, k8sClient)
 
 		bdName, devPath, actualVGName, thinPoolName = "", "", "", ""
-	})
-
-	AfterAll(func() {
-		if cl != nil {
-			if err := cl.Close(context.Background()); err != nil {
-				GinkgoWriter.Println("Error closing cluster: ", err)
-			}
-		}
 	})
 
 	It("Should discover LVMVolumeGroup for manually created VG with tag; thin-pool in status; controller management", func() {

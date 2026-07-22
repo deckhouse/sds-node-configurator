@@ -70,6 +70,11 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, Conti
 		var clErr error
 		cl, clErr = e2e.Connect(ctx, e2e.WithTestName("schedule-extender"))
 		Expect(clErr).NotTo(HaveOccurred(), "failed to connect to cluster")
+		DeferCleanup(func() {
+			if err := cl.Close(context.Background()); err != nil {
+				GinkgoWriter.Println("Error closing cluster: ", err)
+			}
+		})
 
 		var k8sErr error
 		k8sClient, k8sErr = sdsclient.New(cl.RESTConfig())
@@ -414,15 +419,6 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, Conti
 	})
 
 	AfterAll(func() {
-		defer func() {
-			if cl == nil {
-				return
-			}
-			if err := cl.Close(context.Background()); err != nil {
-				GinkgoWriter.Println("Error closing cluster: ", err)
-			}
-		}()
-
 		cleanupCtx := context.Background()
 
 		By("Schedule extender AfterAll: cleaning up Pods, PVCs, PVs")

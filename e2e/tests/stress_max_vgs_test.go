@@ -237,6 +237,11 @@ var _ = Describe("Stress: maximum independent LVMVolumeGroups per node", Label("
 		var clErr error
 		cl, clErr = e2e.Connect(ctx, e2e.WithTestName("stress-max-vgs"))
 		Expect(clErr).NotTo(HaveOccurred(), "failed to connect to cluster")
+		DeferCleanup(func() {
+			if err := cl.Close(context.Background()); err != nil {
+				GinkgoWriter.Println("Error closing cluster: ", err)
+			}
+		})
 
 		var k8sErr error
 		k8s, k8sErr = sdsclient.New(cl.RESTConfig())
@@ -255,15 +260,6 @@ var _ = Describe("Stress: maximum independent LVMVolumeGroups per node", Label("
 	})
 
 	AfterAll(func() {
-		defer func() {
-			if cl == nil {
-				return
-			}
-			if err := cl.Close(context.Background()); err != nil {
-				GinkgoWriter.Println("Error closing cluster: ", err)
-			}
-		}()
-
 		// 1) Delete e2e LVMVolumeGroups first so the agent removes the on-node VGs before disks detach.
 		if k8s != nil {
 			cleanupLVMVolumeGroups(ctx, k8s)
