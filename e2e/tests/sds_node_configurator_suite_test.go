@@ -29,7 +29,7 @@ import (
 )
 
 var _ = BeforeSuite(func() {
-	conf, cfgErr := cfg.New()
+	conf, cfgErr := cfg.Load()
 	Expect(cfgErr).NotTo(HaveOccurred(), "Failed to load config")
 	Expect(conf).NotTo(BeNil())
 })

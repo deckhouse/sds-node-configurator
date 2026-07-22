@@ -30,16 +30,15 @@ type TestCluster struct {
 	StorageClass string `env:"STORAGE_CLASS"`
 }
 
-var cfg Config
-
-func New() (*Config, error) {
-	if err := env.Parse(&cfg); err != nil {
+// Load parses the process environment into a fresh Config and returns it.
+// It is stateless: every call reads the environment anew and returns an
+// independent *Config, so there is no package-level global and no hidden
+// ordering requirement between callers (mirrors LoadStress).
+func Load() (*Config, error) {
+	var c Config
+	if err := env.Parse(&c); err != nil {
 		return nil, err
 	}
 
-	return &cfg, nil
-}
-
-func Load() *Config {
-	return &cfg
+	return &c, nil
 }

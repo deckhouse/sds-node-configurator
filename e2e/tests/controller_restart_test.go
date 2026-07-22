@@ -63,7 +63,9 @@ var _ = Describe("Controller restart stability", Label("sds-node-configurator", 
 	BeforeAll(func() {
 		By("Preparing shared test context and Kubernetes clients")
 		ctx = context.Background()
-		conf = cfg.Load()
+		var cfgErr error
+		conf, cfgErr = cfg.Load()
+		Expect(cfgErr).NotTo(HaveOccurred(), "failed to load config")
 
 		var clErr error
 		cl, clErr = e2e.Connect(ctx, e2e.WithTestName("controller-restart"))

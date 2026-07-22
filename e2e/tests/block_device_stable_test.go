@@ -54,7 +54,9 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 	BeforeAll(func() {
 		By("Preparing shared test context and Kubernetes clients")
 		ctx = context.Background()
-		conf = cfg.Load()
+		var cfgErr error
+		conf, cfgErr = cfg.Load()
+		Expect(cfgErr).NotTo(HaveOccurred(), "failed to load config")
 		Expect(conf).NotTo(BeNil())
 
 		var clErr error

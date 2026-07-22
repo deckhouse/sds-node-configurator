@@ -28,7 +28,7 @@ import (
 const maxVMBlockDevicesCeiling = 16
 
 // Stress holds the domain-specific knobs for the stress spec. It is loaded
-// lazily in the stress spec's BeforeAll (NOT in cfg.New), so a broken
+// lazily in the stress spec's BeforeAll (NOT in cfg.Load), so a broken
 // E2E_STRESS_* env never breaks non-stress runs. In CI these vars are usually
 // not passed and the stress spec runs on defaults — see spec CT7.
 type Stress struct {

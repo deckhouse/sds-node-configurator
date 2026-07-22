@@ -82,7 +82,9 @@ var _ = Describe("BlockDevice netlink discovery", Label("e2e-tests"), Ordered, C
 		k8sClient, k8sErr = sdsclient.New(cl.RESTConfig())
 		Expect(k8sErr).NotTo(HaveOccurred(), "failed to build controller-runtime client")
 
-		conf = cfg.Load()
+		var cfgErr error
+		conf, cfgErr = cfg.Load()
+		Expect(cfgErr).NotTo(HaveOccurred(), "failed to load config")
 
 		nodeList, nlErr := cl.Clientset().CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 		Expect(nlErr).NotTo(HaveOccurred())

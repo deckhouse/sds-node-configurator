@@ -64,7 +64,9 @@ var _ = Describe("LVMVolumeGroup auto-import", Label("sds-node-configurator", "l
 
 	BeforeAll(func() {
 		ctx = context.Background()
-		conf = cfg.Load()
+		var cfgErr error
+		conf, cfgErr = cfg.Load()
+		Expect(cfgErr).NotTo(HaveOccurred(), "failed to load config")
 
 		var clErr error
 		cl, clErr = e2e.Connect(ctx, e2e.WithTestName("lvmvolumegroup-autoimport"))

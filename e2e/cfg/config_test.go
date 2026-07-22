@@ -22,9 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNew(t *testing.T) {
-	// The package var cfg is a global reused across New() calls, so clear the
-	// relevant env deterministically before parsing.
+func TestLoad(t *testing.T) {
 	for _, k := range []string{
 		"TEST_CLUSTER_NAMESPACE",
 		"TEST_CLUSTER_STORAGE_CLASS",
@@ -35,7 +33,7 @@ func TestNew(t *testing.T) {
 
 	assert.NoError(t, os.Setenv("TEST_CLUSTER_STORAGE_CLASS", "linstor-r1"))
 
-	got, err := New()
+	got, err := Load()
 	assert.NoError(t, err)
 	assert.Equal(t, &Config{
 		TestCluster: TestCluster{
@@ -46,7 +44,7 @@ func TestNew(t *testing.T) {
 	}, got)
 }
 
-func TestNewOverrides(t *testing.T) {
+func TestLoadOverrides(t *testing.T) {
 	for _, k := range []string{
 		"TEST_CLUSTER_NAMESPACE",
 		"TEST_CLUSTER_STORAGE_CLASS",
@@ -59,7 +57,7 @@ func TestNewOverrides(t *testing.T) {
 	assert.NoError(t, os.Setenv("TEST_CLUSTER_STORAGE_CLASS", "linstor-r1"))
 	assert.NoError(t, os.Setenv("MODULES_MODULE_TAG", "pr-123"))
 
-	got, err := New()
+	got, err := Load()
 	assert.NoError(t, err)
 	assert.Equal(t, &Config{
 		TestCluster: TestCluster{

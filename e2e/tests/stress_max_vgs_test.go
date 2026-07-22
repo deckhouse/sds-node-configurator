@@ -228,7 +228,9 @@ var _ = Describe("Stress: maximum independent LVMVolumeGroups per node", Label("
 	BeforeAll(func() {
 		By("Preparing shared test context and Kubernetes clients")
 		ctx = context.Background()
-		conf = cfg.Load()
+		var cfgErr error
+		conf, cfgErr = cfg.Load()
+		Expect(cfgErr).NotTo(HaveOccurred(), "failed to load config")
 
 		var stressErr error
 		stressCfg, stressErr = cfg.LoadStress()
