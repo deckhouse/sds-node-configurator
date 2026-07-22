@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20260114125558-7fd7152586ff
-	github.com/deckhouse/storage-e2e v0.0.0-20260717033537-820cdf3ad271
+	github.com/deckhouse/storage-e2e v0.0.0-20260722105340-7b037e400c11
 	github.com/onsi/ginkgo/v2 v2.28.2
 	github.com/onsi/gomega v1.39.1
 	github.com/stretchr/testify v1.11.1
@@ -80,3 +80,8 @@ require (
 )
 
 replace github.com/deckhouse/sds-node-configurator/api => ../api
+
+tool (
+	github.com/deckhouse/storage-e2e/cmd/bootstrap-cluster
+	github.com/deckhouse/storage-e2e/cmd/remove-cluster
+)
