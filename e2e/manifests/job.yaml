@@ -22,8 +22,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: TEST_CLUSTER_STORAGE_CLASS
-              value: "${TEST_CLUSTER_STORAGE_CLASS}"
+            - name: E2E_DVP_BASE_CLUSTER_STORAGE_CLASS
+              value: "${E2E_DVP_BASE_CLUSTER_STORAGE_CLASS}"
           resources:
             requests:
               cpu: 100m

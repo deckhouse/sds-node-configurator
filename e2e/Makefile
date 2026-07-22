@@ -111,7 +111,7 @@ check-env: ## Print relevant env vars
 	@echo "E2E_IMAGE:                 $(E2E_IMAGE)"
 	@echo "TEST_CLUSTER_CREATE_MODE:  $${TEST_CLUSTER_CREATE_MODE}"
 	@echo "TEST_CLUSTER_NAMESPACE:    $${TEST_CLUSTER_NAMESPACE}"
-	@echo "TEST_CLUSTER_STORAGE_CLASS: $${TEST_CLUSTER_STORAGE_CLASS}"
+	@echo "E2E_DVP_BASE_CLUSTER_STORAGE_CLASS: $${E2E_DVP_BASE_CLUSTER_STORAGE_CLASS}"
 	@echo "SSH_HOST:                  $${SSH_HOST}"
 	@echo "SSH_USER:                  $${SSH_USER}"
 	@echo "KUBE_CONFIG_PATH:          $${KUBE_CONFIG_PATH}"

@@ -21,19 +21,15 @@ import (
 )
 
 type Config struct {
-	TestCluster     TestCluster `envPrefix:"TEST_CLUSTER_"`
-	ModulesImageTag string      `env:"MODULES_MODULE_TAG" envDefault:"main"`
+	TestCluster     TestCluster
+	ModulesImageTag string `env:"MODULES_MODULE_TAG" envDefault:"main"`
 }
 
 type TestCluster struct {
-	Namespace    string `env:"NAMESPACE" envDefault:"e2e-test-cluster"`
-	StorageClass string `env:"STORAGE_CLASS"`
+	Namespace    string `env:"TEST_CLUSTER_NAMESPACE" envDefault:"e2e-test-cluster"`
+	StorageClass string `env:"E2E_DVP_BASE_CLUSTER_STORAGE_CLASS"`
 }
 
-// Load parses the process environment into a fresh Config and returns it.
-// It is stateless: every call reads the environment anew and returns an
-// independent *Config, so there is no package-level global and no hidden
-// ordering requirement between callers (mirrors LoadStress).
 func Load() (*Config, error) {
 	var c Config
 	if err := env.Parse(&c); err != nil {

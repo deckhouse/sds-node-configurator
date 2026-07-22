@@ -25,13 +25,13 @@ import (
 func TestLoad(t *testing.T) {
 	for _, k := range []string{
 		"TEST_CLUSTER_NAMESPACE",
-		"TEST_CLUSTER_STORAGE_CLASS",
+		"E2E_DVP_BASE_CLUSTER_STORAGE_CLASS",
 		"MODULES_MODULE_TAG",
 	} {
 		assert.NoError(t, os.Unsetenv(k))
 	}
 
-	assert.NoError(t, os.Setenv("TEST_CLUSTER_STORAGE_CLASS", "linstor-r1"))
+	assert.NoError(t, os.Setenv("E2E_DVP_BASE_CLUSTER_STORAGE_CLASS", "linstor-r1"))
 
 	got, err := Load()
 	assert.NoError(t, err)
@@ -47,14 +47,14 @@ func TestLoad(t *testing.T) {
 func TestLoadOverrides(t *testing.T) {
 	for _, k := range []string{
 		"TEST_CLUSTER_NAMESPACE",
-		"TEST_CLUSTER_STORAGE_CLASS",
+		"E2E_DVP_BASE_CLUSTER_STORAGE_CLASS",
 		"MODULES_MODULE_TAG",
 	} {
 		assert.NoError(t, os.Unsetenv(k))
 	}
 
 	assert.NoError(t, os.Setenv("TEST_CLUSTER_NAMESPACE", "custom-ns"))
-	assert.NoError(t, os.Setenv("TEST_CLUSTER_STORAGE_CLASS", "linstor-r1"))
+	assert.NoError(t, os.Setenv("E2E_DVP_BASE_CLUSTER_STORAGE_CLASS", "linstor-r1"))
 	assert.NoError(t, os.Setenv("MODULES_MODULE_TAG", "pr-123"))
 
 	got, err := Load()

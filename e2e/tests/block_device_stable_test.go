@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var _ = Describe("Block device stability with explicit lifecycle stages", Label("e2e-tests"), Ordered, func() {
+var _ = Describe("Block device stability with explicit lifecycle stages", Label("sds-node-configurator", "block-device-stable"), Ordered, func() {
 	var (
 		ctx       context.Context
 		conf      *cfg.Config
@@ -193,7 +193,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 					})
 				})
 
-				When("running in pull_request and agent imageTag is switched to main", func() {
+				When("running in pull_request and agent imageTag is switched to main", Label("regress"), func() {
 					var (
 						originalImageTag string
 					)

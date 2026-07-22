@@ -24,15 +24,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
-	"github.com/deckhouse/sds-node-configurator/e2e/cfg"
 )
-
-var _ = BeforeSuite(func() {
-	conf, cfgErr := cfg.Load()
-	Expect(cfgErr).NotTo(HaveOccurred(), "Failed to load config")
-	Expect(conf).NotTo(BeNil())
-})
 
 func TestSdsNodeConfigurator(t *testing.T) {
 	RegisterFailHandler(Fail)
