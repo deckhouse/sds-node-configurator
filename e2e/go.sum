@@ -26,8 +26,6 @@ github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/deckhouse/deckhouse v1.74.0 h1:a/gEuLKutoV6ReWaBWMDJ+VLlOkkCwS4VMvR/sHQscw=
 github.com/deckhouse/deckhouse v1.74.0/go.mod h1:qMuvDbP8AYghXkWmDjoFPc6r1w9uw/cWxl/hmvA0BzA=
-github.com/deckhouse/storage-e2e v0.0.0-20260717033537-820cdf3ad271 h1:lV8+st14B2vNtBSU/+hZQVlrdUqStc13LSnfvloPNcA=
-github.com/deckhouse/storage-e2e v0.0.0-20260717033537-820cdf3ad271/go.mod h1:RAdH9NafGN5bBTt14lbkO/dR6sqQwfavOApOGnUt6D4=
 github.com/deckhouse/storage-e2e v0.0.0-20260722105340-7b037e400c11 h1:q/TSVjYRtKuRNaQQHrry3sohWm0UrAwg+faEZ0ADlsI=
 github.com/deckhouse/storage-e2e v0.0.0-20260722105340-7b037e400c11/go.mod h1:RAdH9NafGN5bBTt14lbkO/dR6sqQwfavOApOGnUt6D4=
 github.com/deckhouse/virtualization/api v1.8.0 h1:wR4Ivcg56OWJRGWrZjEL+0mQrHFEG0gKn0xrq1yzjy0=

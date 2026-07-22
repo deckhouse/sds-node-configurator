@@ -96,22 +96,16 @@ var _ = Describe("LVMVolumeGroup auto-import", Label("sds-node-configurator", "l
 			_, _ = framework.NodeExecChecked(ctx, cl, targetNode,
 				fmt.Sprintf(`sudo -n vgchange %q --deltag storage.deckhouse.io/enabled=true 2>&1 || true`, actualVGName))
 
-			deadline := time.Now().Add(5 * time.Minute)
-			for time.Now().Before(deadline) {
+			_ = framework.Poll(ctx, 3*time.Second, 5*time.Minute, func(ctx context.Context) (bool, error) {
 				var list v1alpha1.LVMVolumeGroupList
 				_ = k8sClient.List(ctx, &list, &client.ListOptions{})
-				gone := true
 				for i := range list.Items {
 					if list.Items[i].Spec.ActualVGNameOnTheNode == actualVGName {
-						gone = false
-						break
+						return false, nil
 					}
 				}
-				if gone {
-					break
-				}
-				time.Sleep(3 * time.Second)
-			}
+				return true, nil
+			})
 
 			if thinPoolName != "" {
 				By("auto-import cleanup: remove thin LV stack then VG (best effort)")

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/e2e/framework"
 	. "github.com/onsi/ginkgo/v2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -72,29 +73,27 @@ func forceDeleteAllNonConsumableBlockDevices(ctx context.Context, cl client.Clie
 		}
 	}
 
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	err := framework.Poll(ctx, 5*time.Second, timeout, func(ctx context.Context) (bool, error) {
 		if err := cl.List(ctx, &bdList, &client.ListOptions{}); err != nil {
-			time.Sleep(5 * time.Second)
-			continue
+			return false, err
 		}
-
 		remaining := 0
 		for i := range bdList.Items {
 			if !bdList.Items[i].Status.Consumable {
 				remaining++
 			}
 		}
-
 		if remaining == 0 {
-			GinkgoWriter.Println("All non-consumable BlockDevices deleted")
-			return
+			return true, nil
 		}
-
 		GinkgoWriter.Printf("Waiting for %d non-consumable BlockDevices to be deleted...\n", remaining)
-		time.Sleep(5 * time.Second)
+		return false, nil
+	})
+	if err != nil {
+		GinkgoWriter.Println("Warning: timeout waiting for non-consumable BlockDevices deletion")
+		return
 	}
-	GinkgoWriter.Println("Warning: timeout waiting for non-consumable BlockDevices deletion")
+	GinkgoWriter.Println("All non-consumable BlockDevices deleted")
 }
 
 // forceDeleteAllBlockDevices removes finalizers and deletes every BlockDevice CR, then waits until none remain.
@@ -125,20 +124,21 @@ func forceDeleteAllBlockDevices(ctx context.Context, cl client.Client, timeout t
 			GinkgoWriter.Printf("    Failed to delete: %v\n", err)
 		}
 	}
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	err := framework.Poll(ctx, 5*time.Second, timeout, func(ctx context.Context) (bool, error) {
 		if err := cl.List(ctx, &bdList, &client.ListOptions{}); err != nil {
-			time.Sleep(5 * time.Second)
-			continue
+			return false, err
 		}
 		if len(bdList.Items) == 0 {
-			GinkgoWriter.Println("All BlockDevices deleted")
-			return
+			return true, nil
 		}
 		GinkgoWriter.Printf("Waiting for %d BlockDevice(s) to be gone...\n", len(bdList.Items))
-		time.Sleep(5 * time.Second)
+		return false, nil
+	})
+	if err != nil {
+		GinkgoWriter.Println("Warning: timeout waiting for all BlockDevices deletion")
+		return
 	}
-	GinkgoWriter.Println("Warning: timeout waiting for all BlockDevices deletion")
+	GinkgoWriter.Println("All BlockDevices deleted")
 }
 
 // forceDeleteBlockDevicesByNames strips finalizers and deletes the named BlockDevice CRs (best effort).
@@ -198,11 +198,9 @@ func cleanupLVMLogicalVolumes(ctx context.Context, cl client.Client) {
 		}
 	}
 
-	deadline := time.Now().Add(5 * time.Minute)
-	for time.Now().Before(deadline) {
-		err := cl.List(ctx, &list, &client.ListOptions{})
-		if err != nil {
-			break
+	err = framework.Poll(ctx, 5*time.Second, 5*time.Minute, func(ctx context.Context) (bool, error) {
+		if e := cl.List(ctx, &list, &client.ListOptions{}); e != nil {
+			return true, e
 		}
 		remaining := 0
 		for i := range list.Items {
@@ -211,13 +209,16 @@ func cleanupLVMLogicalVolumes(ctx context.Context, cl client.Client) {
 			}
 		}
 		if remaining == 0 {
-			GinkgoWriter.Println("All e2e LVMLogicalVolumes deleted")
-			return
+			return true, nil
 		}
 		GinkgoWriter.Printf("Waiting for %d LVMLogicalVolumes to be deleted...\n", remaining)
-		time.Sleep(5 * time.Second)
+		return false, nil
+	})
+	if err != nil {
+		GinkgoWriter.Println("Warning: timeout waiting for LVMLogicalVolumes deletion")
+		return
 	}
-	GinkgoWriter.Println("Warning: timeout waiting for LVMLogicalVolumes deletion")
+	GinkgoWriter.Println("All e2e LVMLogicalVolumes deleted")
 }
 
 // cleanupLVMVolumeGroups deletes e2e LVMVolumeGroup CRs, gives sds-node-configurator time to clean the VGs,
@@ -246,13 +247,11 @@ func cleanupLVMVolumeGroups(ctx context.Context, cl client.Client) {
 	}
 
 	GinkgoWriter.Println("Waiting for sds-node-configurator to cleanup VGs (up to 3 minutes)...")
-	deadline := time.Now().Add(3 * time.Minute)
 	forceRemoveAfter := time.Now().Add(2 * time.Minute)
 
-	for time.Now().Before(deadline) {
-		err := cl.List(ctx, &list, &client.ListOptions{})
-		if err != nil {
-			break
+	_ = framework.Poll(ctx, 10*time.Second, 3*time.Minute, func(ctx context.Context) (bool, error) {
+		if e := cl.List(ctx, &list, &client.ListOptions{}); e != nil {
+			return true, e // original: stop the wait loop on list error
 		}
 		var remaining []string
 		for i := range list.Items {
@@ -262,7 +261,7 @@ func cleanupLVMVolumeGroups(ctx context.Context, cl client.Client) {
 		}
 		if len(remaining) == 0 {
 			GinkgoWriter.Println("All e2e LVMVolumeGroups removed (VGs cleaned by sds-node-configurator)")
-			return
+			return true, nil
 		}
 
 		if time.Now().After(forceRemoveAfter) {
@@ -280,6 +279,6 @@ func cleanupLVMVolumeGroups(ctx context.Context, cl client.Client) {
 		}
 
 		GinkgoWriter.Printf("Waiting for %d LVMVolumeGroups to be deleted...\n", len(remaining))
-		time.Sleep(10 * time.Second)
-	}
+		return false, nil
+	})
 }

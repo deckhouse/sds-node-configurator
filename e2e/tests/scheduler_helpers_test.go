@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/e2e/framework"
 )
 
 // localStorageClassGVR identifies the storage.deckhouse.io LocalStorageClass resource (cluster-scoped).
@@ -95,20 +96,17 @@ func ensureSchedulerK8sClient(ctx context.Context, cfg *rest.Config, k8s *client
 }
 
 func waitForLocalStorageClassDeleted(ctx context.Context, dynClient dynamic.Interface, name string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
+	err := framework.Poll(ctx, 2*time.Second, timeout, func(ctx context.Context) (bool, error) {
+		_, getErr := dynClient.Resource(localStorageClassGVR).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(getErr) {
+			return true, nil
 		}
-		_, err := dynClient.Resource(localStorageClassGVR).Get(ctx, name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for LocalStorageClass %s to be deleted", name)
-		}
-		time.Sleep(2 * time.Second)
+		return false, getErr
+	})
+	if err != nil {
+		return fmt.Errorf("timeout waiting for LocalStorageClass %s to be deleted", name)
 	}
+	return nil
 }
 
 func forceDeleteLocalStorageClass(ctx context.Context, dynClient dynamic.Interface, name string) {
@@ -310,17 +308,16 @@ func logSampleStuckPods(ctx context.Context, cl client.Client, max int) {
 
 // waitPodsGone retries Delete on each poll and force-finalizes Pods stuck in Terminating without progress.
 func waitPodsGone(ctx context.Context, cl client.Client, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
 	lastCount := -1
 	lastProgress := time.Now()
 	lastDetailLog := time.Time{}
 
-	for time.Now().Before(deadline) {
+	gone := framework.Poll(ctx, podCleanupPollInterval, timeout, func(ctx context.Context) (bool, error) {
 		cleanupPods(ctx, cl)
 
 		n := countPodsDefault(ctx, cl)
 		if n == 0 {
-			return
+			return true, nil
 		}
 		if n < lastCount {
 			lastProgress = time.Now()
@@ -340,20 +337,19 @@ func waitPodsGone(ctx context.Context, cl client.Client, timeout time.Duration) 
 		} else {
 			GinkgoWriter.Printf("Waiting for e2e Pods to terminate before PVC cleanup: %d remaining\n", n)
 		}
-		time.Sleep(podCleanupPollInterval)
+		return false, nil
+	}) == nil
+	if gone {
+		return
 	}
 
 	if n := countPodsDefault(ctx, cl); n > 0 {
 		GinkgoWriter.Printf("Pod cleanup deadline reached with %d e2e Pods left; forcing removal\n", n)
 		cleanupPods(ctx, cl)
 		forceFinalizeStuckPods(ctx, cl)
-		graceDeadline := time.Now().Add(30 * time.Second)
-		for time.Now().Before(graceDeadline) {
-			if countPodsDefault(ctx, cl) == 0 {
-				return
-			}
-			time.Sleep(2 * time.Second)
-		}
+		_ = framework.Poll(ctx, 2*time.Second, 30*time.Second, func(ctx context.Context) (bool, error) {
+			return countPodsDefault(ctx, cl) == 0, nil
+		})
 		if n := countPodsDefault(ctx, cl); n > 0 {
 			GinkgoWriter.Printf("Warning: %d e2e Pods still present after force cleanup:\n", n)
 			logSampleStuckPods(ctx, cl, 10)
@@ -498,11 +494,10 @@ func cleanupPodsAndPVCsWithWait(ctx context.Context, cl client.Client, podPhaseT
 	waitPodsGone(ctx, cl, podPhaseTimeout)
 
 	cleanupPVCs(ctx, cl)
-	pvDeadline := time.Now().Add(pvPhaseTimeout)
 	lastPVCount := -1
 	lastPVProgress := time.Now()
 	lastPVDetailLog := time.Time{}
-	for time.Now().Before(pvDeadline) {
+	done := framework.Poll(ctx, 5*time.Second, pvPhaseTimeout, func(ctx context.Context) (bool, error) {
 		if countPodsDefault(ctx, cl) > 0 {
 			cleanupPods(ctx, cl)
 		}
@@ -514,7 +509,7 @@ func cleanupPodsAndPVCsWithWait(ctx context.Context, cl client.Client, podPhaseT
 		pvCount := countRelatedPVs(ctx, cl)
 		if podCount == 0 && pvcCount == 0 && pvCount == 0 {
 			GinkgoWriter.Println("All e2e Pods, PVCs, and related PVs deleted")
-			return
+			return true, nil
 		}
 		if pvCount < lastPVCount {
 			lastPVProgress = time.Now()
@@ -532,7 +527,10 @@ func cleanupPodsAndPVCsWithWait(ctx context.Context, cl client.Client, podPhaseT
 		} else {
 			GinkgoWriter.Printf("Waiting for cleanup: %d pods, %d PVCs, %d PVs remaining\n", podCount, pvcCount, pvCount)
 		}
-		time.Sleep(5 * time.Second)
+		return false, nil
+	}) == nil
+	if done {
+		return
 	}
 	if n := countRelatedPVs(ctx, cl); n > 0 {
 		GinkgoWriter.Printf("PV cleanup deadline reached with %d e2e PVs left; forcing removal\n", n)
@@ -722,12 +720,10 @@ func createPVCsAndPodsWithSizes(ctx context.Context, cl client.Client, volumeSiz
 }
 
 func waitForPodsScheduled(ctx context.Context, cl client.Client, sizeLabel string, expectedCount int, timeout time.Duration) int {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	_ = framework.Poll(ctx, 5*time.Second, timeout, func(ctx context.Context) (bool, error) {
 		var podList corev1.PodList
 		if err := cl.List(ctx, &podList, &client.ListOptions{Namespace: "default"}); err != nil {
-			time.Sleep(5 * time.Second)
-			continue
+			return false, err
 		}
 
 		scheduledCount := 0
@@ -741,12 +737,8 @@ func waitForPodsScheduled(ctx context.Context, cl client.Client, sizeLabel strin
 			}
 		}
 
-		if scheduledCount >= expectedCount {
-			return scheduledCount
-		}
-
-		time.Sleep(5 * time.Second)
-	}
+		return scheduledCount >= expectedCount, nil
+	})
 
 	var podList corev1.PodList
 	_ = cl.List(ctx, &podList, &client.ListOptions{Namespace: "default"})

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/e2e/framework"
 	"github.com/deckhouse/sds-node-configurator/e2e/tests/utils/consts"
 	"github.com/deckhouse/storage-e2e/pkg/e2e"
 	. "github.com/onsi/gomega"
@@ -51,41 +52,29 @@ func restartAgentOnNode(ctx context.Context, cl *e2e.Cluster, node string) error
 		return fmt.Errorf("delete agent pods on node %s: %w", node, err)
 	}
 
-	deadline := time.Now().Add(5 * time.Minute)
-	var lastErr error
-	for {
+	err := framework.Poll(ctx, 5*time.Second, 5*time.Minute, func(ctx context.Context) (bool, error) {
 		list, err := pods.List(ctx, listOpts)
 		if err != nil {
-			lastErr = err
-		} else {
-			ready := false
-			for i := range list.Items {
-				p := &list.Items[i]
-				if p.DeletionTimestamp != nil {
-					continue
-				}
-				if !p.CreationTimestamp.Time.After(restartAt) {
-					continue
-				}
-				if p.Status.Phase == v1.PodRunning && isPodReady(p) {
-					ready = true
-					break
-				}
+			return false, err
+		}
+		for i := range list.Items {
+			p := &list.Items[i]
+			if p.DeletionTimestamp != nil {
+				continue
 			}
-			if ready {
-				return nil
+			if !p.CreationTimestamp.Time.After(restartAt) {
+				continue
 			}
-			lastErr = fmt.Errorf("no new ready agent pod on node %s yet", node)
+			if p.Status.Phase == v1.PodRunning && isPodReady(p) {
+				return true, nil
+			}
 		}
-
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for agent pod restart on node %s: %w", node, lastErr)
-		}
-		time.Sleep(5 * time.Second)
+		return false, fmt.Errorf("no new ready agent pod on node %s yet", node)
+	})
+	if err != nil {
+		return fmt.Errorf("timeout waiting for agent pod restart on node %s: %w", node, err)
 	}
+	return nil
 }
 
 func isPodReady(pod *v1.Pod) bool {

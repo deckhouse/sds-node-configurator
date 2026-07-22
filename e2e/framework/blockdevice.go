@@ -45,43 +45,37 @@ func WaitNewConsumableBlockDevice(ctx context.Context, restCfg *rest.Config, nod
 		beforeSet[bd.Name] = struct{}{}
 	}
 
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for {
+	var result kubernetes.BlockDevice
+	err := Poll(ctx, 5*time.Second, timeout, func(ctx context.Context) (bool, error) {
 		bds, err := kubernetes.GetConsumableBlockDevicesByNode(ctx, restCfg, node)
 		if err != nil {
-			lastErr = err
-		} else {
-			var found []kubernetes.BlockDevice
-			for _, bd := range bds {
-				if _, ok := beforeSet[bd.Name]; !ok {
-					found = append(found, bd)
-				}
-			}
-			switch len(found) {
-			case 1:
-				return found[0], nil
-			case 0:
-				lastErr = fmt.Errorf("no new consumable block device on node %s yet", node)
-			default:
-				names := make([]string, 0, len(found))
-				for _, bd := range found {
-					names = append(names, bd.Name)
-				}
-				return kubernetes.BlockDevice{}, fmt.Errorf(
-					"expected exactly one new consumable block device on node %s, got %d: %v", node, len(found), names)
+			return false, err
+		}
+		var found []kubernetes.BlockDevice
+		for _, bd := range bds {
+			if _, ok := beforeSet[bd.Name]; !ok {
+				found = append(found, bd)
 			}
 		}
-
-		if err := ctx.Err(); err != nil {
-			return kubernetes.BlockDevice{}, err
+		switch len(found) {
+		case 1:
+			result = found[0]
+			return true, nil
+		case 0:
+			return false, fmt.Errorf("no new consumable block device on node %s yet", node)
+		default:
+			names := make([]string, 0, len(found))
+			for _, bd := range found {
+				names = append(names, bd.Name)
+			}
+			return true, fmt.Errorf(
+				"expected exactly one new consumable block device on node %s, got %d: %v", node, len(found), names)
 		}
-		if time.Now().After(deadline) {
-			return kubernetes.BlockDevice{}, fmt.Errorf(
-				"timeout waiting for a new consumable block device on node %s: %w", node, lastErr)
-		}
-		time.Sleep(5 * time.Second)
+	})
+	if err != nil {
+		return kubernetes.BlockDevice{}, err
 	}
+	return result, nil
 }
 
 // TriggerLVMDiscovery nudges the agent scanner (udev + pvscan) after on-node LVM changes.

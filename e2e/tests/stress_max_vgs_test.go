@@ -105,29 +105,19 @@ func stressAttachErrIndicatesLimit(err error) bool {
 // stressWaitLVGBatchReady polls until every LVMVolumeGroup in [from,to) is Ready or timeout expires.
 // Returns false on timeout (probe mode stops the ramp without failing the spec).
 func stressWaitLVGBatchReady(ctx context.Context, cl client.Client, slots []stressVGSlot, from, to int, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	poll := 15 * time.Second
-	for {
-		allReady := true
+	err := framework.Poll(ctx, 15*time.Second, timeout, func(ctx context.Context) (bool, error) {
 		for i := from; i < to; i++ {
 			var cur v1alpha1.LVMVolumeGroup
 			if err := cl.Get(ctx, client.ObjectKey{Name: slots[i].lvgName}, &cur); err != nil {
-				allReady = false
-				break
+				return false, err
 			}
 			if cur.Status.Phase != v1alpha1.PhaseReady {
-				allReady = false
-				break
+				return false, nil
 			}
 		}
-		if allReady {
-			return true
-		}
-		if time.Now().After(deadline) {
-			return false
-		}
-		time.Sleep(poll)
-	}
+		return true, nil
+	})
+	return err == nil
 }
 
 // stressMarkSlotsReady marks slots in [from,to) whose LVMVolumeGroup is already Ready and returns the count.
