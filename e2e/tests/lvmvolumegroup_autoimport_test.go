@@ -46,7 +46,7 @@ const (
 	lvgaiTag = "storage.deckhouse.io/enabled=true"
 )
 
-var _ = Describe("LVMVolumeGroup auto-import", Label("sds-node-configurator", "lvmvolumegroup"), Ordered, func() {
+var _ = Describe("LVMVolumeGroup auto-import", Label("sds-node-configurator", "lvmvolumegroup"), Ordered, ContinueOnFailure, func() {
 	var (
 		ctx        context.Context
 		conf       *cfg.Config

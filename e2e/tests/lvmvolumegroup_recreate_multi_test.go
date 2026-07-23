@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var _ = Describe("LVMVolumeGroup recreate & multiple", Label("sds-node-configurator", "lvmvolumegroup"), Ordered, func() {
+var _ = Describe("LVMVolumeGroup recreate & multiple", Label("sds-node-configurator", "lvmvolumegroup"), Ordered, ContinueOnFailure, func() {
 	var (
 		ctx        context.Context
 		conf       *cfg.Config

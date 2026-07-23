@@ -45,7 +45,7 @@ const (
 	bddiscMaxDisksPerNode = 3
 )
 
-var _ = Describe("BlockDevice discovery", Label("sds-node-configurator", "block-device", "discovery"), Ordered, func() {
+var _ = Describe("BlockDevice discovery", Label("sds-node-configurator", "block-device", "discovery"), Ordered, ContinueOnFailure, func() {
 	// bddiscAttached correlates one attached disk with the BlockDevice it produced.
 	type bddiscAttached struct {
 		node     string

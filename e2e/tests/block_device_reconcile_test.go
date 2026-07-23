@@ -46,7 +46,7 @@ const (
 	bdrecCleanupTimeout = 2 * time.Minute
 )
 
-var _ = Describe("BlockDevice reconcile", Label("sds-node-configurator", "block-device"), Ordered, func() {
+var _ = Describe("BlockDevice reconcile", Label("sds-node-configurator", "block-device"), Ordered, ContinueOnFailure, func() {
 	var (
 		ctx        context.Context
 		conf       *cfg.Config

@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var _ = Describe("Block device stability with explicit lifecycle stages", Label("sds-node-configurator", "block-device-stable"), Ordered, func() {
+var _ = Describe("Block device stability with explicit lifecycle stages", Label("sds-node-configurator", "block-device-stable"), Ordered, ContinueOnFailure, func() {
 	var (
 		ctx       context.Context
 		conf      *cfg.Config

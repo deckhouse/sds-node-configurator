@@ -42,7 +42,7 @@ const (
 	ctrlrstThinPoolAllocationLimit = "100%"
 )
 
-var _ = Describe("Controller restart stability", Label("sds-node-configurator", "controller-restart"), Ordered, func() {
+var _ = Describe("Controller restart stability", Label("sds-node-configurator", "controller-restart"), Ordered, ContinueOnFailure, func() {
 	var (
 		ctx  context.Context
 		conf *cfg.Config
