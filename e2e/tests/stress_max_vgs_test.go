@@ -198,8 +198,9 @@ func stressPrintReport(nodeName string, target, ready, batchSize, maxVMBlockDevi
 	GinkgoWriter.Println("====================================================================")
 }
 
-// Label stress: excluded from default smoke; run via E2E_GINKGO_LABEL_FILTER=stress.
-var _ = Describe("Stress: maximum independent LVMVolumeGroups per node", Label("sds-node-configurator", "stress"), Ordered, func() {
+// Label stress-test: excluded from default smoke (default filter !stress-test, matching the
+// storage-e2e reusable workflow); run explicitly via -ginkgo.label-filter=stress-test.
+var _ = Describe("Stress: maximum independent LVMVolumeGroups per node", Label("sds-node-configurator", "stress-test"), Ordered, func() {
 	var (
 		ctx       context.Context
 		conf      *cfg.Config

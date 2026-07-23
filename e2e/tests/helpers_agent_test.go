@@ -40,29 +40,54 @@ const lvmVolumeGroupReadyTimeout = 15 * time.Minute
 // freshly created pod for that node is Running and Ready. It mirrors the "agent pod is restarted" pattern from
 // block_device_stable_test.go but exposes it as a reusable, Gomega-free helper.
 func restartAgentOnNode(ctx context.Context, cl *e2e.Cluster, node string) error {
-	restartAt := time.Now()
-
 	listOpts := metav1.ListOptions{
 		LabelSelector: "app=" + consts.SdsNodeConfiguratorAgentName,
 		FieldSelector: "spec.nodeName=" + node,
 	}
 	pods := cl.Clientset().CoreV1().Pods(consts.SdsNodeConfiguratorAgentNamespace)
 
-	if err := pods.DeleteCollection(ctx, metav1.DeleteOptions{}, listOpts); err != nil {
+	oldPods, listErr := pods.List(ctx, listOpts)
+	if listErr != nil {
+		return fmt.Errorf("list agent pods on node %s: %w", node, listErr)
+	}
+	oldUIDs := make(map[types.UID]struct{}, len(oldPods.Items))
+	for i := range oldPods.Items {
+		oldUIDs[oldPods.Items[i].UID] = struct{}{}
+	}
+
+	grace := int64(0)
+	if err := pods.DeleteCollection(ctx, metav1.DeleteOptions{GracePeriodSeconds: &grace}, listOpts); err != nil {
 		return fmt.Errorf("delete agent pods on node %s: %w", node, err)
 	}
 
-	err := framework.Poll(ctx, 5*time.Second, 5*time.Minute, func(ctx context.Context) (bool, error) {
+	// Phase 1: every old pod is gone from the API.
+	if err := framework.Poll(ctx, 5*time.Second, 3*time.Minute, func(ctx context.Context) (bool, error) {
+		list, err := pods.List(ctx, listOpts)
+		if err != nil {
+			return false, err
+		}
+		for i := range list.Items {
+			if _, isOld := oldUIDs[list.Items[i].UID]; isOld {
+				return false, fmt.Errorf("old agent pod %s still present", list.Items[i].Name)
+			}
+		}
+		return true, nil
+	}); err != nil {
+		return fmt.Errorf("timeout waiting for old agent pod(s) on node %s to terminate: %w", node, err)
+	}
+
+	// Phase 2: a fresh pod (not in the old set) is Running and Ready.
+	if err := framework.Poll(ctx, 5*time.Second, 10*time.Minute, func(ctx context.Context) (bool, error) {
 		list, err := pods.List(ctx, listOpts)
 		if err != nil {
 			return false, err
 		}
 		for i := range list.Items {
 			p := &list.Items[i]
-			if p.DeletionTimestamp != nil {
+			if _, isOld := oldUIDs[p.UID]; isOld {
 				continue
 			}
-			if !p.CreationTimestamp.Time.After(restartAt) {
+			if p.DeletionTimestamp != nil {
 				continue
 			}
 			if p.Status.Phase == v1.PodRunning && isPodReady(p) {
@@ -70,8 +95,7 @@ func restartAgentOnNode(ctx context.Context, cl *e2e.Cluster, node string) error
 			}
 		}
 		return false, fmt.Errorf("no new ready agent pod on node %s yet", node)
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("timeout waiting for agent pod restart on node %s: %w", node, err)
 	}
 	return nil

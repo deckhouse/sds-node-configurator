@@ -332,8 +332,9 @@ jobs:
           E2E_TUNNEL_SSH_JUMP_USER: ${{ secrets.E2E_SSH_JUMP_USER }}
           # Do not set KUBE_CONFIG_PATH here — it is taken from GITHUB_ENV (Setup writes the path to the file from E2E_CLUSTER_KUBECONFIG). Otherwise an empty vars value overwrites the fallback and storage-e2e cannot find kubeconfig when "sudo cat admin.conf" on the master fails.
           LOG_LEVEL: ${{ vars.E2E_LOG_LEVEL }}
-          # Smoke: all specs with label e2e-tests (excludes stress-test / max-VG ramp).
-          E2E_GINKGO_LABEL_FILTER: e2e-tests
+          # Smoke: everything except the max-VG stress ramp (label stress-test),
+          # matching the storage-e2e reusable workflow default filter.
+          E2E_GINKGO_LABEL_FILTER: "!stress-test"
           # Ginkgo suite timeout (must be <= go test -timeout below; smoke often exceeds 60m).
           E2E_TEST_TIMEOUT: 3h30m
         run: |

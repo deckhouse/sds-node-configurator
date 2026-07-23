@@ -1,211 +1,432 @@
-# How to Run E2E Smoke Tests
+# Running the sds-node-configurator E2E tests
 
-This guide explains how to run the **storage-e2e** smoke tests for `sds-node-configurator` (BlockDevice discovery, LVMVolumeGroup) in CI and locally.
+This is the detailed guide for the `sds-node-configurator` end-to-end suite. For a
+short overview and package layout see [`README.md`](README.md).
 
-## What the test does
+## What the suite does & architecture
 
-- Uses the [storage-e2e](https://github.com/deckhouse/storage-e2e) framework.
-- Entry point: `TestSdsNodeConfigurator` in `e2e/tests/sds_node_configurator_suite_test.go` (single Ginkgo run; nested cluster in `BeforeSuite`; Common Scheduler + Sds specs in package).
-- Covers BlockDevice discovery and LVMVolumeGroup flows on a test cluster (existing or created via framework).
-- Test cluster is reached via SSH (base cluster host or jump host) and kubeconfig (often through an SSH tunnel to the API).
+- **Attach-only, no bootstrap.** The suite connects to an **already-provisioned**
+  cluster through the [storage-e2e](https://github.com/deckhouse/storage-e2e) SDK
+  (`e2e.Connect`). Provisioning/teardown of the cluster is a separate operation
+  handled by CI (the storage-e2e reusable workflow) — the Go test binary never
+  bootstraps a cluster.
+- **Single entry point.** `TestSdsNodeConfigurator` in
+  `tests/sds_node_configurator_suite_test.go` registers the Ginkgo fail handler,
+  computes the suite timeout, and calls `RunSpecs`. There is no `BeforeSuite`
+  cluster setup.
+- **Per-spec connection.** Each spec file connects in its own `BeforeAll`:
 
-For test scenarios and debugging, see [README.md](README.md).
+  ```go
+  cl, err = e2e.Connect(ctx, e2e.WithTestName("block-device-discovery"))
+  Expect(err).NotTo(HaveOccurred())
+  DeferCleanup(func() { _ = cl.Close(context.Background()) })
+
+  k8sClient, err = sdsclient.New(cl.RESTConfig()) // controller-runtime client
+  conf, err = cfg.Load()                          // suite config from env
+  ```
+
+- **Cluster lease.** `e2e.Connect` acquires a `coordination.k8s.io/v1` Lease
+  (ref-counted, renewed in the background); a stale lease from a dead run
+  self-expires. `cl.Close` releases it.
+- **Serial-only.** Specs share one cluster, pick the same node
+  (`Nodes().List()[0]`), use common resource-name prefixes, and share the
+  cluster lease. Running with `ginkgo -p` / `--procs` or `go test -parallel`
+  (multiple processes) causes lease contention and races — **do not** enable
+  parallelism.
+- **Config is stateless.** `cfg.Load()` returns a fresh `*Config`; stress config
+  is loaded lazily and separately via `cfg.LoadStress()` inside the stress spec's
+  `BeforeAll`, so a broken `E2E_STRESS_*` value never breaks non-stress runs.
+- **`framework` is stateless & assertion-free** (no Ginkgo/Gomega). It exposes
+  pure helpers (see the reference below) that take explicit `ctx`, cluster/client
+  and `node` arguments.
+
+### Cluster surface used by specs (`*e2e.Cluster`)
+
+| Accessor | Returns | Used for |
+|----------|---------|----------|
+| `cl.RESTConfig()` | `*rest.Config` | build `sdsclient.New(...)` |
+| `cl.Clientset()` | `kubernetes.Interface` | core objects (nodes, pods, PVCs) |
+| `cl.Dynamic()` | `dynamic.Interface` | CRDs / dynamic access |
+| `cl.Nodes()` | `NodeExecutor` | `Exec(ctx, node, cmd)` on nodes |
+| `cl.Disks()` | `DiskManager` | `CreateDisk`/`AttachDisk`/`DetachDisk`/`DeleteDisk`/`ResizeDisk` |
+| `cl.Close(ctx)` | `error` | release the lease + connection |
+
+> Disk resize uses the SDK directly:
+> `cl.Disks().ResizeDisk(ctx, diskName, resource.Quantity)`. There is **no**
+> `framework.ResizeDisk` (it was removed).
+
+### `framework` package reference
+
+| Function (package `framework`) | Signature (abbreviated) |
+|--------------------------------|--------------------------|
+| `Poll` | `Poll(ctx, interval, timeout, cond func(context.Context) (done bool, err error)) error` |
+| `NodeExecChecked` | `NodeExecChecked(ctx, cl *e2e.Cluster, node, cmd string) (string, error)` — non-zero exit ⇒ error (for setup/mutations) |
+| `ParseLsblk` | `ParseLsblk(out string) map[string]LsblkLine` (keyed by PATH) |
+| `LsblkLine` | struct `{ Path, Serial, Size string; SizeBytes int64 }` |
+| `BlockDeviceName` | `BlockDeviceName(nodeName, wwn, model, serial, partUUID string) string` — mirrors the agent's `createUniqDeviceName` |
+| `WaitNewConsumableBlockDevice` | `WaitNewConsumableBlockDevice(ctx, restCfg *rest.Config, node string, before []kubernetes.BlockDevice, timeout) (kubernetes.BlockDevice, error)` |
+| `TriggerLVMDiscovery` | `TriggerLVMDiscovery(ctx, cl *e2e.Cluster, node string)` — pvscan + udevadm trigger |
+| `CountPVsInVG` | `CountPVsInVG(out string) int` (parses `pvs` output) |
+| `VGInListing` | `VGInListing(out, vgName string) bool` (parses `vgs` output) |
+| `ThinPoolDataLVPresent` | `ThinPoolDataLVPresent(out, thinPoolName string) bool` (parses `lvs` output) |
+| `RemoveThinPoolStackScript` | `RemoveThinPoolStackScript(vgName, thinPoolName string) string` — teardown shell script |
+
+Client creation lives in `sdsclient`:
+`sdsclient.New(cfg *rest.Config) (client.Client, error)` builds a
+controller-runtime client with a **private** `runtime.NewScheme()` (registers
+client-go core types + `sds-node-configurator/api/v1alpha1`) and never mutates
+the global `scheme.Scheme`.
 
 ---
 
 ## Running in CI (GitHub Actions)
 
-E2E runs as part of **Build and push for dev** when the **Build and checks** workflow is triggered and the PR has the right label.
+The repo workflow `.github/workflows/e2e-tests.yml` is a thin caller that gates
+on the `e2e/run` PR label and delegates to the storage-e2e reusable workflow:
 
-### 1. Trigger E2E on a PR
+```yaml
+jobs:
+  e2e:
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'e2e/run') }}
+    uses: deckhouse/storage-e2e/.github/workflows/e2e.yml@main
+    with:
+      module_slug: sds-node-configurator
+      module_path: e2e
+      test_package: ./tests/
+      cluster_config: e2e/tests/cluster_config.ci.yml
+      cluster_provider: dvp
+    secrets: inherit
+```
 
-1. Open your pull request.
-2. Add the label **`e2e-smoke-test`** to the PR (this sends a `labeled` event and should start **Build and checks** if Actions are allowed for this PR).
-3. The **Build and checks** workflow calls `build_dev.yml`; the **Run E2E Smoke Tests** job runs only when the PR has the `e2e-smoke-test` label, after the dev image build.
+### PR labels (Prow-style, resolved by the reusable workflow)
 
-Removing the label or not adding it means E2E smoke tests will not run.
+| Label | Effect |
+|-------|--------|
+| `e2e/run` | **Gate.** Without it the reusable workflow is not invoked at all. |
+| `e2e/keep-cluster` | Skip teardown (re-run tests on the same cluster). |
+| `e2e/label:<x>` | Ginkgo label(s); multiple are joined with ` \|\| `. Falls back to the reusable workflow's `label_filter` input when none are set. |
 
-**Draft PRs:** If nothing appears under **Actions** when you add the label, the repository or organization may be configured to **skip workflows for draft pull requests**. In that case either mark the PR as ready for review (a `ready_for_review` run is included) or change the Actions policy for draft PRs in **Settings → Actions** (exact option depends on your GitHub plan).
+### PR image of the module under test
 
-### 2. Required repository configuration
+`cluster_config.ci.yml` differs from `cluster_config.yml` in one line: the
+`sds-node-configurator` module is installed from the PR image via
 
-Configure the following in the repo **Settings → Secrets and variables → Actions**.
+```yaml
+- name: "sds-node-configurator"
+  ...
+  modulePullOverride: "${E2E_MODULE_IMAGE_TAG}"
+```
 
-#### Secrets (required for E2E)
+The reusable workflow exposes its `module_image_tag` input to the enable-modules
+step as `E2E_MODULE_IMAGE_TAG`, which this cluster config references, so the PR
+build of the module is the one exercised by the tests.
 
-| Secret | Description |
-|--------|-------------|
-| `E2E_SSH_PRIVATE_KEY` | Private SSH key content for cluster/VM access (e.g. base cluster master and test VMs). |
-| `E2E_SSH_PUBLIC_KEY` | Public key matching the private key (used for VM `authorized_keys`). |
-| `E2E_SSH_HOST` | SSH host for the base cluster (e.g. master node). Used for tunnel and as default jump host. |
-| `E2E_SSH_USER` | SSH user for the base cluster. |
-| `E2E_CLUSTER_KUBECONFIG` | Test cluster kubeconfig, **base64-encoded**. Written to a temp file; `KUBE_CONFIG_PATH` is set from it. |
-| `E2E_TEST_CLUSTER_CREATE_MODE` | `alwaysUseExisting` or `alwaysCreateNew` (use existing cluster or create via framework). |
-| `E2E_TEST_CLUSTER_STORAGE_CLASS` | Storage class name for the test cluster (e.g. `linstor-r1`). |
-| `E2E_TEST_CLUSTER_CLEANUP` | e.g. `true` / `false` — whether to clean up the test cluster after runs. |
-| `E2E_DECKHOUSE_LICENSE` | Deckhouse/DKP license key (if creating clusters). |
-| `E2E_REGISTRY_DOCKER_CFG` | Registry Docker config (base64) for pulling images (e.g. for VMs). |
+### Required secrets / vars (dvp provider, inherited)
 
-#### Optional secrets
+Configured in **Settings → Secrets and variables → Actions** and passed via
+`secrets: inherit`:
 
-| Secret | Description |
-|--------|-------------|
-| `E2E_SSH_JUMP_HOST` | Jump host for test cluster nodes (e.g. 10.10.10.x). Defaults to `E2E_SSH_HOST` if unset. |
-| `E2E_SSH_JUMP_USER` | SSH user on the jump host. Defaults to `E2E_SSH_USER` if unset. |
+| Secret | Required | Purpose |
+|--------|----------|---------|
+| `E2E_DVP_BASE_CLUSTER_KUBECONFIG` | Yes | base64 kubeconfig of the base virtualization cluster (decoded inline) |
+| `E2E_DVP_BASE_CLUSTER_SSH_PRIVATE_KEY` | Yes | SSH private key **content** for the base cluster |
+| `E2E_DVP_BASE_CLUSTER_SSH_USER` | Yes | SSH user |
+| `E2E_DVP_BASE_CLUSTER_SSH_HOST` | Yes | SSH host |
+| `E2E_DVP_BASE_CLUSTER_SSH_PASSPHRASE` | No | SSH key passphrase |
+| `E2E_DVP_DKP_LICENSE_KEY` | Yes (bootstrap) | DKP license for the dhctl install image (used by bootstrap only) |
+| `E2E_DVP_REGISTRY_DOCKER_CFG` | Yes (bootstrap) | base64 dockercfg embedded into the bootstrap config (bootstrap only) |
+| `E2E_DVP_BASE_CLUSTER_SSH_JUMP_HOST` / `_SSH_JUMP_USER` / `_SSH_JUMP_PRIVATE_KEY` | No | jump host — **all-or-nothing** (a partial set fails validation) |
 
-#### Variables (repository)
+### Results
 
-| Variable | Description |
-|----------|-------------|
-| `MODULE_NAME` | Module name (e.g. `sds-node-configurator`). Used in namespace and artifact names. |
-| `E2E_LOG_LEVEL` | Optional. e.g. `debug` or `info`. |
-
-### 3. Results
-
-- Workflow run: **Actions** → select the **Build and push for dev** run.
-- PR comment: a bot comment reports **E2E Smoke Tests Results** (passed/failed) with a link to the run and **Exit Code**.
-- Logs: download **e2e-smoke-test-logs-\<MODULE_NAME\>-\<run_id\>** from the workflow artifacts.
+- **Actions** → the E2E run for the PR.
+- Test pass/fail is reported by the reusable workflow; teardown runs regardless of
+  the test result unless `e2e/keep-cluster` is set.
 
 ---
 
 ## Running locally
 
-Local runs use the same suite and the same environment variables (often via a config file).
+Local runs use the same suite and the same SDK connection environment; the
+cluster must already exist and be reachable.
 
-### 1. Prepare config (not in git)
+### 1. Prepare a git-ignored config
 
-The directory `e2e/config/` is in `.gitignore`. Create there a script that exports the same variables the CI uses (with your values), for example:
+Keep secrets **out of git**. A common convention is a shell file under
+`e2e/config/` (add the directory to `.gitignore`) that `export`s the variables
+below. Then `source` it before running.
 
-- `e2e/config/test_exports_storage_e2e` — recommended name used in examples below.
+### 2. Export the connection environment
 
-Set at least:
-
-- `TEST_CLUSTER_CREATE_MODE` — `alwaysUseExisting` or `alwaysCreateNew`.
-- `SSH_HOST`, `SSH_USER` — test cluster SSH target and user on those nodes; with jump, also set `SSH_JUMP_HOST` / `SSH_JUMP_USER` (see §4).
-- `SSH_PRIVATE_KEY` (path) — SSH key for cluster/VMs.
-- `KUBE_CONFIG_PATH` (path) — test cluster kubeconfig.
-- `TEST_CLUSTER_STORAGE_CLASS`, `TEST_CLUSTER_NAMESPACE`, `TEST_CLUSTER_CLEANUP`.
-- For create mode: `DKP_LICENSE_KEY`, `REGISTRY_DOCKER_CFG`.
-
-### 2. Source config and run
-
-From the repo root:
+Minimum for the `dvp` provider (see the full table further down):
 
 ```bash
-source e2e/config/test_exports_storage_e2e
+# SDK connection (required)
+export E2E_TEST_CLUSTER_PROVIDER='dvp'
+export E2E_CLUSTER_CONFIG_YAML_PATH='<abs path to a cluster_config yaml>'
+
+# dvp base cluster: SSH + kubeconfig + storage class
+export E2E_DVP_BASE_CLUSTER_SSH_USER='<user>'
+export E2E_DVP_BASE_CLUSTER_SSH_HOST='<host>'
+export E2E_DVP_BASE_CLUSTER_SSH_PRIVATE_KEY_PATH='<path to key>'   # or ..._SSH_PRIVATE_KEY (content)
+export E2E_DVP_BASE_CLUSTER_KUBECONFIG_PATH='<path>'              # or ..._KUBECONFIG (content)
+export E2E_DVP_BASE_CLUSTER_STORAGE_CLASS='<storage-class>'        # required by specs for VirtualDisk creation
+```
+
+> Exactly **one** of `..._SSH_PRIVATE_KEY_PATH` / `..._SSH_PRIVATE_KEY` and
+> exactly **one** of `..._KUBECONFIG_PATH` / `..._KUBECONFIG` must be set — the
+> SDK rejects "both" and "neither".
+
+### 3. Run
+
+```bash
+source <your git-ignored env file>
 cd e2e
-go mod tidy
-ginkgo -v --progress --label-filter=e2e-tests ./tests/
+make deps      # go mod download/tidy + fix-mod-permissions
+make test      # smoke: -ginkgo.label-filter='!stress-test'
 ```
 
-Or run specific test:
+Raw `go test` equivalent (what `make test-go` runs):
 
 ```bash
-# Ginkgo focus on a spec name; CI runs: go test ./tests/ -run '^TestSdsNodeConfigurator$'
-ginkgo -v --progress --label-filter=e2e-tests --focus="Should schedule Pod with local PVC" ./tests/
+cd e2e
+GOWORK=off go test -v -count=1 -timeout 90m ./tests/ \
+  -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter='!stress-test'
 ```
 
-### Ginkgo labels (CI / local filter)
-
-Specs are tagged for selective runs:
-
-| Label | Specs |
-|-------|--------|
-| `e2e-tests` | Smoke e2e (scheduler, BlockDevice, LVMVolumeGroup, …) — **default** (suite, CI, `make test`) |
-| `stress` | Max independent LVMVolumeGroups per node — **not run by default** |
-
-Without `-ginkgo.label-filter`, `TestSdsNodeConfigurator` applies label filter `e2e-tests` automatically. Stress runs only with `make test-stress`, `-ginkgo.label-filter=stress`, or `E2E_GINKGO_LABEL_FILTER=stress`. Full package: `E2E_GINKGO_LABEL_FILTER='e2e-tests || stress'` or `E2E_GINKGO_LABEL_FILTER=all`.
+Via the Ginkgo CLI (install with `make install-ginkgo`; run serial, never `-p`):
 
 ```bash
-# Smoke only (same as CI default)
-go test -v -count=1 -timeout 3h30m ./tests/ -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter=e2e-tests
-
-# Stress only
-go test -v -count=1 -timeout 240m ./tests/ -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter=stress
-
-# Override in CI via env
-export E2E_GINKGO_LABEL_FILTER=stress
+cd e2e
+ginkgo run --label-filter='discovery || block-device' ./tests/
+ginkgo run --label-filter='!stress-test' --focus='BlockDevice discovery' ./tests/
 ```
 
-Focus only: `ginkgo -v --label-filter=stress ./tests/`
+### Focus & labels
 
-### 3. Cluster lock (stale lock)
-
-If a previous run was interrupted (e.g. Ctrl+C) or failed before cleanup, the framework may leave the cluster locked. You will see: `failed to acquire cluster lock: cluster is already locked`.
-
-To release the lock once (only when no other run is using the cluster):
+Real labels (from `tests/*.go`): `sds-node-configurator`, `block-device`,
+`discovery`, `block-device-stable`, `netlink-discovery`, `lvmvolumegroup`,
+`controller-restart`, `schedule-extender` (with `small`/`medium`/`large`),
+`regress`, and `stress-test`. The Makefile default is `GINKGO_LABEL_FILTER ?= !stress-test`
+(matching the storage-e2e reusable workflow default).
 
 ```bash
-export TEST_CLUSTER_FORCE_LOCK_RELEASE='true'
-source e2e/config/test_exports_storage_e2e
-cd e2e && ginkgo -v --progress --label-filter=e2e-tests ./tests/
+# smoke (default)
+make test
+# a subset
+make test-go GINKGO_LABEL_FILTER='lvmvolumegroup'
+# stress only (label stress-test)
+make test-stress
+#   == go test ... -ginkgo.label-filter=stress-test   (timeout 240m)
+# everything (smoke + stress)
+make test-go GINKGO_LABEL_FILTER=''
 ```
 
-For `alwaysUseExisting`, this suite retries once after clearing a stale lock: first it tries deleting ConfigMap `default/e2e-cluster-lock` via `KUBE_CONFIG_PATH` (works when the API URL is reachable directly). If that fails (common when `server` is `https://127.0.0.1:…` and no tunnel is running yet), it opens the same SSH + port-forward as the test connect and releases the lock. Disable with `E2E_NO_CLUSTER_LOCK_RETRY=true` (e.g. shared cluster).
+### Timeouts
 
-### 4. Jump host (test cluster nodes)
-
-If test cluster nodes (e.g. 10.10.10.x) are not reachable directly from your machine, set:
-
-- `SSH_JUMP_HOST` — jump host (often the base cluster master).
-- `SSH_JUMP_USER` — user on the jump host (defaults to `SSH_USER` if unset).
-
-### 5. `permission denied` under `.../pkg/mod/.../storage-e2e/.../temp`
-
-The storage-e2e library writes bootstrap state under a `temp/` directory inside the **checked-out** `storage-e2e` module in the Go module cache. On self-hosted runners that cache is often under a **shared read-only** path (e.g. `/opt/.../go/pkg/mod`), so `mkdir` fails even after `chmod`.
-
-**Fix (recommended):** point the module cache at a writable directory (CI uses this):
-
-```bash
-export GOMODCACHE="$(pwd)/e2e/.gomodcache"
-export GOCACHE="$(pwd)/e2e/.gocache"
-mkdir -p "$GOMODCACHE" "$GOCACHE"
-cd e2e && go mod download && go test ...
-```
-
-**Alternative (local):** `make deps` from `e2e/` runs `fix-mod-permissions` (chmod + `mkdir` under your current `GOPATH`/`GOMODCACHE`), which helps only if that cache is writable by your user.
-
-### 6. Virtualization module stuck in `Reconciling`
-
-storage-e2e checks the Deckhouse `Module/virtualization` once with a short timeout. Before nested cluster creation (`TEST_CLUSTER_CREATE_MODE=alwaysCreateNew`), the suite polls `Module/virtualization` via the Kubernetes API until `status.phase == Ready` (uses `KUBE_CONFIG_PATH`). Override total wait with `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` (e.g. `30m`). To disable this pre-wait entirely, set `E2E_SKIP_VIRTUALIZATION_MODULE_WAIT=true`.
+- Local default: `90m`. Override with `E2E_TEST_TIMEOUT` (e.g. `E2E_TEST_TIMEOUT=120m`)
+  or the `Makefile` var (`make test-go E2E_TEST_TIMEOUT=120m`).
+- In CI the suite enforces a minimum of `3h30m`.
 
 ---
 
-## Quick reference: environment variables
+## Environment variables reference
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `TEST_CLUSTER_CREATE_MODE` | Yes | `alwaysUseExisting` \| `alwaysCreateNew` |
-| `SSH_HOST` | Yes | Test cluster SSH target (master/API host or node); with jump, second hop address. |
-| `SSH_USER` | Yes | SSH user **on test cluster nodes** for the `SSH_HOST` hop (with jump: not the bastion user; set `SSH_JUMP_USER` for that). |
-| `SSH_PRIVATE_KEY` | Yes | Path to private SSH key file. |
-| `KUBE_CONFIG_PATH` | Yes | Path to test cluster kubeconfig. |
-| `TEST_CLUSTER_NAMESPACE` | Yes | Namespace used for test cluster / lock. |
-| `TEST_CLUSTER_STORAGE_CLASS` | Yes | Storage class name. |
-| `TEST_CLUSTER_CLEANUP` | Yes | e.g. `true` / `false`. |
-| `SSH_JUMP_HOST` | If nodes behind jump | Jump host; default = `SSH_HOST`. |
-| `SSH_JUMP_USER` | If using jump | Default = `SSH_USER`. |
-| `DKP_LICENSE_KEY` | If create mode | License for cluster creation. |
-| `REGISTRY_DOCKER_CFG` | If create mode | Registry auth (base64). |
-| `LOG_LEVEL` | No | e.g. `debug`, `info`. |
-| `TEST_CLUSTER_FORCE_LOCK_RELEASE` | No | Set to `true` once to clear a stale lock. |
-| `E2E_VIRTUALIZATION_MODULE_WAIT_TIMEOUT` | No | Max wait for Module `virtualization` Ready before nested cluster create (default ~25m). |
-| `E2E_SKIP_VIRTUALIZATION_MODULE_WAIT` | No | Set to `true` to skip the Module pre-wait (not recommended if you hit Reconciling flakes). |
-| `E2E_GINKGO_LABEL_FILTER` | No | Ginkgo label filter for CI/local (default in workflow: `e2e-tests`). Use `stress` for max-VG stress. |
-| `E2E_TEST_TIMEOUT` | No | Ginkgo suite timeout only on CI (default `3h30m`). CI workflow uses a **fixed** `go test -timeout 3h30m` so org/repo vars cannot shorten it to `60m`. Local default `90m`. |
+Only variables confirmed against the code are listed.
 
-### Stress: maximum VGs per node
+### SDK connection (required by `e2e.Connect`)
 
-Spec **`Stress: maximum independent LVMVolumeGroups per node`** (`sds_node_configurator_stress_max_vgs_test.go`), label **`stress`** (excluded from CI smoke; smoke uses **`e2e-tests`**). LVM2 has no fixed VG count limit; the test ramps **one VirtualDisk → one BlockDevice → one LVMVolumeGroup (one VG)** per slot on a single node in batches and prints an empirical report (`Ready` count, on-node `vgs`/`pvs` totals).
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `E2E_TEST_CLUSTER_PROVIDER` | Yes | provider mode; use `dvp` |
+| `E2E_CLUSTER_CONFIG_YAML_PATH` | Yes | path to the cluster config yaml |
 
-Optional tuning: `E2E_STRESS_MAX_VG_TARGET` (default 15), `E2E_STRESS_MAX_VM_BLOCK_DEVICES` (default 15; Deckhouse virt allows 16 block devices per VM), `E2E_STRESS_MAX_VG_BATCH_SIZE`, `E2E_STRESS_MAX_VG_DISK_SIZE`, `E2E_STRESS_MAX_VG_STRICT`, `E2E_STRESS_MAX_VG_MIN_READY`. The ramp stops gracefully when the VM attachment limit is hit.
+### dvp base cluster (`E2E_DVP_BASE_CLUSTER_*`, consumed by the SDK dvp provider)
 
-Focus or label: `ginkgo -v --label-filter=stress ./tests/`
+| Variable | Required | Default | Notes |
+|----------|----------|---------|-------|
+| `E2E_DVP_BASE_CLUSTER_SSH_USER` | Yes | — | SSH user |
+| `E2E_DVP_BASE_CLUSTER_SSH_HOST` | Yes | — | SSH host |
+| `E2E_DVP_BASE_CLUSTER_SSH_PRIVATE_KEY_PATH` | one of | — | path to key… |
+| `E2E_DVP_BASE_CLUSTER_SSH_PRIVATE_KEY` | one of | — | …or key content (exactly one) |
+| `E2E_DVP_BASE_CLUSTER_SSH_PASSPHRASE` | No | — | key passphrase |
+| `E2E_DVP_BASE_CLUSTER_KUBECONFIG_PATH` | one of | — | path to kubeconfig… |
+| `E2E_DVP_BASE_CLUSTER_KUBECONFIG` | one of | — | …or kubeconfig content (exactly one) |
+| `E2E_DVP_BASE_CLUSTER_STORAGE_CLASS` | Yes (specs) | — | storage class; also read by `cfg` (see below) |
+| `E2E_DVP_BASE_CLUSTER_NAMESPACE` | No | `e2e-test-cluster` | base cluster namespace |
+| `E2E_DVP_BASE_CLUSTER_VM_CLASS` | No | `generic` | VM class |
+| `E2E_DVP_BASE_CLUSTER_DEFAULT_VM_CLASS` | No | `generic` | default VM class |
+| `E2E_DVP_VM_SSH_USER` | No | `cloud` | SSH user on created VMs |
+| `E2E_DVP_BASE_CLUSTER_SSH_JUMP_HOST` | jump set | — | jump host (all-or-nothing) |
+| `E2E_DVP_BASE_CLUSTER_SSH_JUMP_USER` | jump set | — | jump user |
+| `E2E_DVP_BASE_CLUSTER_SSH_JUMP_PRIVATE_KEY_PATH` / `_SSH_JUMP_PRIVATE_KEY` | jump set | — | exactly one when using a jump host |
+| `E2E_DVP_BASE_CLUSTER_SSH_JUMP_KEY_PASSPHRASE` | No | — | jump key passphrase |
+| `E2E_DVP_DKP_LICENSE_KEY` | bootstrap | — | only used by bootstrap, not attach |
+| `E2E_DVP_REGISTRY_DOCKER_CFG` | bootstrap | — | only used by bootstrap, not attach |
+
+### Suite-specific (`cfg.Load`)
+
+`cfg.Load()` parses these **without** an `E2E_` prefix (the storage-e2e reusable
+workflow re-exports the needed values under these names before `go test`):
+
+| Variable | Field | Default | Notes |
+|----------|-------|---------|-------|
+| `TEST_CLUSTER_NAMESPACE` | `TestCluster.Namespace` | `e2e-test-cluster` | test namespace |
+| `E2E_DVP_BASE_CLUSTER_STORAGE_CLASS` | `TestCluster.StorageClass` | — | required by specs for `VirtualDisk` creation |
+| `MODULES_MODULE_TAG` | `ModulesImageTag` | `main` | module image tag used by specs |
+
+### Stress config (`cfg.LoadStress`, loaded lazily only by the stress spec)
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `E2E_STRESS_MAX_VG_TARGET` | `15` | target VG count; clamped to `MAX_VM_BLOCK_DEVICES` |
+| `E2E_STRESS_MAX_VG_DISK_SIZE` | `1Gi` | per-slot disk size (must parse as a quantity) |
+| `E2E_STRESS_MAX_VG_BATCH_SIZE` | `5` | batch size (must be ≤ target) |
+| `E2E_STRESS_MAX_VG_STRICT` | `false` | strict mode sets `MinReady = Target` |
+| `E2E_STRESS_MAX_VG_MIN_READY` | `0` | ≤0 ⇒ `Target` when strict, else `1` |
+| `E2E_STRESS_MAX_VM_BLOCK_DEVICES` | `15` | hard ceiling `16` (VMBDA per VM) |
+
+### Suite runtime
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `E2E_TEST_TIMEOUT` | `90m` local | Ginkgo suite timeout; CI enforces a `3h30m` minimum |
+| `CI` | — | when set, enables `FailFast` and the CI timeout floor |
 
 ---
+
+## Troubleshooting
+
+### Missing connection env (the #1 gotcha)
+
+If the SDK connection variables are not exported, **every** `BeforeAll` fails at
+`e2e.Connect` with an error like:
+
+```
+env: required environment variable "E2E_TEST_CLUSTER_PROVIDER" is not set
+env: required environment variable "E2E_CLUSTER_CONFIG_YAML_PATH" is not set
+```
+
+Fix: `source` your git-ignored env file (or export the variables) so at least
+`E2E_TEST_CLUSTER_PROVIDER`, `E2E_CLUSTER_CONFIG_YAML_PATH` and the required
+`E2E_DVP_BASE_CLUSTER_*` set are present before running.
+
+Related SDK validation errors:
+
+- `exactly one of E2E_DVP_BASE_CLUSTER_KUBECONFIG_PATH or E2E_DVP_BASE_CLUSTER_KUBECONFIG must be set`
+- `exactly one of E2E_DVP_BASE_CLUSTER_SSH_PRIVATE_KEY_PATH or E2E_DVP_BASE_CLUSTER_SSH_PRIVATE_KEY must be set`
+
+### Cluster lease / "already locked"
+
+`e2e.Connect` takes a `coordination.k8s.io/v1` Lease that is renewed in the
+background and **self-expires** if the holder dies, so a crashed run no longer
+leaves a permanent lock. If you must run against a cluster you know is
+exclusively yours and want to skip the lease entirely, a spec can use
+`e2e.Connect(ctx, e2e.WithoutLock())` — do this only when nothing else touches
+the cluster.
+
+### Jump host
+
+If test-cluster nodes are not reachable directly, configure the jump host as an
+**all-or-nothing** set: `E2E_DVP_BASE_CLUSTER_SSH_JUMP_HOST`,
+`E2E_DVP_BASE_CLUSTER_SSH_JUMP_USER`, and exactly one of
+`E2E_DVP_BASE_CLUSTER_SSH_JUMP_PRIVATE_KEY_PATH` /
+`E2E_DVP_BASE_CLUSTER_SSH_JUMP_PRIVATE_KEY` (optionally
+`E2E_DVP_BASE_CLUSTER_SSH_JUMP_KEY_PASSPHRASE`). A partial set fails validation
+with `jump host requires ...`.
+
+### `permission denied` under the storage-e2e module cache
+
+The storage-e2e module may need a writable checkout in the Go module cache. Run:
+
+```bash
+cd e2e
+make fix-mod-permissions   # also run as part of `make deps`
+```
+
+`fix-mod-permissions` `chmod -R +w`s `…/github.com/deckhouse/storage-e2e@*` in
+your `GOMODCACHE`/`GOPATH/pkg/mod`. On self-hosted CI with a shared read-only
+cache, point the cache at a writable directory instead:
+
+```bash
+export GOMODCACHE="$(pwd)/.gomodcache"
+mkdir -p "$GOMODCACHE"
+```
+
+### Ginkgo CLI / library version mismatch
+
+`make install-ginkgo` installs the Ginkgo CLI at `@latest`, which may differ from
+`github.com/onsi/ginkgo/v2` pinned in `go.mod` (currently `v2.28.2`) and print a
+version-mismatch warning. Either avoid the standalone CLI and use `make test-go`
+(plain `go test`), or run the pinned CLI:
+
+```bash
+cd e2e
+GOWORK=off go run github.com/onsi/ginkgo/v2/ginkgo run --label-filter='!stress-test' ./tests/
+```
+
+### `go.work` / toolchain
+
+The repo root has a `go.work` that interferes with the `e2e` module. Run Go
+commands from `e2e/` with `GOWORK=off`; if your base toolchain is older than the
+required `go 1.26.5`, pin it with `GOTOOLCHAIN=go1.26.5`.
+
+---
+
+## Writing a new test
+
+1. **Create a spec file** in `tests/` (`package tests`). Give the top-level
+   `Describe` `Ordered` and the appropriate labels, e.g.:
+
+   ```go
+   var _ = Describe("My new scenario",
+       Label("sds-node-configurator", "block-device"), Ordered, func() { /* ... */ })
+   ```
+
+2. **Connect in `BeforeAll`** and register cleanup:
+
+   ```go
+   BeforeAll(func() {
+       ctx = context.Background()
+       var err error
+       conf, err = cfg.Load()
+       Expect(err).NotTo(HaveOccurred())
+
+       cl, err = e2e.Connect(ctx, e2e.WithTestName("my-new-scenario"))
+       Expect(err).NotTo(HaveOccurred())
+       DeferCleanup(func() {
+           if cerr := cl.Close(context.Background()); cerr != nil {
+               GinkgoWriter.Println("Error closing cluster:", cerr)
+           }
+       })
+
+       k8sClient, err = sdsclient.New(cl.RESTConfig())
+       Expect(err).NotTo(HaveOccurred())
+   })
+   ```
+
+3. **Drive the cluster via the SDK**: nodes with `cl.Clientset().CoreV1().Nodes()`,
+   commands with `cl.Nodes().Exec(...)` (or `framework.NodeExecChecked` when a
+   non-zero exit must be an error), disks with
+   `cl.Disks().CreateDisk/AttachDisk/DetachDisk/DeleteDisk/ResizeDisk`.
+
+4. **Use `framework` helpers** for polling and parsing (`Poll`, `ParseLsblk`,
+   `WaitNewConsumableBlockDevice`, `BlockDeviceName`, `TriggerLVMDiscovery`, the
+   LVM parsers). Keep assertions (`Expect`/`Eventually`) in the spec — `framework`
+   stays assertion-free.
+
+5. **Labeling conventions**: always include `sds-node-configurator` for
+   module-level specs plus a domain label (`block-device`, `lvmvolumegroup`,
+   `netlink-discovery`, `controller-restart`, …). Use `stress-test` only for heavy
+   stress specs (excluded from the default `!stress-test` filter).
+
+6. **No parallelism.** Assume serial execution: pick a node explicitly, clean up
+   what you create (`AfterEach`/`AfterAll`/`DeferCleanup`), and never rely on or
+   enable `ginkgo -p`.
 
 ## See also
 
-- [README.md](README.md) — test scenarios, debugging, troubleshooting.
-- Local smoke (same as CI): `make -C e2e test-go` or `go test ... -ginkgo.label-filter=e2e-tests`
-- Full package including stress: `go test ... -ginkgo.label-filter='e2e-tests || stress'` or `-ginkgo.label-filter=stress` for stress only
+- [`README.md`](README.md) — overview, package structure, quickstart.
+- [`Makefile`](Makefile) — all targets (`make help`).
+- [storage-e2e](https://github.com/deckhouse/storage-e2e) — SDK, reusable CI
+  workflow, and env reference.

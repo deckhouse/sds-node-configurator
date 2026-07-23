@@ -1,7 +1,5 @@
 # Makefile for sds-node-configurator E2E tests (Common Scheduler Extender + module scenarios)
 
-E2E_IMAGE ?= e2e-tests:latest
-
 .PHONY: help
 help: ## Show help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
@@ -12,53 +10,26 @@ deps: ## Download dependencies
 	go mod tidy
 	@$(MAKE) fix-mod-permissions
 
-# === Run in cluster (Job) ===
-
-.PHONY: deploy-rbac
-deploy-rbac: ## Apply RBAC manifests
-	kubectl apply -f manifests/rbac.yaml
-
-.PHONY: run-in-cluster
-run-in-cluster: deploy-rbac ## Run tests as a Job in the cluster
-	@kubectl delete job e2e-tests -n d8-sds-node-configurator --ignore-not-found
-	E2E_IMAGE=$(E2E_IMAGE) \
-	envsubst < manifests/job.yaml | kubectl apply -f -
-	@echo "Job created. Logs: make logs"
-
-.PHONY: logs
-logs: ## Follow test pod logs
-	kubectl logs -n d8-sds-node-configurator -l job-name=e2e-tests -f
-
-.PHONY: status
-status: ## Job status
-	kubectl get job e2e-tests -n d8-sds-node-configurator
-	@echo ""
-	kubectl get pods -n d8-sds-node-configurator -l job-name=e2e-tests
-
-.PHONY: cleanup
-cleanup: ## Delete Job and RBAC
-	kubectl delete -f manifests/job.yaml --ignore-not-found
-	kubectl delete -f manifests/rbac.yaml --ignore-not-found
-
 # === Local run ===
-# CI smoke uses !stress (everything except max-VG stress). Override: make test-go GINKGO_LABEL_FILTER=stress
-GINKGO_LABEL_FILTER ?= !stress
+# CI smoke uses !stress-test (everything except max-VG stress), matching the storage-e2e
+# reusable workflow default. Override: make test-go GINKGO_LABEL_FILTER=stress-test
+GINKGO_LABEL_FILTER ?= !stress-test
 E2E_TEST_TIMEOUT ?= 90m
 # CI workflow uses go test -timeout 3h30m regardless of this var.
 
 .PHONY: test
-test: ## Run E2E smoke (!stress, без max-VG stress) — как CI
+test: ## Run E2E smoke (!stress-test, без max-VG stress) — как CI
 	$(MAKE) test-go
 
 .PHONY: test-go
-test-go: ## Как в CI smoke: TestSdsNodeConfigurator + -ginkgo.label-filter=!stress
+test-go: ## Как в CI smoke: TestSdsNodeConfigurator + -ginkgo.label-filter=!stress-test
 	go test -v -count=1 -timeout "$(E2E_TEST_TIMEOUT)" ./tests/ -run '^TestSdsNodeConfigurator$$' \
 		-ginkgo.label-filter="$(GINKGO_LABEL_FILTER)"
 
 .PHONY: test-stress
-test-stress: ## Только max-VG stress (label stress)
+test-stress: ## Только max-VG stress (label stress-test)
 	go test -v -count=1 -timeout 240m ./tests/ -run '^TestSdsNodeConfigurator$$' \
-		-ginkgo.label-filter=stress
+		-ginkgo.label-filter=stress-test
 
 .PHONY: test-focus
 test-focus: ## Run by test name (make test-focus FOCUS="TestSdsNodeConfigurator")
@@ -102,14 +73,18 @@ fix-mod-permissions: ## Writable storage-e2e in GOMODCACHE or GOPATH (PrepareBoo
 	done
 
 .PHONY: check-env
-check-env: ## Print relevant env vars
-	@echo "E2E_IMAGE:                 $(E2E_IMAGE)"
-	@echo "TEST_CLUSTER_CREATE_MODE:  $${TEST_CLUSTER_CREATE_MODE}"
-	@echo "TEST_CLUSTER_NAMESPACE:    $${TEST_CLUSTER_NAMESPACE}"
-	@echo "E2E_DVP_BASE_CLUSTER_STORAGE_CLASS: $${E2E_DVP_BASE_CLUSTER_STORAGE_CLASS}"
-	@echo "SSH_HOST:                  $${SSH_HOST}"
-	@echo "SSH_USER:                  $${SSH_USER}"
-	@echo "KUBE_CONFIG_PATH:          $${KUBE_CONFIG_PATH}"
+check-env: ## Print the env the suite/SDK actually reads (e2e.Connect + cfg)
+	@echo "# SDK cluster connection (required by e2e.Connect):"
+	@echo "E2E_TEST_CLUSTER_PROVIDER:            $${E2E_TEST_CLUSTER_PROVIDER}"
+	@echo "E2E_CLUSTER_CONFIG_YAML_PATH:         $${E2E_CLUSTER_CONFIG_YAML_PATH}"
+	@echo "# dvp base-cluster (provider=dvp):"
+	@echo "E2E_DVP_BASE_CLUSTER_SSH_USER:        $${E2E_DVP_BASE_CLUSTER_SSH_USER}"
+	@echo "E2E_DVP_BASE_CLUSTER_SSH_HOST:        $${E2E_DVP_BASE_CLUSTER_SSH_HOST}"
+	@echo "E2E_DVP_BASE_CLUSTER_STORAGE_CLASS:   $${E2E_DVP_BASE_CLUSTER_STORAGE_CLASS}"
+	@echo "# suite config (cfg.Load / cfg.LoadStress):"
+	@echo "TEST_CLUSTER_NAMESPACE:               $${TEST_CLUSTER_NAMESPACE}"
+	@echo "MODULES_MODULE_TAG:                   $${MODULES_MODULE_TAG}"
+	@echo "GINKGO_LABEL_FILTER:                  $(GINKGO_LABEL_FILTER)"
 
 .PHONY: lint
 lint: ## Run golangci-lint

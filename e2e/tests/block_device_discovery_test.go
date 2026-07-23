@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -249,8 +250,17 @@ var _ = Describe("BlockDevice discovery", Label("sds-node-configurator", "block-
 			}
 			Expect(line).NotTo(BeNil(),
 				"device path %s of BD %s must be present in lsblk on node %s", bd.Status.Path, bd.Name, d.node)
-			Expect(line.Serial).To(Equal(bd.Status.Serial),
-				"lsblk serial for %s must match BD.Status.Serial (%s)", bd.Status.Path, bd.Status.Serial)
+
+			expectedSerial := line.Serial
+			if expectedSerial == "" {
+				devName := strings.TrimPrefix(bd.Status.Path, "/dev/")
+				sysSerial, sysErr := framework.NodeExecChecked(ctx, cl, d.node,
+					fmt.Sprintf("cat /sys/block/%s/serial 2>/dev/null || true", devName))
+				Expect(sysErr).NotTo(HaveOccurred(), "read /sys/block/%s/serial on node %s", devName, d.node)
+				expectedSerial = strings.TrimSpace(sysSerial)
+			}
+			Expect(expectedSerial).To(Equal(bd.Status.Serial),
+				"serial for %s (lsblk or /sys fallback) must match BD.Status.Serial (%s)", bd.Status.Path, bd.Status.Serial)
 			Expect(line.SizeBytes).To(BeNumerically(">=", d.reqSize.Value()),
 				"lsblk size for %s must be >= requested %s, got %d bytes", bd.Status.Path, d.reqSize.String(), line.SizeBytes)
 		}

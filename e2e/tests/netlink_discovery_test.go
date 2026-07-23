@@ -183,11 +183,10 @@ var _ = Describe("BlockDevice netlink discovery", Label("sds-node-configurator",
 		changeSince = metav1.NewTime(time.Now())
 
 		By(fmt.Sprintf("Growing VirtualDisk %s from %s to %s", diskName, netlinkDiskSize, netlinkDiskResizedSize))
-		Expect(framework.ResizeDisk(
+		Expect(cl.Disks().ResizeDisk(
 			ctx,
-			cl.Dynamic(),
 			diskName,
-			netlinkDiskResizedSize,
+			resource.MustParse(netlinkDiskResizedSize),
 		)).To(Succeed())
 
 		By("Waiting until the same BlockDevice reflects increased size")

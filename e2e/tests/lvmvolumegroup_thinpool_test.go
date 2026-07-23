@@ -257,7 +257,7 @@ var _ = Describe("LVMVolumeGroup thin-pool", Label("sds-node-configurator", "lvm
 		GinkgoWriter.Printf("    BlockDevice %s status size before resize: %s\n", newBD.Name, bdBefore.Status.Size.String())
 
 		By("Growing disk 2Gi -> 4Gi via pvresize scenario")
-		Expect(framework.ResizeDisk(ctx, cl.Dynamic(), diskName, "4Gi")).To(Succeed())
+		Expect(cl.Disks().ResizeDisk(ctx, diskName, resource.MustParse("4Gi"))).To(Succeed())
 
 		By("Waiting for BlockDevice status size to reflect larger disk")
 		Eventually(func(g Gomega) {
