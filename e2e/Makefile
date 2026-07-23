@@ -41,24 +41,24 @@ cleanup: ## Delete Job and RBAC
 	kubectl delete -f manifests/rbac.yaml --ignore-not-found
 
 # === Local run ===
-# CI smoke uses !stress-test (everything except max-VG stress). Override: make test-go GINKGO_LABEL_FILTER=stress-test
-GINKGO_LABEL_FILTER ?= !stress-test
+# CI smoke uses !stress (everything except max-VG stress). Override: make test-go GINKGO_LABEL_FILTER=stress
+GINKGO_LABEL_FILTER ?= !stress
 E2E_TEST_TIMEOUT ?= 90m
 # CI workflow uses go test -timeout 3h30m regardless of this var.
 
 .PHONY: test
-test: ## Run E2E smoke (!stress-test, без max-VG stress) — как CI
+test: ## Run E2E smoke (!stress, без max-VG stress) — как CI
 	$(MAKE) test-go
 
 .PHONY: test-go
-test-go: ## Как в CI smoke: TestSdsNodeConfigurator + -ginkgo.label-filter=!stress-test
+test-go: ## Как в CI smoke: TestSdsNodeConfigurator + -ginkgo.label-filter=!stress
 	go test -v -count=1 -timeout "$(E2E_TEST_TIMEOUT)" ./tests/ -run '^TestSdsNodeConfigurator$$' \
 		-ginkgo.label-filter="$(GINKGO_LABEL_FILTER)"
 
 .PHONY: test-stress
-test-stress: ## Только max-VG stress (label stress-test)
+test-stress: ## Только max-VG stress (label stress)
 	go test -v -count=1 -timeout 240m ./tests/ -run '^TestSdsNodeConfigurator$$' \
-		-ginkgo.label-filter=stress-test
+		-ginkgo.label-filter=stress
 
 .PHONY: test-focus
 test-focus: ## Run by test name (make test-focus FOCUS="TestSdsNodeConfigurator")

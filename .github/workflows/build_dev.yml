@@ -439,7 +439,7 @@ jobs:
             done
             shopt -u nullglob
           fi
-          echo "Ginkgo label filter: ${E2E_GINKGO_LABEL_FILTER} (stress-test specs are skipped in smoke)"
+          echo "Ginkgo label filter: ${E2E_GINKGO_LABEL_FILTER} (stress specs are skipped in smoke)"
           export E2E_TEST_TIMEOUT="${E2E_TEST_TIMEOUT:-3h30m}"
           # Hardcode go test -timeout: repo/org E2E_TEST_TIMEOUT=60m must not shorten the process alarm.
           E2E_GO_TEST_TIMEOUT="3h30m"

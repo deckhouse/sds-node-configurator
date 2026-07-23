@@ -103,7 +103,7 @@ ginkgo -v --progress --label-filter=e2e-tests --focus="Should schedule Pod with 
 
 ### Stress: максимум VG на одной ноде
 
-Spec в `sds_node_configurator_stress_max_vgs_test.go`, Ginkgo-лейбл **`stress-test`** (остальные e2e — **`e2e-tests`**). CI smoke по умолчанию: `-ginkgo.label-filter=e2e-tests`. Подробнее — [E2E_USAGE.md](E2E_USAGE.md).
+Spec в `sds_node_configurator_stress_max_vgs_test.go`, Ginkgo-лейбл **`stress`** (остальные e2e — **`e2e-tests`**). CI smoke по умолчанию: `-ginkgo.label-filter=e2e-tests`. Подробнее — [E2E_USAGE.md](E2E_USAGE.md).
 
 ### Common Scheduler Extender
 
