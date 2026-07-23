@@ -30,9 +30,8 @@ func TestSdsNodeConfigurator(t *testing.T) {
 	RegisterFailHandler(Fail)
 	suiteConfig, reporterConfig := GinkgoConfiguration()
 	suiteConfig.Timeout = suiteTimeout()
-	if os.Getenv("CI") != "" {
-		suiteConfig.FailFast = true
-	}
+	// FailFast is intentionally off (including in CI): we want the full suite to run
+	// so a single early failure does not hide later broken specs.
 	reporterConfig.Verbose = true
 	reporterConfig.ShowNodeEvents = false
 	RunSpecs(t, "Sds Node Configurator Suite", suiteConfig, reporterConfig)
