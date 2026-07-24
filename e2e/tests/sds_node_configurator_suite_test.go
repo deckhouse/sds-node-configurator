@@ -17,68 +17,49 @@
 package tests
 
 import (
-	"context"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	e2ecfg "github.com/deckhouse/sds-node-configurator/e2e/cfg"
-	"github.com/deckhouse/storage-e2e/pkg/cluster"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
-var _ = BeforeSuite(func() {
-	conf, cfgErr := e2ecfg.New()
-	Expect(cfgErr).NotTo(HaveOccurred(), "Failed to load config")
-	Expect(conf).NotTo(BeNil())
-	// Before any spec: Ginkgo may shuffle root Ordered Describes; nested cluster must exist first.
-	e2eEnsureSharedNestedTestCluster()
-})
-
-var _ = AfterSuite(func() {
-	res := e2eNestedTestClusterOrNil()
-	if res != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		locked, lockErr := cluster.IsClusterLocked(ctx, res.Kubeconfig)
-		if lockErr != nil {
-			GinkgoWriter.Println(lockErr)
-		}
-		if locked {
-			releaseErr := cluster.ReleaseClusterLock(ctx, res.Kubeconfig)
-			if releaseErr != nil {
-				GinkgoWriter.Println(releaseErr)
-			}
-			GinkgoWriter.Println("Released cluster lock")
-		}
-	}
-
-	e2eCloseNodeSSHCache()
-	e2eCleanupNestedTestClusterAfterSuite()
-})
-
 func TestSdsNodeConfigurator(t *testing.T) {
-	e2eAssertCIGoTestTimeout(t)
-
 	RegisterFailHandler(Fail)
 	suiteConfig, reporterConfig := GinkgoConfiguration()
-	suiteTimeout := e2eTestSuiteTimeout()
-	suiteConfig.Timeout = suiteTimeout
-	if suiteConfig.LabelFilter == "" {
-		suiteConfig.LabelFilter = e2eGinkgoLabelFilter()
-	}
-	if os.Getenv("CI") != "" {
-		suiteConfig.FailFast = true
-	}
+	suiteConfig.Timeout = suiteTimeout()
+	// FailFast is intentionally off (including in CI): we want the full suite to run
+	// so a single early failure does not hide later broken specs.
 	reporterConfig.Verbose = true
 	reporterConfig.ShowNodeEvents = false
-	t.Logf("E2E suite timeout: %v (override with E2E_TEST_TIMEOUT)", suiteTimeout)
-	if f := strings.TrimSpace(suiteConfig.LabelFilter); f != "" {
-		t.Logf("Ginkgo label filter: %q (stress-test excluded unless filter includes it; override: -ginkgo.label-filter or E2E_GINKGO_LABEL_FILTER)", f)
-	} else {
-		t.Logf("Ginkgo label filter: (none) — all specs including stress-test (set E2E_GINKGO_LABEL_FILTER=all explicitly)")
-	}
 	RunSpecs(t, "Sds Node Configurator Suite", suiteConfig, reporterConfig)
+}
+
+func suiteTimeout() time.Duration {
+	const (
+		localDefault = 90 * time.Minute
+		ciDefault    = 3*time.Hour + 30*time.Minute
+		ciMinimum    = 3*time.Hour + 30*time.Minute
+	)
+
+	inCI := os.Getenv("CI") != ""
+
+	timeout := localDefault
+	if inCI {
+		timeout = ciDefault
+	}
+
+	if raw := strings.TrimSpace(os.Getenv("E2E_TEST_TIMEOUT")); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+			timeout = parsed
+		}
+	}
+
+	if inCI && timeout < ciMinimum {
+		timeout = ciMinimum
+	}
+
+	return timeout
 }

@@ -21,52 +21,20 @@ import (
 )
 
 type Config struct {
-	TestCluster       TestCluster `envPrefix:"TEST_CLUSTER_"`
-	SSH               SSH         `envPrefix:"SSH_"`
-	KubeConfigPath    string      `env:"KUBE_CONFIG_PATH,required"`
-	DKPLicenceKey     string      `env:"DKP_LICENSE_KEY"`
-	LogLevel          string      `env:"LOG_LEVEL" envDefault:"info"`
-	YamlClusterConfig string      `env:"YAML_CONFIG_FILENAME" envDefault:"cluster_config.yml"`
-	ModulesImageTag   string      `env:"MODULES_MODULE_TAG,required" envDefault:"main"`
+	TestCluster     TestCluster
+	ModulesImageTag string `env:"MODULES_MODULE_TAG" envDefault:"main"`
 }
 
 type TestCluster struct {
-	CreateMode   CreateMode `env:"CREATE_MODE,required"`
-	Namespace    string     `env:"NAMESPACE" envDefault:"e2e-test-cluster"`
-	StorageClass string     `env:"STORAGE_CLASS,required"`
-	Cleanup      bool       `env:"CLEANUP" envDefault:"false"`
+	Namespace    string `env:"TEST_CLUSTER_NAMESPACE" envDefault:"e2e-test-cluster"`
+	StorageClass string `env:"E2E_DVP_BASE_CLUSTER_STORAGE_CLASS"`
 }
 
-type SSH struct {
-	User       string `env:"USER,required"`
-	Host       string `env:"HOST,required"`
-	PrivateKey string `env:"PRIVATE_KEY,required"`
-	Passphrase string `env:"PASSPHRASE"`
-	Jump       Jump   `envPrefix:"JUMP_"`
-	VmUser     string `env:"VM_USER"`
-}
-
-type Jump struct {
-	Host           string `env:"HOST"`
-	User           string `env:"USER"`
-	PrivateKeyPath string `env:"KEY_PATH"`
-}
-
-var cfg Config
-
-func New() (*Config, error) {
-	if err := env.Parse(&cfg); err != nil {
+func Load() (*Config, error) {
+	var c Config
+	if err := env.Parse(&c); err != nil {
 		return nil, err
 	}
 
-	vErr := validate()
-	if vErr != nil {
-		return nil, vErr
-	}
-
-	return &cfg, nil
-}
-
-func Load() *Config {
-	return &cfg
+	return &c, nil
 }

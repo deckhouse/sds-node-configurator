@@ -22,44 +22,109 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewModeCreateNew(t *testing.T) {
-	err := os.Setenv("TEST_CLUSTER_CREATE_MODE", ModeCreateNew)
-	assert.NoError(t, err, "Failed to set env TEST_CLUSTER_CREATE_MODE")
+func TestLoad(t *testing.T) {
+	for _, k := range []string{
+		"TEST_CLUSTER_NAMESPACE",
+		"E2E_DVP_BASE_CLUSTER_STORAGE_CLASS",
+		"MODULES_MODULE_TAG",
+	} {
+		assert.NoError(t, os.Unsetenv(k))
+	}
 
-	err = os.Setenv("TEST_CLUSTER_STORAGE_CLASS", "linstor-r1")
-	assert.NoError(t, err, "Failed to set env TEST_CLUSTER_STORAGE_CLASS")
+	assert.NoError(t, os.Setenv("E2E_DVP_BASE_CLUSTER_STORAGE_CLASS", "linstor-r1"))
 
-	err = os.Setenv("SSH_USER", "test")
-	assert.NoError(t, err, "Failed to set env SSH_USER")
-
-	err = os.Setenv("SSH_HOST", "localhost")
-	assert.NoError(t, err, "Failed to set env SSH_HOST")
-
-	err = os.Setenv("SSH_PRIVATE_KEY", "test-key")
-	assert.NoError(t, err, "Failed to set env SSH_PRIVATE_KEY")
-
-	err = os.Setenv("KUBE_CONFIG_PATH", "/path/to/kubeconfig")
-	assert.NoError(t, err, "Failed to set env KUBE_CONFIG_PATH")
-
-	err = os.Setenv("DKP_LICENSE_KEY", "test-key")
-	assert.NoError(t, err, "Failed to set env DKP_LICENSE_KEY")
-
-	got, err := New()
+	got, err := Load()
 	assert.NoError(t, err)
 	assert.Equal(t, &Config{
 		TestCluster: TestCluster{
-			CreateMode:   ModeCreateNew,
 			Namespace:    "e2e-test-cluster",
 			StorageClass: "linstor-r1",
-			Cleanup:      false,
 		},
-		SSH: SSH{
-			User:       "test",
-			Host:       "localhost",
-			PrivateKey: "test-key",
-		},
-		KubeConfigPath: "/path/to/kubeconfig",
-		DKPLicenceKey:  "test-key",
-		LogLevel:       "info",
+		ModulesImageTag: "main",
 	}, got)
+}
+
+func TestLoadOverrides(t *testing.T) {
+	for _, k := range []string{
+		"TEST_CLUSTER_NAMESPACE",
+		"E2E_DVP_BASE_CLUSTER_STORAGE_CLASS",
+		"MODULES_MODULE_TAG",
+	} {
+		assert.NoError(t, os.Unsetenv(k))
+	}
+
+	assert.NoError(t, os.Setenv("TEST_CLUSTER_NAMESPACE", "custom-ns"))
+	assert.NoError(t, os.Setenv("E2E_DVP_BASE_CLUSTER_STORAGE_CLASS", "linstor-r1"))
+	assert.NoError(t, os.Setenv("MODULES_MODULE_TAG", "pr-123"))
+
+	got, err := Load()
+	assert.NoError(t, err)
+	assert.Equal(t, &Config{
+		TestCluster: TestCluster{
+			Namespace:    "custom-ns",
+			StorageClass: "linstor-r1",
+		},
+		ModulesImageTag: "pr-123",
+	}, got)
+}
+
+func TestLoadStressDefaults(t *testing.T) {
+	got, err := LoadStress()
+	assert.NoError(t, err)
+	assert.Equal(t, 15, got.Target)
+	assert.Equal(t, 5, got.BatchSize)
+	assert.Equal(t, "1Gi", got.DiskSize)
+	assert.Equal(t, 15, got.MaxVMBlockDevices)
+	assert.False(t, got.Strict)
+	assert.Equal(t, 1, got.MinReady)
+}
+
+func TestLoadStressTargetZero(t *testing.T) {
+	t.Setenv("E2E_STRESS_MAX_VG_TARGET", "0")
+	_, err := LoadStress()
+	assert.Error(t, err)
+}
+
+func TestLoadStressBatchZero(t *testing.T) {
+	t.Setenv("E2E_STRESS_MAX_VG_BATCH_SIZE", "0")
+	_, err := LoadStress()
+	assert.Error(t, err)
+}
+
+func TestLoadStressBadDiskSize(t *testing.T) {
+	t.Setenv("E2E_STRESS_MAX_VG_DISK_SIZE", "notaquantity")
+	_, err := LoadStress()
+	assert.Error(t, err)
+}
+
+func TestLoadStressBatchExceedsTarget(t *testing.T) {
+	t.Setenv("E2E_STRESS_MAX_VG_TARGET", "3")
+	t.Setenv("E2E_STRESS_MAX_VG_BATCH_SIZE", "5")
+	_, err := LoadStress()
+	assert.Error(t, err)
+}
+
+func TestLoadStressTargetClampedToMaxVM(t *testing.T) {
+	t.Setenv("E2E_STRESS_MAX_VG_TARGET", "100")
+	t.Setenv("E2E_STRESS_MAX_VM_BLOCK_DEVICES", "10")
+	got, err := LoadStress()
+	assert.NoError(t, err)
+	assert.Equal(t, 10, got.Target)
+	assert.Equal(t, 10, got.MaxVMBlockDevices)
+}
+
+func TestLoadStressMaxVMClampedToCeiling(t *testing.T) {
+	t.Setenv("E2E_STRESS_MAX_VG_TARGET", "100")
+	t.Setenv("E2E_STRESS_MAX_VM_BLOCK_DEVICES", "50")
+	got, err := LoadStress()
+	assert.NoError(t, err)
+	assert.Equal(t, 16, got.MaxVMBlockDevices)
+	assert.Equal(t, 16, got.Target)
+}
+
+func TestLoadStressStrictMinReady(t *testing.T) {
+	t.Setenv("E2E_STRESS_MAX_VG_STRICT", "true")
+	got, err := LoadStress()
+	assert.NoError(t, err)
+	assert.Equal(t, got.Target, got.MinReady)
 }

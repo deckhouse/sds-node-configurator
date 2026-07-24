@@ -33,6 +33,7 @@ jobs:
       module_slug: sds-node-configurator
       module_path: e2e
       test_package: ./tests/
-      cluster_config: e2e/tests/cluster_config.yml
+      cluster_config: e2e/tests/cluster_config.ci.yml
       cluster_provider: dvp
+      module_image_tag: pr${{ github.event.pull_request.number }}
     secrets: inherit
