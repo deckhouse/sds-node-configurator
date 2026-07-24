@@ -402,6 +402,30 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] successfully got the LV %s actual size", llv.Spec.ActualLVNameOnTheNode))
 	r.log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LV %s in VG: %s has actual size: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, actualSize.String()))
 
+	// A volume created from a snapshot or another LV via `lvcreate -s` inherits the
+	// origin size instead of being created at the requested size. When the requested
+	// (extent-aligned) size is larger, extend the LV now; otherwise the CSI
+	// CreateVolume call waits indefinitely for a size that is never reached.
+	if llv.Spec.Source != nil && actualSize.Value() < alignedRequestSize.Value() {
+		r.log.Info(fmt.Sprintf("[reconcileLLVCreateFunc] the LV %s cloned from source %s has actual size %s, extending to the requested aligned size %s", llv.Spec.ActualLVNameOnTheNode, llv.Spec.Source.Name, actualSize.String(), alignedRequestSize.String()))
+
+		extendCmd, extendErr := r.commands.ExtendLV(alignedRequestSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+		r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] ran cmd: %s", extendCmd))
+		if extendErr != nil {
+			r.log.Error(extendErr, fmt.Sprintf("[reconcileLLVCreateFunc] unable to extend the cloned LV %s to size %s", llv.Spec.ActualLVNameOnTheNode, alignedRequestSize.String()))
+			return true, extendErr
+		}
+
+		extendedLVData, getLVCmd, _, getExtendedLVErr := r.commands.GetLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+		r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] ran cmd: %s", getLVCmd))
+		if getExtendedLVErr != nil {
+			r.log.Warning(fmt.Sprintf("[reconcileLLVCreateFunc] unable to get LV %s info after extension: %s, will retry", llv.Spec.ActualLVNameOnTheNode, getExtendedLVErr.Error()))
+			return true, nil
+		}
+		actualSize = extendedLVData.LVSize
+		r.log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the cloned LV %s in VG: %s has actual size %s after extension", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, actualSize.String()))
+	}
+
 	if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, llv, actualSize); err != nil {
 		return true, err
 	}
