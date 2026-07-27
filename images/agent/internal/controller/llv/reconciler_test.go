@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/mock/gomock"
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,6 +31,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
@@ -209,6 +211,43 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 			v, reason := r.validateLVMLogicalVolume(llv, lvg)
 			if assert.True(t, v) {
 				assert.Equal(t, 0, len(reason))
+			}
+		})
+
+		// Cloning and restoring go through `lvcreate -s`, which is thin-only. The
+		// create path checks the Thick type first, so a Thick LLV carrying a Source
+		// used to produce an empty LV with the source dropped silently — a Created
+		// volume holding no data. It has to be rejected here instead.
+		t.Run("thick_with_source_returns_false", func(t *testing.T) {
+			const lvgName = "test-lvg"
+
+			r := setupReconciler()
+
+			lvg := &v1alpha1.LVMVolumeGroup{
+				ObjectMeta: v1.ObjectMeta{
+					Name: lvgName,
+				},
+				Status: v1alpha1.LVMVolumeGroupStatus{
+					VGSize: resource.MustParse("1Gi"),
+				},
+			}
+
+			llv := &v1alpha1.LVMLogicalVolume{
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					ActualLVNameOnTheNode: "test-lv",
+					Type:                  internal.Thick,
+					Size:                  "10M",
+					LVMVolumeGroupName:    lvgName,
+					Source: &v1alpha1.LVMLogicalVolumeSource{
+						Kind: "LVMLogicalVolumeSnapshot",
+						Name: "some-snapshot",
+					},
+				},
+			}
+
+			v, reason := r.validateLVMLogicalVolume(llv, lvg)
+			if assert.False(t, v) {
+				assert.Equal(t, "Source specified for Thick LV: cloning and restoring are supported for Thin LVs only. ", reason)
 			}
 		})
 
@@ -846,6 +885,298 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 			assert.Error(t, err)
 		})
 	})
+}
+
+const (
+	cloneVGActual  = "test-vg"
+	cloneThinPool  = "test-pool"
+	cloneLLVName   = "restored-llv"
+	cloneLVName    = "restored-lv"
+	cloneSrcName   = "source-llv"
+	cloneSrcLVName = "source-lv"
+)
+
+type clonedVolumeEnv struct {
+	r        *Reconciler
+	cl       client.Client
+	mockCmds *mock_utils.MockCommands
+	lvg      *v1alpha1.LVMVolumeGroup
+	llv      *v1alpha1.LVMLogicalVolume
+}
+
+// newClonedVolumeEnv builds the fixture shared by the clone/restore tests: a thin
+// LVG with a 4Mi extent, a 36Mi source LLV, and a target LLV cloned from it that
+// asks for requestedSize.
+func newClonedVolumeEnv(ctx context.Context, t *testing.T, requestedSize string) *clonedVolumeEnv {
+	t.Helper()
+
+	ctrl := gomock.NewController(t)
+	t.Cleanup(ctrl.Finish)
+
+	mockCmds := mock_utils.NewMockCommands(ctrl)
+	cl := test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{})
+	r := NewReconciler(cl, logger.Logger{}, monitoring.GetMetrics(""), cache.New(), mockCmds, ReconcilerConfig{})
+
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "test-lvg"},
+		Spec: v1alpha1.LVMVolumeGroupSpec{
+			ActualVGNameOnTheNode: cloneVGActual,
+			Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: "node-1"},
+		},
+		Status: v1alpha1.LVMVolumeGroupStatus{
+			ExtentSize: resource.MustParse("4Mi"),
+			ThinPools: []v1alpha1.LVMVolumeGroupThinPoolStatus{
+				{
+					Name:            cloneThinPool,
+					ActualSize:      resource.MustParse("1Gi"),
+					AvailableSpace:  resource.MustParse("1Gi"),
+					AllocationLimit: "150%",
+				},
+			},
+		},
+	}
+
+	sourceLLV := &v1alpha1.LVMLogicalVolume{
+		ObjectMeta: v1.ObjectMeta{Name: cloneSrcName},
+		Spec: v1alpha1.LVMLogicalVolumeSpec{
+			ActualLVNameOnTheNode: cloneSrcLVName,
+			Type:                  internal.Thin,
+			LVMVolumeGroupName:    lvg.Name,
+			Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: cloneThinPool},
+			Size:                  "36Mi",
+		},
+	}
+	assert.NoError(t, cl.Create(ctx, sourceLLV))
+
+	llv := &v1alpha1.LVMLogicalVolume{
+		ObjectMeta: v1.ObjectMeta{Name: cloneLLVName},
+		Spec: v1alpha1.LVMLogicalVolumeSpec{
+			ActualLVNameOnTheNode: cloneLVName,
+			Type:                  internal.Thin,
+			LVMVolumeGroupName:    lvg.Name,
+			Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: cloneThinPool},
+			Size:                  requestedSize,
+			Source:                &v1alpha1.LVMLogicalVolumeSource{Kind: "LVMLogicalVolume", Name: cloneSrcName},
+		},
+		Status: &v1alpha1.LVMLogicalVolumeStatus{Phase: v1alpha1.PhasePending},
+	}
+	assert.NoError(t, cl.Create(ctx, llv))
+
+	return &clonedVolumeEnv{r: r, cl: cl, mockCmds: mockCmds, lvg: lvg, llv: llv}
+}
+
+func (e *clonedVolumeEnv) expectClone() *gomock.Call {
+	return e.mockCmds.EXPECT().
+		CreateThinLogicalVolumeFromSource(cloneLVName, cloneVGActual, cloneSrcLVName).
+		Return("lvcreate -s", nil).
+		Times(1)
+}
+
+func (e *clonedVolumeEnv) expectGetLV(size resource.Quantity) *gomock.Call {
+	return e.mockCmds.EXPECT().
+		GetLV(cloneVGActual, cloneLVName).
+		Return(internal.LVData{LVName: cloneLVName, VGName: cloneVGActual, LVSize: size}, "lvs", bytes.Buffer{}, nil).
+		Times(1)
+}
+
+func (e *clonedVolumeEnv) expectExtendLV(size resource.Quantity) *gomock.Call {
+	return e.mockCmds.EXPECT().
+		ExtendLV(size.Value(), cloneVGActual, cloneLVName).
+		Return("lvextend", nil).
+		Times(1)
+}
+
+// seedCachedLV puts the LV into the scan cache, which is where the update path
+// reads the pre-extension size from (the create path goes straight to LVM
+// instead, because the cache has not seen the LV yet).
+func (e *clonedVolumeEnv) seedCachedLV(size resource.Quantity) {
+	e.r.sdsCache.StoreLVs(
+		[]internal.LVData{{LVName: cloneLVName, VGName: cloneVGActual, LVSize: size}},
+		bytes.Buffer{},
+	)
+}
+
+// TestReconcileLLVCreateFunc_ClonedVolumeExtendedToRequestedSize pins the fix
+// for restore/clone from a snapshot or another LV: `lvcreate -s` produces an LV
+// of the origin size, not the requested size. When the requested (extent-aligned)
+// size is larger, the create path must extend the LV before reporting Created —
+// otherwise the CSI CreateVolume call waits forever for a size that never
+// materialises and the PVC stays Pending.
+func TestReconcileLLVCreateFunc_ClonedVolumeExtendedToRequestedSize(t *testing.T) {
+	ctx := context.Background()
+
+	originSize := resource.MustParse("36Mi")    // size the clone inherits from the origin LV
+	requestedSize := resource.MustParse("52Mi") // PVC-requested size, already a multiple of the 4Mi extent
+
+	env := newClonedVolumeEnv(ctx, t, "52Mi")
+
+	gomock.InOrder(
+		env.expectClone(),
+		// right after the clone the LV still reports the origin size
+		env.expectGetLV(originSize),
+		// the clone must be extended to the requested (aligned) size
+		env.mockCmds.EXPECT().
+			ExtendLV(requestedSize.Value(), cloneVGActual, cloneLVName).
+			Return("lvextend", nil).
+			Times(1),
+		// after the extension the LV reports the requested size
+		env.expectGetLV(requestedSize),
+	)
+
+	shouldRequeue, err := env.r.reconcileLLVCreateFunc(ctx, env.llv, env.lvg)
+	assert.NoError(t, err)
+	assert.False(t, shouldRequeue)
+
+	updated := &v1alpha1.LVMLogicalVolume{}
+	assert.NoError(t, env.cl.Get(ctx, client.ObjectKey{Name: cloneLLVName}, updated))
+	assert.Equal(t, v1alpha1.PhaseCreated, updated.Status.Phase)
+	assert.Equal(t, requestedSize.Value(), updated.Status.ActualSize.Value())
+}
+
+// TestReconcileLLVCreateFunc_ClonedVolumeNotExtendedWhenAlreadyLargeEnough
+// guards the other direction: a same-size (or smaller) restore must not touch
+// lvextend at all. The strict mock fails the test on any unexpected ExtendLV.
+func TestReconcileLLVCreateFunc_ClonedVolumeNotExtendedWhenAlreadyLargeEnough(t *testing.T) {
+	ctx := context.Background()
+
+	originSize := resource.MustParse("36Mi")
+
+	env := newClonedVolumeEnv(ctx, t, "36Mi")
+
+	gomock.InOrder(
+		env.expectClone(),
+		env.expectGetLV(originSize),
+	)
+
+	shouldRequeue, err := env.r.reconcileLLVCreateFunc(ctx, env.llv, env.lvg)
+	assert.NoError(t, err)
+	assert.False(t, shouldRequeue)
+
+	updated := &v1alpha1.LVMLogicalVolume{}
+	assert.NoError(t, env.cl.Get(ctx, client.ObjectKey{Name: cloneLLVName}, updated))
+	assert.Equal(t, v1alpha1.PhaseCreated, updated.Status.Phase)
+	assert.Equal(t, originSize.Value(), updated.Status.ActualSize.Value())
+}
+
+// TestReconcileLLVCreateFunc_ClonedVolumeExtensionNotConfirmed covers the case
+// that makes verifying the post-extension size mandatory: ExtendLV reports
+// success while the LV did not actually grow (LVM's "No size change." is
+// filtered out as benign, so a no-op resize is indistinguishable from a real
+// one at the command level). The LLV must NOT be moved to Created at the origin
+// size — that would strand the CSI caller waiting for a size that is never
+// reached, with no further reconcile scheduled.
+func TestReconcileLLVCreateFunc_ClonedVolumeExtensionNotConfirmed(t *testing.T) {
+	ctx := context.Background()
+
+	originSize := resource.MustParse("36Mi")
+	requestedSize := resource.MustParse("52Mi")
+
+	env := newClonedVolumeEnv(ctx, t, "52Mi")
+
+	gomock.InOrder(
+		env.expectClone(),
+		env.expectGetLV(originSize),
+		env.mockCmds.EXPECT().
+			ExtendLV(requestedSize.Value(), cloneVGActual, cloneLVName).
+			Return("lvextend", nil).
+			Times(1),
+		// LVM still reports the origin size: the extension was not effective
+		env.expectGetLV(originSize),
+	)
+
+	shouldRequeue, err := env.r.reconcileLLVCreateFunc(ctx, env.llv, env.lvg)
+	assert.NoError(t, err)
+	assert.True(t, shouldRequeue)
+
+	assert.Equal(t, v1alpha1.PhasePending, env.llv.Status.Phase)
+
+	stored := &v1alpha1.LVMLogicalVolume{}
+	assert.NoError(t, env.cl.Get(ctx, client.ObjectKey{Name: cloneLLVName}, stored))
+	if stored.Status != nil {
+		assert.NotEqual(t, v1alpha1.PhaseCreated, stored.Status.Phase)
+	}
+}
+
+// TestReconcileLLVUpdateFunc_ExtendsToTheAlignedRequestedSize pins the resize
+// path onto the extent-aligned size rather than the raw Spec.Size. LVM rounds
+// `lvextend -L` up to the extent boundary anyway, so the resulting LV is the
+// same either way — but the size the reconciler then verifies against, and the
+// ActualSize it publishes, have to be the rounded one. Verifying against the
+// raw request would keep the LLV out of Created forever whenever Spec.Size is
+// not a multiple of the extent.
+func TestReconcileLLVUpdateFunc_ExtendsToTheAlignedRequestedSize(t *testing.T) {
+	ctx := context.Background()
+
+	currentSize := resource.MustParse("36Mi")
+	// 50Mi is not a multiple of the 4Mi extent, the LV can only reach 52Mi
+	alignedSize := resource.MustParse("52Mi")
+
+	env := newClonedVolumeEnv(ctx, t, "50Mi")
+	env.seedCachedLV(currentSize)
+
+	gomock.InOrder(
+		env.expectExtendLV(alignedSize),
+		env.expectGetLV(alignedSize),
+	)
+
+	shouldRequeue, err := env.r.reconcileLLVUpdateFunc(ctx, env.llv, env.lvg)
+	assert.NoError(t, err)
+	assert.False(t, shouldRequeue)
+
+	updated := &v1alpha1.LVMLogicalVolume{}
+	assert.NoError(t, env.cl.Get(ctx, client.ObjectKey{Name: cloneLLVName}, updated))
+	assert.Equal(t, v1alpha1.PhaseCreated, updated.Status.Phase)
+	assert.Equal(t, alignedSize.Value(), updated.Status.ActualSize.Value())
+}
+
+// TestReconcileLLVUpdateFunc_RequeuesWhenExtensionNotConfirmed is the resize-path
+// counterpart of the create-path test above: a no-op lvextend is reported as
+// success, so the LLV must stay out of Created until LVM confirms the new size.
+func TestReconcileLLVUpdateFunc_RequeuesWhenExtensionNotConfirmed(t *testing.T) {
+	ctx := context.Background()
+
+	currentSize := resource.MustParse("36Mi")
+	requestedSize := resource.MustParse("52Mi")
+
+	env := newClonedVolumeEnv(ctx, t, "52Mi")
+	env.seedCachedLV(currentSize)
+
+	gomock.InOrder(
+		env.expectExtendLV(requestedSize),
+		// LVM still reports the pre-extension size
+		env.expectGetLV(currentSize),
+	)
+
+	shouldRequeue, err := env.r.reconcileLLVUpdateFunc(ctx, env.llv, env.lvg)
+	assert.NoError(t, err)
+	assert.True(t, shouldRequeue)
+
+	stored := &v1alpha1.LVMLogicalVolume{}
+	assert.NoError(t, env.cl.Get(ctx, client.ObjectKey{Name: cloneLLVName}, stored))
+	assert.Equal(t, v1alpha1.PhaseResizing, stored.Status.Phase)
+	assert.NotEqual(t, requestedSize.Value(), stored.Status.ActualSize.Value())
+}
+
+// TestReconcileLLVUpdateFunc_NoExtendWhenAlreadyLargeEnough guards the branch a
+// restored volume lands in once the create path has already grown it: the LV is
+// big enough, so lvextend must not run again. The strict mock fails the test on
+// any unexpected ExtendLV.
+func TestReconcileLLVUpdateFunc_NoExtendWhenAlreadyLargeEnough(t *testing.T) {
+	ctx := context.Background()
+
+	currentSize := resource.MustParse("52Mi")
+
+	env := newClonedVolumeEnv(ctx, t, "52Mi")
+	env.seedCachedLV(currentSize)
+
+	shouldRequeue, err := env.r.reconcileLLVUpdateFunc(ctx, env.llv, env.lvg)
+	assert.NoError(t, err)
+	assert.False(t, shouldRequeue)
+
+	updated := &v1alpha1.LVMLogicalVolume{}
+	assert.NoError(t, env.cl.Get(ctx, client.ObjectKey{Name: cloneLLVName}, updated))
+	assert.Equal(t, v1alpha1.PhaseCreated, updated.Status.Phase)
+	assert.Equal(t, currentSize.Value(), updated.Status.ActualSize.Value())
 }
 
 func setupReconciler() *Reconciler {

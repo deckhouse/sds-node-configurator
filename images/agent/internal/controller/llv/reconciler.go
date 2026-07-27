@@ -402,6 +402,20 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 	r.log.Debug(fmt.Sprintf("[reconcileLLVCreateFunc] successfully got the LV %s actual size", llv.Spec.ActualLVNameOnTheNode))
 	r.log.Trace(fmt.Sprintf("[reconcileLLVCreateFunc] the LV %s in VG: %s has actual size: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, actualSize.String()))
 
+	// A thin volume created from a snapshot or another LV via `lvcreate -s` inherits
+	// the origin size instead of being created at the requested size. When the
+	// requested (extent-aligned) size is larger, extend the LV now; otherwise the CSI
+	// CreateVolume call waits indefinitely for a size that is never reached.
+	if llv.Spec.Type == internal.Thin && llv.Spec.Source != nil && actualSize.Value() < alignedRequestSize.Value() {
+		r.log.Info(fmt.Sprintf("[reconcileLLVCreateFunc] the LV %s cloned from source %s has actual size %s, extending to the requested aligned size %s", llv.Spec.ActualLVNameOnTheNode, llv.Spec.Source.Name, actualSize.String(), alignedRequestSize.String()))
+
+		extendedSize, shouldRequeue, extendErr := r.extendLVToSize("reconcileLLVCreateFunc", llv, lvg, alignedRequestSize)
+		if shouldRequeue {
+			return true, extendErr
+		}
+		actualSize = extendedSize
+	}
+
 	if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, llv, actualSize); err != nil {
 		return true, err
 	}
@@ -488,31 +502,11 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 		return true, err
 	}
 
-	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s of the LVMLogicalVolume %s will be extended with size: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, llvRequestSize.String()))
-	cmd, err := r.commands.ExtendLV(llvRequestSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] runs cmd: %s", cmd))
-	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to ExtendLV, name: %s, type: %s", llv.Spec.ActualLVNameOnTheNode, llv.Spec.Type))
+	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s of the LVMLogicalVolume %s will be extended to size: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, alignedRequestSize.String()))
+	newActualSize, shouldRequeue, err := r.extendLVToSize("reconcileLLVUpdateFunc", llv, lvg, alignedRequestSize)
+	if shouldRequeue {
 		return true, err
 	}
-
-	r.log.Info(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully extended LV %s in VG %s for LVMLogicalVolume resource with name: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Name))
-
-	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] tries to get LVMLogicalVolume %s actual size after the extension directly from LVM", llv.Name))
-	lvData, getLVCmd, _, getLVErr := r.commands.GetLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] ran cmd: %s", getLVCmd))
-	if getLVErr != nil {
-		r.log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] unable to get LV %s info from LVM after extension: %s, will retry", llv.Spec.ActualLVNameOnTheNode, getLVErr.Error()))
-		return true, nil
-	}
-	newActualSize := lvData.LVSize
-	if newActualSize.Value() == 0 || newActualSize.Value() == actualSize.Value() {
-		r.log.Warning(fmt.Sprintf("[reconcileLLVUpdateFunc] LV %s of the LVMLogicalVolume %s was extended but LVM still reports old size %s, will retry", llv.Spec.ActualLVNameOnTheNode, llv.Name, newActualSize.String()))
-		return true, nil
-	}
-
-	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully got LVMLogicalVolume %s actual size before the extension", llv.Name))
-	r.log.Trace(fmt.Sprintf("[reconcileLLVUpdateFunc] the LV %s in VG %s actual size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, newActualSize.String()))
 
 	// need this here as a user might create the LLV with existing LV
 	if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, llv, newActualSize); err != nil {
@@ -521,6 +515,52 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 
 	r.log.Info(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully ended reconciliation for the LVMLogicalVolume %s", llv.Name))
 	return false, nil
+}
+
+// extendLVToSize grows the LV of the given LVMLogicalVolume to alignedSize and
+// returns the size LVM reports afterwards.
+//
+// The size is re-read and validated instead of being assumed, because ExtendLV
+// reports a no-op resize as success: LVM signals it on stderr ("No size change.",
+// "New size (...) matches existing size (...)") and filterStdErr deliberately
+// treats those lines as benign. Handing an unverified size to
+// UpdatePhaseToCreatedIfNeeded would move the LLV to Created at the wrong size
+// with no further reconcile scheduled, and the CSI caller would then wait
+// forever for a size that never materialises.
+//
+// The returned flag means "requeue"; it is set both on a hard error (returned as
+// the third value) and when the extension simply could not be confirmed yet.
+func (r *Reconciler) extendLVToSize(
+	caller string,
+	llv *v1alpha1.LVMLogicalVolume,
+	lvg *v1alpha1.LVMVolumeGroup,
+	alignedSize resource.Quantity,
+) (resource.Quantity, bool, error) {
+	cmd, err := r.commands.ExtendLV(alignedSize.Value(), lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+	r.log.Debug(fmt.Sprintf("[%s] ran cmd: %s", caller, cmd))
+	if err != nil {
+		r.log.Error(err, fmt.Sprintf("[%s] unable to extend the LV %s of the LVMLogicalVolume %s to size %s, type: %s", caller, llv.Spec.ActualLVNameOnTheNode, llv.Name, alignedSize.String(), llv.Spec.Type))
+		return resource.Quantity{}, true, err
+	}
+
+	r.log.Info(fmt.Sprintf("[%s] successfully extended LV %s in VG %s for LVMLogicalVolume resource with name: %s", caller, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Name))
+
+	r.log.Debug(fmt.Sprintf("[%s] tries to get LVMLogicalVolume %s actual size after the extension directly from LVM", caller, llv.Name))
+	lvData, getLVCmd, _, getLVErr := r.commands.GetLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
+	r.log.Debug(fmt.Sprintf("[%s] ran cmd: %s", caller, getLVCmd))
+	if getLVErr != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to get LV %s info from LVM after the extension: %s, will retry", caller, llv.Spec.ActualLVNameOnTheNode, getLVErr.Error()))
+		return resource.Quantity{}, true, nil
+	}
+
+	newActualSize := lvData.LVSize
+	if newActualSize.Value() < alignedSize.Value() {
+		r.log.Warning(fmt.Sprintf("[%s] LV %s of the LVMLogicalVolume %s was extended but LVM still reports size %s which is less than the requested %s, will retry", caller, llv.Spec.ActualLVNameOnTheNode, llv.Name, newActualSize.String(), alignedSize.String()))
+		return resource.Quantity{}, true, nil
+	}
+
+	r.log.Trace(fmt.Sprintf("[%s] the LV %s in VG %s has actual size %s after the extension", caller, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, newActualSize.String()))
+	return newActualSize, false, nil
 }
 
 func (r *Reconciler) reconcileLLVDeleteFunc(
@@ -739,6 +779,14 @@ func (r *Reconciler) validateLVMLogicalVolume(llv *v1alpha1.LVMLogicalVolume, lv
 	case internal.Thick:
 		if llv.Spec.Thin != nil {
 			reason.WriteString("Thin pool specified for Thick LV. ")
+		}
+
+		// Cloning and restoring are done with `lvcreate -s`, which exists for thin
+		// volumes only. Without this check the create path falls into its Thick
+		// branch, produces an empty LV and drops the source silently, leaving the
+		// user with a volume that reports Created but holds no data.
+		if llv.Spec.Source != nil {
+			reason.WriteString("Source specified for Thick LV: cloning and restoring are supported for Thin LVs only. ")
 		}
 	}
 
