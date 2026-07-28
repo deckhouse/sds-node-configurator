@@ -938,7 +938,11 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 					addingThinPoolSize += alignedTpSize.Value()
 				} else {
 					r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] thin-pool %s of the LVMVolumeGroup %s is already created, check its requested size", specTp.Name, lvg.Name))
-					if alignedTpSize.Value() < actualThinPool.LVSize.Value() {
+					// LVM rounds a freshly created thin-pool data LV up by up to one extent, so
+					// flag a shrink only when the actual pool exceeds the aligned request by MORE
+					// than one extent — otherwise the LVG loops "is not valid" forever.
+					extentSize := extentSizeForThinPoolAlign(lvg, vg)
+					if actualThinPool.LVSize.Value()-alignedTpSize.Value() > extentSize.Value() {
 						r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] the LVMVolumeGroup %s Spec.ThinPool %s size %s is less than Status one: %s", lvg.Name, specTp.Name, tpRequestedSize.String(), actualThinPool.LVSize.String()))
 						reason.WriteString(fmt.Sprintf("Requested Spec.ThinPool %s size %s is less than actual one %s. ", specTp.Name, tpRequestedSize.String(), actualThinPool.LVSize.String()))
 						continue
