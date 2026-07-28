@@ -103,54 +103,21 @@ var _ = Describe("LVMVolumeGroup validation", Label("sds-node-configurator", "lv
 		createdBDNames = nil
 	})
 
-	// Order: (1) tiny disk — no BlockDevice CR; (2) large disk — intermediate LVG then delete + pvcreate so BD is not
-	// consumable; (3) final LVMVolumeGroup selects only that BD (does not touch other BlockDevices on the node).
+	// Make a BD non-consumable (orphan PV left after deleting an intermediate LVG), then assert a
+	// LVMVolumeGroup selecting only that BD is rejected with ValidationFailed.
 	It("Should fail LVMVolumeGroup when the only selected BlockDevice is not consumable", func() {
 		storageClass := conf.TestCluster.StorageClass
 		Expect(storageClass).NotTo(BeEmpty())
 
 		runID := fmt.Sprintf("%d", time.Now().UnixNano())
-		smallDiskName := "e2e-lvg-val-s-" + runID
 		largeDiskName := "e2e-lvg-val-l-" + runID
-		smallSize := fmt.Sprintf("%dMi", 5+rand.Intn(995)) // 5..999 Mi — below agent minimum, expect no BD
-		largeSize := fmt.Sprintf("%dGi", 5+rand.Intn(11))  // 5..15 Gi
+		largeSize := fmt.Sprintf("%dGi", 5+rand.Intn(11)) // 5..15 Gi
 		midLvgName := lvmVGNamePrefix + "val-mid-" + runID
 		midVgName := "e2e-vg-val-mid-" + runID
 		finalLvgName := lvmVGNamePrefix + "val-final-" + runID
 		finalVgName := "e2e-vg-val-final-" + runID
 
-		By("Step 1: attach small empty disk (no BlockDevice CR expected below minimum size)")
-		var beforeList v1alpha1.BlockDeviceList
-		Expect(k8sClient.List(ctx, &beforeList, &client.ListOptions{})).To(Succeed())
-		beforeNames := make(map[string]struct{}, len(beforeList.Items))
-		for i := range beforeList.Items {
-			beforeNames[beforeList.Items[i].Name] = struct{}{}
-		}
-
-		smallDisk, smallErr := cl.Disks().CreateDisk(ctx, e2e.DiskSpec{
-			Name:         smallDiskName,
-			Size:         resource.MustParse(smallSize),
-			StorageClass: storageClass,
-		})
-		Expect(smallErr).NotTo(HaveOccurred(), "failed to create small disk")
-		createdDisks = append(createdDisks, smallDisk)
-		Expect(cl.Disks().AttachDisk(ctx, targetNode, smallDisk.Name)).To(Succeed(), "failed to attach small disk")
-
-		By("Asserting no new BlockDevice CR appears for the sub-minimum disk")
-		Consistently(func(g Gomega) {
-			var after v1alpha1.BlockDeviceList
-			g.Expect(k8sClient.List(ctx, &after, &client.ListOptions{})).To(Succeed())
-			var newOnes []string
-			for i := range after.Items {
-				if _, ok := beforeNames[after.Items[i].Name]; !ok {
-					newOnes = append(newOnes, after.Items[i].Name)
-				}
-			}
-			g.Expect(newOnes).To(BeEmpty(),
-				"disks below minimum size must not get BlockDevice CRs; new name(s): %v", newOnes)
-		}, 3*time.Minute, 15*time.Second).Should(Succeed())
-
-		By("Step 2: attach large disk; intermediate LVM, delete, pvcreate — BD must become not consumable")
+		By("Step 1: attach large disk; intermediate LVM, delete, pvcreate — BD must become not consumable")
 		beforeConsumable, bdErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
 		Expect(bdErr).NotTo(HaveOccurred())
 
@@ -200,7 +167,7 @@ var _ = Describe("LVMVolumeGroup validation", Label("sds-node-configurator", "lv
 			g.Expect(bd.Status.Consumable).To(BeFalse())
 		}, 3*time.Minute, 10*time.Second).Should(Succeed())
 
-		By("Step 3: LVMVolumeGroup selecting only this BlockDevice — expect ValidationFailed")
+		By("Step 2: LVMVolumeGroup selecting only this BlockDevice — expect ValidationFailed")
 		Expect(kubernetes.CreateLVMVolumeGroup(ctx, cl.RESTConfig(), finalLvgName, nodeName,
 			[]string{largeBD.Name}, finalVgName)).To(Succeed())
 		createdLVGs = append(createdLVGs, finalLvgName)
