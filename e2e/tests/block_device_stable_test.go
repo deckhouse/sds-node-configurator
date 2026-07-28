@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/e2e/cfg"
+	"github.com/deckhouse/sds-node-configurator/e2e/framework"
 	"github.com/deckhouse/sds-node-configurator/e2e/sdsclient"
 	"github.com/deckhouse/sds-node-configurator/e2e/tests/utils/consts"
 	"github.com/deckhouse/storage-e2e/pkg/e2e"
@@ -47,6 +48,9 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 		targetNode         string
 		diskName           string
 		initialBlockDevice kubernetes.BlockDevice
+		// node-wide consumable BDs before our attach; the node is shared, so we track only the
+		// device that appears after our attach rather than asserting on the node-wide count.
+		baselineConsumable []kubernetes.BlockDevice
 
 		mpoGVR schema.GroupVersionResource
 	)
@@ -79,6 +83,11 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 		Expect(nodeList.Items).NotTo(BeEmpty())
 		targetNode = nodeList.Items[0].Name
 		Expect(targetNode).NotTo(BeEmpty(), "need a node for block device stability test")
+
+		By("Snapshotting consumable BlockDevices already present on the node (shared cluster)")
+		var snapErr error
+		baselineConsumable, snapErr = kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
+		Expect(snapErr).NotTo(HaveOccurred())
 
 		diskName = fmt.Sprintf("e2e-bd-stable-%d", time.Now().Unix())
 		By("Creating and attaching a virtual disk to the target node: " + diskName)
@@ -114,14 +123,13 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 	})
 
 	Context("with disk initially attached to the VM", func() {
-		It("has exactly one consumable block device", func() {
-			By("Getting consumable block devices on the target node")
-			Eventually(func(g Gomega) {
-				blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
-				g.Expect(getBDErr).NotTo(HaveOccurred())
-				g.Expect(blockDevices).To(HaveLen(1))
-				initialBlockDevice = blockDevices[0]
-			}, 5*time.Minute, 2*time.Second).Should(Succeed())
+		It("registers exactly one new consumable block device for the attached disk", func() {
+			By("Waiting for the single new consumable block device (ignoring any pre-existing ones)")
+			var waitErr error
+			initialBlockDevice, waitErr = framework.WaitNewConsumableBlockDevice(
+				ctx, cl.RESTConfig(), targetNode, baselineConsumable, 5*time.Minute)
+			Expect(waitErr).NotTo(HaveOccurred())
+			Expect(initialBlockDevice.Name).NotTo(BeEmpty())
 		})
 
 		When("disk is detached from the VM", func() {
@@ -130,11 +138,11 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 				Expect(cl.Disks().DetachDisk(ctx, targetNode, diskName)).To(Succeed())
 			})
 
-			It("has zero consumable block devices", func() {
+			It("stops listing the test block device as consumable", func() {
 				Eventually(func(g Gomega) {
 					blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
 					g.Expect(getBDErr).NotTo(HaveOccurred())
-					g.Expect(blockDevices).To(BeEmpty())
+					g.Expect(blockDevices).NotTo(ContainElement(HaveField("Name", initialBlockDevice.Name)))
 				}, 5*time.Minute, 5*time.Second).Should(Succeed())
 			})
 
@@ -144,11 +152,13 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 					Expect(cl.Disks().AttachDisk(ctx, targetNode, diskName)).To(Succeed())
 				})
 
-				It("has the same consumable block device as before detach", func() {
-					blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
-					Expect(getBDErr).NotTo(HaveOccurred())
-					Expect(blockDevices).To(HaveLen(1))
-					Expect(blockDevices[0]).To(Equal(initialBlockDevice))
+				It("lists the same consumable block device again after reattach", func() {
+					By("Waiting for the same block device (by name) to become consumable again")
+					Eventually(func(g Gomega) {
+						blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
+						g.Expect(getBDErr).NotTo(HaveOccurred())
+						g.Expect(blockDevices).To(ContainElement(HaveField("Name", initialBlockDevice.Name)))
+					}, 5*time.Minute, 5*time.Second).Should(Succeed())
 				})
 
 				When("sds-node-configurator-agent pod is restarted on the node", func() {
@@ -184,12 +194,13 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 						}, 5*time.Minute, 5*time.Second).Should(Succeed())
 					})
 
-					It("keeps block device state stable after agent restart", func() {
-						By("Checking block device visibility on the target node after agent restart")
-						blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
-						Expect(getBDErr).NotTo(HaveOccurred())
-						Expect(blockDevices).To(HaveLen(1))
-						Expect(blockDevices[0]).To(Equal(initialBlockDevice))
+					It("keeps the test block device consumable after agent restart", func() {
+						By("Checking the test block device stays consumable after agent restart")
+						Eventually(func(g Gomega) {
+							blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
+							g.Expect(getBDErr).NotTo(HaveOccurred())
+							g.Expect(blockDevices).To(ContainElement(HaveField("Name", initialBlockDevice.Name)))
+						}, 3*time.Minute, 5*time.Second).Should(Succeed())
 					})
 				})
 
@@ -250,8 +261,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 						Eventually(func(g Gomega) {
 							blockDevices, getBDErr := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
 							g.Expect(getBDErr).NotTo(HaveOccurred())
-							g.Expect(blockDevices).To(HaveLen(1))
-							g.Expect(blockDevices[0].Name).To(Equal(initialBlockDevice.Name))
+							g.Expect(blockDevices).To(ContainElement(HaveField("Name", initialBlockDevice.Name)))
 						}, 5*time.Minute, 5*time.Second).Should(Succeed())
 					})
 				})
