@@ -220,49 +220,39 @@ var _ = Describe("BlockDevice discovery", Label("sds-node-configurator", "block-
 				"node %s: consumable BD count must be >= attached count %d, got %d", node, want, len(bds))
 		}
 
-		// OS cross-check (replaces SSH lsblk): assert each BD's device path is present in on-node lsblk with a
-		// matching serial and a size >= requested. framework.LsblkLine carries no wwn/model/partUUID, so those are not
-		// cross-checked here — the name-formula assertion above already validates them via BD.Status.
-		By("Cross-checking discovered BlockDevices against on-node lsblk")
-		lsblkByNode := make(map[string][]framework.LsblkLine, len(countByNode))
-		for node := range countByNode {
-			out, lsblkErr := framework.NodeExecChecked(ctx, cl, node, "lsblk -b -P -o NAME,SIZE,SERIAL,PATH -n")
-			Expect(lsblkErr).NotTo(HaveOccurred(), "lsblk on node %s", node)
-			parsed := framework.ParseLsblk(out)
-			lines := make([]framework.LsblkLine, 0, len(parsed))
-			for _, l := range parsed {
-				lines = append(lines, l)
+		// Cross-check by SERIAL under sudo. On some node OSes (e.g. RED OS) lsblk's SERIAL column is
+		// empty for a non-root user while the agent (root) still populates BD.Status.Serial, so a
+		// non-root read spuriously mismatched and flaked whenever such a node was picked. Match by
+		// serial, not /dev path: SCSI names churn on hotplug, but serial is the stable BD identity.
+		By("Cross-checking discovered BlockDevices against on-node lsblk (by serial)")
+		lsblkBySerial := func(node, serial string) (framework.LsblkLine, bool, error) {
+			out, lsblkErr := framework.NodeExecChecked(ctx, cl, node, "sudo lsblk -b -P -o NAME,SIZE,SERIAL,PATH -n")
+			if lsblkErr != nil {
+				return framework.LsblkLine{}, false, lsblkErr
 			}
-			lsblkByNode[node] = lines
+			for _, l := range framework.ParseLsblk(out) {
+				if strings.TrimSpace(l.Serial) == serial {
+					return l, true, nil
+				}
+			}
+			return framework.LsblkLine{}, false, nil
 		}
 		for i := range attached {
 			d := attached[i]
 			var bd v1alpha1.BlockDevice
 			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: d.bdName}, &bd)).
 				To(Succeed(), "get BlockDevice %s", d.bdName)
+			serial := strings.TrimSpace(bd.Status.Serial)
+			Expect(serial).NotTo(BeEmpty(), "BD %s must have a non-empty Status.Serial", bd.Name)
 
-			var line *framework.LsblkLine
-			for j := range lsblkByNode[d.node] {
-				if lsblkByNode[d.node][j].Path == bd.Status.Path {
-					line = &lsblkByNode[d.node][j]
-					break
-				}
-			}
-			Expect(line).NotTo(BeNil(),
-				"device path %s of BD %s must be present in lsblk on node %s", bd.Status.Path, bd.Name, d.node)
-
-			expectedSerial := line.Serial
-			if expectedSerial == "" {
-				devName := strings.TrimPrefix(bd.Status.Path, "/dev/")
-				sysSerial, sysErr := framework.NodeExecChecked(ctx, cl, d.node,
-					fmt.Sprintf("cat /sys/block/%s/serial 2>/dev/null || true", devName))
-				Expect(sysErr).NotTo(HaveOccurred(), "read /sys/block/%s/serial on node %s", devName, d.node)
-				expectedSerial = strings.TrimSpace(sysSerial)
-			}
-			Expect(expectedSerial).To(Equal(bd.Status.Serial),
-				"serial for %s (lsblk or /sys fallback) must match BD.Status.Serial (%s)", bd.Status.Path, bd.Status.Serial)
-			Expect(line.SizeBytes).To(BeNumerically(">=", d.reqSize.Value()),
-				"lsblk size for %s must be >= requested %s, got %d bytes", bd.Status.Path, d.reqSize.String(), line.SizeBytes)
+			Eventually(func(g Gomega) {
+				line, ok, execErr := lsblkBySerial(d.node, serial)
+				g.Expect(execErr).NotTo(HaveOccurred(), "lsblk on node %s", d.node)
+				g.Expect(ok).To(BeTrue(),
+					"a disk with BD %s serial %s must be present on node %s (sudo lsblk, matched by serial)", bd.Name, serial, d.node)
+				g.Expect(line.SizeBytes).To(BeNumerically(">=", d.reqSize.Value()),
+					"lsblk size for serial %s must be >= requested %s, got %d bytes", serial, d.reqSize.String(), line.SizeBytes)
+			}, 90*time.Second, 3*time.Second).Should(Succeed())
 		}
 	})
 })
