@@ -1,6 +1,7 @@
 # Use default gitleaks rules + module allowlist (incl. xxhash.h false positive)
 [extend]
-useDefault = true
+useDefault = false
+path = "gitleaks.base.toml"
 
 [allowlist]
 paths = [
