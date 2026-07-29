@@ -38,7 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var _ = Describe("Block device stability with explicit lifecycle stages", Label("sds-node-configurator", "block-device-stable"), Ordered, ContinueOnFailure, func() {
+var _ = Describe("Block device stability with explicit lifecycle stages", Label("sds-node-configurator", "block-device", "stable"), Ordered, ContinueOnFailure, func() {
 	var (
 		ctx       context.Context
 		conf      *cfg.Config
@@ -48,8 +48,6 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 		targetNode         string
 		diskName           string
 		initialBlockDevice kubernetes.BlockDevice
-		// node-wide consumable BDs before our attach; the node is shared, so we track only the
-		// device that appears after our attach rather than asserting on the node-wide count.
 		baselineConsumable []kubernetes.BlockDevice
 
 		mpoGVR schema.GroupVersionResource

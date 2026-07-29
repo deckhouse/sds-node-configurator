@@ -563,10 +563,11 @@ func getTotalAvailableSpace(ctx context.Context, cl client.Client, lvgs []*v1alp
 	return total
 }
 
-// getMaxVGFreeAcrossLVGs returns the largest VGFree among Ready e2e LVMVolumeGroups. A single PVC is satisfied by
-// one LVG on one node — sum(VGFree) over the cluster can exceed this (fragmented free space after prior tests).
-func getMaxVGFreeAcrossLVGs(ctx context.Context, cl client.Client, lvgs []*v1alpha1.LVMVolumeGroup) int64 {
-	var maxFree int64
+// getPerLVGFree returns the current VGFree (bytes) of each Ready e2e LVMVolumeGroup — the per-LVG
+// budget the consolidated-fill planner packs against. Thick volumes are bin-packed per LVG (each PVC
+// must fit one LVG on one node), so planning from a summed pool is wrong when VGFree differs per node.
+func getPerLVGFree(ctx context.Context, cl client.Client, lvgs []*v1alpha1.LVMVolumeGroup) []int64 {
+	var free []int64
 	for _, lvg := range lvgs {
 		var current v1alpha1.LVMVolumeGroup
 		if err := cl.Get(ctx, client.ObjectKeyFromObject(lvg), &current); err != nil {
@@ -575,41 +576,36 @@ func getMaxVGFreeAcrossLVGs(ctx context.Context, cl client.Client, lvgs []*v1alp
 		if current.Status.Phase != v1alpha1.PhaseReady {
 			continue
 		}
-		v := current.Status.VGFree.Value()
-		if v > maxFree {
-			maxFree = v
-		}
+		free = append(free, current.Status.VGFree.Value())
 	}
-	return maxFree
+	return free
 }
 
-// schedulerVolumeSizesForConsolidatedFill builds PVC sizes that sum to at most currentAvailable (sum of VGFree),
-// with each request <= maxPerLVG. preferredUnit is capped by maxPerLVG; leftover bytes are drained in chunks
-// <= maxPerLVG so every volume can schedule on some node with local LVM.
-func schedulerVolumeSizesForConsolidatedFill(currentAvailable, maxPerLVG, preferredUnit, minRemainder int64) []int64 {
-	if currentAvailable <= 0 || maxPerLVG <= 0 {
-		return nil
-	}
-	unit := preferredUnit
-	if unit > maxPerLVG {
-		unit = maxPerLVG
-	}
-	if unit <= 0 {
-		return nil
-	}
-	var sizes []int64
-	left := currentAvailable
-	for left >= unit {
-		sizes = append(sizes, unit)
-		left -= unit
-	}
-	for left >= minRemainder {
-		sz := min(maxPerLVG, left)
-		if sz < minRemainder {
-			break
+// schedulerVolumeSizesForConsolidatedFill plans uniform unit-sized Thick volumes guaranteed to schedule:
+// each LVG contributes floor(VGFree_i * fillMargin / unit) volumes of size `unit` (unit capped by the
+// largest single LVG). Uniform item size makes greedy (first-fit) placement optimal, so the scheduler
+// packs them all; the margin absorbs thin-pool/metadata/rounding overhead and VGFree status staleness.
+// Planning per-LVG rather than from the summed pool is what makes the fill deterministic across uneven
+// nodes.
+func schedulerVolumeSizesForConsolidatedFill(perLVGFree []int64, preferredUnit, minUnit int64) []int64 {
+	const fillNum, fillDen = 85, 100 // pack ~85% of each LVG's free space
+
+	var maxFree int64
+	for _, f := range perLVGFree {
+		if f > maxFree {
+			maxFree = f
 		}
-		sizes = append(sizes, sz)
-		left -= sz
+	}
+	unit := min(preferredUnit, maxFree)
+	if unit < minUnit || unit <= 0 {
+		return nil
+	}
+
+	var sizes []int64
+	for _, free := range perLVGFree {
+		for n := free * fillNum / fillDen / unit; n > 0; n-- {
+			sizes = append(sizes, unit)
+		}
 	}
 	return sizes
 }

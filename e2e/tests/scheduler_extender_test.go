@@ -106,11 +106,6 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, Conti
 
 			ensureSchedulerK8sClient(ctx, cl.RESTConfig(), &k8sClient)
 
-			// Clean up in dependency order: workload (Pods/PVCs/PVs), then the LocalStorageClass,
-			// then LVMVolumeGroups. The LSC MUST be removed before the LVGs it references: the
-			// sds-local-volume LSC validation webhook rejects any update to the LSC (including the
-			// controller's own finalizer removal) once a referenced LVMVolumeGroup is gone, so
-			// deleting LVGs first deadlocks the LSC in Terminating.
 			By("Cleaning up leftover e2e Pods/PVCs/PVs from a previous run")
 			cleanupPodsAndPVCsWithWait(ctx, k8sClient, suitePodPVCleanupPodTimeout, suitePodPVCleanupPVTimeout)
 
@@ -300,13 +295,12 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, Conti
 			By(fmt.Sprintf("Current available space: %.2f Gi (baseline budget %.2f Gi)",
 				float64(currentAvailable)/(1024*1024*1024), float64(totalAvailableSpace)/(1024*1024*1024)))
 
-			maxPerLVG := getMaxVGFreeAcrossLVGs(ctx, k8sClient, createdLVGs)
-			By(fmt.Sprintf("Max VGFree on one LVMVolumeGroup: %.2f Gi (each PVC must fit a single LVG; sum VGFree can be higher)",
-				float64(maxPerLVG)/(1024*1024*1024)))
+			perLVGFree := getPerLVGFree(ctx, k8sClient, createdLVGs)
+			By(fmt.Sprintf("Planning per-LVG over %d Ready LVMVolumeGroups (each Thick PVC must fit one LVG)", len(perLVGFree)))
 
 			preferredUnit := int64(1 * 1024 * 1024 * 1024) // 1Gi
-			minVolumeSize := int64(500 * 1024 * 1024)      // 500Mi minimum for remainder
-			volumeSizes := schedulerVolumeSizesForConsolidatedFill(currentAvailable, maxPerLVG, preferredUnit, minVolumeSize)
+			minUnit := int64(500 * 1024 * 1024)            // 500Mi floor
+			volumeSizes := schedulerVolumeSizesForConsolidatedFill(perLVGFree, preferredUnit, minUnit)
 			Expect(volumeSizes).NotTo(BeEmpty(),
 				"no schedulable volume plan (max VGFree per LVG vs min remainder)")
 
@@ -347,13 +341,12 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, Conti
 			By(fmt.Sprintf("Current available space: %.2f Gi (baseline budget %.2f Gi)",
 				float64(currentAvailable)/(1024*1024*1024), float64(totalAvailableSpace)/(1024*1024*1024)))
 
-			maxPerLVG := getMaxVGFreeAcrossLVGs(ctx, k8sClient, createdLVGs)
-			By(fmt.Sprintf("Max VGFree on one LVMVolumeGroup: %.2f Gi (each PVC must fit a single LVG; sum VGFree can be higher)",
-				float64(maxPerLVG)/(1024*1024*1024)))
+			perLVGFree := getPerLVGFree(ctx, k8sClient, createdLVGs)
+			By(fmt.Sprintf("Planning per-LVG over %d Ready LVMVolumeGroups (each Thick PVC must fit one LVG)", len(perLVGFree)))
 
 			preferredUnit := int64(5 * 1024 * 1024 * 1024) // 5Gi
-			minVolumeSize := int64(1 * 1024 * 1024 * 1024) // 1Gi minimum for remainder
-			volumeSizes := schedulerVolumeSizesForConsolidatedFill(currentAvailable, maxPerLVG, preferredUnit, minVolumeSize)
+			minUnit := int64(1 * 1024 * 1024 * 1024)       // 1Gi floor
+			volumeSizes := schedulerVolumeSizesForConsolidatedFill(perLVGFree, preferredUnit, minUnit)
 			Expect(volumeSizes).NotTo(BeEmpty(),
 				"no schedulable volume plan (max VGFree per LVG vs min remainder)")
 
@@ -394,13 +387,12 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, Conti
 			By(fmt.Sprintf("Current available space: %.2f Gi (baseline budget %.2f Gi)",
 				float64(currentAvailable)/(1024*1024*1024), float64(totalAvailableSpace)/(1024*1024*1024)))
 
-			maxPerLVG := getMaxVGFreeAcrossLVGs(ctx, k8sClient, createdLVGs)
-			By(fmt.Sprintf("Max VGFree on one LVMVolumeGroup: %.2f Gi (each PVC must fit a single LVG; sum VGFree can be higher)",
-				float64(maxPerLVG)/(1024*1024*1024)))
+			perLVGFree := getPerLVGFree(ctx, k8sClient, createdLVGs)
+			By(fmt.Sprintf("Planning per-LVG over %d Ready LVMVolumeGroups (each Thick PVC must fit one LVG)", len(perLVGFree)))
 
 			preferredUnit := int64(10 * 1024 * 1024 * 1024) // 10Gi
-			minVolumeSize := int64(1 * 1024 * 1024 * 1024)  // 1Gi minimum for remainder
-			volumeSizes := schedulerVolumeSizesForConsolidatedFill(currentAvailable, maxPerLVG, preferredUnit, minVolumeSize)
+			minUnit := int64(1 * 1024 * 1024 * 1024)        // 1Gi floor
+			volumeSizes := schedulerVolumeSizesForConsolidatedFill(perLVGFree, preferredUnit, minUnit)
 			Expect(volumeSizes).NotTo(BeEmpty(),
 				"no schedulable volume plan (max VGFree per LVG vs min remainder)")
 
