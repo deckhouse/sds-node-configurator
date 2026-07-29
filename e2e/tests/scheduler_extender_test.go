@@ -106,14 +106,22 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, Conti
 
 			ensureSchedulerK8sClient(ctx, cl.RESTConfig(), &k8sClient)
 
+			// Clean up in dependency order: workload (Pods/PVCs/PVs), then the LocalStorageClass,
+			// then LVMVolumeGroups. The LSC MUST be removed before the LVGs it references: the
+			// sds-local-volume LSC validation webhook rejects any update to the LSC (including the
+			// controller's own finalizer removal) once a referenced LVMVolumeGroup is gone, so
+			// deleting LVGs first deadlocks the LSC in Terminating.
+			By("Cleaning up leftover e2e Pods/PVCs/PVs from a previous run")
+			cleanupPodsAndPVCsWithWait(ctx, k8sClient, suitePodPVCleanupPodTimeout, suitePodPVCleanupPVTimeout)
+
+			By("Ensuring no leftover LocalStorageClass from a previous run")
+			Expect(ensureLocalStorageClassAbsent(ctx, cl.RESTConfig(), k8sClient, localStorageClassName)).To(Succeed())
+
 			By("Cleaning up existing e2e LVMLogicalVolumes (orphan PVCs)")
 			cleanupLVMLogicalVolumes(ctx, k8sClient)
 
 			By("Cleaning up existing e2e LVMVolumeGroups (to release LVM signatures)")
 			cleanupLVMVolumeGroups(ctx, k8sClient)
-
-			By("Ensuring no leftover LocalStorageClass from a previous run")
-			Expect(ensureLocalStorageClassAbsent(ctx, cl.RESTConfig(), k8sClient, localStorageClassName)).To(Succeed())
 
 			By("Force deleting ALL non-consumable BlockDevices")
 			forceDeleteAllNonConsumableBlockDevices(ctx, k8sClient, 2*time.Minute)
@@ -426,12 +434,17 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, Conti
 		By("Schedule extender AfterAll: cleaning up Pods, PVCs, PVs")
 		cleanupPodsAndPVCsWithWait(cleanupCtx, k8sClient, suitePodPVCleanupPodTimeout, suitePodPVCleanupPVTimeout)
 
+		// Delete the LocalStorageClass BEFORE its LVMVolumeGroups. The sds-local-volume LSC
+		// validation webhook rejects any update to the LSC — including the controller's own
+		// finalizer removal — once a referenced LVMVolumeGroup is gone, which deadlocks the LSC
+		// in Terminating forever. Removing the LSC while its LVGs still exist lets the controller
+		// finalize it cleanly.
+		By("Schedule extender AfterAll: cleaning up LocalStorageClass")
+		cleanupLocalStorageClasses(cleanupCtx, cl.RESTConfig())
+
 		By("Schedule extender AfterAll: cleaning up LVMLogicalVolumes and LVMVolumeGroups")
 		cleanupLVMLogicalVolumes(cleanupCtx, k8sClient)
 		cleanupLVMVolumeGroups(cleanupCtx, k8sClient)
-
-		By("Schedule extender AfterAll: cleaning up LocalStorageClass")
-		cleanupLocalStorageClasses(cleanupCtx, cl.RESTConfig())
 
 		By("Schedule extender AfterAll: detaching and deleting created data disks")
 		for _, diskName := range createdDiskNames {

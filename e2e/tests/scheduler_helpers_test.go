@@ -118,9 +118,16 @@ func forceDeleteLocalStorageClass(ctx context.Context, dynClient dynamic.Interfa
 		GinkgoWriter.Printf("force delete LSC %s: get: %v\n", name, err)
 		return
 	}
-	obj.SetFinalizers(nil)
-	if _, err := dynClient.Resource(localStorageClassGVR).Update(ctx, obj, metav1.UpdateOptions{}); err != nil {
-		GinkgoWriter.Printf("force delete LSC %s: clear finalizers: %v\n", name, err)
+	// Best-effort only: the deny-deckhouse-finalizers VAP forbids stripping the *.deckhouse.io
+	// finalizer via the API, so log the rejection loudly instead of failing silently — the CR is
+	// removed by its controller once all consumers are gone.
+	if fin := obj.GetFinalizers(); len(fin) > 0 {
+		obj.SetFinalizers(nil)
+		if _, err := dynClient.Resource(localStorageClassGVR).Update(ctx, obj, metav1.UpdateOptions{}); err != nil {
+			GinkgoWriter.Printf("force delete LSC %s: cannot strip finalizers %v via API "+
+				"(expected — deny-deckhouse-finalizers VAP); it will be removed only by its "+
+				"controller once all consumers are gone: %v\n", name, fin, err)
+		}
 	}
 	propagation := metav1.DeletePropagationForeground
 	_ = dynClient.Resource(localStorageClassGVR).Delete(ctx, name, metav1.DeleteOptions{
