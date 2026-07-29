@@ -582,9 +582,11 @@ func getPerLVGFree(ctx context.Context, cl client.Client, lvgs []*v1alpha1.LVMVo
 }
 
 // schedulerVolumeSizesForConsolidatedFill plans uniform unit-sized Thick volumes guaranteed to schedule:
-// each LVG contributes floor(VGFree_i * fillMargin / unit) volumes of size `unit` (unit capped by the
-// largest single LVG). Uniform item size makes greedy (first-fit) placement optimal, so the scheduler
-// packs them all; the margin absorbs thin-pool/metadata/rounding overhead and VGFree status staleness.
+// each LVG contributes floor(VGFree_i * fillMargin / unit) volumes of size `unit`. Uniform item size
+// makes greedy (first-fit) placement optimal, so the scheduler packs them all; the margin absorbs
+// thin-pool/metadata/rounding overhead and VGFree status staleness. `unit` is capped by the margined
+// max VGFree (fillMargin * maxFree), not the raw max — otherwise a preferredUnit near a whole LVG makes
+// floor(free*margin/unit) == 0 for every LVG and the plan comes out empty (the large-fill case).
 // Planning per-LVG rather than from the summed pool is what makes the fill deterministic across uneven
 // nodes.
 func schedulerVolumeSizesForConsolidatedFill(perLVGFree []int64, preferredUnit, minUnit int64) []int64 {
@@ -596,7 +598,7 @@ func schedulerVolumeSizesForConsolidatedFill(perLVGFree []int64, preferredUnit, 
 			maxFree = f
 		}
 	}
-	unit := min(preferredUnit, maxFree)
+	unit := min(preferredUnit, maxFree*fillNum/fillDen)
 	if unit < minUnit || unit <= 0 {
 		return nil
 	}
