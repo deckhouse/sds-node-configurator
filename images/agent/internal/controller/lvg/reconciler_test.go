@@ -305,6 +305,67 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			valid, _ := r.validateLVGForUpdateFunc(lvg, bds)
 			assert.False(t, valid)
 		})
+
+		t.Run("with_thin_pool_actual_one_extent_larger_returns_true", func(t *testing.T) {
+			// Regression: an actual pool one extent larger than the aligned request must
+			// not be treated as a shrink (else the LVG loops "is not valid" forever).
+			r := setupReconciler()
+
+			const (
+				bdName   = "bd"
+				bdPath   = "bd-path"
+				vgName   = "test-vg"
+				poolName = "thin"
+			)
+
+			bds := map[string]v1alpha1.BlockDevice{
+				bdName: {
+					ObjectMeta: v1.ObjectMeta{Name: bdName},
+					Status: v1alpha1.BlockDeviceStatus{
+						Size:       resource.MustParse("1Gi"),
+						Consumable: true,
+						Path:       bdPath,
+					},
+				},
+			}
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					ActualVGNameOnTheNode: vgName,
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+						{Name: poolName, Size: "50%", AllocationLimit: "150%"},
+					},
+				},
+			}
+
+			// BD already backs a PV (so newTotalVGSize == VGSize). 50% of 1Gi == 512Mi
+			// (extent-aligned); the actual pool is one extent (4Mi) larger.
+			pvs := []internal.PVData{{PVName: bdPath}}
+			vgs := []internal.VGData{
+				{
+					VGName:       vgName,
+					VGSize:       resource.MustParse("1Gi"),
+					VGFree:       resource.MustParse("512Mi"),
+					VGExtentSize: resource.MustParse("4Mi"),
+				},
+			}
+			lvs := []internal.LVData{
+				{
+					LVName: poolName,
+					VGName: vgName,
+					LVAttr: "twi-a-tz--",
+					LVSize: resource.MustParse("516Mi"),
+				},
+			}
+
+			r.sdsCache.StorePVs(pvs, bytes.Buffer{})
+			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
+			r.sdsCache.StoreLVs(lvs, bytes.Buffer{})
+
+			valid, reason := r.validateLVGForUpdateFunc(lvg, bds)
+			if assert.True(t, valid) {
+				assert.Equal(t, "", reason)
+			}
+		})
 	})
 
 	t.Run("validateLVGForCreateFunc", func(t *testing.T) {
