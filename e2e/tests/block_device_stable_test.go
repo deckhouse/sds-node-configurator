@@ -30,7 +30,6 @@ import (
 	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -161,35 +160,7 @@ var _ = Describe("Block device stability with explicit lifecycle stages", Label(
 
 				When("sds-node-configurator-agent pod is restarted on the node", func() {
 					BeforeAll(func() {
-						restartAt := time.Now()
-
-						err := k8sClient.DeleteAllOf(
-							ctx,
-							&v1.Pod{},
-							client.InNamespace(consts.SdsNodeConfiguratorAgentNamespace),
-							client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentName},
-							client.MatchingFields{"spec.nodeName": targetNode},
-						)
-						Expect(err).NotTo(HaveOccurred())
-
-						Eventually(func(g Gomega) {
-							By("Waiting for sds-node-configurator-agent pod to be recreated and become ready")
-							var pods v1.PodList
-							g.Expect(k8sClient.List(
-								ctx,
-								&pods,
-								client.InNamespace(consts.SdsNodeConfiguratorAgentNamespace),
-								client.MatchingLabels{"app": consts.SdsNodeConfiguratorAgentName},
-								client.MatchingFields{"spec.nodeName": targetNode},
-							)).To(Succeed())
-
-							g.Expect(pods.Items).To(HaveLen(1))
-							p := pods.Items[0]
-
-							g.Expect(p.CreationTimestamp.Time.After(restartAt)).To(BeTrue(), "expected a new pod after restart")
-							g.Expect(p.DeletionTimestamp).To(BeNil())
-							g.Expect(p.Status.Phase).To(Equal(v1.PodRunning))
-						}, 5*time.Minute, 5*time.Second).Should(Succeed())
+						Expect(restartAgentOnNode(ctx, cl, targetNode)).To(Succeed())
 					})
 
 					It("keeps the test block device consumable after agent restart", func() {
