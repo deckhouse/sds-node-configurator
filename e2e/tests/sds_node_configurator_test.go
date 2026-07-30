@@ -36,6 +36,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sclient "k8s.io/client-go/kubernetes"
@@ -190,13 +191,13 @@ printf '%%s %%s\n' "$(stat -c %%t %s)" "$(stat -c %%T %s)"`,
 		deviceID, parseErr := parseHexDeviceID(setupOut)
 		Expect(parseErr).NotTo(HaveOccurred(), "failed to determine major:minor for %s; output=%q", devicePath, setupOut)
 
-		By("Step 4: waiting for the agent to mark the mounted BlockDevice non-consumable")
+		By("Step 4: waiting for the agent to remove the ext4 BlockDevice from consumable candidates")
 		Eventually(func(g Gomega) {
 			var current v1alpha1.BlockDevice
-			g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: bdName}, &current)).To(Succeed())
-			g.Expect(current.Status.Consumable).To(BeFalse(),
-				"mounted BlockDevice %s is still consumable (path=%s, fsType=%s)",
-				bdName, current.Status.Path, current.Status.FsType)
+			err := k8sClient.Get(ctx, client.ObjectKey{Name: bdName}, &current)
+			g.Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+				"ext4 BlockDevice %s should be removed from candidates; current error=%v, consumable=%t, fsType=%s",
+				bdName, err, current.Status.Consumable, current.Status.FsType)
 		}, hostPIDStateChangeWait, hostPIDPollInterval).Should(Succeed())
 
 		By("Step 5: proving the host mount is absent from the agent's own mount namespace")
@@ -219,7 +220,7 @@ printf '%%s %%s\n' "$(stat -c %%t %s)" "$(stat -c %%T %s)"`,
 			"/proc/1/mountinfo does not contain device %s mounted at %s; matching lines:\n%s",
 			deviceID, hostPIDMountPath, hostMountInfo)
 
-		By("Step 6: unmounting, removing the ext4 signature, and waiting for consumable=true")
+		By("Step 6: unmounting, removing the ext4 signature, and waiting for the consumable BlockDevice to reappear")
 		teardownScript := fmt.Sprintf(
 			`sudo -n umount %s
 sudo -n wipefs -a %s
@@ -236,7 +237,7 @@ sudo -n udevadm settle`,
 			var current v1alpha1.BlockDevice
 			g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: bdName}, &current)).To(Succeed())
 			g.Expect(current.Status.Consumable).To(BeTrue(),
-				"BlockDevice %s did not become consumable after unmount and wipefs (fsType=%s)",
+				"BlockDevice %s did not reappear as consumable after unmount and wipefs (fsType=%s)",
 				bdName, current.Status.FsType)
 		}, hostPIDStateChangeWait, hostPIDPollInterval).Should(Succeed())
 
