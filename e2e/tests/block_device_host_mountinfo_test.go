@@ -278,15 +278,28 @@ printf '%%s %%s\n' "$(stat -c %%t %s)" "$(stat -c %%T %s)"`,
 			deviceID, hostPIDMountPath, hostMI)
 
 		By("After umount the same BlockDevice becomes consumable again")
+		// umount itself does not emit a block uevent; the agent only rescans mountinfo
+		// on udev activity (or one-shot idle timer). Kick the whole block subsystem.
 		teardownScript := fmt.Sprintf(
 			`sudo -n umount %s
-sudo -n udevadm trigger --action=change "$(udevadm info --query=path --name=%s)"
+if mountpoint -q %s; then echo "mount still present after umount" >&2; exit 1; fi
+sudo -n udevadm trigger --subsystem-match=block --action=change
 sudo -n udevadm settle`,
 			shellQuote(hostPIDMountPath),
-			shellQuote(devicePath),
+			shellQuote(hostPIDMountPath),
 		)
 		teardownOut, teardownErr := framework.NodeExecChecked(ctx, cl, targetNode, teardownScript)
 		Expect(teardownErr).NotTo(HaveOccurred(), "failed to umount the test device: %s", teardownOut)
+
+		By("Confirming the host mount is gone from /proc/1/mountinfo")
+		Eventually(func(g Gomega) {
+			mi, err := readPIDMountInfo(
+				ctx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentNamespace, reader, "1",
+			)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(mountInfoContains(mi, deviceID, hostPIDMountPath)).To(BeFalse(),
+				"host mountinfo still has %s at %s after umount:\n%s", deviceID, hostPIDMountPath, mi)
+		}, hostPIDStateChangeWait, hostPIDPollInterval).Should(Succeed())
 
 		Eventually(func(g Gomega) {
 			var current v1alpha1.BlockDevice
