@@ -70,4 +70,5 @@ clusterDefinition:
         enabled: true
         settings:
           enableThinProvisioning: true
+          enableNetlinkBlockDeviceDiscovery: true
         dependencies: []

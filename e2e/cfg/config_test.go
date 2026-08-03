@@ -27,6 +27,7 @@ func TestLoad(t *testing.T) {
 		"TEST_CLUSTER_NAMESPACE",
 		"E2E_DVP_BASE_CLUSTER_STORAGE_CLASS",
 		"MODULES_MODULE_TAG",
+		"E2E_DEBUG_IMAGE",
 	} {
 		assert.NoError(t, os.Unsetenv(k))
 	}
@@ -41,6 +42,7 @@ func TestLoad(t *testing.T) {
 			StorageClass: "linstor-r1",
 		},
 		ModulesImageTag: "main",
+		DebugImage:      "busybox:1.36",
 	}, got)
 }
 
@@ -49,6 +51,7 @@ func TestLoadOverrides(t *testing.T) {
 		"TEST_CLUSTER_NAMESPACE",
 		"E2E_DVP_BASE_CLUSTER_STORAGE_CLASS",
 		"MODULES_MODULE_TAG",
+		"E2E_DEBUG_IMAGE",
 	} {
 		assert.NoError(t, os.Unsetenv(k))
 	}
@@ -56,6 +59,7 @@ func TestLoadOverrides(t *testing.T) {
 	assert.NoError(t, os.Setenv("TEST_CLUSTER_NAMESPACE", "custom-ns"))
 	assert.NoError(t, os.Setenv("E2E_DVP_BASE_CLUSTER_STORAGE_CLASS", "linstor-r1"))
 	assert.NoError(t, os.Setenv("MODULES_MODULE_TAG", "pr-123"))
+	assert.NoError(t, os.Setenv("E2E_DEBUG_IMAGE", "registry.example/busybox:1.36"))
 
 	got, err := Load()
 	assert.NoError(t, err)
@@ -65,6 +69,7 @@ func TestLoadOverrides(t *testing.T) {
 			StorageClass: "linstor-r1",
 		},
 		ModulesImageTag: "pr-123",
+		DebugImage:      "registry.example/busybox:1.36",
 	}, got)
 }
 
