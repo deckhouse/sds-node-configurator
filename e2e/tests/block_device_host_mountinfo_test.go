@@ -57,7 +57,6 @@ const (
 
 	hostPIDNetlinkEnvName       = "ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY"
 	hostPIDNetlinkChangeLogRe   = `(?i)\[HandleEvent\].*udev event.*action=change`
-	hostPIDAgentProcessComm     = "agent"
 	hostPIDDistrolessSessionTTL = 15 * time.Minute
 )
 
@@ -220,15 +219,6 @@ sudo -n rmdir %s 2>/dev/null || true`,
 		)
 		Expect(readerErr).NotTo(HaveOccurred(), "failed to open distroless reader with image %s", conf.DebugImage)
 
-		agentPID, pidErr := findAgentPID(
-			ctx,
-			cl.RESTConfig(),
-			consts.SdsNodeConfiguratorAgentNamespace,
-			reader,
-			string(agentPod.UID),
-		)
-		Expect(pidErr).NotTo(HaveOccurred(), "failed to resolve agent PID in the shared host PID namespace")
-
 		By("Mounting ext4 then wiping the on-disk signature while still mounted (FSType empty; mount remains)")
 		setupScript := fmt.Sprintf(
 			`if mountpoint -q %s; then echo "mount path is already in use" >&2; exit 1; fi
@@ -264,10 +254,14 @@ printf '%%s %%s\n' "$(stat -c %%t %s)" "$(stat -c %%T %s)"`,
 				"device is mounted on the host; an agent reading /proc/self/mountinfo would miss it and keep Consumable=true")
 		}, hostPIDStateChangeWait, hostPIDPollInterval).Should(Succeed())
 
+		// Ephemeral container targets the agent container, so it shares the agent's
+		// mount namespace: /proc/self/mountinfo is the agent view. With hostPID:true,
+		// PID 1 is host init, so /proc/1/mountinfo is the host view. No need to
+		// discover the agent PID in the host PID namespace.
 		By("Environment precondition: hostPID exposes the mount in /proc/1/mountinfo but not in the agent mount ns")
 		Consistently(func(g Gomega) {
 			agentMI, agentErr := readPIDMountInfo(
-				ctx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentNamespace, reader, agentPID,
+				ctx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentNamespace, reader, "self",
 			)
 			g.Expect(agentErr).NotTo(HaveOccurred())
 			g.Expect(mountInfoContains(agentMI, deviceID, hostPIDMountPath)).To(BeFalse(),
@@ -337,49 +331,6 @@ func daemonSetEnvIsTrue(ds *appsv1.DaemonSet, containerName, envName string) boo
 		}
 	}
 	return false
-}
-
-// findAgentPID locates the agent process in the shared host PID namespace
-// (hostPID: true) by matching /proc/<pid>/comm and the pod UID in cgroup.
-func findAgentPID(
-	ctx context.Context,
-	restCfg *rest.Config,
-	namespace string,
-	reader *kubernetes.DistrolessReader,
-	podUID string,
-) (string, error) {
-	uidKey := strings.ReplaceAll(podUID, "-", "_")
-	script := fmt.Sprintf(
-		`for d in /proc/[0-9]*; do
-  pid=${d#/proc/}
-  comm=$(cat "$d/comm" 2>/dev/null) || continue
-  [ "$comm" = %s ] || continue
-  if grep -Fq %s "$d/cgroup" 2>/dev/null || grep -Fq %s "$d/cgroup" 2>/dev/null; then
-    echo "$pid"
-    exit 0
-  fi
-done
-echo "agent process not found for pod UID" >&2
-exit 1`,
-		shellQuote(hostPIDAgentProcessComm),
-		shellQuote(podUID),
-		shellQuote(uidKey),
-	)
-	stdout, stderr, err := kubernetes.ExecInPod(
-		ctx, restCfg, namespace, reader.PodName(), reader.EphemeralName(),
-		[]string{"sh", "-ec", script},
-	)
-	if err != nil {
-		return "", fmt.Errorf("find agent PID: %w (stderr=%q stdout=%q)", err, stderr, stdout)
-	}
-	pid := strings.TrimSpace(stdout)
-	if pid == "" {
-		return "", fmt.Errorf("find agent PID: empty stdout (stderr=%q)", stderr)
-	}
-	if _, convErr := strconv.Atoi(pid); convErr != nil {
-		return "", fmt.Errorf("find agent PID: not an int %q", pid)
-	}
-	return pid, nil
 }
 
 func readPIDMountInfo(
