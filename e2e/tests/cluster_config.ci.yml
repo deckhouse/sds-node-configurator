@@ -46,6 +46,5 @@ clusterDefinition:
         enabled: true
         settings:
           enableThinProvisioning: true
-          enableNetlinkBlockDeviceDiscovery: true
         modulePullOverride: "${E2E_MODULE_IMAGE_TAG}"
         dependencies: []
