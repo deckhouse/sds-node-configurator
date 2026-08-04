@@ -201,6 +201,40 @@ var (
 		Name:      "lvm_activation_total",
 		Help:      "Total number of LVM VG activation attempts.",
 	}, []string{"node", "volume_group", "result"})
+
+	// File-backed device metrics. Backing files are preallocated, so the module
+	// holds a fixed share of a filesystem it does not own: the two gauges below
+	// are what makes that share, and what is left of the filesystem, visible.
+	// Without them the only protection against filling a node is the free-space
+	// check the agent runs once, at provisioning time.
+	fileDeviceSizeBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "file_device_size_bytes",
+		Help:      "Size of the physical volume created on a spec.fileDevices backing file, in bytes.",
+	}, []string{"node", "lvg_name", "volume_group", "file_device"})
+
+	fileDevicesDirectoryFreeBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "file_devices_directory_free_bytes",
+		Help:      "Free space on the filesystem holding spec.fileDevices backing files, in bytes.",
+	}, []string{"node", "directory"})
+
+	fileDevicesDirectoryAllocatedBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "file_devices_directory_allocated_bytes",
+		Help:      "Total size of the backing files this module has allocated in the directory, in bytes.",
+	}, []string{"node", "directory"})
+
+	// Published alongside the free figure so the share that is left can be
+	// expressed without knowing anything about the node. The agent refuses to
+	// allocate below a configured share of the filesystem, and kubelet evicts
+	// below a share of it too — an absolute number of free bytes cannot be
+	// compared against either.
+	fileDevicesDirectoryTotalBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "file_devices_directory_total_bytes",
+		Help:      "Size of the filesystem holding spec.fileDevices backing files, in bytes.",
+	}, []string{"node", "directory"})
 )
 
 func init() {
@@ -229,6 +263,10 @@ func init() {
 	metrics.Registry.MustRegister(lvgThinPoolUsedSizeBytes)
 	metrics.Registry.MustRegister(lvgThinPoolAllocationLimitBytes)
 	metrics.Registry.MustRegister(lvmActivationTotal)
+	metrics.Registry.MustRegister(fileDeviceSizeBytes)
+	metrics.Registry.MustRegister(fileDevicesDirectoryFreeBytes)
+	metrics.Registry.MustRegister(fileDevicesDirectoryAllocatedBytes)
+	metrics.Registry.MustRegister(fileDevicesDirectoryTotalBytes)
 }
 
 type Metrics struct {
@@ -242,6 +280,8 @@ type Metrics struct {
 	previousLVs       map[string]bool
 	previousLVGVGs    map[string]bool
 	previousLVGTPs    map[string]bool
+	previousFileDevs  map[string]bool
+	previousFileDirs  map[string]bool
 }
 
 func GetMetrics(nodeName string) *Metrics {
@@ -253,6 +293,8 @@ func GetMetrics(nodeName string) *Metrics {
 		previousLVs:       make(map[string]bool),
 		previousLVGVGs:    make(map[string]bool),
 		previousLVGTPs:    make(map[string]bool),
+		previousFileDevs:  make(map[string]bool),
+		previousFileDirs:  make(map[string]bool),
 	}
 }
 
@@ -630,4 +672,90 @@ func (m *Metrics) UpdateLVGStatusMetrics(lvgs map[string]v1alpha1.LVMVolumeGroup
 	m.previousLVGTPs = currentLVGTPs
 
 	return errs
+}
+
+// FileDeviceDirectoryUsage is one directory's worth of backing-file accounting,
+// as observed on the node.
+type FileDeviceDirectoryUsage struct {
+	Directory string
+	// FreeBytes is what the filesystem holding the directory has left. Zero when
+	// the agent could not read it this cycle; the caller reports the error and
+	// the previous sample is left standing rather than replaced with a false 0.
+	FreeBytes int64
+	// TotalBytes is the size of that filesystem. Free alone cannot be compared
+	// against either the agent's reserve or kubelet's eviction threshold, since
+	// both are shares of the whole.
+	TotalBytes int64
+	Known      bool
+	// AllocatedBytes is the total size of the backing files this module put there.
+	AllocatedBytes int64
+}
+
+// UpdateFileDeviceMetrics publishes per-file-device sizes and, per directory,
+// how much of the filesystem the module has taken and how much is left.
+//
+// Backing files are preallocated, so a file-backed Volume Group holds a fixed
+// share of a filesystem the module does not own — usually the node's root. The
+// agent refuses to create a file larger than the free space at provisioning
+// time, but nothing watches that filesystem afterwards, and anything else on the
+// node can fill it. That failure is node-level (kubelet DiskPressure eviction),
+// so it needs to be visible before it happens rather than diagnosed after.
+func (m *Metrics) UpdateFileDeviceMetrics(lvgs map[string]v1alpha1.LVMVolumeGroup, usage []FileDeviceDirectoryUsage) {
+	currentDevs := make(map[string]bool)
+	currentDirs := make(map[string]bool)
+
+	for _, lvg := range lvgs {
+		vgName := lvg.Spec.ActualVGNameOnTheNode
+		if vgName == "" {
+			continue
+		}
+		for _, node := range lvg.Status.Nodes {
+			if node.Name != m.node {
+				continue
+			}
+			for _, fd := range node.FileDevices {
+				if fd.Name == "" {
+					continue
+				}
+				currentDevs[m.node+":"+lvg.Name+":"+vgName+":"+fd.Name] = true
+				fileDeviceSizeBytes.WithLabelValues(m.node, lvg.Name, vgName, fd.Name).
+					Set(float64(fd.Size.Value()))
+			}
+		}
+	}
+
+	for _, u := range usage {
+		currentDirs[m.node+":"+u.Directory] = true
+		fileDevicesDirectoryAllocatedBytes.WithLabelValues(m.node, u.Directory).
+			Set(float64(u.AllocatedBytes))
+		if u.Known {
+			fileDevicesDirectoryFreeBytes.WithLabelValues(m.node, u.Directory).
+				Set(float64(u.FreeBytes))
+			fileDevicesDirectoryTotalBytes.WithLabelValues(m.node, u.Directory).
+				Set(float64(u.TotalBytes))
+		}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for key := range m.previousFileDevs {
+		if !currentDevs[key] {
+			if parts := strings.SplitN(key, ":", 4); len(parts) == 4 {
+				fileDeviceSizeBytes.DeleteLabelValues(parts[0], parts[1], parts[2], parts[3])
+			}
+		}
+	}
+	m.previousFileDevs = currentDevs
+
+	for key := range m.previousFileDirs {
+		if !currentDirs[key] {
+			if parts := strings.SplitN(key, ":", 2); len(parts) == 2 {
+				fileDevicesDirectoryFreeBytes.DeleteLabelValues(parts[0], parts[1])
+				fileDevicesDirectoryTotalBytes.DeleteLabelValues(parts[0], parts[1])
+				fileDevicesDirectoryAllocatedBytes.DeleteLabelValues(parts[0], parts[1])
+			}
+		}
+	}
+	m.previousFileDirs = currentDirs
 }

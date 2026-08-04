@@ -110,6 +110,8 @@ func (s *scanner) Run(
 
 	log.Info("[RunScanner] start to listen to events")
 
+	// duration debounces a burst of udev events: every event pushes the fill back
+	// by a second so the cache is built once the burst settles.
 	duration := 1 * time.Second
 	timer := time.NewTimer(duration)
 	for {
@@ -268,6 +270,21 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 		return err
 	}
 
+	// VGs were listed before PVs, so a VG created in between — including one this
+	// agent has just created for a spec.fileDevices LVMVolumeGroup — is missing
+	// from vgs while its PV is already here. Re-list VGs once when a PV points at
+	// a VG we do not have: without it the cache stores a PV whose VG is unknown,
+	// FindVG returns nil, and the reconciler re-runs create on an existing VG.
+	if missingVGs := utils.PVsReferenceUnknownVG(vgs, pvs); missingVGs {
+		log.Info("[fillTheCache] a PV references a VG absent from the VG list, re-scanning VGs")
+		now = time.Now()
+		vgs, vgsErr, err = s.scanVGs(ctx, log, cfg)
+		log.Trace(fmt.Sprintf("[fillTheCache] VGS re-scan for late VG runs for: %s", realClock.Since(now).String()))
+		if err != nil {
+			return err
+		}
+	}
+
 	now = time.Now()
 	var devices []internal.Device
 	var devErr bytes.Buffer
@@ -284,7 +301,20 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 		return scanDevErr
 	}
 
-	if activated := utils.EnsureVGActivation(ctx, log, s.commands, metrics, vgs, lvs, cfg.CmdDeadlineDuration); activated {
+	// Work out once, for this scan, which Volume Groups are the module's own. Both
+	// consumers below need the same answer, and the classification costs host
+	// commands only for Volume Groups that live entirely on loop devices — none, on
+	// a node that does not use spec.fileDevices.
+	//
+	// It has to happen before EnsureVGActivation, not after: that call issues
+	// `vgchange -ay`, and until spec.fileDevices removed `loop` from
+	// LVMGlobalFilter it could not see a loop-backed Volume Group at all. Handing
+	// it the raw scan means an image of a former node disk — attached with
+	// `losetup` for a restore, or backing a nested cluster — gets activated on the
+	// host, once per udev burst, because it carries the managed tag.
+	loopVerdicts := utils.ClassifyLoopVGs(ctx, log, s.commands, cfg.CmdDeadlineDuration, vgs, pvs)
+
+	if activated := utils.EnsureVGActivation(ctx, log, s.commands, metrics, vgs, lvs, loopVerdicts, cfg.CmdDeadlineDuration); activated {
 		log.Info("[fillTheCache] LVs were activated, re-scanning LVs and VGs")
 		now = time.Now()
 		lvs, lvsErr, err = s.scanLVs(ctx, log, cfg)
@@ -304,11 +334,17 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 
 	// lvm.static bundled in /opt/deckhouse/sds/bin is built without udev
 	// integration and so reports PVs found on any block device it sees in
-	// /dev, including Ceph RBD images and loopback-mounted guest VM disks
-	// that happen to carry LVM signatures from nested LVM (see ADR / PR
-	// description). Filter those out before feeding the cache so that the
-	// LVG/BD reconcile logic never sees duplicate VG names produced by
-	// foreign storage layers.
+	// /dev, including Ceph RBD/DRBD/NBD images that happen to carry LVM
+	// signatures from nested LVM (see ADR / PR description). Filter those out
+	// before feeding the cache so that the LVG/BD reconcile logic never sees
+	// duplicate VG names produced by foreign storage layers.
+	//
+	// FilterForeignPVs does NOT reject loop devices: the agent manages
+	// file-backed loop devices as LVM PVs (spec.fileDevices). PVs of a
+	// loop-backed VG the agent does not own are dropped just below by
+	// FilterForeignLoopPVs so a guest VM's nested-LVM loop VG cannot collide by
+	// name with a managed VG. Ownership is the backing file's name, not the LVM
+	// tag — see utils.ClassifyLoopVGs.
 	//
 	// cfg.CmdDeadlineDuration bounds every per-PV nsenter+readlink call:
 	// a hung resolver on a single foreign device cannot block the entire
@@ -317,7 +353,27 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	beforePV := len(pvs)
 	pvs = utils.FilterForeignPVs(ctx, log, nil, pvs, cfg.CmdDeadlineDuration)
 	if dropped := beforePV - len(pvs); dropped > 0 {
-		log.Info(fmt.Sprintf("[fillTheCache] dropped %d foreign PV(s) backed by rbd/drbd/nbd/loop devices", dropped))
+		log.Info(fmt.Sprintf("[fillTheCache] dropped %d foreign PV(s) backed by rbd/drbd/nbd devices", dropped))
+	}
+
+	// Also drop PVs of foreign, purely loop-backed VGs (nested LVM inside a
+	// guest VM's file-backed disk attached via losetup, an image of another
+	// node's disk mounted for a restore). Loop PVs are not rejected by
+	// FilterForeignPVs because the agent manages its own file-backed loop
+	// devices, but a foreign loop VG that shares a name with a managed VG would
+	// otherwise be detected as a duplicate by findDuplicateVGNames and take the
+	// managed LVMVolumeGroup offline.
+	//
+	// The verdicts were computed above, before activation: a VG that appeared in
+	// the post-activation re-scan carries no verdict and is kept, which is the
+	// safe direction — a VG of ours must never be dropped for want of an answer.
+	beforeLoopPV := len(pvs)
+	pvs = utils.FilterForeignLoopPVs(log, pvs, loopVerdicts)
+	if dropped := beforeLoopPV - len(pvs); dropped > 0 {
+		log.Info(fmt.Sprintf("[fillTheCache] dropped %d PV(s) of unmanaged loop-backed VG(s)", dropped))
+	}
+
+	if len(pvs) < beforePV {
 		beforeVG := len(vgs)
 		vgs = utils.FilterVGsByPresentPVs(vgs, pvs)
 		beforeLV := len(lvs)

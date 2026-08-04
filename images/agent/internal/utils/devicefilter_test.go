@@ -38,9 +38,9 @@ func TestIsForeignDeviceBase(t *testing.T) {
 		{"rbd with partition", "rbd14p1", true},
 		{"drbd canonical", "drbd0", true},
 		{"nbd canonical", "nbd5", true},
-		{"loop canonical", "loop970", true},
-		{"loop with high index", "loop1234", true},
 
+		{"loop canonical", "loop970", false},
+		{"loop with high index", "loop1234", false},
 		{"nvme canonical", "nvme4n1p1", false},
 		{"sda canonical", "sda1", false},
 		{"md raid", "md1", false},
@@ -70,8 +70,8 @@ func TestFilterForeignPVs(t *testing.T) {
 		{PVName: "/dev/md1", VGName: "vg0", VGUuid: "IZMRUl"},
 		{PVName: "/dev/block/251:144", VGName: "vg-1", VGUuid: "Czf0Sf"},                                 // -> rbd9
 		{PVName: "/dev/block/251:16", VGName: "vg-thin-data", VGUuid: "zR5ouf"},                          // -> rbd1
-		{PVName: "/dev/disk/by-id/lvm-pv-uuid-9Uuprg-IFQM-5c2y", VGName: "vg-1", VGUuid: "kHmPc6"},       // -> loop808
-		{PVName: "/dev/disk/by-id/lvm-pv-uuid-xl1soD-zQZM-BRAt", VGName: "vg-thin-data", VGUuid: "He4J"}, // -> loop485
+		{PVName: "/dev/disk/by-id/lvm-pv-uuid-9Uuprg-IFQM-5c2y", VGName: "vg-1", VGUuid: "kHmPc6"},       // -> loop808 (kept — loops are managed)
+		{PVName: "/dev/disk/by-id/lvm-pv-uuid-xl1soD-zQZM-BRAt", VGName: "vg-thin-data", VGUuid: "He4J"}, // -> loop485 (kept — loops are managed)
 	}
 
 	// Resolver mimics the readlink -f result observed on d8-virt-node-0
@@ -94,7 +94,11 @@ func TestFilterForeignPVs(t *testing.T) {
 	}
 
 	got := FilterForeignPVs(context.Background(), log, resolver, pvs, 0)
-	wantNames := []string{"/dev/nvme4n1p1", "/dev/nvme4n1p2", "/dev/md1"}
+	wantNames := []string{
+		"/dev/nvme4n1p1", "/dev/nvme4n1p2", "/dev/md1",
+		"/dev/disk/by-id/lvm-pv-uuid-9Uuprg-IFQM-5c2y",
+		"/dev/disk/by-id/lvm-pv-uuid-xl1soD-zQZM-BRAt",
+	}
 	gotNames := make([]string, 0, len(got))
 	for _, pv := range got {
 		gotNames = append(gotNames, pv.PVName)

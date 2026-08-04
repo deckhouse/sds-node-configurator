@@ -35,17 +35,51 @@ func NewEnabledTags(key string, value string) []string {
 	return []string{internal.LVMTags[0], fmt.Sprintf("%s=%s", key, value)}
 }
 
+// HasManagedTag reports whether an LVM tag list contains the exact
+// storage.deckhouse.io/enabled=true tag that marks a Volume Group as this
+// module's.
+//
+// The comparison is against whole comma-separated elements rather than a
+// substring of the joined list. LVM's tag charset allows a tag to merely
+// contain that text (`x-storage.deckhouse.io/enabled=true` is a legal tag), and
+// the answer decides both whether a Volume Group is adopted and — in
+// FilterForeignLoopPVs — whether its loop PVs are allowed into the cache at all.
+func HasManagedTag(tags string) bool {
+	for _, tag := range strings.Split(tags, ",") {
+		if strings.TrimSpace(tag) == internal.LVMTags[0] {
+			return true
+		}
+	}
+	return false
+}
+
+// ReadValueFromTags reports whether the tag list marks the object as this
+// module's and, if so, the value of the key=value tag named by key ("" when the
+// list carries no such tag).
+//
+// Both halves of a tag are parsed rather than assumed. LVM's tag charset is far
+// wider than what the agent itself writes — an administrator can hand a Volume
+// Group over with any tag `vgchange --addtag` accepts, and that includes a bare
+// `<key>` with no `=` at all. Splitting on "=" and taking element [1] panicked on
+// exactly that, taking the whole DaemonSet into CrashLoopBackOff, and
+// spec.fileDevices widened the set of Volume Groups this is asked about: dropping
+// `loop` from LVMGlobalFilter made Volume Groups the agent never wrote tags for
+// visible to lvm.static.
+//
+// The key must match a whole tag name, not a prefix of one, so a tag that merely
+// starts with the same text is not read as the tag being asked for. The value is
+// everything after the first "=", since LVM allows one inside a tag.
 func ReadValueFromTags(tags string, key string) (bool, string) {
-	if !strings.Contains(tags, internal.LVMTags[0]) {
+	if !HasManagedTag(tags) {
 		return false, ""
 	}
 
-	splitTags := strings.Split(tags, ",")
-	for _, tag := range splitTags {
-		if strings.HasPrefix(tag, key) {
-			kv := strings.Split(tag, "=")
-			return true, kv[1]
+	for _, tag := range strings.Split(tags, ",") {
+		name, value, ok := strings.Cut(strings.TrimSpace(tag), "=")
+		if !ok || name != key {
+			continue
 		}
+		return true, value
 	}
 
 	return true, ""

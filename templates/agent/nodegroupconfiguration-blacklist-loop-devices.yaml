@@ -22,9 +22,11 @@ spec:
     # See the License for the specific language governing permissions and
     # limitations under the License.
 
-    # Loop devices should not be queried by the LVM and multipath commands.
-    # So we add loop devices into blacklist for multipath and configure
-    # global_filter in lvm.conf for them
+    # Loop devices should not be queried by multipath — they are never
+    # multipath targets. Host-wide LVM also ignores loop devices via
+    # global_filter in lvm.conf; the agent re-attaches managed file-backed
+    # loop devices at startup and passes its own --config global_filter
+    # for every LVM command on managed Volume Groups.
 
     bb-event-on 'bb-sync-file-changed' '_on_multipath_config_changed'
     _on_multipath_config_changed() {

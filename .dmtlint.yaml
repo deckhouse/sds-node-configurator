@@ -11,11 +11,22 @@ linters-settings:
   module:
     oss:
       disable: true
+    exclude-rules:
+      license:
+        directories:
+          # The storage-e2e SDK, checked out into the module's workspace by the
+          # e2e reusable workflow. Runners reuse workspaces, so it is still on
+          # disk when a later job lints the module. It is another repository's
+          # code and carries its own headers; .helmignore alone does not keep
+          # this linter out of it.
+          - _storage-e2e/
   no-cyrillic:
     exclude-rules:
       directories:
         - hack/
         - e2e/
+        # Same leftover checkout: its Russian comments are not ours to fix.
+        - _storage-e2e/
   openapi:
     exclude-rules:
       enum:
