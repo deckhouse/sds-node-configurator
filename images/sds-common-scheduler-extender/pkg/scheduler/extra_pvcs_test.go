@@ -232,11 +232,7 @@ func TestGetManagedPVCsFromPod_ExtraPVCsAnnotation(t *testing.T) {
 	}
 }
 
-const (
-	extraPVCsTestTenGiB     = int64(10 * 1024 * 1024 * 1024)
-	extraPVCsTestHundredGiB = int64(100 * 1024 * 1024 * 1024)
-	extraPVCsTestOneGiB     = int64(1024 * 1024 * 1024)
-)
+const extraPVCsTestTenGiB = int64(10 * 1024 * 1024 * 1024)
 
 // pendingPVCWithSize is testPendingPVC with a caller-chosen request size.
 func pendingPVCWithSize(name, namespace, scName string, size int64) *corev1.PersistentVolumeClaim {
@@ -289,8 +285,8 @@ func TestFilter_AnnotationPVC_LocalRejectsNodeWithoutSpace(t *testing.T) {
 	cl := newFakeClient(
 		sc,
 		pendingPVCWithSize("pvc-hotplug", "default", scName, extraPVCsTestTenGiB),
-		readyLVGOnNode("lvg-a", "node-a", extraPVCsTestHundredGiB, extraPVCsTestHundredGiB),
-		readyLVGOnNode("lvg-b", "node-b", extraPVCsTestHundredGiB, extraPVCsTestOneGiB),
+		readyLVGOnNode("lvg-a", "node-a", hundredGiB, hundredGiB),
+		readyLVGOnNode("lvg-b", "node-b", hundredGiB, oneGiB),
 	)
 	c := newTestCache()
 	s := newTestScheduler(cl, c)
@@ -327,8 +323,8 @@ func TestFilter_NoAnnotation_PodWithoutPVCsIsNoOp(t *testing.T) {
 	cl := newFakeClient(
 		testLocalSC(scName, "lvg-a"),
 		pendingPVCWithSize("pvc-hotplug", "default", scName, extraPVCsTestTenGiB),
-		readyLVGOnNode("lvg-a", "node-a", extraPVCsTestHundredGiB, extraPVCsTestHundredGiB),
-		readyLVGOnNode("lvg-b", "node-b", extraPVCsTestHundredGiB, extraPVCsTestOneGiB),
+		readyLVGOnNode("lvg-a", "node-a", hundredGiB, hundredGiB),
+		readyLVGOnNode("lvg-b", "node-b", hundredGiB, oneGiB),
 	)
 	c := newTestCache()
 	s := newTestScheduler(cl, c)
@@ -363,7 +359,7 @@ func TestFilter_AnnotationPVC_ReplicatedLocalAccess(t *testing.T) {
 		testSC(scName, consts.SdsReplicatedVolumeProvisioner),
 		testRSC(scName, srv.VolumeAccessLocal, rspName),
 		testRSP(rspName, srv.ReplicatedStoragePoolTypeLVM, "lvg-a"),
-		readyLVGOnNode("lvg-a", "node-a", extraPVCsTestHundredGiB, extraPVCsTestHundredGiB),
+		readyLVGOnNode("lvg-a", "node-a", hundredGiB, hundredGiB),
 		testNode("node-a", true),
 		testNode("node-b", true),
 		pendingPVCWithSize("pvc-hotplug", "default", scName, extraPVCsTestTenGiB),

@@ -490,6 +490,7 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 	pvcNames, fromSpec := podPVCNames(pod)
 	managedPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(pvcNames))
 	var newControlPlane *bool
+	var missingAnnotationPVCs []string
 
 	for _, pvcName := range pvcNames {
 		pvcLog := log.WithValues("PVC", pvcName)
@@ -500,9 +501,14 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 			// A PVC named only in the annotation is a hint, not a mount: it may
 			// legitimately not exist yet. Skip it instead of failing the whole
 			// scheduling request. A PVC from pod.Spec.Volumes keeps the previous
-			// fail-the-request behavior.
+			// fail-the-request behavior. Names are collected and reported in a
+			// single aggregated Warning after the loop (see below) instead of one
+			// Warning per PVC, so a stale/mistyped annotation on a Pod that gets
+			// retried by kube-scheduler doesn't flood the logs at the default
+			// (INFO) log level.
 			if apierrors.IsNotFound(err) && !fromSpec[pvcName] {
-				pvcLog.Warning(fmt.Sprintf("[getManagedPVCsFromPod] PVC listed in the %s annotation does not exist, skipping it", consts.PodExtraPVCsAnnotation))
+				pvcLog.Debug(fmt.Sprintf("[getManagedPVCsFromPod] PVC listed in the %s annotation does not exist, skipping it", consts.PodExtraPVCsAnnotation))
+				missingAnnotationPVCs = append(missingAnnotationPVCs, pvcName)
 				continue
 			}
 			return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting PVC: %v", err)
@@ -535,6 +541,10 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 
 		pvcLog.Debug("[getManagedPVCsFromPod] add PVC to the managed PVCs")
 		managedPVCs[pvcName] = pvc
+	}
+
+	if len(missingAnnotationPVCs) > 0 {
+		log.Warning(fmt.Sprintf("[getManagedPVCsFromPod] PVC name(s) listed in the %s annotation do not exist and were skipped (the annotation is a scheduling hint, not a guarantee): %v", consts.PodExtraPVCsAnnotation, missingAnnotationPVCs))
 	}
 
 	return managedPVCs, nil
