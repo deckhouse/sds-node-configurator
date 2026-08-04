@@ -311,7 +311,8 @@ func TestFilter_AnnotationPVC_LocalRejectsNodeWithoutSpace(t *testing.T) {
 		"the rejection reason must name the space problem so it surfaces in the Pod's FailedScheduling event")
 
 	assert.True(t, c.HasReservation("default/pvc-hotplug"),
-		"the annotation PVC must get the same 60s reservation a spec PVC gets (spec section 4)")
+		"the annotation PVC must get the same 60s reservation a spec PVC gets: reservation is built "+
+			"into filter (createReservations), so it follows automatically once the PVC is managed")
 }
 
 // TestFilter_NoAnnotation_PodWithoutPVCsIsNoOp pins backward compatibility at the
@@ -344,11 +345,10 @@ func TestFilter_NoAnnotation_PodWithoutPVCsIsNoOp(t *testing.T) {
 	assert.False(t, c.HasReservation("default/pvc-hotplug"))
 }
 
-// TestFilter_AnnotationPVC_ReplicatedLocalAccess covers the replicated cell of the
-// coverage matrix (spec section 2.3): unbound replicated PVC with
-// volumeAccess=Local must space-reject nodes that carry no LVG from the pool.
-// The e2e stand has no sds-replicated-volume module, so this is the coverage for
-// that path.
+// TestFilter_AnnotationPVC_ReplicatedLocalAccess covers the replicated side of the
+// feature: an unbound replicated PVC with volumeAccess=Local must space-reject nodes
+// that carry no LVG from the storage pool. The e2e stand installs only
+// sds-local-volume, so this handler-level test is the only coverage of that path.
 func TestFilter_AnnotationPVC_ReplicatedLocalAccess(t *testing.T) {
 	const (
 		scName  = "repl-sc"
