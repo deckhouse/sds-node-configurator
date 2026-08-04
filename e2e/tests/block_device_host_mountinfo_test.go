@@ -314,7 +314,7 @@ sudo -n mkfs.ext4 -F %s
 sudo -n mkdir -p %s
 sudo -n mount %s %s
 sudo -n wipefs -a -f %s
-sudo -n udevadm trigger --action=change "$(udevadm info --query=path --name=%s)"
+sudo -n udevadm trigger --action=change -- %s
 sudo -n udevadm settle
 printf '%%s %%s\n' "$(stat -c %%t %s)" "$(stat -c %%T %s)"`,
 			shellQuote(hostPIDMountPath),
@@ -384,7 +384,7 @@ printf '%%s %%s\n' "$(stat -c %%t %s)" "$(stat -c %%T %s)"`,
 sudo -n umount %s
 if mountpoint -q %s; then echo "mount still present after umount" >&2; exit 1; fi
 sudo -n wipefs -a -f %s
-sudo -n udevadm trigger --action=change "$(udevadm info --query=path --name=%s)"
+sudo -n udevadm trigger --action=change -- %s
 sudo -n udevadm settle`,
 			shellQuote(hostPIDMountPath),
 			shellQuote(hostPIDMountPath),
