@@ -17,19 +17,27 @@ limitations under the License.
 package scheduler
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func TestPodExtraPVCsAnnotationKey(t *testing.T) {
@@ -222,4 +230,168 @@ func TestGetManagedPVCsFromPod_ExtraPVCsAnnotation(t *testing.T) {
 			assert.Equal(t, want, got)
 		})
 	}
+}
+
+const (
+	extraPVCsTestTenGiB     = int64(10 * 1024 * 1024 * 1024)
+	extraPVCsTestHundredGiB = int64(100 * 1024 * 1024 * 1024)
+	extraPVCsTestOneGiB     = int64(1024 * 1024 * 1024)
+)
+
+// pendingPVCWithSize is testPendingPVC with a caller-chosen request size.
+func pendingPVCWithSize(name, namespace, scName string, size int64) *corev1.PersistentVolumeClaim {
+	return &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			StorageClassName: &scName,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: *resource.NewQuantity(size, resource.BinarySI),
+				},
+			},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	}
+}
+
+// callFilter posts args to the /filter handler and returns the decoded result.
+func callFilter(t *testing.T, s *scheduler, args ExtenderArgs) ExtenderFilterResult {
+	t.Helper()
+	body, err := json.Marshal(args)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/scheduler/filter", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	s.filter(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, "filter must answer 200; body: %s", w.Body.String())
+	var result ExtenderFilterResult
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+	return result
+}
+
+// TestFilter_AnnotationPVC_LocalRejectsNodeWithoutSpace is the core proof of the
+// feature: a Pod with an EMPTY spec.volumes (the virt-launcher shape) and only the
+// extra-pvcs annotation must still be filtered by free space, and must get a
+// reservation on the surviving node.
+func TestFilter_AnnotationPVC_LocalRejectsNodeWithoutSpace(t *testing.T) {
+	const scName = "local-sc"
+
+	sc := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: scName},
+		Provisioner: consts.SdsLocalVolumeProvisioner,
+		Parameters: map[string]string{
+			consts.LvmTypeParamKey:         consts.Thick,
+			consts.LVMVolumeGroupsParamKey: "- name: lvg-a\n- name: lvg-b\n",
+		},
+	}
+
+	cl := newFakeClient(
+		sc,
+		pendingPVCWithSize("pvc-hotplug", "default", scName, extraPVCsTestTenGiB),
+		readyLVGOnNode("lvg-a", "node-a", extraPVCsTestHundredGiB, extraPVCsTestHundredGiB),
+		readyLVGOnNode("lvg-b", "node-b", extraPVCsTestHundredGiB, extraPVCsTestOneGiB),
+	)
+	c := newTestCache()
+	s := newTestScheduler(cl, c)
+	s.targetProvisioners = []string{consts.SdsLocalVolumeProvisioner}
+
+	nodeNames := []string{"node-a", "node-b"}
+	result := callFilter(t, s, ExtenderArgs{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "virt-launcher",
+				Namespace:   "default",
+				Annotations: map[string]string{consts.PodExtraPVCsAnnotation: "pvc-hotplug"},
+			},
+			// No Volumes on purpose: KubeVirt keeps hotplug disks out of the launcher spec.
+		},
+		NodeNames: &nodeNames,
+	})
+
+	require.NotNil(t, result.NodeNames)
+	assert.Equal(t, []string{"node-a"}, *result.NodeNames, "only the node with free space must survive")
+	assert.Contains(t, result.FailedNodes["node-b"], "does not have enough space for PVC",
+		"the rejection reason must name the space problem so it surfaces in the Pod's FailedScheduling event")
+
+	assert.True(t, c.HasReservation("default/pvc-hotplug"),
+		"the annotation PVC must get the same 60s reservation a spec PVC gets (spec section 4)")
+}
+
+// TestFilter_NoAnnotation_PodWithoutPVCsIsNoOp pins backward compatibility at the
+// handler level: without the annotation, a Pod with no PVCs gets every node back
+// and no reservation is created.
+func TestFilter_NoAnnotation_PodWithoutPVCsIsNoOp(t *testing.T) {
+	const scName = "local-sc"
+
+	cl := newFakeClient(
+		testLocalSC(scName, "lvg-a"),
+		pendingPVCWithSize("pvc-hotplug", "default", scName, extraPVCsTestTenGiB),
+		readyLVGOnNode("lvg-a", "node-a", extraPVCsTestHundredGiB, extraPVCsTestHundredGiB),
+		readyLVGOnNode("lvg-b", "node-b", extraPVCsTestHundredGiB, extraPVCsTestOneGiB),
+	)
+	c := newTestCache()
+	s := newTestScheduler(cl, c)
+	s.targetProvisioners = []string{consts.SdsLocalVolumeProvisioner}
+
+	nodeNames := []string{"node-a", "node-b"}
+	result := callFilter(t, s, ExtenderArgs{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "virt-launcher", Namespace: "default"},
+		},
+		NodeNames: &nodeNames,
+	})
+
+	require.NotNil(t, result.NodeNames)
+	assert.ElementsMatch(t, nodeNames, *result.NodeNames, "without the annotation the extender must stay a no-op")
+	assert.Empty(t, result.FailedNodes)
+	assert.False(t, c.HasReservation("default/pvc-hotplug"))
+}
+
+// TestFilter_AnnotationPVC_ReplicatedLocalAccess covers the replicated cell of the
+// coverage matrix (spec section 2.3): unbound replicated PVC with
+// volumeAccess=Local must space-reject nodes that carry no LVG from the pool.
+// The e2e stand has no sds-replicated-volume module, so this is the coverage for
+// that path.
+func TestFilter_AnnotationPVC_ReplicatedLocalAccess(t *testing.T) {
+	const (
+		scName  = "repl-sc"
+		rspName = "repl-pool"
+	)
+
+	cl := newFakeClient(
+		testSC(scName, consts.SdsReplicatedVolumeProvisioner),
+		testRSC(scName, srv.VolumeAccessLocal, rspName),
+		testRSP(rspName, srv.ReplicatedStoragePoolTypeLVM, "lvg-a"),
+		readyLVGOnNode("lvg-a", "node-a", extraPVCsTestHundredGiB, extraPVCsTestHundredGiB),
+		testNode("node-a", true),
+		testNode("node-b", true),
+		pendingPVCWithSize("pvc-hotplug", "default", scName, extraPVCsTestTenGiB),
+		&d8commonapi.ModuleConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: "sds-replicated-volume"},
+			Spec: d8commonapi.ModuleConfigSpec{
+				Settings: d8commonapi.SettingsValues{"newControlPlane": true},
+			},
+		},
+	)
+	c := newTestCache()
+	s := newTestScheduler(cl, c)
+	s.targetProvisioners = []string{consts.SdsReplicatedVolumeProvisioner}
+
+	nodeNames := []string{"node-a", "node-b"}
+	result := callFilter(t, s, ExtenderArgs{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "virt-launcher",
+				Namespace:   "default",
+				Annotations: map[string]string{consts.PodExtraPVCsAnnotation: "pvc-hotplug"},
+			},
+		},
+		NodeNames: &nodeNames,
+	})
+
+	require.NotNil(t, result.NodeNames)
+	assert.Equal(t, []string{"node-a"}, *result.NodeNames,
+		"only the node carrying an LVG of the replicated storage pool must survive")
+	assert.Contains(t, result.FailedNodes["node-b"], "no LVG from RSP repl-pool found on node node-b")
 }

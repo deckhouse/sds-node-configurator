@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
@@ -40,6 +41,7 @@ func init() {
 	_ = srv.AddToScheme(scheme.Scheme)
 	_ = corev1.AddToScheme(scheme.Scheme)
 	_ = storagev1.AddToScheme(scheme.Scheme)
+	_ = d8commonapi.AddToScheme(scheme.Scheme)
 }
 
 func newTestScheduler(cl client.Client, c *cache.Cache) *scheduler {
