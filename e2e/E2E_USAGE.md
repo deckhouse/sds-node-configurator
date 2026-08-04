@@ -208,8 +208,8 @@ Real labels (from `tests/*.go`): `sds-node-configurator`, `block-device`,
 `discovery`, `block-device-stable`, `host-pid`, `netlink-discovery`, `lvmvolumegroup`,
 `controller-restart`, `schedule-extender` (with `small`/`medium`/`large`),
 `regress`, and `stress-test`. The Makefile default is `GINKGO_LABEL_FILTER ?= !stress-test`
-(matching the storage-e2e reusable workflow default). The `host-pid` spec requires
-`E2E_DEBUG_IMAGE` (see the suite-specific env table below).
+(matching the storage-e2e reusable workflow default). The `host-pid` spec skips
+unless `E2E_DEBUG_IMAGE` is set (see the suite-specific env table below).
 
 ```bash
 # smoke (default)
@@ -275,7 +275,7 @@ workflow re-exports the needed values under these names before `go test`):
 | `TEST_CLUSTER_NAMESPACE` | `TestCluster.Namespace` | `e2e-test-cluster` | test namespace |
 | `E2E_DVP_BASE_CLUSTER_STORAGE_CLASS` | `TestCluster.StorageClass` | — | required by specs for `VirtualDisk` creation |
 | `MODULES_MODULE_TAG` | `ModulesImageTag` | `main` | module image tag used by specs |
-| `E2E_DEBUG_IMAGE` | `DebugImage` | — | image for the ephemeral reader container (busybox-like: `cat`, `sleep`, `sh`); required by the `host-pid` spec; use a registry/mirror image, prefer digest pin |
+| `E2E_DEBUG_IMAGE` | `DebugImage` | — | image for the ephemeral reader container (busybox-like: `cat`, `sleep`, `sh`); the `host-pid` spec skips when unset; CI sets it via workflow `extra_env` (prefer a registry/mirror digest pin) |
 
 ### Stress config (`cfg.LoadStress`, loaded lazily only by the stress spec)
 
