@@ -447,50 +447,94 @@ func parseExtraPVCNames(value string) []string {
 	return names
 }
 
+// podPVCNames returns the names of the PVCs relevant for scheduling this Pod:
+// the ones mounted through pod.Spec.Volumes plus the ones listed in the
+// PodExtraPVCsAnnotation annotation. Hotplug volumes are deliberately kept out
+// of the launcher Pod's spec.volumes by KubeVirt, so the annotation is the only
+// way the extender learns about them.
+//
+// Names are deduplicated, spec-volume order first. fromSpec marks the names that
+// came from pod.Spec.Volumes: for those a missing PVC keeps failing the whole
+// scheduling request (unchanged behavior), while a missing annotation-only PVC
+// is skipped.
+func podPVCNames(pod *corev1.Pod) (names []string, fromSpec map[string]bool) {
+	fromSpec = make(map[string]bool, len(pod.Spec.Volumes))
+	seen := make(map[string]struct{}, len(pod.Spec.Volumes))
+
+	for _, volume := range pod.Spec.Volumes {
+		if volume.PersistentVolumeClaim == nil {
+			continue
+		}
+		name := volume.PersistentVolumeClaim.ClaimName
+		fromSpec[name] = true
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+
+	for _, name := range parseExtraPVCNames(pod.Annotations[consts.PodExtraPVCsAnnotation]) {
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+
+	return names, fromSpec
+}
+
 // Get all PVCs from the Pod which are managed by our modules
 func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Logger, pod *corev1.Pod, targetProvisioners []string) (map[string]*corev1.PersistentVolumeClaim, error) {
-	var discoveredProvisioner string
-	managedPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(pod.Spec.Volumes))
+	pvcNames, fromSpec := podPVCNames(pod)
+	managedPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(pvcNames))
 	var newControlPlane *bool
-	for _, volume := range pod.Spec.Volumes {
-		if volume.PersistentVolumeClaim != nil {
-			pvcName := volume.PersistentVolumeClaim.ClaimName
-			log = log.WithValues("PVC", pvcName)
 
-			pvc := &corev1.PersistentVolumeClaim{}
-			err := cl.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pvcName}, pvc)
-			if err != nil {
-				return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting PVC: %v", err)
-			}
+	for _, pvcName := range pvcNames {
+		pvcLog := log.WithValues("PVC", pvcName)
 
-			discoveredProvisioner, err = discoverProvisionerForPVC(ctx, cl, log, pvc)
-			if err != nil {
-				return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting provisioner: %v", err)
-			}
-			log.Trace(fmt.Sprintf("[getManagedPVCsFromPod] discovered provisioner: %s", discoveredProvisioner))
-
-			if !slices.Contains(targetProvisioners, discoveredProvisioner) {
-				log.Debug(fmt.Sprintf("[getManagedPVCsFromPod] provisioner not matches targetProvisioners %+v", targetProvisioners))
+		pvc := &corev1.PersistentVolumeClaim{}
+		err := cl.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pvcName}, pvc)
+		if err != nil {
+			// A PVC named only in the annotation is a hint, not a mount: it may
+			// legitimately not exist yet. Skip it instead of failing the whole
+			// scheduling request. A PVC from pod.Spec.Volumes keeps the previous
+			// fail-the-request behavior.
+			if apierrors.IsNotFound(err) && !fromSpec[pvcName] {
+				pvcLog.Warning(fmt.Sprintf("[getManagedPVCsFromPod] PVC listed in the %s annotation does not exist, skipping it", consts.PodExtraPVCsAnnotation))
 				continue
 			}
+			return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting PVC: %v", err)
+		}
 
-			if discoveredProvisioner == consts.SdsReplicatedVolumeProvisioner {
-				if newControlPlane == nil {
-					newControlPlane, err = getNewControlPlane(ctx, cl, log)
-					if err != nil {
-						return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting newControlPlane: %v", err)
-					}
-				}
+		discoveredProvisioner, err := discoverProvisionerForPVC(ctx, cl, pvcLog, pvc)
+		if err != nil {
+			return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting provisioner: %v", err)
+		}
+		pvcLog.Trace(fmt.Sprintf("[getManagedPVCsFromPod] discovered provisioner: %s", discoveredProvisioner))
 
-				if !*newControlPlane {
-					log.Debug("[getManagedPVCsFromPod] filter out PVC due to used provisioner is managed by the Linstor")
-					continue
+		if !slices.Contains(targetProvisioners, discoveredProvisioner) {
+			pvcLog.Debug(fmt.Sprintf("[getManagedPVCsFromPod] provisioner not matches targetProvisioners %+v", targetProvisioners))
+			continue
+		}
+
+		if discoveredProvisioner == consts.SdsReplicatedVolumeProvisioner {
+			if newControlPlane == nil {
+				newControlPlane, err = getNewControlPlane(ctx, cl, pvcLog)
+				if err != nil {
+					return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting newControlPlane: %v", err)
 				}
 			}
 
-			log.Debug("[getManagedPVCsFromPod] add PVC to the managed PVCs")
-			managedPVCs[pvcName] = pvc
+			if !*newControlPlane {
+				pvcLog.Debug("[getManagedPVCsFromPod] filter out PVC due to used provisioner is managed by the Linstor")
+				continue
+			}
 		}
+
+		pvcLog.Debug("[getManagedPVCsFromPod] add PVC to the managed PVCs")
+		managedPVCs[pvcName] = pvc
 	}
 
 	return managedPVCs, nil

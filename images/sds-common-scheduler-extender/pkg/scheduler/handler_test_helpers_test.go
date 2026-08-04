@@ -385,7 +385,7 @@ func testLocalThinSC(name, lvgName, thinPoolName string) *storagev1.StorageClass
 	}
 }
 
-func testPendingPVC(name, namespace, scName string) *corev1.PersistentVolumeClaim {
+func testPendingPVC(name, namespace, scName string) *corev1.PersistentVolumeClaim { //nolint:unparam
 	return &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 		Spec: corev1.PersistentVolumeClaimSpec{
