@@ -252,9 +252,17 @@ sudo -n rmdir %s 2>/dev/null || true`,
 		Expect(bd.Status.Path).NotTo(BeEmpty())
 		Expect(bd.Status.Path).To(HavePrefix("/dev/"),
 			"resolved BlockDevice %s path %q is not a /dev/ device; refusing to mkfs", bdName, bd.Status.Path)
+		// VirtualDisk capacity often rounds up a few MiB above the PVC request
+		// (here: 5Gi → 5245816Ki). Match netlink_discovery_test: accept
+		// [requested, requested+16Mi].
 		wantSize := resource.MustParse(hostPIDDiskSize)
-		Expect(bd.Status.Size.Equal(wantSize)).To(BeTrue(),
-			"resolved BlockDevice %s is not the %s disk just attached (got %s); refusing to mkfs %s",
+		maxSize := wantSize.DeepCopy()
+		maxSize.Add(resource.MustParse("16Mi"))
+		Expect(bd.Status.Size.Cmp(wantSize)).NotTo(BeNumerically("<", 0),
+			"resolved BlockDevice %s size must be >= requested %s (got %s); refusing to mkfs %s",
+			bdName, hostPIDDiskSize, bd.Status.Size.String(), bd.Status.Path)
+		Expect(bd.Status.Size.Cmp(maxSize)).NotTo(BeNumerically(">", 0),
+			"resolved BlockDevice %s size must be <= requested %s + 16Mi (got %s); refusing to mkfs %s",
 			bdName, hostPIDDiskSize, bd.Status.Size.String(), bd.Status.Path)
 		devicePath = bd.Status.Path
 
