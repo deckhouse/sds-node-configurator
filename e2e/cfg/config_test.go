@@ -42,7 +42,7 @@ func TestLoad(t *testing.T) {
 			StorageClass: "linstor-r1",
 		},
 		ModulesImageTag: "main",
-		DebugImage:      "busybox:1.36",
+		DebugImage:      "",
 	}, got)
 }
 

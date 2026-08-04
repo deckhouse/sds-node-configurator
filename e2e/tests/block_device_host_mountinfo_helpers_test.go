@@ -33,14 +33,14 @@ func TestParseHexDeviceID(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		"simple":         {in: "fd 10\n", want: "253:16"},
-		"zero major":     {in: "0 a\n", want: "0:10"},
-		"trailing junk":  {in: "warn: foo\nfd 10\n", want: "253:16"},
-		"empty":          {in: "", wantErr: true},
-		"whitespace":     {in: "   \n", wantErr: true},
-		"one field":      {in: "fd\n", wantErr: true},
-		"not hex":        {in: "zz 10\n", wantErr: true},
-		"three fields":   {in: "fd 10 extra\n", wantErr: true},
+		"simple":        {in: "fd 10\n", want: "253:16"},
+		"zero major":    {in: "0 a\n", want: "0:10"},
+		"trailing junk": {in: "warn: foo\nfd 10\n", want: "253:16"},
+		"empty":         {in: "", wantErr: true},
+		"whitespace":    {in: "   \n", wantErr: true},
+		"one field":     {in: "fd\n", wantErr: true},
+		"not hex":       {in: "zz 10\n", wantErr: true},
+		"three fields":  {in: "fd 10 extra\n", wantErr: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -98,4 +98,27 @@ func TestDaemonSetEnvIsTrue(t *testing.T) {
 
 	ds.Spec.Template.Spec.Containers[0].Env[0].Value = "false"
 	assert.False(t, daemonSetEnvIsTrue(ds, "sds-node-configurator-agent", "ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY"))
+}
+
+func TestAgentContainerID(t *testing.T) {
+	t.Parallel()
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent"},
+		Status: v1.PodStatus{
+			ContainerStatuses: []v1.ContainerStatus{
+				{Name: "other", ContainerID: "containerd://aaa"},
+				{Name: "sds-node-configurator-agent", ContainerID: "containerd://abc123def"},
+			},
+		},
+	}
+	got, err := agentContainerID(pod, "sds-node-configurator-agent")
+	require.NoError(t, err)
+	assert.Equal(t, "abc123def", got)
+
+	_, err = agentContainerID(pod, "missing")
+	require.Error(t, err)
+
+	pod.Status.ContainerStatuses[1].ContainerID = ""
+	_, err = agentContainerID(pod, "sds-node-configurator-agent")
+	require.Error(t, err)
 }

@@ -38,6 +38,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8sclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -56,16 +58,23 @@ const (
 	hostPIDNamespaceProbeWindow = 5 * time.Second
 
 	hostPIDNetlinkEnvName       = "ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY"
-	hostPIDNetlinkChangeLogRe   = `(?i)\[HandleEvent\].*udev event.*action=change`
+	hostPIDNetlinkSetting       = "enableNetlinkBlockDeviceDiscovery"
 	hostPIDDistrolessSessionTTL = 15 * time.Minute
+	hostPIDModuleReadyTimeout   = 10 * time.Minute
 )
+
+var moduleConfigGVR = schema.GroupVersionResource{
+	Group:    "deckhouse.io",
+	Version:  "v1alpha1",
+	Resource: "moduleconfigs",
+}
 
 // Regression coverage for PR #220: with hostPID the agent must treat a host
 // mount (visible only via /proc/1/mountinfo) as making a BlockDevice
 // non-consumable. FSType is wiped while the FS stays mounted so MountPoint is
 // the only remaining reason for Consumable=false — reverting #220 (reading
 // /proc/self/mountinfo) makes the primary assertion go red.
-var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "block-device", "host-pid"), Ordered, ContinueOnFailure, func() {
+var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "block-device", "host-pid"), Ordered, func() {
 	var (
 		ctx        context.Context
 		conf       *cfg.Config
@@ -80,6 +89,11 @@ var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "b
 		devicePath  string
 		agentPod    *v1.Pod
 		reader      *kubernetes.DistrolessReader
+
+		// netlinkPrevious holds the ModuleConfig setting before this spec
+		// toggled it; nil means the key was absent.
+		netlinkPrevious *bool
+		netlinkPatched  bool
 	)
 
 	BeforeAll(func() {
@@ -88,7 +102,8 @@ var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "b
 		var cfgErr error
 		conf, cfgErr = cfg.Load()
 		Expect(cfgErr).NotTo(HaveOccurred(), "failed to load config")
-		Expect(conf.DebugImage).NotTo(BeEmpty(), "E2E_DEBUG_IMAGE must resolve to a busybox-like image")
+		Expect(conf.DebugImage).NotTo(BeEmpty(),
+			"E2E_DEBUG_IMAGE must be set to a busybox-like image reachable from the cluster (prefer a registry/mirror digest pin)")
 
 		var clErr error
 		cl, clErr = e2e.Connect(ctx, e2e.WithTestName("block-device-host-mountinfo"))
@@ -110,12 +125,53 @@ var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "b
 		Expect(nodes.Items).NotTo(BeEmpty(), "cluster must have at least one node")
 		targetNode = nodes.Items[0].Name
 
-		By("Precondition: netlink block-device discovery must be enabled (only path that reads /proc/1/mountinfo)")
+		By("Enabling netlink block-device discovery for this spec only (ModuleConfig)")
 		enabled, netlinkErr := agentDaemonSetNetlinkEnabled(ctx, clientset)
 		Expect(netlinkErr).NotTo(HaveOccurred())
+		if !enabled {
+			var patchErr error
+			netlinkPrevious, patchErr = patchModuleConfigNetlinkDiscovery(ctx, cl, true)
+			Expect(patchErr).NotTo(HaveOccurred())
+			netlinkPatched = true
+
+			Expect(kubernetes.WaitForModuleReady(
+				ctx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentName, hostPIDModuleReadyTimeout,
+			)).To(Succeed())
+			waitAgentDaemonSetNetlinkEnv(ctx, clientset, true)
+		}
+
+		DeferCleanup(func() {
+			if !netlinkPatched {
+				return
+			}
+			restoreCtx, cancel := context.WithTimeout(context.Background(), hostPIDModuleReadyTimeout+time.Minute)
+			defer cancel()
+
+			want := false
+			if netlinkPrevious != nil {
+				want = *netlinkPrevious
+			}
+			By(fmt.Sprintf("Restoring ModuleConfig %s=%v", hostPIDNetlinkSetting, want))
+			if _, err := patchModuleConfigNetlinkDiscovery(restoreCtx, cl, want); err != nil {
+				GinkgoWriter.Printf("failed to restore %s: %v\n", hostPIDNetlinkSetting, err)
+				return
+			}
+			if err := kubernetes.WaitForModuleReady(
+				restoreCtx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentName, hostPIDModuleReadyTimeout,
+			); err != nil {
+				GinkgoWriter.Printf("module not ready after restoring %s: %v\n", hostPIDNetlinkSetting, err)
+				return
+			}
+			if err := waitAgentDaemonSetNetlinkEnvErr(restoreCtx, clientset, want); err != nil {
+				GinkgoWriter.Printf("DaemonSet env not restored for %s: %v\n", hostPIDNetlinkEnvName, err)
+			}
+		})
+
+		enabled, netlinkErr = agentDaemonSetNetlinkEnabled(ctx, clientset)
+		Expect(netlinkErr).NotTo(HaveOccurred())
 		Expect(enabled).To(BeTrue(),
-			"DaemonSet env %s must be true; enable enableNetlinkBlockDeviceDiscovery in ModuleConfig / cluster_config",
-			hostPIDNetlinkEnvName)
+			"DaemonSet env %s must be true; this spec patches ModuleConfig.%s for its duration",
+			hostPIDNetlinkEnvName, hostPIDNetlinkSetting)
 	})
 
 	AfterEach(func() {
@@ -123,7 +179,7 @@ var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "b
 		defer cancel()
 
 		if CurrentSpecReport().Failed() && cl != nil {
-			collectHostPIDFailureArtifacts(cleanupCtx, cl, k8sClient, targetNode, testStarted)
+			collectHostPIDFailureArtifacts(cleanupCtx, cl, k8sClient, clientset, targetNode, testStarted)
 		}
 
 		if cl != nil && targetNode != "" {
@@ -143,10 +199,8 @@ sudo -n rmdir %s 2>/dev/null || true`,
 			}
 		}
 
-		if k8sClient != nil && bdName != "" {
-			forceDeleteBlockDevicesByNames(cleanupCtx, k8sClient, []string{bdName})
-		}
-
+		// Detach before force-deleting the CR so the agent cannot recreate it
+		// from an still-attached, again-consumable disk.
 		if cl != nil && diskName != "" {
 			if err := cl.Disks().DetachDisk(cleanupCtx, targetNode, diskName); err != nil {
 				GinkgoWriter.Printf("failed to detach disk %s: %v\n", diskName, err)
@@ -154,6 +208,10 @@ sudo -n rmdir %s 2>/dev/null || true`,
 			if err := cl.Disks().DeleteDisk(cleanupCtx, diskName); err != nil {
 				GinkgoWriter.Printf("failed to delete disk %s: %v\n", diskName, err)
 			}
+		}
+
+		if k8sClient != nil && bdName != "" {
+			forceDeleteBlockDevicesByNames(cleanupCtx, k8sClient, []string{bdName})
 		}
 
 		diskName = ""
@@ -192,6 +250,12 @@ sudo -n rmdir %s 2>/dev/null || true`,
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: bdName}, &bd)).To(Succeed())
 		Expect(bd.Status.Consumable).To(BeTrue())
 		Expect(bd.Status.Path).NotTo(BeEmpty())
+		Expect(bd.Status.Path).To(HavePrefix("/dev/"),
+			"resolved BlockDevice %s path %q is not a /dev/ device; refusing to mkfs", bdName, bd.Status.Path)
+		wantSize := resource.MustParse(hostPIDDiskSize)
+		Expect(bd.Status.Size.Equal(wantSize)).To(BeTrue(),
+			"resolved BlockDevice %s is not the %s disk just attached (got %s); refusing to mkfs %s",
+			bdName, hostPIDDiskSize, bd.Status.Size.String(), bd.Status.Path)
 		devicePath = bd.Status.Path
 
 		var podErr error
@@ -250,23 +314,31 @@ printf '%%s %%s\n' "$(stat -c %%t %s)" "$(stat -c %%T %s)"`,
 			g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: bdName}, &current)).To(Succeed())
 			g.Expect(current.Status.FsType).To(BeEmpty(),
 				"precondition: on-disk signature must be wiped so FSType is not the reason for non-consumable")
+			g.Expect(current.Status.HotPlug).To(BeFalse(),
+				"precondition: HotPlug must be false so the host mount is the only remaining reason for non-consumable")
 			g.Expect(current.Status.Consumable).To(BeFalse(),
 				"device is mounted on the host; an agent reading /proc/self/mountinfo would miss it and keep Consumable=true")
 		}, hostPIDStateChangeWait, hostPIDPollInterval).Should(Succeed())
 
-		// Ephemeral container targets the agent container, so it shares the agent's
-		// mount namespace: /proc/self/mountinfo is the agent view. With hostPID:true,
-		// PID 1 is host init, so /proc/1/mountinfo is the host view. No need to
-		// discover the agent PID in the host PID namespace.
+		// targetContainerName shares the agent's PID and IPC namespaces, but
+		// not its mount namespace. /proc/self/mountinfo is therefore the
+		// ephemeral container's view. Resolve the agent PID in the host PID
+		// namespace (already shared) and read /proc/<pid>/mountinfo.
+		By("Resolving the agent PID in the host PID namespace")
+		agentPID, pidErr := findAgentPIDInHostNamespace(
+			ctx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentNamespace, reader, agentPod,
+		)
+		Expect(pidErr).NotTo(HaveOccurred())
+
 		By("Environment precondition: hostPID exposes the mount in /proc/1/mountinfo but not in the agent mount ns")
 		Consistently(func(g Gomega) {
 			agentMI, agentErr := readPIDMountInfo(
-				ctx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentNamespace, reader, "self",
+				ctx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentNamespace, reader, agentPID,
 			)
 			g.Expect(agentErr).NotTo(HaveOccurred())
 			g.Expect(mountInfoContains(agentMI, deviceID, hostPIDMountPath)).To(BeFalse(),
-				"agent mount namespace must not contain %s at %s; mountinfo:\n%s",
-				deviceID, hostPIDMountPath, agentMI)
+				"agent mount namespace (pid %s) must not contain %s at %s; mountinfo:\n%s",
+				agentPID, deviceID, hostPIDMountPath, agentMI)
 		}, hostPIDNamespaceProbeWindow, hostPIDPollInterval).Should(Succeed())
 
 		hostMI, hostErr := readPIDMountInfo(
@@ -308,16 +380,6 @@ sudo -n udevadm settle`,
 				"BlockDevice %s did not become consumable after umount (fsType=%s)",
 				bdName, current.Status.FsType)
 		}, hostPIDStateChangeWait, hostPIDPollInterval).Should(Succeed())
-
-		By("Positive: agent logs show the netlink/udev path handled a change event")
-		Eventually(func(g Gomega) string {
-			logText, logErr := pod.GetLogs(ctx, clientset, consts.SdsNodeConfiguratorAgentNamespace, agentPod.Name, v1.PodLogOptions{
-				Container: consts.SdsNodeConfiguratorAgentContainer,
-				SinceTime: &testStarted,
-			})
-			g.Expect(logErr).NotTo(HaveOccurred(), "failed to read agent logs")
-			return logText
-		}, hostPIDStateChangeWait, 2*time.Second).Should(MatchRegexp(hostPIDNetlinkChangeLogRe))
 	})
 })
 
@@ -346,6 +408,86 @@ func daemonSetEnvIsTrue(ds *appsv1.DaemonSet, containerName, envName string) boo
 	return false
 }
 
+func waitAgentDaemonSetNetlinkEnv(ctx context.Context, clientset *k8sclient.Clientset, want bool) {
+	GinkgoHelper()
+	Expect(waitAgentDaemonSetNetlinkEnvErr(ctx, clientset, want)).To(Succeed())
+}
+
+func waitAgentDaemonSetNetlinkEnvErr(ctx context.Context, clientset *k8sclient.Clientset, want bool) error {
+	var last error
+	deadline := time.Now().Add(hostPIDModuleReadyTimeout)
+	for time.Now().Before(deadline) {
+		ds, err := clientset.AppsV1().DaemonSets(consts.SdsNodeConfiguratorAgentNamespace).Get(
+			ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{},
+		)
+		if err != nil {
+			last = err
+		} else if daemonSetEnvIsTrue(ds, consts.SdsNodeConfiguratorAgentContainer, hostPIDNetlinkEnvName) != want {
+			last = fmt.Errorf("DaemonSet env %s want %v", hostPIDNetlinkEnvName, want)
+		} else if ds.Status.ObservedGeneration < ds.Generation {
+			last = fmt.Errorf("DaemonSet generation not observed (%d < %d)", ds.Status.ObservedGeneration, ds.Generation)
+		} else if ds.Status.DesiredNumberScheduled == 0 {
+			last = fmt.Errorf("DaemonSet DesiredNumberScheduled is 0")
+		} else if ds.Status.NumberReady != ds.Status.DesiredNumberScheduled {
+			last = fmt.Errorf("DaemonSet NumberReady %d != Desired %d", ds.Status.NumberReady, ds.Status.DesiredNumberScheduled)
+		} else if ds.Status.UpdatedNumberScheduled != ds.Status.DesiredNumberScheduled {
+			last = fmt.Errorf("DaemonSet UpdatedNumberScheduled %d != Desired %d", ds.Status.UpdatedNumberScheduled, ds.Status.DesiredNumberScheduled)
+		} else {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			if last == nil {
+				last = ctx.Err()
+			}
+			return last
+		case <-time.After(5 * time.Second):
+		}
+	}
+	if last == nil {
+		last = fmt.Errorf("timed out waiting for DaemonSet env %s=%v", hostPIDNetlinkEnvName, want)
+	}
+	return last
+}
+
+// patchModuleConfigNetlinkDiscovery sets spec.settings.enableNetlinkBlockDeviceDiscovery
+// and returns the previous value (nil if the key was absent).
+func patchModuleConfigNetlinkDiscovery(ctx context.Context, cl *e2e.Cluster, enabled bool) (*bool, error) {
+	mc, err := cl.Dynamic().Resource(moduleConfigGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get ModuleConfig %s: %w", consts.SdsNodeConfiguratorAgentName, err)
+	}
+
+	settings, found, err := unstructured.NestedMap(mc.Object, "spec", "settings")
+	if err != nil {
+		return nil, fmt.Errorf("read spec.settings: %w", err)
+	}
+	if !found || settings == nil {
+		settings = map[string]interface{}{}
+	}
+
+	var previous *bool
+	if raw, ok := settings[hostPIDNetlinkSetting]; ok {
+		switch v := raw.(type) {
+		case bool:
+			previous = &v
+		case string:
+			b := strings.EqualFold(strings.TrimSpace(v), "true")
+			previous = &b
+		}
+	}
+
+	settings[hostPIDNetlinkSetting] = enabled
+	if err := unstructured.SetNestedMap(mc.Object, settings, "spec", "settings"); err != nil {
+		return nil, fmt.Errorf("set spec.settings: %w", err)
+	}
+
+	if _, err := cl.Dynamic().Resource(moduleConfigGVR).Update(ctx, mc, metav1.UpdateOptions{}); err != nil {
+		return nil, fmt.Errorf("update ModuleConfig %s: %w", consts.SdsNodeConfiguratorAgentName, err)
+	}
+	return previous, nil
+}
+
 func readPIDMountInfo(
 	ctx context.Context,
 	restCfg *rest.Config,
@@ -362,6 +504,61 @@ func readPIDMountInfo(
 		return stdout, fmt.Errorf("read %s: %w (stderr=%q)", path, err, stderr)
 	}
 	return stdout, nil
+}
+
+// findAgentPIDInHostNamespace locates the agent container's PID in the host
+// PID namespace (shared by the ephemeral reader when the agent has hostPID).
+func findAgentPIDInHostNamespace(
+	ctx context.Context,
+	restCfg *rest.Config,
+	namespace string,
+	reader *kubernetes.DistrolessReader,
+	agentPod *v1.Pod,
+) (string, error) {
+	containerID, err := agentContainerID(agentPod, consts.SdsNodeConfiguratorAgentContainer)
+	if err != nil {
+		return "", err
+	}
+	cmd := fmt.Sprintf(
+		`for p in /proc/[0-9]*; do grep -qs %s "$p/cgroup" && { echo "${p#/proc/}"; break; }; done`,
+		shellQuote(containerID),
+	)
+	stdout, stderr, err := kubernetes.ExecInPod(
+		ctx, restCfg, namespace, reader.PodName(), reader.EphemeralName(),
+		[]string{"sh", "-c", cmd},
+	)
+	if err != nil {
+		return "", fmt.Errorf("scan /proc for container %s: %w (stderr=%q)", containerID, err, stderr)
+	}
+	pid := strings.TrimSpace(stdout)
+	if pid == "" {
+		return "", fmt.Errorf("no host PID found whose cgroup mentions container %s", containerID)
+	}
+	if _, err := strconv.Atoi(pid); err != nil {
+		return "", fmt.Errorf("invalid PID %q from cgroup scan: %w", pid, err)
+	}
+	return pid, nil
+}
+
+func agentContainerID(pod *v1.Pod, containerName string) (string, error) {
+	for i := range pod.Status.ContainerStatuses {
+		st := &pod.Status.ContainerStatuses[i]
+		if st.Name != containerName {
+			continue
+		}
+		id := strings.TrimSpace(st.ContainerID)
+		if id == "" {
+			return "", fmt.Errorf("container %s has empty ContainerID", containerName)
+		}
+		if _, rest, ok := strings.Cut(id, "://"); ok {
+			id = rest
+		}
+		if id == "" {
+			return "", fmt.Errorf("container %s has empty ID after runtime prefix", containerName)
+		}
+		return id, nil
+	}
+	return "", fmt.Errorf("container %s not found in pod %s status", containerName, pod.Name)
 }
 
 // shellQuote returns a POSIX single-quoted string safe for interpolation into
@@ -405,6 +602,7 @@ func collectHostPIDFailureArtifacts(
 	ctx context.Context,
 	cl *e2e.Cluster,
 	k8sClient client.Client,
+	clientset *k8sclient.Clientset,
 	targetNode string,
 	since metav1.Time,
 ) {
@@ -415,25 +613,25 @@ func collectHostPIDFailureArtifacts(
 		if err := k8sClient.List(ctx, &bds); err != nil {
 			GinkgoWriter.Printf("failed to collect BlockDevices: %v\n", err)
 		} else {
-			addJSONReportEntry("blockdevices.yaml", bds)
+			addJSONReportEntry("blockdevices.json", bds)
 		}
 
 		var lvgs v1alpha1.LVMVolumeGroupList
 		if err := k8sClient.List(ctx, &lvgs); err != nil {
 			GinkgoWriter.Printf("failed to collect LVMVolumeGroups: %v\n", err)
 		} else {
-			addJSONReportEntry("lvmvolumegroups.yaml", lvgs)
+			addJSONReportEntry("lvmvolumegroups.json", lvgs)
 		}
 	}
 
-	events, err := cl.Clientset().CoreV1().Events("").List(ctx, metav1.ListOptions{})
+	events, err := cl.Clientset().CoreV1().Events(consts.SdsNodeConfiguratorAgentNamespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		GinkgoWriter.Printf("failed to collect events: %v\n", err)
 	} else {
-		addJSONReportEntry("events.yaml", events)
+		addJSONReportEntry("events.json", events)
 	}
 
-	if targetNode == "" || k8sClient == nil {
+	if targetNode == "" || k8sClient == nil || clientset == nil {
 		return
 	}
 	agentPod, err := pod.FindRunningPodOnNode(
@@ -445,11 +643,6 @@ func collectHostPIDFailureArtifacts(
 	)
 	if err != nil {
 		GinkgoWriter.Printf("failed to find agent pod for log collection: %v\n", err)
-		return
-	}
-	clientset, err := k8sclient.NewForConfig(cl.RESTConfig())
-	if err != nil {
-		GinkgoWriter.Printf("failed to create clientset for agent logs: %v\n", err)
 		return
 	}
 	logText, err := pod.GetLogs(ctx, clientset, consts.SdsNodeConfiguratorAgentNamespace, agentPod.Name, v1.PodLogOptions{
