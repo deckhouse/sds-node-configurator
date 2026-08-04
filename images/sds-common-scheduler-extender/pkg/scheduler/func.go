@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/stretchr/testify/assert/yaml"
 	corev1 "k8s.io/api/core/v1"
@@ -420,6 +421,30 @@ func getNodeNames(inputData ExtenderArgs) ([]string, error) {
 	}
 
 	return nil, fmt.Errorf("no nodes provided")
+}
+
+// parseExtraPVCNames parses the CSV value of the PodExtraPVCsAnnotation
+// annotation. Entries are trimmed and empty ones are dropped, so a malformed
+// value ("a,,b", " , ") degrades to the usable names instead of an error: the
+// annotation is a scheduling hint and must never fail a scheduling request.
+// Input order is preserved; deduplication is the caller's job.
+func parseExtraPVCNames(value string) []string {
+	if value == "" {
+		return nil
+	}
+
+	parts := strings.Split(value, ",")
+	names := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			names = append(names, trimmed)
+		}
+	}
+
+	if len(names) == 0 {
+		return nil
+	}
+	return names
 }
 
 // Get all PVCs from the Pod which are managed by our modules
