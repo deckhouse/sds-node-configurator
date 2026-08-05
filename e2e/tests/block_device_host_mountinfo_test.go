@@ -36,13 +36,11 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8sclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -59,22 +57,18 @@ const (
 	hostPIDNamespaceProbeWindow = 12 * time.Second
 
 	hostPIDNetlinkEnvName       = "ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY"
-	hostPIDNetlinkSetting       = "enableNetlinkBlockDeviceDiscovery"
 	hostPIDDistrolessSessionTTL = 15 * time.Minute
-	hostPIDModuleReadyTimeout   = 10 * time.Minute
+	hostPIDNodeCleanupTimeout   = 3 * time.Minute
 )
-
-var moduleConfigGVR = schema.GroupVersionResource{
-	Group:    "deckhouse.io",
-	Version:  "v1alpha1",
-	Resource: "moduleconfigs",
-}
 
 // Regression coverage for PR #220: with hostPID the agent must treat a host
 // mount (visible only via /proc/1/mountinfo) as making a BlockDevice
 // non-consumable. FSType is wiped while the FS stays mounted so MountPoint is
 // the only remaining reason for Consumable=false — reverting #220 (reading
 // /proc/self/mountinfo) makes the primary assertion go red.
+//
+// Requires netlink discovery (cluster_config*.yml sets
+// enableNetlinkBlockDeviceDiscovery); the lsblk path cannot see host mounts.
 var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "block-device", "host-pid"), Ordered, func() {
 	var (
 		ctx        context.Context
@@ -90,11 +84,6 @@ var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "b
 		devicePath  string
 		agentPod    *v1.Pod
 		reader      *kubernetes.DistrolessReader
-
-		// netlinkPrevious holds the ModuleConfig setting before this spec
-		// toggled it; nil means the key was absent.
-		netlinkPrevious *bool
-		netlinkPatched  bool
 	)
 
 	BeforeAll(func() {
@@ -129,66 +118,20 @@ var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "b
 		Expect(nodes.Items).NotTo(BeEmpty(), "cluster must have at least one node")
 		targetNode = nodes.Items[0].Name
 
-		By("Enabling netlink block-device discovery for this spec only (ModuleConfig)")
+		By("Checking netlink block-device discovery is enabled (bootstrap ModuleConfig)")
 		enabled, netlinkErr := agentDaemonSetNetlinkEnabled(ctx, clientset)
 		Expect(netlinkErr).NotTo(HaveOccurred())
 		if !enabled {
-			var patchErr error
-			netlinkPrevious, patchErr = patchModuleConfigNetlinkDiscovery(ctx, cl, true)
-			Expect(patchErr).NotTo(HaveOccurred())
-			netlinkPatched = true
-
-			Expect(kubernetes.WaitForModuleReady(
-				ctx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentName, hostPIDModuleReadyTimeout,
-			)).To(Succeed())
-			waitAgentDaemonSetNetlinkEnv(ctx, clientset, true)
+			Skip(fmt.Sprintf(
+				"DaemonSet env %s is not true; enable enableNetlinkBlockDeviceDiscovery in ModuleConfig "+
+					"(e2e/tests/cluster_config*.yml) — this spec needs the netlink /proc/1/mountinfo path",
+				hostPIDNetlinkEnvName,
+			))
 		}
-
-		DeferCleanup(func() {
-			if !netlinkPatched {
-				return
-			}
-			restoreCtx, cancel := context.WithTimeout(context.Background(), hostPIDModuleReadyTimeout+time.Minute)
-			defer cancel()
-
-			want := false
-			if netlinkPrevious != nil {
-				want = *netlinkPrevious
-			}
-			By(fmt.Sprintf("Restoring ModuleConfig %s=%v", hostPIDNetlinkSetting, want))
-			if _, err := patchModuleConfigNetlinkDiscovery(restoreCtx, cl, want); err != nil {
-				msg := fmt.Sprintf("CLUSTER LEFT DIRTY: failed to restore ModuleConfig %s=%v: %v",
-					hostPIDNetlinkSetting, want, err)
-				GinkgoWriter.Println(msg)
-				AddReportEntry("cluster-dirty-netlink-restore", msg)
-				return
-			}
-			if err := kubernetes.WaitForModuleReady(
-				restoreCtx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentName, hostPIDModuleReadyTimeout,
-			); err != nil {
-				msg := fmt.Sprintf("CLUSTER LEFT DIRTY: module not ready after restoring %s=%v: %v",
-					hostPIDNetlinkSetting, want, err)
-				GinkgoWriter.Println(msg)
-				AddReportEntry("cluster-dirty-netlink-restore", msg)
-				return
-			}
-			if err := waitAgentDaemonSetNetlinkEnvErr(restoreCtx, clientset, want); err != nil {
-				msg := fmt.Sprintf("CLUSTER LEFT DIRTY: DaemonSet env %s not restored to %v: %v",
-					hostPIDNetlinkEnvName, want, err)
-				GinkgoWriter.Println(msg)
-				AddReportEntry("cluster-dirty-netlink-restore", msg)
-			}
-		})
-
-		enabled, netlinkErr = agentDaemonSetNetlinkEnabled(ctx, clientset)
-		Expect(netlinkErr).NotTo(HaveOccurred())
-		Expect(enabled).To(BeTrue(),
-			"DaemonSet env %s must be true; this spec patches ModuleConfig.%s for its duration",
-			hostPIDNetlinkEnvName, hostPIDNetlinkSetting)
 	})
 
 	AfterEach(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), hostPIDNodeCleanupTimeout)
 		defer cancel()
 
 		if CurrentSpecReport().Failed() && cl != nil {
@@ -212,8 +155,9 @@ sudo -n rmdir %s 2>/dev/null || true`,
 			}
 		}
 
-		// Detach before force-deleting the CR so the agent cannot recreate it
-		// from an still-attached, again-consumable disk.
+		// Detach first so the agent drops the BlockDevice when the disk disappears.
+		// Do not strip finalizers — they are owned by the agent and cannot be cleared
+		// from the test client as a reliable cleanup path.
 		if cl != nil && diskName != "" {
 			if err := cl.Disks().DetachDisk(cleanupCtx, targetNode, diskName); err != nil {
 				GinkgoWriter.Printf("failed to detach disk %s: %v\n", diskName, err)
@@ -224,7 +168,7 @@ sudo -n rmdir %s 2>/dev/null || true`,
 		}
 
 		if k8sClient != nil && bdName != "" {
-			forceDeleteBlockDevicesByNames(cleanupCtx, k8sClient, []string{bdName})
+			waitBlockDeviceGone(cleanupCtx, k8sClient, bdName)
 		}
 
 		diskName = ""
@@ -441,92 +385,28 @@ func daemonSetEnvIsTrue(ds *appsv1.DaemonSet, containerName, envName string) boo
 	return false
 }
 
-func waitAgentDaemonSetNetlinkEnv(ctx context.Context, clientset *k8sclient.Clientset, want bool) {
-	GinkgoHelper()
-	Expect(waitAgentDaemonSetNetlinkEnvErr(ctx, clientset, want)).To(Succeed())
-}
-
-func waitAgentDaemonSetNetlinkEnvErr(ctx context.Context, clientset *k8sclient.Clientset, want bool) error {
-	var last error
-	deadline := time.Now().Add(hostPIDModuleReadyTimeout)
+// waitBlockDeviceGone waits for the agent to remove the CR after disk detach.
+// Best-effort only: never strips finalizers from the test client.
+func waitBlockDeviceGone(ctx context.Context, cl client.Client, name string) {
+	deadline := time.Now().Add(hostPIDStateChangeWait)
 	for time.Now().Before(deadline) {
-		ds, err := clientset.AppsV1().DaemonSets(consts.SdsNodeConfiguratorAgentNamespace).Get(
-			ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{},
-		)
+		var bd v1alpha1.BlockDevice
+		err := cl.Get(ctx, client.ObjectKey{Name: name}, &bd)
+		if apierrors.IsNotFound(err) {
+			return
+		}
 		if err != nil {
-			last = err
-		} else if daemonSetEnvIsTrue(ds, consts.SdsNodeConfiguratorAgentContainer, hostPIDNetlinkEnvName) != want {
-			last = fmt.Errorf("DaemonSet env %s want %v", hostPIDNetlinkEnvName, want)
-		} else if ds.Status.ObservedGeneration < ds.Generation {
-			last = fmt.Errorf("DaemonSet generation not observed (%d < %d)", ds.Status.ObservedGeneration, ds.Generation)
-		} else if ds.Status.DesiredNumberScheduled == 0 {
-			last = fmt.Errorf("DaemonSet DesiredNumberScheduled is 0")
-		} else if ds.Status.NumberReady != ds.Status.DesiredNumberScheduled {
-			last = fmt.Errorf("DaemonSet NumberReady %d != Desired %d", ds.Status.NumberReady, ds.Status.DesiredNumberScheduled)
-		} else if ds.Status.UpdatedNumberScheduled != ds.Status.DesiredNumberScheduled {
-			last = fmt.Errorf("DaemonSet UpdatedNumberScheduled %d != Desired %d", ds.Status.UpdatedNumberScheduled, ds.Status.DesiredNumberScheduled)
-		} else {
-			return nil
+			GinkgoWriter.Printf("wait BlockDevice %s gone: get failed: %v\n", name, err)
+			return
 		}
 		select {
 		case <-ctx.Done():
-			if last == nil {
-				last = ctx.Err()
-			}
-			return last
-		case <-time.After(5 * time.Second):
+			GinkgoWriter.Printf("wait BlockDevice %s gone: %v (still present)\n", name, ctx.Err())
+			return
+		case <-time.After(hostPIDPollInterval):
 		}
 	}
-	if last == nil {
-		last = fmt.Errorf("timed out waiting for DaemonSet env %s=%v", hostPIDNetlinkEnvName, want)
-	}
-	return last
-}
-
-// patchModuleConfigNetlinkDiscovery sets spec.settings.enableNetlinkBlockDeviceDiscovery
-// and returns the previous value (nil if the key was absent).
-func patchModuleConfigNetlinkDiscovery(ctx context.Context, cl *e2e.Cluster, enabled bool) (*bool, error) {
-	var previous *bool
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		mc, err := cl.Dynamic().Resource(moduleConfigGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
-		if err != nil {
-			return fmt.Errorf("get ModuleConfig %s: %w", consts.SdsNodeConfiguratorAgentName, err)
-		}
-
-		settings, found, err := unstructured.NestedMap(mc.Object, "spec", "settings")
-		if err != nil {
-			return fmt.Errorf("read spec.settings: %w", err)
-		}
-		if !found || settings == nil {
-			settings = map[string]interface{}{}
-		}
-
-		previous = nil
-		if raw, ok := settings[hostPIDNetlinkSetting]; ok {
-			switch v := raw.(type) {
-			case bool:
-				previous = &v
-			case string:
-				b := strings.EqualFold(strings.TrimSpace(v), "true")
-				previous = &b
-			}
-		}
-
-		settings[hostPIDNetlinkSetting] = enabled
-		if err := unstructured.SetNestedMap(mc.Object, settings, "spec", "settings"); err != nil {
-			return fmt.Errorf("set spec.settings: %w", err)
-		}
-
-		_, err = cl.Dynamic().Resource(moduleConfigGVR).Update(ctx, mc, metav1.UpdateOptions{})
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("update ModuleConfig %s: %w", consts.SdsNodeConfiguratorAgentName, err)
-	}
-	return previous, nil
+	GinkgoWriter.Printf("BlockDevice %s still present after detach within %s\n", name, hostPIDStateChangeWait)
 }
 
 func readPIDMountInfo(
@@ -663,8 +543,6 @@ func collectHostPIDFailureArtifacts(
 	targetNode string,
 	since metav1.Time,
 ) {
-	GinkgoHelper()
-
 	if k8sClient != nil {
 		var bds v1alpha1.BlockDeviceList
 		if err := k8sClient.List(ctx, &bds); err != nil {
