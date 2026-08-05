@@ -83,6 +83,16 @@ const (
 	// as a substring because kube-scheduler wraps and aggregates per-node reasons.
 	schedExtenderNoSpaceReason = "does not have enough space for PVC"
 
+	// The three constants below mirror consts.SdsLocalVolumeProvisioner, consts.LvmTypeParamKey and
+	// consts.Thick from the extender module (images/sds-common-scheduler-extender/pkg/consts), duplicated
+	// for the same reason as podExtraPVCsAnnotation above. filter.go/func.go in that module key off these
+	// exact strings to recognize the derived StorageClass as ours and Thick, so asserting them here is
+	// what proves the fixture actually builds what the extender expects, not just something with the
+	// right name.
+	schedLocalVolumeProvisioner = "local.csi.storage.deckhouse.io"
+	schedLvmTypeParamKey        = "local.csi.storage.deckhouse.io/lvm-type"
+	schedLvmTypeThick           = "Thick"
+
 	// Timeouts. Poll interval is shared; each phase gets its own budget so a slow disk attach cannot
 	// eat the budget of a stuck PV.
 	schedPollInterval           = 5 * time.Second
@@ -91,6 +101,7 @@ const (
 	schedExtenderRolloutTimeout = 5 * time.Minute
 	schedLSCCreatedTimeout      = 3 * time.Minute
 	schedSCAppearTimeout        = 2 * time.Minute
+	schedCapacityTimeout        = 2 * time.Minute
 	schedLSCDeleteTimeout       = 5 * time.Minute
 	schedPodScheduledTimeout    = 3 * time.Minute
 	schedRejectTimeout          = 3 * time.Minute
@@ -112,16 +123,34 @@ type schedNodeDisk struct {
 
 // ---=== Fixture ===--- //
 
+// nodeIsUsable reports whether a node can actually admit our Pods: schedulable, and free of any
+// NoExecute taint (our Pods tolerate control-plane NoSchedule but not NoExecute). A node that fails
+// this cannot be a usable "small" node — the steer specs would be aiming a Pod at a place it can
+// never land, which would make the assertion pass for the wrong reason (nowhere else to go) rather
+// than because the extender chose correctly.
+func nodeIsUsable(node *corev1.Node) bool {
+	if node.Spec.Unschedulable {
+		return false
+	}
+	for _, taint := range node.Spec.Taints {
+		if taint.Effect == corev1.TaintEffectNoExecute {
+			return false
+		}
+	}
+	return true
+}
+
 // schedPickNodes assigns the capacity roles. The big node is the alphabetically first node without a
-// control-plane role label; if the cluster has none, the alphabetically first node overall. The master
-// is deliberately not made big: our Pods tolerate control-plane NoSchedule but not NoExecute, so on a
-// stand with a NoExecute master the steer specs would aim a Pod at a node that will not admit it.
+// control-plane role label; if the cluster has none, the alphabetically first node overall. smallNodes
+// is restricted to usable nodes: both steer specs assert the Pod lands specifically on bigNode, which
+// is only meaningful if a usable alternative exists for the extender to have steered it away from.
 func schedPickNodes(ctx context.Context, k8s client.Client) (bigNode string, smallNodes []string) {
 	var nodeList corev1.NodeList
 	Expect(k8s.List(ctx, &nodeList)).To(Succeed(), "list nodes")
 	Expect(nodeList.Items).NotTo(BeEmpty(), "cluster must have at least one node")
 
 	var all, workers []string
+	usable := map[string]bool{}
 	for i := range nodeList.Items {
 		node := &nodeList.Items[i]
 		all = append(all, node.Name)
@@ -130,6 +159,7 @@ func schedPickNodes(ctx context.Context, k8s client.Client) (bigNode string, sma
 		if !isControlPlane && !isMaster {
 			workers = append(workers, node.Name)
 		}
+		usable[node.Name] = nodeIsUsable(node)
 	}
 	slices.Sort(all)
 	slices.Sort(workers)
@@ -139,10 +169,13 @@ func schedPickNodes(ctx context.Context, k8s client.Client) (bigNode string, sma
 		bigNode = workers[0]
 	}
 	for _, name := range all {
-		if name != bigNode {
+		if name != bigNode && usable[name] {
 			smallNodes = append(smallNodes, name)
 		}
 	}
+	Expect(smallNodes).NotTo(BeEmpty(),
+		"the steer specs are vacuous without a second schedulable, non-NoExecute-tainted node to steer "+
+			"the Pod away from; cluster only has %s usable for our Pods", bigNode)
 	return bigNode, smallNodes
 }
 
@@ -198,7 +231,7 @@ func createLocalStorageClass(ctx context.Context, cl *e2e.Cluster, k8s client.Cl
 		"spec": map[string]any{
 			"lvm": map[string]any{
 				"lvmVolumeGroups": lvmVolumeGroups,
-				"type":            "Thick",
+				"type":            schedLvmTypeThick,
 			},
 			"reclaimPolicy":     "Delete",
 			"volumeBindingMode": "WaitForFirstConsumer",
@@ -220,15 +253,53 @@ func createLocalStorageClass(ctx context.Context, cl *e2e.Cluster, k8s client.Cl
 	Eventually(func(g Gomega) {
 		var sc storagev1.StorageClass
 		g.Expect(k8s.Get(ctx, client.ObjectKey{Name: localStorageClassName}, &sc)).To(Succeed())
-	}, schedSCAppearTimeout, schedPollInterval).Should(Succeed(), "derived StorageClass %s must appear", localStorageClassName)
+		g.Expect(sc.Provisioner).To(Equal(schedLocalVolumeProvisioner), "derived StorageClass %s provisioner", localStorageClassName)
+		g.Expect(sc.VolumeBindingMode).NotTo(BeNil(), "derived StorageClass %s volumeBindingMode", localStorageClassName)
+		g.Expect(*sc.VolumeBindingMode).To(Equal(storagev1.VolumeBindingWaitForFirstConsumer),
+			"derived StorageClass %s volumeBindingMode", localStorageClassName)
+		g.Expect(sc.Parameters[schedLvmTypeParamKey]).To(Equal(schedLvmTypeThick),
+			"derived StorageClass %s lvm-type parameter", localStorageClassName)
+	}, schedSCAppearTimeout, schedPollInterval).Should(Succeed(), "derived StorageClass %s must appear with the expected shape", localStorageClassName)
 
 	return localStorageClassName
+}
+
+// assertCapacityInvariant polls the live LVG statuses until the capacity layout the specs depend on
+// holds, or the timeout expires: every small node's VGFree strictly below schedSteerPVCSize, and the
+// big node's VGFree at least twice it. A provisioner that quantizes volumes (rounding up to 4Gi or
+// 10Gi, say) can violate this even though the fixture asked for schedBigDiskSize/schedSmallDiskSize —
+// that is a fixture problem, not an extender bug, so failures here must read as one and name the
+// observed VGFree, never blame "the extender must steer the Pod".
+func assertCapacityInvariant(ctx context.Context, k8s client.Client, bigNode string, nodeDisks []schedNodeDisk) {
+	steer := resource.MustParse(schedSteerPVCSize)
+	twiceSteer := steer.DeepCopy()
+	twiceSteer.Add(steer)
+
+	Eventually(func(g Gomega) {
+		for _, disk := range nodeDisks {
+			var lvg v1alpha1.LVMVolumeGroup
+			g.Expect(k8s.Get(ctx, client.ObjectKey{Name: disk.lvgName}, &lvg)).To(Succeed(), "get LVMVolumeGroup %s", disk.lvgName)
+			free := lvg.Status.VGFree
+
+			if disk.node == bigNode {
+				g.Expect(free.Cmp(twiceSteer)).To(BeNumerically(">=", 0),
+					"fixture problem: big node %s has VGFree %s, need at least %s (2x schedSteerPVCSize) "+
+						"for the steer PVC to fit with room for the annotation spec's repeat reservation",
+					disk.node, free.String(), twiceSteer.String())
+				continue
+			}
+			g.Expect(free.Cmp(steer)).To(BeNumerically("<", 0),
+				"fixture problem: small node %s has VGFree %s, must be strictly below schedSteerPVCSize (%s) "+
+					"or the steer specs prove nothing", disk.node, free.String(), schedSteerPVCSize)
+		}
+	}, schedCapacityTimeout, schedPollInterval).Should(Succeed())
 }
 
 // waitExtenderRolledOut blocks until the extender Deployment is fully rolled out on the image under
 // test. Two reasons, both invisible in the specs themselves: the extender is registered with
 // ignorable: true, so a restart mid-spec turns into a timeout kube-scheduler silently ignores; and a
-// surge Pod means two independent in-memory reservation caches for one PVC.
+// surge Pod means more independent in-memory reservation caches than the Deployment is meant to run —
+// an HA stand already runs several permanently, this only guards against an extra transient one.
 func waitExtenderRolledOut(ctx context.Context, k8s client.Client) {
 	By(fmt.Sprintf("Waiting for Deployment %s/%s to be fully rolled out", schedExtenderNamespace, schedExtenderDeploymentName))
 	Eventually(func(g Gomega) {
@@ -246,7 +317,7 @@ func waitExtenderRolledOut(ctx context.Context, k8s client.Client) {
 			"controller has not observed the current spec yet")
 		g.Expect(dep.Status.UpdatedReplicas).To(Equal(wanted), "updated replicas")
 		g.Expect(dep.Status.ReadyReplicas).To(Equal(wanted), "ready replicas")
-		g.Expect(dep.Status.Replicas).To(Equal(wanted), "surge Pod present: two reservation caches for one PVC")
+		g.Expect(dep.Status.Replicas).To(Equal(wanted), "surge Pod present: more reservation caches than the Deployment's replica count")
 		g.Expect(dep.Status.UnavailableReplicas).To(BeZero(), "unavailable replicas")
 	}, schedExtenderRolloutTimeout, schedPollInterval).Should(Succeed())
 }
@@ -294,9 +365,13 @@ func createPod(ctx context.Context, k8s client.Client, name string, opts podOpts
 				},
 			},
 			Containers: []corev1.Container{{
-				Name:    "test",
-				Image:   "busybox",
-				Command: []string{"sleep", "3600"},
+				Name: "test",
+				// Tag pinned so the steer specs' Running assertion never depends on :latest drift or a
+				// re-pull; PullIfNotPresent so a closed-network stand does not need registry egress once
+				// the image is mirrored once.
+				Image:           "busybox:1.36.1",
+				ImagePullPolicy: corev1.PullIfNotPresent,
+				Command:         []string{"sleep", "3600"},
 				// Tiny requests: these specs must be decided by storage capacity, never by CPU or memory.
 				Resources: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
@@ -335,8 +410,12 @@ func waitPodScheduled(ctx context.Context, k8s client.Client, name string) strin
 	Eventually(func(g Gomega) {
 		var pod corev1.Pod
 		g.Expect(k8s.Get(ctx, client.ObjectKey{Namespace: metav1.NamespaceDefault, Name: name}, &pod)).To(Succeed())
-		g.Expect(pod.Spec.NodeName).NotTo(BeEmpty(),
-			"Pod %s is still unscheduled:\n%s", name, schedulingFailureText(ctx, k8s, &pod))
+		// schedulingFailureText lists every Event in the namespace; build it only on the failing branch
+		// so a happy-path poll never pays for it.
+		if pod.Spec.NodeName == "" {
+			g.Expect(pod.Spec.NodeName).NotTo(BeEmpty(),
+				"Pod %s is still unscheduled:\n%s", name, schedulingFailureText(ctx, k8s, &pod))
+		}
 		node = pod.Spec.NodeName
 	}, schedPodScheduledTimeout, schedPollInterval).Should(Succeed())
 	By(fmt.Sprintf("Pod %s scheduled on node %s", name, node))
@@ -365,7 +444,10 @@ func waitPVCBoundAndPodRunning(ctx context.Context, k8s client.Client, pvcName, 
 
 // schedulingFailureText collects everything the cluster says about why a Pod is not scheduled: the
 // PodScheduled condition plus every event on the Pod. Used both in failure messages and by the
-// rejection assertion, because kube-scheduler surfaces extender reasons in either place.
+// rejection assertion, because kube-scheduler surfaces extender reasons in either place. Matched by
+// UID, not name: Pod names here are fixed constants, so a same-named Pod from a previous run can still
+// have a matching-by-name event sitting in `default` within the event TTL, and UID is what tells them
+// apart.
 func schedulingFailureText(ctx context.Context, k8s client.Client, pod *corev1.Pod) string {
 	var sb strings.Builder
 	for _, cond := range pod.Status.Conditions {
@@ -381,7 +463,7 @@ func schedulingFailureText(ctx context.Context, k8s client.Client, pod *corev1.P
 	}
 	for i := range events.Items {
 		ev := &events.Items[i]
-		if ev.InvolvedObject.Kind != "Pod" || ev.InvolvedObject.Name != pod.Name {
+		if ev.InvolvedObject.Kind != "Pod" || ev.InvolvedObject.UID != pod.UID {
 			continue
 		}
 		fmt.Fprintf(&sb, "event %s: %s\n", ev.Reason, ev.Message)
@@ -426,10 +508,12 @@ func expectPodRejectedByExtender(ctx context.Context, k8s client.Client, name st
 
 // ---=== Teardown ===--- //
 
-// cleanupLocalStorageClasses deletes every e2e LocalStorageClass and waits until it is gone. It never
-// strips the *.deckhouse.io finalizer: the deny-deckhouse-finalizers VAP forbids it, and the LSC is
-// removed by its own controller once no consumer is left.
-func cleanupLocalStorageClasses(ctx context.Context, cl *e2e.Cluster) {
+// cleanupLocalStorageClasses deletes every e2e LocalStorageClass and waits until it is gone, then
+// removes a leftover derived StorageClass if one survived (an interrupted run can leave the
+// StorageClass behind, or BeforeAll can die before creating a fresh LocalStorageClass at all). It
+// never strips the *.deckhouse.io finalizer: the deny-deckhouse-finalizers VAP forbids it, and the LSC
+// is removed by its own controller once no consumer is left.
+func cleanupLocalStorageClasses(ctx context.Context, cl *e2e.Cluster, k8s client.Client) {
 	dynClient := cl.Dynamic()
 
 	list, listErr := dynClient.Resource(localStorageClassGVR).List(ctx, metav1.ListOptions{})
@@ -461,6 +545,33 @@ func cleanupLocalStorageClasses(ctx context.Context, cl *e2e.Cluster) {
 		g.Expect(left).To(BeEmpty(), "LocalStorageClasses still present: %v", left)
 	}, schedLSCDeleteTimeout, schedPollInterval).Should(Succeed(),
 		"an LSC stuck in Terminating means its controller could not finalize it — check whether an LVG was deleted first")
+
+	By(fmt.Sprintf("Deleting leftover StorageClass %s if present", localStorageClassName))
+	delErr := k8s.Delete(ctx, &storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: localStorageClassName}})
+	Expect(client.IgnoreNotFound(delErr)).To(Succeed(), "delete StorageClass %s", localStorageClassName)
+
+	Eventually(func(g Gomega) {
+		var sc storagev1.StorageClass
+		err := k8s.Get(ctx, client.ObjectKey{Name: localStorageClassName}, &sc)
+		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "StorageClass %s still present", localStorageClassName)
+	}, schedSCAppearTimeout, schedPollInterval).Should(Succeed())
+}
+
+// leftoverPVs lists PersistentVolumes still bound to our StorageClass. PVs are cluster-scoped and
+// outlive the namespaced Pods/PVCs that created them, which is exactly what AfterAll needs to check
+// before it is safe to remove the LVMVolumeGroups their provisioner depends on.
+func leftoverPVs(ctx context.Context, k8s client.Client) ([]corev1.PersistentVolume, error) {
+	var pvs corev1.PersistentVolumeList
+	if err := k8s.List(ctx, &pvs); err != nil {
+		return nil, err
+	}
+	var left []corev1.PersistentVolume
+	for i := range pvs.Items {
+		if pvs.Items[i].Spec.StorageClassName == localStorageClassName {
+			left = append(left, pvs.Items[i])
+		}
+	}
+	return left, nil
 }
 
 // deleteWorkload removes every Pod and PVC these specs create and waits until the PersistentVolumes
@@ -470,7 +581,10 @@ func cleanupLocalStorageClasses(ctx context.Context, cl *e2e.Cluster) {
 func deleteWorkload(ctx context.Context, k8s client.Client) {
 	inDefault := client.InNamespace(metav1.NamespaceDefault)
 
-	// Pods first: deleting a PVC while a Pod still mounts it leaves the PVC in Terminating.
+	// Issue every delete — Pods, then PVCs — before waiting on any of them. Deleting a PVC while a Pod
+	// still mounts it leaves the PVC in Terminating, so Pods are deleted first; but if the PVC deletes
+	// were only issued after the Pod-gone wait below succeeded, one hung Terminating Pod would mean the
+	// PVC deletes are never issued at all.
 	var pods corev1.PodList
 	Expect(k8s.List(ctx, &pods, inDefault)).To(Succeed(), "list Pods")
 	for i := range pods.Items {
@@ -481,6 +595,18 @@ func deleteWorkload(ctx context.Context, k8s client.Client) {
 		Expect(client.IgnoreNotFound(k8s.Delete(ctx, &pods.Items[i], client.GracePeriodSeconds(0)))).
 			To(Succeed(), "delete Pod %s", pods.Items[i].Name)
 	}
+
+	var pvcs corev1.PersistentVolumeClaimList
+	Expect(k8s.List(ctx, &pvcs, inDefault)).To(Succeed(), "list PVCs")
+	for i := range pvcs.Items {
+		if !strings.HasPrefix(pvcs.Items[i].Name, schedPVCPrefix) {
+			continue
+		}
+		By(fmt.Sprintf("Deleting PVC %s", pvcs.Items[i].Name))
+		Expect(client.IgnoreNotFound(k8s.Delete(ctx, &pvcs.Items[i]))).
+			To(Succeed(), "delete PVC %s", pvcs.Items[i].Name)
+	}
+
 	Eventually(func(g Gomega) {
 		var current corev1.PodList
 		g.Expect(k8s.List(ctx, &current, inDefault)).To(Succeed())
@@ -494,16 +620,6 @@ func deleteWorkload(ctx context.Context, k8s client.Client) {
 		g.Expect(left).To(BeEmpty(), "Pods still present: %v", left)
 	}, schedPodDeleteTimeout, schedPollInterval).Should(Succeed())
 
-	var pvcs corev1.PersistentVolumeClaimList
-	Expect(k8s.List(ctx, &pvcs, inDefault)).To(Succeed(), "list PVCs")
-	for i := range pvcs.Items {
-		if !strings.HasPrefix(pvcs.Items[i].Name, schedPVCPrefix) {
-			continue
-		}
-		By(fmt.Sprintf("Deleting PVC %s", pvcs.Items[i].Name))
-		Expect(client.IgnoreNotFound(k8s.Delete(ctx, &pvcs.Items[i]))).
-			To(Succeed(), "delete PVC %s", pvcs.Items[i].Name)
-	}
 	Eventually(func(g Gomega) {
 		var current corev1.PersistentVolumeClaimList
 		g.Expect(k8s.List(ctx, &current, inDefault)).To(Succeed())
@@ -519,16 +635,14 @@ func deleteWorkload(ctx context.Context, k8s client.Client) {
 
 	// PVs outlive their PVCs while CSI detaches and removes the LV.
 	Eventually(func(g Gomega) {
-		var pvs corev1.PersistentVolumeList
-		g.Expect(k8s.List(ctx, &pvs)).To(Succeed())
-		var left []string
-		for i := range pvs.Items {
-			pv := &pvs.Items[i]
-			if pv.Spec.StorageClassName == localStorageClassName {
-				left = append(left, fmt.Sprintf("%s(phase=%s,finalizers=%v)", pv.Name, pv.Status.Phase, pv.Finalizers))
-			}
+		left, err := leftoverPVs(ctx, k8s)
+		g.Expect(err).NotTo(HaveOccurred(), "list PersistentVolumes")
+		var desc []string
+		for i := range left {
+			pv := &left[i]
+			desc = append(desc, fmt.Sprintf("%s(phase=%s,finalizers=%v)", pv.Name, pv.Status.Phase, pv.Finalizers))
 		}
-		g.Expect(left).To(BeEmpty(), "PersistentVolumes still present: %v", left)
+		g.Expect(desc).To(BeEmpty(), "PersistentVolumes still present: %v", desc)
 	}, schedPVDeleteTimeout, schedPollInterval).Should(Succeed(),
 		"a PV stuck here means CSI did not detach or delete the volume — check VolumeAttachments and VolumeFailedDelete events")
 }

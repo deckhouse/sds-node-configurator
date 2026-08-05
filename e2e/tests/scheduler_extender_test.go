@@ -74,7 +74,7 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 
 		By("Clearing leftovers from a previous run")
 		deleteWorkload(ctx, k8sClient)
-		cleanupLocalStorageClasses(ctx, cl)
+		cleanupLocalStorageClasses(ctx, cl, k8sClient)
 		cleanupLVMLogicalVolumes(ctx, k8sClient)
 		cleanupLVMVolumeGroups(ctx, k8sClient)
 		forceDeleteAllNonConsumableBlockDevices(ctx, k8sClient, schedBDCleanupTimeout)
@@ -96,10 +96,17 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 		}
 		storageClassName = createLocalStorageClass(ctx, cl, k8sClient, lvgNames)
 		By(fmt.Sprintf("StorageClass %s ready", storageClassName))
+
+		// Fixture invariant, not an extender behavior: if the provisioner quantizes volumes, this must
+		// fail here with the observed VGFree numbers, not surface later as "the extender must steer".
+		assertCapacityInvariant(ctx, k8sClient, bigNode, nodeDisks)
 		dumpLVGs(ctx, k8sClient)
 	})
 
 	AfterEach(func() {
+		if k8sClient == nil {
+			return // BeforeAll failed before the client existed; let that failure be the one that shows
+		}
 		if CurrentSpecReport().Failed() {
 			dumpLVGs(ctx, k8sClient)
 		}
@@ -187,13 +194,36 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 	})
 
 	AfterAll(func() {
+		if k8sClient == nil || cl == nil {
+			return // BeforeAll failed before the cluster connection existed; nothing here to tear down
+		}
+
 		cleanupCtx := context.Background()
+
+		// AfterEach's deleteWorkload can itself fail (e.g. its 5-minute PV wait times out) and AfterAll
+		// still runs. Deleting the LVMVolumeGroups out from under a PV that has not finished deleting
+		// leaves csi-provisioner retrying DeleteVolume against a VG that no longer exists — a retry that
+		// can never succeed, wedging the PV's finalizer and every later run's BeforeAll cleanup forever.
+		// Force-finalizing is not the answer (that is the bug class this suite exists to catch), so
+		// instead: refuse the whole destructive sequence and fail loudly.
+		if left, err := leftoverPVs(cleanupCtx, k8sClient); err != nil {
+			Fail(fmt.Sprintf("AfterAll: failed to list PersistentVolumes before teardown: %v", err))
+		} else if len(left) > 0 {
+			GinkgoWriter.Println("AfterAll: PersistentVolumes below are still present; skipping LocalStorageClass/LVMVolumeGroup/disk teardown")
+			for i := range left {
+				pv := &left[i]
+				GinkgoWriter.Printf("  PV %s phase=%s finalizers=%v\n", pv.Name, pv.Status.Phase, pv.Finalizers)
+			}
+			Fail(fmt.Sprintf(
+				"%d PersistentVolume(s) still bound to StorageClass %s must finish deleting before the "+
+					"LocalStorageClass and LVMVolumeGroups can be removed safely", len(left), localStorageClassName))
+		}
 
 		// The LocalStorageClass must go before its LVMVolumeGroups: the sds-local-volume validating
 		// webhook rejects every LSC update — including the controller's own finalizer removal — once a
 		// referenced LVG is gone, which deadlocks the LSC in Terminating forever.
 		By("AfterAll: deleting the LocalStorageClass")
-		cleanupLocalStorageClasses(cleanupCtx, cl)
+		cleanupLocalStorageClasses(cleanupCtx, cl, k8sClient)
 
 		By("AfterAll: deleting LVMLogicalVolumes and LVMVolumeGroups")
 		cleanupLVMLogicalVolumes(cleanupCtx, k8sClient)
