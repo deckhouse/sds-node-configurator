@@ -114,6 +114,7 @@ SDK `e2e.Connect`. В CI провижн/подключение делает reus
 |-------|-----------------|
 | `sds-node-configurator` | почти все спеки модуля |
 | `block-device`, `discovery` | обнаружение BlockDevice |
+| `device-types` | матрица типов устройств (disk/mpath/crypt/loop/LUKS) + LVG |
 | `block-device-stable` | стабильность BlockDevice по стадиям |
 | `netlink-discovery` | netlink-дискавери |
 | `lvmvolumegroup` | сценарии LVMVolumeGroup (в т.ч. thin-pool) |
