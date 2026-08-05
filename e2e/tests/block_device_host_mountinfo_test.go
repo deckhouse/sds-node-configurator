@@ -40,7 +40,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sclient "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -56,9 +55,8 @@ const (
 	// not the primary assertion that the agent consumed host mountinfo.
 	hostPIDNamespaceProbeWindow = 12 * time.Second
 
-	hostPIDNetlinkEnvName       = "ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY"
-	hostPIDDistrolessSessionTTL = 15 * time.Minute
-	hostPIDNodeCleanupTimeout   = 3 * time.Minute
+	hostPIDNetlinkEnvName     = "ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY"
+	hostPIDNodeCleanupTimeout = 3 * time.Minute
 )
 
 // Regression coverage for PR #220: with hostPID the agent must treat a host
@@ -69,6 +67,8 @@ const (
 //
 // Requires netlink discovery (cluster_config*.yml sets
 // enableNetlinkBlockDeviceDiscovery); the lsblk path cannot see host mounts.
+// Mountinfo is read over SSH on the node (not via an ephemeral busybox reader):
+// /proc/<pid>/mountinfo is rendered relative to the inspected process.
 var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "block-device", "host-pid"), Ordered, func() {
 	var (
 		ctx        context.Context
@@ -83,7 +83,6 @@ var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "b
 		bdName      string
 		devicePath  string
 		agentPod    *v1.Pod
-		reader      *kubernetes.DistrolessReader
 	)
 
 	BeforeAll(func() {
@@ -92,11 +91,6 @@ var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "b
 		var cfgErr error
 		conf, cfgErr = cfg.Load()
 		Expect(cfgErr).NotTo(HaveOccurred(), "failed to load config")
-		if conf.DebugImage == "" {
-			Skip("E2E_DEBUG_IMAGE is not set: this spec needs a busybox-like image " +
-				"(cat/sleep/sh) reachable from the cluster to inject the ephemeral reader " +
-				"into the distroless agent; CI supplies it via the workflow's extra_env")
-		}
 
 		var clErr error
 		cl, clErr = e2e.Connect(ctx, e2e.WithTestName("block-device-host-mountinfo"))
@@ -118,10 +112,14 @@ var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "b
 		Expect(nodes.Items).NotTo(BeEmpty(), "cluster must have at least one node")
 		targetNode = nodes.Items[0].Name
 
-		By("Checking netlink block-device discovery is enabled (bootstrap ModuleConfig)")
-		enabled, netlinkErr := agentDaemonSetNetlinkEnabled(ctx, clientset)
-		Expect(netlinkErr).NotTo(HaveOccurred())
-		if !enabled {
+		By("Checking netlink discovery and hostPID on the agent DaemonSet")
+		ds, dsErr := clientset.AppsV1().DaemonSets(consts.SdsNodeConfiguratorAgentNamespace).Get(
+			ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{},
+		)
+		Expect(dsErr).NotTo(HaveOccurred())
+		Expect(ds.Spec.Template.Spec.HostPID).To(BeTrue(),
+			"agent DaemonSet must have hostPID=true for /proc/1/mountinfo to be the host mount table")
+		if !daemonSetEnvIsTrue(ds, consts.SdsNodeConfiguratorAgentContainer, hostPIDNetlinkEnvName) {
 			Skip(fmt.Sprintf(
 				"DaemonSet env %s is not true; enable enableNetlinkBlockDeviceDiscovery in ModuleConfig "+
 					"(e2e/tests/cluster_config*.yml) — this spec needs the netlink /proc/1/mountinfo path",
@@ -175,7 +173,6 @@ sudo -n rmdir %s 2>/dev/null || true`,
 		bdName = ""
 		devicePath = ""
 		agentPod = nil
-		reader = nil
 	})
 
 	It("marks a host-mounted device non-consumable via /proc/1/mountinfo", func() {
@@ -233,20 +230,9 @@ sudo -n rmdir %s 2>/dev/null || true`,
 		)
 		Expect(podErr).NotTo(HaveOccurred(), "failed to find the agent pod on node %s", targetNode)
 
-		By("Opening a distroless reader (ephemeral busybox) against the agent container")
-		var readerErr error
-		reader, readerErr = kubernetes.OpenDistrolessReader(
-			ctx,
-			cl.RESTConfig(),
-			consts.SdsNodeConfiguratorAgentNamespace,
-			agentPod.Name,
-			consts.SdsNodeConfiguratorAgentContainer,
-			kubernetes.ReadFileOptions{
-				DebugImage: conf.DebugImage,
-				SessionTTL: hostPIDDistrolessSessionTTL,
-			},
-		)
-		Expect(readerErr).NotTo(HaveOccurred(), "failed to open distroless reader with image %s", conf.DebugImage)
+		By("Resolving the agent container init PID via crictl on the node")
+		agentPID, pidErr := findAgentPIDViaCrictl(ctx, cl, targetNode, agentPod)
+		Expect(pidErr).NotTo(HaveOccurred())
 
 		By("Mounting ext4 then wiping the on-disk signature while still mounted (FSType empty; mount remains)")
 		// SSH login shell reports only the last exit code — set -eu so a failed
@@ -288,30 +274,16 @@ printf '%%s %%s\n' "$(stat -c %%t %s)" "$(stat -c %%T %s)"`,
 				"device is mounted on the host; an agent reading /proc/self/mountinfo would miss it and keep Consumable=true")
 		}, hostPIDStateChangeWait, hostPIDPollInterval).Should(Succeed())
 
-		// targetContainerName shares the agent's PID and IPC namespaces, but
-		// not its mount namespace. /proc/self/mountinfo is therefore the
-		// ephemeral container's view. Resolve the agent PID in the host PID
-		// namespace (already shared) and read /proc/<pid>/mountinfo.
-		By("Resolving the agent PID in the host PID namespace")
-		agentPID, pidErr := findAgentPIDInHostNamespace(
-			ctx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentNamespace, reader, agentPod,
-		)
-		Expect(pidErr).NotTo(HaveOccurred())
-
-		By("Environment precondition: hostPID exposes the mount in /proc/1/mountinfo but not in the agent mount ns")
+		By("Environment precondition: host mount is in /proc/1/mountinfo but not in the agent mount ns")
 		Consistently(func(g Gomega) {
-			agentMI, agentErr := readPIDMountInfo(
-				ctx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentNamespace, reader, agentPID,
-			)
+			agentMI, agentErr := readNodeProcMountInfo(ctx, cl, targetNode, agentPID)
 			g.Expect(agentErr).NotTo(HaveOccurred())
 			g.Expect(mountInfoContains(agentMI, deviceID, hostPIDMountPath)).To(BeFalse(),
 				"agent mount namespace (pid %s) must not contain %s at %s; mountinfo:\n%s",
 				agentPID, deviceID, hostPIDMountPath, agentMI)
 		}, hostPIDNamespaceProbeWindow, hostPIDPollInterval).Should(Succeed())
 
-		hostMI, hostErr := readPIDMountInfo(
-			ctx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentNamespace, reader, "1",
-		)
+		hostMI, hostErr := readNodeProcMountInfo(ctx, cl, targetNode, "1")
 		Expect(hostErr).NotTo(HaveOccurred())
 		Expect(mountInfoContains(hostMI, deviceID, hostPIDMountPath)).To(BeTrue(),
 			"/proc/1/mountinfo does not contain device %s mounted at %s; mountinfo:\n%s",
@@ -340,9 +312,7 @@ sudo -n udevadm settle`,
 
 		By("Confirming the host mount is gone from /proc/1/mountinfo")
 		Eventually(func(g Gomega) {
-			mi, err := readPIDMountInfo(
-				ctx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentNamespace, reader, "1",
-			)
+			mi, err := readNodeProcMountInfo(ctx, cl, targetNode, "1")
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(mountInfoContains(mi, deviceID, hostPIDMountPath)).To(BeFalse(),
 				"host mountinfo still has %s at %s after umount:\n%s", deviceID, hostPIDMountPath, mi)
@@ -359,16 +329,6 @@ sudo -n udevadm settle`,
 		}, hostPIDStateChangeWait, hostPIDPollInterval).Should(Succeed())
 	})
 })
-
-func agentDaemonSetNetlinkEnabled(ctx context.Context, clientset *k8sclient.Clientset) (bool, error) {
-	ds, err := clientset.AppsV1().DaemonSets(consts.SdsNodeConfiguratorAgentNamespace).Get(
-		ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{},
-	)
-	if err != nil {
-		return false, err
-	}
-	return daemonSetEnvIsTrue(ds, consts.SdsNodeConfiguratorAgentContainer, hostPIDNetlinkEnvName), nil
-}
 
 func daemonSetEnvIsTrue(ds *appsv1.DaemonSet, containerName, envName string) bool {
 	for i := range ds.Spec.Template.Spec.Containers {
@@ -409,70 +369,29 @@ func waitBlockDeviceGone(ctx context.Context, cl client.Client, name string) {
 	GinkgoWriter.Printf("BlockDevice %s still present after detach within %s\n", name, hostPIDStateChangeWait)
 }
 
-func readPIDMountInfo(
-	ctx context.Context,
-	restCfg *rest.Config,
-	namespace string,
-	reader *kubernetes.DistrolessReader,
-	pid string,
-) (string, error) {
-	path := fmt.Sprintf("/proc/%s/mountinfo", pid)
-	stdout, stderr, err := kubernetes.ExecInPod(
-		ctx, restCfg, namespace, reader.PodName(), reader.EphemeralName(),
-		[]string{"cat", path},
-	)
-	if err != nil {
-		return stdout, fmt.Errorf("read %s: %w (stderr=%q)", path, err, stderr)
-	}
-	return stdout, nil
+func readNodeProcMountInfo(ctx context.Context, cl *e2e.Cluster, node, pid string) (string, error) {
+	return framework.NodeExecChecked(ctx, cl, node, fmt.Sprintf("cat /proc/%s/mountinfo", shellQuote(pid)))
 }
 
-// findAgentPIDInHostNamespace locates the agent container's PID in the host
-// PID namespace (shared by the ephemeral reader when the agent has hostPID).
-// Prefers the lowest PID whose cgroup mentions the container ID and whose
-// mount namespace is not the host's (skips nsenter -m / host helpers).
-func findAgentPIDInHostNamespace(
-	ctx context.Context,
-	restCfg *rest.Config,
-	namespace string,
-	reader *kubernetes.DistrolessReader,
-	agentPod *v1.Pod,
-) (string, error) {
+// findAgentPIDViaCrictl returns the container init PID in the host PID namespace.
+// Prefer crictl over a cgroup scan: unambiguous and not confused by nsenter -m helpers.
+func findAgentPIDViaCrictl(ctx context.Context, cl *e2e.Cluster, node string, agentPod *v1.Pod) (string, error) {
 	containerID, err := agentContainerID(agentPod, consts.SdsNodeConfiguratorAgentContainer)
 	if err != nil {
 		return "", err
 	}
-	// shellQuote is for NodeExecChecked scripts; here the ID is interpolated into
-	// a single-quoted pattern for grep -F (ContainerID has no single quotes).
 	cmd := fmt.Sprintf(
-		`cid=%s
-host_mnt=$(readlink /proc/1/ns/mnt 2>/dev/null || true)
-best=
-for p in /proc/[0-9]*; do
-  grep -Fqs "$cid" "$p/cgroup" 2>/dev/null || continue
-  pid=${p#/proc/}
-  mnt=$(readlink "$p/ns/mnt" 2>/dev/null || true)
-  [ -n "$host_mnt" ] && [ "$mnt" = "$host_mnt" ] && continue
-  if [ -z "$best" ] || [ "$pid" -lt "$best" ]; then
-    best=$pid
-  fi
-done
-[ -n "$best" ] && echo "$best"`,
+		`set -eu
+sudo -n crictl inspect --output go-template --template '{{.info.pid}}' %s`,
 		shellQuote(containerID),
 	)
-	stdout, stderr, err := kubernetes.ExecInPod(
-		ctx, restCfg, namespace, reader.PodName(), reader.EphemeralName(),
-		[]string{"sh", "-c", cmd},
-	)
+	out, err := framework.NodeExecChecked(ctx, cl, node, cmd)
 	if err != nil {
-		return "", fmt.Errorf("scan /proc for container %s: %w (stderr=%q)", containerID, err, stderr)
+		return "", fmt.Errorf("crictl inspect pid for container %s: %w (output=%q)", containerID, err, out)
 	}
-	pid := strings.TrimSpace(stdout)
-	if pid == "" {
-		return "", fmt.Errorf("no host PID found whose cgroup mentions container %s (excluding host mount ns)", containerID)
-	}
+	pid := strings.TrimSpace(out)
 	if _, err := strconv.Atoi(pid); err != nil {
-		return "", fmt.Errorf("invalid PID %q from cgroup scan: %w", pid, err)
+		return "", fmt.Errorf("invalid PID %q from crictl: %w", pid, err)
 	}
 	return pid, nil
 }

@@ -84,7 +84,6 @@ check-env: ## Print the env the suite/SDK actually reads (e2e.Connect + cfg)
 	@echo "# suite config (cfg.Load / cfg.LoadStress):"
 	@echo "TEST_CLUSTER_NAMESPACE:               $${TEST_CLUSTER_NAMESPACE}"
 	@echo "MODULES_MODULE_TAG:                   $${MODULES_MODULE_TAG}"
-	@echo "E2E_DEBUG_IMAGE:                      $${E2E_DEBUG_IMAGE}"
 	@echo "GINKGO_LABEL_FILTER:                  $(GINKGO_LABEL_FILTER)"
 
 .PHONY: lint
