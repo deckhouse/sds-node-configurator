@@ -1,0 +1,23 @@
+Changes:
+- Added support for LVM on file devices: LVMVolumeGroup and LVMVolumeGroupSet accept
+    spec.fileDevices, which allows you to create LVM storage on a node without a free
+    disk; the directory and free space reserve are specified by the fileDevicesDirectory
+    and fileDevicesMinFreeSpacePercent module settings
+- Added experimental mode for detecting block devices via netlink (flag ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY,
+  disabled by default)
+- Correction: volume created from a snapshot or clone now expands to the requested
+    size - PVC no longer remains in Pending
+- Correction: thin-pool set by percentage of VG no longer gets stuck in "is not valid"
+    state due to LVM rounding by one extent
+- Correction: no-op lvextend extension is recognized on all versions of LVM - LVMVolumeGroup
+    no longer goes into NotReady
+- Correction: an empty lv_attr no longer causes the LVMVolumeGroup discovery controller
+    to panic
+- Correction: when taking control of an existing VG, an empty blockDeviceSelector
+    is no longer generated
+- Correction: after pvcreate and vgcreate, udevadm is called to update the udev database
+- Correction: The dm_snapshot kernel module is loaded when storage-foundation is enabled
+- Update base images to v1.3.10, Go 1.26.5 and lib-helm to 1.72.10, vulnerabilities
+  in golang.org/x/{net,text} fixed
+- Documentation: description of file devices in RESOURCES and FAQ
+- Internal changes in module assembly and e2e tests
