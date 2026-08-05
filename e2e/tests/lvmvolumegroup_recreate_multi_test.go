@@ -119,18 +119,41 @@ var _ = Describe("LVMVolumeGroup recreate & multiple", Label("sds-node-configura
 		var (
 			tpDisk    *e2e.Disk
 			tpLVGName string
+			tpVGName  string
 		)
 
 		AfterEach(func() {
+			// The thin-pool stack has to come off the node BEFORE the
+			// LVMVolumeGroup is deleted. The agent refuses to delete a Volume
+			// Group that still has logical volumes — getLVForVG counts every LV in
+			// the VG, including the module's own thin pool — so deleting the
+			// resource first can only end one way: the delete blocks on "Delete
+			// used LVs first", cleanupLVMVolumeGroups gives up and force-removes
+			// the finalizer, and the Volume Group, its thin pool and its Physical
+			// Volume are left on the node while the next line detaches the disk
+			// underneath them. Every later spec that lands on this node then runs
+			// against that debris, and the failure surfaces somewhere else
+			// entirely.
+			//
+			// This spec recreates the thin pool on purpose, so it is guaranteed to
+			// reach the teardown with one present.
+			if tpVGName != "" {
+				_, _ = framework.NodeExecChecked(ctx, cl, targetNode,
+					framework.RemoveThinPoolStackScript(tpVGName, lvgrmThinPoolName))
+			}
 			lvgrmDeleteLVG(tpLVGName)
 			tpLVGName = ""
+			tpVGName = ""
 			lvgrmCleanupDisk(tpDisk)
 			tpDisk = nil
 		})
 
 		It("Should recreate thin-pool when the pool LV was removed manually on the node", func() {
 			runID := fmt.Sprintf("%d", time.Now().Unix())
-			vgName := "e2e-vg-tp-restore-" + runID
+			// Recorded on the shared var, not only locally: the teardown needs it to
+			// take the thin pool down before deleting the resource.
+			tpVGName = "e2e-vg-tp-restore-" + runID
+			vgName := tpVGName
 			tpLVGName = fmt.Sprintf("e2e-lvg-tp-restore-%s-%s", runID, lvgrmNodeSafe(targetNode))
 
 			storageClass := conf.TestCluster.StorageClass

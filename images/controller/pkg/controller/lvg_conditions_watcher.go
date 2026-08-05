@@ -46,8 +46,47 @@ const (
 	lvgCrdName = "lvmvolumegroups.storage.deckhouse.io"
 )
 
+// acceptableReasons are the VGConfigurationApplied=False reasons that describe a
+// Volume Group which is still serving its volumes, so they must not drag the
+// aggregate Ready condition — and with it the phase, and with it the scheduler's
+// willingness to place new volumes — down with them.
+//
+// The three file-device reasons belong here for the same reason
+// ReasonValidationFailed does — in every one of them the Volume Group is intact
+// and serving, and what is left to do is either an operator decision or a retry:
+//
+//   - ReasonFileDeviceDrift — an entry backing a live Physical Volume was
+//     removed from the spec. Only an operator can decide what happens to that
+//     PV; taking the Volume Group out of service while they decide would turn a
+//     report into an outage.
+//   - ReasonFileDeviceNotApplied — an entry could not be brought up on the node
+//     (no free space, losetup refused, a grow that did not go through). That is
+//     capacity which has not arrived, not storage which has broken.
+//   - ReasonAliasResolutionFailed — the agent cannot canonicalize alias-form PV
+//     names and so cannot yet decide whether a loop device is already in the VG.
+//     Worth alerting on, since new file devices will not join until it clears,
+//     but the existing ones are untouched.
+//   - ReasonFileDeviceGrowFailed — raising an entry's size did not go through.
+//     The growth sequence fails towards the smaller size at every step, so the
+//     Volume Group is still the size it was and still serving every volume.
+//   - ReasonCacheStale — the agent's LVM cache has not caught up with a Volume
+//     Group that is on the node. Nothing is wrong with the Volume Group; that is
+//     precisely why the agent refuses to act on it.
+//
+// ReasonVGCheckFailed is deliberately NOT here. It means the agent cannot read
+// the node's Volume Groups at all, and an LVMVolumeGroup whose backing storage
+// the agent has lost sight of is exactly what the scheduler should stop placing
+// volumes on.
 var (
-	acceptableReasons = []string{internal.ReasonUpdating, internal.ReasonValidationFailed}
+	acceptableReasons = []string{
+		internal.ReasonUpdating,
+		internal.ReasonValidationFailed,
+		internal.ReasonFileDeviceDrift,
+		internal.ReasonFileDeviceNotApplied,
+		internal.ReasonAliasResolutionFailed,
+		internal.ReasonFileDeviceGrowFailed,
+		internal.ReasonCacheStale,
+	}
 )
 
 func RunLVGConditionsWatcher(

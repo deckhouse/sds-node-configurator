@@ -19,10 +19,13 @@ package lvg
 import (
 	"bytes"
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/mock/gomock"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,6 +36,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
@@ -95,7 +99,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 			r.sdsCache.StorePVs(pvs, bytes.Buffer{})
 
-			valid, reason := r.validateLVGForUpdateFunc(lvg, bds)
+			valid, reason, _ := r.validateLVGForUpdateFunc(ctx, lvg, bds)
 			if assert.True(t, valid) {
 				assert.Equal(t, "", reason)
 			}
@@ -155,7 +159,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			r.sdsCache.StorePVs(pvs, bytes.Buffer{})
 
 			// new block device is not consumable
-			valid, _ := r.validateLVGForUpdateFunc(lvg, bds)
+			valid, _, _ := r.validateLVGForUpdateFunc(ctx, lvg, bds)
 			assert.False(t, valid)
 		})
 
@@ -225,7 +229,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			r.sdsCache.StorePVs(pvs, bytes.Buffer{})
 			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
 
-			valid, reason := r.validateLVGForUpdateFunc(lvg, bds)
+			valid, reason, _ := r.validateLVGForUpdateFunc(ctx, lvg, bds)
 			if assert.True(t, valid) {
 				assert.Equal(t, "", reason)
 			}
@@ -302,7 +306,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			r.sdsCache.StorePVs(pvs, bytes.Buffer{})
 			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
 
-			valid, _ := r.validateLVGForUpdateFunc(lvg, bds)
+			valid, _, _ := r.validateLVGForUpdateFunc(ctx, lvg, bds)
 			assert.False(t, valid)
 		})
 
@@ -361,7 +365,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
 			r.sdsCache.StoreLVs(lvs, bytes.Buffer{})
 
-			valid, reason := r.validateLVGForUpdateFunc(lvg, bds)
+			valid, reason, _ := r.validateLVGForUpdateFunc(ctx, lvg, bds)
 			if assert.True(t, valid) {
 				assert.Equal(t, "", reason)
 			}
@@ -401,7 +405,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				Spec: v1alpha1.LVMVolumeGroupSpec{},
 			}
 
-			valid, reason := r.validateLVGForCreateFunc(lvg, bds)
+			valid, reason := r.validateLVGForCreateFunc(ctx, lvg, bds)
 			if assert.True(t, valid) {
 				assert.Equal(t, "", reason)
 			}
@@ -428,7 +432,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				Spec: v1alpha1.LVMVolumeGroupSpec{},
 			}
 
-			valid, _ := r.validateLVGForCreateFunc(lvg, bds)
+			valid, _ := r.validateLVGForCreateFunc(ctx, lvg, bds)
 			assert.False(t, valid)
 		})
 
@@ -468,7 +472,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			valid, reason := r.validateLVGForCreateFunc(lvg, bds)
+			valid, reason := r.validateLVGForCreateFunc(ctx, lvg, bds)
 			if assert.True(t, valid) {
 				assert.Equal(t, "", reason)
 			}
@@ -510,14 +514,72 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			valid, _ := r.validateLVGForCreateFunc(lvg, bds)
+			valid, _ := r.validateLVGForCreateFunc(ctx, lvg, bds)
+			assert.False(t, valid)
+		})
+
+		t.Run("with_full_vg_percent_thin_pool_returns_true", func(t *testing.T) {
+			// A single "100%" thin pool must pass validation. The raw VG size
+			// (sum of block devices) is not extent-aligned, so rounding the
+			// percentage up would land one extent past the VG and wrongly fail;
+			// the pool is created with %FREE and fits.
+			r := setupReconciler()
+			bds := map[string]v1alpha1.BlockDevice{
+				"first": {
+					ObjectMeta: v1.ObjectMeta{Name: "first"},
+					Status: v1alpha1.BlockDeviceStatus{
+						// deliberately not a multiple of the 4Mi extent size
+						Size:       resource.MustParse("20481Mi"),
+						Consumable: true,
+					},
+				},
+			}
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+						{Name: "thin", Size: "100%"},
+					},
+				},
+			}
+
+			valid, reason := r.validateLVGForCreateFunc(ctx, lvg, bds)
+			if assert.True(t, valid) {
+				assert.Equal(t, "", reason)
+			}
+		})
+
+		t.Run("with_full_vg_percent_thin_pool_and_another_returns_false", func(t *testing.T) {
+			// "100%" alongside any other thin pool cannot fit.
+			r := setupReconciler()
+			bds := map[string]v1alpha1.BlockDevice{
+				"first": {
+					ObjectMeta: v1.ObjectMeta{Name: "first"},
+					Status: v1alpha1.BlockDeviceStatus{
+						Size:       resource.MustParse("20481Mi"),
+						Consumable: true,
+					},
+				},
+			}
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+						{Name: "thin", Size: "100%"},
+						{Name: "thin-2", Size: "1Gi"},
+					},
+				},
+			}
+
+			valid, _ := r.validateLVGForCreateFunc(ctx, lvg, bds)
 			assert.False(t, valid)
 		})
 	})
 
 	t.Run("identifyLVGReconcileFunc", func(t *testing.T) {
 		t.Run("returns_create", func(t *testing.T) {
-			r := setupReconciler()
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+			mc := mock_utils.NewMockCommands(ctrl)
+			r := reconcilerWithMockedCommands(t, mc)
 			const vgName = "test-vg"
 			lvg := &v1alpha1.LVMVolumeGroup{
 				Spec: v1alpha1.LVMVolumeGroupSpec{
@@ -525,7 +587,11 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				},
 			}
 
-			actual := r.identifyLVGReconcileFunc(lvg)
+			// The cache is empty, and the node confirms the VG really is absent —
+			// only then is creating it the right call.
+			mc.EXPECT().GetAllVGs(gomock.Any()).Return(nil, "lvm vgs", bytes.Buffer{}, nil)
+
+			actual, _ := r.identifyLVGReconcileFunc(ctx, lvg)
 			assert.Equal(t, internal.CreateReconcile, actual)
 		})
 
@@ -545,7 +611,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
 
-			actual := r.identifyLVGReconcileFunc(lvg)
+			actual, _ := r.identifyLVGReconcileFunc(ctx, lvg)
 			assert.Equal(t, internal.UpdateReconcile, actual)
 		})
 
@@ -567,7 +633,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
 
-			actual := r.identifyLVGReconcileFunc(lvg)
+			actual, _ := r.identifyLVGReconcileFunc(ctx, lvg)
 			assert.Equal(t, internal.DeleteReconcile, actual)
 		})
 	})
@@ -947,6 +1013,29 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 			valid, _ := validateSpecBlockDevices(lvg, bds)
 			assert.False(t, valid)
+		})
+
+		t.Run("validation_passes_for_file_only_lvg_without_selector", func(t *testing.T) {
+			// A file-only LVMVolumeGroup carries no blockDeviceSelector.
+			// validateSpecBlockDevices must not dereference the nil selector
+			// (regression: it used to panic in Reconcile).
+			lvg := &v1alpha1.LVMVolumeGroup{
+				Spec: v1alpha1.LVMVolumeGroupSpec{
+					Local: v1alpha1.LVMVolumeGroupLocalSpec{NodeName: "nodeName"},
+					FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{
+						{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")},
+					},
+				},
+			}
+			bds := map[string]v1alpha1.BlockDevice{
+				"first": {ObjectMeta: v1.ObjectMeta{Name: "first"}},
+			}
+
+			assert.NotPanics(t, func() {
+				valid, reason := validateSpecBlockDevices(lvg, bds)
+				assert.True(t, valid)
+				assert.Empty(t, reason)
+			})
 		})
 	})
 
@@ -1541,5 +1630,1072 @@ func setupReconciler() *Reconciler {
 		monitoring.GetMetrics(""),
 		cache.New(),
 		utils.NewCommands(),
-		ReconcilerConfig{NodeName: "test_node"})
+		ReconcilerConfig{NodeName: "test_node", CmdDeadlineDuration: 30 * time.Second})
+}
+
+// countVGSizeByFileDevices must sum spec.fileDevices capacity so the
+// create-path thin-pool sizing does not treat a file-only VG as zero-sized
+// (which would collapse percentage pools to 0 and force absolute pools into
+// the full-VG-space branch).
+func TestCountVGSizeByFileDevices(t *testing.T) {
+	t.Run("no_file_devices", func(t *testing.T) {
+		lvg := &v1alpha1.LVMVolumeGroup{}
+		got := countVGSizeByFileDevices(lvg)
+		assert.Equal(t, int64(0), got.Value())
+	})
+
+	t.Run("sums_all_entries", func(t *testing.T) {
+		lvg := &v1alpha1.LVMVolumeGroup{
+			Spec: v1alpha1.LVMVolumeGroupSpec{
+				FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{
+					{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")},
+					{Name: "d20g", Directory: "/data", Size: resource.MustParse("20Gi")},
+				},
+			},
+		}
+		want := resource.MustParse("30Gi")
+		got := countVGSizeByFileDevices(lvg)
+		assert.Equal(t, want.Value(), got.Value())
+	})
+}
+
+func TestValidateFileDevice(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("valid_file_device", func(t *testing.T) {
+		// Validation is purely structural now: the backing directory is
+		// created on demand at provision time, so no host command is invoked.
+		r := setupReconciler()
+
+		var reason strings.Builder
+		totalSize := resource.MustParse("0")
+		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
+			Directory: "/data",
+			Size:      resource.MustParse("10Gi"),
+		}
+		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+		}, &reason, &totalSize)
+		assert.Empty(t, reason.String())
+		want := resource.MustParse("10Gi")
+		assert.Equal(t, want.Value(), totalSize.Value())
+	})
+
+	t.Run("empty_directory", func(t *testing.T) {
+		r := setupReconciler()
+		var reason strings.Builder
+		totalSize := resource.MustParse("0")
+		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
+			Directory: "",
+			Size:      resource.MustParse("10Gi"),
+		}
+		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+		}, &reason, &totalSize)
+		assert.Contains(t, reason.String(), "directory is empty")
+	})
+
+	t.Run("size_too_small", func(t *testing.T) {
+		r := setupReconciler()
+		var reason strings.Builder
+		totalSize := resource.MustParse("0")
+		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d500m",
+			Directory: "/data",
+			Size:      resource.MustParse("500Mi"),
+		}
+		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+		}, &reason, &totalSize)
+		assert.Contains(t, reason.String(), "less than the minimum")
+	})
+
+	t.Run("size_adds_to_total_vg_size", func(t *testing.T) {
+		r := setupReconciler()
+
+		var reason strings.Builder
+		totalSize := resource.MustParse("5Gi")
+		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
+			Directory: "/data",
+			Size:      resource.MustParse("10Gi"),
+		}
+		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+		}, &reason, &totalSize)
+		assert.Empty(t, reason.String())
+		expected := resource.MustParse("5Gi")
+		add := resource.MustParse("10Gi")
+		expected.Add(add)
+		assert.Equal(t, expected.Value(), totalSize.Value())
+	})
+
+	t.Run("rejects_relative_directory", func(t *testing.T) {
+		r := setupReconciler()
+		var reason strings.Builder
+		totalSize := resource.MustParse("0")
+		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
+			Directory: "data/lvm",
+			Size:      resource.MustParse("10Gi"),
+		}
+		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+		}, &reason, &totalSize)
+		assert.Contains(t, reason.String(), "must be an absolute path")
+	})
+
+	t.Run("rejects_dot_dot_segment", func(t *testing.T) {
+		r := setupReconciler()
+		var reason strings.Builder
+		totalSize := resource.MustParse("0")
+		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
+			Directory: "/data/../etc",
+			Size:      resource.MustParse("10Gi"),
+		}
+		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+		}, &reason, &totalSize)
+		assert.Contains(t, reason.String(), "must not contain '..'")
+	})
+
+	t.Run("rejects_directory_outside_base", func(t *testing.T) {
+		r := setupReconciler()
+		r.cfg.FileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
+		var reason strings.Builder
+		totalSize := resource.MustParse("0")
+		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
+			Directory: "/var/lib/kubelet",
+			Size:      resource.MustParse("10Gi"),
+		}
+		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+		}, &reason, &totalSize)
+		assert.Contains(t, reason.String(), "must be \"/opt/deckhouse/sds/file-devices\" or a subdirectory")
+	})
+
+	t.Run("rejects_base_prefix_sibling", func(t *testing.T) {
+		// A path that shares the base as a string prefix but is not actually
+		// inside it (e.g. "/opt/deckhouse/sds/file-devices-evil") must be
+		// rejected — the separator check guards against this.
+		r := setupReconciler()
+		r.cfg.FileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
+		var reason strings.Builder
+		totalSize := resource.MustParse("0")
+		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
+			Directory: "/opt/deckhouse/sds/file-devices-evil",
+			Size:      resource.MustParse("10Gi"),
+		}
+		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+		}, &reason, &totalSize)
+		assert.Contains(t, reason.String(), "or a subdirectory of it")
+	})
+
+	t.Run("accepts_base_directory_itself", func(t *testing.T) {
+		r := setupReconciler()
+		r.cfg.FileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
+		var reason strings.Builder
+		totalSize := resource.MustParse("0")
+		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
+			Directory: "/opt/deckhouse/sds/file-devices",
+			Size:      resource.MustParse("10Gi"),
+		}
+		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+		}, &reason, &totalSize)
+		assert.Empty(t, reason.String())
+	})
+
+	t.Run("accepts_subdirectory_of_base", func(t *testing.T) {
+		r := setupReconciler()
+		r.cfg.FileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
+		var reason strings.Builder
+		totalSize := resource.MustParse("0")
+		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
+			Directory: "/opt/deckhouse/sds/file-devices/vg-a",
+			Size:      resource.MustParse("10Gi"),
+		}
+		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+		}, &reason, &totalSize)
+		assert.Empty(t, reason.String())
+	})
+
+	t.Run("rejects_duplicate_backing_file", func(t *testing.T) {
+		r := setupReconciler()
+		lvg := &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec: v1alpha1.LVMVolumeGroupSpec{
+				FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{
+					{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")},
+					{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")},
+				},
+			},
+		}
+		var reason strings.Builder
+		r.validateFileDevices(ctx, lvg, &reason, nil)
+		assert.Contains(t, reason.String(), "collides with fileDevices")
+	})
+}
+
+// reconcilerWithMockedCommands wires a Reconciler around a gomock
+// Commands so we can exercise provisionFileDevices / cleanupFileDevices
+// against deterministic expectations.
+func reconcilerWithMockedCommands(t *testing.T, mc *mock_utils.MockCommands) *Reconciler {
+	t.Helper()
+	return NewReconciler(
+		test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{}, &v1alpha1.LVMLogicalVolume{}),
+		logger.Logger{},
+		monitoring.GetMetrics(""),
+		cache.New(),
+		mc,
+		ReconcilerConfig{NodeName: "test_node", CmdDeadlineDuration: 30 * time.Second},
+	)
+}
+
+// provisionFileDevices is idempotent: when a backing file is already
+// attached to a loop device, the existing loop must be reused.
+// `losetup --find --show` would otherwise pick a fresh minor on every
+// reconcile retry and slowly leak loops up to the system-wide limit.
+func TestProvisionFileDevices_ReusesExistingLoop(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	ctx := context.Background()
+
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec: v1alpha1.LVMVolumeGroupSpec{
+			FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{
+				{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")},
+			},
+		},
+	}
+	want := utils.BuildFileDevicePath("/data", "vg-a", "d10g")
+
+	mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), want).Return("losetup -j ...", "/dev/loop7", nil)
+	// CreateFileDevice / SetupLoopDevice MUST NOT be invoked.
+
+	got, _, err := r.provisionFileDevices(ctx, lvg, fileDeviceIssues{}, false)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"/dev/loop7"}, got)
+}
+
+// When the second file's losetup fails, the first file's freshly
+// created loop and backing file must be rolled back so a retry sees a
+// clean state instead of a half-attached carcass.
+func TestProvisionFileDevices_RollsBackOnPartialFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	ctx := context.Background()
+
+	fdA := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	fdB := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d20g", Directory: "/data", Size: resource.MustParse("20Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fdA, fdB}},
+	}
+	pathA := utils.BuildFileDevicePath(fdA.Directory, "vg-a", fdA.Name)
+	pathB := utils.BuildFileDevicePath(fdB.Directory, "vg-a", fdB.Name)
+
+	sizeA := fdA.Size.Value()
+	sizeB := fdB.Size.Value()
+	gomock.InOrder(
+		mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), pathA).Return("losetup -j", "", nil),
+		mc.EXPECT().EnsureFileDeviceDirectory(gomock.Any(), fdA.Directory).Return("mkdir -p ...", nil),
+		mc.EXPECT().GetFileAllocatedBytes(gomock.Any(), pathA).Return("stat -c %b %B ...", int64(0), utils.ErrFileDeviceAbsent),
+		mc.EXPECT().GetFilesystemSpace(gomock.Any(), fdA.Directory).Return("stat -f ...", internal.FilesystemSpace{AvailableBytes: int64(1) << 50}, nil),
+		mc.EXPECT().CreateFileDevice(gomock.Any(), pathA, sizeA).Return("fallocate ...", nil),
+		mc.EXPECT().SetupLoopDevice(gomock.Any(), pathA).Return("losetup --find ...", "/dev/loop0", nil),
+		mc.EXPECT().SetLoopDirectIO(gomock.Any(), "/dev/loop0").Return("losetup --direct-io=on ...", nil),
+		mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), pathB).Return("losetup -j", "", nil),
+		mc.EXPECT().EnsureFileDeviceDirectory(gomock.Any(), fdB.Directory).Return("mkdir -p ...", nil),
+		mc.EXPECT().GetFileAllocatedBytes(gomock.Any(), pathB).Return("stat -c %b %B ...", int64(0), utils.ErrFileDeviceAbsent),
+		mc.EXPECT().GetFilesystemSpace(gomock.Any(), fdB.Directory).Return("stat -f ...", internal.FilesystemSpace{AvailableBytes: int64(1) << 50}, nil),
+		mc.EXPECT().CreateFileDevice(gomock.Any(), pathB, sizeB).Return("fallocate ...", nil),
+		mc.EXPECT().SetupLoopDevice(gomock.Any(), pathB).Return("losetup --find ...", "", errors.New("ENOSPC")),
+		// rollback in LIFO order: first pathB, then pathA (loop + file). losetup can
+		// fail with the device already bound, so pathB's loop is looked for rather
+		// than assumed absent.
+		mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), pathB).Return("losetup -j", "", nil),
+		mc.EXPECT().RemoveFileDevice(gomock.Any(), pathB).Return("rm ...", nil),
+		mc.EXPECT().DetachLoopDevice(gomock.Any(), "/dev/loop0").Return("losetup -d ...", nil),
+		mc.EXPECT().RemoveFileDevice(gomock.Any(), pathA).Return("rm ...", nil),
+	)
+
+	_, _, err := r.provisionFileDevices(ctx, lvg, fileDeviceIssues{}, false)
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "ENOSPC")
+	}
+}
+
+// A backing file larger than the filesystem's free space must be refused
+// before fallocate runs, so a typo in directory/size cannot fill the node's
+// root filesystem and trip kubelet DiskPressure eviction. The directory is
+// still created (mkdir -p), but no file is allocated and no loop is attached.
+func TestProvisionFileDevices_RefusesWhenNotEnoughFreeSpace(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	ctx := context.Background()
+
+	fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d100g", Directory: "/data", Size: resource.MustParse("100Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+	}
+	path := utils.BuildFileDevicePath(fd.Directory, "vg-a", fd.Name)
+
+	gomock.InOrder(
+		mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j", "", nil),
+		mc.EXPECT().EnsureFileDeviceDirectory(gomock.Any(), fd.Directory).Return("mkdir -p ...", nil),
+		mc.EXPECT().GetFileAllocatedBytes(gomock.Any(), path).Return("stat -c %b %B ...", int64(0), utils.ErrFileDeviceAbsent),
+		// Only 1Gi free for a 100Gi request → reject before fallocate.
+		mc.EXPECT().GetFilesystemSpace(gomock.Any(), fd.Directory).Return("stat -f ...", internal.FilesystemSpace{AvailableBytes: int64(1) << 30}, nil),
+	)
+	// CreateFileDevice / SetupLoopDevice MUST NOT be invoked.
+
+	_, _, err := r.provisionFileDevices(ctx, lvg, fileDeviceIssues{}, false)
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "not enough free space")
+	}
+}
+
+// When free space cannot be determined the provision proceeds best-effort:
+// fallocate still fails cleanly on a genuine ENOSPC, so a transient stat
+// failure must not block provisioning by itself.
+func TestProvisionFileDevices_ProceedsWhenFreeSpaceUnknown(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	ctx := context.Background()
+
+	fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+	}
+	path := utils.BuildFileDevicePath(fd.Directory, "vg-a", fd.Name)
+
+	gomock.InOrder(
+		mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j", "", nil),
+		mc.EXPECT().EnsureFileDeviceDirectory(gomock.Any(), fd.Directory).Return("mkdir -p ...", nil),
+		mc.EXPECT().GetFileAllocatedBytes(gomock.Any(), path).Return("stat -c %b %B ...", int64(0), utils.ErrFileDeviceAbsent),
+		mc.EXPECT().GetFilesystemSpace(gomock.Any(), fd.Directory).Return("stat -f ...", internal.FilesystemSpace{AvailableBytes: int64(0)}, errors.New("stat: command not found")),
+		mc.EXPECT().CreateFileDevice(gomock.Any(), path, fd.Size.Value()).Return("fallocate ...", nil),
+		mc.EXPECT().SetupLoopDevice(gomock.Any(), path).Return("losetup --find ...", "/dev/loop0", nil),
+		mc.EXPECT().SetLoopDirectIO(gomock.Any(), "/dev/loop0").Return("losetup --direct-io=on ...", nil),
+	)
+
+	loops, _, err := r.provisionFileDevices(ctx, lvg, fileDeviceIssues{}, false)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"/dev/loop0"}, loops)
+}
+
+// cleanupFileDevices must walk the union of spec.fileDevices and
+// status.nodes[].fileDevices so files that were created mid-provision
+// (and therefore never landed in status) are not leaked when the
+// resource is deleted before the discoverer ran.
+func TestCleanupFileDevices_UnionOfSpecAndStatus(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	expectNoLivePVs(mc)
+	ctx := context.Background()
+
+	fdSpec := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	pathSpec := utils.BuildFileDevicePath(fdSpec.Directory, "vg-a", fdSpec.Name)
+	// status has a different (older) entry — still managed-named.
+	fdStatusPath := utils.BuildFileDevicePath("/data", "vg-a", "d20g")
+
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fdSpec}},
+		Status: v1alpha1.LVMVolumeGroupStatus{
+			Nodes: []v1alpha1.LVMVolumeGroupNode{{
+				Name: "test_node",
+				FileDevices: []v1alpha1.LVMVolumeGroupFileDevice{
+					{FilePath: fdStatusPath, LoopDevice: "/dev/loop9"},
+				},
+			}},
+		},
+	}
+
+	// Both targets carry a backing file, so cleanup always re-resolves the
+	// loop from the file (the status-recorded minor can be stale after a
+	// reboot) before detaching.
+	mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), fdStatusPath).Return("losetup -j ...", "/dev/loop9", nil)
+	mc.EXPECT().DetachLoopDevice(gomock.Any(), "/dev/loop9").Return("losetup -d ...", nil)
+	mc.EXPECT().RemoveFileDevice(gomock.Any(), fdStatusPath).Return("rm ...", nil)
+	// The spec-derived entry resolves via losetup -j too; here nothing is attached.
+	mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), pathSpec).Return("losetup -j ...", "", nil)
+	mc.EXPECT().RemoveFileDevice(gomock.Any(), pathSpec).Return("rm ...", nil)
+
+	assert.NoError(t, r.cleanupFileDevices(ctx, lvg))
+}
+
+// A busy loop device must surface as an error so the finalizer stays
+// in place and the operator can retry — silently leaving a busy loop
+// stranded on the node when the LVG object is gone is the worst case.
+func TestCleanupFileDevices_DetachErrorBlocksFinalizer(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	expectNoLivePVs(mc)
+	ctx := context.Background()
+
+	pathStatus := utils.BuildFileDevicePath("/data", "vg-a", "d20g")
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Status: v1alpha1.LVMVolumeGroupStatus{
+			Nodes: []v1alpha1.LVMVolumeGroupNode{{
+				Name: "test_node",
+				FileDevices: []v1alpha1.LVMVolumeGroupFileDevice{
+					{FilePath: pathStatus, LoopDevice: "/dev/loop9"},
+				},
+			}},
+		},
+	}
+
+	gomock.InOrder(
+		mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), pathStatus).Return("losetup -j ...", "/dev/loop9", nil),
+		mc.EXPECT().DetachLoopDevice(gomock.Any(), "/dev/loop9").Return("losetup -d ...", errors.New("EBUSY")),
+	)
+	// RemoveFileDevice MUST NOT be called when detach failed: we don't
+	// want to rm the backing file while the kernel still has it open.
+
+	err := r.cleanupFileDevices(ctx, lvg)
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "EBUSY")
+	}
+}
+
+// A foreign-looking path that somehow slipped into status (bug, manual
+// edit, …) must be skipped, not rm-ed, even if the LVG is being
+// deleted. This is the hard owner check that protects unrelated host
+// files from being clobbered.
+func TestCleanupFileDevices_RefusesUnmanagedPath(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	expectNoLivePVs(mc)
+	ctx := context.Background()
+
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Status: v1alpha1.LVMVolumeGroupStatus{
+			Nodes: []v1alpha1.LVMVolumeGroupNode{{
+				Name: "test_node",
+				FileDevices: []v1alpha1.LVMVolumeGroupFileDevice{
+					{FilePath: "/var/lib/libvirt/images/disk0.qcow2", LoopDevice: "/dev/loop3"},
+				},
+			}},
+		},
+	}
+	// No EXPECTations on DetachLoopDevice / RemoveFileDevice: the
+	// cleanup must refuse to touch this path.
+
+	assert.NoError(t, r.cleanupFileDevices(ctx, lvg))
+}
+
+// When a backing file is known only from spec (status never recorded a
+// loop device, e.g. a crash mid-provision) cleanup must resolve the loop
+// via losetup -j and detach it BEFORE removing the file, otherwise the
+// loop device is stranded on the node bound to a deleted file.
+func TestCleanupFileDevices_SpecDerivedDetachesDiscoveredLoop(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	expectNoLivePVs(mc)
+	ctx := context.Background()
+
+	fdSpec := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	pathSpec := utils.BuildFileDevicePath(fdSpec.Directory, "vg-a", fdSpec.Name)
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fdSpec}},
+	}
+
+	gomock.InOrder(
+		mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), pathSpec).Return("losetup -j ...", "/dev/loop5", nil),
+		mc.EXPECT().DetachLoopDevice(gomock.Any(), "/dev/loop5").Return("losetup -d ...", nil),
+		mc.EXPECT().RemoveFileDevice(gomock.Any(), pathSpec).Return("rm ...", nil),
+	)
+
+	assert.NoError(t, r.cleanupFileDevices(ctx, lvg))
+}
+
+// The loop minor recorded in status can go stale: after a reboot the file
+// is re-attached via `losetup --find` to a DIFFERENT minor, and the old
+// minor may have been handed to an unrelated device. cleanup must detach
+// the minor that currently backs the file (resolved from the backing
+// file), never the stale one from status — otherwise it strands our loop
+// and may detach a foreign device.
+func TestCleanupFileDevices_ReResolvesStaleStatusLoop(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	expectNoLivePVs(mc)
+	ctx := context.Background()
+
+	path := utils.BuildFileDevicePath("/data", "vg-a", "d10g")
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Status: v1alpha1.LVMVolumeGroupStatus{
+			Nodes: []v1alpha1.LVMVolumeGroupNode{{
+				Name: "test_node",
+				FileDevices: []v1alpha1.LVMVolumeGroupFileDevice{
+					// status says /dev/loop0, but the file is really on /dev/loop3 now.
+					{FilePath: path, LoopDevice: "/dev/loop0"},
+				},
+			}},
+		},
+	}
+
+	gomock.InOrder(
+		mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j ...", "/dev/loop3", nil),
+		mc.EXPECT().DetachLoopDevice(gomock.Any(), "/dev/loop3").Return("losetup -d ...", nil),
+		mc.EXPECT().RemoveFileDevice(gomock.Any(), path).Return("rm ...", nil),
+	)
+	// DetachLoopDevice(/dev/loop0) MUST NOT be called — that is the stale minor.
+
+	assert.NoError(t, r.cleanupFileDevices(ctx, lvg))
+}
+
+// extendFileDevicesIfNeeded is the update-path entry point that makes
+// "add a new fileDevices entry to grow the VG" actually work: it
+// provisions the new backing file, attaches it, and vgextends with the
+// resulting loop device (which is not yet a PV of the VG).
+func TestExtendFileDevicesIfNeeded_AddsNewLoopAsPV(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	ctx := context.Background()
+
+	fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+	}
+	path := utils.BuildFileDevicePath(fd.Directory, "vg-a", fd.Name)
+	vg := internal.VGData{VGName: "vg-test"}
+
+	gomock.InOrder(
+		mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j", "", nil),
+		mc.EXPECT().EnsureFileDeviceDirectory(gomock.Any(), fd.Directory).Return("mkdir -p ...", nil),
+		mc.EXPECT().GetFileAllocatedBytes(gomock.Any(), path).Return("stat -c %b %B ...", int64(0), utils.ErrFileDeviceAbsent),
+		mc.EXPECT().GetFilesystemSpace(gomock.Any(), fd.Directory).Return("stat -f ...", internal.FilesystemSpace{AvailableBytes: int64(1) << 50}, nil),
+		mc.EXPECT().CreateFileDevice(gomock.Any(), path, fd.Size.Value()).Return("fallocate ...", nil),
+		mc.EXPECT().SetupLoopDevice(gomock.Any(), path).Return("losetup --find ...", "/dev/loop4", nil),
+		mc.EXPECT().SetLoopDirectIO(gomock.Any(), "/dev/loop4").Return("losetup --direct-io=on ...", nil),
+		mc.EXPECT().CreatePV(gomock.Any(), "/dev/loop4").Return("pvcreate ...", nil),
+		mc.EXPECT().ExtendVG("vg-test", []string{"/dev/loop4"}).Return("vgextend ...", nil),
+		mc.EXPECT().UdevadmTrigger(gomock.Any(), []string{"/dev/loop4"}).Return("udevadm ...", nil),
+	)
+
+	mc.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "lvm pvs", bytes.Buffer{}, nil).AnyTimes()
+	assert.NoError(t, r.extendFileDevicesIfNeeded(ctx, lvg, vg, nil, fileDeviceIssues{}))
+}
+
+// A loop device that is already a PV of the VG must not be re-added.
+func TestExtendFileDevicesIfNeeded_SkipsExistingPV(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	ctx := context.Background()
+
+	fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+	}
+	path := utils.BuildFileDevicePath(fd.Directory, "vg-a", fd.Name)
+	vg := internal.VGData{VGName: "vg-test"}
+
+	// Already attached and already a PV of this very VG — no CreatePV/ExtendVG
+	// expected. The VG name is what makes it "already done": a PV label alone
+	// leaves the loop outside the Volume Group and it must still be extended in.
+	mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j", "/dev/loop4", nil)
+
+	pvs := []internal.PVData{{PVName: "/dev/loop4", VGName: "vg-test"}}
+	mc.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "lvm pvs", bytes.Buffer{}, nil).AnyTimes()
+	assert.NoError(t, r.extendFileDevicesIfNeeded(ctx, lvg, vg, pvs, fileDeviceIssues{}))
+}
+
+// extendFileDevicesIfNeeded must decide against a live `lvm pvs`, not against the
+// cache. A loop joins a Volume Group without any udev event of its own, and the
+// cache is filled only on udev events, so after an interrupted reconcile the cache
+// is the one place that membership is missing. Here both the caller's snapshot and
+// the cache are empty and only LVM knows the loop is already in the VG: no
+// CreatePV/ExtendVG may be issued, because pvcreate would fail "already a PV" and
+// the caller reports that as VGExtendFailed, which is fatal.
+func TestExtendFileDevicesIfNeeded_SkipsPVKnownOnlyToLiveLVM(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	ctx := context.Background()
+
+	fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+	}
+	path := utils.BuildFileDevicePath(fd.Directory, "vg-a", fd.Name)
+	vg := internal.VGData{VGName: "vg-test"}
+
+	mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j", "/dev/loop4", nil)
+	// The cache is empty — the state an interrupted pvcreate actually leaves it in.
+	r.sdsCache.StorePVs(nil, bytes.Buffer{})
+	mc.EXPECT().GetAllPVs(gomock.Any()).
+		Return([]internal.PVData{{PVName: "/dev/loop4", VGName: "vg-test"}}, "lvm pvs", bytes.Buffer{}, nil)
+
+	assert.NoError(t, r.extendFileDevicesIfNeeded(ctx, lvg, vg, nil, fileDeviceIssues{}))
+}
+
+// The cache is still the fallback when LVM itself cannot be read: pvcreate may
+// then fail, which is no worse than before the guard existed, and refusing to
+// proceed would make an unreadable `pvs` stop provisioning altogether.
+func TestExtendFileDevicesIfNeeded_FallsBackToTheCacheWhenLVMIsUnreadable(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	ctx := context.Background()
+
+	fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+	}
+	path := utils.BuildFileDevicePath(fd.Directory, "vg-a", fd.Name)
+	vg := internal.VGData{VGName: "vg-test"}
+
+	mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j", "/dev/loop4", nil)
+	mc.EXPECT().GetAllPVs(gomock.Any()).
+		Return(nil, "lvm pvs", bytes.Buffer{}, errors.New("lvm unavailable"))
+	r.sdsCache.StorePVs([]internal.PVData{{PVName: "/dev/loop4", VGName: "vg-test"}}, bytes.Buffer{})
+
+	// No CreatePV/ExtendVG: the cache still says it is a PV of this VG.
+	assert.NoError(t, r.extendFileDevicesIfNeeded(ctx, lvg, vg, nil, fileDeviceIssues{}))
+}
+
+// lvm.static has no udev integration, so an already-attached managed loop
+// PV is frequently reported under a /dev/disk/by-id (or /dev/block/MAJ:MIN)
+// alias rather than /dev/loopN. provisionFileDevices always returns the
+// canonical /dev/loopN, so a literal name match would miss it and wrongly
+// re-pvcreate the device. extendFileDevicesIfNeeded must resolve the alias
+// and skip the loop instead.
+func TestExtendFileDevicesIfNeeded_SkipsExistingPVUnderAlias(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	// Resolve the alias PV name to the canonical loop device.
+	r.resolver = func(_ context.Context, path string) (string, error) {
+		if path == "/dev/disk/by-id/lvm-pv-uuid-xyz" {
+			return "/dev/loop4", nil
+		}
+		return path, nil
+	}
+	ctx := context.Background()
+
+	fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+	}
+	path := utils.BuildFileDevicePath(fd.Directory, "vg-a", fd.Name)
+	vg := internal.VGData{VGName: "vg-test"}
+
+	// Loop is already attached; the cache reports it only under an alias.
+	// No CreatePV/ExtendVG must be issued.
+	mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j", "/dev/loop4", nil)
+
+	pvs := []internal.PVData{{PVName: "/dev/disk/by-id/lvm-pv-uuid-xyz", VGName: "vg-test"}}
+	mc.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "lvm pvs", bytes.Buffer{}, nil).AnyTimes()
+	assert.NoError(t, r.extendFileDevicesIfNeeded(ctx, lvg, vg, pvs, fileDeviceIssues{}))
+}
+
+// When the canonical loop cannot be resolved from an alias PV (transient
+// readlink/nsenter failure), extendFileDevicesIfNeeded must NOT hand the loop
+// to pvcreate: the alias might already be this loop registered as a PV, and a
+// duplicate pvcreate would wedge the VGConfigurationApplied condition. The
+// loop is skipped this round, but because the skip was forced by a resolver
+// failure (not a confirmed already-a-PV), the function returns an error so the
+// reconcile requeues instead of silently reporting the configuration applied
+// while the new file device never joined the VG.
+func TestExtendFileDevicesIfNeeded_SkipsOnResolverFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	// The resolver fails for the alias PV, so the loop's PV membership is
+	// undeterminable this round.
+	r.resolver = func(_ context.Context, _ string) (string, error) {
+		return "", errors.New("nsenter readlink timed out")
+	}
+	ctx := context.Background()
+
+	fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+	}
+	path := utils.BuildFileDevicePath(fd.Directory, "vg-a", fd.Name)
+	vg := internal.VGData{VGName: "vg-test"}
+
+	// Loop is already attached. With the resolver failing, CreatePV/ExtendVG
+	// MUST NOT be issued (no duplicate pvcreate wedge).
+	mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j", "/dev/loop4", nil)
+
+	pvs := []internal.PVData{{PVName: "/dev/disk/by-id/lvm-pv-uuid-xyz", VGName: "vg-test"}}
+	mc.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "lvm pvs", bytes.Buffer{}, nil).AnyTimes()
+	assert.Error(t, r.extendFileDevicesIfNeeded(ctx, lvg, vg, pvs, fileDeviceIssues{}))
+}
+
+// A resolver that stays broken must not requeue silently forever: after a few
+// consecutive no-progress rounds the failure streak escalates so the condition
+// switches to ReasonAliasResolutionFailed. This is the observable
+// "resolver broken" signal from review #6.
+//
+// The reason travels back with the error rather than being written to the
+// condition here, and that is asserted: writing it from inside this function was
+// pointless, because the caller overwrote the condition a moment later and the
+// escalation never reached the resource.
+func TestExtendFileDevicesIfNeeded_EscalatesAfterRepeatedResolverFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	r.resolver = func(_ context.Context, _ string) (string, error) {
+		return "", errors.New("nsenter readlink timed out")
+	}
+	ctx := context.Background()
+
+	fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+	}
+	path := utils.BuildFileDevicePath(fd.Directory, "vg-a", fd.Name)
+	vg := internal.VGData{VGName: "vg-test"}
+	pvs := []internal.PVData{{PVName: "/dev/disk/by-id/lvm-pv-uuid-xyz", VGName: "vg-test"}}
+
+	mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j", "/dev/loop4", nil).AnyTimes()
+
+	mc.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "lvm pvs", bytes.Buffer{}, nil).AnyTimes()
+
+	for attempt := 1; attempt <= aliasResolveFailureEscalationThreshold; attempt++ {
+		msg, reason, fatal := splitUnappliedFileDevices(
+			r.extendFileDevicesIfNeeded(ctx, lvg, vg, pvs, fileDeviceIssues{}))
+
+		// The loop did not join the VG, but the VG itself is untouched, so this
+		// must never be the kind of error that takes the LVMVolumeGroup out of
+		// service.
+		assert.NoError(t, fatal, "an unresolvable alias must not be reported as a broken Volume Group")
+		assert.NotEmpty(t, msg, "the operator has to be told why the file device is not in the VG yet")
+
+		if attempt < aliasResolveFailureEscalationThreshold {
+			assert.Equal(t, internal.ReasonUpdating, reason,
+				"a blip is still an ordinary in-flight update")
+		} else {
+			assert.Equal(t, internal.ReasonAliasResolutionFailed, reason,
+				"a persistent failure must become alertable on its own reason")
+			assert.Contains(t, msg, "consecutive reconciles")
+		}
+
+		assert.Equal(t, attempt, r.aliasResolveFailures[lvg.Name])
+	}
+	// At the threshold the streak reached the escalation point.
+	assert.GreaterOrEqual(t, r.aliasResolveFailures[lvg.Name], aliasResolveFailureEscalationThreshold)
+}
+
+// A transient resolver blip must not accumulate toward escalation: once a
+// round makes progress (or has nothing to do), the streak resets so the next
+// failure starts counting from one again.
+func TestExtendFileDevicesIfNeeded_ResolverFailureStreakResetsOnProgress(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	ctx := context.Background()
+
+	fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+	}
+	path := utils.BuildFileDevicePath(fd.Directory, "vg-a", fd.Name)
+	vg := internal.VGData{VGName: "vg-test"}
+	pvs := []internal.PVData{{PVName: "/dev/disk/by-id/lvm-pv-uuid-xyz", VGName: "vg-test"}}
+
+	mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j", "/dev/loop4", nil).AnyTimes()
+
+	// What the live `lvm pvs` reports, round by round.
+	livePVs := []internal.PVData(nil)
+	mc.EXPECT().GetAllPVs(gomock.Any()).
+		DoAndReturn(func(_ context.Context) ([]internal.PVData, string, bytes.Buffer, error) {
+			return livePVs, "lvm pvs", bytes.Buffer{}, nil
+		}).AnyTimes()
+
+	// Two failing rounds build a streak of 2.
+	r.resolver = func(_ context.Context, _ string) (string, error) {
+		return "", errors.New("nsenter readlink timed out")
+	}
+	assert.Error(t, r.extendFileDevicesIfNeeded(ctx, lvg, vg, pvs, fileDeviceIssues{}))
+	assert.Error(t, r.extendFileDevicesIfNeeded(ctx, lvg, vg, pvs, fileDeviceIssues{}))
+	assert.Equal(t, 2, r.aliasResolveFailures[lvg.Name])
+
+	// A round that makes no-progress-but-not-due-to-resolver (the loop is a
+	// canonical PV of this VG that LVM knows about) clears the streak.
+	livePVs = []internal.PVData{{PVName: "/dev/loop4", VGName: "vg-test"}}
+	assert.NoError(t, r.extendFileDevicesIfNeeded(ctx, lvg, vg, nil, fileDeviceIssues{}))
+	assert.Equal(t, 0, r.aliasResolveFailures[lvg.Name])
+}
+
+// When the extend step (pvcreate/vgextend) fails after a new file device was
+// freshly provisioned, the loop device and backing file created in THIS call
+// must be rolled back so a failed extend does not leak them on the node (and
+// orphan them entirely if the admin then removes the failing spec entry).
+func TestExtendFileDevicesIfNeeded_RollsBackProvisionedOnExtendFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	ctx := context.Background()
+
+	fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+	}
+	path := utils.BuildFileDevicePath(fd.Directory, "vg-a", fd.Name)
+	vg := internal.VGData{VGName: "vg-test"}
+
+	gomock.InOrder(
+		mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j", "", nil),
+		mc.EXPECT().EnsureFileDeviceDirectory(gomock.Any(), fd.Directory).Return("mkdir -p ...", nil),
+		mc.EXPECT().GetFileAllocatedBytes(gomock.Any(), path).Return("stat -c %b %B ...", int64(0), utils.ErrFileDeviceAbsent),
+		mc.EXPECT().GetFilesystemSpace(gomock.Any(), fd.Directory).Return("stat -f ...", internal.FilesystemSpace{AvailableBytes: int64(1) << 50}, nil),
+		mc.EXPECT().CreateFileDevice(gomock.Any(), path, fd.Size.Value()).Return("fallocate ...", nil),
+		mc.EXPECT().SetupLoopDevice(gomock.Any(), path).Return("losetup --find ...", "/dev/loop4", nil),
+		mc.EXPECT().SetLoopDirectIO(gomock.Any(), "/dev/loop4").Return("losetup --direct-io=on ...", nil),
+		// Extend fails on pvcreate...
+		mc.EXPECT().CreatePV(gomock.Any(), "/dev/loop4").Return("pvcreate ...", errors.New("pvcreate refused")),
+		// ...rollback first confirms the loop is not already a PV (it is not)...
+		mc.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "pvs", bytes.Buffer{}, nil),
+		// ...then tears down the just-provisioned loop + file.
+		mc.EXPECT().DetachLoopDevice(gomock.Any(), "/dev/loop4").Return("losetup -d ...", nil),
+		mc.EXPECT().RemoveFileDevice(gomock.Any(), path).Return("rm ...", nil),
+	)
+
+	// pvcreate/vgextend failing is a failure of the Volume Group operation, not
+	// of one spec entry, so it stays the kind of error that aborts the reconcile.
+	// This is the other side of the line splitUnappliedFileDevices draws.
+	mc.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "lvm pvs", bytes.Buffer{}, nil).AnyTimes()
+	_, _, fatal := splitUnappliedFileDevices(r.extendFileDevicesIfNeeded(ctx, lvg, vg, nil, fileDeviceIssues{}))
+	assert.Error(t, fatal)
+}
+
+// An entry the node cannot bring up — no room for the backing file is the usual
+// way — must not be reported as a broken Volume Group. Everything already in the
+// VG keeps working, so the caller has to go on reconciling (thin-pool growth in
+// particular) and report the entry under a reason that leaves the LVMVolumeGroup
+// schedulable. Before this, appending one oversized entry to a healthy
+// LVMVolumeGroup put it in NotReady until the entry was removed.
+func TestExtendFileDevicesIfNeeded_UnprovisionableEntryIsNotAVGFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	ctx := context.Background()
+
+	healthy := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d0", Directory: "/data", Size: resource.MustParse("10Gi")}
+	oversized := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d1", Directory: "/data", Size: resource.MustParse("500Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec: v1alpha1.LVMVolumeGroupSpec{
+			FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{healthy, oversized},
+		},
+	}
+	healthyPath := utils.BuildFileDevicePath(healthy.Directory, "vg-a", healthy.Name)
+	oversizedPath := utils.BuildFileDevicePath(oversized.Directory, "vg-a", oversized.Name)
+	vg := internal.VGData{VGName: "vg-test"}
+	// The healthy entry is already a PV of the VG, so nothing is extended.
+	pvs := []internal.PVData{{PVName: "/dev/loop4", VGName: "vg-test"}}
+
+	// The healthy entry is reused as-is.
+	mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), healthyPath).Return("losetup -j", "/dev/loop4", nil)
+	// The oversized one does not fit and is refused before fallocate runs.
+	mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), oversizedPath).Return("losetup -j", "", nil)
+	mc.EXPECT().EnsureFileDeviceDirectory(gomock.Any(), oversized.Directory).Return("mkdir -p ...", nil)
+	mc.EXPECT().GetFileAllocatedBytes(gomock.Any(), oversizedPath).Return("stat -c %b %B ...", int64(0), utils.ErrFileDeviceAbsent)
+	mc.EXPECT().GetFilesystemSpace(gomock.Any(), oversized.Directory).Return("stat -f ...", internal.FilesystemSpace{AvailableBytes: int64(20) << 30}, nil)
+
+	mc.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "lvm pvs", bytes.Buffer{}, nil).AnyTimes()
+
+	msg, reason, fatal := splitUnappliedFileDevices(
+		r.extendFileDevicesIfNeeded(ctx, lvg, vg, pvs, fileDeviceIssues{}))
+
+	assert.NoError(t, fatal, "the Volume Group is intact; only the new entry did not fit")
+	assert.Empty(t, reason, "no override: this is the plain not-applied case")
+	assert.Contains(t, msg, oversized.Name, "the condition has to name the entry that was left out")
+	assert.Equal(t, internal.ReasonFileDeviceNotApplied, fileDeviceConditionReason("", msg, reason))
+}
+
+// rollbackProvisionedFileDevices must NOT detach the loop or remove the backing
+// file of a device whose loop has already become a live PV — by a concurrent
+// reconcile or by a pvcreate/vgcreate that materially succeeded but returned a
+// non-zero status. Tearing it down deletes the backing file out from under a
+// PV the VG is using, which on real clusters left the single backing file
+// attached to two loops (one "(deleted)") and doubled the VG. Here CreatePV
+// reports failure yet the loop shows up as a PV in the authoritative pvs list,
+// so rollback must skip it entirely.
+func TestExtendFileDevicesIfNeeded_DoesNotRollBackLoopThatBecamePV(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	ctx := context.Background()
+
+	fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g", Directory: "/data", Size: resource.MustParse("10Gi")}
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+	}
+	path := utils.BuildFileDevicePath(fd.Directory, "vg-a", fd.Name)
+	vg := internal.VGData{VGName: "vg-test"}
+
+	gomock.InOrder(
+		mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j", "", nil),
+		mc.EXPECT().EnsureFileDeviceDirectory(gomock.Any(), fd.Directory).Return("mkdir -p ...", nil),
+		mc.EXPECT().GetFileAllocatedBytes(gomock.Any(), path).Return("stat -c %b %B ...", int64(0), utils.ErrFileDeviceAbsent),
+		mc.EXPECT().GetFilesystemSpace(gomock.Any(), fd.Directory).Return("stat -f ...", internal.FilesystemSpace{AvailableBytes: int64(1) << 50}, nil),
+		mc.EXPECT().CreateFileDevice(gomock.Any(), path, fd.Size.Value()).Return("fallocate ...", nil),
+		mc.EXPECT().SetupLoopDevice(gomock.Any(), path).Return("losetup --find ...", "/dev/loop4", nil),
+		mc.EXPECT().SetLoopDirectIO(gomock.Any(), "/dev/loop4").Return("losetup --direct-io=on ...", nil),
+		mc.EXPECT().CreatePV(gomock.Any(), "/dev/loop4").Return("pvcreate ...", errors.New("fd leaked on lvm invocation")),
+		// The pvcreate actually wrote the PV label despite the error, so the
+		// authoritative pvs list reports /dev/loop4 as a PV of the VG.
+		mc.EXPECT().GetAllPVs(gomock.Any()).Return(
+			[]internal.PVData{{PVName: "/dev/loop4", VGName: "vg-test"}}, "pvs", bytes.Buffer{}, nil),
+	)
+	// No DetachLoopDevice / RemoveFileDevice expectations: rollback must skip the
+	// in-use loop. gomock fails the test if either is called.
+
+	mc.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "lvm pvs", bytes.Buffer{}, nil).AnyTimes()
+	assert.Error(t, r.extendFileDevicesIfNeeded(ctx, lvg, vg, nil, fileDeviceIssues{}))
+}
+
+// validateLVGForUpdateFunc must count the capacity of newly-added
+// spec.fileDevices entries (not yet PVs in the VG) when validating thin-pool
+// sizes — mirroring additionBlockDeviceSpace for block devices. Without it, a
+// combined "append a fileDevices entry + grow thin-pools" edit is validated
+// against the pre-extend VG size and wrongly rejected.
+//
+// Two thin-pools are used on purpose: with a single pool, a request that
+// exceeds the VG size is silently accepted as a "100% of VG" pool, so the
+// missing-capacity bug would not surface. With two pools, the too-small VG
+// size pushes the first pool into the full-VG branch and produces a rejection
+// ("requests size of full VG space, but there are any other thin-pools"),
+// which the fix avoids.
+func TestValidateLVGForUpdateFunc_CountsNewFileDeviceSpaceForThinPools(t *testing.T) {
+	const vgName = "test-vg-file"
+
+	makeLVG := func(status v1alpha1.LVMVolumeGroupStatus) *v1alpha1.LVMVolumeGroup {
+		return &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-file"},
+			Spec: v1alpha1.LVMVolumeGroupSpec{
+				ActualVGNameOnTheNode: vgName,
+				FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{
+					{Name: "d5g", Directory: "/data", Size: resource.MustParse("5G")},
+				},
+				ThinPools: []v1alpha1.LVMVolumeGroupThinPoolSpec{
+					{Name: "tp1", Size: "2G"},
+					{Name: "tp2", Size: "2G"},
+				},
+			},
+			Status: status,
+		}
+	}
+
+	t.Run("new_file_device_capacity_is_counted", func(t *testing.T) {
+		r := setupReconciler()
+		// VG currently holds 1G; the 5G file device is new (absent from status),
+		// so newTotalVGSize = 1G + 5G = 6G and both 2G pools fit.
+		vgs := []internal.VGData{{VGName: vgName, VGSize: resource.MustParse("1G"), VGFree: resource.MustParse("1G")}}
+		r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
+		r.sdsCache.StorePVs(nil, bytes.Buffer{})
+
+		valid, reason, _ := r.validateLVGForUpdateFunc(context.Background(), makeLVG(v1alpha1.LVMVolumeGroupStatus{}), map[string]v1alpha1.BlockDevice{})
+		if assert.True(t, valid) {
+			assert.Equal(t, "", reason)
+		}
+	})
+
+	t.Run("existing_file_device_is_not_double_counted", func(t *testing.T) {
+		r := setupReconciler()
+		// The same 5G file device is already in status (already part of the 1G
+		// VG for the purpose of the test), so it is NOT added again:
+		// newTotalVGSize stays 1G and the two 2G pools no longer fit.
+		existingPath := utils.BuildFileDevicePath("/data", "vg-file", "d5g")
+		status := v1alpha1.LVMVolumeGroupStatus{
+			Nodes: []v1alpha1.LVMVolumeGroupNode{{
+				Name:        "test_node",
+				FileDevices: []v1alpha1.LVMVolumeGroupFileDevice{{Name: "d5g", FilePath: existingPath, Size: resource.MustParse("5G")}},
+			}},
+		}
+		vgs := []internal.VGData{{VGName: vgName, VGSize: resource.MustParse("1G"), VGFree: resource.MustParse("1G")}}
+		r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
+		r.sdsCache.StorePVs(nil, bytes.Buffer{})
+
+		valid, _, _ := r.validateLVGForUpdateFunc(context.Background(), makeLVG(status), map[string]v1alpha1.BlockDevice{})
+		assert.False(t, valid)
+	})
+
+	t.Run("symlink_canonicalized_status_path_still_matches", func(t *testing.T) {
+		r := setupReconciler()
+		// losetup reports the loop's backing file with the directory symlink
+		// resolved (/data -> /mnt/disk1/data), so status FilePath differs from
+		// BuildFileDevicePath in its directory but shares the basename. The
+		// existing device must still be recognized (basename match) and NOT
+		// counted as new — so newTotalVGSize stays 1G and the two 2G pools no
+		// longer fit, exactly like the same-path case above. A full-path compare
+		// would miss it, inflate the VG size, and wrongly pass validation.
+		specPath := utils.BuildFileDevicePath("/data", "vg-file", "d5g")
+		canonicalStatusPath := "/mnt/disk1" + specPath // /mnt/disk1/data/sds-...img
+		status := v1alpha1.LVMVolumeGroupStatus{
+			Nodes: []v1alpha1.LVMVolumeGroupNode{{
+				Name:        "test_node",
+				FileDevices: []v1alpha1.LVMVolumeGroupFileDevice{{Name: "d5g", FilePath: canonicalStatusPath, Size: resource.MustParse("5G")}},
+			}},
+		}
+		vgs := []internal.VGData{{VGName: vgName, VGSize: resource.MustParse("1G"), VGFree: resource.MustParse("1G")}}
+		r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
+		r.sdsCache.StorePVs(nil, bytes.Buffer{})
+
+		valid, _, _ := r.validateLVGForUpdateFunc(context.Background(), makeLVG(status), map[string]v1alpha1.BlockDevice{})
+		assert.False(t, valid)
+	})
 }
