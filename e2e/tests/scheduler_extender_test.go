@@ -122,6 +122,30 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 		waitPVCBoundAndPodRunning(ctx, k8sClient, pvcName, podName)
 	})
 
+	It("steers a launcher Pod whose PVC comes only from the annotation", Label("sched-steer-annotation"), func() {
+		const (
+			pvcName        = schedPVCPrefix + "steer-annotation"
+			launcherName   = schedPodPrefix + "steer-annotation-launcher"
+			attachmentName = schedPodPrefix + "steer-annotation-attachment"
+		)
+
+		// The PVC has to exist before the launcher is filtered: a PVC named only in the annotation and
+		// missing at that moment is skipped as a stale hint, and the Pod would be placed anywhere.
+		createPVC(ctx, k8sClient, pvcName, storageClassName, schedSteerPVCSize)
+		createPod(ctx, k8sClient, launcherName, podOpts{annotationPVC: pvcName})
+
+		launcherNode := waitPodScheduled(ctx, k8sClient, launcherName)
+		Expect(launcherNode).To(Equal(bigNode),
+			"the extender must read the PVC from the %s annotation and steer the launcher to %s",
+			podExtraPVCsAnnotation, bigNode)
+
+		// Nothing mounts the PVC yet, so it is still Pending: the attachment Pod is its first consumer
+		// and is pinned to wherever the launcher landed. If the launcher went to a small node, this Pod
+		// is pinned there too, the volume cannot be created and the spec goes red.
+		createPod(ctx, k8sClient, attachmentName, podOpts{mountPVC: pvcName, node: launcherNode})
+		waitPVCBoundAndPodRunning(ctx, k8sClient, pvcName, attachmentName)
+	})
+
 	AfterAll(func() {
 		cleanupCtx := context.Background()
 
