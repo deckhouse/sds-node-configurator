@@ -56,8 +56,8 @@ e2e/
 │   ├── parse.go                 #   ParseLsblk / LsblkLine
 │   ├── blockdevice.go           #   BlockDeviceName, WaitNewConsumableBlockDevice,
 │   │                            #     TriggerLVMDiscovery
-│   └── lvm.go                   #   PVNamesInListing, CountPVsInVG, VGInListing,
-│                                #     ThinPoolDataLVPresent, RemoveThinPoolStackScript
+│   └── lvm.go                   #   CountPVsInVG, VGInListing, ThinPoolDataLVPresent,
+│                                #     RemoveThinPoolStackScript
 ├── sdsclient/                   # sdsclient.New(*rest.Config) -> client.Client
 │                                #   (приватный scheme: client-go + v1alpha1)
 └── tests/                       # спеки + Ginkgo-coupled хелперы (package tests)
@@ -117,46 +117,10 @@ SDK `e2e.Connect`. В CI провижн/подключение делает reus
 | `block-device-stable` | стабильность BlockDevice по стадиям |
 | `netlink-discovery` | netlink-дискавери |
 | `lvmvolumegroup` | сценарии LVMVolumeGroup (в т.ч. thin-pool) |
-| `file-devices` | LVMVolumeGroup поверх файлов (`spec.fileDevices`), см. ниже |
-| `node-reboot` | перезагрузка ноды (входит в `file-devices`; исключается `!node-reboot`) |
-| `needs-disks` | спеку нужен настоящий диск (create/attach/detach) — см. ниже |
 | `controller-restart` | устойчивость к рестарту контроллера |
 | `schedule-extender` (+ `small`/`medium`/`large`) | scheduler-extender |
 | `regress` | вложенный регресс-кейс block-device-stable |
 | `stress-test` | стресс: максимум независимых VG на ноду (исключён по умолчанию) |
-
-### Два провайдера в CI
-
-Сьют делится по тому, что спеку нужно от инфраструктуры, а не по тому, что он
-проверяет:
-
-| задание | провайдер | метка PR | фильтр | спеков |
-|---|---|---|---|---|
-| `e2e (dvp, block devices)` | `dvp` | `e2e/run`, `e2e/dvp/run` | `!stress-test && (!file-devices \|\| needs-disks)` | 34 |
-| `e2e (commander, file devices)` | `commander` | `e2e/commander/run` | `!stress-test && file-devices && !needs-disks` | 34 |
-
-Фильтры комплементарны: каждый спек выполняется ровно один раз (34 + 34 = 68 —
-весь сьют без стресса).
-
-Метка `e2e/run` намеренно **не** запускает commander-задание: тому нужны свои
-учётные данные и шаблон кластера, и до их появления такой прогон падал бы на
-bootstrap. Когда Commander будет настроен, имеет смысл сделать `e2e/run`
-запускающей оба.
-
-Метка `e2e/label:<x>` целиком заменяет фильтр задания (так устроен resolve-шаг
-reusable-workflow) и тем самым отменяет это разделение — полезно как аварийный
-выход, неожиданно, если поставить её не подумав.
-
-Причина деления в SDK: провайдер `commander` выдаёт кластер, но не инфраструктуру
-под ним, поэтому его `DiskManager` отсутствует и любая операция с диском
-возвращает `ErrDisksUnsupported`. Выполнение команд на узлах по SSH он при этом
-поддерживает — а `spec.fileDevices` ровно для узлов без свободного диска и
-придуман, так что файловым спекам диски не нужны.
-
-Единственный файловый спек, которому диск нужен (смешанный block+file), помечен
-`needs-disks` и поэтому остаётся на `dvp`. Если он всё же окажется на провайдере
-без дисков, `fdCreateDiskOrSkip` пропустит его с внятным сообщением вместо
-падения.
 
 ```bash
 # подмножество:
@@ -166,124 +130,6 @@ make test-stress
 # всё вместе:
 make test-go GINKGO_LABEL_FILTER=''
 ```
-
-## LVMVolumeGroup на файлах (`spec.fileDevices`)
-
-Лейбл `file-devices`, 25 спек в шести файлах; общие хелперы — `tests/helpers_filedevices_test.go`.
-Кроме смешанного сценария отдельный диск не нужен нигде — включая сценарии с PVC,
-где том нарезается из того же file-backed VG: агент создаёт
-backing-файл (файл-подложку, поверх которой делается PV) в базовом каталоге
-`/opt/deckhouse/sds/file-devices`, подключает его как loop-устройство и делает `pvcreate`.
-Нода выбирается автоматически — первая с Ready-подом агента, worker'ы в приоритете.
-
-> Все проверки на ноде, которые дёргают LVM, обязаны передавать тот же `--config`, что
-> и агент (`fdLVMCfg` в `helpers_filedevices_test.go`). Модуль через NodeGroupConfiguration
-> прописывает в `/etc/lvm/lvm.conf` фильтр `["r|^/dev/loop[0-9]+|"]`, поэтому host-wide LVM
-> **не видит loop-устройств**: обычный `vgs` отрапортует рабочий VG как отсутствующий, а
-> обычный `lvremove` молча не снесёт thin-pool, и LVG залипнет в `Terminating`.
-
-```bash
-make test-go GINKGO_LABEL_FILTER='file-devices'
-```
-
-### `lvmvolumegroup_filedevices_test.go` — жизненный цикл
-
-| Спека | Что проверяется |
-|-------|-----------------|
-| Создание и удаление | file-only VG (`1Gi`) → `Ready`; в `status.nodes[].fileDevices` — `filePath` под базовым каталогом, `loopDevice` `/dev/loop*`, `pvUUID`; на ноде ровно один loop с `DIO=1`, VG с тегами `storage.deckhouse.io/enabled=true` и `.../lvmVolumeGroupName=<lvg>`. После удаления файл убран, loop отсоединён |
-| Thin-pool на файле | file-only VG (`2Gi`) + thin-pool `50%` → `Ready`, data-LV thin-pool'а присутствует на ноде |
-| Расширение | добавление второй записи `fileDevices` → две записи в статусе, `vgSize` растёт, оба PV на ноде — `/dev/loop*` |
-| Reattach при потере loop | фаза 1: обычный рестарт агента — loop переживает под, ничего не меняется и второй loop не появляется; фаза 2: `losetup -d` + `vgchange -an` (имитация ребута) → рестарт агента → VG снова `Ready`, тот же `filePath`, новый loop, без дублей файла и loop'а. Настоящий ребут — в `..._node_test.go` |
-| Идемпотентность | три реконсайла подряд (правка label + рестарт агента) → один файл, один loop, один PV, `vgSize` не дрейфует |
-| Смешанный VG (блочка + файл) | LVG с `blockDeviceSelector` **и** `spec.fileDevices` → `Ready`; в статусе одновременно `devices` и `fileDevices`, на ноде ≥2 PV (один `/dev/loop*`, один блочный); после удаления файл убран |
-
-### `..._validation_test.go` — отказы
-
-CEL-правила CRD (проверяются только на живом apiserver, unit-тестами недостижимы):
-отсутствие и `blockDeviceSelector`, и `fileDevices`; правка `directory` или `size`
-существующей записи; удаление записи (сжатие VG не поддерживается).
-
-Валидация агента (`VGConfigurationApplied=False`, reason `ValidationFailed`, и на ноде
-ничего не создано): `directory` вне базового каталога (allowlist — белый список
-разрешённых путей); `size: 1G` — CRD-паттерн такое пропускает, агент отбивает по минимуму
-`1Gi`; две записи с одинаковыми `directory`+`size` (коллизия имени файла); относительный
-путь; запрос больше, чем `statfs` показывает свободного места (гард перед `fallocate`,
-он же единственный дешёвый способ прогнать rollback).
-
-### `..._foreign_test.go` — изоляция чужих loop-устройств
-
-Ради `spec.fileDevices` агент перестал резать loop-PV в LVM-скане, поэтому здесь
-фиксируется новая граница: чужой untagged loop-VG на ноде не усыновляется (нет ни
-`BlockDevice`, ни `LVMVolumeGroup`) и не ломается; чужой файл с именем-подделкой
-`sds-<чужой-lvg>.<имя-записи>.img` в базовом каталоге не заявляется как свой и не удаляется;
-удаление своего LVG не трогает чужой файл и loop в том же каталоге.
-
-Отдельная группа спек — про **tagged** чужой loop-VG. Это и вероятнее, и опаснее:
-образ диска узла, которым модуль когда-то управлял, несёт
-`storage.deckhouse.io/enabled=true`, поэтому `losetup -f /backup/node2-root.img` при
-восстановлении уже достаточно, чтобы такая группа появилась. Владение решается не тегом,
-а именем файла-подложки (`utils.ClassifyLoopVGs`), и спеки проверяют все четыре
-последствия: одноимённая чужая группа не роняет живой LVG в `Multiple LVM VGs share the
-name` и не попадает в его `status.nodes[].fileDevices`; `ReTag` не заменяет чужой
-legacy-тег `linstor-*` на управляемый (после такой замены дискаверер усыновил бы группу, а
-тега, который её опознавал, уже не осталось бы); `vgchange -ay` не поднимает на хосте
-логические томá гостя — ни при старте агента, ни при последующих наполнениях кэша; и
-чужая группа с тем же именем не подменяет диагноз на `CacheStale`, из которого нет выхода,
-а даёт настоящий `VGCreationFailed`.
-
-### `..._recovery_test.go` — состояния, в которых узел может оказаться
-
-Не то, что оставляет за собой happy path, и там, где ошибка восстановления стоит данных,
-а не condition'а.
-
-| Сценарий | Что проверяется |
-|---|---|
-| Backing-файл удалён при живом loop | `losetup -j` ищет по inode, поэтому после `rm` запись выглядит непровижиненной, а loop продолжает отдавать живой PV. Агент обязан сообщить `FileDeviceNotApplied` с упоминанием `pvmove` и **не** создавать второй файл по тому же пути: считается число loop'ов по basename (`losetup -a`), PV в VG остаётся один, LVG остаётся `Ready`. На удалении осиротевший loop должен быть отцеплен — иначе minor переживёт единственную запись о себе |
-| `directory` через симлинк | `status...filePath` приходит от `losetup` с раскрытыми симлинками, а spec хранит буквальный путь. Одно устройство не должно превратиться в два: одна запись в статусе, один PV, thin-pool создаётся и `Ready` не мигает; на удалении файл исчезает по обоим написаниям пути |
-| loop, который уже PV | Ровно то, что оставляет create, прерванный между `pvcreate` и `vgextend`, — и udev-события при этом не было, так что кэш агента единственное место, где этого PV нет. Добавление записи должно переиспользовать loop и завести его в VG (2 PV), а не упасть на повторном `pvcreate` в фатальный `VGExtendFailed` |
-
-### `..._consumer_test.go` — сквозной путь до нагрузки
-
-Thick `LocalStorageClass` поверх file-backed LVG → PVC (`WaitForFirstConsumer`) → под-писатель
-пишет маркер, под-читатель его читает; попутно проверяется, что появился `LVMLogicalVolume`
-в фазе `Created` на нашем LVG. Отдельно — thin `LVMLogicalVolume` на пуле поверх loop'а и
-LVM-снапшот с него (`lvcreate -s`) с чтением маркера, записанного до снапшота.
-
-Снапшот через CR `LVMLogicalVolumeSnapshot` идёт отдельной спекой: реконсайлер гейтится
-редакцией (`cmd/llvs_ee.go` собирается по `//go:build !ce`), тогда как CRD ставится везде.
-Спека это детектирует — если объект так и не получил статус, она `Skip`, а не падает.
-
-### `..._multinode_test.go` — кластерный уровень
-
-`LVMVolumeGroupSet` с `fileDevices` в шаблоне разворачивается в отдельный `Ready` LVG на
-каждой ноде, у каждого — свой backing-файл и свой loop. Затем шаблон расширяется второй
-записью `fileDevices` (правка существующей запрещена тем же CEL-правилом) — и каждый узел
-должен дорастить свой VG на месте, без появления лишних LVG. Плюс стабильность после
-рестарта: `UID`, `vgUUID`, `filePath`, `loopDevice` и `pvUUID` не меняются.
-
-### `..._node_test.go` — настоящая перезагрузка ноды (лейбл `node-reboot`)
-
-Имитация через `losetup -d` не проходит стартовую последовательность агента относительно
-udev и systemd, поэтому здесь воркер перезагружается по-настоящему: факт ребута
-подтверждается сменой `/proc/sys/kernel/random/boot_id`, затем проверяется, что backing-файл
-пережил перезагрузку, к нему привязан ровно один loop, VG вернулся в `Ready` с тем же
-`vgUUID`, thin-pool на месте и второго файла не появилось. Control-plane не трогается.
-
-Второй спекой проверяется инвариант, на котором держится идемпотентность: `losetup --find
---nooverlap` при повторном вызове обязан вернуть **тот же** minor. Флаг требует util-linux
-≥ 2.29 — если образ ноды его не поддерживает, стартовый reattach и реконсайлер привяжут к
-одному файлу два loop'а и VG молча удвоится.
-
-Самая разрушительная спека в сьюте. Исключается фильтром:
-
-```bash
-make test-go GINKGO_LABEL_FILTER='!stress-test && !node-reboot'
-```
-
-Требования: кластер собран из этой ветки (поле `fileDevices` и настройка модуля
-`fileDevicesDirectory` есть только здесь); на выбранной ноде под
-`/opt/deckhouse/sds` нужно ≥8Gi свободного места. `E2E_DVP_BASE_CLUSTER_STORAGE_CLASS`
-нужна только смешанному сценарию (он подключает `VirtualDisk`); без неё он `Skip`.
 
 ## См. также
 

@@ -21,10 +21,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	goruntime "runtime"
 	"syscall"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
@@ -149,20 +147,6 @@ func run() int {
 			log.Error(err, "[main] unable to run ReTag")
 		}
 
-		log.Info("[main] ReattachFileDevices starts")
-		// Best-effort fast path: re-establish loop mappings for file-backed
-		// PVs so ActivateVGs can see them right after a reboot. A failure
-		// here must NOT suppress ActivateAllManagedVGs — that would hold
-		// every healthy VG on the node (including pure block-device ones)
-		// hostage to one unrelated file device. The LVG reconciler retries
-		// reattach idempotently via provisionFileDevices on its next pass,
-		// so a transient losetup failure recovers without a pod restart.
-		if err := reattachFileDevicesAtStartup(ctx, log, mgr, commands, cfgParams.NodeName, cfgParams.FileDevicesDirectory, cfgParams.CmdDeadlineDuration); err != nil {
-			log.Error(err, "[main] file device reattach failed; the LVG reconciler will retry, continuing to ActivateVGs")
-		} else {
-			log.Info("[main] ReattachFileDevices completed")
-		}
-
 		log.Info("[main] ActivateVGs starts")
 		if err := utils.ActivateAllManagedVGs(ctx, log, commands, metrics, cfgParams.CmdDeadlineDuration); err != nil {
 			log.Error(err, "[main] unable to activate managed VGs")
@@ -208,8 +192,6 @@ func run() int {
 			lvg.DiscovererConfig{
 				NodeName:                cfgParams.NodeName,
 				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
-				CmdDeadlineDuration:     cfgParams.CmdDeadlineDuration,
-				FileDevicesDirectory:    cfgParams.FileDevicesDirectory,
 			},
 		),
 	)
@@ -250,10 +232,6 @@ func run() int {
 				NodeName:                cfgParams.NodeName,
 				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
 				BlockDeviceScanInterval: cfgParams.BlockDeviceScanInterval,
-				CmdDeadlineDuration:     cfgParams.CmdDeadlineDuration,
-				FileDevicesDirectory:    cfgParams.FileDevicesDirectory,
-
-				FileDevicesMinFreeSpacePercent: cfgParams.FileDevicesMinFreeSpacePercent,
 			},
 		),
 	)
@@ -341,104 +319,4 @@ func run() int {
 
 	log.Info("[main] successfully starts the manager")
 	return 0
-}
-
-// reattachFileDevicesAtStartup re-establishes the loop mappings of every managed
-// backing file on this node, before ActivateAllManagedVGs, so LVM can see the
-// file-backed PVs of a Volume Group that has just survived a reboot.
-//
-// baseDir is the configured file-devices base directory. Spec-derived paths are
-// confined to it exactly as provisioning and cleanup confine theirs: a directory
-// outside it cannot name a file this agent created, so there is nothing here to
-// reattach for it, and losetup must not be pointed at an arbitrary host path
-// just because it happens to carry a matching basename. Empty disables the check,
-// matching ReconcilerConfig.FileDevicesDirectory.
-func reattachFileDevicesAtStartup(ctx context.Context, log logger.Logger, mgr manager.Manager, commands utils.Commands, nodeName, baseDir string, cmdTimeout time.Duration) error {
-	var lvgList v1alpha1.LVMVolumeGroupList
-	if err := mgr.GetAPIReader().List(ctx, &lvgList); err != nil {
-		log.Error(err, "[reattachFileDevicesAtStartup] unable to list LVMVolumeGroups")
-		return err
-	}
-
-	items := collectFileDevicesToReattach(log, lvgList.Items, nodeName, baseDir)
-	if len(items) == 0 {
-		log.Debug("[reattachFileDevicesAtStartup] no file devices to reattach")
-		return nil
-	}
-
-	return utils.ReattachFileDevices(ctx, log, commands, cmdTimeout, items)
-}
-
-// collectFileDevicesToReattach works out which backing files on this node have to
-// be re-attached, and is where the confinement to baseDir is applied. Separated
-// from the listing and the losetup calls so that decision is testable on its own.
-func collectFileDevicesToReattach(log logger.Logger, lvgs []v1alpha1.LVMVolumeGroup, nodeName, baseDir string) []utils.LVGWithFileDevices {
-	var items []utils.LVGWithFileDevices
-	for _, lvg := range lvgs {
-		if lvg.Spec.Local.NodeName != nodeName {
-			continue
-		}
-
-		// Collect backing-file paths from BOTH the observed status and the
-		// desired spec. Status alone is not enough: a node can reboot after
-		// the LVG was provisioned but before the discoverer wrote
-		// status.nodes[].fileDevices, in which case reattach would find
-		// nothing and ActivateVGs would bring the VG up missing its loop PV.
-		// The spec path is deterministic (BuildFileDevicePath), so it lets
-		// reattach recover even without a status entry. ReattachFileDevices
-		// never creates files (only losetup --find on an existing backing
-		// file), so a spec entry whose file does not exist yet is a harmless
-		// best-effort miss the LVG reconciler provisions on its next pass.
-		seen := make(map[string]struct{})
-		fds := make([]utils.FileDeviceStatus, 0)
-		for _, node := range lvg.Status.Nodes {
-			if node.Name != nodeName {
-				continue
-			}
-			for _, fd := range node.FileDevices {
-				if fd.FilePath == "" {
-					continue
-				}
-				if _, ok := seen[fd.FilePath]; ok {
-					continue
-				}
-				seen[fd.FilePath] = struct{}{}
-				fds = append(fds, utils.FileDeviceStatus{
-					FilePath:   fd.FilePath,
-					LoopDevice: fd.LoopDevice,
-				})
-			}
-		}
-		for _, fd := range lvg.Spec.FileDevices {
-			// Status-derived paths above are already known to be ours — the
-			// discoverer only records a backing file that matched the managed
-			// pattern. A spec-derived path is not: the apiserver does not
-			// constrain `directory` to the configured base directory, so this is
-			// the same confinement validateFileDevice puts in front of
-			// provisioning and cleanupFileDevices puts in front of `rm`. Without
-			// it, this is the one file-device path that would hand an arbitrary
-			// host path to losetup.
-			if baseDir != "" && !utils.IsWithinBaseDir(filepath.Clean(fd.Directory), baseDir) {
-				log.Warning(fmt.Sprintf("[collectFileDevicesToReattach] skipping the fileDevices entry %q of the LVMVolumeGroup %s: its directory %q is outside the configured base directory %q, so nothing there was created by this agent",
-					fd.Name, lvg.Name, fd.Directory, baseDir))
-				continue
-			}
-			path := utils.BuildFileDevicePath(fd.Directory, lvg.Name, fd.Name)
-			if _, ok := seen[path]; ok {
-				continue
-			}
-			seen[path] = struct{}{}
-			fds = append(fds, utils.FileDeviceStatus{FilePath: path})
-		}
-
-		if len(fds) == 0 {
-			continue
-		}
-		items = append(items, utils.LVGWithFileDevices{
-			LVGName:     lvg.Name,
-			FileDevices: fds,
-		})
-	}
-
-	return items
 }

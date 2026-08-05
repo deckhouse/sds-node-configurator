@@ -126,13 +126,7 @@ var _ = Describe("LVMLogicalVolume clone", Label("sds-node-configurator", "lvmlo
 		Eventually(func(g Gomega) {
 			var lvg v1alpha1.LVMVolumeGroup
 			g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: lvgName}, &lvg)).To(Succeed())
-			// The conditions go into the failure message, not just the phase. A bare
-			// "got Pending" after a 15-minute wait says nothing about which condition
-			// is missing or False, and this wait is in a BeforeAll — so when it times
-			// out the whole suite reports one undiagnosable failure and the log holds
-			// no other trace of it.
-			g.Expect(lvg.Status.Phase).To(Equal(v1alpha1.PhaseReady),
-				"Phase should be Ready, got %s; %s", lvg.Status.Phase, describeLVGStatus(&lvg))
+			g.Expect(lvg.Status.Phase).To(Equal(v1alpha1.PhaseReady), "Phase should be Ready, got %s", lvg.Status.Phase)
 		}, lvmVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
 	})
 
@@ -140,18 +134,11 @@ var _ = Describe("LVMLogicalVolume clone", Label("sds-node-configurator", "lvmlo
 		By("Cleaning up e2e LVMLogicalVolumes")
 		cleanupLVMLogicalVolumes(ctx, k8sClient)
 
-		// Before the LVMVolumeGroups, not after: the agent refuses to delete a
-		// Volume Group that still has logical volumes (getLVForVG counts the
-		// module's own thin pool), so deleting the resource first ends in
-		// cleanupLVMVolumeGroups force-removing the finalizer and leaving the Volume
-		// Group, its thin pool and its Physical Volume on the node — after which the
-		// disk is detached from underneath them and every later spec on this node
-		// works against the debris.
-		By("Removing the thin-pool stack on the node")
-		_, _ = framework.NodeExecChecked(ctx, cl, targetNode, framework.RemoveThinPoolStackScript(vgName, thinPoolName))
-
 		By("Cleaning up e2e LVMVolumeGroups")
 		cleanupLVMVolumeGroups(ctx, k8sClient)
+
+		By("Removing any leftover thin-pool stack on the node")
+		_, _ = framework.NodeExecChecked(ctx, cl, targetNode, framework.RemoveThinPoolStackScript(vgName, thinPoolName))
 
 		By("Detaching and deleting test disks")
 		for _, d := range createdDisks {

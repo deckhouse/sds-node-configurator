@@ -46,11 +46,5 @@ clusterDefinition:
         enabled: true
         settings:
           enableThinProvisioning: true
-          # DEBUG so the agent logs its reconcile decisions and CreateVGComplex
-          # detail; the e2e dumps the tail of this log whenever a spec fails
-          # waiting for an LVMVolumeGroup to become Ready. (The sds cache itself
-          # is only dumped at TRACE, which the module's logLevel enum does not
-          # expose.)
-          logLevel: DEBUG
         modulePullOverride: "${E2E_MODULE_IMAGE_TAG}"
         dependencies: []

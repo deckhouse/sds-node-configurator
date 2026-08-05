@@ -14,64 +14,10 @@
 
 # Thin caller for the storage-e2e reusable workflow.
 # The heavy e2e pipeline (resolve -> bootstrap -> run-tests -> teardown) lives in
-# deckhouse/storage-e2e/.github/workflows/e2e.yml. These jobs only gate on PR
-# labels and delegate, inheriting the org/repo secrets.
-# Recognised PR labels: the e2e/*/run gates below, plus e2e/keep-cluster and
-# e2e/label:* — see
+# deckhouse/storage-e2e/.github/workflows/e2e.yml. This job only gates on the
+# `e2e/run` PR label and delegates, inheriting the org/repo secrets.
+# Required PR labels: e2e/run, e2e/keep-cluster, e2e/label:* — see
 # https://github.com/deckhouse/storage-e2e#ci-reusable-workflow
-#
-# The suite is split across two providers by what a spec needs from the
-# infrastructure, not by what it tests:
-#
-#   dvp        specs that attach, resize or detach block devices. Only dvp owns
-#              the VMs under the cluster, so only dvp can hand a node a disk.
-#   commander  the file-devices specs, which need nothing but a node shell: the
-#              whole point of spec.fileDevices is a node with no spare disk.
-#              Commander provides a cluster, not the infrastructure under it, so
-#              its DiskManager is absent and disk-dependent specs cannot run.
-#
-# The two label filters are complements, so every spec runs exactly once. The one
-# file-devices spec that does need a disk (mixed block+file) carries the
-# needs-disks label and therefore stays on dvp.
-#
-# Labels:
-#
-#   e2e/run             both jobs — the whole suite, one spec at a time, in one go
-#   e2e/dvp/run         the dvp job only
-#   e2e/commander/run   the commander job only
-#
-# `e2e/run` starts both because the two filters are complements: neither job on
-# its own covers the suite, so "run the e2e tests" that starts one of them is an
-# answer to a question nobody asked. The single-provider labels stay for the case
-# a change only touches one half, where paying for the other bootstrap — up to an
-# hour on Commander — buys nothing.
-#
-# The two run in parallel, which took deckhouse/storage-e2e#62 to be true: its
-# concurrency group is now keyed by (module, provider, PR) rather than
-# (module, PR), and its log artifact carries the provider in its name. Keyed
-# without the provider the second job queued behind the first, and the artifact
-# upload of whichever finished second failed outright. Real parallelism
-# additionally needs at least two runners carrying the `self-hosted, regular`
-# labels; with one they still take turns, correctly but serially.
-#
-# Beware that an `e2e/label:<x>` PR label replaces the label_filter below
-# entirely (see the reusable workflow's resolve step), which also undoes the
-# split — useful as an escape hatch, surprising if unintended.
-#
-# The Commander template is multi-distro and its node set is shaped through the
-# repository variable E2E_COMMANDER_VALUES (a JSON blob of template inputs the
-# pipeline merges with the cluster prefix), currently:
-#
-#   {"astraNodeCount": 0, "debianNodeCount": 0, "ubuntuNodeCount": 2}
-#
-# Astra is excluded for now because that image's device-mapper is unusable —
-# `/dev/mapper/control: open failed` plus a libdevmapper/kernel mismatch — so
-# anything needing a logical volume (thin pools, and deleting them again) fails
-# there and leaves Volume Groups behind. This is a stand limitation, not a
-# property of spec.fileDevices, and the exclusion is meant to be temporary:
-# the suite should eventually run on Astra too. csi-nfs shapes the same
-# template the same way, for its own reason (kernels without
-# CONFIG_NET_HANDSHAKE).
 
 name: E2E
 
@@ -80,11 +26,8 @@ on:
     types: [opened, synchronize, reopened, labeled]
 
 jobs:
-  dvp:
-    name: e2e (dvp, block devices)
-    if: >-
-      ${{ contains(github.event.pull_request.labels.*.name, 'e2e/run')
-          || contains(github.event.pull_request.labels.*.name, 'e2e/dvp/run') }}
+  e2e:
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'e2e/run') }}
     uses: deckhouse/storage-e2e/.github/workflows/e2e.yml@main
     with:
       module_slug: sds-node-configurator
@@ -92,24 +35,5 @@ jobs:
       test_package: ./tests/
       cluster_config: e2e/tests/cluster_config.ci.yml
       cluster_provider: dvp
-      label_filter: "!stress-test && (!file-devices || needs-disks)"
-      module_image_tag: pr${{ github.event.pull_request.number }}
-    secrets: inherit
-
-  commander:
-    name: e2e (commander, file devices)
-    if: >-
-      ${{ contains(github.event.pull_request.labels.*.name, 'e2e/run')
-          || contains(github.event.pull_request.labels.*.name, 'e2e/commander/run') }}
-    uses: deckhouse/storage-e2e/.github/workflows/e2e.yml@main
-    with:
-      module_slug: sds-node-configurator
-      module_path: e2e
-      test_package: ./tests/
-      # Commander provisions from its own template; only the modules section of
-      # this file is read on that path (see the provider's enableModules).
-      cluster_config: e2e/tests/cluster_config.ci.yml
-      cluster_provider: commander
-      label_filter: "!stress-test && file-devices && !needs-disks"
       module_image_tag: pr${{ github.event.pull_request.number }}
     secrets: inherit

@@ -14,13 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// The copyright file is mockgen's own, not hack/boilerplate.txt, and the two
-// cannot be shared. mockgen prefixes every line of it with "//", so the `/* */`
-// wrapper controller-gen needs comes out as "// /*"; and controller-gen strips the
-// literal "YEAR" placeholder while mockgen copies it through verbatim, so a
-// shared file leaves one of the two generators emitting "Copyright YEAR".
-//
-//go:generate go tool mockgen -copyright_file ../../../../hack/boilerplate.mockgen.txt -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE
+//go:generate go tool mockgen -copyright_file ../../../../hack/boilerplate.txt -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE
 
 package utils
 

@@ -19,23 +19,3 @@ testing
 tools
 werf*.yaml
 e2e
-
-# The storage-e2e SDK, checked out into the module's workspace by the e2e
-# reusable workflow. Runners reuse workspaces, so it is still on disk when a
-# later job lints the module and would otherwise be read as module content —
-# foreign Go files with no license header and Russian comments fail the lint.
-_storage-e2e
-
-# Linter and CI configs that would otherwise be read as module content. Left out
-# of this list on purpose: module.yaml, oss.yaml and LICENSE, which the Deckhouse
-# module loader and the release tooling read from the module directory.
-.git
-.github
-.werf
-.dmtlint.yaml
-.gitignore
-.gitleaks.toml
-.gitleaks-cse.toml
-.golangci.yaml
-.pre-commit-config.yaml
-cspell.config.yaml

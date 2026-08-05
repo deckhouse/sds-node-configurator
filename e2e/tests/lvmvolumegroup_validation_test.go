@@ -144,11 +144,7 @@ var _ = Describe("LVMVolumeGroup validation", Label("sds-node-configurator", "lv
 		Eventually(func(g Gomega) {
 			var cur v1alpha1.LVMVolumeGroup
 			g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: midLvgName}, &cur)).To(Succeed())
-			// Report the conditions, not only the phase: this wait timed out on a
-			// real run and the log held nothing but "Expected Pending to equal Ready"
-			// after fifteen minutes. See describeLVGStatus.
-			g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady),
-				"the intermediate LVMVolumeGroup did not become Ready; %s", describeLVGStatus(&cur))
+			g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady))
 		}, lvmVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
 		By("Intermediate LVMVolumeGroup Ready (before delete)")
 

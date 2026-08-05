@@ -458,10 +458,10 @@ Configure the `sds-replicated-volume` module according to the ["Full mirror"](#f
    > Replace `<replicated-storage-pool-name>` with an informative name depending on the type of additional disks.
    >
    > Examples of informative names for [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource for additional disks of different types:
-
-   - `data-ssd-nvme`: For NVMe SSD disks.
-   - `data-ssd-sata`: For SATA SSD disks.
-   - `data-hdd`: For HDD disks.
+   >
+   > - `data-ssd-nvme`: For NVMe SSD disks.
+   > - `data-ssd-sata`: For SATA SSD disks.
+   > - `data-hdd`: For HDD disks.
 
 1. Create a [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass) resource and specify the name of the previously created [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource in the `storagePool` field. Run the command:
 
@@ -540,10 +540,10 @@ Configure the node with additional disks according to the ["Partial mirror"](#pa
    > Replace `<vg-name>` with an informative prefix depending on the type of additional disks.
    >
    > Examples of informative prefix `<vg-name>` for additional disks of different types:
-
-   - `ssd-nvme`: For NVMe SSD disks.
-   - `ssd-sata`: For SATA SSD disks.
-   - `hdd`: For HDD disks.
+   >
+   > - `ssd-nvme`: For NVMe SSD disks.
+   > - `ssd-sata`: For SATA SSD disks.
+   > - `hdd`: For HDD disks.
 
 #### SDS modules configuration example (combined storage, "Partial mirror")
 
@@ -626,10 +626,10 @@ Configure the `sds-replicated-volume` module according to the ["Partial mirror"]
    > Replace `data-<vg-name>-safe` with an informative name depending on the type of additional disks.
    >
    > Examples of informative names for [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource for additional disks of different types:
-
-   - `data-ssd-nvme-safe`: For NVMe SSD disks.
-   - `data-ssd-sata-safe`: For SATA SSD disks.
-   - `data-hdd-safe`: For HDD disks.
+   >
+   > - `data-ssd-nvme-safe`: For NVMe SSD disks.
+   > - `data-ssd-sata-safe`: For SATA SSD disks.
+   > - `data-hdd-safe`: For HDD disks.
 
 1. Create a [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource named `data-<vg-name>-unsafe` and add [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources to it, so that only the `<vg-name>-unsafe` Volume Group is used on all nodes in the `sds-replicated-volume` module in [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass) with `replication: Availability` or `replication: ConsistencyAndAvailability` parameter. Run the command:
 
@@ -651,10 +651,10 @@ Configure the `sds-replicated-volume` module according to the ["Partial mirror"]
    > In the example above, replace `data-<vg-name>-unsafe` with an informative name, depending on the type of additional disks.
    >
    > Examples of informative names for [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource for additional disks of different types:
-
-   - `data-ssd-nvme-unsafe`: For NVMe SSD disks.
-   - `data-ssd-sata-unsafe`: For SATA SSD disks.
-   - `data-hdd-unsafe`: For HDD disks.
+   >
+   > - `data-ssd-nvme-unsafe`: For NVMe SSD disks.
+   > - `data-ssd-sata-unsafe`: For SATA SSD disks.
+   > - `data-hdd-unsafe`: For HDD disks.
 
 1. Create a [ReplicatedStorageClass](/modules/sds-replicated-volume/cr.html#replicatedstorageclass) resource and specify the names of previously created [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resources in the `storagePool` field, so that both `<vg-name>-safe` and `<vg-name>-unsafe` Volume Groups are used on all nodes. Run the command:
 
@@ -696,15 +696,15 @@ Configure the `sds-replicated-volume` module according to the ["Partial mirror"]
    > Replace `data-<vg-name>-unsafe` with an informative name depending on the type of additional disks.
    >
    > Examples of informative names for [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource for additional disks of different types:
-
-   - `data-ssd-nvme-unsafe`: For NVMe SSD disks.
-   - `data-ssd-sata-unsafe`: For SATA SSD disks.
-   - `data-hdd-unsafe`: For HDD disks.
-
+   >
+   > - `data-ssd-nvme-unsafe`: For NVMe SSD disks.
+   > - `data-ssd-sata-unsafe`: For SATA SSD disks.
+   > - `data-hdd-unsafe`: For HDD disks.
+   >
    > Replace `data-<vg-name>-safe` with an informative name depending on the type of additional disks.
    >
    > Examples of informative names for [ReplicatedStoragePool](/modules/sds-replicated-volume/cr.html#replicatedstoragepool) resource for additional disks of different types:
-
-   - `data-ssd-nvme-safe`: For NVMe SSD disks.
-   - `data-ssd-sata-safe`: For SATA SSD disks.
-   - `data-hdd-safe`: For HDD disks.
+   >
+   > - `data-ssd-nvme-safe`: For NVMe SSD disks.
+   > - `data-ssd-sata-safe`: For SATA SSD disks.
+   > - `data-hdd-safe`: For HDD disks.

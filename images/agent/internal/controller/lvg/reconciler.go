@@ -20,11 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -55,31 +53,6 @@ const udevadmTriggerTimeout = 10 * time.Second
 // Keep it in sync with how operators query Prometheus.
 const udevadmTriggerCmdLabel = "udevadm-trigger"
 
-// defaultRequeueInterval is the retry cadence used when VolumeGroupScanInterval
-// carries no value. It exists because a zero RequeueAfter means "do not requeue"
-// to controller-runtime, so an unset interval would silently turn every
-// deliberate retry in this reconciler into a dropped one. config.NewConfig always
-// sets a positive value; the fallback is for the zero-value Config a caller can
-// still construct.
-const defaultRequeueInterval = 5 * time.Second
-
-// The backoff for retrying an LVMVolumeGroup whose reconcile made no progress and
-// may never make any: a spec.fileDevices entry the node could not bring up, or a
-// node whose Volume Groups cannot be read at all. See
-// Reconciler.noProgressRequeueAfter for why the retry has to slow down.
-const (
-	// noProgressRetryMaxShift bounds the doubling. With the default 5s base the
-	// intervals run 5s, 10s, 20s, 40s, 80s, 160s and then hit the ceiling below,
-	// so an LVMVolumeGroup settles onto the ceiling on its seventh round, roughly
-	// five minutes after the first round that made no progress.
-	noProgressRetryMaxShift = 6
-	// noProgressRetryMaxInterval is the ceiling. Deliberately far below
-	// controller-runtime's resync — the LVMVolumeGroup has to keep being retried on
-	// its own — and short enough that an operator who has just freed space or fixed
-	// the node sees it recover rather than assuming it is stuck.
-	noProgressRetryMaxInterval = 5 * time.Minute
-)
-
 // lvmDefaultPhysicalExtent is LVM's default PE when vgcreate is run without --physicalextentsize.
 var lvmDefaultPhysicalExtent = resource.MustParse("4Mi")
 
@@ -95,31 +68,6 @@ func extentSizeForThinPoolAlign(lvg *v1alpha1.LVMVolumeGroup, vg *internal.VGDat
 	return lvmDefaultPhysicalExtent
 }
 
-// alignThinPoolSizeForValidation aligns a thin-pool's requested size to the
-// extent boundary for the create-time capacity check.
-//
-// Absolute sizes are rounded UP — that is the real number of extents LVM will
-// consume, so an oversized absolute pool must still be rejected.
-//
-// Percentage sizes (e.g. "100%") are rounded DOWN instead. During create
-// validation the VG size is the raw block-device/file sum, which is not
-// extent-aligned, so a "100%" request rounded up lands one extent past the VG
-// and would wrongly fail the capacity check — even though the pool is created
-// with %FREE and fits. A percentage of the VG can never legitimately exceed
-// it, so flooring is always safe and also makes split percentages (e.g.
-// "50%"+"50%") sum to at most the VG size.
-func alignThinPoolSizeForValidation(specSize string, requested, extentSize resource.Quantity) (resource.Quantity, error) {
-	if utils.IsPercentSize(specSize) {
-		extentBytes := extentSize.Value()
-		if extentBytes <= 0 {
-			return resource.Quantity{}, fmt.Errorf("extent size must be positive, got %d", extentBytes)
-		}
-		floored := (requested.Value() / extentBytes) * extentBytes
-		return *resource.NewQuantity(floored, resource.BinarySI), nil
-	}
-	return utils.AlignSizeToExtent(requested, extentSize)
-}
-
 type Reconciler struct {
 	cl       client.Client
 	log      logger.Logger
@@ -129,64 +77,12 @@ type Reconciler struct {
 	sdsCache *cache.Cache
 	cfg      ReconcilerConfig
 	commands utils.Commands
-	// resolver maps a /dev/* PV name to its canonical block device. It is
-	// only used to recognise a managed loop PV that lvm.static reported
-	// under a /dev/disk/by-id or /dev/block/MAJ:MIN alias. Defaults to
-	// utils.HostNsenterCanonicalResolver; overridable in tests.
-	resolver utils.CanonicalPathResolver
-
-	// aliasResolveFailures counts, per LVG name, how many consecutive
-	// extendFileDevicesIfNeeded rounds made no progress purely because
-	// alias-form PV names could not be resolved. It escalates the condition
-	// from a generic "Updating" retry to ReasonAliasResolutionFailed once the
-	// failures look persistent, so a stuck resolver is alertable instead of
-	// looking like an ordinary in-flight update. Reset on any round that makes
-	// progress or genuinely has nothing to do. The reconciler runs with
-	// MaxConcurrentReconciles==1, but the mutex keeps the map safe if that ever
-	// changes.
-	aliasResolveFailuresMu sync.Mutex
-	aliasResolveFailures   map[string]int
-
-	// noProgressRetries counts, per LVG name, how many consecutive reconciles ended
-	// without making progress. It exists to slow the retry down, because every such
-	// state has two very different causes with the same shape:
-	//
-	//   - a spec.fileDevices entry the node could not bring up — a filesystem that
-	//     will have room in a minute, or an entry that will never fit on this node;
-	//   - a node whose Volume Groups cannot be read (ReasonVGCheckFailed) — a
-	//     transient nsenter hiccup, or an lvm.static that is simply gone.
-	//
-	// Only the transient half is worth polling at VolumeGroupScanInterval. The
-	// permanent half is a fleet of nodes each running a `stat -f`, a `losetup -j`
-	// per entry and a live `lvm pvs`/`vgs` every few seconds, forever, over a
-	// question whose answer cannot change until somebody intervenes. Nothing tells
-	// the two apart from the inside, so the interval backs off instead.
-	//
-	// Reset whenever a round leaves nothing unapplied or the answer becomes
-	// knowable, so a transient shortage does not leave the LVMVolumeGroup on a long
-	// interval afterwards. Same locking rationale as aliasResolveFailures.
-	noProgressRetriesMu sync.Mutex
-	noProgressRetries   map[string]int
 }
 
 type ReconcilerConfig struct {
 	NodeName                string
 	BlockDeviceScanInterval time.Duration
 	VolumeGroupScanInterval time.Duration
-	CmdDeadlineDuration     time.Duration
-	// FileDevicesDirectory is the base directory backing files are confined
-	// to; spec.fileDevices[].directory must be this path or a subdirectory of
-	// it. Empty means "no restriction" (used by unit tests that do not care).
-	FileDevicesDirectory string
-	// FileDevicesMinFreeSpacePercent is the share of the backing-file filesystem
-	// that must remain free after a backing file is created or grown.
-	//
-	// It is a share rather than an absolute size because that is the only form
-	// that travels: the same setting has to be sensible on a 30Gi node root and
-	// on a 4Ti data disk, and kubelet's own eviction thresholds are percentages
-	// for the same reason. Zero disables the reserve, which is only defensible
-	// for a filesystem nothing else on the node depends on.
-	FileDevicesMinFreeSpacePercent int
 }
 
 func NewReconciler(
@@ -207,14 +103,11 @@ func NewReconciler(
 			cfg.NodeName,
 			ReconcilerName,
 		),
-		bdCl:                 repository.NewBDClient(cl, metrics),
-		metrics:              metrics,
-		sdsCache:             sdsCache,
-		cfg:                  cfg,
-		commands:             commands,
-		resolver:             utils.HostNsenterCanonicalResolver,
-		aliasResolveFailures: make(map[string]int),
-		noProgressRetries:    make(map[string]int),
+		bdCl:     repository.NewBDClient(cl, metrics),
+		metrics:  metrics,
+		sdsCache: sdsCache,
+		cfg:      cfg,
+		commands: commands,
 	}
 }
 
@@ -263,7 +156,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 	}
 
 	// this case handles the situation when a user decides to remove LVMVolumeGroup resource without created VG
-	deleted, waitForCache, err := r.deleteLVGIfNeeded(ctx, lvg)
+	deleted, err := r.deleteLVGIfNeeded(ctx, lvg)
 	if err != nil {
 		return controller.Result{}, err
 	}
@@ -271,14 +164,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 	if deleted {
 		r.log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s was deleted, stop the reconciliation", lvg.Name))
 		return controller.Result{}, nil
-	}
-
-	// The node has the Volume Group and the cache does not, so every delete
-	// decision below it would be made on data that is known to be wrong. Stop the
-	// reconcile here and come back: the scanner refills the cache on its own, and
-	// nothing else in this function would wait for it.
-	if waitForCache {
-		return controller.Result{RequeueAfter: r.requeueInterval()}, nil
 	}
 
 	if _, exist := lvg.Labels[internal.LVGUpdateTriggerLabel]; exist {
@@ -291,59 +176,47 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully removed the label %s from the LVMVolumeGroup %s", internal.LVGUpdateTriggerLabel, lvg.Name))
 	}
 
-	// blockDeviceSelector is optional: a file-only LVMVolumeGroup (only
-	// spec.fileDevices) carries no selector. Listing block devices with a
-	// nil selector would match EVERY BlockDevice on the node (the repository
-	// maps an empty selector to "select all"), and validateSpecBlockDevices
-	// dereferences the nil selector. So skip block-device discovery and
-	// validation entirely when there is no selector, and reconcile only the
-	// file devices.
-	blockDevices := make(map[string]v1alpha1.BlockDevice)
-	if lvg.Spec.BlockDeviceSelector != nil {
-		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
-		blockDevices, err = r.bdCl.GetAPIBlockDevices(ctx, ReconcilerName, lvg.Spec.BlockDeviceSelector)
+	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to get block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
+	blockDevices, err := r.bdCl.GetAPIBlockDevices(ctx, ReconcilerName, lvg.Spec.BlockDeviceSelector)
+	if err != nil {
+		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %s", r.cfg.BlockDeviceScanInterval.String()))
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(
+			ctx,
+			lvg,
+			v1.ConditionFalse,
+			internal.TypeVGConfigurationApplied,
+			"NoBlockDevices",
+			fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()),
+		)
 		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to get BlockDevices. Retry in %s", r.cfg.BlockDeviceScanInterval.String()))
-			err = r.lvgCl.UpdateLVGConditionIfNeeded(
-				ctx,
-				lvg,
-				v1.ConditionFalse,
-				internal.TypeVGConfigurationApplied,
-				"NoBlockDevices",
-				fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()),
-			)
-			if err != nil {
-				r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.cfg.BlockDeviceScanInterval.String()))
-			}
-
-			return controller.Result{RequeueAfter: r.cfg.BlockDeviceScanInterval}, nil
+			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.cfg.BlockDeviceScanInterval.String()))
 		}
-		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully got block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
 
-		blockDevices = filterBlockDevicesByNodeName(blockDevices, lvg.Spec.Local.NodeName)
-
-		valid, reason := validateSpecBlockDevices(lvg, blockDevices)
-		if !valid {
-			r.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupController] validation failed for the LVMVolumeGroup %s, reason: %s", lvg.Name, reason))
-			err = r.lvgCl.UpdateLVGConditionIfNeeded(
-				ctx,
-				lvg,
-				v1.ConditionFalse,
-				internal.TypeVGConfigurationApplied,
-				internal.ReasonValidationFailed,
-				reason,
-			)
-			if err != nil {
-				r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.cfg.VolumeGroupScanInterval.String()))
-				return controller.Result{}, err
-			}
-
-			return controller.Result{}, nil
-		}
-		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully validated BlockDevices of the LVMVolumeGroup %s", lvg.Name))
-	} else {
-		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s has no blockDeviceSelector (file-only); skipping block device discovery and validation", lvg.Name))
+		return controller.Result{RequeueAfter: r.cfg.BlockDeviceScanInterval}, nil
 	}
+	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully got block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
+
+	blockDevices = filterBlockDevicesByNodeName(blockDevices, lvg.Spec.Local.NodeName)
+
+	valid, reason := validateSpecBlockDevices(lvg, blockDevices)
+	if !valid {
+		r.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupController] validation failed for the LVMVolumeGroup %s, reason: %s", lvg.Name, reason))
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(
+			ctx,
+			lvg,
+			v1.ConditionFalse,
+			internal.TypeVGConfigurationApplied,
+			internal.ReasonValidationFailed,
+			reason,
+		)
+		if err != nil {
+			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s. Retry in %s", internal.TypeVGConfigurationApplied, lvg.Name, r.cfg.VolumeGroupScanInterval.String()))
+			return controller.Result{}, err
+		}
+
+		return controller.Result{}, nil
+	}
+	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully validated BlockDevices of the LVMVolumeGroup %s", lvg.Name))
 
 	r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] tries to add label %s to the LVMVolumeGroup %s", internal.LVGMetadataNameLabelKey, r.cfg.NodeName))
 	added, err = r.addLVGLabelIfNeeded(ctx, lvg, internal.LVGMetadataNameLabelKey, lvg.Name)
@@ -386,15 +259,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 		return controller.Result{}, err
 	}
 
-	requeueAfter, err := r.runEventReconcile(ctx, lvg, blockDevices)
+	shouldRequeue, err := r.runEventReconcile(ctx, lvg, blockDevices)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to reconcile the LVMVolumeGroup %s", lvg.Name))
 	}
 
-	if requeueAfter > 0 {
-		r.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s event will be requeued in %s", lvg.Name, requeueAfter.String()))
+	if shouldRequeue {
+		r.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s event will be requeued in %s", lvg.Name, r.cfg.VolumeGroupScanInterval.String()))
 		return controller.Result{
-			RequeueAfter: requeueAfter,
+			RequeueAfter: r.cfg.VolumeGroupScanInterval,
 		}, nil
 	}
 	r.log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] Reconciler successfully reconciled the LVMVolumeGroup %s", lvg.Name))
@@ -402,97 +275,27 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 	return controller.Result{}, nil
 }
 
-// runEventReconcile dispatches to the create/update/delete path and reports how
-// long to wait before coming back; zero means "do not requeue".
-//
-// A duration rather than a bool because not every retry deserves the same
-// interval. VolumeGroupScanInterval (5s by default) is the right cadence for
-// "something is in flight" and the wrong one for "an entry does not fit on this
-// node", which is a state that can persist indefinitely — see
-// noProgressRequeueAfter. The create and delete paths have no such distinction to
-// make and still answer yes/no.
 func (r *Reconciler) runEventReconcile(
 	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
-) (time.Duration, error) {
-	recType, vgStateKnown := r.identifyLVGReconcileFunc(ctx, lvg)
+) (bool, error) {
+	recType := r.identifyLVGReconcileFunc(lvg)
 
 	switch recType {
 	case internal.CreateReconcile:
 		r.log.Info(fmt.Sprintf("[runEventReconcile] CreateReconcile starts the reconciliation for the LVMVolumeGroup %s", lvg.Name))
-		shouldRequeue, err := r.reconcileLVGCreateFunc(ctx, lvg, blockDevices)
-		return r.requeueIntervalIf(shouldRequeue), err
+		return r.reconcileLVGCreateFunc(ctx, lvg, blockDevices)
 	case internal.UpdateReconcile:
 		r.log.Info(fmt.Sprintf("[runEventReconcile] UpdateReconcile starts the reconciliation for the LVMVolumeGroup %s", lvg.Name))
 		return r.reconcileLVGUpdateFunc(ctx, lvg, blockDevices)
 	case internal.DeleteReconcile:
 		r.log.Info(fmt.Sprintf("[runEventReconcile] DeleteReconcile starts the reconciliation for the LVMVolumeGroup %s", lvg.Name))
-		shouldRequeue, err := r.reconcileLVGDeleteFunc(ctx, lvg)
-		return r.requeueIntervalIf(shouldRequeue), err
+		return r.reconcileLVGDeleteFunc(ctx, lvg)
 	default:
-		// Reaching this is not "nothing to do", it is "the cache disagrees with
-		// the node". The only way here is: the resource is not being deleted, its
-		// VG is absent from the cache, and shouldReconcileLVGByCreateFunc
-		// confirmed against live LVM that the VG nevertheless exists (or could
-		// not tell and assumed it does) — so create is refused and update has no
-		// cached VG to work with.
-		//
-		// Returning without a requeue would leave it there. The cache is filled
-		// only by the scanner, the scanner runs only on udev events, and writing
-		// LVM metadata to a loop device does not reliably raise one — which is
-		// exactly the situation that guard exists for. Nothing else would wake
-		// this LVMVolumeGroup until controller-runtime's resync, hours later.
-		//
-		// The two ways to get here need different words. "The cache has not
-		// caught up" is a state that clears itself; "LVM could not be read" is a
-		// broken node that will sit here forever, and a resource that only ever
-		// says Pending sends the operator looking in the wrong place. Both write
-		// a condition — silence here is what made this indistinguishable from an
-		// ordinary in-flight update.
-		// The interval differs for the same reason the words do. CacheStale clears
-		// itself on the next scan, so it deserves the scan interval. VGCheckFailed
-		// does not clear itself at all — lvm.static is missing, nsenter is broken,
-		// /etc/lvm is unreadable — and polling it at 5s has every affected node
-		// re-running `vgs` (and a `pvs` plus a `losetup` per loop PV, via
-		// vgExistsOnNode) forever over a question whose answer cannot change until
-		// somebody fixes the node. Same reasoning as noProgressRequeueAfter, whose
-		// backoff this reuses.
-		reason, msg := internal.ReasonCacheStale, fmt.Sprintf("VG %s is present on the node but missing from the agent's cache; waiting for the cache to catch up", lvg.Spec.ActualVGNameOnTheNode)
-		requeueAfter := r.requeueInterval()
-		if !vgStateKnown {
-			reason, msg = internal.ReasonVGCheckFailed, fmt.Sprintf("unable to read the Volume Groups of the node to decide whether VG %s has to be created; nothing is created while this is unknown", lvg.Spec.ActualVGNameOnTheNode)
-			requeueAfter = r.noProgressRequeueAfter(lvg.Name)
-		} else {
-			// The cache caught up enough to answer; do not carry a stale backoff
-			// into the next round of a different problem.
-			r.resetNoProgressRetries(lvg.Name)
-		}
-		r.log.Warning(fmt.Sprintf("[runEventReconcile] %s (LVMVolumeGroup %s)", msg, lvg.Name))
-		if err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, reason, msg); err != nil {
-			r.log.Error(err, fmt.Sprintf("[runEventReconcile] unable to add a condition %s reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, reason, lvg.Name))
-		}
-		return requeueAfter, nil
+		r.log.Info(fmt.Sprintf("[runEventReconcile] no need to reconcile the LVMVolumeGroup %s", lvg.Name))
 	}
-}
-
-// requeueInterval is the reconciler's ordinary retry cadence.
-func (r *Reconciler) requeueInterval() time.Duration {
-	if r.cfg.VolumeGroupScanInterval > 0 {
-		return r.cfg.VolumeGroupScanInterval
-	}
-	return defaultRequeueInterval
-}
-
-// requeueIntervalIf translates the create/delete paths' yes/no answer into the
-// interval the reconciler has always used for them. Those two have no reason to
-// distinguish a transient retry from a permanent one — see noProgressRequeueAfter
-// for the case that does.
-func (r *Reconciler) requeueIntervalIf(requeue bool) time.Duration {
-	if !requeue {
-		return 0
-	}
-	return r.requeueInterval()
+	return false, nil
 }
 
 func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
@@ -558,15 +361,6 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 		return true, err
 	}
 
-	if err := r.cleanupFileDevices(ctx, lvg); err != nil {
-		r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to clean up file devices for the LVMVolumeGroup %s", lvg.Name))
-		condErr := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, err.Error())
-		if condErr != nil {
-			r.log.Error(condErr, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
-		}
-		return true, err
-	}
-
 	removed, err := r.removeLVGFinalizerIfExist(ctx, lvg)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to remove a finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
@@ -589,8 +383,6 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 		return true, err
 	}
 
-	r.resetAliasResolveFailure(lvg.Name)
-	r.resetNoProgressRetries(lvg.Name)
 	r.log.Info(fmt.Sprintf("[reconcileLVGDeleteFunc] successfully reconciled VG %s of the LVMVolumeGroup %s", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 	return false, nil
 }
@@ -599,12 +391,12 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
-) (time.Duration, error) {
+) (bool, error) {
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] starts to reconcile the LVMVolumeGroup %s", lvg.Name))
 
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] tries to validate the LVMVolumeGroup %s", lvg.Name))
 	pvs, _ := r.sdsCache.GetPVs()
-	valid, reason, fdIssues := r.validateLVGForUpdateFunc(ctx, lvg, blockDevices)
+	valid, reason := r.validateLVGForUpdateFunc(lvg, blockDevices)
 	if !valid {
 		r.log.Warning(fmt.Sprintf("[reconcileLVGUpdateFunc] the LVMVolumeGroup %s is not valid", lvg.Name))
 		err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, reason)
@@ -612,7 +404,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, lvg.Name))
 		}
 
-		return r.requeueInterval(), err
+		return true, err
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] successfully validated the LVMVolumeGroup %s", lvg.Name))
 
@@ -625,7 +417,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		}
-		return r.requeueInterval(), err
+		return true, err
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] VG %s found for the LVMVolumeGroup %s", vg.VGName, lvg.Name))
 
@@ -638,7 +430,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		}
 
-		return r.requeueInterval(), err
+		return true, err
 	}
 
 	if updated {
@@ -655,7 +447,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		}
-		return r.requeueInterval(), err
+		return true, err
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] successfully ended the resize operation for PV of the LVMVolumeGroup %s", lvg.Name))
 
@@ -668,65 +460,9 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 		}
 
-		return r.requeueInterval(), err
+		return true, err
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] successfully ended the extend operation for VG of the LVMVolumeGroup %s", lvg.Name))
-
-	// Problems that concern individual spec.fileDevices entries are collected
-	// here instead of aborting the reconcile. The Volume Group is intact in every
-	// one of them, so the rest of the work — extending by the entries that ARE
-	// usable, growing the thin-pools — has to go ahead, and the entries left
-	// behind are named on the condition at the end under a reason that keeps the
-	// LVMVolumeGroup in service. See fileDevicesUnappliedError.
-	fdUnapplied := strings.Builder{}
-	fdUnappliedReason := ""
-	// First reason wins, not the last. Growth is attempted before the extend, and
-	// the extend's own reason is the generic ReasonUpdating in the ordinary "retry
-	// next round" case — letting it overwrite would replace the specific
-	// ReasonFileDeviceGrowFailed with a label that says nothing. Every message is
-	// appended regardless, so nothing is hidden either way; only the reason the
-	// condition carries is decided here.
-	noteUnapplied := func(msg, reason string) {
-		fdUnapplied.WriteString(msg)
-		if reason != "" && fdUnappliedReason == "" {
-			fdUnappliedReason = reason
-		}
-	}
-
-	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] starts to grow file devices of the LVMVolumeGroup %s", lvg.Name))
-	growMsg, growReason, err := splitUnappliedFileDevices(r.growFileDevicesIfNeeded(ctx, lvg, vg, fdIssues))
-	if err != nil {
-		// A growth that did not go through never reaches here: it comes back
-		// wrapped as a per-entry problem carrying ReasonFileDeviceGrowFailed and is
-		// reported at the end of the reconcile, because every step of the sequence
-		// fails towards the smaller size — the Volume Group is still the size it
-		// was and still serving every volume on it.
-		//
-		// What reaches here is the reconcile itself being unable to continue: the
-		// context was cancelled, or the condition write that marks the
-		// LVMVolumeGroup as updating failed. Neither says anything about the file
-		// devices, and neither can be written to the resource — under a cancelled
-		// context the write fails too — so requeue and let the next round diagnose
-		// it instead of labelling it a grow failure.
-		r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to grow file devices of the LVMVolumeGroup %s", lvg.Name))
-		return r.requeueInterval(), err
-	}
-	noteUnapplied(growMsg, growReason)
-	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] successfully ended the file-device grow operation for the LVMVolumeGroup %s", lvg.Name))
-
-	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] starts to extend VG %s of the LVMVolumeGroup %s with file devices", vg.VGName, lvg.Name))
-	extendMsg, extendReason, err := splitUnappliedFileDevices(r.extendFileDevicesIfNeeded(ctx, lvg, vg, pvs, fdIssues))
-	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to extend VG of the LVMVolumeGroup %s with file devices", lvg.Name))
-		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "VGExtendFailed", fmt.Sprintf("unable to extend VG with file devices, err: %s", err.Error()))
-		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
-		}
-
-		return r.requeueInterval(), err
-	}
-	noteUnapplied(extendMsg, extendReason)
-	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] successfully ended the file-device extend operation for VG of the LVMVolumeGroup %s", lvg.Name))
 
 	if lvg.Spec.ThinPools != nil {
 		r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] starts to reconcile thin-pools of the LVMVolumeGroup %s", lvg.Name))
@@ -738,105 +474,21 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 			}
-			return r.requeueInterval(), err
+			return true, err
 		}
 		r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] successfully reconciled thin-pools operation of the LVMVolumeGroup %s", lvg.Name))
 	}
-
-	// Everything that could be applied has been. Report the parts that could
-	// not — unusable spec.fileDevices entries, entries the node could not bring
-	// up, and entries dropped from the spec while their PV is still in the VG —
-	// without having skipped the rest of the reconcile over them, so the
-	// LVMVolumeGroup stays manageable and in service while the admin fixes it.
-	if pending := joinFileDeviceIssues(fdIssues.reason, fdUnapplied.String(), r.fileDeviceDriftReason(lvg)); pending != "" {
-		r.log.Warning(fmt.Sprintf("[reconcileLVGUpdateFunc] the LVMVolumeGroup %s has unapplied file devices: %s", lvg.Name, pending))
-		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, fileDeviceConditionReason(fdIssues.reason, fdUnapplied.String(), fdUnappliedReason), pending)
-		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
-			return r.requeueInterval(), err
-		}
-		// A malformed entry and drift both wait for a human, and an edit produces
-		// its own event — requeueing would only spin. An entry the node could not
-		// bring up is different: the filesystem may gain room, the resolver may
-		// recover, and nothing else will wake the reconcile when it does — but the
-		// interval has to back off, because the same state also covers an entry that
-		// will never fit here. See noProgressRequeueAfter.
-		if fdUnapplied.Len() > 0 {
-			return r.noProgressRequeueAfter(lvg.Name), nil
-		}
-		r.resetNoProgressRetries(lvg.Name)
-		return 0, nil
-	}
-	r.resetNoProgressRetries(lvg.Name)
 
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] tries to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 	err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, internal.ReasonApplied, "configuration has been applied")
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGUpdateFunc] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
-		return r.requeueInterval(), err
+		return true, err
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLVGUpdateFunc] successfully added a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 	r.log.Info(fmt.Sprintf("[reconcileLVGUpdateFunc] successfully reconciled the LVMVolumeGroup %s", lvg.Name))
 
-	return 0, nil
-}
-
-// noProgressRequeueAfter returns how long to wait before retrying an
-// LVMVolumeGroup whose reconcile made no progress, and records that this round
-// did not either.
-//
-// Two callers, one shape. A spec.fileDevices entry the node could not bring up: a
-// filesystem briefly short of room clears in seconds and deserves the scan
-// interval, while an entry asking for more than the node will ever have — a
-// fat-fingered `size`, or a template rolled out by an LVMVolumeGroupSet to a fleet
-// — never clears. A node whose Volume Groups cannot be read at all
-// (ReasonVGCheckFailed): a transient nsenter failure clears, a missing lvm.static
-// does not.
-//
-// At a fixed 5s the permanent variants have every affected node running a
-// `stat -f`, a `losetup -j` per entry and a live `lvm pvs`/`vgs` forever over a
-// question whose answer cannot change until somebody intervenes. Nothing
-// distinguishes them from the inside, so the interval doubles until it reaches a
-// ceiling: the transient case still recovers in one or two rounds, and the
-// permanent one settles into a poll that costs nothing to leave running.
-//
-// The ceiling matters more than the growth rate. It has to stay well under
-// controller-runtime's resync so the LVMVolumeGroup is still retried on its own,
-// and short enough that an operator who frees space or fixes the node does not
-// conclude nothing is happening.
-func (r *Reconciler) noProgressRequeueAfter(lvgName string) time.Duration {
-	base := r.requeueInterval()
-
-	r.noProgressRetriesMu.Lock()
-	r.noProgressRetries[lvgName]++
-	streak := r.noProgressRetries[lvgName]
-	r.noProgressRetriesMu.Unlock()
-
-	// Shift rather than multiply, and cap the shift before it is applied: a streak
-	// on a long-lived LVMVolumeGroup grows without bound, and 1<<64 is not a large
-	// interval, it is zero.
-	shift := min(streak-1, noProgressRetryMaxShift)
-	backoff := base << shift
-	if backoff <= 0 || backoff > noProgressRetryMaxInterval {
-		backoff = noProgressRetryMaxInterval
-	}
-	// A SCAN_INTERVAL longer than the ceiling is a deliberate choice to poll the
-	// node rarely, and the clamp above must not quietly override it into polling
-	// more often than the operator asked for.
-	if backoff < base {
-		backoff = base
-	}
-	r.log.Debug(fmt.Sprintf("[noProgressRequeueAfter] the LVMVolumeGroup %s has made no progress for %d consecutive round(s); retrying in %s", lvgName, streak, backoff))
-	return backoff
-}
-
-// resetNoProgressRetries clears the backoff after a round that made progress, so a
-// transient shortage or an unreadable node does not leave the LVMVolumeGroup on a
-// long interval once it is over.
-func (r *Reconciler) resetNoProgressRetries(lvgName string) {
-	r.noProgressRetriesMu.Lock()
-	defer r.noProgressRetriesMu.Unlock()
-	delete(r.noProgressRetries, lvgName)
+	return false, nil
 }
 
 func (r *Reconciler) reconcileLVGCreateFunc(
@@ -865,7 +517,7 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 	}
 
 	r.log.Debug(fmt.Sprintf("[reconcileLVGCreateFunc] tries to validate the LVMVolumeGroup %s", lvg.Name))
-	valid, reason := r.validateLVGForCreateFunc(ctx, lvg, blockDevices)
+	valid, reason := r.validateLVGForCreateFunc(lvg, blockDevices)
 	if !valid {
 		r.log.Warning(fmt.Sprintf("[reconcileLVGCreateFunc] validation fails for the LVMVolumeGroup %s", lvg.Name))
 		err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, reason)
@@ -902,14 +554,7 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 		extentForThinPools := extentSizeForThinPoolAlign(lvg, vgAfterCreate)
 
 		for _, tp := range lvg.Spec.ThinPools {
-			// vgSize must account for file-backed PVs too: a file-only VG has
-			// no block devices, so countVGSizeByBlockDevices alone returns 0,
-			// which collapses every percentage thin-pool to 0 and forces every
-			// absolute-sized thin-pool into the full-VG-space branch (taking the
-			// whole VG instead of the requested size). Add the spec.fileDevices
-			// capacity, mirroring how validateLVGForCreateFunc computes totalVGSize.
 			vgSize := countVGSizeByBlockDevices(blockDevices)
-			vgSize.Add(countVGSizeByFileDevices(lvg))
 			tpRequestedSize, err := utils.GetRequestedSizeFromString(tp.Size, vgSize)
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[reconcileLVGCreateFunc] unable to get thin-pool %s requested size of the LVMVolumeGroup %s", tp.Name, lvg.Name))
@@ -1074,93 +719,18 @@ func (r *Reconciler) syncThinPoolsAllocationLimit(ctx context.Context, lvg *v1al
 	return nil
 }
 
-// deleteLVGIfNeeded handles the deletion of an LVMVolumeGroup whose Volume Group
-// was never created.
-//
-// deleted says the resource is gone and the reconcile is over. waitForCache says
-// the opposite of "nothing to do": the node has the Volume Group and the cache
-// does not, so no delete decision can be made from the data at hand and the
-// caller must requeue without running any of them.
-func (r *Reconciler) deleteLVGIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) (deleted, waitForCache bool, err error) {
+func (r *Reconciler) deleteLVGIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
 	if lvg.DeletionTimestamp == nil {
-		return false, false, nil
+		return false, nil
 	}
 
 	vgs, _ := r.sdsCache.GetVGs()
 	if !checkIfVGExist(lvg.Spec.ActualVGNameOnTheNode, vgs) {
-		// The cache alone is not enough to conclude the Volume Group was never
-		// created, and here that conclusion is destructive rather than merely
-		// wrong: this branch removes backing files and the finalizer, so a cache
-		// that has simply not caught up would delete the storage of a live VG and
-		// then delete the record of it. The cache is filled only on udev events,
-		// and writing LVM metadata to a loop device does not reliably raise one —
-		// which is exactly why shouldReconcileLVGByCreateFunc confirms against
-		// LVM before it commits to the create path. The same confirmation belongs
-		// here, for a stronger reason: create wedges a condition, this loses data.
-		//
-		// When the VG turns out to exist (or cannot be ruled out), the whole
-		// reconcile stops here and is requeued. Falling through to the ordinary
-		// delete path would not be a safer route to the same place: every step of
-		// it reads the same stale cache. getLVForVG finds no logical volumes and
-		// waves the resource past the "delete used LVs first" guard, deleteVGIfExist
-		// finds no Volume Group and reports success without doing anything, and for
-		// an LVMVolumeGroup with no file devices cleanupFileDevices has nothing to
-		// walk — so the finalizer comes off and the resource is deleted while its
-		// Volume Group, and whatever is on it, stays on the node with no owner. Only
-		// a file-backed group was ever saved from that, and by cleanupFileDevices'
-		// own live `pvs` check rather than by this branch.
-		//
-		// The two ways this can answer "do not delete" need different words, exactly
-		// as they do in runEventReconcile. "The cache has not caught up" clears
-		// itself and is an acceptable reason, so the LVMVolumeGroup stays Ready
-		// while it waits. "LVM could not be read at all" does not clear itself, and
-		// an LVMVolumeGroup whose storage the agent has lost sight of must not keep
-		// reporting Ready — ReasonVGCheckFailed is deliberately absent from the
-		// conditions watcher's acceptableReasons for that reason. Reporting the
-		// second as the first also sends the operator to look at the scanner while
-		// the actual complaint is nsenter or lvm.static.
-		exists, vgStateKnown := r.vgExistsOnNode(ctx, lvg.Spec.ActualVGNameOnTheNode)
-		if exists {
-			reason, msg := internal.ReasonCacheStale, fmt.Sprintf("VG %s is present on the node but missing from the agent's cache; the LVMVolumeGroup is not deleted until the cache catches up", lvg.Spec.ActualVGNameOnTheNode)
-			if !vgStateKnown {
-				reason, msg = internal.ReasonVGCheckFailed, fmt.Sprintf("unable to read the Volume Groups of the node to decide whether VG %s still exists; the LVMVolumeGroup is not deleted while this is unknown", lvg.Spec.ActualVGNameOnTheNode)
-			}
-			r.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] %s (LVMVolumeGroup %s)", msg, lvg.Name))
-			if condErr := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, reason, msg); condErr != nil {
-				r.log.Error(condErr, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, reason, lvg.Name))
-			}
-			return false, true, nil
-		}
-
 		r.log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] VG %s was not yet created for the LVMVolumeGroup %s and the resource is marked as deleting. Delete the resource", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
-
-		// "No Volume Group" does not mean "nothing on the node". File devices are
-		// provisioned before the VG is assembled, and when pvcreate succeeded but
-		// vgcreate did not, rollbackProvisionedFileDevices deliberately keeps the
-		// loop and its backing file — tearing down something that is already a PV
-		// is how a live VG gets corrupted. The resource is then the only record of
-		// what was left behind, so removing its finalizer without cleaning up
-		// strands a preallocated file, a loop minor and an orphan PV that nothing
-		// will ever collect: the reconciler is gone with the resource and the
-		// discoverer has no VG to import. Deleting a stuck VGCreationFailed
-		// LVMVolumeGroup is exactly what an operator does, and repeating it fills
-		// the node.
-		//
-		// The call is free for a block-device-only LVMVolumeGroup (neither spec nor
-		// status names a file device, so it walks an empty set) and refuses to act
-		// on any path outside the managed naming pattern.
-		if err := r.cleanupFileDevices(ctx, lvg); err != nil {
-			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to clean up file devices of the LVMVolumeGroup %s; keeping the finalizer so the resource stays the record of what is on the node", lvg.Name))
-			if condErr := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, err.Error()); condErr != nil {
-				r.log.Error(condErr, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
-			}
-			return false, false, err
-		}
-
 		removed, err := r.removeLVGFinalizerIfExist(ctx, lvg)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to remove the finalizer %s from the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
-			return false, false, err
+			return false, err
 		}
 
 		if removed {
@@ -1172,21 +742,15 @@ func (r *Reconciler) deleteLVGIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVol
 		err = r.lvgCl.DeleteLVMVolumeGroup(ctx, lvg)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to delete the LVMVolumeGroup %s", lvg.Name))
-			return false, false, err
+			return false, err
 		}
-		// Same bookkeeping as the other delete path: the resource is gone, so
-		// neither its resolver-failure streak nor its file-device retry backoff may
-		// outlive it and greet a future LVMVolumeGroup of the same name mid-escalation.
-		r.resetAliasResolveFailure(lvg.Name)
-		r.resetNoProgressRetries(lvg.Name)
 		r.log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully deleted the LVMVolumeGroup %s", lvg.Name))
-		return true, false, nil
+		return true, nil
 	}
-	return false, false, nil
+	return false, nil
 }
 
 func (r *Reconciler) validateLVGForCreateFunc(
-	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 ) (bool, string) {
@@ -1207,8 +771,6 @@ func (r *Reconciler) validateLVGForCreateFunc(
 		r.log.Debug(fmt.Sprintf("[validateLVGForCreateFunc] all BlockDevices of the LVMVolumeGroup %s are consumable", lvg.Name))
 	}
 
-	r.validateFileDevices(ctx, lvg, &reason, &totalVGSize)
-
 	if lvg.Spec.ThinPools != nil {
 		r.log.Debug(fmt.Sprintf("[validateLVGForCreateFunc] the LVMVolumeGroup %s has thin-pools. Validate if VG size has enough space for the thin-pools", lvg.Name))
 		r.log.Trace(fmt.Sprintf("[validateLVGForCreateFunc] the LVMVolumeGroup %s has thin-pools %v", lvg.Name, lvg.Spec.ThinPools))
@@ -1227,7 +789,7 @@ func (r *Reconciler) validateLVGForCreateFunc(
 				continue
 			}
 
-			alignedTpSize, alignErr := alignThinPoolSizeForValidation(tp.Size, tpRequestedSize, extentSizeForThinPoolAlign(lvg, nil))
+			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentSizeForThinPoolAlign(lvg, nil))
 			if alignErr != nil {
 				reason.WriteString(fmt.Sprintf("Unable to align thin-pool %s size: %s. ", tp.Name, alignErr.Error()))
 				continue
@@ -1257,12 +819,10 @@ func (r *Reconciler) validateLVGForCreateFunc(
 }
 
 func (r *Reconciler) validateLVGForUpdateFunc(
-	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
-) (bool, string, fileDeviceIssues) {
+) (bool, string) {
 	reason := strings.Builder{}
-	var issues fileDeviceIssues
 
 	// Bail out before any name-keyed cache lookups when the underlying VG name
 	// is ambiguous on the node. Without this, FindVG/FindLV would return data
@@ -1272,7 +832,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 	allVGs, _ := r.sdsCache.GetVGs()
 	if duplicateVGs := findDuplicateVGNames(allVGs); len(duplicateVGs) > 0 {
 		if uuids, dup := duplicateVGs[lvg.Spec.ActualVGNameOnTheNode]; dup {
-			return false, duplicateVGMessage(lvg.Spec.ActualVGNameOnTheNode, uuids), issues
+			return false, duplicateVGMessage(lvg.Spec.ActualVGNameOnTheNode, uuids)
 		}
 	}
 
@@ -1320,70 +880,6 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 		}
 	}
 
-	// File-device problems are collected apart from `reason`: they must not make
-	// the whole LVMVolumeGroup invalid on the update path. See validateFileDevices.
-	fdReason := strings.Builder{}
-	invalidFileDevices := r.validateFileDevices(ctx, lvg, &fdReason, nil)
-	issues = fileDeviceIssues{reason: fdReason.String(), invalid: invalidFileDevices}
-
-	// additionFileDeviceSpace mirrors additionBlockDeviceSpace for file
-	// devices: it accounts for spec.fileDevices entries that are not yet PVs
-	// in the VG (i.e. not yet reflected in status.nodes[].fileDevices). Without
-	// it, a combined "append a fileDevices entry + grow a thin-pool" edit would
-	// be validated against the current VG size, wrongly rejecting a valid
-	// request or forcing an absolute-sized thin-pool into the full-VG-space
-	// branch — the same defect the create path avoids via countVGSizeByFileDevices.
-	var additionFileDeviceSpace int64
-	if len(lvg.Spec.FileDevices) > 0 {
-		// Match by basename, not full path: status.nodes[].fileDevices[].FilePath
-		// is the loop's backing file as reported by `losetup --output BACK-FILE`,
-		// which canonicalizes symlink components of the directory (e.g. a spec
-		// directory /data symlinked to /mnt/disk1/data is reported as
-		// /mnt/disk1/data/...), while BuildFileDevicePath keeps the literal spec
-		// directory. The basename `sds-<lvgName>.<entryName>.img` is identical on
-		// both sides (it is built from the names alone and losetup leaves the
-		// basename untouched), so a full-path compare would
-		// miss an already-provisioned device whenever the directory is a symlink
-		// and count it as new on every reconcile, inflating the VG size used for
-		// thin-pool validation.
-		//
-		// Only this node's devices. A Local Volume Group has exactly one entry in
-		// status.nodes, but the field is a list and the type may one day be Shared,
-		// and another node's capacity is not this Volume Group's on this node.
-		existingPVSize := make(map[string]int64)
-		for _, n := range lvg.Status.Nodes {
-			if n.Name != r.cfg.NodeName {
-				continue
-			}
-			for _, fd := range n.FileDevices {
-				existingPVSize[filepath.Base(fd.FilePath)] = fd.Size.Value()
-			}
-		}
-		extentQuantity := extentSizeForThinPoolAlign(lvg, nil)
-		extentSize := extentQuantity.Value()
-		for _, fd := range lvg.Spec.FileDevices {
-			if _, bad := invalidFileDevices[fd.Name]; bad {
-				continue
-			}
-			base := filepath.Base(utils.BuildFileDevicePath(fd.Directory, lvg.Name, fd.Name))
-			pvSize, provisioned := existingPVSize[base]
-			if !provisioned {
-				additionFileDeviceSpace += fd.Size.Value()
-				continue
-			}
-			// An entry whose size was raised will grow in place, so the capacity
-			// it is about to add counts too — otherwise "grow the file device and
-			// grow the thin-pool" in one edit is validated against the pre-growth
-			// VG size and wrongly rejected, the same way appending an entry used
-			// to be. One extent is left out of the estimate: that is roughly what
-			// LVM keeps for PV metadata, so counting the full delta would promise
-			// space the VG never actually gains.
-			if gain := fd.Size.Value() - pvSize - extentSize; gain > 0 {
-				additionFileDeviceSpace += gain
-			}
-		}
-	}
-
 	if lvg.Spec.ThinPools != nil {
 		r.log.Debug(fmt.Sprintf("[validateLVGForUpdateFunc] the LVMVolumeGroup %s has thin-pools. Validate them", lvg.Name))
 		actualThinPools := make(map[string]internal.LVData, len(lvg.Spec.ThinPools))
@@ -1408,10 +904,10 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 		vg := r.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode)
 		if vg == nil {
 			reason.WriteString(fmt.Sprintf("Missed VG %s in the cache", lvg.Spec.ActualVGNameOnTheNode))
-			return false, reason.String(), issues
+			return false, reason.String()
 		}
 
-		newTotalVGSize := resource.NewQuantity(vg.VGSize.Value()+additionBlockDeviceSpace+additionFileDeviceSpace, resource.BinarySI)
+		newTotalVGSize := resource.NewQuantity(vg.VGSize.Value()+additionBlockDeviceSpace, resource.BinarySI)
 		for _, specTp := range lvg.Spec.ThinPools {
 			// might be a case when Thin-pool is already created, but is not shown in status
 			tpRequestedSize, err := utils.GetRequestedSizeFromString(specTp.Size, *newTotalVGSize)
@@ -1472,132 +968,35 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 	}
 
 	if reason.Len() != 0 {
-		return false, reason.String(), issues
+		return false, reason.String()
 	}
 
-	return true, "", issues
+	return true, ""
 }
 
-// identifyLVGReconcileFunc picks the reconcile path. vgStateKnown is carried out
-// alongside it so the "none" caller can report why it got nothing to do without
-// paying for a second `vgs`.
-func (r *Reconciler) identifyLVGReconcileFunc(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) (recType internal.ReconcileType, vgStateKnown bool) {
-	shouldCreate, vgStateKnown := r.shouldReconcileLVGByCreateFunc(ctx, lvg)
-	if shouldCreate {
-		return internal.CreateReconcile, vgStateKnown
+func (r *Reconciler) identifyLVGReconcileFunc(lvg *v1alpha1.LVMVolumeGroup) internal.ReconcileType {
+	if r.shouldReconcileLVGByCreateFunc(lvg) {
+		return internal.CreateReconcile
 	}
 
 	if r.shouldReconcileLVGByUpdateFunc(lvg) {
-		return internal.UpdateReconcile, vgStateKnown
+		return internal.UpdateReconcile
 	}
 
 	if r.shouldReconcileLVGByDeleteFunc(lvg) {
-		return internal.DeleteReconcile, vgStateKnown
+		return internal.DeleteReconcile
 	}
 
-	return "none", vgStateKnown
+	return "none"
 }
 
-// shouldReconcileLVGByCreateFunc reports whether the Volume Group has to be
-// created. vgStateKnown says whether that answer rests on an actual reading of
-// the node — it is false only when LVM could not be queried, and it travels out
-// so the caller can tell "waiting for the cache" from "cannot see the node".
-func (r *Reconciler) shouldReconcileLVGByCreateFunc(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) (shouldCreate, vgStateKnown bool) {
+func (r *Reconciler) shouldReconcileLVGByCreateFunc(lvg *v1alpha1.LVMVolumeGroup) bool {
 	if lvg.DeletionTimestamp != nil {
-		return false, true
+		return false
 	}
 
-	if vg := r.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode); vg != nil {
-		return false, true
-	}
-
-	// The cache is filled only by the scanner, and the scanner only runs on udev
-	// events. Writing LVM metadata to a loop device does not reliably raise one, so
-	// after the agent creates a file-backed VG itself the cache can keep a snapshot
-	// taken mid-operation — before vgcreate — with no way to notice. Attaching a
-	// real disk raises plenty of events, which is why this never showed up for
-	// block-device VGs.
-	//
-	// Taking the create path on that stale view is destructive rather than merely
-	// slow: CreateVGComplex re-runs pvcreate on a device that is already a PV of
-	// the very VG it is about to create, LVM refuses with "Can't initialize
-	// physical volume ... without -ff", and the LVMVolumeGroup stays Pending with
-	// vgSize=0 for good, because nothing will refresh the cache later either.
-	//
-	// So confirm against LVM before committing to it. This costs one vgs call, and
-	// only on the path that would otherwise create a VG.
-	exists, known := r.vgExistsOnNode(ctx, lvg.Spec.ActualVGNameOnTheNode)
-	return !exists, known
-}
-
-// vgExistsOnNode asks LVM directly whether vgName is present.
-//
-// known distinguishes the two ways this can answer "exists": because LVM said so,
-// and because LVM could not be asked. Both must keep the create path away from
-// storage that may well be there, but they are different problems with different
-// fixes, and a caller that reports one as the other sends the operator looking
-// for a Volume Group that does not exist. Callers that only need the safe
-// default can ignore it.
-//
-// A Volume Group that lives entirely on loop devices the agent does not own does
-// not count as present. It is not this module's storage, so it is neither
-// something to avoid overwriting nor something to reconcile — and taking it for
-// ours has no way out: create is refused because "the VG is there", update finds
-// nothing in the cache, and the LVMVolumeGroup sits in CacheStale forever while
-// the condition tells the operator to wait for a cache that is not the problem.
-// Before spec.fileDevices removed `loop` from LVMGlobalFilter such a Volume Group
-// was invisible here. See utils/loopvg.go.
-func (r *Reconciler) vgExistsOnNode(ctx context.Context, vgName string) (exists, known bool) {
-	type vgsResult struct {
-		vgs []internal.VGData
-		cmd string
-	}
-	res, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (vgsResult, error) {
-		vgs, cmd, _, err := r.commands.GetAllVGs(ctx)
-		return vgsResult{vgs: vgs, cmd: cmd}, err
-	})
-	r.log.Debug(res.cmd)
-	if err != nil {
-		r.log.Warning(fmt.Sprintf("[vgExistsOnNode] unable to confirm whether VG %s exists; assuming it does so nothing is created over storage that may be there: %v", vgName, err))
-		return true, false
-	}
-
-	candidates := make([]internal.VGData, 0, 1)
-	for _, vg := range res.vgs {
-		if vg.VGName == vgName {
-			candidates = append(candidates, vg)
-		}
-	}
-	if len(candidates) == 0 {
-		return false, true
-	}
-
-	// The PV listing is paid for only when the name actually matched, which is the
-	// rare branch: this function runs only when the VG is missing from the cache.
-	type pvsResult struct {
-		pvs []internal.PVData
-		cmd string
-	}
-	pvsRes, pvsErr := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (pvsResult, error) {
-		pvs, cmd, _, err := r.commands.GetAllPVs(ctx)
-		return pvsResult{pvs: pvs, cmd: cmd}, err
-	})
-	r.log.Debug(pvsRes.cmd)
-	if pvsErr != nil {
-		r.log.Warning(fmt.Sprintf("[vgExistsOnNode] VG %s is present on the node but its PVs could not be listed to tell whether it is the module's own; assuming it is so nothing is created over storage that may be there: %v", vgName, pvsErr))
-		return true, false
-	}
-
-	verdicts := utils.ClassifyLoopVGs(ctx, r.log, r.commands, r.cfg.CmdDeadlineDuration, candidates, pvsRes.pvs)
-	for _, vg := range candidates {
-		if verdicts.IsUnowned(vg.VGUUID) {
-			r.log.Warning(fmt.Sprintf("[vgExistsOnNode] a VG named %s (VG_UUID=%s) is present on the node but lives entirely on loop devices this agent did not create; it is not ours and does not count as existing", vgName, vg.VGUUID))
-			continue
-		}
-		r.log.Warning(fmt.Sprintf("[vgExistsOnNode] VG %s is absent from the cache but present on the node; not re-creating it", vgName))
-		return true, true
-	}
-	return false, true
+	vg := r.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode)
+	return vg == nil
 }
 
 func (r *Reconciler) shouldReconcileLVGByUpdateFunc(lvg *v1alpha1.LVMVolumeGroup) bool {
@@ -1729,11 +1128,9 @@ func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolu
 				r.log.Debug(fmt.Sprintf("[ResizePVIfNeeded] the LVMVolumeGroup %s BlockDevice %s PVSize is less than actual device size. Resize PV", lvg.Name, d.BlockDevice))
 
 				start := time.Now()
-				cmd, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (string, error) {
-					return r.commands.ResizePV(ctx, d.Path)
-				})
+				cmd, err := r.commands.ResizePV(d.Path)
 				r.metrics.UtilsCommandsDuration(ReconcilerName, "pvresize").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-				r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "pvresize").Inc()
+				r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "pvresize")
 				if err != nil {
 					r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "pvresize").Inc()
 					r.log.Error(err, fmt.Sprintf("[ResizePVIfNeeded] unable to resize PV %s of BlockDevice %s of LVMVolumeGroup %s, cmd: %s", d.Path, d.BlockDevice, lvg.Name, cmd))
@@ -1796,7 +1193,7 @@ func (r *Reconciler) extendVGIfNeeded(
 
 	r.log.Debug(fmt.Sprintf("[ExtendVGIfNeeded] VG %s should be extended as there are some BlockDevices were added to Spec field of the LVMVolumeGroup %s", vg.VGName, lvg.Name))
 	paths := extractPathsFromBlockDevices(devicesToExtend, blockDevices)
-	err := r.extendVGComplex(ctx, nil, paths, vg.VGName)
+	err := r.extendVGComplex(ctx, paths, vg.VGName)
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[ExtendVGIfNeeded] unable to extend VG %s of the LVMVolumeGroup %s", vg.VGName, lvg.Name))
 		return err
@@ -1896,17 +1293,16 @@ func (r *Reconciler) deleteVGIfExist(vgName string) error {
 	return nil
 }
 
-// extendVGComplex adds devices to an existing Volume Group.
-//
-// pvs may be nil, in which case the PV listing is taken here. Callers that
-// already built one pass it in so the node is not asked twice; the important part
-// is that the listing is live rather than the cache's — see pvView.
-func (r *Reconciler) extendVGComplex(ctx context.Context, pvs *pvView, extendPVs []string, vgName string) error {
-	if pvs == nil {
-		pvs = r.newPVView(ctx, "ExtendVGComplex")
-	}
+func (r *Reconciler) extendVGComplex(ctx context.Context, extendPVs []string, vgName string) error {
 	for _, pvPath := range extendPVs {
-		if err := r.createPVIfNeeded(ctx, pvs, "ExtendVGComplex", pvPath); err != nil {
+		start := time.Now()
+		command, err := r.commands.CreatePV(pvPath)
+		r.metrics.UtilsCommandsDuration(ReconcilerName, "pvcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "pvcreate").Inc()
+		r.log.Debug(command)
+		if err != nil {
+			r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "pvcreate").Inc()
+			r.log.Error(err, "CreatePV ")
 			return err
 		}
 	}
@@ -1959,44 +1355,19 @@ func (r *Reconciler) triggerUdevForPaths(parent context.Context, paths []string)
 	}
 }
 
-func (r *Reconciler) createVGComplex(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (retErr error) {
+func (r *Reconciler) createVGComplex(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) error {
 	paths := extractPathsFromBlockDevices(nil, blockDevices)
 
-	// The create path validates strictly (validateLVGForCreateFunc), so an
-	// LVMVolumeGroup that reaches here has no rejected entries to skip — and
-	// nothing to be lenient about: without a Volume Group, a partially
-	// provisioned set of file devices is not a state worth keeping.
-	loopPaths, provisioned, err := r.provisionFileDevices(ctx, lvg, fileDeviceIssues{}, false)
-	if err != nil {
-		return fmt.Errorf("file device provisioning failed: %w", err)
-	}
-	paths = append(paths, loopPaths...)
-
-	// If a later step (pvcreate/vgcreate) fails, tear down ONLY the file devices
-	// this call provisioned — and never one that already became a PV. This must
-	// NOT use the broad cleanupFileDevices (the delete-path cleanup): it walks
-	// spec+status and could remove the backing file of a loop that a concurrent
-	// reconcile, or a pvcreate/vgcreate that materially succeeded but returned a
-	// non-zero status, had already turned into a live PV of the VG — which the
-	// next reconcile then re-provisions with a second loop, doubling the VG.
-	// See rollbackProvisionedFileDevices. Runs on a detached context because the
-	// failure is frequently the reconcile ctx being cancelled.
-	if len(provisioned) > 0 {
-		defer func() {
-			if retErr == nil {
-				return
-			}
-			rollbackCtx, cancel := r.newRollbackContext()
-			defer cancel()
-			r.rollbackProvisionedFileDevices(rollbackCtx, provisioned)
-		}()
-	}
-
 	r.log.Trace(fmt.Sprintf("[CreateVGComplex] LVMVolumeGroup %s devices paths %v", lvg.Name, paths))
-
-	existingPVs := r.newPVView(ctx, "CreateVGComplex")
 	for _, path := range paths {
-		if err := r.createPVIfNeeded(ctx, existingPVs, "CreateVGComplex", path); err != nil {
+		start := time.Now()
+		command, err := r.commands.CreatePV(path)
+		r.metrics.UtilsCommandsDuration(ReconcilerName, "pvcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "pvcreate").Inc()
+		r.log.Debug(command)
+		if err != nil {
+			r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "pvcreate").Inc()
+			r.log.Error(err, fmt.Sprintf("[CreateVGComplex] unable to create PV by path %s", path))
 			return err
 		}
 	}
@@ -2042,20 +1413,6 @@ func (r *Reconciler) updateVGTagIfNeeded(
 ) (bool, error) {
 	found, tagName := utils.ReadValueFromTags(vg.VGTags, internal.LVMVolumeGroupTag)
 	if found && lvg.Name != tagName {
-		// Retagging is how a VG follows its LVMVolumeGroup being renamed. For a
-		// file-backed VG the rename is only half a rename: the backing files keep
-		// the old name in their basenames, so after this the agent stops
-		// recognising its own file devices (IsManagedFileDevicePath is gated on
-		// the LVG name) and the next provision round creates a second set from
-		// the spec, doubling the VG. The files are deliberately not renamed —
-		// a live loop device is attached to them — so the honest thing is to warn
-		// loudly and let the operator decide.
-		if len(lvg.Spec.FileDevices) > 0 {
-			r.log.Warning(fmt.Sprintf("[UpdateVGTagIfNeeded] VG %s is tagged for the LVMVolumeGroup %s but is being reconciled as %s, and it has file devices whose backing files still encode %s. "+
-				"The file devices will stop being recognised as managed; move the backing files to the new name manually, or restore the original resource name",
-				vg.VGName, tagName, lvg.Name, tagName))
-		}
-
 		if isApplied(lvg) {
 			err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration")
 			if err != nil {
@@ -2178,14 +1535,6 @@ func validateSpecBlockDevices(lvg *v1alpha1.LVMVolumeGroup, blockDevices map[str
 		if len(lostBdNames) > 0 {
 			return false, fmt.Sprintf("these BlockDevices no longer match the blockDeviceSelector: %s", strings.Join(lostBdNames, ","))
 		}
-	}
-
-	// A file-only LVMVolumeGroup has no blockDeviceSelector; there are no
-	// match expressions to validate, and dereferencing the nil selector
-	// would panic. (The production caller already skips this function for
-	// file-only groups; this guard keeps it safe if called directly.)
-	if lvg.Spec.BlockDeviceSelector == nil {
-		return true, ""
 	}
 
 	for _, me := range lvg.Spec.BlockDeviceSelector.MatchExpressions {

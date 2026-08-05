@@ -64,9 +64,8 @@ func HostNsenterCanonicalResolver(ctx context.Context, devPath string) (string, 
 // IsForeignDeviceBase reports whether the given canonical basename
 // belongs to a storage layer the agent must ignore. The check is a
 // strict prefix match against internal.ForeignDeviceBasePrefixes so it
-// catches partitions of foreign devices too (e.g. "rbd14p1", "nbd0p1",
-// "drbd0"). Loop devices are deliberately absent from the prefix list —
-// the agent manages file-backed loop devices as LVM PVs.
+// catches partitions of foreign devices too (e.g. "rbd14p1", "loop970",
+// "drbd0").
 func IsForeignDeviceBase(base string) bool {
 	for _, prefix := range internal.ForeignDeviceBasePrefixes {
 		if strings.HasPrefix(base, prefix) {
@@ -78,18 +77,7 @@ func IsForeignDeviceBase(base string) bool {
 
 // FilterForeignPVs returns a copy of pvs with PVs whose underlying
 // canonical device belongs to a foreign storage layer (Ceph RBD, DRBD,
-// NBD) removed.
-//
-// Loop devices are intentionally NOT dropped here: the agent manages
-// file-backed loop devices as LVM PVs (spec.fileDevices), so a blanket
-// loop reject would hide its own managed PVs. Ownership of a loop PV is
-// instead established later, in the discoverer, via the backing-file owner
-// pattern (IsManagedFileDevicePath) gated on the VG's
-// storage.deckhouse.io/lvmVolumeGroupName tag. Unmanaged loop PVs that
-// form a whole VG (e.g. nested LVM inside a file-backed guest VM disk) are
-// dropped separately by FilterForeignLoopPVs so they cannot collide by
-// name with a managed VG; see ClassifyLoopVGs for why neither the tag nor
-// the backing-file name alone is enough to establish ownership.
+// NBD, loopback) removed.
 //
 // lvm.static bundled with the agent has no udev integration and so it
 // enumerates devices via /dev/block/MAJOR:MINOR and /dev/disk/by-id/
@@ -110,7 +98,7 @@ func IsForeignDeviceBase(base string) bool {
 // assumption that a transient resolver failure must not silently hide
 // a legitimate PV.
 //
-// Each resolver call runs under RunWithTimeout(cmdTimeout) so a hung
+// Each resolver call runs under runWithTimeout(cmdTimeout) so a hung
 // nsenter-backed readlink cannot block the scan loop indefinitely.
 // This mirrors the per-command timeout protection introduced in
 // PR #290 for every other lvm.static / nsenter invocation in
@@ -136,7 +124,7 @@ func FilterForeignPVs(
 			out = append(out, pv)
 			continue
 		}
-		resolved, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+		resolved, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 			return resolver(ctx, pv.PVName)
 		})
 		if err != nil {
@@ -158,79 +146,6 @@ func FilterForeignPVs(
 		out = append(out, pv)
 	}
 	return out
-}
-
-// FilterForeignLoopPVs drops PVs that belong to an unmanaged, purely
-// loop-backed Volume Group — e.g. nested LVM inside a guest VM's
-// file-backed disk attached on the host via losetup.
-//
-// Loop devices are not rejected by FilterForeignPVs because the agent
-// manages its own file-backed loop devices (spec.fileDevices) as PVs.
-// But an unmanaged loop-backed VG that reaches the cache is dangerous:
-// findDuplicateVGNames runs over every cached VG (before tag filtering),
-// so a guest VG that happens to share a name with a managed VG
-// (`data`, `vg0`, … are common defaults) is detected as a duplicate and
-// takes the *managed* LVMVolumeGroup offline (VGReady=False), and the
-// agent's name-keyed cache lookups (FindVG/FindLV) could mix the two.
-//
-// A VG is dropped here exactly when ClassifyLoopVGs called it
-// LoopVGUnowned: every one of its PVs is a /dev/loop* device and nothing
-// identifies it as this module's — it is either untagged, or tagged but
-// backed by files this agent did not create.
-//
-// The tag on its own is NOT enough to keep a loop-backed VG, and that is
-// the whole reason the decision moved into ClassifyLoopVGs. An image of a
-// node disk this module used to manage carries
-// storage.deckhouse.io/enabled=true, so `losetup -f /backup/node2.img`
-// during a restore used to hand the cache a second VG named `data` — and
-// findDuplicateVGNames then took the healthy, live LVMVolumeGroup offline.
-// That is the very outage this filter exists to prevent, arriving through
-// the exception the filter used to make.
-//
-// A VG whose ownership could not be established (losetup unreadable) and a
-// VG absent from vgs altogether are both KEPT. Dropping on absence is
-// unsafe in exactly the case that matters — fillTheCache lists VGs before
-// PVs, so a VG the agent has just created itself is missing from vgs while
-// its PV is already in pvs, and dropping it wiped the managed file-backed
-// VG out of the cache, after which FindVG returned nil, the reconciler
-// re-entered the create path and pvcreate failed with "Can't initialize
-// physical volume ... without -ff" for good.
-//
-// Bare loop PVs not part of any VG are kept; they carry no VG name and
-// cannot poison name resolution.
-func FilterForeignLoopPVs(log logger.Logger, pvs []internal.PVData, verdicts LoopVGVerdicts) []internal.PVData {
-	out := make([]internal.PVData, 0, len(pvs))
-	for _, pv := range pvs {
-		if pv.VGUuid != "" && verdicts.IsUnowned(pv.VGUuid) {
-			log.Info(fmt.Sprintf(
-				"[FilterForeignLoopPVs] dropping PV %q of foreign loop-backed VG %q (VG_UUID=%q)",
-				pv.PVName, pv.VGName, pv.VGUuid,
-			))
-			continue
-		}
-		out = append(out, pv)
-	}
-	return out
-}
-
-// PVsReferenceUnknownVG reports whether any PV names a VG that is not in vgs.
-// The scanner lists VGs before PVs, so this is how it notices that the VG list it
-// holds predates a VG the PV list already knows about — most often one the agent
-// created moments earlier.
-func PVsReferenceUnknownVG(vgs []internal.VGData, pvs []internal.PVData) bool {
-	known := make(map[string]struct{}, len(vgs))
-	for _, vg := range vgs {
-		known[vg.VGUUID] = struct{}{}
-	}
-	for _, pv := range pvs {
-		if pv.VGUuid == "" {
-			continue
-		}
-		if _, ok := known[pv.VGUuid]; !ok {
-			return true
-		}
-	}
-	return false
 }
 
 // FilterVGsByPresentPVs returns a copy of vgs that keeps only VGs

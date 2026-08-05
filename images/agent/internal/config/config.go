@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -41,33 +40,6 @@ const (
 	DefaultHealthProbeBindAddressEnvName = "HEALTH_PROBE_BIND_ADDRESS"
 	DefaultHealthProbeBindAddress        = ":4228"
 	NetlinkBlockDeviceDiscovery          = "ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY"
-	FileDevicesDirectory                 = "FILE_DEVICES_DIRECTORY"
-	// DefaultFileDevicesDirectory is the base directory backing files are
-	// confined to when the module config does not override it. It lives under
-	// the module's own /opt/deckhouse/sds tree so a stray fileDevices entry
-	// cannot fill an arbitrary host path. Keep in sync with the
-	// fileDevicesDirectory default in openapi/config-values.yaml.
-	DefaultFileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
-
-	FileDevicesMinFreeSpacePercent = "FILE_DEVICES_MIN_FREE_SPACE_PERCENT"
-	// DefaultFileDevicesMinFreeSpacePercent is the share of the backing-file
-	// filesystem the agent refuses to allocate into.
-	//
-	// It exists because "the file fits" and "the node survives" are different
-	// questions. Backing files are preallocated, the default directory lives on
-	// the node's root filesystem, and kubelet starts evicting pods at
-	// nodefs.available<10% — so allowing an allocation down to the last free byte
-	// causes exactly the node-level outage the free-space check is there to
-	// prevent. 15% matches kubelet's stricter imagefs.available default and
-	// leaves a margin above the nodefs one.
-	//
-	// Keep in sync with the fileDevicesMinFreeSpacePercent default in
-	// openapi/config-values.yaml.
-	DefaultFileDevicesMinFreeSpacePercent = 15
-	// MaxFileDevicesMinFreeSpacePercent bounds the setting. Above this a
-	// misconfiguration stops being a reserve and starts being "file devices do
-	// not work"; the apiserver rejects it too, and this is the second line.
-	MaxFileDevicesMinFreeSpacePercent = 90
 )
 
 type Features struct {
@@ -87,12 +59,6 @@ type Config struct {
 	CmdDeadlineDuration     time.Duration
 	HealthProbeBindAddress  string
 	Features                Features
-	FileDevicesDirectory    string
-	// FileDevicesMinFreeSpacePercent is the share of the backing-file filesystem
-	// that must stay free after a backing file is created or grown. Zero disables
-	// the reserve, which is the right setting only for a filesystem the node does
-	// not otherwise depend on.
-	FileDevicesMinFreeSpacePercent int
 }
 
 func NewConfig() (*Config, error) {
@@ -124,30 +90,6 @@ func NewConfig() (*Config, error) {
 	cfg.HealthProbeBindAddress = os.Getenv(DefaultHealthProbeBindAddressEnvName)
 	if cfg.HealthProbeBindAddress == "" {
 		cfg.HealthProbeBindAddress = DefaultHealthProbeBindAddress
-	}
-
-	cfg.FileDevicesDirectory = os.Getenv(FileDevicesDirectory)
-	if cfg.FileDevicesDirectory == "" {
-		cfg.FileDevicesDirectory = DefaultFileDevicesDirectory
-	}
-	if err := validateFileDevicesDirectory(cfg.FileDevicesDirectory); err != nil {
-		return nil, err
-	}
-
-	// An unparseable or out-of-range value falls back to the default rather than
-	// to "no reserve": the failure mode of the reserve being absent is a node
-	// evicting its pods, and a typo in a module setting must not reach it.
-	cfg.FileDevicesMinFreeSpacePercent = DefaultFileDevicesMinFreeSpacePercent
-	if raw := os.Getenv(FileDevicesMinFreeSpacePercent); raw != "" {
-		parsed, parseErr := strconv.Atoi(raw)
-		switch {
-		case parseErr != nil:
-			return nil, fmt.Errorf("[NewConfig] %s must be an integer, got %q: %w", FileDevicesMinFreeSpacePercent, raw, parseErr)
-		case parsed < 0 || parsed > MaxFileDevicesMinFreeSpacePercent:
-			return nil, fmt.Errorf("[NewConfig] %s must be between 0 and %d, got %d", FileDevicesMinFreeSpacePercent, MaxFileDevicesMinFreeSpacePercent, parsed)
-		default:
-			cfg.FileDevicesMinFreeSpacePercent = parsed
-		}
 	}
 
 	scanInt := os.Getenv(ScanInterval)
@@ -234,31 +176,4 @@ func getMachineID() (string, error) {
 	}
 
 	return id, nil
-}
-
-// validateFileDevicesDirectory rejects a base directory that cannot serve as a
-// confinement boundary for spec.fileDevices backing files.
-//
-// The module config schema already refuses a relative path and the filesystem
-// root, but it cannot refuse a `..` component: a config/CRD pattern is an RE2
-// regexp and RE2 has no lookahead. That gap matters because the boundary is
-// enforced lexically — isWithinBaseDir does a filepath.Clean and a prefix
-// compare, it deliberately does not resolve symlinks — so `/opt/../etc` would
-// silently confine every backing file to `/etc` while the module config still
-// read as the default. Failing loudly at startup is the only place left to say
-// so, and it is the same treatment FILE_DEVICES_MIN_FREE_SPACE_PERCENT already
-// gets for an out-of-range value.
-func validateFileDevicesDirectory(dir string) error {
-	if !filepath.IsAbs(dir) {
-		return fmt.Errorf("[NewConfig] %s must be an absolute path, got %q", FileDevicesDirectory, dir)
-	}
-	for _, part := range strings.Split(dir, string(filepath.Separator)) {
-		if part == ".." {
-			return fmt.Errorf("[NewConfig] %s must not contain '..' segments, got %q", FileDevicesDirectory, dir)
-		}
-	}
-	if filepath.Clean(dir) == string(filepath.Separator) {
-		return fmt.Errorf("[NewConfig] %s must not be the filesystem root: every absolute path would be a valid subdirectory of it, which disables the confinement it exists to provide", FileDevicesDirectory)
-	}
-	return nil
 }

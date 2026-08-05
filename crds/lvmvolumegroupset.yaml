@@ -86,15 +86,10 @@ spec:
                   type: object
                   description: |
                     Common template for LVMVolumeGroup resources provided by the set.
-                  x-kubernetes-validations:
-                    - rule: |
-                        has(self.blockDeviceSelector) || (has(self.fileDevices) && size(self.fileDevices) > 0)
-                      message: "At least one of 'blockDeviceSelector' or 'fileDevices' must be specified."
-                    # The per-entry rules live on fileDevices[] itself; see the
-                    # comment on that field, and the same field on LVMVolumeGroup.
                   required:
                     - type
                     - actualVGNameOnTheNode
+                    - blockDeviceSelector
                   properties:
                     blockDeviceSelector:
                       type: object
@@ -167,86 +162,6 @@ spec:
                       x-kubernetes-validations:
                         - rule: self == oldSelf
                           message: "The actualVGNameOnTheNode field is immutable."
-                    fileDevices:
-                      type: array
-                      maxItems: 32
-                      x-kubernetes-list-type: map
-                      x-kubernetes-list-map-keys:
-                        - name
-                      description: |
-                        File-backed block devices to create as LVM PVs in LVMVolumeGroups.
-
-                        The agent will create a preallocated file in the specified directory,
-                        attach it as a loop device, and use it as a Physical Volume.
-
-                        Each entry is identified by its `name`. `directory` cannot be changed,
-                        and `size` can only be increased: raising it grows the backing file, the
-                        loop device and the Physical Volume in place on every node the set covers,
-                        without unmounting anything or interrupting the volumes on top. Lowering
-                        it is rejected: giving capacity back means shrinking the Volume Group,
-                        which the module does not do for block devices either.
-
-                        Capacity can therefore be added two ways: raise the size of an existing
-                        entry, or add a new entry under a new name when the extra space has to
-                        come from a different filesystem — at most 32 entries per Volume Group.
-
-                        > Note that the configuration will be common for every LVMVolumeGroup created by the set.
-                        > Entries removed from this template are removed from the child LVMVolumeGroups; if such
-                        > an entry already backs a live Physical Volume, the agent reports the drift on the
-                        > child's `VGConfigurationApplied` condition and takes no destructive action.
-                      items:
-                        type: object
-                        required:
-                          - name
-                          - directory
-                          - size
-                        # The same three rules the LVMVolumeGroup CRD carries, for the
-                        # same reasons — see the comment there for why the last two are
-                        # per-entry transition rules rather than one nested all() over
-                        # the whole list. Enforcing them here as well keeps a template
-                        # edit from wedging every child LVMVolumeGroup at once.
-                        x-kubernetes-validations:
-                          - rule: "quantity(self.size).compareTo(quantity('1Gi')) >= 0"
-                            message: "A fileDevices entry's 'size' must be at least 1Gi."
-                          - rule: "self.directory == oldSelf.directory"
-                            message: "A fileDevices entry's 'directory' is immutable."
-                          - rule: "quantity(self.size).compareTo(quantity(oldSelf.size)) >= 0"
-                            message: "A fileDevices entry's 'size' can only be increased. Shrinking a Volume Group is not supported."
-                        properties:
-                          name:
-                            type: string
-                            maxLength: 63
-                            pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
-                            description: |
-                              Identifier of this file device within each Volume Group the set creates.
-                              Becomes part of the backing file's name on the node.
-                          directory:
-                            type: string
-                            maxLength: 4096
-                            # Same pattern the LVMVolumeGroup CRD enforces, and for the
-                            # same reason: `directory` cannot be changed afterwards, so a
-                            # malformed value accepted here would wedge every child
-                            # LVMVolumeGroup at once. '..' is left to the agent — RE2 has
-                            # no lookahead.
-                            pattern: '^/[^/]+(/[^/]+)*$'
-                            description: |
-                              Absolute directory on the node's filesystem where the backing file
-                              will be created. The agent creates the directory automatically
-                              (mkdir -p) if it does not exist; the path must be absolute and
-                              must not contain '..' segments.
-                          size:
-                            type: string
-                            maxLength: 32
-                            pattern: '^[0-9]+(Mi|Gi|Ti|Pi|Ei)$'
-                            description: |
-                              Size of the preallocated backing file. Must be at least 1Gi;
-                              a smaller value is rejected at admission, since `size` cannot be
-                              lowered afterwards.
-
-                              Only binary units are accepted; `1G` (10^9 bytes) is below the
-                              1Gi (2^30 bytes) minimum and is rejected at admission. The value
-                              must be a whole number of the unit it names — `1536Mi`, not
-                              `1.5Gi`; see the same field on LVMVolumeGroup for why.
                     thinPools:
                       type: array
                       description: |
