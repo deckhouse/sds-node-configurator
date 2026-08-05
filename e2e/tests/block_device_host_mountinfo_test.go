@@ -230,8 +230,8 @@ sudo -n rmdir %s 2>/dev/null || true`,
 		)
 		Expect(podErr).NotTo(HaveOccurred(), "failed to find the agent pod on node %s", targetNode)
 
-		By("Resolving the agent container init PID via crictl on the node")
-		agentPID, pidErr := findAgentPIDViaCrictl(ctx, cl, targetNode, agentPod)
+		By("Resolving the agent container init PID on the node")
+		agentPID, pidErr := findAgentPIDOnNode(ctx, cl, targetNode, agentPod)
 		Expect(pidErr).NotTo(HaveOccurred())
 
 		By("Mounting ext4 then wiping the on-disk signature while still mounted (FSType empty; mount remains)")
@@ -373,25 +373,48 @@ func readNodeProcMountInfo(ctx context.Context, cl *e2e.Cluster, node, pid strin
 	return framework.NodeExecChecked(ctx, cl, node, fmt.Sprintf("cat /proc/%s/mountinfo", shellQuote(pid)))
 }
 
-// findAgentPIDViaCrictl returns the container init PID in the host PID namespace.
-// Prefer crictl over a cgroup scan: unambiguous and not confused by nsenter -m helpers.
-func findAgentPIDViaCrictl(ctx context.Context, cl *e2e.Cluster, node string, agentPod *v1.Pod) (string, error) {
+// findAgentPIDOnNode returns the container init PID in the host PID namespace.
+// Prefers crictl (full path — Deckhouse installs it under /opt/deckhouse/bin,
+// which is outside sudoers secure_path). Falls back to a cgroup scan that
+// skips processes sharing the host mount namespace (nsenter -m helpers).
+func findAgentPIDOnNode(ctx context.Context, cl *e2e.Cluster, node string, agentPod *v1.Pod) (string, error) {
 	containerID, err := agentContainerID(agentPod, consts.SdsNodeConfiguratorAgentContainer)
 	if err != nil {
 		return "", err
 	}
 	cmd := fmt.Sprintf(
 		`set -eu
-sudo -n crictl inspect --output go-template --template '{{.info.pid}}' %s`,
+cid=%s
+crictl=
+for c in /opt/deckhouse/bin/crictl /usr/local/bin/crictl /usr/bin/crictl; do
+  if [ -x "$c" ]; then crictl=$c; break; fi
+done
+if [ -n "$crictl" ]; then
+  sudo -n "$crictl" inspect --output go-template --template '{{.info.pid}}' "$cid"
+  exit 0
+fi
+host_mnt=$(readlink /proc/1/ns/mnt 2>/dev/null || true)
+best=
+for p in /proc/[0-9]*; do
+  grep -Fqs "$cid" "$p/cgroup" 2>/dev/null || continue
+  pid=${p#/proc/}
+  mnt=$(readlink "$p/ns/mnt" 2>/dev/null || true)
+  [ -n "$host_mnt" ] && [ "$mnt" = "$host_mnt" ] && continue
+  if [ -z "$best" ] || [ "$pid" -lt "$best" ]; then
+    best=$pid
+  fi
+done
+[ -n "$best" ] || { echo "no host PID for container $cid (crictl missing; cgroup scan empty)" >&2; exit 1; }
+echo "$best"`,
 		shellQuote(containerID),
 	)
 	out, err := framework.NodeExecChecked(ctx, cl, node, cmd)
 	if err != nil {
-		return "", fmt.Errorf("crictl inspect pid for container %s: %w (output=%q)", containerID, err, out)
+		return "", fmt.Errorf("resolve pid for container %s: %w (output=%q)", containerID, err, out)
 	}
 	pid := strings.TrimSpace(out)
 	if _, err := strconv.Atoi(pid); err != nil {
-		return "", fmt.Errorf("invalid PID %q from crictl: %w", pid, err)
+		return "", fmt.Errorf("invalid PID %q for container %s: %w", pid, containerID, err)
 	}
 	return pid, nil
 }

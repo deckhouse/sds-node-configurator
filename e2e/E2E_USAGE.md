@@ -210,7 +210,8 @@ Real labels (from `tests/*.go`): `sds-node-configurator`, `block-device`,
 `regress`, and `stress-test`. The Makefile default is `GINKGO_LABEL_FILTER ?= !stress-test`
 (matching the storage-e2e reusable workflow default). The `host-pid` spec needs
 netlink discovery (`enableNetlinkBlockDeviceDiscovery` in `cluster_config*.yml`)
-and reads host mountinfo over SSH/`crictl` on the node.
+and reads host mountinfo over SSH on the node (agent PID via
+`/opt/deckhouse/bin/crictl` or a cgroup scan fallback).
 
 ```bash
 # smoke (default)
