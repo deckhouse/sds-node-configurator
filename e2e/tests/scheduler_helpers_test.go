@@ -25,6 +25,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -78,6 +79,10 @@ const (
 	// the annotation specs on the stand instead of failing to compile.
 	podExtraPVCsAnnotation = "scheduler.deckhouse.io/extra-pvcs"
 
+	// schedExtenderNoSpaceReason is the extender's own rejection text (filterNodeForLocalPVCs). Pinned
+	// as a substring because kube-scheduler wraps and aggregates per-node reasons.
+	schedExtenderNoSpaceReason = "does not have enough space for PVC"
+
 	// Timeouts. Poll interval is shared; each phase gets its own budget so a slow disk attach cannot
 	// eat the budget of a stuck PV.
 	schedPollInterval           = 5 * time.Second
@@ -88,6 +93,8 @@ const (
 	schedSCAppearTimeout        = 2 * time.Minute
 	schedLSCDeleteTimeout       = 5 * time.Minute
 	schedPodScheduledTimeout    = 3 * time.Minute
+	schedRejectTimeout          = 3 * time.Minute
+	schedRejectHoldWindow       = 30 * time.Second
 	schedPVCBoundTimeout        = 5 * time.Minute
 	schedPodRunningTimeout      = 5 * time.Minute
 	schedPodDeleteTimeout       = 3 * time.Minute
@@ -380,6 +387,41 @@ func schedulingFailureText(ctx context.Context, k8s client.Client, pod *corev1.P
 		fmt.Fprintf(&sb, "event %s: %s\n", ev.Reason, ev.Message)
 	}
 	return sb.String()
+}
+
+// expectPodRejectedByExtender asserts the Pod stays unscheduled *and* that the reason is the
+// extender's. The reason string is what separates "the extender rejected the node" from "the extender
+// was ignored": it is registered with ignorable: true, so a dead extender produces the same Pending.
+// extraAcceptedReasons widens the check when another component may legitimately reject first (in-tree
+// VolumeBinding on a stand with CSIStorageCapacity enabled).
+func expectPodRejectedByExtender(ctx context.Context, k8s client.Client, name string, extraAcceptedReasons ...string) {
+	key := client.ObjectKey{Namespace: metav1.NamespaceDefault, Name: name}
+	accepted := append([]string{schedExtenderNoSpaceReason}, extraAcceptedReasons...)
+
+	By(fmt.Sprintf("Expecting Pod %s to be rejected with one of %v", name, accepted))
+	Eventually(func(g Gomega) {
+		var pod corev1.Pod
+		g.Expect(k8s.Get(ctx, key, &pod)).To(Succeed())
+		g.Expect(pod.Spec.NodeName).To(BeEmpty(),
+			"Pod %s must stay unscheduled, but it landed on %s", name, pod.Spec.NodeName)
+
+		text := schedulingFailureText(ctx, k8s, &pod)
+		matchers := make([]types.GomegaMatcher, 0, len(accepted))
+		for _, reason := range accepted {
+			matchers = append(matchers, ContainSubstring(reason))
+		}
+		g.Expect(text).To(SatisfyAny(matchers...),
+			"the scheduling failure must name a capacity reason, got:\n%s", text)
+	}, schedRejectTimeout, schedPollInterval).Should(Succeed())
+
+	// The reason can show up during an early scheduling cycle; hold the window open to prove the Pod
+	// is not placed a moment later.
+	Consistently(func(g Gomega) {
+		var pod corev1.Pod
+		g.Expect(k8s.Get(ctx, key, &pod)).To(Succeed())
+		g.Expect(pod.Spec.NodeName).To(BeEmpty(),
+			"Pod %s was placed on %s after the rejection was observed", name, pod.Spec.NodeName)
+	}, schedRejectHoldWindow, schedPollInterval).Should(Succeed())
 }
 
 // ---=== Teardown ===--- //

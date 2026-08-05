@@ -146,6 +146,26 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 		waitPVCBoundAndPodRunning(ctx, k8sClient, pvcName, attachmentName)
 	})
 
+	It("blocks a Pod whose spec.volumes PVC fits nowhere", Label("sched-block-spec"), func() {
+		const (
+			pvcName     = schedPVCPrefix + "block-spec"
+			podName     = schedPodPrefix + "block-spec"
+			controlName = schedPodPrefix + "block-spec-control"
+		)
+
+		createPVC(ctx, k8sClient, pvcName, storageClassName, schedBlockPVCSize)
+		createPod(ctx, k8sClient, podName, podOpts{mountPVC: pvcName})
+		expectPodRejectedByExtender(ctx, k8sClient, podName)
+
+		// A/B control. Pending on its own proves nothing: the Pod could be stuck for an unrelated
+		// reason. The same Pod without our PVC must schedule. The two legs do not interfere: a full
+		// hard reject leaves no filtered node, so no reservation is created, and a Pod with no managed
+		// PVC short-circuits the filter into a no-op.
+		createPod(ctx, k8sClient, controlName, podOpts{})
+		Expect(waitPodScheduled(ctx, k8sClient, controlName)).NotTo(BeEmpty(),
+			"a Pod without our PVC must schedule — otherwise the Pending above is not about storage")
+	})
+
 	AfterAll(func() {
 		cleanupCtx := context.Background()
 
