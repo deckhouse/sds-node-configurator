@@ -106,8 +106,21 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 		deleteWorkload(ctx, k8sClient)
 	})
 
-	// Specs are added by Tasks 2-5. Until then the container has no It, so Ginkgo never runs BeforeAll
-	// or AfterAll — the suite stays green and nothing touches the cluster.
+	It("steers a Pod with a spec.volumes PVC to the only node that fits", Label("sched-steer-spec"), func() {
+		const (
+			pvcName = schedPVCPrefix + "steer-spec"
+			podName = schedPodPrefix + "steer-spec"
+		)
+
+		createPVC(ctx, k8sClient, pvcName, storageClassName, schedSteerPVCSize)
+		createPod(ctx, k8sClient, podName, podOpts{mountPVC: pvcName})
+
+		Expect(waitPodScheduled(ctx, k8sClient, podName)).To(Equal(bigNode),
+			"the extender must steer the Pod to %s: %s does not fit a %s VG on any other node",
+			bigNode, schedSteerPVCSize, schedSmallDiskSize)
+
+		waitPVCBoundAndPodRunning(ctx, k8sClient, pvcName, podName)
+	})
 
 	AfterAll(func() {
 		cleanupCtx := context.Background()

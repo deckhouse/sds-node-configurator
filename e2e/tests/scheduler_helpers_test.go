@@ -73,6 +73,11 @@ const (
 	schedExtenderNamespace      = "d8-sds-node-configurator"
 	schedExtenderDeploymentName = "sds-common-scheduler-extender"
 
+	// podExtraPVCsAnnotation mirrors consts.PodExtraPVCsAnnotation from the extender module. The e2e
+	// module does not import that module, so the key is duplicated here on purpose: a divergence fails
+	// the annotation specs on the stand instead of failing to compile.
+	podExtraPVCsAnnotation = "scheduler.deckhouse.io/extra-pvcs"
+
 	// Timeouts. Poll interval is shared; each phase gets its own budget so a slow disk attach cannot
 	// eat the budget of a stuck PV.
 	schedPollInterval           = 5 * time.Second
@@ -237,6 +242,144 @@ func waitExtenderRolledOut(ctx context.Context, k8s client.Client) {
 		g.Expect(dep.Status.Replicas).To(Equal(wanted), "surge Pod present: two reservation caches for one PVC")
 		g.Expect(dep.Status.UnavailableReplicas).To(BeZero(), "unavailable replicas")
 	}, schedExtenderRolloutTimeout, schedPollInterval).Should(Succeed())
+}
+
+// ---=== Workload ===--- //
+
+// podOpts covers all four Pod shapes the specs need: one that mounts a volume, a launcher that only
+// advertises a PVC through the annotation, an attachment Pod pinned to the launcher's node, and a
+// control Pod with none of the above.
+type podOpts struct {
+	mountPVC      string // mounted through spec.volumes; empty means the Pod has no volumes
+	annotationPVC string // advertised only via the extra-pvcs annotation
+	node          string // pin to this node with a hostname nodeSelector
+}
+
+func createPVC(ctx context.Context, k8s client.Client, name, storageClass, size string) {
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: metav1.NamespaceDefault},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse(size)},
+			},
+			StorageClassName: &storageClass,
+		},
+	}
+	By(fmt.Sprintf("Creating PVC %s (%s, storageClass %s)", name, size, storageClass))
+	Expect(k8s.Create(ctx, pvc)).To(Succeed(), "create PVC %s", name)
+}
+
+func createPod(ctx context.Context, k8s client.Client, name string, opts podOpts) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: metav1.NamespaceDefault},
+		Spec: corev1.PodSpec{
+			Tolerations: []corev1.Toleration{
+				{
+					Key:      "node-role.kubernetes.io/control-plane",
+					Operator: corev1.TolerationOpExists,
+					Effect:   corev1.TaintEffectNoSchedule,
+				},
+				{
+					Key:      "node-role.kubernetes.io/master",
+					Operator: corev1.TolerationOpExists,
+					Effect:   corev1.TaintEffectNoSchedule,
+				},
+			},
+			Containers: []corev1.Container{{
+				Name:    "test",
+				Image:   "busybox",
+				Command: []string{"sleep", "3600"},
+				// Tiny requests: these specs must be decided by storage capacity, never by CPU or memory.
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("10m"),
+						corev1.ResourceMemory: resource.MustParse("16Mi"),
+					},
+				},
+			}},
+		},
+	}
+
+	if opts.mountPVC != "" {
+		pod.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "data", MountPath: "/data"}}
+		pod.Spec.Volumes = []corev1.Volume{{
+			Name: "data",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: opts.mountPVC},
+			},
+		}}
+	}
+	if opts.annotationPVC != "" {
+		pod.Annotations = map[string]string{podExtraPVCsAnnotation: opts.annotationPVC}
+	}
+	if opts.node != "" {
+		pod.Spec.NodeSelector = map[string]string{corev1.LabelHostname: opts.node}
+	}
+
+	By(fmt.Sprintf("Creating Pod %s (mountPVC=%q annotationPVC=%q node=%q)",
+		name, opts.mountPVC, opts.annotationPVC, opts.node))
+	Expect(k8s.Create(ctx, pod)).To(Succeed(), "create Pod %s", name)
+}
+
+// waitPodScheduled returns the node kube-scheduler placed the Pod on.
+func waitPodScheduled(ctx context.Context, k8s client.Client, name string) string {
+	var node string
+	Eventually(func(g Gomega) {
+		var pod corev1.Pod
+		g.Expect(k8s.Get(ctx, client.ObjectKey{Namespace: metav1.NamespaceDefault, Name: name}, &pod)).To(Succeed())
+		g.Expect(pod.Spec.NodeName).NotTo(BeEmpty(),
+			"Pod %s is still unscheduled:\n%s", name, schedulingFailureText(ctx, k8s, &pod))
+		node = pod.Spec.NodeName
+	}, schedPodScheduledTimeout, schedPollInterval).Should(Succeed())
+	By(fmt.Sprintf("Pod %s scheduled on node %s", name, node))
+	return node
+}
+
+// waitPVCBoundAndPodRunning is the mechanical half of the steer assertion. Checking the node name
+// alone is weak: without the extender every node is equal and kube-scheduler draws lots, so on three
+// nodes the spec would pass by chance one time in three. A wrong node cannot produce the volume — the
+// requested LV does not fit a small VG — so the PVC stays Pending and the Pod never runs.
+func waitPVCBoundAndPodRunning(ctx context.Context, k8s client.Client, pvcName, podName string) {
+	Eventually(func(g Gomega) {
+		var pvc corev1.PersistentVolumeClaim
+		g.Expect(k8s.Get(ctx, client.ObjectKey{Namespace: metav1.NamespaceDefault, Name: pvcName}, &pvc)).To(Succeed())
+		g.Expect(pvc.Status.Phase).To(Equal(corev1.ClaimBound), "PVC %s phase", pvcName)
+	}, schedPVCBoundTimeout, schedPollInterval).Should(Succeed(),
+		"PVC %s must bind: a %s volume is only creatable on the big node", pvcName, schedSteerPVCSize)
+
+	Eventually(func(g Gomega) {
+		var pod corev1.Pod
+		g.Expect(k8s.Get(ctx, client.ObjectKey{Namespace: metav1.NamespaceDefault, Name: podName}, &pod)).To(Succeed())
+		g.Expect(pod.Status.Phase).To(Equal(corev1.PodRunning), "Pod %s phase", podName)
+	}, schedPodRunningTimeout, schedPollInterval).Should(Succeed(),
+		"Pod %s must reach Running — the volume was placed where it can actually be provisioned", podName)
+}
+
+// schedulingFailureText collects everything the cluster says about why a Pod is not scheduled: the
+// PodScheduled condition plus every event on the Pod. Used both in failure messages and by the
+// rejection assertion, because kube-scheduler surfaces extender reasons in either place.
+func schedulingFailureText(ctx context.Context, k8s client.Client, pod *corev1.Pod) string {
+	var sb strings.Builder
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == corev1.PodScheduled {
+			fmt.Fprintf(&sb, "condition PodScheduled=%s %s: %s\n", cond.Status, cond.Reason, cond.Message)
+		}
+	}
+
+	var events corev1.EventList
+	if err := k8s.List(ctx, &events, client.InNamespace(pod.Namespace)); err != nil {
+		fmt.Fprintf(&sb, "list events: %v\n", err)
+		return sb.String()
+	}
+	for i := range events.Items {
+		ev := &events.Items[i]
+		if ev.InvolvedObject.Kind != "Pod" || ev.InvolvedObject.Name != pod.Name {
+			continue
+		}
+		fmt.Fprintf(&sb, "event %s: %s\n", ev.Reason, ev.Message)
+	}
+	return sb.String()
 }
 
 // ---=== Teardown ===--- //
