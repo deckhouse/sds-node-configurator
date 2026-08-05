@@ -118,7 +118,9 @@ SDK `e2e.Connect`. В CI провижн/подключение делает reus
 | `netlink-discovery` | netlink-дискавери |
 | `lvmvolumegroup` | сценарии LVMVolumeGroup (в т.ч. thin-pool) |
 | `controller-restart` | устойчивость к рестарту контроллера |
-| `schedule-extender` (+ `small`/`medium`/`large`) | scheduler-extender |
+| `schedule-extender` | scheduler-extender: размещение и отказ |
+| `sched-steer-spec`, `sched-steer-annotation` | увод пода на ноду с местом (PVC из `spec.volumes` / из аннотации) |
+| `sched-block-spec`, `sched-block-annotation` | отказ в размещении, когда места нет нигде |
 | `regress` | вложенный регресс-кейс block-device-stable |
 | `stress-test` | стресс: максимум независимых VG на ноду (исключён по умолчанию) |
 
