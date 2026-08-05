@@ -166,6 +166,26 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 			"a Pod without our PVC must schedule — otherwise the Pending above is not about storage")
 	})
 
+	It("blocks a Pod whose annotation PVC fits nowhere", Label("sched-block-annotation"), func() {
+		const (
+			pvcName     = schedPVCPrefix + "block-annotation"
+			podName     = schedPodPrefix + "block-annotation"
+			controlName = schedPodPrefix + "block-annotation-control"
+		)
+
+		createPVC(ctx, k8sClient, pvcName, storageClassName, schedBlockPVCSize)
+		createPod(ctx, k8sClient, podName, podOpts{annotationPVC: pvcName})
+
+		// Strict on purpose, with no in-tree fallback reason: kube-scheduler's VolumeBinding does not
+		// know about this PVC at all, so the only component that can reject every node is the extender.
+		expectPodRejectedByExtender(ctx, k8sClient, podName)
+
+		// A/B control: the same Pod without the annotation must schedule.
+		createPod(ctx, k8sClient, controlName, podOpts{})
+		Expect(waitPodScheduled(ctx, k8sClient, controlName)).NotTo(BeEmpty(),
+			"a Pod without the annotation must schedule — otherwise the Pending above is not about storage")
+	})
+
 	AfterAll(func() {
 		cleanupCtx := context.Background()
 
