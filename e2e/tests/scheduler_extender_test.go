@@ -72,11 +72,8 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 
 		waitExtenderRolledOut(ctx, k8sClient)
 
-		By("Clearing leftovers from a previous run")
-		deleteWorkload(ctx, k8sClient)
-		cleanupLocalStorageClasses(ctx, cl, k8sClient)
-		cleanupLVMLogicalVolumes(ctx, k8sClient)
-		cleanupLVMVolumeGroups(ctx, k8sClient)
+		By("Checking that no objects from an earlier run are left behind")
+		assertNoLeftoversFromPreviousRun(ctx, cl, k8sClient)
 
 		runID := fmt.Sprintf("%d", time.Now().Unix())
 		var smallNodes []string

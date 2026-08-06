@@ -19,6 +19,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -73,6 +74,11 @@ const (
 
 	schedExtenderNamespace      = "d8-sds-node-configurator"
 	schedExtenderDeploymentName = "sds-common-scheduler-extender"
+
+	// schedCleanLeftoversEnv opts BeforeAll into wiping objects left by an earlier run instead of
+	// failing on them. For a deliberately reused stand; never set it in CI, where a dirty cluster is a
+	// finding. See assertNoLeftoversFromPreviousRun.
+	schedCleanLeftoversEnv = "E2E_SCHED_CLEAN_LEFTOVERS"
 
 	// podExtraPVCsAnnotation mirrors consts.PodExtraPVCsAnnotation from the extender module. The e2e
 	// module does not import that module, so the key is duplicated here on purpose: a divergence fails
@@ -554,6 +560,91 @@ func cleanupLocalStorageClasses(ctx context.Context, cl *e2e.Cluster, k8s client
 		err := k8s.Get(ctx, client.ObjectKey{Name: localStorageClassName}, &sc)
 		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "StorageClass %s still present", localStorageClassName)
 	}, schedSCAppearTimeout, schedPollInterval).Should(Succeed())
+}
+
+// assertNoLeftoversFromPreviousRun fails when the cluster still holds objects this suite created
+// earlier. BeforeAll deliberately does not clean them up.
+//
+// A dirty cluster has exactly three causes, and none of them should be erased silently: AfterAll was
+// killed before it could run (CI job timeout, SIGKILL, Ctrl-C), AfterAll deliberately refused the
+// destructive teardown because a PersistentVolume was still deleting (see the leftoverPVs guard), or
+// AfterAll itself is broken. Wiping the evidence at the start of the next run is how the third one
+// stays invisible forever — the same reason this suite never strips finalizers.
+//
+// CI provisions a fresh cluster per run (e2e/keep-cluster is opt-in), so on the default path there is
+// nothing to find and this costs a handful of LIST calls. For a deliberately reused stand, set
+// E2E_SCHED_CLEAN_LEFTOVERS=1 to wipe instead of fail — opt-in, and loud about what it removed.
+func assertNoLeftoversFromPreviousRun(ctx context.Context, cl *e2e.Cluster, k8s client.Client) {
+	var found []string
+
+	var pods corev1.PodList
+	Expect(k8s.List(ctx, &pods, client.InNamespace(metav1.NamespaceDefault))).To(Succeed(), "list Pods")
+	for i := range pods.Items {
+		if strings.HasPrefix(pods.Items[i].Name, schedPodPrefix) {
+			found = append(found, "Pod "+pods.Items[i].Name)
+		}
+	}
+
+	var pvcs corev1.PersistentVolumeClaimList
+	Expect(k8s.List(ctx, &pvcs, client.InNamespace(metav1.NamespaceDefault))).To(Succeed(), "list PVCs")
+	for i := range pvcs.Items {
+		if strings.HasPrefix(pvcs.Items[i].Name, schedPVCPrefix) {
+			found = append(found, "PVC "+pvcs.Items[i].Name)
+		}
+	}
+
+	pvs, pvErr := leftoverPVs(ctx, k8s)
+	Expect(pvErr).NotTo(HaveOccurred(), "list PersistentVolumes")
+	for i := range pvs {
+		found = append(found, fmt.Sprintf("PV %s (phase=%s)", pvs[i].Name, pvs[i].Status.Phase))
+	}
+
+	var lvgs v1alpha1.LVMVolumeGroupList
+	Expect(k8s.List(ctx, &lvgs)).To(Succeed(), "list LVMVolumeGroups")
+	for i := range lvgs.Items {
+		if strings.HasPrefix(lvgs.Items[i].Name, lvmVGNamePrefix) {
+			found = append(found, "LVMVolumeGroup "+lvgs.Items[i].Name)
+		}
+	}
+
+	var llvs v1alpha1.LVMLogicalVolumeList
+	Expect(k8s.List(ctx, &llvs)).To(Succeed(), "list LVMLogicalVolumes")
+	for i := range llvs.Items {
+		if strings.HasPrefix(llvs.Items[i].Spec.LVMVolumeGroupName, lvmVGNamePrefix) {
+			found = append(found, "LVMLogicalVolume "+llvs.Items[i].Name)
+		}
+	}
+
+	lscList, lscErr := cl.Dynamic().Resource(localStorageClassGVR).List(ctx, metav1.ListOptions{})
+	if !apierrors.IsNotFound(lscErr) { // CRD absent means sds-local-volume is not installed
+		Expect(lscErr).NotTo(HaveOccurred(), "list LocalStorageClasses")
+		for i := range lscList.Items {
+			if name := lscList.Items[i].GetName(); strings.HasPrefix(name, "e2e-") {
+				found = append(found, "LocalStorageClass "+name)
+			}
+		}
+	}
+
+	if len(found) == 0 {
+		return
+	}
+
+	if os.Getenv(schedCleanLeftoversEnv) != "" {
+		By(fmt.Sprintf("%s is set: removing %d leftover object(s) from an earlier run instead of failing: %v",
+			schedCleanLeftoversEnv, len(found), found))
+		deleteWorkload(ctx, k8s)
+		cleanupLocalStorageClasses(ctx, cl, k8s)
+		cleanupLVMLogicalVolumes(ctx, k8s)
+		cleanupLVMVolumeGroups(ctx, k8s)
+		return
+	}
+
+	Fail(fmt.Sprintf(
+		"the cluster still holds %d object(s) from an earlier run of this suite:\n  %s\n\n"+
+			"This suite does not clean them up on purpose — their presence means the previous run's AfterAll "+
+			"was killed, refused teardown because a PersistentVolume was still deleting, or is broken, and that "+
+			"is worth looking at rather than erasing. Investigate, or re-run with %s=1 to wipe them first.",
+		len(found), strings.Join(found, "\n  "), schedCleanLeftoversEnv))
 }
 
 // leftoverPVs lists PersistentVolumes still bound to our StorageClass. PVs are cluster-scoped and
