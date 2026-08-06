@@ -199,7 +199,7 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 		// AfterEach's deleteWorkload can itself fail (e.g. its 5-minute PV wait times out) and AfterAll
 		// still runs. Deleting the LVMVolumeGroups out from under a PV that has not finished deleting
 		// leaves csi-provisioner retrying DeleteVolume against a VG that no longer exists — a retry that
-		// can never succeed, wedging the PV's finalizer and every later run's BeforeAll cleanup forever.
+		// can never succeed, wedging the PV's finalizer and, through it, every later run of this suite.
 		// Force-finalizing is not the answer (that is the bug class this suite exists to catch), so
 		// instead: refuse the whole destructive sequence and fail loudly.
 		if left, err := leftoverPVs(cleanupCtx, k8sClient); err != nil {
