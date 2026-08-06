@@ -33,7 +33,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -223,38 +222,26 @@ func attachDiskWithLVG(
 
 // createLocalStorageClass creates one Thick WaitForFirstConsumer LocalStorageClass over every LVG and
 // waits until its controller has produced the derived StorageClass.
+//
+// Creation and the "Created" wait come from the storage-e2e SDK; only the shape assertion below is
+// ours. The SDK builds the same object, so hand-rolling it here through the dynamic client would just
+// be a second copy to keep in sync with the CRD.
 func createLocalStorageClass(ctx context.Context, cl *e2e.Cluster, k8s client.Client, lvgNames []string) string {
-	lvmVolumeGroups := make([]any, 0, len(lvgNames))
-	for _, name := range lvgNames {
-		lvmVolumeGroups = append(lvmVolumeGroups, map[string]any{"name": name})
-	}
-
-	lsc := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "storage.deckhouse.io/v1alpha1",
-		"kind":       "LocalStorageClass",
-		"metadata":   map[string]any{"name": localStorageClassName},
-		"spec": map[string]any{
-			"lvm": map[string]any{
-				"lvmVolumeGroups": lvmVolumeGroups,
-				"type":            schedLvmTypeThick,
-			},
-			"reclaimPolicy":     "Delete",
-			"volumeBindingMode": "WaitForFirstConsumer",
-		},
-	}}
-
-	dynClient := cl.Dynamic()
 	By(fmt.Sprintf("Creating LocalStorageClass %s over LVMVolumeGroups %v", localStorageClassName, lvgNames))
-	_, createErr := dynClient.Resource(localStorageClassGVR).Create(ctx, lsc, metav1.CreateOptions{})
-	Expect(createErr).NotTo(HaveOccurred(), "create LocalStorageClass %s", localStorageClassName)
+	Expect(kubernetes.CreateLocalStorageClass(ctx, cl.RESTConfig(), kubernetes.LocalStorageClassConfig{
+		Name:              localStorageClassName,
+		LVMVolumeGroups:   lvgNames,
+		LVMType:           schedLvmTypeThick,
+		ReclaimPolicy:     "Delete",
+		VolumeBindingMode: "WaitForFirstConsumer",
+	})).To(Succeed(), "create LocalStorageClass %s", localStorageClassName)
 
-	Eventually(func(g Gomega) {
-		obj, err := dynClient.Resource(localStorageClassGVR).Get(ctx, localStorageClassName, metav1.GetOptions{})
-		g.Expect(err).NotTo(HaveOccurred())
-		phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
-		g.Expect(phase).To(Equal("Created"), "LocalStorageClass phase")
-	}, schedLSCCreatedTimeout, schedPollInterval).Should(Succeed())
+	Expect(kubernetes.WaitForLocalStorageClassCreated(ctx, cl.RESTConfig(), localStorageClassName, schedLSCCreatedTimeout)).
+		To(Succeed(), "LocalStorageClass %s must reach phase Created", localStorageClassName)
 
+	// The derived StorageClass is what the extender actually keys off: filter.go recognizes our volumes
+	// by provisioner and the lvm-type parameter, so asserting the shape here is what proves the fixture
+	// built something the extender will treat as ours, not just an object with the right name.
 	Eventually(func(g Gomega) {
 		var sc storagev1.StorageClass
 		g.Expect(k8s.Get(ctx, client.ObjectKey{Name: localStorageClassName}, &sc)).To(Succeed())
