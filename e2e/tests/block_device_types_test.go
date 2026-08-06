@@ -184,6 +184,9 @@ var _ = Describe("Block device types matrix",
 					Expect(bdCR.Status.Consumable).To(BeTrue())
 				}
 
+				By(fmt.Sprintf("[%s] assert BlockDevice %s is stable and selectable by kubernetes.io/metadata.name", tag, bdName))
+				bdtypesAssertBDSelectable(ctx, k8sClient, bdName)
+
 				By(fmt.Sprintf("[%s] create LVMVolumeGroup on BlockDevice %s (%s)", tag, bdName, bdPath))
 				lvgName, vgName := createReadyLVG(runID, tag, []string{bdName})
 
@@ -199,12 +202,11 @@ var _ = Describe("Block device types matrix",
 
 			Entry("disk", "disk", "disk", nil),
 
-			Entry("mpath (dm-multipath)", "mpath", "mpath",
-				func(runID, backingPath string) string {
-					mapperName := fmt.Sprintf("e2e-mpath-%s", runID)
-					mapper := bdtypesCreateMpath(ctx, cl, targetNode, backingPath, mapperName)
-					DeferCleanup(func() { bdtypesRemoveMpath(ctx, cl, targetNode, mapperName) })
-					return mapper
+			Entry("mpath (multipathd)", "mpath", "mpath",
+				func(_runID, backingPath string) string {
+					m := bdtypesCreateMpath(ctx, cl, targetNode, backingPath)
+					DeferCleanup(func() { bdtypesRemoveMpath(ctx, cl, targetNode, m) })
+					return m.MapperPath
 				}),
 
 			Entry("crypt (opened LUKS)", "crypt", "crypt",
@@ -286,7 +288,10 @@ var _ = Describe("Block device types matrix",
 				}),
 		)
 
-		It("can mix supported device types (disk + mpath) in one LVMVolumeGroup", func() {
+		// Mix uses disk+crypt (both already proven Ready in the table above).
+		// disk+mpath is intentionally avoided here: mpath setup is environment-
+		// sensitive (multipathd/WWID) and is covered by the dedicated mpath Entry.
+		It("can mix supported device types (disk + crypt) in one LVMVolumeGroup", func() {
 			runID := fmt.Sprintf("%d", time.Now().UnixNano())
 
 			By("Attach first plain disk (type=disk)")
@@ -295,31 +300,33 @@ var _ = Describe("Block device types matrix",
 			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: diskBD.Name}, &diskCR)).To(Succeed())
 			Expect(diskCR.Status.Type).To(Equal("disk"))
 
-			By("Attach second disk and wrap it as mpath")
-			_, _, backingPath := attachPlainDisk(runID, "mix-mpath")
+			By("Attach second disk and open it as LUKS crypt")
+			_, _, backingPath := attachPlainDisk(runID, "mix-crypt")
 			before, err := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
 			Expect(err).NotTo(HaveOccurred())
 
-			mapperName := fmt.Sprintf("e2e-mpath-mix-%s", runID)
-			mapperPath := bdtypesCreateMpath(ctx, cl, targetNode, backingPath, mapperName)
-			DeferCleanup(func() { bdtypesRemoveMpath(ctx, cl, targetNode, mapperName) })
+			mapperName := fmt.Sprintf("e2e-luks-mix-%s", runID)
+			mapperPath := bdtypesOpenLUKS(ctx, cl, targetNode, backingPath, mapperName)
+			DeferCleanup(func() { bdtypesCloseLUKS(ctx, cl, targetNode, mapperName, backingPath) })
 			framework.TriggerLVMDiscovery(ctx, cl, targetNode)
 
-			mpathBD, waitErr := framework.WaitNewConsumableBlockDevice(
+			cryptBD, waitErr := framework.WaitNewConsumableBlockDevice(
 				ctx, cl.RESTConfig(), targetNode, before, bdtypesDiscoveryTimeout)
 			Expect(waitErr).NotTo(HaveOccurred())
-			DeferCleanup(func() { forceDeleteBlockDevicesByNames(ctx, k8sClient, []string{mpathBD.Name}) })
+			DeferCleanup(func() { forceDeleteBlockDevicesByNames(ctx, k8sClient, []string{cryptBD.Name}) })
 
-			var mpathCR v1alpha1.BlockDevice
-			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: mpathBD.Name}, &mpathCR)).To(Succeed())
-			Expect(mpathCR.Status.Type).To(Equal("mpath"))
-			Expect(mpathCR.Status.Path).To(Equal(mapperPath))
+			var cryptCR v1alpha1.BlockDevice
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: cryptBD.Name}, &cryptCR)).To(Succeed())
+			Expect(cryptCR.Status.Type).To(Equal("crypt"))
+			Expect(cryptCR.Status.Path).To(Equal(mapperPath))
+			bdtypesAssertBDSelectable(ctx, k8sClient, cryptBD.Name)
+			bdtypesAssertBDSelectable(ctx, k8sClient, diskBD.Name)
 
-			By("Create LVMVolumeGroup selecting both disk and mpath BlockDevices")
-			lvgName, vgName := createReadyLVG(runID, "mix", []string{diskBD.Name, mpathBD.Name})
+			By("Create LVMVolumeGroup selecting both disk and crypt BlockDevices")
+			lvgName, vgName := createReadyLVG(runID, "mix", []string{diskBD.Name, cryptBD.Name})
 
 			lvgextWaitBlockDeviceLinkedToVG(ctx, k8sClient, diskBD.Name, vgName, lvgextBDLinkageTimeout)
-			lvgextWaitBlockDeviceLinkedToVG(ctx, k8sClient, mpathBD.Name, vgName, lvgextBDLinkageTimeout)
+			lvgextWaitBlockDeviceLinkedToVG(ctx, k8sClient, cryptBD.Name, vgName, lvgextBDLinkageTimeout)
 
 			var ready v1alpha1.LVMVolumeGroup
 			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: lvgName}, &ready)).To(Succeed())
@@ -327,8 +334,8 @@ var _ = Describe("Block device types matrix",
 				"mixed LVG should list both BlockDevices")
 			devices := lvgextDevicesOnLVGNode(&ready, targetNode)
 			Expect(devices).To(HaveKey(diskBD.Name))
-			Expect(devices).To(HaveKey(mpathBD.Name))
-			GinkgoWriter.Printf("    mix LVG Ready: disk=%s mpath=%s VGSize=%s\n",
-				diskBD.Name, mpathBD.Name, ready.Status.VGSize.String())
+			Expect(devices).To(HaveKey(cryptBD.Name))
+			GinkgoWriter.Printf("    mix LVG Ready: disk=%s crypt=%s VGSize=%s\n",
+				diskBD.Name, cryptBD.Name, ready.Status.VGSize.String())
 		})
 	})

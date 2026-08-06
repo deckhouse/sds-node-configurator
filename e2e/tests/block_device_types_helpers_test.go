@@ -49,69 +49,138 @@ func bdtypesRequireCmd(ctx context.Context, cl *e2e.Cluster, node, cmd string) {
 	}
 }
 
-// bdtypesCreateMpath wraps backingPath in a single-path device-mapper multipath
-// target (not a linear map). A linear dm device with UUID prefix mpath- is
-// enough for BD discovery (lsblk TYPE=mpath) but LVM refuses to pvcreate on it,
-// leaving LVMVolumeGroup Pending — the table must use the multipath target.
-// Returns the mapper path (/dev/mapper/<mapperName>).
-func bdtypesCreateMpath(ctx context.Context, cl *e2e.Cluster, node, backingPath, mapperName string) string {
+// bdtypesMpath holds a multipath device created via multipathd (not hand-rolled
+// dmsetup). Hand-rolled mpath-* maps are discovered briefly but then disappear
+// from the agent (multipathd fights them / LVM rejects them), which surfaces as
+// LVMVolumeGroup ValidationFailed "none of specified BlockDevices were found".
+type bdtypesMpath struct {
+	MapperPath string
+	WWID       string
+}
+
+// bdtypesCreateMpath forces a single-path multipath map for backingPath through
+// multipathd (wwids file + reconfigure). Skips when multipath/WWID is unavailable.
+func bdtypesCreateMpath(ctx context.Context, cl *e2e.Cluster, node, backingPath string) bdtypesMpath {
 	GinkgoHelper()
-	bdtypesRequireCmd(ctx, cl, node, "dmsetup")
+	bdtypesRequireCmd(ctx, cl, node, "multipath")
 
 	script := fmt.Sprintf(`set -eu
 DEV=%s
-NAME=%s
-UUID=mpath-e2e-%s
 if [ ! -b "$DEV" ]; then echo "backing device missing: $DEV" >&2; exit 1; fi
-if [ -e "/dev/mapper/$NAME" ]; then echo "mapper already exists: $NAME" >&2; exit 1; fi
-# dm-multipath target requires the module; ignore failure if already built-in.
-sudo -n modprobe dm-multipath 2>/dev/null || sudo -n modprobe dm_multipath 2>/dev/null || true
-# Drop any leftover signature so LVM/udev see a clean path under the map.
-sudo -n wipefs -a -f "$DEV" >/dev/null 2>&1 || true
-SZ=$(sudo -n blockdev --getsz "$DEV")
-MAJ=$((0x$(stat -c '%%t' "$DEV")))
-MIN=$((0x$(stat -c '%%T' "$DEV")))
-# Single-path multipath table (round-robin, one path group, one path).
-# Format: multipath <nfeatures> <nhandler> <npg> <pg_init> <selector> <nselargs> <npaths> <npathargs> <maj:min> <patharg>
-TABLE="0 $SZ multipath 0 0 1 1 round-robin 0 1 1 ${MAJ}:${MIN} 1"
-echo "$TABLE" | sudo -n dmsetup create "$NAME" --uuid "$UUID"
-sudo -n udevadm settle || true
-sudo -n udevadm trigger --action=change --subsystem-match=block || true
-# Confirm kernel loaded a multipath (not linear) table and TYPE looks like mpath.
-TABLE_OUT=$(sudo -n dmsetup table "$NAME")
-echo "$TABLE_OUT" | grep -q ' multipath ' || {
-  echo "expected multipath table, got: $TABLE_OUT" >&2
-  sudo -n dmsetup remove -f "$NAME" >/dev/null 2>&1 || true
-  exit 1
-}
-TYPE=$(lsblk -dn -o TYPE "/dev/mapper/$NAME" 2>/dev/null || true)
-if [ "$TYPE" != "mpath" ]; then
-  echo "lsblk TYPE for /dev/mapper/$NAME is '$TYPE' (want mpath); dm UUID/table may be wrong" >&2
-  # Still return the mapper — agent udev path may classify via DM_UUID even if lsblk differs.
+
+# multipathd must own the map; otherwise it tears down foreign mpath-* dm devices.
+if ! sudo -n systemctl is-active --quiet multipathd 2>/dev/null; then
+  sudo -n systemctl start multipathd 2>/dev/null || true
+  sleep 2
 fi
-test -b "/dev/mapper/$NAME"
-printf '%%s\n' "/dev/mapper/$NAME"
-`, shellQuote(backingPath), shellQuote(mapperName), shellQuote(mapperName))
+if ! sudo -n systemctl is-active --quiet multipathd 2>/dev/null; then
+  echo "multipathd is not running and could not be started" >&2
+  exit 2
+fi
+
+sudo -n wipefs -a -f "$DEV" >/dev/null 2>&1 || true
+
+WWID=""
+for cmd in \
+  "/lib/udev/scsi_id -g -u" \
+  "/usr/lib/udev/scsi_id -g -u" \
+  "scsi_id -g -u" \
+  "multipath -u"
+do
+  set +e
+  WWID=$(sudo -n $cmd "$DEV" 2>/dev/null | head -1 | tr -d '[:space:]')
+  set -e
+  if [ -n "$WWID" ]; then break; fi
+done
+if [ -z "$WWID" ]; then
+  WWID=$(sudo -n udevadm info --query=property --name="$DEV" 2>/dev/null | sed -n 's/^ID_SERIAL=//p' | head -1 | tr -d '[:space:]' || true)
+fi
+if [ -z "$WWID" ]; then
+  echo "cannot determine WWID for $DEV (scsi_id/multipath -u/ID_SERIAL empty)" >&2
+  exit 2
+fi
+
+sudo -n multipath -a "$WWID" >/dev/null
+sudo -n multipath -r >/dev/null 2>&1 || sudo -n multipathd reconfigure >/dev/null 2>&1 || true
+sudo -n udevadm settle || true
+
+MAPPER=""
+for _ in $(seq 1 20); do
+  LINE=$(sudo -n multipath -l "$WWID" 2>/dev/null | head -1 || true)
+  if [ -n "$LINE" ]; then
+    NAME=$(printf '%%s\n' "$LINE" | awk '{print $1}')
+    if [ -n "$NAME" ] && [ -b "/dev/mapper/$NAME" ]; then
+      MAPPER="/dev/mapper/$NAME"
+      break
+    fi
+  fi
+  # Fallback: match dm UUID containing the WWID.
+  for p in /dev/mapper/mpath* /dev/mapper/*; do
+    [ -b "$p" ] || continue
+    uuid=$(sudo -n dmsetup info -C --noheadings -o uuid -- "$p" 2>/dev/null || true)
+    case "$uuid" in
+      *"$WWID"*) MAPPER=$p; break ;;
+    esac
+  done
+  if [ -n "$MAPPER" ]; then break; fi
+  sleep 1
+done
+
+if [ -z "$MAPPER" ] || [ ! -b "$MAPPER" ]; then
+  echo "multipath map for WWID=$WWID not found after multipath -a/-r" >&2
+  sudo -n multipath -ll >&2 || true
+  exit 1
+fi
+
+TYPE=$(lsblk -dn -o TYPE "$MAPPER" 2>/dev/null || true)
+FS_PARENT=$(lsblk -dn -o FSTYPE "$DEV" 2>/dev/null || true)
+printf 'mapper=%%s wwid=%%s lsblk_type=%%s parent_fstype=%%s\n' "$MAPPER" "$WWID" "$TYPE" "$FS_PARENT" >&2
+printf '%%s\t%%s\n' "$MAPPER" "$WWID"
+`, shellQuote(backingPath))
 
 	out, err := framework.NodeExecChecked(ctx, cl, node, script)
-	Expect(err).NotTo(HaveOccurred(), "dmsetup multipath create failed: %s", out)
-	mapper := strings.TrimSpace(out)
+	if err != nil {
+		msg := fmt.Sprintf("multipath setup failed: %v; output=%s", err, out)
+		if strings.Contains(out, "cannot determine WWID") ||
+			strings.Contains(out, "multipathd is not running") ||
+			strings.Contains(msg, "exit 2") {
+			Skip(msg)
+		}
+		Expect(err).NotTo(HaveOccurred(), msg)
+	}
+
+	// Last non-empty line is "mapper\twwid"; earlier lines may be diagnostics on stderr merged by SSH.
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	last := strings.TrimSpace(lines[len(lines)-1])
+	parts := strings.Split(last, "\t")
+	Expect(parts).To(HaveLen(2), "expected mapper\\twwid, got %q (full output=%q)", last, out)
+	mapper, wwid := parts[0], parts[1]
 	Expect(mapper).To(HavePrefix("/dev/mapper/"))
-	return mapper
+	Expect(wwid).NotTo(BeEmpty())
+	GinkgoWriter.Printf("    multipath ready: mapper=%s wwid=%s\n", mapper, wwid)
+	return bdtypesMpath{MapperPath: mapper, WWID: wwid}
 }
 
-// bdtypesRemoveMpath removes a dmsetup multipath mapper created by bdtypesCreateMpath.
-func bdtypesRemoveMpath(ctx context.Context, cl *e2e.Cluster, node, mapperName string) {
+// bdtypesRemoveMpath tears down a multipathd-managed map and forgets its WWID.
+func bdtypesRemoveMpath(ctx context.Context, cl *e2e.Cluster, node string, m bdtypesMpath) {
+	if m.MapperPath == "" && m.WWID == "" {
+		return
+	}
 	script := fmt.Sprintf(`set -eu
-NAME=%s
-if [ -e "/dev/mapper/$NAME" ] || sudo -n dmsetup info "$NAME" >/dev/null 2>&1; then
-  # Best-effort: wipe LVM/PV labels from the map before remove so the backing disk is reusable.
-  sudo -n wipefs -a -f "/dev/mapper/$NAME" >/dev/null 2>&1 || true
-  sudo -n dmsetup remove -f "$NAME" || sudo -n dmsetup remove "$NAME" || true
+MAPPER=%s
+WWID=%s
+if [ -n "$MAPPER" ] && [ -b "$MAPPER" ]; then
+  sudo -n wipefs -a -f "$MAPPER" >/dev/null 2>&1 || true
+  sudo -n multipath -f "$MAPPER" >/dev/null 2>&1 || true
 fi
-`, shellQuote(mapperName))
+if [ -n "$WWID" ]; then
+  sudo -n multipath -f "$WWID" >/dev/null 2>&1 || true
+  sudo -n multipath -w "$WWID" >/dev/null 2>&1 || true
+fi
+sudo -n multipath -r >/dev/null 2>&1 || true
+`, shellQuote(m.MapperPath), shellQuote(m.WWID))
 	if out, err := framework.NodeExecChecked(ctx, cl, node, script); err != nil {
-		GinkgoWriter.Printf("bdtypesRemoveMpath %s: %v (%s)\n", mapperName, err, out)
+		GinkgoWriter.Printf("bdtypesRemoveMpath %s (%s): %v (%s)\n", m.MapperPath, m.WWID, err, out)
 	}
 }
 
@@ -217,6 +286,30 @@ fi
 	if out, err := framework.NodeExecChecked(ctx, cl, node, script); err != nil {
 		GinkgoWriter.Printf("bdtypesRemoveLoop %s: %v (%s)\n", loopPath, err, out)
 	}
+}
+
+// bdtypesAssertBDSelectable checks the BlockDevice keeps the metadata.name label
+// the LVMVolumeGroup selector uses, and stays present for a short stability window
+// (guards against multipath maps that the agent discovers then immediately drops).
+func bdtypesAssertBDSelectable(ctx context.Context, cl client.Client, bdName string) {
+	GinkgoHelper()
+	const metaNameLabel = "kubernetes.io/metadata.name"
+
+	var bd v1alpha1.BlockDevice
+	Expect(cl.Get(ctx, client.ObjectKey{Name: bdName}, &bd)).To(Succeed(),
+		"BlockDevice %s vanished before LVMVolumeGroup create", bdName)
+	Expect(bd.Labels).To(HaveKeyWithValue(metaNameLabel, bdName),
+		"BlockDevice %s must have label %s=%s for BlockDeviceSelector; labels=%v",
+		bdName, metaNameLabel, bdName, bd.Labels)
+	Expect(bd.Status.Consumable).To(BeTrue(), "BlockDevice %s must stay consumable", bdName)
+
+	Consistently(func(g Gomega) {
+		var cur v1alpha1.BlockDevice
+		g.Expect(cl.Get(ctx, client.ObjectKey{Name: bdName}, &cur)).To(Succeed(),
+			"BlockDevice %s disappeared during stability window (mpath map unstable?)", bdName)
+		g.Expect(cur.Labels).To(HaveKeyWithValue(metaNameLabel, bdName))
+		g.Expect(cur.Status.Consumable).To(BeTrue())
+	}, 30*time.Second, 5*time.Second).Should(Succeed())
 }
 
 // bdtypesAssertNoBDForPath asserts that no BlockDevice CR on node points at path
