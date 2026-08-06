@@ -114,7 +114,7 @@ SDK `e2e.Connect`. В CI провижн/подключение делает reus
 |-------|-----------------|
 | `sds-node-configurator` | почти все спеки модуля |
 | `block-device`, `discovery` | обнаружение BlockDevice |
-| `device-types` | матрица типов устройств (disk/mpath/crypt/loop/LUKS) + LVG |
+| `device-types` | матрица типов устройств (disk/mpath/crypt/loop/LUKS) + LVG; только этот спек |
 | `block-device-stable` | стабильность BlockDevice по стадиям |
 | `netlink-discovery` | netlink-дискавери |
 | `lvmvolumegroup` | сценарии LVMVolumeGroup (в т.ч. thin-pool) |
@@ -164,6 +164,9 @@ reusable-workflow) и тем самым отменяет это разделен
 ```bash
 # подмножество:
 make test-go GINKGO_LABEL_FILTER='discovery || block-device'
+# только матрица типов устройств:
+make test-device-types
+#   == go test ... -ginkgo.label-filter=device-types
 # только стресс:
 make test-stress
 # всё вместе:

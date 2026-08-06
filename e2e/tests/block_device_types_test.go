@@ -37,8 +37,12 @@ import (
 // Device-type matrix: discovery + LVG lifecycle for supported types (disk,
 // mpath, opened crypt/LUKS), filtering of unsupported types (loop, closed
 // LUKS), and an optional mix of supported devices in one LVG.
+// Label device-types is exclusive: run only this suite via
+//   make test-device-types
+//   go test ... -ginkgo.label-filter=device-types
+//   PR label e2e/label:device-types
 var _ = Describe("Block device types matrix",
-	Label("sds-node-configurator", "block-device", "lvmvolumegroup", "device-types"),
+	Label("sds-node-configurator", "device-types"),
 	Ordered, ContinueOnFailure, func() {
 
 		var (

@@ -31,6 +31,11 @@ test-stress: ## Только max-VG stress (label stress-test)
 	go test -v -count=1 -timeout 240m ./tests/ -run '^TestSdsNodeConfigurator$$' \
 		-ginkgo.label-filter=stress-test
 
+.PHONY: test-device-types
+test-device-types: ## Только матрица типов устройств (label device-types)
+	go test -v -count=1 -timeout "$(E2E_TEST_TIMEOUT)" ./tests/ -run '^TestSdsNodeConfigurator$$' \
+		-ginkgo.label-filter=device-types
+
 .PHONY: test-focus
 test-focus: ## Run by test name (make test-focus FOCUS="TestSdsNodeConfigurator")
 	@if [ -z "$(FOCUS)" ]; then \

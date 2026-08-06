@@ -207,15 +207,20 @@ ginkgo run --label-filter='!stress-test' --focus='BlockDevice discovery' ./tests
 Real labels (from `tests/*.go`): `sds-node-configurator`, `block-device`,
 `discovery`, `block-device-stable`, `host-pid`, `netlink-discovery`, `lvmvolumegroup`,
 `controller-restart`, `schedule-extender` (with `small`/`medium`/`large`),
-`regress`, and `stress-test`. The Makefile default is `GINKGO_LABEL_FILTER ?= !stress-test`
-(matching the storage-e2e reusable workflow default). The `host-pid` spec requires
-`E2E_DEBUG_IMAGE` (see the suite-specific env table below).
+`regress`, `device-types`, and `stress-test`. The Makefile default is
+`GINKGO_LABEL_FILTER ?= !stress-test` (matching the storage-e2e reusable
+workflow default). The `host-pid` spec skips unless `E2E_DEBUG_IMAGE` is set
+(see the suite-specific env table below).
 
 ```bash
 # smoke (default)
 make test
 # a subset
 make test-go GINKGO_LABEL_FILTER='lvmvolumegroup'
+# device-types matrix only (label device-types)
+make test-device-types
+#   == go test ... -ginkgo.label-filter=device-types
+#   CI PR label: e2e/label:device-types
 # stress only (label stress-test)
 make test-stress
 #   == go test ... -ginkgo.label-filter=stress-test   (timeout 240m)
