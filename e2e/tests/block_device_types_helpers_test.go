@@ -49,8 +49,11 @@ func bdtypesRequireCmd(ctx context.Context, cl *e2e.Cluster, node, cmd string) {
 	}
 }
 
-// bdtypesCreateMpath wraps backingPath in a single-path dm-multipath device
-// (dmsetup linear table + UUID prefix mpath-). Returns the mapper path.
+// bdtypesCreateMpath wraps backingPath in a single-path device-mapper multipath
+// target (not a linear map). A linear dm device with UUID prefix mpath- is
+// enough for BD discovery (lsblk TYPE=mpath) but LVM refuses to pvcreate on it,
+// leaving LVMVolumeGroup Pending — the table must use the multipath target.
+// Returns the mapper path (/dev/mapper/<mapperName>).
 func bdtypesCreateMpath(ctx context.Context, cl *e2e.Cluster, node, backingPath, mapperName string) string {
 	GinkgoHelper()
 	bdtypesRequireCmd(ctx, cl, node, "dmsetup")
@@ -61,26 +64,49 @@ NAME=%s
 UUID=mpath-e2e-%s
 if [ ! -b "$DEV" ]; then echo "backing device missing: $DEV" >&2; exit 1; fi
 if [ -e "/dev/mapper/$NAME" ]; then echo "mapper already exists: $NAME" >&2; exit 1; fi
+# dm-multipath target requires the module; ignore failure if already built-in.
+sudo -n modprobe dm-multipath 2>/dev/null || sudo -n modprobe dm_multipath 2>/dev/null || true
+# Drop any leftover signature so LVM/udev see a clean path under the map.
+sudo -n wipefs -a -f "$DEV" >/dev/null 2>&1 || true
 SZ=$(sudo -n blockdev --getsz "$DEV")
-echo "0 $SZ linear $DEV 0" | sudo -n dmsetup create "$NAME" --uuid "$UUID"
+MAJ=$((0x$(stat -c '%%t' "$DEV")))
+MIN=$((0x$(stat -c '%%T' "$DEV")))
+# Single-path multipath table (round-robin, one path group, one path).
+# Format: multipath <nfeatures> <nhandler> <npg> <pg_init> <selector> <nselargs> <npaths> <npathargs> <maj:min> <patharg>
+TABLE="0 $SZ multipath 0 0 1 1 round-robin 0 1 1 ${MAJ}:${MIN} 1"
+echo "$TABLE" | sudo -n dmsetup create "$NAME" --uuid "$UUID"
 sudo -n udevadm settle || true
 sudo -n udevadm trigger --action=change --subsystem-match=block || true
+# Confirm kernel loaded a multipath (not linear) table and TYPE looks like mpath.
+TABLE_OUT=$(sudo -n dmsetup table "$NAME")
+echo "$TABLE_OUT" | grep -q ' multipath ' || {
+  echo "expected multipath table, got: $TABLE_OUT" >&2
+  sudo -n dmsetup remove -f "$NAME" >/dev/null 2>&1 || true
+  exit 1
+}
+TYPE=$(lsblk -dn -o TYPE "/dev/mapper/$NAME" 2>/dev/null || true)
+if [ "$TYPE" != "mpath" ]; then
+  echo "lsblk TYPE for /dev/mapper/$NAME is '$TYPE' (want mpath); dm UUID/table may be wrong" >&2
+  # Still return the mapper — agent udev path may classify via DM_UUID even if lsblk differs.
+fi
 test -b "/dev/mapper/$NAME"
 printf '%%s\n' "/dev/mapper/$NAME"
 `, shellQuote(backingPath), shellQuote(mapperName), shellQuote(mapperName))
 
 	out, err := framework.NodeExecChecked(ctx, cl, node, script)
-	Expect(err).NotTo(HaveOccurred(), "dmsetup mpath create failed: %s", out)
+	Expect(err).NotTo(HaveOccurred(), "dmsetup multipath create failed: %s", out)
 	mapper := strings.TrimSpace(out)
 	Expect(mapper).To(HavePrefix("/dev/mapper/"))
 	return mapper
 }
 
-// bdtypesRemoveMpath removes a dmsetup mapper created by bdtypesCreateMpath.
+// bdtypesRemoveMpath removes a dmsetup multipath mapper created by bdtypesCreateMpath.
 func bdtypesRemoveMpath(ctx context.Context, cl *e2e.Cluster, node, mapperName string) {
 	script := fmt.Sprintf(`set -eu
 NAME=%s
 if [ -e "/dev/mapper/$NAME" ] || sudo -n dmsetup info "$NAME" >/dev/null 2>&1; then
+  # Best-effort: wipe LVM/PV labels from the map before remove so the backing disk is reusable.
+  sudo -n wipefs -a -f "/dev/mapper/$NAME" >/dev/null 2>&1 || true
   sudo -n dmsetup remove -f "$NAME" || sudo -n dmsetup remove "$NAME" || true
 fi
 `, shellQuote(mapperName))

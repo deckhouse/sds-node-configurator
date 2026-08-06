@@ -38,9 +38,10 @@ import (
 // mpath, opened crypt/LUKS), filtering of unsupported types (loop, closed
 // LUKS), and an optional mix of supported devices in one LVG.
 // Label device-types is exclusive: run only this suite via
-//   make test-device-types
-//   go test ... -ginkgo.label-filter=device-types
-//   PR label e2e/label:device-types
+//
+//	make test-device-types
+//	go test ... -ginkgo.label-filter=device-types
+//	PR label e2e/label:device-types
 var _ = Describe("Block device types matrix",
 	Label("sds-node-configurator", "device-types"),
 	Ordered, ContinueOnFailure, func() {
@@ -128,7 +129,16 @@ var _ = Describe("Block device types matrix",
 			Eventually(func(g Gomega) {
 				var cur v1alpha1.LVMVolumeGroup
 				g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: lvgName}, &cur)).To(Succeed())
-				g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady))
+				if cur.Status.Phase != v1alpha1.PhaseReady {
+					var condSummary []string
+					for _, c := range cur.Status.Conditions {
+						condSummary = append(condSummary,
+							fmt.Sprintf("%s=%s reason=%s msg=%q", c.Type, c.Status, c.Reason, c.Message))
+					}
+					g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady),
+						"LVMVolumeGroup %s stuck phase=%s conditions=%v selectedBDs=%v",
+						lvgName, cur.Status.Phase, condSummary, bdNames)
+				}
 			}, lvmVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
 			return lvgName, vgName
 		}
