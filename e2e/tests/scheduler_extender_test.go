@@ -93,8 +93,6 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 		storageClassName = createLocalStorageClass(ctx, cl, k8sClient, lvgNames)
 		By(fmt.Sprintf("StorageClass %s ready", storageClassName))
 
-		// Fixture invariant, not an extender behavior: if the provisioner quantizes volumes, this must
-		// fail here with the observed VGFree numbers, not surface later as "the extender must steer".
 		assertCapacityInvariant(ctx, k8sClient, bigNode, nodeDisks)
 		dumpLVGs(ctx, k8sClient)
 	})
@@ -132,8 +130,6 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 			attachmentName = schedPodPrefix + "steer-annotation-attachment"
 		)
 
-		// The PVC has to exist before the launcher is filtered: a PVC named only in the annotation and
-		// missing at that moment is skipped as a stale hint, and the Pod would be placed anywhere.
 		createPVC(ctx, k8sClient, pvcName, storageClassName, schedSteerPVCSize)
 		createPod(ctx, k8sClient, launcherName, podOpts{annotationPVC: pvcName})
 
@@ -142,9 +138,6 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 			"the extender must read the PVC from the %s annotation and steer the launcher to %s",
 			podExtraPVCsAnnotation, bigNode)
 
-		// Nothing mounts the PVC yet, so it is still Pending: the attachment Pod is its first consumer
-		// and is pinned to wherever the launcher landed. If the launcher went to a small node, this Pod
-		// is pinned there too, the volume cannot be created and the spec goes red.
 		createPod(ctx, k8sClient, attachmentName, podOpts{mountPVC: pvcName, node: launcherNode})
 		waitPVCBoundAndPodRunning(ctx, k8sClient, pvcName, attachmentName)
 	})
@@ -160,10 +153,6 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 		createPod(ctx, k8sClient, podName, podOpts{mountPVC: pvcName})
 		expectPodRejectedByExtender(ctx, k8sClient, podName)
 
-		// A/B control. Pending on its own proves nothing: the Pod could be stuck for an unrelated
-		// reason. The same Pod without our PVC must schedule. The two legs do not interfere: a full
-		// hard reject leaves no filtered node, so no reservation is created, and a Pod with no managed
-		// PVC short-circuits the filter into a no-op.
 		createPod(ctx, k8sClient, controlName, podOpts{})
 		Expect(waitPodScheduled(ctx, k8sClient, controlName)).NotTo(BeEmpty(),
 			"a Pod without our PVC must schedule — otherwise the Pending above is not about storage")
@@ -179,11 +168,8 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 		createPVC(ctx, k8sClient, pvcName, storageClassName, schedBlockPVCSize)
 		createPod(ctx, k8sClient, podName, podOpts{annotationPVC: pvcName})
 
-		// Strict on purpose, with no in-tree fallback reason: kube-scheduler's VolumeBinding does not
-		// know about this PVC at all, so the only component that can reject every node is the extender.
 		expectPodRejectedByExtender(ctx, k8sClient, podName)
 
-		// A/B control: the same Pod without the annotation must schedule.
 		createPod(ctx, k8sClient, controlName, podOpts{})
 		Expect(waitPodScheduled(ctx, k8sClient, controlName)).NotTo(BeEmpty(),
 			"a Pod without the annotation must schedule — otherwise the Pending above is not about storage")
@@ -196,12 +182,6 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 
 		cleanupCtx := context.Background()
 
-		// AfterEach's deleteWorkload can itself fail (e.g. its 5-minute PV wait times out) and AfterAll
-		// still runs. Deleting the LVMVolumeGroups out from under a PV that has not finished deleting
-		// leaves csi-provisioner retrying DeleteVolume against a VG that no longer exists — a retry that
-		// can never succeed, wedging the PV's finalizer and, through it, every later run of this suite.
-		// Force-finalizing is not the answer (that is the bug class this suite exists to catch), so
-		// instead: refuse the whole destructive sequence and fail loudly.
 		if left, err := leftoverPVs(cleanupCtx, k8sClient); err != nil {
 			Fail(fmt.Sprintf("AfterAll: failed to list PersistentVolumes before teardown: %v", err))
 		} else if len(left) > 0 {
@@ -215,9 +195,6 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 					"LocalStorageClass and LVMVolumeGroups can be removed safely", len(left), localStorageClassName))
 		}
 
-		// The LocalStorageClass must go before its LVMVolumeGroups: the sds-local-volume validating
-		// webhook rejects every LSC update — including the controller's own finalizer removal — once a
-		// referenced LVG is gone, which deadlocks the LSC in Terminating forever.
 		By("AfterAll: deleting the LocalStorageClass")
 		cleanupLocalStorageClasses(cleanupCtx, cl, k8sClient)
 
@@ -234,9 +211,5 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 				GinkgoWriter.Printf("failed to delete disk %s: %v\n", disk.diskName, deleteErr)
 			}
 		}
-
-		// No BlockDevice cleanup here on purpose: once the disks above are detached, the devices are
-		// gone from the nodes and the agent's discoverer removes their BlockDevice CRs itself
-		// (removeDeprecatedAPIDevices). Deleting them from the test would only race that reconcile.
 	})
 })
