@@ -31,10 +31,19 @@ import (
 )
 
 const (
-	bdtypesDiskSize          = "2Gi"
-	bdtypesDiscoveryTimeout  = 5 * time.Minute
-	bdtypesFilterWaitTimeout = 3 * time.Minute
-	bdtypesPollInterval      = 5 * time.Second
+	bdtypesDiskSize = "2Gi"
+	// VirtualDisk create/attach must not hang the suite (CI saw ~2h on AttachDisk).
+	bdtypesDiskOpTimeout = 5 * time.Minute
+	// BD discovery after attach (agent scan is ~5s).
+	bdtypesDiscoveryTimeout = 3 * time.Minute
+	// LVG Pending→Ready for a single/mixed VG in this suite (not the global 15m).
+	bdtypesLVGReadyTimeout = 5 * time.Minute
+	// Positive wait for "device became filtered".
+	bdtypesFilterWaitTimeout = 1 * time.Minute
+	// Negative stability window: a few agent rescan cycles is enough.
+	bdtypesFilterStableTimeout = 30 * time.Second
+	bdtypesBDStableTimeout     = 15 * time.Second
+	bdtypesPollInterval        = 5 * time.Second
 	// Fixed passphrase for ephemeral e2e LUKS volumes (never used outside the test node).
 	bdtypesLUKSPassphrase = "e2e-sds-node-configurator-luks"
 )
@@ -309,11 +318,11 @@ func bdtypesAssertBDSelectable(ctx context.Context, cl client.Client, bdName str
 			"BlockDevice %s disappeared during stability window (mpath map unstable?)", bdName)
 		g.Expect(cur.Labels).To(HaveKeyWithValue(metaNameLabel, bdName))
 		g.Expect(cur.Status.Consumable).To(BeTrue())
-	}, 30*time.Second, 5*time.Second).Should(Succeed())
+	}, bdtypesBDStableTimeout, bdtypesPollInterval).Should(Succeed())
 }
 
 // bdtypesAssertNoBDForPath asserts that no BlockDevice CR on node points at path
-// for the duration of the wait window (filtered / never discovered).
+// across a short stability window (filtered / never discovered).
 func bdtypesAssertNoBDForPath(ctx context.Context, cl client.Client, node, path string) {
 	GinkgoHelper()
 	Consistently(func(g Gomega) {
@@ -327,7 +336,7 @@ func bdtypesAssertNoBDForPath(ctx context.Context, cl client.Client, node, path 
 					path, bd.Status.Type, bd.Status.Consumable)
 			}
 		}
-	}, bdtypesFilterWaitTimeout, 15*time.Second).Should(Succeed())
+	}, bdtypesFilterStableTimeout, bdtypesPollInterval).Should(Succeed())
 }
 
 // bdtypesAssertNoConsumableOfType asserts no consumable BlockDevice of the given
@@ -358,7 +367,7 @@ func bdtypesAssertNoConsumableOfType(
 		}
 		g.Expect(offenders).To(BeEmpty(),
 			"unsupported type %q must not yield new consumable BlockDevices; got %v", deviceType, offenders)
-	}, bdtypesFilterWaitTimeout, 15*time.Second).Should(Succeed())
+	}, bdtypesFilterStableTimeout, bdtypesPollInterval).Should(Succeed())
 }
 
 // bdtypesNodeSafe converts a node name into a DNS-1123-safe fragment.

@@ -87,25 +87,36 @@ var _ = Describe("Block device types matrix",
 		})
 
 		// attachPlainDisk creates a VirtualDisk, attaches it, and waits for a
-		// new consumable BlockDevice. Cleanup of the disk is registered via DeferCleanup.
+		// new consumable BlockDevice. Disk ops are hard-capped so a stuck
+		// VirtualDisk/Attachment cannot burn the whole CI job.
 		attachPlainDisk := func(runID, tag string) (disk *e2e.Disk, bd kubernetes.BlockDevice, path string) {
 			GinkgoHelper()
 			before, err := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
 			Expect(err).NotTo(HaveOccurred())
 
 			diskName := fmt.Sprintf("e2e-bdtypes-%s-%s", tag, runID)
-			disk, err = cl.Disks().CreateDisk(ctx, e2e.DiskSpec{
+			diskCtx, diskCancel := context.WithTimeout(ctx, bdtypesDiskOpTimeout)
+			defer diskCancel()
+
+			By(fmt.Sprintf("CreateDisk %s (timeout %s)", diskName, bdtypesDiskOpTimeout))
+			disk, err = cl.Disks().CreateDisk(diskCtx, e2e.DiskSpec{
 				Name:         diskName,
 				Size:         resource.MustParse(bdtypesDiskSize),
 				StorageClass: conf.TestCluster.StorageClass,
 			})
 			Expect(err).NotTo(HaveOccurred(), "failed to create disk %s", diskName)
 			DeferCleanup(func() {
-				_ = cl.Disks().DetachDisk(ctx, targetNode, disk.Name)
-				_ = cl.Disks().DeleteDisk(ctx, disk.Name)
+				cctx, cancel := context.WithTimeout(context.Background(), bdtypesDiskOpTimeout)
+				defer cancel()
+				_ = cl.Disks().DetachDisk(cctx, targetNode, disk.Name)
+				_ = cl.Disks().DeleteDisk(cctx, disk.Name)
 			})
-			Expect(cl.Disks().AttachDisk(ctx, targetNode, disk.Name)).
-				To(Succeed(), "failed to attach disk %s", disk.Name)
+
+			By(fmt.Sprintf("AttachDisk %s → %s (timeout %s)", disk.Name, targetNode, bdtypesDiskOpTimeout))
+			attachCtx, attachCancel := context.WithTimeout(ctx, bdtypesDiskOpTimeout)
+			defer attachCancel()
+			Expect(cl.Disks().AttachDisk(attachCtx, targetNode, disk.Name)).
+				To(Succeed(), "failed to attach disk %s (timed out or error)", disk.Name)
 
 			bd, err = framework.WaitNewConsumableBlockDevice(ctx, cl.RESTConfig(), targetNode, before, bdtypesDiscoveryTimeout)
 			Expect(err).NotTo(HaveOccurred(), "consumable BlockDevice not discovered for %s", disk.Name)
@@ -139,7 +150,7 @@ var _ = Describe("Block device types matrix",
 						"LVMVolumeGroup %s stuck phase=%s conditions=%v selectedBDs=%v",
 						lvgName, cur.Status.Phase, condSummary, bdNames)
 				}
-			}, lvmVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
+			}, bdtypesLVGReadyTimeout, 10*time.Second).Should(Succeed())
 			return lvgName, vgName
 		}
 
@@ -284,7 +295,7 @@ var _ = Describe("Block device types matrix",
 							g.Expect(cr.Status.Path).NotTo(Equal(backingPath),
 								"path %s must not reappear as consumable after luksFormat", backingPath)
 						}
-					}, bdtypesFilterWaitTimeout, 15*time.Second).Should(Succeed())
+					}, bdtypesFilterStableTimeout, bdtypesPollInterval).Should(Succeed())
 				}),
 		)
 
