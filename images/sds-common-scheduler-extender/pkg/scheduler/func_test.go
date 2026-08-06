@@ -1,17 +1,17 @@
 /*
-Copyright 2025 Flant JSC
+	Copyright 2026 Flant JSC
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+		http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
 */
 
 package scheduler
@@ -236,7 +236,7 @@ func TestShouldProcessPod(t *testing.T) {
 
 			cl := fake.NewFakeClient(tc.objects...)
 			targetProvisioners := []string{tc.targetProvisioner}
-			managedPVCs, err := getManagedPVCsFromPod(ctx, cl, log, tc.pod, targetProvisioners)
+			managedPVCs, _, err := getManagedPVCsFromPod(ctx, cl, log, tc.pod, targetProvisioners)
 			if (err != nil) != tc.expectedError {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -1014,7 +1014,7 @@ func TestExtractRequestedSize_PhaseLag(t *testing.T) {
 		pvcs := map[string]*corev1.PersistentVolumeClaim{
 			pvFreshlyCreatedNoPhase.Name: pvFreshlyCreatedNoPhase,
 		}
-		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs)
+		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs, nil)
 		require.NoError(t, err)
 		require.Contains(t, got, pvFreshlyCreatedNoPhase.Name, "PVC with empty Status.Phase must NOT be dropped")
 		assert.Equal(t, requestQty.Value(), got[pvFreshlyCreatedNoPhase.Name].RequestedSize)
@@ -1025,7 +1025,7 @@ func TestExtractRequestedSize_PhaseLag(t *testing.T) {
 		pvcs := map[string]*corev1.PersistentVolumeClaim{
 			pvcExplicitlyPending.Name: pvcExplicitlyPending,
 		}
-		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs)
+		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs, nil)
 		require.NoError(t, err)
 		require.Contains(t, got, pvcExplicitlyPending.Name)
 		assert.Equal(t, requestQty.Value(), got[pvcExplicitlyPending.Name].RequestedSize)
@@ -1033,7 +1033,7 @@ func TestExtractRequestedSize_PhaseLag(t *testing.T) {
 
 	t.Run("bound PVC reports resize delta", func(t *testing.T) {
 		pvcs := map[string]*corev1.PersistentVolumeClaim{pvcBound.Name: pvcBound}
-		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs)
+		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs, nil)
 		require.NoError(t, err)
 		require.Contains(t, got, pvcBound.Name)
 		assert.Equal(t, requestQty.Value()-pvCapacity.Value(), got[pvcBound.Name].RequestedSize,
@@ -1045,11 +1045,103 @@ func TestExtractRequestedSize_PhaseLag(t *testing.T) {
 		pvcBoundNoPhase.Name = "pvc-bound-no-phase"
 		pvcBoundNoPhase.Status = corev1.PersistentVolumeClaimStatus{}
 		pvcs := map[string]*corev1.PersistentVolumeClaim{pvcBoundNoPhase.Name: pvcBoundNoPhase}
-		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs)
+		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs, nil)
 		require.NoError(t, err)
 		require.Contains(t, got, pvcBoundNoPhase.Name,
 			"a PVC with Spec.VolumeName set but empty Status.Phase must be treated as bound, not dropped")
 		assert.Equal(t, requestQty.Value()-pvCapacity.Value(), got[pvcBoundNoPhase.Name].RequestedSize)
+	})
+
+	// LVM rounds an LV up to the extent boundary, so a PV backing a decimal-unit
+	// request is larger than the request. The delta must clamp at 0: a negative
+	// size is summed into Cache.GetReservedSpace and getAvailableSpace subtracts
+	// it, which would inflate the pool's free space for every other Pod.
+	t.Run("bound PVC whose PV is larger than the request reserves nothing", func(t *testing.T) {
+		bigPVName := "pv-rounded-up"
+		bigPV := &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: bigPVName},
+			Spec: corev1.PersistentVolumeSpec{
+				Capacity:         corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("11Gi")},
+				StorageClassName: scName,
+			},
+		}
+		pvcOverProvisioned := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-rounded-up", Namespace: "default"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				StorageClassName: &scName,
+				VolumeName:       bigPVName,
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("10Gi")},
+				},
+			},
+		}
+
+		clWithBigPV := newFakeClient(bigPV)
+		pvcs := map[string]*corev1.PersistentVolumeClaim{pvcOverProvisioned.Name: pvcOverProvisioned}
+		got, err := extractRequestedSize(context.Background(), clWithBigPV, log, pvcs, scs, nil)
+		require.NoError(t, err)
+		require.Contains(t, got, pvcOverProvisioned.Name)
+		assert.Equal(t, int64(0), got[pvcOverProvisioned.Name].RequestedSize,
+			"pv.capacity > requests.storage must clamp to 0, never go negative")
+	})
+
+	// A PVC known only from the extra-pvcs annotation must never fail the whole
+	// request: an unresolvable one is dropped from both the requests and the
+	// managed-PVC map, so the downstream node filter stops considering it.
+	t.Run("unresolvable annotation-only PVC is dropped instead of failing", func(t *testing.T) {
+		brokenSCName := "local-sc-no-lvm-type"
+		brokenSC := &storagev1.StorageClass{
+			ObjectMeta:  metav1.ObjectMeta{Name: brokenSCName},
+			Provisioner: provisioner,
+			Parameters:  map[string]string{consts.LVMVolumeGroupsParamKey: `[{"name":"lvg1"}]`},
+		}
+		pvcHint := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-hint-broken-sc", Namespace: "default"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				StorageClassName: &brokenSCName,
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: requestQty},
+				},
+			},
+		}
+
+		pvcs := map[string]*corev1.PersistentVolumeClaim{
+			pvcHint.Name:              pvcHint,
+			pvcExplicitlyPending.Name: pvcExplicitlyPending,
+		}
+		allSCs := map[string]*storagev1.StorageClass{scName: sc, brokenSCName: brokenSC}
+
+		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, allSCs,
+			map[string]bool{pvcHint.Name: true})
+		require.NoError(t, err, "an annotation-only PVC must not fail the request")
+		assert.NotContains(t, got, pvcHint.Name)
+		assert.NotContains(t, pvcs, pvcHint.Name,
+			"the dropped PVC must also leave managedPVCs, or the node filter keeps checking it")
+		assert.Contains(t, got, pvcExplicitlyPending.Name, "the other PVCs must still be processed")
+	})
+
+	// The same failure on a spec-sourced PVC keeps failing the whole request.
+	t.Run("unresolvable spec PVC still fails the request", func(t *testing.T) {
+		brokenSCName := "local-sc-no-lvm-type-2"
+		brokenSC := &storagev1.StorageClass{
+			ObjectMeta:  metav1.ObjectMeta{Name: brokenSCName},
+			Provisioner: provisioner,
+			Parameters:  map[string]string{consts.LVMVolumeGroupsParamKey: `[{"name":"lvg1"}]`},
+		}
+		pvcSpec := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-spec-broken-sc", Namespace: "default"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				StorageClassName: &brokenSCName,
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: requestQty},
+				},
+			},
+		}
+
+		pvcs := map[string]*corev1.PersistentVolumeClaim{pvcSpec.Name: pvcSpec}
+		_, err := extractRequestedSize(context.Background(), cl, log, pvcs,
+			map[string]*storagev1.StorageClass{brokenSCName: brokenSC}, nil)
+		require.Error(t, err)
 	})
 }
 

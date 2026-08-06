@@ -1,17 +1,17 @@
 /*
-Copyright 2025 Flant JSC
+	Copyright 2026 Flant JSC
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+		http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
 */
 
 package consts
@@ -29,6 +29,12 @@ const (
 	// separate attachment Pod pinned to the launcher's node). The PVCs are always
 	// looked up in the Pod's own namespace. It is a best-effort scheduling hint:
 	// unknown or foreign-provisioner names are ignored.
+	//
+	// Contract for the producer: every PVC named here MUST already exist by the
+	// time the Pod is created. The extender resolves the names once, while running
+	// filter/prioritize for this Pod; a name that does not resolve is skipped and
+	// there is no second attempt — the hint is silently lost and the Pod is
+	// scheduled as blindly as it was before this annotation existed.
 	PodExtraPVCsAnnotation = "scheduler.deckhouse.io/extra-pvcs"
 
 	Thick = "Thick"
