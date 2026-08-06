@@ -77,7 +77,6 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 		cleanupLocalStorageClasses(ctx, cl, k8sClient)
 		cleanupLVMLogicalVolumes(ctx, k8sClient)
 		cleanupLVMVolumeGroups(ctx, k8sClient)
-		forceDeleteAllNonConsumableBlockDevices(ctx, k8sClient, schedBDCleanupTimeout)
 
 		runID := fmt.Sprintf("%d", time.Now().Unix())
 		var smallNodes []string
@@ -239,7 +238,8 @@ var _ = Describe("Schedule extender", Label("schedule-extender"), Ordered, func(
 			}
 		}
 
-		By("AfterAll: force deleting leftover non-consumable BlockDevices")
-		forceDeleteAllNonConsumableBlockDevices(cleanupCtx, k8sClient, schedBDCleanupTimeout)
+		// No BlockDevice cleanup here on purpose: once the disks above are detached, the devices are
+		// gone from the nodes and the agent's discoverer removes their BlockDevice CRs itself
+		// (removeDeprecatedAPIDevices). Deleting them from the test would only race that reconcile.
 	})
 })

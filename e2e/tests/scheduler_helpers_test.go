@@ -97,7 +97,6 @@ const (
 	// eat the budget of a stuck PV.
 	schedPollInterval           = 5 * time.Second
 	schedBDAppearTimeout        = 5 * time.Minute
-	schedBDCleanupTimeout       = 2 * time.Minute
 	schedExtenderRolloutTimeout = 5 * time.Minute
 	schedLSCCreatedTimeout      = 3 * time.Minute
 	schedSCAppearTimeout        = 2 * time.Minute
