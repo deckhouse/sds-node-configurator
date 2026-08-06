@@ -884,4 +884,24 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		assert.ElementsMatch(t, []string{"/dev/nvme4n1p1", "/dev/sdb"}, names,
 			"drbd/rbd/nbd devices must be filtered out at the BD discoverer level")
 	})
+
+	t.Run("createCandidateName_uses_inherited_serial_for_crypt", func(t *testing.T) {
+		d := setupDiscoverer()
+		candidate := internal.BlockDeviceCandidate{
+			NodeName:        "test-node",
+			Path:            "/dev/mapper/e2e-luks",
+			Type:            "crypt",
+			SerialInherited: "parent-serial-xyz",
+			WWNInherited:    "0xdeadbeef",
+			Model:           "TestModel",
+		}
+		name := d.createCandidateName(candidate, nil)
+		assert.NotEmpty(t, name, "crypt with SerialInherited must get a BD name")
+		// WWNInherited must not enter the name hash (stability with prior releases).
+		assert.Equal(t, createUniqDeviceName(internal.BlockDeviceCandidate{
+			NodeName: "test-node",
+			Serial:   "parent-serial-xyz",
+			Model:    "TestModel",
+		}), name)
+	})
 }
