@@ -687,10 +687,15 @@ func getNewControlPlane(ctx context.Context, cl client.Client, log logger.Logger
 // uses to decide whether a PVC is bound.
 //
 // hintOnly (from getManagedPVCsFromPod) marks PVCs known only from the
-// PodExtraPVCsAnnotation annotation. Failing to resolve one of those drops that
-// single PVC instead of the whole request: the caller turns an error here into a
-// rejection of every node, which for a Pod that does not mount the volume means
-// it never schedules at all.
+// PodExtraPVCsAnnotation annotation. A hint the extender cannot resolve must not
+// cost the Pod its nodes, so instead of failing the whole request its name is
+// returned in dropped and the caller removes it from its own PVC map. The
+// asymmetry is deliberate: an unresolvable PVC from pod.Spec.Volumes keeps
+// failing the request, because the Pod genuinely cannot run without that mount.
+//
+// The caller owns the removal (same shape as dropPVCsWithMissingSC) rather than
+// this function mutating pvcs behind its back — filter/prioritize both guard on
+// len(managedPVCs) after each such step.
 func extractRequestedSize(
 	ctx context.Context,
 	cl client.Client,
@@ -698,96 +703,96 @@ func extractRequestedSize(
 	pvcs map[string]*corev1.PersistentVolumeClaim,
 	scs map[string]*storagev1.StorageClass,
 	hintOnly map[string]bool,
-) (map[string]PVCRequest, error) {
+) (map[string]PVCRequest, []string, error) {
 	pvcRequests := make(map[string]PVCRequest, len(pvcs))
-	for _, pvc := range pvcs {
-		sc := scs[*pvc.Spec.StorageClassName]
+	var dropped []string
+
+	for name, pvc := range pvcs {
 		log.Debug(fmt.Sprintf("[extractRequestedSize] PVC %s/%s has status phase: %q, spec.volumeName: %q", pvc.Namespace, pvc.Name, pvc.Status.Phase, pvc.Spec.VolumeName))
 
-		// skipHint reports whether err may be downgraded to "drop this PVC". The
-		// PVC is removed from pvcs as well, so the downstream node filter does not
-		// keep checking it with a zero-value PVCRequest (deleting during range is
-		// safe, and dropPVCsWithMissingSC mutates the same map the same way).
-		skipHint := func(err error) bool {
-			if !hintOnly[pvc.Name] {
-				return false
+		req, err := requestForPVC(ctx, cl, pvc, scs[*pvc.Spec.StorageClassName])
+		if err != nil {
+			if !hintOnly[name] {
+				return nil, nil, err
 			}
 			log.Warning(fmt.Sprintf("[extractRequestedSize] skipping PVC %s/%s listed only in the %s annotation: %v", pvc.Namespace, pvc.Name, consts.PodExtraPVCsAnnotation, err))
-			delete(pvcs, pvc.Name)
-			return true
+			dropped = append(dropped, name)
+			continue
 		}
 
-		var deviceType string
-		isReplicated := sc.Provisioner == consts.SdsReplicatedVolumeProvisioner
-
-		if isReplicated {
-			rsc, err := getReplicatedStorageClassForExtract(ctx, cl, sc.Name)
-			if err != nil {
-				err = fmt.Errorf("[extractRequestedSize] unable to get RSC for SC %s: %w", sc.Name, err)
-				if skipHint(err) {
-					continue
-				}
-				return nil, err
-			}
-			rspName := rscStoragePoolName(rsc)
-			rsp, err := getReplicatedStoragePoolForExtract(ctx, cl, rspName)
-			if err != nil {
-				err = fmt.Errorf("[extractRequestedSize] unable to get RSP %s: %w", rspName, err)
-				if skipHint(err) {
-					continue
-				}
-				return nil, err
-			}
-			switch rsp.Spec.Type {
-			case srv.ReplicatedStoragePoolTypeLVM:
-				deviceType = consts.Thick
-			case srv.ReplicatedStoragePoolTypeLVMThin:
-				deviceType = consts.Thin
-			default:
-				deviceType = consts.Thick
-			}
-		} else {
-			deviceType = sc.Parameters[consts.LvmTypeParamKey]
-		}
-
-		if deviceType == "" {
-			err := fmt.Errorf("[extractRequestedSize] unable to determine device type for PVC %s/%s", pvc.Namespace, pvc.Name)
-			if skipHint(err) {
-				continue
-			}
-			return nil, err
-		}
-
-		var requestedSize int64
-		if pvc.Spec.VolumeName == "" {
-			requestedSize = pvc.Spec.Resources.Requests.Storage().Value()
-		} else {
-			pv := &corev1.PersistentVolume{}
-			if err := cl.Get(ctx, client.ObjectKey{Name: pvc.Spec.VolumeName}, pv); err != nil {
-				err = fmt.Errorf("[extractRequestedSize] error getting PV %s: %v", pvc.Spec.VolumeName, err)
-				if skipHint(err) {
-					continue
-				}
-				return nil, err
-			}
-			requestedSize = pvc.Spec.Resources.Requests.Storage().Value() - pv.Spec.Capacity.Storage().Value()
-			if requestedSize < 0 {
-				// LVM rounds an LV up to the extent boundary, so a PV backing a
-				// decimal-unit request ("10G") is larger than the request itself.
-				// A negative size would be summed into GetReservedSpace and, via
-				// getAvailableSpace's baseFree-reserved, inflate the pool's free
-				// space for every other Pod scheduled in the same window.
-				requestedSize = 0
-			}
-		}
-
-		pvcRequests[pvc.Name] = PVCRequest{
-			DeviceType:    deviceType,
-			RequestedSize: requestedSize,
-		}
+		pvcRequests[name] = req
 	}
 
-	return pvcRequests, nil
+	return pvcRequests, dropped, nil
+}
+
+// requestForPVC resolves the device type of a PVC and how much space it still
+// needs from its pool. It is pure resolution: what to do with a failure (fail
+// the whole scheduling request, or drop an annotation-only hint) is the caller's
+// decision, so every failure here is just an error.
+func requestForPVC(
+	ctx context.Context,
+	cl client.Client,
+	pvc *corev1.PersistentVolumeClaim,
+	sc *storagev1.StorageClass,
+) (PVCRequest, error) {
+	deviceType, err := deviceTypeForSC(ctx, cl, sc)
+	if err != nil {
+		return PVCRequest{}, err
+	}
+	if deviceType == "" {
+		return PVCRequest{}, fmt.Errorf("[extractRequestedSize] unable to determine device type for PVC %s/%s", pvc.Namespace, pvc.Name)
+	}
+
+	requested := pvc.Spec.Resources.Requests.Storage().Value()
+	if pvc.Spec.VolumeName == "" {
+		return PVCRequest{DeviceType: deviceType, RequestedSize: requested}, nil
+	}
+
+	pv := &corev1.PersistentVolume{}
+	if err := cl.Get(ctx, client.ObjectKey{Name: pvc.Spec.VolumeName}, pv); err != nil {
+		return PVCRequest{}, fmt.Errorf("[extractRequestedSize] error getting PV %s: %v", pvc.Spec.VolumeName, err)
+	}
+
+	// A bound PVC only needs the growth delta. Clamp at 0: LVM rounds an LV up to
+	// the extent boundary, so a PV backing a decimal-unit request ("10G") is
+	// larger than the request itself. A negative size would be summed into
+	// Cache.GetReservedSpace and, via getAvailableSpace's baseFree-reserved,
+	// inflate the pool's free space for every other Pod scheduled in the same
+	// window.
+	return PVCRequest{
+		DeviceType:    deviceType,
+		RequestedSize: max(requested-pv.Spec.Capacity.Storage().Value(), 0),
+	}, nil
+}
+
+// deviceTypeForSC maps a StorageClass to the LVM device type its volumes land
+// on. A local class carries it directly in the lvm-type parameter; a replicated
+// one hides it one hop away, behind RSC -> RSP.
+func deviceTypeForSC(ctx context.Context, cl client.Client, sc *storagev1.StorageClass) (string, error) {
+	if sc.Provisioner != consts.SdsReplicatedVolumeProvisioner {
+		return sc.Parameters[consts.LvmTypeParamKey], nil
+	}
+
+	rsc, err := getReplicatedStorageClassForExtract(ctx, cl, sc.Name)
+	if err != nil {
+		return "", fmt.Errorf("[extractRequestedSize] unable to get RSC for SC %s: %w", sc.Name, err)
+	}
+
+	rspName := rscStoragePoolName(rsc)
+	rsp, err := getReplicatedStoragePoolForExtract(ctx, cl, rspName)
+	if err != nil {
+		return "", fmt.Errorf("[extractRequestedSize] unable to get RSP %s: %w", rspName, err)
+	}
+
+	switch rsp.Spec.Type {
+	case srv.ReplicatedStoragePoolTypeLVM:
+		return consts.Thick, nil
+	case srv.ReplicatedStoragePoolTypeLVMThin:
+		return consts.Thin, nil
+	default:
+		return consts.Thick, nil
+	}
 }
 
 func getReplicatedStorageClassForExtract(ctx context.Context, cl client.Client, scName string) (*srv.ReplicatedStorageClass, error) {

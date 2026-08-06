@@ -113,12 +113,30 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	servingLog.Debug("starts to extract PVC requested sizes")
-	pvcRequests, err := extractRequestedSize(ctx, s.client, servingLog, managedPVCs, scUsedByPVCs, hintOnlyPVCs)
+	pvcRequests, droppedHints, err := extractRequestedSize(ctx, s.client, servingLog, managedPVCs, scUsedByPVCs, hintOnlyPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to extract request size")
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+
+	// Mirror of filter: an unresolvable annotation-only PVC is dropped rather
+	// than allowed to fail the request, so scoring stops accounting for it.
+	if len(droppedHints) > 0 {
+		for _, name := range droppedHints {
+			delete(managedPVCs, name)
+		}
+		servingLog.Warning(fmt.Sprintf("dropping unresolvable PVCs listed only in the %s annotation: %v", consts.PodExtraPVCsAnnotation, droppedHints))
+	}
+	if len(managedPVCs) == 0 {
+		servingLog.Debug("After dropping unresolvable annotation PVCs, no managed PVCs left. Return the same nodes with 0 score")
+		if err := writeNodeScoresResponse(w, servingLog, nodeNames, 0); err != nil {
+			servingLog.Error(err, "unable to write node scores response")
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+
 	// Mirror of filter: do not short-circuit when len(pvcRequests) == 0. Scoring
 	// always runs so the response is consistent with the filter contract (the
 	// filter never returns "all nodes" for a local PVC; therefore prioritize
