@@ -26,9 +26,19 @@ e2e
 # foreign Go files with no license header and Russian comments fail the lint.
 _storage-e2e
 
+# The CVE-scan tooling, left in the same workspace by the reusable scan job. Not
+# module content either, and not ours to add license headers to. The license
+# linter needs telling separately — .helmignore alone does not keep it out; see
+# the license exclude-rules in .dmtlint.yaml.
+cve_scan.sh
+process_digest.py
+send_report.py
+cve-scan
+
 # Linter and CI configs that would otherwise be read as module content. Left out
-# of this list on purpose: module.yaml, oss.yaml and LICENSE, which the Deckhouse
-# module loader and the release tooling read from the module directory.
+# of this list on purpose: module.yaml, oss.yaml, LICENSE and
+# known_vulnerabilities.vex, which the Deckhouse module loader, the release
+# tooling and the VEX attestation step read from the module directory.
 .git
 .github
 .werf

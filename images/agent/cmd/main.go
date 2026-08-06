@@ -144,6 +144,15 @@ func run() int {
 	// The runnable also receives a cancellable context, so a graceful
 	// shutdown can interrupt long-running LVM commands.
 	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		// Before ReTag, because every LVM command below is filtered by what the
+		// agent believes its own loop devices to be, and after a restart that belief
+		// starts out empty while the loops of a file-backed Volume Group are still
+		// attached from the previous incarnation. Without this pass ReTag and
+		// ActivateVGs would not see those Volume Groups at all.
+		if err := utils.RefreshOwnedLoops(ctx, log, commands, cfgParams.CmdDeadlineDuration); err != nil {
+			log.Warning(fmt.Sprintf("[main] %v", err))
+		}
+
 		log.Info("[main] ReTag starts")
 		if err := commands.ReTag(ctx, log, metrics, bd.DiscovererName, cfgParams.CmdDeadlineDuration); err != nil {
 			log.Error(err, "[main] unable to run ReTag")

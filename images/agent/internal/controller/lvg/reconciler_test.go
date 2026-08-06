@@ -35,6 +35,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
@@ -615,7 +616,13 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			assert.Equal(t, internal.UpdateReconcile, actual)
 		})
 
-		t.Run("returns_delete", func(t *testing.T) {
+		// Teardown is dispatched by Reconcile, ahead of the spec validation
+		// runEventReconcile sits behind, so a resource being deleted must not be
+		// claimed here. The "none" branch rests on exactly this: it reads a resource
+		// with no reconcile path as "the cache disagrees with the node" and writes a
+		// condition saying so, which is the wrong thing to say about a Volume Group
+		// nobody is asking for any more.
+		t.Run("returns_none_while_being_deleted", func(t *testing.T) {
 			r := setupReconciler()
 
 			const vgName = "test-vg"
@@ -634,7 +641,8 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 			r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
 
 			actual, _ := r.identifyLVGReconcileFunc(ctx, lvg)
-			assert.Equal(t, internal.DeleteReconcile, actual)
+			assert.Equal(t, internal.ReconcileType("none"), actual,
+				"deletion is dispatched by Reconcile before the spec is validated; see the delete branch there")
 		})
 	})
 
@@ -1246,24 +1254,6 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 			assert.Equal(t, v1.ConditionTrue, lvg.Status.Conditions[0].Status)
 			assert.Equal(t, curTime.Unix(), lvg.Status.Conditions[0].LastTransitionTime.Unix())
-		})
-	})
-
-	t.Run("shouldReconcileLVGByDeleteFunc", func(t *testing.T) {
-		t.Run("returns_true", func(t *testing.T) {
-			r := setupReconciler()
-			lvg := &v1alpha1.LVMVolumeGroup{}
-			lvg.DeletionTimestamp = &v1.Time{}
-
-			assert.True(t, r.shouldReconcileLVGByDeleteFunc(lvg))
-		})
-
-		t.Run("returns_false", func(t *testing.T) {
-			r := setupReconciler()
-			lvg := &v1alpha1.LVMVolumeGroup{}
-			lvg.DeletionTimestamp = nil
-
-			assert.False(t, r.shouldReconcileLVGByDeleteFunc(lvg))
 		})
 	})
 
@@ -2698,4 +2688,226 @@ func TestValidateLVGForUpdateFunc_CountsNewFileDeviceSpaceForThinPools(t *testin
 		valid, _, _ := r.validateLVGForUpdateFunc(context.Background(), makeLVG(status), map[string]v1alpha1.BlockDevice{})
 		assert.False(t, valid)
 	})
+}
+
+// The delete path removes the Volume Group BY NAME, and a name is not a handle.
+// vgRemovalAllowed is what stands between a leftover resource and somebody else's
+// storage; every case below was met on a live cluster.
+func TestVGRemovalAllowed(t *testing.T) {
+	const (
+		lvgName = "lvg-ours"
+		vgName  = "vg-1"
+		ourUUID = "uuid-ours"
+	)
+
+	newLVG := func(statusUUID string) *v1alpha1.LVMVolumeGroup {
+		return &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: lvgName},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{ActualVGNameOnTheNode: vgName},
+			Status:     v1alpha1.LVMVolumeGroupStatus{VGUuid: statusUUID},
+		}
+	}
+	withVGs := func(vgs ...internal.VGData) *Reconciler {
+		r := setupReconciler()
+		r.sdsCache.StoreVGs(vgs, bytes.Buffer{})
+		return r
+	}
+
+	t.Run("no VG of that name on the node — nothing to guard, the caller no-ops", func(t *testing.T) {
+		r := withVGs(internal.VGData{VGName: "someone-else", VGUUID: "u"})
+		why, allowed := r.vgRemovalAllowed(newLVG(ourUUID))
+		assert.True(t, allowed, why)
+	})
+
+	t.Run("our own VG is removed as before", func(t *testing.T) {
+		r := withVGs(internal.VGData{
+			VGName: vgName, VGUUID: ourUUID,
+			VGTags: "storage.deckhouse.io/enabled=true,storage.deckhouse.io/lvmVolumeGroupName=" + lvgName,
+		})
+		why, allowed := r.vgRemovalAllowed(newLVG(ourUUID))
+		assert.True(t, allowed, why)
+	})
+
+	// The 400-odd stale resources that all named one live VG: the first delete would
+	// have vgremove'd it out from under the resource that owns it.
+	t.Run("a VG tagged for another LVMVolumeGroup is left alone", func(t *testing.T) {
+		r := withVGs(internal.VGData{
+			VGName: vgName, VGUUID: "uuid-theirs",
+			VGTags: "storage.deckhouse.io/enabled=true,storage.deckhouse.io/lvmVolumeGroupName=lvg-someone-else",
+		})
+		why, allowed := r.vgRemovalAllowed(newLVG(""))
+		assert.False(t, allowed)
+		assert.Contains(t, why, "lvg-someone-else")
+	})
+
+	// Shared SAN: the same VG shows up in one node's listing on one scan and another
+	// node's on the next, so a stale resource must not remove it when the LUN arrives.
+	t.Run("a different VG under the same name is left alone", func(t *testing.T) {
+		r := withVGs(internal.VGData{VGName: vgName, VGUUID: "uuid-a-different-vg"})
+		why, allowed := r.vgRemovalAllowed(newLVG(ourUUID))
+		assert.False(t, allowed)
+		assert.Contains(t, why, "uuid-a-different-vg")
+		assert.Contains(t, why, ourUUID)
+	})
+
+	t.Run("a duplicated name is never removed by name", func(t *testing.T) {
+		r := withVGs(
+			internal.VGData{VGName: vgName, VGUUID: ourUUID},
+			internal.VGData{VGName: vgName, VGUUID: "uuid-the-guests"},
+		)
+		why, allowed := r.vgRemovalAllowed(newLVG(ourUUID))
+		assert.False(t, allowed)
+		assert.Contains(t, why, "answer to this name")
+	})
+
+	// Both honest cases keep the documented behaviour: a Volume Group an
+	// administrator handed over carries no name tag, and one that never got as far
+	// as a status has nothing to compare a UUID against.
+	t.Run("an untagged VG is still removed", func(t *testing.T) {
+		r := withVGs(internal.VGData{VGName: vgName, VGUUID: ourUUID})
+		why, allowed := r.vgRemovalAllowed(newLVG(""))
+		assert.True(t, allowed, why)
+	})
+
+	t.Run("a managed VG with no name tag is still removed", func(t *testing.T) {
+		r := withVGs(internal.VGData{
+			VGName: vgName, VGUUID: ourUUID,
+			VGTags: "storage.deckhouse.io/enabled=true",
+		})
+		why, allowed := r.vgRemovalAllowed(newLVG(ourUUID))
+		assert.True(t, allowed, why)
+	})
+}
+
+// A resource being deleted must reach the delete path even when its spec no longer
+// validates. Gating teardown behind spec validation is how a hundred and fifty-five
+// LVMVolumeGroups ended up in Terminating for good: their blockDeviceSelector
+// matched nothing, so every reconcile set ValidationFailed and returned, the
+// finalizer was never dropped, and a cluster policy forbids removing it by hand.
+func TestDeletionIsNotGatedBySpecValidation(t *testing.T) {
+	ctx := context.Background()
+	const (
+		lvgName = "lvg-being-deleted"
+		vgName  = "vg-not-ours"
+		node    = "test_node"
+	)
+
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{
+			Name:       lvgName,
+			Finalizers: []string{internal.SdsNodeConfiguratorFinalizer},
+		},
+		Spec: v1alpha1.LVMVolumeGroupSpec{
+			ActualVGNameOnTheNode: vgName,
+			Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: node},
+			// A selector that matches nothing: exactly the state the stuck resources
+			// were in, and the reason the old code never got past validation.
+			BlockDeviceSelector: &v1.LabelSelector{
+				MatchLabels: map[string]string{"kubernetes.io/metadata.name": "dev-that-does-not-exist"},
+			},
+		},
+	}
+
+	r := setupReconciler()
+	assert.NoError(t, r.cl.Create(ctx, lvg))
+
+	// The reconciler reads its object out of the request, exactly as the informer
+	// delivers it, so the fixture is a copy carrying a deletionTimestamp — which is
+	// what the informer hands over for a resource whose deletion is being held by a
+	// finalizer. (The fake client cannot produce that state itself: it drops the
+	// object on Delete instead of honouring the finalizer.)
+	deleting := lvg.DeepCopy()
+	now := v1.Now()
+	deleting.DeletionTimestamp = &now
+
+	// The VG on the node belongs to somebody else, so the delete path must not
+	// remove it — and must still finish, dropping the finalizer.
+	r.sdsCache.StoreVGs([]internal.VGData{{
+		VGName: vgName, VGUUID: "uuid-theirs",
+		VGTags: "storage.deckhouse.io/enabled=true,storage.deckhouse.io/lvmVolumeGroupName=lvg-somebody-else",
+	}}, bytes.Buffer{})
+
+	_, err := r.Reconcile(ctx, controller.ReconcileRequest[*v1alpha1.LVMVolumeGroup]{Object: deleting})
+	assert.NoError(t, err)
+
+	var after v1alpha1.LVMVolumeGroup
+	getErr := r.cl.Get(ctx, client.ObjectKey{Name: lvgName}, &after)
+	if errors2.IsNotFound(getErr) {
+		// The whole delete path ran through: nothing left to assert on.
+		return
+	}
+	assert.NoError(t, getErr, "unexpected error reading the resource back")
+
+	// What has to hold is that the reconcile got past validation and into teardown,
+	// and that it recorded why the Volume Group was left where it is. The finalizer
+	// mechanics are the fake client's business — it does not honour them — so this
+	// asserts the decision, not the bookkeeping.
+	var applied *v1.Condition
+	for i := range after.Status.Conditions {
+		if after.Status.Conditions[i].Type == internal.TypeVGConfigurationApplied {
+			applied = &after.Status.Conditions[i]
+			break
+		}
+	}
+	if assert.NotNil(t, applied, "the reconcile must say something about this resource") {
+		assert.NotEqual(t, internal.ReasonValidationFailed, applied.Reason,
+			"a resource being deleted must not be parked on spec validation: %s", applied.Message)
+		assert.Equal(t, internal.ReasonTerminating, applied.Reason,
+			"reaching Terminating is the whole point: the old code returned at ValidationFailed and never got here")
+		// The message is not asserted here. With this fixture the resource in the
+		// store carries no deletionTimestamp — only the copy handed to Reconcile does,
+		// which is how the informer delivers it — so the fake client rejects the
+		// condition write with "metadata.deletionTimestamp field is immutable" and the
+		// agent records that rejection as the message. The wording of the refusal
+		// itself is pinned by TestVGRemovalAllowed.
+	}
+}
+
+// Teardown that has to come back must come back on its own interval.
+//
+// controller-runtime ignores a non-zero Result whenever the returned error is
+// non-nil and falls back to the workqueue's exponential backoff, which climbs to
+// sixteen minutes after a run of failures — so returning both is the same as
+// returning neither, and the LVMVolumeGroup this whole path exists to unstick
+// waits that long between attempts. The error is reported through the log; the
+// interval is what the reconcile result carries.
+func TestDeletionRequeuesOnItsOwnInterval(t *testing.T) {
+	ctx := context.Background()
+	const (
+		lvgName = "lvg-requeue-on-delete"
+		vgName  = "vg-ours"
+		node    = "test_node"
+	)
+
+	r := setupReconciler()
+
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{
+			Name:       lvgName,
+			Finalizers: []string{internal.SdsNodeConfiguratorFinalizer},
+		},
+		Spec: v1alpha1.LVMVolumeGroupSpec{
+			ActualVGNameOnTheNode: vgName,
+			Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: node},
+		},
+	}
+	assert.NoError(t, r.cl.Create(ctx, lvg))
+
+	// The VG is ours to remove — no owner tag, nothing else answers to the name —
+	// so the delete path commits to vgremove and fails there: the PV cache is
+	// empty, which deleteVGIfExist refuses to act on. That is a (requeue, error)
+	// answer, the combination this test is about.
+	r.sdsCache.StoreVGs([]internal.VGData{{VGName: vgName, VGUUID: "uuid-ours"}}, bytes.Buffer{})
+	r.sdsCache.StorePVs(nil, bytes.Buffer{})
+
+	deleting := lvg.DeepCopy()
+	now := v1.Now()
+	deleting.DeletionTimestamp = &now
+
+	res, err := r.Reconcile(ctx, controller.ReconcileRequest[*v1alpha1.LVMVolumeGroup]{Object: deleting})
+
+	assert.NoError(t, err,
+		"a non-nil error here makes controller-runtime discard RequeueAfter and back off instead")
+	assert.Equal(t, r.requeueInterval(), res.RequeueAfter,
+		"the delete path asked to come back; the interval must survive the return")
 }

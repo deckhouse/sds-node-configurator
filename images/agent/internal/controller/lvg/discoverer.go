@@ -60,6 +60,12 @@ type Discoverer struct {
 	// utils.HostNsenterCanonicalResolver; overridable in tests, mirroring
 	// Reconciler.resolver.
 	resolver utils.CanonicalPathResolver
+	// refusedImports maps a Volume Group on this node to the reason its import was
+	// refused on the previous pass, so the reason is logged when it appears or
+	// changes rather than once per scan interval for as long as it holds. The
+	// alertable form of the same fact is the lvm_volume_group_import_refused_total
+	// counter — this is only about the log.
+	refusedImports map[string]string
 }
 
 type DiscovererConfig struct {
@@ -100,6 +106,8 @@ func NewDiscoverer(
 		cfg:      cfg,
 		commands: commands,
 		resolver: utils.HostNsenterCanonicalResolver,
+
+		refusedImports: make(map[string]string),
 	}
 }
 
@@ -230,6 +238,12 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 		return true
 	}
 
+	// Rebuilt from scratch every pass rather than added to, so a Volume Group that
+	// stops being refused — the tag was fixed, the resource was deleted, the LUN
+	// went away — drops out and the next refusal of it is reported afresh. Keyed by
+	// the VG name on this node, so it is bounded by what the node can see.
+	refusedThisPass := make(map[string]string, len(d.refusedImports))
+
 	for _, candidate := range candidates {
 		// A candidate whose file devices could not all be classified describes the
 		// node incompletely, and every use below turns it into a claim: an update
@@ -309,9 +323,42 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 					continue
 				}
 
-				d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the name %s recorded in the tag of VG %s is already taken by the LVMVolumeGroup of VG %s; generating a new one",
-					candidate.LVMVGName, candidate.ActualVGNameOnTheNode, taken.Spec.ActualVGNameOnTheNode))
-				candidate.LVMVGName = generateLVMVGName()
+				// Refused, not renamed. Minting a generated name here and creating the
+				// resource anyway is an unbounded loop: the name is random, so the next
+				// cycle finds no resource for this Volume Group either and creates
+				// another one. On a cluster where this fired it produced ninety
+				// LMVolumeGroups for one Volume Group inside four seconds and about nine
+				// hundred over a day, every one of them Pending and never reconcilable.
+				//
+				// The loop needs shared storage to get going, which is ordinary here: a
+				// LUN-backed Volume Group is presented to several hosts, the
+				// LVMVolumeGroup for it belongs to one of them, and the agents on the
+				// others do not find it in their per-node map — filteredLVGs is keyed by
+				// the VG name of the resources on THIS node — so they all try to import
+				// what is already owned.
+				//
+				// A Volume Group whose tag names an existing resource has an owner, and
+				// that is the answer regardless of which node is asking. The other way to
+				// get here is one tag on two Volume Groups, which is a mistake to report
+				// rather than paper over with a name nobody chose.
+				//
+				// The refusal is terminal and leaves nothing in the API to look at:
+				// there is no resource for this Volume Group, and the LVMVolumeGroup
+				// whose name the tag claims is healthy on its own node and must not be
+				// marked otherwise. The counter is what an operator can alert on; the
+				// log line carries the detail, and only when the detail changes —
+				// repeating it every scan interval buries the first, useful copy.
+				why := importRefusalReason(candidate, taken)
+				d.metrics.LVMVolumeGroupImportRefusedTotal(candidate.ActualVGNameOnTheNode, candidate.LVMVGName).Inc()
+				refusedThisPass[candidate.ActualVGNameOnTheNode] = why
+				if d.refusedImports[candidate.ActualVGNameOnTheNode] == why {
+					d.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] still not importing VG %s: %s",
+						candidate.ActualVGNameOnTheNode, why))
+				} else {
+					d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] not importing VG %s: %s",
+						candidate.ActualVGNameOnTheNode, why))
+				}
+				continue
 			}
 
 			d.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is not yet created. Create it", candidate.LVMVGName))
@@ -345,6 +392,8 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 			d.log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] created new APILVMVolumeGroup, name: "%s"`, createdLvg.Name))
 		}
 	}
+
+	d.refusedImports = refusedThisPass
 
 	if shouldRequeue {
 		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] some problems have been occurred while iterating the lvmvolumegroup resources. Retry the reconcile in %s", d.cfg.VolumeGroupScanInterval.String()))
@@ -976,20 +1025,45 @@ func removeDuplicates(strList []string) []string {
 func (d *Discoverer) sortThinPoolIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string]map[string]string {
 	var lvIssuesByVG = make(map[string]map[string]string, len(lvs))
 
+	// One map per Volume Group, created once and added to. Re-creating it per
+	// Logical Volume — which is what this did — keeps only whichever LV came last
+	// in the listing, so a Volume Group with several unhealthy thin pools reports
+	// one of them and the operator fixes that one, waits, and gets a different
+	// message with no sign the list was ever longer.
+	issuesOf := func(lv internal.LVData) map[string]string {
+		key := lv.VGName + lv.VGUuid
+		if issues, ok := lvIssuesByVG[key]; ok {
+			return issues
+		}
+		issues := make(map[string]string, len(lvs))
+		lvIssuesByVG[key] = issues
+		return issues
+	}
+
 	for _, lv := range lvs {
 		_, cmd, stdErr, err := d.commands.GetLV(lv.VGName, lv.LVName)
 		log.Debug(fmt.Sprintf("[sortThinPoolIssuesByVG] runs cmd: %s", cmd))
 
 		if err != nil {
 			log.Error(err, fmt.Sprintf(`[sortThinPoolIssuesByVG] unable to run lvs command for lv, name: "%s"`, lv.LVName))
-			lvIssuesByVG[lv.VGName+lv.VGUuid] = make(map[string]string, len(lvs))
-			lvIssuesByVG[lv.VGName+lv.VGUuid][lv.LVName] = err.Error()
+			issuesOf(lv)[lv.LVName] = err.Error()
 		}
 
 		if stdErr.Len() != 0 {
 			log.Error(errors.New(stdErr.String()), fmt.Sprintf(`[sortThinPoolIssuesByVG] lvs command for lv "%s" has stderr: `, lv.LVName))
-			lvIssuesByVG[lv.VGName+lv.VGUuid] = make(map[string]string, len(lvs))
-			lvIssuesByVG[lv.VGName+lv.VGUuid][lv.LVName] = stdErr.String()
+			// Logged whole above, attributed in part: only what lvm said about this
+			// Logical Volume may become this Volume Group's health. See
+			// utils.ObjectDiagnostics.
+			if aboutTheLV := utils.ObjectDiagnostics(cmd, stdErr); aboutTheLV.Len() != 0 {
+				// Appended to whatever the command's own error already said, rather
+				// than replacing it: a failed lvs that also printed a diagnostic about
+				// this Logical Volume is two facts about it, not one.
+				if existing := issuesOf(lv)[lv.LVName]; existing != "" {
+					issuesOf(lv)[lv.LVName] = existing + "\n" + aboutTheLV.String()
+				} else {
+					issuesOf(lv)[lv.LVName] = aboutTheLV.String()
+				}
+			}
 			stdErr.Reset()
 		}
 	}
@@ -1011,7 +1085,9 @@ func (d *Discoverer) sortPVIssuesByVG(log logger.Logger, pvs []internal.PVData) 
 
 		if stdErr.Len() != 0 {
 			log.Error(errors.New(stdErr.String()), fmt.Sprintf(`[sortPVIssuesByVG] pvs command for pv "%s" has stderr: %s`, pv.PVName, stdErr.String()))
-			pvIssuesByVG[pv.VGName+pv.VGUuid] = append(pvIssuesByVG[pv.VGName+pv.VGUuid], stdErr.String())
+			if aboutThePV := utils.ObjectDiagnostics(cmd, stdErr); aboutThePV.Len() != 0 {
+				pvIssuesByVG[pv.VGName+pv.VGUuid] = append(pvIssuesByVG[pv.VGName+pv.VGUuid], aboutThePV.String())
+			}
 			stdErr.Reset()
 		}
 	}
@@ -1031,7 +1107,9 @@ func (d *Discoverer) sortVGIssuesByVG(log logger.Logger, vgs []internal.VGData) 
 
 		if stdErr.Len() != 0 {
 			log.Error(errors.New(stdErr.String()), fmt.Sprintf(`[sortVGIssuesByVG] vgs command for vg "%s" has stderr: `, vg.VGName))
-			vgIssues[vg.VGName+vg.VGUUID] = stdErr.String()
+			if aboutTheVG := utils.ObjectDiagnostics(cmd, stdErr); aboutTheVG.Len() != 0 {
+				vgIssues[vg.VGName+vg.VGUUID] = aboutTheVG.String()
+			}
 			stdErr.Reset()
 		}
 	}
@@ -1730,6 +1808,27 @@ func convertStatusThinPools(lvg v1alpha1.LVMVolumeGroup, thinPools []internal.LV
 	}
 
 	return result, nil
+}
+
+// importRefusalReason explains why a Volume Group whose owner tag names an existing
+// LVMVolumeGroup must not be imported under a new name.
+//
+// Separated from the discovery loop so the wording — the only thing an operator
+// gets — is testable, and because the two cases it distinguishes are diagnosed
+// completely differently.
+func importRefusalReason(candidate internal.LVMVolumeGroupCandidate, taken v1alpha1.LVMVolumeGroup) string {
+	why := fmt.Sprintf("its %s tag names the LVMVolumeGroup %s, which already exists", internal.LVMVolumeGroupTag, candidate.LVMVGName)
+	if taken.Spec.ActualVGNameOnTheNode == candidate.ActualVGNameOnTheNode {
+		return why + fmt.Sprintf(" for the same VG on node %s — a Volume Group on shared storage must not be imported twice."+
+			" Nothing is wrong if that node is the one serving it; otherwise move the LVMVolumeGroup to this node",
+			taken.Spec.Local.NodeName)
+	}
+	// The remedy belongs in the message for the same reason it does in
+	// refuseFileBackedImport: this is a terminal refusal, and the operator's only
+	// other source is a metric that says a count and not what to do about it.
+	return why + fmt.Sprintf(" for VG %s — the tag is on two Volume Groups."+
+		" Retag one of them with vgchange --deltag/--addtag, or delete the LVMVolumeGroup that no longer describes its Volume Group",
+		taken.Spec.ActualVGNameOnTheNode)
 }
 
 func generateLVMVGName() string {

@@ -159,7 +159,11 @@ var _ = Describe("LVMVolumeGroup file-backed devices across a node reboot",
 				g.Expect(fdsAfter[0].FilePath).To(Equal(filePath), "the deterministic backing file must be reused")
 				g.Expect(fdsAfter[0].LoopDevice).To(HavePrefix("/dev/loop"))
 			}, fdRebootBackTimeout, 15*time.Second).Should(Succeed())
-			fdExpectNoFalseConditions(&recovered)
+
+			// Waited for, not sampled: the Eventually above returns as soon as the
+			// phase is Ready and the file device is back, which happens before the
+			// thin pool is active and before the discovery pass that clears VGReady.
+			fdEventuallyNoFalseConditions(ctx, k8sClient, lvgName, fdRebootBackTimeout)
 
 			By("Verifying the thin-pool on the file-backed VG is usable again")
 			present, lvsOut, err := fdThinPoolDataLVPresentOnNode(ctx, cl, targetNode, vgName, thinPoolName)

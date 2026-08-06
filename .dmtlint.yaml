@@ -20,6 +20,17 @@ linters-settings:
           # code and carries its own headers; .helmignore alone does not keep
           # this linter out of it.
           - _storage-e2e/
+          # The CVE-scan tooling, dropped into the module's workspace by the
+          # reusable scan job. Same reused-workspace story as above and the same
+          # remedy: the Lint job checks out with clean:false, so whatever an
+          # earlier job on that runner left behind is still there when dmt walks
+          # the directory. Which runner picked the job then decides whether Lint
+          # is red, for a tree that has not changed.
+          - cve-scan/
+        files:
+          - cve_scan.sh
+          - process_digest.py
+          - send_report.py
   no-cyrillic:
     exclude-rules:
       directories:

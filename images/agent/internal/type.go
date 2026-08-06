@@ -94,6 +94,15 @@ type LoopBackingFile struct {
 	Deleted bool
 }
 
+// LoopDeviceEntry is one line of the node's loop-device table: the device and the
+// file behind it. Enumerating both together is what lets the agent tell its own
+// file-backed devices from a virtual machine's disk, which is the difference
+// between a loop device LVM may read and one it must not touch.
+type LoopDeviceEntry struct {
+	Device  string
+	Backing LoopBackingFile
+}
+
 // FilesystemSpace is what one `stat -f` reports about the filesystem holding a
 // directory the agent is about to allocate a backing file in.
 type FilesystemSpace struct {

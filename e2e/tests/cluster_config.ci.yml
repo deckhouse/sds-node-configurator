@@ -52,8 +52,5 @@ clusterDefinition:
           # is only dumped at TRACE, which the module's logLevel enum does not
           # expose.)
           logLevel: DEBUG
-          # Bootstrap with netlink discovery so host-pid / mountinfo coverage
-          # exercises /proc/1/mountinfo (lsblk path cannot see host mounts).
-          enableNetlinkBlockDeviceDiscovery: true
         modulePullOverride: "${E2E_MODULE_IMAGE_TAG}"
         dependencies: []

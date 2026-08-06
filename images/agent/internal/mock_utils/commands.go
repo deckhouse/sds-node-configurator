@@ -498,6 +498,22 @@ func (mr *MockCommandsMockRecorder) LVChangeDelTag(ctx, lv, tag any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVChangeDelTag", reflect.TypeOf((*MockCommands)(nil).LVChangeDelTag), ctx, lv, tag)
 }
 
+// ListLoopDevices mocks base method.
+func (m *MockCommands) ListLoopDevices(ctx context.Context) (string, []internal.LoopDeviceEntry, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListLoopDevices", ctx)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].([]internal.LoopDeviceEntry)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ListLoopDevices indicates an expected call of ListLoopDevices.
+func (mr *MockCommandsMockRecorder) ListLoopDevices(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListLoopDevices", reflect.TypeOf((*MockCommands)(nil).ListLoopDevices), ctx)
+}
+
 // PVScan mocks base method.
 func (m *MockCommands) PVScan(ctx context.Context) (string, error) {
 	m.ctrl.T.Helper()

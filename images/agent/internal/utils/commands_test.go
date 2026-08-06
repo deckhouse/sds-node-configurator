@@ -764,3 +764,123 @@ func TestParseStatfsSpace(t *testing.T) {
 		})
 	}
 }
+
+// An lvm report is not necessarily pure JSON. lvm prints part of its diagnostics
+// on stdout — log_print/log_warn advisories — and with --reportformat json they
+// land wherever lvm emitted them, which is INSIDE the report. This is the verbatim
+// stdout of `lvm vgs --reportformat json` from a node whose /etc/lvm/archive had
+// grown past lvm's pruning threshold; before reportJSON it failed to parse on
+// every scan with `invalid character 'C' looking for beginning of value`, and that
+// stopped the whole cache-filling loop on that node.
+func TestReportSurvivesLVMAdvisoriesOnStdout(t *testing.T) {
+	const polluted = `  {
+      "report": [
+  Consider pruning ceph-vg VG archive with more then 12 MiB in 8929 files (check archiving is needed in lvm.conf).
+  Consider pruning vg-1 VG archive with more then 1032 MiB in 11272 files (check archiving is needed in lvm.conf).
+          {
+              "vg": [
+                  {"vg_name":"vg-1", "pv_count":"2", "lv_count":"329", "snap_count":"0", "vg_attr":"wz--n-", "vg_size":"11522252210176", "vg_free":"1322367582208", "vg_uuid":"GzKqS7-TW1a-W21I-yZK2-FlTu-WC7c-Iz24OW", "vg_tags":"storage.deckhouse.io/enabled=true", "vg_shared":"", "vg_extent_size":"4194304"}
+              ]
+          }
+      ]
+  }
+`
+
+	t.Run("the report is parsed and nothing is lost", func(t *testing.T) {
+		vgs, err := unmarshalVGs([]byte(polluted))
+		assert.NoError(t, err)
+		if assert.Len(t, vgs, 1) {
+			assert.Equal(t, "vg-1", vgs[0].VGName)
+			assert.Equal(t, "GzKqS7-TW1a-W21I-yZK2-FlTu-WC7c-Iz24OW", vgs[0].VGUUID)
+			assert.Equal(t, int64(11522252210176), vgs[0].VGSize.Value())
+		}
+	})
+
+	t.Run("a clean report is handed through untouched", func(t *testing.T) {
+		const clean = `{"report":[{"vg":[{"vg_name":"vg-1","vg_uuid":"u-1"}]}]}`
+		assert.Equal(t, []byte(clean), reportJSON([]byte(clean)))
+	})
+
+	t.Run("the same holds for the PV and LV reports", func(t *testing.T) {
+		pvs, err := unmarshalPVs([]byte(`  {
+      "report": [
+  Consider pruning vg-1 VG archive with more then 1032 MiB in 11272 files (check archiving is needed in lvm.conf).
+          {
+              "pv": [
+                  {"pv_name":"/dev/nvme0n1", "vg_name":"vg-1", "pv_size":"1", "pv_uuid":"pv-1", "vg_uuid":"vg-uuid-1"}
+              ]
+          }
+      ]
+  }
+`))
+		assert.NoError(t, err)
+		if assert.Len(t, pvs, 1) {
+			assert.Equal(t, "/dev/nvme0n1", pvs[0].PVName)
+		}
+
+		lvs, err := unmarshalLVs([]byte(`  {
+      "report": [
+  Consider pruning vg-1 VG archive with more then 1032 MiB in 11272 files (check archiving is needed in lvm.conf).
+          {
+              "lv": [
+                  {"lv_name":"pvc-1", "vg_name":"vg-1", "vg_uuid":"vg-uuid-1", "lv_size":"1"}
+              ]
+          }
+      ]
+  }
+`))
+		assert.NoError(t, err)
+		if assert.Len(t, lvs, 1) {
+			assert.Equal(t, "pvc-1", lvs[0].LVName)
+		}
+	})
+
+	t.Run("a parse failure names what lvm printed", func(t *testing.T) {
+		// Not an advisory and not JSON: whatever this is, the error has to carry it,
+		// because the buffer it came from is dropped right after.
+		_, err := unmarshalVGs([]byte("\x00\x01 not a report at all"))
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "lvm printed on stdout:",
+				"the parse error must quote stdout, otherwise the only way to learn what lvm said is to reproduce the command on the node")
+			assert.Contains(t, err.Error(), "not a report at all")
+		}
+	})
+}
+
+// lvm prints the duplicate-VG-name warning on every invocation, whatever object
+// the command asked about, so it must never become that object's health. A `data`
+// VG inside one guest's disk colliding with another guest's `data` is what took
+// this node's own vg-1 to NotReady.
+func TestObjectDiagnosticsDropsNodeWideWarnings(t *testing.T) {
+	const (
+		dupWarning = `  WARNING: VG name data is used by VGs TNiDBi-Y1g2-GUM5-9Gov-WuN5-GR3j-8zz7aE and x4wwVz-2g1i-7ntB-eM0Q-88tg-zP08-e0bGiR.`
+		dupHint    = `  Fix duplicate VG names with vgrename uuid, a device filter, or system IDs.`
+		realIssue  = `  Couldn't find device with uuid abcd-1234.`
+	)
+
+	filter := func(lines ...string) string {
+		var buf bytes.Buffer
+		for _, l := range lines {
+			buf.WriteString(l + "\n")
+		}
+		out := ObjectDiagnostics("vgs vg-1", buf)
+		return out.String()
+	}
+
+	t.Run("a node-wide duplicate-name warning is not about the queried object", func(t *testing.T) {
+		assert.Empty(t, filter(dupWarning, dupHint))
+		assert.Empty(t, filter(dupWarning, dupHint, dupWarning, dupHint))
+	})
+
+	t.Run("a real diagnostic still survives, alongside the dropped ones", func(t *testing.T) {
+		got := filter(dupWarning, dupHint, realIssue)
+		assert.Contains(t, got, "Couldn't find device with uuid")
+		assert.NotContains(t, got, "is used by VGs")
+	})
+
+	t.Run("the patterns are anchored to a whole line", func(t *testing.T) {
+		const quoting = `  Failed: vgs said "WARNING: VG name data is used by VGs a and b." and then aborted`
+		assert.NotEmpty(t, filter(quoting),
+			"a line embedding the warning is a diagnostic of its own")
+	})
+}

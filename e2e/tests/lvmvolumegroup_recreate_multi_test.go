@@ -352,7 +352,13 @@ var _ = Describe("LVMVolumeGroup recreate & multiple", Label("sds-node-configura
 				for i := range disks {
 					var cur v1alpha1.LVMVolumeGroup
 					g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: disks[i].lvgName}, &cur)).To(Succeed())
-					g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady), "LVMVolumeGroup %s phase", disks[i].lvgName)
+					// With the conditions in the message a timeout here says which of
+					// the several LVMVolumeGroups is stuck and what the agent thinks
+					// about it; without them the failure is one word and every
+					// diagnosis afterwards is a guess.
+					g.Expect(cur.Status.Phase).To(Equal(v1alpha1.PhaseReady),
+						"LVMVolumeGroup %s (VG %s, BlockDevice %s) did not become Ready; %s",
+						disks[i].lvgName, disks[i].vgName, disks[i].bdName, describeLVGStatus(&cur))
 				}
 			}, lvmVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
 

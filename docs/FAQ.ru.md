@@ -252,7 +252,7 @@ Loop-устройство транслирует discard в `FALLOC_FL_PUNCH_HOL
 
 На пару free/total стоит завести алерт. Файлы создаются с предварительным выделением места, поэтому модуль держит фиксированную долю файловой системы, которая ему не принадлежит (по умолчанию — корня узла). Агент оставляет `fileDevicesMinFreeSpacePercent` этой файловой системы вне собственной досягаемости, но ничто не мешает заполнить её чем-то другим позже, а её исчерпание приводит к вытеснению подов по `DiskPressure` на всём узле. Алертить стоит на падение `free / total` ниже резерва:
 
-```
+```promql
 sds_node_configurator_file_devices_directory_free_bytes
   / sds_node_configurator_file_devices_directory_total_bytes < 0.15
 ```
