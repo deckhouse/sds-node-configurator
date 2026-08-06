@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
@@ -480,5 +481,48 @@ func TestReconstructFileDeviceSize(t *testing.T) {
 				}
 			}
 		}
+	})
+}
+
+// A Volume Group whose owner tag names an existing LVMVolumeGroup is not imported
+// under a generated name. Doing that was an unbounded loop: the name is random, so
+// the next cycle finds no resource for the Volume Group either and creates another
+// one — ninety LVMVolumeGroups for one VG in four seconds on the cluster where it
+// fired, about nine hundred over a day.
+//
+// The wording is what an operator gets, and the two cases need different actions,
+// so both are pinned here.
+func TestImportRefusalReason(t *testing.T) {
+	candidate := internal.LVMVolumeGroupCandidate{
+		LVMVGName:             "lvg-worker-07",
+		ActualVGNameOnTheNode: "vg-worker-07",
+	}
+
+	t.Run("the same VG already imported from another node — shared storage", func(t *testing.T) {
+		taken := v1alpha1.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: "lvg-worker-07"},
+			Spec: v1alpha1.LVMVolumeGroupSpec{
+				ActualVGNameOnTheNode: "vg-worker-07",
+				Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: "node-a"},
+			},
+		}
+		got := importRefusalReason(candidate, taken)
+		assert.Contains(t, got, "lvg-worker-07")
+		assert.Contains(t, got, "node-a")
+		assert.Contains(t, got, "shared storage")
+	})
+
+	t.Run("one tag on two different Volume Groups — an operator mistake to report", func(t *testing.T) {
+		taken := v1alpha1.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: "lvg-worker-07"},
+			Spec: v1alpha1.LVMVolumeGroupSpec{
+				ActualVGNameOnTheNode: "vg-something-else",
+				Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: "node-b"},
+			},
+		}
+		got := importRefusalReason(candidate, taken)
+		assert.Contains(t, got, "vg-something-else")
+		assert.Contains(t, got, "two Volume Groups")
+		assert.NotContains(t, got, "shared storage")
 	})
 }

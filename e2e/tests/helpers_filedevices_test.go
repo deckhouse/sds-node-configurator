@@ -94,8 +94,15 @@ const (
 	// VGConfigurationApplied. Validation runs before any node work, so this is short.
 	fdRejectionTimeout = 3 * time.Minute
 
-	// fdLVMConfig mirrors internal.LVMGlobalFilter + internal.LVMArchiveRetention,
-	// the --config the agent passes to every LVM command.
+	// fdLVMConfig is the --config the SPECS pass to LVM, and it is deliberately NOT
+	// the agent's own: internal.LVMGlobalFilter rejects /dev/loop*, and the agent
+	// re-admits, one device at a time, only the loops it attached itself
+	// (internal.LVMGlobalFilterAcceptingLoops). A spec has to do the opposite — build
+	// and inspect loop-backed Volume Groups the agent must never see, guests' disks
+	// included — so it keeps loop devices visible to itself. Do not "fix" this
+	// divergence by copying the agent's filter here: every foreign-loop and
+	// file-device spec sets up its fixture through these commands, and with loop
+	// devices filtered out the setup silently does nothing.
 	//
 	// It is mandatory for anything touching a file-backed VG: the module's
 	// NodeGroupConfiguration writes global_filter = ["r|^/dev/loop[0-9]+|"] into
@@ -406,6 +413,32 @@ func fdExpectNoFalseConditions(lvg *v1alpha1.LVMVolumeGroup) {
 		Expect(c.Status).NotTo(Equal(metav1.ConditionFalse),
 			"condition %s has status False: reason=%s message=%s", c.Type, c.Reason, c.Message)
 	}
+}
+
+// fdEventuallyNoFalseConditions waits until the LVMVolumeGroup has no condition in
+// the False state.
+//
+// fdExpectNoFalseConditions is a snapshot, and belongs after a helper that already
+// waited for a settled state. After something the node has to recover from, nothing
+// has settled: following a reboot the agent reattaches the loop, activates the Volume
+// Group, finds the thin pool still inactive and activates that too, and only the next
+// discovery pass clears VGReady. status.phase reaches Ready before all of that
+// finishes — so a snapshot taken right after "phase is Ready" catches the resource
+// mid-recovery. On one CI run it read "Unable to find VG ..." at the assertion and
+// "Unable to find ThinPool ..." a second later in the dump: two steps of a recovery
+// in progress, reported as a defect.
+func fdEventuallyNoFalseConditions(ctx context.Context, cl client.Client, name string, timeout time.Duration) {
+	GinkgoHelper()
+
+	var lvg v1alpha1.LVMVolumeGroup
+	Eventually(func(g Gomega) {
+		g.Expect(cl.Get(ctx, client.ObjectKey{Name: name}, &lvg)).To(Succeed())
+		for i := range lvg.Status.Conditions {
+			c := &lvg.Status.Conditions[i]
+			g.Expect(c.Status).NotTo(Equal(metav1.ConditionFalse),
+				"condition %s is still False: reason=%s message=%s", c.Type, c.Reason, c.Message)
+		}
+	}, timeout, 10*time.Second).Should(Succeed())
 }
 
 // fdDeleteLVGAndWaitGone deletes the LVMVolumeGroup and waits until its CR is gone. The

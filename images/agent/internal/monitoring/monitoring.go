@@ -235,6 +235,22 @@ var (
 		Name:      "file_devices_directory_total_bytes",
 		Help:      "Size of the filesystem holding spec.fileDevices backing files, in bytes.",
 	}, []string{"node", "directory"})
+
+	// A Volume Group the discoverer refuses to import leaves no other trace in the
+	// API: there is no resource for it, and the LVMVolumeGroup whose name its tag
+	// claims is healthy and must not be marked otherwise. Without this counter the
+	// only record is a line in one node's agent log, so `kubectl get lvg` looks
+	// clean while a Volume Group on the node is permanently unmanaged.
+	//
+	// A counter rather than a gauge because the state never resolves on its own:
+	// a non-zero rate is "this is happening now" and falls back to zero by itself
+	// once the tag is fixed, whereas a gauge set to 1 would need clearing by
+	// whichever pass stops seeing the Volume Group.
+	lvmVolumeGroupImportRefusedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "lvm_volume_group_import_refused_total",
+		Help:      "Number of times the discoverer refused to import a Volume Group because its owner tag names an existing LVMVolumeGroup.",
+	}, []string{"node", "volume_group", "lvg_name"})
 )
 
 func init() {
@@ -267,6 +283,7 @@ func init() {
 	metrics.Registry.MustRegister(fileDevicesDirectoryFreeBytes)
 	metrics.Registry.MustRegister(fileDevicesDirectoryAllocatedBytes)
 	metrics.Registry.MustRegister(fileDevicesDirectoryTotalBytes)
+	metrics.Registry.MustRegister(lvmVolumeGroupImportRefusedTotal)
 }
 
 type Metrics struct {
@@ -408,6 +425,14 @@ func (m *Metrics) LVGThinPoolAllocationLimitBytes(lvgName, volumeGroup, thinPool
 
 func (m *Metrics) LVMActivationTotal(volumeGroup, result string) prometheus.Counter {
 	return lvmActivationTotal.WithLabelValues(m.node, volumeGroup, result)
+}
+
+// LVMVolumeGroupImportRefusedTotal counts a Volume Group the discoverer will not
+// import. lvgName is the name its owner tag claims — the LVMVolumeGroup that
+// already holds it — so an operator reading the metric has both ends of the
+// conflict without going to the node's log.
+func (m *Metrics) LVMVolumeGroupImportRefusedTotal(volumeGroup, lvgName string) prometheus.Counter {
+	return lvmVolumeGroupImportRefusedTotal.WithLabelValues(m.node, volumeGroup, lvgName)
 }
 
 // isThinPool determines if an LVM logical volume is a thin pool

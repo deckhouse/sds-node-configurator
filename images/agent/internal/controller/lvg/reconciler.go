@@ -291,6 +291,40 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 		r.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] successfully removed the label %s from the LVMVolumeGroup %s", internal.LVGUpdateTriggerLabel, lvg.Name))
 	}
 
+	// Teardown runs before the spec is validated, and must.
+	//
+	// Everything below — listing BlockDevices by the selector, validating that the
+	// spec still describes them — exists to protect PROVISIONING. Gating deletion
+	// behind it means a resource whose selector matches nothing can never be
+	// deleted: the reconcile sets VGConfigurationApplied=ValidationFailed and
+	// returns, the delete path is never reached, the finalizer stays, and the
+	// resource sits in Terminating forever. With a cluster policy that forbids
+	// removing Deckhouse finalizers by hand (deny-deckhouse-finalizers), there is
+	// then no way out at all — which is the state a hundred and fifty-five
+	// LVMVolumeGroups were found in, all of them referring to BlockDevices that no
+	// longer exist, all of them asked to be deleted.
+	//
+	// A resource being deleted has nothing to validate: the question is not whether
+	// its spec is right but what to tear down, and that is answered from the node
+	// and the resource's own status (see vgRemovalAllowed).
+	if lvg.DeletionTimestamp != nil {
+		r.log.Info(fmt.Sprintf("[RunLVMVolumeGroupWatcherController] the LVMVolumeGroup %s is being deleted; running the delete path without validating the spec", lvg.Name))
+		shouldRequeue, err := r.reconcileLVGDeleteFunc(ctx, lvg)
+		if err != nil {
+			r.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupWatcherController] unable to delete the LVMVolumeGroup %s", lvg.Name))
+		}
+		// Returning the error here as well would throw the interval away:
+		// controller-runtime ignores a non-zero Result whenever the error is
+		// non-nil and falls back to the workqueue's exponential backoff, which
+		// climbs to sixteen minutes after a run of failures. Teardown is the one
+		// path that must not slow down under repeated failure, and the error is
+		// already reported above, so the interval is what travels out.
+		if shouldRequeue {
+			return controller.Result{RequeueAfter: r.requeueInterval()}, nil
+		}
+		return controller.Result{}, err
+	}
+
 	// blockDeviceSelector is optional: a file-only LVMVolumeGroup (only
 	// spec.fileDevices) carries no selector. Listing block devices with a
 	// nil selector would match EVERY BlockDevice on the node (the repository
@@ -402,15 +436,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 	return controller.Result{}, nil
 }
 
-// runEventReconcile dispatches to the create/update/delete path and reports how
-// long to wait before coming back; zero means "do not requeue".
+// runEventReconcile dispatches to the create or the update path and reports how
+// long to wait before coming back; zero means "do not requeue". Deletion is not
+// one of its cases: Reconcile runs the delete path itself, ahead of the spec
+// validation this function sits behind.
 //
 // A duration rather than a bool because not every retry deserves the same
 // interval. VolumeGroupScanInterval (5s by default) is the right cadence for
 // "something is in flight" and the wrong one for "an entry does not fit on this
 // node", which is a state that can persist indefinitely — see
-// noProgressRequeueAfter. The create and delete paths have no such distinction to
-// make and still answer yes/no.
+// noProgressRequeueAfter. The create path has no such distinction to make and
+// still answers yes/no.
 func (r *Reconciler) runEventReconcile(
 	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
@@ -426,10 +462,9 @@ func (r *Reconciler) runEventReconcile(
 	case internal.UpdateReconcile:
 		r.log.Info(fmt.Sprintf("[runEventReconcile] UpdateReconcile starts the reconciliation for the LVMVolumeGroup %s", lvg.Name))
 		return r.reconcileLVGUpdateFunc(ctx, lvg, blockDevices)
-	case internal.DeleteReconcile:
-		r.log.Info(fmt.Sprintf("[runEventReconcile] DeleteReconcile starts the reconciliation for the LVMVolumeGroup %s", lvg.Name))
-		shouldRequeue, err := r.reconcileLVGDeleteFunc(ctx, lvg)
-		return r.requeueIntervalIf(shouldRequeue), err
+	// There is deliberately no delete case. Teardown is dispatched by Reconcile
+	// before the spec is validated, so a resource with a deletionTimestamp never
+	// reaches here — which is the invariant the default branch below rests on.
 	default:
 		// Reaching this is not "nothing to do", it is "the cache disagrees with
 		// the node". The only way here is: the resource is not being deleted, its
@@ -530,6 +565,21 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 		return false, nil
 	}
 
+	// Whether the Volume Group on the node is this resource's to remove is decided
+	// before anything is removed. When it is not, the resource still goes away — it
+	// is a leftover and the operator asked for it to be deleted — but the storage
+	// stays and the condition says so.
+	if why, allowed := r.vgRemovalAllowed(lvg); !allowed {
+		r.log.Warning(fmt.Sprintf("[reconcileLVGDeleteFunc] not removing VG %s while deleting the LVMVolumeGroup %s: %s",
+			lvg.Spec.ActualVGNameOnTheNode, lvg.Name, why))
+		if err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating,
+			fmt.Sprintf("removing the resource without touching VG %s: %s", lvg.Spec.ActualVGNameOnTheNode, why)); err != nil {
+			r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
+			return true, err
+		}
+		return r.finishLVGDeletion(ctx, lvg)
+	}
+
 	r.log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] check if VG %s of the LVMVolumeGroup %s uses LVs", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 	usedLVs := r.getLVForVG(lvg.Spec.ActualVGNameOnTheNode)
 	if len(usedLVs) > 0 {
@@ -546,18 +596,33 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 	}
 
 	r.log.Debug(fmt.Sprintf("[reconcileLVGDeleteFunc] VG %s of the LVMVolumeGroup %s does not use any LV. Start to delete the VG", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
-	err := r.deleteVGIfExist(lvg.Spec.ActualVGNameOnTheNode)
-	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to delete VG %s", lvg.Spec.ActualVGNameOnTheNode))
-		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, err.Error())
-		if err != nil {
-			r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
-			return true, err
+	// The vgremove failure is what this function has to report, so it is kept in a
+	// variable of its own: assigning the condition write's result over it hands the
+	// caller a nil error whenever the write succeeds, which is every ordinary run
+	// of this branch.
+	if vgErr := r.deleteVGIfExist(lvg.Spec.ActualVGNameOnTheNode); vgErr != nil {
+		r.log.Error(vgErr, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to delete VG %s", lvg.Spec.ActualVGNameOnTheNode))
+		if condErr := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, vgErr.Error()); condErr != nil {
+			r.log.Error(condErr, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
+			return true, condErr
 		}
 
-		return true, err
+		return true, vgErr
 	}
 
+	return r.finishLVGDeletion(ctx, lvg)
+}
+
+// finishLVGDeletion is everything the delete path does once the question of the
+// Volume Group is settled: clean up the backing files this resource owns, drop the
+// finalizer, remove the resource.
+//
+// Shared by the two ways of getting here — the Volume Group was removed, or it was
+// somebody else's and deliberately left alone — because the resource has to go away
+// either way, with its own file devices cleaned up and nothing of anyone else's
+// touched. cleanupFileDevices is safe on the second path by construction: it only
+// acts on paths whose basename carries this LVMVolumeGroup's name.
+func (r *Reconciler) finishLVGDeletion(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
 	if err := r.cleanupFileDevices(ctx, lvg); err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLVGDeleteFunc] unable to clean up file devices for the LVMVolumeGroup %s", lvg.Name))
 		condErr := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, err.Error())
@@ -1491,10 +1556,8 @@ func (r *Reconciler) identifyLVGReconcileFunc(ctx context.Context, lvg *v1alpha1
 		return internal.UpdateReconcile, vgStateKnown
 	}
 
-	if r.shouldReconcileLVGByDeleteFunc(lvg) {
-		return internal.DeleteReconcile, vgStateKnown
-	}
-
+	// Deletion is not asked about here. Reconcile dispatches it directly, so a
+	// resource carrying a deletionTimestamp never gets this far.
 	return "none", vgStateKnown
 }
 
@@ -1607,10 +1670,6 @@ func (r *Reconciler) shouldReconcileLVGByUpdateFunc(lvg *v1alpha1.LVMVolumeGroup
 
 	vg := r.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode)
 	return vg != nil
-}
-
-func (r *Reconciler) shouldReconcileLVGByDeleteFunc(lvg *v1alpha1.LVMVolumeGroup) bool {
-	return lvg.DeletionTimestamp != nil
 }
 
 func (r *Reconciler) reconcileThinPoolsIfNeeded(
@@ -2147,6 +2206,72 @@ func (r *Reconciler) addLVGLabelIfNeeded(ctx context.Context, lvg *v1alpha1.LVMV
 	}
 
 	return true, nil
+}
+
+// vgRemovalAllowed answers whether the Volume Group named in lvg.Spec may be
+// removed from the node as part of deleting this resource, and if not, why not.
+//
+// It exists because the removal addresses the Volume Group BY NAME, and a name is
+// not a handle. Three ways that goes wrong, all of them seen on a live cluster:
+//
+//   - a leftover resource over somebody else's storage. Hundreds of stale
+//     LVMVolumeGroups named after e2e runs pointed at one live VG; the first delete
+//     would have vgremove'd it out from under the resource that owns it. The VG's
+//     own storage.deckhouse.io/lvmVolumeGroupName tag says who that is.
+//   - a Volume Group on shared storage. A LUN-backed VG is presented to several
+//     hosts, so the same VG appears in one node's listing on one scan and another
+//     node's on the next; a stale resource on the second host would remove it the
+//     moment the LUN arrives there. status.vgUuid is what pins the identity.
+//   - a duplicated name. Two Volume Groups answering to one name — a guest's LVM
+//     inside a disk this node can see is enough — and `vgremove <name>` is then a
+//     coin toss.
+//
+// The permissive answer is deliberate for the two honest cases: no Volume Group of
+// that name on the node (nothing to remove, and the caller no-ops), and a Volume
+// Group with no owner tag at all (a manually created one this module adopted, whose
+// removal on delete is the documented behaviour).
+func (r *Reconciler) vgRemovalAllowed(lvg *v1alpha1.LVMVolumeGroup) (string, bool) {
+	vgs, _ := r.sdsCache.GetVGs()
+
+	matched := make([]internal.VGData, 0, 1)
+	for _, vg := range vgs {
+		if vg.VGName == lvg.Spec.ActualVGNameOnTheNode {
+			matched = append(matched, vg)
+		}
+	}
+
+	switch len(matched) {
+	case 0:
+		return "", true
+	case 1:
+	default:
+		uuids := make([]string, 0, len(matched))
+		for _, vg := range matched {
+			uuids = append(uuids, vg.VGUUID)
+		}
+		return fmt.Sprintf("%d VGs on the node answer to this name (UUIDs: %s), so removing it by name would be a guess",
+			len(matched), strings.Join(uuids, ", ")), false
+	}
+
+	vg := matched[0]
+
+	// status.vgUuid is written when the agent creates or adopts the Volume Group, so
+	// a mismatch means the VG under this name is not the one this resource was
+	// serving. Empty status is not a mismatch: the resource never got that far.
+	if lvg.Status.VGUuid != "" && vg.VGUUID != lvg.Status.VGUuid {
+		return fmt.Sprintf("the VG under this name has VG_UUID=%s while the resource served %s, so it is a different Volume Group",
+			vg.VGUUID, lvg.Status.VGUuid), false
+	}
+
+	// The first return of ReadValueFromTags says whether the VG is managed at all,
+	// not whether the key was found, so the value is what has to be looked at. An
+	// empty owner covers both honest cases — an unmanaged Volume Group and a managed
+	// one carrying no name tag — and both keep the old behaviour.
+	if _, owner := utils.ReadValueFromTags(vg.VGTags, internal.LVMVolumeGroupTag); owner != "" && owner != lvg.Name {
+		return fmt.Sprintf("the VG is tagged %s=%s, so it belongs to that LVMVolumeGroup and not to this one", internal.LVMVolumeGroupTag, owner), false
+	}
+
+	return "", true
 }
 
 func checkIfVGExist(vgName string, vgs []internal.VGData) bool {

@@ -180,7 +180,14 @@ var _ = Describe("LVMVolumeGroup lifecycle with a second disk", Label("sds-node-
 			var readyOneDisk v1alpha1.LVMVolumeGroup
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: lvgName}, &readyOneDisk)).To(Succeed())
-				g.Expect(readyOneDisk.Status.Phase).To(Equal(v1alpha1.PhaseReady))
+				// The conditions are part of the failure, not a nicety. A bare
+				// "Pending is not Ready" after fifteen minutes cannot be told apart
+				// from a fixture that never delivered its disk, and this spec has
+				// timed out that way on a CI run whose neighbour created four
+				// LVMVolumeGroups on four fresh disks a minute earlier.
+				g.Expect(readyOneDisk.Status.Phase).To(Equal(v1alpha1.PhaseReady),
+					"LVMVolumeGroup %s (VG %s, BlockDevice %s) did not become Ready; %s",
+					lvgName, vgName, bd1.Name, describeLVGStatus(&readyOneDisk))
 			}, lvmVolumeGroupReadyTimeout, 10*time.Second).Should(Succeed())
 
 			baselineVGFree := readyOneDisk.Status.VGFree.Value()

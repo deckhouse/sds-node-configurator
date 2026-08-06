@@ -16,6 +16,11 @@ limitations under the License.
 
 package internal
 
+import (
+	"regexp"
+	"strings"
+)
+
 const (
 	// LVGUpdateTriggerLabel if you change this value, you must change its value in controller/pkg/block_device_labels_watcher.go as well
 	LVGUpdateTriggerLabel = "storage.deckhouse.io/update-trigger"
@@ -67,12 +72,25 @@ const (
 	// DRBD, NBD) so lvm does not even read PV labels from them
 	// when udev integration is unavailable.
 	//
-	// Loop devices are intentionally NOT rejected: the agent manages
-	// file-backed loop devices as LVM PVs (spec.fileDevices). Unmanaged
-	// loop-backed VGs never become candidates (the discoverer only adopts
-	// VGs tagged storage.deckhouse.io/enabled=true) and are additionally
-	// dropped from the cache by utils.FilterForeignLoopPVs so they cannot
-	// collide by name with a managed VG.
+	// Loop devices are rejected too, and this filter is therefore the
+	// FALLBACK form — the one used when the agent owns no loop device.
+	// Build the filter through LVMGlobalFilterAcceptingLoops instead
+	// wherever the agent's own file-backed devices have to be visible;
+	// utils.LVMGlobalFilterForOwnedLoops does that from the registry of
+	// loops the agent attached itself.
+	//
+	// Why the loop rule has to be here at all: on a hypervisor /dev/loopN
+	// is a block-mode PersistentVolume handed to a virtual machine, and
+	// the LVM inside it is the guest's. Without the rule the agent reads
+	// the guests' Volume Groups as if they were the node's — the guests'
+	// names collide with each other and with the node's own, lvm then
+	// warns about that on every single invocation and archives metadata
+	// on reads, and the node's own storage goes offline through channels
+	// that have nothing to do with adoption. The module's own
+	// NodeGroupConfiguration already puts this rule in the host's
+	// /etc/lvm/lvm.conf; the agent's --config overrides that file, so
+	// dropping the rule here silently un-does the node configuration the
+	// module itself shipped.
 	//
 	// There is intentionally no blanket "a|.*|" accept rule. When a
 	// device matches none of the reject patterns, LVM accepts it by
@@ -85,7 +103,12 @@ const (
 	// The authoritative foreign-PV filter (FilterForeignPVs) still runs
 	// after lvm returns and catches any PVs that slip through
 	// via /dev/block/MAJ:MIN or /dev/disk/by-id/... aliases.
-	LVMGlobalFilter = `devices/global_filter=["r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|"]`
+	LVMGlobalFilter = `devices/global_filter=[` + lvmForeignDeviceRejects + `]`
+
+	// lvmForeignDeviceRejects is the reject-rule body shared by every form
+	// of the filter. Order matters only against the accept rules that may
+	// precede it: LVM takes the first matching rule.
+	lvmForeignDeviceRejects = `"r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|"`
 
 	// LVMArchiveRetention caps the size of /etc/lvm/archive: keep at
 	// most the last 10 metadata snapshots and at most 7 days of history.
@@ -230,3 +253,44 @@ const (
 type (
 	ReconcileType string
 )
+
+// loopDevicePath is what a loop device may look like for the filter builder to
+// accept it. Anything else is refused rather than escaped: the value is spliced
+// into an LVM configuration string whose own field separator is `|`, and the
+// only inputs this function has any business taking are canonical loop paths.
+var loopDevicePath = regexp.MustCompile(`^/dev/loop\d+$`)
+
+// LVMGlobalFilterAcceptingLoops builds the `lvm --config` filter that rejects
+// foreign devices as LVMGlobalFilter does, but first accepts the loop devices
+// named in loops.
+//
+// The accept rules have to come first because LVM applies the first matching
+// rule, and they have to be exact (`^/dev/loopN$`) because the point is to admit
+// this agent's own file-backed devices without admitting the neighbouring minor
+// that belongs to a virtual machine.
+//
+// A path that is not a canonical loop device is skipped, and skipping is the safe
+// direction: the device stays invisible to lvm, which for a file device the agent
+// is about to provision surfaces as a plain provisioning failure, whereas a
+// mangled filter value makes EVERY lvm command fail with "Invalid filter pattern"
+// and takes the whole node's storage with it.
+func LVMGlobalFilterAcceptingLoops(loops []string) string {
+	if len(loops) == 0 {
+		return LVMGlobalFilter
+	}
+
+	var b strings.Builder
+	b.WriteString(`devices/global_filter=[`)
+	for _, loop := range loops {
+		if !loopDevicePath.MatchString(loop) {
+			continue
+		}
+		b.WriteString(`"a|^`)
+		b.WriteString(loop)
+		b.WriteString(`$|",`)
+	}
+	b.WriteString(lvmForeignDeviceRejects)
+	b.WriteString(`]`)
+
+	return b.String()
+}

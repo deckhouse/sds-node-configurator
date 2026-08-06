@@ -79,6 +79,7 @@ type Commands interface {
 	SetLoopDirectIO(ctx context.Context, loopDev string) (string, error)
 	SetLoopCapacity(ctx context.Context, loopDev string) (string, error)
 	DetachLoopDevice(ctx context.Context, loopDev string) (string, error)
+	ListLoopDevices(ctx context.Context) (string, []internal.LoopDeviceEntry, error)
 	FindLoopDeviceByFile(ctx context.Context, filePath string) (string, string, error)
 	GetLoopBackingFile(ctx context.Context, loopDev string) (string, internal.LoopBackingFile, error)
 	RemoveFileDevice(ctx context.Context, path string) (string, error)
@@ -169,7 +170,10 @@ func (commands) GetVG(vgName string) (vgData internal.VGData, command string, st
 	if err != nil {
 		return vgData, cmd.String(), filteredStdErr, fmt.Errorf("unable to GetVG, err: %w", err)
 	}
-	vgData = data[0]
+	vgData, err = theOnlyVG(data, vgName)
+	if err != nil {
+		return internal.VGData{}, cmd.String(), filteredStdErr, err
+	}
 
 	return vgData, cmd.String(), filteredStdErr, nil
 }
@@ -216,7 +220,10 @@ func (commands) GetLV(vgName, lvName string) (lvData internal.LVData, command st
 	if err != nil {
 		return lvData, cmd.String(), filteredStdErr, fmt.Errorf("unable to GetLV %s, err: %w", lvPath, err)
 	}
-	lvData = lv[0]
+	lvData, err = theOnlyLV(lv, lvPath, vgName)
+	if err != nil {
+		return internal.LVData{}, cmd.String(), filteredStdErr, err
+	}
 
 	return lvData, cmd.String(), filteredStdErr, nil
 }
@@ -270,7 +277,10 @@ func (commands) GetPV(pvName string) (pvData internal.PVData, command string, st
 	if err != nil {
 		return pvData, cmd.String(), filteredStdErr, fmt.Errorf("unable to GetPV, err: %w", err)
 	}
-	pvData = data[0]
+	pvData, err = theOnlyPV(data, pvName)
+	if err != nil {
+		return internal.PVData{}, cmd.String(), filteredStdErr, err
+	}
 
 	return pvData, cmd.String(), filteredStdErr, nil
 }
@@ -1156,7 +1166,17 @@ func (commands) SetupLoopDevice(ctx context.Context, filePath string) (string, s
 	if err := cmd.Run(); err != nil {
 		return cmd.String(), "", fmt.Errorf("unable to setup loop device for %s: %w, stderr: %s", filePath, err, stderr.String())
 	}
-	return cmd.String(), strings.TrimSpace(stdout.String()), nil
+
+	loopDev := strings.TrimSpace(stdout.String())
+	// Registered here rather than at the call sites, because the very next thing
+	// every caller does is run an LVM command against this device — pvcreate,
+	// vgcreate, vgextend — and internal.LVMGlobalFilter rejects /dev/loop* until
+	// the device is known to be ours. A call site that forgot to register would
+	// hand lvm a device it has just been told to ignore, and the failure would read
+	// as "pvcreate refused the device" with nothing pointing at the filter.
+	RememberLoopIfManaged(filePath, loopDev)
+
+	return cmd.String(), loopDev, nil
 }
 
 // SetLoopDirectIO asks the loop driver to open the backing file with O_DIRECT so
@@ -1226,7 +1246,66 @@ func (commands) DetachLoopDevice(ctx context.Context, loopDev string) (string, e
 	if err := cmd.Run(); err != nil {
 		return cmd.String(), fmt.Errorf("unable to detach loop device %s: %w, stderr: %s", loopDev, err, stderr.String())
 	}
+
+	// The minor goes back to the kernel's pool the moment this succeeds, and what
+	// it is handed to next may well be a virtual machine's disk. An exemption left
+	// behind here is an exemption for somebody else's storage.
+	ForgetOwnedLoop(loopDev)
+
 	return cmd.String(), nil
+}
+
+// ListLoopDevices enumerates the node's loop devices together with the files
+// behind them.
+//
+// One command for the whole table rather than GetLoopBackingFile per device: this
+// runs on every cache fill (utils.RefreshOwnedLoops) and a hypervisor carries a
+// loop device per block-mode volume of every virtual machine on it — a hundred and
+// fifty of them is ordinary, and that many nsenter calls per scan is not.
+func (commands) ListLoopDevices(ctx context.Context) (string, []internal.LoopDeviceEntry, error) {
+	args := nsentrerExpendedArgs(internal.LosetupCmd, "--noheadings", "--output", "NAME,BACK-FILE")
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), nil, fmt.Errorf("unable to list loop devices: %w, stderr: %s", err, stderr.String())
+	}
+
+	return cmd.String(), parseLoopDeviceTable(stdout.String()), nil
+}
+
+// parseLoopDeviceTable reads `losetup --noheadings --output NAME,BACK-FILE`.
+//
+// The device is the first field and the backing file is everything after it: a
+// path may contain spaces, and the " (deleted)" marker losetup appends is itself
+// separated by one. Splitting on all whitespace would silently truncate both, and
+// a truncated path fails the ownership check — which would hide the agent's own
+// file-backed device from lvm rather than admit somebody else's.
+func parseLoopDeviceTable(out string) []internal.LoopDeviceEntry {
+	lines := strings.Split(out, "\n")
+	entries := make([]internal.LoopDeviceEntry, 0, len(lines))
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		device, backing, found := strings.Cut(trimmed, " ")
+		if !found {
+			// A loop device with no backing file at all: losetup lists it while it is
+			// being torn down. Nothing to own.
+			continue
+		}
+		entries = append(entries, internal.LoopDeviceEntry{
+			Device:  device,
+			Backing: parseBackingFile(backing),
+		})
+	}
+
+	return entries
 }
 
 func (commands) FindLoopDeviceByFile(ctx context.Context, filePath string) (string, string, error) {
@@ -1246,6 +1325,11 @@ func (commands) FindLoopDeviceByFile(ctx context.Context, filePath string) (stri
 	case 0:
 		return cmd.String(), "", nil
 	case 1:
+		// Already attached, so nothing registered it: this is the startup path after
+		// a restart, where the loops of a file-backed Volume Group survived and the
+		// in-process registry did not. Without this the LVM filter would hide the
+		// node's own Volume Group until the first cache fill refreshed the set.
+		RememberLoopIfManaged(filePath, devices[0])
 		return cmd.String(), devices[0], nil
 	default:
 		// Two loop devices over one backing file are two Physical Volumes of the
@@ -1429,11 +1513,155 @@ func parseStatfsSpace(out string) (internal.FilesystemSpace, error) {
 	}, nil
 }
 
+// lvmAdvisoryLine matches a line lvm prints on STDOUT instead of stderr — one of
+// its log_print/log_warn advisories, e.g.
+//
+//	Consider pruning vg-1 VG archive with more then 1032 MiB in 11272 files (check archiving is needed in lvm.conf).
+//
+// Under --reportformat json these land wherever lvm happened to emit them, which
+// is in the MIDDLE of the report and not only in front of it, so skipping a
+// prefix is not enough — the line has to be dropped wherever it appears.
+//
+// Keying on "starts with a letter" is safe for an lvm report and only for an lvm
+// report: every line of one begins with a structural character or a quoted key,
+// never with a bare word.
+//
+// (?m) is what lets the same pattern answer both questions asked of it: "does
+// this buffer contain such a line at all" (the cheap pre-check over the whole
+// report) and "is this line one" (per line, after the scanner has stripped the
+// newline). Without it `^` would only ever match at byte zero and the pre-check
+// would miss every advisory that is not the very first thing lvm printed — which
+// is all of them, since the report opens with `{`. The character class is spelled
+// out rather than [[:space:]] so that it cannot span a line break.
+var lvmAdvisoryLine = regexp.MustCompile(`(?m)^[ \t]*[A-Za-z]`)
+
+// maxReportLine caps one line of an lvm JSON report. lvm puts a whole object on
+// a single line, so the longest line grows with the number of columns, not with
+// the number of Volume Groups or Logical Volumes.
+const maxReportLine = 1 << 20
+
+// reportJSON returns out without the advisory lines lvm mixes into its JSON
+// report on stdout.
+//
+// One such line is enough to take a node out of service: unmarshalVGs fails,
+// scanner.fillTheCache returns an error on every pass, and neither the
+// BlockDevice nor the LVMVolumeGroup discoverer runs on that node again — while
+// the report itself is complete and correct both before and after the advisory.
+// That is what happened on four nodes of a 20-node cluster once /etc/lvm/archive
+// had grown past lvm's pruning threshold.
+func reportJSON(out []byte) []byte {
+	if !lvmAdvisoryLine.Match(out) {
+		return out
+	}
+
+	var kept bytes.Buffer
+	kept.Grow(len(out))
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	scanner.Buffer(make([]byte, 0, 64*1024), maxReportLine)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if lvmAdvisoryLine.Match(line) {
+			golog.Printf("WARNING: [reportJSON] dropping a non-JSON line lvm printed on stdout inside its report. Line: '%s'.", bytes.TrimSpace(line))
+			continue
+		}
+		kept.Write(line)
+		kept.WriteByte('\n')
+	}
+	if err := scanner.Err(); err != nil {
+		// The filtered copy is truncated and would fail to parse for a second,
+		// unrelated reason. Hand back the raw bytes so the error the caller reports
+		// describes what lvm actually printed.
+		golog.Printf("WARNING: [reportJSON] unable to scan the report, using it verbatim: %v.", err)
+		return out
+	}
+
+	return kept.Bytes()
+}
+
+// reportParseError explains a failed report parse in terms of what lvm printed.
+//
+// Without the head of stdout the log says only `invalid character 'C' looking
+// for beginning of value` and drops the buffer that named byte came from, so the
+// only way to learn what lvm said is to reproduce the command on the node by
+// hand — which is not something the error's reader can do a day later.
+func reportParseError(err error, raw []byte) error {
+	const headLen = 240
+
+	head := bytes.TrimSpace(raw)
+	truncated := ""
+	if len(head) > headLen {
+		head, truncated = head[:headLen], "..."
+	}
+
+	return fmt.Errorf("%w; lvm printed on stdout: %q%s", err, head, truncated)
+}
+
+// theOnlyVG, theOnlyLV and theOnlyPV turn a targeted lvm report into the one row
+// the caller asked for, or into an error saying why there is no such row.
+//
+// Separated from the commands so the three decisions can be tested — the commands
+// themselves shell out through nsenter and cannot be — and because they encode the
+// same rule from three angles: an object's NAME is not its identity.
+//
+// Neither an empty nor a multi-row report may be indexed into. Zero rows used to be
+// an index-out-of-range panic, and lvm exits 0 with an empty report often enough
+// (the object went away between two commands, or devices/global_filter hid it) that
+// the agent must not die on it. More than one row means the name the caller used
+// does not identify one object, and picking a row hands them somebody else's
+// storage under their own name.
+func theOnlyVG(rows []internal.VGData, vgName string) (internal.VGData, error) {
+	// Two Volume Groups may share a name — that is what lvm's "VG name %s is used by
+	// VGs %s and %s" warning is about, and on a hypervisor it takes nothing more than
+	// a guest creating a `vg-1` of its own inside a disk this node can see. Neither
+	// answer is this function's to pick, so the caller is told to resolve it by UUID.
+	switch len(rows) {
+	case 1:
+		return rows[0], nil
+	case 0:
+		return internal.VGData{}, fmt.Errorf("unable to GetVG %s: lvm reported no such VG", vgName)
+	default:
+		uuids := make([]string, 0, len(rows))
+		for _, vg := range rows {
+			uuids = append(uuids, vg.VGUUID)
+		}
+		return internal.VGData{}, fmt.Errorf("unable to GetVG %s: the name is used by %d VGs (UUIDs: %s), so it does not identify one", vgName, len(rows), strings.Join(uuids, ", "))
+	}
+}
+
+func theOnlyLV(rows []internal.LVData, lvPath, vgName string) (internal.LVData, error) {
+	// Here the path itself is ambiguous: /dev/<vg>/<lv> names a Volume Group by name,
+	// so a duplicate VG name makes lvm report an LV per candidate. Every caller treats
+	// an error as "warn and retry", which is the right outcome — picking a row would
+	// report a foreign LV's size as our volume's.
+	switch len(rows) {
+	case 1:
+		return rows[0], nil
+	case 0:
+		return internal.LVData{}, fmt.Errorf("unable to GetLV %s: lvm reported no such LV", lvPath)
+	default:
+		vgUUIDs := make([]string, 0, len(rows))
+		for _, lv := range rows {
+			vgUUIDs = append(vgUUIDs, lv.VGUuid)
+		}
+		return internal.LVData{}, fmt.Errorf("unable to GetLV %s: the path matches %d LVs across VGs sharing the name %s (VG UUIDs: %s)", lvPath, len(rows), vgName, strings.Join(vgUUIDs, ", "))
+	}
+}
+
+func theOnlyPV(rows []internal.PVData, pvName string) (internal.PVData, error) {
+	// A device path does identify one PV, so the multi-row case is not a thing here —
+	// but the empty one is: this is the only listing that runs against a device the
+	// agent may have just detached.
+	if len(rows) == 0 {
+		return internal.PVData{}, fmt.Errorf("unable to GetPV %s: lvm reported no such PV", pvName)
+	}
+	return rows[0], nil
+}
+
 func unmarshalPVs(out []byte) ([]internal.PVData, error) {
 	var pvR internal.PVReport
 
-	if err := json.Unmarshal(out, &pvR); err != nil {
-		return nil, err
+	if err := json.Unmarshal(reportJSON(out), &pvR); err != nil {
+		return nil, reportParseError(err, out)
 	}
 
 	pvs := make([]internal.PVData, 0, len(pvR.Report))
@@ -1447,8 +1675,8 @@ func unmarshalPVs(out []byte) ([]internal.PVData, error) {
 func unmarshalVGs(out []byte) ([]internal.VGData, error) {
 	var vgR internal.VGReport
 
-	if err := json.Unmarshal(out, &vgR); err != nil {
-		return nil, err
+	if err := json.Unmarshal(reportJSON(out), &vgR); err != nil {
+		return nil, reportParseError(err, out)
 	}
 
 	vgs := make([]internal.VGData, 0, len(vgR.Report))
@@ -1462,8 +1690,8 @@ func unmarshalVGs(out []byte) ([]internal.VGData, error) {
 func unmarshalLVs(out []byte) ([]internal.LVData, error) {
 	var lvR internal.LVReport
 
-	if err := json.Unmarshal(out, &lvR); err != nil {
-		return nil, err
+	if err := json.Unmarshal(reportJSON(out), &lvR); err != nil {
+		return nil, reportParseError(err, out)
 	}
 
 	lvs := make([]internal.LVData, 0, len(lvR.Report))
@@ -1505,7 +1733,7 @@ func lvmStaticExtendedArgs(args []string) []string {
 		return nsentrerExpendedArgs(internal.LVMCmd, args...)
 	}
 
-	configValue := internal.LVMGlobalFilter + " " + internal.LVMArchiveRetention
+	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMArchiveRetention
 	withConfig := make([]string, 0, len(args)+2)
 	withConfig = append(withConfig, args[0], "--config", configValue)
 	withConfig = append(withConfig, args[1:]...)
@@ -1549,12 +1777,44 @@ var (
 	// should not be swallowed.
 	reNoSizeChange = regexp.MustCompile(`^\s*(No size change\..*|New size \(.+\) matches existing size \(.+\)\.)$`)
 
+	// Two Volume Groups on the node share a name. lvm prints this pair on EVERY
+	// invocation, whatever object the command asked about, because it is a property
+	// of the node's device scan and not of the argument: `vgs vg-1`, `pvs
+	// /dev/nvme0n1` and `lvs /dev/vg-1/pvc-...` all print it.
+	//
+	// That makes it the one thing a per-object diagnostic must never keep. The
+	// discoverer asks lvm about one Volume Group at a time and records whatever
+	// stderr comes back as that Volume Group's health; with these lines in it, a
+	// `data` inside some guest's disk colliding with another guest's `data` marked
+	// this node's own vg-1 NonOperational and took its LVMVolumeGroup to NotReady.
+	// The condition it deserves is set elsewhere, by name, with the UUIDs of the
+	// actual duplicates in the message (see the discoverer's duplicate handling).
+	reDuplicateVGName     = regexp.MustCompile(`^\s*WARNING: VG name .+ is used by VGs .+\.$`)
+	reDuplicateVGNameHint = regexp.MustCompile(`^\s*Fix duplicate VG names with vgrename uuid, a device filter, or system IDs\.$`)
+
 	// benignAlwaysStdErr is the set every lvm invocation may ignore.
 	benignAlwaysStdErr = []*regexp.Regexp{reRegexVersionMismatch, reLeakedFileDescriptor}
 	// benignResizeStdErr additionally tolerates the no-op resize. Only lvextend
 	// and its full-VG-space variant may use it.
 	benignResizeStdErr = []*regexp.Regexp{reRegexVersionMismatch, reLeakedFileDescriptor, reNoSizeChange}
+	// notAboutTheQueriedObject is what ObjectDiagnostics drops. It is NOT a
+	// benign-stderr set: these lines do report a real problem with the node, they
+	// just do not report one with the object that was asked about, and only the
+	// former is a reason to keep them.
+	notAboutTheQueriedObject = []*regexp.Regexp{reDuplicateVGName, reDuplicateVGNameHint}
 )
+
+// ObjectDiagnostics returns the part of stdErr that says something about the
+// specific VG, PV or LV the command asked about.
+//
+// Use it wherever lvm's stderr is about to be attributed to one object —
+// recorded as its health, written into its condition, shown next to its name.
+// Everything lvm prints about the node as a whole belongs in the log and in the
+// conditions that describe the node, not pinned on whichever object happened to
+// be the argument.
+func ObjectDiagnostics(command string, stdErr bytes.Buffer) bytes.Buffer {
+	return filterStdErr(command, stdErr, notAboutTheQueriedObject)
+}
 
 // filterStdErr returns the lines of stdErr that actually say something about the
 // outcome of command, dropping the ones matched by allow.

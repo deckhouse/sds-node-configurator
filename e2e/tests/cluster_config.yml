@@ -70,7 +70,4 @@ clusterDefinition:
         enabled: true
         settings:
           enableThinProvisioning: true
-          # Bootstrap with netlink discovery so host-pid / mountinfo coverage
-          # exercises /proc/1/mountinfo (lsblk path cannot see host mounts).
-          enableNetlinkBlockDeviceDiscovery: true
         dependencies: []

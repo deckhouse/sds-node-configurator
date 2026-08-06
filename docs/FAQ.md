@@ -252,7 +252,7 @@ The agent exports four gauges per node for file-backed devices:
 
 The free/total pair is worth an alert. Backing files are preallocated, so the module holds a fixed share of a filesystem it does not own — by default the node's root. The agent keeps `fileDevicesMinFreeSpacePercent` of it out of its own reach, but nothing stops anything else on the node from filling that filesystem afterwards, and running it out triggers kubelet `DiskPressure` eviction for the whole node. Alert on `free / total` falling below the reserve:
 
-```
+```promql
 sds_node_configurator_file_devices_directory_free_bytes
   / sds_node_configurator_file_devices_directory_total_bytes < 0.15
 ```

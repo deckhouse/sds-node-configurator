@@ -247,6 +247,21 @@ func runControllersReconcile(
 }
 
 func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Config, metrics *monitoring.Metrics) error {
+	// Before any LVM command, because it decides what they are allowed to see:
+	// internal.LVMGlobalFilter rejects /dev/loop* — a loop device on a hypervisor
+	// is a virtual machine's disk — and this is what exempts the ones the agent
+	// attached itself. In-process bookkeeping covers the loops this incarnation
+	// created; the full reconcile here is what covers the rest, chiefly the loops
+	// that survived a restart of the agent.
+	//
+	// A failure is logged and not returned: it leaves the previously known set in
+	// place, which is the conservative direction. Returning would abort the whole
+	// cache fill over losetup, taking down block-device-backed Volume Groups that
+	// have nothing to do with loop devices.
+	if err := utils.RefreshOwnedLoops(ctx, log, s.commands, cfg.CmdDeadlineDuration); err != nil {
+		log.Warning(fmt.Sprintf("[fillTheCache] %v", err))
+	}
+
 	// the scan operations order is very important as it guarantees the consistent and reliable data from the node
 	realClock := clock.RealClock{}
 	now := time.Now()

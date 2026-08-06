@@ -380,10 +380,19 @@ var _ = Describe("LVMVolumeGroup file-backed devices foreign-loop isolation",
 		// Taking a foreign Volume Group for ours has no way out: create is refused
 		// ("the VG is there"), update finds nothing in the cache, and the resource sits
 		// in CacheStale forever while the condition tells the operator to wait for a
-		// cache that is not the problem. The VG name genuinely collides here, so
-		// vgcreate does fail — but it has to fail for the real reason, having actually
-		// been attempted, rather than being parked with a diagnosis that points nowhere.
-		It("Should not report CacheStale because a foreign loop VG happens to share the name", func() {
+		// cache that is not the problem.
+		//
+		// What the agent does INSTEAD of that has changed, and this spec tracks the
+		// change. While loop devices were visible wholesale, the name genuinely
+		// collided in lvm's view and vgcreate had to fail for the real reason
+		// (VGCreationFailed). Now that the filter only admits the loops the agent owns
+		// (internal.LVMGlobalFilterAcceptingLoops), a Volume Group inside somebody
+		// else's disk is not in that view at all — so there is no collision to report
+		// and the managed Volume Group is simply created. That is the point of the
+		// filter: a guest's VG must not decide what this node can do with its own
+		// storage. What must still hold is that the agent never parks in CacheStale
+		// over it, and never touches the guest's image.
+		It("Should create its own VG despite a foreign loop VG of the same name, and never park in CacheStale", func() {
 			vgName := "e2e-vg-fdcollide-" + runID
 			lvgName := fdLVGName("fdcollide", runID, targetNode)
 
@@ -396,9 +405,13 @@ var _ = Describe("LVMVolumeGroup file-backed devices foreign-loop isolation",
 			lvg := fdNewLVG(targetNode, lvgName, vgName, nil,
 				[]v1alpha1.LVMVolumeGroupFileDeviceSpec{{Name: "d1g", Directory: fdBaseDir, Size: resource.MustParse("1Gi")}}, nil)
 			Expect(k8sClient.Create(ctx, lvg)).To(Succeed())
-			DeferCleanup(func() { fdForceDeleteLVG(ctx, k8sClient, lvgName) })
+			// A normal delete now, not a forced one: the create succeeds here, so there
+			// is a real Volume Group and a real backing file to clean up, and dropping
+			// the resource by force would leak both onto the node for the rest of the
+			// suite. fdForceDeleteLVG stays the tool for resources that never got that far.
+			DeferCleanup(func() { fdDeleteLVGAndWaitGone(ctx, k8sClient, lvgName) })
 
-			By("Verifying the agent reports the real failure instead of parking in CacheStale")
+			By("Verifying the agent applies the configuration instead of parking in CacheStale")
 			Eventually(func(g Gomega) {
 				var cur v1alpha1.LVMVolumeGroup
 				g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: lvgName}, &cur)).To(Succeed())
@@ -413,14 +426,26 @@ var _ = Describe("LVMVolumeGroup file-backed devices foreign-loop isolation",
 				g.Expect(applied).NotTo(BeNil(), "the agent must say something about this LVMVolumeGroup")
 				g.Expect(applied.Reason).NotTo(Equal(fdReasonCacheStale),
 					"the foreign loop VG was taken for ours; message: %s", applied.Message)
-				g.Expect(applied.Reason).To(Equal(fdReasonVGCreationFailed),
-					"the create path must have been attempted and failed on the genuine name conflict; reason %s, message: %s",
+				g.Expect(applied.Status).To(Equal(metav1.ConditionTrue),
+					"a Volume Group inside a guest's disk is not in the agent's view, so there is nothing to stop the create; reason %s, message: %s",
 					applied.Reason, applied.Message)
-			}, fdRejectionTimeout, 10*time.Second).Should(Succeed())
+				g.Expect(fdFileDevicesForNode(&cur, targetNode)).To(HaveLen(1),
+					"the foreign loop must not be counted as one of our file devices")
+			}, fdLVGReadyTimeout, 10*time.Second).Should(Succeed())
+
+			By("Verifying the VG the agent created is its own and not the guest's")
+			var created v1alpha1.LVMVolumeGroup
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: lvgName}, &created)).To(Succeed())
+			Expect(created.Status.VGUuid).NotTo(BeEmpty(), "the managed VG must be reported in status")
+			Expect(created.Status.VGUuid).NotTo(Equal(foreign.VGUUID),
+				"the agent adopted the guest's Volume Group instead of creating its own")
 
 			By("Verifying the image is untouched")
 			fdExpectForeignLoopVGIntact(ctx, cl, foreign)
 
-			By("✓ A foreign loop VG of the same name does not mask the real diagnosis")
+			By("Detaching the image before teardown, so the managed VG owns its name for the delete")
+			fdDetachForeignLoopVG(ctx, cl, foreign)
+
+			By("✓ The guest's Volume Group neither blocked the create nor was taken for ours")
 		})
 	})
