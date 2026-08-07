@@ -19,6 +19,7 @@ package utils
 import (
 	"bytes"
 	"context"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -403,8 +404,8 @@ func TestLvmStaticExtendedArgs(t *testing.T) {
 	}
 
 	t.Run("config_value_contains_all_foreign_prefixes_and_retention", func(t *testing.T) {
-		// Defensive cross-check: --config must reject all four foreign
-		// device prefixes the post-filter knows about (rbd/drbd/nbd/loop)
+		// Defensive cross-check: --config must reject all foreign
+		// device prefixes the post-filter knows about (rbd/drbd/nbd)
 		// and must cap /etc/lvm/archive growth. If either drops out due
 		// to a refactor, this assertion catches it before the next scan
 		// loop silently regresses.
@@ -551,7 +552,7 @@ func TestFilterStdErr(t *testing.T) {
 			var buf bytes.Buffer
 			buf.WriteString(tt.stdErr)
 
-			result := filterStdErr(cmd, buf)
+			result := filterStdErr(cmd, buf, benignResizeStdErr)
 
 			if tt.filtered {
 				assert.Equal(t, 0, result.Len(), "expected stderr to be fully filtered, got: %q", result.String())
@@ -560,4 +561,326 @@ func TestFilterStdErr(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The benign allowlist is per command, and the split is the whole point: a
+// resize that changed nothing is a normal state for lvextend and is not a thing
+// pvs or pvcreate can report. Keeping one global set meant a pattern added for a
+// write command silently widened what counts as success for the PV listing — and
+// that listing is the sole gate in front of every destructive file-device
+// decision (cleanupFileDevices unlinks backing files on the strength of it).
+//
+// Asserted here rather than left to review, the same way the conditions
+// watcher's acceptableReasons membership is.
+// A Volume Group this module creates carries two tags, and both have to arrive:
+// storage.deckhouse.io/enabled=true is what makes it managed, and
+// storage.deckhouse.io/lvmVolumeGroupName is what says whose it is. The second one
+// is what the discoverer reads to re-import a Volume Group under its original name,
+// what ClassifyLoopVGs needs to tell a file-backed Volume Group of ours from an
+// image somebody attached with losetup, and what buildFileDeviceFromLoopPV refuses
+// to claim a loop PV without.
+//
+// The shared variant used to emit "--addtag" twice in a row, so vgcreate took the
+// second flag as the first one's value and the lvmVolumeGroupName tag as a
+// positional device path: the tag never landed. Asserting the argv is cheaper than
+// discovering that on a cluster, and it is why the two variants now share
+// vgCreateArgs.
+func TestVGCreateArgs(t *testing.T) {
+	const (
+		vgName  = "vg-data"
+		lvgName = "lvg-a"
+	)
+	pvs := []string{"/dev/sda", "/dev/loop0"}
+
+	for _, tt := range []struct {
+		name   string
+		shared bool
+		want   []string
+	}{
+		{
+			name:   "local",
+			shared: false,
+			want: []string{
+				"vgcreate", vgName, "/dev/sda", "/dev/loop0",
+				"--addtag", "storage.deckhouse.io/enabled=true",
+				"--addtag", "storage.deckhouse.io/lvmVolumeGroupName=" + lvgName,
+			},
+		},
+		{
+			name:   "shared",
+			shared: true,
+			want: []string{
+				"vgcreate", "--shared", vgName, "/dev/sda", "/dev/loop0",
+				"--addtag", "storage.deckhouse.io/enabled=true",
+				"--addtag", "storage.deckhouse.io/lvmVolumeGroupName=" + lvgName,
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := vgCreateArgs(vgName, lvgName, tt.shared, pvs)
+			assert.Equal(t, tt.want, got)
+
+			// Stated separately from the exact-argv assertion, because this is the
+			// property that actually broke: one flag per tag, never two in a row.
+			var flags int
+			for i, arg := range got {
+				if arg != "--addtag" {
+					continue
+				}
+				flags++
+				if assert.Less(t, i+1, len(got), "--addtag must be followed by a value") {
+					assert.NotEqual(t, "--addtag", got[i+1], "--addtag must not be its own value")
+				}
+			}
+			assert.Equal(t, 2, flags, "exactly two tags: the managed marker and the owning LVMVolumeGroup")
+		})
+	}
+
+	t.Run("a Volume Group with no PVs still gets both tags", func(t *testing.T) {
+		got := vgCreateArgs(vgName, lvgName, false, nil)
+		assert.Equal(t, []string{
+			"vgcreate", vgName,
+			"--addtag", "storage.deckhouse.io/enabled=true",
+			"--addtag", "storage.deckhouse.io/lvmVolumeGroupName=" + lvgName,
+		}, got)
+	})
+}
+
+func TestBenignStdErrSetsAreScopedPerCommand(t *testing.T) {
+	const (
+		noSizeChange = "  No size change."
+		matchesSize  = "  New size (953801 extents) matches existing size (953801 extents)."
+		leakedFD     = "File descriptor 7 leaked on lvm.static invocation. Parent PID 1: /opt/deckhouse/sds/bin/nsenter"
+		versionSkew  = "Regex version mismatch, expected: 10.42 2022-12-11 actual: 10.34 2019-11-21"
+	)
+
+	filter := func(allow []*regexp.Regexp, line string) string {
+		var buf bytes.Buffer
+		buf.WriteString(line)
+		out := filterStdErr("pvs", buf, allow)
+		return out.String()
+	}
+
+	t.Run("nsenter artefacts are benign everywhere", func(t *testing.T) {
+		for _, line := range []string{leakedFD, versionSkew} {
+			assert.Empty(t, filter(benignAlwaysStdErr, line), "line must be benign for any command: %q", line)
+			assert.Empty(t, filter(benignResizeStdErr, line), "line must be benign for any command: %q", line)
+		}
+	})
+
+	t.Run("a no-op resize is benign only for a resize", func(t *testing.T) {
+		for _, line := range []string{noSizeChange, matchesSize} {
+			assert.Empty(t, filter(benignResizeStdErr, line),
+				"lvextend must tolerate its own no-op: %q", line)
+			assert.NotEmpty(t, filter(benignAlwaysStdErr, line),
+				"pvs/pvcreate/pvresize have no such no-op; swallowing it would let a partial listing gate an unlink: %q", line)
+		}
+	})
+
+	t.Run("a real diagnostic is never benign", func(t *testing.T) {
+		const realErr = `  Couldn't find device with uuid abcd-1234.`
+		assert.NotEmpty(t, filter(benignAlwaysStdErr, realErr))
+		assert.NotEmpty(t, filter(benignResizeStdErr, realErr))
+	})
+
+	t.Run("the no-op resize pattern is anchored", func(t *testing.T) {
+		// Unanchored, this would swallow an error message that merely quotes
+		// another command's output.
+		const quoting = `  Failed: lvextend said "New size (1 extents) matches existing size (1 extents)." and then aborted`
+		assert.NotEmpty(t, filter(benignResizeStdErr, quoting),
+			"a line embedding the no-op wording is not itself a no-op")
+	})
+}
+
+// GetLoopBackingFile must strip the " (deleted)" marker losetup appends when the
+// backing file was unlinked while the loop is still attached — without stripping
+// it, IsManagedFileDevicePath would not recognise the basename and cleanup would
+// refuse to detach the loop, stranding the minor on the node — and it must report
+// the marker separately, because provisioning has to know the file is gone in
+// order not to create a second one at the same path.
+func TestParseBackingFile(t *testing.T) {
+	tests := []struct {
+		name        string
+		in          string
+		wantPath    string
+		wantDeleted bool
+	}{
+		{"plain", "/data/sds-vg-a.d0.img", "/data/sds-vg-a.d0.img", false},
+		{"trailing newline", "/data/sds-vg-a.d0.img\n", "/data/sds-vg-a.d0.img", false},
+		{"deleted marker", "/data/sds-vg-a.d0.img (deleted)", "/data/sds-vg-a.d0.img", true},
+		{"deleted marker with newline", "/data/sds-vg-a.d0.img (deleted)\n", "/data/sds-vg-a.d0.img", true},
+		{"empty", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseBackingFile(tt.in)
+			assert.Equal(t, tt.wantPath, got.Path)
+			assert.Equal(t, tt.wantDeleted, got.Deleted)
+			if tt.wantPath != "" {
+				assert.True(t, IsManagedFileDevicePath(got.Path, "vg-a"),
+					"the parsed path must still be recognised as managed")
+			}
+		})
+	}
+}
+
+// parseStatfsSpace turns the "<block-size> <total-blocks> <available-blocks>"
+// output of `stat -f -c "%S %b %a"` into a FilesystemSpace; GetFilesystemSpace
+// relies on it both to refuse an oversized backing file before fallocate fills
+// the node and to work out the reserve, which is a share of the total.
+func TestParseStatfsSpace(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    internal.FilesystemSpace
+		wantErr bool
+	}{
+		{"plain", "4096 5000 1000", internal.FilesystemSpace{AvailableBytes: 4096 * 1000, TotalBytes: 4096 * 5000}, false},
+		{"trailing newline", "4096 5000 1000\n", internal.FilesystemSpace{AvailableBytes: 4096 * 1000, TotalBytes: 4096 * 5000}, false},
+		{"extra whitespace", "  4096   5000   1000  ", internal.FilesystemSpace{AvailableBytes: 4096 * 1000, TotalBytes: 4096 * 5000}, false},
+		{"full filesystem", "4096 5000 0", internal.FilesystemSpace{AvailableBytes: 0, TotalBytes: 4096 * 5000}, false},
+		{"empty", "", internal.FilesystemSpace{}, true},
+		{"two fields", "4096 1000", internal.FilesystemSpace{}, true},
+		{"too many fields", "4096 5000 1000 7", internal.FilesystemSpace{}, true},
+		{"non-numeric block size", "abc 5000 1000", internal.FilesystemSpace{}, true},
+		{"non-numeric total", "4096 abc 1000", internal.FilesystemSpace{}, true},
+		{"non-numeric available", "4096 5000 abc", internal.FilesystemSpace{}, true},
+		{"negative available", "4096 5000 -1", internal.FilesystemSpace{}, true},
+		// A zero total must never reach the caller: it reads TotalBytes <= 0 as
+		// "size unknown" and skips the reserve, so a successful stat that said
+		// zero would silently disable the guard on the node's root filesystem.
+		{"zero total", "4096 0 1000", internal.FilesystemSpace{}, true},
+		{"zero block size", "0 5000 1000", internal.FilesystemSpace{}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseStatfsSpace(tt.in)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// An lvm report is not necessarily pure JSON. lvm prints part of its diagnostics
+// on stdout — log_print/log_warn advisories — and with --reportformat json they
+// land wherever lvm emitted them, which is INSIDE the report. This is the verbatim
+// stdout of `lvm vgs --reportformat json` from a node whose /etc/lvm/archive had
+// grown past lvm's pruning threshold; before reportJSON it failed to parse on
+// every scan with `invalid character 'C' looking for beginning of value`, and that
+// stopped the whole cache-filling loop on that node.
+func TestReportSurvivesLVMAdvisoriesOnStdout(t *testing.T) {
+	const polluted = `  {
+      "report": [
+  Consider pruning ceph-vg VG archive with more then 12 MiB in 8929 files (check archiving is needed in lvm.conf).
+  Consider pruning vg-1 VG archive with more then 1032 MiB in 11272 files (check archiving is needed in lvm.conf).
+          {
+              "vg": [
+                  {"vg_name":"vg-1", "pv_count":"2", "lv_count":"329", "snap_count":"0", "vg_attr":"wz--n-", "vg_size":"11522252210176", "vg_free":"1322367582208", "vg_uuid":"GzKqS7-TW1a-W21I-yZK2-FlTu-WC7c-Iz24OW", "vg_tags":"storage.deckhouse.io/enabled=true", "vg_shared":"", "vg_extent_size":"4194304"}
+              ]
+          }
+      ]
+  }
+`
+
+	t.Run("the report is parsed and nothing is lost", func(t *testing.T) {
+		vgs, err := unmarshalVGs([]byte(polluted))
+		assert.NoError(t, err)
+		if assert.Len(t, vgs, 1) {
+			assert.Equal(t, "vg-1", vgs[0].VGName)
+			assert.Equal(t, "GzKqS7-TW1a-W21I-yZK2-FlTu-WC7c-Iz24OW", vgs[0].VGUUID)
+			assert.Equal(t, int64(11522252210176), vgs[0].VGSize.Value())
+		}
+	})
+
+	t.Run("a clean report is handed through untouched", func(t *testing.T) {
+		const clean = `{"report":[{"vg":[{"vg_name":"vg-1","vg_uuid":"u-1"}]}]}`
+		assert.Equal(t, []byte(clean), reportJSON([]byte(clean)))
+	})
+
+	t.Run("the same holds for the PV and LV reports", func(t *testing.T) {
+		pvs, err := unmarshalPVs([]byte(`  {
+      "report": [
+  Consider pruning vg-1 VG archive with more then 1032 MiB in 11272 files (check archiving is needed in lvm.conf).
+          {
+              "pv": [
+                  {"pv_name":"/dev/nvme0n1", "vg_name":"vg-1", "pv_size":"1", "pv_uuid":"pv-1", "vg_uuid":"vg-uuid-1"}
+              ]
+          }
+      ]
+  }
+`))
+		assert.NoError(t, err)
+		if assert.Len(t, pvs, 1) {
+			assert.Equal(t, "/dev/nvme0n1", pvs[0].PVName)
+		}
+
+		lvs, err := unmarshalLVs([]byte(`  {
+      "report": [
+  Consider pruning vg-1 VG archive with more then 1032 MiB in 11272 files (check archiving is needed in lvm.conf).
+          {
+              "lv": [
+                  {"lv_name":"pvc-1", "vg_name":"vg-1", "vg_uuid":"vg-uuid-1", "lv_size":"1"}
+              ]
+          }
+      ]
+  }
+`))
+		assert.NoError(t, err)
+		if assert.Len(t, lvs, 1) {
+			assert.Equal(t, "pvc-1", lvs[0].LVName)
+		}
+	})
+
+	t.Run("a parse failure names what lvm printed", func(t *testing.T) {
+		// Not an advisory and not JSON: whatever this is, the error has to carry it,
+		// because the buffer it came from is dropped right after.
+		_, err := unmarshalVGs([]byte("\x00\x01 not a report at all"))
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "lvm printed on stdout:",
+				"the parse error must quote stdout, otherwise the only way to learn what lvm said is to reproduce the command on the node")
+			assert.Contains(t, err.Error(), "not a report at all")
+		}
+	})
+}
+
+// lvm prints the duplicate-VG-name warning on every invocation, whatever object
+// the command asked about, so it must never become that object's health. A `data`
+// VG inside one guest's disk colliding with another guest's `data` is what took
+// this node's own vg-1 to NotReady.
+func TestObjectDiagnosticsDropsNodeWideWarnings(t *testing.T) {
+	const (
+		dupWarning = `  WARNING: VG name data is used by VGs TNiDBi-Y1g2-GUM5-9Gov-WuN5-GR3j-8zz7aE and x4wwVz-2g1i-7ntB-eM0Q-88tg-zP08-e0bGiR.`
+		dupHint    = `  Fix duplicate VG names with vgrename uuid, a device filter, or system IDs.`
+		realIssue  = `  Couldn't find device with uuid abcd-1234.`
+	)
+
+	filter := func(lines ...string) string {
+		var buf bytes.Buffer
+		for _, l := range lines {
+			buf.WriteString(l + "\n")
+		}
+		out := ObjectDiagnostics("vgs vg-1", buf)
+		return out.String()
+	}
+
+	t.Run("a node-wide duplicate-name warning is not about the queried object", func(t *testing.T) {
+		assert.Empty(t, filter(dupWarning, dupHint))
+		assert.Empty(t, filter(dupWarning, dupHint, dupWarning, dupHint))
+	})
+
+	t.Run("a real diagnostic still survives, alongside the dropped ones", func(t *testing.T) {
+		got := filter(dupWarning, dupHint, realIssue)
+		assert.Contains(t, got, "Couldn't find device with uuid")
+		assert.NotContains(t, got, "is used by VGs")
+	})
+
+	t.Run("the patterns are anchored to a whole line", func(t *testing.T) {
+		const quoting = `  Failed: vgs said "WARNING: VG name data is used by VGs a and b." and then aborted`
+		assert.NotEmpty(t, filter(quoting),
+			"a line embedding the warning is a diagnostic of its own")
+	})
 }

@@ -38,6 +38,23 @@ type LVMVolumeGroupCandidate struct {
 	VGUUID                string
 	ExtentSize            resource.Quantity
 	Nodes                 map[string][]LVMVGDevice
+	FileDeviceNodes       map[string][]LVMVGFileDevice
+	// LVMVGNameGenerated records that LVMVGName was minted rather than read back
+	// from the Volume Group's storage.deckhouse.io/lvmVolumeGroupName tag. It is
+	// normal for a Volume Group an administrator handed over, and disqualifying
+	// for a file-backed one: its backing files are named after the owning
+	// LVMVolumeGroup, so under a generated name the agent would not recognise
+	// them and would provision a second set alongside.
+	//
+	// False is the safe default — "the name is the one the node recorded".
+	LVMVGNameGenerated bool
+	// FileDeviceStateUnknown records that at least one loop PV of this Volume
+	// Group could not be classified, so FileDeviceNodes is known to be
+	// incomplete. A candidate carrying it must not be written to an
+	// LVMVolumeGroup: an entry missing from status.nodes[].fileDevices reads as
+	// "never provisioned", which is a claim about the node this candidate cannot
+	// make. False is the safe default — "the set is complete".
+	FileDeviceStateUnknown bool
 }
 
 type LVMVGStatusThinPool struct {
@@ -55,6 +72,51 @@ type LVMVGDevice struct {
 	DevSize     resource.Quantity
 	PVUUID      string
 	BlockDevice string
+}
+
+type LVMVGFileDevice struct {
+	FilePath   string
+	LoopDevice string
+	Size       resource.Quantity
+	PVUUID     string
+}
+
+// LoopBackingFile is what `losetup --output BACK-FILE` says about one loop
+// device.
+type LoopBackingFile struct {
+	// Path is the backing file with the " (deleted)" marker stripped, so
+	// ownership matching by basename still works on an unlinked file.
+	Path string
+	// Deleted is that stripped marker. Keeping it apart from Path is the whole
+	// point: cleanup needs the path to recognise the loop as ours, while
+	// provisioning needs to know the file is gone so it does not create a
+	// second one beside it.
+	Deleted bool
+}
+
+// LoopDeviceEntry is one line of the node's loop-device table: the device and the
+// file behind it. Enumerating both together is what lets the agent tell its own
+// file-backed devices from a virtual machine's disk, which is the difference
+// between a loop device LVM may read and one it must not touch.
+type LoopDeviceEntry struct {
+	Device  string
+	Backing LoopBackingFile
+}
+
+// FilesystemSpace is what one `stat -f` reports about the filesystem holding a
+// directory the agent is about to allocate a backing file in.
+type FilesystemSpace struct {
+	// AvailableBytes is what can still be allocated without dipping into the
+	// filesystem's own superuser reserve.
+	AvailableBytes int64
+	// TotalBytes is the size of the filesystem. It is what makes a reserve
+	// expressible as a share rather than as an absolute number, which is the
+	// only form that travels between a 30Gi node root and a 4Ti data disk.
+	//
+	// Zero means "unknown": callers skip the reserve rather than refuse
+	// everything. A successful GetFilesystemSpace never returns it (see
+	// parseStatfsSpace); it only appears when the measurement did not happen.
+	TotalBytes int64
 }
 
 type Devices struct {

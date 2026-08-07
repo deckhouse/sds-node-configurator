@@ -129,7 +129,7 @@ func TestFilter(t *testing.T) {
 
 		cl := fake.NewFakeClient(objects...)
 		targetProvisioners := []string{consts.SdsLocalVolumeProvisioner}
-		filtered, err := getManagedPVCsFromPod(ctx, cl, log, pod, targetProvisioners)
+		filtered, _, err := getManagedPVCsFromPod(ctx, cl, log, pod, targetProvisioners)
 
 		assert.NoError(t, err)
 		if assert.Equal(t, 2, len(filtered)) {

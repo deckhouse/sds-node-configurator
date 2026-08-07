@@ -32,10 +32,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func TestShouldProcessPod(t *testing.T) {
@@ -236,7 +238,7 @@ func TestShouldProcessPod(t *testing.T) {
 
 			cl := fake.NewFakeClient(tc.objects...)
 			targetProvisioners := []string{tc.targetProvisioner}
-			managedPVCs, err := getManagedPVCsFromPod(ctx, cl, log, tc.pod, targetProvisioners)
+			managedPVCs, _, err := getManagedPVCsFromPod(ctx, cl, log, tc.pod, targetProvisioners)
 			if (err != nil) != tc.expectedError {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -1014,7 +1016,7 @@ func TestExtractRequestedSize_PhaseLag(t *testing.T) {
 		pvcs := map[string]*corev1.PersistentVolumeClaim{
 			pvFreshlyCreatedNoPhase.Name: pvFreshlyCreatedNoPhase,
 		}
-		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs)
+		got, _, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs, nil)
 		require.NoError(t, err)
 		require.Contains(t, got, pvFreshlyCreatedNoPhase.Name, "PVC with empty Status.Phase must NOT be dropped")
 		assert.Equal(t, requestQty.Value(), got[pvFreshlyCreatedNoPhase.Name].RequestedSize)
@@ -1025,7 +1027,7 @@ func TestExtractRequestedSize_PhaseLag(t *testing.T) {
 		pvcs := map[string]*corev1.PersistentVolumeClaim{
 			pvcExplicitlyPending.Name: pvcExplicitlyPending,
 		}
-		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs)
+		got, _, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs, nil)
 		require.NoError(t, err)
 		require.Contains(t, got, pvcExplicitlyPending.Name)
 		assert.Equal(t, requestQty.Value(), got[pvcExplicitlyPending.Name].RequestedSize)
@@ -1033,7 +1035,7 @@ func TestExtractRequestedSize_PhaseLag(t *testing.T) {
 
 	t.Run("bound PVC reports resize delta", func(t *testing.T) {
 		pvcs := map[string]*corev1.PersistentVolumeClaim{pvcBound.Name: pvcBound}
-		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs)
+		got, _, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs, nil)
 		require.NoError(t, err)
 		require.Contains(t, got, pvcBound.Name)
 		assert.Equal(t, requestQty.Value()-pvCapacity.Value(), got[pvcBound.Name].RequestedSize,
@@ -1045,12 +1047,218 @@ func TestExtractRequestedSize_PhaseLag(t *testing.T) {
 		pvcBoundNoPhase.Name = "pvc-bound-no-phase"
 		pvcBoundNoPhase.Status = corev1.PersistentVolumeClaimStatus{}
 		pvcs := map[string]*corev1.PersistentVolumeClaim{pvcBoundNoPhase.Name: pvcBoundNoPhase}
-		got, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs)
+		got, _, err := extractRequestedSize(context.Background(), cl, log, pvcs, scs, nil)
 		require.NoError(t, err)
 		require.Contains(t, got, pvcBoundNoPhase.Name,
 			"a PVC with Spec.VolumeName set but empty Status.Phase must be treated as bound, not dropped")
 		assert.Equal(t, requestQty.Value()-pvCapacity.Value(), got[pvcBoundNoPhase.Name].RequestedSize)
 	})
+
+	// LVM rounds an LV up to the extent boundary, so a PV backing a decimal-unit
+	// request is larger than the request. The delta must clamp at 0: a negative
+	// size is summed into Cache.GetReservedSpace and getAvailableSpace subtracts
+	// it, which would inflate the pool's free space for every other Pod.
+	t.Run("bound PVC whose PV is larger than the request reserves nothing", func(t *testing.T) {
+		bigPVName := "pv-rounded-up"
+		bigPV := &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: bigPVName},
+			Spec: corev1.PersistentVolumeSpec{
+				Capacity:         corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("11Gi")},
+				StorageClassName: scName,
+			},
+		}
+		pvcOverProvisioned := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-rounded-up", Namespace: "default"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				StorageClassName: &scName,
+				VolumeName:       bigPVName,
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("10Gi")},
+				},
+			},
+		}
+
+		clWithBigPV := newFakeClient(bigPV)
+		pvcs := map[string]*corev1.PersistentVolumeClaim{pvcOverProvisioned.Name: pvcOverProvisioned}
+		got, _, err := extractRequestedSize(context.Background(), clWithBigPV, log, pvcs, scs, nil)
+		require.NoError(t, err)
+		require.Contains(t, got, pvcOverProvisioned.Name)
+		assert.Equal(t, int64(0), got[pvcOverProvisioned.Name].RequestedSize,
+			"pv.capacity > requests.storage must clamp to 0, never go negative")
+	})
+
+	// A PVC known only from the extra-pvcs annotation must never fail the whole
+	// request: an unresolvable one is left out of the requests and reported in
+	// dropped, so the caller can take it out of managedPVCs and the downstream
+	// node filter stops considering it.
+	t.Run("unresolvable annotation-only PVC is dropped instead of failing", func(t *testing.T) {
+		brokenSCName := "local-sc-no-lvm-type"
+		brokenSC := &storagev1.StorageClass{
+			ObjectMeta:  metav1.ObjectMeta{Name: brokenSCName},
+			Provisioner: provisioner,
+			Parameters:  map[string]string{consts.LVMVolumeGroupsParamKey: `[{"name":"lvg1"}]`},
+		}
+		pvcHint := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-hint-broken-sc", Namespace: "default"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				StorageClassName: &brokenSCName,
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: requestQty},
+				},
+			},
+		}
+
+		pvcs := map[string]*corev1.PersistentVolumeClaim{
+			pvcHint.Name:              pvcHint,
+			pvcExplicitlyPending.Name: pvcExplicitlyPending,
+		}
+		allSCs := map[string]*storagev1.StorageClass{scName: sc, brokenSCName: brokenSC}
+
+		got, dropped, err := extractRequestedSize(context.Background(), cl, log, pvcs, allSCs,
+			map[string]bool{pvcHint.Name: true})
+		require.NoError(t, err, "an annotation-only PVC must not fail the request")
+		assert.NotContains(t, got, pvcHint.Name)
+		assert.Equal(t, []string{pvcHint.Name}, dropped,
+			"the dropped PVC must be reported so the caller removes it from managedPVCs")
+		assert.Contains(t, pvcs, pvcHint.Name,
+			"extractRequestedSize must not mutate the caller's map behind its back")
+		assert.Contains(t, got, pvcExplicitlyPending.Name, "the other PVCs must still be processed")
+	})
+
+	// The same failure on a spec-sourced PVC keeps failing the whole request.
+	t.Run("unresolvable spec PVC still fails the request", func(t *testing.T) {
+		brokenSCName := "local-sc-no-lvm-type-2"
+		brokenSC := &storagev1.StorageClass{
+			ObjectMeta:  metav1.ObjectMeta{Name: brokenSCName},
+			Provisioner: provisioner,
+			Parameters:  map[string]string{consts.LVMVolumeGroupsParamKey: `[{"name":"lvg1"}]`},
+		}
+		pvcSpec := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "pvc-spec-broken-sc", Namespace: "default"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				StorageClassName: &brokenSCName,
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: requestQty},
+				},
+			},
+		}
+
+		pvcs := map[string]*corev1.PersistentVolumeClaim{pvcSpec.Name: pvcSpec}
+		_, _, err := extractRequestedSize(context.Background(), cl, log, pvcs,
+			map[string]*storagev1.StorageClass{brokenSCName: brokenSC}, nil)
+		require.Error(t, err)
+	})
+}
+
+// TestExtractRequestedSize_HintOnlyDowngrade walks every failure point of
+// requestForPVC from both sides. A PVC known only from the extra-pvcs annotation
+// must be reported in dropped and never fail the request; the identical failure
+// on a spec-sourced PVC must still fail it, because the Pod cannot run without
+// that mount.
+//
+// The replicated cases matter most: the e2e stand installs only sds-local-volume
+// (see e2e/tests/cluster_config.yml), so the RSC/RSP path has no e2e coverage at
+// all and this table is its only regression net.
+func TestExtractRequestedSize_HintOnlyDowngrade(t *testing.T) {
+	log, _ := logger.NewLogger("0")
+	ctx := context.Background()
+
+	const (
+		replicatedSCName = "repl-sc"
+		localSCName      = "local-sc"
+		poolName         = "repl-pool"
+		missingPVName    = "pv-already-deleted"
+	)
+
+	replicatedSC := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: replicatedSCName},
+		Provisioner: consts.SdsReplicatedVolumeProvisioner,
+	}
+	localSCWithoutLVMType := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: localSCName},
+		Provisioner: consts.SdsLocalVolumeProvisioner,
+		Parameters:  map[string]string{consts.LVMVolumeGroupsParamKey: `[{"name":"lvg1"}]`},
+	}
+	localSC := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: localSCName},
+		Provisioner: consts.SdsLocalVolumeProvisioner,
+		Parameters: map[string]string{
+			consts.LvmTypeParamKey:         consts.Thick,
+			consts.LVMVolumeGroupsParamKey: `[{"name":"lvg1"}]`,
+		},
+	}
+
+	// pvcFor builds a PVC named after the case so the two subtests of one case
+	// cannot collide in the fake client.
+	pvcFor := func(name, scName, volumeName string) *corev1.PersistentVolumeClaim {
+		return &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				StorageClassName: &scName,
+				VolumeName:       volumeName,
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("10Gi")},
+				},
+			},
+		}
+	}
+
+	tt := []struct {
+		name    string
+		sc      *storagev1.StorageClass
+		pvc     *corev1.PersistentVolumeClaim
+		objects []client.Object
+	}{
+		{
+			name: "RSC for the replicated SC does not exist",
+			sc:   replicatedSC,
+			pvc:  pvcFor("pvc-no-rsc", replicatedSCName, ""),
+			// no RSC object on purpose
+		},
+		{
+			name:    "RSP referenced by the RSC does not exist",
+			sc:      replicatedSC,
+			pvc:     pvcFor("pvc-no-rsp", replicatedSCName, ""),
+			objects: []client.Object{testRSC(replicatedSCName, srv.VolumeAccessLocal, poolName)},
+		},
+		{
+			name: "local SC carries no lvm-type parameter",
+			sc:   localSCWithoutLVMType,
+			pvc:  pvcFor("pvc-no-lvm-type", localSCName, ""),
+		},
+		{
+			name: "PV vanished from under a bound PVC",
+			sc:   localSC,
+			pvc:  pvcFor("pvc-dangling-pv", localSCName, missingPVName),
+			// no PV object on purpose
+		},
+	}
+
+	for _, tc := range tt {
+		scs := map[string]*storagev1.StorageClass{tc.sc.Name: tc.sc}
+
+		t.Run(tc.name+"/annotation-only PVC is dropped", func(t *testing.T) {
+			cl := newFakeClient(tc.objects...)
+			pvcs := map[string]*corev1.PersistentVolumeClaim{tc.pvc.Name: tc.pvc}
+
+			got, dropped, err := extractRequestedSize(ctx, cl, log, pvcs, scs,
+				map[string]bool{tc.pvc.Name: true})
+
+			require.NoError(t, err, "a hint PVC must never fail the whole scheduling request")
+			assert.Equal(t, []string{tc.pvc.Name}, dropped)
+			assert.NotContains(t, got, tc.pvc.Name, "a dropped PVC must not reserve space")
+		})
+
+		t.Run(tc.name+"/spec-sourced PVC still fails", func(t *testing.T) {
+			cl := newFakeClient(tc.objects...)
+			pvcs := map[string]*corev1.PersistentVolumeClaim{tc.pvc.Name: tc.pvc}
+
+			_, dropped, err := extractRequestedSize(ctx, cl, log, pvcs, scs, nil)
+
+			require.Error(t, err, "a PVC the Pod actually mounts must keep failing the request")
+			assert.Empty(t, dropped)
+		})
+	}
 }
 
 // TestFilter_LocalPVC_EmptyPhase_NoMatchingLVG is the end-to-end regression for

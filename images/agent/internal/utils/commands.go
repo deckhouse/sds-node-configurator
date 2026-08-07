@@ -14,7 +14,7 @@
 	limitations under the License.
 */
 
-//go:generate go tool mockgen -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE
+//go:generate go tool mockgen -copyright_file ../../../../hack/boilerplate.mockgen.txt -write_source_comment -destination=../mock_utils/$GOFILE -source=$GOFILE
 
 package utils
 
@@ -23,11 +23,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	golog "log"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,7 +46,7 @@ type Commands interface {
 	GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdErr bytes.Buffer, err error)
 	GetAllPVs(ctx context.Context) (data []internal.PVData, command string, stdErr bytes.Buffer, err error)
 	GetPV(pvName string) (pvData internal.PVData, command string, stdErr bytes.Buffer, err error)
-	CreatePV(path string) (string, error)
+	CreatePV(ctx context.Context, path string) (string, error)
 	CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []string) (string, error)
 	CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string, error)
 	CreateThinPool(thinPoolName, vgName string, size int64) (string, error)
@@ -56,7 +58,7 @@ type Commands interface {
 	ExtendVG(vgName string, paths []string) (string, error)
 	ExtendLV(size int64, vgName, lvName string) (string, error)
 	ExtendLVFullVGSpace(vgName, lvName string) (string, error)
-	ResizePV(pvName string) (string, error)
+	ResizePV(ctx context.Context, pvName string) (string, error)
 	RemoveVG(vgName string) (string, error)
 	RemovePV(pvNames []string) (string, error)
 	RemoveLV(vgName, lvName string) (string, error)
@@ -70,6 +72,19 @@ type Commands interface {
 	UdevadmTrigger(ctx context.Context, paths []string) (string, error)
 	UnmarshalDevices(out []byte) ([]internal.Device, error)
 	ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error
+
+	CreateFileDevice(ctx context.Context, path string, sizeBytes int64) (string, error)
+	GetFileAllocatedBytes(ctx context.Context, path string) (string, int64, error)
+	SetupLoopDevice(ctx context.Context, filePath string) (string, string, error)
+	SetLoopDirectIO(ctx context.Context, loopDev string) (string, error)
+	SetLoopCapacity(ctx context.Context, loopDev string) (string, error)
+	DetachLoopDevice(ctx context.Context, loopDev string) (string, error)
+	ListLoopDevices(ctx context.Context) (string, []internal.LoopDeviceEntry, error)
+	FindLoopDeviceByFile(ctx context.Context, filePath string) (string, string, error)
+	GetLoopBackingFile(ctx context.Context, loopDev string) (string, internal.LoopBackingFile, error)
+	RemoveFileDevice(ctx context.Context, path string) (string, error)
+	EnsureFileDeviceDirectory(ctx context.Context, directory string) (string, error)
+	GetFilesystemSpace(ctx context.Context, directory string) (string, internal.FilesystemSpace, error)
 }
 
 type commands struct {
@@ -101,6 +116,17 @@ func (c *commands) GetBlockDevices(ctx context.Context) ([]internal.Device, stri
 	return devices, cmd.String(), stderr, nil
 }
 
+// GetAllVGs lists the node's Volume Groups.
+//
+// Like the write commands, it goes through errIfNotBenign: lvm.static under
+// nsenter prints a leaked file descriptor or a regex version mismatch and exits
+// non-zero on an invocation that in fact produced a complete report, and taking
+// that at face value is consequential for the callers that decide something on
+// the answer — vgExistsOnNode reports VGCheckFailed, which takes an
+// LVMVolumeGroup out of service, and ActivateAllManagedVGs refuses to activate
+// anything. Silence is still a failure: `vgs` has no known no-op, so a non-zero
+// exit with nothing on stderr means nobody knows what happened. An empty or
+// truncated report is caught a line later by unmarshalVGs either way.
 func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	args := []string{"vgs", "-o", "+uuid,tags,shared,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json"}
@@ -109,10 +135,12 @@ func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command 
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
-	filteredStdErr := filterStdErr(cmd.String(), stdErr)
-	err = cmd.Run()
-	if err != nil {
-		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
+	// Filtered after the run, not before it: taken before, stdErr is still empty
+	// and the returned buffer never carries anything.
+	runErr := cmd.Run()
+	filteredStdErr := filterStdErr(cmd.String(), stdErr, benignAlwaysStdErr)
+	if err := errIfNotBenignFiltered(cmd.String(), runErr, stdErr, filteredStdErr, silentExitIsFailure); err != nil {
+		return nil, cmd.String(), filteredStdErr, err
 	}
 
 	data, err = unmarshalVGs(outs.Bytes())
@@ -133,7 +161,7 @@ func (commands) GetVG(vgName string) (vgData internal.VGData, command string, st
 	cmd.Stderr = &stdErr
 
 	err = cmd.Run()
-	filteredStdErr := filterStdErr(cmd.String(), stdErr)
+	filteredStdErr := filterStdErr(cmd.String(), stdErr, benignAlwaysStdErr)
 	if err != nil {
 		return vgData, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
@@ -142,7 +170,10 @@ func (commands) GetVG(vgName string) (vgData internal.VGData, command string, st
 	if err != nil {
 		return vgData, cmd.String(), filteredStdErr, fmt.Errorf("unable to GetVG, err: %w", err)
 	}
-	vgData = data[0]
+	vgData, err = theOnlyVG(data, vgName)
+	if err != nil {
+		return internal.VGData{}, cmd.String(), filteredStdErr, err
+	}
 
 	return vgData, cmd.String(), filteredStdErr, nil
 }
@@ -156,7 +187,7 @@ func (commands) GetAllLVs(ctx context.Context) (data []internal.LVData, command 
 	cmd.Stderr = &stdErr
 
 	err = cmd.Run()
-	filteredStdErr := filterStdErr(cmd.String(), stdErr)
+	filteredStdErr := filterStdErr(cmd.String(), stdErr, benignAlwaysStdErr)
 	if err != nil {
 		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
@@ -180,7 +211,7 @@ func (commands) GetLV(vgName, lvName string) (lvData internal.LVData, command st
 	cmd.Stderr = &stdErr
 
 	err = cmd.Run()
-	filteredStdErr := filterStdErr(cmd.String(), stdErr)
+	filteredStdErr := filterStdErr(cmd.String(), stdErr, benignAlwaysStdErr)
 	if err != nil {
 		return lvData, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
@@ -189,11 +220,22 @@ func (commands) GetLV(vgName, lvName string) (lvData internal.LVData, command st
 	if err != nil {
 		return lvData, cmd.String(), filteredStdErr, fmt.Errorf("unable to GetLV %s, err: %w", lvPath, err)
 	}
-	lvData = lv[0]
+	lvData, err = theOnlyLV(lv, lvPath, vgName)
+	if err != nil {
+		return internal.LVData{}, cmd.String(), filteredStdErr, err
+	}
 
 	return lvData, cmd.String(), filteredStdErr, nil
 }
 
+// GetAllPVs lists the node's Physical Volumes.
+//
+// Filtered through errIfNotBenign for the same reason GetAllVGs is, and with
+// more at stake: this listing is what gates every destructive file-device
+// decision. A false failure makes cleanupFileDevices refuse to run and leaves
+// the LVMVolumeGroup in Terminating with its finalizer, and makes
+// rollbackProvisionedFileDevices and pvView fall back or do nothing. See
+// silentExitPolicy for why silence still counts as a failure here.
 func (commands) GetAllPVs(ctx context.Context) (data []internal.PVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json"}
@@ -202,10 +244,10 @@ func (commands) GetAllPVs(ctx context.Context) (data []internal.PVData, command 
 	cmd.Stdout = &outs
 	cmd.Stderr = &stdErr
 
-	err = cmd.Run()
-	filteredStdErr := filterStdErr(cmd.String(), stdErr)
-	if err != nil {
-		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
+	runErr := cmd.Run()
+	filteredStdErr := filterStdErr(cmd.String(), stdErr, benignAlwaysStdErr)
+	if err := errIfNotBenignFiltered(cmd.String(), runErr, stdErr, filteredStdErr, silentExitIsFailure); err != nil {
+		return nil, cmd.String(), filteredStdErr, err
 	}
 
 	data, err = unmarshalPVs(outs.Bytes())
@@ -226,7 +268,7 @@ func (commands) GetPV(pvName string) (pvData internal.PVData, command string, st
 	cmd.Stderr = &stdErr
 
 	err = cmd.Run()
-	filteredStdErr := filterStdErr(cmd.String(), stdErr)
+	filteredStdErr := filterStdErr(cmd.String(), stdErr, benignAlwaysStdErr)
 	if err != nil {
 		return pvData, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
 	}
@@ -235,59 +277,220 @@ func (commands) GetPV(pvName string) (pvData internal.PVData, command string, st
 	if err != nil {
 		return pvData, cmd.String(), filteredStdErr, fmt.Errorf("unable to GetPV, err: %w", err)
 	}
-	pvData = data[0]
+	pvData, err = theOnlyPV(data, pvName)
+	if err != nil {
+		return internal.PVData{}, cmd.String(), filteredStdErr, err
+	}
 
 	return pvData, cmd.String(), filteredStdErr, nil
 }
 
-func (commands) CreatePV(path string) (string, error) {
+// silentExitPolicy says what a non-zero exit with an empty stderr means for a
+// particular command. It is per-command because the honest answer differs:
+//
+//   - For a resize (`lvextend`), silence is tolerated. Some LVM versions report
+//     a no-op `-l 100%VG` — which a thin pool sized 100% hits on every single
+//     reconcile, since the pool always already fills the VG — without printing
+//     anything, and calling that a failure makes a healthy pool flap
+//     VGConfigurationApplied. This is the behaviour lvextend had before the
+//     file-device work and it is deliberately preserved.
+//
+//   - For pvcreate and pvresize there is no such known no-op, so silence is an
+//     unexplained failure and stays one. Accepting it would have CreatePV report
+//     a PV label that was never written; the real error would then surface a
+//     command later as a confusing vgcreate/vgextend failure, and — the reason
+//     this matters here — a create rollback would run against a device whose
+//     state nobody actually knows.
+type silentExitPolicy bool
+
+const (
+	silentExitIsFailure silentExitPolicy = false
+	silentExitIsBenign  silentExitPolicy = true
+)
+
+// deletedBackingFileMarker is what losetup (like
+// /sys/block/<loop>/loop/backing_file) appends to a backing-file path whose
+// inode has been unlinked while the loop device is still attached to it.
+const deletedBackingFileMarker = "(deleted)"
+
+// errIfNotBenign decides whether a finished lvm.static invocation actually
+// failed. lvm.static run under nsenter routinely emits a benign line —
+// "File descriptor N leaked on lvm invocation", a regex version mismatch, a
+// no-op resize — and exits non-zero on an operation that in fact succeeded, so
+// a bare non-zero exit cannot be taken at face value.
+//
+// stderr may only be given a vote when lvm itself chose the exit code, which is
+// exactly one of the three ways a command can fail:
+//
+//   - it never started (binary missing, fork failure). There is no diagnostic to
+//     filter and nothing ran, so this is always an error.
+//   - it was killed by a signal — SIGKILL from the OOM killer, SIGTERM during
+//     shutdown. lvm did not decide to fail and may have been cut off mid-write,
+//     so whatever it had printed by then says nothing about the outcome. Always
+//     an error, even though os/exec reports this as an *exec.ExitError too.
+//   - it ran to completion and exited non-zero. Only here is stderr the
+//     authority: if everything lvm printed was benign, the operation succeeded.
+//
+// The earlier `err != nil && filtered.Len() > 0` form collapsed all three, which
+// silently turned every diagnostic-less failure into a success — a killed
+// pvcreate would have had CreatePV claim a PV label that was never written.
+//
+// A non-zero exit with nothing at all on stderr is a fourth case, and it is the
+// caller's to decide via silence: "everything lvm printed was benign" is a
+// statement about output that exists, and an unexplained failure is not the same
+// claim. See silentExitPolicy.
+//
+// allow says which lines count as benign for THIS command; see
+// benignAlwaysStdErr for why that is not one global set.
+func errIfNotBenign(cmdStr string, err error, stderr bytes.Buffer, allow []*regexp.Regexp, silence silentExitPolicy) error {
+	if err == nil {
+		return nil
+	}
+	return errIfNotBenignFiltered(cmdStr, err, stderr, filterStdErr(cmdStr, stderr, allow), silence)
+}
+
+// errIfNotBenignFiltered is errIfNotBenign for callers that already hold the
+// filtered stderr because they return it as well. Filtering twice would work —
+// a bytes.Buffer copy keeps its own read offset — but it would log every
+// filtered line twice, which reads as two separate benign lines rather than one.
+func errIfNotBenignFiltered(cmdStr string, err error, stderr, filtered bytes.Buffer, silence silentExitPolicy) error {
+	if err == nil {
+		return nil
+	}
+
+	failed := func() error {
+		return fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmdStr, err, stderr.String())
+	}
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return failed()
+	}
+	// ExitCode reports -1 when the process was terminated by a signal.
+	if exitErr.ExitCode() < 0 {
+		return failed()
+	}
+	if stderr.Len() == 0 && silence == silentExitIsFailure {
+		return failed()
+	}
+	if filtered.Len() > 0 {
+		return failed()
+	}
+
+	golog.Printf("WARNING: [errIfNotBenign] command '%s' exited with '%v' but printed only benign output; treating it as successful.", cmdStr, err)
+	return nil
+}
+
+// ErrFileDeviceAbsent reports that a backing file is not there — the command ran,
+// looked, and said so. It is deliberately NOT returned when the command never got
+// to look, because the two answers lead to opposite decisions: "it is not there"
+// permits the create-path rollback to remove the file it is about to create,
+// while "I could not check" must not.
+var ErrFileDeviceAbsent = errors.New("backing file does not exist")
+
+// ranAndFailed reports whether the process actually ran to completion and chose a
+// non-zero exit code, as opposed to never starting (binary missing, fork
+// failure), being killed by a signal, or having its context cancelled or time out
+// underneath it.
+//
+// It is the same distinction errIfNotBenign draws before it lets stderr vote,
+// stated on its own because GetFileAllocatedBytes needs it for the opposite
+// purpose: there, only a command that ran is allowed to conclude anything about
+// the filesystem.
+func ranAndFailed(err error) bool {
+	var exitErr *exec.ExitError
+	// ExitCode reports -1 when the process was terminated by a signal, which is
+	// how exec.CommandContext reports a deadline or a cancellation.
+	return errors.As(err, &exitErr) && exitErr.ExitCode() > 0
+}
+
+// CreatePV writes an LVM Physical Volume label onto path.
+//
+// It takes a context because it is one of the two write commands the
+// spec.fileDevices paths depend on (the other is ResizePV), and every other step
+// of those sequences — fallocate, losetup, losetup -c — is already bounded by
+// CMD_DEADLINE_DURATION. An unbounded pvcreate in the middle of a bounded
+// sequence means the reconcile as a whole has no deadline, which is the one
+// property the per-command budget exists to provide.
+func (commands) CreatePV(ctx context.Context, path string) (string, error) {
 	args := []string{"pvcreate", path}
 	extendedArgs := lvmStaticExtendedArgs(args)
-	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderror = %s", cmd.String(), err, stderr.String())
+	// A benign non-zero exit must not be reported as a failure: pvcreate has
+	// already written the PV label by the time lvm.static complains about a
+	// leaked file descriptor, and surfacing that as an error wrongly trips the
+	// create/extend rollback against a device that is in fact a healthy PV.
+	// A failure with nothing on stderr is not benign, though — pvcreate has no
+	// known silent no-op, so silence means nobody knows what happened.
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+		return cmd.String(), err
 	}
 
 	return cmd.String(), nil
 }
 
+// vgCreateArgs builds the vgcreate argv for a Volume Group of this module's.
+//
+// Shared by the local and shared variants rather than written out twice, because
+// written out twice is how the shared one came to pass "--addtag" one time too
+// many: vgcreate then read the second "--addtag" as the first one's value and the
+// lvmVolumeGroupName tag as a positional device path, so a shared Volume Group was
+// never tagged with its owning LVMVolumeGroup — the tag every ownership check in
+// the agent, file devices included, reads. The tags are the part worth keeping in
+// one place; the `--shared` flag is the only real difference.
+func vgCreateArgs(vgName, lvmVolumeGroupName string, shared bool, pvNames []string) []string {
+	args := []string{"vgcreate"}
+	if shared {
+		args = append(args, "--shared")
+	}
+	args = append(args, vgName)
+	args = append(args, pvNames...)
+	return append(args,
+		"--addtag", internal.LVMTags[0],
+		"--addtag", fmt.Sprintf("%s=%s", internal.LVMVolumeGroupTag, lvmVolumeGroupName),
+	)
+}
+
+// CreateVGLocal assembles a Volume Group out of the given Physical Volumes and
+// tags it as this module's.
+//
+// Filtered through errIfNotBenign for the same reason CreatePV is, and with the
+// same stakes the create rollback already assumes: rollbackProvisionedFileDevices
+// names "a pvcreate/vgcreate that materially succeeded but returned a non-zero
+// status" as a state it has to defend against. Left unfiltered, a leaked file
+// descriptor on an invocation that in fact wrote the VG metadata reaches
+// reconcileLVGCreateFunc as VGCreationFailed and puts the LVMVolumeGroup in a
+// failed state over a Volume Group that exists. Silence stays a failure: vgcreate
+// has no known no-op.
 func (commands) CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
-	tmpStr := fmt.Sprintf("storage.deckhouse.io/lvmVolumeGroupName=%s", lvmVolumeGroupName)
-	args := []string{"vgcreate", vgName}
-	args = append(args, pvNames...)
-	args = append(args, "--addtag", "storage.deckhouse.io/enabled=true", "--addtag", tmpStr)
-
-	extendedArgs := lvmStaticExtendedArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(vgCreateArgs(vgName, lvmVolumeGroupName, false, pvNames))
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderror: %s", cmd.String(), err, stderr.String())
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+		return cmd.String(), err
 	}
 
 	return cmd.String(), nil
 }
 
+// CreateVGShared is CreateVGLocal for a shared (clustered) Volume Group. Same
+// benign-stderr treatment, for the same reason.
 func (commands) CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
-	tmpStr := fmt.Sprintf("storage.deckhouse.io/lvmVolumeGroupName=%s", lvmVolumeGroupName)
-	args := []string{"vgcreate", "--shared", vgName}
-	args = append(args, pvNames...)
-	args = append(args, "--addtag", "storage.deckhouse.io/enabled=true", "--addtag", "--addtag", tmpStr)
-
-	extendedArgs := lvmStaticExtendedArgs(args)
+	extendedArgs := lvmStaticExtendedArgs(vgCreateArgs(vgName, lvmVolumeGroupName, true, pvNames))
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+		return cmd.String(), err
 	}
 
 	return cmd.String(), nil
@@ -390,6 +593,17 @@ func (commands) CreateThickLogicalVolume(vgName, lvName string, size int64, cont
 	return cmd.String(), nil
 }
 
+// ExtendVG adds devices to an existing Volume Group.
+//
+// Filtered through errIfNotBenign like CreatePV and CreateVGLocal, and this is
+// the one where an unfiltered non-zero exit costs the most. Its error reaches
+// reconcileLVGUpdateFunc, which writes VGConfigurationApplied=False with reason
+// VGExtendFailed — a reason deliberately absent from the conditions watcher's
+// acceptableReasons, so the aggregate Ready condition goes False and the
+// scheduler stops placing volumes on a Volume Group that is serving every volume
+// it has. A leaked file descriptor printed after vgextend had already written the
+// metadata is not a reason to take storage out of service. Silence stays a
+// failure: vgextend has no known no-op.
 func (commands) ExtendVG(vgName string, paths []string) (string, error) {
 	args := []string{"vgextend", vgName}
 	args = append(args, paths...)
@@ -399,8 +613,8 @@ func (commands) ExtendVG(vgName string, paths []string) (string, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+		return cmd.String(), err
 	}
 
 	return cmd.String(), nil
@@ -414,10 +628,11 @@ func (commands) ExtendLV(size int64, vgName, lvName string) (string, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
-	filteredStdErr := filterStdErr(cmd.String(), stderr)
-	if err != nil && filteredStdErr.Len() > 0 {
-		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	// A resize that changes nothing is the normal state of a thin pool sized as
+	// a percentage of the VG, and not every LVM version explains itself when it
+	// exits non-zero over one; see silentExitPolicy.
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignResizeStdErr, silentExitIsBenign); err != nil {
+		return cmd.String(), err
 	}
 
 	return cmd.String(), nil
@@ -431,25 +646,35 @@ func (commands) ExtendLVFullVGSpace(vgName, lvName string) (string, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
-	filteredStdErr := filterStdErr(cmd.String(), stderr)
-	if err != nil && filteredStdErr.Len() > 0 {
-		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
+	// The no-op case this tolerates is the rule rather than the exception here:
+	// a 100% thin pool always already fills the VG. See silentExitPolicy.
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignResizeStdErr, silentExitIsBenign); err != nil {
+		return cmd.String(), err
 	}
 
 	return cmd.String(), nil
 }
 
-func (commands) ResizePV(pvName string) (string, error) {
+// ResizePV makes a Physical Volume take up the current size of its device. It
+// is bounded by a context for the same reason CreatePV is: it is the last step
+// of the in-place growth sequence, whose other two steps already are.
+func (commands) ResizePV(ctx context.Context, pvName string) (string, error) {
 	args := []string{"pvresize", pvName}
 	extendedArgs := lvmStaticExtendedArgs(args)
-	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
-		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	// pvresize is filtered like CreatePV and ExtendLV: under nsenter lvm.static
+	// prints "File descriptor N leaked on lvm.static invocation" and exits
+	// non-zero on an operation that in fact succeeded, and treating that as a
+	// failure is what once made the create rollback delete a live PV's backing
+	// file and double the VG. Silence is still a failure, as for pvcreate: a
+	// pvresize that did nothing and said nothing must not be reported as growth
+	// that happened.
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+		return cmd.String(), err
 	}
 
 	return cmd.String(), nil
@@ -665,15 +890,83 @@ func (commands) UnmarshalDevices(out []byte) ([]internal.Device, error) {
 // timeout (derived from CMD_DEADLINE_DURATION) and the caller's context, so a
 // stuck nsenter-backed command cannot block the agent indefinitely and a
 // SIGTERM from kubelet propagates immediately to the child process.
+//
+// Volume Groups that live entirely on loop devices the agent does not own are
+// skipped. This function WRITES LVM metadata — and worse than that, its write
+// makes a Volume Group the module's own, since it replaces the legacy tag with
+// storage.deckhouse.io/enabled=true, after which the discoverer will adopt it.
+// Its only gate is the legacy tag, which a guest running LINSTOR inside a
+// file-backed disk carries too; until spec.fileDevices removed `loop` from
+// LVMGlobalFilter such a Volume Group was invisible to lvm.static and the
+// question never arose. See utils/loopvg.go.
 func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error {
+	return reTag(ctx, c, log, metrics, ctrlName, cmdTimeout)
+}
+
+// reTag is ReTag's body, taking the command set as a parameter so the ownership
+// gate below can be tested. The method reads through the same interface it
+// implements, which is otherwise impossible to stand in for.
+func reTag(ctx context.Context, c Commands, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error {
+	log.Debug("[ReTag] start establishing which VGs are the module's own")
+	start := time.Now()
+	type vgsResult struct {
+		data   []internal.VGData
+		cmdStr string
+	}
+	vgsRes, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (vgsResult, error) {
+		data, cmdStr, _, err := c.GetAllVGs(ctx)
+		return vgsResult{data: data, cmdStr: cmdStr}, err
+	})
+	metrics.UtilsCommandsDuration(ctrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(ctrlName, "vgs").Inc()
+	log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", vgsRes.cmdStr))
+	if err != nil {
+		metrics.UtilsCommandsErrorsCount(ctrlName, "vgs").Inc()
+		log.Error(err, "[ReTag] unable to GetAllVGs")
+		return err
+	}
+
+	start = time.Now()
+	type pvsResult struct {
+		data   []internal.PVData
+		cmdStr string
+	}
+	pvsRes, pvsErr := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (pvsResult, error) {
+		data, cmdStr, _, err := c.GetAllPVs(ctx)
+		return pvsResult{data: data, cmdStr: cmdStr}, err
+	})
+	pvs, pvsCmd := pvsRes.data, pvsRes.cmdStr
+	metrics.UtilsCommandsDuration(ctrlName, "pvs").Observe(metrics.GetEstimatedTimeInSeconds(start))
+	metrics.UtilsCommandsExecutionCount(ctrlName, "pvs").Inc()
+	log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", pvsCmd))
+	if pvsErr != nil {
+		// Retagging is a one-off migration of a legacy tag; not doing it costs
+		// nothing until the next restart. Doing it to the wrong Volume Group cannot
+		// be undone, because the tag it replaces is gone afterwards.
+		metrics.UtilsCommandsErrorsCount(ctrlName, "pvs").Inc()
+		log.Error(pvsErr, "[ReTag] unable to GetAllPVs to establish which VGs are the module's own")
+		return pvsErr
+	}
+
+	verdicts := ClassifyLoopVGs(ctx, log, c, cmdTimeout, vgsRes.data, pvs)
+	ownVGs := SkipUnownedLoopVGs(log, "re-tag", vgsRes.data, verdicts)
+	// An LV names its Volume Group but not its UUID, so LVs are matched by name.
+	// A name shared by an owned and a foreign Volume Group therefore skips both,
+	// which is the harmless direction: the legacy tag simply stays until the
+	// duplicate is resolved.
+	ownVGNames := make(map[string]struct{}, len(ownVGs))
+	for _, vg := range ownVGs {
+		ownVGNames[vg.VGName] = struct{}{}
+	}
+
 	// thin pool
 	log.Debug("[ReTag] start re-tagging LV")
-	start := time.Now()
+	start = time.Now()
 	type lvsResult struct {
 		data   []internal.LVData
 		cmdStr string
 	}
-	lvsRes, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (lvsResult, error) {
+	lvsRes, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (lvsResult, error) {
 		data, cmdStr, _, err := c.GetAllLVs(ctx)
 		return lvsResult{data: data, cmdStr: cmdStr}, err
 	})
@@ -687,6 +980,9 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 	}
 
 	for _, lv := range lvsRes.data {
+		if _, own := ownVGNames[lv.VGName]; !own {
+			continue
+		}
 		tags := strings.Split(lv.LvTags, ",")
 		for _, tag := range tags {
 			if strings.Contains(tag, internal.LVMTags[0]) {
@@ -695,7 +991,7 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 
 			if strings.Contains(tag, internal.LVMTags[1]) {
 				start = time.Now()
-				cmdStr, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+				cmdStr, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 					return c.LVChangeDelTag(ctx, lv, tag)
 				})
 				metrics.UtilsCommandsDuration(ctrlName, "lvchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
@@ -708,7 +1004,7 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 				}
 
 				start = time.Now()
-				cmdStr, err = runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+				cmdStr, err = RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 					return c.VGChangeAddTag(ctx, lv.VGName, internal.LVMTags[0])
 				})
 				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
@@ -725,25 +1021,7 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 	log.Debug("[ReTag] end re-tagging LV")
 
 	log.Debug("[ReTag] start re-tagging LVM")
-	start = time.Now()
-	type vgsResult struct {
-		data   []internal.VGData
-		cmdStr string
-	}
-	vgsRes, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (vgsResult, error) {
-		data, cmdStr, _, err := c.GetAllVGs(ctx)
-		return vgsResult{data: data, cmdStr: cmdStr}, err
-	})
-	metrics.UtilsCommandsDuration(ctrlName, "vgs").Observe(metrics.GetEstimatedTimeInSeconds(start))
-	metrics.UtilsCommandsExecutionCount(ctrlName, "vgs").Inc()
-	log.Debug(fmt.Sprintf("[ReTag] exec cmd: %s", vgsRes.cmdStr))
-	if err != nil {
-		metrics.UtilsCommandsErrorsCount(ctrlName, vgsRes.cmdStr).Inc()
-		log.Error(err, "[ReTag] unable to GetAllVGs")
-		return err
-	}
-
-	for _, vg := range vgsRes.data {
+	for _, vg := range ownVGs {
 		tags := strings.Split(vg.VGTags, ",")
 		for _, tag := range tags {
 			if strings.Contains(tag, internal.LVMTags[0]) {
@@ -752,7 +1030,7 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 
 			if strings.Contains(tag, internal.LVMTags[1]) {
 				start = time.Now()
-				cmdStr, err := runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+				cmdStr, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 					return c.VGChangeDelTag(ctx, vg.VGName, tag)
 				})
 				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
@@ -765,7 +1043,7 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 				}
 
 				start = time.Now()
-				cmdStr, err = runWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
+				cmdStr, err = RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 					return c.VGChangeAddTag(ctx, vg.VGName, internal.LVMTags[0])
 				})
 				metrics.UtilsCommandsDuration(ctrlName, "vgchange").Observe(metrics.GetEstimatedTimeInSeconds(start))
@@ -784,11 +1062,606 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 	return nil
 }
 
+func (commands) CreateFileDevice(ctx context.Context, path string, sizeBytes int64) (string, error) {
+	args := nsentrerExpendedArgs(internal.FallocateCmd, "-l", strconv.FormatInt(sizeBytes, 10), path)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to create file device %s: %w, stderr: %s", path, err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// GetFileAllocatedBytes returns how many bytes path actually occupies on its
+// filesystem: `%b` blocks of `%B` bytes each.
+//
+// Allocated, not apparent (`%s`), because the only caller asks this in order to
+// work out how much more `fallocate` still has to reserve. For a file the agent
+// itself created the two agree — `fallocate -l` allocates everything it
+// declares. They part company for a sparse file that turns up under a managed
+// path (restored with `cp --sparse`, pre-created with `truncate`, copied by
+// hand), where the apparent size is the full one while nothing is on disk:
+// trusting it would compute "nothing left to allocate", skip the free-space
+// guard entirely, and let fallocate fill the node's filesystem — the DiskPressure
+// eviction that guard exists to prevent.
+//
+// Failure comes back in two flavours, and the difference decides whether a
+// rollback is later allowed to `rm` the file:
+//
+//   - ErrFileDeviceAbsent — stat ran, looked, and exited non-zero. For a path the
+//     agent is about to create this is ENOENT in all but pathological cases, and
+//     the pathological ones (EACCES, EIO, ESTALE) make the fallocate that follows
+//     fail too, so nothing is ever removed on their account.
+//   - any other error — stat never got to look: it could not be started, was
+//     killed, or the per-command deadline expired. Nothing at all is known about
+//     the path.
+//
+// Collapsing the two is what let a transient timeout be read as "the file is not
+// there", after which the create-path rollback removed a backing file that
+// carried a live PV. Distinguishing them by exit status rather than by parsing
+// stderr keeps the check out of locale-dependent strerror text.
+func (commands) GetFileAllocatedBytes(ctx context.Context, path string) (string, int64, error) {
+	args := nsentrerExpendedArgs(internal.StatCmd, "-c", "%b %B", path)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if ranAndFailed(err) {
+			return cmd.String(), 0, fmt.Errorf("%w: %q: %w, stderr: %s", ErrFileDeviceAbsent, path, err, stderr.String())
+		}
+		return cmd.String(), 0, fmt.Errorf("unable to stat %q: %w, stderr: %s", path, err, stderr.String())
+	}
+
+	size, err := parseStatAllocatedBytes(stdout.String())
+	if err != nil {
+		return cmd.String(), 0, fmt.Errorf("unable to parse the allocated size of %q: %w", path, err)
+	}
+	return cmd.String(), size, nil
+}
+
+// parseStatAllocatedBytes parses the "<blocks> <block-size>" output of
+// `stat -c "%b %B"` into the number of bytes the file occupies.
+func parseStatAllocatedBytes(out string) (int64, error) {
+	fields := strings.Fields(out)
+	if len(fields) != 2 {
+		return 0, fmt.Errorf("expected 2 fields, got %q", strings.TrimSpace(out))
+	}
+	blocks, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid block count %q: %w", fields[0], err)
+	}
+	blockSize, err := strconv.ParseInt(fields[1], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid block size %q: %w", fields[1], err)
+	}
+	if blocks < 0 || blockSize < 0 {
+		return 0, fmt.Errorf("negative block count %d or block size %d", blocks, blockSize)
+	}
+	return blocks * blockSize, nil
+}
+
+func (commands) SetupLoopDevice(ctx context.Context, filePath string) (string, string, error) {
+	// --nooverlap makes losetup reuse an already-attached loop for this
+	// backing file (printing it via --show) instead of binding a second
+	// minor to the same file. Without it, a race between the startup
+	// reattach and the reconciler's provision step — or an existing
+	// attachment that FindLoopDeviceByFile reported only under an alias —
+	// would leak an extra loop device that nothing ever reaps.
+	//
+	// Direct I/O is deliberately NOT requested here; see SetLoopDirectIO for
+	// why it has to be a separate, best-effort call.
+	args := nsentrerExpendedArgs(internal.LosetupCmd, "--find", "--nooverlap", "--show", filePath)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), "", fmt.Errorf("unable to setup loop device for %s: %w, stderr: %s", filePath, err, stderr.String())
+	}
+
+	loopDev := strings.TrimSpace(stdout.String())
+	// Registered here rather than at the call sites, because the very next thing
+	// every caller does is run an LVM command against this device — pvcreate,
+	// vgcreate, vgextend — and internal.LVMGlobalFilter rejects /dev/loop* until
+	// the device is known to be ours. A call site that forgot to register would
+	// hand lvm a device it has just been told to ignore, and the failure would read
+	// as "pvcreate refused the device" with nothing pointing at the filter.
+	RememberLoopIfManaged(filePath, loopDev)
+
+	return cmd.String(), loopDev, nil
+}
+
+// SetLoopDirectIO asks the loop driver to open the backing file with O_DIRECT so
+// reads and writes bypass the backing filesystem's page cache. Our stack layers
+// a filesystem on top of LVM on top of the loop on top of the node's
+// filesystem; without direct I/O every page is cached twice (once for the
+// volume's filesystem, once for the backing file), doubling the RAM footprint
+// and throttling throughput.
+//
+// It is a separate command, and its failure must be treated as a warning rather
+// than an error, because `LOOP_SET_DIRECT_IO` is not best-effort in the kernel:
+// loop_set_dio() returns -EINVAL when direct I/O could not be enabled — which is
+// the case for any backing filesystem without an ->direct_IO implementation
+// (tmpfs is the obvious one) or with an incompatible alignment. losetup applies
+// --direct-io AFTER attaching the device, so folding it into SetupLoopDevice
+// produced a non-zero exit with the loop already bound and nothing printed on
+// stdout: the caller saw a failure, removed the backing file it had just
+// created, and left the minor stranded on a deleted inode holding disk space
+// that the filesystem could never reclaim — once per reconcile, forever.
+//
+// Buffered I/O is a performance regression. It is not a reason to refuse to
+// provision storage.
+func (commands) SetLoopDirectIO(ctx context.Context, loopDev string) (string, error) {
+	args := nsentrerExpendedArgs(internal.LosetupCmd, "--direct-io=on", loopDev)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to enable direct I/O on loop device %s: %w, stderr: %s", loopDev, err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// SetLoopCapacity makes the loop driver re-read the size of its backing file
+// (the LOOP_SET_CAPACITY ioctl). It is what turns a grown backing file into a
+// grown block device, and it works on a live device: the filesystems and
+// logical volumes stacked on top stay mounted and in use throughout.
+//
+// Shrinking is not the mirror image of this and is not supported anywhere in the
+// growth path. Note that `fallocate -l` cannot shrink a file — with mode 0 it
+// only ever allocates and, if needed, extends — so a smaller requested size is a
+// no-op rather than a truncation. The reason shrinking is refused is not the
+// file: it is that giving capacity back requires shrinking the Volume Group
+// (pvmove + vgreduce), which the module does not do for block devices either.
+func (commands) SetLoopCapacity(ctx context.Context, loopDev string) (string, error) {
+	args := nsentrerExpendedArgs(internal.LosetupCmd, "-c", loopDev)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to refresh capacity of loop device %s: %w, stderr: %s", loopDev, err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+func (commands) DetachLoopDevice(ctx context.Context, loopDev string) (string, error) {
+	args := nsentrerExpendedArgs(internal.LosetupCmd, "-d", loopDev)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to detach loop device %s: %w, stderr: %s", loopDev, err, stderr.String())
+	}
+
+	// The minor goes back to the kernel's pool the moment this succeeds, and what
+	// it is handed to next may well be a virtual machine's disk. An exemption left
+	// behind here is an exemption for somebody else's storage.
+	ForgetOwnedLoop(loopDev)
+
+	return cmd.String(), nil
+}
+
+// ListLoopDevices enumerates the node's loop devices together with the files
+// behind them.
+//
+// One command for the whole table rather than GetLoopBackingFile per device: this
+// runs on every cache fill (utils.RefreshOwnedLoops) and a hypervisor carries a
+// loop device per block-mode volume of every virtual machine on it — a hundred and
+// fifty of them is ordinary, and that many nsenter calls per scan is not.
+func (commands) ListLoopDevices(ctx context.Context) (string, []internal.LoopDeviceEntry, error) {
+	args := nsentrerExpendedArgs(internal.LosetupCmd, "--noheadings", "--output", "NAME,BACK-FILE")
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), nil, fmt.Errorf("unable to list loop devices: %w, stderr: %s", err, stderr.String())
+	}
+
+	return cmd.String(), parseLoopDeviceTable(stdout.String()), nil
+}
+
+// parseLoopDeviceTable reads `losetup --noheadings --output NAME,BACK-FILE`.
+//
+// The device is the first field and the backing file is everything after it: a
+// path may contain spaces, and the " (deleted)" marker losetup appends is itself
+// separated by one. Splitting on all whitespace would silently truncate both, and
+// a truncated path fails the ownership check — which would hide the agent's own
+// file-backed device from lvm rather than admit somebody else's.
+func parseLoopDeviceTable(out string) []internal.LoopDeviceEntry {
+	lines := strings.Split(out, "\n")
+	entries := make([]internal.LoopDeviceEntry, 0, len(lines))
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		device, backing, found := strings.Cut(trimmed, " ")
+		if !found {
+			// A loop device with no backing file at all: losetup lists it while it is
+			// being torn down. Nothing to own.
+			continue
+		}
+		entries = append(entries, internal.LoopDeviceEntry{
+			Device:  device,
+			Backing: parseBackingFile(backing),
+		})
+	}
+
+	return entries
+}
+
+func (commands) FindLoopDeviceByFile(ctx context.Context, filePath string) (string, string, error) {
+	args := nsentrerExpendedArgs(internal.LosetupCmd, "-j", filePath)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), "", fmt.Errorf("unable to find loop device for %s: %w, stderr: %s", filePath, err, stderr.String())
+	}
+
+	devices := parseLoopDeviceListing(stdout.String())
+	switch len(devices) {
+	case 0:
+		return cmd.String(), "", nil
+	case 1:
+		// Already attached, so nothing registered it: this is the startup path after
+		// a restart, where the loops of a file-backed Volume Group survived and the
+		// in-process registry did not. Without this the LVM filter would hide the
+		// node's own Volume Group until the first cache fill refreshed the set.
+		RememberLoopIfManaged(filePath, devices[0])
+		return cmd.String(), devices[0], nil
+	default:
+		// Two loop devices over one backing file are two Physical Volumes of the
+		// same size over the same blocks — the state in which a file-backed Volume
+		// Group silently doubled on a real cluster, with half of it on a loop whose
+		// file had been unlinked. Returning the first device and moving on would let
+		// every caller act on half the picture: provisioning would report "already
+		// attached", cleanup would detach one of the two and `rm` the file the other
+		// is still reading. So it is reported instead. The first device is still
+		// returned, for the callers that only log it.
+		return cmd.String(), devices[0], fmt.Errorf("%s is attached to %d loop devices (%s); refusing to act on one of them",
+			filePath, len(devices), strings.Join(devices, ", "))
+	}
+}
+
+// parseLoopDeviceListing extracts the loop device names from `losetup -j <file>`
+// output, which prints one `/dev/loopN: <offset> <backing-file>` line per loop
+// device bound to the file and nothing at all when there is none.
+//
+// Blank lines are dropped rather than turned into an empty device name: an empty
+// name would be indistinguishable from "not attached" for a caller counting the
+// result, which is what decides whether provisioning creates a second file.
+func parseLoopDeviceListing(out string) []string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	devices := make([]string, 0, len(lines))
+	for _, line := range lines {
+		dev, _, _ := strings.Cut(line, ":")
+		if dev = strings.TrimSpace(dev); dev != "" {
+			devices = append(devices, dev)
+		}
+	}
+	return devices
+}
+
+// GetLoopBackingFile returns the backing file loopDev is currently attached to.
+// An empty Path means the device is not attached.
+//
+// Implemented via `losetup --noheadings --output BACK-FILE <loopDev>` so
+// the agent does not have to spawn `cat /sys/block/<loop>/loop/backing_file`
+// in the host PID namespace just to read a single value. Goes through the
+// same nsenter wrapper as every other host command in this package so the
+// argv stays unit-testable.
+//
+// The result carries the Deleted flag separately from the path rather than
+// collapsing the two, because the two callers need opposite things from it:
+// cleanup has to recognise an unlinked file as ours in order to detach the
+// minor, while provisioning has to know the file is gone in order NOT to create
+// a second one at the same path.
+func (commands) GetLoopBackingFile(ctx context.Context, loopDev string) (string, internal.LoopBackingFile, error) {
+	args := nsentrerExpendedArgs(internal.LosetupCmd, "--noheadings", "--output", "BACK-FILE", loopDev)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), internal.LoopBackingFile{}, fmt.Errorf("unable to read backing file for %s: %w, stderr: %s", loopDev, err, stderr.String())
+	}
+	return cmd.String(), parseBackingFile(stdout.String()), nil
+}
+
+// parseBackingFile splits the backing-file path losetup reports from the
+// " (deleted)" marker it appends when the file has been unlinked while the loop
+// is still attached, e.g. "/data/sds-vg-a.d0.img (deleted)".
+//
+// The marker has to come off the path: leaving it in makes
+// IsManagedFileDevicePath miss the basename, cleanup refuse to detach the loop
+// and the minor stay on the node forever. It also has to be reported, because a
+// loop reading from a file nobody can open again is not a healthy file device
+// and must not be published as one.
+func parseBackingFile(out string) internal.LoopBackingFile {
+	trimmed := strings.TrimSpace(out)
+	path := strings.TrimSuffix(trimmed, deletedBackingFileMarker)
+	return internal.LoopBackingFile{
+		Path:    strings.TrimSpace(path),
+		Deleted: len(path) != len(trimmed),
+	}
+}
+
+func (commands) RemoveFileDevice(ctx context.Context, path string) (string, error) {
+	args := nsentrerExpendedArgs(internal.RmCmd, "-f", path)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to remove file device %s: %w, stderr: %s", path, err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// EnsureFileDeviceDirectory creates directory (and any missing parents) on the
+// host so the backing file can be allocated into it. The agent runs in PID 1's
+// mount namespace, so this is `mkdir -p` against the node's root filesystem.
+// `mkdir -p` is idempotent (no error if the directory already exists) and fails
+// only when the path is genuinely unusable — a read-only filesystem, or a
+// non-directory component along the way.
+func (commands) EnsureFileDeviceDirectory(ctx context.Context, directory string) (string, error) {
+	args := nsentrerExpendedArgs(internal.MkdirCmd, "-p", directory)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to create directory %q on the node: %w, stderr: %s", directory, err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// GetFilesystemSpace measures the filesystem holding directory: how many bytes
+// can still be allocated in it, and how large it is in total.
+//
+// The available figure lets the caller refuse an oversized backing file before
+// `fallocate` fails halfway. The total is what turns that into a guard against a
+// node-level outage rather than merely against ENOSPC: the caller keeps a share
+// of the filesystem free (see ReconcilerConfig.FileDevicesMinFreeSpacePercent),
+// because kubelet starts evicting at `nodefs.available<10%` by default, long
+// before the filesystem is actually full.
+//
+// It reads both with one `stat -f` in PID 1's mount namespace (the agent itself
+// does not share the host mount namespace, so a Go syscall.Statfs would measure
+// the wrong filesystem): %S is the fundamental block size, %b the total block
+// count and %a the count of blocks available to a non-superuser. Using %a rather
+// than %f deliberately leaves the filesystem's own superuser reserve untouched
+// on top of the configured share.
+func (commands) GetFilesystemSpace(ctx context.Context, directory string) (string, internal.FilesystemSpace, error) {
+	args := nsentrerExpendedArgs(internal.StatCmd, "-f", "-c", "%S %b %a", directory)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), internal.FilesystemSpace{}, fmt.Errorf("unable to stat filesystem for %q: %w, stderr: %s", directory, err, stderr.String())
+	}
+
+	space, err := parseStatfsSpace(stdout.String())
+	if err != nil {
+		return cmd.String(), internal.FilesystemSpace{}, fmt.Errorf("unable to parse free space for %q: %w", directory, err)
+	}
+	return cmd.String(), space, nil
+}
+
+// parseStatfsSpace parses the "<block-size> <total-blocks> <available-blocks>"
+// output of `stat -f -c "%S %b %a"` into a FilesystemSpace.
+//
+// A non-positive block size or total block count is rejected rather than passed
+// on: no real filesystem reports one, and the caller reads TotalBytes <= 0 as
+// "size unknown, skip the reserve" — a value that must never be reachable from a
+// successful stat.
+func parseStatfsSpace(out string) (internal.FilesystemSpace, error) {
+	fields := strings.Fields(out)
+	if len(fields) != 3 {
+		return internal.FilesystemSpace{}, fmt.Errorf("expected 3 fields, got %q", strings.TrimSpace(out))
+	}
+	blockSize, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil {
+		return internal.FilesystemSpace{}, fmt.Errorf("invalid block size %q: %w", fields[0], err)
+	}
+	totalBlocks, err := strconv.ParseInt(fields[1], 10, 64)
+	if err != nil {
+		return internal.FilesystemSpace{}, fmt.Errorf("invalid total block count %q: %w", fields[1], err)
+	}
+	availBlocks, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil {
+		return internal.FilesystemSpace{}, fmt.Errorf("invalid available block count %q: %w", fields[2], err)
+	}
+	if blockSize <= 0 || totalBlocks <= 0 {
+		return internal.FilesystemSpace{}, fmt.Errorf("non-positive block size %d or total block count %d", blockSize, totalBlocks)
+	}
+	if availBlocks < 0 {
+		return internal.FilesystemSpace{}, fmt.Errorf("negative available block count %d", availBlocks)
+	}
+	return internal.FilesystemSpace{
+		AvailableBytes: blockSize * availBlocks,
+		TotalBytes:     blockSize * totalBlocks,
+	}, nil
+}
+
+// lvmAdvisoryLine matches a line lvm prints on STDOUT instead of stderr — one of
+// its log_print/log_warn advisories, e.g.
+//
+//	Consider pruning vg-1 VG archive with more then 1032 MiB in 11272 files (check archiving is needed in lvm.conf).
+//
+// Under --reportformat json these land wherever lvm happened to emit them, which
+// is in the MIDDLE of the report and not only in front of it, so skipping a
+// prefix is not enough — the line has to be dropped wherever it appears.
+//
+// Keying on "starts with a letter" is safe for an lvm report and only for an lvm
+// report: every line of one begins with a structural character or a quoted key,
+// never with a bare word.
+//
+// (?m) is what lets the same pattern answer both questions asked of it: "does
+// this buffer contain such a line at all" (the cheap pre-check over the whole
+// report) and "is this line one" (per line, after the scanner has stripped the
+// newline). Without it `^` would only ever match at byte zero and the pre-check
+// would miss every advisory that is not the very first thing lvm printed — which
+// is all of them, since the report opens with `{`. The character class is spelled
+// out rather than [[:space:]] so that it cannot span a line break.
+var lvmAdvisoryLine = regexp.MustCompile(`(?m)^[ \t]*[A-Za-z]`)
+
+// maxReportLine caps one line of an lvm JSON report. lvm puts a whole object on
+// a single line, so the longest line grows with the number of columns, not with
+// the number of Volume Groups or Logical Volumes.
+const maxReportLine = 1 << 20
+
+// reportJSON returns out without the advisory lines lvm mixes into its JSON
+// report on stdout.
+//
+// One such line is enough to take a node out of service: unmarshalVGs fails,
+// scanner.fillTheCache returns an error on every pass, and neither the
+// BlockDevice nor the LVMVolumeGroup discoverer runs on that node again — while
+// the report itself is complete and correct both before and after the advisory.
+// That is what happened on four nodes of a 20-node cluster once /etc/lvm/archive
+// had grown past lvm's pruning threshold.
+func reportJSON(out []byte) []byte {
+	if !lvmAdvisoryLine.Match(out) {
+		return out
+	}
+
+	var kept bytes.Buffer
+	kept.Grow(len(out))
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	scanner.Buffer(make([]byte, 0, 64*1024), maxReportLine)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if lvmAdvisoryLine.Match(line) {
+			golog.Printf("WARNING: [reportJSON] dropping a non-JSON line lvm printed on stdout inside its report. Line: '%s'.", bytes.TrimSpace(line))
+			continue
+		}
+		kept.Write(line)
+		kept.WriteByte('\n')
+	}
+	if err := scanner.Err(); err != nil {
+		// The filtered copy is truncated and would fail to parse for a second,
+		// unrelated reason. Hand back the raw bytes so the error the caller reports
+		// describes what lvm actually printed.
+		golog.Printf("WARNING: [reportJSON] unable to scan the report, using it verbatim: %v.", err)
+		return out
+	}
+
+	return kept.Bytes()
+}
+
+// reportParseError explains a failed report parse in terms of what lvm printed.
+//
+// Without the head of stdout the log says only `invalid character 'C' looking
+// for beginning of value` and drops the buffer that named byte came from, so the
+// only way to learn what lvm said is to reproduce the command on the node by
+// hand — which is not something the error's reader can do a day later.
+func reportParseError(err error, raw []byte) error {
+	const headLen = 240
+
+	head := bytes.TrimSpace(raw)
+	truncated := ""
+	if len(head) > headLen {
+		head, truncated = head[:headLen], "..."
+	}
+
+	return fmt.Errorf("%w; lvm printed on stdout: %q%s", err, head, truncated)
+}
+
+// theOnlyVG, theOnlyLV and theOnlyPV turn a targeted lvm report into the one row
+// the caller asked for, or into an error saying why there is no such row.
+//
+// Separated from the commands so the three decisions can be tested — the commands
+// themselves shell out through nsenter and cannot be — and because they encode the
+// same rule from three angles: an object's NAME is not its identity.
+//
+// Neither an empty nor a multi-row report may be indexed into. Zero rows used to be
+// an index-out-of-range panic, and lvm exits 0 with an empty report often enough
+// (the object went away between two commands, or devices/global_filter hid it) that
+// the agent must not die on it. More than one row means the name the caller used
+// does not identify one object, and picking a row hands them somebody else's
+// storage under their own name.
+func theOnlyVG(rows []internal.VGData, vgName string) (internal.VGData, error) {
+	// Two Volume Groups may share a name — that is what lvm's "VG name %s is used by
+	// VGs %s and %s" warning is about, and on a hypervisor it takes nothing more than
+	// a guest creating a `vg-1` of its own inside a disk this node can see. Neither
+	// answer is this function's to pick, so the caller is told to resolve it by UUID.
+	switch len(rows) {
+	case 1:
+		return rows[0], nil
+	case 0:
+		return internal.VGData{}, fmt.Errorf("unable to GetVG %s: lvm reported no such VG", vgName)
+	default:
+		uuids := make([]string, 0, len(rows))
+		for _, vg := range rows {
+			uuids = append(uuids, vg.VGUUID)
+		}
+		return internal.VGData{}, fmt.Errorf("unable to GetVG %s: the name is used by %d VGs (UUIDs: %s), so it does not identify one", vgName, len(rows), strings.Join(uuids, ", "))
+	}
+}
+
+func theOnlyLV(rows []internal.LVData, lvPath, vgName string) (internal.LVData, error) {
+	// Here the path itself is ambiguous: /dev/<vg>/<lv> names a Volume Group by name,
+	// so a duplicate VG name makes lvm report an LV per candidate. Every caller treats
+	// an error as "warn and retry", which is the right outcome — picking a row would
+	// report a foreign LV's size as our volume's.
+	switch len(rows) {
+	case 1:
+		return rows[0], nil
+	case 0:
+		return internal.LVData{}, fmt.Errorf("unable to GetLV %s: lvm reported no such LV", lvPath)
+	default:
+		vgUUIDs := make([]string, 0, len(rows))
+		for _, lv := range rows {
+			vgUUIDs = append(vgUUIDs, lv.VGUuid)
+		}
+		return internal.LVData{}, fmt.Errorf("unable to GetLV %s: the path matches %d LVs across VGs sharing the name %s (VG UUIDs: %s)", lvPath, len(rows), vgName, strings.Join(vgUUIDs, ", "))
+	}
+}
+
+func theOnlyPV(rows []internal.PVData, pvName string) (internal.PVData, error) {
+	// A device path does identify one PV, so the multi-row case is not a thing here —
+	// but the empty one is: this is the only listing that runs against a device the
+	// agent may have just detached.
+	if len(rows) == 0 {
+		return internal.PVData{}, fmt.Errorf("unable to GetPV %s: lvm reported no such PV", pvName)
+	}
+	return rows[0], nil
+}
+
 func unmarshalPVs(out []byte) ([]internal.PVData, error) {
 	var pvR internal.PVReport
 
-	if err := json.Unmarshal(out, &pvR); err != nil {
-		return nil, err
+	if err := json.Unmarshal(reportJSON(out), &pvR); err != nil {
+		return nil, reportParseError(err, out)
 	}
 
 	pvs := make([]internal.PVData, 0, len(pvR.Report))
@@ -802,8 +1675,8 @@ func unmarshalPVs(out []byte) ([]internal.PVData, error) {
 func unmarshalVGs(out []byte) ([]internal.VGData, error) {
 	var vgR internal.VGReport
 
-	if err := json.Unmarshal(out, &vgR); err != nil {
-		return nil, err
+	if err := json.Unmarshal(reportJSON(out), &vgR); err != nil {
+		return nil, reportParseError(err, out)
 	}
 
 	vgs := make([]internal.VGData, 0, len(vgR.Report))
@@ -817,8 +1690,8 @@ func unmarshalVGs(out []byte) ([]internal.VGData, error) {
 func unmarshalLVs(out []byte) ([]internal.LVData, error) {
 	var lvR internal.LVReport
 
-	if err := json.Unmarshal(out, &lvR); err != nil {
-		return nil, err
+	if err := json.Unmarshal(reportJSON(out), &lvR); err != nil {
+		return nil, reportParseError(err, out)
 	}
 
 	lvs := make([]internal.LVData, 0, len(lvR.Report))
@@ -860,7 +1733,7 @@ func lvmStaticExtendedArgs(args []string) []string {
 		return nsentrerExpendedArgs(internal.LVMCmd, args...)
 	}
 
-	configValue := internal.LVMGlobalFilter + " " + internal.LVMArchiveRetention
+	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMArchiveRetention
 	withConfig := make([]string, 0, len(args)+2)
 	withConfig = append(withConfig, args[0], "--config", configValue)
 	withConfig = append(withConfig, args[1:]...)
@@ -868,51 +1741,104 @@ func lvmStaticExtendedArgs(args []string) []string {
 	return nsentrerExpendedArgs(internal.LVMCmd, withConfig...)
 }
 
-// filterStdErr processes a bytes.Buffer containing stderr output and filters out specific
-// messages that match a predefined regular expression pattern. In this context, it's used to
-// exclude "Regex version mismatch" messages generated due to SELinux checks on a statically
-// compiled LVM binary. These messages report a discrepancy between the versions of the regex
-// library used inside the LVM binary, but since LVM is statically compiled and doesn't rely on
-// system libraries at runtime, these warnings do not impact LVM's functionality or overall
-// system security. Therefore, they can be safely ignored to simplify the analysis of command output.
+// The benign-stderr allowlists. A line matched here is one lvm.static prints
+// that says nothing about whether the operation succeeded, so it must not make
+// the caller treat a non-zero exit as a failure (see errIfNotBenign).
 //
-// Parameters:
-//   - command (string): The command that generated the stderr output.
-//   - stdErr (bytes.Buffer): The buffer containing the stderr output from a command execution.
+// They are deliberately SPLIT PER COMMAND rather than kept as one global set.
+// What counts as "says nothing about the outcome" is a property of the
+// subcommand, not of lvm: a resize that changed nothing is a normal state for
+// `lvextend -l 100%VG`, and is not a thing `pvs` or `pvcreate` can report at
+// all. Keeping one set meant that adding a benign pattern for a write command
+// silently widened what counts as success for the LISTING commands too — and
+// the PV listing is the sole gate in front of every destructive file-device
+// decision (cleanupFileDevices unlinks backing files on the strength of it,
+// rollbackProvisionedFileDevices tears loops down). A `pvs` that exits non-zero
+// after emitting a partial report must stay a failure, whatever patterns a
+// future resize needs.
+var (
+	// Artefacts of running a statically linked lvm.static under nsenter. They
+	// appear on any subcommand, read or write, and never carry information about
+	// the outcome: the regex version mismatch comes from the SELinux check inside
+	// the static binary, and the leaked descriptor is reported after the operation
+	// has already been applied.
+	reRegexVersionMismatch = regexp.MustCompile(`Regex version mismatch, expected: .+ actual: .+`)
+	reLeakedFileDescriptor = regexp.MustCompile(`File descriptor .+ leaked on lvm(\.static)? invocation\. Parent PID .+: /opt/deckhouse/sds/bin/nsenter`)
+
+	// A resize that changed nothing. This is the normal state of a thin pool sized
+	// as a percentage of the VG: the pool always already fills it, up to thin-pool
+	// metadata, so the controller re-requests a size the LV already has on every
+	// reconcile. Different LVM versions word it differently — older ones print
+	// "No size change.", newer ones (2.03.x) "New size (<n> extents) matches
+	// existing size (<n> extents)." — and both mean the same no-op.
+	//
+	// Anchored, unlike the two above: this one is specific enough that a line
+	// merely quoting it (an error message embedding another command's output)
+	// should not be swallowed.
+	reNoSizeChange = regexp.MustCompile(`^\s*(No size change\..*|New size \(.+\) matches existing size \(.+\)\.)$`)
+
+	// Two Volume Groups on the node share a name. lvm prints this pair on EVERY
+	// invocation, whatever object the command asked about, because it is a property
+	// of the node's device scan and not of the argument: `vgs vg-1`, `pvs
+	// /dev/nvme0n1` and `lvs /dev/vg-1/pvc-...` all print it.
+	//
+	// That makes it the one thing a per-object diagnostic must never keep. The
+	// discoverer asks lvm about one Volume Group at a time and records whatever
+	// stderr comes back as that Volume Group's health; with these lines in it, a
+	// `data` inside some guest's disk colliding with another guest's `data` marked
+	// this node's own vg-1 NonOperational and took its LVMVolumeGroup to NotReady.
+	// The condition it deserves is set elsewhere, by name, with the UUIDs of the
+	// actual duplicates in the message (see the discoverer's duplicate handling).
+	reDuplicateVGName     = regexp.MustCompile(`^\s*WARNING: VG name .+ is used by VGs .+\.$`)
+	reDuplicateVGNameHint = regexp.MustCompile(`^\s*Fix duplicate VG names with vgrename uuid, a device filter, or system IDs\.$`)
+
+	// benignAlwaysStdErr is the set every lvm invocation may ignore.
+	benignAlwaysStdErr = []*regexp.Regexp{reRegexVersionMismatch, reLeakedFileDescriptor}
+	// benignResizeStdErr additionally tolerates the no-op resize. Only lvextend
+	// and its full-VG-space variant may use it.
+	benignResizeStdErr = []*regexp.Regexp{reRegexVersionMismatch, reLeakedFileDescriptor, reNoSizeChange}
+	// notAboutTheQueriedObject is what ObjectDiagnostics drops. It is NOT a
+	// benign-stderr set: these lines do report a real problem with the node, they
+	// just do not report one with the object that was asked about, and only the
+	// former is a reason to keep them.
+	notAboutTheQueriedObject = []*regexp.Regexp{reDuplicateVGName, reDuplicateVGNameHint}
+)
+
+// ObjectDiagnostics returns the part of stdErr that says something about the
+// specific VG, PV or LV the command asked about.
 //
-// Returns:
-//   - bytes.Buffer: A new buffer containing the filtered stderr output, excluding lines that
-//     match the "Regex version mismatch" pattern.
-func filterStdErr(command string, stdErr bytes.Buffer) bytes.Buffer {
+// Use it wherever lvm's stderr is about to be attributed to one object —
+// recorded as its health, written into its condition, shown next to its name.
+// Everything lvm prints about the node as a whole belongs in the log and in the
+// conditions that describe the node, not pinned on whichever object happened to
+// be the argument.
+func ObjectDiagnostics(command string, stdErr bytes.Buffer) bytes.Buffer {
+	return filterStdErr(command, stdErr, notAboutTheQueriedObject)
+}
+
+// filterStdErr returns the lines of stdErr that actually say something about the
+// outcome of command, dropping the ones matched by allow.
+//
+// An empty result means "everything lvm printed was benign", which is what lets
+// errIfNotBenign turn a non-zero exit into a success. A non-empty one is a real
+// diagnostic and is reported verbatim.
+//
+// allow must be one of benignAlwaysStdErr / benignResizeStdErr — see their doc
+// comment for why the choice belongs to the call site.
+func filterStdErr(command string, stdErr bytes.Buffer, allow []*regexp.Regexp) bytes.Buffer {
 	var filteredStdErr bytes.Buffer
 	stdErrScanner := bufio.NewScanner(&stdErr)
-	regexpPattern := `Regex version mismatch, expected: .+ actual: .+`
-	regexpSocketError := `File descriptor .+ leaked on lvm(\.static)? invocation. Parent PID .+: /opt/deckhouse/sds/bin/nsenter`
-	// this needs as if the controller were restarted and found existing LVG thin-pools with size equals 100%VG space,
-	// as the Thin-pool size on the node might be less than Spec one even with delta (because of metadata). So the controller
-	// will try to resize the Thin-pool with 100%VG space and will get the error.
-	// Different LVM versions report a no-op resize differently: older ones print "No size change.",
-	// newer ones (e.g. 2.03.16) print "New size (<n> extents) matches existing size (<n> extents).".
-	// Both mean the LV is already at the requested size and must be treated as a benign no-op.
-	regexpNoSizeChangeError := ` (No size change\..*|New size \(.+\) matches existing size \(.+\)\.)`
-	regex1, err := regexp.Compile(regexpPattern)
-	if err != nil {
-		return stdErr
-	}
-	regex2, err := regexp.Compile(regexpSocketError)
-	if err != nil {
-		return stdErr
-	}
-	regex3, err := regexp.Compile(regexpNoSizeChangeError)
-	if err != nil {
-		return stdErr
-	}
 
 	for stdErrScanner.Scan() {
 		line := stdErrScanner.Text()
-		if regex1.MatchString(line) ||
-			regex2.MatchString(line) ||
-			regex3.MatchString(line) {
+		benign := false
+		for _, re := range allow {
+			if re.MatchString(line) {
+				benign = true
+				break
+			}
+		}
+		if benign {
 			golog.Printf("WARNING: [filterStdErr] Line filtered from stderr due to matching exclusion pattern. Line: '%s'. Triggered by command: '%s'.", line, command)
 		} else {
 			filteredStdErr.WriteString(line + "\n")

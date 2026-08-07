@@ -388,13 +388,18 @@ func testLocalThinSC(name, lvgName, thinPoolName string) *storagev1.StorageClass
 }
 
 func testPendingPVC(name, namespace, scName string) *corev1.PersistentVolumeClaim { //nolint:unparam
+	return pendingPVCWithSize(name, namespace, scName, oneGiB)
+}
+
+// pendingPVCWithSize is testPendingPVC with a caller-chosen request size.
+func pendingPVCWithSize(name, namespace, scName string, size int64) *corev1.PersistentVolumeClaim {
 	return &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			StorageClassName: &scName,
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse("1Gi"),
+					corev1.ResourceStorage: *resource.NewQuantity(size, resource.BinarySI),
 				},
 			},
 		},

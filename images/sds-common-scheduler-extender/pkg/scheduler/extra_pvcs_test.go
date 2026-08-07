@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2026 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,7 +30,6 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -144,10 +143,11 @@ func TestGetManagedPVCsFromPod_ExtraPVCsAnnotation(t *testing.T) {
 	}
 
 	tt := []struct {
-		name      string
-		pod       *corev1.Pod
-		want      []string
-		wantError bool
+		name         string
+		pod          *corev1.Pod
+		want         []string
+		wantHintOnly []string
+		wantError    bool
 	}{
 		{
 			name: "no annotation: only spec volumes (backward compatibility)",
@@ -160,29 +160,33 @@ func TestGetManagedPVCsFromPod_ExtraPVCsAnnotation(t *testing.T) {
 			want: []string{"pvc-spec"},
 		},
 		{
-			name: "one annotation PVC, no spec volumes (the virt-launcher case)",
-			pod:  podWithPVCs("pvc-hint"),
-			want: []string{"pvc-hint"},
+			name:         "one annotation PVC, no spec volumes (the virt-launcher case)",
+			pod:          podWithPVCs("pvc-hint"),
+			want:         []string{"pvc-hint"},
+			wantHintOnly: []string{"pvc-hint"},
 		},
 		{
-			name: "several annotation PVCs",
-			pod:  podWithPVCs("pvc-hint,pvc-hint-2"),
-			want: []string{"pvc-hint", "pvc-hint-2"},
+			name:         "several annotation PVCs",
+			pod:          podWithPVCs("pvc-hint,pvc-hint-2"),
+			want:         []string{"pvc-hint", "pvc-hint-2"},
+			wantHintOnly: []string{"pvc-hint", "pvc-hint-2"},
 		},
 		{
-			name: "spec and annotation combined",
-			pod:  podWithPVCs("pvc-hint", "pvc-spec"),
-			want: []string{"pvc-spec", "pvc-hint"},
+			name:         "spec and annotation combined",
+			pod:          podWithPVCs("pvc-hint", "pvc-spec"),
+			want:         []string{"pvc-spec", "pvc-hint"},
+			wantHintOnly: []string{"pvc-hint"},
 		},
 		{
-			name: "duplicate between spec and annotation is deduplicated",
+			name: "duplicate between spec and annotation is deduplicated and counts as spec-sourced",
 			pod:  podWithPVCs("pvc-spec", "pvc-spec"),
 			want: []string{"pvc-spec"},
 		},
 		{
-			name: "annotation PVC that does not exist is skipped without error",
-			pod:  podWithPVCs("pvc-hint,pvc-does-not-exist"),
-			want: []string{"pvc-hint"},
+			name:         "annotation PVC that does not exist is skipped without error",
+			pod:          podWithPVCs("pvc-hint,pvc-does-not-exist"),
+			want:         []string{"pvc-hint"},
+			wantHintOnly: []string{"pvc-hint"},
 		},
 		{
 			name: "annotation PVC of a foreign provisioner is filtered out",
@@ -204,7 +208,7 @@ func TestGetManagedPVCsFromPod_ExtraPVCsAnnotation(t *testing.T) {
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
 			cl := newFakeClient(objects()...)
-			managed, err := getManagedPVCsFromPod(ctx, cl, log, tc.pod,
+			managed, hintOnly, err := getManagedPVCsFromPod(ctx, cl, log, tc.pod,
 				[]string{consts.SdsLocalVolumeProvisioner})
 
 			if tc.wantError {
@@ -219,6 +223,20 @@ func TestGetManagedPVCsFromPod_ExtraPVCsAnnotation(t *testing.T) {
 			}
 			sort.Strings(got)
 
+			gotHintOnly := make([]string, 0, len(hintOnly))
+			for name := range hintOnly {
+				gotHintOnly = append(gotHintOnly, name)
+			}
+			sort.Strings(gotHintOnly)
+
+			if len(tc.wantHintOnly) == 0 {
+				assert.Empty(t, gotHintOnly, "no PVC should be marked annotation-only")
+			} else {
+				wantHintOnly := append([]string(nil), tc.wantHintOnly...)
+				sort.Strings(wantHintOnly)
+				assert.Equal(t, wantHintOnly, gotHintOnly)
+			}
+
 			// got is always non-nil (make with len 0), so compare emptiness
 			// explicitly instead of letting assert.Equal see []string{} vs nil.
 			if len(tc.want) == 0 {
@@ -229,24 +247,6 @@ func TestGetManagedPVCsFromPod_ExtraPVCsAnnotation(t *testing.T) {
 			sort.Strings(want)
 			assert.Equal(t, want, got)
 		})
-	}
-}
-
-const extraPVCsTestTenGiB = int64(10 * 1024 * 1024 * 1024)
-
-// pendingPVCWithSize is testPendingPVC with a caller-chosen request size.
-func pendingPVCWithSize(name, namespace, scName string, size int64) *corev1.PersistentVolumeClaim {
-	return &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			StorageClassName: &scName,
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: *resource.NewQuantity(size, resource.BinarySI),
-				},
-			},
-		},
-		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
 	}
 }
 
@@ -284,7 +284,7 @@ func TestFilter_AnnotationPVC_LocalRejectsNodeWithoutSpace(t *testing.T) {
 
 	cl := newFakeClient(
 		sc,
-		pendingPVCWithSize("pvc-hotplug", "default", scName, extraPVCsTestTenGiB),
+		pendingPVCWithSize("pvc-hotplug", "default", scName, tenGiB),
 		readyLVGOnNode("lvg-a", "node-a", hundredGiB, hundredGiB),
 		readyLVGOnNode("lvg-b", "node-b", hundredGiB, oneGiB),
 	)
@@ -323,7 +323,7 @@ func TestFilter_NoAnnotation_PodWithoutPVCsIsNoOp(t *testing.T) {
 
 	cl := newFakeClient(
 		testLocalSC(scName, "lvg-a"),
-		pendingPVCWithSize("pvc-hotplug", "default", scName, extraPVCsTestTenGiB),
+		pendingPVCWithSize("pvc-hotplug", "default", scName, tenGiB),
 		readyLVGOnNode("lvg-a", "node-a", hundredGiB, hundredGiB),
 		readyLVGOnNode("lvg-b", "node-b", hundredGiB, oneGiB),
 	)
@@ -362,7 +362,7 @@ func TestFilter_AnnotationPVC_ReplicatedLocalAccess(t *testing.T) {
 		readyLVGOnNode("lvg-a", "node-a", hundredGiB, hundredGiB),
 		testNode("node-a", true),
 		testNode("node-b", true),
-		pendingPVCWithSize("pvc-hotplug", "default", scName, extraPVCsTestTenGiB),
+		pendingPVCWithSize("pvc-hotplug", "default", scName, tenGiB),
 		&d8commonapi.ModuleConfig{
 			ObjectMeta: metav1.ObjectMeta{Name: "sds-replicated-volume"},
 			Spec: d8commonapi.ModuleConfigSpec{
@@ -390,4 +390,132 @@ func TestFilter_AnnotationPVC_ReplicatedLocalAccess(t *testing.T) {
 	assert.Equal(t, []string{"node-a"}, *result.NodeNames,
 		"only the node carrying an LVG of the replicated storage pool must survive")
 	assert.Contains(t, result.FailedNodes["node-b"], "no LVG from RSP repl-pool found on node node-b")
+}
+
+// TestFilter_AnnotationPVC_UnresolvableIsIgnored is the counterpart of the core
+// test: the annotation is a hint, so a PVC the extender cannot resolve must never
+// cost the Pod its nodes. Here the SC lacks the lvm-type parameter, which makes
+// extractRequestedSize fail; before the hint origin was propagated that error
+// reached writeFailAllNodesResponse and left the launcher unschedulable forever.
+func TestFilter_AnnotationPVC_UnresolvableIsIgnored(t *testing.T) {
+	const scName = "local-sc-no-lvm-type"
+
+	sc := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: scName},
+		Provisioner: consts.SdsLocalVolumeProvisioner,
+		Parameters: map[string]string{
+			// No LvmTypeParamKey on purpose.
+			consts.LVMVolumeGroupsParamKey: "- name: lvg-a\n",
+		},
+	}
+
+	cl := newFakeClient(
+		sc,
+		pendingPVCWithSize("pvc-hotplug", "default", scName, tenGiB),
+		readyLVGOnNode("lvg-a", "node-a", hundredGiB, hundredGiB),
+		readyLVGOnNode("lvg-b", "node-b", hundredGiB, hundredGiB),
+	)
+	c := newTestCache()
+	s := newTestScheduler(cl, c)
+	s.targetProvisioners = []string{consts.SdsLocalVolumeProvisioner}
+
+	nodeNames := []string{"node-a", "node-b"}
+	result := callFilter(t, s, ExtenderArgs{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "virt-launcher",
+				Namespace:   "default",
+				Annotations: map[string]string{consts.PodExtraPVCsAnnotation: "pvc-hotplug"},
+			},
+		},
+		NodeNames: &nodeNames,
+	})
+
+	require.NotNil(t, result.NodeNames)
+	assert.ElementsMatch(t, nodeNames, *result.NodeNames,
+		"an unresolvable hint PVC must degrade to the pre-annotation behavior, not reject every node")
+	assert.Empty(t, result.FailedNodes)
+	assert.False(t, c.HasReservation("default/pvc-hotplug"),
+		"a dropped hint PVC must not hold space in the cache")
+}
+
+// callPrioritize posts args to the /prioritize handler and returns the decoded result.
+func callPrioritize(t *testing.T, s *scheduler, args ExtenderArgs) HostPriorityList {
+	t.Helper()
+	body, err := json.Marshal(args)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/scheduler/prioritize", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	s.prioritize(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, "prioritize must answer 200; body: %s", w.Body.String())
+	var result HostPriorityList
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+	return result
+}
+
+// TestPrioritize_AnnotationPVC_ScoresNodes covers the second handler: the PR claims
+// prioritize inherits the annotation "for free", and unlike filter it has its own
+// error branch and its own cache step (narrowReservationsToFinalNodes).
+func TestPrioritize_AnnotationPVC_ScoresNodes(t *testing.T) {
+	const scName = "local-sc"
+
+	sc := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: scName},
+		Provisioner: consts.SdsLocalVolumeProvisioner,
+		Parameters: map[string]string{
+			consts.LvmTypeParamKey:         consts.Thick,
+			consts.LVMVolumeGroupsParamKey: "- name: lvg-a\n- name: lvg-b\n",
+		},
+	}
+
+	cl := newFakeClient(
+		sc,
+		pendingPVCWithSize("pvc-hotplug", "default", scName, tenGiB),
+		readyLVGOnNode("lvg-a", "node-a", hundredGiB, hundredGiB),
+		readyLVGOnNode("lvg-b", "node-b", hundredGiB, 20*oneGiB),
+	)
+	c := newTestCache()
+	s := newTestScheduler(cl, c)
+	s.targetProvisioners = []string{consts.SdsLocalVolumeProvisioner}
+
+	nodeNames := []string{"node-a", "node-b"}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "virt-launcher",
+			Namespace:   "default",
+			Annotations: map[string]string{consts.PodExtraPVCsAnnotation: "pvc-hotplug"},
+		},
+	}
+
+	// filter runs first in a real scheduling cycle and is what creates the
+	// reservation; prioritize only scores and narrows it.
+	filtered := callFilter(t, s, ExtenderArgs{Pod: pod, NodeNames: &nodeNames})
+	require.NotNil(t, filtered.NodeNames)
+	require.ElementsMatch(t, nodeNames, *filtered.NodeNames)
+	_, pools, ok := c.GetReservation("default/pvc-hotplug")
+	require.True(t, ok, "filter must reserve for the annotation PVC")
+	require.Len(t, pools, 2, "the reservation starts spread over every surviving node")
+
+	scores := callPrioritize(t, s, ExtenderArgs{Pod: pod, NodeNames: &nodeNames})
+
+	require.Len(t, scores, 2, "both nodes must be scored")
+	byNode := make(map[string]int, len(scores))
+	for _, s := range scores {
+		byNode[s.Host] = s.Score
+	}
+	require.Contains(t, byNode, "node-a")
+	require.Contains(t, byNode, "node-b")
+	assert.GreaterOrEqual(t, byNode["node-a"], byNode["node-b"],
+		"the node with more free space must not score lower")
+
+	// narrowReservationsToFinalNodes must work for an annotation PVC too. It only
+	// ever narrows down to the final node list — narrowing to the single chosen
+	// node needs selected-node, which a Pod that does not mount the PVC never gets.
+	oneNode := []string{"node-a"}
+	callPrioritize(t, s, ExtenderArgs{Pod: pod, NodeNames: &oneNode})
+	_, pools, ok = c.GetReservation("default/pvc-hotplug")
+	require.True(t, ok, "narrowing must not drop the reservation")
+	assert.Len(t, pools, 1, "the reservation must follow the final node list")
 }

@@ -23,15 +23,21 @@ import (
 	"strings"
 )
 
-// CountPVsInVG counts non-empty lines of `pvs -o pv_name --noheadings -S vg_name --select vg_name=<vg>` output.
-func CountPVsInVG(out string) int {
-	count := 0
+// PVNamesInListing returns the trimmed, non-empty lines of `pvs -o pv_name --noheadings ...` output.
+// A mixed block+file VG is told apart by these names: a file-backed PV is a /dev/loop* device.
+func PVNamesInListing(out string) []string {
+	var names []string
 	for _, line := range strings.Split(out, "\n") {
-		if strings.TrimSpace(line) != "" {
-			count++
+		if name := strings.TrimSpace(line); name != "" {
+			names = append(names, name)
 		}
 	}
-	return count
+	return names
+}
+
+// CountPVsInVG counts non-empty lines of `pvs -o pv_name --noheadings -S vg_name --select vg_name=<vg>` output.
+func CountPVsInVG(out string) int {
+	return len(PVNamesInListing(out))
 }
 
 // VGInListing reports whether vgName appears as a line in `vgs -o vg_name --noheadings` output.
@@ -64,11 +70,26 @@ func ThinPoolDataLVPresent(out, thinPoolName string) bool {
 
 // RemoveThinPoolStackScript returns a shell script to brute-force teardown a thin-pool stack for a VG.
 func RemoveThinPoolStackScript(vgName, thinPoolName string) string {
+	return RemoveThinPoolStackScriptWithLVMConfig(vgName, thinPoolName, "")
+}
+
+// RemoveThinPoolStackScriptWithLVMConfig is RemoveThinPoolStackScript with an extra
+// `--config` passed to every lvs/lvremove.
+//
+// A file-backed VG needs it: the module filters /dev/loop* out of host-wide LVM, so
+// without the agent's own override the script lists nothing, removes nothing, and the
+// LVMVolumeGroup then hangs in Terminating because its thin-pool LVs are still there.
+// lvmConfig is the raw --config value (NOT shell-quoted); empty means no override.
+// It is expanded as ${LVMCFG:+--config "$LVMCFG"} so the whole setting stays one
+// argv entry — the value contains spaces, and an unquoted expansion would split it
+// into fragments that LVM rejects, leaving the thin-pool in place.
+func RemoveThinPoolStackScriptWithLVMConfig(vgName, thinPoolName, lvmConfig string) string {
 	return fmt.Sprintf(`set +e
 VG=%q
 POOL=%q
-runlv() { lvs "$@" 2>/dev/null || sudo -n lvs "$@" 2>/dev/null; }
-runrm() { lvremove -fy "$@" 2>/dev/null || sudo -n lvremove -fy "$@" 2>/dev/null; }
+LVMCFG=%q
+runlv() { lvs ${LVMCFG:+--config "$LVMCFG"} "$@" 2>/dev/null || sudo -n lvm lvs ${LVMCFG:+--config "$LVMCFG"} "$@" 2>/dev/null; }
+runrm() { lvremove ${LVMCFG:+--config "$LVMCFG"} -fy "$@" 2>/dev/null || sudo -n lvm lvremove ${LVMCFG:+--config "$LVMCFG"} -fy "$@" 2>/dev/null; }
 for pass in 1 2 3 4 5 6 7 8 9 10; do
   runlv -a --noheadings -o lv_name,pool_lv "$VG" | while IFS= read -r line; do
     lv=$(echo "$line" | awk '{print $1}' | tr -d '[]')
@@ -87,5 +108,5 @@ for pass in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     [ -n "$lv" ] && runrm "/dev/$VG/$lv"
   done
 done
-`, vgName, thinPoolName)
+`, vgName, thinPoolName, lvmConfig)
 }
