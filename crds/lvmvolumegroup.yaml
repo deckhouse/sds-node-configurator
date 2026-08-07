@@ -321,6 +321,9 @@ spec:
                     - type
                   items:
                     type: object
+                    required:
+                      - type
+                      - status
                     properties:
                       type:
                         type: string
