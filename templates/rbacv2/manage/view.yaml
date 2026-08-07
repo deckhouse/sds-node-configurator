@@ -16,7 +16,6 @@ rules:
       - blockdevices
       - lvmvolumegroups
       - lvmvolumegroupsets
-      - lvmvolumegroupbackups
       - lvmlogicalvolumes
       - lvmlogicalvolumesnapshots
     verbs:
