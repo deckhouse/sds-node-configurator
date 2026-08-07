@@ -74,7 +74,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	}
 	servingLog.Trace(fmt.Sprintf("NodeNames from the request: %+v", nodeNames))
 
-	managedPVCs, err := getManagedPVCsFromPod(ctx, s.client, servingLog, inputData.Pod, s.targetProvisioners)
+	managedPVCs, hintOnlyPVCs, err := getManagedPVCsFromPod(ctx, s.client, servingLog, inputData.Pod, s.targetProvisioners)
 	if err != nil {
 		servingLog.Error(err, "unable to get managed PVCs from the Pod")
 		writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to get managed PVCs: %s", err))
@@ -127,12 +127,32 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	servingLog.Debug("starts to extract PVC requested sizes")
-	pvcRequests, err := extractRequestedSize(ctx, s.client, servingLog, managedPVCs, scUsedByPVCs)
+	pvcRequests, droppedHints, err := extractRequestedSize(ctx, s.client, servingLog, managedPVCs, scUsedByPVCs, hintOnlyPVCs)
 	if err != nil {
 		servingLog.Error(err, "unable to extract request size")
 		writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to extract request size: %s", err))
 		return
 	}
+
+	// A PVC named only in the annotation that the extender cannot resolve is a
+	// hint that failed to materialize, not a requirement. Drop it so neither the
+	// node filter nor the reservation step keeps accounting for it; the Pod then
+	// degrades to its pre-annotation behavior instead of losing every node.
+	if len(droppedHints) > 0 {
+		for _, name := range droppedHints {
+			delete(managedPVCs, name)
+		}
+		servingLog.Warning(fmt.Sprintf("dropping unresolvable PVCs listed only in the %s annotation: %v", consts.PodExtraPVCsAnnotation, droppedHints))
+	}
+	if len(managedPVCs) == 0 {
+		servingLog.Debug("After dropping unresolvable annotation PVCs, no managed PVCs left. Return the same nodes")
+		if err := writeNodeNamesResponse(w, servingLog, nodeNames); err != nil {
+			servingLog.Error(err, "unable to write node names response")
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+
 	// NB: we intentionally do not short-circuit here when len(pvcRequests) == 0.
 	// For local PVCs, returning all incoming nodes would be unsafe: kube-scheduler
 	// could pick a node without a matching LVMVolumeGroup and the CSI provisioner
@@ -400,6 +420,13 @@ func filterNodeForLocalPVCs(
 }
 
 // createReservations creates reservations for each PVC across all filtered nodes.
+//
+// The reservation is deliberately spread over every surviving node and narrowed
+// later — by narrowReservationsToFinalNodes in prioritize, and down to a single
+// node by the PVC watcher once VolumeBinding stamps selected-node on the PVC.
+// That last step never happens for a PVC known only from PodExtraPVCsAnnotation:
+// the Pod does not mount it, so no binding cycle touches it and the reservation
+// stays spread across all candidate nodes until the TTL expires.
 func createReservations(
 	ctx context.Context,
 	log logger.Logger,

@@ -29,6 +29,7 @@ import (
 
 const (
 	oneGiB     = int64(1 << 30) // 1 GiB in bytes
+	tenGiB     = int64(10) * oneGiB
 	hundredGiB = int64(100) * oneGiB
 )
 

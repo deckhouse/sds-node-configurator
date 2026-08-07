@@ -23,6 +23,20 @@ const (
 	LvmTypeParamKey         = "local.csi.storage.deckhouse.io/lvm-type"
 	LVMVolumeGroupsParamKey = "local.csi.storage.deckhouse.io/lvm-volume-groups"
 
+	// PodExtraPVCsAnnotation lists, as a comma-separated value, the names of
+	// PersistentVolumeClaims a Pod needs taken into account when scheduling but
+	// does not mount itself (e.g. a KubeVirt hotplug disk, which is attached by a
+	// separate attachment Pod pinned to the launcher's node). The PVCs are always
+	// looked up in the Pod's own namespace. It is a best-effort scheduling hint:
+	// unknown or foreign-provisioner names are ignored.
+	//
+	// Contract for the producer: every PVC named here MUST already exist by the
+	// time the Pod is created. The extender resolves the names once, while running
+	// filter/prioritize for this Pod; a name that does not resolve is skipped and
+	// there is no second attempt — the hint is silently lost and the Pod is
+	// scheduled as blindly as it was before this annotation existed.
+	PodExtraPVCsAnnotation = "scheduler.deckhouse.io/extra-pvcs"
+
 	Thick = "Thick"
 	Thin  = "Thin"
 )

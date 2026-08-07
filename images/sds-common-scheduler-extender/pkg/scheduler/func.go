@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/stretchr/testify/assert/yaml"
 	corev1 "k8s.io/api/core/v1"
@@ -422,53 +423,149 @@ func getNodeNames(inputData ExtenderArgs) ([]string, error) {
 	return nil, fmt.Errorf("no nodes provided")
 }
 
-// Get all PVCs from the Pod which are managed by our modules
-func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Logger, pod *corev1.Pod, targetProvisioners []string) (map[string]*corev1.PersistentVolumeClaim, error) {
-	var discoveredProvisioner string
-	managedPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(pod.Spec.Volumes))
-	var newControlPlane *bool
-	for _, volume := range pod.Spec.Volumes {
-		if volume.PersistentVolumeClaim != nil {
-			pvcName := volume.PersistentVolumeClaim.ClaimName
-			log = log.WithValues("PVC", pvcName)
+// parseExtraPVCNames parses the CSV value of the PodExtraPVCsAnnotation
+// annotation. Entries are trimmed and empty ones are dropped, so a malformed
+// value ("a,,b", " , ") degrades to the usable names instead of an error: the
+// annotation is a scheduling hint and must never fail a scheduling request.
+// Input order is preserved; deduplication is the caller's job.
+func parseExtraPVCNames(value string) []string {
+	if value == "" {
+		return nil
+	}
 
-			pvc := &corev1.PersistentVolumeClaim{}
-			err := cl.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pvcName}, pvc)
-			if err != nil {
-				return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting PVC: %v", err)
-			}
-
-			discoveredProvisioner, err = discoverProvisionerForPVC(ctx, cl, log, pvc)
-			if err != nil {
-				return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting provisioner: %v", err)
-			}
-			log.Trace(fmt.Sprintf("[getManagedPVCsFromPod] discovered provisioner: %s", discoveredProvisioner))
-
-			if !slices.Contains(targetProvisioners, discoveredProvisioner) {
-				log.Debug(fmt.Sprintf("[getManagedPVCsFromPod] provisioner not matches targetProvisioners %+v", targetProvisioners))
-				continue
-			}
-
-			if discoveredProvisioner == consts.SdsReplicatedVolumeProvisioner {
-				if newControlPlane == nil {
-					newControlPlane, err = getNewControlPlane(ctx, cl, log)
-					if err != nil {
-						return nil, fmt.Errorf("[getManagedPVCsFromPod] error getting newControlPlane: %v", err)
-					}
-				}
-
-				if !*newControlPlane {
-					log.Debug("[getManagedPVCsFromPod] filter out PVC due to used provisioner is managed by the Linstor")
-					continue
-				}
-			}
-
-			log.Debug("[getManagedPVCsFromPod] add PVC to the managed PVCs")
-			managedPVCs[pvcName] = pvc
+	parts := strings.Split(value, ",")
+	names := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			names = append(names, trimmed)
 		}
 	}
 
-	return managedPVCs, nil
+	if len(names) == 0 {
+		return nil
+	}
+	return names
+}
+
+// podPVCNames returns the names of the PVCs relevant for scheduling this Pod:
+// the ones mounted through pod.Spec.Volumes plus the ones listed in the
+// PodExtraPVCsAnnotation annotation. Hotplug volumes are deliberately kept out
+// of the launcher Pod's spec.volumes by KubeVirt, so the annotation is the only
+// way the extender learns about them.
+//
+// Names are deduplicated, spec-volume order first. fromSpec marks the names that
+// came from pod.Spec.Volumes: for those a missing PVC keeps failing the whole
+// scheduling request (unchanged behavior), while a missing annotation-only PVC
+// is skipped.
+func podPVCNames(pod *corev1.Pod) (names []string, fromSpec map[string]bool) {
+	fromSpec = make(map[string]bool, len(pod.Spec.Volumes))
+	seen := make(map[string]struct{}, len(pod.Spec.Volumes))
+
+	for _, volume := range pod.Spec.Volumes {
+		if volume.PersistentVolumeClaim == nil {
+			continue
+		}
+		name := volume.PersistentVolumeClaim.ClaimName
+		fromSpec[name] = true
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+
+	for _, name := range parseExtraPVCNames(pod.Annotations[consts.PodExtraPVCsAnnotation]) {
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+
+	return names, fromSpec
+}
+
+// Get all PVCs from the Pod which are managed by our modules.
+//
+// The second return value marks the PVCs that came only from the
+// PodExtraPVCsAnnotation annotation. Their origin has to survive this function:
+// past it, any resolution error (a missing lvm-type parameter, a deleted RSC/RSP,
+// a PV gone from under a bound PVC) would otherwise turn the hint into a hard
+// requirement and reject every node for a Pod that does not even mount the volume.
+// See extractRequestedSize.
+func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Logger, pod *corev1.Pod, targetProvisioners []string) (map[string]*corev1.PersistentVolumeClaim, map[string]bool, error) {
+	pvcNames, fromSpec := podPVCNames(pod)
+	managedPVCs := make(map[string]*corev1.PersistentVolumeClaim, len(pvcNames))
+	hintOnly := make(map[string]bool, len(pvcNames))
+	var newControlPlane *bool
+	var missingAnnotationPVCs []string
+
+	// Emitted from a defer so the diagnostics survive the loop's error exits: a
+	// stale annotation is most worth reporting exactly when some other PVC fails
+	// and the operator is debugging both at once. Repeating it on every
+	// filter/prioritize call for a Pod stuck Pending is deliberate — one line per
+	// call is the price of keeping typo diagnostics at the default log level.
+	defer func() {
+		if len(missingAnnotationPVCs) > 0 {
+			log.Warning(fmt.Sprintf("[getManagedPVCsFromPod] PVC name(s) listed in the %s annotation do not exist and were skipped (the annotation is a scheduling hint, not a guarantee): %v", consts.PodExtraPVCsAnnotation, missingAnnotationPVCs))
+		}
+	}()
+
+	for _, pvcName := range pvcNames {
+		pvcLog := log.WithValues("PVC", pvcName)
+
+		pvc := &corev1.PersistentVolumeClaim{}
+		err := cl.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pvcName}, pvc)
+		if err != nil {
+			// A PVC named only in the annotation is a hint, not a mount: it may
+			// legitimately not exist yet. Skip it instead of failing the whole
+			// scheduling request. A PVC from pod.Spec.Volumes keeps the previous
+			// fail-the-request behavior. Names are collected and reported in a
+			// single aggregated Warning (see the defer above) instead of one
+			// Warning per PVC, so a stale/mistyped annotation on a Pod that gets
+			// retried by kube-scheduler doesn't flood the logs at the default
+			// (INFO) log level.
+			if apierrors.IsNotFound(err) && !fromSpec[pvcName] {
+				pvcLog.Debug(fmt.Sprintf("[getManagedPVCsFromPod] PVC listed in the %s annotation does not exist, skipping it", consts.PodExtraPVCsAnnotation))
+				missingAnnotationPVCs = append(missingAnnotationPVCs, pvcName)
+				continue
+			}
+			return nil, nil, fmt.Errorf("[getManagedPVCsFromPod] error getting PVC: %v", err)
+		}
+
+		discoveredProvisioner, err := discoverProvisionerForPVC(ctx, cl, pvcLog, pvc)
+		if err != nil {
+			return nil, nil, fmt.Errorf("[getManagedPVCsFromPod] error getting provisioner: %v", err)
+		}
+		pvcLog.Trace(fmt.Sprintf("[getManagedPVCsFromPod] discovered provisioner: %s", discoveredProvisioner))
+
+		if !slices.Contains(targetProvisioners, discoveredProvisioner) {
+			pvcLog.Debug(fmt.Sprintf("[getManagedPVCsFromPod] provisioner not matches targetProvisioners %+v", targetProvisioners))
+			continue
+		}
+
+		if discoveredProvisioner == consts.SdsReplicatedVolumeProvisioner {
+			if newControlPlane == nil {
+				newControlPlane, err = getNewControlPlane(ctx, cl, pvcLog)
+				if err != nil {
+					return nil, nil, fmt.Errorf("[getManagedPVCsFromPod] error getting newControlPlane: %v", err)
+				}
+			}
+
+			if !*newControlPlane {
+				pvcLog.Debug("[getManagedPVCsFromPod] filter out PVC due to used provisioner is managed by the Linstor")
+				continue
+			}
+		}
+
+		pvcLog.Debug("[getManagedPVCsFromPod] add PVC to the managed PVCs")
+		managedPVCs[pvcName] = pvc
+		if !fromSpec[pvcName] {
+			hintOnly[pvcName] = true
+		}
+	}
+
+	return managedPVCs, hintOnly, nil
 }
 
 // getStorageClassesUsedByPVCs fetches only the StorageClasses referenced by PVCs.
@@ -588,65 +685,114 @@ func getNewControlPlane(ctx context.Context, cl client.Client, log logger.Logger
 // silently drops the PVC. Spec.VolumeName, on the other hand, is set in the same
 // transaction as the binding and matches what the upstream VolumeBinding plugin
 // uses to decide whether a PVC is bound.
+//
+// hintOnly (from getManagedPVCsFromPod) marks PVCs known only from the
+// PodExtraPVCsAnnotation annotation. A hint the extender cannot resolve must not
+// cost the Pod its nodes, so instead of failing the whole request its name is
+// returned in dropped and the caller removes it from its own PVC map. The
+// asymmetry is deliberate: an unresolvable PVC from pod.Spec.Volumes keeps
+// failing the request, because the Pod genuinely cannot run without that mount.
+//
+// The caller owns the removal (same shape as dropPVCsWithMissingSC) rather than
+// this function mutating pvcs behind its back — filter/prioritize both guard on
+// len(managedPVCs) after each such step.
 func extractRequestedSize(
 	ctx context.Context,
 	cl client.Client,
 	log logger.Logger,
 	pvcs map[string]*corev1.PersistentVolumeClaim,
 	scs map[string]*storagev1.StorageClass,
-) (map[string]PVCRequest, error) {
+	hintOnly map[string]bool,
+) (map[string]PVCRequest, []string, error) {
 	pvcRequests := make(map[string]PVCRequest, len(pvcs))
-	for _, pvc := range pvcs {
-		sc := scs[*pvc.Spec.StorageClassName]
+	var dropped []string
+
+	for name, pvc := range pvcs {
 		log.Debug(fmt.Sprintf("[extractRequestedSize] PVC %s/%s has status phase: %q, spec.volumeName: %q", pvc.Namespace, pvc.Name, pvc.Status.Phase, pvc.Spec.VolumeName))
 
-		var deviceType string
-		isReplicated := sc.Provisioner == consts.SdsReplicatedVolumeProvisioner
-
-		if isReplicated {
-			rsc, err := getReplicatedStorageClassForExtract(ctx, cl, sc.Name)
-			if err != nil {
-				return nil, fmt.Errorf("[extractRequestedSize] unable to get RSC for SC %s: %w", sc.Name, err)
+		req, err := requestForPVC(ctx, cl, pvc, scs[*pvc.Spec.StorageClassName])
+		if err != nil {
+			if !hintOnly[name] {
+				return nil, nil, err
 			}
-			rspName := rscStoragePoolName(rsc)
-			rsp, err := getReplicatedStoragePoolForExtract(ctx, cl, rspName)
-			if err != nil {
-				return nil, fmt.Errorf("[extractRequestedSize] unable to get RSP %s: %w", rspName, err)
-			}
-			switch rsp.Spec.Type {
-			case srv.ReplicatedStoragePoolTypeLVM:
-				deviceType = consts.Thick
-			case srv.ReplicatedStoragePoolTypeLVMThin:
-				deviceType = consts.Thin
-			default:
-				deviceType = consts.Thick
-			}
-		} else {
-			deviceType = sc.Parameters[consts.LvmTypeParamKey]
+			log.Warning(fmt.Sprintf("[extractRequestedSize] skipping PVC %s/%s listed only in the %s annotation: %v", pvc.Namespace, pvc.Name, consts.PodExtraPVCsAnnotation, err))
+			dropped = append(dropped, name)
+			continue
 		}
 
-		if deviceType == "" {
-			return nil, fmt.Errorf("[extractRequestedSize] unable to determine device type for PVC %s/%s", pvc.Namespace, pvc.Name)
-		}
-
-		var requestedSize int64
-		if pvc.Spec.VolumeName == "" {
-			requestedSize = pvc.Spec.Resources.Requests.Storage().Value()
-		} else {
-			pv := &corev1.PersistentVolume{}
-			if err := cl.Get(ctx, client.ObjectKey{Name: pvc.Spec.VolumeName}, pv); err != nil {
-				return nil, fmt.Errorf("[extractRequestedSize] error getting PV %s: %v", pvc.Spec.VolumeName, err)
-			}
-			requestedSize = pvc.Spec.Resources.Requests.Storage().Value() - pv.Spec.Capacity.Storage().Value()
-		}
-
-		pvcRequests[pvc.Name] = PVCRequest{
-			DeviceType:    deviceType,
-			RequestedSize: requestedSize,
-		}
+		pvcRequests[name] = req
 	}
 
-	return pvcRequests, nil
+	return pvcRequests, dropped, nil
+}
+
+// requestForPVC resolves the device type of a PVC and how much space it still
+// needs from its pool. It is pure resolution: what to do with a failure (fail
+// the whole scheduling request, or drop an annotation-only hint) is the caller's
+// decision, so every failure here is just an error.
+func requestForPVC(
+	ctx context.Context,
+	cl client.Client,
+	pvc *corev1.PersistentVolumeClaim,
+	sc *storagev1.StorageClass,
+) (PVCRequest, error) {
+	deviceType, err := deviceTypeForSC(ctx, cl, sc)
+	if err != nil {
+		return PVCRequest{}, err
+	}
+	if deviceType == "" {
+		return PVCRequest{}, fmt.Errorf("[extractRequestedSize] unable to determine device type for PVC %s/%s", pvc.Namespace, pvc.Name)
+	}
+
+	requested := pvc.Spec.Resources.Requests.Storage().Value()
+	if pvc.Spec.VolumeName == "" {
+		return PVCRequest{DeviceType: deviceType, RequestedSize: requested}, nil
+	}
+
+	pv := &corev1.PersistentVolume{}
+	if err := cl.Get(ctx, client.ObjectKey{Name: pvc.Spec.VolumeName}, pv); err != nil {
+		return PVCRequest{}, fmt.Errorf("[extractRequestedSize] error getting PV %s: %v", pvc.Spec.VolumeName, err)
+	}
+
+	// A bound PVC only needs the growth delta. Clamp at 0: LVM rounds an LV up to
+	// the extent boundary, so a PV backing a decimal-unit request ("10G") is
+	// larger than the request itself. A negative size would be summed into
+	// Cache.GetReservedSpace and, via getAvailableSpace's baseFree-reserved,
+	// inflate the pool's free space for every other Pod scheduled in the same
+	// window.
+	return PVCRequest{
+		DeviceType:    deviceType,
+		RequestedSize: max(requested-pv.Spec.Capacity.Storage().Value(), 0),
+	}, nil
+}
+
+// deviceTypeForSC maps a StorageClass to the LVM device type its volumes land
+// on. A local class carries it directly in the lvm-type parameter; a replicated
+// one hides it one hop away, behind RSC -> RSP.
+func deviceTypeForSC(ctx context.Context, cl client.Client, sc *storagev1.StorageClass) (string, error) {
+	if sc.Provisioner != consts.SdsReplicatedVolumeProvisioner {
+		return sc.Parameters[consts.LvmTypeParamKey], nil
+	}
+
+	rsc, err := getReplicatedStorageClassForExtract(ctx, cl, sc.Name)
+	if err != nil {
+		return "", fmt.Errorf("[extractRequestedSize] unable to get RSC for SC %s: %w", sc.Name, err)
+	}
+
+	rspName := rscStoragePoolName(rsc)
+	rsp, err := getReplicatedStoragePoolForExtract(ctx, cl, rspName)
+	if err != nil {
+		return "", fmt.Errorf("[extractRequestedSize] unable to get RSP %s: %w", rspName, err)
+	}
+
+	switch rsp.Spec.Type {
+	case srv.ReplicatedStoragePoolTypeLVM:
+		return consts.Thick, nil
+	case srv.ReplicatedStoragePoolTypeLVMThin:
+		return consts.Thin, nil
+	default:
+		return consts.Thick, nil
+	}
 }
 
 func getReplicatedStorageClassForExtract(ctx context.Context, cl client.Client, scName string) (*srv.ReplicatedStorageClass, error) {
