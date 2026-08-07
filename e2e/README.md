@@ -121,7 +121,9 @@ SDK `e2e.Connect`. В CI провижн/подключение делает reus
 | `node-reboot` | перезагрузка ноды (входит в `file-devices`; исключается `!node-reboot`) |
 | `needs-disks` | спеку нужен настоящий диск (create/attach/detach) — см. ниже |
 | `controller-restart` | устойчивость к рестарту контроллера |
-| `schedule-extender` (+ `small`/`medium`/`large`) | scheduler-extender |
+| `schedule-extender` | scheduler-extender: размещение и отказ |
+| `sched-steer-spec`, `sched-steer-annotation` | увод пода на ноду с местом (PVC из `spec.volumes` / из аннотации) |
+| `sched-block-spec`, `sched-block-annotation` | отказ в размещении, когда места нет нигде |
 | `regress` | вложенный регресс-кейс block-device-stable |
 | `stress-test` | стресс: максимум независимых VG на ноду (исключён по умолчанию) |
 

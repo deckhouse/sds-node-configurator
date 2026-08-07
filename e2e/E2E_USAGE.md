@@ -206,7 +206,8 @@ ginkgo run --label-filter='!stress-test' --focus='BlockDevice discovery' ./tests
 
 Real labels (from `tests/*.go`): `sds-node-configurator`, `block-device`,
 `discovery`, `block-device-stable`, `netlink-discovery`, `lvmvolumegroup`,
-`controller-restart`, `schedule-extender` (with `small`/`medium`/`large`),
+`controller-restart`, `schedule-extender` (with `sched-steer-spec`,
+`sched-steer-annotation`, `sched-block-spec`, `sched-block-annotation`),
 `regress`, and `stress-test`. The Makefile default is `GINKGO_LABEL_FILTER ?= !stress-test`
 (matching the storage-e2e reusable workflow default).
 

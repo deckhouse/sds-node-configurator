@@ -32,6 +32,16 @@ import (
 // lvmVGNamePrefix matches all e2e-created LVMVolumeGroups (and LVMLogicalVolumes referencing them).
 const lvmVGNamePrefix = "e2e-lvg-"
 
+// pvcNamePrefix / podNamePrefix are the shared naming prefixes for namespaced workload created by
+// suites that do not own a prefix of their own; each such suite adds its own infix (e.g. "fd-") and
+// sweeps by that. They live here rather than next to one suite because more than one depends on them.
+// The scheduler-extender suite deliberately does not use them — it owns schedPVCPrefix/schedPodPrefix
+// so its prefix-driven teardown cannot reach another suite's objects.
+const (
+	pvcNamePrefix = "e2e-pvc-"
+	podNamePrefix = "e2e-pod-"
+)
+
 // forceDeleteAllNonConsumableBlockDevices removes finalizers and deletes every non-consumable BlockDevice CR,
 // then waits until none remain.
 func forceDeleteAllNonConsumableBlockDevices(ctx context.Context, cl client.Client, timeout time.Duration) {
