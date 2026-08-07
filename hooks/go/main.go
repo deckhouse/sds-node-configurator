@@ -20,6 +20,7 @@ import (
 	"github.com/deckhouse/module-sdk/pkg/app"
 	_ "github.com/deckhouse/sds-node-configurator/hooks/go/020-common-scheduler-extender-certs"
 	_ "github.com/deckhouse/sds-node-configurator/hooks/go/020-webhook-certs"
+	_ "github.com/deckhouse/sds-node-configurator/hooks/go/025-remove-obsolete-crds"
 	_ "github.com/deckhouse/sds-node-configurator/hooks/go/030-remove-finalizers-on-module-delete"
 )
 

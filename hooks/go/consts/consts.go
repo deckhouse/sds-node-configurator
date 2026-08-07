@@ -23,6 +23,24 @@ const (
 	WebhookCertCn                     string = "webhooks"
 	SdsCommonSchedulerExtenderCertCn  string = "sds-common-scheduler-extender"
 	CommonSchedulerExtenderSecretName string = "common-scheduler-extender-https-certs"
+
+	APIGroup string = "storage.deckhouse.io"
+)
+
+const (
+	// ObsoleteLVMVolumeGroupBackupCRDName is the CRD left behind by the one-time
+	// LvmVolumeGroup -> LVMVolumeGroup kind migration. Its only producer/consumer was the
+	// convert_bd_names_to_selector.py hook, dropped in April 2025 together with the whole
+	// Python hook set, so nothing has read or written these objects since. The CRD is no
+	// longer shipped in crds/, and the 025-remove-obsolete-crds hook deletes the leftover
+	// from clusters that were upgraded through the migration.
+	ObsoleteLVMVolumeGroupBackupCRDName string = "lvmvolumegroupbackups." + APIGroup
+
+	// ObsoleteLVMVolumeGroupBackupKind is the kind the obsolete CRD declared. Note the
+	// lower-case "vm": the migration predates the LVM* naming convention, and the kind is
+	// spelled LvmVolumeGroupBackup, not LVMVolumeGroupBackup. Kinds are case-sensitive in
+	// the RESTMapper, so the exact spelling matters when listing the leftovers.
+	ObsoleteLVMVolumeGroupBackupKind string = "LvmVolumeGroupBackup"
 )
 
 var AllowedProvisioners = []string{}
@@ -31,7 +49,6 @@ var WebhookConfigurationsToDelete = []string{}
 
 var CRGVKsForFinalizerRemoval = []CRGVK{
 	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "LVMVolumeGroup", Namespaced: false},
-	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "LVMVolumeGroupBackup", Namespaced: false},
 	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "LVMLogicalVolume", Namespaced: false},
 	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "LVMLogicalVolumeSnapshot", Namespaced: false},
 	{Group: "storage.deckhouse.io", Version: "v1alpha1", Kind: "BlockDevice", Namespaced: false},
