@@ -514,11 +514,13 @@ func cleanupLocalStorageClasses(ctx context.Context, cl *e2e.Cluster, k8s client
 	}
 	Expect(listErr).NotTo(HaveOccurred(), "list LocalStorageClasses")
 
+	var swept []string
 	for i := range list.Items {
 		name := list.Items[i].GetName()
 		if !strings.HasPrefix(name, "e2e-") {
 			continue
 		}
+		swept = append(swept, name)
 		By(fmt.Sprintf("Deleting LocalStorageClass %s", name))
 		if delErr := dynClient.Resource(localStorageClassGVR).Delete(ctx, name, metav1.DeleteOptions{}); delErr != nil {
 			Expect(apierrors.IsNotFound(delErr)).To(BeTrue(), "delete LocalStorageClass %s: %v", name, delErr)
@@ -538,14 +540,21 @@ func cleanupLocalStorageClasses(ctx context.Context, cl *e2e.Cluster, k8s client
 	}, schedLSCDeleteTimeout, schedPollInterval).Should(Succeed(),
 		"an LSC stuck in Terminating means its controller could not finalize it — check whether an LVG was deleted first")
 
-	By(fmt.Sprintf("Deleting leftover StorageClass %s if present", localStorageClassName))
-	delErr := k8s.Delete(ctx, &storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: localStorageClassName}})
-	Expect(client.IgnoreNotFound(delErr)).To(Succeed(), "delete StorageClass %s", localStorageClassName)
+	// The derived StorageClass carries the same name as its LocalStorageClass. Sweep one per LSC we
+	// just removed rather than a single hard-coded name — other suites create their own LSCs through
+	// this helper too, and leaving their StorageClass behind makes the next run's create fail.
+	for _, name := range swept {
+		By(fmt.Sprintf("Deleting leftover StorageClass %s if present", name))
+		delErr := k8s.Delete(ctx, &storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: name}})
+		Expect(client.IgnoreNotFound(delErr)).To(Succeed(), "delete StorageClass %s", name)
+	}
 
 	Eventually(func(g Gomega) {
-		var sc storagev1.StorageClass
-		err := k8s.Get(ctx, client.ObjectKey{Name: localStorageClassName}, &sc)
-		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "StorageClass %s still present", localStorageClassName)
+		for _, name := range swept {
+			var sc storagev1.StorageClass
+			err := k8s.Get(ctx, client.ObjectKey{Name: name}, &sc)
+			g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "StorageClass %s still present", name)
+		}
 	}, schedSCAppearTimeout, schedPollInterval).Should(Succeed())
 }
 

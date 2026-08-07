@@ -100,7 +100,7 @@ var _ = Describe("LVMVolumeGroup file-backed devices consumers",
 				cleanupLVMLogicalVolumes(ctx, k8sClient)
 			}
 			if cl != nil {
-				cleanupLocalStorageClasses(ctx, cl.RESTConfig())
+				cleanupLocalStorageClasses(ctx, cl, k8sClient)
 			}
 			if k8sClient != nil {
 				cleanupLVMVolumeGroups(ctx, k8sClient)
@@ -130,7 +130,7 @@ var _ = Describe("LVMVolumeGroup file-backed devices consumers",
 			fdCreateLocalStorageClass(ctx, cl, k8sClient, fdLocalStorageClassName, "Thick", []string{lvgName})
 			DeferCleanup(func() {
 				fdCleanupWorkload(ctx, k8sClient)
-				cleanupLocalStorageClasses(ctx, cl.RESTConfig())
+				cleanupLocalStorageClasses(ctx, cl, k8sClient)
 			})
 
 			pvcName := pvcNamePrefix + "fd-" + runID
@@ -195,7 +195,7 @@ var _ = Describe("LVMVolumeGroup file-backed devices consumers",
 			fdCreateLocalStorageClass(ctx, cl, k8sClient, fdLocalStorageClassName, "Thick", []string{lvgName})
 			DeferCleanup(func() {
 				fdCleanupWorkload(ctx, k8sClient)
-				cleanupLocalStorageClasses(ctx, cl.RESTConfig())
+				cleanupLocalStorageClasses(ctx, cl, k8sClient)
 			})
 
 			pvcName := pvcNamePrefix + "fdgrow-" + runID
@@ -510,11 +510,11 @@ func fdCreateLocalStorageClass(ctx context.Context, cl *e2e.Cluster, k8sClient c
 		},
 	}
 
-	Eventually(func(g Gomega) {
-		g.Expect(ensureLocalStorageClassAbsent(ctx, cl.RESTConfig(), k8sClient, name)).To(Succeed())
-		_, createErr := dynamicClient.Resource(localStorageClassGVR).Create(ctx, lsc.DeepCopy(), metav1.CreateOptions{})
-		g.Expect(createErr).NotTo(HaveOccurred(), "create LocalStorageClass %s", name)
-	}, 5*time.Minute, 10*time.Second).Should(Succeed())
+	// cleanupLocalStorageClasses already waits until no e2e- LocalStorageClass — and no derived
+	// StorageClass — is left, so the create below no longer needs its own retry loop.
+	cleanupLocalStorageClasses(ctx, cl, k8sClient)
+	_, createErr := dynamicClient.Resource(localStorageClassGVR).Create(ctx, lsc.DeepCopy(), metav1.CreateOptions{})
+	Expect(createErr).NotTo(HaveOccurred(), "create LocalStorageClass %s", name)
 
 	By("Waiting for the LocalStorageClass to reach Created and its StorageClass to appear")
 	Eventually(func(g Gomega) {
