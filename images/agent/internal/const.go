@@ -128,8 +128,15 @@ const (
 	ReasonUpdating         = "Updating"
 	ReasonTerminating      = "Terminating"
 	ReasonScanFailed       = "ScanFailed"
-	ReasonUpdated          = "Updated"
-	ReasonApplied          = "Applied"
+	// ReasonResizing marks an LVMLogicalVolume whose Logical Volume is being grown
+	// to the requested size. Not a failure, but not usable at the new size yet.
+	ReasonResizing = "Resizing"
+	// ReasonCleaning marks an LVMLogicalVolume whose Logical Volume is being wiped
+	// before removal, as spec.volumeCleanup asks. The volume still exists and is
+	// on its way out.
+	ReasonCleaning = "Cleaning"
+	ReasonUpdated  = "Updated"
+	ReasonApplied  = "Applied"
 	// ReasonAliasResolutionFailed is set when the agent has repeatedly failed
 	// to canonicalize the alias-form PV names it needs to decide whether a
 	// file-backed loop device is already part of the VG. Unlike the transient

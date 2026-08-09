@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/controller/config"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/logger"
@@ -332,21 +333,69 @@ func GetNodes(ctx context.Context, cl client.Client, metrics monitoring.Metrics,
 	return result, nil
 }
 
-func updateLVMVolumeGroupSetPhaseIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvgSet *v1alpha1.LVMVolumeGroupSet, phase, reason string) error {
-	log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetPhaseIfNeeded] tries to update the LVMVolumeGroupSet %s status phase to %s and reason to %s", lvgSet.Name, phase, reason))
-	if lvgSet.Status.Phase == phase && lvgSet.Status.Reason == reason {
-		log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetPhaseIfNeeded] no need to update phase or reason of the LVMVolumeGroupSet %s as they are same", lvgSet.Name))
-		return nil
+// readyConditionForSetPhase translates a phase this controller is about to write
+// into the Ready condition that goes with it.
+//
+// The phase is derived from the condition in the resources that were built this
+// way from the start. Here it is the other way round, because the phase came
+// first and is the load-bearing contract: the strings are part of the published
+// API and are what operators watch. Deriving the condition from the phase keeps
+// the two in step by construction, with one place to look.
+//
+// reason carries free-form text, including raw error strings, so it becomes the
+// condition's message rather than its reason.
+func readyConditionForSetPhase(generation int64, phase, reason string) metav1.Condition {
+	cond := metav1.Condition{
+		Type:               conditions.TypeReady,
+		ObservedGeneration: generation,
+		Message:            reason,
 	}
 
-	log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetPhaseIfNeeded] the LVMVolumeGroupSet %s status phase %s and reason %s should be updated to the phase %s and reason %s", lvgSet.Name, lvgSet.Status.Phase, lvgSet.Status.Reason, phase, reason))
-	lvgSet.Status.Phase = phase
-	lvgSet.Status.Reason = reason
-	err := cl.Status().Update(ctx, lvgSet)
+	switch phase {
+	case phaseCreated:
+		cond.Status = metav1.ConditionTrue
+		cond.Reason = conditions.ReasonReconciled
+	case v1alpha1.PhasePending:
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = conditions.ReasonPending
+	case phaseNotCreated:
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = conditions.ReasonReconcileFailed
+	default:
+		// Nothing has observed the set yet. The phase enum admits the empty
+		// string, so this is reachable rather than defensive.
+		cond.Status = metav1.ConditionUnknown
+		cond.Reason = conditions.ReasonPending
+	}
+
+	if cond.Message == "" {
+		cond.Message = fmt.Sprintf("the LVMVolumeGroupSet is in the %s phase", phase)
+	}
+
+	return cond
+}
+
+func updateLVMVolumeGroupSetPhaseIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvgSet *v1alpha1.LVMVolumeGroupSet, phase, reason string) error {
+	log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetPhaseIfNeeded] tries to update the LVMVolumeGroupSet %s status phase to %s and reason to %s", lvgSet.Name, phase, reason))
+
+	// The state UpdateStatus read and wrote, kept so the server-side values can be
+	// mirrored onto the caller's object below.
+	var written *v1alpha1.LVMVolumeGroupSet
+
+	err := conditions.UpdateStatus(ctx, cl, lvgSet, func(fresh *v1alpha1.LVMVolumeGroupSet) {
+		written = fresh
+		fresh.Status.Phase = phase
+		fresh.Status.Reason = reason
+		fresh.Status.ObservedGeneration = fresh.Generation
+		conditions.Set(&fresh.Status.Conditions, readyConditionForSetPhase(fresh.Generation, phase, reason))
+	})
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[updateLVMVolumeGroupSetPhaseIfNeeded] unable to update the LVMVolumeGroupSet %s", lvgSet.Name))
 		return err
 	}
+
+	lvgSet.Status = written.Status
+	lvgSet.ResourceVersion = written.ResourceVersion
 
 	log.Debug(fmt.Sprintf("[updateLVMVolumeGroupSetPhaseIfNeeded] successfully updated the LVMVolumeGroupSet %s to phase %s and reason %s", lvgSet.Name, phase, reason))
 	return nil

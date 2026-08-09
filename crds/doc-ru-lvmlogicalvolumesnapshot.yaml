@@ -39,6 +39,36 @@ spec:
                 reason:
                   description: |
                     Причина выставленной фазы.
+                observedGeneration:
+                  description: |
+                    Значение `metadata.generation`, которое контроллер обработал последним. Если оно
+                    отстаёт от `metadata.generation`, последняя спецификация ещё не обработана, и
+                    условия ниже описывают предыдущую.
+                conditions:
+                  description: |
+                    Последние наблюдения состояния ресурса. Тип условия: `Ready`.
+                  items:
+                    properties:
+                      type:
+                        description: |
+                          Тип условия.
+                      status:
+                        description: |
+                          Текущий статус условия.
+                      observedGeneration:
+                        description: |
+                          Значение `metadata.generation`, для которого было выставлено условие.
+                      lastTransitionTime:
+                        description: |
+                          Время последней смены статуса условия. Не обновляется, если изменились
+                          только причина или сообщение.
+                      reason:
+                        description: |
+                          Машиночитаемая причина текущего статуса, пригодная для фильтрации логов
+                          и алертинга.
+                      message:
+                        description: |
+                          Человекочитаемое пояснение к текущему статусу.
                 size:
                   description: |
                     Размер снимка Logical Volume на узле.

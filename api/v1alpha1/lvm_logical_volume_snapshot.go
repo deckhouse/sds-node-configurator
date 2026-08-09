@@ -55,11 +55,19 @@ type LVMLogicalVolumeSnapshotSpec struct {
 
 // +k8s:deepcopy-gen=true
 type LVMLogicalVolumeSnapshotStatus struct {
-	NodeName              string            `json:"nodeName"`
-	ActualVGNameOnTheNode string            `json:"actualVGNameOnTheNode"`
-	ActualLVNameOnTheNode string            `json:"actualLVNameOnTheNode"`
-	Phase                 string            `json:"phase"`
-	Reason                string            `json:"reason"`
-	Size                  resource.Quantity `json:"size"`
-	UsedSize              resource.Quantity `json:"usedSize"`
+	NodeName              string `json:"nodeName"`
+	ActualVGNameOnTheNode string `json:"actualVGNameOnTheNode"`
+	ActualLVNameOnTheNode string `json:"actualLVNameOnTheNode"`
+	Phase                 string `json:"phase"`
+	// Reason carries free-form detail about the current phase, including raw error
+	// text. Machine-readable reasons live on Conditions.
+	Reason   string            `json:"reason"`
+	Size     resource.Quantity `json:"size"`
+	UsedSize resource.Quantity `json:"usedSize"`
+	// Conditions holds the latest observations of the resource state.
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// ObservedGeneration is the value of metadata.generation the agent last acted
+	// on. When it trails metadata.generation the conditions still describe the
+	// previous spec.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
