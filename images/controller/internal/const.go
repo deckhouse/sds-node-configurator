@@ -72,4 +72,34 @@ const (
 
 	TypeReady                  = "Ready"
 	TypeVGConfigurationApplied = "VGConfigurationApplied"
+	// TypeVGReady mirrors the agent-side constant of the same name
+	// (images/agent/internal/const.go): the agent reports whether the Volume Group
+	// it manages on the node is usable.
+	TypeVGReady    = "VGReady"
+	TypeNodeReady  = "NodeReady"
+	TypeAgentReady = "AgentReady"
 )
+
+// LVGConditionTypes is every condition type published on an LVMVolumeGroup, by
+// the agent on each node and by the controllers here. The aggregate Ready
+// condition is only meaningful once all of them have been observed at least
+// once, so the conditions watcher uses this list to tell "not ready" apart from
+// "not yet reported".
+//
+// It has to be kept in step with the type enum in crds/lvmvolumegroup.yaml, which
+// TestLVGConditionTypesMatchTheCRDEnum asserts. It used to be derived from that
+// enum at runtime — the controller fetched its own CustomResourceDefinition and
+// counted the enum entries — which cost the controller a cluster-wide read on
+// CRDs, made the reconcile fail whenever that read failed, and hid the fact that
+// VGReady had no constant on this side at all.
+var LVGConditionTypes = []string{
+	TypeVGConfigurationApplied,
+	TypeVGReady,
+	TypeNodeReady,
+	TypeAgentReady,
+	// Ready is written by the conditions watcher itself, and was counted by the
+	// enum-length check it replaces: a fresh LVMVolumeGroup reports Pending until
+	// its first Ready has been written. Dropping it from the list would change
+	// that sequence, which the e2e suite asserts on.
+	TypeReady,
+}

@@ -22,7 +22,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	coreV1 "k8s.io/api/core/v1"
-	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/strings/slices"
@@ -248,7 +247,6 @@ func NewFakeClient() client.WithWatch {
 	s := scheme.Scheme
 	_ = metav1.AddMetaToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
-	_ = v1.AddToScheme(s)
 
 	builder := fake.NewClientBuilder().WithScheme(s)
 

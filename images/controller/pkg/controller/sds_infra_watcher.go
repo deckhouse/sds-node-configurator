@@ -29,6 +29,7 @@ import (
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/controller/config"
+	"github.com/deckhouse/sds-node-configurator/images/controller/internal"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/logger"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/monitoring"
 )
@@ -36,8 +37,8 @@ import (
 const (
 	SdsInfraWatcherCtrlName = "sds-infrastructure-watcher-controller"
 
-	nodeReadyType  = "NodeReady"
-	agentReadyType = "AgentReady"
+	nodeReadyType  = internal.TypeNodeReady
+	agentReadyType = internal.TypeAgentReady
 )
 
 var (
