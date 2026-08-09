@@ -75,7 +75,10 @@ func TestReadyConditionForSetPhaseTruncatesAnOversizedMessage(t *testing.T) {
 	// length, counted in runes, and TruncateMessage counts the same way — a
 	// byte-counting assertion here would fail on a message that is in fact
 	// within the limit.
-	huge := strings.Repeat("я", conditions.MaxMessageLen+100)
+	//
+	// Written as an escape rather than the character itself: the module linter
+	// rejects non-ASCII bytes in Go sources.
+	huge := strings.Repeat("\u044f", conditions.MaxMessageLen+100)
 
 	cond := readyConditionForSetPhase(1, phaseNotCreated, huge)
 
