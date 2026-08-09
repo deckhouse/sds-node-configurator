@@ -73,7 +73,13 @@ func decideLVGReadyAndPhase(lvg *v1alpha1.LVMVolumeGroup) lvgVerdict {
 				Status:             status,
 				ObservedGeneration: lvg.Generation,
 				Reason:             reason,
-				Message:            message,
+				// The messages below list condition types, so they stay well
+				// inside the schema's 32768 in practice. Truncating anyway is
+				// what makes "every condition this module writes fits the
+				// schema" true by construction rather than by argument: the
+				// list is as long as the conditions the agents happen to have
+				// written, and nothing here bounds that.
+				Message: conditions.TruncateMessage(message),
 			},
 		}
 	}

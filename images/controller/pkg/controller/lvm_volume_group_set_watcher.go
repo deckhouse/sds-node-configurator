@@ -372,6 +372,14 @@ func readyConditionForSetPhase(generation int64, phase, reason string) metav1.Co
 		cond.Message = fmt.Sprintf("the LVMVolumeGroupSet is in the %s phase", phase)
 	}
 
+	// reason is free-form and carries raw error strings, while the schema caps
+	// the condition message at 32768. Over the cap the API server rejects the
+	// whole status write, so the set would keep reporting its previous verdict
+	// and the reconcile would fail on the write rather than on what actually
+	// went wrong. conditions.Set does not truncate: it is a thin wrapper over
+	// meta.SetStatusCondition.
+	cond.Message = conditions.TruncateMessage(cond.Message)
+
 	return cond
 }
 

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -62,6 +63,18 @@ func TestReadyConditionForSetPhaseKeepsFreeFormTextOutOfTheReason(t *testing.T) 
 
 	assert.Equal(t, text, cond.Message)
 	assert.Equal(t, conditions.ReasonReconcileFailed, cond.Reason)
+}
+
+// That free-form text is unbounded, and the schema caps the condition message
+// at 32768. Over the cap the API server rejects the whole status write, so the
+// set keeps reporting its previous verdict and the reconcile fails on the write
+// instead of on what actually went wrong.
+func TestReadyConditionForSetPhaseTruncatesAnOversizedMessage(t *testing.T) {
+	huge := strings.Repeat("x", conditions.MaxMessageLen+100)
+
+	cond := readyConditionForSetPhase(1, phaseNotCreated, huge)
+
+	assert.LessOrEqual(t, len(cond.Message), conditions.MaxMessageLen)
 }
 
 // Every phase the CRD admits, apart from the empty string it explicitly allows,

@@ -80,6 +80,14 @@ func (lvgCl *LVGClient) UpdateLVGConditionIfNeeded(
 ) error {
 	lvgCl.log.Debug(fmt.Sprintf("[UpdateLVGConditionIfNeeded] set the condition type %s status %s reason %s message %s on the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
 
+	// Callers pass raw error text, including the output of failed LVM commands,
+	// while the schema caps the message at 32768. Over the cap the API server
+	// rejects the whole status write, so the group would keep reporting its
+	// previous verdict and the agent would fail on the write rather than on the
+	// command that actually went wrong. conditions.Set does not truncate: it is
+	// a thin wrapper over meta.SetStatusCondition.
+	message = conditions.TruncateMessage(message)
+
 	// The state UpdateStatus read and wrote, kept so the server-side values can be
 	// mirrored onto the caller's object below.
 	var written *v1alpha1.LVMVolumeGroup
