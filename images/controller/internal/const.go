@@ -19,7 +19,6 @@ package internal
 const (
 	SdsNodeConfiguratorNamespace = "d8-sds-node-configurator"
 
-	ReasonPending          = "Pending"
 	ReasonUpdating         = "Updating"
 	ReasonCreating         = "Creating"
 	ReasonTerminating      = "Terminating"

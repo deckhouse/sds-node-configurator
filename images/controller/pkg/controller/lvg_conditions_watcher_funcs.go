@@ -85,7 +85,7 @@ func decideLVGReadyAndPhase(lvg *v1alpha1.LVMVolumeGroup) lvgVerdict {
 	}
 
 	if missing := missingConditionTypes(lvg); len(missing) > 0 {
-		return verdict(v1alpha1.PhasePending, metav1.ConditionFalse, internal.ReasonPending,
+		return verdict(v1alpha1.PhasePending, metav1.ConditionFalse, conditions.ReasonPending,
 			fmt.Sprintf("waiting for the conditions %s to be configured", strings.Join(missing, ",")))
 	}
 
@@ -100,7 +100,7 @@ func decideLVGReadyAndPhase(lvg *v1alpha1.LVMVolumeGroup) lvgVerdict {
 		// loop that used to break here.
 		switch c.Reason {
 		case internal.ReasonCreating:
-			return verdict(v1alpha1.PhasePending, metav1.ConditionFalse, internal.ReasonPending,
+			return verdict(v1alpha1.PhasePending, metav1.ConditionFalse, conditions.ReasonPending,
 				fmt.Sprintf("condition %s has Creating reason", c.Type))
 		case internal.ReasonTerminating:
 			return verdict(v1alpha1.PhaseTerminating, metav1.ConditionFalse, internal.ReasonTerminating,
