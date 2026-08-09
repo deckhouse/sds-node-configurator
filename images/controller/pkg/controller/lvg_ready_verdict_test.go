@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/controller/internal"
 )
@@ -89,14 +90,14 @@ func TestDecideLVGReadyAndPhase(t *testing.T) {
 			}(),
 			wantPhase:  v1alpha1.PhasePending,
 			wantStatus: metav1.ConditionFalse,
-			wantReason: internal.ReasonPending,
+			wantReason: conditions.ReasonPending,
 		},
 		{
 			name:       "a stage is still being created",
 			lvg:        lvgWith(falseCond(internal.TypeVGConfigurationApplied, internal.ReasonCreating)),
 			wantPhase:  v1alpha1.PhasePending,
 			wantStatus: metav1.ConditionFalse,
-			wantReason: internal.ReasonPending,
+			wantReason: conditions.ReasonPending,
 		},
 		{
 			name:       "a stage is terminating",
