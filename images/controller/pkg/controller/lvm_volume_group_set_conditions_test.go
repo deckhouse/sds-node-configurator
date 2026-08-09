@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -70,11 +71,15 @@ func TestReadyConditionForSetPhaseKeepsFreeFormTextOutOfTheReason(t *testing.T) 
 // set keeps reporting its previous verdict and the reconcile fails on the write
 // instead of on what actually went wrong.
 func TestReadyConditionForSetPhaseTruncatesAnOversizedMessage(t *testing.T) {
-	huge := strings.Repeat("x", conditions.MaxMessageLen+100)
+	// Multi-byte on purpose. The schema's maxLength is an OpenAPI string
+	// length, counted in runes, and TruncateMessage counts the same way — a
+	// byte-counting assertion here would fail on a message that is in fact
+	// within the limit.
+	huge := strings.Repeat("я", conditions.MaxMessageLen+100)
 
 	cond := readyConditionForSetPhase(1, phaseNotCreated, huge)
 
-	assert.LessOrEqual(t, len(cond.Message), conditions.MaxMessageLen)
+	assert.LessOrEqual(t, utf8.RuneCountInString(cond.Message), conditions.MaxMessageLen)
 }
 
 // Every phase the CRD admits, apart from the empty string it explicitly allows,

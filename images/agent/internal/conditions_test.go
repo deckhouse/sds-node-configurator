@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,11 +60,15 @@ func TestReadyConditionForPhase(t *testing.T) {
 // so the resource keeps reporting its previous verdict and the agent fails on
 // the write instead of on the command that actually went wrong.
 func TestReadyConditionForPhaseTruncatesAnOversizedMessage(t *testing.T) {
-	huge := strings.Repeat("x", conditions.MaxMessageLen+100)
+	// Multi-byte on purpose. The schema's maxLength is an OpenAPI string
+	// length, counted in runes, and TruncateMessage counts the same way — a
+	// byte-counting assertion here would fail on a message that is in fact
+	// within the limit.
+	huge := strings.Repeat("я", conditions.MaxMessageLen+100)
 
 	cond := ReadyConditionForPhase(1, v1alpha1.PhaseFailed, huge, "LVMLogicalVolume")
 
-	assert.LessOrEqual(t, len(cond.Message), conditions.MaxMessageLen)
+	assert.LessOrEqual(t, utf8.RuneCountInString(cond.Message), conditions.MaxMessageLen)
 }
 
 // status.reason carries free-form text, including raw output from a failed LVM
