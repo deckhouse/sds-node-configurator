@@ -22,8 +22,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
@@ -68,6 +70,21 @@ var _ = Describe("Regression1", func() {
 					var device v1alpha1.BlockDevice
 					err = k8client.Get(ctx, types.NamespacedName{Name: expectedDevice.Name, Namespace: expectedDevice.Namespace}, &device)
 					Expect(err).ShouldNot(HaveOccurred(), "fix code, not test! Names should stay the same across the versions")
+
+					// The conditions carry lastTransitionTime, so they cannot be
+					// a golden value. This fixture is about the field names and
+					// values staying stable across versions; the condition is
+					// asserted below, against the verdict it has to agree with.
+					published := conditions.Get(device.Status.Conditions, v1alpha1.BlockDeviceConditionConsumable)
+					Expect(published).ShouldNot(BeNil(), "the Consumable condition was not published")
+					Expect(published.Reason).ShouldNot(BeEmpty())
+					if device.Status.Consumable {
+						Expect(published.Status).Should(Equal(metav1.ConditionTrue))
+					} else {
+						Expect(published.Status).Should(Equal(metav1.ConditionFalse))
+					}
+
+					device.Status.Conditions = nil
 					Expect(device.Status).Should(BeEquivalentTo(expectedDevice.Status))
 				})
 			})
