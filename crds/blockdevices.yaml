@@ -120,6 +120,62 @@ spec:
                   type: string
                   description: |
                     Unique identifier of the machine the device is on (normally at `/etc/machine-id`).
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+                  description: |
+                    Latest state. Known type: `Consumable`, which carries the
+                    reason behind `status.consumable`: `Available`, `Mounted`,
+                    `HasFilesystem` or `HotPlugged`.
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                      - lastTransitionTime
+                      - reason
+                      - message
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        description: |
+                          Condition type, for example `Consumable`.
+                      status:
+                        type: string
+                        description: |
+                          Current status of the condition.
+                        enum:
+                          - "True"
+                          - "False"
+                          - "Unknown"
+                      observedGeneration:
+                        type: integer
+                        minimum: 0
+                        format: int64
+                        description: |
+                          Value of `metadata.generation` the condition was last set against.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: |
+                          Timestamp of the last status transition for this condition.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: |
+                          Machine-readable reason for the current status, suitable for
+                          log filtering.
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: |
+                          Human-readable explanation of the current status.
 
                             
       additionalPrinterColumns:
@@ -131,6 +187,11 @@ spec:
           name: Consumable
           type: boolean
           description: Defines whether the current block device can be used by `sds-node-configurator`.
+        - jsonPath: .status.conditions[?(@.type=="Consumable")].reason
+          name: Reason
+          type: string
+          priority: 1
+          description: Why the device is or is not consumable.
         - jsonPath: .status.size
           name: Size
           type: string
