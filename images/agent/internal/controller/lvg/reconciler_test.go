@@ -1247,7 +1247,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				t.Error(err)
 			}
 
-			err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, "", "")
+			err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, internal.ReasonUpdated, "")
 			if err != nil {
 				t.Error(err)
 			}
@@ -1581,8 +1581,10 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 				Status:             v1.ConditionTrue,
 				ObservedGeneration: 1,
 				LastTransitionTime: v1.NewTime(time.Now().Truncate(time.Second)),
-				Reason:             "",
-				Message:            "",
+				// Matches the call below, so the write is a no-op and the early
+				// return is what propagates the resource version.
+				Reason:  internal.ReasonUpdated,
+				Message: "",
 			},
 		}
 
@@ -1606,7 +1608,7 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 
 		lvg.ResourceVersion = ""
 
-		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, "", "")
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, internal.ReasonUpdated, "")
 		if assert.NoError(t, err) {
 			assert.Equal(t, serverRV, lvg.ResourceVersion)
 		}

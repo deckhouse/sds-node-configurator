@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/controller/internal"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/logger"
@@ -173,58 +174,37 @@ func GetLVMVolumeGroups(ctx context.Context, cl client.Client, metrics monitorin
 	return lvgs, nil
 }
 
+// updateLVGConditionIfNeeded sets a condition on the LVMVolumeGroup, skipping the
+// write when nothing changed and retrying on conflict.
+//
+// The retry matters here: the agent on every node writes conditions on the same
+// LVMVolumeGroup, so a write built from the copy the caller happens to hold loses
+// the race often enough to be routine.
+//
+// On success, lvg.Status and lvg.ResourceVersion are replaced with server-side values.
+// Callers must not hold unsaved in-memory Status modifications before calling this.
 func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, status metav1.ConditionStatus, conType, reason, message string) error {
-	exist := false
-	index := 0
-	newCondition := metav1.Condition{
-		Type:               conType,
-		Status:             status,
-		ObservedGeneration: lvg.Generation,
-		LastTransitionTime: metav1.NewTime(time.Now()),
-		Reason:             reason,
-		Message:            message,
+	log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] set the condition type %s status %s reason %s message %s on the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
+
+	// The state UpdateStatus read and wrote, kept so the server-side values can be
+	// mirrored onto the caller's object below.
+	var written *v1alpha1.LVMVolumeGroup
+
+	err := conditions.UpdateStatus(ctx, cl, lvg, func(fresh *v1alpha1.LVMVolumeGroup) {
+		written = fresh
+		conditions.Set(&fresh.Status.Conditions, metav1.Condition{
+			Type:               conType,
+			Status:             status,
+			ObservedGeneration: fresh.Generation,
+			Reason:             reason,
+			Message:            message,
+		})
+	})
+	if err != nil {
+		return err
 	}
 
-	if lvg.Status.Conditions == nil {
-		log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] the LVMVolumeGroup %s conditions is nil. Initialize them", lvg.Name))
-		lvg.Status.Conditions = make([]metav1.Condition, 0, 2)
-	}
-
-	if len(lvg.Status.Conditions) > 0 {
-		log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] there are some conditions in the LVMVolumeGroup %s. Tries to find a condition %s", lvg.Name, conType))
-		for i, c := range lvg.Status.Conditions {
-			if c.Type == conType {
-				log.Trace(fmt.Sprintf("[updateLVGConditionIfNeeded] old condition: %+v, new condition: %+v", c, newCondition))
-				if checkIfEqualConditions(c, newCondition) {
-					log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no need to update condition %s in the LVMVolumeGroup %s as new and old condition states are the same", conType, lvg.Name))
-					return nil
-				}
-
-				index = i
-				exist = true
-				log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was found in the LVMVolumeGroup %s at the index %d", conType, lvg.Name, i))
-			}
-		}
-
-		if !exist {
-			log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] a condition %s was not found. Append it in the end of the LVMVolumeGroup %s conditions", conType, lvg.Name))
-			lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
-		} else {
-			log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] insert the condition %s at index %d of the LVMVolumeGroup %s conditions", conType, index, lvg.Name))
-			lvg.Status.Conditions[index] = newCondition
-		}
-	} else {
-		log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] no conditions were found in the LVMVolumeGroup %s. Append the condition %s in the end", lvg.Name, conType))
-		lvg.Status.Conditions = append(lvg.Status.Conditions, newCondition)
-	}
-
-	return cl.Status().Update(ctx, lvg)
-}
-
-func checkIfEqualConditions(first, second metav1.Condition) bool {
-	return first.Type == second.Type &&
-		first.Status == second.Status &&
-		first.Reason == second.Reason &&
-		first.Message == second.Message &&
-		first.ObservedGeneration == second.ObservedGeneration
+	lvg.Status = written.Status
+	lvg.ResourceVersion = written.ResourceVersion
+	return nil
 }

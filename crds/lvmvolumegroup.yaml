@@ -312,6 +312,18 @@ spec:
                     - NotReady
                     - Terminating
                     - ""
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: |
+                    The value of `metadata.generation` the conditions watcher last computed a
+                    verdict against. When it trails `metadata.generation`, the phase and the
+                    aggregate `Ready` condition still describe the previous spec.
+
+                    Only the conditions watcher sets it, because it is the only writer that
+                    looks at the resource as a whole. The agent and the infrastructure watcher
+                    each own individual stage conditions and stamp the generation on those.
                 conditions:
                   description: |
                     LVMVolumeGroup conditions.
@@ -324,9 +336,13 @@ spec:
                     required:
                       - type
                       - status
+                      - lastTransitionTime
+                      - reason
+                      - message
                     properties:
                       type:
                         type: string
+                        maxLength: 316
                         description: |
                           Condition type.
                         enum:
@@ -339,22 +355,35 @@ spec:
                         type: string
                         description: |
                           Condition status.
+                        enum:
+                          - "True"
+                          - "False"
+                          - "Unknown"
                       reason:
                         type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
                         description: |
-                          Reason for the current status.
+                          Machine-readable reason for the current status, suitable for log filtering
+                          and alerting.
                       message:
                         type: string
+                        maxLength: 32768
                         description: |
                           Information about the current status.
                       lastTransitionTime:
                         type: string
+                        format: date-time
                         description: |
-                          Time the condition was updated.
+                          Timestamp of the last status transition for this condition. It is not bumped
+                          when only the reason or the message changes.
                       observedGeneration:
                         type: integer
+                        minimum: 0
+                        format: int64
                         description: |
-                          Resource version when the condition was applied.
+                          The value of `metadata.generation` this condition was set against.
                 vgUUID:
                   type: string
                   description: |
@@ -509,6 +538,10 @@ spec:
           name: phase
           type: string
           description: Resource phase.
+        - jsonPath: .status.conditions[?(@.type=="Ready")].status
+          name: Ready
+          type: string
+          description: Whether every stage condition has been reported and passed.
         - jsonPath: .status.nodes..name
           name: node
           type: string

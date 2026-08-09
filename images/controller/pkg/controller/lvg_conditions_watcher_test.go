@@ -17,111 +17,103 @@ limitations under the License.
 package controller
 
 import (
-	"context"
-	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/controller/internal"
 )
 
-func TestLVGConditionsWatcher(t *testing.T) {
-	cl := NewFakeClient()
-	ctx := context.Background()
-
-	t.Run("getCRD", func(t *testing.T) {
-		targetName := "target"
-		crds := []v1.CustomResourceDefinition{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: targetName,
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "other-name",
-				},
-			},
+func TestMissingConditionTypes(t *testing.T) {
+	conditionsOf := func(types ...string) []metav1.Condition {
+		conds := make([]metav1.Condition, 0, len(types))
+		for _, conType := range types {
+			conds = append(conds, metav1.Condition{Type: conType, Status: metav1.ConditionTrue})
 		}
+		return conds
+	}
 
-		for _, crd := range crds {
-			err := cl.Create(ctx, &crd)
-			if err != nil {
-				t.Error(err)
-			}
-		}
+	t.Run("every expected type present", func(t *testing.T) {
+		lvg := &v1alpha1.LVMVolumeGroup{}
+		lvg.Status.Conditions = conditionsOf(internal.LVGConditionTypes...)
 
-		crd, err := getCRD(ctx, cl, targetName)
-		if err != nil {
-			t.Error(err)
-		}
-
-		assert.Equal(t, targetName, crd.Name)
+		assert.Empty(t, missingConditionTypes(lvg))
 	})
 
-	t.Run("getTargetConditionsCount", func(t *testing.T) {
-		first, err := json.Marshal("first")
-		if err != nil {
-			t.Error(err)
-		}
-		second, err := json.Marshal("second")
-		if err != nil {
-			t.Error(err)
-		}
-		third, err := json.Marshal("third")
-		if err != nil {
-			t.Error(err)
-		}
-		crd := &v1.CustomResourceDefinition{
-			Spec: v1.CustomResourceDefinitionSpec{
-				Versions: []v1.CustomResourceDefinitionVersion{
-					{
-						Schema: &v1.CustomResourceValidation{
-							OpenAPIV3Schema: &v1.JSONSchemaProps{
-								Properties: map[string]v1.JSONSchemaProps{
-									"status": {
-										Properties: map[string]v1.JSONSchemaProps{
-											"conditions": {
-												Items: &v1.JSONSchemaPropsOrArray{
-													Schema: &v1.JSONSchemaProps{
-														Properties: map[string]v1.JSONSchemaProps{
-															"type": {
-																Enum: []v1.JSON{
-																	{
-																		Raw: first,
-																	},
-																	{
-																		Raw: second,
-																	},
-																	{
-																		Raw: third,
-																	},
-																},
-															},
-														},
-													},
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		}
+	t.Run("reports the absent types in declaration order", func(t *testing.T) {
+		lvg := &v1alpha1.LVMVolumeGroup{}
+		lvg.Status.Conditions = conditionsOf(internal.TypeVGReady, internal.TypeAgentReady)
 
-		count, err := getTargetConditionsCount(crd)
-		if err != nil {
-			t.Error(err)
-		}
-
-		assert.Equal(t, 3, count)
+		assert.Equal(t,
+			[]string{internal.TypeVGConfigurationApplied, internal.TypeNodeReady, internal.TypeReady},
+			missingConditionTypes(lvg))
 	})
+
+	// The check this replaces compared a count, so an unexpected type could stand
+	// in for a missing one and let a half-reported LVMVolumeGroup through.
+	t.Run("an unexpected type does not stand in for a missing one", func(t *testing.T) {
+		present := append(conditionsOf(internal.LVGConditionTypes[1:]...),
+			metav1.Condition{Type: "SomethingElse", Status: metav1.ConditionTrue})
+		lvg := &v1alpha1.LVMVolumeGroup{}
+		lvg.Status.Conditions = present
+
+		assert.Equal(t, []string{internal.TypeVGConfigurationApplied}, missingConditionTypes(lvg))
+	})
+
+	t.Run("no conditions at all", func(t *testing.T) {
+		assert.Equal(t, internal.LVGConditionTypes, missingConditionTypes(&v1alpha1.LVMVolumeGroup{}))
+	})
+}
+
+// internal.LVGConditionTypes used to be derived from this enum at runtime: the
+// controller fetched its own CustomResourceDefinition on every reconcile and
+// counted the entries. The list is now a compile-time constant, so the agreement
+// with the published schema has to be asserted somewhere — an LVMVolumeGroup can
+// only reach Ready once every type in the list has been written, and a type the
+// enum rejects can never be written at all.
+func TestLVGConditionTypesMatchTheCRDEnum(t *testing.T) {
+	raw, err := os.ReadFile("../../../../crds/lvmvolumegroup.yaml")
+	require.NoError(t, err)
+
+	var crd struct {
+		Spec struct {
+			Versions []struct {
+				Name   string `json:"name"`
+				Schema struct {
+					OpenAPIV3Schema struct {
+						Properties struct {
+							Status struct {
+								Properties struct {
+									Conditions struct {
+										Items struct {
+											Properties struct {
+												Type struct {
+													Enum []string `json:"enum"`
+												} `json:"type"`
+											} `json:"properties"`
+										} `json:"items"`
+									} `json:"conditions"`
+								} `json:"properties"`
+							} `json:"status"`
+						} `json:"properties"`
+					} `json:"openAPIV3Schema"`
+				} `json:"schema"`
+			} `json:"versions"`
+		} `json:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(raw, &crd))
+	require.Len(t, crd.Spec.Versions, 1, "the lookup below assumes a single served version")
+
+	enum := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Status.Properties.Conditions.Items.Properties.Type.Enum
+	require.NotEmpty(t, enum, "the conditions type enum was not found in the CRD")
+
+	assert.ElementsMatch(t, enum, internal.LVGConditionTypes,
+		"internal.LVGConditionTypes and the type enum in crds/lvmvolumegroup.yaml have drifted apart")
 }
 
 // A VGConfigurationApplied=False reason that is not in acceptableReasons drags the
