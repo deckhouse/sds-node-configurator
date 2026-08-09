@@ -171,6 +171,69 @@ spec:
                   type: string
                   description: |
                     Reason of the phase.
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: |
+                    The value of `metadata.generation` the controller has last acted on. When it trails
+                    `metadata.generation`, the controller has not yet processed the latest spec, and the
+                    conditions below still describe the previous one.
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+                  description: |
+                    The latest observations of the resource state. Condition type: `Ready`.
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                      - lastTransitionTime
+                      - reason
+                      - message
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        description: |
+                          Condition type. `Ready` is `True` once the Logical Volume is in place, `False`
+                          while it is not, and `Unknown` before anything has observed it.
+                      status:
+                        type: string
+                        description: |
+                          Current status of the condition.
+                        enum:
+                          - "True"
+                          - "False"
+                          - "Unknown"
+                      observedGeneration:
+                        type: integer
+                        minimum: 0
+                        format: int64
+                        description: |
+                          The value of `metadata.generation` this condition was set against.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: |
+                          Timestamp of the last status transition for this condition. It is not bumped
+                          when only the reason or the message changes.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: |
+                          Machine-readable reason for the current status, suitable for log filtering
+                          and alerting.
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: |
+                          Human-readable explanation of the current status.
                 actualSize:
                   description: |
                     Actual Logical Volume size on the node.
@@ -190,6 +253,9 @@ spec:
           name: Phase
           type: string
           description: Current resource status.
+        - jsonPath: .status.conditions[?(@.type=="Ready")].status
+          name: Ready
+          type: string
         - jsonPath: .spec.lvmVolumeGroupName
           name: LVMVolumeGroup
           type: string

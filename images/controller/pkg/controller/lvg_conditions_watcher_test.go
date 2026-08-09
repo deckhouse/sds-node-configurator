@@ -70,6 +70,58 @@ func TestMissingConditionTypes(t *testing.T) {
 	})
 }
 
+// Every declared condition type has to have a component that writes it. Here
+// that is not merely about observability: reconcileLVGConditions refuses to
+// compute Ready until all of them have been written at least once, so a type
+// nobody writes wedges every LVMVolumeGroup in the cluster at Pending.
+//
+// The agent writes its two from a different Go module, so the ownership split is
+// what makes the set checkable — each side's own tests cover its writes.
+func TestConditionOwnershipCoversEveryDeclaredType(t *testing.T) {
+	owners := map[string][]string{
+		"the agent":       internal.LVGConditionsOwnedByAgent,
+		"the controllers": internal.LVGConditionsOwnedByController,
+	}
+
+	ownerOf := map[string]string{}
+	for owner, types := range owners {
+		for _, conType := range types {
+			if previous, taken := ownerOf[conType]; taken {
+				t.Errorf("condition %s is claimed by both %s and %s; two writers of one "+
+					"condition overwrite each other", conType, previous, owner)
+				continue
+			}
+			ownerOf[conType] = owner
+		}
+	}
+
+	for _, conType := range internal.LVGConditionTypes {
+		if _, owned := ownerOf[conType]; !owned {
+			t.Errorf("condition %s is declared but no component writes it, which leaves every "+
+				"LVMVolumeGroup Pending", conType)
+		}
+	}
+
+	declared := map[string]bool{}
+	for _, conType := range internal.LVGConditionTypes {
+		declared[conType] = true
+	}
+	for conType, owner := range ownerOf {
+		if !declared[conType] {
+			t.Errorf("%s writes condition %s, which LVGConditionTypes does not declare", owner, conType)
+		}
+	}
+}
+
+// The two condition types the controllers report on the node and the agent pod
+// are referenced through local names in sds_infra_watcher.go. They have to be
+// the canonical constants, or the conditions watcher would be waiting for types
+// nobody writes under those names.
+func TestTheInfraWatcherUsesTheCanonicalConditionTypes(t *testing.T) {
+	assert.Equal(t, internal.TypeNodeReady, nodeReadyType)
+	assert.Equal(t, internal.TypeAgentReady, agentReadyType)
+}
+
 // internal.LVGConditionTypes used to be derived from this enum at runtime: the
 // controller fetched its own CustomResourceDefinition on every reconcile and
 // counted the entries. The list is now a compile-time constant, so the agreement

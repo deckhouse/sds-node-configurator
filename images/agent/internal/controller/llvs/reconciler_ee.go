@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
@@ -160,7 +161,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 				Phase:  v1alpha1.PhaseFailed,
 				Reason: fmt.Sprintf("Source LLV %s is not Thin", llv.Name),
 			}
-			return false, r.cl.Status().Update(ctx, llvs)
+			return false, r.updateStatus(ctx, llvs)
 		}
 
 		lvg := &v1alpha1.LVMVolumeGroup{}
@@ -187,7 +188,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 				Phase:  v1alpha1.PhasePending,
 				Reason: fmt.Sprintf("Thin pool %s is not found in LVG %s", llv.Spec.Thin.PoolName, lvg.Name),
 			}
-			return true, r.cl.Status().Update(ctx, llvs)
+			return true, r.updateStatus(ctx, llvs)
 		}
 
 		if llv.Status == nil || llv.Status.ActualSize.Value() == 0 {
@@ -196,7 +197,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 				Phase:  v1alpha1.PhasePending,
 				Reason: fmt.Sprintf("Source LLV %s ActualSize is not known", llv.Name),
 			}
-			return true, r.cl.Status().Update(ctx, llvs)
+			return true, r.updateStatus(ctx, llvs)
 		}
 
 		if lvg.Status.ThinPools[thinPoolIndex].AvailableSpace.Value() < llv.Status.ActualSize.Value() {
@@ -216,7 +217,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 					lvg.Status.ThinPools[thinPoolIndex].AvailableSpace.String(),
 				),
 			}
-			return true, r.cl.Status().Update(ctx, llvs)
+			return true, r.updateStatus(ctx, llvs)
 		}
 
 		llvs.Status = &v1alpha1.LVMLogicalVolumeSnapshotStatus{
@@ -227,7 +228,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 			Reason:                "Creating volume",
 		}
 
-		if err := r.cl.Status().Update(ctx, llvs); err != nil {
+		if err := r.updateStatus(ctx, llvs); err != nil {
 			r.log.Error(err, "Failed updating status of "+llvs.Name)
 			return true, err
 		}
@@ -271,7 +272,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 					llvs.Status.ActualLVNameOnTheNode,
 				))
 			llvs.Status.Reason = fmt.Sprintf("Error during snapshot creation (will be retried): %v", err)
-			updateErr := r.cl.Status().Update(ctx, llvs)
+			updateErr := r.updateStatus(ctx, llvs)
 			err = errors.Join(err, updateErr)
 			return true, err
 		}
@@ -291,7 +292,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 		if getLVErr != nil {
 			r.log.Warning(fmt.Sprintf("[reconcileLLVSCreateFunc] unable to get snapshot %s info from LVM: %s, will retry", llvs.ActualSnapshotNameOnTheNode(), getLVErr.Error()))
 			llvs.Status.Reason = "Waiting for created volume to become discovered"
-			err = r.cl.Status().Update(ctx, llvs)
+			err = r.updateStatus(ctx, llvs)
 			return true, err
 		}
 		snapshotLVData = &cache.LVData{Data: lvData, Exist: true}
@@ -306,7 +307,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 		llvs.Status.UsedSize = *usedSize
 		llvs.Status.Phase = v1alpha1.PhaseCreated
 		llvs.Status.Reason = ""
-		err = r.cl.Status().Update(ctx, llvs)
+		err = r.updateStatus(ctx, llvs)
 		return false, err
 	case reflect.ValueOf(snapshotLVData.Data).IsZero():
 		// still "Waiting for created volume to become discovered"
@@ -327,7 +328,7 @@ func (r *Reconciler) reconcileLLVSCreateFunc(
 		llvs.Status.UsedSize = *usedSize
 		llvs.Status.Phase = v1alpha1.PhaseCreated
 		llvs.Status.Reason = ""
-		err = r.cl.Status().Update(ctx, llvs)
+		err = r.updateStatus(ctx, llvs)
 		return false, err
 	}
 }
@@ -394,6 +395,26 @@ func (r *Reconciler) deleteLVIfNeeded(llvsName, llvsActualNameOnTheNode, vgActua
 	return nil
 }
 
+// updateStatus writes llvs.Status, refreshing the Ready condition from the phase
+// and reason the caller has just set.
+//
+// Unlike the LVMVolumeGroup writers this does not re-read the object first: the
+// callers build status fields from LVM data they have already gathered, and the
+// agent on a node is the only writer of that node's snapshots, so there is no
+// second actor to lose a race with.
+func (r *Reconciler) updateStatus(
+	ctx context.Context,
+	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
+) error {
+	if llvs.Status != nil {
+		llvs.Status.ObservedGeneration = llvs.Generation
+		conditions.Set(&llvs.Status.Conditions, internal.ReadyConditionForPhase(
+			llvs.Generation, llvs.Status.Phase, llvs.Status.Reason, "LVMLogicalVolumeSnapshot"))
+	}
+
+	return r.cl.Status().Update(ctx, llvs)
+}
+
 func (r *Reconciler) getObjectOrSetPendingStatus(
 	ctx context.Context,
 	llvs *v1alpha1.LVMLogicalVolumeSnapshot,
@@ -405,7 +426,7 @@ func (r *Reconciler) getObjectOrSetPendingStatus(
 			Phase:  v1alpha1.PhasePending,
 			Reason: fmt.Sprintf("Error while getting object %s: %v", obj.GetName(), err),
 		}
-		updErr := r.cl.Status().Update(ctx, llvs)
+		updErr := r.updateStatus(ctx, llvs)
 		return errors.Join(err, updErr)
 	}
 	return nil

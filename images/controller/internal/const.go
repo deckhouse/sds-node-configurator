@@ -103,3 +103,29 @@ var LVGConditionTypes = []string{
 	// that sequence, which the e2e suite asserts on.
 	TypeReady,
 }
+
+// Which component writes which LVMVolumeGroup condition.
+//
+// This matters more here than in the other storage modules: the conditions
+// watcher refuses to compute Ready until every type in LVGConditionTypes has
+// been written at least once, so a declared type nobody writes does not merely
+// go missing — it wedges every LVMVolumeGroup in the cluster at Pending.
+//
+// The agent's types are written from a different Go module, so no single test
+// can drive both sides. The split lets each side be checked where it lives.
+var (
+	// LVGConditionsOwnedByAgent are written by the agent on each node, from what
+	// it observes about the Volume Group there.
+	LVGConditionsOwnedByAgent = []string{
+		TypeVGConfigurationApplied,
+		TypeVGReady,
+	}
+	// LVGConditionsOwnedByController are written by the controllers here: the
+	// infrastructure watcher reports on the node and the agent pod, and the
+	// conditions watcher aggregates the rest into Ready.
+	LVGConditionsOwnedByController = []string{
+		TypeNodeReady,
+		TypeAgentReady,
+		TypeReady,
+	}
+)

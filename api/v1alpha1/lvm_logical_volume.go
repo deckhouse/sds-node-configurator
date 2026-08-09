@@ -70,10 +70,19 @@ type LVMLogicalVolumeThickSpec struct {
 
 // +k8s:deepcopy-gen=true
 type LVMLogicalVolumeStatus struct {
-	Phase      string            `json:"phase"`
+	Phase string `json:"phase"`
+	// Reason carries free-form detail about the current phase, including raw error
+	// text. Machine-readable reasons live on Conditions.
 	Reason     string            `json:"reason"`
 	ActualSize resource.Quantity `json:"actualSize"`
 	Contiguous *bool             `json:"contiguous"`
+	// Conditions holds the latest observations of the resource state. Phase is
+	// derived from them.
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// ObservedGeneration is the value of metadata.generation the agent last acted
+	// on. When it trails metadata.generation the conditions still describe the
+	// previous spec.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
