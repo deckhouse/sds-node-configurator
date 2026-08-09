@@ -161,7 +161,17 @@ func (candidate *BlockDeviceCandidate) UpdateAPIBlockDevice(blockDevice *v1alpha
 	// lastTransitionTime on every unrelated change the discoverer picks up — a
 	// path rename, a size change — and the timestamp would stop meaning "since
 	// when has this device been unusable".
-	existing := blockDevice.Status.Conditions
+	//
+	// Copied rather than re-pointed. The discoverer hands this method a
+	// BlockDevice by value, taken from the map it listed from the API — and a
+	// struct copy copies the slice header, not the array behind it. Reusing
+	// that header would let meta.SetStatusCondition, which edits an existing
+	// condition in place, write through into the map. The map is re-listed
+	// every pass, so nothing observes it today; it becomes a real defect the
+	// moment the write is retried within a pass, because the map would already
+	// carry a verdict the API server rejected and the next diff would find
+	// nothing to write.
+	existing := append([]metav1.Condition(nil), blockDevice.Status.Conditions...)
 	blockDevice.Status = candidate.asAPIBlockDeviceStatus()
 	blockDevice.Status.Conditions = existing
 	candidate.setConsumableCondition(blockDevice)
@@ -186,9 +196,12 @@ func (candidate *BlockDeviceCandidate) setConsumableCondition(blockDevice *v1alp
 		Status:  status,
 		Reason:  candidate.ConsumableReason,
 		Message: conditions.TruncateMessage(candidate.ConsumableMessage),
-		// BlockDevice has no spec, so metadata.generation never advances past
-		// the value it is created with. Recording it keeps the field meaning
-		// what it means everywhere else rather than leaving it zero.
+		// Zero on the create path — the object has no generation until the API
+		// server assigns one — and the assigned value on every update after
+		// that. BlockDevice has no spec, so it never advances beyond that
+		// value; the field is here because a condition that omits it reads as
+		// "the writer does not track which revision it looked at", which is not
+		// the case.
 		ObservedGeneration: blockDevice.Generation,
 	})
 }

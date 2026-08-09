@@ -106,6 +106,29 @@ var _ = Describe("The Consumable condition", func() {
 			"the device did not become usable or unusable, so the timestamp must not move")
 	})
 
+	// The discoverer hands UpdateAPIBlockDevice a BlockDevice by value, taken
+	// from the map it listed from the API. A struct copy copies the slice
+	// header, not the array behind it, and meta.SetStatusCondition edits an
+	// existing condition in place — so without copying the conditions the
+	// update would write through into the caller's map.
+	It("does not write through into the caller's copy", func() {
+		mounted := internal.Device{MountPoint: "/mnt", FSType: "ext4"}
+		bd := internal.NewBlockDeviceCandidateByDevice(&mounted, "node-1", "machine-1").AsAPIBlockDevice()
+		bd.Name = "dev"
+		listed := map[string]v1alpha1.BlockDevice{"dev": bd}
+
+		byValue := listed["dev"]
+		unmounted := internal.Device{FSType: "ext4"}
+		next := internal.NewBlockDeviceCandidateByDevice(&unmounted, "node-1", "machine-1")
+		next.UpdateAPIBlockDevice(&byValue)
+
+		Expect(conditions.Get(listed["dev"].Status.Conditions, v1alpha1.BlockDeviceConditionConsumable).Reason).
+			Should(Equal(v1alpha1.ReasonDeviceMounted),
+				"the listed device must keep the verdict the API server holds")
+		Expect(conditions.Get(byValue.Status.Conditions, v1alpha1.BlockDeviceConditionConsumable).Reason).
+			Should(Equal(v1alpha1.ReasonDeviceHasFilesystem))
+	})
+
 	// status.consumable stays false across this change, and so does every other
 	// field the old diff compared — without consulting the condition the
 	// discoverer would go on publishing a reason naming a mount that is gone.
