@@ -18,7 +18,9 @@ package internal
 
 import (
 	"os"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,6 +53,25 @@ func TestReadyConditionForPhase(t *testing.T) {
 			assert.Equal(t, int64(7), cond.ObservedGeneration)
 		})
 	}
+}
+
+// status.reason carries raw LVM output, and the schema caps the condition
+// message at 32768. Over the cap the API server rejects the whole status write,
+// so the resource keeps reporting its previous verdict and the agent fails on
+// the write instead of on the command that actually went wrong.
+func TestReadyConditionForPhaseTruncatesAnOversizedMessage(t *testing.T) {
+	// Multi-byte on purpose. The schema's maxLength is an OpenAPI string
+	// length, counted in runes, and TruncateMessage counts the same way — a
+	// byte-counting assertion here would fail on a message that is in fact
+	// within the limit.
+	//
+	// Written as an escape rather than the character itself: the module linter
+	// rejects non-ASCII bytes in Go sources.
+	huge := strings.Repeat("\u044f", conditions.MaxMessageLen+100)
+
+	cond := ReadyConditionForPhase(1, v1alpha1.PhaseFailed, huge, "LVMLogicalVolume")
+
+	assert.LessOrEqual(t, utf8.RuneCountInString(cond.Message), conditions.MaxMessageLen)
 }
 
 // status.reason carries free-form text, including raw output from a failed LVM

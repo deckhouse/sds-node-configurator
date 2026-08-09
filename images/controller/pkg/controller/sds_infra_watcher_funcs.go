@@ -186,6 +186,13 @@ func GetLVMVolumeGroups(ctx context.Context, cl client.Client, metrics monitorin
 func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, status metav1.ConditionStatus, conType, reason, message string) error {
 	log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] set the condition type %s status %s reason %s message %s on the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
 
+	// Callers pass raw error text, while the schema caps the message at 32768.
+	// Over the cap the API server rejects the whole status write, so the group
+	// would keep reporting its previous verdict and the reconcile would fail on
+	// the write rather than on what actually went wrong. conditions.Set does not
+	// truncate: it is a thin wrapper over meta.SetStatusCondition.
+	message = conditions.TruncateMessage(message)
+
 	// The state UpdateStatus read and wrote, kept so the server-side values can be
 	// mirrored onto the caller's object below.
 	var written *v1alpha1.LVMVolumeGroup

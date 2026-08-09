@@ -74,5 +74,14 @@ func ReadyConditionForPhase(generation int64, phase, reason, kind string) metav1
 		cond.Message = fmt.Sprintf("the %s is in the %s phase", kind, phase)
 	}
 
+	// status.reason is free-form and carries raw LVM output, while the schema
+	// caps the condition message at 32768. Over the cap the API server rejects
+	// the whole status write, so the resource would keep reporting its previous
+	// verdict and the agent would fail on the write rather than on the command
+	// that actually went wrong. conditions.Set does not truncate: it is a thin
+	// wrapper over meta.SetStatusCondition, and only the library's Ready and
+	// ReadyWithMessage builders truncate for you.
+	cond.Message = conditions.TruncateMessage(cond.Message)
+
 	return cond
 }

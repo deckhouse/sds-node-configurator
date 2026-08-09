@@ -18,7 +18,9 @@ package controller
 
 import (
 	"os"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -62,6 +64,25 @@ func TestReadyConditionForSetPhaseKeepsFreeFormTextOutOfTheReason(t *testing.T) 
 
 	assert.Equal(t, text, cond.Message)
 	assert.Equal(t, conditions.ReasonReconcileFailed, cond.Reason)
+}
+
+// That free-form text is unbounded, and the schema caps the condition message
+// at 32768. Over the cap the API server rejects the whole status write, so the
+// set keeps reporting its previous verdict and the reconcile fails on the write
+// instead of on what actually went wrong.
+func TestReadyConditionForSetPhaseTruncatesAnOversizedMessage(t *testing.T) {
+	// Multi-byte on purpose. The schema's maxLength is an OpenAPI string
+	// length, counted in runes, and TruncateMessage counts the same way — a
+	// byte-counting assertion here would fail on a message that is in fact
+	// within the limit.
+	//
+	// Written as an escape rather than the character itself: the module linter
+	// rejects non-ASCII bytes in Go sources.
+	huge := strings.Repeat("\u044f", conditions.MaxMessageLen+100)
+
+	cond := readyConditionForSetPhase(1, phaseNotCreated, huge)
+
+	assert.LessOrEqual(t, utf8.RuneCountInString(cond.Message), conditions.MaxMessageLen)
 }
 
 // Every phase the CRD admits, apart from the empty string it explicitly allows,
