@@ -95,6 +95,8 @@ jobs:
       test_package: ./tests/
       cluster_config: e2e/tests/cluster_config.ci.yml
       cluster_provider: dvp
+      extra_env: |
+        E2E_DEBUG_IMAGE=busybox:1.36
     secrets: inherit
 ```
 
@@ -209,10 +211,11 @@ ginkgo run --label-filter='!stress-test && !device-types && !host-pid' \
 Real labels (from `tests/*.go`): `sds-node-configurator`, `block-device`,
 `discovery`, `block-device-stable`, `host-pid`, `netlink-discovery`, `lvmvolumegroup`,
 `controller-restart`, `schedule-extender` (with `small`/`medium`/`large`),
-`regress`, `device-types`, and `stress-test`. The Makefile / workflow default is
-`GINKGO_LABEL_FILTER ?= !stress-test && !device-types && !host-pid` (exclusive
-suites and stress are out of smoke). The `host-pid` spec also skips unless
-`E2E_DEBUG_IMAGE` is set (see the suite-specific env table below).
+`regress`, `device-types`, and `stress-test`. In CI the Ginkgo filter comes from
+PR labels `e2e/label:<x>` (joined with `||`); with none set, the reusable
+workflow default is `!stress-test`. The local Makefile default is stricter:
+`!stress-test && !device-types && !host-pid`. The `host-pid` spec also skips
+unless `E2E_DEBUG_IMAGE` is set (see the suite-specific env table below).
 
 ```bash
 # smoke (default)
@@ -286,7 +289,7 @@ workflow re-exports the needed values under these names before `go test`):
 | `TEST_CLUSTER_NAMESPACE` | `TestCluster.Namespace` | `e2e-test-cluster` | test namespace |
 | `E2E_DVP_BASE_CLUSTER_STORAGE_CLASS` | `TestCluster.StorageClass` | — | required by specs for `VirtualDisk` creation |
 | `MODULES_MODULE_TAG` | `ModulesImageTag` | `main` | module image tag used by specs |
-| `E2E_DEBUG_IMAGE` | `DebugImage` | — | image for the ephemeral reader container (busybox-like: `cat`, `sleep`, `sh`); the `host-pid` spec skips when unset; CI sets a digest-pinned `busybox:1.36@sha256:…` via workflow `extra_env` |
+| `E2E_DEBUG_IMAGE` | `DebugImage` | — | image for the ephemeral reader container (busybox-like: `cat`, `sleep`, `sh`); the `host-pid` spec skips when unset; CI sets `busybox:1.36` via workflow `extra_env` |
 
 ### Stress config (`cfg.LoadStress`, loaded lazily only by the stress spec)
 
@@ -431,8 +434,10 @@ required `go 1.26.5`, pin it with `GOTOOLCHAIN=go1.26.5`.
 
 5. **Labeling conventions**: always include `sds-node-configurator` for
    module-level specs plus a domain label (`block-device`, `lvmvolumegroup`,
-   `netlink-discovery`, `controller-restart`, …). Use `stress-test` only for heavy
-   stress / device-types / host-pid specs (excluded from the default smoke filter).
+   `netlink-discovery`, `controller-restart`, …). Heavy exclusive suites use their
+   own labels (`device-types`, `host-pid`, `stress-test`) — run them via
+   `make test-device-types` / `test-host-pid` / `test-stress` or PR labels
+   `e2e/label:<x>` (CI filter is driven by those GitHub labels).
 
 6. **No parallelism.** Assume serial execution: pick a node explicitly, clean up
    what you create (`AfterEach`/`AfterAll`/`DeferCleanup`), and never rely on or

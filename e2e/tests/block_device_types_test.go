@@ -37,8 +37,8 @@ import (
 // Device-type matrix: discovery + LVG lifecycle for supported types (disk,
 // mpath, opened crypt/LUKS), filtering of unsupported types (loop, closed
 // LUKS), and an optional mix of supported devices in one LVG.
-// Label device-types is exclusive: excluded from default smoke
-// (!stress-test && !device-types && !host-pid). Run only this suite via
+// Label device-types is exclusive. Local Makefile smoke excludes it; in CI run
+// via PR label e2e/label:device-types (or make test-device-types locally):
 //
 //	make test-device-types
 //	go test ... -ginkgo.label-filter=device-types
@@ -319,7 +319,7 @@ var _ = Describe("Block device types matrix",
 			Expect(diskCR.Status.Type).To(Equal("disk"))
 
 			By("Attach second disk and open it as LUKS crypt")
-			_, _, backingPath := attachPlainDisk(runID, "mix-crypt")
+			_, plainCryptBD, backingPath := attachPlainDisk(runID, "mix-crypt")
 			before, err := kubernetes.GetConsumableBlockDevicesByNode(ctx, cl.RESTConfig(), targetNode)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -337,6 +337,11 @@ var _ = Describe("Block device types matrix",
 			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: cryptBD.Name}, &cryptCR)).To(Succeed())
 			Expect(cryptCR.Status.Type).To(Equal("crypt"))
 			Expect(cryptCR.Status.Path).To(Equal(mapperPath))
+			// Same identity-hash contract as the transformed-device table entries.
+			Expect(cryptBD.Name).NotTo(Equal(plainCryptBD.Name),
+				"crypt BlockDevice must not reuse backing disk BD name %s", plainCryptBD.Name)
+			Expect(cryptBD.Name).NotTo(Equal(diskBD.Name),
+				"crypt BlockDevice must not collide with the other disk BD name %s", diskBD.Name)
 			bdtypesAssertBDSelectable(ctx, k8sClient, cryptBD.Name)
 			bdtypesAssertBDSelectable(ctx, k8sClient, diskBD.Name)
 

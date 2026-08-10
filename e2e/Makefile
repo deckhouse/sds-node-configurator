@@ -11,7 +11,8 @@ deps: ## Download dependencies
 	@$(MAKE) fix-mod-permissions
 
 # === Local run ===
-# CI smoke excludes stress + exclusive suites (device-types, host-pid). Override:
+# Local smoke default (stricter than CI's reusable-workflow fallback
+# !stress-test). In CI, filter comes from PR labels e2e/label:<x>. Override:
 #   make test-go GINKGO_LABEL_FILTER=stress-test
 #   make test-device-types / make test-host-pid
 GINKGO_LABEL_FILTER ?= !stress-test && !device-types && !host-pid

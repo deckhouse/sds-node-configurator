@@ -78,8 +78,8 @@ var moduleConfigGVR = schema.GroupVersionResource{
 // the only remaining reason for Consumable=false — reverting #220 (reading
 // /proc/self/mountinfo) makes the primary assertion go red.
 //
-// Label host-pid is exclusive (like device-types): excluded from default smoke
-// (!stress-test && !device-types && !host-pid). Run via:
+// Label host-pid is exclusive (like device-types). Local Makefile smoke excludes
+// it; in CI run via PR label e2e/label:host-pid (or make test-host-pid locally):
 //
 //	make test-host-pid
 //	go test ... -ginkgo.label-filter=host-pid

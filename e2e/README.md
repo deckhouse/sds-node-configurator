@@ -107,10 +107,11 @@ SDK `e2e.Connect`. В CI провижн/подключение делает reus
 
 ## Лейблы и фильтры
 
-Спеки размечены Ginkgo-лейблами; фильтр по умолчанию в `Makefile` /
-`.github/workflows/e2e-tests.yml` —
-`!stress-test && !device-types && !host-pid` (exclusive suites и стресс
-исключены из смоука).
+Спеки размечены Ginkgo-лейблами. В CI фильтр задаётся GitHub-лейблами
+`e2e/label:<x>` (несколько склеиваются через `||`); без них reusable
+workflow падает на свой default (`!stress-test`). Локальный `Makefile`
+по умолчанию ужесточает смоук:
+`!stress-test && !device-types && !host-pid`.
 
 Реальные лейблы из кода `tests/*.go`:
 
