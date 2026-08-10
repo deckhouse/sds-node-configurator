@@ -210,7 +210,8 @@ ginkgo run --label-filter='!stress-test && !device-types && !host-pid' \
 
 Real labels (from `tests/*.go`): `sds-node-configurator`, `block-device`,
 `discovery`, `block-device-stable`, `host-pid`, `netlink-discovery`, `lvmvolumegroup`,
-`controller-restart`, `schedule-extender` (with `small`/`medium`/`large`),
+`controller-restart`, `schedule-extender` (with `sched-steer-spec`,
+`sched-steer-annotation`, `sched-block-spec`, `sched-block-annotation`),
 `regress`, `device-types`, and `stress-test`. In CI the Ginkgo filter comes from
 PR labels `e2e/label:<x>` (joined with `||`); with none set, the reusable
 workflow default is `!stress-test`. The local Makefile default is stricter:
