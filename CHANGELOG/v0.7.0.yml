@@ -1,0 +1,36 @@
+Changes:
+- Correction: the agent no longer accepts LVM structures inside block devices given
+    to virtual machines as its own - the /dev/loop exception was returned in the LVM
+    global_filter. Fixed the resulting LVMVolumeGroup failures with CacheEmpty and
+    ScanFailed causes - the VG name is no longer considered an identifier, and the
+    LVM warning about a duplicate of someone else's name is not attributed to our
+    group
+- Added support for LVM on files: spec.fileDevices field of LVMVolumeGroup and LVMVolumeGroupSet.
+    The agent creates a file, connects it as a loop device and uses it as a PV, which
+    gives LVM storage on a node without a free disk; the blockDeviceSelector field
+    has become optional
+- The scheduler (scheduler-extender) takes into account the PVCs listed in the extra-pvcs
+  pod annotation
+- LVMLogicalVolume, LVMLogicalVolumeSnapshot and LVMVolumeGroupSet publish status.conditions;
+  BlockDevice now has a Consumable condition, explaining why the device cannot be
+  used; processing of LVMVolumeGroup conditions has been brought to a general form
+- Correction: a volume created from a snapshot or clone is expanded to the requested
+    size - previously the PVC remained in Pending waiting for a size that never appeared
+- Correction: thin pool set by percentage of VG size no longer gets stuck at VGConfigurationApplied=False
+    due to LVM rounding by one extent
+- Correction: an idle call to lvextend is recognized as harmless on LVM 2.03.16 -
+    otherwise LVMVolumeGroup remained in NotReady
+- Correction: when taking control of an existing VG, blockDeviceSelector no longer
+    remains empty
+- Correction: after pvcreate and vgcreate the agent calls udevadm to update the udev
+    database
+- Correction: when storage-foundation is enabled, the agent loads the dm_snapshot
+    kernel module
+- Removed outdated CRD LvmVolumeGroupBackup, left over from a one-time migration: the
+    new hook removes finalizers from leftovers and removes the CRD itself
+- Added an experimental mode for detecting block devices via netlink, enabled by the
+  ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY flag
+- Updating base images to v1.3.25, Go 1.26.5 and lib-helm to 1.72.13
+- Fixed vulnerabilities in golang.org/x/net, golang.org/x/sys and golang.org/x/crypto
+- Internal changes in module assembly and CI, the set of e2e tests has been significantly
+  expanded
