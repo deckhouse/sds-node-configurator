@@ -19,6 +19,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -26,6 +27,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/e2e/tests/utils/consts"
 	"github.com/deckhouse/storage-e2e/pkg/e2e"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -36,31 +38,64 @@ import (
 // can exceed 5m (agent + node LVM).
 const lvmVolumeGroupReadyTimeout = 15 * time.Minute
 
-// restartAgentOnNode deletes the sds-node-configurator-agent pod(s) scheduled on node and waits until a
-// freshly created pod for that node is Running and Ready. It mirrors the "agent pod is restarted" pattern from
-// block_device_stable_test.go but exposes it as a reusable, Gomega-free helper.
-func restartAgentOnNode(ctx context.Context, cl *e2e.Cluster, node string) error {
-	listOpts := metav1.ListOptions{
+// daemonSetEnvIsTrue reports whether the named container carries envName with a
+// true boolean value. Shared by specs that gate on agent DaemonSet feature flags
+// (e.g. ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY).
+func daemonSetEnvIsTrue(ds *appsv1.DaemonSet, containerName, envName string) bool {
+	if ds == nil {
+		return false
+	}
+	for i := range ds.Spec.Template.Spec.Containers {
+		c := &ds.Spec.Template.Spec.Containers[i]
+		if c.Name != containerName {
+			continue
+		}
+		for _, env := range c.Env {
+			if env.Name != envName {
+				continue
+			}
+			v, err := strconv.ParseBool(env.Value)
+			return err == nil && v
+		}
+	}
+	return false
+}
+
+func agentPodListOptions(node string) metav1.ListOptions {
+	return metav1.ListOptions{
 		LabelSelector: "app=" + consts.SdsNodeConfiguratorAgentName,
 		FieldSelector: "spec.nodeName=" + node,
 	}
-	pods := cl.Clientset().CoreV1().Pods(consts.SdsNodeConfiguratorAgentNamespace)
+}
 
-	oldPods, listErr := pods.List(ctx, listOpts)
-	if listErr != nil {
-		return fmt.Errorf("list agent pods on node %s: %w", node, listErr)
-	}
-	oldUIDs := make(map[types.UID]struct{}, len(oldPods.Items))
-	for i := range oldPods.Items {
-		oldUIDs[oldPods.Items[i].UID] = struct{}{}
-	}
-
+func deleteAgentPodsOnNode(ctx context.Context, cl *e2e.Cluster, node string) error {
 	grace := int64(0)
-	if err := pods.DeleteCollection(ctx, metav1.DeleteOptions{GracePeriodSeconds: &grace}, listOpts); err != nil {
+	err := cl.Clientset().CoreV1().Pods(consts.SdsNodeConfiguratorAgentNamespace).DeleteCollection(
+		ctx,
+		metav1.DeleteOptions{GracePeriodSeconds: &grace},
+		agentPodListOptions(node),
+	)
+	if err != nil {
 		return fmt.Errorf("delete agent pods on node %s: %w", node, err)
 	}
+	return nil
+}
 
-	// Phase 1: every old pod is gone from the API.
+func listAgentPodUIDsOnNode(ctx context.Context, cl *e2e.Cluster, node string) (map[types.UID]struct{}, error) {
+	list, err := cl.Clientset().CoreV1().Pods(consts.SdsNodeConfiguratorAgentNamespace).List(ctx, agentPodListOptions(node))
+	if err != nil {
+		return nil, fmt.Errorf("list agent pods on node %s: %w", node, err)
+	}
+	uids := make(map[types.UID]struct{}, len(list.Items))
+	for i := range list.Items {
+		uids[list.Items[i].UID] = struct{}{}
+	}
+	return uids, nil
+}
+
+func waitAgentPodsGoneOnNode(ctx context.Context, cl *e2e.Cluster, node string, oldUIDs map[types.UID]struct{}) error {
+	pods := cl.Clientset().CoreV1().Pods(consts.SdsNodeConfiguratorAgentNamespace)
+	listOpts := agentPodListOptions(node)
 	if err := framework.Poll(ctx, 5*time.Second, 3*time.Minute, func(ctx context.Context) (bool, error) {
 		list, err := pods.List(ctx, listOpts)
 		if err != nil {
@@ -75,8 +110,39 @@ func restartAgentOnNode(ctx context.Context, cl *e2e.Cluster, node string) error
 	}); err != nil {
 		return fmt.Errorf("timeout waiting for old agent pod(s) on node %s to terminate: %w", node, err)
 	}
+	return nil
+}
 
-	// Phase 2: a fresh pod (not in the old set) is Running and Ready.
+// waitNoRunningAgentOnNode waits until no agent pod on the node is still Running.
+// A Running container can consume netlink events even with DeletionTimestamp set
+// and even before Ready=True, so terminating pods are not treated as "down".
+func waitNoRunningAgentOnNode(ctx context.Context, cl *e2e.Cluster, node string) error {
+	pods := cl.Clientset().CoreV1().Pods(consts.SdsNodeConfiguratorAgentNamespace)
+	listOpts := agentPodListOptions(node)
+	if err := framework.Poll(ctx, time.Second, 3*time.Minute, func(ctx context.Context) (bool, error) {
+		list, err := pods.List(ctx, listOpts)
+		if err != nil {
+			return false, err
+		}
+		for i := range list.Items {
+			p := &list.Items[i]
+			if p.Status.Phase == v1.PodRunning {
+				return false, fmt.Errorf(
+					"agent pod %s is still Running on node %s (deletionTimestamp=%v)",
+					p.Name, node, p.DeletionTimestamp,
+				)
+			}
+		}
+		return true, nil
+	}); err != nil {
+		return fmt.Errorf("timeout waiting for no Running agent on node %s: %w", node, err)
+	}
+	return nil
+}
+
+func waitAgentReadyOnNode(ctx context.Context, cl *e2e.Cluster, node string, excludeUIDs map[types.UID]struct{}) error {
+	pods := cl.Clientset().CoreV1().Pods(consts.SdsNodeConfiguratorAgentNamespace)
+	listOpts := agentPodListOptions(node)
 	if err := framework.Poll(ctx, 5*time.Second, 10*time.Minute, func(ctx context.Context) (bool, error) {
 		list, err := pods.List(ctx, listOpts)
 		if err != nil {
@@ -84,7 +150,7 @@ func restartAgentOnNode(ctx context.Context, cl *e2e.Cluster, node string) error
 		}
 		for i := range list.Items {
 			p := &list.Items[i]
-			if _, isOld := oldUIDs[p.UID]; isOld {
+			if _, excluded := excludeUIDs[p.UID]; excluded {
 				continue
 			}
 			if p.DeletionTimestamp != nil {
@@ -96,9 +162,75 @@ func restartAgentOnNode(ctx context.Context, cl *e2e.Cluster, node string) error
 		}
 		return false, fmt.Errorf("no new ready agent pod on node %s yet", node)
 	}); err != nil {
-		return fmt.Errorf("timeout waiting for agent pod restart on node %s: %w", node, err)
+		return fmt.Errorf("timeout waiting for agent pod Ready on node %s: %w", node, err)
 	}
 	return nil
+}
+
+// restartAgentOnNode deletes the sds-node-configurator-agent pod(s) scheduled on node and waits until a
+// freshly created pod for that node is Running and Ready. It mirrors the "agent pod is restarted" pattern from
+// block_device_stable_test.go but exposes it as a reusable, Gomega-free helper.
+func restartAgentOnNode(ctx context.Context, cl *e2e.Cluster, node string) error {
+	oldUIDs, listErr := listAgentPodUIDsOnNode(ctx, cl, node)
+	if listErr != nil {
+		return listErr
+	}
+	if err := deleteAgentPodsOnNode(ctx, cl, node); err != nil {
+		return err
+	}
+	if err := waitAgentPodsGoneOnNode(ctx, cl, node, oldUIDs); err != nil {
+		return err
+	}
+	return waitAgentReadyOnNode(ctx, cl, node, oldUIDs)
+}
+
+// runWithAgentDownOnNode deletes the agent on node and keeps deleting DaemonSet replacements while fn
+// runs (so a recreate cannot observe hotplug via netlink), then waits for a Ready agent again.
+// Use this when the scenario requires a device to appear while the agent is absent and be recovered
+// after restart (startup crawler + first cache fill).
+func runWithAgentDownOnNode(ctx context.Context, cl *e2e.Cluster, node string, fn func(context.Context) error) error {
+	oldUIDs, listErr := listAgentPodUIDsOnNode(ctx, cl, node)
+	if listErr != nil {
+		return listErr
+	}
+
+	keeperCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	keeperDone := make(chan struct{})
+	go func() {
+		defer close(keeperDone)
+		_ = framework.Poll(keeperCtx, time.Second, 30*time.Minute, func(ctx context.Context) (bool, error) {
+			if err := deleteAgentPodsOnNode(ctx, cl, node); err != nil {
+				return false, err
+			}
+			return false, fmt.Errorf("keeping agent pods deleted on node %s", node)
+		})
+	}()
+
+	if err := waitNoRunningAgentOnNode(ctx, cl, node); err != nil {
+		cancel()
+		<-keeperDone
+		if readyErr := waitAgentReadyOnNode(ctx, cl, node, oldUIDs); readyErr != nil {
+			return fmt.Errorf("failed to clear Running agent on node %s: %w (also failed to restore agent: %v)", node, err, readyErr)
+		}
+		return err
+	}
+
+	fnErr := fn(ctx)
+	cancel()
+	<-keeperDone
+
+	// Always bring the agent back — even when fn failed — so later specs are not
+	// left without a Ready agent on the node.
+	readyErr := waitAgentReadyOnNode(ctx, cl, node, oldUIDs)
+	if fnErr != nil {
+		if readyErr != nil {
+			return fmt.Errorf("work while agent was down failed: %w (also failed to restore agent: %v)", fnErr, readyErr)
+		}
+		return fnErr
+	}
+	return readyErr
 }
 
 func isPodReady(pod *v1.Pod) bool {
