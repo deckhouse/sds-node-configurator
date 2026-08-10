@@ -42,6 +42,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8sclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -55,10 +56,10 @@ const (
 	hostPIDDiscoveryWait   = 5 * time.Minute
 	hostPIDStateChangeWait = 2 * time.Minute
 	hostPIDPollInterval    = time.Second
-	// hostPIDNamespaceProbeWindow is longer than one scanner rescan cycle and
-	// is used only as a hostPID environment precondition (not the primary
-	// assertion that the agent consumed host mountinfo).
-	hostPIDNamespaceProbeWindow = 5 * time.Second
+	// hostPIDNamespaceProbeWindow spans two default scanner rescan cycles
+	// (BlockDeviceScanInterval defaults to 5s). Environment precondition only —
+	// not the primary assertion that the agent consumed host mountinfo.
+	hostPIDNamespaceProbeWindow = 12 * time.Second
 
 	hostPIDNetlinkEnvName       = "ENABLE_NETLINK_BLOCK_DEVICE_DISCOVERY"
 	hostPIDNetlinkSetting       = "enableNetlinkBlockDeviceDiscovery"
@@ -112,8 +113,11 @@ var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "h
 		var cfgErr error
 		conf, cfgErr = cfg.Load()
 		Expect(cfgErr).NotTo(HaveOccurred(), "failed to load config")
-		Expect(conf.DebugImage).NotTo(BeEmpty(),
-			"E2E_DEBUG_IMAGE must be set to a busybox-like image reachable from the cluster (prefer a registry/mirror digest pin)")
+		if conf.DebugImage == "" {
+			Skip("E2E_DEBUG_IMAGE is not set: this spec needs a busybox-like image " +
+				"(cat/sleep/sh) reachable from the cluster to inject the ephemeral reader " +
+				"into the distroless agent; CI supplies it via the workflow's extra_env")
+		}
 
 		var clErr error
 		cl, clErr = e2e.Connect(ctx, e2e.WithTestName("block-device-host-mountinfo"))
@@ -163,17 +167,26 @@ var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "h
 			}
 			By(fmt.Sprintf("Restoring ModuleConfig %s=%v", hostPIDNetlinkSetting, want))
 			if _, err := patchModuleConfigNetlinkDiscovery(restoreCtx, cl, want); err != nil {
-				GinkgoWriter.Printf("failed to restore %s: %v\n", hostPIDNetlinkSetting, err)
+				msg := fmt.Sprintf("CLUSTER LEFT DIRTY: failed to restore ModuleConfig %s=%v: %v",
+					hostPIDNetlinkSetting, want, err)
+				GinkgoWriter.Println(msg)
+				AddReportEntry("cluster-dirty-netlink-restore", msg)
 				return
 			}
 			if err := kubernetes.WaitForModuleReady(
 				restoreCtx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentName, hostPIDModuleReadyTimeout,
 			); err != nil {
-				GinkgoWriter.Printf("module not ready after restoring %s: %v\n", hostPIDNetlinkSetting, err)
+				msg := fmt.Sprintf("CLUSTER LEFT DIRTY: module not ready after restoring %s=%v: %v",
+					hostPIDNetlinkSetting, want, err)
+				GinkgoWriter.Println(msg)
+				AddReportEntry("cluster-dirty-netlink-restore", msg)
 				return
 			}
 			if err := waitAgentDaemonSetNetlinkEnvErr(restoreCtx, clientset, want); err != nil {
-				GinkgoWriter.Printf("DaemonSet env not restored for %s: %v\n", hostPIDNetlinkEnvName, err)
+				msg := fmt.Sprintf("CLUSTER LEFT DIRTY: DaemonSet env %s not restored to %v: %v",
+					hostPIDNetlinkEnvName, want, err)
+				GinkgoWriter.Println(msg)
+				AddReportEntry("cluster-dirty-netlink-restore", msg)
 			}
 		})
 
@@ -268,9 +281,17 @@ sudo -n rmdir %s 2>/dev/null || true`,
 		Expect(bd.Status.Path).NotTo(BeEmpty())
 		Expect(bd.Status.Path).To(HavePrefix("/dev/"),
 			"resolved BlockDevice %s path %q is not a /dev/ device; refusing to mkfs", bdName, bd.Status.Path)
+		// VirtualDisk capacity often rounds up a few MiB above the PVC request
+		// (here: 5Gi → 5245816Ki). Match netlink_discovery_test: accept
+		// [requested, requested+16Mi].
 		wantSize := resource.MustParse(hostPIDDiskSize)
-		Expect(bd.Status.Size.Equal(wantSize)).To(BeTrue(),
-			"resolved BlockDevice %s is not the %s disk just attached (got %s); refusing to mkfs %s",
+		maxSize := wantSize.DeepCopy()
+		maxSize.Add(resource.MustParse("16Mi"))
+		Expect(bd.Status.Size.Cmp(wantSize)).NotTo(BeNumerically("<", 0),
+			"resolved BlockDevice %s size must be >= requested %s (got %s); refusing to mkfs %s",
+			bdName, hostPIDDiskSize, bd.Status.Size.String(), bd.Status.Path)
+		Expect(bd.Status.Size.Cmp(maxSize)).NotTo(BeNumerically(">", 0),
+			"resolved BlockDevice %s size must be <= requested %s + 16Mi (got %s); refusing to mkfs %s",
 			bdName, hostPIDDiskSize, bd.Status.Size.String(), bd.Status.Path)
 		devicePath = bd.Status.Path
 
@@ -299,23 +320,17 @@ sudo -n rmdir %s 2>/dev/null || true`,
 		)
 		Expect(readerErr).NotTo(HaveOccurred(), "failed to open distroless reader with image %s", conf.DebugImage)
 
-		agentPID, pidErr := findAgentPID(
-			ctx,
-			cl.RESTConfig(),
-			consts.SdsNodeConfiguratorAgentNamespace,
-			reader,
-			string(agentPod.UID),
-		)
-		Expect(pidErr).NotTo(HaveOccurred(), "failed to resolve agent PID in the shared host PID namespace")
-
 		By("Mounting ext4 then wiping the on-disk signature while still mounted (FSType empty; mount remains)")
+		// SSH login shell reports only the last exit code — set -eu so a failed
+		// mkfs/mount cannot be masked by a successful printf at the end.
 		setupScript := fmt.Sprintf(
-			`if mountpoint -q %s; then echo "mount path is already in use" >&2; exit 1; fi
+			`set -eu
+if mountpoint -q %s; then echo "mount path is already in use" >&2; exit 1; fi
 sudo -n mkfs.ext4 -F %s
 sudo -n mkdir -p %s
 sudo -n mount %s %s
 sudo -n wipefs -a -f %s
-sudo -n udevadm trigger --action=change "$(udevadm info --query=path --name=%s)"
+sudo -n udevadm trigger --action=change -- %s
 sudo -n udevadm settle
 printf '%%s %%s\n' "$(stat -c %%t %s)" "$(stat -c %%T %s)"`,
 			shellQuote(hostPIDMountPath),
@@ -375,19 +390,41 @@ printf '%%s %%s\n' "$(stat -c %%t %s)" "$(stat -c %%T %s)"`,
 			deviceID, hostPIDMountPath, hostMI)
 
 		By("After umount the same BlockDevice becomes consumable again")
+		// umount itself does not emit a block uevent; the agent only rescans mountinfo
+		// on udev activity (or one-shot idle timer). Trigger the target device only.
+		// ext4 commits its in-memory superblock on umount (ext4_put_super), which
+		// restores the magic wipefs removed while mounted — re-wipe so FSType stays
+		// empty and MountPoint is provably the only reason Consumable flipped.
 		teardownScript := fmt.Sprintf(
-			`sudo -n umount %s
-sudo -n udevadm trigger --action=change "$(udevadm info --query=path --name=%s)"
+			`set -eu
+sudo -n umount %s
+if mountpoint -q %s; then echo "mount still present after umount" >&2; exit 1; fi
+sudo -n wipefs -a -f %s
+sudo -n udevadm trigger --action=change -- %s
 sudo -n udevadm settle`,
 			shellQuote(hostPIDMountPath),
+			shellQuote(hostPIDMountPath),
+			shellQuote(devicePath),
 			shellQuote(devicePath),
 		)
 		teardownOut, teardownErr := framework.NodeExecChecked(ctx, cl, targetNode, teardownScript)
 		Expect(teardownErr).NotTo(HaveOccurred(), "failed to umount the test device: %s", teardownOut)
 
+		By("Confirming the host mount is gone from /proc/1/mountinfo")
+		Eventually(func(g Gomega) {
+			mi, err := readPIDMountInfo(
+				ctx, cl.RESTConfig(), consts.SdsNodeConfiguratorAgentNamespace, reader, "1",
+			)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(mountInfoContains(mi, deviceID, hostPIDMountPath)).To(BeFalse(),
+				"host mountinfo still has %s at %s after umount:\n%s", deviceID, hostPIDMountPath, mi)
+		}, hostPIDStateChangeWait, hostPIDPollInterval).Should(Succeed())
+
 		Eventually(func(g Gomega) {
 			var current v1alpha1.BlockDevice
 			g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: bdName}, &current)).To(Succeed())
+			g.Expect(current.Status.FsType).To(BeEmpty(),
+				"precondition: FSType must stay empty after umount+wipefs so MountPoint was the reason Consumable flipped")
 			g.Expect(current.Status.Consumable).To(BeTrue(),
 				"BlockDevice %s did not become consumable after umount (fsType=%s)",
 				bdName, current.Status.FsType)
@@ -465,36 +502,44 @@ func waitAgentDaemonSetNetlinkEnvErr(ctx context.Context, clientset *k8sclient.C
 // patchModuleConfigNetlinkDiscovery sets spec.settings.enableNetlinkBlockDeviceDiscovery
 // and returns the previous value (nil if the key was absent).
 func patchModuleConfigNetlinkDiscovery(ctx context.Context, cl *e2e.Cluster, enabled bool) (*bool, error) {
-	mc, err := cl.Dynamic().Resource(moduleConfigGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("get ModuleConfig %s: %w", consts.SdsNodeConfiguratorAgentName, err)
-	}
-
-	settings, found, err := unstructured.NestedMap(mc.Object, "spec", "settings")
-	if err != nil {
-		return nil, fmt.Errorf("read spec.settings: %w", err)
-	}
-	if !found || settings == nil {
-		settings = map[string]interface{}{}
-	}
-
 	var previous *bool
-	if raw, ok := settings[hostPIDNetlinkSetting]; ok {
-		switch v := raw.(type) {
-		case bool:
-			previous = &v
-		case string:
-			b := strings.EqualFold(strings.TrimSpace(v), "true")
-			previous = &b
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		mc, err := cl.Dynamic().Resource(moduleConfigGVR).Get(ctx, consts.SdsNodeConfiguratorAgentName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("get ModuleConfig %s: %w", consts.SdsNodeConfiguratorAgentName, err)
 		}
-	}
 
-	settings[hostPIDNetlinkSetting] = enabled
-	if err := unstructured.SetNestedMap(mc.Object, settings, "spec", "settings"); err != nil {
-		return nil, fmt.Errorf("set spec.settings: %w", err)
-	}
+		settings, found, err := unstructured.NestedMap(mc.Object, "spec", "settings")
+		if err != nil {
+			return fmt.Errorf("read spec.settings: %w", err)
+		}
+		if !found || settings == nil {
+			settings = map[string]interface{}{}
+		}
 
-	if _, err := cl.Dynamic().Resource(moduleConfigGVR).Update(ctx, mc, metav1.UpdateOptions{}); err != nil {
+		previous = nil
+		if raw, ok := settings[hostPIDNetlinkSetting]; ok {
+			switch v := raw.(type) {
+			case bool:
+				previous = &v
+			case string:
+				b := strings.EqualFold(strings.TrimSpace(v), "true")
+				previous = &b
+			}
+		}
+
+		settings[hostPIDNetlinkSetting] = enabled
+		if err := unstructured.SetNestedMap(mc.Object, settings, "spec", "settings"); err != nil {
+			return fmt.Errorf("set spec.settings: %w", err)
+		}
+
+		_, err = cl.Dynamic().Resource(moduleConfigGVR).Update(ctx, mc, metav1.UpdateOptions{})
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, fmt.Errorf("update ModuleConfig %s: %w", consts.SdsNodeConfiguratorAgentName, err)
 	}
 	return previous, nil
@@ -520,6 +565,8 @@ func readPIDMountInfo(
 
 // findAgentPIDInHostNamespace locates the agent container's PID in the host
 // PID namespace (shared by the ephemeral reader when the agent has hostPID).
+// Prefers the lowest PID whose cgroup mentions the container ID and whose
+// mount namespace is not the host's (skips nsenter -m / host helpers).
 func findAgentPIDInHostNamespace(
 	ctx context.Context,
 	restCfg *rest.Config,
@@ -531,8 +578,22 @@ func findAgentPIDInHostNamespace(
 	if err != nil {
 		return "", err
 	}
+	// shellQuote is for NodeExecChecked scripts; here the ID is interpolated into
+	// a single-quoted pattern for grep -F (ContainerID has no single quotes).
 	cmd := fmt.Sprintf(
-		`for p in /proc/[0-9]*; do grep -qs %s "$p/cgroup" && { echo "${p#/proc/}"; break; }; done`,
+		`cid=%s
+host_mnt=$(readlink /proc/1/ns/mnt 2>/dev/null || true)
+best=
+for p in /proc/[0-9]*; do
+  grep -Fqs "$cid" "$p/cgroup" 2>/dev/null || continue
+  pid=${p#/proc/}
+  mnt=$(readlink "$p/ns/mnt" 2>/dev/null || true)
+  [ -n "$host_mnt" ] && [ "$mnt" = "$host_mnt" ] && continue
+  if [ -z "$best" ] || [ "$pid" -lt "$best" ]; then
+    best=$pid
+  fi
+done
+[ -n "$best" ] && echo "$best"`,
 		shellQuote(containerID),
 	)
 	stdout, stderr, err := kubernetes.ExecInPod(
@@ -544,7 +605,7 @@ func findAgentPIDInHostNamespace(
 	}
 	pid := strings.TrimSpace(stdout)
 	if pid == "" {
-		return "", fmt.Errorf("no host PID found whose cgroup mentions container %s", containerID)
+		return "", fmt.Errorf("no host PID found whose cgroup mentions container %s (excluding host mount ns)", containerID)
 	}
 	if _, err := strconv.Atoi(pid); err != nil {
 		return "", fmt.Errorf("invalid PID %q from cgroup scan: %w", pid, err)
@@ -574,7 +635,7 @@ func agentContainerID(pod *v1.Pod, containerName string) (string, error) {
 }
 
 // shellQuote returns a POSIX single-quoted string safe for interpolation into
-// shell scripts run via NodeExecChecked / sh -ec.
+// shell scripts run via NodeExecChecked (SSH login shell on the node).
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
