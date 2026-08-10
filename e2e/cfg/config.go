@@ -23,6 +23,11 @@ import (
 type Config struct {
 	TestCluster     TestCluster
 	ModulesImageTag string `env:"MODULES_MODULE_TAG" envDefault:"main"`
+	// DebugImage is a minimal image with cat/sleep/sh used for OpenDistrolessReader
+	// against the distroless agent (see storage-e2e kubernetes.ReadFileOptions.DebugImage).
+	// No default: the host-pid e2e spec skips when unset; CI sets E2E_DEBUG_IMAGE via
+	// workflow extra_env (busybox:1.36).
+	DebugImage string `env:"E2E_DEBUG_IMAGE"`
 }
 
 type TestCluster struct {

@@ -11,18 +11,20 @@ deps: ## Download dependencies
 	@$(MAKE) fix-mod-permissions
 
 # === Local run ===
-# CI smoke uses !stress-test (everything except max-VG stress), matching the storage-e2e
-# reusable workflow default. Override: make test-go GINKGO_LABEL_FILTER=stress-test
-GINKGO_LABEL_FILTER ?= !stress-test
+# Local smoke default (stricter than CI's reusable-workflow fallback
+# !stress-test). In CI, filter comes from PR labels e2e/label:<x>. Override:
+#   make test-go GINKGO_LABEL_FILTER=stress-test
+#   make test-device-types / make test-host-pid
+GINKGO_LABEL_FILTER ?= !stress-test && !device-types && !host-pid
 E2E_TEST_TIMEOUT ?= 90m
 # CI workflow uses go test -timeout 3h30m regardless of this var.
 
 .PHONY: test
-test: ## Run E2E smoke (!stress-test, без max-VG stress) — как CI
+test: ## Run E2E smoke (без stress / device-types / host-pid) — как CI
 	$(MAKE) test-go
 
 .PHONY: test-go
-test-go: ## Как в CI smoke: TestSdsNodeConfigurator + -ginkgo.label-filter=!stress-test
+test-go: ## Как в CI smoke: TestSdsNodeConfigurator + default label filter
 	go test -v -count=1 -timeout "$(E2E_TEST_TIMEOUT)" ./tests/ -run '^TestSdsNodeConfigurator$$' \
 		-ginkgo.label-filter="$(GINKGO_LABEL_FILTER)"
 
@@ -30,6 +32,16 @@ test-go: ## Как в CI smoke: TestSdsNodeConfigurator + -ginkgo.label-filter=!
 test-stress: ## Только max-VG stress (label stress-test)
 	go test -v -count=1 -timeout 240m ./tests/ -run '^TestSdsNodeConfigurator$$' \
 		-ginkgo.label-filter=stress-test
+
+.PHONY: test-device-types
+test-device-types: ## Только матрица типов устройств (label device-types)
+	go test -v -count=1 -timeout "$(E2E_TEST_TIMEOUT)" ./tests/ -run '^TestSdsNodeConfigurator$$' \
+		-ginkgo.label-filter=device-types
+
+.PHONY: test-host-pid
+test-host-pid: ## Только host mountinfo / hostPID regression (label host-pid; needs E2E_DEBUG_IMAGE)
+	go test -v -count=1 -timeout "$(E2E_TEST_TIMEOUT)" ./tests/ -run '^TestSdsNodeConfigurator$$' \
+		-ginkgo.label-filter=host-pid
 
 .PHONY: test-focus
 test-focus: ## Run by test name (make test-focus FOCUS="TestSdsNodeConfigurator")
@@ -84,6 +96,7 @@ check-env: ## Print the env the suite/SDK actually reads (e2e.Connect + cfg)
 	@echo "# suite config (cfg.Load / cfg.LoadStress):"
 	@echo "TEST_CLUSTER_NAMESPACE:               $${TEST_CLUSTER_NAMESPACE}"
 	@echo "MODULES_MODULE_TAG:                   $${MODULES_MODULE_TAG}"
+	@echo "E2E_DEBUG_IMAGE:                      $${E2E_DEBUG_IMAGE}"
 	@echo "GINKGO_LABEL_FILTER:                  $(GINKGO_LABEL_FILTER)"
 
 .PHONY: lint

@@ -69,6 +69,6 @@ e2e/.gocache/
 # local test artifacts (kubeconfigs, cluster state at repo root)
 temp/
 .cursor
-
+.tmp*
 # git worktrees created by agents
 .worktrees/
