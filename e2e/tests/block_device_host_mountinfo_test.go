@@ -34,7 +34,6 @@ import (
 	"github.com/deckhouse/storage-e2e/pkg/kubernetes"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -440,21 +439,6 @@ func agentDaemonSetNetlinkEnabled(ctx context.Context, clientset *k8sclient.Clie
 		return false, err
 	}
 	return daemonSetEnvIsTrue(ds, consts.SdsNodeConfiguratorAgentContainer, hostPIDNetlinkEnvName), nil
-}
-
-func daemonSetEnvIsTrue(ds *appsv1.DaemonSet, containerName, envName string) bool {
-	for i := range ds.Spec.Template.Spec.Containers {
-		c := &ds.Spec.Template.Spec.Containers[i]
-		if c.Name != containerName {
-			continue
-		}
-		for _, e := range c.Env {
-			if e.Name == envName {
-				return strings.EqualFold(strings.TrimSpace(e.Value), "true")
-			}
-		}
-	}
-	return false
 }
 
 func waitAgentDaemonSetNetlinkEnv(ctx context.Context, clientset *k8sclient.Clientset, want bool) {

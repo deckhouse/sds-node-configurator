@@ -52,5 +52,6 @@ clusterDefinition:
           # is only dumped at TRACE, which the module's logLevel enum does not
           # expose.)
           logLevel: DEBUG
+          enableNetlinkBlockDeviceDiscovery: true
         modulePullOverride: "${E2E_MODULE_IMAGE_TAG}"
         dependencies: []
