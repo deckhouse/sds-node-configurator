@@ -183,7 +183,7 @@ export E2E_DVP_BASE_CLUSTER_STORAGE_CLASS='<storage-class>'        # required by
 source <your git-ignored env file>
 cd e2e
 make deps      # go mod download/tidy + fix-mod-permissions
-make test      # smoke: -ginkgo.label-filter='!stress-test'
+make test      # smoke: !stress-test && !device-types && !host-pid
 ```
 
 Raw `go test` equivalent (what `make test-go` runs):
@@ -191,7 +191,8 @@ Raw `go test` equivalent (what `make test-go` runs):
 ```bash
 cd e2e
 GOWORK=off go test -v -count=1 -timeout 90m ./tests/ \
-  -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter='!stress-test'
+  -run '^TestSdsNodeConfigurator$' \
+  -ginkgo.label-filter='!stress-test && !device-types && !host-pid'
 ```
 
 Via the Ginkgo CLI (install with `make install-ginkgo`; run serial, never `-p`):
@@ -199,7 +200,8 @@ Via the Ginkgo CLI (install with `make install-ginkgo`; run serial, never `-p`):
 ```bash
 cd e2e
 ginkgo run --label-filter='discovery || block-device' ./tests/
-ginkgo run --label-filter='!stress-test' --focus='BlockDevice discovery' ./tests/
+ginkgo run --label-filter='!stress-test && !device-types && !host-pid' \
+  --focus='BlockDevice discovery' ./tests/
 ```
 
 ### Focus & labels
@@ -207,10 +209,10 @@ ginkgo run --label-filter='!stress-test' --focus='BlockDevice discovery' ./tests
 Real labels (from `tests/*.go`): `sds-node-configurator`, `block-device`,
 `discovery`, `block-device-stable`, `host-pid`, `netlink-discovery`, `lvmvolumegroup`,
 `controller-restart`, `schedule-extender` (with `small`/`medium`/`large`),
-`regress`, `device-types`, and `stress-test`. The Makefile default is
-`GINKGO_LABEL_FILTER ?= !stress-test` (matching the storage-e2e reusable
-workflow default). The `host-pid` spec skips unless `E2E_DEBUG_IMAGE` is set
-(see the suite-specific env table below).
+`regress`, `device-types`, and `stress-test`. The Makefile / workflow default is
+`GINKGO_LABEL_FILTER ?= !stress-test && !device-types && !host-pid` (exclusive
+suites and stress are out of smoke). The `host-pid` spec also skips unless
+`E2E_DEBUG_IMAGE` is set (see the suite-specific env table below).
 
 ```bash
 # smoke (default)
@@ -221,10 +223,14 @@ make test-go GINKGO_LABEL_FILTER='lvmvolumegroup'
 make test-device-types
 #   == go test ... -ginkgo.label-filter=device-types
 #   CI PR label: e2e/label:device-types
+# host mountinfo / hostPID regression (label host-pid; needs E2E_DEBUG_IMAGE)
+make test-host-pid
+#   == go test ... -ginkgo.label-filter=host-pid
+#   CI PR label: e2e/label:host-pid
 # stress only (label stress-test)
 make test-stress
 #   == go test ... -ginkgo.label-filter=stress-test   (timeout 240m)
-# everything (smoke + stress)
+# everything (smoke + exclusive + stress)
 make test-go GINKGO_LABEL_FILTER=''
 ```
 
@@ -280,7 +286,7 @@ workflow re-exports the needed values under these names before `go test`):
 | `TEST_CLUSTER_NAMESPACE` | `TestCluster.Namespace` | `e2e-test-cluster` | test namespace |
 | `E2E_DVP_BASE_CLUSTER_STORAGE_CLASS` | `TestCluster.StorageClass` | — | required by specs for `VirtualDisk` creation |
 | `MODULES_MODULE_TAG` | `ModulesImageTag` | `main` | module image tag used by specs |
-| `E2E_DEBUG_IMAGE` | `DebugImage` | — | image for the ephemeral reader container (busybox-like: `cat`, `sleep`, `sh`); required by the `host-pid` spec; use a registry/mirror image, prefer digest pin |
+| `E2E_DEBUG_IMAGE` | `DebugImage` | — | image for the ephemeral reader container (busybox-like: `cat`, `sleep`, `sh`); the `host-pid` spec skips when unset; CI sets a digest-pinned `busybox:1.36@sha256:…` via workflow `extra_env` |
 
 ### Stress config (`cfg.LoadStress`, loaded lazily only by the stress spec)
 
@@ -369,7 +375,8 @@ version-mismatch warning. Either avoid the standalone CLI and use `make test-go`
 
 ```bash
 cd e2e
-GOWORK=off go run github.com/onsi/ginkgo/v2/ginkgo run --label-filter='!stress-test' ./tests/
+GOWORK=off go run github.com/onsi/ginkgo/v2/ginkgo run \
+  --label-filter='!stress-test && !device-types && !host-pid' ./tests/
 ```
 
 ### `go.work` / toolchain
@@ -425,7 +432,7 @@ required `go 1.26.5`, pin it with `GOTOOLCHAIN=go1.26.5`.
 5. **Labeling conventions**: always include `sds-node-configurator` for
    module-level specs plus a domain label (`block-device`, `lvmvolumegroup`,
    `netlink-discovery`, `controller-restart`, …). Use `stress-test` only for heavy
-   stress specs (excluded from the default `!stress-test` filter).
+   stress / device-types / host-pid specs (excluded from the default smoke filter).
 
 6. **No parallelism.** Assume serial execution: pick a node explicitly, clean up
    what you create (`AfterEach`/`AfterAll`/`DeferCleanup`), and never rely on or

@@ -49,6 +49,9 @@ const (
 	hostPIDMountPath = "/mnt/e2e-test"
 	hostPIDDiskSize  = "5Gi"
 
+	// VirtualDisk create/attach must not hang the suite (same class of CI
+	// failure device-types already guards with bdtypesDiskOpTimeout).
+	hostPIDDiskOpTimeout   = 5 * time.Minute
 	hostPIDDiscoveryWait   = 5 * time.Minute
 	hostPIDStateChangeWait = 2 * time.Minute
 	hostPIDPollInterval    = time.Second
@@ -74,7 +77,14 @@ var moduleConfigGVR = schema.GroupVersionResource{
 // non-consumable. FSType is wiped while the FS stays mounted so MountPoint is
 // the only remaining reason for Consumable=false — reverting #220 (reading
 // /proc/self/mountinfo) makes the primary assertion go red.
-var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "block-device", "host-pid"), Ordered, func() {
+//
+// Label host-pid is exclusive (like device-types): excluded from default smoke
+// (!stress-test && !device-types && !host-pid). Run via:
+//
+//	make test-host-pid
+//	go test ... -ginkgo.label-filter=host-pid
+//	PR label e2e/label:host-pid
+var _ = Describe("BlockDevice host mountinfo", Label("sds-node-configurator", "host-pid"), Ordered, func() {
 	var (
 		ctx        context.Context
 		conf       *cfg.Config
@@ -229,17 +239,23 @@ sudo -n rmdir %s 2>/dev/null || true`,
 		Expect(beforeErr).NotTo(HaveOccurred())
 
 		diskName = fmt.Sprintf("e2e-host-pid-%d", time.Now().UnixNano())
-		disk, createErr := cl.Disks().CreateDisk(ctx, e2e.DiskSpec{
+		diskCtx, diskCancel := context.WithTimeout(ctx, hostPIDDiskOpTimeout)
+		defer diskCancel()
+		By(fmt.Sprintf("CreateDisk %s (timeout %s)", diskName, hostPIDDiskOpTimeout))
+		disk, createErr := cl.Disks().CreateDisk(diskCtx, e2e.DiskSpec{
 			Name:         diskName,
 			Size:         resource.MustParse(hostPIDDiskSize),
 			StorageClass: conf.TestCluster.StorageClass,
 		})
-		Expect(createErr).NotTo(HaveOccurred(), "failed to create virtual disk")
+		Expect(createErr).NotTo(HaveOccurred(), "failed to create virtual disk %s (timed out or error)", diskName)
 		Expect(disk).NotTo(BeNil())
 		diskName = disk.Name
 
-		By("Attaching the disk and waiting for its consumable BlockDevice")
-		Expect(cl.Disks().AttachDisk(ctx, targetNode, diskName)).To(Succeed(), "failed to attach virtual disk")
+		By(fmt.Sprintf("AttachDisk %s → %s (timeout %s)", diskName, targetNode, hostPIDDiskOpTimeout))
+		attachCtx, attachCancel := context.WithTimeout(ctx, hostPIDDiskOpTimeout)
+		defer attachCancel()
+		Expect(cl.Disks().AttachDisk(attachCtx, targetNode, diskName)).
+			To(Succeed(), "failed to attach virtual disk %s (timed out or error)", diskName)
 		discovered, waitErr := framework.WaitNewConsumableBlockDevice(
 			ctx, cl.RESTConfig(), targetNode, before, hostPIDDiscoveryWait,
 		)

@@ -25,8 +25,8 @@ type Config struct {
 	ModulesImageTag string `env:"MODULES_MODULE_TAG" envDefault:"main"`
 	// DebugImage is a minimal image with cat/sleep/sh used for OpenDistrolessReader
 	// against the distroless agent (see storage-e2e kubernetes.ReadFileOptions.DebugImage).
-	// No default: set E2E_DEBUG_IMAGE to a registry/mirror image reachable from the
-	// cluster (prefer digest-pinned). Docker Hub tags are not suitable for CI/air-gap.
+	// No default: the host-pid e2e spec skips when unset; CI sets E2E_DEBUG_IMAGE via
+	// workflow extra_env (digest-pinned busybox).
 	DebugImage string `env:"E2E_DEBUG_IMAGE"`
 }
 

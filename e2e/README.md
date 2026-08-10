@@ -80,7 +80,7 @@ e2e/
 source <ваш git-ignored файл с export ...>   # экспорт переменных окружения
 cd e2e
 make deps        # go mod download/tidy + fix-mod-permissions
-make test        # смоук (label-filter !stress-test), как в CI
+make test        # смоук (!stress-test && !device-types && !host-pid), как в CI
 ```
 
 Эквивалент напрямую через `go test`:
@@ -88,13 +88,16 @@ make test        # смоук (label-filter !stress-test), как в CI
 ```bash
 cd e2e
 GOWORK=off go test -v -count=1 -timeout 90m ./tests/ \
-  -run '^TestSdsNodeConfigurator$' -ginkgo.label-filter='!stress-test'
+  -run '^TestSdsNodeConfigurator$' \
+  -ginkgo.label-filter='!stress-test && !device-types && !host-pid'
 ```
 
 Точечные запуски:
 
 ```bash
 make test-focus FOCUS='^TestSdsNodeConfigurator$'   # по имени go-теста
+make test-device-types                              # матрица типов устройств
+make test-host-pid                                  # host mountinfo (нужен E2E_DEBUG_IMAGE)
 make test-stress                                    # только стресс (label stress-test)
 ```
 
@@ -104,9 +107,10 @@ SDK `e2e.Connect`. В CI провижн/подключение делает reus
 
 ## Лейблы и фильтры
 
-Спеки размечены Ginkgo-лейблами; фильтр по умолчанию в `Makefile` —
-`GINKGO_LABEL_FILTER ?= !stress-test` (стресс исключён из смоука; совпадает с
-дефолтом reusable-workflow storage-e2e).
+Спеки размечены Ginkgo-лейблами; фильтр по умолчанию в `Makefile` /
+`.github/workflows/e2e-tests.yml` —
+`!stress-test && !device-types && !host-pid` (exclusive suites и стресс
+исключены из смоука).
 
 Реальные лейблы из кода `tests/*.go`:
 
@@ -114,7 +118,8 @@ SDK `e2e.Connect`. В CI провижн/подключение делает reus
 |-------|-----------------|
 | `sds-node-configurator` | почти все спеки модуля |
 | `block-device`, `discovery` | обнаружение BlockDevice |
-| `device-types` | матрица типов устройств (disk/mpath/crypt/loop/LUKS) + LVG; только этот спек |
+| `device-types` | матрица типов устройств (disk/mpath/crypt/loop/LUKS) + LVG; exclusive |
+| `host-pid` | host mountinfo / hostPID regression; exclusive (нужен `E2E_DEBUG_IMAGE`) |
 | `block-device-stable` | стабильность BlockDevice по стадиям |
 | `netlink-discovery` | netlink-дискавери |
 | `lvmvolumegroup` | сценарии LVMVolumeGroup (в т.ч. thin-pool) |
@@ -167,6 +172,9 @@ make test-go GINKGO_LABEL_FILTER='discovery || block-device'
 # только матрица типов устройств:
 make test-device-types
 #   == go test ... -ginkgo.label-filter=device-types
+# host mountinfo:
+make test-host-pid
+#   == go test ... -ginkgo.label-filter=host-pid
 # только стресс:
 make test-stress
 # всё вместе:

@@ -37,7 +37,8 @@ import (
 // Device-type matrix: discovery + LVG lifecycle for supported types (disk,
 // mpath, opened crypt/LUKS), filtering of unsupported types (loop, closed
 // LUKS), and an optional mix of supported devices in one LVG.
-// Label device-types is exclusive: run only this suite via
+// Label device-types is exclusive: excluded from default smoke
+// (!stress-test && !device-types && !host-pid). Run only this suite via
 //
 //	make test-device-types
 //	go test ... -ginkgo.label-filter=device-types
@@ -185,6 +186,12 @@ var _ = Describe("Block device types matrix",
 						"discovered BlockDevice type mismatch for %s", newBD.Name)
 					Expect(bdCR.Status.Path).To(Equal(mapperPath))
 					Expect(bdCR.Status.Consumable).To(BeTrue())
+					// createUniqDeviceName hashes NodeName+Wwn+Model+Serial+PartUUID
+					// (not Type/Path). Transformed devices must not collide with the
+					// backing disk CR — otherwise LVG selects the wrong object.
+					Expect(newBD.Name).NotTo(Equal(plainBD.Name),
+						"transformed %s BlockDevice must not reuse backing disk BD name %s",
+						expectedType, plainBD.Name)
 					bdName = newBD.Name
 					bdPath = mapperPath
 				} else {
