@@ -1,4 +1,4 @@
-{{- if (.Values.global.enabledModules | has "operator-prometheus-crd") }}
+{{- if (include "helm_lib_api_version_exists" (list . "monitoring.coreos.com/v1/PodMonitor")) }}
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
