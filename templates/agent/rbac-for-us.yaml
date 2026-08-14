@@ -73,6 +73,10 @@ rules:
       - delete
       - watch
       - update
+      # patch is a separate verb from update, and every write in the shared-pool
+      # reconcilers is a merge patch. Without it they fail at runtime with
+      # "cannot patch resource" while the rule reads as sufficient.
+      - patch
   - apiGroups:
       - events.k8s.io
     resources:
