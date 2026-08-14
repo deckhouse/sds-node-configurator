@@ -1,4 +1,11 @@
 {{- /* RBAC */ -}}
+{{- /*
+  patch on nodes is what the sanlock host_id allocator needs, and it is worth
+  naming the cost: RBAC does not narrow to one node — NodeRestriction is about
+  kubelet identities — so this is the right to write annotations on any node in
+  the cluster. It is granted to the controller rather than to the agents
+  precisely so there is one writer under leader election instead of one per node.
+*/ -}}
 {{- $rbacConfig := dict
   "roleRules" (list)
   "clusterRoleRules" (list
@@ -7,13 +14,6 @@
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmvolumegroups" "lvmvolumegroups/status") "verbs" (list "get" "list" "watch" "update" "create"))
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmlogicalvolumesnapshots") "verbs" (list "get" "list" "watch"))
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmsharedvolumegroups" "lvmsharedvolumegroups/status") "verbs" (list "get" "list" "watch" "update"))
-    {{- /*
-      patch on nodes is what the sanlock host_id allocator needs, and it is worth
-      naming the cost: RBAC does not narrow to one node — NodeRestriction is about
-      kubelet identities — so this is the right to write annotations on any node in
-      the cluster. It is granted to the controller rather than to the agents
-      precisely so there is one writer under leader election instead of one per node.
-    */}}
     (dict "apiGroups" (list "") "resources" (list "nodes" "pods") "verbs" (list "get" "list" "watch"))
     (dict "apiGroups" (list "") "resources" (list "nodes") "verbs" (list "patch"))
     (dict "apiGroups" (list "coordination.k8s.io") "resources" (list "leases") "verbs" (list "get" "list" "watch" "update" "create" "delete"))
