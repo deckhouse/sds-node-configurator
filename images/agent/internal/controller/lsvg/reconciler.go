@@ -40,7 +40,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
@@ -225,29 +224,27 @@ func (r *Reconciler) publishGroup(
 		return controller.Result{}, nil
 	}
 
-	vgs, _ := r.sdsCache.GetVGs()
-	var found *internal.VGData
-	for i := range vgs {
-		if vgs[i].VGName == lsvg.Spec.ActualVGNameOnTheNode {
-			found = &vgs[i]
-			break
-		}
-	}
-	if found == nil {
-		// The group was created a moment ago and this node has not rescanned yet.
-		// Saying nothing is the honest answer; the next scan says the rest.
-		r.log.Info(fmt.Sprintf("[%s] %s is not in the scan results yet, will publish it after the next scan",
-			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+	// Asked, not remembered. The group is read from lvm directly rather than from
+	// the scan cache: the cache is refreshed by a scanner that has no schedule of
+	// its own, so a group created between two scans could stay unpublished
+	// indefinitely — and the whole point of this is to stop a reader upstream
+	// from believing something nobody has checked.
+	vg, cmd, _, err := r.commands.GetVG(lsvg.Spec.ActualVGNameOnTheNode)
+	if err != nil || vg.VGUUID == "" {
+		// Ordinary right after vgcreate on a busy node, and equally ordinary while
+		// the LUN is still settling. Neither is worth an error on the object.
+		r.log.Info(fmt.Sprintf("[%s] %s cannot be read yet (cmd: %s), will publish it later",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd))
 		return controller.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
 	status := &v1alpha1.LVMSharedVolumeGroupStatus{
 		Phase:              phaseCreated,
 		ObservedGeneration: lsvg.Generation,
-		VGUUID:             found.VGUUID,
-		VGSize:             found.VGSize.String(),
-		VGFree:             found.VGFree.String(),
-		ExtentSize:         found.VGExtentSize.String(),
+		VGUUID:             vg.VGUUID,
+		VGSize:             vg.VGSize.String(),
+		VGFree:             vg.VGFree.String(),
+		ExtentSize:         vg.VGExtentSize.String(),
 	}
 
 	lvs, _ := r.sdsCache.GetLVs()

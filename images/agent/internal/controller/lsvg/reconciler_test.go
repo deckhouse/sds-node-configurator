@@ -112,6 +112,13 @@ func annotationsOf(t *testing.T, cl client.Client) map[string]string {
 	return node.Annotations
 }
 
+// vgUnreadable is the ordinary answer right after vgcreate: the group is there
+// but this node has not been able to read it back yet. Tests that are not about
+// publishing use it so the publish step stays out of their way.
+func vgUnreadable(commands *mock_utils.MockCommands) {
+	commands.EXPECT().GetVG(testVG).Return(internal.VGData{}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+}
+
 func TestWaitsForTheAllocatorInsteadOfPickingAnID(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
@@ -323,6 +330,7 @@ func TestOwnerCreatesTheGroupAndItStartsItsOwnLockspace(t *testing.T) {
 			assert.Equal(t, "4Mi", params.PhysicalExtentSize)
 			return "vgcreate --shared", nil
 		})
+	vgUnreadable(commands)
 
 	reconcile(t, r, ownedGroup())
 
@@ -340,6 +348,7 @@ func TestGroupIsNotRecreatedOverAnExistingOne(t *testing.T) {
 	r.sdsCache.StorePVs([]internal.PVData{{PVName: "/dev/mapper/mpathi", VGName: testVG}}, bytes.Buffer{})
 
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
+	vgUnreadable(commands)
 
 	reconcile(t, r, ownedGroup())
 }
@@ -360,15 +369,16 @@ func TestTheOwnerPublishesWhatItObservesAboutTheGroup(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(node, group).WithStatusSubresource(group).Build()
 
-	sdsCache := cache.New()
-	sdsCache.StorePVs([]internal.PVData{{PVName: "/dev/mapper/mpathi", VGName: testVG}}, bytes.Buffer{})
-	sdsCache.StoreVGs([]internal.VGData{{
+	commands.EXPECT().GetVG(testVG).Return(internal.VGData{
 		VGName:       testVG,
 		VGUUID:       "vg-uuid",
 		VGSize:       resource.MustParse("200Gi"),
 		VGFree:       resource.MustParse("197Gi"),
 		VGExtentSize: resource.MustParse("4Mi"),
-	}}, bytes.Buffer{})
+	}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+
+	sdsCache := cache.New()
+	sdsCache.StorePVs([]internal.PVData{{PVName: "/dev/mapper/mpathi", VGName: testVG}}, bytes.Buffer{})
 	sdsCache.StoreLVs([]internal.LVData{
 		{VGName: testVG, LVName: "lvmlock", LVSize: resource.MustParse("256Mi")},
 		{VGName: testVG, LVName: "volume-1"},
