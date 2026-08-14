@@ -724,6 +724,36 @@ func (mr *MockCommandsMockRecorder) VGChangeDelTag(ctx, vGName, tag any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGChangeDelTag", reflect.TypeOf((*MockCommands)(nil).VGChangeDelTag), ctx, vGName, tag)
 }
 
+// VGLockStart mocks base method.
+func (m *MockCommands) VGLockStart(ctx context.Context, vgName string, hostID int) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VGLockStart", ctx, vgName, hostID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// VGLockStart indicates an expected call of VGLockStart.
+func (mr *MockCommandsMockRecorder) VGLockStart(ctx, vgName, hostID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGLockStart", reflect.TypeOf((*MockCommands)(nil).VGLockStart), ctx, vgName, hostID)
+}
+
+// VGLockStop mocks base method.
+func (m *MockCommands) VGLockStop(ctx context.Context, vgName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VGLockStop", ctx, vgName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// VGLockStop indicates an expected call of VGLockStop.
+func (mr *MockCommandsMockRecorder) VGLockStop(ctx, vgName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGLockStop", reflect.TypeOf((*MockCommands)(nil).VGLockStop), ctx, vgName)
+}
+
 // VGScan mocks base method.
 func (m *MockCommands) VGScan(ctx context.Context) (string, error) {
 	m.ctrl.T.Helper()

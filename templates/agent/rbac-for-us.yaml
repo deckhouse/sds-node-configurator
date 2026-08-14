@@ -19,6 +19,17 @@ rules:
       - get
       - list
       - watch
+  # patch on nodes carries the fact that this node holds a pool's lockspace.
+  # It is read by another module, which is why it lives on the Node rather than
+  # in a status this module owns. The cost is worth naming: RBAC does not narrow
+  # to the agent's own node — NodeRestriction is about kubelet identities — so
+  # this is the right to write annotations on any node in the cluster.
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - patch
   - apiGroups:
       - ""
     resources:
@@ -36,6 +47,12 @@ rules:
       - lvmlogicalvolumes/status
       - lvmlogicalvolumesnapshots
       - lvmlogicalvolumesnapshots/status
+      - lvmsharedvolumegroups
+      - lvmsharedvolumegroups/status
+      - lvmsharedlogicalvolumes
+      - lvmsharedlogicalvolumes/status
+      - lvmsharedlogicalvolumeattachments
+      - lvmsharedlogicalvolumeattachments/status
     verbs:
       - get
       - list

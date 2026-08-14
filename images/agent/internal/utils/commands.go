@@ -65,6 +65,8 @@ type Commands interface {
 	VGChangeDelTag(ctx context.Context, vGName, tag string) (string, error)
 	LVChangeDelTag(ctx context.Context, lv internal.LVData, tag string) (string, error)
 	VGActivate(ctx context.Context, vgName string) (string, error)
+	VGLockStart(ctx context.Context, vgName string, hostID int) (string, error)
+	VGLockStop(ctx context.Context, vgName string) (string, error)
 	LVActivate(ctx context.Context, vgName, lvName string) (string, error)
 	VGScan(ctx context.Context) (string, error)
 	PVScan(ctx context.Context) (string, error)
@@ -760,6 +762,56 @@ func (commands) LVChangeDelTag(ctx context.Context, lv internal.LVData, tag stri
 func (commands) VGActivate(ctx context.Context, vgName string) (string, error) {
 	args := []string{"vgchange", "-ay", vgName}
 	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// VGLockStart joins this node to the sanlock lockspace of a shared Volume
+// Group, which is what makes the group's volumes lockable here at all.
+//
+// It can take minutes rather than seconds, and the caller must budget for that
+// instead of treating a slow return as a hang. Taking a free host_id costs up
+// to 5 x io_timeout; taking back an id whose own delta lease is still alive —
+// a quick reboot, a restarted daemon pod, an OnDelete update — costs
+// 14 x io_timeout + 60, which is 200 s on the defaults. lvm prints
+// "Waiting for sanlock may take a few seconds to 3 min" and means it.
+//
+// host_id reaches lvmlockd through its --host-id-file and is passed here as
+// well because the CLIENT checks it too: since lvm2 2.03.27 vgcreate --shared
+// refuses a host_id outside the range implied by the lease alignment, and a
+// client that says nothing about it is rejected in production while passing on
+// an older stand.
+func (commands) VGLockStart(ctx context.Context, vgName string, hostID int) (string, error) {
+	args := []string{"vgchange", "--lock-start", vgName}
+	extendedArgs := lvmStaticLockdArgs(args, hostID)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// VGLockStop leaves the lockspace of a shared Volume Group.
+//
+// Order matters and is not enforced here: every logical volume of the group has
+// to be deactivated on this node first. Stopping the lockspace under an active
+// volume leaves the volume writable with no lock behind it, which is the one
+// state the whole design exists to prevent. The caller checks; this only runs
+// the command.
+func (commands) VGLockStop(ctx context.Context, vgName string) (string, error) {
+	args := []string{"vgchange", "--lock-stop", vgName}
+	extendedArgs := lvmStaticLockdArgs(args, 0)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -1720,6 +1772,34 @@ func lvmStaticExtendedArgs(args []string) []string {
 	}
 
 	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMArchiveRetention
+	withConfig := make([]string, 0, len(args)+2)
+	withConfig = append(withConfig, args[0], "--config", configValue)
+	withConfig = append(withConfig, args[1:]...)
+
+	return nsentrerExpendedArgs(internal.LVMCmd, withConfig...)
+}
+
+// lvmStaticLockdArgs is lvmStaticExtendedArgs plus the two settings a command
+// against a shared Volume Group needs from the client side.
+//
+// use_lvmlockd is not a property of the node here but of the command: the agent
+// runs against both local and shared groups with the same binary, and turning
+// the setting on globally would make every local command talk to a daemon that
+// has nothing to say about it.
+//
+// host_id is passed only when it is known and non-zero. It is the client's own
+// copy of what lvmlockd reads from its host-id file, and lvm2 >= 2.03.27 checks
+// it against the ceiling implied by the lease alignment.
+func lvmStaticLockdArgs(args []string, hostID int) []string {
+	if len(args) == 0 {
+		return nsentrerExpendedArgs(internal.LVMCmd, args...)
+	}
+
+	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMArchiveRetention + " global/use_lvmlockd=1"
+	if hostID > 0 {
+		configValue += " local/host_id=" + strconv.Itoa(hostID)
+	}
+
 	withConfig := make([]string, 0, len(args)+2)
 	withConfig = append(withConfig, args[0], "--config", configValue)
 	withConfig = append(withConfig, args[1:]...)

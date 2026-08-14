@@ -41,7 +41,9 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/bd"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/bdf"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llv"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsvg"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llv_extender"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lvg"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/kubutils"
@@ -309,6 +311,25 @@ func run() int {
 			os.Exit(1)
 		}
 	}()
+
+	err = controller.AddReconciler(
+		mgr,
+		log,
+		lsvg.NewReconciler(
+			mgr.GetClient(),
+			log,
+			sdsCache,
+			commands,
+			lsvg.ReconcilerConfig{
+				NodeName:  cfgParams.NodeName,
+				HostIDDir: internal.SharedLockDaemonsStateDir,
+			},
+		),
+	)
+	if err != nil {
+		log.Error(err, "[main] unable to add the LVMSharedVolumeGroup reconciler")
+		return 1
+	}
 
 	err = controller.AddReconciler(
 		mgr,

@@ -43,6 +43,13 @@ const (
 	DMSetupCmd                   = "/opt/deckhouse/sds/bin/dmsetup"
 	LSBLKCmd                     = "/opt/deckhouse/sds/bin/lsblk.dynamic"
 	LVMCmd                       = "/opt/deckhouse/sds/bin/lvm"
+
+	// SharedLockDaemonsStateDir is the only channel between this agent and the
+	// lock daemons of a shared pool. They run from an image pinned to OnDelete
+	// and have no API access at all — a token there would make every change to
+	// them an operation with a drain — so the host_id goes in through a file and
+	// the result of a fencing barrier comes back out through one.
+	SharedLockDaemonsStateDir = "/opt/deckhouse/sds/lvmlockd"
 	ThinDumpCmd                  = "thin_dump"
 
 	// The commands below are the node's own, not the module's. Everything above
