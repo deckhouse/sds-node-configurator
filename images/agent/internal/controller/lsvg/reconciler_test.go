@@ -343,6 +343,23 @@ func TestGroupIsNotRecreatedOverAnExistingOne(t *testing.T) {
 	reconcile(t, r, ownedGroup())
 }
 
+func TestForeignGroupOnTheLUNIsRefused(t *testing.T) {
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
+	// A group that is not the one the pool asks for. Found on the stand: the LUN
+	// had been used for something else, and the check that only asked "is there a
+	// group here" would have declared the pool's group ready without it existing.
+	r.sdsCache.StorePVs([]internal.PVData{{PVName: "/dev/mapper/mpathi", VGName: "someone-elses-vg"}}, bytes.Buffer{})
+
+	_, err := r.Reconcile(context.Background(),
+		controller.ReconcileRequest[*v1alpha1.LVMSharedVolumeGroup]{Object: ownedGroup()})
+
+	require.Error(t, err, "neither creating over it nor adopting it is defensible")
+	assert.Contains(t, err.Error(), "someone-elses-vg")
+}
+
 func TestMissingLUNPostponesCreation(t *testing.T) {
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)

@@ -225,7 +225,17 @@ func (r *Reconciler) ensureGroup(
 		return false, controller.Result{RequeueAfter: 20 * time.Second}, nil
 	}
 
-	if r.groupExists(devices) {
+	exists, foreign := r.groupState(devices, lsvg.Spec.ActualVGNameOnTheNode)
+	if foreign != "" {
+		// Someone else's data. Creating over it would destroy it, and adopting it
+		// would put this module in charge of a group whose extent size, lease area
+		// and membership were decided elsewhere — so neither is done, and the LUN
+		// is left exactly as it was found.
+		return false, controller.Result{}, fmt.Errorf(
+			"%s cannot be created: the devices already carry the volume group %q, and this pool asks for %q",
+			lsvg.Name, foreign, lsvg.Spec.ActualVGNameOnTheNode)
+	}
+	if exists {
 		return false, controller.Result{}, nil
 	}
 
@@ -263,18 +273,37 @@ func (r *Reconciler) ensureGroup(
 	return true, controller.Result{}, nil
 }
 
-// groupExists reads the physical volume labels this node has already scanned.
-// A label naming a volume group is proof the group is there; vgs is not.
-func (r *Reconciler) groupExists(devices map[string]utils.SharedDevice) bool {
+// groupState reads the physical volume labels this node has already scanned and
+// says whether the wanted group is there — and whether something else is.
+//
+// The name has to be compared, not just its presence. A label naming any volume
+// group used to count as proof that this group existed, which is only true while
+// the LUN has never been used for anything else. On a LUN that carries an
+// unrelated group the agent would skip creation, report the group ready, and
+// then work against a name that is not on the device — or, worse, hand out
+// volumes from a group that belongs to someone else.
+func (r *Reconciler) groupState(
+	devices map[string]utils.SharedDevice,
+	wantVGName string,
+) (exists bool, foreign string) {
 	pvs, _ := r.sdsCache.GetPVs()
 	for _, pv := range pvs {
 		for _, device := range devices {
-			if pv.PVName == device.Path && pv.VGName != "" {
-				return true
+			if pv.PVName != device.Path || pv.VGName == "" {
+				continue
+			}
+			if pv.VGName == wantVGName {
+				exists = true
+				continue
+			}
+			// Reported rather than returned immediately: the first foreign group
+			// found is the one named, and the loop stays deterministic.
+			if foreign == "" {
+				foreign = pv.VGName
 			}
 		}
 	}
-	return false
+	return exists, foreign
 }
 
 // extentSizeBytes parses the requested extent size for the granularity check.
