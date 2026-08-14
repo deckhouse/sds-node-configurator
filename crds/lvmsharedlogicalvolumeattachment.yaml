@@ -134,6 +134,19 @@ spec:
                     arrived before growing anything on top of it. The filesystem is not this
                     resource's business: it is grown by the CSI driver and observed by
                     kubelet.
+                lockspaceGeneration:
+                  type: integer
+                  format: int64
+                  description: |
+                    The node's lockspace incarnation this activation belongs to.
+
+                    It exists because a device-mapper device outlives the lock behind it.
+                    sanlock and lvmlockd restart together — they are one pod — and their
+                    restart takes every lease with it while the kernel keeps every mapping,
+                    so a node can look activated and hold nothing at all. Comparing this
+                    against the node's current generation is what tells the two apart, and
+                    a mismatch makes the node activate the volume again instead of trusting
+                    the device it can see.
                 conditions:
                   type: array
                   x-kubernetes-list-type: map

@@ -70,6 +70,17 @@ type LVMSharedLogicalVolumeAttachmentStatus struct {
 	// ObservedSize is published here as well as on the volume because growing
 	// an attached volume is done by this node — the metadata owner cannot, the
 	// lock is held here — and the consumer needs to know the new size arrived.
-	ObservedSize string             `json:"observedSize,omitempty"`
+	ObservedSize string `json:"observedSize,omitempty"`
+
+	// LockspaceGeneration is the node's lockspace incarnation this activation
+	// belongs to, and it exists because a device-mapper device outlives the lock
+	// behind it.
+	//
+	// sanlock and lvmlockd restart together — they are one pod — and their
+	// restart takes every lease with it while the kernel keeps every mapping.
+	// A node then looks activated and holds nothing, so the next reconcile has
+	// to activate again rather than see the device and stop. Comparing this
+	// against the node's current generation is what tells the two apart.
+	LockspaceGeneration int64 `json:"lockspaceGeneration,omitempty"`
 	Conditions   []metav1.Condition `json:"conditions,omitempty"`
 }

@@ -31,9 +31,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,6 +45,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsvg"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
@@ -140,7 +143,15 @@ func (r *Reconciler) attach(
 	lvName := volume.Spec.ActualLVNameOnTheNode
 	shared := attachment.Spec.AccessMode == v1alpha1.LVMSharedLogicalVolumeAccessModeRWX
 
-	if !r.isActive(vgName, lvName) {
+	// The device is not the lock. lvmlockd and sanlock restart together and lose
+	// every lease; the kernel keeps every mapping — so a volume can be mapped
+	// here and locked nowhere, which is exactly the state in which two nodes can
+	// write to it. The node counts its lockspace incarnations, and an activation
+	// recorded under an earlier one proves nothing about now.
+	generation := r.lockspaceGeneration(ctx, group.Name)
+	locked := attachment.Status != nil && attachment.Status.LockspaceGeneration == generation
+
+	if !locked || !r.isActive(vgName, lvName) {
 		// Everything this node owes in the same group and the same mode goes in
 		// one command, not just the volume this reconcile is about.
 		//
@@ -182,7 +193,13 @@ func (r *Reconciler) attach(
 	// for an extension would hold up a pod over a resize it does not need yet.
 	devicePath := filepath.Join("/dev", vgName, lvName)
 	r.setStatus(ctx, attachment, PhaseAttached, devicePath, true, "Activated",
-		fmt.Sprintf("%s is active on %s", devicePath, r.cfg.NodeName))
+		fmt.Sprintf("%s is active on %s", devicePath, r.cfg.NodeName),
+		// Stamped with the incarnation of the lockspace this activation belongs
+		// to. Written here, inside the status write, because a field set before
+		// the patch is computed is a field the patch does not carry.
+		func(status *v1alpha1.LVMSharedLogicalVolumeAttachmentStatus) {
+			status.LockspaceGeneration = generation
+		})
 
 	// Growing the volume belongs here and not to the metadata owner. lvextend
 	// takes the LV lock, and under lvmlockd that lock is held exclusively by the
@@ -457,17 +474,44 @@ func (r *Reconciler) removeFinalizer(ctx context.Context, attachment *v1alpha1.L
 // setStatus is best-effort on purpose: a status that could not be written must
 // not undo an activation that succeeded. The failure is logged and the next
 // reconcile writes it again.
+
+// lockspaceGeneration is the incarnation of this node's lockspace for the group,
+// or 0 when the node cannot be read or has never started it.
+//
+// Zero is deliberately a value that matches nothing recorded: an attachment that
+// claims generation 0 was never activated under any lockspace, and one that
+// claims a number while the node has none is stale by construction.
+func (r *Reconciler) lockspaceGeneration(ctx context.Context, groupName string) int64 {
+	node := &corev1.Node{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: r.cfg.NodeName}, node); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to read the lockspace generation of %s: %s",
+			ReconcilerName, r.cfg.NodeName, err.Error()))
+		return 0
+	}
+
+	value := node.Annotations[lsvg.LockspaceGenerationAnnotationPrefix+groupName]
+	generation, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return generation
+}
+
 func (r *Reconciler) setStatus(
 	ctx context.Context,
 	attachment *v1alpha1.LVMSharedLogicalVolumeAttachment,
 	phase, devicePath string,
 	ready bool,
 	reason, message string,
+	mutators ...func(*v1alpha1.LVMSharedLogicalVolumeAttachmentStatus),
 ) {
 	patch := client.MergeFrom(attachment.DeepCopy())
 
 	if attachment.Status == nil {
 		attachment.Status = &v1alpha1.LVMSharedLogicalVolumeAttachmentStatus{}
+	}
+	for _, mutate := range mutators {
+		mutate(attachment.Status)
 	}
 	attachment.Status.Phase = phase
 	attachment.Status.DevicePath = devicePath

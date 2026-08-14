@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -38,6 +39,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsvg"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
@@ -91,6 +93,16 @@ func withFinalizer(a *v1alpha1.LVMSharedLogicalVolumeAttachment) {
 	a.Finalizers = append(a.Finalizers, internal.SdsNodeConfiguratorFinalizer)
 }
 
+// activatedNow marks the attachment as activated under the node's current
+// lockspace incarnation, which is what makes the device it can see mean
+// something.
+func activatedNow(a *v1alpha1.LVMSharedLogicalVolumeAttachment) {
+	if a.Status == nil {
+		a.Status = &v1alpha1.LVMSharedLogicalVolumeAttachmentStatus{}
+	}
+	a.Status.LockspaceGeneration = 7
+}
+
 func deleting(a *v1alpha1.LVMSharedLogicalVolumeAttachment) {
 	now := metav1.Now()
 	a.DeletionTimestamp = &now
@@ -135,6 +147,14 @@ func testReconciler(
 
 	s := scheme.Scheme
 	require.NoError(t, v1alpha1.AddToScheme(s))
+	require.NoError(t, corev1.AddToScheme(s))
+	// The node's lockspace incarnation. Everything activated under it is locked;
+	// a stamp from an earlier one is a device without a lock behind it.
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:        testNode,
+		Annotations: map[string]string{lsvg.LockspaceGenerationAnnotationPrefix + "pool-1": "7"},
+	}}
+	objects = append(objects, node)
 	cl := fake.NewClientBuilder().
 		WithScheme(s).
 		WithObjects(objects...).
@@ -228,7 +248,7 @@ func TestAlreadyActiveVolumeIsNotActivatedAgain(t *testing.T) {
 	commands := mock_utils.NewMockCommands(ctrl)
 	// No expectation: every lvm command against a shared group takes the group
 	// lock, and the lock is what the pool's throughput is made of.
-	attachment := testAttachment(testNode, withFinalizer)
+	attachment := testAttachment(testNode, withFinalizer, activatedNow)
 	activate, _ := dmView(t)
 	activate()
 	r, cl := testReconciler(t, commands, []internal.LVData{activeLV()}, testGroup(), testVolume(), attachment)
@@ -457,7 +477,7 @@ func TestAttachedVolumeIsGrownByTheNodeThatHoldsTheLock(t *testing.T) {
 	// that lock is held exclusively by the activating node.
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
-	attachment := testAttachment(testNode, withFinalizer)
+	attachment := testAttachment(testNode, withFinalizer, activatedNow)
 	// The volume is attached here, so the extension is this node's to make.
 	activate, _ := dmView(t)
 	activate()
@@ -483,7 +503,7 @@ func TestVolumeAtItsSizeIsNotExtended(t *testing.T) {
 	commands := mock_utils.NewMockCommands(ctrl)
 	// No expectation: every lvm command against a shared group takes the group
 	// lock, and the pool's throughput is made of those.
-	attachment := testAttachment(testNode, withFinalizer)
+	attachment := testAttachment(testNode, withFinalizer, activatedNow)
 	// The volume is attached here, so the extension is this node's to make.
 	activate, _ := dmView(t)
 	activate()
@@ -501,7 +521,7 @@ func TestUnknownSizeIsNotAReasonToExtend(t *testing.T) {
 	// happen: the next pass knows.
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
-	attachment := testAttachment(testNode, withFinalizer)
+	attachment := testAttachment(testNode, withFinalizer, activatedNow)
 	// The volume is attached here, so the extension is this node's to make.
 	activate, _ := dmView(t)
 	activate()
@@ -520,7 +540,7 @@ func TestFailedExtensionKeepsTheVolumeUsable(t *testing.T) {
 	// at its current size.
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
-	attachment := testAttachment(testNode, withFinalizer)
+	attachment := testAttachment(testNode, withFinalizer, activatedNow)
 	// The volume is attached here, so the extension is this node's to make.
 	activate, _ := dmView(t)
 	activate()
@@ -541,7 +561,7 @@ func TestRoundedSizeIsReportedAsItIs(t *testing.T) {
 	// is worth reporting rather than echoing the request back.
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
-	attachment := testAttachment(testNode, withFinalizer)
+	attachment := testAttachment(testNode, withFinalizer, activatedNow)
 	// The volume is attached here, so the extension is this node's to make.
 	activate, _ := dmView(t)
 	activate()
@@ -582,4 +602,34 @@ func TestActivationIsSeenWithoutWaitingForAScan(t *testing.T) {
 	got := attachmentFromAPI(t, cl)
 	assert.Equal(t, PhaseAttached, got.Status.Phase)
 	assert.Equal(t, "/dev/vgshared/vol1", got.Status.DevicePath)
+}
+
+func TestARestartOfTheLockDaemonsMakesTheNodeTakeTheLockAgain(t *testing.T) {
+	// Found on the stand, and it is the gravest kind of finding: the volume was
+	// mapped on three nodes at once and locked on none. sanlock and lvmlockd are
+	// one pod, so they restart together and lose every lease, while the kernel
+	// keeps every device-mapper mapping. A check that reads the device then
+	// vouches for a lock that no longer exists.
+	//
+	// Here the device is present and the attachment carries a stamp from an
+	// earlier incarnation, so the volume has to be activated again — which is
+	// what takes the lock back.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	attachment := testAttachment(testNode, withFinalizer, func(a *v1alpha1.LVMSharedLogicalVolumeAttachment) {
+		a.Status = &v1alpha1.LVMSharedLogicalVolumeAttachmentStatus{LockspaceGeneration: 6}
+	})
+	activate, _ := dmView(t)
+	activate()
+	r, cl := testReconciler(t, commands, []internal.LVData{activeLV()}, testGroup(), testVolume(), attachment)
+
+	commands.EXPECT().LVActivateShared(gomock.Any(), testVG, []string{testLV}, false).
+		Return("lvchange -aey", nil)
+
+	reconcile(t, r, attachment)
+
+	got := attachmentFromAPI(t, cl)
+	assert.Equal(t, PhaseAttached, got.Status.Phase)
+	assert.Equal(t, int64(7), got.Status.LockspaceGeneration,
+		"the activation is stamped with the incarnation it belongs to")
 }

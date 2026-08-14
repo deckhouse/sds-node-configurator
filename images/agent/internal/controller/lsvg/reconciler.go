@@ -61,6 +61,17 @@ const (
 	// attachments, and whether its LUN may be taken away.
 	LockspaceStartedAnnotationPrefix = "storage.deckhouse.io/lockspace-started-"
 
+	// LockspaceGenerationAnnotationPrefix, plus the group name, counts how many
+	// times this node has started that lockspace.
+	//
+	// It is the answer to a question a device cannot answer: whether the lock
+	// behind it is still held. lvmlockd and sanlock restart together and lose
+	// every lease; the kernel keeps every mapping. A volume activated under an
+	// earlier incarnation is still mapped and no longer locked, so the number is
+	// what makes the attachment reconciler activate it again rather than stop at
+	// the sight of the device.
+	LockspaceGenerationAnnotationPrefix = "storage.deckhouse.io/lockspace-generation-"
+
 	// hostIDFileName is read by lvmlockd through --host-id-file on every
 	// lockspace start, so writing it is enough and no daemon needs restarting.
 	hostIDFileName = "host-id"
@@ -523,6 +534,17 @@ func (r *Reconciler) node(ctx context.Context) (*corev1.Node, error) {
 // that and lies: the node claims a lockspace of a group that no longer exists,
 // never starts the one that does, and the pool looks healthy on paper with one
 // member actually holding leases.
+// nextGeneration is the successor of whatever is written, and 1 when nothing is.
+// An unparseable value is treated as nothing: the point of the number is that it
+// differs from the previous one, not that it counts anything in particular.
+func nextGeneration(current string) string {
+	n, err := strconv.ParseInt(current, 10, 64)
+	if err != nil || n < 0 {
+		n = 0
+	}
+	return strconv.FormatInt(n+1, 10)
+}
+
 // vgUUID is the group's identity, or an empty string when it cannot be read —
 // which is the ordinary state before the group exists.
 func (r *Reconciler) vgUUID(vgName string) string {
@@ -553,10 +575,19 @@ func (r *Reconciler) setLockspaceStarted(ctx context.Context, groupName, vgUUID 
 	}
 
 	key := LockspaceStartedAnnotationPrefix + groupName
+	generationKey := LockspaceGenerationAnnotationPrefix + groupName
 	patch := client.MergeFrom(node.DeepCopy())
 	if started {
 		if node.Annotations == nil {
 			node.Annotations = map[string]string{}
+		}
+		// The generation moves only when the lockspace is actually started, and
+		// it moves every time — including a start that follows a daemon restart,
+		// which is the case it exists for. Everything activated under the old
+		// number is mapped and unlocked, and the attachment reconciler treats a
+		// mismatch as a reason to activate again.
+		if node.Annotations[key] != vgUUID || node.Annotations[generationKey] == "" {
+			node.Annotations[generationKey] = nextGeneration(node.Annotations[generationKey])
 		}
 		node.Annotations[key] = vgUUID
 	} else {
@@ -564,6 +595,9 @@ func (r *Reconciler) setLockspaceStarted(ctx context.Context, groupName, vgUUID 
 			return nil
 		}
 		delete(node.Annotations, key)
+		// The generation is deliberately NOT deleted. It counts incarnations of
+		// this node's lockspace, and a counter that restarts at one would let a
+		// stale attachment match a fresh lockspace by coincidence.
 	}
 
 	if err := r.cl.Patch(ctx, node, patch); err != nil {
