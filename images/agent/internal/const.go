@@ -44,6 +44,26 @@ const (
 	LSBLKCmd                     = "/opt/deckhouse/sds/bin/lsblk.dynamic"
 	LVMCmd                       = "/opt/deckhouse/sds/bin/lvm"
 
+	// SharedLVMCmd is lvm inside the lock daemons' image, and it is a different
+	// binary from LVMCmd on purpose — not a preference but the only one that
+	// works.
+	//
+	// The lvm this module ships is configured "--enable-static_link
+	// --disable-readline --enable-blkid_wiping" and nothing else: it has no
+	// lvmlockd support compiled in at all, so every command against a shared
+	// group answers "Using a shared lock type requires lvmlockd" no matter what
+	// is running on the node. The image that carries lvmlockd carries an lvm
+	// built against it, and a node has no lvm of its own to fall back on.
+	//
+	// It also removes a failure mode rather than adding one: the client and the
+	// daemon are then the same build, so they cannot disagree about the protocol
+	// between them.
+	SharedLVMCmd = "/usr/sbin/lvm"
+
+	// SharedLockDaemonProcess is how the mount namespace holding SharedLVMCmd is
+	// found: by the daemon that must be running for any of this to mean anything.
+	SharedLockDaemonProcess = "lvmlockd"
+
 	// SharedLockDaemonsStateDir is the only channel between this agent and the
 	// lock daemons of a shared pool. They run from an image pinned to OnDelete
 	// and have no API access at all — a token there would make every change to

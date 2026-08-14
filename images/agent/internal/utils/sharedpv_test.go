@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -187,4 +188,41 @@ func TestLVMSizeConvertsABareByteCount(t *testing.T) {
 	// valid quantity — and a bare number to lvm means megabytes, so unconverted
 	// it asks for a volume a million times too large.
 	assert.Equal(t, "1048576k", lvmSize("1073741824"))
+}
+
+func TestSharedLVMNamespaceIsFoundByTheDaemon(t *testing.T) {
+	// The daemon is the marker because a shared command needs it running quite
+	// apart from needing the binary: no daemon, nothing to do but wait.
+	root := t.TempDir()
+	previous := ProcRoot
+	ProcRoot = root
+	t.Cleanup(func() { ProcRoot = previous })
+
+	write := func(pid, cmdline string) {
+		require.NoError(t, os.MkdirAll(filepath.Join(root, pid), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, pid, "cmdline"),
+			[]byte(strings.ReplaceAll(cmdline, " ", "\x00")), 0o644))
+	}
+	write("1", "/sbin/init")
+	write("4242", "/usr/sbin/lvmlockd -f -g sanlock")
+	write("4243", "/usr/sbin/lvmlockd -f -g sanlock")
+
+	pid, err := SharedLVMNamespacePID()
+	require.NoError(t, err)
+	assert.Equal(t, 4242, pid, "the lowest pid, so two calls build the same command")
+}
+
+func TestNoLockDaemonSaysSoInsteadOfLettingLVMSayIt(t *testing.T) {
+	root := t.TempDir()
+	previous := ProcRoot
+	ProcRoot = root
+	t.Cleanup(func() { ProcRoot = previous })
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "1"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "1", "cmdline"), []byte("/sbin/init\x00"), 0o644))
+
+	_, err := SharedLVMNamespacePID()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not running here",
+		"lvm would call this a configuration mistake; it is a node that is not ready yet")
 }

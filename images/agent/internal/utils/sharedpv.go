@@ -17,17 +17,23 @@ limitations under the License.
 package utils
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
 // SysBlockRoot is a variable so tests can point it at a fixture. Nothing else
 // is meant to change it.
 var SysBlockRoot = "/sys/block"
+
+// ProcRoot is a variable for the same reason SysBlockRoot is.
+var ProcRoot = "/proc"
 
 // SharedDevice is one LUN of a shared pool as this node sees it.
 type SharedDevice struct {
@@ -259,4 +265,50 @@ func LVIsActiveHere(vgName, lvName string) bool {
 func dmName(vgName, lvName string) string {
 	escape := func(s string) string { return strings.ReplaceAll(s, "-", "--") }
 	return escape(vgName) + "-" + escape(lvName)
+}
+
+// SharedLVMNamespacePID finds a process whose mount namespace contains an lvm
+// that can talk to lvmlockd.
+//
+// The daemon itself is the marker, which is deliberate: a shared command needs
+// lvmlockd running quite apart from needing the binary, so looking for the
+// daemon answers both questions at once. When it is not there, the caller has
+// nothing to do but wait — and the message says exactly that, instead of lvm's
+// "Using a shared lock type requires lvmlockd", which reads as a configuration
+// mistake.
+func SharedLVMNamespacePID() (int, error) {
+	entries, err := os.ReadDir(ProcRoot)
+	if err != nil {
+		return 0, fmt.Errorf("read %s: %w", ProcRoot, err)
+	}
+
+	best := 0
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+
+		raw, err := os.ReadFile(filepath.Join(ProcRoot, entry.Name(), "cmdline"))
+		if err != nil || len(raw) == 0 {
+			// A process that ended between the listing and the read.
+			continue
+		}
+
+		argv0 := string(bytes.SplitN(raw, []byte{0}, 2)[0])
+		if filepath.Base(argv0) != internal.SharedLockDaemonProcess {
+			continue
+		}
+		// The lowest pid of the daemon's processes, so that repeated calls build
+		// the same command and a reader comparing two log lines sees the same one.
+		if best == 0 || pid < best {
+			best = pid
+		}
+	}
+
+	if best == 0 {
+		return 0, fmt.Errorf("no %s process on this node: the lock daemons of the shared pool are not running here",
+			internal.SharedLockDaemonProcess)
+	}
+	return best, nil
 }

@@ -511,7 +511,10 @@ func (commands) CreateLVShared(ctx context.Context, vgName, lvName, size string)
 	// count — so passing it through unconverted asks for a volume a million times
 	// too large.
 	args := []string{"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", lvmSize(size), "-W", "y", "-y"}
-	extendedArgs := lvmStaticLockdArgs(args, 0)
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -526,7 +529,10 @@ func (commands) CreateLVShared(ctx context.Context, vgName, lvName, size string)
 // RemoveLVShared destroys a volume of a shared Volume Group.
 func (commands) RemoveLVShared(ctx context.Context, vgName, lvName string) (string, error) {
 	args := []string{"lvremove", "-y", fmt.Sprintf("%s/%s", vgName, lvName)}
-	extendedArgs := lvmStaticLockdArgs(args, 0)
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -549,7 +555,10 @@ func (commands) RemoveLVShared(ctx context.Context, vgName, lvName string) (stri
 // asks for the same end state rather than adding twice.
 func (commands) LVExtendShared(ctx context.Context, vgName, lvName, size string) (string, error) {
 	args := []string{"lvextend", "-L", lvmSize(size), fmt.Sprintf("%s/%s", vgName, lvName)}
-	extendedArgs := lvmStaticLockdArgs(args, 0)
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -579,7 +588,10 @@ func (commands) SetLVTagShared(ctx context.Context, vgName, lvName, tag string, 
 	}
 
 	args := []string{"lvchange", flag, tag, fmt.Sprintf("%s/%s", vgName, lvName)}
-	extendedArgs := lvmStaticLockdArgs(args, 0)
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -659,7 +671,11 @@ func (commands) CreateVGShared(ctx context.Context, params SharedVGParams) (stri
 	}
 
 	args := vgCreateArgs(params.VGName, params.SharedVolumeGroupName, extra, params.PVPaths)
-	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, nsentrerExpendedArgs(internal.LVMCmd, args...)...)
+	argv, err := sharedLVMArgs(args...)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -979,7 +995,10 @@ func (commands) VGActivate(ctx context.Context, vgName string) (string, error) {
 // an older stand.
 func (commands) VGLockStart(ctx context.Context, vgName string, hostID int) (string, error) {
 	args := []string{"vgchange", "--lock-start", vgName}
-	extendedArgs := lvmStaticLockdArgs(args, hostID)
+	extendedArgs, err := lvmStaticLockdArgs(args, hostID)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -1000,7 +1019,10 @@ func (commands) VGLockStart(ctx context.Context, vgName string, hostID int) (str
 // the command.
 func (commands) VGLockStop(ctx context.Context, vgName string) (string, error) {
 	args := []string{"vgchange", "--lock-stop", vgName}
-	extendedArgs := lvmStaticLockdArgs(args, 0)
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -1041,7 +1063,10 @@ func (commands) LVActivateShared(ctx context.Context, vgName string, lvNames []s
 	}
 
 	args := append([]string{"lvchange", mode}, lvPaths(vgName, lvNames)...)
-	extendedArgs := lvmStaticLockdArgs(args, 0)
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -1062,7 +1087,10 @@ func (commands) LVDeactivateShared(ctx context.Context, vgName string, lvNames [
 	}
 
 	args := append([]string{"lvchange", "-an"}, lvPaths(vgName, lvNames)...)
-	extendedArgs := lvmStaticLockdArgs(args, 0)
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -2049,9 +2077,9 @@ func lvmStaticExtendedArgs(args []string) []string {
 // host_id is passed only when it is known and non-zero. It is the client's own
 // copy of what lvmlockd reads from its host-id file, and lvm2 >= 2.03.27 checks
 // it against the ceiling implied by the lease alignment.
-func lvmStaticLockdArgs(args []string, hostID int) []string {
+func lvmStaticLockdArgs(args []string, hostID int) ([]string, error) {
 	if len(args) == 0 {
-		return nsentrerExpendedArgs(internal.LVMCmd, args...)
+		return nil, fmt.Errorf("no command given")
 	}
 
 	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMArchiveRetention + " global/use_lvmlockd=1"
@@ -2063,7 +2091,28 @@ func lvmStaticLockdArgs(args []string, hostID int) []string {
 	withConfig = append(withConfig, args[0], "--config", configValue)
 	withConfig = append(withConfig, args[1:]...)
 
-	return nsentrerExpendedArgs(internal.LVMCmd, withConfig...)
+	return sharedLVMArgs(withConfig...)
+}
+
+// sharedLVMArgs builds the argv for a command against a shared Volume Group.
+//
+// It enters the mount namespace of the lock daemons rather than the host's, and
+// runs their lvm rather than this module's. The host's namespace has no lvm that
+// can speak to lvmlockd — this module's is compiled without the support and a
+// node carries none of its own — so the same command that works for a local
+// group answers "Using a shared lock type requires lvmlockd" for a shared one.
+//
+// Only the mount namespace is entered. The daemons run with the node's pid and
+// network namespaces already, so asking for those again would be a no-op with
+// two more ways to fail.
+func sharedLVMArgs(args ...string) ([]string, error) {
+	pid, err := SharedLVMNamespacePID()
+	if err != nil {
+		return nil, err
+	}
+
+	argv := []string{"-t", strconv.Itoa(pid), "-m", "--", internal.SharedLVMCmd}
+	return append(argv, args...), nil
 }
 
 // The benign-stderr allowlists. A line matched here is one lvm.static prints
