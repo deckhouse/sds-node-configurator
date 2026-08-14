@@ -2062,8 +2062,7 @@ func (r *Reconciler) createVGComplex(ctx context.Context, lvg *v1alpha1.LVMVolum
 
 	r.log.Debug(fmt.Sprintf("[CreateVGComplex] successfully created all PVs for the LVMVolumeGroup %s", lvg.Name))
 	r.log.Debug(fmt.Sprintf("[CreateVGComplex] the LVMVolumeGroup %s type is %s", lvg.Name, lvg.Spec.Type))
-	switch lvg.Spec.Type {
-	case internal.Local:
+	if lvg.Spec.Type == internal.Local {
 		start := time.Now()
 		cmd, err := r.commands.CreateVGLocal(lvg.Spec.ActualVGNameOnTheNode, lvg.Name, paths)
 		r.metrics.UtilsCommandsDuration(ReconcilerName, "vgcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
