@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -176,11 +177,115 @@ func (r *Reconciler) attach(
 		}
 	}
 
+	// Attached is reported before the size question is even asked. The volume is
+	// active and usable at whatever size it currently has; making readiness wait
+	// for an extension would hold up a pod over a resize it does not need yet.
 	devicePath := filepath.Join("/dev", vgName, lvName)
 	r.setStatus(ctx, attachment, PhaseAttached, devicePath, true, "Activated",
 		fmt.Sprintf("%s is active on %s", devicePath, r.cfg.NodeName))
 
+	// Growing the volume belongs here and not to the metadata owner. lvextend
+	// takes the LV lock, and under lvmlockd that lock is held exclusively by the
+	// activating node — the owner would simply be refused. Which also means the
+	// requested size has to reach this node through the volume resource, because
+	// there is no other channel to it.
+	return r.extendIfNeeded(ctx, attachment, volume, vgName, lvName)
+}
+
+// extendIfNeeded grows the volume to the size its resource asks for.
+//
+// The observed size is published on the ATTACHMENT rather than on the volume,
+// and that is the same reasoning as everywhere else in this design: the node
+// that performed the operation is the one that reports it. The consumer needs
+// this value before it grows anything on top — a filesystem resize against a
+// device that has not grown yet fails in a way that looks like a broken
+// filesystem.
+func (r *Reconciler) extendIfNeeded(
+	ctx context.Context,
+	attachment *v1alpha1.LVMSharedLogicalVolumeAttachment,
+	volume *v1alpha1.LVMSharedLogicalVolume,
+	vgName, lvName string,
+) (controller.Result, error) {
+	requested, err := resource.ParseQuantity(volume.Spec.Size)
+	if err != nil {
+		// The webhook and the schema pattern keep this out, so a bad value here
+		// is worth an error rather than a silent skip.
+		return controller.Result{}, fmt.Errorf("volume %s has an unparseable size %q: %w",
+			volume.Name, volume.Spec.Size, err)
+	}
+
+	actual := r.actualSize(vgName, lvName)
+	if actual == nil {
+		// The volume was just activated and this node's view of LVM has not caught
+		// up. Extending on the strength of "I do not know the current size" is the
+		// one thing that must not happen here: the next pass knows.
+		return controller.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+	if actual.Cmp(requested) >= 0 {
+		r.publishObservedSize(ctx, attachment, actual.String())
+		return controller.Result{}, nil
+	}
+
+	r.log.Info(fmt.Sprintf("[%s] extending %s/%s to %s", ReconcilerName, vgName, lvName, volume.Spec.Size))
+	cmd, err := r.commands.LVExtendShared(ctx, vgName, lvName, volume.Spec.Size)
+	if err != nil {
+		// A group that has run out of space is the ordinary reason, and it is not
+		// this node's to fix. Retry rather than fail the attachment: the volume is
+		// still usable at its current size.
+		r.log.Warning(fmt.Sprintf("[%s] unable to extend %s/%s (cmd: %s): %s",
+			ReconcilerName, vgName, lvName, cmd, err.Error()))
+		return controller.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	// The new size is read back rather than assumed: lvm rounds up to whole
+	// extents, and with a large extent size the difference is worth reporting.
+	if grown := r.actualSize(vgName, lvName); grown != nil {
+		r.publishObservedSize(ctx, attachment, grown.String())
+	}
+
 	return controller.Result{}, nil
+}
+
+// actualSize is the size of the volume as this node currently sees it, or nil
+// when it does not know.
+//
+// A zero counts as "does not know" rather than as a size: LVM never reports a
+// zero-length logical volume, so a zero here is a cache that has not been filled
+// in — and treating it as a size would mean extending a volume on no information
+// at all.
+func (r *Reconciler) actualSize(vgName, lvName string) *resource.Quantity {
+	lvs, _ := r.sdsCache.GetLVs()
+	for i := range lvs {
+		if lvs[i].VGName != vgName || lvs[i].LVName != lvName {
+			continue
+		}
+		size := lvs[i].LVSize
+		if size.IsZero() {
+			return nil
+		}
+		return &size
+	}
+	return nil
+}
+
+func (r *Reconciler) publishObservedSize(
+	ctx context.Context,
+	attachment *v1alpha1.LVMSharedLogicalVolumeAttachment,
+	size string,
+) {
+	if attachment.Status != nil && attachment.Status.ObservedSize == size {
+		return
+	}
+
+	patch := client.MergeFrom(attachment.DeepCopy())
+	if attachment.Status == nil {
+		attachment.Status = &v1alpha1.LVMSharedLogicalVolumeAttachmentStatus{}
+	}
+	attachment.Status.ObservedSize = size
+
+	if err := r.cl.Status().Patch(ctx, attachment, patch); err != nil {
+		r.log.Error(err, fmt.Sprintf("[%s] unable to publish the observed size of %s", ReconcilerName, attachment.Name))
+	}
 }
 
 // detach releases the volume and only then lets the object go. The order is the

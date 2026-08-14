@@ -71,6 +71,7 @@ type Commands interface {
 	CreateLVShared(ctx context.Context, vgName, lvName, size string) (string, error)
 	RemoveLVShared(ctx context.Context, vgName, lvName string) (string, error)
 	SetLVTagShared(ctx context.Context, vgName, lvName, tag string, add bool) (string, error)
+	LVExtendShared(ctx context.Context, vgName, lvName, size string) (string, error)
 	LVActivateShared(ctx context.Context, vgName string, lvNames []string, shared bool) (string, error)
 	LVDeactivateShared(ctx context.Context, vgName string, lvNames []string) (string, error)
 	LVActivate(ctx context.Context, vgName, lvName string) (string, error)
@@ -528,6 +529,32 @@ func (commands) RemoveLVShared(ctx context.Context, vgName, lvName string) (stri
 
 	if err := cmd.Run(); err != nil {
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// LVExtendShared grows a volume of a shared Volume Group.
+//
+// It must run on the node that holds the volume's lock, which is the node the
+// volume is attached to and not the metadata owner. That is not a preference:
+// lvextend takes the LV lock, and under lvmlockd the lock is held exclusively by
+// the activating node — the owner's attempt would simply be refused.
+//
+// The size is the requested one, not a delta, so a retry after a partial failure
+// asks for the same end state rather than adding twice.
+func (commands) LVExtendShared(ctx context.Context, vgName, lvName, size string) (string, error) {
+	args := []string{"lvextend", "-L", size, fmt.Sprintf("%s/%s", vgName, lvName)}
+	extendedArgs := lvmStaticLockdArgs(args, 0)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	// A volume that is already the requested size makes lvextend exit non-zero
+	// with "matches existing size", and for an idempotent caller that is a
+	// success — the same benign-stderr treatment the local path already gives it.
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignResizeStdErr, silentExitIsBenign); err != nil {
+		return cmd.String(), err
 	}
 	return cmd.String(), nil
 }

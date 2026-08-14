@@ -544,6 +544,21 @@ func (mr *MockCommandsMockRecorder) LVDeactivateShared(ctx, vgName, lvNames any)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVDeactivateShared", reflect.TypeOf((*MockCommands)(nil).LVDeactivateShared), ctx, vgName, lvNames)
 }
 
+// LVExtendShared mocks base method.
+func (m *MockCommands) LVExtendShared(ctx context.Context, vgName, lvName, size string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LVExtendShared", ctx, vgName, lvName, size)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LVExtendShared indicates an expected call of LVExtendShared.
+func (mr *MockCommandsMockRecorder) LVExtendShared(ctx, vgName, lvName, size any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVExtendShared", reflect.TypeOf((*MockCommands)(nil).LVExtendShared), ctx, vgName, lvName, size)
+}
+
 // ListLoopDevices mocks base method.
 func (m *MockCommands) ListLoopDevices(ctx context.Context) (string, []internal.LoopDeviceEntry, error) {
 	m.ctrl.T.Helper()

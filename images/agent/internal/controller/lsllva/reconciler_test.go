@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -398,4 +399,111 @@ func TestMassEventGoesInOneCommand(t *testing.T) {
 	assert.ElementsMatch(t, []string{testLV, "vol2", "vol3", "vol4", "vol5"}, got)
 	assert.NotContains(t, got, "elsewhere", "a neighbour's volume is not ours to activate")
 	assert.NotContains(t, got, "rwx", "shared and exclusive activation cannot share a command")
+}
+
+// --- growing an attached volume ---
+
+func sizedLV(size string) internal.LVData {
+	return internal.LVData{
+		VGName: testVG, LVName: testLV, LVAttr: "-wi-a-----",
+		LVSize: resource.MustParse(size),
+	}
+}
+
+func volumeOfSize(size string) *v1alpha1.LVMSharedLogicalVolume {
+	volume := testVolume()
+	volume.Spec.Size = size
+	return volume
+}
+
+func TestAttachedVolumeIsGrownByTheNodeThatHoldsTheLock(t *testing.T) {
+	// Not by the metadata owner: lvextend takes the LV lock, and under lvmlockd
+	// that lock is held exclusively by the activating node.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	attachment := testAttachment(testNode, withFinalizer)
+	r, cl := testReconciler(t, commands, []internal.LVData{sizedLV("10Gi")},
+		testGroup(), volumeOfSize("20Gi"), attachment)
+
+	commands.EXPECT().LVExtendShared(gomock.Any(), testVG, testLV, "20Gi").DoAndReturn(
+		func(_ context.Context, _, _, _ string) (string, error) {
+			r.sdsCache.StoreLVs([]internal.LVData{sizedLV("20Gi")}, bytes.Buffer{})
+			return "lvextend", nil
+		})
+
+	reconcile(t, r, attachment)
+
+	got := attachmentFromAPI(t, cl)
+	assert.Equal(t, PhaseAttached, got.Status.Phase)
+	assert.Equal(t, "20Gi", got.Status.ObservedSize,
+		"the consumer needs the new size before it grows anything on top of it")
+}
+
+func TestVolumeAtItsSizeIsNotExtended(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	// No expectation: every lvm command against a shared group takes the group
+	// lock, and the pool's throughput is made of those.
+	attachment := testAttachment(testNode, withFinalizer)
+	r, cl := testReconciler(t, commands, []internal.LVData{sizedLV("10Gi")},
+		testGroup(), volumeOfSize("10Gi"), attachment)
+
+	reconcile(t, r, attachment)
+
+	assert.Equal(t, "10Gi", attachmentFromAPI(t, cl).Status.ObservedSize)
+}
+
+func TestUnknownSizeIsNotAReasonToExtend(t *testing.T) {
+	// The volume was just activated and this node's view of LVM has not caught
+	// up. Extending on the strength of not knowing is the one thing that must not
+	// happen: the next pass knows.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	attachment := testAttachment(testNode, withFinalizer)
+	r, cl := testReconciler(t, commands, []internal.LVData{activeLV()},
+		testGroup(), volumeOfSize("20Gi"), attachment)
+
+	res := reconcile(t, r, attachment)
+
+	assert.NotZero(t, res.RequeueAfter)
+	assert.Equal(t, PhaseAttached, attachmentFromAPI(t, cl).Status.Phase,
+		"the volume is usable at whatever size it has, so readiness does not wait for a resize")
+}
+
+func TestFailedExtensionKeepsTheVolumeUsable(t *testing.T) {
+	// A group out of space is not this node's to fix, and the volume still works
+	// at its current size.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	attachment := testAttachment(testNode, withFinalizer)
+	r, cl := testReconciler(t, commands, []internal.LVData{sizedLV("10Gi")},
+		testGroup(), volumeOfSize("20Gi"), attachment)
+
+	commands.EXPECT().LVExtendShared(gomock.Any(), testVG, testLV, "20Gi").
+		Return("lvextend", errors.New("Insufficient free space"))
+
+	res := reconcile(t, r, attachment)
+
+	assert.NotZero(t, res.RequeueAfter)
+	assert.Equal(t, PhaseAttached, attachmentFromAPI(t, cl).Status.Phase)
+}
+
+func TestRoundedSizeIsReportedAsItIs(t *testing.T) {
+	// lvm rounds up to whole extents, and with a large extent size the difference
+	// is worth reporting rather than echoing the request back.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	attachment := testAttachment(testNode, withFinalizer)
+	r, cl := testReconciler(t, commands, []internal.LVData{sizedLV("10Gi")},
+		testGroup(), volumeOfSize("10241Mi"), attachment)
+
+	commands.EXPECT().LVExtendShared(gomock.Any(), testVG, testLV, "10241Mi").DoAndReturn(
+		func(_ context.Context, _, _, _ string) (string, error) {
+			r.sdsCache.StoreLVs([]internal.LVData{sizedLV("10244Mi")}, bytes.Buffer{})
+			return "lvextend", nil
+		})
+
+	reconcile(t, r, attachment)
+
+	assert.Equal(t, "10244Mi", attachmentFromAPI(t, cl).Status.ObservedSize)
 }
