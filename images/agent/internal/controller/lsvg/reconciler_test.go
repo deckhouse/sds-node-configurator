@@ -65,16 +65,26 @@ func testReconciler(
 	node *corev1.Node,
 	commands *mock_utils.MockCommands,
 	lvs []internal.LVData,
+	objects ...client.Object,
 ) (*Reconciler, client.Client, string) {
 	t.Helper()
 
 	s := scheme.Scheme
 	require.NoError(t, v1alpha1.AddToScheme(s))
 	require.NoError(t, corev1.AddToScheme(s))
-	cl := fake.NewClientBuilder().WithScheme(s).WithObjects(node).Build()
+	cl := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(append([]client.Object{node}, objects...)...).
+		WithStatusSubresource(&v1alpha1.LVMSharedVolumeGroup{}).
+		Build()
 
 	sdsCache := cache.New()
 	sdsCache.StoreLVs(lvs, bytes.Buffer{})
+
+	// The fallback answers: lvm cannot say anything about the group or the
+	// devices. A test that needs a different answer declares it before calling
+	// this helper, and gomock prefers the expectation declared first.
+	commands.EXPECT().GetVG(gomock.Any()).Return(internal.VGData{}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+	commands.EXPECT().GetPV(gomock.Any()).Return(internal.PVData{}, "pvs", bytes.Buffer{}, nil).AnyTimes()
 
 	log, err := logger.NewLogger(logger.WarningLevel)
 	require.NoError(t, err)
@@ -112,14 +122,6 @@ func annotationsOf(t *testing.T, cl client.Client) map[string]string {
 	return node.Annotations
 }
 
-// vgUnreadable is the ordinary answer right after vgcreate: the group is there
-// but this node has not been able to read it back yet. Tests that are not about
-// publishing use it so the publish step stays out of their way.
-func vgUnreadable(commands *mock_utils.MockCommands) {
-	commands.EXPECT().GetVG(testVG).Return(internal.VGData{}, "vgs", bytes.Buffer{}, nil).AnyTimes()
-	commands.EXPECT().GetPV(gomock.Any()).Return(internal.PVData{}, "pvs", bytes.Buffer{}, nil).AnyTimes()
-}
-
 func TestWaitsForTheAllocatorInsteadOfPickingAnID(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
@@ -154,7 +156,8 @@ func TestJoinWritesTheFileBeforeStartingTheLockspace(t *testing.T) {
 
 	reconcile(t, r, testGroup(testNode))
 
-	assert.Equal(t, "true", annotationsOf(t, cl)[LockspaceStartedAnnotationPrefix+"pool-1"])
+	assert.Contains(t, annotationsOf(t, cl), LockspaceStartedAnnotationPrefix+"pool-1",
+		"the value is the group's uuid, so the fact is its presence")
 }
 
 func TestJoinIsIdempotent(t *testing.T) {
@@ -331,11 +334,11 @@ func TestOwnerCreatesTheGroupAndItStartsItsOwnLockspace(t *testing.T) {
 			assert.Equal(t, "4Mi", params.PhysicalExtentSize)
 			return "vgcreate --shared", nil
 		})
-	vgUnreadable(commands)
 
 	reconcile(t, r, ownedGroup())
 
-	assert.Equal(t, "true", annotationsOf(t, cl)[LockspaceStartedAnnotationPrefix+"pool-1"])
+	assert.Contains(t, annotationsOf(t, cl), LockspaceStartedAnnotationPrefix+"pool-1",
+		"the value is the group's uuid, so the fact is its presence")
 }
 
 func TestGroupIsNotRecreatedOverAnExistingOne(t *testing.T) {
@@ -345,14 +348,15 @@ func TestGroupIsNotRecreatedOverAnExistingOne(t *testing.T) {
 	// The physical volume label already names a group, which is the only proof
 	// that counts: under lvmlockd a skipped group looks exactly like an absent
 	// one to vgs.
-	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
-
 	// lvm says the group is there, which is the only source that can say it about
 	// a group created a moment ago.
-	commands.EXPECT().GetVG(testVG).Return(internal.VGData{VGName: testVG}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+	commands.EXPECT().GetVG(testVG).Return(internal.VGData{VGName: testVG, VGUUID: "vg-uuid"}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+	group := ownedGroup()
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
 
-	reconcile(t, r, ownedGroup())
+	reconcile(t, r, group)
 }
 
 func TestTheOwnerPublishesWhatItObservesAboutTheGroup(t *testing.T) {
@@ -365,8 +369,10 @@ func TestTheOwnerPublishesWhatItObservesAboutTheGroup(t *testing.T) {
 	require.NoError(t, v1alpha1.AddToScheme(s))
 	require.NoError(t, corev1.AddToScheme(s))
 	node := nodeWith(map[string]string{
-		SanlockHostIDAnnotation:                       "7",
-		LockspaceStartedAnnotationPrefix + group.Name: "true",
+		SanlockHostIDAnnotation: "7",
+		// The value is the group's identity: a name alone would let a group
+		// destroyed and created again inherit this node's old claim.
+		LockspaceStartedAnnotationPrefix + group.Name: "vg-uuid",
 	})
 	cl := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(node, group).WithStatusSubresource(group).Build()
@@ -405,13 +411,12 @@ func TestForeignGroupOnTheLUNIsRefused(t *testing.T) {
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
-	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
 	// A group that is not the one the pool asks for. Found on the stand: the LUN
 	// had been used for something else, and the check that only asked "is there a
 	// group here" would have declared the pool's group ready without it existing.
-	commands.EXPECT().GetVG(testVG).Return(internal.VGData{}, "vgs", bytes.Buffer{}, nil).AnyTimes()
 	commands.EXPECT().GetPV(gomock.Any()).
 		Return(internal.PVData{PVName: "/dev/mapper/mpathi", VGName: "someone-elses-vg"}, "pvs", bytes.Buffer{}, nil).AnyTimes()
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
 
 	_, err := r.Reconcile(context.Background(),
 		controller.ReconcileRequest[*v1alpha1.LVMSharedVolumeGroup]{Object: ownedGroup()})
@@ -443,7 +448,6 @@ func TestUnusableExtentSizeIsAHardStop(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
-	vgUnreadable(commands)
 
 	_, err := r.Reconcile(context.Background(),
 		controller.ReconcileRequest[*v1alpha1.LVMSharedVolumeGroup]{Object: ownedGroup()})
@@ -474,11 +478,36 @@ func TestAnUnnamedGroupIsNotAForeignGroup(t *testing.T) {
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
-	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
-	commands.EXPECT().GetVG(testVG).Return(internal.VGData{}, "vgs", bytes.Buffer{}, nil).AnyTimes()
 	commands.EXPECT().GetPV(gomock.Any()).
 		Return(internal.PVData{PVName: "/dev/mapper/mpathi", VGName: "[unknown]"}, "pvs", bytes.Buffer{}, nil).AnyTimes()
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
 	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("vgcreate --shared", nil)
 
 	reconcile(t, r, ownedGroup())
+}
+
+func TestARecreatedGroupDoesNotInheritTheOldLockspaceClaim(t *testing.T) {
+	// Found on the stand: a pool being commissioned had its group destroyed and
+	// created again under the same name. Two of three nodes still carried
+	// "lockspace started" from the previous group, never started the new one,
+	// and the pool looked healthy with a single member actually holding leases.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	commands.EXPECT().GetVG(testVG).
+		Return(internal.VGData{VGName: testVG, VGUUID: "the-new-one"}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+
+	group := testGroup(testNode)
+	node := nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                       "7",
+		LockspaceStartedAnnotationPrefix + group.Name: "the-old-one",
+	})
+	r, cl, _ := testReconciler(t, node, commands, nil, group)
+
+	// The lockspace of the group that exists now has to be started here.
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
+
+	reconcile(t, r, group)
+
+	assert.Equal(t, "the-new-one", annotationsOf(t, cl)[LockspaceStartedAnnotationPrefix+group.Name])
 }

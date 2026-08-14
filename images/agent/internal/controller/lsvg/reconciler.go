@@ -169,6 +169,11 @@ func (r *Reconciler) join(
 		return controller.Result{}, err
 	}
 
+	// The identity of the group this node is about to hold a lockspace of. Read
+	// before anything is decided, because both the check below and the fact
+	// published afterwards are about THIS group and not about its name.
+	vgUUID := r.vgUUID(lsvg.Spec.ActualVGNameOnTheNode)
+
 	if lsvg.Spec.MetadataOwner == r.cfg.NodeName {
 		created, res, err := r.ensureGroup(ctx, lsvg, hostID)
 		if err != nil || created || res.RequeueAfter > 0 {
@@ -176,7 +181,8 @@ func (r *Reconciler) join(
 			// vgcreate --shared starts it — so the readiness fact is published
 			// and the reconcile ends.
 			if created {
-				if err := r.setLockspaceStarted(ctx, lsvg.Name, true); err != nil {
+				// Created a moment ago, so its identity is only known now.
+				if err := r.setLockspaceStarted(ctx, lsvg.Name, r.vgUUID(lsvg.Spec.ActualVGNameOnTheNode), true); err != nil {
 					return controller.Result{}, err
 				}
 				return r.publishGroup(ctx, lsvg)
@@ -185,7 +191,7 @@ func (r *Reconciler) join(
 		}
 	}
 
-	if r.lockspaceStarted(node, lsvg.Name) {
+	if r.lockspaceStarted(node, lsvg.Name, vgUUID) {
 		return r.publishGroup(ctx, lsvg)
 	}
 
@@ -200,7 +206,7 @@ func (r *Reconciler) join(
 		return controller.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	if err := r.setLockspaceStarted(ctx, lsvg.Name, true); err != nil {
+	if err := r.setLockspaceStarted(ctx, lsvg.Name, vgUUID, true); err != nil {
 		return controller.Result{}, err
 	}
 
@@ -451,7 +457,10 @@ func (r *Reconciler) leave(
 		return controller.Result{}, err
 	}
 
-	if !r.lockspaceStarted(node, lsvg.Name) {
+	// Presence, not identity: whatever group the annotation was written for, the
+	// node is leaving this one, and a lockspace that is not running makes
+	// vgchange --lock-stop a no-op anyway.
+	if !r.lockspaceStarted(node, lsvg.Name, "") {
 		return controller.Result{}, nil
 	}
 
@@ -464,7 +473,7 @@ func (r *Reconciler) leave(
 		return controller.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
-	if err := r.setLockspaceStarted(ctx, lsvg.Name, false); err != nil {
+	if err := r.setLockspaceStarted(ctx, lsvg.Name, "", false); err != nil {
 		return controller.Result{}, err
 	}
 
@@ -505,11 +514,39 @@ func (r *Reconciler) node(ctx context.Context) (*corev1.Node, error) {
 	return node, nil
 }
 
-func (r *Reconciler) lockspaceStarted(node *corev1.Node, groupName string) bool {
-	return node.Annotations[LockspaceStartedAnnotationPrefix+groupName] == "true"
+// lockspaceStarted reports whether this node holds the lockspace OF THIS GROUP,
+// and the emphasis is the point.
+//
+// The value is the volume group's uuid rather than "true", because a group can
+// be destroyed and created again under the same name — which is exactly what
+// happens while a pool is being commissioned. A boolean keyed by name survives
+// that and lies: the node claims a lockspace of a group that no longer exists,
+// never starts the one that does, and the pool looks healthy on paper with one
+// member actually holding leases.
+// vgUUID is the group's identity, or an empty string when it cannot be read —
+// which is the ordinary state before the group exists.
+func (r *Reconciler) vgUUID(vgName string) string {
+	vg, _, _, err := r.commands.GetVG(vgName)
+	if err != nil {
+		return ""
+	}
+	return vg.VGUUID
 }
 
-func (r *Reconciler) setLockspaceStarted(ctx context.Context, groupName string, started bool) error {
+func (r *Reconciler) lockspaceStarted(node *corev1.Node, groupName, vgUUID string) bool {
+	value := node.Annotations[LockspaceStartedAnnotationPrefix+groupName]
+	if value == "" {
+		return false
+	}
+	if vgUUID == "" {
+		// The group cannot be read right now. Whatever is written was written by
+		// this node about this group, so it is the best answer available.
+		return true
+	}
+	return value == vgUUID
+}
+
+func (r *Reconciler) setLockspaceStarted(ctx context.Context, groupName, vgUUID string, started bool) error {
 	node, err := r.node(ctx)
 	if err != nil {
 		return err
@@ -521,7 +558,7 @@ func (r *Reconciler) setLockspaceStarted(ctx context.Context, groupName string, 
 		if node.Annotations == nil {
 			node.Annotations = map[string]string{}
 		}
-		node.Annotations[key] = "true"
+		node.Annotations[key] = vgUUID
 	} else {
 		if _, ok := node.Annotations[key]; !ok {
 			return nil
