@@ -36,6 +36,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -150,8 +151,23 @@ func (r *Reconciler) join(
 		return controller.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
+	// Before anything else, including vgcreate: creating a shared group starts
+	// its lockspace, and lvmlockd reads the id from this file when it does.
 	if err := r.writeHostIDFile(hostID); err != nil {
 		return controller.Result{}, err
+	}
+
+	if lsvg.Spec.MetadataOwner == r.cfg.NodeName {
+		created, res, err := r.ensureGroup(ctx, lsvg, hostID)
+		if err != nil || created || res.RequeueAfter > 0 {
+			// A group that was just created already holds its lockspace here —
+			// vgcreate --shared starts it — so the readiness fact is published
+			// and the reconcile ends.
+			if created {
+				return controller.Result{}, r.setLockspaceStarted(ctx, lsvg.Name, true)
+			}
+			return res, err
+		}
 	}
 
 	if r.lockspaceStarted(node, lsvg.Name) {
@@ -175,6 +191,118 @@ func (r *Reconciler) join(
 
 	r.log.Info(fmt.Sprintf("[%s] the lockspace of %s is started", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
 	return controller.Result{}, nil
+}
+
+// ensureGroup creates the Volume Group if it is not there yet. Only the
+// metadata owner runs it: LVM metadata has one writer by construction, and two
+// nodes racing to create the same group on the same LUN is not a race that ends
+// well.
+//
+// Absence is proved by reading the labels of the physical volumes rather than
+// by asking vgs. Under lvmlockd a group whose lockspace this node has not
+// started is skipped and looks exactly like a group that does not exist, so
+// "vgs found nothing" is not evidence of anything — and acting on it would mean
+// creating a second group over an existing one.
+func (r *Reconciler) ensureGroup(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+	hostID int,
+) (created bool, res controller.Result, err error) {
+	wwids := make([]string, 0, len(lsvg.Spec.Devices))
+	for _, device := range lsvg.Spec.Devices {
+		wwids = append(wwids, device.WWID)
+	}
+
+	devices, missing, err := utils.ResolveWWIDs(wwids)
+	if err != nil {
+		return false, controller.Result{}, fmt.Errorf("resolve the devices of %s: %w", lsvg.Name, err)
+	}
+	if len(missing) > 0 {
+		// The array has not presented these LUNs to this node yet, or multipath
+		// has not assembled them. Both resolve themselves.
+		r.log.Info(fmt.Sprintf("[%s] %s is waiting for %d device(s): %s",
+			ReconcilerName, lsvg.Name, len(missing), strings.Join(missing, ", ")))
+		return false, controller.Result{RequeueAfter: 20 * time.Second}, nil
+	}
+
+	if r.groupExists(devices) {
+		return false, controller.Result{}, nil
+	}
+
+	ordered := make([]utils.SharedDevice, 0, len(devices))
+	for _, wwid := range wwids {
+		ordered = append(ordered, devices[wwid])
+	}
+	if err := utils.CheckSharedDeviceInvariants(ordered, extentSizeBytes(lsvg)); err != nil {
+		// Neither invariant can be repaired after the group exists, so this is a
+		// hard stop rather than a retry.
+		return false, controller.Result{}, fmt.Errorf("%s cannot be created: %w", lsvg.Name, err)
+	}
+
+	params := utils.SharedVGParams{
+		VGName:                lsvg.Spec.ActualVGNameOnTheNode,
+		SharedVolumeGroupName: lsvg.Name,
+		PVPaths:               utils.SortedPaths(devices),
+		HostID:                hostID,
+		SanlockAlignSizeMiB:   alignSizeMiB(lsvg),
+	}
+	if lsvg.Spec.LVM != nil {
+		params.PhysicalExtentSize = lsvg.Spec.LVM.PhysicalExtentSize
+		params.MetadataSize = lsvg.Spec.LVM.MetadataSize
+	}
+
+	r.log.Info(fmt.Sprintf("[%s] creating the shared volume group %s on %s",
+		ReconcilerName, params.VGName, strings.Join(params.PVPaths, ", ")))
+	cmd, err := r.commands.CreateVGShared(ctx, params)
+	if err != nil {
+		return false, controller.Result{}, fmt.Errorf("create the shared volume group %s (cmd: %s): %w",
+			params.VGName, cmd, err)
+	}
+
+	r.log.Info(fmt.Sprintf("[%s] the shared volume group %s is created", ReconcilerName, params.VGName))
+	return true, controller.Result{}, nil
+}
+
+// groupExists reads the physical volume labels this node has already scanned.
+// A label naming a volume group is proof the group is there; vgs is not.
+func (r *Reconciler) groupExists(devices map[string]utils.SharedDevice) bool {
+	pvs, _ := r.sdsCache.GetPVs()
+	for _, pv := range pvs {
+		for _, device := range devices {
+			if pv.PVName == device.Path && pv.VGName != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// extentSizeBytes parses the requested extent size for the granularity check.
+// An unparseable value simply skips the check rather than blocking creation:
+// lvm validates the string itself and says so better than this could.
+func extentSizeBytes(lsvg *v1alpha1.LVMSharedVolumeGroup) int {
+	if lsvg.Spec.LVM == nil || lsvg.Spec.LVM.PhysicalExtentSize == "" {
+		return 0
+	}
+	quantity, err := resource.ParseQuantity(lsvg.Spec.LVM.PhysicalExtentSize)
+	if err != nil {
+		return 0
+	}
+	return int(quantity.Value())
+}
+
+// alignSizeMiB turns the lease alignment into the integer lvm expects. It is
+// the same number the host_id allocator derives its ceiling from, and the two
+// must not disagree.
+func alignSizeMiB(lsvg *v1alpha1.LVMSharedVolumeGroup) int {
+	if lsvg.Spec.LVM == nil || lsvg.Spec.LVM.SanlockAlignSize == "" {
+		return 0
+	}
+	quantity, err := resource.ParseQuantity(lsvg.Spec.LVM.SanlockAlignSize)
+	if err != nil {
+		return 0
+	}
+	return int(quantity.Value() / (1024 * 1024))
 }
 
 // leave takes this node out of the group's lockspace, in the one order that is

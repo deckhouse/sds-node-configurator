@@ -33,6 +33,7 @@ import (
 	internal "github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	logger "github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	monitoring "github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
+	utils "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -193,6 +194,21 @@ func (m *MockCommands) CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames 
 func (mr *MockCommandsMockRecorder) CreateVGLocal(vgName, lvmVolumeGroupName, pvNames any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateVGLocal", reflect.TypeOf((*MockCommands)(nil).CreateVGLocal), vgName, lvmVolumeGroupName, pvNames)
+}
+
+// CreateVGShared mocks base method.
+func (m *MockCommands) CreateVGShared(ctx context.Context, params utils.SharedVGParams) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateVGShared", ctx, params)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateVGShared indicates an expected call of CreateVGShared.
+func (mr *MockCommandsMockRecorder) CreateVGShared(ctx, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateVGShared", reflect.TypeOf((*MockCommands)(nil).CreateVGShared), ctx, params)
 }
 
 // DetachLoopDevice mocks base method.

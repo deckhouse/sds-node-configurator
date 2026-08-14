@@ -22,6 +22,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -39,6 +40,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 const (
@@ -265,4 +267,123 @@ func TestUnreadableHostIDIsAnError(t *testing.T) {
 	_, err := r.Reconcile(context.Background(),
 		controller.ReconcileRequest[*v1alpha1.LVMSharedVolumeGroup]{Object: testGroup(testNode)})
 	require.Error(t, err)
+}
+
+// --- the metadata owner's half: creating the group ---
+
+func ownedGroup(opts ...func(*v1alpha1.LVMSharedVolumeGroup)) *v1alpha1.LVMSharedVolumeGroup {
+	g := testGroup(testNode)
+	g.Spec.MetadataOwner = testNode
+	g.Spec.Devices = []v1alpha1.LVMSharedVolumeGroupDevice{{WWID: "36c89f1a1"}}
+	g.Spec.LVM = &v1alpha1.LVMSharedVolumeGroupLVMSpec{
+		PhysicalExtentSize: "4Mi",
+		SanlockAlignSize:   "4Mi",
+	}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
+}
+
+func fakeSysBlockWithLUN(t *testing.T, granularity int) {
+	t.Helper()
+	root := t.TempDir()
+	base := filepath.Join(root, "dm-3")
+	require.NoError(t, os.MkdirAll(filepath.Join(base, "dm"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(base, "queue"), 0o755))
+	write := func(p, v string) {
+		require.NoError(t, os.WriteFile(filepath.Join(base, p), []byte(v+"\n"), 0o644))
+	}
+	write("dm/uuid", "mpath-36c89f1a1")
+	write("dm/name", "mpathi")
+	write("queue/logical_block_size", "512")
+	write("queue/physical_block_size", "512")
+	write("queue/discard_granularity", strconv.Itoa(granularity))
+
+	old := utils.SysBlockRoot
+	utils.SysBlockRoot = root
+	t.Cleanup(func() { utils.SysBlockRoot = old })
+}
+
+func TestOwnerCreatesTheGroupAndItStartsItsOwnLockspace(t *testing.T) {
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
+
+	// No VGLockStart expectation: vgcreate --shared starts the lockspace itself,
+	// so running it afterwards would be a command that blocks for nothing.
+	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, params utils.SharedVGParams) (string, error) {
+			assert.Equal(t, testVG, params.VGName)
+			assert.Equal(t, []string{"/dev/mapper/mpathi"}, params.PVPaths)
+			assert.Equal(t, 7, params.HostID, "the client checks host_id against the alignment ceiling itself")
+			assert.Equal(t, 4, params.SanlockAlignSizeMiB)
+			assert.Equal(t, "4Mi", params.PhysicalExtentSize)
+			return "vgcreate --shared", nil
+		})
+
+	reconcile(t, r, ownedGroup())
+
+	assert.Equal(t, "true", annotationsOf(t, cl)[LockspaceStartedAnnotationPrefix+"pool-1"])
+}
+
+func TestGroupIsNotRecreatedOverAnExistingOne(t *testing.T) {
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	// The physical volume label already names a group, which is the only proof
+	// that counts: under lvmlockd a skipped group looks exactly like an absent
+	// one to vgs.
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
+	r.sdsCache.StorePVs([]internal.PVData{{PVName: "/dev/mapper/mpathi", VGName: testVG}}, bytes.Buffer{})
+
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
+
+	reconcile(t, r, ownedGroup())
+}
+
+func TestMissingLUNPostponesCreation(t *testing.T) {
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
+
+	group := ownedGroup(func(g *v1alpha1.LVMSharedVolumeGroup) {
+		g.Spec.Devices = append(g.Spec.Devices, v1alpha1.LVMSharedVolumeGroupDevice{WWID: "not-here-yet"})
+	})
+
+	res := reconcile(t, r, group)
+
+	assert.NotZero(t, res.RequeueAfter, "an array that has not presented the LUN yet resolves itself")
+	assert.NotContains(t, annotationsOf(t, cl), LockspaceStartedAnnotationPrefix+"pool-1")
+}
+
+func TestUnusableExtentSizeIsAHardStop(t *testing.T) {
+	// 3 KiB granularity against a 4 MiB extent: discard would free nothing, and
+	// the extent size cannot be changed once the group exists.
+	fakeSysBlockWithLUN(t, 3*1024)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
+
+	_, err := r.Reconcile(context.Background(),
+		controller.ReconcileRequest[*v1alpha1.LVMSharedVolumeGroup]{Object: ownedGroup()})
+
+	require.Error(t, err, "retrying would not make an irreversible parameter correct")
+	assert.Contains(t, err.Error(), "discard would free nothing")
+}
+
+func TestNonOwnerNeverCreatesTheGroup(t *testing.T) {
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	// Two nodes racing to create one group on one LUN is not a race that ends
+	// well, so only the owner may.
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
+
+	group := ownedGroup(func(g *v1alpha1.LVMSharedVolumeGroup) { g.Spec.MetadataOwner = "other-node" })
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
+
+	reconcile(t, r, group)
 }

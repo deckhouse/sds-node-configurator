@@ -67,6 +67,7 @@ type Commands interface {
 	VGActivate(ctx context.Context, vgName string) (string, error)
 	VGLockStart(ctx context.Context, vgName string, hostID int) (string, error)
 	VGLockStop(ctx context.Context, vgName string) (string, error)
+	CreateVGShared(ctx context.Context, params SharedVGParams) (string, error)
 	LVActivateShared(ctx context.Context, vgName string, lvNames []string, shared bool) (string, error)
 	LVDeactivateShared(ctx context.Context, vgName string, lvNames []string) (string, error)
 	LVActivate(ctx context.Context, vgName, lvName string) (string, error)
@@ -473,6 +474,65 @@ func vgCreateArgs(vgName, lvmVolumeGroupName string, extraArgs []string, pvNames
 func (commands) CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
 	extendedArgs := lvmStaticExtendedArgs(vgCreateArgs(vgName, lvmVolumeGroupName, nil, pvNames))
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+		return cmd.String(), err
+	}
+
+	return cmd.String(), nil
+}
+
+// SharedVGParams is everything vgcreate needs for a shared Volume Group, and
+// every field of it is irreversible once the group exists.
+type SharedVGParams struct {
+	VGName                string
+	SharedVolumeGroupName string
+	PVPaths               []string
+	HostID                int
+	// PhysicalExtentSize and MetadataSize are passed verbatim to lvm, which
+	// accepts suffixed sizes.
+	PhysicalExtentSize string
+	MetadataSize       string
+	// SanlockAlignSizeMiB is 1, 2, 4 or 8. It fixes the size of the lease area
+	// and the ceiling on host_id — 250 hosts per MiB of alignment, roughly —
+	// and cannot be changed on an existing group.
+	SanlockAlignSizeMiB int
+}
+
+// CreateVGShared creates the Volume Group of a pool.
+//
+// The command is a bootstrap as much as a creation: vgcreate --shared starts
+// the lockspace itself and enables the global lock, so the node running it ends
+// up a member of a pool that did not exist a moment earlier.
+//
+// host_id and the lease alignment go in through --config rather than being left
+// to the daemon's configuration, and that is a version requirement rather than
+// a preference. Since lvm2 2.03.27 the CLIENT checks local/host_id against the
+// ceiling implied by the alignment, so a client that says nothing about either
+// is refused in production while passing on an older stand. That mismatch is
+// invisible until the day it is not.
+func (commands) CreateVGShared(ctx context.Context, params SharedVGParams) (string, error) {
+	config := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMArchiveRetention + " global/use_lvmlockd=1"
+	if params.HostID > 0 {
+		config += " local/host_id=" + strconv.Itoa(params.HostID)
+	}
+	if params.SanlockAlignSizeMiB > 0 {
+		config += " global/sanlock_align_size=" + strconv.Itoa(params.SanlockAlignSizeMiB)
+	}
+
+	extra := []string{"--config", config, "--shared"}
+	if params.PhysicalExtentSize != "" {
+		extra = append(extra, "--physicalextentsize", params.PhysicalExtentSize)
+	}
+	if params.MetadataSize != "" {
+		extra = append(extra, "--metadatasize", params.MetadataSize)
+	}
+
+	args := vgCreateArgs(params.VGName, params.SharedVolumeGroupName, extra, params.PVPaths)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, nsentrerExpendedArgs(internal.LVMCmd, args...)...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

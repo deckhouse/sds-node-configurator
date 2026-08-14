@@ -50,7 +50,7 @@ const (
 	// them an operation with a drain — so the host_id goes in through a file and
 	// the result of a fencing barrier comes back out through one.
 	SharedLockDaemonsStateDir = "/opt/deckhouse/sds/lvmlockd"
-	ThinDumpCmd                  = "thin_dump"
+	ThinDumpCmd               = "thin_dump"
 
 	// The commands below are the node's own, not the module's. Everything above
 	// ships in the agent image under /opt/deckhouse/sds/bin precisely so the
