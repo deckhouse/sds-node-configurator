@@ -31,8 +31,12 @@ import (
 )
 
 const (
-	ScanInterval                         = "SCAN_INTERVAL"
-	NodeName                             = "NODE_NAME"
+	ScanInterval = "SCAN_INTERVAL"
+	NodeName     = "NODE_NAME"
+	// PodNamespace is where the agent publishes its heartbeat. Taken from the
+	// pod rather than hardcoded, so a module renamed or installed elsewhere does
+	// not silently write into a namespace nobody reads.
+	PodNamespace                         = "POD_NAMESPACE"
 	LogLevel                             = "LOG_LEVEL"
 	MetricsPort                          = "METRICS_PORT"
 	MachineID                            = "MACHINE_ID"
@@ -77,6 +81,7 @@ type Features struct {
 type Config struct {
 	MachineID               string
 	NodeName                string
+	PodNamespace            string
 	Loglevel                logger.Verbosity
 	MetricsPort             string
 	BlockDeviceScanInterval time.Duration
@@ -97,6 +102,8 @@ type Config struct {
 
 func NewConfig() (*Config, error) {
 	var cfg Config
+
+	cfg.PodNamespace = os.Getenv(PodNamespace)
 
 	cfg.NodeName = os.Getenv(NodeName)
 	if cfg.NodeName == "" {

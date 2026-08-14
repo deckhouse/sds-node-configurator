@@ -48,6 +48,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsllva"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsvg"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lvg"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/heartbeat"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/kubutils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
@@ -136,6 +137,16 @@ func run() int {
 		return 1
 	}
 	log.Info("[main] successfully created kubernetes manager")
+
+	// The heartbeat starts before any reconciler, because a node that is not seen
+	// is a node no pool will admit — and everything below only matters once it is.
+	if cfgParams.PodNamespace != "" {
+		go heartbeat.NewPublisher(
+			mgr.GetClient(), log, cfgParams.NodeName, cfgParams.PodNamespace, 20*time.Second,
+		).Run(ctx)
+	} else {
+		log.Warning("[main] POD_NAMESPACE is not set, so this agent will not publish a heartbeat and no shared pool will admit this node")
+	}
 
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 	commands := utils.NewCommands()
