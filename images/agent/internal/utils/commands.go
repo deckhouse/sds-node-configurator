@@ -68,6 +68,9 @@ type Commands interface {
 	VGLockStart(ctx context.Context, vgName string, hostID int) (string, error)
 	VGLockStop(ctx context.Context, vgName string) (string, error)
 	CreateVGShared(ctx context.Context, params SharedVGParams) (string, error)
+	CreateLVShared(ctx context.Context, vgName, lvName, size string) (string, error)
+	RemoveLVShared(ctx context.Context, vgName, lvName string) (string, error)
+	SetLVTagShared(ctx context.Context, vgName, lvName, tag string, add bool) (string, error)
 	LVActivateShared(ctx context.Context, vgName string, lvNames []string, shared bool) (string, error)
 	LVDeactivateShared(ctx context.Context, vgName string, lvNames []string) (string, error)
 	LVActivate(ctx context.Context, vgName, lvName string) (string, error)
@@ -482,6 +485,77 @@ func (commands) CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []strin
 		return cmd.String(), err
 	}
 
+	return cmd.String(), nil
+}
+
+// CreateLVShared creates a thick volume in a shared Volume Group.
+//
+// Activation is left at lvm's default and -Z y is explicit, and the two go
+// together. lvcreate --activate n turns off lvm's own zeroing of the volume
+// head, and a volume whose head still carries the previous tenant's superblock
+// is a volume blkid identifies as an ext4 that the consumer never made — which
+// is how a fresh PersistentVolume comes up already "formatted".
+//
+// This closes MISIDENTIFICATION, not disclosure. Reading the previous tenant's
+// data is stopped by the wipe on deletion, or by the array returning zeroes
+// after unmapping — never by zeroing four kilobytes at the front.
+//
+// The volume is then deactivated by the caller: creating is not attaching, and
+// a metadata owner that kept every volume it created would hold the exclusive
+// lock of the entire pool.
+func (commands) CreateLVShared(ctx context.Context, vgName, lvName, size string) (string, error) {
+	args := []string{"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", size, "-W", "y", "-y"}
+	extendedArgs := lvmStaticLockdArgs(args, 0)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// RemoveLVShared destroys a volume of a shared Volume Group.
+func (commands) RemoveLVShared(ctx context.Context, vgName, lvName string) (string, error) {
+	args := []string{"lvremove", "-y", fmt.Sprintf("%s/%s", vgName, lvName)}
+	extendedArgs := lvmStaticLockdArgs(args, 0)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// SetLVTagShared adds or removes a tag on a volume of a shared group.
+//
+// Tags are where the "not cleaned yet" marker lives, and the reason is
+// ownership rather than taste: the marker has to survive the metadata owner
+// changing between the moment a wipe starts and the moment it finishes. A
+// marker in the resource status would be written by the old owner and never
+// read by the new one, which leaves a volume that was never wiped looking
+// exactly like one that was.
+func (commands) SetLVTagShared(ctx context.Context, vgName, lvName, tag string, add bool) (string, error) {
+	flag := "--deltag"
+	if add {
+		flag = "--addtag"
+	}
+
+	args := []string{"lvchange", flag, tag, fmt.Sprintf("%s/%s", vgName, lvName)}
+	extendedArgs := lvmStaticLockdArgs(args, 0)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
 	return cmd.String(), nil
 }
 

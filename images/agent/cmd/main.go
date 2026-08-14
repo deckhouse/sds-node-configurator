@@ -44,6 +44,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/bdf"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llv"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llv_extender"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsllv"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsllva"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsvg"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lvg"
@@ -312,6 +313,22 @@ func run() int {
 			os.Exit(1)
 		}
 	}()
+
+	err = controller.AddReconciler(
+		mgr,
+		log,
+		lsllv.NewReconciler(
+			mgr.GetClient(),
+			log,
+			sdsCache,
+			commands,
+			lsllv.ReconcilerConfig{NodeName: cfgParams.NodeName},
+		),
+	)
+	if err != nil {
+		log.Error(err, "[main] unable to add the LVMSharedLogicalVolume reconciler")
+		return 1
+	}
 
 	err = controller.AddReconciler(
 		mgr,

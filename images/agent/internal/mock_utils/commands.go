@@ -76,6 +76,21 @@ func (mr *MockCommandsMockRecorder) CreateFileDevice(ctx, path, sizeBytes any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateFileDevice", reflect.TypeOf((*MockCommands)(nil).CreateFileDevice), ctx, path, sizeBytes)
 }
 
+// CreateLVShared mocks base method.
+func (m *MockCommands) CreateLVShared(ctx context.Context, vgName, lvName, size string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateLVShared", ctx, vgName, lvName, size)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateLVShared indicates an expected call of CreateLVShared.
+func (mr *MockCommandsMockRecorder) CreateLVShared(ctx, vgName, lvName, size any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateLVShared", reflect.TypeOf((*MockCommands)(nil).CreateLVShared), ctx, vgName, lvName, size)
+}
+
 // CreatePV mocks base method.
 func (m *MockCommands) CreatePV(ctx context.Context, path string) (string, error) {
 	m.ctrl.T.Helper()
@@ -604,6 +619,21 @@ func (mr *MockCommandsMockRecorder) RemoveLV(vgName, lvName any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveLV", reflect.TypeOf((*MockCommands)(nil).RemoveLV), vgName, lvName)
 }
 
+// RemoveLVShared mocks base method.
+func (m *MockCommands) RemoveLVShared(ctx context.Context, vgName, lvName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveLVShared", ctx, vgName, lvName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemoveLVShared indicates an expected call of RemoveLVShared.
+func (mr *MockCommandsMockRecorder) RemoveLVShared(ctx, vgName, lvName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveLVShared", reflect.TypeOf((*MockCommands)(nil).RemoveLVShared), ctx, vgName, lvName)
+}
+
 // RemovePV mocks base method.
 func (m *MockCommands) RemovePV(pvNames []string) (string, error) {
 	m.ctrl.T.Helper()
@@ -647,6 +677,21 @@ func (m *MockCommands) ResizePV(ctx context.Context, pvName string) (string, err
 func (mr *MockCommandsMockRecorder) ResizePV(ctx, pvName any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResizePV", reflect.TypeOf((*MockCommands)(nil).ResizePV), ctx, pvName)
+}
+
+// SetLVTagShared mocks base method.
+func (m *MockCommands) SetLVTagShared(ctx context.Context, vgName, lvName, tag string, add bool) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetLVTagShared", ctx, vgName, lvName, tag, add)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetLVTagShared indicates an expected call of SetLVTagShared.
+func (mr *MockCommandsMockRecorder) SetLVTagShared(ctx, vgName, lvName, tag, add any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLVTagShared", reflect.TypeOf((*MockCommands)(nil).SetLVTagShared), ctx, vgName, lvName, tag, add)
 }
 
 // SetLoopCapacity mocks base method.
