@@ -240,7 +240,20 @@ func effectiveCleanup(volume *v1alpha1.LVMSharedLogicalVolume, group *v1alpha1.L
 	return group.Spec.VolumeCleanup
 }
 
+// findLV asks lvm whether the volume is there, and falls back to the scan cache
+// only if the question cannot be put.
+//
+// Asked rather than remembered, for the same reason the group is: the cache is
+// filled by a scanner with no schedule of its own, so a volume created a moment
+// ago may not be in it. Believing the cache there means running lvcreate against
+// a name that already exists, which fails — and the failure would move a volume
+// that is perfectly fine from Created back to Pending.
 func (r *Reconciler) findLV(vgName, lvName string) *internal.LVData {
+	lv, _, _, err := r.commands.GetLV(vgName, lvName)
+	if err == nil && lv.LVName == lvName {
+		return &lv
+	}
+
 	lvs, _ := r.sdsCache.GetLVs()
 	for i := range lvs {
 		if lvs[i].VGName == vgName && lvs[i].LVName == lvName {

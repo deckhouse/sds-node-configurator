@@ -105,6 +105,13 @@ func testReconciler(
 	sdsCache := cache.New()
 	sdsCache.StoreLVs(lvs, bytes.Buffer{})
 
+	// These tests describe what happens around the volume, not how it is looked
+	// up, so lvm answers "cannot say" and the lookup falls back to the scan
+	// results the test seeded. The other way round — lvm answering — is a test of
+	// its own, below.
+	commands.EXPECT().GetLV(gomock.Any(), gomock.Any()).
+		Return(internal.LVData{}, "lvs", bytes.Buffer{}, errors.New("not asked here")).AnyTimes()
+
 	log, err := logger.NewLogger(logger.WarningLevel)
 	require.NoError(t, err)
 
@@ -218,4 +225,35 @@ func TestConditionTimestampMovesOnlyOnChange(t *testing.T) {
 
 	setCondition(&conditions, metav1.Condition{Type: ConditionReady, Status: metav1.ConditionTrue, Reason: "Three"})
 	assert.NotEqual(t, first, conditions[0].LastTransitionTime)
+}
+
+func TestAnExistingVolumeIsNotCreatedTwiceWhenTheScanIsStale(t *testing.T) {
+	// The scanner has no schedule of its own, so a volume created a moment ago
+	// may be absent from the scan results. Trusting them would run lvcreate
+	// against a name that exists, and the failure would move a perfectly good
+	// volume from Created back to Pending.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	volume := testVolume()
+	group := testGroup(testNode)
+
+	s := scheme.Scheme
+	require.NoError(t, v1alpha1.AddToScheme(s))
+	cl := fake.NewClientBuilder().WithScheme(s).WithObjects(volume, group).
+		WithStatusSubresource(&v1alpha1.LVMSharedLogicalVolume{}).Build()
+
+	commands.EXPECT().GetLV(testVG, testLV).
+		Return(internal.LVData{VGName: testVG, LVName: testLV}, "lvs", bytes.Buffer{}, nil).AnyTimes()
+	// No CreateLVShared expectation: asking lvm is the whole point.
+
+	log, err := logger.NewLogger(logger.WarningLevel)
+	require.NoError(t, err)
+	r := NewReconciler(cl, log, cache.New(), commands, ReconcilerConfig{NodeName: testNode})
+
+	reconcile(t, r, volume)
+
+	published := &v1alpha1.LVMSharedLogicalVolume{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: volume.Name}, published))
+	require.NotNil(t, published.Status)
+	assert.Equal(t, PhaseCreated, published.Status.Phase)
 }
