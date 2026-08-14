@@ -219,3 +219,44 @@ func SortedPaths(devices map[string]SharedDevice) []string {
 	sort.Strings(paths)
 	return paths
 }
+
+// LVIsActiveHere reports whether the logical volume has a device-mapper device
+// on this node, which is what "active here" means under lvmlockd.
+//
+// Sysfs rather than lvm, and the reason is the pool's scarcest resource: every
+// lvm command against a shared group takes the group lock, whose throughput is
+// flat at 13-21 operations per second no matter how many nodes there are. A
+// readiness check is asked far more often than a volume is activated, so putting
+// it behind that lock would spend the pool's throughput on questions.
+//
+// Sysfs rather than the scan cache, for the opposite reason: the cache is filled
+// by a scanner with no schedule of its own, so it cannot answer a question about
+// something that happened a moment ago — and the question always comes a moment
+// after an activation.
+func LVIsActiveHere(vgName, lvName string) bool {
+	want := dmName(vgName, lvName)
+
+	entries, err := os.ReadDir(SysBlockRoot)
+	if err != nil {
+		return false
+	}
+
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), "dm-") {
+			continue
+		}
+		name, err := readSysAttr(filepath.Join(SysBlockRoot, entry.Name(), "dm", "name"))
+		if err == nil && name == want {
+			return true
+		}
+	}
+	return false
+}
+
+// dmName is the name device-mapper gives a logical volume: the group and the
+// volume joined by a dash, with any dash inside either of them doubled. Without
+// the doubling, "vg-a/lv" and "vg/a-lv" would be the same device.
+func dmName(vgName, lvName string) string {
+	escape := func(s string) string { return strings.ReplaceAll(s, "-", "--") }
+	return escape(vgName) + "-" + escape(lvName)
+}

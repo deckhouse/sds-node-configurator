@@ -21,6 +21,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,6 +40,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 const (
@@ -102,6 +105,26 @@ func inactiveLV() internal.LVData {
 	return internal.LVData{VGName: testVG, LVName: testLV, LVAttr: "-wi-------"}
 }
 
+// dmView points the device-mapper view at a directory this test owns, and hands
+// back the two things a test does with it. "Active on this node" is a dm device
+// and nothing else, so this is the whole of the state the reconciler reads back
+// after an activation.
+func dmView(t *testing.T) (activate func(), deactivate func()) {
+	t.Helper()
+	root := t.TempDir()
+	previous := utils.SysBlockRoot
+	utils.SysBlockRoot = root
+	t.Cleanup(func() { utils.SysBlockRoot = previous })
+
+	dir := filepath.Join(root, "dm-0", "dm")
+	return func() {
+			require.NoError(t, os.MkdirAll(dir, 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "name"), []byte(testVG+"-"+testLV+"\n"), 0o644))
+		}, func() {
+			require.NoError(t, os.RemoveAll(filepath.Join(root, "dm-0")))
+		}
+}
+
 func testReconciler(
 	t *testing.T,
 	commands *mock_utils.MockCommands,
@@ -120,6 +143,11 @@ func testReconciler(
 
 	sdsCache := cache.New()
 	sdsCache.StoreLVs(lvs, bytes.Buffer{})
+
+	// Sizes come from lvm first and the scan results only as a fallback; these
+	// tests describe the fallback, so lvm answers "cannot say".
+	commands.EXPECT().GetLV(gomock.Any(), gomock.Any()).
+		Return(internal.LVData{}, "lvs", bytes.Buffer{}, errors.New("not asked here")).AnyTimes()
 
 	log, err := logger.NewLogger(logger.WarningLevel)
 	require.NoError(t, err)
@@ -158,13 +186,14 @@ func TestAttachActivatesAndReportsThePath(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	attachment := testAttachment(testNode)
+	activate, _ := dmView(t)
 	r, cl := testReconciler(t, commands, nil, testGroup(), testVolume(), attachment)
 
-	// The cache says inactive before the command and active after it, which is
-	// what the reconciler reads back instead of trusting the exit code.
+	// No device-mapper device before the command and one after it, which is what
+	// the reconciler reads back instead of trusting the exit code.
 	commands.EXPECT().LVActivateShared(gomock.Any(), testVG, []string{testLV}, false).DoAndReturn(
 		func(_ context.Context, _ string, _ []string, _ bool) (string, error) {
-			r.sdsCache.StoreLVs([]internal.LVData{activeLV()}, bytes.Buffer{})
+			activate()
 			return "lvchange -aey", nil
 		})
 
@@ -182,11 +211,12 @@ func TestReadWriteManyUsesSharedActivation(t *testing.T) {
 	attachment := testAttachment(testNode, func(a *v1alpha1.LVMSharedLogicalVolumeAttachment) {
 		a.Spec.AccessMode = v1alpha1.LVMSharedLogicalVolumeAccessModeRWX
 	})
+	activate, _ := dmView(t)
 	r, _ := testReconciler(t, commands, nil, testGroup(), testVolume(), attachment)
 
 	commands.EXPECT().LVActivateShared(gomock.Any(), testVG, []string{testLV}, true).DoAndReturn(
 		func(_ context.Context, _ string, _ []string, _ bool) (string, error) {
-			r.sdsCache.StoreLVs([]internal.LVData{activeLV()}, bytes.Buffer{})
+			activate()
 			return "lvchange -asy", nil
 		})
 
@@ -199,6 +229,8 @@ func TestAlreadyActiveVolumeIsNotActivatedAgain(t *testing.T) {
 	// No expectation: every lvm command against a shared group takes the group
 	// lock, and the lock is what the pool's throughput is made of.
 	attachment := testAttachment(testNode, withFinalizer)
+	activate, _ := dmView(t)
+	activate()
 	r, cl := testReconciler(t, commands, []internal.LVData{activeLV()}, testGroup(), testVolume(), attachment)
 
 	reconcile(t, r, attachment)
@@ -245,11 +277,13 @@ func TestDetachDeactivatesBeforeReleasingTheObject(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	attachment := testAttachment(testNode, deleting)
+	activate, deactivate := dmView(t)
+	activate()
 	r, cl := testReconciler(t, commands, []internal.LVData{activeLV()}, testGroup(), testVolume(), attachment)
 
 	commands.EXPECT().LVDeactivateShared(gomock.Any(), testVG, []string{testLV}).DoAndReturn(
 		func(_ context.Context, _ string, _ []string) (string, error) {
-			r.sdsCache.StoreLVs([]internal.LVData{inactiveLV()}, bytes.Buffer{})
+			deactivate()
 			return "lvchange -an", nil
 		})
 
@@ -264,6 +298,8 @@ func TestBusyVolumeKeepsTheAttachmentAlive(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	attachment := testAttachment(testNode, deleting)
+	activate, _ := dmView(t)
+	activate()
 	r, cl := testReconciler(t, commands, []internal.LVData{activeLV()}, testGroup(), testVolume(), attachment)
 
 	commands.EXPECT().LVDeactivateShared(gomock.Any(), testVG, []string{testLV}).
@@ -422,6 +458,9 @@ func TestAttachedVolumeIsGrownByTheNodeThatHoldsTheLock(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	attachment := testAttachment(testNode, withFinalizer)
+	// The volume is attached here, so the extension is this node's to make.
+	activate, _ := dmView(t)
+	activate()
 	r, cl := testReconciler(t, commands, []internal.LVData{sizedLV("10Gi")},
 		testGroup(), volumeOfSize("20Gi"), attachment)
 
@@ -445,6 +484,9 @@ func TestVolumeAtItsSizeIsNotExtended(t *testing.T) {
 	// No expectation: every lvm command against a shared group takes the group
 	// lock, and the pool's throughput is made of those.
 	attachment := testAttachment(testNode, withFinalizer)
+	// The volume is attached here, so the extension is this node's to make.
+	activate, _ := dmView(t)
+	activate()
 	r, cl := testReconciler(t, commands, []internal.LVData{sizedLV("10Gi")},
 		testGroup(), volumeOfSize("10Gi"), attachment)
 
@@ -460,6 +502,9 @@ func TestUnknownSizeIsNotAReasonToExtend(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	attachment := testAttachment(testNode, withFinalizer)
+	// The volume is attached here, so the extension is this node's to make.
+	activate, _ := dmView(t)
+	activate()
 	r, cl := testReconciler(t, commands, []internal.LVData{activeLV()},
 		testGroup(), volumeOfSize("20Gi"), attachment)
 
@@ -476,6 +521,9 @@ func TestFailedExtensionKeepsTheVolumeUsable(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	attachment := testAttachment(testNode, withFinalizer)
+	// The volume is attached here, so the extension is this node's to make.
+	activate, _ := dmView(t)
+	activate()
 	r, cl := testReconciler(t, commands, []internal.LVData{sizedLV("10Gi")},
 		testGroup(), volumeOfSize("20Gi"), attachment)
 
@@ -494,6 +542,9 @@ func TestRoundedSizeIsReportedAsItIs(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	attachment := testAttachment(testNode, withFinalizer)
+	// The volume is attached here, so the extension is this node's to make.
+	activate, _ := dmView(t)
+	activate()
 	r, cl := testReconciler(t, commands, []internal.LVData{sizedLV("10Gi")},
 		testGroup(), volumeOfSize("10241Mi"), attachment)
 
@@ -506,4 +557,29 @@ func TestRoundedSizeIsReportedAsItIs(t *testing.T) {
 	reconcile(t, r, attachment)
 
 	assert.Equal(t, "10244Mi", attachmentFromAPI(t, cl).Status.ObservedSize)
+}
+
+func TestActivationIsSeenWithoutWaitingForAScan(t *testing.T) {
+	// The state is read back after the activation, and it used to be read from
+	// the scan cache — which the activation does not touch. The attachment
+	// therefore reported NotActiveYet forever on a volume that was active, and
+	// the pod waiting for it never started. Nothing here fills a cache: the
+	// device-mapper device appearing is the whole of the evidence.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	attachment := testAttachment(testNode)
+	activate, _ := dmView(t)
+	r, cl := testReconciler(t, commands, nil, testGroup(), testVolume(), attachment)
+
+	commands.EXPECT().LVActivateShared(gomock.Any(), testVG, []string{testLV}, false).DoAndReturn(
+		func(_ context.Context, _ string, _ []string, _ bool) (string, error) {
+			activate()
+			return "lvchange -aey", nil
+		})
+
+	reconcile(t, r, attachment)
+
+	got := attachmentFromAPI(t, cl)
+	assert.Equal(t, PhaseAttached, got.Status.Phase)
+	assert.Equal(t, "/dev/vgshared/vol1", got.Status.DevicePath)
 }

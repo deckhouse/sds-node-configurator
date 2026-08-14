@@ -254,6 +254,19 @@ func (r *Reconciler) extendIfNeeded(
 // in — and treating it as a size would mean extending a volume on no information
 // at all.
 func (r *Reconciler) actualSize(vgName, lvName string) *resource.Quantity {
+	// Asked, then remembered. A size is read while deciding whether to extend and
+	// again to report what the extension produced, and both questions are about
+	// something that has just happened — which the scan cache, refreshed by a
+	// scanner with no schedule of its own, cannot answer. The cost is one lvs per
+	// resize rather than per activation, which is where the group lock's
+	// throughput actually matters.
+	if lv, _, _, err := r.commands.GetLV(vgName, lvName); err == nil && lv.LVName == lvName {
+		size := lv.LVSize
+		if !size.IsZero() {
+			return &size
+		}
+	}
+
 	lvs, _ := r.sdsCache.GetLVs()
 	for i := range lvs {
 		if lvs[i].VGName != vgName || lvs[i].LVName != lvName {
@@ -403,17 +416,18 @@ func (r *Reconciler) resolve(
 }
 
 // isActive reads the node's own view of device-mapper rather than asking lvm.
-// Every lvm command against a shared group takes the group lock, and the lock
-// is the pool's scarcest resource: its throughput is flat at 13-21 operations
-// per second no matter how many nodes there are.
+//
+// Not lvm, because every command against a shared group takes the group lock,
+// and the lock is the pool's scarcest resource: its throughput is flat at 13-21
+// operations per second no matter how many nodes there are.
+//
+// Not the scan cache either, which is what this used to read and what made the
+// check unable to do its job: the cache is filled by a scanner with no schedule
+// of its own, so right after an activation it still says the volume is inactive.
+// The caller reads the state back precisely to avoid trusting an exit code, and
+// a source that cannot have observed the change is no better than the exit code.
 func (r *Reconciler) isActive(vgName, lvName string) bool {
-	lvs, _ := r.sdsCache.GetLVs()
-	for _, lv := range lvs {
-		if lv.VGName == vgName && lv.LVName == lvName {
-			return len(lv.LVAttr) > 4 && lv.LVAttr[4] == 'a'
-		}
-	}
-	return false
+	return utils.LVIsActiveHere(vgName, lvName)
 }
 
 func (r *Reconciler) addFinalizer(ctx context.Context, attachment *v1alpha1.LVMSharedLogicalVolumeAttachment) error {
