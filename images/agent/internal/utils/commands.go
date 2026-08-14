@@ -654,7 +654,7 @@ func lvmSize(size string) string {
 }
 
 func (commands) CreateVGShared(ctx context.Context, params SharedVGParams) (string, error) {
-	config := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMArchiveRetention + " global/use_lvmlockd=1"
+	config := LVMGlobalFilterForOwnedLoops() + " " + internal.SharedLVMNoArchive + " global/use_lvmlockd=1"
 	if params.HostID > 0 {
 		config += " local/host_id=" + strconv.Itoa(params.HostID)
 	}
@@ -2082,7 +2082,7 @@ func lvmStaticLockdArgs(args []string, hostID int) ([]string, error) {
 		return nil, fmt.Errorf("no command given")
 	}
 
-	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMArchiveRetention + " global/use_lvmlockd=1"
+	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.SharedLVMNoArchive + " global/use_lvmlockd=1"
 	if hostID > 0 {
 		configValue += " local/host_id=" + strconv.Itoa(hostID)
 	}

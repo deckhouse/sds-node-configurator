@@ -226,3 +226,27 @@ func TestNoLockDaemonSaysSoInsteadOfLettingLVMSayIt(t *testing.T) {
 	assert.Contains(t, err.Error(), "not running here",
 		"lvm would call this a configuration mistake; it is a node that is not ready yet")
 }
+
+func TestSharedCommandsTurnLVMsArchiveOff(t *testing.T) {
+	// Not a preference. Those commands run in the lock daemons' mount namespace,
+	// whose root filesystem is read-only, and lvm writes its archive before it
+	// touches metadata — so with the archive on, every write fails, and fails
+	// naming the operation rather than the cause ("Failed to create sanlock lv").
+	root := t.TempDir()
+	previous := ProcRoot
+	ProcRoot = root
+	t.Cleanup(func() { ProcRoot = previous })
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "77"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "77", "cmdline"),
+		[]byte("/usr/sbin/lvmlockd\x00-f\x00"), 0o644))
+
+	argv, err := lvmStaticLockdArgs([]string{"vgs"}, 3)
+	require.NoError(t, err)
+
+	line := strings.Join(argv, " ")
+	assert.Contains(t, line, "backup/archive=0")
+	assert.Contains(t, line, "global/use_lvmlockd=1")
+	assert.Contains(t, line, "local/host_id=3")
+	assert.Contains(t, line, "-t 77 -m -- /usr/sbin/lvm vgs",
+		"the daemons' namespace and the daemons' lvm, which is the only one built with lvmlockd support")
+}

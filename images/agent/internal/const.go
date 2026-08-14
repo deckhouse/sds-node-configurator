@@ -143,6 +143,21 @@ const (
 	// archives must be pruned manually on impacted nodes.
 	LVMArchiveRetention = `backup/retain_min=10 backup/retain_days=7`
 
+	// SharedLVMNoArchive turns lvm's metadata archive off for commands against a
+	// shared Volume Group, and it is a requirement rather than a preference.
+	//
+	// Those commands run in the mount namespace of the lock daemons (see
+	// SharedLVMCmd), whose root filesystem is read-only: lvm writes /etc/lvm/archive
+	// BEFORE touching metadata, so with the archive on, every write fails — and
+	// fails in a way that names the operation rather than the cause, as
+	// "Failed to create sanlock lv lvmlock in vg <name>".
+	//
+	// Nothing is lost by it. The metadata of a shared group lives on the LUN, where
+	// every member reads it; the archive is a local convenience, and a local
+	// convenience written into a container that is thrown away on the next restart
+	// is not one.
+	SharedLVMNoArchive = `backup/archive=0 backup/backup=0`
+
 	TypeVGConfigurationApplied = "VGConfigurationApplied"
 	TypeVGReady                = "VGReady"
 
