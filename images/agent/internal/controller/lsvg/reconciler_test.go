@@ -460,3 +460,20 @@ func TestNonOwnerNeverCreatesTheGroup(t *testing.T) {
 
 	reconcile(t, r, group)
 }
+
+func TestAnUnnamedGroupIsNotAForeignGroup(t *testing.T) {
+	// What the LUN looks like after a vgcreate that labelled the physical volume
+	// and then failed: a PV "marked in use but no VG was found using it", which
+	// lvm reports as "[unknown]". Found on the stand, where the module's own
+	// debris made it refuse to create anything, forever.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
+	r.sdsCache.StorePVs([]internal.PVData{{PVName: "/dev/mapper/mpathi", VGName: "[unknown]"}}, bytes.Buffer{})
+
+	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("vgcreate --shared", nil)
+	vgUnreadable(commands)
+
+	reconcile(t, r, ownedGroup())
+}

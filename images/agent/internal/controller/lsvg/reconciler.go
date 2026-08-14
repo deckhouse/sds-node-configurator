@@ -381,7 +381,11 @@ func (r *Reconciler) groupState(
 	pvs, _ := r.sdsCache.GetPVs()
 	for _, pv := range pvs {
 		for _, device := range devices {
-			if pv.PVName != device.Path || pv.VGName == "" {
+			// "[unknown]" is not a name, it is lvm saying it cannot tell — which
+			// is what a physical volume looks like after a vgcreate that labelled
+			// it and then failed. Reading it as someone else's group turns this
+			// module's own debris into a permanent refusal to create anything.
+			if pv.PVName != device.Path || pv.VGName == "" || pv.VGName == "[unknown]" {
 				continue
 			}
 			if pv.VGName == wantVGName {
