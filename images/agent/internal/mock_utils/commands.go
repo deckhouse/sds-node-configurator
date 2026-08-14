@@ -468,6 +468,21 @@ func (mr *MockCommandsMockRecorder) LVActivate(ctx, vgName, lvName any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVActivate", reflect.TypeOf((*MockCommands)(nil).LVActivate), ctx, vgName, lvName)
 }
 
+// LVActivateShared mocks base method.
+func (m *MockCommands) LVActivateShared(ctx context.Context, vgName string, lvNames []string, shared bool) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LVActivateShared", ctx, vgName, lvNames, shared)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LVActivateShared indicates an expected call of LVActivateShared.
+func (mr *MockCommandsMockRecorder) LVActivateShared(ctx, vgName, lvNames, shared any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVActivateShared", reflect.TypeOf((*MockCommands)(nil).LVActivateShared), ctx, vgName, lvNames, shared)
+}
+
 // LVChangeDelTag mocks base method.
 func (m *MockCommands) LVChangeDelTag(ctx context.Context, lv internal.LVData, tag string) (string, error) {
 	m.ctrl.T.Helper()
@@ -481,6 +496,21 @@ func (m *MockCommands) LVChangeDelTag(ctx context.Context, lv internal.LVData, t
 func (mr *MockCommandsMockRecorder) LVChangeDelTag(ctx, lv, tag any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVChangeDelTag", reflect.TypeOf((*MockCommands)(nil).LVChangeDelTag), ctx, lv, tag)
+}
+
+// LVDeactivateShared mocks base method.
+func (m *MockCommands) LVDeactivateShared(ctx context.Context, vgName string, lvNames []string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LVDeactivateShared", ctx, vgName, lvNames)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LVDeactivateShared indicates an expected call of LVDeactivateShared.
+func (mr *MockCommandsMockRecorder) LVDeactivateShared(ctx, vgName, lvNames any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVDeactivateShared", reflect.TypeOf((*MockCommands)(nil).LVDeactivateShared), ctx, vgName, lvNames)
 }
 
 // ListLoopDevices mocks base method.

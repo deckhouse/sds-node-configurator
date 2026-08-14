@@ -36,15 +36,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/bd"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/bdf"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llv"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsvg"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llv_extender"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsllva"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsvg"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lvg"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/kubutils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
@@ -311,6 +312,22 @@ func run() int {
 			os.Exit(1)
 		}
 	}()
+
+	err = controller.AddReconciler(
+		mgr,
+		log,
+		lsllva.NewReconciler(
+			mgr.GetClient(),
+			log,
+			sdsCache,
+			commands,
+			lsllva.ReconcilerConfig{NodeName: cfgParams.NodeName},
+		),
+	)
+	if err != nil {
+		log.Error(err, "[main] unable to add the LVMSharedLogicalVolumeAttachment reconciler")
+		return 1
+	}
 
 	err = controller.AddReconciler(
 		mgr,
