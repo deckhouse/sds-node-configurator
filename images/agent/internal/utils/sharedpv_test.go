@@ -170,3 +170,14 @@ func TestSortedPathsAreStable(t *testing.T) {
 	assert.Equal(t, []string{"/dev/mapper/mpatha", "/dev/mapper/mpathb"}, SortedPaths(devices),
 		"a vgcreate retried after a failure has to be the same command")
 }
+
+func TestLVMSizeSpeaksLVMsNotation(t *testing.T) {
+	// "4Mi" is a valid quantity everywhere in this module's API and a usage
+	// error to lvm, which exits 3 and prints its help without naming the
+	// argument it disliked. Found on the stand exactly that way.
+	assert.Equal(t, "4096k", lvmSize("4Mi"))
+	assert.Equal(t, "1048576k", lvmSize("1Gi"))
+	assert.Equal(t, "4m", lvmSize("4m"),
+		"lvm's own spelling means mebibytes; as a quantity it would be four thousandths of a byte")
+	assert.Equal(t, "nonsense", lvmSize("nonsense"), "lvm rejects it with a better message than this could")
+}

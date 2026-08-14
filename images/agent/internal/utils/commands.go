@@ -33,6 +33,8 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
@@ -615,6 +617,27 @@ type SharedVGParams struct {
 // ceiling implied by the alignment, so a client that says nothing about either
 // is refused in production while passing on an older stand. That mismatch is
 // invisible until the day it is not.
+
+// lvmSize turns a size written the way Kubernetes writes sizes into the way lvm
+// reads them.
+//
+// The two notations look alike and are not, in both directions. "4Mi" is a valid
+// quantity in every API of this module and a usage error to lvm, which exits 3
+// and prints its help without naming the argument it disliked. And "4m" means
+// four mebibytes to lvm and four thousandths of a byte to Kubernetes — so a
+// value that parses to less than a kibibyte is left exactly as written rather
+// than converted to the zero it would become.
+//
+// Anything else unparseable is passed through too: lvm accepts its own spelling
+// and rejects nonsense with a better message than this could.
+func lvmSize(size string) string {
+	quantity, err := resource.ParseQuantity(size)
+	if err != nil || quantity.Value() < 1024 {
+		return size
+	}
+	return fmt.Sprintf("%dk", quantity.Value()/1024)
+}
+
 func (commands) CreateVGShared(ctx context.Context, params SharedVGParams) (string, error) {
 	config := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMArchiveRetention + " global/use_lvmlockd=1"
 	if params.HostID > 0 {
@@ -626,10 +649,10 @@ func (commands) CreateVGShared(ctx context.Context, params SharedVGParams) (stri
 
 	extra := []string{"--config", config, "--shared"}
 	if params.PhysicalExtentSize != "" {
-		extra = append(extra, "--physicalextentsize", params.PhysicalExtentSize)
+		extra = append(extra, "--physicalextentsize", lvmSize(params.PhysicalExtentSize))
 	}
 	if params.MetadataSize != "" {
-		extra = append(extra, "--metadatasize", params.MetadataSize)
+		extra = append(extra, "--metadatasize", lvmSize(params.MetadataSize))
 	}
 
 	args := vgCreateArgs(params.VGName, params.SharedVolumeGroupName, extra, params.PVPaths)
