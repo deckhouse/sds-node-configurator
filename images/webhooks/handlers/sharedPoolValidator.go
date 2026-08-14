@@ -50,10 +50,14 @@ var cleanupStrength = map[string]int{
 // second object, and that is what this is for.
 type SharedPoolValidator struct {
 	cl client.Client
+	// cleanupAvailable is injected rather than called directly so that the
+	// cross-object rules can be tested in every edition. The rules themselves
+	// have nothing to do with which edition this is; only the gate does.
+	cleanupAvailable func() bool
 }
 
 func NewSharedPoolValidator(cl client.Client) *SharedPoolValidator {
-	return &SharedPoolValidator{cl: cl}
+	return &SharedPoolValidator{cl: cl, cleanupAvailable: feature.VolumeCleanupEnabled}
 }
 
 // ValidateVolume refuses a volume whose erase policy is weaker than its pool
@@ -69,7 +73,7 @@ func (v *SharedPoolValidator) ValidateVolume(
 	_ *model.AdmissionReview,
 	obj metav1.Object,
 ) (*kwhvalidating.ValidatorResult, error) {
-	if result := requireSharedPoolEdition(); result != nil {
+	if result := v.requireEdition(); result != nil {
 		return result, nil
 	}
 
@@ -113,7 +117,7 @@ func (v *SharedPoolValidator) ValidateAttachment(
 	_ *model.AdmissionReview,
 	obj metav1.Object,
 ) (*kwhvalidating.ValidatorResult, error) {
-	if result := requireSharedPoolEdition(); result != nil {
+	if result := v.requireEdition(); result != nil {
 		return result, nil
 	}
 
@@ -144,15 +148,20 @@ func (v *SharedPoolValidator) ValidateAttachment(
 	return valid(), nil
 }
 
-// requireSharedPoolEdition gates both validators. Shared pools ride on the same
-// volume-cleanup machinery that is Enterprise Edition only, and a pool whose
-// volumes cannot be erased is a pool that hands data between tenants — so the
-// refusal is at admission rather than at deletion time.
-func requireSharedPoolEdition() *kwhvalidating.ValidatorResult {
-	if feature.VolumeCleanupEnabled() {
+// requireEdition gates both validators on volume cleanup being available, which
+// today means Enterprise Edition and CSE Pro and not SE — a narrower set than
+// "EE-gated" suggests, and worth stating because SE has snapshots but not this.
+//
+// The dependency is not incidental. Capacity carved out of a shared LUN returns
+// to the pool and comes back out as another tenant's volume, so a pool whose
+// volumes cannot be erased is a pool that hands data between tenants. Refusing
+// at admission is the only honest place: refusing at deletion would leave
+// volumes that can be created and never removed.
+func (v *SharedPoolValidator) requireEdition() *kwhvalidating.ValidatorResult {
+	if v.cleanupAvailable() {
 		return nil
 	}
-	return invalid("shared pools are not available in this Deckhouse edition")
+	return invalid("shared pools need volume cleanup, which is not available in this Deckhouse edition")
 }
 
 func valid() *kwhvalidating.ValidatorResult {

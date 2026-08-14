@@ -9,8 +9,10 @@ package lsllv
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -27,15 +29,19 @@ func TestRemoveMarksBeforeErasing(t *testing.T) {
 
 	// The marker goes on before the first byte is written. An owner taking over
 	// halfway through has to see a volume that may still hold data.
+	//
+	// The activation is made to fail on purpose: the erase writes to a real
+	// device, and this test is about the order of the marker against everything
+	// else, not about the erase itself.
 	gomock.InOrder(
 		commands.EXPECT().SetLVTagShared(gomock.Any(), testVG, testLV, PendingCleanupTag, true).Return("lvchange --addtag", nil),
-		commands.EXPECT().LVActivateShared(gomock.Any(), testVG, []string{testLV}, false).Return("lvchange -aey", nil),
+		commands.EXPECT().LVActivateShared(gomock.Any(), testVG, []string{testLV}, false).
+			Return("lvchange -aey", errors.New("LV locked by other host")),
 	)
 
-	// The erase itself needs a real device; the point checked here is the order
-	// of the marker against the activation, so the run stops at the failure.
-	_, _ = r.Reconcile(context.Background(),
+	_, err := r.Reconcile(context.Background(),
 		controller.ReconcileRequest[*v1alpha1.LVMSharedLogicalVolume]{Object: volume})
+	require.Error(t, err, "a volume that could not be erased must not be removed")
 }
 
 func TestMarkerIsNotSetTwice(t *testing.T) {
@@ -47,8 +53,10 @@ func TestMarkerIsNotSetTwice(t *testing.T) {
 	r, _ := testReconciler(t, commands, []internal.LVData{existingLV("other-tag," + PendingCleanupTag)},
 		testGroup(testNode), volume)
 
-	commands.EXPECT().LVActivateShared(gomock.Any(), testVG, []string{testLV}, false).Return("lvchange -aey", nil)
+	commands.EXPECT().LVActivateShared(gomock.Any(), testVG, []string{testLV}, false).
+		Return("lvchange -aey", errors.New("LV locked by other host"))
 
-	_, _ = r.Reconcile(context.Background(),
+	_, err := r.Reconcile(context.Background(),
 		controller.ReconcileRequest[*v1alpha1.LVMSharedLogicalVolume]{Object: volume})
+	require.Error(t, err)
 }
