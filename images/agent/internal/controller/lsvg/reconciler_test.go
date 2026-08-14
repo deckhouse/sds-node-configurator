@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -198,6 +199,8 @@ func TestLeaveRefusesWhileAVolumeIsActive(t *testing.T) {
 		SanlockHostIDAnnotation:                     "7",
 		LockspaceStartedAnnotationPrefix + "pool-1": "true",
 	})
+	fakeSysBlockWithLUN(t, 8192)
+	fakeActiveLV(t, testVG, "vol1")
 	r, cl, _ := testReconciler(t, node, commands, []internal.LVData{activeLV("vgshared", "vol1")})
 
 	res := reconcile(t, r, testGroup("other-node"))
@@ -315,6 +318,17 @@ func fakeSysBlockWithLUN(t *testing.T, granularity int) {
 	old := utils.SysBlockRoot
 	utils.SysBlockRoot = root
 	t.Cleanup(func() { utils.SysBlockRoot = old })
+}
+
+// fakeActiveLV adds a device-mapper device for a volume of the group, which is
+// what "active on this node" means and the only thing the reconciler reads.
+func fakeActiveLV(t *testing.T, vgName, lvName string) {
+	t.Helper()
+	root := utils.SysBlockRoot
+	base := filepath.Join(root, "dm-9")
+	require.NoError(t, os.MkdirAll(filepath.Join(base, "dm"), 0o755))
+	mangled := strings.ReplaceAll(vgName, "-", "--") + "-" + strings.ReplaceAll(lvName, "-", "--")
+	require.NoError(t, os.WriteFile(filepath.Join(base, "dm", "name"), []byte(mangled+"\n"), 0o644))
 }
 
 func TestOwnerCreatesTheGroupAndItStartsItsOwnLockspace(t *testing.T) {
@@ -510,4 +524,60 @@ func TestARecreatedGroupDoesNotInheritTheOldLockspaceClaim(t *testing.T) {
 	reconcile(t, r, group)
 
 	assert.Equal(t, "the-new-one", annotationsOf(t, cl)[LockspaceStartedAnnotationPrefix+group.Name])
+}
+
+func TestAStartedLockspaceReleasesMappingsNobodyAskedFor(t *testing.T) {
+	// The residue of a lock-daemon restart: sanlock and lvmlockd went down
+	// together and took every lease, the kernel kept every mapping. On the stand
+	// this left a volume mapped on a node that had never asked for it — a device
+	// with no lock behind it, which is exactly what lets a second node write to
+	// a volume this one still shows as active.
+	//
+	// The moment to clean it up is right after the lockspace starts: the leases
+	// are fresh, so everything mapped from before is known to be unlocked.
+	fakeSysBlockWithLUN(t, 8192)
+	fakeActiveLV(t, testVG, "stray")
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
+	commands.EXPECT().LVDeactivateShared(gomock.Any(), testVG, []string{"stray"}).
+		Return("lvchange -an", nil)
+
+	reconcile(t, r, group)
+}
+
+func TestAVolumeWithAnAttachmentIsLeftAlone(t *testing.T) {
+	// The other half: a mapping that something asked for stays. Deactivating it
+	// would take the volume from under a running pod, and the attachment is the
+	// statement that the pod is meant to have it.
+	fakeSysBlockWithLUN(t, 8192)
+	fakeActiveLV(t, testVG, "vol1")
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	volume := &v1alpha1.LVMSharedLogicalVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "vol-1"},
+		Spec: v1alpha1.LVMSharedLogicalVolumeSpec{
+			LVMSharedVolumeGroupName: group.Name,
+			ActualLVNameOnTheNode:    "vol1",
+			Size:                     "1Gi",
+		},
+	}
+	attachment := &v1alpha1.LVMSharedLogicalVolumeAttachment{
+		ObjectMeta: metav1.ObjectMeta{Name: "att-1"},
+		Spec: v1alpha1.LVMSharedLogicalVolumeAttachmentSpec{
+			LVMSharedLogicalVolumeName: "vol-1",
+			NodeName:                   testNode,
+		},
+	}
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands,
+		nil, group, volume, attachment)
+
+	// No LVDeactivateShared expectation: this volume belongs here.
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
+
+	reconcile(t, r, group)
 }

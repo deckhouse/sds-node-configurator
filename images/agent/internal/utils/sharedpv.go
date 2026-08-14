@@ -35,6 +35,10 @@ var SysBlockRoot = "/sys/block"
 // ProcRoot is a variable for the same reason SysBlockRoot is.
 var ProcRoot = "/proc"
 
+// LeaseAreaLVName is the hidden volume lvm creates for sanlock's leases. It
+// belongs to lvm rather than to the pool, and nothing here may deactivate it.
+const LeaseAreaLVName = "lvmlock"
+
 // SharedDevice is one LUN of a shared pool as this node sees it.
 type SharedDevice struct {
 	WWID string
@@ -311,4 +315,42 @@ func SharedLVMNamespacePID() (int, error) {
 			internal.SharedLockDaemonProcess)
 	}
 	return best, nil
+}
+
+// ActiveLVsOfGroupHere lists the logical volumes of a group that have a
+// device-mapper device on this node.
+//
+// Sysfs again, and for the same two reasons as LVIsActiveHere: asking lvm would
+// spend the pool's group lock on a question, and the scan cache cannot answer a
+// question about right now. The hidden lease volume is never returned — it is
+// lvm's own and is not a volume of the pool.
+func ActiveLVsOfGroupHere(vgName string) ([]string, error) {
+	prefix := strings.ReplaceAll(vgName, "-", "--") + "-"
+
+	entries, err := os.ReadDir(SysBlockRoot)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", SysBlockRoot, err)
+	}
+
+	var names []string
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), "dm-") {
+			continue
+		}
+		name, err := readSysAttr(filepath.Join(SysBlockRoot, entry.Name(), "dm", "name"))
+		if err != nil || !strings.HasPrefix(name, prefix) {
+			continue
+		}
+
+		// Back from device-mapper's spelling: it doubles every dash so that
+		// "vg-a/lv" and "vg/a-lv" cannot collide.
+		lvName := strings.ReplaceAll(strings.TrimPrefix(name, prefix), "--", "-")
+		if lvName == "" || lvName == LeaseAreaLVName {
+			continue
+		}
+		names = append(names, lvName)
+	}
+
+	sort.Strings(names)
+	return names, nil
 }

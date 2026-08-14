@@ -222,6 +222,11 @@ func (r *Reconciler) join(
 	}
 
 	r.log.Info(fmt.Sprintf("[%s] the lockspace of %s is started", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+
+	// The leases are fresh now, so anything still mapped from before the start
+	// is mapped without a lock behind it.
+	r.releaseOrphanActivations(ctx, lsvg)
+
 	return r.publishGroup(ctx, lsvg)
 }
 
@@ -500,21 +505,101 @@ func (r *Reconciler) leave(
 }
 
 // activeLVs names the volumes of the group that are active on this node.
+//
+// Device-mapper, not the scan cache: the question is about right now — whether
+// anything is still mapped here — and the cache is filled by a scanner with no
+// schedule of its own. Asking lvm instead would spend the pool's group lock on
+// a question rather than on work.
 func (r *Reconciler) activeLVs(vgName string) []string {
-	active := make([]string, 0)
-	lvs, _ := r.sdsCache.GetLVs()
-	for _, lv := range lvs {
-		if lv.VGName != vgName {
-			continue
-		}
-		// The fifth attribute character is 'a' for an active volume. Reading it
-		// rather than asking lvm again keeps this off the shared VG lock, which
-		// is the pool's scarcest resource.
-		if len(lv.LVAttr) > 4 && lv.LVAttr[4] == 'a' {
-			active = append(active, lv.LVName)
-		}
+	active, err := utils.ActiveLVsOfGroupHere(vgName)
+	if err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to list the active volumes of %s: %s",
+			ReconcilerName, vgName, err.Error()))
+		return nil
 	}
 	return active
+}
+
+// releaseOrphanActivations deactivates volumes of the group that are mapped on
+// this node with nothing asking for them.
+//
+// It runs right after a lockspace start, which is the moment the node's leases
+// are known to be fresh and everything mapped from before is known to be
+// unlocked. Those mappings are the residue of a lock-daemon restart: the kernel
+// kept them while sanlock lost every lease, so they are devices no lock stands
+// behind — and a device like that is what lets a second node write to a volume
+// this one still shows as active.
+//
+// Only volumes with no attachment for this node are touched, and lvchange
+// refuses to deactivate a volume that is open, which is the safety net: a
+// mapping that is genuinely in use survives and is reported instead.
+func (r *Reconciler) releaseOrphanActivations(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup) {
+	active := r.activeLVs(lsvg.Spec.ActualVGNameOnTheNode)
+	if len(active) == 0 {
+		return
+	}
+
+	wanted, err := r.attachedHere(ctx, lsvg.Name)
+	if err != nil {
+		// Without the list there is no way to tell residue from work in
+		// progress, and deactivating on a guess is the one thing that must not
+		// happen here.
+		r.log.Warning(fmt.Sprintf("[%s] unable to tell which volumes of %s belong here: %s",
+			ReconcilerName, lsvg.Name, err.Error()))
+		return
+	}
+
+	orphans := make([]string, 0, len(active))
+	for _, lvName := range active {
+		if !wanted[lvName] {
+			orphans = append(orphans, lvName)
+		}
+	}
+	if len(orphans) == 0 {
+		return
+	}
+
+	r.log.Info(fmt.Sprintf("[%s] releasing %d volume(s) of %s mapped here with no attachment: %s",
+		ReconcilerName, len(orphans), lsvg.Spec.ActualVGNameOnTheNode, strings.Join(orphans, ", ")))
+	if cmd, err := r.commands.LVDeactivateShared(ctx, lsvg.Spec.ActualVGNameOnTheNode, orphans); err != nil {
+		// Not an error of this reconcile: a volume that is open refuses to go,
+		// and that refusal is the safety net rather than a fault.
+		r.log.Warning(fmt.Sprintf("[%s] some volumes of %s could not be released (cmd: %s): %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
+	}
+}
+
+// attachedHere is the set of volumes this node has an attachment for.
+func (r *Reconciler) attachedHere(ctx context.Context, groupName string) (map[string]bool, error) {
+	attachments := &v1alpha1.LVMSharedLogicalVolumeAttachmentList{}
+	if err := r.cl.List(ctx, attachments); err != nil {
+		return nil, fmt.Errorf("list attachments: %w", err)
+	}
+
+	volumes := &v1alpha1.LVMSharedLogicalVolumeList{}
+	if err := r.cl.List(ctx, volumes); err != nil {
+		return nil, fmt.Errorf("list volumes: %w", err)
+	}
+
+	lvNameOf := make(map[string]string, len(volumes.Items))
+	for i := range volumes.Items {
+		volume := &volumes.Items[i]
+		if volume.Spec.LVMSharedVolumeGroupName == groupName {
+			lvNameOf[volume.Name] = volume.Spec.ActualLVNameOnTheNode
+		}
+	}
+
+	wanted := make(map[string]bool, len(attachments.Items))
+	for i := range attachments.Items {
+		attachment := &attachments.Items[i]
+		if attachment.Spec.NodeName != r.cfg.NodeName {
+			continue
+		}
+		if lvName, ok := lvNameOf[attachment.Spec.LVMSharedLogicalVolumeName]; ok {
+			wanted[lvName] = true
+		}
+	}
+	return wanted, nil
 }
 
 func (r *Reconciler) node(ctx context.Context) (*corev1.Node, error) {
