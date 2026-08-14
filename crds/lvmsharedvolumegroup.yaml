@@ -55,6 +55,12 @@ spec:
                 - actualVGNameOnTheNode
                 - devices
                 - volumeCleanup
+              x-kubernetes-validations:
+                # The owner performs metadata operations, which needs the group's
+                # lockspace, which only members hold. An owner outside the member
+                # list is a group that cannot be written to by anyone.
+                - rule: "!has(self.metadataOwner) || self.metadataOwner == '' || (has(self.nodes) && self.metadataOwner in self.nodes)"
+                  message: "metadataOwner must be one of nodes: only a member holds the lockspace the metadata operations need."
               properties:
                 actualVGNameOnTheNode:
                   type: string

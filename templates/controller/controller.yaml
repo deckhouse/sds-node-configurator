@@ -40,3 +40,28 @@
   "rules" (list (dict "apiGroups" (list "storage.deckhouse.io") "apiVersions" (list "v1alpha1") "operations" (list "*") "resources" (list "lvmlogicalvolumesnapshots") "scope" "Cluster"))
 }}
 {{ include "helm_lib_module_validating_webhook_configuration" (list . $llvsWebhookConfig) }}
+
+{{- /*
+  ValidatingWebhookConfigurations for the shared pool. Only the rules that need
+  a SECOND object live here — a volume's erase policy against the floor its pool
+  demands, an attachment's node against the pool's member list. Everything
+  expressible inside one resource is a CRD validation rule instead, where it is
+  enforced even when this webhook is unavailable.
+*/ -}}
+{{- $lsllvWebhookConfig := dict
+  "name" "lsllv-validation"
+  "webhookName" "lsllv-validation"
+  "valuesKey" "sdsNodeConfigurator"
+  "path" "/lsllv-validate"
+  "rules" (list (dict "apiGroups" (list "storage.deckhouse.io") "apiVersions" (list "v1alpha1") "operations" (list "CREATE" "UPDATE") "resources" (list "lvmsharedlogicalvolumes") "scope" "Cluster"))
+}}
+{{ include "helm_lib_module_validating_webhook_configuration" (list . $lsllvWebhookConfig) }}
+
+{{- $lsllvaWebhookConfig := dict
+  "name" "lsllva-validation"
+  "webhookName" "lsllva-validation"
+  "valuesKey" "sdsNodeConfigurator"
+  "path" "/lsllva-validate"
+  "rules" (list (dict "apiGroups" (list "storage.deckhouse.io") "apiVersions" (list "v1alpha1") "operations" (list "CREATE" "UPDATE") "resources" (list "lvmsharedlogicalvolumeattachments") "scope" "Cluster"))
+}}
+{{ include "helm_lib_module_validating_webhook_configuration" (list . $lsllvaWebhookConfig) }}
