@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -341,6 +342,51 @@ func TestGroupIsNotRecreatedOverAnExistingOne(t *testing.T) {
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
 
 	reconcile(t, r, ownedGroup())
+}
+
+func TestTheOwnerPublishesWhatItObservesAboutTheGroup(t *testing.T) {
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := ownedGroup()
+
+	s := scheme.Scheme
+	require.NoError(t, v1alpha1.AddToScheme(s))
+	require.NoError(t, corev1.AddToScheme(s))
+	node := nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                       "7",
+		LockspaceStartedAnnotationPrefix + group.Name: "true",
+	})
+	cl := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(node, group).WithStatusSubresource(group).Build()
+
+	sdsCache := cache.New()
+	sdsCache.StorePVs([]internal.PVData{{PVName: "/dev/mapper/mpathi", VGName: testVG}}, bytes.Buffer{})
+	sdsCache.StoreVGs([]internal.VGData{{
+		VGName:       testVG,
+		VGUUID:       "vg-uuid",
+		VGSize:       resource.MustParse("200Gi"),
+		VGFree:       resource.MustParse("197Gi"),
+		VGExtentSize: resource.MustParse("4Mi"),
+	}}, bytes.Buffer{})
+	sdsCache.StoreLVs([]internal.LVData{
+		{VGName: testVG, LVName: "lvmlock", LVSize: resource.MustParse("256Mi")},
+		{VGName: testVG, LVName: "volume-1"},
+	}, bytes.Buffer{})
+
+	log, err := logger.NewLogger(logger.WarningLevel)
+	require.NoError(t, err)
+	r := NewReconciler(cl, log, sdsCache, commands, ReconcilerConfig{NodeName: testNode, HostIDDir: t.TempDir()})
+
+	reconcile(t, r, group)
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	require.NotNil(t, published.Status, "without this the pool above has only the object to go on, and an object is not a volume group")
+	assert.Equal(t, "Created", published.Status.Phase)
+	assert.Equal(t, "vg-uuid", published.Status.VGUUID)
+	assert.Equal(t, int32(1), published.Status.LogicalVolumeCount, "the lease area is not a volume of the pool")
+	assert.NotEmpty(t, published.Status.LeaseAreaSize)
 }
 
 func TestForeignGroupOnTheLUNIsRefused(t *testing.T) {

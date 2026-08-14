@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
@@ -64,6 +65,14 @@ const (
 	// hostIDFileName is read by lvmlockd through --host-id-file on every
 	// lockspace start, so writing it is enough and no daemon needs restarting.
 	hostIDFileName = "host-id"
+
+	// leaseAreaLVName is the hidden volume lvm creates for sanlock's leases. It
+	// is counted apart from the volumes of the pool: it is not one of them, and a
+	// reader who saw it in the count would think a pool with no volumes had one.
+	leaseAreaLVName = "lvmlock"
+
+	// phaseCreated is the group's state once it exists and can serve volumes.
+	phaseCreated = "Created"
 )
 
 type Reconciler struct {
@@ -164,14 +173,17 @@ func (r *Reconciler) join(
 			// vgcreate --shared starts it — so the readiness fact is published
 			// and the reconcile ends.
 			if created {
-				return controller.Result{}, r.setLockspaceStarted(ctx, lsvg.Name, true)
+				if err := r.setLockspaceStarted(ctx, lsvg.Name, true); err != nil {
+					return controller.Result{}, err
+				}
+				return r.publishGroup(ctx, lsvg)
 			}
 			return res, err
 		}
 	}
 
 	if r.lockspaceStarted(node, lsvg.Name) {
-		return controller.Result{}, nil
+		return r.publishGroup(ctx, lsvg)
 	}
 
 	r.log.Info(fmt.Sprintf("[%s] starting the lockspace of %s with host id %d", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, hostID))
@@ -190,6 +202,89 @@ func (r *Reconciler) join(
 	}
 
 	r.log.Info(fmt.Sprintf("[%s] the lockspace of %s is started", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+	return r.publishGroup(ctx, lsvg)
+}
+
+// publishGroup states what this node observes about the group, and only the
+// metadata owner does it.
+//
+// One writer, because a status written by every member would be a status whose
+// last writer wins and whose readers cannot tell which node's view they got.
+// The owner is the node that creates the group, so it is the one node whose
+// answer to "is it there" is not a guess.
+//
+// Until something says the group exists, every reader downstream — the pool
+// above all — has only the existence of this object to go on, and an object is
+// not a volume group. That was exactly the defect this closes: a pool reported
+// itself ready while nothing had been created on the LUN.
+func (r *Reconciler) publishGroup(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+) (controller.Result, error) {
+	if lsvg.Spec.MetadataOwner != r.cfg.NodeName {
+		return controller.Result{}, nil
+	}
+
+	vgs, _ := r.sdsCache.GetVGs()
+	var found *internal.VGData
+	for i := range vgs {
+		if vgs[i].VGName == lsvg.Spec.ActualVGNameOnTheNode {
+			found = &vgs[i]
+			break
+		}
+	}
+	if found == nil {
+		// The group was created a moment ago and this node has not rescanned yet.
+		// Saying nothing is the honest answer; the next scan says the rest.
+		r.log.Info(fmt.Sprintf("[%s] %s is not in the scan results yet, will publish it after the next scan",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+		return controller.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	status := &v1alpha1.LVMSharedVolumeGroupStatus{
+		Phase:              phaseCreated,
+		ObservedGeneration: lsvg.Generation,
+		VGUUID:             found.VGUUID,
+		VGSize:             found.VGSize.String(),
+		VGFree:             found.VGFree.String(),
+		ExtentSize:         found.VGExtentSize.String(),
+	}
+
+	lvs, _ := r.sdsCache.GetLVs()
+	for i := range lvs {
+		if lvs[i].VGName != lsvg.Spec.ActualVGNameOnTheNode {
+			continue
+		}
+		if lvs[i].LVName == leaseAreaLVName {
+			status.LeaseAreaSize = lvs[i].LVSize.String()
+			continue
+		}
+		status.LogicalVolumeCount++
+	}
+
+	if lsvg.Status != nil &&
+		lsvg.Status.Phase == status.Phase &&
+		lsvg.Status.VGUUID == status.VGUUID &&
+		lsvg.Status.VGSize == status.VGSize &&
+		lsvg.Status.VGFree == status.VGFree &&
+		lsvg.Status.ExtentSize == status.ExtentSize &&
+		lsvg.Status.LeaseAreaSize == status.LeaseAreaSize &&
+		lsvg.Status.LogicalVolumeCount == status.LogicalVolumeCount &&
+		lsvg.Status.ObservedGeneration == status.ObservedGeneration {
+		// Nothing changed. Writing anyway would wake every watcher of this object
+		// on a timer for no reason.
+		return controller.Result{}, nil
+	}
+
+	patch := client.MergeFrom(lsvg.DeepCopy())
+	if lsvg.Status != nil {
+		status.Conditions = lsvg.Status.Conditions
+	}
+	lsvg.Status = status
+	if err := r.cl.Status().Patch(ctx, lsvg, patch); err != nil {
+		return controller.Result{}, fmt.Errorf("publish the status of %s: %w", lsvg.Name, err)
+	}
+
 	return controller.Result{}, nil
 }
 

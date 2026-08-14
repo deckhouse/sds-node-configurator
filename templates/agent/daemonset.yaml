@@ -246,6 +246,12 @@ spec:
           name: host-sys-fs-cgroup
         - mountPath: /run/udev/
           name: host-run-udev-dir
+        # The host's copy of this directory, not the image's. The path exists in
+        # the agent image because the binaries ship under it, so without this
+        # mount the agent writes the host_id into its own read-only rootfs — or,
+        # worse, into a copy the lock daemons of a shared pool never read.
+        - mountPath: /opt/deckhouse/sds/lvmlockd
+          name: lvmlockd-state
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
@@ -306,6 +312,13 @@ spec:
           path: /opt/deckhouse/sds
           type: DirectoryOrCreate
         name: opt-deckhouse-sds
+      # The one channel to the lock daemons of a shared pool: they have no API
+      # access, so the host_id reaches them through a file on the host and the
+      # result of a fencing barrier comes back the same way.
+      - hostPath:
+          path: /opt/deckhouse/sds/lvmlockd
+          type: DirectoryOrCreate
+        name: lvmlockd-state
       - hostPath:
           path: /dev/
           type: ""
