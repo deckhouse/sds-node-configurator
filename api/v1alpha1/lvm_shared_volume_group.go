@@ -69,9 +69,28 @@ type LVMSharedVolumeGroupSpec struct {
 	// tenant, so "no policy" is not a defensible default.
 	VolumeCleanup string `json:"volumeCleanup"`
 
+	// LVM holds what vgcreate is given and what can never be changed after it.
+	// The agent runs vgcreate, so the values have to reach it through here.
+	LVM *LVMSharedVolumeGroupLVMSpec `json:"lvm,omitempty"`
+
 	// SanlockLVExtend is how much the hidden lease volume grows by when it runs
 	// out of slots. Empty means the LVM default.
 	SanlockLVExtend string `json:"sanlockLVExtend,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type LVMSharedVolumeGroupLVMSpec struct {
+	// PhysicalExtentSize must be a multiple of the unmap granularity of the
+	// group's LUNs, or discarding a volume frees nothing however honestly the
+	// array reports zeroes afterwards.
+	PhysicalExtentSize string `json:"physicalExtentSize,omitempty"`
+
+	// SanlockAlignSize decides the size of the lease area and the ceiling on
+	// host_id: 250 hosts for 1Mi, 500 for 2Mi, 1000 for 4Mi, 2000 for 8Mi. LVM
+	// does not enforce that ceiling itself, so the allocator does.
+	SanlockAlignSize string `json:"sanlockAlignSize,omitempty"`
+
+	MetadataSize string `json:"metadataSize,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true

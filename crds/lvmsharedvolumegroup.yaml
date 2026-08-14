@@ -149,6 +149,59 @@ spec:
                     - Discard
                     - RandomFillSinglePass
                     - RandomFillThreePass
+                lvm:
+                  type: object
+                  default: {}
+                  description: |
+                    Layout parameters passed to `vgcreate` and fixed for the lifetime of the
+                    Volume Group.
+
+                    They live here because the agent is what runs `vgcreate`, and none of
+                    them can be changed afterwards by any means short of destroying the group
+                    and everything in it. The block itself defaults to an empty object rather
+                    than being absent: an absent object defaults nothing and compares against
+                    nothing, so the immutability rule below would never fire and a value
+                    could be introduced after the group already existed with another one.
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: The LVM layout is fixed when the Volume Group is created and is immutable.
+                  properties:
+                    physicalExtentSize:
+                      type: string
+                      default: 4Mi
+                      pattern: ^[1-9][0-9]*(Ki|Mi|Gi)$
+                      description: |
+                        Physical extent size, and therefore the granularity of every volume in
+                        the group.
+
+                        It must be a multiple of the unmap granularity of the group's LUNs, or
+                        discarding a volume frees nothing at all however honestly the array
+                        reports zeroes afterwards. That is checked before the group is created,
+                        not at the first deletion.
+                    sanlockAlignSize:
+                      type: string
+                      default: 4Mi
+                      enum:
+                        - 1Mi
+                        - 2Mi
+                        - 4Mi
+                        - 8Mi
+                      description: |
+                        Alignment of the sanlock lease area, which decides two things at once:
+                        how large the lease area is, and the ceiling on `host_id` — 250 hosts
+                        for 1Mi, 500 for 2Mi, 1000 for 4Mi, 2000 for 8Mi.
+
+                        The agent passes it to `vgcreate` and the allocator enforces the
+                        ceiling, because LVM itself does not: a `host_id` above the ceiling is
+                        accepted and fails later, when the node tries to join.
+                    metadataSize:
+                      type: string
+                      pattern: ^[1-9][0-9]*(Ki|Mi|Gi)$
+                      description: |
+                        Size of the Volume Group metadata area on each physical volume.
+
+                        Metadata is rewritten on every volume operation and cannot grow later,
+                        so a group planned for hundreds of volumes needs it stated up front.
                 sanlockLVExtend:
                   type: string
                   pattern: ^[1-9][0-9]*(Ki|Mi|Gi)$
