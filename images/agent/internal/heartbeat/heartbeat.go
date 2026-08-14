@@ -49,6 +49,15 @@ import (
 const LeasePrefix = "sds-node-configurator-agent-"
 
 // Publisher renews the agent's Lease until its context is cancelled.
+//
+// Its client must be an UNCACHED one, and that is not a detail. A cached read of
+// a single object still starts an informer, and an informer over Leases lists
+// and watches every Lease in the cluster — which turns a rule granting get and
+// update on one object into a demand for cluster-wide list and watch. The agent
+// asked for the narrow rights, got exactly them, and then failed with "cannot
+// list resource leases at the cluster scope" while looking correct in review.
+//
+// One object read every twenty seconds does not want a cache anyway.
 type Publisher struct {
 	cl        client.Client
 	log       logger.Logger

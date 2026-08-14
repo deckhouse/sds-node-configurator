@@ -31,6 +31,7 @@ import (
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -141,8 +142,16 @@ func run() int {
 	// The heartbeat starts before any reconciler, because a node that is not seen
 	// is a node no pool will admit — and everything below only matters once it is.
 	if cfgParams.PodNamespace != "" {
+		// An uncached client on purpose: see the heartbeat package. The manager's
+		// client would start an informer over every Lease in the cluster to read
+		// this one.
+		heartbeatClient, err := client.New(kConfig, client.Options{Scheme: scheme})
+		if err != nil {
+			log.Error(err, "[main] unable to create a client for the heartbeat")
+			return 1
+		}
 		go heartbeat.NewPublisher(
-			mgr.GetClient(), log, cfgParams.NodeName, cfgParams.PodNamespace, 20*time.Second,
+			heartbeatClient, log, cfgParams.NodeName, cfgParams.PodNamespace, 20*time.Second,
 		).Run(ctx)
 	} else {
 		log.Warning("[main] POD_NAMESPACE is not set, so this agent will not publish a heartbeat and no shared pool will admit this node")

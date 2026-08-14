@@ -21,8 +21,13 @@ rules:
       - watch
   # The agent's own heartbeat: a Lease in this module's namespace, renewed while
   # the agent runs. A Lease rather than an annotation because liveness needs a
-  # lifetime — see the heartbeat package — and namespaced rather than cluster-wide
-  # because that is the whole scope it needs.
+  # lifetime — see the heartbeat package.
+  #
+  # Deliberately without list and watch. The heartbeat reads exactly one object by
+  # name and does it with an UNCACHED client, because a cached read would start an
+  # informer over every Lease in the cluster and demand those two verbs for it.
+  # Granting them here instead would have hidden that: the module would have got
+  # cluster-wide read of every lease in every namespace to renew one of its own.
   - apiGroups:
       - coordination.k8s.io
     resources:
