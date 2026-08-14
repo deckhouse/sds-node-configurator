@@ -507,7 +507,10 @@ func (commands) CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []strin
 // a metadata owner that kept every volume it created would hold the exclusive
 // lock of the entire pool.
 func (commands) CreateLVShared(ctx context.Context, vgName, lvName, size string) (string, error) {
-	args := []string{"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", size, "-W", "y", "-y"}
+	// lvm reads a bare number as megabytes, and the size arrives here as a byte
+	// count — so passing it through unconverted asks for a volume a million times
+	// too large.
+	args := []string{"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", lvmSize(size), "-W", "y", "-y"}
 	extendedArgs := lvmStaticLockdArgs(args, 0)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
@@ -545,7 +548,7 @@ func (commands) RemoveLVShared(ctx context.Context, vgName, lvName string) (stri
 // The size is the requested one, not a delta, so a retry after a partial failure
 // asks for the same end state rather than adding twice.
 func (commands) LVExtendShared(ctx context.Context, vgName, lvName, size string) (string, error) {
-	args := []string{"lvextend", "-L", size, fmt.Sprintf("%s/%s", vgName, lvName)}
+	args := []string{"lvextend", "-L", lvmSize(size), fmt.Sprintf("%s/%s", vgName, lvName)}
 	extendedArgs := lvmStaticLockdArgs(args, 0)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 

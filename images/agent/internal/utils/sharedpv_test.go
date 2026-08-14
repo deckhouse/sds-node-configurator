@@ -181,3 +181,10 @@ func TestLVMSizeSpeaksLVMsNotation(t *testing.T) {
 		"lvm's own spelling means mebibytes; as a quantity it would be four thousandths of a byte")
 	assert.Equal(t, "nonsense", lvmSize("nonsense"), "lvm rejects it with a better message than this could")
 }
+
+func TestLVMSizeConvertsABareByteCount(t *testing.T) {
+	// The driver writes the requested size as a plain byte count, which is a
+	// valid quantity — and a bare number to lvm means megabytes, so unconverted
+	// it asks for a volume a million times too large.
+	assert.Equal(t, "1048576k", lvmSize("1073741824"))
+}
