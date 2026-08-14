@@ -593,13 +593,13 @@ func TestVGCreateArgs(t *testing.T) {
 	pvs := []string{"/dev/sda", "/dev/loop0"}
 
 	for _, tt := range []struct {
-		name   string
-		shared bool
-		want   []string
+		name  string
+		extra []string
+		want  []string
 	}{
 		{
-			name:   "local",
-			shared: false,
+			name:  "no extra arguments",
+			extra: nil,
 			want: []string{
 				"vgcreate", vgName, "/dev/sda", "/dev/loop0",
 				"--addtag", "storage.deckhouse.io/enabled=true",
@@ -607,17 +607,19 @@ func TestVGCreateArgs(t *testing.T) {
 			},
 		},
 		{
-			name:   "shared",
-			shared: true,
+			// extraArgs land in front of the Volume Group name, which is where lvm
+			// expects mode flags and injected configuration.
+			name:  "extra arguments go before the VG name",
+			extra: []string{"--config", "global/use_lvmlockd=1"},
 			want: []string{
-				"vgcreate", "--shared", vgName, "/dev/sda", "/dev/loop0",
+				"vgcreate", "--config", "global/use_lvmlockd=1", vgName, "/dev/sda", "/dev/loop0",
 				"--addtag", "storage.deckhouse.io/enabled=true",
 				"--addtag", "storage.deckhouse.io/lvmVolumeGroupName=" + lvgName,
 			},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got := vgCreateArgs(vgName, lvgName, tt.shared, pvs)
+			got := vgCreateArgs(vgName, lvgName, tt.extra, pvs)
 			assert.Equal(t, tt.want, got)
 
 			// Stated separately from the exact-argv assertion, because this is the
@@ -637,7 +639,7 @@ func TestVGCreateArgs(t *testing.T) {
 	}
 
 	t.Run("a Volume Group with no PVs still gets both tags", func(t *testing.T) {
-		got := vgCreateArgs(vgName, lvgName, false, nil)
+		got := vgCreateArgs(vgName, lvgName, nil, nil)
 		assert.Equal(t, []string{
 			"vgcreate", vgName,
 			"--addtag", "storage.deckhouse.io/enabled=true",
@@ -882,5 +884,66 @@ func TestObjectDiagnosticsDropsNodeWideWarnings(t *testing.T) {
 		const quoting = `  Failed: vgs said "WARNING: VG name data is used by VGs a and b." and then aborted`
 		assert.NotEmpty(t, filter(quoting),
 			"a line embedding the warning is a diagnostic of its own")
+	})
+}
+
+// Turning on `use_lvmlockd` makes lvm comment on the node's locking setup in the
+// stderr of EVERY command, whatever object it asked about. The discoverer records
+// non-empty stderr as the queried object's health, so without this filter the
+// flag alone takes every LVMVolumeGroup on the node — including Local ones owned
+// by other modules — to NonOperational.
+//
+// The strings are the ones actually printed by lvm2 2.03.16 and 2.03.42.
+func TestObjectDiagnosticsDropsLockdWarnings(t *testing.T) {
+	filter := func(lines ...string) string {
+		var buf bytes.Buffer
+		for _, l := range lines {
+			buf.WriteString(l + "\n")
+		}
+		out := ObjectDiagnostics("vgs vg-1", buf)
+		return out.String()
+	}
+
+	t.Run("the flag is on and the daemon is not running", func(t *testing.T) {
+		assert.Empty(t, filter(
+			`  WARNING: lvmlockd process is not running.`,
+			`  Reading without shared global lock.`,
+		))
+	})
+
+	t.Run("the lock was skipped for this command", func(t *testing.T) {
+		assert.Empty(t, filter(`  WARNING: skipping VG lock in lvmlockd.`))
+		assert.Empty(t, filter(`  Skipping global lock: storage failed for sanlock leases`))
+		assert.Empty(t, filter(`  Skipping volume group vg-1`))
+		assert.Empty(t, filter(`  VG vg-1 lock skipped: error -218`))
+		assert.Empty(t, filter(`  lvmlockd is not being used on the host.`))
+	})
+
+	t.Run("the Volume Group was read without a lock", func(t *testing.T) {
+		assert.Empty(t, filter(`  Reading VG vg-1 without a lock.`))
+	})
+
+	t.Run("lockspace transitions are node state, not object health", func(t *testing.T) {
+		assert.Empty(t, filter(`  VG vg-1 starting sanlock lockspace`))
+	})
+
+	t.Run("a real lock failure is NOT dropped", func(t *testing.T) {
+		// These say the command did not do what it was asked to, and that is a
+		// property of this object.
+		assert.NotEmpty(t, filter(`  Global lock failed: error -218`),
+			"a failed global lock is a real failure, not a skipped one")
+		assert.NotEmpty(t, filter(`  Cannot access VG vg-1 due to failed lock.`),
+			"an inaccessible VG is a real failure")
+		assert.NotEmpty(t, filter(`  Volume group "vg-1" not found`))
+	})
+
+	t.Run("a real diagnostic survives alongside the dropped ones", func(t *testing.T) {
+		got := filter(
+			`  WARNING: lvmlockd process is not running.`,
+			`  Reading without shared global lock.`,
+			`  Couldn't find device with uuid abcd-1234.`,
+		)
+		assert.Contains(t, got, "Couldn't find device with uuid")
+		assert.NotContains(t, got, "lvmlockd")
 	})
 }

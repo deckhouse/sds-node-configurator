@@ -2074,17 +2074,6 @@ func (r *Reconciler) createVGComplex(ctx context.Context, lvg *v1alpha1.LVMVolum
 			r.log.Error(err, "error CreateVGLocal")
 			return err
 		}
-	case internal.Shared:
-		start := time.Now()
-		cmd, err := r.commands.CreateVGShared(lvg.Spec.ActualVGNameOnTheNode, lvg.Name, paths)
-		r.metrics.UtilsCommandsDuration(ReconcilerName, "vgcreate").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
-		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "vgcreate").Inc()
-		r.log.Debug(cmd)
-		if err != nil {
-			r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "vgcreate").Inc()
-			r.log.Error(err, "error CreateVGShared")
-			return err
-		}
 	}
 
 	r.log.Debug(fmt.Sprintf("[CreateVGComplex] successfully create VG %s of the LVMVolumeGroup %s", lvg.Spec.ActualVGNameOnTheNode, lvg.Name))

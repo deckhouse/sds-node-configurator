@@ -1968,10 +1968,12 @@ func sortBlockDevicesByVG(bds map[string]v1alpha1.BlockDevice, vgs []internal.VG
 
 func getVgType(vg internal.VGData) string {
 	if vg.VGShared == "" {
-		return "Local"
+		return internal.Local
 	}
 
-	return "Shared"
+	// Reported, not created: this module no longer has a path that produces a
+	// shared Volume Group, but it still has to name what it found on the node.
+	return internal.Shared
 }
 
 func getSpecThinPools(thinPools map[string][]internal.LVData, vg internal.VGData) map[string]resource.Quantity {

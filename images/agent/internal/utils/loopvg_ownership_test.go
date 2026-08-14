@@ -65,7 +65,7 @@ func TestActivateAllManagedVGs_SkipsAForeignLoopBackedVG(t *testing.T) {
 	mc.EXPECT().GetLoopBackingFile(gomock.Any(), "/dev/loop7").
 		Return("losetup -O BACK-FILE", internal.LoopBackingFile{Path: "/backup/node2-root.img"}, nil)
 	// Only ours. gomock fails the test if VGActivate is called for the image.
-	mc.EXPECT().VGActivate(gomock.Any(), "ours", false).Return("vgchange -ay ours", nil)
+	mc.EXPECT().VGActivate(gomock.Any(), "ours").Return("vgchange -ay ours", nil)
 
 	err := utils.ActivateAllManagedVGs(context.Background(), testLogger(t), mc, monitoring.GetMetrics("test_node"), 30*time.Second)
 	assert.NoError(t, err)
@@ -114,7 +114,7 @@ func TestEnsureVGActivation_SkipsAForeignLoopBackedVG(t *testing.T) {
 		"uuid-ours":  utils.LoopVGNotLoopOnly,
 	}
 
-	mc.EXPECT().VGActivate(gomock.Any(), "ours", false).Return("vgchange -ay ours", nil)
+	mc.EXPECT().VGActivate(gomock.Any(), "ours").Return("vgchange -ay ours", nil)
 
 	activated := utils.EnsureVGActivation(context.Background(), testLogger(t), mc,
 		monitoring.GetMetrics("test_node"), vgs, lvs, verdicts, 30*time.Second)

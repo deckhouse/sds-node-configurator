@@ -207,6 +207,31 @@ func classifyManagedTaggedLoopVG(
 // has to run its input through. Those paths gate on the LVM tag alone, and the
 // tag is not an ownership proof for a loop-backed Volume Group — see the file
 // comment.
+// SkipSharedVGs drops Volume Groups created with `vgcreate --shared` from a list
+// this module is about to activate.
+//
+// A shared Volume Group is owned by a lock manager (lvmlockd/sanlock), not by
+// whoever finds it in a scan: which node may activate which of its Logical
+// Volumes is that manager's decision, and taking it locally is how two nodes end
+// up writing the same extents. This module does not run a lock manager, so the
+// only correct thing it can do with such a Volume Group is leave it alone.
+//
+// The tag filter does not cover this: a shared Volume Group can carry the
+// module's tag — an earlier version of the agent created shared Volume Groups
+// itself, and a pool may be tagged by whoever manages it.
+func SkipSharedVGs(log logger.Logger, action string, vgs []internal.VGData) []internal.VGData {
+	out := make([]internal.VGData, 0, len(vgs))
+	for _, vg := range vgs {
+		if vg.VGShared != "" {
+			log.Warning(fmt.Sprintf("[SkipSharedVGs] refusing to %s VG %s (VG_UUID=%s): it is a shared VG (lock type %q), activation of it belongs to its lock manager",
+				action, vg.VGName, vg.VGUUID, vg.VGShared))
+			continue
+		}
+		out = append(out, vg)
+	}
+	return out
+}
+
 func SkipUnownedLoopVGs(log logger.Logger, action string, vgs []internal.VGData, verdicts LoopVGVerdicts) []internal.VGData {
 	out := make([]internal.VGData, 0, len(vgs))
 	for _, vg := range vgs {

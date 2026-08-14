@@ -48,7 +48,6 @@ type Commands interface {
 	GetPV(pvName string) (pvData internal.PVData, command string, stdErr bytes.Buffer, err error)
 	CreatePV(ctx context.Context, path string) (string, error)
 	CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []string) (string, error)
-	CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string, error)
 	CreateThinPool(thinPoolName, vgName string, size int64) (string, error)
 	CreateThinPoolFullVGSpace(thinPoolName, vgName string) (string, error)
 	CreateThinLogicalVolumeFromSource(name string, sourceVgName string, sourceName string) (string, error)
@@ -65,7 +64,7 @@ type Commands interface {
 	VGChangeAddTag(ctx context.Context, vGName, tag string) (string, error)
 	VGChangeDelTag(ctx context.Context, vGName, tag string) (string, error)
 	LVChangeDelTag(ctx context.Context, lv internal.LVData, tag string) (string, error)
-	VGActivate(ctx context.Context, vgName string, shared bool) (string, error)
+	VGActivate(ctx context.Context, vgName string) (string, error)
 	LVActivate(ctx context.Context, vgName, lvName string) (string, error)
 	VGScan(ctx context.Context) (string, error)
 	PVScan(ctx context.Context) (string, error)
@@ -442,11 +441,12 @@ func (commands) CreatePV(ctx context.Context, path string) (string, error) {
 // never tagged with its owning LVMVolumeGroup — the tag every ownership check in
 // the agent, file devices included, reads. The tags are the part worth keeping in
 // one place; the `--shared` flag is the only real difference.
-func vgCreateArgs(vgName, lvmVolumeGroupName string, shared bool, pvNames []string) []string {
+// vgCreateArgs builds a vgcreate invocation. extraArgs go in front of the Volume
+// Group name, which is where lvm expects mode flags (`--shared`) and injected
+// configuration (`--config`); callers that need neither pass nil.
+func vgCreateArgs(vgName, lvmVolumeGroupName string, extraArgs []string, pvNames []string) []string {
 	args := []string{"vgcreate"}
-	if shared {
-		args = append(args, "--shared")
-	}
+	args = append(args, extraArgs...)
 	args = append(args, vgName)
 	args = append(args, pvNames...)
 	return append(args,
@@ -467,23 +467,7 @@ func vgCreateArgs(vgName, lvmVolumeGroupName string, shared bool, pvNames []stri
 // failed state over a Volume Group that exists. Silence stays a failure: vgcreate
 // has no known no-op.
 func (commands) CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
-	extendedArgs := lvmStaticExtendedArgs(vgCreateArgs(vgName, lvmVolumeGroupName, false, pvNames))
-	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
-		return cmd.String(), err
-	}
-
-	return cmd.String(), nil
-}
-
-// CreateVGShared is CreateVGLocal for a shared (clustered) Volume Group. Same
-// benign-stderr treatment, for the same reason.
-func (commands) CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
-	extendedArgs := lvmStaticExtendedArgs(vgCreateArgs(vgName, lvmVolumeGroupName, true, pvNames))
+	extendedArgs := lvmStaticExtendedArgs(vgCreateArgs(vgName, lvmVolumeGroupName, nil, pvNames))
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -767,12 +751,14 @@ func (commands) LVChangeDelTag(ctx context.Context, lv internal.LVData, tag stri
 	return cmd.String(), nil
 }
 
-func (commands) VGActivate(ctx context.Context, vgName string, shared bool) (string, error) {
-	activateFlag := "-ay"
-	if shared {
-		activateFlag = "-asy"
-	}
-	args := []string{"vgchange", activateFlag, vgName}
+// VGActivate activates a Volume Group exclusively on this node.
+//
+// There is deliberately no shared-activation mode. `vgchange -asy` lets several
+// nodes hold the same Volume Group at once, which is safe only for a filesystem
+// that expects it; on a plain one it is two writers on the same extents. Shared
+// Volume Groups are not activated by this module at all — see SkipSharedVGs.
+func (commands) VGActivate(ctx context.Context, vgName string) (string, error) {
+	args := []string{"vgchange", "-ay", vgName}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
@@ -1792,6 +1778,29 @@ var (
 	reDuplicateVGName     = regexp.MustCompile(`^\s*WARNING: VG name .+ is used by VGs .+\.$`)
 	reDuplicateVGNameHint = regexp.MustCompile(`^\s*Fix duplicate VG names with vgrename uuid, a device filter, or system IDs\.$`)
 
+	// The node has lvmlockd configured in some way lvm wants to comment on. Like
+	// the duplicate-name pair above, these lines describe the node's locking
+	// setup, not the object the command asked about: `use_lvmlockd = 1` in
+	// lvm.conf makes EVERY invocation print them, whatever its argument, and a
+	// Local Volume Group belonging to another module gets them just as much as a
+	// shared one.
+	//
+	// Keeping them would mean that switching the flag on turns every
+	// LVMVolumeGroup on the node NonOperational at once, because the discoverer
+	// records non-empty stderr as the object's health regardless of exit code.
+	// The state they describe belongs in a node-level condition, set by whoever
+	// owns the locking daemons.
+	//
+	// Three classes, all observed:
+	//   - the flag is on and the daemon is not running (lvm2 2.03.16 and 2.03.42);
+	//   - the lock was skipped for this command (global or per-VG);
+	//   - the Volume Group was read without a lock, which lvm reports by name.
+	reLockdNotRunning = regexp.MustCompile(`^\s*WARNING: lvmlockd process is not running\.$`)
+	reLockdNotUsed    = regexp.MustCompile(`^\s*(WARNING: )?lvmlockd is not being used on the host\.$`)
+	reLockSkipped     = regexp.MustCompile(`^\s*(WARNING: )?(Reading without shared global lock\.|Skipping global lock: .+|WARNING: skipping VG lock in lvmlockd\.|Skipping volume group .+|VG .+ lock skipped: .+)$`)
+	reReadingNoLock   = regexp.MustCompile(`^\s*Reading VG .+ without a lock\.$`)
+	reLockspaceStart  = regexp.MustCompile(`^\s*VG .+ (starting|stopping) .+ lockspace$`)
+
 	// benignAlwaysStdErr is the set every lvm invocation may ignore.
 	benignAlwaysStdErr = []*regexp.Regexp{reRegexVersionMismatch, reLeakedFileDescriptor}
 	// benignResizeStdErr additionally tolerates the no-op resize. Only lvextend
@@ -1801,7 +1810,10 @@ var (
 	// benign-stderr set: these lines do report a real problem with the node, they
 	// just do not report one with the object that was asked about, and only the
 	// former is a reason to keep them.
-	notAboutTheQueriedObject = []*regexp.Regexp{reDuplicateVGName, reDuplicateVGNameHint}
+	notAboutTheQueriedObject = []*regexp.Regexp{
+		reDuplicateVGName, reDuplicateVGNameHint,
+		reLockdNotRunning, reLockdNotUsed, reLockSkipped, reReadingNoLock, reLockspaceStart,
+	}
 )
 
 // ObjectDiagnostics returns the part of stdErr that says something about the
