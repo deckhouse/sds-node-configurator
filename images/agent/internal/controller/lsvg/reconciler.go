@@ -72,6 +72,10 @@ const (
 
 	// phaseCreated is the group's state once it exists and can serve volumes.
 	phaseCreated = "Created"
+
+	// unknownVGName is what lvm prints when it cannot name the group a physical
+	// volume belongs to. It is an admission, not an answer.
+	unknownVGName = "[unknown]"
 )
 
 type Reconciler struct {
@@ -365,41 +369,44 @@ func (r *Reconciler) ensureGroup(
 	return true, controller.Result{}, nil
 }
 
-// groupState reads the physical volume labels this node has already scanned and
-// says whether the wanted group is there — and whether something else is.
+// groupState asks lvm whether the wanted group is there — and whether something
+// else is on the pool's devices.
 //
-// The name has to be compared, not just its presence. A label naming any volume
-// group used to count as proof that this group existed, which is only true while
-// the LUN has never been used for anything else. On a LUN that carries an
-// unrelated group the agent would skip creation, report the group ready, and
-// then work against a name that is not on the device — or, worse, hand out
-// volumes from a group that belongs to someone else.
+// Asked, not remembered, for the reason the whole shared path is: the scan cache
+// is refreshed by a scanner with no schedule of its own, and this question is
+// always about a moment ago. Believing it ran vgcreate against a group that had
+// just been created, which fails with "/dev/<vg>: already exists in filesystem"
+// and leaves a healthy pool reporting an error for as long as the cache is cold.
+//
+// The name is compared, not just the presence of some group. A label naming any
+// volume group used to count as proof that this group existed, which is only
+// true while the LUN has never been used for anything else.
 func (r *Reconciler) groupState(
 	devices map[string]utils.SharedDevice,
 	wantVGName string,
 ) (exists bool, foreign string) {
-	pvs, _ := r.sdsCache.GetPVs()
-	for _, pv := range pvs {
-		for _, device := range devices {
-			// "[unknown]" is not a name, it is lvm saying it cannot tell — which
-			// is what a physical volume looks like after a vgcreate that labelled
-			// it and then failed. Reading it as someone else's group turns this
-			// module's own debris into a permanent refusal to create anything.
-			if pv.PVName != device.Path || pv.VGName == "" || pv.VGName == "[unknown]" {
-				continue
-			}
-			if pv.VGName == wantVGName {
-				exists = true
-				continue
-			}
-			// Reported rather than returned immediately: the first foreign group
-			// found is the one named, and the loop stays deterministic.
-			if foreign == "" {
-				foreign = pv.VGName
-			}
+	if vg, _, _, err := r.commands.GetVG(wantVGName); err == nil && vg.VGName == wantVGName {
+		return true, ""
+	}
+
+	for _, device := range devices {
+		pv, _, _, err := r.commands.GetPV(device.Path)
+		if err != nil {
+			continue
+		}
+		// "[unknown]" is not a name, it is lvm saying it cannot tell — which is
+		// what a physical volume looks like after a vgcreate that labelled it and
+		// then failed. Reading it as someone else's group turns this module's own
+		// debris into a permanent refusal to create anything.
+		if pv.VGName == "" || pv.VGName == unknownVGName || pv.VGName == wantVGName {
+			continue
+		}
+		if foreign == "" {
+			foreign = pv.VGName
 		}
 	}
-	return exists, foreign
+
+	return false, foreign
 }
 
 // extentSizeBytes parses the requested extent size for the granularity check.

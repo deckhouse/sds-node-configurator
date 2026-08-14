@@ -117,6 +117,7 @@ func annotationsOf(t *testing.T, cl client.Client) map[string]string {
 // publishing use it so the publish step stays out of their way.
 func vgUnreadable(commands *mock_utils.MockCommands) {
 	commands.EXPECT().GetVG(testVG).Return(internal.VGData{}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+	commands.EXPECT().GetPV(gomock.Any()).Return(internal.PVData{}, "pvs", bytes.Buffer{}, nil).AnyTimes()
 }
 
 func TestWaitsForTheAllocatorInsteadOfPickingAnID(t *testing.T) {
@@ -345,10 +346,11 @@ func TestGroupIsNotRecreatedOverAnExistingOne(t *testing.T) {
 	// that counts: under lvmlockd a skipped group looks exactly like an absent
 	// one to vgs.
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
-	r.sdsCache.StorePVs([]internal.PVData{{PVName: "/dev/mapper/mpathi", VGName: testVG}}, bytes.Buffer{})
 
+	// lvm says the group is there, which is the only source that can say it about
+	// a group created a moment ago.
+	commands.EXPECT().GetVG(testVG).Return(internal.VGData{VGName: testVG}, "vgs", bytes.Buffer{}, nil).AnyTimes()
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
-	vgUnreadable(commands)
 
 	reconcile(t, r, ownedGroup())
 }
@@ -407,7 +409,9 @@ func TestForeignGroupOnTheLUNIsRefused(t *testing.T) {
 	// A group that is not the one the pool asks for. Found on the stand: the LUN
 	// had been used for something else, and the check that only asked "is there a
 	// group here" would have declared the pool's group ready without it existing.
-	r.sdsCache.StorePVs([]internal.PVData{{PVName: "/dev/mapper/mpathi", VGName: "someone-elses-vg"}}, bytes.Buffer{})
+	commands.EXPECT().GetVG(testVG).Return(internal.VGData{}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+	commands.EXPECT().GetPV(gomock.Any()).
+		Return(internal.PVData{PVName: "/dev/mapper/mpathi", VGName: "someone-elses-vg"}, "pvs", bytes.Buffer{}, nil).AnyTimes()
 
 	_, err := r.Reconcile(context.Background(),
 		controller.ReconcileRequest[*v1alpha1.LVMSharedVolumeGroup]{Object: ownedGroup()})
@@ -439,6 +443,7 @@ func TestUnusableExtentSizeIsAHardStop(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
+	vgUnreadable(commands)
 
 	_, err := r.Reconcile(context.Background(),
 		controller.ReconcileRequest[*v1alpha1.LVMSharedVolumeGroup]{Object: ownedGroup()})
@@ -470,10 +475,10 @@ func TestAnUnnamedGroupIsNotAForeignGroup(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
-	r.sdsCache.StorePVs([]internal.PVData{{PVName: "/dev/mapper/mpathi", VGName: "[unknown]"}}, bytes.Buffer{})
-
+	commands.EXPECT().GetVG(testVG).Return(internal.VGData{}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+	commands.EXPECT().GetPV(gomock.Any()).
+		Return(internal.PVData{PVName: "/dev/mapper/mpathi", VGName: "[unknown]"}, "pvs", bytes.Buffer{}, nil).AnyTimes()
 	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("vgcreate --shared", nil)
-	vgUnreadable(commands)
 
 	reconcile(t, r, ownedGroup())
 }
