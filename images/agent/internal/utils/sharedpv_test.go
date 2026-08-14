@@ -91,6 +91,19 @@ func TestResolveWWIDsIsCaseInsensitive(t *testing.T) {
 	assert.Len(t, found, 1)
 }
 
+func TestResolveWWIDsAcceptsTheDiscoverySpelling(t *testing.T) {
+	// The same LUN, written the way a SCSIDevice carries it. Comparing the
+	// strings as written would leave the group waiting for a LUN that is there.
+	fakeSysBlock(t, fakeDM{dm: "dm-3", uuid: "mpath-36c89f1a1", name: "mpathi", logical: 512, physical: 512})
+
+	found, missing, err := ResolveWWIDs([]string{"naa.6c89f1a1"})
+	require.NoError(t, err)
+	assert.Empty(t, missing)
+	require.Len(t, found, 1)
+	assert.Equal(t, "/dev/mapper/mpathi", found["naa.6c89f1a1"].Path,
+		"the device is keyed by the identifier as the caller wrote it")
+}
+
 func TestMissingLUNIsNotAnError(t *testing.T) {
 	fakeSysBlock(t, fakeDM{dm: "dm-3", uuid: "mpath-aaa", name: "mpatha", logical: 512, physical: 512})
 

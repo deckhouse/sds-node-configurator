@@ -119,10 +119,37 @@ func mpathDevicesByWWID() (map[string]SharedDevice, error) {
 }
 
 // normaliseWWID makes the comparison independent of how the identifier was
-// written down. multipath prints it with a leading vendor-type digit and in
-// lower case; a person copying it out of an array's UI may do neither.
+// written down, and the canonical form is multipath's own: the designator type
+// digit followed by the hex, lower case.
+//
+// Two spellings of one LUN reach this module. multipath — and therefore
+// /sys/block/dm-*/dm/uuid, and therefore an administrator reading "multipath
+// -ll" — writes "36c89…". Device discovery writes "naa.6c89…" into a SCSIDevice,
+// and a pool built from those devices carries that spelling. Comparing the
+// strings as written makes one of the two silently resolve to nothing: the group
+// waits for a LUN that is plainly there, and says only that it is missing.
 func normaliseWWID(wwid string) string {
-	return strings.ToLower(strings.TrimSpace(wwid))
+	wwid = strings.ToLower(strings.TrimSpace(wwid))
+	for _, prefix := range []string{"naa.", "eui.", "t10."} {
+		if after, found := strings.CutPrefix(wwid, prefix); found {
+			return designatorDigit(prefix) + after
+		}
+	}
+	return wwid
+}
+
+// designatorDigit is the type digit multipath puts in front of the identifier.
+// The mapping is SPC's designator type: 1 is T10 vendor id, 2 is EUI-64, 3 is
+// NAA.
+func designatorDigit(prefix string) string {
+	switch prefix {
+	case "naa.":
+		return "3"
+	case "eui.":
+		return "2"
+	default:
+		return "1"
+	}
 }
 
 func readSysAttr(path string) (string, error) {
