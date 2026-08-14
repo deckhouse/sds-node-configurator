@@ -52,6 +52,12 @@ var knownTypes = []runtime.Object{
 	&LVMVolumeGroupSetList{},
 	&LVMLogicalVolumeSnapshot{},
 	&LVMLogicalVolumeSnapshotList{},
+	&LVMSharedVolumeGroup{},
+	&LVMSharedVolumeGroupList{},
+	&LVMSharedLogicalVolume{},
+	&LVMSharedLogicalVolumeList{},
+	&LVMSharedLogicalVolumeAttachment{},
+	&LVMSharedLogicalVolumeAttachmentList{},
 }
 
 // Adds the list of known types to Scheme.
