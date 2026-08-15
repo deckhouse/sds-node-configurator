@@ -668,26 +668,44 @@ func (r *Reconciler) releaseOrphanActivations(ctx context.Context, lsvg *v1alpha
 	// not from device-mapper: with the lease gone it finds nothing to do, exits
 	// zero, and leaves the mapping standing. Measured on the stand — the command
 	// was silent and the device was still there afterwards.
-	r.removeLeftoverMappings(ctx, lsvg.Spec.ActualVGNameOnTheNode, wanted)
+	r.removeLeftoverMappings(ctx, lsvg.Spec.ActualVGNameOnTheNode, orphans)
 }
 
-// removeLeftoverMappings tears down device-mapper devices that survived the
-// deactivation, which is the only way residue of a lock-daemon restart goes.
+// removeLeftoverMappings tears down the device-mapper devices of volumes that
+// were just released and did not go, which is the only way residue of a
+// lock-daemon restart goes.
+//
+// It asks about each of those volumes by name rather than listing what is
+// active again. The difference is not style: on the stand the node logged
+// "releasing 1 volume(s)" every minute for hours and never once reached this
+// removal, because the second listing came back empty while the mapping was
+// plainly there — same directory, same prefix, a fraction of a second apart. A
+// pass that repairs nothing and says nothing is worse than one that fails, so
+// the question is now put about the one thing the answer is needed for.
 //
 // dmsetup refuses an open device, and that refusal is kept: a mapping something
 // is still using is not residue, whatever the lock state says.
-func (r *Reconciler) removeLeftoverMappings(ctx context.Context, vgName string, wanted map[string]bool) {
-	left := r.activeLVs(vgName)
-	for _, lvName := range left {
-		if wanted[lvName] {
+func (r *Reconciler) removeLeftoverMappings(ctx context.Context, vgName string, released []string) {
+	for _, lvName := range released {
+		dmName := utils.DMName(vgName, lvName)
+		if !utils.DMDeviceExists(dmName) {
+			// The deactivation did what it said. Nothing to do, and nothing to
+			// report: this is the ordinary outcome.
 			continue
 		}
 
-		dmName := utils.DMName(vgName, lvName)
 		r.log.Info(fmt.Sprintf("[%s] removing the leftover device-mapper device %s", ReconcilerName, dmName))
 		if cmd, err := r.commands.RemoveDMDevice(ctx, dmName); err != nil {
 			r.log.Warning(fmt.Sprintf("[%s] %s could not be removed (cmd: %s): %s",
 				ReconcilerName, dmName, cmd, err.Error()))
+			continue
+		}
+
+		if utils.DMDeviceExists(dmName) {
+			// Removal reported success and the mapping is still here. Said out
+			// loud because it is the shape of the bug this replaced: a repair
+			// that believes its own commands.
+			r.log.Warning(fmt.Sprintf("[%s] %s is still mapped after a successful removal", ReconcilerName, dmName))
 		}
 	}
 }

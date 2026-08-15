@@ -856,3 +856,56 @@ func applyNodeEntry(
 
 	return cl.Status().Update(ctx, group)
 }
+
+func TestAReleasedVolumeThatDidNotGoIsAskedAboutByName(t *testing.T) {
+	// lvchange decides whether a volume is active here from the lock it holds,
+	// not from device-mapper: with the lease gone it finds nothing to do, exits
+	// zero, and leaves the mapping standing. The fallback has to reach dmsetup.
+	//
+	// It asks about the volume it just released, by name. Listing what is active
+	// a second time is what the stand disproved: the node logged the release
+	// every minute for hours and never reached the removal, because the second
+	// listing came back empty with the mapping plainly there.
+	fakeSysBlockWithLUN(t, 8192)
+	fakeActiveLV(t, "vol1")
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                          "7",
+		LockspaceGenerationAnnotationPrefix + group.Name: "1",
+	}), commands, nil, group)
+
+	commands.EXPECT().LVDeactivateShared(gomock.Any(), testVG, []string{"vol1"}).Return("lvchange -an", nil)
+	commands.EXPECT().RemoveDMDevice(gomock.Any(), utils.DMName(testVG, "vol1")).Return("dmsetup remove", nil)
+	commands.EXPECT().VGLockStart(gomock.Any(), gomock.Any(), gomock.Any()).Return("", nil).AnyTimes()
+	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("", nil).AnyTimes()
+
+	r.releaseOrphanActivations(context.Background(), group)
+}
+
+func TestAReleasedVolumeThatWentIsLeftAlone(t *testing.T) {
+	// The ordinary outcome, and it must cost nothing: the deactivation worked,
+	// the mapping is gone, and dmsetup is not asked to remove what is not there.
+	fakeSysBlockWithLUN(t, 8192)
+	fakeActiveLV(t, "vol1")
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                          "7",
+		LockspaceGenerationAnnotationPrefix + group.Name: "1",
+	}), commands, nil, group)
+
+	commands.EXPECT().LVDeactivateShared(gomock.Any(), testVG, []string{"vol1"}).
+		DoAndReturn(func(_ context.Context, _ string, _ []string) (string, error) {
+			// What a working deactivation leaves behind: no mapping.
+			require.NoError(t, os.RemoveAll(filepath.Join(utils.SysBlockRoot, "dm-21")))
+			return "lvchange -an", nil
+		})
+	commands.EXPECT().VGLockStart(gomock.Any(), gomock.Any(), gomock.Any()).Return("", nil).AnyTimes()
+	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("", nil).AnyTimes()
+
+	// No RemoveDMDevice expectation: the mock fails the test if one is attempted.
+	r.releaseOrphanActivations(context.Background(), group)
+}
