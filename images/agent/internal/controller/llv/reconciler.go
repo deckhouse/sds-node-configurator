@@ -219,6 +219,19 @@ func (r *Reconciler) Reconcile(
 	}
 	r.log.Info(fmt.Sprintf("[Reconcile] the LVMVolumeGroup %s of the LVMLogicalVolume %s belongs to the current node: %s. Reconciliation continues", lvg.Name, llv.Name, r.cfg.NodeName))
 
+	// The group behind this resource may be a pool's. LVMVolumeGroups are no
+	// longer made for shared groups, but one made by an older agent outlives the
+	// fix — and everything below this line creates, extends and removes Logical
+	// Volumes on the node, with no lock taken anywhere.
+	if message, refuse := utils.RefuseSharedVG(r.log, "manage a Logical Volume",
+		lvg.Spec.ActualVGNameOnTheNode, r.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode)); refuse {
+		if err := r.llvCl.UpdatePhaseIfNeeded(ctx, llv, v1alpha1.PhaseFailed, message); err != nil {
+			r.log.Error(err, fmt.Sprintf("[Reconcile] unable to update the LVMLogicalVolume %s", llv.Name))
+			return controller.Result{}, err
+		}
+		return controller.Result{}, nil
+	}
+
 	// this case prevents the unexpected behavior when the controller runs up with existing LVMLogicalVolumes
 	if vgs, _ := r.sdsCache.GetVGs(); len(vgs) == 0 {
 		r.log.Warning(fmt.Sprintf("[RunLVMLogicalVolumeWatcherController] unable to reconcile the request as no VG was found in the cache. Retry in %s", r.cfg.VolumeGroupScanInterval.String()))

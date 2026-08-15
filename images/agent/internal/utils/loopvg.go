@@ -252,3 +252,28 @@ func SkipUnownedLoopVGs(log logger.Logger, action string, vgs []internal.VGData,
 	}
 	return out
 }
+
+// RefuseSharedVG reports whether a Volume Group is served by a lock manager and
+// must therefore not be written to by the node-local paths of this module.
+//
+// It is the check every path that creates, extends or removes a Logical Volume
+// has to make before it acts on a group it reached through an LVMVolumeGroup.
+// Those resources are not created for shared groups any more, but one made
+// earlier still exists on any cluster that ran an older agent — and behind it
+// sit reconcilers that would run lvcreate, lvextend and lvremove on a pool's
+// group with no lock taken at all. The reason it is written as a refusal rather
+// than a repair: what is on the other side is somebody's data, and a volume that
+// another node holds a lease on must not be resized or removed because a local
+// resource asked for it.
+func RefuseSharedVG(log logger.Logger, action, vgName string, vg *internal.VGData) (string, bool) {
+	if vg == nil || !vg.IsShared() {
+		return "", false
+	}
+
+	message := fmt.Sprintf("refusing to %s in the Volume Group %s: it is shared (lock type %q) and its volumes are "+
+		"handed out by a lock manager, so nothing here may create, extend or remove them. Use the pool's own "+
+		"resources for it; an LVMVolumeGroup pointing at a shared group is a leftover and should be deleted by hand",
+		action, vgName, vg.SharedDescription())
+	log.Warning(fmt.Sprintf("[RefuseSharedVG] %s", message))
+	return message, true
+}

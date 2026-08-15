@@ -206,3 +206,27 @@ func TestASharedGroupIsRecognisedByItsLockTypeWhenSharedIsEmpty(t *testing.T) {
 	assert.Equal(t, []string{"vglocal", "vgnone"}, names,
 		`a group whose lock type is sanlock is not this node's to activate; "none" is lvm's word for a local one`)
 }
+
+func TestASharedGroupIsRefusedToTheNodeLocalVolumePaths(t *testing.T) {
+	// LVMVolumeGroups are not made for shared groups any more, but one made by
+	// an older agent outlives the fix — and behind it sit reconcilers that run
+	// lvcreate, lvextend and lvremove on the node with no lock taken anywhere.
+	// What is on the other side is somebody's data, so this is a refusal and
+	// not a repair.
+	log := testLogger(t)
+
+	message, refuse := utils.RefuseSharedVG(log, "manage a Logical Volume", "vghw",
+		&internal.VGData{VGName: "vghw", VGLockType: "sanlock"})
+	assert.True(t, refuse)
+	assert.Contains(t, message, "handed out by a lock manager")
+	assert.Contains(t, message, "deleted by hand",
+		"the leftover resource is the operator's to remove, not this module's")
+
+	_, refuseLocal := utils.RefuseSharedVG(log, "manage a Logical Volume", "vglocal",
+		&internal.VGData{VGName: "vglocal"})
+	assert.False(t, refuseLocal, "an ordinary group is untouched by this")
+
+	_, refuseUnknown := utils.RefuseSharedVG(log, "manage a Logical Volume", "vggone", nil)
+	assert.False(t, refuseUnknown,
+		"a group the cache cannot see says nothing about sharedness, and the paths below have their own answer for it")
+}
