@@ -17,6 +17,8 @@ limitations under the License.
 package lsvg
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
@@ -97,4 +100,33 @@ func TestAFencedNodeWaitsWhileItsLUNsAreStillMissing(t *testing.T) {
 	assert.NotZero(t, res.RequeueAfter, "the paths come back on their own, and so does the node")
 	_, err := os.Stat(filepath.Join(dir, "killpath-"+testVG+".json"))
 	assert.NoError(t, err, "the record stands until the recovery finishes")
+}
+
+func TestAReservationOnTheLUNIsNamedForWhatItIs(t *testing.T) {
+	// Most reasons a lockspace does not start resolve on their own, and this one
+	// never does: a SCSI reservation left by another initiator lets the node read
+	// the volume group and refuses its writes, so the delta lease — taken with
+	// COMPARE AND WRITE — comes back as a conflict. Retrying that every thirty
+	// seconds with nothing published is indistinguishable from a healthy node.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).
+		Return("vgchange --lock-start", errors.New("add_lockspace fail result -286"))
+	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	res := reconcile(t, r, group)
+
+	assert.NotZero(t, res.RequeueAfter, "the retry stays: the reservation may be cleared at any moment")
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	require.NotNil(t, published.Status)
+	require.NotEmpty(t, published.Status.Conditions)
+	assert.Equal(t, "ReservationConflict", published.Status.Conditions[0].Reason)
+	assert.Contains(t, published.Status.Conditions[0].Message, "sg_persist",
+		"the message names the command that shows the reservation")
+	assert.Contains(t, published.Status.Conditions[0].Message, "does not clear it",
+		"clearing somebody else's registration is not this module's decision")
 }

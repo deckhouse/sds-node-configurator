@@ -22,7 +22,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
@@ -122,4 +126,80 @@ func (r *Reconciler) recoverFromBarrier(ctx context.Context, lsvg *v1alpha1.LVMS
 
 	r.log.Info(fmt.Sprintf("[%s] %s is ready to rejoin the pool", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
 	return false
+}
+
+// ConditionLockspaceStarted is what a reader outside this module looks at to
+// learn whether a node is in the pool and, when it is not, why.
+const ConditionLockspaceStarted = "LockspaceStarted"
+
+// publishLockStartFailure says why the node is not in the pool, and names the
+// one cause a retry will never fix.
+//
+// Most failures here resolve on their own: a LUN still arriving, a lease from
+// this node's previous incarnation not yet expired, a group being created a
+// moment ago. One does not. A SCSI reservation left on the LUN by another
+// initiator lets this node read the volume group and refuses its writes, so the
+// delta lease — taken with COMPARE AND WRITE — comes back as a reservation
+// conflict, and sanlock reports it as add_lockspace fail result -286. Retrying
+// that until somebody notices is the failure mode this exists to prevent.
+//
+// The reservation is not cleared here on purpose. Clearing somebody else's
+// registration is how a pool takes a LUN from a host that may be using it
+// legitimately, and this module refuses to make that decision on its own — the
+// boundary is the data, and here it runs through an array shared with hosts this
+// cluster knows nothing about.
+func (r *Reconciler) publishLockStartFailure(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+	cause error,
+) {
+	reason, message := "LockspaceNotStarted", cause.Error()
+
+	text := strings.ToLower(cause.Error())
+	switch {
+	case strings.Contains(text, "reservation conflict") || strings.Contains(text, "result -286"):
+		reason = "ReservationConflict"
+		message = "the LUN carries a SCSI reservation from another initiator: the node can read the " +
+			"volume group and cannot take its lease, and this will not change on its own. " +
+			"Check `sg_persist --in --read-reservation` on a path of the LUN and clear the leftover " +
+			"registration from the host that owns the key. This module does not clear it: the LUN may " +
+			"belong to somebody who is using it."
+	case strings.Contains(text, "lockspace is not started") || strings.Contains(text, "no such device"):
+		reason = "LUNNotReadyYet"
+		message = "the volume group is not readable on this node yet, which is ordinary while the array " +
+			"is presenting the LUN: " + cause.Error()
+	}
+
+	patch := client.MergeFrom(lsvg.DeepCopy())
+	if lsvg.Status == nil {
+		lsvg.Status = &v1alpha1.LVMSharedVolumeGroupStatus{}
+	}
+	setCondition(&lsvg.Status.Conditions, metav1.Condition{
+		Type:    ConditionLockspaceStarted,
+		Status:  metav1.ConditionFalse,
+		Reason:  reason,
+		Message: r.cfg.NodeName + ": " + message,
+	})
+
+	if err := r.cl.Status().Patch(ctx, lsvg, patch); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to publish why the lockspace of %s did not start: %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
+	}
+}
+
+// setCondition keeps lastTransitionTime honest: it moves when the state
+// changes and stays put when only the wording does.
+func setCondition(conditions *[]metav1.Condition, condition metav1.Condition) {
+	condition.LastTransitionTime = metav1.Now()
+	for i := range *conditions {
+		if (*conditions)[i].Type != condition.Type {
+			continue
+		}
+		if (*conditions)[i].Status == condition.Status {
+			condition.LastTransitionTime = (*conditions)[i].LastTransitionTime
+		}
+		(*conditions)[i] = condition
+		return
+	}
+	*conditions = append(*conditions, condition)
 }

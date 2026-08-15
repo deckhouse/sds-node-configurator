@@ -241,6 +241,12 @@ func (r *Reconciler) join(
 		// this and all of them pass. Retry rather than escalate.
 		r.log.Warning(fmt.Sprintf("[%s] unable to start the lockspace of %s (cmd: %s): %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
+
+		// Retrying is right, and retrying SILENTLY is not: one of these causes
+		// never resolves by itself, and a node that keeps trying every thirty
+		// seconds with nothing published looks identical to a node that is fine.
+		r.publishLockStartFailure(ctx, lsvg, err)
+
 		return controller.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
