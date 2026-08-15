@@ -806,7 +806,7 @@ func TestAMemberLooksAtItselfAgainWithoutBeingAsked(t *testing.T) {
 func applyNodeEntry(
 	ctx context.Context,
 	cl client.Client,
-	subResourceName string,
+	_ string,
 	obj client.Object,
 	patch client.Patch,
 	opts ...client.SubResourcePatchOption,
