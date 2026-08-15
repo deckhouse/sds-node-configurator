@@ -605,19 +605,19 @@ func (mr *MockCommandsMockRecorder) LockspaceRunning(ctx, vgName any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockspaceRunning", reflect.TypeOf((*MockCommands)(nil).LockspaceRunning), ctx, vgName)
 }
 
-// MultipathToolsVersion mocks base method.
-func (m *MockCommands) MultipathToolsVersion(ctx context.Context) (string, error) {
+// MissingReservationTools mocks base method.
+func (m *MockCommands) MissingReservationTools(ctx context.Context) ([]string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "MultipathToolsVersion", ctx)
-	ret0, _ := ret[0].(string)
+	ret := m.ctrl.Call(m, "MissingReservationTools", ctx)
+	ret0, _ := ret[0].([]string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// MultipathToolsVersion indicates an expected call of MultipathToolsVersion.
-func (mr *MockCommandsMockRecorder) MultipathToolsVersion(ctx any) *gomock.Call {
+// MissingReservationTools indicates an expected call of MissingReservationTools.
+func (mr *MockCommandsMockRecorder) MissingReservationTools(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MultipathToolsVersion", reflect.TypeOf((*MockCommands)(nil).MultipathToolsVersion), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MissingReservationTools", reflect.TypeOf((*MockCommands)(nil).MissingReservationTools), ctx)
 }
 
 // PVScan mocks base method.

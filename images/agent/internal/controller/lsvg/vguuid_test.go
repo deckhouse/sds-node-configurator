@@ -146,8 +146,9 @@ func TestANodePublishesWhatItCanSayAboutTheReservationChannel(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	group := testGroup(testNode)
-	// The image carries tools whose `reserve` lies about its exit code.
-	commands.EXPECT().MultipathToolsVersion(gomock.Any()).Return("multipath-tools v0.14.3", nil).AnyTimes()
+	// The image does not carry the tooling every reservation command runs from.
+	commands.EXPECT().MissingReservationTools(gomock.Any()).
+		Return([]string{"/usr/sbin/lvmpersist"}, nil).AnyTimes()
 	commands.EXPECT().ReservationKeyOf(gomock.Any(), gomock.Any()).Return("0x1", nil).AnyTimes()
 	r, cl, _ := testReconciler(t, nodeWith(map[string]string{
 		SanlockHostIDAnnotation:                        "7",
@@ -163,6 +164,6 @@ func TestANodePublishesWhatItCanSayAboutTheReservationChannel(t *testing.T) {
 	pr := published.Status.Nodes[0].PersistentReservations
 	require.NotNil(t, pr, "a node says what it knows about the channel whether or not anybody asked yet")
 	assert.False(t, pr.Ready)
-	assert.Equal(t, utils.ReasonMultipathToolsTooNew, pr.Reason)
-	assert.Contains(t, pr.Message, "0.9.9", "the message names the last version that works")
+	assert.Equal(t, utils.ReasonReservationToolsMissing, pr.Reason)
+	assert.Contains(t, pr.Message, "/usr/sbin/lvmpersist", "the message names what is missing")
 }

@@ -67,13 +67,14 @@ const (
 	// without a word to anybody.
 	SharedLockCtlCmd = "/usr/sbin/lvmlockctl"
 
-	// SharedMpathPersistCmd and SharedMultipathdCmd answer what a node can learn
-	// about the SCSI reservation channel without writing to the array: which
-	// multipath-tools the daemons carry, and whether a map has a reservation key.
-	// They live in the same image for the same reason lvm does — the tool that
-	// speaks to multipathd must be the one lvmpersist will run.
-	SharedMpathPersistCmd = "/usr/sbin/mpathpersist"
-	SharedMultipathdCmd   = "/usr/sbin/multipathd"
+	// SharedMultipathdCmd answers whether a map has a reservation key, and it is
+	// run in the HOST's mount namespace rather than the lock daemons'.
+	//
+	// multipathd is the host's: it owns the maps, it holds the keys in
+	// /etc/multipath/prkeys, and it is what re-registers a path that comes back.
+	// The daemons' image does not carry it and should not — nothing in the pool
+	// asks multipathd to do anything, it is only asked what it already knows.
+	SharedMultipathdCmd = "/usr/sbin/multipathd"
 
 	// SharedSgPersistCmd is how a registration is taken away from a node that
 	// cannot be asked to give it up.
@@ -84,6 +85,12 @@ const (
 	// the host, with the key set every way there is. sg_persist on a single path
 	// does the same operation in a third of a second.
 	SharedSgPersistCmd = "/usr/bin/sg_persist"
+
+	// SharedLvmPersistCmd is the script lvm2 runs for every `vgchange --persist`
+	// and `--setpersist`, by a path compiled into it. It is checked rather than
+	// called: a pool that cannot find it fails in the middle of the one-way
+	// door, and the node can say so beforehand instead.
+	SharedLvmPersistCmd = "/usr/sbin/lvmpersist"
 
 	// SharedLockDaemonProcess is how the mount namespace holding SharedLVMCmd is
 	// found: by the daemon that must be running for any of this to mean anything.

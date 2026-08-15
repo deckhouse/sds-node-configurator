@@ -78,7 +78,7 @@ type Commands interface {
 	VGSetLockArgsPersist(ctx context.Context, vgName string) (string, error)
 	ReadRegistrationKeys(ctx context.Context, path string) ([]string, string, error)
 	PreemptRegistration(ctx context.Context, path, ourKey, theirKey string) (string, error)
-	MultipathToolsVersion(ctx context.Context) (string, error)
+	MissingReservationTools(ctx context.Context) ([]string, error)
 	ReservationKeyOf(ctx context.Context, mapName string) (string, error)
 	CreateVGShared(ctx context.Context, params SharedVGParams) (string, error)
 	CreateLVShared(ctx context.Context, vgName, lvName, size string) (string, error)
@@ -1181,37 +1181,46 @@ func lockspaceListed(info, vgName string) bool {
 
 // MultipathToolsVersion is the version of the tools in the lock daemons' image,
 // which is the only one that matters: lvmpersist prepends the system
-// directories to PATH and runs that binary whatever else is installed.
-func (commands) MultipathToolsVersion(ctx context.Context) (string, error) {
-	argv, err := sharedNamespaceArgs(internal.SharedMpathPersistCmd, "-V")
-	if err != nil {
-		return "", err
-	}
-	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+// MissingReservationTools names the reservation tooling that is not in the lock
+// daemons' image, and it is a build check rather than a node check.
+//
+// Every reservation command runs from that image: lvm2 executes
+// /sbin/lvmpersist by a path compiled into it, and lvmpersist runs sg_persist
+// per path of the map. A pool asked to switch with either of them missing fails
+// in the middle of the one-way door — `vgchange --setpersist require` has
+// already made the group unusable by then — so it is established by looking
+// first.
+func (commands) MissingReservationTools(ctx context.Context) ([]string, error) {
+	var missing []string
+	for _, tool := range []string{internal.SharedSgPersistCmd, internal.SharedLvmPersistCmd} {
+		argv, err := sharedNamespaceArgs("/bin/test", "-x", tool)
+		if err != nil {
+			return nil, err
+		}
+		cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
 
-	var out, stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
 
-	// The version goes to stdout on some builds and to stderr on others, and
-	// -V exits non-zero on a few; the text is what matters.
-	_ = cmd.Run()
-	answer := strings.TrimSpace(out.String() + " " + stderr.String())
-	if answer == "" {
-		return "", fmt.Errorf("no answer from %s -V", internal.SharedMpathPersistCmd)
+		if err := cmd.Run(); err != nil {
+			if cmd.ProcessState == nil {
+				// The namespace itself could not be entered: that is not an
+				// answer about the tooling.
+				return nil, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+			}
+			missing = append(missing, tool)
+		}
 	}
-	return answer, nil
+	return missing, nil
 }
 
-// ReservationKeyOf asks multipathd for the reservation key of a map. An empty
-// or "none" answer means every reservation command will be refused before it
-// reaches the array.
+// ReservationKeyOf asks the host's multipathd for the reservation key of a map.
+// An empty or "none" answer means every reservation command will be refused
+// before it reaches the array, and that a path which comes back will not be
+// re-registered.
 func (commands) ReservationKeyOf(ctx context.Context, mapName string) (string, error) {
-	argv, err := sharedNamespaceArgs(internal.SharedMultipathdCmd, "getprkey", "map", mapName)
-	if err != nil {
-		return "", err
-	}
-	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd,
+		hostNamespaceArgs(internal.SharedMultipathdCmd, "getprkey", "map", mapName)...)
 
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
@@ -1221,6 +1230,15 @@ func (commands) ReservationKeyOf(ctx context.Context, mapName string) (string, e
 		return "", fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 	return strings.TrimSpace(out.String()), nil
+}
+
+// hostNamespaceArgs runs a command of the host in the host's mount namespace.
+//
+// Only multipathd is asked this way, and only questions. The maps, the keys in
+// /etc/multipath/prkeys and the re-registration of a returning path all belong
+// to the host's multipathd; the daemons' image carries no multipathd at all.
+func hostNamespaceArgs(command string, args ...string) []string {
+	return append([]string{"-t", "1", "-m", "--", command}, args...)
 }
 
 // sharedNamespaceArgs runs a command of the lock daemons' image in their mount

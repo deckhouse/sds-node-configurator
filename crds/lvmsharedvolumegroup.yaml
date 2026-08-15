@@ -365,12 +365,14 @@ spec:
                             description: |
                               Short, machine-readable cause when `ready` is `false`.
 
-                              - `MultipathToolsTooNew`: the version in the lock daemons' image
-                                returns a wrong exit code for `reserve`, and lvmpersist undoes its
-                                own registration in response — which takes the reservation with it.
+                              - `ReservationToolsMissing`: the lock daemons' image does not carry
+                                the tooling every reservation command runs from — lvm2 executes
+                                `/sbin/lvmpersist` by a compiled-in path, and lvmpersist runs
+                                `sg_persist`. A build regression, not something to fix on the node.
                               - `NoReservationKey`: the pool's multipath maps have no
                                 `reservation_key`, so every reservation command is refused before
-                                it reaches the array.
+                                it reaches the array and a path that comes back is not
+                                re-registered.
                               - `ChannelUnreachable`: the channel could not be read from this node
                                 at all, which is what a pod without `hostNetwork` looks like.
                           message:

@@ -71,25 +71,28 @@ func (r *Reconciler) checkPersistentReservations(
 	ctx context.Context,
 	lsvg *v1alpha1.LVMSharedVolumeGroup,
 ) utils.PRReadiness {
-	version, err := r.commands.MultipathToolsVersion(ctx)
+	missing, err := r.commands.MissingReservationTools(ctx)
 	if err != nil {
-		// The tool that speaks to multipathd could not be run or could not
-		// answer. Nothing else about the channel is knowable from here.
-		r.log.Warning(fmt.Sprintf("[%s] cannot read the multipath-tools version for %s: %s",
+		// The daemons' mount namespace could not be entered or looked into.
+		// Nothing else about the channel is knowable from here.
+		r.log.Warning(fmt.Sprintf("[%s] cannot check the reservation tooling for %s: %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
-		return utils.PRReadinessFrom("", false, nil, false)
+		return utils.PRReadinessFrom(nil, nil, false)
+	}
+	if len(missing) > 0 {
+		return utils.PRReadinessFrom(missing, nil, true)
 	}
 
 	wwids := make([]string, 0, len(lsvg.Spec.Devices))
 	for _, device := range lsvg.Spec.Devices {
 		wwids = append(wwids, device.WWID)
 	}
-	devices, missing, err := utils.ResolveWWIDs(wwids)
-	if err != nil || len(missing) > 0 {
+	devices, missingLUNs, err := utils.ResolveWWIDs(wwids)
+	if err != nil || len(missingLUNs) > 0 {
 		// The LUNs are not here yet. That is not a verdict on the channel, so
 		// the previous answer — if any — stands rather than being replaced by a
 		// worse one for an unrelated reason.
-		return utils.PRReadinessFrom(version, true, nil, true)
+		return utils.PRReadinessFrom(nil, nil, true)
 	}
 
 	var withoutKey, keys []string
@@ -103,7 +106,7 @@ func (r *Reconciler) checkPersistentReservations(
 		if err != nil {
 			r.log.Warning(fmt.Sprintf("[%s] cannot read the reservation key of %s: %s",
 				ReconcilerName, name, err.Error()))
-			return utils.PRReadinessFrom(version, true, nil, false)
+			return utils.PRReadinessFrom(nil, nil, false)
 		}
 		if !utils.ReservationKeyConfigured(key) {
 			withoutKey = append(withoutKey, name)
@@ -112,7 +115,7 @@ func (r *Reconciler) checkPersistentReservations(
 		keys = append(keys, key)
 	}
 
-	readiness := utils.PRReadinessFrom(version, true, withoutKey, true)
+	readiness := utils.PRReadinessFrom(nil, withoutKey, true)
 	readiness.Key = utils.SingleReservationKey(keys)
 	return readiness
 }
