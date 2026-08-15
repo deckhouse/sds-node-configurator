@@ -192,8 +192,12 @@ type NodePersistentReservations struct {
 	// +kubebuilder:validation:MaxLength=4096
 	Message string `json:"message,omitempty"`
 
-	// Key is the reservation key this node registers with on the pool's LUNs,
-	// as its own multipath configuration reports it.
+	// Key is the reservation key this node holds on the pool's LUNs, as the
+	// host's multipathd reports it.
+	//
+	// It is empty until the node actually registers one, which is what a pool
+	// that has not been switched looks like — multipathd answers "none" for a
+	// map nothing has registered on.
 	//
 	// It is published so that the pool can take this node's access away when the
 	// node itself can no longer be asked to give it up — a node cut off from the

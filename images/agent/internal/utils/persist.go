@@ -71,7 +71,7 @@ type PRReadiness struct {
 func SingleReservationKey(keys []string) string {
 	var single string
 	for _, key := range keys {
-		if !ReservationKeyConfigured(key) {
+		if key == "" {
 			return ""
 		}
 		if single == "" {
@@ -85,27 +85,38 @@ func SingleReservationKey(keys []string) string {
 	return single
 }
 
-// ReservationKeyConfigured reports whether multipathd has a reservation key for
-// the map.
+// ReservationKeyConfigured reports whether the host's multipathd is configured
+// to keep a reservation key at all.
 //
-// Without one every reservation command is refused before it reaches the array —
-// "<map>: no configured reservation key" — and the refusal reads like a broken
-// mechanism rather than a missing setting. The key belongs in the pool's
-// multipath drop-in, alongside no_path_retry, and it is written by whoever
-// prepares the node: lvmpersist tries to repair the config itself by calling
-// mpathconf, and mpathconf refuses to run in a container ("Running in chroot,
-// ignoring request"), so self-healing from here is impossible by construction.
-func ReservationKeyConfigured(getprkeyOutput string) bool {
-	answer := strings.TrimSpace(getprkeyOutput)
-	if answer == "" {
-		return false
+// It reads the merged configuration rather than a map's current key, and the
+// difference is the whole point: `getprkey` answers "none" for every map until
+// something registers one, so a check on the key itself could never pass before
+// the switch — which is exactly what it exists to gate. What has to be true
+// beforehand is that multipathd knows where the key lives, because it is
+// multipathd that re-registers a path when it comes back.
+func ReservationKeyConfigured(config string) bool {
+	for _, line := range strings.Split(config, "\n") {
+		field := strings.TrimSpace(line)
+		if !strings.HasPrefix(field, "reservation_key") {
+			continue
+		}
+		value := strings.Trim(strings.TrimSpace(strings.TrimPrefix(field, "reservation_key")), `"`)
+		if value != "" && value != "none" {
+			return true
+		}
 	}
-	// multipathd answers "none" when the map has no key, and the key itself
-	// otherwise.
-	if strings.EqualFold(answer, "none") || strings.Contains(strings.ToLower(answer), "no configured reservation key") {
-		return false
+	return false
+}
+
+// KeyOfMap reads a map's current reservation key, which exists only once
+// something has registered one. An empty or "none" answer is not a fault before
+// a pool is switched — it is what an unregistered map says.
+func KeyOfMap(answer string) string {
+	answer = strings.TrimSpace(answer)
+	if answer == "" || answer == "none" || !strings.HasPrefix(answer, "0x") {
+		return ""
 	}
-	return true
+	return answer
 }
 
 // PRReadinessFrom turns what a node could read into the verdict it publishes.
@@ -113,7 +124,7 @@ func ReservationKeyConfigured(getprkeyOutput string) bool {
 // The order of the checks is the order in which their failures are cheapest to
 // fix: a version in the image is a rebuild, a missing key is a line in a drop-in,
 // and an unreachable channel is a pod that cannot see multipathd at all.
-func PRReadinessFrom(toolsPresent []string, mapsWithoutKey []string, channelReadable bool) PRReadiness {
+func PRReadinessFrom(toolsPresent []string, keyConfigured bool, channelReadable bool) PRReadiness {
 	if !channelReadable {
 		return PRReadiness{
 			Reason: ReasonChannelUnreachable,
@@ -133,14 +144,14 @@ func PRReadinessFrom(toolsPresent []string, mapsWithoutKey []string, channelRead
 		}
 	}
 
-	if len(mapsWithoutKey) > 0 {
+	if !keyConfigured {
 		return PRReadiness{
 			Reason: ReasonNoReservationKey,
-			Message: fmt.Sprintf("no reservation key is configured for %s. Every reservation command is refused "+
-				"before it reaches the array while that is so, and a path that comes back is not re-registered. "+
-				"The key belongs in the node's multipath configuration (`reservation_key file`), which the module "+
-				"writes there itself — a map without one means that configuration did not reach this node",
-				strings.Join(mapsWithoutKey, ", ")),
+			Message: "this node's multipathd has no `reservation_key` in its configuration. Every reservation " +
+				"command is refused before it reaches the array while that is so, and a path that comes back is " +
+				"not re-registered — which leaves the node writing through a path the array no longer knows. " +
+				"The module writes `reservation_key file` into /etc/multipath/conf.d itself, so a node without " +
+				"it is a node that configuration has not reached yet",
 		}
 	}
 

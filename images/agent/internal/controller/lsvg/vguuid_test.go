@@ -149,6 +149,7 @@ func TestANodePublishesWhatItCanSayAboutTheReservationChannel(t *testing.T) {
 	// The image does not carry the tooling every reservation command runs from.
 	commands.EXPECT().MissingReservationTools(gomock.Any()).
 		Return([]string{"/usr/sbin/lvmpersist"}, nil).AnyTimes()
+	commands.EXPECT().MultipathConfiguration(gomock.Any()).Return("\treservation_key \"file\"\n", nil).AnyTimes()
 	commands.EXPECT().ReservationKeyOf(gomock.Any(), gomock.Any()).Return("0x1", nil).AnyTimes()
 	r, cl, _ := testReconciler(t, nodeWith(map[string]string{
 		SanlockHostIDAnnotation:                        "7",

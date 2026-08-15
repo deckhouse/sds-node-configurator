@@ -369,10 +369,11 @@ spec:
                                 the tooling every reservation command runs from — lvm2 executes
                                 `/sbin/lvmpersist` by a compiled-in path, and lvmpersist runs
                                 `sg_persist`. A build regression, not something to fix on the node.
-                              - `NoReservationKey`: the pool's multipath maps have no
-                                `reservation_key`, so every reservation command is refused before
-                                it reaches the array and a path that comes back is not
-                                re-registered.
+                              - `NoReservationKey`: this node's multipathd has no
+                                `reservation_key` in its configuration, so every reservation
+                                command is refused before it reaches the array and a path that
+                                comes back is not re-registered. The module writes it into
+                                /etc/multipath/conf.d itself.
                               - `ChannelUnreachable`: the channel could not be read from this node
                                 at all, which is what a pod without `hostNetwork` looks like.
                           message:
@@ -384,8 +385,9 @@ spec:
                             type: string
                             maxLength: 32
                             description: |
-                              The reservation key this node registers with on the pool's LUNs, as
-                              its own multipath configuration reports it.
+                              The reservation key this node holds on the pool's LUNs, as the
+                              host's multipathd reports it. Empty until the node registers one,
+                              which is what a pool that has not been switched looks like.
 
                               It is published so that the pool can take this node's access away
                               when the node can no longer be asked to give it up: the array stops

@@ -102,6 +102,7 @@ func testReconciler(
 	// The reservation channel answers the way a node ready for it answers. Tests
 	// about the channel itself say otherwise before calling this helper.
 	commands.EXPECT().MissingReservationTools(gomock.Any()).Return(nil, nil).AnyTimes()
+	commands.EXPECT().MultipathConfiguration(gomock.Any()).Return("\treservation_key \"file\"\n", nil).AnyTimes()
 	commands.EXPECT().ReservationKeyOf(gomock.Any(), gomock.Any()).Return("0x100000000001002d", nil).AnyTimes()
 
 	log, err := logger.NewLogger(logger.WarningLevel)
@@ -498,6 +499,7 @@ func TestTheOwnerPublishesWhatItObservesAboutTheGroup(t *testing.T) {
 		WithObjects(node, group).WithStatusSubresource(group).Build()
 
 	commands.EXPECT().MissingReservationTools(gomock.Any()).Return(nil, nil).AnyTimes()
+	commands.EXPECT().MultipathConfiguration(gomock.Any()).Return("\treservation_key \"file\"\n", nil).AnyTimes()
 	commands.EXPECT().ReservationKeyOf(gomock.Any(), gomock.Any()).Return("0x1", nil).AnyTimes()
 	commands.EXPECT().LockspaceRunning(gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	commands.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "pvs", bytes.Buffer{}, nil).AnyTimes()

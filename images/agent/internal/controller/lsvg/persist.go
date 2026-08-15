@@ -77,47 +77,56 @@ func (r *Reconciler) checkPersistentReservations(
 		// Nothing else about the channel is knowable from here.
 		r.log.Warning(fmt.Sprintf("[%s] cannot check the reservation tooling for %s: %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
-		return utils.PRReadinessFrom(nil, nil, false)
+		return utils.PRReadinessFrom(nil, false, false)
 	}
 	if len(missing) > 0 {
-		return utils.PRReadinessFrom(missing, nil, true)
+		return utils.PRReadinessFrom(missing, false, true)
 	}
 
+	config, err := r.commands.MultipathConfiguration(ctx)
+	if err != nil {
+		// multipathd could not be asked. That is what a pod which cannot reach
+		// the host's multipathd looks like, and it is not a verdict about the
+		// key.
+		r.log.Warning(fmt.Sprintf("[%s] cannot read the multipath configuration for %s: %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
+		return utils.PRReadinessFrom(nil, false, false)
+	}
+	if !utils.ReservationKeyConfigured(config) {
+		return utils.PRReadinessFrom(nil, false, true)
+	}
+
+	readiness := utils.PRReadinessFrom(nil, true, true)
+	readiness.Key = r.reservationKeyOfThisNode(ctx, lsvg)
+	return readiness
+}
+
+// reservationKeyOfThisNode is the key this node registers with, once it holds a
+// registration. It is empty before the pool is switched, and empty is the honest
+// answer then: there is no key yet, and a neighbour must not fence by a guess.
+func (r *Reconciler) reservationKeyOfThisNode(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+) string {
 	wwids := make([]string, 0, len(lsvg.Spec.Devices))
 	for _, device := range lsvg.Spec.Devices {
 		wwids = append(wwids, device.WWID)
 	}
-	devices, missingLUNs, err := utils.ResolveWWIDs(wwids)
-	if err != nil || len(missingLUNs) > 0 {
-		// The LUNs are not here yet. That is not a verdict on the channel, so
-		// the previous answer — if any — stands rather than being replaced by a
-		// worse one for an unrelated reason.
-		return utils.PRReadinessFrom(nil, nil, true)
+	devices, missing, err := utils.ResolveWWIDs(wwids)
+	if err != nil || len(missing) > 0 {
+		// A key read from some of the pool's LUNs says nothing about the rest.
+		return ""
 	}
 
-	var withoutKey, keys []string
-	for _, wwid := range wwids {
-		device, resolved := devices[wwid]
-		if !resolved {
-			continue
-		}
-		name := utils.MultipathNameOf(device.Path)
-		key, err := r.commands.ReservationKeyOf(ctx, name)
+	keys := make([]string, 0, len(devices))
+	for _, wwid := range utils.SortedWWIDs(devices) {
+		answer, err := r.commands.ReservationKeyOf(ctx, utils.MultipathNameOf(devices[wwid].Path))
 		if err != nil {
-			r.log.Warning(fmt.Sprintf("[%s] cannot read the reservation key of %s: %s",
-				ReconcilerName, name, err.Error()))
-			return utils.PRReadinessFrom(nil, nil, false)
+			return ""
 		}
-		if !utils.ReservationKeyConfigured(key) {
-			withoutKey = append(withoutKey, name)
-			continue
-		}
-		keys = append(keys, key)
+		keys = append(keys, utils.KeyOfMap(answer))
 	}
-
-	readiness := utils.PRReadinessFrom(nil, withoutKey, true)
-	readiness.Key = utils.SingleReservationKey(keys)
-	return readiness
+	return utils.SingleReservationKey(keys)
 }
 
 func prStatus(v utils.PRReadiness) *v1alpha1.NodePersistentReservations {

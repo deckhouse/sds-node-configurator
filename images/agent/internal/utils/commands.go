@@ -76,6 +76,7 @@ type Commands interface {
 	VGPersistStart(ctx context.Context, vgName string) (string, error)
 	VGPersistStop(ctx context.Context, vgName string) (string, error)
 	VGSetLockArgsPersist(ctx context.Context, vgName string) (string, error)
+	MultipathConfiguration(ctx context.Context) (string, error)
 	ReadRegistrationKeys(ctx context.Context, path string) ([]string, string, error)
 	PreemptRegistration(ctx context.Context, path, ourKey, theirKey string) (string, error)
 	MissingReservationTools(ctx context.Context) ([]string, error)
@@ -1212,6 +1213,27 @@ func (commands) MissingReservationTools(ctx context.Context) ([]string, error) {
 		}
 	}
 	return missing, nil
+}
+
+// MultipathConfiguration is what the host's multipathd is actually running with,
+// after its defaults, its drop-ins and its per-map sections have been merged.
+//
+// It is the only place the reservation key can be established before a pool is
+// switched. `getprkey` answers "none" for every map until something registers a
+// key, so a readiness check built on it could never pass for a pool that has not
+// been switched yet — and the switch is what it was supposed to gate.
+func (commands) MultipathConfiguration(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd,
+		hostNamespaceArgs(internal.SharedMultipathdCmd, "show", "config")...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return out.String(), nil
 }
 
 // ReservationKeyOf asks the host's multipathd for the reservation key of a map.

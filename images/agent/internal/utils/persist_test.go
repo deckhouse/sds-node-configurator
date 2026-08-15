@@ -29,7 +29,7 @@ func TestAMissingToolIsNamedRatherThanDiscoveredLater(t *testing.T) {
 	// executes /sbin/lvmpersist by a path compiled into it, and lvmpersist runs
 	// sg_persist. A pool taken through the switch without them fails in the
 	// middle of the one-way door, with the group already unusable.
-	v := utils.PRReadinessFrom([]string{"/usr/sbin/lvmpersist"}, nil, true)
+	v := utils.PRReadinessFrom([]string{"/usr/sbin/lvmpersist"}, false, true)
 	assert.False(t, v.Ready)
 	assert.Equal(t, utils.ReasonReservationToolsMissing, v.Reason)
 	assert.Contains(t, v.Message, "/usr/sbin/lvmpersist")
@@ -37,39 +37,48 @@ func TestAMissingToolIsNamedRatherThanDiscoveredLater(t *testing.T) {
 
 func TestAChannelThatCannotBeReadIsNotAPass(t *testing.T) {
 	// Silence about the channel is not a verdict that it works.
-	v := utils.PRReadinessFrom(nil, nil, false)
+	v := utils.PRReadinessFrom(nil, false, false)
 	assert.False(t, v.Ready)
 	assert.Equal(t, utils.ReasonChannelUnreachable, v.Reason)
 }
 
-func TestAMapWithoutAKeyIsNotReady(t *testing.T) {
-	assert.False(t, utils.ReservationKeyConfigured(""))
-	assert.False(t, utils.ReservationKeyConfigured("none"))
-	assert.False(t, utils.ReservationKeyConfigured("mpathi: no configured reservation key"))
-	assert.True(t, utils.ReservationKeyConfigured("0x100000000001002d"))
+func TestTheKeyIsCheckedInTheConfigurationAndNotOnTheMap(t *testing.T) {
+	// `getprkey` answers "none" for every map until something registers a key,
+	// so a check on the map could never pass before the switch — which is what
+	// it exists to gate. What must be true beforehand is that multipathd knows
+	// where the key lives, because multipathd is what re-registers a path that
+	// comes back.
+	assert.True(t, utils.ReservationKeyConfigured("\tprkeys_file \"/etc/multipath/prkeys\"\n\treservation_key \"file\"\n"))
+	assert.True(t, utils.ReservationKeyConfigured("\treservation_key 0x123\n"))
+	assert.False(t, utils.ReservationKeyConfigured("\tno_path_retry 4\n"))
+	assert.False(t, utils.ReservationKeyConfigured("\treservation_key \"none\"\n"))
+
+	// And a map that has not registered anything is not a fault, it is silence.
+	assert.Empty(t, utils.KeyOfMap("none"))
+	assert.Empty(t, utils.KeyOfMap(""))
+	assert.Equal(t, "0x100000000001002d", utils.KeyOfMap(" 0x100000000001002d\n"))
 }
 
 func TestTheVerdictNamesTheCheapestFixFirst(t *testing.T) {
 	// An unreachable channel says nothing about anything else, so it is reported
 	// on its own: a pod that cannot see the host's multipathd knows nothing
 	// about the array at all.
-	v := utils.PRReadinessFrom([]string{"/usr/bin/sg_persist"}, []string{"mpathi"}, false)
+	v := utils.PRReadinessFrom([]string{"/usr/bin/sg_persist"}, false, false)
 	assert.False(t, v.Ready)
 	assert.Equal(t, utils.ReasonChannelUnreachable, v.Reason)
 	assert.Contains(t, v.Message, "hostNetwork")
 
 	// Tooling that cannot be fixed without a rebuild outranks a key that the
 	// node configuration puts in place by itself.
-	v = utils.PRReadinessFrom([]string{"/usr/bin/sg_persist"}, []string{"mpathi"}, true)
+	v = utils.PRReadinessFrom([]string{"/usr/bin/sg_persist"}, false, true)
 	assert.Equal(t, utils.ReasonReservationToolsMissing, v.Reason)
 	assert.Contains(t, v.Message, "/usr/bin/sg_persist")
 
-	v = utils.PRReadinessFrom(nil, []string{"mpathi", "mpathj"}, true)
+	v = utils.PRReadinessFrom(nil, false, true)
 	assert.Equal(t, utils.ReasonNoReservationKey, v.Reason)
-	assert.Contains(t, v.Message, "mpathi, mpathj")
 	assert.Contains(t, v.Message, "reservation_key file")
 
-	v = utils.PRReadinessFrom(nil, nil, true)
+	v = utils.PRReadinessFrom(nil, true, true)
 	assert.True(t, v.Ready)
 	assert.Empty(t, v.Reason)
 }

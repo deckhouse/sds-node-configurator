@@ -620,6 +620,21 @@ func (mr *MockCommandsMockRecorder) MissingReservationTools(ctx any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MissingReservationTools", reflect.TypeOf((*MockCommands)(nil).MissingReservationTools), ctx)
 }
 
+// MultipathConfiguration mocks base method.
+func (m *MockCommands) MultipathConfiguration(ctx context.Context) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MultipathConfiguration", ctx)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MultipathConfiguration indicates an expected call of MultipathConfiguration.
+func (mr *MockCommandsMockRecorder) MultipathConfiguration(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MultipathConfiguration", reflect.TypeOf((*MockCommands)(nil).MultipathConfiguration), ctx)
+}
+
 // PVScan mocks base method.
 func (m *MockCommands) PVScan(ctx context.Context) (string, error) {
 	m.ctrl.T.Helper()
