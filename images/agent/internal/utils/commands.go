@@ -71,6 +71,7 @@ type Commands interface {
 	VGActivate(ctx context.Context, vgName string) (string, error)
 	VGLockStart(ctx context.Context, vgName string, hostID int) (string, error)
 	VGLockStop(ctx context.Context, vgName string) (string, error)
+	LockspaceRunning(ctx context.Context, vgName string) (bool, error)
 	CreateVGShared(ctx context.Context, params SharedVGParams) (string, error)
 	CreateLVShared(ctx context.Context, vgName, lvName, size string) (string, error)
 	RemoveLVShared(ctx context.Context, vgName, lvName string) (string, error)
@@ -1116,6 +1117,58 @@ func (commands) VGLockStart(ctx context.Context, vgName string, hostID int) (str
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 	return cmd.String(), nil
+}
+
+// LockspaceRunning asks the lock manager whether the lockspace of this Volume
+// Group is started on this node.
+//
+// It exists because the alternative is believing an annotation this module wrote
+// itself. lvmlockd and sanlock restart together and take every lockspace with
+// them; the annotation stays, so the node goes on reporting itself a member of
+// a pool it holds no lease in — and the attachment side, comparing generation
+// stamps that both still say the same number, goes on believing its volume is
+// locked. Measured on a live pool after restarting the lock daemons: the
+// lockspace was gone, `lvmlockctl --info` printed nothing at all, and every
+// piece of bookkeeping in the cluster still said the node was in the pool.
+//
+// An error is not an answer: a caller that cannot ask must not conclude the
+// lockspace is down and start it again over a lockspace that is running.
+func (commands) LockspaceRunning(ctx context.Context, vgName string) (bool, error) {
+	pid, err := SharedLVMNamespacePID()
+	if err != nil {
+		return false, err
+	}
+
+	argv := []string{"-t", strconv.Itoa(pid), "-m", "--", internal.SharedLockCtlCmd, "--info"}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return false, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+
+	// lvmlockd names a started lockspace "lvm_<vg>" on a line of its own.
+	return lockspaceListed(out.String(), vgName), nil
+}
+
+// lockspaceListed reports whether lvmlockctl's answer contains the lockspace of
+// this Volume Group.
+func lockspaceListed(info, vgName string) bool {
+	want := "lvm_" + vgName
+	for _, line := range strings.Split(info, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == "LS" {
+			for _, f := range fields[1:] {
+				if f == want {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // VGLockStop leaves the lockspace of a shared Volume Group.

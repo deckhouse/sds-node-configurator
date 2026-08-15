@@ -212,6 +212,20 @@ func (r *Reconciler) Reconcile(
 // enough that a hundred nodes are not a load on anything.
 const groupRecheckInterval = time.Minute
 
+// lockspaceReallyRunning asks the lock manager rather than this module's own
+// bookkeeping. An error is not an answer: a node that cannot ask keeps its
+// belief, because restarting a lockspace that is running would drop the leases
+// under the volumes it holds.
+func (r *Reconciler) lockspaceReallyRunning(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup) bool {
+	running, err := r.commands.LockspaceRunning(ctx, lsvg.Spec.ActualVGNameOnTheNode)
+	if err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to ask the lock manager about %s: %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
+		return true
+	}
+	return running
+}
+
 // lockspaceStartedInStatus is what this node last said about its own
 // participation. Used when reporting something else about the node, so that the
 // unrelated fact is carried over instead of being invented.
@@ -289,6 +303,26 @@ func (r *Reconciler) join(
 				return r.publishGroup(ctx, lsvg)
 			}
 			return res, err
+		}
+	}
+
+	// The annotation says what this node believes; the lock manager says what is
+	// true. They diverge every time lvmlockd and sanlock restart — the lockspaces
+	// go with them and nothing rewrites the annotation, so the node reports
+	// itself a member of a pool it holds no lease in, and the attachment side,
+	// comparing two generation stamps that still agree, believes its volume is
+	// locked. That is the two-writer state with every piece of bookkeeping in the
+	// cluster saying otherwise. Measured after restarting the lock daemons on a
+	// live pool.
+	if r.lockspaceStarted(node, lsvg.Name, vgUUID) && !r.lockspaceReallyRunning(ctx, lsvg) {
+		r.log.Warning(fmt.Sprintf("[%s] this node is recorded in the lockspace of %s and the lock manager does not have it: starting it again",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+		if err := r.setLockspaceStarted(ctx, lsvg.Name, "", false); err != nil {
+			return controller.Result{}, err
+		}
+		// Re-read: the branch below decides on what the node says about itself.
+		if node, err = r.node(ctx); err != nil {
+			return controller.Result{}, err
 		}
 	}
 
@@ -983,7 +1017,15 @@ func (r *Reconciler) setLockspaceStarted(ctx context.Context, groupName, vgUUID 
 		// which is the case it exists for. Everything activated under the old
 		// number is mapped and unlocked, and the attachment reconciler treats a
 		// mismatch as a reason to activate again.
-		if node.Annotations[key] != vgUUID || node.Annotations[generationKey] == "" {
+		//
+		// The absence of the fact is what marks a fresh start, and comparing the
+		// UUIDs alone was not enough to notice it: a lockspace started at a
+		// moment when lvm cannot be asked for the group's identity records an
+		// empty UUID, which equals the empty value a cleared annotation reads
+		// back as. The generation then stood still across a restart, and every
+		// attachment went on vouching for a lock that no longer existed.
+		_, recorded := node.Annotations[key]
+		if !recorded || node.Annotations[key] != vgUUID || node.Annotations[generationKey] == "" {
 			node.Annotations[generationKey] = nextGeneration(node.Annotations[generationKey])
 		}
 		node.Annotations[key] = vgUUID

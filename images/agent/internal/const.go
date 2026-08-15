@@ -60,6 +60,13 @@ const (
 	// between them.
 	SharedLVMCmd = "/usr/sbin/lvm"
 
+	// SharedLockCtlCmd asks the lock manager what it is actually holding. It
+	// lives beside lvm in the daemons' image, and it is the only source that can
+	// answer whether a lockspace is running: this module's own annotations say
+	// what it believes, and a daemon restart makes belief and fact diverge
+	// without a word to anybody.
+	SharedLockCtlCmd = "/usr/sbin/lvmlockctl"
+
 	// SharedLockDaemonProcess is how the mount namespace holding SharedLVMCmd is
 	// found: by the daemon that must be running for any of this to mean anything.
 	SharedLockDaemonProcess = "lvmlockd"

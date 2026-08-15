@@ -590,6 +590,21 @@ func (mr *MockCommandsMockRecorder) ListLoopDevices(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListLoopDevices", reflect.TypeOf((*MockCommands)(nil).ListLoopDevices), ctx)
 }
 
+// LockspaceRunning mocks base method.
+func (m *MockCommands) LockspaceRunning(ctx context.Context, vgName string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockspaceRunning", ctx, vgName)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LockspaceRunning indicates an expected call of LockspaceRunning.
+func (mr *MockCommandsMockRecorder) LockspaceRunning(ctx, vgName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockspaceRunning", reflect.TypeOf((*MockCommands)(nil).LockspaceRunning), ctx, vgName)
+}
+
 // PVScan mocks base method.
 func (m *MockCommands) PVScan(ctx context.Context) (string, error) {
 	m.ctrl.T.Helper()

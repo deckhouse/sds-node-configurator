@@ -96,6 +96,9 @@ func testReconciler(
 	// Nothing is in any group unless a test says so: an extension asks lvm which
 	// devices the group already has, and the answer decides whether it runs.
 	commands.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "pvs", bytes.Buffer{}, nil).AnyTimes()
+	// The lock manager agrees with the node's own record unless a test says
+	// otherwise: the interesting case is when it does not.
+	commands.EXPECT().LockspaceRunning(gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 
 	log, err := logger.NewLogger(logger.WarningLevel)
 	require.NoError(t, err)
@@ -484,6 +487,7 @@ func TestTheOwnerPublishesWhatItObservesAboutTheGroup(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(node, group).WithStatusSubresource(group).Build()
 
+	commands.EXPECT().LockspaceRunning(gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	commands.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "pvs", bytes.Buffer{}, nil).AnyTimes()
 	commands.EXPECT().GetVG(testVG).Return(internal.VGData{
 		VGName:       testVG,
@@ -970,4 +974,55 @@ func TestTheBrokenInvariantIsPublishedAsANumber(t *testing.T) {
 	require.NoError(t, os.RemoveAll(filepath.Join(utils.SysBlockRoot, "dm-21")))
 	r.releaseOrphanActivations(context.Background(), group)
 	assert.Equal(t, 0.0, testutil.ToFloat64(r.metrics.SharedPoolUnlockedMappings(testVG)))
+}
+
+func TestANodeThatOnlyBelievesItIsInTheLockspaceStartsItAgain(t *testing.T) {
+	// lvmlockd and sanlock restart together and take every lockspace with them.
+	// The annotation stays, so the node reports itself a member of a pool it
+	// holds no lease in — and the attachment side, comparing two generation
+	// stamps that still agree, believes its volume is locked. That is the
+	// two-writer state with every piece of bookkeeping in the cluster saying
+	// otherwise. Measured on a live pool after restarting the lock daemons:
+	// lvmlockctl --info printed nothing at all.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	// The lock manager does not have it, whatever the node's own record says.
+	commands.EXPECT().LockspaceRunning(gomock.Any(), testVG).Return(false, nil).AnyTimes()
+	r, cl, _ := testReconciler(t, nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                          "7",
+		LockspaceStartedAnnotationPrefix + group.Name:    "vg-uuid",
+		LockspaceGenerationAnnotationPrefix + group.Name: "2",
+	}), commands, nil, group)
+
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
+
+	reconcile(t, r, group)
+
+	// A new incarnation, which is what makes the attachment side activate again
+	// instead of trusting a stamp that describes a lockspace that is gone.
+	node := &corev1.Node{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: testNode}, node))
+	assert.Equal(t, "3", node.Annotations[LockspaceGenerationAnnotationPrefix+group.Name],
+		"the lockspace was started anew, so the volumes activated under the old one are not vouched for")
+}
+
+func TestALockManagerThatCannotBeAskedIsNotTakenAsADenial(t *testing.T) {
+	// Restarting a lockspace that is running would drop the leases under the
+	// volumes this node holds. A node that cannot ask keeps its belief.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	commands.EXPECT().LockspaceRunning(gomock.Any(), testVG).
+		Return(false, errors.New("lvmlockctl is not answering")).AnyTimes()
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                          "7",
+		LockspaceStartedAnnotationPrefix + group.Name:    "vg-uuid",
+		LockspaceGenerationAnnotationPrefix + group.Name: "2",
+	}), commands, nil, group)
+
+	// No VGLockStart expectation: starting one on a guess is what this avoids.
+	reconcile(t, r, group)
 }
