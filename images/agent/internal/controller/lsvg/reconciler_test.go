@@ -996,6 +996,11 @@ func TestANodeThatOnlyBelievesItIsInTheLockspaceStartsItAgain(t *testing.T) {
 		LockspaceGenerationAnnotationPrefix + group.Name: "2",
 	}), commands, nil, group)
 
+	// One pass, not two: the start happens in the same reconcile that disowned
+	// the lockspace. Re-reading the node instead would come from the manager's
+	// cache, which has not seen the write, and the node would take its own word
+	// for a lockspace it had just given up — measured on the stand as a repair
+	// that took two minutes instead of one.
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
 
 	reconcile(t, r, group)

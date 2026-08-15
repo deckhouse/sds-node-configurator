@@ -320,10 +320,13 @@ func (r *Reconciler) join(
 		if err := r.setLockspaceStarted(ctx, lsvg.Name, "", false); err != nil {
 			return controller.Result{}, err
 		}
-		// Re-read: the branch below decides on what the node says about itself.
-		if node, err = r.node(ctx); err != nil {
-			return controller.Result{}, err
-		}
+		// And the local copy goes with it, rather than being re-read. A Get here
+		// comes from the manager's cache, which has not seen the write yet, so
+		// the branch below would take the node's word for a lockspace that was
+		// just disowned — and the start would wait for the next pass. Measured
+		// on the stand: the repair took two minutes instead of one for exactly
+		// this reason.
+		delete(node.Annotations, LockspaceStartedAnnotationPrefix+lsvg.Name)
 	}
 
 	if r.lockspaceStarted(node, lsvg.Name, vgUUID) {
