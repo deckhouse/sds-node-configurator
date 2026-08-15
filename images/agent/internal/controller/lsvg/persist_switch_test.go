@@ -265,3 +265,38 @@ func TestAMemberWithoutAHostIDIsNotTakenThroughTheDoor(t *testing.T) {
 	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
 	assert.Equal(t, ReasonPRNotReady, entryOf(t, published).Reason)
 }
+
+func TestAMemberThatStepsAsideStopsSayingItsLockspaceIsRunning(t *testing.T) {
+	// Found on the stand: two members reported `Stopped` and
+	// `lockspaceStarted: true` in the same entry, because the flag was read out
+	// of the status about to be overwritten. Everything that reads it reads it
+	// to decide whether the node still holds leases — the pool's readiness, the
+	// removal protocol, and the moment a LUN may be taken away from a node.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := poolAskingForReservations(func(g *v1alpha1.LVMSharedVolumeGroup) {
+		g.Spec.MetadataOwner = "second-node"
+		g.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+			Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{
+				// This node is in the lockspace and says so, which is what it
+				// has to stop saying once it steps aside.
+				{Name: testNode, LockspaceStarted: true,
+					PersistentReservations: &v1alpha1.NodePersistentReservations{Ready: true, State: PRStateOff}},
+				nodeSaid("second-node", true, PRStateOff),
+			},
+		}
+	})
+	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	commands.EXPECT().VGPersistStop(gomock.Any(), testVG, 7).Return("", nil)
+	commands.EXPECT().VGLockStop(gomock.Any(), testVG).Return("", nil)
+
+	reconcile(t, r, group)
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	entry := entryOf(t, published)
+	assert.Equal(t, PRStateStopped, entry.PersistentReservations.State)
+	assert.False(t, entry.LockspaceStarted, "it has just left the lockspace")
+}

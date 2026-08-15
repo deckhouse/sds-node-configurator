@@ -102,7 +102,9 @@ func (r *Reconciler) standAsideForTheSwitch(
 				ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
 			return controller.Result{RequeueAfter: prSwitchRetryInterval}
 		}
-		r.publishPRState(ctx, lsvg, PRStateEnabled)
+		// The reservation is started here; the lockspace is not yet, and the
+		// ordinary pass starts it next.
+		r.publishPRState(ctx, lsvg, PRStateEnabled, false)
 		return controller.Result{}
 	}
 
@@ -141,7 +143,7 @@ func (r *Reconciler) standAsideForTheSwitch(
 	}
 
 	r.log.Info(fmt.Sprintf("[%s] stepped aside for the reservation switch of %s", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
-	r.publishPRState(ctx, lsvg, PRStateStopped)
+	r.publishPRState(ctx, lsvg, PRStateStopped, false)
 	return controller.Result{RequeueAfter: prSwitchRetryInterval}
 }
 
@@ -230,7 +232,7 @@ func (r *Reconciler) runTheSwitch(
 	}
 
 	r.log.Info(fmt.Sprintf("[%s] %s is under persistent reservations", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
-	r.publishPRState(ctx, lsvg, PRStateEnabled)
+	r.publishPRState(ctx, lsvg, PRStateEnabled, true)
 	return controller.Result{}
 }
 
@@ -303,7 +305,22 @@ func (r *Reconciler) hostIDFor(ctx context.Context) int {
 // publishPRState records where this node stands in the switch, which is the
 // only channel the members have to each other: the executor waits for their
 // Stopped and they wait for its Enabled.
-func (r *Reconciler) publishPRState(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup, state string) {
+// publishPRState says where this node stands, together with whether its
+// lockspace is running.
+//
+// The two are published together on purpose. The first version read the
+// lockspace flag out of the status it was about to overwrite, so a node that had
+// just stopped its lockspace to step aside went on saying it was running —
+// established on the stand, where two members reported `Stopped` and
+// `lockspaceStarted: true` at once. Everything that reads that field reads it to
+// decide whether the node still holds leases: the pool's readiness, the removal
+// protocol, and the moment a LUN may be taken away from a node.
+func (r *Reconciler) publishPRState(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+	state string,
+	lockspaceRunning bool,
+) {
 	r.prStates[lsvg.Name] = state
-	r.publishNodeState(ctx, lsvg, r.lockspaceStartedInStatus(lsvg), "", "")
+	r.publishNodeState(ctx, lsvg, lockspaceRunning, "", "")
 }
