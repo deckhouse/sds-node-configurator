@@ -140,4 +140,40 @@ type LVMSharedVolumeGroupNodeStatus struct {
 	// while the answer stays the same, so a member re-confirming itself once a
 	// minute costs nothing on the API server.
 	Since metav1.Time `json:"since,omitempty"`
+
+	// PersistentReservations is what this node can say about the SCSI
+	// reservation channel of the pool's LUNs, checked without writing anything
+	// to the array.
+	//
+	// It is reported before anything is switched on, and that is the point:
+	// turning reservations on is a one-way door in the middle of its own
+	// procedure — the volume group becomes unusable the moment `vgchange
+	// --setpersist require` succeeds and stays that way until `--persist start`
+	// does too. A pool whose nodes cannot say in advance that the channel works
+	// must not be taken through it.
+	PersistentReservations *NodePersistentReservations `json:"persistentReservations,omitempty"`
+}
+
+// NodePersistentReservations is a node's read-only verdict on the reservation
+// channel: whether this node could take part in a pool that requires SCSI
+// persistent reservations, and what is missing when it could not.
+type NodePersistentReservations struct {
+	// Ready is true when every precondition this node can check by reading is
+	// met. It says nothing about whether reservations are in use — only that
+	// switching them on would not fail here.
+	Ready bool `json:"ready"`
+
+	// Reason is a short, machine-readable cause when Ready is false.
+	//
+	// - `MultipathToolsTooNew`: the version in the lock daemons' image returns a
+	//   wrong exit code for `reserve`, and lvmpersist undoes its own
+	//   registration in response — which takes the reservation with it.
+	// - `NoReservationKey`: the pool's multipath maps have no `reservation_key`,
+	//   so every reservation command is refused before it reaches the array.
+	// - `ChannelUnreachable`: the reservation channel could not be read at all
+	//   from this node, which is what a container without hostNetwork looks like.
+	Reason string `json:"reason,omitempty"`
+
+	// Message explains it, including what only a person can do about it.
+	Message string `json:"message,omitempty"`
 }
