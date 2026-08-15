@@ -580,6 +580,34 @@ func (r *Reconciler) releaseOrphanActivations(ctx context.Context, lsvg *v1alpha
 		r.log.Warning(fmt.Sprintf("[%s] some volumes of %s could not be released (cmd: %s): %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
 	}
+
+	// And then check, because lvchange cannot be taken at its word here. It
+	// decides whether a volume is active on this node from the lock it holds,
+	// not from device-mapper: with the lease gone it finds nothing to do, exits
+	// zero, and leaves the mapping standing. Measured on the stand — the command
+	// was silent and the device was still there afterwards.
+	r.removeLeftoverMappings(ctx, lsvg.Spec.ActualVGNameOnTheNode, wanted)
+}
+
+// removeLeftoverMappings tears down device-mapper devices that survived the
+// deactivation, which is the only way residue of a lock-daemon restart goes.
+//
+// dmsetup refuses an open device, and that refusal is kept: a mapping something
+// is still using is not residue, whatever the lock state says.
+func (r *Reconciler) removeLeftoverMappings(ctx context.Context, vgName string, wanted map[string]bool) {
+	left := r.activeLVs(vgName)
+	for _, lvName := range left {
+		if wanted[lvName] {
+			continue
+		}
+
+		dmName := utils.DMName(vgName, lvName)
+		r.log.Info(fmt.Sprintf("[%s] removing the leftover device-mapper device %s", ReconcilerName, dmName))
+		if cmd, err := r.commands.RemoveDMDevice(ctx, dmName); err != nil {
+			r.log.Warning(fmt.Sprintf("[%s] %s could not be removed (cmd: %s): %s",
+				ReconcilerName, dmName, cmd, err.Error()))
+		}
+	}
 }
 
 // attachedHere is the set of volumes this node has an attachment for.

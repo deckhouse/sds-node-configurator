@@ -604,6 +604,21 @@ func (mr *MockCommandsMockRecorder) ReTag(ctx, log, metrics, ctrlName, cmdTimeou
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReTag", reflect.TypeOf((*MockCommands)(nil).ReTag), ctx, log, metrics, ctrlName, cmdTimeout)
 }
 
+// RemoveDMDevice mocks base method.
+func (m *MockCommands) RemoveDMDevice(ctx context.Context, dmName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveDMDevice", ctx, dmName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemoveDMDevice indicates an expected call of RemoveDMDevice.
+func (mr *MockCommandsMockRecorder) RemoveDMDevice(ctx, dmName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveDMDevice", reflect.TypeOf((*MockCommands)(nil).RemoveDMDevice), ctx, dmName)
+}
+
 // RemoveFileDevice mocks base method.
 func (m *MockCommands) RemoveFileDevice(ctx context.Context, path string) (string, error) {
 	m.ctrl.T.Helper()

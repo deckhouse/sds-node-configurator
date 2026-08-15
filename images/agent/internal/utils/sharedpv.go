@@ -244,7 +244,7 @@ func SortedPaths(devices map[string]SharedDevice) []string {
 // something that happened a moment ago — and the question always comes a moment
 // after an activation.
 func LVIsActiveHere(vgName, lvName string) bool {
-	want := dmName(vgName, lvName)
+	want := DMName(vgName, lvName)
 
 	entries, err := os.ReadDir(SysBlockRoot)
 	if err != nil {
@@ -263,10 +263,10 @@ func LVIsActiveHere(vgName, lvName string) bool {
 	return false
 }
 
-// dmName is the name device-mapper gives a logical volume: the group and the
+// DMName is the name device-mapper gives a logical volume: the group and the
 // volume joined by a dash, with any dash inside either of them doubled. Without
 // the doubling, "vg-a/lv" and "vg/a-lv" would be the same device.
-func dmName(vgName, lvName string) string {
+func DMName(vgName, lvName string) string {
 	escape := func(s string) string { return strings.ReplaceAll(s, "-", "--") }
 	return escape(vgName) + "-" + escape(lvName)
 }

@@ -75,6 +75,7 @@ type Commands interface {
 	SetLVTagShared(ctx context.Context, vgName, lvName, tag string, add bool) (string, error)
 	LVExtendShared(ctx context.Context, vgName, lvName, size string) (string, error)
 	LVActivateShared(ctx context.Context, vgName string, lvNames []string, shared bool) (string, error)
+	RemoveDMDevice(ctx context.Context, dmName string) (string, error)
 	LVDeactivateShared(ctx context.Context, vgName string, lvNames []string) (string, error)
 	LVActivate(ctx context.Context, vgName, lvName string) (string, error)
 	VGScan(ctx context.Context) (string, error)
@@ -1081,6 +1082,30 @@ func (commands) LVActivateShared(ctx context.Context, vgName string, lvNames []s
 // LVDeactivateShared releases volumes of a shared Volume Group, which is what
 // hands their locks to whoever wants them next. Same batching, same caveat
 // about the single exit code.
+// RemoveDMDevice tears down a device-mapper device by name, and it exists
+// because lvchange cannot.
+//
+// lvm decides whether a volume is active HERE from the lock it holds, not from
+// device-mapper: with the lock gone, "lvchange -an" finds nothing to do, exits
+// zero, and leaves the mapping standing. That mapping is the residue of a
+// lock-daemon restart — a device with no lease behind it — and dmsetup is the
+// only tool that addresses the kernel directly enough to remove it.
+//
+// It is refused for an open device, which is the safety net kept deliberately:
+// a mapping something is still using is not residue.
+func (commands) RemoveDMDevice(ctx context.Context, dmName string) (string, error) {
+	args := nsentrerExpendedArgs(internal.DMSetupCmd, "remove", dmName)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
 func (commands) LVDeactivateShared(ctx context.Context, vgName string, lvNames []string) (string, error) {
 	if len(lvNames) == 0 {
 		return "", nil

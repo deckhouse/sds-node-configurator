@@ -545,6 +545,10 @@ func TestAStartedLockspaceReleasesMappingsNobodyAskedFor(t *testing.T) {
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
 	commands.EXPECT().LVDeactivateShared(gomock.Any(), testVG, []string{"stray"}).
 		Return("lvchange -an", nil)
+	// lvchange cannot be taken at its word: it reports success and leaves the
+	// mapping standing, so the device is torn down by name.
+	commands.EXPECT().RemoveDMDevice(gomock.Any(), utils.DMName(testVG, "stray")).
+		Return("dmsetup remove", nil)
 
 	reconcile(t, r, group)
 }
@@ -608,9 +612,44 @@ func TestALockspaceStartedBeforeThisAgentIsTakenStockOf(t *testing.T) {
 	// No VGLockStart: the lockspace is already up. The residue goes, though.
 	commands.EXPECT().LVDeactivateShared(gomock.Any(), testVG, []string{"stray"}).
 		Return("lvchange -an", nil)
+	commands.EXPECT().RemoveDMDevice(gomock.Any(), utils.DMName(testVG, "stray")).
+		Return("dmsetup remove", nil)
 
 	reconcile(t, r, group)
 
 	assert.Equal(t, "1", annotationsOf(t, cl)[LockspaceGenerationAnnotationPrefix+group.Name],
 		"the node now has an incarnation to compare against")
+}
+
+func TestAVolumeWithAnAttachmentKeepsItsMappingThroughTheCleanup(t *testing.T) {
+	// The cleanup now reaches for dmsetup, which does not consult any lock and
+	// would happily tear down a device a pod is using. The attachment is the
+	// only thing standing between the two, so it is worth its own test.
+	fakeSysBlockWithLUN(t, 8192)
+	fakeActiveLV(t, testVG, "vol1")
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	volume := &v1alpha1.LVMSharedLogicalVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "vol-1"},
+		Spec: v1alpha1.LVMSharedLogicalVolumeSpec{
+			LVMSharedVolumeGroupName: group.Name,
+			ActualLVNameOnTheNode:    "vol1",
+			Size:                     "1Gi",
+		},
+	}
+	attachment := &v1alpha1.LVMSharedLogicalVolumeAttachment{
+		ObjectMeta: metav1.ObjectMeta{Name: "att-1"},
+		Spec: v1alpha1.LVMSharedLogicalVolumeAttachmentSpec{
+			LVMSharedLogicalVolumeName: "vol-1",
+			NodeName:                   testNode,
+		},
+	}
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands,
+		nil, group, volume, attachment)
+
+	// Neither the deactivation nor the removal: this volume belongs here.
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
+
+	reconcile(t, r, group)
 }
