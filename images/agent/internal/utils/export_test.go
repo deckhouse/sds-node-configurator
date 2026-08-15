@@ -30,3 +30,9 @@ var ReTagForTest = reTag
 func NoSuchDMDeviceForTest(stderr string) bool {
 	return reNoSuchDMDevice.MatchString(stderr)
 }
+
+// PVAlreadyInVGForTest exposes how an extension recognises a device that is in
+// the group already.
+func PVAlreadyInVGForTest(stderr string) bool {
+	return rePVAlreadyInVG.MatchString(stderr)
+}

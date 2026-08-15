@@ -933,6 +933,16 @@ func (commands) ExtendVGShared(ctx context.Context, vgName string, paths []strin
 	cmd.Stderr = &stderr
 
 	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+		// A device that is already in the group is the outcome this was called
+		// for. It happens for a window after every extension, because the lvm
+		// that changes a shared group runs in the lock daemons' mount namespace
+		// and the lvm that reads it here runs in the host's: the two keep
+		// separate caches, and the reader takes a minute or two to catch up.
+		// Measured on a live pool — the extension worked and the next pass ran
+		// it again against a device already added.
+		if rePVAlreadyInVG.Match(stderr.Bytes()) {
+			return cmd.String(), nil
+		}
 		return cmd.String(), err
 	}
 	return cmd.String(), nil
@@ -2328,6 +2338,10 @@ var (
 	// everything it needs already exists. Measured on the stand with a pool
 	// named after a group an earlier experiment had left behind.
 	reDevDirExists = regexp.MustCompile(`/dev/[^:]+: already exists in filesystem`)
+
+	// rePVAlreadyInVG is lvm refusing to add a physical volume that is in the
+	// group already. For an extension that is success spelled as an error.
+	rePVAlreadyInVG = regexp.MustCompile(`is already in volume group`)
 
 	// A resize that changed nothing. This is the normal state of a thin pool sized
 	// as a percentage of the VG: the pool always already fills it, up to thin-pool
