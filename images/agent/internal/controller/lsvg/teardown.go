@@ -106,17 +106,24 @@ func (r *Reconciler) teardown(
 		return controller.Result{RequeueAfter: teardownRetryInterval}, nil
 	}
 
-	// Empty now, so the lockspaces can go: every member stops its own, and the
-	// owner keeps its own until the removal is done.
-	if res, done, err := r.stopForTeardown(ctx, lsvg); err != nil || !done {
-		return res, err
-	}
-
+	// Empty now. Everyone except the owner leaves the lockspace; the owner keeps
+	// its own, because vgremove is run from a node that holds one — measured on
+	// the stand, where an owner that stopped first got "Cannot access VG vgtest
+	// due to failed lock" and nothing else, forever.
 	if lsvg.Spec.MetadataOwner != r.cfg.NodeName {
-		// A member that is not the owner has done its part: it has left the
-		// lockspace, and it says so where the owner reads it.
+		res, done, err := r.stopForTeardown(ctx, lsvg)
+		if err != nil || !done {
+			return res, err
+		}
+		// This member has done its part: it has left, and it says so where the
+		// owner reads it.
 		return controller.Result{}, nil
 	}
+
+	// And the owner's own lockspace has to be up for the same reason. It may not
+	// be — an earlier version of this teardown stopped it, or the node left the
+	// pool and came back — so it is started rather than assumed.
+	r.ensureLockspaceForTeardown(ctx, lsvg)
 
 	if waiting := r.membersStillInLockspace(lsvg); len(waiting) > 0 {
 		r.log.Info(fmt.Sprintf("[%s] waiting to remove %s: %d member(s) still hold the lockspace (%v)",
@@ -143,6 +150,14 @@ func (r *Reconciler) teardown(
 	}
 
 	r.log.Info(fmt.Sprintf("[%s] the volume group %s is removed", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+
+	// The lockspace went with the group — vgremove takes it down — so the fact
+	// this node published about itself stops being true here.
+	if err := r.setLockspaceStarted(ctx, lsvg.Name, "", false); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to record that the lockspace of %s is gone: %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
+	}
+
 	return controller.Result{}, r.dropFinalizer(ctx, lsvg)
 }
 

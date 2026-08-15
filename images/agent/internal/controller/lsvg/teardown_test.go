@@ -100,6 +100,10 @@ func TestTheOwnerWaitsForTheOtherMembersToLeaveTheLockspace(t *testing.T) {
 	})
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
+	// The owner keeps its own lockspace — vgremove needs it — so starting it is
+	// expected even while it waits for the others.
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+
 	// No RemoveVGShared expectation: running it now is what earns the refusal.
 	res := reconcile(t, r, group)
 
@@ -117,6 +121,7 @@ func TestTheLockManagerAskingForTimeIsNotAFailure(t *testing.T) {
 	group := deletedGroup()
 	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
 	commands.EXPECT().RemoveVGShared(gomock.Any(), testVG).
 		Return("vgremove", errors.New("unknown host state (wait and retry)"))
 
@@ -146,6 +151,11 @@ func TestAnEmptyPoolIsRemovedAndTheResourceReleased(t *testing.T) {
 	group := deletedGroup()
 	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
+	// The owner does not stop its own lockspace before the removal: vgremove is
+	// run from a node that holds one, and an owner that stopped first got
+	// "Cannot access VG due to failed lock" on the stand and never recovered.
+	// No VGLockStop expectation is declared, so attempting it fails this test.
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
 	commands.EXPECT().RemoveVGShared(gomock.Any(), testVG).Return("vgremove", nil)
 
 	reconcile(t, r, group)
