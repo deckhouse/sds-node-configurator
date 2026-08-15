@@ -376,3 +376,11 @@ func ActiveLVsOfGroupHere(vgName string) ([]string, error) {
 	sort.Strings(names)
 	return names, nil
 }
+
+// MultipathNameOf is the map's name as multipathd knows it, taken from the
+// device path this module resolved by WWID. The names are node-local — the same
+// LUN is mpathk on one node and mpathl on another — which is why nothing here
+// keys on them, and why this conversion happens as late as possible.
+func MultipathNameOf(devicePath string) string {
+	return filepath.Base(devicePath)
+}

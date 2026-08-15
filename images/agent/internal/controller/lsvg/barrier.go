@@ -227,7 +227,8 @@ func (r *Reconciler) publishNodeState(
 			if node.Name != r.cfg.NodeName {
 				continue
 			}
-			if node.LockspaceStarted == started && node.Reason == reason && node.Message == message {
+			if node.LockspaceStarted == started && node.Reason == reason && node.Message == message &&
+				samePRVerdict(node.PersistentReservations, r.persistentReservations(ctx, lsvg)) {
 				return
 			}
 			break
@@ -242,6 +243,21 @@ func (r *Reconciler) publishNodeState(
 	}
 	if message != "" {
 		entry["message"] = message
+	}
+
+	// What this node can say about the reservation channel goes in the same
+	// entry: it is a fact about this node, established by reading, and it is the
+	// answer somebody needs before deciding whether this pool can be switched to
+	// reservations at all.
+	if pr := r.persistentReservations(ctx, lsvg); pr != nil {
+		reservations := map[string]any{"ready": pr.Ready}
+		if pr.Reason != "" {
+			reservations["reason"] = pr.Reason
+		}
+		if pr.Message != "" {
+			reservations["message"] = pr.Message
+		}
+		entry["persistentReservations"] = reservations
 	}
 
 	patch := &unstructured.Unstructured{Object: map[string]any{
@@ -343,4 +359,15 @@ func (r *Reconciler) retractNodeState(ctx context.Context, lsvg *v1alpha1.LVMSha
 		r.log.Warning(fmt.Sprintf("[%s] unable to withdraw the state of this node from %s: %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
 	}
+}
+
+// samePRVerdict compares what was published with what is established now, so a
+// member re-confirming itself does not rewrite the object for no news.
+func samePRVerdict(published, current *v1alpha1.NodePersistentReservations) bool {
+	if published == nil || current == nil {
+		return published == current
+	}
+	return published.Ready == current.Ready &&
+		published.Reason == current.Reason &&
+		published.Message == current.Message
 }

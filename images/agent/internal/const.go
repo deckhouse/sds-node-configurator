@@ -67,6 +67,14 @@ const (
 	// without a word to anybody.
 	SharedLockCtlCmd = "/usr/sbin/lvmlockctl"
 
+	// SharedMpathPersistCmd and SharedMultipathdCmd answer what a node can learn
+	// about the SCSI reservation channel without writing to the array: which
+	// multipath-tools the daemons carry, and whether a map has a reservation key.
+	// They live in the same image for the same reason lvm does — the tool that
+	// speaks to multipathd must be the one lvmpersist will run.
+	SharedMpathPersistCmd = "/usr/sbin/mpathpersist"
+	SharedMultipathdCmd   = "/usr/sbin/multipathd"
+
 	// SharedLockDaemonProcess is how the mount namespace holding SharedLVMCmd is
 	// found: by the daemon that must be running for any of this to mean anything.
 	SharedLockDaemonProcess = "lvmlockd"

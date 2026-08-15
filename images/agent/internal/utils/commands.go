@@ -72,6 +72,8 @@ type Commands interface {
 	VGLockStart(ctx context.Context, vgName string, hostID int) (string, error)
 	VGLockStop(ctx context.Context, vgName string) (string, error)
 	LockspaceRunning(ctx context.Context, vgName string) (bool, error)
+	MultipathToolsVersion(ctx context.Context) (string, error)
+	ReservationKeyOf(ctx context.Context, mapName string) (string, error)
 	CreateVGShared(ctx context.Context, params SharedVGParams) (string, error)
 	CreateLVShared(ctx context.Context, vgName, lvName, size string) (string, error)
 	RemoveLVShared(ctx context.Context, vgName, lvName string) (string, error)
@@ -1169,6 +1171,60 @@ func lockspaceListed(info, vgName string) bool {
 		}
 	}
 	return false
+}
+
+// MultipathToolsVersion is the version of the tools in the lock daemons' image,
+// which is the only one that matters: lvmpersist prepends the system
+// directories to PATH and runs that binary whatever else is installed.
+func (commands) MultipathToolsVersion(ctx context.Context) (string, error) {
+	argv, err := sharedNamespaceArgs(internal.SharedMpathPersistCmd, "-V")
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	// The version goes to stdout on some builds and to stderr on others, and
+	// -V exits non-zero on a few; the text is what matters.
+	_ = cmd.Run()
+	answer := strings.TrimSpace(out.String() + " " + stderr.String())
+	if answer == "" {
+		return "", fmt.Errorf("no answer from %s -V", internal.SharedMpathPersistCmd)
+	}
+	return answer, nil
+}
+
+// ReservationKeyOf asks multipathd for the reservation key of a map. An empty
+// or "none" answer means every reservation command will be refused before it
+// reaches the array.
+func (commands) ReservationKeyOf(ctx context.Context, mapName string) (string, error) {
+	argv, err := sharedNamespaceArgs(internal.SharedMultipathdCmd, "getprkey", "map", mapName)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return strings.TrimSpace(out.String()), nil
+}
+
+// sharedNamespaceArgs runs a command of the lock daemons' image in their mount
+// namespace, the way every shared-pool command runs.
+func sharedNamespaceArgs(command string, args ...string) ([]string, error) {
+	pid, err := SharedLVMNamespacePID()
+	if err != nil {
+		return nil, err
+	}
+	return append([]string{"-t", strconv.Itoa(pid), "-m", "--", command}, args...), nil
 }
 
 // VGLockStop leaves the lockspace of a shared Volume Group.

@@ -98,6 +98,12 @@ type Reconciler struct {
 	commands utils.Commands
 	metrics  *monitoring.Metrics
 	cfg      ReconcilerConfig
+
+	// prVerdicts caches what this node established about the reservation
+	// channel of each pool. Nothing it looks at changes without somebody
+	// changing it, so asking on every pass would be two commands a minute for
+	// an answer that is the same until an image or a drop-in changes.
+	prVerdicts map[string]prVerdict
 }
 
 type ReconcilerConfig struct {

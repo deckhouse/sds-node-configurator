@@ -18,6 +18,7 @@ package lsvg
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -26,10 +27,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 func readVGUUIDs(t *testing.T, dir string) map[string]string {
@@ -133,4 +136,33 @@ func TestEveryMemberForgetsAGroupThatIsGoneNotOnlyItsOwner(t *testing.T) {
 
 	assert.Equal(t, map[string]string{"other-pool": "keep-me"}, readVGUUIDs(t, dir),
 		"a member that left the pool has no business naming its group to the handler")
+}
+
+func TestANodePublishesWhatItCanSayAboutTheReservationChannel(t *testing.T) {
+	// Established by reading and never by trying: switching a pool to
+	// reservations is a one-way door in the middle of its own procedure, so the
+	// preconditions are answered before anybody opens it.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	// The image carries tools whose `reserve` lies about its exit code.
+	commands.EXPECT().MultipathToolsVersion(gomock.Any()).Return("multipath-tools v0.14.3", nil).AnyTimes()
+	commands.EXPECT().ReservationKeyOf(gomock.Any(), gomock.Any()).Return("0x1", nil).AnyTimes()
+	r, cl, _ := testReconciler(t, nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                        "7",
+		LockspaceGenerationAnnotationPrefix + "pool-1": "1",
+	}), commands, nil, group)
+	commands.EXPECT().VGLockStart(gomock.Any(), gomock.Any(), gomock.Any()).Return("", nil).AnyTimes()
+
+	reconcile(t, r, group)
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	require.NotEmpty(t, published.Status.Nodes)
+	pr := published.Status.Nodes[0].PersistentReservations
+	require.NotNil(t, pr, "a node says what it knows about the channel whether or not anybody asked yet")
+	assert.False(t, pr.Ready)
+	assert.Equal(t, utils.ReasonMultipathToolsTooNew, pr.Reason)
+	assert.Contains(t, pr.Message, "0.9.9", "the message names the last version that works")
 }

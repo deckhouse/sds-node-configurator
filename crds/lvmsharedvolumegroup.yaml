@@ -325,6 +325,45 @@ spec:
                         description: |
                           The state in words, including what — if anything — only a person can
                           do about it.
+                      persistentReservations:
+                        type: object
+                        required:
+                          - ready
+                        description: |
+                          What this node can say about the SCSI reservation channel of the pool's
+                          LUNs, established by reading and never by trying.
+
+                          Switching a pool to reservations is a one-way door in the middle of its
+                          own procedure: the volume group is unusable between
+                          `vgchange --setpersist require` and a successful `vgchange --persist
+                          start`. A pool whose nodes cannot say in advance that the channel works
+                          must not be taken through it.
+                        properties:
+                          ready:
+                            type: boolean
+                            description: |
+                              `true` when every precondition this node can check by reading is met.
+                              It does not say reservations are in use — only that switching them on
+                              would not fail here.
+                          reason:
+                            type: string
+                            maxLength: 1024
+                            description: |
+                              Short, machine-readable cause when `ready` is `false`.
+
+                              - `MultipathToolsTooNew`: the version in the lock daemons' image
+                                returns a wrong exit code for `reserve`, and lvmpersist undoes its
+                                own registration in response — which takes the reservation with it.
+                              - `NoReservationKey`: the pool's multipath maps have no
+                                `reservation_key`, so every reservation command is refused before
+                                it reaches the array.
+                              - `ChannelUnreachable`: the channel could not be read from this node
+                                at all, which is what a pod without `hostNetwork` looks like.
+                          message:
+                            type: string
+                            maxLength: 4096
+                            description: |
+                              The verdict in words, including what only a person can do about it.
                       since:
                         type: string
                         format: date-time

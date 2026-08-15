@@ -605,6 +605,21 @@ func (mr *MockCommandsMockRecorder) LockspaceRunning(ctx, vgName any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockspaceRunning", reflect.TypeOf((*MockCommands)(nil).LockspaceRunning), ctx, vgName)
 }
 
+// MultipathToolsVersion mocks base method.
+func (m *MockCommands) MultipathToolsVersion(ctx context.Context) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MultipathToolsVersion", ctx)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MultipathToolsVersion indicates an expected call of MultipathToolsVersion.
+func (mr *MockCommandsMockRecorder) MultipathToolsVersion(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MultipathToolsVersion", reflect.TypeOf((*MockCommands)(nil).MultipathToolsVersion), ctx)
+}
+
 // PVScan mocks base method.
 func (m *MockCommands) PVScan(ctx context.Context) (string, error) {
 	m.ctrl.T.Helper()
@@ -752,6 +767,21 @@ func (m *MockCommands) RemoveVGShared(ctx context.Context, vgName string) (strin
 func (mr *MockCommandsMockRecorder) RemoveVGShared(ctx, vgName any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveVGShared", reflect.TypeOf((*MockCommands)(nil).RemoveVGShared), ctx, vgName)
+}
+
+// ReservationKeyOf mocks base method.
+func (m *MockCommands) ReservationKeyOf(ctx context.Context, mapName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReservationKeyOf", ctx, mapName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReservationKeyOf indicates an expected call of ReservationKeyOf.
+func (mr *MockCommandsMockRecorder) ReservationKeyOf(ctx, mapName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReservationKeyOf", reflect.TypeOf((*MockCommands)(nil).ReservationKeyOf), ctx, mapName)
 }
 
 // ResizePV mocks base method.
