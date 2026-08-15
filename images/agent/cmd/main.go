@@ -374,6 +374,7 @@ func run() int {
 			log,
 			sdsCache,
 			commands,
+			metrics,
 			lsvg.ReconcilerConfig{
 				NodeName:  cfgParams.NodeName,
 				HostIDDir: internal.SharedLockDaemonsStateDir,

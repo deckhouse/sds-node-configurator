@@ -43,6 +43,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -94,6 +95,7 @@ type Reconciler struct {
 	log      logger.Logger
 	sdsCache *cache.Cache
 	commands utils.Commands
+	metrics  *monitoring.Metrics
 	cfg      ReconcilerConfig
 }
 
@@ -109,9 +111,10 @@ func NewReconciler(
 	log logger.Logger,
 	sdsCache *cache.Cache,
 	commands utils.Commands,
+	metrics *monitoring.Metrics,
 	cfg ReconcilerConfig,
 ) *Reconciler {
-	return &Reconciler{cl: cl, log: log, sdsCache: sdsCache, commands: commands, cfg: cfg}
+	return &Reconciler{cl: cl, log: log, sdsCache: sdsCache, commands: commands, metrics: metrics, cfg: cfg}
 }
 
 func (r *Reconciler) Name() string {
@@ -631,6 +634,7 @@ func (r *Reconciler) activeLVs(vgName string) []string {
 func (r *Reconciler) releaseOrphanActivations(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup) {
 	active := r.activeLVs(lsvg.Spec.ActualVGNameOnTheNode)
 	if len(active) == 0 {
+		r.reportUnlockedMappings(lsvg.Spec.ActualVGNameOnTheNode, 0)
 		return
 	}
 
@@ -650,6 +654,7 @@ func (r *Reconciler) releaseOrphanActivations(ctx context.Context, lsvg *v1alpha
 			orphans = append(orphans, lvName)
 		}
 	}
+	r.reportUnlockedMappings(lsvg.Spec.ActualVGNameOnTheNode, len(orphans))
 	if len(orphans) == 0 {
 		return
 	}
@@ -669,6 +674,16 @@ func (r *Reconciler) releaseOrphanActivations(ctx context.Context, lsvg *v1alpha
 	// zero, and leaves the mapping standing. Measured on the stand — the command
 	// was silent and the device was still there afterwards.
 	r.removeLeftoverMappings(ctx, lsvg.Spec.ActualVGNameOnTheNode, orphans)
+}
+
+// reportUnlockedMappings publishes the invariant of a shared pool as a number:
+// volumes mapped on this node with nothing here asking for them. It is set on
+// every pass, zero included — a gauge nobody clears is a gauge nobody believes.
+func (r *Reconciler) reportUnlockedMappings(vgName string, count int) {
+	if r.metrics == nil {
+		return
+	}
+	r.metrics.SharedPoolUnlockedMappings(vgName).Set(float64(count))
 }
 
 // removeLeftoverMappings tears down the device-mapper devices of volumes that

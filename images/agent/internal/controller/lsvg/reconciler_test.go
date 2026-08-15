@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -46,6 +47,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -96,7 +98,7 @@ func testReconciler(
 	require.NoError(t, err)
 
 	dir := t.TempDir()
-	return NewReconciler(cl, log, sdsCache, commands, ReconcilerConfig{
+	return NewReconciler(cl, log, sdsCache, commands, monitoring.GetMetrics(testNode), ReconcilerConfig{
 		NodeName:  testNode,
 		HostIDDir: dir,
 	}), cl, dir
@@ -488,7 +490,7 @@ func TestTheOwnerPublishesWhatItObservesAboutTheGroup(t *testing.T) {
 
 	log, err := logger.NewLogger(logger.WarningLevel)
 	require.NoError(t, err)
-	r := NewReconciler(cl, log, sdsCache, commands, ReconcilerConfig{NodeName: testNode, HostIDDir: t.TempDir()})
+	r := NewReconciler(cl, log, sdsCache, commands, monitoring.GetMetrics(testNode), ReconcilerConfig{NodeName: testNode, HostIDDir: t.TempDir()})
 
 	reconcile(t, r, group)
 
@@ -907,4 +909,34 @@ func TestAReleasedVolumeThatWentIsRemovedWithoutComplaint(t *testing.T) {
 	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("", nil).AnyTimes()
 
 	r.releaseOrphanActivations(context.Background(), group)
+}
+
+func TestTheBrokenInvariantIsPublishedAsANumber(t *testing.T) {
+	// The module has broken this invariant by itself: its scanner activated a
+	// pool's volumes on every node that could see the LUN, once a minute, and
+	// the only trace was a line in each node's log saying it was releasing them.
+	// A gauge shows it in one query across the cluster — and it is set on every
+	// pass, zero included, because a gauge nobody clears is a gauge nobody
+	// believes.
+	fakeSysBlockWithLUN(t, 8192)
+	fakeActiveLV(t, "vol1")
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                          "7",
+		LockspaceGenerationAnnotationPrefix + group.Name: "1",
+	}), commands, nil, group)
+
+	commands.EXPECT().LVDeactivateShared(gomock.Any(), testVG, []string{"vol1"}).Return("lvchange -an", nil)
+	commands.EXPECT().RemoveDMDevice(gomock.Any(), utils.DMName(testVG, "vol1")).Return("dmsetup remove", nil)
+
+	r.releaseOrphanActivations(context.Background(), group)
+	assert.Equal(t, 1.0, testutil.ToFloat64(r.metrics.SharedPoolUnlockedMappings(testVG)),
+		"one volume is mapped here with nothing asking for it")
+
+	// The mapping is gone on the next pass, and so is the number.
+	require.NoError(t, os.RemoveAll(filepath.Join(utils.SysBlockRoot, "dm-21")))
+	r.releaseOrphanActivations(context.Background(), group)
+	assert.Equal(t, 0.0, testutil.ToFloat64(r.metrics.SharedPoolUnlockedMappings(testVG)))
 }
