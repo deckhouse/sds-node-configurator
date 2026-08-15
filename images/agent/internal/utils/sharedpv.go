@@ -51,10 +51,36 @@ type SharedDevice struct {
 	// device is a different one.
 	LogicalBlockSize  int
 	PhysicalBlockSize int
+	// Paths are the single paths of the map, as device nodes. Reservation
+	// commands that the array will not take on the map are issued on these.
+	Paths []string
+
 	// DiscardGranularity is what the array frees in one go. An extent size that
 	// is not a multiple of it means discarding a volume frees nothing, however
 	// honestly the array reports zeroes afterwards.
 	DiscardGranularity int
+}
+
+// pathsUnder lists the single paths a multipath map is built from, as device
+// nodes.
+//
+// They matter for one operation only: taking a registration away from a node
+// that cannot be asked to give it up. That has to be issued per path, because
+// the library behind mpathpersist refuses every preempt on the map itself, and
+// because a registration lives per initiator-target pair anyway — a key removed
+// on one path leaves the node writing through the others.
+func pathsUnder(sysfsBase string) []string {
+	entries, err := os.ReadDir(filepath.Join(sysfsBase, "slaves"))
+	if err != nil {
+		return nil
+	}
+
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		paths = append(paths, filepath.Join("/dev", entry.Name()))
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 // FourKGeometry reports the class this device belongs to, by the rule lvm2
@@ -117,7 +143,7 @@ func mpathDevicesByWWID() (map[string]SharedDevice, error) {
 			continue
 		}
 
-		device := SharedDevice{Path: filepath.Join("/dev/mapper", name)}
+		device := SharedDevice{Path: filepath.Join("/dev/mapper", name), Paths: pathsUnder(base)}
 		device.LogicalBlockSize, _ = readSysInt(filepath.Join(base, "queue", "logical_block_size"))
 		device.PhysicalBlockSize, _ = readSysInt(filepath.Join(base, "queue", "physical_block_size"))
 		device.DiscardGranularity, _ = readSysInt(filepath.Join(base, "queue", "discard_granularity"))
@@ -228,6 +254,17 @@ func SortedPaths(devices map[string]SharedDevice) []string {
 	}
 	sort.Strings(paths)
 	return paths
+}
+
+// SortedWWIDs returns the identifiers in a stable order, so that an operation
+// repeated over the pool's LUNs visits them the same way each time.
+func SortedWWIDs(devices map[string]SharedDevice) []string {
+	wwids := make([]string, 0, len(devices))
+	for wwid := range devices {
+		wwids = append(wwids, wwid)
+	}
+	sort.Strings(wwids)
+	return wwids
 }
 
 // LVIsActiveHere reports whether the logical volume has a device-mapper device

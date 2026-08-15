@@ -192,6 +192,19 @@ type NodePersistentReservations struct {
 	// +kubebuilder:validation:MaxLength=4096
 	Message string `json:"message,omitempty"`
 
+	// Key is the reservation key this node registers with on the pool's LUNs,
+	// as its own multipath configuration reports it.
+	//
+	// It is published so that the pool can take this node's access away when the
+	// node itself can no longer be asked to give it up — a node cut off from the
+	// API, or hung. That is the only mechanism there is for those cases: the
+	// array stops accepting the writes of a key that is no longer registered.
+	//
+	// It is left empty unless every one of the pool's LUNs reports the same key
+	// here. A key that is only probably this node's would fence the wrong node.
+	// +kubebuilder:validation:MaxLength=32
+	Key string `json:"key,omitempty"`
+
 	// State is where this node stands in the switch to reservations, and it is
 	// how the members coordinate: the executor waits for every neighbour to
 	// report `Stopped` before it opens the one-way door, and the neighbours wait

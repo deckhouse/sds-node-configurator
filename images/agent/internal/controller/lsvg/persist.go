@@ -92,7 +92,7 @@ func (r *Reconciler) checkPersistentReservations(
 		return utils.PRReadinessFrom(version, true, nil, true)
 	}
 
-	var withoutKey []string
+	var withoutKey, keys []string
 	for _, wwid := range wwids {
 		device, resolved := devices[wwid]
 		if !resolved {
@@ -107,10 +107,14 @@ func (r *Reconciler) checkPersistentReservations(
 		}
 		if !utils.ReservationKeyConfigured(key) {
 			withoutKey = append(withoutKey, name)
+			continue
 		}
+		keys = append(keys, key)
 	}
 
-	return utils.PRReadinessFrom(version, true, withoutKey, true)
+	readiness := utils.PRReadinessFrom(version, true, withoutKey, true)
+	readiness.Key = utils.SingleReservationKey(keys)
+	return readiness
 }
 
 func prStatus(v utils.PRReadiness) *v1alpha1.NodePersistentReservations {
@@ -118,5 +122,6 @@ func prStatus(v utils.PRReadiness) *v1alpha1.NodePersistentReservations {
 		Ready:   v.Ready,
 		Reason:  v.Reason,
 		Message: v.Message,
+		Key:     v.Key,
 	}
 }

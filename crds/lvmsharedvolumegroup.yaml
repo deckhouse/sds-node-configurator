@@ -378,6 +378,20 @@ spec:
                             maxLength: 4096
                             description: |
                               The verdict in words, including what only a person can do about it.
+                          key:
+                            type: string
+                            maxLength: 32
+                            description: |
+                              The reservation key this node registers with on the pool's LUNs, as
+                              its own multipath configuration reports it.
+
+                              It is published so that the pool can take this node's access away
+                              when the node can no longer be asked to give it up: the array stops
+                              accepting the writes of a key that is no longer registered.
+
+                              Left empty unless every one of the pool's LUNs reports the same key
+                              here — a key that is only probably this node's would fence the wrong
+                              node.
                           state:
                             type: string
                             enum: ["Off", "Stopped", "Enabled"]

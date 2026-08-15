@@ -203,6 +203,8 @@ const (
 	ReasonVolumesRemain       = "VolumesRemain"
 	ReasonRemovalFailed       = "RemovalFailed"
 	ReasonExtensionRefused    = "ExtensionRefused"
+	ReasonEvictionImpossible  = "EvictionImpossible"
+	ReasonEvictionIncomplete  = "EvictionIncomplete"
 	ReasonReconcileFailed     = "ReconcileFailed"
 	ReasonPRWaitingForVolumes = "PersistentReservationsWaitingForVolumes"
 	ReasonPRNotReady          = "PersistentReservationsNotReady"

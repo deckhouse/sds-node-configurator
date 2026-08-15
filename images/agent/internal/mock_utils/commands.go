@@ -635,6 +635,21 @@ func (mr *MockCommandsMockRecorder) PVScan(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PVScan", reflect.TypeOf((*MockCommands)(nil).PVScan), ctx)
 }
 
+// PreemptRegistration mocks base method.
+func (m *MockCommands) PreemptRegistration(ctx context.Context, path, ourKey, theirKey string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PreemptRegistration", ctx, path, ourKey, theirKey)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PreemptRegistration indicates an expected call of PreemptRegistration.
+func (mr *MockCommandsMockRecorder) PreemptRegistration(ctx, path, ourKey, theirKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PreemptRegistration", reflect.TypeOf((*MockCommands)(nil).PreemptRegistration), ctx, path, ourKey, theirKey)
+}
+
 // ReTag mocks base method.
 func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error {
 	m.ctrl.T.Helper()
@@ -647,6 +662,22 @@ func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics *mo
 func (mr *MockCommandsMockRecorder) ReTag(ctx, log, metrics, ctrlName, cmdTimeout any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReTag", reflect.TypeOf((*MockCommands)(nil).ReTag), ctx, log, metrics, ctrlName, cmdTimeout)
+}
+
+// ReadRegistrationKeys mocks base method.
+func (m *MockCommands) ReadRegistrationKeys(ctx context.Context, path string) ([]string, string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReadRegistrationKeys", ctx, path)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ReadRegistrationKeys indicates an expected call of ReadRegistrationKeys.
+func (mr *MockCommandsMockRecorder) ReadRegistrationKeys(ctx, path any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadRegistrationKeys", reflect.TypeOf((*MockCommands)(nil).ReadRegistrationKeys), ctx, path)
 }
 
 // RemoveDMDevice mocks base method.

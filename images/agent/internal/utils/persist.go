@@ -67,6 +67,34 @@ type PRReadiness struct {
 	Ready   bool
 	Reason  string
 	Message string
+
+	// Key is this node's reservation key, and it is set only when every LUN of
+	// the pool reports the same one. See NodePersistentReservations.Key.
+	Key string
+}
+
+// SingleReservationKey returns the key the maps agree on, and nothing when they
+// do not.
+//
+// Disagreement is not expected — lvm2 derives one key per host from its sanlock
+// host id and writes it for every map of the group — but "not expected" is not a
+// reason to publish one of several keys as though it were the node's. The
+// published key is what a neighbour would fence with.
+func SingleReservationKey(keys []string) string {
+	var single string
+	for _, key := range keys {
+		if !ReservationKeyConfigured(key) {
+			return ""
+		}
+		if single == "" {
+			single = key
+			continue
+		}
+		if !SameRegistrationKey(single, key) {
+			return ""
+		}
+	}
+	return single
 }
 
 // MultipathToolsVersionAtMostCeiling reports whether the version string names a
@@ -172,4 +200,43 @@ func PRReadinessFrom(version string, versionKnown bool, mapsWithoutKey []string,
 	}
 
 	return PRReadiness{Ready: true}
+}
+
+// ParseRegistrationKeys reads the keys out of what sg_persist prints.
+//
+// Its output is a header and then one key per line, indented:
+//
+//	PR generation=0x2, 3 registered reservation keys follow:
+//	    0x100000000001002d
+//	    0x100000000002002e
+//
+// Anything that is not a hexadecimal key is skipped rather than guessed at: this
+// list decides which node gets its access to a LUN taken away, and a
+// misread line there is a node evicted for nothing.
+func ParseRegistrationKeys(output string) []string {
+	var keys []string
+	for _, line := range strings.Split(output, "\n") {
+		field := strings.TrimSpace(line)
+		if !strings.HasPrefix(field, "0x") || strings.ContainsAny(field, " \t") {
+			continue
+		}
+		if _, err := strconv.ParseUint(strings.TrimPrefix(field, "0x"), 16, 64); err != nil {
+			continue
+		}
+		keys = append(keys, field)
+	}
+	return keys
+}
+
+// SameRegistrationKey compares keys as numbers, because the array and the tools
+// do not agree on spelling: 0x100000000001002D and 0x100000000001002d are one
+// key, and a string comparison would evict a node that is already gone while
+// leaving the one that is still writing.
+func SameRegistrationKey(a, b string) bool {
+	na, erra := strconv.ParseUint(strings.TrimPrefix(strings.ToLower(a), "0x"), 16, 64)
+	nb, errb := strconv.ParseUint(strings.TrimPrefix(strings.ToLower(b), "0x"), 16, 64)
+	if erra != nil || errb != nil {
+		return false
+	}
+	return na == nb
 }

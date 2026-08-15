@@ -76,6 +76,8 @@ type Commands interface {
 	VGPersistStart(ctx context.Context, vgName string) (string, error)
 	VGPersistStop(ctx context.Context, vgName string) (string, error)
 	VGSetLockArgsPersist(ctx context.Context, vgName string) (string, error)
+	ReadRegistrationKeys(ctx context.Context, path string) ([]string, string, error)
+	PreemptRegistration(ctx context.Context, path, ourKey, theirKey string) (string, error)
 	MultipathToolsVersion(ctx context.Context) (string, error)
 	ReservationKeyOf(ctx context.Context, mapName string) (string, error)
 	CreateVGShared(ctx context.Context, params SharedVGParams) (string, error)
@@ -1279,6 +1281,66 @@ func runSharedLVM(ctx context.Context, args ...string) (string, error) {
 
 	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
 		return cmd.String(), err
+	}
+	return cmd.String(), nil
+}
+
+// ReadRegistrationKeys lists the keys registered on a path of a LUN.
+//
+// Read through sg_persist on the path rather than through mpathpersist on the
+// map: the reading works either way, and using one tool for both halves keeps
+// the keys this module compares in the same spelling as the keys it preempts.
+func (commands) ReadRegistrationKeys(ctx context.Context, path string) ([]string, string, error) {
+	argv, err := sharedNamespaceArgs(internal.SharedSgPersistCmd, "--in", "--read-keys", path)
+	if err != nil {
+		return nil, "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return ParseRegistrationKeys(out.String()), cmd.String(), nil
+}
+
+// PreemptRegistration takes a key off a LUN, on one path.
+//
+// This is the operation the whole reservation branch exists for: a node that
+// cannot be asked to stop — cut off from the API, or hung — is denied by the
+// array itself, because its neighbours remove its registration and the array
+// stops accepting its writes.
+//
+// It is done with sg_persist and not with lvm2's own lvmpersist remove, and that
+// is not a preference. On a multipath map every preempt is refused with
+// "configured reservation key doesn't match: 0x0" — libmpathpersist compares the
+// key given to it against one it reads itself and gets zero — regardless of how
+// the key is configured, on either version tried, from the container and from
+// the host. The same operation through sg_persist on a single path completes in
+// a third of a second.
+func (commands) PreemptRegistration(ctx context.Context, path, ourKey, theirKey string) (string, error) {
+	argv, err := sharedNamespaceArgs(internal.SharedSgPersistCmd,
+		"--out", "--preempt-abort",
+		"--param-rk="+ourKey,
+		"--param-sark="+theirKey,
+		// Write Exclusive, all registrants: the type the pool's reservation is
+		// held under, and a preempt has to name the type that is in force.
+		"--prout-type=7",
+		path,
+	)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 	return cmd.String(), nil
 }

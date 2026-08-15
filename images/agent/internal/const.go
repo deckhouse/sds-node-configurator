@@ -75,6 +75,16 @@ const (
 	SharedMpathPersistCmd = "/usr/sbin/mpathpersist"
 	SharedMultipathdCmd   = "/usr/sbin/multipathd"
 
+	// SharedSgPersistCmd is how a registration is taken away from a node that
+	// cannot be asked to give it up.
+	//
+	// The library behind mpathpersist compares --param-rk against a key it reads
+	// itself and gets zero, so every preempt on a multipath map is refused —
+	// measured on two versions of multipath-tools, from the container and from
+	// the host, with the key set every way there is. sg_persist on a single path
+	// does the same operation in a third of a second.
+	SharedSgPersistCmd = "/usr/bin/sg_persist"
+
 	// SharedLockDaemonProcess is how the mount namespace holding SharedLVMCmd is
 	// found: by the daemon that must be running for any of this to mean anything.
 	SharedLockDaemonProcess = "lvmlockd"

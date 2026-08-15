@@ -184,6 +184,11 @@ func (r *Reconciler) Reconcile(
 		return res, nil
 	}
 
+	// An eviction a person asked for, before the ordinary pass: it takes a
+	// node's access away, and everything below assumes the members it can see
+	// are the members that may write.
+	r.evictRequestedNode(ctx, lsvg)
+
 	res, err := r.join(ctx, lsvg)
 	if err != nil {
 		// Said out loud and retried on this reconciler's own cadence, rather

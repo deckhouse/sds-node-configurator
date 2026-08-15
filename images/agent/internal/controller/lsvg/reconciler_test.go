@@ -410,6 +410,12 @@ func fakeSysBlockWithLUN(t *testing.T, granularity int) {
 	write("queue/logical_block_size", "512")
 	write("queue/physical_block_size", "512")
 	write("queue/discard_granularity", strconv.Itoa(granularity))
+	// Two paths under the map, because reservation commands are issued per path
+	// and a map with none would make an eviction look complete having done
+	// nothing.
+	for _, path := range []string{"sdb", "sdc"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(base, "slaves", path), 0o755))
+	}
 
 	old := utils.SysBlockRoot
 	utils.SysBlockRoot = root
