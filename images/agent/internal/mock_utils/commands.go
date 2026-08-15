@@ -709,6 +709,21 @@ func (mr *MockCommandsMockRecorder) RemoveVG(vgName any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveVG", reflect.TypeOf((*MockCommands)(nil).RemoveVG), vgName)
 }
 
+// RemoveVGShared mocks base method.
+func (m *MockCommands) RemoveVGShared(ctx context.Context, vgName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveVGShared", ctx, vgName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemoveVGShared indicates an expected call of RemoveVGShared.
+func (mr *MockCommandsMockRecorder) RemoveVGShared(ctx, vgName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveVGShared", reflect.TypeOf((*MockCommands)(nil).RemoveVGShared), ctx, vgName)
+}
+
 // ResizePV mocks base method.
 func (m *MockCommands) ResizePV(ctx context.Context, pvName string) (string, error) {
 	m.ctrl.T.Helper()

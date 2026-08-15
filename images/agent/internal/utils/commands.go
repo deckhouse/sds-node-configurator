@@ -61,6 +61,7 @@ type Commands interface {
 	ExtendLVFullVGSpace(vgName, lvName string) (string, error)
 	ResizePV(ctx context.Context, pvName string) (string, error)
 	RemoveVG(vgName string) (string, error)
+	RemoveVGShared(ctx context.Context, vgName string) (string, error)
 	RemovePV(pvNames []string) (string, error)
 	RemoveLV(vgName, lvName string) (string, error)
 	VGChangeAddTag(ctx context.Context, vGName, tag string) (string, error)
@@ -886,6 +887,57 @@ func (commands) ResizePV(ctx context.Context, pvName string) (string, error) {
 	}
 
 	return cmd.String(), nil
+}
+
+// RemoveVGShared removes the Volume Group of a pool, and it is the last step of
+// a cluster-wide operation rather than a command that stands alone.
+//
+// Three things have to be true before it can succeed, and each of them was
+// learned by watching it fail on a live pool:
+//
+//   - the archive has to be off. lvm writes /etc/lvm/archive before changing
+//     metadata, the lock daemons' image has a read-only rootfs, and the refusal
+//     to create that directory is what fails the command;
+//   - every OTHER member must have stopped its lockspace, or lvm answers
+//     "Lockspace for ... not stopped on other hosts". Stopping them is not
+//     something this node can do — each member stops its own;
+//   - sanlock must have waited out its own interval afterwards, or it answers
+//     "unknown host state (wait and retry)": it will not vouch for the absence
+//     of other owners until then. That answer is not a failure, it is the
+//     protocol asking for time, which is why the caller retries rather than
+//     giving up.
+//
+// It runs in the lock daemons' mount namespace like every other shared command,
+// because the lvm that can speak to lvmlockd lives there.
+func (commands) RemoveVGShared(ctx context.Context, vgName string) (string, error) {
+	args := []string{"vgremove", "--config", internal.SharedLVMNoArchive, "-y", vgName}
+	argv, err := sharedLVMArgs(args...)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// SharedVGRemovalNeedsTime reports whether a failed removal is the protocol
+// asking to be waited out rather than a fault. Both answers resolve on their
+// own: the first once the other members stop, the second once sanlock has sat
+// out its interval.
+func SharedVGRemovalNeedsTime(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "not stopped on other hosts") ||
+		strings.Contains(text, "unknown host state") ||
+		strings.Contains(text, "global lock failed")
 }
 
 func (commands) RemoveVG(vgName string) (string, error) {

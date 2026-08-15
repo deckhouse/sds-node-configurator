@@ -145,8 +145,19 @@ func (r *Reconciler) Reconcile(
 ) (controller.Result, error) {
 	lsvg := req.Object
 
+	// A deleted pool is unwound rather than forgotten: the Volume Group is on a
+	// LUN that outlives this object, and so are the lockspaces every member is
+	// holding over it.
+	if lsvg.DeletionTimestamp != nil {
+		return r.teardown(ctx, lsvg)
+	}
+
 	if !r.isMember(lsvg) {
 		return r.leave(ctx, lsvg)
+	}
+
+	if err := r.addFinalizer(ctx, lsvg); err != nil {
+		return controller.Result{}, err
 	}
 
 	res, err := r.join(ctx, lsvg)

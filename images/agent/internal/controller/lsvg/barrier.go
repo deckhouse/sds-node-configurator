@@ -200,6 +200,8 @@ const (
 	ReasonLUNNotReadyYet      = "LUNNotReadyYet"
 	ReasonLockspaceNotStarted = "LockspaceNotStarted"
 	ReasonBarrierNotCleared   = "BarrierNotCleared"
+	ReasonVolumesRemain       = "VolumesRemain"
+	ReasonRemovalFailed       = "RemovalFailed"
 )
 
 // publishNodeState records what this node has to say about its own membership.
