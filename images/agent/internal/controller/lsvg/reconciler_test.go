@@ -397,7 +397,11 @@ func fakeSysBlockWithLUN(t *testing.T, granularity int) {
 func fakeActiveLV(t *testing.T, lvName string) {
 	t.Helper()
 	root := utils.SysBlockRoot
-	base := filepath.Join(root, "dm-9")
+	// A directory of its own per call: several volumes of a group can be mapped
+	// at once, and a helper that reuses one slot can only ever describe one.
+	entries, err := os.ReadDir(root)
+	require.NoError(t, err)
+	base := filepath.Join(root, "dm-"+strconv.Itoa(20+len(entries)))
 	require.NoError(t, os.MkdirAll(filepath.Join(base, "dm"), 0o755))
 	mangled := strings.ReplaceAll(testVG, "-", "--") + "-" + strings.ReplaceAll(lvName, "-", "--")
 	require.NoError(t, os.WriteFile(filepath.Join(base, "dm", "name"), []byte(mangled+"\n"), 0o644))

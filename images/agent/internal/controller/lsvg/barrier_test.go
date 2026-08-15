@@ -17,6 +17,7 @@ limitations under the License.
 package lsvg
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -29,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
@@ -70,6 +72,8 @@ func TestAFencedNodeReturnsToThePoolByItself(t *testing.T) {
 	commands := mock_utils.NewMockCommands(ctrl)
 	group := ownedGroup()
 	r, _, dir := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+	fakeActiveLV(t, "vol1")
+	fakeActiveLV(t, "vol2")
 	fencedNode(t, dir, "vgshared-vol1", "vgshared-vol2")
 
 	commands.EXPECT().RemoveDMDevice(gomock.Any(), "vgshared-vol1").Return("dmsetup remove", nil)
@@ -147,6 +151,7 @@ func TestAFencedLeaseAreaDoesNotTrapTheNodeInARetry(t *testing.T) {
 	group := ownedGroup()
 	r, _, dir := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 	leaseMap := utils.DMName(testVG, utils.LeaseAreaLVName)
+	fakeActiveLV(t, utils.LeaseAreaLVName)
 	fencedNode(t, dir, leaseMap)
 
 	busy := errors.New("device-mapper: remove ioctl on " + leaseMap + " failed: Device or resource busy")
@@ -174,6 +179,7 @@ func TestALeaseAreaNobodyCanUnmapIsStatedRatherThanRetried(t *testing.T) {
 	group := ownedGroup()
 	r, cl, dir := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 	leaseMap := utils.DMName(testVG, utils.LeaseAreaLVName)
+	fakeActiveLV(t, utils.LeaseAreaLVName)
 	fencedNode(t, dir, leaseMap)
 
 	commands.EXPECT().VGLockStop(gomock.Any(), testVG).Return("vgchange --lock-stop", nil)
@@ -192,4 +198,29 @@ func TestALeaseAreaNobodyCanUnmapIsStatedRatherThanRetried(t *testing.T) {
 	assert.Equal(t, "BarrierNotCleared", published.Status.Conditions[0].Reason)
 	assert.Contains(t, published.Status.Conditions[0].Message, "No volume of this group is at risk",
 		"a node out of the pool is not a node losing data, and the message must not read like one")
+}
+
+func TestAMapThatIsAlreadyGoneFinishesTheRecovery(t *testing.T) {
+	// The pass after a deferred removal fires finds no map to remove. Asking
+	// device-mapper anyway answers "No such device", and a recovery that reads
+	// its own success as a failure keeps the node out of the pool forever —
+	// which is the state the whole barrier return exists to end.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := ownedGroup()
+	r, _, dir := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+	fencedNode(t, dir, utils.DMName(testVG, utils.LeaseAreaLVName), "vgshared-vol1")
+
+	// Nothing is mapped: no removal is expected, and the mock fails the test if
+	// one is attempted.
+	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("vgcreate", nil).AnyTimes()
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+	commands.EXPECT().GetVG(testVG).Return(internal.VGData{VGName: testVG, VGUUID: "vg-uuid"}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+	commands.EXPECT().VGLockStop(gomock.Any(), testVG).Return("vgchange --lock-stop", nil).AnyTimes()
+
+	reconcile(t, r, group)
+
+	_, err := os.Stat(filepath.Join(dir, "killpath-"+testVG+".json"))
+	assert.True(t, os.IsNotExist(err), "with the last error target gone, the node was never fenced any more")
 }

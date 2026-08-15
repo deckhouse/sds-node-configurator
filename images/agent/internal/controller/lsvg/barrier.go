@@ -142,6 +142,15 @@ func (r *Reconciler) recoverFromBarrier(ctx context.Context, lsvg *v1alpha1.LVMS
 	}
 
 	for _, dmName := range res.CoveredMaps {
+		// A map that is already gone is the goal, not a case to handle: it may
+		// have been removed by a previous pass, by a deferred removal that has
+		// since fired, or by an operator. Asking device-mapper to remove it
+		// would fail with "No such device", and a recovery that reads its own
+		// success as an error never finishes.
+		if !utils.DMDeviceExists(dmName) {
+			continue
+		}
+
 		cmd, err := r.commands.RemoveDMDevice(ctx, dmName)
 		if err == nil {
 			continue

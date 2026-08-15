@@ -230,6 +230,28 @@ func SortedPaths(devices map[string]SharedDevice) []string {
 	return paths
 }
 
+// DMDeviceExists reports whether a device-mapper device of this name is mapped
+// on this node. It answers about the name device-mapper itself uses, which is
+// what makes it usable for maps that belong to no volume of the pool — the
+// lease area above all.
+func DMDeviceExists(dmName string) bool {
+	entries, err := os.ReadDir(SysBlockRoot)
+	if err != nil {
+		return false
+	}
+
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), "dm-") {
+			continue
+		}
+		name, err := readSysAttr(filepath.Join(SysBlockRoot, entry.Name(), "dm", "name"))
+		if err == nil && name == dmName {
+			return true
+		}
+	}
+	return false
+}
+
 // LVIsActiveHere reports whether the logical volume has a device-mapper device
 // on this node, which is what "active here" means under lvmlockd.
 //
