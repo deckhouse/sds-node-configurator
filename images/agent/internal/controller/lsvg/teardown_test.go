@@ -60,12 +60,18 @@ func TestAPoolWithVolumesInItIsNotRemoved(t *testing.T) {
 	}
 	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group, volume)
 
-	// No RemoveVGShared expectation: attempting it is the failure this guards.
-	// No VGLockStop either, and that is the second half of it: removing a volume
-	// takes the group's lock, so a teardown that stopped the lockspace before
-	// the group was empty would leave the pool unable to delete the volumes its
-	// own message asks an operator to delete. Measured on the stand exactly that
-	// way — the owner stopped, and the volume's cleanup failed from then on.
+	// No RemoveVGShared and no VGLockStop, and the second one is the point:
+	// removing a volume takes the group's lock, so a teardown that stopped the
+	// lockspace before the group was empty would leave the pool unable to delete
+	// the volumes its own message asks an operator to delete. Measured on the
+	// stand exactly that way — the owner stopped, and the volume's cleanup
+	// failed from then on, whatever anybody did next.
+	//
+	// The lockspace is started instead, because a pool that cannot lose its
+	// volumes cannot be removed: refraining from stopping it fixes the next
+	// pool and leaves this one stuck.
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
+
 	res := reconcile(t, r, group)
 
 	assert.NotZero(t, res.RequeueAfter, "the volumes may still be deleted, and then the group goes")
@@ -206,4 +212,28 @@ func TestAGroupWhoseDevicesCannotBeListedIsNotExtended(t *testing.T) {
 
 	// No ExtendVGShared expectation: silence is not an empty group.
 	reconcile(t, r, group)
+}
+
+func TestADeletedPoolWhoseLockspaceIsDownGetsItBack(t *testing.T) {
+	// The recovery half. A pool that entered the deadlock — lockspace stopped
+	// while a volume remained — cannot get out of it on its own unless the
+	// lockspace comes back: the volume needs the group's lock to go, and until
+	// the volume goes the group cannot be removed. Refusing to stop the
+	// lockspace fixes the next pool; this is what fixes the one already stuck.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := deletedGroup()
+	volume := &v1alpha1.LVMSharedLogicalVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "vol-1"},
+		Spec:       v1alpha1.LVMSharedLogicalVolumeSpec{LVMSharedVolumeGroupName: group.Name},
+	}
+	// No lockspace annotation on the node: this is a node that has stopped it.
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group, volume)
+
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil)
+
+	res := reconcile(t, r, group)
+
+	assert.NotZero(t, res.RequeueAfter, "and it keeps waiting for the volume to be deleted")
 }

@@ -86,6 +86,15 @@ func (r *Reconciler) teardown(
 		return controller.Result{}, err
 	}
 	if remaining > 0 {
+		// And the pool keeps working while it waits. A lockspace that is down —
+		// stopped by an earlier version of this teardown, or by a node that
+		// left and came back — is what makes the volumes undeletable, so it is
+		// started again rather than left for somebody to notice. Nothing about
+		// this touches data: it is the same lockspace the pool ran on a minute
+		// ago, and without it the deletion this pass is waiting for cannot
+		// happen at all.
+		r.ensureLockspaceForTeardown(ctx, lsvg)
+
 		if lsvg.Spec.MetadataOwner == r.cfg.NodeName {
 			// Said plainly and repeatedly rather than forced: the group is not
 			// empty, and what is in it is data somebody put there.
@@ -243,4 +252,47 @@ func (r *Reconciler) dropFinalizer(ctx context.Context, lsvg *v1alpha1.LVMShared
 		return fmt.Errorf("remove the finalizer from %s: %w", lsvg.Name, err)
 	}
 	return nil
+}
+
+// ensureLockspaceForTeardown brings this node's lockspace back while a deleted
+// pool still holds volumes.
+//
+// Removing a volume takes the group's lock. A pool whose lockspace is down
+// cannot lose its volumes, and a pool that cannot lose its volumes cannot be
+// removed — so a teardown that merely refrains from stopping the lockspace
+// fixes the next pool and leaves this one where it is. Measured on the stand:
+// an earlier order of these steps stopped the lockspace first, and the volume
+// stayed undeletable afterwards no matter what an operator did.
+func (r *Reconciler) ensureLockspaceForTeardown(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup) {
+	node, err := r.node(ctx)
+	if err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to read this node while unwinding %s: %s",
+			ReconcilerName, lsvg.Name, err.Error()))
+		return
+	}
+	if r.lockspaceStarted(node, lsvg.Name, "") {
+		return
+	}
+
+	hostID, err := hostIDOf(node)
+	if err != nil || hostID == 0 {
+		// Without an id there is nothing to start with, and the allocator is not
+		// going to hand one to a pool being deleted. Said once per pass rather
+		// than silently skipped.
+		r.log.Warning(fmt.Sprintf("[%s] cannot restart the lockspace of %s: no sanlock host id on this node",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+		return
+	}
+
+	r.log.Info(fmt.Sprintf("[%s] restarting the lockspace of %s so its volumes can be removed",
+		ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+	if cmd, err := r.commands.VGLockStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, hostID); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to restart the lockspace of %s (cmd: %s): %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
+		return
+	}
+	if err := r.setLockspaceStarted(ctx, lsvg.Name, r.vgUUID(lsvg.Spec.ActualVGNameOnTheNode), true); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to record the restarted lockspace of %s: %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
+	}
 }
