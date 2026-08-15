@@ -513,7 +513,14 @@ func (commands) CreateLVShared(ctx context.Context, vgName, lvName, size string)
 	// lvm reads a bare number as megabytes, and the size arrives here as a byte
 	// count — so passing it through unconverted asks for a volume a million times
 	// too large.
-	args := []string{"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName), "-L", lvmSize(size), "-W", "y", "-y"}
+	// --setautoactivation n for the same reason the group carries it: a volume
+	// this cluster hands to one node at a time must not be activated by anything
+	// that merely sees the disk. The group's setting is not inherited by volumes
+	// created in it, so it is repeated here.
+	args := []string{
+		"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName),
+		"-L", lvmSize(size), "-W", "y", "-y", "--setautoactivation", "n",
+	}
 	extendedArgs, err := lvmStaticLockdArgs(args, 0)
 	if err != nil {
 		return "", err
@@ -665,7 +672,14 @@ func (commands) CreateVGShared(ctx context.Context, params SharedVGParams) (stri
 		config += " global/sanlock_align_size=" + strconv.Itoa(params.SanlockAlignSizeMiB)
 	}
 
-	extra := []string{"--config", config, "--shared"}
+	// Autoactivation off, and it is not a preference. lvm2 on a host that has it
+	// installed activates the volumes of a group it can see — on boot, and on
+	// every appearance of a physical volume. For a pool that is the one thing
+	// the whole design forbids: a node with no attachment taking a lock and
+	// mapping somebody else's volume. The nodes measured here ship no lvm at
+	// all, so nothing happens on them today; a pool is not a promise about one
+	// distribution.
+	extra := []string{"--config", config, "--shared", "--setautoactivation", "n"}
 	if params.PhysicalExtentSize != "" {
 		extra = append(extra, "--physicalextentsize", lvmSize(params.PhysicalExtentSize))
 	}
