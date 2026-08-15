@@ -1142,6 +1142,14 @@ func (commands) RemoveDMDevice(ctx context.Context, dmName string) (string, erro
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		// A device that is not there is the outcome this was called for, not a
+		// failure to report. Callers used to check first and then remove, and
+		// the check was the weak part: on the stand a node read /sys/block,
+		// found nothing, and skipped the removal of a mapping dmsetup listed at
+		// the same moment. One command, one authority.
+		if reNoSuchDMDevice.Match(stderr.Bytes()) {
+			return cmd.String(), nil
+		}
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 	return cmd.String(), nil
@@ -2283,6 +2291,9 @@ var (
 
 	// benignAlwaysStdErr is the set every lvm invocation may ignore.
 	benignAlwaysStdErr = []*regexp.Regexp{reRegexVersionMismatch, reLeakedFileDescriptor}
+	// reNoSuchDMDevice is how device-mapper says the mapping a removal was aimed
+	// at is already gone. For a removal that is success spelled as an error.
+	reNoSuchDMDevice = regexp.MustCompile(`(?i)(No such device or address|Device does not exist)`)
 	// benignResizeStdErr additionally tolerates the no-op resize. Only lvextend
 	// and its full-VG-space variant may use it.
 	benignResizeStdErr = []*regexp.Regexp{reRegexVersionMismatch, reLeakedFileDescriptor, reNoSizeChange}

@@ -204,3 +204,21 @@ func TestWriteCommandsShareTheBenignStdErrPolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestAMappingThatIsAlreadyGoneIsARemovalThatSucceeded(t *testing.T) {
+	// Both spellings device-mapper uses, because the caller of a removal wants
+	// the mapping gone and does not care which of them it is told. Treating
+	// either as a failure is what kept a fenced node out of its pool: the
+	// recovery read its own success as something to retry.
+	for _, stderr := range []string{
+		"device-mapper: remove ioctl on vghw-lvmlock  failed: No such device or address\nCommand failed.\n",
+		"Device does not exist.\nCommand failed.\n",
+	} {
+		assert.True(t, NoSuchDMDeviceForTest(stderr), "%q means the mapping is gone", stderr)
+	}
+
+	// And the one that must not be swallowed: something is still holding it.
+	assert.False(t, NoSuchDMDeviceForTest(
+		"device-mapper: remove ioctl on vghw-lvmlock  failed: Device or resource busy\nCommand failed.\n"),
+		"a busy device is a mapping that is still there, and the caller has to know")
+}

@@ -203,10 +203,11 @@ func TestALeaseAreaNobodyCanUnmapIsStatedRatherThanRetried(t *testing.T) {
 }
 
 func TestAMapThatIsAlreadyGoneFinishesTheRecovery(t *testing.T) {
-	// The pass after a deferred removal fires finds no map to remove. Asking
-	// device-mapper anyway answers "No such device", and a recovery that reads
-	// its own success as a failure keeps the node out of the pool forever —
-	// which is the state the whole barrier return exists to end.
+	// The pass after a deferred removal fires finds no map to remove, and the
+	// removal says so by succeeding: device-mapper answers "No such device" and
+	// the command treats that as the outcome it was asked for. A recovery that
+	// read its own success as a failure would keep the node out of the pool
+	// forever — which is the state the whole barrier return exists to end.
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
@@ -214,8 +215,9 @@ func TestAMapThatIsAlreadyGoneFinishesTheRecovery(t *testing.T) {
 	r, _, dir := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 	fencedNode(t, dir, utils.DMName(testVG, utils.LeaseAreaLVName), "vgshared-vol1")
 
-	// Nothing is mapped: no removal is expected, and the mock fails the test if
-	// one is attempted.
+	// Both removals report the missing mapping as success, which is what the
+	// real command does.
+	commands.EXPECT().RemoveDMDevice(gomock.Any(), gomock.Any()).Return("dmsetup remove", nil).Times(2)
 	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("vgcreate", nil).AnyTimes()
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
 	commands.EXPECT().GetVG(testVG).Return(internal.VGData{VGName: testVG, VGUUID: "vg-uuid"}, "vgs", bytes.Buffer{}, nil).AnyTimes()

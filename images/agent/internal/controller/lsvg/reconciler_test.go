@@ -884,9 +884,11 @@ func TestAReleasedVolumeThatDidNotGoIsAskedAboutByName(t *testing.T) {
 	r.releaseOrphanActivations(context.Background(), group)
 }
 
-func TestAReleasedVolumeThatWentIsLeftAlone(t *testing.T) {
-	// The ordinary outcome, and it must cost nothing: the deactivation worked,
-	// the mapping is gone, and dmsetup is not asked to remove what is not there.
+func TestAReleasedVolumeThatWentIsRemovedWithoutComplaint(t *testing.T) {
+	// The ordinary outcome: the deactivation worked and the mapping is gone.
+	// The removal still runs — asking device-mapper is cheaper and more truthful
+	// than deciding from a directory listing whether it needs to — and
+	// "no such device" is what success looks like from here.
 	fakeSysBlockWithLUN(t, 8192)
 	fakeActiveLV(t, "vol1")
 	ctrl := gomock.NewController(t)
@@ -897,15 +899,12 @@ func TestAReleasedVolumeThatWentIsLeftAlone(t *testing.T) {
 		LockspaceGenerationAnnotationPrefix + group.Name: "1",
 	}), commands, nil, group)
 
-	commands.EXPECT().LVDeactivateShared(gomock.Any(), testVG, []string{"vol1"}).
-		DoAndReturn(func(_ context.Context, _ string, _ []string) (string, error) {
-			// What a working deactivation leaves behind: no mapping.
-			require.NoError(t, os.RemoveAll(filepath.Join(utils.SysBlockRoot, "dm-21")))
-			return "lvchange -an", nil
-		})
+	commands.EXPECT().LVDeactivateShared(gomock.Any(), testVG, []string{"vol1"}).Return("lvchange -an", nil)
+	// The real command reports the missing device as success, so the reconciler
+	// sees no error and says nothing.
+	commands.EXPECT().RemoveDMDevice(gomock.Any(), utils.DMName(testVG, "vol1")).Return("dmsetup remove", nil)
 	commands.EXPECT().VGLockStart(gomock.Any(), gomock.Any(), gomock.Any()).Return("", nil).AnyTimes()
 	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("", nil).AnyTimes()
 
-	// No RemoveDMDevice expectation: the mock fails the test if one is attempted.
 	r.releaseOrphanActivations(context.Background(), group)
 }

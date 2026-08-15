@@ -675,37 +675,24 @@ func (r *Reconciler) releaseOrphanActivations(ctx context.Context, lsvg *v1alpha
 // were just released and did not go, which is the only way residue of a
 // lock-daemon restart goes.
 //
-// It asks about each of those volumes by name rather than listing what is
-// active again. The difference is not style: on the stand the node logged
+// It asks device-mapper to remove each of those volumes by name and does not
+// look first. Looking first is what failed on the stand: the node logged
 // "releasing 1 volume(s)" every minute for hours and never once reached this
-// removal, because the second listing came back empty while the mapping was
-// plainly there — same directory, same prefix, a fraction of a second apart. A
-// pass that repairs nothing and says nothing is worse than one that fails, so
-// the question is now put about the one thing the answer is needed for.
+// removal, because a scan of /sys/block came back empty while dmsetup listed
+// the mapping at the same moment, with the same minor number and an open count
+// of zero. Asking about a name in a directory listing and acting on a name are
+// two different questions asked of two different authorities, and only one of
+// them owns the answer. Now there is one command, and a device that is already
+// gone is a success rather than an error.
 //
 // dmsetup refuses an open device, and that refusal is kept: a mapping something
 // is still using is not residue, whatever the lock state says.
 func (r *Reconciler) removeLeftoverMappings(ctx context.Context, vgName string, released []string) {
 	for _, lvName := range released {
 		dmName := utils.DMName(vgName, lvName)
-		if !utils.DMDeviceExists(dmName) {
-			// The deactivation did what it said. Nothing to do, and nothing to
-			// report: this is the ordinary outcome.
-			continue
-		}
-
-		r.log.Info(fmt.Sprintf("[%s] removing the leftover device-mapper device %s", ReconcilerName, dmName))
 		if cmd, err := r.commands.RemoveDMDevice(ctx, dmName); err != nil {
 			r.log.Warning(fmt.Sprintf("[%s] %s could not be removed (cmd: %s): %s",
 				ReconcilerName, dmName, cmd, err.Error()))
-			continue
-		}
-
-		if utils.DMDeviceExists(dmName) {
-			// Removal reported success and the mapping is still here. Said out
-			// loud because it is the shape of the bug this replaced: a repair
-			// that believes its own commands.
-			r.log.Warning(fmt.Sprintf("[%s] %s is still mapped after a successful removal", ReconcilerName, dmName))
 		}
 	}
 }
