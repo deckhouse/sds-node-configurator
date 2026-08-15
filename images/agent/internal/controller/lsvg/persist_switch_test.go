@@ -56,6 +56,9 @@ func TestTheOneWayDoorIsNotOpenedWhileAMemberCannotTakePart(t *testing.T) {
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
+	// The group is asked whether it has already been switched; "" is a group
+	// that has not.
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	group := poolAskingForReservations(func(g *v1alpha1.LVMSharedVolumeGroup) {
 		g.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
 			Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{
@@ -85,6 +88,9 @@ func TestTheExecutorWaitsForTheMembersToStepAside(t *testing.T) {
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
+	// The group is asked whether it has already been switched; "" is a group
+	// that has not.
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	group := poolAskingForReservations(func(g *v1alpha1.LVMSharedVolumeGroup) {
 		g.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
 			Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{
@@ -108,6 +114,9 @@ func TestTheSwitchRunsInTheOrderTheArrayAccepts(t *testing.T) {
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
+	// The group is asked whether it has already been switched; "" is a group
+	// that has not.
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	group := poolAskingForReservations(func(g *v1alpha1.LVMSharedVolumeGroup) {
 		g.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
 			Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{
@@ -122,8 +131,6 @@ func TestTheSwitchRunsInTheOrderTheArrayAccepts(t *testing.T) {
 	// --setpersist require fails without one — so a start may happen ahead of
 	// the sequence as well as inside it.
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
-	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
-
 	setPersist := commands.EXPECT().VGSetPersist(gomock.Any(), testVG, gomock.Any()).Return("vgchange --setpersist require", nil)
 	persistStart := commands.EXPECT().VGPersistStart(gomock.Any(), testVG, gomock.Any()).
 		After(setPersist).Return("vgchange --persist start", nil)
@@ -151,6 +158,9 @@ func TestAGroupLeftBetweenStatesSaysSoAndKeepsTrying(t *testing.T) {
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
+	// The group is asked whether it has already been switched; "" is a group
+	// that has not.
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	group := poolAskingForReservations(func(g *v1alpha1.LVMSharedVolumeGroup) {
 		g.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
 			Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{
@@ -162,7 +172,6 @@ func TestAGroupLeftBetweenStatesSaysSoAndKeepsTrying(t *testing.T) {
 	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
-	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	commands.EXPECT().VGSetPersist(gomock.Any(), testVG, gomock.Any()).Return("vgchange --setpersist require", nil)
 	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, gomock.Any()).
 		Return("vgchange --persist start", assert.AnError)
@@ -187,6 +196,9 @@ func TestAMemberDoesNotStepAsideWhileItServesAVolume(t *testing.T) {
 	fakeActiveLV(t, "vol1")
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
+	// The group is asked whether it has already been switched; "" is a group
+	// that has not.
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	group := poolAskingForReservations(func(g *v1alpha1.LVMSharedVolumeGroup) {
 		g.Spec.MetadataOwner = "second-node"
 	})
@@ -228,6 +240,9 @@ func TestTheSwitchCarriesThisNodesHostID(t *testing.T) {
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
+	// The group is asked whether it has already been switched; "" is a group
+	// that has not.
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	group := poolAskingForReservations(func(g *v1alpha1.LVMSharedVolumeGroup) {
 		g.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
 			Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{
@@ -239,7 +254,6 @@ func TestTheSwitchCarriesThisNodesHostID(t *testing.T) {
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("", nil).AnyTimes()
-	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	commands.EXPECT().VGSetPersist(gomock.Any(), testVG, 7).Return("", nil)
 	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, 7).Return("", nil).Times(2)
 	commands.EXPECT().VGSetLockArgsPersist(gomock.Any(), testVG, 7).Return("", nil)
@@ -253,6 +267,9 @@ func TestAMemberWithoutAHostIDIsNotTakenThroughTheDoor(t *testing.T) {
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
+	// The group is asked whether it has already been switched; "" is a group
+	// that has not.
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	group := poolAskingForReservations(func(g *v1alpha1.LVMSharedVolumeGroup) {
 		g.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
 			Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{
@@ -282,6 +299,9 @@ func TestAMemberThatStepsAsideStopsSayingItsLockspaceIsRunning(t *testing.T) {
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
+	// The group is asked whether it has already been switched; "" is a group
+	// that has not.
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	group := poolAskingForReservations(func(g *v1alpha1.LVMSharedVolumeGroup) {
 		g.Spec.MetadataOwner = "second-node"
 		g.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
@@ -344,6 +364,9 @@ func TestANodeUnderReservationsRegistersBeforeItStartsItsLockspace(t *testing.T)
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
+	// The group is asked whether it has already been switched; "" is a group
+	// that has not.
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	group := testGroup(testNode)
 	group.Spec.PersistentReservations = PersistentReservationsRequired
 	group.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
@@ -367,6 +390,9 @@ func TestARestartedAgentRemembersThatItStandsUnderReservations(t *testing.T) {
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
+	// The group is asked whether it has already been switched; "" is a group
+	// that has not.
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	group := testGroup(testNode)
 	group.Spec.PersistentReservations = PersistentReservationsRequired
 	group.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
@@ -387,4 +413,61 @@ func TestARestartedAgentRemembersThatItStandsUnderReservations(t *testing.T) {
 	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
 	assert.Equal(t, PRStateEnabled, entryOf(t, published).PersistentReservations.State,
 		"the node keeps saying where it stands rather than forgetting it")
+}
+
+func TestAGroupThatHasBeenSwitchedIsJoinedRatherThanSwitchedAgain(t *testing.T) {
+	// The group records the finished switch in its own lock args
+	// ("2.0.0:lvmlock:persist"), and that record outlives everything a node may
+	// have forgotten. Without asking for it, a pool switched itself again after
+	// every agent restart: the node read its own silence as "no reservations",
+	// stood its neighbours aside, and asked them to leave a lockspace they had
+	// already left. Found on the stand, in a loop.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).
+		Return("require 2.0.0:lvmlock:persist", nil).AnyTimes()
+	// An existing group, with nothing published by anybody: what a restart
+	// leaves behind.
+	group := testGroup(testNode)
+	group.Spec.PersistentReservations = PersistentReservationsRequired
+	group.Status = &v1alpha1.LVMSharedVolumeGroupStatus{}
+	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	// No VGSetPersist and no VGPersistStop: nothing is switched and nobody is
+	// asked to step aside. The node registers and joins.
+	commands.EXPECT().LockspaceRunning(gomock.Any(), testVG).Return(false, nil).AnyTimes()
+	register := commands.EXPECT().VGPersistStart(gomock.Any(), testVG, 7).Return("", nil)
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).After(register).Return("", nil)
+
+	reconcile(t, r, group)
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	assert.Equal(t, PRStateEnabled, entryOf(t, published).PersistentReservations.State)
+}
+
+func TestAMemberLeavesTheLockspaceBeforeItStopsItsReservations(t *testing.T) {
+	// lvm2 refuses the other order outright: "VG vgshared locking should be
+	// stopped before PR (vgchange --lockstop)". A member that kept trying it
+	// stood in front of the switch for as long as it kept trying.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
+	group := poolAskingForReservations(func(g *v1alpha1.LVMSharedVolumeGroup) {
+		g.Spec.MetadataOwner = "second-node"
+		g.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+			Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{
+				nodeSaid(testNode, true, PRStateOff),
+				nodeSaid("second-node", true, PRStateOff),
+			},
+		}
+	})
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	lockStop := commands.EXPECT().VGLockStop(gomock.Any(), testVG).Return("", nil)
+	commands.EXPECT().VGPersistStop(gomock.Any(), testVG, 7).After(lockStop).Return("", nil)
+
+	reconcile(t, r, group)
 }

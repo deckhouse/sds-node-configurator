@@ -19,6 +19,7 @@ package lsvg
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -38,6 +39,14 @@ const (
 	// open: `vgs -o vg_persist` says "require" once `--setpersist require` has
 	// succeeded, and it says it without taking a lock.
 	PersistRequired = "require"
+
+	// PersistInLockArgs is how a group that has been all the way through the
+	// switch describes its own leases — "2.0.0:lvmlock:persist" against
+	// "1.0.0:lvmlock" before it. It is the group's own record that the procedure
+	// finished, and it is the only record that survives everything: an agent
+	// restart, a status that was never written, a node that has never taken
+	// part.
+	PersistInLockArgs = ":persist"
 )
 
 // prSwitchRetryInterval is the pace of the switch. It is slow on purpose: two of
@@ -82,7 +91,26 @@ func (r *Reconciler) switchToPersistentReservations(
 		return controller.Result{}, false
 	}
 
-	if r.prStateOf(lsvg, r.cfg.NodeName) == PRStateEnabled {
+	if r.prStateHere(lsvg) == PRStateEnabled {
+		return controller.Result{}, false
+	}
+
+	// Whether the switch has already happened is asked of the group, not
+	// remembered. A group that has been through it records it in its own lock
+	// args — "2.0.0:lvmlock:persist" — and that record outlives everything this
+	// node might have forgotten: an agent restart, a status entry that was never
+	// written, a member that has never taken part.
+	//
+	// Without this a pool switches itself again after every restart: the node
+	// reads its own silence as "no reservations", stands its neighbours aside,
+	// and asks them to leave a lockspace they have already left. Found on the
+	// stand doing exactly that, in a loop.
+	if switched, err := r.groupAlreadySwitched(ctx, lsvg); err != nil {
+		return controller.Result{RequeueAfter: prSwitchRetryInterval}, true
+	} else if switched {
+		r.log.Info(fmt.Sprintf("[%s] %s is already under reservations; this node joins it rather than switching it",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+		r.publishPRState(ctx, lsvg, PRStateEnabled, r.lockspaceReallyRunning(ctx, lsvg))
 		return controller.Result{}, false
 	}
 
@@ -133,16 +161,20 @@ func (r *Reconciler) standAsideForTheSwitch(
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}
 	}
 
-	if cmd, err := r.commands.VGPersistStop(ctx, lsvg.Spec.ActualVGNameOnTheNode, r.hostIDFor(ctx)); err != nil {
-		r.log.Warning(fmt.Sprintf("[%s] unable to stop reservations of %s (cmd: %s): %s",
-			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
-		return controller.Result{RequeueAfter: prSwitchRetryInterval}
-	}
+	// The lockspace goes first. lvm2 refuses the other order outright — "VG %s
+	// locking should be stopped before PR (vgchange --lockstop)" — and a member
+	// that kept trying it stood in front of the switch for as long as it kept
+	// trying, which is what the stand showed.
 	if err := r.setLockspaceStarted(ctx, lsvg.Name, "", false); err != nil {
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}
 	}
 	if cmd, err := r.commands.VGLockStop(ctx, lsvg.Spec.ActualVGNameOnTheNode); err != nil {
 		r.log.Warning(fmt.Sprintf("[%s] unable to stop the lockspace of %s for the switch (cmd: %s): %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
+		return controller.Result{RequeueAfter: prSwitchRetryInterval}
+	}
+	if cmd, err := r.commands.VGPersistStop(ctx, lsvg.Spec.ActualVGNameOnTheNode, r.hostIDFor(ctx)); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to stop reservations of %s (cmd: %s): %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}
 	}
@@ -199,7 +231,7 @@ func (r *Reconciler) runTheSwitch(
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}
 	}
 
-	if setting != PersistRequired {
+	if !strings.Contains(setting, PersistRequired) {
 		// And this node's own lockspace has to be running, which is the opposite
 		// of what "stop the lockspace everywhere" sounds like: --setpersist
 		// require fails without one.
@@ -446,4 +478,18 @@ func publishedPRStateOf(lsvg *v1alpha1.LVMSharedVolumeGroup, nodeName string) st
 		}
 	}
 	return ""
+}
+
+// groupAlreadySwitched asks the group whether the switch has been made.
+func (r *Reconciler) groupAlreadySwitched(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+) (bool, error) {
+	answer, err := r.commands.VGPersistSetting(ctx, lsvg.Spec.ActualVGNameOnTheNode)
+	if err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] cannot ask %s whether it is already under reservations: %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
+		return false, err
+	}
+	return strings.Contains(answer, PersistInLockArgs), nil
 }

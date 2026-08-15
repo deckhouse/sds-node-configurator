@@ -1308,8 +1308,9 @@ func (commands) VGSetLockArgsPersist(ctx context.Context, vgName string, hostID 
 	return runSharedLockdLVM(ctx, hostID, "vgchange", "--setlockargs", "persist", vgName)
 }
 
-// VGPersistSetting reads whether the group already requires persistent
-// reservations, and it is readable when nothing else about the group is.
+// VGPersistSetting reads what the group itself says about reservations: whether
+// it requires them, and what its lock args are. Both are readable when nothing
+// else about the group is.
 //
 // This is what makes the switch resumable. Once `--setpersist require` has
 // succeeded the group answers "Cannot access VG due to failed lock" to every
@@ -1317,7 +1318,7 @@ func (commands) VGSetLockArgsPersist(ctx context.Context, vgName string, hostID 
 // that always starts from the beginning can never finish what it started. The
 // setting lives in the metadata and `vgs` reads it without a lock, saying so.
 func (commands) VGPersistSetting(ctx context.Context, vgName string) (string, error) {
-	argv, err := sharedLVMArgs("vgs", "--noheadings", "-o", "vg_persist", vgName)
+	argv, err := sharedLVMArgs("vgs", "--noheadings", "-o", "vg_persist,vg_lock_args", vgName)
 	if err != nil {
 		return "", err
 	}
