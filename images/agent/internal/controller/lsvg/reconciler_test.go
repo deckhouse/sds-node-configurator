@@ -99,6 +99,8 @@ func testReconciler(
 	// The lock manager agrees with the node's own record unless a test says
 	// otherwise: the interesting case is when it does not.
 	commands.EXPECT().LockspaceRunning(gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
+	// Both daemons agree unless a test says otherwise.
+	commands.EXPECT().LockspaceState(gomock.Any(), gomock.Any()).Return(true, true, nil).AnyTimes()
 	// The reservation channel answers the way a node ready for it answers. Tests
 	// about the channel itself say otherwise before calling this helper.
 	commands.EXPECT().MissingReservationTools(gomock.Any()).Return(nil, nil).AnyTimes()
@@ -1056,5 +1058,32 @@ func TestALockManagerThatCannotBeAskedIsNotTakenAsADenial(t *testing.T) {
 	}), commands, nil, group)
 
 	// No VGLockStart expectation: starting one on a guess is what this avoids.
+	reconcile(t, r, group)
+}
+
+func TestALockspaceOnlyLVMLockdBelievesInIsStoppedBeforeItIsStarted(t *testing.T) {
+	// lvmlockd keeps its registration after sanlock has dropped the lockspace,
+	// and in that state `vgchange --lock-start` succeeds and does nothing:
+	// lvmlockd considers it already started, sanlock answers "invalid lockspace"
+	// to every lease request, and the node repeats the start every pass forever.
+	// Found on the stand with a volume that could not be activated on a node
+	// reporting itself healthy.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+
+	commands.EXPECT().LockspaceRunning(gomock.Any(), testVG).Return(false, nil).AnyTimes()
+	commands.EXPECT().LockspaceState(gomock.Any(), testVG).Return(true, false, nil).AnyTimes()
+	stop := commands.EXPECT().VGLockStop(gomock.Any(), testVG).Return("", nil)
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).After(stop).Return("", nil)
+
+	node := nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                        "7",
+		LockspaceStartedAnnotationPrefix + "pool-1":    "vg-uuid",
+		LockspaceGenerationAnnotationPrefix + "pool-1": "1",
+	})
+	r, _, _ := testReconciler(t, node, commands, nil, group)
+
 	reconcile(t, r, group)
 }

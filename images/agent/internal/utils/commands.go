@@ -73,6 +73,7 @@ type Commands interface {
 	VGLockStart(ctx context.Context, vgName string, hostID int) (string, error)
 	VGLockStop(ctx context.Context, vgName string) (string, error)
 	LockspaceRunning(ctx context.Context, vgName string) (bool, error)
+	LockspaceState(ctx context.Context, vgName string) (registered, held bool, err error)
 	VGSetPersist(ctx context.Context, vgName string, hostID int) (string, error)
 	VGPersistStart(ctx context.Context, vgName string, hostID int) (string, error)
 	VGPersistStop(ctx context.Context, vgName string, hostID int) (string, error)
@@ -1147,23 +1148,38 @@ func (commands) VGLockStart(ctx context.Context, vgName string, hostID int) (str
 // An error is not an answer: a caller that cannot ask must not conclude the
 // lockspace is down and start it again over a lockspace that is running.
 func (commands) LockspaceRunning(ctx context.Context, vgName string) (bool, error) {
-	// Both daemons are asked, and both have to say yes.
-	//
-	// lvmlockd answers whether the lockspace is registered with it, and that
-	// survives the lease being lost: on the stand a node whose registration had
-	// been taken off the array still had "LS sanlock lvm_vghw" in lvmlockctl
-	// --info while sanlock had dropped the lockspace entirely and lvm answered
-	// "lock skipped: storage errors for sanlock leases" to everything. The node
-	// published a running lockspace it did not have.
-	//
-	// sanlock answers whether this host holds the lease, which is the fact the
-	// rest of the module means by "started": it decides whether volumes may be
-	// activated here and whether a LUN may be taken away from this node.
+	registered, held, err := lockspaceState(ctx, vgName)
+	return registered && held, err
+}
+
+// LockspaceState is what each daemon says about the lockspace, separately.
+//
+// They disagree, and the disagreement has a repair of its own. lvmlockd answers
+// whether the lockspace is registered with it, and that survives the lease being
+// lost: on the stand a node whose registration had been taken off the array
+// still had "LS sanlock lvm_vghw" in lvmlockctl --info while sanlock had dropped
+// the lockspace and lvm answered "lock skipped: storage errors for sanlock
+// leases" to everything.
+//
+// In that state `vgchange --lock-start` succeeds and changes nothing —
+// lvmlockd considers the lockspace already started — and sanlock goes on
+// answering "invalid lockspace" to every lease request. The node repeats the
+// start every pass and never recovers. The way out is to stop it first, which is
+// why the two answers are kept apart.
+func (commands) LockspaceState(ctx context.Context, vgName string) (registered, held bool, err error) {
+	return lockspaceState(ctx, vgName)
+}
+
+func lockspaceState(ctx context.Context, vgName string) (bool, bool, error) {
 	registered, err := lockspaceRegisteredWithLVMLockd(ctx, vgName)
-	if err != nil || !registered {
-		return false, err
+	if err != nil {
+		return false, false, err
 	}
-	return sanlockHoldsLockspace(ctx, vgName)
+	held, err := sanlockHoldsLockspace(ctx, vgName)
+	if err != nil {
+		return registered, false, err
+	}
+	return registered, held, nil
 }
 
 func lockspaceRegisteredWithLVMLockd(ctx context.Context, vgName string) (bool, error) {

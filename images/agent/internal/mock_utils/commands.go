@@ -605,6 +605,22 @@ func (mr *MockCommandsMockRecorder) LockspaceRunning(ctx, vgName any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockspaceRunning", reflect.TypeOf((*MockCommands)(nil).LockspaceRunning), ctx, vgName)
 }
 
+// LockspaceState mocks base method.
+func (m *MockCommands) LockspaceState(ctx context.Context, vgName string) (bool, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockspaceState", ctx, vgName)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// LockspaceState indicates an expected call of LockspaceState.
+func (mr *MockCommandsMockRecorder) LockspaceState(ctx, vgName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockspaceState", reflect.TypeOf((*MockCommands)(nil).LockspaceState), ctx, vgName)
+}
+
 // MissingReservationTools mocks base method.
 func (m *MockCommands) MissingReservationTools(ctx context.Context) ([]string, error) {
 	m.ctrl.T.Helper()

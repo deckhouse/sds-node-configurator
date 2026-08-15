@@ -357,6 +357,7 @@ func (r *Reconciler) join(
 	if r.lockspaceStarted(node, lsvg.Name, vgUUID) && !r.lockspaceReallyRunning(ctx, lsvg) {
 		r.log.Warning(fmt.Sprintf("[%s] this node is recorded in the lockspace of %s and the lock manager does not have it: starting it again",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+		r.clearStaleLockspaceRegistration(ctx, lsvg)
 		if err := r.setLockspaceStarted(ctx, lsvg.Name, "", false); err != nil {
 			return controller.Result{}, err
 		}
@@ -1124,4 +1125,29 @@ func hostIDOf(node *corev1.Node) (int, error) {
 		return 0, fmt.Errorf("annotation %s of node %s is %d; sanlock host ids start at 1", SanlockHostIDAnnotation, node.Name, id)
 	}
 	return id, nil
+}
+
+// clearStaleLockspaceRegistration stops a lockspace that only lvmlockd still
+// believes in.
+//
+// When lvmlockd has the lockspace and sanlock does not, `vgchange --lock-start`
+// succeeds and does nothing: lvmlockd considers it already started, sanlock goes
+// on answering "invalid lockspace" to every lease request, and the node repeats
+// the start every pass forever. Found on the stand after an eviction, with a
+// volume that could not be activated on a node that reported itself healthy.
+//
+// Stopping first makes the start real. A lockspace sanlock does not hold has no
+// lease to give up, so nothing is lost by stopping it.
+func (r *Reconciler) clearStaleLockspaceRegistration(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup) {
+	registered, held, err := r.commands.LockspaceState(ctx, lsvg.Spec.ActualVGNameOnTheNode)
+	if err != nil || !registered || held {
+		return
+	}
+
+	r.log.Warning(fmt.Sprintf("[%s] lvmlockd still holds a registration for the lockspace of %s that sanlock has dropped: stopping it so it can be started for real",
+		ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+	if cmd, err := r.commands.VGLockStop(ctx, lsvg.Spec.ActualVGNameOnTheNode); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to stop the stale lockspace of %s (cmd: %s): %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
+	}
 }
