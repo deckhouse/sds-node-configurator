@@ -122,6 +122,7 @@ func TestTheSwitchRunsInTheOrderTheArrayAccepts(t *testing.T) {
 	// --setpersist require fails without one — so a start may happen ahead of
 	// the sequence as well as inside it.
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 
 	setPersist := commands.EXPECT().VGSetPersist(gomock.Any(), testVG, gomock.Any()).Return("vgchange --setpersist require", nil)
 	persistStart := commands.EXPECT().VGPersistStart(gomock.Any(), testVG, gomock.Any()).
@@ -157,6 +158,7 @@ func TestAGroupLeftBetweenStatesSaysSoAndKeepsTrying(t *testing.T) {
 	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	commands.EXPECT().VGSetPersist(gomock.Any(), testVG, gomock.Any()).Return("vgchange --setpersist require", nil)
 	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, gomock.Any()).
 		Return("vgchange --persist start", assert.AnError)
@@ -233,6 +235,7 @@ func TestTheSwitchCarriesThisNodesHostID(t *testing.T) {
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("", nil).AnyTimes()
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	commands.EXPECT().VGSetPersist(gomock.Any(), testVG, 7).Return("", nil)
 	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, 7).Return("", nil)
 	commands.EXPECT().VGSetLockArgsPersist(gomock.Any(), testVG, 7).Return("", nil)
@@ -299,4 +302,32 @@ func TestAMemberThatStepsAsideStopsSayingItsLockspaceIsRunning(t *testing.T) {
 	entry := entryOf(t, published)
 	assert.Equal(t, PRStateStopped, entry.PersistentReservations.State)
 	assert.False(t, entry.LockspaceStarted, "it has just left the lockspace")
+}
+
+func TestASwitchInterruptedBehindTheDoorIsResumedRatherThanRestarted(t *testing.T) {
+	// Once `--setpersist require` has succeeded the group answers "Cannot access
+	// VG due to failed lock" to everything that takes a lock — `--setpersist`
+	// among them. A procedure that always started at the beginning could never
+	// finish what it had started, and the pool would stay unusable for as long
+	// as it kept trying. Found on the stand, from inside that state.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := poolAskingForReservations(func(g *v1alpha1.LVMSharedVolumeGroup) {
+		g.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+			Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{
+				nodeSaid(testNode, true, PRStateOff),
+				nodeSaid("second-node", true, PRStateStopped),
+			},
+		}
+	})
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return(PersistRequired, nil)
+	// No VGSetPersist: repeating it is what fails, and there is nothing to set.
+	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, 7).Return("", nil)
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("", nil).AnyTimes()
+	commands.EXPECT().VGSetLockArgsPersist(gomock.Any(), testVG, 7).Return("", nil)
+
+	reconcile(t, r, group)
 }

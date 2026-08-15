@@ -33,6 +33,11 @@ const (
 	PRStateOff     = "Off"
 	PRStateStopped = "Stopped"
 	PRStateEnabled = "Enabled"
+
+	// PersistRequired is what lvm2 reports for a group whose door is already
+	// open: `vgs -o vg_persist` says "require" once `--setpersist require` has
+	// succeeded, and it says it without taking a lock.
+	PersistRequired = "require"
 )
 
 // prSwitchRetryInterval is the pace of the switch. It is slow on purpose: two of
@@ -121,7 +126,7 @@ func (r *Reconciler) standAsideForTheSwitch(
 	if active := r.activeLVs(lsvg.Spec.ActualVGNameOnTheNode); len(active) > 0 {
 		r.log.Warning(fmt.Sprintf("[%s] not stepping aside for the reservation switch of %s: %d volume(s) still active here",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, len(active)))
-		r.publishNodeState(ctx, lsvg, true, ReasonPRWaitingForVolumes, fmt.Sprintf(
+		r.publishNodeState(ctx, lsvg, r.lockspaceReallyRunning(ctx, lsvg), ReasonPRWaitingForVolumes, fmt.Sprintf(
 			"the switch to persistent reservations is waiting for %d volume(s) of %s to be released on this node: "+
 				"the members have to leave the lockspace for it, and a node cannot leave while it serves a volume. "+
 				"Evacuate the workload from this node to continue", len(active), lsvg.Spec.ActualVGNameOnTheNode))
@@ -158,7 +163,7 @@ func (r *Reconciler) runTheSwitch(
 	// one-way: a member that cannot register would be left outside a pool the
 	// others are holding, and the way back is another maintenance window.
 	if blocked := r.membersWithoutReservations(lsvg); len(blocked) > 0 {
-		r.publishNodeState(ctx, lsvg, true, ReasonPRNotReady, fmt.Sprintf(
+		r.publishNodeState(ctx, lsvg, r.lockspaceReallyRunning(ctx, lsvg), ReasonPRNotReady, fmt.Sprintf(
 			"the pool is not switched to persistent reservations because %d member(s) cannot take part: %v. "+
 				"Their reasons are in status.nodes of this resource; nothing is changed until every member can",
 			len(blocked), blocked))
@@ -170,7 +175,7 @@ func (r *Reconciler) runTheSwitch(
 		// without one every reservation command stops before it starts. The id
 		// is allocated by the pool controller and lands on the node as an
 		// annotation; a node without it is not one to take through the door.
-		r.publishNodeState(ctx, lsvg, true, ReasonPRNotReady,
+		r.publishNodeState(ctx, lsvg, r.lockspaceReallyRunning(ctx, lsvg), ReasonPRNotReady,
 			"the pool is not switched to persistent reservations because this node has no sanlock host id yet, "+
 				"and lvm2 derives the key a node registers with from it")
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}
@@ -182,19 +187,36 @@ func (r *Reconciler) runTheSwitch(
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}
 	}
 
-	// And this node's own lockspace has to be running, which is the opposite of
-	// what "stop the lockspace everywhere" sounds like: --setpersist require
-	// fails without one.
-	r.ensureLockspaceRunning(ctx, lsvg)
-
-	r.log.Info(fmt.Sprintf("[%s] switching %s to persistent reservations", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
-	if cmd, err := r.commands.VGSetPersist(ctx, lsvg.Spec.ActualVGNameOnTheNode, r.hostIDFor(ctx)); err != nil {
-		// Refused before the door opened, which is the good case: the group is
-		// still usable and nothing has to be undone.
-		r.log.Error(err, fmt.Sprintf("[%s] %s was not switched (cmd: %s)", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd))
-		r.publishNodeState(ctx, lsvg, true, ReasonPRSwitchFailed,
-			"the group was not switched to persistent reservations and is unchanged: "+err.Error())
+	// Where this is picking up from. Once `--setpersist require` has succeeded
+	// the group answers "Cannot access VG due to failed lock" to everything that
+	// takes a lock — `--setpersist` included — so a procedure that always began
+	// at the beginning could never finish what it had started. Found on the
+	// stand, from inside exactly that state.
+	setting, err := r.commands.VGPersistSetting(ctx, lsvg.Spec.ActualVGNameOnTheNode)
+	if err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] cannot read whether %s already requires reservations: %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}
+	}
+
+	if setting != PersistRequired {
+		// And this node's own lockspace has to be running, which is the opposite
+		// of what "stop the lockspace everywhere" sounds like: --setpersist
+		// require fails without one.
+		r.ensureLockspaceRunning(ctx, lsvg)
+
+		r.log.Info(fmt.Sprintf("[%s] switching %s to persistent reservations", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+		if cmd, err := r.commands.VGSetPersist(ctx, lsvg.Spec.ActualVGNameOnTheNode, r.hostIDFor(ctx)); err != nil {
+			// Refused before the door opened, which is the good case: the group
+			// is still usable and nothing has to be undone.
+			r.log.Error(err, fmt.Sprintf("[%s] %s was not switched (cmd: %s)", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd))
+			r.publishNodeState(ctx, lsvg, r.lockspaceReallyRunning(ctx, lsvg), ReasonPRSwitchFailed,
+				"the group was not switched to persistent reservations and is unchanged: "+err.Error())
+			return controller.Result{RequeueAfter: prSwitchRetryInterval}
+		}
+	} else {
+		r.log.Info(fmt.Sprintf("[%s] %s already requires reservations; continuing the switch from --persist start",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
 	}
 
 	// Past this line the group answers "Persistent reservation is not started"

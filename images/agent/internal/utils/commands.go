@@ -75,6 +75,7 @@ type Commands interface {
 	VGSetPersist(ctx context.Context, vgName string, hostID int) (string, error)
 	VGPersistStart(ctx context.Context, vgName string, hostID int) (string, error)
 	VGPersistStop(ctx context.Context, vgName string, hostID int) (string, error)
+	VGPersistSetting(ctx context.Context, vgName string) (string, error)
 	VGSetLockArgsPersist(ctx context.Context, vgName string, hostID int) (string, error)
 	MultipathConfiguration(ctx context.Context) (string, error)
 	ReadRegistrationKeys(ctx context.Context, path string) ([]string, string, error)
@@ -1305,6 +1306,31 @@ func (commands) VGPersistStop(ctx context.Context, vgName string, hostID int) (s
 // sanlock not yet convinced the neighbours have gone. Both pass with time.
 func (commands) VGSetLockArgsPersist(ctx context.Context, vgName string, hostID int) (string, error) {
 	return runSharedLockdLVM(ctx, hostID, "vgchange", "--setlockargs", "persist", vgName)
+}
+
+// VGPersistSetting reads whether the group already requires persistent
+// reservations, and it is readable when nothing else about the group is.
+//
+// This is what makes the switch resumable. Once `--setpersist require` has
+// succeeded the group answers "Cannot access VG due to failed lock" to every
+// command that takes a lock — including `--setpersist` itself — so a procedure
+// that always starts from the beginning can never finish what it started. The
+// setting lives in the metadata and `vgs` reads it without a lock, saying so.
+func (commands) VGPersistSetting(ctx context.Context, vgName string) (string, error) {
+	argv, err := sharedLVMArgs("vgs", "--noheadings", "-o", "vg_persist", vgName)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return strings.TrimSpace(out.String()), nil
 }
 
 // runSharedLockdLVM runs an lvm command that speaks to lvmlockd, with this

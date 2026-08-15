@@ -1011,6 +1011,21 @@ func (mr *MockCommandsMockRecorder) VGLockStop(ctx, vgName any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGLockStop", reflect.TypeOf((*MockCommands)(nil).VGLockStop), ctx, vgName)
 }
 
+// VGPersistSetting mocks base method.
+func (m *MockCommands) VGPersistSetting(ctx context.Context, vgName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VGPersistSetting", ctx, vgName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// VGPersistSetting indicates an expected call of VGPersistSetting.
+func (mr *MockCommandsMockRecorder) VGPersistSetting(ctx, vgName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGPersistSetting", reflect.TypeOf((*MockCommands)(nil).VGPersistSetting), ctx, vgName)
+}
+
 // VGPersistStart mocks base method.
 func (m *MockCommands) VGPersistStart(ctx context.Context, vgName string, hostID int) (string, error) {
 	m.ctrl.T.Helper()
