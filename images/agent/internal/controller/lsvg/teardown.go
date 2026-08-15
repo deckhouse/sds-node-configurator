@@ -41,17 +41,21 @@ const teardownRetryInterval = 20 * time.Second
 // it lives here rather than in the metadata owner alone is that no node can stop
 // another node's lockspace. The order is the protocol:
 //
-//  1. Every member stops its own lockspace and says so in status.nodes. A member
-//     holding an active volume of the group does not stop — the attachment side
-//     is still unwinding, and stopping under a live volume would leave it
-//     writable with no lock behind it.
-//  2. The metadata owner waits until nobody else reports a running lockspace.
+//  1. Nothing happens while the group still holds volumes. Removing a volume
+//     takes the group's lock and the lock comes from a running lockspace, so a
+//     teardown that stopped it first would leave the pool unable to delete the
+//     volumes its own message asks for.
+//  2. Then every member stops its own lockspace and says so in status.nodes. A
+//     member holding an active volume does not stop — the attachment side is
+//     still unwinding, and stopping under a live volume would leave it writable
+//     with no lock behind it.
+//  3. The metadata owner waits until nobody else reports a running lockspace.
 //     It keeps its own: vgremove is run from a node that holds one.
-//  3. The owner removes the group. lvm answers "not stopped on other hosts" or
+//  4. The owner removes the group. lvm answers "not stopped on other hosts" or
 //     "unknown host state" while sanlock is still waiting out its interval; both
 //     are the protocol asking for time, so the pass retries and says what it is
 //     waiting for rather than reporting a failure.
-//  4. Only then does the finalizer go, which is what lets the resource
+//  5. Only then does the finalizer go, which is what lets the resource
 //     disappear.
 //
 // Volumes are the one thing that stops all of this. A group with volumes in it
@@ -68,7 +72,33 @@ func (r *Reconciler) teardown(
 		return controller.Result{}, nil
 	}
 
-	// Every member stops its own lockspace first, owner included at the end.
+	// The volumes come first, and the order is not a preference.
+	//
+	// Removing a volume takes the group's lock, and the lock comes from a
+	// running lockspace. A teardown that stopped the lockspace before checking
+	// would leave the pool unable to delete the very volumes its own message
+	// asks an operator to delete — measured on the stand: the owner stopped its
+	// lockspace, and lvchange for the volume's cleanup then failed for as long
+	// as the pool existed. So nothing stops while the group still holds
+	// anything.
+	remaining, err := r.volumesOfGroup(ctx, lsvg.Name)
+	if err != nil {
+		return controller.Result{}, err
+	}
+	if remaining > 0 {
+		if lsvg.Spec.MetadataOwner == r.cfg.NodeName {
+			// Said plainly and repeatedly rather than forced: the group is not
+			// empty, and what is in it is data somebody put there.
+			r.publishNodeState(ctx, lsvg, r.lockspaceStartedInStatus(lsvg), ReasonVolumesRemain, fmt.Sprintf(
+				"the volume group %s still holds %d volume(s) and will not be removed: delete their "+
+					"LVMSharedLogicalVolume resources first, which is how the volumes themselves go. "+
+					"This resource stays until then.", lsvg.Spec.ActualVGNameOnTheNode, remaining))
+		}
+		return controller.Result{RequeueAfter: teardownRetryInterval}, nil
+	}
+
+	// Empty now, so the lockspaces can go: every member stops its own, and the
+	// owner keeps its own until the removal is done.
 	if res, done, err := r.stopForTeardown(ctx, lsvg); err != nil || !done {
 		return res, err
 	}
@@ -77,18 +107,6 @@ func (r *Reconciler) teardown(
 		// A member that is not the owner has done its part: it has left the
 		// lockspace, and it says so where the owner reads it.
 		return controller.Result{}, nil
-	}
-
-	if remaining, err := r.volumesOfGroup(ctx, lsvg.Name); err != nil {
-		return controller.Result{}, err
-	} else if remaining > 0 {
-		// Said plainly and repeatedly rather than forced: the group is not empty,
-		// and what is in it is data somebody put there.
-		r.publishNodeState(ctx, lsvg, false, ReasonVolumesRemain, fmt.Sprintf(
-			"the volume group %s still holds %d volume(s) and will not be removed: delete their "+
-				"LVMSharedLogicalVolume resources first, which is how the volumes themselves go. "+
-				"This resource stays until then.", lsvg.Spec.ActualVGNameOnTheNode, remaining))
-		return controller.Result{RequeueAfter: teardownRetryInterval}, nil
 	}
 
 	if waiting := r.membersStillInLockspace(lsvg); len(waiting) > 0 {

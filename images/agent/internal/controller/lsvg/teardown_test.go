@@ -61,6 +61,11 @@ func TestAPoolWithVolumesInItIsNotRemoved(t *testing.T) {
 	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group, volume)
 
 	// No RemoveVGShared expectation: attempting it is the failure this guards.
+	// No VGLockStop either, and that is the second half of it: removing a volume
+	// takes the group's lock, so a teardown that stopped the lockspace before
+	// the group was empty would leave the pool unable to delete the volumes its
+	// own message asks an operator to delete. Measured on the stand exactly that
+	// way — the owner stopped, and the volume's cleanup failed from then on.
 	res := reconcile(t, r, group)
 
 	assert.NotZero(t, res.RequeueAfter, "the volumes may still be deleted, and then the group goes")
