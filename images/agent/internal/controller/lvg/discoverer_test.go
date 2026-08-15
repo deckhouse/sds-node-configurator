@@ -1156,14 +1156,20 @@ func TestAnLVMVolumeGroupOverASharedGroupIsNotToldItsGroupIsMissing(t *testing.T
 	// missing and should be tagged sends them to re-create it — over a pool.
 	shared := &internal.VGData{VGName: "vghw", VGLockType: "sanlock"}
 
-	message := missingCandidateMessage("vghw", shared)
+	reason, message := missingCandidateMessage("vghw", shared)
 
+	assert.Equal(t, "SharedVolumeGroup", reason,
+		`the reason is the half a machine reads, and "a scan failed" is not what happened`)
 	assert.NotContains(t, message, "Unable to find VG")
 	assert.Contains(t, message, "is shared")
 	assert.Contains(t, message, "delete this resource by hand",
 		"removing an LVMVolumeGroup removes the Volume Group with it, so this is not the module's call")
 
 	// And the ordinary case is untouched: a group that really is gone still says so.
-	assert.Contains(t, missingCandidateMessage("vglocal", nil), "Unable to find VG vglocal")
-	assert.Contains(t, missingCandidateMessage("vglocal", &internal.VGData{VGName: "vglocal"}), "Unable to find VG vglocal")
+	goneReason, goneMessage := missingCandidateMessage("vglocal", nil)
+	assert.Equal(t, internal.ReasonScanFailed, goneReason)
+	assert.Contains(t, goneMessage, "Unable to find VG vglocal")
+
+	_, localMessage := missingCandidateMessage("vglocal", &internal.VGData{VGName: "vglocal"})
+	assert.Contains(t, localMessage, "Unable to find VG vglocal")
 }
