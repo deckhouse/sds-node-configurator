@@ -15,6 +15,13 @@ The controller works with two types of resources:
 - [BlockDevice](./cr.html#blockdevice)
 - [LVMVolumeGroup](./cr.html#lvmvolumegroup)
 
+On the nodes of a shared SCSI pool it also serves three resources of its own —
+[LVMSharedVolumeGroup](./cr.html#lvmsharedvolumegroup),
+[LVMSharedLogicalVolume](./cr.html#lvmsharedlogicalvolume) and
+[LVMSharedLogicalVolumeAttachment](./cr.html#lvmsharedlogicalvolumeattachment).
+They are created by the `csi-scsi-generic` module rather than by an
+administrator; see [Shared volume groups](#shared-volume-groups) below.
+
 ## Working with BlockDevice resources
 
 ### Creating a BlockDevice resource
@@ -326,6 +333,43 @@ To extract a [BlockDevice](./cr.html#blockdevice) resource from an [LVMVolumeGro
 
 1. Modify the `spec.blockDeviceSelector` field of the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource (add other selectors) or modify the corresponding labels on the [BlockDevice](./cr.html#blockdevice) resource so they no longer match the [LVMVolumeGroup](./cr.html#lvmvolumegroup) selectors.
 1. Manually execute the `pvmove`, `vgreduce`, and `pvremove` commands on the node.
+
+## Shared volume groups
+
+A shared volume group lives on a LUN that several nodes see at once, and its
+volumes are handed out one node at a time. It is created by the `csi-scsi-generic`
+module when an administrator declares an `SCSISharedPool`; nothing here is
+written by hand, and the three resources below exist so that each fact has one
+writer.
+
+- [LVMSharedVolumeGroup](./cr.html#lvmsharedvolumegroup) is the group itself.
+  The node named in `spec.metadataOwner` creates it with `vgcreate --shared`;
+  every node in `spec.nodes` joins its sanlock lockspace with the host id the
+  pool's controller allocated. In `status.nodes` each member writes its own
+  entry — whether its lockspace is running and, when it is not, why.
+- [LVMSharedLogicalVolume](./cr.html#lvmsharedlogicalvolume) is one volume in
+  the group. Created and removed by the metadata owner.
+- [LVMSharedLogicalVolumeAttachment](./cr.html#lvmsharedlogicalvolumeattachment)
+  is one volume on one node. This is what activates it there — exclusively, or
+  shared for a `ReadWriteMany` block volume — and what grows it: under lvmlockd
+  `lvextend` needs the lock, so only the activating node can do it.
+
+What the agent guarantees on such a group, and what it deliberately does not:
+
+- a volume is mapped on the node that holds its lock, and nowhere else. A
+  mapping left over from a lock-daemon restart is removed by the node itself,
+  and while one exists the metric
+  `sds_node_configurator_shared_pool_unlocked_mappings` is above zero;
+- a node whose lease is lost is fenced by the killpath handler, and it returns
+  to the pool on its own once its LUNs are back — no operator step;
+- the agent never activates a shared group as a whole. A group whose lock type
+  is `sanlock` is skipped by every path that activates volume groups on the
+  node, and it is not imported as an [LVMVolumeGroup](./cr.html#lvmvolumegroup)
+  either: the controllers behind that resource work on one node without taking
+  the pool's locks. An `LVMVolumeGroup` that still points at a shared group is
+  reported as `VGReady=False` with the reason `SharedVolumeGroup` and is not
+  touched — deleting it is how a volume group gets destroyed, so that stays a
+  person's decision.
 
 ## Protection against data leakage between volumes
 
