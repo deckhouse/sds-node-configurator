@@ -123,8 +123,15 @@ func TestEverySharedCommandCarriesTheHostID(t *testing.T) {
 	// where every lvcreate failed on a pool that was otherwise healthy.
 	dir := t.TempDir()
 
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "host-id"), []byte("7\n"), 0o644))
+	// The file is written for lvmlockd's --host-id-file, in lvm's own syntax
+	// rather than as a number — reading it as a number gets zero, and zero
+	// leaves the option off every command.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "host-id"), []byte("host_id = 7\n"), 0o644))
 	assert.Equal(t, 7, utils.HostIDFromStateDir(dir))
+	assert.Equal(t, 7, utils.ParseHostIDFile("7\n"))
+	assert.Equal(t, 7, utils.ParseHostIDFile("# written by the agent\nhost_id = 7\n"))
+	assert.Zero(t, utils.ParseHostIDFile("host_id = 0\n"))
+	assert.Zero(t, utils.ParseHostIDFile("nothing here\n"))
 
 	// A node that has none answers zero, which leaves the option off the
 	// command rather than putting a wrong id on it.

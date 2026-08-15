@@ -2733,11 +2733,7 @@ func HostIDFromStateDir(dir string) int {
 	if err != nil {
 		return 0
 	}
-	id, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil || id <= 0 {
-		return 0
-	}
-	return id
+	return ParseHostIDFile(string(raw))
 }
 
 // sharedLVMArgs builds the argv for a command against a shared Volume Group.

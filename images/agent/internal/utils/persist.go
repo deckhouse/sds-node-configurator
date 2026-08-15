@@ -226,3 +226,26 @@ func SanlockHoldsLockspace(status, vgName string) bool {
 	}
 	return false
 }
+
+// ParseHostIDFile reads the id out of the file the lock daemons are given.
+//
+// The file is written for lvmlockd's --host-id-file, which expects lvm's own
+// syntax — "host_id = 1" — and not a bare number. Reading it as a number gets
+// zero, and zero means the option is left off every command, which under
+// persistent reservations is the difference between a working pool and one that
+// answers "Cannot access VG" to everything.
+func ParseHostIDFile(content string) int {
+	for _, line := range strings.Split(content, "\n") {
+		field := strings.TrimSpace(line)
+		if field == "" || strings.HasPrefix(field, "#") {
+			continue
+		}
+		if _, value, found := strings.Cut(field, "="); found {
+			field = value
+		}
+		if id, err := strconv.Atoi(strings.TrimSpace(field)); err == nil && id > 0 {
+			return id
+		}
+	}
+	return 0
+}
