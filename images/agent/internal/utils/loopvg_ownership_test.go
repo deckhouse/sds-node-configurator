@@ -181,3 +181,28 @@ func TestReTag_RefusesWhenPVsCannotBeListed(t *testing.T) {
 	err := utils.ReTagForTest(context.Background(), mc, testLogger(t), monitoring.GetMetrics("test_node"), "test", 30*time.Second)
 	assert.Error(t, err)
 }
+
+func TestASharedGroupIsRecognisedByItsLockTypeWhenSharedIsEmpty(t *testing.T) {
+	// The field that names a shared group, vg_shared, is computed by lvm at run
+	// time from lockd support — and the static lvm this agent carries is built
+	// without it. Measured on a live pool: vg_shared="" and vg_attr="wz--n--"
+	// for a group whose lock type was sanlock, which left every guard written
+	// against vg_shared switched off. The scanner then activated the pool's
+	// volume on a node holding no lock for it, one second after the cleanup had
+	// unmapped it, once a minute.
+	log := testLogger(t)
+	vgs := []internal.VGData{
+		{VGName: "vghw", VGUUID: "u1", VGShared: "", VGLockType: "sanlock"},
+		{VGName: "vglocal", VGUUID: "u2"},
+		{VGName: "vgnone", VGUUID: "u3", VGLockType: "none"},
+	}
+
+	kept := utils.SkipSharedVGs(log, "activate", vgs)
+
+	names := make([]string, 0, len(kept))
+	for _, vg := range kept {
+		names = append(names, vg.VGName)
+	}
+	assert.Equal(t, []string{"vglocal", "vgnone"}, names,
+		`a group whose lock type is sanlock is not this node's to activate; "none" is lvm's word for a local one`)
+}

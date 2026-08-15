@@ -219,12 +219,20 @@ func classifyManagedTaggedLoopVG(
 // The tag filter does not cover this: a shared Volume Group can carry the
 // module's tag — an earlier version of the agent created shared Volume Groups
 // itself, and a pool may be tagged by whoever manages it.
+//
+// It asks VGData.IsShared rather than vg_shared directly, and that is not a
+// detail. vg_shared was empty for every shared group this module has ever
+// looked at, because the static lvm the agent carries is built without lockd
+// support and computes the field as "no" — so this guard was switched off from
+// the day it was written. Measured on a live pool: the scanner activated a
+// pool's volume on a node holding no lock for it, one second after the cleanup
+// had unmapped it, once a minute, forever.
 func SkipSharedVGs(log logger.Logger, action string, vgs []internal.VGData) []internal.VGData {
 	out := make([]internal.VGData, 0, len(vgs))
 	for _, vg := range vgs {
-		if vg.VGShared != "" {
+		if vg.IsShared() {
 			log.Warning(fmt.Sprintf("[SkipSharedVGs] refusing to %s VG %s (VG_UUID=%s): it is a shared VG (lock type %q), activation of it belongs to its lock manager",
-				action, vg.VGName, vg.VGUUID, vg.VGShared))
+				action, vg.VGName, vg.VGUUID, vg.SharedDescription()))
 			continue
 		}
 		out = append(out, vg)

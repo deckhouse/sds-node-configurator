@@ -1967,7 +1967,7 @@ func sortBlockDevicesByVG(bds map[string]v1alpha1.BlockDevice, vgs []internal.VG
 }
 
 func getVgType(vg internal.VGData) string {
-	if vg.VGShared == "" {
+	if !vg.IsShared() {
 		return internal.Local
 	}
 

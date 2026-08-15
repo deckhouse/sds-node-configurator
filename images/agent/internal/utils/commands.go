@@ -142,7 +142,7 @@ func (c *commands) GetBlockDevices(ctx context.Context) ([]internal.Device, stri
 // truncated report is caught a line later by unmarshalVGs either way.
 func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	args := []string{"vgs", "-o", "+uuid,tags,shared,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json"}
+	args := []string{"vgs", "-o", "+uuid,tags,shared,vg_lock_type,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
@@ -167,7 +167,7 @@ func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command 
 func (commands) GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	vgData = internal.VGData{}
-	args := []string{"vgs", "-o", "+uuid,tags,shared,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json", vgName}
+	args := []string{"vgs", "-o", "+uuid,tags,shared,vg_lock_type,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json", vgName}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
