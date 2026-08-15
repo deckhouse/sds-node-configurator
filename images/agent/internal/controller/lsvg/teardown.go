@@ -151,6 +151,12 @@ func (r *Reconciler) teardown(
 
 	r.log.Info(fmt.Sprintf("[%s] the volume group %s is removed", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
 
+	// The pool's gauge goes with the pool. Left behind it would keep reporting
+	// its last value about something that no longer exists.
+	if r.metrics != nil {
+		r.metrics.ForgetSharedPool(lsvg.Spec.ActualVGNameOnTheNode)
+	}
+
 	// The lockspace went with the group — vgremove takes it down — so the fact
 	// this node published about itself stops being true here.
 	if err := r.setLockspaceStarted(ctx, lsvg.Name, "", false); err != nil {

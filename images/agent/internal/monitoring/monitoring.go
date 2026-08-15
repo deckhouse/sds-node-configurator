@@ -494,6 +494,16 @@ func (m *Metrics) SharedPoolUnlockedMappings(volumeGroup string) prometheus.Gaug
 	return sharedPoolUnlockedMappings.WithLabelValues(m.node, volumeGroup)
 }
 
+// ForgetSharedPool drops this node's gauge for a pool that no longer exists.
+//
+// A gauge vec keeps a series until somebody deletes it, so a removed pool would
+// go on reporting its last value — zero, most likely, which reads as "this pool
+// is fine" about a pool that is gone. Same reasoning as setting it on every
+// pass: a number nobody maintains is a number nobody should believe.
+func (m *Metrics) ForgetSharedPool(volumeGroup string) {
+	sharedPoolUnlockedMappings.DeleteLabelValues(m.node, volumeGroup)
+}
+
 // isThinPool determines if an LVM logical volume is a thin pool
 func isThinPool(lv internal.LVData) bool {
 	return len(lv.LVAttr) > 0 && lv.LVAttr[0] == 't'

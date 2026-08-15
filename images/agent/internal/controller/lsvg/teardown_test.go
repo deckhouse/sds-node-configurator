@@ -22,6 +22,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -246,4 +247,26 @@ func TestADeletedPoolWhoseLockspaceIsDownGetsItBack(t *testing.T) {
 	res := reconcile(t, r, group)
 
 	assert.NotZero(t, res.RequeueAfter, "and it keeps waiting for the volume to be deleted")
+}
+
+func TestAGaugeDoesNotOutliveThePoolItDescribes(t *testing.T) {
+	// A gauge vec keeps a series until somebody deletes it, so a removed pool
+	// would go on reporting its last value — zero, most likely, which reads as
+	// "this pool is fine" about a pool that is gone.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := deletedGroup()
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+	commands.EXPECT().RemoveVGShared(gomock.Any(), testVG).Return("vgremove", nil)
+
+	r.metrics.SharedPoolUnlockedMappings(testVG).Set(3)
+	require.Equal(t, 3.0, testutil.ToFloat64(r.metrics.SharedPoolUnlockedMappings(testVG)))
+
+	reconcile(t, r, group)
+
+	assert.Equal(t, 0.0, testutil.ToFloat64(r.metrics.SharedPoolUnlockedMappings(testVG)),
+		"the series is gone, so asking for it again yields a fresh zero rather than the old three")
 }
