@@ -17,9 +17,12 @@ limitations under the License.
 package utils_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
@@ -110,4 +113,23 @@ func TestOnlySanlockKnowsWhetherTheLeaseIsAlive(t *testing.T) {
 	assert.False(t, utils.SanlockHoldsLockspace("s lvm_vgother:3:/dev/x:0\n", "vghw"))
 	// And a prefix is not a name: "vghw" must not match "vghw2".
 	assert.False(t, utils.SanlockHoldsLockspace("s lvm_vghw2:3:/dev/x:0\n", "vghw"))
+}
+
+func TestEverySharedCommandCarriesTheHostID(t *testing.T) {
+	// For a sanlock group the lvm client resolves "our key" from local/host_id
+	// and ignores local/pr_key entirely, so a command without it is answered
+	// "Persistent reservation is not started. Cannot access VG" — with the node
+	// registered on the array and its lockspace running. Found on the stand,
+	// where every lvcreate failed on a pool that was otherwise healthy.
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "host-id"), []byte("7\n"), 0o644))
+	assert.Equal(t, 7, utils.HostIDFromStateDir(dir))
+
+	// A node that has none answers zero, which leaves the option off the
+	// command rather than putting a wrong id on it.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "host-id"), []byte("\n"), 0o644))
+	assert.Zero(t, utils.HostIDFromStateDir(dir))
+	require.NoError(t, os.Remove(filepath.Join(dir, "host-id")))
+	assert.Zero(t, utils.HostIDFromStateDir(dir))
 }

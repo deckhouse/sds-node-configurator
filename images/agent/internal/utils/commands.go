@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	golog "log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -2688,6 +2689,20 @@ func lvmStaticLockdArgs(args []string, hostID int) ([]string, error) {
 		return nil, fmt.Errorf("no command given")
 	}
 
+	if hostID <= 0 {
+		// Every command against a shared group carries the host id, not only the
+		// ones that start locks.
+		//
+		// For a sanlock group the lvm client resolves "our key" from
+		// local/host_id and nothing else — it ignores local/pr_key there — and a
+		// command that arrives without one is answered "Persistent reservation
+		// is not started. Cannot access VG." even though the node is registered
+		// with the array and holds a running lockspace. Found on the stand: the
+		// pool was switched, all three nodes held keys, and every lvcreate
+		// failed.
+		hostID = HostIDFromDaemonsState()
+	}
+
 	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.SharedLVMNoArchive + " global/use_lvmlockd=1"
 	if hostID > 0 {
 		configValue += " local/host_id=" + strconv.Itoa(hostID)
@@ -2698,6 +2713,31 @@ func lvmStaticLockdArgs(args []string, hostID int) ([]string, error) {
 	withConfig = append(withConfig, args[1:]...)
 
 	return sharedLVMArgs(withConfig...)
+}
+
+// HostIDFromDaemonsState reads the sanlock host id of this node from the file
+// the lock daemons themselves read it from.
+//
+// It is the same fact by the same path: the agent writes it there for lvmlockd,
+// which is given it as --host-id-file. Reading it back keeps one source rather
+// than threading the id through every command signature, and a node that has no
+// id yet answers zero — which leaves the command without the option, exactly as
+// before.
+func HostIDFromDaemonsState() int {
+	return HostIDFromStateDir(internal.SharedLockDaemonsStateDir)
+}
+
+// HostIDFromStateDir reads the id out of a given state directory.
+func HostIDFromStateDir(dir string) int {
+	raw, err := os.ReadFile(filepath.Join(dir, "host-id"))
+	if err != nil {
+		return 0
+	}
+	id, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || id <= 0 {
+		return 0
+	}
+	return id
 }
 
 // sharedLVMArgs builds the argv for a command against a shared Volume Group.
