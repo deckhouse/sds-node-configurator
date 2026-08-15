@@ -82,3 +82,14 @@ func TestTheVerdictNamesTheCheapestFixFirst(t *testing.T) {
 	assert.True(t, v.Ready)
 	assert.Empty(t, v.Reason)
 }
+
+func TestMultipathdAcceptanceIsTheWordOKAndNothingElse(t *testing.T) {
+	// multipathd prints its refusal on stdout and exits zero, so the exit status
+	// proves nothing. It answered a wrongly-spelled command with "not found"
+	// followed by its whole CLI reference — which reads like a version
+	// difference and is a missing word in the command.
+	assert.True(t, utils.MultipathdAccepted("ok\n"))
+	assert.True(t, utils.MultipathdAccepted("OK"))
+	assert.False(t, utils.MultipathdAccepted(""))
+	assert.False(t, utils.MultipathdAccepted("setprkey map mpathi 0x1 \n: not found\nmultipath-tools v0.9.4"))
+}

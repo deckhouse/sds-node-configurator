@@ -1439,7 +1439,11 @@ func (commands) RecordedReservationKey(ctx context.Context) (string, error) {
 // writes, which looks like a flapping path healing and quietly not working.
 func (commands) SetReservationKey(ctx context.Context, mapName, key string) (string, error) {
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd,
-		hostNamespaceArgs(internal.SharedMultipathdCmd, "setprkey", "map", mapName, key)...)
+		// "setprkey map $map key $key" — the word "key" is part of the command,
+		// and without it multipathd answers "not found" followed by its entire
+		// CLI reference, which is easy to read as a version difference rather
+		// than a typo.
+		hostNamespaceArgs(internal.SharedMultipathdCmd, "setprkey", "map", mapName, "key", key)...)
 
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
@@ -1448,8 +1452,10 @@ func (commands) SetReservationKey(ctx context.Context, mapName, key string) (str
 	if err := cmd.Run(); err != nil {
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
-	if answer := strings.TrimSpace(out.String()); answer != "" && !strings.EqualFold(answer, "ok") {
-		return cmd.String(), fmt.Errorf("multipathd refused the key of %s: %s", mapName, answer)
+	// multipathd answers "ok" on success and prints its refusal on the same
+	// channel with exit status 0, so the exit status alone proves nothing.
+	if answer := out.String(); !MultipathdAccepted(answer) {
+		return cmd.String(), fmt.Errorf("multipathd refused the key of %s: %s", mapName, strings.TrimSpace(answer))
 	}
 	return cmd.String(), nil
 }

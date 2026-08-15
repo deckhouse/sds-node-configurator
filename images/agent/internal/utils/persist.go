@@ -199,3 +199,12 @@ func SameRegistrationKey(a, b string) bool {
 	}
 	return na == nb
 }
+
+// MultipathdAccepted reports whether multipathd took a command.
+//
+// It answers "ok" and nothing else on success, and prints its refusal — up to
+// and including its entire CLI reference — with exit status 0. The exit status
+// is not an answer.
+func MultipathdAccepted(answer string) bool {
+	return strings.EqualFold(strings.TrimSpace(answer), "ok")
+}
