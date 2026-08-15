@@ -180,6 +180,13 @@ func (r *Reconciler) join(
 		return controller.Result{}, err
 	}
 
+	// A node that was fenced comes back on its own. Until the error targets the
+	// barrier left are gone, there is nothing to start a lockspace over — and
+	// starting one while the paths are still broken only earns another barrier.
+	if waiting := r.recoverFromBarrier(ctx, lsvg); waiting {
+		return controller.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
 	// The identity of the group this node is about to hold a lockspace of. Read
 	// before anything is decided, because both the check below and the fact
 	// published afterwards are about THIS group and not about its name.
