@@ -93,3 +93,21 @@ func TestMultipathdAcceptanceIsTheWordOKAndNothingElse(t *testing.T) {
 	assert.False(t, utils.MultipathdAccepted(""))
 	assert.False(t, utils.MultipathdAccepted("setprkey map mpathi 0x1 \n: not found\nmultipath-tools v0.9.4"))
 }
+
+func TestOnlySanlockKnowsWhetherTheLeaseIsAlive(t *testing.T) {
+	// lvmlockd goes on listing a lockspace it registered long after sanlock has
+	// stopped renewing it: on the stand a node whose registration had been taken
+	// off the array still had "LS sanlock lvm_vghw" in lvmlockctl --info, while
+	// lvm answered "lock skipped: storage errors for sanlock leases" and sanlock
+	// listed no lockspace at all.
+	held := "daemon abc.node\np -1 helper\np 1471677 lvmlockd\ns lvm_vghw:3:/dev/mapper/vghw-lvmlock:0\n"
+	assert.True(t, utils.SanlockHoldsLockspace(held, "vghw"))
+
+	lost := "daemon abc.node\np -1 helper\np 1060640 lvmlockd\np -1 status\n"
+	assert.False(t, utils.SanlockHoldsLockspace(lost, "vghw"))
+
+	// Another group's lockspace is not this one's.
+	assert.False(t, utils.SanlockHoldsLockspace("s lvm_vgother:3:/dev/x:0\n", "vghw"))
+	// And a prefix is not a name: "vghw" must not match "vghw2".
+	assert.False(t, utils.SanlockHoldsLockspace("s lvm_vghw2:3:/dev/x:0\n", "vghw"))
+}

@@ -248,3 +248,33 @@ func TestAKeyMultipathdAlreadyHasIsNotWrittenAgain(t *testing.T) {
 
 	assert.Equal(t, "0x1000000000040001", r.persistentReservations(context.Background(), group).Key)
 }
+
+func TestAnEvictedNodeDoesNotLetItselfBackIn(t *testing.T) {
+	// An eviction removes the node's registration, and nothing about that stops
+	// the node from making another one: it is the same command the ordinary pass
+	// runs whenever its lockspace is missing, and the lockspace goes missing
+	// precisely because the eviction worked. On the stand the key was back on
+	// the array minutes after it had been preempted.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := poolAskingForReservations()
+	group.Annotations = map[string]string{EvictNodeAnnotation: testNode}
+	group.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+		Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{nodeSaid(testNode, true, PRStateEnabled)},
+	}
+
+	// No VGPersistStart and no VGLockStart: the node stays out.
+	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	res := reconcile(t, r, group)
+
+	assert.NotZero(t, res.RequeueAfter, "it keeps looking, because the annotation may be removed")
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	entry := entryOf(t, published)
+	assert.Equal(t, ReasonEvicted, entry.Reason)
+	assert.False(t, entry.LockspaceStarted)
+	assert.Contains(t, entry.Message, EvictNodeAnnotation)
+}

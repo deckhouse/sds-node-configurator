@@ -208,3 +208,21 @@ func SameRegistrationKey(a, b string) bool {
 func MultipathdAccepted(answer string) bool {
 	return strings.EqualFold(strings.TrimSpace(answer), "ok")
 }
+
+// SanlockHoldsLockspace reports whether sanlock lists the lockspace of this
+// Volume Group as one it holds.
+//
+// Its status prints one line per lockspace, "s lvm_<vg>:<host id>:<path>:<n>",
+// and prints nothing for a lockspace whose lease it has lost. That absence is
+// the answer lvmlockd cannot give: lvmlockd goes on listing a lockspace it
+// registered long after sanlock has stopped renewing it.
+func SanlockHoldsLockspace(status, vgName string) bool {
+	want := "lvm_" + vgName + ":"
+	for _, line := range strings.Split(status, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "s" && strings.HasPrefix(fields[1], want) {
+			return true
+		}
+	}
+	return false
+}

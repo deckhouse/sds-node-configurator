@@ -1146,12 +1146,30 @@ func (commands) VGLockStart(ctx context.Context, vgName string, hostID int) (str
 // An error is not an answer: a caller that cannot ask must not conclude the
 // lockspace is down and start it again over a lockspace that is running.
 func (commands) LockspaceRunning(ctx context.Context, vgName string) (bool, error) {
-	pid, err := SharedLVMNamespacePID()
+	// Both daemons are asked, and both have to say yes.
+	//
+	// lvmlockd answers whether the lockspace is registered with it, and that
+	// survives the lease being lost: on the stand a node whose registration had
+	// been taken off the array still had "LS sanlock lvm_vghw" in lvmlockctl
+	// --info while sanlock had dropped the lockspace entirely and lvm answered
+	// "lock skipped: storage errors for sanlock leases" to everything. The node
+	// published a running lockspace it did not have.
+	//
+	// sanlock answers whether this host holds the lease, which is the fact the
+	// rest of the module means by "started": it decides whether volumes may be
+	// activated here and whether a LUN may be taken away from this node.
+	registered, err := lockspaceRegisteredWithLVMLockd(ctx, vgName)
+	if err != nil || !registered {
+		return false, err
+	}
+	return sanlockHoldsLockspace(ctx, vgName)
+}
+
+func lockspaceRegisteredWithLVMLockd(ctx context.Context, vgName string) (bool, error) {
+	argv, err := sharedNamespaceArgs(internal.SharedLockCtlCmd, "--info")
 	if err != nil {
 		return false, err
 	}
-
-	argv := []string{"-t", strconv.Itoa(pid), "-m", "--", internal.SharedLockCtlCmd, "--info"}
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
 
 	var out, stderr bytes.Buffer
@@ -1164,6 +1182,23 @@ func (commands) LockspaceRunning(ctx context.Context, vgName string) (bool, erro
 
 	// lvmlockd names a started lockspace "lvm_<vg>" on a line of its own.
 	return lockspaceListed(out.String(), vgName), nil
+}
+
+func sanlockHoldsLockspace(ctx context.Context, vgName string) (bool, error) {
+	argv, err := sharedNamespaceArgs(internal.SharedSanlockCmd, "status")
+	if err != nil {
+		return false, err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return false, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return SanlockHoldsLockspace(out.String(), vgName), nil
 }
 
 // lockspaceListed reports whether lvmlockctl's answer contains the lockspace of

@@ -86,6 +86,10 @@ const (
 	// does the same operation in a third of a second.
 	SharedSgPersistCmd = "/usr/bin/sg_persist"
 
+	// SharedSanlockCmd answers the one question lvmlockd cannot: whether this
+	// host still holds the lease of a lockspace.
+	SharedSanlockCmd = "/usr/sbin/sanlock"
+
 	// SharedReservationKeyFile is where the lock daemons' lvmpersist leaves the
 	// key this node registers with.
 	//

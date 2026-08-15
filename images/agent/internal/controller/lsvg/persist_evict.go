@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -265,4 +266,32 @@ func (r *Reconciler) unaccountedKeys(
 	}
 	sort.Strings(unknown)
 	return unknown
+}
+
+// standDownIfEvicted keeps this node out of a pool it has been evicted from.
+//
+// An eviction removes the node's registration, and nothing about that stops the
+// node from making another one: it is the same command the ordinary pass runs
+// whenever it finds its lockspace missing, and the lockspace goes missing
+// precisely because the eviction worked. The annotation is what a person set to
+// mean "this node must not be in this pool", so it is honoured here until they
+// remove it.
+//
+// It is a refusal to rejoin, not an undoing: the node's volumes were released
+// when its lease went, and the pool has moved on.
+func (r *Reconciler) standDownIfEvicted(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+) (controller.Result, bool) {
+	if strings.TrimSpace(lsvg.Annotations[EvictNodeAnnotation]) != r.cfg.NodeName {
+		return controller.Result{}, false
+	}
+
+	r.log.Warning(fmt.Sprintf("[%s] this node is evicted from %s and stays out until %s is removed",
+		ReconcilerName, lsvg.Name, EvictNodeAnnotation))
+	r.publishNodeState(ctx, lsvg, false, ReasonEvicted, fmt.Sprintf(
+		"This node has been evicted from the pool: its registration was removed from the LUNs, so the array "+
+			"refuses its writes and its lease cannot be renewed. It will not rejoin while the annotation %s "+
+			"names it. Remove the annotation once the node is fit to serve the pool again.", EvictNodeAnnotation))
+	return controller.Result{RequeueAfter: groupRecheckInterval}, true
 }

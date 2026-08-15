@@ -189,6 +189,18 @@ func (r *Reconciler) Reconcile(
 	// are the members that may write.
 	r.evictRequestedNode(ctx, lsvg)
 
+	// And the node being evicted stays out for as long as it is named.
+	//
+	// Without this the eviction is a race with this node's own recovery, and the
+	// recovery wins: the array refuses its writes, sanlock loses the lease and
+	// drops the lockspace, the agent sees a lockspace that should be running,
+	// registers again — and the node is back inside the pool it was fenced out
+	// of. Found on the stand, with the key reappearing on the array minutes
+	// after it had been preempted.
+	if res, standingDown := r.standDownIfEvicted(ctx, lsvg); standingDown {
+		return res, nil
+	}
+
 	res, err := r.join(ctx, lsvg)
 	if err != nil {
 		// Said out loud and retried on this reconciler's own cadence, rather
