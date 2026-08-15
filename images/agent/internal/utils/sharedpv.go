@@ -286,7 +286,7 @@ func SharedLVMNamespacePID() (int, error) {
 		return 0, fmt.Errorf("read %s: %w", ProcRoot, err)
 	}
 
-	best := 0
+	ours, foreign := 0, 0
 	for _, entry := range entries {
 		pid, err := strconv.Atoi(entry.Name())
 		if err != nil {
@@ -299,22 +299,44 @@ func SharedLVMNamespacePID() (int, error) {
 			continue
 		}
 
-		argv0 := string(bytes.SplitN(raw, []byte{0}, 2)[0])
-		if filepath.Base(argv0) != internal.SharedLockDaemonProcess {
+		argv := bytes.Split(raw, []byte{0})
+		if filepath.Base(string(argv[0])) != internal.SharedLockDaemonProcess {
 			continue
 		}
-		// The lowest pid of the daemon's processes, so that repeated calls build
-		// the same command and a reader comparing two log lines sees the same one.
-		if best == 0 || pid < best {
-			best = pid
+
+		// Ours or somebody's. The module's daemon is the one reading the host_id
+		// this module writes, and the difference matters more than it looks: a
+		// stray lvmlockd — started by hand, left by an experiment, shipped by the
+		// distribution — has its own mount namespace, its own lvm, and no
+		// relation to this pool. Entering it would run every shared command in
+		// the wrong world, and the commands would mostly work, which is worse
+		// than failing.
+		if bytes.Contains(raw, []byte(internal.SharedLockDaemonsStateDir)) {
+			if ours == 0 || pid < ours {
+				ours = pid
+			}
+			continue
+		}
+		if foreign == 0 || pid < foreign {
+			foreign = pid
 		}
 	}
 
-	if best == 0 {
-		return 0, fmt.Errorf("no %s process on this node: the lock daemons of the shared pool are not running here",
-			internal.SharedLockDaemonProcess)
+	if ours != 0 {
+		return ours, nil
 	}
-	return best, nil
+	if foreign != 0 {
+		// Named rather than used. Killing it is not this module's business — it
+		// is somebody's process on somebody's node — but running the pool's
+		// commands through it would be worse than not running them at all.
+		return 0, fmt.Errorf(
+			"the only %s on this node (pid %d) is not the one of this module: "+
+				"it does not read %s, so it belongs to something else and must be stopped by whoever started it",
+			internal.SharedLockDaemonProcess, foreign, internal.SharedLockDaemonsStateDir)
+	}
+
+	return 0, fmt.Errorf("no %s process on this node: the lock daemons of the shared pool are not running here",
+		internal.SharedLockDaemonProcess)
 }
 
 // ActiveLVsOfGroupHere lists the logical volumes of a group that have a

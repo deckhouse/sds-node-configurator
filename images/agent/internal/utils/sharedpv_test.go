@@ -25,6 +25,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
 type fakeDM struct {
@@ -204,8 +206,8 @@ func TestSharedLVMNamespaceIsFoundByTheDaemon(t *testing.T) {
 			[]byte(strings.ReplaceAll(cmdline, " ", "\x00")), 0o644))
 	}
 	write("1", "/sbin/init")
-	write("4242", "/usr/sbin/lvmlockd -f -g sanlock")
-	write("4243", "/usr/sbin/lvmlockd -f -g sanlock")
+	write("4242", "/usr/sbin/lvmlockd -f -g sanlock --host-id-file "+internal.SharedLockDaemonsStateDir+"/host-id")
+	write("4243", "/usr/sbin/lvmlockd -f -g sanlock --host-id-file "+internal.SharedLockDaemonsStateDir+"/host-id")
 
 	pid, err := SharedLVMNamespacePID()
 	require.NoError(t, err)
@@ -238,7 +240,7 @@ func TestSharedCommandsTurnLVMsArchiveOff(t *testing.T) {
 	t.Cleanup(func() { ProcRoot = previous })
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "77"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "77", "cmdline"),
-		[]byte("/usr/sbin/lvmlockd\x00-f\x00"), 0o644))
+		[]byte("/usr/sbin/lvmlockd\x00--host-id-file\x00"+internal.SharedLockDaemonsStateDir+"/host-id\x00"), 0o644))
 
 	argv, err := lvmStaticLockdArgs([]string{"vgs"}, 3)
 	require.NoError(t, err)
@@ -249,4 +251,28 @@ func TestSharedCommandsTurnLVMsArchiveOff(t *testing.T) {
 	assert.Contains(t, line, "local/host_id=3")
 	assert.Contains(t, line, "-t 77 -m -- /usr/sbin/lvm vgs",
 		"the daemons' namespace and the daemons' lvm, which is the only one built with lvmlockd support")
+}
+
+func TestAForeignLockDaemonIsNamedRatherThanUsed(t *testing.T) {
+	// Found on the stand: a node carried an lvmlockd left over from an
+	// experiment, and picking "any lvmlockd" would have run every shared command
+	// in its mount namespace — its own lvm, its own world, no relation to this
+	// pool. The commands would mostly work, which is worse than failing.
+	//
+	// Killing it is not this module's business: it is somebody's process on
+	// somebody's node. Naming it is.
+	root := t.TempDir()
+	previous := ProcRoot
+	ProcRoot = root
+	t.Cleanup(func() { ProcRoot = previous })
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "900"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "900", "cmdline"),
+		[]byte("lvmlockd\x00-g\x00sanlock\x00--host-id\x0045\x00"), 0o644))
+
+	_, err := SharedLVMNamespacePID()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "900")
+	assert.Contains(t, err.Error(), "not the one of this module")
 }
