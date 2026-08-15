@@ -699,7 +699,7 @@ func (commands) CreateVGShared(ctx context.Context, params SharedVGParams) (stri
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignCreateStdErr, silentExitIsFailure); err != nil {
 		return cmd.String(), err
 	}
 
@@ -2320,6 +2320,15 @@ var (
 	reRegexVersionMismatch = regexp.MustCompile(`Regex version mismatch, expected: .+ actual: .+`)
 	reLeakedFileDescriptor = regexp.MustCompile(`File descriptor .+ leaked on lvm(\.static)? invocation\. Parent PID .+: /opt/deckhouse/sds/bin/nsenter`)
 
+	// lvm says this when /dev/<vg> is already a directory — a leftover from a
+	// group of the same name that existed on this node before. It is a remark
+	// about the device node, printed after the Volume Group has been created,
+	// and reading it as a failure is expensive: the group is on the LUN, the
+	// caller believes it is not, and the pool it belongs to stays Pending while
+	// everything it needs already exists. Measured on the stand with a pool
+	// named after a group an earlier experiment had left behind.
+	reDevDirExists = regexp.MustCompile(`/dev/[^:]+: already exists in filesystem`)
+
 	// A resize that changed nothing. This is the normal state of a thin pool sized
 	// as a percentage of the VG: the pool always already fills it, up to thin-pool
 	// metadata, so the controller re-requests a size the LV already has on every
@@ -2372,6 +2381,10 @@ var (
 
 	// benignAlwaysStdErr is the set every lvm invocation may ignore.
 	benignAlwaysStdErr = []*regexp.Regexp{reRegexVersionMismatch, reLeakedFileDescriptor}
+	// benignCreateStdErr additionally tolerates the leftover device-node
+	// directory. Only vgcreate may use it: elsewhere that line would be about a
+	// directory nobody asked this command to make.
+	benignCreateStdErr = []*regexp.Regexp{reRegexVersionMismatch, reLeakedFileDescriptor, reDevDirExists}
 	// reNoSuchDMDevice is how device-mapper says the mapping a removal was aimed
 	// at is already gone. For a removal that is success spelled as an error.
 	reNoSuchDMDevice = regexp.MustCompile(`(?i)(No such device or address|Device does not exist)`)

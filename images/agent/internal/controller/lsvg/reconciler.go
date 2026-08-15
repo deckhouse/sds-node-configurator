@@ -162,8 +162,32 @@ func (r *Reconciler) Reconcile(
 	}
 
 	res, err := r.join(ctx, lsvg)
-	if err != nil || res.RequeueAfter > 0 {
-		return res, err
+	if err != nil {
+		// Said out loud and retried on this reconciler's own cadence, rather
+		// than handed back as an error.
+		//
+		// controller-runtime ignores RequeueAfter when an error is returned and
+		// falls back to its rate limiter — and on the stand that meant a member
+		// whose vgcreate failed once got two passes in fifteen minutes and then
+		// none at all. The pool it belonged to sat Pending with its volume group
+		// already on the LUN, needing exactly one more pass to notice.
+		//
+		// The period is the whole design of this reconciler: nothing here
+		// produces events, so a pass that stops happening is a repair that stops
+		// happening. An error is a reason to look again in a minute, not a reason
+		// to stop looking.
+		r.log.Error(err, fmt.Sprintf("[%s] %s did not reconcile cleanly, retrying in %s",
+			ReconcilerName, lsvg.Name, groupRecheckInterval))
+		// And on the object, because a log line on one node of a pool is not
+		// where anybody looks. The lockspace fact is carried over rather than
+		// overwritten: whether this node is in the pool is a different question
+		// from whether its last pass went through, and answering the first with
+		// the second would be a lie in the direction that matters.
+		r.publishNodeState(ctx, lsvg, r.lockspaceStartedInStatus(lsvg), ReasonReconcileFailed, err.Error())
+		return controller.Result{RequeueAfter: groupRecheckInterval}, nil
+	}
+	if res.RequeueAfter > 0 {
+		return res, nil
 	}
 
 	// A member of a pool looks at itself again on a schedule, and this is the
@@ -187,6 +211,21 @@ func (r *Reconciler) Reconcile(
 // short enough that residue does not outlive an interesting window and long
 // enough that a hundred nodes are not a load on anything.
 const groupRecheckInterval = time.Minute
+
+// lockspaceStartedInStatus is what this node last said about its own
+// participation. Used when reporting something else about the node, so that the
+// unrelated fact is carried over instead of being invented.
+func (r *Reconciler) lockspaceStartedInStatus(lsvg *v1alpha1.LVMSharedVolumeGroup) bool {
+	if lsvg.Status == nil {
+		return false
+	}
+	for _, node := range lsvg.Status.Nodes {
+		if node.Name == r.cfg.NodeName {
+			return node.LockspaceStarted
+		}
+	}
+	return false
+}
 
 func (r *Reconciler) isMember(lsvg *v1alpha1.LVMSharedVolumeGroup) bool {
 	return slices.Contains(lsvg.Spec.Nodes, r.cfg.NodeName)

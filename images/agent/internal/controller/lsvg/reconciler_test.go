@@ -355,14 +355,22 @@ func TestHostIDFileIsNotRewrittenWhenUnchanged(t *testing.T) {
 		"rewriting the file under a running lockspace is a change nobody asked for")
 }
 
-func TestUnreadableHostIDIsAnError(t *testing.T) {
+func TestAnUnreadableHostIDIsRetriedRatherThanEscalated(t *testing.T) {
+	// A host id that is not a number is a fault, and the node still has to look
+	// again: nothing about this reconciler produces events, so handing the error
+	// back — which makes controller-runtime drop the RequeueAfter and fall back
+	// to its rate limiter — is how a member stops being reconciled at all. On the
+	// stand that cost a pool fifteen minutes and then silence, with its volume
+	// group already on the LUN.
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "zero"}), commands, nil)
 
-	_, err := r.Reconcile(context.Background(),
+	res, err := r.Reconcile(context.Background(),
 		controller.ReconcileRequest[*v1alpha1.LVMSharedVolumeGroup]{Object: testGroup(testNode)})
-	require.Error(t, err)
+
+	require.NoError(t, err, "the error belongs in the log, not in the queue's rate limiter")
+	assert.Equal(t, groupRecheckInterval, res.RequeueAfter, "and the next pass still happens")
 }
 
 // --- the metadata owner's half: creating the group ---
@@ -516,13 +524,24 @@ func TestForeignGroupOnTheLUNIsRefused(t *testing.T) {
 	// group here" would have declared the pool's group ready without it existing.
 	commands.EXPECT().GetPV(gomock.Any()).
 		Return(internal.PVData{PVName: "/dev/mapper/mpathi", VGName: "someone-elses-vg"}, "pvs", bytes.Buffer{}, nil).AnyTimes()
-	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
+	var cl client.Client
+	group := ownedGroup()
+	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
-	_, err := r.Reconcile(context.Background(),
-		controller.ReconcileRequest[*v1alpha1.LVMSharedVolumeGroup]{Object: ownedGroup()})
+	res, err := r.Reconcile(context.Background(),
+		controller.ReconcileRequest[*v1alpha1.LVMSharedVolumeGroup]{Object: group})
 
-	require.Error(t, err, "neither creating over it nor adopting it is defensible")
-	assert.Contains(t, err.Error(), "someone-elses-vg")
+	// Neither creating over it nor adopting it is defensible, and the refusal is
+	// published rather than only logged: a line on one node of a pool is not
+	// where anybody looks.
+	require.NoError(t, err)
+	assert.Equal(t, groupRecheckInterval, res.RequeueAfter, "the LUN may be corrected, so the node keeps looking")
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	require.NotEmpty(t, published.Status.Nodes)
+	assert.Equal(t, ReasonReconcileFailed, published.Status.Nodes[0].Reason)
+	assert.Contains(t, published.Status.Nodes[0].Message, "someone-elses-vg")
 }
 
 func TestMissingLUNPostponesCreation(t *testing.T) {
@@ -547,13 +566,21 @@ func TestUnusableExtentSizeIsAHardStop(t *testing.T) {
 	fakeSysBlockWithLUN(t, 3*1024)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
-	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil)
+	group := ownedGroup()
+	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
 	_, err := r.Reconcile(context.Background(),
-		controller.ReconcileRequest[*v1alpha1.LVMSharedVolumeGroup]{Object: ownedGroup()})
+		controller.ReconcileRequest[*v1alpha1.LVMSharedVolumeGroup]{Object: group})
 
-	require.Error(t, err, "retrying would not make an irreversible parameter correct")
-	assert.Contains(t, err.Error(), "discard would free nothing")
+	// Retrying will not make an irreversible parameter correct, and the node
+	// keeps looking anyway — the device behind the pool can be replaced. What
+	// matters is that the reason is on the object, where somebody sees it.
+	require.NoError(t, err)
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	require.NotEmpty(t, published.Status.Nodes)
+	assert.Contains(t, published.Status.Nodes[0].Message, "discard would free nothing")
 }
 
 func TestNonOwnerNeverCreatesTheGroup(t *testing.T) {
