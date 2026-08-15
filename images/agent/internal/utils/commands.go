@@ -76,6 +76,7 @@ type Commands interface {
 	LVExtendShared(ctx context.Context, vgName, lvName, size string) (string, error)
 	LVActivateShared(ctx context.Context, vgName string, lvNames []string, shared bool) (string, error)
 	RemoveDMDevice(ctx context.Context, dmName string) (string, error)
+	RemoveDMDeviceDeferred(ctx context.Context, dmName string) (string, error)
 	WipeDMTable(ctx context.Context, dmName string) (string, error)
 	LVDeactivateShared(ctx context.Context, vgName string, lvNames []string) (string, error)
 	LVActivate(ctx context.Context, vgName, lvName string) (string, error)
@@ -1121,6 +1122,32 @@ func (commands) WipeDMTable(ctx context.Context, dmName string) (string, error) 
 // a mapping something is still using is not residue.
 func (commands) RemoveDMDevice(ctx context.Context, dmName string) (string, error) {
 	args := nsentrerExpendedArgs(internal.DMSetupCmd, "remove", dmName)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// RemoveDMDeviceDeferred asks device-mapper to drop the mapping when its last
+// opener closes it.
+//
+// It exists for one case: a map that has to go and is held open by a process
+// that will let go on its own. Retrying the plain removal there produces the
+// same "Device or resource busy" every thirty seconds for as long as the node
+// lives, which reads as an agent doing nothing. The deferred form turns that
+// into a decision recorded in the kernel — the mapping is gone the moment it is
+// no longer in use, with nobody watching for the moment.
+//
+// It is not a stronger removal. A map with a live opener stays usable until the
+// close, so this must never stand in for the barrier: an error target under a
+// writer is what stops the writes, and this only cleans up afterwards.
+func (commands) RemoveDMDeviceDeferred(ctx context.Context, dmName string) (string, error) {
+	args := nsentrerExpendedArgs(internal.DMSetupCmd, "remove", "--deferred", dmName)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
 
 	var stderr bytes.Buffer

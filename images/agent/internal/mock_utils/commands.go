@@ -619,6 +619,21 @@ func (mr *MockCommandsMockRecorder) RemoveDMDevice(ctx, dmName any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveDMDevice", reflect.TypeOf((*MockCommands)(nil).RemoveDMDevice), ctx, dmName)
 }
 
+// RemoveDMDeviceDeferred mocks base method.
+func (m *MockCommands) RemoveDMDeviceDeferred(ctx context.Context, dmName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveDMDeviceDeferred", ctx, dmName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemoveDMDeviceDeferred indicates an expected call of RemoveDMDeviceDeferred.
+func (mr *MockCommandsMockRecorder) RemoveDMDeviceDeferred(ctx, dmName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveDMDeviceDeferred", reflect.TypeOf((*MockCommands)(nil).RemoveDMDeviceDeferred), ctx, dmName)
+}
+
 // RemoveFileDevice mocks base method.
 func (m *MockCommands) RemoveFileDevice(ctx context.Context, path string) (string, error) {
 	m.ctrl.T.Helper()

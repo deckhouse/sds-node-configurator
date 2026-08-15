@@ -30,6 +30,7 @@ import (
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 // fencedNode leaves behind what the fencing handler leaves behind.
@@ -129,4 +130,66 @@ func TestAReservationOnTheLUNIsNamedForWhatItIs(t *testing.T) {
 		"the message names the command that shows the reservation")
 	assert.Contains(t, published.Status.Conditions[0].Message, "does not clear it",
 		"clearing somebody else's registration is not this module's decision")
+}
+
+func TestAFencedLeaseAreaDoesNotTrapTheNodeInARetry(t *testing.T) {
+	// A handler that covered the lease area too — an older one, or one written
+	// by hand — leaves a map sanlock still holds open. Removing it answers
+	// "Device or resource busy", and a node that only retries that answers it
+	// every thirty seconds for the rest of its life while looking healthy.
+	//
+	// The lockspace is dead the moment its lease storage becomes an error
+	// target, so it is stopped rather than waited on, and what the kernel still
+	// refuses is handed to the kernel to do on close.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := ownedGroup()
+	r, _, dir := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+	leaseMap := utils.DMName(testVG, utils.LeaseAreaLVName)
+	fencedNode(t, dir, leaseMap)
+
+	busy := errors.New("device-mapper: remove ioctl on " + leaseMap + " failed: Device or resource busy")
+	stopped := commands.EXPECT().VGLockStop(gomock.Any(), testVG).Return("vgchange --lock-stop", nil)
+	commands.EXPECT().RemoveDMDevice(gomock.Any(), leaseMap).After(stopped).Return("dmsetup remove", busy)
+	commands.EXPECT().RemoveDMDeviceDeferred(gomock.Any(), leaseMap).Return("dmsetup remove --deferred", nil)
+	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("vgcreate", nil).AnyTimes()
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+
+	res := reconcile(t, r, group)
+
+	assert.NotZero(t, res.RequeueAfter, "the map goes on the last close, and the pass after that finishes the recovery")
+	_, err := os.Stat(filepath.Join(dir, "killpath-"+testVG+".json"))
+	assert.NoError(t, err, "the node has not rejoined yet, and the record says so")
+}
+
+func TestALeaseAreaNobodyCanUnmapIsStatedRatherThanRetried(t *testing.T) {
+	// Everything reversible is spent by here: the lockspace was stopped, the
+	// removal refused, and the kernel would not take it on close either. What
+	// is left — restarting the lock daemons of this node — has a blast radius,
+	// so the module says what it sees instead of taking the decision.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := ownedGroup()
+	r, cl, dir := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+	leaseMap := utils.DMName(testVG, utils.LeaseAreaLVName)
+	fencedNode(t, dir, leaseMap)
+
+	commands.EXPECT().VGLockStop(gomock.Any(), testVG).Return("vgchange --lock-stop", nil)
+	commands.EXPECT().RemoveDMDevice(gomock.Any(), leaseMap).Return("dmsetup remove", errors.New("Device or resource busy"))
+	commands.EXPECT().RemoveDMDeviceDeferred(gomock.Any(), leaseMap).
+		Return("dmsetup remove --deferred", errors.New("Invalid argument"))
+	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("vgcreate", nil).AnyTimes()
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+
+	reconcile(t, r, group)
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	require.NotNil(t, published.Status)
+	require.NotEmpty(t, published.Status.Conditions)
+	assert.Equal(t, "BarrierNotCleared", published.Status.Conditions[0].Reason)
+	assert.Contains(t, published.Status.Conditions[0].Message, "No volume of this group is at risk",
+		"a node out of the pool is not a node losing data, and the message must not read like one")
 }

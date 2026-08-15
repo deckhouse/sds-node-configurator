@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -105,15 +106,71 @@ func (r *Reconciler) recoverFromBarrier(ctx context.Context, lsvg *v1alpha1.LVMS
 	r.log.Info(fmt.Sprintf("[%s] %s was fenced at %s (%d map(s) covered), the LUNs are back, removing the error targets",
 		ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, res.FinishedAt.Format(time.RFC3339), res.MapsCovered))
 
-	for _, dmName := range res.CoveredMaps {
-		if cmd, err := r.commands.RemoveDMDevice(ctx, dmName); err != nil {
-			// Left for the next pass rather than treated as fatal: a map that is
-			// still open belongs to something that has not let go yet, and the
-			// error target under it is already refusing every write.
-			r.log.Warning(fmt.Sprintf("[%s] the error target %s could not be removed (cmd: %s): %s",
-				ReconcilerName, dmName, cmd, err.Error()))
+	// The lease area among the covered maps is not one more volume to clean up.
+	// It is the storage sanlock renews its lease through, and an error target
+	// under it means this node's lockspace is dead however healthy lvmlockd
+	// looks: every renewal returns EIO. It also means the map cannot be removed
+	// the ordinary way, because sanlock still holds it open, which is exactly
+	// how a node ends up repeating "Device or resource busy" every thirty
+	// seconds for the rest of its life.
+	//
+	// This module's own barrier never covers the lease area. A handler from an
+	// older release, or one somebody wrote by hand, does — and a recovery that
+	// only works against the handler shipped with it is not a recovery.
+	//
+	// So the dead lockspace is stopped first. Nothing is lost by it: the leases
+	// it held stopped being renewable the moment the barrier went up, and the
+	// volumes underneath are error targets holding no data. Stopping it makes
+	// sanlock let go of the lease area, and the ordinary path starts the
+	// lockspace again on a later pass.
+	leaseMap := utils.DMName(lsvg.Spec.ActualVGNameOnTheNode, utils.LeaseAreaLVName)
+	if slices.Contains(res.CoveredMaps, leaseMap) {
+		r.log.Warning(fmt.Sprintf("[%s] the barrier covered the lease area of %s, so the lockspace here is dead: stopping it before the error targets go",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+
+		if err := r.setLockspaceStarted(ctx, lsvg.Name, "", false); err != nil {
+			r.log.Warning(fmt.Sprintf("[%s] unable to record that the lockspace of %s is stopped: %s",
+				ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
 			return true
 		}
+		if cmd, err := r.commands.VGLockStop(ctx, lsvg.Spec.ActualVGNameOnTheNode); err != nil {
+			// Not fatal on its own: the removal below is tried anyway, and it is
+			// what decides whether this converges.
+			r.log.Warning(fmt.Sprintf("[%s] unable to stop the dead lockspace of %s (cmd: %s): %s",
+				ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
+		}
+	}
+
+	for _, dmName := range res.CoveredMaps {
+		cmd, err := r.commands.RemoveDMDevice(ctx, dmName)
+		if err == nil {
+			continue
+		}
+
+		// A map that is still open belongs to something that has not let go
+		// yet, and the error target under it is already refusing every write —
+		// so the next pass is normally the whole answer.
+		r.log.Warning(fmt.Sprintf("[%s] the error target %s could not be removed (cmd: %s): %s",
+			ReconcilerName, dmName, cmd, err.Error()))
+
+		if dmName != leaseMap {
+			return true
+		}
+
+		// Except here, where waiting is what fails. The opener is sanlock, it
+		// has just been asked to leave, and if it has not closed the lease area
+		// by now it is because it cannot — its own device answers EIO. Handing
+		// the removal to the kernel ends the loop: the map goes on the last
+		// close, whenever that is, with nobody watching for the moment.
+		if deferredCmd, deferredErr := r.commands.RemoveDMDeviceDeferred(ctx, dmName); deferredErr != nil {
+			r.publishBarrierStall(ctx, lsvg, dmName, deferredErr)
+			r.log.Error(deferredErr, fmt.Sprintf("[%s] the lease area %s can be removed neither now nor on close (cmd: %s)",
+				ReconcilerName, dmName, deferredCmd))
+		} else {
+			r.log.Info(fmt.Sprintf("[%s] the lease area %s will be removed when its last opener closes it",
+				ReconcilerName, dmName))
+		}
+		return true
 	}
 
 	// Only now, and only if every map went: the file is the record that this
@@ -183,6 +240,40 @@ func (r *Reconciler) publishLockStartFailure(
 
 	if err := r.cl.Status().Patch(ctx, lsvg, patch); err != nil {
 		r.log.Warning(fmt.Sprintf("[%s] unable to publish why the lockspace of %s did not start: %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
+	}
+}
+
+// publishBarrierStall says that a fenced node cannot come back on its own.
+//
+// It is published in one situation, and the situation is rare: the lease area
+// is still mapped to an error target, its opener will not close it, and the
+// kernel refused to take the removal on close either. Everything reversible has
+// been spent by the time this is written, and what remains — restarting the
+// lock daemons of this node, or restarting the node — is a decision with a
+// blast radius, so it is stated rather than taken.
+func (r *Reconciler) publishBarrierStall(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+	dmName string,
+	cause error,
+) {
+	patch := client.MergeFrom(lsvg.DeepCopy())
+	if lsvg.Status == nil {
+		lsvg.Status = &v1alpha1.LVMSharedVolumeGroupStatus{}
+	}
+	setCondition(&lsvg.Status.Conditions, metav1.Condition{
+		Type:   ConditionLockspaceStarted,
+		Status: metav1.ConditionFalse,
+		Reason: "BarrierNotCleared",
+		Message: r.cfg.NodeName + ": the node was fenced and cannot rejoin the pool because the lease " +
+			"area " + dmName + " is still mapped to an error target and its opener will not release it (" +
+			cause.Error() + "). No volume of this group is at risk — the map holds nothing and every write " +
+			"through it fails — but this node stays out of the pool until its lock daemons are restarted.",
+	})
+
+	if err := r.cl.Status().Patch(ctx, lsvg, patch); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to publish that %s cannot return from the barrier: %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
 	}
 }
