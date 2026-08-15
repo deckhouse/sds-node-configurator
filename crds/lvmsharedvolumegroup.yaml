@@ -277,6 +277,60 @@ spec:
                   format: int32
                   description: |
                     Number of logical volumes in the group.
+                nodes:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - name
+                  description: |
+                    What each member of the pool says about its own participation.
+
+                    It is deliberately not a condition: conditions describe the group and are
+                    written by the metadata owner alone, while whether a lockspace is running
+                    is a fact about a node. A per-node fact in a shared array would be a value
+                    whose last writer wins and whose reader cannot tell whose answer it got.
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - lockspaceStarted
+                    properties:
+                      name:
+                        type: string
+                        description: |
+                          Name of the node this entry belongs to.
+                      lockspaceStarted:
+                        type: boolean
+                        description: |
+                          `true` while the node holds a lockspace of this group and can
+                          therefore activate its volumes. While it is `false`, no volume of
+                          this group can be attached to this node — see `reason`.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        description: |
+                          Short, machine-readable cause of the current state.
+
+                          - `LockspaceStarted`: the node is in the pool.
+                          - `ReservationConflict`: the LUN carries a SCSI reservation from
+                            another initiator; this one never resolves on its own.
+                          - `LUNNotReadyYet`: the volume group is not readable here yet.
+                          - `BarrierNotCleared`: the node was fenced and something still
+                            holds the error target of its lease area.
+                          - `LockspaceNotStarted`: anything else, with the detail in
+                            `message`.
+                      message:
+                        type: string
+                        maxLength: 4096
+                        description: |
+                          The state in words, including what — if anything — only a person can
+                          do about it.
+                      since:
+                        type: string
+                        format: date-time
+                        description: |
+                          When the node last changed what it says here. It does not move while
+                          the answer stays the same.
                 conditions:
                   type: array
                   x-kubernetes-list-type: map

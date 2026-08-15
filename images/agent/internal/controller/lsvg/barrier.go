@@ -27,6 +27,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -194,9 +195,70 @@ func (r *Reconciler) recoverFromBarrier(ctx context.Context, lsvg *v1alpha1.LVMS
 	return false
 }
 
-// ConditionLockspaceStarted is what a reader outside this module looks at to
-// learn whether a node is in the pool and, when it is not, why.
-const ConditionLockspaceStarted = "LockspaceStarted"
+// Reasons a node gives for its own state. They are the machine-readable half of
+// what the pool publishes about its members; the message beside them is the half
+// meant for a person.
+const (
+	ReasonLockspaceStarted    = "LockspaceStarted"
+	ReasonReservationConflict = "ReservationConflict"
+	ReasonLUNNotReadyYet      = "LUNNotReadyYet"
+	ReasonLockspaceNotStarted = "LockspaceNotStarted"
+	ReasonBarrierNotCleared   = "BarrierNotCleared"
+)
+
+// publishNodeState records what this node has to say about its own membership.
+//
+// It is written with a server-side apply of one array entry, keyed by the node's
+// name and owned by a field manager of its own. Every member of a pool writes
+// here at the same time, and a merge patch of the whole array would make each
+// node's view the last writer's view — the value would be true and useless.
+func (r *Reconciler) publishNodeState(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+	started bool,
+	reason, message string,
+) {
+	// Nothing is written while the answer stays the same. A member re-confirms
+	// itself every pass, and a pass that rewrote the timestamp would make every
+	// node of every pool a steady write to the API server for no news at all.
+	since := metav1.Now()
+	if lsvg.Status != nil {
+		for _, node := range lsvg.Status.Nodes {
+			if node.Name != r.cfg.NodeName {
+				continue
+			}
+			if node.LockspaceStarted == started && node.Reason == reason && node.Message == message {
+				return
+			}
+			break
+		}
+	}
+
+	entry := map[string]any{
+		"name":             r.cfg.NodeName,
+		"lockspaceStarted": started,
+		"reason":           reason,
+		"since":            since.UTC().Format(time.RFC3339),
+	}
+	if message != "" {
+		entry["message"] = message
+	}
+
+	patch := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": v1alpha1.SchemeGroupVersion.String(),
+		"kind":       "LVMSharedVolumeGroup",
+		"metadata":   map[string]any{"name": lsvg.Name},
+		"status":     map[string]any{"nodes": []any{entry}},
+	}}
+
+	if err := r.cl.Status().Patch(ctx, patch, client.Apply,
+		client.FieldOwner("sds-node-configurator-agent-"+r.cfg.NodeName),
+		client.ForceOwnership,
+	); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to publish the state of %s on this node: %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
+	}
+}
 
 // publishLockStartFailure says why the node is not in the pool, and names the
 // one cause a retry will never fix.
@@ -219,38 +281,24 @@ func (r *Reconciler) publishLockStartFailure(
 	lsvg *v1alpha1.LVMSharedVolumeGroup,
 	cause error,
 ) {
-	reason, message := "LockspaceNotStarted", cause.Error()
+	reason, message := ReasonLockspaceNotStarted, cause.Error()
 
 	text := strings.ToLower(cause.Error())
 	switch {
 	case strings.Contains(text, "reservation conflict") || strings.Contains(text, "result -286"):
-		reason = "ReservationConflict"
+		reason = ReasonReservationConflict
 		message = "the LUN carries a SCSI reservation from another initiator: the node can read the " +
 			"volume group and cannot take its lease, and this will not change on its own. " +
 			"Check `sg_persist --in --read-reservation` on a path of the LUN and clear the leftover " +
 			"registration from the host that owns the key. This module does not clear it: the LUN may " +
 			"belong to somebody who is using it."
 	case strings.Contains(text, "lockspace is not started") || strings.Contains(text, "no such device"):
-		reason = "LUNNotReadyYet"
+		reason = ReasonLUNNotReadyYet
 		message = "the volume group is not readable on this node yet, which is ordinary while the array " +
 			"is presenting the LUN: " + cause.Error()
 	}
 
-	patch := client.MergeFrom(lsvg.DeepCopy())
-	if lsvg.Status == nil {
-		lsvg.Status = &v1alpha1.LVMSharedVolumeGroupStatus{}
-	}
-	setCondition(&lsvg.Status.Conditions, metav1.Condition{
-		Type:    ConditionLockspaceStarted,
-		Status:  metav1.ConditionFalse,
-		Reason:  reason,
-		Message: r.cfg.NodeName + ": " + message,
-	})
-
-	if err := r.cl.Status().Patch(ctx, lsvg, patch); err != nil {
-		r.log.Warning(fmt.Sprintf("[%s] unable to publish why the lockspace of %s did not start: %s",
-			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
-	}
+	r.publishNodeState(ctx, lsvg, false, reason, message)
 }
 
 // publishBarrierStall says that a fenced node cannot come back on its own.
@@ -267,39 +315,32 @@ func (r *Reconciler) publishBarrierStall(
 	dmName string,
 	cause error,
 ) {
-	patch := client.MergeFrom(lsvg.DeepCopy())
-	if lsvg.Status == nil {
-		lsvg.Status = &v1alpha1.LVMSharedVolumeGroupStatus{}
-	}
-	setCondition(&lsvg.Status.Conditions, metav1.Condition{
-		Type:   ConditionLockspaceStarted,
-		Status: metav1.ConditionFalse,
-		Reason: "BarrierNotCleared",
-		Message: r.cfg.NodeName + ": the node was fenced and cannot rejoin the pool because the lease " +
-			"area " + dmName + " is still mapped to an error target and its opener will not release it (" +
-			cause.Error() + "). No volume of this group is at risk — the map holds nothing and every write " +
-			"through it fails — but this node stays out of the pool until its lock daemons are restarted.",
-	})
-
-	if err := r.cl.Status().Patch(ctx, lsvg, patch); err != nil {
-		r.log.Warning(fmt.Sprintf("[%s] unable to publish that %s cannot return from the barrier: %s",
-			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
-	}
+	r.publishNodeState(ctx, lsvg, false, ReasonBarrierNotCleared,
+		"the node was fenced and cannot rejoin the pool because the lease area "+dmName+
+			" is still mapped to an error target and its opener will not release it ("+cause.Error()+
+			"). No volume of this group is at risk — the map holds nothing and every write through it "+
+			"fails — but this node stays out of the pool until its lock daemons are restarted.")
 }
 
-// setCondition keeps lastTransitionTime honest: it moves when the state
-// changes and stays put when only the wording does.
-func setCondition(conditions *[]metav1.Condition, condition metav1.Condition) {
-	condition.LastTransitionTime = metav1.Now()
-	for i := range *conditions {
-		if (*conditions)[i].Type != condition.Type {
-			continue
-		}
-		if (*conditions)[i].Status == condition.Status {
-			condition.LastTransitionTime = (*conditions)[i].LastTransitionTime
-		}
-		(*conditions)[i] = condition
-		return
+// retractNodeState removes this node's entry when it leaves the pool.
+//
+// The same field manager that wrote the entry applies an empty list, and
+// server-side apply prunes exactly what that manager owned — which is this
+// node's entry and nothing else. Leaving the old answer behind would be worse
+// than saying nothing: a reader would see a member that is no longer one.
+func (r *Reconciler) retractNodeState(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup) {
+	patch := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": v1alpha1.SchemeGroupVersion.String(),
+		"kind":       "LVMSharedVolumeGroup",
+		"metadata":   map[string]any{"name": lsvg.Name},
+		"status":     map[string]any{"nodes": []any{}},
+	}}
+
+	if err := r.cl.Status().Patch(ctx, patch, client.Apply,
+		client.FieldOwner("sds-node-configurator-agent-"+r.cfg.NodeName),
+		client.ForceOwnership,
+	); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to withdraw the state of this node from %s: %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
 	}
-	*conditions = append(*conditions, condition)
 }

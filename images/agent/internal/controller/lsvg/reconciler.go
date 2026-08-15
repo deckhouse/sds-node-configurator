@@ -254,6 +254,8 @@ func (r *Reconciler) join(
 		// two cached reads; only an actual orphan costs a command.
 		r.releaseOrphanActivations(ctx, lsvg)
 
+		r.publishNodeState(ctx, lsvg, true, ReasonLockspaceStarted, "")
+
 		return r.publishGroup(ctx, lsvg)
 	}
 
@@ -283,6 +285,8 @@ func (r *Reconciler) join(
 	// The leases are fresh now, so anything still mapped from before the start
 	// is mapped without a lock behind it.
 	r.releaseOrphanActivations(ctx, lsvg)
+
+	r.publishNodeState(ctx, lsvg, true, ReasonLockspaceStarted, "")
 
 	return r.publishGroup(ctx, lsvg)
 }
@@ -586,6 +590,10 @@ func (r *Reconciler) leave(
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
 		return controller.Result{RequeueAfter: 30 * time.Second}, nil
 	}
+
+	// The node is out of the pool by its own account now, and leaving its old
+	// answer standing would be a lie readers act on.
+	r.retractNodeState(ctx, lsvg)
 
 	r.log.Info(fmt.Sprintf("[%s] the lockspace of %s is stopped", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
 	return controller.Result{}, nil

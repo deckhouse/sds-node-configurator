@@ -33,9 +33,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
@@ -77,6 +80,7 @@ func testReconciler(
 	cl := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(append([]client.Object{node}, objects...)...).
 		WithStatusSubresource(&v1alpha1.LVMSharedVolumeGroup{}).
+		WithInterceptorFuncs(interceptor.Funcs{SubResourcePatch: applyNodeEntry}).
 		Build()
 
 	sdsCache := cache.New()
@@ -790,4 +794,65 @@ func TestAMemberLooksAtItselfAgainWithoutBeingAsked(t *testing.T) {
 
 	assert.Equal(t, time.Minute, res.RequeueAfter,
 		"a successful pass is not a reason to stop looking")
+}
+
+// applyNodeEntry stands in for the one thing the fake client cannot do: a
+// server-side apply of a single entry in a list keyed by name.
+//
+// The real merge belongs to the API server, and what the tests need from it is
+// its outcome — this node's entry replaced, every other node's entry left
+// alone, and an empty list from a manager meaning "withdraw mine". Emulating
+// exactly that keeps the tests about the reconciler rather than about apply.
+func applyNodeEntry(
+	ctx context.Context,
+	cl client.Client,
+	subResourceName string,
+	obj client.Object,
+	patch client.Patch,
+	opts ...client.SubResourcePatchOption,
+) error {
+	u, ok := obj.(*unstructured.Unstructured)
+	if !ok || patch.Type() != types.ApplyPatchType {
+		return cl.Status().Patch(ctx, obj, patch, opts...)
+	}
+
+	group := &v1alpha1.LVMSharedVolumeGroup{}
+	if err := cl.Get(ctx, client.ObjectKey{Name: u.GetName()}, group); err != nil {
+		return err
+	}
+	if group.Status == nil {
+		group.Status = &v1alpha1.LVMSharedVolumeGroupStatus{}
+	}
+
+	entries, _, _ := unstructured.NestedSlice(u.Object, "status", "nodes")
+
+	// The applied set is what this manager owns, so its own previous entries go
+	// and everybody else's stay.
+	kept := group.Status.Nodes[:0]
+	for _, node := range group.Status.Nodes {
+		if node.Name != testNode {
+			kept = append(kept, node)
+		}
+	}
+	group.Status.Nodes = kept
+
+	for _, raw := range entries {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := entry["name"].(string)
+		started, _ := entry["lockspaceStarted"].(bool)
+		reason, _ := entry["reason"].(string)
+		message, _ := entry["message"].(string)
+		group.Status.Nodes = append(group.Status.Nodes, v1alpha1.LVMSharedVolumeGroupNodeStatus{
+			Name:             name,
+			LockspaceStarted: started,
+			Reason:           reason,
+			Message:          message,
+			Since:            metav1.Now(),
+		})
+	}
+
+	return cl.Status().Update(ctx, group)
 }

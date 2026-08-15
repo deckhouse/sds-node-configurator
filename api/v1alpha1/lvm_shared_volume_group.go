@@ -109,4 +109,35 @@ type LVMSharedVolumeGroupStatus struct {
 	LeaseAreaSize      string             `json:"leaseAreaSize,omitempty"`
 	LogicalVolumeCount int32              `json:"logicalVolumeCount,omitempty"`
 	Conditions         []metav1.Condition `json:"conditions,omitempty"`
+
+	// Nodes is what each member says about its own participation in the pool.
+	//
+	// It is deliberately not a condition. Conditions here are written by one
+	// node — the metadata owner — and describe the group; whether a lockspace is
+	// running is a fact about a NODE, and putting a per-node fact in a shared
+	// array gives a value whose last writer wins and whose reader cannot tell
+	// whose answer it got.
+	Nodes []LVMSharedVolumeGroupNodeStatus `json:"nodes,omitempty"`
+}
+
+// LVMSharedVolumeGroupNodeStatus is one member's account of itself.
+type LVMSharedVolumeGroupNodeStatus struct {
+	// Name of the node this entry belongs to.
+	Name string `json:"name"`
+
+	// LockspaceStarted is true while the node holds a lockspace of this group
+	// and can therefore activate its volumes.
+	LockspaceStarted bool `json:"lockspaceStarted"`
+
+	// Reason is a short, machine-readable cause of the current state.
+	Reason string `json:"reason,omitempty"`
+
+	// Message explains the state to a person, including what — if anything —
+	// only a person can do about it.
+	Message string `json:"message,omitempty"`
+
+	// Since is when the node last changed what it says here. It does not move
+	// while the answer stays the same, so a member re-confirming itself once a
+	// minute costs nothing on the API server.
+	Since metav1.Time `json:"since,omitempty"`
 }

@@ -128,11 +128,13 @@ func TestAReservationOnTheLUNIsNamedForWhatItIs(t *testing.T) {
 	published := &v1alpha1.LVMSharedVolumeGroup{}
 	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
 	require.NotNil(t, published.Status)
-	require.NotEmpty(t, published.Status.Conditions)
-	assert.Equal(t, "ReservationConflict", published.Status.Conditions[0].Reason)
-	assert.Contains(t, published.Status.Conditions[0].Message, "sg_persist",
+	require.NotEmpty(t, published.Status.Nodes)
+	assert.Equal(t, testNode, published.Status.Nodes[0].Name)
+	assert.False(t, published.Status.Nodes[0].LockspaceStarted)
+	assert.Equal(t, ReasonReservationConflict, published.Status.Nodes[0].Reason)
+	assert.Contains(t, published.Status.Nodes[0].Message, "sg_persist",
 		"the message names the command that shows the reservation")
-	assert.Contains(t, published.Status.Conditions[0].Message, "does not clear it",
+	assert.Contains(t, published.Status.Nodes[0].Message, "does not clear it",
 		"clearing somebody else's registration is not this module's decision")
 }
 
@@ -194,9 +196,9 @@ func TestALeaseAreaNobodyCanUnmapIsStatedRatherThanRetried(t *testing.T) {
 	published := &v1alpha1.LVMSharedVolumeGroup{}
 	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
 	require.NotNil(t, published.Status)
-	require.NotEmpty(t, published.Status.Conditions)
-	assert.Equal(t, "BarrierNotCleared", published.Status.Conditions[0].Reason)
-	assert.Contains(t, published.Status.Conditions[0].Message, "No volume of this group is at risk",
+	require.NotEmpty(t, published.Status.Nodes)
+	assert.Equal(t, ReasonBarrierNotCleared, published.Status.Nodes[0].Reason)
+	assert.Contains(t, published.Status.Nodes[0].Message, "No volume of this group is at risk",
 		"a node out of the pool is not a node losing data, and the message must not read like one")
 }
 
@@ -223,4 +225,44 @@ func TestAMapThatIsAlreadyGoneFinishesTheRecovery(t *testing.T) {
 
 	_, err := os.Stat(filepath.Join(dir, "killpath-"+testVG+".json"))
 	assert.True(t, os.IsNotExist(err), "with the last error target gone, the node was never fenced any more")
+}
+
+func TestOneNodeSayingWhatItSeesDoesNotSpeakForTheOthers(t *testing.T) {
+	// Whether a lockspace is running is a fact about a node, and every member of
+	// a pool has its own answer. Written as a condition on the group it would be
+	// one value with three authors: true, and useless to a reader who cannot
+	// tell whose answer arrived last.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+
+	// A member that does not own the metadata, so the pass goes straight to the
+	// lock start and to what this node has to say about it.
+	group := testGroup(testNode)
+	group.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+		Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{{
+			Name:             "another-node",
+			LockspaceStarted: true,
+			Reason:           ReasonLockspaceStarted,
+		}},
+	}
+	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("vgcreate", nil).AnyTimes()
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).
+		Return("vgchange --lock-start", errors.New("add_lockspace fail result -286")).AnyTimes()
+
+	reconcile(t, r, group)
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	require.Len(t, published.Status.Nodes, 2, "the other node's answer is still there")
+
+	byName := map[string]v1alpha1.LVMSharedVolumeGroupNodeStatus{}
+	for _, node := range published.Status.Nodes {
+		byName[node.Name] = node
+	}
+	assert.True(t, byName["another-node"].LockspaceStarted, "and it is still its own answer")
+	assert.False(t, byName[testNode].LockspaceStarted)
+	assert.Equal(t, ReasonReservationConflict, byName[testNode].Reason)
 }
