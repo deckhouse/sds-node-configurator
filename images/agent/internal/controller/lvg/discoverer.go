@@ -331,33 +331,6 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 
 	shouldRequeue := false
 
-	// An LVMVolumeGroup that already points at a shared Volume Group is a
-	// leftover from when this discoverer imported them, and it is not harmless:
-	// the controllers behind that resource activate, extend and remove volumes
-	// on this node alone, over a group whose volumes belong to a lock manager.
-	//
-	// It is named rather than removed. Deleting an LVMVolumeGroup is how a
-	// Volume Group gets destroyed — its finalizer says so — and taking that
-	// decision automatically over a pool holding somebody's data is exactly the
-	// line this module does not cross.
-	for _, lvg := range filteredLVGs {
-		vg := d.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode)
-		if vg == nil || !vg.IsShared() {
-			continue
-		}
-
-		message := fmt.Sprintf("the Volume Group %s is shared (lock type %q) and is served by an LVMSharedVolumeGroup; "+
-			"this LVMVolumeGroup must not be used for it, because its controllers activate and remove volumes without "+
-			"taking the pool's locks. Nothing here is touched automatically: removing an LVMVolumeGroup removes the "+
-			"Volume Group with it. Delete this resource by hand once you have confirmed the pool is the owner",
-			vg.VGName, vg.SharedDescription())
-		if updErr := d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, metav1.ConditionFalse, internal.TypeVGReady,
-			"SharedVolumeGroup", message); updErr != nil {
-			d.log.Error(updErr, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to say that the LVMVolumeGroup %s points at a shared Volume Group", lvg.Name))
-			shouldRequeue = true
-		}
-	}
-
 	// When LVM reports more than one VG with the same name, it stops resolving
 	// such VGs by name (`vgs <name>`/`lvs <name>` fail with
 	// `Multiple VGs found with the same name: skipping`). The agent's name-keyed
@@ -664,8 +637,10 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 			messageBldr := strings.Builder{}
 			candidate, exist := candidateMap[lvg.Spec.ActualVGNameOnTheNode]
 			if !exist {
-				d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its VG %s", lvg.Name, lvg.Spec.ActualVGNameOnTheNode))
-				messageBldr.WriteString(fmt.Sprintf("Unable to find VG %s (it should be created with special tag %s). ", lvg.Spec.ActualVGNameOnTheNode, internal.LVMTags[0]))
+				vg := d.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode)
+				d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s has no candidate for VG %s",
+					lvg.Name, lvg.Spec.ActualVGNameOnTheNode))
+				messageBldr.WriteString(missingCandidateMessage(lvg.Spec.ActualVGNameOnTheNode, vg))
 			} else {
 				// candidate exists, check thin pools
 				candidateTPs := make(map[string]internal.LVMVGStatusThinPool, len(candidate.StatusThinPools))
@@ -2002,6 +1977,28 @@ func sortBlockDevicesByVG(bds map[string]v1alpha1.BlockDevice, vgs []internal.VG
 	}
 
 	return result
+}
+
+// missingCandidateMessage explains why an LVMVolumeGroup has no volume group
+// behind it, and the distinction it draws is the point of it.
+//
+// "Not a candidate" and "not there" are different things, and only one of them
+// is the operator's to fix. A shared Volume Group is deliberately not a
+// candidate — it belongs to a lock manager and is served by an
+// LVMSharedVolumeGroup — so telling somebody their group is missing and should
+// be tagged sends them to re-create a group that is sitting right there with
+// data on it.
+func missingCandidateMessage(vgName string, vg *internal.VGData) string {
+	if vg == nil || !vg.IsShared() {
+		return fmt.Sprintf("Unable to find VG %s (it should be created with special tag %s). ",
+			vgName, internal.LVMTags[0])
+	}
+
+	return fmt.Sprintf("The Volume Group %s is shared (lock type %q) and is served by an LVMSharedVolumeGroup. "+
+		"This LVMVolumeGroup must not be used for it: the controllers behind this resource activate, extend and "+
+		"remove volumes on one node without taking the pool's locks. Nothing is done to it automatically — removing "+
+		"an LVMVolumeGroup removes the Volume Group with it — so delete this resource by hand once you have "+
+		"confirmed the pool owns the group. ", vgName, vg.SharedDescription())
 }
 
 func getVgType(vg internal.VGData) string {

@@ -1150,3 +1150,20 @@ func TestASharedVolumeGroupIsNotImportedAsAnLVMVolumeGroup(t *testing.T) {
 		assert.Equal(t, "vglocal", kept[0].VGName)
 	}
 }
+
+func TestAnLVMVolumeGroupOverASharedGroupIsNotToldItsGroupIsMissing(t *testing.T) {
+	// The group is right there with data on it. Telling an operator it is
+	// missing and should be tagged sends them to re-create it — over a pool.
+	shared := &internal.VGData{VGName: "vghw", VGLockType: "sanlock"}
+
+	message := missingCandidateMessage("vghw", shared)
+
+	assert.NotContains(t, message, "Unable to find VG")
+	assert.Contains(t, message, "is shared")
+	assert.Contains(t, message, "delete this resource by hand",
+		"removing an LVMVolumeGroup removes the Volume Group with it, so this is not the module's call")
+
+	// And the ordinary case is untouched: a group that really is gone still says so.
+	assert.Contains(t, missingCandidateMessage("vglocal", nil), "Unable to find VG vglocal")
+	assert.Contains(t, missingCandidateMessage("vglocal", &internal.VGData{VGName: "vglocal"}), "Unable to find VG vglocal")
+}
