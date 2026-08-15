@@ -118,8 +118,30 @@ func (r *Reconciler) Reconcile(
 		return r.detach(ctx, attachment)
 	}
 
-	return r.attach(ctx, attachment)
+	res, err := r.attach(ctx, attachment)
+	if err != nil || res.RequeueAfter > 0 {
+		return res, err
+	}
+
+	// An attached volume is looked at again on a schedule, because the thing
+	// that can go wrong under it produces no event.
+	//
+	// lvmlockd and sanlock restart together and lose every lease; the kernel
+	// keeps every mapping. The attachment does not change when that happens —
+	// nothing about it does — so a reconciler woken only by events would never
+	// find out, and the volume would stay mapped here with its lock held
+	// nowhere. That is the state in which two nodes write to one volume, and it
+	// is the one state this whole design exists to make impossible.
+	//
+	// The pass is a Node read from the manager's cache and a sysfs scan. It runs
+	// a command only when the stamp no longer matches the node's incarnation,
+	// which is to say only when the lock really has been lost.
+	return controller.Result{RequeueAfter: attachmentRecheckInterval}, nil
 }
+
+// attachmentRecheckInterval is how often an attached volume is checked against
+// the incarnation of the lockspace it was activated under.
+const attachmentRecheckInterval = time.Minute
 
 func (r *Reconciler) attach(
 	ctx context.Context,

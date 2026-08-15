@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -665,4 +666,29 @@ func TestAnUnknownGenerationIsNotAClaimThatTheLockIsHeld(t *testing.T) {
 	r := NewReconciler(cl, log, cache.New(), commands, ReconcilerConfig{NodeName: testNode})
 
 	reconcile(t, r, attachment)
+}
+
+func TestAnAttachedVolumeIsCheckedAgainWithoutAnEvent(t *testing.T) {
+	// The lock daemons restart together and lose every lease while the kernel
+	// keeps every mapping. Nothing about the attachment changes when that
+	// happens, so a reconciler woken only by events never finds out — and the
+	// volume stays mapped here, locked nowhere, which is the state where two
+	// nodes write to one volume.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	activate, _ := dmView(t)
+	activate()
+
+	attachment := testAttachment(testNode, withFinalizer, activatedNow)
+	// Already at its requested size, so the pass has nothing to do but look —
+	// which is the pass this is about.
+	sized := activeLV()
+	sized.LVSize = resource.MustParse("10Gi")
+	r, _ := testReconciler(t, commands, []internal.LVData{sized},
+		attachment, testVolume(), testGroup())
+
+	res := reconcile(t, r, attachment)
+
+	assert.Equal(t, time.Minute, res.RequeueAfter,
+		"an attachment nobody touches is exactly the one that needs looking at")
 }
