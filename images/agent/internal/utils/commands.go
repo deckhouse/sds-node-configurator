@@ -937,8 +937,11 @@ func (commands) ResizePV(ctx context.Context, pvName string) (string, error) {
 // image has a read-only rootfs, and lvm writes /etc/lvm/archive before touching
 // metadata.
 func (commands) ExtendVGShared(ctx context.Context, vgName string, paths []string) (string, error) {
-	args := append([]string{"vgextend", "--config", internal.SharedLVMNoArchive, vgName}, paths...)
-	argv, err := sharedLVMArgs(args...)
+	// Through lvmStaticLockdArgs, so the command carries this node's host id: a
+	// group held under persistent reservations answers "Cannot access VG"
+	// without it, whatever the state of the array.
+	args := append([]string{"vgextend", vgName}, paths...)
+	argv, err := lvmStaticLockdArgs(args, 0)
 	if err != nil {
 		return "", err
 	}
@@ -964,8 +967,12 @@ func (commands) ExtendVGShared(ctx context.Context, vgName string, paths []strin
 }
 
 func (commands) RemoveVGShared(ctx context.Context, vgName string) (string, error) {
-	args := []string{"vgremove", "--config", internal.SharedLVMNoArchive, "-y", vgName}
-	argv, err := sharedLVMArgs(args...)
+	// With the host id, like every other command against a shared group. Without
+	// it the removal of a pool held under reservations fails with "Persistent
+	// reservation is not started" and the group hangs on its finalizer — found
+	// on the stand, taking a switched pool down.
+	args := []string{"vgremove", "-y", vgName}
+	argv, err := lvmStaticLockdArgs(args, 0)
 	if err != nil {
 		return "", err
 	}
