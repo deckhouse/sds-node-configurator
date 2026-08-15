@@ -160,6 +160,22 @@ func (r *Reconciler) preemptKeyEverywhere(
 		}
 	}
 
+	// A key that is simply absent proves less than it looks like. lvm2 derives
+	// the key from the host id and the lockspace generation, so a node that
+	// restarted its lockspace since it last published is registered under a key
+	// nobody here has ever seen — and preempting the published one would then
+	// remove nothing while reporting success. So what is left on the LUNs is
+	// compared against what the members have published, and anything unaccounted
+	// for is named rather than assumed to be nobody's.
+	if unknown := r.unaccountedKeys(ctx, lsvg, devices); len(unknown) > 0 {
+		r.publishNodeState(ctx, lsvg, r.lockspaceStartedInStatus(lsvg), ReasonEvictionIncomplete,
+			fmt.Sprintf("Node %q was evicted by the key it published, and %d key(s) on the pool's LUNs belong to "+
+				"nobody that has published one: %s. A node that restarted its lockspace registers under a new key, "+
+				"so one of these may still be that node — check them from the array before treating it as fenced.",
+				target, len(unknown), strings.Join(unknown, ", ")))
+		return
+	}
+
 	if len(remaining) > 0 {
 		r.publishNodeState(ctx, lsvg, r.lockspaceStartedInStatus(lsvg), ReasonEvictionIncomplete,
 			fmt.Sprintf("Node %q is still registered on %d of the pool's paths (%s). "+
@@ -214,4 +230,39 @@ func containsKey(keys []string, wanted string) bool {
 		}
 	}
 	return false
+}
+
+// unaccountedKeys lists the registrations on the pool's LUNs that no member has
+// claimed by publishing it.
+func (r *Reconciler) unaccountedKeys(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+	devices map[string]utils.SharedDevice,
+) []string {
+	claimed := make([]string, 0, len(lsvg.Status.Nodes))
+	for _, node := range lsvg.Status.Nodes {
+		if node.PersistentReservations != nil && node.PersistentReservations.Key != "" {
+			claimed = append(claimed, node.PersistentReservations.Key)
+		}
+	}
+
+	seen := map[string]bool{}
+	var unknown []string
+	for _, wwid := range utils.SortedWWIDs(devices) {
+		for _, path := range devices[wwid].Paths {
+			keys, _, err := r.commands.ReadRegistrationKeys(ctx, path)
+			if err != nil {
+				continue
+			}
+			for _, key := range keys {
+				if containsKey(claimed, key) || seen[key] {
+					continue
+				}
+				seen[key] = true
+				unknown = append(unknown, key)
+			}
+		}
+	}
+	sort.Strings(unknown)
+	return unknown
 }

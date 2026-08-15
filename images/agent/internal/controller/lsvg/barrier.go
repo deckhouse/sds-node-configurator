@@ -235,7 +235,7 @@ func (r *Reconciler) publishNodeState(
 			}
 			if node.LockspaceStarted == started && node.Reason == reason && node.Message == message &&
 				samePRVerdict(node.PersistentReservations, r.persistentReservations(ctx, lsvg)) &&
-				publishedPRState(node) == r.prStates[lsvg.Name] {
+				publishedPRState(node) == r.prStateHere(lsvg) {
 				return
 			}
 			break
@@ -258,7 +258,7 @@ func (r *Reconciler) publishNodeState(
 	// reservations at all.
 	if pr := r.persistentReservations(ctx, lsvg); pr != nil {
 		reservations := map[string]any{"ready": pr.Ready}
-		if state := r.prStates[lsvg.Name]; state != "" {
+		if state := r.prStateHere(lsvg); state != "" {
 			reservations["state"] = state
 		}
 		if pr.Reason != "" {

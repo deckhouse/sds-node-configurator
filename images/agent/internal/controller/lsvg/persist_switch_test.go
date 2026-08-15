@@ -356,3 +356,35 @@ func TestANodeUnderReservationsRegistersBeforeItStartsItsLockspace(t *testing.T)
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 	reconcile(t, r, group)
 }
+
+func TestARestartedAgentRemembersThatItStandsUnderReservations(t *testing.T) {
+	// The state is a fact about the array — this node holds a registration — not
+	// bookkeeping that may start empty. An agent restart erased it on the stand,
+	// and both things that follow are wrong: the node would take the pool
+	// through the switch again, standing its neighbours aside, and it would
+	// start its lockspace without registering, which under a Write Exclusive,
+	// all registrants reservation is a node that cannot renew its lease.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	group.Spec.PersistentReservations = PersistentReservationsRequired
+	group.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+		Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{nodeSaid(testNode, true, PRStateEnabled)},
+	}
+
+	// A reconciler with nothing in memory, as after a restart.
+	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+	require.Empty(t, r.prStates)
+
+	// No VGSetPersist: the switch is done and must not be run again.
+	register := commands.EXPECT().VGPersistStart(gomock.Any(), testVG, 7).Return("", nil)
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).After(register).Return("", nil)
+
+	reconcile(t, r, group)
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	assert.Equal(t, PRStateEnabled, entryOf(t, published).PersistentReservations.State,
+		"the node keeps saying where it stands rather than forgetting it")
+}

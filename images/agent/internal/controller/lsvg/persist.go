@@ -137,3 +137,15 @@ func prStatus(v utils.PRReadiness) *v1alpha1.NodePersistentReservations {
 		Key:     v.Key,
 	}
 }
+
+// forgetPRVerdict drops the cached answer so the next pass reads it again.
+//
+// It is called after this node registers, because that is when its key changes:
+// lvm2 derives the key from the host id and the lockspace generation, so a node
+// that restarts its lockspace comes back with a different one — measured on the
+// stand, where host id 1 went from 0x1000000000010001 to 0x1000000000040001. A
+// key published for ten more minutes after that is a key a neighbour would fence
+// by and miss.
+func (r *Reconciler) forgetPRVerdict(lsvg *v1alpha1.LVMSharedVolumeGroup) {
+	delete(r.prVerdicts, lsvg.Name)
+}

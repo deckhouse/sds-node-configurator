@@ -58,11 +58,16 @@ func TestEvictionRemovesTheKeyFromEveryPath(t *testing.T) {
 	})
 
 	for _, path := range []string{"/dev/sdb", "/dev/sdc"} {
-		commands.EXPECT().ReadRegistrationKeys(gomock.Any(), path).
-			Return([]string{"0x1000000000010001", "0x1000000000010002"}, "", nil)
 		commands.EXPECT().PreemptRegistration(gomock.Any(), path, "0x1000000000010001", "0x1000000000010002").
 			Return("", nil)
 	}
+	// Read before the preempt, and read again afterwards to see what is left.
+	gomock.InOrder(
+		commands.EXPECT().ReadRegistrationKeys(gomock.Any(), gomock.Any()).
+			Return([]string{"0x1000000000010001", "0x1000000000010002"}, "", nil).Times(2),
+		commands.EXPECT().ReadRegistrationKeys(gomock.Any(), gomock.Any()).
+			Return([]string{"0x1000000000010001"}, "", nil).Times(2),
+	)
 
 	r, _, _ := testReconciler(t, nodeWith(nil), commands, nil, group)
 	r.evictRequestedNode(context.Background(), group)
@@ -81,7 +86,7 @@ func TestEvictionIsSkippedOnPathsWhereTheKeyIsAlreadyGone(t *testing.T) {
 	})
 
 	commands.EXPECT().ReadRegistrationKeys(gomock.Any(), gomock.Any()).
-		Return([]string{"0x1000000000010001"}, "", nil).Times(2)
+		Return([]string{"0x1000000000010001"}, "", nil).AnyTimes()
 	// No PreemptRegistration: there is nothing left to preempt.
 
 	r, _, _ := testReconciler(t, nodeWith(nil), commands, nil, group)
@@ -161,4 +166,39 @@ func TestANodesKeyIsPublishedOnlyWhenEveryLUNAgrees(t *testing.T) {
 	assert.Equal(t, "0x1002d", utils.SingleReservationKey([]string{"0x1002d", "0X1002D"}))
 	assert.Empty(t, utils.SingleReservationKey([]string{"0x1002d", "0x1002e"}))
 	assert.Empty(t, utils.SingleReservationKey([]string{"0x1002d", "0x0"}))
+}
+
+func TestAKeyNobodyClaimsIsNamedRatherThanTakenForNobodys(t *testing.T) {
+	// lvm2 derives the key from the host id and the lockspace generation, so a
+	// node that restarted its lockspace since it last published is registered
+	// under a key nobody has seen — measured on the stand, where host id 1 went
+	// from 0x1000000000010001 to 0x1000000000040001. Preempting the published
+	// key would then remove nothing and report the node fenced.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := poolWithEvictionRequested(map[string]string{
+		testNode:      "0x1000000000010001",
+		"second-node": "0x1000000000010002",
+	})
+
+	commands.EXPECT().PreemptRegistration(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return("", nil).AnyTimes()
+	gomock.InOrder(
+		commands.EXPECT().ReadRegistrationKeys(gomock.Any(), gomock.Any()).
+			Return([]string{"0x1000000000010001", "0x1000000000010002"}, "", nil).Times(2),
+		// Afterwards: the published key is gone, and a key of the same node
+		// under a newer lockspace generation is not.
+		commands.EXPECT().ReadRegistrationKeys(gomock.Any(), gomock.Any()).
+			Return([]string{"0x1000000000010001", "0x1000000000040002"}, "", nil).Times(2),
+	)
+
+	r, cl, _ := testReconciler(t, nodeWith(nil), commands, nil, group)
+	r.evictRequestedNode(context.Background(), group)
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	entry := entryOf(t, published)
+	assert.Equal(t, ReasonEvictionIncomplete, entry.Reason)
+	assert.Contains(t, entry.Message, "0x1000000000040002")
 }

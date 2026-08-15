@@ -389,10 +389,11 @@ func (r *Reconciler) startLockspaceUnderReservations(
 	// and the group actually requiring reservations there is a window, and
 	// registering inside it is refused — which would leave the executor unable
 	// to bring up the lockspace that `--setpersist require` needs.
-	if r.prStateOf(lsvg, r.cfg.NodeName) == PRStateEnabled {
+	if r.prStateHere(lsvg) == PRStateEnabled {
 		if cmd, err := r.commands.VGPersistStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, hostID); err != nil {
 			return cmd, err
 		}
+		r.forgetPRVerdict(lsvg)
 	}
 	return r.commands.VGLockStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, hostID)
 }
@@ -409,5 +410,40 @@ func (r *Reconciler) rejoinUnderReservations(
 	if cmd, err := r.commands.VGPersistStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, hostID); err != nil {
 		return cmd, err
 	}
+	r.forgetPRVerdict(lsvg)
 	return r.commands.VGLockStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, hostID)
+}
+
+// prStateHere is where this node stands, and it outlives the process.
+//
+// The state is a fact about the array and the group — this node holds a
+// registration, or has given one up on purpose — not bookkeeping that may start
+// empty. An agent restart used to erase it: the node published no state, its
+// own switch logic then read that back as "not under reservations", and the two
+// things that follow from it are both wrong. It would take the pool through the
+// switch again, standing its neighbours aside; and it would start its lockspace
+// without registering first, which under a Write Exclusive, all registrants
+// reservation is a node that cannot renew its lease and fences itself.
+//
+// So memory answers only while it has something to say, and what was published
+// answers otherwise.
+func (r *Reconciler) prStateHere(lsvg *v1alpha1.LVMSharedVolumeGroup) string {
+	if state := r.prStates[lsvg.Name]; state != "" {
+		return state
+	}
+	return publishedPRStateOf(lsvg, r.cfg.NodeName)
+}
+
+// publishedPRStateOf reads a member's last published state, with "" for a member
+// that has never published one.
+func publishedPRStateOf(lsvg *v1alpha1.LVMSharedVolumeGroup, nodeName string) string {
+	if lsvg.Status == nil {
+		return ""
+	}
+	for _, node := range lsvg.Status.Nodes {
+		if node.Name == nodeName && node.PersistentReservations != nil {
+			return node.PersistentReservations.State
+		}
+	}
+	return ""
 }
