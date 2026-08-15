@@ -889,3 +889,18 @@ func (mr *MockCommandsMockRecorder) VGScan(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGScan", reflect.TypeOf((*MockCommands)(nil).VGScan), ctx)
 }
+
+// WipeDMTable mocks base method.
+func (m *MockCommands) WipeDMTable(ctx context.Context, dmName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "WipeDMTable", ctx, dmName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// WipeDMTable indicates an expected call of WipeDMTable.
+func (mr *MockCommandsMockRecorder) WipeDMTable(ctx, dmName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WipeDMTable", reflect.TypeOf((*MockCommands)(nil).WipeDMTable), ctx, dmName)
+}

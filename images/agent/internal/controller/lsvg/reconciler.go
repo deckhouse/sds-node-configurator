@@ -508,12 +508,42 @@ func (r *Reconciler) leave(
 	}
 
 	if active := r.activeLVs(lsvg.Spec.ActualVGNameOnTheNode); len(active) > 0 {
-		// Not an error: the attachment reconciler is deactivating them, or the
-		// controller removed the node while volumes were still in use. Say what
-		// is holding the node and come back.
-		r.log.Warning(fmt.Sprintf("[%s] cannot stop the lockspace of %s: %d volume(s) still active here (%s)",
-			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, len(active), strings.Join(active, ", ")))
-		return controller.Result{RequeueAfter: 15 * time.Second}, nil
+		// The volumes are still here and the pool has already decided this node
+		// is out of it. Ordinarily the attachment reconciler is deactivating
+		// them and one more pass is all that is needed, so that is tried first.
+		if r.attachmentsRemain(ctx, lsvg.Name) {
+			r.log.Warning(fmt.Sprintf("[%s] cannot stop the lockspace of %s yet: %d volume(s) still active here (%s)",
+				ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, len(active), strings.Join(active, ", ")))
+			return controller.Result{RequeueAfter: 15 * time.Second}, nil
+		}
+
+		// Nothing asks for them any more, and they are still mapped. That is the
+		// live-stuck node: kubelet is gone, its pods were never removed, their
+		// mounts hold the volumes, and sanlock will renew the lease for as long
+		// as this node breathes. Waiting here is waiting for a human.
+		//
+		// So the node raises the barrier over its own volumes — the same error
+		// target the fencing handler writes — and only then stops the lockspace.
+		// The order is the whole safety of it: leases must not expire while a
+		// write can still reach the array, because by then the volume may belong
+		// to somebody else. Data is not damaged either way; writes fail instead
+		// of landing somewhere they should not.
+		r.log.Warning(fmt.Sprintf("[%s] %d volume(s) of %s are mapped here with nothing asking for them and the node is out of the pool: raising the barrier",
+			ReconcilerName, len(active), lsvg.Spec.ActualVGNameOnTheNode))
+
+		blocked := false
+		for _, lvName := range active {
+			dmName := utils.DMName(lsvg.Spec.ActualVGNameOnTheNode, lvName)
+			if cmd, err := r.commands.WipeDMTable(ctx, dmName); err != nil {
+				r.log.Error(err, fmt.Sprintf("[%s] the barrier over %s failed (cmd: %s)", ReconcilerName, dmName, cmd))
+				blocked = true
+			}
+		}
+		if blocked {
+			// One map short of a barrier is not a barrier: a write could still
+			// reach the array through it, so the leases stay where they are.
+			return controller.Result{RequeueAfter: 15 * time.Second}, nil
+		}
 	}
 
 	if err := r.setLockspaceStarted(ctx, lsvg.Name, "", false); err != nil {
@@ -622,6 +652,21 @@ func (r *Reconciler) removeLeftoverMappings(ctx context.Context, vgName string, 
 				ReconcilerName, dmName, cmd, err.Error()))
 		}
 	}
+}
+
+// attachmentsRemain reports whether anything still asks this node for a volume
+// of the group. It is the difference between "the release is in progress" and
+// "nobody is coming", and those two want opposite things.
+func (r *Reconciler) attachmentsRemain(ctx context.Context, groupName string) bool {
+	wanted, err := r.attachedHere(ctx, groupName)
+	if err != nil {
+		// Unknown, so treated as "someone may still want them": waiting costs a
+		// requeue, raising a barrier on a guess costs a running workload.
+		r.log.Warning(fmt.Sprintf("[%s] unable to tell whether anything still needs the volumes of %s: %s",
+			ReconcilerName, groupName, err.Error()))
+		return true
+	}
+	return len(wanted) > 0
 }
 
 // attachedHere is the set of volumes this node has an attachment for.

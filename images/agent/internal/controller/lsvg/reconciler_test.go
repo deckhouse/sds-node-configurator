@@ -190,24 +190,95 @@ func TestFailedLockStartLeavesTheNodeNotReady(t *testing.T) {
 		"readiness must not be claimed for a lockspace that did not start")
 }
 
-func TestLeaveRefusesWhileAVolumeIsActive(t *testing.T) {
+func TestLeaveWaitsWhileSomethingStillAsksForTheVolume(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
-	// No VGLockStop expectation: stopping the lockspace under an active volume
-	// leaves the volume writable with no lock behind it.
+	// Neither VGLockStop nor a barrier: the attachment reconciler is releasing
+	// the volume, and one more pass is all this needs.
+	node := nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                     "7",
+		LockspaceStartedAnnotationPrefix + "pool-1": "true",
+	})
+	group := testGroup("other-node")
+	volume := &v1alpha1.LVMSharedLogicalVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "vol-1"},
+		Spec: v1alpha1.LVMSharedLogicalVolumeSpec{
+			LVMSharedVolumeGroupName: group.Name,
+			ActualLVNameOnTheNode:    "vol1",
+			Size:                     "1Gi",
+		},
+	}
+	attachment := &v1alpha1.LVMSharedLogicalVolumeAttachment{
+		ObjectMeta: metav1.ObjectMeta{Name: "att-1"},
+		Spec: v1alpha1.LVMSharedLogicalVolumeAttachmentSpec{
+			LVMSharedLogicalVolumeName: "vol-1",
+			NodeName:                   testNode,
+		},
+	}
+	fakeSysBlockWithLUN(t, 8192)
+	fakeActiveLV(t, "vol1")
+	r, cl, _ := testReconciler(t, node, commands, nil, volume, attachment)
+
+	res := reconcile(t, r, group)
+
+	assert.NotZero(t, res.RequeueAfter)
+	assert.Contains(t, annotationsOf(t, cl), LockspaceStartedAnnotationPrefix+"pool-1",
+		"the node still holds the lockspace, so it must still say so")
+}
+
+func TestALiveStuckNodeRaisesTheBarrierOverItsOwnVolumes(t *testing.T) {
+	// kubelet is gone, its pods were never removed, their mounts hold the
+	// volumes, and sanlock renews the lease for as long as the node breathes.
+	// The pool has already taken the node out. Waiting here is waiting for a
+	// human, which this platform does not do.
+	//
+	// The order is the safety: the barrier first, the leases after. Data is not
+	// damaged either way — a write fails instead of landing on a volume that by
+	// then may belong to somebody else.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
 	node := nodeWith(map[string]string{
 		SanlockHostIDAnnotation:                     "7",
 		LockspaceStartedAnnotationPrefix + "pool-1": "true",
 	})
 	fakeSysBlockWithLUN(t, 8192)
 	fakeActiveLV(t, "vol1")
-	r, cl, _ := testReconciler(t, node, commands, []internal.LVData{activeLV("vgshared", "vol1")})
+	r, cl, _ := testReconciler(t, node, commands, nil)
+
+	gomock.InOrder(
+		commands.EXPECT().WipeDMTable(gomock.Any(), utils.DMName(testVG, "vol1")).
+			Return("dmsetup wipe_table", nil),
+		commands.EXPECT().VGLockStop(gomock.Any(), testVG).Return("vgchange --lock-stop", nil),
+	)
+
+	reconcile(t, r, testGroup("other-node"))
+
+	assert.NotContains(t, annotationsOf(t, cl), LockspaceStartedAnnotationPrefix+"pool-1",
+		"the node holds nothing now and must not claim otherwise")
+}
+
+func TestAnIncompleteBarrierLeavesTheLeasesAlone(t *testing.T) {
+	// One map short of a barrier is not a barrier: a write could still reach the
+	// array through it, so the leases stay where they are and the node tries
+	// again rather than letting another node have the volume.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	node := nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                     "7",
+		LockspaceStartedAnnotationPrefix + "pool-1": "true",
+	})
+	fakeSysBlockWithLUN(t, 8192)
+	fakeActiveLV(t, "vol1")
+	r, cl, _ := testReconciler(t, node, commands, nil)
+
+	// No VGLockStop expectation: the leases must not go.
+	commands.EXPECT().WipeDMTable(gomock.Any(), utils.DMName(testVG, "vol1")).
+		Return("dmsetup wipe_table", errors.New("device busy"))
 
 	res := reconcile(t, r, testGroup("other-node"))
 
 	assert.NotZero(t, res.RequeueAfter)
-	assert.Equal(t, "true", annotationsOf(t, cl)[LockspaceStartedAnnotationPrefix+"pool-1"],
-		"the node still holds the lockspace, so it must still say so")
+	assert.Contains(t, annotationsOf(t, cl), LockspaceStartedAnnotationPrefix+"pool-1")
 }
 
 func TestLeaveDropsReadinessBeforeStoppingTheLockspace(t *testing.T) {

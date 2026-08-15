@@ -76,6 +76,7 @@ type Commands interface {
 	LVExtendShared(ctx context.Context, vgName, lvName, size string) (string, error)
 	LVActivateShared(ctx context.Context, vgName string, lvNames []string, shared bool) (string, error)
 	RemoveDMDevice(ctx context.Context, dmName string) (string, error)
+	WipeDMTable(ctx context.Context, dmName string) (string, error)
 	LVDeactivateShared(ctx context.Context, vgName string, lvNames []string) (string, error)
 	LVActivate(ctx context.Context, vgName, lvName string) (string, error)
 	VGScan(ctx context.Context) (string, error)
@@ -1082,6 +1083,31 @@ func (commands) LVActivateShared(ctx context.Context, vgName string, lvNames []s
 // LVDeactivateShared releases volumes of a shared Volume Group, which is what
 // hands their locks to whoever wants them next. Same batching, same caveat
 // about the single exit code.
+// WipeDMTable replaces a device-mapper table with an error target: the barrier.
+//
+// It is the same command the fencing handler runs, and it is here so that a node
+// the pool has removed can raise the barrier over its own volumes instead of
+// waiting for somebody to do it over SSH. The difference between this and
+// removing the device is the whole point: a write in flight has to FAIL rather
+// than find nothing, because the volume it was aimed at may already belong to
+// another node.
+//
+// --force replaces the table of a device that is open, which is exactly the case
+// this exists for; --noudevsync because udev cannot be waited on when the node
+// is being taken out of a pool it can no longer talk to.
+func (commands) WipeDMTable(ctx context.Context, dmName string) (string, error) {
+	args := nsentrerExpendedArgs(internal.DMSetupCmd, "wipe_table", "--force", "--noudevsync", dmName)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
 // RemoveDMDevice tears down a device-mapper device by name, and it exists
 // because lvchange cannot.
 //
