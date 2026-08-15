@@ -200,7 +200,7 @@ func TestLeaveRefusesWhileAVolumeIsActive(t *testing.T) {
 		LockspaceStartedAnnotationPrefix + "pool-1": "true",
 	})
 	fakeSysBlockWithLUN(t, 8192)
-	fakeActiveLV(t, testVG, "vol1")
+	fakeActiveLV(t, "vol1")
 	r, cl, _ := testReconciler(t, node, commands, []internal.LVData{activeLV("vgshared", "vol1")})
 
 	res := reconcile(t, r, testGroup("other-node"))
@@ -322,12 +322,12 @@ func fakeSysBlockWithLUN(t *testing.T, granularity int) {
 
 // fakeActiveLV adds a device-mapper device for a volume of the group, which is
 // what "active on this node" means and the only thing the reconciler reads.
-func fakeActiveLV(t *testing.T, vgName, lvName string) {
+func fakeActiveLV(t *testing.T, lvName string) {
 	t.Helper()
 	root := utils.SysBlockRoot
 	base := filepath.Join(root, "dm-9")
 	require.NoError(t, os.MkdirAll(filepath.Join(base, "dm"), 0o755))
-	mangled := strings.ReplaceAll(vgName, "-", "--") + "-" + strings.ReplaceAll(lvName, "-", "--")
+	mangled := strings.ReplaceAll(testVG, "-", "--") + "-" + strings.ReplaceAll(lvName, "-", "--")
 	require.NoError(t, os.WriteFile(filepath.Join(base, "dm", "name"), []byte(mangled+"\n"), 0o644))
 }
 
@@ -536,7 +536,7 @@ func TestAStartedLockspaceReleasesMappingsNobodyAskedFor(t *testing.T) {
 	// The moment to clean it up is right after the lockspace starts: the leases
 	// are fresh, so everything mapped from before is known to be unlocked.
 	fakeSysBlockWithLUN(t, 8192)
-	fakeActiveLV(t, testVG, "stray")
+	fakeActiveLV(t, "stray")
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	group := testGroup(testNode)
@@ -558,7 +558,7 @@ func TestAVolumeWithAnAttachmentIsLeftAlone(t *testing.T) {
 	// would take the volume from under a running pod, and the attachment is the
 	// statement that the pod is meant to have it.
 	fakeSysBlockWithLUN(t, 8192)
-	fakeActiveLV(t, testVG, "vol1")
+	fakeActiveLV(t, "vol1")
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	group := testGroup(testNode)
@@ -596,7 +596,7 @@ func TestALockspaceStartedBeforeThisAgentIsTakenStockOf(t *testing.T) {
 	// from one whose leases were lost: the node adopts a number now and treats
 	// what it finds as residue.
 	fakeSysBlockWithLUN(t, 8192)
-	fakeActiveLV(t, testVG, "stray")
+	fakeActiveLV(t, "stray")
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	group := testGroup(testNode)
@@ -626,7 +626,7 @@ func TestAVolumeWithAnAttachmentKeepsItsMappingThroughTheCleanup(t *testing.T) {
 	// would happily tear down a device a pod is using. The attachment is the
 	// only thing standing between the two, so it is worth its own test.
 	fakeSysBlockWithLUN(t, 8192)
-	fakeActiveLV(t, testVG, "vol1")
+	fakeActiveLV(t, "vol1")
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	group := testGroup(testNode)
@@ -661,7 +661,7 @@ func TestResidueIsReleasedOnEveryPassNotOnlyTheFirst(t *testing.T) {
 	// daemons restart, which this reconciler does not witness, so the cleanup
 	// belongs to the state and not to a first sighting.
 	fakeSysBlockWithLUN(t, 8192)
-	fakeActiveLV(t, testVG, "stray")
+	fakeActiveLV(t, "stray")
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	group := testGroup(testNode)
