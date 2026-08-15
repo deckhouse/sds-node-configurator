@@ -102,31 +102,67 @@ func (r *Reconciler) checkPersistentReservations(
 }
 
 // reservationKeyOfThisNode is the key this node registers with, once it holds a
-// registration. It is empty before the pool is switched, and empty is the honest
-// answer then: there is no key yet, and a neighbour must not fence by a guess.
+// registration, and it also makes sure multipathd knows it.
+//
+// The key comes from lvmpersist, which is the only place it exists by name: lvm2
+// derives it from the sanlock host id and the lockspace generation. Neither
+// multipathd nor this module can compute it, and multipathd does not learn it on
+// its own either — the registration is made with sg_persist rather than through
+// the library multipathd shares with mpathpersist. So it is handed over here,
+// and a path that comes back after a failure is registered again instead of
+// being left outside the reservation, refusing this node's writes while looking
+// healthy.
+//
+// Before the pool is switched there is no key, and empty is the honest answer:
+// a neighbour must not fence by a guess.
 func (r *Reconciler) reservationKeyOfThisNode(
 	ctx context.Context,
 	lsvg *v1alpha1.LVMSharedVolumeGroup,
 ) string {
+	key, err := r.commands.RecordedReservationKey(ctx)
+	if err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] cannot read the reservation key of this node for %s: %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
+		return ""
+	}
+	if key == "" {
+		return ""
+	}
+
+	r.tellMultipathdTheKey(ctx, lsvg, key)
+	return key
+}
+
+// tellMultipathdTheKey hands the key to multipathd for every LUN of the pool
+// that does not already have it.
+func (r *Reconciler) tellMultipathdTheKey(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+	key string,
+) {
 	wwids := make([]string, 0, len(lsvg.Spec.Devices))
 	for _, device := range lsvg.Spec.Devices {
 		wwids = append(wwids, device.WWID)
 	}
-	devices, missing, err := utils.ResolveWWIDs(wwids)
-	if err != nil || len(missing) > 0 {
-		// A key read from some of the pool's LUNs says nothing about the rest.
-		return ""
+	devices, _, err := utils.ResolveWWIDs(wwids)
+	if err != nil {
+		return
 	}
 
-	keys := make([]string, 0, len(devices))
 	for _, wwid := range utils.SortedWWIDs(devices) {
-		answer, err := r.commands.ReservationKeyOf(ctx, utils.MultipathNameOf(devices[wwid].Path))
-		if err != nil {
-			return ""
+		name := utils.MultipathNameOf(devices[wwid].Path)
+		known, err := r.commands.ReservationKeyOf(ctx, name)
+		if err == nil && utils.SameRegistrationKey(utils.KeyOfMap(known), key) {
+			continue
 		}
-		keys = append(keys, utils.KeyOfMap(answer))
+		if cmd, err := r.commands.SetReservationKey(ctx, name, key); err != nil {
+			r.log.Warning(fmt.Sprintf("[%s] multipathd was not told the reservation key of %s (cmd: %s): %s",
+				ReconcilerName, name, cmd, err.Error()))
+			continue
+		}
+		r.log.Info(fmt.Sprintf("[%s] multipathd now knows the reservation key of %s, so a returning path is registered again",
+			ReconcilerName, name))
 	}
-	return utils.SingleReservationKey(keys)
 }
 
 func prStatus(v utils.PRReadiness) *v1alpha1.NodePersistentReservations {

@@ -267,6 +267,13 @@ func (r *Reconciler) publishNodeState(
 		if pr.Message != "" {
 			reservations["message"] = pr.Message
 		}
+		if pr.Key != "" {
+			// The key is how a neighbour takes this node's access away when the
+			// node can no longer be asked to give it up. Left out of this patch
+			// it was computed, logged and never published — the entry said
+			// nothing, and an eviction had nothing to aim at.
+			reservations["key"] = pr.Key
+		}
 		entry["persistentReservations"] = reservations
 	}
 
@@ -382,7 +389,12 @@ func samePRVerdict(published, current *v1alpha1.NodePersistentReservations) bool
 	}
 	return published.Ready == current.Ready &&
 		published.Reason == current.Reason &&
-		published.Message == current.Message
+		published.Message == current.Message &&
+		// The key changes with the lockspace generation, so a node that
+		// restarted its lockspace has a new one to publish. Leaving it out of
+		// this comparison keeps the old key in the status, and a neighbour would
+		// fence by a key the array no longer knows.
+		published.Key == current.Key
 }
 
 // publishedPRState is where a node said it stands in a switch, or the empty

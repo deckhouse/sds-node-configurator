@@ -78,6 +78,8 @@ type Commands interface {
 	VGPersistSetting(ctx context.Context, vgName string) (string, error)
 	VGSetLockArgsPersist(ctx context.Context, vgName string, hostID int) (string, error)
 	MultipathConfiguration(ctx context.Context) (string, error)
+	RecordedReservationKey(ctx context.Context) (string, error)
+	SetReservationKey(ctx context.Context, mapName, key string) (string, error)
 	ReadRegistrationKeys(ctx context.Context, path string) ([]string, string, error)
 	PreemptRegistration(ctx context.Context, path, ourKey, theirKey string) (string, error)
 	MissingReservationTools(ctx context.Context) ([]string, error)
@@ -1397,6 +1399,59 @@ func (commands) ReadRegistrationKeys(ctx context.Context, path string) ([]string
 		return nil, cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 	return ParseRegistrationKeys(out.String()), cmd.String(), nil
+}
+
+// RecordedReservationKey reads the key this node last registered with, as
+// lvmpersist wrote it down.
+//
+// Nothing here can derive it: lvm2 computes it from the sanlock host id and the
+// lockspace generation, and a node that restarted its lockspace comes back with
+// a different one. An empty answer means this node has not registered yet, which
+// is what a pool that has not been switched looks like.
+func (commands) RecordedReservationKey(ctx context.Context) (string, error) {
+	argv, err := sharedNamespaceArgs("/bin/cat", internal.SharedReservationKeyFile)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		// No file yet is not a fault: it is a node that has not registered.
+		if strings.Contains(stderr.String(), "No such file") {
+			return "", nil
+		}
+		return "", fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return strings.TrimSpace(out.String()), nil
+}
+
+// SetReservationKey tells the host's multipathd which key a map is registered
+// with.
+//
+// Without it multipathd knows nothing of the registration — we register with
+// sg_persist, not through the library multipathd shares with mpathpersist — and
+// a path that comes back after a failure is left unregistered. Under a Write
+// Exclusive, all registrants reservation that path then refuses this node's
+// writes, which looks like a flapping path healing and quietly not working.
+func (commands) SetReservationKey(ctx context.Context, mapName, key string) (string, error) {
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd,
+		hostNamespaceArgs(internal.SharedMultipathdCmd, "setprkey", "map", mapName, key)...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	if answer := strings.TrimSpace(out.String()); answer != "" && !strings.EqualFold(answer, "ok") {
+		return cmd.String(), fmt.Errorf("multipathd refused the key of %s: %s", mapName, answer)
+	}
+	return cmd.String(), nil
 }
 
 // PreemptRegistration takes a key off a LUN, on one path.

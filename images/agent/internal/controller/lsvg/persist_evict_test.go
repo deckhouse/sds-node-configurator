@@ -202,3 +202,49 @@ func TestAKeyNobodyClaimsIsNamedRatherThanTakenForNobodys(t *testing.T) {
 	assert.Equal(t, ReasonEvictionIncomplete, entry.Reason)
 	assert.Contains(t, entry.Message, "0x1000000000040002")
 }
+
+func TestMultipathdIsToldTheKeyThisNodeRegisteredWith(t *testing.T) {
+	// The registration is made with sg_persist, not through the library
+	// multipathd shares with mpathpersist, so multipathd knows nothing of it —
+	// `getprkey` answers "none" while the array holds three keys. A path that
+	// comes back after a failure is then left unregistered, and under a Write
+	// Exclusive, all registrants reservation it refuses this node's writes while
+	// looking like a path that healed.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := poolAskingForReservations()
+
+	commands.EXPECT().MissingReservationTools(gomock.Any()).Return(nil, nil).AnyTimes()
+	commands.EXPECT().MultipathConfiguration(gomock.Any()).Return("\treservation_key \"file\"\n", nil).AnyTimes()
+	commands.EXPECT().RecordedReservationKey(gomock.Any()).Return("0x1000000000040001", nil)
+	commands.EXPECT().ReservationKeyOf(gomock.Any(), "mpathi").Return("none", nil)
+	commands.EXPECT().SetReservationKey(gomock.Any(), "mpathi", "0x1000000000040001").Return("", nil)
+
+	r, _, _ := testReconciler(t, nodeWith(nil), commands, nil, group)
+
+	verdict := r.persistentReservations(context.Background(), group)
+
+	require.NotNil(t, verdict)
+	assert.Equal(t, "0x1000000000040001", verdict.Key,
+		"and the node publishes it, so a neighbour has something to fence by")
+}
+
+func TestAKeyMultipathdAlreadyHasIsNotWrittenAgain(t *testing.T) {
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := poolAskingForReservations()
+
+	commands.EXPECT().MissingReservationTools(gomock.Any()).Return(nil, nil).AnyTimes()
+	commands.EXPECT().MultipathConfiguration(gomock.Any()).Return("\treservation_key \"file\"\n", nil).AnyTimes()
+	commands.EXPECT().RecordedReservationKey(gomock.Any()).Return("0x1000000000040001", nil)
+	// The same key, spelled the other way round: comparing the strings would
+	// rewrite it on every pass.
+	commands.EXPECT().ReservationKeyOf(gomock.Any(), "mpathi").Return("0X1000000000040001", nil)
+	// No SetReservationKey.
+
+	r, _, _ := testReconciler(t, nodeWith(nil), commands, nil, group)
+
+	assert.Equal(t, "0x1000000000040001", r.persistentReservations(context.Background(), group).Key)
+}

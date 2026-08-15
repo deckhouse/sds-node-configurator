@@ -103,6 +103,7 @@ func testReconciler(
 	// about the channel itself say otherwise before calling this helper.
 	commands.EXPECT().MissingReservationTools(gomock.Any()).Return(nil, nil).AnyTimes()
 	commands.EXPECT().MultipathConfiguration(gomock.Any()).Return("\treservation_key \"file\"\n", nil).AnyTimes()
+	commands.EXPECT().RecordedReservationKey(gomock.Any()).Return("", nil).AnyTimes()
 	commands.EXPECT().ReservationKeyOf(gomock.Any(), gomock.Any()).Return("0x100000000001002d", nil).AnyTimes()
 
 	log, err := logger.NewLogger(logger.WarningLevel)
@@ -500,6 +501,7 @@ func TestTheOwnerPublishesWhatItObservesAboutTheGroup(t *testing.T) {
 
 	commands.EXPECT().MissingReservationTools(gomock.Any()).Return(nil, nil).AnyTimes()
 	commands.EXPECT().MultipathConfiguration(gomock.Any()).Return("\treservation_key \"file\"\n", nil).AnyTimes()
+	commands.EXPECT().RecordedReservationKey(gomock.Any()).Return("", nil).AnyTimes()
 	commands.EXPECT().ReservationKeyOf(gomock.Any(), gomock.Any()).Return("0x1", nil).AnyTimes()
 	commands.EXPECT().LockspaceRunning(gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	commands.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "pvs", bytes.Buffer{}, nil).AnyTimes()
@@ -908,8 +910,9 @@ func applyNodeEntry(
 			prReason, _ := raw["reason"].(string)
 			prMessage, _ := raw["message"].(string)
 			prState, _ := raw["state"].(string)
+			prKey, _ := raw["key"].(string)
 			published.PersistentReservations = &v1alpha1.NodePersistentReservations{
-				Ready: ready, Reason: prReason, Message: prMessage, State: prState,
+				Ready: ready, Reason: prReason, Message: prMessage, State: prState, Key: prKey,
 			}
 		}
 		group.Status.Nodes = append(group.Status.Nodes, published)

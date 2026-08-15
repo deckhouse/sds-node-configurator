@@ -695,6 +695,21 @@ func (mr *MockCommandsMockRecorder) ReadRegistrationKeys(ctx, path any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadRegistrationKeys", reflect.TypeOf((*MockCommands)(nil).ReadRegistrationKeys), ctx, path)
 }
 
+// RecordedReservationKey mocks base method.
+func (m *MockCommands) RecordedReservationKey(ctx context.Context) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RecordedReservationKey", ctx)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RecordedReservationKey indicates an expected call of RecordedReservationKey.
+func (mr *MockCommandsMockRecorder) RecordedReservationKey(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordedReservationKey", reflect.TypeOf((*MockCommands)(nil).RecordedReservationKey), ctx)
+}
+
 // RemoveDMDevice mocks base method.
 func (m *MockCommands) RemoveDMDevice(ctx context.Context, dmName string) (string, error) {
 	m.ctrl.T.Helper()
@@ -888,6 +903,21 @@ func (m *MockCommands) SetLoopDirectIO(ctx context.Context, loopDev string) (str
 func (mr *MockCommandsMockRecorder) SetLoopDirectIO(ctx, loopDev any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLoopDirectIO", reflect.TypeOf((*MockCommands)(nil).SetLoopDirectIO), ctx, loopDev)
+}
+
+// SetReservationKey mocks base method.
+func (m *MockCommands) SetReservationKey(ctx context.Context, mapName, key string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetReservationKey", ctx, mapName, key)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetReservationKey indicates an expected call of SetReservationKey.
+func (mr *MockCommandsMockRecorder) SetReservationKey(ctx, mapName, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetReservationKey", reflect.TypeOf((*MockCommands)(nil).SetReservationKey), ctx, mapName, key)
 }
 
 // SetupLoopDevice mocks base method.

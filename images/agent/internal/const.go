@@ -86,6 +86,16 @@ const (
 	// does the same operation in a third of a second.
 	SharedSgPersistCmd = "/usr/bin/sg_persist"
 
+	// SharedReservationKeyFile is where the lock daemons' lvmpersist leaves the
+	// key this node registers with.
+	//
+	// The key is lvm2's to choose — derived from the sanlock host id and the
+	// lockspace generation, so it changes when a lockspace restarts — and
+	// lvmpersist is the only place it is known by name. Reading it back is how
+	// the node publishes a key its neighbours can fence by, and how multipathd
+	// is told which key to re-register a returning path with.
+	SharedReservationKeyFile = "/run/lvm-shared-pool/ourkey"
+
 	// SharedLvmPersistCmd is the script lvm2 runs for every `vgchange --persist`
 	// and `--setpersist`, by a path compiled into it. It is checked rather than
 	// called: a pool that cannot find it fails in the middle of the one-way

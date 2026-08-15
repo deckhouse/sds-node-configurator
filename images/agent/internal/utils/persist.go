@@ -113,7 +113,10 @@ func ReservationKeyConfigured(config string) bool {
 // a pool is switched — it is what an unregistered map says.
 func KeyOfMap(answer string) string {
 	answer = strings.TrimSpace(answer)
-	if answer == "" || answer == "none" || !strings.HasPrefix(answer, "0x") {
+	// Case-insensitively: the tools do not agree on the spelling of a key, and
+	// reading "0X…" as "no key" would have this module rewrite a key multipathd
+	// already has, on every pass.
+	if answer == "" || strings.EqualFold(answer, "none") || !strings.HasPrefix(strings.ToLower(answer), "0x") {
 		return ""
 	}
 	return answer
