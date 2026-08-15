@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 )
@@ -111,4 +112,25 @@ func TestAGroupWithoutAKnownUUIDIsNotRecordedAsEmpty(t *testing.T) {
 	r.rememberVGUUID(testVG, "")
 
 	assert.Nil(t, readVGUUIDs(t, dir), "nothing is written when there is nothing to say")
+}
+
+func TestEveryMemberForgetsAGroupThatIsGoneNotOnlyItsOwner(t *testing.T) {
+	// Only the owner runs the removal, so only the owner used to drop the entry.
+	// The other members were left pointing the fencing handler at a group that
+	// no longer exists — seen on the stand, where a pool was removed cleanly and
+	// two of its three nodes still named it in vg-uuid.json afterwards.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := deletedGroup(func(g *v1alpha1.LVMSharedVolumeGroup) {
+		g.Spec.MetadataOwner = "another-node"
+	})
+	r, _, dir := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, vgUUIDFileName),
+		[]byte(`{"other-pool":"keep-me","`+testVG+`":"drop-me"}`), 0o644))
+
+	reconcile(t, r, group)
+
+	assert.Equal(t, map[string]string{"other-pool": "keep-me"}, readVGUUIDs(t, dir),
+		"a member that left the pool has no business naming its group to the handler")
 }

@@ -117,6 +117,18 @@ func (r *Reconciler) teardown(
 		}
 		// This member has done its part: it has left, and it says so where the
 		// owner reads it.
+		//
+		// Its copy of the group's identity goes too. Only the owner runs the
+		// removal, so only the owner used to forget it — and the other members
+		// were left pointing the fencing handler at a group that no longer
+		// exists. Seen on the stand: a pool removed cleanly, and two of its
+		// three nodes still named it in vg-uuid.json afterwards. Nothing of the
+		// group is active here by now — leave refuses to stop the lockspace
+		// while a volume of it is.
+		r.forgetVGUUID(lsvg.Spec.ActualVGNameOnTheNode)
+		if r.metrics != nil {
+			r.metrics.ForgetSharedPool(lsvg.Spec.ActualVGNameOnTheNode)
+		}
 		return controller.Result{}, nil
 	}
 
