@@ -270,6 +270,11 @@ func (r *Reconciler) join(
 	// published afterwards are about THIS group and not about its name.
 	vgUUID := r.vgUUID(lsvg.Spec.ActualVGNameOnTheNode)
 
+	// And on local disk, where the fencing handler will look for it. It runs
+	// when the storage is already gone, so it cannot ask lvm: the identity has
+	// to be there before it is needed, on every pass that knows it.
+	r.rememberVGUUID(lsvg.Spec.ActualVGNameOnTheNode, vgUUID)
+
 	if lsvg.Spec.MetadataOwner == r.cfg.NodeName {
 		created, res, err := r.ensureGroup(ctx, lsvg, hostID)
 		if err != nil || created || res.RequeueAfter > 0 {

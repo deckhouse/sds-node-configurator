@@ -151,6 +151,11 @@ func (r *Reconciler) teardown(
 
 	r.log.Info(fmt.Sprintf("[%s] the volume group %s is removed", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
 
+	// The group is gone, so its identity must go with it: an entry left behind
+	// points the fencing handler at a UUID that no longer exists, and it would
+	// find no maps and report a barrier it never raised.
+	r.forgetVGUUID(lsvg.Spec.ActualVGNameOnTheNode)
+
 	// The pool's gauge goes with the pool. Left behind it would keep reporting
 	// its last value about something that no longer exists.
 	if r.metrics != nil {
