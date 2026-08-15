@@ -17,6 +17,7 @@ limitations under the License.
 package lsvg
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -143,4 +144,61 @@ func TestAnEmptyPoolIsRemovedAndTheResourceReleased(t *testing.T) {
 	if err == nil {
 		assert.Empty(t, published.Finalizers, "the group is gone, so nothing holds the resource back")
 	}
+}
+
+func TestAPoolGainsTheDeviceItsSpecGained(t *testing.T) {
+	// A pool grows by being given another LUN, and nothing else in this
+	// reconciler would ever notice: the group exists, so every pass used to stop
+	// right there.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := ownedGroup()
+	commands.EXPECT().GetVG(testVG).Return(internal.VGData{VGName: testVG, VGUUID: "vg-uuid"}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+	commands.EXPECT().GetAllPVs(gomock.Any()).
+		Return([]internal.PVData{{PVName: "/dev/mapper/other", VGName: testVG}}, "pvs", bytes.Buffer{}, nil).AnyTimes()
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	// lvm knows the group and its current device; the spec's device is not in it.
+	commands.EXPECT().ExtendVGShared(gomock.Any(), testVG, []string{"/dev/mapper/mpathi"}).Return("vgextend", nil)
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+
+	reconcile(t, r, group)
+}
+
+func TestADeviceAlreadyInTheGroupIsNotAddedAgain(t *testing.T) {
+	// vgextend refuses a physical volume that is already in, loudly, and a pass
+	// that runs it every minute turns a healthy pool into a log full of failures.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := ownedGroup()
+	commands.EXPECT().GetVG(testVG).Return(internal.VGData{VGName: testVG, VGUUID: "vg-uuid"}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+	commands.EXPECT().GetAllPVs(gomock.Any()).
+		Return([]internal.PVData{{PVName: "/dev/mapper/mpathi", VGName: testVG}}, "pvs", bytes.Buffer{}, nil).AnyTimes()
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+
+	// No ExtendVGShared expectation: there is nothing to add.
+	reconcile(t, r, group)
+}
+
+func TestAGroupWhoseDevicesCannotBeListedIsNotExtended(t *testing.T) {
+	// Not knowing what the group already holds is not permission to add to it:
+	// every device would look missing, and vgextend would run against the ones
+	// already in. This is the same shape as reading lvm's "[unknown]" as a name.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := ownedGroup()
+	commands.EXPECT().GetVG(testVG).Return(internal.VGData{VGName: testVG, VGUUID: "vg-uuid"}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+	commands.EXPECT().GetAllPVs(gomock.Any()).
+		Return(nil, "pvs", bytes.Buffer{}, errors.New("lvm is not answering")).AnyTimes()
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+
+	// No ExtendVGShared expectation: silence is not an empty group.
+	reconcile(t, r, group)
 }

@@ -202,6 +202,7 @@ const (
 	ReasonBarrierNotCleared   = "BarrierNotCleared"
 	ReasonVolumesRemain       = "VolumesRemain"
 	ReasonRemovalFailed       = "RemovalFailed"
+	ReasonExtensionRefused    = "ExtensionRefused"
 )
 
 // publishNodeState records what this node has to say about its own membership.

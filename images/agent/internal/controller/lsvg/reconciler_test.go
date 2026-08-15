@@ -93,6 +93,9 @@ func testReconciler(
 	// this helper, and gomock prefers the expectation declared first.
 	commands.EXPECT().GetVG(gomock.Any()).Return(internal.VGData{}, "vgs", bytes.Buffer{}, nil).AnyTimes()
 	commands.EXPECT().GetPV(gomock.Any()).Return(internal.PVData{}, "pvs", bytes.Buffer{}, nil).AnyTimes()
+	// Nothing is in any group unless a test says so: an extension asks lvm which
+	// devices the group already has, and the answer decides whether it runs.
+	commands.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "pvs", bytes.Buffer{}, nil).AnyTimes()
 
 	log, err := logger.NewLogger(logger.WarningLevel)
 	require.NoError(t, err)
@@ -473,6 +476,7 @@ func TestTheOwnerPublishesWhatItObservesAboutTheGroup(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(node, group).WithStatusSubresource(group).Build()
 
+	commands.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "pvs", bytes.Buffer{}, nil).AnyTimes()
 	commands.EXPECT().GetVG(testVG).Return(internal.VGData{
 		VGName:       testVG,
 		VGUUID:       "vg-uuid",

@@ -301,6 +301,21 @@ func (mr *MockCommandsMockRecorder) ExtendVG(vgName, paths any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendVG", reflect.TypeOf((*MockCommands)(nil).ExtendVG), vgName, paths)
 }
 
+// ExtendVGShared mocks base method.
+func (m *MockCommands) ExtendVGShared(ctx context.Context, vgName string, paths []string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExtendVGShared", ctx, vgName, paths)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ExtendVGShared indicates an expected call of ExtendVGShared.
+func (mr *MockCommandsMockRecorder) ExtendVGShared(ctx, vgName, paths any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendVGShared", reflect.TypeOf((*MockCommands)(nil).ExtendVGShared), ctx, vgName, paths)
+}
+
 // FindLoopDeviceByFile mocks base method.
 func (m *MockCommands) FindLoopDeviceByFile(ctx context.Context, filePath string) (string, string, error) {
 	m.ctrl.T.Helper()

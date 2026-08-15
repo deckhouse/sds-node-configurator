@@ -31,6 +31,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -429,6 +430,15 @@ func (r *Reconciler) ensureGroup(
 			lsvg.Name, foreign, lsvg.Spec.ActualVGNameOnTheNode)
 	}
 	if exists {
+		// The group is there. What may have changed is its spec: a pool grows by
+		// gaining LUNs, and nothing else in this reconciler would ever notice.
+		//
+		// It returns nothing on purpose. Joining the lockspace has nothing to do
+		// with the size of the pool, and a member that failed to join because a
+		// `pvs` call hiccuped would be a node out of its pool for an unrelated
+		// reason. Whatever the extension could not do, the next pass does — the
+		// member re-examines itself every minute anyway.
+		r.extendGroup(ctx, lsvg, devices, wwids)
 		return false, controller.Result{}, nil
 	}
 
@@ -478,6 +488,95 @@ func (r *Reconciler) ensureGroup(
 // The name is compared, not just the presence of some group. A label naming any
 // volume group used to count as proof that this group existed, which is only
 // true while the LUN has never been used for anything else.
+// extendGroup adds to the group the devices its spec has gained.
+//
+// Only the metadata owner reaches this, and only through the lock daemons' lvm:
+// vgextend changes the group's metadata, which under lvmlockd means taking the
+// group's lock, which is what keeps two members from extending it at once.
+//
+// Devices are never removed here, and that is a decision rather than an
+// omission. vgreduce moves extents off a physical volume before dropping it —
+// on a pool that is somebody's data being relocated under a live workload, and
+// if the extents do not fit it fails halfway. A LUN that has to leave a pool is
+// an operation with a plan, not a consequence of editing a list, so the pool
+// says what it sees and does nothing.
+func (r *Reconciler) extendGroup(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+	devices map[string]utils.SharedDevice,
+	wwids []string,
+) {
+	if lsvg.Spec.MetadataOwner != r.cfg.NodeName {
+		return
+	}
+
+	inGroup, known := r.devicesOfGroup(lsvg.Spec.ActualVGNameOnTheNode)
+	if !known {
+		// Not knowing what the group already holds is not permission to add to
+		// it: every device would look missing, and vgextend would be run against
+		// the ones already in. The next pass knows.
+		return
+	}
+	missing := make([]utils.SharedDevice, 0, len(wwids))
+	for _, wwid := range wwids {
+		device, resolved := devices[wwid]
+		if !resolved || inGroup[device.Path] {
+			continue
+		}
+		missing = append(missing, device)
+	}
+	if len(missing) == 0 {
+		return
+	}
+
+	// The same invariants the group was created under. A device with a different
+	// sector size or one that does not divide by the extent size cannot be
+	// repaired after it joins, so it is refused before it does.
+	if err := utils.CheckSharedDeviceInvariants(missing, extentSizeBytes(lsvg)); err != nil {
+		r.log.Error(err, fmt.Sprintf("[%s] %s cannot be extended", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+		r.publishNodeState(ctx, lsvg, true, ReasonExtensionRefused,
+			"the volume group "+lsvg.Spec.ActualVGNameOnTheNode+" was not extended: "+err.Error())
+		return
+	}
+
+	paths := make([]string, 0, len(missing))
+	for _, device := range missing {
+		paths = append(paths, device.Path)
+	}
+	sort.Strings(paths)
+
+	r.log.Info(fmt.Sprintf("[%s] extending %s with %d device(s): %s",
+		ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, len(paths), strings.Join(paths, ", ")))
+	if cmd, err := r.commands.ExtendVGShared(ctx, lsvg.Spec.ActualVGNameOnTheNode, paths); err != nil {
+		r.log.Error(err, fmt.Sprintf("[%s] unable to extend %s (cmd: %s)", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd))
+	}
+}
+
+// devicesOfGroup is the set of device paths lvm currently counts as part of the
+// group. Asked of lvm rather than of the scan cache: the cache is filled by a
+// scanner with no schedule of its own, and a stale answer here means adding a
+// device that is already in — which lvm refuses, loudly, every pass.
+func (r *Reconciler) devicesOfGroup(vgName string) (map[string]bool, bool) {
+	pvs, _, _, err := r.commands.GetAllPVs(context.Background())
+	if err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to list the devices of %s: %s", ReconcilerName, vgName, err.Error()))
+		return nil, false
+	}
+	if len(pvs) == 0 {
+		// A group that exists has physical volumes. An empty list is lvm not
+		// answering rather than a group made of nothing.
+		return nil, false
+	}
+
+	inGroup := make(map[string]bool, len(pvs))
+	for _, pv := range pvs {
+		if pv.VGName == vgName {
+			inGroup[pv.PVName] = true
+		}
+	}
+	return inGroup, true
+}
+
 func (r *Reconciler) groupState(
 	devices map[string]utils.SharedDevice,
 	wantVGName string,

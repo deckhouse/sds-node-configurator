@@ -62,6 +62,7 @@ type Commands interface {
 	ResizePV(ctx context.Context, pvName string) (string, error)
 	RemoveVG(vgName string) (string, error)
 	RemoveVGShared(ctx context.Context, vgName string) (string, error)
+	ExtendVGShared(ctx context.Context, vgName string, paths []string) (string, error)
 	RemovePV(pvNames []string) (string, error)
 	RemoveLV(vgName, lvName string) (string, error)
 	VGChangeAddTag(ctx context.Context, vGName, tag string) (string, error)
@@ -909,6 +910,34 @@ func (commands) ResizePV(ctx context.Context, pvName string) (string, error) {
 //
 // It runs in the lock daemons' mount namespace like every other shared command,
 // because the lvm that can speak to lvmlockd lives there.
+// ExtendVGShared adds devices to the Volume Group of a pool.
+//
+// It runs in the lock daemons' mount namespace, like every command that changes
+// the metadata of a shared group: the lvm that can take the group's lock lives
+// there, and lvmlockd is what serialises this against the other members. With
+// the module's own static lvm it would either be refused or — worse — go through
+// without a lock.
+//
+// The archive is off for the same reason vgremove needs it off: the daemons'
+// image has a read-only rootfs, and lvm writes /etc/lvm/archive before touching
+// metadata.
+func (commands) ExtendVGShared(ctx context.Context, vgName string, paths []string) (string, error) {
+	args := append([]string{"vgextend", "--config", internal.SharedLVMNoArchive, vgName}, paths...)
+	argv, err := sharedLVMArgs(args...)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+		return cmd.String(), err
+	}
+	return cmd.String(), nil
+}
+
 func (commands) RemoveVGShared(ctx context.Context, vgName string) (string, error) {
 	args := []string{"vgremove", "--config", internal.SharedLVMNoArchive, "-y", vgName}
 	argv, err := sharedLVMArgs(args...)
