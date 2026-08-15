@@ -899,8 +899,9 @@ func applyNodeEntry(
 			ready, _ := raw["ready"].(bool)
 			prReason, _ := raw["reason"].(string)
 			prMessage, _ := raw["message"].(string)
+			prState, _ := raw["state"].(string)
 			published.PersistentReservations = &v1alpha1.NodePersistentReservations{
-				Ready: ready, Reason: prReason, Message: prMessage,
+				Ready: ready, Reason: prReason, Message: prMessage, State: prState,
 			}
 		}
 		group.Status.Nodes = append(group.Status.Nodes, published)

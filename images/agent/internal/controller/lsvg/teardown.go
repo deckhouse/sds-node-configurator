@@ -93,7 +93,7 @@ func (r *Reconciler) teardown(
 		// this touches data: it is the same lockspace the pool ran on a minute
 		// ago, and without it the deletion this pass is waiting for cannot
 		// happen at all.
-		r.ensureLockspaceForTeardown(ctx, lsvg)
+		r.ensureLockspaceRunning(ctx, lsvg)
 
 		if lsvg.Spec.MetadataOwner == r.cfg.NodeName {
 			// Said plainly and repeatedly rather than forced: the group is not
@@ -135,7 +135,7 @@ func (r *Reconciler) teardown(
 	// And the owner's own lockspace has to be up for the same reason. It may not
 	// be — an earlier version of this teardown stopped it, or the node left the
 	// pool and came back — so it is started rather than assumed.
-	r.ensureLockspaceForTeardown(ctx, lsvg)
+	r.ensureLockspaceRunning(ctx, lsvg)
 
 	if waiting := r.membersStillInLockspace(lsvg); len(waiting) > 0 {
 		r.log.Info(fmt.Sprintf("[%s] waiting to remove %s: %d member(s) still hold the lockspace (%v)",
@@ -292,8 +292,8 @@ func (r *Reconciler) dropFinalizer(ctx context.Context, lsvg *v1alpha1.LVMShared
 	return nil
 }
 
-// ensureLockspaceForTeardown brings this node's lockspace back while a deleted
-// pool still holds volumes.
+// ensureLockspaceRunning starts this node's lockspace when the lock manager does
+// not have it and something about to run needs it.
 //
 // Removing a volume takes the group's lock. A pool whose lockspace is down
 // cannot lose its volumes, and a pool that cannot lose its volumes cannot be
@@ -301,7 +301,7 @@ func (r *Reconciler) dropFinalizer(ctx context.Context, lsvg *v1alpha1.LVMShared
 // fixes the next pool and leaves this one where it is. Measured on the stand:
 // an earlier order of these steps stopped the lockspace first, and the volume
 // stayed undeletable afterwards no matter what an operator did.
-func (r *Reconciler) ensureLockspaceForTeardown(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup) {
+func (r *Reconciler) ensureLockspaceRunning(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup) {
 	node, err := r.node(ctx)
 	if err != nil {
 		r.log.Warning(fmt.Sprintf("[%s] unable to read this node while unwinding %s: %s",

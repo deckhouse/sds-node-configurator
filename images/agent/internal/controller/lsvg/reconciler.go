@@ -104,6 +104,12 @@ type Reconciler struct {
 	// changing it, so asking on every pass would be two commands a minute for
 	// an answer that is the same until an image or a drop-in changes.
 	prVerdicts map[string]prVerdict
+
+	// prStates is where this node says it stands in a switch to reservations,
+	// per pool. It lives here rather than being derived because the steps that
+	// set it are the ones that ran the commands, and nothing else can tell
+	// "stopped for the switch" from "stopped for any other reason".
+	prStates map[string]string
 }
 
 type ReconcilerConfig struct {
@@ -121,7 +127,11 @@ func NewReconciler(
 	metrics *monitoring.Metrics,
 	cfg ReconcilerConfig,
 ) *Reconciler {
-	return &Reconciler{cl: cl, log: log, sdsCache: sdsCache, commands: commands, metrics: metrics, cfg: cfg}
+	return &Reconciler{
+		cl: cl, log: log, sdsCache: sdsCache, commands: commands, metrics: metrics, cfg: cfg,
+		prVerdicts: map[string]prVerdict{},
+		prStates:   map[string]string{},
+	}
 }
 
 func (r *Reconciler) Name() string {
@@ -165,6 +175,13 @@ func (r *Reconciler) Reconcile(
 
 	if err := r.addFinalizer(ctx, lsvg); err != nil {
 		return controller.Result{}, err
+	}
+
+	// A pool being taken over by persistent reservations is not reconciled the
+	// ordinary way while that lasts: the members give up their lockspaces on
+	// purpose, and the ordinary pass would start them again.
+	if res, switching := r.switchToPersistentReservations(ctx, lsvg); switching {
+		return res, nil
 	}
 
 	res, err := r.join(ctx, lsvg)

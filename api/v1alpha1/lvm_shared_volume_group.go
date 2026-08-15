@@ -76,6 +76,20 @@ type LVMSharedVolumeGroupSpec struct {
 	// SanlockLVExtend is how much the hidden lease volume grows by when it runs
 	// out of slots. Empty means the LVM default.
 	SanlockLVExtend string `json:"sanlockLVExtend,omitempty"`
+
+	// PersistentReservations is the pool's intent, mirrored here because this is
+	// the resource the node agents act on.
+	//
+	// `Required` means the group's LUNs are to be held under SCSI-3 persistent
+	// reservations, so that a node can be denied access by the array rather than
+	// by anything running on it. Reaching that state is an orchestration across
+	// every member and a one-way door in the middle of it: after `vgchange
+	// --setpersist require` the group answers "Persistent reservation is not
+	// started" to everything until `vgchange --persist start` succeeds.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:Enum=Disabled;Required
+	// +kubebuilder:default=Disabled
+	PersistentReservations string `json:"persistentReservations,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -175,5 +189,20 @@ type NodePersistentReservations struct {
 	Reason string `json:"reason,omitempty"`
 
 	// Message explains it, including what only a person can do about it.
+	// +kubebuilder:validation:MaxLength=4096
 	Message string `json:"message,omitempty"`
+
+	// State is where this node stands in the switch to reservations, and it is
+	// how the members coordinate: the executor waits for every neighbour to
+	// report `Stopped` before it opens the one-way door, and the neighbours wait
+	// for `Enabled` before they come back.
+	//
+	// - `Off`: reservations are not in use here.
+	// - `Stopped`: this node has stopped its lockspace and its reservations so
+	//   the executor can take the group over. It serves no volumes in this state.
+	// - `Enabled`: this node holds a registration with the array and its
+	//   lockspace is running under reservations.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:Enum=Off;Stopped;Enabled
+	State string `json:"state,omitempty"`
 }

@@ -204,6 +204,10 @@ const (
 	ReasonRemovalFailed       = "RemovalFailed"
 	ReasonExtensionRefused    = "ExtensionRefused"
 	ReasonReconcileFailed     = "ReconcileFailed"
+	ReasonPRWaitingForVolumes = "PersistentReservationsWaitingForVolumes"
+	ReasonPRNotReady          = "PersistentReservationsNotReady"
+	ReasonPRSwitchFailed      = "PersistentReservationsSwitchFailed"
+	ReasonPRSwitchIncomplete  = "PersistentReservationsSwitchIncomplete"
 )
 
 // publishNodeState records what this node has to say about its own membership.
@@ -228,7 +232,8 @@ func (r *Reconciler) publishNodeState(
 				continue
 			}
 			if node.LockspaceStarted == started && node.Reason == reason && node.Message == message &&
-				samePRVerdict(node.PersistentReservations, r.persistentReservations(ctx, lsvg)) {
+				samePRVerdict(node.PersistentReservations, r.persistentReservations(ctx, lsvg)) &&
+				publishedPRState(node) == r.prStates[lsvg.Name] {
 				return
 			}
 			break
@@ -251,6 +256,9 @@ func (r *Reconciler) publishNodeState(
 	// reservations at all.
 	if pr := r.persistentReservations(ctx, lsvg); pr != nil {
 		reservations := map[string]any{"ready": pr.Ready}
+		if state := r.prStates[lsvg.Name]; state != "" {
+			reservations["state"] = state
+		}
 		if pr.Reason != "" {
 			reservations["reason"] = pr.Reason
 		}
@@ -361,8 +369,11 @@ func (r *Reconciler) retractNodeState(ctx context.Context, lsvg *v1alpha1.LVMSha
 	}
 }
 
-// samePRVerdict compares what was published with what is established now, so a
-// member re-confirming itself does not rewrite the object for no news.
+// samePRVerdict compares the readiness verdict only. Where a node stands in a
+// switch is compared separately by the caller: the two change for different
+// reasons, and a state that moved while the verdict did not is exactly the news
+// the other members are waiting for — the executor watches for their Stopped and
+// they watch for its Enabled.
 func samePRVerdict(published, current *v1alpha1.NodePersistentReservations) bool {
 	if published == nil || current == nil {
 		return published == current
@@ -370,4 +381,13 @@ func samePRVerdict(published, current *v1alpha1.NodePersistentReservations) bool
 	return published.Ready == current.Ready &&
 		published.Reason == current.Reason &&
 		published.Message == current.Message
+}
+
+// publishedPRState is where a node said it stands in a switch, or the empty
+// string when it has not said.
+func publishedPRState(node v1alpha1.LVMSharedVolumeGroupNodeStatus) string {
+	if node.PersistentReservations == nil {
+		return ""
+	}
+	return node.PersistentReservations.State
 }

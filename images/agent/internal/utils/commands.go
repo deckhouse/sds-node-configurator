@@ -72,6 +72,10 @@ type Commands interface {
 	VGLockStart(ctx context.Context, vgName string, hostID int) (string, error)
 	VGLockStop(ctx context.Context, vgName string) (string, error)
 	LockspaceRunning(ctx context.Context, vgName string) (bool, error)
+	VGSetPersist(ctx context.Context, vgName string) (string, error)
+	VGPersistStart(ctx context.Context, vgName string) (string, error)
+	VGPersistStop(ctx context.Context, vgName string) (string, error)
+	VGSetLockArgsPersist(ctx context.Context, vgName string) (string, error)
 	MultipathToolsVersion(ctx context.Context) (string, error)
 	ReservationKeyOf(ctx context.Context, mapName string) (string, error)
 	CreateVGShared(ctx context.Context, params SharedVGParams) (string, error)
@@ -1225,6 +1229,58 @@ func sharedNamespaceArgs(command string, args ...string) ([]string, error) {
 		return nil, err
 	}
 	return append([]string{"-t", strconv.Itoa(pid), "-m", "--", command}, args...), nil
+}
+
+// VGSetPersist declares that the group requires SCSI-3 persistent reservations.
+//
+// It is the one-way door: from the moment it succeeds the group answers
+// "Persistent reservation is not started" to every command until
+// VGPersistStart does. It also needs THIS node's lockspace running — without one
+// it fails with "Cannot access VG ... due to failed lock" — which is the
+// opposite of what "stop the lockspace everywhere" sounds like, and the
+// everywhere means the neighbours.
+func (commands) VGSetPersist(ctx context.Context, vgName string) (string, error) {
+	return runSharedLVM(ctx, "vgchange", "--config", internal.SharedLVMNoArchive, "--setpersist", "require", vgName)
+}
+
+// VGPersistStart registers this node with the array and takes the reservation.
+// lvm2 runs lvmpersist for it, which is why the multipath-tools version in the
+// daemons' image decides whether this works at all.
+func (commands) VGPersistStart(ctx context.Context, vgName string) (string, error) {
+	return runSharedLVM(ctx, "vgchange", "--config", internal.SharedLVMNoArchive, "--persist", "start", vgName)
+}
+
+// VGPersistStop gives up this node's registration, which is what a member does
+// to let the executor take the group over.
+func (commands) VGPersistStop(ctx context.Context, vgName string) (string, error) {
+	return runSharedLVM(ctx, "vgchange", "--config", internal.SharedLVMNoArchive, "--persist", "stop", vgName)
+}
+
+// VGSetLockArgsPersist records in the group's metadata that its lockspaces run
+// under reservations, so a node starting one later does the same.
+//
+// It is the last step because of what it checks: keys still on the array, and
+// sanlock not yet convinced the neighbours have gone. Both pass with time.
+func (commands) VGSetLockArgsPersist(ctx context.Context, vgName string) (string, error) {
+	return runSharedLVM(ctx, "vgchange", "--config", internal.SharedLVMNoArchive, "--setlockargs", "persist", vgName)
+}
+
+// runSharedLVM runs an lvm command in the lock daemons' namespace, which is
+// where the lvm that can speak to lvmlockd lives.
+func runSharedLVM(ctx context.Context, args ...string) (string, error) {
+	argv, err := sharedLVMArgs(args...)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+		return cmd.String(), err
+	}
+	return cmd.String(), nil
 }
 
 // VGLockStop leaves the lockspace of a shared Volume Group.

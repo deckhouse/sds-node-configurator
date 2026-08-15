@@ -208,6 +208,20 @@ spec:
 
                         Metadata is rewritten on every volume operation and cannot grow later,
                         so a group planned for hundreds of volumes needs it stated up front.
+                persistentReservations:
+                  type: string
+                  enum: ["Disabled", "Required"]
+                  default: Disabled
+                  description: |
+                    The pool's intent, mirrored here because this is the resource the node agents
+                    act on.
+
+                    `Required` means the group's LUNs are to be held under SCSI-3 persistent
+                    reservations, so that a node can be denied access by the array rather than by
+                    anything running on it. Reaching that state is an orchestration across every
+                    member and a one-way door in the middle of it: after
+                    `vgchange --setpersist require` the group answers "Persistent reservation is
+                    not started" to everything until `vgchange --persist start` succeeds.
                 sanlockLVExtend:
                   type: string
                   pattern: ^[1-9][0-9]*(Ki|Mi|Gi)$
@@ -364,6 +378,20 @@ spec:
                             maxLength: 4096
                             description: |
                               The verdict in words, including what only a person can do about it.
+                          state:
+                            type: string
+                            enum: ["Off", "Stopped", "Enabled"]
+                            description: |
+                              Where this node stands in the switch to reservations, and how the
+                              members coordinate it: the executor waits for every neighbour to
+                              report `Stopped` before it opens the one-way door, and the neighbours
+                              wait for `Enabled` before they come back.
+
+                              - `Off`: reservations are not in use here.
+                              - `Stopped`: this node has stopped its lockspace and its reservations
+                                so the executor can take the group over. It serves no volumes then.
+                              - `Enabled`: this node holds a registration with the array and its
+                                lockspace is running under reservations.
                       since:
                         type: string
                         format: date-time
