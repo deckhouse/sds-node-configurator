@@ -235,6 +235,8 @@ func (r *Reconciler) runTheSwitch(
 	if err := r.setLockspaceStarted(ctx, lsvg.Name, "", false); err != nil {
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}
 	}
+	// Registration is not repeated here: --persist start ran three lines above,
+	// and this is the lock-start it exists for.
 	if cmd, err := r.commands.VGLockStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, r.hostIDFor(ctx)); err != nil {
 		r.log.Warning(fmt.Sprintf("[%s] the lockspace of %s did not start under reservations (cmd: %s): %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
@@ -250,6 +252,23 @@ func (r *Reconciler) runTheSwitch(
 		// time, so this waits rather than reporting a fault.
 		r.log.Info(fmt.Sprintf("[%s] %s is not ready to record the lock args yet (cmd: %s): %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
+		return controller.Result{RequeueAfter: prSwitchRetryInterval}
+	}
+
+	// `--setlockargs persist` writes the new lock args by stopping the lockspace
+	// and dropping this node's registration with it — visible in sanlock's log
+	// as "free lockspace" and on the array as a key that is simply gone. So the
+	// executor comes back the same way every other member does.
+	if err := r.setLockspaceStarted(ctx, lsvg.Name, "", false); err != nil {
+		return controller.Result{RequeueAfter: prSwitchRetryInterval}
+	}
+	if cmd, err := r.rejoinUnderReservations(ctx, lsvg); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] %s is under reservations and this node has not rejoined it yet (cmd: %s): %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
+		r.publishPRState(ctx, lsvg, PRStateEnabled, false)
+		return controller.Result{RequeueAfter: prSwitchRetryInterval}
+	}
+	if err := r.setLockspaceStarted(ctx, lsvg.Name, r.vgUUID(lsvg.Spec.ActualVGNameOnTheNode), true); err != nil {
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}
 	}
 
@@ -345,4 +364,50 @@ func (r *Reconciler) publishPRState(
 ) {
 	r.prStates[lsvg.Name] = state
 	r.publishNodeState(ctx, lsvg, lockspaceRunning, "", "")
+}
+
+// startLockspaceUnderReservations starts this node's lockspace, registering with
+// the array first when the group is held under persistent reservations.
+//
+// The order is not ours to choose. Under reservations the sanlock lease is
+// renewed with a SCSI command an unregistered initiator may not issue, so a
+// lockspace started without a registration is a lockspace that cannot be kept —
+// the node reads the LUN, fails every write, and is fenced by its own watchdog.
+//
+// Every path back into a pool goes through here: a member returning after the
+// switch, a node whose lock daemons restarted, and the executor itself —
+// `vgchange --setlockargs persist` stops the lockspace and drops the
+// registration as part of writing the new lock args, which was found on the
+// stand as an executor holding a running group with no key on the array.
+func (r *Reconciler) startLockspaceUnderReservations(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+	hostID int,
+) (string, error) {
+	// Whether this node is registered with the array is decided by where it
+	// already stands, not by what the pool has asked for: between the request
+	// and the group actually requiring reservations there is a window, and
+	// registering inside it is refused — which would leave the executor unable
+	// to bring up the lockspace that `--setpersist require` needs.
+	if r.prStateOf(lsvg, r.cfg.NodeName) == PRStateEnabled {
+		if cmd, err := r.commands.VGPersistStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, hostID); err != nil {
+			return cmd, err
+		}
+	}
+	return r.commands.VGLockStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, hostID)
+}
+
+// rejoinUnderReservations is the executor's way back in, run once the lock args
+// are written: register, then start the lockspace. It does not consult the
+// node's published state because the node is about to acquire it — this is the
+// pass that makes it true.
+func (r *Reconciler) rejoinUnderReservations(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+) (string, error) {
+	hostID := r.hostIDFor(ctx)
+	if cmd, err := r.commands.VGPersistStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, hostID); err != nil {
+		return cmd, err
+	}
+	return r.commands.VGLockStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, hostID)
 }

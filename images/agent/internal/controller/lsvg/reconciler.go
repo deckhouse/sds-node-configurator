@@ -384,7 +384,7 @@ func (r *Reconciler) join(
 	}
 
 	r.log.Info(fmt.Sprintf("[%s] starting the lockspace of %s with host id %d", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, hostID))
-	cmd, err := r.commands.VGLockStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, hostID)
+	cmd, err := r.startLockspaceUnderReservations(ctx, lsvg, hostID)
 	if err != nil {
 		// A LUN that is not visible yet, a lease still held by this node's
 		// previous incarnation, a pool being created — all of them look like

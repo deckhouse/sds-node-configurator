@@ -127,8 +127,12 @@ func TestTheSwitchRunsInTheOrderTheArrayAccepts(t *testing.T) {
 	setPersist := commands.EXPECT().VGSetPersist(gomock.Any(), testVG, gomock.Any()).Return("vgchange --setpersist require", nil)
 	persistStart := commands.EXPECT().VGPersistStart(gomock.Any(), testVG, gomock.Any()).
 		After(setPersist).Return("vgchange --persist start", nil)
-	commands.EXPECT().VGSetLockArgsPersist(gomock.Any(), testVG, gomock.Any()).
+	setLockArgs := commands.EXPECT().VGSetLockArgsPersist(gomock.Any(), testVG, gomock.Any()).
 		After(persistStart).Return("vgchange --setlockargs persist", nil)
+	// And the executor comes back: --setlockargs persist stops its lockspace and
+	// drops its registration as part of writing the new lock args.
+	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, gomock.Any()).
+		After(setLockArgs).Return("vgchange --persist start", nil)
 
 	reconcile(t, r, group)
 
@@ -237,7 +241,7 @@ func TestTheSwitchCarriesThisNodesHostID(t *testing.T) {
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("", nil).AnyTimes()
 	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return("", nil).AnyTimes()
 	commands.EXPECT().VGSetPersist(gomock.Any(), testVG, 7).Return("", nil)
-	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, 7).Return("", nil)
+	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, 7).Return("", nil).Times(2)
 	commands.EXPECT().VGSetLockArgsPersist(gomock.Any(), testVG, 7).Return("", nil)
 
 	reconcile(t, r, group)
@@ -323,11 +327,32 @@ func TestASwitchInterruptedBehindTheDoorIsResumedRatherThanRestarted(t *testing.
 	})
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
-	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return(PersistRequired, nil)
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return(PersistRequired, nil).AnyTimes()
 	// No VGSetPersist: repeating it is what fails, and there is nothing to set.
-	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, 7).Return("", nil)
+	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, 7).Return("", nil).Times(2)
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("", nil).AnyTimes()
 	commands.EXPECT().VGSetLockArgsPersist(gomock.Any(), testVG, 7).Return("", nil)
 
+	reconcile(t, r, group)
+}
+
+func TestANodeUnderReservationsRegistersBeforeItStartsItsLockspace(t *testing.T) {
+	// The order is not ours to choose: under reservations the sanlock lease is
+	// renewed with a SCSI command an unregistered initiator may not issue, so a
+	// lockspace started without a registration cannot be kept — the node reads
+	// the LUN, fails every write, and is fenced by its own watchdog.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	group.Spec.PersistentReservations = PersistentReservationsRequired
+	group.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+		Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{nodeSaid(testNode, true, PRStateEnabled)},
+	}
+
+	register := commands.EXPECT().VGPersistStart(gomock.Any(), testVG, 7).Return("", nil)
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).After(register).Return("", nil)
+
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 	reconcile(t, r, group)
 }

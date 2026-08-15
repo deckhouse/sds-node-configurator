@@ -324,7 +324,7 @@ func (r *Reconciler) ensureLockspaceRunning(ctx context.Context, lsvg *v1alpha1.
 
 	r.log.Info(fmt.Sprintf("[%s] restarting the lockspace of %s so its volumes can be removed",
 		ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
-	if cmd, err := r.commands.VGLockStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, hostID); err != nil {
+	if cmd, err := r.startLockspaceUnderReservations(ctx, lsvg, hostID); err != nil {
 		r.log.Warning(fmt.Sprintf("[%s] unable to restart the lockspace of %s (cmd: %s): %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
 		return
