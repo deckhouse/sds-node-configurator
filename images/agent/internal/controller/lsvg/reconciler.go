@@ -206,16 +206,23 @@ func (r *Reconciler) join(
 		// Started before this agent could count it — an upgrade, or a restart of
 		// the agent alone. The incarnation is unknown, and an unknown incarnation
 		// is indistinguishable from a lost one: everything mapped here may or may
-		// not still be locked. So the node adopts a number now and treats what it
-		// finds the way it treats residue, which is the only safe reading.
+		// not still be locked. So the node adopts a number now.
 		if node.Annotations[LockspaceGenerationAnnotationPrefix+lsvg.Name] == "" {
 			r.log.Info(fmt.Sprintf("[%s] the lockspace of %s was started before this agent counted it, taking stock",
 				ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
 			if err := r.setLockspaceStarted(ctx, lsvg.Name, vgUUID, true); err != nil {
 				return controller.Result{}, err
 			}
-			r.releaseOrphanActivations(ctx, lsvg)
 		}
+
+		// Every pass, not only the first: residue is a STATE, not an event. It
+		// appears whenever the lock daemons restart, which this reconciler does
+		// not witness — tying the cleanup to "the first time a started lockspace
+		// is seen" left the stand with mappings nobody released, because the
+		// agent had already seen it once. The check itself is a sysfs scan and
+		// two cached reads; only an actual orphan costs a command.
+		r.releaseOrphanActivations(ctx, lsvg)
+
 		return r.publishGroup(ctx, lsvg)
 	}
 

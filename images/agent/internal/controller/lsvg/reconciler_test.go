@@ -653,3 +653,36 @@ func TestAVolumeWithAnAttachmentKeepsItsMappingThroughTheCleanup(t *testing.T) {
 
 	reconcile(t, r, group)
 }
+
+func TestResidueIsReleasedOnEveryPassNotOnlyTheFirst(t *testing.T) {
+	// Found on the stand after the first fix: the node had already adopted an
+	// incarnation, so the branch that cleaned up never ran again — and the
+	// mappings nobody asked for stayed. Residue appears whenever the lock
+	// daemons restart, which this reconciler does not witness, so the cleanup
+	// belongs to the state and not to a first sighting.
+	fakeSysBlockWithLUN(t, 8192)
+	fakeActiveLV(t, testVG, "stray")
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	commands.EXPECT().GetVG(testVG).
+		Return(internal.VGData{VGName: testVG, VGUUID: "vg-uuid"}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+
+	// A node that has counted this lockspace already: nothing here is new.
+	node := nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                          "7",
+		LockspaceStartedAnnotationPrefix + group.Name:    "vg-uuid",
+		LockspaceGenerationAnnotationPrefix + group.Name: "4",
+	})
+	r, cl, _ := testReconciler(t, node, commands, nil, group)
+
+	commands.EXPECT().LVDeactivateShared(gomock.Any(), testVG, []string{"stray"}).
+		Return("lvchange -an", nil)
+	commands.EXPECT().RemoveDMDevice(gomock.Any(), utils.DMName(testVG, "stray")).
+		Return("dmsetup remove", nil)
+
+	reconcile(t, r, group)
+
+	assert.Equal(t, "4", annotationsOf(t, cl)[LockspaceGenerationAnnotationPrefix+group.Name],
+		"nothing restarted, so the incarnation stands")
+}
