@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -756,4 +757,33 @@ func TestResidueIsReleasedOnEveryPassNotOnlyTheFirst(t *testing.T) {
 
 	assert.Equal(t, "4", annotationsOf(t, cl)[LockspaceGenerationAnnotationPrefix+group.Name],
 		"nothing restarted, so the incarnation stands")
+}
+
+func TestAMemberLooksAtItselfAgainWithoutBeingAsked(t *testing.T) {
+	// Every state this reconciler repairs — a mapping left by a lock-daemon
+	// restart, a node returning from a barrier, a lockspace nobody counted —
+	// produces no event on the object being watched, and the watch itself fires
+	// only on membership and on the group's name. Without a period of its own a
+	// node finishes one good pass and is never called again: measured on the
+	// stand, where an orphan mapping outlived the pass that found it by hours.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	// A member that does not own the metadata: the pass has nothing to create
+	// and nothing to publish, which is precisely the pass that used to end the
+	// node's day.
+	group := testGroup(testNode)
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                          "7",
+		LockspaceGenerationAnnotationPrefix + group.Name: "1",
+	}), commands, nil, group)
+
+	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("vgcreate", nil).AnyTimes()
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+	commands.EXPECT().GetVG(testVG).Return(internal.VGData{VGName: testVG, VGUUID: "vg-uuid"}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+
+	res := reconcile(t, r, group)
+
+	assert.Equal(t, time.Minute, res.RequeueAfter,
+		"a successful pass is not a reason to stop looking")
 }

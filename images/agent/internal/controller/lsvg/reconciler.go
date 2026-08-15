@@ -146,8 +146,32 @@ func (r *Reconciler) Reconcile(
 		return r.leave(ctx, lsvg)
 	}
 
-	return r.join(ctx, lsvg)
+	res, err := r.join(ctx, lsvg)
+	if err != nil || res.RequeueAfter > 0 {
+		return res, err
+	}
+
+	// A member of a pool looks at itself again on a schedule, and this is the
+	// difference between a reconciler that fixes things and one that happens to
+	// have been called at the right moment.
+	//
+	// Everything this pass repairs — a mapping left by a lock-daemon restart, a
+	// node coming back from a barrier, a lockspace nobody counted — is a STATE
+	// of the node, and none of it produces an event on the object being watched.
+	// The watch fires on membership and on the group's name, which is to say
+	// almost never. On the stand a node released its orphan once, finished the
+	// pass, and then sat with the mapping still there for hours: nothing was
+	// broken, nobody was going to call it again.
+	//
+	// The cost of the period is a sysfs scan and two reads from a cache the
+	// manager already keeps; commands run only when there is something to fix.
+	return controller.Result{RequeueAfter: groupRecheckInterval}, nil
 }
+
+// groupRecheckInterval is how often a member re-examines its own state. It is
+// short enough that residue does not outlive an interesting window and long
+// enough that a hundred nodes are not a load on anything.
+const groupRecheckInterval = time.Minute
 
 func (r *Reconciler) isMember(lsvg *v1alpha1.LVMSharedVolumeGroup) bool {
 	return slices.Contains(lsvg.Spec.Nodes, r.cfg.NodeName)
