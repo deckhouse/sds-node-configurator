@@ -123,10 +123,10 @@ func TestTheSwitchRunsInTheOrderTheArrayAccepts(t *testing.T) {
 	// the sequence as well as inside it.
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
 
-	setPersist := commands.EXPECT().VGSetPersist(gomock.Any(), testVG).Return("vgchange --setpersist require", nil)
-	persistStart := commands.EXPECT().VGPersistStart(gomock.Any(), testVG).
+	setPersist := commands.EXPECT().VGSetPersist(gomock.Any(), testVG, gomock.Any()).Return("vgchange --setpersist require", nil)
+	persistStart := commands.EXPECT().VGPersistStart(gomock.Any(), testVG, gomock.Any()).
 		After(setPersist).Return("vgchange --persist start", nil)
-	commands.EXPECT().VGSetLockArgsPersist(gomock.Any(), testVG).
+	commands.EXPECT().VGSetLockArgsPersist(gomock.Any(), testVG, gomock.Any()).
 		After(persistStart).Return("vgchange --setlockargs persist", nil)
 
 	reconcile(t, r, group)
@@ -157,8 +157,8 @@ func TestAGroupLeftBetweenStatesSaysSoAndKeepsTrying(t *testing.T) {
 	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
-	commands.EXPECT().VGSetPersist(gomock.Any(), testVG).Return("vgchange --setpersist require", nil)
-	commands.EXPECT().VGPersistStart(gomock.Any(), testVG).
+	commands.EXPECT().VGSetPersist(gomock.Any(), testVG, gomock.Any()).Return("vgchange --setpersist require", nil)
+	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, gomock.Any()).
 		Return("vgchange --persist start", assert.AnError)
 
 	res := reconcile(t, r, group)
@@ -211,4 +211,57 @@ func entryOf(t *testing.T, group *v1alpha1.LVMSharedVolumeGroup) v1alpha1.LVMSha
 	}
 	t.Fatalf("node %s said nothing", testNode)
 	return v1alpha1.LVMSharedVolumeGroupNodeStatus{}
+}
+
+func TestTheSwitchCarriesThisNodesHostID(t *testing.T) {
+	// lvm2 derives the key a node registers with from its host id, and reports
+	// its absence as "A local pr_key or host_id is required to use PR (see
+	// lvmlocal.conf)". The file cannot hold it — it is baked into the image, and
+	// the id is the one thing that differs per node — so every reservation
+	// command carries it, the way lock-start already does.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := poolAskingForReservations(func(g *v1alpha1.LVMSharedVolumeGroup) {
+		g.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+			Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{
+				nodeSaid(testNode, true, PRStateOff),
+				nodeSaid("second-node", true, PRStateStopped),
+			},
+		}
+	})
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("", nil).AnyTimes()
+	commands.EXPECT().VGSetPersist(gomock.Any(), testVG, 7).Return("", nil)
+	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, 7).Return("", nil)
+	commands.EXPECT().VGSetLockArgsPersist(gomock.Any(), testVG, 7).Return("", nil)
+
+	reconcile(t, r, group)
+}
+
+func TestAMemberWithoutAHostIDIsNotTakenThroughTheDoor(t *testing.T) {
+	// Every reservation command would stop before it started, and the group
+	// would be left needing them.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := poolAskingForReservations(func(g *v1alpha1.LVMSharedVolumeGroup) {
+		g.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+			Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{
+				nodeSaid(testNode, true, PRStateOff),
+				nodeSaid("second-node", true, PRStateStopped),
+			},
+		}
+	})
+	// No host id on the node, and so no VGSetPersist expectation.
+	r, cl, _ := testReconciler(t, nodeWith(nil), commands, nil, group)
+
+	res := reconcile(t, r, group)
+
+	assert.NotZero(t, res.RequeueAfter, "the id arrives from the pool controller, so this keeps looking")
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	assert.Equal(t, ReasonPRNotReady, entryOf(t, published).Reason)
 }

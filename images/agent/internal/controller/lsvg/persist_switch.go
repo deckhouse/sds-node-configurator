@@ -97,7 +97,7 @@ func (r *Reconciler) standAsideForTheSwitch(
 		// The group is under reservations now. Coming back means starting the
 		// reservation first and the lockspace second: the lockspace cannot be
 		// started over a group whose PR has not been started here.
-		if cmd, err := r.commands.VGPersistStart(ctx, lsvg.Spec.ActualVGNameOnTheNode); err != nil {
+		if cmd, err := r.commands.VGPersistStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, r.hostIDFor(ctx)); err != nil {
 			r.log.Warning(fmt.Sprintf("[%s] cannot rejoin %s under reservations yet (cmd: %s): %s",
 				ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
 			return controller.Result{RequeueAfter: prSwitchRetryInterval}
@@ -126,7 +126,7 @@ func (r *Reconciler) standAsideForTheSwitch(
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}
 	}
 
-	if cmd, err := r.commands.VGPersistStop(ctx, lsvg.Spec.ActualVGNameOnTheNode); err != nil {
+	if cmd, err := r.commands.VGPersistStop(ctx, lsvg.Spec.ActualVGNameOnTheNode, r.hostIDFor(ctx)); err != nil {
 		r.log.Warning(fmt.Sprintf("[%s] unable to stop reservations of %s (cmd: %s): %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}
@@ -163,6 +163,17 @@ func (r *Reconciler) runTheSwitch(
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}
 	}
 
+	if r.hostIDFor(ctx) <= 0 {
+		// lvm2 derives the key a node registers with from its host id, so
+		// without one every reservation command stops before it starts. The id
+		// is allocated by the pool controller and lands on the node as an
+		// annotation; a node without it is not one to take through the door.
+		r.publishNodeState(ctx, lsvg, true, ReasonPRNotReady,
+			"the pool is not switched to persistent reservations because this node has no sanlock host id yet, "+
+				"and lvm2 derives the key a node registers with from it")
+		return controller.Result{RequeueAfter: prSwitchRetryInterval}
+	}
+
 	if waiting := r.membersNotStoodAside(lsvg); len(waiting) > 0 {
 		r.log.Info(fmt.Sprintf("[%s] waiting to switch %s to reservations: %d member(s) have not stepped aside (%v)",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, len(waiting), waiting))
@@ -175,7 +186,7 @@ func (r *Reconciler) runTheSwitch(
 	r.ensureLockspaceRunning(ctx, lsvg)
 
 	r.log.Info(fmt.Sprintf("[%s] switching %s to persistent reservations", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
-	if cmd, err := r.commands.VGSetPersist(ctx, lsvg.Spec.ActualVGNameOnTheNode); err != nil {
+	if cmd, err := r.commands.VGSetPersist(ctx, lsvg.Spec.ActualVGNameOnTheNode, r.hostIDFor(ctx)); err != nil {
 		// Refused before the door opened, which is the good case: the group is
 		// still usable and nothing has to be undone.
 		r.log.Error(err, fmt.Sprintf("[%s] %s was not switched (cmd: %s)", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd))
@@ -187,7 +198,7 @@ func (r *Reconciler) runTheSwitch(
 	// Past this line the group answers "Persistent reservation is not started"
 	// to everything. Only --persist start reopens it, and the retry exists for
 	// exactly that: giving up here would leave the pool unusable.
-	if cmd, err := r.commands.VGPersistStart(ctx, lsvg.Spec.ActualVGNameOnTheNode); err != nil {
+	if cmd, err := r.commands.VGPersistStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, r.hostIDFor(ctx)); err != nil {
 		r.log.Error(err, fmt.Sprintf("[%s] %s is between states: --setpersist require succeeded and --persist start did not (cmd: %s)",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd))
 		r.publishNodeState(ctx, lsvg, false, ReasonPRSwitchIncomplete, fmt.Sprintf(
@@ -209,7 +220,7 @@ func (r *Reconciler) runTheSwitch(
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}
 	}
 
-	if cmd, err := r.commands.VGSetLockArgsPersist(ctx, lsvg.Spec.ActualVGNameOnTheNode); err != nil {
+	if cmd, err := r.commands.VGSetLockArgsPersist(ctx, lsvg.Spec.ActualVGNameOnTheNode, r.hostIDFor(ctx)); err != nil {
 		// The two checks behind this are about the neighbours: keys still on the
 		// array, or sanlock not yet convinced they have gone. Both pass with
 		// time, so this waits rather than reporting a fault.

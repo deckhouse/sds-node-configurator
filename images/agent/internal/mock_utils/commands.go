@@ -1012,33 +1012,33 @@ func (mr *MockCommandsMockRecorder) VGLockStop(ctx, vgName any) *gomock.Call {
 }
 
 // VGPersistStart mocks base method.
-func (m *MockCommands) VGPersistStart(ctx context.Context, vgName string) (string, error) {
+func (m *MockCommands) VGPersistStart(ctx context.Context, vgName string, hostID int) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "VGPersistStart", ctx, vgName)
+	ret := m.ctrl.Call(m, "VGPersistStart", ctx, vgName, hostID)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // VGPersistStart indicates an expected call of VGPersistStart.
-func (mr *MockCommandsMockRecorder) VGPersistStart(ctx, vgName any) *gomock.Call {
+func (mr *MockCommandsMockRecorder) VGPersistStart(ctx, vgName, hostID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGPersistStart", reflect.TypeOf((*MockCommands)(nil).VGPersistStart), ctx, vgName)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGPersistStart", reflect.TypeOf((*MockCommands)(nil).VGPersistStart), ctx, vgName, hostID)
 }
 
 // VGPersistStop mocks base method.
-func (m *MockCommands) VGPersistStop(ctx context.Context, vgName string) (string, error) {
+func (m *MockCommands) VGPersistStop(ctx context.Context, vgName string, hostID int) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "VGPersistStop", ctx, vgName)
+	ret := m.ctrl.Call(m, "VGPersistStop", ctx, vgName, hostID)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // VGPersistStop indicates an expected call of VGPersistStop.
-func (mr *MockCommandsMockRecorder) VGPersistStop(ctx, vgName any) *gomock.Call {
+func (mr *MockCommandsMockRecorder) VGPersistStop(ctx, vgName, hostID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGPersistStop", reflect.TypeOf((*MockCommands)(nil).VGPersistStop), ctx, vgName)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGPersistStop", reflect.TypeOf((*MockCommands)(nil).VGPersistStop), ctx, vgName, hostID)
 }
 
 // VGScan mocks base method.
@@ -1057,33 +1057,33 @@ func (mr *MockCommandsMockRecorder) VGScan(ctx any) *gomock.Call {
 }
 
 // VGSetLockArgsPersist mocks base method.
-func (m *MockCommands) VGSetLockArgsPersist(ctx context.Context, vgName string) (string, error) {
+func (m *MockCommands) VGSetLockArgsPersist(ctx context.Context, vgName string, hostID int) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "VGSetLockArgsPersist", ctx, vgName)
+	ret := m.ctrl.Call(m, "VGSetLockArgsPersist", ctx, vgName, hostID)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // VGSetLockArgsPersist indicates an expected call of VGSetLockArgsPersist.
-func (mr *MockCommandsMockRecorder) VGSetLockArgsPersist(ctx, vgName any) *gomock.Call {
+func (mr *MockCommandsMockRecorder) VGSetLockArgsPersist(ctx, vgName, hostID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGSetLockArgsPersist", reflect.TypeOf((*MockCommands)(nil).VGSetLockArgsPersist), ctx, vgName)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGSetLockArgsPersist", reflect.TypeOf((*MockCommands)(nil).VGSetLockArgsPersist), ctx, vgName, hostID)
 }
 
 // VGSetPersist mocks base method.
-func (m *MockCommands) VGSetPersist(ctx context.Context, vgName string) (string, error) {
+func (m *MockCommands) VGSetPersist(ctx context.Context, vgName string, hostID int) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "VGSetPersist", ctx, vgName)
+	ret := m.ctrl.Call(m, "VGSetPersist", ctx, vgName, hostID)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // VGSetPersist indicates an expected call of VGSetPersist.
-func (mr *MockCommandsMockRecorder) VGSetPersist(ctx, vgName any) *gomock.Call {
+func (mr *MockCommandsMockRecorder) VGSetPersist(ctx, vgName, hostID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGSetPersist", reflect.TypeOf((*MockCommands)(nil).VGSetPersist), ctx, vgName)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGSetPersist", reflect.TypeOf((*MockCommands)(nil).VGSetPersist), ctx, vgName, hostID)
 }
 
 // WipeDMTable mocks base method.

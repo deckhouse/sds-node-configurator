@@ -72,10 +72,10 @@ type Commands interface {
 	VGLockStart(ctx context.Context, vgName string, hostID int) (string, error)
 	VGLockStop(ctx context.Context, vgName string) (string, error)
 	LockspaceRunning(ctx context.Context, vgName string) (bool, error)
-	VGSetPersist(ctx context.Context, vgName string) (string, error)
-	VGPersistStart(ctx context.Context, vgName string) (string, error)
-	VGPersistStop(ctx context.Context, vgName string) (string, error)
-	VGSetLockArgsPersist(ctx context.Context, vgName string) (string, error)
+	VGSetPersist(ctx context.Context, vgName string, hostID int) (string, error)
+	VGPersistStart(ctx context.Context, vgName string, hostID int) (string, error)
+	VGPersistStop(ctx context.Context, vgName string, hostID int) (string, error)
+	VGSetLockArgsPersist(ctx context.Context, vgName string, hostID int) (string, error)
 	MultipathConfiguration(ctx context.Context) (string, error)
 	ReadRegistrationKeys(ctx context.Context, path string) ([]string, string, error)
 	PreemptRegistration(ctx context.Context, path, ourKey, theirKey string) (string, error)
@@ -1281,21 +1281,21 @@ func sharedNamespaceArgs(command string, args ...string) ([]string, error) {
 // it fails with "Cannot access VG ... due to failed lock" — which is the
 // opposite of what "stop the lockspace everywhere" sounds like, and the
 // everywhere means the neighbours.
-func (commands) VGSetPersist(ctx context.Context, vgName string) (string, error) {
-	return runSharedLVM(ctx, "vgchange", "--config", internal.SharedLVMNoArchive, "--setpersist", "require", vgName)
+func (commands) VGSetPersist(ctx context.Context, vgName string, hostID int) (string, error) {
+	return runSharedLockdLVM(ctx, hostID, "vgchange", "--setpersist", "require", vgName)
 }
 
 // VGPersistStart registers this node with the array and takes the reservation.
 // lvm2 runs lvmpersist for it, which is why the multipath-tools version in the
 // daemons' image decides whether this works at all.
-func (commands) VGPersistStart(ctx context.Context, vgName string) (string, error) {
-	return runSharedLVM(ctx, "vgchange", "--config", internal.SharedLVMNoArchive, "--persist", "start", vgName)
+func (commands) VGPersistStart(ctx context.Context, vgName string, hostID int) (string, error) {
+	return runSharedLockdLVM(ctx, hostID, "vgchange", "--persist", "start", vgName)
 }
 
 // VGPersistStop gives up this node's registration, which is what a member does
 // to let the executor take the group over.
-func (commands) VGPersistStop(ctx context.Context, vgName string) (string, error) {
-	return runSharedLVM(ctx, "vgchange", "--config", internal.SharedLVMNoArchive, "--persist", "stop", vgName)
+func (commands) VGPersistStop(ctx context.Context, vgName string, hostID int) (string, error) {
+	return runSharedLockdLVM(ctx, hostID, "vgchange", "--persist", "stop", vgName)
 }
 
 // VGSetLockArgsPersist records in the group's metadata that its lockspaces run
@@ -1303,8 +1303,33 @@ func (commands) VGPersistStop(ctx context.Context, vgName string) (string, error
 //
 // It is the last step because of what it checks: keys still on the array, and
 // sanlock not yet convinced the neighbours have gone. Both pass with time.
-func (commands) VGSetLockArgsPersist(ctx context.Context, vgName string) (string, error) {
-	return runSharedLVM(ctx, "vgchange", "--config", internal.SharedLVMNoArchive, "--setlockargs", "persist", vgName)
+func (commands) VGSetLockArgsPersist(ctx context.Context, vgName string, hostID int) (string, error) {
+	return runSharedLockdLVM(ctx, hostID, "vgchange", "--setlockargs", "persist", vgName)
+}
+
+// runSharedLockdLVM runs an lvm command that speaks to lvmlockd, with this
+// node's identity attached.
+//
+// Every persistent-reservation command needs it: lvm2 derives the key a node
+// registers with from its host id, and without one `vgchange --setpersist` stops
+// with "A local pr_key or host_id is required to use PR (see lvmlocal.conf)".
+// The id cannot live in that file — it is baked into the image, and it is the
+// one thing that differs per node — so it is passed the same way lock-start
+// passes it.
+func runSharedLockdLVM(ctx context.Context, hostID int, args ...string) (string, error) {
+	extendedArgs, err := lvmStaticLockdArgs(args, hostID)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
 }
 
 // runSharedLVM runs an lvm command in the lock daemons' namespace, which is
