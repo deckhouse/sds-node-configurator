@@ -633,3 +633,36 @@ func TestARestartOfTheLockDaemonsMakesTheNodeTakeTheLockAgain(t *testing.T) {
 	assert.Equal(t, int64(7), got.Status.LockspaceGeneration,
 		"the activation is stamped with the incarnation it belongs to")
 }
+
+func TestAnUnknownGenerationIsNotAClaimThatTheLockIsHeld(t *testing.T) {
+	// The trap this fell into on the stand: the node had recorded no incarnation
+	// (0) and the attachment carried no stamp (0), and comparing them made the
+	// code conclude the lock was held. Two absences are not a claim — the same
+	// shape as reading lvm's "[unknown]" as a group name.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	attachment := testAttachment(testNode, withFinalizer)
+	activate, _ := dmView(t)
+	activate()
+
+	s := scheme.Scheme
+	require.NoError(t, v1alpha1.AddToScheme(s))
+	require.NoError(t, corev1.AddToScheme(s))
+	// A node that has never recorded a lockspace incarnation.
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: testNode}}
+	cl := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(node, testGroup(), testVolume(), attachment).
+		WithStatusSubresource(&v1alpha1.LVMSharedLogicalVolumeAttachment{}).Build()
+
+	commands.EXPECT().GetLV(gomock.Any(), gomock.Any()).
+		Return(internal.LVData{}, "lvs", bytes.Buffer{}, errors.New("not asked here")).AnyTimes()
+	// The volume has to be activated: nothing here proves the lock is held.
+	commands.EXPECT().LVActivateShared(gomock.Any(), testVG, []string{testLV}, false).
+		Return("lvchange -aey", nil)
+
+	log, err := logger.NewLogger(logger.WarningLevel)
+	require.NoError(t, err)
+	r := NewReconciler(cl, log, cache.New(), commands, ReconcilerConfig{NodeName: testNode})
+
+	reconcile(t, r, attachment)
+}

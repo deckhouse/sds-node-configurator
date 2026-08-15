@@ -581,3 +581,36 @@ func TestAVolumeWithAnAttachmentIsLeftAlone(t *testing.T) {
 
 	reconcile(t, r, group)
 }
+
+func TestALockspaceStartedBeforeThisAgentIsTakenStockOf(t *testing.T) {
+	// The upgrade path, and the one the stand caught: the lockspace was already
+	// started, so the code that counts incarnations never ran — no number was
+	// written, no residue was released, and the attachment reconciler compared
+	// two zeroes and concluded the lock was held.
+	//
+	// A lockspace started before this agent could count it is indistinguishable
+	// from one whose leases were lost: the node adopts a number now and treats
+	// what it finds as residue.
+	fakeSysBlockWithLUN(t, 8192)
+	fakeActiveLV(t, testVG, "stray")
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	commands.EXPECT().GetVG(testVG).
+		Return(internal.VGData{VGName: testVG, VGUUID: "vg-uuid"}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+
+	node := nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                       "7",
+		LockspaceStartedAnnotationPrefix + group.Name: "vg-uuid",
+	})
+	r, cl, _ := testReconciler(t, node, commands, nil, group)
+
+	// No VGLockStart: the lockspace is already up. The residue goes, though.
+	commands.EXPECT().LVDeactivateShared(gomock.Any(), testVG, []string{"stray"}).
+		Return("lvchange -an", nil)
+
+	reconcile(t, r, group)
+
+	assert.Equal(t, "1", annotationsOf(t, cl)[LockspaceGenerationAnnotationPrefix+group.Name],
+		"the node now has an incarnation to compare against")
+}

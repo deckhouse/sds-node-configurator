@@ -149,7 +149,14 @@ func (r *Reconciler) attach(
 	// write to it. The node counts its lockspace incarnations, and an activation
 	// recorded under an earlier one proves nothing about now.
 	generation := r.lockspaceGeneration(ctx, group.Name)
-	locked := attachment.Status != nil && attachment.Status.LockspaceGeneration == generation
+	// Zero is not a generation, it is the absence of one — and two absences must
+	// never add up to a claim. A node that has not recorded an incarnation cannot
+	// vouch for any lock, so the volume is activated rather than assumed held.
+	// (The same shape as reading lvm's "[unknown]" as a group name: an admission
+	// compared as if it were a value.)
+	locked := generation != 0 &&
+		attachment.Status != nil &&
+		attachment.Status.LockspaceGeneration == generation
 
 	if !locked || !r.isActive(vgName, lvName) {
 		// Everything this node owes in the same group and the same mode goes in

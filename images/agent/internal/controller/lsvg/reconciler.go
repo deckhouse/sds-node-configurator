@@ -203,6 +203,19 @@ func (r *Reconciler) join(
 	}
 
 	if r.lockspaceStarted(node, lsvg.Name, vgUUID) {
+		// Started before this agent could count it — an upgrade, or a restart of
+		// the agent alone. The incarnation is unknown, and an unknown incarnation
+		// is indistinguishable from a lost one: everything mapped here may or may
+		// not still be locked. So the node adopts a number now and treats what it
+		// finds the way it treats residue, which is the only safe reading.
+		if node.Annotations[LockspaceGenerationAnnotationPrefix+lsvg.Name] == "" {
+			r.log.Info(fmt.Sprintf("[%s] the lockspace of %s was started before this agent counted it, taking stock",
+				ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+			if err := r.setLockspaceStarted(ctx, lsvg.Name, vgUUID, true); err != nil {
+				return controller.Result{}, err
+			}
+			r.releaseOrphanActivations(ctx, lsvg)
+		}
 		return r.publishGroup(ctx, lsvg)
 	}
 
