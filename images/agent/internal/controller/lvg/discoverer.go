@@ -331,6 +331,33 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 
 	shouldRequeue := false
 
+	// An LVMVolumeGroup that already points at a shared Volume Group is a
+	// leftover from when this discoverer imported them, and it is not harmless:
+	// the controllers behind that resource activate, extend and remove volumes
+	// on this node alone, over a group whose volumes belong to a lock manager.
+	//
+	// It is named rather than removed. Deleting an LVMVolumeGroup is how a
+	// Volume Group gets destroyed — its finalizer says so — and taking that
+	// decision automatically over a pool holding somebody's data is exactly the
+	// line this module does not cross.
+	for _, lvg := range filteredLVGs {
+		vg := d.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode)
+		if vg == nil || !vg.IsShared() {
+			continue
+		}
+
+		message := fmt.Sprintf("the Volume Group %s is shared (lock type %q) and is served by an LVMSharedVolumeGroup; "+
+			"this LVMVolumeGroup must not be used for it, because its controllers activate and remove volumes without "+
+			"taking the pool's locks. Nothing here is touched automatically: removing an LVMVolumeGroup removes the "+
+			"Volume Group with it. Delete this resource by hand once you have confirmed the pool is the owner",
+			vg.VGName, vg.SharedDescription())
+		if updErr := d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, metav1.ConditionFalse, internal.TypeVGReady,
+			"SharedVolumeGroup", message); updErr != nil {
+			d.log.Error(updErr, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to say that the LVMVolumeGroup %s points at a shared Volume Group", lvg.Name))
+			shouldRequeue = true
+		}
+	}
+
 	// When LVM reports more than one VG with the same name, it stops resolving
 	// such VGs by name (`vgs <name>`/`lvs <name>` fail with
 	// `Multiple VGs found with the same name: skipping`). The agent's name-keyed
@@ -712,7 +739,18 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 
 func (d *Discoverer) GetLVMVolumeGroupCandidates(ctx context.Context, bds map[string]v1alpha1.BlockDevice) ([]internal.LVMVolumeGroupCandidate, error) {
 	vgs, vgErrs := d.sdsCache.GetVGs()
-	vgWithTag := filterVGByTag(vgs, internal.LVMTags)
+	// A shared Volume Group is not a candidate for an LVMVolumeGroup, whoever
+	// tagged it. That resource is served by controllers that activate, extend
+	// and remove volumes on this node alone, and a group whose volumes are
+	// handed out by a lock manager cannot be treated that way — the pool has a
+	// resource of its own, LVMSharedVolumeGroup, for exactly this reason.
+	//
+	// It used to be a candidate: the type was recorded as Shared and everything
+	// else proceeded, and because vg_shared arrives empty from the agent's lvm
+	// (see VGData.IsShared) even the type came out Local. Measured on a live
+	// pool: an LVMVolumeGroup named after the pool's group, type Local, bound to
+	// one of its member nodes.
+	vgWithTag := utils.SkipSharedVGs(d.log, "import as an LVMVolumeGroup", filterVGByTag(vgs, internal.LVMTags))
 	candidates := make([]internal.LVMVolumeGroupCandidate, 0, len(vgWithTag))
 
 	// If there is no VG with our tag, then there is no any candidate.

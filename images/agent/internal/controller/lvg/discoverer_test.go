@@ -1130,3 +1130,23 @@ func TestHasStatusFileDevicesDiff(t *testing.T) {
 		assert.True(t, hasStatusFileDevicesDiff(first, second))
 	})
 }
+
+func TestASharedVolumeGroupIsNotImportedAsAnLVMVolumeGroup(t *testing.T) {
+	// The LVMVolumeGroup resource is served by controllers that activate, extend
+	// and remove volumes on this node alone. A group whose volumes are handed
+	// out by a lock manager cannot be treated that way — the pool has a resource
+	// of its own. Measured on a live pool before this: an LVMVolumeGroup named
+	// after the pool's group, type Local, bound to one of its member nodes.
+	log := logger.Logger{}
+	vgs := []internal.VGData{
+		{VGName: "vghw", VGUUID: "u1", VGTags: internal.LVMTags[0], VGLockType: "sanlock"},
+		{VGName: "vglocal", VGUUID: "u2", VGTags: internal.LVMTags[0]},
+	}
+
+	kept := utils.SkipSharedVGs(log, "import as an LVMVolumeGroup", filterVGByTag(vgs, internal.LVMTags))
+
+	assert.Len(t, kept, 1)
+	if len(kept) == 1 {
+		assert.Equal(t, "vglocal", kept[0].VGName)
+	}
+}
