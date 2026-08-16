@@ -24,9 +24,22 @@ import (
 	"github.com/deckhouse/storage-e2e/pkg/e2e"
 )
 
+// ExitCodeError is a command that ran and failed, as opposed to one that could not
+// be run at all. It carries the code so a caller whose script uses exit codes to
+// say WHY it failed can tell those reasons apart without matching on the message.
+type ExitCodeError struct {
+	Node     string
+	ExitCode int
+	Stderr   string
+}
+
+func (e *ExitCodeError) Error() string {
+	return fmt.Sprintf("command on node %s exited with code %d: %s", e.Node, e.ExitCode, e.Stderr)
+}
+
 // NodeExecChecked runs cmd on node via the SDK NodeExecutor and returns the
-// command's stdout. A non-zero exit code is surfaced as an error (with stderr
-// included); an err from Exec itself signals a transport failure.
+// command's stdout. A non-zero exit code is surfaced as an *ExitCodeError (with
+// stderr included); an err from Exec itself signals a transport failure.
 func NodeExecChecked(ctx context.Context, cl *e2e.Cluster, node, cmd string) (string, error) {
 	res, err := cl.Nodes().Exec(ctx, node, cmd)
 	if err != nil {
@@ -34,8 +47,11 @@ func NodeExecChecked(ctx context.Context, cl *e2e.Cluster, node, cmd string) (st
 	}
 	stdout := string(res.Stdout)
 	if res.ExitCode != 0 {
-		return stdout, fmt.Errorf("command on node %s exited with code %d: %s",
-			node, res.ExitCode, strings.TrimSpace(string(res.Stderr)))
+		return stdout, &ExitCodeError{
+			Node:     node,
+			ExitCode: res.ExitCode,
+			Stderr:   strings.TrimSpace(string(res.Stderr)),
+		}
 	}
 	return stdout, nil
 }
