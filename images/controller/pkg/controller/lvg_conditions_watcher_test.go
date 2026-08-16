@@ -168,11 +168,12 @@ func TestLVGConditionTypesMatchTheCRDEnum(t *testing.T) {
 		"internal.LVGConditionTypes and the type enum in crds/lvmvolumegroup.yaml have drifted apart")
 }
 
-// A VGConfigurationApplied=False reason that is not in acceptableReasons drags the
-// aggregate Ready condition down and puts the LVMVolumeGroup into NotReady, after
-// which the scheduler stops placing new volumes on that Volume Group.
+// A False reason that is not in acceptableReasons drags the aggregate Ready
+// condition down and puts the LVMVolumeGroup into NotReady, after which the
+// scheduler stops placing new volumes on that Volume Group. The verdict looks at
+// every condition's reason, whatever type wrote it.
 //
-// Four reasons must never do that, because in every one of them the Volume Group
+// These reasons must never do that, because in every one of them the Volume Group
 // is still serving every volume on it and what is left is either an operator
 // decision or a retry:
 //
@@ -191,6 +192,10 @@ func TestLVGConditionTypesMatchTheCRDEnum(t *testing.T) {
 //     Group is still the size it was and still serving every volume on it.
 //   - CacheStale — the agent's LVM cache has not caught up with a Volume Group
 //     that is on the node, which is why the agent refuses to act on it.
+//   - BlockDeviceNotFound — some of the Volume Group's Physical Volumes have no
+//     BlockDevice resource, so status.nodes lists fewer devices than the node has.
+//     It was written together with the rest of the status, so the capacity figures
+//     the scheduler reads are the ones this pass measured.
 //
 // Introducing any of them without listing it here is what would turn a report
 // into an outage, so the membership is asserted rather than left to review.
@@ -203,6 +208,7 @@ func TestAcceptableReasonsKeepAVolumeGroupInService(t *testing.T) {
 		internal.ReasonAliasResolutionFailed,
 		internal.ReasonFileDeviceGrowFailed,
 		internal.ReasonCacheStale,
+		internal.ReasonBlockDeviceNotFound,
 	} {
 		t.Run(reason, func(t *testing.T) {
 			assert.Contains(t, acceptableReasons, reason,
@@ -222,5 +228,33 @@ func TestAcceptableReasonsKeepAVolumeGroupInService(t *testing.T) {
 		// exactly what the scheduler should stop placing volumes on — unlike
 		// CacheStale, which is the agent knowing precisely what it is waiting for.
 		assert.NotContains(t, acceptableReasons, "VGCheckFailed")
+		// Not one Physical Volume of the Volume Group could be named by a
+		// BlockDevice, so the agent left status.nodes as an earlier pass wrote it.
+		// The Volume Group may well be fine, but the free space in that status is
+		// nobody's current measurement, and placing volumes against stale figures is
+		// what this must prevent — which is the whole distinction from
+		// BlockDeviceNotFound, where the status was refreshed in the same pass.
+		assert.NotContains(t, acceptableReasons, "NodeNotDescribed")
 	})
+}
+
+// TestReasonsMirroredFromTheAgentKeepTheirWireValue pins the wire value of every
+// reason this package matches but does not write.
+//
+// The agent produces them, from its own copy of the constant in another Go
+// module; acceptableReasons compares by string. Nothing links the two at compile
+// time, and every other test on this side goes through internal.Reason… — so a
+// value changed on the agent side leaves this whole package green while the match
+// silently stops happening.
+//
+// What that costs: BlockDeviceNotFound falling out of the match takes every
+// LVMVolumeGroup with a filtered-out or undersized Physical Volume out of Ready
+// and stops the scheduler placing volumes on it, cluster-wide, with nothing in any
+// log to say why. The mirror of this test lives beside the agent's copy in
+// images/agent/internal/const_test.go; both have to move together.
+func TestReasonsMirroredFromTheAgentKeepTheirWireValue(t *testing.T) {
+	assert.Equal(t, "BlockDeviceNotFound", internal.ReasonBlockDeviceNotFound,
+		"the agent writes this string into the VGReady condition")
+	assert.Equal(t, "CacheStale", internal.ReasonCacheStale,
+		"the agent writes this string into the VGReady condition")
 }

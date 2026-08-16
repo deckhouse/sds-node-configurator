@@ -31,8 +31,6 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/bd"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lvg"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/throttler"
@@ -46,8 +44,16 @@ type Scanner interface {
 		cfg config.Config,
 		sdsCache *cache.Cache,
 		metrics *monitoring.Metrics,
-		bdCtrl func(context.Context) (controller.Result, error),
-		lvgDiscoverCtrl func(context.Context) (controller.Result, error)) error
+		// discover is one discovery pass: every discoverer of the agent, in the
+		// order they have to run in. The scanner decides when a pass happens, not
+		// what is in one — see controller.DiscoverInOrder for the order and why it
+		// is a contract.
+		//
+		// It is expected to be wrapped in controller.WithSingleRetryChain, which is
+		// what honours a requeue the pass asks for. The scanner is one of two things
+		// that run a pass — the BlockDeviceFilter reconciler is the other — so the
+		// chain cannot belong to either of them without becoming two chains.
+		discover func(context.Context) (controller.Result, error)) error
 }
 
 type scanner struct {
@@ -65,8 +71,7 @@ func (s *scanner) Run(
 	cfg config.Config,
 	sdsCache *cache.Cache,
 	metrics *monitoring.Metrics,
-	bdCtrl func(context.Context) (controller.Result, error),
-	lvgDiscoverCtrl func(context.Context) (controller.Result, error),
+	discover func(context.Context) (controller.Result, error),
 ) error {
 	log.Info("[RunScanner] starts the work")
 
@@ -145,7 +150,7 @@ func (s *scanner) Run(
 				}
 				log.Info("[RunScanner] successfully filled the cache")
 
-				err = runControllersReconcile(ctx, log, bdCtrl, lvgDiscoverCtrl)
+				err = s.runDiscoveryPass(ctx, log, discover)
 				if err != nil {
 					log.Error(err, "[RunScanner] unable to run controllers reconciliations")
 				}
@@ -187,7 +192,7 @@ func (s *scanner) Run(
 
 			log.Info("[RunScanner] successfully filled the cache after all events passed")
 
-			err = runControllersReconcile(ctx, log, bdCtrl, lvgDiscoverCtrl)
+			err = s.runDiscoveryPass(ctx, log, discover)
 			if err != nil {
 				log.Error(err, "[RunScanner] unable to run controllers reconciliations")
 			}
@@ -197,51 +202,23 @@ func (s *scanner) Run(
 	}
 }
 
-func runControllersReconcile(
+func (s *scanner) runDiscoveryPass(
 	ctx context.Context,
 	log logger.Logger,
-	bdCtrl func(context.Context) (controller.Result, error),
-	lvgDiscoverCtrl func(context.Context) (controller.Result, error),
+	discover func(context.Context) (controller.Result, error),
 ) error {
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s reconcile", bd.DiscovererName))
-	bdRes, err := bdCtrl(ctx)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[runControllersReconcile] an error occurred while %s reconcile", bd.DiscovererName))
+	log.Info("[runDiscoveryPass] run the discovery pass")
+
+	// The requeue a discoverer asks for is not handled here and does not come back
+	// in the Result either. It belongs to controller.WithSingleRetryChain, which
+	// wraps this pass in main: the scanner is not the only caller that runs one, and
+	// a retry chain per caller is what lvg.maxUnnamedPVPasses cannot survive.
+	if _, err := discover(ctx); err != nil {
+		log.Error(err, "[runDiscoveryPass] an error occurred while running the discovery pass")
 		return err
 	}
 
-	if bdRes.RequeueAfter > 0 {
-		go func() {
-			for bdRes.RequeueAfter > 0 {
-				log.Warning(fmt.Sprintf("[runControllersReconcile] BlockDevices reconcile needs a retry in %s", bdRes.RequeueAfter.String()))
-				time.Sleep(bdRes.RequeueAfter)
-				bdRes, err = bdCtrl(ctx)
-			}
-
-			log.Info("[runControllersReconcile] successfully reconciled BlockDevices after a retry")
-		}()
-	}
-
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s successfully reconciled", bd.DiscovererName))
-
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s reconcile", lvg.DiscovererName))
-	lvgRes, err := lvgDiscoverCtrl(ctx)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[runControllersReconcile] an error occurred while %s reconcile", lvg.DiscovererName))
-		return err
-	}
-	if lvgRes.RequeueAfter > 0 {
-		go func() {
-			for lvgRes.RequeueAfter > 0 {
-				log.Warning(fmt.Sprintf("[runControllersReconcile] LVMVolumeGroups reconcile needs a retry in %s", lvgRes.RequeueAfter.String()))
-				time.Sleep(lvgRes.RequeueAfter)
-				lvgRes, err = lvgDiscoverCtrl(ctx)
-			}
-
-			log.Info("[runControllersReconcile] successfully reconciled LVMVolumeGroups after a retry")
-		}()
-	}
-	log.Info(fmt.Sprintf("[runControllersReconcile] run %s successfully reconciled", lvg.DiscovererName))
+	log.Info("[runDiscoveryPass] the discovery pass successfully reconciled")
 
 	return nil
 }

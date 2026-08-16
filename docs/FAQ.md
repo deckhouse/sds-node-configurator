@@ -17,6 +17,24 @@ Module functionality when using other kernels or distributions is possible but n
 
 - If [BlockDevice](./cr.html#blockdevice) resources exist but [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources are missing, ensure that existing LVM Volume Groups on the node have the LVM tag `storage.deckhouse.io/enabled=true`.
 
+## Why does an LVMVolumeGroup report `BlockDeviceNotFound` or `NodeNotDescribed`?
+
+Both reasons appear on the `VGReady` condition and mean the same thing: a Physical Volume of the Volume Group has no [BlockDevice](./cr.html#blockdevice) resource naming it, so `status.nodes` cannot list that device. They differ in how much of the node the agent could still describe, and that difference decides whether the Volume Group keeps taking new volumes.
+
+| Reason | Meaning | What to do |
+|---|---|---|
+| `BlockDeviceNotFound` | Some Physical Volumes were named, some were not. `status.nodes` was refreshed in that same pass, so `vgSize`, `vgFree` and thin-pool usage are current — only the entries for the unnamed devices are missing. The Volume Group stays `Ready` and keeps receiving volumes. | Usually nothing: it clears within seconds, once the block-device discoverer registers the device. If it persists, the device is one that never becomes a `BlockDevice` — see below. |
+| `NodeNotDescribed` | Not one Physical Volume could be named, so the agent declined to overwrite `status.nodes` at all. What the resource shows is an earlier pass's status, and its free space is as old as that pass. The LVMVolumeGroup leaves `Ready` on purpose, and the scheduler stops placing new volumes on it. | Find out why the node's devices produce no `BlockDevice` at all — see below — then check the agent's log on that node. |
+
+A device never becomes a `BlockDevice` in two cases, and in both the condition stays until you act:
+
+- it is smaller than the minimum size the controller accepts (see the [requirements](./resources.html#controller-requirements-for-devices));
+- it is excluded by a [BlockDeviceFilter](./cr.html#blockdevicefilter).
+
+The agent retries for a bounded number of discovery passes and then stops, logging that it has given up; the condition keeps reporting the state. Editing the `BlockDeviceFilter` to admit the device runs a discovery pass of its own, so the Volume Group recovers without an agent restart.
+
+An LVMVolumeGroup that has never described its node stays in the `Pending` phase rather than `NotReady`, because the `AgentReady` condition is only ever set on a resource whose `status.nodes` names a node. Its aggregate `Ready` message carries the blocking reason, so `kubectl describe` shows the cause rather than a bare "waiting for the conditions AgentReady to be configured".
+
 ## Why did the LVMVolumeGroup resource and Volume Group remain after deletion attempt?
 
 This situation can occur in two cases:

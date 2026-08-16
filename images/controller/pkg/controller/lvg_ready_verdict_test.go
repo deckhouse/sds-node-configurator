@@ -197,6 +197,82 @@ func TestDecideLVGReadyAndPhaseRanksCreatingAndTerminatingFirst(t *testing.T) {
 	}
 }
 
+// The incident this whole path is about: the agent could not name any Physical
+// Volume of the Volume Group, so it declined to write status.nodes and said why
+// under VGReady. AgentReady is only ever set on an LVMVolumeGroup whose
+// status.nodes names a node, so it never arrives — and the missing-conditions
+// branch outranks everything, so the bare "waiting for AgentReady" is exactly the
+// unhelpful verdict that made the state undiagnosable. The explanation has to
+// travel with it.
+func TestDecideLVGReadyAndPhaseCarriesTheBlockingReasonWhileConditionsAreMissing(t *testing.T) {
+	lvg := &v1alpha1.LVMVolumeGroup{}
+	lvg.Name = "test-lvg"
+	lvg.Status.Conditions = []metav1.Condition{
+		{Type: internal.TypeVGConfigurationApplied, Status: metav1.ConditionTrue, Reason: "Applied"},
+		{Type: internal.TypeNodeReady, Status: metav1.ConditionTrue, Reason: "NodeReady"},
+		{
+			Type:    internal.TypeVGReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "NodeNotDescribed",
+			Message: "no BlockDevice resource names the Physical Volume(s) /dev/sdc of the Volume Group vg-thin-data",
+		},
+	}
+
+	got := decideLVGReadyAndPhase(lvg)
+
+	assert.Equal(t, v1alpha1.PhasePending, got.phase)
+	assert.Contains(t, got.ready.Message, internal.TypeAgentReady, "the missing type is still named")
+	assert.Contains(t, got.ready.Message, "NodeNotDescribed", "and so is the reason it is missing")
+	assert.Contains(t, got.ready.Message, "/dev/sdc", "with enough of the message to act on")
+}
+
+// An acceptable False is not a blocking one: those describe a Volume Group that
+// is still serving its volumes, so quoting them here would attach a cause to a
+// verdict they are not the cause of.
+func TestDecideLVGReadyAndPhaseIgnoresAnAcceptableReasonWhileConditionsAreMissing(t *testing.T) {
+	lvg := &v1alpha1.LVMVolumeGroup{}
+	lvg.Name = "test-lvg"
+	lvg.Status.Conditions = []metav1.Condition{
+		{
+			Type:    internal.TypeVGReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  internal.ReasonBlockDeviceNotFound,
+			Message: "some devices are missing from status.nodes",
+		},
+	}
+
+	got := decideLVGReadyAndPhase(lvg)
+
+	assert.Equal(t, v1alpha1.PhasePending, got.phase)
+	assert.NotContains(t, got.ready.Message, internal.ReasonBlockDeviceNotFound)
+}
+
+// Creating is a stage that resolves itself, not a reason the Volume Group is
+// blocked. The phase is Pending here whether or not it is quoted, so quoting it
+// would only put an ordinary in-progress stage where an operator expects the cause
+// — the opposite of what the explanation was added for.
+func TestDecideLVGReadyAndPhaseDoesNotQuoteCreatingWhileConditionsAreMissing(t *testing.T) {
+	lvg := &v1alpha1.LVMVolumeGroup{}
+	lvg.Name = "test-lvg"
+	lvg.Status.Conditions = []metav1.Condition{
+		{
+			Type:    internal.TypeVGConfigurationApplied,
+			Status:  metav1.ConditionFalse,
+			Reason:  internal.ReasonCreating,
+			Message: "the Volume Group is being created",
+		},
+	}
+
+	got := decideLVGReadyAndPhase(lvg)
+
+	assert.Equal(t, v1alpha1.PhasePending, got.phase)
+	assert.Contains(t, got.ready.Message, internal.TypeAgentReady, "the missing types are still named")
+	assert.NotContains(t, got.ready.Message, internal.ReasonCreating,
+		"a stage in progress is not the blocking cause")
+	assert.NotContains(t, got.ready.Message, "meanwhile",
+		"and with nothing blocking there is no explanation to append")
+}
+
 // The function has to be total. A verdict with an empty phase or an empty status
 // would leave the LVMVolumeGroup reporting neither, which is the state the
 // scheduler and the e2e suite cannot interpret.

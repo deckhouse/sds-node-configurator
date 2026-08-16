@@ -242,6 +242,36 @@ func (candidate *BlockDeviceCandidate) GetWWN() string {
 	return candidate.WWNInherited
 }
 
+// The slug settings the label values are built under. They are package-global in
+// the library, so they are set once here rather than before each call.
+//
+// Not a tidy-up: newBlockDeviceLabels runs from the block-device discoverer and
+// BlockDeviceLabelValue from the LVMVolumeGroup one, those two overlap (see
+// scanner.runDiscoveryPass, which retries a pass from a goroutine of its own
+// while the main loop keeps starting passes on udev events), and writing a
+// package variable from two goroutines while a third reads it is a data race
+// under the Go memory model — https://go.dev/ref/mem. Writing them before any
+// goroutine exists is not.
+func init() {
+	slug.Lowercase = false
+	slug.MaxLength = 63
+	slug.EnableSmartTruncate = false
+}
+
+// BlockDeviceLabelValue is how every label value below is derived from the status
+// field behind it, and it is exported so a caller that wants to *select*
+// BlockDevices by one of them computes the same string the writer wrote.
+//
+// A second copy of the derivation that forgot one of the slug settings would
+// silently select nothing on, say, a node whose name has an upper-case letter —
+// and an empty list from a selector looks exactly like "there are no such
+// devices".
+//
+// See Discoverer.bdAPICl in the lvg package for the caller this exists for.
+func BlockDeviceLabelValue(statusField string) string {
+	return slug.Make(statusField)
+}
+
 // Creates new labels as map, keeping unrelated labels device already has
 func newBlockDeviceLabels(blockDevice *v1alpha1.BlockDevice) map[string]string {
 	resultItemCount := 16
@@ -253,12 +283,9 @@ func newBlockDeviceLabels(blockDevice *v1alpha1.BlockDevice) map[string]string {
 
 	maps.Copy(result, blockDevice.Labels)
 
-	slug.Lowercase = false
-	slug.MaxLength = 63
-	slug.EnableSmartTruncate = false
 	maps.Copy(result, map[string]string{
 		MetadataNameLabelKey:                           slug.Make(blockDevice.Name),
-		HostNameLabelKey:                               slug.Make(blockDevice.Status.NodeName),
+		HostNameLabelKey:                               BlockDeviceLabelValue(blockDevice.Status.NodeName),
 		v1alpha1.BlockDeviceTypeLabelKey:               slug.Make(blockDevice.Status.Type),
 		v1alpha1.BlockDeviceFSTypeLabelKey:             slug.Make(blockDevice.Status.FsType),
 		v1alpha1.BlockDevicePVUUIDLabelKey:             blockDevice.Status.PVUuid,

@@ -54,6 +54,19 @@
 # additionally needs at least two runners carrying the `self-hosted, regular`
 # labels; with one they still take turns, correctly but serially.
 #
+# Shell access to the nodes (framework.EnsureDebugAccess) is opt-in and needs no
+# change here: it is driven by E2E_NODE_SSH_AUTHORIZED_KEYS, which comes from the
+# repository secret E2E_MODULE_ENV — a KEY=VALUE blob the reusable workflow reads
+# by fixed name, masks and merges into the suite's environment, which is why
+# `secrets: inherit` below is all the plumbing needed. The value is the
+# authorized_keys block base64-encoded, since that blob cannot carry a newline:
+#
+#   E2E_NODE_SSH_AUTHORIZED_KEYS=<base64 -w0 of the authorized_keys lines>
+#
+# With the secret unset the suite installs no NodeUser and no sudoers rule, so a
+# run pointed at a cluster somebody else owns grants nothing. Do NOT put the keys
+# in extra_env below — those values are echoed to the job log.
+#
 # Beware that an `e2e/label:<x>` PR label replaces the label_filter below
 # entirely (see the reusable workflow's resolve step), which also undoes the
 # split — useful as an escape hatch, surprising if unintended.
