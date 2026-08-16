@@ -803,6 +803,13 @@ func (r *Reconciler) leave(
 	// node is leaving this one, and a lockspace that is not running makes
 	// vgchange --lock-stop a no-op anyway.
 	if !r.lockspaceStarted(node, lsvg.Name, "") {
+		// Out of the lockspace, and possibly still registered with the array:
+		// the two are separate facts. A node that registered and then failed to
+		// start its lockspace keeps a key nobody asks it to give up, and
+		// `vgremove` refuses while it is there — "Found 2 PR keys ... Stop PR for
+		// VG on other hosts", with nobody left to stop it. Found on the stand,
+		// on a pool that could not be removed for an hour.
+		r.stopReservationsOnLeaving(ctx, lsvg)
 		return controller.Result{}, nil
 	}
 

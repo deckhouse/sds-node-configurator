@@ -381,3 +381,26 @@ func TestARemovalThatFailsWhileTheGroupIsUnreadableIsRetried(t *testing.T) {
 
 	assert.NotZero(t, res.RequeueAfter, "an unreadable answer is a reason to look again")
 }
+
+func TestANodeOutOfTheLockspaceStillGivesUpItsKey(t *testing.T) {
+	// Registration and lockspace are separate facts. A node that registered and
+	// then failed to start its lockspace was leaving the pool without giving up
+	// its key, and `vgremove` refuses while it is there — "Found 2 PR keys ...
+	// Stop PR for VG on other hosts", with nobody left to stop it. Found on the
+	// stand, on a pool that could not be removed for an hour.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup("another-node")
+	group.Spec.PersistentReservations = PersistentReservationsRequired
+	group.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+		Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{nodeSaid(testNode, false, PRStateEnabled)},
+	}
+
+	// No VGLockStop: this node is not in the lockspace and knows it.
+	commands.EXPECT().VGPersistStop(gomock.Any(), testVG, gomock.Any()).Return("", nil)
+
+	// The node's own record says it holds no lockspace.
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+	reconcile(t, r, group)
+}
