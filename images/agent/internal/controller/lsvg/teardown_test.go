@@ -320,8 +320,8 @@ func TestThePoolGivesItsLUNsBackWithoutAReservation(t *testing.T) {
 	// reservations that means registering first.
 	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, gomock.Any()).Return("", nil).AnyTimes()
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, gomock.Any()).Return("", nil).AnyTimes()
-	clear := commands.EXPECT().VGPersistClear(gomock.Any(), testVG, gomock.Any()).Return("", nil)
-	commands.EXPECT().RemoveVGShared(gomock.Any(), testVG).After(clear).Return("", nil)
+	cleared := commands.EXPECT().VGPersistClear(gomock.Any(), testVG, gomock.Any()).Return("", nil)
+	commands.EXPECT().RemoveVGShared(gomock.Any(), testVG).After(cleared).Return("", nil)
 
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 	reconcile(t, r, group)
