@@ -19,15 +19,18 @@ package tests
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/e2e/framework"
+	"github.com/deckhouse/sds-node-configurator/e2e/sdsclient"
 	"github.com/deckhouse/storage-e2e/pkg/e2e"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestSdsNodeConfigurator(t *testing.T) {
@@ -86,7 +89,103 @@ var _ = BeforeSuite(func() {
 		GinkgoWriter.Printf("BeforeSuite: unable to install %s access, continuing anyway: %v\n",
 			framework.DebugNodeUserName, err)
 	}
+
+	wipeLeftoverLVM(ctx, cl)
 })
+
+// wipeLeftoverLVM clears Volume Groups and device-mapper entries a previous run
+// left on the nodes. A run that was killed, or one that force-removed an
+// LVMVolumeGroup the agent had not finished deleting, leaves the group on the
+// node; if its disk was detached afterwards the dm entries survive as orphans
+// pointing at a device that is gone.
+//
+// Only the suite's own e2e-vg- prefix is touched, so this is safe on a cluster
+// that carries storage the suite did not create. Like everything else in
+// BeforeSuite it cannot fail the run: starting dirty is worse than starting
+// clean, but it is not a reason to report the suite as broken.
+//
+// A Volume Group an LVMVolumeGroup still describes is left alone. The prefix
+// separates this suite from everything else on the node but not one run of it from
+// another, and this sweep runs across every node before the first spec — so
+// without that check a second run starting against the same cluster would take
+// the first one's Volume Groups out from under it, mid-spec, and the first run
+// would report it as the agent losing storage. Failing to list them is therefore a
+// reason not to sweep at all rather than a reason to sweep blind.
+//
+// The list is taken again for every node, not once for the walk. The walk is one
+// NodeExec per node of the cluster, so it is long next to the moment another run's
+// BeforeSuite needs to create its first LVMVolumeGroup — and a group created after
+// a single list was taken, on a node this walk has not reached yet, would be swept
+// out from under that run with the same symptom the keep list exists to prevent.
+// One extra List per node is not worth trading that against.
+func wipeLeftoverLVM(ctx context.Context, cl *e2e.Cluster) {
+	nodes, err := cl.Clientset().CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		GinkgoWriter.Printf("BeforeSuite: not sweeping leftover LVM, listing nodes failed: %v\n", err)
+		return
+	}
+
+	k8sClient, err := sdsclient.New(cl.RESTConfig())
+	if err != nil {
+		GinkgoWriter.Printf("BeforeSuite: not sweeping leftover LVM, building the client failed: %v\n", err)
+		return
+	}
+
+	// The nodes the sweep could not run on at all. Collected rather than reported
+	// as they come, because the two things that stop it — passwordless sudo and the
+	// lvm binary — are how the run is configured, not properties of one node, so
+	// every node answers the same way and the report would carry one sentence per
+	// node of the cluster.
+	var cannotRun []string
+
+	for i := range nodes.Items {
+		node := nodes.Items[i].Name
+
+		keep, keepErr := framework.LiveVolumeGroupNames(ctx, k8sClient)
+		if keepErr != nil {
+			GinkgoWriter.Printf("BeforeSuite: not sweeping leftover LVM on %s, cannot tell leftovers from live Volume Groups: %v\n",
+				node, keepErr)
+			AddReportEntry("leftover-lvm-sweep-failed/"+node, keepErr.Error())
+			continue
+		}
+		if len(keep) > 0 {
+			GinkgoWriter.Printf("BeforeSuite: on %s leaving %d Volume Group(s) alone, an LVMVolumeGroup still describes them: %v\n",
+				node, len(keep), keep)
+		}
+
+		leftovers, err := framework.WipeE2ELVM(ctx, cl, node, keep)
+		switch {
+		case errors.Is(err, framework.ErrWipeCannotRun):
+			// One cause for the whole cluster — no passwordless sudo, or lvm not on
+			// PATH — so it is collected and said once at the end. A report entry per
+			// node would be the same sentence as many times as the cluster has nodes,
+			// which buries the per-node failures below that are actually per-node.
+			GinkgoWriter.Printf("BeforeSuite: %v\n", err)
+			cannotRun = append(cannotRun, node)
+		case err != nil:
+			GinkgoWriter.Printf("BeforeSuite: sweeping leftover LVM on %s failed: %v\n", node, err)
+			// In the report as well as the log: a node the sweep could not reach
+			// is the one whose leftovers will be blamed on whichever spec happens
+			// to run there, and finding that out means reading the whole output.
+			AddReportEntry("leftover-lvm-sweep-failed/"+node, err.Error())
+		case len(leftovers) > 0:
+			// vg: a Volume Group vgremove could not take; dm: a device-mapper node
+			// that outlived one. The first is the more interesting of the two — it
+			// means the node starts this run already carrying storage from the last.
+			GinkgoWriter.Printf("BeforeSuite: %s still carries LVM the sweep could not remove: %v\n",
+				node, leftovers)
+			AddReportEntry("leftover-lvm/"+node, strings.Join(leftovers, ","))
+		}
+	}
+
+	// Once, and still in the report: a cluster the sweep cannot touch accumulates
+	// the leftovers this exists to clear, and the run that finally trips over them
+	// will not be this one.
+	if len(cannotRun) > 0 {
+		AddReportEntry("leftover-lvm-sweep-unavailable",
+			fmt.Sprintf("%s: %s", framework.ErrWipeCannotRun, strings.Join(cannotRun, ",")))
+	}
+}
 
 func suiteTimeout() time.Duration {
 	const (
