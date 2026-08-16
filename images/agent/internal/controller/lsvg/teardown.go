@@ -144,6 +144,12 @@ func (r *Reconciler) teardown(
 	}
 
 	r.log.Info(fmt.Sprintf("[%s] removing the volume group %s of the deleted pool", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+	// The LUNs are given back clean. A registration left by a member that is
+	// already gone blocks the removal outright, and a reservation left behind
+	// refuses the next pool's lockspace — the symptom then is sanlock failing to
+	// start a lockspace on a LUN that looks perfectly healthy.
+	r.clearReservationsBeforeRemoval(ctx, lsvg)
+
 	cmd, err := r.commands.RemoveVGShared(ctx, lsvg.Spec.ActualVGNameOnTheNode)
 	if err != nil {
 		if utils.SharedVGRemovalNeedsTime(err) {
@@ -333,4 +339,26 @@ func (r *Reconciler) ensureLockspaceRunning(ctx context.Context, lsvg *v1alpha1.
 		r.log.Warning(fmt.Sprintf("[%s] unable to record the restarted lockspace of %s: %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, err.Error()))
 	}
+}
+
+// clearReservationsBeforeRemoval takes the reservation and every key off the
+// pool's LUNs, on the node that is about to remove the group.
+//
+// It runs at the one moment it is safe: the volumes are gone and every member
+// has reported itself out of the lockspace, which is the ground the removal
+// itself stands on.
+func (r *Reconciler) clearReservationsBeforeRemoval(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup) {
+	if lsvg.Spec.PersistentReservations != PersistentReservationsRequired {
+		return
+	}
+
+	if cmd, err := r.commands.VGPersistClear(ctx, lsvg.Spec.ActualVGNameOnTheNode, r.hostIDFor(ctx)); err != nil {
+		// Said and not retried here: the removal that follows names the keys it
+		// finds, which tells an administrator more than this could.
+		r.log.Warning(fmt.Sprintf("[%s] could not clear the reservation of %s before removing it (cmd: %s): %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
+		return
+	}
+	r.log.Info(fmt.Sprintf("[%s] the reservation and every key are off the LUNs of %s",
+		ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
 }

@@ -78,6 +78,7 @@ type Commands interface {
 	VGPersistStart(ctx context.Context, vgName string, hostID int) (string, error)
 	VGPersistStop(ctx context.Context, vgName string, hostID int) (string, error)
 	VGPersistSetting(ctx context.Context, vgName string) (string, error)
+	VGPersistClear(ctx context.Context, vgName string, hostID int) (string, error)
 	VGSetLockArgsPersist(ctx context.Context, vgName string, hostID int) (string, error)
 	MultipathConfiguration(ctx context.Context) (string, error)
 	RecordedReservationKey(ctx context.Context) (string, error)
@@ -1367,6 +1368,24 @@ func (commands) VGPersistStop(ctx context.Context, vgName string, hostID int) (s
 // sanlock not yet convinced the neighbours have gone. Both pass with time.
 func (commands) VGSetLockArgsPersist(ctx context.Context, vgName string, hostID int) (string, error) {
 	return runSharedLockdLVM(ctx, hostID, "vgchange", "--setlockargs", "persist", vgName)
+}
+
+// VGPersistClear takes the reservation and every registration off the group's
+// LUNs, and it is only ever run while the group is being removed.
+//
+// Two things need it. A member that left before it learned to give up its own
+// key — or a node that is simply gone — leaves a registration nobody can be
+// asked to remove, and `vgremove` refuses while any of them is there: "Found 3
+// PR keys on /dev/mapper/mpathi. Stop PR for VG vghw on other hosts." And a LUN
+// that keeps a reservation after its pool is gone refuses the next pool's
+// lockspace with a reservation conflict, which reads as a sanlock fault and is
+// not one.
+//
+// -y because lvm asks "clearing PR may disrupt ongoing activity. Continue?" and
+// defaults to no. By this point the pool's volumes are gone and every member has
+// left the lockspace, which is the same ground vgremove itself stands on.
+func (commands) VGPersistClear(ctx context.Context, vgName string, hostID int) (string, error) {
+	return runSharedLockdLVM(ctx, hostID, "vgchange", "-y", "--persist", "clear", vgName)
 }
 
 // VGPersistSetting reads what the group itself says about reservations: whether

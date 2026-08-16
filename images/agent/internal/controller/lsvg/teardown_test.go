@@ -298,3 +298,31 @@ func TestAMemberLeavingAPoolUnderReservationsGivesUpItsKey(t *testing.T) {
 
 	reconcile(t, r, group)
 }
+
+func TestThePoolGivesItsLUNsBackWithoutAReservation(t *testing.T) {
+	// Two things need this. A registration left by a member that is already gone
+	// blocks the removal outright — "Found 3 PR keys ... Stop PR for VG on other
+	// hosts" — and a reservation left behind refuses the next pool's lockspace,
+	// which reads as a sanlock fault on a LUN that looks healthy.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := deletedGroup(func(g *v1alpha1.LVMSharedVolumeGroup) {
+		g.Spec.PersistentReservations = PersistentReservationsRequired
+		g.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+			Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{nodeSaid(testNode, false, PRStateEnabled)},
+		}
+	})
+
+	commands.EXPECT().VGLockStop(gomock.Any(), testVG).Return("", nil).AnyTimes()
+	commands.EXPECT().VGPersistStop(gomock.Any(), testVG, gomock.Any()).Return("", nil).AnyTimes()
+	// The removal restarts the lockspace so the volumes can go, and under
+	// reservations that means registering first.
+	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, gomock.Any()).Return("", nil).AnyTimes()
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, gomock.Any()).Return("", nil).AnyTimes()
+	clear := commands.EXPECT().VGPersistClear(gomock.Any(), testVG, gomock.Any()).Return("", nil)
+	commands.EXPECT().RemoveVGShared(gomock.Any(), testVG).After(clear).Return("", nil)
+
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+	reconcile(t, r, group)
+}
