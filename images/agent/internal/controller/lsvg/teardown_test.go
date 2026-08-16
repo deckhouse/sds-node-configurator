@@ -343,13 +343,13 @@ func TestARemovalOfAGroupThatIsAlreadyGoneIsDone(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
 	group := deletedGroup()
+	// Read, and the group is not in it.
+	commands.EXPECT().GetAllVGs(gomock.Any()).Return(nil, "vgs", bytes.Buffer{}, nil).AnyTimes()
 	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("", nil).AnyTimes()
 	commands.EXPECT().RemoveVGShared(gomock.Any(), testVG).
 		Return("vgremove", errors.New("Global lock failed: check that global lockspace is started"))
-	// Read, and the group is not in it.
-	commands.EXPECT().GetAllVGs(gomock.Any()).Return(nil, "vgs", bytes.Buffer{}, nil).AnyTimes()
 
 	reconcile(t, r, group)
 

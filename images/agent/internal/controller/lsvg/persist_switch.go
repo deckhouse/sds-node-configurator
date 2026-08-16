@@ -105,6 +105,16 @@ func (r *Reconciler) switchToPersistentReservations(
 	// reads its own silence as "no reservations", stands its neighbours aside,
 	// and asks them to leave a lockspace they have already left. Found on the
 	// stand doing exactly that, in a loop.
+	if r.groupIsAlreadyGone(ctx, lsvg) {
+		// There is nothing to switch yet: the volume group has not been created
+		// on this node, or the LUNs have not arrived. Standing in front of the
+		// ordinary pass here is a deadlock — the group cannot be created because
+		// the question cannot be answered, and the question cannot be answered
+		// because the group does not exist. Found on the stand creating a pool
+		// that asked for reservations from the start.
+		return controller.Result{}, false
+	}
+
 	if switched, err := r.groupAlreadySwitched(ctx, lsvg); err != nil {
 		return controller.Result{RequeueAfter: prSwitchRetryInterval}, true
 	} else if switched {

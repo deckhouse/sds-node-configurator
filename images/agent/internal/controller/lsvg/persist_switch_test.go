@@ -17,6 +17,7 @@ limitations under the License.
 package lsvg
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -469,5 +470,29 @@ func TestAMemberLeavesTheLockspaceBeforeItStopsItsReservations(t *testing.T) {
 	lockStop := commands.EXPECT().VGLockStop(gomock.Any(), testVG).Return("", nil)
 	commands.EXPECT().VGPersistStop(gomock.Any(), testVG, 7).After(lockStop).Return("", nil)
 
+	reconcile(t, r, group)
+}
+
+func TestAPoolThatAsksForReservationsBeforeItExistsIsStillCreated(t *testing.T) {
+	// The switch asks the group whether it has already been switched, and a
+	// group that does not exist yet cannot answer: `vgs` fails with "Volume
+	// group not found". Standing in front of the ordinary pass on that answer is
+	// a deadlock — the group cannot be created because the question cannot be
+	// answered, and the question cannot be answered because there is no group.
+	// Found on the stand creating a pool that asked for reservations from the
+	// start: nothing happened for ten minutes and no member published anything.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := poolAskingForReservations()
+	group.Spec.Nodes = []string{testNode}
+
+	// Nothing of the group is on this node yet.
+	commands.EXPECT().GetAllVGs(gomock.Any()).Return(nil, "vgs", bytes.Buffer{}, nil).AnyTimes()
+	// So the ordinary pass runs and creates it.
+	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("vgcreate", nil)
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, gomock.Any()).Return("", nil).AnyTimes()
+
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 	reconcile(t, r, group)
 }
