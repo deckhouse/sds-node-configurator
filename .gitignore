@@ -4,6 +4,16 @@
 *.so
 *.dylib
 
+# Compiled output of the helper in hack/. Its source sits beside it and the name
+# carries no extension, so nothing above catches it — and a `go build` in that
+# directory otherwise leaves a multi-megabyte unstripped ELF staged for the next
+# `git add .`, which is how one of them reached this branch.
+#
+# hack/generate_release_notes is the same kind of artefact and is already tracked,
+# so listing it here would say nothing: git does not ignore a file it tracks.
+# Untracking it is its own change.
+/hack/sds-node-configurator-release-notes
+
 # Test binary, build with `go test -c`
 *.test
 

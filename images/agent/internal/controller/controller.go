@@ -44,6 +44,64 @@ type Result struct {
 	RequeueAfter time.Duration
 }
 
+// SoonestRequeue is the requeue a caller should honour when several results ask
+// for one. A zero RequeueAfter means "not asking", so it never wins over a
+// result that is.
+func SoonestRequeue(results ...Result) Result {
+	var soonest Result
+
+	for _, res := range results {
+		if res.RequeueAfter <= 0 {
+			continue
+		}
+
+		if soonest.RequeueAfter <= 0 || res.RequeueAfter < soonest.RequeueAfter {
+			soonest = res
+		}
+	}
+
+	return soonest
+}
+
+// DiscoverInOrder makes one discovery pass out of several discoverers, run in
+// the order they are given.
+//
+// That order is a contract rather than a convenience, and this function exists
+// so the contract has one place to live instead of being re-stated by every
+// caller that runs the pass. The LVMVolumeGroup discoverer matches a Volume
+// Group's Physical Volumes against the actualVGNameOnTheNode/vgUuid pair the
+// block-device discoverer writes onto a BlockDevice, so it has to run after it.
+//
+// A caller that ran only the first half is the failure this prevents, and it is
+// not hypothetical. The LVMVolumeGroup discoverer bounds how long it retries a
+// Physical Volume whose BlockDevice has not arrived (lvg.maxUnnamedPVPasses);
+// past that bound the only other thing that runs it is a udev event, which a
+// node whose devices have settled does not raise. So a path that creates a
+// BlockDevice without running the LVMVolumeGroup discoverer after it leaves
+// nothing to notice the device. An operator widening a BlockDeviceFilter
+// produces exactly that — a new BlockDevice, no udev event — and the
+// LVMVolumeGroup would go on reporting the Physical Volume as unnamed, out of
+// service, until the agent restarted.
+//
+// The pass asks for the soonest requeue any of them asked for. A discoverer that
+// already ran keeps its requeue even when a later one fails: it is a request
+// about the node, not about the pass.
+func DiscoverInOrder(discoverers ...func(context.Context) (Result, error)) func(context.Context) (Result, error) {
+	return func(ctx context.Context) (Result, error) {
+		var soonest Result
+
+		for _, discover := range discoverers {
+			res, err := discover(ctx)
+			soonest = SoonestRequeue(soonest, res)
+			if err != nil {
+				return soonest, err
+			}
+		}
+
+		return soonest, nil
+	}
+}
+
 type Named interface {
 	Name() string
 }

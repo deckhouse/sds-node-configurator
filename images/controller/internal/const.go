@@ -68,6 +68,25 @@ const (
 	// Volume Group — it is the reason the agent refuses to touch it — so this
 	// must not take the LVMVolumeGroup out of service either.
 	ReasonCacheStale = "CacheStale"
+	// ReasonBlockDeviceNotFound mirrors the agent-side constant of the same name:
+	// some of a Volume Group's Physical Volumes have no BlockDevice resource to name
+	// them, so status.nodes[].devices does not list those devices. Either the
+	// block-device discoverer has not registered them yet, which takes seconds, or
+	// they are devices that never become BlockDevices — under the minimum size, or
+	// excluded by a BlockDeviceFilter.
+	//
+	// It belongs in acceptableReasons because it says nothing about the Volume Group
+	// itself: the status carrying it was written in that same pass, so vgSize, vgFree
+	// and thin-pool usage are current, the missing device entry is not part of that
+	// arithmetic, and every volume on the Volume Group keeps working. A PV
+	// deliberately kept below the minimum size or filtered out would otherwise take
+	// an LVMVolumeGroup that is serving perfectly well out of service permanently.
+	//
+	// The agent's other unnamed-PV reason, NodeNotDescribed, is deliberately not
+	// mirrored here: it means no PV could be named at all, so status.nodes was left
+	// as an earlier pass wrote it and its free space is stale. Like VGCheckFailed it
+	// lives on the agent side only, which is what keeps it out of acceptableReasons.
+	ReasonBlockDeviceNotFound = "BlockDeviceNotFound"
 
 	TypeReady                  = "Ready"
 	TypeVGConfigurationApplied = "VGConfigurationApplied"

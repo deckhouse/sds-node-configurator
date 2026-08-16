@@ -22,8 +22,10 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -45,10 +47,22 @@ import (
 const DiscovererName = "lvm-volume-group-discover-controller"
 
 type Discoverer struct {
-	cl       client.Client
-	log      logger.Logger
-	lvgCl    *repository.LVGClient
-	bdCl     *repository.BDClient
+	cl    client.Client
+	log   logger.Logger
+	lvgCl *repository.LVGClient
+	bdCl  *repository.BDClient
+	// bdAPICl reads BlockDevices straight from the API server, bypassing the
+	// informer cache bdCl reads through. It is only used to re-read them when the
+	// cached list turned out not to describe a Volume Group's Physical Volumes
+	// (see LVMVolumeGroupDiscoverReconcile): the block-device discoverer runs
+	// immediately before this one in the same scanner pass, and the BlockDevice
+	// status it just wrote — the actualVGNameOnTheNode/vgUuid pair this discoverer
+	// matches PVs by — is not in the cache yet.
+	//
+	// Every ordinary pass still reads through the cache; an uncached list of every
+	// BlockDevice in the cluster from every agent on every scan is exactly the load
+	// the cache exists to avoid.
+	bdAPICl  *repository.BDClient
 	metrics  *monitoring.Metrics
 	sdsCache *cache.Cache
 	cfg      DiscovererConfig
@@ -60,13 +74,90 @@ type Discoverer struct {
 	// utils.HostNsenterCanonicalResolver; overridable in tests, mirroring
 	// Reconciler.resolver.
 	resolver utils.CanonicalPathResolver
+	// stateMu guards what the discoverer remembers between passes. Two passes can
+	// overlap: the scanner retries a requeued pass from a goroutine of its own
+	// while its main loop keeps starting passes on udev events (see
+	// scanner.runDiscoveryPass), and the BlockDeviceFilter reconciler runs a pass
+	// of its own on top of both. Concurrent writes to a bare map take the process
+	// down.
+	//
+	// A pass reads the maps once, works on copies and publishes them at the end, so
+	// overlapping passes can lose an increment. That is acceptable for what the
+	// counts are for — bounding a retry, not measuring it.
+	stateMu sync.Mutex
 	// refusedImports maps a Volume Group on this node to the reason its import was
 	// refused on the previous pass, so the reason is logged when it appears or
 	// changes rather than once per scan interval for as long as it holds. The
 	// alertable form of the same fact is the lvm_volume_group_import_refused_total
 	// counter — this is only about the log.
 	refusedImports map[string]string
+	// unnamedPVPasses counts, per Volume Group and Physical Volume, the consecutive
+	// passes in which that PV was found with no BlockDevice resource naming it. It
+	// is what ends the retry for a PV that will never have one: the scanner retries
+	// a requeue in a goroutine that only exits once the requeue stops, so an
+	// unbounded retry means a full discovery pass — host LVM commands and an
+	// uncached list of every BlockDevice in the cluster — every scan interval,
+	// forever, in a goroutine per udev event that ever hit this state.
+	//
+	// Keyed the same way it is rebuilt: an entry only survives a pass that saw the
+	// PV unnamed again, so naming it resets the count.
+	//
+	// Three ways a pass can leave a still-unnamed PV out of the rebuild, and all
+	// three restart its budget. Each is deliberate — in every one of them the pass
+	// never got as far as looking at the Volume Group's BlockDevices, so charging it
+	// would charge for the wrong thing — but only the first is visible at the place
+	// it happens:
+	//
+	//   - the candidate's file devices could not all be classified
+	//     (FileDeviceStateUnknown), which the loop skips before trackUnnamedPVs;
+	//   - the VG's name is used by more than one Volume Group on the node, so
+	//     filterCandidatesByDuplicateVGs dropped the candidate;
+	//   - ReconcileUnhealthyLVMVolumeGroups removed it as unhealthy.
+	//
+	// All three requeue on their own account, so nothing is lost by the reset.
+	unnamedPVPasses map[string]int
 }
+
+// maxUnnamedPVPasses is how many consecutive passes a Physical Volume with no
+// BlockDevice keeps the discoverer requeueing before its absence is taken to be
+// permanent.
+//
+// The budget is counted in passes, and a pass is worth roughly a scan interval
+// because scanner.startRetry admits one retry chain. It was not always: the
+// scanner used to start a chain for every pass that asked for a retry, those
+// chains overlapped, and each of them spent a pass of this budget — twelve went in
+// twenty-three seconds on a stand at the default five-second interval, which is
+// the load the budget is meant to tolerate shrinking the budget instead. The two
+// have to stay paired: raise the number of concurrent chains and this constant
+// stops meaning what the paragraph below says it means.
+//
+// What the number has to be is more passes than the informer cache needs to catch up
+// with the block-device discoverer's write — which is one, sometimes two — and few
+// enough that a device filtered out on purpose stops costing full discovery passes
+// quickly. The condition stays on the resource either way; only the retry stops.
+//
+// Giving up is not the same as never looking again, and it must not become the
+// same. What ends this state is a later pass finding the BlockDevice there, and a
+// pass runs on a udev event, on a BlockDeviceFilter change — the deliberate way a
+// device excluded from discovery is let back in — and on an agent restart. The
+// BlockDeviceFilter one is why controller.DiscoverInOrder exists: that path used
+// to run the block-device discoverer alone, so the device an operator had just
+// admitted appeared with nothing left to notice it, and the Volume Group stayed
+// out of service on a resource nobody was going to look at again. Anything that
+// creates BlockDevices has to run this discoverer after it, or this constant means
+// "forever".
+//
+// The budget bounds two things, and both have to be bounded by it or it bounds
+// nothing worth bounding: the requeue, and the uncached re-read the requeue would
+// otherwise repeat — see anyUnnamedPVWithinBudget.
+const maxUnnamedPVPasses = 12
+
+// uncachedDiscovererName labels the metrics of the reads that bypass the informer
+// cache. The cached and the uncached list are the same call on the same type, so
+// without a label of its own the load rebuildCandidatesFromAPIServer adds is
+// indistinguishable from every other list this controller does — and therefore
+// impossible to alert on.
+const uncachedDiscovererName = DiscovererName + "-uncached"
 
 type DiscovererConfig struct {
 	NodeName                string
@@ -88,8 +179,21 @@ type DiscovererConfig struct {
 	FileDevicesDirectory string
 }
 
+// UncachedReader is a reader that does not go through the informer cache —
+// mgr.GetAPIReader() in production. It is a named type rather than a bare
+// client.Reader because handing NewDiscoverer the cached client instead compiles,
+// runs, and silently gives up the one guarantee bdAPICl exists for; naming it
+// makes every caller say which of the two it means. See Discoverer.bdAPICl.
+//
+// A test that does not exercise the stale-cache path may wrap the same client it
+// passes as cl.
+type UncachedReader struct {
+	client.Reader
+}
+
 func NewDiscoverer(
 	cl client.Client,
+	bdAPIReader UncachedReader,
 	log logger.Logger,
 	metrics *monitoring.Metrics,
 	sdsCache *cache.Cache,
@@ -101,13 +205,15 @@ func NewDiscoverer(
 		log:      log,
 		lvgCl:    repository.NewLVGClient(cl, log, metrics, cfg.NodeName, DiscovererName),
 		bdCl:     repository.NewBDClient(cl, metrics),
+		bdAPICl:  repository.NewBDClient(bdAPIReader, metrics),
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		cfg:      cfg,
 		commands: commands,
 		resolver: utils.HostNsenterCanonicalResolver,
 
-		refusedImports: make(map[string]string),
+		refusedImports:  make(map[string]string),
+		unnamedPVPasses: make(map[string]int),
 	}
 }
 
@@ -119,7 +225,12 @@ func (d *Discoverer) Discover(ctx context.Context) (controller.Result, error) {
 	d.log.Info("[RunLVMVolumeGroupDiscoverController] Reconciler starts LVMVolumeGroup resources reconciliation")
 	shouldRequeue := d.LVMVolumeGroupDiscoverReconcile(ctx)
 	if shouldRequeue {
-		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error occurred while run the Reconciler func, retry in %s", d.cfg.VolumeGroupScanInterval.String()))
+		// Not "an error occurred": the commonest reason to be here is a Physical
+		// Volume whose BlockDevice has not been registered yet, which is the node
+		// behaving normally and the state this whole retry exists for. Naming it an
+		// error sent whoever read the log looking for one — in exactly the scenario
+		// the requeue was added to make diagnosable.
+		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the reconciliation did not complete the node's description, retry in %s", d.cfg.VolumeGroupScanInterval.String()))
 		return controller.Result{
 			RequeueAfter: d.cfg.VolumeGroupScanInterval,
 		}, nil
@@ -194,6 +305,26 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 	}
 	d.log.Debug("[RunLVMVolumeGroupDiscoverController] successfully got LVMVolumeGroup candidates")
 
+	// A Physical Volume with no BlockDevice to name it is, most of the time, this
+	// process reading its own write back too early rather than a device that has no
+	// resource: the block-device discoverer runs immediately before this one in the
+	// same discovery pass (see controller.DiscoverInOrder), and the status it
+	// wrote there — actualVGNameOnTheNode and vgUuid, the pair sortBlockDevicesByVG
+	// matches a PV by — reaches the informer cache blockDevices was listed from
+	// only afterwards. Whether it arrives in time is a coin flip, and losing it
+	// costs a whole scan interval at best.
+	//
+	// So ask the API server directly before concluding anything, and only in this
+	// case: it is the one read where the cache is known to be behind.
+	//
+	// Bounded by the same budget as the requeue, and for the same reason. Past it
+	// the PV is one that never becomes a BlockDevice, so a fresh read cannot change
+	// the answer — it would just buy an uncached list of every BlockDevice in the
+	// cluster, a second full candidate rebuild and a losetup probe per unnamed PV,
+	// once per udev event, for the lifetime of the process. Bounding the requeue
+	// while leaving this unbounded would bound the cheap half.
+	previousRefusals, previousUnnamedPVPasses := d.rememberedState()
+
 	if len(candidates) == 0 {
 		d.log.Debug("[RunLVMVolumeGroupDiscoverController] no candidates were found on the node")
 	}
@@ -238,11 +369,21 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 		return true
 	}
 
+	// After both filters, not before them. A candidate that duplicate-VG filtering
+	// or ReconcileUnhealthyLVMVolumeGroups is about to drop must not pay for an
+	// uncached read and a second full candidate build first; each of those branches
+	// requeues on its own account and never looks at the Volume Group's
+	// BlockDevices, which is also why neither spends the unnamed-PV budget.
+	candidates = d.refreshUnnamedPVsFromAPIServer(ctx, candidates, previousUnnamedPVPasses)
+
 	// Rebuilt from scratch every pass rather than added to, so a Volume Group that
 	// stops being refused — the tag was fixed, the resource was deleted, the LUN
 	// went away — drops out and the next refusal of it is reported afresh. Keyed by
 	// the VG name on this node, so it is bounded by what the node can see.
-	refusedThisPass := make(map[string]string, len(d.refusedImports))
+	refusedThisPass := make(map[string]string, len(previousRefusals))
+	// Same rebuilt-not-added-to rule, keyed by VG name and PV path: a PV that gets
+	// its BlockDevice drops out, and its count starts over if it ever comes back.
+	unnamedPVPassesThisPass := make(map[string]int, len(previousUnnamedPVPasses))
 
 	for _, candidate := range candidates {
 		// A candidate whose file devices could not all be classified describes the
@@ -255,11 +396,28 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 		// Volume is in the Volume Group. Leave the resource exactly as it is and come
 		// back; the cause is a host command that did not answer, which the next cycle
 		// retries for free. See buildFileDeviceFromLoopPV.
+		//
+		// This returns before trackUnnamedPVs, so a candidate that is both
+		// unclassifiable and short of a BlockDevice does not spend a pass of the
+		// unnamed-PV budget — the counts are rebuilt from scratch each pass, so the
+		// entry simply drops out and starts over. Deliberate: this branch requeues
+		// unconditionally anyway, and charging a budget for a pass that never got as
+		// far as looking at the BlockDevices would be charging for the wrong thing.
 		if candidate.FileDeviceStateUnknown {
 			d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the file devices of VG %s could not all be classified this cycle; leaving the LVMVolumeGroup as it is and retrying in %s",
 				candidate.ActualVGNameOnTheNode, d.cfg.VolumeGroupScanInterval.String()))
 			shouldRequeue = true
 			continue
+		}
+
+		if len(candidate.UnnamedPVs) > 0 {
+			publish, requeue := d.handleUnnamedPVs(ctx, candidate, filteredLVGs, previousUnnamedPVPasses, unnamedPVPassesThisPass)
+			if requeue {
+				shouldRequeue = true
+			}
+			if !publish {
+				continue
+			}
 		}
 
 		if lvg, exist := filteredLVGs[candidate.ActualVGNameOnTheNode]; exist {
@@ -269,7 +427,14 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 
 			if !hasLVMVolumeGroupDiff(d.log, lvg, candidate) {
 				d.log.Debug(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] no data to update for LVMVolumeGroup, name: "%s"`, lvg.Name))
-				err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, metav1.ConditionTrue, internal.TypeVGReady, internal.ReasonUpdated, "ready to create LV")
+				// The published verdict, not an unconditional True: a candidate with an
+				// unnamed PV reaches this branch on every pass once its status has settled,
+				// and a True here would undo the caveat the previous pass wrote — two
+				// condition writes per pass, forever, saying opposite things. The status this
+				// branch found nothing to change in is a published one, written by an earlier
+				// pass of this same partial branch.
+				readyStatus, readyReason, readyMessage := vgReadyForPublishedStatus(candidate)
+				err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, readyStatus, internal.TypeVGReady, readyReason, readyMessage)
 				if err != nil {
 					d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name))
 					shouldRequeue = true
@@ -349,12 +514,18 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 				// log line carries the detail, and only when the detail changes —
 				// repeating it every scan interval buries the first, useful copy.
 				why := importRefusalReason(candidate, taken)
-				d.metrics.LVMVolumeGroupImportRefusedTotal(candidate.ActualVGNameOnTheNode, candidate.LVMVGName).Inc()
 				refusedThisPass[candidate.ActualVGNameOnTheNode] = why
-				if d.refusedImports[candidate.ActualVGNameOnTheNode] == why {
+				if previousRefusals[candidate.ActualVGNameOnTheNode] == why {
 					d.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] still not importing VG %s: %s",
 						candidate.ActualVGNameOnTheNode, why))
 				} else {
+					// Counted on the same transition the Warning is said on. A tag
+					// naming another LVMVolumeGroup does not resolve itself, so a
+					// counter incremented every pass would report a standing
+					// misconfiguration as a stream of fresh refusals for as long as
+					// it stands — and it is the alertable half of this pair, so it
+					// has to mean "a refusal happened".
+					d.metrics.LVMVolumeGroupImportRefusedTotal(candidate.ActualVGNameOnTheNode, candidate.LVMVGName).Inc()
 					d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] not importing VG %s: %s",
 						candidate.ActualVGNameOnTheNode, why))
 				}
@@ -362,9 +533,20 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 			}
 
 			d.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is not yet created. Create it", candidate.LVMVGName))
-			createdLvg, err := d.CreateLVMVolumeGroupByCandidate(ctx, candidate)
+			createdLvg, created, err := d.CreateLVMVolumeGroupByCandidate(ctx, candidate)
 			if err != nil {
 				d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to CreateLVMVolumeGroupByCandidate %s. Requeue the request in %s", candidate.LVMVGName, d.cfg.VolumeGroupScanInterval.String()))
+				shouldRequeue = true
+				continue
+			}
+
+			// The import was postponed, not performed: the object exists only in
+			// memory, so the two condition writes below would go to a resource the
+			// API server has never seen and fail with NotFound. That turned a
+			// deliberate "come back next pass" into an error log and an unbounded
+			// requeue, and named the wrong cause in both. CreateLVMVolumeGroupByCandidate
+			// has already said why at the place that decided it.
+			if !created {
 				shouldRequeue = true
 				continue
 			}
@@ -382,7 +564,8 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 				continue
 			}
 
-			err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, createdLvg, metav1.ConditionTrue, internal.TypeVGReady, internal.ReasonUpdated, "ready to create LV")
+			readyStatus, readyReason, readyMessage := vgReadyForPublishedStatus(candidate)
+			err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, createdLvg, readyStatus, internal.TypeVGReady, readyReason, readyMessage)
 			if err != nil {
 				d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, createdLvg.Name))
 				shouldRequeue = true
@@ -393,7 +576,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 		}
 	}
 
-	d.refusedImports = refusedThisPass
+	d.rememberState(refusedThisPass, unnamedPVPassesThisPass)
 
 	if shouldRequeue {
 		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] some problems have been occurred while iterating the lvmvolumegroup resources. Retry the reconcile in %s", d.cfg.VolumeGroupScanInterval.String()))
@@ -489,7 +672,14 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 				}
 
 				d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s and its data object will be removed from the reconcile due to unhealthy states", lvg.Name))
-				vgNamesToSkip[candidate.ActualVGNameOnTheNode] = struct{}{}
+				// Keyed off the resource, not off the candidate. In the branch above
+				// that reports a missing Volume Group the candidate is the zero value
+				// the map lookup returned, so this used to record the empty string —
+				// which skips nothing, and left the very LVMVolumeGroup just marked
+				// unhealthy in the reconcile. Where a candidate does exist the two
+				// names are equal by construction: candidateMap is keyed by
+				// ActualVGNameOnTheNode and looked up by this same field.
+				vgNamesToSkip[lvg.Spec.ActualVGNameOnTheNode] = struct{}{}
 			}
 		}
 	}
@@ -501,12 +691,21 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 		}
 	}
 
-	for i, c := range candidates {
+	// slices.DeleteFunc rather than append-in-place while ranging: `range` fixes the
+	// slice header once, and the append rewrites the same backing array, so every
+	// removal shifted the elements the loop had not reached yet and it skipped the
+	// one after each. Two adjacent unhealthy Volume Groups meant the second stayed
+	// in the reconcile — see 100 Go Mistakes #30, "Ignoring how arguments are
+	// evaluated in range loops". It matters more now than it did: these candidates
+	// are the input to the unnamed-PV budget below.
+	candidates = slices.DeleteFunc(candidates, func(c internal.LVMVolumeGroupCandidate) bool {
 		if _, shouldSkip := vgNamesToSkip[c.ActualVGNameOnTheNode]; shouldSkip {
 			d.log.Debug(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] remove the data object for VG %s from the reconcile", c.ActualVGNameOnTheNode))
-			candidates = append(candidates[:i], candidates[i+1:]...)
+			return true
 		}
-	}
+
+		return false
+	})
 
 	return candidates, nil
 }
@@ -558,7 +757,7 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(ctx context.Context, bds map[st
 
 	// Sort PV,BlockDevices and LV by VG to fill needed information for LVMVolumeGroup resource further.
 	sortedPVs := sortPVsByVG(pvs, vgWithTag)
-	sortedBDs := sortBlockDevicesByVG(bds, vgWithTag)
+	sortedBDs := sortBlockDevicesByVG(bds, vgWithTag, d.cfg.NodeName)
 	d.log.Trace(fmt.Sprintf("[GetLVMVolumeGroupCandidates] BlockDevices: %+v", bds))
 	d.log.Trace(fmt.Sprintf("[GetLVMVolumeGroupCandidates] Sorted BlockDevices: %+v", sortedBDs))
 	sortedThinPools := sortThinPoolsByVG(thinPools, vgWithTag)
@@ -593,7 +792,7 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(ctx context.Context, bds map[st
 			ExtentSize:            *resource.NewQuantity(vg.VGExtentSize.Value(), resource.BinarySI),
 		}
 		var fileDevicesKnown bool
-		candidate.Nodes, candidate.FileDeviceNodes, fileDevicesKnown = d.configureCandidateNodeDevices(ctx, sortedPVs, sortedBDs, vg, d.cfg.NodeName)
+		candidate.Nodes, candidate.FileDeviceNodes, fileDevicesKnown, candidate.UnnamedPVs = d.configureCandidateNodeDevices(ctx, sortedPVs, sortedBDs, vg, d.cfg.NodeName)
 		candidate.FileDeviceStateUnknown = !fileDevicesKnown
 
 		candidates = append(candidates, candidate)
@@ -602,13 +801,259 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(ctx context.Context, bds map[st
 	return candidates, nil
 }
 
+// anyUnnamedPVWithinBudget reports whether any candidate carries a Physical Volume
+// whose absence from the BlockDevice list is still young enough for a fresh read to
+// be worth its cost.
+//
+// passes holds the counts the previous pass left behind, so a PV at
+// maxUnnamedPVPasses there is one whose count reaches maxUnnamedPVPasses+1 here —
+// the pass on which the retry stops. The predicate is therefore the same one
+// trackUnnamedPVs applies, evaluated one pass earlier.
+//
+// One consequence is worth naming: the pass that gives up is itself outside the
+// budget, so it decides on the cached list. That is deliberate rather than
+// overlooked — twelve passes in, the informer cache has long since caught up with
+// a write that takes one of them, and paying for an uncached list of every
+// BlockDevice in the cluster to confirm a verdict the previous eleven already
+// reached is the cost this budget exists to refuse.
+//
+// A candidate whose file devices could not all be classified does not count, and
+// that exclusion is what keeps the budget a budget. The loop skips such a
+// candidate before it publishes anything, so a fresher BlockDevice list cannot
+// change what this pass does with it; and the same skip happens before
+// trackUnnamedPVs, so the counts this function reads are restarted for it on every
+// pass. Left in, a probe that flaps would therefore buy an uncached list and a
+// second full candidate build — a losetup call per loop Physical Volume among them
+// — every pass, for as long as it flaps, which is exactly the unbounded cost
+// maxUnnamedPVPasses exists to end.
+//
+// What that gives up is small and self-correcting: the rebuild re-runs the probes,
+// so it could have turned FileDeviceStateUnknown back off a pass earlier than the
+// requeue does on its own. That branch requeues unconditionally, so "a pass
+// earlier" is one scan interval.
+func anyUnnamedPVWithinBudget(candidates []internal.LVMVolumeGroupCandidate, passes map[string]int) bool {
+	for _, candidate := range candidates {
+		if candidate.FileDeviceStateUnknown {
+			continue
+		}
+
+		for _, pv := range candidate.UnnamedPVs {
+			if passes[unnamedPVKey(candidate.ActualVGNameOnTheNode, pv)] < maxUnnamedPVPasses {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// rebuildCandidatesFromAPIServer lists BlockDevices straight from the API server,
+// skipping the informer cache, and builds the candidates again from that list.
+//
+// It costs a full rebuild, host commands for file devices included, which is why
+// the caller only reaches for it once a candidate has come out incomplete. On the
+// pass that follows a Volume Group's creation or extension that is a fair trade
+// against waiting out a scan interval — or, before this discoverer requeued for a
+// missing BlockDevice at all, against waiting for a udev event that never comes.
+func (d *Discoverer) rebuildCandidatesFromAPIServer(ctx context.Context) ([]internal.LVMVolumeGroupCandidate, error) {
+	// Selected by node, and server-side. The cached read above lists every
+	// BlockDevice in the cluster, which costs nothing extra because the informer
+	// holds them all anyway; this one goes straight to the API server, from every
+	// agent, so the same list would be a real request per node — and none of the
+	// devices of another node can name a Physical Volume of this one.
+	//
+	// The value has to be the one the writer wrote, hence internal.BlockDeviceLabelValue
+	// rather than the node name: newBlockDeviceLabels slugs it.
+	selector := &metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			internal.HostNameLabelKey: internal.BlockDeviceLabelValue(d.cfg.NodeName),
+		},
+	}
+
+	blockDevices, err := d.bdAPICl.GetAPIBlockDevices(ctx, uncachedDiscovererName, selector)
+	if err != nil {
+		return nil, fmt.Errorf("unable to list BlockDevices from the API server: %w", err)
+	}
+
+	candidates, err := d.GetLVMVolumeGroupCandidates(ctx, blockDevices)
+	if err != nil {
+		return nil, fmt.Errorf("unable to rebuild the LVMVolumeGroup candidates: %w", err)
+	}
+
+	return candidates, nil
+}
+
+// replaceWithRebuilt returns candidates with each entry replaced by its rebuilt
+// counterpart, matched by the Volume Group's name on this node, and reports the
+// Volume Groups whose rebuilt counterpart was refused.
+//
+// Not the rebuilt slice itself. It is built from the node's Volume Groups afresh,
+// so taking it wholesale would put back every candidate this pass has already
+// dropped — a Volume Group whose name is used twice on the node, or one whose
+// LVMVolumeGroup ReconcileUnhealthyLVMVolumeGroups has just marked unhealthy —
+// and the loop below would act on it after all.
+//
+// A candidate with no counterpart keeps the view it came with: the two reads are
+// moments apart, and a Volume Group that disappeared between them is the next
+// pass's business, not this one's to guess at.
+//
+// The re-read may only fill gaps, never open them, and that verdict is reached per
+// Volume Group because per Volume Group is the grain everything downstream is
+// decided at: the number of unnamed Physical Volumes of ONE candidate decides
+// whether that candidate's status.nodes is published and whether its
+// spec.blockDeviceSelector is derived, and a selector once written is never
+// widened. Taken over the node's total instead, one Volume Group's gain pays for
+// another's loss — vg-a going from two unnamed Physical Volumes to one while vg-b
+// goes from none to one leaves the total unchanged, and vg-b is published
+// describing less of the node than the cache had described. Nothing about the two
+// Volume Groups makes that trade, so nothing should be able to make it for them.
+//
+// Refusing is not hypothetical: the re-read selects by the node label the
+// block-device discoverer writes, so a device whose labels predate an upgrade is
+// missing from it, and a BlockDevice deleted between the two reads is missing from
+// it too.
+func replaceWithRebuilt(candidates, rebuilt []internal.LVMVolumeGroupCandidate) (merged []internal.LVMVolumeGroupCandidate, refused []string) {
+	byVGName := make(map[string]internal.LVMVolumeGroupCandidate, len(rebuilt))
+	for _, candidate := range rebuilt {
+		byVGName[candidate.ActualVGNameOnTheNode] = candidate
+	}
+
+	merged = make([]internal.LVMVolumeGroupCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		fresh, found := byVGName[candidate.ActualVGNameOnTheNode]
+		switch {
+		case !found:
+			merged = append(merged, candidate)
+		case describesLessOfTheNode(fresh, candidate):
+			refused = append(refused, candidate.ActualVGNameOnTheNode)
+			merged = append(merged, candidate)
+		default:
+			merged = append(merged, fresh)
+		}
+	}
+
+	return merged, refused
+}
+
+// describesLessOfTheNode reports whether the rebuilt view of a Volume Group says
+// less about the node than the cached one did, in any of the ways that decide what
+// the pass is allowed to do with it.
+//
+// Not just the unnamed Physical Volumes, even though those are what the re-read is
+// for. rebuildCandidatesFromAPIServer goes through GetLVMVolumeGroupCandidates
+// again, which re-runs the file-device probes — nsenter and readlink on the node,
+// each under CmdDeadlineDuration. One of them not answering the second time is
+// enough to make the rebuilt candidate worse in a way len(UnnamedPVs) cannot see:
+//
+//   - FileDeviceStateUnknown flips to true, and the discovery loop skips such a
+//     candidate before it publishes anything — so a pass that could have written
+//     the status from the cached view writes nothing, only because it also asked
+//     the API server. That same skip happens before trackUnnamedPVs, so the
+//     unnamed-PV budget restarts too, and a probe that flaps keeps it from ever
+//     reaching maxUnnamedPVPasses;
+//   - FileDeviceNodes or Nodes comes back shorter, which can take a candidate that
+//     described the node down to one that describes nothing of it — and that is
+//     the case handleUnnamedPVs answers with ReasonNodeNotDescribed, which is
+//     deliberately not among the controller's acceptableReasons and therefore
+//     takes the LVMVolumeGroup out of Ready.
+//
+// Cheaper than it looks: this only runs for a Volume Group the pass has already
+// found incomplete, and only within the budget.
+func describesLessOfTheNode(fresh, cached internal.LVMVolumeGroupCandidate) bool {
+	return len(fresh.UnnamedPVs) > len(cached.UnnamedPVs) ||
+		(fresh.FileDeviceStateUnknown && !cached.FileDeviceStateUnknown) ||
+		countDevices(fresh.Nodes) < countDevices(cached.Nodes) ||
+		countFileDevices(fresh.FileDeviceNodes) < countFileDevices(cached.FileDeviceNodes)
+}
+
+// countDevices counts the block devices a candidate describes across every node it
+// names — which for a candidate built by this discoverer is one, but counting the
+// map's length instead would compare "how many nodes" and miss a node that lost a
+// device.
+func countDevices(nodes map[string][]internal.LVMVGDevice) int {
+	var count int
+	for _, devices := range nodes {
+		count += len(devices)
+	}
+
+	return count
+}
+
+func countFileDevices(nodes map[string][]internal.LVMVGFileDevice) int {
+	var count int
+	for _, devices := range nodes {
+		count += len(devices)
+	}
+
+	return count
+}
+
+// refreshUnnamedPVsFromAPIServer re-reads the BlockDevices straight from the API
+// server when a candidate came out of the cached read incomplete, and takes the
+// fresh view of each Volume Group it describes no worse than the cache did.
+//
+// Taking a worse view is the failure this guards against, and it is not
+// hypothetical: the read is selected by a label the block-device discoverer writes,
+// so a device whose labels have not been rewritten since an upgrade is absent from
+// it, and a BlockDevice deleted between the two reads is absent from it too. Both
+// would hand the loop below MORE unnamed Physical Volumes than the cache had — and
+// that number is what decides whether status.nodes is published at all and whether
+// a spec.blockDeviceSelector is derived, neither of which has a second chance.
+//
+// "Worse" is not only the unnamed Physical Volumes, because the rebuild is a whole
+// second candidate rather than a fresh BlockDevice list grafted onto the first: it
+// re-runs the file-device probes as well, and one of those failing this time makes
+// the rebuilt candidate unpublishable in a way the PV count does not show. See
+// describesLessOfTheNode.
+//
+// The verdict is per Volume Group, not over the node's total — see
+// replaceWithRebuilt for why summing them lets one Volume Group's gain pay for
+// another's loss.
+func (d *Discoverer) refreshUnnamedPVsFromAPIServer(
+	ctx context.Context,
+	candidates []internal.LVMVolumeGroupCandidate,
+	previousUnnamedPVPasses map[string]int,
+) []internal.LVMVolumeGroupCandidate {
+	if !anyUnnamedPVWithinBudget(candidates, previousUnnamedPVPasses) {
+		return candidates
+	}
+
+	rebuilt, err := d.rebuildCandidatesFromAPIServer(ctx)
+	if err != nil {
+		// Keep the candidates built from the cached list: they still carry their
+		// unnamed PVs, so the loop below reports them and retries, which is what a
+		// failed re-read should lead to anyway.
+		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to re-read BlockDevices from the API server, keeping the cached view: %v", err))
+		return candidates
+	}
+
+	merged, refused := replaceWithRebuilt(candidates, rebuilt)
+	if len(refused) > 0 {
+		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the rebuilt candidate describes less of this node than the cached one did for the Volume Group(s) %s, keeping the cached view of those",
+			strings.Join(refused, ", ")))
+	}
+
+	return merged
+}
+
+// CreateLVMVolumeGroupByCandidate imports a Volume Group the node carries but no
+// LVMVolumeGroup describes yet.
+//
+// created says whether the resource reached the API server. Several conditions
+// postpone an import — a Physical Volume with no BlockDevice, a Volume Group with
+// neither BlockDevices nor file devices — and postponing is not an error: the next
+// pass tries again, and nothing is wrong with the node. The caller has to be able
+// to tell the two apart, because the returned object exists only in memory when
+// created is false, and writing conditions on it fails with NotFound — an error
+// that says nothing about what actually happened and requeues the pass under no
+// budget at all.
 func (d *Discoverer) CreateLVMVolumeGroupByCandidate(
 	ctx context.Context,
 	candidate internal.LVMVolumeGroupCandidate,
-) (*v1alpha1.LVMVolumeGroup, error) {
+) (lvmVolumeGroup *v1alpha1.LVMVolumeGroup, created bool, err error) {
 	thinPools, err := convertStatusThinPools(v1alpha1.LVMVolumeGroup{}, candidate.StatusThinPools)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	// Reconstruct spec.fileDevices from the backing files found on the node. The
@@ -618,10 +1063,10 @@ func (d *Discoverer) CreateLVMVolumeGroupByCandidate(
 	// VGs tagged storage.deckhouse.io/enabled=true already get.
 	specFileDevices, err := d.buildSpecFileDevicesFromCandidate(ctx, candidate)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	lvmVolumeGroup := &v1alpha1.LVMVolumeGroup{
+	lvmVolumeGroup = &v1alpha1.LVMVolumeGroup{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            candidate.LVMVGName,
 			OwnerReferences: []metav1.OwnerReference{},
@@ -646,26 +1091,37 @@ func (d *Discoverer) CreateLVMVolumeGroupByCandidate(
 		},
 	}
 
+	// A Volume Group still waits for all of its block devices: importing it while
+	// some are undiscovered derives a blockDeviceSelector that does not cover the
+	// whole VG, and nothing widens a selector afterwards —
+	// hasEmptyBlockDeviceSelector stops being true the moment one is written, so the
+	// omitted device is omitted permanently.
+	//
+	// This is what the loop over candidate.Nodes here used to be for, testing
+	// dev.BlockDevice == "". It could not work: configureCandidateNodeDevices drops
+	// a Physical Volume it cannot name instead of emitting a device with an empty
+	// BlockDevice, so every device it does emit carries one — the field is assigned
+	// in exactly one place, from bd.Name after a successful lookup.
+	// candidate.UnnamedPVs is the signal the guard was reaching for.
+	//
+	// The discoverer's loop declines to publish such a candidate before it gets
+	// here (see handleUnnamedPVs), which is what keeps the retry bounded — reaching
+	// this return would requeue through the failed condition write below. The check
+	// stays so the exported call is correct on its own.
+	if len(candidate.UnnamedPVs) > 0 {
+		d.log.Warning(fmt.Sprintf("[CreateLVMVolumeGroupByCandidate] the Physical Volumes %s of VG %s have no BlockDevice resource; postponing the import so the derived blockDeviceSelector covers the whole VG",
+			strings.Join(candidate.UnnamedPVs, ", "), candidate.ActualVGNameOnTheNode))
+		return lvmVolumeGroup, false, nil
+	}
+
+	// A Volume Group built entirely on file devices has no BlockDevices by design;
+	// waiting for them would postpone its import forever.
 	if len(candidate.BlockDevicesNames) == 0 {
-		// A Volume Group built entirely on file devices has no BlockDevices by
-		// design; waiting for them would postpone its import forever.
 		if len(specFileDevices) == 0 {
 			d.log.Warning(fmt.Sprintf("[CreateLVMVolumeGroupByCandidate] no BlockDevices found for VG %s, postponing LVMVolumeGroup creation until BlockDevices are discovered", candidate.ActualVGNameOnTheNode))
-			return lvmVolumeGroup, nil
+			return lvmVolumeGroup, false, nil
 		}
 		d.log.Info(fmt.Sprintf("[CreateLVMVolumeGroupByCandidate] VG %s is backed by %d file device(s) and no BlockDevices; importing it", candidate.ActualVGNameOnTheNode, len(specFileDevices)))
-	} else {
-		// A mixed Volume Group still waits for all of its block devices: importing
-		// it while some are undiscovered would derive a blockDeviceSelector that
-		// does not cover the whole VG.
-		for _, node := range candidate.Nodes {
-			for _, dev := range node {
-				if len(dev.BlockDevice) == 0 {
-					d.log.Warning("The attempt to create the LVG resource failed because it was not possible to find a BlockDevice for it.")
-					return lvmVolumeGroup, nil
-				}
-			}
-		}
 	}
 
 	start := time.Now()
@@ -674,10 +1130,10 @@ func (d *Discoverer) CreateLVMVolumeGroupByCandidate(
 	d.metrics.APIMethodsExecutionCount(DiscovererName, "create").Inc()
 	if err != nil {
 		d.metrics.APIMethodsErrors(DiscovererName, "create").Inc()
-		return nil, fmt.Errorf("unable to create LVMVolumeGroup, err: %w", err)
+		return nil, false, fmt.Errorf("unable to create LVMVolumeGroup, err: %w", err)
 	}
 
-	return lvmVolumeGroup, nil
+	return lvmVolumeGroup, true, nil
 }
 
 func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
@@ -685,7 +1141,16 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	lvg *v1alpha1.LVMVolumeGroup,
 	candidate internal.LVMVolumeGroupCandidate,
 ) error {
-	if len(candidate.BlockDevicesNames) > 0 && hasEmptyBlockDeviceSelector(lvg) {
+	// The one write to spec in this file, and it happens once: candidate.UnnamedPVs
+	// has to be empty for it, because BlockDevicesNames is built by the same match
+	// that left those Physical Volumes unnamed. Backfilling from an incomplete
+	// candidate writes a selector that does not cover the whole Volume Group, and
+	// hasEmptyBlockDeviceSelector is false from then on, so there is no second
+	// chance to widen it. What the operator would see instead is
+	// VGConfigurationApplied=False, "these BlockDevices no longer match the
+	// blockDeviceSelector", for as long as the resource exists — under a reason the
+	// controller keeps in service, so quietly.
+	if len(candidate.BlockDevicesNames) > 0 && len(candidate.UnnamedPVs) == 0 && hasEmptyBlockDeviceSelector(lvg) {
 		d.log.Warning(fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] the LVMVolumeGroup %s has an empty blockDeviceSelector, updating it with discovered BlockDevices", lvg.Name))
 		lvg.Spec.BlockDeviceSelector = configureBlockDeviceSelector(candidate)
 		if err := d.cl.Update(ctx, lvg); err != nil {
@@ -703,26 +1168,6 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 		return updErr
 	}
 
-	// The resource.Status.Nodes can not be just re-written, it needs to be updated directly by a node.
-	// We take all current resources nodes and convert them to map for better performance further.
-	resourceNodes := make(map[string][]v1alpha1.LVMVolumeGroupDevice, len(lvg.Status.Nodes))
-	for _, node := range lvg.Status.Nodes {
-		resourceNodes[node.Name] = node.Devices
-	}
-
-	// Now we take our candidate's nodes, match them with resource's ones and upgrade devices for matched resource node.
-	for candidateNode, devices := range candidate.Nodes {
-		if _, match := resourceNodes[candidateNode]; match {
-			resourceNodes[candidateNode] = convertLVMVGDevices(devices)
-		}
-	}
-
-	// Now we take resource's nodes, match them with our map and fill with new info.
-	for i, node := range lvg.Status.Nodes {
-		if devices, match := resourceNodes[node.Name]; match {
-			lvg.Status.Nodes[i].Devices = devices
-		}
-	}
 	thinPools, err := convertStatusThinPools(*lvg, candidate.StatusThinPools)
 	if err != nil {
 		d.log.Error(err, fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] unable to convert status thin pools for the LVMVolumeGroup %s", lvg.Name))
@@ -730,6 +1175,15 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	}
 
 	lvg.Status.AllocatedSize = candidate.AllocatedSize
+	// Wholesale, not merged into what is already there. Twenty lines that computed a
+	// per-node merge used to sit above and were thrown away by this assignment; they
+	// are gone, because the wholesale write is the invariant several decisions in
+	// this file depend on. It is why a candidate that names no device at all must not
+	// be published — an empty status.nodes loses the node name itself, and with it
+	// the AgentReady condition the controller only sets on an LVMVolumeGroup whose
+	// status.nodes names a node. Making this a merge would silently make all of that
+	// reasoning wrong, so it must not be changed without revisiting
+	// handleUnnamedPVs, LVMVolumeGroupCandidate.UnnamedPVs and both VGReady verdicts.
 	lvg.Status.Nodes = convertLVMVGNodes(candidate.Nodes, candidate.FileDeviceNodes)
 	lvg.Status.ThinPools = thinPools
 	lvg.Status.VGSize = candidate.VGSize
@@ -746,12 +1200,311 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 		return fmt.Errorf(`[UpdateLVMVolumeGroupByCandidate] unable to update LVMVolumeGroup, name: "%s", err: %w`, lvg.Name, err)
 	}
 
-	err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, metav1.ConditionTrue, internal.TypeVGReady, internal.ReasonUpdated, "ready to create LV")
+	// The status that was just written is the published one, so the verdict is about
+	// it: an unnamed PV means the devices in it are not all there.
+	readyStatus, readyReason, readyMessage := vgReadyForPublishedStatus(candidate)
+	err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, readyStatus, internal.TypeVGReady, readyReason, readyMessage)
 	if err != nil {
 		d.log.Error(err, fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name))
 	}
 
 	return err
+}
+
+// vgReadyForPublishedStatus is the VGReady verdict that goes with a status.nodes
+// this pass has just written — every publishing path, the create path and the
+// no-diff branch that would otherwise undo what a previous pass wrote.
+//
+// It is False for as long as a Physical Volume of the Volume Group has no
+// BlockDevice resource to name it, because the status it accompanies is then
+// missing that device's entry — the write is wholesale, so a device that had an
+// entry until its BlockDevice went away loses it on this same pass. It is
+// deliberately the acceptable
+// ReasonBlockDeviceNotFound: the capacity figures in the status were all refreshed
+// this pass and the Volume Group keeps serving its volumes, so the missing entry
+// must not take it out of service. Use vgReadyForWithheldStatus where that is not
+// true.
+func vgReadyForPublishedStatus(candidate internal.LVMVolumeGroupCandidate) (status metav1.ConditionStatus, reason, message string) {
+	if len(candidate.UnnamedPVs) == 0 {
+		return metav1.ConditionTrue, internal.ReasonUpdated, "ready to create LV"
+	}
+
+	return metav1.ConditionFalse, internal.ReasonBlockDeviceNotFound,
+		unnamedPVMessage(candidate, "so status.nodes does not describe them")
+}
+
+// vgReadyForWithheldStatus is the VGReady verdict for the other case: not one
+// Physical Volume could be named, so the candidate describes no node and the pass
+// declined to write status.nodes at all.
+//
+// The two verdicts are kept apart by name rather than by a flag because the reason
+// they carry is what the controller acts on, and only one of the two is meant to be
+// survivable. Here the resource still shows the previous pass's status, whose free
+// space nobody has re-measured, so the reason is the unacceptable
+// ReasonNodeNotDescribed and the LVMVolumeGroup is meant to leave Ready and stop
+// receiving new volumes until a device shows up.
+func vgReadyForWithheldStatus(candidate internal.LVMVolumeGroupCandidate) (status metav1.ConditionStatus, reason, message string) {
+	return metav1.ConditionFalse, internal.ReasonNodeNotDescribed,
+		unnamedPVMessage(candidate, "so status.nodes does not describe this node at all and what it holds may be out of date")
+}
+
+// unnamedPVMessage names the Physical Volumes and both ways their absence ends, so
+// an operator reading the condition can tell "wait a moment" from "this device was
+// filtered out and nothing will change on its own".
+//
+// consequence is passed in rather than selected from a bool for the same reason the
+// two verdicts above are separate functions: each caller knows which case it is in,
+// and a flag one of them could get wrong is a reason silently mismatched to a status.
+func unnamedPVMessage(candidate internal.LVMVolumeGroupCandidate, consequence string) string {
+	return fmt.Sprintf("no BlockDevice resource names the Physical Volume(s) %s of the Volume Group %s, %s. A BlockDevice appears once the block-device discoverer registers the device, which normally takes seconds; a device smaller than %s or excluded by a BlockDeviceFilter never gets one",
+		strings.Join(candidate.UnnamedPVs, ", "), candidate.ActualVGNameOnTheNode, consequence, internal.BlockDeviceValidSize)
+}
+
+// reportUnnamedPVs puts the verdict on an LVMVolumeGroup whose status this pass
+// declined to write, and reports whether it managed to. There is nothing to report
+// on when the Volume Group has no resource yet — importing it is what the same
+// pass just declined to do.
+//
+// Only the withheld verdict applies here, and this is the only place it is written;
+// the published one belongs to whoever writes the status.
+func (d *Discoverer) reportUnnamedPVs(
+	ctx context.Context,
+	lvgs map[string]v1alpha1.LVMVolumeGroup,
+	candidate internal.LVMVolumeGroupCandidate,
+) bool {
+	lvg, exist := lvgs[candidate.ActualVGNameOnTheNode]
+	if !exist {
+		return true
+	}
+
+	status, reason, message := vgReadyForWithheldStatus(candidate)
+	if err := d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, status, internal.TypeVGReady, reason, message); err != nil {
+		d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name))
+		return false
+	}
+
+	return true
+}
+
+// unnamedPVKey identifies one Physical Volume of one Volume Group on this node.
+// Neither half can contain a NUL, so no pair of them can collide.
+func unnamedPVKey(vgName, pvName string) string {
+	return vgName + "\x00" + pvName
+}
+
+// unnamedPVVerdict is what a pass concludes about the Physical Volumes of one
+// candidate that no BlockDevice names.
+type unnamedPVVerdict struct {
+	// retry is true while at least one of them is still within the budget.
+	retry bool
+	// gaveUp is true on the single pass that took the last of them out of the
+	// budget, so giving up is logged once instead of every scan interval.
+	gaveUp bool
+	// firstSeen is true when at least one of them went unnamed on this pass rather
+	// than on an earlier one. It is what decides whether the state is worth saying
+	// out loud again: the set of Physical Volumes is what the message names, so a
+	// new one joining an already-reported set changes what the message says, while
+	// the same set reported again does not.
+	firstSeen bool
+	// waited is how many consecutive passes the longest-waiting of them has gone
+	// unnamed. Reported rather than the constant, because overlapping retry
+	// goroutines make the two diverge.
+	waited int
+}
+
+// trackUnnamedPVs carries each unnamed Physical Volume's count over from the
+// previous pass and records it in this pass's map.
+//
+// The verdict is reached per Physical Volume and only then combined, which is the
+// whole point: a Volume Group can hold a PV that will never have a BlockDevice next
+// to one that is a pass away from getting its own. Deciding on the longest wait
+// alone — the highest count — let the first spend the second one's retry, so a disk
+// added to such a Volume Group got no requeue at all and waited for a udev event
+// that a settled node does not raise.
+func trackUnnamedPVs(candidate internal.LVMVolumeGroupCandidate, previous, current map[string]int) unnamedPVVerdict {
+	var (
+		verdict      unnamedPVVerdict
+		wasRetryable bool
+	)
+
+	for _, pv := range candidate.UnnamedPVs {
+		key := unnamedPVKey(candidate.ActualVGNameOnTheNode, pv)
+		// What the previous pass concluded about this PV, so the transition can be
+		// recognised without remembering it separately.
+		if previous[key] <= maxUnnamedPVPasses {
+			wasRetryable = true
+		}
+
+		passes := previous[key] + 1
+		current[key] = passes
+		if passes == 1 {
+			verdict.firstSeen = true
+		}
+		if passes <= maxUnnamedPVPasses {
+			verdict.retry = true
+		}
+		if passes > verdict.waited {
+			verdict.waited = passes
+		}
+	}
+
+	verdict.gaveUp = wasRetryable && !verdict.retry
+
+	return verdict
+}
+
+// handleUnnamedPVs applies the retry budget to a candidate whose Physical Volumes
+// are not all named by a BlockDevice, reports the state on the resource, and says
+// whether the caller may publish the candidate at all.
+//
+// The retry exists because nothing else runs discovery again — the scanner drives it
+// off udev events, and a node whose devices have settled raises none — so the "retry
+// on the next iteration" the warning promises used to mean "never". The bound exists
+// because the scanner runs a requeue in a goroutine that exits only when the requeue
+// stops, so a PV that never gets a BlockDevice would otherwise cost a full discovery
+// pass every scan interval for the lifetime of the process, once per goroutine that
+// piled up.
+func (d *Discoverer) handleUnnamedPVs(
+	ctx context.Context,
+	candidate internal.LVMVolumeGroupCandidate,
+	lvgs map[string]v1alpha1.LVMVolumeGroup,
+	previous, current map[string]int,
+) (publish, requeue bool) {
+	verdict := trackUnnamedPVs(candidate, previous, current)
+	requeue = verdict.retry
+
+	if verdict.gaveUp {
+		// Once, at the transition: past here the condition on the resource is the
+		// standing report, and repeating this every pass would bury it.
+		//
+		// It names what ends the state, because giving up the retry is the point at
+		// which an operator has to do something and the condition alone does not say
+		// what. Editing the BlockDeviceFilter runs a discovery pass of its own — see
+		// controller.DiscoverInOrder — so the Volume Group recovers on its own from
+		// the only action that can actually admit the device.
+		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the Physical Volumes %s of VG %s have had no BlockDevice resource for %d consecutive passes; taking their absence to be permanent and giving up the retry. A device below %s or excluded by a BlockDeviceFilter never becomes a BlockDevice; the %s condition keeps reporting this. Discovery runs again on the next udev event, on a BlockDeviceFilter change, or on an agent restart — so admitting the device through the BlockDeviceFilter clears this without further action",
+			strings.Join(candidate.UnnamedPVs, ", "), candidate.ActualVGNameOnTheNode, verdict.waited, internal.BlockDeviceValidSize, internal.TypeVGReady))
+	}
+
+	// The three lines below describe a state, not an event, and the state can last
+	// forever — a Physical Volume excluded by a BlockDeviceFilter never becomes a
+	// BlockDevice. Said at Warning on every pass it would repeat for the lifetime
+	// of the process and bury the first, useful copy, which is the same argument
+	// refusedImports already answers with the same rule: loud when it appears or
+	// changes, quiet while it merely holds. The condition on the resource is the
+	// standing report; this is only about the log.
+	report := d.log.Debug
+	if verdict.firstSeen {
+		report = d.log.Warning
+	}
+
+	// Counted here rather than inside one of the branches below, because the import
+	// does not happen in either of them. It used to be counted only in the second,
+	// which left the harder case — not one Physical Volume named, so no status to
+	// publish and no resource to carry a condition — with no trace in the API at
+	// all: after the give-up warning scrolls away, a single log line on one node is
+	// the whole record. That is the shape of the incident this path exists for.
+	//
+	// Counted on the transition, not on every pass, and for the same reason the log
+	// above is: this is a state that can last forever — a Physical Volume excluded
+	// by a BlockDeviceFilter never becomes a BlockDevice — and a counter that climbs
+	// on every udev event for a device somebody excluded on purpose makes
+	// increase(lvm_volume_group_import_refused_total[…]) fire for as long as the
+	// exclusion stands. That is the alert this counter exists for, so it has to mean
+	// "a refusal happened", not "a pass ran while a refusal held". The other site,
+	// the owner-tag conflict below, is gated the same way for the same reason: one
+	// counter whose two increments count different things is worse than either.
+	//
+	// The label is the name the import would have used, and only when it is a name
+	// somebody chose. A Volume Group with no LVMVolumeGroup yet — the precondition
+	// of this whole branch — usually carries no owner tag either, and
+	// lvgNameForCandidate then mints a fresh UUID on every pass. In a Prometheus
+	// label that is a new time series per pass, retained for the lifetime of the
+	// process, for exactly as long as the state that can last forever lasts.
+	_, imported := lvgs[candidate.ActualVGNameOnTheNode]
+	if !imported && verdict.firstSeen {
+		lvgLabel := ""
+		if !candidate.LVMVGNameGenerated {
+			lvgLabel = candidate.LVMVGName
+		}
+		d.metrics.LVMVolumeGroupImportRefusedTotal(candidate.ActualVGNameOnTheNode, lvgLabel).Inc()
+	}
+
+	// With not one device named, the candidate does not even carry the node it
+	// describes, and status.nodes is written wholesale: publishing it would empty the
+	// node entry, or on a resource that has none yet never write one. The AgentReady
+	// condition goes with it — the controller only sets it on LVMVolumeGroups whose
+	// status.nodes names a node with a healthy agent's pod — leaving the resource
+	// Pending. So leave status alone, and say why on the resource: what is kept there
+	// is now known to be out of date, and a Pending LVMVolumeGroup with no
+	// explanation is the symptom this whole path is about. The reason for that — see
+	// vgReadyForWithheldStatus — is not one the controller keeps in service, because
+	// the free space the scheduler would place against is whatever the last complete
+	// pass measured.
+	if len(candidate.Nodes) == 0 && len(candidate.FileDeviceNodes) == 0 {
+		report(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] no Physical Volume of VG %s has a BlockDevice resource yet, so this node cannot be described at all; leaving status.nodes as it is",
+			candidate.ActualVGNameOnTheNode))
+		if !d.reportUnnamedPVs(ctx, lvgs, candidate) {
+			requeue = true
+		}
+
+		return false, requeue
+	}
+
+	// A Volume Group with no LVMVolumeGroup yet is the other case that must not be
+	// published, and it is spec rather than status that decides it: importing runs
+	// CreateLVMVolumeGroupByCandidate, whose spec.blockDeviceSelector is derived from
+	// candidate.BlockDevicesNames — built by the same match that left these PVs
+	// unnamed. The selector would not cover the whole Volume Group, and nothing
+	// widens a selector afterwards: hasEmptyBlockDeviceSelector stops being true the
+	// moment one is written, so the omission is permanent and only an operator
+	// editing spec by hand can undo it. Wait for the devices instead.
+	//
+	// There is nothing to report on either — the resource this would explain is the
+	// one the same decision declines to create. Past the budget the Volume Group
+	// simply stays unimported, which the give-up warning above names.
+	//
+	// The counter — incremented above, for both this branch and the one before it —
+	// is the only thing that outlives the give-up warning, because this branch
+	// returns before the loop reaches the refusal it would otherwise record.
+	// Without it "the agent is not importing a Volume Group it can see" would be
+	// invisible in the form that can last: a Physical Volume excluded by a
+	// BlockDeviceFilter on this node never gets a BlockDevice, so the import never
+	// happens and nothing says so past the give-up line.
+	if !imported {
+		report(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] VG %s has no LVMVolumeGroup yet and its Physical Volumes %s have no BlockDevice resource; postponing the import so the derived blockDeviceSelector covers the whole Volume Group",
+			candidate.ActualVGNameOnTheNode, strings.Join(candidate.UnnamedPVs, ", ")))
+
+		return false, requeue
+	}
+
+	// The node entry itself survives here, so publish what is known rather than hold
+	// everything back: freezing vgSize, vgFree and thin-pool usage over a PV that may
+	// never have a BlockDevice would cost more than the one missing device entry. The
+	// VGReady condition the publish writes carries the caveat — see
+	// vgReadyForPublishedStatus — under a reason the controller keeps in service,
+	// since everything the scheduler reads off this status is current.
+	report(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] not every Physical Volume of VG %s has a BlockDevice resource yet; publishing the devices that could be named",
+		candidate.ActualVGNameOnTheNode))
+
+	return true, requeue
+}
+
+// rememberedState reads what the previous pass left behind. The maps are only ever
+// replaced, never mutated in place, so the caller can read them without the lock.
+func (d *Discoverer) rememberedState() (refusedImports map[string]string, unnamedPVPasses map[string]int) {
+	d.stateMu.Lock()
+	defer d.stateMu.Unlock()
+
+	return d.refusedImports, d.unnamedPVPasses
+}
+
+func (d *Discoverer) rememberState(refusedImports map[string]string, unnamedPVPasses map[string]int) {
+	d.stateMu.Lock()
+	defer d.stateMu.Unlock()
+
+	d.refusedImports = refusedImports
+	d.unnamedPVPasses = unnamedPVPasses
 }
 
 // configureCandidateNodeDevices maps the VG's Physical Volumes onto the block
@@ -760,10 +1513,17 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 // fileDevicesKnown is false when at least one loop PV could not be classified,
 // i.e. when the returned file-device set is known to be incomplete. The caller
 // must not write a status built from it — see buildFileDeviceFromLoopPV.
-func (d *Discoverer) configureCandidateNodeDevices(ctx context.Context, pvs map[string][]internal.PVData, bds map[string][]v1alpha1.BlockDevice, vg internal.VGData, currentNode string) (devices map[string][]internal.LVMVGDevice, fileDevices map[string][]internal.LVMVGFileDevice, fileDevicesKnown bool) {
+//
+// unnamedPVs holds the block-device PVs no BlockDevice resource names, sorted so
+// the condition built from them does not churn with `lvm pvs` report order. Their
+// devices are missing from the returned set — see LVMVolumeGroupCandidate.
+// UnnamedPVs.
+func (d *Discoverer) configureCandidateNodeDevices(ctx context.Context, pvs map[string][]internal.PVData, bds map[string][]v1alpha1.BlockDevice, vg internal.VGData, currentNode string) (devices map[string][]internal.LVMVGDevice, fileDevices map[string][]internal.LVMVGFileDevice, fileDevicesKnown bool, unnamedPVs []string) {
 	filteredPV := pvs[vg.VGName+vg.VGUUID]
 	filteredBds := bds[vg.VGName+vg.VGUUID]
-	bdPathStatus := make(map[string]v1alpha1.BlockDevice, len(bds))
+	// Sized by the devices of this Volume Group, which is what goes in — bds is
+	// keyed by Volume Group, so its length was the number of groups on the node.
+	bdPathStatus := make(map[string]v1alpha1.BlockDevice, len(filteredBds))
 	result := make(map[string][]internal.LVMVGDevice, len(filteredPV))
 	fileResult := make(map[string][]internal.LVMVGFileDevice)
 	fileDevicesKnown = true
@@ -811,7 +1571,16 @@ func (d *Discoverer) configureCandidateNodeDevices(ctx context.Context, pvs map[
 					continue
 				}
 			}
-			d.log.Warning(fmt.Sprintf("[configureCandidateNodeDevices] no BlockDevice resource is yet configured for PV %s in VG %s, retry on the next iteration", pv.PVName, vg.VGName))
+			// Incomplete: the device this PV stands for is missing from the set, and
+			// when it is the VG's only PV the node entry is too — which is what used to
+			// leave an LVMVolumeGroup Pending with nothing to explain it.
+			unnamedPVs = append(unnamedPVs, pv.PVName)
+			// Debug, because handleUnnamedPVs reports the same fact for the whole
+			// candidate — naming every PV it collected here — and does it once, when
+			// the state appears or changes. Repeating it per PV per pass at Warning
+			// meant three lines a pass, forever, for a device that was filtered out
+			// on purpose.
+			d.log.Debug(fmt.Sprintf("[configureCandidateNodeDevices] no BlockDevice resource is yet configured for PV %s in VG %s, retry on the next iteration", pv.PVName, vg.VGName))
 			continue
 		}
 
@@ -827,7 +1596,9 @@ func (d *Discoverer) configureCandidateNodeDevices(ctx context.Context, pvs map[
 		result[currentNode] = append(result[currentNode], device)
 	}
 
-	return result, fileResult, fileDevicesKnown
+	sort.Strings(unnamedPVs)
+
+	return result, fileResult, fileDevicesKnown, unnamedPVs
 }
 
 // buildFileDeviceFromLoopPV resolves the backing file for a loop PV and
@@ -1159,13 +1930,34 @@ func sortPVsByVG(pvs []internal.PVData, vgs []internal.VGData) map[string][]inte
 	return result
 }
 
-func sortBlockDevicesByVG(bds map[string]v1alpha1.BlockDevice, vgs []internal.VGData) map[string][]v1alpha1.BlockDevice {
+// sortBlockDevicesByVG groups the BlockDevices of nodeName by the Volume Group
+// their status names.
+//
+// The node filter is not an optimisation. The list this reads is a cluster-wide
+// one — GetAPIBlockDevices is called with no selector — and the key is
+// ActualVGNameOnTheNode+VGUuid, neither half of which is per-node: a shared
+// Volume Group (getVgType returns "Shared" whenever vg_shared is set) is
+// presented to several hosts under one VG UUID, and device paths repeat across
+// them, so /dev/sdc on another node would land in this node's group under the
+// same path.
+//
+// Two things downstream then get it wrong, and both are one-way:
+// configureCandidateNodeDevices keys its lookup by Status.Path, so another node's
+// BlockDevice would name this node's Physical Volume — leaving candidate.UnnamedPVs
+// empty and the guards that depend on it disarmed; and getBlockDevicesNames feeds
+// configureBlockDeviceSelector, so an auto-derived spec.blockDeviceSelector would
+// name BlockDevices belonging to other nodes. Nothing widens a selector once one
+// is written (see UpdateLVMVolumeGroupByCandidate).
+func sortBlockDevicesByVG(bds map[string]v1alpha1.BlockDevice, vgs []internal.VGData, nodeName string) map[string][]v1alpha1.BlockDevice {
 	result := make(map[string][]v1alpha1.BlockDevice, len(vgs))
 	for _, vg := range vgs {
 		result[vg.VGName+vg.VGUUID] = make([]v1alpha1.BlockDevice, 0, len(bds))
 	}
 
 	for _, bd := range bds {
+		if bd.Status.NodeName != nodeName {
+			continue
+		}
 		if _, ok := result[bd.Status.ActualVGNameOnTheNode+bd.Status.VGUuid]; ok {
 			result[bd.Status.ActualVGNameOnTheNode+bd.Status.VGUuid] = append(result[bd.Status.ActualVGNameOnTheNode+bd.Status.VGUuid], bd)
 		}

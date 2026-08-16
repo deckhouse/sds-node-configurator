@@ -39,10 +39,13 @@ import (
 
 const SdsLVGConditionsWatcherCtrlName = "sds-conditions-watcher-controller"
 
-// acceptableReasons are the VGConfigurationApplied=False reasons that describe a
-// Volume Group which is still serving its volumes, so they must not drag the
-// aggregate Ready condition — and with it the phase, and with it the scheduler's
-// willingness to place new volumes — down with them.
+// acceptableReasons are the False reasons that describe a Volume Group which is
+// still serving its volumes, so they must not drag the aggregate Ready condition —
+// and with it the phase, and with it the scheduler's willingness to place new
+// volumes — down with them.
+//
+// They are matched against every condition's reason, whichever type wrote it: most
+// come from VGConfigurationApplied, ReasonBlockDeviceNotFound from VGReady.
 //
 // The three file-device reasons belong here for the same reason
 // ReasonValidationFailed does — in every one of them the Volume Group is intact
@@ -65,11 +68,18 @@ const SdsLVGConditionsWatcherCtrlName = "sds-conditions-watcher-controller"
 //   - ReasonCacheStale — the agent's LVM cache has not caught up with a Volume
 //     Group that is on the node. Nothing is wrong with the Volume Group; that is
 //     precisely why the agent refuses to act on it.
+//   - ReasonBlockDeviceNotFound — some of the Volume Group's Physical Volumes have
+//     no BlockDevice resource, so status.nodes lists fewer devices than the node
+//     has. The status carrying it was written in that same pass, so the capacity
+//     figures are current and the Volume Group keeps serving; a PV deliberately
+//     below the minimum size or filtered out must not end its service.
 //
 // ReasonVGCheckFailed is deliberately NOT here. It means the agent cannot read
 // the node's Volume Groups at all, and an LVMVolumeGroup whose backing storage
 // the agent has lost sight of is exactly what the scheduler should stop placing
-// volumes on.
+// volumes on. The agent's NodeNotDescribed — no Physical Volume of the Volume Group
+// could be named, so status.nodes was left as an earlier pass wrote it — is absent
+// for the same reason, and like VGCheckFailed has no constant on this side.
 var (
 	acceptableReasons = []string{
 		internal.ReasonUpdating,
@@ -79,6 +89,7 @@ var (
 		internal.ReasonAliasResolutionFailed,
 		internal.ReasonFileDeviceGrowFailed,
 		internal.ReasonCacheStale,
+		internal.ReasonBlockDeviceNotFound,
 	}
 )
 

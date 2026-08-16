@@ -37,6 +37,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -199,6 +200,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 
 	t.Run("sortBlockDevicesByVG_returns_sorted_bds", func(t *testing.T) {
 		const (
+			nodeName     = "test_node"
 			firstVgName  = "firstVg"
 			firstVgUUID  = "firstUUID"
 			secondVgName = "secondVg"
@@ -219,6 +221,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			"first": {
 				ObjectMeta: metav1.ObjectMeta{Name: "first"},
 				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:              nodeName,
 					ActualVGNameOnTheNode: firstVgName,
 					VGUuid:                firstVgUUID,
 				},
@@ -226,6 +229,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			"second": {
 				ObjectMeta: metav1.ObjectMeta{Name: "second"},
 				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:              nodeName,
 					ActualVGNameOnTheNode: secondVgName,
 					VGUuid:                secondVgUUID,
 				},
@@ -237,7 +241,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			secondVgName + secondVgUUID: {bds["second"]},
 		}
 
-		actual := sortBlockDevicesByVG(bds, vgs)
+		actual := sortBlockDevicesByVG(bds, vgs, nodeName)
 		assert.Equal(t, expected, actual)
 	})
 
@@ -359,16 +363,20 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 		mp := map[string][]v1alpha1.BlockDevice{vgName + vgUUID: bds}
 		ar := map[string][]internal.PVData{vgName + vgUUID: pvs}
 
-		actual, _, _ := setupDiscoverer(nil).configureCandidateNodeDevices(context.Background(), ar, mp, vg, nodeName)
+		actual, _, _, unnamedPVs := setupDiscoverer(nil).configureCandidateNodeDevices(context.Background(), ar, mp, vg, nodeName)
 
 		assert.Equal(t, expected, actual)
+		assert.Empty(t, unnamedPVs, "every PV has a BlockDevice, so the device set is complete")
 	})
 
 	t.Run("sortBlockDevicesByVG", func(t *testing.T) {
+		const nodeName = "test_node"
+
 		bds := map[string]v1alpha1.BlockDevice{
 			"first": {
 				ObjectMeta: metav1.ObjectMeta{Name: "first"},
 				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:              nodeName,
 					VGUuid:                "firstUUID",
 					ActualVGNameOnTheNode: "firstVG",
 				},
@@ -376,6 +384,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			"second": {
 				ObjectMeta: metav1.ObjectMeta{Name: "second"},
 				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:              nodeName,
 					VGUuid:                "firstUUID",
 					ActualVGNameOnTheNode: "firstVG",
 				},
@@ -388,11 +397,54 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				VGUUID: "firstUUID",
 			},
 		}
-		actual := sortBlockDevicesByVG(bds, vgs)
+		actual := sortBlockDevicesByVG(bds, vgs, nodeName)
 		assert.Equal(t, 1, len(actual))
 
 		sorted := actual["firstVGfirstUUID"]
 		assert.Equal(t, 2, len(sorted))
+	})
+
+	// A shared Volume Group is presented to several hosts under one VG UUID, and
+	// the BlockDevice list this reads is cluster-wide, so without the node filter
+	// another host's device lands in this node's group. Device paths repeat across
+	// hosts, so it does not stay harmless: configureCandidateNodeDevices keys its
+	// lookup by Status.Path, and getBlockDevicesNames feeds the auto-derived
+	// spec.blockDeviceSelector — which nothing widens once it is written.
+	t.Run("sortBlockDevicesByVG_drops_another_nodes_device_in_a_shared_VG", func(t *testing.T) {
+		const (
+			nodeName     = "test_node"
+			sharedVGName = "shared-vg"
+			sharedVGUUID = "sharedUUID"
+			otherNode    = "other-node"
+		)
+
+		bds := map[string]v1alpha1.BlockDevice{
+			"ours": {
+				ObjectMeta: metav1.ObjectMeta{Name: "ours"},
+				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:              nodeName,
+					Path:                  "/dev/sdc",
+					VGUuid:                sharedVGUUID,
+					ActualVGNameOnTheNode: sharedVGName,
+				},
+			},
+			"theirs": {
+				ObjectMeta: metav1.ObjectMeta{Name: "theirs"},
+				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:              otherNode,
+					Path:                  "/dev/sdc",
+					VGUuid:                sharedVGUUID,
+					ActualVGNameOnTheNode: sharedVGName,
+				},
+			},
+		}
+
+		vgs := []internal.VGData{{VGName: sharedVGName, VGUUID: sharedVGUUID}}
+
+		sorted := sortBlockDevicesByVG(bds, vgs, nodeName)[sharedVGName+sharedVGUUID]
+
+		require.Len(t, sorted, 1, "only this node's BlockDevice belongs in this node's group")
+		assert.Equal(t, "ours", sorted[0].Name)
 	})
 
 	t.Run("getVgType_returns_shared", func(t *testing.T) {
@@ -533,9 +585,10 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			},
 		}
 
-		created, err := d.CreateLVMVolumeGroupByCandidate(ctx, candidate)
+		lvg, created, err := d.CreateLVMVolumeGroupByCandidate(ctx, candidate)
 		if assert.NoError(t, err) {
-			assert.Equal(t, &expected, created)
+			assert.True(t, created, "the candidate is complete, so the import goes through")
+			assert.Equal(t, &expected, lvg)
 		}
 	})
 
@@ -556,9 +609,12 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			VGUUID:                "test-uuid",
 		}
 
-		created, err := d.CreateLVMVolumeGroupByCandidate(ctx, candidate)
+		lvg, created, err := d.CreateLVMVolumeGroupByCandidate(ctx, candidate)
 		assert.NoError(t, err)
-		assert.NotNil(t, created)
+		assert.NotNil(t, lvg)
+		// Postponed, not created — and said so, rather than leaving the caller to
+		// find out by writing a condition on a resource that is not there.
+		assert.False(t, created)
 
 		lvgs, err := d.GetAPILVMVolumeGroups(ctx)
 		assert.NoError(t, err)
@@ -1024,7 +1080,7 @@ func setupDiscoverer(opts *DiscovererConfig) *Discoverer {
 		opts = &DiscovererConfig{NodeName: "test_node"}
 	}
 
-	return NewDiscoverer(cl, log, metrics, cache.New(), utils.NewCommands(), *opts)
+	return NewDiscoverer(cl, UncachedReader{Reader: cl}, log, metrics, cache.New(), utils.NewCommands(), *opts)
 }
 
 // hasStatusFileDevicesDiff must match file devices by FilePath, not by slice
