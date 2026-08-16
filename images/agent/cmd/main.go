@@ -210,6 +210,10 @@ func run() int {
 		log,
 		lvg.NewDiscoverer(
 			mgr.GetClient(),
+			// Uncached on purpose: this discoverer runs right after the block-device
+			// one in the same scanner pass and has to be able to see the BlockDevice
+			// status it just wrote. See Discoverer.bdAPICl.
+			lvg.UncachedReader{Reader: mgr.GetAPIReader()},
 			log,
 			metrics,
 			sdsCache,
@@ -227,6 +231,27 @@ func run() int {
 		return 1
 	}
 
+	// One discovery pass, and the only place the order of the two discoverers is
+	// stated. Everything that runs discovery runs this — the BlockDeviceFilter
+	// reconciler below and the scanner further down — so neither can run the
+	// block-device half without the LVMVolumeGroup half after it. See
+	// controller.DiscoverInOrder for why that is a contract and not a convenience.
+	//
+	// Wrapped once, here, so that both of those callers share ONE retry chain. The
+	// requeue is a property of the node's state rather than of whoever noticed it,
+	// and lvg.maxUnnamedPVPasses is counted in passes on the assumption that a pass
+	// is worth about a scan interval — an assumption that only holds while there is
+	// a single chain. See controller.WithSingleRetryChain.
+	//
+	// ctx and not a per-caller context: the chain outlives the pass that started it,
+	// and it has to end with the process rather than with one reconcile.
+	discover := controller.WithSingleRetryChain(
+		ctx,
+		log,
+		controller.DiscoveryPassName,
+		controller.DiscoverInOrder(rediscoverBlockDevices, rediscoverLVGs),
+	)
+
 	err = controller.AddReconciler(
 		mgr,
 		log,
@@ -234,7 +259,7 @@ func run() int {
 			mgr.GetClient(),
 			log,
 			metrics,
-			rediscoverBlockDevices,
+			discover,
 			bdf.ReconcilerConfig{
 				NodeName: cfgParams.NodeName,
 				Loglevel: cfgParams.Loglevel,
@@ -278,8 +303,7 @@ func run() int {
 			*cfgParams,
 			sdsCache,
 			metrics,
-			rediscoverBlockDevices,
-			rediscoverLVGs,
+			discover,
 		); err != nil {
 			log.Error(err, "[main] unable to run scanner")
 			os.Exit(1)

@@ -39,3 +39,35 @@ func TestLVMGlobalFilter_NoBlanketAccept(t *testing.T) {
 		)
 	}
 }
+
+// TestConditionReasonsCrossingTheModuleBoundary pins the wire value of the
+// reasons the controller matches by string.
+//
+// The agent writes these into an LVMVolumeGroup condition; the controller reads
+// them back and decides, in images/controller/pkg/controller, whether the reason
+// keeps the Volume Group in service. The two live in different Go modules with
+// separate copies of the constant, so nothing links them at compile time and the
+// existing tests on each side pass whichever value their own copy holds.
+//
+// What a drift costs is not a broken test but a silent outage: rename the value
+// here and BlockDeviceNotFound stops matching the controller's acceptableReasons,
+// so every LVMVolumeGroup carrying a filtered-out or undersized Physical Volume
+// leaves Ready, its phase becomes NotReady, and the scheduler stops placing
+// volumes on Volume Groups that are serving perfectly well. NodeNotDescribed is
+// pinned for the opposite reason: it must keep NOT matching.
+//
+// The mirror of this test lives beside the controller's copy. Both have to be
+// updated together, which is the point.
+func TestConditionReasonsCrossingTheModuleBoundary(t *testing.T) {
+	for name, pair := range map[string]struct{ got, want string }{
+		"ReasonBlockDeviceNotFound": {ReasonBlockDeviceNotFound, "BlockDeviceNotFound"},
+		"ReasonNodeNotDescribed":    {ReasonNodeNotDescribed, "NodeNotDescribed"},
+		"ReasonVGCheckFailed":       {ReasonVGCheckFailed, "VGCheckFailed"},
+		"ReasonCacheStale":          {ReasonCacheStale, "CacheStale"},
+	} {
+		if pair.got != pair.want {
+			t.Errorf("%s is %q, but the controller matches it as %q; change both or neither",
+				name, pair.got, pair.want)
+		}
+	}
+}
