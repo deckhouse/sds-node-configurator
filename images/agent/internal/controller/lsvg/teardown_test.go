@@ -123,6 +123,11 @@ func TestTheLockManagerAskingForTimeIsNotAFailure(t *testing.T) {
 	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+	// The group is still there: a removal that fails while it exists is a
+	// removal to retry, and one that fails after it is gone is a removal that
+	// happened.
+	commands.EXPECT().GetAllVGs(gomock.Any()).
+		Return([]internal.VGData{{VGName: testVG}}, "vgs", bytes.Buffer{}, nil).AnyTimes()
 	commands.EXPECT().RemoveVGShared(gomock.Any(), testVG).
 		Return("vgremove", errors.New("unknown host state (wait and retry)"))
 
@@ -326,4 +331,53 @@ func TestTheLUNsAreLeftCleanByTheRemovalItself(t *testing.T) {
 
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 	reconcile(t, r, group)
+}
+
+func TestARemovalOfAGroupThatIsAlreadyGoneIsDone(t *testing.T) {
+	// The command fails with something that says nothing about the removal —
+	// "Global lock failed: check that global lockspace is started", because
+	// there is no volume group left to take a lock in. Found on the stand, where
+	// a resource sat on its finalizer reporting RemovalFailed once a minute over
+	// a volume group that had been gone for an hour.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := deletedGroup()
+	r, cl, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("", nil).AnyTimes()
+	commands.EXPECT().RemoveVGShared(gomock.Any(), testVG).
+		Return("vgremove", errors.New("Global lock failed: check that global lockspace is started"))
+	// Read, and the group is not in it.
+	commands.EXPECT().GetAllVGs(gomock.Any()).Return(nil, "vgs", bytes.Buffer{}, nil).AnyTimes()
+
+	reconcile(t, r, group)
+
+	// The finalizer goes, which is what lets the resource go.
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	err := cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published)
+	if err == nil {
+		assert.Empty(t, published.Finalizers, "a group that is gone must not be held by its finalizer")
+	}
+}
+
+func TestARemovalThatFailsWhileTheGroupIsUnreadableIsRetried(t *testing.T) {
+	// Not being able to read the list is not the same as the group being gone,
+	// and treating it as gone would drop the finalizer over a volume group that
+	// is still on the LUN.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := deletedGroup()
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("", nil).AnyTimes()
+	commands.EXPECT().RemoveVGShared(gomock.Any(), testVG).
+		Return("vgremove", errors.New("Global lock failed: check that global lockspace is started"))
+	commands.EXPECT().GetAllVGs(gomock.Any()).
+		Return(nil, "vgs", bytes.Buffer{}, errors.New("cannot read")).AnyTimes()
+
+	res := reconcile(t, r, group)
+
+	assert.NotZero(t, res.RequeueAfter, "an unreadable answer is a reason to look again")
 }

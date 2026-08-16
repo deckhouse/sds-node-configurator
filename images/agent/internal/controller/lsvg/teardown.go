@@ -145,6 +145,19 @@ func (r *Reconciler) teardown(
 
 	r.log.Info(fmt.Sprintf("[%s] removing the volume group %s of the deleted pool", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
 	cmd, err := r.commands.RemoveVGShared(ctx, lsvg.Spec.ActualVGNameOnTheNode)
+	if err != nil && r.groupIsAlreadyGone(ctx, lsvg) {
+		// A group that is not there any more is a group that is removed. It gets
+		// here after another member removed it, after an administrator did, and
+		// after a removal that succeeded and whose bookkeeping did not — and in
+		// all three the command fails with something that says nothing about the
+		// removal: "Global lock failed: check that global lockspace is started",
+		// because there is no volume group left to take a lock in. Found on the
+		// stand, where a resource sat on its finalizer reporting RemovalFailed
+		// once a minute over a volume group that had been gone for an hour.
+		r.log.Info(fmt.Sprintf("[%s] %s is already gone; treating the removal as done (cmd: %s)",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd))
+		err = nil
+	}
 	if err != nil {
 		if utils.SharedVGRemovalNeedsTime(err) {
 			// Not a fault. sanlock is waiting out its interval, or a member has
@@ -351,3 +364,23 @@ func (r *Reconciler) ensureLockspaceRunning(ctx context.Context, lsvg *v1alpha1.
 // proceeds. Doing that from here would mean taking a registration away from a
 // node that never said it had left, which is the one thing this module refuses
 // to infer.
+
+// groupIsAlreadyGone reports whether the volume group has stopped existing.
+//
+// It is asked only after a removal has failed, and it asks for the whole list
+// rather than for the group by name: `vgs <name>` fails for a group that is not
+// there, which is the same shape of failure as not being able to read at all,
+// and this must not confuse the two. Listing succeeds either way, and the
+// group's absence from a list that was read is a fact.
+func (r *Reconciler) groupIsAlreadyGone(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup) bool {
+	groups, _, _, err := r.commands.GetAllVGs(ctx)
+	if err != nil {
+		return false
+	}
+	for _, group := range groups {
+		if group.VGName == lsvg.Spec.ActualVGNameOnTheNode {
+			return false
+		}
+	}
+	return true
+}
