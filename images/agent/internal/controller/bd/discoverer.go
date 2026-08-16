@@ -25,6 +25,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -49,7 +50,6 @@ var (
 	ErrDeviceListInvalid                             = errors.New("device list invalid")
 	ErrDeviceListKNameIsEmpty                        = fmt.Errorf("kname is empty: %w", ErrDeviceListInvalid)
 	ErrDEviceListParentVisitingRecursionLimitReached = fmt.Errorf("max parent recursion reached: %w", ErrDeviceListInvalid)
-	ErrDeviceListParentNotFound                      = fmt.Errorf("parent not found: %w", ErrDeviceListInvalid)
 )
 
 type Discoverer struct {
@@ -60,6 +60,19 @@ type Discoverer struct {
 	metrics                 *monitoring.Metrics
 	sdsCache                *cache.Cache
 	cfg                     DiscovererConfig
+	// reportedOrphans holds the KNames of the devices whose parent was missing on
+	// the previous pass, so an orphan is named when it appears or goes away rather
+	// than once per pass for as long as it exists. Nothing on the node clears an
+	// orphaned device-mapper node by itself, and filterDevices runs on every udev
+	// event: at Warning every time, the first and useful copy would be buried by
+	// the identical ones behind it. The same rule the LVMVolumeGroup discoverer
+	// applies to a refused import.
+	//
+	// Guarded because filterDevices is reachable from the scanner's retry goroutine
+	// as well as from its main loop, and concurrent writes to a bare map take the
+	// process down.
+	orphanMu        sync.Mutex
+	reportedOrphans map[string]struct{}
 }
 
 type DiscovererConfig struct {
@@ -83,6 +96,7 @@ func NewDiscoverer(
 		metrics:                 metrics,
 		sdsCache:                sdsCache,
 		cfg:                     cfg,
+		reportedOrphans:         make(map[string]struct{}),
 	}
 }
 
@@ -321,8 +335,19 @@ func (d *Discoverer) getBlockDeviceCandidates() ([]internal.BlockDeviceCandidate
 
 // Calls visitor function for each parent of the device
 //
-// Once maxDepth reached or travel function returns false it stops
+// Once the visitor returns false, or the chain ends, it stops.
 // Returns true if interrupted by visitor
+//
+// maxDepth is what makes a cycle in the parent chain an error rather than an
+// infinite walk, and callers pass len(devicesByKName) for it. That bound is exact:
+// a walk that visits more devices than the list holds must have visited one of
+// them twice, and there is no other way to exceed it. A constant is not exact, and
+// the difference matters — it conflates a chain that loops, which makes the list
+// invalid, with a chain that is merely long, which is a property of one device.
+// LVM on LUKS on md-raid on multipath on partitions is a legal stack and the node
+// is free to keep growing it, so a constant would eventually fail the node's whole
+// device list over the length of one device's chain: the same failure this
+// function stopped having for a parent that is named but absent.
 func visitParents(devicesByKName map[string]*internal.Device, device *internal.Device, visitor func(parent *internal.Device) bool, maxDepth int) (bool, error) {
 	if maxDepth <= 0 {
 		return false, ErrDEviceListParentVisitingRecursionLimitReached
@@ -333,7 +358,25 @@ func visitParents(devicesByKName map[string]*internal.Device, device *internal.D
 
 	parent, found := devicesByKName[device.PkName]
 	if !found {
-		return false, ErrDeviceListParentNotFound
+		// A parent that is named but absent ends the walk with nothing inherited,
+		// exactly like a device that names no parent at all. It is not a broken
+		// list: a device-mapper node outlives the disk under it, so a detached
+		// disk leaves dm entries whose PkName points at a device that is gone —
+		// `dmsetup ls` still shows them while /dev/sdX does not exist.
+		//
+		// This used to return ErrDeviceListParentNotFound, which filterDevices
+		// turned into a hard error and getBlockDeviceCandidates propagated,
+		// throwing away every candidate on the node. One orphaned dm node was
+		// therefore enough to stop the agent creating any BlockDevice at all,
+		// permanently and on a five-second retry loop, on a node that was
+		// otherwise healthy. The caller already handles "not found" by logging
+		// that it could not resolve a serial and moving on, which is the correct
+		// outcome here.
+		//
+		// It is silent because it says nothing new: filterDevices names the
+		// orphans once per pass before it walks anything, which is the one place
+		// where each is reported once rather than once per walk that reaches it.
+		return false, nil
 	}
 
 	if !visitor(parent) {
@@ -341,6 +384,104 @@ func visitParents(devicesByKName map[string]*internal.Device, device *internal.D
 	}
 
 	return visitParents(devicesByKName, parent, visitor, maxDepth-1)
+}
+
+// orphanedParents returns the devices whose PkName names a device that is not in
+// the list, in the order they appear.
+//
+// Tolerating them is what visitParents does now, and it has to: a device-mapper
+// node outlives the disk under it, so one detached disk used to cost the node
+// every BlockDevice it had. But tolerating them quietly would replace a loud
+// failure with a silent one — the device simply never becomes a BlockDevice, with
+// no error, no warning, and nothing for an operator to search for. Naming them is
+// what keeps the state findable.
+func orphanedParents(devices []internal.Device, kNamesInList map[string]struct{}) []internal.Device {
+	var orphans []internal.Device
+
+	for _, device := range devices {
+		if device.PkName == "" {
+			continue
+		}
+		if _, found := kNamesInList[device.PkName]; !found {
+			orphans = append(orphans, device)
+		}
+	}
+
+	return orphans
+}
+
+// reportOrphanedParents says it out loud once per orphan — when it appears, and
+// again when it goes away — rather than once per pass for as long as it exists.
+//
+// Warning rather than Debug: an orphaned device-mapper node is leftover state
+// that nothing on the node clears by itself, and the answer is a `dmsetup remove`
+// somebody has to run. That is also exactly why it must not be repeated every
+// pass. filterDevices runs on every udev event, so a state that never resolves
+// itself would print the same line for the lifetime of the process and bury the
+// copy that was worth reading — the same reason the LVMVolumeGroup discoverer
+// reports a refused import only when it appears or changes.
+//
+// The recovery gets a line of its own, because otherwise the only record of an
+// orphan going away is the absence of a message.
+func (d *Discoverer) reportOrphanedParents(devices []internal.Device, kNamesInList map[string]struct{}) {
+	orphans := orphanedParents(devices, kNamesInList)
+
+	current := make(map[string]struct{}, len(orphans))
+	for _, device := range orphans {
+		current[device.KName] = struct{}{}
+	}
+
+	d.orphanMu.Lock()
+	previous := d.reportedOrphans
+	d.reportedOrphans = current
+	d.orphanMu.Unlock()
+
+	for _, device := range orphans {
+		if _, known := previous[device.KName]; known {
+			d.log.Debug(fmt.Sprintf("[filterDevices] device %s (kname %s) still names the missing parent %s",
+				device.Name, device.KName, device.PkName))
+			continue
+		}
+
+		d.log.Warning(fmt.Sprintf("[filterDevices] device %s (kname %s) names the parent %s, which is not in the device list; "+
+			"it inherits no serial or WWN and will most likely not become a BlockDevice. "+
+			"A device-mapper node left behind by a detached disk looks exactly like this — check `dmsetup ls` and `dmsetup deps` for %s",
+			device.Name, device.KName, device.PkName, device.KName))
+	}
+
+	for kName := range previous {
+		if _, still := current[kName]; !still {
+			d.log.Info(fmt.Sprintf("[filterDevices] device with kname %s no longer names a missing parent", kName))
+		}
+	}
+}
+
+// reportUnusableDevices says which entries could not be indexed by KName and were
+// therefore dropped from the pass.
+//
+// Loud, and every time rather than on a transition, because unlike an orphaned
+// device-mapper node this is not a state of the node: an entry with no KName, or a
+// second entry under a KName the list already holds, is the device list itself
+// being wrong. Nothing on the node clears it and nothing here can act on it, so it
+// has to be findable — and it is rare enough that repeating it costs nothing. The
+// orphan report is the one that has to hold its tongue, because an orphan is
+// ordinary and lasts.
+//
+// It is a Warning and not an error because the pass goes on: dropping the entry
+// costs one undiscovered device, where failing the list used to cost the node
+// every BlockDevice it had.
+func (d *Discoverer) reportUnusableDevices(unusable []internal.Device) {
+	for _, device := range unusable {
+		if device.KName == "" {
+			d.log.Warning(fmt.Sprintf("[filterDevices] device %s has no kname and cannot be indexed; skipping it. "+
+				"Every other device on this node is still discovered", device.Name))
+			continue
+		}
+
+		d.log.Warning(fmt.Sprintf("[filterDevices] device %s repeats the kname %s of an earlier device in the list; skipping it. "+
+			"Two entries under one kname resolve to one BlockDevice, so keeping both would have them overwrite each other every pass. "+
+			"Every other device on this node is still discovered", device.Name, device.KName))
+	}
 }
 
 // Removing devices we don't need
@@ -359,19 +500,68 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 	filteredDevices := slices.Clone(devices)
 	start := time.Now()
 	// arrange devices by pkname to fast access
+	//
+	// An entry that cannot go into the map leaves the list instead of failing it.
+	// Both ways of being unusable — no KName at all, or a KName another entry
+	// already holds — are properties of ONE entry, exactly like the named-but-absent
+	// parent this file stopped failing over: keeping the old behaviour here would
+	// mean a single bad record still cost the node every BlockDevice it has, on the
+	// five-second retry loop, for as long as the record existed. The duplicate is
+	// not hypothetical either — with Features.NetlinkBlockDeviceDiscovery the list
+	// comes from the agent's own bookkeeping (udev.DeviceMap.Snapshot), built from a
+	// stream of events, so one missed remove leaves two entries under one KName.
+	//
+	// Dropped from filteredDevices rather than merely left out of the map: a device
+	// the map does not hold is a device nothing can inherit from and, worse for the
+	// duplicate, two entries under one KName resolve to one BlockDevice name and
+	// would fight over the same resource every pass.
 	devicesByKName := make(map[string]*internal.Device, len(filteredDevices))
-	for _, device := range filteredDevices {
+	var unusable []internal.Device
+	// The KNames the list holds, kept as a set of its own so the orphan report at
+	// the end can ask "is this parent in the list" without reading through
+	// devicesByKName — whose pointers address a backing array the compaction below
+	// rewrites.
+	kNamesInList := make(map[string]struct{}, len(filteredDevices))
+	filteredDevices = slices.DeleteFunc(filteredDevices, func(device internal.Device) bool {
 		if device.KName == "" {
-			return devices, fmt.Errorf("empty kname is unexpected for device: %v", device)
+			unusable = append(unusable, device)
+			return true
 		}
-		firstDevice, alreadyExists := devicesByKName[device.KName]
-		if alreadyExists {
-			d.log.Error(ErrDeviceListInvalid, "second device with same kname", "first", firstDevice, "second", device)
-			return devices, fmt.Errorf("%w: second device with kname %s found", ErrDeviceListInvalid, device.KName)
+		if _, alreadyExists := kNamesInList[device.KName]; alreadyExists {
+			unusable = append(unusable, device)
+			return true
 		}
-		devicesByKName[device.KName] = &device
+
+		kNamesInList[device.KName] = struct{}{}
+
+		return false
+	})
+	for i := range filteredDevices {
+		// The element, not a copy of it. The loop below fills SerialInherited and
+		// WWNInherited through &filteredDevices[i], so with copies in the map a
+		// parent's inherited value was never visible to its children and every walk
+		// went to the top of the chain again. Harmless but pointless work, and a
+		// trap for anyone who later reads a mutable field back out of this map.
+		//
+		// Taken after DeleteFunc has finished moving elements, because it takes
+		// addresses into the backing array the compaction rewrites.
+		devicesByKName[filteredDevices[i].KName] = &filteredDevices[i]
 	}
 	d.log.Trace("[filterDevices] Made map by KName", "duration", time.Since(start))
+
+	d.reportUnusableDevices(unusable)
+
+	// Before the type filtering, deliberately. The orphan this exists for is a thin
+	// pool's dm node, which carries type "lvm" and is therefore dropped by
+	// hasValidType a hundred lines below whatever its parent does — so reporting
+	// only the survivors would say nothing at all in the case taken from the stand.
+	// What the line is for is the leftover state on the node, not the candidate: an
+	// entry in `dmsetup ls` pointing at a disk that is gone stays there until
+	// somebody removes it.
+	//
+	// It reads the KName set rather than devicesByKName, whose pointers address the
+	// backing array the compaction below rewrites.
+	d.reportOrphanedParents(filteredDevices, kNamesInList)
 
 	start = time.Now()
 	// feel up missing serial and wwn for mpath and partitions
@@ -389,7 +579,7 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 				}
 				device.SerialInherited = parent.Serial
 				return false
-			}, 16)
+			}, len(devicesByKName))
 
 			if err != nil {
 				return nil, fmt.Errorf("looking serial for device %v: %w", device, err)
@@ -411,7 +601,7 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 				}
 				device.WWNInherited = parent.Wwn
 				return false
-			}, 16)
+			}, len(devicesByKName))
 
 			if err != nil {
 				return nil, fmt.Errorf("looking WWN for device %v: %w", device, err)

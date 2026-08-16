@@ -19,6 +19,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/deckhouse/sds-node-configurator/e2e/cfg"
@@ -102,6 +103,33 @@ var _ = Describe("Controller restart stability", Label("sds-node-configurator", 
 	AfterAll(func() {
 		if managedDisk == nil {
 			return
+		}
+
+		// Before the disk goes, not after. cleanupLVMVolumeGroups strips the
+		// finalizers off an LVMVolumeGroup the agent did not manage to delete,
+		// which removes the resource but leaves the Volume Group on the node.
+		// Detaching the disk under it then leaves device-mapper entries pointing
+		// at a device that no longer exists — an orphan that nothing later in the
+		// run cleans up.
+		By("Wiping any Volume Group left on the node before the disk goes")
+		// AfterEach has already run cleanupLVMVolumeGroups, so anything this run
+		// still owns has a resource describing it and is not a leftover. Passing the
+		// live ones keeps the sweep off a concurrently running suite's Volume Groups
+		// as well — the prefix cannot tell one run from another.
+		keep, keepErr := framework.LiveVolumeGroupNames(ctx, k8sClient)
+		if keepErr != nil {
+			GinkgoWriter.Printf("not wiping e2e LVM on %s, cannot tell leftovers from live Volume Groups: %v\n", targetNode, keepErr)
+			AddReportEntry("leftover-lvm-sweep-failed/"+targetNode, keepErr.Error())
+		} else if leftovers, err := framework.WipeE2ELVM(ctx, cl, targetNode, keep); err != nil {
+			GinkgoWriter.Printf("failed to wipe e2e LVM on %s: %v\n", targetNode, err)
+			AddReportEntry("leftover-lvm-sweep-failed/"+targetNode, err.Error())
+		} else if len(leftovers) > 0 {
+			GinkgoWriter.Printf("LVM the wipe could not remove on %s: %v\n", targetNode, leftovers)
+			// This is the spec that strands the group and then detaches the disk
+			// under it, so a leftover here is the orphan itself, about to outlive
+			// the run — whether it is still a Volume Group (vg:) or already only
+			// the device-mapper nodes under one (dm:).
+			AddReportEntry("leftover-lvm/"+targetNode, strings.Join(leftovers, ","))
 		}
 
 		By("Detaching and deleting the test disk")
