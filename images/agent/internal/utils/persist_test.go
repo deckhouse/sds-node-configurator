@@ -140,3 +140,36 @@ func TestEverySharedCommandCarriesTheHostID(t *testing.T) {
 	require.NoError(t, os.Remove(filepath.Join(dir, "host-id")))
 	assert.Zero(t, utils.HostIDFromStateDir(dir))
 }
+
+func TestALeaseMappingOfAnotherIncarnationIsRecognised(t *testing.T) {
+	// A pool removed and created again under the same name gives its lease
+	// volume the same device-mapper name and a different UUID. A member that
+	// still has the old mapping cannot start the new lockspace at all: the
+	// create fails with "Device or resource busy" once a minute, for as long as
+	// the mapping stands. Found on the stand, on a pool healthy on its other two
+	// nodes.
+	root := t.TempDir()
+	old := utils.SysBlockRoot
+	utils.SysBlockRoot = root
+	t.Cleanup(func() { utils.SysBlockRoot = old })
+
+	base := filepath.Join(root, "dm-9")
+	require.NoError(t, os.MkdirAll(filepath.Join(base, "dm"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(base, "dm", "name"), []byte("e2e--shared--pool-lvmlock\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(base, "dm", "uuid"),
+		[]byte("LVM-5YmDCDfccS4MpuV0sCnE76fJPWdQoZUQ7rVgFI1Rv3pufbJZx05kQeP00ENOeLxU\n"), 0o644))
+
+	// The group that has that name now is a different one.
+	name, stale := utils.LeaseMappingOfOtherIncarnation("e2e-shared-pool", "KANMFg-8e8g-0tAj-THJE-whs0-cQj3-r7UStc")
+	assert.True(t, stale)
+	assert.Equal(t, "e2e--shared--pool-lvmlock", name)
+
+	// The group it belongs to keeps it: device-mapper carries the volume
+	// group's UUID with the dashes removed.
+	_, stale = utils.LeaseMappingOfOtherIncarnation("e2e-shared-pool", "5YmDCD-fccS-4Mpu-V0sC-nE76-fJPW-dQoZUQ")
+	assert.False(t, stale)
+
+	// And an answer that cannot be read is not a stale mapping.
+	_, stale = utils.LeaseMappingOfOtherIncarnation("other-pool", "5YmDCD-fccS")
+	assert.False(t, stale)
+}

@@ -429,6 +429,12 @@ func (r *Reconciler) join(
 		r.log.Warning(fmt.Sprintf("[%s] unable to start the lockspace of %s (cmd: %s): %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
 
+		// One of them never resolves by itself: the lease volume of a pool that
+		// was removed and created again under the same name still has its
+		// device-mapper device here, under the same name and a different UUID,
+		// and the new lockspace cannot be created over it.
+		r.dropLeaseMappingOfAnotherIncarnation(ctx, lsvg)
+
 		// Retrying is right, and retrying SILENTLY is not: one of these causes
 		// never resolves by itself, and a node that keeps trying every thirty
 		// seconds with nothing published looks identical to a node that is fine.
@@ -1186,5 +1192,29 @@ func (r *Reconciler) clearStaleLockspaceRegistration(ctx context.Context, lsvg *
 	if cmd, err := r.commands.VGLockStop(ctx, lsvg.Spec.ActualVGNameOnTheNode); err != nil {
 		r.log.Warning(fmt.Sprintf("[%s] unable to stop the stale lockspace of %s (cmd: %s): %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
+	}
+}
+
+// dropLeaseMappingOfAnotherIncarnation removes a lease mapping left behind by a
+// pool that no longer exists.
+//
+// It runs only after a lockspace has failed to start, and only when the mapping
+// belongs to a different volume group than the one this pool has now — the same
+// name, a different UUID. On the stand that state cost a member of a recreated
+// pool its place in it: "device-mapper: create ioctl on
+// e2e--shared--pool-lvmlock failed: Device or resource busy", once a minute,
+// with the group otherwise healthy on the other two nodes.
+func (r *Reconciler) dropLeaseMappingOfAnotherIncarnation(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup) {
+	name, stale := utils.LeaseMappingOfOtherIncarnation(
+		lsvg.Spec.ActualVGNameOnTheNode, r.vgUUID(lsvg.Spec.ActualVGNameOnTheNode))
+	if !stale {
+		return
+	}
+
+	r.log.Warning(fmt.Sprintf("[%s] the lease mapping %s belongs to a volume group that no longer exists; removing it so the lockspace can start",
+		ReconcilerName, name))
+	if cmd, err := r.commands.RemoveDMDeviceDeferred(ctx, name); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to remove the stale lease mapping %s (cmd: %s): %s",
+			ReconcilerName, name, cmd, err.Error()))
 	}
 }

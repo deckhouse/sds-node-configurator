@@ -421,3 +421,53 @@ func ActiveLVsOfGroupHere(vgName string) ([]string, error) {
 func MultipathNameOf(devicePath string) string {
 	return filepath.Base(devicePath)
 }
+
+// LeaseMappingOfOtherIncarnation reports whether a device-mapper device for the
+// group's lease volume exists here and belongs to a different volume group than
+// the one that carries this UUID.
+//
+// A pool removed and created again under the same name gives its lease volume
+// the same device-mapper NAME and a different UUID. A member that still has the
+// old mapping cannot start the new lockspace at all: the create fails with
+// "Device or resource busy" and lvm answers "Failed to activate sanlock lv",
+// once a minute, for as long as the mapping stands.
+//
+// The comparison is on the volume group's UUID, which device-mapper carries in
+// its own with the dashes removed. An unreadable answer is not a stale mapping:
+// removing a lease volume that is actually in use would take the lockspace of a
+// working pool away from this node.
+func LeaseMappingOfOtherIncarnation(vgName, vgUUID string) (string, bool) {
+	if vgName == "" || vgUUID == "" {
+		return "", false
+	}
+
+	name := dmName(vgName) + "-lvmlock"
+	entries, err := os.ReadDir(SysBlockRoot)
+	if err != nil {
+		return "", false
+	}
+
+	want := strings.ReplaceAll(vgUUID, "-", "")
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), "dm-") {
+			continue
+		}
+		base := filepath.Join(SysBlockRoot, entry.Name())
+		got, err := readSysAttr(filepath.Join(base, "dm", "name"))
+		if err != nil || got != name {
+			continue
+		}
+		uuid, err := readSysAttr(filepath.Join(base, "dm", "uuid"))
+		if err != nil || uuid == "" {
+			return "", false
+		}
+		return name, !strings.Contains(uuid, want)
+	}
+	return "", false
+}
+
+// dmName is how device-mapper spells a volume group's name: every dash is
+// doubled, because a single dash separates the group from the volume.
+func dmName(name string) string {
+	return strings.ReplaceAll(name, "-", "--")
+}
