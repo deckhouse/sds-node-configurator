@@ -55,6 +55,25 @@ type LVMVolumeGroupCandidate struct {
 	// "never provisioned", which is a claim about the node this candidate cannot
 	// make. False is the safe default — "the set is complete".
 	FileDeviceStateUnknown bool
+	// UnnamedPVs holds the paths of this Volume Group's block-device Physical
+	// Volumes that no BlockDevice resource names, sorted. Nodes is therefore known
+	// to be incomplete — and when such a PV is the VG's only one, empty.
+	//
+	// A candidate carrying any must be come back for, and must say so on the
+	// resource: the reason it holds is almost always transient, but a PV below
+	// BlockDeviceValidSize or excluded by a BlockDeviceFilter never gets a
+	// BlockDevice, and the retry has to end somewhere.
+	//
+	// Unlike FileDeviceStateUnknown it does not by itself make the candidate
+	// unpublishable — withholding vgSize, vgFree and thin-pool usage forever would
+	// cost more than a missing device entry. What must not be published is a
+	// candidate that names no device at all, because status.nodes is overwritten
+	// wholesale and an empty one loses the node name itself, and with it the
+	// AgentReady condition the controller only sets on an LVMVolumeGroup whose
+	// status.nodes names a node.
+	//
+	// Empty is the safe default — "every PV was named".
+	UnnamedPVs []string
 }
 
 type LVMVGStatusThinPool struct {

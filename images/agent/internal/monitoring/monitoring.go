@@ -249,7 +249,14 @@ var (
 	lvmVolumeGroupImportRefusedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
 		Name:      "lvm_volume_group_import_refused_total",
-		Help:      "Number of times the discoverer refused to import a Volume Group because its owner tag names an existing LVMVolumeGroup.",
+		// Both reasons, because HELP is what an operator reads in /metrics and in
+		// Grafana's completion — not the Go doc comment on the accessor. Naming only
+		// the tag conflict sent whoever the alert woke looking for a duplicate
+		// lvmVolumeGroupName that was not there.
+		Help: "Number of times the discoverer started refusing to import a Volume Group: either its owner tag names an existing LVMVolumeGroup, or one of its Physical Volumes has no BlockDevice resource yet and a selector derived now would not cover the whole group. Counted when the refusal appears or changes, not once per discovery pass, so increase() over a window means new refusals rather than the age of a standing one.",
+		// lvg_name is empty when the import had no name of its own to use — an
+		// unimported Volume Group with no owner tag is given a freshly generated
+		// name on every pass, and that is not something to put in a label.
 	}, []string{"node", "volume_group", "lvg_name"})
 )
 
@@ -428,9 +435,32 @@ func (m *Metrics) LVMActivationTotal(volumeGroup, result string) prometheus.Coun
 }
 
 // LVMVolumeGroupImportRefusedTotal counts a Volume Group the discoverer will not
-// import. lvgName is the name its owner tag claims — the LVMVolumeGroup that
-// already holds it — so an operator reading the metric has both ends of the
-// conflict without going to the node's log.
+// import, whichever of the two reasons it has: the name its owner tag claims is
+// already taken by another LVMVolumeGroup, or one of its Physical Volumes has no
+// BlockDevice yet and a selector derived now would not cover the whole group.
+//
+// lvgName is the name the import would have used — in the first case, the
+// LVMVolumeGroup that already holds it — so an operator reading the metric has
+// both ends of the conflict without going to the node's log.
+//
+// It must be a name somebody chose, and callers are responsible for that: a
+// Volume Group with no owner tag is given a generated name, minted afresh on
+// every discovery pass, and a label that changes every pass is a new time series
+// every pass, retained for the lifetime of the process. Pass "" instead —
+// LVMVolumeGroupCandidate.LVMVGNameGenerated says which case it is.
+//
+// Both are counted because both can be permanent: a tag on two Volume Groups is
+// not going to resolve itself, and a Physical Volume excluded by a
+// BlockDeviceFilter never becomes a BlockDevice. Counting one and not the other
+// would make "the agent can see a Volume Group it will not adopt" alertable only
+// half the time.
+//
+// And because both can be permanent, callers must increment when the refusal
+// appears or changes, not on every pass that finds it still holding — the same
+// rule, and the same condition, their log lines are gated on. The discoverer runs
+// on every udev event, so a per-pass increment would keep increase(…[1h]) non-zero
+// for as long as a deliberate BlockDeviceFilter exclusion stands, which is this
+// counter's own alert firing on a decision somebody made on purpose.
 func (m *Metrics) LVMVolumeGroupImportRefusedTotal(volumeGroup, lvgName string) prometheus.Counter {
 	return lvmVolumeGroupImportRefusedTotal.WithLabelValues(m.node, volumeGroup, lvgName)
 }

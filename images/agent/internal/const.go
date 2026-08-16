@@ -193,6 +193,41 @@ const (
 	// be reported as the same thing, or the operator waits for a cache that is
 	// not the problem.
 	ReasonVGCheckFailed = "VGCheckFailed"
+	// ReasonBlockDeviceNotFound is set when SOME of the node's Volume Group's
+	// Physical Volumes have no BlockDevice resource to name them, while the rest
+	// could be named: the status published in that pass describes the node, and only
+	// the device entries for the unnamed PVs are absent from it.
+	//
+	// Usually it clears itself within seconds, as soon as the block-device
+	// discoverer registers the device. It does not clear itself when the device is
+	// one that never becomes a BlockDevice — below BlockDeviceValidSize, or excluded
+	// by a BlockDeviceFilter — which is the case this reason exists for: the agent
+	// stops retrying at that point, and without a condition the resource would sit
+	// with a device silently missing from status.nodes and nothing to say so.
+	//
+	// It has to be listed in the controller's acceptableReasons (mirrored there as
+	// internal.ReasonBlockDeviceNotFound), because everything the aggregate verdict
+	// is about is still true: vgSize, vgFree and thin-pool usage were all written
+	// this pass and none of them is affected by the missing device entry, so the
+	// Volume Group keeps serving its volumes and can take new ones. A PV that is
+	// deliberately below BlockDeviceValidSize or filtered out must not take an
+	// otherwise healthy Volume Group out of service.
+	ReasonBlockDeviceNotFound = "BlockDeviceNotFound"
+	// ReasonNodeNotDescribed is set when NOT ONE of the Volume Group's Physical
+	// Volumes could be named by a BlockDevice resource. The candidate then carries
+	// no node at all, and since status.nodes is written wholesale the agent declines
+	// to write it: publishing would empty the node entry, or never create one on a
+	// resource that has none yet, and the controller only sets AgentReady on an
+	// LVMVolumeGroup whose status.nodes names a node.
+	//
+	// So what the resource keeps showing is the previous pass's status, and its
+	// free-space numbers are as old as it is. Unlike ReasonBlockDeviceNotFound this
+	// reason is deliberately NOT mirrored in the controller and therefore NOT among
+	// its acceptableReasons — the same arrangement ReasonVGCheckFailed has. Placing
+	// new volumes against figures nobody refreshed is exactly what the scheduler
+	// must not do, so this one has to drag the aggregate Ready condition, the phase
+	// and the scheduler's willingness down with it.
+	ReasonNodeNotDescribed = "NodeNotDescribed"
 
 	MetadataNameLabelKey = "kubernetes.io/metadata.name"
 	HostNameLabelKey     = "kubernetes.io/hostname"

@@ -29,13 +29,18 @@ import (
 )
 
 type BDClient struct {
-	cl      client.Client
+	// reader is a client.Reader rather than a client.Client because listing is
+	// all this client does, and because a caller must be able to hand it the
+	// manager's uncached API reader: a BlockDevice read back through the
+	// informer cache does not see an update another controller in this process
+	// made moments earlier. See Discoverer.bdAPICl in the lvg package.
+	reader  client.Reader
 	metrics *monitoring.Metrics
 }
 
-func NewBDClient(cl client.Client, metrics *monitoring.Metrics) *BDClient {
+func NewBDClient(reader client.Reader, metrics *monitoring.Metrics) *BDClient {
 	return &BDClient{
-		cl:      cl,
+		reader:  reader,
 		metrics: metrics,
 	}
 }
@@ -56,7 +61,7 @@ func (bdCl *BDClient) GetAPIBlockDevices(
 		s = nil
 	}
 	start := time.Now()
-	err = bdCl.cl.List(ctx, list, &client.ListOptions{LabelSelector: s})
+	err = bdCl.reader.List(ctx, list, &client.ListOptions{LabelSelector: s})
 	bdCl.metrics.APIMethodsDuration(controllerName, "list").Observe(bdCl.metrics.GetEstimatedTimeInSeconds(start))
 	bdCl.metrics.APIMethodsExecutionCount(controllerName, "list").Inc()
 	if err != nil {
