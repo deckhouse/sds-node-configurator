@@ -493,3 +493,27 @@ func (r *Reconciler) groupAlreadySwitched(
 	}
 	return strings.Contains(answer, PersistInLockArgs), nil
 }
+
+// stopReservationsOnLeaving gives up this node's registration when it leaves a
+// pool that is held under reservations.
+//
+// It is a no-op for a pool that is not, and it is deliberately quiet about
+// failing: the node has already left the lockspace by this point, so the worst
+// case is a key left on the array, which the removal reports by name rather than
+// silently working around.
+func (r *Reconciler) stopReservationsOnLeaving(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup) {
+	if r.prStateHere(lsvg) != PRStateEnabled {
+		return
+	}
+
+	if cmd, err := r.commands.VGPersistStop(ctx, lsvg.Spec.ActualVGNameOnTheNode, r.hostIDFor(ctx)); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] this node left the lockspace of %s and could not give up its registration (cmd: %s): %s",
+			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
+		return
+	}
+
+	r.prStates[lsvg.Name] = PRStateOff
+	r.forgetPRVerdict(lsvg)
+	r.log.Info(fmt.Sprintf("[%s] this node gave up its registration on the LUNs of %s",
+		ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+}

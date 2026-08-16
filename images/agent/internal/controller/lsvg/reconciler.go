@@ -826,6 +826,19 @@ func (r *Reconciler) leave(
 		return controller.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
+	// And its registration goes with its lockspace when the group is held under
+	// reservations.
+	//
+	// Not tidiness: `vgremove` on such a group refuses while anybody else is
+	// still registered — "Found 3 PR keys on /dev/mapper/mpathi. Stop PR for VG
+	// vghw on other hosts (vgchange --persist stop)" — so a member that leaves
+	// without giving its key up leaves a pool that cannot be removed. Found on
+	// the stand, taking a switched pool down.
+	//
+	// After the lockspace, in that order: lvm2 refuses the other way round with
+	// "locking should be stopped before PR".
+	r.stopReservationsOnLeaving(ctx, lsvg)
+
 	// The node is out of the pool by its own account now, and leaving its old
 	// answer standing would be a lie readers act on.
 	r.retractNodeState(ctx, lsvg)

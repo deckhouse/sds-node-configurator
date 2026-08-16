@@ -270,3 +270,31 @@ func TestAGaugeDoesNotOutliveThePoolItDescribes(t *testing.T) {
 	assert.Equal(t, 0.0, testutil.ToFloat64(r.metrics.SharedPoolUnlockedMappings(testVG)),
 		"the series is gone, so asking for it again yields a fresh zero rather than the old three")
 }
+
+func TestAMemberLeavingAPoolUnderReservationsGivesUpItsKey(t *testing.T) {
+	// `vgremove` on a group held under reservations refuses while anybody else
+	// is still registered — "Found 3 PR keys on /dev/mapper/mpathi. Stop PR for
+	// VG vghw on other hosts (vgchange --persist stop)" — so a member that
+	// leaves without giving its key up leaves a pool nobody can remove. Found on
+	// the stand, taking a switched pool down.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup("another-node")
+	group.Spec.PersistentReservations = PersistentReservationsRequired
+	group.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+		Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{nodeSaid(testNode, true, PRStateEnabled)},
+	}
+
+	// The lockspace first, the registration after: lvm2 refuses the other order.
+	lockStop := commands.EXPECT().VGLockStop(gomock.Any(), testVG).Return("", nil)
+	commands.EXPECT().VGPersistStop(gomock.Any(), testVG, gomock.Any()).After(lockStop).Return("", nil)
+
+	node := nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                     "7",
+		LockspaceStartedAnnotationPrefix + "pool-1": "vg-uuid",
+	})
+	r, _, _ := testReconciler(t, node, commands, nil, group)
+
+	reconcile(t, r, group)
+}
