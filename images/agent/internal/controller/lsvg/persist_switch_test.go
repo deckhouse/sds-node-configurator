@@ -496,3 +496,26 @@ func TestAPoolThatAsksForReservationsBeforeItExistsIsStillCreated(t *testing.T) 
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 	reconcile(t, r, group)
 }
+
+func TestAPoolThatDoesNotAskForReservationsIsNotUnderThem(t *testing.T) {
+	// The state is remembered per group NAME, and a pool deleted and created
+	// again under the same name gets a new group with none of the old one's
+	// history. On the stand a member of the previous pool still had "we are
+	// under reservations" in memory: it registered on the new pool's LUN and
+	// took a Write Exclusive reservation there, and every other member then
+	// failed to start its lockspace with a reservation conflict — which reads as
+	// a fault of the array and is ours.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	group.Spec.PersistentReservations = "Disabled"
+
+	// No VGPersistStart: a pool that does not ask for reservations gets none.
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("", nil)
+
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+	r.prStates[group.Name] = PRStateEnabled // left over from the pool that was
+
+	reconcile(t, r, group)
+}

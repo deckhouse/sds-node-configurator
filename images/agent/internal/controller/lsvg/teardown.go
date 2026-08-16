@@ -181,6 +181,12 @@ func (r *Reconciler) teardown(
 	// find no maps and report a barrier it never raised.
 	r.forgetVGUUID(lsvg.Spec.ActualVGNameOnTheNode)
 
+	// And what this node remembered about the pool's reservations, for the same
+	// reason: the memory is keyed by name, and the next pool to carry that name
+	// is a different pool.
+	delete(r.prStates, lsvg.Name)
+	r.forgetPRVerdict(lsvg)
+
 	// The pool's gauge goes with the pool. Left behind it would keep reporting
 	// its last value about something that no longer exists.
 	if r.metrics != nil {

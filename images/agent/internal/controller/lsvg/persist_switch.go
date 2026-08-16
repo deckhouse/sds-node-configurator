@@ -470,6 +470,17 @@ func (r *Reconciler) rejoinUnderReservations(
 // So memory answers only while it has something to say, and what was published
 // answers otherwise.
 func (r *Reconciler) prStateHere(lsvg *v1alpha1.LVMSharedVolumeGroup) string {
+	// The pool has the last word, and it has to: this is remembered per group
+	// NAME, and a pool that is deleted and created again under the same name
+	// gets a new group with none of the old one's history. On the stand that
+	// turned into a reservation nobody asked for — a member of the previous pool
+	// still had "we are under reservations" in memory, registered on the new
+	// pool's LUN and took a Write Exclusive reservation on it, and every other
+	// member then failed to start its lockspace with a reservation conflict.
+	if lsvg.Spec.PersistentReservations != PersistentReservationsRequired {
+		return ""
+	}
+
 	if state := r.prStates[lsvg.Name]; state != "" {
 		return state
 	}
