@@ -237,3 +237,18 @@ func TestADeviceAlreadyInTheGroupIsAnExtensionThatSucceeded(t *testing.T) {
 	// And a real refusal is still one.
 	assert.False(t, PVAlreadyInVGForTest("  Device /dev/mapper/mpathk excluded by a filter.\n"))
 }
+
+func TestStoppingReservationsANodeNeverHadIsNotAFailure(t *testing.T) {
+	// The ordinary state of every member of a pool that has not been switched.
+	// Reported as an error it stops the switch before it starts: on the stand
+	// the two neighbours of a new pool spent every pass failing to stop
+	// reservations they had never had, while the executor waited for them to say
+	// they had stepped aside.
+	assert.True(t, NoRegisteredKeyToStop(errors.New(
+		"unable to run cmd: vgchange --persist stop vghw, err: exit status 5, stderr: "+
+			"No registered key found for local host.")))
+	assert.False(t, NoRegisteredKeyToStop(errors.New(
+		"unable to run cmd: vgchange --persist stop vghw, err: exit status 5, stderr: "+
+			"VG vghw locking should be stopped before PR (vgchange --lockstop)")))
+	assert.False(t, NoRegisteredKeyToStop(nil))
+}

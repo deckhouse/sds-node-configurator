@@ -1357,7 +1357,23 @@ func (commands) VGPersistStart(ctx context.Context, vgName string, hostID int) (
 // VGPersistStop gives up this node's registration, which is what a member does
 // to let the executor take the group over.
 func (commands) VGPersistStop(ctx context.Context, vgName string, hostID int) (string, error) {
-	return runSharedLockdLVM(ctx, hostID, "vgchange", "--persist", "stop", vgName)
+	cmd, err := runSharedLockdLVM(ctx, hostID, "vgchange", "--persist", "stop", vgName)
+	if NoRegisteredKeyToStop(err) {
+		// A node that holds no registration has nothing to give up, and that is
+		// the ordinary state of every member of a pool that has not been
+		// switched. Reported as an error it stops the switch before it starts:
+		// on the stand the two neighbours of a new pool spent every pass failing
+		// to stop reservations they had never had, and the executor waited for
+		// them to say they had stepped aside.
+		return cmd, nil
+	}
+	return cmd, err
+}
+
+// NoRegisteredKeyToStop reports whether a failed `--persist stop` failed only
+// because this node holds no registration.
+func NoRegisteredKeyToStop(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "No registered key found for local host")
 }
 
 // VGSetLockArgsPersist records in the group's metadata that its lockspaces run
