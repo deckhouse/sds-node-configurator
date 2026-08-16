@@ -1091,3 +1091,38 @@ func TestALockspaceOnlyLVMLockdBelievesInIsStoppedBeforeItIsStarted(t *testing.T
 
 	reconcile(t, r, group)
 }
+
+func TestADeletionIsNotFilteredOutOfTheQueue(t *testing.T) {
+	// Nothing about membership or the group's name changes when a deletion
+	// timestamp appears, so the filter dropped the event and the unwinding never
+	// began. Found on the stand: a group sat in deletion for hours with its
+	// lockspace up and no agent looking at it.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	r, _, _ := testReconciler(t, nodeWith(nil), commands, nil, group)
+
+	deleting := group.DeepCopy()
+	now := metav1.Now()
+	deleting.DeletionTimestamp = &now
+
+	assert.True(t, r.ShouldReconcileUpdate(group, deleting), "the deletion has to reach the queue")
+	assert.False(t, r.ShouldReconcileUpdate(group, group.DeepCopy()), "and nothing else changed still does not")
+}
+
+func TestEveryPassAsksForTheNextOne(t *testing.T) {
+	// The states this reconciler repairs produce no event of their own, and the
+	// events that arrive are filtered down to membership and the group's name. A
+	// branch that returned an empty result stopped the clock for that group
+	// until something unrelated happened to it.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("", nil).AnyTimes()
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+
+	res := reconcile(t, r, group)
+
+	assert.Equal(t, groupRecheckInterval, res.RequeueAfter)
+}

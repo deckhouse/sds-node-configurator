@@ -152,6 +152,15 @@ func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMSharedVolumeGroup) boo
 }
 
 func (r *Reconciler) ShouldReconcileUpdate(objectOld, objectNew *v1alpha1.LVMSharedVolumeGroup) bool {
+	// A pool being deleted is the update that matters most, and it is the one
+	// this filter used to drop: nothing about membership or the group's name
+	// changes when a deletion timestamp appears, so the event was skipped and
+	// the unwinding never began. Found on the stand, where a group sat in
+	// deletion for hours with its lockspace up and no agent looking at it.
+	if (objectOld.DeletionTimestamp == nil) != (objectNew.DeletionTimestamp == nil) {
+		return true
+	}
+
 	return r.isMember(objectOld) != r.isMember(objectNew) ||
 		objectOld.Spec.ActualVGNameOnTheNode != objectNew.Spec.ActualVGNameOnTheNode
 }
@@ -159,8 +168,23 @@ func (r *Reconciler) ShouldReconcileUpdate(objectOld, objectNew *v1alpha1.LVMSha
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req controller.ReconcileRequest[*v1alpha1.LVMSharedVolumeGroup],
-) (controller.Result, error) {
+) (res controller.Result, err error) {
 	lsvg := req.Object
+
+	// Every pass asks for the next one, whatever it decided.
+	//
+	// The states this reconciler repairs produce no event of their own — a
+	// lockspace the lock manager lost, a mapping nobody is asking for, a
+	// deletion that arrived while nothing was watching — and the events that do
+	// arrive are filtered down to membership and the group's name. A branch that
+	// returned an empty result stopped the clock for that group until something
+	// unrelated happened to it, which is how a deleted pool waited hours to be
+	// unwound.
+	defer func() {
+		if err == nil && res.RequeueAfter == 0 {
+			res.RequeueAfter = groupRecheckInterval
+		}
+	}()
 
 	// A deleted pool is unwound rather than forgotten: the Volume Group is on a
 	// LUN that outlives this object, and so are the lockspaces every member is
@@ -197,11 +221,11 @@ func (r *Reconciler) Reconcile(
 	// registers again — and the node is back inside the pool it was fenced out
 	// of. Found on the stand, with the key reappearing on the array minutes
 	// after it had been preempted.
-	if res, standingDown := r.standDownIfEvicted(ctx, lsvg); standingDown {
-		return res, nil
+	if standDown, standingDown := r.standDownIfEvicted(ctx, lsvg); standingDown {
+		return standDown, nil
 	}
 
-	res, err := r.join(ctx, lsvg)
+	res, err = r.join(ctx, lsvg)
 	if err != nil {
 		// Said out loud and retried on this reconciler's own cadence, rather
 		// than handed back as an error.
