@@ -299,11 +299,13 @@ func TestAMemberLeavingAPoolUnderReservationsGivesUpItsKey(t *testing.T) {
 	reconcile(t, r, group)
 }
 
-func TestThePoolGivesItsLUNsBackWithoutAReservation(t *testing.T) {
-	// Two things need this. A registration left by a member that is already gone
-	// blocks the removal outright — "Found 3 PR keys ... Stop PR for VG on other
-	// hosts" — and a reservation left behind refuses the next pool's lockspace,
-	// which reads as a sanlock fault on a LUN that looks healthy.
+func TestTheLUNsAreLeftCleanByTheRemovalItself(t *testing.T) {
+	// Nothing clears the reservation here, and that was tried: clearing it
+	// before `vgremove` leaves the group requiring a reservation nobody holds,
+	// and the removal then fails with "Persistent reservation is not started"
+	// for good. The normal path needs no cleaning — every member gives up its
+	// key as it leaves, the remover keeps its own through the removal, and lvm2
+	// releases that one itself.
 	fakeSysBlockWithLUN(t, 8192)
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
@@ -320,8 +322,7 @@ func TestThePoolGivesItsLUNsBackWithoutAReservation(t *testing.T) {
 	// reservations that means registering first.
 	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, gomock.Any()).Return("", nil).AnyTimes()
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, gomock.Any()).Return("", nil).AnyTimes()
-	cleared := commands.EXPECT().VGPersistClear(gomock.Any(), testVG, gomock.Any()).Return("", nil)
-	commands.EXPECT().RemoveVGShared(gomock.Any(), testVG).After(cleared).Return("", nil)
+	commands.EXPECT().RemoveVGShared(gomock.Any(), testVG).Return("", nil)
 
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 	reconcile(t, r, group)

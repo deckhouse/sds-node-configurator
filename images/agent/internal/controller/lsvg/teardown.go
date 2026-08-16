@@ -144,12 +144,6 @@ func (r *Reconciler) teardown(
 	}
 
 	r.log.Info(fmt.Sprintf("[%s] removing the volume group %s of the deleted pool", ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
-	// The LUNs are given back clean. A registration left by a member that is
-	// already gone blocks the removal outright, and a reservation left behind
-	// refuses the next pool's lockspace — the symptom then is sanlock failing to
-	// start a lockspace on a LUN that looks perfectly healthy.
-	r.clearReservationsBeforeRemoval(ctx, lsvg)
-
 	cmd, err := r.commands.RemoveVGShared(ctx, lsvg.Spec.ActualVGNameOnTheNode)
 	if err != nil {
 		if utils.SharedVGRemovalNeedsTime(err) {
@@ -341,24 +335,19 @@ func (r *Reconciler) ensureLockspaceRunning(ctx context.Context, lsvg *v1alpha1.
 	}
 }
 
-// clearReservationsBeforeRemoval takes the reservation and every key off the
-// pool's LUNs, on the node that is about to remove the group.
+// Nothing clears the reservation here, and that was tried: clearing it before
+// `vgremove` leaves the group requiring a reservation that nobody holds, and the
+// removal then fails with "Persistent reservation is not started" for good.
 //
-// It runs at the one moment it is safe: the volumes are gone and every member
-// has reported itself out of the lockspace, which is the ground the removal
-// itself stands on.
-func (r *Reconciler) clearReservationsBeforeRemoval(ctx context.Context, lsvg *v1alpha1.LVMSharedVolumeGroup) {
-	if lsvg.Spec.PersistentReservations != PersistentReservationsRequired {
-		return
-	}
-
-	if cmd, err := r.commands.VGPersistClear(ctx, lsvg.Spec.ActualVGNameOnTheNode, r.hostIDFor(ctx)); err != nil {
-		// Said and not retried here: the removal that follows names the keys it
-		// finds, which tells an administrator more than this could.
-		r.log.Warning(fmt.Sprintf("[%s] could not clear the reservation of %s before removing it (cmd: %s): %s",
-			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
-		return
-	}
-	r.log.Info(fmt.Sprintf("[%s] the reservation and every key are off the LUNs of %s",
-		ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
-}
+// The normal path needs no cleaning. Every member gives up its key as it leaves,
+// the node doing the removal keeps its own registration through it, and lvm2
+// releases that one itself — measured on the stand, where the LUN was left with
+// no keys and no reservation the moment the group was gone.
+//
+// What is left is the case of a key nobody can be asked to give up, because the
+// node that holds it is gone. The removal then reports lvm's own message, which
+// names the keys and the device, and an administrator clears them: `vgchange -y
+// --persist clear`, then `--persist start` to register again, then the removal
+// proceeds. Doing that from here would mean taking a registration away from a
+// node that never said it had left, which is the one thing this module refuses
+// to infer.
