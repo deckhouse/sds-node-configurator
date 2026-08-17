@@ -19,7 +19,7 @@
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmvolumegroupsets" "lvmvolumegroupsets/status") "verbs" (list "get" "list" "watch" "update"))
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmvolumegroups" "lvmvolumegroups/status") "verbs" (list "get" "list" "watch" "update" "create"))
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmlogicalvolumesnapshots") "verbs" (list "get" "list" "watch"))
-    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmsharedvolumegroups" "lvmsharedvolumegroups/status") "verbs" (list "get" "list" "watch" "update"))
+    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmsharedvolumegroups" "lvmsharedvolumegroups/status") "verbs" (list "get" "list" "watch" "update" "patch"))
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmsharedlogicalvolumes") "verbs" (list "get" "list" "watch"))
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmsharedlogicalvolumeattachments") "verbs" (list "get" "list" "watch" "patch" "delete"))
     (dict "apiGroups" (list "") "resources" (list "nodes" "pods") "verbs" (list "get" "list" "watch"))
