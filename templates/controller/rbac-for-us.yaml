@@ -14,7 +14,11 @@
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmvolumegroups" "lvmvolumegroups/status") "verbs" (list "get" "list" "watch" "update" "create"))
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmlogicalvolumesnapshots") "verbs" (list "get" "list" "watch"))
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmsharedvolumegroups" "lvmsharedvolumegroups/status") "verbs" (list "get" "list" "watch" "update"))
-    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmsharedlogicalvolumes" "lvmsharedlogicalvolumeattachments") "verbs" (list "get" "list" "watch"))
+    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmsharedlogicalvolumes") "verbs" (list "get" "list" "watch"))
+    # The attachments of a node that no longer exists are released here, and the
+    # finalizer of the agent that would have done it comes off with them: patch
+    # and delete are for that one case.
+    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmsharedlogicalvolumeattachments") "verbs" (list "get" "list" "watch" "patch" "delete"))
     (dict "apiGroups" (list "") "resources" (list "nodes" "pods") "verbs" (list "get" "list" "watch"))
     (dict "apiGroups" (list "") "resources" (list "nodes") "verbs" (list "patch"))
     (dict "apiGroups" (list "coordination.k8s.io") "resources" (list "leases") "verbs" (list "get" "list" "watch" "update" "create" "delete"))
