@@ -92,6 +92,12 @@ const (
 	// volume belongs to. It is an admission, not an answer.
 	unknownVGName = "[unknown]"
 
+	// unknownLockspaceIdentity stands in the lockspace annotation when the group
+	// could not be read at the moment the lockspace was started. The fact — this
+	// node holds a lockspace — is worth recording without the identity; an empty
+	// value is not, because it is indistinguishable from no value at all.
+	unknownLockspaceIdentity = "unknown"
+
 	// The conditions the group publishes, named by the schema. Ready comes from
 	// the shared library, because every resource of the platform summarises
 	// itself under the same name.
@@ -1251,6 +1257,13 @@ func (r *Reconciler) lockspaceStarted(node *corev1.Node, groupName, vgUUID strin
 	if value == "" {
 		return false
 	}
+	if value == unknownLockspaceIdentity {
+		// Held, and of an incarnation nobody could name at the time. It is read
+		// as held on purpose: every gate that asks this question asks it before
+		// taking something away — the lockspace, the LUN, the node's own agent —
+		// and "cannot tell" must not be answered as "holds nothing".
+		return true
+	}
 	if vgUUID == "" {
 		// The group cannot be read right now. Whatever is written was written by
 		// this node about this group, so it is the best answer available.
@@ -1284,11 +1297,23 @@ func (r *Reconciler) setLockspaceStarted(ctx context.Context, groupName, vgUUID 
 		// empty UUID, which equals the empty value a cleared annotation reads
 		// back as. The generation then stood still across a restart, and every
 		// attachment went on vouching for a lock that no longer existed.
+		// An identity nobody could read is recorded as unknown rather than as an
+		// empty string, and the difference is not cosmetic: an empty value reads
+		// back exactly like an absent one, so a node that had just started its
+		// lockspace looked like a node holding nothing. Seen on the stand — the
+		// node then left the pool WITHOUT stopping the lockspace, because the
+		// leave path asks this same question, and its lease went on being renewed
+		// on a LUN the pool had already taken from it.
+		value := vgUUID
+		if value == "" {
+			value = unknownLockspaceIdentity
+		}
+
 		_, recorded := node.Annotations[key]
-		if !recorded || node.Annotations[key] != vgUUID || node.Annotations[generationKey] == "" {
+		if !recorded || node.Annotations[key] != value || node.Annotations[generationKey] == "" {
 			node.Annotations[generationKey] = nextGeneration(node.Annotations[generationKey])
 		}
-		node.Annotations[key] = vgUUID
+		node.Annotations[key] = value
 	} else {
 		if _, ok := node.Annotations[key]; !ok {
 			return nil

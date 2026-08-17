@@ -310,6 +310,60 @@ func TestAnIncompleteBarrierLeavesTheLeasesAlone(t *testing.T) {
 	assert.Contains(t, annotationsOf(t, cl), LockspaceStartedAnnotationPrefix+"pool-1")
 }
 
+func TestALockspaceStartedWithoutAReadableIdentityStillCountsAsHeld(t *testing.T) {
+	// Found on the stand. The lockspace was started at a moment when lvm could
+	// not say which group it belonged to, so the annotation was written with an
+	// empty value — which reads back exactly like no annotation at all. The node
+	// then left the pool WITHOUT stopping the lockspace, because the leave path
+	// asks this same question and got "holds nothing"; its lease went on being
+	// renewed over a LUN the pool had already taken from it. The identity may be
+	// unknown; the fact that something is held may not be lost with it.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	node := nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                     "7",
+		LockspaceStartedAnnotationPrefix + "pool-1": unknownLockspaceIdentity,
+	})
+	r, _, _ := testReconciler(t, node, commands, []internal.LVData{inactiveLV("vgshared", "vol1")})
+
+	// The stop must be attempted: that is the whole difference.
+	stopped := false
+	commands.EXPECT().VGLockStop(gomock.Any(), "vgshared").DoAndReturn(
+		func(_ context.Context, _ string) (string, error) {
+			stopped = true
+			return "vgchange --lock-stop", nil
+		})
+
+	reconcile(t, r, testGroup("other-node"))
+
+	assert.True(t, stopped, "a lockspace of an unnamed incarnation is still a lockspace to stop")
+}
+
+func TestAStartedLockspaceIsNeverRecordedAsAnEmptyValue(t *testing.T) {
+	// The write side of the same defect: an empty annotation value is
+	// indistinguishable from an absent one, so recording a started lockspace with
+	// an unreadable group identity erased the fact it was meant to record. And
+	// once the group becomes readable again, the recorded value is compared
+	// against the real uuid — so the placeholder has to be understood on that
+	// path too, or the node forgets its lockspace a second time.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	node := nodeWith(map[string]string{SanlockHostIDAnnotation: "7"})
+	r, cl, _ := testReconciler(t, node, commands, nil)
+
+	require.NoError(t, r.setLockspaceStarted(context.Background(), "pool-1", "", true))
+
+	stored := annotationsOf(t, cl)[LockspaceStartedAnnotationPrefix+"pool-1"]
+	assert.NotEmpty(t, stored, "an empty value reads back exactly like no annotation at all")
+
+	fresh := &corev1.Node{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: testNode}, fresh))
+	assert.True(t, r.lockspaceStarted(fresh, "pool-1", ""),
+		"the node holds a lockspace and must say so while nobody can name the group")
+	assert.True(t, r.lockspaceStarted(fresh, "pool-1", "vg-uuid"),
+		"and must still say so once the group can be read again")
+}
+
 func TestLeaveDropsReadinessBeforeStoppingTheLockspace(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)
