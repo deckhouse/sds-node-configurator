@@ -127,6 +127,23 @@ func (v *SharedPoolValidator) ValidateAttachment(
 		return invalid("expected an LVMSharedLogicalVolumeAttachment"), nil
 	}
 
+	// An attachment on its way out asks for nothing, so there is nothing here to
+	// refuse. Judging it anyway is not caution but a deadlock: the one update
+	// such an object still needs is the removal of a finalizer, and the node it
+	// names is exactly the node that stopped being a member. Measured on the
+	// stand — a node was fenced and deleted, and the cleanup that had to release
+	// its attachment was denied by this validator every time it tried.
+
+	// An attachment on its way out asks for nothing, so there is nothing here to
+	// refuse. Judging it anyway is not caution but a deadlock: the one update
+	// such an object still needs is the removal of a finalizer, and the node it
+	// names is exactly the node that stopped being a member. Measured on the
+	// stand — a node was fenced and deleted, and the cleanup that had to release
+	// its attachment was denied by this validator every time it tried.
+	if attachment.DeletionTimestamp != nil {
+		return valid(), nil
+	}
+
 	// A read that failed is not the same answer as an object that is absent, and
 	// only the first of the two is this validator's to report. Anything else —
 	// an API timeout, a denied read, a cold cache — is returned as an error, so

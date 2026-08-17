@@ -135,6 +135,25 @@ func TestAttachmentToANonMemberIsRefused(t *testing.T) {
 	assert.Contains(t, result.Message, "not a member of the pool")
 }
 
+func TestAnAttachmentBeingDeletedIsNotJudged(t *testing.T) {
+	// Measured on the stand: a node was fenced and its Node object deleted, so
+	// the pool dropped it from its members — and the cleanup that had to release
+	// the attachment it left behind was denied by this validator every time it
+	// tried. The one update such an object still needs is the removal of a
+	// finalizer, and it asks for nothing that could be refused.
+	v := testValidator(testClient(t,
+		group(cn.VolumeCleanupDiscard, "node-1"), volume(cn.VolumeCleanupDiscard)))
+
+	leaving := attachment("node-9")
+	now := metav1.Now()
+	leaving.DeletionTimestamp = &now
+	leaving.Finalizers = []string{"storage.deckhouse.io/sds-node-configurator"}
+
+	result, err := v.ValidateAttachment(context.Background(), nil, leaving)
+	require.NoError(t, err)
+	assert.True(t, result.Valid, "an attachment on its way out asks for nothing")
+}
+
 func TestAttachmentToAMemberIsAllowed(t *testing.T) {
 	v := testValidator(testClient(t,
 		group(cn.VolumeCleanupDiscard, "node-1", "node-2"), volume(cn.VolumeCleanupDiscard)))
