@@ -1254,27 +1254,43 @@ func lockspaceListed(info, vgName string) bool {
 // already made the group unusable by then — so it is established by looking
 // first.
 func (commands) MissingReservationTools(ctx context.Context) ([]string, error) {
+	// One probe first, and it decides whether anything below means anything.
+	//
+	// Entering the namespace fails with the same exit status as a missing file —
+	// both are 1 — and the process state cannot tell them apart either: nsenter
+	// runs and exits, so it is always set. Without this probe a pod of lock
+	// daemons that is merely restarting is reported as an image built without
+	// its tooling, which sends the reader to rebuild something that is already
+	// correct.
+	if err := runSharedNamespaceProbe(ctx, "/bin/true"); err != nil {
+		return nil, err
+	}
+
 	var missing []string
 	for _, tool := range []string{internal.SharedSgPersistCmd, internal.SharedLvmPersistCmd} {
-		argv, err := sharedNamespaceArgs("/bin/test", "-x", tool)
-		if err != nil {
-			return nil, err
-		}
-		cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
-
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-
-		if err := cmd.Run(); err != nil {
-			if cmd.ProcessState == nil {
-				// The namespace itself could not be entered: that is not an
-				// answer about the tooling.
-				return nil, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
-			}
+		if err := runSharedNamespaceProbe(ctx, "/bin/test", "-x", tool); err != nil {
 			missing = append(missing, tool)
 		}
 	}
 	return missing, nil
+}
+
+// runSharedNamespaceProbe runs a command in the lock daemons' namespace and
+// answers only whether it succeeded.
+func runSharedNamespaceProbe(ctx context.Context, command string, args ...string) error {
+	argv, err := sharedNamespaceArgs(command, args...)
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return nil
 }
 
 // MultipathConfiguration is what the host's multipathd is actually running with,

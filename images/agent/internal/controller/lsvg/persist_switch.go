@@ -431,7 +431,25 @@ func (r *Reconciler) startLockspaceUnderReservations(
 	// and the group actually requiring reservations there is a window, and
 	// registering inside it is refused — which would leave the executor unable
 	// to bring up the lockspace that `--setpersist require` needs.
-	if r.prStateHere(lsvg) == PRStateEnabled {
+	// Whether this node registers is decided by where it already stands — and,
+	// when that says no, by what the group itself is.
+	//
+	// The published state can say "not under reservations" for a group that is:
+	// a member that has never taken part, a status that was lost, a spec edited
+	// by hand. Starting a lockspace on such a group without registering is the
+	// worst outcome available here — under a Write Exclusive, all registrants
+	// reservation the lease is renewed with a write, so the node fences itself a
+	// minute later. The group's own lock args are asked before that happens.
+	register := r.prStateHere(lsvg) == PRStateEnabled
+	if !register {
+		if switched, err := r.groupAlreadySwitched(ctx, lsvg); err == nil && switched {
+			r.log.Warning(fmt.Sprintf("[%s] %s is under reservations though this node had no record of it; registering before starting the lockspace",
+				ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode))
+			register = true
+		}
+	}
+
+	if register {
 		if cmd, err := r.commands.VGPersistStart(ctx, lsvg.Spec.ActualVGNameOnTheNode, hostID); err != nil {
 			return cmd, err
 		}

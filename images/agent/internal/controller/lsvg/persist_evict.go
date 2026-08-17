@@ -70,7 +70,25 @@ func (r *Reconciler) evictRequestedNode(ctx context.Context, lsvg *v1alpha1.LVMS
 		return
 	}
 
-	if executor := evictionExecutor(lsvg, target); executor != r.cfg.NodeName {
+	executor := evictionExecutor(lsvg, target)
+	if executor == "" {
+		// Nobody can carry it out: no member holds a registration to preempt
+		// with. Said by one node — the first member that is not the target,
+		// which every member computes the same way — and said at all, because
+		// silence is indistinguishable from an eviction in progress, and this
+		// one will never happen.
+		//
+		// Not by the metadata owner: the case arises precisely when the owner is
+		// the node being evicted, and a node does not act on its own eviction.
+		if firstMemberBesides(lsvg, target) == r.cfg.NodeName {
+			r.publishNodeState(ctx, lsvg, r.lockspaceStartedInStatus(lsvg), ReasonEvictionImpossible,
+				fmt.Sprintf("Node %q is to be evicted, and no member of the pool holds a registration to do it "+
+					"with: an eviction is issued by a node the array already accepts. Wait for a member to come "+
+					"back under reservations, or take the key off from the array's side.", target))
+		}
+		return
+	}
+	if executor != r.cfg.NodeName {
 		// One node carries it out, so that three of them do not preempt each
 		// other's freshly taken reservation in turn.
 		return
@@ -294,4 +312,17 @@ func (r *Reconciler) standDownIfEvicted(
 			"refuses its writes and its lease cannot be renewed. It will not rejoin while the annotation %s "+
 			"names it. Remove the annotation once the node is fit to serve the pool again.", EvictNodeAnnotation))
 	return controller.Result{RequeueAfter: groupRecheckInterval}, true
+}
+
+// firstMemberBesides names one member deterministically, so that a thing which
+// has to be said once is said once.
+func firstMemberBesides(lsvg *v1alpha1.LVMSharedVolumeGroup, exclude string) string {
+	members := append([]string(nil), lsvg.Spec.Nodes...)
+	sort.Strings(members)
+	for _, name := range members {
+		if name != exclude {
+			return name
+		}
+	}
+	return ""
 }

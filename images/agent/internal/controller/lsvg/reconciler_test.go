@@ -96,6 +96,9 @@ func testReconciler(
 	// decides whether there is anything to switch or to remove.
 	commands.EXPECT().GetAllVGs(gomock.Any()).
 		Return([]internal.VGData{{VGName: testVG}}, "vgs", bytes.Buffer{}, nil).AnyTimes()
+	// The group is not under reservations unless a test says otherwise: the
+	// lockspace start asks before registering.
+	commands.EXPECT().VGPersistSetting(gomock.Any(), gomock.Any()).Return("", nil).AnyTimes()
 	commands.EXPECT().GetPV(gomock.Any()).Return(internal.PVData{}, "pvs", bytes.Buffer{}, nil).AnyTimes()
 	// Nothing is in any group unless a test says so: an extension asks lvm which
 	// devices the group already has, and the answer decides whether it runs.

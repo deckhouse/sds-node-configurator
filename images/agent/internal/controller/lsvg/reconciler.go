@@ -201,6 +201,16 @@ func (r *Reconciler) Reconcile(
 		return controller.Result{}, err
 	}
 
+	// The eviction ban is checked before anything that touches the array.
+	//
+	// It is the cheapest question here — an annotation — and it has to be asked
+	// first: the switch's own rejoin path registers this node, so an evicted
+	// node caught mid-switch would put its key back on the LUNs before the ban
+	// below had a chance to stop it.
+	if standDown, standingDown := r.standDownIfEvicted(ctx, lsvg); standingDown {
+		return standDown, nil
+	}
+
 	// A pool being taken over by persistent reservations is not reconciled the
 	// ordinary way while that lasts: the members give up their lockspaces on
 	// purpose, and the ordinary pass would start them again.
@@ -212,18 +222,6 @@ func (r *Reconciler) Reconcile(
 	// node's access away, and everything below assumes the members it can see
 	// are the members that may write.
 	r.evictRequestedNode(ctx, lsvg)
-
-	// And the node being evicted stays out for as long as it is named.
-	//
-	// Without this the eviction is a race with this node's own recovery, and the
-	// recovery wins: the array refuses its writes, sanlock loses the lease and
-	// drops the lockspace, the agent sees a lockspace that should be running,
-	// registers again — and the node is back inside the pool it was fenced out
-	// of. Found on the stand, with the key reappearing on the array minutes
-	// after it had been preempted.
-	if standDown, standingDown := r.standDownIfEvicted(ctx, lsvg); standingDown {
-		return standDown, nil
-	}
 
 	res, err = r.join(ctx, lsvg)
 	if err != nil {

@@ -23,6 +23,7 @@ import (
 
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -126,14 +127,25 @@ func (v *SharedPoolValidator) ValidateAttachment(
 		return invalid("expected an LVMSharedLogicalVolumeAttachment"), nil
 	}
 
+	// A read that failed is not the same answer as an object that is absent, and
+	// only the first of the two is this validator's to report. Anything else —
+	// an API timeout, a denied read, a cold cache — is returned as an error, so
+	// the webhook's own failurePolicy decides, rather than telling the reader to
+	// go looking for a resource nobody deleted.
 	volume := &cn.LVMSharedLogicalVolume{}
 	if err := v.cl.Get(ctx, client.ObjectKey{Name: attachment.Spec.LVMSharedLogicalVolumeName}, volume); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("read LVMSharedLogicalVolume %s: %w", attachment.Spec.LVMSharedLogicalVolumeName, err)
+		}
 		return invalid(fmt.Sprintf("LVMSharedLogicalVolume %q does not exist",
 			attachment.Spec.LVMSharedLogicalVolumeName)), nil
 	}
 
 	group := &cn.LVMSharedVolumeGroup{}
 	if err := v.cl.Get(ctx, client.ObjectKey{Name: volume.Spec.LVMSharedVolumeGroupName}, group); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("read LVMSharedVolumeGroup %s: %w", volume.Spec.LVMSharedVolumeGroupName, err)
+		}
 		return invalid(fmt.Sprintf("LVMSharedVolumeGroup %q does not exist",
 			volume.Spec.LVMSharedVolumeGroupName)), nil
 	}

@@ -346,9 +346,10 @@ func TestASwitchInterruptedBehindTheDoorIsResumedRatherThanRestarted(t *testing.
 			},
 		}
 	})
-	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
-
+	// Declared before the reconciler is built, so it wins over the helper's
+	// default answer.
 	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).Return(PersistRequired, nil).AnyTimes()
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 	// No VGSetPersist: repeating it is what fails, and there is nothing to set.
 	commands.EXPECT().VGPersistStart(gomock.Any(), testVG, 7).Return("", nil).Times(2)
 	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("", nil).AnyTimes()
@@ -516,6 +517,29 @@ func TestAPoolThatDoesNotAskForReservationsIsNotUnderThem(t *testing.T) {
 
 	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 	r.prStates[group.Name] = PRStateEnabled // left over from the pool that was
+
+	reconcile(t, r, group)
+}
+
+func TestANodeRegistersWhenTheGroupSaysItIsUnderReservations(t *testing.T) {
+	// The published state can say "not under reservations" for a group that is:
+	// a member that never took part, a status that was lost, a spec edited by
+	// hand. Starting a lockspace then is the worst outcome available — under a
+	// Write Exclusive, all registrants reservation the lease is renewed with a
+	// write, so the node fences itself a minute later.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := testGroup(testNode)
+	group.Spec.PersistentReservations = "Disabled" // spec says no
+	group.Status = &v1alpha1.LVMSharedVolumeGroupStatus{}
+
+	// The group itself says otherwise.
+	commands.EXPECT().VGPersistSetting(gomock.Any(), testVG).
+		Return("require 2.0.0:lvmlock:persist", nil).AnyTimes()
+	register := commands.EXPECT().VGPersistStart(gomock.Any(), testVG, 7).Return("", nil)
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).After(register).Return("", nil)
+	r, _, _ := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
 
 	reconcile(t, r, group)
 }

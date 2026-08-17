@@ -278,3 +278,32 @@ func TestAnEvictedNodeDoesNotLetItselfBackIn(t *testing.T) {
 	assert.False(t, entry.LockspaceStarted)
 	assert.Contains(t, entry.Message, EvictNodeAnnotation)
 }
+
+func TestAnEvictionNobodyCanCarryOutSaysSo(t *testing.T) {
+	// The executor is chosen among members that hold a registration, and after a
+	// restart there may be none — the annotation is set, nothing happens, and
+	// the status looks exactly like an eviction in progress. Silence here is
+	// indistinguishable from work, and this one will never happen.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := poolAskingForReservations()
+	// The owner is the target, and nobody else has published a state.
+	group.Annotations = map[string]string{EvictNodeAnnotation: testNode}
+	group.Spec.MetadataOwner = testNode
+	// Members sorted: the target is first by name, so the node that speaks is
+	// this one — and every member works that out identically.
+	group.Spec.Nodes = []string{testNode, "zz-other-node"}
+	group.Status = &v1alpha1.LVMSharedVolumeGroupStatus{}
+
+	r, cl, _ := testReconciler(t, nodeWith(nil), commands, nil, group)
+	r.cfg.NodeName = "zz-other-node"
+
+	r.evictRequestedNode(context.Background(), group)
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	require.NotEmpty(t, published.Status.Nodes)
+	assert.Equal(t, ReasonEvictionImpossible, published.Status.Nodes[0].Reason)
+	assert.Contains(t, published.Status.Nodes[0].Message, "no member of the pool holds a registration")
+}
