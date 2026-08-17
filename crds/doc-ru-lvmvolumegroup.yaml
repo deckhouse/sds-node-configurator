@@ -208,6 +208,9 @@ spec:
                 vgFree:
                   description: |
                     Свободное место в группе томов.
+                extentSize:
+                  description: |
+                    Размер физического extent'а группы томов.
                 allocatedSize:
                   description: |
                     Объём пространства, занимаемый в данный момент в группе томов.
