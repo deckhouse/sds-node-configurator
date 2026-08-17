@@ -24,3 +24,15 @@ package utils
 // ReTagForTest exposes reTag, whose ownership gate is what keeps the agent from
 // rewriting the LVM tags of a loop-backed Volume Group it does not own.
 var ReTagForTest = reTag
+
+// NoSuchDMDeviceForTest exposes how a removal decides that the mapping it was
+// aimed at is already gone.
+func NoSuchDMDeviceForTest(stderr string) bool {
+	return reNoSuchDMDevice.MatchString(stderr)
+}
+
+// PVAlreadyInVGForTest exposes how an extension recognises a device that is in
+// the group already.
+func PVAlreadyInVGForTest(stderr string) bool {
+	return rePVAlreadyInVG.MatchString(stderr)
+}

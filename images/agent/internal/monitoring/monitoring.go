@@ -258,6 +258,27 @@ var (
 		// unimported Volume Group with no owner tag is given a freshly generated
 		// name on every pass, and that is not something to put in a label.
 	}, []string{"node", "volume_group", "lvg_name"})
+
+	// The invariant of a shared pool, measured on the node that would break it:
+	// a volume of the pool mapped here with nothing on this node asking for it.
+	// Zero is the only healthy value. Anything above it means device-mapper can
+	// carry a write to a volume whose lease belongs to another node, which is
+	// the one outcome the whole design exists to prevent.
+	//
+	// It is worth a metric of its own because the module has broken this
+	// invariant by itself before: its scanner activated a pool's volumes on
+	// every node that could see the LUN, once a minute, and the only trace was
+	// a line in each node's log saying it was releasing them. A gauge shows it
+	// in one query across the cluster.
+	//
+	// A gauge and not a counter: the state resolves — the cleanup unmaps what it
+	// finds — so what matters is whether it is happening right now, and every
+	// pass sets the current number, including zero.
+	sharedPoolUnlockedMappings = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "shared_pool_unlocked_mappings",
+		Help:      "Volumes of a shared pool mapped on this node with no attachment asking for them. Zero is the only healthy value.",
+	}, []string{"node", "volume_group"})
 )
 
 func init() {
@@ -291,6 +312,7 @@ func init() {
 	metrics.Registry.MustRegister(fileDevicesDirectoryAllocatedBytes)
 	metrics.Registry.MustRegister(fileDevicesDirectoryTotalBytes)
 	metrics.Registry.MustRegister(lvmVolumeGroupImportRefusedTotal)
+	metrics.Registry.MustRegister(sharedPoolUnlockedMappings)
 }
 
 type Metrics struct {
@@ -463,6 +485,23 @@ func (m *Metrics) LVMActivationTotal(volumeGroup, result string) prometheus.Coun
 // counter's own alert firing on a decision somebody made on purpose.
 func (m *Metrics) LVMVolumeGroupImportRefusedTotal(volumeGroup, lvgName string) prometheus.Counter {
 	return lvmVolumeGroupImportRefusedTotal.WithLabelValues(m.node, volumeGroup, lvgName)
+}
+
+// SharedPoolUnlockedMappings is the number of volumes of a shared pool mapped on
+// this node with nothing asking for them. Set on every pass of the group
+// reconciler, zero included — a gauge nobody clears is a gauge nobody believes.
+func (m *Metrics) SharedPoolUnlockedMappings(volumeGroup string) prometheus.Gauge {
+	return sharedPoolUnlockedMappings.WithLabelValues(m.node, volumeGroup)
+}
+
+// ForgetSharedPool drops this node's gauge for a pool that no longer exists.
+//
+// A gauge vec keeps a series until somebody deletes it, so a removed pool would
+// go on reporting its last value — zero, most likely, which reads as "this pool
+// is fine" about a pool that is gone. Same reasoning as setting it on every
+// pass: a number nobody maintains is a number nobody should believe.
+func (m *Metrics) ForgetSharedPool(volumeGroup string) {
+	sharedPoolUnlockedMappings.DeleteLabelValues(m.node, volumeGroup)
 }
 
 // isThinPool determines if an LVM logical volume is a thin pool

@@ -136,6 +136,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	err = controller.RunSharedHostIDAllocator(mgr, *log)
+	if err != nil {
+		log.Error(err, "[main] unable to run SharedHostIDAllocator controller")
+		os.Exit(1)
+	}
+
+	err = controller.RunSharedVanishedNodeCleanup(mgr, *log)
+	if err != nil {
+		log.Error(err, "[main] unable to run SharedVanishedNodeCleanup controller")
+		os.Exit(1)
+	}
+
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
 		os.Exit(1)

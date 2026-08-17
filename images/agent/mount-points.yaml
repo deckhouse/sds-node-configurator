@@ -1,3 +1,8 @@
 dirs:
   - /dev/
   - /run/udev/
+  # Where the agent leaves what the lock daemons of a shared pool read — the
+  # sanlock host_id — and where their fencing handler leaves what the agent reads
+  # back. The two have no other channel: the daemons hold no API credentials by
+  # design, so this directory is the entire interface between them.
+  - /opt/deckhouse/sds/lvmlockd/

@@ -233,7 +233,7 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 	}
 
 	verdicts := ClassifyLoopVGs(ctx, log, commands, cmdTimeout, res.data, pvsRes.data)
-	managedVGs := SkipUnownedLoopVGs(log, "activate", FilterVGsByTag(res.data, internal.LVMTags), verdicts)
+	managedVGs := SkipSharedVGs(log, "activate", SkipUnownedLoopVGs(log, "activate", FilterVGsByTag(res.data, internal.LVMTags), verdicts))
 	if len(managedVGs) == 0 {
 		log.Info("[ActivateVGs] no managed VGs found, nothing to activate")
 		return nil
@@ -243,12 +243,11 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 
 	var activationErrors []error
 	for _, vg := range managedVGs {
-		shared := vg.VGShared != ""
 		cmd, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
-			return commands.VGActivate(ctx, vg.VGName, shared)
+			return commands.VGActivate(ctx, vg.VGName)
 		})
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[ActivateVGs] failed to activate VG %s (shared=%t, cmd: %s)", vg.VGName, shared, cmd))
+			log.Error(err, fmt.Sprintf("[ActivateVGs] failed to activate VG %s (cmd: %s)", vg.VGName, cmd))
 			metrics.UtilsCommandsErrorsCount(activationControllerName, "vgchange").Inc()
 			metrics.LVMActivationTotal(vg.VGName, "error").Inc()
 			activationErrors = append(activationErrors, fmt.Errorf("VG %s: %w", vg.VGName, err))
@@ -256,7 +255,7 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 		}
 		metrics.UtilsCommandsExecutionCount(activationControllerName, "vgchange").Inc()
 		metrics.LVMActivationTotal(vg.VGName, "success").Inc()
-		log.Info(fmt.Sprintf("[ActivateVGs] activated VG %s (shared=%t)", vg.VGName, shared))
+		log.Info(fmt.Sprintf("[ActivateVGs] activated VG %s", vg.VGName))
 	}
 
 	if len(activationErrors) > 0 {
@@ -283,7 +282,7 @@ func EnsureVGActivation(
 	verdicts LoopVGVerdicts,
 	cmdTimeout time.Duration,
 ) bool {
-	managedVGs := SkipUnownedLoopVGs(log, "activate", FilterVGsByTag(vgs, internal.LVMTags), verdicts)
+	managedVGs := SkipSharedVGs(log, "activate", SkipUnownedLoopVGs(log, "activate", FilterVGsByTag(vgs, internal.LVMTags), verdicts))
 	if len(managedVGs) == 0 {
 		return false
 	}
@@ -317,9 +316,8 @@ func EnsureVGActivation(
 	log.Info(fmt.Sprintf("[EnsureActivation] activating %d VGs with inactive LVs", len(vgsToActivate)))
 	activated := false
 	for _, vg := range vgsToActivate {
-		shared := vg.VGShared != ""
 		cmd, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
-			return commands.VGActivate(ctx, vg.VGName, shared)
+			return commands.VGActivate(ctx, vg.VGName)
 		})
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[EnsureActivation] failed to activate VG %s (cmd: %s)", vg.VGName, cmd))
@@ -329,7 +327,7 @@ func EnsureVGActivation(
 		}
 		metrics.UtilsCommandsExecutionCount(activationControllerName, "vgchange").Inc()
 		metrics.LVMActivationTotal(vg.VGName, "success").Inc()
-		log.Info(fmt.Sprintf("[EnsureActivation] activated VG %s (shared=%t)", vg.VGName, shared))
+		log.Info(fmt.Sprintf("[EnsureActivation] activated VG %s", vg.VGName))
 		activated = true
 	}
 

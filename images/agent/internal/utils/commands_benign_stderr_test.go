@@ -204,3 +204,51 @@ func TestWriteCommandsShareTheBenignStdErrPolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestAMappingThatIsAlreadyGoneIsARemovalThatSucceeded(t *testing.T) {
+	// Both spellings device-mapper uses, because the caller of a removal wants
+	// the mapping gone and does not care which of them it is told. Treating
+	// either as a failure is what kept a fenced node out of its pool: the
+	// recovery read its own success as something to retry.
+	for _, stderr := range []string{
+		"device-mapper: remove ioctl on vghw-lvmlock  failed: No such device or address\nCommand failed.\n",
+		"Device does not exist.\nCommand failed.\n",
+	} {
+		assert.True(t, NoSuchDMDeviceForTest(stderr), "%q means the mapping is gone", stderr)
+	}
+
+	// And the one that must not be swallowed: something is still holding it.
+	assert.False(t, NoSuchDMDeviceForTest(
+		"device-mapper: remove ioctl on vghw-lvmlock  failed: Device or resource busy\nCommand failed.\n"),
+		"a busy device is a mapping that is still there, and the caller has to know")
+}
+
+func TestADeviceAlreadyInTheGroupIsAnExtensionThatSucceeded(t *testing.T) {
+	// The lvm that changes a shared group runs in the lock daemons' mount
+	// namespace; the lvm that reads it runs in the host's. They keep separate
+	// caches, so for a minute or two after an extension the reader still lists
+	// the group without its new device — and the next pass adds it again.
+	// Measured on a live pool, and the answer is not a failure: what the caller
+	// wanted is already true.
+	assert.True(t, PVAlreadyInVGForTest(
+		"  Physical volume '/dev/mapper/mpathk' is already in volume group 'vgext'\n"+
+			"  Unable to add physical volume '/dev/mapper/mpathk' to volume group 'vgext'\n"))
+
+	// And a real refusal is still one.
+	assert.False(t, PVAlreadyInVGForTest("  Device /dev/mapper/mpathk excluded by a filter.\n"))
+}
+
+func TestStoppingReservationsANodeNeverHadIsNotAFailure(t *testing.T) {
+	// The ordinary state of every member of a pool that has not been switched.
+	// Reported as an error it stops the switch before it starts: on the stand
+	// the two neighbours of a new pool spent every pass failing to stop
+	// reservations they had never had, while the executor waited for them to say
+	// they had stepped aside.
+	assert.True(t, NoRegisteredKeyToStop(errors.New(
+		"unable to run cmd: vgchange --persist stop vghw, err: exit status 5, stderr: "+
+			"No registered key found for local host.")))
+	assert.False(t, NoRegisteredKeyToStop(errors.New(
+		"unable to run cmd: vgchange --persist stop vghw, err: exit status 5, stderr: "+
+			"VG vghw locking should be stopped before PR (vgchange --lockstop)")))
+	assert.False(t, NoRegisteredKeyToStop(nil))
+}

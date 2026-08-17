@@ -1,0 +1,511 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: lvmsharedvolumegroups.storage.deckhouse.io
+  labels:
+    heritage: deckhouse
+    module: sds-node-configurator
+    backup.deckhouse.io/cluster-config: "true"
+spec:
+  group: storage.deckhouse.io
+  scope: Cluster
+  names:
+    kind: LVMSharedVolumeGroup
+    plural: lvmsharedvolumegroups
+    singular: lvmsharedvolumegroup
+    shortNames:
+      - lsvg
+  preserveUnknownFields: false
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: |
+            LVMSharedVolumeGroup is one LVM Volume Group on storage that several nodes see
+            at once, with lvmlockd and sanlock arbitrating who may write to which volume.
+
+            It differs from LVMVolumeGroup in what it is addressed by. A local group belongs
+            to one node and is found through the block devices discovered there; a shared
+            group belongs to a set of nodes and is found by the WWIDs of its LUNs, because
+            paths and map names differ from node to node and only the WWID is the same
+            everywhere.
+
+            Exactly one node — `spec.metadataOwner` — performs the metadata operations of
+            the group and is the only writer of this resource's status. Every other member
+            still activates its own volumes; the role exists because LVM metadata has one
+            writer by construction, not because the other nodes are lesser.
+
+            Per-node facts do not live here. Sixteen to thirty-two agents writing one
+            resourceVersion is a conflict generator, so a node reports its own state next to
+            the node, and this status carries only what the metadata owner observes about
+            the group itself.
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              description: |
+                Defines the shared Volume Group: the LUNs it lives on, the nodes that may
+                use it, and the policies fixed for it.
+              required:
+                - actualVGNameOnTheNode
+                - devices
+                - volumeCleanup
+              x-kubernetes-validations:
+                # The owner performs metadata operations, which needs the group's
+                # lockspace, which only members hold. An owner outside the member
+                # list is a group that cannot be written to by anyone.
+                - rule: "!has(self.metadataOwner) || self.metadataOwner == '' || (has(self.nodes) && self.metadataOwner in self.nodes)"
+                  message: "metadataOwner must be one of nodes: only a member holds the lockspace the metadata operations need."
+              properties:
+                actualVGNameOnTheNode:
+                  type: string
+                  maxLength: 44
+                  minLength: 1
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                  description: |
+                    Name of the Volume Group as it exists on the nodes.
+
+                    The limit of 44 characters is not cosmetic. lvmlockd prefixes the name
+                    with `lvm_` and checks the result against 64, while sanlock silently
+                    truncates a lockspace name at 48 — a longer name is accepted by both and
+                    then refers to a different lockspace than the one intended.
+                devices:
+                  type: array
+                  minItems: 1
+                  maxItems: 32
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - wwid
+                  description: |
+                    The LUNs this Volume Group lives on, addressed by WWID.
+
+                    A WWID rather than a device path or a BlockDevice reference: the same LUN
+                    appears under different names on different nodes, and a shared group has
+                    to mean the same thing on all of them. The agent resolves a WWID to the
+                    local multipath map itself.
+
+                    Every device of a group must belong to the same geometry class, which is
+                    decided by the rule LVM itself applies — a physical *or* logical block
+                    size of 4096 means 4K geometry. A 512e device and a 4Kn device are the
+                    same class; an honest 512-byte device is a different one. The sanlock
+                    lease layout depends on this, so mixing classes is rejected when the
+                    group is created and when a device is added.
+                  items:
+                    type: object
+                    required:
+                      - wwid
+                    properties:
+                      wwid:
+                        type: string
+                        minLength: 1
+                        description: |
+                          World-wide identifier of the LUN, as multipath reports it.
+                nodes:
+                  type: array
+                  x-kubernetes-list-type: set
+                  description: |
+                    Nodes that are members of this group. The agent on a node listed here
+                    starts the sanlock lockspace of the group and may activate its volumes;
+                    the agent on a node removed from here stops the lockspace.
+
+                    Membership is decided by the controller that owns the pool, from facts
+                    the nodes report about themselves. A node must not be removed while it
+                    still holds an active volume of this group.
+                  items:
+                    type: string
+                metadataOwner:
+                  type: string
+                  description: |
+                    The node whose agent performs the metadata operations of the group —
+                    `vgcreate`, `vgextend`, `lvcreate`, `lvremove`, `lvextend` of unattached
+                    volumes — and the only writer of this resource's status.
+
+                    It must be one of `spec.nodes`. The controller moves the role when the
+                    holder leaves the group or stops being ready; the move is safe because
+                    the role carries no state of its own.
+                volumeCleanup:
+                  type: string
+                  description: |
+                    The floor for how a volume of this group is erased when it is deleted.
+
+                    Required, and deliberately so: a volume carved out of a shared LUN is
+                    handed to the next tenant as raw capacity, so "no policy" is not a
+                    defensible default. A volume may ask for a stronger policy than the group
+                    and never for a weaker one.
+
+                    Possible values:
+
+                    - `Discard`: Sends `UNMAP` to the array. Only correct when the array
+                      guarantees zeroes after unmapping — otherwise the next tenant can read
+                      the previous one's data — and only when the extent size is a multiple
+                      of the array's unmap granularity, or nothing is actually freed.
+
+                    - `RandomFillSinglePass`: Overwrites the volume with random data once.
+
+                    - `RandomFillThreePass`: Overwrites the volume with random data three
+                      times.
+                  enum:
+                    - Discard
+                    - RandomFillSinglePass
+                    - RandomFillThreePass
+                lvm:
+                  type: object
+                  default: {}
+                  description: |
+                    Layout parameters passed to `vgcreate` and fixed for the lifetime of the
+                    Volume Group.
+
+                    They live here because the agent is what runs `vgcreate`, and none of
+                    them can be changed afterwards by any means short of destroying the group
+                    and everything in it. The block itself defaults to an empty object rather
+                    than being absent: an absent object defaults nothing and compares against
+                    nothing, so the immutability rule below would never fire and a value
+                    could be introduced after the group already existed with another one.
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: The LVM layout is fixed when the Volume Group is created and is immutable.
+                  properties:
+                    physicalExtentSize:
+                      type: string
+                      default: 4Mi
+                      pattern: ^[1-9][0-9]*(Ki|Mi|Gi)$
+                      description: |
+                        Physical extent size, and therefore the granularity of every volume in
+                        the group.
+
+                        It must be a multiple of the unmap granularity of the group's LUNs, or
+                        discarding a volume frees nothing at all however honestly the array
+                        reports zeroes afterwards. That is checked before the group is created,
+                        not at the first deletion.
+                    sanlockAlignSize:
+                      type: string
+                      default: 4Mi
+                      enum:
+                        - 1Mi
+                        - 2Mi
+                        - 4Mi
+                        - 8Mi
+                      description: |
+                        Alignment of the sanlock lease area, which decides two things at once:
+                        how large the lease area is, and the ceiling on `host_id` — 250 hosts
+                        for 1Mi, 500 for 2Mi, 1000 for 4Mi, 2000 for 8Mi.
+
+                        The agent passes it to `vgcreate` and the allocator enforces the
+                        ceiling, because LVM itself does not: a `host_id` above the ceiling is
+                        accepted and fails later, when the node tries to join.
+                    metadataSize:
+                      type: string
+                      pattern: ^[1-9][0-9]*(Ki|Mi|Gi)$
+                      description: |
+                        Size of the Volume Group metadata area on each physical volume.
+
+                        Metadata is rewritten on every volume operation and cannot grow later,
+                        so a group planned for hundreds of volumes needs it stated up front.
+                persistentReservations:
+                  type: string
+                  enum: ["Disabled", "Required"]
+                  default: Disabled
+                  description: |
+                    The pool's intent, mirrored here because this is the resource the node agents
+                    act on.
+
+                    `Required` means the group's LUNs are to be held under SCSI-3 persistent
+                    reservations, so that a node can be denied access by the array rather than by
+                    anything running on it. Reaching that state is an orchestration across every
+                    member and a one-way door in the middle of it: after
+                    `vgchange --setpersist require` the group answers "Persistent reservation is
+                    not started" to everything until `vgchange --persist start` succeeds.
+                sanlockLVExtend:
+                  type: string
+                  pattern: ^[1-9][0-9]*(Ki|Mi|Gi)$
+                  description: |
+                    How much the hidden lease volume grows by when it runs out of slots.
+
+                    The default LVM uses is a good one and this field exists for the case it
+                    is not: growing the area happens while volumes are being created, so a
+                    larger step trades a rarer pause for a longer one. The area never shrinks
+                    again, whatever this is set to.
+            status:
+              type: object
+              description: |
+                Observed state of the group, written only by the agent on
+                `spec.metadataOwner`.
+              properties:
+                phase:
+                  type: string
+                  description: |
+                    The group's current state, derived from the conditions below.
+
+                    Possible values:
+
+                    - `Pending`: The group has not been created yet, or the metadata owner
+                      has not observed it.
+                    - `Created`: The group exists and can serve volumes.
+                    - `Failed`: A reconcile pass failed. See the conditions.
+                  enum:
+                    - Pending
+                    - Created
+                    - Failed
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: |
+                    The value of `metadata.generation` the agent has last acted on. When it
+                    trails `metadata.generation`, the latest spec has not been processed and
+                    the conditions still describe the previous one.
+                vgUUID:
+                  type: string
+                  description: |
+                    UUID of the Volume Group.
+
+                    It is the group's identity across renames and across nodes, and the
+                    prefix of the device-mapper UUID of every volume in it — which is how a
+                    node decides whether a map belongs to this group without trusting its
+                    name.
+                vgSize:
+                  type: string
+                  description: |
+                    Total size of the Volume Group.
+                vgFree:
+                  type: string
+                  description: |
+                    Free space in the Volume Group. It already excludes the lease area.
+                extentSize:
+                  type: string
+                  description: |
+                    Physical extent size, which is the granularity of every volume here. It
+                    is fixed when the group is created and cannot be changed afterwards.
+                leaseAreaSize:
+                  type: string
+                  description: |
+                    Current size of the hidden lease volume that sanlock keeps its leases in.
+                logicalVolumeCount:
+                  type: integer
+                  format: int32
+                  description: |
+                    Number of logical volumes in the group.
+                nodes:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - name
+                  description: |
+                    What each member of the pool says about its own participation.
+
+                    It is deliberately not a condition: conditions describe the group and are
+                    written by the metadata owner alone, while whether a lockspace is running
+                    is a fact about a node. A per-node fact in a shared array would be a value
+                    whose last writer wins and whose reader cannot tell whose answer it got.
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - lockspaceStarted
+                    properties:
+                      name:
+                        type: string
+                        description: |
+                          Name of the node this entry belongs to.
+                      lockspaceStarted:
+                        type: boolean
+                        description: |
+                          `true` while the node holds a lockspace of this group and can
+                          therefore activate its volumes. While it is `false`, no volume of
+                          this group can be attached to this node — see `reason`.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        description: |
+                          Short, machine-readable cause of the current state.
+
+                          - `LockspaceStarted`: the node is in the pool.
+                          - `ReservationConflict`: the LUN carries a SCSI reservation from
+                            another initiator; this one never resolves on its own.
+                          - `LUNNotReadyYet`: the volume group is not readable here yet.
+                          - `BarrierNotCleared`: the node was fenced and something still
+                            holds the error target of its lease area.
+                          - `LockspaceNotStarted`: anything else, with the detail in
+                            `message`.
+                      message:
+                        type: string
+                        maxLength: 4096
+                        description: |
+                          The state in words, including what — if anything — only a person can
+                          do about it.
+                      persistentReservations:
+                        type: object
+                        required:
+                          - ready
+                        description: |
+                          What this node can say about the SCSI reservation channel of the pool's
+                          LUNs, established by reading and never by trying.
+
+                          Switching a pool to reservations is a one-way door in the middle of its
+                          own procedure: the volume group is unusable between
+                          `vgchange --setpersist require` and a successful `vgchange --persist
+                          start`. A pool whose nodes cannot say in advance that the channel works
+                          must not be taken through it.
+                        properties:
+                          ready:
+                            type: boolean
+                            description: |
+                              `true` when every precondition this node can check by reading is met.
+                              It does not say reservations are in use — only that switching them on
+                              would not fail here.
+                          reason:
+                            type: string
+                            maxLength: 1024
+                            description: |
+                              Short, machine-readable cause when `ready` is `false`.
+
+                              - `ReservationToolsMissing`: the lock daemons' image does not carry
+                                the tooling every reservation command runs from — lvm2 executes
+                                `/sbin/lvmpersist` by a compiled-in path, and lvmpersist runs
+                                `sg_persist`. A build regression, not something to fix on the node.
+                              - `NoReservationKey`: this node's multipathd has no
+                                `reservation_key` in its configuration, so every reservation
+                                command is refused before it reaches the array and a path that
+                                comes back is not re-registered. The module writes it into
+                                /etc/multipath/conf.d itself.
+                              - `ChannelUnreachable`: the channel could not be read from this node
+                                at all, which is what a pod without `hostNetwork` looks like.
+                          message:
+                            type: string
+                            maxLength: 4096
+                            description: |
+                              The verdict in words, including what only a person can do about it.
+                          key:
+                            type: string
+                            maxLength: 32
+                            description: |
+                              The reservation key this node holds on the pool's LUNs, as the
+                              host's multipathd reports it. Empty until the node registers one,
+                              which is what a pool that has not been switched looks like.
+
+                              It is published so that the pool can take this node's access away
+                              when the node can no longer be asked to give it up: the array stops
+                              accepting the writes of a key that is no longer registered.
+
+                              Left empty unless every one of the pool's LUNs reports the same key
+                              here — a key that is only probably this node's would fence the wrong
+                              node.
+                          state:
+                            type: string
+                            enum: ["Off", "Stopped", "Enabled"]
+                            description: |
+                              Where this node stands in the switch to reservations, and how the
+                              members coordinate it: the executor waits for every neighbour to
+                              report `Stopped` before it opens the one-way door, and the neighbours
+                              wait for `Enabled` before they come back.
+
+                              - `Off`: reservations are not in use here.
+                              - `Stopped`: this node has stopped its lockspace and its reservations
+                                so the executor can take the group over. It serves no volumes then.
+                              - `Enabled`: this node holds a registration with the array and its
+                                lockspace is running under reservations.
+                      since:
+                        type: string
+                        format: date-time
+                        description: |
+                          When the node last changed what it says here. It does not move while
+                          the answer stays the same.
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+                  description: |
+                    The latest observations of the group state.
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                      - lastTransitionTime
+                      - reason
+                      - message
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        description: |
+                          Condition type.
+
+                          - `VGReady` is `True` once the Volume Group exists and is readable
+                            on the metadata owner.
+                          - `MetadataOwnerReady` is `True` while the owning node holds the
+                            lockspace and can perform metadata operations.
+                          - `Ready` summarises the rest.
+
+                          Whether the devices resolved on every node is not among them: only
+                          the metadata owner writes here, and it can speak for itself alone.
+                          That answer belongs to the pool resource above this one, which sees
+                          all the candidates.
+                        enum:
+                          - VGReady
+                          - MetadataOwnerReady
+                          - Ready
+                      status:
+                        type: string
+                        description: |
+                          Condition status.
+                        enum:
+                          - "True"
+                          - "False"
+                          - "Unknown"
+                      observedGeneration:
+                        type: integer
+                        minimum: 0
+                        format: int64
+                        description: |
+                          The value of `metadata.generation` this condition was set against.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: |
+                          Timestamp of the last status transition for this condition. It is
+                          not bumped when only the reason or the message changes.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: |
+                          Machine-readable reason for the current status, suitable for log
+                          filtering and alerting.
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: |
+                          Human-readable explanation of the current status.
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - jsonPath: .status.phase
+          name: phase
+          type: string
+        - jsonPath: .status.conditions[?(@.type=="Ready")].status
+          name: Ready
+          type: string
+        - jsonPath: .spec.actualVGNameOnTheNode
+          name: VG
+          type: string
+        - jsonPath: .status.vgSize
+          name: size
+          type: string
+        - jsonPath: .status.vgFree
+          name: free
+          type: string
+        - jsonPath: .spec.metadataOwner
+          name: metadata owner
+          type: string
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date

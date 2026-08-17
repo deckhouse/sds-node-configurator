@@ -65,7 +65,7 @@ func TestActivateAllManagedVGs_SkipsAForeignLoopBackedVG(t *testing.T) {
 	mc.EXPECT().GetLoopBackingFile(gomock.Any(), "/dev/loop7").
 		Return("losetup -O BACK-FILE", internal.LoopBackingFile{Path: "/backup/node2-root.img"}, nil)
 	// Only ours. gomock fails the test if VGActivate is called for the image.
-	mc.EXPECT().VGActivate(gomock.Any(), "ours", false).Return("vgchange -ay ours", nil)
+	mc.EXPECT().VGActivate(gomock.Any(), "ours").Return("vgchange -ay ours", nil)
 
 	err := utils.ActivateAllManagedVGs(context.Background(), testLogger(t), mc, monitoring.GetMetrics("test_node"), 30*time.Second)
 	assert.NoError(t, err)
@@ -114,7 +114,7 @@ func TestEnsureVGActivation_SkipsAForeignLoopBackedVG(t *testing.T) {
 		"uuid-ours":  utils.LoopVGNotLoopOnly,
 	}
 
-	mc.EXPECT().VGActivate(gomock.Any(), "ours", false).Return("vgchange -ay ours", nil)
+	mc.EXPECT().VGActivate(gomock.Any(), "ours").Return("vgchange -ay ours", nil)
 
 	activated := utils.EnsureVGActivation(context.Background(), testLogger(t), mc,
 		monitoring.GetMetrics("test_node"), vgs, lvs, verdicts, 30*time.Second)
@@ -180,4 +180,53 @@ func TestReTag_RefusesWhenPVsCannotBeListed(t *testing.T) {
 
 	err := utils.ReTagForTest(context.Background(), mc, testLogger(t), monitoring.GetMetrics("test_node"), "test", 30*time.Second)
 	assert.Error(t, err)
+}
+
+func TestASharedGroupIsRecognisedByItsLockTypeWhenSharedIsEmpty(t *testing.T) {
+	// The field that names a shared group, vg_shared, is computed by lvm at run
+	// time from lockd support — and the static lvm this agent carries is built
+	// without it. Measured on a live pool: vg_shared="" and vg_attr="wz--n--"
+	// for a group whose lock type was sanlock, which left every guard written
+	// against vg_shared switched off. The scanner then activated the pool's
+	// volume on a node holding no lock for it, one second after the cleanup had
+	// unmapped it, once a minute.
+	log := testLogger(t)
+	vgs := []internal.VGData{
+		{VGName: "vghw", VGUUID: "u1", VGShared: "", VGLockType: "sanlock"},
+		{VGName: "vglocal", VGUUID: "u2"},
+		{VGName: "vgnone", VGUUID: "u3", VGLockType: "none"},
+	}
+
+	kept := utils.SkipSharedVGs(log, "activate", vgs)
+
+	names := make([]string, 0, len(kept))
+	for _, vg := range kept {
+		names = append(names, vg.VGName)
+	}
+	assert.Equal(t, []string{"vglocal", "vgnone"}, names,
+		`a group whose lock type is sanlock is not this node's to activate; "none" is lvm's word for a local one`)
+}
+
+func TestASharedGroupIsRefusedToTheNodeLocalVolumePaths(t *testing.T) {
+	// LVMVolumeGroups are not made for shared groups any more, but one made by
+	// an older agent outlives the fix — and behind it sit reconcilers that run
+	// lvcreate, lvextend and lvremove on the node with no lock taken anywhere.
+	// What is on the other side is somebody's data, so this is a refusal and
+	// not a repair.
+	log := testLogger(t)
+
+	message, refuse := utils.RefuseSharedVG(log, "manage a Logical Volume", "vghw",
+		&internal.VGData{VGName: "vghw", VGLockType: "sanlock"})
+	assert.True(t, refuse)
+	assert.Contains(t, message, "handed out by a lock manager")
+	assert.Contains(t, message, "deleted by hand",
+		"the leftover resource is the operator's to remove, not this module's")
+
+	_, refuseLocal := utils.RefuseSharedVG(log, "manage a Logical Volume", "vglocal",
+		&internal.VGData{VGName: "vglocal"})
+	assert.False(t, refuseLocal, "an ordinary group is untouched by this")
+
+	_, refuseUnknown := utils.RefuseSharedVG(log, "manage a Logical Volume", "vggone", nil)
+	assert.False(t, refuseUnknown,
+		"a group the cache cannot see says nothing about sharedness, and the paths below have their own answer for it")
 }

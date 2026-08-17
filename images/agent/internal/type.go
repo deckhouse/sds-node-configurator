@@ -188,14 +188,48 @@ type VG struct {
 }
 
 type VGData struct {
-	VGAttr       string            `json:"vg_attr"`
-	VGFree       resource.Quantity `json:"vg_free"`
-	VGName       string            `json:"vg_name"`
-	VGShared     string            `json:"vg_shared"`
+	VGAttr   string            `json:"vg_attr"`
+	VGFree   resource.Quantity `json:"vg_free"`
+	VGName   string            `json:"vg_name"`
+	VGShared string            `json:"vg_shared"`
+	// VGLockType is how a shared Volume Group is actually recognised here.
+	//
+	// vg_shared, the obvious field, is empty in everything this module reads:
+	// it is computed by lvm at run time from lockd support, and the static lvm
+	// the agent carries is built without it. Measured on a live pool — vgs
+	// reported vg_shared="" and vg_attr="wz--n--" for a group whose lock type
+	// was sanlock — which made every guard written against vg_shared inert.
+	// vg_lock_type comes from the metadata on the disk and is reported
+	// faithfully by the same command.
+	VGLockType   string            `json:"vg_lock_type"`
 	VGSize       resource.Quantity `json:"vg_size"`
 	VGTags       string            `json:"vg_tags"`
 	VGUUID       string            `json:"vg_uuid"`
 	VGExtentSize resource.Quantity `json:"vg_extent_size"`
+}
+
+// IsShared reports whether the Volume Group belongs to a lock manager rather
+// than to this node.
+//
+// It asks vg_lock_type first and vg_shared second, and the order is the whole
+// point: vg_shared is what lvm computes at run time from lockd support, and the
+// static lvm this agent carries has none, so the field arrives empty for a group
+// whose metadata plainly says sanlock. Every guard written against vg_shared was
+// therefore switched off — including the one that keeps the scanner from
+// activating a pool's volumes on a node that holds no lock for them.
+func (vg VGData) IsShared() bool {
+	return vg.VGShared != "" ||
+		(vg.VGLockType != "" && vg.VGLockType != "none")
+}
+
+// SharedDescription names the lock manager of a shared Volume Group for a
+// message, preferring the lock type because it is the field that is actually
+// filled in.
+func (vg VGData) SharedDescription() string {
+	if vg.VGLockType != "" {
+		return vg.VGLockType
+	}
+	return vg.VGShared
 }
 
 type LVReport struct {

@@ -26,12 +26,15 @@ import (
 	"errors"
 	"fmt"
 	golog "log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
@@ -48,7 +51,6 @@ type Commands interface {
 	GetPV(pvName string) (pvData internal.PVData, command string, stdErr bytes.Buffer, err error)
 	CreatePV(ctx context.Context, path string) (string, error)
 	CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []string) (string, error)
-	CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string, error)
 	CreateThinPool(thinPoolName, vgName string, size int64) (string, error)
 	CreateThinPoolFullVGSpace(thinPoolName, vgName string) (string, error)
 	CreateThinLogicalVolumeFromSource(name string, sourceVgName string, sourceName string) (string, error)
@@ -60,12 +62,40 @@ type Commands interface {
 	ExtendLVFullVGSpace(vgName, lvName string) (string, error)
 	ResizePV(ctx context.Context, pvName string) (string, error)
 	RemoveVG(vgName string) (string, error)
+	RemoveVGShared(ctx context.Context, vgName string) (string, error)
+	ExtendVGShared(ctx context.Context, vgName string, paths []string) (string, error)
 	RemovePV(pvNames []string) (string, error)
 	RemoveLV(vgName, lvName string) (string, error)
 	VGChangeAddTag(ctx context.Context, vGName, tag string) (string, error)
 	VGChangeDelTag(ctx context.Context, vGName, tag string) (string, error)
 	LVChangeDelTag(ctx context.Context, lv internal.LVData, tag string) (string, error)
-	VGActivate(ctx context.Context, vgName string, shared bool) (string, error)
+	VGActivate(ctx context.Context, vgName string) (string, error)
+	VGLockStart(ctx context.Context, vgName string, hostID int) (string, error)
+	VGLockStop(ctx context.Context, vgName string) (string, error)
+	LockspaceRunning(ctx context.Context, vgName string) (bool, error)
+	LockspaceState(ctx context.Context, vgName string) (registered, held bool, err error)
+	VGSetPersist(ctx context.Context, vgName string, hostID int) (string, error)
+	VGPersistStart(ctx context.Context, vgName string, hostID int) (string, error)
+	VGPersistStop(ctx context.Context, vgName string, hostID int) (string, error)
+	VGPersistSetting(ctx context.Context, vgName string) (string, error)
+	VGSetLockArgsPersist(ctx context.Context, vgName string, hostID int) (string, error)
+	MultipathConfiguration(ctx context.Context) (string, error)
+	RecordedReservationKey(ctx context.Context) (string, error)
+	SetReservationKey(ctx context.Context, mapName, key string) (string, error)
+	ReadRegistrationKeys(ctx context.Context, path string) ([]string, string, error)
+	PreemptRegistration(ctx context.Context, path, ourKey, theirKey string) (string, error)
+	MissingReservationTools(ctx context.Context) ([]string, error)
+	ReservationKeyOf(ctx context.Context, mapName string) (string, error)
+	CreateVGShared(ctx context.Context, params SharedVGParams) (string, error)
+	CreateLVShared(ctx context.Context, vgName, lvName, size string) (string, error)
+	RemoveLVShared(ctx context.Context, vgName, lvName string) (string, error)
+	SetLVTagShared(ctx context.Context, vgName, lvName, tag string, add bool) (string, error)
+	LVExtendShared(ctx context.Context, vgName, lvName, size string) (string, error)
+	LVActivateShared(ctx context.Context, vgName string, lvNames []string, shared bool) (string, error)
+	RemoveDMDevice(ctx context.Context, dmName string) (string, error)
+	RemoveDMDeviceDeferred(ctx context.Context, dmName string) (string, error)
+	WipeDMTable(ctx context.Context, dmName string) (string, error)
+	LVDeactivateShared(ctx context.Context, vgName string, lvNames []string) (string, error)
 	LVActivate(ctx context.Context, vgName, lvName string) (string, error)
 	VGScan(ctx context.Context) (string, error)
 	PVScan(ctx context.Context) (string, error)
@@ -129,7 +159,7 @@ func (c *commands) GetBlockDevices(ctx context.Context) ([]internal.Device, stri
 // truncated report is caught a line later by unmarshalVGs either way.
 func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
-	args := []string{"vgs", "-o", "+uuid,tags,shared,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json"}
+	args := []string{"vgs", "-o", "+uuid,tags,shared,vg_lock_type,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
@@ -154,7 +184,7 @@ func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command 
 func (commands) GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	vgData = internal.VGData{}
-	args := []string{"vgs", "-o", "+uuid,tags,shared,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json", vgName}
+	args := []string{"vgs", "-o", "+uuid,tags,shared,vg_lock_type,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json", vgName}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
@@ -442,11 +472,12 @@ func (commands) CreatePV(ctx context.Context, path string) (string, error) {
 // never tagged with its owning LVMVolumeGroup — the tag every ownership check in
 // the agent, file devices included, reads. The tags are the part worth keeping in
 // one place; the `--shared` flag is the only real difference.
-func vgCreateArgs(vgName, lvmVolumeGroupName string, shared bool, pvNames []string) []string {
+// vgCreateArgs builds a vgcreate invocation. extraArgs go in front of the Volume
+// Group name, which is where lvm expects mode flags (`--shared`) and injected
+// configuration (`--config`); callers that need neither pass nil.
+func vgCreateArgs(vgName, lvmVolumeGroupName string, extraArgs []string, pvNames []string) []string {
 	args := []string{"vgcreate"}
-	if shared {
-		args = append(args, "--shared")
-	}
+	args = append(args, extraArgs...)
 	args = append(args, vgName)
 	args = append(args, pvNames...)
 	return append(args,
@@ -467,7 +498,7 @@ func vgCreateArgs(vgName, lvmVolumeGroupName string, shared bool, pvNames []stri
 // failed state over a Volume Group that exists. Silence stays a failure: vgcreate
 // has no known no-op.
 func (commands) CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
-	extendedArgs := lvmStaticExtendedArgs(vgCreateArgs(vgName, lvmVolumeGroupName, false, pvNames))
+	extendedArgs := lvmStaticExtendedArgs(vgCreateArgs(vgName, lvmVolumeGroupName, nil, pvNames))
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
@@ -480,16 +511,210 @@ func (commands) CreateVGLocal(vgName, lvmVolumeGroupName string, pvNames []strin
 	return cmd.String(), nil
 }
 
-// CreateVGShared is CreateVGLocal for a shared (clustered) Volume Group. Same
-// benign-stderr treatment, for the same reason.
-func (commands) CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
-	extendedArgs := lvmStaticExtendedArgs(vgCreateArgs(vgName, lvmVolumeGroupName, true, pvNames))
-	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+// CreateLVShared creates a thick volume in a shared Volume Group.
+//
+// Activation is left at lvm's default and -Z y is explicit, and the two go
+// together. lvcreate --activate n turns off lvm's own zeroing of the volume
+// head, and a volume whose head still carries the previous tenant's superblock
+// is a volume blkid identifies as an ext4 that the consumer never made — which
+// is how a fresh PersistentVolume comes up already "formatted".
+//
+// This closes MISIDENTIFICATION, not disclosure. Reading the previous tenant's
+// data is stopped by the wipe on deletion, or by the array returning zeroes
+// after unmapping — never by zeroing four kilobytes at the front.
+//
+// The volume is then deactivated by the caller: creating is not attaching, and
+// a metadata owner that kept every volume it created would hold the exclusive
+// lock of the entire pool.
+func (commands) CreateLVShared(ctx context.Context, vgName, lvName, size string) (string, error) {
+	// lvm reads a bare number as megabytes, and the size arrives here as a byte
+	// count — so passing it through unconverted asks for a volume a million times
+	// too large.
+	// --setautoactivation n for the same reason the group carries it: a volume
+	// this cluster hands to one node at a time must not be activated by anything
+	// that merely sees the disk. The group's setting is not inherited by volumes
+	// created in it, so it is repeated here.
+	args := []string{
+		"lvcreate", "-n", fmt.Sprintf("%s/%s", vgName, lvName),
+		"-L", lvmSize(size), "-W", "y", "-y", "--setautoactivation", "n",
+	}
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// RemoveLVShared destroys a volume of a shared Volume Group.
+func (commands) RemoveLVShared(ctx context.Context, vgName, lvName string) (string, error) {
+	args := []string{"lvremove", "-y", fmt.Sprintf("%s/%s", vgName, lvName)}
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// LVExtendShared grows a volume of a shared Volume Group.
+//
+// It must run on the node that holds the volume's lock, which is the node the
+// volume is attached to and not the metadata owner. That is not a preference:
+// lvextend takes the LV lock, and under lvmlockd the lock is held exclusively by
+// the activating node — the owner's attempt would simply be refused.
+//
+// The size is the requested one, not a delta, so a retry after a partial failure
+// asks for the same end state rather than adding twice.
+func (commands) LVExtendShared(ctx context.Context, vgName, lvName, size string) (string, error) {
+	args := []string{"lvextend", "-L", lvmSize(size), fmt.Sprintf("%s/%s", vgName, lvName)}
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	// A volume that is already the requested size makes lvextend exit non-zero
+	// with "matches existing size", and for an idempotent caller that is a
+	// success — the same benign-stderr treatment the local path already gives it.
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignResizeStdErr, silentExitIsBenign); err != nil {
+		return cmd.String(), err
+	}
+	return cmd.String(), nil
+}
+
+// SetLVTagShared adds or removes a tag on a volume of a shared group.
+//
+// Tags are where the "not cleaned yet" marker lives, and the reason is
+// ownership rather than taste: the marker has to survive the metadata owner
+// changing between the moment a wipe starts and the moment it finishes. A
+// marker in the resource status would be written by the old owner and never
+// read by the new one, which leaves a volume that was never wiped looking
+// exactly like one that was.
+func (commands) SetLVTagShared(ctx context.Context, vgName, lvName, tag string, add bool) (string, error) {
+	flag := "--deltag"
+	if add {
+		flag = "--addtag"
+	}
+
+	args := []string{"lvchange", flag, tag, fmt.Sprintf("%s/%s", vgName, lvName)}
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// SharedVGParams is everything vgcreate needs for a shared Volume Group, and
+// every field of it is irreversible once the group exists.
+type SharedVGParams struct {
+	VGName                string
+	SharedVolumeGroupName string
+	PVPaths               []string
+	HostID                int
+	// PhysicalExtentSize and MetadataSize are passed verbatim to lvm, which
+	// accepts suffixed sizes.
+	PhysicalExtentSize string
+	MetadataSize       string
+	// SanlockAlignSizeMiB is 1, 2, 4 or 8. It fixes the size of the lease area
+	// and the ceiling on host_id — 250 hosts per MiB of alignment, roughly —
+	// and cannot be changed on an existing group.
+	SanlockAlignSizeMiB int
+}
+
+// CreateVGShared creates the Volume Group of a pool.
+//
+// The command is a bootstrap as much as a creation: vgcreate --shared starts
+// the lockspace itself and enables the global lock, so the node running it ends
+// up a member of a pool that did not exist a moment earlier.
+//
+// host_id and the lease alignment go in through --config rather than being left
+// to the daemon's configuration, and that is a version requirement rather than
+// a preference. Since lvm2 2.03.27 the CLIENT checks local/host_id against the
+// ceiling implied by the alignment, so a client that says nothing about either
+// is refused in production while passing on an older stand. That mismatch is
+// invisible until the day it is not.
+
+// lvmSize turns a size written the way Kubernetes writes sizes into the way lvm
+// reads them.
+//
+// The two notations look alike and are not, in both directions. "4Mi" is a valid
+// quantity in every API of this module and a usage error to lvm, which exits 3
+// and prints its help without naming the argument it disliked. And "4m" means
+// four mebibytes to lvm and four thousandths of a byte to Kubernetes — so a
+// value that parses to less than a kibibyte is left exactly as written rather
+// than converted to the zero it would become.
+//
+// Anything else unparseable is passed through too: lvm accepts its own spelling
+// and rejects nonsense with a better message than this could.
+func lvmSize(size string) string {
+	quantity, err := resource.ParseQuantity(size)
+	if err != nil || quantity.Value() < 1024 {
+		return size
+	}
+	return fmt.Sprintf("%dk", quantity.Value()/1024)
+}
+
+func (commands) CreateVGShared(ctx context.Context, params SharedVGParams) (string, error) {
+	config := LVMGlobalFilterForOwnedLoops() + " " + internal.SharedLVMNoArchive + " global/use_lvmlockd=1"
+	if params.HostID > 0 {
+		config += " local/host_id=" + strconv.Itoa(params.HostID)
+	}
+	if params.SanlockAlignSizeMiB > 0 {
+		config += " global/sanlock_align_size=" + strconv.Itoa(params.SanlockAlignSizeMiB)
+	}
+
+	// Autoactivation off, and it is not a preference. lvm2 on a host that has it
+	// installed activates the volumes of a group it can see — on boot, and on
+	// every appearance of a physical volume. For a pool that is the one thing
+	// the whole design forbids: a node with no attachment taking a lock and
+	// mapping somebody else's volume. The nodes measured here ship no lvm at
+	// all, so nothing happens on them today; a pool is not a promise about one
+	// distribution.
+	extra := []string{"--config", config, "--shared", "--setautoactivation", "n"}
+	if params.PhysicalExtentSize != "" {
+		extra = append(extra, "--physicalextentsize", lvmSize(params.PhysicalExtentSize))
+	}
+	if params.MetadataSize != "" {
+		extra = append(extra, "--metadatasize", lvmSize(params.MetadataSize))
+	}
+
+	args := vgCreateArgs(params.VGName, params.SharedVolumeGroupName, extra, params.PVPaths)
+	argv, err := sharedLVMArgs(args...)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignCreateStdErr, silentExitIsFailure); err != nil {
 		return cmd.String(), err
 	}
 
@@ -680,6 +905,102 @@ func (commands) ResizePV(ctx context.Context, pvName string) (string, error) {
 	return cmd.String(), nil
 }
 
+// RemoveVGShared removes the Volume Group of a pool, and it is the last step of
+// a cluster-wide operation rather than a command that stands alone.
+//
+// Three things have to be true before it can succeed, and each of them was
+// learned by watching it fail on a live pool:
+//
+//   - the archive has to be off. lvm writes /etc/lvm/archive before changing
+//     metadata, the lock daemons' image has a read-only rootfs, and the refusal
+//     to create that directory is what fails the command;
+//   - every OTHER member must have stopped its lockspace, or lvm answers
+//     "Lockspace for ... not stopped on other hosts". Stopping them is not
+//     something this node can do — each member stops its own;
+//   - sanlock must have waited out its own interval afterwards, or it answers
+//     "unknown host state (wait and retry)": it will not vouch for the absence
+//     of other owners until then. That answer is not a failure, it is the
+//     protocol asking for time, which is why the caller retries rather than
+//     giving up.
+//
+// It runs in the lock daemons' mount namespace like every other shared command,
+// because the lvm that can speak to lvmlockd lives there.
+// ExtendVGShared adds devices to the Volume Group of a pool.
+//
+// It runs in the lock daemons' mount namespace, like every command that changes
+// the metadata of a shared group: the lvm that can take the group's lock lives
+// there, and lvmlockd is what serialises this against the other members. With
+// the module's own static lvm it would either be refused or — worse — go through
+// without a lock.
+//
+// The archive is off for the same reason vgremove needs it off: the daemons'
+// image has a read-only rootfs, and lvm writes /etc/lvm/archive before touching
+// metadata.
+func (commands) ExtendVGShared(ctx context.Context, vgName string, paths []string) (string, error) {
+	// Through lvmStaticLockdArgs, so the command carries this node's host id: a
+	// group held under persistent reservations answers "Cannot access VG"
+	// without it, whatever the state of the array.
+	args := append([]string{"vgextend", vgName}, paths...)
+	argv, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+		// A device that is already in the group is the outcome this was called
+		// for. It happens for a window after every extension, because the lvm
+		// that changes a shared group runs in the lock daemons' mount namespace
+		// and the lvm that reads it here runs in the host's: the two keep
+		// separate caches, and the reader takes a minute or two to catch up.
+		// Measured on a live pool — the extension worked and the next pass ran
+		// it again against a device already added.
+		if rePVAlreadyInVG.Match(stderr.Bytes()) {
+			return cmd.String(), nil
+		}
+		return cmd.String(), err
+	}
+	return cmd.String(), nil
+}
+
+func (commands) RemoveVGShared(ctx context.Context, vgName string) (string, error) {
+	// With the host id, like every other command against a shared group. Without
+	// it the removal of a pool held under reservations fails with "Persistent
+	// reservation is not started" and the group hangs on its finalizer — found
+	// on the stand, taking a switched pool down.
+	args := []string{"vgremove", "-y", vgName}
+	argv, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// SharedVGRemovalNeedsTime reports whether a failed removal is the protocol
+// asking to be waited out rather than a fault. Both answers resolve on their
+// own: the first once the other members stop, the second once sanlock has sat
+// out its interval.
+func SharedVGRemovalNeedsTime(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "not stopped on other hosts") ||
+		strings.Contains(text, "unknown host state") ||
+		strings.Contains(text, "global lock failed")
+}
+
 func (commands) RemoveVG(vgName string) (string, error) {
 	args := []string{"vgremove", vgName}
 	extendedArgs := lvmStaticExtendedArgs(args)
@@ -767,12 +1088,14 @@ func (commands) LVChangeDelTag(ctx context.Context, lv internal.LVData, tag stri
 	return cmd.String(), nil
 }
 
-func (commands) VGActivate(ctx context.Context, vgName string, shared bool) (string, error) {
-	activateFlag := "-ay"
-	if shared {
-		activateFlag = "-asy"
-	}
-	args := []string{"vgchange", activateFlag, vgName}
+// VGActivate activates a Volume Group exclusively on this node.
+//
+// There is deliberately no shared-activation mode. `vgchange -asy` lets several
+// nodes hold the same Volume Group at once, which is safe only for a filesystem
+// that expects it; on a plain one it is two writers on the same extents. Shared
+// Volume Groups are not activated by this module at all — see SkipSharedVGs.
+func (commands) VGActivate(ctx context.Context, vgName string) (string, error) {
+	args := []string{"vgchange", "-ay", vgName}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
 
@@ -783,6 +1106,670 @@ func (commands) VGActivate(ctx context.Context, vgName string, shared bool) (str
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
 	}
 	return cmd.String(), nil
+}
+
+// VGLockStart joins this node to the sanlock lockspace of a shared Volume
+// Group, which is what makes the group's volumes lockable here at all.
+//
+// It can take minutes rather than seconds, and the caller must budget for that
+// instead of treating a slow return as a hang. Taking a free host_id costs up
+// to 5 x io_timeout; taking back an id whose own delta lease is still alive —
+// a quick reboot, a restarted daemon pod, an OnDelete update — costs
+// 14 x io_timeout + 60, which is 200 s on the defaults. lvm prints
+// "Waiting for sanlock may take a few seconds to 3 min" and means it.
+//
+// host_id reaches lvmlockd through its --host-id-file and is passed here as
+// well because the CLIENT checks it too: since lvm2 2.03.27 vgcreate --shared
+// refuses a host_id outside the range implied by the lease alignment, and a
+// client that says nothing about it is rejected in production while passing on
+// an older stand.
+func (commands) VGLockStart(ctx context.Context, vgName string, hostID int) (string, error) {
+	args := []string{"vgchange", "--lock-start", vgName}
+	extendedArgs, err := lvmStaticLockdArgs(args, hostID)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// LockspaceRunning asks the lock manager whether the lockspace of this Volume
+// Group is started on this node.
+//
+// It exists because the alternative is believing an annotation this module wrote
+// itself. lvmlockd and sanlock restart together and take every lockspace with
+// them; the annotation stays, so the node goes on reporting itself a member of
+// a pool it holds no lease in — and the attachment side, comparing generation
+// stamps that both still say the same number, goes on believing its volume is
+// locked. Measured on a live pool after restarting the lock daemons: the
+// lockspace was gone, `lvmlockctl --info` printed nothing at all, and every
+// piece of bookkeeping in the cluster still said the node was in the pool.
+//
+// An error is not an answer: a caller that cannot ask must not conclude the
+// lockspace is down and start it again over a lockspace that is running.
+func (commands) LockspaceRunning(ctx context.Context, vgName string) (bool, error) {
+	registered, held, err := lockspaceState(ctx, vgName)
+	return registered && held, err
+}
+
+// LockspaceState is what each daemon says about the lockspace, separately.
+//
+// They disagree, and the disagreement has a repair of its own. lvmlockd answers
+// whether the lockspace is registered with it, and that survives the lease being
+// lost: on the stand a node whose registration had been taken off the array
+// still had "LS sanlock lvm_vghw" in lvmlockctl --info while sanlock had dropped
+// the lockspace and lvm answered "lock skipped: storage errors for sanlock
+// leases" to everything.
+//
+// In that state `vgchange --lock-start` succeeds and changes nothing —
+// lvmlockd considers the lockspace already started — and sanlock goes on
+// answering "invalid lockspace" to every lease request. The node repeats the
+// start every pass and never recovers. The way out is to stop it first, which is
+// why the two answers are kept apart.
+func (commands) LockspaceState(ctx context.Context, vgName string) (registered, held bool, err error) {
+	return lockspaceState(ctx, vgName)
+}
+
+func lockspaceState(ctx context.Context, vgName string) (bool, bool, error) {
+	registered, err := lockspaceRegisteredWithLVMLockd(ctx, vgName)
+	if err != nil {
+		return false, false, err
+	}
+	held, err := sanlockHoldsLockspace(ctx, vgName)
+	if err != nil {
+		return registered, false, err
+	}
+	return registered, held, nil
+}
+
+func lockspaceRegisteredWithLVMLockd(ctx context.Context, vgName string) (bool, error) {
+	argv, err := sharedNamespaceArgs(internal.SharedLockCtlCmd, "--info")
+	if err != nil {
+		return false, err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return false, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+
+	// lvmlockd names a started lockspace "lvm_<vg>" on a line of its own.
+	return lockspaceListed(out.String(), vgName), nil
+}
+
+func sanlockHoldsLockspace(ctx context.Context, vgName string) (bool, error) {
+	argv, err := sharedNamespaceArgs(internal.SharedSanlockCmd, "status")
+	if err != nil {
+		return false, err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return false, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return SanlockHoldsLockspace(out.String(), vgName), nil
+}
+
+// lockspaceListed reports whether lvmlockctl's answer contains the lockspace of
+// this Volume Group.
+func lockspaceListed(info, vgName string) bool {
+	want := "lvm_" + vgName
+	for _, line := range strings.Split(info, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == "LS" {
+			for _, f := range fields[1:] {
+				if f == want {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// MultipathToolsVersion is the version of the tools in the lock daemons' image,
+// which is the only one that matters: lvmpersist prepends the system
+// MissingReservationTools names the reservation tooling that is not in the lock
+// daemons' image, and it is a build check rather than a node check.
+//
+// Every reservation command runs from that image: lvm2 executes
+// /sbin/lvmpersist by a path compiled into it, and lvmpersist runs sg_persist
+// per path of the map. A pool asked to switch with either of them missing fails
+// in the middle of the one-way door — `vgchange --setpersist require` has
+// already made the group unusable by then — so it is established by looking
+// first.
+func (commands) MissingReservationTools(ctx context.Context) ([]string, error) {
+	// One probe first, and it decides whether anything below means anything.
+	//
+	// Entering the namespace fails with the same exit status as a missing file —
+	// both are 1 — and the process state cannot tell them apart either: nsenter
+	// runs and exits, so it is always set. Without this probe a pod of lock
+	// daemons that is merely restarting is reported as an image built without
+	// its tooling, which sends the reader to rebuild something that is already
+	// correct.
+	if err := runSharedNamespaceProbe(ctx, "/bin/true"); err != nil {
+		return nil, err
+	}
+
+	var missing []string
+	for _, tool := range []string{internal.SharedSgPersistCmd, internal.SharedLvmPersistCmd} {
+		if err := runSharedNamespaceProbe(ctx, "/bin/test", "-x", tool); err != nil {
+			missing = append(missing, tool)
+		}
+	}
+	return missing, nil
+}
+
+// runSharedNamespaceProbe runs a command in the lock daemons' namespace and
+// answers only whether it succeeded.
+func runSharedNamespaceProbe(ctx context.Context, command string, args ...string) error {
+	argv, err := sharedNamespaceArgs(command, args...)
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return nil
+}
+
+// MultipathConfiguration is what the host's multipathd is actually running with,
+// after its defaults, its drop-ins and its per-map sections have been merged.
+//
+// It is the only place the reservation key can be established before a pool is
+// switched. `getprkey` answers "none" for every map until something registers a
+// key, so a readiness check built on it could never pass for a pool that has not
+// been switched yet — and the switch is what it was supposed to gate.
+func (commands) MultipathConfiguration(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd,
+		hostNamespaceArgs(internal.SharedMultipathdCmd, "show", "config")...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return out.String(), nil
+}
+
+// ReservationKeyOf asks the host's multipathd for the reservation key of a map.
+// An empty or "none" answer means every reservation command will be refused
+// before it reaches the array, and that a path which comes back will not be
+// re-registered.
+func (commands) ReservationKeyOf(ctx context.Context, mapName string) (string, error) {
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd,
+		hostNamespaceArgs(internal.SharedMultipathdCmd, "getprkey", "map", mapName)...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return strings.TrimSpace(out.String()), nil
+}
+
+// hostNamespaceArgs runs a command of the host in the host's mount namespace.
+//
+// Only multipathd is asked this way, and only questions. The maps, the keys in
+// /etc/multipath/prkeys and the re-registration of a returning path all belong
+// to the host's multipathd; the daemons' image carries no multipathd at all.
+func hostNamespaceArgs(command string, args ...string) []string {
+	return append([]string{"-t", "1", "-m", "--", command}, args...)
+}
+
+// sharedNamespaceArgs runs a command of the lock daemons' image in their mount
+// namespace, the way every shared-pool command runs.
+func sharedNamespaceArgs(command string, args ...string) ([]string, error) {
+	pid, err := SharedLVMNamespacePID()
+	if err != nil {
+		return nil, err
+	}
+	return append([]string{"-t", strconv.Itoa(pid), "-m", "--", command}, args...), nil
+}
+
+// VGSetPersist declares that the group requires SCSI-3 persistent reservations.
+//
+// It is the one-way door: from the moment it succeeds the group answers
+// "Persistent reservation is not started" to every command until
+// VGPersistStart does. It also needs THIS node's lockspace running — without one
+// it fails with "Cannot access VG ... due to failed lock" — which is the
+// opposite of what "stop the lockspace everywhere" sounds like, and the
+// everywhere means the neighbours.
+func (commands) VGSetPersist(ctx context.Context, vgName string, hostID int) (string, error) {
+	return runSharedLockdLVM(ctx, hostID, "vgchange", "--setpersist", "require", vgName)
+}
+
+// VGPersistStart registers this node with the array and takes the reservation.
+// lvm2 runs lvmpersist for it, which is why the multipath-tools version in the
+// daemons' image decides whether this works at all.
+func (commands) VGPersistStart(ctx context.Context, vgName string, hostID int) (string, error) {
+	return runSharedLockdLVM(ctx, hostID, "vgchange", "--persist", "start", vgName)
+}
+
+// VGPersistStop gives up this node's registration, which is what a member does
+// to let the executor take the group over.
+func (commands) VGPersistStop(ctx context.Context, vgName string, hostID int) (string, error) {
+	cmd, err := runSharedLockdLVM(ctx, hostID, "vgchange", "--persist", "stop", vgName)
+	if NoRegisteredKeyToStop(err) {
+		// A node that holds no registration has nothing to give up, and that is
+		// the ordinary state of every member of a pool that has not been
+		// switched. Reported as an error it stops the switch before it starts:
+		// on the stand the two neighbours of a new pool spent every pass failing
+		// to stop reservations they had never had, and the executor waited for
+		// them to say they had stepped aside.
+		return cmd, nil
+	}
+	return cmd, err
+}
+
+// NoRegisteredKeyToStop reports whether a failed `--persist stop` failed only
+// because this node holds no registration.
+func NoRegisteredKeyToStop(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "No registered key found for local host")
+}
+
+// VGSetLockArgsPersist records in the group's metadata that its lockspaces run
+// under reservations, so a node starting one later does the same.
+//
+// It is the last step because of what it checks: keys still on the array, and
+// sanlock not yet convinced the neighbours have gone. Both pass with time.
+func (commands) VGSetLockArgsPersist(ctx context.Context, vgName string, hostID int) (string, error) {
+	return runSharedLockdLVM(ctx, hostID, "vgchange", "--setlockargs", "persist", vgName)
+}
+
+// VGPersistSetting reads what the group itself says about reservations: whether
+// it requires them, and what its lock args are. Both are readable when nothing
+// else about the group is.
+//
+// This is what makes the switch resumable. Once `--setpersist require` has
+// succeeded the group answers "Cannot access VG due to failed lock" to every
+// command that takes a lock — including `--setpersist` itself — so a procedure
+// that always starts from the beginning can never finish what it started. The
+// setting lives in the metadata and `vgs` reads it without a lock, saying so.
+func (commands) VGPersistSetting(ctx context.Context, vgName string) (string, error) {
+	argv, err := sharedLVMArgs("vgs", "--noheadings", "-o", "vg_persist,vg_lock_args", vgName)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return strings.TrimSpace(out.String()), nil
+}
+
+// runSharedLockdLVM runs an lvm command that speaks to lvmlockd, with this
+// node's identity attached.
+//
+// Every persistent-reservation command needs it: lvm2 derives the key a node
+// registers with from its host id, and without one `vgchange --setpersist` stops
+// with "A local pr_key or host_id is required to use PR (see lvmlocal.conf)".
+// The id cannot live in that file — it is baked into the image, and it is the
+// one thing that differs per node — so it is passed the same way lock-start
+// passes it.
+func runSharedLockdLVM(ctx context.Context, hostID int, args ...string) (string, error) {
+	extendedArgs, err := lvmStaticLockdArgs(args, hostID)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// runSharedLVM runs an lvm command in the lock daemons' namespace, which is
+// where the lvm that can speak to lvmlockd lives.
+func runSharedLVM(ctx context.Context, args ...string) (string, error) {
+	argv, err := sharedLVMArgs(args...)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := errIfNotBenign(cmd.String(), cmd.Run(), stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+		return cmd.String(), err
+	}
+	return cmd.String(), nil
+}
+
+// ReadRegistrationKeys lists the keys registered on a path of a LUN.
+//
+// Read through sg_persist on the path rather than through mpathpersist on the
+// map: the reading works either way, and using one tool for both halves keeps
+// the keys this module compares in the same spelling as the keys it preempts.
+func (commands) ReadRegistrationKeys(ctx context.Context, path string) ([]string, string, error) {
+	argv, err := sharedNamespaceArgs(internal.SharedSgPersistCmd, "--in", "--read-keys", path)
+	if err != nil {
+		return nil, "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return ParseRegistrationKeys(out.String()), cmd.String(), nil
+}
+
+// RecordedReservationKey reads the key this node last registered with, as
+// lvmpersist wrote it down.
+//
+// Nothing here can derive it: lvm2 computes it from the sanlock host id and the
+// lockspace generation, and a node that restarted its lockspace comes back with
+// a different one. An empty answer means this node has not registered yet, which
+// is what a pool that has not been switched looks like.
+func (commands) RecordedReservationKey(ctx context.Context) (string, error) {
+	argv, err := sharedNamespaceArgs("/bin/cat", internal.SharedReservationKeyFile)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		// No file yet is not a fault: it is a node that has not registered.
+		if strings.Contains(stderr.String(), "No such file") {
+			return "", nil
+		}
+		return "", fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return strings.TrimSpace(out.String()), nil
+}
+
+// SetReservationKey tells the host's multipathd which key a map is registered
+// with.
+//
+// Without it multipathd knows nothing of the registration — we register with
+// sg_persist, not through the library multipathd shares with mpathpersist — and
+// a path that comes back after a failure is left unregistered. Under a Write
+// Exclusive, all registrants reservation that path then refuses this node's
+// writes, which looks like a flapping path healing and quietly not working.
+func (commands) SetReservationKey(ctx context.Context, mapName, key string) (string, error) {
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd,
+		// "setprkey map $map key $key" — the word "key" is part of the command,
+		// and without it multipathd answers "not found" followed by its entire
+		// CLI reference, which is easy to read as a version difference rather
+		// than a typo.
+		hostNamespaceArgs(internal.SharedMultipathdCmd, "setprkey", "map", mapName, "key", key)...)
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	// multipathd answers "ok" on success and prints its refusal on the same
+	// channel with exit status 0, so the exit status alone proves nothing.
+	if answer := out.String(); !MultipathdAccepted(answer) {
+		return cmd.String(), fmt.Errorf("multipathd refused the key of %s: %s", mapName, strings.TrimSpace(answer))
+	}
+	return cmd.String(), nil
+}
+
+// PreemptRegistration takes a key off a LUN, on one path.
+//
+// This is the operation the whole reservation branch exists for: a node that
+// cannot be asked to stop — cut off from the API, or hung — is denied by the
+// array itself, because its neighbours remove its registration and the array
+// stops accepting its writes.
+//
+// It is done with sg_persist and not with lvm2's own lvmpersist remove, and that
+// is not a preference. On a multipath map every preempt is refused with
+// "configured reservation key doesn't match: 0x0" — libmpathpersist compares the
+// key given to it against one it reads itself and gets zero — regardless of how
+// the key is configured, on either version tried, from the container and from
+// the host. The same operation through sg_persist on a single path completes in
+// a third of a second.
+func (commands) PreemptRegistration(ctx context.Context, path, ourKey, theirKey string) (string, error) {
+	argv, err := sharedNamespaceArgs(internal.SharedSgPersistCmd,
+		"--out", "--preempt-abort",
+		"--param-rk="+ourKey,
+		"--param-sark="+theirKey,
+		// Write Exclusive, all registrants: the type the pool's reservation is
+		// held under, and a preempt has to name the type that is in force.
+		"--prout-type=7",
+		path,
+	)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, argv...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// VGLockStop leaves the lockspace of a shared Volume Group.
+//
+// Order matters and is not enforced here: every logical volume of the group has
+// to be deactivated on this node first. Stopping the lockspace under an active
+// volume leaves the volume writable with no lock behind it, which is the one
+// state the whole design exists to prevent. The caller checks; this only runs
+// the command.
+func (commands) VGLockStop(ctx context.Context, vgName string) (string, error) {
+	args := []string{"vgchange", "--lock-stop", vgName}
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// LVActivateShared activates volumes of a shared Volume Group, and takes a
+// LIST rather than one name because that is the whole point of it.
+//
+// A batch takes the Volume Group lock once for the entire list. Measured on a
+// 32-node pool: sixteen volumes in one command give 68 activations per second
+// against 13 for a loop over the same sixteen, and the lock — not the disk — is
+// what the difference is made of. Every mass event goes through here: a node
+// returning after a reboot, a pool coming back after an outage, a node starting
+// with dozens of volumes. The single-volume path stays where it is natural, in
+// NodeStageVolume for one volume.
+//
+// The price of one command is one exit code for the whole list, so the CALLER
+// must compare the set of active volumes against what it asked for instead of
+// trusting the return.
+//
+// shared selects -asy over -aey. It is correct only for a volume whose consumer
+// arbitrates access itself — a block volume with ReadWriteMany — and on an
+// ordinary filesystem it means two writers on the same extents.
+func (commands) LVActivateShared(ctx context.Context, vgName string, lvNames []string, shared bool) (string, error) {
+	if len(lvNames) == 0 {
+		return "", nil
+	}
+
+	mode := "-aey"
+	if shared {
+		mode = "-asy"
+	}
+
+	args := append([]string{"lvchange", mode}, lvPaths(vgName, lvNames)...)
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// LVDeactivateShared releases volumes of a shared Volume Group, which is what
+// hands their locks to whoever wants them next. Same batching, same caveat
+// about the single exit code.
+// WipeDMTable replaces a device-mapper table with an error target: the barrier.
+//
+// It is the same command the fencing handler runs, and it is here so that a node
+// the pool has removed can raise the barrier over its own volumes instead of
+// waiting for somebody to do it over SSH. The difference between this and
+// removing the device is the whole point: a write in flight has to FAIL rather
+// than find nothing, because the volume it was aimed at may already belong to
+// another node.
+//
+// --force replaces the table of a device that is open, which is exactly the case
+// this exists for; --noudevsync because udev cannot be waited on when the node
+// is being taken out of a pool it can no longer talk to.
+func (commands) WipeDMTable(ctx context.Context, dmName string) (string, error) {
+	args := nsentrerExpendedArgs(internal.DMSetupCmd, "wipe_table", "--force", "--noudevsync", dmName)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// RemoveDMDevice tears down a device-mapper device by name, and it exists
+// because lvchange cannot.
+//
+// lvm decides whether a volume is active HERE from the lock it holds, not from
+// device-mapper: with the lock gone, "lvchange -an" finds nothing to do, exits
+// zero, and leaves the mapping standing. That mapping is the residue of a
+// lock-daemon restart — a device with no lease behind it — and dmsetup is the
+// only tool that addresses the kernel directly enough to remove it.
+//
+// It is refused for an open device, which is the safety net kept deliberately:
+// a mapping something is still using is not residue.
+func (commands) RemoveDMDevice(ctx context.Context, dmName string) (string, error) {
+	args := nsentrerExpendedArgs(internal.DMSetupCmd, "remove", dmName)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		// A device that is not there is the outcome this was called for, not a
+		// failure to report. Callers used to check first and then remove, and
+		// the check was the weak part: on the stand a node read /sys/block,
+		// found nothing, and skipped the removal of a mapping dmsetup listed at
+		// the same moment. One command, one authority.
+		if reNoSuchDMDevice.Match(stderr.Bytes()) {
+			return cmd.String(), nil
+		}
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+// RemoveDMDeviceDeferred asks device-mapper to drop the mapping when its last
+// opener closes it.
+//
+// It exists for one case: a map that has to go and is held open by a process
+// that will let go on its own. Retrying the plain removal there produces the
+// same "Device or resource busy" every thirty seconds for as long as the node
+// lives, which reads as an agent doing nothing. The deferred form turns that
+// into a decision recorded in the kernel — the mapping is gone the moment it is
+// no longer in use, with nobody watching for the moment.
+//
+// It is not a stronger removal. A map with a live opener stays usable until the
+// close, so this must never stand in for the barrier: an error target under a
+// writer is what stops the writes, and this only cleans up afterwards.
+func (commands) RemoveDMDeviceDeferred(ctx context.Context, dmName string) (string, error) {
+	args := nsentrerExpendedArgs(internal.DMSetupCmd, "remove", "--deferred", dmName)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, args...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+func (commands) LVDeactivateShared(ctx context.Context, vgName string, lvNames []string) (string, error) {
+	if len(lvNames) == 0 {
+		return "", nil
+	}
+
+	args := append([]string{"lvchange", "-an"}, lvPaths(vgName, lvNames)...)
+	extendedArgs, err := lvmStaticLockdArgs(args, 0)
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+	return cmd.String(), nil
+}
+
+func lvPaths(vgName string, lvNames []string) []string {
+	paths := make([]string, 0, len(lvNames))
+	for _, lvName := range lvNames {
+		paths = append(paths, vgName+"/"+lvName)
+	}
+	return paths
 }
 
 func (commands) LVActivate(ctx context.Context, vgName, lvName string) (string, error) {
@@ -1741,6 +2728,90 @@ func lvmStaticExtendedArgs(args []string) []string {
 	return nsentrerExpendedArgs(internal.LVMCmd, withConfig...)
 }
 
+// lvmStaticLockdArgs is lvmStaticExtendedArgs plus the two settings a command
+// against a shared Volume Group needs from the client side.
+//
+// use_lvmlockd is not a property of the node here but of the command: the agent
+// runs against both local and shared groups with the same binary, and turning
+// the setting on globally would make every local command talk to a daemon that
+// has nothing to say about it.
+//
+// host_id is passed only when it is known and non-zero. It is the client's own
+// copy of what lvmlockd reads from its host-id file, and lvm2 >= 2.03.27 checks
+// it against the ceiling implied by the lease alignment.
+func lvmStaticLockdArgs(args []string, hostID int) ([]string, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("no command given")
+	}
+
+	if hostID <= 0 {
+		// Every command against a shared group carries the host id, not only the
+		// ones that start locks.
+		//
+		// For a sanlock group the lvm client resolves "our key" from
+		// local/host_id and nothing else — it ignores local/pr_key there — and a
+		// command that arrives without one is answered "Persistent reservation
+		// is not started. Cannot access VG." even though the node is registered
+		// with the array and holds a running lockspace. Found on the stand: the
+		// pool was switched, all three nodes held keys, and every lvcreate
+		// failed.
+		hostID = HostIDFromDaemonsState()
+	}
+
+	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.SharedLVMNoArchive + " global/use_lvmlockd=1"
+	if hostID > 0 {
+		configValue += " local/host_id=" + strconv.Itoa(hostID)
+	}
+
+	withConfig := make([]string, 0, len(args)+2)
+	withConfig = append(withConfig, args[0], "--config", configValue)
+	withConfig = append(withConfig, args[1:]...)
+
+	return sharedLVMArgs(withConfig...)
+}
+
+// HostIDFromDaemonsState reads the sanlock host id of this node from the file
+// the lock daemons themselves read it from.
+//
+// It is the same fact by the same path: the agent writes it there for lvmlockd,
+// which is given it as --host-id-file. Reading it back keeps one source rather
+// than threading the id through every command signature, and a node that has no
+// id yet answers zero — which leaves the command without the option, exactly as
+// before.
+func HostIDFromDaemonsState() int {
+	return HostIDFromStateDir(internal.SharedLockDaemonsStateDir)
+}
+
+// HostIDFromStateDir reads the id out of a given state directory.
+func HostIDFromStateDir(dir string) int {
+	raw, err := os.ReadFile(filepath.Join(dir, "host-id"))
+	if err != nil {
+		return 0
+	}
+	return ParseHostIDFile(string(raw))
+}
+
+// sharedLVMArgs builds the argv for a command against a shared Volume Group.
+//
+// It enters the mount namespace of the lock daemons rather than the host's, and
+// runs their lvm rather than this module's. The host's namespace has no lvm that
+// can speak to lvmlockd — this module's is compiled without the support and a
+// node carries none of its own — so the same command that works for a local
+// group answers "Using a shared lock type requires lvmlockd" for a shared one.
+//
+// Only the mount namespace is entered. The daemons run with the node's pid and
+// network namespaces already, so asking for those again would be a no-op with
+// two more ways to fail.
+func sharedLVMArgs(args ...string) ([]string, error) {
+	pid, err := SharedLVMNamespacePID()
+	if err != nil {
+		return nil, err
+	}
+
+	argv := []string{"-t", strconv.Itoa(pid), "-m", "--", internal.SharedLVMCmd}
+	return append(argv, args...), nil
+}
+
 // The benign-stderr allowlists. A line matched here is one lvm.static prints
 // that says nothing about whether the operation succeeded, so it must not make
 // the caller treat a non-zero exit as a failure (see errIfNotBenign).
@@ -1764,6 +2835,19 @@ var (
 	// has already been applied.
 	reRegexVersionMismatch = regexp.MustCompile(`Regex version mismatch, expected: .+ actual: .+`)
 	reLeakedFileDescriptor = regexp.MustCompile(`File descriptor .+ leaked on lvm(\.static)? invocation\. Parent PID .+: /opt/deckhouse/sds/bin/nsenter`)
+
+	// lvm says this when /dev/<vg> is already a directory — a leftover from a
+	// group of the same name that existed on this node before. It is a remark
+	// about the device node, printed after the Volume Group has been created,
+	// and reading it as a failure is expensive: the group is on the LUN, the
+	// caller believes it is not, and the pool it belongs to stays Pending while
+	// everything it needs already exists. Measured on the stand with a pool
+	// named after a group an earlier experiment had left behind.
+	reDevDirExists = regexp.MustCompile(`/dev/[^:]+: already exists in filesystem`)
+
+	// rePVAlreadyInVG is lvm refusing to add a physical volume that is in the
+	// group already. For an extension that is success spelled as an error.
+	rePVAlreadyInVG = regexp.MustCompile(`is already in volume group`)
 
 	// A resize that changed nothing. This is the normal state of a thin pool sized
 	// as a percentage of the VG: the pool always already fills it, up to thin-pool
@@ -1792,8 +2876,38 @@ var (
 	reDuplicateVGName     = regexp.MustCompile(`^\s*WARNING: VG name .+ is used by VGs .+\.$`)
 	reDuplicateVGNameHint = regexp.MustCompile(`^\s*Fix duplicate VG names with vgrename uuid, a device filter, or system IDs\.$`)
 
+	// The node has lvmlockd configured in some way lvm wants to comment on. Like
+	// the duplicate-name pair above, these lines describe the node's locking
+	// setup, not the object the command asked about: `use_lvmlockd = 1` in
+	// lvm.conf makes EVERY invocation print them, whatever its argument, and a
+	// Local Volume Group belonging to another module gets them just as much as a
+	// shared one.
+	//
+	// Keeping them would mean that switching the flag on turns every
+	// LVMVolumeGroup on the node NonOperational at once, because the discoverer
+	// records non-empty stderr as the object's health regardless of exit code.
+	// The state they describe belongs in a node-level condition, set by whoever
+	// owns the locking daemons.
+	//
+	// Three classes, all observed:
+	//   - the flag is on and the daemon is not running (lvm2 2.03.16 and 2.03.42);
+	//   - the lock was skipped for this command (global or per-VG);
+	//   - the Volume Group was read without a lock, which lvm reports by name.
+	reLockdNotRunning = regexp.MustCompile(`^\s*WARNING: lvmlockd process is not running\.$`)
+	reLockdNotUsed    = regexp.MustCompile(`^\s*(WARNING: )?lvmlockd is not being used on the host\.$`)
+	reLockSkipped     = regexp.MustCompile(`^\s*(WARNING: )?(Reading without shared global lock\.|Skipping global lock: .+|WARNING: skipping VG lock in lvmlockd\.|Skipping volume group .+|VG .+ lock skipped: .+)$`)
+	reReadingNoLock   = regexp.MustCompile(`^\s*Reading VG .+ without a lock\.$`)
+	reLockspaceStart  = regexp.MustCompile(`^\s*VG .+ (starting|stopping) .+ lockspace$`)
+
 	// benignAlwaysStdErr is the set every lvm invocation may ignore.
 	benignAlwaysStdErr = []*regexp.Regexp{reRegexVersionMismatch, reLeakedFileDescriptor}
+	// benignCreateStdErr additionally tolerates the leftover device-node
+	// directory. Only vgcreate may use it: elsewhere that line would be about a
+	// directory nobody asked this command to make.
+	benignCreateStdErr = []*regexp.Regexp{reRegexVersionMismatch, reLeakedFileDescriptor, reDevDirExists}
+	// reNoSuchDMDevice is how device-mapper says the mapping a removal was aimed
+	// at is already gone. For a removal that is success spelled as an error.
+	reNoSuchDMDevice = regexp.MustCompile(`(?i)(No such device or address|Device does not exist)`)
 	// benignResizeStdErr additionally tolerates the no-op resize. Only lvextend
 	// and its full-VG-space variant may use it.
 	benignResizeStdErr = []*regexp.Regexp{reRegexVersionMismatch, reLeakedFileDescriptor, reNoSizeChange}
@@ -1801,7 +2915,10 @@ var (
 	// benign-stderr set: these lines do report a real problem with the node, they
 	// just do not report one with the object that was asked about, and only the
 	// former is a reason to keep them.
-	notAboutTheQueriedObject = []*regexp.Regexp{reDuplicateVGName, reDuplicateVGNameHint}
+	notAboutTheQueriedObject = []*regexp.Regexp{
+		reDuplicateVGName, reDuplicateVGNameHint,
+		reLockdNotRunning, reLockdNotUsed, reLockSkipped, reReadingNoLock, reLockspaceStart,
+	}
 )
 
 // ObjectDiagnostics returns the part of stdErr that says something about the

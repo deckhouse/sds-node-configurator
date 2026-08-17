@@ -635,10 +635,15 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 		// this means VG was actually created on the node before
 		if len(lvg.Status.VGUuid) > 0 {
 			messageBldr := strings.Builder{}
+			reason := internal.ReasonScanFailed
 			candidate, exist := candidateMap[lvg.Spec.ActualVGNameOnTheNode]
 			if !exist {
-				d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its VG %s", lvg.Name, lvg.Spec.ActualVGNameOnTheNode))
-				messageBldr.WriteString(fmt.Sprintf("Unable to find VG %s (it should be created with special tag %s). ", lvg.Spec.ActualVGNameOnTheNode, internal.LVMTags[0]))
+				vg := d.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode)
+				d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s has no candidate for VG %s",
+					lvg.Name, lvg.Spec.ActualVGNameOnTheNode))
+				var message string
+				reason, message = missingCandidateMessage(lvg.Spec.ActualVGNameOnTheNode, vg)
+				messageBldr.WriteString(message)
 			} else {
 				// candidate exists, check thin pools
 				candidateTPs := make(map[string]internal.LVMVGStatusThinPool, len(candidate.StatusThinPools))
@@ -665,7 +670,7 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 			}
 
 			if messageBldr.Len() > 0 {
-				err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, metav1.ConditionFalse, internal.TypeVGReady, internal.ReasonScanFailed, messageBldr.String())
+				err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, metav1.ConditionFalse, internal.TypeVGReady, reason, messageBldr.String())
 				if err != nil {
 					d.log.Error(err, fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] unable to update the LVMVolumeGroup %s", lvg.Name))
 					return nil, err
@@ -712,7 +717,18 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 
 func (d *Discoverer) GetLVMVolumeGroupCandidates(ctx context.Context, bds map[string]v1alpha1.BlockDevice) ([]internal.LVMVolumeGroupCandidate, error) {
 	vgs, vgErrs := d.sdsCache.GetVGs()
-	vgWithTag := filterVGByTag(vgs, internal.LVMTags)
+	// A shared Volume Group is not a candidate for an LVMVolumeGroup, whoever
+	// tagged it. That resource is served by controllers that activate, extend
+	// and remove volumes on this node alone, and a group whose volumes are
+	// handed out by a lock manager cannot be treated that way — the pool has a
+	// resource of its own, LVMSharedVolumeGroup, for exactly this reason.
+	//
+	// It used to be a candidate: the type was recorded as Shared and everything
+	// else proceeded, and because vg_shared arrives empty from the agent's lvm
+	// (see VGData.IsShared) even the type came out Local. Measured on a live
+	// pool: an LVMVolumeGroup named after the pool's group, type Local, bound to
+	// one of its member nodes.
+	vgWithTag := utils.SkipSharedVGs(d.log, "import as an LVMVolumeGroup", filterVGByTag(vgs, internal.LVMTags))
 	candidates := make([]internal.LVMVolumeGroupCandidate, 0, len(vgWithTag))
 
 	// If there is no VG with our tag, then there is no any candidate.
@@ -1966,12 +1982,43 @@ func sortBlockDevicesByVG(bds map[string]v1alpha1.BlockDevice, vgs []internal.VG
 	return result
 }
 
-func getVgType(vg internal.VGData) string {
-	if vg.VGShared == "" {
-		return "Local"
+// missingCandidateMessage explains why an LVMVolumeGroup has no volume group
+// behind it, and the distinction it draws is the point of it.
+//
+// "Not a candidate" and "not there" are different things, and only one of them
+// is the operator's to fix. A shared Volume Group is deliberately not a
+// candidate — it belongs to a lock manager and is served by an
+// LVMSharedVolumeGroup — so telling somebody their group is missing and should
+// be tagged sends them to re-create a group that is sitting right there with
+// data on it.
+func missingCandidateMessage(vgName string, vg *internal.VGData) (reason, message string) {
+	if vg == nil || !vg.IsShared() {
+		return internal.ReasonScanFailed, fmt.Sprintf("Unable to find VG %s (it should be created with special tag %s). ",
+			vgName, internal.LVMTags[0])
 	}
 
-	return "Shared"
+	// A reason of its own, because the reason is the half a machine reads and
+	// "a scan failed" is not what happened: nothing failed, and the group is
+	// exactly where it should be.
+	return reasonSharedVolumeGroup, fmt.Sprintf("The Volume Group %s is shared (lock type %q) and is served by an LVMSharedVolumeGroup. "+
+		"This LVMVolumeGroup must not be used for it: the controllers behind this resource activate, extend and "+
+		"remove volumes on one node without taking the pool's locks. Nothing is done to it automatically — removing "+
+		"an LVMVolumeGroup removes the Volume Group with it — so delete this resource by hand once you have "+
+		"confirmed the pool owns the group. ", vgName, vg.SharedDescription())
+}
+
+// reasonSharedVolumeGroup marks an LVMVolumeGroup that names a group belonging
+// to a pool. It is not a failure of this node and no retry changes it.
+const reasonSharedVolumeGroup = "SharedVolumeGroup"
+
+func getVgType(vg internal.VGData) string {
+	if !vg.IsShared() {
+		return internal.Local
+	}
+
+	// Reported, not created: this module no longer has a path that produces a
+	// shared Volume Group, but it still has to name what it found on the node.
+	return internal.Shared
 }
 
 func getSpecThinPools(thinPools map[string][]internal.LVData, vg internal.VGData) map[string]resource.Quantity {

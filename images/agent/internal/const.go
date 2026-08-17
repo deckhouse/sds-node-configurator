@@ -43,7 +43,80 @@ const (
 	DMSetupCmd                   = "/opt/deckhouse/sds/bin/dmsetup"
 	LSBLKCmd                     = "/opt/deckhouse/sds/bin/lsblk.dynamic"
 	LVMCmd                       = "/opt/deckhouse/sds/bin/lvm"
-	ThinDumpCmd                  = "thin_dump"
+
+	// SharedLVMCmd is lvm inside the lock daemons' image, and it is a different
+	// binary from LVMCmd on purpose — not a preference but the only one that
+	// works.
+	//
+	// The lvm this module ships is configured "--enable-static_link
+	// --disable-readline --enable-blkid_wiping" and nothing else: it has no
+	// lvmlockd support compiled in at all, so every command against a shared
+	// group answers "Using a shared lock type requires lvmlockd" no matter what
+	// is running on the node. The image that carries lvmlockd carries an lvm
+	// built against it, and a node has no lvm of its own to fall back on.
+	//
+	// It also removes a failure mode rather than adding one: the client and the
+	// daemon are then the same build, so they cannot disagree about the protocol
+	// between them.
+	SharedLVMCmd = "/usr/sbin/lvm"
+
+	// SharedLockCtlCmd asks the lock manager what it is actually holding. It
+	// lives beside lvm in the daemons' image, and it is the only source that can
+	// answer whether a lockspace is running: this module's own annotations say
+	// what it believes, and a daemon restart makes belief and fact diverge
+	// without a word to anybody.
+	SharedLockCtlCmd = "/usr/sbin/lvmlockctl"
+
+	// SharedMultipathdCmd answers whether a map has a reservation key, and it is
+	// run in the HOST's mount namespace rather than the lock daemons'.
+	//
+	// multipathd is the host's: it owns the maps, it holds the keys in
+	// /etc/multipath/prkeys, and it is what re-registers a path that comes back.
+	// The daemons' image does not carry it and should not — nothing in the pool
+	// asks multipathd to do anything, it is only asked what it already knows.
+	SharedMultipathdCmd = "/usr/sbin/multipathd"
+
+	// SharedSgPersistCmd is how a registration is taken away from a node that
+	// cannot be asked to give it up.
+	//
+	// The library behind mpathpersist compares --param-rk against a key it reads
+	// itself and gets zero, so every preempt on a multipath map is refused —
+	// measured on two versions of multipath-tools, from the container and from
+	// the host, with the key set every way there is. sg_persist on a single path
+	// does the same operation in a third of a second.
+	SharedSgPersistCmd = "/usr/bin/sg_persist"
+
+	// SharedSanlockCmd answers the one question lvmlockd cannot: whether this
+	// host still holds the lease of a lockspace.
+	SharedSanlockCmd = "/usr/sbin/sanlock"
+
+	// SharedReservationKeyFile is where the lock daemons' lvmpersist leaves the
+	// key this node registers with.
+	//
+	// The key is lvm2's to choose — derived from the sanlock host id and the
+	// lockspace generation, so it changes when a lockspace restarts — and
+	// lvmpersist is the only place it is known by name. Reading it back is how
+	// the node publishes a key its neighbours can fence by, and how multipathd
+	// is told which key to re-register a returning path with.
+	SharedReservationKeyFile = "/run/lvm-shared-pool/ourkey"
+
+	// SharedLvmPersistCmd is the script lvm2 runs for every `vgchange --persist`
+	// and `--setpersist`, by a path compiled into it. It is checked rather than
+	// called: a pool that cannot find it fails in the middle of the one-way
+	// door, and the node can say so beforehand instead.
+	SharedLvmPersistCmd = "/usr/sbin/lvmpersist"
+
+	// SharedLockDaemonProcess is how the mount namespace holding SharedLVMCmd is
+	// found: by the daemon that must be running for any of this to mean anything.
+	SharedLockDaemonProcess = "lvmlockd"
+
+	// SharedLockDaemonsStateDir is the only channel between this agent and the
+	// lock daemons of a shared pool. They run from an image pinned to OnDelete
+	// and have no API access at all — a token there would make every change to
+	// them an operation with a drain — so the host_id goes in through a file and
+	// the result of a fencing barrier comes back out through one.
+	SharedLockDaemonsStateDir = "/opt/deckhouse/sds/lvmlockd"
+	ThinDumpCmd               = "thin_dump"
 
 	// The commands below are the node's own, not the module's. Everything above
 	// ships in the agent image under /opt/deckhouse/sds/bin precisely so the
@@ -115,6 +188,21 @@ const (
 	// This only affects new metadata-changing operations; existing
 	// archives must be pruned manually on impacted nodes.
 	LVMArchiveRetention = `backup/retain_min=10 backup/retain_days=7`
+
+	// SharedLVMNoArchive turns lvm's metadata archive off for commands against a
+	// shared Volume Group, and it is a requirement rather than a preference.
+	//
+	// Those commands run in the mount namespace of the lock daemons (see
+	// SharedLVMCmd), whose root filesystem is read-only: lvm writes /etc/lvm/archive
+	// BEFORE touching metadata, so with the archive on, every write fails — and
+	// fails in a way that names the operation rather than the cause, as
+	// "Failed to create sanlock lv lvmlock in vg <name>".
+	//
+	// Nothing is lost by it. The metadata of a shared group lives on the LUN, where
+	// every member reads it; the archive is a local convenience, and a local
+	// convenience written into a container that is thrown away on the next restart
+	// is not one.
+	SharedLVMNoArchive = `backup/archive=0 backup/backup=0`
 
 	TypeVGConfigurationApplied = "VGConfigurationApplied"
 	TypeVGReady                = "VGReady"

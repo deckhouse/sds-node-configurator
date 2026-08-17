@@ -74,6 +74,18 @@ spec:
                     operator: In
                     values:
                       - ""
+              {{- /*
+                A fourth term, not a change to the three above: the terms are ORed,
+                so adding one cannot take the agent away from anyone. Nodes of a
+                shared SCSI pool carry this label — set by the pool's controller in
+                csi-scsi-generic — and they need the agent for the same reason the
+                other three do: it is what performs LVM operations on the node.
+              */}}
+              - matchExpressions:
+                  - key: storage.deckhouse.io/scsi-shared-pool-member
+                    operator: In
+                    values:
+                      - ""
       dnsPolicy: ClusterFirstWithHostNet
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
@@ -192,6 +204,10 @@ spec:
             value: 127.0.0.1:4228
           - name: METRICS_PORT
             value: 127.0.0.1:9000
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
           - name: NODE_NAME
             valueFrom:
               fieldRef:
@@ -230,6 +246,12 @@ spec:
           name: host-sys-fs-cgroup
         - mountPath: /run/udev/
           name: host-run-udev-dir
+        # The host's copy of this directory, not the image's. The path exists in
+        # the agent image because the binaries ship under it, so without this
+        # mount the agent writes the host_id into its own read-only rootfs — or,
+        # worse, into a copy the lock daemons of a shared pool never read.
+        - mountPath: /opt/deckhouse/sds/lvmlockd
+          name: lvmlockd-state
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
@@ -290,6 +312,13 @@ spec:
           path: /opt/deckhouse/sds
           type: DirectoryOrCreate
         name: opt-deckhouse-sds
+      # The one channel to the lock daemons of a shared pool: they have no API
+      # access, so the host_id reaches them through a file on the host and the
+      # result of a fencing barrier comes back the same way.
+      - hostPath:
+          path: /opt/deckhouse/sds/lvmlockd
+          type: DirectoryOrCreate
+        name: lvmlockd-state
       - hostPath:
           path: /dev/
           type: ""

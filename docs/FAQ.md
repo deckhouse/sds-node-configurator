@@ -301,3 +301,25 @@ When an LVMVolumeGroup with file-backed devices is deleted, the agent detaches t
 - `status.blockdevice.storage.deckhouse.io/rota`: Indicates whether the device is rotational.
 - `status.blockdevice.storage.deckhouse.io/hotplug`: Indicates device hot-plug capability.
 - `status.blockdevice.storage.deckhouse.io/machineid`: Identifier of the server where the block device is installed.
+
+## A node of a shared pool maps a volume nothing is asking for
+
+The metric `sds_node_configurator_shared_pool_unlocked_mappings` counts exactly
+that, and zero is its only healthy value: a mapping on a node that holds no lock
+for it is a path a write could still take to a volume that belongs to another
+node. The node clears such mappings by itself once a minute.
+
+If the number stays above zero, something on the node has the device open —
+`dmsetup info -c -o name,open | grep '^<vg>-'` shows it, and `lsof` names the
+holder. A mapping somebody is using is not removed, and that refusal is
+deliberate.
+
+## Why does `lvmlockctl --info` print nothing on a node of a pool?
+
+Because it was run in the host mount namespace, where the daemon's socket is not
+visible. The command succeeds and prints an empty answer, which reads as "no
+locks anywhere" and is not. Ask the daemon inside its own namespace:
+
+```shell
+nsenter -t "$(pgrep -f 'lvmlockd -f' | head -1)" -m -- lvmlockctl --info
+```

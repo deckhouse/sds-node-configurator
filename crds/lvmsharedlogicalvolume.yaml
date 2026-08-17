@@ -1,0 +1,226 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: lvmsharedlogicalvolumes.storage.deckhouse.io
+  labels:
+    heritage: deckhouse
+    module: sds-node-configurator
+    backup.deckhouse.io/cluster-config: "true"
+spec:
+  group: storage.deckhouse.io
+  scope: Cluster
+  names:
+    kind: LVMSharedLogicalVolume
+    plural: lvmsharedlogicalvolumes
+    singular: lvmsharedlogicalvolume
+    shortNames:
+      - lsllv
+  preserveUnknownFields: false
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: |
+            LVMSharedLogicalVolume is one volume inside a shared Volume Group.
+
+            It describes the volume, not where it is in use. Creating, extending and
+            removing it are metadata operations and belong to one node — the group's
+            metadata owner — while activating it belongs to whichever node the volume is
+            attached to. Those are two writers of different things, which is why attachment
+            is a separate resource rather than a field here.
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              description: |
+                Defines the volume.
+              required:
+                - lvmSharedVolumeGroupName
+                - actualLVNameOnTheNode
+                - size
+                - volumeCleanup
+              properties:
+                lvmSharedVolumeGroupName:
+                  type: string
+                  minLength: 1
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                  description: |
+                    The shared Volume Group this volume is carved out of.
+                actualLVNameOnTheNode:
+                  type: string
+                  minLength: 1
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                  description: |
+                    Name of the logical volume as it exists in the Volume Group.
+                type:
+                  type: string
+                  default: Thick
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                  description: |
+                    How the volume is allocated.
+
+                    Only `Thick` exists here, and the omission is not an oversight. Under
+                    lvmlockd a thin pool cannot be activated in shared mode at all, so every
+                    volume of a thin pool would be pinned to the single node holding the
+                    pool — which is exactly the property a shared group exists to avoid.
+                    Overcommitment on a shared LUN is the array's job.
+                  enum:
+                    - Thick
+                size:
+                  type: string
+                  pattern: ^[1-9][0-9]*(Ki|Mi|Gi|Ti|Pi|k|M|G|T|P)?$
+                  description: |
+                    Requested size of the volume.
+
+                    It can be increased and never decreased. The actual size is rounded up to
+                    a whole number of extents and reported in `status.actualSize`; with a
+                    large extent size the difference is worth reading rather than assuming.
+                volumeCleanup:
+                  type: string
+                  description: |
+                    How this volume is erased when it is deleted.
+
+                    This is the effective policy, coming from the storage class, while the
+                    group's field is the floor: a volume asking for a weaker policy than its
+                    group is rejected. `Discard` is also rejected when the array has not
+                    confirmed that it reads zeroes after unmapping — otherwise deletion would
+                    quietly hand the data to the next tenant.
+                  enum:
+                    - Discard
+                    - RandomFillSinglePass
+                    - RandomFillThreePass
+            status:
+              type: object
+              description: |
+                Observed state of the volume, written only by the agent on the group's
+                metadata owner.
+              properties:
+                phase:
+                  type: string
+                  description: |
+                    The volume's current state, derived from the conditions below.
+
+                    Possible values:
+
+                    - `Pending`: The volume has not been created yet.
+                    - `Created`: The volume exists and can be attached.
+                    - `Failed`: A reconcile pass failed. See the conditions.
+                  enum:
+                    - Pending
+                    - Created
+                    - Failed
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: |
+                    The value of `metadata.generation` the agent has last acted on.
+                actualSize:
+                  type: string
+                  description: |
+                    Size the volume actually has, rounded up to whole extents.
+                lvUUID:
+                  type: string
+                  description: |
+                    UUID of the logical volume. Together with the group's UUID it forms the
+                    device-mapper UUID of every map of this volume, which is how a node
+                    recognises its own maps without trusting their names.
+                contiguous:
+                  type: boolean
+                  description: |
+                    Whether the volume occupies a contiguous range of extents.
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+                  description: |
+                    The latest observations of the volume state.
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                      - lastTransitionTime
+                      - reason
+                      - message
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        description: |
+                          Condition type.
+
+                          - `Created` is `True` once the logical volume exists.
+                          - `Zeroed` is `True` once the volume has been zeroed at its head,
+                            which is what stops a fresh volume from presenting the previous
+                            tenant's filesystem signature.
+                          - `Resized` reports the outcome of the most recent size change.
+                          - `Ready` summarises the rest.
+                        enum:
+                          - Created
+                          - Zeroed
+                          - Resized
+                          - Ready
+                      status:
+                        type: string
+                        description: |
+                          Condition status.
+                        enum:
+                          - "True"
+                          - "False"
+                          - "Unknown"
+                      observedGeneration:
+                        type: integer
+                        minimum: 0
+                        format: int64
+                        description: |
+                          The value of `metadata.generation` this condition was set against.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: |
+                          Timestamp of the last status transition for this condition.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: |
+                          Machine-readable reason for the current status.
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: |
+                          Human-readable explanation of the current status.
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - jsonPath: .status.phase
+          name: phase
+          type: string
+        - jsonPath: .status.conditions[?(@.type=="Ready")].status
+          name: Ready
+          type: string
+        - jsonPath: .spec.lvmSharedVolumeGroupName
+          name: VG
+          type: string
+        - jsonPath: .spec.size
+          name: size
+          type: string
+        - jsonPath: .status.actualSize
+          name: actual size
+          type: string
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date

@@ -33,6 +33,7 @@ import (
 	internal "github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	logger "github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	monitoring "github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
+	utils "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -73,6 +74,21 @@ func (m *MockCommands) CreateFileDevice(ctx context.Context, path string, sizeBy
 func (mr *MockCommandsMockRecorder) CreateFileDevice(ctx, path, sizeBytes any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateFileDevice", reflect.TypeOf((*MockCommands)(nil).CreateFileDevice), ctx, path, sizeBytes)
+}
+
+// CreateLVShared mocks base method.
+func (m *MockCommands) CreateLVShared(ctx context.Context, vgName, lvName, size string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateLVShared", ctx, vgName, lvName, size)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateLVShared indicates an expected call of CreateLVShared.
+func (mr *MockCommandsMockRecorder) CreateLVShared(ctx, vgName, lvName, size any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateLVShared", reflect.TypeOf((*MockCommands)(nil).CreateLVShared), ctx, vgName, lvName, size)
 }
 
 // CreatePV mocks base method.
@@ -196,18 +212,18 @@ func (mr *MockCommandsMockRecorder) CreateVGLocal(vgName, lvmVolumeGroupName, pv
 }
 
 // CreateVGShared mocks base method.
-func (m *MockCommands) CreateVGShared(vgName, lvmVolumeGroupName string, pvNames []string) (string, error) {
+func (m *MockCommands) CreateVGShared(ctx context.Context, params utils.SharedVGParams) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateVGShared", vgName, lvmVolumeGroupName, pvNames)
+	ret := m.ctrl.Call(m, "CreateVGShared", ctx, params)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // CreateVGShared indicates an expected call of CreateVGShared.
-func (mr *MockCommandsMockRecorder) CreateVGShared(vgName, lvmVolumeGroupName, pvNames any) *gomock.Call {
+func (mr *MockCommandsMockRecorder) CreateVGShared(ctx, params any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateVGShared", reflect.TypeOf((*MockCommands)(nil).CreateVGShared), vgName, lvmVolumeGroupName, pvNames)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateVGShared", reflect.TypeOf((*MockCommands)(nil).CreateVGShared), ctx, params)
 }
 
 // DetachLoopDevice mocks base method.
@@ -283,6 +299,21 @@ func (m *MockCommands) ExtendVG(vgName string, paths []string) (string, error) {
 func (mr *MockCommandsMockRecorder) ExtendVG(vgName, paths any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendVG", reflect.TypeOf((*MockCommands)(nil).ExtendVG), vgName, paths)
+}
+
+// ExtendVGShared mocks base method.
+func (m *MockCommands) ExtendVGShared(ctx context.Context, vgName string, paths []string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExtendVGShared", ctx, vgName, paths)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ExtendVGShared indicates an expected call of ExtendVGShared.
+func (mr *MockCommandsMockRecorder) ExtendVGShared(ctx, vgName, paths any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendVGShared", reflect.TypeOf((*MockCommands)(nil).ExtendVGShared), ctx, vgName, paths)
 }
 
 // FindLoopDeviceByFile mocks base method.
@@ -483,6 +514,21 @@ func (mr *MockCommandsMockRecorder) LVActivate(ctx, vgName, lvName any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVActivate", reflect.TypeOf((*MockCommands)(nil).LVActivate), ctx, vgName, lvName)
 }
 
+// LVActivateShared mocks base method.
+func (m *MockCommands) LVActivateShared(ctx context.Context, vgName string, lvNames []string, shared bool) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LVActivateShared", ctx, vgName, lvNames, shared)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LVActivateShared indicates an expected call of LVActivateShared.
+func (mr *MockCommandsMockRecorder) LVActivateShared(ctx, vgName, lvNames, shared any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVActivateShared", reflect.TypeOf((*MockCommands)(nil).LVActivateShared), ctx, vgName, lvNames, shared)
+}
+
 // LVChangeDelTag mocks base method.
 func (m *MockCommands) LVChangeDelTag(ctx context.Context, lv internal.LVData, tag string) (string, error) {
 	m.ctrl.T.Helper()
@@ -496,6 +542,36 @@ func (m *MockCommands) LVChangeDelTag(ctx context.Context, lv internal.LVData, t
 func (mr *MockCommandsMockRecorder) LVChangeDelTag(ctx, lv, tag any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVChangeDelTag", reflect.TypeOf((*MockCommands)(nil).LVChangeDelTag), ctx, lv, tag)
+}
+
+// LVDeactivateShared mocks base method.
+func (m *MockCommands) LVDeactivateShared(ctx context.Context, vgName string, lvNames []string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LVDeactivateShared", ctx, vgName, lvNames)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LVDeactivateShared indicates an expected call of LVDeactivateShared.
+func (mr *MockCommandsMockRecorder) LVDeactivateShared(ctx, vgName, lvNames any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVDeactivateShared", reflect.TypeOf((*MockCommands)(nil).LVDeactivateShared), ctx, vgName, lvNames)
+}
+
+// LVExtendShared mocks base method.
+func (m *MockCommands) LVExtendShared(ctx context.Context, vgName, lvName, size string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LVExtendShared", ctx, vgName, lvName, size)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LVExtendShared indicates an expected call of LVExtendShared.
+func (mr *MockCommandsMockRecorder) LVExtendShared(ctx, vgName, lvName, size any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVExtendShared", reflect.TypeOf((*MockCommands)(nil).LVExtendShared), ctx, vgName, lvName, size)
 }
 
 // ListLoopDevices mocks base method.
@@ -514,6 +590,67 @@ func (mr *MockCommandsMockRecorder) ListLoopDevices(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListLoopDevices", reflect.TypeOf((*MockCommands)(nil).ListLoopDevices), ctx)
 }
 
+// LockspaceRunning mocks base method.
+func (m *MockCommands) LockspaceRunning(ctx context.Context, vgName string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockspaceRunning", ctx, vgName)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LockspaceRunning indicates an expected call of LockspaceRunning.
+func (mr *MockCommandsMockRecorder) LockspaceRunning(ctx, vgName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockspaceRunning", reflect.TypeOf((*MockCommands)(nil).LockspaceRunning), ctx, vgName)
+}
+
+// LockspaceState mocks base method.
+func (m *MockCommands) LockspaceState(ctx context.Context, vgName string) (bool, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockspaceState", ctx, vgName)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// LockspaceState indicates an expected call of LockspaceState.
+func (mr *MockCommandsMockRecorder) LockspaceState(ctx, vgName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockspaceState", reflect.TypeOf((*MockCommands)(nil).LockspaceState), ctx, vgName)
+}
+
+// MissingReservationTools mocks base method.
+func (m *MockCommands) MissingReservationTools(ctx context.Context) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MissingReservationTools", ctx)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MissingReservationTools indicates an expected call of MissingReservationTools.
+func (mr *MockCommandsMockRecorder) MissingReservationTools(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MissingReservationTools", reflect.TypeOf((*MockCommands)(nil).MissingReservationTools), ctx)
+}
+
+// MultipathConfiguration mocks base method.
+func (m *MockCommands) MultipathConfiguration(ctx context.Context) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MultipathConfiguration", ctx)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MultipathConfiguration indicates an expected call of MultipathConfiguration.
+func (mr *MockCommandsMockRecorder) MultipathConfiguration(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MultipathConfiguration", reflect.TypeOf((*MockCommands)(nil).MultipathConfiguration), ctx)
+}
+
 // PVScan mocks base method.
 func (m *MockCommands) PVScan(ctx context.Context) (string, error) {
 	m.ctrl.T.Helper()
@@ -529,6 +666,21 @@ func (mr *MockCommandsMockRecorder) PVScan(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PVScan", reflect.TypeOf((*MockCommands)(nil).PVScan), ctx)
 }
 
+// PreemptRegistration mocks base method.
+func (m *MockCommands) PreemptRegistration(ctx context.Context, path, ourKey, theirKey string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PreemptRegistration", ctx, path, ourKey, theirKey)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PreemptRegistration indicates an expected call of PreemptRegistration.
+func (mr *MockCommandsMockRecorder) PreemptRegistration(ctx, path, ourKey, theirKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PreemptRegistration", reflect.TypeOf((*MockCommands)(nil).PreemptRegistration), ctx, path, ourKey, theirKey)
+}
+
 // ReTag mocks base method.
 func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error {
 	m.ctrl.T.Helper()
@@ -541,6 +693,67 @@ func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics *mo
 func (mr *MockCommandsMockRecorder) ReTag(ctx, log, metrics, ctrlName, cmdTimeout any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReTag", reflect.TypeOf((*MockCommands)(nil).ReTag), ctx, log, metrics, ctrlName, cmdTimeout)
+}
+
+// ReadRegistrationKeys mocks base method.
+func (m *MockCommands) ReadRegistrationKeys(ctx context.Context, path string) ([]string, string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReadRegistrationKeys", ctx, path)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ReadRegistrationKeys indicates an expected call of ReadRegistrationKeys.
+func (mr *MockCommandsMockRecorder) ReadRegistrationKeys(ctx, path any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadRegistrationKeys", reflect.TypeOf((*MockCommands)(nil).ReadRegistrationKeys), ctx, path)
+}
+
+// RecordedReservationKey mocks base method.
+func (m *MockCommands) RecordedReservationKey(ctx context.Context) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RecordedReservationKey", ctx)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RecordedReservationKey indicates an expected call of RecordedReservationKey.
+func (mr *MockCommandsMockRecorder) RecordedReservationKey(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordedReservationKey", reflect.TypeOf((*MockCommands)(nil).RecordedReservationKey), ctx)
+}
+
+// RemoveDMDevice mocks base method.
+func (m *MockCommands) RemoveDMDevice(ctx context.Context, dmName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveDMDevice", ctx, dmName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemoveDMDevice indicates an expected call of RemoveDMDevice.
+func (mr *MockCommandsMockRecorder) RemoveDMDevice(ctx, dmName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveDMDevice", reflect.TypeOf((*MockCommands)(nil).RemoveDMDevice), ctx, dmName)
+}
+
+// RemoveDMDeviceDeferred mocks base method.
+func (m *MockCommands) RemoveDMDeviceDeferred(ctx context.Context, dmName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveDMDeviceDeferred", ctx, dmName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemoveDMDeviceDeferred indicates an expected call of RemoveDMDeviceDeferred.
+func (mr *MockCommandsMockRecorder) RemoveDMDeviceDeferred(ctx, dmName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveDMDeviceDeferred", reflect.TypeOf((*MockCommands)(nil).RemoveDMDeviceDeferred), ctx, dmName)
 }
 
 // RemoveFileDevice mocks base method.
@@ -573,6 +786,21 @@ func (mr *MockCommandsMockRecorder) RemoveLV(vgName, lvName any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveLV", reflect.TypeOf((*MockCommands)(nil).RemoveLV), vgName, lvName)
 }
 
+// RemoveLVShared mocks base method.
+func (m *MockCommands) RemoveLVShared(ctx context.Context, vgName, lvName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveLVShared", ctx, vgName, lvName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemoveLVShared indicates an expected call of RemoveLVShared.
+func (mr *MockCommandsMockRecorder) RemoveLVShared(ctx, vgName, lvName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveLVShared", reflect.TypeOf((*MockCommands)(nil).RemoveLVShared), ctx, vgName, lvName)
+}
+
 // RemovePV mocks base method.
 func (m *MockCommands) RemovePV(pvNames []string) (string, error) {
 	m.ctrl.T.Helper()
@@ -603,6 +831,36 @@ func (mr *MockCommandsMockRecorder) RemoveVG(vgName any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveVG", reflect.TypeOf((*MockCommands)(nil).RemoveVG), vgName)
 }
 
+// RemoveVGShared mocks base method.
+func (m *MockCommands) RemoveVGShared(ctx context.Context, vgName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveVGShared", ctx, vgName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemoveVGShared indicates an expected call of RemoveVGShared.
+func (mr *MockCommandsMockRecorder) RemoveVGShared(ctx, vgName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveVGShared", reflect.TypeOf((*MockCommands)(nil).RemoveVGShared), ctx, vgName)
+}
+
+// ReservationKeyOf mocks base method.
+func (m *MockCommands) ReservationKeyOf(ctx context.Context, mapName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReservationKeyOf", ctx, mapName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReservationKeyOf indicates an expected call of ReservationKeyOf.
+func (mr *MockCommandsMockRecorder) ReservationKeyOf(ctx, mapName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReservationKeyOf", reflect.TypeOf((*MockCommands)(nil).ReservationKeyOf), ctx, mapName)
+}
+
 // ResizePV mocks base method.
 func (m *MockCommands) ResizePV(ctx context.Context, pvName string) (string, error) {
 	m.ctrl.T.Helper()
@@ -616,6 +874,21 @@ func (m *MockCommands) ResizePV(ctx context.Context, pvName string) (string, err
 func (mr *MockCommandsMockRecorder) ResizePV(ctx, pvName any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResizePV", reflect.TypeOf((*MockCommands)(nil).ResizePV), ctx, pvName)
+}
+
+// SetLVTagShared mocks base method.
+func (m *MockCommands) SetLVTagShared(ctx context.Context, vgName, lvName, tag string, add bool) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetLVTagShared", ctx, vgName, lvName, tag, add)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetLVTagShared indicates an expected call of SetLVTagShared.
+func (mr *MockCommandsMockRecorder) SetLVTagShared(ctx, vgName, lvName, tag, add any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLVTagShared", reflect.TypeOf((*MockCommands)(nil).SetLVTagShared), ctx, vgName, lvName, tag, add)
 }
 
 // SetLoopCapacity mocks base method.
@@ -646,6 +919,21 @@ func (m *MockCommands) SetLoopDirectIO(ctx context.Context, loopDev string) (str
 func (mr *MockCommandsMockRecorder) SetLoopDirectIO(ctx, loopDev any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLoopDirectIO", reflect.TypeOf((*MockCommands)(nil).SetLoopDirectIO), ctx, loopDev)
+}
+
+// SetReservationKey mocks base method.
+func (m *MockCommands) SetReservationKey(ctx context.Context, mapName, key string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetReservationKey", ctx, mapName, key)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetReservationKey indicates an expected call of SetReservationKey.
+func (mr *MockCommandsMockRecorder) SetReservationKey(ctx, mapName, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetReservationKey", reflect.TypeOf((*MockCommands)(nil).SetReservationKey), ctx, mapName, key)
 }
 
 // SetupLoopDevice mocks base method.
@@ -695,18 +983,18 @@ func (mr *MockCommandsMockRecorder) UnmarshalDevices(out any) *gomock.Call {
 }
 
 // VGActivate mocks base method.
-func (m *MockCommands) VGActivate(ctx context.Context, vgName string, shared bool) (string, error) {
+func (m *MockCommands) VGActivate(ctx context.Context, vgName string) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "VGActivate", ctx, vgName, shared)
+	ret := m.ctrl.Call(m, "VGActivate", ctx, vgName)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // VGActivate indicates an expected call of VGActivate.
-func (mr *MockCommandsMockRecorder) VGActivate(ctx, vgName, shared any) *gomock.Call {
+func (mr *MockCommandsMockRecorder) VGActivate(ctx, vgName any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGActivate", reflect.TypeOf((*MockCommands)(nil).VGActivate), ctx, vgName, shared)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGActivate", reflect.TypeOf((*MockCommands)(nil).VGActivate), ctx, vgName)
 }
 
 // VGChangeAddTag mocks base method.
@@ -739,6 +1027,81 @@ func (mr *MockCommandsMockRecorder) VGChangeDelTag(ctx, vGName, tag any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGChangeDelTag", reflect.TypeOf((*MockCommands)(nil).VGChangeDelTag), ctx, vGName, tag)
 }
 
+// VGLockStart mocks base method.
+func (m *MockCommands) VGLockStart(ctx context.Context, vgName string, hostID int) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VGLockStart", ctx, vgName, hostID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// VGLockStart indicates an expected call of VGLockStart.
+func (mr *MockCommandsMockRecorder) VGLockStart(ctx, vgName, hostID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGLockStart", reflect.TypeOf((*MockCommands)(nil).VGLockStart), ctx, vgName, hostID)
+}
+
+// VGLockStop mocks base method.
+func (m *MockCommands) VGLockStop(ctx context.Context, vgName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VGLockStop", ctx, vgName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// VGLockStop indicates an expected call of VGLockStop.
+func (mr *MockCommandsMockRecorder) VGLockStop(ctx, vgName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGLockStop", reflect.TypeOf((*MockCommands)(nil).VGLockStop), ctx, vgName)
+}
+
+// VGPersistSetting mocks base method.
+func (m *MockCommands) VGPersistSetting(ctx context.Context, vgName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VGPersistSetting", ctx, vgName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// VGPersistSetting indicates an expected call of VGPersistSetting.
+func (mr *MockCommandsMockRecorder) VGPersistSetting(ctx, vgName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGPersistSetting", reflect.TypeOf((*MockCommands)(nil).VGPersistSetting), ctx, vgName)
+}
+
+// VGPersistStart mocks base method.
+func (m *MockCommands) VGPersistStart(ctx context.Context, vgName string, hostID int) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VGPersistStart", ctx, vgName, hostID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// VGPersistStart indicates an expected call of VGPersistStart.
+func (mr *MockCommandsMockRecorder) VGPersistStart(ctx, vgName, hostID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGPersistStart", reflect.TypeOf((*MockCommands)(nil).VGPersistStart), ctx, vgName, hostID)
+}
+
+// VGPersistStop mocks base method.
+func (m *MockCommands) VGPersistStop(ctx context.Context, vgName string, hostID int) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VGPersistStop", ctx, vgName, hostID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// VGPersistStop indicates an expected call of VGPersistStop.
+func (mr *MockCommandsMockRecorder) VGPersistStop(ctx, vgName, hostID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGPersistStop", reflect.TypeOf((*MockCommands)(nil).VGPersistStop), ctx, vgName, hostID)
+}
+
 // VGScan mocks base method.
 func (m *MockCommands) VGScan(ctx context.Context) (string, error) {
 	m.ctrl.T.Helper()
@@ -752,4 +1115,49 @@ func (m *MockCommands) VGScan(ctx context.Context) (string, error) {
 func (mr *MockCommandsMockRecorder) VGScan(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGScan", reflect.TypeOf((*MockCommands)(nil).VGScan), ctx)
+}
+
+// VGSetLockArgsPersist mocks base method.
+func (m *MockCommands) VGSetLockArgsPersist(ctx context.Context, vgName string, hostID int) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VGSetLockArgsPersist", ctx, vgName, hostID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// VGSetLockArgsPersist indicates an expected call of VGSetLockArgsPersist.
+func (mr *MockCommandsMockRecorder) VGSetLockArgsPersist(ctx, vgName, hostID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGSetLockArgsPersist", reflect.TypeOf((*MockCommands)(nil).VGSetLockArgsPersist), ctx, vgName, hostID)
+}
+
+// VGSetPersist mocks base method.
+func (m *MockCommands) VGSetPersist(ctx context.Context, vgName string, hostID int) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VGSetPersist", ctx, vgName, hostID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// VGSetPersist indicates an expected call of VGSetPersist.
+func (mr *MockCommandsMockRecorder) VGSetPersist(ctx, vgName, hostID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VGSetPersist", reflect.TypeOf((*MockCommands)(nil).VGSetPersist), ctx, vgName, hostID)
+}
+
+// WipeDMTable mocks base method.
+func (m *MockCommands) WipeDMTable(ctx context.Context, dmName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "WipeDMTable", ctx, dmName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// WipeDMTable indicates an expected call of WipeDMTable.
+func (mr *MockCommandsMockRecorder) WipeDMTable(ctx, dmName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WipeDMTable", reflect.TypeOf((*MockCommands)(nil).WipeDMTable), ctx, dmName)
 }

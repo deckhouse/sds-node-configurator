@@ -19,6 +19,12 @@ package internal
 const (
 	SdsNodeConfiguratorNamespace = "d8-sds-node-configurator"
 
+	// SdsNodeConfiguratorFinalizer mirrors the agent-side constant of the same
+	// name (images/agent/internal/const.go). The agent puts it on what it has to
+	// unwind before the object may go; this side takes it off in the one case the
+	// agent cannot — when the node it ran on no longer exists.
+	SdsNodeConfiguratorFinalizer = "storage.deckhouse.io/sds-node-configurator"
+
 	ReasonUpdating         = "Updating"
 	ReasonCreating         = "Creating"
 	ReasonTerminating      = "Terminating"

@@ -15,6 +15,13 @@ weight: 5
 - [BlockDevice](./cr.html#blockdevice);
 - [LVMVolumeGroup](./cr.html#lvmvolumegroup).
 
+На узлах разделяемого SCSI-пула он обслуживает ещё три собственных ресурса —
+[LVMSharedVolumeGroup](./cr.html#lvmsharedvolumegroup),
+[LVMSharedLogicalVolume](./cr.html#lvmsharedlogicalvolume) и
+[LVMSharedLogicalVolumeAttachment](./cr.html#lvmsharedlogicalvolumeattachment).
+Их создаёт модуль `csi-scsi-generic`, а не администратор; см. раздел
+[Разделяемые группы томов](#разделяемые-группы-томов) ниже.
+
 ## Работа с ресурсами BlockDevice
 
 ### Создание ресурса BlockDevice
@@ -326,6 +333,20 @@ d8 k delete lvg %lvg-name%
 
 1. Измените поле `spec.blockDeviceSelector` ресурса [LVMVolumeGroup](./cr.html#lvmvolumegroup) (добавив другие селекторы) или измените соответствующие лейблы у ресурса [BlockDevice](./cr.html#blockdevice), чтобы они больше не попадали под селекторы [LVMVolumeGroup](./cr.html#lvmvolumegroup).
 1. Выполните на узле команды `pvmove`, `vgreduce` и `pvremove`.
+
+## Разделяемые группы томов
+
+Разделяемая группа томов живёт на LUN, который одновременно видят несколько узлов, а её тома выдаются по одному узлу за раз. Создаёт её модуль `csi-scsi-generic`, когда администратор объявляет `SCSISharedPool`; руками здесь ничего не пишется, а три ресурса ниже существуют для того, чтобы у каждого факта был ровно один писатель.
+
+- [LVMSharedVolumeGroup](./cr.html#lvmsharedvolumegroup) — сама группа. Узел, названный в `spec.metadataOwner`, создаёт её командой `vgcreate --shared`; каждый узел из `spec.nodes` входит в её sanlock-lockspace с host id, который выделил контроллер пула. В `status.nodes` каждый участник пишет **свою** запись: поднят ли его lockspace и, если нет, почему.
+- [LVMSharedLogicalVolume](./cr.html#lvmsharedlogicalvolume) — один том в группе. Создаётся и удаляется владельцем метаданных.
+- [LVMSharedLogicalVolumeAttachment](./cr.html#lvmsharedlogicalvolumeattachment) — один том на одном узле. Именно он активирует том там (эксклюзивно либо в разделяемом режиме для блочного тома `ReadWriteMany`) и расширяет его: под lvmlockd `lvextend` требует блокировки, поэтому сделать это может только активировавший узел.
+
+Что агент на такой группе гарантирует и чего намеренно не делает:
+
+- том отображён на узле, который держит его блокировку, и больше нигде. Отображение, оставшееся после рестарта демонов блокировок, узел снимает сам, а пока оно есть, метрика `sds_node_configurator_shared_pool_unlocked_mappings` больше нуля;
+- узел, потерявший аренду, отсекается обработчиком killpath и возвращается в пул **сам**, как только его LUN снова доступны, — без действий оператора;
+- агент никогда не активирует разделяемую группу целиком. Группа с типом блокировки `sanlock` пропускается всеми путями, которые активируют группы томов на узле, и **не импортируется** как [LVMVolumeGroup](./cr.html#lvmvolumegroup): контроллеры за этим ресурсом работают силами одного узла, не беря блокировок пула. Если такой `LVMVolumeGroup` уже существует, ему выставляется `VGReady=False` с причиной `SharedVolumeGroup`, и больше с ним ничего не делается — удаление этого ресурса уничтожает группу томов, поэтому решение остаётся за человеком.
 
 ## Защита от утечек данных между томами
 

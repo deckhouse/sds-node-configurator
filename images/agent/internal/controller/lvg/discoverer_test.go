@@ -1130,3 +1130,46 @@ func TestHasStatusFileDevicesDiff(t *testing.T) {
 		assert.True(t, hasStatusFileDevicesDiff(first, second))
 	})
 }
+
+func TestASharedVolumeGroupIsNotImportedAsAnLVMVolumeGroup(t *testing.T) {
+	// The LVMVolumeGroup resource is served by controllers that activate, extend
+	// and remove volumes on this node alone. A group whose volumes are handed
+	// out by a lock manager cannot be treated that way — the pool has a resource
+	// of its own. Measured on a live pool before this: an LVMVolumeGroup named
+	// after the pool's group, type Local, bound to one of its member nodes.
+	log := logger.Logger{}
+	vgs := []internal.VGData{
+		{VGName: "vghw", VGUUID: "u1", VGTags: internal.LVMTags[0], VGLockType: "sanlock"},
+		{VGName: "vglocal", VGUUID: "u2", VGTags: internal.LVMTags[0]},
+	}
+
+	kept := utils.SkipSharedVGs(log, "import as an LVMVolumeGroup", filterVGByTag(vgs, internal.LVMTags))
+
+	assert.Len(t, kept, 1)
+	if len(kept) == 1 {
+		assert.Equal(t, "vglocal", kept[0].VGName)
+	}
+}
+
+func TestAnLVMVolumeGroupOverASharedGroupIsNotToldItsGroupIsMissing(t *testing.T) {
+	// The group is right there with data on it. Telling an operator it is
+	// missing and should be tagged sends them to re-create it — over a pool.
+	shared := &internal.VGData{VGName: "vghw", VGLockType: "sanlock"}
+
+	reason, message := missingCandidateMessage("vghw", shared)
+
+	assert.Equal(t, "SharedVolumeGroup", reason,
+		`the reason is the half a machine reads, and "a scan failed" is not what happened`)
+	assert.NotContains(t, message, "Unable to find VG")
+	assert.Contains(t, message, "is shared")
+	assert.Contains(t, message, "delete this resource by hand",
+		"removing an LVMVolumeGroup removes the Volume Group with it, so this is not the module's call")
+
+	// And the ordinary case is untouched: a group that really is gone still says so.
+	goneReason, goneMessage := missingCandidateMessage("vglocal", nil)
+	assert.Equal(t, internal.ReasonScanFailed, goneReason)
+	assert.Contains(t, goneMessage, "Unable to find VG vglocal")
+
+	_, localMessage := missingCandidateMessage("vglocal", &internal.VGData{VGName: "vglocal"})
+	assert.Contains(t, localMessage, "Unable to find VG vglocal")
+}

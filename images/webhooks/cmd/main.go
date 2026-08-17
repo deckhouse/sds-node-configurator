@@ -24,6 +24,9 @@ import (
 
 	"github.com/sirupsen/logrus"
 	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/webhooks/handlers"
@@ -53,8 +56,10 @@ func initFlags() config {
 }
 
 const (
-	port            = ":8443"
-	llvsValidatorID = "LLVSValidator"
+	port                      = ":8443"
+	llvsValidatorID           = "LLVSValidator"
+	sharedVolumeValidatorID   = "LVMSharedLogicalVolumeValidator"
+	sharedAttachmentValidator = "LVMSharedLogicalVolumeAttachmentValidator"
 )
 
 func main() {
@@ -70,8 +75,47 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The shared-pool validators read a second object — the pool of a volume,
+	// the group of an attachment — which is the whole reason they are not CRD
+	// validation rules.
+	kConfig, err := ctrlconfig.GetConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error getting a kubernetes config: %s", err)
+		os.Exit(1)
+	}
+
+	scheme := runtime.NewScheme()
+	if err := cn.AddToScheme(scheme); err != nil {
+		fmt.Fprintf(os.Stderr, "error building a scheme: %s", err)
+		os.Exit(1)
+	}
+
+	cl, err := client.New(kConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating a kubernetes client: %s", err)
+		os.Exit(1)
+	}
+
+	sharedPool := handlers.NewSharedPoolValidator(cl)
+
+	sharedVolumeHandler, err := handlers.GetValidatingWebhookHandler(
+		sharedPool.ValidateVolume, sharedVolumeValidatorID, &cn.LVMSharedLogicalVolume{}, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating sharedVolumeHandler: %s", err)
+		os.Exit(1)
+	}
+
+	sharedAttachmentHandler, err := handlers.GetValidatingWebhookHandler(
+		sharedPool.ValidateAttachment, sharedAttachmentValidator, &cn.LVMSharedLogicalVolumeAttachment{}, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating sharedAttachmentHandler: %s", err)
+		os.Exit(1)
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/llvs-validate", llvsValidatingWebhookHandler)
+	mux.Handle("/lsllv-validate", sharedVolumeHandler)
+	mux.Handle("/lsllva-validate", sharedAttachmentHandler)
 	mux.HandleFunc("/healthz", httpHandlerHealthz)
 
 	logger.Infof("Listening on %s", port)

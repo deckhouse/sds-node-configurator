@@ -19,6 +19,35 @@ rules:
       - get
       - list
       - watch
+  # The agent's own heartbeat: a Lease in this module's namespace, renewed while
+  # the agent runs. A Lease rather than an annotation because liveness needs a
+  # lifetime — see the heartbeat package.
+  #
+  # Deliberately without list and watch. The heartbeat reads exactly one object by
+  # name and does it with an UNCACHED client, because a cached read would start an
+  # informer over every Lease in the cluster and demand those two verbs for it.
+  # Granting them here instead would have hidden that: the module would have got
+  # cluster-wide read of every lease in every namespace to renew one of its own.
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - create
+      - update
+      - patch
+  # patch on nodes carries the fact that this node holds a pool's lockspace.
+  # It is read by another module, which is why it lives on the Node rather than
+  # in a status this module owns. The cost is worth naming: RBAC does not narrow
+  # to the agent's own node — NodeRestriction is about kubelet identities — so
+  # this is the right to write annotations on any node in the cluster.
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - patch
   - apiGroups:
       - ""
     resources:
@@ -36,6 +65,12 @@ rules:
       - lvmlogicalvolumes/status
       - lvmlogicalvolumesnapshots
       - lvmlogicalvolumesnapshots/status
+      - lvmsharedvolumegroups
+      - lvmsharedvolumegroups/status
+      - lvmsharedlogicalvolumes
+      - lvmsharedlogicalvolumes/status
+      - lvmsharedlogicalvolumeattachments
+      - lvmsharedlogicalvolumeattachments/status
     verbs:
       - get
       - list
@@ -43,6 +78,10 @@ rules:
       - delete
       - watch
       - update
+      # patch is a separate verb from update, and every write in the shared-pool
+      # reconcilers is a merge patch. Without it they fail at runtime with
+      # "cannot patch resource" while the rule reads as sufficient.
+      - patch
   - apiGroups:
       - events.k8s.io
     resources:

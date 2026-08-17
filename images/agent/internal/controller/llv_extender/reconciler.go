@@ -111,6 +111,14 @@ func (r *Reconciler) Reconcile(
 		return controller.Result{}, nil
 	}
 
+	// Same reason the volume reconciler refuses: an LVMVolumeGroup left over a
+	// pool's group leads here, and lvextend over a volume another node holds
+	// a lease on is not this node's to run.
+	if _, refuse := utils.RefuseSharedVG(r.log, "extend a Logical Volume",
+		lvg.Spec.ActualVGNameOnTheNode, r.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode)); refuse {
+		return controller.Result{}, nil
+	}
+
 	shouldRequeue := r.ReconcileLVMLogicalVolumeExtension(ctx, lvg)
 	if shouldRequeue {
 		r.log.Warning(fmt.Sprintf("[RunLVMLogicalVolumeExtenderWatcherController] Reconciler needs a retry for the LVMVolumeGroup %s. Retry in %s", lvg.Name, r.cfg.VolumeGroupScanInterval.String()))

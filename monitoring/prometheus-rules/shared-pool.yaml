@@ -1,0 +1,31 @@
+- name: kubernetes.sds_node_configurator.shared_pool
+  rules:
+    - alert: D8SdsNodeConfiguratorSharedPoolUnlockedMappings
+      expr: max by (node, volume_group) (sds_node_configurator_shared_pool_unlocked_mappings) > 0
+      # The module repairs this by itself on every pass of the group reconciler,
+      # which runs once a minute — so a value that is still above zero after ten
+      # minutes is not the state occurring, it is the repair failing. Firing on
+      # the first sighting would page somebody for something already fixed.
+      for: 10m
+      labels:
+        severity_level: "3"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_sds_node_configurator_shared_pool_health: "D8SdsNodeConfiguratorSharedPoolHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_sds_node_configurator_shared_pool_health: "D8SdsNodeConfiguratorSharedPoolHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: A node maps volumes of a shared pool that nothing on it is asking for
+        description: |
+          {{ $value }} volume(s) of the shared volume group `{{ $labels.volume_group }}` are mapped on node `{{ $labels.node }}` with no attachment there asking for them, and the node has not managed to unmap them for ten minutes.
+
+          This is the one state the design of a shared pool exists to prevent. A volume of a pool belongs to one node at a time, and the lock manager decides which one; a mapping that outlives the node's claim to it is a path through which a write can still reach the array — while the lease, and possibly a writing pod, belong to another node.
+
+          Nothing is necessarily lost when this fires: device-mapper carries a write only if something has the device open. What the alert says is that the module tried to close the path, failed, and the cluster is one open file descriptor away from two writers on one volume.
+
+          The recommended course of action:
+          1. Find what is mapped and whether anything holds it open. On the node: `dmsetup info -c -o name,open | grep '^{{ $labels.volume_group }}-'`. An open count above zero is the answer — the module refuses to remove a mapping somebody is using, and that refusal is deliberate.
+          2. Find the holder: `lsof /dev/mapper/<name>` or `fuser -v /dev/mapper/<name>`. It is usually a mount left behind by a pod whose kubelet died, or a container that outlived it.
+          3. Check who legitimately owns the volume now: `d8 k get lvmsharedlogicalvolumeattachment -o wide`. If another node holds it, the mapping here must go; if this node does, the attachment and the mapping disagree and the agent's log on this node says why.
+          4. Ask the lock manager what it actually holds, and ask it in the right place: `nsenter -t "$(pgrep -f 'lvmlockd -f' | head -1)" -m -- lvmlockctl --info`. Run in the host mount namespace instead, the command succeeds and prints nothing — the daemon's socket is not visible there — which reads as "no locks anywhere" and is not.
+          5. Once nothing holds the device, the node removes the mapping on its next pass, within a minute. If it does not, the agent's log on that node names the command that failed and its error.

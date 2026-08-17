@@ -207,6 +207,39 @@ func classifyManagedTaggedLoopVG(
 // has to run its input through. Those paths gate on the LVM tag alone, and the
 // tag is not an ownership proof for a loop-backed Volume Group — see the file
 // comment.
+// SkipSharedVGs drops Volume Groups created with `vgcreate --shared` from a list
+// this module is about to activate.
+//
+// A shared Volume Group is owned by a lock manager (lvmlockd/sanlock), not by
+// whoever finds it in a scan: which node may activate which of its Logical
+// Volumes is that manager's decision, and taking it locally is how two nodes end
+// up writing the same extents. This module does not run a lock manager, so the
+// only correct thing it can do with such a Volume Group is leave it alone.
+//
+// The tag filter does not cover this: a shared Volume Group can carry the
+// module's tag — an earlier version of the agent created shared Volume Groups
+// itself, and a pool may be tagged by whoever manages it.
+//
+// It asks VGData.IsShared rather than vg_shared directly, and that is not a
+// detail. vg_shared was empty for every shared group this module has ever
+// looked at, because the static lvm the agent carries is built without lockd
+// support and computes the field as "no" — so this guard was switched off from
+// the day it was written. Measured on a live pool: the scanner activated a
+// pool's volume on a node holding no lock for it, one second after the cleanup
+// had unmapped it, once a minute, forever.
+func SkipSharedVGs(log logger.Logger, action string, vgs []internal.VGData) []internal.VGData {
+	out := make([]internal.VGData, 0, len(vgs))
+	for _, vg := range vgs {
+		if vg.IsShared() {
+			log.Warning(fmt.Sprintf("[SkipSharedVGs] refusing to %s VG %s (VG_UUID=%s): it is a shared VG (lock type %q), activation of it belongs to its lock manager",
+				action, vg.VGName, vg.VGUUID, vg.SharedDescription()))
+			continue
+		}
+		out = append(out, vg)
+	}
+	return out
+}
+
 func SkipUnownedLoopVGs(log logger.Logger, action string, vgs []internal.VGData, verdicts LoopVGVerdicts) []internal.VGData {
 	out := make([]internal.VGData, 0, len(vgs))
 	for _, vg := range vgs {
@@ -218,4 +251,29 @@ func SkipUnownedLoopVGs(log logger.Logger, action string, vgs []internal.VGData,
 		out = append(out, vg)
 	}
 	return out
+}
+
+// RefuseSharedVG reports whether a Volume Group is served by a lock manager and
+// must therefore not be written to by the node-local paths of this module.
+//
+// It is the check every path that creates, extends or removes a Logical Volume
+// has to make before it acts on a group it reached through an LVMVolumeGroup.
+// Those resources are not created for shared groups any more, but one made
+// earlier still exists on any cluster that ran an older agent — and behind it
+// sit reconcilers that would run lvcreate, lvextend and lvremove on a pool's
+// group with no lock taken at all. The reason it is written as a refusal rather
+// than a repair: what is on the other side is somebody's data, and a volume that
+// another node holds a lease on must not be resized or removed because a local
+// resource asked for it.
+func RefuseSharedVG(log logger.Logger, action, vgName string, vg *internal.VGData) (string, bool) {
+	if vg == nil || !vg.IsShared() {
+		return "", false
+	}
+
+	message := fmt.Sprintf("refusing to %s in the Volume Group %s: it is shared (lock type %q) and its volumes are "+
+		"handed out by a lock manager, so nothing here may create, extend or remove them. Use the pool's own "+
+		"resources for it; an LVMVolumeGroup pointing at a shared group is a leftover and should be deleted by hand",
+		action, vgName, vg.SharedDescription())
+	log.Warning(fmt.Sprintf("[RefuseSharedVG] %s", message))
+	return message, true
 }

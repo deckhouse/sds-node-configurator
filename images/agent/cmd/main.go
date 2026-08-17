@@ -31,11 +31,13 @@ import (
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
@@ -43,7 +45,11 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/bdf"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llv"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llv_extender"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsllv"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsllva"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lsvg"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lvg"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal/heartbeat"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/kubutils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
@@ -132,6 +138,24 @@ func run() int {
 		return 1
 	}
 	log.Info("[main] successfully created kubernetes manager")
+
+	// The heartbeat starts before any reconciler, because a node that is not seen
+	// is a node no pool will admit — and everything below only matters once it is.
+	if cfgParams.PodNamespace != "" {
+		// An uncached client on purpose: see the heartbeat package. The manager's
+		// client would start an informer over every Lease in the cluster to read
+		// this one.
+		heartbeatClient, err := client.New(kConfig, client.Options{Scheme: scheme})
+		if err != nil {
+			log.Error(err, "[main] unable to create a client for the heartbeat")
+			return 1
+		}
+		go heartbeat.NewPublisher(
+			heartbeatClient, log, cfgParams.NodeName, cfgParams.PodNamespace, 20*time.Second,
+		).Run(ctx)
+	} else {
+		log.Warning("[main] POD_NAMESPACE is not set, so this agent will not publish a heartbeat and no shared pool will admit this node")
+	}
 
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 	commands := utils.NewCommands()
@@ -309,6 +333,58 @@ func run() int {
 			os.Exit(1)
 		}
 	}()
+
+	err = controller.AddReconciler(
+		mgr,
+		log,
+		lsllv.NewReconciler(
+			mgr.GetClient(),
+			log,
+			sdsCache,
+			commands,
+			lsllv.ReconcilerConfig{NodeName: cfgParams.NodeName},
+		),
+	)
+	if err != nil {
+		log.Error(err, "[main] unable to add the LVMSharedLogicalVolume reconciler")
+		return 1
+	}
+
+	err = controller.AddReconciler(
+		mgr,
+		log,
+		lsllva.NewReconciler(
+			mgr.GetClient(),
+			log,
+			sdsCache,
+			commands,
+			lsllva.ReconcilerConfig{NodeName: cfgParams.NodeName},
+		),
+	)
+	if err != nil {
+		log.Error(err, "[main] unable to add the LVMSharedLogicalVolumeAttachment reconciler")
+		return 1
+	}
+
+	err = controller.AddReconciler(
+		mgr,
+		log,
+		lsvg.NewReconciler(
+			mgr.GetClient(),
+			log,
+			sdsCache,
+			commands,
+			metrics,
+			lsvg.ReconcilerConfig{
+				NodeName:  cfgParams.NodeName,
+				HostIDDir: internal.SharedLockDaemonsStateDir,
+			},
+		),
+	)
+	if err != nil {
+		log.Error(err, "[main] unable to add the LVMSharedVolumeGroup reconciler")
+		return 1
+	}
 
 	err = controller.AddReconciler(
 		mgr,

@@ -1,0 +1,239 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: lvmsharedlogicalvolumeattachments.storage.deckhouse.io
+  labels:
+    heritage: deckhouse
+    module: sds-node-configurator
+    backup.deckhouse.io/cluster-config: "true"
+spec:
+  group: storage.deckhouse.io
+  scope: Cluster
+  names:
+    kind: LVMSharedLogicalVolumeAttachment
+    plural: lvmsharedlogicalvolumeattachments
+    singular: lvmsharedlogicalvolumeattachment
+    shortNames:
+      - lsllva
+  preserveUnknownFields: false
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: |
+            LVMSharedLogicalVolumeAttachment is a request to have one volume of a shared
+            Volume Group active on one node, and the report of what happened.
+
+            It is a resource of its own rather than a field on the volume for three reasons.
+            The volume's metadata and its activation have different writers — the group's
+            metadata owner and the node the volume runs on — and one object with two writers
+            is either server-side apply with per-role field managers or mutual overwrites.
+            Block volumes with `ReadWriteMany` need more than one attachment at a time, which
+            a field naming a node cannot express. And an agent can watch only the attachments
+            of its own node instead of every volume of the pool.
+
+            Deleting this resource is how a volume is released: the agent deactivates it and
+            the exclusive lock is dropped, after which another node can take it.
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              description: |
+                Which volume, on which node, in which mode.
+              required:
+                - lvmSharedLogicalVolumeName
+                - nodeName
+              properties:
+                lvmSharedLogicalVolumeName:
+                  type: string
+                  minLength: 1
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                  description: |
+                    The volume to activate.
+                nodeName:
+                  type: string
+                  minLength: 1
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                    - rule: size(self) <= 253
+                      message: Node name must be no longer than 253 characters.
+                  description: |
+                    The node to activate it on. It must be a member of the volume's group;
+                    an attachment to a node outside the group cannot be satisfied, because
+                    only members hold the lockspace that hands out the lock.
+                accessMode:
+                  type: string
+                  default: ReadWriteOnce
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                  description: |
+                    How the volume is activated.
+
+                    Possible values:
+
+                    - `ReadWriteOnce`: Exclusive activation. LVM refuses to activate the same
+                      volume exclusively anywhere else while this holds, and that refusal —
+                      not a controller's bookkeeping — is what keeps two nodes from writing
+                      to one volume.
+
+                    - `ReadWriteMany`: Shared activation, for block volumes whose consumer
+                      arbitrates access itself. There is no filesystem safety here: a shared
+                      activation carrying an ordinary filesystem is a corrupted filesystem,
+                      so this mode is accepted only for volumes used in block mode.
+                  enum:
+                    - ReadWriteOnce
+                    - ReadWriteMany
+            status:
+              type: object
+              description: |
+                Observed state of the attachment, written only by the agent of
+                `spec.nodeName`.
+              properties:
+                phase:
+                  type: string
+                  description: |
+                    The attachment's current state, derived from the conditions below.
+
+                    Possible values:
+
+                    - `Pending`: The agent has not activated the volume yet.
+                    - `Attached`: The volume is active on the node and its device path is
+                      published below.
+                    - `Failed`: Activation failed. See the conditions; a lock held by
+                      another node is the ordinary reason and is not an error of this node.
+                  enum:
+                    - Pending
+                    - Attached
+                    - Failed
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: |
+                    The value of `metadata.generation` the agent has last acted on.
+                devicePath:
+                  type: string
+                  description: |
+                    Path of the activated volume on this node.
+                observedSize:
+                  type: string
+                  description: |
+                    Size of the logical volume as this node currently sees it.
+
+                    It is published here, and not only on the volume, because growing an
+                    attached volume is done by this node — the metadata owner cannot, the
+                    lock is held here — and the consumer needs to know the new size has
+                    arrived before growing anything on top of it. The filesystem is not this
+                    resource's business: it is grown by the CSI driver and observed by
+                    kubelet.
+                lockspaceGeneration:
+                  type: integer
+                  format: int64
+                  description: |
+                    The node's lockspace incarnation this activation belongs to.
+
+                    It exists because a device-mapper device outlives the lock behind it.
+                    sanlock and lvmlockd restart together — they are one pod — and their
+                    restart takes every lease with it while the kernel keeps every mapping,
+                    so a node can look activated and hold nothing at all. Comparing this
+                    against the node's current generation is what tells the two apart, and
+                    a mismatch makes the node activate the volume again instead of trusting
+                    the device it can see.
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+                  description: |
+                    The latest observations of the attachment state.
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                      - lastTransitionTime
+                      - reason
+                      - message
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        description: |
+                          Condition type.
+
+                          - `LockAcquired` is `True` once this node holds the volume's lock.
+                            `False` with a reason naming the holder is the normal state while
+                            another node still has it.
+                          - `Activated` is `True` once the device exists on this node.
+                          - `Resized` reports the outcome of the most recent extension
+                            performed here.
+                          - `Ready` summarises the rest.
+                        enum:
+                          - LockAcquired
+                          - Activated
+                          - Resized
+                          - Ready
+                      status:
+                        type: string
+                        description: |
+                          Condition status.
+                        enum:
+                          - "True"
+                          - "False"
+                          - "Unknown"
+                      observedGeneration:
+                        type: integer
+                        minimum: 0
+                        format: int64
+                        description: |
+                          The value of `metadata.generation` this condition was set against.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: |
+                          Timestamp of the last status transition for this condition.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: |
+                          Machine-readable reason for the current status.
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: |
+                          Human-readable explanation of the current status.
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - jsonPath: .status.phase
+          name: phase
+          type: string
+        - jsonPath: .status.conditions[?(@.type=="Ready")].status
+          name: Ready
+          type: string
+        - jsonPath: .spec.lvmSharedLogicalVolumeName
+          name: volume
+          type: string
+        - jsonPath: .spec.nodeName
+          name: node
+          type: string
+        - jsonPath: .spec.accessMode
+          name: mode
+          type: string
+        - jsonPath: .status.devicePath
+          name: device
+          type: string
+          priority: 1
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
