@@ -528,6 +528,15 @@ func (r *Reconciler) publishGroup(
 	patch := client.MergeFrom(lsvg.DeepCopy())
 	if lsvg.Status != nil {
 		status.Conditions = lsvg.Status.Conditions
+
+		// And the per-node entries, which belong to nobody here: every member
+		// applies its own with a field manager of its own, and this pass is the
+		// metadata owner publishing what it read from lvm. Left out, the merge
+		// patch computed against the old object carries a removal of the whole
+		// list — the entries come back one by one as each agent reconciles, and
+		// in between the pool reads as a pool almost nobody is in. Seen on the
+		// stand: two healthy members reported outside the pool for a minute.
+		status.Nodes = lsvg.Status.Nodes
 	}
 	lsvg.Status = status
 	if err := r.cl.Status().Patch(ctx, lsvg, patch); err != nil {

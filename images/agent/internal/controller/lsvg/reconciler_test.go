@@ -508,6 +508,22 @@ func TestTheOwnerPublishesWhatItObservesAboutTheGroup(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(node, group).WithStatusSubresource(group).Build()
 
+	// What the other members have already published about themselves. Each of
+	// them writes its own entry with a field manager of its own, and this pass
+	// belongs to the metadata owner publishing what it read from lvm — so the
+	// entries have to survive it. They did not: the patch carried a removal of
+	// the whole list, and until every agent reconciled again the pool read as a
+	// pool almost nobody was in.
+	seeded := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, seeded))
+	seeded.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+		Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{
+			{Name: "node-2", LockspaceStarted: true, Reason: ReasonLockspaceStarted},
+			{Name: "node-3", LockspaceStarted: true, Reason: ReasonLockspaceStarted},
+		},
+	}
+	require.NoError(t, cl.Status().Update(context.Background(), seeded))
+
 	commands.EXPECT().MissingReservationTools(gomock.Any()).Return(nil, nil).AnyTimes()
 	commands.EXPECT().MultipathConfiguration(gomock.Any()).Return("\treservation_key \"file\"\n", nil).AnyTimes()
 	commands.EXPECT().RecordedReservationKey(gomock.Any()).Return("", nil).AnyTimes()
@@ -542,6 +558,13 @@ func TestTheOwnerPublishesWhatItObservesAboutTheGroup(t *testing.T) {
 	assert.Equal(t, "vg-uuid", published.Status.VGUUID)
 	assert.Equal(t, int32(1), published.Status.LogicalVolumeCount, "the lease area is not a volume of the pool")
 	assert.NotEmpty(t, published.Status.LeaseAreaSize)
+
+	names := make([]string, 0, len(published.Status.Nodes))
+	for _, entry := range published.Status.Nodes {
+		names = append(names, entry.Name)
+	}
+	assert.Contains(t, names, "node-2", "what a member published about itself is not the owner's to erase")
+	assert.Contains(t, names, "node-3")
 }
 
 func TestForeignGroupOnTheLUNIsRefused(t *testing.T) {
