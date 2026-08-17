@@ -1,0 +1,15 @@
+Changes:
+- Correction: one “orphaned” device-mapper device without a disk no longer stops BlockDevice
+    detection on the entire node - previously, because of it, the agent did not create
+    a single BlockDevice on the node, including healthy disks
+- Correction: LVMVolumeGroup with a single PV whose name could not be determined immediately
+    no longer hangs in Pending forever - empty status.nodes post and no retry in the
+    absence of udev events have been fixed
+- Correction: the agent substitutes the serial number inherited from the parent device
+    if direct reading of the serial number fails (multipath participants, crypt/dm
+    devices) - previously such devices were skipped when detecting BlockDevice
+- Optional resources (VerticalPodAutoscaler, PodMonitor/ServiceMonitor) are now enabled
+  based on the presence of a CRD in the API, and not based on the enabledModules list
+- Documentation: fixed duplication of the description key in the Russian CRD LVMVolumeGroup,
+    which broke docs-builder, added the missing status.extentSize description and
+    restored the blockDevice description
