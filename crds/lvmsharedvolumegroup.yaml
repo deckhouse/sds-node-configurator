@@ -438,14 +438,17 @@ spec:
                         description: |
                           Condition type.
 
-                          - `DevicesResolved` is `True` when every WWID of the spec resolves
-                            to a device on the metadata owner.
-                          - `VGReady` is `True` once the Volume Group exists and is readable.
+                          - `VGReady` is `True` once the Volume Group exists and is readable
+                            on the metadata owner.
                           - `MetadataOwnerReady` is `True` while the owning node holds the
                             lockspace and can perform metadata operations.
                           - `Ready` summarises the rest.
+
+                          Whether the devices resolved on every node is not among them: only
+                          the metadata owner writes here, and it can speak for itself alone.
+                          That answer belongs to the pool resource above this one, which sees
+                          all the candidates.
                         enum:
-                          - DevicesResolved
                           - VGReady
                           - MetadataOwnerReady
                           - Ready
