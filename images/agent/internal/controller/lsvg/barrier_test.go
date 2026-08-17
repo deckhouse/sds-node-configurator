@@ -88,6 +88,40 @@ func TestAFencedNodeReturnsToThePoolByItself(t *testing.T) {
 		"the record of the fencing stops being true once the last error target is gone")
 }
 
+func TestAnErrorTargetSomethingStillHoldsOpenIsPublished(t *testing.T) {
+	// Seen on hardware: the paths came back, the recovery stopped the dead
+	// lockspace and could not remove the volume's error target because kubelet
+	// still had the mount of a pod nobody had deleted. Waiting is the right
+	// answer — the map must not be removed under a stale page cache while the
+	// lock belongs to another node — but the wait was published nowhere, so the
+	// pool showed a member that would not come back and no reason for it.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := ownedGroup()
+	r, cl, dir := testReconciler(t, nodeWith(map[string]string{SanlockHostIDAnnotation: "7"}), commands, nil, group)
+	const volumeMap = testVG + "-pvc--52529f60"
+	fencedNode(t, dir, volumeMap)
+
+	commands.EXPECT().RemoveDMDevice(gomock.Any(), volumeMap).
+		Return("dmsetup remove", errors.New("Device or resource busy"))
+	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("vgcreate", nil).AnyTimes()
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+
+	res := reconcile(t, r, group)
+
+	assert.NotZero(t, res.RequeueAfter, "the opener lets go on its own, and the next pass finishes this")
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	require.NotNil(t, published.Status)
+	require.NotEmpty(t, published.Status.Nodes)
+	assert.False(t, published.Status.Nodes[0].LockspaceStarted)
+	assert.Equal(t, ReasonBarrierNotCleared, published.Status.Nodes[0].Reason)
+	assert.Contains(t, published.Status.Nodes[0].Message, volumeMap,
+		"the message names the map, which is what the operator has to look for")
+}
+
 func TestAFencedNodeWaitsWhileItsLUNsAreStillMissing(t *testing.T) {
 	// Rejoining while the paths are broken buys a second fencing one io_timeout
 	// later. The node waits instead — and says why, because a node out of its

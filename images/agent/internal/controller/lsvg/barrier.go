@@ -101,6 +101,10 @@ func (r *Reconciler) recoverFromBarrier(ctx context.Context, lsvg *v1alpha1.LVMS
 		// prevent.
 		r.log.Info(fmt.Sprintf("[%s] %s was fenced at %s and cannot return yet: %d device(s) still missing",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, res.FinishedAt.Format(time.RFC3339), len(missing)))
+		r.publishBarrierWaiting(ctx, lsvg, fmt.Sprintf(
+			"the node was fenced at %s and cannot rejoin the pool yet: %d of its device(s) are still "+
+				"missing here, and rejoining before the array answers would only earn another fencing",
+			res.FinishedAt.Format(time.RFC3339), len(missing)))
 		return true
 	}
 
@@ -160,6 +164,18 @@ func (r *Reconciler) recoverFromBarrier(ctx context.Context, lsvg *v1alpha1.LVMS
 			ReconcilerName, dmName, cmd, err.Error()))
 
 		if dmName != leaseMap {
+			// Normally, but not always: on a stand with no platform fencing the
+			// opener is kubelet, still holding the mount of a pod nobody has
+			// deleted, and the pass repeats for as long as that pod lives. The
+			// map must not be removed under it — this node's page cache is stale
+			// and the lock is somebody else's by now — so the wait is right and
+			// the silence around it was not. Whoever is looking at the pool sees
+			// a member that will not come back and no reason anywhere but a log
+			// on the node.
+			r.publishBarrierWaiting(ctx, lsvg, "the node was fenced at "+
+				res.FinishedAt.Format(time.RFC3339)+" and cannot rejoin the pool while "+dmName+
+				" is still open here: the map is an error target holding nothing, and it goes as soon as "+
+				"whatever has it open — normally a pod that has not been deleted — lets go.")
 			return true
 		}
 
@@ -333,6 +349,22 @@ func (r *Reconciler) publishLockStartFailure(
 	}
 
 	r.publishNodeState(ctx, lsvg, false, reason, message)
+}
+
+// publishBarrierWaiting says that a fenced node is still on its way back.
+//
+// The difference from a stall is who has to act: nobody. These are the two
+// waits the recovery does on purpose — for the array to present the LUN again,
+// and for whatever still holds an error target to close it — and both end by
+// themselves. They are published because a member sitting out of its pool with
+// an empty reason is indistinguishable from a broken agent, and the operator
+// then goes looking in the wrong place.
+func (r *Reconciler) publishBarrierWaiting(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+	message string,
+) {
+	r.publishNodeState(ctx, lsvg, false, ReasonBarrierNotCleared, message)
 }
 
 // publishBarrierStall says that a fenced node cannot come back on its own.
