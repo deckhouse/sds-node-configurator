@@ -215,6 +215,7 @@ const (
 	ReasonReservationConflict = "ReservationConflict"
 	ReasonLUNNotReadyYet      = "LUNNotReadyYet"
 	ReasonLockspaceNotStarted = "LockspaceNotStarted"
+	ReasonLockspaceStopFailed = "LockspaceStopFailed"
 	ReasonBarrierNotCleared   = "BarrierNotCleared"
 	ReasonVolumesRemain       = "VolumesRemain"
 	ReasonRemovalFailed       = "RemovalFailed"

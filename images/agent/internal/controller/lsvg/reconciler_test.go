@@ -329,6 +329,47 @@ func TestLeaveDropsReadinessBeforeStoppingTheLockspace(t *testing.T) {
 	reconcile(t, r, testGroup("other-node"))
 }
 
+func TestALeaveThatCannotStopTheLockspaceStopsClaimingToHoldIt(t *testing.T) {
+	// Seen on the stand: a node left the pool while its LUNs were gone, so the
+	// stop could not run — `vgchange --lock-stop` cannot find a volume group it
+	// cannot read. The annotation was already false and the published entry
+	// still said LockspaceStarted, so for five minutes the pool counted a member
+	// holding leases that the lock manager did not have. Every decision about
+	// this pool is made against that entry.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	node := nodeWith(map[string]string{
+		SanlockHostIDAnnotation:                     "7",
+		LockspaceStartedAnnotationPrefix + "pool-1": "true",
+	})
+	group := testGroup("other-node")
+	group.Status = &v1alpha1.LVMSharedVolumeGroupStatus{
+		Nodes: []v1alpha1.LVMSharedVolumeGroupNodeStatus{
+			{Name: testNode, LockspaceStarted: true, Reason: ReasonLockspaceStarted},
+		},
+	}
+	// Declared before the helper: gomock answers with the expectation declared
+	// first, and the helper's own answer is that the lock manager has the
+	// lockspace. Here it does not, which is the whole case.
+	commands.EXPECT().LockspaceRunning(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+	commands.EXPECT().VGLockStop(gomock.Any(), "vgshared").
+		Return("vgchange --lock-stop", errors.New("Volume group \"vgshared\" not found"))
+
+	r, cl, _ := testReconciler(t, node, commands, []internal.LVData{inactiveLV("vgshared", "vol1")}, group)
+
+	res := reconcile(t, r, group)
+
+	assert.NotZero(t, res.RequeueAfter, "the stop is tried again, and until it works the truth is published")
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	require.NotNil(t, published.Status)
+	require.NotEmpty(t, published.Status.Nodes)
+	assert.False(t, published.Status.Nodes[0].LockspaceStarted,
+		"the lock manager does not have the lockspace, and the entry must not say otherwise")
+	assert.Equal(t, ReasonLockspaceStopFailed, published.Status.Nodes[0].Reason)
+}
+
 func TestVolumesOfOtherGroupsDoNotBlockLeaving(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)

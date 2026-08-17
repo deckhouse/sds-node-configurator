@@ -1016,6 +1016,16 @@ func (r *Reconciler) leave(
 	if err != nil {
 		r.log.Warning(fmt.Sprintf("[%s] unable to stop the lockspace of %s (cmd: %s): %s",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd, err.Error()))
+
+		// The annotation above already says this node is out; the published entry
+		// still said it holds the lockspace, and returning here left it saying so.
+		// Seen on the stand: a node whose LUNs went away while it was leaving
+		// reported LockspaceStarted for five minutes with no lockspace in the
+		// lock manager at all — the one state every decision about this pool is
+		// made against, from the count of members in the pool to whether a LUN
+		// may be taken away from this node.
+		r.publishNodeState(ctx, lsvg, r.lockspaceReallyRunning(ctx, lsvg), ReasonLockspaceStopFailed,
+			"this node is leaving the pool and its lockspace could not be stopped: "+err.Error())
 		return controller.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
