@@ -457,6 +457,23 @@ func TestVolumesOfOtherGroupsDoNotBlockLeaving(t *testing.T) {
 	reconcile(t, r, testGroup("other-node"))
 }
 
+func TestAPoolThisNodeIsNotInIsLookedAtLessOften(t *testing.T) {
+	// The periodic pass exists because the states this reconciler repairs produce
+	// no events, and that reason holds for a node's own pools. For a pool it is
+	// not in and holds nothing in, a pass a minute is a background load per pool
+	// per node with nothing to find — while dropping the pass entirely would lose
+	// the one case that matters: a node whose record of what it holds was lost.
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	r, _, _ := testReconciler(t, nodeWith(nil), commands, nil)
+
+	res := reconcile(t, r, testGroup("other-node"))
+
+	assert.Equal(t, outsiderRecheckInterval, res.RequeueAfter,
+		"a pool this node is not in is a safety net, not a repair loop")
+	assert.Greater(t, outsiderRecheckInterval, groupRecheckInterval)
+}
+
 func TestLeaveIsIdempotent(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	commands := mock_utils.NewMockCommands(ctrl)

@@ -194,9 +194,20 @@ func (r *Reconciler) Reconcile(
 	// returned an empty result stopped the clock for that group until something
 	// unrelated happened to it, which is how a deleted pool waited hours to be
 	// unwound.
+	//
+	// Not at the same rate for every group, though. A node re-examines the pools
+	// it belongs to every minute, because that is where residue appears; a pool
+	// it is not a member of and holds nothing in is looked at far less often. The
+	// rule itself stays — a node whose record of what it holds was lost still has
+	// to find its own residue, and "nothing recorded" is not "nothing held" — but
+	// paying a pass a minute per pool per node for that answer is the wrong price
+	// on a cluster with several pools and dozens of nodes.
 	defer func() {
 		if err == nil && res.RequeueAfter == 0 {
 			res.RequeueAfter = groupRecheckInterval
+			if !r.isMember(lsvg) && lsvg.DeletionTimestamp == nil {
+				res.RequeueAfter = outsiderRecheckInterval
+			}
 		}
 	}()
 
@@ -287,6 +298,15 @@ func (r *Reconciler) Reconcile(
 // short enough that residue does not outlive an interesting window and long
 // enough that a hundred nodes are not a load on anything.
 const groupRecheckInterval = time.Minute
+
+// outsiderRecheckInterval is how often a node looks at a pool it is not in.
+//
+// It still looks: the only record of what this node holds is an annotation on
+// its own Node object, and a node that lost that record — a Node recreated, an
+// annotation removed by hand — would otherwise never find the mappings it left
+// behind. But nothing there changes without an event, so the rate is the rate of
+// a safety net rather than of a repair loop.
+const outsiderRecheckInterval = 10 * time.Minute
 
 // lockspaceReallyRunning asks the lock manager rather than this module's own
 // bookkeeping. An error is not an answer: a node that cannot ask keeps its
