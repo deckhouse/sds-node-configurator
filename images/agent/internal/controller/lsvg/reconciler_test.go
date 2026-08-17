@@ -246,13 +246,32 @@ func TestLeaveWaitsWhileSomethingStillAsksForTheVolume(t *testing.T) {
 	}
 	fakeSysBlockWithLUN(t, 8192)
 	fakeActiveLV(t, "vol1")
-	r, cl, _ := testReconciler(t, node, commands, nil, volume, attachment)
+
+	// Declared before the helper, which answers the opposite by default and wins
+	// as the first expectation: here the lock manager does not have the
+	// lockspace, which is the state a fenced member sits in and the reason the
+	// entry has to be corrected.
+	commands.EXPECT().LockspaceRunning(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+
+	r, cl, _ := testReconciler(t, node, commands, nil, group, volume, attachment)
 
 	res := reconcile(t, r, group)
 
 	assert.NotZero(t, res.RequeueAfter)
 	assert.Contains(t, annotationsOf(t, cl), LockspaceStartedAnnotationPrefix+"pool-1",
 		"the node still holds the lockspace, so it must still say so")
+
+	// Found by the e2e spec written for the barrier: the barrier kills the
+	// lockspace, the pool drops the node for devices it can no longer see, and the
+	// volume it served is still mapped behind a pod nobody deleted. The entry went
+	// on claiming the lockspace through all of it.
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	require.NotNil(t, published.Status)
+	require.NotEmpty(t, published.Status.Nodes)
+	assert.False(t, published.Status.Nodes[0].LockspaceStarted,
+		"the lock manager holds nothing, and the entry everything else reads must say so")
+	assert.Equal(t, ReasonVolumesRemain, published.Status.Nodes[0].Reason)
 }
 
 func TestALiveStuckNodeRaisesTheBarrierOverItsOwnVolumes(t *testing.T) {

@@ -982,6 +982,18 @@ func (r *Reconciler) leave(
 		if r.attachmentsRemain(ctx, lsvg.Name) {
 			r.log.Warning(fmt.Sprintf("[%s] cannot stop the lockspace of %s yet: %d volume(s) still active here (%s)",
 				ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, len(active), strings.Join(active, ", ")))
+
+			// And said on the object, because this is the state a fenced member
+			// sits in: the barrier killed its lockspace, the pool dropped it for
+			// devices it can no longer see, and the volume it was serving is
+			// still mapped here behind a pod nobody has deleted. The entry went on
+			// claiming the lockspace through all of it — the lock manager holds
+			// none — which is the one thing everything else reads. Found by the
+			// e2e spec written for the barrier.
+			r.publishNodeState(ctx, lsvg, r.lockspaceReallyRunning(ctx, lsvg), ReasonVolumesRemain,
+				fmt.Sprintf("this node is leaving the pool and %d volume(s) are still active here (%s): "+
+					"the lockspace is stopped once whatever holds them lets go",
+					len(active), strings.Join(active, ", ")))
 			return controller.Result{RequeueAfter: 15 * time.Second}, nil
 		}
 
