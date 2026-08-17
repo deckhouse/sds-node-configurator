@@ -526,11 +526,20 @@ func (d *Discoverer) createCandidateName(candidate internal.BlockDeviceCandidate
 				d.log.Trace(fmt.Sprintf("[CreateCandidateName] device: %+v. Device list: %+v", candidate, devices))
 				serial, err := getSerialForMultipathDevice(candidate, devices)
 				if err != nil {
-					d.log.Warning(fmt.Sprintf("[CreateCandidateName] Unable to obtain serial number or its equivalent; skipping device: %s. Error: %s", candidate.Path, err))
-					return ""
+					// Fall back to SerialInherited (filled by filterDevices from parents)
+					// before giving up — same value getSerialForMultipathDevice would
+					// return when the parent is an mpath_member.
+					if candidate.SerialInherited != "" {
+						d.log.Info(fmt.Sprintf("[CreateCandidateName] Using inherited serial %s for mpath device %s after parent lookup failed: %s", candidate.SerialInherited, candidate.Path, err))
+						candidate.Serial = candidate.SerialInherited
+					} else {
+						d.log.Warning(fmt.Sprintf("[CreateCandidateName] Unable to obtain serial number or its equivalent; skipping device: %s. Error: %s", candidate.Path, err))
+						return ""
+					}
+				} else {
+					candidate.Serial = serial
+					d.log.Info(fmt.Sprintf("[CreateCandidateName] Successfully obtained serial number or its equivalent: %s for device: %s", candidate.Serial, candidate.Path))
 				}
-				candidate.Serial = serial
-				d.log.Info(fmt.Sprintf("[CreateCandidateName] Successfully obtained serial number or its equivalent: %s for device: %s", candidate.Serial, candidate.Path))
 			default:
 				isMdRaid := false
 				matched, err := regexp.MatchString(`raid.*`, candidate.Type)
@@ -542,11 +551,20 @@ func (d *Discoverer) createCandidateName(candidate internal.BlockDeviceCandidate
 				}
 				serial, err := readSerialBlockDevice(candidate.Path, isMdRaid)
 				if err != nil {
-					d.log.Warning(fmt.Sprintf("[CreateCandidateName] Unable to obtain serial number or its equivalent; skipping device: %s. Error: %s", candidate.Path, err))
-					return ""
+					// crypt/dm devices rarely expose /sys/block/<name>/serial; use
+					// the parent serial discovered by filterDevices instead of
+					// skipping the device entirely.
+					if candidate.SerialInherited != "" {
+						d.log.Info(fmt.Sprintf("[CreateCandidateName] Using inherited serial %s for device %s after direct read failed: %s", candidate.SerialInherited, candidate.Path, err))
+						candidate.Serial = candidate.SerialInherited
+					} else {
+						d.log.Warning(fmt.Sprintf("[CreateCandidateName] Unable to obtain serial number or its equivalent; skipping device: %s. Error: %s", candidate.Path, err))
+						return ""
+					}
+				} else {
+					d.log.Info(fmt.Sprintf("[CreateCandidateName] Successfully obtained serial number or its equivalent: %s for device: %s", serial, candidate.Path))
+					candidate.Serial = serial
 				}
-				d.log.Info(fmt.Sprintf("[CreateCandidateName] Successfully obtained serial number or its equivalent: %s for device: %s", serial, candidate.Path))
-				candidate.Serial = serial
 			}
 		}
 	}
