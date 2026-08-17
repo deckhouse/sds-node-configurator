@@ -41,6 +41,7 @@ cve-scan
 # tooling and the VEX attestation step read from the module directory.
 .git
 .github
+.gitlab-ci.yml
 .werf
 .dmtlint.yaml
 .gitignore

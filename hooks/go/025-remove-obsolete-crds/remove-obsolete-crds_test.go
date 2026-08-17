@@ -21,6 +21,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/deckhouse/deckhouse/pkg/log"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -33,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	"github.com/deckhouse/deckhouse/pkg/log"
 	"github.com/deckhouse/sds-node-configurator/hooks/go/consts"
 )
 

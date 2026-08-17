@@ -1,11 +1,12 @@
 module github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender
 
 go 1.26.6
+
 require (
-	github.com/deckhouse/sds-common-lib v0.6.3
-	github.com/deckhouse/sds-local-volume/api v0.0.0-20250114155747-5d75d401a787
+	github.com/deckhouse/sds-local-volume/api v0.0.0-20260817174544-85d6a53407b5
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250424082358-e271071c2a57
-	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20260321102435-8421db65f5d9
+	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20260817181823-91960760c4aa
+	github.com/deckhouse/sds-common-lib v0.6.3
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
 	github.com/spf13/cobra v1.10.2
@@ -63,14 +64,14 @@ require (
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/oauth2 v0.31.0 // indirect
+	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/time v0.13.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
-	google.golang.org/protobuf v1.36.9 // indirect
+	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

@@ -62,12 +62,12 @@ type LVMVolumeGroupFileDeviceSpec struct {
 
 // +k8s:deepcopy-gen=true
 type LVMVolumeGroupStatus struct {
-	AllocatedSize        resource.Quantity              `json:"allocatedSize"`
-	Nodes                []LVMVolumeGroupNode           `json:"nodes"`
-	ThinPools            []LVMVolumeGroupThinPoolStatus `json:"thinPools"`
-	VGSize               resource.Quantity              `json:"vgSize"`
-	VGUuid               string                         `json:"vgUUID"`
-	Phase string `json:"phase"`
+	AllocatedSize resource.Quantity              `json:"allocatedSize"`
+	Nodes         []LVMVolumeGroupNode           `json:"nodes"`
+	ThinPools     []LVMVolumeGroupThinPoolStatus `json:"thinPools"`
+	VGSize        resource.Quantity              `json:"vgSize"`
+	VGUuid        string                         `json:"vgUUID"`
+	Phase         string                         `json:"phase"`
 	// ObservedGeneration is the value of metadata.generation the conditions
 	// watcher last computed a verdict against. When it trails
 	// metadata.generation the phase and the aggregate Ready below still describe
@@ -76,12 +76,12 @@ type LVMVolumeGroupStatus struct {
 	// Only the conditions watcher sets it, because it is the only writer that
 	// looks at the resource as a whole. The agent and the infrastructure watcher
 	// each own individual stage conditions and stamp the generation on those.
-	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
-	Conditions         []metav1.Condition `json:"conditions"`
-	ThinPoolReady        string                         `json:"thinPoolReady"`
-	ConfigurationApplied string                         `json:"configurationApplied"`
-	VGFree               resource.Quantity              `json:"vgFree"`
-	ExtentSize           resource.Quantity              `json:"extentSize"`
+	ObservedGeneration   int64              `json:"observedGeneration,omitempty"`
+	Conditions           []metav1.Condition `json:"conditions"`
+	ThinPoolReady        string             `json:"thinPoolReady"`
+	ConfigurationApplied string             `json:"configurationApplied"`
+	VGFree               resource.Quantity  `json:"vgFree"`
+	ExtentSize           resource.Quantity  `json:"extentSize"`
 }
 
 // +k8s:deepcopy-gen=true
