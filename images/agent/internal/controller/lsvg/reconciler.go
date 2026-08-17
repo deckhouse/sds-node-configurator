@@ -38,8 +38,10 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
@@ -89,6 +91,12 @@ const (
 	// unknownVGName is what lvm prints when it cannot name the group a physical
 	// volume belongs to. It is an admission, not an answer.
 	unknownVGName = "[unknown]"
+
+	// The conditions the group publishes, named by the schema. Ready comes from
+	// the shared library, because every resource of the platform summarises
+	// itself under the same name.
+	conditionTypeVGReady            = "VGReady"
+	conditionTypeMetadataOwnerReady = "MetadataOwnerReady"
 )
 
 type Reconciler struct {
@@ -484,9 +492,12 @@ func (r *Reconciler) publishGroup(
 	vg, cmd, _, err := r.commands.GetVG(lsvg.Spec.ActualVGNameOnTheNode)
 	if err != nil || vg.VGUUID == "" {
 		// Ordinary right after vgcreate on a busy node, and equally ordinary while
-		// the LUN is still settling. Neither is worth an error on the object.
+		// the LUN is still settling. Neither is worth an error on the object —
+		// but it is worth saying, because "not readable yet" and "readable and
+		// empty" look the same to everything downstream.
 		r.log.Info(fmt.Sprintf("[%s] %s cannot be read yet (cmd: %s), will publish it later",
 			ReconcilerName, lsvg.Spec.ActualVGNameOnTheNode, cmd))
+		r.publishGroupConditions(ctx, lsvg, false)
 		return controller.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
@@ -520,8 +531,13 @@ func (r *Reconciler) publishGroup(
 		lsvg.Status.LeaseAreaSize == status.LeaseAreaSize &&
 		lsvg.Status.LogicalVolumeCount == status.LogicalVolumeCount &&
 		lsvg.Status.ObservedGeneration == status.ObservedGeneration {
-		// Nothing changed. Writing anyway would wake every watcher of this object
-		// on a timer for no reason.
+		// Nothing changed about the group itself. The conditions still have to be
+		// looked at: what they say about the owner's lockspace changes without
+		// anything here changing with it.
+		r.publishGroupConditions(ctx, lsvg, true)
+
+		// Writing anything else anyway would wake every watcher of this object on
+		// a timer for no reason.
 		return controller.Result{}, nil
 	}
 
@@ -538,12 +554,145 @@ func (r *Reconciler) publishGroup(
 		// stand: two healthy members reported outside the pool for a minute.
 		status.Nodes = lsvg.Status.Nodes
 	}
+	setGroupConditions(status, lsvg.Generation, true, r.ownerHoldsLockspace(ctx, lsvg, vg.VGUUID))
 	lsvg.Status = status
 	if err := r.cl.Status().Patch(ctx, lsvg, patch); err != nil {
 		return controller.Result{}, fmt.Errorf("publish the status of %s: %w", lsvg.Name, err)
 	}
 
 	return controller.Result{}, nil
+}
+
+// publishGroupConditions writes only the conditions, for the passes that have
+// nothing else to say.
+//
+// The group publishes them because the CustomResourceDefinition says it does —
+// `kubectl get` prints Ready from them — and a column that is always empty is
+// worse than no column: it reads as "not ready" on a healthy pool.
+func (r *Reconciler) publishGroupConditions(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+	vgReadable bool,
+) {
+	status := lsvg.Status.DeepCopy()
+	if status == nil {
+		status = &v1alpha1.LVMSharedVolumeGroupStatus{}
+	}
+
+	before := status.Conditions
+	setGroupConditions(status, lsvg.Generation, vgReadable, r.ownerHoldsLockspace(ctx, lsvg, ""))
+	if conditionsSame(before, status.Conditions) {
+		return
+	}
+
+	patch := client.MergeFrom(lsvg.DeepCopy())
+	lsvg.Status = status
+	if err := r.cl.Status().Patch(ctx, lsvg, patch); err != nil {
+		r.log.Warning(fmt.Sprintf("[%s] unable to publish the conditions of %s: %s",
+			ReconcilerName, lsvg.Name, err.Error()))
+	}
+}
+
+// ownerHoldsLockspace answers whether metadata operations can be taken at all.
+//
+// Read from the annotation this node writes about itself rather than from the
+// entry it publishes in the group's status: the annotation is the fact the rest
+// of the module already gates on — an attachment is refused without it — and it
+// is written before the status entry, so taking the answer from the status would
+// report the owner unable to act for as long as one apply takes.
+func (r *Reconciler) ownerHoldsLockspace(
+	ctx context.Context,
+	lsvg *v1alpha1.LVMSharedVolumeGroup,
+	vgUUID string,
+) bool {
+	node, err := r.node(ctx)
+	if err != nil {
+		// Unknown, and unknown is not "no". Saying the owner cannot act because
+		// its own Node could not be read would take a working pool out of
+		// service over an API hiccup.
+		return r.lockspaceStartedInStatus(lsvg)
+	}
+	return r.lockspaceStarted(node, lsvg.Name, vgUUID)
+}
+
+// setGroupConditions states the two things the owner knows and the summary that
+// follows from them.
+//
+// DevicesResolved is not among them here: the owner reaches this point only
+// after every WWID of the spec resolved, so publishing it from here would be
+// publishing a constant. It belongs to the pool above, which knows about the
+// nodes that are not the owner.
+func setGroupConditions(
+	status *v1alpha1.LVMSharedVolumeGroupStatus,
+	generation int64,
+	vgReadable, ownerHoldsLockspace bool,
+) {
+	vgReady := metav1.Condition{
+		Type:               conditionTypeVGReady,
+		Status:             metav1.ConditionTrue,
+		ObservedGeneration: generation,
+		Reason:             conditions.ReasonReconciled,
+		Message:            "the volume group exists and is readable on the metadata owner",
+	}
+	if !vgReadable {
+		vgReady.Status = metav1.ConditionFalse
+		vgReady.Reason = conditions.ReasonPending
+		vgReady.Message = "the volume group is not readable on the metadata owner yet"
+	}
+
+	ownerReady := metav1.Condition{
+		Type:               conditionTypeMetadataOwnerReady,
+		Status:             metav1.ConditionTrue,
+		ObservedGeneration: generation,
+		Reason:             conditions.ReasonReconciled,
+		Message:            "the metadata owner holds the lockspace and can perform metadata operations",
+	}
+	if !ownerHoldsLockspace {
+		// Every metadata operation of the pool — creating a volume, extending
+		// one, removing one — is taken under the group lock, and the lock comes
+		// from the lockspace. An owner without one is a pool that serves what it
+		// has and accepts nothing new, which is worth saying before somebody
+		// creates a PersistentVolumeClaim against it.
+		ownerReady.Status = metav1.ConditionFalse
+		ownerReady.Reason = conditions.ReasonPending
+		ownerReady.Message = "the metadata owner does not hold the lockspace, so no metadata operation can be taken"
+	}
+
+	ready := metav1.Condition{
+		Type:               conditions.TypeReady,
+		Status:             metav1.ConditionTrue,
+		ObservedGeneration: generation,
+		Reason:             conditions.ReasonReconciled,
+		Message:            "the group is readable and its metadata owner can act on it",
+	}
+	if vgReady.Status != metav1.ConditionTrue || ownerReady.Status != metav1.ConditionTrue {
+		ready.Status = metav1.ConditionFalse
+		ready.Reason = conditions.ReasonPending
+		ready.Message = vgReady.Message
+		if ownerReady.Status != metav1.ConditionTrue {
+			ready.Message = ownerReady.Message
+		}
+	}
+
+	conditions.Set(&status.Conditions, vgReady)
+	conditions.Set(&status.Conditions, ownerReady)
+	conditions.Set(&status.Conditions, ready)
+}
+
+// conditionsSame answers whether a write would say anything new. The timestamps
+// are not compared: conditions.Set leaves the transition time alone while the
+// status holds, and comparing it would make every pass a write.
+func conditionsSame(before, after []metav1.Condition) bool {
+	if len(before) != len(after) {
+		return false
+	}
+	for i := range after {
+		found := conditions.Get(before, after[i].Type)
+		if found == nil || !conditions.SemanticallyEqual(found, &after[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // ensureGroup creates the Volume Group if it is not there yet. Only the

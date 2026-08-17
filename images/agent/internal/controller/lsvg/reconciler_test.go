@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
@@ -565,6 +566,72 @@ func TestTheOwnerPublishesWhatItObservesAboutTheGroup(t *testing.T) {
 	}
 	assert.Contains(t, names, "node-2", "what a member published about itself is not the owner's to erase")
 	assert.Contains(t, names, "node-3")
+
+	// The schema says this group publishes conditions and `kubectl get` prints
+	// Ready from them. Nothing wrote any, so the column was empty on a healthy
+	// pool — which reads as "not ready", the opposite of the truth.
+	vgReady := conditions.Get(published.Status.Conditions, conditionTypeVGReady)
+	require.NotNil(t, vgReady)
+	assert.Equal(t, metav1.ConditionTrue, vgReady.Status)
+	ownerReady := conditions.Get(published.Status.Conditions, conditionTypeMetadataOwnerReady)
+	require.NotNil(t, ownerReady)
+	assert.Equal(t, metav1.ConditionTrue, ownerReady.Status,
+		"the owner published its own lockspace as started, and metadata operations need it")
+	ready := conditions.Get(published.Status.Conditions, conditions.TypeReady)
+	require.NotNil(t, ready)
+	assert.Equal(t, metav1.ConditionTrue, ready.Status)
+}
+
+func TestAGroupNobodyCanReadYetSaysSoInItsConditions(t *testing.T) {
+	// The owner cannot read the volume group: right after vgcreate on a busy
+	// node, or while the LUN is still settling. Nothing is written about the
+	// group itself then — correctly, since there is nothing to say — but the
+	// silence used to reach the reader as an empty Ready column, which is the
+	// same thing a healthy pool showed.
+	fakeSysBlockWithLUN(t, 8192)
+	ctrl := gomock.NewController(t)
+	commands := mock_utils.NewMockCommands(ctrl)
+	group := ownedGroup()
+
+	s := scheme.Scheme
+	require.NoError(t, v1alpha1.AddToScheme(s))
+	require.NoError(t, corev1.AddToScheme(s))
+	node := nodeWith(map[string]string{SanlockHostIDAnnotation: "7"})
+	cl := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(node, group).WithStatusSubresource(group).Build()
+
+	commands.EXPECT().MissingReservationTools(gomock.Any()).Return(nil, nil).AnyTimes()
+	commands.EXPECT().MultipathConfiguration(gomock.Any()).Return("\treservation_key \"file\"\n", nil).AnyTimes()
+	commands.EXPECT().RecordedReservationKey(gomock.Any()).Return("", nil).AnyTimes()
+	commands.EXPECT().ReservationKeyOf(gomock.Any(), gomock.Any()).Return("0x1", nil).AnyTimes()
+	commands.EXPECT().LockspaceRunning(gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
+	commands.EXPECT().GetAllPVs(gomock.Any()).Return(nil, "pvs", bytes.Buffer{}, nil).AnyTimes()
+	commands.EXPECT().GetVG(testVG).
+		Return(internal.VGData{}, "vgs", bytes.Buffer{}, errors.New("Volume group \"vgshared\" not found")).AnyTimes()
+	commands.EXPECT().CreateVGShared(gomock.Any(), gomock.Any()).Return("vgcreate", nil).AnyTimes()
+	commands.EXPECT().VGLockStart(gomock.Any(), testVG, 7).Return("vgchange --lock-start", nil).AnyTimes()
+	commands.EXPECT().GetPV(gomock.Any()).Return(internal.PVData{}, "pvs", bytes.Buffer{}, nil).AnyTimes()
+
+	sdsCache := cache.New()
+	sdsCache.StorePVs([]internal.PVData{{PVName: "/dev/mapper/mpathi", VGName: testVG}}, bytes.Buffer{})
+
+	log, err := logger.NewLogger(logger.WarningLevel)
+	require.NoError(t, err)
+	r := NewReconciler(cl, log, sdsCache, commands, monitoring.GetMetrics(testNode),
+		ReconcilerConfig{NodeName: testNode, HostIDDir: t.TempDir()})
+
+	reconcile(t, r, group)
+
+	published := &v1alpha1.LVMSharedVolumeGroup{}
+	require.NoError(t, cl.Get(context.Background(), client.ObjectKey{Name: group.Name}, published))
+	require.NotNil(t, published.Status)
+	vgReady := conditions.Get(published.Status.Conditions, conditionTypeVGReady)
+	require.NotNil(t, vgReady, "an unreadable group is a fact, and a fact nobody publishes is a fact nobody has")
+	assert.Equal(t, metav1.ConditionFalse, vgReady.Status)
+	ready := conditions.Get(published.Status.Conditions, conditions.TypeReady)
+	require.NotNil(t, ready)
+	assert.Equal(t, metav1.ConditionFalse, ready.Status)
+	assert.Empty(t, published.Status.Phase, "nothing was created, and the phase must not say otherwise")
 }
 
 func TestForeignGroupOnTheLUNIsRefused(t *testing.T) {
