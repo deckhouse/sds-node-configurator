@@ -1,9 +1,6 @@
 dirs:
   - /dev/
   - /run/udev/
-  # The cgroup hierarchy, for the same reason every agent that runs lvm in the
-  # host's namespaces mounts it: lvm and udev talk to systemd through it.
-  - /sys/fs/cgroup/
   # Where the agent leaves what the lock daemons of a shared pool read — the
   # sanlock host_id — and where their fencing handler leaves what the agent reads
   # back. The two have no other channel: the daemons hold no API credentials by
