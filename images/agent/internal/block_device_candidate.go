@@ -22,11 +22,11 @@ import (
 	"reflect"
 	"strconv"
 
-	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/gosimple/slug"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 

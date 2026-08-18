@@ -3,9 +3,9 @@ module github.com/deckhouse/sds-node-configurator/hooks/go
 go 1.26.6
 
 require (
+	github.com/deckhouse/sds-common-lib v0.9.0
 	github.com/deckhouse/deckhouse/pkg/log v0.0.0-20250814094423-e9f108b41a1a
 	github.com/deckhouse/module-sdk v0.7.0
-	github.com/deckhouse/sds-common-lib v0.0.0-20250428090414-0c2938b30fa7
 	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.2.0
 	k8s.io/api v0.32.10
 	k8s.io/apiextensions-apiserver v0.32.10
@@ -85,7 +85,7 @@ require (
 	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/time v0.10.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
-	google.golang.org/protobuf v1.36.5 // indirect
+	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
