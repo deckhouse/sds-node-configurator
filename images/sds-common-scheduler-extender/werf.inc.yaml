@@ -46,11 +46,15 @@ shell:
     - export GOOS=linux GOARCH=amd64 CGO_ENABLED=0
     - |
       {{- include "image-build.build" (set $ "BuildCommand" (printf `go build -ldflags="-s -w" -tags "%s" -o /%s` .MODULE_EDITION $.ImageName)) | nindent 6 }}
-    - chmod +x /{{ $.ImageName }}
+    # Absolute mode: see the note in .werf/defines/golang.tmpl — `chmod +x` is masked by
+    # the umask in effect and can leave the binary executable by root only.
+    - chmod 0755 /{{ $.ImageName }}
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}
 from: {{ index $.Images "builder/distroless" }}
+# An import is keyed on file content, not on mode: without this the pre-fix stage stays cached.
+fromCacheVersion: "1"
 git:
 {{- include "image mount points" . }}
 import:

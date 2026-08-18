@@ -3,9 +3,9 @@ module github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-ex
 go 1.26.6
 
 require (
-	github.com/deckhouse/sds-local-volume/api v0.0.0-20260817174544-85d6a53407b5
+	github.com/deckhouse/sds-local-volume/api v0.0.0-20260817195343-682df4d51ffd
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250424082358-e271071c2a57
-	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20260817181823-91960760c4aa
+	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20260817200905-b05ceebc8008
 	github.com/deckhouse/sds-common-lib v0.6.3
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
