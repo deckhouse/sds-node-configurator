@@ -1,0 +1,4 @@
+Changes:
+  - Bugfix: the controller is granted permission to write events (create and patch) - previously the event write was denied by RBAC
+  - CVE fixes
+  - Internal build changes: CI moved to GitLab CI, the Go module paths to github.com, and crds, docs and openapi are shipped in the release image
