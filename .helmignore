@@ -50,3 +50,7 @@ cve-scan
 .golangci.yaml
 .pre-commit-config.yaml
 cspell.config.yaml
+LICENSE
+known_vulnerabilities.vex
+module.yaml
+oss.yaml
