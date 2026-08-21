@@ -101,8 +101,34 @@ const (
 	ReasonDeviceHotPlugged = "HotPlugged"
 )
 
+// BlockDeviceConditionMissing reports that the device this BlockDevice
+// describes was not found on its node during the most recent scan.
+//
+// Only published for a device the agent would otherwise never delete on its
+// own -- one that is not Consumable (see shouldDeleteBlockDevice), typically
+// because it is already an LVM Physical Volume. Losing that device out from
+// under a live LVMVolumeGroup is worth surfacing; silently doing nothing,
+// which is what happened before this condition existed, left status.path
+// pointing at a device that no longer existed with no indication anywhere
+// that anything was wrong.
+//
+// Absent while the device is seen normally -- there is no "not missing" to
+// report. Unknown while it has been briefly absent: a flapping iSCSI path or
+// a udev event burst straddling the device coming back is the common case,
+// and this clears itself the moment the device reappears without ever
+// alerting anyone. Only escalates to True once the device has been missing
+// continuously for missingGracePeriod (see discoverer.go), since by then a
+// transient blip is no longer the likely explanation.
+const BlockDeviceConditionMissing = "Missing"
+
+// ReasonDeviceNotFound is the only reason BlockDeviceConditionMissing is
+// published with, at both Unknown and True -- the two statuses are already
+// what distinguishes "recently gone" from "confirmed gone".
+const ReasonDeviceNotFound = "DeviceNotFound"
+
 // BlockDeviceConditionTypes is every condition type a BlockDevice publishes.
 // See LVGConditionTypes in the controller for why the set is written down.
 var BlockDeviceConditionTypes = []string{
 	BlockDeviceConditionConsumable,
+	BlockDeviceConditionMissing,
 }

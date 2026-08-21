@@ -175,6 +175,10 @@ func (candidate *BlockDeviceCandidate) UpdateAPIBlockDevice(blockDevice *v1alpha
 	blockDevice.Status = candidate.asAPIBlockDeviceStatus()
 	blockDevice.Status.Conditions = existing
 	candidate.setConsumableCondition(blockDevice)
+	// This method only ever runs for a candidate that exists right now, so a
+	// Missing condition carried over from a previous pass is stale by
+	// definition -- the device it described as gone is what we're updating.
+	conditions.Remove(&blockDevice.Status.Conditions, v1alpha1.BlockDeviceConditionMissing)
 
 	blockDevice.Labels = newBlockDeviceLabels(blockDevice)
 }
@@ -225,6 +229,7 @@ func (candidate *BlockDeviceCandidate) HasBlockDeviceDiff(blockDevice v1alpha1.B
 		candidate.FSType != blockDevice.Status.FsType ||
 		candidate.MachineID != blockDevice.Status.MachineID ||
 		candidate.consumableConditionDiffers(blockDevice) ||
+		conditions.Get(blockDevice.Status.Conditions, v1alpha1.BlockDeviceConditionMissing) != nil ||
 		!reflect.DeepEqual(newBlockDeviceLabels(&blockDevice), blockDevice.Labels)
 }
 

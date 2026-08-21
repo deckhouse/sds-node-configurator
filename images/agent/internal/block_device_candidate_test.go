@@ -24,7 +24,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
@@ -263,6 +265,25 @@ var _ = Describe("Block device candidate", func() {
 
 				It("keep extra labels", func() {
 					Expect(blockDevice.Labels).To(BeEquivalentTo(expectedLabels))
+				})
+			})
+
+			When("it carries a stale Missing condition from a previous pass", func() {
+				BeforeEach(func() {
+					blockDevice.Status.Conditions = append(blockDevice.Status.Conditions, metav1.Condition{
+						Type:   v1alpha1.BlockDeviceConditionMissing,
+						Status: metav1.ConditionTrue,
+						Reason: v1alpha1.ReasonDeviceNotFound,
+					})
+				})
+
+				// The JustBeforeEach above already asserts HasBlockDeviceDiff is
+				// true and runs UpdateAPIBlockDevice -- the device reappearing
+				// as a real candidate is what puts this test here at all, so
+				// the stale Missing condition it carried over should not
+				// survive that update.
+				It("clears the Missing condition", func() {
+					Expect(conditions.Get(blockDevice.Status.Conditions, v1alpha1.BlockDeviceConditionMissing)).To(BeNil())
 				})
 			})
 		})

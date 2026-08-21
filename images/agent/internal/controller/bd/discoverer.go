@@ -29,9 +29,11 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
@@ -244,7 +246,8 @@ func (d *Discoverer) removeDeprecatedAPIDevices(
 	}
 
 	for name, device := range apiBlockDevices {
-		if shouldDeleteBlockDevice(device, actualCandidates, d.cfg.NodeName) {
+		switch {
+		case shouldDeleteBlockDevice(device, actualCandidates, d.cfg.NodeName):
 			err := d.deleteAPIBlockDevice(ctx, &device)
 			if err != nil {
 				d.log.Error(err, fmt.Sprintf("[RunBlockDeviceController] unable to delete APIBlockDevice, name: %s", name))
@@ -253,8 +256,88 @@ func (d *Discoverer) removeDeprecatedAPIDevices(
 
 			delete(apiBlockDevices, name)
 			d.log.Info(fmt.Sprintf("[RunBlockDeviceController] device deleted, name: %s", name))
+
+		case isMissingBlockDeviceCandidate(device, actualCandidates, d.cfg.NodeName):
+			if err := d.markBlockDeviceMissing(ctx, device); err != nil {
+				d.log.Error(err, fmt.Sprintf("[RunBlockDeviceController] unable to mark APIBlockDevice missing, name: %s", name))
+			}
 		}
 	}
+}
+
+// missingGracePeriod is how long a non-consumable BlockDevice's device may be
+// absent from a scan before BlockDeviceConditionMissing escalates from
+// Unknown to True. Long enough that a dropped iSCSI session reconnecting on
+// its own, or a udev event burst that briefly straddles the device coming
+// back, never gets flagged; short enough that a genuinely gone device is
+// still caught well within an on-call shift.
+const missingGracePeriod = 10 * time.Minute
+
+// isMissingBlockDeviceCandidate reports whether device belongs to this node,
+// no longer has a matching candidate, and is exempt from
+// shouldDeleteBlockDevice's own deletion (Consumable == false) -- the
+// population markBlockDeviceMissing needs to watch, since nothing else ever
+// revisits it once its device is gone.
+func isMissingBlockDeviceCandidate(device v1alpha1.BlockDevice, actualCandidates map[string]struct{}, nodeName string) bool {
+	return device.Status.NodeName == nodeName &&
+		!device.Status.Consumable &&
+		isBlockDeviceDeprecated(device.Name, actualCandidates)
+}
+
+// markBlockDeviceMissing publishes or escalates BlockDeviceConditionMissing
+// for a device isMissingBlockDeviceCandidate selected. See that condition's
+// own doc comment for the Unknown-then-True progression; this is the only
+// place that ever sets it, and block_device_candidate.go's UpdateAPIBlockDevice
+// is the only place that ever clears it, once the device is seen again.
+func (d *Discoverer) markBlockDeviceMissing(ctx context.Context, device v1alpha1.BlockDevice) error {
+	published := conditions.Get(device.Status.Conditions, v1alpha1.BlockDeviceConditionMissing)
+
+	newCondition := metav1.Condition{
+		Type:               v1alpha1.BlockDeviceConditionMissing,
+		Status:             metav1.ConditionUnknown,
+		Reason:             v1alpha1.ReasonDeviceNotFound,
+		Message:            fmt.Sprintf("device %q was not found on node %q during the most recent scan", device.Status.Path, device.Status.NodeName),
+		ObservedGeneration: device.Generation,
+	}
+
+	switch {
+	case published == nil:
+		// First pass without the device: publish Unknown and start the grace
+		// period clock via LastTransitionTime. Not yet actionable on its own.
+	case published.Status == metav1.ConditionTrue:
+		// Already escalated; nothing left to do until the device reappears,
+		// which UpdateAPIBlockDevice handles on a later pass.
+		return nil
+	case time.Since(published.LastTransitionTime.Time) >= missingGracePeriod:
+		newCondition.Status = metav1.ConditionTrue
+		newCondition.Message = fmt.Sprintf(
+			"device %q has not been found on node %q for over %s",
+			device.Status.Path, device.Status.NodeName, missingGracePeriod,
+		)
+	default:
+		// Still within the grace period: leave it Unknown. conditions.Set
+		// below is then a no-op (same status/reason/message), so this does
+		// not touch LastTransitionTime or write to the API on every pass.
+	}
+
+	if !conditions.Set(&device.Status.Conditions, newCondition) {
+		return nil
+	}
+
+	start := time.Now()
+	err := d.cl.Update(ctx, &device)
+	d.metrics.APIMethodsDuration(DiscovererName, "update").Observe(d.metrics.GetEstimatedTimeInSeconds(start))
+	d.metrics.APIMethodsExecutionCount(DiscovererName, "update").Inc()
+	if err != nil {
+		d.metrics.APIMethodsErrors(DiscovererName, "update").Inc()
+		return err
+	}
+
+	d.log.Warning(fmt.Sprintf(
+		"[RunBlockDeviceController] BlockDevice %q marked %s=%s: %s",
+		device.Name, v1alpha1.BlockDeviceConditionMissing, newCondition.Status, newCondition.Message,
+	))
+	return nil
 }
 
 func (d *Discoverer) getBlockDeviceCandidates() ([]internal.BlockDeviceCandidate, error) {

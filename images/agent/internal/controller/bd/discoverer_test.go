@@ -23,13 +23,16 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
@@ -361,10 +364,169 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		})
 	})
 
+	t.Run("isMissingBlockDeviceCandidate", func(t *testing.T) {
+		t.Run("returns_true", func(t *testing.T) {
+			bd := v1alpha1.BlockDevice{
+				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:   "node",
+					Consumable: false,
+				},
+			}
+			actual := map[string]struct{}{}
+
+			assert.True(t, isMissingBlockDeviceCandidate(bd, actual, "node"))
+		})
+
+		t.Run("returns_false_cause_of_dif_node", func(t *testing.T) {
+			bd := v1alpha1.BlockDevice{
+				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:   "node",
+					Consumable: false,
+				},
+			}
+			actual := map[string]struct{}{}
+
+			assert.False(t, isMissingBlockDeviceCandidate(bd, actual, "dif-node"))
+		})
+
+		t.Run("returns_false_cause_of_consumable", func(t *testing.T) {
+			// A consumable device that vanishes is shouldDeleteBlockDevice's
+			// job, not markBlockDeviceMissing's -- the two are mutually
+			// exclusive by construction in removeDeprecatedAPIDevices.
+			bd := v1alpha1.BlockDevice{
+				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:   "node",
+					Consumable: true,
+				},
+			}
+			actual := map[string]struct{}{}
+
+			assert.False(t, isMissingBlockDeviceCandidate(bd, actual, "node"))
+		})
+
+		t.Run("returns_false_cause_of_not_deprecated", func(t *testing.T) {
+			const name = "test"
+			bd := v1alpha1.BlockDevice{
+				ObjectMeta: metav1.ObjectMeta{Name: name},
+				Status: v1alpha1.BlockDeviceStatus{
+					NodeName:   "node",
+					Consumable: false,
+				},
+			}
+			actual := map[string]struct{}{name: {}}
+
+			assert.False(t, isMissingBlockDeviceCandidate(bd, actual, "node"))
+		})
+	})
+
+	t.Run("markBlockDeviceMissing", func(t *testing.T) {
+		newBlockDevice := func(name string) v1alpha1.BlockDevice {
+			return v1alpha1.BlockDevice{
+				ObjectMeta: metav1.ObjectMeta{Name: name},
+				Status: v1alpha1.BlockDeviceStatus{
+					NodeName: "test-node",
+					Path:     "/dev/sdx",
+				},
+			}
+		}
+
+		t.Run("publishes_unknown_on_first_pass", func(t *testing.T) {
+			d := setupDiscoverer()
+			bd := newBlockDevice("first-pass")
+			require.NoError(t, d.cl.Create(ctx, &bd))
+
+			require.NoError(t, d.markBlockDeviceMissing(ctx, bd))
+
+			var fetched v1alpha1.BlockDevice
+			require.NoError(t, d.cl.Get(ctx, client.ObjectKey{Name: bd.Name}, &fetched))
+			cond := conditions.Get(fetched.Status.Conditions, v1alpha1.BlockDeviceConditionMissing)
+			if assert.NotNil(t, cond) {
+				assert.Equal(t, metav1.ConditionUnknown, cond.Status)
+				assert.Equal(t, v1alpha1.ReasonDeviceNotFound, cond.Reason)
+			}
+		})
+
+		t.Run("stays_unknown_within_the_grace_period", func(t *testing.T) {
+			d := setupDiscoverer()
+			bd := newBlockDevice("within-grace-period")
+			bd.Status.Conditions = []metav1.Condition{{
+				Type:               v1alpha1.BlockDeviceConditionMissing,
+				Status:             metav1.ConditionUnknown,
+				Reason:             v1alpha1.ReasonDeviceNotFound,
+				LastTransitionTime: metav1.NewTime(time.Now().Add(-missingGracePeriod / 2)),
+			}}
+			require.NoError(t, d.cl.Create(ctx, &bd))
+
+			require.NoError(t, d.markBlockDeviceMissing(ctx, bd))
+
+			var fetched v1alpha1.BlockDevice
+			require.NoError(t, d.cl.Get(ctx, client.ObjectKey{Name: bd.Name}, &fetched))
+			cond := conditions.Get(fetched.Status.Conditions, v1alpha1.BlockDeviceConditionMissing)
+			if assert.NotNil(t, cond) {
+				assert.Equal(t, metav1.ConditionUnknown, cond.Status)
+			}
+		})
+
+		t.Run("escalates_to_true_past_the_grace_period", func(t *testing.T) {
+			d := setupDiscoverer()
+			bd := newBlockDevice("past-grace-period")
+			bd.Status.Conditions = []metav1.Condition{{
+				Type:               v1alpha1.BlockDeviceConditionMissing,
+				Status:             metav1.ConditionUnknown,
+				Reason:             v1alpha1.ReasonDeviceNotFound,
+				LastTransitionTime: metav1.NewTime(time.Now().Add(-2 * missingGracePeriod)),
+			}}
+			require.NoError(t, d.cl.Create(ctx, &bd))
+
+			require.NoError(t, d.markBlockDeviceMissing(ctx, bd))
+
+			var fetched v1alpha1.BlockDevice
+			require.NoError(t, d.cl.Get(ctx, client.ObjectKey{Name: bd.Name}, &fetched))
+			cond := conditions.Get(fetched.Status.Conditions, v1alpha1.BlockDeviceConditionMissing)
+			if assert.NotNil(t, cond) {
+				assert.Equal(t, metav1.ConditionTrue, cond.Status)
+			}
+		})
+
+		t.Run("leaves_an_already_true_condition_alone", func(t *testing.T) {
+			d := setupDiscoverer()
+			bd := newBlockDevice("already-true")
+			bd.Status.Conditions = []metav1.Condition{{
+				Type:               v1alpha1.BlockDeviceConditionMissing,
+				Status:             metav1.ConditionTrue,
+				Reason:             v1alpha1.ReasonDeviceNotFound,
+				LastTransitionTime: metav1.NewTime(time.Now().Add(-3 * missingGracePeriod)),
+			}}
+			require.NoError(t, d.cl.Create(ctx, &bd))
+
+			// Read back what Create actually persisted (a real API server
+			// truncates metav1.Time to whole seconds on the wire) before
+			// calling markBlockDeviceMissing, so the comparison below isn't
+			// comparing against an in-memory value with sub-second precision
+			// the round trip never had a chance to preserve either way.
+			var before v1alpha1.BlockDevice
+			require.NoError(t, d.cl.Get(ctx, client.ObjectKey{Name: bd.Name}, &before))
+			persistedTransition := conditions.Get(before.Status.Conditions, v1alpha1.BlockDeviceConditionMissing).LastTransitionTime
+
+			require.NoError(t, d.markBlockDeviceMissing(ctx, bd))
+
+			var fetched v1alpha1.BlockDevice
+			require.NoError(t, d.cl.Get(ctx, client.ObjectKey{Name: bd.Name}, &fetched))
+			cond := conditions.Get(fetched.Status.Conditions, v1alpha1.BlockDeviceConditionMissing)
+			if assert.NotNil(t, cond) {
+				// meta.SetStatusCondition leaves LastTransitionTime untouched
+				// when the status doesn't change -- confirms markBlockDeviceMissing
+				// made no write at all, not just that the status still reads True.
+				assert.True(t, cond.LastTransitionTime.Equal(&persistedTransition))
+			}
+		})
+	})
+
 	t.Run("RemoveDeprecatedAPIDevices", func(t *testing.T) {
 		const (
-			goodName = "test-candidate1"
-			badName  = "test-candidate2"
+			goodName    = "test-candidate1"
+			badName     = "test-candidate2"
+			missingName = "test-candidate3"
 		)
 
 		d := setupDiscoverer()
@@ -404,6 +566,19 @@ func TestBlockDeviceCtrl(t *testing.T) {
 					NodeName:   d.cfg.NodeName,
 				},
 			},
+			// Deprecated and on this node, same as badName, but not
+			// Consumable -- shouldDeleteBlockDevice exempts it, so it should
+			// end up marked Missing instead of deleted.
+			missingName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name: missingName,
+				},
+				Status: v1alpha1.BlockDeviceStatus{
+					Consumable: false,
+					NodeName:   d.cfg.NodeName,
+					Path:       "/dev/sdz",
+				},
+			},
 		}
 
 		for _, bd := range bds {
@@ -419,15 +594,20 @@ func TestBlockDeviceCtrl(t *testing.T) {
 			}
 		}()
 
-		for _, bd := range bds {
+		for name := range bds {
 			createdBd := &v1alpha1.BlockDevice{}
 			err := d.cl.Get(ctx, client.ObjectKey{
-				Name: bd.Name,
+				Name: name,
 			}, createdBd)
 			if err != nil {
 				t.Error(err)
 			}
-			assert.Equal(t, bd.Name, createdBd.Name)
+			assert.Equal(t, name, createdBd.Name)
+			// The Create loop above ran on a range-local copy, so bds itself
+			// never picked up the server-assigned resourceVersion. Only
+			// deleteAPIBlockDevice tolerated that; markBlockDeviceMissing's
+			// Update does not.
+			bds[name] = *createdBd
 		}
 
 		d.removeDeprecatedAPIDevices(ctx, candidates, bds)
@@ -441,6 +621,14 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		}, deleted)
 		if assert.True(t, errors2.IsNotFound(err)) {
 			assert.Equal(t, "", deleted.Name)
+		}
+
+		stillThere := &v1alpha1.BlockDevice{}
+		require.NoError(t, d.cl.Get(ctx, client.ObjectKey{Name: missingName}, stillThere))
+		cond := conditions.Get(stillThere.Status.Conditions, v1alpha1.BlockDeviceConditionMissing)
+		if assert.NotNil(t, cond) {
+			assert.Equal(t, metav1.ConditionUnknown, cond.Status)
+			assert.Equal(t, v1alpha1.ReasonDeviceNotFound, cond.Reason)
 		}
 	})
 
