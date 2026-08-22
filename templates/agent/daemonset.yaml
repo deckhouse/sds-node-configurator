@@ -22,15 +22,22 @@ spec:
     kind: DaemonSet
     name: sds-node-configurator
   updatePolicy:
-    updateMode: "Initial"
+    updateMode: "InPlaceOrRecreate"
   resourcePolicy:
     containerPolicies:
+    {{- /* The agent shells out to the LVM tooling, so a scan fans out over every device on the
+           node and the cost scales with their count, not with cluster size. Over 7 days on a
+           5-node stand with 128 cores each, the per-pod peaks were 344m/115Mi at the median,
+           882m/230Mi at p90 and 1716m/1648Mi at the top. The ceiling covers that top; the
+           recommender rounds memory up to a multiple of 64Mi, so 2Gi is 32 buckets and anything
+           under 64Mi would cap every recommendation unconditionally. Requests come from
+           minAllowed, which stays at 50m/50Mi, so this reserves nothing on an idle node. */}}
     - containerName: "sds-node-configurator-agent"
       minAllowed:
         {{- include "sds_node_configurator_agent_resources" . | nindent 8 }}
       maxAllowed:
-        cpu: 200m
-        memory: 100Mi
+        cpu: 2000m
+        memory: 2Gi
     {{- include "helm_lib_vpa_kube_rbac_proxy_resources" . | nindent 4 }}
 {{- end }}
 

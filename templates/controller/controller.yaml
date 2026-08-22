@@ -5,7 +5,11 @@
 }}
 {{ include "helm_lib_module_webhook_certs_secret" (list . $secretConfig) }}
 
-{{- /* Controller Deployment */ -}}
+{{- /* Controller Deployment.
+       controllerMaxCpu overrides the 200m default of helm_lib_module_controller_manifests: the
+       health watcher polls every node's agent, so it is measurably hungrier than the generic
+       controller the define is sized for, and its 7-day peak of 196m sat on that default, which
+       pinned the recommendation to the ceiling. Memory peaked at 98Mi and the default covers it. */ -}}
 {{- $leaderElectionEnvs := list
   (dict "name" "LEADER_ELECTION" "value" "true")
   (dict "name" "LEADER_ELECTION_NAMESPACE" "valueFrom" (dict "fieldRef" (dict "fieldPath" "metadata.namespace")))
@@ -20,6 +24,7 @@
   "podSecurityContext" "nobody"
   "controllerMetricsPort" 8080
   "additionalControllerEnvs" $leaderElectionEnvs
+  "controllerMaxCpu" "500m"
 }}
 {{ include "helm_lib_module_controller_manifests" (list . $config) }}
 

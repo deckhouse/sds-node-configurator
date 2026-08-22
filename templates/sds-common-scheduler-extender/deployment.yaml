@@ -24,8 +24,11 @@ spec:
       minAllowed:
         {{- include "sds_common_scheduler_extender_resources" . | nindent 8 }}
       maxAllowed:
-        memory: 40Mi
-        cpu: 20m
+        {{- /* Measured 7-day peak: 34m/53Mi, above the previous 20m/40Mi ceiling. The recommender
+               rounds memory up to a multiple of 64Mi, so 40Mi could never be reached and pinned
+               every recommendation to itself. */}}
+        memory: 128Mi
+        cpu: 100m
 {{- end }}
 ---
 apiVersion: policy/v1
