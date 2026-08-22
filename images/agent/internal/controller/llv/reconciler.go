@@ -646,16 +646,30 @@ func (r *Reconciler) removeLLVFinalizersIfExist(
 	return nil
 }
 
+// checkIfLVBelongsToLLV reports whether the LV found on the node is the one the
+// LVMLogicalVolume describes. It exists to keep the agent from touching a
+// same-name LV that belongs to something else.
+//
+// The cache holds a zero-valued LVData for an LV added right after `lvcreate`
+// (see cache.AddLV) until the next `lvs` scan fills it in. Such an entry carries
+// no evidence either way, and indexing its empty LVAttr used to panic the whole
+// agent. It is treated as belonging: the entry can only have been created by the
+// agent itself for this exact VG/LV pair, and the delete path has to be able to
+// remove a just-created LV — refusing to would drop the finalizer while the LV
+// stays on the node.
 func checkIfLVBelongsToLLV(llv *v1alpha1.LVMLogicalVolume, lv *internal.LVData) bool {
+	if !utils.IsLVAttrKnown(lv.LVAttr) {
+		return true
+	}
+
 	switch llv.Spec.Type {
 	case internal.Thin:
 		if lv.PoolName != llv.Spec.Thin.PoolName {
 			return false
 		}
 	case internal.Thick:
-		contiguous := string(lv.LVAttr[2]) == "c"
-		if string(lv.LVAttr[0]) != "-" ||
-			contiguous != isContiguous(llv) {
+		if !utils.IsLVThick(lv.LVAttr) ||
+			utils.IsLVContiguous(lv.LVAttr) != isContiguous(llv) {
 			return false
 		}
 	}
@@ -792,8 +806,7 @@ func (r *Reconciler) validateLVMLogicalVolume(llv *v1alpha1.LVMLogicalVolume, lv
 
 	// if a specified Thick LV name matches the existing Thin one
 	lv := r.sdsCache.FindLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
-	if lv != nil &&
-		len(lv.Data.LVAttr) != 0 && !checkIfLVBelongsToLLV(llv, &lv.Data) {
+	if lv != nil && !checkIfLVBelongsToLLV(llv, &lv.Data) {
 		reason.WriteString(fmt.Sprintf("Specified LV %s is already created and it is doesn't match the one on the node.", lv.Data.LVName))
 	}
 

@@ -85,6 +85,48 @@ func TestIsLVThick(t *testing.T) {
 	}
 }
 
+func TestIsLVAttrKnown(t *testing.T) {
+	tests := []struct {
+		name  string
+		attr  string
+		known bool
+	}{
+		{"thick LV", "-wi-a-----", true},
+		{"thin LV", "Vwi-a-tz--", true},
+		{"empty attr of a cached LV", "", false},
+		{"one char", "-", false},
+		{"two chars", "-w", false},
+		{"four chars", "-wi-", false},
+		{"five chars", "-wi-a", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.known, IsLVAttrKnown(tt.attr))
+		})
+	}
+}
+
+func TestIsLVContiguous(t *testing.T) {
+	tests := []struct {
+		name       string
+		attr       string
+		contiguous bool
+	}{
+		{"contiguous thick LV", "-wc-a-----", true},
+		{"inherited alloc policy", "-wi-a-----", false},
+		{"thin LV", "Vwi-a-tz--", false},
+		{"empty", "", false},
+		{"too short to hold the alloc policy", "-w", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.contiguous, IsLVContiguous(tt.attr))
+		})
+	}
+}
+
 func TestFilterVGsByTag(t *testing.T) {
 	vgs := []internal.VGData{
 		{VGName: "vg-managed", VGTags: "storage.deckhouse.io/enabled=true"},

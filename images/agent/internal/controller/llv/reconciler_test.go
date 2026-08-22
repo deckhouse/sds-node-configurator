@@ -62,7 +62,7 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 					Thin: &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
 				},
 			}
-			lv := &internal.LVData{PoolName: poolName}
+			lv := &internal.LVData{LVAttr: "Vwi-a-tz--", PoolName: poolName}
 
 			assert.True(t, checkIfLVBelongsToLLV(llv, lv))
 		})
@@ -76,7 +76,7 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 					Thin: &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: poolName},
 				},
 			}
-			lv := &internal.LVData{PoolName: "another-name"}
+			lv := &internal.LVData{LVAttr: "Vwi-a-tz--", PoolName: "another-name"}
 
 			assert.False(t, checkIfLVBelongsToLLV(llv, lv))
 		})
@@ -107,6 +107,31 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 			assert.False(t, checkIfLVBelongsToLLV(llv, lv1))
 			assert.False(t, checkIfLVBelongsToLLV(llv, lv2))
 			assert.False(t, checkIfLVBelongsToLLV(llv, lv3))
+		})
+
+		// cache.AddLV puts a zero-valued LVData into the cache right after
+		// lvcreate; indexing its LVAttr used to panic the agent.
+		t.Run("lv_without_attrs_does_not_panic_and_belongs", func(t *testing.T) {
+			thickLLV := &v1alpha1.LVMLogicalVolume{
+				ObjectMeta: v1.ObjectMeta{},
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					Type: internal.Thick,
+				},
+			}
+			thinLLV := &v1alpha1.LVMLogicalVolume{
+				ObjectMeta: v1.ObjectMeta{},
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					Type: internal.Thin,
+					Thin: &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: "test-pool"},
+				},
+			}
+
+			for _, attr := range []string{"", "-", "-w", "-wi", "-wi-"} {
+				lv := &internal.LVData{LVAttr: attr}
+
+				assert.True(t, checkIfLVBelongsToLLV(thickLLV, lv))
+				assert.True(t, checkIfLVBelongsToLLV(thinLLV, lv))
+			}
 		})
 	})
 

@@ -29,11 +29,13 @@ import (
 )
 
 const (
-	lvAttrMinLen       = 5
-	lvAttrActiveIndex  = 4
-	lvAttrActiveChar   = 'a'
-	lvAttrTypeThinPool = 't'
-	lvAttrTypeThick    = '-'
+	lvAttrMinLen           = 5
+	lvAttrActiveIndex      = 4
+	lvAttrAllocPolicyIndex = 2
+	lvAttrActiveChar       = 'a'
+	lvAttrAllocContiguous  = 'c'
+	lvAttrTypeThinPool     = 't'
+	lvAttrTypeThick        = '-'
 
 	activationControllerName = "Activation"
 )
@@ -48,6 +50,21 @@ func IsLVThinPool(attr string) bool {
 
 func IsLVThick(attr string) bool {
 	return len(attr) > 0 && attr[0] == lvAttrTypeThick
+}
+
+// IsLVAttrKnown reports whether attr carries the LVM attribute fields the agent
+// reads from it. `lvs` always reports the full 10-character string, but the cache
+// holds a zero-valued LVData for an LV added right after `lvcreate` (see
+// cache.AddLV) until the next scan fills it in, so callers have to tell a real
+// attribute string from a placeholder before indexing into it.
+func IsLVAttrKnown(attr string) bool {
+	return len(attr) >= lvAttrMinLen
+}
+
+// IsLVContiguous reports whether the LV was allocated with the contiguous
+// allocation policy (`lvcreate --contiguous y`).
+func IsLVContiguous(attr string) bool {
+	return len(attr) > lvAttrAllocPolicyIndex && attr[lvAttrAllocPolicyIndex] == lvAttrAllocContiguous
 }
 
 func FilterVGsByTag(vgs []internal.VGData, tags []string) []internal.VGData {
