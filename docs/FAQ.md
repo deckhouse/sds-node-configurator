@@ -13,6 +13,8 @@ Module functionality when using other kernels or distributions is possible but n
 
 - [BlockDevice](./cr.html#blockdevice) resources may not be created if devices do not pass controller filtering. Ensure that devices meet the [requirements](./resources.html#controller-requirements-for-devices).
 
+- For virtual machines, a common cause is a virtual disk without a serial number. See ["How to configure serial numbers for virtual disks?"](#how-to-configure-serial-numbers-for-virtual-disks) for how to check and set it.
+
 - [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources may not be created due to the absence of [BlockDevice](./cr.html#blockdevice) resources in the cluster, as their names are used in the [LVMVolumeGroup](./cr.html#lvmvolumegroup) specification.
 
 - If [BlockDevice](./cr.html#blockdevice) resources exist but [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources are missing, ensure that existing LVM Volume Groups on the node have the LVM tag `storage.deckhouse.io/enabled=true`.
@@ -168,6 +170,88 @@ If the Volume Group has active Logical Volumes, perform the following steps:
    ```
 
 If necessary, the command can be added to the `cloud-init` script for automatic execution when creating virtual machines.
+
+When cloning, also check the disk serial numbers: if the template sets them explicitly, the clones end up sharing them — see ["How to configure serial numbers for virtual disks?"](#how-to-configure-serial-numbers-for-virtual-disks).
+
+## How to configure serial numbers for virtual disks?
+
+The controller identifies block devices by their serial numbers, so a virtual disk without a serial number never becomes a [BlockDevice](./cr.html#blockdevice) resource — and therefore never joins an LVM volume group.
+
+### Why the serial number is required
+
+The name of a [BlockDevice](./cr.html#blockdevice) resource is a hash of the node name, WWN, model, serial number, and PartUUID of the device. The serial number is required on its own: if the agent cannot resolve it, the device is skipped even when it has a WWN and a model. The log then contains a warning:
+
+```text
+WARNING [CreateCandidateName] Unable to obtain serial number or its equivalent; skipping device: /dev/vdc. Error: serial is empty
+```
+
+To find such devices on a node:
+
+```shell
+d8 k -n d8-sds-node-configurator logs <agent-pod-name> -c sds-node-configurator-agent | grep 'Unable to obtain serial number'
+```
+
+Partitions are the exception: for a partition the PartUUID is enough, and the serial number of the parent disk is not required.
+
+The serial number also becomes the `status.blockdevice.storage.deckhouse.io/serial` label, which lets you select the device in the `blockDeviceSelector` of [LVMVolumeGroup](./cr.html#lvmvolumegroup) and [BlockDeviceFilter](./cr.html#blockdevicefilter) resources.
+
+### How to check whether the guest OS sees the serial number
+
+Run the following on the node:
+
+```shell
+# the same fields the agent reads
+lsblk -o NAME,TYPE,SIZE,SERIAL,WWN,MODEL
+
+# where lsblk takes SERIAL from — the udev properties of the device
+udevadm info --query=property --name=/dev/sda | grep -E 'ID_SERIAL|ID_SCSI_SERIAL|SCSI_IDENT'
+
+# the fallback source the agent uses for virtio-blk and NVMe
+cat /sys/block/sda/serial
+```
+
+`lsblk` fills the `SERIAL` field from udev in the following order: `SCSI_IDENT_SERIAL` → `ID_SCSI_SERIAL` → `ID_SERIAL_SHORT` → `ID_SERIAL`. If all of them are empty, the agent additionally reads `/sys/block/<device>/serial`, or `/sys/block/<device>/md/uuid` for mdraid. Multipath devices and partitions inherit the serial number from their parent device.
+
+{{< alert level="info" >}}
+The sysfs `serial` attribute exists for virtio-blk and NVMe devices, but not for SCSI disks. For a disk attached over a SCSI bus (including virtio-scsi), udev is the only source of the serial number, so empty output of `lsblk -o SERIAL` means the hypervisor does not expose the identifier.
+{{< /alert >}}
+
+### Configuration in virtualization systems
+
+| Virtualization system | What to set | Notes |
+| --- | --- | --- |
+| Deckhouse Virtualization Platform | Nothing to configure | Every `VirtualDisk` resource is attached to the virtual machine over the virtio-scsi bus with a serial number already set. The serial number is the MD5 hash of the `.metadata.uid` of the `VirtualDisk` resource, so it can be used to find the disk in the DVP cluster (see below) |
+| QEMU/KVM (libvirt) | The `<serial>` element inside `<disk>` in the domain XML | Allowed characters are Latin letters, digits, `_`, `.`, `+`, `-`, and space. The serial number is accepted by the virtio-blk, scsi-hd, ide-hd, and nvme device models; with full device passthrough (`scsi-block`) the serial number comes from the physical disk and cannot be set manually |
+| Proxmox VE | The `serial=` sub-option of the disk option, for example `scsi0: local-lvm:vm-100-disk-0,serial=disk0` | The value is url-encoded and up to 20 bytes long; supported for `ide[n]`, `sata[n]`, `scsi[n]`, and `virtio[n]` disks |
+| VMware vSphere | The `disk.EnableUUID = "TRUE"` parameter in the virtual machine configuration | The guest OS receives the disk identifier from VPD page 0x83; to check it inside the guest OS, run `/lib/udev/scsi_id --whitelisted --device=/dev/sda` |
+| Hyper-V | The serial number cannot be set | A Hyper-V virtual disk has no serial number and the property is not configurable. Use the partition workaround (see below) |
+
+To match a disk in the guest OS with a `VirtualDisk` resource in DVP:
+
+```shell
+# in the guest OS: the serial number of the disk
+lsblk -o NAME,SERIAL /dev/sda
+
+# in the DVP cluster: the same identifier for the VirtualDisk in question
+d8 k -n <namespace> get virtualdisk <name> -o jsonpath='{.metadata.uid}' | tr -d '\n' | md5sum
+```
+
+### If the serial number cannot be set
+
+Create a partition on the disk (see [Creating a partition on a block device](./resources.html#creating-a-partition-on-a-block-device)) and hand the partition to the controller: a partition only needs a PartUUID, so the [BlockDevice](./cr.html#blockdevice) resource is created even when the disk has no serial number.
+
+Make sure the partition has a PARTUUID:
+
+```shell
+lsblk -o NAME,TYPE,PARTUUID /dev/sdb
+```
+
+After that, a [BlockDevice](./cr.html#blockdevice) resource appears for the `/dev/sdb1` partition, and it is that resource the `blockDeviceSelector` of the [LVMVolumeGroup](./cr.html#lvmvolumegroup) has to select — by the `kubernetes.io/metadata.name` label.
+
+### Limitations to keep in mind
+
+- **The serial number must be unique within a node.** The name of a [BlockDevice](./cr.html#blockdevice) resource is built from the node name, WWN, model, serial number, and PartUUID. Two disks on the same node that share a serial number and a model and have no WWN produce the same name, so a single resource appears instead of two. The usual cause is cloning virtual machines from a template that sets disk serial numbers explicitly.
+- **The label value is transformed.** The value of the `status.blockdevice.storage.deckhouse.io/serial` label is converted into a label-safe form: letters are lowercased and the remaining characters are replaced with a hyphen. Use the already converted value in `blockDeviceSelector` — you can see it with `d8 k get blockdevices --show-labels`.
 
 ## How do file-backed devices (fileDevices) work?
 

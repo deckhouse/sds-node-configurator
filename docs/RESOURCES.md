@@ -31,7 +31,7 @@ For the controller to create a [BlockDevice](./cr.html#blockdevice) resource for
 - The file system must be absent or of type `LVM2_MEMBER`.
 - The block device must not have partitions.
 - The block device size must exceed 1 GB.
-- If the device is a virtual disk, it must have a serial number.
+- If the device is a virtual disk, it must have a serial number (see the [FAQ](./faq.html#how-to-configure-serial-numbers-for-virtual-disks) for how to set it in different virtualization systems).
 
 #### Creating a partition on a block device
 
