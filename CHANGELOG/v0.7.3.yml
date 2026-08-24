@@ -1,0 +1,8 @@
+Changes:
+  - "Added the Missing condition to BlockDevice: a missing but still occupied device (e.g., part of an LVM Physical Volume) no longer remains forever with a stale status.path. It is first set to Unknown; True is set only if the device is continuously absent for 10 minutes, so a flapping iSCSI path that recovers on its own is not marked. The condition is cleared as soon as the device is found again; the object itself is not deleted to avoid breaking references from LVMVolumeGroup and LVMLogicalVolume"
+  - "Fix: the agent no longer crashes on a cached logical volume without LVM attributes"
+  - "Fix: VPA ceilings for the agent, scheduler-extender, and controller are raised to match measured consumption"
+  - "Fix: the release image is no longer built from a cache with an outdated changelog.yaml — git-mapping dependencies are tied to the install stage where the file is copied"
+  - Updated base images to v2.1.3 and lib-helm to 1.72.14
+  - "Documentation: described virtual disk serial numbers"
+  - Internal build changes for the module
