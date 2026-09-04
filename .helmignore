@@ -1,4 +1,5 @@
 *.md
+.release-notes
 CHANGELOG
 api
 crds
