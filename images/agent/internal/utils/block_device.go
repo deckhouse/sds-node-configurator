@@ -25,14 +25,10 @@ limitations under the License.
 package utils
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
-	"unsafe"
-
-	"golang.org/x/sys/unix"
 )
 
 type blockDevice[TSysCall SysCall] struct {
@@ -121,15 +117,9 @@ func (device *blockDevice[TSysCall]) Size() (int64, error) {
 		return 0, fmt.Errorf("not a block device, mode: %x", stat.Mode)
 	}
 
-	var blockDeviceSize uint64
-	_, _, errno := device.syscall.Syscall(
-		unix.SYS_IOCTL,
-		device.Fd(),
-		unix.BLKGETSIZE64,
-		uintptr(unsafe.Pointer(&blockDeviceSize)))
-	if errno != 0 {
-		err := errors.New(errno.Error())
-		return 0, fmt.Errorf("error calling ioctl BLKGETSIZE64: %w", err)
+	blockDeviceSize, err := device.syscall.Blkgetsize64(device.Fd())
+	if err != nil {
+		return 0, err
 	}
 	if blockDeviceSize == 0 {
 		return 0, fmt.Errorf("block device size is invalid")
@@ -142,22 +132,14 @@ func (device *blockDevice[TSysCall]) Discard(start, count uint64) error {
 	return device.syscall.Blkdiscard(device.Fd(), start, count)
 }
 
-func (device *blockDevice[TSysCall]) BlockSize() (blockSize int, err error) {
-	_, _, errno := device.syscall.Syscall(
-		unix.SYS_IOCTL,
-		device.Fd(),
-		unix.BLKSSZGET,
-		uintptr(unsafe.Pointer(&blockSize)))
-
-	if errno != 0 {
-		err = errors.New(errno.Error())
-		err = fmt.Errorf("error calling ioctl BLKGETSIZE64: %w", err)
-		return
+func (device *blockDevice[TSysCall]) BlockSize() (int, error) {
+	blockSize, err := device.syscall.Blksszget(device.Fd())
+	if err != nil {
+		return 0, err
 	}
 	if blockSize == 0 {
-		err = fmt.Errorf("block size is invalid")
-		return
+		return 0, fmt.Errorf("block size is invalid")
 	}
 
-	return
+	return blockSize, nil
 }

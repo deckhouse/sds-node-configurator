@@ -19,12 +19,10 @@ package utils_test
 import (
 	"errors"
 	"os"
-	"unsafe"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
-	"golang.org/x/sys/unix"
 
 	. "github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	. "github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
@@ -68,14 +66,49 @@ var _ = Describe("BlockDevice", func() {
 				stat.Mode = S_IFBLK
 				return nil
 			})
-			sysCall.EXPECT().Syscall(uintptr(unix.SYS_IOCTL), fd, uintptr(unix.BLKGETSIZE64), gomock.Any()).DoAndReturn(func(_, _, _, a3 uintptr) (uintptr, uintptr, Errno) {
-				*(*uint64)(unsafe.Pointer(a3)) = uint64(size)
-				return 0, 0, 0
-			})
+			sysCall.EXPECT().Blkgetsize64(fd).Return(uint64(size), nil)
 
 			got, err := device.Size()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got).To(BeEquivalentTo(size))
+		})
+
+		It("reports the ioctl error behind an unknown size", func() {
+			sysCall.EXPECT().Fstat(int(fd), gomock.Any()).DoAndReturn(func(_ int, stat *Stat_t) error {
+				stat.Mode = S_IFBLK
+				return nil
+			})
+			ioctlError := errors.New("calling ioctl BLKGETSIZE64: inappropriate ioctl for device")
+			sysCall.EXPECT().Blkgetsize64(fd).Return(uint64(0), ioctlError)
+
+			_, err := device.Size()
+			Expect(err).To(MatchError(ioctlError))
+		})
+
+		It("rejects a zero size", func() {
+			sysCall.EXPECT().Fstat(int(fd), gomock.Any()).DoAndReturn(func(_ int, stat *Stat_t) error {
+				stat.Mode = S_IFBLK
+				return nil
+			})
+			sysCall.EXPECT().Blkgetsize64(fd).Return(uint64(0), nil)
+
+			_, err := device.Size()
+			Expect(err).To(MatchError("block device size is invalid"))
+		})
+
+		It("finds out the block size", func() {
+			sysCall.EXPECT().Blksszget(fd).Return(512, nil)
+
+			got, err := device.BlockSize()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal(512))
+		})
+
+		It("rejects a zero block size", func() {
+			sysCall.EXPECT().Blksszget(fd).Return(0, nil)
+
+			_, err := device.BlockSize()
+			Expect(err).To(MatchError("block size is invalid"))
 		})
 
 		It("issues blkdiscard", func() {

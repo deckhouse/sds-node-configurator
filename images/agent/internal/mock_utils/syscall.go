@@ -69,6 +69,36 @@ func (mr *MockSysCallMockRecorder) Blkdiscard(fd, start, count any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Blkdiscard", reflect.TypeOf((*MockSysCall)(nil).Blkdiscard), fd, start, count)
 }
 
+// Blkgetsize64 mocks base method.
+func (m *MockSysCall) Blkgetsize64(fd uintptr) (uint64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Blkgetsize64", fd)
+	ret0, _ := ret[0].(uint64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Blkgetsize64 indicates an expected call of Blkgetsize64.
+func (mr *MockSysCallMockRecorder) Blkgetsize64(fd any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Blkgetsize64", reflect.TypeOf((*MockSysCall)(nil).Blkgetsize64), fd)
+}
+
+// Blksszget mocks base method.
+func (m *MockSysCall) Blksszget(fd uintptr) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Blksszget", fd)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Blksszget indicates an expected call of Blksszget.
+func (mr *MockSysCallMockRecorder) Blksszget(fd any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Blksszget", reflect.TypeOf((*MockSysCall)(nil).Blksszget), fd)
+}
+
 // Fstat mocks base method.
 func (m *MockSysCall) Fstat(fd int, stat *utils.Stat_t) error {
 	m.ctrl.T.Helper()
@@ -81,20 +111,4 @@ func (m *MockSysCall) Fstat(fd int, stat *utils.Stat_t) error {
 func (mr *MockSysCallMockRecorder) Fstat(fd, stat any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Fstat", reflect.TypeOf((*MockSysCall)(nil).Fstat), fd, stat)
-}
-
-// Syscall mocks base method.
-func (m *MockSysCall) Syscall(trap, a1, a2, a3 uintptr) (uintptr, uintptr, utils.Errno) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Syscall", trap, a1, a2, a3)
-	ret0, _ := ret[0].(uintptr)
-	ret1, _ := ret[1].(uintptr)
-	ret2, _ := ret[2].(utils.Errno)
-	return ret0, ret1, ret2
-}
-
-// Syscall indicates an expected call of Syscall.
-func (mr *MockSysCallMockRecorder) Syscall(trap, a1, a2, a3 any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Syscall", reflect.TypeOf((*MockSysCall)(nil).Syscall), trap, a1, a2, a3)
 }

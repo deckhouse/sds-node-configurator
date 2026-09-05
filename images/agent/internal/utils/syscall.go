@@ -29,9 +29,22 @@ import (
 type Stat_t = unix.Stat_t
 type Errno = unix.Errno
 
+// SysCall is the syscall surface the agent needs, one method per operation.
+//
+// There is deliberately no generic Syscall(trap, a1, a2, a3 uintptr) here. An
+// ioctl that reports back through a pointer has to pass that pointer as a
+// uintptr, and the rule that keeps the pointed-to variable alive across the
+// call (unsafe, "Pointer to uintptr, in the argument list of a call to
+// syscall.Syscall") holds only inside the argument list of the syscall itself.
+// Converted a call earlier - at a caller of this interface - the value is just
+// a number: the variable stays on the stack, nothing keeps it in place, and a
+// stack growth during the call moves it out from under the kernel's write. So
+// every operation that hands the kernel a pointer is a method here, and does
+// its own conversion below, next to unix.Syscall.
 type SysCall interface {
 	Fstat(fd int, stat *Stat_t) (err error)
-	Syscall(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno)
+	Blkgetsize64(fd uintptr) (size uint64, err error)
+	Blksszget(fd uintptr) (blockSize int, err error)
 	Blkdiscard(fd uintptr, start, count uint64) error
 }
 
@@ -49,8 +62,32 @@ func (osSyscall) Fstat(fd int, stat *Stat_t) (err error) {
 	return unix.Fstat(fd, stat)
 }
 
-func (osSyscall) Syscall(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno) {
-	return unix.Syscall(trap, a1, a2, a3)
+func (osSyscall) Blkgetsize64(fd uintptr) (uint64, error) {
+	var size uint64
+	_, _, errno := unix.Syscall(
+		unix.SYS_IOCTL,
+		fd,
+		unix.BLKGETSIZE64,
+		uintptr(unsafe.Pointer(&size)))
+
+	if errno != 0 {
+		return 0, fmt.Errorf("calling ioctl BLKGETSIZE64: %w", errors.New(errno.Error()))
+	}
+	return size, nil
+}
+
+func (osSyscall) Blksszget(fd uintptr) (int, error) {
+	var blockSize int
+	_, _, errno := unix.Syscall(
+		unix.SYS_IOCTL,
+		fd,
+		unix.BLKSSZGET,
+		uintptr(unsafe.Pointer(&blockSize)))
+
+	if errno != 0 {
+		return 0, fmt.Errorf("calling ioctl BLKSSZGET: %w", errors.New(errno.Error()))
+	}
+	return blockSize, nil
 }
 
 func (osSyscall) Blkdiscard(fd uintptr, start, count uint64) error {
