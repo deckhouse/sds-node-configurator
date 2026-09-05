@@ -192,6 +192,22 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 
 		if lv.Data.LVSize.Value() >= alignedRequestedSize.Value() {
 			r.log.Info(fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] the LVMLogicalVolume %s should not be extended (actual %s >= aligned requested %s)", llv.Name, lv.Data.LVSize.String(), alignedRequestedSize.String()))
+			// The volume is the size it asked for, so whatever an earlier pass
+			// concluded about it no longer holds. A "not enough space" verdict
+			// below is computed from the group's free space, which lags behind
+			// the LV the agent has just created: for a moment the LV is full
+			// size while the group still reports free extents, and the request
+			// resolved against that stale free space asks for more than exists.
+			// The phase written then is permanent - no later pass reaches the
+			// extension that would clear it - and the volume stays Failed for
+			// good, with a consumer (sds-elastic waits for every OSD volume)
+			// blocked behind a volume that is in fact correct.
+			if llv.Status == nil || llv.Status.Phase != v1alpha1.PhaseCreated {
+				if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, &llv, lv.Data.LVSize); err != nil {
+					r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to clear the stale phase of the LVMLogicalVolume %s", llv.Name))
+					shouldRetry = true
+				}
+			}
 			continue
 		}
 
@@ -202,8 +218,12 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
 			if err != nil {
 				r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to update the LVMLogicalVolume %s", llv.Name))
-				shouldRetry = true
 			}
+			// Retry: the numbers this verdict rests on - the group's free space
+			// and the cached LV - are both refreshed out of band, so the same
+			// volume can well fit on the next pass. Without a retry the failure
+			// waits for an unrelated event to disturb the group.
+			shouldRetry = true
 			continue
 		}
 
