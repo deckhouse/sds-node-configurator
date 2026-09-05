@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/stretchr/testify/assert/yaml"
@@ -124,7 +125,7 @@ func getAvailableSpace(
 		reportedFree = tp.AvailableSpace.Value()
 	}
 
-	sumAll, err := sumLLVSpace(ctx, cl, key, false)
+	sumAll, err := sumLLVSpace(ctx, cl, key, false, totalCapacity)
 	if err != nil {
 		return LVGSpaceInfo{}, fmt.Errorf("unable to compute LLV space for pool %s: %w", key, err)
 	}
@@ -199,14 +200,18 @@ func getLVGsOnNode(ctx context.Context, cl client.Client, nodeName string) ([]sn
 
 // --- LLV space computation ---
 
-// sumLLVSpace sums spec.size for all LLVs on the given storage pool.
+// sumLLVSpace sums the space taken by all LLVs on the given storage pool.
 // If onlyOnDisk is true, only LLVs whose space is reflected on disk are included:
 // phase == Created OR status.actualSize > 0 (e.g. Failed LLVs that were already
 // provisioned). This prevents double-counting of on-disk LLVs that are not in
 // Created phase (their space is already captured by reportedFree / availableSpace).
 // For thick pools (key.ThinPoolName == ""), only LLVs without a thin spec are counted.
 // For thin pools, only LLVs matching the thin pool name are counted.
-func sumLLVSpace(ctx context.Context, cl client.Client, key cache.StoragePoolKey, onlyOnDisk bool) (int64, error) {
+//
+// poolCapacity is the pool's total size and is what a percentage spec.size is
+// resolved against; pass 0 when it is unknown, and percent-sized volumes that
+// are not yet on disk then contribute nothing rather than breaking the sum.
+func sumLLVSpace(ctx context.Context, cl client.Client, key cache.StoragePoolKey, onlyOnDisk bool, poolCapacity int64) (int64, error) {
 	var llvList snc.LVMLogicalVolumeList
 	if err := cl.List(ctx, &llvList, client.MatchingFields{IndexFieldLLVLVGName: key.LVGName}); err != nil {
 		return 0, fmt.Errorf("unable to list LLVs for LVG %s: %w", key.LVGName, err)
@@ -235,13 +240,54 @@ func sumLLVSpace(ctx context.Context, cl client.Client, key cache.StoragePoolKey
 			}
 		}
 
-		size, err := resource.ParseQuantity(llv.Spec.Size)
+		size, err := llvRequestedSpace(llv, poolCapacity)
 		if err != nil {
-			return 0, fmt.Errorf("unable to parse LLV %s spec.size %q: %w", llv.Name, llv.Spec.Size, err)
+			return 0, err
 		}
-		total += size.Value()
+		total += size
 	}
 	return total, nil
+}
+
+// llvRequestedSpace returns the space one LVMLogicalVolume asks of the pool.
+//
+// spec.size is the source in both of sumLLVSpace's modes, unchanged: the
+// on-disk mode uses status.actualSize only to decide whether a volume counts,
+// never as the amount.
+//
+// A percentage is resolved against the pool capacity rather than parsed as a
+// quantity. sds-elastic asks for "100%FREE" to hand a whole VG to one OSD, and
+// ParseQuantity on that returns an error which used to abort the accounting of
+// the whole pool — on every reconcile, so the pool was never calibrated. A zero
+// capacity means the caller does not know it; such a volume then contributes
+// nothing, which keeps the sum usable instead of failing it outright.
+func llvRequestedSpace(llv *snc.LVMLogicalVolume, poolCapacity int64) (int64, error) {
+	if percent, ok := parsePercentSize(llv.Spec.Size); ok {
+		if poolCapacity <= 0 {
+			return 0, nil
+		}
+		return poolCapacity * percent / 100, nil
+	}
+
+	size, err := resource.ParseQuantity(llv.Spec.Size)
+	if err != nil {
+		return 0, fmt.Errorf("unable to parse LLV %s spec.size %q: %w", llv.Name, llv.Spec.Size, err)
+	}
+	return size.Value(), nil
+}
+
+// parsePercentSize recognises the percentage spellings the LVMLogicalVolume API
+// accepts — "50%", "100%FREE", "100%VG" — and returns the percentage.
+func parsePercentSize(size string) (int64, bool) {
+	idx := strings.Index(size, "%")
+	if idx <= 0 {
+		return 0, false
+	}
+	percent, err := strconv.ParseInt(size[:idx], 10, 64)
+	if err != nil || percent < 0 {
+		return 0, false
+	}
+	return percent, true
 }
 
 // --- Unaccounted space calibration ---
@@ -257,11 +303,6 @@ func CalibratePoolUnaccountedSpace(
 	lvg *snc.LVMVolumeGroup,
 	key cache.StoragePoolKey,
 ) error {
-	sumOnDisk, err := sumLLVSpace(ctx, cl, key, true)
-	if err != nil {
-		return fmt.Errorf("unable to compute on-disk LLV space for pool %s: %w", key, err)
-	}
-
 	var totalCapacity int64
 	var reportedFree int64
 
@@ -275,6 +316,14 @@ func CalibratePoolUnaccountedSpace(
 		}
 		totalCapacity = tp.AllocatedSize.Value() + tp.AvailableSpace.Value()
 		reportedFree = tp.AvailableSpace.Value()
+	}
+
+	// The capacity is resolved first because a percent-sized volume is a share
+	// of it: summing before it is known would count such a volume as nothing
+	// and blame its space on non-LLV volumes.
+	sumOnDisk, err := sumLLVSpace(ctx, cl, key, true, totalCapacity)
+	if err != nil {
+		return fmt.Errorf("unable to compute on-disk LLV space for pool %s: %w", key, err)
 	}
 
 	unaccounted := totalCapacity - sumOnDisk - reportedFree

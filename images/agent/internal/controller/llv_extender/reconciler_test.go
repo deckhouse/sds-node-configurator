@@ -17,10 +17,15 @@ limitations under the License.
 package llv_extender
 
 import (
+	"bytes"
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
@@ -114,6 +119,89 @@ func TestLLVExtender(t *testing.T) {
 			assert.True(t, r.shouldLLVExtenderReconcileEvent(lvg))
 		})
 	})
+}
+
+// A whole-VG volume must be left alone. The VG size LVM reports is the raw
+// device sum and is not a multiple of the extent, so rounding a "100%FREE"
+// request up asks for one extent more than the VG holds; the reconciler then
+// decides the LV has to grow, finds no free space, and parks the volume in
+// Failed with "unable to extend LV, err: not enough space". Whether a given
+// disk hit it was decided by whether its VG size happened to be aligned, so a
+// fifteen-OSD sds-elastic cluster lost a volume or two and never reached Ready.
+func TestLLVExtenderPercentSizeVolumeIsNotExtended(t *testing.T) {
+	const (
+		vgNameOnNode = "test_vg"
+		lvNameOnNode = "test_lv"
+		lvgName      = "test_lvg"
+		llvName      = "test_llv"
+	)
+
+	// 20470Mi is not a multiple of the 4Mi extent; the LV created with
+	// `lvcreate -l 100%FREE` therefore stops at 20468Mi.
+	vgSize := resource.MustParse("20470Mi")
+	lvSize := resource.MustParse("20468Mi")
+	extentSize := resource.MustParse("4Mi")
+
+	llv := &v1alpha1.LVMLogicalVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: llvName},
+		Spec: v1alpha1.LVMLogicalVolumeSpec{
+			LVMVolumeGroupName:    lvgName,
+			ActualLVNameOnTheNode: lvNameOnNode,
+			Type:                  internal.Thick,
+			Size:                  "100%FREE",
+		},
+		Status: &v1alpha1.LVMLogicalVolumeStatus{
+			Phase:      v1alpha1.PhaseCreated,
+			ActualSize: lvSize,
+		},
+	}
+
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: lvgName},
+		Spec: v1alpha1.LVMVolumeGroupSpec{
+			ActualVGNameOnTheNode: vgNameOnNode,
+			Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: testNodeName},
+		},
+		Status: v1alpha1.LVMVolumeGroupStatus{
+			VGSize:     vgSize,
+			VGFree:     *resource.NewQuantity(0, resource.BinarySI),
+			ExtentSize: extentSize,
+		},
+	}
+
+	r := NewReconciler(
+		test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{}, &v1alpha1.LVMVolumeGroup{}),
+		logger.Logger{},
+		monitoring.GetMetrics(""),
+		cache.New(),
+		utils.NewCommands(),
+		ReconcilerConfig{NodeName: testNodeName},
+	).(*Reconciler)
+
+	ctx := context.Background()
+	// Status is a subresource on the fake client, so it is written separately
+	// from the object itself.
+	llvStatus := llv.Status
+	llv.Status = nil
+	require.NoError(t, r.cl.Create(ctx, llv))
+	llv.Status = llvStatus
+	require.NoError(t, r.cl.Status().Update(ctx, llv))
+	require.NoError(t, r.cl.Create(ctx, lvg))
+
+	r.sdsCache.StoreLVs([]internal.LVData{{
+		LVName: lvNameOnNode,
+		VGName: vgNameOnNode,
+		LVSize: lvSize,
+	}}, bytes.Buffer{})
+
+	shouldRetry := r.ReconcileLVMLogicalVolumeExtension(ctx, lvg)
+	assert.False(t, shouldRetry, "a volume that already owns every free extent needs no retry")
+
+	updated := &v1alpha1.LVMLogicalVolume{}
+	require.NoError(t, r.cl.Get(ctx, client.ObjectKey{Name: llvName}, updated))
+	require.NotNil(t, updated.Status)
+	assert.Equal(t, v1alpha1.PhaseCreated, updated.Status.Phase,
+		"the volume must stay Created; extending it would fail with \"not enough space\"")
 }
 
 func setupExtenderReconciler() *Reconciler {

@@ -910,6 +910,55 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 			assert.Error(t, err)
 		})
 	})
+
+	t.Run("AlignRequestedSizeToExtent", func(t *testing.T) {
+		extentSize := resource.MustParse("4Mi")
+
+		t.Run("absolute_size_rounds_up", func(t *testing.T) {
+			aligned, err := utils.AlignRequestedSizeToExtent("201Mi", resource.MustParse("201Mi"), extentSize)
+			assert.NoError(t, err)
+			expected := resource.MustParse("204Mi")
+			assert.Equal(t, expected.Value(), aligned.Value())
+		})
+
+		t.Run("percent_of_unaligned_capacity_stays_within_it", func(t *testing.T) {
+			// A 20Gi disk minus LVM metadata leaves a VG whose size is not a
+			// multiple of the 4Mi extent. Rounding 100% of it up would ask for
+			// more than the VG holds: the create-time check would reject the
+			// volume, and the extender would try to grow an LV that already
+			// owns every free extent and fail with "not enough space".
+			vgSize := resource.MustParse("20470Mi")
+			vgBytes := vgSize.Value()
+			aligned, err := utils.AlignRequestedSizeToExtent("100%FREE", vgSize, extentSize)
+			assert.NoError(t, err)
+			assert.LessOrEqual(t, aligned.Value(), vgBytes)
+			expected := resource.MustParse("20468Mi")
+			assert.Equal(t, expected.Value(), aligned.Value())
+		})
+
+		t.Run("percent_already_aligned_stays_same", func(t *testing.T) {
+			aligned, err := utils.AlignRequestedSizeToExtent("100%", resource.MustParse("204Mi"), extentSize)
+			assert.NoError(t, err)
+			expected := resource.MustParse("204Mi")
+			assert.Equal(t, expected.Value(), aligned.Value())
+		})
+
+		t.Run("split_percentages_sum_to_at_most_the_whole", func(t *testing.T) {
+			vgSize := resource.MustParse("20470Mi")
+			vgBytes := vgSize.Value()
+			half := resource.NewQuantity(vgBytes/2, resource.BinarySI)
+			first, err := utils.AlignRequestedSizeToExtent("50%", *half, extentSize)
+			assert.NoError(t, err)
+			second, err := utils.AlignRequestedSizeToExtent("50%", *half, extentSize)
+			assert.NoError(t, err)
+			assert.LessOrEqual(t, first.Value()+second.Value(), vgBytes)
+		})
+
+		t.Run("returns_error_for_zero_extent", func(t *testing.T) {
+			_, err := utils.AlignRequestedSizeToExtent("100%", resource.MustParse("100Mi"), resource.MustParse("0"))
+			assert.Error(t, err)
+		})
+	})
 }
 
 const (

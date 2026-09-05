@@ -178,7 +178,12 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 			continue
 		}
 
-		alignedRequestedSize, err := utils.AlignSizeToExtent(llvRequestedSize, lvg.Status.ExtentSize)
+		// Every LLV here has a percent size (that is what this reconciler
+		// selects), so the alignment must floor: a "100%FREE" volume already
+		// owns every free extent, and rounding its request up past the
+		// unaligned VG size would send it into the extension below, where
+		// there is nothing left to extend into.
+		alignedRequestedSize, err := utils.AlignRequestedSizeToExtent(llv.Spec.Size, llvRequestedSize, lvg.Status.ExtentSize)
 		if err != nil {
 			r.log.Error(err, fmt.Sprintf("[ReconcileLVMLogicalVolumeExtension] unable to align size for LVMLogicalVolume %s", llv.Name))
 			shouldRetry = true

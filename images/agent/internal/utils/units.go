@@ -31,3 +31,38 @@ func AlignSizeToExtent(size, extentSize resource.Quantity) (resource.Quantity, e
 	aligned := ((sizeBytes + extentBytes - 1) / extentBytes) * extentBytes
 	return *resource.NewQuantity(aligned, resource.BinarySI), nil
 }
+
+// alignSizeToExtentDown aligns a size to the extent boundary by flooring: the
+// largest whole number of extents that still fits into the size. Callers reach
+// it through AlignRequestedSizeToExtent, which decides the direction from the
+// spelling of the request.
+func alignSizeToExtentDown(size, extentSize resource.Quantity) (resource.Quantity, error) {
+	extentBytes := extentSize.Value()
+	if extentBytes <= 0 {
+		return resource.Quantity{}, fmt.Errorf("extent size must be positive, got %d", extentBytes)
+	}
+	floored := (size.Value() / extentBytes) * extentBytes
+	return *resource.NewQuantity(floored, resource.BinarySI), nil
+}
+
+// AlignRequestedSizeToExtent aligns a requested size the way the spelling of
+// the request demands.
+//
+// An absolute size ("10Gi") is rounded UP: that is the real number of extents
+// LVM will consume, so a request that does not fit must still be rejected.
+//
+// A percentage ("100%", "50%FREE") is rounded DOWN. The percentage is computed
+// against a capacity — VG size, or a thin pool's size — that LVM reports as the
+// raw device sum and is not itself extent-aligned. Rounding such a request up
+// lands one extent past the capacity it was derived from, and the caller then
+// concludes that 100% of a thing does not fit into that thing: the create-time
+// check rejects the volume, and the extender tries to grow an LV that already
+// owns every free extent and fails with "not enough space". Flooring is always
+// safe, because a percentage of a capacity can never legitimately exceed it,
+// and it also makes split percentages ("50%"+"50%") sum to at most the whole.
+func AlignRequestedSizeToExtent(specSize string, requested, extentSize resource.Quantity) (resource.Quantity, error) {
+	if IsPercentSize(specSize) {
+		return alignSizeToExtentDown(requested, extentSize)
+	}
+	return AlignSizeToExtent(requested, extentSize)
+}

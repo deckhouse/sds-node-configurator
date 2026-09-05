@@ -333,7 +333,9 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 		return false, err
 	}
 
-	alignedRequestSize, err := utils.AlignSizeToExtent(llvRequestSize, llvExtentSize(lvg))
+	// Percent requests floor, absolute ones round up: 100% of a VG whose size
+	// is not extent-aligned must not be rejected as too large for that VG.
+	alignedRequestSize, err := utils.AlignRequestedSizeToExtent(llv.Spec.Size, llvRequestSize, llvExtentSize(lvg))
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLLVCreateFunc] unable to align size for LVMLogicalVolume %s", llv.Name))
 		return true, err
@@ -457,7 +459,7 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 	}
 	r.log.Debug(fmt.Sprintf("[reconcileLLVUpdateFunc] successfully counted the LVMLogicalVolume %s requested size: %s", llv.Name, llvRequestSize.String()))
 
-	alignedRequestSize, err := utils.AlignSizeToExtent(llvRequestSize, llvExtentSize(lvg))
+	alignedRequestSize, err := utils.AlignRequestedSizeToExtent(llv.Spec.Size, llvRequestSize, llvExtentSize(lvg))
 	if err != nil {
 		r.log.Error(err, fmt.Sprintf("[reconcileLLVUpdateFunc] unable to align size for LVMLogicalVolume %s", llv.Name))
 		return true, err

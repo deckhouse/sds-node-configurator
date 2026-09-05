@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 )
@@ -45,13 +46,51 @@ func TestSumLLVSpace_ThickOnly(t *testing.T) {
 	)
 	key := cache.StoragePoolKey{LVGName: "lvg1"}
 
-	total, err := sumLLVSpace(ctx, cl, key, false)
+	total, err := sumLLVSpace(ctx, cl, key, false, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(30)*oneGiB, total)
 
-	onDisk, err := sumLLVSpace(ctx, cl, key, true)
+	onDisk, err := sumLLVSpace(ctx, cl, key, true, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(10)*oneGiB, onDisk)
+}
+
+// A percent-sized volume is what sds-elastic creates to hand a whole VG to one
+// OSD. Parsing "100%FREE" as a quantity fails, and that used to abort the
+// pool's accounting entirely: the calibration error repeated on every reconcile
+// and the pool never got calibrated.
+func TestSumLLVSpace_PercentSize(t *testing.T) {
+	ctx := context.Background()
+	cl := newFakeClient(
+		readyLVG("lvg1", hundredGiB, hundredGiB),
+		thickLLV("llv-percent", "lvg1", "100%FREE", "Pending"),
+	)
+	key := cache.StoragePoolKey{LVGName: "lvg1"}
+
+	total, err := sumLLVSpace(ctx, cl, key, false, int64(100)*oneGiB)
+	require.NoError(t, err)
+	assert.Equal(t, int64(100)*oneGiB, total)
+
+	// Not on disk yet, so it contributes nothing to the on-disk sum — and an
+	// unknown capacity must not turn into an error either.
+	onDisk, err := sumLLVSpace(ctx, cl, key, true, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), onDisk)
+}
+
+// The on-disk sum resolves a percentage the same way, so a whole-VG volume is
+// not mistaken for space taken by something other than an LLV.
+func TestSumLLVSpace_PercentSizeOnDisk(t *testing.T) {
+	ctx := context.Background()
+	llv := thickLLV("llv-percent", "lvg1", "100%FREE", "Created")
+	llv.Status.ActualSize = *resource.NewQuantity(int64(99)*oneGiB, resource.BinarySI)
+	cl := newFakeClient(readyLVG("lvg1", hundredGiB, hundredGiB), llv)
+	key := cache.StoragePoolKey{LVGName: "lvg1"}
+
+	onDisk, err := sumLLVSpace(ctx, cl, key, true, int64(100)*oneGiB)
+	require.NoError(t, err)
+	assert.Equal(t, int64(100)*oneGiB, onDisk,
+		"spec.size stays the source of the amount; actualSize only decides that the volume counts")
 }
 
 func TestSumLLVSpace_ThinOnly(t *testing.T) {
@@ -64,11 +103,11 @@ func TestSumLLVSpace_ThinOnly(t *testing.T) {
 	)
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
 
-	total, err := sumLLVSpace(ctx, cl, key, false)
+	total, err := sumLLVSpace(ctx, cl, key, false, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(12)*oneGiB, total)
 
-	onDisk, err := sumLLVSpace(ctx, cl, key, true)
+	onDisk, err := sumLLVSpace(ctx, cl, key, true, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(8)*oneGiB, onDisk)
 }
@@ -78,7 +117,7 @@ func TestSumLLVSpace_NoLLVs(t *testing.T) {
 	cl := newFakeClient(readyLVG("lvg1", hundredGiB, hundredGiB))
 	key := cache.StoragePoolKey{LVGName: "lvg1"}
 
-	total, err := sumLLVSpace(ctx, cl, key, false)
+	total, err := sumLLVSpace(ctx, cl, key, false, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), total)
 }
@@ -90,11 +129,11 @@ func TestSumLLVSpace_NilStatus(t *testing.T) {
 	)
 	key := cache.StoragePoolKey{LVGName: "lvg1"}
 
-	total, err := sumLLVSpace(ctx, cl, key, false)
+	total, err := sumLLVSpace(ctx, cl, key, false, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(10)*oneGiB, total)
 
-	onDisk, err := sumLLVSpace(ctx, cl, key, true)
+	onDisk, err := sumLLVSpace(ctx, cl, key, true, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), onDisk)
 }
@@ -108,11 +147,11 @@ func TestSumLLVSpace_FailedWithActualSize(t *testing.T) {
 	)
 	key := cache.StoragePoolKey{LVGName: "lvg1"}
 
-	total, err := sumLLVSpace(ctx, cl, key, false)
+	total, err := sumLLVSpace(ctx, cl, key, false, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(60)*oneGiB, total, "sumAll should include both Created and Failed LLVs")
 
-	onDisk, err := sumLLVSpace(ctx, cl, key, true)
+	onDisk, err := sumLLVSpace(ctx, cl, key, true, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(60)*oneGiB, onDisk, "onlyOnDisk should include Failed LLV with actualSize > 0")
 }
@@ -126,11 +165,11 @@ func TestSumLLVSpace_FailedWithoutActualSize(t *testing.T) {
 	)
 	key := cache.StoragePoolKey{LVGName: "lvg1"}
 
-	total, err := sumLLVSpace(ctx, cl, key, false)
+	total, err := sumLLVSpace(ctx, cl, key, false, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(30)*oneGiB, total)
 
-	onDisk, err := sumLLVSpace(ctx, cl, key, true)
+	onDisk, err := sumLLVSpace(ctx, cl, key, true, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(20)*oneGiB, onDisk, "onlyOnDisk should NOT include Failed LLV with zero actualSize")
 }
@@ -143,11 +182,11 @@ func TestSumLLVSpace_ThinFailedWithActualSize(t *testing.T) {
 	)
 	key := cache.StoragePoolKey{LVGName: "lvg1", ThinPoolName: "tp0"}
 
-	total, err := sumLLVSpace(ctx, cl, key, false)
+	total, err := sumLLVSpace(ctx, cl, key, false, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(18)*oneGiB, total)
 
-	onDisk, err := sumLLVSpace(ctx, cl, key, true)
+	onDisk, err := sumLLVSpace(ctx, cl, key, true, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(18)*oneGiB, onDisk, "onlyOnDisk should include thin Failed LLV with actualSize > 0")
 }

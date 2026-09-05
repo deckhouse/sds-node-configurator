@@ -96,28 +96,11 @@ func extentSizeForThinPoolAlign(lvg *v1alpha1.LVMVolumeGroup, vg *internal.VGDat
 }
 
 // alignThinPoolSizeForValidation aligns a thin-pool's requested size to the
-// extent boundary for the create-time capacity check.
-//
-// Absolute sizes are rounded UP — that is the real number of extents LVM will
-// consume, so an oversized absolute pool must still be rejected.
-//
-// Percentage sizes (e.g. "100%") are rounded DOWN instead. During create
-// validation the VG size is the raw block-device/file sum, which is not
-// extent-aligned, so a "100%" request rounded up lands one extent past the VG
-// and would wrongly fail the capacity check — even though the pool is created
-// with %FREE and fits. A percentage of the VG can never legitimately exceed
-// it, so flooring is always safe and also makes split percentages (e.g.
-// "50%"+"50%") sum to at most the VG size.
+// extent boundary for the create-time capacity check. The rule it needs — up
+// for absolute sizes, down for percentages — is the same one every requested
+// size obeys, and lives in utils.AlignRequestedSizeToExtent.
 func alignThinPoolSizeForValidation(specSize string, requested, extentSize resource.Quantity) (resource.Quantity, error) {
-	if utils.IsPercentSize(specSize) {
-		extentBytes := extentSize.Value()
-		if extentBytes <= 0 {
-			return resource.Quantity{}, fmt.Errorf("extent size must be positive, got %d", extentBytes)
-		}
-		floored := (requested.Value() / extentBytes) * extentBytes
-		return *resource.NewQuantity(floored, resource.BinarySI), nil
-	}
-	return utils.AlignSizeToExtent(requested, extentSize)
+	return utils.AlignRequestedSizeToExtent(specSize, requested, extentSize)
 }
 
 type Reconciler struct {
