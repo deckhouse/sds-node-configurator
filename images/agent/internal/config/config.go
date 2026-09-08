@@ -26,15 +26,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deckhouse/sds-common-lib/logger"
+	"github.com/deckhouse/sds-common-lib/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 const (
 	ScanInterval                         = "SCAN_INTERVAL"
 	NodeName                             = "NODE_NAME"
-	LogLevel                             = "LOG_LEVEL"
-	MetricsPort                          = "METRICS_PORT"
 	MachineID                            = "MACHINE_ID"
 	ThrottleInterval                     = "THROTTLER_INTERVAL"
 	CmdDeadlineDuration                  = "CMD_DEADLINE_DURATION"
@@ -78,7 +77,7 @@ type Config struct {
 	MachineID               string
 	NodeName                string
 	Loglevel                logger.Verbosity
-	MetricsPort             string
+	MetricsBindAddress      string
 	BlockDeviceScanInterval time.Duration
 	VolumeGroupScanInterval time.Duration
 	LLVRequeueInterval      time.Duration
@@ -95,6 +94,15 @@ type Config struct {
 	FileDevicesMinFreeSpacePercent int
 }
 
+// DefaultMetricsBindAddress keeps the endpoint on loopback when the chart says
+// nothing: the kube-rbac-proxy of the same pod is what publishes it. The fleet-wide
+// fallback is the wildcard ":8080", which would both answer unauthenticated on the
+// pod IP and collide with the proxy, since the two carry the same port number.
+//
+// Exported so that a test asserts against the value this package actually uses
+// rather than against the library default it deliberately overrides.
+const DefaultMetricsBindAddress = "127.0.0.1:8080"
+
 func NewConfig() (*Config, error) {
 	var cfg Config
 
@@ -103,12 +111,7 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("[NewConfig] required %s env variable is not specified", NodeName)
 	}
 
-	loglevel := os.Getenv(LogLevel)
-	if loglevel == "" {
-		cfg.Loglevel = logger.DebugLevel
-	} else {
-		cfg.Loglevel = logger.Verbosity(loglevel)
-	}
+	cfg.Loglevel = logger.VerbosityFromEnv(logger.InfoLevel)
 
 	machID, err := getMachineID()
 	if err != nil {
@@ -116,10 +119,11 @@ func NewConfig() (*Config, error) {
 	}
 	cfg.MachineID = machID
 
-	cfg.MetricsPort = os.Getenv(MetricsPort)
-	if cfg.MetricsPort == "" {
-		cfg.MetricsPort = ":4202"
-	}
+	// METRICS_BIND_ADDRESS, the name every module in the fleet reads, instead of the
+	// METRICS_PORT this one used to read. The old default was :4202, the port
+	// kube-rbac-proxy listens on in the same pod, so an agent started without the env
+	// set would have fought the proxy for it; the shared default is :8080.
+	cfg.MetricsBindAddress = monitoring.BindAddressFromEnvOr(DefaultMetricsBindAddress)
 
 	cfg.HealthProbeBindAddress = os.Getenv(DefaultHealthProbeBindAddressEnvName)
 	if cfg.HealthProbeBindAddress == "" {

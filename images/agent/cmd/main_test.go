@@ -23,8 +23,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -77,7 +77,7 @@ func paths(items []utils.LVGWithFileDevices) []string {
 // a block device, and, since spec.fileDevices removed `loop` from LVMGlobalFilter,
 // exposing whatever LVM metadata it carries to lvm.static.
 func TestCollectFileDevicesToReattach_ConfinesSpecPathsToTheBaseDirectory(t *testing.T) {
-	log := logger.Logger{}
+	log := logger.NewNop()
 
 	t.Run("an entry inside the base directory is collected", func(t *testing.T) {
 		lvgs := []v1alpha1.LVMVolumeGroup{
@@ -154,7 +154,7 @@ func TestCollectFileDevicesToReattach_KeepsStatusPaths(t *testing.T) {
 		}},
 	}}
 
-	got := collectFileDevicesToReattach(logger.Logger{}, []v1alpha1.LVMVolumeGroup{lvg}, reattachNode, reattachBaseDir)
+	got := collectFileDevicesToReattach(logger.NewNop(), []v1alpha1.LVMVolumeGroup{lvg}, reattachNode, reattachBaseDir)
 	assert.Equal(t, []string{"/mnt/data/sds-lvg-a.d1.img"}, paths(got))
 }
 
@@ -171,7 +171,7 @@ func TestCollectFileDevicesToReattach_FiltersByNodeAndDeduplicates(t *testing.T)
 	}}
 	foreign := reattachLVG("lvg-b", "node-1", reattachEntry("d1", reattachBaseDir))
 
-	got := collectFileDevicesToReattach(logger.Logger{}, []v1alpha1.LVMVolumeGroup{local, foreign}, reattachNode, reattachBaseDir)
+	got := collectFileDevicesToReattach(logger.NewNop(), []v1alpha1.LVMVolumeGroup{local, foreign}, reattachNode, reattachBaseDir)
 
 	assert.Equal(t, []string{sameFile}, paths(got))
 	if assert.Len(t, got, 1) {

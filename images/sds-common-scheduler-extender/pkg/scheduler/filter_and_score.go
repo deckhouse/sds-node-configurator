@@ -23,12 +23,13 @@ import (
 	"sort"
 	"time"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/tracing"
 )
 
 func (s *scheduler) filterAndScore(w http.ResponseWriter, r *http.Request) {
-	servingLog := logger.WithTraceIDLogger(r.Context(), s.log).WithName("filter-and-score")
+	servingLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("filter-and-score")
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -39,7 +40,7 @@ func (s *scheduler) filterAndScore(w http.ResponseWriter, r *http.Request) {
 	reader := http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
 	err := json.NewDecoder(reader).Decode(&req)
 	if err != nil {
-		servingLog.Error(err, "unable to decode request")
+		servingLog.Error("unable to decode request", logger.Err(err))
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -60,7 +61,7 @@ func (s *scheduler) filterAndScore(w http.ResponseWriter, r *http.Request) {
 
 	ttl, err := time.ParseDuration(req.ReservationTTL)
 	if err != nil {
-		servingLog.Error(err, "unable to parse reservation TTL")
+		servingLog.Error("unable to parse reservation TTL", logger.Err(err))
 		http.Error(w, "invalid reservationTTL", http.StatusBadRequest)
 		return
 	}
@@ -80,19 +81,20 @@ func (s *scheduler) filterAndScore(w http.ResponseWriter, r *http.Request) {
 	// Filter by available space
 	var filteredKeys []cache.StoragePoolKey
 	var filteredLVGs []LVMVolumeGroupInput
+	filterAndScoreLog := servingLog.Named("filterAndScore")
 	for i, key := range poolKeys {
 		spaceInfo, err := getAvailableSpace(s.ctx, s.client, s.cache, key)
 		if err != nil {
-			servingLog.Error(err, fmt.Sprintf("[filterAndScore] unable to get available space for %s", key.String()))
+			filterAndScoreLog.Error(fmt.Sprintf("unable to get available space for %s", key.String()), logger.Err(err))
 			continue
 		}
 
 		if spaceInfo.AvailableSpace >= req.Size {
-			servingLog.Debug(fmt.Sprintf("[filterAndScore] %s has enough space (available: %d >= requested: %d)", key.String(), spaceInfo.AvailableSpace, req.Size))
+			filterAndScoreLog.Debug(fmt.Sprintf("%s has enough space (available: %d >= requested: %d)", key.String(), spaceInfo.AvailableSpace, req.Size))
 			filteredKeys = append(filteredKeys, key)
 			filteredLVGs = append(filteredLVGs, req.LVGS[i])
 		} else {
-			servingLog.Debug(fmt.Sprintf("[filterAndScore] %s does not have enough space (available: %d < requested: %d)", key.String(), spaceInfo.AvailableSpace, req.Size))
+			filterAndScoreLog.Debug(fmt.Sprintf("%s does not have enough space (available: %d < requested: %d)", key.String(), spaceInfo.AvailableSpace, req.Size))
 		}
 	}
 
@@ -110,7 +112,7 @@ func (s *scheduler) filterAndScore(w http.ResponseWriter, r *http.Request) {
 	for i, key := range filteredKeys {
 		score, err := calculatePoolScore(s.ctx, s.client, s.cache, key, req.Size, s.defaultDivisor)
 		if err != nil {
-			servingLog.Error(err, fmt.Sprintf("[filterAndScore] unable to calculate score for %s", key.String()))
+			servingLog.Named("filterAndScore").Error(fmt.Sprintf("unable to calculate score for %s", key.String()), logger.Err(err))
 			continue
 		}
 		scored = append(scored, ScoredLVMVolumeGroup{
@@ -132,7 +134,7 @@ func (s *scheduler) filterAndScore(w http.ResponseWriter, r *http.Request) {
 
 	responseJSON, err := json.Marshal(response)
 	if err != nil {
-		servingLog.Error(err, "unable to marshal response")
+		servingLog.Error("unable to marshal response", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -140,6 +142,6 @@ func (s *scheduler) filterAndScore(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("content-type", "application/json")
 	if _, err = w.Write(responseJSON); err != nil {
-		servingLog.Error(err, "unable to write response")
+		servingLog.Error("unable to write response", logger.Err(err))
 	}
 }

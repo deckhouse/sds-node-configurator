@@ -8,8 +8,8 @@ metadata:
   {{- include "helm_lib_module_labels" (list $ (dict "prometheus" "main")) | nindent 2 }}
 spec:
   endpoints:
-  - port: metrics
-    scheme: http
+  - port: https-metrics
+    scheme: https
     path: /metrics
     bearerTokenSecret:
       name: "prometheus-token"
@@ -27,8 +27,13 @@ spec:
       regex: "true"
       action: keep
   selector:
+    # The Service is the one helm_lib_module_webhook_service renders, and it is
+    # labelled after the Deployment -- "controller". Selecting
+    # "sds-health-watcher-controller" matched no Service at all, so nothing was
+    # scraped however the port was declared; the job label below is what carries the
+    # controller's name into Prometheus.
     matchLabels:
-      app: sds-health-watcher-controller
+      app: controller
   namespaceSelector:
     matchNames:
     - d8-{{ .Chart.Name }}

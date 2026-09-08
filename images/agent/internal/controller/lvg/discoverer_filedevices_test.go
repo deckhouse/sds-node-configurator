@@ -30,10 +30,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
@@ -46,7 +46,7 @@ func discovererWithMockedCommands(t *testing.T, mc *mock_utils.MockCommands) *Di
 	return NewDiscoverer(
 		cl,
 		UncachedReader{Reader: cl},
-		logger.Logger{},
+		logger.NewNop(),
 		monitoring.GetMetrics(""),
 		cache.New(),
 		mc,
@@ -360,7 +360,7 @@ func TestLVMVolumeGroupDiscoverReconcile_RefusesToRenameAFileBackedImport(t *tes
 	if err := cl.Create(context.Background(), occupant); err != nil {
 		t.Fatalf("unable to seed the occupying LVMVolumeGroup: %v", err)
 	}
-	log := logger.Logger{}
+	log := logger.NewNop()
 	metrics := monitoring.GetMetrics(node)
 	sdsCache := cache.New()
 
@@ -480,7 +480,7 @@ func TestLVMVolumeGroupDiscoverReconcile_KeepsStatusWhenALoopPVCannotBeRead(t *t
 	mc.EXPECT().GetFilesystemSpace(gomock.Any(), gomock.Any()).
 		Return("stat -f", internal.FilesystemSpace{AvailableBytes: 1 << 40, TotalBytes: 1 << 40}, nil).AnyTimes()
 
-	d := NewDiscoverer(cl, UncachedReader{Reader: cl}, logger.Logger{}, monitoring.GetMetrics(node), sdsCache, mc, DiscovererConfig{
+	d := NewDiscoverer(cl, UncachedReader{Reader: cl}, logger.NewNop(), monitoring.GetMetrics(node), sdsCache, mc, DiscovererConfig{
 		NodeName:                node,
 		VolumeGroupScanInterval: time.Second,
 	})

@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 func newTestCache() *Cache {

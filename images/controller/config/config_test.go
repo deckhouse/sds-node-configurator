@@ -21,13 +21,15 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/deckhouse/sds-common-lib/monitoring"
 )
 
 func TestNewConfig(t *testing.T) {
 	t.Run("AllValuesSet_ReturnsNoError", func(t *testing.T) {
-		expMetricsPort := ":0000"
+		expMetricsBindAddress := ":0000"
 
-		err := os.Setenv(MetricsPort, expMetricsPort)
+		err := os.Setenv(monitoring.EnvMetricsBindAddress, expMetricsBindAddress)
 		if err != nil {
 			t.Error(err)
 		}
@@ -36,19 +38,19 @@ func TestNewConfig(t *testing.T) {
 		opts, err := NewConfig()
 
 		if assert.NoError(t, err) {
-			assert.Equal(t, expMetricsPort, opts.MetricsPort)
+			assert.Equal(t, expMetricsBindAddress, opts.MetricsBindAddress)
 		}
 	})
 
-	t.Run("MetricsPortNotSet_ReturnsDefaultPort", func(t *testing.T) {
-		expMetricsPort := ":8080"
+	t.Run("MetricsBindAddressNotSet_ReturnsDefaultAddress", func(t *testing.T) {
+		expMetricsBindAddress := DefaultMetricsBindAddress
 
 		defer os.Clearenv()
 
 		opts, err := NewConfig()
 
 		if assert.NoError(t, err) {
-			assert.Equal(t, expMetricsPort, opts.MetricsPort)
+			assert.Equal(t, expMetricsBindAddress, opts.MetricsBindAddress)
 		}
 	})
 }

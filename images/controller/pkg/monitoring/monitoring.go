@@ -92,6 +92,11 @@ func init() {
 	metrics.Registry.MustRegister(reconcilesCountTotal)
 	metrics.Registry.MustRegister(reconcileDuration)
 	metrics.Registry.MustRegister(utilsCommandsDuration)
+	// Both of these were declared and incremented -- in about forty places across
+	// the agent and the controller -- and never registered, so nothing they counted
+	// was ever exported.
+	metrics.Registry.MustRegister(utilsCommandsExecutionCount)
+	metrics.Registry.MustRegister(utilsCommandsErrorsCount)
 	metrics.Registry.MustRegister(apiMethodsDuration)
 	metrics.Registry.MustRegister(apiMethodsExecutionCount)
 	metrics.Registry.MustRegister(apiMethodsErrorsCount)

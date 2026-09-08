@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
@@ -45,7 +46,6 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/llv_extender"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/lvg"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/kubutils"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/scanner"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
@@ -79,59 +79,70 @@ func run() int {
 
 	cfgParams, err := config.NewConfig()
 	if err != nil {
-		fmt.Println("unable to create NewConfig " + err.Error())
+		// NewConfig returns nil on error, so the next line -- cfgParams.Loglevel --
+		// used to panic on a nil pointer and bury the message printed here. A
+		// missing NODE_NAME or an unreadable machine-id is a plain configuration
+		// error and has to read as one.
+		fmt.Printf("unable to create the config: %v\n", err)
+		return 1
 	}
 
-	log, err := logger.NewLogger(cfgParams.Loglevel)
+	baseLog, err := logger.NewLogger(cfgParams.Loglevel)
 	if err != nil {
 		fmt.Printf("unable to create NewLogger, err: %v\n", err)
 		return 1
 	}
+	log := baseLog.Named("main")
 
-	log.Info(fmt.Sprintf("[main] Go Version:%s ", goruntime.Version()))
-	log.Info(fmt.Sprintf("[main] OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
+	log.Info(fmt.Sprintf("go Version:%s ", goruntime.Version()))
+	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
-	log.Info(fmt.Sprintf("[main] Feature SnapshotsEnabled: %t", feature.SnapshotsEnabled()))
-	log.Info(fmt.Sprintf("[main] Feature VolumeCleanupEnabled: %t", feature.VolumeCleanupEnabled()))
-	log.Info(fmt.Sprintf("[main] Feature NetlinkBlockDeviceDiscoveryEnabled: %t", cfgParams.Features.NetlinkBlockDeviceDiscovery))
+	log.Info(fmt.Sprintf("feature SnapshotsEnabled: %t", feature.SnapshotsEnabled()))
+	log.Info(fmt.Sprintf("feature VolumeCleanupEnabled: %t", feature.VolumeCleanupEnabled()))
+	log.Info(fmt.Sprintf("feature NetlinkBlockDeviceDiscoveryEnabled: %t", cfgParams.Features.NetlinkBlockDeviceDiscovery))
 
-	log.Info("[main] CfgParams has been successfully created")
-	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.NodeName, cfgParams.NodeName))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.MachineID, cfgParams.MachineID))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.BlockDeviceScanInterval.String()))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ThrottleInterval, cfgParams.ThrottleInterval.String()))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDuration.String()))
+	log.Info("CfgParams has been successfully created")
+	log.Info(fmt.Sprintf("%s = %s", logger.EnvLogLevel, cfgParams.Loglevel))
+	log.Info(fmt.Sprintf("%s = %s", config.NodeName, cfgParams.NodeName))
+	log.Info(fmt.Sprintf("%s = %s", config.MachineID, cfgParams.MachineID))
+	log.Info(fmt.Sprintf("%s = %s", config.ScanInterval, cfgParams.BlockDeviceScanInterval.String()))
+	log.Info(fmt.Sprintf("%s = %s", config.ThrottleInterval, cfgParams.ThrottleInterval.String()))
+	log.Info(fmt.Sprintf("%s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDuration.String()))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
-		log.Error(err, "[main] unable to KubernetesDefaultConfigCreate")
+		// Without a config the manager cannot be built at all; continuing only moved
+		// the failure a few lines down, to a message that does not name the cause.
+		// return and not os.Exit: main is kept minimal precisely so that the
+		// `defer cancel()` above still runs on a startup failure.
+		log.Error("unable to KubernetesDefaultConfigCreate", logger.Err(err))
+		return 1
 	}
-	log.Info("[main] kubernetes config has been successfully created.")
+	log.Info("kubernetes config has been successfully created.")
 
 	scheme := runtime.NewScheme()
 	for _, f := range resourcesSchemeFuncs {
 		err := f(scheme)
 		if err != nil {
-			log.Error(err, "[main] unable to add scheme to func")
+			log.Error("unable to add scheme to func", logger.Err(err))
 			return 1
 		}
 	}
-	log.Info("[main] successfully read scheme CR")
+	log.Info("successfully read scheme CR")
 
 	managerOpts := manager.Options{
 		Scheme:                 scheme,
-		Logger:                 log.GetLogger(),
-		Metrics:                server.Options{BindAddress: cfgParams.MetricsPort},
+		Logger:                 baseLog.GetLogger(),
+		Metrics:                server.Options{BindAddress: cfgParams.MetricsBindAddress},
 		HealthProbeBindAddress: cfgParams.HealthProbeBindAddress,
 	}
 
 	mgr, err := manager.New(kConfig, managerOpts)
 	if err != nil {
-		log.Error(err, "[main] unable to manager.New")
+		log.Error("unable to manager.New", logger.Err(err))
 		return 1
 	}
-	log.Info("[main] successfully created kubernetes manager")
+	log.Info("successfully created kubernetes manager")
 
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
 	commands := utils.NewCommands()
@@ -150,15 +161,15 @@ func run() int {
 		// attached from the previous incarnation. Without this pass ReTag and
 		// ActivateVGs would not see those Volume Groups at all.
 		if err := utils.RefreshOwnedLoops(ctx, log, commands, cfgParams.CmdDeadlineDuration); err != nil {
-			log.Warning(fmt.Sprintf("[main] %v", err))
+			log.Warn("unable to refresh the owned loop devices", logger.Err(err))
 		}
 
-		log.Info("[main] ReTag starts")
+		log.Info("ReTag starts")
 		if err := commands.ReTag(ctx, log, metrics, bd.DiscovererName, cfgParams.CmdDeadlineDuration); err != nil {
-			log.Error(err, "[main] unable to run ReTag")
+			log.Error("unable to run ReTag", logger.Err(err))
 		}
 
-		log.Info("[main] ReattachFileDevices starts")
+		log.Info("ReattachFileDevices starts")
 		// Best-effort fast path: re-establish loop mappings for file-backed
 		// PVs so ActivateVGs can see them right after a reboot. A failure
 		// here must NOT suppress ActivateAllManagedVGs — that would hold
@@ -167,19 +178,19 @@ func run() int {
 		// reattach idempotently via provisionFileDevices on its next pass,
 		// so a transient losetup failure recovers without a pod restart.
 		if err := reattachFileDevicesAtStartup(ctx, log, mgr, commands, cfgParams.NodeName, cfgParams.FileDevicesDirectory, cfgParams.CmdDeadlineDuration); err != nil {
-			log.Error(err, "[main] file device reattach failed; the LVG reconciler will retry, continuing to ActivateVGs")
+			log.Error("file device reattach failed; the LVG reconciler will retry, continuing to ActivateVGs", logger.Err(err))
 		} else {
-			log.Info("[main] ReattachFileDevices completed")
+			log.Info("ReattachFileDevices completed")
 		}
 
-		log.Info("[main] ActivateVGs starts")
+		log.Info("ActivateVGs starts")
 		if err := utils.ActivateAllManagedVGs(ctx, log, commands, metrics, cfgParams.CmdDeadlineDuration); err != nil {
-			log.Error(err, "[main] unable to activate managed VGs")
+			log.Error("unable to activate managed VGs", logger.Err(err))
 		}
-		log.Info("[main] ActivateVGs completed")
+		log.Info("ActivateVGs completed")
 		return nil
 	})); err != nil {
-		log.Error(err, "[main] unable to add startup tasks runnable")
+		log.Error("unable to add startup tasks runnable", logger.Err(err))
 		return 1
 	}
 
@@ -201,7 +212,7 @@ func run() int {
 		),
 	)
 	if err != nil {
-		log.Error(err, "[main] unable to controller.RunBlockDeviceController")
+		log.Error("unable to controller.RunBlockDeviceController", logger.Err(err))
 		return 1
 	}
 
@@ -227,7 +238,7 @@ func run() int {
 		),
 	)
 	if err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupDiscoverController")
+		log.Error("unable to controller.RunLVMVolumeGroupDiscoverController", logger.Err(err))
 		return 1
 	}
 
@@ -267,7 +278,7 @@ func run() int {
 		),
 	)
 	if err != nil {
-		log.Error(err, "[main] unable to run BlockDeviceFilter controller")
+		log.Error("unable to run BlockDeviceFilter controller", logger.Err(err))
 		return 1
 	}
 
@@ -292,7 +303,7 @@ func run() int {
 		),
 	)
 	if err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
+		log.Error("unable to controller.RunLVMVolumeGroupWatcherController", logger.Err(err))
 		return 1
 	}
 
@@ -305,7 +316,7 @@ func run() int {
 			metrics,
 			discover,
 		); err != nil {
-			log.Error(err, "[main] unable to run scanner")
+			log.Error("unable to run scanner", logger.Err(err))
 			os.Exit(1)
 		}
 	}()
@@ -328,7 +339,7 @@ func run() int {
 		),
 	)
 	if err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMVolumeGroupWatcherController")
+		log.Error("unable to controller.RunLVMVolumeGroupWatcherController", logger.Err(err))
 		return 1
 	}
 
@@ -348,31 +359,31 @@ func run() int {
 		),
 	)
 	if err != nil {
-		log.Error(err, "[main] unable to controller.RunLVMLogicalVolumeExtenderWatcherController")
+		log.Error("unable to controller.RunLVMLogicalVolumeExtenderWatcherController", logger.Err(err))
 		return 1
 	}
 
 	addLLVSReconciler(mgr, log, metrics, sdsCache, commands, cfgParams)
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
+		log.Error("unable to mgr.AddHealthzCheck", logger.Err(err))
 		return 1
 	}
-	log.Info("[main] successfully AddHealthzCheck")
+	log.Info("successfully AddHealthzCheck")
 
 	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		log.Error(err, "[main] unable to mgr.AddReadyzCheck")
+		log.Error("unable to mgr.AddReadyzCheck", logger.Err(err))
 		return 1
 	}
-	log.Info("[main] successfully AddReadyzCheck")
+	log.Info("successfully AddReadyzCheck")
 
 	err = mgr.Start(ctx)
 	if err != nil {
-		log.Error(err, "[main] unable to mgr.Start")
+		log.Error("unable to mgr.Start", logger.Err(err))
 		return 1
 	}
 
-	log.Info("[main] successfully starts the manager")
+	log.Info("successfully starts the manager")
 	return 0
 }
 
@@ -389,13 +400,13 @@ func run() int {
 func reattachFileDevicesAtStartup(ctx context.Context, log logger.Logger, mgr manager.Manager, commands utils.Commands, nodeName, baseDir string, cmdTimeout time.Duration) error {
 	var lvgList v1alpha1.LVMVolumeGroupList
 	if err := mgr.GetAPIReader().List(ctx, &lvgList); err != nil {
-		log.Error(err, "[reattachFileDevicesAtStartup] unable to list LVMVolumeGroups")
+		log.Error("unable to list LVMVolumeGroups", logger.Err(err))
 		return err
 	}
 
 	items := collectFileDevicesToReattach(log, lvgList.Items, nodeName, baseDir)
 	if len(items) == 0 {
-		log.Debug("[reattachFileDevicesAtStartup] no file devices to reattach")
+		log.Named("reattachFileDevicesAtStartup").Debug("no file devices to reattach")
 		return nil
 	}
 
@@ -406,6 +417,8 @@ func reattachFileDevicesAtStartup(ctx context.Context, log logger.Logger, mgr ma
 // be re-attached, and is where the confinement to baseDir is applied. Separated
 // from the listing and the losetup calls so that decision is testable on its own.
 func collectFileDevicesToReattach(log logger.Logger, lvgs []v1alpha1.LVMVolumeGroup, nodeName, baseDir string) []utils.LVGWithFileDevices {
+	log = log.Named("collectFileDevicesToReattach")
+
 	var items []utils.LVGWithFileDevices
 	for _, lvg := range lvgs {
 		if lvg.Spec.Local.NodeName != nodeName {
@@ -452,7 +465,7 @@ func collectFileDevicesToReattach(log logger.Logger, lvgs []v1alpha1.LVMVolumeGr
 			// it, this is the one file-device path that would hand an arbitrary
 			// host path to losetup.
 			if baseDir != "" && !utils.IsWithinBaseDir(filepath.Clean(fd.Directory), baseDir) {
-				log.Warning(fmt.Sprintf("[collectFileDevicesToReattach] skipping the fileDevices entry %q of the LVMVolumeGroup %s: its directory %q is outside the configured base directory %q, so nothing there was created by this agent",
+				log.Warn(fmt.Sprintf("skipping the fileDevices entry %q of the LVMVolumeGroup %s: its directory %q is outside the configured base directory %q, so nothing there was created by this agent",
 					fd.Name, lvg.Name, fd.Directory, baseDir))
 				continue
 			}

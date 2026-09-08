@@ -12,5 +12,8 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+  {{- /* No metrics port here. This Service is what kube-scheduler calls; the metrics
+         of the pod are scraped by the PodMonitor next to this file, the same way the
+         other two scheduler extenders of the fleet are scraped. */}}
   selector:
     app: sds-common-scheduler-extender

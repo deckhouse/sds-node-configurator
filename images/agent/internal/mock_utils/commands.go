@@ -30,8 +30,8 @@ import (
 	reflect "reflect"
 	time "time"
 
+	logger "github.com/deckhouse/sds-common-lib/logger"
 	internal "github.com/deckhouse/sds-node-configurator/images/agent/internal"
-	logger "github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	monitoring "github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	gomock "go.uber.org/mock/gomock"
 )

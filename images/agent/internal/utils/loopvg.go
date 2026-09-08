@@ -40,8 +40,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 // LoopDevicePathPrefix is what makes a PV name a loop device.
@@ -162,6 +162,8 @@ func classifyManagedTaggedLoopVG(
 	vg internal.VGData,
 	loopPVs []string,
 ) LoopVGVerdict {
+	log = log.Named("ClassifyLoopVGs")
+
 	unreadable := false
 	for _, loop := range loopPVs {
 		backing, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (internal.LoopBackingFile, error) {
@@ -170,7 +172,7 @@ func classifyManagedTaggedLoopVG(
 			return backing, err
 		})
 		if err != nil {
-			log.Warning(fmt.Sprintf("[ClassifyLoopVGs] unable to read the backing file of loop PV %s of VG %s: %v; cannot establish ownership this round",
+			log.Warn(fmt.Sprintf("unable to read the backing file of loop PV %s of VG %s: %v; cannot establish ownership this round",
 				loop, vg.VGName, err))
 			unreadable = true
 			continue
@@ -195,7 +197,7 @@ func classifyManagedTaggedLoopVG(
 		return LoopVGUnknown
 	}
 
-	log.Warning(fmt.Sprintf("[ClassifyLoopVGs] VG %s (VG_UUID=%s) is tagged %s but every one of its %d loop PV(s) is backed by a file this agent did not create; treating it as foreign and leaving it alone",
+	log.Warn(fmt.Sprintf("VG %s (VG_UUID=%s) is tagged %s but every one of its %d loop PV(s) is backed by a file this agent did not create; treating it as foreign and leaving it alone",
 		vg.VGName, vg.VGUUID, internal.LVMTags[0], len(loopPVs)))
 	return LoopVGUnowned
 }
@@ -208,10 +210,12 @@ func classifyManagedTaggedLoopVG(
 // tag is not an ownership proof for a loop-backed Volume Group — see the file
 // comment.
 func SkipUnownedLoopVGs(log logger.Logger, action string, vgs []internal.VGData, verdicts LoopVGVerdicts) []internal.VGData {
+	log = log.Named("SkipUnownedLoopVGs")
+
 	out := make([]internal.VGData, 0, len(vgs))
 	for _, vg := range vgs {
 		if verdicts.IsUnowned(vg.VGUUID) {
-			log.Warning(fmt.Sprintf("[SkipUnownedLoopVGs] refusing to %s VG %s (VG_UUID=%s): it lives entirely on loop devices whose backing files this agent did not create",
+			log.Warn(fmt.Sprintf("refusing to %s VG %s (VG_UUID=%s): it lives entirely on loop devices whose backing files this agent did not create",
 				action, vg.VGName, vg.VGUUID))
 			continue
 		}

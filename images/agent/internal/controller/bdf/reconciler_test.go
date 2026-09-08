@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 // A BlockDeviceFilter decides which devices become BlockDevices, so widening one
@@ -50,7 +50,7 @@ func TestReconcile_RunsTheWholeDiscoveryPass(t *testing.T) {
 
 	r := NewReconciler(
 		nil,
-		logger.Logger{},
+		logger.NewNop(),
 		nil,
 		controller.DiscoverInOrder(
 			record("block-devices", controller.Result{}),
@@ -82,11 +82,11 @@ func TestReconcile_DoesNotOpenASecondRetryChain(t *testing.T) {
 
 	r := NewReconciler(
 		nil,
-		logger.Logger{},
+		logger.NewNop(),
 		nil,
 		controller.WithSingleRetryChain(
 			chainCtx,
-			logger.Logger{},
+			logger.NewNop(),
 			controller.DiscoveryPassName,
 			func(context.Context) (controller.Result, error) {
 				return controller.Result{RequeueAfter: time.Hour}, nil

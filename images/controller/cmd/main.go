@@ -30,11 +30,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
+	"github.com/deckhouse/sds-common-lib/logger"
+	commonmonitoring "github.com/deckhouse/sds-common-lib/monitoring"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/controller/config"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/controller"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/kubutils"
-	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/logger"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/monitoring"
 )
 
@@ -52,46 +53,53 @@ func main() {
 
 	cfgParams, err := config.NewConfig()
 	if err != nil {
-		fmt.Println("unable to create NewConfig " + err.Error())
+		// NewConfig returns nil on error, so the next line -- cfgParams.Loglevel --
+		// used to panic on a nil pointer and bury the message printed here.
+		fmt.Printf("unable to create the config: %v\n", err)
+		os.Exit(1)
 	}
 
-	log, err := logger.NewLogger(cfgParams.Loglevel)
+	baseLog, err := logger.NewLogger(cfgParams.Loglevel)
 	if err != nil {
 		fmt.Printf("unable to create NewLogger, err: %v\n", err)
 		os.Exit(1)
 	}
+	log := baseLog.Named("main")
 
-	log.Info(fmt.Sprintf("[main] Go Version:%s ", goruntime.Version()))
-	log.Info(fmt.Sprintf("[main] OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
+	log.Info(fmt.Sprintf("go Version:%s ", goruntime.Version()))
+	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
-	log.Info("[main] CfgParams has been successfully created")
-	log.Info(fmt.Sprintf("[main] %s = %s", config.LogLevel, cfgParams.Loglevel))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.MetricsPort, cfgParams.MetricsPort))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.ScanInterval, cfgParams.ScanInterval))
-	log.Info(fmt.Sprintf("[main] %s = %t", config.LeaderElectionEnvName, cfgParams.LeaderElection))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.LeaderElectionNamespaceEnvName, cfgParams.LeaderElectionNamespace))
-	log.Info(fmt.Sprintf("[main] %s = %s", config.LeaderElectionIDEnvName, cfgParams.LeaderElectionID))
+	log.Info("CfgParams has been successfully created")
+	log.Info(fmt.Sprintf("%s = %s", logger.EnvLogLevel, cfgParams.Loglevel))
+	log.Info(fmt.Sprintf("%s = %s", commonmonitoring.EnvMetricsBindAddress, cfgParams.MetricsBindAddress))
+	log.Info(fmt.Sprintf("%s = %s", config.ScanInterval, cfgParams.ScanInterval))
+	log.Info(fmt.Sprintf("%s = %t", config.LeaderElectionEnvName, cfgParams.LeaderElection))
+	log.Info(fmt.Sprintf("%s = %s", config.LeaderElectionNamespaceEnvName, cfgParams.LeaderElectionNamespace))
+	log.Info(fmt.Sprintf("%s = %s", config.LeaderElectionIDEnvName, cfgParams.LeaderElectionID))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
-		log.Error(err, "[main] unable to KubernetesDefaultConfigCreate")
+		// Without a config the manager cannot be built at all; continuing only moved
+		// the failure a few lines down, to a message that does not name the cause.
+		log.Error("unable to KubernetesDefaultConfigCreate", logger.Err(err))
+		os.Exit(1)
 	}
-	log.Info("[main] kubernetes config has been successfully created.")
+	log.Info("kubernetes config has been successfully created.")
 
 	scheme := apiruntime.NewScheme()
 	for _, f := range resourcesSchemeFuncs {
 		err := f(scheme)
 		if err != nil {
-			log.Error(err, "[main] unable to add scheme to func")
+			log.Error("unable to add scheme to func", logger.Err(err))
 			os.Exit(1)
 		}
 	}
-	log.Info("[main] successfully read scheme CR")
+	log.Info("successfully read scheme CR")
 
 	managerOpts := manager.Options{
 		Scheme:                  scheme,
-		Logger:                  log.GetLogger(),
-		Metrics:                 server.Options{BindAddress: cfgParams.MetricsPort},
+		Logger:                  baseLog.GetLogger(),
+		Metrics:                 server.Options{BindAddress: cfgParams.MetricsBindAddress},
 		HealthProbeBindAddress:  cfgParams.HealthProbeBindAddress,
 		LeaderElection:          cfgParams.LeaderElection,
 		LeaderElectionID:        cfgParams.LeaderElectionID,
@@ -100,59 +108,59 @@ func main() {
 
 	mgr, err := manager.New(kConfig, managerOpts)
 	if err != nil {
-		log.Error(err, "[main] unable to manager.New")
+		log.Error("unable to manager.New", logger.Err(err))
 		os.Exit(1)
 	}
-	log.Info("[main] successfully created kubernetes manager")
+	log.Info("successfully created kubernetes manager")
 
 	metrics := monitoring.GetMetrics(cfgParams.NodeName)
-	err = controller.RunSdsInfraWatcher(mgr, *cfgParams, metrics, *log)
+	err = controller.RunSdsInfraWatcher(mgr, *cfgParams, metrics, baseLog)
 	if err != nil {
-		log.Error(err, "[main] unable to run SdsInfraWatcher controller")
+		log.Error("unable to run SdsInfraWatcher controller", logger.Err(err))
 		os.Exit(1)
 	}
 
-	err = controller.RunLVGConditionsWatcher(mgr, *cfgParams, *log)
+	err = controller.RunLVGConditionsWatcher(mgr, *cfgParams, baseLog)
 	if err != nil {
-		log.Error(err, "[main] unable to run LVGConditionsWatcher controller")
+		log.Error("unable to run LVGConditionsWatcher controller", logger.Err(err))
 		os.Exit(1)
 	}
 
-	err = controller.RunLVGStatusWatcher(mgr, *log)
+	err = controller.RunLVGStatusWatcher(mgr, baseLog)
 	if err != nil {
-		log.Error(err, "[main] unable to run LVGConfigurationWatcher controller")
+		log.Error("unable to run LVGConfigurationWatcher controller", logger.Err(err))
 		os.Exit(1)
 	}
 
-	err = controller.RunBlockDeviceLabelsWatcher(mgr, *log, *cfgParams)
+	err = controller.RunBlockDeviceLabelsWatcher(mgr, baseLog, *cfgParams)
 	if err != nil {
-		log.Error(err, "[main] unable to run BlockDeviceWatcher controller")
+		log.Error("unable to run BlockDeviceWatcher controller", logger.Err(err))
 		os.Exit(1)
 	}
 
-	err = controller.RunLVMVolumeGroupSetWatcher(mgr, *log, *cfgParams, metrics)
+	err = controller.RunLVMVolumeGroupSetWatcher(mgr, baseLog, *cfgParams, metrics)
 	if err != nil {
-		log.Error(err, "[main] unable to run RunLVMVolumeGroupSetWatcher controller")
+		log.Error("unable to run RunLVMVolumeGroupSetWatcher controller", logger.Err(err))
 		os.Exit(1)
 	}
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		log.Error(err, "[main] unable to mgr.AddHealthzCheck")
+		log.Error("unable to mgr.AddHealthzCheck", logger.Err(err))
 		os.Exit(1)
 	}
-	log.Info("[main] successfully AddHealthzCheck")
+	log.Info("successfully AddHealthzCheck")
 
 	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		log.Error(err, "[main] unable to mgr.AddReadyzCheck")
+		log.Error("unable to mgr.AddReadyzCheck", logger.Err(err))
 		os.Exit(1)
 	}
-	log.Info("[main] successfully AddReadyzCheck")
+	log.Info("successfully AddReadyzCheck")
 
 	err = mgr.Start(ctx)
 	if err != nil {
-		log.Error(err, "[main] unable to mgr.Start")
+		log.Error("unable to mgr.Start", logger.Err(err))
 		os.Exit(1)
 	}
 
-	log.Info("[main] successfully starts the manager")
+	log.Info("successfully starts the manager")
 }

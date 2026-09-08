@@ -24,8 +24,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
@@ -62,7 +62,7 @@ func classify(t *testing.T, vgs []internal.VGData, pvs []internal.PVData, backin
 			return "losetup ...", internal.LoopBackingFile{Path: backing}, nil
 		}).AnyTimes()
 
-	return utils.ClassifyLoopVGs(context.Background(), logger.Logger{}, mc, 0, vgs, pvs)
+	return utils.ClassifyLoopVGs(context.Background(), logger.NewNop(), mc, 0, vgs, pvs)
 }
 
 // The regression this whole guard exists for. fillTheCache lists VGs before PVs,
@@ -76,7 +76,7 @@ func TestFilterForeignLoopPVs_KeepsLoopPVWhoseVGIsNotListedYet(t *testing.T) {
 	pvs := []internal.PVData{loopPV("/dev/loop0", "uuid-fresh", "e2e-vg-fd")}
 
 	verdicts := classify(t, nil, pvs, nil)
-	got := utils.FilterForeignLoopPVs(logger.Logger{}, pvs, verdicts)
+	got := utils.FilterForeignLoopPVs(logger.NewNop(), pvs, verdicts)
 
 	assert.Equal(t, []string{"/dev/loop0"}, pvNames(got),
 		"a loop PV whose VG is merely unknown must be kept; absence is not evidence of foreignness")
@@ -90,7 +90,7 @@ func TestFilterForeignLoopPVs_DropsListedUntaggedLoopVG(t *testing.T) {
 	pvs := []internal.PVData{loopPV("/dev/loop1", "uuid-foreign", "guest-vg")}
 
 	verdicts := classify(t, vgs, pvs, map[string]string{"/dev/loop1": "/var/lib/libvirt/guest.qcow2"})
-	got := utils.FilterForeignLoopPVs(logger.Logger{}, pvs, verdicts)
+	got := utils.FilterForeignLoopPVs(logger.NewNop(), pvs, verdicts)
 
 	assert.Empty(t, got, "a listed, untagged, purely loop-backed VG is foreign and must be dropped")
 }
@@ -107,7 +107,7 @@ func TestFilterForeignLoopPVs_KeepsManagedLoopOnlyVG(t *testing.T) {
 	verdicts := classify(t, vgs, pvs, map[string]string{
 		"/dev/loop0": "/opt/deckhouse/sds/file-devices/sds-e2e-lvg-fd.data-0.img",
 	})
-	got := utils.FilterForeignLoopPVs(logger.Logger{}, pvs, verdicts)
+	got := utils.FilterForeignLoopPVs(logger.NewNop(), pvs, verdicts)
 
 	assert.Equal(t, []string{"/dev/loop0"}, pvNames(got))
 	assert.Equal(t, utils.LoopVGManaged, verdicts["uuid-managed"])
@@ -128,7 +128,7 @@ func TestFilterForeignLoopPVs_DropsTaggedLoopVGWithForeignBackingFile(t *testing
 	pvs := []internal.PVData{loopPV("/dev/loop7", "uuid-restored-image", "data")}
 
 	verdicts := classify(t, vgs, pvs, map[string]string{"/dev/loop7": "/backup/node2-root.img"})
-	got := utils.FilterForeignLoopPVs(logger.Logger{}, pvs, verdicts)
+	got := utils.FilterForeignLoopPVs(logger.NewNop(), pvs, verdicts)
 
 	assert.Empty(t, got, "a tagged loop VG whose backing file this agent did not create is not ours")
 	assert.Equal(t, utils.LoopVGUnowned, verdicts["uuid-restored-image"])
@@ -142,7 +142,7 @@ func TestFilterForeignLoopPVs_KeepsTaggedLoopVGWhenOwnershipIsUnknown(t *testing
 	pvs := []internal.PVData{loopPV("/dev/loop0", "uuid-unknown", "e2e-vg-fd")}
 
 	verdicts := classify(t, vgs, pvs, nil) // losetup fails for every device
-	got := utils.FilterForeignLoopPVs(logger.Logger{}, pvs, verdicts)
+	got := utils.FilterForeignLoopPVs(logger.NewNop(), pvs, verdicts)
 
 	assert.Equal(t, []string{"/dev/loop0"}, pvNames(got))
 	assert.Equal(t, utils.LoopVGUnknown, verdicts["uuid-unknown"])
@@ -162,10 +162,10 @@ func TestFilterForeignLoopPVs_KeepsManagedLoopVGWithDeletedBackingFile(t *testin
 			Deleted: true,
 		}, nil)
 
-	verdicts := utils.ClassifyLoopVGs(context.Background(), logger.Logger{}, mc, 0, vgs, pvs)
+	verdicts := utils.ClassifyLoopVGs(context.Background(), logger.NewNop(), mc, 0, vgs, pvs)
 
 	assert.Equal(t, utils.LoopVGManaged, verdicts["uuid-deleted"])
-	assert.Equal(t, []string{"/dev/loop0"}, pvNames(utils.FilterForeignLoopPVs(logger.Logger{}, pvs, verdicts)))
+	assert.Equal(t, []string{"/dev/loop0"}, pvNames(utils.FilterForeignLoopPVs(logger.NewNop(), pvs, verdicts)))
 }
 
 // The mixed case the e2e covers: one loop PV and one block PV in the same VG. It is
@@ -181,8 +181,8 @@ func TestFilterForeignLoopPVs_KeepsVGThatAlsoHasABlockPV(t *testing.T) {
 	mc := mock_utils.NewMockCommands(gomock.NewController(t))
 	// No GetLoopBackingFile expectation: a VG with a block PV is settled by name
 	// alone, and spending a host command on it would be paid on every cache fill.
-	verdicts := utils.ClassifyLoopVGs(context.Background(), logger.Logger{}, mc, 0, vgs, pvs)
-	got := utils.FilterForeignLoopPVs(logger.Logger{}, pvs, verdicts)
+	verdicts := utils.ClassifyLoopVGs(context.Background(), logger.NewNop(), mc, 0, vgs, pvs)
+	got := utils.FilterForeignLoopPVs(logger.NewNop(), pvs, verdicts)
 
 	assert.ElementsMatch(t, []string{"/dev/loop0", "/dev/sdb"}, pvNames(got))
 	assert.Equal(t, utils.LoopVGNotLoopOnly, verdicts["uuid-mixed"])
@@ -197,7 +197,7 @@ func TestFilterForeignLoopPVs_SeparatesFreshFromForeign(t *testing.T) {
 	}
 
 	verdicts := classify(t, vgs, pvs, map[string]string{"/dev/loop1": "/var/lib/libvirt/guest.qcow2"})
-	got := utils.FilterForeignLoopPVs(logger.Logger{}, pvs, verdicts)
+	got := utils.FilterForeignLoopPVs(logger.NewNop(), pvs, verdicts)
 
 	assert.Equal(t, []string{"/dev/loop0"}, pvNames(got))
 }
@@ -220,7 +220,7 @@ func TestFilterForeignLoopPVs_DropsTheForeignHalfOfADuplicateName(t *testing.T) 
 		"/dev/loop7": "/backup/node2-root.img",
 		"/dev/loop8": "/opt/deckhouse/sds/file-devices/sds-e2e-lvg-fd.data-0.img",
 	})
-	got := utils.FilterForeignLoopPVs(logger.Logger{}, pvs, verdicts)
+	got := utils.FilterForeignLoopPVs(logger.NewNop(), pvs, verdicts)
 
 	assert.Equal(t, []string{"/dev/loop8"}, pvNames(got),
 		"only the live Volume Group may reach the cache; the other one is what makes findDuplicateVGNames take it offline")
@@ -234,7 +234,7 @@ func TestFilterForeignLoopPVs_KeepsUntaggedBlockVG(t *testing.T) {
 
 	verdicts := classify(t, vgs, pvs, nil)
 
-	assert.Equal(t, []string{"/dev/sdb"}, pvNames(utils.FilterForeignLoopPVs(logger.Logger{}, pvs, verdicts)))
+	assert.Equal(t, []string{"/dev/sdb"}, pvNames(utils.FilterForeignLoopPVs(logger.NewNop(), pvs, verdicts)))
 }
 
 // A bare loop PV that belongs to no Volume Group carries no VG name and cannot
@@ -244,7 +244,7 @@ func TestFilterForeignLoopPVs_KeepsBareLoopPV(t *testing.T) {
 
 	verdicts := classify(t, nil, pvs, nil)
 
-	assert.Equal(t, []string{"/dev/loop1"}, pvNames(utils.FilterForeignLoopPVs(logger.Logger{}, pvs, verdicts)))
+	assert.Equal(t, []string{"/dev/loop1"}, pvNames(utils.FilterForeignLoopPVs(logger.NewNop(), pvs, verdicts)))
 }
 
 // Every code path that writes to, activates or adopts a Volume Group runs its
@@ -264,7 +264,7 @@ func TestSkipUnownedLoopVGs(t *testing.T) {
 		"uuid-block":   utils.LoopVGNotLoopOnly,
 	}
 
-	got := utils.SkipUnownedLoopVGs(logger.Logger{}, "activate", vgs, verdicts)
+	got := utils.SkipUnownedLoopVGs(logger.NewNop(), "activate", vgs, verdicts)
 
 	names := make([]string, 0, len(got))
 	for _, vg := range got {

@@ -25,8 +25,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 // CanonicalPathResolver resolves a /dev/* path to the canonical block
@@ -126,6 +126,8 @@ func FilterForeignPVs(
 	pvs []internal.PVData,
 	cmdTimeout time.Duration,
 ) []internal.PVData {
+	log = log.Named("FilterForeignPVs")
+
 	if resolver == nil {
 		resolver = HostNsenterCanonicalResolver
 	}
@@ -140,8 +142,8 @@ func FilterForeignPVs(
 			return resolver(ctx, pv.PVName)
 		})
 		if err != nil {
-			log.Warning(fmt.Sprintf(
-				"[FilterForeignPVs] unable to resolve canonical path for PV %q; keeping it: %v",
+			log.Warn(fmt.Sprintf(
+				"unable to resolve canonical path for PV %q; keeping it: %v",
 				pv.PVName, err,
 			))
 			out = append(out, pv)
@@ -150,7 +152,7 @@ func FilterForeignPVs(
 		base := path.Base(resolved)
 		if IsForeignDeviceBase(base) {
 			log.Info(fmt.Sprintf(
-				"[FilterForeignPVs] dropping PV %q backed by foreign device %q (VG=%q VG_UUID=%q)",
+				"dropping PV %q backed by foreign device %q (VG=%q VG_UUID=%q)",
 				pv.PVName, resolved, pv.VGName, pv.VGUuid,
 			))
 			continue
@@ -199,11 +201,13 @@ func FilterForeignPVs(
 // Bare loop PVs not part of any VG are kept; they carry no VG name and
 // cannot poison name resolution.
 func FilterForeignLoopPVs(log logger.Logger, pvs []internal.PVData, verdicts LoopVGVerdicts) []internal.PVData {
+	log = log.Named("FilterForeignLoopPVs")
+
 	out := make([]internal.PVData, 0, len(pvs))
 	for _, pv := range pvs {
 		if pv.VGUuid != "" && verdicts.IsUnowned(pv.VGUuid) {
 			log.Info(fmt.Sprintf(
-				"[FilterForeignLoopPVs] dropping PV %q of foreign loop-backed VG %q (VG_UUID=%q)",
+				"dropping PV %q of foreign loop-backed VG %q (VG_UUID=%q)",
 				pv.PVName, pv.VGName, pv.VGUuid,
 			))
 			continue

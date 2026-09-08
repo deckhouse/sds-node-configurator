@@ -27,9 +27,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/conditions"
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/controller/internal"
-	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/logger"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/monitoring"
 )
 
@@ -184,7 +184,7 @@ func GetLVMVolumeGroups(ctx context.Context, cl client.Client, metrics monitorin
 // On success, lvg.Status and lvg.ResourceVersion are replaced with server-side values.
 // Callers must not hold unsaved in-memory Status modifications before calling this.
 func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, status metav1.ConditionStatus, conType, reason, message string) error {
-	log.Debug(fmt.Sprintf("[updateLVGConditionIfNeeded] set the condition type %s status %s reason %s message %s on the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
+	log.Named("updateLVGConditionIfNeeded").Debug(fmt.Sprintf("set the condition type %s status %s reason %s message %s on the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
 
 	// Callers pass raw error text, while the schema caps the message at 32768.
 	// Over the cap the API server rejects the whole status write, so the group

@@ -24,15 +24,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/controller/internal"
-	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/logger"
 )
 
 func TestRunBlockDeviceLabelsWatcher(t *testing.T) {
 	ctx := context.Background()
 	cl := NewFakeClient()
-	log := logger.Logger{}
+	log := logger.NewNop()
 
 	t.Run("ReconcileBlockDeviceLabels_matches_selector_and_in_status_not_label_lvg", func(t *testing.T) {
 		const (

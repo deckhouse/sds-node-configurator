@@ -14,7 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package logger
+// Package tracing carries the request trace ID through a context and onto the
+// logger.
+//
+// It used to live in the extender's own logger package. That package is gone --
+// the module logs through sds-common-lib/logger now -- but the trace ID is this
+// component's own idea and not something a shared logger should know about, so
+// it stays here.
+package tracing
 
 import (
 	"context"
@@ -22,6 +29,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
+
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 type traceIDKey struct{}
@@ -58,10 +67,10 @@ func TraceIDFromContext(ctx context.Context) string {
 
 // WithTraceIDLogger returns a logger with trace ID from context added as a value.
 // If trace ID is not found in context, returns the original logger.
-func WithTraceIDLogger(ctx context.Context, log Logger) Logger {
+func WithTraceIDLogger(ctx context.Context, log logger.Logger) logger.Logger {
 	traceID := TraceIDFromContext(ctx)
 	if traceID == "" {
 		return log
 	}
-	return log.WithValues(traceIDKeyName, traceID)
+	return log.With(traceIDKeyName, traceID)
 }

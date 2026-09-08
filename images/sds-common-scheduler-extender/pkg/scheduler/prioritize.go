@@ -30,14 +30,15 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/tracing"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
-	servingLog := logger.WithTraceIDLogger(r.Context(), s.log).WithName("prioritize")
+	servingLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("prioritize")
 
 	servingLog.Debug("starts the serving the request")
 
@@ -48,23 +49,23 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	reader := http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
 	err := json.NewDecoder(reader).Decode(&inputData)
 	if err != nil {
-		servingLog.Error(err, "unable to decode a request")
+		servingLog.Error("unable to decode a request", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	servingLog.Trace(fmt.Sprintf("input data: %+v", inputData))
 
 	if inputData.Pod == nil {
-		servingLog.Error(errors.New("no pod in the request"), "unable to get a Pod from the request")
+		servingLog.Error("unable to get a Pod from the request", logger.Err(errors.New("no pod in the request")))
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 
-	servingLog = servingLog.WithValues("Pod", fmt.Sprintf("%s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+	servingLog = servingLog.With("Pod", fmt.Sprintf("%s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
 
 	nodeNames, err := getNodeNames(inputData)
 	if err != nil {
-		servingLog.Error(err, "unable to get node names from the request")
+		servingLog.Error("unable to get node names from the request", logger.Err(err))
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -72,14 +73,14 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 
 	managedPVCs, hintOnlyPVCs, err := getManagedPVCsFromPod(ctx, s.client, servingLog, inputData.Pod, s.targetProvisioners)
 	if err != nil {
-		servingLog.Error(err, "unable to get managed PVCs from the Pod")
+		servingLog.Error("unable to get managed PVCs from the Pod", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	if len(managedPVCs) == 0 {
 		servingLog.Debug("Pod uses PVCs which are not managed by our modules. Return the same nodes")
 		if err := writeNodeScoresResponse(w, servingLog, nodeNames, 0); err != nil {
-			servingLog.Error(err, "unable to write node names response")
+			servingLog.Error("unable to write node names response", logger.Err(err))
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
@@ -87,7 +88,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 
 	scUsedByPVCs, err := getStorageClassesUsedByPVCs(ctx, s.client, managedPVCs)
 	if err != nil {
-		servingLog.Error(err, "unable to get StorageClasses from the PVC")
+		servingLog.Error("unable to get StorageClasses from the PVC", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -98,15 +99,15 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	// PVC's SC is gone would break statically provisioned PVs and SC migrations.
 	if dropped := dropPVCsWithMissingSC(managedPVCs, scUsedByPVCs); len(dropped) > 0 {
 		allKeys, pendingKeys := formatDroppedPVCsForLog(dropped)
-		servingLog.Warning(fmt.Sprintf("dropping PVCs without an existing StorageClass from prioritize decision: %v", allKeys))
+		servingLog.Warn(fmt.Sprintf("dropping PVCs without an existing StorageClass from prioritize decision: %v", allKeys))
 		if len(pendingKeys) > 0 {
-			servingLog.Warning(fmt.Sprintf("Pending PVCs reference a missing StorageClass and will never be dynamically provisioned (the Pod will likely get stuck in ContainerCreating with FailedMount): %v", pendingKeys))
+			servingLog.Warn(fmt.Sprintf("Pending PVCs reference a missing StorageClass and will never be dynamically provisioned (the Pod will likely get stuck in ContainerCreating with FailedMount): %v", pendingKeys))
 		}
 	}
 	if len(managedPVCs) == 0 {
 		servingLog.Debug("After filtering out PVCs with missing StorageClass, no managed PVCs left. Return the same nodes with 0 score")
 		if err := writeNodeScoresResponse(w, servingLog, nodeNames, 0); err != nil {
-			servingLog.Error(err, "unable to write node scores response")
+			servingLog.Error("unable to write node scores response", logger.Err(err))
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
@@ -115,7 +116,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("starts to extract PVC requested sizes")
 	pvcRequests, droppedHints, err := extractRequestedSize(ctx, s.client, servingLog, managedPVCs, scUsedByPVCs, hintOnlyPVCs)
 	if err != nil {
-		servingLog.Error(err, "unable to extract request size")
+		servingLog.Error("unable to extract request size", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -126,12 +127,12 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		for _, name := range droppedHints {
 			delete(managedPVCs, name)
 		}
-		servingLog.Warning(fmt.Sprintf("dropping unresolvable PVCs listed only in the %s annotation: %v", consts.PodExtraPVCsAnnotation, droppedHints))
+		servingLog.Warn(fmt.Sprintf("dropping unresolvable PVCs listed only in the %s annotation: %v", consts.PodExtraPVCsAnnotation, droppedHints))
 	}
 	if len(managedPVCs) == 0 {
 		servingLog.Debug("After dropping unresolvable annotation PVCs, no managed PVCs left. Return the same nodes with 0 score")
 		if err := writeNodeScoresResponse(w, servingLog, nodeNames, 0); err != nil {
-			servingLog.Error(err, "unable to write node scores response")
+			servingLog.Error("unable to write node scores response", logger.Err(err))
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
@@ -150,7 +151,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 
 	scoredNodes, err := scoreNodes(ctx, servingLog, s.client, s.cache, &nodeNames, managedPVCs, scUsedByPVCs, pvcRequests, replicaLocations, s.defaultDivisor)
 	if err != nil {
-		servingLog.Error(err, "unable to score nodes")
+		servingLog.Error("unable to score nodes", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -162,7 +163,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	// Log response body at DEBUG level
 	responseJSON, err := json.Marshal(scoredNodes)
 	if err != nil {
-		servingLog.Error(err, "unable to marshal response")
+		servingLog.Error("unable to marshal response", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -171,7 +172,7 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("content-type", "application/json")
 	_, err = w.Write(responseJSON)
 	if err != nil {
-		servingLog.Error(err, "unable to write response")
+		servingLog.Error("unable to write response", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -213,18 +214,22 @@ func scoreNodes(
 	replicaLocations map[string][]string,
 	divisor float64,
 ) ([]HostPriority, error) {
+	log = log.Named("scoreNodes")
+
+	log = log.Named("scoreNodes")
+
 	// Separate PVCs by provisioner
 	localPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsLocalVolumeProvisioner)
 	replicatedPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsReplicatedVolumeProvisioner)
 
-	log.Debug(fmt.Sprintf("[scoreNodes] local PVCs count: %d, replicated PVCs count: %d", len(localPVCs), len(replicatedPVCs)))
+	log.Debug(fmt.Sprintf("local PVCs count: %d, replicated PVCs count: %d", len(localPVCs), len(replicatedPVCs)))
 
 	// Get LVGs from StorageClasses only for local PVCs
 	var scLVGs map[string]SCLVMVolumeGroups
 	var err error
 
 	if len(localPVCs) > 0 {
-		log.Debug("[scoreNodes] starts to get LVMVolumeGroups for local Storage Classes")
+		log.Debug("starts to get LVMVolumeGroups for local Storage Classes")
 		localSCs := make(map[string]*storagev1.StorageClass)
 		for _, pvc := range localPVCs {
 			if pvc.Spec.StorageClassName != nil {
@@ -248,9 +253,11 @@ func scoreNodes(
 
 	for i, nodeName := range *nodeNames {
 		go func(i int, nodeName string) {
-			log.Trace(fmt.Sprintf("[scoreNodes] goroutine %d starts the work for the node %s", i, nodeName))
+			log := log.Named("scoreNodes")
+
+			log.Trace(fmt.Sprintf("goroutine %d starts the work for the node %s", i, nodeName))
 			defer func() {
-				log.Trace(fmt.Sprintf("[scoreNodes] goroutine %d ends the work for the node %s", i, nodeName))
+				log.Trace(fmt.Sprintf("goroutine %d ends the work for the node %s", i, nodeName))
 				wg.Done()
 			}()
 
@@ -264,14 +271,14 @@ func scoreNodes(
 				// Get LVGs on this node via field indexer
 				nodeLVGs, err := getLVGsOnNode(ctx, cl, nodeName)
 				if err != nil {
-					log.Error(err, fmt.Sprintf("[scoreNodes] unable to get LVGs for node %s", nodeName))
+					log.Error(fmt.Sprintf("unable to get LVGs for node %s", nodeName), logger.Err(err))
 				} else {
 					for _, pvc := range localPVCs {
 						pvcReq := pvcRequests[pvc.Name]
 						lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
 						commonLVG := findMatchedSCLVG(nodeLVGs, lvgsFromSC)
 						if commonLVG == nil {
-							log.Debug(fmt.Sprintf("[scoreNodes] unable to match local LVG for SC %s on node %s, scoring 0", *pvc.Spec.StorageClassName, nodeName))
+							log.Debug(fmt.Sprintf("unable to match local LVG for SC %s on node %s, scoring 0", *pvc.Spec.StorageClassName, nodeName))
 							pvcCount++
 							continue
 						}
@@ -279,12 +286,12 @@ func scoreNodes(
 						key := storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType)
 						spaceInfo, err := getAvailableSpace(ctx, cl, schedulerCache, key)
 						if err != nil {
-							log.Error(err, fmt.Sprintf("[scoreNodes] unable to get available space for %s", key.String()))
+							log.Error(fmt.Sprintf("unable to get available space for %s", key.String()), logger.Err(err))
 							pvcCount++
 							continue
 						}
 
-						log.Trace(fmt.Sprintf("[scoreNodes] pool %s available space: %s, total size: %s", key.String(), resource.NewQuantity(spaceInfo.AvailableSpace, resource.BinarySI), resource.NewQuantity(spaceInfo.TotalSize, resource.BinarySI)))
+						log.Trace(fmt.Sprintf("pool %s available space: %s, total size: %s", key.String(), resource.NewQuantity(spaceInfo.AvailableSpace, resource.BinarySI), resource.NewQuantity(spaceInfo.TotalSize, resource.BinarySI)))
 						totalScore += getFreeSpaceLeftPercent(spaceInfo.AvailableSpace, pvcReq.RequestedSize, spaceInfo.TotalSize)
 						pvcCount++
 					}
@@ -299,7 +306,7 @@ func scoreNodes(
 
 					rsc, err := getReplicatedStorageClass(ctx, cl, sc.Name)
 					if err != nil {
-						log.Error(err, fmt.Sprintf("[scoreNodes] unable to get RSC for SC %s", sc.Name))
+						log.Error(fmt.Sprintf("unable to get RSC for SC %s", sc.Name), logger.Err(err))
 						pvcCount++
 						continue
 					}
@@ -307,7 +314,7 @@ func scoreNodes(
 					rspName := rscStoragePoolName(rsc)
 					rsp, err := getReplicatedStoragePool(ctx, cl, rspName)
 					if err != nil {
-						log.Error(err, fmt.Sprintf("[scoreNodes] unable to get RSP %s", rspName))
+						log.Error(fmt.Sprintf("unable to get RSP %s", rspName), logger.Err(err))
 						pvcCount++
 						continue
 					}
@@ -363,7 +370,7 @@ func scoreNodes(
 					score = replicaScore
 				}
 			}
-			log.Trace(fmt.Sprintf("[scoreNodes] node %s has final score %d (base: %d, total: %d, pvcs: %d, replicaHits: %d/%d)", nodeName, score, baseScore, totalScore, pvcCount, replicaHits, replicaTotalPVCs))
+			log.Trace(fmt.Sprintf("node %s has final score %d (base: %d, total: %d, pvcs: %d, replicaHits: %d/%d)", nodeName, score, baseScore, totalScore, pvcCount, replicaHits, replicaTotalPVCs))
 
 			resultMtx.Lock()
 			result = append(result, HostPriority{
@@ -374,10 +381,10 @@ func scoreNodes(
 		}(i, nodeName)
 	}
 	wg.Wait()
-	log.Debug("[scoreNodes] goroutines work is done")
+	log.Debug("goroutines work is done")
 	if len(errs) != 0 {
 		for err = range errs {
-			log.Error(err, "[scoreNodes] an error occurs while scoring the nodes")
+			log.Error("an error occurs while scoring the nodes", logger.Err(err))
 		}
 	}
 	close(errs)
@@ -401,6 +408,8 @@ func narrowReservationsToFinalNodes(
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 ) {
+	log = log.Named("narrowReservationsToFinalNodes")
+
 	for _, pvc := range managedPVCs {
 		sc := scUsedByPVCs[*pvc.Spec.StorageClassName]
 
@@ -416,7 +425,7 @@ func narrowReservationsToFinalNodes(
 
 		lvgsFromSC, err := ExtractLVGsFromSC(sc)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[narrowReservationsToFinalNodes] unable to extract LVGs from SC %s", sc.Name))
+			log.Error(fmt.Sprintf("unable to extract LVGs from SC %s", sc.Name), logger.Err(err))
 			continue
 		}
 
@@ -425,7 +434,7 @@ func narrowReservationsToFinalNodes(
 		for _, nodeName := range finalNodeNames {
 			nodeLVGs, err := getLVGsOnNode(ctx, cl, nodeName)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[narrowReservationsToFinalNodes] unable to get LVGs for node %s", nodeName))
+				log.Error(fmt.Sprintf("unable to get LVGs for node %s", nodeName), logger.Err(err))
 				continue
 			}
 
@@ -442,7 +451,7 @@ func narrowReservationsToFinalNodes(
 			pvcKey := pvc.Namespace + "/" + pvc.Name
 			ok := schedulerCache.NarrowReservation(pvcKey, keepPools, defaultReservationTTL)
 			if ok {
-				log.Debug(fmt.Sprintf("[narrowReservationsToFinalNodes] narrowed reservation %s to %d pools", pvcKey, len(keepPools)))
+				log.Debug(fmt.Sprintf("narrowed reservation %s to %d pools", pvcKey, len(keepPools)))
 			}
 		}
 	}

@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 // retryInterval is short enough to keep the tests instant and long enough that a
@@ -41,7 +41,7 @@ func requeue() Result { return Result{RequeueAfter: retryInterval} }
 func TestRetryReconcile_StopsWhenTheReconcileStopsRequeueing(t *testing.T) {
 	var calls atomic.Int32
 
-	retryReconcile(context.Background(), logger.Logger{}, "test", func(context.Context) (Result, error) {
+	retryReconcile(context.Background(), logger.NewNop(), "test", func(context.Context) (Result, error) {
 		if calls.Add(1) < 3 {
 			return requeue(), nil
 		}
@@ -65,7 +65,7 @@ func TestRetryReconcile_OneChainFinishingDoesNotEndAnother(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		retryReconcile(context.Background(), logger.Logger{}, "settles", func(context.Context) (Result, error) {
+		retryReconcile(context.Background(), logger.NewNop(), "settles", func(context.Context) (Result, error) {
 			return Result{}, nil
 		}, requeue())
 	}()
@@ -76,7 +76,7 @@ func TestRetryReconcile_OneChainFinishingDoesNotEndAnother(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		retryReconcile(context.Background(), logger.Logger{}, "keeps waiting", func(context.Context) (Result, error) {
+		retryReconcile(context.Background(), logger.NewNop(), "keeps waiting", func(context.Context) (Result, error) {
 			if unfinish.Add(1) < wanted {
 				return requeue(), nil
 			}
@@ -104,7 +104,7 @@ func TestRetryReconcile_StopsOnContextCancellation(t *testing.T) {
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
-		retryReconcile(ctx, logger.Logger{}, "test", func(context.Context) (Result, error) {
+		retryReconcile(ctx, logger.NewNop(), "test", func(context.Context) (Result, error) {
 			calls.Add(1)
 			return requeue(), nil
 		}, requeue())
@@ -126,7 +126,7 @@ func TestRetryReconcile_StopsOnError(t *testing.T) {
 	var calls atomic.Int32
 	wantErr := errors.New("host command failed")
 
-	retryReconcile(context.Background(), logger.Logger{}, "test", func(context.Context) (Result, error) {
+	retryReconcile(context.Background(), logger.NewNop(), "test", func(context.Context) (Result, error) {
 		calls.Add(1)
 		return requeue(), wantErr
 	}, requeue())
@@ -139,7 +139,7 @@ func TestRetryReconcile_StopsOnError(t *testing.T) {
 func TestRetryReconcile_DoesNothingWithoutARequeue(t *testing.T) {
 	var calls atomic.Int32
 
-	retryReconcile(context.Background(), logger.Logger{}, "test", func(context.Context) (Result, error) {
+	retryReconcile(context.Background(), logger.NewNop(), "test", func(context.Context) (Result, error) {
 		calls.Add(1)
 		return Result{}, nil
 	}, Result{})
@@ -169,7 +169,7 @@ func TestStartRetry_AdmitsOneChainPerController(t *testing.T) {
 	}
 
 	for range 8 {
-		startRetry(context.Background(), logger.Logger{}, &gate, "test", reconcile, requeue())
+		startRetry(context.Background(), logger.NewNop(), &gate, "test", reconcile, requeue())
 	}
 
 	require.Eventually(t, func() bool { return started.Load() == 1 }, time.Second, time.Millisecond,
@@ -196,10 +196,10 @@ func TestStartRetry_ReopensTheGateAfterTheChainEnds(t *testing.T) {
 		return Result{}, nil
 	}
 
-	startRetry(context.Background(), logger.Logger{}, &gate, "test", reconcile, requeue())
+	startRetry(context.Background(), logger.NewNop(), &gate, "test", reconcile, requeue())
 	require.Eventually(t, func() bool { return !gateRunning(&gate) }, time.Second, time.Millisecond)
 
-	startRetry(context.Background(), logger.Logger{}, &gate, "test", reconcile, requeue())
+	startRetry(context.Background(), logger.NewNop(), &gate, "test", reconcile, requeue())
 	require.Eventually(t, func() bool { return calls.Load() == 2 }, time.Second, time.Millisecond,
 		"the second pass gets a chain of its own once the first one is gone")
 }
@@ -238,12 +238,12 @@ func TestStartRetry_HonoursARequestThatArrivesAsTheChainIsEnding(t *testing.T) {
 		return Result{}, nil
 	}
 
-	startRetry(context.Background(), logger.Logger{}, &gate, "test", reconcile, requeue())
+	startRetry(context.Background(), logger.NewNop(), &gate, "test", reconcile, requeue())
 
 	<-ending
 	require.True(t, gateRunning(&gate), "the chain is still inside its last attempt")
 
-	startRetry(context.Background(), logger.Logger{}, &gate, "test", reconcile, requeue())
+	startRetry(context.Background(), logger.NewNop(), &gate, "test", reconcile, requeue())
 	close(release)
 
 	require.Eventually(t, func() bool { return calls.Load() == 2 }, time.Second, time.Millisecond,
@@ -300,7 +300,7 @@ func TestWithSingleRetryChain_AnswersWithNoRequeueOfItsOwn(t *testing.T) {
 	t.Cleanup(cancel)
 
 	var calls atomic.Int32
-	discover := WithSingleRetryChain(ctx, logger.Logger{}, DiscoveryPassName,
+	discover := WithSingleRetryChain(ctx, logger.NewNop(), DiscoveryPassName,
 		func(context.Context) (Result, error) {
 			calls.Add(1)
 			return requeue(), nil
@@ -321,7 +321,7 @@ func TestWithSingleRetryChain_PassesTheErrorThrough(t *testing.T) {
 	t.Cleanup(cancel)
 
 	failed := errors.New("the pass failed")
-	discover := WithSingleRetryChain(ctx, logger.Logger{}, DiscoveryPassName,
+	discover := WithSingleRetryChain(ctx, logger.NewNop(), DiscoveryPassName,
 		func(context.Context) (Result, error) { return Result{}, failed })
 
 	_, err := discover(ctx)
@@ -345,7 +345,7 @@ func TestWithSingleRetryChain_SharesOneChainAcrossCallers(t *testing.T) {
 		once    sync.Once
 	)
 
-	discover := WithSingleRetryChain(ctx, logger.Logger{}, DiscoveryPassName,
+	discover := WithSingleRetryChain(ctx, logger.NewNop(), DiscoveryPassName,
 		func(context.Context) (Result, error) {
 			// Compare-and-swap rather than load-then-store: two passes are inside
 			// this function at once by construction, and a plain store lets the

@@ -29,10 +29,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
@@ -48,7 +48,7 @@ func TestBuildSpecFileDevicesFromCandidate(t *testing.T) {
 	// cases are about rebuilding the entries themselves. The symlink translation
 	// has its own test below.
 	newDiscoverer := func() *Discoverer {
-		return &Discoverer{log: logger.Logger{}, sdsCache: cache.New()}
+		return &Discoverer{log: logger.NewNop(), sdsCache: cache.New()}
 	}
 
 	t.Run("rebuilds_entries_from_backing_files", func(t *testing.T) {
@@ -122,7 +122,7 @@ func TestBuildSpecFileDevicesFromCandidate_MapsResolvedPathsBackOntoTheConfigure
 
 	newDiscoverer := func(resolver utils.CanonicalPathResolver) *Discoverer {
 		return &Discoverer{
-			log:      logger.Logger{},
+			log:      logger.NewNop(),
 			sdsCache: cache.New(),
 			cfg:      DiscovererConfig{NodeName: "test_node", FileDevicesDirectory: configuredBase},
 			resolver: resolver,

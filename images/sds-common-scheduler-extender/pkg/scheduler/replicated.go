@@ -25,10 +25,10 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
@@ -143,7 +143,7 @@ func checkNodeHasLVGWithSpaceForReplicated(
 	key := storagePoolKeyFromRSPLVG(lvgRef, deviceType)
 	hasSpace, err := checkPoolHasSpace(ctx, cl, reservationCache, key, requestedSize)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("unable to check space for pool %s", key.String()))
+		log.Error(fmt.Sprintf("unable to check space for pool %s", key.String()), logger.Err(err))
 		return false, fmt.Sprintf("error checking space for LVG %s: %v", lvgRef.Name, err)
 	}
 
@@ -189,6 +189,8 @@ func buildReplicaLocations(
 	cl client.Client,
 	replicatedPVCs map[string]*corev1.PersistentVolumeClaim,
 ) map[string][]string {
+	log = log.Named("buildReplicaLocations")
+
 	result := make(map[string][]string, len(replicatedPVCs))
 	for _, pvc := range replicatedPVCs {
 		// A PVC is bound iff Spec.VolumeName is set. Status.Phase is updated by
@@ -200,7 +202,7 @@ func buildReplicaLocations(
 		}
 		nodes, err := getReplicaNodesForBoundPVC(ctx, cl, pvc)
 		if err != nil {
-			log.Warning(fmt.Sprintf("[buildReplicaLocations] unable to resolve replica nodes for PVC %s/%s: %v", pvc.Namespace, pvc.Name, err))
+			log.Warn(fmt.Sprintf("unable to resolve replica nodes for PVC %s/%s: %v", pvc.Namespace, pvc.Name, err))
 			continue
 		}
 		if len(nodes) > 0 {
@@ -218,7 +220,7 @@ func filterNodesByVolumeZone(
 	pvc *corev1.PersistentVolumeClaim,
 	_ *srv.ReplicatedStorageClass,
 ) []string {
-	log.Debug(fmt.Sprintf("[filterNodesByVolumeZone] TODO: implement zone-based filtering for Zonal topology, PVC %s/%s", pvc.Namespace, pvc.Name))
+	log.Named("filterNodesByVolumeZone").Debug(fmt.Sprintf("TODO: implement zone-based filtering for Zonal topology, PVC %s/%s", pvc.Namespace, pvc.Name))
 	return nodeNames
 }
 
@@ -254,6 +256,8 @@ func filterNodeForReplicatedPVCs(
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 ) (bool, string) {
+	log = log.Named("filterNodeForReplicatedPVCs")
+
 	var failReasons []string
 
 	for _, pvc := range replicatedPVCs {
@@ -296,7 +300,7 @@ func filterNodeForReplicatedPVCs(
 		isBound := pvc.Spec.VolumeName != ""
 
 		if rsc.Spec.Topology == srv.TopologyZonal && isBound {
-			log.Debug(fmt.Sprintf("[filterNodeForReplicatedPVCs] TODO: zone filtering for Zonal topology, pvc=%s", pvc.Name))
+			log.Debug(fmt.Sprintf("TODO: zone filtering for Zonal topology, pvc=%s", pvc.Name))
 		}
 
 		if !isBound {
@@ -311,7 +315,7 @@ func filterNodeForReplicatedPVCs(
 			case srv.VolumeAccessLocal:
 				replicaNodes, err := getReplicaNodesForBoundPVC(ctx, cl, pvc)
 				if err != nil {
-					log.Warning(fmt.Sprintf("[filterNodeForReplicatedPVCs] unable to resolve replica nodes for Local PVC %s: %v; passing node", pvc.Name, err))
+					log.Warn(fmt.Sprintf("unable to resolve replica nodes for Local PVC %s: %v; passing node", pvc.Name, err))
 				} else {
 					hasReplica := false
 					for _, rn := range replicaNodes {
@@ -363,7 +367,7 @@ func calculateReplicatedPVCScore(
 	key := storagePoolKeyFromRSPLVG(lvgRef, deviceType)
 	score, err := calculatePoolScore(ctx, cl, reservationCache, key, pvcReq.RequestedSize, divisor)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("unable to calculate score for pool %s", key.String()))
+		log.Error(fmt.Sprintf("unable to calculate score for pool %s", key.String()), logger.Err(err))
 		return 0
 	}
 

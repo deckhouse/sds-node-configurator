@@ -49,8 +49,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 // ownedLoops is the process-wide registry. Package-level state, deliberately: the
@@ -172,7 +172,7 @@ func RefreshOwnedLoops(ctx context.Context, log logger.Logger, commands Commands
 	ownedLoops.mu.Unlock()
 
 	if previous != len(fresh) {
-		log.Debug(fmt.Sprintf("[RefreshOwnedLoops] the agent's own loop devices: %s (was %d, now %d)",
+		log.Named("RefreshOwnedLoops").Debug(fmt.Sprintf("the agent's own loop devices: %s (was %d, now %d)",
 			strings.Join(OwnedLoops(), ", "), previous, len(fresh)))
 	}
 

@@ -29,12 +29,12 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 )
 
 func TestFilter(t *testing.T) {
-	log := logger.Logger{}
+	log := logger.NewNop()
 	ctx := context.Background()
 	t.Run("getManagedPVCsFromPod filters PVCs by provisioner", func(t *testing.T) {
 		sc1 := "sc1"

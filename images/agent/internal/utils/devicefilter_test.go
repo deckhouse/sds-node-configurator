@@ -24,8 +24,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 func TestIsForeignDeviceBase(t *testing.T) {

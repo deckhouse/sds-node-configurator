@@ -23,19 +23,21 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/deckhouse/sds-common-lib/monitoring"
 )
 
 func TestNewConfig(t *testing.T) {
 	t.Run("AllValuesSet_ReturnsNoError", func(t *testing.T) {
 		expNodeName := "test-node"
-		expMetricsPort := ":0000"
+		expMetricsBindAddress := ":0000"
 		expMachineID := "test-id"
 
 		err := os.Setenv(NodeName, expNodeName)
 		if err != nil {
 			t.Error(err)
 		}
-		err = os.Setenv(MetricsPort, expMetricsPort)
+		err = os.Setenv(monitoring.EnvMetricsBindAddress, expMetricsBindAddress)
 		if err != nil {
 			t.Error(err)
 		}
@@ -49,17 +51,17 @@ func TestNewConfig(t *testing.T) {
 
 		if assert.NoError(t, err) {
 			assert.Equal(t, expNodeName, opts.NodeName)
-			assert.Equal(t, expMetricsPort, opts.MetricsPort)
+			assert.Equal(t, expMetricsBindAddress, opts.MetricsBindAddress)
 			assert.Equal(t, expMachineID, opts.MachineID)
 		}
 	})
 
 	t.Run("NodeNameNotSet_ReturnsError", func(t *testing.T) {
 		machineIDFile := "./host-root/etc/machine-id"
-		expMetricsPort := ":0000"
+		expMetricsBindAddress := ":0000"
 		expErrorMsg := fmt.Sprintf("[NewConfig] required %s env variable is not specified", NodeName)
 
-		err := os.Setenv(MetricsPort, expMetricsPort)
+		err := os.Setenv(monitoring.EnvMetricsBindAddress, expMetricsBindAddress)
 		if err != nil {
 			t.Error(err)
 		}
@@ -91,12 +93,12 @@ func TestNewConfig(t *testing.T) {
 	})
 
 	t.Run("MachineIDNotSet_ReturnsError", func(t *testing.T) {
-		expMetricsPort := ":0000"
+		expMetricsBindAddress := ":0000"
 		expNodeName := "test-node"
 		expErrorMsg := fmt.Sprintf("[NewConfig] unable to get %s, error: %s",
 			MachineID, "fork/exec /opt/deckhouse/sds/bin/nsenter: no such file or directory")
 
-		err := os.Setenv(MetricsPort, expMetricsPort)
+		err := os.Setenv(monitoring.EnvMetricsBindAddress, expMetricsBindAddress)
 		if err != nil {
 			t.Error(err)
 		}
@@ -138,9 +140,9 @@ func TestNewConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("MetricsPortNotSet_ReturnsDefaultPort", func(t *testing.T) {
+	t.Run("MetricsBindAddressNotSet_ReturnsDefaultAddress", func(t *testing.T) {
 		expNodeName := "test-node"
-		expMetricsPort := ":4202"
+		expMetricsBindAddress := DefaultMetricsBindAddress
 		expMachineID := "test-id"
 
 		err := os.Setenv(NodeName, expNodeName)
@@ -158,7 +160,7 @@ func TestNewConfig(t *testing.T) {
 
 		if assert.NoError(t, err) {
 			assert.Equal(t, expNodeName, opts.NodeName)
-			assert.Equal(t, expMetricsPort, opts.MetricsPort)
+			assert.Equal(t, expMetricsBindAddress, opts.MetricsBindAddress)
 			assert.Equal(t, expMachineID, opts.MachineID)
 		}
 	})

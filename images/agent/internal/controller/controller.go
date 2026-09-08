@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 type ReconcileRequest[T client.Object] struct {
@@ -161,16 +161,16 @@ func AddReconciler[T client.Object](
 					q workqueue.TypedRateLimitingInterface[reconcile.Request],
 				) {
 					if !reconciler.ShouldReconcileCreate(e.Object) {
-						log.Debug(fmt.Sprintf("createFunc skipped a request for the %s %s to the Reconcilers queue", tname, e.Object.GetName()))
+						log.Debug(fmt.Sprintf("CreateFunc skipped a request for the %s %s to the Reconcilers queue", tname, e.Object.GetName()))
 						return
 					}
 
-					log.Info(fmt.Sprintf("createFunc got a create event for the %s, name: %s", tname, e.Object.GetName()))
+					log.Info(fmt.Sprintf("CreateFunc got a create event for the %s, name: %s", tname, e.Object.GetName()))
 
 					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 					q.Add(request)
 
-					log.Info(fmt.Sprintf("createFunc added a request for the %s %s to the Reconcilers queue", tname, e.Object.GetName()))
+					log.Info(fmt.Sprintf("CreateFunc added a request for the %s %s to the Reconcilers queue", tname, e.Object.GetName()))
 				},
 				UpdateFunc: func(
 					_ context.Context,
@@ -180,14 +180,14 @@ func AddReconciler[T client.Object](
 					log.Info(fmt.Sprintf("UpdateFunc got a update event for the %s %s", tname, e.ObjectNew.GetName()))
 
 					if !reconciler.ShouldReconcileUpdate(e.ObjectOld, e.ObjectNew) {
-						log.Debug(fmt.Sprintf("updateFunc skipped a request for the %s %s to the Reconcilers queue", tname, e.ObjectNew.GetName()))
+						log.Debug(fmt.Sprintf("UpdateFunc skipped a request for the %s %s to the Reconcilers queue", tname, e.ObjectNew.GetName()))
 						return
 					}
 
 					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 					q.Add(request)
 
-					log.Info(fmt.Sprintf("updateFunc added a request for the %s %s to the Reconcilers queue", tname, e.ObjectNew.GetName()))
+					log.Info(fmt.Sprintf("UpdateFunc added a request for the %s %s to the Reconcilers queue", tname, e.ObjectNew.GetName()))
 				},
 			},
 		),
@@ -218,7 +218,7 @@ func AddDiscoverer(
 
 func makeDiscovererDispatcher(log logger.Logger, discoverer Discoverer) reconcile.Func {
 	return reconcile.Func(func(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-		log.Info(fmt.Sprintf("[DiscovererDispatcher] %s discoverer starts", discoverer.Name()))
+		log.Named("DiscovererDispatcher").Info(fmt.Sprintf("%s discoverer starts", discoverer.Name()))
 
 		result, err := discoverer.Discover(ctx)
 
@@ -233,19 +233,21 @@ func makeReconcileDispatcher[T client.Object](
 ) reconcile.TypedReconciler[reconcile.Request] {
 	cl := mgr.GetClient()
 	return reconcile.Func(func(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+		log := log.Named("ReconcileDispatcher")
+
 		// load object being reconciled
-		log.Info(fmt.Sprintf("[ReconcileDispatcher] Reconciler starts to reconcile the request %s", req.String()))
+		log.Info(fmt.Sprintf("reconciler starts to reconcile the request %s", req.String()))
 
 		t := reflect.TypeFor[T]()
 		obj := reflect.New(t.Elem()).Interface().(T)
 
 		if err := cl.Get(ctx, req.NamespacedName, obj); err != nil {
 			if errors.IsNotFound(err) {
-				log.Warning(fmt.Sprintf("[ReconcileDispatcher] seems like the object was deleted as unable to get it, err: %s. Stop to reconcile", err.Error()))
+				log.Warn(fmt.Sprintf("seems like the object was deleted as unable to get it, err: %s. Stop to reconcile", err.Error()))
 				return reconcile.Result{}, nil
 			}
 
-			log.Error(err, fmt.Sprintf("[ReconcileDispatcher] unable to get an object by NamespacedName %s", req.String()))
+			log.Error(fmt.Sprintf("unable to get an object by NamespacedName %s", req.String()), logger.Err(err))
 			return reconcile.Result{}, err
 		}
 

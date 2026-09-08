@@ -24,9 +24,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/conditions"
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 type LLVClient struct {
@@ -50,7 +50,9 @@ func (llvCl *LLVClient) UpdatePhaseIfNeeded(
 	phase string,
 	reason string,
 ) error {
-	llvCl.log.Debug(fmt.Sprintf("[UpdatePhaseIfNeeded] tries to update the LVMLogicalVolume %s status with phase: %s, reason: %s", llv.Name, phase, reason))
+	log := llvCl.log.Named("UpdatePhaseIfNeeded")
+
+	log.Debug(fmt.Sprintf("tries to update the LVMLogicalVolume %s status with phase: %s, reason: %s", llv.Name, phase, reason))
 
 	// The state UpdateStatus read and wrote, kept so the server-side values can be
 	// mirrored onto the caller's object below.
@@ -73,7 +75,7 @@ func (llvCl *LLVClient) UpdatePhaseIfNeeded(
 	llv.Status = written.Status
 	llv.ResourceVersion = written.ResourceVersion
 
-	llvCl.log.Debug(fmt.Sprintf("[UpdatePhaseIfNeeded] updated LVMLogicalVolume %s status.phase to %s and reason to %s", llv.Name, phase, reason))
+	log.Debug(fmt.Sprintf("updated LVMLogicalVolume %s status.phase to %s and reason to %s", llv.Name, phase, reason))
 	return nil
 }
 
@@ -82,6 +84,8 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 	llv *v1alpha1.LVMLogicalVolume,
 	actualSize resource.Quantity,
 ) error {
+	log := llvCl.log.Named("UpdatePhaseToCreatedIfNeeded")
+
 	var contiguous *bool
 	if llv.Spec.Thick != nil && llv.Spec.Thick.Contiguous != nil {
 		if *llv.Spec.Thick.Contiguous {
@@ -109,13 +113,13 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 			internal.ReadyConditionForPhase(fresh.Generation, v1alpha1.PhaseCreated, "", "LVMLogicalVolume"))
 	})
 	if err != nil {
-		llvCl.log.Error(err, fmt.Sprintf("[UpdatePhaseToCreatedIfNeeded] unable to update the LVMLogicalVolume %s", llv.Name))
+		log.Error(fmt.Sprintf("unable to update the LVMLogicalVolume %s", llv.Name), logger.Err(err))
 		return err
 	}
 
 	llv.Status = written.Status
 	llv.ResourceVersion = written.ResourceVersion
 
-	llvCl.log.Info(fmt.Sprintf("[UpdatePhaseToCreatedIfNeeded] the LVMLogicalVolume %s was successfully updated", llv.Name))
+	log.Info(fmt.Sprintf("the LVMLogicalVolume %s was successfully updated", llv.Name))
 	return nil
 }

@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
@@ -113,7 +114,7 @@ func (r *Reconciler) ensureFileDeviceSpace(ctx context.Context, directory, fileP
 		return space, err
 	})
 	if err != nil {
-		r.log.Warning(fmt.Sprintf("[ensureFileDeviceSpace] unable to check free space in %s, proceeding (fallocate will still fail on ENOSPC): %v", directory, err))
+		r.log.Named("ensureFileDeviceSpace").Warn(fmt.Sprintf("unable to check free space in %s, proceeding (fallocate will still fail on ENOSPC): %v", directory, err))
 		return nil
 	}
 
@@ -174,6 +175,8 @@ func (r *Reconciler) growFileDevicesIfNeeded(
 	vg internal.VGData,
 	issues fileDeviceIssues,
 ) error {
+	log := r.log.Named("growFileDevicesIfNeeded")
+
 	if len(lvg.Spec.FileDevices) == 0 {
 		return nil
 	}
@@ -226,13 +229,13 @@ func (r *Reconciler) growFileDevicesIfNeeded(
 
 		if isApplied(lvg) {
 			if err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration"); err != nil {
-				r.log.Error(err, fmt.Sprintf("[growFileDevicesIfNeeded] unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name))
+				log.Error(fmt.Sprintf("unable to add the condition %s status False reason %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, internal.ReasonUpdating, lvg.Name), logger.Err(err))
 				return err
 			}
 		}
 
 		if err := r.growFileDevice(ctx, lvg, fd, current, requested-have); err != nil {
-			r.log.Error(err, fmt.Sprintf("[growFileDevicesIfNeeded] unable to grow the file device %q of the LVMVolumeGroup %s", fd.Name, lvg.Name))
+			log.Error(fmt.Sprintf("unable to grow the file device %q of the LVMVolumeGroup %s", fd.Name, lvg.Name), logger.Err(err))
 			errs.WriteString(err.Error() + " ")
 		}
 	}
@@ -265,6 +268,8 @@ func (r *Reconciler) growFileDevice(
 	current v1alpha1.LVMVolumeGroupFileDevice,
 	delta int64,
 ) error {
+	log := r.log.Named("growFileDevice")
+
 	filePath := utils.BuildFileDevicePath(fd.Directory, lvg.Name, fd.Name)
 
 	// Always resolve the loop from the backing file, never from status. A loop
@@ -290,7 +295,7 @@ func (r *Reconciler) growFileDevice(
 		return fmt.Errorf("no loop device is attached to %s", filePath)
 	}
 	if current.LoopDevice != "" && current.LoopDevice != loopDev {
-		r.log.Warning(fmt.Sprintf("[growFileDevice] %s is attached to %s, not to %s as recorded in the status of the LVMVolumeGroup %s; using the resolved device",
+		log.Warn(fmt.Sprintf("%s is attached to %s, not to %s as recorded in the status of the LVMVolumeGroup %s; using the resolved device",
 			filePath, loopDev, current.LoopDevice, lvg.Name))
 	}
 
@@ -300,7 +305,7 @@ func (r *Reconciler) growFileDevice(
 		return fmt.Errorf("unable to grow %s: %w", filePath, err)
 	}
 
-	r.log.Info(fmt.Sprintf("[growFileDevice] growing %s to %d bytes (loop %s) for the LVMVolumeGroup %s", filePath, fd.Size.Value(), loopDev, lvg.Name))
+	log.Info(fmt.Sprintf("growing %s to %d bytes (loop %s) for the LVMVolumeGroup %s", filePath, fd.Size.Value(), loopDev, lvg.Name))
 
 	growCmd, err := utils.RunWithTimeout(ctx, r.cfg.CmdDeadlineDuration, func(ctx context.Context) (string, error) {
 		return r.commands.CreateFileDevice(ctx, filePath, fd.Size.Value())
@@ -330,7 +335,7 @@ func (r *Reconciler) growFileDevice(
 		return fmt.Errorf("resize PV %s: %w", loopDev, err)
 	}
 
-	r.log.Info(fmt.Sprintf("[growFileDevice] grew %s and its PV %s", filePath, loopDev))
+	log.Info(fmt.Sprintf("grew %s and its PV %s", filePath, loopDev))
 	return nil
 }
 
@@ -351,6 +356,8 @@ func (r *Reconciler) extendFileDevicesIfNeeded(
 	pvs []internal.PVData,
 	issues fileDeviceIssues,
 ) error {
+	log := r.log.Named("extendFileDevicesIfNeeded")
+
 	if len(lvg.Spec.FileDevices) == 0 {
 		return nil
 	}
@@ -370,7 +377,7 @@ func (r *Reconciler) extendFileDevicesIfNeeded(
 	loopPaths, provisioned, rawProvisionErr := r.provisionFileDevices(ctx, lvg, issues, true)
 	provisionErr := rawProvisionErr
 	if provisionErr != nil {
-		r.log.Error(provisionErr, fmt.Sprintf("[extendFileDevicesIfNeeded] some file devices of the LVMVolumeGroup %s could not be provisioned", lvg.Name))
+		log.Error(fmt.Sprintf("some file devices of the LVMVolumeGroup %s could not be provisioned", lvg.Name), logger.Err(provisionErr))
 		provisionErr = unappliedFileDevices("", provisionErr)
 	}
 	if len(loopPaths) == 0 && provisionErr != nil {
@@ -445,7 +452,7 @@ func (r *Reconciler) extendFileDevicesIfNeeded(
 		member, unresolved := r.loopVGMembership(ctx, pvView.aliases, loop, pvs)
 		switch {
 		case member == vg.VGName:
-			r.log.Debug(fmt.Sprintf("[extendFileDevicesIfNeeded] loop %s is already a PV of VG %s; skipping", loop, vg.VGName))
+			log.Debug(fmt.Sprintf("loop %s is already a PV of VG %s; skipping", loop, vg.VGName))
 		case member != "":
 			// The backing file is named for this LVMVolumeGroup, so the loop is one
 			// this agent provisioned, but its Physical Volume sits in somebody else's
@@ -455,7 +462,7 @@ func (r *Reconciler) extendFileDevicesIfNeeded(
 			foreignVGLoops = append(foreignVGLoops, fmt.Sprintf("%s (VG %s)", loop, member))
 		case unresolved:
 			skippedOnResolverFailure = true
-			r.log.Warning(fmt.Sprintf("[extendFileDevicesIfNeeded] loop %s skipped because an alias PV could not be resolved; will retry on the next reconcile", loop))
+			log.Warn(fmt.Sprintf("loop %s skipped because an alias PV could not be resolved; will retry on the next reconcile", loop))
 		default:
 			pvsToExtend = append(pvsToExtend, loop)
 		}
@@ -467,7 +474,7 @@ func (r *Reconciler) extendFileDevicesIfNeeded(
 	if len(foreignVGLoops) > 0 {
 		conflict := fmt.Errorf("file device loop(s) %s are Physical Volumes of another Volume Group and cannot join VG %s",
 			strings.Join(foreignVGLoops, ", "), vg.VGName)
-		r.log.Error(conflict, fmt.Sprintf("[extendFileDevicesIfNeeded] the LVMVolumeGroup %s cannot use every file device it provisioned", lvg.Name))
+		log.Error(fmt.Sprintf("the LVMVolumeGroup %s cannot use every file device it provisioned", lvg.Name), logger.Err(conflict))
 		rawProvisionErr = errors.Join(rawProvisionErr, conflict)
 		provisionErr = unappliedFileDevices("", rawProvisionErr)
 	}
@@ -501,7 +508,7 @@ func (r *Reconciler) extendFileDevicesIfNeeded(
 			if streak >= aliasResolveFailureEscalationThreshold {
 				reason = internal.ReasonAliasResolutionFailed
 				msg = fmt.Sprintf("unable to resolve alias PV names for %d consecutive reconciles; file devices cannot be added to VG %s until path resolution recovers (check the nsenter binary and PV aliases on the node)", streak, vg.VGName)
-				r.log.Error(fmt.Errorf("alias PV resolution stuck"), fmt.Sprintf("[extendFileDevicesIfNeeded] %s (LVMVolumeGroup %s)", msg, lvg.Name))
+				log.Error(fmt.Sprintf("%s (LVMVolumeGroup %s)", msg, lvg.Name), logger.Err(fmt.Errorf("alias PV resolution stuck")))
 			}
 			// provisionErr is carried along rather than dropped: an entry the node
 			// could not bring up in this same round is a separate problem with its
@@ -512,7 +519,7 @@ func (r *Reconciler) extendFileDevicesIfNeeded(
 			return unappliedFileDevices(reason, errors.Join(errors.New(msg), rawProvisionErr))
 		}
 		r.resetAliasResolveFailure(lvg.Name)
-		r.log.Debug(fmt.Sprintf("[extendFileDevicesIfNeeded] VG %s of the LVMVolumeGroup %s has no new file devices to add", vg.VGName, lvg.Name))
+		log.Debug(fmt.Sprintf("VG %s of the LVMVolumeGroup %s has no new file devices to add", vg.VGName, lvg.Name))
 		return provisionErr
 	}
 
@@ -522,19 +529,19 @@ func (r *Reconciler) extendFileDevicesIfNeeded(
 
 	if isApplied(lvg) {
 		if err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonUpdating, "trying to apply the configuration"); err != nil {
-			r.log.Error(err, fmt.Sprintf("[extendFileDevicesIfNeeded] unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
+			log.Error(fmt.Sprintf("unable to add the condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name), logger.Err(err))
 			extendFailed = true
 			return err
 		}
 	}
 
-	r.log.Info(fmt.Sprintf("[extendFileDevicesIfNeeded] VG %s of the LVMVolumeGroup %s should be extended with file devices %v", vg.VGName, lvg.Name, pvsToExtend))
+	log.Info(fmt.Sprintf("VG %s of the LVMVolumeGroup %s should be extended with file devices %v", vg.VGName, lvg.Name, pvsToExtend))
 	if err := r.extendVGComplex(ctx, pvView, pvsToExtend, vg.VGName); err != nil {
-		r.log.Error(err, fmt.Sprintf("[extendFileDevicesIfNeeded] unable to extend VG %s of the LVMVolumeGroup %s with file devices", vg.VGName, lvg.Name))
+		log.Error(fmt.Sprintf("unable to extend VG %s of the LVMVolumeGroup %s with file devices", vg.VGName, lvg.Name), logger.Err(err))
 		extendFailed = true
 		return err
 	}
-	r.log.Info(fmt.Sprintf("[extendFileDevicesIfNeeded] VG %s of the LVMVolumeGroup %s was extended with file devices", vg.VGName, lvg.Name))
+	log.Info(fmt.Sprintf("VG %s of the LVMVolumeGroup %s was extended with file devices", vg.VGName, lvg.Name))
 
 	// The devices that could be added are in the VG now; the entries that could
 	// not be provisioned are still reported, so the condition names them and the
@@ -591,7 +598,7 @@ func (r *Reconciler) newPVView(ctx context.Context, caller string, extra ...[]in
 	livePVs, cmd, _, err := r.commands.GetAllPVs(ctx)
 	r.log.Debug(cmd)
 	if err != nil {
-		r.log.Warning(fmt.Sprintf("[%s] unable to list PVs to decide which devices are already Physical Volumes, falling back to the cache: %v", caller, err))
+		r.log.Warn(fmt.Sprintf("[%s] unable to list PVs to decide which devices are already Physical Volumes, falling back to the cache: %v", caller, err))
 		livePVs, _ = r.sdsCache.GetPVs()
 	}
 
@@ -650,7 +657,7 @@ func (r *Reconciler) createPVIfNeeded(ctx context.Context, pvs *pvView, caller, 
 			r.log.Info(fmt.Sprintf("[%s] loop %s is already a PV (under an alias); skipping pvcreate", caller, path))
 			return nil
 		case pvLoopStateUnknown:
-			r.log.Warning(fmt.Sprintf("[%s] skipping pvcreate for loop %s: an alias PV could not be resolved, so it cannot be ruled out that this device is already a PV", caller, path))
+			r.log.Warn(fmt.Sprintf("[%s] skipping pvcreate for loop %s: an alias PV could not be resolved, so it cannot be ruled out that this device is already a PV", caller, path))
 			return nil
 		case pvLoopStateAbsent:
 			// Confirmed not a PV; fall through to pvcreate.
@@ -666,7 +673,7 @@ func (r *Reconciler) createPVIfNeeded(ctx context.Context, pvs *pvView, caller, 
 	r.log.Debug(command)
 	if err != nil {
 		r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "pvcreate").Inc()
-		r.log.Error(err, fmt.Sprintf("[%s] unable to create PV by path %s", caller, path))
+		r.log.Error(fmt.Sprintf("[%s] unable to create PV by path %s", caller, path), logger.Err(err))
 		return err
 	}
 
@@ -719,7 +726,7 @@ func (r *Reconciler) resolveAlias(ctx context.Context, cache *aliasCache, pvName
 		return r.resolver(ctx, pvName)
 	})
 	if err != nil {
-		r.log.Warning(fmt.Sprintf("[resolveAlias] unable to resolve the canonical path of PV %s: %v", pvName, err))
+		r.log.Named("resolveAlias").Warn(fmt.Sprintf("unable to resolve the canonical path of PV %s: %v", pvName, err))
 		cache.failed[pvName] = struct{}{}
 		return "", false
 	}
@@ -777,13 +784,14 @@ const (
 // their ownership/aliasing assumptions in sync.
 func (r *Reconciler) loopPVState(ctx context.Context, cache *aliasCache, loop string, pvs []internal.PVData) pvLoopState {
 	unresolved := false
+	loopPVStateLog := r.log.Named("loopPVState")
 	for _, pv := range pvs {
 		if !isAliasPVName(pv.PVName) {
 			continue
 		}
 		resolved, ok := r.resolveAlias(ctx, cache, pv.PVName)
 		if !ok {
-			r.log.Warning(fmt.Sprintf("[loopPVState] cannot rule out that loop %s is already a PV: %s could not be resolved", loop, pv.PVName))
+			loopPVStateLog.Warn(fmt.Sprintf("cannot rule out that loop %s is already a PV: %s could not be resolved", loop, pv.PVName))
 			unresolved = true
 			continue
 		}
@@ -811,6 +819,7 @@ func (r *Reconciler) loopPVState(ctx context.Context, cache *aliasCache, loop st
 // after the ordinary delete path the loop is still a PV — reporting it would
 // make cleanup refuse to run in exactly the case it is meant for.
 func (r *Reconciler) loopVGMembership(ctx context.Context, cache *aliasCache, loop string, pvs []internal.PVData) (vgName string, unresolved bool) {
+	loopVGMembershipLog := r.log.Named("loopVGMembership")
 	for _, pv := range pvs {
 		if pv.VGName == "" {
 			continue
@@ -823,7 +832,7 @@ func (r *Reconciler) loopVGMembership(ctx context.Context, cache *aliasCache, lo
 		}
 		resolved, ok := r.resolveAlias(ctx, cache, pv.PVName)
 		if !ok {
-			r.log.Warning(fmt.Sprintf("[loopVGMembership] PV %s of VG %s could not be resolved; cannot rule out that it is %s", pv.PVName, pv.VGName, loop))
+			loopVGMembershipLog.Warn(fmt.Sprintf("PV %s of VG %s could not be resolved; cannot rule out that it is %s", pv.PVName, pv.VGName, loop))
 			unresolved = true
 			continue
 		}
@@ -915,6 +924,8 @@ func (r *Reconciler) provisionFileDevices(
 	issues fileDeviceIssues,
 	lenient bool,
 ) (loopPaths []string, provisioned []provisionedFileDevice, retErr error) {
+	log := r.log.Named("provisionFileDevices")
+
 	if len(lvg.Spec.FileDevices) == 0 {
 		return nil, nil, nil
 	}
@@ -952,7 +963,7 @@ func (r *Reconciler) provisionFileDevices(
 		// Group keeps reconciling, which would otherwise mean happily
 		// provisioning the very entry we just declared unusable.
 		if issues.shouldSkip(fd.Name) {
-			r.log.Debug(fmt.Sprintf("[provisionFileDevices] skipping the invalid fileDevices entry %q of the LVMVolumeGroup %s", fd.Name, lvg.Name))
+			log.Debug(fmt.Sprintf("skipping the invalid fileDevices entry %q of the LVMVolumeGroup %s", fd.Name, lvg.Name))
 			continue
 		}
 		if err := ctx.Err(); err != nil {
@@ -971,7 +982,7 @@ func (r *Reconciler) provisionFileDevices(
 			// may well live on a different filesystem and have nothing to do with
 			// why this one failed. Nothing is recorded for the batch unwind — this
 			// entry is already dealt with, and the ones that succeed must survive.
-			r.log.Error(err, fmt.Sprintf("[provisionFileDevices] unable to provision the fileDevices entry %q of the LVMVolumeGroup %s; the other entries are still processed", fd.Name, lvg.Name))
+			log.Error(fmt.Sprintf("unable to provision the fileDevices entry %q of the LVMVolumeGroup %s; the other entries are still processed", fd.Name, lvg.Name), logger.Err(err))
 			rollbackCtx, cancel := r.newRollbackContext()
 			r.rollbackFileDeviceEntry(rollbackCtx, rb)
 			cancel()
@@ -1023,6 +1034,8 @@ func (r *Reconciler) refuseUnlinkedBackingFile(
 	fd v1alpha1.LVMVolumeGroupFileDeviceSpec,
 	filePath string,
 ) error {
+	log := r.log.Named("refuseUnlinkedBackingFile")
+
 	recorded := ""
 	for _, n := range lvg.Status.Nodes {
 		if n.Name != r.cfg.NodeName {
@@ -1047,7 +1060,7 @@ func (r *Reconciler) refuseUnlinkedBackingFile(
 		// Unreadable is not evidence of anything. Proceeding matches what happened
 		// before this check existed, and the free-space guard and `--nooverlap` are
 		// still in front of the actual provisioning.
-		r.log.Warning(fmt.Sprintf("[refuseUnlinkedBackingFile] unable to read the backing file of %s recorded for the fileDevices entry %q of the LVMVolumeGroup %s: %v; provisioning as usual",
+		log.Warn(fmt.Sprintf("unable to read the backing file of %s recorded for the fileDevices entry %q of the LVMVolumeGroup %s: %v; provisioning as usual",
 			recorded, fd.Name, lvg.Name, err))
 		return nil
 	}
@@ -1057,7 +1070,7 @@ func (r *Reconciler) refuseUnlinkedBackingFile(
 
 	err = fmt.Errorf("the backing file %s of the fileDevices entry %q has been unlinked while loop %s still reads from it as a Physical Volume of VG %s; refusing to create a second backing file at the same path, which would add a second Physical Volume to the Volume Group. Restore the file, or move the Physical Volume out (pvmove + vgreduce + pvremove) before removing the entry",
 		filePath, fd.Name, recorded, lvg.Spec.ActualVGNameOnTheNode)
-	r.log.Error(err, fmt.Sprintf("[refuseUnlinkedBackingFile] the fileDevices entry %q of the LVMVolumeGroup %s cannot be provisioned", fd.Name, lvg.Name))
+	log.Error(fmt.Sprintf("the fileDevices entry %q of the LVMVolumeGroup %s cannot be provisioned", fd.Name, lvg.Name), logger.Err(err))
 	return err
 }
 
@@ -1070,6 +1083,8 @@ func (r *Reconciler) provisionFileDevice(
 	lvg *v1alpha1.LVMVolumeGroup,
 	fd v1alpha1.LVMVolumeGroupFileDeviceSpec,
 ) (loopDev string, rb fileDeviceRollback, err error) {
+	log := r.log.Named("provisionFileDevices")
+
 	filePath := utils.BuildFileDevicePath(fd.Directory, lvg.Name, fd.Name)
 	sizeBytes := fd.Size.Value()
 
@@ -1086,7 +1101,7 @@ func (r *Reconciler) provisionFileDevice(
 		return "", fileDeviceRollback{}, fmt.Errorf("query loop for %s: %w", filePath, err)
 	}
 	if findRes.loopDev != "" {
-		r.log.Info(fmt.Sprintf("[provisionFileDevices] %s already attached to %s; reusing", filePath, findRes.loopDev))
+		log.Info(fmt.Sprintf("%s already attached to %s; reusing", filePath, findRes.loopDev))
 		// Nothing to roll back: neither the file nor the loop is ours.
 		return findRes.loopDev, fileDeviceRollback{}, nil
 	}
@@ -1103,7 +1118,7 @@ func (r *Reconciler) provisionFileDevice(
 		return "", fileDeviceRollback{}, err
 	}
 
-	r.log.Info(fmt.Sprintf("[provisionFileDevices] creating file device %s (%d bytes) for LVMVolumeGroup %s", filePath, sizeBytes, lvg.Name))
+	log.Info(fmt.Sprintf("creating file device %s (%d bytes) for LVMVolumeGroup %s", filePath, sizeBytes, lvg.Name))
 
 	// Create the backing directory on demand (mkdir -p, idempotent) so
 	// the admin does not have to pre-create it on every node. A failure
@@ -1114,7 +1129,7 @@ func (r *Reconciler) provisionFileDevice(
 	})
 	r.log.Debug(mkdirCmd)
 	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[provisionFileDevices] unable to create directory %s", fd.Directory))
+		log.Error(fmt.Sprintf("unable to create directory %s", fd.Directory), logger.Err(err))
 		return "", fileDeviceRollback{}, err
 	}
 
@@ -1146,9 +1161,9 @@ func (r *Reconciler) provisionFileDevice(
 		existingBytes = allocatedBytes
 	case errors.Is(statErr, utils.ErrFileDeviceAbsent):
 		fileAbsent = true
-		r.log.Debug(fmt.Sprintf("[provisionFileDevices] no existing backing file at %s; nothing is allocated yet", filePath))
+		log.Debug(fmt.Sprintf("no existing backing file at %s; nothing is allocated yet", filePath))
 	default:
-		r.log.Warning(fmt.Sprintf("[provisionFileDevices] unable to tell whether %s already exists and how much of it is allocated: %v; not provisioning this entry until the answer is known", filePath, statErr))
+		log.Warn(fmt.Sprintf("unable to tell whether %s already exists and how much of it is allocated: %v; not provisioning this entry until the answer is known", filePath, statErr))
 		return "", fileDeviceRollback{}, fmt.Errorf("unable to measure the backing file %s: %w", filePath, statErr)
 	}
 
@@ -1180,7 +1195,7 @@ func (r *Reconciler) provisionFileDevice(
 	})
 	r.log.Debug(createCmd)
 	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[provisionFileDevices] unable to create file %s", filePath))
+		log.Error(fmt.Sprintf("unable to create file %s", filePath), logger.Err(err))
 		// A fallocate that failed part-way may still have left a partial file
 		// behind. It is not removed here on purpose: the next reconcile
 		// completes it, and `size` is what decides the final length, not
@@ -1199,7 +1214,7 @@ func (r *Reconciler) provisionFileDevice(
 	})
 	r.log.Debug(setupRes.cmd)
 	if err != nil {
-		r.log.Error(err, fmt.Sprintf("[provisionFileDevices] unable to setup loop device for %s", filePath))
+		log.Error(fmt.Sprintf("unable to setup loop device for %s", filePath), logger.Err(err))
 		// losetup can fail with the device already bound, so the rollback is told
 		// to look for a loop rather than trusting what the failed command
 		// returned; see rollbackFileDeviceEntry.
@@ -1209,7 +1224,7 @@ func (r *Reconciler) provisionFileDevice(
 
 	utils.EnableLoopDirectIO(ctx, r.log, r.commands, r.cfg.CmdDeadlineDuration, setupRes.loopDev)
 
-	r.log.Info(fmt.Sprintf("[provisionFileDevices] file %s attached to %s", filePath, setupRes.loopDev))
+	log.Info(fmt.Sprintf("file %s attached to %s", filePath, setupRes.loopDev))
 	return setupRes.loopDev, rb, nil
 }
 
@@ -1226,6 +1241,8 @@ func (r *Reconciler) provisionFileDevice(
 // The file is kept whenever its loop could not be detached, since the loop may
 // still be reading from it.
 func (r *Reconciler) rollbackFileDeviceEntry(ctx context.Context, rb fileDeviceRollback) {
+	log := r.log.Named("rollbackFileDeviceEntry")
+
 	if rb.filePath == "" && rb.loopDev == "" {
 		return
 	}
@@ -1236,24 +1253,24 @@ func (r *Reconciler) rollbackFileDeviceEntry(ctx context.Context, rb fileDeviceR
 		r.log.Debug(cmd)
 		switch {
 		case err != nil:
-			r.log.Warning(fmt.Sprintf("[rollbackFileDeviceEntry] unable to check whether a loop is attached to %s: %v; keeping both in place", rb.filePath, err))
+			log.Warn(fmt.Sprintf("unable to check whether a loop is attached to %s: %v; keeping both in place", rb.filePath, err))
 			return
 		case found != "":
-			r.log.Warning(fmt.Sprintf("[rollbackFileDeviceEntry] %s turned out to be attached to %s even though the setup command failed; detaching it before removing the file", rb.filePath, found))
+			log.Warn(fmt.Sprintf("%s turned out to be attached to %s even though the setup command failed; detaching it before removing the file", rb.filePath, found))
 			loopDev = found
 		}
 	}
 
 	if loopDev != "" {
 		if cmd, err := r.commands.DetachLoopDevice(ctx, loopDev); err != nil {
-			r.log.Warning(fmt.Sprintf("[rollbackFileDeviceEntry] unable to detach %s: %v (cmd: %s); keeping backing file %s in place", loopDev, err, cmd, rb.filePath))
+			log.Warn(fmt.Sprintf("unable to detach %s: %v (cmd: %s); keeping backing file %s in place", loopDev, err, cmd, rb.filePath))
 			return
 		}
 	}
 
 	if rb.createdFile && rb.filePath != "" {
 		if cmd, err := r.commands.RemoveFileDevice(ctx, rb.filePath); err != nil {
-			r.log.Warning(fmt.Sprintf("[rollbackFileDeviceEntry] unable to remove %s: %v (cmd: %s)", rb.filePath, err, cmd))
+			log.Warn(fmt.Sprintf("unable to remove %s: %v (cmd: %s)", rb.filePath, err, cmd))
 		}
 	}
 }
@@ -1282,6 +1299,8 @@ func (r *Reconciler) rollbackFileDeviceEntry(ctx context.Context, rb fileDeviceR
 // backing file whose loop it could not detach, since the loop may still
 // reference it.
 func (r *Reconciler) rollbackProvisionedFileDevices(ctx context.Context, provisioned []provisionedFileDevice) {
+	log := r.log.Named("rollbackProvisionedFileDevices")
+
 	if len(provisioned) == 0 {
 		return
 	}
@@ -1289,7 +1308,7 @@ func (r *Reconciler) rollbackProvisionedFileDevices(ctx context.Context, provisi
 	pvs, cmd, _, err := r.commands.GetAllPVs(ctx)
 	r.log.Debug(cmd)
 	if err != nil {
-		r.log.Warning(fmt.Sprintf("[rollbackProvisionedFileDevices] unable to list PVs to confirm rollback is safe; leaving %d provisioned file device(s) in place (a leak is recoverable, corrupting a live VG is not): %v", len(provisioned), err))
+		log.Warn(fmt.Sprintf("unable to list PVs to confirm rollback is safe; leaving %d provisioned file device(s) in place (a leak is recoverable, corrupting a live VG is not): %v", len(provisioned), err))
 		return
 	}
 	pvNames := make(map[string]struct{}, len(pvs))
@@ -1321,13 +1340,13 @@ func (r *Reconciler) rollbackProvisionedFileDevices(ctx context.Context, provisi
 				isPV = r.loopPVState(entryCtx, aliases, p.loopDev, pvs) != pvLoopStateAbsent
 			}
 			if isPV {
-				r.log.Warning(fmt.Sprintf("[rollbackProvisionedFileDevices] loop %s (file %s) is already an LVM PV, or could not be confirmed not to be one; skipping rollback so a concurrent or partially-succeeded create does not lose its backing storage", p.loopDev, p.filePath))
+				log.Warn(fmt.Sprintf("loop %s (file %s) is already an LVM PV, or could not be confirmed not to be one; skipping rollback so a concurrent or partially-succeeded create does not lose its backing storage", p.loopDev, p.filePath))
 				kept++
 				cancel()
 				continue
 			}
 			if cmd, derr := r.commands.DetachLoopDevice(entryCtx, p.loopDev); derr != nil {
-				r.log.Warning(fmt.Sprintf("[rollbackProvisionedFileDevices] unable to detach %s: %v (cmd: %s); keeping backing file %s in place", p.loopDev, derr, cmd, p.filePath))
+				log.Warn(fmt.Sprintf("unable to detach %s: %v (cmd: %s); keeping backing file %s in place", p.loopDev, derr, cmd, p.filePath))
 				kept++
 				cancel()
 				continue
@@ -1335,7 +1354,7 @@ func (r *Reconciler) rollbackProvisionedFileDevices(ctx context.Context, provisi
 		}
 		if p.filePath != "" {
 			if cmd, rerr := r.commands.RemoveFileDevice(entryCtx, p.filePath); rerr != nil {
-				r.log.Warning(fmt.Sprintf("[rollbackProvisionedFileDevices] unable to remove %s: %v (cmd: %s)", p.filePath, rerr, cmd))
+				log.Warn(fmt.Sprintf("unable to remove %s: %v (cmd: %s)", p.filePath, rerr, cmd))
 				kept++
 				cancel()
 				continue
@@ -1346,7 +1365,7 @@ func (r *Reconciler) rollbackProvisionedFileDevices(ctx context.Context, provisi
 	}
 
 	if kept > 0 {
-		r.log.Warning(fmt.Sprintf("[rollbackProvisionedFileDevices] rolled back %d of %d provisioned file device(s); %d were kept (already a PV, or a command that did not go through) and will be reused by the next reconcile", torn, len(provisioned), kept))
+		log.Warn(fmt.Sprintf("rolled back %d of %d provisioned file device(s); %d were kept (already a PV, or a command that did not go through) and will be reused by the next reconcile", torn, len(provisioned), kept))
 	}
 }
 
@@ -1375,6 +1394,8 @@ func (r *Reconciler) rollbackProvisionedFileDevices(ctx context.Context, provisi
 // returned — the finalizer stays and the resource remains the record of what is
 // on the node.
 func (r *Reconciler) cleanupFileDevices(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) error {
+	log := r.log.Named("cleanupFileDevices")
+
 	type target struct {
 		filePath   string
 		loopDevice string
@@ -1433,7 +1454,7 @@ func (r *Reconciler) cleanupFileDevices(ctx context.Context, lvg *v1alpha1.LVMVo
 		// A path outside the base directory cannot be one this agent created, so
 		// there is nothing to clean up for it either way.
 		if r.cfg.FileDevicesDirectory != "" && !isWithinBaseDir(filepath.Clean(fd.Directory), r.cfg.FileDevicesDirectory) {
-			r.log.Warning(fmt.Sprintf("[cleanupFileDevices] skipping the fileDevices entry %q of the LVMVolumeGroup %s: its directory %q is outside the configured base directory %q, so nothing there was created by this agent",
+			log.Warn(fmt.Sprintf("skipping the fileDevices entry %q of the LVMVolumeGroup %s: its directory %q is outside the configured base directory %q, so nothing there was created by this agent",
 				fd.Name, lvg.Name, fd.Directory, r.cfg.FileDevicesDirectory))
 			continue
 		}
@@ -1473,7 +1494,7 @@ func (r *Reconciler) cleanupFileDevices(ctx context.Context, lvg *v1alpha1.LVMVo
 		// match the agent's managed pattern. If it slipped into status
 		// via a foreign loop PV (or a bug), refuse to rm and warn.
 		if t.filePath != "" && !utils.IsManagedFileDevicePath(t.filePath, lvg.Name) {
-			r.log.Warning(fmt.Sprintf("[cleanupFileDevices] refusing to act on unmanaged path %q for LVG %s", t.filePath, lvg.Name))
+			log.Warn(fmt.Sprintf("refusing to act on unmanaged path %q for LVG %s", t.filePath, lvg.Name))
 			continue
 		}
 
@@ -1494,7 +1515,7 @@ func (r *Reconciler) cleanupFileDevices(ctx context.Context, lvg *v1alpha1.LVMVo
 			})
 			if err != nil {
 				detachErrs = append(detachErrs, fmt.Errorf("query loop for %s: %w", t.filePath, err))
-				r.log.Error(err, fmt.Sprintf("[cleanupFileDevices] unable to query loop for %s", t.filePath))
+				log.Error(fmt.Sprintf("unable to query loop for %s", t.filePath), logger.Err(err))
 				continue
 			}
 			t.loopDevice = loop
@@ -1523,18 +1544,18 @@ func (r *Reconciler) cleanupFileDevices(ctx context.Context, lvg *v1alpha1.LVMVo
 			})
 			if err != nil {
 				detachErrs = append(detachErrs, fmt.Errorf("read backing file for %s: %w", t.loopDevice, err))
-				r.log.Error(err, fmt.Sprintf("[cleanupFileDevices] unable to read backing file for loop %s", t.loopDevice))
+				log.Error(fmt.Sprintf("unable to read backing file for loop %s", t.loopDevice), logger.Err(err))
 				continue
 			}
 			// The " (deleted)" marker is already off the path, on purpose: an
 			// unlinked backing file still names its owner, and a loop whose file is
 			// gone is exactly the one that must be detached rather than left behind.
 			if !utils.IsManagedFileDevicePath(backing.Path, lvg.Name) {
-				r.log.Warning(fmt.Sprintf("[cleanupFileDevices] refusing to detach loop %s backed by unmanaged file %q for LVG %s", t.loopDevice, backing.Path, lvg.Name))
+				log.Warn(fmt.Sprintf("refusing to detach loop %s backed by unmanaged file %q for LVG %s", t.loopDevice, backing.Path, lvg.Name))
 				continue
 			}
 			if backing.Deleted {
-				r.log.Warning(fmt.Sprintf("[cleanupFileDevices] loop %s of the LVMVolumeGroup %s still reads from %s, which has already been unlinked; detaching it so the minor does not outlive the resource", t.loopDevice, lvg.Name, backing.Path))
+				log.Warn(fmt.Sprintf("loop %s of the LVMVolumeGroup %s still reads from %s, which has already been unlinked; detaching it so the minor does not outlive the resource", t.loopDevice, lvg.Name, backing.Path))
 			}
 		}
 
@@ -1548,12 +1569,12 @@ func (r *Reconciler) cleanupFileDevices(ctx context.Context, lvg *v1alpha1.LVMVo
 			switch {
 			case vgName != "":
 				err := fmt.Errorf("loop %s (file %s) is still a Physical Volume of VG %s; refusing to detach it or remove its backing file", t.loopDevice, t.filePath, vgName)
-				r.log.Error(err, fmt.Sprintf("[cleanupFileDevices] refusing to clean up a file device still in use by VG %s (LVMVolumeGroup %s)", vgName, lvg.Name))
+				log.Error(fmt.Sprintf("refusing to clean up a file device still in use by VG %s (LVMVolumeGroup %s)", vgName, lvg.Name), logger.Err(err))
 				detachErrs = append(detachErrs, err)
 				continue
 			case unresolved:
 				err := fmt.Errorf("unable to tell whether loop %s (file %s) is still a Physical Volume of some VG; refusing to clean it up", t.loopDevice, t.filePath)
-				r.log.Error(err, fmt.Sprintf("[cleanupFileDevices] alias PV resolution failed while checking the file devices of the LVMVolumeGroup %s", lvg.Name))
+				log.Error(fmt.Sprintf("alias PV resolution failed while checking the file devices of the LVMVolumeGroup %s", lvg.Name), logger.Err(err))
 				detachErrs = append(detachErrs, err)
 				continue
 			}
@@ -1566,7 +1587,7 @@ func (r *Reconciler) cleanupFileDevices(ctx context.Context, lvg *v1alpha1.LVMVo
 			r.log.Debug(cmd)
 			if err != nil {
 				detachErrs = append(detachErrs, fmt.Errorf("detach %s: %w", t.loopDevice, err))
-				r.log.Error(err, fmt.Sprintf("[cleanupFileDevices] unable to detach loop %s", t.loopDevice))
+				log.Error(fmt.Sprintf("unable to detach loop %s", t.loopDevice), logger.Err(err))
 				continue
 			}
 		}
@@ -1576,7 +1597,7 @@ func (r *Reconciler) cleanupFileDevices(ctx context.Context, lvg *v1alpha1.LVMVo
 			})
 			r.log.Debug(cmd)
 			if err != nil {
-				r.log.Warning(fmt.Sprintf("[cleanupFileDevices] unable to remove file %s: %v", t.filePath, err))
+				log.Warn(fmt.Sprintf("unable to remove file %s: %v", t.filePath, err))
 			}
 		}
 	}

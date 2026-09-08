@@ -28,12 +28,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller/bd"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
 )
@@ -69,7 +69,7 @@ func withDiscovererCreated(foo func(vars *DiscoverCreatedVars)) {
 			NodeName:  NodeName,
 		}
 		metrics = monitoring.GetMetrics("")
-		log = logger.NewLoggerWrap(GinkgoLogr)
+		log, _ = logger.NewLoggerToWriter(GinkgoWriter, logger.TraceLevel)
 		vars.sdsCache = cache.New()
 		k8client = test_utils.NewFakeClient()
 		vars.discoverer = bd.NewDiscoverer(k8client, log, metrics, vars.sdsCache, config)

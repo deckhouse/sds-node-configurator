@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 )
 
@@ -108,6 +108,8 @@ func RunWithTimeout[T any](ctx context.Context, timeout time.Duration, fn func(c
 // provisionFileDevices on its next pass, so a transient losetup failure
 // recovers without a pod restart.
 func ReattachFileDevices(ctx context.Context, log logger.Logger, commands Commands, cmdTimeout time.Duration, lvgs []LVGWithFileDevices) error {
+	log = log.Named("ReattachFileDevices")
+
 	var failures []error
 	for _, item := range lvgs {
 		for _, fd := range item.FileDevices {
@@ -129,11 +131,11 @@ func ReattachFileDevices(ctx context.Context, log logger.Logger, commands Comman
 			log.Debug(findRes.cmd)
 			if err != nil {
 				failures = append(failures, fmt.Errorf("LVG %s: query loop for %s: %w", item.LVGName, fd.FilePath, err))
-				log.Warning(fmt.Sprintf("[ReattachFileDevices] unable to query loop for %s: %v", fd.FilePath, err))
+				log.Warn(fmt.Sprintf("unable to query loop for %s: %v", fd.FilePath, err))
 				continue
 			}
 			if findRes.loopDev != "" {
-				log.Debug(fmt.Sprintf("[ReattachFileDevices] %s already attached to %s", fd.FilePath, findRes.loopDev))
+				log.Debug(fmt.Sprintf("%s already attached to %s", fd.FilePath, findRes.loopDev))
 				continue
 			}
 
@@ -148,11 +150,11 @@ func ReattachFileDevices(ctx context.Context, log logger.Logger, commands Comman
 			log.Debug(setupRes.cmd)
 			if err != nil {
 				failures = append(failures, fmt.Errorf("LVG %s: setup loop for %s: %w", item.LVGName, fd.FilePath, err))
-				log.Error(err, fmt.Sprintf("[ReattachFileDevices] unable to reattach %s", fd.FilePath))
+				log.Error(fmt.Sprintf("unable to reattach %s", fd.FilePath), logger.Err(err))
 				continue
 			}
 			EnableLoopDirectIO(ctx, log, commands, cmdTimeout, setupRes.loopDev)
-			log.Info(fmt.Sprintf("[ReattachFileDevices] reattached %s → %s (LVG %s)", fd.FilePath, setupRes.loopDev, item.LVGName))
+			log.Info(fmt.Sprintf("reattached %s → %s (LVG %s)", fd.FilePath, setupRes.loopDev, item.LVGName))
 		}
 	}
 	if len(failures) > 0 {
@@ -180,7 +182,7 @@ func EnableLoopDirectIO(ctx context.Context, log logger.Logger, commands Command
 	})
 	log.Debug(cmd)
 	if err != nil {
-		log.Warning(fmt.Sprintf("[EnableLoopDirectIO] direct I/O is unavailable for %s, continuing with buffered I/O (expect a higher page-cache footprint): %v", loopDev, err))
+		log.Named("EnableLoopDirectIO").Warn(fmt.Sprintf("direct I/O is unavailable for %s, continuing with buffered I/O (expect a higher page-cache footprint): %v", loopDev, err))
 	}
 }
 
@@ -197,16 +199,18 @@ type FileDeviceStatus struct {
 }
 
 func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Commands, metrics *monitoring.Metrics, cmdTimeout time.Duration) error {
-	log.Info("[ActivateVGs] refreshing LVM metadata cache")
+	log = log.Named("ActivateVGs")
+
+	log.Info("refreshing LVM metadata cache")
 	if cmd, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 		return commands.PVScan(ctx)
 	}); err != nil {
-		log.Warning(fmt.Sprintf("[ActivateVGs] pvscan --cache failed (cmd: %s): %v", cmd, err))
+		log.Warn(fmt.Sprintf("pvscan --cache failed (cmd: %s): %v", cmd, err))
 	}
 	if cmd, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 		return commands.VGScan(ctx)
 	}); err != nil {
-		log.Warning(fmt.Sprintf("[ActivateVGs] vgscan --cache failed (cmd: %s): %v", cmd, err))
+		log.Warn(fmt.Sprintf("vgscan --cache failed (cmd: %s): %v", cmd, err))
 	}
 
 	type vgsResult struct {
@@ -217,7 +221,7 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 		data, cmdStr, _, err := commands.GetAllVGs(ctx)
 		return vgsResult{data: data, cmdStr: cmdStr}, err
 	})
-	log.Debug(fmt.Sprintf("[ActivateVGs] exec cmd: %s", res.cmdStr))
+	log.Debug(fmt.Sprintf("exec cmd: %s", res.cmdStr))
 	if err != nil {
 		return fmt.Errorf("unable to get VGs: %w", err)
 	}
@@ -240,7 +244,7 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 		data, cmdStr, _, err := commands.GetAllPVs(ctx)
 		return pvsResult{data: data, cmdStr: cmdStr}, err
 	})
-	log.Debug(fmt.Sprintf("[ActivateVGs] exec cmd: %s", pvsRes.cmdStr))
+	log.Debug(fmt.Sprintf("exec cmd: %s", pvsRes.cmdStr))
 	if pvsErr != nil {
 		// Without the PV list every loop-only Volume Group is unclassifiable, so
 		// activating anything risks activating somebody else's. Volumes not coming
@@ -252,11 +256,11 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 	verdicts := ClassifyLoopVGs(ctx, log, commands, cmdTimeout, res.data, pvsRes.data)
 	managedVGs := SkipUnownedLoopVGs(log, "activate", FilterVGsByTag(res.data, internal.LVMTags), verdicts)
 	if len(managedVGs) == 0 {
-		log.Info("[ActivateVGs] no managed VGs found, nothing to activate")
+		log.Info("no managed VGs found, nothing to activate")
 		return nil
 	}
 
-	log.Info(fmt.Sprintf("[ActivateVGs] found %d managed VGs to activate", len(managedVGs)))
+	log.Info(fmt.Sprintf("found %d managed VGs to activate", len(managedVGs)))
 
 	var activationErrors []error
 	for _, vg := range managedVGs {
@@ -265,7 +269,7 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 			return commands.VGActivate(ctx, vg.VGName, shared)
 		})
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[ActivateVGs] failed to activate VG %s (shared=%t, cmd: %s)", vg.VGName, shared, cmd))
+			log.Error(fmt.Sprintf("failed to activate VG %s (shared=%t, cmd: %s)", vg.VGName, shared, cmd), logger.Err(err))
 			metrics.UtilsCommandsErrorsCount(activationControllerName, "vgchange").Inc()
 			metrics.LVMActivationTotal(vg.VGName, "error").Inc()
 			activationErrors = append(activationErrors, fmt.Errorf("VG %s: %w", vg.VGName, err))
@@ -273,7 +277,7 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 		}
 		metrics.UtilsCommandsExecutionCount(activationControllerName, "vgchange").Inc()
 		metrics.LVMActivationTotal(vg.VGName, "success").Inc()
-		log.Info(fmt.Sprintf("[ActivateVGs] activated VG %s (shared=%t)", vg.VGName, shared))
+		log.Info(fmt.Sprintf("activated VG %s (shared=%t)", vg.VGName, shared))
 	}
 
 	if len(activationErrors) > 0 {
@@ -300,6 +304,8 @@ func EnsureVGActivation(
 	verdicts LoopVGVerdicts,
 	cmdTimeout time.Duration,
 ) bool {
+	log = log.Named("EnsureActivation")
+
 	managedVGs := SkipUnownedLoopVGs(log, "activate", FilterVGsByTag(vgs, internal.LVMTags), verdicts)
 	if len(managedVGs) == 0 {
 		return false
@@ -322,7 +328,7 @@ func EnsureVGActivation(
 		}
 
 		if !IsLVActive(lv.LVAttr) {
-			log.Warning(fmt.Sprintf("[EnsureActivation] detected inactive LV %s/%s (attr=%s)", lv.VGName, lv.LVName, lv.LVAttr))
+			log.Warn(fmt.Sprintf("detected inactive LV %s/%s (attr=%s)", lv.VGName, lv.LVName, lv.LVAttr))
 			vgsToActivate[vg.VGName] = vg
 		}
 	}
@@ -331,7 +337,7 @@ func EnsureVGActivation(
 		return false
 	}
 
-	log.Info(fmt.Sprintf("[EnsureActivation] activating %d VGs with inactive LVs", len(vgsToActivate)))
+	log.Info(fmt.Sprintf("activating %d VGs with inactive LVs", len(vgsToActivate)))
 	activated := false
 	for _, vg := range vgsToActivate {
 		shared := vg.VGShared != ""
@@ -339,14 +345,14 @@ func EnsureVGActivation(
 			return commands.VGActivate(ctx, vg.VGName, shared)
 		})
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[EnsureActivation] failed to activate VG %s (cmd: %s)", vg.VGName, cmd))
+			log.Error(fmt.Sprintf("failed to activate VG %s (cmd: %s)", vg.VGName, cmd), logger.Err(err))
 			metrics.UtilsCommandsErrorsCount(activationControllerName, "vgchange").Inc()
 			metrics.LVMActivationTotal(vg.VGName, "error").Inc()
 			continue
 		}
 		metrics.UtilsCommandsExecutionCount(activationControllerName, "vgchange").Inc()
 		metrics.LVMActivationTotal(vg.VGName, "success").Inc()
-		log.Info(fmt.Sprintf("[EnsureActivation] activated VG %s (shared=%t)", vg.VGName, shared))
+		log.Info(fmt.Sprintf("activated VG %s (shared=%t)", vg.VGName, shared))
 		activated = true
 	}
 

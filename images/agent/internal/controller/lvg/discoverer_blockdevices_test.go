@@ -33,10 +33,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	mock_utils "github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
@@ -153,7 +153,7 @@ func bdRaceDiscoverer(t *testing.T, cl client.Client, bdAPIReader UncachedReader
 	mc.EXPECT().GetLoopBackingFile(gomock.Any(), bdRacePVName).
 		Return("losetup -O BACK-FILE", internal.LoopBackingFile{}, nil).AnyTimes()
 
-	return NewDiscoverer(cl, bdAPIReader, logger.Logger{}, monitoring.GetMetrics(bdRaceNode), sdsCache,
+	return NewDiscoverer(cl, bdAPIReader, logger.NewNop(), monitoring.GetMetrics(bdRaceNode), sdsCache,
 		mc, DiscovererConfig{
 			NodeName:                bdRaceNode,
 			VolumeGroupScanInterval: time.Second,

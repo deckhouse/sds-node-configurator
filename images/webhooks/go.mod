@@ -2,9 +2,9 @@ module github.com/deckhouse/sds-node-configurator/images/webhooks
 
 go 1.27.1
 require (
+	github.com/deckhouse/sds-common-lib v0.15.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250206203415-a9ffd855f5a3
 	github.com/deckhouse/sds-node-configurator/lib/go/common v0.0.0-00010101000000-000000000000
-	github.com/sirupsen/logrus v1.9.3
 	github.com/slok/kubewebhook/v2 v2.7.0
 	k8s.io/apimachinery v0.33.0
 )
@@ -14,6 +14,8 @@ replace github.com/deckhouse/sds-node-configurator/api => ../../api
 replace github.com/deckhouse/sds-node-configurator/lib/go/common => ../../lib/go/common
 
 require (
+	github.com/DataDog/gostackparse v0.7.0 // indirect
+	github.com/deckhouse/deckhouse/pkg/log v0.2.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -23,9 +25,9 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/api v0.33.0 // indirect
 	k8s.io/client-go v0.32.1 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect

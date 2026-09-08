@@ -21,7 +21,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/tracing"
 )
 
 type accessLogResponseWriter struct {
@@ -46,12 +47,12 @@ func accessLogHandler(log logger.Logger, schedulerHandler http.Handler) http.Han
 		startTime := time.Now()
 
 		// Generate trace ID for this request
-		traceID := logger.GenerateTraceID()
-		ctx := logger.WithTraceID(r.Context(), traceID)
+		traceID := tracing.GenerateTraceID()
+		ctx := tracing.WithTraceID(r.Context(), traceID)
 		r = r.WithContext(ctx)
 
 		// Create logger with trace ID
-		requestLog := logger.WithTraceIDLogger(ctx, log)
+		requestLog := tracing.WithTraceIDLogger(ctx, log)
 
 		accessLogRW := &accessLogResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 

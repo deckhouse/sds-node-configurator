@@ -264,6 +264,11 @@ func init() {
 	metrics.Registry.MustRegister(reconcilesCountTotal)
 	metrics.Registry.MustRegister(reconcileDuration)
 	metrics.Registry.MustRegister(utilsCommandsDuration)
+	// Both of these are incremented in about forty places in this binary -- every
+	// lvm and lsblk call goes through them -- and were never registered, so nothing
+	// they counted left the process.
+	metrics.Registry.MustRegister(utilsCommandsExecutionCount)
+	metrics.Registry.MustRegister(utilsCommandsErrorsCount)
 	metrics.Registry.MustRegister(apiMethodsDuration)
 	metrics.Registry.MustRegister(apiMethodsExecutionCount)
 	metrics.Registry.MustRegister(apiMethodsErrorsCount)

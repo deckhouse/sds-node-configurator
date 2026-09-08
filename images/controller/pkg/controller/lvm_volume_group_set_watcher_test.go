@@ -28,8 +28,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/logger"
 	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/monitoring"
 )
 
@@ -193,7 +193,7 @@ func TestProvideLVMVolumeGroupsPerNode_CreatesOneFileBackedLVGPerNode(t *testing
 		"node-1": {ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 	}
 
-	assert.NoError(t, provideLVMVolumeGroupsPerNode(ctx, cl, logger.Logger{}, monitoring.GetMetrics(""), lvgSet, nodes))
+	assert.NoError(t, provideLVMVolumeGroupsPerNode(ctx, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet, nodes))
 
 	var created v1alpha1.LVMVolumeGroupList
 	assert.NoError(t, cl.List(ctx, &created))
@@ -236,7 +236,7 @@ func TestProvideLVMVolumeGroupsPerNode_IsIdempotentAndGrowsFileDevices(t *testin
 	assert.NoError(t, cl.Create(ctx, lvgSet))
 
 	nodes := map[string]v1.Node{"node-0": {ObjectMeta: metav1.ObjectMeta{Name: "node-0"}}}
-	assert.NoError(t, provideLVMVolumeGroupsPerNode(ctx, cl, logger.Logger{}, monitoring.GetMetrics(""), lvgSet, nodes))
+	assert.NoError(t, provideLVMVolumeGroupsPerNode(ctx, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet, nodes))
 
 	// Grow the template the way an operator would: append, never edit in place
 	// (existing entries are immutable by CEL rule).
@@ -244,7 +244,7 @@ func TestProvideLVMVolumeGroupsPerNode_IsIdempotentAndGrowsFileDevices(t *testin
 		v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d20g", Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("20Gi")})
 	lvgSet.Spec.LVGTemplate.FileDevices = grown
 
-	assert.NoError(t, provideLVMVolumeGroupsPerNode(ctx, cl, logger.Logger{}, monitoring.GetMetrics(""), lvgSet, nodes))
+	assert.NoError(t, provideLVMVolumeGroupsPerNode(ctx, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet, nodes))
 
 	var after v1alpha1.LVMVolumeGroupList
 	assert.NoError(t, cl.List(ctx, &after))
@@ -282,14 +282,14 @@ func TestProvideLVMVolumeGroupsPerNode_PropagatesFileDeviceRemoval(t *testing.T)
 	assert.NoError(t, cl.Create(ctx, lvgSet))
 
 	nodes := map[string]v1.Node{"node-0": {ObjectMeta: metav1.ObjectMeta{Name: "node-0"}}}
-	assert.NoError(t, provideLVMVolumeGroupsPerNode(ctx, cl, logger.Logger{}, monitoring.GetMetrics(""), lvgSet, nodes))
+	assert.NoError(t, provideLVMVolumeGroupsPerNode(ctx, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet, nodes))
 
 	var created v1alpha1.LVMVolumeGroupList
 	assert.NoError(t, cl.List(ctx, &created))
 	assert.Len(t, created.Items[0].Spec.FileDevices, 2)
 
 	lvgSet.Spec.LVGTemplate.FileDevices = both[:1]
-	assert.NoError(t, provideLVMVolumeGroupsPerNode(ctx, cl, logger.Logger{}, monitoring.GetMetrics(""), lvgSet, nodes))
+	assert.NoError(t, provideLVMVolumeGroupsPerNode(ctx, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet, nodes))
 
 	var after v1alpha1.LVMVolumeGroupList
 	assert.NoError(t, cl.List(ctx, &after))

@@ -32,10 +32,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
+	"github.com/deckhouse/sds-common-lib/logger"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
@@ -393,21 +393,23 @@ func discoverProvisionerForPVC(
 	log logger.Logger,
 	pvc *corev1.PersistentVolumeClaim,
 ) (string, error) {
+	log = log.Named("discoverProvisionerForPVC")
+
 	var discoveredProvisioner string
 
-	log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] get pvc: %+v", pvc))
-	log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] check provisioner in pvc annotations: %+v", pvc.Annotations))
+	log.Trace(fmt.Sprintf("get pvc: %+v", pvc))
+	log.Trace(fmt.Sprintf("check provisioner in pvc annotations: %+v", pvc.Annotations))
 
 	// Get provisioner from PVC annotations
 	discoveredProvisioner = pvc.Annotations[annotationStorageProvisioner]
 	if discoveredProvisioner != "" {
-		log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] discovered provisioner in pvc annotations: %s", discoveredProvisioner))
+		log.Trace(fmt.Sprintf("discovered provisioner in pvc annotations: %s", discoveredProvisioner))
 		return discoveredProvisioner, nil
 	}
 
 	discoveredProvisioner = pvc.Annotations[annotationBetaStorageProvisioner]
 	if discoveredProvisioner != "" {
-		log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] discovered provisioner in beta pvc annotations: %s", discoveredProvisioner))
+		log.Trace(fmt.Sprintf("discovered provisioner in beta pvc annotations: %s", discoveredProvisioner))
 		return discoveredProvisioner, nil
 	}
 
@@ -420,18 +422,18 @@ func discoverProvisionerForPVC(
 	// such cases we fall through to PV-based provisioner discovery instead
 	// of failing the whole scheduling request.
 	if pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != "" {
-		log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] can't find provisioner in pvc annotations, check in storageClass with name: %s", *pvc.Spec.StorageClassName))
+		log.Trace(fmt.Sprintf("can't find provisioner in pvc annotations, check in storageClass with name: %s", *pvc.Spec.StorageClassName))
 		storageClass := &storagev1.StorageClass{}
 		err := cl.Get(ctx, client.ObjectKey{Name: *pvc.Spec.StorageClassName}, storageClass)
 		switch {
 		case err == nil:
 			discoveredProvisioner = storageClass.Provisioner
-			log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] discover provisioner %s in storageClass: %+v", discoveredProvisioner, storageClass))
+			log.Trace(fmt.Sprintf("discover provisioner %s in storageClass: %+v", discoveredProvisioner, storageClass))
 			if discoveredProvisioner != "" {
 				return discoveredProvisioner, nil
 			}
 		case apierrors.IsNotFound(err):
-			log.Debug(fmt.Sprintf("[discoverProvisionerForPVC] StorageClass %s not found, falling back to PV-based provisioner discovery", *pvc.Spec.StorageClassName))
+			log.Debug(fmt.Sprintf("StorageClass %s not found, falling back to PV-based provisioner discovery", *pvc.Spec.StorageClassName))
 		default:
 			return "", fmt.Errorf("[discoverProvisionerForPVC] error getting StorageClass %s: %v", *pvc.Spec.StorageClassName, err)
 		}
@@ -439,7 +441,7 @@ func discoverProvisionerForPVC(
 
 	// Get provisioner from PV
 	if pvc.Spec.VolumeName != "" {
-		log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] can't find provisioner in pvc annotations and StorageClass, check in PV with name: %s", pvc.Spec.VolumeName))
+		log.Trace(fmt.Sprintf("can't find provisioner in pvc annotations and StorageClass, check in PV with name: %s", pvc.Spec.VolumeName))
 		pv := &corev1.PersistentVolume{}
 		if err := cl.Get(ctx, client.ObjectKey{Name: pvc.Spec.VolumeName}, pv); err != nil {
 			return "", fmt.Errorf("[discoverProvisionerForPVC] error getting PV %s: %v", pvc.Spec.VolumeName, err)
@@ -449,7 +451,7 @@ func discoverProvisionerForPVC(
 			discoveredProvisioner = pv.Spec.CSI.Driver
 		}
 
-		log.Trace(fmt.Sprintf("[discoverProvisionerForPVC] discover provisioner %s in PV: %+v", discoveredProvisioner, pv))
+		log.Trace(fmt.Sprintf("discover provisioner %s in PV: %+v", discoveredProvisioner, pv))
 	}
 
 	return discoveredProvisioner, nil
@@ -556,12 +558,14 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 	// call is the price of keeping typo diagnostics at the default log level.
 	defer func() {
 		if len(missingAnnotationPVCs) > 0 {
-			log.Warning(fmt.Sprintf("[getManagedPVCsFromPod] PVC name(s) listed in the %s annotation do not exist and were skipped (the annotation is a scheduling hint, not a guarantee): %v", consts.PodExtraPVCsAnnotation, missingAnnotationPVCs))
+			log.Named("getManagedPVCsFromPod").Warn(fmt.Sprintf("PVC name(s) listed in the %s annotation do not exist and were skipped (the annotation is a scheduling hint, not a guarantee): %v", consts.PodExtraPVCsAnnotation, missingAnnotationPVCs))
 		}
 	}()
 
 	for _, pvcName := range pvcNames {
-		pvcLog := log.WithValues("PVC", pvcName)
+		// Named here rather than at every call below: Named allocates before the level
+		// is checked, and this loop runs once per PVC of the pod.
+		pvcLog := log.With("PVC", pvcName).Named("getManagedPVCsFromPod")
 
 		pvc := &corev1.PersistentVolumeClaim{}
 		err := cl.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pvcName}, pvc)
@@ -575,7 +579,7 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 			// retried by kube-scheduler doesn't flood the logs at the default
 			// (INFO) log level.
 			if apierrors.IsNotFound(err) && !fromSpec[pvcName] {
-				pvcLog.Debug(fmt.Sprintf("[getManagedPVCsFromPod] PVC listed in the %s annotation does not exist, skipping it", consts.PodExtraPVCsAnnotation))
+				pvcLog.Debug(fmt.Sprintf("PVC listed in the %s annotation does not exist, skipping it", consts.PodExtraPVCsAnnotation))
 				missingAnnotationPVCs = append(missingAnnotationPVCs, pvcName)
 				continue
 			}
@@ -586,10 +590,10 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 		if err != nil {
 			return nil, nil, fmt.Errorf("[getManagedPVCsFromPod] error getting provisioner: %v", err)
 		}
-		pvcLog.Trace(fmt.Sprintf("[getManagedPVCsFromPod] discovered provisioner: %s", discoveredProvisioner))
+		pvcLog.Trace(fmt.Sprintf("discovered provisioner: %s", discoveredProvisioner))
 
 		if !slices.Contains(targetProvisioners, discoveredProvisioner) {
-			pvcLog.Debug(fmt.Sprintf("[getManagedPVCsFromPod] provisioner not matches targetProvisioners %+v", targetProvisioners))
+			pvcLog.Debug(fmt.Sprintf("provisioner not matches targetProvisioners %+v", targetProvisioners))
 			continue
 		}
 
@@ -602,12 +606,12 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 			}
 
 			if !*newControlPlane {
-				pvcLog.Debug("[getManagedPVCsFromPod] filter out PVC due to used provisioner is managed by the Linstor")
+				pvcLog.Debug("filter out PVC due to used provisioner is managed by the Linstor")
 				continue
 			}
 		}
 
-		pvcLog.Debug("[getManagedPVCsFromPod] add PVC to the managed PVCs")
+		pvcLog.Debug("add PVC to the managed PVCs")
 		managedPVCs[pvcName] = pvc
 		if !fromSpec[pvcName] {
 			hintOnly[pvcName] = true
@@ -703,24 +707,26 @@ func formatDroppedPVCsForLog(dropped []*corev1.PersistentVolumeClaim) (allKeys [
 // (as opposed to LINSTOR). When true, the extender handles replicated PVC scheduling;
 // when false (or MC not found), LINSTOR manages scheduling and the extender skips them.
 func getNewControlPlane(ctx context.Context, cl client.Client, log logger.Logger) (*bool, error) {
+	log = log.Named("getNewControlPlane")
+
 	_true := true
 	_false := false
 	mc := &d8commonapi.ModuleConfig{}
 	err := cl.Get(ctx, client.ObjectKey{Name: "sds-replicated-volume"}, mc)
 	if err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			log.Debug("[getNewControlPlane] ModuleConfig sds-replicated-volume not found. Assume newControlPlane is false")
+			log.Debug("ModuleConfig sds-replicated-volume not found. Assume newControlPlane is false")
 			return &_false, nil
 		}
 		return &_false, err
 	}
 
 	if value, exists := mc.Spec.Settings["newControlPlane"]; exists && value == true {
-		log.Debug("[getNewControlPlane] ModuleConfig sds-replicated-volume found, newControlPlane is true")
+		log.Debug("ModuleConfig sds-replicated-volume found, newControlPlane is true")
 		return &_true, nil
 	}
 
-	log.Debug("[getNewControlPlane] ModuleConfig sds-replicated-volume found, newControlPlane is false")
+	log.Debug("ModuleConfig sds-replicated-volume found, newControlPlane is false")
 	return &_false, nil
 }
 
@@ -753,18 +759,20 @@ func extractRequestedSize(
 	scs map[string]*storagev1.StorageClass,
 	hintOnly map[string]bool,
 ) (map[string]PVCRequest, []string, error) {
+	log = log.Named("extractRequestedSize")
+
 	pvcRequests := make(map[string]PVCRequest, len(pvcs))
 	var dropped []string
 
 	for name, pvc := range pvcs {
-		log.Debug(fmt.Sprintf("[extractRequestedSize] PVC %s/%s has status phase: %q, spec.volumeName: %q", pvc.Namespace, pvc.Name, pvc.Status.Phase, pvc.Spec.VolumeName))
+		log.Debug(fmt.Sprintf("PVC %s/%s has status phase: %q, spec.volumeName: %q", pvc.Namespace, pvc.Name, pvc.Status.Phase, pvc.Spec.VolumeName))
 
 		req, err := requestForPVC(ctx, cl, pvc, scs[*pvc.Spec.StorageClassName])
 		if err != nil {
 			if !hintOnly[name] {
 				return nil, nil, err
 			}
-			log.Warning(fmt.Sprintf("[extractRequestedSize] skipping PVC %s/%s listed only in the %s annotation: %v", pvc.Namespace, pvc.Name, consts.PodExtraPVCsAnnotation, err))
+			log.Warn(fmt.Sprintf("skipping PVC %s/%s listed only in the %s annotation: %v", pvc.Namespace, pvc.Name, consts.PodExtraPVCsAnnotation, err))
 			dropped = append(dropped, name)
 			continue
 		}

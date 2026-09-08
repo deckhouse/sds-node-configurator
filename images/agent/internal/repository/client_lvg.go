@@ -25,8 +25,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/conditions"
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 )
 
@@ -78,7 +78,7 @@ func (lvgCl *LVGClient) UpdateLVGConditionIfNeeded(
 	status v1.ConditionStatus,
 	conType, reason, message string,
 ) error {
-	lvgCl.log.Debug(fmt.Sprintf("[UpdateLVGConditionIfNeeded] set the condition type %s status %s reason %s message %s on the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
+	lvgCl.log.Named("UpdateLVGConditionIfNeeded").Debug(fmt.Sprintf("set the condition type %s status %s reason %s message %s on the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
 
 	// Callers pass raw error text, including the output of failed LVM commands,
 	// while the schema caps the message at 32768. Over the cap the API server
@@ -115,12 +115,14 @@ func (lvgCl *LVGClient) DeleteLVMVolumeGroup(
 	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
 ) error {
-	lvgCl.log.Debug(fmt.Sprintf(`[DeleteLVMVolumeGroup] Node "%s" does not belong to VG "%s". It will be removed from LVM resource, name "%s"'`, lvgCl.currentNodeName, lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
+	log := lvgCl.log.Named("DeleteLVMVolumeGroup")
+
+	log.Debug(fmt.Sprintf("node \"%s\" does not belong to VG \"%s\". It will be removed from LVM resource, name \"%s\"'", lvgCl.currentNodeName, lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 	for i, node := range lvg.Status.Nodes {
 		if node.Name == lvgCl.currentNodeName {
 			// delete node
 			lvg.Status.Nodes = append(lvg.Status.Nodes[:i], lvg.Status.Nodes[i+1:]...)
-			lvgCl.log.Info(fmt.Sprintf(`[DeleteLVMVolumeGroup] deleted node "%s" from LVMVolumeGroup "%s"`, node.Name, lvg.Name))
+			log.Info(fmt.Sprintf("deleted node \"%s\" from LVMVolumeGroup \"%s\"", node.Name, lvg.Name))
 		}
 	}
 
@@ -134,7 +136,7 @@ func (lvgCl *LVGClient) DeleteLVMVolumeGroup(
 			lvgCl.metrics.APIMethodsErrors(lvgCl.controllerName, "delete").Inc()
 			return err
 		}
-		lvgCl.log.Info(fmt.Sprintf("[DeleteLVMVolumeGroup] the LVMVolumeGroup %s deleted", lvg.Name))
+		log.Info(fmt.Sprintf("the LVMVolumeGroup %s deleted", lvg.Name))
 	}
 
 	return nil

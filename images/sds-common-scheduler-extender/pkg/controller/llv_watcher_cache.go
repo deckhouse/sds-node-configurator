@@ -28,9 +28,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 )
 
 const (
@@ -46,7 +46,9 @@ func RunLLVWatcherCacheController(
 	log logger.Logger,
 	schedulerCache *cache.Cache,
 ) error {
-	log.Info("[RunLLVWatcherCacheController] starts the work")
+	log = log.Named("RunLLVWatcherCacheController")
+
+	log.Info("starts the work")
 
 	c, err := controller.New(LLVWatcherCacheCtrlName, mgr, controller.Options{
 		Reconciler: &llvReconciler{
@@ -55,7 +57,7 @@ func RunLLVWatcherCacheController(
 		},
 	})
 	if err != nil {
-		log.Error(err, "[RunLLVWatcherCacheController] unable to create controller")
+		log.Error("unable to create controller", logger.Err(err))
 		return err
 	}
 
@@ -88,11 +90,11 @@ func RunLLVWatcherCacheController(
 		},
 	))
 	if err != nil {
-		log.Error(err, "[RunLLVWatcherCacheController] unable to controller Watch")
+		log.Error("unable to controller Watch", logger.Err(err))
 		return err
 	}
 
-	log.Info("[RunLLVWatcherCacheController] controller started successfully")
+	log.Info("controller started successfully")
 	return nil
 }
 
@@ -102,7 +104,7 @@ type llvReconciler struct {
 }
 
 func (r *llvReconciler) Reconcile(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
-	r.log.Debug(fmt.Sprintf("[llvReconciler] reconciling LLV %s, removing reservation", req.Name))
+	r.log.Named("llvReconciler").Debug(fmt.Sprintf("reconciling LLV %s, removing reservation", req.Name))
 	r.cache.RemoveReservation(req.Name)
 	return reconcile.Result{}, nil
 }

@@ -29,9 +29,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/scheduler"
 )
 
@@ -47,7 +47,9 @@ func RunLVGWatcherCacheController(
 	log logger.Logger,
 	schedulerCache *cache.Cache,
 ) error {
-	log.Info("[RunLVGWatcherCacheController] starts the work")
+	log = log.Named("RunLVGWatcherCacheController")
+
+	log.Info("starts the work")
 
 	c, err := controller.New(LVGWatcherCacheCtrlName, mgr, controller.Options{
 		Reconciler: &lvgReconciler{
@@ -57,7 +59,7 @@ func RunLVGWatcherCacheController(
 		},
 	})
 	if err != nil {
-		log.Error(err, "[RunLVGWatcherCacheController] unable to create controller")
+		log.Error("unable to create controller", logger.Err(err))
 		return err
 	}
 
@@ -76,11 +78,11 @@ func RunLVGWatcherCacheController(
 		},
 	))
 	if err != nil {
-		log.Error(err, "[RunLVGWatcherCacheController] unable to controller Watch")
+		log.Error("unable to controller Watch", logger.Err(err))
 		return err
 	}
 
-	log.Info("[RunLVGWatcherCacheController] controller started successfully")
+	log.Info("controller started successfully")
 	return nil
 }
 
@@ -91,22 +93,24 @@ type lvgReconciler struct {
 }
 
 func (r *lvgReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	r.log.Debug(fmt.Sprintf("[lvgReconciler] reconciling LVG %s, recalibrating unaccounted space", req.Name))
+	log := r.log.Named("lvgReconciler")
+
+	log.Debug(fmt.Sprintf("reconciling LVG %s, recalibrating unaccounted space", req.Name))
 
 	lvg := &snc.LVMVolumeGroup{}
 	if err := r.cl.Get(ctx, req.NamespacedName, lvg); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			r.log.Debug(fmt.Sprintf("[lvgReconciler] LVG %s not found (deleted), skipping", req.Name))
+			log.Debug(fmt.Sprintf("LVG %s not found (deleted), skipping", req.Name))
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, fmt.Errorf("unable to get LVG %s: %w", req.Name, err)
 	}
 
 	if err := scheduler.CalibrateAllPoolsForLVG(ctx, r.cl, r.cache, lvg); err != nil {
-		r.log.Error(err, fmt.Sprintf("[lvgReconciler] failed to calibrate LVG %s", req.Name))
+		log.Error(fmt.Sprintf("failed to calibrate LVG %s", req.Name), logger.Err(err))
 		return reconcile.Result{}, err
 	}
 
-	r.log.Debug(fmt.Sprintf("[lvgReconciler] successfully calibrated unaccounted space for LVG %s", req.Name))
+	log.Debug(fmt.Sprintf("successfully calibrated unaccounted space for LVG %s", req.Name))
 	return reconcile.Result{}, nil
 }

@@ -22,9 +22,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/sirupsen/logrus"
-	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
-
+	"github.com/deckhouse/sds-common-lib/logger"
+	"github.com/deckhouse/sds-common-lib/logger/kwhlogger"
 	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/webhooks/handlers"
 )
@@ -58,13 +57,19 @@ const (
 )
 
 func main() {
-	logrusLogEntry := logrus.NewEntry(logrus.New())
-	logrusLogEntry.Logger.SetLevel(logrus.DebugLevel)
-	logger := kwhlogrus.NewLogrus(logrusLogEntry)
+	// LOG_LEVEL arrives as a number 0..4 from lib-helm, the same value the controller
+	// container in this pod reads. This webhook used to ignore it and log at Debug
+	// whatever the module setting said.
+	log, err := logger.NewLoggerFromEnv(logger.InfoLevel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "unable to create the logger: %s\n", err)
+		os.Exit(1)
+	}
+	kwhLog := kwhlogger.New(log)
 
 	cfg := initFlags()
 
-	llvsValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.LLVSValidate, llvsValidatorID, &cn.LVMLogicalVolumeSnapshot{}, logger)
+	llvsValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.LLVSValidate, llvsValidatorID, &cn.LVMLogicalVolumeSnapshot{}, kwhLog)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating llvsValidatingWebhookHandler: %s", err)
 		os.Exit(1)
@@ -74,7 +79,7 @@ func main() {
 	mux.Handle("/llvs-validate", llvsValidatingWebhookHandler)
 	mux.HandleFunc("/healthz", httpHandlerHealthz)
 
-	logger.Infof("Listening on %s", port)
+	log.Info("listening", "address", port)
 	err = http.ListenAndServeTLS(port, cfg.certFile, cfg.keyFile, mux)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error serving webhook: %s", err)

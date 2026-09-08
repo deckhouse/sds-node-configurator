@@ -27,9 +27,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/tracing"
 )
 
 const (
@@ -50,40 +51,42 @@ type scheduler struct {
 
 func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get logger with trace ID from request context
-	requestLog := logger.WithTraceIDLogger(r.Context(), s.log)
+	// Named once per request: Named allocates before the level is checked, and this
+	// handler logs on every route it dispatches.
+	requestLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("ServeHTTP")
 
 	switch r.URL.Path {
 	case "/scheduler/filter":
 		s.filterRequestCount++
-		requestLog.Debug("[ServeHTTP] filter route starts handling the request")
+		requestLog.Debug("filter route starts handling the request")
 		s.filter(w, r)
-		requestLog.Debug("[ServeHTTP] filter route ends handling the request")
+		requestLog.Debug("filter route ends handling the request")
 	case "/scheduler/prioritize":
 		s.prioritizeRequestCount++
-		requestLog.Debug("[ServeHTTP] prioritize route starts handling the request")
+		requestLog.Debug("prioritize route starts handling the request")
 		s.prioritize(w, r)
-		requestLog.Debug("[ServeHTTP] prioritize route ends handling the request")
+		requestLog.Debug("prioritize route ends handling the request")
 	case "/v1/lvg/filter-and-score":
 		s.filterAndScoreRequestCount++
-		requestLog.Debug("[ServeHTTP] filter-and-score route starts handling the request")
+		requestLog.Debug("filter-and-score route starts handling the request")
 		s.filterAndScore(w, r)
-		requestLog.Debug("[ServeHTTP] filter-and-score route ends handling the request")
+		requestLog.Debug("filter-and-score route ends handling the request")
 	case "/v1/lvg/narrow-reservation":
-		requestLog.Debug("[ServeHTTP] narrow-reservation route starts handling the request")
+		requestLog.Debug("narrow-reservation route starts handling the request")
 		s.narrowReservation(w, r)
-		requestLog.Debug("[ServeHTTP] narrow-reservation route ends handling the request")
+		requestLog.Debug("narrow-reservation route ends handling the request")
 	case "/status":
-		requestLog.Debug("[ServeHTTP] status route starts handling the request")
+		requestLog.Debug("status route starts handling the request")
 		status(w, r)
-		requestLog.Debug("[ServeHTTP] status route ends handling the request")
+		requestLog.Debug("status route ends handling the request")
 	case "/cache":
-		requestLog.Debug("[ServeHTTP] cache route starts handling the request")
+		requestLog.Debug("cache route starts handling the request")
 		s.getCache(w, r)
-		requestLog.Debug("[ServeHTTP] cache route ends handling the request")
+		requestLog.Debug("cache route ends handling the request")
 	case "/stat":
-		requestLog.Debug("[ServeHTTP] stat route starts handling the request")
+		requestLog.Debug("stat route starts handling the request")
 		s.getCacheStat(w, r)
-		requestLog.Debug("[ServeHTTP] stat route ends handling the request")
+		requestLog.Debug("stat route ends handling the request")
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}
@@ -109,7 +112,7 @@ func getTargetProvisioners(log logger.Logger) []string {
 
 	if len(result) == 0 {
 		defaultProvisioners := []string{consts.SdsLocalVolumeProvisioner, consts.SdsReplicatedVolumeProvisioner}
-		log.Warning(fmt.Sprintf("TARGET_PROVISIONERS environment variable is set but empty after parsing, using default provisioners: %v", defaultProvisioners))
+		log.Warn(fmt.Sprintf("TARGET_PROVISIONERS environment variable is set but empty after parsing, using default provisioners: %v", defaultProvisioners))
 		return defaultProvisioners
 	}
 
@@ -139,7 +142,9 @@ func status(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *scheduler) getCache(w http.ResponseWriter, r *http.Request) {
-	requestLog := logger.WithTraceIDLogger(r.Context(), s.log)
+	// Named once per request: Named allocates before the level is checked, and this
+	// handler logs on every route it dispatches.
+	requestLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("ServeHTTP")
 	w.WriteHeader(http.StatusOK)
 
 	// Print pools
@@ -147,7 +152,7 @@ func (s *scheduler) getCache(w http.ResponseWriter, r *http.Request) {
 	for key, reservedSize := range pools {
 		line := fmt.Sprintf("Pool: %s, reserved: %s\n", key.String(), resource.NewQuantity(reservedSize, resource.BinarySI).String())
 		if _, err := w.Write([]byte(line)); err != nil {
-			requestLog.Error(err, "error writing pool info")
+			requestLog.Error("error writing pool info", logger.Err(err))
 			return
 		}
 	}
@@ -166,14 +171,16 @@ func (s *scheduler) getCache(w http.ResponseWriter, r *http.Request) {
 		}
 		line += strings.Join(poolStrs, ", ") + "]\n"
 		if _, err := w.Write([]byte(line)); err != nil {
-			requestLog.Error(err, "error writing reservation info")
+			requestLog.Error("error writing reservation info", logger.Err(err))
 			return
 		}
 	}
 }
 
 func (s *scheduler) getCacheStat(w http.ResponseWriter, r *http.Request) {
-	requestLog := logger.WithTraceIDLogger(r.Context(), s.log)
+	// Named once per request: Named allocates before the level is checked, and this
+	// handler logs on every route it dispatches.
+	requestLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("ServeHTTP")
 	w.WriteHeader(http.StatusOK)
 
 	pools := s.cache.GetAllPools()
@@ -207,6 +214,6 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := w.Write([]byte(sb.String())); err != nil {
-		requestLog.Error(err, "error write response for cache stat")
+		requestLog.Error("error write response for cache stat", logger.Err(err))
 	}
 }

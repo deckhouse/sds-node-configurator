@@ -10,6 +10,7 @@ spec:
   podMetricsEndpoints:
   - port: https-metrics
     scheme: https
+    path: /metrics
     bearerTokenSecret:
       name: "prometheus-token"
       key: "token"

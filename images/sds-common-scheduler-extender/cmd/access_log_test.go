@@ -17,28 +17,27 @@ limitations under the License.
 package main
 
 import (
-	"net"
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
-	"time"
 
-	"github.com/go-logr/logr"
-	"github.com/go-logr/zapr"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
-
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
-func getInt64(t *testing.T, m map[string]interface{}, key string) int64 {
+func getFloat64(t *testing.T, m map[string]interface{}, key string) float64 {
 	t.Helper()
-	i, ok := m[key].(int64)
+	// JSON has one number type, so every numeric attribute comes back as a float64
+	// regardless of what was passed to the logger.
+	f, ok := m[key].(float64)
 	if !ok {
-		t.Errorf(`i, ok := m[%q].(int64); !ok`, key)
+		t.Errorf(`f, ok := m[%q].(float64); !ok`, key)
 	}
-	return i
+	return f
 }
+
 func getString(t *testing.T, m map[string]interface{}, key string) string {
 	t.Helper()
 	s, ok := m[key].(string)
@@ -48,87 +47,48 @@ func getString(t *testing.T, m map[string]interface{}, key string) string {
 	return s
 }
 
-// testLoggerWrapper wraps logger.Logger and overrides Info to use direct Info
-type testLoggerWrapper struct {
-	logger.Logger
-	baseLogr logr.Logger
-}
-
-// Info overrides the default Info to use direct Info instead of V(2).Info
-func (t *testLoggerWrapper) Info(message string, keysAndValues ...interface{}) {
-	t.baseLogr.WithValues("level", "INFO").Info(message, keysAndValues...)
-}
-
 func TestAccessLogHandler(t *testing.T) {
-	obs, logs := observer.New(zap.InfoLevel)
-	zapLogger := zap.New(obs)
-	logrLogger := zapr.NewLogger(zapLogger)
-	baseLogger := logger.NewLoggerWrap(logrLogger)
-
-	// Create a wrapper that overrides Info to use direct Info
-	testLogWrapper := &testLoggerWrapper{
-		Logger:   baseLogger,
-		baseLogr: logrLogger,
+	var out bytes.Buffer
+	log, err := logger.NewLoggerToWriter(&out, logger.InfoLevel)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	mux := http.NewServeMux()
-
-	// Create a custom handler that uses our test logger
-	customHandler := func(w http.ResponseWriter, r *http.Request) {
-		startTime := time.Now()
-		accessLogRW := &accessLogResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-		mux.ServeHTTP(accessLogRW, r)
-
-		fields := []interface{}{
-			"response_time", time.Since(startTime).Seconds(),
-			"protocol", r.Proto,
-			"http_status_code", accessLogRW.statusCode,
-			"http_method", r.Method,
-			"url", r.RequestURI,
-			"http_host", r.Host,
-			"request_size", r.ContentLength,
-			"response_size", accessLogRW.size,
-		}
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err == nil {
-			fields = append(fields, "remote_ipaddr", ip)
-		}
-		ua := r.Header.Get("User-Agent")
-		if len(ua) > 0 {
-			fields = append(fields, "http_user_agent", ua)
-		}
-		testLogWrapper.Info("[accessLogHandler] access", fields...)
-	}
 	mux.HandleFunc("/hello", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		// w.Write([]byte("hello"))
-		_, err := w.Write([]byte("hello"))
-		if err != nil {
-			t.Fatal(err)
+		if _, err := w.Write([]byte("hello")); err != nil {
+			t.Error(err)
 		}
 	})
-	serv := httptest.NewServer(http.HandlerFunc(customHandler))
+
+	serv := httptest.NewServer(accessLogHandler(log, mux))
 	defer serv.Close()
 
 	cli := serv.Client()
-	_, err := cli.Get(serv.URL + "/hello")
-	if err != nil {
+	if _, err = cli.Get(serv.URL + "/hello"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = cli.Get(serv.URL + "/notfound")
-	if err != nil {
+	if _, err = cli.Get(serv.URL + "/notfound"); err != nil {
 		t.Fatal(err)
 	}
 
-	if logs.Len() != 2 {
-		t.Fatal(`len(accessLogs) != 2`)
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf(`len(accessLogs) != 2, got %d`, len(lines))
 	}
 
-	helloLog := logs.All()[0].ContextMap()
-	notfoundLog := logs.All()[1].ContextMap()
+	records := make([]map[string]interface{}, len(lines))
+	for i, line := range lines {
+		if err = json.Unmarshal([]byte(line), &records[i]); err != nil {
+			t.Fatalf("record %d is not JSON: %v", i, err)
+		}
+	}
 
-	if getInt64(t, helloLog, "http_status_code") != http.StatusOK {
-		t.Error(`getInt(t, helloLog, "http_status_code") != http.StatusOK`)
+	helloLog, notfoundLog := records[0], records[1]
+
+	if getFloat64(t, helloLog, "http_status_code") != http.StatusOK {
+		t.Error(`getFloat64(t, helloLog, "http_status_code") != http.StatusOK`)
 	}
 	if getString(t, helloLog, "http_method") != "GET" {
 		t.Error(`getString(t, helloLog, "http_method") != "GET"`)
@@ -139,7 +99,10 @@ func TestAccessLogHandler(t *testing.T) {
 	if getString(t, notfoundLog, "url") != "/notfound" {
 		t.Error(`getString(t, notfoundLog, "url") != "/notfound"`)
 	}
-	if getInt64(t, helloLog, "response_size") != 5 {
-		t.Error(`getInt(t, helloLog, "response_size") != helloLength`)
+	if getFloat64(t, helloLog, "response_size") != 5 {
+		t.Error(`getFloat64(t, helloLog, "response_size") != helloLength`)
+	}
+	if getString(t, helloLog, "traceid") == "" {
+		t.Error(`getString(t, helloLog, "traceid") == ""`)
 	}
 }

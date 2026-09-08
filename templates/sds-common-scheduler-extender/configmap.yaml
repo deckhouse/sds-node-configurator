@@ -10,14 +10,4 @@ data:
     listen: ":8099"
     health-probe-bind-address: ":8081"
     default-divisor: 1
-{{- if eq .Values.sdsNodeConfigurator.logLevel "ERROR" }}
-    log-level: "0"
-{{- else if eq .Values.sdsNodeConfigurator.logLevel "WARN" }}
-    log-level: "1"
-{{- else if eq .Values.sdsNodeConfigurator.logLevel "INFO" }}
-    log-level: "2"
-{{- else if eq .Values.sdsNodeConfigurator.logLevel "DEBUG" }}
-    log-level: "3"
-{{- else if eq .Values.sdsNodeConfigurator.logLevel "TRACE" }}
-    log-level: "4"
-{{- end }}
+    log-level: {{ include "helm_lib_module_controller_log_level" (list . "sdsNodeConfigurator") | quote }}

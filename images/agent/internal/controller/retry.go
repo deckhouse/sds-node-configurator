@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 // DiscoveryPassName labels the retry chain in the log. The pass is what is
@@ -131,12 +131,14 @@ func startRetry(
 	reconcile func(context.Context) (Result, error),
 	res Result,
 ) {
+	log = log.Named("discoveryRetry")
+
 	if res.RequeueAfter <= 0 {
 		return
 	}
 
 	if !gate.admit(res) {
-		log.Debug(fmt.Sprintf("[discoveryRetry] %s already has a retry running, holding this request for it", name))
+		log.Named("discoveryRetry").Debug(fmt.Sprintf("%s already has a retry running, holding this request for it", name))
 		return
 	}
 
@@ -149,7 +151,7 @@ func startRetry(
 				return
 			}
 
-			log.Debug(fmt.Sprintf("[discoveryRetry] %s was asked to come back while its chain was ending; going round again in %s", name, next.RequeueAfter.String()))
+			log.Debug(fmt.Sprintf("%s was asked to come back while its chain was ending; going round again in %s", name, next.RequeueAfter.String()))
 			res = next
 		}
 	}()
@@ -249,24 +251,26 @@ func retryReconcile(
 	reconcile func(context.Context) (Result, error),
 	res Result,
 ) {
+	log = log.Named("discoveryRetry")
+
 	for res.RequeueAfter > 0 {
-		log.Warning(fmt.Sprintf("[discoveryRetry] %s reconcile needs a retry in %s", name, res.RequeueAfter.String()))
+		log.Warn(fmt.Sprintf("%s reconcile needs a retry in %s", name, res.RequeueAfter.String()))
 
 		select {
 		case <-ctx.Done():
-			log.Info(fmt.Sprintf("[discoveryRetry] %s retry stopped before its next attempt: %v", name, ctx.Err()))
+			log.Info(fmt.Sprintf("%s retry stopped before its next attempt: %v", name, ctx.Err()))
 			return
 		case <-time.After(res.RequeueAfter):
 		}
 
 		next, err := reconcile(ctx)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[discoveryRetry] an error occurred while retrying %s reconcile, giving the retry up", name))
+			log.Error(fmt.Sprintf("an error occurred while retrying %s reconcile, giving the retry up", name), logger.Err(err))
 			return
 		}
 
 		res = next
 	}
 
-	log.Info(fmt.Sprintf("[discoveryRetry] successfully reconciled %s after a retry", name))
+	log.Info(fmt.Sprintf("successfully reconciled %s after a retry", name))
 }

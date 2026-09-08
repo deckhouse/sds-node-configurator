@@ -21,13 +21,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-logr/logr/funcr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 )
 
 // orphanedDMDevices reproduces what an e2e node looks like after a spec detached
@@ -261,9 +260,13 @@ func deviceNames(devices []internal.Device) []string {
 // whether the code ran.
 func capturingDiscoverer(lines *[]string) *Discoverer {
 	d := setupDiscoverer()
-	d.log = logger.NewLoggerWrap(funcr.New(func(_, args string) {
-		*lines = append(*lines, args)
-	}, funcr.Options{Verbosity: 10}))
+	// A writer that keeps each record, so the assertions below can look at which
+	// level a line went to and not only at whether the code ran. funcr did this
+	// before; the shared logger takes an io.Writer instead.
+	d.log, _ = logger.NewLoggerToWriter(writerFunc(func(p []byte) (int, error) {
+		*lines = append(*lines, string(p))
+		return len(p), nil
+	}), logger.TraceLevel)
 
 	return d
 }
@@ -272,6 +275,20 @@ func linesContaining(lines []string, needle string) []string {
 	var got []string
 	for _, line := range lines {
 		if strings.Contains(line, needle) {
+			got = append(got, line)
+		}
+	}
+
+	return got
+}
+
+// linesAtLevel is linesContaining restricted to one level. The records are JSON,
+// so the level is a field of its own, and so is the name of the function that
+// wrote the line -- filterDevices logs through a sub-logger named after itself.
+func linesAtLevel(lines []string, level, needle string) []string {
+	var got []string
+	for _, line := range linesContaining(lines, needle) {
+		if strings.Contains(line, `"level":"`+level+`"`) {
 			got = append(got, line)
 		}
 	}
@@ -293,7 +310,7 @@ func TestReportOrphanedParents_WarnsOnceWhileTheOrphanPersists(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	warnings := linesContaining(lines, "WARNING [filterDevices] device /dev/mapper")
+	warnings := linesAtLevel(lines, "warn", `"logger":"filterDevices","msg":"device /dev/mapper`)
 	assert.Len(t, warnings, 1, "the orphan is named when it appears, not on every pass")
 
 	repeats := linesContaining(lines, "still names the missing parent")
@@ -328,5 +345,10 @@ func TestReportOrphanedParents_SaysWhenTheOrphanIsGone(t *testing.T) {
 	// already said.
 	_, err = d.filterDevices(orphanedDMDevices())
 	require.NoError(t, err)
-	assert.Len(t, linesContaining(lines, "WARNING [filterDevices] device /dev/mapper"), 2)
+	assert.Len(t, linesAtLevel(lines, "warn", `"logger":"filterDevices","msg":"device /dev/mapper`), 2)
 }
+
+// writerFunc adapts a function to io.Writer.
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }

@@ -27,11 +27,11 @@ import (
 	"github.com/pilebones/go-udev/netlink"
 	"k8s.io/utils/clock"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/throttler"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/udev"
@@ -73,16 +73,20 @@ func (s *scanner) Run(
 	metrics *monitoring.Metrics,
 	discover func(context.Context) (controller.Result, error),
 ) error {
-	log.Info("[RunScanner] starts the work")
+	log = log.Named("HandleEvent")
+
+	log = log.Named("RunScanner")
+
+	log.Info("starts the work")
 
 	t := throttler.New(cfg.ThrottleInterval)
 
 	conn := new(netlink.UEventConn)
 	if err := conn.Connect(netlink.UdevEvent); err != nil {
-		log.Error(err, "[RunScanner] Failed to connect to Netlink")
+		log.Error("Failed to connect to Netlink", logger.Err(err))
 		return err
 	}
-	log.Debug("[RunScanner] system socket connection succeeded")
+	log.Debug("system socket connection succeeded")
 
 	errChan := make(chan error)
 	eventChan := make(chan netlink.UEvent)
@@ -100,20 +104,20 @@ func (s *scanner) Run(
 
 		crawlerDevs, crawlErr := s.collectCrawlerDevices(ctx, matcher)
 		if crawlErr != nil {
-			log.Error(crawlErr, "[RunScanner] Failed to collect crawler devices")
+			log.Error("Failed to collect crawler devices", logger.Err(crawlErr))
 		} else {
 			fillErr := s.deviceMap.FillFromCrawler(ctx, crawlerDevs)
 			if fillErr != nil {
-				log.Error(fillErr, "[RunScanner] Failed to fill device map")
+				log.Error("Failed to fill device map", logger.Err(fillErr))
 			}
 		}
 
-		log.Info(fmt.Sprintf("[RunScanner] initial crawl found %d block devices", s.deviceMap.Len()))
+		log.Info(fmt.Sprintf("initial crawl found %d block devices", s.deviceMap.Len()))
 	}
 
 	quit := conn.Monitor(eventChan, errChan, matcher)
 
-	log.Info("[RunScanner] start to listen to events")
+	log.Info("start to listen to events")
 
 	// duration debounces a burst of udev events: every event pushes the fill back
 	// by a second so the cache is built once the burst settles.
@@ -123,81 +127,83 @@ func (s *scanner) Run(
 		select {
 		case device, open := <-eventChan:
 			timer.Reset(duration)
-			log.Debug(fmt.Sprintf("[RunScanner] event triggered for device: %s", device.Env["DEVNAME"]))
-			log.Trace(fmt.Sprintf("[RunScanner] device from the event: %s", device.String()))
+			log.Debug(fmt.Sprintf("event triggered for device: %s", device.Env["DEVNAME"]))
+			log.Trace(fmt.Sprintf("device from the event: %s", device.String()))
 			if !open {
 				err := errors.New("EventChan has been closed when monitor udev event")
-				log.Error(err, "[RunScanner] unable to read from the event channel")
+				log.Error("unable to read from the event channel", logger.Err(err))
 				return err
 			}
 
 			if cfg.Features.NetlinkBlockDeviceDiscovery {
 				if err := s.deviceMap.HandleEvent(device.Action, device.Env); err != nil {
-					log.Error(err, fmt.Sprintf("[RunScanner] handle event error: %s", device.String()))
+					log.Error(fmt.Sprintf("handle event error: %s", device.String()), logger.Err(err))
 				}
-				log.Info(fmt.Sprintf("[HandleEvent] udev event action=%s devname=%s", device.Action.String(), device.Env["DEVNAME"]))
+				log.Info(fmt.Sprintf("udev event action=%s devname=%s", device.Action.String(), device.Env["DEVNAME"]))
 			}
 
 			t.Do(func() {
-				log.Info("[RunScanner] start to fill the cache")
+				log := log.Named("RunScanner")
+
+				log.Info("start to fill the cache")
 				err := s.fillTheCache(ctx, log, sdsCache, cfg, metrics)
 				if err != nil {
-					log.Error(err, "[RunScanner] unable to fill the cache. Retry")
+					log.Error("unable to fill the cache. Retry", logger.Err(err))
 					go func() {
 						eventChan <- device
 					}()
 					return
 				}
-				log.Info("[RunScanner] successfully filled the cache")
+				log.Info("successfully filled the cache")
 
 				err = s.runDiscoveryPass(ctx, log, discover)
 				if err != nil {
-					log.Error(err, "[RunScanner] unable to run controllers reconciliations")
+					log.Error("unable to run controllers reconciliations", logger.Err(err))
 				}
 
-				log.Info("[RunScanner] successfully ran the controllers reconcile funcs")
+				log.Info("successfully ran the controllers reconcile funcs")
 			})
 
 		case err := <-errChan:
-			log.Error(err, "[RunScanner] Monitor udev event error")
+			log.Error("Monitor udev event error", logger.Err(err))
 			quit = conn.Monitor(eventChan, errChan, matcher)
 			if cfg.Features.NetlinkBlockDeviceDiscovery {
 				devs, crErr := s.collectCrawlerDevices(ctx, matcher)
 				if crErr != nil {
-					log.Error(crErr, "[RunScanner] unable to collect crawler devices")
+					log.Error("unable to collect crawler devices", logger.Err(crErr))
 				} else {
 					fillErr := s.deviceMap.FillFromCrawler(ctx, devs)
 					if fillErr != nil {
-						log.Error(fillErr, "[RunScanner] Failed to fill device map")
+						log.Error("Failed to fill device map", logger.Err(fillErr))
 					}
 				}
-				log.Info(fmt.Sprintf("[RunScanner] re-crawl found %d block devices", s.deviceMap.Len()))
+				log.Info(fmt.Sprintf("re-crawl found %d block devices", s.deviceMap.Len()))
 			}
 			timer.Reset(duration)
 			continue
 
 		case <-quit:
 			err := errors.New("receive quit signal when monitor udev event")
-			log.Error(err, "[RunScanner] unable to read from the event channel")
+			log.Error("unable to read from the event channel", logger.Err(err))
 			return err
 
 		case <-timer.C:
-			log.Info("[RunScanner] events ran out. Start to fill the cache")
+			log.Info("events ran out. Start to fill the cache")
 			err := s.fillTheCache(ctx, log, sdsCache, cfg, metrics)
 			if err != nil {
-				log.Error(err, "[RunScanner] unable to fill the cache after all events passed. Retry")
+				log.Error("unable to fill the cache after all events passed. Retry", logger.Err(err))
 				timer.Reset(duration)
 				continue
 			}
 
-			log.Info("[RunScanner] successfully filled the cache after all events passed")
+			log.Info("successfully filled the cache after all events passed")
 
 			err = s.runDiscoveryPass(ctx, log, discover)
 			if err != nil {
-				log.Error(err, "[RunScanner] unable to run controllers reconciliations")
+				log.Error("unable to run controllers reconciliations", logger.Err(err))
 			}
 
-			log.Info("[RunScanner] successfully ran the controllers reconcile funcs")
+			log.Info("successfully ran the controllers reconcile funcs")
 		}
 	}
 }
@@ -207,23 +213,27 @@ func (s *scanner) runDiscoveryPass(
 	log logger.Logger,
 	discover func(context.Context) (controller.Result, error),
 ) error {
-	log.Info("[runDiscoveryPass] run the discovery pass")
+	log = log.Named("runDiscoveryPass")
+
+	log.Info("run the discovery pass")
 
 	// The requeue a discoverer asks for is not handled here and does not come back
 	// in the Result either. It belongs to controller.WithSingleRetryChain, which
 	// wraps this pass in main: the scanner is not the only caller that runs one, and
 	// a retry chain per caller is what lvg.maxUnnamedPVPasses cannot survive.
 	if _, err := discover(ctx); err != nil {
-		log.Error(err, "[runDiscoveryPass] an error occurred while running the discovery pass")
+		log.Error("an error occurred while running the discovery pass", logger.Err(err))
 		return err
 	}
 
-	log.Info("[runDiscoveryPass] the discovery pass successfully reconciled")
+	log.Info("the discovery pass successfully reconciled")
 
 	return nil
 }
 
 func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Config, metrics *monitoring.Metrics) error {
+	log = log.Named("fillTheCache")
+
 	// Before any LVM command, because it decides what they are allowed to see:
 	// internal.LVMGlobalFilter rejects /dev/loop* — a loop device on a hypervisor
 	// is a virtual machine's disk — and this is what exempts the ones the agent
@@ -236,28 +246,28 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	// cache fill over losetup, taking down block-device-backed Volume Groups that
 	// have nothing to do with loop devices.
 	if err := utils.RefreshOwnedLoops(ctx, log, s.commands, cfg.CmdDeadlineDuration); err != nil {
-		log.Warning(fmt.Sprintf("[fillTheCache] %v", err))
+		log.Warn(fmt.Sprintf("%v", err))
 	}
 
 	// the scan operations order is very important as it guarantees the consistent and reliable data from the node
 	realClock := clock.RealClock{}
 	now := time.Now()
 	lvs, lvsErr, err := s.scanLVs(ctx, log, cfg)
-	log.Trace(fmt.Sprintf("[fillTheCache] LVS command runs for: %s", realClock.Since(now).String()))
+	log.Trace(fmt.Sprintf("LVS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
 
 	now = time.Now()
 	vgs, vgsErr, err := s.scanVGs(ctx, log, cfg)
-	log.Trace(fmt.Sprintf("[fillTheCache] VGS command runs for: %s", realClock.Since(now).String()))
+	log.Trace(fmt.Sprintf("VGS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
 
 	now = time.Now()
 	pvs, pvsErr, err := s.scanPVs(ctx, log, cfg)
-	log.Trace(fmt.Sprintf("[fillTheCache] PVS command runs for: %s", realClock.Since(now).String()))
+	log.Trace(fmt.Sprintf("PVS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
 		return err
 	}
@@ -268,10 +278,10 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	// a VG we do not have: without it the cache stores a PV whose VG is unknown,
 	// FindVG returns nil, and the reconciler re-runs create on an existing VG.
 	if missingVGs := utils.PVsReferenceUnknownVG(vgs, pvs); missingVGs {
-		log.Info("[fillTheCache] a PV references a VG absent from the VG list, re-scanning VGs")
+		log.Info("a PV references a VG absent from the VG list, re-scanning VGs")
 		now = time.Now()
 		vgs, vgsErr, err = s.scanVGs(ctx, log, cfg)
-		log.Trace(fmt.Sprintf("[fillTheCache] VGS re-scan for late VG runs for: %s", realClock.Since(now).String()))
+		log.Trace(fmt.Sprintf("VGS re-scan for late VG runs for: %s", realClock.Since(now).String()))
 		if err != nil {
 			return err
 		}
@@ -283,10 +293,10 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	var scanDevErr error
 	if cfg.Features.NetlinkBlockDeviceDiscovery {
 		devices, devErr, scanDevErr = s.scanDevicesNetlink()
-		log.Trace(fmt.Sprintf("[fillTheCache] device scan runs for: %s", realClock.Since(now).String()))
+		log.Trace(fmt.Sprintf("device scan runs for: %s", realClock.Since(now).String()))
 	} else {
 		devices, devErr, scanDevErr = s.scanDevices(ctx, log, cfg)
-		log.Trace(fmt.Sprintf("[fillTheCache] LSBLK command runs for: %s", realClock.Since(now).String()))
+		log.Trace(fmt.Sprintf("LSBLK command runs for: %s", realClock.Since(now).String()))
 	}
 
 	if scanDevErr != nil {
@@ -307,22 +317,22 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	loopVerdicts := utils.ClassifyLoopVGs(ctx, log, s.commands, cfg.CmdDeadlineDuration, vgs, pvs)
 
 	if activated := utils.EnsureVGActivation(ctx, log, s.commands, metrics, vgs, lvs, loopVerdicts, cfg.CmdDeadlineDuration); activated {
-		log.Info("[fillTheCache] LVs were activated, re-scanning LVs and VGs")
+		log.Info("LVs were activated, re-scanning LVs and VGs")
 		now = time.Now()
 		lvs, lvsErr, err = s.scanLVs(ctx, log, cfg)
-		log.Trace(fmt.Sprintf("[fillTheCache] LVS re-scan runs for: %s", realClock.Since(now).String()))
+		log.Trace(fmt.Sprintf("LVS re-scan runs for: %s", realClock.Since(now).String()))
 		if err != nil {
 			return err
 		}
 		now = time.Now()
 		vgs, vgsErr, err = s.scanVGs(ctx, log, cfg)
-		log.Trace(fmt.Sprintf("[fillTheCache] VGS re-scan runs for: %s", realClock.Since(now).String()))
+		log.Trace(fmt.Sprintf("VGS re-scan runs for: %s", realClock.Since(now).String()))
 		if err != nil {
 			return err
 		}
 	}
 
-	log.Debug("[fillTheCache] successfully scanned entities. Starts to fill the cache")
+	log.Debug("successfully scanned entities. Starts to fill the cache")
 
 	// lvm.static bundled in /opt/deckhouse/sds/bin is built without udev
 	// integration and so reports PVs found on any block device it sees in
@@ -345,7 +355,7 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	beforePV := len(pvs)
 	pvs = utils.FilterForeignPVs(ctx, log, nil, pvs, cfg.CmdDeadlineDuration)
 	if dropped := beforePV - len(pvs); dropped > 0 {
-		log.Info(fmt.Sprintf("[fillTheCache] dropped %d foreign PV(s) backed by rbd/drbd/nbd devices", dropped))
+		log.Info(fmt.Sprintf("dropped %d foreign PV(s) backed by rbd/drbd/nbd devices", dropped))
 	}
 
 	// Also drop PVs of foreign, purely loop-backed VGs (nested LVM inside a
@@ -362,7 +372,7 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	beforeLoopPV := len(pvs)
 	pvs = utils.FilterForeignLoopPVs(log, pvs, loopVerdicts)
 	if dropped := beforeLoopPV - len(pvs); dropped > 0 {
-		log.Info(fmt.Sprintf("[fillTheCache] dropped %d PV(s) of unmanaged loop-backed VG(s)", dropped))
+		log.Info(fmt.Sprintf("dropped %d PV(s) of unmanaged loop-backed VG(s)", dropped))
 	}
 
 	if len(pvs) < beforePV {
@@ -371,7 +381,7 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 		beforeLV := len(lvs)
 		lvs = utils.FilterLVsByPresentVGs(lvs, vgs)
 		log.Info(fmt.Sprintf(
-			"[fillTheCache] cache pruned to local view: VGs %d -> %d, LVs %d -> %d",
+			"cache pruned to local view: VGs %d -> %d, LVs %d -> %d",
 			beforeVG, len(vgs), beforeLV, len(lvs),
 		))
 	}
@@ -380,14 +390,14 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	cache.StorePVs(pvs, pvsErr)
 	cache.StoreVGs(vgs, vgsErr)
 	cache.StoreLVs(lvs, lvsErr)
-	log.Debug("[fillTheCache] successfully filled the cache")
+	log.Debug("successfully filled the cache")
 	cache.PrintTheCache(log)
 
 	// Update LVM metrics only for VGs managed by LVMVolumeGroup resources
 	managedVGs := cache.GetManagedVGs()
 	if errs := metrics.UpdateLVMMetrics(vgs, lvs, managedVGs); len(errs) > 0 {
 		for _, err := range errs {
-			log.Warning(fmt.Sprintf("[fillTheCache] metrics update error: %v", err))
+			log.Warn(fmt.Sprintf("metrics update error: %v", err))
 		}
 	}
 
@@ -399,7 +409,7 @@ func (s *scanner) scanDevices(ctx context.Context, log logger.Logger, cfg config
 	defer cancel()
 	devices, cmdStr, stdErr, err := s.commands.GetBlockDevices(ctx)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[ScanDevices] unable to scan the devices, cmd: %s", cmdStr))
+		log.Named("ScanDevices").Error(fmt.Sprintf("unable to scan the devices, cmd: %s", cmdStr), logger.Err(err))
 		return nil, stdErr, err
 	}
 	return devices, stdErr, nil
@@ -423,7 +433,7 @@ func (s *scanner) scanPVs(ctx context.Context, log logger.Logger, cfg config.Con
 	defer cancel()
 	pvs, cmdStr, stdErr, err := s.commands.GetAllPVs(ctx)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[ScanPVs] unable to scan the PVs, cmd: %s", cmdStr))
+		log.Named("ScanPVs").Error(fmt.Sprintf("unable to scan the PVs, cmd: %s", cmdStr), logger.Err(err))
 		return nil, stdErr, err
 	}
 
@@ -435,7 +445,7 @@ func (s *scanner) scanVGs(ctx context.Context, log logger.Logger, cfg config.Con
 	defer cancel()
 	vgs, cmdStr, stdErr, err := s.commands.GetAllVGs(ctx)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[ScanVGs] unable to scan the VGs, cmd: %s", cmdStr))
+		log.Named("ScanVGs").Error(fmt.Sprintf("unable to scan the VGs, cmd: %s", cmdStr), logger.Err(err))
 		return nil, stdErr, err
 	}
 
@@ -447,7 +457,7 @@ func (s *scanner) scanLVs(ctx context.Context, log logger.Logger, cfg config.Con
 	defer cancel()
 	lvs, cmdStr, stdErr, err := s.commands.GetAllLVs(ctx)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[ScanLVs] unable to scan LVs, cmd: %s", cmdStr))
+		log.Named("ScanLVs").Error(fmt.Sprintf("unable to scan LVs, cmd: %s", cmdStr), logger.Err(err))
 		return nil, stdErr, err
 	}
 

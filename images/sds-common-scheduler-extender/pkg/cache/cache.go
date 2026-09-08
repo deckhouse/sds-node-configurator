@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 const (
@@ -136,12 +136,14 @@ func (c *Cache) HasReservation(id string) bool {
 // AddReservation adds a new reservation. If a reservation with the same ID already exists,
 // it is removed first (idempotent replace).
 func (c *Cache) AddReservation(id string, ttl time.Duration, size int64, poolKeys []StoragePoolKey) {
+	log := c.log.Named("AddReservation")
+
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
 	// Idempotent: remove old reservation if exists
 	if _, exists := c.reservations[id]; exists {
-		c.log.Debug(fmt.Sprintf("[AddReservation] reservation %s already exists, replacing", id))
+		log.Debug(fmt.Sprintf("reservation %s already exists, replacing", id))
 		c.removeReservation(id)
 	}
 
@@ -156,7 +158,7 @@ func (c *Cache) AddReservation(id string, ttl time.Duration, size int64, poolKey
 		pools:     poolSet,
 	}
 
-	c.log.Debug(fmt.Sprintf("[AddReservation] reservation %s added: size=%d, pools=%d, ttl=%s", id, size, len(poolSet), ttl))
+	log.Debug(fmt.Sprintf("reservation %s added: size=%d, pools=%d, ttl=%s", id, size, len(poolSet), ttl))
 }
 
 // RemoveReservation removes a reservation.
@@ -172,12 +174,14 @@ func (c *Cache) RemoveReservation(id string) {
 // (PVC watcher on selectedNode, prioritize final node list).
 // Returns false if the reservation was not found.
 func (c *Cache) NarrowReservation(id string, keepPools []StoragePoolKey, newTTL time.Duration) bool {
+	log := c.log.Named("NarrowReservation")
+
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
 	r, ok := c.reservations[id]
 	if !ok {
-		c.log.Debug(fmt.Sprintf("[NarrowReservation] reservation %s not found", id))
+		log.Debug(fmt.Sprintf("reservation %s not found", id))
 		return false
 	}
 
@@ -197,12 +201,12 @@ func (c *Cache) NarrowReservation(id string, keepPools []StoragePoolKey, newTTL 
 
 	r.expiresAt = time.Now().Add(newTTL)
 
-	c.log.Debug(fmt.Sprintf("[NarrowReservation] reservation %s narrowed: removed %d pools, remaining %d pools", id, removedCount, len(r.pools)))
+	log.Debug(fmt.Sprintf("reservation %s narrowed: removed %d pools, remaining %d pools", id, removedCount, len(r.pools)))
 
 	// If no pools remain, remove the reservation entirely
 	if len(r.pools) == 0 {
 		delete(c.reservations, id)
-		c.log.Debug(fmt.Sprintf("[NarrowReservation] reservation %s removed (no pools remaining)", id))
+		log.Debug(fmt.Sprintf("reservation %s removed (no pools remaining)", id))
 	}
 
 	return true
@@ -279,7 +283,7 @@ func (c *Cache) removeReservation(id string) {
 		return
 	}
 	delete(c.reservations, id)
-	c.log.Debug(fmt.Sprintf("[removeReservation] reservation %s removed", id))
+	c.log.Named("removeReservation").Debug(fmt.Sprintf("reservation %s removed", id))
 }
 
 // --- Background TTL cleanup ---
@@ -299,9 +303,10 @@ func (c *Cache) cleanupExpired() {
 	defer c.mtx.Unlock()
 
 	now := time.Now()
+	cleanupExpiredLog := c.log.Named("cleanupExpired")
 	for id, r := range c.reservations {
 		if now.After(r.expiresAt) {
-			c.log.Debug(fmt.Sprintf("[cleanupExpired] removing expired reservation %s", id))
+			cleanupExpiredLog.Debug(fmt.Sprintf("removing expired reservation %s", id))
 			delete(c.reservations, id)
 		}
 	}

@@ -22,13 +22,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/deckhouse/sds-node-configurator/images/controller/pkg/logger"
+	"github.com/deckhouse/sds-common-lib/logger"
+	"github.com/deckhouse/sds-common-lib/monitoring"
 )
 
 const (
 	ScanInterval                         = "SCAN_INTERVAL"
-	LogLevel                             = "LOG_LEVEL"
-	MetricsPort                          = "METRICS_PORT"
 	DefaultHealthProbeBindAddressEnvName = "HEALTH_PROBE_BIND_ADDRESS"
 	DefaultHealthProbeBindAddress        = ":8081"
 
@@ -40,7 +39,7 @@ const (
 
 type Options struct {
 	Loglevel                logger.Verbosity
-	MetricsPort             string
+	MetricsBindAddress      string
 	ScanInterval            time.Duration
 	NodeName                string
 	HealthProbeBindAddress  string
@@ -49,20 +48,24 @@ type Options struct {
 	LeaderElectionID        string
 }
 
+// DefaultMetricsBindAddress keeps the endpoint on loopback when the chart says
+// nothing: the kube-rbac-proxy of the same pod is what publishes it. The fleet-wide
+// fallback is the wildcard ":8080", which would both answer unauthenticated on the
+// pod IP and collide with the proxy, since the two carry the same port number.
+//
+// Exported so that a test asserts against the value this package actually uses
+// rather than against the library default it deliberately overrides.
+const DefaultMetricsBindAddress = "127.0.0.1:8080"
+
 func NewConfig() (*Options, error) {
 	var opts Options
 
-	loglevel := os.Getenv(LogLevel)
-	if loglevel == "" {
-		opts.Loglevel = logger.DebugLevel
-	} else {
-		opts.Loglevel = logger.Verbosity(loglevel)
-	}
+	opts.Loglevel = logger.VerbosityFromEnv(logger.InfoLevel)
 
-	opts.MetricsPort = os.Getenv(MetricsPort)
-	if opts.MetricsPort == "" {
-		opts.MetricsPort = ":8080"
-	}
+	// METRICS_BIND_ADDRESS, the name every module in the fleet reads, instead of the
+	// METRICS_PORT this one used to read: the value is an address and not a port, and
+	// the chart now sets it from the same place as everywhere else.
+	opts.MetricsBindAddress = monitoring.BindAddressFromEnvOr(DefaultMetricsBindAddress)
 
 	opts.HealthProbeBindAddress = os.Getenv(DefaultHealthProbeBindAddressEnvName)
 	if opts.HealthProbeBindAddress == "" {

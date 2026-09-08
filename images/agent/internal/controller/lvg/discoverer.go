@@ -34,11 +34,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/repository"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
@@ -222,7 +222,9 @@ func (d *Discoverer) Name() string {
 }
 
 func (d *Discoverer) Discover(ctx context.Context) (controller.Result, error) {
-	d.log.Info("[RunLVMVolumeGroupDiscoverController] Reconciler starts LVMVolumeGroup resources reconciliation")
+	log := d.log.Named("RunLVMVolumeGroupDiscoverController")
+
+	log.Info("reconciler starts LVMVolumeGroup resources reconciliation")
 	shouldRequeue := d.LVMVolumeGroupDiscoverReconcile(ctx)
 	if shouldRequeue {
 		// Not "an error occurred": the commonest reason to be here is a Physical
@@ -230,36 +232,38 @@ func (d *Discoverer) Discover(ctx context.Context) (controller.Result, error) {
 		// behaving normally and the state this whole retry exists for. Naming it an
 		// error sent whoever read the log looking for one — in exactly the scenario
 		// the requeue was added to make diagnosable.
-		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the reconciliation did not complete the node's description, retry in %s", d.cfg.VolumeGroupScanInterval.String()))
+		log.Warn(fmt.Sprintf("the reconciliation did not complete the node's description, retry in %s", d.cfg.VolumeGroupScanInterval.String()))
 		return controller.Result{
 			RequeueAfter: d.cfg.VolumeGroupScanInterval,
 		}, nil
 	}
-	d.log.Info("[RunLVMVolumeGroupDiscoverController] Reconciler successfully ended LVMVolumeGroup resources reconciliation")
+	log.Info("reconciler successfully ended LVMVolumeGroup resources reconciliation")
 	return controller.Result{}, nil
 }
 
 func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
+	log := d.log.Named("RunLVMVolumeGroupDiscoverController")
+
 	reconcileStart := time.Now()
-	d.log.Info("[RunLVMVolumeGroupDiscoverController] starts the reconciliation")
+	log.Info("starts the reconciliation")
 
 	currentLVMVGs, err := d.GetAPILVMVolumeGroups(ctx)
 	if err != nil {
-		d.log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to run GetAPILVMVolumeGroups")
+		d.log.Error("unable to run GetAPILVMVolumeGroups", logger.Err(err))
 		return true
 	}
 
 	if len(currentLVMVGs) == 0 {
-		d.log.Debug("[RunLVMVolumeGroupDiscoverController] no current LVMVolumeGroups found")
+		log.Debug("no current LVMVolumeGroups found")
 	}
 
 	blockDevices, err := d.bdCl.GetAPIBlockDevices(ctx, DiscovererName, nil)
 	if err != nil {
-		d.log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to GetAPIBlockDevices")
+		d.log.Error("unable to GetAPIBlockDevices", logger.Err(err))
 		for _, lvg := range currentLVMVGs {
 			err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, metav1.ConditionFalse, internal.TypeVGReady, "NoBlockDevices", fmt.Sprintf("unable to get block devices resources, err: %s", err.Error()))
 			if err != nil {
-				d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name))
+				log.Error(fmt.Sprintf("unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name), logger.Err(err))
 			}
 		}
 		return true
@@ -283,27 +287,27 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 	// there is no resource to look at. Checking only the resources would make a
 	// node whose sole storage is a file-backed VG unable to ever re-adopt it.
 	if len(blockDevices) == 0 && !anyLVGHasFileDevices(filteredLVGs) && !d.cacheHasManagedVG() {
-		d.log.Info("[RunLVMVolumeGroupDiscoverController] no BlockDevices, no file-backed LVMVolumeGroups and no managed VGs were found")
+		log.Info("no BlockDevices, no file-backed LVMVolumeGroups and no managed VGs were found")
 		return false
 	}
 
 	// Store managed VG names in cache for metrics filtering
 	d.sdsCache.StoreManagedVGs(maps.Keys(filteredLVGs))
 
-	d.log.Debug("[RunLVMVolumeGroupDiscoverController] tries to get LVMVolumeGroup candidates")
+	log.Debug("tries to get LVMVolumeGroup candidates")
 	candidates, err := d.GetLVMVolumeGroupCandidates(ctx, blockDevices)
 	if err != nil {
-		d.log.Error(err, "[RunLVMVolumeGroupDiscoverController] unable to run GetLVMVolumeGroupCandidates")
+		d.log.Error("unable to run GetLVMVolumeGroupCandidates", logger.Err(err))
 		for _, lvg := range filteredLVGs {
-			d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] turn LVMVolumeGroup %s to non operational. LVG struct: %+v ", lvg.Name, lvg))
+			log.Trace(fmt.Sprintf("turn LVMVolumeGroup %s to non operational. LVG struct: %+v ", lvg.Name, lvg))
 			err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, metav1.ConditionFalse, internal.TypeVGReady, "DataConfigurationFailed", fmt.Sprintf("unable to configure data, err: %s", err.Error()))
 			if err != nil {
-				d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name))
+				log.Error(fmt.Sprintf("unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name), logger.Err(err))
 			}
 		}
 		return true
 	}
-	d.log.Debug("[RunLVMVolumeGroupDiscoverController] successfully got LVMVolumeGroup candidates")
+	log.Debug("successfully got LVMVolumeGroup candidates")
 
 	// A Physical Volume with no BlockDevice to name it is, most of the time, this
 	// process reading its own write back too early rather than a device that has no
@@ -326,7 +330,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 	previousRefusals, previousUnnamedPVPasses := d.rememberedState()
 
 	if len(candidates) == 0 {
-		d.log.Debug("[RunLVMVolumeGroupDiscoverController] no candidates were found on the node")
+		log.Debug("no candidates were found on the node")
 	}
 
 	shouldRequeue := false
@@ -343,7 +347,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 	duplicateVGs := findDuplicateVGNames(allVGs)
 	if len(duplicateVGs) > 0 {
 		for name, uuids := range duplicateVGs {
-			d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] VG name %q is used by multiple VGs on the node (UUIDs: %s); LVMVolumeGroup resources referencing it will be marked NotReady until the duplicate is resolved", name, strings.Join(uuids, ", ")))
+			log.Warn(fmt.Sprintf("VG name %q is used by multiple VGs on the node (UUIDs: %s); LVMVolumeGroup resources referencing it will be marked NotReady until the duplicate is resolved", name, strings.Join(uuids, ", ")))
 		}
 
 		for _, lvg := range filteredLVGs {
@@ -352,7 +356,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 				continue
 			}
 			if updErr := d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, metav1.ConditionFalse, internal.TypeVGReady, internal.ReasonScanFailed, duplicateVGMessage(lvg.Spec.ActualVGNameOnTheNode, uuids)); updErr != nil {
-				d.log.Error(updErr, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add VGReady=False condition for duplicate VG name to the LVMVolumeGroup %s", lvg.Name))
+				log.Error(fmt.Sprintf("unable to add VGReady=False condition for duplicate VG name to the LVMVolumeGroup %s", lvg.Name), logger.Err(updErr))
 				shouldRequeue = true
 			}
 		}
@@ -365,7 +369,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 
 	candidates, err = d.ReconcileUnhealthyLVMVolumeGroups(ctx, candidates, filteredLVGs)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] an error has occurred while clearing the LVMVolumeGroups resources. Requeue the request in %s", d.cfg.VolumeGroupScanInterval.String()))
+		log.Error(fmt.Sprintf("an error has occurred while clearing the LVMVolumeGroups resources. Requeue the request in %s", d.cfg.VolumeGroupScanInterval.String()), logger.Err(err))
 		return true
 	}
 
@@ -385,6 +389,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 	// its BlockDevice drops out, and its count starts over if it ever comes back.
 	unnamedPVPassesThisPass := make(map[string]int, len(previousUnnamedPVPasses))
 
+	runLVMVolumeGroupDiscoverControllerLog := d.log.Named("RunLVMVolumeGroupDiscoverController")
 	for _, candidate := range candidates {
 		// A candidate whose file devices could not all be classified describes the
 		// node incompletely, and every use below turns it into a claim: an update
@@ -404,7 +409,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 		// unconditionally anyway, and charging a budget for a pass that never got as
 		// far as looking at the BlockDevices would be charging for the wrong thing.
 		if candidate.FileDeviceStateUnknown {
-			d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the file devices of VG %s could not all be classified this cycle; leaving the LVMVolumeGroup as it is and retrying in %s",
+			log.Warn(fmt.Sprintf("the file devices of VG %s could not all be classified this cycle; leaving the LVMVolumeGroup as it is and retrying in %s",
 				candidate.ActualVGNameOnTheNode, d.cfg.VolumeGroupScanInterval.String()))
 			shouldRequeue = true
 			continue
@@ -421,12 +426,12 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 		}
 
 		if lvg, exist := filteredLVGs[candidate.ActualVGNameOnTheNode]; exist {
-			d.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is already exist. Tries to update it", lvg.Name))
-			d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] candidate: %+v", candidate))
-			d.log.Trace(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] lvg: %+v", lvg))
+			log.Debug(fmt.Sprintf("the LVMVolumeGroup %s is already exist. Tries to update it", lvg.Name))
+			log.Trace(fmt.Sprintf("candidate: %+v", candidate))
+			log.Trace(fmt.Sprintf("lvg: %+v", lvg))
 
 			if !hasLVMVolumeGroupDiff(d.log, lvg, candidate) {
-				d.log.Debug(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] no data to update for LVMVolumeGroup, name: "%s"`, lvg.Name))
+				log.Debug(fmt.Sprintf("no data to update for LVMVolumeGroup, name: \"%s\"", lvg.Name))
 				// The published verdict, not an unconditional True: a candidate with an
 				// unnamed PV reaches this branch on every pass once its status has settled,
 				// and a True here would undo the caveat the previous pass wrote — two
@@ -436,21 +441,21 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 				readyStatus, readyReason, readyMessage := vgReadyForPublishedStatus(candidate)
 				err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, readyStatus, internal.TypeVGReady, readyReason, readyMessage)
 				if err != nil {
-					d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name))
+					log.Error(fmt.Sprintf("unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name), logger.Err(err))
 					shouldRequeue = true
 				}
 				continue
 			}
 
-			d.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s should be updated", lvg.Name))
+			log.Debug(fmt.Sprintf("the LVMVolumeGroup %s should be updated", lvg.Name))
 			if err = d.UpdateLVMVolumeGroupByCandidate(ctx, &lvg, candidate); err != nil {
-				d.log.Error(err, fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] unable to update LVMVolumeGroup, name: "%s". Requeue the request in %s`,
-					lvg.Name, d.cfg.VolumeGroupScanInterval.String()))
+				log.Error(fmt.Sprintf("unable to update LVMVolumeGroup, name: \"%s\". Requeue the request in %s",
+					lvg.Name, d.cfg.VolumeGroupScanInterval.String()), logger.Err(err))
 				shouldRequeue = true
 				continue
 			}
 
-			d.log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] updated LVMVolumeGroup, name: "%s"`, lvg.Name))
+			log.Info(fmt.Sprintf("updated LVMVolumeGroup, name: \"%s\"", lvg.Name))
 		} else {
 			// A file-backed Volume Group cannot be imported under any name but the
 			// one in its backing files. They are named after the owning
@@ -464,10 +469,10 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 			// not a usable resource name (GetLVMVolumeGroupCandidates already said
 			// so), or the name it holds is taken by another LVMVolumeGroup.
 			refuseFileBackedImport := func(why string) {
-				d.log.Error(fmt.Errorf("unable to import a file-backed Volume Group"), fmt.Sprintf(
-					"[RunLVMVolumeGroupDiscoverController] VG %s is backed by file devices whose names encode the owning LVMVolumeGroup, so it cannot be imported under a generated name: %s. "+
+				runLVMVolumeGroupDiscoverControllerLog.Error(fmt.Sprintf(
+					"VG %s is backed by file devices whose names encode the owning LVMVolumeGroup, so it cannot be imported under a generated name: %s. "+
 						"Retag the VG with a usable %s value, or free that name",
-					candidate.ActualVGNameOnTheNode, why, internal.LVMVolumeGroupTag))
+					candidate.ActualVGNameOnTheNode, why, internal.LVMVolumeGroupTag), logger.Err(fmt.Errorf("unable to import a file-backed Volume Group")))
 				shouldRequeue = true
 			}
 
@@ -516,7 +521,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 				why := importRefusalReason(candidate, taken)
 				refusedThisPass[candidate.ActualVGNameOnTheNode] = why
 				if previousRefusals[candidate.ActualVGNameOnTheNode] == why {
-					d.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] still not importing VG %s: %s",
+					log.Debug(fmt.Sprintf("still not importing VG %s: %s",
 						candidate.ActualVGNameOnTheNode, why))
 				} else {
 					// Counted on the same transition the Warning is said on. A tag
@@ -526,16 +531,16 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 					// it stands — and it is the alertable half of this pair, so it
 					// has to mean "a refusal happened".
 					d.metrics.LVMVolumeGroupImportRefusedTotal(candidate.ActualVGNameOnTheNode, candidate.LVMVGName).Inc()
-					d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] not importing VG %s: %s",
+					log.Warn(fmt.Sprintf("not importing VG %s: %s",
 						candidate.ActualVGNameOnTheNode, why))
 				}
 				continue
 			}
 
-			d.log.Debug(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the LVMVolumeGroup %s is not yet created. Create it", candidate.LVMVGName))
+			log.Debug(fmt.Sprintf("the LVMVolumeGroup %s is not yet created. Create it", candidate.LVMVGName))
 			createdLvg, created, err := d.CreateLVMVolumeGroupByCandidate(ctx, candidate)
 			if err != nil {
-				d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to CreateLVMVolumeGroupByCandidate %s. Requeue the request in %s", candidate.LVMVGName, d.cfg.VolumeGroupScanInterval.String()))
+				log.Error(fmt.Sprintf("unable to CreateLVMVolumeGroupByCandidate %s. Requeue the request in %s", candidate.LVMVGName, d.cfg.VolumeGroupScanInterval.String()), logger.Err(err))
 				shouldRequeue = true
 				continue
 			}
@@ -559,7 +564,7 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 			// re-import of a file-backed VG makes it a normal path.
 			err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, createdLvg, metav1.ConditionTrue, internal.TypeVGConfigurationApplied, internal.ReasonApplied, "all configuration has been applied")
 			if err != nil {
-				d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, createdLvg.Name))
+				log.Error(fmt.Sprintf("unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, createdLvg.Name), logger.Err(err))
 				shouldRequeue = true
 				continue
 			}
@@ -567,32 +572,32 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 			readyStatus, readyReason, readyMessage := vgReadyForPublishedStatus(candidate)
 			err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, createdLvg, readyStatus, internal.TypeVGReady, readyReason, readyMessage)
 			if err != nil {
-				d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, createdLvg.Name))
+				log.Error(fmt.Sprintf("unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, createdLvg.Name), logger.Err(err))
 				shouldRequeue = true
 				continue
 			}
 
-			d.log.Info(fmt.Sprintf(`[RunLVMVolumeGroupDiscoverController] created new APILVMVolumeGroup, name: "%s"`, createdLvg.Name))
+			log.Info(fmt.Sprintf("created new APILVMVolumeGroup, name: \"%s\"", createdLvg.Name))
 		}
 	}
 
 	d.rememberState(refusedThisPass, unnamedPVPassesThisPass)
 
 	if shouldRequeue {
-		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] some problems have been occurred while iterating the lvmvolumegroup resources. Retry the reconcile in %s", d.cfg.VolumeGroupScanInterval.String()))
+		log.Warn(fmt.Sprintf("some problems have been occurred while iterating the lvmvolumegroup resources. Retry the reconcile in %s", d.cfg.VolumeGroupScanInterval.String()))
 		return true
 	}
 
 	// Update LVMVolumeGroup status metrics
 	if errs := d.metrics.UpdateLVGStatusMetrics(filteredLVGs); len(errs) > 0 {
 		for _, err := range errs {
-			d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] metrics update error: %v", err))
+			log.Warn(fmt.Sprintf("metrics update error: %v", err))
 		}
 	}
 
 	d.metrics.UpdateFileDeviceMetrics(filteredLVGs, d.collectFileDeviceUsage(ctx, filteredLVGs))
 
-	d.log.Info("[RunLVMVolumeGroupDiscoverController] END discovery loop")
+	log.Info("END discovery loop")
 	d.metrics.ReconcileDuration(DiscovererName).Observe(d.metrics.GetEstimatedTimeInSeconds(reconcileStart))
 	d.metrics.ReconcilesCountTotal(DiscovererName).Inc()
 	return false
@@ -624,6 +629,8 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 	candidates []internal.LVMVolumeGroupCandidate,
 	lvgs map[string]v1alpha1.LVMVolumeGroup,
 ) ([]internal.LVMVolumeGroupCandidate, error) {
+	log := d.log.Named("ReconcileUnhealthyLVMVolumeGroups")
+
 	candidateMap := make(map[string]internal.LVMVolumeGroupCandidate, len(candidates))
 	for _, candidate := range candidates {
 		candidateMap[candidate.ActualVGNameOnTheNode] = candidate
@@ -637,7 +644,7 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 			messageBldr := strings.Builder{}
 			candidate, exist := candidateMap[lvg.Spec.ActualVGNameOnTheNode]
 			if !exist {
-				d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its VG %s", lvg.Name, lvg.Spec.ActualVGNameOnTheNode))
+				log.Warn(fmt.Sprintf("the LVMVolumeGroup %s misses its VG %s", lvg.Name, lvg.Spec.ActualVGNameOnTheNode))
 				messageBldr.WriteString(fmt.Sprintf("Unable to find VG %s (it should be created with special tag %s). ", lvg.Spec.ActualVGNameOnTheNode, internal.LVMTags[0]))
 			} else {
 				// candidate exists, check thin pools
@@ -649,7 +656,7 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 				// take thin-pools from status instead of spec to prevent miss never-created ones
 				for i, statusTp := range lvg.Status.ThinPools {
 					if candidateTp, exist := candidateTPs[statusTp.Name]; !exist {
-						d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, statusTp.Name))
+						log.Warn(fmt.Sprintf("the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, statusTp.Name))
 						messageBldr.WriteString(fmt.Sprintf("Unable to find ThinPool %s. ", statusTp.Name))
 						lvg.Status.ThinPools[i].Ready = false
 					} else {
@@ -657,7 +664,7 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 						vgTpDiff := candidate.VGSize.Value() - statusTp.ActualSize.Value()
 						isFullVG := vgTpDiff >= 0 && vgTpDiff <= extentSize.Value()
 						if !isFullVG && candidateTp.ActualSize.Value()+extentSize.Value() < statusTp.ActualSize.Value() {
-							d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s ThinPool %s size %s is less than status one %s", lvg.Name, statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String()))
+							log.Warn(fmt.Sprintf("the LVMVolumeGroup %s ThinPool %s size %s is less than status one %s", lvg.Name, statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String()))
 							messageBldr.WriteString(fmt.Sprintf("ThinPool %s on the node has size %s which is less than status one %s. ", statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String()))
 						}
 					}
@@ -667,11 +674,11 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 			if messageBldr.Len() > 0 {
 				err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, metav1.ConditionFalse, internal.TypeVGReady, internal.ReasonScanFailed, messageBldr.String())
 				if err != nil {
-					d.log.Error(err, fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] unable to update the LVMVolumeGroup %s", lvg.Name))
+					log.Error(fmt.Sprintf("unable to update the LVMVolumeGroup %s", lvg.Name), logger.Err(err))
 					return nil, err
 				}
 
-				d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] the LVMVolumeGroup %s and its data object will be removed from the reconcile due to unhealthy states", lvg.Name))
+				log.Warn(fmt.Sprintf("the LVMVolumeGroup %s and its data object will be removed from the reconcile due to unhealthy states", lvg.Name))
 				// Keyed off the resource, not off the candidate. In the branch above
 				// that reports a missing Volume Group the candidate is the zero value
 				// the map lookup returned, so this used to record the empty string —
@@ -686,7 +693,7 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 
 	for _, lvg := range lvgs {
 		if _, shouldSkip := vgNamesToSkip[lvg.Spec.ActualVGNameOnTheNode]; shouldSkip {
-			d.log.Warning(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] remove the LVMVolumeGroup %s from the reconcile", lvg.Name))
+			log.Warn(fmt.Sprintf("remove the LVMVolumeGroup %s from the reconcile", lvg.Name))
 			delete(lvgs, lvg.Spec.ActualVGNameOnTheNode)
 		}
 	}
@@ -700,7 +707,7 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 	// are the input to the unnamed-PV budget below.
 	candidates = slices.DeleteFunc(candidates, func(c internal.LVMVolumeGroupCandidate) bool {
 		if _, shouldSkip := vgNamesToSkip[c.ActualVGNameOnTheNode]; shouldSkip {
-			d.log.Debug(fmt.Sprintf("[ReconcileUnhealthyLVMVolumeGroups] remove the data object for VG %s from the reconcile", c.ActualVGNameOnTheNode))
+			d.log.Named("ReconcileUnhealthyLVMVolumeGroups").Debug(fmt.Sprintf("remove the data object for VG %s from the reconcile", c.ActualVGNameOnTheNode))
 			return true
 		}
 
@@ -711,6 +718,8 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 }
 
 func (d *Discoverer) GetLVMVolumeGroupCandidates(ctx context.Context, bds map[string]v1alpha1.BlockDevice) ([]internal.LVMVolumeGroupCandidate, error) {
+	log := d.log.Named("GetLVMVolumeGroupCandidates")
+
 	vgs, vgErrs := d.sdsCache.GetVGs()
 	vgWithTag := filterVGByTag(vgs, internal.LVMTags)
 	candidates := make([]internal.LVMVolumeGroupCandidate, 0, len(vgWithTag))
@@ -723,21 +732,21 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(ctx context.Context, bds map[st
 	// If vgErrs is not empty, that means we have some problems on vgs, so we need to identify unhealthy vgs.
 	var vgIssues map[string]string
 	if vgErrs.Len() != 0 {
-		d.log.Warning("[GetLVMVolumeGroupCandidates] some errors have been occurred while executing vgs command")
+		log.Warn("some errors have been occurred while executing vgs command")
 		vgIssues = d.sortVGIssuesByVG(d.log, vgWithTag)
 	}
 
 	pvs, pvErrs := d.sdsCache.GetPVs()
 	if len(pvs) == 0 {
 		err := errors.New("no PV found")
-		d.log.Error(err, "[GetLVMVolumeGroupCandidates] no PV was found, but VG with tags are not empty")
+		d.log.Error("no PV was found, but VG with tags are not empty", logger.Err(err))
 		return nil, err
 	}
 
 	// If pvErrs is not empty, that means we have some problems on vgs, so we need to identify unhealthy vgs.
 	var pvIssues map[string][]string
 	if pvErrs.Len() != 0 {
-		d.log.Warning("[GetLVMVolumeGroupCandidates] some errors have been occurred while executing pvs command")
+		log.Warn("some errors have been occurred while executing pvs command")
 		pvIssues = d.sortPVIssuesByVG(d.log, pvs)
 	}
 
@@ -751,15 +760,15 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(ctx context.Context, bds map[st
 	// If lvErrs is not empty, that means we have some problems on vgs, so we need to identify unhealthy vgs.
 	var lvIssues map[string]map[string]string
 	if lvErrs.Len() != 0 {
-		d.log.Warning("[GetLVMVolumeGroupCandidates] some errors have been occurred while executing lvs command")
+		log.Warn("some errors have been occurred while executing lvs command")
 		lvIssues = d.sortThinPoolIssuesByVG(d.log, thinPools)
 	}
 
 	// Sort PV,BlockDevices and LV by VG to fill needed information for LVMVolumeGroup resource further.
 	sortedPVs := sortPVsByVG(pvs, vgWithTag)
 	sortedBDs := sortBlockDevicesByVG(bds, vgWithTag, d.cfg.NodeName)
-	d.log.Trace(fmt.Sprintf("[GetLVMVolumeGroupCandidates] BlockDevices: %+v", bds))
-	d.log.Trace(fmt.Sprintf("[GetLVMVolumeGroupCandidates] Sorted BlockDevices: %+v", sortedBDs))
+	log.Trace(fmt.Sprintf("BlockDevices: %+v", bds))
+	log.Trace(fmt.Sprintf("sorted BlockDevices: %+v", sortedBDs))
 	sortedThinPools := sortThinPoolsByVG(thinPools, vgWithTag)
 	sortedLVByThinPool := sortLVByThinPool(lvs)
 
@@ -769,7 +778,7 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(ctx context.Context, bds map[st
 
 		lvgName, fromTag, nameUsable := lvgNameForCandidate(vg)
 		if !nameUsable {
-			d.log.Warning(fmt.Sprintf("[GetLVMVolumeGroupCandidates] VG %s is tagged %s=%q, which is not a usable LVMVolumeGroup name; generating one instead",
+			log.Warn(fmt.Sprintf("VG %s is tagged %s=%q, which is not a usable LVMVolumeGroup name; generating one instead",
 				vg.VGName, internal.LVMVolumeGroupTag, lvgName))
 			lvgName, fromTag = generateLVMVGName(), false
 		}
@@ -1014,6 +1023,8 @@ func (d *Discoverer) refreshUnnamedPVsFromAPIServer(
 	candidates []internal.LVMVolumeGroupCandidate,
 	previousUnnamedPVPasses map[string]int,
 ) []internal.LVMVolumeGroupCandidate {
+	log := d.log.Named("RunLVMVolumeGroupDiscoverController")
+
 	if !anyUnnamedPVWithinBudget(candidates, previousUnnamedPVPasses) {
 		return candidates
 	}
@@ -1023,13 +1034,13 @@ func (d *Discoverer) refreshUnnamedPVsFromAPIServer(
 		// Keep the candidates built from the cached list: they still carry their
 		// unnamed PVs, so the loop below reports them and retries, which is what a
 		// failed re-read should lead to anyway.
-		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to re-read BlockDevices from the API server, keeping the cached view: %v", err))
+		log.Warn(fmt.Sprintf("unable to re-read BlockDevices from the API server, keeping the cached view: %v", err))
 		return candidates
 	}
 
 	merged, refused := replaceWithRebuilt(candidates, rebuilt)
 	if len(refused) > 0 {
-		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the rebuilt candidate describes less of this node than the cached one did for the Volume Group(s) %s, keeping the cached view of those",
+		log.Warn(fmt.Sprintf("the rebuilt candidate describes less of this node than the cached one did for the Volume Group(s) %s, keeping the cached view of those",
 			strings.Join(refused, ", ")))
 	}
 
@@ -1051,6 +1062,8 @@ func (d *Discoverer) CreateLVMVolumeGroupByCandidate(
 	ctx context.Context,
 	candidate internal.LVMVolumeGroupCandidate,
 ) (lvmVolumeGroup *v1alpha1.LVMVolumeGroup, created bool, err error) {
+	log := d.log.Named("CreateLVMVolumeGroupByCandidate")
+
 	thinPools, err := convertStatusThinPools(v1alpha1.LVMVolumeGroup{}, candidate.StatusThinPools)
 	if err != nil {
 		return nil, false, err
@@ -1109,7 +1122,7 @@ func (d *Discoverer) CreateLVMVolumeGroupByCandidate(
 	// this return would requeue through the failed condition write below. The check
 	// stays so the exported call is correct on its own.
 	if len(candidate.UnnamedPVs) > 0 {
-		d.log.Warning(fmt.Sprintf("[CreateLVMVolumeGroupByCandidate] the Physical Volumes %s of VG %s have no BlockDevice resource; postponing the import so the derived blockDeviceSelector covers the whole VG",
+		log.Warn(fmt.Sprintf("the Physical Volumes %s of VG %s have no BlockDevice resource; postponing the import so the derived blockDeviceSelector covers the whole VG",
 			strings.Join(candidate.UnnamedPVs, ", "), candidate.ActualVGNameOnTheNode))
 		return lvmVolumeGroup, false, nil
 	}
@@ -1118,10 +1131,10 @@ func (d *Discoverer) CreateLVMVolumeGroupByCandidate(
 	// waiting for them would postpone its import forever.
 	if len(candidate.BlockDevicesNames) == 0 {
 		if len(specFileDevices) == 0 {
-			d.log.Warning(fmt.Sprintf("[CreateLVMVolumeGroupByCandidate] no BlockDevices found for VG %s, postponing LVMVolumeGroup creation until BlockDevices are discovered", candidate.ActualVGNameOnTheNode))
+			log.Warn(fmt.Sprintf("no BlockDevices found for VG %s, postponing LVMVolumeGroup creation until BlockDevices are discovered", candidate.ActualVGNameOnTheNode))
 			return lvmVolumeGroup, false, nil
 		}
-		d.log.Info(fmt.Sprintf("[CreateLVMVolumeGroupByCandidate] VG %s is backed by %d file device(s) and no BlockDevices; importing it", candidate.ActualVGNameOnTheNode, len(specFileDevices)))
+		log.Info(fmt.Sprintf("VG %s is backed by %d file device(s) and no BlockDevices; importing it", candidate.ActualVGNameOnTheNode, len(specFileDevices)))
 	}
 
 	start := time.Now()
@@ -1141,6 +1154,8 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	lvg *v1alpha1.LVMVolumeGroup,
 	candidate internal.LVMVolumeGroupCandidate,
 ) error {
+	log := d.log.Named("UpdateLVMVolumeGroupByCandidate")
+
 	// The one write to spec in this file, and it happens once: candidate.UnnamedPVs
 	// has to be empty for it, because BlockDevicesNames is built by the same match
 	// that left those Physical Volumes unnamed. Backfilling from an incomplete
@@ -1151,7 +1166,7 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	// blockDeviceSelector", for as long as the resource exists — under a reason the
 	// controller keeps in service, so quietly.
 	if len(candidate.BlockDevicesNames) > 0 && len(candidate.UnnamedPVs) == 0 && hasEmptyBlockDeviceSelector(lvg) {
-		d.log.Warning(fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] the LVMVolumeGroup %s has an empty blockDeviceSelector, updating it with discovered BlockDevices", lvg.Name))
+		log.Warn(fmt.Sprintf("the LVMVolumeGroup %s has an empty blockDeviceSelector, updating it with discovered BlockDevices", lvg.Name))
 		lvg.Spec.BlockDeviceSelector = configureBlockDeviceSelector(candidate)
 		if err := d.cl.Update(ctx, lvg); err != nil {
 			return fmt.Errorf("[UpdateLVMVolumeGroupByCandidate] unable to fix empty blockDeviceSelector for LVMVolumeGroup %s: %w", lvg.Name, err)
@@ -1160,17 +1175,17 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 
 	// Check if VG has some problems
 	if candidate.Health == internal.NonOperational {
-		d.log.Warning(fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] candidate for LVMVolumeGroup %s has NonOperational health, message %s. Update the VGReady condition to False", lvg.Name, candidate.Message))
+		log.Warn(fmt.Sprintf("candidate for LVMVolumeGroup %s has NonOperational health, message %s. Update the VGReady condition to False", lvg.Name, candidate.Message))
 		updErr := d.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, metav1.ConditionFalse, internal.TypeVGReady, internal.ReasonScanFailed, candidate.Message)
 		if updErr != nil {
-			d.log.Error(updErr, fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name))
+			log.Error(fmt.Sprintf("unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name), logger.Err(updErr))
 		}
 		return updErr
 	}
 
 	thinPools, err := convertStatusThinPools(*lvg, candidate.StatusThinPools)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] unable to convert status thin pools for the LVMVolumeGroup %s", lvg.Name))
+		log.Error(fmt.Sprintf("unable to convert status thin pools for the LVMVolumeGroup %s", lvg.Name), logger.Err(err))
 		return err
 	}
 
@@ -1205,7 +1220,7 @@ func (d *Discoverer) UpdateLVMVolumeGroupByCandidate(
 	readyStatus, readyReason, readyMessage := vgReadyForPublishedStatus(candidate)
 	err = d.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, readyStatus, internal.TypeVGReady, readyReason, readyMessage)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[UpdateLVMVolumeGroupByCandidate] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name))
+		log.Error(fmt.Sprintf("unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name), logger.Err(err))
 	}
 
 	return err
@@ -1279,7 +1294,7 @@ func (d *Discoverer) reportUnnamedPVs(
 
 	status, reason, message := vgReadyForWithheldStatus(candidate)
 	if err := d.lvgCl.UpdateLVGConditionIfNeeded(ctx, &lvg, status, internal.TypeVGReady, reason, message); err != nil {
-		d.log.Error(err, fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name))
+		d.log.Named("RunLVMVolumeGroupDiscoverController").Error(fmt.Sprintf("unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGReady, lvg.Name), logger.Err(err))
 		return false
 	}
 
@@ -1382,7 +1397,7 @@ func (d *Discoverer) handleUnnamedPVs(
 		// what. Editing the BlockDeviceFilter runs a discovery pass of its own — see
 		// controller.DiscoverInOrder — so the Volume Group recovers on its own from
 		// the only action that can actually admit the device.
-		d.log.Warning(fmt.Sprintf("[RunLVMVolumeGroupDiscoverController] the Physical Volumes %s of VG %s have had no BlockDevice resource for %d consecutive passes; taking their absence to be permanent and giving up the retry. A device below %s or excluded by a BlockDeviceFilter never becomes a BlockDevice; the %s condition keeps reporting this. Discovery runs again on the next udev event, on a BlockDeviceFilter change, or on an agent restart — so admitting the device through the BlockDeviceFilter clears this without further action",
+		d.log.Named("RunLVMVolumeGroupDiscoverController").Warn(fmt.Sprintf("the Physical Volumes %s of VG %s have had no BlockDevice resource for %d consecutive passes; taking their absence to be permanent and giving up the retry. A device below %s or excluded by a BlockDeviceFilter never becomes a BlockDevice; the %s condition keeps reporting this. Discovery runs again on the next udev event, on a BlockDeviceFilter change, or on an agent restart — so admitting the device through the BlockDeviceFilter clears this without further action",
 			strings.Join(candidate.UnnamedPVs, ", "), candidate.ActualVGNameOnTheNode, verdict.waited, internal.BlockDeviceValidSize, internal.TypeVGReady))
 	}
 
@@ -1395,7 +1410,7 @@ func (d *Discoverer) handleUnnamedPVs(
 	// standing report; this is only about the log.
 	report := d.log.Debug
 	if verdict.firstSeen {
-		report = d.log.Warning
+		report = d.log.Warn
 	}
 
 	// Counted here rather than inside one of the branches below, because the import
@@ -1540,6 +1555,7 @@ func (d *Discoverer) configureCandidateNodeDevices(ctx context.Context, pvs map[
 	// off entirely for safety.
 	_, ownerLVGName := utils.ReadValueFromTags(vg.VGTags, internal.LVMVolumeGroupTag)
 
+	configureCandidateNodeDevicesLog := d.log.Named("configureCandidateNodeDevices")
 	for _, pv := range filteredPV {
 		if strings.HasPrefix(pv.PVName, utils.LoopDevicePathPrefix) {
 			fileDev, known := d.buildFileDeviceFromLoopPV(ctx, pv, ownerLVGName, false)
@@ -1580,7 +1596,7 @@ func (d *Discoverer) configureCandidateNodeDevices(ctx context.Context, pvs map[
 			// the state appears or changes. Repeating it per PV per pass at Warning
 			// meant three lines a pass, forever, for a device that was filtered out
 			// on purpose.
-			d.log.Debug(fmt.Sprintf("[configureCandidateNodeDevices] no BlockDevice resource is yet configured for PV %s in VG %s, retry on the next iteration", pv.PVName, vg.VGName))
+			configureCandidateNodeDevicesLog.Debug(fmt.Sprintf("no BlockDevice resource is yet configured for PV %s in VG %s, retry on the next iteration", pv.PVName, vg.VGName))
 			continue
 		}
 
@@ -1645,13 +1661,15 @@ func (d *Discoverer) configureCandidateNodeDevices(ctx context.Context, pvs map[
 // via readlink). They use different methods because their inputs differ; keep
 // their ownership/aliasing assumptions in sync.
 func (d *Discoverer) buildFileDeviceFromLoopPV(ctx context.Context, pv internal.PVData, expectedLVGName string, probe bool) (dev *internal.LVMVGFileDevice, known bool) {
+	log := d.log.Named("buildFileDeviceFromLoopPV")
+
 	if expectedLVGName == "" {
 		// Debug, not Warning: this is a state that never clears itself — a VG
 		// tagged managed but carrying no owner name stays that way — so a Warning
 		// would repeat for every loop PV on every discovery cycle, forever, and
 		// asks nothing of the operator. Skipping the PV is the correct and final
 		// answer, not a problem report.
-		d.log.Debug(fmt.Sprintf("[buildFileDeviceFromLoopPV] VG of loop PV %s carries no %s tag; skipping file-device discovery", pv.PVName, internal.LVMVolumeGroupTag))
+		log.Debug(fmt.Sprintf("VG of loop PV %s carries no %s tag; skipping file-device discovery", pv.PVName, internal.LVMVolumeGroupTag))
 		return nil, true
 	}
 
@@ -1670,7 +1688,7 @@ func (d *Discoverer) buildFileDeviceFromLoopPV(ctx context.Context, pv internal.
 		if probe {
 			d.log.Debug(msg)
 		} else {
-			d.log.Warning(msg + "; ownership cannot be established this round, so the status of this Volume Group is left as it is")
+			d.log.Warn(msg + "; ownership cannot be established this round, so the status of this Volume Group is left as it is")
 		}
 		// known = probe: a gap on the canonical path, an expected answer on the
 		// speculative one.
@@ -1683,7 +1701,7 @@ func (d *Discoverer) buildFileDeviceFromLoopPV(ctx context.Context, pv internal.
 		// probe path an empty path is the expected answer for a device that is
 		// simply not a loop.
 		if !probe {
-			d.log.Warning(fmt.Sprintf("[buildFileDeviceFromLoopPV] losetup reports no backing file for loop PV %s, which cannot be true of a device lvm just listed as a PV; leaving the status of this Volume Group as it is", pv.PVName))
+			log.Warn(fmt.Sprintf("losetup reports no backing file for loop PV %s, which cannot be true of a device lvm just listed as a PV; leaving the status of this Volume Group as it is", pv.PVName))
 		}
 		return nil, probe
 	}
@@ -1693,7 +1711,7 @@ func (d *Discoverer) buildFileDeviceFromLoopPV(ctx context.Context, pv internal.
 		if probe {
 			d.log.Debug(msg)
 		} else {
-			d.log.Warning(msg)
+			d.log.Warn(msg)
 		}
 		// A read that succeeded and said "not ours" is a verdict, not a gap.
 		return nil, true
@@ -1713,7 +1731,7 @@ func (d *Discoverer) buildFileDeviceFromLoopPV(ctx context.Context, pv internal.
 	// invisible otherwise: `kubectl get lvg` shows a healthy resource and the path
 	// in status resolves to nothing.
 	if backing.Deleted {
-		d.log.Warning(fmt.Sprintf("[buildFileDeviceFromLoopPV] the backing file %q of loop PV %s (LVG %s) has been unlinked while the loop is still attached; the Physical Volume is live but the file is gone — restore it, or move the PV out with pvmove + vgreduce + pvremove",
+		log.Warn(fmt.Sprintf("the backing file %q of loop PV %s (LVG %s) has been unlinked while the loop is still attached; the Physical Volume is live but the file is gone — restore it, or move the PV out with pvmove + vgreduce + pvremove",
 			backing.Path, pv.PVName, expectedLVGName))
 	}
 
@@ -1731,7 +1749,7 @@ func (d *Discoverer) buildFileDeviceFromLoopPV(ctx context.Context, pv internal.
 			return canonical, err
 		})
 		if ferr != nil {
-			d.log.Debug(fmt.Sprintf("[buildFileDeviceFromLoopPV] unable to resolve canonical loop for %s: %v; keeping %s", backing.Path, ferr, pv.PVName))
+			log.Debug(fmt.Sprintf("unable to resolve canonical loop for %s: %v; keeping %s", backing.Path, ferr, pv.PVName))
 		} else if canonical != "" {
 			loopDevice = canonical
 		}
@@ -1794,6 +1812,8 @@ func removeDuplicates(strList []string) []string {
 }
 
 func (d *Discoverer) sortThinPoolIssuesByVG(log logger.Logger, lvs []internal.LVData) map[string]map[string]string {
+	log = log.Named("sortThinPoolIssuesByVG")
+
 	var lvIssuesByVG = make(map[string]map[string]string, len(lvs))
 
 	// One map per Volume Group, created once and added to. Re-creating it per
@@ -1813,15 +1833,15 @@ func (d *Discoverer) sortThinPoolIssuesByVG(log logger.Logger, lvs []internal.LV
 
 	for _, lv := range lvs {
 		_, cmd, stdErr, err := d.commands.GetLV(lv.VGName, lv.LVName)
-		log.Debug(fmt.Sprintf("[sortThinPoolIssuesByVG] runs cmd: %s", cmd))
+		log.Debug(fmt.Sprintf("runs cmd: %s", cmd))
 
 		if err != nil {
-			log.Error(err, fmt.Sprintf(`[sortThinPoolIssuesByVG] unable to run lvs command for lv, name: "%s"`, lv.LVName))
+			log.Error(fmt.Sprintf("unable to run lvs command for lv, name: \"%s\"", lv.LVName), logger.Err(err))
 			issuesOf(lv)[lv.LVName] = err.Error()
 		}
 
 		if stdErr.Len() != 0 {
-			log.Error(errors.New(stdErr.String()), fmt.Sprintf(`[sortThinPoolIssuesByVG] lvs command for lv "%s" has stderr: `, lv.LVName))
+			log.Error(fmt.Sprintf("lvs command for lv \"%s\" has stderr: ", lv.LVName), logger.Err(errors.New(stdErr.String())))
 			// Logged whole above, attributed in part: only what lvm said about this
 			// Logical Volume may become this Volume Group's health. See
 			// utils.ObjectDiagnostics.
@@ -1843,19 +1863,21 @@ func (d *Discoverer) sortThinPoolIssuesByVG(log logger.Logger, lvs []internal.LV
 }
 
 func (d *Discoverer) sortPVIssuesByVG(log logger.Logger, pvs []internal.PVData) map[string][]string {
+	log = log.Named("sortPVIssuesByVG")
+
 	pvIssuesByVG := make(map[string][]string, len(pvs))
 
 	for _, pv := range pvs {
 		_, cmd, stdErr, err := d.commands.GetPV(pv.PVName)
-		log.Debug(fmt.Sprintf("[sortPVIssuesByVG] runs cmd: %s", cmd))
+		log.Debug(fmt.Sprintf("runs cmd: %s", cmd))
 
 		if err != nil {
-			log.Error(err, fmt.Sprintf(`[sortPVIssuesByVG] unable to run pvs command for pv "%s"`, pv.PVName))
+			log.Error(fmt.Sprintf("unable to run pvs command for pv \"%s\"", pv.PVName), logger.Err(err))
 			pvIssuesByVG[pv.VGName+pv.VGUuid] = append(pvIssuesByVG[pv.VGName+pv.VGUuid], err.Error())
 		}
 
 		if stdErr.Len() != 0 {
-			log.Error(errors.New(stdErr.String()), fmt.Sprintf(`[sortPVIssuesByVG] pvs command for pv "%s" has stderr: %s`, pv.PVName, stdErr.String()))
+			log.Error(fmt.Sprintf("pvs command for pv \"%s\" has stderr: %s", pv.PVName, stdErr.String()), logger.Err(errors.New(stdErr.String())))
 			if aboutThePV := utils.ObjectDiagnostics(cmd, stdErr); aboutThePV.Len() != 0 {
 				pvIssuesByVG[pv.VGName+pv.VGUuid] = append(pvIssuesByVG[pv.VGName+pv.VGUuid], aboutThePV.String())
 			}
@@ -1867,17 +1889,19 @@ func (d *Discoverer) sortPVIssuesByVG(log logger.Logger, pvs []internal.PVData) 
 }
 
 func (d *Discoverer) sortVGIssuesByVG(log logger.Logger, vgs []internal.VGData) map[string]string {
+	log = log.Named("sortVGIssuesByVG")
+
 	vgIssues := make(map[string]string, len(vgs))
 	for _, vg := range vgs {
 		_, cmd, stdErr, err := d.commands.GetVG(vg.VGName)
-		log.Debug(fmt.Sprintf("[sortVGIssuesByVG] runs cmd: %s", cmd))
+		log.Debug(fmt.Sprintf("runs cmd: %s", cmd))
 		if err != nil {
-			log.Error(err, fmt.Sprintf(`[sortVGIssuesByVG] unable to run vgs command for vg, name: "%s"`, vg.VGName))
+			log.Error(fmt.Sprintf("unable to run vgs command for vg, name: \"%s\"", vg.VGName), logger.Err(err))
 			vgIssues[vg.VGName+vg.VGUUID] = err.Error()
 		}
 
 		if stdErr.Len() != 0 {
-			log.Error(errors.New(stdErr.String()), fmt.Sprintf(`[sortVGIssuesByVG] vgs command for vg "%s" has stderr: `, vg.VGName))
+			log.Error(fmt.Sprintf("vgs command for vg \"%s\" has stderr: ", vg.VGName), logger.Err(errors.New(stdErr.String())))
 			if aboutTheVG := utils.ObjectDiagnostics(cmd, stdErr); aboutTheVG.Len() != 0 {
 				vgIssues[vg.VGName+vg.VGUUID] = aboutTheVG.String()
 			}
@@ -1998,14 +2022,16 @@ func getThinPools(lvs []internal.LVData) []internal.LVData {
 }
 
 func getStatusThinPools(log logger.Logger, thinPools, sortedLVs map[string][]internal.LVData, vg internal.VGData, lvIssues map[string]map[string]string) []internal.LVMVGStatusThinPool {
+	log = log.Named("getStatusThinPools")
+
 	tps := thinPools[vg.VGName+vg.VGUUID]
 	result := make([]internal.LVMVGStatusThinPool, 0, len(tps))
 
 	for _, thinPool := range tps {
 		usedSize, err := thinPool.GetUsedSize()
-		log.Trace(fmt.Sprintf("[getStatusThinPools] LV %v for VG name %s", thinPool, vg.VGName))
+		log.Trace(fmt.Sprintf("LV %v for VG name %s", thinPool, vg.VGName))
 		if err != nil {
-			log.Error(err, "[getStatusThinPools] unable to getThinPoolUsedSize")
+			log.Error("unable to getThinPoolUsedSize", logger.Err(err))
 		}
 
 		allocatedSize := getThinPoolAllocatedSize(thinPool.LVName, sortedLVs[thinPool.LVName])
@@ -2090,7 +2116,7 @@ func filterLVGsByNode(lvgs map[string]v1alpha1.LVMVolumeGroup, currentNode strin
 func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LVMVolumeGroup, candidate internal.LVMVolumeGroupCandidate) bool {
 	convertedStatusPools, err := convertStatusThinPools(lvg, candidate.StatusThinPools)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[hasLVMVolumeGroupDiff] unable to identify candidate difference for the LVMVolumeGroup %s", lvg.Name))
+		log.Named("hasLVMVolumeGroupDiff").Error(fmt.Sprintf("unable to identify candidate difference for the LVMVolumeGroup %s", lvg.Name), logger.Err(err))
 		return false
 	}
 	log.Trace(fmt.Sprintf(`AllocatedSize, candidate: %s, lvg: %s`, candidate.AllocatedSize.String(), lvg.Status.AllocatedSize.String()))
@@ -2115,6 +2141,8 @@ func hasLVMVolumeGroupDiff(log logger.Logger, lvg v1alpha1.LVMVolumeGroup, candi
 }
 
 func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LVMVolumeGroupNode) bool {
+	log = log.Named("hasStatusNodesDiff")
+
 	if len(first) != len(second) {
 		return true
 	}
@@ -2129,8 +2157,8 @@ func hasStatusNodesDiff(log logger.Logger, first, second []v1alpha1.LVMVolumeGro
 		}
 
 		for j := range first[i].Devices {
-			log.Trace(fmt.Sprintf("[hasStatusNodesDiff] first Device: name %s, PVSize %s, DevSize %s", first[i].Devices[j].BlockDevice, first[i].Devices[j].PVSize.String(), first[i].Devices[j].DevSize.String()))
-			log.Trace(fmt.Sprintf("[hasStatusNodesDiff] second Device: name %s, PVSize %s, DevSize %s", second[i].Devices[j].BlockDevice, second[i].Devices[j].PVSize.String(), second[i].Devices[j].DevSize.String()))
+			log.Trace(fmt.Sprintf("first Device: name %s, PVSize %s, DevSize %s", first[i].Devices[j].BlockDevice, first[i].Devices[j].PVSize.String(), first[i].Devices[j].DevSize.String()))
+			log.Trace(fmt.Sprintf("second Device: name %s, PVSize %s, DevSize %s", second[i].Devices[j].BlockDevice, second[i].Devices[j].PVSize.String(), second[i].Devices[j].DevSize.String()))
 			if first[i].Devices[j].BlockDevice != second[i].Devices[j].BlockDevice ||
 				first[i].Devices[j].Path != second[i].Devices[j].Path ||
 				first[i].Devices[j].PVUuid != second[i].Devices[j].PVUuid ||
@@ -2280,6 +2308,7 @@ func (d *Discoverer) collectFileDeviceUsage(ctx context.Context, lvgs map[string
 	}
 
 	usage := make([]monitoring.FileDeviceDirectoryUsage, 0, len(allocated))
+	collectFileDeviceUsageLog := d.log.Named("collectFileDeviceUsage")
 	for dir, bytes := range allocated {
 		u := monitoring.FileDeviceDirectoryUsage{Directory: dir, AllocatedBytes: bytes}
 
@@ -2298,7 +2327,7 @@ func (d *Discoverer) collectFileDeviceUsage(ctx context.Context, lvgs map[string
 		if err != nil {
 			// Leave the previous sample standing rather than publishing a false
 			// zero, which would look exactly like a full filesystem.
-			d.log.Warning(fmt.Sprintf("[collectFileDeviceUsage] unable to read free space in %s: %v", dir, err))
+			collectFileDeviceUsageLog.Warn(fmt.Sprintf("unable to read free space in %s: %v", dir, err))
 		} else {
 			u.FreeBytes, u.TotalBytes, u.Known = space.AvailableBytes, space.TotalBytes, true
 		}
@@ -2353,6 +2382,7 @@ func (d *Discoverer) buildSpecFileDevicesFromCandidate(ctx context.Context, cand
 	baseResolved := false
 
 	for _, devices := range candidate.FileDeviceNodes {
+		buildSpecFileDevicesFromCandidateLog := d.log.Named("buildSpecFileDevicesFromCandidate")
 		for _, dev := range devices {
 			_, entryName, ok := utils.ParseFileDevicePath(dev.FilePath)
 			if !ok {
@@ -2382,7 +2412,7 @@ func (d *Discoverer) buildSpecFileDevicesFromCandidate(ctx context.Context, cand
 					return nil, fmt.Errorf("backing file %s of VG %s is outside the configured base directory %q (which resolves to %q), so its spec.fileDevices entry cannot be expressed; move the file under the base directory or point fileDevicesDirectory at it",
 						dev.FilePath, candidate.ActualVGNameOnTheNode, d.cfg.FileDevicesDirectory, resolvedBase)
 				}
-				d.log.Info(fmt.Sprintf("[buildSpecFileDevicesFromCandidate] backing file %s is reported under the resolved base %q; recording its directory as %q so the imported entry passes validation",
+				buildSpecFileDevicesFromCandidateLog.Info(fmt.Sprintf("backing file %s is reported under the resolved base %q; recording its directory as %q so the imported entry passes validation",
 					dev.FilePath, resolvedBase, relocated))
 				dir = relocated
 			}

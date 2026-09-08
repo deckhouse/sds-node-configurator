@@ -42,10 +42,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
@@ -879,7 +879,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 			}
 
 			var (
-				testLogger        = logger.Logger{}
+				testLogger        = logger.NewNop()
 				blockDevicesNames = []string{
 					"first",
 					"second",
@@ -1010,7 +1010,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				},
 			}
 
-			assert.True(t, hasLVMVolumeGroupDiff(logger.Logger{}, lvmVolumeGroup, candidate))
+			assert.True(t, hasLVMVolumeGroupDiff(logger.NewNop(), lvmVolumeGroup, candidate))
 		})
 
 		t.Run("should_return_true_when_extent_size_differs", func(t *testing.T) {
@@ -1029,7 +1029,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 				},
 			}
 
-			assert.True(t, hasLVMVolumeGroupDiff(logger.Logger{}, lvmVolumeGroup, candidate))
+			assert.True(t, hasLVMVolumeGroupDiff(logger.NewNop(), lvmVolumeGroup, candidate))
 		})
 	})
 
@@ -1074,7 +1074,7 @@ func TestLVMVolumeGroupDiscover(t *testing.T) {
 
 func setupDiscoverer(opts *DiscovererConfig) *Discoverer {
 	cl := test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{}, &v1alpha1.LVMLogicalVolume{})
-	log := logger.Logger{}
+	log := logger.NewNop()
 	metrics := monitoring.GetMetrics("")
 	if opts == nil {
 		opts = &DiscovererConfig{NodeName: "test_node"}

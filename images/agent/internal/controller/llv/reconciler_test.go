@@ -27,10 +27,10 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
-	"github.com/deckhouse/sds-node-configurator/images/agent/internal/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/test_utils"
@@ -989,7 +989,7 @@ func newClonedVolumeEnv(ctx context.Context, t *testing.T, requestedSize string)
 
 	mockCmds := mock_utils.NewMockCommands(ctrl)
 	cl := test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{})
-	r := NewReconciler(cl, logger.Logger{}, monitoring.GetMetrics(""), cache.New(), mockCmds, ReconcilerConfig{})
+	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mockCmds, ReconcilerConfig{})
 
 	lvg := &v1alpha1.LVMVolumeGroup{
 		ObjectMeta: v1.ObjectMeta{Name: "test-lvg"},
@@ -1255,7 +1255,7 @@ func TestReconcileLLVUpdateFunc_NoExtendWhenAlreadyLargeEnough(t *testing.T) {
 
 func setupReconciler() *Reconciler {
 	cl := test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{})
-	log := logger.Logger{}
+	log := logger.NewNop()
 	metrics := monitoring.GetMetrics("")
 
 	return NewReconciler(cl, log, metrics, cache.New(), utils.NewCommands(), ReconcilerConfig{})

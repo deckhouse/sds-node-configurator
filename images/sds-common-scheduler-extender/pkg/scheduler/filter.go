@@ -31,9 +31,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/tracing"
 )
 
 const (
@@ -41,7 +42,7 @@ const (
 )
 
 func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
-	servingLog := logger.WithTraceIDLogger(r.Context(), s.log).WithName("filter")
+	servingLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("filter")
 
 	servingLog.Debug("starts the serving the request")
 
@@ -52,23 +53,23 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	reader := http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
 	err := json.NewDecoder(reader).Decode(&inputData)
 	if err != nil {
-		servingLog.Error(err, "unable to decode a request")
+		servingLog.Error("unable to decode a request", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	servingLog.Trace(fmt.Sprintf("input data: %+v", inputData))
 
 	if inputData.Pod == nil {
-		servingLog.Error(errors.New("no pod in the request"), "unable to get a Pod from the request")
+		servingLog.Error("unable to get a Pod from the request", logger.Err(errors.New("no pod in the request")))
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 
-	servingLog = servingLog.WithValues("Pod", fmt.Sprintf("%s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+	servingLog = servingLog.With("Pod", fmt.Sprintf("%s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
 
 	nodeNames, err := getNodeNames(inputData)
 	if err != nil {
-		servingLog.Error(err, "unable to get node names from the request")
+		servingLog.Error("unable to get node names from the request", logger.Err(err))
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -76,14 +77,14 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 
 	managedPVCs, hintOnlyPVCs, err := getManagedPVCsFromPod(ctx, s.client, servingLog, inputData.Pod, s.targetProvisioners)
 	if err != nil {
-		servingLog.Error(err, "unable to get managed PVCs from the Pod")
+		servingLog.Error("unable to get managed PVCs from the Pod", logger.Err(err))
 		writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to get managed PVCs: %s", err))
 		return
 	}
 	if len(managedPVCs) == 0 {
 		servingLog.Debug("Pod uses PVCs which are not managed by our modules. Return the same nodes")
 		if err := writeNodeNamesResponse(w, servingLog, nodeNames); err != nil {
-			servingLog.Error(err, "unable to write node names response")
+			servingLog.Error("unable to write node names response", logger.Err(err))
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
@@ -99,7 +100,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 
 	scUsedByPVCs, err := getStorageClassesUsedByPVCs(ctx, s.client, managedPVCs)
 	if err != nil {
-		servingLog.Error(err, "unable to get StorageClasses from the PVC")
+		servingLog.Error("unable to get StorageClasses from the PVC", logger.Err(err))
 		writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to get StorageClasses: %s", err))
 		return
 	}
@@ -112,15 +113,15 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	// instead of failing the whole pod-scheduling request.
 	if dropped := dropPVCsWithMissingSC(managedPVCs, scUsedByPVCs); len(dropped) > 0 {
 		allKeys, pendingKeys := formatDroppedPVCsForLog(dropped)
-		servingLog.Warning(fmt.Sprintf("dropping PVCs without an existing StorageClass from scheduling decision: %v", allKeys))
+		servingLog.Warn(fmt.Sprintf("dropping PVCs without an existing StorageClass from scheduling decision: %v", allKeys))
 		if len(pendingKeys) > 0 {
-			servingLog.Warning(fmt.Sprintf("Pending PVCs reference a missing StorageClass and will never be dynamically provisioned (the Pod will likely get stuck in ContainerCreating with FailedMount): %v", pendingKeys))
+			servingLog.Warn(fmt.Sprintf("Pending PVCs reference a missing StorageClass and will never be dynamically provisioned (the Pod will likely get stuck in ContainerCreating with FailedMount): %v", pendingKeys))
 		}
 	}
 	if len(managedPVCs) == 0 {
 		servingLog.Debug("After filtering out PVCs with missing StorageClass, no managed PVCs left. Return the same nodes")
 		if err := writeNodeNamesResponse(w, servingLog, nodeNames); err != nil {
-			servingLog.Error(err, "unable to write node names response")
+			servingLog.Error("unable to write node names response", logger.Err(err))
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
@@ -129,7 +130,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("starts to extract PVC requested sizes")
 	pvcRequests, droppedHints, err := extractRequestedSize(ctx, s.client, servingLog, managedPVCs, scUsedByPVCs, hintOnlyPVCs)
 	if err != nil {
-		servingLog.Error(err, "unable to extract request size")
+		servingLog.Error("unable to extract request size", logger.Err(err))
 		writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to extract request size: %s", err))
 		return
 	}
@@ -142,12 +143,12 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		for _, name := range droppedHints {
 			delete(managedPVCs, name)
 		}
-		servingLog.Warning(fmt.Sprintf("dropping unresolvable PVCs listed only in the %s annotation: %v", consts.PodExtraPVCsAnnotation, droppedHints))
+		servingLog.Warn(fmt.Sprintf("dropping unresolvable PVCs listed only in the %s annotation: %v", consts.PodExtraPVCsAnnotation, droppedHints))
 	}
 	if len(managedPVCs) == 0 {
 		servingLog.Debug("After dropping unresolvable annotation PVCs, no managed PVCs left. Return the same nodes")
 		if err := writeNodeNamesResponse(w, servingLog, nodeNames); err != nil {
-			servingLog.Error(err, "unable to write node names response")
+			servingLog.Error("unable to write node names response", logger.Err(err))
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
@@ -169,7 +170,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		servingLog.Debug("Pod has replicated PVCs, fetching node information")
 		nodes, err = getNodes(ctx, s.client, nodeNames)
 		if err != nil {
-			servingLog.Error(err, "unable to get nodes")
+			servingLog.Error("unable to get nodes", logger.Err(err))
 			writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to get nodes: %s", err))
 			return
 		}
@@ -178,7 +179,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("starts to filter the nodes from the request")
 	filteredNodes, err := filterNodes(ctx, servingLog, s.client, s.cache, &nodeNames, nodes, managedPVCs, scUsedByPVCs, pvcRequests)
 	if err != nil {
-		servingLog.Error(err, "unable to filter the nodes")
+		servingLog.Error("unable to filter the nodes", logger.Err(err))
 		writeFailAllNodesResponse(w, servingLog, nodeNames, fmt.Sprintf("unable to filter nodes: %s", err))
 		return
 	}
@@ -188,7 +189,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	servingLog.Debug("starts to create reservations")
 	err = createReservations(ctx, servingLog, s.client, s.cache, filteredNodes.NodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
 	if err != nil {
-		servingLog.Error(err, "unable to create reservations")
+		servingLog.Error("unable to create reservations", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -197,7 +198,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	// Log response body at DEBUG level
 	responseJSON, err := json.Marshal(filteredNodes)
 	if err != nil {
-		servingLog.Error(err, "unable to marshal response")
+		servingLog.Error("unable to marshal response", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -206,7 +207,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("content-type", "application/json")
 	_, err = w.Write(responseJSON)
 	if err != nil {
-		servingLog.Error(err, "unable to write response")
+		servingLog.Error("unable to write response", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -230,7 +231,7 @@ func writeFailAllNodesResponse(w http.ResponseWriter, log logger.Logger, nodeNam
 
 	responseJSON, err := json.Marshal(result)
 	if err != nil {
-		log.Error(err, "unable to marshal fail-all response, falling back to 500")
+		log.Error("unable to marshal fail-all response, falling back to 500", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -238,7 +239,7 @@ func writeFailAllNodesResponse(w http.ResponseWriter, log logger.Logger, nodeNam
 
 	w.Header().Set("content-type", "application/json")
 	if _, err := w.Write(responseJSON); err != nil {
-		log.Error(err, "unable to write fail-all response")
+		log.Error("unable to write fail-all response", logger.Err(err))
 	}
 }
 
@@ -271,18 +272,22 @@ func filterNodes(
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 ) (*ExtenderFilterResult, error) {
+	log = log.Named("filterNodes")
+
+	log = log.Named("filterNodes")
+
 	// Separate PVCs by provisioner
 	localPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsLocalVolumeProvisioner)
 	replicatedPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsReplicatedVolumeProvisioner)
 
-	log.Debug(fmt.Sprintf("[filterNodes] local PVCs count: %d, replicated PVCs count: %d", len(localPVCs), len(replicatedPVCs)))
+	log.Debug(fmt.Sprintf("local PVCs count: %d, replicated PVCs count: %d", len(localPVCs), len(replicatedPVCs)))
 
 	// Get LVGs from StorageClasses only for local PVCs
 	var scLVGs map[string]SCLVMVolumeGroups
 	var err error
 
 	if len(localPVCs) > 0 {
-		log.Debug("[filterNodes] starts to get LVMVolumeGroups for local StorageClasses")
+		log.Debug("starts to get LVMVolumeGroups for local StorageClasses")
 		localSCs := make(map[string]*storagev1.StorageClass)
 		for _, pvc := range localPVCs {
 			if pvc.Spec.StorageClassName != nil {
@@ -312,9 +317,9 @@ func filterNodes(
 
 	for i, nodeName := range *nodeNames {
 		go func(i int, nodeName string) {
-			log.Trace(fmt.Sprintf("[filterNodes] goroutine %d starts the work with node %s", i, nodeName))
+			log.Trace(fmt.Sprintf("goroutine %d starts the work with node %s", i, nodeName))
 			defer func() {
-				log.Trace(fmt.Sprintf("[filterNodes] goroutine %d ends the work with node %s", i, nodeName))
+				log.Trace(fmt.Sprintf("goroutine %d ends the work with node %s", i, nodeName))
 				wg.Done()
 			}()
 
@@ -354,15 +359,15 @@ func filterNodes(
 		}(i, nodeName)
 	}
 	wg.Wait()
-	log.Debug("[filterNodes] goroutines work is done")
+	log.Debug("goroutines work is done")
 	if len(errs) != 0 {
 		for err = range errs {
-			log.Error(err, "[filterNodes] an error occurs while filtering the nodes")
+			log.Error("an error occurs while filtering the nodes", logger.Err(err))
 		}
 	}
 	close(errs)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[filterNodes] unable to filter nodes for the Pod, last error: %s", err.Error()))
+		log.Error(fmt.Sprintf("unable to filter nodes for the Pod, last error: %s", err.Error()), logger.Err(err))
 		return nil, err
 	}
 
@@ -380,15 +385,17 @@ func filterNodeForLocalPVCs(
 	scLVGs map[string]SCLVMVolumeGroups,
 	pvcRequests map[string]PVCRequest,
 ) (bool, string) {
+	log = log.Named("filterNodeForLocalPVCs")
+
 	// Get all LVGs on this node via field indexer
 	nodeLVGs, err := getLVGsOnNode(ctx, cl, nodeName)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[filterNodeForLocalPVCs] unable to get LVGs for node %s", nodeName))
+		log.Error(fmt.Sprintf("unable to get LVGs for node %s", nodeName), logger.Err(err))
 		return false, fmt.Sprintf("unable to get LVGs for node %s: %v", nodeName, err)
 	}
 
 	if len(nodeLVGs) == 0 {
-		log.Debug(fmt.Sprintf("[filterNodeForLocalPVCs] node %s does not have any LVMVolumeGroups", nodeName))
+		log.Debug(fmt.Sprintf("node %s does not have any LVMVolumeGroups", nodeName))
 		return false, fmt.Sprintf("node %s does not have any LVMVolumeGroups", nodeName)
 	}
 
@@ -406,12 +413,12 @@ func filterNodeForLocalPVCs(
 		key := storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType)
 		hasSpace, err := checkPoolHasSpace(ctx, cl, schedulerCache, key, pvcReq.RequestedSize)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[filterNodeForLocalPVCs] unable to check space for %s", key.String()))
+			log.Error(fmt.Sprintf("unable to check space for %s", key.String()), logger.Err(err))
 			return false, fmt.Sprintf("error checking space for LVG %s: %v", commonLVG.Name, err)
 		}
 
 		if !hasSpace {
-			log.Trace(fmt.Sprintf("[filterNodeForLocalPVCs] %s does not have enough space for PVC %s (requested: %s)", key.String(), pvc.Name, resource.NewQuantity(pvcReq.RequestedSize, resource.BinarySI)))
+			log.Trace(fmt.Sprintf("%s does not have enough space for PVC %s (requested: %s)", key.String(), pvc.Name, resource.NewQuantity(pvcReq.RequestedSize, resource.BinarySI)))
 			return false, fmt.Sprintf("LVMVolumeGroup %s does not have enough space for PVC %s", commonLVG.Name, pvc.Name)
 		}
 	}
@@ -437,6 +444,8 @@ func createReservations(
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 ) error {
+	log = log.Named("createReservations")
+
 	if filteredNodeNames == nil || len(*filteredNodeNames) == 0 {
 		return nil
 	}
@@ -446,7 +455,7 @@ func createReservations(
 
 		// Only create reservations for local PVCs; replicated PVCs use a different mechanism
 		if sc.Provisioner != consts.SdsLocalVolumeProvisioner {
-			log.Debug(fmt.Sprintf("[createReservations] PVC %s uses provisioner %s, skipping", pvc.Name, sc.Provisioner))
+			log.Debug(fmt.Sprintf("PVC %s uses provisioner %s, skipping", pvc.Name, sc.Provisioner))
 			continue
 		}
 
@@ -465,7 +474,7 @@ func createReservations(
 		for _, nodeName := range *filteredNodeNames {
 			nodeLVGs, err := getLVGsOnNode(ctx, cl, nodeName)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[createReservations] unable to get LVGs for node %s", nodeName))
+				log.Error(fmt.Sprintf("unable to get LVGs for node %s", nodeName), logger.Err(err))
 				continue
 			}
 
@@ -476,13 +485,13 @@ func createReservations(
 
 			key := storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType)
 			poolKeys = append(poolKeys, key)
-			log.Trace(fmt.Sprintf("[createReservations] PVC %s/%s will reserve space in %s (node %s)", pvc.Namespace, pvc.Name, key.String(), nodeName))
+			log.Trace(fmt.Sprintf("PVC %s/%s will reserve space in %s (node %s)", pvc.Namespace, pvc.Name, key.String(), nodeName))
 		}
 
 		if len(poolKeys) > 0 {
 			pvcKey := pvc.Namespace + "/" + pvc.Name
 			schedulerCache.AddReservation(pvcKey, defaultReservationTTL, pvcReq.RequestedSize, poolKeys)
-			log.Debug(fmt.Sprintf("[createReservations] reservation created for PVC %s: size=%d, pools=%d", pvcKey, pvcReq.RequestedSize, len(poolKeys)))
+			log.Debug(fmt.Sprintf("reservation created for PVC %s: size=%d, pools=%d", pvcKey, pvcReq.RequestedSize, len(poolKeys)))
 		}
 	}
 

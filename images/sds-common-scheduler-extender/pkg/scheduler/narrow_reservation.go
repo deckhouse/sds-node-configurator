@@ -22,12 +22,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
-	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/tracing"
 )
 
 func (s *scheduler) narrowReservation(w http.ResponseWriter, r *http.Request) {
-	servingLog := logger.WithTraceIDLogger(r.Context(), s.log).WithName("narrow-reservation")
+	servingLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("narrow-reservation")
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -38,7 +39,7 @@ func (s *scheduler) narrowReservation(w http.ResponseWriter, r *http.Request) {
 	reader := http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
 	err := json.NewDecoder(reader).Decode(&req)
 	if err != nil {
-		servingLog.Error(err, "unable to decode request")
+		servingLog.Error("unable to decode request", logger.Err(err))
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -55,7 +56,7 @@ func (s *scheduler) narrowReservation(w http.ResponseWriter, r *http.Request) {
 
 	ttl, err := time.ParseDuration(req.ReservationTTL)
 	if err != nil {
-		servingLog.Error(err, "unable to parse reservation TTL")
+		servingLog.Error("unable to parse reservation TTL", logger.Err(err))
 		http.Error(w, "invalid reservationTTL", http.StatusBadRequest)
 		return
 	}
@@ -76,7 +77,7 @@ func (s *scheduler) narrowReservation(w http.ResponseWriter, r *http.Request) {
 	response := NarrowReservationResponse{}
 	responseJSON, err := json.Marshal(response)
 	if err != nil {
-		servingLog.Error(err, "unable to marshal response")
+		servingLog.Error("unable to marshal response", logger.Err(err))
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -84,6 +85,6 @@ func (s *scheduler) narrowReservation(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("content-type", "application/json")
 	if _, err = w.Write(responseJSON); err != nil {
-		servingLog.Error(err, "unable to write response")
+		servingLog.Error("unable to write response", logger.Err(err))
 	}
 }
