@@ -115,6 +115,7 @@ func TestLVMFilterAlwaysRejectsUnownedLoopDevices(t *testing.T) {
 func TestOwnedLoopRegistry(t *testing.T) {
 	t.Run("remembering and forgetting", func(t *testing.T) {
 		withEmptyLoopRegistry(t)
+		utils.WithEmptySysBlockForTest(t)
 
 		utils.RememberOwnedLoop("/dev/loop3")
 		utils.RememberOwnedLoop("/dev/loop1")
@@ -134,6 +135,7 @@ func TestOwnedLoopRegistry(t *testing.T) {
 
 	t.Run("an empty registry yields the plain filter", func(t *testing.T) {
 		withEmptyLoopRegistry(t)
+		utils.WithEmptySysBlockForTest(t)
 		assert.Equal(t, internal.LVMGlobalFilter, utils.LVMGlobalFilterForOwnedLoops())
 	})
 }
@@ -146,6 +148,7 @@ func TestRefreshOwnedLoops(t *testing.T) {
 
 	t.Run("only the loops backed by a file this agent named are kept", func(t *testing.T) {
 		withEmptyLoopRegistry(t)
+		utils.WithEmptySysBlockForTest(t)
 		ctrl := gomock.NewController(t)
 		mc := mock_utils.NewMockCommands(ctrl)
 
@@ -168,6 +171,7 @@ func TestRefreshOwnedLoops(t *testing.T) {
 	// node's own storage disappeared".
 	t.Run("an unlinked backing file still identifies its owner", func(t *testing.T) {
 		withEmptyLoopRegistry(t)
+		utils.WithEmptySysBlockForTest(t)
 		ctrl := gomock.NewController(t)
 		mc := mock_utils.NewMockCommands(ctrl)
 
@@ -181,6 +185,7 @@ func TestRefreshOwnedLoops(t *testing.T) {
 
 	t.Run("a loop detached behind our back leaves the set", func(t *testing.T) {
 		withEmptyLoopRegistry(t)
+		utils.WithEmptySysBlockForTest(t)
 		utils.RememberOwnedLoop("/dev/loop0")
 		utils.RememberOwnedLoop("/dev/loop5")
 
@@ -200,6 +205,7 @@ func TestRefreshOwnedLoops(t *testing.T) {
 	// from the very scan about to decide whether they still exist.
 	t.Run("a failure keeps the previously known set", func(t *testing.T) {
 		withEmptyLoopRegistry(t)
+		utils.WithEmptySysBlockForTest(t)
 		utils.RememberOwnedLoop("/dev/loop0")
 
 		ctrl := gomock.NewController(t)

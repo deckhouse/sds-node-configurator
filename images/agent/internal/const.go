@@ -302,6 +302,13 @@ type (
 // only inputs this function has any business taking are canonical loop paths.
 var loopDevicePath = regexp.MustCompile(`^/dev/loop\d+$`)
 
+// pathlessMapPath is what a device the builder may reject by name looks like.
+// Same reasoning as loopDevicePath, and the same consequence for getting it
+// wrong: the value is spliced into a configuration string whose field separator
+// is `|`, so the charset is restricted rather than escaped. A multipath map is
+// reachable as /dev/dm-N and as /dev/mapper/<name>, and both are accepted here.
+var pathlessMapPath = regexp.MustCompile(`^/dev/(dm-\d+|mapper/[A-Za-z0-9_.+-]+)$`)
+
 // LVMGlobalFilterAcceptingLoops builds the `lvm --config` filter that rejects
 // foreign devices as LVMGlobalFilter does, but first accepts the loop devices
 // named in loops.
@@ -317,7 +324,25 @@ var loopDevicePath = regexp.MustCompile(`^/dev/loop\d+$`)
 // mangled filter value makes EVERY lvm command fail with "Invalid filter pattern"
 // and takes the whole node's storage with it.
 func LVMGlobalFilterAcceptingLoops(loops []string) string {
-	if len(loops) == 0 {
+	return LVMGlobalFilterFor(loops, nil)
+}
+
+// LVMGlobalFilterFor builds the same filter and additionally rejects the devices
+// named in rejectDevices by exact path.
+//
+// Its caller passes multipath maps that have lost every path. Those must be
+// rejected by name and not by a blanket device-mapper rule: a Volume Group on a
+// SAN LUN is a supported layout, so healthy multipath devices have to stay
+// visible. Reading a pathless map blocks in the kernel instead of failing, and
+// the blocked reader holds the map open, which is what eventually prevents the
+// volume from ever being detached from the node - see
+// utils.PathlessMultipathDevices for the full chain.
+//
+// Rejects are emitted after the loop accepts and before the static foreign-device
+// rejects. Order among rejects does not matter; order against the accepts does,
+// and no device can be in both lists.
+func LVMGlobalFilterFor(loops, rejectDevices []string) string {
+	if len(loops) == 0 && len(rejectDevices) == 0 {
 		return LVMGlobalFilter
 	}
 
@@ -329,6 +354,14 @@ func LVMGlobalFilterAcceptingLoops(loops []string) string {
 		}
 		b.WriteString(`"a|^`)
 		b.WriteString(loop)
+		b.WriteString(`$|",`)
+	}
+	for _, dev := range rejectDevices {
+		if !pathlessMapPath.MatchString(dev) {
+			continue
+		}
+		b.WriteString(`"r|^`)
+		b.WriteString(dev)
 		b.WriteString(`$|",`)
 	}
 	b.WriteString(lvmForeignDeviceRejects)

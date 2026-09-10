@@ -16,6 +16,8 @@ limitations under the License.
 
 package utils
 
+import "testing"
+
 // This file is compiled only for tests of this package. It exists because the
 // generated command mocks live in internal/mock_utils, which imports this package
 // — so a test that needs a mocked Commands has to be in the external utils_test
@@ -24,3 +26,23 @@ package utils
 // ReTagForTest exposes reTag, whose ownership gate is what keeps the agent from
 // rewriting the LVM tags of a loop-backed Volume Group it does not own.
 var ReTagForTest = reTag
+
+// WithEmptySysBlockForTest points the pathless-multipath scan at an empty tree
+// for the duration of the test.
+//
+// Without it LVMGlobalFilterForOwnedLoops depends on the machine running the
+// test: a box with a SAN attached can carry multipath maps whose paths are gone,
+// and those legitimately add reject rules to the filter, so an assertion on the
+// exact filter string would fail there and nowhere else.
+func WithEmptySysBlockForTest(tb testing.TB) {
+	tb.Helper()
+
+	saved := sysBlockPath
+	sysBlockPath = tb.TempDir()
+	ResetPathlessMultipathCache()
+
+	tb.Cleanup(func() {
+		sysBlockPath = saved
+		ResetPathlessMultipathCache()
+	})
+}
