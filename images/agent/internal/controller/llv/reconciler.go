@@ -711,6 +711,14 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 	}
 
 	if cleanupMethodPtr := llv.Spec.VolumeCleanup; cleanupMethodPtr != nil {
+		// staticcheck reports SA4023 on the next line when the linter runs with
+		// -tags=ce, and it is right about that edition: the CE cleanupVolume
+		// (reconciler_ce.go) is a stub that always returns "volume cleanup is not
+		// supported in your edition", so there the comparison cannot be false. The
+		// check has to stay all the same — under ee the call does the actual cleanup
+		// and is expected to succeed — and in CE this branch is exactly what reports
+		// the unsupported request back to the user.
+		//nolint:staticcheck // SA4023: unconditionally non-nil only in the CE stub
 		if shouldRequeue, err := r.cleanupVolume(ctx, llv, lv, vgName, *cleanupMethodPtr); err != nil {
 			return shouldRequeue, err
 		}
@@ -827,7 +835,7 @@ func (r *Reconciler) validateLVMLogicalVolume(llv *v1alpha1.LVMLogicalVolume, lv
 	// if a specified Thick LV name matches the existing Thin one
 	lv := r.sdsCache.FindLV(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.ActualLVNameOnTheNode)
 	if lv != nil && !checkIfLVBelongsToLLV(llv, &lv.Data) {
-		reason.WriteString(fmt.Sprintf("Specified LV %s is already created and it is doesn't match the one on the node.", lv.Data.LVName))
+		fmt.Fprintf(&reason, "Specified LV %s is already created and it is doesn't match the one on the node.", lv.Data.LVName)
 	}
 
 	if reason.Len() > 0 {

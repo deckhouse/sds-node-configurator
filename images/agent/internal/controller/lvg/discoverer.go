@@ -645,7 +645,7 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 			candidate, exist := candidateMap[lvg.Spec.ActualVGNameOnTheNode]
 			if !exist {
 				log.Warn(fmt.Sprintf("the LVMVolumeGroup %s misses its VG %s", lvg.Name, lvg.Spec.ActualVGNameOnTheNode))
-				messageBldr.WriteString(fmt.Sprintf("Unable to find VG %s (it should be created with special tag %s). ", lvg.Spec.ActualVGNameOnTheNode, internal.LVMTags[0]))
+				fmt.Fprintf(&messageBldr, "Unable to find VG %s (it should be created with special tag %s). ", lvg.Spec.ActualVGNameOnTheNode, internal.LVMTags[0])
 			} else {
 				// candidate exists, check thin pools
 				candidateTPs := make(map[string]internal.LVMVGStatusThinPool, len(candidate.StatusThinPools))
@@ -657,7 +657,7 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 				for i, statusTp := range lvg.Status.ThinPools {
 					if candidateTp, exist := candidateTPs[statusTp.Name]; !exist {
 						log.Warn(fmt.Sprintf("the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, statusTp.Name))
-						messageBldr.WriteString(fmt.Sprintf("Unable to find ThinPool %s. ", statusTp.Name))
+						fmt.Fprintf(&messageBldr, "Unable to find ThinPool %s. ", statusTp.Name)
 						lvg.Status.ThinPools[i].Ready = false
 					} else {
 						extentSize := extentSizeForThinPoolAlign(&lvg, nil)
@@ -665,7 +665,7 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 						isFullVG := vgTpDiff >= 0 && vgTpDiff <= extentSize.Value()
 						if !isFullVG && candidateTp.ActualSize.Value()+extentSize.Value() < statusTp.ActualSize.Value() {
 							log.Warn(fmt.Sprintf("the LVMVolumeGroup %s ThinPool %s size %s is less than status one %s", lvg.Name, statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String()))
-							messageBldr.WriteString(fmt.Sprintf("ThinPool %s on the node has size %s which is less than status one %s. ", statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String()))
+							fmt.Fprintf(&messageBldr, "ThinPool %s on the node has size %s which is less than status one %s. ", statusTp.Name, candidateTp.ActualSize.String(), statusTp.ActualSize.String())
 						}
 					}
 				}

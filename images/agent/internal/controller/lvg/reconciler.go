@@ -1269,7 +1269,7 @@ func (r *Reconciler) validateLVGForCreateFunc(
 		if !bd.Status.Consumable {
 			log.Warn(fmt.Sprintf("BlockDevice %s is not consumable", bd.Name))
 			log.Trace(fmt.Sprintf("BlockDevice name: %s, status: %+v", bd.Name, bd.Status))
-			reason.WriteString(fmt.Sprintf("BlockDevice %s is not consumable. ", bd.Name))
+			fmt.Fprintf(&reason, "BlockDevice %s is not consumable. ", bd.Name)
 		}
 	}
 
@@ -1293,18 +1293,18 @@ func (r *Reconciler) validateLVGForCreateFunc(
 			}
 
 			if tpRequestedSize.Value() == 0 {
-				reason.WriteString(fmt.Sprintf("Thin-pool %s has zero size. ", tp.Name))
+				fmt.Fprintf(&reason, "Thin-pool %s has zero size. ", tp.Name)
 				continue
 			}
 
 			alignedTpSize, alignErr := alignThinPoolSizeForValidation(tp.Size, tpRequestedSize, extentSizeForThinPoolAlign(lvg, nil))
 			if alignErr != nil {
-				reason.WriteString(fmt.Sprintf("Unable to align thin-pool %s size: %s. ", tp.Name, alignErr.Error()))
+				fmt.Fprintf(&reason, "Unable to align thin-pool %s size: %s. ", tp.Name, alignErr.Error())
 				continue
 			}
 			if alignedTpSize.Value() >= totalVGSize.Value() {
 				if len(lvg.Spec.ThinPools) > 1 {
-					reason.WriteString(fmt.Sprintf("Thin-pool %s requested size of full VG space, but there is any other thin-pool. ", tp.Name))
+					fmt.Fprintf(&reason, "Thin-pool %s requested size of full VG space, but there is any other thin-pool. ", tp.Name)
 				}
 			}
 
@@ -1315,7 +1315,7 @@ func (r *Reconciler) validateLVGForCreateFunc(
 		if totalThinPoolSize > totalVGSize.Value() {
 			log.Trace(fmt.Sprintf("total thin pool size: %s, total vg size: %s", resource.NewQuantity(totalThinPoolSize, resource.BinarySI).String(), totalVGSize.String()))
 			log.Warn(fmt.Sprintf("requested thin pool size is more than VG total size for the LVMVolumeGroup %s", lvg.Name))
-			reason.WriteString(fmt.Sprintf("Required space for thin-pools %d is more than VG size %d.", totalThinPoolSize, totalVGSize.Value()))
+			fmt.Fprintf(&reason, "Required space for thin-pools %d is more than VG size %d.", totalThinPoolSize, totalVGSize.Value())
 		}
 	}
 
@@ -1367,7 +1367,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 				for _, d := range n.Devices {
 					if d.BlockDevice == bd.Name {
 						log.Warn(fmt.Sprintf("BlockDevice %s misses the PV %s. That might be because the corresponding device was removed from the node. Unable to validate BlockDevices", bd.Name, bd.Status.Path))
-						reason.WriteString(fmt.Sprintf("BlockDevice %s misses the PV %s (that might be because the device was removed from the node). ", bd.Name, bd.Status.Path))
+						fmt.Fprintf(&reason, "BlockDevice %s misses the PV %s (that might be because the device was removed from the node). ", bd.Name, bd.Status.Path)
 					}
 
 					if reason.Len() == 0 {
@@ -1383,7 +1383,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 			}
 
 			if !bd.Status.Consumable {
-				reason.WriteString(fmt.Sprintf("BlockDevice %s is not consumable. ", bd.Name))
+				fmt.Fprintf(&reason, "BlockDevice %s is not consumable. ", bd.Name)
 				continue
 			}
 
@@ -1463,7 +1463,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 			lv := r.sdsCache.FindLV(lvg.Spec.ActualVGNameOnTheNode, tp.Name)
 			if lv != nil {
 				if !isThinPool(lv.Data) {
-					reason.WriteString(fmt.Sprintf("LV %s is already created on the node and it is not a thin-pool", lv.Data.LVName))
+					fmt.Fprintf(&reason, "LV %s is already created on the node and it is not a thin-pool", lv.Data.LVName)
 					continue
 				}
 
@@ -1479,7 +1479,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 
 		vg := r.sdsCache.FindVG(lvg.Spec.ActualVGNameOnTheNode)
 		if vg == nil {
-			reason.WriteString(fmt.Sprintf("Missed VG %s in the cache", lvg.Spec.ActualVGNameOnTheNode))
+			fmt.Fprintf(&reason, "Missed VG %s in the cache", lvg.Spec.ActualVGNameOnTheNode)
 			return false, reason.String(), issues
 		}
 
@@ -1493,20 +1493,20 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 			}
 
 			if tpRequestedSize.Value() == 0 {
-				reason.WriteString(fmt.Sprintf("Thin-pool %s has zero size. ", specTp.Name))
+				fmt.Fprintf(&reason, "Thin-pool %s has zero size. ", specTp.Name)
 				continue
 			}
 
 			log.Debug(fmt.Sprintf("the LVMVolumeGroup %s thin-pool %s requested size %s, Status VG size %s", lvg.Name, specTp.Name, tpRequestedSize.String(), lvg.Status.VGSize.String()))
 			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentSizeForThinPoolAlign(lvg, vg))
 			if alignErr != nil {
-				reason.WriteString(fmt.Sprintf("Unable to align thin-pool %s size: %s. ", specTp.Name, alignErr.Error()))
+				fmt.Fprintf(&reason, "Unable to align thin-pool %s size: %s. ", specTp.Name, alignErr.Error())
 				continue
 			}
 			if alignedTpSize.Value() >= newTotalVGSize.Value() {
 				hasFullThinPool = true
 				if len(lvg.Spec.ThinPools) > 1 {
-					reason.WriteString(fmt.Sprintf("Thin-pool %s requests size of full VG space, but there are any other thin-pools. ", specTp.Name))
+					fmt.Fprintf(&reason, "Thin-pool %s requests size of full VG space, but there are any other thin-pools. ", specTp.Name)
 				}
 			} else {
 				if actualThinPool, created := actualThinPools[specTp.Name]; !created {
@@ -1520,7 +1520,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 					extentSize := extentSizeForThinPoolAlign(lvg, vg)
 					if actualThinPool.LVSize.Value()-alignedTpSize.Value() > extentSize.Value() {
 						log.Debug(fmt.Sprintf("the LVMVolumeGroup %s Spec.ThinPool %s size %s is less than Status one: %s", lvg.Name, specTp.Name, tpRequestedSize.String(), actualThinPool.LVSize.String()))
-						reason.WriteString(fmt.Sprintf("Requested Spec.ThinPool %s size %s is less than actual one %s. ", specTp.Name, tpRequestedSize.String(), actualThinPool.LVSize.String()))
+						fmt.Fprintf(&reason, "Requested Spec.ThinPool %s size %s is less than actual one %s. ", specTp.Name, tpRequestedSize.String(), actualThinPool.LVSize.String())
 						continue
 					}
 
@@ -1719,7 +1719,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 			alignedTpSize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentSizeForThinPoolAlign(lvg, &vg))
 			if alignErr != nil {
 				log.Error(fmt.Sprintf("unable to align thin-pool %s size for LVMVolumeGroup %s", specTp.Name, lvg.Name), logger.Err(alignErr))
-				errs.WriteString(fmt.Sprintf("unable to align thin-pool %s size, err: %s. ", specTp.Name, alignErr.Error()))
+				fmt.Fprintf(&errs, "unable to align thin-pool %s size, err: %s. ", specTp.Name, alignErr.Error())
 				continue
 			}
 			if alignedTpSize.Value() >= lvg.Status.VGSize.Value() {
@@ -1734,7 +1734,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 			if err != nil {
 				r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "lvcreate").Inc()
 				log.Error(fmt.Sprintf("unable to create thin-pool %s of the LVMVolumeGroup %s, cmd: %s", specTp.Name, lvg.Name, cmd), logger.Err(err))
-				errs.WriteString(fmt.Sprintf("unable to create thin-pool %s, err: %s. ", specTp.Name, err.Error()))
+				fmt.Fprintf(&errs, "unable to create thin-pool %s, err: %s. ", specTp.Name, err.Error())
 				continue
 			}
 
@@ -1743,7 +1743,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 			alignedTpSizeForResize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentSizeForThinPoolAlign(lvg, &vg))
 			if alignErr != nil {
 				log.Error(fmt.Sprintf("unable to align thin-pool %s size for LVMVolumeGroup %s", specTp.Name, lvg.Name), logger.Err(alignErr))
-				errs.WriteString(fmt.Sprintf("unable to align thin-pool %s size, err: %s. ", specTp.Name, alignErr.Error()))
+				fmt.Fprintf(&errs, "unable to align thin-pool %s size, err: %s. ", specTp.Name, alignErr.Error())
 				continue
 			}
 			if actualTp.LVSize.Value() >= alignedTpSizeForResize.Value() {
@@ -1762,7 +1762,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 			err = r.extendThinPool(lvg, specTp)
 			if err != nil {
 				log.Error(fmt.Sprintf("unable to resize thin-pool %s of the LVMVolumeGroup %s", specTp.Name, lvg.Name), logger.Err(err))
-				errs.WriteString(fmt.Sprintf("unable to resize thin-pool %s, err: %s. ", specTp.Name, err.Error()))
+				fmt.Fprintf(&errs, "unable to resize thin-pool %s, err: %s. ", specTp.Name, err.Error())
 				continue
 			}
 		}
@@ -1809,7 +1809,7 @@ func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolu
 				if err != nil {
 					r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "pvresize").Inc()
 					log.Error(fmt.Sprintf("unable to resize PV %s of BlockDevice %s of LVMVolumeGroup %s, cmd: %s", d.Path, d.BlockDevice, lvg.Name, cmd), logger.Err(err))
-					errs.WriteString(fmt.Sprintf("unable to resize PV %s, err: %s. ", d.Path, err.Error()))
+					fmt.Fprintf(&errs, "unable to resize PV %s, err: %s. ", d.Path, err.Error())
 					continue
 				}
 

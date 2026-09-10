@@ -200,9 +200,9 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, r *http.Request) {
 	activeCount := len(reservations) - expiredCount
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Filter request count: %d, Prioritize request count: %d, Filter-and-score request count: %d\n", s.filterRequestCount, s.prioritizeRequestCount, s.filterAndScoreRequestCount))
-	sb.WriteString(fmt.Sprintf("Pools: %d, Reservations: %d (active: %d, expired: %d)\n", len(pools), len(reservations), activeCount, expiredCount))
-	sb.WriteString(fmt.Sprintf("Total reserved across all pools: %s\n", resource.NewQuantity(totalReserved, resource.BinarySI).String()))
+	fmt.Fprintf(&sb, "Filter request count: %d, Prioritize request count: %d, Filter-and-score request count: %d\n", s.filterRequestCount, s.prioritizeRequestCount, s.filterAndScoreRequestCount)
+	fmt.Fprintf(&sb, "Pools: %d, Reservations: %d (active: %d, expired: %d)\n", len(pools), len(reservations), activeCount, expiredCount)
+	fmt.Fprintf(&sb, "Total reserved across all pools: %s\n", resource.NewQuantity(totalReserved, resource.BinarySI).String())
 
 	poolsForJSON := make(map[string]int64, len(pools))
 	for k, v := range pools {
@@ -210,7 +210,7 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := json.Marshal(poolsForJSON)
 	if err == nil {
-		sb.WriteString(fmt.Sprintf("Pools detail: %s\n", string(result)))
+		fmt.Fprintf(&sb, "Pools detail: %s\n", string(result))
 	}
 
 	if _, err := w.Write([]byte(sb.String())); err != nil {
