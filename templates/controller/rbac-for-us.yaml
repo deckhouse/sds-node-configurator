@@ -1,5 +1,15 @@
 {{- /* RBAC */ -}}
+{{- /*
+  controllerMetricsProxyPort is not used as a port here. It is how
+  helm_lib_module_controller_rbac learns that the pod carries a kube-rbac-proxy in
+  front of the metrics, and therefore needs the ClusterRoleBinding to d8:rbac-proxy
+  that lets the sidecar create the TokenReview and SubjectAccessReview every scrape
+  is authorised with. Keep it in step with the value given to
+  helm_lib_module_controller_manifests: without it the proxy fails closed on every
+  scrape and the only symptom is up == 0 and a permanent TargetDown.
+*/ -}}
 {{- $rbacConfig := dict
+  "controllerMetricsProxyPort" (int .Values.sdsNodeConfigurator.internal.controllerMetricsProxyPort)
   "roleRules" (list
     (dict "apiGroups" (list "") "resources" (list "events") "verbs" (list "create" "patch"))
   )
