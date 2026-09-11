@@ -64,8 +64,13 @@ spec:
         app: sds-common-scheduler-extender
     spec:
       {{- include "helm_lib_priority_class" (tuple . "system-cluster-critical") | nindent 6 }}
-      {{- include "helm_lib_node_selector" (tuple . "system") | nindent 6 }}
-      {{- include "helm_lib_tolerations" (tuple . "system") | nindent 6 }}
+      {{- /* The extender is consulted by kube-scheduler on every scheduling attempt of the modules
+             that register it, so it runs next to its only client — the control plane. The "master"
+             selector falls back to system nodes in clusters that expose no master role, and the
+             "any-node" tolerations are what actually let the pod onto a tainted control-plane node:
+             the "system" strategy tolerates neither the control-plane taint nor custom ones. */ -}}
+      {{- include "helm_lib_node_selector" (tuple . "master") | nindent 6 }}
+      {{- include "helm_lib_tolerations" (tuple . "any-node") | nindent 6 }}
       {{- include "helm_lib_module_pod_security_context_run_as_user_nobody" . | nindent 6 }}
       {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "sds-common-scheduler-extender")) | nindent 6 }}
       imagePullSecrets:
