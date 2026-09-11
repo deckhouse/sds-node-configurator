@@ -1,0 +1,27 @@
+date: "2026-09-11"
+
+summary: "Controller and scheduler extender metrics are now published through a kube-rbac-proxy, and percent-sized LVMLogicalVolumes are no longer rejected or left in Failed once they reach their requested size."
+
+highlights:
+  - "The `/metrics` endpoints of the controller and the scheduler extender are no longer reachable without authentication: both bind on `127.0.0.1` and a kube-rbac-proxy publishes them, so a scrape needs `get` on `deployments/prometheus-metrics`."
+  - "A percent-sized `LVMLogicalVolume` — `100%FREE` of a whole volume group, the shape sds-elastic uses for one OSD per disk — is no longer refused at creation and no longer parked in `Failed` with `unable to extend LV, err: not enough space`."
+  - "An LVM scan that reaches a multipath map with no remaining paths no longer blocks the agent, so the node keeps reporting its block devices and its RWO volumes can move to another node."
+
+fixes:
+  - "`LVMLogicalVolume` with a percentage in `spec.size` is computed against a capacity LVM reports as the raw device sum, which is not extent-aligned. Rounding the request up landed one extent past that capacity, so a request for 100% of a volume group was judged not to fit into it: creation was refused, and the extender put an already full-size volume into `Failed`. Percent sizes are now floored to the extent boundary."
+  - "An `LVMLogicalVolume` that had been marked `Failed` because the group's free space still lagged behind the just-created LV stayed `Failed` for the rest of its life, since later passes returned early on a volume that was already at its requested size. Such a volume now moves to `Created`."
+  - "The agent could report `block device size is invalid` for a healthy device: the ioctl output variable lived on the stack and a stack growth during the call moved it, so the size was written to the old address and stayed zero."
+  - "An LVM scan that reached a multipath map whose paths were all gone blocked in the kernel instead of failing, and every stuck scan held the map open. That stalled the agent, kept `multipath -f` from removing the map, and left the volume in `Node.status.volumesInUse`, so it could not be attached elsewhere. Such maps — a `mpath-` device-mapper UUID with no slaves — are now rejected in the `global_filter` of every LVM command."
+
+improvements:
+  - "Metrics of the scheduler extender are collected for the first time: the manager had always bound the port, but nothing declared or scraped it."
+  - "`utils_commands_execution_count_total` and `utils_commands_errors_count_total` are exported at last. Both were incremented in about forty places in the agent and the controller but never registered, so nothing they counted was visible."
+  - "All binaries of the module log through one shared logger. The name of the component that emitted a record is now a field of the record (`logger`) rather than a bracketed prefix inside the message text."
+
+security:
+  - "Anonymous access to the controller and scheduler extender metrics is closed. Previously the endpoints authenticated no one, were reachable from every pod in the cluster, and the ServiceMonitor sent the Prometheus ServiceAccount token to them over plain HTTP."
+  - "`golang.org/x/crypto` used by the module hooks is updated to 0.56.0, which closes CVE-2026-56854 (critical, authentication bypass in `x/crypto/ssh`), CVE-2026-56855 and CVE-2026-78662."
+
+upgrade_notes:
+  - "Nothing has to be done by hand for metrics: the ServiceMonitor shipped with the module already scrapes the proxy over HTTPS with a token. Only a collector of your own that used to read the controller metrics directly over HTTP has to be pointed at the proxy port and granted `get` on `deployments/prometheus-metrics`."
+  - "Log records changed shape, so a filter that matched the component name inside the message text has to match the `logger` field instead."
