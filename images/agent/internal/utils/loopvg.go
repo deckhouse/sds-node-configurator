@@ -162,8 +162,6 @@ func classifyManagedTaggedLoopVG(
 	vg internal.VGData,
 	loopPVs []string,
 ) LoopVGVerdict {
-	log = log.Named("ClassifyLoopVGs")
-
 	unreadable := false
 	for _, loop := range loopPVs {
 		backing, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (internal.LoopBackingFile, error) {
@@ -210,8 +208,6 @@ func classifyManagedTaggedLoopVG(
 // tag is not an ownership proof for a loop-backed Volume Group — see the file
 // comment.
 func SkipUnownedLoopVGs(log logger.Logger, action string, vgs []internal.VGData, verdicts LoopVGVerdicts) []internal.VGData {
-	log = log.Named("SkipUnownedLoopVGs")
-
 	out := make([]internal.VGData, 0, len(vgs))
 	for _, vg := range vgs {
 		if verdicts.IsUnowned(vg.VGUUID) {

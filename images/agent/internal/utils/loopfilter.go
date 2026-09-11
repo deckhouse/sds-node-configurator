@@ -172,7 +172,7 @@ func RefreshOwnedLoops(ctx context.Context, log logger.Logger, commands Commands
 	ownedLoops.mu.Unlock()
 
 	if previous != len(fresh) {
-		log.Named("RefreshOwnedLoops").Debug(fmt.Sprintf("the agent's own loop devices: %s (was %d, now %d)",
+		log.Debug(fmt.Sprintf("the agent's own loop devices: %s (was %d, now %d)",
 			strings.Join(OwnedLoops(), ", "), previous, len(fresh)))
 	}
 

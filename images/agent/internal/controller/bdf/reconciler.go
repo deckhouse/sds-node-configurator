@@ -71,7 +71,7 @@ func NewReconciler(
 ) *Reconciler {
 	return &Reconciler{
 		client:   client,
-		log:      log,
+		log:      log.Named(ReconcilerName),
 		metrics:  metrics,
 		discover: discover,
 		cfg:      cfg,

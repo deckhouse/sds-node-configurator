@@ -93,7 +93,7 @@ func NewDiscoverer(
 ) *Discoverer {
 	return &Discoverer{
 		cl:                      cl,
-		log:                     log,
+		log:                     log.Named(DiscovererName),
 		bdCl:                    repository.NewBDClient(cl, metrics),
 		blockDeviceFilterClient: repository.NewBlockDeviceFilterClient(cl, metrics),
 		metrics:                 metrics,
@@ -108,7 +108,7 @@ func (d *Discoverer) Name() string {
 }
 
 func (d *Discoverer) Discover(ctx context.Context) (controller.Result, error) {
-	log := d.log.Named("RunBlockDeviceController")
+	log := d.log.Named("discover")
 
 	log.Info("reconciler starts BlockDevice resources reconciliation")
 
@@ -125,7 +125,7 @@ func (d *Discoverer) Discover(ctx context.Context) (controller.Result, error) {
 }
 
 func (d *Discoverer) blockDeviceReconcile(ctx context.Context) (bool, error) {
-	log := d.log.Named("RunBlockDeviceController")
+	log := d.log
 
 	reconcileStart := time.Now()
 
@@ -160,7 +160,7 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) (bool, error) {
 	blockDevicesToDelete := make([]*v1alpha1.BlockDevice, 0, len(candidates))
 
 	// create new API devices
-	runBlockDeviceControllerLog := d.log.Named("RunBlockDeviceController")
+	runBlockDeviceControllerLog := d.log
 	for _, candidate := range candidates {
 		blockDevice, exist := apiBlockDevices[candidate.Name]
 		if !exist {
@@ -246,7 +246,7 @@ func (d *Discoverer) removeDeprecatedAPIDevices(
 	candidates []internal.BlockDeviceCandidate,
 	apiBlockDevices map[string]v1alpha1.BlockDevice,
 ) {
-	log := d.log.Named("RunBlockDeviceController")
+	log := d.log
 
 	actualCandidates := make(map[string]struct{}, len(candidates))
 	for _, candidate := range candidates {
@@ -341,7 +341,7 @@ func (d *Discoverer) markBlockDeviceMissing(ctx context.Context, device v1alpha1
 		return err
 	}
 
-	d.log.Named("RunBlockDeviceController").Warn(fmt.Sprintf(
+	d.log.Warn(fmt.Sprintf(
 		"BlockDevice %q marked %s=%s: %s",
 		device.Name, v1alpha1.BlockDeviceConditionMissing, newCondition.Status, newCondition.Message,
 	))
@@ -349,7 +349,7 @@ func (d *Discoverer) markBlockDeviceMissing(ctx context.Context, device v1alpha1
 }
 
 func (d *Discoverer) getBlockDeviceCandidates() ([]internal.BlockDeviceCandidate, error) {
-	log := d.log.Named("GetBlockDeviceCandidates")
+	log := d.log
 
 	var candidates []internal.BlockDeviceCandidate
 	devices, _ := d.sdsCache.GetDevices()
@@ -517,7 +517,7 @@ func orphanedParents(devices []internal.Device, kNamesInList map[string]struct{}
 // The recovery gets a line of its own, because otherwise the only record of an
 // orphan going away is the absence of a message.
 func (d *Discoverer) reportOrphanedParents(devices []internal.Device, kNamesInList map[string]struct{}) {
-	log := d.log.Named("filterDevices")
+	log := d.log
 
 	orphans := orphanedParents(devices, kNamesInList)
 
@@ -566,7 +566,7 @@ func (d *Discoverer) reportOrphanedParents(devices []internal.Device, kNamesInLi
 // costs one undiscovered device, where failing the list used to cost the node
 // every BlockDevice it had.
 func (d *Discoverer) reportUnusableDevices(unusable []internal.Device) {
-	log := d.log.Named("filterDevices")
+	log := d.log
 
 	for _, device := range unusable {
 		if device.KName == "" {
@@ -592,7 +592,7 @@ func (d *Discoverer) reportUnusableDevices(unusable []internal.Device) {
 // In mpath case we should copy serial and wwn from the parent device
 // Also mpath devices appears once but their parents multiple times. So only way to filter them out is to remove them by "fstype": "mpath_member"
 func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device, error) {
-	log := d.log.Named("filterDevices")
+	log := d.log
 
 	log.Trace(fmt.Sprintf("devices before type filtration: %+v", devices))
 
@@ -727,7 +727,7 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 	filteredDevices = slices.DeleteFunc(
 		filteredDevices,
 		func(device internal.Device) bool {
-			log := d.log.Named("filterDevices")
+			log := d.log
 
 			if device.FSType == "mpath_member" {
 				log.Trace("filtered out", "name", device.Name, "kname", device.KName, "reason", "mpath_member")
@@ -800,7 +800,7 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 }
 
 func (d *Discoverer) createCandidateName(candidate internal.BlockDeviceCandidate, devices []internal.Device) string {
-	log := d.log.Named("CreateCandidateName")
+	log := d.log
 
 	if len(candidate.Serial) == 0 {
 		log.Trace(fmt.Sprintf("serial number is empty for device: %s", candidate.Path))

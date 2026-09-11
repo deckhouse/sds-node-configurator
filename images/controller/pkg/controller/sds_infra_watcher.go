@@ -51,10 +51,11 @@ func RunSdsInfraWatcher(
 	metrics monitoring.Metrics,
 	log logger.Logger,
 ) error {
-	log.Named("RunSdsInfraWatcher").Info("registering runnable with the manager")
+	log = log.Named(SdsInfraWatcherCtrlName)
+	log.Info("registering runnable with the manager")
 
 	return mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		log := log.Named("RunSdsInfraWatcher")
+		log := log
 
 		log.Info("starts the work")
 		cl := mgr.GetClient()

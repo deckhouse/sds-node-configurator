@@ -42,7 +42,7 @@ const (
 )
 
 func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
-	servingLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("filter")
+	servingLog := tracing.WithTraceIDLogger(r.Context(), s.log)
 
 	servingLog.Debug("starts the serving the request")
 
@@ -272,10 +272,6 @@ func filterNodes(
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 ) (*ExtenderFilterResult, error) {
-	log = log.Named("filterNodes")
-
-	log = log.Named("filterNodes")
-
 	// Separate PVCs by provisioner
 	localPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsLocalVolumeProvisioner)
 	replicatedPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsReplicatedVolumeProvisioner)
@@ -385,8 +381,6 @@ func filterNodeForLocalPVCs(
 	scLVGs map[string]SCLVMVolumeGroups,
 	pvcRequests map[string]PVCRequest,
 ) (bool, string) {
-	log = log.Named("filterNodeForLocalPVCs")
-
 	// Get all LVGs on this node via field indexer
 	nodeLVGs, err := getLVGsOnNode(ctx, cl, nodeName)
 	if err != nil {
@@ -444,8 +438,6 @@ func createReservations(
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 ) error {
-	log = log.Named("createReservations")
-
 	if filteredNodeNames == nil || len(*filteredNodeNames) == 0 {
 		return nil
 	}

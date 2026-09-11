@@ -63,7 +63,7 @@ func NewReconciler(
 ) controller.Reconciler[*v1alpha1.LVMVolumeGroup] {
 	return &Reconciler{
 		cl:  cl,
-		log: log,
+		log: log.Named(ReconcilerName),
 		lvgCl: repository.NewLVGClient(
 			cl,
 			log,
@@ -104,7 +104,7 @@ func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req controller.ReconcileRequest[*v1alpha1.LVMVolumeGroup],
 ) (controller.Result, error) {
-	log := r.log.Named("RunLVMLogicalVolumeExtenderWatcherController")
+	log := r.log
 
 	lvg := req.Object
 
@@ -126,7 +126,7 @@ func (r *Reconciler) Reconcile(
 }
 
 func (r *Reconciler) shouldLLVExtenderReconcileEvent(newLVG *v1alpha1.LVMVolumeGroup) bool {
-	log := r.log.Named("RunLVMLogicalVolumeExtenderWatcherController")
+	log := r.log
 
 	// for new LVMVolumeGroups
 	if reflect.DeepEqual(newLVG.Status, v1alpha1.LVMVolumeGroupStatus{}) {
@@ -151,7 +151,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
 ) bool {
-	log := r.log.Named("ReconcileLVMLogicalVolumeExtension")
+	log := r.log
 
 	log.Debug(fmt.Sprintf("tries to get LLV resources with percent size for the LVMVolumeGroup %s", lvg.Name))
 	llvs, err := r.getAllLLVsWithPercentSize(ctx, lvg.Name)

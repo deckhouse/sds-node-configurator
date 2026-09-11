@@ -135,6 +135,11 @@ func AddReconciler[T client.Object](
 
 	tname := t.Elem().Name()
 
+	// The watch handlers below log under the reconciler they feed, the same name
+	// the dispatcher and the reconciler itself use, so an event and the reconcile
+	// it triggers read as one component.
+	log = log.Named(reconciler.Name())
+
 	c, err := controller.New(
 		reconciler.Name(),
 		mgr,
@@ -160,6 +165,8 @@ func AddReconciler[T client.Object](
 					e event.TypedCreateEvent[T],
 					q workqueue.TypedRateLimitingInterface[reconcile.Request],
 				) {
+					log := log.Named("create")
+
 					if !reconciler.ShouldReconcileCreate(e.Object) {
 						log.Debug(fmt.Sprintf("CreateFunc skipped a request for the %s %s to the Reconcilers queue", tname, e.Object.GetName()))
 						return
@@ -177,6 +184,8 @@ func AddReconciler[T client.Object](
 					e event.TypedUpdateEvent[T],
 					q workqueue.TypedRateLimitingInterface[reconcile.Request],
 				) {
+					log := log.Named("update")
+
 					log.Info(fmt.Sprintf("UpdateFunc got a update event for the %s %s", tname, e.ObjectNew.GetName()))
 
 					if !reconciler.ShouldReconcileUpdate(e.ObjectOld, e.ObjectNew) {
@@ -218,7 +227,7 @@ func AddDiscoverer(
 
 func makeDiscovererDispatcher(log logger.Logger, discoverer Discoverer) reconcile.Func {
 	return reconcile.Func(func(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-		log.Named("DiscovererDispatcher").Info(fmt.Sprintf("%s discoverer starts", discoverer.Name()))
+		log.Named(discoverer.Name()).Info(fmt.Sprintf("%s discoverer starts", discoverer.Name()))
 
 		result, err := discoverer.Discover(ctx)
 
@@ -233,7 +242,7 @@ func makeReconcileDispatcher[T client.Object](
 ) reconcile.TypedReconciler[reconcile.Request] {
 	cl := mgr.GetClient()
 	return reconcile.Func(func(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-		log := log.Named("ReconcileDispatcher")
+		log := log.Named(reconciler.Name())
 
 		// load object being reconciled
 		log.Info(fmt.Sprintf("reconciler starts to reconcile the request %s", req.String()))

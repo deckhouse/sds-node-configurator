@@ -182,7 +182,7 @@ func NewReconciler(
 ) *Reconciler {
 	return &Reconciler{
 		cl:  cl,
-		log: log,
+		log: log.Named(ReconcilerName),
 		lvgCl: repository.NewLVGClient(
 			cl,
 			log,
@@ -221,7 +221,7 @@ func (r *Reconciler) ShouldReconcileCreate(obj *v1alpha1.LVMVolumeGroup) bool {
 
 // Reconcile implements controller.Reconciler.
 func (r *Reconciler) Reconcile(ctx context.Context, request controller.ReconcileRequest[*v1alpha1.LVMVolumeGroup]) (controller.Result, error) {
-	log := r.log.Named("RunLVMVolumeGroupWatcherController")
+	log := r.log.Named("reconcile")
 
 	log.Info(fmt.Sprintf("reconciler starts to reconcile the request %s", request.Object.Name))
 
@@ -343,7 +343,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 
 		valid, reason := validateSpecBlockDevices(lvg, blockDevices)
 		if !valid {
-			r.log.Named("RunLVMVolumeGroupController").Warn(fmt.Sprintf("validation failed for the LVMVolumeGroup %s, reason: %s", lvg.Name, reason))
+			r.log.Warn(fmt.Sprintf("validation failed for the LVMVolumeGroup %s, reason: %s", lvg.Name, reason))
 			err = r.lvgCl.UpdateLVGConditionIfNeeded(
 				ctx,
 				lvg,
@@ -437,7 +437,7 @@ func (r *Reconciler) runEventReconcile(
 	lvg *v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 ) (time.Duration, error) {
-	log := r.log.Named("runEventReconcile")
+	log := r.log
 
 	recType, vgStateKnown := r.identifyLVGReconcileFunc(ctx, lvg)
 
@@ -518,7 +518,7 @@ func (r *Reconciler) requeueIntervalIf(requeue bool) time.Duration {
 }
 
 func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
-	log := r.log.Named("reconcileLVGDeleteFunc")
+	log := r.log
 
 	log.Debug(fmt.Sprintf("starts to reconcile the LVMVolumeGroup %s", lvg.Name))
 	log.Debug(fmt.Sprintf("tries to add the condition %s status false to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
@@ -612,7 +612,7 @@ func (r *Reconciler) reconcileLVGDeleteFunc(ctx context.Context, lvg *v1alpha1.L
 // touched. cleanupFileDevices is safe on the second path by construction: it only
 // acts on paths whose basename carries this LVMVolumeGroup's name.
 func (r *Reconciler) finishLVGDeletion(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
-	log := r.log.Named("reconcileLVGDeleteFunc")
+	log := r.log
 
 	if err := r.cleanupFileDevices(ctx, lvg); err != nil {
 		log.Error(fmt.Sprintf("unable to clean up file devices for the LVMVolumeGroup %s", lvg.Name), logger.Err(err))
@@ -656,7 +656,7 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 	lvg *v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 ) (time.Duration, error) {
-	log := r.log.Named("reconcileLVGUpdateFunc")
+	log := r.log
 
 	log.Debug(fmt.Sprintf("starts to reconcile the LVMVolumeGroup %s", lvg.Name))
 
@@ -884,7 +884,7 @@ func (r *Reconciler) noProgressRequeueAfter(lvgName string) time.Duration {
 	if backoff < base {
 		backoff = base
 	}
-	r.log.Named("noProgressRequeueAfter").Debug(fmt.Sprintf("the LVMVolumeGroup %s has made no progress for %d consecutive round(s); retrying in %s", lvgName, streak, backoff))
+	r.log.Debug(fmt.Sprintf("the LVMVolumeGroup %s has made no progress for %d consecutive round(s); retrying in %s", lvgName, streak, backoff))
 	return backoff
 }
 
@@ -902,7 +902,7 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 	lvg *v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 ) (bool, error) {
-	log := r.log.Named("reconcileLVGCreateFunc")
+	log := r.log
 
 	log.Debug(fmt.Sprintf("starts to reconcile the LVMVolumeGroup %s", lvg.Name))
 
@@ -1012,7 +1012,7 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 }
 
 func (r *Reconciler) shouldUpdateLVGLabels(lvg *v1alpha1.LVMVolumeGroup, labelKey, labelValue string) bool {
-	log := r.log.Named("shouldUpdateLVGLabels")
+	log := r.log
 
 	if lvg.Labels == nil {
 		log.Debug(fmt.Sprintf("the LVMVolumeGroup %s has no labels.", lvg.Name))
@@ -1034,7 +1034,7 @@ func (r *Reconciler) shouldUpdateLVGLabels(lvg *v1alpha1.LVMVolumeGroup, labelKe
 }
 
 func (r *Reconciler) shouldLVGWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alpha1.LVMVolumeGroup) bool {
-	log := r.log.Named("shouldLVGWatcherReconcileUpdateEvent")
+	log := r.log
 
 	if !checkIfLVGBelongsToNode(newLVG, r.cfg.NodeName) {
 		return false
@@ -1092,7 +1092,7 @@ func (r *Reconciler) addLVGFinalizerIfNotExist(ctx context.Context, lvg *v1alpha
 }
 
 func (r *Reconciler) syncThinPoolsAllocationLimit(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) error {
-	log := r.log.Named("syncThinPoolsAllocationLimit")
+	log := r.log
 
 	updated := false
 
@@ -1148,7 +1148,7 @@ func (r *Reconciler) syncThinPoolsAllocationLimit(ctx context.Context, lvg *v1al
 // does not, so no delete decision can be made from the data at hand and the
 // caller must requeue without running any of them.
 func (r *Reconciler) deleteLVGIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) (deleted, waitForCache bool, err error) {
-	log := r.log.Named("RunLVMVolumeGroupWatcherController")
+	log := r.log
 
 	if lvg.DeletionTimestamp == nil {
 		return false, false, nil
@@ -1258,7 +1258,7 @@ func (r *Reconciler) validateLVGForCreateFunc(
 	lvg *v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 ) (bool, string) {
-	log := r.log.Named("validateLVGForCreateFunc")
+	log := r.log
 
 	reason := strings.Builder{}
 
@@ -1331,7 +1331,7 @@ func (r *Reconciler) validateLVGForUpdateFunc(
 	lvg *v1alpha1.LVMVolumeGroup,
 	blockDevices map[string]v1alpha1.BlockDevice,
 ) (bool, string, fileDeviceIssues) {
-	log := r.log.Named("validateLVGForUpdateFunc")
+	log := r.log
 
 	reason := strings.Builder{}
 	var issues fileDeviceIssues
@@ -1618,7 +1618,7 @@ func (r *Reconciler) shouldReconcileLVGByCreateFunc(ctx context.Context, lvg *v1
 // Before spec.fileDevices removed `loop` from LVMGlobalFilter such a Volume Group
 // was invisible here. See utils/loopvg.go.
 func (r *Reconciler) vgExistsOnNode(ctx context.Context, vgName string) (exists, known bool) {
-	log := r.log.Named("vgExistsOnNode")
+	log := r.log
 
 	type vgsResult struct {
 		vgs []internal.VGData
@@ -1687,7 +1687,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 	vg internal.VGData,
 	lvs []internal.LVData,
 ) error {
-	log := r.log.Named("ReconcileThinPoolsIfNeeded")
+	log := r.log
 
 	actualThinPools := make(map[string]internal.LVData, len(lvs))
 	for _, lv := range lvs {
@@ -1776,7 +1776,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 }
 
 func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) error {
-	log := r.log.Named("ResizePVIfNeeded")
+	log := r.log
 
 	if len(lvg.Status.Nodes) == 0 {
 		log.Warn(fmt.Sprintf("the LVMVolumeGroup %s nodes are empty. Wait for the next update", lvg.Name))
@@ -1834,7 +1834,7 @@ func (r *Reconciler) extendVGIfNeeded(
 	pvs []internal.PVData,
 	blockDevices map[string]v1alpha1.BlockDevice,
 ) error {
-	log := r.log.Named("ExtendVGIfNeeded")
+	log := r.log
 
 	for _, n := range lvg.Status.Nodes {
 		for _, d := range n.Devices {
@@ -1924,7 +1924,7 @@ func (r *Reconciler) getLVForVG(vgName string) []string {
 }
 
 func (r *Reconciler) deleteVGIfExist(vgName string) error {
-	log := r.log.Named("DeleteVGIfExist")
+	log := r.log
 
 	vgs, _ := r.sdsCache.GetVGs()
 	if !checkIfVGExist(vgName, vgs) {
@@ -2031,12 +2031,12 @@ func (r *Reconciler) triggerUdevForPaths(parent context.Context, paths []string)
 	r.log.Debug(cmd)
 	if err != nil {
 		r.metrics.UtilsCommandsErrorsCount(ReconcilerName, udevadmTriggerCmdLabel).Inc()
-		r.log.Named("triggerUdevForPaths").Warn(fmt.Sprintf("udevadm trigger failed for %v (non-fatal): %v, cmd: %s", paths, err, cmd))
+		r.log.Warn(fmt.Sprintf("udevadm trigger failed for %v (non-fatal): %v, cmd: %s", paths, err, cmd))
 	}
 }
 
 func (r *Reconciler) createVGComplex(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup, blockDevices map[string]v1alpha1.BlockDevice) (retErr error) {
-	log := r.log.Named("CreateVGComplex")
+	log := r.log
 
 	paths := extractPathsFromBlockDevices(nil, blockDevices)
 
@@ -2118,7 +2118,7 @@ func (r *Reconciler) updateVGTagIfNeeded(
 	lvg *v1alpha1.LVMVolumeGroup,
 	vg internal.VGData,
 ) (bool, error) {
-	log := r.log.Named("UpdateVGTagIfNeeded")
+	log := r.log
 
 	found, tagName := utils.ReadValueFromTags(vg.VGTags, internal.LVMVolumeGroupTag)
 	if found && lvg.Name != tagName {
@@ -2173,7 +2173,7 @@ func (r *Reconciler) updateVGTagIfNeeded(
 }
 
 func (r *Reconciler) extendThinPool(lvg *v1alpha1.LVMVolumeGroup, specThinPool v1alpha1.LVMVolumeGroupThinPoolSpec) error {
-	log := r.log.Named("ExtendThinPool")
+	log := r.log
 
 	volumeGroupFreeSpaceBytes := lvg.Status.VGSize.Value() - lvg.Status.AllocatedSize.Value()
 	tpRequestedSize, err := utils.GetRequestedSizeFromString(specThinPool.Size, lvg.Status.VGSize)

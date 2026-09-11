@@ -907,8 +907,6 @@ func (c *commands) ReTag(ctx context.Context, log logger.Logger, metrics *monito
 // gate below can be tested. The method reads through the same interface it
 // implements, which is otherwise impossible to stand in for.
 func reTag(ctx context.Context, c Commands, log logger.Logger, metrics *monitoring.Metrics, ctrlName string, cmdTimeout time.Duration) error {
-	log = log.Named("ReTag")
-
 	log.Debug("start establishing which VGs are the module's own")
 	start := time.Now()
 	type vgsResult struct {

@@ -53,7 +53,7 @@ func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get logger with trace ID from request context
 	// Named once per request: Named allocates before the level is checked, and this
 	// handler logs on every route it dispatches.
-	requestLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("ServeHTTP")
+	requestLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("http")
 
 	switch r.URL.Path {
 	case "/scheduler/filter":
@@ -144,7 +144,7 @@ func status(w http.ResponseWriter, _ *http.Request) {
 func (s *scheduler) getCache(w http.ResponseWriter, r *http.Request) {
 	// Named once per request: Named allocates before the level is checked, and this
 	// handler logs on every route it dispatches.
-	requestLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("ServeHTTP")
+	requestLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("http")
 	w.WriteHeader(http.StatusOK)
 
 	// Print pools
@@ -180,7 +180,7 @@ func (s *scheduler) getCache(w http.ResponseWriter, r *http.Request) {
 func (s *scheduler) getCacheStat(w http.ResponseWriter, r *http.Request) {
 	// Named once per request: Named allocates before the level is checked, and this
 	// handler logs on every route it dispatches.
-	requestLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("ServeHTTP")
+	requestLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("http")
 	w.WriteHeader(http.StatusOK)
 
 	pools := s.cache.GetAllPools()

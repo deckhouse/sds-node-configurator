@@ -78,7 +78,7 @@ func (lvgCl *LVGClient) UpdateLVGConditionIfNeeded(
 	status v1.ConditionStatus,
 	conType, reason, message string,
 ) error {
-	lvgCl.log.Named("UpdateLVGConditionIfNeeded").Debug(fmt.Sprintf("set the condition type %s status %s reason %s message %s on the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
+	lvgCl.log.Debug(fmt.Sprintf("set the condition type %s status %s reason %s message %s on the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
 
 	// Callers pass raw error text, including the output of failed LVM commands,
 	// while the schema caps the message at 32768. Over the cap the API server
@@ -115,7 +115,7 @@ func (lvgCl *LVGClient) DeleteLVMVolumeGroup(
 	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
 ) error {
-	log := lvgCl.log.Named("DeleteLVMVolumeGroup")
+	log := lvgCl.log
 
 	log.Debug(fmt.Sprintf("node \"%s\" does not belong to VG \"%s\". It will be removed from LVM resource, name \"%s\"'", lvgCl.currentNodeName, lvg.Spec.ActualVGNameOnTheNode, lvg.Name))
 	for i, node := range lvg.Status.Nodes {

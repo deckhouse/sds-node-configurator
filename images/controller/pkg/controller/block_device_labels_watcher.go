@@ -52,11 +52,12 @@ func RunBlockDeviceLabelsWatcher(
 	log logger.Logger,
 	cfg config.Options,
 ) error {
+	log = log.Named(BlockDeviceLabelsWatcherCtrlName)
 	cl := mgr.GetClient()
 
 	c, err := controller.New(BlockDeviceLabelsWatcherCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-			log := log.Named("RunBlockDeviceLabelsWatcher")
+			log := log.Named("reconcile")
 
 			log.Info(fmt.Sprintf("starts to reconcile the BlockDevice %s", request.Name))
 
@@ -94,14 +95,14 @@ func RunBlockDeviceLabelsWatcher(
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.BlockDevice{}, handler.TypedFuncs[*v1alpha1.BlockDevice, reconcile.Request]{
 		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.BlockDevice], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log := log.Named("RunBlockDeviceLabelsWatcher")
+			log := log.Named("create")
 
 			log.Debug(fmt.Sprintf("got a Create event for the BlockDevice %s", e.Object.Name))
 			q.Add(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}})
 			log.Debug(fmt.Sprintf("the BlockDevice %s was added to the Reconciler's queue", e.Object.Name))
 		},
 		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.BlockDevice], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log := log.Named("RunBlockDeviceLabelsWatcher")
+			log := log.Named("update")
 
 			log.Debug(fmt.Sprintf("got an Update event for the BlockDevice %s", e.ObjectNew.Name))
 
@@ -123,8 +124,6 @@ func RunBlockDeviceLabelsWatcher(
 }
 
 func reconcileBlockDeviceLabels(ctx context.Context, cl client.Client, log logger.Logger, blockDevice *v1alpha1.BlockDevice) (bool, error) {
-	log = log.Named("reconcileBlockDeviceLabels")
-
 	log.Info(fmt.Sprintf("starts the reconciliation for the BlockDevice %s", blockDevice.Name))
 	shouldRetry := false
 
@@ -200,8 +199,6 @@ func checkIfLVGInProgress(newLVG *v1alpha1.LVMVolumeGroup) bool {
 }
 
 func shouldTriggerLVGUpdateIfMatches(log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, blockDevice *v1alpha1.BlockDevice, usedBdNames map[string]struct{}) bool {
-	log = log.Named("reconcileBlockDeviceLabels")
-
 	log.Debug(fmt.Sprintf("BlockDevice %s matches a blockDeviceSelector of the LVMVolumeGroup %s", blockDevice.Name, lvg.Name))
 	if _, used := usedBdNames[blockDevice.Name]; !used {
 		log.Info(fmt.Sprintf("the BlockDevice %s matches the LVMVolumeGroup %s blockDeviceSelector, but is not used yet", blockDevice.Name, lvg.Name))
@@ -221,8 +218,6 @@ func shouldTriggerLVGUpdateIfMatches(log logger.Logger, lvg *v1alpha1.LVMVolumeG
 }
 
 func shouldTriggerLVGUpdateIfNotMatches(log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, blockDevice *v1alpha1.BlockDevice, usedBdNames map[string]struct{}) bool {
-	log = log.Named("reconcileBlockDeviceLabels")
-
 	log.Debug(fmt.Sprintf("BlockDevice %s does not match a blockDeviceSelector of the LVMVolumeGroup %s", blockDevice.Name, lvg.Name))
 	if _, used := usedBdNames[blockDevice.Name]; used {
 		log.Warn(fmt.Sprintf("the BlockDevice %s does not match the LVMVolumeGroup %s blockDeviceSelector, but is used by the resource", blockDevice.Name, lvg.Name))

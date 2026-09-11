@@ -136,7 +136,7 @@ func (c *Cache) HasReservation(id string) bool {
 // AddReservation adds a new reservation. If a reservation with the same ID already exists,
 // it is removed first (idempotent replace).
 func (c *Cache) AddReservation(id string, ttl time.Duration, size int64, poolKeys []StoragePoolKey) {
-	log := c.log.Named("AddReservation")
+	log := c.log
 
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -174,7 +174,7 @@ func (c *Cache) RemoveReservation(id string) {
 // (PVC watcher on selectedNode, prioritize final node list).
 // Returns false if the reservation was not found.
 func (c *Cache) NarrowReservation(id string, keepPools []StoragePoolKey, newTTL time.Duration) bool {
-	log := c.log.Named("NarrowReservation")
+	log := c.log
 
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -283,7 +283,7 @@ func (c *Cache) removeReservation(id string) {
 		return
 	}
 	delete(c.reservations, id)
-	c.log.Named("removeReservation").Debug(fmt.Sprintf("reservation %s removed", id))
+	c.log.Debug(fmt.Sprintf("reservation %s removed", id))
 }
 
 // --- Background TTL cleanup ---
@@ -303,7 +303,7 @@ func (c *Cache) cleanupExpired() {
 	defer c.mtx.Unlock()
 
 	now := time.Now()
-	cleanupExpiredLog := c.log.Named("cleanupExpired")
+	cleanupExpiredLog := c.log
 	for id, r := range c.reservations {
 		if now.After(r.expiresAt) {
 			cleanupExpiredLog.Debug(fmt.Sprintf("removing expired reservation %s", id))

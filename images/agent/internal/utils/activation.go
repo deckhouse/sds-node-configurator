@@ -108,8 +108,6 @@ func RunWithTimeout[T any](ctx context.Context, timeout time.Duration, fn func(c
 // provisionFileDevices on its next pass, so a transient losetup failure
 // recovers without a pod restart.
 func ReattachFileDevices(ctx context.Context, log logger.Logger, commands Commands, cmdTimeout time.Duration, lvgs []LVGWithFileDevices) error {
-	log = log.Named("ReattachFileDevices")
-
 	var failures []error
 	for _, item := range lvgs {
 		for _, fd := range item.FileDevices {
@@ -182,7 +180,7 @@ func EnableLoopDirectIO(ctx context.Context, log logger.Logger, commands Command
 	})
 	log.Debug(cmd)
 	if err != nil {
-		log.Named("EnableLoopDirectIO").Warn(fmt.Sprintf("direct I/O is unavailable for %s, continuing with buffered I/O (expect a higher page-cache footprint): %v", loopDev, err))
+		log.Warn(fmt.Sprintf("direct I/O is unavailable for %s, continuing with buffered I/O (expect a higher page-cache footprint): %v", loopDev, err))
 	}
 }
 
@@ -199,8 +197,6 @@ type FileDeviceStatus struct {
 }
 
 func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Commands, metrics *monitoring.Metrics, cmdTimeout time.Duration) error {
-	log = log.Named("ActivateVGs")
-
 	log.Info("refreshing LVM metadata cache")
 	if cmd, err := RunWithTimeout(ctx, cmdTimeout, func(ctx context.Context) (string, error) {
 		return commands.PVScan(ctx)
@@ -304,8 +300,6 @@ func EnsureVGActivation(
 	verdicts LoopVGVerdicts,
 	cmdTimeout time.Duration,
 ) bool {
-	log = log.Named("EnsureActivation")
-
 	managedVGs := SkipUnownedLoopVGs(log, "activate", FilterVGsByTag(vgs, internal.LVMTags), verdicts)
 	if len(managedVGs) == 0 {
 		return false

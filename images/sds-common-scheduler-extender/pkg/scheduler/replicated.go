@@ -189,8 +189,6 @@ func buildReplicaLocations(
 	cl client.Client,
 	replicatedPVCs map[string]*corev1.PersistentVolumeClaim,
 ) map[string][]string {
-	log = log.Named("buildReplicaLocations")
-
 	result := make(map[string][]string, len(replicatedPVCs))
 	for _, pvc := range replicatedPVCs {
 		// A PVC is bound iff Spec.VolumeName is set. Status.Phase is updated by
@@ -220,7 +218,7 @@ func filterNodesByVolumeZone(
 	pvc *corev1.PersistentVolumeClaim,
 	_ *srv.ReplicatedStorageClass,
 ) []string {
-	log.Named("filterNodesByVolumeZone").Debug(fmt.Sprintf("TODO: implement zone-based filtering for Zonal topology, PVC %s/%s", pvc.Namespace, pvc.Name))
+	log.Debug(fmt.Sprintf("TODO: implement zone-based filtering for Zonal topology, PVC %s/%s", pvc.Namespace, pvc.Name))
 	return nodeNames
 }
 
@@ -256,8 +254,6 @@ func filterNodeForReplicatedPVCs(
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 ) (bool, string) {
-	log = log.Named("filterNodeForReplicatedPVCs")
-
 	var failReasons []string
 
 	for _, pvc := range replicatedPVCs {

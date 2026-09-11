@@ -393,8 +393,6 @@ func discoverProvisionerForPVC(
 	log logger.Logger,
 	pvc *corev1.PersistentVolumeClaim,
 ) (string, error) {
-	log = log.Named("discoverProvisionerForPVC")
-
 	var discoveredProvisioner string
 
 	log.Trace(fmt.Sprintf("get pvc: %+v", pvc))
@@ -558,14 +556,14 @@ func getManagedPVCsFromPod(ctx context.Context, cl client.Client, log logger.Log
 	// call is the price of keeping typo diagnostics at the default log level.
 	defer func() {
 		if len(missingAnnotationPVCs) > 0 {
-			log.Named("getManagedPVCsFromPod").Warn(fmt.Sprintf("PVC name(s) listed in the %s annotation do not exist and were skipped (the annotation is a scheduling hint, not a guarantee): %v", consts.PodExtraPVCsAnnotation, missingAnnotationPVCs))
+			log.Warn(fmt.Sprintf("PVC name(s) listed in the %s annotation do not exist and were skipped (the annotation is a scheduling hint, not a guarantee): %v", consts.PodExtraPVCsAnnotation, missingAnnotationPVCs))
 		}
 	}()
 
 	for _, pvcName := range pvcNames {
 		// Named here rather than at every call below: Named allocates before the level
 		// is checked, and this loop runs once per PVC of the pod.
-		pvcLog := log.With("PVC", pvcName).Named("getManagedPVCsFromPod")
+		pvcLog := log.With("PVC", pvcName)
 
 		pvc := &corev1.PersistentVolumeClaim{}
 		err := cl.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pvcName}, pvc)
@@ -707,8 +705,6 @@ func formatDroppedPVCsForLog(dropped []*corev1.PersistentVolumeClaim) (allKeys [
 // (as opposed to LINSTOR). When true, the extender handles replicated PVC scheduling;
 // when false (or MC not found), LINSTOR manages scheduling and the extender skips them.
 func getNewControlPlane(ctx context.Context, cl client.Client, log logger.Logger) (*bool, error) {
-	log = log.Named("getNewControlPlane")
-
 	_true := true
 	_false := false
 	mc := &d8commonapi.ModuleConfig{}
@@ -759,8 +755,6 @@ func extractRequestedSize(
 	scs map[string]*storagev1.StorageClass,
 	hintOnly map[string]bool,
 ) (map[string]PVCRequest, []string, error) {
-	log = log.Named("extractRequestedSize")
-
 	pvcRequests := make(map[string]PVCRequest, len(pvcs))
 	var dropped []string
 

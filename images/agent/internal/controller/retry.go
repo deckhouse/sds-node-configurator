@@ -131,14 +131,12 @@ func startRetry(
 	reconcile func(context.Context) (Result, error),
 	res Result,
 ) {
-	log = log.Named("discoveryRetry")
-
 	if res.RequeueAfter <= 0 {
 		return
 	}
 
 	if !gate.admit(res) {
-		log.Named("discoveryRetry").Debug(fmt.Sprintf("%s already has a retry running, holding this request for it", name))
+		log.Debug(fmt.Sprintf("%s already has a retry running, holding this request for it", name))
 		return
 	}
 
@@ -251,8 +249,6 @@ func retryReconcile(
 	reconcile func(context.Context) (Result, error),
 	res Result,
 ) {
-	log = log.Named("discoveryRetry")
-
 	for res.RequeueAfter > 0 {
 		log.Warn(fmt.Sprintf("%s reconcile needs a retry in %s", name, res.RequeueAfter.String()))
 

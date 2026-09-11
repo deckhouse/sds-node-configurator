@@ -270,7 +270,6 @@ func subMain(ctx context.Context) error {
 }
 
 func runServer(ctx context.Context, serv *http.Server, mgr manager.Manager, log logger.Logger) error {
-	log = log.Named("runServer")
 	ctx, stop := context.WithCancel(ctx)
 
 	var wg sync.WaitGroup

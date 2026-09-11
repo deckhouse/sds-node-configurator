@@ -263,10 +263,14 @@ func capturingDiscoverer(lines *[]string) *Discoverer {
 	// A writer that keeps each record, so the assertions below can look at which
 	// level a line went to and not only at whether the code ran. funcr did this
 	// before; the shared logger takes an io.Writer instead.
-	d.log, _ = logger.NewLoggerToWriter(writerFunc(func(p []byte) (int, error) {
+	lg, _ := logger.NewLoggerToWriter(writerFunc(func(p []byte) (int, error) {
 		*lines = append(*lines, string(p))
 		return len(p), nil
 	}), logger.TraceLevel)
+
+	// Named as the constructor names it, so the assertions below see the same
+	// logger path an operator reads in a real record.
+	d.log = lg.Named(DiscovererName)
 
 	return d
 }
@@ -310,7 +314,7 @@ func TestReportOrphanedParents_WarnsOnceWhileTheOrphanPersists(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	warnings := linesAtLevel(lines, "warn", `"logger":"filterDevices","msg":"device /dev/mapper`)
+	warnings := linesAtLevel(lines, "warn", `"logger":"`+DiscovererName+`","msg":"device /dev/mapper`)
 	assert.Len(t, warnings, 1, "the orphan is named when it appears, not on every pass")
 
 	repeats := linesContaining(lines, "still names the missing parent")
@@ -345,7 +349,7 @@ func TestReportOrphanedParents_SaysWhenTheOrphanIsGone(t *testing.T) {
 	// already said.
 	_, err = d.filterDevices(orphanedDMDevices())
 	require.NoError(t, err)
-	assert.Len(t, linesAtLevel(lines, "warn", `"logger":"filterDevices","msg":"device /dev/mapper`), 2)
+	assert.Len(t, linesAtLevel(lines, "warn", `"logger":"`+DiscovererName+`","msg":"device /dev/mapper`), 2)
 }
 
 // writerFunc adapts a function to io.Writer.

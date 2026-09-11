@@ -184,7 +184,7 @@ func GetLVMVolumeGroups(ctx context.Context, cl client.Client, metrics monitorin
 // On success, lvg.Status and lvg.ResourceVersion are replaced with server-side values.
 // Callers must not hold unsaved in-memory Status modifications before calling this.
 func updateLVGConditionIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup, status metav1.ConditionStatus, conType, reason, message string) error {
-	log.Named("updateLVGConditionIfNeeded").Debug(fmt.Sprintf("set the condition type %s status %s reason %s message %s on the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
+	log.Debug(fmt.Sprintf("set the condition type %s status %s reason %s message %s on the LVMVolumeGroup %s", conType, status, reason, message, lvg.Name))
 
 	// Callers pass raw error text, while the schema caps the message at 32768.
 	// Over the cap the API server rejects the whole status write, so the group

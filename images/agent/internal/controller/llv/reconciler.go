@@ -88,7 +88,7 @@ func NewReconciler(
 ) *Reconciler {
 	return &Reconciler{
 		cl:  cl,
-		log: log,
+		log: log.Named(ReconcilerName),
 		lvgCl: repository.NewLVGClient(
 			cl,
 			log,
@@ -156,7 +156,7 @@ func (r *Reconciler) ShouldReconcileCreate(_ *v1alpha1.LVMLogicalVolume) bool {
 
 // ShouldReconcileUpdate implements controller.Reconciler.
 func (r *Reconciler) ShouldReconcileUpdate(objectOld *v1alpha1.LVMLogicalVolume, objectNew *v1alpha1.LVMLogicalVolume) bool {
-	log := r.log.Named("RunLVMLogicalVolumeWatcherController")
+	log := r.log
 
 	log.Info(fmt.Sprintf("got an update event for the LVMLogicalVolume: %s", objectNew.GetName()))
 
@@ -180,8 +180,8 @@ func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req controller.ReconcileRequest[*v1alpha1.LVMLogicalVolume],
 ) (controller.Result, error) {
-	reconcileLog := r.log.Named("Reconcile")
-	log := r.log.Named("RunLVMLogicalVolumeWatcherController")
+	reconcileLog := r.log
+	log := r.log
 
 	llv := req.Object
 	log.Info(fmt.Sprintf("reconciler starts reconciliation of the LVMLogicalVolume: %s", llv.Name))
@@ -282,8 +282,8 @@ func (r *Reconciler) Reconcile(
 }
 
 func (r *Reconciler) ReconcileLVMLogicalVolume(ctx context.Context, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
-	runEventReconcileLog := r.log.Named("runEventReconcile")
-	log := r.log.Named("ReconcileLVMLogicalVolume")
+	runEventReconcileLog := r.log
+	log := r.log
 
 	log.Debug(fmt.Sprintf("starts the reconciliation for the LVMLogicalVolume %s", llv.Name))
 
@@ -325,7 +325,7 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 	llv *v1alpha1.LVMLogicalVolume,
 	lvg *v1alpha1.LVMVolumeGroup,
 ) (bool, error) {
-	log := r.log.Named("reconcileLLVCreateFunc")
+	log := r.log
 
 	log.Debug(fmt.Sprintf("starts reconciliation for the LVMLogicalVolume %s", llv.Name))
 
@@ -441,7 +441,7 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 	llv *v1alpha1.LVMLogicalVolume,
 	lvg *v1alpha1.LVMVolumeGroup,
 ) (bool, error) {
-	log := r.log.Named("reconcileLLVUpdateFunc")
+	log := r.log
 
 	log.Debug(fmt.Sprintf("starts reconciliation for the LVMLogicalVolume %s", llv.Name))
 
@@ -466,7 +466,7 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 	log.Debug(fmt.Sprintf("tries to count the LVMLogicalVolume %s requested size", llv.Name))
 	llvRequestSize, err := utils.GetLLVRequestedSize(llv, lvg)
 	if err != nil {
-		r.log.Named("reconcileLLVCreateFunc").Error(fmt.Sprintf("unable to get LVMLogicalVolume %s requested size", llv.Name), logger.Err(err))
+		r.log.Error(fmt.Sprintf("unable to get LVMLogicalVolume %s requested size", llv.Name), logger.Err(err))
 		return false, err
 	}
 	log.Debug(fmt.Sprintf("successfully counted the LVMLogicalVolume %s requested size: %s", llv.Name, llvRequestSize.String()))
@@ -582,7 +582,7 @@ func (r *Reconciler) reconcileLLVDeleteFunc(
 	llv *v1alpha1.LVMLogicalVolume,
 	lvg *v1alpha1.LVMVolumeGroup,
 ) (bool, error) {
-	log := r.log.Named("reconcileLLVDeleteFunc")
+	log := r.log
 
 	log.Debug(fmt.Sprintf("starts reconciliation for the LVMLogicalVolume %s", llv.Name))
 
@@ -640,7 +640,7 @@ func (r *Reconciler) removeLLVFinalizersIfExist(
 	ctx context.Context,
 	llv *v1alpha1.LVMLogicalVolume,
 ) error {
-	log := r.log.Named("removeLLVFinalizersIfExist")
+	log := r.log
 
 	var removed bool
 	for i, f := range llv.Finalizers {
@@ -656,7 +656,7 @@ func (r *Reconciler) removeLLVFinalizersIfExist(
 		log.Trace(fmt.Sprintf("removed finalizer %s from the LVMLogicalVolume %s", internal.SdsNodeConfiguratorFinalizer, llv.Name))
 		err := r.updateLVMLogicalVolumeSpec(ctx, llv)
 		if err != nil {
-			r.log.Named("updateLVMLogicalVolumeSpec").Error(fmt.Sprintf("unable to update the LVMVolumeGroup %s", llv.Name), logger.Err(err))
+			r.log.Error(fmt.Sprintf("unable to update the LVMVolumeGroup %s", llv.Name), logger.Err(err))
 			return err
 		}
 	}
@@ -696,7 +696,7 @@ func checkIfLVBelongsToLLV(llv *v1alpha1.LVMLogicalVolume, lv *internal.LVData) 
 }
 
 func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v1alpha1.LVMLogicalVolume) (bool, error) {
-	log := r.log.Named("deleteLVIfNeeded")
+	log := r.log
 
 	lv := r.sdsCache.FindLV(vgName, llv.Spec.ActualLVNameOnTheNode)
 	if lv == nil || !lv.Exist {
@@ -755,7 +755,7 @@ func (r *Reconciler) addLLVFinalizerIfNotExist(ctx context.Context, llv *v1alpha
 
 	llv.Finalizers = append(llv.Finalizers, internal.SdsNodeConfiguratorFinalizer)
 
-	r.log.Named("addLLVFinalizerIfNotExist").Trace(fmt.Sprintf("added finalizer %s to the LVMLogicalVolume %s", internal.SdsNodeConfiguratorFinalizer, llv.Name))
+	r.log.Trace(fmt.Sprintf("added finalizer %s to the LVMLogicalVolume %s", internal.SdsNodeConfiguratorFinalizer, llv.Name))
 	err := r.updateLVMLogicalVolumeSpec(ctx, llv)
 	if err != nil {
 		return false, err

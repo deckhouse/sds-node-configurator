@@ -114,7 +114,7 @@ func (r *Reconciler) ensureFileDeviceSpace(ctx context.Context, directory, fileP
 		return space, err
 	})
 	if err != nil {
-		r.log.Named("ensureFileDeviceSpace").Warn(fmt.Sprintf("unable to check free space in %s, proceeding (fallocate will still fail on ENOSPC): %v", directory, err))
+		r.log.Warn(fmt.Sprintf("unable to check free space in %s, proceeding (fallocate will still fail on ENOSPC): %v", directory, err))
 		return nil
 	}
 
@@ -175,7 +175,7 @@ func (r *Reconciler) growFileDevicesIfNeeded(
 	vg internal.VGData,
 	issues fileDeviceIssues,
 ) error {
-	log := r.log.Named("growFileDevicesIfNeeded")
+	log := r.log
 
 	if len(lvg.Spec.FileDevices) == 0 {
 		return nil
@@ -268,7 +268,7 @@ func (r *Reconciler) growFileDevice(
 	current v1alpha1.LVMVolumeGroupFileDevice,
 	delta int64,
 ) error {
-	log := r.log.Named("growFileDevice")
+	log := r.log
 
 	filePath := utils.BuildFileDevicePath(fd.Directory, lvg.Name, fd.Name)
 
@@ -356,7 +356,7 @@ func (r *Reconciler) extendFileDevicesIfNeeded(
 	pvs []internal.PVData,
 	issues fileDeviceIssues,
 ) error {
-	log := r.log.Named("extendFileDevicesIfNeeded")
+	log := r.log
 
 	if len(lvg.Spec.FileDevices) == 0 {
 		return nil
@@ -726,7 +726,7 @@ func (r *Reconciler) resolveAlias(ctx context.Context, cache *aliasCache, pvName
 		return r.resolver(ctx, pvName)
 	})
 	if err != nil {
-		r.log.Named("resolveAlias").Warn(fmt.Sprintf("unable to resolve the canonical path of PV %s: %v", pvName, err))
+		r.log.Warn(fmt.Sprintf("unable to resolve the canonical path of PV %s: %v", pvName, err))
 		cache.failed[pvName] = struct{}{}
 		return "", false
 	}
@@ -784,7 +784,7 @@ const (
 // their ownership/aliasing assumptions in sync.
 func (r *Reconciler) loopPVState(ctx context.Context, cache *aliasCache, loop string, pvs []internal.PVData) pvLoopState {
 	unresolved := false
-	loopPVStateLog := r.log.Named("loopPVState")
+	loopPVStateLog := r.log
 	for _, pv := range pvs {
 		if !isAliasPVName(pv.PVName) {
 			continue
@@ -819,7 +819,7 @@ func (r *Reconciler) loopPVState(ctx context.Context, cache *aliasCache, loop st
 // after the ordinary delete path the loop is still a PV — reporting it would
 // make cleanup refuse to run in exactly the case it is meant for.
 func (r *Reconciler) loopVGMembership(ctx context.Context, cache *aliasCache, loop string, pvs []internal.PVData) (vgName string, unresolved bool) {
-	loopVGMembershipLog := r.log.Named("loopVGMembership")
+	loopVGMembershipLog := r.log
 	for _, pv := range pvs {
 		if pv.VGName == "" {
 			continue
@@ -924,7 +924,7 @@ func (r *Reconciler) provisionFileDevices(
 	issues fileDeviceIssues,
 	lenient bool,
 ) (loopPaths []string, provisioned []provisionedFileDevice, retErr error) {
-	log := r.log.Named("provisionFileDevices")
+	log := r.log
 
 	if len(lvg.Spec.FileDevices) == 0 {
 		return nil, nil, nil
@@ -1034,7 +1034,7 @@ func (r *Reconciler) refuseUnlinkedBackingFile(
 	fd v1alpha1.LVMVolumeGroupFileDeviceSpec,
 	filePath string,
 ) error {
-	log := r.log.Named("refuseUnlinkedBackingFile")
+	log := r.log
 
 	recorded := ""
 	for _, n := range lvg.Status.Nodes {
@@ -1083,7 +1083,7 @@ func (r *Reconciler) provisionFileDevice(
 	lvg *v1alpha1.LVMVolumeGroup,
 	fd v1alpha1.LVMVolumeGroupFileDeviceSpec,
 ) (loopDev string, rb fileDeviceRollback, err error) {
-	log := r.log.Named("provisionFileDevices")
+	log := r.log
 
 	filePath := utils.BuildFileDevicePath(fd.Directory, lvg.Name, fd.Name)
 	sizeBytes := fd.Size.Value()
@@ -1241,7 +1241,7 @@ func (r *Reconciler) provisionFileDevice(
 // The file is kept whenever its loop could not be detached, since the loop may
 // still be reading from it.
 func (r *Reconciler) rollbackFileDeviceEntry(ctx context.Context, rb fileDeviceRollback) {
-	log := r.log.Named("rollbackFileDeviceEntry")
+	log := r.log
 
 	if rb.filePath == "" && rb.loopDev == "" {
 		return
@@ -1299,7 +1299,7 @@ func (r *Reconciler) rollbackFileDeviceEntry(ctx context.Context, rb fileDeviceR
 // backing file whose loop it could not detach, since the loop may still
 // reference it.
 func (r *Reconciler) rollbackProvisionedFileDevices(ctx context.Context, provisioned []provisionedFileDevice) {
-	log := r.log.Named("rollbackProvisionedFileDevices")
+	log := r.log
 
 	if len(provisioned) == 0 {
 		return
@@ -1394,7 +1394,7 @@ func (r *Reconciler) rollbackProvisionedFileDevices(ctx context.Context, provisi
 // returned — the finalizer stays and the resource remains the record of what is
 // on the node.
 func (r *Reconciler) cleanupFileDevices(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) error {
-	log := r.log.Named("cleanupFileDevices")
+	log := r.log
 
 	type target struct {
 		filePath   string

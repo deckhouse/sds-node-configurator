@@ -47,7 +47,8 @@ func RunPVCWatcherCacheController(
 	log logger.Logger,
 	schedulerCache *cache.Cache,
 ) error {
-	log.Named("RunPVCWatcherCacheController").Info("starts the work")
+	log = log.Named(PVCWatcherCacheCtrlName)
+	log.Info("starts the work")
 
 	c, err := controller.New(PVCWatcherCacheCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(_ context.Context, _ reconcile.Request) (reconcile.Result, error) {
@@ -61,7 +62,7 @@ func RunPVCWatcherCacheController(
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &corev1.PersistentVolumeClaim{}, handler.TypedFuncs[*corev1.PersistentVolumeClaim, reconcile.Request]{
 		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*corev1.PersistentVolumeClaim], _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log := log.Named("RunPVCWatcherCacheController")
+			log := log.Named("create")
 
 			log.Info("CreateFunc reconciliation starts")
 			pvc := e.Object
@@ -83,7 +84,7 @@ func RunPVCWatcherCacheController(
 			log.Info("CreateFunc reconciliation ends")
 		},
 		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*corev1.PersistentVolumeClaim], _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log := log.Named("RunPVCWatcherCacheController")
+			log := log.Named("update")
 
 			log.Info("UpdateFunc reconciliation starts")
 			pvc := e.ObjectNew
@@ -124,7 +125,7 @@ func RunPVCWatcherCacheController(
 			log.Info("UpdateFunc reconciliation ends")
 		},
 		DeleteFunc: func(_ context.Context, e event.TypedDeleteEvent[*corev1.PersistentVolumeClaim], _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log := log.Named("RunPVCWatcherCacheController")
+			log := log.Named("delete")
 
 			log.Info("DeleteFunc reconciliation starts")
 			pvc := e.Object
@@ -154,8 +155,6 @@ func narrowReservationToNode(
 	pvc *corev1.PersistentVolumeClaim,
 	selectedNodeName string,
 ) {
-	log = log.Named("narrowReservationToNode")
-
 	pvcKey := pvc.Namespace + "/" + pvc.Name
 
 	if !schedulerCache.HasReservation(pvcKey) {

@@ -50,7 +50,7 @@ func (llvCl *LLVClient) UpdatePhaseIfNeeded(
 	phase string,
 	reason string,
 ) error {
-	log := llvCl.log.Named("UpdatePhaseIfNeeded")
+	log := llvCl.log
 
 	log.Debug(fmt.Sprintf("tries to update the LVMLogicalVolume %s status with phase: %s, reason: %s", llv.Name, phase, reason))
 
@@ -84,7 +84,7 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 	llv *v1alpha1.LVMLogicalVolume,
 	actualSize resource.Quantity,
 ) error {
-	log := llvCl.log.Named("UpdatePhaseToCreatedIfNeeded")
+	log := llvCl.log
 
 	var contiguous *bool
 	if llv.Spec.Thick != nil && llv.Spec.Thick.Contiguous != nil {

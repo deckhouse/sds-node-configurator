@@ -46,7 +46,7 @@ func RunLLVWatcherCacheController(
 	log logger.Logger,
 	schedulerCache *cache.Cache,
 ) error {
-	log = log.Named("RunLLVWatcherCacheController")
+	log = log.Named(LLVWatcherCacheCtrlName)
 
 	log.Info("starts the work")
 
@@ -104,7 +104,7 @@ type llvReconciler struct {
 }
 
 func (r *llvReconciler) Reconcile(_ context.Context, req reconcile.Request) (reconcile.Result, error) {
-	r.log.Named("llvReconciler").Debug(fmt.Sprintf("reconciling LLV %s, removing reservation", req.Name))
+	r.log.Debug(fmt.Sprintf("reconciling LLV %s, removing reservation", req.Name))
 	r.cache.RemoveReservation(req.Name)
 	return reconcile.Result{}, nil
 }

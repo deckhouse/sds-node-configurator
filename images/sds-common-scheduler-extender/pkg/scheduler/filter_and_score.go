@@ -81,7 +81,7 @@ func (s *scheduler) filterAndScore(w http.ResponseWriter, r *http.Request) {
 	// Filter by available space
 	var filteredKeys []cache.StoragePoolKey
 	var filteredLVGs []LVMVolumeGroupInput
-	filterAndScoreLog := servingLog.Named("filterAndScore")
+	filterAndScoreLog := servingLog
 	for i, key := range poolKeys {
 		spaceInfo, err := getAvailableSpace(s.ctx, s.client, s.cache, key)
 		if err != nil {
@@ -112,7 +112,7 @@ func (s *scheduler) filterAndScore(w http.ResponseWriter, r *http.Request) {
 	for i, key := range filteredKeys {
 		score, err := calculatePoolScore(s.ctx, s.client, s.cache, key, req.Size, s.defaultDivisor)
 		if err != nil {
-			servingLog.Named("filterAndScore").Error(fmt.Sprintf("unable to calculate score for %s", key.String()), logger.Err(err))
+			servingLog.Error(fmt.Sprintf("unable to calculate score for %s", key.String()), logger.Err(err))
 			continue
 		}
 		scored = append(scored, ScoredLVMVolumeGroup{

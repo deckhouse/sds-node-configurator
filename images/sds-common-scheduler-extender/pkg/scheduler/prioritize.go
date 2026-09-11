@@ -38,7 +38,7 @@ import (
 )
 
 func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
-	servingLog := tracing.WithTraceIDLogger(r.Context(), s.log).Named("prioritize")
+	servingLog := tracing.WithTraceIDLogger(r.Context(), s.log)
 
 	servingLog.Debug("starts the serving the request")
 
@@ -214,10 +214,6 @@ func scoreNodes(
 	replicaLocations map[string][]string,
 	divisor float64,
 ) ([]HostPriority, error) {
-	log = log.Named("scoreNodes")
-
-	log = log.Named("scoreNodes")
-
 	// Separate PVCs by provisioner
 	localPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsLocalVolumeProvisioner)
 	replicatedPVCs := filterPVCsByProvisioner(managedPVCs, scUsedByPVCs, consts.SdsReplicatedVolumeProvisioner)
@@ -253,7 +249,7 @@ func scoreNodes(
 
 	for i, nodeName := range *nodeNames {
 		go func(i int, nodeName string) {
-			log := log.Named("scoreNodes")
+			log := log
 
 			log.Trace(fmt.Sprintf("goroutine %d starts the work for the node %s", i, nodeName))
 			defer func() {
@@ -408,8 +404,6 @@ func narrowReservationsToFinalNodes(
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 ) {
-	log = log.Named("narrowReservationsToFinalNodes")
-
 	for _, pvc := range managedPVCs {
 		sc := scUsedByPVCs[*pvc.Spec.StorageClassName]
 

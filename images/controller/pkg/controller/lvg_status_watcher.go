@@ -45,11 +45,12 @@ func RunLVGStatusWatcher(
 	mgr manager.Manager,
 	log logger.Logger,
 ) error {
+	log = log.Named(LVGStatusWatcherCtrl)
 	cl := mgr.GetClient()
 
 	c, err := controller.New(LVGStatusWatcherCtrl, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-			log := log.Named("RunLVGStatusWatcher")
+			log := log.Named("reconcile")
 
 			log.Info(fmt.Sprintf("reconciler got a request %s", request.String()))
 
@@ -87,7 +88,7 @@ func RunLVGStatusWatcher(
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &v1alpha1.LVMVolumeGroup{}, handler.TypedFuncs[*v1alpha1.LVMVolumeGroup, reconcile.Request]{
 		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*v1alpha1.LVMVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log := log.Named("RunLVGStatusWatcher")
+			log := log.Named("create")
 
 			log.Info(fmt.Sprintf("got a create event for the LVMVolumeGroup %s", e.Object.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
@@ -95,7 +96,7 @@ func RunLVGStatusWatcher(
 			log.Info(fmt.Sprintf("CreateFunc added a request for the LVMVolumeGroup %s to the Reconcilers queue", e.Object.GetName()))
 		},
 		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*v1alpha1.LVMVolumeGroup], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log := log.Named("RunLVGStatusWatcher")
+			log := log.Named("update")
 
 			log.Info(fmt.Sprintf("got an update event for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
@@ -112,8 +113,6 @@ func RunLVGStatusWatcher(
 }
 
 func reconcileLVGStatus(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup) error {
-	log = log.Named("reconcileLVGStatus")
-
 	log.Debug(fmt.Sprintf("starts to reconcile the LVMVolumeGroup %s", lvg.Name))
 	shouldUpdate := false
 

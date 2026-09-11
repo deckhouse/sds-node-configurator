@@ -406,7 +406,7 @@ func reattachFileDevicesAtStartup(ctx context.Context, log logger.Logger, mgr ma
 
 	items := collectFileDevicesToReattach(log, lvgList.Items, nodeName, baseDir)
 	if len(items) == 0 {
-		log.Named("reattachFileDevicesAtStartup").Debug("no file devices to reattach")
+		log.Debug("no file devices to reattach")
 		return nil
 	}
 
@@ -417,8 +417,6 @@ func reattachFileDevicesAtStartup(ctx context.Context, log logger.Logger, mgr ma
 // be re-attached, and is where the confinement to baseDir is applied. Separated
 // from the listing and the losetup calls so that decision is testable on its own.
 func collectFileDevicesToReattach(log logger.Logger, lvgs []v1alpha1.LVMVolumeGroup, nodeName, baseDir string) []utils.LVGWithFileDevices {
-	log = log.Named("collectFileDevicesToReattach")
-
 	var items []utils.LVGWithFileDevices
 	for _, lvg := range lvgs {
 		if lvg.Spec.Local.NodeName != nodeName {

@@ -73,9 +73,7 @@ func (s *scanner) Run(
 	metrics *monitoring.Metrics,
 	discover func(context.Context) (controller.Result, error),
 ) error {
-	log = log.Named("HandleEvent")
-
-	log = log.Named("RunScanner")
+	log = log.Named("scanner")
 
 	log.Info("starts the work")
 
@@ -143,7 +141,7 @@ func (s *scanner) Run(
 			}
 
 			t.Do(func() {
-				log := log.Named("RunScanner")
+				log := log
 
 				log.Info("start to fill the cache")
 				err := s.fillTheCache(ctx, log, sdsCache, cfg, metrics)
@@ -213,8 +211,6 @@ func (s *scanner) runDiscoveryPass(
 	log logger.Logger,
 	discover func(context.Context) (controller.Result, error),
 ) error {
-	log = log.Named("runDiscoveryPass")
-
 	log.Info("run the discovery pass")
 
 	// The requeue a discoverer asks for is not handled here and does not come back
@@ -232,8 +228,6 @@ func (s *scanner) runDiscoveryPass(
 }
 
 func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *cache.Cache, cfg config.Config, metrics *monitoring.Metrics) error {
-	log = log.Named("fillTheCache")
-
 	// Before any LVM command, because it decides what they are allowed to see:
 	// internal.LVMGlobalFilter rejects /dev/loop* — a loop device on a hypervisor
 	// is a virtual machine's disk — and this is what exempts the ones the agent
@@ -409,7 +403,7 @@ func (s *scanner) scanDevices(ctx context.Context, log logger.Logger, cfg config
 	defer cancel()
 	devices, cmdStr, stdErr, err := s.commands.GetBlockDevices(ctx)
 	if err != nil {
-		log.Named("ScanDevices").Error(fmt.Sprintf("unable to scan the devices, cmd: %s", cmdStr), logger.Err(err))
+		log.Error(fmt.Sprintf("unable to scan the devices, cmd: %s", cmdStr), logger.Err(err))
 		return nil, stdErr, err
 	}
 	return devices, stdErr, nil
@@ -433,7 +427,7 @@ func (s *scanner) scanPVs(ctx context.Context, log logger.Logger, cfg config.Con
 	defer cancel()
 	pvs, cmdStr, stdErr, err := s.commands.GetAllPVs(ctx)
 	if err != nil {
-		log.Named("ScanPVs").Error(fmt.Sprintf("unable to scan the PVs, cmd: %s", cmdStr), logger.Err(err))
+		log.Error(fmt.Sprintf("unable to scan the PVs, cmd: %s", cmdStr), logger.Err(err))
 		return nil, stdErr, err
 	}
 
@@ -445,7 +439,7 @@ func (s *scanner) scanVGs(ctx context.Context, log logger.Logger, cfg config.Con
 	defer cancel()
 	vgs, cmdStr, stdErr, err := s.commands.GetAllVGs(ctx)
 	if err != nil {
-		log.Named("ScanVGs").Error(fmt.Sprintf("unable to scan the VGs, cmd: %s", cmdStr), logger.Err(err))
+		log.Error(fmt.Sprintf("unable to scan the VGs, cmd: %s", cmdStr), logger.Err(err))
 		return nil, stdErr, err
 	}
 
@@ -457,7 +451,7 @@ func (s *scanner) scanLVs(ctx context.Context, log logger.Logger, cfg config.Con
 	defer cancel()
 	lvs, cmdStr, stdErr, err := s.commands.GetAllLVs(ctx)
 	if err != nil {
-		log.Named("ScanLVs").Error(fmt.Sprintf("unable to scan LVs, cmd: %s", cmdStr), logger.Err(err))
+		log.Error(fmt.Sprintf("unable to scan LVs, cmd: %s", cmdStr), logger.Err(err))
 		return nil, stdErr, err
 	}
 

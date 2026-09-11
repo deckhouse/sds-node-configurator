@@ -126,8 +126,6 @@ func FilterForeignPVs(
 	pvs []internal.PVData,
 	cmdTimeout time.Duration,
 ) []internal.PVData {
-	log = log.Named("FilterForeignPVs")
-
 	if resolver == nil {
 		resolver = HostNsenterCanonicalResolver
 	}
@@ -201,8 +199,6 @@ func FilterForeignPVs(
 // Bare loop PVs not part of any VG are kept; they carry no VG name and
 // cannot poison name resolution.
 func FilterForeignLoopPVs(log logger.Logger, pvs []internal.PVData, verdicts LoopVGVerdicts) []internal.PVData {
-	log = log.Named("FilterForeignLoopPVs")
-
 	out := make([]internal.PVData, 0, len(pvs))
 	for _, pv := range pvs {
 		if pv.VGUuid != "" && verdicts.IsUnowned(pv.VGUuid) {

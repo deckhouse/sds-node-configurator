@@ -47,7 +47,7 @@ func RunLVGWatcherCacheController(
 	log logger.Logger,
 	schedulerCache *cache.Cache,
 ) error {
-	log = log.Named("RunLVGWatcherCacheController")
+	log = log.Named(LVGWatcherCacheCtrlName)
 
 	log.Info("starts the work")
 
@@ -93,7 +93,7 @@ type lvgReconciler struct {
 }
 
 func (r *lvgReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	log := r.log.Named("lvgReconciler")
+	log := r.log
 
 	log.Debug(fmt.Sprintf("reconciling LVG %s, recalibrating unaccounted space", req.Name))
 
