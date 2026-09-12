@@ -76,3 +76,15 @@
     echo "GO_PRIVATE_TOKEN is empty: modules under ${GOPRIVATE} cannot be fetched"
   fi
 {{- end -}}
+
+{{- define "svace toolchain for golang builds" -}}
+{{- if ne .SVACE_ENABLED "false" }}
+# The base-images catalogue carries no golang+svace builder. builder/alpine-svace is plain
+# Alpine plus the analyser: its only go binary sits in /opt/svace/compilers and is not on
+# PATH, so a Go build started from that image fails with "go: command not found". Keep the
+# regular Go builder and add the Svace toolchain to it instead.
+# ssh-static and rsync are needed by "image-build.build" to ship .svace-dir to the analyser.
+- pm install svace rsync ssh-static
+{{- end }}
+{{- end -}}
+

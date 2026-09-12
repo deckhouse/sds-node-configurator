@@ -21,7 +21,7 @@ shell:
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
-from: {{ index $.Images (eq .SVACE_ENABLED "false" | ternary "builder/golang" "builder/alpine-svace") }}
+from: {{ index $.Images "builder/golang" }}
 final: false
 
 import:
@@ -40,6 +40,7 @@ secrets:
 
 shell:
   setup:
+    {{- include "svace toolchain for golang builds" . | nindent 4 }}
     {{- include "auth for private go modules" . | nindent 4 }}
     - cd /src/images/{{ $.ImageName }}/cmd
     - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download

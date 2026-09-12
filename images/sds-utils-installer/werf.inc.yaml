@@ -33,7 +33,7 @@ shell:
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-binaries-artifact
-from: {{ index $.Images (eq .SVACE_ENABLED "false" | ternary "builder/golang-alt" "builder/alpine-svace") }}
+from: {{ index $.Images "builder/golang" }}
 final: false
 
 import:
@@ -51,19 +51,12 @@ git:
 
 shell:
   install:
-    {{- include "alt packages proxy" . | nindent 4 }}
-    - |
-      apt-get install -y \
-      build-essential \
-      autoconf \
-      automake \
-      libtool \
-      pkg-config \
-      libdevmapper-devel \
-      libaio-devel-static \
-      libblkid-devel-static \
-      glibc-core \
-      cross-glibc-x86_64
+    {{- include "svace toolchain for golang builds" . | nindent 4 }}
+    # The ALT builder is gone; the same toolchain comes from the container-factory catalogue.
+    # gnu-glibc-devel, util-linux-devel and libaio-devel carry the static archives
+    # (libc.a, libblkid.a, libaio.a) that --enable-static_link needs; lvm2 builds its own
+    # libdm, so no device-mapper package is required. ldd is what binary_replace.sh checks for.
+    - pm install make gnu-gcc gnu-glibc-devel binutils autoconf automake libtool pkgconf libaio-devel util-linux-devel ldd
     - cd /src/lvm2
     - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu
     - |
@@ -76,7 +69,7 @@ shell:
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
-from: {{ index $.Images (eq .SVACE_ENABLED "false" | ternary "builder/golang" "builder/alpine-svace") }}
+from: {{ index $.Images "builder/golang" }}
 final: false
 
 import:
@@ -94,6 +87,7 @@ secrets:
 
 shell:
   setup:
+    {{- include "svace toolchain for golang builds" . | nindent 4 }}
     - cd /src/images/{{ $.ImageName }}/cmd
     - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
     - export GOOS=linux GOARCH=amd64 CGO_ENABLED=0
