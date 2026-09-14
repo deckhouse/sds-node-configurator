@@ -1,0 +1,9 @@
+date: "2026-09-14"
+
+summary: "The scheduler extender now runs on the control-plane nodes, next to the kube-scheduler that consults it."
+
+highlights:
+  - "The `sds-common-scheduler-extender` Pod is placed on control-plane nodes instead of system ones, and tolerates their taints."
+
+fixes:
+  - "The `sds-common-scheduler-extender` Deployment asked for system nodes and carried the `system` tolerations, which tolerate neither the control-plane taint nor custom ones, so the Pod could not be placed on a control-plane node. It now selects master nodes — falling back to system nodes in clusters that expose no master role — and tolerates any node, which puts it next to the kube-scheduler that calls it on every scheduling attempt of the modules that register it."
