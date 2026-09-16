@@ -76,6 +76,14 @@ type Discoverer struct {
 	// process down.
 	orphanMu        sync.Mutex
 	reportedOrphans map[string]struct{}
+
+	// publishedDevices answers which devices this cluster has published to
+	// workloads as block volumes (utils.PublishedDevices in production). A device
+	// that is somebody's volume is not a candidate: a BlockDevice on it would offer
+	// the operator to build storage over a consumer's data, and the LVM signature
+	// on it — a nested cluster's — is not this node's. A field so a test can state
+	// the set.
+	publishedDevices func() utils.PublishedBlockDevices
 }
 
 type DiscovererConfig struct {
@@ -100,6 +108,7 @@ func NewDiscoverer(
 		sdsCache:                sdsCache,
 		cfg:                     cfg,
 		reportedOrphans:         make(map[string]struct{}),
+		publishedDevices:        utils.PublishedDevices,
 	}
 }
 
@@ -724,10 +733,21 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 		}
 	}
 
+	published := d.publishedDevices()
+
 	filteredDevices = slices.DeleteFunc(
 		filteredDevices,
 		func(device internal.Device) bool {
 			log := d.log
+
+			// Before every other rule, because the others describe the device and
+			// this one describes who it belongs to. The set already holds the
+			// partitions and holders of a published device, so a guest's partition
+			// table does not bring the device back one level down.
+			if published.Has(device.KName) {
+				log.Trace("filtered out", "name", device.Name, "kname", device.KName, "reason", "published to a workload as a block volume")
+				return true
+			}
 
 			if device.FSType == "mpath_member" {
 				log.Trace("filtered out", "name", device.Name, "kname", device.KName, "reason", "mpath_member")

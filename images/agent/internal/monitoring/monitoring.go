@@ -246,6 +246,25 @@ var (
 	// a non-zero rate is "this is happening now" and falls back to zero by itself
 	// once the tag is fixed, whereas a gauge set to 1 would need clearing by
 	// whichever pass stops seeing the Volume Group.
+	// The devices this cluster has published to workloads as block volumes on the
+	// node, partitions and holders included — the set every lvm command's filter
+	// rejects (utils.PublishedDevices). Two gauges rather than one because the
+	// two answers an operator has to tell apart both look like an empty set: a
+	// node that has published nothing, and a node where the agent is looking at
+	// the wrong place (a relocated kubelet root). The second silently restores
+	// the leak the filter exists to close, and the count cannot show it.
+	publishedBlockDevices = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "published_block_devices",
+		Help:      "Number of block devices on the node that kubelet has published to workloads as block volumes, with their partitions and holders; the agent's lvm commands reject these devices.",
+	}, []string{"node"})
+
+	publishedDevicesDirectoryPresent = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "published_devices_directory_present",
+		Help:      "1 when kubelet's CSI volumeDevices/publish directory exists on the node, 0 when it does not: either no block volume was ever published here, or kubelet's root is not where the agent reads it and nothing is filtered as published.",
+	}, []string{"node"})
+
 	lvmVolumeGroupImportRefusedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
 		Name:      "lvm_volume_group_import_refused_total",
@@ -296,6 +315,8 @@ func init() {
 	metrics.Registry.MustRegister(fileDevicesDirectoryAllocatedBytes)
 	metrics.Registry.MustRegister(fileDevicesDirectoryTotalBytes)
 	metrics.Registry.MustRegister(lvmVolumeGroupImportRefusedTotal)
+	metrics.Registry.MustRegister(publishedBlockDevices)
+	metrics.Registry.MustRegister(publishedDevicesDirectoryPresent)
 }
 
 type Metrics struct {
@@ -433,6 +454,17 @@ func (m *Metrics) LVGThinPoolUsedSizeBytes(lvgName, volumeGroup, thinPool string
 
 func (m *Metrics) LVGThinPoolAllocationLimitBytes(lvgName, volumeGroup, thinPool string) prometheus.Gauge {
 	return lvgThinPoolAllocationLimitBytes.WithLabelValues(m.node, lvgName, volumeGroup, thinPool)
+}
+
+// SetPublishedBlockDevices publishes the size of the published-devices set and
+// whether kubelet's publish directory was there to read.
+func (m *Metrics) SetPublishedBlockDevices(count int, directoryPresent bool) {
+	publishedBlockDevices.WithLabelValues(m.node).Set(float64(count))
+	present := 0.0
+	if directoryPresent {
+		present = 1
+	}
+	publishedDevicesDirectoryPresent.WithLabelValues(m.node).Set(present)
 }
 
 func (m *Metrics) LVMActivationTotal(volumeGroup, result string) prometheus.Counter {

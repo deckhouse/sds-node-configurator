@@ -1046,6 +1046,32 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		}
 	})
 
+	t.Run("filterDevices_drops_devices_published_to_workloads", func(t *testing.T) {
+		d := setupDiscoverer()
+		// The map kubelet published to a VM and the kpartx partition of it that the
+		// guest's installer created; the node's own map next to them.
+		d.publishedDevices = func() utils.PublishedBlockDevices {
+			return utils.NewPublishedBlockDevices("dm-5", "dm-9")
+		}
+
+		size := resource.MustParse("10G")
+		devices := []internal.Device{
+			{Name: "/dev/mapper/mpatha", KName: "dm-5", Type: "mpath", FSType: "", Size: size, Serial: "s1", Wwn: "w1"},
+			{Name: "/dev/mapper/mpatha-part1", KName: "dm-9", PkName: "dm-5", Type: "part", FSType: internal.LVMFSType, Size: size, Serial: "s1", Wwn: "w1"},
+			{Name: "/dev/mapper/mpathb", KName: "dm-6", Type: "mpath", FSType: internal.LVMFSType, Size: size, Serial: "s2", Wwn: "w2"},
+		}
+
+		got, err := d.filterDevices(devices)
+		assert.NoError(t, err)
+
+		names := make([]string, 0, len(got))
+		for _, dev := range got {
+			names = append(names, dev.Name)
+		}
+		assert.Equal(t, []string{"/dev/mapper/mpathb"}, names,
+			"a device this cluster handed to a workload, and whatever the guest stacked on it, is nobody's candidate; the node's own map stays")
+	})
+
 	t.Run("filterDevices_drops_foreign_storage_prefixes", func(t *testing.T) {
 		d := setupDiscoverer()
 

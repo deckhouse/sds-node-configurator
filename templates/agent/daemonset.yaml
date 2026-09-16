@@ -237,6 +237,19 @@ spec:
           name: host-sys-fs-cgroup
         - mountPath: /run/udev/
           name: host-run-udev-dir
+        # Read-only, and only so the agent can tell which block devices this
+        # cluster has published to a workload: `publish/<pvName>/<podUID>` under
+        # it is a device node kubelet created for a block volume, `staging/<pvName>`
+        # a volume staged on the node. A device that is somebody's volume is not
+        # this node's storage: the agent's lvm commands reject it by name. See
+        # utils.PublishedDevices in the agent.
+        #
+        # HostToContainer so that anything a CSI driver bind-mounts inside this
+        # tree (some drivers stage a block volume that way) is visible here too.
+        - mountPath: /var/lib/kubelet/plugins/kubernetes.io/csi/volumeDevices
+          name: host-csi-volume-devices-dir
+          readOnly: true
+          mountPropagation: HostToContainer
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
@@ -315,4 +328,16 @@ spec:
           path: /run/udev/
           type: Directory
         name: host-run-udev-dir
+      # DirectoryOrCreate rather than Directory: the directory only exists once
+      # kubelet has staged a block volume on the node, and the agent must start on
+      # a node that never had one. An empty directory reads as "nothing published",
+      # which is the agent's behaviour before this mount existed, so on a node
+      # whose kubelet root is elsewhere the filter is silently off. The agent says
+      # so at startup and publishes it as published_devices_directory_present;
+      # moving the path means moving it here, in the mountPath above and in
+      # internal.DefaultCSIVolumeDevicesDirectory together.
+      - hostPath:
+          path: /var/lib/kubelet/plugins/kubernetes.io/csi/volumeDevices
+          type: DirectoryOrCreate
+        name: host-csi-volume-devices-dir
 {{- end }}

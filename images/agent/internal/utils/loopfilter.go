@@ -123,9 +123,16 @@ func OwnedLoops() []string {
 }
 
 // LVMGlobalFilterForOwnedLoops is the filter every LVM command the agent runs
-// carries: foreign devices rejected, this agent's own loop devices accepted.
+// carries: this agent's own loop devices accepted; multipath maps with no path
+// left and the devices this cluster published to workloads rejected by name;
+// foreign storage layers rejected by prefix.
 func LVMGlobalFilterForOwnedLoops() string {
-	return internal.LVMGlobalFilterFor(OwnedLoops(), PathlessMultipathDevices())
+	pathless := PathlessMultipathDevices()
+	published := PublishedDevices().RejectPaths()
+	rejects := make([]string, 0, len(pathless)+len(published))
+	rejects = append(rejects, pathless...)
+	rejects = append(rejects, published...)
+	return internal.LVMGlobalFilterFor(OwnedLoops(), rejects)
 }
 
 // RefreshOwnedLoops rebuilds the registry from the node's actual loop devices,

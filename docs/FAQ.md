@@ -19,6 +19,20 @@ Module functionality when using other kernels or distributions is possible but n
 
 - If [BlockDevice](./cr.html#blockdevice) resources exist but [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources are missing, ensure that existing LVM Volume Groups on the node have the LVM tag `storage.deckhouse.io/enabled=true`.
 
+- A device that kubelet has published to a pod as a block volume (a `volumeMode: Block` PersistentVolume, e.g. a virtual machine's disk on a hypervisor) never becomes a [BlockDevice](./cr.html#blockdevice), and a Volume Group inside it never becomes an [LVMVolumeGroup](./cr.html#lvmvolumegroup), even when it carries the module's tags: the LVM inside such a volume belongs to the volume's consumer (a nested cluster), not to the node. The agent reads the set of published devices from kubelet's `/var/lib/kubelet/plugins/kubernetes.io/csi/volumeDevices` tree and reports its size as the `sds_node_configurator_published_block_devices` metric; `sds_node_configurator_published_devices_directory_present` is `0` when that tree is not where the agent expects it.
+
+## A nested cluster's Logical Volumes are still active on the hypervisor after the upgrade. What do I do with them?
+
+Before the agent learned to keep away from published block volumes, it could activate a nested cluster's Volume Group right through a virtual machine's disk: the guest's thin pools and Logical Volumes appeared on the hypervisor as device-mapper devices stacked on the published volume. Upgrading does not undo that. The agent now rejects the volume and everything stacked on it, so its `lvs` no longer lists those Logical Volumes and `vgchange -an` cannot find their Volume Group — but the device-mapper devices stay, and they hold the volume open. The symptom appears when the virtual machine's disk is deleted: `lvremove` fails with `Logical volume … is used by another device`, and the PersistentVolumeClaim stays `Terminating`.
+
+Remove those mappings by hand, on the node:
+
+1. Find them. The agent logs the set on every change — `devices published to workloads as block volumes, with their partitions and holders: N (was M): <kernel names>` — and `dmsetup ls --tree` shows what is stacked on each published volume. A device stacked on a published volume is the guest's, seen through the volume.
+2. Make sure nothing on the hypervisor holds it: `dmsetup info -c --noheadings -o name,open_count <name>` must report `0`.
+3. Remove it, from the top of the stack down: `dmsetup remove <name>`. A mapping that still has something on top of it answers `Device or resource busy` — remove that first.
+
+The guest's data is not touched: the virtual machine reads its disk through the published volume, not through the hypervisor's mapping, and the guest's own LVM activates its Logical Volumes inside the machine as before. Delete the stale [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources that described those Volume Groups afterwards; the agent no longer sees the Volume Group, so deleting the resource does not touch it.
+
 ## Why does an LVMVolumeGroup report `BlockDeviceNotFound` or `NodeNotDescribed`?
 
 Both reasons appear on the `VGReady` condition and mean the same thing: a Physical Volume of the Volume Group has no [BlockDevice](./cr.html#blockdevice) resource naming it, so `status.nodes` cannot list that device. They differ in how much of the node the agent could still describe, and that difference decides whether the Volume Group keeps taking new volumes.

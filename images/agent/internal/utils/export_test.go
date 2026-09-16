@@ -45,4 +45,21 @@ func WithEmptySysBlockForTest(tb testing.TB) {
 		sysBlockPath = saved
 		ResetPathlessMultipathCache()
 	})
+
+	WithNoPublishedDevicesForTest(tb)
+}
+
+// WithNoPublishedDevicesForTest points the published-devices scan at an empty
+// tree for the duration of the test, for the same reason: a machine running the
+// tests inside a cluster could have kubelet's volumeDevices tree mounted, and the
+// devices published there legitimately add reject rules to the filter.
+func WithNoPublishedDevicesForTest(tb testing.TB) {
+	tb.Helper()
+
+	savedRoot := PublishedDevicesRoot()
+	SetPublishedDevicesRoot(tb.TempDir())
+
+	tb.Cleanup(func() {
+		SetPublishedDevicesRoot(savedRoot)
+	})
 }

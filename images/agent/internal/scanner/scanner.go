@@ -243,6 +243,15 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 		log.Warn(fmt.Sprintf("%v", err))
 	}
 
+	// Also before any LVM command, for the same reason: the filter every command
+	// below carries rejects the devices this cluster has published to workloads as
+	// block volumes, and a pass should run under a set as fresh as itself rather
+	// than one up to publishedDevicesTTL old. A block volume published a moment
+	// ago is a guest's disk, and the LVM inside it must not be read even once if
+	// that can be helped. Cheap: a walk over kubelet's tree, no host command.
+	published, publishedDirPresent := utils.RefreshPublishedDevices(log)
+	metrics.SetPublishedBlockDevices(published.Len(), publishedDirPresent)
+
 	// the scan operations order is very important as it guarantees the consistent and reliable data from the node
 	realClock := clock.RealClock{}
 	now := time.Now()
@@ -280,6 +289,19 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 			return err
 		}
 	}
+
+	// The PV count before any filter of this pass. The pruning of VGs and LVs at
+	// the end is keyed on it: EnsureVGActivation re-lists VGs and LVs raw after it
+	// activates something, so the prune has to fire whenever ANY PV was dropped,
+	// not only when the filters below the activation dropped one.
+	rawPVCount := len(pvs)
+
+	// Second line behind lvm's own filter, which already rejects these devices
+	// (see utils.PublishedDevices): it catches a PV read in the window between the
+	// device being published and the filter learning of it. Before activation,
+	// because a guest Volume Group that reaches EnsureVGActivation gets a
+	// `vgchange -ay` on the host — see dropPublishedPVs.
+	pvs, vgs, lvs = dropPublishedPVs(log, pvs, vgs, lvs, published)
 
 	now = time.Now()
 	var devices []internal.Device
@@ -346,9 +368,9 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	// a hung resolver on a single foreign device cannot block the entire
 	// scan loop. This is the same per-command timeout contract every
 	// other lvm.static invocation in this function obeys (see PR #290).
-	beforePV := len(pvs)
+	beforeForeignPV := len(pvs)
 	pvs = utils.FilterForeignPVs(ctx, log, nil, pvs, cfg.CmdDeadlineDuration)
-	if dropped := beforePV - len(pvs); dropped > 0 {
+	if dropped := beforeForeignPV - len(pvs); dropped > 0 {
 		log.Info(fmt.Sprintf("dropped %d foreign PV(s) backed by rbd/drbd/nbd devices", dropped))
 	}
 
@@ -369,16 +391,7 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 		log.Info(fmt.Sprintf("dropped %d PV(s) of unmanaged loop-backed VG(s)", dropped))
 	}
 
-	if len(pvs) < beforePV {
-		beforeVG := len(vgs)
-		vgs = utils.FilterVGsByPresentPVs(vgs, pvs)
-		beforeLV := len(lvs)
-		lvs = utils.FilterLVsByPresentVGs(lvs, vgs)
-		log.Info(fmt.Sprintf(
-			"cache pruned to local view: VGs %d -> %d, LVs %d -> %d",
-			beforeVG, len(vgs), beforeLV, len(lvs),
-		))
-	}
+	vgs, lvs = pruneToPresentPVs(log, pvs, vgs, lvs, rawPVCount)
 
 	cache.StoreDevices(devices, devErr)
 	cache.StorePVs(pvs, pvsErr)

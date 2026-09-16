@@ -28,6 +28,7 @@ For the controller to create a [BlockDevice](./cr.html#blockdevice) resource for
 - The device must not be a DRBD device.
 - The device must not be a pseudo-device (loop device).
 - The device must not be a Logical Volume.
+- The device must not be a block volume that kubelet has published to a workload on this node (a `volumeMode: Block` PersistentVolume attached to a pod, e.g. a virtual machine's disk), nor a partition of one or a device stacked on one: whatever is written inside such a device belongs to the volume's consumer. The agent's LVM commands do not read these devices either.
 - The file system must be absent or of type `LVM2_MEMBER`.
 - The block device must not have partitions.
 - The block device size must exceed 1 GB.

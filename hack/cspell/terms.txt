@@ -17,6 +17,7 @@ goruntime
 healthz
 k8serr
 KNAME
+kpartx
 kubutils
 LLVS
 Loglevel
@@ -32,6 +33,7 @@ lvremove
 machineid
 mdraid
 metav
+mmcblk
 mpath
 mpatha
 NSENTER
@@ -43,6 +45,7 @@ Proxmox
 pvremove
 pvresize
 PVUUID
+rdev
 Readyz
 stretchr
 sysfs

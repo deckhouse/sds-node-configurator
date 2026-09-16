@@ -1717,7 +1717,11 @@ func nsentrerExpendedArgs(cmd string, args ...string) []string {
 // `pvs`, `lvs`, `vgchange`, ...). The override does two things:
 //
 //   - rejects foreign-storage canonical paths from LVM's device scan
-//     (devices/global_filter, see internal.LVMGlobalFilter);
+//     (devices/global_filter, see internal.LVMGlobalFilter), together with
+//     multipath maps that have no path left and the devices this cluster
+//     published to workloads as block volumes (utils.LVMGlobalFilterForOwnedLoops);
+//   - keeps lvm from scanning Logical Volumes for Physical Volumes
+//     (devices/scan_lvs, see internal.LVMScanLVs);
 //   - caps the size of /etc/lvm/archive on new metadata operations
 //     (backup/retain_min, backup/retain_days; see
 //     internal.LVMArchiveRetention).
@@ -1733,7 +1737,7 @@ func lvmStaticExtendedArgs(args []string) []string {
 		return nsentrerExpendedArgs(internal.LVMCmd, args...)
 	}
 
-	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMArchiveRetention
+	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMScanLVs + " " + internal.LVMArchiveRetention
 	withConfig := make([]string, 0, len(args)+2)
 	withConfig = append(withConfig, args[0], "--config", configValue)
 	withConfig = append(withConfig, args[1:]...)

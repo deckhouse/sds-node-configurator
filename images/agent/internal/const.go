@@ -116,6 +116,28 @@ const (
 	// archives must be pruned manually on impacted nodes.
 	LVMArchiveRetention = `backup/retain_min=10 backup/retain_days=7`
 
+	// LVMScanLVs keeps lvm from looking for Physical Volumes inside Logical
+	// Volumes. It is LVM's own default, and it is what keeps a guest's Physical
+	// Volume inside a local volume this cluster handed to a virtual machine (an
+	// LV of sds-local-volume, published as a block volume) out of the node's view.
+	// Pinned in the agent's --config so a node whose lvm.conf says otherwise does
+	// not silently reopen that case.
+	LVMScanLVs = `devices/scan_lvs=0`
+
+	// DefaultCSIVolumeDevicesDirectory is kubelet's CSI volumeDevices tree. Its
+	// `publish/<pvName>/<podUID>` entries are the device nodes kubelet created for
+	// the block volumes it published to pods on this node, and `staging/<pvName>`
+	// holds the volumes staged on it; the agent reads both to know which devices
+	// this cluster has handed to a consumer — see utils.PublishedDevices.
+	//
+	// Kubelet's root is fixed on every bundle the module supports, and the
+	// DaemonSet hard-codes the same path in hostPath and mountPath; moving it means
+	// moving all three together. A node that has relocated its kubelet root reads
+	// as "nothing is published", which is the behaviour the agent had before it
+	// looked there, and the published_devices_directory_present metric is what
+	// makes that visible rather than silent.
+	DefaultCSIVolumeDevicesDirectory = "/var/lib/kubelet/plugins/kubernetes.io/csi/volumeDevices"
+
 	TypeVGConfigurationApplied = "VGConfigurationApplied"
 	TypeVGReady                = "VGReady"
 
@@ -302,12 +324,34 @@ type (
 // only inputs this function has any business taking are canonical loop paths.
 var loopDevicePath = regexp.MustCompile(`^/dev/loop\d+$`)
 
-// pathlessMapPath is what a device the builder may reject by name looks like.
+// rejectDevicePath is what a device the builder may reject by name looks like.
 // Same reasoning as loopDevicePath, and the same consequence for getting it
 // wrong: the value is spliced into a configuration string whose field separator
-// is `|`, so the charset is restricted rather than escaped. A multipath map is
-// reachable as /dev/dm-N and as /dev/mapper/<name>, and both are accepted here.
-var pathlessMapPath = regexp.MustCompile(`^/dev/(dm-\d+|mapper/[A-Za-z0-9_.+-]+)$`)
+// is `|`, so the charset is restricted rather than escaped. It admits every
+// spelling the two callers produce — /dev/dm-N and /dev/mapper/<name> for a
+// multipath map, /dev/<kname> for a device published to a workload and for its
+// partitions and holders — and nothing with a quote, a pipe, a bracket or
+// whitespace in it. The trailing character
+// has to be alphanumeric so that a truncated name ("/dev/dm-") is refused too.
+//
+// Two of the admitted characters, `.` and `+`, are regex metacharacters, and a
+// device-mapper name may carry both. The builder wraps them in a bracket
+// expression (rejectRuleLiteral) rather than dropping them, because dropping
+// would leave that device unfiltered, and a rule left as `vg0-data.1` would also
+// match `vg0-dataX1` — a device of the node's own, rejected over a lookalike.
+var rejectDevicePath = regexp.MustCompile(`^/dev/[A-Za-z0-9_./:+-]*[A-Za-z0-9]$`)
+
+// rejectRuleLiteralEscaper turns a device path into a regex that matches that
+// path and nothing else, within the charset rejectDevicePath admits. Bracket
+// expressions rather than backslashes: libdm's regex engine reads both, but a
+// bracket expression survives every layer the value passes through — Go string,
+// argv, lvm's config parser — without anyone having to agree on escaping.
+var rejectRuleLiteralEscaper = strings.NewReplacer(".", "[.]", "+", "[+]")
+
+// rejectRuleLiteral is the regex body for an exact-path reject rule.
+func rejectRuleLiteral(devicePath string) string {
+	return rejectRuleLiteralEscaper.Replace(devicePath)
+}
 
 // LVMGlobalFilterAcceptingLoops builds the `lvm --config` filter that rejects
 // foreign devices as LVMGlobalFilter does, but first accepts the loop devices
@@ -330,13 +374,18 @@ func LVMGlobalFilterAcceptingLoops(loops []string) string {
 // LVMGlobalFilterFor builds the same filter and additionally rejects the devices
 // named in rejectDevices by exact path.
 //
-// Its caller passes multipath maps that have lost every path. Those must be
-// rejected by name and not by a blanket device-mapper rule: a Volume Group on a
-// SAN LUN is a supported layout, so healthy multipath devices have to stay
-// visible. Reading a pathless map blocks in the kernel instead of failing, and
-// the blocked reader holds the map open, which is what eventually prevents the
-// volume from ever being detached from the node - see
-// utils.PathlessMultipathDevices for the full chain.
+// Its caller passes two kinds of device, and both must be rejected by name and
+// not by a blanket device-mapper rule, because a Volume Group on a SAN LUN is a
+// supported layout and healthy multipath devices have to stay visible:
+//
+//   - multipath maps that have lost every path. Reading one blocks in the kernel
+//     instead of failing, and the blocked reader holds the map open, which is
+//     what eventually prevents the volume from ever being detached from the node
+//     — see utils.PathlessMultipathDevices for the full chain;
+//   - devices this cluster published to a workload as block volumes, with their
+//     partitions and holders. What is written inside them is the consumer's — on
+//     a hypervisor, a nested cluster's LVM — and rejecting them here is what keeps
+//     lvm from ever reading it; see utils.PublishedDevices.
 //
 // Rejects are emitted after the loop accepts and before the static foreign-device
 // rejects. Order among rejects does not matter; order against the accepts does,
@@ -357,11 +406,11 @@ func LVMGlobalFilterFor(loops, rejectDevices []string) string {
 		b.WriteString(`$|",`)
 	}
 	for _, dev := range rejectDevices {
-		if !pathlessMapPath.MatchString(dev) {
+		if !rejectDevicePath.MatchString(dev) {
 			continue
 		}
 		b.WriteString(`"r|^`)
-		b.WriteString(dev)
+		b.WriteString(rejectRuleLiteral(dev))
 		b.WriteString(`$|",`)
 	}
 	b.WriteString(lvmForeignDeviceRejects)

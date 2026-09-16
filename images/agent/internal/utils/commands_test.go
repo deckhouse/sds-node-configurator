@@ -345,7 +345,7 @@ func TestCommands(t *testing.T) {
 // compares with assert.Equal — any future drift in either the prefix
 // or the --config placement fails loudly with a readable diff.
 func TestLvmStaticExtendedArgs(t *testing.T) {
-	configValue := internal.LVMGlobalFilter + " " + internal.LVMArchiveRetention
+	configValue := internal.LVMGlobalFilter + " " + internal.LVMScanLVs + " " + internal.LVMArchiveRetention
 	prefix := []string{"-t", "1", "-m", "-u", "-i", "-n", "-p", "--", internal.LVMCmd}
 
 	tests := []struct {
@@ -421,6 +421,8 @@ func TestLvmStaticExtendedArgs(t *testing.T) {
 			assert.Contains(t, actualConfig, "/dev/"+p,
 				"global_filter must reject /dev/%s* canonical paths", p)
 		}
+		assert.Contains(t, actualConfig, "devices/scan_lvs=0",
+			"--config must keep lvm from reading Physical Volumes inside Logical Volumes: a guest's PV inside a local volume handed to a VM")
 		assert.Contains(t, actualConfig, "backup/retain_min=",
 			"--config must cap /etc/lvm/archive growth via backup/retain_min")
 		assert.Contains(t, actualConfig, "backup/retain_days=",

@@ -106,13 +106,42 @@ func TestLVMGlobalFilterForRefusesMangledPaths(t *testing.T) {
 	filter := internal.LVMGlobalFilterFor(nil, []string{
 		`/dev/mapper/evil|","a|.*`,
 		"/dev/dm-",
-		"/dev/sda",
+		`/dev/sda"`,
+		"/dev/sd a",
+		"/dev/mapper/[x]",
 		"../../etc/passwd",
+		"/etc/passwd",
 	})
 
 	assert.Equal(t, internal.LVMGlobalFilter, filter,
 		"no candidate is a canonical device path, so the filter stays the static one")
 	assert.False(t, strings.Contains(filter, "evil"), "a mangled path never reaches the filter")
+}
+
+func TestLVMGlobalFilterForAcceptsEverySpellingOfAPublishedDevice(t *testing.T) {
+	// The published-devices scan names a device under every spelling lvm may
+	// reach it by, whole disks and partitions included; all of them are legal.
+	filter := internal.LVMGlobalFilterFor(nil, []string{
+		"/dev/sda", "/dev/sdc1", "/dev/nvme0n1p2", "/dev/block/253:5", "/dev/dm-5", "/dev/mapper/mpatha-part1",
+	})
+
+	assert.Equal(t,
+		`devices/global_filter=["r|^/dev/sda$|","r|^/dev/sdc1$|","r|^/dev/nvme0n1p2$|","r|^/dev/block/253:5$|","r|^/dev/dm-5$|","r|^/dev/mapper/mpatha-part1$|","r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|"]`,
+		filter)
+}
+
+func TestLVMGlobalFilterForEscapesRegexMetacharactersInNames(t *testing.T) {
+	// A device-mapper name may carry `.` and `+`, and both are regex
+	// metacharacters. Left as they are, `r|^/dev/mapper/vg0-data.1$|` would also
+	// reject /dev/mapper/vg0-dataX1 — a device of the node's own, taken out over a
+	// lookalike. Bracket expressions pin the rule to the one path it names.
+	filter := internal.LVMGlobalFilterFor(nil, []string{
+		"/dev/mapper/vg0-data.1", "/dev/mapper/a+b", "/dev/mapper/mpath.a+1",
+	})
+
+	assert.Equal(t,
+		`devices/global_filter=["r|^/dev/mapper/vg0-data[.]1$|","r|^/dev/mapper/a[+]b$|","r|^/dev/mapper/mpath[.]a[+]1$|","r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|"]`,
+		filter)
 }
 
 func TestLVMGlobalFilterForEmptyInputs(t *testing.T) {
