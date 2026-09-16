@@ -114,6 +114,46 @@ The LVM tag appears in the following cases:
 
 When migrating from the built-in `linstor` module to `sds-node-configurator` and `sds-replicated-volume` modules, `linstor-*` LVM tags are automatically replaced with `storage.deckhouse.io/enabled=true` in Volume Groups. Management of these Volume Groups is transferred to the `sds-node-configurator` module.
 
+## Why is a Volume Group with the module's tags not imported, and how do I adopt it?
+
+A Volume Group that carries `storage.deckhouse.io/enabled=true` is imported automatically — an [LVMVolumeGroup](./cr.html#lvmvolumegroup) is created for it — with one exception. When the Volume Group also carries `storage.deckhouse.io/lvmVolumeGroupName=<name>` and no LVMVolumeGroup named `<name>` exists in this cluster, the agent refuses the import.
+
+The reason is where that tag comes from: the agent writes it when it creates a Volume Group, and nothing else does. A Volume Group tagged with a name nobody in this cluster knows was therefore created by another cluster's agent — typically a nested cluster running in a virtual machine whose disk this node can see (a SAN LUN mapped to several hosts, a LUN mapped by hand to both the hypervisor and the guest, a LUN whose volume was deleted but whose mapping was not). Importing it would make the Volume Group of a running cluster look like this node's storage, and deleting the resulting LVMVolumeGroup would run `vgremove` on it.
+
+The refusal is reported once in the agent's log on the node (`not importing VG <vg>: its storage.deckhouse.io/lvmVolumeGroupName tag names the LVMVolumeGroup <name>, which does not exist in this cluster …`) and counted in the `sds_node_configurator_lvm_volume_group_import_refused_total` metric with `lvg_name=<name>` (empty when `<name>` is not a valid resource name: another cluster's string does not become a series of this cluster's metrics).
+
+The same refusal meets a cluster bootstrapped anew on nodes that kept their disks — a reinstall, a recovery that did not restore etcd, a node moved with its data into another cluster: every Volume Group there carries the name of the previous cluster's resource, and none is imported until an operator acts as described below. Earlier versions of the module imported them silently.
+
+If the Volume Group really is this node's — its LVMVolumeGroup was deleted here, for example around its finalizer — take it under management deliberately, in one of two ways:
+
+- Create an LVMVolumeGroup with the name from the tag, pointing at the existing Volume Group. The agent finds the Volume Group on the node and adopts it instead of creating a new one:
+
+  ```yaml
+  apiVersion: storage.deckhouse.io/v1alpha1
+  kind: LVMVolumeGroup
+  metadata:
+    name: <name from the tag>
+  spec:
+    type: Local
+    local:
+      nodeName: <node>
+    actualVGNameOnTheNode: <vg>
+    blockDeviceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+            - <BlockDevice of each Physical Volume of the Volume Group>
+  ```
+
+- Or remove the name tag on the node, after which the Volume Group is imported as a newly handed-over one under a generated name:
+
+  ```shell
+  vgchange --deltag storage.deckhouse.io/lvmVolumeGroupName=<name> <vg>
+  ```
+
+Do neither for a Volume Group that belongs to another cluster.
+
 ## How do I create LVMVolumeGroup using LVMVolumeGroupSet?
 
 To create [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources using [LVMVolumeGroupSet](./cr.html#lvmvolumegroupset), specify node selectors and a template for the created [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources in the [LVMVolumeGroupSet](./cr.html#lvmvolumegroupset) specification.

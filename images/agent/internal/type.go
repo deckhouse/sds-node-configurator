@@ -39,6 +39,17 @@ type LVMVolumeGroupCandidate struct {
 	ExtentSize            resource.Quantity
 	Nodes                 map[string][]LVMVGDevice
 	FileDeviceNodes       map[string][]LVMVGFileDevice
+	// OwnerTag is the value of the Volume Group's storage.deckhouse.io/lvmVolumeGroupName
+	// tag, empty when the Volume Group carries none. The agent writes that tag when it
+	// creates a Volume Group and never otherwise, so a candidate with one was made by
+	// an agent of this module — this cluster's, in which case an LVMVolumeGroup of
+	// that name exists here, or another cluster's, in which case none does. The
+	// discoverer refuses to import the second kind; see foreignOwnerRefusalReason.
+	//
+	// Kept raw, next to LVMVGName, because LVMVGName is replaced by a generated one
+	// when the tag does not hold a usable resource name, and the refusal has to fire
+	// on the tag's presence, not on its usability.
+	OwnerTag string
 	// LVMVGNameGenerated records that LVMVGName was minted rather than read back
 	// from the Volume Group's storage.deckhouse.io/lvmVolumeGroupName tag. It is
 	// normal for a Volume Group an administrator handed over, and disqualifying

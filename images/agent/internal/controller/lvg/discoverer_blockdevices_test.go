@@ -627,10 +627,13 @@ func TestLVMVolumeGroupDiscoverReconcile_DoesNotImportAVolumeGroupWithAnUnnamedP
 	ctx := context.Background()
 	cl := test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{})
 
-	// No LVMVolumeGroup for this VG at all: the pass would create one.
+	// No LVMVolumeGroup for this VG at all: the pass would create one. The Volume
+	// Group carries no owner tag — the state of one an operator handed over — because
+	// a tag naming a resource this cluster does not have is refused outright, and
+	// that refusal is a different test.
 	require.NoError(t, cl.Create(ctx, bdRaceBlockDevice(true)))
 
-	sdsCache := bdRaceCache(t)
+	sdsCache := bdRaceCacheWithTags(t, "storage.deckhouse.io/enabled=true")
 	d := bdRaceDiscoverer(t, cl, UncachedReader{Reader: cl}, sdsCache)
 	bdRaceStorePVs(t, sdsCache, d, bdRacePVName, "/dev/sdd")
 

@@ -150,6 +150,14 @@ type Reconciler struct {
 	// interval afterwards. Same locking rationale as aliasResolveFailures.
 	noProgressRetriesMu sync.Mutex
 	noProgressRetries   map[string]int
+
+	// adoptionTriggered holds the names of the LVMVolumeGroups whose Volume Group
+	// this process has already re-probed for the discoverer (triggerUdevForAdoption)
+	// and that have not been described since. Once per resource: a second uevent
+	// changes nothing on the device, and every one of them runs the host's udev
+	// rules. Same locking story as the two maps above.
+	adoptionTriggeredMu sync.Mutex
+	adoptionTriggered   map[string]struct{}
 }
 
 type ReconcilerConfig struct {
@@ -198,6 +206,7 @@ func NewReconciler(
 		resolver:             utils.HostNsenterCanonicalResolver,
 		aliasResolveFailures: make(map[string]int),
 		noProgressRetries:    make(map[string]int),
+		adoptionTriggered:    make(map[string]struct{}),
 	}
 }
 
@@ -686,6 +695,19 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 		return r.requeueInterval(), err
 	}
 	log.Debug(fmt.Sprintf("VG %s found for the LVMVolumeGroup %s", vg.VGName, lvg.Name))
+
+	// A resource that has never been described — status.vgUuid is written by the
+	// discoverer alone — over a Volume Group that already exists is an adoption: the
+	// LVMVolumeGroup an operator creates by hand, as the FAQ tells them to for a
+	// group the discoverer refused to import. Nothing here changes a device, so no
+	// udev event follows, and the discoverer runs on udev events only; on a quiet
+	// node its status would wait for an unrelated device to appear — measured at
+	// fifteen minutes and counting on an idle e2e node, under two on a hypervisor
+	// where something re-probes a disk every minute. Re-probe the group's own
+	// devices, exactly as after vgcreate and vgextend, so the discoverer describes
+	// it now. Best-effort, like every other trigger here, and once per resource —
+	// see triggerUdevForAdoption.
+	r.triggerUdevForAdoption(ctx, lvg, vg, pvs)
 
 	log.Debug(fmt.Sprintf("tries to check and update VG %s tag %s", lvg.Spec.ActualVGNameOnTheNode, internal.LVMTags[0]))
 	updated, err := r.updateVGTagIfNeeded(ctx, lvg, vg)
@@ -2001,6 +2023,62 @@ func (r *Reconciler) extendVGComplex(ctx context.Context, pvs *pvView, extendPVs
 	r.triggerUdevForPaths(ctx, extendPVs)
 
 	return nil
+}
+
+// pvPathsOfVG lists the Physical Volume paths of vg as the cache knows them, for a
+// udev re-probe of the whole Volume Group.
+func pvPathsOfVG(pvs []internal.PVData, vg internal.VGData) []string {
+	paths := make([]string, 0, 2)
+	for _, pv := range pvs {
+		if pv.VGUuid == vg.VGUUID && pv.PVName != "" {
+			paths = append(paths, pv.PVName)
+		}
+	}
+	return paths
+}
+
+// triggerUdevForAdoption re-probes the Physical Volumes of a Volume Group that lvg
+// describes for the first time — status.vgUuid is written by the discoverer alone,
+// so an empty one over an existing Volume Group is an adoption — and reports
+// whether it did.
+//
+// Once per resource for the life of the process. Nothing on the device changes
+// between two reconciles of an undescribed resource: the trigger exists to wake
+// the discoverer, and the discoverer either describes the group on the pass that
+// follows or is holding the resource back for a reason of its own (a Physical
+// Volume without a BlockDevice yet — handleUnnamedPVs), which a second uevent does
+// not change. Without the memo every reconcile that reached this point — a spec
+// edit, a label, a status.nodes write — would send another `change` event down
+// the host's udev rules, where multipathd and lvm2-pvscan answer each one.
+//
+// The memo is dropped as soon as the resource carries a vgUuid, so a resource
+// that is described, deleted and re-created under the same name is re-probed
+// again. The command runs outside the lock: it is bounded by
+// udevadmTriggerTimeout, but a reconcile of another resource has no reason to
+// wait on it.
+func (r *Reconciler) triggerUdevForAdoption(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup, vg internal.VGData, pvs []internal.PVData) bool {
+	if !r.claimAdoptionTrigger(lvg) {
+		return false
+	}
+	r.triggerUdevForPaths(ctx, pvPathsOfVG(pvs, vg))
+	return true
+}
+
+// claimAdoptionTrigger decides, under the memo's lock, whether lvg is due a
+// re-probe, and records the claim when it is.
+func (r *Reconciler) claimAdoptionTrigger(lvg *v1alpha1.LVMVolumeGroup) bool {
+	r.adoptionTriggeredMu.Lock()
+	defer r.adoptionTriggeredMu.Unlock()
+
+	if lvg.Status.VGUuid != "" {
+		delete(r.adoptionTriggered, lvg.Name)
+		return false
+	}
+	if _, done := r.adoptionTriggered[lvg.Name]; done {
+		return false
+	}
+	r.adoptionTriggered[lvg.Name] = struct{}{}
+	return true
 }
 
 // triggerUdevForPaths sends a "change" uevent for the given device paths so that

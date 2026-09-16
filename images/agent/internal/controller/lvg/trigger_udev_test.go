@@ -24,7 +24,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/mock_utils"
 )
 
@@ -184,5 +187,118 @@ func TestTriggerUdevForPaths(t *testing.T) {
 			Times(1)
 
 		r.triggerUdevForPaths(parent, []string{"/dev/sda"})
+	})
+}
+
+// pvPathsOfVG feeds the re-probe the reconciler issues for a resource that has
+// never been described — an LVMVolumeGroup created by hand over an existing Volume
+// Group. Keyed by VG UUID rather than name, because two Volume Groups answering to
+// one name is precisely the situation the surrounding code exists for.
+func TestPVPathsOfVG(t *testing.T) {
+	vg := internal.VGData{VGName: "vg-adopt", VGUUID: "uuid-adopt"}
+	pvs := []internal.PVData{
+		{PVName: "/dev/sdc", VGName: "vg-adopt", VGUuid: "uuid-adopt"},
+		{PVName: "/dev/sdd", VGName: "vg-adopt", VGUuid: "uuid-adopt"},
+		{PVName: "/dev/sde", VGName: "vg-adopt", VGUuid: "uuid-another-group-with-the-same-name"},
+		{PVName: "", VGName: "vg-adopt", VGUuid: "uuid-adopt"},
+		{PVName: "/dev/sdf", VGName: "vg-other", VGUuid: "uuid-other"},
+	}
+
+	assert.Equal(t, []string{"/dev/sdc", "/dev/sdd"}, pvPathsOfVG(pvs, vg),
+		"only the PVs of this very Volume Group, by UUID, and never an empty path")
+	assert.Empty(t, pvPathsOfVG(nil, vg), "no PVs, nothing to trigger — triggerUdevForPaths then stays away from udevadm")
+}
+
+// TestTriggerUdevForAdoption pins the adoption re-probe: an LVMVolumeGroup that
+// has never been described (no status.vgUuid) over a Volume Group that already
+// exists gets the group's own Physical Volumes re-probed — once, however many
+// reconciles pass before the discoverer describes it — and a described resource
+// is never re-probed at all.
+func TestTriggerUdevForAdoption(t *testing.T) {
+	vg := internal.VGData{VGName: "vg-adopt", VGUUID: "vg-uuid-adopt"}
+	pvs := []internal.PVData{
+		{PVName: "/dev/sdb1", VGUuid: "vg-uuid-adopt"},
+		{PVName: "/dev/sdz", VGUuid: "vg-uuid-other"},
+	}
+	undescribed := func() *v1alpha1.LVMVolumeGroup {
+		return &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: "lvg-adopt"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{ActualVGNameOnTheNode: "vg-adopt"},
+		}
+	}
+	described := func() *v1alpha1.LVMVolumeGroup {
+		lvg := undescribed()
+		lvg.Status.VGUuid = "vg-uuid-adopt"
+		return lvg
+	}
+
+	t.Run("re_probes_the_groups_own_pvs_once", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockCmds := mock_utils.NewMockCommands(ctrl)
+		r := setupReconciler()
+		r.commands = mockCmds
+
+		// Only the PVs of this Volume Group, and only once across three reconciles.
+		mockCmds.EXPECT().
+			UdevadmTrigger(gomock.Any(), gomock.Eq([]string{"/dev/sdb1"})).
+			Return("nsenter ... udevadm trigger --action=change -- /dev/sdb1", nil).
+			Times(1)
+
+		assert.True(t, r.triggerUdevForAdoption(context.Background(), undescribed(), vg, pvs))
+		assert.False(t, r.triggerUdevForAdoption(context.Background(), undescribed(), vg, pvs),
+			"a second reconcile of the same undescribed resource does not re-probe")
+		assert.False(t, r.triggerUdevForAdoption(context.Background(), undescribed(), vg, pvs))
+	})
+
+	t.Run("does_nothing_for_a_described_resource", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockCmds := mock_utils.NewMockCommands(ctrl)
+		r := setupReconciler()
+		r.commands = mockCmds
+
+		// No EXPECT(): any call to UdevadmTrigger fails the test.
+		assert.False(t, r.triggerUdevForAdoption(context.Background(), described(), vg, pvs))
+	})
+
+	t.Run("forgets_the_resource_once_it_is_described", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockCmds := mock_utils.NewMockCommands(ctrl)
+		r := setupReconciler()
+		r.commands = mockCmds
+
+		// Adopted, described, then re-created under the same name: two re-probes.
+		mockCmds.EXPECT().
+			UdevadmTrigger(gomock.Any(), gomock.Eq([]string{"/dev/sdb1"})).
+			Return("", nil).
+			Times(2)
+
+		assert.True(t, r.triggerUdevForAdoption(context.Background(), undescribed(), vg, pvs))
+		assert.False(t, r.triggerUdevForAdoption(context.Background(), described(), vg, pvs),
+			"the described resource is not re-probed, and the memo is dropped")
+		assert.True(t, r.triggerUdevForAdoption(context.Background(), undescribed(), vg, pvs),
+			"a resource re-created under the same name is re-probed again")
+	})
+
+	t.Run("is_independent_per_resource", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockCmds := mock_utils.NewMockCommands(ctrl)
+		r := setupReconciler()
+		r.commands = mockCmds
+
+		mockCmds.EXPECT().UdevadmTrigger(gomock.Any(), gomock.Any()).Return("", nil).Times(2)
+
+		other := undescribed()
+		other.Name = "lvg-adopt-2"
+		assert.True(t, r.triggerUdevForAdoption(context.Background(), undescribed(), vg, pvs))
+		assert.True(t, r.triggerUdevForAdoption(context.Background(), other, vg, pvs),
+			"the memo is per resource name, not per Volume Group")
 	})
 }

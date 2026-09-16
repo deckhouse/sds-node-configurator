@@ -537,6 +537,55 @@ func (d *Discoverer) LVMVolumeGroupDiscoverReconcile(ctx context.Context) bool {
 				continue
 			}
 
+			// A Volume Group whose owner tag names an LVMVolumeGroup this cluster does
+			// not have was created by an agent of this module in ANOTHER cluster, and
+			// that is the only way such a Volume Group comes to exist: the tag is
+			// written by vgcreate here and nowhere else, and a Volume Group handed
+			// over by an operator carries no name at all.
+			//
+			// This used to be read as "the resource was lost, restore it under the
+			// name in the tag" — and that reading is how, on a hypervisor, 108 of 113
+			// LVMVolumeGroups came to describe nested clusters' Volume Groups: the
+			// guests run this module too, their groups carry the names of THEIR
+			// resources, and a LUN that a nested cluster's node can see is often one
+			// the hypervisor can see as well. Importing such a group makes its
+			// removal a vgremove on a running guest's storage.
+			//
+			// The device-level filter (utils.PublishedDevices) already hides the
+			// common form of this — a guest's disk published to a VM on this node —
+			// before lvm reads it. This is the check for what that filter cannot see:
+			// a LUN mapped to this node but consumed on another, a LUN mapped by hand
+			// to both the hypervisor and a guest, a LUN whose volume was deleted but
+			// whose mapping was not. Nothing about the device says whose it is; the
+			// name in the tag does.
+			//
+			// The price is deliberate and documented in the FAQ: a resource genuinely
+			// lost here — deleted around its finalizer — is no longer recreated on its
+			// own. The operator creates it under the tagged name and the reconciler
+			// adopts the existing Volume Group, or removes the name tag and the group
+			// is imported as a new one. Terminal, counted and logged on the transition
+			// like the owner-tag conflict above, for the same reasons.
+			//
+			// A file-backed Volume Group is exempt. Its Physical Volumes are loop devices
+			// over files this agent named after the owning LVMVolumeGroup, under its own
+			// directory on this node (IsManagedFileDevicePath, applied by
+			// configureCandidateNodeDevices before anything reaches here) — nothing a
+			// nested cluster can produce. Re-adopting one after its resource is lost is
+			// the documented behaviour and the tag is the only place its name survives.
+			if candidate.OwnerTag != "" && len(candidate.FileDeviceNodes) == 0 {
+				why := foreignOwnerRefusalReason(candidate, d.cfg.NodeName)
+				refusedThisPass[candidate.ActualVGNameOnTheNode] = why
+				if previousRefusals[candidate.ActualVGNameOnTheNode] == why {
+					log.Debug(fmt.Sprintf("still not importing VG %s: %s",
+						candidate.ActualVGNameOnTheNode, why))
+				} else {
+					d.metrics.LVMVolumeGroupImportRefusedTotal(candidate.ActualVGNameOnTheNode, refusedOwnerLabel(candidate)).Inc()
+					log.Warn(fmt.Sprintf("not importing VG %s: %s",
+						candidate.ActualVGNameOnTheNode, why))
+				}
+				continue
+			}
+
 			log.Debug(fmt.Sprintf("the LVMVolumeGroup %s is not yet created. Create it", candidate.LVMVGName))
 			createdLvg, created, err := d.CreateLVMVolumeGroupByCandidate(ctx, candidate)
 			if err != nil {
@@ -783,9 +832,11 @@ func (d *Discoverer) GetLVMVolumeGroupCandidates(ctx context.Context, bds map[st
 			lvgName, fromTag = generateLVMVGName(), false
 		}
 
+		_, ownerTag := utils.ReadValueFromTags(vg.VGTags, internal.LVMVolumeGroupTag)
 		candidate := internal.LVMVolumeGroupCandidate{
 			LVMVGName:             lvgName,
 			LVMVGNameGenerated:    !fromTag,
+			OwnerTag:              ownerTag,
 			Finalizers:            internal.Finalizers,
 			ActualVGNameOnTheNode: vg.VGName,
 			BlockDevicesNames:     getBlockDevicesNames(sortedBDs, vg),
@@ -2641,6 +2692,40 @@ func importRefusalReason(candidate internal.LVMVolumeGroupCandidate, taken v1alp
 	return why + fmt.Sprintf(" for VG %s — the tag is on two Volume Groups."+
 		" Retag one of them with vgchange --deltag/--addtag, or delete the LVMVolumeGroup that no longer describes its Volume Group",
 		taken.Spec.ActualVGNameOnTheNode)
+}
+
+// foreignOwnerRefusalReason explains why a Volume Group whose owner tag names an
+// LVMVolumeGroup this cluster does not have is not imported, and what to do about
+// it. The remedy is in the message for the same reason it is in
+// importRefusalReason: the refusal is terminal and leaves nothing in the API but a
+// counter, so the operator's only other source is this line in one node's log.
+func foreignOwnerRefusalReason(candidate internal.LVMVolumeGroupCandidate, nodeName string) string {
+	return fmt.Sprintf("its %s tag names the LVMVolumeGroup %s, which does not exist in this cluster."+
+		" The tag is written when this module creates a Volume Group, so this one was created by another cluster's agent"+
+		" (a nested cluster whose disk this node can see), or its LVMVolumeGroup was deleted here."+
+		" It is not imported. To take it under management deliberately, create an LVMVolumeGroup named %s with"+
+		" spec.actualVGNameOnTheNode=%s and spec.local.nodeName=%s, or hand it over as a new Volume Group with"+
+		" `vgchange --deltag %s=%s %s` on the node",
+		internal.LVMVolumeGroupTag, candidate.OwnerTag, candidate.OwnerTag, candidate.ActualVGNameOnTheNode, nodeName,
+		internal.LVMVolumeGroupTag, candidate.OwnerTag, candidate.ActualVGNameOnTheNode)
+}
+
+// refusedOwnerLabel is the lvg_name label a refusal over the owner tag is counted
+// under: the tagged name when it is a usable LVMVolumeGroup name, empty otherwise.
+//
+// The tag was written by another cluster's agent, and it is the one piece of a
+// foreign cluster's metadata that reaches this node's telemetry. A label value is
+// a Prometheus series, and an unbounded set of foreign strings must not become a
+// series each — a guest with a bug, or a hostile one, could mint thousands. A
+// usable name is bounded the way every other lvg_name label already is, by the
+// resource-name rules, and that bound is the label's protection. The log line
+// keeps the raw tag: the operator needs the exact value for `vgchange --deltag`,
+// and the LVM tag charset admits no newline to inject through.
+func refusedOwnerLabel(candidate internal.LVMVolumeGroupCandidate) string {
+	if candidate.LVMVGNameGenerated {
+		return ""
+	}
+	return candidate.LVMVGName
 }
 
 func generateLVMVGName() string {

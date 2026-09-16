@@ -272,10 +272,12 @@ var (
 		// Grafana's completion — not the Go doc comment on the accessor. Naming only
 		// the tag conflict sent whoever the alert woke looking for a duplicate
 		// lvmVolumeGroupName that was not there.
-		Help: "Number of times the discoverer started refusing to import a Volume Group: either its owner tag names an existing LVMVolumeGroup, or one of its Physical Volumes has no BlockDevice resource yet and a selector derived now would not cover the whole group. Counted when the refusal appears or changes, not once per discovery pass, so increase() over a window means new refusals rather than the age of a standing one.",
+		Help: "Number of times the discoverer started refusing to import a Volume Group: its owner tag names an existing LVMVolumeGroup, or names one that does not exist in this cluster (the Volume Group was created by another cluster's agent, e.g. a nested cluster, or its LVMVolumeGroup was deleted here), or one of its Physical Volumes has no BlockDevice resource yet and a selector derived now would not cover the whole group. Counted when the refusal appears or changes, not once per discovery pass, so increase() over a window means new refusals rather than the age of a standing one.",
 		// lvg_name is empty when the import had no name of its own to use — an
 		// unimported Volume Group with no owner tag is given a freshly generated
-		// name on every pass, and that is not something to put in a label.
+		// name on every pass, and that is not something to put in a label. Empty
+		// as well when the owner tag holds something that is not a usable resource
+		// name: the tag is another cluster's string, and a label value is a series.
 	}, []string{"node", "volume_group", "lvg_name"})
 )
 
