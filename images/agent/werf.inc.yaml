@@ -1,4 +1,4 @@
-{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /usr/sbin/thin_dump /usr/sbin/pdata_tools" }}
+{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic /usr/lib/ld-linux-x86-64.so.2 /usr/bin/thin_dump /usr/bin/pdata_tools" }}
 
 # Do not remove. It's used in external tests.
 ---
@@ -31,14 +31,33 @@ shell:
     - rm -rf /src/.git
 
 ---
+# The thin-provisioning-tools binaries ship ready-built in the
+# container-factory catalogue, exactly as they shipped as an ALT package
+# before; this stage only exists to give `import` something to copy from.
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-thin-tools-artifact
+from: {{ index $.Images "thin-provisioning-tools" }}
+final: false
+
+---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-binaries-artifact
-from: {{ index $.Images "builder/golang-alt" }}
+from: {{ index $.Images "builder/native" }}
 final: false
 
 import:
   - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
     add: /src
     to: /src
+    before: install
+  # /usr/sbin is a symlink to /usr/bin on this builder, so the two land there
+  # directly; thin_dump stays the relative symlink to pdata_tools it is in the
+  # package.
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-thin-tools-artifact
+    add: /usr/sbin/pdata_tools
+    to: /usr/bin/pdata_tools
+    before: install
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-thin-tools-artifact
+    add: /usr/sbin/thin_dump
+    to: /usr/bin/thin_dump
     before: install
 
 git:
@@ -50,25 +69,23 @@ git:
 
 shell:
   install:
-    {{- include "alt packages proxy" . | nindent 4 }}
-    - |
-      apt-get install -y \
-      build-essential \
-      pkg-config \
-      gettext \
-      autoconf \
-      bison \
-      libtool \
-      libudev-devel \
-      libblkid-devel-static \
-      libsmartcols-devel-static \
-      libmount-devel-static \
-      automake \
-      gettext \
-      flex \
-      glibc-core \
-      thin-provisioning-tools \
-      cross-glibc-x86_64
+    # builder/native already carries everything util-linux bootstraps with --
+    # gcc, make, autoconf, automake, libtool, bison, flex, pkgconf and a
+    # gettext whose autopoint actually has its archive (the catalogue's gettext
+    # package does not: on builder/golang autogen.sh dies with "infrastructure
+    # files for version 0.18.3 not found"). Only two runtime libraries are
+    # added here; pdata_tools and thin_dump come in as an import above.
+    #
+    # libudev has to be systemd's, not the libudev-zero stub the catalogue also
+    # carries: zero answers every query from nothing, so an lsblk linked
+    # against it reports wwn=null, and so does the prebuilt util-linux package
+    # (it carries no libudev at all). WWN is what BlockDevice identity is built
+    # from, so either would be silent data loss rather than a cosmetic
+    # difference. Verified against a real NVMe: with systemd's libudev this
+    # lsblk returns the same wwn the host's own lsblk does. MODEL and SERIAL
+    # come from sysfs and survive either way, which is what makes the
+    # difference easy to miss.
+    - pm install systemd libcap
     - cd /src/util-linux
     - ./autogen.sh
     - ./configure LDFLAGS="-static" --enable-static-programs -disable-all-programs --enable-nsenter
@@ -80,9 +97,9 @@ shell:
     - cp /lib64/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1
     - cp /lib64/libc.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libc.so.6
     - cp /lib64/libcap.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2
-    # There is no more such file in P11 with glibc-core that it was a part of. Now it's /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2
-    #- cp /lib64/ld-2.32.so /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
-    - cp /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    # builder/native keeps the loader at /usr/lib (with /lib64 symlinked there),
+    # not under the sys-root prefix the ALT builder used.
+    - cp /usr/lib/ld-linux-x86-64.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
     - cp /opt/deckhouse/sds/bin/lsblk /opt/deckhouse/sds/bin/lsblk.dynamic
     - chmod +x /binary_replace.sh
     - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
