@@ -27,7 +27,7 @@ Before the agent learned to keep away from published block volumes, it could act
 
 Remove those mappings by hand, on the node:
 
-1. Find them. The agent logs the set on every change — `devices published to workloads as block volumes, with their partitions and holders: N (was M): <kernel names>` — and `dmsetup ls --tree` shows what is stacked on each published volume. A device stacked on a published volume is the guest's, seen through the volume.
+1. Find them. The agent logs the set when it starts and whenever it changes — `devices published to workloads as block volumes, with their partitions and holders: <count>: <kernel names>` — and `dmsetup ls --tree` shows what is stacked on each published volume. A device stacked on a published volume is the guest's, seen through the volume.
 2. Make sure nothing on the hypervisor holds it: `dmsetup info -c --noheadings -o name,open_count <name>` must report `0`.
 3. Remove it, from the top of the stack down: `dmsetup remove <name>`. A mapping that still has something on top of it answers `Device or resource busy` — remove that first.
 

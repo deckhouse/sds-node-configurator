@@ -17,6 +17,7 @@ limitations under the License.
 package utils
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -136,6 +137,19 @@ func testLog(t *testing.T) logger.Logger {
 	log, err := logger.NewLogger(logger.WarningLevel)
 	require.NoError(t, err)
 	return log
+}
+
+// publishedSetLogPrefix is the line an operator greps for to learn what the
+// agent considers published. The tests below pin it because that is the only
+// place the composition of the set is ever written down.
+const publishedSetLogPrefix = "devices published to workloads as block volumes, with their partitions and holders"
+
+func capturingLog(t *testing.T) (logger.Logger, *bytes.Buffer) {
+	t.Helper()
+	var out bytes.Buffer
+	log, err := logger.NewLoggerToWriter(&out, logger.InfoLevel)
+	require.NoError(t, err)
+	return log, &out
 }
 
 func TestPublishedDevices_PublishedMultipathMapWithKpartxPartition(t *testing.T) {
@@ -327,4 +341,63 @@ func TestStatBlockDeviceNode_RegularFileIsNotADevice(t *testing.T) {
 	assert.True(t, errors.Is(err, os.ErrNotExist))
 	assert.False(t, isBlock)
 	assert.Zero(t, major+minor)
+}
+
+// The defect this file's announcement guards against: on a node, an lvm command
+// runs before the scanner's first pass (ActivateAllManagedVGs), building its
+// filter fills the cache, and a log keyed on "the cache was empty" then said
+// nothing — ever, because a steady node has no transitions either. Measured on a
+// hypervisor: fifteen devices in the filter, not one line about them.
+func TestPublishedDevices_AnnouncesTheSetEvenAfterASilentFill(t *testing.T) {
+	n := newFakeNode(t)
+	n.device("dm-5", 253, 5, "mpatha")
+	n.publish("pvc-guest-disk", "pod-uid-1", 253, 5)
+
+	// The silent path, as the filter builder walks it.
+	require.Equal(t, []string{"dm-5"}, PublishedDevices().KNames())
+
+	log, out := capturingLog(t)
+	RefreshPublishedDevices(log)
+
+	said := out.String()
+	assert.Equal(t, 1, strings.Count(said, publishedSetLogPrefix), "the set is announced exactly once:\n%s", said)
+	assert.Contains(t, said, publishedSetLogPrefix+": 1: dm-5")
+	assert.Contains(t, said, "block volumes published by kubelet are read from",
+		"where the set is read from is said too, so a relocated kubelet root is visible")
+
+	out.Reset()
+	RefreshPublishedDevices(log)
+	assert.Empty(t, out.String(), "nothing changed, so there is nothing to say: the scanner refreshes on every udev event")
+}
+
+// The same defect one step further along: a volume published between two scanner
+// passes is picked up by whichever lvm command finds the cache stale, and the
+// change must still reach the log.
+func TestPublishedDevices_AnnouncesAChangeThatOnlyTheSilentPathSaw(t *testing.T) {
+	n := newFakeNode(t)
+	log, out := capturingLog(t)
+
+	RefreshPublishedDevices(log)
+	assert.Contains(t, out.String(), publishedSetLogPrefix+": none", "an empty set is said in words, not as a bare colon")
+	assert.Contains(t, out.String(), "does not exist", "nothing has been published here yet")
+
+	n.device("dm-5", 253, 5, "mpatha")
+	n.publish("pvc-guest-disk", "pod-uid-1", 253, 5)
+	ResetPublishedDevicesCache() // the TTL, as a node experiences it
+	require.Equal(t, []string{"dm-5"}, PublishedDevices().KNames(), "the silent path has the new set")
+
+	out.Reset()
+	RefreshPublishedDevices(log)
+	said := out.String()
+	assert.Contains(t, said, publishedSetLogPrefix+" (was 0): 1: dm-5")
+	assert.Contains(t, said, "block volumes published by kubelet are read from",
+		"the publish directory appeared, which is the other half of the answer")
+
+	// And back: the pod releases the volume, the directory goes with it.
+	require.NoError(t, os.RemoveAll(filepath.Join(n.kubelet, PublishedSubdir)))
+	out.Reset()
+	RefreshPublishedDevices(log)
+	said = out.String()
+	assert.Contains(t, said, publishedSetLogPrefix+" (was 1): none")
+	assert.Contains(t, said, "does not exist")
 }

@@ -73,6 +73,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -216,6 +217,21 @@ var publishedCache struct {
 	set       PublishedBlockDevices
 	present   bool
 	refreshed time.Time
+
+	// What the log has already said, tracked apart from the cache above because
+	// the cache is also filled silently. PublishedDevices refreshes it for
+	// whichever lvm command finds it stale, and the first such command runs
+	// before the scanner does — ActivateAllManagedVGs, at startup — so keying the
+	// log on "the cache was empty" said nothing on a node where anything else
+	// touched lvm first, which is every node. Keyed on the announcement instead:
+	// the first forced refresh always speaks, and a set that changed while only
+	// the silent path was looking is still said out loud by the next one.
+	announced        bool
+	announcedPresent bool
+	// announcedRejects is the set as announced. It is the rejects slice of that
+	// set, held by reference: a scan builds a new set rather than mutating the
+	// one in the cache, so nothing can change it from under this field.
+	announcedRejects []string
 }
 
 // SetPublishedDevicesRoot points the scan at root, kubelet's CSI volumeDevices
@@ -228,6 +244,10 @@ func SetPublishedDevicesRoot(root string) {
 	publishedCache.set = PublishedBlockDevices{}
 	publishedCache.present = false
 	publishedCache.refreshed = time.Time{}
+	// A different tree is a different story, so it is told from the beginning.
+	publishedCache.announced = false
+	publishedCache.announcedPresent = false
+	publishedCache.announcedRejects = nil
 }
 
 // PublishedDevicesRoot is the tree the scan reads, for a log line.
@@ -254,18 +274,28 @@ func PublishedDevices() PublishedBlockDevices {
 // RefreshPublishedDevices walks kubelet's tree now, whatever the cache holds, and
 // reports the set and whether the publish directory is there at all. The scanner
 // calls it at the start of every cache fill so the filter the pass runs under is
-// as fresh as the pass itself; changes are said once, when they happen.
+// as fresh as the pass itself; this is also where the set is said out loud.
 func RefreshPublishedDevices(log logger.Logger) (set PublishedBlockDevices, directoryPresent bool) {
 	publishedCache.mu.Lock()
 	defer publishedCache.mu.Unlock()
 
-	previous := publishedCache.set
-	previousPresent, previouslyRefreshed := publishedCache.present, !publishedCache.refreshed.IsZero()
-
 	publishedCache.set, publishedCache.present = scanPublishedDevices(publishedDevicesRoot)
 	publishedCache.refreshed = time.Now()
+	announcePublishedDevices(log)
 
-	if !previouslyRefreshed || previousPresent != publishedCache.present {
+	return publishedCache.set, publishedCache.present
+}
+
+// announcePublishedDevices logs where the set is read from and what is in it —
+// the first time, and afterwards only when either answer changes. Silence is the
+// point: the scanner refreshes on every udev event, and a node that publishes
+// nothing new has nothing to say.
+//
+// Called with publishedCache.mu held.
+func announcePublishedDevices(log logger.Logger) {
+	first := !publishedCache.announced
+
+	if first || publishedCache.announcedPresent != publishedCache.present {
 		if publishedCache.present {
 			log.Info(fmt.Sprintf("block volumes published by kubelet are read from %s", filepath.Join(publishedDevicesRoot, PublishedSubdir)))
 		} else {
@@ -273,16 +303,34 @@ func RefreshPublishedDevices(log logger.Logger) (set PublishedBlockDevices, dire
 				filepath.Join(publishedDevicesRoot, PublishedSubdir)))
 		}
 	}
-	if !previouslyRefreshed || strings.Join(previous.rejects, ",") != strings.Join(publishedCache.set.rejects, ",") {
-		log.Info(fmt.Sprintf("devices published to workloads as block volumes, with their partitions and holders: %d (was %d): %s",
-			publishedCache.set.Len(), previous.Len(), strings.Join(publishedCache.set.KNames(), ", ")))
+
+	// "none" rather than "0: " with nothing after it: a line that ends in a bare
+	// colon reads as a truncated log, and an empty set is the ordinary state of
+	// every node that hands no block volume to a workload.
+	composition := "none"
+	if !publishedCache.set.Empty() {
+		composition = fmt.Sprintf("%d: %s", publishedCache.set.Len(), strings.Join(publishedCache.set.KNames(), ", "))
+	}
+	switch {
+	case first:
+		log.Info("devices published to workloads as block volumes, with their partitions and holders: " + composition)
+	case !slices.Equal(publishedCache.announcedRejects, publishedCache.set.rejects):
+		log.Info(fmt.Sprintf("devices published to workloads as block volumes, with their partitions and holders (was %d): %s",
+			len(publishedCache.announcedRejects), composition))
 	}
 
-	return publishedCache.set, publishedCache.present
+	publishedCache.announced = true
+	publishedCache.announcedPresent = publishedCache.present
+	publishedCache.announcedRejects = publishedCache.set.rejects
 }
 
 // ResetPublishedDevicesCache drops the cached set; the next reader walks the tree
-// again. Tests use it to make the cache invisible.
+// again. Tests use it to make the cache invisible, which is what the TTL does on
+// a node.
+//
+// What the log has already said is deliberately left alone: expiry is not an
+// event, and a set that is found again unchanged is not news. Use
+// SetPublishedDevicesRoot to start a test from silence.
 func ResetPublishedDevicesCache() {
 	publishedCache.mu.Lock()
 	defer publishedCache.mu.Unlock()

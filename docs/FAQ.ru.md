@@ -27,7 +27,7 @@ weight: 2
 
 Снимите эти отображения руками, на узле:
 
-1. Найдите их. Агент пишет набор в лог при каждом изменении — `devices published to workloads as block volumes, with their partitions and holders: N (was M): <kernel names>`, — а `dmsetup ls --tree` показывает, что построено поверх каждого опубликованного тома. Устройство поверх опубликованного тома — гостевое, видимое сквозь том.
+1. Найдите их. Агент пишет набор в лог при старте и при каждом изменении — `devices published to workloads as block volumes, with their partitions and holders: <count>: <kernel names>`, — а `dmsetup ls --tree` показывает, что построено поверх каждого опубликованного тома. Устройство поверх опубликованного тома — гостевое, видимое сквозь том.
 2. Убедитесь, что на гипервизоре его никто не держит: `dmsetup info -c --noheadings -o name,open_count <имя>` должен показать `0`.
 3. Удалите его, сверху вниз по стеку: `dmsetup remove <имя>`. Отображение, поверх которого ещё что-то есть, ответит `Device or resource busy` — сначала удалите то, что сверху.
 
