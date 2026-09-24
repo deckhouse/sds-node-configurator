@@ -1,0 +1,27 @@
+date: "2026-09-24"
+
+summary: "The module's files on the node move from `/opt/deckhouse/sds` to `/var/lib/deckhouse/sds`, the agent stops reading LVM from virtual machine disks, and thin snapshots no longer depend on the `dm_snapshot` kernel module."
+
+highlights:
+  - "The module's node tree moves to `/var/lib/deckhouse/sds`, which stays writable on nodes whose `/opt` is read-only, and the `fileDevicesDirectory` default becomes `/var/lib/deckhouse/sds/file-devices`. Existing `spec.fileDevices` entries under the old directory keep working where they are."
+  - "On a node that runs virtual machines, the Volume Groups a nested cluster builds on its disks no longer turn into `LVMVolumeGroup` and `BlockDevice` resources of the host cluster."
+  - "`LVMLogicalVolumeSnapshot`, restores from a VolumeSnapshot and clones of thin volumes work on nodes without the `dm_snapshot` kernel module."
+
+improvements:
+  - "New metrics: `sds_node_configurator_published_block_devices` and `sds_node_configurator_published_devices_directory_present` show how many devices the agent keeps out of LVM on each node and whether it found kubelet's directory of published block volumes there, and `sds_node_configurator_legacy_file_devices_directory_lvgs` counts the `LVMVolumeGroup` resources whose `spec.fileDevices` still name `/opt/deckhouse/sds/file-devices`; the module log lists their names."
+
+fixes:
+  - "On a node that runs virtual machines (DVP), the agent read LVM inside VM disks: a guest cluster's Volume Groups appeared as `LVMVolumeGroup` resources and its disks as `BlockDevice` resources of the host cluster. The agent's `lvm` commands now reject every device kubelet has published to a Pod as a block volume, with its partitions and whatever is stacked on it, for any CSI driver. Resources created this way before the update leave `Ready` and can be deleted; the Volume Group inside the VM is not touched."
+  - "A Volume Group tagged `storage.deckhouse.io/lvmVolumeGroupName=<name>` for an `LVMVolumeGroup` that does not exist in this cluster was imported as a new resource, although only the module in another cluster (for example, inside a virtual machine) writes that tag. It is no longer imported: the agent logs the refusal once and counts it in `sds_node_configurator_lvm_volume_group_import_refused_total`. A Volume Group handed over with `storage.deckhouse.io/enabled=true` and no name tag is imported as before, and so is a file-backed one."
+  - "Creating an `LVMLogicalVolumeSnapshot`, restoring from a VolumeSnapshot and cloning a thin `LVMLogicalVolume` failed on nodes without the `dm_snapshot` kernel module loaded, with `snapshot: Required device-mapper target(s) not detected in your kernel`. Thin snapshots are now created without that module. The agent still loads `dm_snapshot` on every node with thin provisioning, and a node where it is missing no longer keeps the agent from starting."
+  - "The bundled `lvm` could not load a missing device-mapper kernel module by itself and reported the target as not detected instead. It now calls the node's `/sbin/modprobe`."
+
+breaking:
+  - "The module no longer installs `lvm` and `dmsetup` under `/opt/deckhouse/sds/bin`, and removes the old copies from nodes. Scripts outside the module that run them from there have to use `/var/lib/deckhouse/sds/bin/`."
+
+upgrade_notes:
+  - "Nothing has to be done by hand. Once the agent Pod has restarted on a node, the next bashible run removes the files the module used to install under `/opt/deckhouse/sds`; files of other modules and backing files there are left in place. Scripts that ran `/opt/deckhouse/sds/bin/lvm` or `dmsetup` have to switch to `/var/lib/deckhouse/sds/bin/`."
+  - "`spec.fileDevices[].directory` is immutable, so entries created with the old default `/opt/deckhouse/sds/file-devices` keep naming it, and the agent keeps accepting it. Do not move their backing files by hand; the FAQ describes how to move an entry to the new directory online. Create new entries under the new default. A `fileDevicesDirectory` set explicitly in the module config is kept as is."
+
+docs:
+  - "FAQ: a section on backing files created before the base directory moved, with a procedure that moves an entry to the new directory using `pvmove`."
