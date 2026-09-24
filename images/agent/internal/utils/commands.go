@@ -532,15 +532,29 @@ func (commands) CreateThinLogicalVolumeSnapshot(name string, sourceVgName string
 	return createSnapshotVolume(name, sourceVgName, sourceName, tags)
 }
 
-func createSnapshotVolume(name string, sourceVgName string, sourceName string, tags []string) (string, error) {
-	args := []string{"lvcreate", "-ay", "-s", "-kn", "-n", name, fmt.Sprintf("%s/%s", sourceVgName, sourceName), "-y"}
+// thinSnapshotArgs builds the lvcreate argv for a thin snapshot of a thin LV.
+//
+// The segment type is given as `--type thin` rather than implied by `-s`, because
+// `-s` makes lvcreate start from the COW "snapshot" segment type and check that
+// the kernel has dm-snapshot before it opens the VG; it switches to thin only
+// afterwards, once it sees a thin origin and no size. A node without dm_snapshot
+// loaded then fails every snapshot, restore and clone with "snapshot: Required
+// device-mapper target(s) not detected in your kernel", although a thin snapshot
+// never uses that target. With `--type thin` and no size the free argument is
+// still read as the snapshot origin, and the only target checked is thin.
+func thinSnapshotArgs(name, sourceVgName, sourceName string, tags []string) []string {
+	args := []string{"lvcreate", "--type", "thin", "-ay", "-kn", "-n", name, fmt.Sprintf("%s/%s", sourceVgName, sourceName), "-y"}
 
 	for _, tag := range tags {
 		args = append(args, "--addtag")
 		args = append(args, tag)
 	}
 
-	extendedArgs := lvmStaticExtendedArgs(args)
+	return args
+}
+
+func createSnapshotVolume(name string, sourceVgName string, sourceName string, tags []string) (string, error) {
+	extendedArgs := lvmStaticExtendedArgs(thinSnapshotArgs(name, sourceVgName, sourceName, tags))
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
 	var stderr bytes.Buffer

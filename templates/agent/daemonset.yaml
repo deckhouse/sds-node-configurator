@@ -131,12 +131,13 @@ spec:
           - -n
           - -p
           - --
-          - modprobe
-          - -a
-          - dm_thin_pool
-{{- if or (.Values.global.enabledModules | has "snapshot-controller") (.Values.global.enabledModules | has "storage-foundation") }}
-          - dm_snapshot
-{{- end }}
+          - sh
+          - -c
+          # dm_snapshot is loaded whatever modules are enabled, as a safety net for any `lvcreate -s`
+          # on the node: that form demands the dm-snapshot target even for a thin origin. The agent
+          # itself creates thin snapshots with `--type thin` and does not need it, so a kernel
+          # without dm_snapshot must not keep the agent from starting.
+          - modprobe dm_thin_pool && { modprobe dm_snapshot || echo "dm_snapshot is not available, skipped"; }
         # Privileged mode is required to use nsenter and access the host's mount namespace.
         # This is necessary to run modprobe and load the dm_thin_pool kernel module on the host.
         securityContext:

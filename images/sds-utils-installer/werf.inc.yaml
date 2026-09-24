@@ -58,7 +58,10 @@ shell:
     # libdm, so no device-mapper package is required. ldd is what binary_replace.sh checks for.
     - pm install make gnu-gcc gnu-glibc-devel binutils autoconf automake libtool pkgconf libaio-devel util-linux-devel ldd
     - cd /src/lvm2
-    - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu
+    # configure looks for modprobe on the builder and, not finding it, compiles out the module
+    # autoload: lvm then reports a missing device-mapper target instead of loading it. The binary
+    # runs on the host through nsenter, so the path is the host's and is given explicitly.
+    - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu MODPROBE_CMD=/sbin/modprobe
     - |
       {{- include "image-build.build" (set $ "BuildCommand" (printf "make")) | nindent 6 }}
     - mkdir -p /sds-utils/bin/

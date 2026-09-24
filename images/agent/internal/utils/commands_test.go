@@ -648,6 +648,24 @@ func TestVGCreateArgs(t *testing.T) {
 	})
 }
 
+// A bare `-s` makes lvcreate demand the dm-snapshot target before it notices the
+// origin is thin, so snapshots and restores failed on nodes without dm_snapshot
+// loaded. The argv must name the thin type and must not carry `-s`: LVM 2.03.16
+// rejects `--snapshot` next to `--type thin` ("Command does not accept option").
+func TestThinSnapshotArgs(t *testing.T) {
+	got := thinSnapshotArgs("snap-1", "vg-data", "pvc-1", []string{"storage.deckhouse.io/enabled=true"})
+	assert.Equal(t, []string{
+		"lvcreate", "--type", "thin", "-ay", "-kn", "-n", "snap-1", "vg-data/pvc-1", "-y",
+		"--addtag", "storage.deckhouse.io/enabled=true",
+	}, got)
+	assert.NotContains(t, got, "-s")
+	assert.NotContains(t, got, "--snapshot")
+
+	assert.Equal(t, []string{
+		"lvcreate", "--type", "thin", "-ay", "-kn", "-n", "pvc-2", "vg-data/snap-1", "-y",
+	}, thinSnapshotArgs("pvc-2", "vg-data", "snap-1", nil))
+}
+
 func TestBenignStdErrSetsAreScopedPerCommand(t *testing.T) {
 	const (
 		noSizeChange = "  No size change."
