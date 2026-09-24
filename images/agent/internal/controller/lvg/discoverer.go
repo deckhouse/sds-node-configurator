@@ -2400,8 +2400,8 @@ func (d *Discoverer) collectFileDeviceUsage(ctx context.Context, lvgs map[string
 //
 // The directory needs one translation before it can go into a spec. It comes from
 // `losetup --output BACK-FILE`, which canonicalizes symlink components, whereas
-// spec.fileDevices[].directory is validated against the configured base directory
-// lexically (isWithinBaseDir does not resolve symlinks, deliberately). Make the
+// spec.fileDevices[].directory is validated against the allowed base directories
+// lexically (IsWithinBaseDir does not resolve symlinks, deliberately). Make the
 // base directory — or a component of it — a symlink, which is the natural way to
 // point the default path at a data disk without touching the module config, and
 // the canonical path is no longer under the configured base: the imported entry
@@ -2435,7 +2435,11 @@ func (d *Discoverer) buildSpecFileDevicesFromCandidate(ctx context.Context, cand
 			seen[entryName] = struct{}{}
 
 			dir := filepath.Dir(dev.FilePath)
-			if d.cfg.FileDevicesDirectory != "" && !isWithinBaseDir(dir, d.cfg.FileDevicesDirectory) {
+			// The legacy base directory is allowed as it stands, without the
+			// symlink translation below: a backing file left in the old tree by a
+			// cluster upgraded in place is where it is supposed to be, and an
+			// entry naming it passes validation.
+			if !isFileDeviceDirectoryAllowed(dir, d.cfg.FileDevicesDirectory) {
 				if !baseResolved {
 					var err error
 					resolvedBase, err = utils.RunWithTimeout(ctx, d.cfg.CmdDeadlineDuration, func(ctx context.Context) (string, error) {

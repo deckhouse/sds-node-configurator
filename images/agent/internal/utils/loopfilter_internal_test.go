@@ -31,10 +31,10 @@ import (
 func TestParseLoopDeviceTable(t *testing.T) {
 	t.Run("device and path, including paths with spaces", func(t *testing.T) {
 		got := parseLoopDeviceTable(
-			"/dev/loop0 /opt/deckhouse/sds/file-devices/sds-lvg-a.d0.img\n" +
+			"/dev/loop0 /var/lib/deckhouse/sds/file-devices/sds-lvg-a.d0.img\n" +
 				"/dev/loop1 /var/tmp/a guest disk.img\n")
 		assert.Equal(t, []internal.LoopDeviceEntry{
-			{Device: "/dev/loop0", Backing: internal.LoopBackingFile{Path: "/opt/deckhouse/sds/file-devices/sds-lvg-a.d0.img"}},
+			{Device: "/dev/loop0", Backing: internal.LoopBackingFile{Path: "/var/lib/deckhouse/sds/file-devices/sds-lvg-a.d0.img"}},
 			{Device: "/dev/loop1", Backing: internal.LoopBackingFile{Path: "/var/tmp/a guest disk.img"}},
 		}, got)
 	})
@@ -74,7 +74,7 @@ func TestRememberLoopIfManaged(t *testing.T) {
 
 	t.Run("a backing file this agent named is registered", func(t *testing.T) {
 		reset()
-		RememberLoopIfManaged("/opt/deckhouse/sds/file-devices/sds-lvg-a.d0.img", "/dev/loop3")
+		RememberLoopIfManaged("/var/lib/deckhouse/sds/file-devices/sds-lvg-a.d0.img", "/dev/loop3")
 		assert.Equal(t, []string{"/dev/loop3"}, OwnedLoops())
 	})
 
@@ -93,7 +93,7 @@ func TestRememberLoopIfManaged(t *testing.T) {
 
 	t.Run("nothing to register without a device", func(t *testing.T) {
 		reset()
-		RememberLoopIfManaged("/opt/deckhouse/sds/file-devices/sds-lvg-a.d0.img", "")
+		RememberLoopIfManaged("/var/lib/deckhouse/sds/file-devices/sds-lvg-a.d0.img", "")
 		assert.Empty(t, OwnedLoops())
 	})
 }

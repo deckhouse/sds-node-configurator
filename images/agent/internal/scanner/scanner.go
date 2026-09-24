@@ -350,7 +350,7 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 
 	log.Debug("successfully scanned entities. Starts to fill the cache")
 
-	// lvm.static bundled in /opt/deckhouse/sds/bin is built without udev
+	// lvm.static bundled in /var/lib/deckhouse/sds/bin is built without udev
 	// integration and so reports PVs found on any block device it sees in
 	// /dev, including Ceph RBD/DRBD/NBD images that happen to carry LVM
 	// signatures from nested LVM (see ADR / PR description). Filter those out

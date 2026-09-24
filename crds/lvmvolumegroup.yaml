@@ -231,9 +231,12 @@ spec:
                           will be created.
 
                           Must be the module's configured base directory
-                          (fileDevicesDirectory, default /opt/deckhouse/sds/file-devices) or a
+                          (fileDevicesDirectory, default /var/lib/deckhouse/sds/file-devices) or a
                           subdirectory of it; the agent rejects paths outside that subtree so a
-                          stray entry cannot fill an arbitrary host path.
+                          stray entry cannot fill an arbitrary host path. The previous default,
+                          /opt/deckhouse/sds/file-devices, is still accepted: this field is
+                          immutable, so an entry created before the directory moved cannot be
+                          edited to the new one.
 
                           The agent creates the directory automatically (mkdir -p) if it does
                           not exist. The path must be absolute and must not contain '..'

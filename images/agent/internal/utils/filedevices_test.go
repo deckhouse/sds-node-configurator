@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
 func TestBuildFileDevicePath_DeterministicAndDistinguishesEntries(t *testing.T) {
@@ -142,4 +144,63 @@ func TestFileDeviceBasenameTooLong(t *testing.T) {
 	assert.False(t, FileDeviceBasenameTooLong(strings.Repeat("a", 245), "d"))
 	assert.True(t, FileDeviceBasenameTooLong(strings.Repeat("a", 246), "d"))
 	assert.True(t, FileDeviceBasenameTooLong(strings.Repeat("a", 253), strings.Repeat("x", 63)))
+}
+
+func TestIsWithinBaseDir(t *testing.T) {
+	tests := []struct {
+		name string
+		dir  string
+		base string
+		want bool
+	}{
+		{"the base itself", "/var/lib/deckhouse/sds/file-devices", "/var/lib/deckhouse/sds/file-devices", true},
+		{"a subdirectory", "/var/lib/deckhouse/sds/file-devices/a/b", "/var/lib/deckhouse/sds/file-devices", true},
+		{"trailing slash on the base", "/data/x", "/data/", true},
+		{"a sibling sharing the prefix", "/var/lib/deckhouse/sds/file-devices-2", "/var/lib/deckhouse/sds/file-devices", false},
+		{"the parent", "/var/lib/deckhouse/sds", "/var/lib/deckhouse/sds/file-devices", false},
+		{"an unrelated path", "/etc", "/var/lib/deckhouse/sds/file-devices", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, IsWithinBaseDir(tc.dir, tc.base))
+		})
+	}
+}
+
+// The legacy subtree is accepted because spec.fileDevices[].directory is
+// immutable at admission: an entry created before the node tree moved to
+// /var/lib/deckhouse/sds keeps naming the old default forever, and rejecting it
+// would park VGConfigurationApplied on ValidationFailed and stop the entry from
+// ever growing again.
+func TestIsFileDeviceDirectoryAllowed(t *testing.T) {
+	const configured = "/var/lib/deckhouse/sds/file-devices"
+
+	tests := []struct {
+		name string
+		dir  string
+		base string
+		want bool
+	}{
+		{"the configured base", configured, configured, true},
+		{"under the configured base", configured + "/pool-0", configured, true},
+		{"the legacy base", internal.LegacyFileDevicesDirectory, configured, true},
+		{"under the legacy base", internal.LegacyFileDevicesDirectory + "/pool-0", configured, true},
+		{"the legacy base's parent", "/opt/deckhouse/sds", configured, false},
+		{"a sibling of the legacy base", "/opt/deckhouse/sds/file-devices-2", configured, false},
+		{"an arbitrary host path", "/var/lib/kubelet", configured, false},
+		{"the filesystem root", "/", configured, false},
+		// A base the admin pointed at a dedicated disk does not lose the legacy
+		// subtree: a cluster can hold entries from both eras at once.
+		{"a custom base, entry under it", "/mnt/disk/sds", "/mnt/disk/sds", true},
+		{"a custom base, legacy entry", internal.LegacyFileDevicesDirectory, "/mnt/disk/sds", true},
+		{"a custom base, new default entry", configured, "/mnt/disk/sds", false},
+		// An empty base is how the unit tests that do not exercise the allowlist
+		// switch the confinement off entirely.
+		{"no base configured", "/anywhere/at/all", "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, IsFileDeviceDirectoryAllowed(tc.dir, tc.base))
+		})
+	}
 }

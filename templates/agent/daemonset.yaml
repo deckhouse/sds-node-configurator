@@ -102,15 +102,15 @@ spec:
         command:
         - /sds-utils-installer
         - /sds-utils
-        - /opt/deckhouse/sds
+        - /var/lib/deckhouse/sds
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
           seccompProfile:
             type: RuntimeDefault
         volumeMounts:
-        - mountPath: /opt/deckhouse/sds
-          name: opt-deckhouse-sds
+        - mountPath: /var/lib/deckhouse/sds
+          name: var-lib-deckhouse-sds
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
@@ -122,7 +122,7 @@ spec:
         image: {{ include "helm_lib_module_image" (list . "agent") }}
         imagePullPolicy: IfNotPresent
         command:
-          - /opt/deckhouse/sds/bin/nsenter
+          - /var/lib/deckhouse/sds/bin/nsenter
           - -t
           - "1"
           - -m
@@ -310,9 +310,9 @@ spec:
 {{- end }}
       volumes:
       - hostPath:
-          path: /opt/deckhouse/sds
+          path: /var/lib/deckhouse/sds
           type: DirectoryOrCreate
-        name: opt-deckhouse-sds
+        name: var-lib-deckhouse-sds
       - hostPath:
           path: /dev/
           type: ""

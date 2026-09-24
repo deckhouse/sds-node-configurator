@@ -96,7 +96,7 @@ func TestNewConfig(t *testing.T) {
 		expMetricsBindAddress := ":0000"
 		expNodeName := "test-node"
 		expErrorMsg := fmt.Sprintf("[NewConfig] unable to get %s, error: %s",
-			MachineID, "fork/exec /opt/deckhouse/sds/bin/nsenter: no such file or directory")
+			MachineID, "fork/exec /var/lib/deckhouse/sds/bin/nsenter: no such file or directory")
 
 		err := os.Setenv(monitoring.EnvMetricsBindAddress, expMetricsBindAddress)
 		if err != nil {
@@ -255,10 +255,10 @@ func TestValidateFileDevicesDirectory(t *testing.T) {
 		"default":                  {DefaultFileDevicesDirectory, ""},
 		"dedicated_disk":           {"/mnt/data/sds-file-devices", ""},
 		"dot_component_is_no_op":   {"/opt/./sds-file-devices", ""},
-		"relative":                 {"opt/deckhouse/sds/file-devices", "absolute path"},
+		"relative":                 {"var/lib/deckhouse/sds/file-devices", "absolute path"},
 		"parent_escape":            {"/opt/../etc", "'..' segments"},
-		"parent_escape_mid_path":   {"/opt/deckhouse/../../etc/sds", "'..' segments"},
-		"trailing_parent":          {"/opt/deckhouse/sds/..", "'..' segments"},
+		"parent_escape_mid_path":   {"/var/lib/deckhouse/../../etc/sds", "'..' segments"},
+		"trailing_parent":          {"/var/lib/deckhouse/sds/..", "'..' segments"},
 		"filesystem_root":          {"/", "filesystem root"},
 		"filesystem_root_via_dots": {"/opt/..", "'..' segments"},
 	}

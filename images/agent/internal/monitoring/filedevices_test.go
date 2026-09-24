@@ -35,7 +35,7 @@ func fileDeviceLVG(name, vgName string, devices ...v1alpha1.LVMVolumeGroupFileDe
 		Spec: v1alpha1.LVMVolumeGroupSpec{
 			ActualVGNameOnTheNode: vgName,
 			FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{
-				{Name: "d1", Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("10Gi")},
+				{Name: "d1", Directory: "/var/lib/deckhouse/sds/file-devices", Size: resource.MustParse("10Gi")},
 			},
 		},
 		Status: v1alpha1.LVMVolumeGroupStatus{
@@ -55,7 +55,7 @@ func TestUpdateFileDeviceMetrics(t *testing.T) {
 			v1alpha1.LVMVolumeGroupFileDevice{Name: "d1", Size: resource.MustParse("1069547520")}),
 	}
 	usage := []FileDeviceDirectoryUsage{{
-		Directory:      "/opt/deckhouse/sds/file-devices",
+		Directory:      "/var/lib/deckhouse/sds/file-devices",
 		FreeBytes:      5 << 30,
 		Known:          true,
 		AllocatedBytes: 10 << 30,
@@ -67,9 +67,9 @@ func TestUpdateFileDeviceMetrics(t *testing.T) {
 	assert.Equal(t, float64(1069547520),
 		testutil.ToFloat64(fileDeviceSizeBytes.WithLabelValues(testNode, "lvg-a", "vg-a", "d1")))
 	assert.Equal(t, float64(5<<30),
-		testutil.ToFloat64(fileDevicesDirectoryFreeBytes.WithLabelValues(testNode, "/opt/deckhouse/sds/file-devices")))
+		testutil.ToFloat64(fileDevicesDirectoryFreeBytes.WithLabelValues(testNode, "/var/lib/deckhouse/sds/file-devices")))
 	assert.Equal(t, float64(10<<30),
-		testutil.ToFloat64(fileDevicesDirectoryAllocatedBytes.WithLabelValues(testNode, "/opt/deckhouse/sds/file-devices")))
+		testutil.ToFloat64(fileDevicesDirectoryAllocatedBytes.WithLabelValues(testNode, "/var/lib/deckhouse/sds/file-devices")))
 }
 
 // A gauge left behind after its LVMVolumeGroup is gone reads as a Volume Group
@@ -80,7 +80,7 @@ func TestUpdateFileDeviceMetrics_DropsStaleSeries(t *testing.T) {
 	fileDevicesDirectoryAllocatedBytes.Reset()
 
 	m := GetMetrics(testNode)
-	dir := "/opt/deckhouse/sds/file-devices"
+	dir := "/var/lib/deckhouse/sds/file-devices"
 
 	m.UpdateFileDeviceMetrics(map[string]v1alpha1.LVMVolumeGroup{
 		"vg-a": fileDeviceLVG("lvg-a", "vg-a",
@@ -108,7 +108,7 @@ func TestUpdateFileDeviceMetrics_UnknownFreeSpaceKeepsPreviousSample(t *testing.
 	fileDevicesDirectoryAllocatedBytes.Reset()
 
 	m := GetMetrics(testNode)
-	dir := "/opt/deckhouse/sds/file-devices"
+	dir := "/var/lib/deckhouse/sds/file-devices"
 	lvgs := map[string]v1alpha1.LVMVolumeGroup{"vg-a": fileDeviceLVG("lvg-a", "vg-a")}
 
 	m.UpdateFileDeviceMetrics(lvgs, []FileDeviceDirectoryUsage{

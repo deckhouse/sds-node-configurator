@@ -200,7 +200,7 @@ All selected block devices must belong to the same node for [LVMVolumeGroup](./c
 
 When dedicated block devices are not available, you can allocate part of an existing filesystem for LVM by using file-backed devices (`spec.fileDevices`). The agent will create a preallocated file, attach it as a loop device, and use it as an LVM Physical Volume.
 
-Each `spec.fileDevices[].directory` must be inside the base directory configured by the `fileDevicesDirectory` module setting (default `/opt/deckhouse/sds/file-devices`); the agent rejects paths outside it so a stray entry cannot fill an arbitrary host path. To place backing files on a dedicated data disk, mount the disk on the node and set `fileDevicesDirectory` to its mount point in the module configuration.
+Each `spec.fileDevices[].directory` must be inside the base directory configured by the `fileDevicesDirectory` module setting (default `/var/lib/deckhouse/sds/file-devices`); the agent rejects paths outside it so a stray entry cannot fill an arbitrary host path. To place backing files on a dedicated data disk, mount the disk on the node and set `fileDevicesDirectory` to its mount point in the module configuration.
 
 Creating a Volume Group backed by a 50Gi file on an existing filesystem:
 
@@ -216,7 +216,7 @@ spec:
   actualVGNameOnTheNode: "vg-file"
   fileDevices:
     - name: data-0
-      directory: /opt/deckhouse/sds/file-devices
+      directory: /var/lib/deckhouse/sds/file-devices
       size: 50Gi
 ```
 
@@ -240,7 +240,7 @@ spec:
   actualVGNameOnTheNode: "vg-mixed"
   fileDevices:
     - name: data-0
-      directory: /opt/deckhouse/sds/file-devices
+      directory: /var/lib/deckhouse/sds/file-devices
       size: 100Gi
 ```
 
@@ -255,7 +255,7 @@ The straightforward way is to raise the size of an existing entry:
 ```yaml
   fileDevices:
     - name: data-0
-      directory: /opt/deckhouse/sds/file-devices
+      directory: /var/lib/deckhouse/sds/file-devices
       size: 100Gi         # was 50Gi
 ```
 
@@ -268,7 +268,7 @@ When the extra capacity has to come from a different filesystem, add a new entry
 ```yaml
   fileDevices:
     - name: data-0        # unchanged
-      directory: /opt/deckhouse/sds/file-devices
+      directory: /var/lib/deckhouse/sds/file-devices
       size: 50Gi
     - name: data-1        # new file, new loop device, new PV
       directory: /mnt/second-disk/sds-file-devices

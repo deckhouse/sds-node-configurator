@@ -42,7 +42,7 @@ import (
 // shell, the agent sees no entries, and it re-provisions duplicate files
 // alongside the live ones.
 func TestBuildSpecFileDevicesFromCandidate(t *testing.T) {
-	const dir = "/opt/deckhouse/sds/file-devices"
+	const dir = "/var/lib/deckhouse/sds/file-devices"
 
 	// The base directory is left unset so no path translation is attempted: these
 	// cases are about rebuilding the entries themselves. The symlink translation
@@ -116,7 +116,7 @@ func TestBuildSpecFileDevicesFromCandidate(t *testing.T) {
 // with `directory` immutable and therefore no way back through the API.
 func TestBuildSpecFileDevicesFromCandidate_MapsResolvedPathsBackOntoTheConfiguredBase(t *testing.T) {
 	const (
-		configuredBase = "/opt/deckhouse/sds/file-devices"
+		configuredBase = "/var/lib/deckhouse/sds/file-devices"
 		resolvedBase   = "/mnt/data/fd"
 	)
 
@@ -184,6 +184,24 @@ func TestBuildSpecFileDevicesFromCandidate_MapsResolvedPathsBackOntoTheConfigure
 		_, err := d.buildSpecFileDevicesFromCandidate(context.Background(), candidateAt("/srv/elsewhere"))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "outside the configured base directory")
+	})
+
+	// A backing file a cluster upgraded in place left in the old tree is where it
+	// belongs, and an entry naming that directory passes validation, so the
+	// import must express it as it stands — without resolving the configured
+	// base, which has nothing to do with it.
+	t.Run("a file in the legacy base is imported as it stands", func(t *testing.T) {
+		for _, dir := range []string{internal.LegacyFileDevicesDirectory, internal.LegacyFileDevicesDirectory + "/tier1"} {
+			d := newDiscoverer(func(context.Context, string) (string, error) {
+				t.Fatal("the resolver must not be called for a path under the legacy base")
+				return "", nil
+			})
+
+			got, err := d.buildSpecFileDevicesFromCandidate(context.Background(), candidateAt(dir))
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			assert.Equal(t, dir, got[0].Directory)
+		}
 	})
 
 	t.Run("a resolver failure refuses the import rather than guessing", func(t *testing.T) {

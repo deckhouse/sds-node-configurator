@@ -32,7 +32,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
-const growDir = "/opt/deckhouse/sds/file-devices"
+const growDir = "/var/lib/deckhouse/sds/file-devices"
 
 // growLVG builds an LVMVolumeGroup whose single entry asks for specSize while
 // the node reports a physical volume of pvSize.

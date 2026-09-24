@@ -87,7 +87,7 @@ func signalError(t *testing.T) error {
 // `err != nil && filtered.Len() > 0` check did, and it silently turned every
 // diagnostic-less failure into a success.
 func TestErrIfNotBenign(t *testing.T) {
-	const benignFDLeak = "File descriptor 7 leaked on lvm.static invocation. Parent PID 1234: /opt/deckhouse/sds/bin/nsenter\n"
+	const benignFDLeak = "File descriptor 7 leaked on lvm.static invocation. Parent PID 1234: /var/lib/deckhouse/sds/bin/nsenter\n"
 
 	t.Run("no error is no error", func(t *testing.T) {
 		assert.NoError(t, errIfNotBenign("pvcreate /dev/loop0", nil, bytes.Buffer{}, benignAlwaysStdErr, silentExitIsFailure))
@@ -164,7 +164,7 @@ func TestErrIfNotBenign(t *testing.T) {
 // every single reconcile.
 func TestWriteCommandsShareTheBenignStdErrPolicy(t *testing.T) {
 	const (
-		benignFDLeak = "File descriptor 7 leaked on lvm.static invocation. Parent PID 1234: /opt/deckhouse/sds/bin/nsenter"
+		benignFDLeak = "File descriptor 7 leaked on lvm.static invocation. Parent PID 1234: /var/lib/deckhouse/sds/bin/nsenter"
 		realFailure  = "  Volume group \"vg-a\" not found"
 		noOpResize   = "  New size (953801 extents) matches existing size (953801 extents)."
 	)

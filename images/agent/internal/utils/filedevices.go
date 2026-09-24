@@ -62,6 +62,34 @@ func IsWithinBaseDir(dir, base string) bool {
 	return dir == base || strings.HasPrefix(dir, base+string(filepath.Separator))
 }
 
+// IsFileDeviceDirectoryAllowed reports whether a spec-supplied directory may be
+// used for backing files. It is the one predicate every path that touches
+// spec.fileDevices[].directory asks — validation, cleanup, the startup reattach
+// and the import — so the four cannot drift apart and start disagreeing about
+// which files belong to this agent.
+//
+// A directory is allowed when it is inside the configured base directory, or
+// inside internal.LegacyFileDevicesDirectory: entries created before the node
+// tree moved to /var/lib/deckhouse/sds still name the old default and cannot be
+// edited, because `directory` is immutable at admission. See the comment on that
+// constant.
+//
+// The predicate looks at the path alone, so a new entry that names the legacy
+// directory is allowed as well. Telling it apart would need the entry's history
+// (is its backing file already in status?), which the cleanup and reattach
+// paths must not depend on; the hook 035 counts such entries together with the
+// old ones.
+//
+// An empty base disables the check, which is what the unit tests that do not
+// exercise the allowlist rely on. It also means the legacy subtree is not
+// special-cased away: with no base configured nothing is confined at all.
+func IsFileDeviceDirectoryAllowed(dir, base string) bool {
+	if base == "" {
+		return true
+	}
+	return IsWithinBaseDir(dir, base) || IsWithinBaseDir(dir, internal.LegacyFileDevicesDirectory)
+}
+
 // BuildFileDevicePath returns the deterministic absolute path the agent
 // uses for the backing file of a single spec.fileDevices entry.
 //

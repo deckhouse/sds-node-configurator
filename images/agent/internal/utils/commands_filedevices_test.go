@@ -53,9 +53,9 @@ func TestFileDeviceCommandsArgv(t *testing.T) {
 	ctx := fileDeviceCancelledCtx(t)
 
 	const (
-		path    = "/opt/deckhouse/sds/file-devices/sds-vg-a.d5.img"
+		path    = "/var/lib/deckhouse/sds/file-devices/sds-vg-a.d5.img"
 		loopDev = "/dev/loop7"
-		dir     = "/opt/deckhouse/sds/file-devices"
+		dir     = "/var/lib/deckhouse/sds/file-devices"
 	)
 
 	// Every host command goes through the same nsenter wrapper into PID 1's

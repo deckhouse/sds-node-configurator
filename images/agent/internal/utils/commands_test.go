@@ -539,7 +539,7 @@ func TestFilterStdErr(t *testing.T) {
 		},
 		{
 			name:     "file_descriptor_leaked",
-			stdErr:   "File descriptor 7 leaked on lvm invocation. Parent PID 1: /opt/deckhouse/sds/bin/nsenter",
+			stdErr:   "File descriptor 7 leaked on lvm invocation. Parent PID 1: /var/lib/deckhouse/sds/bin/nsenter",
 			filtered: true,
 		},
 		{
@@ -670,7 +670,7 @@ func TestBenignStdErrSetsAreScopedPerCommand(t *testing.T) {
 	const (
 		noSizeChange = "  No size change."
 		matchesSize  = "  New size (953801 extents) matches existing size (953801 extents)."
-		leakedFD     = "File descriptor 7 leaked on lvm.static invocation. Parent PID 1: /opt/deckhouse/sds/bin/nsenter"
+		leakedFD     = "File descriptor 7 leaked on lvm.static invocation. Parent PID 1: /var/lib/deckhouse/sds/bin/nsenter"
 		versionSkew  = "Regex version mismatch, expected: 10.42 2022-12-11 actual: 10.34 2019-11-21"
 	)
 

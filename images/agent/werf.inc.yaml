@@ -1,4 +1,4 @@
-{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic /usr/lib/ld-linux-x86-64.so.2 /usr/bin/thin_dump /usr/bin/pdata_tools" }}
+{{ $binaries := "/var/lib/deckhouse/sds/lib/libblkid.so.1 /var/lib/deckhouse/sds/lib/libmount.so.1 /var/lib/deckhouse/sds/lib/libsmartcols.so.1 /var/lib/deckhouse/sds/bin/nsenter /var/lib/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /var/lib/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /var/lib/deckhouse/sds/bin/lsblk.dynamic /usr/lib/ld-linux-x86-64.so.2 /usr/bin/thin_dump /usr/bin/pdata_tools" }}
 
 # Do not remove. It's used in external tests.
 ---
@@ -90,17 +90,17 @@ shell:
     - ./autogen.sh
     - ./configure LDFLAGS="-static" --enable-static-programs -disable-all-programs --enable-nsenter
     - make install-strip
-    - ./configure --prefix /opt/deckhouse/sds --with-udev
+    - ./configure --prefix /var/lib/deckhouse/sds --with-udev
     - make install-strip
-    - mkdir -p /opt/deckhouse/sds/lib/x86_64-linux-gnu/
-    - cp /src/util-linux/nsenter.static /opt/deckhouse/sds/bin/nsenter
-    - cp /lib64/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1
-    - cp /lib64/libc.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libc.so.6
-    - cp /lib64/libcap.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2
+    - mkdir -p /var/lib/deckhouse/sds/lib/x86_64-linux-gnu/
+    - cp /src/util-linux/nsenter.static /var/lib/deckhouse/sds/bin/nsenter
+    - cp /lib64/libudev.so.1 /var/lib/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1
+    - cp /lib64/libc.so.6 /var/lib/deckhouse/sds/lib/x86_64-linux-gnu/libc.so.6
+    - cp /lib64/libcap.so.2 /var/lib/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2
     # builder/native keeps the loader at /usr/lib (with /lib64 symlinked there),
     # not under the sys-root prefix the ALT builder used.
-    - cp /usr/lib/ld-linux-x86-64.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
-    - cp /opt/deckhouse/sds/bin/lsblk /opt/deckhouse/sds/bin/lsblk.dynamic
+    - cp /usr/lib/ld-linux-x86-64.so.2 /var/lib/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+    - cp /var/lib/deckhouse/sds/bin/lsblk /var/lib/deckhouse/sds/bin/lsblk.dynamic
     - chmod +x /binary_replace.sh
     - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
 

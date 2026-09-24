@@ -313,8 +313,9 @@ File-backed devices allow you to allocate part of an existing filesystem for LVM
 
 ### Limitations
 
-- **Host tooling on the node**: unlike `lvm`, `nsenter` and `lsblk`, which the agent ships under `/opt/deckhouse/sds/bin`, the loop and file operations run the node's own `losetup`, `fallocate`, `stat`, `mkdir` and `rm` in PID 1's mount namespace. `losetup` must support `--nooverlap`, i.e. **util-linux 2.29 or newer** (2016; every currently supported distribution qualifies, RHEL/CentOS 7 does not). On an older host every provisioning attempt fails with `unrecognized option '--nooverlap'`, reported on the resource as `FileDeviceNotApplied`. `--direct-io` is not a requirement: when it is missing or the kernel refuses it, the agent logs a warning and continues with buffered I/O.
-- **Confined to a base directory**: Each `directory` must be the `fileDevicesDirectory` module setting (default `/opt/deckhouse/sds/file-devices`) or a subdirectory of it. Paths outside this subtree are rejected so an arbitrary host path cannot be filled up. Point `fileDevicesDirectory` at a dedicated data disk to use a different location.
+- **Host tooling on the node**: unlike `lvm`, `nsenter` and `lsblk`, which the agent ships under `/var/lib/deckhouse/sds/bin`, the loop and file operations run the node's own `losetup`, `fallocate`, `stat`, `mkdir` and `rm` in PID 1's mount namespace. `losetup` must support `--nooverlap`, i.e. **util-linux 2.29 or newer** (2016; every currently supported distribution qualifies, RHEL/CentOS 7 does not). On an older host every provisioning attempt fails with `unrecognized option '--nooverlap'`, reported on the resource as `FileDeviceNotApplied`. `--direct-io` is not a requirement: when it is missing or the kernel refuses it, the agent logs a warning and continues with buffered I/O.
+- **Confined to a base directory**: Each `directory` must be the `fileDevicesDirectory` module setting (default `/var/lib/deckhouse/sds/file-devices`) or a subdirectory of it. Paths outside this subtree are rejected so an arbitrary host path cannot be filled up, with one exception: the previous default, `/opt/deckhouse/sds/file-devices`, is still accepted so that entries created before it moved keep working (see [Backing files created before the base directory moved](#backing-files-created-before-the-base-directory-moved)).
+- **The default shares a filesystem with kubelet and containerd**: On a standard node layout `/var/lib/deckhouse/sds/file-devices` sits on the same filesystem as `/var/lib/kubelet` and `/var/lib/containerd`, whose sizing DKP accounts for in full. Filling it up evicts Pods and breaks image pulls on the node, so for anything beyond a small entry mount a dedicated disk and point `fileDevicesDirectory` at it. The `fileDevicesMinFreeSpacePercent` reserve below is the guard, not a licence to skip this.
 - **Directory auto-created**: The agent creates the backing directory automatically (`mkdir -p`) on the node if it does not exist. The path must be absolute and free of `..` segments — a relative path is rejected at admission, a `..` segment by the agent — and `directory` cannot be changed afterwards. Provisioning then fails only if the path is on a read-only filesystem or a non-directory component is in the way.
 - **Growth**: `size` can be increased on an existing entry — the backing file, the loop device and the Physical Volume grow in place, online, without unmounting anything. `directory` cannot be changed; to take capacity from a different filesystem, add a new entry under a new `name` (at most 32 entries).
 - **No shrink**: `size` cannot be lowered, and the edit is rejected at admission. Returning capacity means shrinking the Volume Group (`pvmove` + `vgreduce`), which can be impossible when the remaining Physical Volumes have no room and is destructive when it is not; the module does not shrink a Volume Group for block devices either. To reclaim space without changing sizes, use discard/TRIM (see below).
@@ -327,6 +328,25 @@ File-backed devices allow you to allocate part of an existing filesystem for LVM
 - **A stray `losetup` on the node is left alone**: The agent recognises a loop-backed Volume Group as its own only when the backing file's basename matches `sds-<lvgName>.<entryName>.img`, and it will not activate, re-tag, adopt or reconcile one that does not. That matters for images that carry the module's own LVM tags — a backup of a node disk attached with `losetup -f` for a restore, or a nested cluster on a rawfile-backed volume: the tag alone would make such a Volume Group look managed, and one sharing a name with a live Volume Group would then be reported as a duplicate. Nothing on the host needs to be done about it, but the agent log names any Volume Group it skips for this reason.
 - **Never `rm` a backing file while its loop device is attached**: The Physical Volume stays live on the unlinked inode — `losetup -a` shows the path as `(deleted)` — while the path itself resolves to nothing. The agent detects this and refuses to provision the entry, reporting `FileDeviceNotApplied` rather than creating a second file at the same path (which would add a second Physical Volume and double the Volume Group). Recover by restoring the file, or by moving the Physical Volume out with `pvmove` + `vgreduce` + `pvremove` and then removing the entry. To free space inside a file device, use `fstrim` (see below).
 - **Never `losetup` a managed backing file yourself**: Two loop devices over one backing file are two Physical Volumes of the same size over the same blocks. The agent refuses to act on such a file at all — it will not provision, grow or clean it up, and deleting the LVMVolumeGroup stops with the loop devices named on the condition rather than detaching one of the two and removing the file the other is still reading from. Detach the extra device with `losetup -d` and the reconcile continues on its own.
+
+### Backing files created before the base directory moved
+
+The default base directory used to be `/opt/deckhouse/sds/file-devices`; it is now `/var/lib/deckhouse/sds/file-devices`, together with the rest of the module's node tree. Entries created under the old default keep working exactly as before, and nothing has to be done about them. Do not create new entries there: the agent does not stop you — it cannot tell a new entry from an old one by the path — but on an immutable node `/opt` is not writable, and each such entry keeps the compatibility path alive:
+
+- `spec.fileDevices[].directory` is immutable, so an existing entry cannot be edited to the new path — the apiserver rejects the change;
+- the agent therefore keeps accepting the old directory alongside the configured one. Such an entry is validated, grown, re-attached after a reboot and cleaned up on delete exactly as one under the new default;
+- **do not move the backing file.** The entry would still name the old directory, so the next reconcile would create a second backing file there and add a second Physical Volume to the Volume Group.
+
+The module reports what is left: the `sds_node_configurator_legacy_file_devices_directory_lvgs` metric counts the LVMVolumeGroups that still name the old directory, and the module's log names them.
+
+Moving one to the new directory is optional, and is done the same way capacity is moved off any Physical Volume — online, with the volumes on top untouched:
+
+1. Add a second entry under a new `name`, with `directory: /var/lib/deckhouse/sds/file-devices` and at least the `size` of the old one. Wait for its Physical Volume to appear in `status.nodes[].fileDevices`.
+2. Move the data off the old Physical Volume: `pvmove <old loop device>`.
+3. Take it out of the Volume Group: `vgreduce <vg> <old loop device>`, then `pvremove <old loop device>`.
+4. Remove the old entry from `spec.fileDevices`. Nothing is torn down for a removed entry, so detach and delete its backing file by hand: `losetup -d <old loop device>` and `rm <old backing file>`.
+
+Every LVM command above needs the filter override below, or it will not see the loop-backed Physical Volumes at all. Which loop device belongs to which entry is in `status.nodes[].fileDevices` and in `losetup -a`.
 
 ### Inspecting a file-backed Volume Group on the node
 
@@ -343,7 +363,7 @@ lvm vgs --config 'devices/global_filter=["r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev
 losetup -a
 
 # the backing files the module owns; the basename is sds-<lvgName>.<entryName>.img
-ls -l /opt/deckhouse/sds/file-devices
+ls -l /var/lib/deckhouse/sds/file-devices
 ```
 
 Do not remove the loop entry from `lvm.conf`: the filter is what keeps the host's own `pvscan`/activation units from claiming these devices behind the agent's back.
@@ -414,6 +434,14 @@ sds_node_configurator_file_devices_directory_free_bytes
 ```
 
 If the free-space reading fails on a cycle, the previous value is kept rather than reported as zero, so a transient error does not look like a full disk.
+
+One more gauge comes from the module's hooks rather than the agent, so it is cluster-wide and carries no labels:
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `sds_node_configurator_legacy_file_devices_directory_lvgs` | — | LVMVolumeGroups whose entries still name the previous default base directory, see [Backing files created before the base directory moved](#backing-files-created-before-the-base-directory-moved) |
+
+It is not an error condition — those entries keep working — but while it is above zero the old directory is still in use on some node. A listing failure leaves the previous value in place instead of reporting zero.
 
 ### Reboot recovery
 

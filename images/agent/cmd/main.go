@@ -37,6 +37,7 @@ import (
 
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/cache"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/config"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/controller"
@@ -457,14 +458,14 @@ func collectFileDevicesToReattach(log logger.Logger, lvgs []v1alpha1.LVMVolumeGr
 			// Status-derived paths above are already known to be ours — the
 			// discoverer only records a backing file that matched the managed
 			// pattern. A spec-derived path is not: the apiserver does not
-			// constrain `directory` to the configured base directory, so this is
+			// constrain `directory` to the allowed base directories, so this is
 			// the same confinement validateFileDevice puts in front of
 			// provisioning and cleanupFileDevices puts in front of `rm`. Without
 			// it, this is the one file-device path that would hand an arbitrary
 			// host path to losetup.
-			if baseDir != "" && !utils.IsWithinBaseDir(filepath.Clean(fd.Directory), baseDir) {
-				log.Warn(fmt.Sprintf("skipping the fileDevices entry %q of the LVMVolumeGroup %s: its directory %q is outside the configured base directory %q, so nothing there was created by this agent",
-					fd.Name, lvg.Name, fd.Directory, baseDir))
+			if !utils.IsFileDeviceDirectoryAllowed(filepath.Clean(fd.Directory), baseDir) {
+				log.Warn(fmt.Sprintf("skipping the fileDevices entry %q of the LVMVolumeGroup %s: its directory %q is neither inside the configured base directory %q nor inside the legacy %q, so nothing there was created by this agent",
+					fd.Name, lvg.Name, fd.Directory, baseDir, internal.LegacyFileDevicesDirectory))
 				continue
 			}
 			path := utils.BuildFileDevicePath(fd.Directory, lvg.Name, fd.Name)

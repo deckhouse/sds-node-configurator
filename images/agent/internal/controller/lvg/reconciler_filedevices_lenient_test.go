@@ -54,9 +54,9 @@ func TestValidateLVGForUpdateFunc_BadFileDeviceDoesNotInvalidateTheLVG(t *testin
 		Spec: v1alpha1.LVMVolumeGroupSpec{
 			ActualVGNameOnTheNode: vgName,
 			FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{
-				{Name: "good", Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("2Gi")},
+				{Name: "good", Directory: "/var/lib/deckhouse/sds/file-devices", Size: resource.MustParse("2Gi")},
 				// 1G is 10^9 bytes — below the 1Gi minimum. The classic typo.
-				{Name: "typo", Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("1G")},
+				{Name: "typo", Directory: "/var/lib/deckhouse/sds/file-devices", Size: resource.MustParse("1G")},
 			},
 		},
 	}
@@ -81,7 +81,7 @@ func TestValidateFileDevices_InvalidEntrySizeIsNotCounted(t *testing.T) {
 		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
 		Spec: v1alpha1.LVMVolumeGroupSpec{
 			FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{
-				{Name: "good", Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("4Gi")},
+				{Name: "good", Directory: "/var/lib/deckhouse/sds/file-devices", Size: resource.MustParse("4Gi")},
 				{Name: "relative", Directory: "not/absolute", Size: resource.MustParse("100Gi")},
 			},
 		},
@@ -107,7 +107,7 @@ func TestValidateFileDevices_RejectsNamesThatOverflowNameMax(t *testing.T) {
 		ObjectMeta: v1.ObjectMeta{Name: strings.Repeat("a", 253)},
 		Spec: v1alpha1.LVMVolumeGroupSpec{
 			FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{
-				{Name: strings.Repeat("x", 63), Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("2Gi")},
+				{Name: strings.Repeat("x", 63), Directory: "/var/lib/deckhouse/sds/file-devices", Size: resource.MustParse("2Gi")},
 			},
 		},
 	}
@@ -137,7 +137,7 @@ func TestFileDeviceDriftReason(t *testing.T) {
 		}
 	}
 	entry := func(name string) v1alpha1.LVMVolumeGroupFileDeviceSpec {
-		return v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: name, Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("2Gi")}
+		return v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: name, Directory: "/var/lib/deckhouse/sds/file-devices", Size: resource.MustParse("2Gi")}
 	}
 
 	t.Run("in_sync", func(t *testing.T) {
@@ -164,7 +164,7 @@ func TestFileDeviceDriftReason(t *testing.T) {
 	t.Run("nameless_status_entry_is_ignored", func(t *testing.T) {
 		// Written before the name field existed; the discoverer refills it.
 		lvg := lvgWith([]v1alpha1.LVMVolumeGroupFileDeviceSpec{entry("d1")},
-			[]v1alpha1.LVMVolumeGroupFileDevice{{FilePath: "/opt/deckhouse/sds/file-devices/sds-vg-a.d1.img"}})
+			[]v1alpha1.LVMVolumeGroupFileDevice{{FilePath: "/var/lib/deckhouse/sds/file-devices/sds-vg-a.d1.img"}})
 		assert.Empty(t, r.fileDeviceDriftReason(lvg))
 	})
 }
@@ -174,7 +174,7 @@ func TestFileDeviceDriftReason(t *testing.T) {
 // report unreachable: removing the entry blanked the name on the next discovery
 // pass, so the very act being reported erased its own evidence.
 func TestConvertLVMVGFileDevices_NameComesFromTheBackingFile(t *testing.T) {
-	const dir = "/opt/deckhouse/sds/file-devices"
+	const dir = "/var/lib/deckhouse/sds/file-devices"
 
 	got := convertLVMVGFileDevices([]internal.LVMVGFileDevice{
 		{FilePath: dir + "/sds-vg-a.d1.img", LoopDevice: "/dev/loop0", PVUUID: "uuid-a"},
@@ -195,7 +195,7 @@ func TestConvertLVMVGFileDevices_NameComesFromTheBackingFile(t *testing.T) {
 // Two entries of equal size in one directory are distinct files now — the
 // previous size-keyed scheme could not express this at all.
 func TestBuildFileDevicePath_EqualSizesInOneDirectoryDiffer(t *testing.T) {
-	const dir = "/opt/deckhouse/sds/file-devices"
+	const dir = "/var/lib/deckhouse/sds/file-devices"
 	assert.NotEqual(t,
 		utils.BuildFileDevicePath(dir, "vg-a", "d1"),
 		utils.BuildFileDevicePath(dir, "vg-a", "d2"))
@@ -209,7 +209,7 @@ func TestBuildFileDevicePath_EqualSizesInOneDirectoryDiffer(t *testing.T) {
 // must not fire on the other two.
 func TestFileDeviceConditionReason(t *testing.T) {
 	const malformed = "fileDevices[0].size 1G is less than the minimum 1Gi. "
-	const unapplied = "not enough free space in \"/opt/deckhouse/sds/file-devices\". "
+	const unapplied = "not enough free space in \"/var/lib/deckhouse/sds/file-devices\". "
 
 	t.Run("drift alone", func(t *testing.T) {
 		assert.Equal(t, internal.ReasonFileDeviceDrift, fileDeviceConditionReason("", "", ""))

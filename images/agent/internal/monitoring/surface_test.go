@@ -128,7 +128,7 @@ func touchEverySeries(m *Metrics) {
 			},
 		},
 		[]FileDeviceDirectoryUsage{{
-			Directory:      "/opt/deckhouse/sds/file-devices",
+			Directory:      "/var/lib/deckhouse/sds/file-devices",
 			FreeBytes:      1,
 			TotalBytes:     2,
 			AllocatedBytes: 1,

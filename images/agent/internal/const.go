@@ -39,14 +39,14 @@ const (
 	LVMVGHealthOperational       = "Operational"
 	LVMVGHealthNonOperational    = "NonOperational"
 	BlockDeviceValidSize         = "1G"
-	NSENTERCmd                   = "/opt/deckhouse/sds/bin/nsenter"
-	DMSetupCmd                   = "/opt/deckhouse/sds/bin/dmsetup"
-	LSBLKCmd                     = "/opt/deckhouse/sds/bin/lsblk.dynamic"
-	LVMCmd                       = "/opt/deckhouse/sds/bin/lvm"
+	NSENTERCmd                   = "/var/lib/deckhouse/sds/bin/nsenter"
+	DMSetupCmd                   = "/var/lib/deckhouse/sds/bin/dmsetup"
+	LSBLKCmd                     = "/var/lib/deckhouse/sds/bin/lsblk.dynamic"
+	LVMCmd                       = "/var/lib/deckhouse/sds/bin/lvm"
 	ThinDumpCmd                  = "thin_dump"
 
 	// The commands below are the node's own, not the module's. Everything above
-	// ships in the agent image under /opt/deckhouse/sds/bin precisely so the
+	// ships in the agent image under /var/lib/deckhouse/sds/bin precisely so the
 	// agent does not depend on what the host happens to have installed;
 	// spec.fileDevices cannot do the same, because attaching a loop device and
 	// preallocating a file have to happen in PID 1's mount namespace with the
@@ -279,6 +279,30 @@ const (
 	// unrelated file (a libvirt qcow2, a snap, …) is never misidentified
 	// as ours during discovery or cleanup.
 	FileDevicePrefix = "sds-"
+
+	// LegacyFileDevicesDirectory is the base directory backing files were
+	// confined to before the module's node tree moved from /opt/deckhouse/sds to
+	// /var/lib/deckhouse/sds. It is accepted alongside the configured base
+	// directory, and that is a migration shim rather than a second setting.
+	//
+	// It has to be: spec.fileDevices[].directory is immutable at admission
+	// (`self.directory == oldSelf.directory` in crds/lvmvolumegroup.yaml), so an
+	// entry created under the old default cannot be edited to the new one — not
+	// by the admin and not by a hook either. Every file-backed Volume Group in
+	// every upgraded cluster keeps naming this path forever. Without accepting
+	// it, those entries fail validateFileDevice on every reconcile, which parks
+	// VGConfigurationApplied on ValidationFailed, skips the entries when
+	// provisioning (so `size` can no longer be raised), and makes re-importing
+	// such a Volume Group fail outright.
+	//
+	// Widening the confinement by exactly this one subtree costs nothing the
+	// guard was built to prevent: the point of the check is that a mistyped
+	// `directory` must not fill an arbitrary host path, and this is the module's
+	// own former home, not an arbitrary path.
+	//
+	// It can be dropped once no LVMVolumeGroup names it any more; the
+	// 035-legacy-file-devices-directory hook reports how many still do.
+	LegacyFileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
 )
 
 var (

@@ -105,7 +105,7 @@ func TestFilterForeignLoopPVs_KeepsManagedLoopOnlyVG(t *testing.T) {
 	pvs := []internal.PVData{loopPV("/dev/loop0", "uuid-managed", "e2e-vg-fd")}
 
 	verdicts := classify(t, vgs, pvs, map[string]string{
-		"/dev/loop0": "/opt/deckhouse/sds/file-devices/sds-e2e-lvg-fd.data-0.img",
+		"/dev/loop0": "/var/lib/deckhouse/sds/file-devices/sds-e2e-lvg-fd.data-0.img",
 	})
 	got := utils.FilterForeignLoopPVs(logger.NewNop(), pvs, verdicts)
 
@@ -158,7 +158,7 @@ func TestFilterForeignLoopPVs_KeepsManagedLoopVGWithDeletedBackingFile(t *testin
 	mc := mock_utils.NewMockCommands(gomock.NewController(t))
 	mc.EXPECT().GetLoopBackingFile(gomock.Any(), "/dev/loop0").
 		Return("losetup ...", internal.LoopBackingFile{
-			Path:    "/opt/deckhouse/sds/file-devices/sds-e2e-lvg-fd.data-0.img",
+			Path:    "/var/lib/deckhouse/sds/file-devices/sds-e2e-lvg-fd.data-0.img",
 			Deleted: true,
 		}, nil)
 
@@ -218,7 +218,7 @@ func TestFilterForeignLoopPVs_DropsTheForeignHalfOfADuplicateName(t *testing.T) 
 
 	verdicts := classify(t, vgs, pvs, map[string]string{
 		"/dev/loop7": "/backup/node2-root.img",
-		"/dev/loop8": "/opt/deckhouse/sds/file-devices/sds-e2e-lvg-fd.data-0.img",
+		"/dev/loop8": "/var/lib/deckhouse/sds/file-devices/sds-e2e-lvg-fd.data-0.img",
 	})
 	got := utils.FilterForeignLoopPVs(logger.NewNop(), pvs, verdicts)
 

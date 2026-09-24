@@ -1756,7 +1756,7 @@ func TestValidateFileDevice(t *testing.T) {
 
 	t.Run("rejects_directory_outside_base", func(t *testing.T) {
 		r := setupReconciler()
-		r.cfg.FileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
+		r.cfg.FileDevicesDirectory = "/var/lib/deckhouse/sds/file-devices"
 		var reason strings.Builder
 		totalSize := resource.MustParse("0")
 		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
@@ -1767,19 +1767,19 @@ func TestValidateFileDevice(t *testing.T) {
 			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
 			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
 		}, &reason, &totalSize)
-		assert.Contains(t, reason.String(), "must be \"/opt/deckhouse/sds/file-devices\" or a subdirectory")
+		assert.Contains(t, reason.String(), "must be \"/var/lib/deckhouse/sds/file-devices\" or a subdirectory")
 	})
 
 	t.Run("rejects_base_prefix_sibling", func(t *testing.T) {
 		// A path that shares the base as a string prefix but is not actually
-		// inside it (e.g. "/opt/deckhouse/sds/file-devices-evil") must be
+		// inside it (e.g. "/var/lib/deckhouse/sds/file-devices-evil") must be
 		// rejected — the separator check guards against this.
 		r := setupReconciler()
-		r.cfg.FileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
+		r.cfg.FileDevicesDirectory = "/var/lib/deckhouse/sds/file-devices"
 		var reason strings.Builder
 		totalSize := resource.MustParse("0")
 		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
-			Directory: "/opt/deckhouse/sds/file-devices-evil",
+			Directory: "/var/lib/deckhouse/sds/file-devices-evil",
 			Size:      resource.MustParse("10Gi"),
 		}
 		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
@@ -1791,11 +1791,11 @@ func TestValidateFileDevice(t *testing.T) {
 
 	t.Run("accepts_base_directory_itself", func(t *testing.T) {
 		r := setupReconciler()
-		r.cfg.FileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
+		r.cfg.FileDevicesDirectory = "/var/lib/deckhouse/sds/file-devices"
 		var reason strings.Builder
 		totalSize := resource.MustParse("0")
 		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
-			Directory: "/opt/deckhouse/sds/file-devices",
+			Directory: "/var/lib/deckhouse/sds/file-devices",
 			Size:      resource.MustParse("10Gi"),
 		}
 		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
@@ -1807,11 +1807,11 @@ func TestValidateFileDevice(t *testing.T) {
 
 	t.Run("accepts_subdirectory_of_base", func(t *testing.T) {
 		r := setupReconciler()
-		r.cfg.FileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
+		r.cfg.FileDevicesDirectory = "/var/lib/deckhouse/sds/file-devices"
 		var reason strings.Builder
 		totalSize := resource.MustParse("0")
 		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
-			Directory: "/opt/deckhouse/sds/file-devices/vg-a",
+			Directory: "/var/lib/deckhouse/sds/file-devices/vg-a",
 			Size:      resource.MustParse("10Gi"),
 		}
 		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
@@ -1819,6 +1819,66 @@ func TestValidateFileDevice(t *testing.T) {
 			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
 		}, &reason, &totalSize)
 		assert.Empty(t, reason.String())
+	})
+
+	// An entry created before the module's node tree moved to
+	// /var/lib/deckhouse/sds still names the old default, and `directory` is
+	// immutable at admission, so it can never be edited to the new one. It has to
+	// keep validating: otherwise every file-backed Volume Group in an upgraded
+	// cluster parks VGConfigurationApplied on ValidationFailed and its entries
+	// stop being provisioned, which means `size` can no longer be raised.
+	t.Run("accepts_legacy_base_directory", func(t *testing.T) {
+		r := setupReconciler()
+		r.cfg.FileDevicesDirectory = "/var/lib/deckhouse/sds/file-devices"
+		var reason strings.Builder
+		totalSize := resource.MustParse("0")
+		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
+			Directory: internal.LegacyFileDevicesDirectory,
+			Size:      resource.MustParse("10Gi"),
+		}
+		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+		}, &reason, &totalSize)
+		assert.Empty(t, reason.String())
+		// The size still counts towards the VG: a legacy entry is a Physical
+		// Volume like any other, and thin-pool sizing has to see it.
+		want := resource.MustParse("10Gi")
+		assert.Equal(t, want.Value(), totalSize.Value())
+	})
+
+	t.Run("accepts_subdirectory_of_legacy_base", func(t *testing.T) {
+		r := setupReconciler()
+		r.cfg.FileDevicesDirectory = "/var/lib/deckhouse/sds/file-devices"
+		var reason strings.Builder
+		totalSize := resource.MustParse("0")
+		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
+			Directory: internal.LegacyFileDevicesDirectory + "/vg-a",
+			Size:      resource.MustParse("10Gi"),
+		}
+		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+		}, &reason, &totalSize)
+		assert.Empty(t, reason.String())
+	})
+
+	// The shim is exactly one subtree wide: the parent of the legacy base holds
+	// the module's static binaries, not its backing files.
+	t.Run("rejects_parent_of_legacy_base", func(t *testing.T) {
+		r := setupReconciler()
+		r.cfg.FileDevicesDirectory = "/var/lib/deckhouse/sds/file-devices"
+		var reason strings.Builder
+		totalSize := resource.MustParse("0")
+		fd := v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d10g",
+			Directory: "/opt/deckhouse/sds",
+			Size:      resource.MustParse("10Gi"),
+		}
+		r.validateFileDevices(ctx, &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{fd}},
+		}, &reason, &totalSize)
+		assert.Contains(t, reason.String(), "must be \"/var/lib/deckhouse/sds/file-devices\" or a subdirectory")
 	})
 
 	t.Run("rejects_duplicate_backing_file", func(t *testing.T) {

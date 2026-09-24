@@ -1781,7 +1781,7 @@ var (
 	// the static binary, and the leaked descriptor is reported after the operation
 	// has already been applied.
 	reRegexVersionMismatch = regexp.MustCompile(`Regex version mismatch, expected: .+ actual: .+`)
-	reLeakedFileDescriptor = regexp.MustCompile(`File descriptor .+ leaked on lvm(\.static)? invocation\. Parent PID .+: /opt/deckhouse/sds/bin/nsenter`)
+	reLeakedFileDescriptor = regexp.MustCompile(`File descriptor .+ leaked on lvm(\.static)? invocation\. Parent PID .+: /var/lib/deckhouse/sds/bin/nsenter`)
 
 	// A resize that changed nothing. This is the normal state of a thin pool sized
 	// as a percentage of the VG: the pool always already fills it, up to thin-pool

@@ -1,2 +1,2 @@
 dirs:
-  - /opt/deckhouse/sds
+  - /var/lib/deckhouse/sds

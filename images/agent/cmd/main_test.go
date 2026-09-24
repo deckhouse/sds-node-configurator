@@ -25,12 +25,13 @@ import (
 
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/utils"
 )
 
 const (
 	reattachNode    = "node-0"
-	reattachBaseDir = "/opt/deckhouse/sds/file-devices"
+	reattachBaseDir = "/var/lib/deckhouse/sds/file-devices"
 )
 
 func reattachLVG(name, nodeName string, entries ...v1alpha1.LVMVolumeGroupFileDeviceSpec) v1alpha1.LVMVolumeGroup {
@@ -96,13 +97,37 @@ func TestCollectFileDevicesToReattach_ConfinesSpecPathsToTheBaseDirectory(t *tes
 	})
 
 	t.Run("an entry outside the base directory is skipped", func(t *testing.T) {
-		for _, dir := range []string{"/etc", "/var/lib/kubelet", "/", "/opt/deckhouse/sds/file-devices-elsewhere"} {
+		for _, dir := range []string{"/etc", "/var/lib/kubelet", "/", "/var/lib/deckhouse/sds/file-devices-elsewhere"} {
 			lvgs := []v1alpha1.LVMVolumeGroup{
 				reattachLVG("lvg-a", reattachNode, reattachEntry("d1", dir)),
 			}
 			got := collectFileDevicesToReattach(log, lvgs, reattachNode, reattachBaseDir)
 			assert.Empty(t, paths(got), "directory %q must not be reattached", dir)
 		}
+	})
+
+	// The legacy base directory is the one path outside the configured base that
+	// must still be reattached: entries created before the node tree moved to
+	// /var/lib/deckhouse/sds keep naming it, `directory` is immutable, and their
+	// backing files really are there. A node that reboots before the discoverer
+	// wrote status.nodes[].fileDevices has only the spec to go on, and skipping
+	// the entry brings the Volume Group up short of its loop Physical Volume.
+	t.Run("an entry in the legacy base directory is collected", func(t *testing.T) {
+		for _, dir := range []string{internal.LegacyFileDevicesDirectory, internal.LegacyFileDevicesDirectory + "/pool-1"} {
+			lvgs := []v1alpha1.LVMVolumeGroup{
+				reattachLVG("lvg-a", reattachNode, reattachEntry("d1", dir)),
+			}
+			got := collectFileDevicesToReattach(log, lvgs, reattachNode, reattachBaseDir)
+			assert.Equal(t, []string{dir + "/sds-lvg-a.d1.img"}, paths(got), "directory %q must be reattached", dir)
+		}
+	})
+
+	t.Run("the parent of the legacy base directory is skipped", func(t *testing.T) {
+		lvgs := []v1alpha1.LVMVolumeGroup{
+			reattachLVG("lvg-a", reattachNode, reattachEntry("d1", "/opt/deckhouse/sds")),
+		}
+		got := collectFileDevicesToReattach(log, lvgs, reattachNode, reattachBaseDir)
+		assert.Empty(t, paths(got))
 	})
 
 	t.Run("a '..' escape is skipped", func(t *testing.T) {

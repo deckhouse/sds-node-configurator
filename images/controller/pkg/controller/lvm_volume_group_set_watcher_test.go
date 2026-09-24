@@ -172,7 +172,7 @@ func TestProvideLVMVolumeGroupsPerNode_CreatesOneFileBackedLVGPerNode(t *testing
 	cl := newFakeClientWithLVGSetStatus()
 
 	fileDevices := []v1alpha1.LVMVolumeGroupFileDeviceSpec{
-		{Name: "d10g", Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("10Gi")},
+		{Name: "d10g", Directory: "/var/lib/deckhouse/sds/file-devices", Size: resource.MustParse("10Gi")},
 	}
 	lvgSet := &v1alpha1.LVMVolumeGroupSet{
 		ObjectMeta: metav1.ObjectMeta{Name: "set-a"},
@@ -220,7 +220,7 @@ func TestProvideLVMVolumeGroupsPerNode_IsIdempotentAndGrowsFileDevices(t *testin
 	cl := newFakeClientWithLVGSetStatus()
 
 	first := []v1alpha1.LVMVolumeGroupFileDeviceSpec{
-		{Name: "d10g", Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("10Gi")},
+		{Name: "d10g", Directory: "/var/lib/deckhouse/sds/file-devices", Size: resource.MustParse("10Gi")},
 	}
 	lvgSet := &v1alpha1.LVMVolumeGroupSet{
 		ObjectMeta: metav1.ObjectMeta{Name: "set-a"},
@@ -241,7 +241,7 @@ func TestProvideLVMVolumeGroupsPerNode_IsIdempotentAndGrowsFileDevices(t *testin
 	// Grow the template the way an operator would: append, never edit in place
 	// (existing entries are immutable by CEL rule).
 	grown := append(append([]v1alpha1.LVMVolumeGroupFileDeviceSpec{}, first...),
-		v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d20g", Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("20Gi")})
+		v1alpha1.LVMVolumeGroupFileDeviceSpec{Name: "d20g", Directory: "/var/lib/deckhouse/sds/file-devices", Size: resource.MustParse("20Gi")})
 	lvgSet.Spec.LVGTemplate.FileDevices = grown
 
 	assert.NoError(t, provideLVMVolumeGroupsPerNode(ctx, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet, nodes))
@@ -265,8 +265,8 @@ func TestProvideLVMVolumeGroupsPerNode_PropagatesFileDeviceRemoval(t *testing.T)
 	cl := newFakeClientWithLVGSetStatus()
 
 	both := []v1alpha1.LVMVolumeGroupFileDeviceSpec{
-		{Name: "keep", Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("10Gi")},
-		{Name: "dropped", Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("10Gi")},
+		{Name: "keep", Directory: "/var/lib/deckhouse/sds/file-devices", Size: resource.MustParse("10Gi")},
+		{Name: "dropped", Directory: "/var/lib/deckhouse/sds/file-devices", Size: resource.MustParse("10Gi")},
 	}
 	lvgSet := &v1alpha1.LVMVolumeGroupSet{
 		ObjectMeta: metav1.ObjectMeta{Name: "set-shrink"},

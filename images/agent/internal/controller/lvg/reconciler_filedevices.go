@@ -1451,11 +1451,13 @@ func (r *Reconciler) cleanupFileDevices(ctx context.Context, lvg *v1alpha1.LVMVo
 		// composed path handed to `losetup -j`, and then to `losetup -d` + `rm -f`
 		// if something happened to be there under a matching name.
 		//
-		// A path outside the base directory cannot be one this agent created, so
-		// there is nothing to clean up for it either way.
-		if r.cfg.FileDevicesDirectory != "" && !isWithinBaseDir(filepath.Clean(fd.Directory), r.cfg.FileDevicesDirectory) {
-			log.Warn(fmt.Sprintf("skipping the fileDevices entry %q of the LVMVolumeGroup %s: its directory %q is outside the configured base directory %q, so nothing there was created by this agent",
-				fd.Name, lvg.Name, fd.Directory, r.cfg.FileDevicesDirectory))
+		// A path outside both base directories — the configured one and the
+		// legacy default entries older than the node-tree move still carry —
+		// cannot be one this agent created, so there is nothing to clean up for
+		// it either way.
+		if !isFileDeviceDirectoryAllowed(filepath.Clean(fd.Directory), r.cfg.FileDevicesDirectory) {
+			log.Warn(fmt.Sprintf("skipping the fileDevices entry %q of the LVMVolumeGroup %s: its directory %q is neither inside the configured base directory %q nor inside the legacy %q, so nothing there was created by this agent",
+				fd.Name, lvg.Name, fd.Directory, r.cfg.FileDevicesDirectory, internal.LegacyFileDevicesDirectory))
 			continue
 		}
 		add(target{filePath: utils.BuildFileDevicePath(fd.Directory, lvg.Name, fd.Name)})

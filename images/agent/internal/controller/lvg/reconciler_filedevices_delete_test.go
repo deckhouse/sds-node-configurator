@@ -261,7 +261,7 @@ func TestCleanupFileDevices_SkipsEntriesOutsideTheBaseDirectory(t *testing.T) {
 	defer ctrl.Finish()
 	mc := mock_utils.NewMockCommands(ctrl)
 	r := reconcilerWithMockedCommands(t, mc)
-	r.cfg.FileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
+	r.cfg.FileDevicesDirectory = "/var/lib/deckhouse/sds/file-devices"
 
 	lvg := &v1alpha1.LVMVolumeGroup{
 		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
@@ -269,7 +269,7 @@ func TestCleanupFileDevices_SkipsEntriesOutsideTheBaseDirectory(t *testing.T) {
 			ActualVGNameOnTheNode: "data-vg",
 			FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{
 				{Name: "outside", Directory: "/var/lib/libvirt/images", Size: resource.MustParse("1Gi")},
-				{Name: "escaped", Directory: "/opt/deckhouse/sds/file-devices/../../..", Size: resource.MustParse("1Gi")},
+				{Name: "escaped", Directory: "/var/lib/deckhouse/sds/file-devices/../../..", Size: resource.MustParse("1Gi")},
 			},
 		},
 	}
@@ -288,9 +288,9 @@ func TestCleanupFileDevices_ActsOnEntriesInsideTheBaseDirectory(t *testing.T) {
 	defer ctrl.Finish()
 	mc := mock_utils.NewMockCommands(ctrl)
 	r := reconcilerWithMockedCommands(t, mc)
-	r.cfg.FileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
+	r.cfg.FileDevicesDirectory = "/var/lib/deckhouse/sds/file-devices"
 
-	base := "/opt/deckhouse/sds/file-devices/sub"
+	base := "/var/lib/deckhouse/sds/file-devices/sub"
 	lvg := &v1alpha1.LVMVolumeGroup{
 		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
 		Spec: v1alpha1.LVMVolumeGroupSpec{
@@ -305,6 +305,39 @@ func TestCleanupFileDevices_ActsOnEntriesInsideTheBaseDirectory(t *testing.T) {
 	// vgremove does not pvremove, so on the ordinary delete path the loop is an
 	// orphan PV: present in the listing with no VG name, which is what lets
 	// cleanup proceed.
+	mc.EXPECT().GetAllPVs(gomock.Any()).Return([]internal.PVData{{PVName: "/dev/loop0"}}, "lvm pvs ...", bytes.Buffer{}, nil)
+	gomock.InOrder(
+		mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j ...", "/dev/loop0", nil),
+		mc.EXPECT().DetachLoopDevice(gomock.Any(), "/dev/loop0").Return("losetup -d ...", nil),
+		mc.EXPECT().RemoveFileDevice(gomock.Any(), path).Return("rm -f ...", nil),
+	)
+
+	assert.NoError(t, r.cleanupFileDevices(context.Background(), lvg))
+}
+
+// Deleting an LVMVolumeGroup whose entries were created before the node tree
+// moved to /var/lib/deckhouse/sds must still take their backing files with it.
+// The status-derived half of the target list would cover the ordinary case, but
+// not an entry that never reached status, and leaving the file behind leaves an
+// orphan loop Physical Volume on the node with nothing left to own it.
+func TestCleanupFileDevices_ActsOnEntriesInTheLegacyBaseDirectory(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mc := mock_utils.NewMockCommands(ctrl)
+	r := reconcilerWithMockedCommands(t, mc)
+	r.cfg.FileDevicesDirectory = "/var/lib/deckhouse/sds/file-devices"
+
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "vg-a"},
+		Spec: v1alpha1.LVMVolumeGroupSpec{
+			ActualVGNameOnTheNode: "data-vg",
+			FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{
+				{Name: "legacy", Directory: internal.LegacyFileDevicesDirectory, Size: resource.MustParse("1Gi")},
+			},
+		},
+	}
+	path := utils.BuildFileDevicePath(internal.LegacyFileDevicesDirectory, "vg-a", "legacy")
+
 	mc.EXPECT().GetAllPVs(gomock.Any()).Return([]internal.PVData{{PVName: "/dev/loop0"}}, "lvm pvs ...", bytes.Buffer{}, nil)
 	gomock.InOrder(
 		mc.EXPECT().FindLoopDeviceByFile(gomock.Any(), path).Return("losetup -j ...", "/dev/loop0", nil),

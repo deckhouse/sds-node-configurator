@@ -144,7 +144,7 @@ func TestRefreshOwnedLoops(t *testing.T) {
 	log, err := logger.NewLogger(logger.WarningLevel)
 	assert.NoError(t, err)
 
-	const managed = "/opt/deckhouse/sds/file-devices/sds-lvg-a.d0.img"
+	const managed = "/var/lib/deckhouse/sds/file-devices/sds-lvg-a.d0.img"
 
 	t.Run("only the loops backed by a file this agent named are kept", func(t *testing.T) {
 		withEmptyLoopRegistry(t)

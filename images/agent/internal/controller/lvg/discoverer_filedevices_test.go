@@ -58,7 +58,7 @@ func discovererWithMockedCommands(t *testing.T, mc *mock_utils.MockCommands) *Di
 // for LVG "vg-a", so IsManagedFileDevicePath accepts it.
 func fdTestManagedPath(t *testing.T, lvgName string) string {
 	t.Helper()
-	return utils.BuildFileDevicePath("/opt/deckhouse/sds/file-devices", lvgName, "d10g")
+	return utils.BuildFileDevicePath("/var/lib/deckhouse/sds/file-devices", lvgName, "d10g")
 }
 
 // Ownership of a loop PV is decided solely by the VG's
@@ -303,7 +303,7 @@ func TestAnyLVGHasFileDevices(t *testing.T) {
 		Spec: v1alpha1.LVMVolumeGroupSpec{
 			ActualVGNameOnTheNode: "vg-file",
 			FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{
-				{Name: "d2g", Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("2Gi")},
+				{Name: "d2g", Directory: "/var/lib/deckhouse/sds/file-devices", Size: resource.MustParse("2Gi")},
 			},
 		},
 	}
@@ -384,7 +384,7 @@ func TestLVMVolumeGroupDiscoverReconcile_RefusesToRenameAFileBackedImport(t *tes
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	mc := mock_utils.NewMockCommands(ctrl)
-	backing := utils.BuildFileDevicePath("/opt/deckhouse/sds/file-devices", takenName, "d1")
+	backing := utils.BuildFileDevicePath("/var/lib/deckhouse/sds/file-devices", takenName, "d1")
 	mc.EXPECT().GetLoopBackingFile(gomock.Any(), "/dev/loop3").
 		Return("losetup -O BACK-FILE", internal.LoopBackingFile{Path: backing}, nil).AnyTimes()
 	mc.EXPECT().GetFilesystemSpace(gomock.Any(), gomock.Any()).
@@ -423,7 +423,7 @@ func TestLVMVolumeGroupDiscoverReconcile_KeepsStatusWhenALoopPVCannotBeRead(t *t
 		vgName  = "vg-a"
 		node    = "test_node"
 	)
-	backing := utils.BuildFileDevicePath("/opt/deckhouse/sds/file-devices", lvgName, "d1")
+	backing := utils.BuildFileDevicePath("/var/lib/deckhouse/sds/file-devices", lvgName, "d1")
 
 	existing := &v1alpha1.LVMVolumeGroup{
 		ObjectMeta: metav1.ObjectMeta{Name: lvgName},
@@ -432,7 +432,7 @@ func TestLVMVolumeGroupDiscoverReconcile_KeepsStatusWhenALoopPVCannotBeRead(t *t
 			Type:                  internal.Local,
 			Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: node},
 			FileDevices: []v1alpha1.LVMVolumeGroupFileDeviceSpec{
-				{Name: "d1", Directory: "/opt/deckhouse/sds/file-devices", Size: resource.MustParse("10Gi")},
+				{Name: "d1", Directory: "/var/lib/deckhouse/sds/file-devices", Size: resource.MustParse("10Gi")},
 			},
 		},
 		Status: v1alpha1.LVMVolumeGroupStatus{
@@ -503,7 +503,7 @@ func TestLVMVolumeGroupDiscoverReconcile_KeepsStatusWhenALoopPVCannotBeRead(t *t
 // discoverer refills the name on the next pass", which only holds if a differing
 // name counts as a difference.
 func TestHasStatusFileDevicesDiff_ComparesTheEntryName(t *testing.T) {
-	const path = "/opt/deckhouse/sds/file-devices/sds-vg-a.d1.img"
+	const path = "/var/lib/deckhouse/sds/file-devices/sds-vg-a.d1.img"
 	device := func(name string) v1alpha1.LVMVolumeGroupFileDevice {
 		return v1alpha1.LVMVolumeGroupFileDevice{
 			Name:       name,

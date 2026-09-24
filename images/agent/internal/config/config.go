@@ -43,10 +43,10 @@ const (
 	FileDevicesDirectory                 = "FILE_DEVICES_DIRECTORY"
 	// DefaultFileDevicesDirectory is the base directory backing files are
 	// confined to when the module config does not override it. It lives under
-	// the module's own /opt/deckhouse/sds tree so a stray fileDevices entry
+	// the module's own /var/lib/deckhouse/sds tree so a stray fileDevices entry
 	// cannot fill an arbitrary host path. Keep in sync with the
 	// fileDevicesDirectory default in openapi/config-values.yaml.
-	DefaultFileDevicesDirectory = "/opt/deckhouse/sds/file-devices"
+	DefaultFileDevicesDirectory = "/var/lib/deckhouse/sds/file-devices"
 
 	FileDevicesMinFreeSpacePercent = "FILE_DEVICES_MIN_FREE_SPACE_PERCENT"
 	// DefaultFileDevicesMinFreeSpacePercent is the share of the backing-file

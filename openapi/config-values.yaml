@@ -27,7 +27,7 @@ properties:
       When disabled, the agent discovers block devices via `lsblk`.
   fileDevicesDirectory:
     type: string
-    default: /opt/deckhouse/sds/file-devices
+    default: /var/lib/deckhouse/sds/file-devices
     # An absolute path of at least one non-empty component. The filesystem root
     # is excluded deliberately: setting this to '/' would make every absolute
     # path a valid subdirectory and disable the very confinement this setting
@@ -47,7 +47,14 @@ properties:
       subdirectory of it; the agent rejects backing files outside this subtree
       to prevent an arbitrary host path (for example `/etc` or `/var/lib/kubelet`)
       from being filled up. Override it to point at a dedicated data disk
-      mounted on the node when the default location does not have enough space.
+      mounted on the node when the default location does not have enough space —
+      the default shares a filesystem with `/var/lib/kubelet` and
+      `/var/lib/containerd` on a standard node layout.
+
+      The previous default, `/opt/deckhouse/sds/file-devices`, is accepted in
+      addition to whatever is configured here. `spec.fileDevices[].directory` is
+      immutable, so entries created before the module's node tree moved keep
+      naming it and cannot be edited; they go on working where they are.
 
       The filesystem root (`/`) is not accepted: it would make every absolute
       path a valid subdirectory and disable the restriction entirely.

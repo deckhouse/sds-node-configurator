@@ -23,6 +23,7 @@ import (
 	_ "github.com/deckhouse/sds-node-configurator/hooks/go/020-webhook-certs"
 	_ "github.com/deckhouse/sds-node-configurator/hooks/go/025-remove-obsolete-crds"
 	_ "github.com/deckhouse/sds-node-configurator/hooks/go/030-remove-finalizers-on-module-delete"
+	_ "github.com/deckhouse/sds-node-configurator/hooks/go/035-legacy-file-devices-directory"
 )
 
 func main() {

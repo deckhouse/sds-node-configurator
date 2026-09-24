@@ -39,10 +39,11 @@ import (
 
 var minFileDeviceSize = resource.MustParse("1Gi")
 
-// isWithinBaseDir is utils.IsWithinBaseDir, aliased so the call sites in this
-// package stay short. It lives in utils because the startup reattach in
-// cmd/main.go needs the same check and cannot import this package.
-var isWithinBaseDir = utils.IsWithinBaseDir
+// isFileDeviceDirectoryAllowed is utils.IsFileDeviceDirectoryAllowed, aliased so
+// the call sites in this package stay short. It lives in utils because the
+// startup reattach in cmd/main.go needs the same check and cannot import this
+// package.
+var isFileDeviceDirectoryAllowed = utils.IsFileDeviceDirectoryAllowed
 
 // validateFileDevices checks every spec.fileDevices entry, writes the problems
 // it finds to reason and returns the names of the entries that failed. Sizes of
@@ -132,12 +133,17 @@ func (r *Reconciler) validateFileDevice(
 	}
 
 	// Confine backing files to the configured base directory (module config
-	// fileDevicesDirectory, default /opt/deckhouse/sds/file-devices). Without
+	// fileDevicesDirectory, default /var/lib/deckhouse/sds/file-devices), plus
+	// the legacy default that entries older than the move still carry — and that
+	// a new entry may name too, since nothing here tells the two apart. Without
 	// this an arbitrary host path — `/`, `/etc`, `/var/lib/kubelet` — could be
 	// targeted, and one oversized file there fills the node's filesystem and
 	// trips kubelet DiskPressure eviction. An empty base disables the check
 	// (unit tests that do not exercise the allowlist).
-	if r.cfg.FileDevicesDirectory != "" && !isWithinBaseDir(cleaned, r.cfg.FileDevicesDirectory) {
+	if !isFileDeviceDirectoryAllowed(cleaned, r.cfg.FileDevicesDirectory) {
+		// The message names the configured base only: the legacy subtree is
+		// accepted so that existing entries keep working, and it is not a path
+		// to send anyone to — on an immutable node /opt is not even writable.
 		fmt.Fprintf(reason, "fileDevices[%d].directory %q must be %q or a subdirectory of it. ", index, fd.Directory, r.cfg.FileDevicesDirectory)
 		return
 	}

@@ -200,7 +200,7 @@ spec:
 
 Если выделенных блочных устройств нет, часть существующей файловой системы можно отдать под LVM с помощью файловых устройств (`spec.fileDevices`). Агент создаст файл с предварительно выделенным местом, подключит его как loop-устройство и использует как LVM Physical Volume.
 
-Каждый `spec.fileDevices[].directory` должен находиться внутри базового каталога, заданного параметром модуля `fileDevicesDirectory` (по умолчанию `/opt/deckhouse/sds/file-devices`); пути вне него агент отклоняет, чтобы ошибочная запись не заполнила произвольный путь на узле. Чтобы разместить файлы-подложки на выделенном диске, смонтируйте диск на узле и укажите его точку монтирования в `fileDevicesDirectory` в конфигурации модуля.
+Каждый `spec.fileDevices[].directory` должен находиться внутри базового каталога, заданного параметром модуля `fileDevicesDirectory` (по умолчанию `/var/lib/deckhouse/sds/file-devices`); пути вне него агент отклоняет, чтобы ошибочная запись не заполнила произвольный путь на узле. Чтобы разместить файлы-подложки на выделенном диске, смонтируйте диск на узле и укажите его точку монтирования в `fileDevicesDirectory` в конфигурации модуля.
 
 Создание группы томов на файле размером 50Gi поверх существующей файловой системы:
 
@@ -216,7 +216,7 @@ spec:
   actualVGNameOnTheNode: "vg-file"
   fileDevices:
     - name: data-0
-      directory: /opt/deckhouse/sds/file-devices
+      directory: /var/lib/deckhouse/sds/file-devices
       size: 50Gi
 ```
 
@@ -240,7 +240,7 @@ spec:
   actualVGNameOnTheNode: "vg-mixed"
   fileDevices:
     - name: data-0
-      directory: /opt/deckhouse/sds/file-devices
+      directory: /var/lib/deckhouse/sds/file-devices
       size: 100Gi
 ```
 
@@ -255,7 +255,7 @@ spec:
 ```yaml
   fileDevices:
     - name: data-0
-      directory: /opt/deckhouse/sds/file-devices
+      directory: /var/lib/deckhouse/sds/file-devices
       size: 100Gi         # было 50Gi
 ```
 
@@ -268,7 +268,7 @@ spec:
 ```yaml
   fileDevices:
     - name: data-0        # не меняется
-      directory: /opt/deckhouse/sds/file-devices
+      directory: /var/lib/deckhouse/sds/file-devices
       size: 50Gi
     - name: data-1        # новый файл, новое loop-устройство, новый PV
       directory: /mnt/second-disk/sds-file-devices

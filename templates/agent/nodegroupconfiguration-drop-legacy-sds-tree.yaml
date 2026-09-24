@@ -1,0 +1,103 @@
+apiVersion: deckhouse.io/v1alpha1
+kind: NodeGroupConfiguration
+metadata:
+  name: sds-node-configurator-drop-legacy-sds-tree.sh
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+spec:
+  weight: 100
+  nodeGroups: ["*"]
+  bundles: ["*"]
+  content: |
+    # Copyright 2026 Flant JSC
+    #
+    # Licensed under the Apache License, Version 2.0 (the "License");
+    # you may not use this file except in compliance with the License.
+    # You may obtain a copy of the License at
+    #
+    #     http://www.apache.org/licenses/LICENSE-2.0
+    #
+    # Unless required by applicable law or agreed to in writing, software
+    # distributed under the License is distributed on an "AS IS" BASIS,
+    # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    # See the License for the specific language governing permissions and
+    # limitations under the License.
+
+    # The module's node tree moved from /opt/deckhouse/sds to
+    # /var/lib/deckhouse/sds. The init container plants the static lvm and
+    # dmsetup at the new path on every Pod start, but it never deletes anything,
+    # so a node upgraded in place keeps the old copies forever: binaries the agent
+    # no longer runs, and a tree that still looks like the module's own. This
+    # removes them.
+    #
+    # "The old copies" is every file the installer has ever planted there, not
+    # only the last layout: a node that has been upgraded since 2024 carries all
+    # of them, and the plain rmdir below goes nowhere while any one is left.
+    #
+    #   * bin/lvm, bin/dmsetup — since the .static suffix was dropped (#300);
+    #   * bin/lvm.static, bin/dmsetup.static — before that;
+    #   * bin/thin_dump, bin/pdata_tools and lib/{libudev.so.1,libgcc_s.so.1,
+    #     libm.so.6,libc.so.6,ld-linux-x86-64.so.2} — until October 2025;
+    #   * bin/lsblk.dynamic and lib/{libblkid.so.1,libmount.so.1,
+    #     libsmartcols.so.1,libcap.so.2} — the Dockerfile-built installer of 2024.
+    #
+    # What it deliberately does not touch:
+    #
+    #   * any other file. /opt/deckhouse/sds/bin is shared — storage-status
+    #     keeps its own nsenter.static and mount.static there — and sds-elastic
+    #     keeps its Rook dataDirHostPath under /opt/deckhouse/sds/elastic. Files
+    #     are removed by name, never by glob;
+    #   * the backing files of spec.fileDevices entries under
+    #     /opt/deckhouse/sds/file-devices. Those are data, they are still in
+    #     use, and they stay: spec.fileDevices[].directory is immutable at
+    #     admission, so an existing entry keeps naming the old directory and the
+    #     agent keeps accepting it. Moving the file would leave the spec
+    #     pointing at the old path and have the next reconcile create a second
+    #     backing file and a second Physical Volume.
+    #
+    # The directories themselves are removed with a plain rmdir, so they go only
+    # when nothing of the above is left in them.
+
+    LEGACY_SDS_DIR=/opt/deckhouse/sds
+    CURRENT_SDS_DIR=/var/lib/deckhouse/sds
+
+    LEGACY_SDS_FILES="
+    bin/lvm
+    bin/dmsetup
+    bin/lvm.static
+    bin/dmsetup.static
+    bin/thin_dump
+    bin/pdata_tools
+    bin/lsblk.dynamic
+    lib/libudev.so.1
+    lib/libgcc_s.so.1
+    lib/libm.so.6
+    lib/libc.so.6
+    lib/ld-linux-x86-64.so.2
+    lib/libblkid.so.1
+    lib/libmount.so.1
+    lib/libsmartcols.so.1
+    lib/libcap.so.2
+    "
+
+    drop_legacy_sds_tree() {
+      test -d "${LEGACY_SDS_DIR}" || return 0
+
+      # The new copies have to be on the node before the old ones go: the agent
+      # runs lvm and dmsetup by absolute path through nsenter, and bashible is
+      # not ordered against the DaemonSet rollout. Their presence is what proves
+      # the new Pod already ran here — on a node still running the previous
+      # agent, the files below are the only copies it has.
+      test -x "${CURRENT_SDS_DIR}/bin/lvm" || return 0
+
+      for file in ${LEGACY_SDS_FILES}; do
+        if test -e "${LEGACY_SDS_DIR}/${file}"; then
+          rm -f "${LEGACY_SDS_DIR}/${file}" &&
+            echo "removed the superseded ${LEGACY_SDS_DIR}/${file}"
+        fi
+      done
+
+      rmdir "${LEGACY_SDS_DIR}/bin" "${LEGACY_SDS_DIR}/lib" 2>/dev/null || true
+      rmdir "${LEGACY_SDS_DIR}" 2>/dev/null || true
+    }
+
+    drop_legacy_sds_tree
