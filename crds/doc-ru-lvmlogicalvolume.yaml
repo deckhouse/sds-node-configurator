@@ -40,8 +40,6 @@ spec:
                       description: |
                         Имя используемого thin pool.
                 thick:
-                  description: |
-                    Описывает настройки используемого Thick Logical Volume.
                   properties:
                     contiguous:
                       description: |

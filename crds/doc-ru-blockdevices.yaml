@@ -79,3 +79,28 @@ spec:
                 machineId:
                   description: |
                     Уникальный идентификатор машины, на которой находится устройство (обычно хранится в `/etc/machine-id`).
+                conditions:
+                  description: |
+                    Последние наблюдения состояния ресурса. Известный тип условия: `Consumable`, который содержит
+                    причину значения `status.consumable`: `Available`, `Mounted`,
+                    `HasFilesystem` или `HotPlugged`.
+                  items:
+                    properties:
+                      type:
+                        description: |
+                          Тип условия, например `Consumable`.
+                      status:
+                        description: |
+                          Текущий статус условия.
+                      observedGeneration:
+                        description: |
+                          Значение `metadata.generation`, для которого было выставлено условие.
+                      lastTransitionTime:
+                        description: |
+                          Время последней смены статуса условия.
+                      reason:
+                        description: |
+                          Машиночитаемая причина текущего статуса, пригодная для фильтрации логов.
+                      message:
+                        description: |
+                          Человекочитаемое пояснение к текущему статусу.
