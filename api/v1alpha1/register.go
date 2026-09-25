@@ -27,7 +27,7 @@ const (
 	APIVersion = "v1alpha1"
 )
 
-//go:generate go tool controller-gen object:headerFile=../../hack/boilerplate.txt
+//go:generate bash ../../hack/generate_deepcopy.sh
 
 // SchemeGroupVersion is group version used to register these objects
 var (

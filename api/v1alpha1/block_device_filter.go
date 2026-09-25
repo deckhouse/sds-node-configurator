@@ -20,7 +20,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-//go:generate go tool controller-gen paths=$GOFILE crd output:crd:dir=../../crds/filter
+// Only this kind is generated: the other kinds in this package have hand-written
+// manifests in crds/. See hack/generate_crds.sh, which also runs crd-enricher.
+//go:generate bash ../../hack/generate_crds.sh
 
 // +groupName=storage.deckhouse.io
 
