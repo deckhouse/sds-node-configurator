@@ -49,6 +49,7 @@ var wantSurface = []string{
 	"sds_node_configurator_api_commands_duration_seconds                    SUMMARY controller,method,node",
 	"sds_node_configurator_api_methods_errors_count_total                   COUNTER controller,method,node",
 	"sds_node_configurator_api_methods_execution_count_total                COUNTER controller,method,node",
+	"sds_node_configurator_block_devices_missing                            GAUGE   node,reason",
 	"sds_node_configurator_custom_utils_commands_duration_seconds           SUMMARY command,controller,node",
 	"sds_node_configurator_file_device_size_bytes                           GAUGE   file_device,lvg_name,node,volume_group",
 	"sds_node_configurator_file_devices_directory_allocated_bytes           GAUGE   directory,node",
@@ -111,6 +112,7 @@ func touchEverySeries(m *Metrics) {
 	m.LVGThinPoolAllocationLimitBytes("lvg", "vg", "tp").Set(1)
 	m.LVMActivationTotal("vg", "success").Inc()
 	m.LVMVolumeGroupImportRefusedTotal("vg", "lvg").Inc()
+	m.SetBlockDevicesMissing(map[string]int{v1alpha1.ReasonDeviceNotFound: 1})
 
 	// The four file-device gauges have no per-series accessor; they are written
 	// only through this method.

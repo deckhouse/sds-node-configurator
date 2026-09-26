@@ -215,6 +215,8 @@ spec:
             value: {{ .Values.sdsNodeConfigurator.fileDevicesDirectory | quote }}
           - name: FILE_DEVICES_MIN_FREE_SPACE_PERCENT
             value: {{ .Values.sdsNodeConfigurator.fileDevicesMinFreeSpacePercent | quote }}
+          - name: MISSING_BLOCK_DEVICE_RETENTION_HOURS
+            value: {{ .Values.sdsNodeConfigurator.missingBlockDeviceRetentionHours | quote }}
 {{- /* The same define the controller container gets its level from, in place of a
        copy of the ERROR..TRACE map that was maintained here, in the extender
        deployment and in the extender ConfigMap. */}}

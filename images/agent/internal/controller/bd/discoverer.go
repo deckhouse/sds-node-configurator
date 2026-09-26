@@ -90,6 +90,10 @@ type DiscovererConfig struct {
 	BlockDeviceScanInterval time.Duration
 	MachineID               string
 	NodeName                string
+	// MissingBlockDeviceRetention is how long a BlockDevice may stay
+	// Missing=True before collectMissingBlockDevices deletes it. Zero keeps it
+	// forever.
+	MissingBlockDeviceRetention time.Duration
 }
 
 func NewDiscoverer(
@@ -280,6 +284,8 @@ func (d *Discoverer) removeDeprecatedAPIDevices(
 			}
 		}
 	}
+
+	d.collectMissingBlockDevices(ctx, actualCandidates, apiBlockDevices)
 }
 
 // missingGracePeriod is how long a non-consumable BlockDevice's device may be

@@ -67,6 +67,19 @@ const (
 	// misconfiguration stops being a reserve and starts being "file devices do
 	// not work"; the apiserver rejects it too, and this is the second line.
 	MaxFileDevicesMinFreeSpacePercent = 90
+
+	MissingBlockDeviceRetentionHours = "MISSING_BLOCK_DEVICE_RETENTION_HOURS"
+	// DefaultMissingBlockDeviceRetentionHours is how long a BlockDevice may stay
+	// Missing=True before the agent deletes it, when nothing references it. A
+	// day is past any maintenance window a LUN is unmapped for and short enough
+	// that a node with dynamic LUN mapping does not pile up thousands of records.
+	//
+	// Keep in sync with the missingBlockDeviceRetentionHours default in
+	// openapi/config-values.yaml.
+	DefaultMissingBlockDeviceRetentionHours = 24
+	// MaxMissingBlockDeviceRetentionHours bounds the setting to a year, well
+	// inside what a time.Duration holds; the schema rejects more as well.
+	MaxMissingBlockDeviceRetentionHours = 8760
 )
 
 type Features struct {
@@ -92,6 +105,10 @@ type Config struct {
 	// the reserve, which is the right setting only for a filesystem the node does
 	// not otherwise depend on.
 	FileDevicesMinFreeSpacePercent int
+	// MissingBlockDeviceRetention is how long a BlockDevice may stay
+	// Missing=True before the agent deletes it. Zero disables the deletion and
+	// keeps such records forever, as before the setting existed.
+	MissingBlockDeviceRetention time.Duration
 }
 
 // DefaultMetricsBindAddress keeps the endpoint on loopback when the chart says
@@ -151,6 +168,19 @@ func NewConfig() (*Config, error) {
 			return nil, fmt.Errorf("[NewConfig] %s must be between 0 and %d, got %d", FileDevicesMinFreeSpacePercent, MaxFileDevicesMinFreeSpacePercent, parsed)
 		default:
 			cfg.FileDevicesMinFreeSpacePercent = parsed
+		}
+	}
+
+	cfg.MissingBlockDeviceRetention = DefaultMissingBlockDeviceRetentionHours * time.Hour
+	if raw := os.Getenv(MissingBlockDeviceRetentionHours); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		switch {
+		case parseErr != nil:
+			return nil, fmt.Errorf("[NewConfig] %s must be an integer, got %q: %w", MissingBlockDeviceRetentionHours, raw, parseErr)
+		case parsed < 0 || parsed > MaxMissingBlockDeviceRetentionHours:
+			return nil, fmt.Errorf("[NewConfig] %s must be between 0 and %d, got %d", MissingBlockDeviceRetentionHours, MaxMissingBlockDeviceRetentionHours, parsed)
+		default:
+			cfg.MissingBlockDeviceRetention = time.Duration(parsed) * time.Hour
 		}
 	}
 

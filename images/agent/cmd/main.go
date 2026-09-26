@@ -109,6 +109,7 @@ func run() int {
 	log.Info(fmt.Sprintf("%s = %s", config.ScanInterval, cfgParams.BlockDeviceScanInterval.String()))
 	log.Info(fmt.Sprintf("%s = %s", config.ThrottleInterval, cfgParams.ThrottleInterval.String()))
 	log.Info(fmt.Sprintf("%s = %s", config.CmdDeadlineDuration, cfgParams.CmdDeadlineDuration.String()))
+	log.Info(fmt.Sprintf("%s = %s", config.MissingBlockDeviceRetentionHours, cfgParams.MissingBlockDeviceRetention.String()))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
@@ -206,9 +207,10 @@ func run() int {
 			metrics,
 			sdsCache,
 			bd.DiscovererConfig{
-				NodeName:                cfgParams.NodeName,
-				MachineID:               cfgParams.MachineID,
-				BlockDeviceScanInterval: cfgParams.BlockDeviceScanInterval,
+				NodeName:                    cfgParams.NodeName,
+				MachineID:                   cfgParams.MachineID,
+				BlockDeviceScanInterval:     cfgParams.BlockDeviceScanInterval,
+				MissingBlockDeviceRetention: cfgParams.MissingBlockDeviceRetention,
 			},
 		),
 	)

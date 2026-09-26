@@ -85,6 +85,46 @@ func TestIsLVThick(t *testing.T) {
 	}
 }
 
+func TestIsLVThinVolume(t *testing.T) {
+	tests := []struct {
+		name string
+		attr string
+		thin bool
+	}{
+		{"thin LV", "Vwi-a-tz--", true},
+		{"thin snapshot", "Vwi---tz-k", true},
+		{"thin pool", "twi-a-tz--", false},
+		{"thick LV", "-wi-a-----", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.thin, IsLVThinVolume(tt.attr))
+		})
+	}
+}
+
+func TestIsLVActivationSkip(t *testing.T) {
+	tests := []struct {
+		name string
+		attr string
+		skip bool
+	}{
+		{"thin snapshot with skip", "Vwi---tz-k", true},
+		{"thin LV without skip", "Vwi---tz--", false},
+		{"thick LV", "-wi-a-----", false},
+		{"too short to hold the skip flag", "Vwi---tz-", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.skip, IsLVActivationSkip(tt.attr))
+		})
+	}
+}
+
 func TestIsLVAttrKnown(t *testing.T) {
 	tests := []struct {
 		name  string

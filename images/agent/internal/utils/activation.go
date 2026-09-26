@@ -36,6 +36,9 @@ const (
 	lvAttrAllocContiguous  = 'c'
 	lvAttrTypeThinPool     = 't'
 	lvAttrTypeThick        = '-'
+	lvAttrTypeThinVolume   = 'V'
+	lvAttrSkipIndex        = 9
+	lvAttrSkipChar         = 'k'
 
 	activationControllerName = "Activation"
 )
@@ -50,6 +53,16 @@ func IsLVThinPool(attr string) bool {
 
 func IsLVThick(attr string) bool {
 	return len(attr) > 0 && attr[0] == lvAttrTypeThick
+}
+
+func IsLVThinVolume(attr string) bool {
+	return len(attr) > 0 && attr[0] == lvAttrTypeThinVolume
+}
+
+// IsLVActivationSkip reports whether the LV carries the activation skip flag
+// (`lvcreate -ky` / `lvchange -ky`), which makes `vgchange -ay` pass it over.
+func IsLVActivationSkip(attr string) bool {
+	return len(attr) > lvAttrSkipIndex && attr[lvAttrSkipIndex] == lvAttrSkipChar
 }
 
 // IsLVAttrKnown reports whether attr carries the LVM attribute fields the agent
@@ -283,7 +296,17 @@ func ActivateAllManagedVGs(ctx context.Context, log logger.Logger, commands Comm
 }
 
 // EnsureVGActivation activates the managed Volume Groups that have inactive
-// thick or thin-pool logical volumes.
+// thick, thin-pool or thin logical volumes.
+//
+// A thin LV can be inactive while its pool is up (`lvchange -an` on the LV
+// alone), and an inactive thin LV reads as empty, so it has to trigger the
+// activation as well; `vgchange -ay` brings it up.
+//
+// An LV with the activation skip flag is left out. The module never sets it:
+// thin snapshots, the only LVs lvm flags by default, are created with `-kn`. So
+// the flag was set outside of the module, on purpose, and `vgchange -ay` passes
+// such an LV over anyway — counting it would repeat the activation on every
+// cache fill without ever changing anything.
 //
 // verdicts must come from ClassifyLoopVGs over the same vgs/pvs the caller is
 // about to cache: this function issues `vgchange -ay`, and a loop-backed Volume
@@ -317,7 +340,11 @@ func EnsureVGActivation(
 			continue
 		}
 
-		if !IsLVThinPool(lv.LVAttr) && !IsLVThick(lv.LVAttr) {
+		if !IsLVThinPool(lv.LVAttr) && !IsLVThick(lv.LVAttr) && !IsLVThinVolume(lv.LVAttr) {
+			continue
+		}
+
+		if IsLVActivationSkip(lv.LVAttr) {
 			continue
 		}
 

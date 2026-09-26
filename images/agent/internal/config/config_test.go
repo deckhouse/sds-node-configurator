@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -236,6 +237,41 @@ func TestNewConfig_FileDevicesMinFreeSpacePercent(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, cfg.FileDevicesMinFreeSpacePercent)
+		})
+	}
+}
+
+func TestNewConfig_MissingBlockDeviceRetention(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"unset falls back to the default", "", DefaultMissingBlockDeviceRetentionHours * time.Hour, false},
+		{"explicit value is honoured", "48", 48 * time.Hour, false},
+		{"zero disables the deletion", "0", 0, false},
+		{"upper bound is inclusive", "8760", MaxMissingBlockDeviceRetentionHours * time.Hour, false},
+		{"above the bound is rejected", "8761", 0, true},
+		{"negative is rejected", "-1", 0, true},
+		{"a duration string is rejected", "24h", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(NodeName, "test-node")
+			t.Setenv(MachineID, "test-id")
+			if tt.env != "" {
+				t.Setenv(MissingBlockDeviceRetentionHours, tt.env)
+			}
+
+			cfg, err := NewConfig()
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.MissingBlockDeviceRetention)
 		})
 	}
 }

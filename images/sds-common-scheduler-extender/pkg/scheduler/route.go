@@ -37,6 +37,18 @@ const (
 	envTargetProvisioners = "TARGET_PROVISIONERS"
 )
 
+// NeedsReservationCache reports whether the route reads or writes the space
+// reservations. The reservations live in the memory of one process, so these
+// routes must all be served by the same replica. /cache and /stat also read them,
+// but only to show what the replica they reached holds.
+func NeedsReservationCache(path string) bool {
+	switch path {
+	case "/scheduler/filter", "/scheduler/prioritize", "/v1/lvg/filter-and-score", "/v1/lvg/narrow-reservation":
+		return true
+	}
+	return false
+}
+
 type scheduler struct {
 	client                     client.Client
 	ctx                        context.Context

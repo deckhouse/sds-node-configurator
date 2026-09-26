@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -30,7 +31,11 @@ import (
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -46,6 +51,7 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/cache"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/controller"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/kubutils"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/leader"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/scheduler"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
@@ -55,7 +61,21 @@ const (
 	defaultListenAddr      = ":8000"
 	defaultcertFile        = "/etc/sds-common-scheduler-extender/certs/tls.crt"
 	defaultkeyFile         = "/etc/sds-common-scheduler-extender/certs/tls.key"
+	defaultCAFile          = "/etc/sds-common-scheduler-extender/certs/ca.crt"
 	defaultCleanupInterval = 30 * time.Second
+
+	// defaultLeaderServerName is a name the serving certificate carries (see the
+	// certificate hook of the module); a standby checks the leader against it.
+	defaultLeaderServerName = "sds-common-scheduler-extender"
+	leaseName               = "sds-common-scheduler-extender"
+
+	// shutdownTimeout bounds the drain of in-flight requests before the lease is
+	// released. The handlers give up after 4 s and kube-scheduler after 5 s.
+	shutdownTimeout = 10 * time.Second
+
+	envPodName      = "POD_NAME"
+	envPodNamespace = "POD_NAMESPACE"
+	envPodIP        = "POD_IP"
 )
 
 type Config struct {
@@ -65,6 +85,8 @@ type Config struct {
 	HealthProbeBindAddress string  `json:"health-probe-bind-address"`
 	CertFile               string  `json:"cert-file"`
 	KeyFile                string  `json:"key-file"`
+	CAFile                 string  `json:"ca-file"`
+	LeaderServerName       string  `json:"leader-server-name"`
 }
 
 var cfgFilePath string
@@ -79,11 +101,13 @@ var resourcesSchemeFuncs = []func(*runtime.Scheme) error{
 }
 
 var config = &Config{
-	ListenAddr:     defaultListenAddr,
-	DefaultDivisor: defaultDivisor,
-	LogLevel:       "2",
-	CertFile:       defaultcertFile,
-	KeyFile:        defaultkeyFile,
+	ListenAddr:       defaultListenAddr,
+	DefaultDivisor:   defaultDivisor,
+	LogLevel:         "2",
+	CertFile:         defaultcertFile,
+	KeyFile:          defaultkeyFile,
+	CAFile:           defaultCAFile,
+	LeaderServerName: defaultLeaderServerName,
 }
 
 var rootCmd = &cobra.Command{
@@ -258,31 +282,113 @@ func subMain(ctx context.Context) error {
 	}
 	mainLog.Info("successfully AddReadyzCheck")
 
+	leaderState, lock, err := newLeaderElection(log, kConfig)
+	if err != nil {
+		mainLog.Error("unable to set up the leader election", logger.Err(err))
+		return err
+	}
+	mainLog.Info(fmt.Sprintf("leader election is set up, identity %q", leaderState.Identity()))
+
+	caPEM, err := os.ReadFile(config.CAFile)
+	if err != nil {
+		mainLog.Error("unable to read the CA bundle", logger.Err(err))
+		return err
+	}
+	leaderTransport, err := leader.NewLeaderTransport(caPEM, config.LeaderServerName)
+	if err != nil {
+		mainLog.Error("unable to build the transport to the leader", logger.Err(err))
+		return err
+	}
+	router := leader.NewRouter(log.Named("leader"), leaderState, schedulerHandler, scheduler.NeedsReservationCache, leaderTransport)
+
 	serv := &http.Server{
 		Addr:         config.ListenAddr,
-		Handler:      accessLogHandler(log, schedulerHandler),
+		Handler:      accessLogHandler(log, router),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
 	mainLog.Info("server was initialized")
 
-	return runServer(ctx, serv, mgr, log)
+	return runServer(ctx, serv, mgr, leaderState, lock, log)
 }
 
-func runServer(ctx context.Context, serv *http.Server, mgr manager.Manager, log logger.Logger) error {
-	ctx, stop := context.WithCancel(ctx)
+// newLeaderElection returns the election state of this replica and the Lease it
+// competes for. The pod coordinates come from the downward API; without them a
+// replica could not tell the others where it listens, so their absence is fatal
+// rather than a silent fallback to serving reservations from every replica.
+func newLeaderElection(log logger.Logger, kConfig *rest.Config) (*leader.State, resourcelock.Interface, error) {
+	podName, podNamespace, podIP := os.Getenv(envPodName), os.Getenv(envPodNamespace), os.Getenv(envPodIP)
+	if podName == "" || podNamespace == "" || podIP == "" {
+		return nil, nil, fmt.Errorf("%s, %s and %s must all be set", envPodName, envPodNamespace, envPodIP)
+	}
+	if net.ParseIP(podIP) == nil {
+		return nil, nil, fmt.Errorf("%s=%q is not an IP address", envPodIP, podIP)
+	}
 
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	defer stop() // stop() should be called before wg.Wait() to stop the goroutine correctly.
-	wg.Add(1)
+	_, port, err := net.SplitHostPort(config.ListenAddr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to take the port from the listen address %q: %w", config.ListenAddr, err)
+	}
+
+	clientset, err := kubernetes.NewForConfig(rest.CopyConfig(kConfig))
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to create the leader election client: %w", err)
+	}
+
+	identity := leader.Identity(podName, podIP)
+	lock := &resourcelock.LeaseLock{
+		LeaseMeta:  metav1.ObjectMeta{Name: leaseName, Namespace: podNamespace},
+		Client:     clientset.CoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{Identity: identity},
+	}
+	return leader.NewState(log.Named("leader-election"), identity, port), lock, nil
+}
+
+// runServer serves until ctx is done or the lease is lost. The order of the
+// shutdown is what keeps a single replica answering reservation requests: the
+// HTTP server drains first, and only then is the lease released, so the next
+// leader starts after the last reservation decision of this one.
+func runServer(ctx context.Context, serv *http.Server, mgr manager.Manager, leaderState *leader.State, lock resourcelock.Interface, log logger.Logger) error {
+	serveCtx, stopServing := context.WithCancel(ctx)
+	defer stopServing()
+
+	// Not derived from ctx: cancelling it releases the lease, which must wait
+	// for the drain below.
+	electionCtx, stopElection := context.WithCancel(context.Background())
+	defer stopElection()
+
+	var (
+		wg          sync.WaitGroup
+		electionErr error
+	)
+	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		<-ctx.Done()
-		if err := serv.Shutdown(ctx); err != nil {
+		// A replica that took the lease with cold informers would block the
+		// first requests on the sync, past the kube-scheduler timeout. This waits
+		// for the informers started up front (LVMVolumeGroup, LVMLogicalVolume,
+		// PVC); the ones the handlers open lazily still sync on first use.
+		if !mgr.GetCache().WaitForCacheSync(serveCtx) {
+			return
+		}
+		log.Info("informer caches are synced, joining the leader election")
+		electionErr = leaderState.Run(electionCtx, lock)
+		if electionErr != nil {
+			log.Error("stopping: the reservations of this replica are no longer authoritative", logger.Err(electionErr))
+			stopServing()
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		<-serveCtx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := serv.Shutdown(shutdownCtx); err != nil {
 			log.Error("failed to shutdown gracefully", logger.Err(err))
 		}
+		stopElection()
 	}()
 
 	go func() {
@@ -296,8 +402,11 @@ func runServer(ctx context.Context, serv *http.Server, mgr manager.Manager, log 
 
 	if err := serv.ListenAndServeTLS(config.CertFile, config.KeyFile); !errors.Is(err, http.ErrServerClosed) {
 		log.Error("unable to run the server", logger.Err(err))
+		stopServing()
+		wg.Wait()
 		return err
 	}
 
-	return nil
+	wg.Wait()
+	return electionErr
 }

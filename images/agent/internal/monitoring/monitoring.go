@@ -279,6 +279,17 @@ var (
 		// as well when the owner tag holds something that is not a usable resource
 		// name: the tag is another cluster's string, and a label value is a series.
 	}, []string{"node", "volume_group", "lvg_name"})
+
+	// A BlockDevice whose device is gone is kept, not deleted, when it is not
+	// Consumable (see BlockDeviceConditionMissing), and deleted only after the
+	// configured retention. The gauge is what shows how many such records a node
+	// holds now: on a node with dynamic LUN mapping a stuck count is the first
+	// sign the deletion is not happening.
+	blockDevicesMissing = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "block_devices_missing",
+		Help:      "Number of BlockDevice resources of the node with the Missing condition True, by the condition's reason. Counted after the agent deleted the ones past the retention, so what remains is waiting for it or is kept because an LVMVolumeGroup references it.",
+	}, []string{"node", "reason"})
 )
 
 func init() {
@@ -319,6 +330,7 @@ func init() {
 	metrics.Registry.MustRegister(lvmVolumeGroupImportRefusedTotal)
 	metrics.Registry.MustRegister(publishedBlockDevices)
 	metrics.Registry.MustRegister(publishedDevicesDirectoryPresent)
+	metrics.Registry.MustRegister(blockDevicesMissing)
 }
 
 type Metrics struct {
@@ -334,6 +346,9 @@ type Metrics struct {
 	previousLVGTPs    map[string]bool
 	previousFileDevs  map[string]bool
 	previousFileDirs  map[string]bool
+	// Reasons SetBlockDevicesMissing has published for this node, so a reason
+	// that no longer occurs drops to zero instead of keeping its last count.
+	missingReasons map[string]struct{}
 }
 
 func GetMetrics(nodeName string) *Metrics {
@@ -347,6 +362,7 @@ func GetMetrics(nodeName string) *Metrics {
 		previousLVGTPs:    make(map[string]bool),
 		previousFileDevs:  make(map[string]bool),
 		previousFileDirs:  make(map[string]bool),
+		missingReasons:    make(map[string]struct{}),
 	}
 }
 
@@ -467,6 +483,25 @@ func (m *Metrics) SetPublishedBlockDevices(count int, directoryPresent bool) {
 		present = 1
 	}
 	publishedDevicesDirectoryPresent.WithLabelValues(m.node).Set(present)
+}
+
+// SetBlockDevicesMissing publishes how many of the node's BlockDevices are
+// Missing=True, by reason. A reason published before and absent from byReason
+// is set to zero rather than deleted, so `> 0` alerts resolve instead of going
+// stale on an absent series.
+func (m *Metrics) SetBlockDevicesMissing(byReason map[string]int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for reason := range m.missingReasons {
+		if _, ok := byReason[reason]; !ok {
+			blockDevicesMissing.WithLabelValues(m.node, reason).Set(0)
+		}
+	}
+	for reason, count := range byReason {
+		blockDevicesMissing.WithLabelValues(m.node, reason).Set(float64(count))
+		m.missingReasons[reason] = struct{}{}
+	}
 }
 
 func (m *Metrics) LVMActivationTotal(volumeGroup, result string) prometheus.Counter {

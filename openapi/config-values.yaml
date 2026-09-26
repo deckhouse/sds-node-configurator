@@ -80,3 +80,26 @@ properties:
 
       Lower it only when `fileDevicesDirectory` points at a dedicated disk that
       nothing else on the node depends on. `0` disables the reserve entirely.
+  missingBlockDeviceRetentionHours:
+    type: integer
+    default: 24
+    minimum: 0
+    maximum: 8760
+    description: |
+      How long, in hours, a BlockDevice resource whose device has disappeared from
+      the node is kept before the agent deletes it.
+
+      A BlockDevice that is not consumable (typically one already used as an LVM
+      Physical Volume) is not deleted when its device disappears: it gets the
+      `Missing` condition instead, `Unknown` at first and `True` once the device has
+      been absent for 10 minutes. On a node where LUNs are mapped and unmapped
+      dynamically (a virtualization hypervisor, a node attaching disks for virtual
+      machines) every such device would otherwise leave a resource behind forever.
+
+      The retention is counted from the moment `Missing` became `True`. A resource
+      is deleted only if no LVMVolumeGroup lists it in `status.nodes` and its
+      `status.lvmVolumeGroupName` does not name an existing LVMVolumeGroup, so a
+      Physical Volume lost from under a live Volume Group stays visible. If the
+      device returns later, the agent creates the resource again.
+
+      `0` disables the deletion: the resources are kept until removed manually.
