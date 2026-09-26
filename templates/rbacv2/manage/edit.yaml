@@ -1,3 +1,37 @@
+{{- if eq (include "sds-node-configurator.rbacv2_new_scheme" .) "true" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    heritage: deckhouse
+    module: sds-node-configurator
+    rbac.deckhouse.io/aggregate-to-storage-as: manager
+    rbac.deckhouse.io/kind: capability
+    rbac.deckhouse.io/capability: "system-capability.sds-node-configurator.edit"
+    rbac.deckhouse.io/scope: system
+    rbac.deckhouse.io/namespace: d8-sds-node-configurator
+  name: d8:system-capability:sds-node-configurator:edit
+  annotations:
+    en.meta.deckhouse.io/title: "Module sds-node-configurator: manage cluster resources"
+    ru.meta.deckhouse.io/title: "Модуль sds-node-configurator: управление кластерными ресурсами"
+    en.meta.deckhouse.io/description: "Create, update and delete the cluster-scoped resources of the sds-node-configurator module (BlockDevice, LVMVolumeGroup, LVMVolumeGroupSet, LVMLogicalVolume, LVMLogicalVolumeSnapshot)."
+    ru.meta.deckhouse.io/description: "Создание, изменение и удаление кластерных ресурсов модуля sds-node-configurator (BlockDevice, LVMVolumeGroup, LVMVolumeGroupSet, LVMLogicalVolume, LVMLogicalVolumeSnapshot)."
+rules:
+  - apiGroups:
+      - storage.deckhouse.io
+    resources:
+      - blockdevices
+      - lvmvolumegroups
+      - lvmvolumegroupsets
+      - lvmlogicalvolumes
+      - lvmlogicalvolumesnapshots
+    verbs:
+      - create
+      - update
+      - patch
+      - delete
+      - deletecollection
+{{- else }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -24,3 +58,4 @@ rules:
       - patch
       - delete
       - deletecollection
+{{- end }}
