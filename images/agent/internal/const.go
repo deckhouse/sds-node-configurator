@@ -286,7 +286,7 @@ const (
 	// directory, and that is a migration shim rather than a second setting.
 	//
 	// It has to be: spec.fileDevices[].directory is immutable at admission
-	// (`self.directory == oldSelf.directory` in crds/lvmvolumegroup.yaml), so an
+	// (`self.directory == oldSelf.directory` in crds/storage.deckhouse.io_lvmvolumegroups.yaml), so an
 	// entry created under the old default cannot be edited to the new one — not
 	// by the admin and not by a hook either. Every file-backed Volume Group in
 	// every upgraded cluster keeps naming this path forever. Without accepting

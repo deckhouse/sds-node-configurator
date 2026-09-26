@@ -89,7 +89,7 @@ func TestReadyConditionForSetPhaseTruncatesAnOversizedMessage(t *testing.T) {
 // has to map to a definite condition. Falling through to the default reports
 // Unknown, which reads as "nothing has looked at this resource yet".
 func TestEverySetPhaseInTheCRDEnumIsHandled(t *testing.T) {
-	raw, err := os.ReadFile("../../../../crds/lvmvolumegroupset.yaml")
+	raw, err := os.ReadFile("../../../../crds/storage.deckhouse.io_lvmvolumegroupsets.yaml")
 	require.NoError(t, err)
 
 	var crd struct {

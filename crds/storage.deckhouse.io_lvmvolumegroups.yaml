@@ -1,0 +1,550 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  labels:
+    backup.deckhouse.io/cluster-config: "true"
+    heritage: deckhouse
+    module: sds-node-configurator
+  name: lvmvolumegroups.storage.deckhouse.io
+spec:
+  group: storage.deckhouse.io
+  names:
+    kind: LVMVolumeGroup
+    plural: lvmvolumegroups
+    shortNames:
+    - lvg
+    singular: lvmvolumegroup
+  preserveUnknownFields: false
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - description: Current and total Thin pools count.
+      jsonPath: .status.thinPoolReady
+      name: ThinPools
+      type: string
+    - description: If last configuration has been successfully applied.
+      jsonPath: .status.configurationApplied
+      name: Configuration Applied
+      type: string
+    - description: Resource phase.
+      jsonPath: .status.phase
+      name: phase
+      type: string
+    - description: Whether every stage condition has been reported and passed.
+      jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - description: Node the Volume Group is on.
+      jsonPath: .status.nodes..name
+      name: node
+      type: string
+    - description: Total Volume Group size.
+      jsonPath: .status.vgSize
+      name: size
+      type: string
+    - description: Actual Volume Group size.
+      jsonPath: .status.allocatedSize
+      name: allocated size
+      type: string
+    - description: Actual Volume Group name.
+      jsonPath: .spec.actualVGNameOnTheNode
+      name: VG
+      type: string
+    - description: Volume Group type.
+      jsonPath: .spec.type
+      name: type
+      priority: 1
+      type: string
+    - description: Age of this resource.
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          An interface for managing Volume Groups and Thin pools on the nodes.
+
+          > These resources might be created both by a user and the `sds-node-configurator` controller. `sds-node-configurator` controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. Controller will fill in both the 'spec' and 'status' fields.
+          > `spec.thinPools` field must be filled in by yourself.
+        properties:
+          spec:
+            properties:
+              actualVGNameOnTheNode:
+                description: |-
+                  Desired name of a Volume Group. Must be unique for the node it is on.
+
+                  > This field is immutable.
+                type: string
+                x-kubernetes-validations:
+                - message: The actualVGNameOnTheNode field is immutable.
+                  rule: self == oldSelf
+              blockDeviceSelector:
+                description: |-
+                  Desired block device selector.
+
+                  > Note: Selected block devices must belong to the same node for a volume group of type ‘Local’.
+                properties:
+                  matchExpressions:
+                    description: Desired block device selector expressions.
+                    items:
+                      properties:
+                        key:
+                          description: Label key to check.
+                          type: string
+                        operator:
+                          description: Operator used to compare values.
+                          enum:
+                          - In
+                          - NotIn
+                          - Exists
+                          - DoesNotExist
+                          type: string
+                        values:
+                          description: Array of values to compare. Required if the
+                            operator is `In` or `NotIn`.
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: Desired block device selector labels.
+                    type: object
+                type: object
+              fileDevices:
+                description: |-
+                  File-backed block devices to create as LVM PVs for this Volume Group.
+
+                  The agent will create a preallocated file in the specified directory,
+                  attach it as a loop device, and use it as a Physical Volume.
+                  File devices and block devices can be used together in the same VG.
+
+                  Each entry is identified by its `name`. `directory` cannot be changed,
+                  and `size` can only be increased: raising it grows the backing file, the
+                  loop device and the Physical Volume in place, without unmounting anything
+                  or interrupting the volumes on top. Lowering it is rejected: giving
+                  capacity back means shrinking the Volume Group, which the module does
+                  not do for block devices either.
+
+                  Capacity can therefore be added two ways: raise the size of an existing
+                  entry, or add a new entry under a new name when the extra space has to
+                  come from a different filesystem. Prefer fewer, larger entries — every
+                  entry costs a loop device, a PV and VG metadata, and thick logical volumes
+                  requesting contiguous space get harder to place as free space is spread
+                  across many small PVs.
+
+                  An entry that was never provisioned (it is not present in
+                  `status.nodes[].fileDevices`, for example because it failed validation)
+                  can be removed from the spec. Removing an entry that backs a live PV is
+                  not supported — the module never shrinks a Volume Group; the agent
+                  reports the drift on the `VGConfigurationApplied` condition (reason
+                  `FileDeviceDrift`) and takes no destructive action. The Volume Group
+                  keeps working and stays `Ready`. Freeing space inside a file device is
+                  done with `fstrim` instead, see the module FAQ.
+                items:
+                  properties:
+                    directory:
+                      description: |-
+                        Absolute directory on the node's filesystem where the backing file
+                        will be created.
+
+                        Must be the module's configured base directory
+                        (fileDevicesDirectory, default /var/lib/deckhouse/sds/file-devices) or a
+                        subdirectory of it; the agent rejects paths outside that subtree so a
+                        stray entry cannot fill an arbitrary host path. The previous default,
+                        /opt/deckhouse/sds/file-devices, is still accepted: this field is
+                        immutable, so an entry created before the directory moved cannot be
+                        edited to the new one.
+
+                        The agent creates the directory automatically (mkdir -p) if it does
+                        not exist. The path must be absolute and must not contain '..'
+                        segments. Provisioning fails if the path is on a read-only
+                        filesystem, a non-directory component is in the way, or there is not
+                        enough free space for the requested size.
+                      maxLength: 4096
+                      pattern: ^/[^/]+(/[^/]+)*$
+                      type: string
+                    name:
+                      description: |-
+                        Identifier of this file device within the Volume Group, unique among
+                        the entries of this LVMVolumeGroup. It becomes part of the backing
+                        file's name on the node, so it is restricted to lowercase
+                        alphanumerics and '-'.
+
+                        > This field is the entry's key: an entry is identified by it, and
+                        > changing it is not an edit but the removal of one entry and the
+                        > addition of another. If the old name had already been provisioned,
+                        > its Physical Volume stays in the Volume Group and the agent reports
+                        > it on the `VGConfigurationApplied` condition.
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    size:
+                      description: |-
+                        Size of the preallocated backing file. Must be at least 1Gi;
+                        a smaller value is rejected at admission, because `size` cannot
+                        be lowered afterwards and an entry accepted below the minimum is
+                        one the agent refuses forever.
+
+                        Only binary units are accepted. Decimal units are rejected at
+                        admission for the same reason: `1G` is 10^9 bytes, which is below
+                        the 1Gi (2^30 bytes) minimum, and the mistake is easy to miss.
+
+                        The value must be a whole number of the unit it names: `1536Mi`,
+                        not `1.5Gi`. A Physical Volume is always a little smaller than
+                        its backing file (LVM keeps metadata at the head of the device
+                        and then rounds down to whole extents), and the reconciler treats
+                        a difference of up to one extent as "already the right size". That
+                        tolerance covers the metadata gap exactly as long as the requested
+                        size is a whole number of mebibytes; a finer value can leave a
+                        permanent gap the agent would try to close on every reconcile.
+                      maxLength: 32
+                      pattern: ^[0-9]+(Mi|Gi|Ti|Pi|Ei)$
+                      type: string
+                  required:
+                  - directory
+                  - name
+                  - size
+                  type: object
+                  x-kubernetes-validations:
+                  - message: A fileDevices entry's 'size' must be at least 1Gi.
+                    rule: quantity(self.size).compareTo(quantity('1Gi')) >= 0
+                  - message: A fileDevices entry's 'directory' is immutable.
+                    rule: self.directory == oldSelf.directory
+                  - message: A fileDevices entry's 'size' can only be increased. Shrinking
+                      a Volume Group is not supported.
+                    rule: quantity(self.size).compareTo(quantity(oldSelf.size)) >=
+                      0
+                maxItems: 32
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              local:
+                description: Desired configuration for a local Volume Group.
+                properties:
+                  nodeName:
+                    description: |-
+                      Desired node for the LVM Volume Group.
+
+                      > This field is immutable.
+                    type: string
+                    x-kubernetes-validations:
+                    - message: The nodeName field is immutable.
+                      rule: self == oldSelf
+                required:
+                - nodeName
+                type: object
+              thinPools:
+                description: Desired thin pool configuration.
+                items:
+                  properties:
+                    allocationLimit:
+                      default: 150%
+                      description: Thin pool oversize limit.
+                      pattern: ^[1-9][0-9]{2,3}%$
+                      type: string
+                    name:
+                      description: |-
+                        Desired thin pool name.
+
+                        > This field is immutable.
+                      type: string
+                    size:
+                      description: |-
+                        Desired thin pool size. Might be specified as number or percent size of total Volume Group space.
+
+                        > Note, that if you specify the percent size, the thin pool will be automatically extended when Volume Group is extended.
+                      pattern: ^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$|^[1-9][0-9]?%$|100%
+                      x-kubernetes-int-or-string: true
+                  required:
+                  - name
+                  - size
+                  type: object
+                type: array
+              type:
+                description: |-
+                  Type of a Volume Group.
+
+                  Possible values:
+
+                  - `Local`: Local volume group; the devices used are not distributed (not Shared LUN).
+                enum:
+                - Local
+                type: string
+                x-kubernetes-validations:
+                - message: The type field is immutable.
+                  rule: self == oldSelf
+            required:
+            - actualVGNameOnTheNode
+            - type
+            type: object
+            x-kubernetes-validations:
+            - message: The 'local' field is required when the 'type' field is 'Local'.
+              rule: (self.type == "Local" && has(self.local)) || self.type != "Local"
+            - message: At least one of 'blockDeviceSelector' or 'fileDevices' must
+                be specified.
+              rule: has(self.blockDeviceSelector) || (has(self.fileDevices) && size(self.fileDevices)
+                > 0)
+          status:
+            properties:
+              allocatedSize:
+                anyOf:
+                - type: integer
+                - type: string
+                description: Amount of space currently occupied on the Volume Group.
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
+              conditions:
+                description: LVMVolumeGroup conditions.
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        Timestamp of the last status transition for this condition. It is not bumped
+                        when only the reason or the message changes.
+                      format: date-time
+                      type: string
+                    message:
+                      description: Information about the current status.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: The value of `metadata.generation` this condition
+                        was set against.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        Machine-readable reason for the current status, suitable for log filtering
+                        and alerting.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: Condition status.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: Condition type.
+                      enum:
+                      - VGConfigurationApplied
+                      - VGReady
+                      - NodeReady
+                      - AgentReady
+                      - Ready
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              configurationApplied:
+                description: Indicates if the last configuration has been successfully
+                  applied.
+                type: string
+              extentSize:
+                anyOf:
+                - type: integer
+                - type: string
+                description: Physical extent size of the Volume Group.
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
+              nodes:
+                description: Information about the nodes the Volume Group is on.
+                items:
+                  properties:
+                    devices:
+                      description: Information about the devices used in the Volume
+                        Group on the current node.
+                      items:
+                        properties:
+                          blockDevice:
+                            description: Name of the corresponding block device resource.
+                            type: string
+                          devSize:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: Block device size.
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          path:
+                            description: Device path on the node (e.g., `/dev/sda`).
+                            type: string
+                          pvSize:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: Physical Volume size.
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          pvUUID:
+                            description: LVM Physical Volume UUID.
+                            type: string
+                        type: object
+                      type: array
+                    fileDevices:
+                      description: Information about the file-backed devices used
+                        in the Volume Group on the current node.
+                      items:
+                        properties:
+                          filePath:
+                            description: Path to the backing file on the node.
+                            type: string
+                          loopDevice:
+                            description: Loop device path (e.g., `/dev/loop0`).
+                            type: string
+                          name:
+                            description: |-
+                              Name of the `spec.fileDevices` entry this device was provisioned from.
+
+                              An entry present here backs a live Physical Volume and cannot be
+                              removed from the spec; an entry absent from this list has not been
+                              provisioned and may be removed.
+                            type: string
+                          pvUUID:
+                            description: LVM Physical Volume UUID.
+                            type: string
+                          size:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: |-
+                              Size of the Physical Volume created on the backing file.
+                              This is slightly smaller than the requested `spec.fileDevices[].size`
+                              because LVM reserves space for PV metadata (the same way
+                              `status.nodes[].devices[].pvSize` differs from the raw device size).
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                      type: array
+                    name:
+                      description: Node name.
+                      type: string
+                  type: object
+                type: array
+              observedGeneration:
+                description: |-
+                  The value of `metadata.generation` the conditions watcher last computed a
+                  verdict against. When it trails `metadata.generation`, the phase and the
+                  aggregate `Ready` condition still describe the previous spec.
+
+                  Only the conditions watcher sets it, because it is the only writer that
+                  looks at the resource as a whole. The agent and the infrastructure watcher
+                  each own individual stage conditions and stamp the generation on those.
+                format: int64
+                minimum: 0
+                type: integer
+              phase:
+                description: General LVMVolumeGroup condition.
+                enum:
+                - Pending
+                - Ready
+                - NotReady
+                - Terminating
+                - ""
+                type: string
+              thinPoolReady:
+                description: Shows the number of healthy and total thin pools.
+                type: string
+              thinPools:
+                description: |-
+                  Current state of the Volume Group's thin pools.
+
+                  > Might be empty if there are no thin pools in the Volume Group.
+                items:
+                  properties:
+                    actualSize:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      description: Thin pool capacity.
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    allocatedSize:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      description: Total requested size of logical volumes in the
+                        thin pool.
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    allocationLimit:
+                      default: 150%
+                      description: Thin pool oversize limit.
+                      pattern: ^[1-9][0-9]{2,3}%$
+                      type: string
+                    availableSpace:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      description: Thin pool free space available.
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    message:
+                      description: Information about the status.
+                      type: string
+                    name:
+                      description: Thin pool name.
+                      type: string
+                    ready:
+                      description: Thin pool health status.
+                      type: boolean
+                    usedSize:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      description: Thin pool used size.
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                  required:
+                  - actualSize
+                  - name
+                  - usedSize
+                  type: object
+                type: array
+              vgFree:
+                anyOf:
+                - type: integer
+                - type: string
+                description: Volume Group free space.
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
+              vgSize:
+                anyOf:
+                - type: integer
+                - type: string
+                description: Volume Group capacity.
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
+              vgUUID:
+                description: Volume Group UUID.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

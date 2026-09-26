@@ -1,0 +1,278 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  labels:
+    backup.deckhouse.io/cluster-config: "true"
+    heritage: deckhouse
+    module: sds-node-configurator
+  name: lvmlogicalvolumes.storage.deckhouse.io
+spec:
+  group: storage.deckhouse.io
+  names:
+    kind: LVMLogicalVolume
+    plural: lvmlogicalvolumes
+    shortNames:
+    - llv
+    singular: lvmlogicalvolume
+  preserveUnknownFields: false
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - description: Actual Logical Volume name on the node.
+      jsonPath: .spec.actualLVNameOnTheNode
+      name: LV Name
+      type: string
+    - description: Current resource status.
+      jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - description: Selected LVMVolumeGroup resource.
+      jsonPath: .spec.lvmVolumeGroupName
+      name: LVMVolumeGroup
+      type: string
+    - description: Selected thin pool in LVMVolumeGroup. Might be empty if the LVMVolumeGroup
+        is thick.
+      jsonPath: .spec.thin.poolName
+      name: ThinPool
+      type: string
+    - description: Actual LVMLogicalVolume size.
+      jsonPath: .status.actualSize
+      name: Size
+      type: string
+    - description: Age of this resource.
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: LVMLogicalVolume resource defines the storage where a PV will
+          be created.
+        properties:
+          spec:
+            properties:
+              actualLVNameOnTheNode:
+                description: Logical Volume name on the node.
+                minLength: 1
+                pattern: ^[a-z0-9]([a-z0-9-._]{0,251}[a-z0-9])?$
+                type: string
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+              lvmVolumeGroupName:
+                description: Name of a LVMVolumeGroup resource whose Volume Group
+                  will be used for Logical Volume creation.
+                minLength: 1
+                pattern: ^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$
+                type: string
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+              size:
+                description: |-
+                  Desired Logical Volume size. It can be specified as a numerical value or percentage of the total Volume Group or thin pool space. For thin pools, the total space is calculated as the actual thin pool size multiplied by the `allocationLimit` value.
+
+                  > Note that if you specify a percentage, the Logical Volume will be automatically extended when Volume Group, thin pool, or thin pool's `allocationLimit` value is increased.
+                minLength: 1
+                pattern: ^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$|^[1-9][0-9]?%$|100%
+                x-kubernetes-int-or-string: true
+              source:
+                description: Source of the volume, if present.
+                properties:
+                  kind:
+                    description: Kind of the source. LVMLogicalVolume kind means that
+                      the current resource is a clone. LVMLogicalVolumeSnapshot kind
+                      means that the current resource is a restored volume.
+                    enum:
+                    - LVMLogicalVolume
+                    - LVMLogicalVolumeSnapshot
+                    type: string
+                    x-kubernetes-validations:
+                    - message: Value is immutable.
+                      rule: self == oldSelf
+                  name:
+                    description: Name of the resource from which the current resource
+                      is created.
+                    minLength: 1
+                    type: string
+                    x-kubernetes-validations:
+                    - message: Value is immutable.
+                      rule: self == oldSelf
+                required:
+                - kind
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+              thick:
+                properties:
+                  contiguous:
+                    description: |-
+                      If set to `true`, the logical volume will be created with the `contiguous` attribute.
+
+                      > Use this attribute carefully, as it may prevent from Logical Volume creation even if there is enough space for it.
+                    type: boolean
+                    x-kubernetes-validations:
+                    - message: Value is immutable.
+                      rule: self == oldSelf
+                type: object
+                x-kubernetes-validations:
+                - message: Field 'contiguous' cannot be removed.
+                  rule: (!has(oldSelf.contiguous) || has(self.contiguous))
+              thin:
+                description: Defines the used thin pool. Specified only for Thin Logical
+                  Volume.
+                properties:
+                  poolName:
+                    description: Name of the used thin pool.
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                required:
+                - poolName
+                type: object
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+              type:
+                description: Logical Volume type.
+                enum:
+                - Thick
+                - Thin
+                type: string
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+              volumeCleanup:
+                description: |-
+                  Volume cleanup method after the PV is deleted. If this parameter is not set, there's no guarantee that the data will be completely deleted.
+
+                  Allowed values:
+
+                  - `RandomFillSinglePass`: Volume will be overwritten with random data once before deletion. This option is not recommended for solid-state drives (SSDs), as overwriting reduces the drive's lifespan. For thin volumes, only the space in use at the moment of volume deletion will be overwritten.
+                  - `RandomFillThreePass`: Volume will be overwritten with random data three times before deletion. This option is also not recommended for SSDs, as overwriting reduces the drive's lifespan. For thin volumes, only the space in use at the moment of volume deletion will be overwritten.
+                  - `Discard`: Before deletion, all blocks of the volume will be marked as free using the `discard` system call. This option is applicable only to SSDs and thick volumes.
+                enum:
+                - RandomFillThreePass
+                - RandomFillSinglePass
+                - Discard
+                type: string
+            required:
+            - actualLVNameOnTheNode
+            - lvmVolumeGroupName
+            - size
+            - type
+            type: object
+            x-kubernetes-validations:
+            - message: Field 'thin' is required and field 'thick' is forbidden when
+                'type' is 'Thin'.
+              rule: (self.type == "Thin" && has(self.thin) && !has(self.thick)) ||
+                self.type != "Thin"
+            - message: Field 'contiguous' is immutable and cannot be added if not
+                specified at creation.
+              rule: ( (!has(self.thick) || !has(self.thick.contiguous)) && (!has(oldSelf.thick)
+                || !has(oldSelf.thick.contiguous)) ) || ( has(self.thick) && has(self.thick.contiguous)
+                && has(oldSelf.thick) && has(oldSelf.thick.contiguous) )
+            - message: '''volumeCleanup: Discard'' is supported only for ''Thick''
+                volumes'
+              rule: self.type == "Thick" || !has(self.volumeCleanup) || self.volumeCleanup
+                != "Discard"
+          status:
+            description: Describes the resource status.
+            properties:
+              actualSize:
+                anyOf:
+                - type: integer
+                - type: string
+                description: Actual Logical Volume size on the node.
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
+              conditions:
+                description: 'The latest observations of the resource state. Condition
+                  type: `Ready`.'
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        Timestamp of the last status transition for this condition. It is not bumped
+                        when only the reason or the message changes.
+                      format: date-time
+                      type: string
+                    message:
+                      description: Human-readable explanation of the current status.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: The value of `metadata.generation` this condition
+                        was set against.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        Machine-readable reason for the current status, suitable for log filtering
+                        and alerting.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: Current status of the condition.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: |-
+                        Condition type. `Ready` is `True` once the Logical Volume is in place, `False`
+                        while it is not, and `Unknown` before anything has observed it.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              contiguous:
+                description: Shows if the created Logical Volume has the `contiguous`
+                  attribute.
+                type: boolean
+              observedGeneration:
+                description: |-
+                  The value of `metadata.generation` the controller has last acted on. When it trails
+                  `metadata.generation`, the controller has not yet processed the latest spec, and the
+                  conditions below still describe the previous one.
+                format: int64
+                type: integer
+              phase:
+                description: Current resource's phase.
+                enum:
+                - Created
+                - Pending
+                - Cleaning
+                - Resizing
+                - Failed
+                type: string
+              reason:
+                description: Reason of the phase.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

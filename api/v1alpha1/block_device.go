@@ -21,12 +21,29 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// The resource displays up-to-date information about available block devices on nodes that can be used by the `sds-node-configurator` controller for LVM operations.
+//
+// > The resource is created and managed by the controller only. Manual modification of the resource is prohibited.
+//
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// BlockDevice empty block device
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Cluster,shortName=bd
+// +kubebuilder:metadata:labels={"heritage=deckhouse","module=sds-node-configurator","backup.deckhouse.io/cluster-config=true"}
+// +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.nodeName",description="Node the block device is on."
+// +kubebuilder:printcolumn:name="Consumable",type="boolean",JSONPath=".status.consumable",description="Defines whether the current block device can be used by `sds-node-configurator`."
+// +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.conditions[?(@.type==\"Consumable\")].reason",priority=1,description="Why the device is or is not consumable."
+// +kubebuilder:printcolumn:name="Size",type="string",JSONPath=".status.size",description="Size of the included device."
+// +kubebuilder:printcolumn:name="Path",type="string",JSONPath=".status.path",description="Actual device path (name)."
+// +kubebuilder:printcolumn:name="VG",type="string",JSONPath=".status.actualVGNameOnTheNode",priority=1,description="Volume Group the block device is in."
+// +kubebuilder:printcolumn:name="LVMVolumeGroup",type="string",JSONPath=".status.lvmVolumeGroupName",priority=1,description="LVMVolumeGroup resource the block device is in."
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age of this resource"
+// +crd-enricher:crd:minimal=true
+// +crd-enricher:crd:preserveUnknownFields=false
 type BlockDevice struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
+	// +optional
 	Status BlockDeviceStatus `json:"status"`
 }
 
@@ -40,30 +57,84 @@ type BlockDeviceList struct {
 
 // +k8s:deepcopy-gen=true
 type BlockDeviceStatus struct {
-	Type                  string            `json:"type"`
-	FsType                string            `json:"fsType"`
-	NodeName              string            `json:"nodeName"`
-	Consumable            bool              `json:"consumable"`
-	PVUuid                string            `json:"pvUUID"`
-	VGUuid                string            `json:"vgUUID"`
-	PartUUID              string            `json:"partUUID"`
-	LVMVolumeGroupName    string            `json:"lvmVolumeGroupName"`
-	ActualVGNameOnTheNode string            `json:"actualVGNameOnTheNode"`
-	Wwn                   string            `json:"wwn"`
-	Serial                string            `json:"serial"`
-	Path                  string            `json:"path"`
-	Size                  resource.Quantity `json:"size"`
-	Model                 string            `json:"model"`
-	Rota                  bool              `json:"rota"`
-	HotPlug               bool              `json:"hotPlug"`
-	MachineID             string            `json:"machineId"`
+	// The device's type (disk, partition, RAID, and others).
+	Type string `json:"type"`
+	// The device's file system type.
+	// +optional
+	// +kubebuilder:validation:Enum=LVM2_member;""
+	FsType string `json:"fsType"`
+	// The name of the Kubernetes node the device is on.
+	NodeName string `json:"nodeName"`
+	// The flag that defines whether this device can be used by the controller to create an LVM Physical Volume.
+	Consumable bool `json:"consumable"`
+	// The LVM Physical Volume UUID.
+	//
+	// > **Optional**: exists only if the device is used as a LVM Physical Volume.
+	// +optional
+	PVUuid string `json:"pvUUID"`
+	// The UUID of the LVM Volume Group to which this device belongs as a Physical Volume.
+	//
+	// > **Optional**: exists only if the device is used as a Physical Volume and is included in a Volume Group.
+	// +optional
+	VGUuid string `json:"vgUUID"`
+	// The UUID of the partition.
+	//
+	// > **Optional**: exists only if the device is a partition.
+	// +optional
+	PartUUID string `json:"partUUID"`
+	// The LVMVolumeGroup resource name.
+	//
+	// > **Optional**: exists only if the device is used as a Physical Volume, is included in a Volume Group, and is specified in an LVMVolumeGroup resource.
+	// +optional
+	LVMVolumeGroupName string `json:"lvmVolumeGroupName"`
+	// The actual name of the LVM Volume Group the device is included in.
+	//
+	// > **Optional**: exists if only the device is used as a Physical Volume and is included in a Volume Group.
+	// +optional
+	ActualVGNameOnTheNode string `json:"actualVGNameOnTheNode"`
+	// The device unique wwn (World Wide Name) identifier.
+	//
+	// > **Optional**: might not exist if WWN is not supported for this type of disk by the manufacturer.
+	// +optional
+	Wwn string `json:"wwn"`
+	// The device unique serial number.
+	// +optional
+	Serial string `json:"serial"`
+	// The device path on the node (/dev/sda).
+	Path string `json:"path"`
+	// The device size.
+	Size resource.Quantity `json:"size"`
+	// Device model.
+	//
+	// > **Optional**: might not exist if the manufacturer does not provide this information for the given type of disks.
+	// +optional
+	Model string `json:"model"`
+	// Device disk type. Can be:
+	// - `true`: For HDD;
+	// - `false`: For SSD.
+	Rota bool `json:"rota"`
+	// Device connection type. Can be:
+	// - `true`: If the device has been hot-plugged;
+	// - `false`: Otherwise.
+	HotPlug bool `json:"hotPlug"`
+	// Unique identifier of the machine the device is on (normally at `/etc/machine-id`).
+	MachineID string `json:"machineId"`
 
-	// Conditions hold the latest state. Known type: Consumable.
+	// Latest state. Known type: `Consumable`, which carries the
+	// reason behind `status.consumable`: `Available`, `Mounted`,
+	// `HasFilesystem` or `HotPlugged`.
 	// +optional
 	// +patchMergeKey=type
 	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
+	// +crd-enricher:unset:items.description
+	// +crd-enricher:raw:items.properties.type.description=Condition type, for example `Consumable`.
+	// +crd-enricher:raw:items.properties.status.description=Current status of the condition.
+	// +crd-enricher:raw:items.properties.observedGeneration.description=Value of `metadata.generation` the condition was last set against.
+	// +crd-enricher:raw:items.properties.lastTransitionTime.description=Timestamp of the last status transition for this condition.
+	// +crd-enricher:raw:items.properties.reason.description="Machine-readable reason for the current status, suitable for\nlog filtering."
+	// +crd-enricher:raw:items.properties.message.description=Human-readable explanation of the current status.
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 

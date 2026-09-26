@@ -4,8 +4,8 @@
 // by the images and by other storage modules, so pinning them there would bump
 // the dependencies that production code is built against.
 //
-// The pinned versions are the whole point of this module: the CRD in crds/filter
-// is a generated artifact, so the generator is part of its definition and a
+// The pinned versions are the whole point of this module: the CRDs in crds/
+// are a generated artifact, so the generator is part of their definition and a
 // floating version would make the committed manifest depend on when it was last
 // rendered. Bump with, from this directory:
 //
@@ -13,7 +13,7 @@
 //	go get -tool github.com/deckhouse/deckhouse/pkg/crd-enricher/cmd/crd-enricher@vX.Y.Z
 //
 // and regenerate: a bump that changes the rendered output shows up as a diff in
-// crds/filter in the same commit, which is exactly where it should be reviewed.
+// crds/ in the same commit, which is exactly where it should be reviewed.
 module sds-node-configurator-codegen-tools
 
 // Must not be older, in language version, than the module the generators read:

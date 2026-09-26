@@ -29,7 +29,28 @@ type LVMVolumeGroupList struct {
 	Items []LVMVolumeGroup `json:"items"`
 }
 
+// An interface for managing Volume Groups and Thin pools on the nodes.
+//
+// > These resources might be created both by a user and the `sds-node-configurator` controller. `sds-node-configurator` controller will automatically create an LVMVolumeGroup resource if it detects an existing Volume Group on a node tagged with 'storage.deckhouse.io/enabled=true'. Controller will fill in both the 'spec' and 'status' fields.
+// > `spec.thinPools` field must be filled in by yourself.
+//
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Cluster,shortName=lvg
+// +kubebuilder:subresource:status
+// +kubebuilder:metadata:labels={"heritage=deckhouse","module=sds-node-configurator","backup.deckhouse.io/cluster-config=true"}
+// +kubebuilder:printcolumn:name="ThinPools",type="string",JSONPath=".status.thinPoolReady",description="Current and total Thin pools count."
+// +kubebuilder:printcolumn:name="Configuration Applied",type="string",JSONPath=".status.configurationApplied",description="If last configuration has been successfully applied."
+// +kubebuilder:printcolumn:name="phase",type="string",JSONPath=".status.phase",description="Resource phase."
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description="Whether every stage condition has been reported and passed."
+// +kubebuilder:printcolumn:name="node",type="string",JSONPath=".status.nodes..name",description="Node the Volume Group is on."
+// +kubebuilder:printcolumn:name="size",type="string",JSONPath=".status.vgSize",description="Total Volume Group size."
+// +kubebuilder:printcolumn:name="allocated size",type="string",JSONPath=".status.allocatedSize",description="Actual Volume Group size."
+// +kubebuilder:printcolumn:name="VG",type="string",JSONPath=".spec.actualVGNameOnTheNode",description="Actual Volume Group name."
+// +kubebuilder:printcolumn:name="type",type="string",JSONPath=".spec.type",priority=1,description="Volume Group type."
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age of this resource."
+// +crd-enricher:crd:minimal=true
+// +crd-enricher:crd:preserveUnknownFields=false
 type LVMVolumeGroup struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -38,101 +59,356 @@ type LVMVolumeGroup struct {
 	Status LVMVolumeGroupStatus `json:"status,omitempty"`
 }
 
-// +k8s:deepcopy-gen=true
-type LVMVolumeGroupSpec struct {
-	ActualVGNameOnTheNode string                         `json:"actualVGNameOnTheNode"`
-	BlockDeviceSelector   *metav1.LabelSelector          `json:"blockDeviceSelector,omitempty"`
-	ThinPools             []LVMVolumeGroupThinPoolSpec   `json:"thinPools"`
-	Type                  string                         `json:"type"`
-	Local                 LVMVolumeGroupLocalSpec        `json:"local"`
-	FileDevices           []LVMVolumeGroupFileDeviceSpec `json:"fileDevices,omitempty"`
-}
+// The per-entry rules -- 'directory' is immutable, 'size' may only grow -- live
+// on LVMVolumeGroupFileDeviceSpec itself rather than here. See the comment on
+// that type.
 
 // +k8s:deepcopy-gen=true
+// +kubebuilder:validation:XValidation:rule="(self.type == \"Local\" && has(self.local)) || self.type != \"Local\"",message="The 'local' field is required when the 'type' field is 'Local'."
+// +kubebuilder:validation:XValidation:rule="has(self.blockDeviceSelector) || (has(self.fileDevices) && size(self.fileDevices) > 0)",message="At least one of 'blockDeviceSelector' or 'fileDevices' must be specified."
+type LVMVolumeGroupSpec struct {
+	// Desired name of a Volume Group. Must be unique for the node it is on.
+	//
+	// > This field is immutable.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="The actualVGNameOnTheNode field is immutable."
+	ActualVGNameOnTheNode string `json:"actualVGNameOnTheNode"`
+	// Desired block device selector.
+	//
+	// > Note: Selected block devices must belong to the same node for a volume group of type ‘Local’.
+	// +optional
+	// +crd-enricher:unset:x-kubernetes-map-type
+	// +crd-enricher:raw:properties.matchLabels.description=Desired block device selector labels.
+	// +crd-enricher:raw:properties.matchExpressions.description=Desired block device selector expressions.
+	// +crd-enricher:unset:properties.matchExpressions.x-kubernetes-list-type
+	// +crd-enricher:unset:properties.matchExpressions.items.description
+	// +crd-enricher:raw:properties.matchExpressions.items.properties.key.description=Label key to check.
+	// +crd-enricher:raw:properties.matchExpressions.items.properties.operator.description=Operator used to compare values.
+	// +crd-enricher:raw:properties.matchExpressions.items.properties.operator.enum=[In, NotIn, Exists, DoesNotExist]
+	// +crd-enricher:raw:properties.matchExpressions.items.properties.values.description=Array of values to compare. Required if the operator is `In` or `NotIn`.
+	// +crd-enricher:unset:properties.matchExpressions.items.properties.values.x-kubernetes-list-type
+	BlockDeviceSelector *metav1.LabelSelector `json:"blockDeviceSelector,omitempty"`
+	// Desired thin pool configuration.
+	// +optional
+	ThinPools []LVMVolumeGroupThinPoolSpec `json:"thinPools"`
+	// Type of a Volume Group.
+	//
+	// Possible values:
+	//
+	// - `Local`: Local volume group; the devices used are not distributed (not Shared LUN).
+	// +kubebuilder:validation:Enum=Local
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="The type field is immutable."
+	Type string `json:"type"`
+	// Desired configuration for a local Volume Group.
+	// +optional
+	Local LVMVolumeGroupLocalSpec `json:"local"`
+	// File-backed block devices to create as LVM PVs for this Volume Group.
+	//
+	// The agent will create a preallocated file in the specified directory,
+	// attach it as a loop device, and use it as a Physical Volume.
+	// File devices and block devices can be used together in the same VG.
+	//
+	// Each entry is identified by its `name`. `directory` cannot be changed,
+	// and `size` can only be increased: raising it grows the backing file, the
+	// loop device and the Physical Volume in place, without unmounting anything
+	// or interrupting the volumes on top. Lowering it is rejected: giving
+	// capacity back means shrinking the Volume Group, which the module does
+	// not do for block devices either.
+	//
+	// Capacity can therefore be added two ways: raise the size of an existing
+	// entry, or add a new entry under a new name when the extra space has to
+	// come from a different filesystem. Prefer fewer, larger entries — every
+	// entry costs a loop device, a PV and VG metadata, and thick logical volumes
+	// requesting contiguous space get harder to place as free space is spread
+	// across many small PVs.
+	//
+	// An entry that was never provisioned (it is not present in
+	// `status.nodes[].fileDevices`, for example because it failed validation)
+	// can be removed from the spec. Removing an entry that backs a live PV is
+	// not supported — the module never shrinks a Volume Group; the agent
+	// reports the drift on the `VGConfigurationApplied` condition (reason
+	// `FileDeviceDrift`) and takes no destructive action. The Volume Group
+	// keeps working and stays `Ready`. Freeing space inside a file device is
+	// done with `fstrim` instead, see the module FAQ.
+	// +optional
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=map
+	// +listMapKey=name
+	FileDevices []LVMVolumeGroupFileDeviceSpec `json:"fileDevices,omitempty"`
+}
+
+// The first rule is checked on every entry; the two below it are transition
+// rules, evaluated only against the entry that carried the same `name` before
+// the edit.
+//
+// That correlation is the apiserver's, not ours: `fileDevices` is an
+// x-kubernetes-list-type=map keyed on `name`, which makes this a correlatable
+// position, so `oldSelf` here is the entry with the same name -- and the rules
+// are simply not evaluated for an entry that had no predecessor. Appending an
+// entry and removing one are therefore exempt by construction rather than by
+// being spelled out, and a reorder is a no-op because nothing is matched by
+// position. See
+// https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/#transition-rules
+//
+// Expressing them per entry instead of as one nested all() over both the old
+// and the new list also keeps the cost linear in maxItems rather than
+// quadratic, and lets each violation report itself -- one message naming both
+// invariants tells an admin who edited `directory` about shrinking too.
+//
+// The minimum size is rejected at admission for the same reason a decimal unit
+// is: `size` cannot be lowered afterwards, so an entry accepted below the
+// minimum is an entry the agent refuses forever and the user can only escape by
+// removing and re-adding it. The agent keeps its own check for objects that were
+// imported or already exist.
+
+// +k8s:deepcopy-gen=true
+// +kubebuilder:validation:XValidation:rule="quantity(self.size).compareTo(quantity('1Gi')) >= 0",message="A fileDevices entry's 'size' must be at least 1Gi."
+// +kubebuilder:validation:XValidation:rule="self.directory == oldSelf.directory",message="A fileDevices entry's 'directory' is immutable."
+// +kubebuilder:validation:XValidation:rule="quantity(self.size).compareTo(quantity(oldSelf.size)) >= 0",message="A fileDevices entry's 'size' can only be increased. Shrinking a Volume Group is not supported."
 type LVMVolumeGroupFileDeviceSpec struct {
-	// Name identifies the entry within spec.fileDevices. It is the entry's
-	// primary key (x-kubernetes-list-map-keys) and the only part of the
-	// backing file's path the user controls, which is what keeps `size`
-	// editable in principle and lets two entries of equal size share a
+	// Name is the entry's primary key (x-kubernetes-list-map-keys) and the only
+	// part of the backing file's path the user controls, which is what keeps
+	// `size` editable in principle and lets two entries of equal size share a
 	// directory.
-	Name      string            `json:"name"`
-	Directory string            `json:"directory"`
-	Size      resource.Quantity `json:"size"`
+
+	// Identifier of this file device within the Volume Group, unique among
+	// the entries of this LVMVolumeGroup. It becomes part of the backing
+	// file's name on the node, so it is restricted to lowercase
+	// alphanumerics and '-'.
+	//
+	// > This field is the entry's key: an entry is identified by it, and
+	// > changing it is not an edit but the removal of one entry and the
+	// > addition of another. If the old name had already been provisioned,
+	// > its Physical Volume stays in the Volume Group and the agent reports
+	// > it on the `VGConfigurationApplied` condition.
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+	// The pattern is rejected at admission for the same reason `size` and
+	// `name` are: `directory` is immutable once the entry exists, so a malformed
+	// value is one the agent refuses forever and the user can only escape by
+	// removing and re-adding the entry. This is the same shape the
+	// fileDevicesDirectory module setting enforces -- an absolute path of at
+	// least one non-empty component. A '..' component cannot be excluded here
+	// (an RE2 regexp has no lookahead), so the agent keeps its own check for
+	// that, and for the base-directory subtree.
+
+	// Absolute directory on the node's filesystem where the backing file
+	// will be created.
+	//
+	// Must be the module's configured base directory
+	// (fileDevicesDirectory, default /var/lib/deckhouse/sds/file-devices) or a
+	// subdirectory of it; the agent rejects paths outside that subtree so a
+	// stray entry cannot fill an arbitrary host path. The previous default,
+	// /opt/deckhouse/sds/file-devices, is still accepted: this field is
+	// immutable, so an entry created before the directory moved cannot be
+	// edited to the new one.
+	//
+	// The agent creates the directory automatically (mkdir -p) if it does
+	// not exist. The path must be absolute and must not contain '..'
+	// segments. Provisioning fails if the path is on a read-only
+	// filesystem, a non-directory component is in the way, or there is not
+	// enough free space for the requested size.
+	// +kubebuilder:validation:MaxLength=4096
+	// +kubebuilder:validation:Pattern=`^/[^/]+(/[^/]+)*$`
+	Directory string `json:"directory"`
+	// Size of the preallocated backing file. Must be at least 1Gi;
+	// a smaller value is rejected at admission, because `size` cannot
+	// be lowered afterwards and an entry accepted below the minimum is
+	// one the agent refuses forever.
+	//
+	// Only binary units are accepted. Decimal units are rejected at
+	// admission for the same reason: `1G` is 10^9 bytes, which is below
+	// the 1Gi (2^30 bytes) minimum, and the mistake is easy to miss.
+	//
+	// The value must be a whole number of the unit it names: `1536Mi`,
+	// not `1.5Gi`. A Physical Volume is always a little smaller than
+	// its backing file (LVM keeps metadata at the head of the device
+	// and then rounds down to whole extents), and the reconciler treats
+	// a difference of up to one extent as "already the right size". That
+	// tolerance covers the metadata gap exactly as long as the requested
+	// size is a whole number of mebibytes; a finer value can leave a
+	// permanent gap the agent would try to close on every reconcile.
+	// +crd-enricher:raw:type=string
+	// +crd-enricher:raw:maxLength=32
+	// +crd-enricher:unset:anyOf
+	// +crd-enricher:unset:x-kubernetes-int-or-string
+	// +crd-enricher:raw:pattern=^[0-9]+(Mi|Gi|Ti|Pi|Ei)$
+	Size resource.Quantity `json:"size"`
 }
 
 // +k8s:deepcopy-gen=true
 type LVMVolumeGroupStatus struct {
-	AllocatedSize resource.Quantity              `json:"allocatedSize"`
-	Nodes         []LVMVolumeGroupNode           `json:"nodes"`
-	ThinPools     []LVMVolumeGroupThinPoolStatus `json:"thinPools"`
-	VGSize        resource.Quantity              `json:"vgSize"`
-	VGUuid        string                         `json:"vgUUID"`
-	Phase         string                         `json:"phase"`
-	// ObservedGeneration is the value of metadata.generation the conditions
-	// watcher last computed a verdict against. When it trails
-	// metadata.generation the phase and the aggregate Ready below still describe
-	// the previous spec.
+	// Amount of space currently occupied on the Volume Group.
+	// +optional
+	AllocatedSize resource.Quantity `json:"allocatedSize"`
+	// Information about the nodes the Volume Group is on.
+	// +optional
+	Nodes []LVMVolumeGroupNode `json:"nodes"`
+	// Current state of the Volume Group's thin pools.
+	//
+	// > Might be empty if there are no thin pools in the Volume Group.
+	// +optional
+	ThinPools []LVMVolumeGroupThinPoolStatus `json:"thinPools"`
+	// Volume Group capacity.
+	// +optional
+	VGSize resource.Quantity `json:"vgSize"`
+	// Volume Group UUID.
+	// +optional
+	VGUuid string `json:"vgUUID"`
+	// General LVMVolumeGroup condition.
+	// +optional
+	// +kubebuilder:validation:Enum=Pending;Ready;NotReady;Terminating;""
+	Phase string `json:"phase"`
+	// The value of `metadata.generation` the conditions watcher last computed a
+	// verdict against. When it trails `metadata.generation`, the phase and the
+	// aggregate `Ready` condition still describe the previous spec.
 	//
 	// Only the conditions watcher sets it, because it is the only writer that
 	// looks at the resource as a whole. The agent and the infrastructure watcher
 	// each own individual stage conditions and stamp the generation on those.
-	ObservedGeneration   int64              `json:"observedGeneration,omitempty"`
-	Conditions           []metav1.Condition `json:"conditions"`
-	ThinPoolReady        string             `json:"thinPoolReady"`
-	ConfigurationApplied string             `json:"configurationApplied"`
-	VGFree               resource.Quantity  `json:"vgFree"`
-	ExtentSize           resource.Quantity  `json:"extentSize"`
+	// +kubebuilder:validation:Minimum=0
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	// LVMVolumeGroup conditions.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	// +crd-enricher:unset:items.description
+	// +crd-enricher:raw:items.properties.type.description=Condition type.
+	// +crd-enricher:raw:items.properties.type.enum=[VGConfigurationApplied, VGReady, NodeReady, AgentReady, Ready]
+	// +crd-enricher:raw:items.properties.status.description=Condition status.
+	// +crd-enricher:raw:items.properties.reason.description="Machine-readable reason for the current status, suitable for log filtering\nand alerting."
+	// +crd-enricher:raw:items.properties.message.description=Information about the current status.
+	// +crd-enricher:raw:items.properties.lastTransitionTime.description="Timestamp of the last status transition for this condition. It is not bumped\nwhen only the reason or the message changes."
+	// +crd-enricher:raw:items.properties.observedGeneration.description=The value of `metadata.generation` this condition was set against.
+	Conditions []metav1.Condition `json:"conditions"`
+	// Shows the number of healthy and total thin pools.
+	// +optional
+	ThinPoolReady string `json:"thinPoolReady"`
+	// Indicates if the last configuration has been successfully applied.
+	// +optional
+	ConfigurationApplied string `json:"configurationApplied"`
+	// Volume Group free space.
+	// +optional
+	VGFree resource.Quantity `json:"vgFree"`
+	// Physical extent size of the Volume Group.
+	// +optional
+	ExtentSize resource.Quantity `json:"extentSize"`
 }
 
 // +k8s:deepcopy-gen=true
 type LVMVolumeGroupDevice struct {
-	BlockDevice string            `json:"blockDevice"`
-	DevSize     resource.Quantity `json:"devSize"`
-	PVSize      resource.Quantity `json:"pvSize"`
-	PVUuid      string            `json:"pvUUID"`
-	Path        string            `json:"path"`
+	// Name of the corresponding block device resource.
+	// +optional
+	BlockDevice string `json:"blockDevice"`
+	// Block device size.
+	// +optional
+	DevSize resource.Quantity `json:"devSize"`
+	// Physical Volume size.
+	// +optional
+	PVSize resource.Quantity `json:"pvSize"`
+	// LVM Physical Volume UUID.
+	// +optional
+	PVUuid string `json:"pvUUID"`
+	// Device path on the node (e.g., `/dev/sda`).
+	// +optional
+	Path string `json:"path"`
 }
 
 // +k8s:deepcopy-gen=true
 type LVMVolumeGroupNode struct {
-	Devices     []LVMVolumeGroupDevice     `json:"devices"`
+	// Information about the devices used in the Volume Group on the current node.
+	// +optional
+	Devices []LVMVolumeGroupDevice `json:"devices"`
+	// Information about the file-backed devices used in the Volume Group on the current node.
+	// +optional
 	FileDevices []LVMVolumeGroupFileDevice `json:"fileDevices,omitempty"`
-	Name        string                     `json:"name"`
+	// Node name.
+	// +optional
+	Name string `json:"name"`
 }
 
 // +k8s:deepcopy-gen=true
 type LVMVolumeGroupFileDevice struct {
-	// Name is the spec.fileDevices entry this device was provisioned from.
-	// It is what lets the reconciler tell "this entry was never provisioned"
-	// (safe to drop from the spec) from "this entry backs a live PV"
-	// (dropping it needs pvmove/vgreduce, which the module does not do).
-	Name       string            `json:"name"`
-	FilePath   string            `json:"filePath"`
-	LoopDevice string            `json:"loopDevice"`
-	Size       resource.Quantity `json:"size"`
-	PVUuid     string            `json:"pvUUID"`
+	// Name is what lets the reconciler tell "this entry was never provisioned"
+	// (safe to drop from the spec) from "this entry backs a live PV" (dropping
+	// it needs pvmove/vgreduce, which the module does not do).
+
+	// Name of the `spec.fileDevices` entry this device was provisioned from.
+	//
+	// An entry present here backs a live Physical Volume and cannot be
+	// removed from the spec; an entry absent from this list has not been
+	// provisioned and may be removed.
+	// +optional
+	Name string `json:"name"`
+	// Path to the backing file on the node.
+	// +optional
+	FilePath string `json:"filePath"`
+	// Loop device path (e.g., `/dev/loop0`).
+	// +optional
+	LoopDevice string `json:"loopDevice"`
+	// Size of the Physical Volume created on the backing file.
+	// This is slightly smaller than the requested `spec.fileDevices[].size`
+	// because LVM reserves space for PV metadata (the same way
+	// `status.nodes[].devices[].pvSize` differs from the raw device size).
+	// +optional
+	Size resource.Quantity `json:"size"`
+	// LVM Physical Volume UUID.
+	// +optional
+	PVUuid string `json:"pvUUID"`
 }
 
 // +k8s:deepcopy-gen=true
 type LVMVolumeGroupThinPoolStatus struct {
-	Name            string            `json:"name"`
-	ActualSize      resource.Quantity `json:"actualSize"`
-	UsedSize        resource.Quantity `json:"usedSize"`
-	AllocatedSize   resource.Quantity `json:"allocatedSize"`
-	AvailableSpace  resource.Quantity `json:"availableSpace"`
-	AllocationLimit string            `json:"allocationLimit"`
-	Ready           bool              `json:"ready"`
-	Message         string            `json:"message"`
+	// Thin pool name.
+	Name string `json:"name"`
+	// Thin pool capacity.
+	ActualSize resource.Quantity `json:"actualSize"`
+	// Thin pool used size.
+	UsedSize resource.Quantity `json:"usedSize"`
+	// Total requested size of logical volumes in the thin pool.
+	// +optional
+	AllocatedSize resource.Quantity `json:"allocatedSize"`
+	// Thin pool free space available.
+	// +optional
+	AvailableSpace resource.Quantity `json:"availableSpace"`
+	// Thin pool oversize limit.
+	// +optional
+	// +kubebuilder:default="150%"
+	// +kubebuilder:validation:Pattern=`^[1-9][0-9]{2,3}%$`
+	AllocationLimit string `json:"allocationLimit"`
+	// Thin pool health status.
+	// +optional
+	Ready bool `json:"ready"`
+	// Information about the status.
+	// +optional
+	Message string `json:"message"`
 }
 
 // +k8s:deepcopy-gen=true
 type LVMVolumeGroupThinPoolSpec struct {
-	Name            string `json:"name"`
-	Size            string `json:"size"`
+	// Desired thin pool name.
+	//
+	// > This field is immutable.
+	Name string `json:"name"`
+	// Desired thin pool size. Might be specified as number or percent size of total Volume Group space.
+	//
+	// > Note, that if you specify the percent size, the thin pool will be automatically extended when Volume Group is extended.
+	// +kubebuilder:validation:XIntOrString
+	// +kubebuilder:validation:Type=""
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$|^[1-9][0-9]?%$|100%`
+	Size string `json:"size"`
+	// Thin pool oversize limit.
+	// +optional
+	// +kubebuilder:default="150%"
+	// +kubebuilder:validation:Pattern=`^[1-9][0-9]{2,3}%$`
 	AllocationLimit string `json:"allocationLimit"`
 }
 
 // +k8s:deepcopy-gen=true
 type LVMVolumeGroupLocalSpec struct {
+	// Desired node for the LVM Volume Group.
+	//
+	// > This field is immutable.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="The nodeName field is immutable."
 	NodeName string `json:"nodeName"`
 }

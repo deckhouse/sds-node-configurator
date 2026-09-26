@@ -14,12 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Regenerates crds/filter from the Go types in api/.
+# Regenerates crds/ from the Go types in api/.
 #
-# Only BlockDeviceFilter is generated here. The other kinds in api/v1alpha1 have
-# hand-written manifests in crds/, so controller-gen is pointed at the single file
-# that declares BlockDeviceFilter rather than at the package -- rendering the whole
-# package would produce a second manifest for every one of them.
+# Every kind in api/v1alpha1 is rendered. BlockDeviceFilter keeps the place its
+# manifest has always had, crds/filter; the other kinds go directly into crds/.
 #
 # controller-gen renders the OpenAPI schema from the kubebuilder markers;
 # crd-enricher then folds in what controller-gen cannot emit -- the x-doc-*
@@ -43,12 +41,9 @@ set -euo pipefail
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # Resolved against the working directory, which has to sit inside the module that
-# holds the API types. controller-gen renders from one file; the enricher is given
-# the whole package, since it only looks for markers belonging to the CRDs it finds
-# in the directory it is pointed at.
-# controller-gen resolves a bare file name against the working directory, which is
-# why generation runs from inside the package rather than from api/.
-render_paths="block_device_filter.go"
+# holds the API types, which is why generation runs from inside the package rather
+# than from api/.
+render_paths="."
 marker_paths="."
 
 tools_dir=$(mktemp -d)
@@ -125,7 +120,12 @@ if [ ${#rendered_files[@]} -eq 0 ]; then
     exit 1
 fi
 
-echo "Installing the CRDs into crds/filter"
+echo "Installing the CRDs into crds"
 for rendered in "${rendered_files[@]}"; do
-    cp "${rendered}" "${root_dir}/crds/filter/$(basename "${rendered}")"
+    name=$(basename "${rendered}")
+    case "${name}" in
+    storage.deckhouse.io_blockdevicefilters.yaml) dest="${root_dir}/crds/filter" ;;
+    *) dest="${root_dir}/crds" ;;
+    esac
+    cp "${rendered}" "${dest}/${name}"
 done

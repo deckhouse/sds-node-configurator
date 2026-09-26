@@ -129,7 +129,7 @@ func TestTheInfraWatcherUsesTheCanonicalConditionTypes(t *testing.T) {
 // only reach Ready once every type in the list has been written, and a type the
 // enum rejects can never be written at all.
 func TestLVGConditionTypesMatchTheCRDEnum(t *testing.T) {
-	raw, err := os.ReadFile("../../../../crds/lvmvolumegroup.yaml")
+	raw, err := os.ReadFile("../../../../crds/storage.deckhouse.io_lvmvolumegroups.yaml")
 	require.NoError(t, err)
 
 	var crd struct {
@@ -165,7 +165,7 @@ func TestLVGConditionTypesMatchTheCRDEnum(t *testing.T) {
 	require.NotEmpty(t, enum, "the conditions type enum was not found in the CRD")
 
 	assert.ElementsMatch(t, enum, internal.LVGConditionTypes,
-		"internal.LVGConditionTypes and the type enum in crds/lvmvolumegroup.yaml have drifted apart")
+		"internal.LVGConditionTypes and the type enum in crds/storage.deckhouse.io_lvmvolumegroups.yaml have drifted apart")
 }
 
 // A False reason that is not in acceptableReasons drags the aggregate Ready

@@ -30,13 +30,29 @@ type LVMLogicalVolumeSnapshotList struct {
 	Items []LVMLogicalVolumeSnapshot `json:"items"`
 }
 
+// LVMLogicalVolumeSnapshot resource defines the storage where a VolumeSnapshot will be created.
+//
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Cluster,shortName=llvs
+// +kubebuilder:subresource:status
+// +kubebuilder:metadata:labels={"heritage=deckhouse","module=sds-node-configurator","backup.deckhouse.io/cluster-config=true"}
+// +kubebuilder:printcolumn:name="Snapshotted LLV Name",type="string",JSONPath=".spec.lvmLogicalVolumeName",description="Snapshotted LLV name"
+// +kubebuilder:printcolumn:name="NodeName",type="string",JSONPath=".status.nodeName",description="Name of the Kubernetes node the snapshot resides in."
+// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Current resource status."
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status"
+// +kubebuilder:printcolumn:name="Size",type="string",JSONPath=".status.size",description="Snapshotted Logical Volume size."
+// +kubebuilder:printcolumn:name="UsedSize",type="string",JSONPath=".status.usedSize",description="Snapshot size."
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age of this resource."
+// +crd-enricher:crd:minimal=true
+// +crd-enricher:crd:preserveUnknownFields=false
 type LVMLogicalVolumeSnapshot struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   LVMLogicalVolumeSnapshotSpec    `json:"spec"`
+	Spec LVMLogicalVolumeSnapshotSpec `json:"spec"`
+	// Describes the resource status.
 	Status *LVMLogicalVolumeSnapshotStatus `json:"status,omitempty"`
 }
 
@@ -49,25 +65,64 @@ func (llvs *LVMLogicalVolumeSnapshot) ActualSnapshotNameOnTheNode() string {
 
 // +k8s:deepcopy-gen=true
 type LVMLogicalVolumeSnapshotSpec struct {
+	// Name of the volume snapshot.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
+	// +kubebuilder:validation:MinLength=1
 	ActualSnapshotNameOnTheNode string `json:"actualSnapshotNameOnTheNode"`
-	LVMLogicalVolumeName        string `json:"lvmLogicalVolumeName"`
+	// Name of the snapshotted LLV resource.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
+	// +kubebuilder:validation:MinLength=1
+	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName"`
 }
 
 // +k8s:deepcopy-gen=true
 type LVMLogicalVolumeSnapshotStatus struct {
-	NodeName              string `json:"nodeName"`
+	// Name of the Kubernetes node the snapshot resides in.
+	// +optional
+	NodeName string `json:"nodeName"`
+	// Name of the Volume Group, where the snapshot resides in.
+	// +optional
 	ActualVGNameOnTheNode string `json:"actualVGNameOnTheNode"`
+	// Name of the volume the snapshot is created from.
+	// +optional
 	ActualLVNameOnTheNode string `json:"actualLVNameOnTheNode"`
-	Phase                 string `json:"phase"`
+	// Current resource's phase.
+	//
+	// Possible values:
+	//
+	// - `Created`: Snapshot was created successfully.
+	// - `Pending`: Snapshot is being created.
+	// - `Failed`: An error occurred while creating the snapshot.
+	// +optional
+	// +kubebuilder:validation:Enum=Created;Pending;Failed
+	Phase string `json:"phase"`
 	// Reason carries free-form detail about the current phase, including raw error
 	// text. Machine-readable reasons live on Conditions.
-	Reason   string            `json:"reason"`
-	Size     resource.Quantity `json:"size"`
+
+	// Reason of the phase.
+	// +optional
+	Reason string `json:"reason"`
+	// Snapshotted Logical Volume size on the node.
+	// +optional
+	Size resource.Quantity `json:"size"`
+	// Snapshot Logical Volume size on the node.
+	// +optional
 	UsedSize resource.Quantity `json:"usedSize"`
-	// Conditions holds the latest observations of the resource state.
+	// The latest observations of the resource state. Condition type: `Ready`.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	// +crd-enricher:unset:items.description
+	// +crd-enricher:raw:items.properties.type.description="Condition type. `Ready` is `True` once the snapshot is in place, `False`\nwhile it is not, and `Unknown` before anything has observed it."
+	// +crd-enricher:raw:items.properties.status.description=Current status of the condition.
+	// +crd-enricher:raw:items.properties.observedGeneration.description=The value of `metadata.generation` this condition was set against.
+	// +crd-enricher:raw:items.properties.lastTransitionTime.description="Timestamp of the last status transition for this condition. It is not bumped\nwhen only the reason or the message changes."
+	// +crd-enricher:raw:items.properties.reason.description="Machine-readable reason for the current status, suitable for log filtering\nand alerting."
+	// +crd-enricher:raw:items.properties.message.description=Human-readable explanation of the current status.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-	// ObservedGeneration is the value of metadata.generation the agent last acted
-	// on. When it trails metadata.generation the conditions still describe the
-	// previous spec.
+	// The value of `metadata.generation` the controller has last acted on. When it trails
+	// `metadata.generation`, the controller has not yet processed the latest spec, and the
+	// conditions below still describe the previous one.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }

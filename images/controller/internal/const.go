@@ -104,7 +104,7 @@ const (
 // once, so the conditions watcher uses this list to tell "not ready" apart from
 // "not yet reported".
 //
-// It has to be kept in step with the type enum in crds/lvmvolumegroup.yaml, which
+// It has to be kept in step with the type enum in crds/storage.deckhouse.io_lvmvolumegroups.yaml, which
 // TestLVGConditionTypesMatchTheCRDEnum asserts. It used to be derived from that
 // enum at runtime — the controller fetched its own CustomResourceDefinition and
 // counted the enum entries — which cost the controller a cluster-wide read on

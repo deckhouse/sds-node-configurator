@@ -108,7 +108,7 @@ func TestEveryPhaseInTheCRDEnumsIsHandled(t *testing.T) {
 		"lvmlogicalvolumesnapshot",
 	} {
 		t.Run(crd, func(t *testing.T) {
-			for _, phase := range phaseEnum(t, "../../../crds/"+crd+".yaml") {
+			for _, phase := range phaseEnum(t, "../../../crds/storage.deckhouse.io_"+crd+"s.yaml") {
 				cond := ReadyConditionForPhase(1, phase, "", crd)
 				assert.NotEqual(t, metav1.ConditionUnknown, cond.Status,
 					"phase %q is in the CRD enum but falls through to the default", phase)
@@ -163,14 +163,14 @@ func TestTheAgentsConditionTypesAreInTheCRDEnum(t *testing.T) {
 
 	for _, conType := range []string{TypeVGConfigurationApplied, TypeVGReady} {
 		assert.Contains(t, enum, conType,
-			"the agent writes condition %s, which crds/lvmvolumegroup.yaml does not admit", conType)
+			"the agent writes condition %s, which crds/storage.deckhouse.io_lvmvolumegroups.yaml does not admit", conType)
 	}
 }
 
 func lvgConditionTypeEnum(t *testing.T) []string {
 	t.Helper()
 
-	raw, err := os.ReadFile("../../../crds/lvmvolumegroup.yaml")
+	raw, err := os.ReadFile("../../../crds/storage.deckhouse.io_lvmvolumegroups.yaml")
 	require.NoError(t, err)
 
 	var crd struct {

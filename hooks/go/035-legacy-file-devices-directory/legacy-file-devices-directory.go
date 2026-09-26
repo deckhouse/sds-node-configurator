@@ -23,7 +23,7 @@ limitations under the License.
 // this hook exists because of that asymmetry.
 //
 // Why they cannot follow. spec.fileDevices[].directory is immutable at admission
-// (`self.directory == oldSelf.directory` in crds/lvmvolumegroup.yaml), so an
+// (`self.directory == oldSelf.directory` in crds/storage.deckhouse.io_lvmvolumegroups.yaml), so an
 // entry created under the old default cannot be edited to the new one — not by
 // the admin, and not by this hook either: the apiserver rejects the write the
 // same way. Nor can the file simply be moved on the node: the spec would still

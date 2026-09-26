@@ -1,0 +1,395 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  labels:
+    backup.deckhouse.io/cluster-config: "true"
+    heritage: deckhouse
+    module: sds-node-configurator
+  name: lvmvolumegroupsets.storage.deckhouse.io
+spec:
+  group: storage.deckhouse.io
+  names:
+    kind: LVMVolumeGroupSet
+    plural: lvmvolumegroupsets
+    shortNames:
+    - lvgset
+    singular: lvmvolumegroupset
+  preserveUnknownFields: false
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - description: Specified LVMVolumeGroups strategy creation.
+      jsonPath: .spec.strategy
+      name: Strategy
+      type: string
+    - description: Actual Volume Group name.
+      jsonPath: .spec.lvmVolumeGroupTemplate.actualVGNameOnTheNode
+      name: VG
+      type: string
+    - description: Volume Group type.
+      jsonPath: .spec.lvmVolumeGroupTemplate.type
+      name: type
+      priority: 1
+      type: string
+    - description: Current LVMVolumeGroups count created by the set.
+      jsonPath: .status.currentLVMVolumeGroupsCount
+      name: Current LVG Count
+      type: integer
+    - description: Desired LVMVolumeGroups count created by the set.
+      jsonPath: .status.desiredLVMVolumeGroupsCount
+      name: Desired LVG Count
+      type: integer
+    - description: Resource phase.
+      jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - description: Age of this resource.
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: An interface for creating several LVMVolumeGroups by common template
+          at once.
+        properties:
+          spec:
+            properties:
+              lvmVolumeGroupTemplate:
+                description: Common template for LVMVolumeGroup resources provided
+                  by the set.
+                properties:
+                  actualVGNameOnTheNode:
+                    description: |-
+                      Desired name of a Volume Group in LVMVolumeGroups. Must be unique for the node it is on.
+
+                      > This field is immutable.
+                      > Note that this Volume Group name will be common for every LVMVolumeGroup created by the set.
+                    type: string
+                    x-kubernetes-validations:
+                    - message: The actualVGNameOnTheNode field is immutable.
+                      rule: self == oldSelf
+                  blockDeviceSelector:
+                    description: BlockDevice resources selector used in LVMVolumeGroups
+                      configurations.
+                    properties:
+                      matchExpressions:
+                        description: Expressions for the block device selector.
+                        items:
+                          properties:
+                            key:
+                              description: Label key to check.
+                              type: string
+                            operator:
+                              description: Operator for comparing values.
+                              enum:
+                              - In
+                              - NotIn
+                              - Exists
+                              - DoesNotExist
+                              type: string
+                            values:
+                              description: An array of values to compare. Required
+                                if the operator is `In` or `NotIn`.
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: Labels for the block device selector.
+                        type: object
+                    type: object
+                  fileDevices:
+                    description: |-
+                      File-backed block devices to create as LVM PVs in LVMVolumeGroups.
+
+                      The agent will create a preallocated file in the specified directory,
+                      attach it as a loop device, and use it as a Physical Volume.
+
+                      Each entry is identified by its `name`. `directory` cannot be changed,
+                      and `size` can only be increased: raising it grows the backing file, the
+                      loop device and the Physical Volume in place on every node the set covers,
+                      without unmounting anything or interrupting the volumes on top. Lowering
+                      it is rejected: giving capacity back means shrinking the Volume Group,
+                      which the module does not do for block devices either.
+
+                      Capacity can therefore be added two ways: raise the size of an existing
+                      entry, or add a new entry under a new name when the extra space has to
+                      come from a different filesystem — at most 32 entries per Volume Group.
+
+                      > Note that the configuration will be common for every LVMVolumeGroup created by the set.
+                      > Entries removed from this template are removed from the child LVMVolumeGroups; if such
+                      > an entry already backs a live Physical Volume, the agent reports the drift on the
+                      > child's `VGConfigurationApplied` condition and takes no destructive action.
+                    items:
+                      properties:
+                        directory:
+                          description: |-
+                            Absolute directory on the node's filesystem where the backing file
+                            will be created. The agent creates the directory automatically
+                            (mkdir -p) if it does not exist; the path must be absolute and
+                            must not contain '..' segments.
+                          maxLength: 4096
+                          pattern: ^/[^/]+(/[^/]+)*$
+                          type: string
+                        name:
+                          description: |-
+                            Identifier of this file device within each Volume Group the set creates.
+                            Becomes part of the backing file's name on the node.
+                          maxLength: 63
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                        size:
+                          description: |-
+                            Size of the preallocated backing file. Must be at least 1Gi;
+                            a smaller value is rejected at admission, since `size` cannot be
+                            lowered afterwards.
+
+                            Only binary units are accepted; `1G` (10^9 bytes) is below the
+                            1Gi (2^30 bytes) minimum and is rejected at admission. The value
+                            must be a whole number of the unit it names — `1536Mi`, not
+                            `1.5Gi`; see the same field on LVMVolumeGroup for why.
+                          maxLength: 32
+                          pattern: ^[0-9]+(Mi|Gi|Ti|Pi|Ei)$
+                          type: string
+                      required:
+                      - directory
+                      - name
+                      - size
+                      type: object
+                      x-kubernetes-validations:
+                      - message: A fileDevices entry's 'size' must be at least 1Gi.
+                        rule: quantity(self.size).compareTo(quantity('1Gi')) >= 0
+                      - message: A fileDevices entry's 'directory' is immutable.
+                        rule: self.directory == oldSelf.directory
+                      - message: A fileDevices entry's 'size' can only be increased.
+                          Shrinking a Volume Group is not supported.
+                        rule: quantity(self.size).compareTo(quantity(oldSelf.size))
+                          >= 0
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  metadata:
+                    description: Metadata of LVMVolumeGroup resources.
+                    properties:
+                      labels:
+                        additionalProperties:
+                          type: string
+                        description: Required labels for LVMVolumeGroup resources.
+                        type: object
+                    type: object
+                  thinPools:
+                    description: |-
+                      Desired thin pool configuration in LVMVolumeGroups.
+
+                      > Note that the configuration will be common for every LVMVolumeGroup created by the set.
+                    items:
+                      properties:
+                        allocationLimit:
+                          default: 150%
+                          description: Thin pool oversize limit.
+                          pattern: ^[1-9][0-9]{2,3}%$
+                          type: string
+                        name:
+                          description: |-
+                            Desired thin pool name.
+
+                            > This field is immutable.
+                          type: string
+                        size:
+                          description: |-
+                            Desired thin pool size. Might be specified as a number or percentage of total Volume Group space.
+
+                            > Note that if you specify the percent size, the thin pool will be automatically extended when Volume Group is extended.
+                          pattern: ^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$|^[1-9][0-9]?%$|100%
+                          x-kubernetes-int-or-string: true
+                      required:
+                      - name
+                      - size
+                      type: object
+                    type: array
+                  type:
+                    description: |-
+                      Type of a VolumeGroup in LVMVolumeGroups.
+
+                      Possible values:
+
+                      - `Local`: Local volume group; the devices used are not distributed (not Shared LUN).
+                    enum:
+                    - Local
+                    type: string
+                    x-kubernetes-validations:
+                    - message: The type field is immutable.
+                      rule: self == oldSelf
+                required:
+                - actualVGNameOnTheNode
+                - type
+                type: object
+                x-kubernetes-validations:
+                - message: At least one of 'blockDeviceSelector' or 'fileDevices'
+                    must be specified.
+                  rule: has(self.blockDeviceSelector) || (has(self.fileDevices) &&
+                    size(self.fileDevices) > 0)
+              nodeSelector:
+                description: Node selector for nodes that will be used by LVMVolumeGroups.
+                properties:
+                  matchExpressions:
+                    description: Expressions for the node selector.
+                    items:
+                      properties:
+                        key:
+                          description: Label key to check.
+                          type: string
+                        operator:
+                          description: Operator for comparing values.
+                          enum:
+                          - In
+                          - NotIn
+                          - Exists
+                          - DoesNotExist
+                          type: string
+                        values:
+                          description: An array of values to compare. Required if
+                            the operator is `In` or `NotIn`.
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: Labels for the node selector.
+                    type: object
+                type: object
+              strategy:
+                description: Strategy (rule) to provide LVMVolumeGroup resources by
+                  the set.
+                enum:
+                - PerNode
+                type: string
+                x-kubernetes-validations:
+                - message: The strategy field is immutable.
+                  rule: self == oldSelf
+            required:
+            - lvmVolumeGroupTemplate
+            - nodeSelector
+            - strategy
+            type: object
+          status:
+            properties:
+              conditions:
+                description: 'The latest observations of the resource state. Condition
+                  type: `Ready`.'
+                items:
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        Timestamp of the last status transition for this condition. It is not bumped
+                        when only the reason or the message changes.
+                      format: date-time
+                      type: string
+                    message:
+                      description: Human-readable explanation of the current status.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: The value of `metadata.generation` this condition
+                        was set against.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        Machine-readable reason for the current status, suitable for log filtering
+                        and alerting.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: Current status of the condition.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: |-
+                        Condition type. `Ready` is `True` once the set of LVMVolumeGroup resources is in place, `False`
+                        while it is not, and `Unknown` before anything has observed it.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              createdLVMVolumeGroups:
+                description: Brief information about LVMVolumeGroups created by the
+                  set.
+                items:
+                  properties:
+                    lvmVolumeGroupName:
+                      description: Name of the created LVMVolumeGroup resource.
+                      type: string
+                    nodeName:
+                      description: Name of the node where the LVMVolumeGroup resource
+                        was created.
+                      type: string
+                  type: object
+                type: array
+              currentLVMVolumeGroupsCount:
+                description: Current number of LVMVolumeGroups created by the set.
+                type: integer
+              desiredLVMVolumeGroupsCount:
+                description: Desired number of LVMVolumeGroups that should be created
+                  by the set.
+                type: integer
+              observedGeneration:
+                description: |-
+                  The value of `metadata.generation` the controller has last acted on. When it trails
+                  `metadata.generation`, the controller has not yet processed the latest spec, and the
+                  conditions below still describe the previous one.
+                format: int64
+                type: integer
+              phase:
+                description: LVMVolumeGroups creation phase.
+                enum:
+                - Created
+                - Pending
+                - NotCreated
+                - ""
+                type: string
+              reason:
+                description: Reason for the current phase.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
