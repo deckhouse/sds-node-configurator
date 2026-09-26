@@ -1,3 +1,4 @@
 dirs:
   - /dev/
   - /run/udev/
+  - /var/lib/kubelet/plugins/kubernetes.io/csi/volumeDevices
