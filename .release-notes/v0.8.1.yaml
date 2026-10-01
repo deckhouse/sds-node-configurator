@@ -1,0 +1,30 @@
+date: "2026-10-01"
+
+summary: "The agent deletes `BlockDevice` resources that have stayed `Missing` past a configurable retention, the scheduler extender no longer promises the same free space twice in HA mode, and inactive thin volumes are activated again."
+
+highlights:
+  - "New module setting `missingBlockDeviceRetentionHours` (24 by default): a `BlockDevice` whose device has been gone for that long and that no `LVMVolumeGroup` uses is deleted, so nodes with dynamically mapped LUNs no longer collect `Missing` resources forever."
+  - "With two replicas of `sds-common-scheduler-extender` (HA mode), space reservations are served by one elected replica, so two Pods can no longer be promised the same free space of a thin pool."
+  - "A thin `LVMLogicalVolume` deactivated while its thin pool stayed active is activated again by the agent."
+
+new_features:
+  - "Module setting `missingBlockDeviceRetentionHours` (hours, 0 to 8760, 24 by default). A `BlockDevice` that is not consumable is not deleted when its device disappears: it gets the `Missing` condition, `True` after 10 minutes of absence. The agent now deletes such a resource of its node once `Missing` has been `True` for the retention, provided no `LVMVolumeGroup` lists it in `status.nodes` and its `status.lvmVolumeGroupName` does not name an existing `LVMVolumeGroup`, so a Physical Volume lost from under a live Volume Group stays visible. If the device returns, the resource is created again. `0` disables the deletion. The new metric `sds_node_configurator_block_devices_missing{node,reason}` counts the `Missing=True` resources that remain; each deletion is logged by the agent."
+  - "On DKP 1.78 and later, the module's access roles follow the capability/scope RBAC scheme: the ClusterRoles `d8:system-capability:sds-node-configurator:view` and `d8:system-capability:sds-node-configurator:edit` grant read-only and full access to `BlockDevice`, `LVMVolumeGroup`, `LVMVolumeGroupSet`, `LVMLogicalVolume` and `LVMLogicalVolumeSnapshot`. Below 1.78 the module keeps the `d8:manage:permission:module:sds-node-configurator:view` and `:edit` roles."
+
+fixes:
+  - "In HA mode, the two `sds-common-scheduler-extender` replicas each kept their own space reservations in memory, so scheduling requests answered by different replicas could be promised the same free space and overcommit a thin pool. The replicas now elect a leader over the Lease `d8-sds-node-configurator/sds-common-scheduler-extender`; only the leader serves filtering, scoring and reservation requests, and the other replica forwards them to it, answering `503` while no leader is reachable."
+  - "A thin `LVMLogicalVolume` deactivated on its own (for example, with `lvchange -an`) while its thin pool stayed active was never activated again, so the volume stayed unavailable. The agent now runs `vgchange -ay` for its Volume Group as it already did for thick volumes and thin pools. Logical volumes carrying the activation skip flag, which the module never sets, are still left inactive."
+
+upgrade_notes:
+  - "Deletion of `Missing` resources is on by default. Right after the update, the agent deletes every `BlockDevice` that has already been `Missing=True` for more than 24 hours and is not used by an `LVMVolumeGroup`. To keep them, set `missingBlockDeviceRetentionHours` to `0` or to a larger value before updating."
+  - "On DKP 1.78 and later, the `d8:manage:permission:module:sds-node-configurator:view` and `:edit` ClusterRoles are replaced by `d8:system-capability:sds-node-configurator:view` and `:edit`. Bindings that reference the old role names directly have to be switched to the new ones."
+
+docs:
+  - "The Russian reference for `BlockDevice` now covers `status.conditions` and its fields."
+
+dependencies:
+  - name: "LVM2 (`lvm`, `dmsetup` on the nodes)"
+    from: "main snapshot"
+    to: "2.03.42"
+    changelog_url: "https://gitlab.com/lvmteam/lvm2/-/tags/v2_03_42"
+    notes: "The static `lvm` and `dmsetup` the module installs on the nodes now come from the LVM2 2.03.42 release. The previous build pinned a revision but never checked it out, so nodes got an unreleased snapshot of the LVM2 main branch."
