@@ -13,34 +13,13 @@ git:
       - api
       - lib/go
       - images/{{ $.ImageName }}
-    stageDependencies:
-      install:
-        - '**/*'
     excludePaths:
       - images/{{ $.ImageName }}/werf.yaml
-
-secrets:
-- id: SOURCE_REPO
-  value: {{ .SOURCE_REPO }}
-
-shell:
-  install:
-    - git config --global advice.detachedHead false
-    - git clone --depth 1 $(cat /run/secrets/SOURCE_REPO)/lvmteam/lvm2.git /src/lvm2
-    - cd /src/lvm2
-    - git fetch --depth 1 origin {{ include "get_oss_version_by_id" (list "lvm2" .) }}
-    - rm -rf /src/lvm2/.git
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-binaries-artifact
 from: {{ index $.Images "builder/golang" }}
 final: false
-
-import:
-  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
-    add: /src
-    to: /src
-    before: install
 
 git:
   - add: {{ .ModuleDir }}/tools/dev_images/additional_tools/binary_replace.sh
@@ -51,22 +30,10 @@ git:
 
 shell:
   install:
-    {{- include "svace toolchain for golang builds" . | nindent 4 }}
-    # The ALT builder is gone; the same toolchain comes from the container-factory catalogue.
-    # gnu-glibc-devel, util-linux-devel and libaio-devel carry the static archives
-    # (libc.a, libblkid.a, libaio.a) that --enable-static_link needs; lvm2 builds its own
-    # libdm, so no device-mapper package is required. ldd is what binary_replace.sh checks for.
-    - pm install make gnu-gcc gnu-glibc-devel binutils autoconf automake libtool pkgconf libaio-devel util-linux-devel ldd
-    - cd /src/lvm2
-    # configure looks for modprobe on the builder and, not finding it, compiles out the module
-    # autoload: lvm then reports a missing device-mapper target instead of loading it. The binary
-    # runs on the host through nsenter, so the path is the host's and is given explicitly.
-    - ./configure --enable-static_link --disable-silent-rules --disable-readline --enable-blkid_wiping --build=x86_64-linux-gnu MODPROBE_CMD=/sbin/modprobe
-    - |
-      {{- include "image-build.build" (set $ "BuildCommand" (printf "make")) | nindent 6 }}
+    - pm install lvm2-static ldd
     - mkdir -p /sds-utils/bin/
-    - mv /src/lvm2/tools/lvm.static /sds-utils/bin/lvm
-    - mv /src/lvm2/libdm/dm-tools/dmsetup.static /sds-utils/bin/dmsetup
+    - cp /usr/sbin/lvm /sds-utils/bin/lvm
+    - cp /usr/sbin/dmsetup /sds-utils/bin/dmsetup
     - chmod +x /binary_replace.sh
     - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
 
