@@ -95,7 +95,7 @@ func TestLVMGlobalFilterForRejectsPathlessMaps(t *testing.T) {
 	)
 
 	assert.Equal(t,
-		`devices/global_filter=["a|^/dev/loop7$|","r|^/dev/dm-2$|","r|^/dev/mapper/mpathbb$|","r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|"]`,
+		`devices/global_filter=["a|^/dev/loop7$|","r|^/dev/dm-2$|","r|^/dev/mapper/mpathbb$|","r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|","r|^/dev/mapper/shlun-|"]`,
 		filter,
 		"accepts first, then the named rejects, then the static foreign-device rejects")
 }
@@ -126,7 +126,7 @@ func TestLVMGlobalFilterForAcceptsEverySpellingOfAPublishedDevice(t *testing.T) 
 	})
 
 	assert.Equal(t,
-		`devices/global_filter=["r|^/dev/sda$|","r|^/dev/sdc1$|","r|^/dev/nvme0n1p2$|","r|^/dev/block/253:5$|","r|^/dev/dm-5$|","r|^/dev/mapper/mpatha-part1$|","r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|"]`,
+		`devices/global_filter=["r|^/dev/sda$|","r|^/dev/sdc1$|","r|^/dev/nvme0n1p2$|","r|^/dev/block/253:5$|","r|^/dev/dm-5$|","r|^/dev/mapper/mpatha-part1$|","r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|","r|^/dev/mapper/shlun-|"]`,
 		filter)
 }
 
@@ -140,7 +140,7 @@ func TestLVMGlobalFilterForEscapesRegexMetacharactersInNames(t *testing.T) {
 	})
 
 	assert.Equal(t,
-		`devices/global_filter=["r|^/dev/mapper/vg0-data[.]1$|","r|^/dev/mapper/a[+]b$|","r|^/dev/mapper/mpath[.]a[+]1$|","r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|"]`,
+		`devices/global_filter=["r|^/dev/mapper/vg0-data[.]1$|","r|^/dev/mapper/a[+]b$|","r|^/dev/mapper/mpath[.]a[+]1$|","r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|","r|^/dev/mapper/shlun-|"]`,
 		filter)
 }
 

@@ -269,7 +269,7 @@ func TestPublishedDevices_FilterCarriesTheRejects(t *testing.T) {
 	filter := LVMGlobalFilterForOwnedLoops()
 
 	assert.Equal(t,
-		`devices/global_filter=["r|^/dev/dm-5$|","r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|"]`,
+		`devices/global_filter=["r|^/dev/dm-5$|","r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|","r|^/dev/mapper/shlun-|"]`,
 		filter,
 		"the published device is rejected by its kernel name, ahead of the static rejects")
 }

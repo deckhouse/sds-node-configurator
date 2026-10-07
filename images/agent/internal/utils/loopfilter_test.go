@@ -84,7 +84,7 @@ func TestLVMFilterAlwaysRejectsUnownedLoopDevices(t *testing.T) {
 	t.Run("the rules are ordered and complete", func(t *testing.T) {
 		got := internal.LVMGlobalFilterAcceptingLoops([]string{"/dev/loop2", "/dev/loop10"})
 		assert.Equal(t,
-			`devices/global_filter=["a|^/dev/loop2$|","a|^/dev/loop10$|","r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|"]`,
+			`devices/global_filter=["a|^/dev/loop2$|","a|^/dev/loop10$|","r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|","r|^/dev/mapper/shlun-|"]`,
 			got)
 	})
 

@@ -108,7 +108,17 @@ const (
 	// lvmForeignDeviceRejects is the reject-rule body shared by every form
 	// of the filter. Order matters only against the accept rules that may
 	// precede it: LVM takes the first matching rule.
-	lvmForeignDeviceRejects = `"r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|"`
+	//
+	// /dev/mapper/shlun-* are the device-mapper stacks csi-scsi-generic
+	// builds over its shared LUNs: a thin pool per volume and the volume,
+	// snapshot and standby devices on it, each carrying whatever a guest
+	// put inside -- Volume Groups included. csi-scsi-generic's own
+	// NodeGroupConfiguration rejects them in the host's lvm.conf, and this
+	// --config overrides that file too: without the rule here a
+	// `vgchange -ay` for a node's Volume Group of the same name activated
+	// a guest's thin pool on the host and held the guest's volume open,
+	// so that its node could neither tear it down nor migrate it away.
+	lvmForeignDeviceRejects = `"r|^/dev/rbd|","r|^/dev/drbd|","r|^/dev/nbd|","r|^/dev/loop|","r|^/dev/mapper/shlun-|"`
 
 	// LVMArchiveRetention caps the size of /etc/lvm/archive: keep at
 	// most the last 10 metadata snapshots and at most 7 days of history.
