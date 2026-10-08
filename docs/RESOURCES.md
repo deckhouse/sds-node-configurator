@@ -299,6 +299,21 @@ The controller automatically updates the `status` field of the [LVMVolumeGroup](
 The controller does not modify the `spec` field, as it reflects the desired state of the LVM Volume Group. To change the state of the corresponding LVM Volume Group on the node, the user can modify the `spec` field.
 {{< /alert >}}
 
+#### Adding capacity on a node used by a LocalStorageClass
+
+A [LocalStorageClass](/modules/sds-local-volume/cr.html#localstorageclass) accepts only one [LVMVolumeGroup](./cr.html#lvmvolumegroup) per node. Several LVMVolumeGroup resources may exist on the same node, but each of them must be used in a different LocalStorageClass. If a LocalStorageClass lists two LVMVolumeGroup resources from the same node, it goes to the `Failed` phase with the following reason:
+
+```text
+Some LVMVolumeGroups use the same node (|node: LVG names): |node1: vg-1-on-node1,vg-2-on-node1,
+```
+
+The restriction exists for two reasons:
+
+- A volume of the storage class is placed by node: the CSI driver picks the single LVMVolumeGroup of the class on the node selected by the scheduler.
+- Separate Volume Groups do not share free space. Thin volumes in a thin pool of one Volume Group cannot grow into another Volume Group, even when it has free space.
+
+To add capacity on such a node, extend the Volume Group that is already in the LocalStorageClass instead of creating a new LVMVolumeGroup resource: change `spec.blockDeviceSelector` of the existing LVMVolumeGroup so that it also selects the new [BlockDevice](./cr.html#blockdevice) resource. The controller adds the device to the Volume Group. A thin pool whose `size` is set as a percentage grows together with the Volume Group; for a thin pool with an absolute `size`, increase the value in `spec.thinPools`.
+
 ### Deleting an LVMVolumeGroup resource
 
 #### Automatic deletion
