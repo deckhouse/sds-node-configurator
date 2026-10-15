@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender
 
-go 1.27.1
+go 1.27.2
 require (
 	github.com/deckhouse/sds-common-lib v0.15.0
 	github.com/deckhouse/sds-local-volume/api v0.0.0-20260908063335-f8c1c129fa86

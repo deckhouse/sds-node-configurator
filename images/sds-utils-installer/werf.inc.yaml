@@ -30,7 +30,7 @@ git:
 
 shell:
   install:
-    - pm install lvm2-static ldd
+    - pm install lvm2-static-bin posix-libc-utils
     - mkdir -p /sds-utils/bin/
     - cp /usr/sbin/lvm /sds-utils/bin/lvm
     - cp /usr/sbin/dmsetup /sds-utils/bin/dmsetup

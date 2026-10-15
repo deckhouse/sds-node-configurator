@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-node-configurator/images/controller
 
-go 1.27.1
+go 1.27.2
 require (
 	github.com/deckhouse/sds-common-lib v0.15.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250114161813-c1a8b09cd47d

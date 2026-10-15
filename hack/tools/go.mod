@@ -21,7 +21,7 @@ module sds-node-configurator-codegen-tools
 // refuses to load a package declaring a newer `go` directive ("package requires
 // newer Go version go1.26 (application built with go1.25)"). api/go.mod is on
 // go 1.26.
-go 1.27.1
+go 1.27.2
 tool (
 	github.com/deckhouse/deckhouse/pkg/crd-enricher/cmd/crd-enricher
 	sigs.k8s.io/controller-tools/cmd/controller-gen

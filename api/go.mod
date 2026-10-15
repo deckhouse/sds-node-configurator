@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-node-configurator/api
 
-go 1.27.1
+go 1.27.2
 require k8s.io/apimachinery v0.33.0
 
 require (
