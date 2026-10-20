@@ -128,16 +128,13 @@ func (c *commands) GetBlockDevices(ctx context.Context) ([]internal.Device, stri
 // exit with nothing on stderr means nobody knows what happened. An empty or
 // truncated report is caught a line later by unmarshalVGs either way.
 func (commands) GetAllVGs(ctx context.Context) (data []internal.VGData, command string, stdErr bytes.Buffer, err error) {
-	var outs bytes.Buffer
 	args := []string{"vgs", "-o", "+uuid,tags,shared,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
-	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
-	cmd.Stdout = &outs
-	cmd.Stderr = &stdErr
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
 	// Filtered after the run, not before it: taken before, stdErr is still empty
 	// and the returned buffer never carries anything.
-	runErr := cmd.Run()
+	outs, stdErr, runErr := runScanDetached(ctx, "vgs", cmd)
 	filteredStdErr := filterStdErr(cmd.String(), stdErr, benignAlwaysStdErr)
 	if err := errIfNotBenignFiltered(cmd.String(), runErr, stdErr, filteredStdErr, silentExitIsFailure); err != nil {
 		return nil, cmd.String(), filteredStdErr, err
@@ -179,14 +176,12 @@ func (commands) GetVG(vgName string) (vgData internal.VGData, command string, st
 }
 
 func (commands) GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
-	var outs bytes.Buffer
 	args := []string{"lvs", "-o", "+vg_uuid,tags,thin_id,metadata_lv,lv_dm_path", "--units", "B", "--nosuffix", "--all", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
-	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
-	cmd.Stdout = &outs
-	cmd.Stderr = &stdErr
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
-	err = cmd.Run()
+	var outs bytes.Buffer
+	outs, stdErr, err = runScanDetached(ctx, "lvs", cmd)
 	filteredStdErr := filterStdErr(cmd.String(), stdErr, benignAlwaysStdErr)
 	if err != nil {
 		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
@@ -237,14 +232,11 @@ func (commands) GetLV(vgName, lvName string) (lvData internal.LVData, command st
 // rollbackProvisionedFileDevices and pvView fall back or do nothing. See
 // silentExitPolicy for why silence still counts as a failure here.
 func (commands) GetAllPVs(ctx context.Context) (data []internal.PVData, command string, stdErr bytes.Buffer, err error) {
-	var outs bytes.Buffer
 	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
-	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
-	cmd.Stdout = &outs
-	cmd.Stderr = &stdErr
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
-	runErr := cmd.Run()
+	outs, stdErr, runErr := runScanDetached(ctx, "pvs", cmd)
 	filteredStdErr := filterStdErr(cmd.String(), stdErr, benignAlwaysStdErr)
 	if err := errIfNotBenignFiltered(cmd.String(), runErr, stdErr, filteredStdErr, silentExitIsFailure); err != nil {
 		return nil, cmd.String(), filteredStdErr, err
