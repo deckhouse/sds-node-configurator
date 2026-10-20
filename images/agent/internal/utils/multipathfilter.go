@@ -136,8 +136,23 @@ func UnreadableMultipathDevices() []string {
 	return devices
 }
 
-// ResetUnreadableMultipathCache drops the cached set. The scanner calls it when
-// it has reason to believe the picture changed, and tests use it to make the
+// RefreshUnreadableMultipathDevices rebuilds the set now, whatever its age, and
+// returns it. The scanner calls it before every pass: the pass is about to run
+// lvm over every device on the node, and a map that lost its last path since
+// the cache was filled is exactly the one that pass must not open. The TTL
+// stays for the other callers, which run between passes and cannot afford a
+// scan each.
+func RefreshUnreadableMultipathDevices() []string {
+	unreadableMaps.mu.Lock()
+	defer unreadableMaps.mu.Unlock()
+
+	unreadableMaps.devices = scanUnreadableMultipathDevices()
+	unreadableMaps.refreshed = time.Now()
+
+	return unreadableMaps.devices
+}
+
+// ResetUnreadableMultipathCache drops the cached set. Tests use it to make the
 // cache invisible.
 func ResetUnreadableMultipathCache() {
 	unreadableMaps.mu.Lock()

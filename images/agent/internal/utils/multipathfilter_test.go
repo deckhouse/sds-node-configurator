@@ -185,6 +185,23 @@ func TestMapsWithoutActivePath(t *testing.T) {
 	}
 }
 
+func TestRefreshUnreadableMultipathDevices_IgnoresTheCacheAge(t *testing.T) {
+	root := withFakeSysBlock(t)
+
+	fakeDM(t, root, "dm-1", "mpath-3600healthy", "mpathaa", 2)
+	require.Empty(t, UnreadableMultipathDevices(), "nothing is unreadable yet, and the cache now holds that answer")
+
+	// The map loses its paths while the cache is fresh.
+	require.NoError(t, os.RemoveAll(filepath.Join(root, "dm-1", "slaves")))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "dm-1", "slaves"), 0o755))
+
+	assert.Empty(t, UnreadableMultipathDevices(), "the cached answer is served within the TTL")
+	assert.Equal(t, []string{"/dev/dm-1", "/dev/mapper/mpathaa"}, RefreshUnreadableMultipathDevices(),
+		"a refresh sees the map as it is now")
+	assert.Equal(t, []string{"/dev/dm-1", "/dev/mapper/mpathaa"}, UnreadableMultipathDevices(),
+		"and the cache serves the refreshed answer afterwards")
+}
+
 func TestUnreadableMultipathDevices_NoSysfs(t *testing.T) {
 	root := withFakeSysBlock(t)
 	require.NoError(t, os.RemoveAll(root))

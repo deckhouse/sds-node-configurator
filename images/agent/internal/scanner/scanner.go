@@ -252,6 +252,14 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	published, publishedDirPresent := utils.RefreshPublishedDevices(log)
 	metrics.SetPublishedBlockDevices(published.Len(), publishedDirPresent)
 
+	// And the multipath maps that cannot be read, for the strongest reason of the
+	// three: a map that lost its last path since the cache was filled is the one
+	// device this pass must not open, because the open does not fail, it blocks,
+	// and the blocked scan then holds every map it reached before. The window
+	// the TTL left was the whole interval between passes; what remains is the
+	// moment between this scan and the first lvm command below.
+	utils.RefreshUnreadableMultipathDevices()
+
 	// the scan operations order is very important as it guarantees the consistent and reliable data from the node
 	realClock := clock.RealClock{}
 	now := time.Now()
