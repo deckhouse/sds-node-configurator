@@ -50,6 +50,7 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,6 +61,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
@@ -109,6 +111,11 @@ var unreadableMaps struct {
 	mu        sync.Mutex
 	devices   []string
 	refreshed time.Time
+
+	// What the log has already said. The devices slice as announced, held by
+	// reference: a scan builds a new slice rather than mutating the cached one.
+	announced        bool
+	announcedDevices []string
 }
 
 // UnreadableMultipathDevices returns the device paths of multipath maps that
@@ -142,14 +149,63 @@ func UnreadableMultipathDevices() []string {
 // the cache was filled is exactly the one that pass must not open. The TTL
 // stays for the other callers, which run between passes and cannot afford a
 // scan each.
-func RefreshUnreadableMultipathDevices() []string {
+func RefreshUnreadableMultipathDevices(log logger.Logger) []string {
 	unreadableMaps.mu.Lock()
 	defer unreadableMaps.mu.Unlock()
 
 	unreadableMaps.devices = scanUnreadableMultipathDevices()
 	unreadableMaps.refreshed = time.Now()
+	announceUnreadableMaps(log)
 
 	return unreadableMaps.devices
+}
+
+// announceUnreadableMaps says what the set is when it is first known and
+// whenever it changes, and stays quiet otherwise: the set is rebuilt every pass,
+// and a line per pass would bury the one that matters under identical copies.
+// The maps are named by their mapper alias, which is what `multipath -ll` and
+// `dmsetup` show the operator who has to remove them.
+func announceUnreadableMaps(log logger.Logger) {
+	if unreadableMaps.announced && slices.Equal(unreadableMaps.announcedDevices, unreadableMaps.devices) {
+		return
+	}
+
+	composition := "none"
+	if n := CountUnreadableMultipathMaps(unreadableMaps.devices); n > 0 {
+		composition = fmt.Sprintf("%d: %s", n, strings.Join(unreadableMultipathMapNames(unreadableMaps.devices), ", "))
+	}
+	if unreadableMaps.announced {
+		log.Info(fmt.Sprintf("multipath maps with no usable path, kept out of lvm scans and BlockDevice candidates (was %d): %s",
+			CountUnreadableMultipathMaps(unreadableMaps.announcedDevices), composition))
+	} else {
+		log.Info("multipath maps with no usable path, kept out of lvm scans and BlockDevice candidates: " + composition)
+	}
+
+	unreadableMaps.announced = true
+	unreadableMaps.announcedDevices = unreadableMaps.devices
+}
+
+// CountUnreadableMultipathMaps counts the maps in a set returned by
+// UnreadableMultipathDevices: each map is listed by both of its spellings, so
+// the count is of the /dev/dm-N entries, which every map has.
+func CountUnreadableMultipathMaps(devices []string) int {
+	n := 0
+	for _, dev := range devices {
+		if strings.HasPrefix(dev, "/dev/dm-") {
+			n++
+		}
+	}
+	return n
+}
+
+func unreadableMultipathMapNames(devices []string) []string {
+	names := make([]string, 0, len(devices))
+	for _, dev := range devices {
+		if name, ok := strings.CutPrefix(dev, "/dev/mapper/"); ok {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // ResetUnreadableMultipathCache drops the cached set. Tests use it to make the
@@ -160,6 +216,8 @@ func ResetUnreadableMultipathCache() {
 
 	unreadableMaps.devices = nil
 	unreadableMaps.refreshed = time.Time{}
+	unreadableMaps.announced = false
+	unreadableMaps.announcedDevices = nil
 }
 
 func scanUnreadableMultipathDevices() []string {

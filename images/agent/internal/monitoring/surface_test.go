@@ -65,6 +65,8 @@ var wantSurface = []string{
 	"sds_node_configurator_lvm_logical_volume_size_bytes                    GAUGE   logical_volume,node,volume_group",
 	"sds_node_configurator_lvm_logical_volume_used_bytes                    GAUGE   logical_volume,node,volume_group",
 	"sds_node_configurator_lvm_logical_volume_used_percent                  GAUGE   logical_volume,node,volume_group",
+	"sds_node_configurator_lvm_scans_abandoned_total                        COUNTER command,node",
+	"sds_node_configurator_lvm_scans_outstanding                            GAUGE   command,node",
 	"sds_node_configurator_lvm_thin_pool_metadata_used_percent              GAUGE   node,thin_pool,volume_group",
 	"sds_node_configurator_lvm_thin_pool_size_bytes                         GAUGE   node,thin_pool,volume_group",
 	"sds_node_configurator_lvm_thin_pool_used_bytes                         GAUGE   node,thin_pool,volume_group",
@@ -77,6 +79,7 @@ var wantSurface = []string{
 	"sds_node_configurator_no_operational_resources_count_total             GAUGE   resource",
 	"sds_node_configurator_reconcile_duration_seconds                       SUMMARY controller,node",
 	"sds_node_configurator_reconciles_count_total                           COUNTER controller,node",
+	"sds_node_configurator_unreadable_multipath_maps                        GAUGE   node",
 	"sds_node_configurator_utils_commands_errors_count_total                COUNTER controller,method,node",
 	"sds_node_configurator_utils_commands_execution_count_total             COUNTER controller,method,node",
 }
@@ -113,6 +116,9 @@ func touchEverySeries(m *Metrics) {
 	m.LVMActivationTotal("vg", "success").Inc()
 	m.LVMVolumeGroupImportRefusedTotal("vg", "lvg").Inc()
 	m.SetBlockDevicesMissing(map[string]int{v1alpha1.ReasonDeviceNotFound: 1})
+	m.SetUnreadableMultipathMaps(1)
+	m.LVMScanAbandoned("lvs")
+	m.SetLVMScanOutstanding("lvs", true)
 
 	// The four file-device gauges have no per-series accessor; they are written
 	// only through this method.

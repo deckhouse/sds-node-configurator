@@ -102,6 +102,20 @@ func runScanDetached(ctx context.Context, key string, cmd *exec.Cmd) (stdout, st
 	}
 }
 
+// OutstandingScans reports which scans, abandoned at their deadline, are still
+// running, with the time each one started.
+func OutstandingScans() map[string]time.Time {
+	outstandingScans.mu.Lock()
+	defer outstandingScans.mu.Unlock()
+
+	out := make(map[string]time.Time, len(outstandingScans.started))
+	for key, since := range outstandingScans.started {
+		out[key] = since
+	}
+
+	return out
+}
+
 func claimScan(key string) error {
 	outstandingScans.mu.Lock()
 	defer outstandingScans.mu.Unlock()

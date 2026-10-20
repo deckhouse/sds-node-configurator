@@ -265,6 +265,36 @@ var (
 		Help:      "1 when kubelet's CSI volumeDevices/publish directory exists on the node, 0 when it does not: either no block volume was ever published here, or kubelet's root is not where the agent reads it and nothing is filtered as published.",
 	}, []string{"node"})
 
+	// The multipath maps the agent keeps lvm away from because reading them
+	// blocks (utils.UnreadableMultipathDevices). A non-zero value is a node
+	// state nobody else reports: the maps sit in `multipath -ll` with every path
+	// failed, and the first process to read one hangs holding every map it
+	// opened before — which is what stops a CSI driver from detaching its
+	// volume. The agent only steps around them; whoever owns the maps has to
+	// remove them, and this gauge is what tells that someone there is work.
+	unreadableMultipathMaps = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "unreadable_multipath_maps",
+		Help:      "Number of multipath maps on the node with no usable path (no slaves, or every path failed): reading one blocks in the kernel, so the agent's lvm commands reject them and they are not BlockDevice candidates. A non-zero value means a SAN volume was unmapped or lost its paths while the map stayed; it is the CSI driver's or the operator's to remove.",
+	}, []string{"node"})
+
+	// The whole-node lvm scans that the agent abandoned at their deadline rather
+	// than killed (utils.runScanDetached): killed, a scan blocked on such a map
+	// turns into a D-state process a reboot alone removes; abandoned, it sleeps
+	// until the map is dealt with. The counter says it happened, the gauge says
+	// the process is still there.
+	lvmScansAbandonedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "lvm_scans_abandoned_total",
+		Help:      "Number of pvs/vgs/lvs scans the agent abandoned because they did not finish within CMD_DEADLINE_DURATION; the process is left running, not killed, and holds whatever device it blocked on until that device is dealt with.",
+	}, []string{"node", "command"})
+
+	lvmScansOutstanding = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvm_scans_outstanding",
+		Help:      "1 while a pvs/vgs/lvs scan abandoned at its deadline is still running on the node, 0 otherwise; while it is 1 the agent runs no new scan of that kind.",
+	}, []string{"node", "command"})
+
 	lvmVolumeGroupImportRefusedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
 		Name:      "lvm_volume_group_import_refused_total",
@@ -331,6 +361,9 @@ func init() {
 	metrics.Registry.MustRegister(publishedBlockDevices)
 	metrics.Registry.MustRegister(publishedDevicesDirectoryPresent)
 	metrics.Registry.MustRegister(blockDevicesMissing)
+	metrics.Registry.MustRegister(unreadableMultipathMaps)
+	metrics.Registry.MustRegister(lvmScansAbandonedTotal)
+	metrics.Registry.MustRegister(lvmScansOutstanding)
 }
 
 type Metrics struct {
@@ -483,6 +516,28 @@ func (m *Metrics) SetPublishedBlockDevices(count int, directoryPresent bool) {
 		present = 1
 	}
 	publishedDevicesDirectoryPresent.WithLabelValues(m.node).Set(present)
+}
+
+// SetUnreadableMultipathMaps publishes how many multipath maps on the node the
+// agent's lvm commands reject because reading them would block.
+func (m *Metrics) SetUnreadableMultipathMaps(count int) {
+	unreadableMultipathMaps.WithLabelValues(m.node).Set(float64(count))
+}
+
+// LVMScanAbandoned counts a pvs/vgs/lvs scan the agent left running at its
+// deadline instead of killing it.
+func (m *Metrics) LVMScanAbandoned(command string) {
+	lvmScansAbandonedTotal.WithLabelValues(m.node, command).Inc()
+}
+
+// SetLVMScanOutstanding publishes whether an abandoned scan of the given kind
+// is still running on the node.
+func (m *Metrics) SetLVMScanOutstanding(command string, outstanding bool) {
+	v := 0.0
+	if outstanding {
+		v = 1
+	}
+	lvmScansOutstanding.WithLabelValues(m.node, command).Set(v)
 }
 
 // SetBlockDevicesMissing publishes how many of the node's BlockDevices are

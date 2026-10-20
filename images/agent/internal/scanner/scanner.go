@@ -258,7 +258,17 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	// and the blocked scan then holds every map it reached before. The window
 	// the TTL left was the whole interval between passes; what remains is the
 	// moment between this scan and the first lvm command below.
-	utils.RefreshUnreadableMultipathDevices()
+	unreadable := utils.RefreshUnreadableMultipathDevices(log)
+	metrics.SetUnreadableMultipathMaps(utils.CountUnreadableMultipathMaps(unreadable))
+
+	// A scan abandoned at its deadline on an earlier pass may still be running;
+	// this pass will not start another of that kind, and the gauge is how the
+	// operator learns which process on the node to look for.
+	outstanding := utils.OutstandingScans()
+	for _, command := range []string{"pvs", "vgs", "lvs"} {
+		_, running := outstanding[command]
+		metrics.SetLVMScanOutstanding(command, running)
+	}
 
 	// the scan operations order is very important as it guarantees the consistent and reliable data from the node
 	realClock := clock.RealClock{}
@@ -266,6 +276,7 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	lvs, lvsErr, err := s.scanLVs(ctx, log, cfg)
 	log.Trace(fmt.Sprintf("LVS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
+		countAbandonedScan(metrics, "lvs", err)
 		return err
 	}
 
@@ -273,6 +284,7 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	vgs, vgsErr, err := s.scanVGs(ctx, log, cfg)
 	log.Trace(fmt.Sprintf("VGS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
+		countAbandonedScan(metrics, "vgs", err)
 		return err
 	}
 
@@ -280,6 +292,7 @@ func (s *scanner) fillTheCache(ctx context.Context, log logger.Logger, cache *ca
 	pvs, pvsErr, err := s.scanPVs(ctx, log, cfg)
 	log.Trace(fmt.Sprintf("PVS command runs for: %s", realClock.Since(now).String()))
 	if err != nil {
+		countAbandonedScan(metrics, "pvs", err)
 		return err
 	}
 
@@ -441,6 +454,16 @@ func (s *scanner) scanDevicesNetlink() ([]internal.Device, bytes.Buffer, error) 
 		stderr.WriteString(e.Error() + "\n")
 	}
 	return devices, stderr, nil
+}
+
+// countAbandonedScan counts the scan when its error says the deadline passed:
+// that is the one failure after which the process is still there (see
+// utils.OutstandingScans), as opposed to a scan that ran and reported.
+func countAbandonedScan(metrics *monitoring.Metrics, command string, err error) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		metrics.LVMScanAbandoned(command)
+		metrics.SetLVMScanOutstanding(command, true)
+	}
 }
 
 func (s *scanner) scanPVs(ctx context.Context, log logger.Logger, cfg config.Config) ([]internal.PVData, bytes.Buffer, error) {

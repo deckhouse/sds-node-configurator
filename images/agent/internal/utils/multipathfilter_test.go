@@ -196,10 +196,34 @@ func TestRefreshUnreadableMultipathDevices_IgnoresTheCacheAge(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "dm-1", "slaves"), 0o755))
 
 	assert.Empty(t, UnreadableMultipathDevices(), "the cached answer is served within the TTL")
-	assert.Equal(t, []string{"/dev/dm-1", "/dev/mapper/mpathaa"}, RefreshUnreadableMultipathDevices(),
+	assert.Equal(t, []string{"/dev/dm-1", "/dev/mapper/mpathaa"}, RefreshUnreadableMultipathDevices(testLog(t)),
 		"a refresh sees the map as it is now")
 	assert.Equal(t, []string{"/dev/dm-1", "/dev/mapper/mpathaa"}, UnreadableMultipathDevices(),
 		"and the cache serves the refreshed answer afterwards")
+}
+
+func TestRefreshUnreadableMultipathDevices_AnnouncesTheSetOnceAndOnChange(t *testing.T) {
+	root := withFakeSysBlock(t)
+	withMultipathStatus(t, statusAfterDrain, nil)
+	log, out := capturingLog(t)
+
+	fakeDM(t, root, "dm-72", "mpath-361452900326008fc40024000000004df", "mpathf", 2)
+	RefreshUnreadableMultipathDevices(log)
+	assert.Contains(t, out.String(), "multipath maps with no usable path, kept out of lvm scans and BlockDevice candidates: none",
+		"an empty set is said in words the first time")
+
+	out.Reset()
+	RefreshUnreadableMultipathDevices(log)
+	assert.Empty(t, out.String(), "nothing changed, nothing to say: the set is rebuilt every pass")
+
+	fakeDM(t, root, "dm-70", "mpath-361452900326008fc40024000000004dd", "mpathd", 1)
+	fakeDM(t, root, "dm-71", "mpath-361452900326008fc40024000000004d9", "mpathc", 0)
+	out.Reset()
+	RefreshUnreadableMultipathDevices(log)
+	assert.Contains(t, out.String(), "(was 0): 2: mpathc, mpathd",
+		"a change names the maps by the alias multipath -ll shows")
+
+	assert.Equal(t, 2, CountUnreadableMultipathMaps(UnreadableMultipathDevices()), "one count per map, not per spelling")
 }
 
 func TestUnreadableMultipathDevices_NoSysfs(t *testing.T) {
