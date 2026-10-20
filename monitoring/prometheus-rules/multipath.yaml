@@ -1,0 +1,57 @@
+- name: kubernetes.sds_node_configurator.multipath
+  rules:
+    - alert: D8SdsNodeConfiguratorUnreadableMultipathMaps
+      expr: max by (node) (sds_node_configurator_unreadable_multipath_maps) > 0
+      # A SAN failover or a controller reboot on the array takes every path of a
+      # map down for a while and brings them back; multipathd queues the I/O
+      # meanwhile, which is what queue_if_no_path is for. Ten minutes is past any
+      # failover the arrays this module meets are rated for, so what is left firing
+      # is a map nobody is bringing back.
+      for: 10m
+      labels:
+        severity_level: "5"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_sds_node_configurator_multipath_health: "D8SdsNodeConfiguratorMultipathHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_sds_node_configurator_multipath_health: "D8SdsNodeConfiguratorMultipathHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: Node {{ $labels.node }} has multipath maps with no usable path
+        description: |
+          {{ $value }} multipath maps on node `{{ $labels.node }}` have no usable path: no path device left, or every path failed. Reading such a map does not fail, it blocks in the kernel for as long as `queue_if_no_path` holds the I/O, and the blocked process keeps every device it opened before.
+
+          The sds-node-configurator agent steps around these maps — it does not read them and does not offer them as BlockDevices — but it does not remove them, and anything else on the node that scans block devices (udev's lvm rules, `multipath -ll`, a CSI driver's cleanup) will block on them. The usual consequence is a CSI volume that cannot be detached from this node: `NodeUnstageVolume` fails with `can't flush multipath device`, the volume stays in `Node.status.volumesInUse`, and a pod that needs it elsewhere waits in `ContainerCreating`.
+
+          Such a map is left behind when a SAN volume is unmapped on the array, or its iSCSI/FC session is lost, while the map still exists on the node — after a forced detach, a node failure, or a driver that did not finish its cleanup.
+
+          The recommended course of action, on the node:
+          1. Find the maps: `multipath -ll` (every path `failed`, or no path at all, vendor shown as `##,##`), or `dmsetup status --target multipath` (no path reported as `A`). The agent names them in its log: `d8 k -n d8-sds-node-configurator logs -l app=sds-node-configurator --tail=500 | grep "multipath maps with no usable path"`.
+          2. Make sure the volume behind each map is really gone: it is not mapped to this node on the array, and no PersistentVolume of this node expects it.
+          3. Stop the queueing, so that whoever is blocked on the map gets an error and lets go: `dmsetup message <map> 0 fail_if_no_path`.
+          4. Remove the map and its dead paths: `multipath -f <map>`, then `echo 1 > /sys/block/<path device>/device/delete` for each path it listed. If `multipath -f` answers `map in use`, find the holder with `fuser -vm /dev/mapper/<map>` and `ls -l /proc/<pid>/fd | grep dm-`; after step 3 it exits on its own.
+          5. If the maps come back, the CSI driver that owns the volumes is not cleaning up after itself; report it with the output of step 1.
+
+    - alert: D8SdsNodeConfiguratorLVMScanAbandoned
+      expr: max by (node, command) (sds_node_configurator_lvm_scans_outstanding) > 0
+      for: 5m
+      labels:
+        severity_level: "4"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_sds_node_configurator_multipath_health: "D8SdsNodeConfiguratorMultipathHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_sds_node_configurator_multipath_health: "D8SdsNodeConfiguratorMultipathHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: An lvm {{ $labels.command }} scan is stuck on node {{ $labels.node }}
+        description: |
+          An `lvm {{ $labels.command }}` started by the sds-node-configurator agent on node `{{ $labels.node }}` did not finish within its deadline. The agent left it running rather than killing it — killed, a scan blocked on a block device becomes a D-state process that only a reboot removes — and runs no new `{{ $labels.command }}` while it lives.
+
+          Until the process exits, the agent's picture of the node's LVM is frozen for that command: BlockDevice and LVMVolumeGroup resources of the node are not refreshed from `{{ $labels.command }}`, and the process holds open every block device it had reached, which blocks a CSI driver from detaching those devices.
+
+          The scan is almost always blocked on a multipath map with no usable path; `D8SdsNodeConfiguratorUnreadableMultipathMaps` on the same node names them. A map that lost its paths after the agent's filter was built is still opened once, and this is that once.
+
+          The recommended course of action, on the node:
+          1. Find the process and what it is blocked on: `ps -o pid,stat,wchan:24,lstart,cmd -C lvm`, then `ls -l /proc/<pid>/fd | grep -E "/dev/(dm-|mapper)"` for the devices it holds. A state of `S` with `wchan` `read_events` is the expected shape and is recoverable.
+          2. Release it by stopping the queueing on the dead map it holds: `dmsetup message <map> 0 fail_if_no_path`. The process gets an I/O error and exits; this alert resolves on the agent's next pass.
+          3. Remove the dead maps as `D8SdsNodeConfiguratorUnreadableMultipathMaps` describes, or the next scan may block again.
+          4. If the process is in state `D`, it was not this agent that stopped it and it will not exit; plan a reboot of the node.
