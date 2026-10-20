@@ -84,6 +84,14 @@ type Discoverer struct {
 	// on it — a nested cluster's — is not this node's. A field so a test can state
 	// the set.
 	publishedDevices func() utils.PublishedBlockDevices
+
+	// unreadableMultipathDevices answers which multipath maps on the node cannot
+	// be read (utils.UnreadableMultipathDevices in production): no slaves left,
+	// or not one active path among them. Such a map is not a candidate either —
+	// there is nothing behind it, and lsblk still reports its size — and the
+	// BlockDevice it once had goes Missing like any device that left the node.
+	// A field so a test can state the set.
+	unreadableMultipathDevices func() []string
 }
 
 type DiscovererConfig struct {
@@ -113,6 +121,8 @@ func NewDiscoverer(
 		cfg:                     cfg,
 		reportedOrphans:         make(map[string]struct{}),
 		publishedDevices:        utils.PublishedDevices,
+
+		unreadableMultipathDevices: utils.UnreadableMultipathDevices,
 	}
 }
 
@@ -741,6 +751,11 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 
 	published := d.publishedDevices()
 
+	unreadable := make(map[string]struct{})
+	for _, dev := range d.unreadableMultipathDevices() {
+		unreadable[dev] = struct{}{}
+	}
+
 	filteredDevices = slices.DeleteFunc(
 		filteredDevices,
 		func(device internal.Device) bool {
@@ -752,6 +767,11 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 			// table does not bring the device back one level down.
 			if published.Has(device.KName) {
 				log.Trace("filtered out", "name", device.Name, "kname", device.KName, "reason", "published to a workload as a block volume")
+				return true
+			}
+
+			if _, ok := unreadable[device.KName]; ok {
+				log.Trace("filtered out", "name", device.Name, "kname", device.KName, "reason", "multipath map without an active path")
 				return true
 			}
 

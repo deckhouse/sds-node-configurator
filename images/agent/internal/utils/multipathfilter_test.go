@@ -17,8 +17,10 @@ limitations under the License.
 package utils
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -51,16 +53,40 @@ func withFakeSysBlock(t *testing.T) string {
 	root := t.TempDir()
 	saved := sysBlockPath
 	sysBlockPath = root
-	ResetPathlessMultipathCache()
+	withMultipathStatus(t, "", errors.New("no dmsetup in tests"))
+	ResetUnreadableMultipathCache()
 	t.Cleanup(func() {
 		sysBlockPath = saved
-		ResetPathlessMultipathCache()
+		ResetUnreadableMultipathCache()
 	})
 
 	return root
 }
 
-func TestPathlessMultipathDevices(t *testing.T) {
+// withMultipathStatus makes the scan read a fixed status report instead of
+// asking the host's dmsetup.
+func withMultipathStatus(t *testing.T, report string, err error) {
+	t.Helper()
+
+	saved := multipathStatus
+	multipathStatus = func() ([]byte, error) { return []byte(report), err }
+	ResetUnreadableMultipathCache()
+	t.Cleanup(func() {
+		multipathStatus = saved
+		ResetUnreadableMultipathCache()
+	})
+}
+
+// The report of the client node the second shape was found on: mpathd and
+// mpathg keep one failed path each behind queue_if_no_path, mpathf has one
+// active path next to a failed one, mpathc has no path at all.
+const statusAfterDrain = `mpathd: 0 4194304 multipath 2 0 0 0 1 1 E 0 1 2 8:112 F 1 0 1
+mpathf: 0 2097152 multipath 2 0 0 0 1 1 A 0 2 2 65:64 F 1 0 1 8:0 A 0 0 1
+mpathg: 0 4194304 multipath 2 0 0 0 1 1 E 0 1 2 65:240 F 1 0 1
+mpathc: 0 2097152 multipath 0 0 0 0
+`
+
+func TestUnreadableMultipathDevices(t *testing.T) {
 	root := withFakeSysBlock(t)
 
 	// A multipath map that still has paths must not be skipped: LVM on top of a
@@ -74,17 +100,96 @@ func TestPathlessMultipathDevices(t *testing.T) {
 	// A plain disk is not a dm device at all.
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "sda"), 0o755))
 
-	got := PathlessMultipathDevices()
+	got := UnreadableMultipathDevices()
 
 	assert.Equal(t, []string{"/dev/dm-2", "/dev/mapper/mpathbb"}, got,
 		"only the pathless multipath map is reported, by both spellings LVM may scan")
 }
 
-func TestPathlessMultipathDevices_NoSysfs(t *testing.T) {
+func TestUnreadableMultipathDevices_MapsWithOnlyFailedPaths(t *testing.T) {
+	root := withFakeSysBlock(t)
+	withMultipathStatus(t, statusAfterDrain, nil)
+
+	fakeDM(t, root, "dm-70", "mpath-361452900326008fc40024000000004dd", "mpathd", 1)
+	fakeDM(t, root, "dm-72", "mpath-361452900326008fc40024000000004df", "mpathf", 2)
+	fakeDM(t, root, "dm-73", "mpath-361452900326008fc40024000000004e1", "mpathg", 1)
+	fakeDM(t, root, "dm-71", "mpath-361452900326008fc40024000000004d9", "mpathc", 0)
+
+	got := UnreadableMultipathDevices()
+
+	assert.Equal(t, []string{
+		"/dev/dm-70", "/dev/dm-71", "/dev/dm-73",
+		"/dev/mapper/mpathc", "/dev/mapper/mpathd", "/dev/mapper/mpathg",
+	}, got, "maps whose every path is failed are skipped like maps with no path; the map with an active path stays")
+}
+
+func TestUnreadableMultipathDevices_StatusUnavailableFallsBackToSysfs(t *testing.T) {
+	root := withFakeSysBlock(t)
+	withMultipathStatus(t, "", errors.New("dmsetup: command not found"))
+
+	fakeDM(t, root, "dm-70", "mpath-3600failed", "mpathd", 1)
+	fakeDM(t, root, "dm-71", "mpath-3600dead", "mpathc", 0)
+
+	assert.Equal(t, []string{"/dev/dm-71", "/dev/mapper/mpathc"}, UnreadableMultipathDevices(),
+		"without the status report only the slave-less map can be told apart, and that one still is")
+}
+
+func TestMapsWithoutActivePath(t *testing.T) {
+	cases := []struct {
+		name   string
+		report string
+		want   []string
+	}{
+		{
+			name:   "client node after drain",
+			report: statusAfterDrain,
+			want:   []string{"mpathc", "mpathd", "mpathg"},
+		},
+		{
+			name:   "queue_if_no_path feature tokens do not pass for path state",
+			report: "mpathx: 0 8 multipath 2 1 queue_if_no_path 0 1 1 E 0 1 2 8:16 F 1 0 1 \n",
+			want:   []string{"mpathx"},
+		},
+		{
+			name:   "an active group state is not an active path",
+			report: "mpathy: 0 8 multipath 0 0 1 1 A 0 1 2 8:32 F 3 0 1 \n",
+			want:   []string{"mpathy"},
+		},
+		{
+			name:   "two groups, the second one alive",
+			report: "mpathz: 0 8 multipath 0 1 alua 2 2 E 0 1 2 8:48 F 1 0 1 A 0 1 2 8:64 A 0 0 1 \n",
+			want:   nil,
+		},
+		{
+			name:   "nothing to report",
+			report: "No devices found\n",
+			want:   nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mapsWithoutActivePath([]byte(tc.report))
+
+			names := make([]string, 0, len(got))
+			for name := range got {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			if tc.want == nil {
+				assert.Empty(t, names)
+				return
+			}
+			assert.Equal(t, tc.want, names)
+		})
+	}
+}
+
+func TestUnreadableMultipathDevices_NoSysfs(t *testing.T) {
 	root := withFakeSysBlock(t)
 	require.NoError(t, os.RemoveAll(root))
 
-	assert.Empty(t, PathlessMultipathDevices(),
+	assert.Empty(t, UnreadableMultipathDevices(),
 		"an unreadable /sys/block yields no rejects rather than an error: the filter must stay valid")
 }
 

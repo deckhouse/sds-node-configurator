@@ -39,11 +39,11 @@ func WithEmptySysBlockForTest(tb testing.TB) {
 
 	saved := sysBlockPath
 	sysBlockPath = tb.TempDir()
-	ResetPathlessMultipathCache()
+	ResetUnreadableMultipathCache()
 
 	tb.Cleanup(func() {
 		sysBlockPath = saved
-		ResetPathlessMultipathCache()
+		ResetUnreadableMultipathCache()
 	})
 
 	WithNoPublishedDevicesForTest(tb)

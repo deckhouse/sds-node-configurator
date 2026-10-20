@@ -412,10 +412,10 @@ func LVMGlobalFilterAcceptingLoops(loops []string) string {
 // not by a blanket device-mapper rule, because a Volume Group on a SAN LUN is a
 // supported layout and healthy multipath devices have to stay visible:
 //
-//   - multipath maps that have lost every path. Reading one blocks in the kernel
+//   - multipath maps that cannot be read. Reading one blocks in the kernel
 //     instead of failing, and the blocked reader holds the map open, which is
 //     what eventually prevents the volume from ever being detached from the node
-//     — see utils.PathlessMultipathDevices for the full chain;
+//     — see utils.UnreadableMultipathDevices for the full chain;
 //   - devices this cluster published to a workload as block volumes, with their
 //     partitions and holders. What is written inside them is the consumer's — on
 //     a hypervisor, a nested cluster's LVM — and rejecting them here is what keeps
