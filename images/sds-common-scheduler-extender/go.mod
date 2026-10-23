@@ -1,11 +1,12 @@
 module github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender
 
-go 1.27.2
+go 1.27.3
+
 require (
 	github.com/deckhouse/sds-common-lib v0.15.0
-	github.com/deckhouse/sds-local-volume/api v0.0.0-20260908063335-f8c1c129fa86
+	github.com/deckhouse/sds-local-volume/api v0.0.0-20261013063333-cbdbb4af6091
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250424082358-e271071c2a57
-	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20260918073131-4484fc070984
+	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20261013063330-4fce6382091d
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	k8s.io/api v0.35.1
@@ -64,12 +65,12 @@ require (
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
-	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/term v0.44.0 // indirect
-	golang.org/x/text v0.39.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/term v0.46.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.13.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect

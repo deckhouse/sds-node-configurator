@@ -1,8 +1,4 @@
-# Use default gitleaks rules + module allowlist (incl. xxhash.h false positive)
-[extend]
-useDefault = false
-path = "gitleaks.base.toml"
-
+# Module allowlist (incl. xxhash.h false positive); CI composes it with the centralized Deckhouse gitleaks config
 [allowlist]
 paths = [
   '''(?:^|/)images/.*\.patch$''',
