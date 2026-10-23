@@ -59,6 +59,9 @@ spec:
       namespace: d8-{{ .Chart.Name }}
       labels:
         app: sds-node-configurator
+        {{- if .Values.global.enabledModules | has "admission-policy-engine-crd" }}
+        security.deckhouse.io/security-policy-exception: sds-node-configurator
+        {{- end }}
     spec:
       {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 6 }}
       {{- include "helm_lib_tolerations" (tuple . "any-node" "storage-problems") | nindent 6 }}
@@ -106,6 +109,9 @@ spec:
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
           seccompProfile:
             type: RuntimeDefault
         volumeMounts:
@@ -143,7 +149,10 @@ spec:
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
-          allowPrivilegeEscalation: true  
+          allowPrivilegeEscalation: true
+          capabilities:
+            drop:
+            - ALL
           seccompProfile:
             type: RuntimeDefault
         volumeMounts:
@@ -229,6 +238,9 @@ spec:
           privileged: true
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: true
+          capabilities:
+            drop:
+            - ALL
           seccompProfile:
             type: RuntimeDefault
         volumeMounts:

@@ -46,8 +46,7 @@ func main() {
 
 	err = copyFilesRecursive(srcDir, dstDir)
 	if err != nil {
-		log.Println("Error:", err)
-		return
+		log.Fatal("ERR: ", err)
 	}
 
 	log.Println("Done.")

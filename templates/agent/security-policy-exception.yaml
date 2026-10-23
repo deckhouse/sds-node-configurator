@@ -1,0 +1,103 @@
+{{- if and (not .Values.sdsNodeConfigurator.disableDs) (.Values.global.enabledModules | has "admission-policy-engine-crd") }}
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: SecurityPolicyException
+metadata:
+  name: sds-node-configurator
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-node-configurator")) | nindent 2 }}
+spec:
+  securityContext:
+    privileged:
+      allowedValue: true
+      metadata:
+        description: |
+          Allow privileged mode for the sds-node-configurator-agent and thin-volumes-enabler containers.
+          The agent enters the host namespaces with nsenter to run the host LVM tooling (pvs, vgs, lvcreate, lvextend) and lsblk against the node block devices; thin-volumes-enabler loads the dm_thin_pool and dm_snapshot kernel modules on the host. Neither is possible from an unprivileged container.
+    allowPrivilegeEscalation:
+      allowedValue: true
+      metadata:
+        description: |
+          Allow privilege escalation for the sds-node-configurator-agent and thin-volumes-enabler containers.
+          Both run privileged, and a privileged container always runs with privilege escalation allowed.
+    runAsUser:
+      allowedValues:
+        - 0
+      metadata:
+        description: |
+          Allow running as root (UID 0) for the agent Pod.
+          LVM commands on the host and the installation of the sds utilities into /var/lib/deckhouse/sds on the node require root.
+    runAsNonRoot:
+      allowedValue: false
+      metadata:
+        description: |
+          Allow running as root for the agent Pod.
+          LVM commands on the host and the installation of the sds utilities into /var/lib/deckhouse/sds on the node require root.
+    seLinuxOptions:
+      allowedValues:
+        - level: s0
+          type: spc_t
+      metadata:
+        description: |
+          Allow the spc_t SELinux type for the agent Pod.
+          On nodes with SELinux enforcing, the agent manages block devices and LVM metadata of the host, which the confined container types forbid.
+  network:
+    hostNetwork:
+      allowedValue: true
+      metadata:
+        description: |
+          Allow host network access for the agent Pod.
+          The agent watches the block device events that udev broadcasts on a NETLINK_KOBJECT_UEVENT socket after processing them, and udev sends them only in the network namespace of the host.
+    hostPID:
+      allowedValue: true
+      metadata:
+        description: |
+          Allow host PID namespace access for the agent Pod.
+          The agent and thin-volumes-enabler run nsenter against PID 1 of the host to execute LVM commands and modprobe in the host namespaces.
+    hostPorts:
+      - port: 4202
+        protocol: TCP
+        metadata:
+          description: |
+            Port 4202 of kube-rbac-proxy, bound on the node because the Pod runs in the host network. It serves the agent metrics to Prometheus.
+  volumes:
+    types:
+      allowedValues:
+        - hostPath
+      metadata:
+        description: |
+          Allow hostPath volumes for the agent Pod.
+          The agent works with the block devices, the sysfs and the udev database of the node, and installs the sds utilities on the node.
+    hostPath:
+      allowedValues:
+        - path: /var/lib/deckhouse/sds
+          readOnly: false
+          metadata:
+            description: |
+              sds-utils-installer copies the sds utilities (nsenter, LVM tooling) here, and the agent runs them from the host.
+        - path: /dev/
+          readOnly: false
+          metadata:
+            description: |
+              The block devices of the node, which the agent discovers, wipes and puts under LVM.
+        - path: /sys/
+          readOnly: false
+          metadata:
+            description: |
+              The sysfs of the node, read to discover block devices and their attributes.
+        - path: /sys/fs/cgroup
+          readOnly: false
+          metadata:
+            description: |
+              The cgroup filesystem of the node, which the host LVM tooling started through nsenter expects to find.
+        - path: /run/udev/
+          readOnly: false
+          metadata:
+            description: |
+              The udev database of the node, read to resolve device identifiers (serial, WWN) of the block devices.
+        - path: /var/lib/kubelet/plugins/kubernetes.io/csi/volumeDevices
+          readOnly: true
+          metadata:
+            description: |
+              The block volumes kubelet published to workloads, read so the agent never treats a device that belongs to a volume as node storage.
+{{- end }}
