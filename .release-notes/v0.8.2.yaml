@@ -1,0 +1,32 @@
+date: "2026-10-26"
+
+summary: "The agent no longer offers a path of a multipath map as a `BlockDevice`, steps around multipath maps whose every path has failed and reports them with metrics and alerts, and its DaemonSet is ready for the Pod Security Standards enforcement of DKP 1.79."
+
+highlights:
+  - "A path of a multipath map never becomes a `BlockDevice`, even when udev has not marked it `mpath_member`, so an `LVMVolumeGroup` can no longer be built over a raw path of a LUN that already carries a volume's data."
+  - "A multipath map whose every path has failed is now treated like a map with no paths: the agent's LVM commands do not read it, it is not offered as a `BlockDevice`, and the new alerts `D8SdsNodeConfiguratorUnreadableMultipathMaps` and `D8SdsNodeConfiguratorLVMScanAbandoned` tell the operator such maps exist and how to remove them."
+  - "The module ships a `SecurityPolicyException` for the agent DaemonSet, so its Pods keep being created once DKP 1.79 starts denying Pods that violate the Pod Security Standards in system namespaces."
+
+new_features:
+  - "The `SecurityPolicyException` `sds-node-configurator` in the `d8-sds-node-configurator` namespace describes what the agent needs beyond the restricted profile: privileged containers running as root, the host network and PID namespaces, the `spc_t` SELinux type, its hostPath volumes and the metrics hostPort. The agent Pods are labeled `security.deckhouse.io/security-policy-exception: sds-node-configurator`. Both are rendered only when the `admission-policy-engine` CRDs are present in the cluster. All three containers of the agent now drop all capabilities, as the restricted profile requires; the privileged ones keep their access, because the container runtime ignores the drop list for them."
+  - "The module ships its first Prometheus rules. `D8SdsNodeConfiguratorUnreadableMultipathMaps` fires when a node has held a multipath map with no usable path for 10 minutes; `D8SdsNodeConfiguratorLVMScanAbandoned` fires when a `pvs`, `vgs` or `lvs` run that the agent left behind at its deadline has been running for 5 minutes. The alert texts explain the consequences, such as a CSI volume that cannot be detached from the node, and the steps to remove the maps."
+
+improvements:
+  - "New agent metrics: `sds_node_configurator_unreadable_multipath_maps{node}` counts the multipath maps the agent keeps LVM away from, `sds_node_configurator_lvm_scans_abandoned_total{node,command}` counts the LVM scans left running at their deadline, and `sds_node_configurator_lvm_scans_outstanding{node,command}` is `1` while such a scan is still on the node. The agent log names the unreadable maps, as `multipath -ll` shows them, at `Info` level when it first sees them and whenever the set changes."
+
+fixes:
+  - "A path of a multipath map (a device listed in `/sys/block/dm-N/slaves` of a map whose `dm/uuid` starts with `mpath-`) could be published as a consumable `BlockDevice`. udev marks a path `mpath_member` only if multipath claimed it when it appeared, and with `find_multipaths yes` it does not claim a path that appeared before the LUN's WWID was registered, which is the order in which a CSI driver connects a volume. The agent now reads the paths of every multipath map from sysfs and never makes a `BlockDevice` of them."
+  - "A multipath map that still listed its paths but had every one of them failed, with `queue_if_no_path` on, blocked any reader just like a map with no paths, yet the agent's filter caught only the latter: `lvs` hung on such a map for hours holding neighbouring maps open, `multipath -f` failed with `map in use`, and a ReadWriteOnce volume could not move to another node. The agent now reads the multipath target status through the bundled `dmsetup`, which does no I/O to the maps, and rejects a map with no active path in the LVM `global_filter` and drops it from `BlockDevice` candidates. The set of such maps is rebuilt right before every scan pass, so a map that lost its last path a moment earlier is not opened once more."
+  - "An LVM scan (`pvs`, `vgs`, `lvs`) that outlived its deadline was killed, and a scan blocked on an unreadable device turned into a process in the D state that only a reboot removes, still holding the device open. Such a scan is now left running and exits on its own once the device is dealt with; while it lives, the agent starts no other scan of the same kind."
+  - "The `sds-utils-installer` init container of the agent logged a failed copy of the node utilities and exited successfully, so the agent started with the utilities of the previous release. It now fails, and the Pod does not start until the copy succeeds."
+
+security:
+  - "The Go dependencies of the agent, the controller, the scheduler extender, the webhooks and the module hooks are updated, closing CVE-2026-78669, CVE-2026-78659, CVE-2026-78660, CVE-2026-78663 and CVE-2026-97032 in `golang.org/x/net`, CVE-2026-56851 in `golang.org/x/text` and CVE-2026-63209 in `github.com/klauspost/compress`. `github.com/docker/distribution`, which has no fixed release for CVE-2026-85747, is no longer linked into the module hooks."
+
+upgrade_notes:
+  - "Nothing has to be done by hand. The agent Pod template changes on every cluster, so the agent DaemonSet restarts its Pods once."
+  - "A `BlockDevice` already created on a path of a multipath map is handled like one whose device left the node: a consumable one is deleted, and one that is not consumable gets the `Missing` condition and is deleted after `missingBlockDeviceRetentionHours` unless an `LVMVolumeGroup` uses it."
+
+docs:
+  - "FAQ: why multipath maps with no usable path and the paths of a multipath map never become `BlockDevice` resources, which metrics report them, and how to remove such maps with `dmsetup message <map> 0 fail_if_no_path` and `multipath -f <map>`."
+  - "A section on adding capacity on a node used by a `LocalStorageClass`: the class accepts one `LVMVolumeGroup` per node, so capacity is added by extending the existing Volume Group through its `spec.blockDeviceSelector` instead of creating a second `LVMVolumeGroup`."
