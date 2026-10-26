@@ -92,6 +92,14 @@ type Discoverer struct {
 	// BlockDevice it once had goes Missing like any device that left the node.
 	// A field so a test can state the set.
 	unreadableMultipathDevices func() []string
+
+	// multipathPaths answers which devices are paths of a multipath map
+	// (utils.MultipathPathDevices in production), read from the maps' slaves in
+	// sysfs. udev marks a path mpath_member only if multipath claimed it when it
+	// appeared, which it does not for a path that came before its WWID was
+	// registered; such a path is still a raw way into a LUN that a map serves.
+	// A field so a test can state the set.
+	multipathPaths func() map[string]struct{}
 }
 
 type DiscovererConfig struct {
@@ -123,6 +131,7 @@ func NewDiscoverer(
 		publishedDevices:        utils.PublishedDevices,
 
 		unreadableMultipathDevices: utils.UnreadableMultipathDevices,
+		multipathPaths:             utils.MultipathPathDevices,
 	}
 }
 
@@ -756,6 +765,8 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 		unreadable[dev] = struct{}{}
 	}
 
+	multipathPaths := d.multipathPaths()
+
 	filteredDevices = slices.DeleteFunc(
 		filteredDevices,
 		func(device internal.Device) bool {
@@ -777,6 +788,11 @@ func (d *Discoverer) filterDevices(devices []internal.Device) ([]internal.Device
 
 			if device.FSType == "mpath_member" {
 				log.Trace("filtered out", "name", device.Name, "kname", device.KName, "reason", "mpath_member")
+				return true
+			}
+
+			if _, ok := multipathPaths[device.KName]; ok {
+				log.Trace("filtered out", "name", device.Name, "kname", device.KName, "reason", "path of a multipath map")
 				return true
 			}
 
