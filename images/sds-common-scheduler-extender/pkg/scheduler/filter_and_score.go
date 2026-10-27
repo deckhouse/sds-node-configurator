@@ -78,27 +78,33 @@ func (s *scheduler) filterAndScore(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Filter by available space
-	var filteredKeys []cache.StoragePoolKey
-	var filteredLVGs []LVMVolumeGroupInput
-	filterAndScoreLog := servingLog
+	// Filter by available space and score in one pass: the score is computed from the same
+	// space snapshot, and only the returned pools are reserved. The request replaces its own
+	// reservation, so a retry with the same reservationID does not count it as taken space.
+	var reservedKeys []cache.StoragePoolKey
+	scored := make([]ScoredLVMVolumeGroup, 0, len(poolKeys))
 	for i, key := range poolKeys {
-		spaceInfo, err := getAvailableSpace(s.ctx, s.client, s.cache, key)
+		spaceInfo, err := getAvailableSpace(s.ctx, s.client, s.cache, key, req.ReservationID)
 		if err != nil {
-			filterAndScoreLog.Error(fmt.Sprintf("unable to get available space for %s", key.String()), logger.Err(err))
+			servingLog.Error(fmt.Sprintf("unable to get available space for %s", key.String()), logger.Err(err))
 			continue
 		}
 
-		if spaceInfo.AvailableSpace >= req.Size {
-			filterAndScoreLog.Debug(fmt.Sprintf("%s has enough space (available: %d >= requested: %d)", key.String(), spaceInfo.AvailableSpace, req.Size))
-			filteredKeys = append(filteredKeys, key)
-			filteredLVGs = append(filteredLVGs, req.LVGS[i])
-		} else {
-			filterAndScoreLog.Debug(fmt.Sprintf("%s does not have enough space (available: %d < requested: %d)", key.String(), spaceInfo.AvailableSpace, req.Size))
+		if spaceInfo.AvailableSpace < req.Size {
+			servingLog.Debug(fmt.Sprintf("%s does not have enough space (available: %d < requested: %d)", key.String(), spaceInfo.AvailableSpace, req.Size))
+			continue
 		}
+		servingLog.Debug(fmt.Sprintf("%s has enough space (available: %d >= requested: %d)", key.String(), spaceInfo.AvailableSpace, req.Size))
+
+		freeSpaceLeft := getFreeSpaceLeftPercent(spaceInfo.AvailableSpace, req.Size, spaceInfo.TotalSize)
+		reservedKeys = append(reservedKeys, key)
+		scored = append(scored, ScoredLVMVolumeGroup{
+			LVMVolumeGroupInput: req.LVGS[i],
+			Score:               getNodeScore(freeSpaceLeft, s.defaultDivisor),
+		})
 	}
 
-	if len(filteredKeys) == 0 {
+	if len(scored) == 0 {
 		response := FilterAndScoreResponse{LVGS: []ScoredLVMVolumeGroup{}}
 		responseJSON, _ := json.Marshal(response)
 		servingLog.Debug(fmt.Sprintf("response: %s", string(responseJSON)))
@@ -107,27 +113,12 @@ func (s *scheduler) filterAndScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Score filtered LVGs
-	scored := make([]ScoredLVMVolumeGroup, 0, len(filteredKeys))
-	for i, key := range filteredKeys {
-		score, err := calculatePoolScore(s.ctx, s.client, s.cache, key, req.Size, s.defaultDivisor)
-		if err != nil {
-			servingLog.Error(fmt.Sprintf("unable to calculate score for %s", key.String()), logger.Err(err))
-			continue
-		}
-		scored = append(scored, ScoredLVMVolumeGroup{
-			LVMVolumeGroupInput: filteredLVGs[i],
-			Score:               score,
-		})
-	}
-
 	// Sort by score (highest first)
 	sort.Slice(scored, func(i, j int) bool {
 		return scored[i].Score > scored[j].Score
 	})
 
-	// Reserve space for all filtered pools
-	s.cache.AddReservation(req.ReservationID, ttl, req.Size, filteredKeys)
+	s.cache.AddReservation(req.ReservationID, ttl, req.Size, reservedKeys)
 
 	// Build response
 	response := FilterAndScoreResponse{LVGS: scored}

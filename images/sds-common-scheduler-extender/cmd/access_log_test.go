@@ -25,6 +25,8 @@ import (
 	"testing"
 
 	"github.com/deckhouse/sds-common-lib/logger"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/leader"
+	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/tracing"
 )
 
 func getFloat64(t *testing.T, m map[string]interface{}, key string) float64 {
@@ -104,5 +106,85 @@ func TestAccessLogHandler(t *testing.T) {
 	}
 	if getString(t, helloLog, "traceid") == "" {
 		t.Error(`getString(t, helloLog, "traceid") == ""`)
+	}
+}
+
+// A request its handler marks as a dry run is logged at Debug: with the Info level only the
+// real request and the dry run that failed with 500 are in the log.
+func TestAccessLogHandler_DryRunAtDebug(t *testing.T) {
+	var out bytes.Buffer
+	log, err := logger.NewLoggerToWriter(&out, logger.InfoLevel)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/real", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/dry", func(w http.ResponseWriter, _ *http.Request) {
+		tracing.MarkDryRun(w)
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/dry-failed", func(w http.ResponseWriter, _ *http.Request) {
+		tracing.MarkDryRun(w)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	})
+
+	serv := httptest.NewServer(accessLogHandler(log, mux))
+	defer serv.Close()
+
+	for _, path := range []string{"/dry", "/real", "/dry-failed"} {
+		if _, err = serv.Client().Get(serv.URL + path); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"url":"/real"`) || !strings.Contains(lines[1], `"url":"/dry-failed"`) {
+		t.Fatalf("want the /real and /dry-failed requests at Info, got %q", out.String())
+	}
+}
+
+type leaderAt string
+
+func (l leaderAt) IsLeader() bool        { return false }
+func (l leaderAt) LeaderAddress() string { return string(l) }
+func (l leaderAt) Identity() string      { return "standby" }
+
+// A standby replica forwards filter to the leader and relays its answer. It logs a dry-run
+// request at Debug too: the mark comes back with the leader's response headers.
+func TestAccessLogHandler_DryRunForwardedToLeader(t *testing.T) {
+	leaderSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("dry") != "" {
+			tracing.MarkDryRun(w)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer leaderSrv.Close()
+
+	var out bytes.Buffer
+	log, err := logger.NewLoggerToWriter(&out, logger.InfoLevel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	needsLeader := func(string) bool { return true }
+	router := leader.NewRouter(log, leaderAt(leaderSrv.Listener.Addr().String()), http.NotFoundHandler(), needsLeader, leaderSrv.Client().Transport)
+
+	standby := httptest.NewServer(accessLogHandler(log, router))
+	defer standby.Close()
+
+	for _, query := range []string{"?dry=1", ""} {
+		resp, err := standby.Client().Get(standby.URL + "/scheduler/filter" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status %d, want 200 from the leader", resp.StatusCode)
+		}
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], `"url":"/scheduler/filter"`) {
+		t.Fatalf("want only the real request at Info on the standby, got %q", out.String())
 	}
 }

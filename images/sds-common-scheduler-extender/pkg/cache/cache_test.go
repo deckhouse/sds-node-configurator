@@ -355,3 +355,14 @@ func TestNarrowReservation_UpdatesTTL(t *testing.T) {
 	// Reservation should still be alive due to updated TTL
 	assert.True(t, c.HasReservation("res1"))
 }
+
+func TestGetReservedSpaceExcept(t *testing.T) {
+	c := newTestCache()
+	pool := StoragePoolKey{LVGName: "lvg1"}
+	c.AddReservation("own", 30*time.Second, 100, []StoragePoolKey{pool})
+	c.AddReservation("other", 30*time.Second, 40, []StoragePoolKey{pool})
+
+	assert.Equal(t, int64(140), c.GetReservedSpace(pool))
+	assert.Equal(t, int64(40), c.GetReservedSpaceExcept(pool, "own"))
+	assert.Equal(t, int64(140), c.GetReservedSpaceExcept(pool, "missing"))
+}

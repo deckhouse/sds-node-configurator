@@ -124,36 +124,6 @@ func storagePoolKeyFromRSPLVG(lvgRef *srv.ReplicatedStoragePoolLVMVolumeGroups, 
 	return key
 }
 
-func checkNodeHasLVGWithSpaceForReplicated(
-	ctx context.Context,
-	log logger.Logger,
-	cl client.Client,
-	reservationCache *cache.Cache,
-	nodeName string,
-	rsp *srv.ReplicatedStoragePool,
-	requestedSize int64,
-) (bool, string) {
-	deviceType := getDeviceTypeFromRSP(rsp)
-
-	lvgRef, found := findLVGForNodeInRSP(ctx, cl, nodeName, rsp)
-	if !found {
-		return false, fmt.Sprintf("no LVG from RSP %s found on node %s", rsp.Name, nodeName)
-	}
-
-	key := storagePoolKeyFromRSPLVG(lvgRef, deviceType)
-	hasSpace, err := checkPoolHasSpace(ctx, cl, reservationCache, key, requestedSize)
-	if err != nil {
-		log.Error(fmt.Sprintf("unable to check space for pool %s", key.String()), logger.Err(err))
-		return false, fmt.Sprintf("error checking space for LVG %s: %v", lvgRef.Name, err)
-	}
-
-	if !hasSpace {
-		return false, fmt.Sprintf("LVG %s on node %s does not have enough space", lvgRef.Name, nodeName)
-	}
-
-	return true, ""
-}
-
 // getReplicaNodesForBoundPVC resolves a bound PVC to the set of node names
 // that host Diskful replicas. Chain: PVC -> RV ->
 // datamesh members with HasBackingVolume().
@@ -247,14 +217,24 @@ func filterNodeForReplicatedPVCs(
 	ctx context.Context,
 	log logger.Logger,
 	cl client.Client,
-	schedulerCache *cache.Cache,
 	nodeName string,
 	node *corev1.Node,
 	replicatedPVCs map[string]*corev1.PersistentVolumeClaim,
 	scUsedByPVCs map[string]*storagev1.StorageClass,
 	pvcRequests map[string]PVCRequest,
-) (bool, string) {
+) (bool, string, []poolClaim) {
 	var failReasons []string
+	var claims []poolClaim
+	// claimSpace records the space the PVC asks of the node's pool of the RSP;
+	// checkPodClaims checks it together with the Pod's other PVCs.
+	claimSpace := func(pvcName string, rsp *srv.ReplicatedStoragePool, size int64) {
+		key, found := replicatedPoolKey(ctx, cl, nodeName, rsp)
+		if !found {
+			failReasons = append(failReasons, fmt.Sprintf("PVC %s: no LVG from RSP %s found on node %s", pvcName, rsp.Name, nodeName))
+			return
+		}
+		claims = append(claims, poolClaim{pvc: pvcName, key: key, size: size})
+	}
 
 	for _, pvc := range replicatedPVCs {
 		sc := scUsedByPVCs[*pvc.Spec.StorageClassName]
@@ -301,10 +281,7 @@ func filterNodeForReplicatedPVCs(
 
 		if !isBound {
 			if requiresLVGCheck(volumeAccess) {
-				ok, reason := checkNodeHasLVGWithSpaceForReplicated(ctx, log, cl, schedulerCache, nodeName, rsp, pvcReq.RequestedSize)
-				if !ok {
-					failReasons = append(failReasons, fmt.Sprintf("PVC %s: %s", pvc.Name, reason))
-				}
+				claimSpace(pvc.Name, rsp, pvcReq.RequestedSize)
 			}
 		} else {
 			switch volumeAccess {
@@ -326,10 +303,7 @@ func filterNodeForReplicatedPVCs(
 				}
 
 			case srv.VolumeAccessEventuallyLocal:
-				ok, reason := checkNodeHasLVGWithSpaceForReplicated(ctx, log, cl, schedulerCache, nodeName, rsp, pvcReq.RequestedSize)
-				if !ok {
-					failReasons = append(failReasons, fmt.Sprintf("PVC %s: %s", pvc.Name, reason))
-				}
+				claimSpace(pvc.Name, rsp, pvcReq.RequestedSize)
 
 			default:
 				// PreferablyLocal, Any — no LVG/space check for bound PVCs
@@ -338,36 +312,18 @@ func filterNodeForReplicatedPVCs(
 	}
 
 	if len(failReasons) > 0 {
-		return false, strings.Join(failReasons, "; ")
+		return false, strings.Join(failReasons, "; "), claims
 	}
-	return true, ""
+	return true, "", claims
 }
 
-func calculateReplicatedPVCScore(
-	ctx context.Context,
-	log logger.Logger,
-	cl client.Client,
-	reservationCache *cache.Cache,
-	nodeName string,
-	rsp *srv.ReplicatedStoragePool,
-	pvcReq PVCRequest,
-	divisor float64,
-) int64 {
-	deviceType := getDeviceTypeFromRSP(rsp)
-
+// replicatedPoolKey returns the node's pool of the RSP, or false when the node has none.
+func replicatedPoolKey(ctx context.Context, cl client.Client, nodeName string, rsp *srv.ReplicatedStoragePool) (cache.StoragePoolKey, bool) {
 	lvgRef, found := findLVGForNodeInRSP(ctx, cl, nodeName, rsp)
 	if !found {
-		return 0
+		return cache.StoragePoolKey{}, false
 	}
-
-	key := storagePoolKeyFromRSPLVG(lvgRef, deviceType)
-	score, err := calculatePoolScore(ctx, cl, reservationCache, key, pvcReq.RequestedSize, divisor)
-	if err != nil {
-		log.Error(fmt.Sprintf("unable to calculate score for pool %s", key.String()), logger.Err(err))
-		return 0
-	}
-
-	return int64(score)
+	return storagePoolKeyFromRSPLVG(lvgRef, getDeviceTypeFromRSP(rsp)), true
 }
 
 // nodeHasReplicaForPVC checks if the node hosts a diskful replica for the PVC.

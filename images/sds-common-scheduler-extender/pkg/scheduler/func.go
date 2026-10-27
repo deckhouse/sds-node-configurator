@@ -91,6 +91,10 @@ func isLVGSchedulable(lvg *snc.LVMVolumeGroup) (bool, string) {
 // getAvailableSpace computes available space for a storage pool using
 // min(llvBased, vgFreeBased) - reserved.
 //
+// ownReservationIDs are the reservations of the volumes being checked, none if the request has
+// none: they are left out of reserved, because the request is about to replace them. Counting them
+// would subtract a volume's own size twice, once as a reservation and once as the request.
+//
 // The LLV-based value (totalCapacity - sumAllLLV - unaccountedSpace) reacts
 // immediately when new LLV CRs appear, avoiding the VGFree staleness race.
 // VGFree serves as a safety net before calibration and when manual LVs are
@@ -100,6 +104,7 @@ func getAvailableSpace(
 	cl client.Client,
 	reservationCache *cache.Cache,
 	key cache.StoragePoolKey,
+	ownReservationIDs ...string,
 ) (LVGSpaceInfo, error) {
 	lvg := &snc.LVMVolumeGroup{}
 	if err := cl.Get(ctx, client.ObjectKey{Name: key.LVGName}, lvg); err != nil {
@@ -131,7 +136,7 @@ func getAvailableSpace(
 	}
 
 	unaccounted := reservationCache.GetUnaccountedSpace(key)
-	reserved := reservationCache.GetReservedSpace(key)
+	reserved := reservationCache.GetReservedSpaceExcept(key, ownReservationIDs...)
 
 	llvBased := totalCapacity - sumAll - unaccounted
 	baseFree := llvBased
@@ -147,6 +152,13 @@ func getAvailableSpace(
 	}, nil
 }
 
+// poolClaim is the space a PVC of the Pod asks of a pool on a node.
+type poolClaim struct {
+	pvc  string
+	key  cache.StoragePoolKey
+	size int64
+}
+
 // checkPoolHasSpace checks if a storage pool has enough space for the requested size.
 func checkPoolHasSpace(
 	ctx context.Context,
@@ -154,30 +166,13 @@ func checkPoolHasSpace(
 	reservationCache *cache.Cache,
 	key cache.StoragePoolKey,
 	requestedSize int64,
+	ownReservationIDs ...string,
 ) (bool, error) {
-	spaceInfo, err := getAvailableSpace(ctx, cl, reservationCache, key)
+	spaceInfo, err := getAvailableSpace(ctx, cl, reservationCache, key, ownReservationIDs...)
 	if err != nil {
 		return false, err
 	}
 	return spaceInfo.AvailableSpace >= requestedSize, nil
-}
-
-// calculatePoolScore calculates a score (1-10) for a storage pool based on available space.
-func calculatePoolScore(
-	ctx context.Context,
-	cl client.Client,
-	reservationCache *cache.Cache,
-	key cache.StoragePoolKey,
-	requestedSize int64,
-	divisor float64,
-) (int, error) {
-	spaceInfo, err := getAvailableSpace(ctx, cl, reservationCache, key)
-	if err != nil {
-		return 0, err
-	}
-	freeSpaceLeft := getFreeSpaceLeftPercent(spaceInfo.AvailableSpace, requestedSize, spaceInfo.TotalSize)
-	score := getNodeScore(freeSpaceLeft, divisor)
-	return score, nil
 }
 
 // storagePoolKeyFromSCLVG creates a StoragePoolKey from an SCLVMVolumeGroup and device type.
@@ -360,12 +355,20 @@ func CalibrateAllPoolsForLVG(
 
 // --- Score calculation helpers ---
 
-// getFreeSpaceLeftPercent calculates the percentage of free space left after placing the requested volume
+// getFreeSpaceLeftPercent calculates the percentage of free space left after placing the requested volume.
+// A pool that cannot hold the volume gets 0, the same as a node without a pool: a negative
+// percent is unbounded (a 500Gi request to a 100Gi pool with 1Gi free gives -499) and would
+// outweigh the other PVCs of the pod in the average. A pool of zero size gets 0 too: converting
+// the NaN of 0/0 to int64 depends on the CPU architecture.
 func getFreeSpaceLeftPercent(freeSize, requestedSpace, totalSize int64) int64 {
+	if totalSize <= 0 {
+		return 0
+	}
 	leftFreeSize := freeSize - requestedSpace
-	fraction := float64(leftFreeSize) / float64(totalSize)
-	percent := fraction * 100
-	return int64(percent)
+	if leftFreeSize <= 0 {
+		return 0
+	}
+	return int64(float64(leftFreeSize) / float64(totalSize) * 100)
 }
 
 // getNodeScore calculates score based on free space

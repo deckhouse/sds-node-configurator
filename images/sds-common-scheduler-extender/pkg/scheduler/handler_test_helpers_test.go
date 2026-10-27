@@ -416,3 +416,14 @@ func shadowDiskfulMember(nodeName string) srv.DatameshMember {
 		NodeName: nodeName,
 	}
 }
+
+// testNewControlPlaneMC is the sds-replicated-volume ModuleConfig that hands replicated PVCs
+// to the extender.
+func testNewControlPlaneMC() *d8commonapi.ModuleConfig {
+	return &d8commonapi.ModuleConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "sds-replicated-volume"},
+		Spec: d8commonapi.ModuleConfigSpec{
+			Settings: d8commonapi.SettingsValues{"newControlPlane": true},
+		},
+	}
+}

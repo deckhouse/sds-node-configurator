@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -65,7 +66,11 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	servingLog = servingLog.With("Pod", fmt.Sprintf("%s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+	servingLog = servingLog.With("Pod", fmt.Sprintf("%s/%s", inputData.Pod.Namespace, inputData.Pod.Name), "dryRun", inputData.DryRun)
+	if inputData.DryRun {
+		s.filterDryRunRequestCount.Add(1)
+		tracing.MarkDryRun(w)
+	}
 
 	nodeNames, err := getNodeNames(inputData)
 	if err != nil {
@@ -88,14 +93,6 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 		return
-	}
-
-	// Remove old reservations for these PVCs (idempotent -- AddReservation replaces anyway)
-	for _, pvc := range managedPVCs {
-		pvcKey := pvc.Namespace + "/" + pvc.Name
-		if s.cache.HasReservation(pvcKey) {
-			servingLog.Debug(fmt.Sprintf("PVC %s has existing reservation, it will be replaced", pvcKey))
-		}
 	}
 
 	scUsedByPVCs, err := getStorageClassesUsedByPVCs(ctx, s.client, managedPVCs)
@@ -185,15 +182,21 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 	}
 	servingLog.Debug("successfully filtered the nodes from the request")
 
-	// Create reservations for each PVC across all filtered nodes
-	servingLog.Debug("starts to create reservations")
-	err = createReservations(ctx, servingLog, s.client, s.cache, filteredNodes.NodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
-	if err != nil {
-		servingLog.Error("unable to create reservations", logger.Err(err))
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
+	// Create reservations for each PVC across all filtered nodes. A dry run
+	// only reads them: a simulated copy shares the PVC keys of the real Pod, and
+	// writing would replace the real Pod's reservation and reset its TTL.
+	if inputData.DryRun {
+		servingLog.Debug("dry run: reservations are not created")
+	} else {
+		servingLog.Debug("starts to create reservations")
+		err = createReservations(ctx, servingLog, s.client, s.cache, filteredNodes.NodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
+		if err != nil {
+			servingLog.Error("unable to create reservations", logger.Err(err))
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		servingLog.Debug("successfully created reservations")
 	}
-	servingLog.Debug("successfully created reservations")
 
 	// Log response body at DEBUG level
 	responseJSON, err := json.Marshal(filteredNodes)
@@ -299,6 +302,8 @@ func filterNodes(
 		}
 	}
 
+	podReservationIDs := reservationIDs(localPVCs)
+
 	result := &ExtenderFilterResult{
 		NodeNames:   &[]string{},
 		FailedNodes: FailedNodesMap{},
@@ -320,13 +325,15 @@ func filterNodes(
 			}()
 
 			var failReasons []string
+			var claims []poolClaim
 
 			// === Filter for LOCAL PVCs ===
 			if len(localPVCs) > 0 {
-				ok, reason := filterNodeForLocalPVCs(ctx, log, cl, schedulerCache, nodeName, localPVCs, scLVGs, pvcRequests)
+				ok, reason, localClaims := filterNodeForLocalPVCs(ctx, log, cl, schedulerCache, nodeName, localPVCs, scLVGs, pvcRequests)
 				if !ok && reason != "" {
 					failReasons = append(failReasons, fmt.Sprintf("[local] %s", reason))
 				}
+				claims = append(claims, localClaims...)
 			}
 
 			// === Filter for REPLICATED PVCs ===
@@ -335,11 +342,17 @@ func filterNodes(
 				if node == nil {
 					failReasons = append(failReasons, fmt.Sprintf("[replicated] node %s not found", nodeName))
 				} else {
-					ok, reason := filterNodeForReplicatedPVCs(ctx, log, cl, schedulerCache, nodeName, node, replicatedPVCs, scUsedByPVCs, pvcRequests)
+					ok, reason, replicatedClaims := filterNodeForReplicatedPVCs(ctx, log, cl, nodeName, node, replicatedPVCs, scUsedByPVCs, pvcRequests)
 					if !ok && reason != "" {
 						failReasons = append(failReasons, fmt.Sprintf("[replicated] %s", reason))
 					}
+					claims = append(claims, replicatedClaims...)
 				}
+			}
+
+			// === Space of the whole Pod in each pool ===
+			if ok, reason := checkPodClaims(ctx, log, cl, schedulerCache, claims, podReservationIDs); !ok {
+				failReasons = append(failReasons, fmt.Sprintf("[space] %s", reason))
 			}
 
 			if len(failReasons) > 0 {
@@ -370,7 +383,8 @@ func filterNodes(
 	return result, nil
 }
 
-// filterNodeForLocalPVCs filters node for local PVCs using client.Client for LVG lookups.
+// filterNodeForLocalPVCs filters node for local PVCs using client.Client for LVG lookups and
+// returns the space the PVCs ask of the node's pools; checkPodClaims checks it.
 func filterNodeForLocalPVCs(
 	ctx context.Context,
 	log logger.Logger,
@@ -380,44 +394,87 @@ func filterNodeForLocalPVCs(
 	localPVCs map[string]*corev1.PersistentVolumeClaim,
 	scLVGs map[string]SCLVMVolumeGroups,
 	pvcRequests map[string]PVCRequest,
-) (bool, string) {
+) (bool, string, []poolClaim) {
 	// Get all LVGs on this node via field indexer
 	nodeLVGs, err := getLVGsOnNode(ctx, cl, nodeName)
 	if err != nil {
 		log.Error(fmt.Sprintf("unable to get LVGs for node %s", nodeName), logger.Err(err))
-		return false, fmt.Sprintf("unable to get LVGs for node %s: %v", nodeName, err)
+		return false, fmt.Sprintf("unable to get LVGs for node %s: %v", nodeName, err), nil
 	}
 
 	if len(nodeLVGs) == 0 {
 		log.Debug(fmt.Sprintf("node %s does not have any LVMVolumeGroups", nodeName))
-		return false, fmt.Sprintf("node %s does not have any LVMVolumeGroups", nodeName)
+		return false, fmt.Sprintf("node %s does not have any LVMVolumeGroups", nodeName), nil
 	}
 
+	claims := make([]poolClaim, 0, len(localPVCs))
 	for _, pvc := range localPVCs {
-		pvcReq := pvcRequests[pvc.Name]
-		lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
-
 		// Find the matching LVG between node and SC
-		commonLVG := findMatchedSCLVG(nodeLVGs, lvgsFromSC)
+		commonLVG := findMatchedSCLVG(nodeLVGs, scLVGs[*pvc.Spec.StorageClassName])
 		if commonLVG == nil {
-			return false, fmt.Sprintf("unable to match Storage Class's LVMVolumeGroup with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
+			return false, fmt.Sprintf("unable to match Storage Class's LVMVolumeGroup with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName), nil
 		}
+		pvcReq := pvcRequests[pvc.Name]
+		claims = append(claims, poolClaim{pvc: pvc.Name, key: storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType), size: pvcReq.RequestedSize})
+	}
 
-		// Build StoragePoolKey and check space
-		key := storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType)
-		hasSpace, err := checkPoolHasSpace(ctx, cl, schedulerCache, key, pvcReq.RequestedSize)
+	return true, "", claims
+}
+
+// checkPodClaims checks that every pool holds all the Pod's PVCs placed in it, local and
+// replicated alike. The Pod's own local reservations are left out: the request is about to
+// replace them. Every other reservation counts, a replicated PVC's own one included: it is
+// made under ns/name while sds-replicated-volume places a diskful replica and lives until
+// Bound or its TTL. Claims are checked in PVC name order, so the reason is stable.
+func checkPodClaims(
+	ctx context.Context,
+	log logger.Logger,
+	cl client.Client,
+	schedulerCache *cache.Cache,
+	claims []poolClaim,
+	podReservationIDs []string,
+) (bool, string) {
+	claims = slices.Clone(claims)
+	slices.SortFunc(claims, func(a, b poolClaim) int { return strings.Compare(a.pvc, b.pvc) })
+
+	podClaims := make(map[cache.StoragePoolKey]int64, len(claims))
+	for _, c := range claims {
+		podClaims[c.key] += c.size
+	}
+
+	checked := make(map[cache.StoragePoolKey]bool, len(podClaims))
+	for _, c := range claims {
+		if checked[c.key] {
+			continue
+		}
+		checked[c.key] = true
+
+		hasSpace, err := checkPoolHasSpace(ctx, cl, schedulerCache, c.key, podClaims[c.key], podReservationIDs...)
 		if err != nil {
-			log.Error(fmt.Sprintf("unable to check space for %s", key.String()), logger.Err(err))
-			return false, fmt.Sprintf("error checking space for LVG %s: %v", commonLVG.Name, err)
+			log.Error(fmt.Sprintf("unable to check space for %s", c.key.String()), logger.Err(err))
+			return false, fmt.Sprintf("error checking space for LVG %s: %v", c.key.LVGName, err)
+		}
+		if hasSpace {
+			continue
 		}
 
-		if !hasSpace {
-			log.Trace(fmt.Sprintf("%s does not have enough space for PVC %s (requested: %s)", key.String(), pvc.Name, resource.NewQuantity(pvcReq.RequestedSize, resource.BinarySI)))
-			return false, fmt.Sprintf("LVMVolumeGroup %s does not have enough space for PVC %s", commonLVG.Name, pvc.Name)
+		log.Trace(fmt.Sprintf("%s does not have enough space for the Pod's PVCs (requested: %s)", c.key.String(), resource.NewQuantity(podClaims[c.key], resource.BinarySI)))
+		if podClaims[c.key] > c.size {
+			return false, fmt.Sprintf("LVMVolumeGroup %s does not have enough space for PVC %s and the Pod's other PVCs in it", c.key.LVGName, c.pvc)
 		}
+		return false, fmt.Sprintf("LVMVolumeGroup %s does not have enough space for PVC %s", c.key.LVGName, c.pvc)
 	}
 
 	return true, ""
+}
+
+// reservationIDs returns the reservation IDs of the PVCs, ns/name each.
+func reservationIDs(pvcs map[string]*corev1.PersistentVolumeClaim) []string {
+	ids := make([]string, 0, len(pvcs))
+	for _, pvc := range pvcs {
+		ids = append(ids, pvc.Namespace+"/"+pvc.Name)
+	}
+	return ids
 }
 
 // createReservations creates reservations for each PVC across all filtered nodes.

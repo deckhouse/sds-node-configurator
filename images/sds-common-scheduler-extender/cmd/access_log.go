@@ -77,6 +77,14 @@ func accessLogHandler(log logger.Logger, schedulerHandler http.Handler) http.Han
 		if len(ua) > 0 {
 			fields = append(fields, "http_user_agent", ua)
 		}
+		// A scheduling simulation sends up to hundreds of dry-run requests per descheduler
+		// cycle; they are logged at Debug so that real scheduling stays visible at Info.
+		// A standby replica reads the mark from the response it relays from the leader.
+		// A dry run that failed on the server stays at Info.
+		if tracing.IsDryRun(accessLogRW.Header()) && accessLogRW.statusCode < http.StatusInternalServerError {
+			requestLog.Debug("[accessLogHandler]", fields...)
+			return
+		}
 		requestLog.Info("[accessLogHandler]", fields...)
 	})
 }

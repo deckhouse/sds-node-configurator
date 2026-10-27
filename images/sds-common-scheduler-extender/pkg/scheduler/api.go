@@ -32,6 +32,11 @@ type ExtenderArgs struct {
 	// List of candidate node names where the pod can be scheduled; to be
 	// populated only if ExtenderConfig.NodeCacheCapable == true
 	NodeNames *[]string `json:"nodenames,omitempty"`
+	// DryRun is a Deckhouse kube-scheduler extension: it is set on the filter
+	// and prioritize requests of a scheduling simulation (POST /simulate), which
+	// never binds the Pod. The answer must be the one a real cycle would get,
+	// with no reservation created, replaced or narrowed.
+	DryRun bool `json:"dryRun,omitempty"`
 }
 
 // HostPriority is copied from https://godoc.org/k8s.io/kubernetes/pkg/scheduler/api/v1#HostPriority

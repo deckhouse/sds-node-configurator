@@ -102,8 +102,6 @@ func TestFilterNodeForReplicatedPVCs_LocalBound(t *testing.T) {
 	})
 	sc := testSC(scName, consts.SdsReplicatedVolumeProvisioner)
 
-	schedulerCache := newTestCache()
-
 	replicatedPVCs := map[string]*corev1.PersistentVolumeClaim{
 		pvc.Name: pvc,
 	}
@@ -117,7 +115,7 @@ func TestFilterNodeForReplicatedPVCs_LocalBound(t *testing.T) {
 	t.Run("node with replica passes", func(t *testing.T) {
 		node := testNode("node-1", true)
 		cl := newFakeClient(rsc, rsp, lvg1, lvg2, pvc, pv, rv, sc, node)
-		ok, reason := filterNodeForReplicatedPVCs(ctx, log, cl, schedulerCache, "node-1", node, replicatedPVCs, scUsedByPVCs, pvcRequests)
+		ok, reason, _ := filterNodeForReplicatedPVCs(ctx, log, cl, "node-1", node, replicatedPVCs, scUsedByPVCs, pvcRequests)
 		assert.True(t, ok, "node-1 should pass (has replica): %s", reason)
 	})
 
@@ -125,7 +123,7 @@ func TestFilterNodeForReplicatedPVCs_LocalBound(t *testing.T) {
 		node := testNode("node-3", true)
 		lvg3 := readyLVGOnNode("lvg3", "node-3", hundredGiB, 50*oneGiB)
 		cl := newFakeClient(rsc, rsp, lvg1, lvg2, lvg3, pvc, pv, rv, sc, node)
-		ok, reason := filterNodeForReplicatedPVCs(ctx, log, cl, schedulerCache, "node-3", node, replicatedPVCs, scUsedByPVCs, pvcRequests)
+		ok, reason, _ := filterNodeForReplicatedPVCs(ctx, log, cl, "node-3", node, replicatedPVCs, scUsedByPVCs, pvcRequests)
 		assert.False(t, ok, "node-3 should be rejected (no replica)")
 		assert.Contains(t, reason, "no diskful replica")
 	})
@@ -133,7 +131,7 @@ func TestFilterNodeForReplicatedPVCs_LocalBound(t *testing.T) {
 	t.Run("node without replicated label rejected", func(t *testing.T) {
 		node := testNode("node-1", false)
 		cl := newFakeClient(rsc, rsp, lvg1, lvg2, pvc, pv, rv, sc, node)
-		ok, reason := filterNodeForReplicatedPVCs(ctx, log, cl, schedulerCache, "node-1", node, replicatedPVCs, scUsedByPVCs, pvcRequests)
+		ok, reason, _ := filterNodeForReplicatedPVCs(ctx, log, cl, "node-1", node, replicatedPVCs, scUsedByPVCs, pvcRequests)
 		assert.False(t, ok, "node without label should be rejected")
 		assert.Contains(t, reason, srv.AgentNodeLabelKey)
 	})
@@ -154,8 +152,6 @@ func TestFilterNodeForReplicatedPVCs_AnyBound(t *testing.T) {
 	})
 	sc := testSC(scName, consts.SdsReplicatedVolumeProvisioner)
 
-	schedulerCache := newTestCache()
-
 	replicatedPVCs := map[string]*corev1.PersistentVolumeClaim{
 		pvc.Name: pvc,
 	}
@@ -169,7 +165,7 @@ func TestFilterNodeForReplicatedPVCs_AnyBound(t *testing.T) {
 	t.Run("node without replica passes for VolumeAccessAny", func(t *testing.T) {
 		node := testNode("node-2", true)
 		cl := newFakeClient(rsc, rsp, lvg1, pvc, pv, rv, sc, node)
-		ok, reason := filterNodeForReplicatedPVCs(ctx, log, cl, schedulerCache, "node-2", node, replicatedPVCs, scUsedByPVCs, pvcRequests)
+		ok, reason, _ := filterNodeForReplicatedPVCs(ctx, log, cl, "node-2", node, replicatedPVCs, scUsedByPVCs, pvcRequests)
 		assert.True(t, ok, "node-2 should pass for Any access: %s", reason)
 	})
 }
@@ -189,8 +185,6 @@ func TestFilterNodeForReplicatedPVCs_EventuallyLocalBound(t *testing.T) {
 	})
 	sc := testSC(scName, consts.SdsReplicatedVolumeProvisioner)
 
-	schedulerCache := newTestCache()
-
 	replicatedPVCs := map[string]*corev1.PersistentVolumeClaim{
 		pvc.Name: pvc,
 	}
@@ -204,14 +198,14 @@ func TestFilterNodeForReplicatedPVCs_EventuallyLocalBound(t *testing.T) {
 	t.Run("node with LVG passes", func(t *testing.T) {
 		node := testNode("node-1", true)
 		cl := newFakeClient(rsc, rsp, lvg1, pvc, pv, rv, sc, node)
-		ok, reason := filterNodeForReplicatedPVCs(ctx, log, cl, schedulerCache, "node-1", node, replicatedPVCs, scUsedByPVCs, pvcRequests)
+		ok, reason, _ := filterNodeForReplicatedPVCs(ctx, log, cl, "node-1", node, replicatedPVCs, scUsedByPVCs, pvcRequests)
 		assert.True(t, ok, "node-1 should pass (has LVG with space): %s", reason)
 	})
 
 	t.Run("node without LVG rejected", func(t *testing.T) {
 		node := testNode("node-2", true)
 		cl := newFakeClient(rsc, rsp, lvg1, pvc, pv, rv, sc, node)
-		ok, reason := filterNodeForReplicatedPVCs(ctx, log, cl, schedulerCache, "node-2", node, replicatedPVCs, scUsedByPVCs, pvcRequests)
+		ok, reason, _ := filterNodeForReplicatedPVCs(ctx, log, cl, "node-2", node, replicatedPVCs, scUsedByPVCs, pvcRequests)
 		assert.False(t, ok, "node-2 should be rejected (no LVG)")
 		assert.Contains(t, reason, "no LVG from RSP")
 	})
@@ -363,10 +357,12 @@ func TestScoreNodes_MultiVolume_ReplicaIntersection(t *testing.T) {
 		scoreMap[hp.Host] = hp.Score
 	}
 
-	// node-2 has 2/2 hits -> 10, node-1 and node-3 have 1/2 -> 5
+	// node-2 has 2/2 hits -> 10. node-1 and node-3 have 1/2 hits -> 5, but the PVC without
+	// a replica sees a 49% free pool -> 6 and wins; the PVC with a replica stays out of the
+	// space average.
 	assert.Equal(t, 10, scoreMap["node-2"], "node-2 should get 10 (2/2 hits)")
-	assert.Equal(t, 5, scoreMap["node-1"], "node-1 should get 5 (1/2 hits)")
-	assert.Equal(t, 5, scoreMap["node-3"], "node-3 should get 5 (1/2 hits)")
+	assert.Equal(t, 6, scoreMap["node-1"], "node-1 should get 6 (space score above 1/2 hits)")
+	assert.Equal(t, 6, scoreMap["node-3"], "node-3 should get 6 (space score above 1/2 hits)")
 }
 
 func TestScoreNodes_MultiVolume_AllReplicasOnAllNodes(t *testing.T) {
@@ -462,10 +458,12 @@ func TestScoreNodes_ThreeVolumes_PartialOverlap(t *testing.T) {
 		scoreMap[hp.Host] = hp.Score
 	}
 
-	// node-1: 3/3 -> 10, node-2: 2/3 -> 6, node-3: 1/3 -> 3
+	// node-1: 3/3 replicas -> 10; node-2: 2/3 replicas -> 6.
+	// node-3: 1/3 replicas -> 3, but the two PVCs without a replica see 49% free pools,
+	// so the space score 49% -> 6 is higher and wins.
 	assert.Equal(t, 10, scoreMap["node-1"], "node-1 should get 10 (3/3)")
 	assert.Equal(t, 6, scoreMap["node-2"], "node-2 should get 6 (2/3)")
-	assert.Equal(t, 3, scoreMap["node-3"], "node-3 should get 3 (1/3)")
+	assert.Equal(t, 6, scoreMap["node-3"], "node-3 should get 6 (space score above 1/3 replicas)")
 }
 
 // --- B. Mixed local + replicated scoring ---

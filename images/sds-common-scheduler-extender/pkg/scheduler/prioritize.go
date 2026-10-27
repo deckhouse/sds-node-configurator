@@ -61,7 +61,11 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	servingLog = servingLog.With("Pod", fmt.Sprintf("%s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
+	servingLog = servingLog.With("Pod", fmt.Sprintf("%s/%s", inputData.Pod.Namespace, inputData.Pod.Name), "dryRun", inputData.DryRun)
+	if inputData.DryRun {
+		s.prioritizeDryRunRequestCount.Add(1)
+		tracing.MarkDryRun(w)
+	}
 
 	nodeNames, err := getNodeNames(inputData)
 	if err != nil {
@@ -157,8 +161,11 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	}
 	servingLog.Debug("successfully scored the nodes for Pod")
 
-	// Narrow reservations to the final node list (prioritize may receive fewer nodes than filter)
-	narrowReservationsToFinalNodes(ctx, servingLog, s.client, s.cache, nodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
+	// Narrow reservations to the final node list (prioritize may receive fewer nodes than filter).
+	// A dry run leaves them as they are, TTL included.
+	if !inputData.DryRun {
+		narrowReservationsToFinalNodes(ctx, servingLog, s.client, s.cache, nodeNames, managedPVCs, scUsedByPVCs, pvcRequests)
+	}
 
 	// Log response body at DEBUG level
 	responseJSON, err := json.Marshal(scoredNodes)
@@ -241,6 +248,12 @@ func scoreNodes(
 		}
 	}
 
+	// The Pod's own local PVCs are accounted from the request, not from the cache: a real
+	// filter reserves them on every candidate pool right before prioritize, a dry run
+	// reserves nothing, and both must score the same. This holds for every pool, the
+	// pools of an RSP included: an LVG can serve a local StorageClass and an RSP at once.
+	podReservationIDs := reservationIDs(localPVCs)
+
 	result := make([]HostPriority, 0, len(*nodeNames))
 	resultMtx := &sync.Mutex{}
 	wg := &sync.WaitGroup{}
@@ -257,10 +270,13 @@ func scoreNodes(
 				wg.Done()
 			}()
 
-			var totalScore int64
+			var totalPercent int64
 			pvcCount := 0
 			replicaHits := 0
 			replicaTotalPVCs := 0
+			// claims are the PVCs scored by the free space of their pool on this node,
+			// local and replicated alike; they are scored once all of them are known.
+			var claims []poolClaim
 
 			// === Score LOCAL PVCs ===
 			if len(localPVCs) > 0 {
@@ -270,26 +286,14 @@ func scoreNodes(
 					log.Error(fmt.Sprintf("unable to get LVGs for node %s", nodeName), logger.Err(err))
 				} else {
 					for _, pvc := range localPVCs {
-						pvcReq := pvcRequests[pvc.Name]
-						lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
-						commonLVG := findMatchedSCLVG(nodeLVGs, lvgsFromSC)
+						commonLVG := findMatchedSCLVG(nodeLVGs, scLVGs[*pvc.Spec.StorageClassName])
 						if commonLVG == nil {
 							log.Debug(fmt.Sprintf("unable to match local LVG for SC %s on node %s, scoring 0", *pvc.Spec.StorageClassName, nodeName))
 							pvcCount++
 							continue
 						}
-
-						key := storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType)
-						spaceInfo, err := getAvailableSpace(ctx, cl, schedulerCache, key)
-						if err != nil {
-							log.Error(fmt.Sprintf("unable to get available space for %s", key.String()), logger.Err(err))
-							pvcCount++
-							continue
-						}
-
-						log.Trace(fmt.Sprintf("pool %s available space: %s, total size: %s", key.String(), resource.NewQuantity(spaceInfo.AvailableSpace, resource.BinarySI), resource.NewQuantity(spaceInfo.TotalSize, resource.BinarySI)))
-						totalScore += getFreeSpaceLeftPercent(spaceInfo.AvailableSpace, pvcReq.RequestedSize, spaceInfo.TotalSize)
-						pvcCount++
+						pvcReq := pvcRequests[pvc.Name]
+						claims = append(claims, poolClaim{pvc: pvc.Name, key: storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType), size: pvcReq.RequestedSize})
 					}
 				}
 			}
@@ -325,21 +329,27 @@ func scoreNodes(
 					// and lags behind binding, so a freshly bound (or freshly created)
 					// PVC may temporarily show an out-of-date phase here. See the
 					// rationale on extractRequestedSize.
+					//
+					// For Local, PreferablyLocal and EventuallyLocal a bound PVC with a diskful
+					// replica on the node counts in the replica score only and stays out of the
+					// space average; the growth delta of an expanded PVC is not charged to the
+					// replica node, as before. Counting it as 0% in the average made a node with
+					// a replica of one of several PVCs lose to a node without replicas.
 					if pvc.Spec.VolumeName != "" {
 						switch volumeAccess {
 						case srv.VolumeAccessLocal:
 							replicaTotalPVCs++
 							if nodeHasReplicaForPVC(nodeName, pvc.Name, replicaLocations) {
 								replicaHits++
+							} else {
+								pvcCount++
 							}
-							pvcCount++
 							continue
 
 						case srv.VolumeAccessPreferablyLocal, srv.VolumeAccessEventuallyLocal:
 							replicaTotalPVCs++
 							if nodeHasReplicaForPVC(nodeName, pvc.Name, replicaLocations) {
 								replicaHits++
-								pvcCount++
 								continue
 							}
 
@@ -348,17 +358,23 @@ func scoreNodes(
 						}
 					}
 
-					pvcScore := calculateReplicatedPVCScore(ctx, log, cl, schedulerCache, nodeName, rsp, pvcReq, divisor)
-					totalScore += pvcScore
-					pvcCount++
+					key, found := replicatedPoolKey(ctx, cl, nodeName, rsp)
+					if !found {
+						pvcCount++
+						continue
+					}
+					claims = append(claims, poolClaim{pvc: pvc.Name, key: key, size: pvcReq.RequestedSize})
 				}
 			}
 
-			var averageScore int64
+			totalPercent += scoreClaims(ctx, log, cl, schedulerCache, claims, podReservationIDs)
+			pvcCount += len(claims)
+
+			var averagePercent int64
 			if pvcCount > 0 {
-				averageScore = totalScore / int64(pvcCount)
+				averagePercent = totalPercent / int64(pvcCount)
 			}
-			baseScore := getNodeScore(averageScore, divisor)
+			baseScore := getNodeScore(averagePercent, divisor)
 			score := baseScore
 			if replicaTotalPVCs > 0 && replicaHits > 0 {
 				replicaScore := 10 * replicaHits / replicaTotalPVCs
@@ -366,7 +382,7 @@ func scoreNodes(
 					score = replicaScore
 				}
 			}
-			log.Trace(fmt.Sprintf("node %s has final score %d (base: %d, total: %d, pvcs: %d, replicaHits: %d/%d)", nodeName, score, baseScore, totalScore, pvcCount, replicaHits, replicaTotalPVCs))
+			log.Trace(fmt.Sprintf("node %s has final score %d (base: %d, total percent: %d, pvcs: %d, replicaHits: %d/%d)", nodeName, score, baseScore, totalPercent, pvcCount, replicaHits, replicaTotalPVCs))
 
 			resultMtx.Lock()
 			result = append(result, HostPriority{
@@ -389,6 +405,46 @@ func scoreNodes(
 	}
 
 	return result, nil
+}
+
+// scoreClaims sums, over the claims, the percent of the pool left free once the whole Pod is
+// placed: the other claims of the Pod on the same pool count too. A pool whose space cannot be
+// read adds 0.
+func scoreClaims(
+	ctx context.Context,
+	log logger.Logger,
+	cl client.Client,
+	schedulerCache *cache.Cache,
+	claims []poolClaim,
+	podReservationIDs []string,
+) int64 {
+	podClaims := make(map[cache.StoragePoolKey]int64, len(claims))
+	for _, c := range claims {
+		podClaims[c.key] += c.size
+	}
+
+	// The space of a pool is the same for every claim on it.
+	spaces := make(map[cache.StoragePoolKey]*LVGSpaceInfo, len(podClaims))
+	var total int64
+	for _, c := range claims {
+		spaceInfo, read := spaces[c.key]
+		if !read {
+			info, err := getAvailableSpace(ctx, cl, schedulerCache, c.key, podReservationIDs...)
+			if err != nil {
+				log.Error(fmt.Sprintf("unable to get available space for %s", c.key.String()), logger.Err(err))
+			} else {
+				spaceInfo = &info
+				log.Trace(fmt.Sprintf("pool %s available space: %s, total size: %s", c.key.String(), resource.NewQuantity(info.AvailableSpace, resource.BinarySI), resource.NewQuantity(info.TotalSize, resource.BinarySI)))
+			}
+			spaces[c.key] = spaceInfo
+		}
+		if spaceInfo == nil {
+			continue
+		}
+		others := podClaims[c.key] - c.size
+		total += getFreeSpaceLeftPercent(spaceInfo.AvailableSpace-others, c.size, spaceInfo.TotalSize)
+	}
+	return total
 }
 
 // narrowReservationsToFinalNodes narrows reservations for each PVC to only include

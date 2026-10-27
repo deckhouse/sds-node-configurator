@@ -33,7 +33,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	d8commonapi "github.com/deckhouse/sds-common-lib/api/v1alpha1"
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/images/sds-common-scheduler-extender/pkg/consts"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -363,12 +362,7 @@ func TestFilter_AnnotationPVC_ReplicatedLocalAccess(t *testing.T) {
 		testNode("node-a", true),
 		testNode("node-b", true),
 		pendingPVCWithSize("pvc-hotplug", "default", scName, tenGiB),
-		&d8commonapi.ModuleConfig{
-			ObjectMeta: metav1.ObjectMeta{Name: "sds-replicated-volume"},
-			Spec: d8commonapi.ModuleConfigSpec{
-				Settings: d8commonapi.SettingsValues{"newControlPlane": true},
-			},
-		},
+		testNewControlPlaneMC(),
 	)
 	c := newTestCache()
 	s := newTestScheduler(cl, c)

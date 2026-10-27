@@ -28,12 +28,28 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/deckhouse/sds-common-lib/logger"
 )
 
 type traceIDKey struct{}
+
+// DryRunHeader marks the response to a dry-run request. The access log reads the mark from
+// the response: only the handler decodes the body, and a standby replica that forwards the
+// request to the leader gets the leader's response headers back.
+const DryRunHeader = "X-Sds-Scheduler-Extender-Dry-Run"
+
+// MarkDryRun marks the response as one to a dry-run request. Call it before the body is written.
+func MarkDryRun(w http.ResponseWriter) {
+	w.Header().Set(DryRunHeader, "true")
+}
+
+// IsDryRun reports whether the response headers carry the dry-run mark.
+func IsDryRun(h http.Header) bool {
+	return h.Get(DryRunHeader) != ""
+}
 
 const traceIDKeyName = "traceid"
 

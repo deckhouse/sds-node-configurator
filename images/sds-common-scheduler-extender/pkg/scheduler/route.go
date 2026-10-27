@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,15 +51,20 @@ func NeedsReservationCache(path string) bool {
 }
 
 type scheduler struct {
-	client                     client.Client
-	ctx                        context.Context
-	log                        logger.Logger
-	cache                      *cache.Cache
-	defaultDivisor             float64
-	targetProvisioners         []string
-	filterRequestCount         int
-	prioritizeRequestCount     int
-	filterAndScoreRequestCount int
+	client             client.Client
+	ctx                context.Context
+	log                logger.Logger
+	cache              *cache.Cache
+	defaultDivisor     float64
+	targetProvisioners []string
+	// Request counters for /stat. ServeHTTP runs in a goroutine per connection, so
+	// they are atomic. The dry-run counters are part of the totals and count only
+	// requests decoded with a Pod: the router does not read the body.
+	filterRequestCount           atomic.Int64
+	filterDryRunRequestCount     atomic.Int64
+	prioritizeRequestCount       atomic.Int64
+	prioritizeDryRunRequestCount atomic.Int64
+	filterAndScoreRequestCount   atomic.Int64
 }
 
 func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -69,17 +75,17 @@ func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch r.URL.Path {
 	case "/scheduler/filter":
-		s.filterRequestCount++
+		s.filterRequestCount.Add(1)
 		requestLog.Debug("filter route starts handling the request")
 		s.filter(w, r)
 		requestLog.Debug("filter route ends handling the request")
 	case "/scheduler/prioritize":
-		s.prioritizeRequestCount++
+		s.prioritizeRequestCount.Add(1)
 		requestLog.Debug("prioritize route starts handling the request")
 		s.prioritize(w, r)
 		requestLog.Debug("prioritize route ends handling the request")
 	case "/v1/lvg/filter-and-score":
-		s.filterAndScoreRequestCount++
+		s.filterAndScoreRequestCount.Add(1)
 		requestLog.Debug("filter-and-score route starts handling the request")
 		s.filterAndScore(w, r)
 		requestLog.Debug("filter-and-score route ends handling the request")
@@ -212,7 +218,12 @@ func (s *scheduler) getCacheStat(w http.ResponseWriter, r *http.Request) {
 	activeCount := len(reservations) - expiredCount
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Filter request count: %d, Prioritize request count: %d, Filter-and-score request count: %d\n", s.filterRequestCount, s.prioritizeRequestCount, s.filterAndScoreRequestCount)
+	// Dry-run counters first: a request adds to the total before its dry-run counter,
+	// so reading them in this order never shows more dry runs than requests.
+	filterDryRun, prioritizeDryRun := s.filterDryRunRequestCount.Load(), s.prioritizeDryRunRequestCount.Load()
+	filter, prioritize := s.filterRequestCount.Load(), s.prioritizeRequestCount.Load()
+	fmt.Fprintf(&sb, "Filter request count: %d (real: %d, dry-run: %d), Prioritize request count: %d (real: %d, dry-run: %d), Filter-and-score request count: %d\n",
+		filter, filter-filterDryRun, filterDryRun, prioritize, prioritize-prioritizeDryRun, prioritizeDryRun, s.filterAndScoreRequestCount.Load())
 	fmt.Fprintf(&sb, "Pools: %d, Reservations: %d (active: %d, expired: %d)\n", len(pools), len(reservations), activeCount, expiredCount)
 	fmt.Fprintf(&sb, "Total reserved across all pools: %s\n", resource.NewQuantity(totalReserved, resource.BinarySI).String())
 

@@ -18,6 +18,7 @@ package cache
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -85,13 +86,19 @@ func NewCache(log logger.Logger, cleanupInterval time.Duration) *Cache {
 
 // GetReservedSpace computes reserved size for a pool by summing active (non-expired) reservations.
 func (c *Cache) GetReservedSpace(key StoragePoolKey) int64 {
+	return c.GetReservedSpaceExcept(key)
+}
+
+// GetReservedSpaceExcept is GetReservedSpace without the reservations exceptIDs. A request that
+// will replace its own reservations must not count them as space taken by someone else.
+func (c *Cache) GetReservedSpaceExcept(key StoragePoolKey, exceptIDs ...string) int64 {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 
 	now := time.Now()
 	var reserved int64
-	for _, r := range c.reservations {
-		if now.After(r.expiresAt) {
+	for id, r := range c.reservations {
+		if slices.Contains(exceptIDs, id) || now.After(r.expiresAt) {
 			continue
 		}
 		if _, ok := r.pools[key]; ok {
