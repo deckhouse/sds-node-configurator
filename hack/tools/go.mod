@@ -22,7 +22,6 @@ module sds-node-configurator-codegen-tools
 // newer Go version go1.26 (application built with go1.25)"). api/go.mod is on
 // go 1.26.
 go 1.27.3
-
 tool (
 	github.com/deckhouse/deckhouse/pkg/crd-enricher/cmd/crd-enricher
 	sigs.k8s.io/controller-tools/cmd/controller-gen
