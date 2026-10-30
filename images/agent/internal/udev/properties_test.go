@@ -55,6 +55,28 @@ func TestParseProperties_FullEnv(t *testing.T) {
 	assert.Equal(t, "abcd-1234", props.PartUUID)
 }
 
+// A disk carrying a partition table reports it; a partition does not, although
+// udev sets ID_PART_TABLE_TYPE on it too, naming the table of its parent.
+func TestParseProperties_PartTableType(t *testing.T) {
+	disk, err := ParseProperties(map[string]string{
+		"DEVNAME": "/dev/nvme2n1", "DEVTYPE": "disk", "MAJOR": "259", "MINOR": "0",
+		"ID_PART_TABLE_TYPE": "gpt",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "gpt", disk.PartTableType)
+
+	partition, err := ParseProperties(map[string]string{
+		"DEVNAME": "/dev/nvme2n1p1", "DEVTYPE": "partition", "MAJOR": "259", "MINOR": "1",
+		"ID_PART_TABLE_TYPE": "gpt",
+	})
+	require.NoError(t, err)
+	assert.Empty(t, partition.PartTableType)
+
+	plain, err := ParseProperties(map[string]string{"DEVNAME": "/dev/sdb", "DEVTYPE": "disk", "MAJOR": "8", "MINOR": "16"})
+	require.NoError(t, err)
+	assert.Empty(t, plain.PartTableType)
+}
+
 func TestParseProperties_SerialFallback(t *testing.T) {
 	env := map[string]string{
 		"DEVNAME":   "/dev/sda",

@@ -48,6 +48,9 @@ var _ = Describe("The Consumable condition", func() {
 			{"a mounted device", internal.Device{MountPoint: "/var/lib/x"}, metav1.ConditionFalse, v1alpha1.ReasonDeviceMounted},
 			{"a formatted device", internal.Device{FSType: "ext4"}, metav1.ConditionFalse, v1alpha1.ReasonDeviceHasFilesystem},
 			{"a hot-plugged device", internal.Device{HotPlug: true}, metav1.ConditionFalse, v1alpha1.ReasonDeviceHotPlugged},
+			// A partition table with no partitions in it: the kernel shows the
+			// disk as empty, and pvcreate still refuses it.
+			{"a device with an empty partition table", internal.Device{PartTableType: "gpt"}, metav1.ConditionFalse, v1alpha1.ReasonDeviceHasPartitionTable},
 			// The common case, and not a problem: a device already serving as a
 			// Physical Volume. Ready would have called this unhealthy.
 			{"a Physical Volume", internal.Device{FSType: "LVM2_member"}, metav1.ConditionFalse, v1alpha1.ReasonDeviceHasFilesystem},
@@ -69,12 +72,21 @@ var _ = Describe("The Consumable condition", func() {
 		Expect(cond.Reason).Should(Equal(v1alpha1.ReasonDeviceMounted))
 	})
 
+	// Wiping the table cannot make a hot-plugged device usable, so the reason
+	// has to name the hot plug.
+	It("reports a hot-plugged device with a partition table as hot-plugged", func() {
+		cond := publish(internal.Device{HotPlug: true, PartTableType: "gpt"})
+
+		Expect(cond.Reason).Should(Equal(v1alpha1.ReasonDeviceHotPlugged))
+	})
+
 	It("agrees with status.consumable", func() {
 		for _, device := range []internal.Device{
 			{},
 			{MountPoint: "/mnt"},
 			{FSType: "xfs"},
 			{HotPlug: true},
+			{PartTableType: "dos"},
 		} {
 			candidate := internal.NewBlockDeviceCandidateByDevice(&device, "node-1", "machine-1")
 			bd := candidate.AsAPIBlockDevice()

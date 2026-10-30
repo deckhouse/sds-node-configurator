@@ -307,7 +307,7 @@ func TestSnapshot_BuildsDevices(t *testing.T) {
 		"MAJOR": "8", "MINOR": "0", "DEVNAME": "sda",
 		"DEVTYPE": "disk", "ID_MODEL": "TestDisk",
 		"ID_SERIAL_SHORT": "SN123", "ID_WWN": "0x5000",
-		"ID_FS_TYPE": "ext4",
+		"ID_FS_TYPE": "ext4", "ID_PART_TABLE_TYPE": "gpt",
 	}
 	require.NoError(t, dm.HandleEvent("add", env))
 
@@ -325,6 +325,7 @@ func TestSnapshot_BuildsDevices(t *testing.T) {
 	assert.Equal(t, "SN123", dev.Serial)
 	assert.Equal(t, "0x5000", dev.Wwn)
 	assert.Equal(t, "ext4", dev.FSType)
+	assert.Equal(t, "gpt", dev.PartTableType)
 	assert.True(t, dev.Rota)
 	assert.False(t, dev.HotPlug)
 	assert.Equal(t, int64(2097152*512), dev.Size.Value())

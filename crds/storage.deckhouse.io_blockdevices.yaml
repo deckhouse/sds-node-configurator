@@ -73,7 +73,7 @@ spec:
                 description: |-
                   Latest state. Known type: `Consumable`, which carries the
                   reason behind `status.consumable`: `Available`, `Mounted`,
-                  `HasFilesystem` or `HotPlugged`.
+                  `HasFilesystem`, `HasPartitionTable` or `HotPlugged`.
                 items:
                   properties:
                     lastTransitionTime:

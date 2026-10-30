@@ -83,6 +83,12 @@ func consumability(device *Device) (bool, string, string) {
 	case device.HotPlug:
 		return false, v1alpha1.ReasonDeviceHotPlugged,
 			"the device is hot-plugged, and a Volume Group on removable media loses its Physical Volume without notice"
+	// After HotPlugged: wiping the table is the action that changes this
+	// answer, and it would not change that one.
+	case device.PartTableType != "":
+		return false, v1alpha1.ReasonDeviceHasPartitionTable,
+			fmt.Sprintf("the device carries a %s partition table, and pvcreate refuses such a device even when the table holds no partitions; "+
+				"if the device is not in use, remove the table (for example, wipefs --all) to make it available", device.PartTableType)
 	default:
 		return true, v1alpha1.ReasonDeviceAvailable,
 			"the device can back an LVM Physical Volume"

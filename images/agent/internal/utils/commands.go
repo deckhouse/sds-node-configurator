@@ -96,7 +96,7 @@ func NewCommands() Commands {
 
 func (c *commands) GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
 	var outs bytes.Buffer
-	args := []string{"-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA"}
+	args := []string{"-J", "-lpfb", "-no", "name,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA,PTTYPE"}
 	cmd := exec.CommandContext(ctx, internal.LSBLKCmd, args...)
 	cmd.Stdout = &outs
 
@@ -886,6 +886,14 @@ func (commands) UnmarshalDevices(out []byte) ([]internal.Device, error) {
 	var devices internal.Devices
 	if err := json.Unmarshal(out, &devices); err != nil {
 		return nil, err
+	}
+
+	// lsblk reports PTTYPE on a partition too, naming the table of its parent
+	// disk; Device.PartTableType is the table the device itself carries.
+	for i := range devices.BlockDevices {
+		if devices.BlockDevices[i].Type == internal.PartType {
+			devices.BlockDevices[i].PartTableType = ""
+		}
 	}
 
 	return devices.BlockDevices, nil

@@ -167,6 +167,8 @@ type Device struct {
 	PkName     string            `json:"pkname"`
 	FSType     string            `json:"fstype"`
 	Rota       bool              `json:"rota"`
+	// PartTableType is the partition table the device carries, empty when none.
+	PartTableType string `json:"pttype"`
 
 	SerialInherited string
 	WWNInherited    string

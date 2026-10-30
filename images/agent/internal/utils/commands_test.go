@@ -112,6 +112,26 @@ func TestCommands(t *testing.T) {
 			}
 		})
 
+		// lsblk names the parent's table on a partition as well; only the disk
+		// carries it.
+		t.Run("UnmarshalDevices_PartTableType", func(t *testing.T) {
+			js := `{
+   "blockdevices": [
+      {"name": "/dev/nvme2n1", "size": "100G", "type": "disk", "kname": "/dev/nvme2n1", "pkname": null, "pttype": "gpt"},
+      {"name": "/dev/vda", "size": "30G", "type": "disk", "kname": "/dev/vda", "pkname": null, "pttype": "dos"},
+      {"name": "/dev/vda1", "size": "1M", "type": "part", "kname": "/dev/vda1", "pkname": "/dev/vda", "pttype": "dos"},
+      {"name": "/dev/sdb", "size": "10G", "type": "disk", "kname": "/dev/sdb", "pkname": null, "pttype": null}
+   ]
+}`
+			devices, err := NewCommands().UnmarshalDevices([]byte(js))
+			if assert.NoError(t, err) && assert.Len(t, devices, 4) {
+				assert.Equal(t, "gpt", devices[0].PartTableType)
+				assert.Equal(t, "dos", devices[1].PartTableType)
+				assert.Empty(t, devices[2].PartTableType)
+				assert.Empty(t, devices[3].PartTableType)
+			}
+		})
+
 		t.Run("UnmarshalDevices_Expects_Failure", func(t *testing.T) {
 			js := `{
    "blockdevices": [

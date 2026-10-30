@@ -86,6 +86,25 @@ Most often the problem is related to incorrectly specified [BlockDevice](./cr.ht
 
 The complete list of expected values is available in the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource description.
 
+## Why is a BlockDevice not consumable with the reason `HasPartitionTable`?
+
+The device carries a partition table, possibly one without any partitions in it. The kernel then shows no partitions, and `lsblk` shows the disk as empty, but LVM refuses to create a Physical Volume on it. Depending on the LVM version, the error is either `Cannot use /dev/<device>: device is partitioned` or `WARNING: gpt signature detected on /dev/<device> …` followed by `Aborted wiping of gpt.`. A disk that was partitioned before and cleaned only partially, or that came with a GPT header from the vendor, often looks like this.
+
+The agent never wipes devices: whether the table is disposable is the owner's decision. Check what the device carries:
+
+```shell
+blkid /dev/<device>
+wipefs /dev/<device>
+```
+
+If the device holds nothing you need, remove the signatures; the BlockDevice becomes consumable on the agent's next scan:
+
+```shell
+wipefs --all /dev/<device>
+```
+
+The command removes the partition table, after which the data in its partitions can no longer be reached.
+
 ## What happens if I disconnect one of the devices in a Volume Group? Will the corresponding LVMVolumeGroup resource be deleted?
 
 The [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource exists as long as the corresponding Volume Group exists. As long as at least one device exists, the Volume Group is preserved but marked as non-functional. The current state is reflected in the `status` field of the resource.

@@ -83,7 +83,7 @@ spec:
                   description: |
                     Последние наблюдения состояния ресурса. Известный тип условия: `Consumable`, который содержит
                     причину значения `status.consumable`: `Available`, `Mounted`,
-                    `HasFilesystem` или `HotPlugged`.
+                    `HasFilesystem`, `HasPartitionTable` или `HotPlugged`.
                   items:
                     properties:
                       type:

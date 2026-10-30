@@ -174,6 +174,8 @@ func (dm *DeviceMap) Snapshot(mounts map[string]string) ([]internal.Device, []er
 			PkName:     dm.resolver.ParentDevice(sysName),
 			FSType:     props.FSType,
 			Rota:       rota,
+
+			PartTableType: props.PartTableType,
 		}
 		result = append(result, dev)
 	}

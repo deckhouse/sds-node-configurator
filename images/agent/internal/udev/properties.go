@@ -37,6 +37,11 @@ type Properties struct {
 	DMName   string
 	DMUUID   string
 	MDLevel  string
+	// PartTableType is the partition table the device itself carries ("gpt",
+	// "dos"), empty when it carries none. udev also sets ID_PART_TABLE_TYPE on
+	// a partition, naming the table of its parent disk, so it is taken from
+	// whole devices only.
+	PartTableType string
 }
 
 // ParseProperties parses a raw udev environment map into Properties.
@@ -66,7 +71,16 @@ func ParseProperties(env map[string]string) (Properties, error) {
 		DMName:   env["DM_NAME"],
 		DMUUID:   env["DM_UUID"],
 		MDLevel:  env["MD_LEVEL"],
+
+		PartTableType: partTableType(env),
 	}, nil
+}
+
+func partTableType(env map[string]string) string {
+	if env["DEVTYPE"] == "partition" {
+		return ""
+	}
+	return env["ID_PART_TABLE_TYPE"]
 }
 
 var serialKeyPriority = []string{

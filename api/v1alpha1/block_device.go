@@ -122,7 +122,7 @@ type BlockDeviceStatus struct {
 
 	// Latest state. Known type: `Consumable`, which carries the
 	// reason behind `status.consumable`: `Available`, `Mounted`,
-	// `HasFilesystem` or `HotPlugged`.
+	// `HasFilesystem`, `HasPartitionTable` or `HotPlugged`.
 	// +optional
 	// +patchMergeKey=type
 	// +patchStrategy=merge
@@ -148,7 +148,7 @@ type BlockDeviceStatus struct {
 // is therefore not consumable, so Ready=False would be the normal state of
 // every disk in a working cluster and an alert on it would never stop firing.
 //
-// What status.consumable could not say is why. The three answers are
+// What status.consumable could not say is why. The answers are
 // distinguishable and actionable in different ways, and they are what the
 // reason carries.
 const BlockDeviceConditionConsumable = "Consumable"
@@ -170,6 +170,13 @@ const (
 	// device. The agent refuses those regardless of their contents, since a
 	// Volume Group on removable media loses its Physical Volume without notice.
 	ReasonDeviceHotPlugged = "HotPlugged"
+	// ReasonDeviceHasPartitionTable is set on Consumable=False when the device
+	// carries a partition table, even one with no partitions in it: the kernel
+	// shows no partitions then, but pvcreate still refuses the device — LVM
+	// before 2.03.27 as partitioned, later versions by stopping at the
+	// partition-table signature they would have to wipe. Wiping the table
+	// (wipefs --all) makes the device available.
+	ReasonDeviceHasPartitionTable = "HasPartitionTable"
 )
 
 // BlockDeviceConditionMissing reports that the device this BlockDevice
