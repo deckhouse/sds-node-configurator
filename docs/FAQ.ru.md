@@ -472,3 +472,46 @@ sds_node_configurator_file_devices_directory_free_bytes
 - `status.blockdevice.storage.deckhouse.io/rota` — указывает, является ли устройство ротационным.
 - `status.blockdevice.storage.deckhouse.io/hotplug` — указывает возможность горячей замены устройства (HotPlug).
 - `status.blockdevice.storage.deckhouse.io/machineid` — идентификатор сервера, на котором установлено блочное устройство.
+
+## Как отключить модуль?
+
+Отключение модуля удаляет его контроллер и агент — и ничего больше. Группы томов и логические тома остаются на узлах вместе с данными, а ресурсы модуля ([BlockDevice](./cr.html#blockdevice), [LVMVolumeGroup](./cr.html#lvmvolumegroup), LVMVolumeGroupSet, LVMLogicalVolume, LVMLogicalVolumeSnapshot, BlockDeviceFilter) остаются в кластере; модуль только снимает с них финализаторы, чтобы их можно было удалить позже.
+
+Модули `sds-local-volume`, `sds-replicated-volume` и `sds-elastic` работают поверх `sds-node-configurator`. Сначала отключите их по их документации и только после этого отключайте этот модуль.
+
+1. Если диски нужно освободить, удалите LVM-объекты модуля, пока модуль ещё работает, — после отключения их с узлов никто не удалит:
+
+   1. Удалите ресурсы LVMVolumeGroupSet. Пока набор существует, контроллер заново создаёт каждый удалённый LVMVolumeGroup из него:
+
+      ```shell
+      d8 k get lvmvolumegroupsets.storage.deckhouse.io
+      d8 k delete lvmvolumegroupsets.storage.deckhouse.io <name>
+      ```
+
+   1. Удалите ресурсы LVMVolumeGroup:
+
+      ```shell
+      d8 k get lvmvolumegroups.storage.deckhouse.io
+      d8 k delete lvmvolumegroups.storage.deckhouse.io <name>
+      ```
+
+      Агент удаляет с узла группу томов и её физические тома; для файловых устройств он также отключает loop-устройства и удаляет файлы-подложки. Удаление ждёт, пока в группе томов есть логические тома или на ресурсе есть аннотация `storage.deckhouse.io/deletion-protection`, см. [Почему ресурс LVMVolumeGroup и группа томов остались после попытки удаления?](#почему-ресурс-lvmvolumegroup-и-группа-томов-остались-после-попытки-удаления).
+
+   1. Дождитесь, пока команда вернёт `No resources found`:
+
+      ```shell
+      d8 k get lvmvolumegroups.storage.deckhouse.io
+      ```
+
+1. Отключите модуль:
+
+   ```shell
+   d8 k patch moduleconfig sds-node-configurator --type=merge -p '{"spec":{"enabled":false}}'
+   ```
+
+Что остаётся после отключения модуля:
+
+- Ресурсы BlockDevice. При отключении они не удаляются. Пока модуль работает, BlockDevice удаляется только после того, как его устройство пропало с узла; удалённый вручную BlockDevice устройства, которое всё ещё на месте, создаётся снова.
+- Группы томов, чей LVMVolumeGroup не был удалён до отключения. Они продолжают работать как обычные группы томов LVM. Если их ресурсы LVMVolumeGroup удалить, пока модуль отключён, созданные модулем группы томов не будут импортированы снова после повторного включения модуля, см. [Почему группа томов с тегами модуля не импортируется, и как взять её под управление?](#почему-группа-томов-с-тегами-модуля-не-импортируется-и-как-взять-её-под-управление).
+- Группы томов на файловых устройствах не активируются после перезагрузки узла: агента, который подключал loop-устройства, больше нет.
+- Файлы модуля в `/var/lib/deckhouse/sds` и фильтр loop-устройств в `/etc/lvm/lvm.conf` на узлах.

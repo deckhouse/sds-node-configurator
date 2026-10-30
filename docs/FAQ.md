@@ -472,3 +472,46 @@ When an LVMVolumeGroup with file-backed devices is deleted, the agent detaches t
 - `status.blockdevice.storage.deckhouse.io/rota`: Indicates whether the device is rotational.
 - `status.blockdevice.storage.deckhouse.io/hotplug`: Indicates device hot-plug capability.
 - `status.blockdevice.storage.deckhouse.io/machineid`: Identifier of the server where the block device is installed.
+
+## How do I disable the module?
+
+Disabling the module removes its controller and agent, and nothing else. Volume Groups and Logical Volumes stay on the nodes with the data on them, and the module's resources ([BlockDevice](./cr.html#blockdevice), [LVMVolumeGroup](./cr.html#lvmvolumegroup), LVMVolumeGroupSet, LVMLogicalVolume, LVMLogicalVolumeSnapshot, BlockDeviceFilter) stay in the cluster; the module only removes their finalizers so that they can be deleted later.
+
+The `sds-local-volume`, `sds-replicated-volume` and `sds-elastic` modules work on top of `sds-node-configurator`. Disable them first, following their documentation, and only then disable this module.
+
+1. If the disks have to be freed, delete the module's LVM objects while the module is still running — after it is disabled, nobody removes them from the nodes:
+
+   1. Delete the LVMVolumeGroupSet resources. While a set exists, the controller recreates every LVMVolumeGroup of it that is deleted:
+
+      ```shell
+      d8 k get lvmvolumegroupsets.storage.deckhouse.io
+      d8 k delete lvmvolumegroupsets.storage.deckhouse.io <name>
+      ```
+
+   1. Delete the LVMVolumeGroup resources:
+
+      ```shell
+      d8 k get lvmvolumegroups.storage.deckhouse.io
+      d8 k delete lvmvolumegroups.storage.deckhouse.io <name>
+      ```
+
+      The agent removes the Volume Group and its Physical Volumes from the node; for file-backed devices it also detaches the loop devices and removes the backing files. The deletion waits while the Volume Group has Logical Volumes or the resource has the `storage.deckhouse.io/deletion-protection` annotation, see [Why did the LVMVolumeGroup resource and Volume Group remain after deletion attempt?](#why-did-the-lvmvolumegroup-resource-and-volume-group-remain-after-deletion-attempt).
+
+   1. Wait until the command returns `No resources found`:
+
+      ```shell
+      d8 k get lvmvolumegroups.storage.deckhouse.io
+      ```
+
+1. Disable the module:
+
+   ```shell
+   d8 k patch moduleconfig sds-node-configurator --type=merge -p '{"spec":{"enabled":false}}'
+   ```
+
+What remains after the module is disabled:
+
+- BlockDevice resources. They are not deleted on disabling. While the module runs, a BlockDevice is deleted only after its device disappears from the node; one deleted by hand for a device that is still there is created again.
+- Volume Groups whose LVMVolumeGroup was not deleted before disabling. They keep working as plain LVM Volume Groups. If their LVMVolumeGroup resources are deleted while the module is disabled, the Volume Groups the module created are not imported again after the module is re-enabled, see [Why is a Volume Group with the module's tags not imported, and how do I adopt it?](#why-is-a-volume-group-with-the-modules-tags-not-imported-and-how-do-i-adopt-it).
+- Volume Groups on file-backed devices are not activated after a node reboot: the agent that attached the loop devices is gone.
+- The module's files under `/var/lib/deckhouse/sds` and the loop device filter in `/etc/lvm/lvm.conf` on the nodes.
