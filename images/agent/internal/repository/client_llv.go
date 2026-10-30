@@ -82,6 +82,7 @@ func (llvCl *LLVClient) UpdatePhaseIfNeeded(
 func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 	ctx context.Context,
 	llv *v1alpha1.LVMLogicalVolume,
+	lvg *v1alpha1.LVMVolumeGroup,
 	actualSize resource.Quantity,
 ) error {
 	log := llvCl.log
@@ -108,6 +109,7 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 		fresh.Status.Reason = ""
 		fresh.Status.ActualSize = actualSize
 		fresh.Status.Contiguous = contiguous
+		setLocation(fresh.Status, lvg)
 		fresh.Status.ObservedGeneration = fresh.Generation
 		conditions.Set(&fresh.Status.Conditions,
 			internal.ReadyConditionForPhase(fresh.Generation, v1alpha1.PhaseCreated, "", "LVMLogicalVolume"))
@@ -122,4 +124,42 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 
 	log.Info(fmt.Sprintf("the LVMLogicalVolume %s was successfully updated", llv.Name))
 	return nil
+}
+
+// UpdateLocationIfNeeded records the node and the Volume Group of a volume
+// created before the status carried them.
+func (llvCl *LLVClient) UpdateLocationIfNeeded(
+	ctx context.Context,
+	llv *v1alpha1.LVMLogicalVolume,
+	lvg *v1alpha1.LVMVolumeGroup,
+) error {
+	if llv.Status != nil &&
+		llv.Status.NodeName == lvg.Spec.Local.NodeName &&
+		llv.Status.ActualVGNameOnTheNode == lvg.Spec.ActualVGNameOnTheNode {
+		return nil
+	}
+
+	var written *v1alpha1.LVMLogicalVolume
+
+	err := conditions.UpdateStatus(ctx, llvCl.cl, llv, func(fresh *v1alpha1.LVMLogicalVolume) {
+		written = fresh
+		if fresh.Status == nil {
+			fresh.Status = new(v1alpha1.LVMLogicalVolumeStatus)
+		}
+		setLocation(fresh.Status, lvg)
+	})
+	if err != nil {
+		return err
+	}
+
+	llv.Status = written.Status
+	llv.ResourceVersion = written.ResourceVersion
+
+	llvCl.log.Debug(fmt.Sprintf("recorded node %s and VG %s in the LVMLogicalVolume %s status", lvg.Spec.Local.NodeName, lvg.Spec.ActualVGNameOnTheNode, llv.Name))
+	return nil
+}
+
+func setLocation(status *v1alpha1.LVMLogicalVolumeStatus, lvg *v1alpha1.LVMVolumeGroup) {
+	status.NodeName = lvg.Spec.Local.NodeName
+	status.ActualVGNameOnTheNode = lvg.Spec.ActualVGNameOnTheNode
 }

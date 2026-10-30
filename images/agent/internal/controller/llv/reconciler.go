@@ -306,6 +306,9 @@ func (r *Reconciler) ReconcileLVMLogicalVolume(ctx context.Context, llv *v1alpha
 				return true, err
 			}
 		}
+		if err := r.llvCl.UpdateLocationIfNeeded(ctx, llv, lvg); err != nil {
+			return true, err
+		}
 	}
 
 	return false, nil
@@ -428,7 +431,7 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 		actualSize = extendedSize
 	}
 
-	if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, llv, actualSize); err != nil {
+	if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, llv, lvg, actualSize); err != nil {
 		return true, err
 	}
 
@@ -480,7 +483,7 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 	if actualSize.Value() >= alignedRequestSize.Value() {
 		log.Warn(fmt.Sprintf("the LV %s in VG %s actual size %s is already >= aligned requested size %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, actualSize.String(), alignedRequestSize.String()))
 
-		if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, llv, actualSize); err != nil {
+		if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, llv, lvg, actualSize); err != nil {
 			return true, err
 		}
 
@@ -523,7 +526,7 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 	}
 
 	// need this here as a user might create the LLV with existing LV
-	if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, llv, newActualSize); err != nil {
+	if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, llv, lvg, newActualSize); err != nil {
 		return true, err
 	}
 

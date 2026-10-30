@@ -33,6 +33,10 @@ spec:
       jsonPath: .spec.lvmVolumeGroupName
       name: LVMVolumeGroup
       type: string
+    - description: Kubernetes node the Logical Volume resides on.
+      jsonPath: .status.nodeName
+      name: Node
+      type: string
     - description: Selected thin pool in LVMVolumeGroup. Might be empty if the LVMVolumeGroup
         is thick.
       jsonPath: .spec.thin.poolName
@@ -191,6 +195,10 @@ spec:
                 description: Actual Logical Volume size on the node.
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
+              actualVGNameOnTheNode:
+                description: Name of the Volume Group on the node the Logical Volume
+                  resides in.
+                type: string
               conditions:
                 description: 'The latest observations of the resource state. Condition
                   type: `Ready`.'
@@ -249,6 +257,10 @@ spec:
                 description: Shows if the created Logical Volume has the `contiguous`
                   attribute.
                 type: boolean
+              nodeName:
+                description: Name of the Kubernetes node the Logical Volume resides
+                  on.
+                type: string
               observedGeneration:
                 description: |-
                   The value of `metadata.generation` the controller has last acted on. When it trails

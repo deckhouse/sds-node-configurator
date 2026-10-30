@@ -209,7 +209,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 			// good, with a consumer (sds-elastic waits for every OSD volume)
 			// blocked behind a volume that is in fact correct.
 			if llv.Status == nil || llv.Status.Phase != v1alpha1.PhaseCreated {
-				if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, &llv, lv.Data.LVSize); err != nil {
+				if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, &llv, lvg, lv.Data.LVSize); err != nil {
 					log.Error(fmt.Sprintf("unable to clear the stale phase of the LVMLogicalVolume %s", llv.Name), logger.Err(err))
 					shouldRetry = true
 				}
@@ -268,7 +268,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 		}
 		log.Debug(fmt.Sprintf("LV %s of the LVMLogicalVolume %s has actual size %s matching aligned request", lv.Data.LVName, llv.Name, lv.Data.LVSize.String()))
 
-		if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, &llv, lv.Data.LVSize); err != nil {
+		if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, &llv, lvg, lv.Data.LVSize); err != nil {
 			shouldRetry = true
 			continue
 		}

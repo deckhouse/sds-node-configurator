@@ -102,6 +102,12 @@ spec:
                 contiguous:
                   description: |
                     Показывает, создан ли логический том с атрибутом `contiguous`.
+                nodeName:
+                  description: |
+                    Имя Kubernetes-узла, на котором находится логический том.
+                actualVGNameOnTheNode:
+                  description: |
+                    Фактическое имя группы томов на узле, в которой находится логический том.
       subresources:
         status: {}
       additionalPrinterColumns:
@@ -117,6 +123,10 @@ spec:
           name: LVMVolumeGroup
           type: string
           description: Выбранный ресурс LVMVolumeGroup.
+        - jsonPath: .status.nodeName
+          name: Node
+          type: string
+          description: Kubernetes-узел, на котором находится логический том.
         - jsonPath: .spec.thin.poolName
           name: ThinPool
           description: Выбранный ThinPool в LVMVolumeGroup. Может быть пустым, если LVMVolumeGroup является thick.

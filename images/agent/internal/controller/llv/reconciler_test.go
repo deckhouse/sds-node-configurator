@@ -820,7 +820,14 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 
 		oldLLV.Spec.Size = newSize.String()
 
-		err = r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, oldLLV, *newSize)
+		lvg := &v1alpha1.LVMVolumeGroup{
+			Spec: v1alpha1.LVMVolumeGroupSpec{
+				ActualVGNameOnTheNode: "test-vg",
+				Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: "test-node"},
+			},
+		}
+
+		err = r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, oldLLV, lvg, *newSize)
 		if assert.NoError(t, err) {
 			newLLV := &v1alpha1.LVMLogicalVolume{}
 			err = r.cl.Get(ctx, client.ObjectKey{
@@ -834,6 +841,43 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 			assert.Equal(t, oldSize.String(), newLLV.Spec.Size)
 			assert.Equal(t, v1alpha1.PhaseCreated, newLLV.Status.Phase)
 			assert.Equal(t, newSize.Value(), newLLV.Status.ActualSize.Value())
+			assert.Equal(t, "test-node", newLLV.Status.NodeName)
+			assert.Equal(t, "test-vg", newLLV.Status.ActualVGNameOnTheNode)
+		}
+	})
+
+	t.Run("UpdateLocationIfNeeded_fills_a_volume_created_without_it", func(t *testing.T) {
+		r := setupReconciler()
+		llv := &v1alpha1.LVMLogicalVolume{
+			ObjectMeta: v1.ObjectMeta{Name: "test-llv"},
+			Status: &v1alpha1.LVMLogicalVolumeStatus{
+				Phase:      v1alpha1.PhaseCreated,
+				ActualSize: resource.MustParse("1Gi"),
+			},
+		}
+		if err := r.cl.Create(ctx, llv); err != nil {
+			t.Fatal(err)
+		}
+		lvg := &v1alpha1.LVMVolumeGroup{
+			Spec: v1alpha1.LVMVolumeGroupSpec{
+				ActualVGNameOnTheNode: "test-vg",
+				Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: "test-node"},
+			},
+		}
+
+		if assert.NoError(t, r.llvCl.UpdateLocationIfNeeded(ctx, llv, lvg)) {
+			got := &v1alpha1.LVMLogicalVolume{}
+			if err := r.cl.Get(ctx, client.ObjectKey{Name: llv.Name}, got); err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, "test-node", got.Status.NodeName)
+			assert.Equal(t, "test-vg", got.Status.ActualVGNameOnTheNode)
+			assert.Equal(t, v1alpha1.PhaseCreated, got.Status.Phase)
+			assert.Equal(t, "1Gi", got.Status.ActualSize.String())
+
+			resourceVersion := got.ResourceVersion
+			assert.NoError(t, r.llvCl.UpdateLocationIfNeeded(ctx, got, lvg))
+			assert.Equal(t, resourceVersion, got.ResourceVersion)
 		}
 	})
 

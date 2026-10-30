@@ -42,6 +42,7 @@ type LVMLogicalVolumeList struct {
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Current resource status."
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status"
 // +kubebuilder:printcolumn:name="LVMVolumeGroup",type="string",JSONPath=".spec.lvmVolumeGroupName",description="Selected LVMVolumeGroup resource."
+// +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.nodeName",description="Kubernetes node the Logical Volume resides on."
 // +kubebuilder:printcolumn:name="ThinPool",type="string",JSONPath=".spec.thin.poolName",description="Selected thin pool in LVMVolumeGroup. Might be empty if the LVMVolumeGroup is thick."
 // +kubebuilder:printcolumn:name="Size",type="string",JSONPath=".status.actualSize",description="Actual LVMLogicalVolume size."
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age of this resource."
@@ -146,6 +147,12 @@ type LVMLogicalVolumeStatus struct {
 	// Shows if the created Logical Volume has the `contiguous` attribute.
 	// +optional
 	Contiguous *bool `json:"contiguous"`
+	// Name of the Kubernetes node the Logical Volume resides on.
+	// +optional
+	NodeName string `json:"nodeName,omitempty"`
+	// Name of the Volume Group on the node the Logical Volume resides in.
+	// +optional
+	ActualVGNameOnTheNode string `json:"actualVGNameOnTheNode,omitempty"`
 	// Phase is derived from Conditions.
 
 	// The latest observations of the resource state. Condition type: `Ready`.
