@@ -19,10 +19,12 @@ package llv
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
+	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -1295,6 +1297,145 @@ func TestReconcileLLVUpdateFunc_NoExtendWhenAlreadyLargeEnough(t *testing.T) {
 	assert.NoError(t, env.cl.Get(ctx, client.ObjectKey{Name: cloneLLVName}, updated))
 	assert.Equal(t, v1alpha1.PhaseCreated, updated.Status.Phase)
 	assert.Equal(t, currentSize.Value(), updated.Status.ActualSize.Value())
+}
+
+const (
+	deleteVGActual = "test-vg"
+	deleteLLVName  = "deleted-llv"
+	deleteLVName   = "deleted-lv"
+)
+
+type deletedVolumeEnv struct {
+	r        *Reconciler
+	cl       client.Client
+	mockCmds *mock_utils.MockCommands
+	lvg      *v1alpha1.LVMVolumeGroup
+	llv      *v1alpha1.LVMLogicalVolume
+}
+
+func newDeletedVolumeEnv(ctx context.Context, t *testing.T) *deletedVolumeEnv {
+	t.Helper()
+
+	ctrl := gomock.NewController(t)
+	t.Cleanup(ctrl.Finish)
+
+	mockCmds := mock_utils.NewMockCommands(ctrl)
+	cl := test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{})
+	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mockCmds, ReconcilerConfig{})
+
+	lvg := &v1alpha1.LVMVolumeGroup{
+		ObjectMeta: v1.ObjectMeta{Name: "test-lvg"},
+		Spec: v1alpha1.LVMVolumeGroupSpec{
+			ActualVGNameOnTheNode: deleteVGActual,
+			Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: "node-1"},
+		},
+	}
+
+	llv := &v1alpha1.LVMLogicalVolume{
+		ObjectMeta: v1.ObjectMeta{
+			Name:       deleteLLVName,
+			Finalizers: []string{internal.SdsNodeConfiguratorFinalizer},
+		},
+		Spec: v1alpha1.LVMLogicalVolumeSpec{
+			ActualLVNameOnTheNode: deleteLVName,
+			Type:                  internal.Thin,
+			LVMVolumeGroupName:    lvg.Name,
+			Thin:                  &v1alpha1.LVMLogicalVolumeThinSpec{PoolName: "test-pool"},
+			Size:                  "1Gi",
+		},
+	}
+	assert.NoError(t, cl.Create(ctx, llv))
+	assert.NoError(t, cl.Delete(ctx, llv))
+	assert.NoError(t, cl.Get(ctx, client.ObjectKey{Name: deleteLLVName}, llv))
+
+	r.sdsCache.AddLV(deleteVGActual, deleteLVName)
+
+	return &deletedVolumeEnv{r: r, cl: cl, mockCmds: mockCmds, lvg: lvg, llv: llv}
+}
+
+func (e *deletedVolumeEnv) expectRemoveLV(err error) *gomock.Call {
+	return e.mockCmds.EXPECT().
+		RemoveLV(deleteVGActual, deleteLVName).
+		Return("lvremove", err).
+		Times(1)
+}
+
+func (e *deletedVolumeEnv) expectLVListing(lvs ...internal.LVData) {
+	e.mockCmds.EXPECT().
+		GetVG(deleteVGActual).
+		Return(internal.VGData{VGName: deleteVGActual}, "vgs", bytes.Buffer{}, nil).
+		Times(1)
+	e.mockCmds.EXPECT().
+		GetAllLVs(gomock.Any()).
+		Return(lvs, "lvs", bytes.Buffer{}, nil).
+		Times(1)
+}
+
+func (e *deletedVolumeEnv) llvIsGone(ctx context.Context, t *testing.T) bool {
+	t.Helper()
+
+	err := e.cl.Get(ctx, client.ObjectKey{Name: deleteLLVName}, &v1alpha1.LVMLogicalVolume{})
+	if err == nil {
+		return false
+	}
+	assert.True(t, k8serr.IsNotFound(err), "unexpected error: %v", err)
+	return true
+}
+
+func TestReconcileLLVDeleteFunc_PlaceholderOfAMissingLVReleasesTheFinalizer(t *testing.T) {
+	ctx := context.Background()
+	env := newDeletedVolumeEnv(ctx, t)
+
+	env.expectRemoveLV(errors.New(`Failed to find logical volume "test-vg/deleted-lv"`))
+	env.expectLVListing(internal.LVData{VGName: deleteVGActual, LVName: "other-lv"})
+
+	shouldRequeue, err := env.r.reconcileLLVDeleteFunc(ctx, env.llv, env.lvg)
+	assert.NoError(t, err)
+	assert.False(t, shouldRequeue)
+	assert.True(t, env.llvIsGone(ctx, t))
+}
+
+func TestReconcileLLVDeleteFunc_PlaceholderOfAnExistingLVKeepsTheFinalizer(t *testing.T) {
+	ctx := context.Background()
+	env := newDeletedVolumeEnv(ctx, t)
+
+	env.expectRemoveLV(errors.New("Logical volume test-vg/deleted-lv in use"))
+	env.expectLVListing(internal.LVData{VGName: deleteVGActual, LVName: deleteLVName})
+
+	shouldRequeue, err := env.r.reconcileLLVDeleteFunc(ctx, env.llv, env.lvg)
+	assert.Error(t, err)
+	assert.True(t, shouldRequeue)
+	assert.False(t, env.llvIsGone(ctx, t))
+}
+
+func TestReconcileLLVDeleteFunc_PlaceholderRemovedByLvremoveIsMarkedRemoved(t *testing.T) {
+	ctx := context.Background()
+	env := newDeletedVolumeEnv(ctx, t)
+
+	env.expectRemoveLV(nil)
+
+	shouldRequeue, err := env.r.reconcileLLVDeleteFunc(ctx, env.llv, env.lvg)
+	assert.NoError(t, err)
+	assert.False(t, shouldRequeue)
+	assert.True(t, env.llvIsGone(ctx, t))
+
+	cached := env.r.sdsCache.FindLV(deleteVGActual, deleteLVName)
+	if assert.NotNil(t, cached) {
+		assert.False(t, cached.Exist)
+	}
+}
+
+func TestReconcileLLVDeleteFunc_PlaceholderDroppedByScansSkipsLvremove(t *testing.T) {
+	ctx := context.Background()
+	env := newDeletedVolumeEnv(ctx, t)
+
+	env.r.sdsCache.StoreLVs([]internal.LVData{}, bytes.Buffer{})
+	env.r.sdsCache.StoreLVs([]internal.LVData{}, bytes.Buffer{})
+
+	shouldRequeue, err := env.r.reconcileLLVDeleteFunc(ctx, env.llv, env.lvg)
+	assert.NoError(t, err)
+	assert.False(t, shouldRequeue)
+	assert.True(t, env.llvIsGone(ctx, t))
 }
 
 func setupReconciler() *Reconciler {

@@ -30,6 +30,8 @@ import (
 
 const (
 	lvcount = 50
+
+	placeholderScansToExpire = 2
 )
 
 type Cache struct {
@@ -49,6 +51,8 @@ type Cache struct {
 type LVData struct {
 	Data  internal.LVData
 	Exist bool
+
+	unseenScans int
 }
 
 func New() *Cache {
@@ -112,13 +116,18 @@ func (c *Cache) StoreLVs(lvs []internal.LVData, stdErr bytes.Buffer) {
 	}
 
 	for key, lv := range c.lvs {
-		if lv.Exist && reflect.ValueOf(lv.Data).IsZero() {
+		if _, exist := lvsOnNode[key]; exist {
 			continue
 		}
 
-		if _, exist := lvsOnNode[key]; !exist {
-			delete(c.lvs, key)
+		if lv.Exist && reflect.ValueOf(lv.Data).IsZero() {
+			lv.unseenScans++
+			if lv.unseenScans < placeholderScansToExpire {
+				continue
+			}
 		}
+
+		delete(c.lvs, key)
 	}
 
 	c.lvsErrs = stdErr

@@ -672,7 +672,8 @@ func (r *Reconciler) removeLLVFinalizersIfExist(
 // same-name LV that belongs to something else.
 //
 // The cache holds a zero-valued LVData for an LV added right after `lvcreate`
-// (see cache.AddLV) until the next `lvs` scan fills it in. Such an entry carries
+// (see cache.AddLV) until a scan fills it in, or drops it once two scans in a
+// row did not list the LV. Such an entry carries
 // no evidence either way, and indexing its empty LVAttr used to panic the whole
 // agent. It is treated as belonging: the entry can only have been created by the
 // agent itself for this exact VG/LV pair, and the delete path has to be able to
@@ -730,14 +731,45 @@ func (r *Reconciler) deleteLVIfNeeded(ctx context.Context, vgName string, llv *v
 	cmd, err := r.commands.RemoveLV(vgName, llv.Spec.ActualLVNameOnTheNode)
 	log.Debug(fmt.Sprintf("runs cmd: %s", cmd))
 	if err != nil {
+		if reflect.ValueOf(lv.Data).IsZero() {
+			gone, checkErr := r.lvIsGoneFromVG(ctx, vgName, llv.Spec.ActualLVNameOnTheNode)
+			if checkErr != nil {
+				log.Warn(fmt.Sprintf("unable to check whether LV %s is still in VG %s", llv.Spec.ActualLVNameOnTheNode, vgName), logger.Err(checkErr))
+			}
+			if gone {
+				log.Warn(fmt.Sprintf("LV %s is not in VG %s although the cache still holds it as just created, treat it as removed", llv.Spec.ActualLVNameOnTheNode, vgName))
+				r.sdsCache.MarkLVAsRemoved(vgName, llv.Spec.ActualLVNameOnTheNode)
+				return false, nil
+			}
+		}
+
 		log.Error(fmt.Sprintf("unable to remove LV %s from VG %s", llv.Spec.ActualLVNameOnTheNode, vgName), logger.Err(err))
 		return true, err
 	}
 
-	log.Debug(fmt.Sprintf("mark LV %s in the cache as removed", lv.Data.LVName))
-	r.sdsCache.MarkLVAsRemoved(lv.Data.VGName, lv.Data.LVName)
+	log.Debug(fmt.Sprintf("mark LV %s in the cache as removed", llv.Spec.ActualLVNameOnTheNode))
+	r.sdsCache.MarkLVAsRemoved(vgName, llv.Spec.ActualLVNameOnTheNode)
 
 	return false, nil
+}
+
+func (r *Reconciler) lvIsGoneFromVG(ctx context.Context, vgName, lvName string) (bool, error) {
+	if _, cmd, _, err := r.commands.GetVG(vgName); err != nil {
+		return false, fmt.Errorf("unable to confirm VG %s with %s: %w", vgName, cmd, err)
+	}
+
+	lvs, cmd, _, err := r.commands.GetAllLVs(ctx)
+	if err != nil {
+		return false, fmt.Errorf("unable to list LVs with %s: %w", cmd, err)
+	}
+
+	for _, lv := range lvs {
+		if lv.VGName == vgName && lv.LVName == lvName {
+			return false, nil
+		}
+	}
+
+	return true, nil
 }
 
 func (r *Reconciler) getLVActualSize(vgName, lvName string) resource.Quantity {

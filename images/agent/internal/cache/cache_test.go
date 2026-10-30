@@ -103,6 +103,38 @@ func TestCache(t *testing.T) {
 		assert.True(t, exist)
 	})
 
+	t.Run("StoreLVs_LV_is_empty_and_exist_is_true_delete_it_after_two_scans_without_it", func(t *testing.T) {
+		const (
+			key = "some-vg/some-lv"
+		)
+		cache := New()
+		cache.AddLV("some-vg", "some-lv")
+		cache.StoreLVs([]internal.LVData{}, bytes.Buffer{})
+		cache.StoreLVs([]internal.LVData{}, bytes.Buffer{})
+
+		_, exist := cache.lvs[key]
+		assert.False(t, exist)
+		assert.Nil(t, cache.FindLV("some-vg", "some-lv"))
+	})
+
+	t.Run("StoreLVs_LV_is_empty_and_exist_is_true_fill_it_when_the_scan_finds_it", func(t *testing.T) {
+		lv := internal.LVData{
+			LVName: "some-lv",
+			VGName: "some-vg",
+		}
+		cache := New()
+		cache.AddLV("some-vg", "some-lv")
+		cache.StoreLVs([]internal.LVData{}, bytes.Buffer{})
+		cache.StoreLVs([]internal.LVData{lv}, bytes.Buffer{})
+		cache.StoreLVs([]internal.LVData{lv}, bytes.Buffer{})
+
+		cached := cache.FindLV("some-vg", "some-lv")
+		if assert.NotNil(t, cached) {
+			assert.True(t, cached.Exist)
+			assert.Equal(t, lv, cached.Data)
+		}
+	})
+
 	t.Run("StoreLVs_LV_is_empty_and_exist_is_false_delete_it", func(t *testing.T) {
 		const (
 			key = "some-vg/some-lv"
