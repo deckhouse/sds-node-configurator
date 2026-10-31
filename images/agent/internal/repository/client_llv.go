@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/conditions"
@@ -162,4 +163,55 @@ func (llvCl *LLVClient) UpdateLocationIfNeeded(
 func setLocation(status *v1alpha1.LVMLogicalVolumeStatus, lvg *v1alpha1.LVMVolumeGroup) {
 	status.NodeName = lvg.Spec.Local.NodeName
 	status.ActualVGNameOnTheNode = lvg.Spec.ActualVGNameOnTheNode
+}
+
+// SetDeletingIfNeeded reports, as Ready=False with the reason Deleting, a volume
+// whose deletion is held by the finalizers of other controllers. The phase is
+// left alone: it still describes the Logical Volume, which is in place. It
+// returns whether anything was written, so the caller can log the wait when it
+// starts or changes rather than on every pass.
+func (llvCl *LLVClient) SetDeletingIfNeeded(
+	ctx context.Context,
+	llv *v1alpha1.LVMLogicalVolume,
+	message string,
+) (bool, error) {
+	message = conditions.TruncateMessage(message)
+
+	if llv.Status != nil {
+		if ready := conditions.Get(llv.Status.Conditions, conditions.TypeReady); ready != nil &&
+			ready.Status == metav1.ConditionFalse &&
+			ready.Reason == conditions.ReasonDeleting &&
+			ready.Message == message {
+			return false, nil
+		}
+	}
+
+	var (
+		written *v1alpha1.LVMLogicalVolume
+		// The cached llv can lag behind the server, which may already carry
+		// this condition: UpdateStatus then writes nothing, and neither should
+		// the caller log a change.
+		changed bool
+	)
+
+	err := conditions.UpdateStatus(ctx, llvCl.cl, llv, func(fresh *v1alpha1.LVMLogicalVolume) {
+		written = fresh
+		if fresh.Status == nil {
+			fresh.Status = new(v1alpha1.LVMLogicalVolumeStatus)
+		}
+		changed = conditions.Set(&fresh.Status.Conditions, metav1.Condition{
+			Type:               conditions.TypeReady,
+			Status:             metav1.ConditionFalse,
+			Reason:             conditions.ReasonDeleting,
+			Message:            message,
+			ObservedGeneration: fresh.Generation,
+		})
+	})
+	if err != nil {
+		return false, err
+	}
+
+	llv.Status = written.Status
+	llv.ResourceVersion = written.ResourceVersion
+	return changed, nil
 }

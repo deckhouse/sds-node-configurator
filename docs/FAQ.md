@@ -74,6 +74,16 @@ This situation can occur in two cases:
 
    After executing the command, the resource and Volume Group will be automatically deleted.
 
+## Why is an LVMLogicalVolume not deleted?
+
+The agent removes the Logical Volume only after every other controller has removed its finalizer from the [LVMLogicalVolume](./cr.html#lvmlogicalvolume): a finalizer of another module, such as `storage.deckhouse.io/sds-local-volume-csi` of `sds-local-volume`, means the volume may still be in use. While it waits, the resource reports it in the `Ready` condition: `status: "False"`, `reason: Deleting`, and the finalizers it waits for in the message:
+
+```shell
+d8 k get lvmlogicalvolume <name> -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
+```
+
+The finalizer belongs to the module that put it there and is removed by that module once it has released the volume (for `sds-local-volume`, when the PersistentVolume is deleted). Look for the cause on that side rather than removing the finalizer by hand: doing so lets the agent delete a Logical Volume that may still hold data in use.
+
 ## Why is it not possible to create a Volume Group using the LVMVolumeGroup resource?
 
 The resource does not pass controller validation (Kubernetes validation was successful). The reason can be seen in the `status.message` field of the resource or in the controller logs.

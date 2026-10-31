@@ -589,13 +589,23 @@ func (r *Reconciler) reconcileLLVDeleteFunc(
 
 	log.Debug(fmt.Sprintf("starts reconciliation for the LVMLogicalVolume %s", llv.Name))
 
-	// The controller won't remove the LLV resource and LV volume till the resource has any other finalizer.
-	if len(llv.Finalizers) != 0 {
-		if len(llv.Finalizers) > 1 ||
-			llv.Finalizers[0] != internal.SdsNodeConfiguratorFinalizer {
-			log.Debug(fmt.Sprintf("unable to delete LVMLogicalVolume %s for now due to it has any other finalizer", llv.Name))
-			return false, nil
+	// The Logical Volume stays until every other controller has let go of the
+	// resource: a finalizer of its consumer means the volume may still be in
+	// use. The wait is published on the resource, since a deletion that holds
+	// with nothing but a debug line looks like one that is stuck for no reason.
+	if foreign := foreignFinalizers(llv); len(foreign) > 0 {
+		message := fmt.Sprintf("waiting for the finalizers %s to be removed by their owners before deleting the Logical Volume", strings.Join(foreign, ", "))
+		changed, err := r.llvCl.SetDeletingIfNeeded(ctx, llv, message)
+		if err != nil {
+			// Not returned: Reconcile would turn it into the Failed phase, and
+			// nothing has failed on the Logical Volume, which is in place.
+			log.Error(fmt.Sprintf("unable to report the pending deletion of the LVMLogicalVolume %s", llv.Name), logger.Err(err))
+			return true, nil
 		}
+		if changed {
+			log.Info(fmt.Sprintf("the deletion of the LVMLogicalVolume %s waits for the finalizers %s", llv.Name, strings.Join(foreign, ", ")))
+		}
+		return false, nil
 	}
 
 	shouldRequeue, err := r.deleteLVIfNeeded(ctx, lvg.Spec.ActualVGNameOnTheNode, llv)
@@ -899,4 +909,15 @@ func isContiguous(llv *v1alpha1.LVMLogicalVolume) bool {
 	}
 
 	return *llv.Spec.Thick.Contiguous
+}
+
+// foreignFinalizers returns the finalizers on llv other than the agent's own.
+func foreignFinalizers(llv *v1alpha1.LVMLogicalVolume) []string {
+	var foreign []string
+	for _, f := range llv.Finalizers {
+		if f != internal.SdsNodeConfiguratorFinalizer {
+			foreign = append(foreign, f)
+		}
+	}
+	return foreign
 }
