@@ -1,6 +1,7 @@
 module github.com/deckhouse/sds-node-configurator/images/agent
 
 go 1.27.3
+
 require (
 	github.com/deckhouse/sds-common-lib v0.15.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250130211935-b68366dfd0f8
@@ -12,7 +13,7 @@ require (
 	github.com/pilebones/go-udev v0.9.1
 	github.com/prometheus/client_golang v1.22.0
 	github.com/stretchr/testify v1.10.0
-	go.uber.org/mock v0.5.2
+	go.uber.org/mock v0.6.0
 	golang.org/x/sys v0.49.0
 	k8s.io/api v0.33.0
 	k8s.io/apiextensions-apiserver v0.33.0
