@@ -58,7 +58,7 @@ An LVMVolumeGroup that has never described its node stays in the `Pending` phase
 
 ## Why did the LVMVolumeGroup resource and Volume Group remain after deletion attempt?
 
-This situation can occur in two cases:
+This situation can occur in three cases:
 
 1. The Volume Group contains Logical Volumes.
 
@@ -73,6 +73,16 @@ This situation can occur in two cases:
    ```
 
    After executing the command, the resource and Volume Group will be automatically deleted.
+
+1. The resource has finalizers of other controllers.
+
+   The agent does not touch the Volume Group while another controller still holds the resource. The `VGConfigurationApplied` condition names the finalizers it waits for:
+
+   ```shell
+   d8 k get lvg %lvg-name% -o jsonpath='{.status.conditions[?(@.type=="VGConfigurationApplied")].message}'
+   ```
+
+   Once their owners remove them, the resource and Volume Group will be automatically deleted.
 
 ## Why is an LVMLogicalVolume not deleted?
 
@@ -218,6 +228,10 @@ spec:
         status.blockdevice.storage.deckhouse.io/model: <model>
     actualVGNameOnTheNode: <actual-vg-name-on-the-node>
 ```
+
+The controller keeps the `thinPools`, `blockDeviceSelector` and `fileDevices` fields of the created resources in line with the template, and recreates a resource of the set that is deleted while its node still matches the selector. Deleting the set leaves its LVMVolumeGroup resources in place.
+
+The `CURRENT LVG COUNT`, `DESIRED LVG COUNT` and `READY LVG COUNT` columns of `d8 k get lvgset` show how many LVMVolumeGroup resources the set has, how many nodes match the selector, and how many of the resources are in the `Ready` phase.
 
 ## How do I change the UUID of Volume Groups when cloning virtual machines?
 

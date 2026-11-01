@@ -31,6 +31,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
@@ -254,6 +255,28 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 		log.Debug(fmt.Sprintf("successfully added a finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
 	} else {
 		log.Debug(fmt.Sprintf("no need to add a finalizer %s to the LVMVolumeGroup %s", internal.SdsNodeConfiguratorFinalizer, lvg.Name))
+	}
+
+	// Nothing on the node is torn down while another controller still holds the
+	// resource: its finalizer means it depends on the Volume Group. The wait is
+	// published on the resource, since a deletion that holds silently looks like
+	// one that is stuck for no reason.
+	if lvg.DeletionTimestamp != nil {
+		if foreign := foreignFinalizers(lvg); len(foreign) > 0 {
+			message := fmt.Sprintf("waiting for the finalizers %s to be removed by their owners before deleting VG %s", strings.Join(foreign, ", "), lvg.Spec.ActualVGNameOnTheNode)
+			// Every status write on a group being deleted wakes the agent, its own
+			// included, so a wait already on the resource is left as it is.
+			if c := conditions.Get(lvg.Status.Conditions, internal.TypeVGConfigurationApplied); c != nil &&
+				c.Status == v1.ConditionFalse && c.Reason == internal.ReasonTerminating && c.Message == message {
+				return controller.Result{}, nil
+			}
+			if err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonTerminating, message); err != nil {
+				log.Error(fmt.Sprintf("unable to report the pending deletion of the LVMVolumeGroup %s", lvg.Name), logger.Err(err))
+				return controller.Result{}, err
+			}
+			log.Info(fmt.Sprintf("the deletion of the LVMVolumeGroup %s waits for the finalizers %s", lvg.Name, strings.Join(foreign, ", ")))
+			return controller.Result{}, nil
+		}
 	}
 
 	// this case handles the situation when a user decides to remove LVMVolumeGroup resource without created VG

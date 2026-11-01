@@ -154,7 +154,7 @@ func getNodeNamesFromLVGs(lvgs map[string]v1alpha1.LVMVolumeGroup) []string {
 	return nodes
 }
 
-func GetLVMVolumeGroups(ctx context.Context, cl client.Client, metrics monitoring.Metrics) (map[string]v1alpha1.LVMVolumeGroup, error) {
+func GetLVMVolumeGroups(ctx context.Context, cl client.Reader, metrics monitoring.Metrics) (map[string]v1alpha1.LVMVolumeGroup, error) {
 	lvgList := &v1alpha1.LVMVolumeGroupList{}
 
 	start := time.Now()

@@ -144,7 +144,7 @@ spec:
               properties:
                 createdLVMVolumeGroups:
                   description: |
-                    Краткая информация о ресурсах LVMVolumeGroup, созданных данным набором.
+                    Краткая информация о ресурсах LVMVolumeGroup набора: созданных им и ещё существующих, а также о ресурсе, который набор поддерживает на каждом выбранном узле.
                   items:
                     properties:
                       lvmVolumeGroupName:
@@ -155,10 +155,13 @@ spec:
                           Имя узла, на котором создан ресурс LVMVolumeGroup.
                 currentLVMVolumeGroupsCount:
                   description: |
-                    Текущее количество ресурсов LVMVolumeGroup, созданных данным набором.
+                    Текущее количество ресурсов LVMVolumeGroup набора.
                 desiredLVMVolumeGroupsCount:
                   description: |
                     Желаемое количество ресурсов LVMVolumeGroup, которые должны быть созданы данным набором.
+                readyLVMVolumeGroupsCount:
+                  description: |
+                    Количество ресурсов LVMVolumeGroup набора в фазе `Ready`.
                 phase:
                   description: |
                     Фаза создания ресурсов LVMVolumeGroup.

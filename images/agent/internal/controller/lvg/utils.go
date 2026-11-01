@@ -120,3 +120,14 @@ func filterCandidatesByDuplicateVGs(
 	}
 	return filtered
 }
+
+// foreignFinalizers returns the finalizers on lvg other than the agent's own.
+func foreignFinalizers(lvg *v1alpha1.LVMVolumeGroup) []string {
+	var foreign []string
+	for _, f := range lvg.Finalizers {
+		if f != internal.SdsNodeConfiguratorFinalizer {
+			foreign = append(foreign, f)
+		}
+	}
+	return foreign
+}

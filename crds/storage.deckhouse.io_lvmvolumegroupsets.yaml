@@ -39,6 +39,10 @@ spec:
       jsonPath: .status.desiredLVMVolumeGroupsCount
       name: Desired LVG Count
       type: integer
+    - description: Number of LVMVolumeGroups of the set in the Ready phase.
+      jsonPath: .status.readyLVMVolumeGroupsCount
+      name: Ready LVG Count
+      type: integer
     - description: Resource phase.
       jsonPath: .status.phase
       name: Phase
@@ -347,8 +351,9 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               createdLVMVolumeGroups:
-                description: Brief information about LVMVolumeGroups created by the
-                  set.
+                description: |-
+                  Brief information about LVMVolumeGroups of the set: the ones it created that
+                  still exist and the one it keeps on each selected node.
                 items:
                   properties:
                     lvmVolumeGroupName:
@@ -361,7 +366,7 @@ spec:
                   type: object
                 type: array
               currentLVMVolumeGroupsCount:
-                description: Current number of LVMVolumeGroups created by the set.
+                description: Current number of LVMVolumeGroups of the set.
                 type: integer
               desiredLVMVolumeGroupsCount:
                 description: Desired number of LVMVolumeGroups that should be created
@@ -382,6 +387,9 @@ spec:
                 - NotCreated
                 - ""
                 type: string
+              readyLVMVolumeGroupsCount:
+                description: Number of LVMVolumeGroups of the set in the `Ready` phase.
+                type: integer
               reason:
                 description: Reason for the current phase.
                 type: string

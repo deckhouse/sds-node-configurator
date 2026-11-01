@@ -42,6 +42,7 @@ type LVMVolumeGroupSetList struct {
 // +kubebuilder:printcolumn:name="type",type="string",JSONPath=".spec.lvmVolumeGroupTemplate.type",priority=1,description="Volume Group type."
 // +kubebuilder:printcolumn:name="Current LVG Count",type="integer",JSONPath=".status.currentLVMVolumeGroupsCount",description="Current LVMVolumeGroups count created by the set."
 // +kubebuilder:printcolumn:name="Desired LVG Count",type="integer",JSONPath=".status.desiredLVMVolumeGroupsCount",description="Desired LVMVolumeGroups count created by the set."
+// +kubebuilder:printcolumn:name="Ready LVG Count",type="integer",JSONPath=".status.readyLVMVolumeGroupsCount",description="Number of LVMVolumeGroups of the set in the Ready phase."
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Resource phase."
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age of this resource."
@@ -164,15 +165,19 @@ type LVMVolumeGroupTemplateMeta struct {
 
 // +k8s:deepcopy-gen=true
 type LVMVolumeGroupSetStatus struct {
-	// Brief information about LVMVolumeGroups created by the set.
+	// Brief information about LVMVolumeGroups of the set: the ones it created that
+	// still exist and the one it keeps on each selected node.
 	// +optional
 	CreatedLVGs []LVMVolumeGroupSetStatusLVG `json:"createdLVMVolumeGroups"`
-	// Current number of LVMVolumeGroups created by the set.
+	// Current number of LVMVolumeGroups of the set.
 	// +optional
 	CurrentLVMVolumeGroupsCount int `json:"currentLVMVolumeGroupsCount"`
 	// Desired number of LVMVolumeGroups that should be created by the set.
 	// +optional
 	DesiredLVMVolumeGroupsCount int `json:"desiredLVMVolumeGroupsCount"`
+	// Number of LVMVolumeGroups of the set in the `Ready` phase.
+	// +optional
+	ReadyLVMVolumeGroupsCount int `json:"readyLVMVolumeGroupsCount"`
 	// LVMVolumeGroups creation phase.
 	// +optional
 	// +kubebuilder:validation:Enum=Created;Pending;NotCreated;""
