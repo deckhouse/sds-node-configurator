@@ -37,7 +37,7 @@ spec:
       jsonPath: .status.size
       name: Size
       type: string
-    - description: Snapshot size.
+    - description: Space the snapshot maps when it is created, shared blocks included.
       jsonPath: .status.usedSize
       name: UsedSize
       type: string
@@ -172,7 +172,11 @@ spec:
                 anyOf:
                 - type: integer
                 - type: string
-                description: Snapshot Logical Volume size on the node.
+                description: |-
+                  Space the snapshot Logical Volume maps on the node when the snapshot is created: its
+                  Data% times its size. The snapshot is thin, so this counts the blocks it shares with
+                  the origin as well, and it does not grow as the origin is written to. It is not the
+                  space that deleting the snapshot would free.
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
             type: object

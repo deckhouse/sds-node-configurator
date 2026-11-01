@@ -43,7 +43,7 @@ type LVMLogicalVolumeSnapshotList struct {
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Current resource status."
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status"
 // +kubebuilder:printcolumn:name="Size",type="string",JSONPath=".status.size",description="Snapshotted Logical Volume size."
-// +kubebuilder:printcolumn:name="UsedSize",type="string",JSONPath=".status.usedSize",description="Snapshot size."
+// +kubebuilder:printcolumn:name="UsedSize",type="string",JSONPath=".status.usedSize",description="Space the snapshot maps when it is created, shared blocks included."
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age of this resource."
 // +crd-enricher:crd:minimal=true
 // +crd-enricher:crd:preserveUnknownFields=false
@@ -106,7 +106,10 @@ type LVMLogicalVolumeSnapshotStatus struct {
 	// Snapshotted Logical Volume size on the node.
 	// +optional
 	Size resource.Quantity `json:"size"`
-	// Snapshot Logical Volume size on the node.
+	// Space the snapshot Logical Volume maps on the node when the snapshot is created: its
+	// Data% times its size. The snapshot is thin, so this counts the blocks it shares with
+	// the origin as well, and it does not grow as the origin is written to. It is not the
+	// space that deleting the snapshot would free.
 	// +optional
 	UsedSize resource.Quantity `json:"usedSize"`
 	// The latest observations of the resource state. Condition type: `Ready`.
