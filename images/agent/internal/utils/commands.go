@@ -65,6 +65,8 @@ type Commands interface {
 	VGChangeAddTag(ctx context.Context, vGName, tag string) (string, error)
 	VGChangeDelTag(ctx context.Context, vGName, tag string) (string, error)
 	LVChangeDelTag(ctx context.Context, lv internal.LVData, tag string) (string, error)
+	LVChangeAddTag(ctx context.Context, vgName, lvName, tag string) (string, error)
+	RemoveEmptyThinPool(ctx context.Context, vgName, poolName string) (removed bool, command string, err error)
 	VGActivate(ctx context.Context, vgName string, shared bool) (string, error)
 	LVActivate(ctx context.Context, vgName, lvName string) (string, error)
 	VGScan(ctx context.Context) (string, error)
@@ -756,6 +758,40 @@ func (commands) VGChangeDelTag(ctx context.Context, vGName, tag string) (string,
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stdErr: %s", cmd.String(), err, stdErr.String())
 	}
 	return cmd.String(), nil
+}
+
+func (commands) LVChangeAddTag(ctx context.Context, vgName, lvName, tag string) (string, error) {
+	var outs, stdErr bytes.Buffer
+	args := []string{"lvchange", filepath.Join("/dev", vgName, lvName), "--addtag", tag}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	if err := cmd.Run(); err != nil {
+		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stdErr: %s", cmd.String(), err, stdErr.String())
+	}
+	return cmd.String(), nil
+}
+
+// RemoveEmptyThinPool removes the thin pool only if it holds no thin volumes,
+// and reports whether it did. The check is a selection evaluated by lvremove
+// itself, under the Volume Group's lock, so a volume created between a caller's
+// check and this call keeps the pool: --yes on a plain lvremove would take the
+// pool's volumes with it. A selection that matches nothing is not an error for
+// lvremove, which is why the result is read from what it printed.
+func (commands) RemoveEmptyThinPool(ctx context.Context, vgName, poolName string) (bool, string, error) {
+	var outs, stdErr bytes.Buffer
+	args := []string{"lvremove", "-y", "-S", fmt.Sprintf("lv_name=%s && thin_count=0", poolName), vgName}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.CommandContext(ctx, internal.NSENTERCmd, extendedArgs...)
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	if err := cmd.Run(); err != nil {
+		return false, cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stdErr: %s", cmd.String(), err, stdErr.String())
+	}
+	return strings.Contains(outs.String(), fmt.Sprintf("Logical volume %q successfully removed", poolName)), cmd.String(), nil
 }
 
 func (commands) LVChangeDelTag(ctx context.Context, lv internal.LVData, tag string) (string, error) {

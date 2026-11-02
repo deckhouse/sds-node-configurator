@@ -94,6 +94,24 @@ d8 k get lvmlogicalvolume <name> -o jsonpath='{.status.conditions[?(@.type=="Rea
 
 The finalizer belongs to the module that put it there and is removed by that module once it has released the volume (for `sds-local-volume`, when the PersistentVolume is deleted). Look for the cause on that side rather than removing the finalizer by hand: doing so lets the agent delete a Logical Volume that may still hold data in use.
 
+## How do I remove a thin pool?
+
+Remove it from `spec.thinPools` of the [LVMVolumeGroup](./cr.html#lvmvolumegroup). The agent removes the thin pool from the node once it holds no thin volumes.
+
+While the thin pool still holds volumes, the agent keeps it and the volumes in it, and the `VGConfigurationApplied` condition is `False` with the reason `ThinPoolHasVolumes` and the volumes in the message:
+
+```shell
+d8 k get lvg %lvg-name% -o jsonpath='{.status.conditions[?(@.type=="VGConfigurationApplied")]}'
+```
+
+Delete those volumes first, for example the PersistentVolumeClaims behind them. The agent removes the thin pool on its next pass. The LVMVolumeGroup stays `Ready` meanwhile.
+
+Only a thin pool that was listed in `spec.thinPools` is removed: the agent tags every such thin pool with `storage.deckhouse.io/lvmVolumeGroupName=<LVMVolumeGroup name>`. A thin pool that the spec never listed, such as one in a Volume Group the module took over, is not touched.
+
+Removing a thin pool from the template of an [LVMVolumeGroupSet](./cr.html#lvmvolumegroupset) removes it from every LVMVolumeGroup of the set.
+
+Before removing a thin pool, remove it from the classes of storage that use it: the LocalStorageClass of `sds-local-volume` and the ReplicatedStoragePool of `sds-replicated-volume`.
+
 ## Why is it not possible to create a Volume Group using the LVMVolumeGroup resource?
 
 The resource does not pass controller validation (Kubernetes validation was successful). The reason can be seen in the `status.message` field of the resource or in the controller logs.

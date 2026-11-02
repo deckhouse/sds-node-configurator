@@ -44,6 +44,10 @@ const (
 	// broken. Treating it as a failure would let one oversized entry appended to
 	// a healthy LVMVolumeGroup stop the scheduler from placing volumes on it.
 	ReasonFileDeviceNotApplied = "FileDeviceNotApplied"
+	// ReasonThinPoolHasVolumes mirrors the agent-side constant of the same name:
+	// a thin pool was removed from spec.thinPools while it still holds thin
+	// volumes, so the agent keeps it. The Volume Group keeps serving every volume.
+	ReasonThinPoolHasVolumes = "ThinPoolHasVolumes"
 	// ReasonAliasResolutionFailed mirrors the agent-side constant of the same
 	// name: the agent cannot canonicalize the alias-form PV names it needs to
 	// decide whether a file-backed loop device is already part of the VG, and has

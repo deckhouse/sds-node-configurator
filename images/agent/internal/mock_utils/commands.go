@@ -483,6 +483,21 @@ func (mr *MockCommandsMockRecorder) LVActivate(ctx, vgName, lvName any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVActivate", reflect.TypeOf((*MockCommands)(nil).LVActivate), ctx, vgName, lvName)
 }
 
+// LVChangeAddTag mocks base method.
+func (m *MockCommands) LVChangeAddTag(ctx context.Context, vgName, lvName, tag string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LVChangeAddTag", ctx, vgName, lvName, tag)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LVChangeAddTag indicates an expected call of LVChangeAddTag.
+func (mr *MockCommandsMockRecorder) LVChangeAddTag(ctx, vgName, lvName, tag any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LVChangeAddTag", reflect.TypeOf((*MockCommands)(nil).LVChangeAddTag), ctx, vgName, lvName, tag)
+}
+
 // LVChangeDelTag mocks base method.
 func (m *MockCommands) LVChangeDelTag(ctx context.Context, lv internal.LVData, tag string) (string, error) {
 	m.ctrl.T.Helper()
@@ -541,6 +556,22 @@ func (m *MockCommands) ReTag(ctx context.Context, log logger.Logger, metrics *mo
 func (mr *MockCommandsMockRecorder) ReTag(ctx, log, metrics, ctrlName, cmdTimeout any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReTag", reflect.TypeOf((*MockCommands)(nil).ReTag), ctx, log, metrics, ctrlName, cmdTimeout)
+}
+
+// RemoveEmptyThinPool mocks base method.
+func (m *MockCommands) RemoveEmptyThinPool(ctx context.Context, vgName, poolName string) (bool, string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveEmptyThinPool", ctx, vgName, poolName)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// RemoveEmptyThinPool indicates an expected call of RemoveEmptyThinPool.
+func (mr *MockCommandsMockRecorder) RemoveEmptyThinPool(ctx, vgName, poolName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveEmptyThinPool", reflect.TypeOf((*MockCommands)(nil).RemoveEmptyThinPool), ctx, vgName, poolName)
 }
 
 // RemoveFileDevice mocks base method.

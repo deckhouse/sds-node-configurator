@@ -65,6 +65,9 @@ const SdsLVGConditionsWatcherCtrlName = "sds-conditions-watcher-controller"
 //   - ReasonFileDeviceGrowFailed — raising an entry's size did not go through.
 //     The growth sequence fails towards the smaller size at every step, so the
 //     Volume Group is still the size it was and still serving every volume.
+//   - ReasonThinPoolHasVolumes — a thin pool was removed from the spec while it
+//     still holds thin volumes. The pool and its volumes stay until those are
+//     deleted; the rest of the Volume Group is untouched.
 //   - ReasonCacheStale — the agent's LVM cache has not caught up with a Volume
 //     Group that is on the node. Nothing is wrong with the Volume Group; that is
 //     precisely why the agent refuses to act on it.
@@ -90,6 +93,7 @@ var (
 		internal.ReasonFileDeviceGrowFailed,
 		internal.ReasonCacheStale,
 		internal.ReasonBlockDeviceNotFound,
+		internal.ReasonThinPoolHasVolumes,
 	}
 )
 

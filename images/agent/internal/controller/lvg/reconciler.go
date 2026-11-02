@@ -846,6 +846,17 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 		log.Debug(fmt.Sprintf("successfully reconciled thin-pools operation of the LVMVolumeGroup %s", lvg.Name))
 	}
 
+	// Outside the block above: dropping the last pool leaves spec.thinPools empty.
+	lvs, _ := r.sdsCache.GetLVs()
+	keptThinPools, err := r.removeThinPoolsDroppedFromSpec(ctx, lvg, vg.VGName, lvs)
+	if err != nil {
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "ThinPoolReconcileFailed", fmt.Sprintf("unable to reconcile thin-pools, err: %s", err.Error()))
+		if err != nil {
+			log.Error(fmt.Sprintf("unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name), logger.Err(err))
+		}
+		return r.requeueInterval(), err
+	}
+
 	// Everything that could be applied has been. Report the parts that could
 	// not — unusable spec.fileDevices entries, entries the node could not bring
 	// up, and entries dropped from the spec while their PV is still in the VG —
@@ -871,6 +882,17 @@ func (r *Reconciler) reconcileLVGUpdateFunc(
 		return 0, nil
 	}
 	r.resetNoProgressRetries(lvg.Name)
+
+	// Deleting the volumes raises no event on the LVMVolumeGroup, so the removal
+	// is retried on the interval until the pool is empty.
+	if keptThinPools != "" {
+		log.Warn(fmt.Sprintf("the LVMVolumeGroup %s keeps thin pools removed from its spec: %s", lvg.Name, keptThinPools))
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonThinPoolHasVolumes, keptThinPools)
+		if err != nil {
+			log.Error(fmt.Sprintf("unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name), logger.Err(err))
+		}
+		return r.requeueInterval(), err
+	}
 
 	log.Debug(fmt.Sprintf("tries to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name))
 	err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionTrue, internal.TypeVGConfigurationApplied, internal.ReasonApplied, "configuration has been applied")
@@ -1736,7 +1758,7 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 
 	actualThinPools := make(map[string]internal.LVData, len(lvs))
 	for _, lv := range lvs {
-		if isThinPool(lv) {
+		if lv.VGName == vg.VGName && isThinPool(lv) {
 			actualThinPools[lv.LVName] = lv
 		}
 	}
@@ -1784,7 +1806,17 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 			}
 
 			log.Info(fmt.Sprintf("thin-pool %s of the LVMVolumeGroup %s has been successfully created", specTp.Name, lvg.Name))
+
+			if err := r.tagDeclaredThinPool(ctx, lvg, vg.VGName, specTp.Name); err != nil {
+				fmt.Fprintf(&errs, "%s. ", err.Error())
+			}
 		} else {
+			if !hasLVTag(actualTp.LvTags, declaredThinPoolTag(lvg.Name)) {
+				if err := r.tagDeclaredThinPool(ctx, lvg, vg.VGName, specTp.Name); err != nil {
+					fmt.Fprintf(&errs, "%s. ", err.Error())
+				}
+			}
+
 			alignedTpSizeForResize, alignErr := utils.AlignSizeToExtent(tpRequestedSize, extentSizeForThinPoolAlign(lvg, &vg))
 			if alignErr != nil {
 				log.Error(fmt.Sprintf("unable to align thin-pool %s size for LVMVolumeGroup %s", specTp.Name, lvg.Name), logger.Err(alignErr))
@@ -1818,6 +1850,71 @@ func (r *Reconciler) reconcileThinPoolsIfNeeded(
 	}
 
 	return nil
+}
+
+// tagDeclaredThinPool marks the thin pool as declared by the LVMVolumeGroup's
+// spec. Only a pool with the mark is ever removed when it leaves the spec; see
+// removeThinPoolsDroppedFromSpec.
+func (r *Reconciler) tagDeclaredThinPool(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup, vgName, poolName string) error {
+	start := time.Now()
+	cmd, err := r.commands.LVChangeAddTag(ctx, vgName, poolName, declaredThinPoolTag(lvg.Name))
+	r.metrics.UtilsCommandsDuration(ReconcilerName, "lvchange").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+	r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "lvchange").Inc()
+	if err != nil {
+		r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "lvchange").Inc()
+		r.log.Error(fmt.Sprintf("unable to tag thin-pool %s of the LVMVolumeGroup %s, cmd: %s", poolName, lvg.Name, cmd), logger.Err(err))
+		return fmt.Errorf("unable to tag thin-pool %s, err: %w", poolName, err)
+	}
+	return nil
+}
+
+// removeThinPoolsDroppedFromSpec removes the thin pools of the Volume Group that
+// spec.thinPools declared and no longer does, and returns what it had to leave.
+//
+// A pool is considered only if it carries the tag tagDeclaredThinPool puts on
+// every pool the spec declares. A pool the spec never listed — one of a Volume
+// Group the agent adopted, say — is not the module's to remove. A pool that
+// still holds thin volumes is left as well: they may hold data, and they are
+// named in the result so that the caller can report them.
+func (r *Reconciler) removeThinPoolsDroppedFromSpec(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup, vgName string, lvs []internal.LVData) (string, error) {
+	declared := make(map[string]struct{}, len(lvg.Spec.ThinPools))
+	for _, tp := range lvg.Spec.ThinPools {
+		declared[tp.Name] = struct{}{}
+	}
+
+	var kept []string
+	for _, pool := range lvs {
+		if pool.VGName != vgName || !isThinPool(pool) || !hasLVTag(pool.LvTags, declaredThinPoolTag(lvg.Name)) {
+			continue
+		}
+		if _, ok := declared[pool.LVName]; ok {
+			continue
+		}
+
+		if volumes := thinVolumesOf(lvs, vgName, pool.LVName); len(volumes) > 0 {
+			kept = append(kept, fmt.Sprintf("thin pool %s was removed from spec.thinPools but holds %s; delete them to remove the pool", pool.LVName, strings.Join(volumes, ", ")))
+			continue
+		}
+
+		start := time.Now()
+		removed, cmd, err := r.commands.RemoveEmptyThinPool(ctx, vgName, pool.LVName)
+		r.metrics.UtilsCommandsDuration(ReconcilerName, "lvremove").Observe(r.metrics.GetEstimatedTimeInSeconds(start))
+		r.metrics.UtilsCommandsExecutionCount(ReconcilerName, "lvremove").Inc()
+		if err != nil {
+			r.metrics.UtilsCommandsErrorsCount(ReconcilerName, "lvremove").Inc()
+			r.log.Error(fmt.Sprintf("unable to remove thin-pool %s of the LVMVolumeGroup %s, cmd: %s", pool.LVName, lvg.Name, cmd), logger.Err(err))
+			return "", fmt.Errorf("unable to remove thin-pool %s, err: %w", pool.LVName, err)
+		}
+		if !removed {
+			// The agent's cache had no volume in the pool, LVM did: one was
+			// created since the cache was filled.
+			kept = append(kept, fmt.Sprintf("thin pool %s was removed from spec.thinPools but holds thin volumes; delete them to remove the pool", pool.LVName))
+			continue
+		}
+		r.log.Info(fmt.Sprintf("thin-pool %s of the LVMVolumeGroup %s has been removed as it is no longer in spec.thinPools", pool.LVName, lvg.Name))
+	}
+
+	return strings.Join(kept, "; "), nil
 }
 
 func (r *Reconciler) resizePVIfNeeded(ctx context.Context, lvg *v1alpha1.LVMVolumeGroup) error {

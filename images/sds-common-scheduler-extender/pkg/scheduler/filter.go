@@ -329,7 +329,7 @@ func filterNodes(
 
 			// === Filter for LOCAL PVCs ===
 			if len(localPVCs) > 0 {
-				ok, reason, localClaims := filterNodeForLocalPVCs(ctx, log, cl, schedulerCache, nodeName, localPVCs, scLVGs, pvcRequests)
+				ok, reason, localClaims := filterNodeForLocalPVCs(ctx, log, cl, nodeName, localPVCs, scLVGs, pvcRequests)
 				if !ok && reason != "" {
 					failReasons = append(failReasons, fmt.Sprintf("[local] %s", reason))
 				}
@@ -389,7 +389,6 @@ func filterNodeForLocalPVCs(
 	ctx context.Context,
 	log logger.Logger,
 	cl client.Client,
-	schedulerCache *cache.Cache,
 	nodeName string,
 	localPVCs map[string]*corev1.PersistentVolumeClaim,
 	scLVGs map[string]SCLVMVolumeGroups,

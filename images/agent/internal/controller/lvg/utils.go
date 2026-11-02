@@ -131,3 +131,29 @@ func foreignFinalizers(lvg *v1alpha1.LVMVolumeGroup) []string {
 	}
 	return foreign
 }
+
+// declaredThinPoolTag is the LVM tag of a thin pool that the LVMVolumeGroup's
+// spec declares.
+func declaredThinPoolTag(lvgName string) string {
+	return fmt.Sprintf("%s=%s", internal.LVMVolumeGroupTag, lvgName)
+}
+
+func hasLVTag(tags, tag string) bool {
+	for _, t := range strings.Split(tags, ",") {
+		if strings.TrimSpace(t) == tag {
+			return true
+		}
+	}
+	return false
+}
+
+// thinVolumesOf returns the names of the thin volumes in the pool.
+func thinVolumesOf(lvs []internal.LVData, vgName, poolName string) []string {
+	var volumes []string
+	for _, lv := range lvs {
+		if lv.VGName == vgName && lv.PoolName == poolName {
+			volumes = append(volumes, lv.LVName)
+		}
+	}
+	return volumes
+}

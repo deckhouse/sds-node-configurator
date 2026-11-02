@@ -186,6 +186,10 @@ const (
 	// decision (restore the entry, or pvmove + vgreduce by hand) — without
 	// drowning in genuinely malformed entries.
 	ReasonFileDeviceDrift = "FileDeviceDrift"
+	// ReasonThinPoolHasVolumes is set when a thin pool was removed from
+	// spec.thinPools while it still holds thin volumes. The pool stays, and so does
+	// every volume in it, until they are deleted; the message names them.
+	ReasonThinPoolHasVolumes = "ThinPoolHasVolumes"
 	// ReasonFileDeviceNotApplied is set when a spec.fileDevices entry could not
 	// be brought up on the node — no free space for the backing file, losetup
 	// refused, pvresize failed while growing one — while the Volume Group itself

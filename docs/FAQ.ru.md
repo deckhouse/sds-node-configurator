@@ -94,6 +94,24 @@ d8 k get lvmlogicalvolume <name> -o jsonpath='{.status.conditions[?(@.type=="Rea
 
 Финализатор принадлежит модулю, который его поставил, и снимается этим модулем, когда тот отпустил том (у `sds-local-volume` — при удалении PersistentVolume). Ищите причину на его стороне, а не снимайте финализатор вручную: так агент удалит логический том, данные которого, возможно, ещё используются.
 
+## Как удалить thin pool?
+
+Удалите его из `spec.thinPools` ресурса [LVMVolumeGroup](./cr.html#lvmvolumegroup). Агент удалит thin pool с узла, когда в нём не останется тонких томов.
+
+Пока в thin pool есть тома, агент оставляет и его, и тома в нём. Условие `VGConfigurationApplied` при этом в статусе `False` с причиной `ThinPoolHasVolumes`, а в сообщении перечислены тома:
+
+```shell
+d8 k get lvg %lvg-name% -o jsonpath='{.status.conditions[?(@.type=="VGConfigurationApplied")]}'
+```
+
+Сначала удалите эти тома, например стоящие за ними PersistentVolumeClaim. Агент удалит thin pool при следующем проходе. LVMVolumeGroup всё это время остаётся `Ready`.
+
+Удаляется только thin pool, который был указан в `spec.thinPools`: агент помечает каждый такой thin pool тегом `storage.deckhouse.io/lvmVolumeGroupName=<имя LVMVolumeGroup>`. Thin pool, которого в spec никогда не было, например в группе томов, взятой модулем под управление, агент не трогает.
+
+Удаление thin pool из шаблона [LVMVolumeGroupSet](./cr.html#lvmvolumegroupset) удаляет его из всех LVMVolumeGroup набора.
+
+Перед удалением thin pool уберите его из классов хранения, которые его используют: LocalStorageClass модуля `sds-local-volume` и ReplicatedStoragePool модуля `sds-replicated-volume`.
+
 ## Почему не удаётся создать группу томов с помощью ресурса LVMVolumeGroup?
 
 Ресурс не проходит валидацию контроллера (валидация Kubernetes прошла успешно). Причину можно увидеть в поле `status.message` ресурса или в логах контроллера.

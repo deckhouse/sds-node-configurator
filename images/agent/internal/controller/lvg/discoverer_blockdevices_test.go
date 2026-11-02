@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -1234,4 +1235,63 @@ func TestReplaceWithRebuilt_RefusesARebuildThatDescribesLessOfTheNodeOtherThanBy
 			assert.Equal(t, tt.fresh, merged[0], "the rebuilt view is taken whole")
 		})
 	}
+}
+
+// A thin pool dropped from spec.thinPools is removed from the node once it is
+// empty, and it stays in status.thinPools until the reconcile rewrites the
+// status from the node. Its absence must not mark the LVMVolumeGroup unhealthy:
+// that would take it out of the very reconcile that drops the stale entry. A
+// pool still declared in the spec and missing from the node is reported as
+// before.
+func TestReconcileUnhealthyLVMVolumeGroups_IgnoresThinPoolDroppedFromSpec(t *testing.T) {
+	ctx := context.Background()
+	cl := test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{})
+	d := bdRaceDiscoverer(t, cl, UncachedReader{Reader: cl}, bdRaceCache(t))
+
+	newLVG := func(vgName string, specPools []string) v1alpha1.LVMVolumeGroup {
+		lvg := v1alpha1.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: "lvg-" + vgName},
+			Spec: v1alpha1.LVMVolumeGroupSpec{
+				ActualVGNameOnTheNode: vgName,
+				Local:                 v1alpha1.LVMVolumeGroupLocalSpec{NodeName: bdRaceNode},
+			},
+			Status: v1alpha1.LVMVolumeGroupStatus{
+				VGUuid: "uuid-" + vgName,
+				ThinPools: []v1alpha1.LVMVolumeGroupThinPoolStatus{
+					{Name: "tp-kept", Ready: true},
+					{Name: "tp-gone", Ready: true},
+				},
+			},
+		}
+		for _, name := range specPools {
+			lvg.Spec.ThinPools = append(lvg.Spec.ThinPools, v1alpha1.LVMVolumeGroupThinPoolSpec{Name: name})
+		}
+		require.NoError(t, cl.Create(ctx, &lvg))
+		return lvg
+	}
+
+	lvgs := map[string]v1alpha1.LVMVolumeGroup{
+		"vg-dropped":  newLVG("vg-dropped", []string{"tp-kept"}),
+		"vg-declared": newLVG("vg-declared", []string{"tp-kept", "tp-gone"}),
+	}
+	// tp-gone is missing from the node in both Volume Groups.
+	candidates := []internal.LVMVolumeGroupCandidate{
+		{ActualVGNameOnTheNode: "vg-dropped", StatusThinPools: []internal.LVMVGStatusThinPool{{Name: "tp-kept"}}},
+		{ActualVGNameOnTheNode: "vg-declared", StatusThinPools: []internal.LVMVGStatusThinPool{{Name: "tp-kept"}}},
+	}
+
+	kept, err := d.ReconcileUnhealthyLVMVolumeGroups(ctx, candidates, lvgs)
+	require.NoError(t, err)
+
+	var keptNames []string
+	for _, c := range kept {
+		keptNames = append(keptNames, c.ActualVGNameOnTheNode)
+	}
+	assert.Equal(t, []string{"vg-dropped"}, keptNames,
+		"a pool dropped from the spec may be gone; a declared one that is gone is still a failure")
+
+	var dropped v1alpha1.LVMVolumeGroup
+	require.NoError(t, cl.Get(ctx, client.ObjectKey{Name: "lvg-vg-dropped"}, &dropped))
+	assert.Nil(t, meta.FindStatusCondition(dropped.Status.Conditions, internal.TypeVGReady),
+		"the LVMVolumeGroup whose pool was dropped from the spec gets no VGReady=False")
 }

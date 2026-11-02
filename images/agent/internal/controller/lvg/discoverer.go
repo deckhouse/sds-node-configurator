@@ -702,9 +702,22 @@ func (d *Discoverer) ReconcileUnhealthyLVMVolumeGroups(
 					candidateTPs[tp.Name] = tp
 				}
 
+				specTPs := make(map[string]struct{}, len(lvg.Spec.ThinPools))
+				for _, tp := range lvg.Spec.ThinPools {
+					specTPs[tp.Name] = struct{}{}
+				}
+
 				// take thin-pools from status instead of spec to prevent miss never-created ones
 				for i, statusTp := range lvg.Status.ThinPools {
 					if candidateTp, exist := candidateTPs[statusTp.Name]; !exist {
+						// A pool dropped from spec.thinPools is removed from the node
+						// once it is empty, so its absence is the expected outcome.
+						// Reporting it would take the LVMVolumeGroup out of the
+						// reconcile, which is the only path that rewrites
+						// status.thinPools from the node.
+						if _, inSpec := specTPs[statusTp.Name]; !inSpec {
+							continue
+						}
 						log.Warn(fmt.Sprintf("the LVMVolumeGroup %s misses its ThinPool %s", lvg.Name, statusTp.Name))
 						fmt.Fprintf(&messageBldr, "Unable to find ThinPool %s. ", statusTp.Name)
 						lvg.Status.ThinPools[i].Ready = false

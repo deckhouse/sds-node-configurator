@@ -1353,8 +1353,8 @@ func newDeletedVolumeEnv(ctx context.Context, t *testing.T) *deletedVolumeEnv {
 	return &deletedVolumeEnv{r: r, cl: cl, mockCmds: mockCmds, lvg: lvg, llv: llv}
 }
 
-func (e *deletedVolumeEnv) expectRemoveLV(err error) *gomock.Call {
-	return e.mockCmds.EXPECT().
+func (e *deletedVolumeEnv) expectRemoveLV(err error) {
+	e.mockCmds.EXPECT().
 		RemoveLV(deleteVGActual, deleteLVName).
 		Return("lvremove", err).
 		Times(1)
