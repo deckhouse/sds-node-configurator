@@ -11,6 +11,8 @@ spec:
                 actualSnapshotNameOnTheNode:
                   description: |
                     Имя снимка тома на узле.
+                    Необязательное: если не задано или пусто, агент использует имя объекта LLVS
+                    metadata.name. После первого непустого значения поле неизменяемо.
                 lvmLogicalVolumeName:
                   description: |
                     Имя ресурса LVMLogicalVolume, с которого создается снимок.

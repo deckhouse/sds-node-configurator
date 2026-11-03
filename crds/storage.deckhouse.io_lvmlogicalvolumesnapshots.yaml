@@ -54,8 +54,10 @@ spec:
           spec:
             properties:
               actualSnapshotNameOnTheNode:
-                description: Name of the volume snapshot.
-                minLength: 1
+                description: |-
+                  Name of the volume snapshot on the node.
+                  Optional: if omitted or empty, the agent uses the LLVS object name
+                  (`metadata.name`). Once set to a non-empty value, the field is immutable.
                 type: string
                 x-kubernetes-validations:
                 - message: Value is immutable.

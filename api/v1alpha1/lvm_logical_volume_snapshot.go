@@ -65,11 +65,12 @@ func (llvs *LVMLogicalVolumeSnapshot) ActualSnapshotNameOnTheNode() string {
 
 // +k8s:deepcopy-gen=true
 type LVMLogicalVolumeSnapshotSpec struct {
-	// Name of the volume snapshot.
+	// Name of the volume snapshot on the node.
+	// Optional: if omitted or empty, the agent uses the LLVS object name
+	// (`metadata.name`). Once set to a non-empty value, the field is immutable.
 	// +optional
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
-	// +kubebuilder:validation:MinLength=1
-	ActualSnapshotNameOnTheNode string `json:"actualSnapshotNameOnTheNode"`
+	ActualSnapshotNameOnTheNode string `json:"actualSnapshotNameOnTheNode,omitempty"`
 	// Name of the snapshotted LLV resource.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	// +kubebuilder:validation:MinLength=1
