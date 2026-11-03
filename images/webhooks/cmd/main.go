@@ -22,6 +22,10 @@ import (
 	"net/http"
 	"os"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-common-lib/logger/kwhlogger"
 	cn "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -54,6 +58,7 @@ func initFlags() config {
 const (
 	port            = ":8443"
 	llvsValidatorID = "LLVSValidator"
+	lvgValidatorID  = "LVGValidator"
 )
 
 func main() {
@@ -75,8 +80,33 @@ func main() {
 		os.Exit(1)
 	}
 
+	scheme := runtime.NewScheme()
+	if err := cn.AddToScheme(scheme); err != nil {
+		fmt.Fprintf(os.Stderr, "error building the scheme: %s", err)
+		os.Exit(1)
+	}
+
+	restConfig, err := ctrl.GetConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error getting the kubeconfig: %s", err)
+		os.Exit(1)
+	}
+
+	cl, err := client.New(restConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating the Kubernetes client: %s", err)
+		os.Exit(1)
+	}
+
+	lvgValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.LVGValidate(cl, log.Named("lvg-validate")), lvgValidatorID, &cn.LVMVolumeGroup{}, kwhLog)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating lvgValidatingWebhookHandler: %s", err)
+		os.Exit(1)
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/llvs-validate", llvsValidatingWebhookHandler)
+	mux.Handle("/lvg-validate", lvgValidatingWebhookHandler)
 	mux.HandleFunc("/healthz", httpHandlerHealthz)
 
 	log.Info("listening", "address", port)

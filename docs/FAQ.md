@@ -167,6 +167,12 @@ Add the LVM tag `storage.deckhouse.io/enabled=true` to the LVM Volume Group on t
 vgchange myvg-0 --addtag storage.deckhouse.io/enabled=true
 ```
 
+## Can two LVMVolumeGroup resources describe the same Volume Group?
+
+No. A Volume Group of a node is described by one LVMVolumeGroup. Creating a second resource with the same `spec.local.nodeName` and `spec.actualVGNameOnTheNode` is rejected by the module's webhook with a message that names the existing resource; edit that resource instead.
+
+If a second resource gets into the cluster anyway, for example while the webhook was unavailable, the agent does not serve it: the resource gets `VGConfigurationApplied=False` with the reason `ValidationFailed` and a message that names the resource serving the Volume Group, and nothing is changed on the node for it. The Volume Group is served by the resource its `storage.deckhouse.io/lvmVolumeGroupName` tag names or, when the tag names neither, by the older resource. Delete the extra resource: the Volume Group stays, because it is not tagged for it.
+
 ## How do I stop the controller from tracking an LVM Volume Group?
 
 Remove the LVM tag `storage.deckhouse.io/enabled=true` from the desired LVM Volume Group on the node:

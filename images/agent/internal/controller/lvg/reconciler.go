@@ -342,6 +342,24 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 		return controller.Result{}, err
 	}
 
+	// After the delete path, so a duplicate can still be deleted: vgRemovalAllowed
+	// keeps the Volume Group, which stays tagged for the resource that serves it.
+	serving, err := r.duplicateOf(ctx, lvg)
+	if err != nil {
+		log.Error(fmt.Sprintf("unable to check whether another LVMVolumeGroup serves VG %s", lvg.Spec.ActualVGNameOnTheNode), logger.Err(err))
+		return controller.Result{}, err
+	}
+	if serving != "" {
+		message := fmt.Sprintf("VG %s on the node %s is already described by the LVMVolumeGroup %s; this resource is not served, delete it",
+			lvg.Spec.ActualVGNameOnTheNode, lvg.Spec.Local.NodeName, serving)
+		log.Warn(fmt.Sprintf("the LVMVolumeGroup %s duplicates the LVMVolumeGroup %s", lvg.Name, serving))
+		if err := r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, message); err != nil {
+			log.Error(fmt.Sprintf("unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name), logger.Err(err))
+			return controller.Result{}, err
+		}
+		return controller.Result{RequeueAfter: r.requeueInterval()}, nil
+	}
+
 	// blockDeviceSelector is optional: a file-only LVMVolumeGroup (only
 	// spec.fileDevices) carries no selector. Listing block devices with a
 	// nil selector would match EVERY BlockDevice on the node (the repository

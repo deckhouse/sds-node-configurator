@@ -46,3 +46,13 @@
   "rules" (list (dict "apiGroups" (list "storage.deckhouse.io") "apiVersions" (list "v1alpha1") "operations" (list "*") "resources" (list "lvmlogicalvolumesnapshots") "scope" "Cluster"))
 }}
 {{ include "helm_lib_module_validating_webhook_configuration" (list . $llvsWebhookConfig) }}
+
+{{- /* ValidatingWebhookConfiguration for LVMVolumeGroups: rejects a second resource for a Volume Group of a node */ -}}
+{{- $lvgWebhookConfig := dict
+  "name" "lvg-validation"
+  "webhookName" "lvg-validation"
+  "valuesKey" "sdsNodeConfigurator"
+  "path" "/lvg-validate"
+  "rules" (list (dict "apiGroups" (list "storage.deckhouse.io") "apiVersions" (list "v1alpha1") "operations" (list "CREATE") "resources" (list "lvmvolumegroups") "scope" "Cluster"))
+}}
+{{ include "helm_lib_module_validating_webhook_configuration" (list . $lvgWebhookConfig) }}
