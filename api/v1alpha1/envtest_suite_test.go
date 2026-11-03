@@ -61,15 +61,22 @@ func runEnvtest(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, "envtest: cannot resolve suite path")
 		return 1
 	}
-	crdPath := filepath.Join(filepath.Dir(thisFile), "..", "..", "crds", "storage.deckhouse.io_lvmlogicalvolumesnapshots.yaml")
-	crdPath, err = filepath.Abs(crdPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "envtest: abs crd path: %v\n", err)
-		return 1
-	}
-	if _, err := os.Stat(crdPath); err != nil {
-		fmt.Fprintf(os.Stderr, "envtest: CRD file missing: %s (%v)\n", crdPath, err)
-		return 1
+	var crdPaths []string
+	for _, name := range []string{
+		"storage.deckhouse.io_lvmlogicalvolumesnapshots.yaml",
+		"storage.deckhouse.io_lvmvolumegroups.yaml",
+		"storage.deckhouse.io_lvmlogicalvolumes.yaml",
+	} {
+		crdPath, err := filepath.Abs(filepath.Join(filepath.Dir(thisFile), "..", "..", "crds", name))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "envtest: abs crd path: %v\n", err)
+			return 1
+		}
+		if _, err := os.Stat(crdPath); err != nil {
+			fmt.Fprintf(os.Stderr, "envtest: CRD file missing: %s (%v)\n", crdPath, err)
+			return 1
+		}
+		crdPaths = append(crdPaths, crdPath)
 	}
 
 	scheme := kruntime.NewScheme()
@@ -85,7 +92,7 @@ func runEnvtest(m *testing.M) int {
 	testEnv = &envtest.Environment{
 		BinaryAssetsDirectory: assets,
 		CRDInstallOptions: envtest.CRDInstallOptions{
-			Paths:  []string{crdPath},
+			Paths:  crdPaths,
 			Scheme: scheme,
 		},
 		ErrorIfCRDPathMissing: true,
