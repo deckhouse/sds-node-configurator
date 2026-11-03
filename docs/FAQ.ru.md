@@ -112,6 +112,10 @@ d8 k get lvg %lvg-name% -o jsonpath='{.status.conditions[?(@.type=="VGConfigurat
 
 Перед удалением thin pool уберите его из классов хранения, которые его используют: LocalStorageClass модуля `sds-local-volume` и ReplicatedStoragePool модуля `sds-replicated-volume`.
 
+## Что происходит, если один thin pool в LVMVolumeGroup не удаётся создать?
+
+LVMVolumeGroup остаётся `Ready`, а остальные thin pool продолжают принимать тома. Условие `VGConfigurationApplied` — `False` с причиной `ThinPoolCreationFailed` (группа томов создавалась) или `ThinPoolReconcileFailed` (thin pool существующей группы томов не удалось создать, расширить или удалить), а в сообщении перечислены thin pool, на которых произошла ошибка, и ошибка `lvcreate`. Несозданного thin pool нет в `status.thinPools`, а `status.thinPoolReady` показывает, сколько из заявленных thin pool существует. Тома, которым нужен этот thin pool, на узел не планируются. Агент повторяет попытку при каждом проходе, поэтому thin pool появится, как только причина будет устранена, например когда в группе томов появится достаточно свободного места.
+
 ## Почему не удаётся создать группу томов с помощью ресурса LVMVolumeGroup?
 
 Ресурс не проходит валидацию контроллера (валидация Kubernetes прошла успешно). Причину можно увидеть в поле `status.message` ресурса или в логах контроллера.

@@ -6,7 +6,7 @@ require (
 	github.com/deckhouse/sds-common-lib v0.15.0
 	github.com/deckhouse/sds-local-volume/api v0.0.0-20261030071906-101494c01cb0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250424082358-e271071c2a57
-	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20261029093657-522202339719
+	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20261101171453-6f1e162df1a7
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	k8s.io/api v0.35.1

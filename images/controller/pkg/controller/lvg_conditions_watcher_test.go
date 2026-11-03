@@ -196,6 +196,12 @@ func TestLVGConditionTypesMatchTheCRDEnum(t *testing.T) {
 //     BlockDevice resource, so status.nodes lists fewer devices than the node has.
 //     It was written together with the rest of the status, so the capacity figures
 //     the scheduler reads are the ones this pass measured.
+//   - ThinPoolCreationFailed, ThinPoolReconcileFailed — one thin pool could not be
+//     created, extended, tagged or removed. The Volume Group and its other thin
+//     pools are untouched, and the discoverer keeps status.thinPools current
+//     whatever the reconcile did. The scheduler reads every thin pool apart: it
+//     finds the failed one absent or at its old size and places nothing there it
+//     cannot hold, so nothing is gained by refusing the rest.
 //
 // Introducing any of them without listing it here is what would turn a report
 // into an outage, so the membership is asserted rather than left to review.
@@ -209,6 +215,8 @@ func TestAcceptableReasonsKeepAVolumeGroupInService(t *testing.T) {
 		internal.ReasonFileDeviceGrowFailed,
 		internal.ReasonCacheStale,
 		internal.ReasonBlockDeviceNotFound,
+		internal.ReasonThinPoolCreationFailed,
+		internal.ReasonThinPoolReconcileFailed,
 	} {
 		t.Run(reason, func(t *testing.T) {
 			assert.Contains(t, acceptableReasons, reason,
@@ -222,7 +230,6 @@ func TestAcceptableReasonsKeepAVolumeGroupInService(t *testing.T) {
 		// "the Volume Group is broken" versus "the Volume Group did not grow".
 		assert.NotContains(t, acceptableReasons, "VGCreationFailed")
 		assert.NotContains(t, acceptableReasons, "VGExtendFailed")
-		assert.NotContains(t, acceptableReasons, "ThinPoolReconcileFailed")
 		// The agent cannot read the node's Volume Groups at all. An
 		// LVMVolumeGroup whose backing storage the agent has lost sight of is
 		// exactly what the scheduler should stop placing volumes on — unlike

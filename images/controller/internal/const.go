@@ -48,6 +48,12 @@ const (
 	// a thin pool was removed from spec.thinPools while it still holds thin
 	// volumes, so the agent keeps it. The Volume Group keeps serving every volume.
 	ReasonThinPoolHasVolumes = "ThinPoolHasVolumes"
+	// ReasonThinPoolCreationFailed and ReasonThinPoolReconcileFailed mirror the
+	// agent-side constants of the same names: a thin pool could not be created,
+	// extended, tagged or removed. The Volume Group and its other thin pools keep
+	// serving.
+	ReasonThinPoolCreationFailed  = "ThinPoolCreationFailed"
+	ReasonThinPoolReconcileFailed = "ThinPoolReconcileFailed"
 	// ReasonAliasResolutionFailed mirrors the agent-side constant of the same
 	// name: the agent cannot canonicalize the alias-form PV names it needs to
 	// decide whether a file-backed loop device is already part of the VG, and has

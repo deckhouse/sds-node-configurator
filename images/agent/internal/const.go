@@ -190,6 +190,14 @@ const (
 	// spec.thinPools while it still holds thin volumes. The pool stays, and so does
 	// every volume in it, until they are deleted; the message names them.
 	ReasonThinPoolHasVolumes = "ThinPoolHasVolumes"
+	// ReasonThinPoolCreationFailed is set when lvcreate failed for a thin pool
+	// of a Volume Group being created, and ReasonThinPoolReconcileFailed when a
+	// thin pool of an existing Volume Group could not be created, extended, tagged
+	// or removed. Either way the Volume Group and its other thin pools keep serving
+	// their volumes; the message names the thin pools that failed, and they are
+	// absent from status.thinPools or keep their old size.
+	ReasonThinPoolCreationFailed  = "ThinPoolCreationFailed"
+	ReasonThinPoolReconcileFailed = "ThinPoolReconcileFailed"
 	// ReasonFileDeviceNotApplied is set when a spec.fileDevices entry could not
 	// be brought up on the node — no free space for the backing file, losetup
 	// refused, pvresize failed while growing one — while the Volume Group itself

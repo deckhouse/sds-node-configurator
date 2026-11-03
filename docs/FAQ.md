@@ -112,6 +112,10 @@ Removing a thin pool from the template of an [LVMVolumeGroupSet](./cr.html#lvmvo
 
 Before removing a thin pool, remove it from the classes of storage that use it: the LocalStorageClass of `sds-local-volume` and the ReplicatedStoragePool of `sds-replicated-volume`.
 
+## What happens when one thin pool of an LVMVolumeGroup cannot be created?
+
+The LVMVolumeGroup stays `Ready`, and its other thin pools keep receiving volumes. The `VGConfigurationApplied` condition is `False` with the reason `ThinPoolCreationFailed` (the Volume Group was being created) or `ThinPoolReconcileFailed` (a thin pool of an existing Volume Group could not be created, extended or removed), and its message names the thin pools that failed and the `lvcreate` error. A thin pool that was not created is absent from `status.thinPools`, and `status.thinPoolReady` shows how many of the declared thin pools exist. Volumes that ask for that thin pool are not scheduled to the node. The agent retries on every reconcile, so the thin pool appears once its cause is fixed, for example once there is enough free space in the Volume Group.
+
 ## Why is it not possible to create a Volume Group using the LVMVolumeGroup resource?
 
 The resource does not pass controller validation (Kubernetes validation was successful). The reason can be seen in the `status.message` field of the resource or in the controller logs.

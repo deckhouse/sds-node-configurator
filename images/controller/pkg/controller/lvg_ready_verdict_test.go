@@ -123,6 +123,22 @@ func TestDecideLVGReadyAndPhase(t *testing.T) {
 			wantReason: "ValidConditionStates",
 		},
 		{
+			// A thin pool that could not be created or extended is one pool;
+			// the Volume Group and its other thin pools keep serving.
+			name:       "a thin pool could not be created",
+			lvg:        lvgWith(falseCond(internal.TypeVGConfigurationApplied, internal.ReasonThinPoolCreationFailed)),
+			wantPhase:  v1alpha1.PhaseReady,
+			wantStatus: metav1.ConditionTrue,
+			wantReason: "ValidConditionStates",
+		},
+		{
+			name:       "a thin pool could not be reconciled",
+			lvg:        lvgWith(falseCond(internal.TypeVGConfigurationApplied, internal.ReasonThinPoolReconcileFailed)),
+			wantPhase:  v1alpha1.PhaseReady,
+			wantStatus: metav1.ConditionTrue,
+			wantReason: "ValidConditionStates",
+		},
+		{
 			// A stage that says it has not reached a verdict is not evidence
 			// that the Volume Group is healthy. Reporting Ready here would let
 			// the scheduler place volumes on nobody's word.

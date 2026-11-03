@@ -68,6 +68,11 @@ const SdsLVGConditionsWatcherCtrlName = "sds-conditions-watcher-controller"
 //   - ReasonThinPoolHasVolumes — a thin pool was removed from the spec while it
 //     still holds thin volumes. The pool and its volumes stay until those are
 //     deleted; the rest of the Volume Group is untouched.
+//   - ReasonThinPoolCreationFailed, ReasonThinPoolReconcileFailed — a thin pool
+//     could not be created, extended, tagged or removed. Each thin pool is a
+//     separate pool to the scheduler, which finds a failed one absent from
+//     status.thinPools or at its old size and places nothing there it cannot
+//     hold; the other thin pools and the thick space keep taking volumes.
 //   - ReasonCacheStale — the agent's LVM cache has not caught up with a Volume
 //     Group that is on the node. Nothing is wrong with the Volume Group; that is
 //     precisely why the agent refuses to act on it.
@@ -94,6 +99,8 @@ var (
 		internal.ReasonCacheStale,
 		internal.ReasonBlockDeviceNotFound,
 		internal.ReasonThinPoolHasVolumes,
+		internal.ReasonThinPoolCreationFailed,
+		internal.ReasonThinPoolReconcileFailed,
 	}
 )
 
