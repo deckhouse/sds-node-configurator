@@ -116,6 +116,20 @@ func TestPodPVCNames(t *testing.T) {
 		names, _ := podPVCNames(pod)
 		assert.Equal(t, []string{"pvc-a"}, names)
 	})
+
+	t.Run("a generic ephemeral volume is the PVC named after the pod and the volume", func(t *testing.T) {
+		pod := podWithPVCs("", "pvc-a")
+		pod.Name = "worker-0"
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+			Name: "scratch",
+			VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{
+				VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{},
+			}},
+		})
+		names, fromSpec := podPVCNames(pod)
+		assert.Equal(t, []string{"pvc-a", "worker-0-scratch"}, names)
+		assert.True(t, fromSpec["worker-0-scratch"], "an ephemeral PVC is mounted: a missing one must fail the request like any spec PVC")
+	})
 }
 
 func TestGetManagedPVCsFromPod_ExtraPVCsAnnotation(t *testing.T) {
@@ -138,7 +152,19 @@ func TestGetManagedPVCsFromPod_ExtraPVCsAnnotation(t *testing.T) {
 			testPendingPVC("pvc-hint", "default", localSCName),
 			testPendingPVC("pvc-hint-2", "default", localSCName),
 			testPendingPVC("pvc-foreign", "default", foreignSCName),
+			testPendingPVC("test-pod-scratch", "default", localSCName),
 		}
+	}
+
+	podWithEphemeral := func(volumeName string) *corev1.Pod {
+		pod := podWithPVCs("")
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+			Name: volumeName,
+			VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{
+				VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{},
+			}},
+		})
+		return pod
 	}
 
 	tt := []struct {
@@ -196,6 +222,16 @@ func TestGetManagedPVCsFromPod_ExtraPVCsAnnotation(t *testing.T) {
 			name: "malformed annotation value does not panic and adds nothing",
 			pod:  podWithPVCs(",, ,", "pvc-spec"),
 			want: []string{"pvc-spec"},
+		},
+		{
+			name: "generic ephemeral volume resolves to the PVC <pod>-<volume>",
+			pod:  podWithEphemeral("scratch"),
+			want: []string{"test-pod-scratch"},
+		},
+		{
+			name:      "missing PVC of a generic ephemeral volume fails the request like a spec PVC",
+			pod:       podWithEphemeral("other"),
+			wantError: true,
 		},
 		{
 			name:      "missing spec PVC still fails the request (unchanged behavior)",

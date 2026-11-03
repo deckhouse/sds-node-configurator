@@ -505,6 +505,10 @@ func parseExtraPVCNames(value string) []string {
 // of the launcher Pod's spec.volumes by KubeVirt, so the annotation is the only
 // way the extender learns about them.
 //
+// A generic ephemeral volume counts as a mounted PVC under the name Kubernetes
+// gives it, <pod name>-<volume name>. kube-scheduler does not pass the Pod past
+// PreFilter until the ephemeral volume controller has created that PVC.
+//
 // Names are deduplicated, spec-volume order first. fromSpec marks the names that
 // came from pod.Spec.Volumes: for those a missing PVC keeps failing the whole
 // scheduling request (unchanged behavior), while a missing annotation-only PVC
@@ -514,10 +518,15 @@ func podPVCNames(pod *corev1.Pod) (names []string, fromSpec map[string]bool) {
 	seen := make(map[string]struct{}, len(pod.Spec.Volumes))
 
 	for _, volume := range pod.Spec.Volumes {
-		if volume.PersistentVolumeClaim == nil {
+		var name string
+		switch {
+		case volume.PersistentVolumeClaim != nil:
+			name = volume.PersistentVolumeClaim.ClaimName
+		case volume.Ephemeral != nil:
+			name = pod.Name + "-" + volume.Name
+		default:
 			continue
 		}
-		name := volume.PersistentVolumeClaim.ClaimName
 		fromSpec[name] = true
 		if _, ok := seen[name]; ok {
 			continue
