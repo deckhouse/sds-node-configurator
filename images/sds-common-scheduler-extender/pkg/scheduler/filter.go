@@ -414,6 +414,13 @@ func filterNodeForLocalPVCs(
 			return false, fmt.Sprintf("unable to match Storage Class's LVMVolumeGroup with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName), nil
 		}
 		pvcReq := pvcRequests[pvc.Name]
+		// A bound PVC that does not grow takes no new space: its volume already
+		// exists in this pool and is part of the allocated space the check
+		// counts. Claiming it anyway rejects a node whose pool is full on paper
+		// for a Pod that only mounts what is already there.
+		if pvcReq.RequestedSize == 0 {
+			continue
+		}
 		claims = append(claims, poolClaim{pvc: pvc.Name, key: storagePoolKeyFromSCLVG(*commonLVG, pvcReq.DeviceType), size: pvcReq.RequestedSize})
 	}
 

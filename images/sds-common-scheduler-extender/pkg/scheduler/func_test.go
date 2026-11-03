@@ -1396,3 +1396,58 @@ func TestFilter_LocalPVC_EmptyPhase_KeepsMatchingNode(t *testing.T) {
 func stringPtr(s string) *string {
 	return &s
 }
+
+// TestFilter_BoundPVCWithoutGrowthIgnoresPoolSpace pins that a Pod mounting a
+// volume that already exists is not rejected by a pool that is overcommitted on
+// paper: the bound PVC needs nothing new from it. A volume provisioned outside
+// the scheduler (a restore into a temporary claim) can push the sum of the thin
+// volumes over the pool before its consumer is scheduled.
+func TestFilter_BoundPVCWithoutGrowthIgnoresPoolSpace(t *testing.T) {
+	const scName = "local-thin"
+	const pvName = "pv-restored"
+
+	pv := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: pvName},
+		Spec: corev1.PersistentVolumeSpec{
+			PersistentVolumeSource: corev1.PersistentVolumeSource{
+				CSI: &corev1.CSIPersistentVolumeSource{Driver: consts.SdsLocalVolumeProvisioner, VolumeHandle: pvName},
+			},
+			Capacity:         corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+			StorageClassName: scName,
+		},
+	}
+	bound := pendingPVCWithSize("pvc-restored", "default", scName, oneGiB)
+	bound.Spec.VolumeName = pvName
+	bound.Status.Phase = corev1.ClaimBound
+	pending := pendingPVCWithSize("pvc-new", "default", scName, oneGiB)
+
+	podWith := func(claim string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-" + claim, Namespace: "default"},
+			Spec: corev1.PodSpec{Volumes: []corev1.Volume{{Name: "v", VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claim},
+			}}}},
+		}
+	}
+
+	// A 2Gi pool holding three 1Gi thin volumes, the restored one among them: 1Gi below zero.
+	cl := newFakeClient(
+		testLocalThinSC(scName, "lvg1", "tp0"), pv, bound, pending,
+		readyLVGOnNodeWithThinPool("lvg1", "node-a", 2*oneGiB, 0),
+		thinLLV("llv-source-1", "tp0", "1Gi", ""),
+		thinLLV("llv-source-2", "tp0", "1Gi", ""),
+		thinLLV(pvName, "tp0", "1Gi", ""),
+	)
+	s := newTestScheduler(cl, newTestCache())
+	s.targetProvisioners = []string{consts.SdsLocalVolumeProvisioner}
+	nodeNames := []string{"node-a"}
+
+	result := callFilter(t, s, ExtenderArgs{Pod: podWith("pvc-restored"), NodeNames: &nodeNames})
+	require.NotNil(t, result.NodeNames)
+	assert.Equal(t, []string{"node-a"}, *result.NodeNames, "a bound PVC that does not grow must not need free space")
+	assert.Empty(t, result.FailedNodes)
+
+	result = callFilter(t, s, ExtenderArgs{Pod: podWith("pvc-new"), NodeNames: &nodeNames})
+	assert.Contains(t, result.FailedNodes["node-a"], "does not have enough space for PVC",
+		"a PVC that still needs its volume must keep being checked against the free space")
+}
