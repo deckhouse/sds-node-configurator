@@ -588,7 +588,7 @@ The `sds-local-volume`, `sds-replicated-volume` and `sds-elastic` modules work o
 
 What remains after the module is disabled:
 
-- BlockDevice resources. They are not deleted on disabling. While the module runs, a BlockDevice is deleted only after its device disappears from the node; one deleted by hand for a device that is still there is created again.
+- BlockDevice resources. They are not deleted on disabling. While the module runs, a BlockDevice is deleted only after its device disappears from the node, or after its node is deleted or stops running the agent (see `missingBlockDeviceRetentionHours`); one deleted by hand for a device that is still there is created again.
 - Volume Groups whose LVMVolumeGroup was not deleted before disabling. They keep working as plain LVM Volume Groups. If their LVMVolumeGroup resources are deleted while the module is disabled, the Volume Groups the module created are not imported again after the module is re-enabled, see [Why is a Volume Group with the module's tags not imported, and how do I adopt it?](#why-is-a-volume-group-with-the-modules-tags-not-imported-and-how-do-i-adopt-it).
 - Volume Groups on file-backed devices are not activated after a node reboot: the agent that attached the loop devices is gone.
 - The module's files under `/var/lib/deckhouse/sds` and the loop device filter in `/etc/lvm/lvm.conf` on the nodes.

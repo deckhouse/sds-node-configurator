@@ -14,6 +14,8 @@
   (dict "name" "LEADER_ELECTION" "value" "true")
   (dict "name" "LEADER_ELECTION_NAMESPACE" "valueFrom" (dict "fieldRef" (dict "fieldPath" "metadata.namespace")))
   (dict "name" "LEADER_ELECTION_ID" "value" "sds-health-watcher-controller-leader-election")
+  (dict "name" "AGENT_NAMESPACE" "valueFrom" (dict "fieldRef" (dict "fieldPath" "metadata.namespace")))
+  (dict "name" "MISSING_BLOCK_DEVICE_RETENTION_HOURS" "value" (.Values.sdsNodeConfigurator.missingBlockDeviceRetentionHours | toString))
 }}
 
 {{- $config := dict

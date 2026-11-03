@@ -19,6 +19,7 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -51,6 +52,28 @@ func TestNewConfig(t *testing.T) {
 
 		if assert.NoError(t, err) {
 			assert.Equal(t, expMetricsBindAddress, opts.MetricsBindAddress)
+		}
+	})
+
+	t.Run("MissingBlockDeviceRetention", func(t *testing.T) {
+		defer os.Clearenv()
+
+		opts, err := NewConfig()
+		if assert.NoError(t, err) {
+			assert.Equal(t, DefaultMissingBlockDeviceRetentionHours*time.Hour, opts.MissingBlockDeviceRetention)
+			assert.Equal(t, DefaultAgentNamespace, opts.AgentNamespace)
+		}
+
+		t.Setenv(MissingBlockDeviceRetentionHours, "0")
+		opts, err = NewConfig()
+		if assert.NoError(t, err) {
+			assert.Zero(t, opts.MissingBlockDeviceRetention)
+		}
+
+		for _, bad := range []string{"-1", "8761", "day"} {
+			t.Setenv(MissingBlockDeviceRetentionHours, bad)
+			_, err = NewConfig()
+			assert.Error(t, err, bad)
 		}
 	})
 }

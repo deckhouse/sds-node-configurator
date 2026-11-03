@@ -76,6 +76,8 @@ func main() {
 	log.Info(fmt.Sprintf("%s = %t", config.LeaderElectionEnvName, cfgParams.LeaderElection))
 	log.Info(fmt.Sprintf("%s = %s", config.LeaderElectionNamespaceEnvName, cfgParams.LeaderElectionNamespace))
 	log.Info(fmt.Sprintf("%s = %s", config.LeaderElectionIDEnvName, cfgParams.LeaderElectionID))
+	log.Info(fmt.Sprintf("%s = %s", config.AgentNamespaceEnvName, cfgParams.AgentNamespace))
+	log.Info(fmt.Sprintf("%s = %s", config.MissingBlockDeviceRetentionHours, cfgParams.MissingBlockDeviceRetention))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
@@ -141,6 +143,12 @@ func main() {
 	err = controller.RunLVMVolumeGroupSetWatcher(mgr, baseLog, *cfgParams, metrics)
 	if err != nil {
 		log.Error("unable to run RunLVMVolumeGroupSetWatcher controller", logger.Err(err))
+		os.Exit(1)
+	}
+
+	err = controller.RunBlockDeviceNodeGC(mgr, baseLog, *cfgParams)
+	if err != nil {
+		log.Error("unable to run RunBlockDeviceNodeGC", logger.Err(err))
 		os.Exit(1)
 	}
 

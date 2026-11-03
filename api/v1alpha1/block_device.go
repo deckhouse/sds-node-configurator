@@ -188,9 +188,11 @@ const (
 // BlockDeviceConditionMissing reports that the device this BlockDevice
 // describes was not found on its node during the most recent scan.
 //
-// Only published for a device the agent would otherwise never delete on its
-// own -- one that is not Consumable (see shouldDeleteBlockDevice), typically
-// because it is already an LVM Physical Volume. Losing that device out from
+// The agent publishes it only for a device it would otherwise never delete on
+// its own -- one that is not Consumable (see shouldDeleteBlockDevice), typically
+// because it is already an LVM Physical Volume. The controller publishes it for
+// every BlockDevice of a node no agent runs on, since nothing on that node
+// scans its devices any more. Losing that device out from
 // under a live LVMVolumeGroup is worth surfacing; silently doing nothing,
 // which is what happened before this condition existed, left status.path
 // pointing at a device that no longer existed with no indication anywhere
@@ -205,10 +207,21 @@ const (
 // transient blip is no longer the likely explanation.
 const BlockDeviceConditionMissing = "Missing"
 
-// ReasonDeviceNotFound is the only reason BlockDeviceConditionMissing is
-// published with, at both Unknown and True -- the two statuses are already
-// what distinguishes "recently gone" from "confirmed gone".
-const ReasonDeviceNotFound = "DeviceNotFound"
+// The reasons BlockDeviceConditionMissing is published with, at both Unknown
+// and True -- the two statuses are already what distinguishes "recently gone"
+// from "confirmed gone".
+const (
+	// ReasonDeviceNotFound is set by the agent of the node: its scan did not
+	// find the device.
+	ReasonDeviceNotFound = "DeviceNotFound"
+	// ReasonNodeNotFound is set by the controller: the node the BlockDevice
+	// belongs to is not in the cluster, so no agent will ever scan it again.
+	ReasonNodeNotFound = "NodeNotFound"
+	// ReasonAgentNotRunning is set by the controller: the node is in the
+	// cluster, but no agent Pod runs on it, typically because the node lost
+	// the labels the agent is placed by.
+	ReasonAgentNotRunning = "AgentNotRunning"
+)
 
 // BlockDeviceConditionTypes is every condition type a BlockDevice publishes.
 // See LVGConditionTypes in the controller for why the set is written down.

@@ -102,4 +102,11 @@ properties:
       Physical Volume lost from under a live Volume Group stays visible. If the
       device returns later, the agent creates the resource again.
 
+      The same retention applies to the BlockDevices of a node that no agent runs
+      on: a node deleted from the cluster, or one that lost the labels the agent is
+      placed by. No agent is left there to scan the devices, so the controller marks
+      all of that node's BlockDevices `Missing` (reason `NodeNotFound` or
+      `AgentNotRunning`) and deletes them under the same rules. If an agent starts
+      on the node again, it clears the condition from the devices it finds.
+
       `0` disables the deletion: the resources are kept until removed manually.

@@ -35,6 +35,20 @@ const (
 	LeaderElectionNamespaceEnvName = "LEADER_ELECTION_NAMESPACE"
 	LeaderElectionIDEnvName        = "LEADER_ELECTION_ID"
 	DefaultLeaderElectionID        = "controller-leader-election"
+
+	// AgentNamespaceEnvName names the namespace the agent DaemonSet runs in,
+	// the module's own. The controller lists the agent Pods there to tell the
+	// nodes the agent runs on.
+	AgentNamespaceEnvName = "AGENT_NAMESPACE"
+	DefaultAgentNamespace = "d8-sds-node-configurator"
+	AgentPodLabelSelector = "app=sds-node-configurator"
+
+	// MissingBlockDeviceRetentionHours is the setting the agent reads too: a
+	// BlockDevice of a node without an agent is kept as long as one whose
+	// device left a node with an agent.
+	MissingBlockDeviceRetentionHours        = "MISSING_BLOCK_DEVICE_RETENTION_HOURS"
+	DefaultMissingBlockDeviceRetentionHours = 24
+	MaxMissingBlockDeviceRetentionHours     = 8760
 )
 
 type Options struct {
@@ -46,6 +60,9 @@ type Options struct {
 	LeaderElection          bool
 	LeaderElectionNamespace string
 	LeaderElectionID        string
+
+	AgentNamespace              string
+	MissingBlockDeviceRetention time.Duration
 }
 
 // DefaultMetricsBindAddress keeps the endpoint on loopback when the chart says
@@ -95,6 +112,24 @@ func NewConfig() (*Options, error) {
 	opts.LeaderElectionID = os.Getenv(LeaderElectionIDEnvName)
 	if opts.LeaderElectionID == "" {
 		opts.LeaderElectionID = DefaultLeaderElectionID
+	}
+
+	opts.AgentNamespace = os.Getenv(AgentNamespaceEnvName)
+	if opts.AgentNamespace == "" {
+		opts.AgentNamespace = DefaultAgentNamespace
+	}
+
+	opts.MissingBlockDeviceRetention = DefaultMissingBlockDeviceRetentionHours * time.Hour
+	if raw := os.Getenv(MissingBlockDeviceRetentionHours); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		switch {
+		case err != nil:
+			return nil, fmt.Errorf("[NewConfig] %s must be an integer, got %q: %w", MissingBlockDeviceRetentionHours, raw, err)
+		case parsed < 0 || parsed > MaxMissingBlockDeviceRetentionHours:
+			return nil, fmt.Errorf("[NewConfig] %s must be between 0 and %d, got %d", MissingBlockDeviceRetentionHours, MaxMissingBlockDeviceRetentionHours, parsed)
+		default:
+			opts.MissingBlockDeviceRetention = time.Duration(parsed) * time.Hour
+		}
 	}
 
 	return &opts, nil
