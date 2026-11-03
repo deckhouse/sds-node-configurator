@@ -95,6 +95,26 @@ func consumability(device *Device) (bool, string, string) {
 	}
 }
 
+// MarkOrphanPhysicalVolume makes the candidate consumable when its device is an
+// LVM Physical Volume of no Volume Group. consumability turns down every device
+// that carries a signature, LVM2_member included, because a Physical Volume is
+// normally in use. One in no Volume Group is not: it is what a Volume Group
+// creation that failed after pvcreate leaves behind, and it kept the
+// LVMVolumeGroup from ever being created again. vgcreate and vgextend take it as
+// it is, since createPVIfNeeded skips pvcreate for a device that is already a
+// Physical Volume.
+//
+// The caller has found the device in pvs with no Volume Group. Everything else
+// consumability refuses a device for still applies.
+func (candidate *BlockDeviceCandidate) MarkOrphanPhysicalVolume(device *Device) {
+	if device.FSType != LVMFSType || device.MountPoint != "" || device.HotPlug || device.PartTableType != "" {
+		return
+	}
+	candidate.Consumable = true
+	candidate.ConsumableReason = v1alpha1.ReasonDeviceOrphanPhysicalVolume
+	candidate.ConsumableMessage = "the device is an LVM Physical Volume that belongs to no Volume Group; a Volume Group takes it as it is"
+}
+
 func isConsumable(device *Device) bool {
 	consumable, _, _ := consumability(device)
 	return consumable

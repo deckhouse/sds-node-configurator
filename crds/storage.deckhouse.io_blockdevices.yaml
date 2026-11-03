@@ -72,8 +72,8 @@ spec:
               conditions:
                 description: |-
                   Latest state. Known type: `Consumable`, which carries the
-                  reason behind `status.consumable`: `Available`, `Mounted`,
-                  `HasFilesystem`, `HasPartitionTable` or `HotPlugged`.
+                  reason behind `status.consumable`: `Available`, `OrphanPhysicalVolume`,
+                  `Mounted`, `HasFilesystem`, `HasPartitionTable` or `HotPlugged`.
                 items:
                   properties:
                     lastTransitionTime:

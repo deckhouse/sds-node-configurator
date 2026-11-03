@@ -674,6 +674,42 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		}
 	})
 
+	t.Run("GetBlockDeviceCandidates_OffersAPhysicalVolumeOfNoVolumeGroup", func(t *testing.T) {
+		devices := []internal.Device{
+			{Name: "/dev/orphan", KName: "/dev/orphan", FSType: internal.LVMFSType, Size: resource.MustParse("1G"), Serial: "orphan"},
+			{Name: "/dev/ours", KName: "/dev/ours", FSType: internal.LVMFSType, Size: resource.MustParse("1G"), Serial: "ours"},
+		}
+		pvs := []internal.PVData{
+			{PVName: "/dev/orphan", PVUuid: "pv-orphan"},
+			{PVName: "/dev/ours", PVUuid: "pv-ours", VGName: "vg-ours", VGUuid: "vg-ours-uuid", VGTags: internal.LVMTags[0] + "," + internal.LVMVolumeGroupTag + "=lvg-ours"},
+		}
+
+		d := setupDiscoverer()
+		d.sdsCache.StoreDevices(devices, bytes.Buffer{})
+		d.sdsCache.StorePVs(pvs, bytes.Buffer{})
+
+		candidates, err := d.getBlockDeviceCandidates()
+		assert.NoError(t, err)
+		byPath := make(map[string]internal.BlockDeviceCandidate, len(candidates))
+		for _, c := range candidates {
+			byPath[c.Path] = c
+		}
+
+		orphan, ok := byPath["/dev/orphan"]
+		if assert.True(t, ok) {
+			assert.True(t, orphan.Consumable, "a Physical Volume of no Volume Group is free to take")
+			assert.Equal(t, v1alpha1.ReasonDeviceOrphanPhysicalVolume, orphan.ConsumableReason)
+			assert.Equal(t, "pv-orphan", orphan.PVUuid)
+		}
+
+		ours, ok := byPath["/dev/ours"]
+		if assert.True(t, ok) {
+			assert.False(t, ours.Consumable, "a Physical Volume of a Volume Group is in use")
+			assert.Equal(t, v1alpha1.ReasonDeviceHasFilesystem, ours.ConsumableReason)
+			assert.Equal(t, "lvg-ours", ours.LVMVolumeGroupName)
+		}
+	})
+
 	t.Run("BlockDeviceReconcile", func(t *testing.T) {
 		t.Run("updates_existing_non_consumable_block_device_when_new_hash_name_differs", func(t *testing.T) {
 			ctx := context.Background()

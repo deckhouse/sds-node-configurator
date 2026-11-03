@@ -64,6 +64,33 @@ var _ = Describe("The Consumable condition", func() {
 		}
 	})
 
+	// What a Volume Group creation that failed after pvcreate leaves behind.
+	// It kept the LVMVolumeGroup from being created again, since the retry
+	// found its device not consumable.
+	It("offers a Physical Volume of no Volume Group", func() {
+		for _, tc := range []struct {
+			what       string
+			device     internal.Device
+			consumable bool
+			reason     string
+		}{
+			{"a Physical Volume", internal.Device{FSType: "LVM2_member"}, true, v1alpha1.ReasonDeviceOrphanPhysicalVolume},
+			{"a hot-plugged Physical Volume", internal.Device{FSType: "LVM2_member", HotPlug: true}, false, v1alpha1.ReasonDeviceHasFilesystem},
+			{"a Physical Volume with a partition table", internal.Device{FSType: "LVM2_member", PartTableType: "gpt"}, false, v1alpha1.ReasonDeviceHasFilesystem},
+			{"a mounted device", internal.Device{FSType: "LVM2_member", MountPoint: "/var/lib/x"}, false, v1alpha1.ReasonDeviceMounted},
+			{"a formatted device", internal.Device{FSType: "ext4"}, false, v1alpha1.ReasonDeviceHasFilesystem},
+		} {
+			candidate := internal.NewBlockDeviceCandidateByDevice(&tc.device, "node-1", "machine-1")
+			candidate.MarkOrphanPhysicalVolume(&tc.device)
+			cond := conditions.Get(candidate.AsAPIBlockDevice().Status.Conditions, v1alpha1.BlockDeviceConditionConsumable)
+
+			Expect(candidate.Consumable).Should(Equal(tc.consumable), tc.what)
+			Expect(cond).ShouldNot(BeNil(), tc.what)
+			Expect(cond.Reason).Should(Equal(tc.reason), tc.what)
+			Expect(cond.Message).ShouldNot(BeEmpty(), tc.what)
+		}
+	})
+
 	// A mounted device also has a filesystem. Unmounting is the action that
 	// changes the answer, so that is what the reason has to name.
 	It("reports a mounted device as mounted, not as formatted", func() {

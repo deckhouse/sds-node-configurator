@@ -147,6 +147,12 @@ wipefs --all /dev/<device>
 
 The command removes the partition table, after which the data in its partitions can no longer be reached.
 
+## Why is a BlockDevice that is already a Physical Volume consumable with the reason `OrphanPhysicalVolume`?
+
+The device is an LVM Physical Volume that belongs to no Volume Group: `pvs` shows it with an empty `VG` column. It is what an LVMVolumeGroup creation that failed after `pvcreate` leaves behind, or a Physical Volume created by hand and never added to a Volume Group. A Volume Group takes such a device as it is, so the agent offers it like an empty device: a new LVMVolumeGroup can use it, and the retry of the failed one succeeds.
+
+A device that carries a Physical Volume of a Volume Group, any Volume Group, stays not consumable with the reason `HasFilesystem`. If an orphaned Physical Volume should not be used, remove it on the node with `pvremove /dev/<device>`.
+
 ## What happens if I disconnect one of the devices in a Volume Group? Will the corresponding LVMVolumeGroup resource be deleted?
 
 The [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource exists as long as the corresponding Volume Group exists. As long as at least one device exists, the Volume Group is preserved but marked as non-functional. The current state is reflected in the `status` field of the resource.

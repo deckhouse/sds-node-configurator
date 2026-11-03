@@ -444,6 +444,7 @@ func (d *Discoverer) getBlockDeviceCandidates() ([]internal.BlockDeviceCandidate
 							delFlag = true
 						} else {
 							candidate.PVUuid = pv.PVUuid
+							candidate.MarkOrphanPhysicalVolume(&device)
 						}
 					}
 				}

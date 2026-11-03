@@ -121,8 +121,8 @@ type BlockDeviceStatus struct {
 	MachineID string `json:"machineId"`
 
 	// Latest state. Known type: `Consumable`, which carries the
-	// reason behind `status.consumable`: `Available`, `Mounted`,
-	// `HasFilesystem`, `HasPartitionTable` or `HotPlugged`.
+	// reason behind `status.consumable`: `Available`, `OrphanPhysicalVolume`,
+	// `Mounted`, `HasFilesystem`, `HasPartitionTable` or `HotPlugged`.
 	// +optional
 	// +patchMergeKey=type
 	// +patchStrategy=merge
@@ -157,7 +157,8 @@ const BlockDeviceConditionConsumable = "Consumable"
 // module's own: the shared vocabulary in sds-common-lib describes the progress
 // of a reconcile, and none of these is about one.
 const (
-	// ReasonDeviceAvailable is set on Consumable=True.
+	// ReasonDeviceAvailable is set on Consumable=True for a device that carries
+	// nothing.
 	ReasonDeviceAvailable = "Available"
 	// ReasonDeviceMounted is set on Consumable=False when the device is
 	// mounted. Unmounting it makes the device available.
@@ -177,6 +178,11 @@ const (
 	// partition-table signature they would have to wipe. Wiping the table
 	// (wipefs --all) makes the device available.
 	ReasonDeviceHasPartitionTable = "HasPartitionTable"
+	// ReasonDeviceOrphanPhysicalVolume is set on Consumable=True for an LVM
+	// Physical Volume that belongs to no Volume Group, typically one left by a
+	// Volume Group creation that failed after pvcreate. vgcreate and vgextend
+	// take such a Physical Volume as it is.
+	ReasonDeviceOrphanPhysicalVolume = "OrphanPhysicalVolume"
 )
 
 // BlockDeviceConditionMissing reports that the device this BlockDevice
