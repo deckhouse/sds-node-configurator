@@ -550,6 +550,8 @@ When an LVMVolumeGroup with file-backed devices is deleted, the agent detaches t
 - `status.blockdevice.storage.deckhouse.io/hotplug`: Indicates device hot-plug capability.
 - `status.blockdevice.storage.deckhouse.io/machineid`: Identifier of the server where the block device is installed.
 
+The agent sets these labels from the resource's status, and `spec.blockDeviceSelector` of LVMVolumeGroup and LVMVolumeGroupSet selects devices by them. Changing, removing or adding a label with one of these keys (`kubernetes.io/hostname`, `kubernetes.io/metadata.name` or the `status.blockdevice.storage.deckhouse.io/` prefix) is rejected by the `d8-sds-node-configurator-blockdevice-label-guard` ValidatingAdmissionPolicy for everyone except the agent. Labels with other keys can be set and removed freely.
+
 ## How do I disable the module?
 
 Disabling the module removes its controller and agent, and nothing else. Volume Groups and Logical Volumes stay on the nodes with the data on them, and the module's resources ([BlockDevice](./cr.html#blockdevice), [LVMVolumeGroup](./cr.html#lvmvolumegroup), LVMVolumeGroupSet, LVMLogicalVolume, LVMLogicalVolumeSnapshot, BlockDeviceFilter) stay in the cluster; the module only removes their finalizers so that they can be deleted later.

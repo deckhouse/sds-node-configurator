@@ -550,6 +550,8 @@ sds_node_configurator_file_devices_directory_free_bytes
 - `status.blockdevice.storage.deckhouse.io/hotplug` — указывает возможность горячей замены устройства (HotPlug).
 - `status.blockdevice.storage.deckhouse.io/machineid` — идентификатор сервера, на котором установлено блочное устройство.
 
+Эти лейблы агент выставляет по статусу ресурса, и по ним выбирает устройства `spec.blockDeviceSelector` в LVMVolumeGroup и LVMVolumeGroupSet. Изменение, удаление или добавление лейбла с одним из этих ключей (`kubernetes.io/hostname`, `kubernetes.io/metadata.name` или с префиксом `status.blockdevice.storage.deckhouse.io/`) отклоняет ValidatingAdmissionPolicy `d8-sds-node-configurator-blockdevice-label-guard` для всех, кроме агента. Лейблы с другими ключами можно ставить и снимать свободно.
+
 ## Как отключить модуль?
 
 Отключение модуля удаляет его контроллер и агент — и ничего больше. Группы томов и логические тома остаются на узлах вместе с данными, а ресурсы модуля ([BlockDevice](./cr.html#blockdevice), [LVMVolumeGroup](./cr.html#lvmvolumegroup), LVMVolumeGroupSet, LVMLogicalVolume, LVMLogicalVolumeSnapshot, BlockDeviceFilter) остаются в кластере; модуль только снимает с них финализаторы, чтобы их можно было удалить позже.

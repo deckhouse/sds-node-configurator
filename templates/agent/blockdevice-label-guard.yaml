@@ -1,0 +1,56 @@
+{{- /*
+The agent derives these labels of a BlockDevice from its status, and selectors —
+spec.blockDeviceSelector of LVMVolumeGroup and LVMVolumeGroupSet — match on them.
+The agent rewrites them only on its next discovery pass for the node, which runs
+on device events, so a label changed by hand could hold for as long as nothing
+happens to the node's devices and send the device to the wrong selector.
+Labels of other keys stay free to set and remove.
+*/ -}}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: d8-{{ .Chart.Name }}-blockdevice-label-guard
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["storage.deckhouse.io"]
+        apiVersions: ["*"]
+        operations: ["UPDATE"]
+        resources: ["blockdevices"]
+  variables:
+    - name: exempt
+      expression: >-
+        request.userInfo.username in [
+          "system:serviceaccount:d8-{{ .Chart.Name }}:agent",
+          "system:serviceaccount:d8-system:deckhouse"
+        ]
+    - name: oldLabels
+      expression: "has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}"
+    - name: newLabels
+      expression: "has(object.metadata.labels) ? object.metadata.labels : {}"
+    - name: changed
+      expression: >-
+        variables.oldLabels.filter(k,
+          (k == "kubernetes.io/hostname" || k == "kubernetes.io/metadata.name" || k.startsWith("status.blockdevice.storage.deckhouse.io/")) &&
+          (!(k in variables.newLabels) || variables.newLabels[k] != variables.oldLabels[k])) +
+        variables.newLabels.filter(k,
+          (k == "kubernetes.io/hostname" || k == "kubernetes.io/metadata.name" || k.startsWith("status.blockdevice.storage.deckhouse.io/")) &&
+          !(k in variables.oldLabels))
+  validations:
+    - expression: "variables.exempt || size(variables.changed) == 0"
+      reason: Forbidden
+      messageExpression: >-
+        "the labels " + variables.changed.join(", ") + " of a BlockDevice are set by sds-node-configurator from its status and cannot be changed by hand"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: d8-{{ .Chart.Name }}-blockdevice-label-guard
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+spec:
+  policyName: d8-{{ .Chart.Name }}-blockdevice-label-guard
+  validationActions:
+    - Deny
