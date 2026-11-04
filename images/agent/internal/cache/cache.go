@@ -62,11 +62,17 @@ func New() *Cache {
 }
 
 func (c *Cache) StoreDevices(devices []internal.Device, stdErr bytes.Buffer) {
+	c.m.Lock()
+	defer c.m.Unlock()
+
 	c.devices = devices
 	c.deviceErrs = stdErr
 }
 
 func (c *Cache) GetDevices() ([]internal.Device, bytes.Buffer) {
+	c.m.RLock()
+	defer c.m.RUnlock()
+
 	dst := make([]internal.Device, len(c.devices))
 	copy(dst, c.devices)
 
@@ -74,11 +80,17 @@ func (c *Cache) GetDevices() ([]internal.Device, bytes.Buffer) {
 }
 
 func (c *Cache) StorePVs(pvs []internal.PVData, stdErr bytes.Buffer) {
+	c.m.Lock()
+	defer c.m.Unlock()
+
 	c.pvs = pvs
 	c.pvsErrs = stdErr
 }
 
 func (c *Cache) GetPVs() ([]internal.PVData, bytes.Buffer) {
+	c.m.RLock()
+	defer c.m.RUnlock()
+
 	dst := make([]internal.PVData, len(c.pvs))
 	copy(dst, c.pvs)
 
@@ -86,11 +98,17 @@ func (c *Cache) GetPVs() ([]internal.PVData, bytes.Buffer) {
 }
 
 func (c *Cache) StoreVGs(vgs []internal.VGData, stdErr bytes.Buffer) {
+	c.m.Lock()
+	defer c.m.Unlock()
+
 	c.vgs = vgs
 	c.vgsErrs = stdErr
 }
 
 func (c *Cache) GetVGs() ([]internal.VGData, bytes.Buffer) {
+	c.m.RLock()
+	defer c.m.RUnlock()
+
 	dst := make([]internal.VGData, len(c.vgs))
 	copy(dst, c.vgs)
 
@@ -134,10 +152,10 @@ func (c *Cache) StoreLVs(lvs []internal.LVData, stdErr bytes.Buffer) {
 }
 
 func (c *Cache) GetLVs() ([]internal.LVData, bytes.Buffer) {
-	dst := make([]internal.LVData, 0, len(c.lvs))
-
 	c.m.RLock()
 	defer c.m.RUnlock()
+
+	dst := make([]internal.LVData, 0, len(c.lvs))
 	for _, lv := range c.lvs {
 		dst = append(dst, lv.Data)
 	}
@@ -145,10 +163,18 @@ func (c *Cache) GetLVs() ([]internal.LVData, bytes.Buffer) {
 	return dst, c.lvsErrs
 }
 
+// FindLV returns a copy of the cached LV, so that a caller reading it does not
+// race with MarkLVAsRemoved and StoreLVs, which change the cached entry.
 func (c *Cache) FindLV(vgName, lvName string) *LVData {
 	c.m.RLock()
 	defer c.m.RUnlock()
-	return c.lvs[c.configureLVKey(vgName, lvName)]
+
+	lv := c.lvs[c.configureLVKey(vgName, lvName)]
+	if lv == nil {
+		return nil
+	}
+	found := *lv
+	return &found
 }
 
 func (c *Cache) AddLV(vgName, lvName string) {
@@ -160,14 +186,21 @@ func (c *Cache) AddLV(vgName, lvName string) {
 	}
 }
 
+// MarkLVAsRemoved marks the LV as removed, if the cache still has it: a scan
+// that ran after the lvremove has already dropped it.
 func (c *Cache) MarkLVAsRemoved(vgName, lvName string) {
 	c.m.Lock()
 	defer c.m.Unlock()
 
-	c.lvs[c.configureLVKey(vgName, lvName)].Exist = false
+	if lv := c.lvs[c.configureLVKey(vgName, lvName)]; lv != nil {
+		lv.Exist = false
+	}
 }
 
 func (c *Cache) FindVG(vgName string) *internal.VGData {
+	c.m.RLock()
+	defer c.m.RUnlock()
+
 	for _, vg := range c.vgs {
 		if vg.VGName == vgName {
 			return &vg
@@ -205,6 +238,9 @@ func (c *Cache) FindThinPoolMappers(thinLvData *LVData) (tpool, poolMetadataMapp
 }
 
 func (c *Cache) PrintTheCache(log logger.Logger) {
+	c.m.RLock()
+	defer c.m.RUnlock()
+
 	log.Trace("*****************CACHE BEGIN*****************")
 	log.Trace("[Devices BEGIN]")
 	for _, d := range c.devices {
