@@ -23,6 +23,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
 func withFakeMountInfo(t *testing.T, content string) string {
@@ -150,4 +152,38 @@ func TestDecodeMountInfoOctal_AllKernelEscapes(t *testing.T) {
 func TestDecodeMountInfoOctal_TrailingBackslash(t *testing.T) {
 	assert.Equal(t, `path\`, decodeMountInfoOctal(`path\`))
 	assert.Equal(t, `path\ab`, decodeMountInfoOctal(`path\ab`))
+}
+
+func TestApplyHostMountPoints(t *testing.T) {
+	devices := []internal.Device{
+		// Mounted on the host only: lsblk in the container reports nothing.
+		{Name: "/dev/sdb", MajMin: "8:16"},
+		// Holds the kubelet directory the container's /etc/hosts is bound from.
+		{Name: "/dev/sda1", MajMin: "8:1", MountPoint: "/etc/hosts"},
+		{Name: "/dev/sdc", MajMin: "8:32"},
+		// Mounted in the container but not on the host.
+		{Name: "/dev/sdd", MajMin: "8:48", MountPoint: "/mnt/container-only"},
+		{Name: "/dev/zram0", MajMin: "251:0", MountPoint: "[SWAP]"},
+	}
+	mounts := map[string]string{
+		"8:16": "/mnt/data",
+		"8:1":  "/",
+		"0:20": "/proc",
+	}
+
+	require.NoError(t, ApplyHostMountPoints(devices, mounts))
+
+	assert.Equal(t, "/mnt/data", devices[0].MountPoint)
+	assert.Equal(t, "/", devices[1].MountPoint)
+	assert.Empty(t, devices[2].MountPoint)
+	assert.Empty(t, devices[3].MountPoint)
+	assert.Equal(t, "[SWAP]", devices[4].MountPoint)
+}
+
+func TestApplyHostMountPoints_NoMajMin_Fails(t *testing.T) {
+	devices := []internal.Device{{Name: "/dev/sdb"}}
+
+	err := ApplyHostMountPoints(devices, map[string]string{"8:16": "/mnt/data"})
+
+	assert.ErrorContains(t, err, "/dev/sdb")
 }

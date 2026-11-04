@@ -35,6 +35,7 @@ func TestCommands(t *testing.T) {
    "blockdevices": [
       {
          "name": "/dev/vda",
+         "maj:min": "252:0",
          "mountpoint": null,
          "partuuid": null,
          "hotplug": false,
@@ -49,6 +50,7 @@ func TestCommands(t *testing.T) {
          "rota": true
       },{
          "name": "/dev/vda1",
+         "maj:min": "252:1",
          "mountpoint": null,
          "partuuid": "ec0944f8-90a5-4e74-9453-d4d8d03bd53d",
          "hotplug": false,
@@ -76,6 +78,7 @@ func TestCommands(t *testing.T) {
 			expectedDevices := internal.Devices{BlockDevices: []internal.Device{
 				{
 					Name:       "/dev/vda",
+					MajMin:     "252:0",
 					MountPoint: "",
 					PartUUID:   "",
 					HotPlug:    false,
@@ -91,6 +94,7 @@ func TestCommands(t *testing.T) {
 				},
 				{
 					Name:       "/dev/vda1",
+					MajMin:     "252:1",
 					MountPoint: "",
 					PartUUID:   "ec0944f8-90a5-4e74-9453-d4d8d03bd53d",
 					HotPlug:    false,

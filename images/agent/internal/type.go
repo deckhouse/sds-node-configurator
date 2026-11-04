@@ -169,6 +169,9 @@ type Device struct {
 	Rota       bool              `json:"rota"`
 	// PartTableType is the partition table the device carries, empty when none.
 	PartTableType string `json:"pttype"`
+	// MajMin is the device number, "major:minor", the key the host's mountinfo
+	// names the device by. Only lsblk discovery fills it.
+	MajMin string `json:"maj:min"`
 
 	SerialInherited string
 	WWNInherited    string

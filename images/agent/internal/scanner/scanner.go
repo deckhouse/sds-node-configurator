@@ -59,10 +59,13 @@ type Scanner interface {
 type scanner struct {
 	commands  utils.Commands
 	deviceMap *udev.DeviceMap
+	// hostMountInfo is the mountinfo both discovery paths take mount points
+	// from: utils.ProcHostMountInfo, a fake one in tests.
+	hostMountInfo string
 }
 
 func NewScanner(commands utils.Commands) Scanner {
-	return &scanner{commands: commands}
+	return &scanner{commands: commands, hostMountInfo: utils.ProcHostMountInfo}
 }
 
 func (s *scanner) Run(
@@ -440,12 +443,21 @@ func (s *scanner) scanDevices(ctx context.Context, log logger.Logger, cfg config
 		log.Error(fmt.Sprintf("unable to scan the devices, cmd: %s", cmdStr), logger.Err(err))
 		return nil, stdErr, err
 	}
+
+	// lsblk sees the agent container's mounts, not the host's.
+	mounts, err := utils.ParseMountInfo(s.hostMountInfo)
+	if err != nil {
+		return nil, stdErr, fmt.Errorf("[scanDevices] failed to parse mountinfo: %w", err)
+	}
+	if err := utils.ApplyHostMountPoints(devices, mounts); err != nil {
+		return nil, stdErr, fmt.Errorf("[scanDevices] %w", err)
+	}
 	return devices, stdErr, nil
 }
 
 func (s *scanner) scanDevicesNetlink() ([]internal.Device, bytes.Buffer, error) {
 	var stderr bytes.Buffer
-	mounts, err := utils.ParseMountInfo(utils.ProcHostMountInfo)
+	mounts, err := utils.ParseMountInfo(s.hostMountInfo)
 	if err != nil {
 		return []internal.Device{}, stderr, fmt.Errorf("[scanDevicesNetlink] failed to parse mountinfo: %v", err)
 	}
