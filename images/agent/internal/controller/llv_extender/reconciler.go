@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/logger"
@@ -217,10 +218,11 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 			continue
 		}
 
+		extendingSize := alignedRequestedSize.Value() - lv.Data.LVSize.Value()
 		freeSpace := utils.GetFreeLVGSpaceForLLV(lvg, &llv)
-		if alignedRequestedSize.Value() > freeSpace.Value() {
+		if extendingSize > freeSpace.Value() {
 			err = errors.New("not enough space")
-			log.Error(fmt.Sprintf("unable to extend the LV %s of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name), logger.Err(err))
+			log.Error(fmt.Sprintf("unable to extend the LV %s of the LVMLogicalVolume %s by %s, free space: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, resource.NewQuantity(extendingSize, resource.BinarySI).String(), freeSpace.String()), logger.Err(err))
 			err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseFailed, fmt.Sprintf("unable to extend LV, err: %s", err.Error()))
 			if err != nil {
 				log.Error(fmt.Sprintf("unable to update the LVMLogicalVolume %s", llv.Name), logger.Err(err))
@@ -233,7 +235,7 @@ func (r *Reconciler) ReconcileLVMLogicalVolumeExtension(
 			continue
 		}
 
-		log.Info(fmt.Sprintf("the LVMLogicalVolume %s should be extended from %s to %s size", llv.Name, llv.Status.ActualSize.String(), llvRequestedSize.String()))
+		log.Info(fmt.Sprintf("the LVMLogicalVolume %s should be extended from %s to %s size", llv.Name, lv.Data.LVSize.String(), alignedRequestedSize.String()))
 		err = r.llvCl.UpdatePhaseIfNeeded(ctx, &llv, v1alpha1.PhaseResizing, "")
 		if err != nil {
 			log.Error(fmt.Sprintf("unable to update the LVMLogicalVolume %s", llv.Name), logger.Err(err))
