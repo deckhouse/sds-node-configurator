@@ -123,7 +123,6 @@ spec:
 {{- if not (include "helm_lib_api_version_exists" (list . "autoscaling.k8s.io/v1/VerticalPodAutoscaler")) }}
             {{- include "sds_utils_installer_resources" . | nindent 14 }}
 {{- end }}
-{{- if .Values.sdsNodeConfigurator.enableThinProvisioning }}
       - name: thin-volumes-enabler
         image: {{ include "helm_lib_module_image" (list . "agent") }}
         imagePullPolicy: IfNotPresent
@@ -143,7 +142,7 @@ spec:
           # on the node: that form demands the dm-snapshot target even for a thin origin. The agent
           # itself creates thin snapshots with `--type thin` and does not need it, so a kernel
           # without dm_snapshot must not keep the agent from starting.
-          - modprobe dm_thin_pool && { modprobe dm_snapshot || echo "dm_snapshot is not available, skipped"; }
+          - modprobe dm_thin_pool || echo "dm_thin_pool is not available, thin pools cannot be created on this node" >&2; modprobe dm_snapshot || echo "dm_snapshot is not available, skipped"
         # Privileged mode is required to use nsenter and access the host's mount namespace.
         # This is necessary to run modprobe and load the dm_thin_pool kernel module on the host.
         securityContext:
@@ -169,7 +168,6 @@ spec:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
 {{- if not (include "helm_lib_api_version_exists" (list . "autoscaling.k8s.io/v1/VerticalPodAutoscaler")) }}
             {{- include "sds_utils_installer_resources" . | nindent 14 }}
-{{- end }}
 {{- end }}
       containers:
       - name: sds-node-configurator-agent

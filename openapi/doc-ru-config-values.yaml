@@ -4,8 +4,6 @@ properties:
     description: Выключить DaemonSet `sds-node-configurator`.
   logLevel:
     description: Уровень логирования для приложений модуля.
-  enableThinProvisioning:
-    description: Включить поддержку thin-LVM-томов.
   enableNetlinkBlockDeviceDiscovery:
     description: |
       Использовать netlink/sysfs вместо `lsblk` как источник данных для обнаружения блочных устройств в agent.
