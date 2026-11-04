@@ -2699,9 +2699,12 @@ func convertStatusThinPools(lvg v1alpha1.LVMVolumeGroup, thinPools []internal.LV
 func importRefusalReason(candidate internal.LVMVolumeGroupCandidate, taken v1alpha1.LVMVolumeGroup) string {
 	why := fmt.Sprintf("its %s tag names the LVMVolumeGroup %s, which already exists", internal.LVMVolumeGroupTag, candidate.LVMVGName)
 	if taken.Spec.ActualVGNameOnTheNode == candidate.ActualVGNameOnTheNode {
-		return why + fmt.Sprintf(" for the same VG on node %s — a Volume Group on shared storage must not be imported twice."+
-			" Nothing is wrong if that node is the one serving it; otherwise move the LVMVolumeGroup to this node",
-			taken.Spec.Local.NodeName)
+		return why + fmt.Sprintf(" for the same VG on node %s. If the VG is on shared storage, it must not be imported twice:"+
+			" nothing is wrong if that node is the one serving it, otherwise move the LVMVolumeGroup to this node."+
+			" If this node's disk is a clone of that node's, give the VG a new UUID (`vgchange -u %s`) and drop the tag"+
+			" (`vgchange --deltag %s=%s %s`)",
+			taken.Spec.Local.NodeName, candidate.ActualVGNameOnTheNode,
+			internal.LVMVolumeGroupTag, candidate.LVMVGName, candidate.ActualVGNameOnTheNode)
 	}
 	// The remedy belongs in the message for the same reason it does in
 	// refuseFileBackedImport: this is a terminal refusal, and the operator's only

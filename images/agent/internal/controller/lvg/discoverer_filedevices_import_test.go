@@ -516,7 +516,7 @@ func TestImportRefusalReason(t *testing.T) {
 		ActualVGNameOnTheNode: "vg-worker-07",
 	}
 
-	t.Run("the same VG already imported from another node — shared storage", func(t *testing.T) {
+	t.Run("the same VG already imported from another node — shared storage or a cloned disk", func(t *testing.T) {
 		taken := v1alpha1.LVMVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{Name: "lvg-worker-07"},
 			Spec: v1alpha1.LVMVolumeGroupSpec{
@@ -528,6 +528,8 @@ func TestImportRefusalReason(t *testing.T) {
 		assert.Contains(t, got, "lvg-worker-07")
 		assert.Contains(t, got, "node-a")
 		assert.Contains(t, got, "shared storage")
+		assert.Contains(t, got, "vgchange -u vg-worker-07")
+		assert.Contains(t, got, "vgchange --deltag storage.deckhouse.io/lvmVolumeGroupName=lvg-worker-07 vg-worker-07")
 	})
 
 	t.Run("one tag on two different Volume Groups — an operator mistake to report", func(t *testing.T) {
@@ -542,5 +544,6 @@ func TestImportRefusalReason(t *testing.T) {
 		assert.Contains(t, got, "vg-something-else")
 		assert.Contains(t, got, "two Volume Groups")
 		assert.NotContains(t, got, "shared storage")
+		assert.NotContains(t, got, "vgchange -u")
 	})
 }

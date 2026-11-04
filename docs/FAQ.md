@@ -376,7 +376,15 @@ If the Volume Group has active Logical Volumes, perform the following steps:
    vgchange -u
    ```
 
-If necessary, the command can be added to the `cloud-init` script for automatic execution when creating virtual machines.
+If the Volume Group was created by the module, the clone also carries its tag `storage.deckhouse.io/lvmVolumeGroupName=<name>`, which names the LVMVolumeGroup of the source node. The agent on the clone does not import such a Volume Group: it logs `not importing VG <VG_NAME>: its storage.deckhouse.io/lvmVolumeGroupName tag names the LVMVolumeGroup <name>, which already exists for the same VG on node <source node> …` and counts the refusal in the `sds_node_configurator_lvm_volume_group_import_refused_total` metric. After changing the UUID, remove the tag on the clone:
+
+```shell
+vgchange --deltag storage.deckhouse.io/lvmVolumeGroupName=<name> <VG_NAME>
+```
+
+The Volume Group is then imported as a new one, under a generated LVMVolumeGroup name. Do not remove the tag on the source node. For more on this tag, see [Why is a Volume Group with the module's tags not imported, and how do I adopt it?](#why-is-a-volume-group-with-the-modules-tags-not-imported-and-how-do-i-adopt-it).
+
+If necessary, the commands can be added to the `cloud-init` script for automatic execution when creating virtual machines.
 
 When cloning, also check the disk serial numbers: if the template sets them explicitly, the clones end up sharing them — see ["How to configure serial numbers for virtual disks?"](#how-to-configure-serial-numbers-for-virtual-disks).
 
