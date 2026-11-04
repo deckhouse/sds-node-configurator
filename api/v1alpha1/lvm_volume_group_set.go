@@ -104,12 +104,19 @@ type LVMVolumeGroupTemplate struct {
 	//
 	// > This field is immutable.
 	// > Note that this Volume Group name will be common for every LVMVolumeGroup created by the set.
+	// Must be a valid LVM Volume Group name: up to 127 characters from a-z, A-Z, 0-9, +, _, . and -, not starting with a hyphen, and other than `.` and `..`.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="The actualVGNameOnTheNode field is immutable."
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=127
+	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-zA-Z0-9+_.-]+$')",message="A Volume Group name may contain only the characters a-z, A-Z, 0-9, +, _, . and -."
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('-')",message="A Volume Group name must not start with a hyphen."
+	// +kubebuilder:validation:XValidation:rule="self != '.' && self != '..'",message="A Volume Group name must not be '.' or '..'."
 	ActualVGNameOnTheNode string `json:"actualVGNameOnTheNode"`
 	// Desired thin pool configuration in LVMVolumeGroups.
 	//
 	// > Note that the configuration will be common for every LVMVolumeGroup created by the set.
 	// +optional
+	// +kubebuilder:validation:MaxItems=256
 	// +crd-enricher:raw:items.properties.size.description="Desired thin pool size. Might be specified as a number or percentage of total Volume Group space.\n\n> Note that if you specify the percent size, the thin pool will be automatically extended when Volume Group is extended."
 	ThinPools []LVMVolumeGroupThinPoolSpec `json:"thinPools"`
 	// Type of a VolumeGroup in LVMVolumeGroups.

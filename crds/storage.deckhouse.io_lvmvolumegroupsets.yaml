@@ -72,10 +72,20 @@ spec:
 
                       > This field is immutable.
                       > Note that this Volume Group name will be common for every LVMVolumeGroup created by the set.
+                      Must be a valid LVM Volume Group name: up to 127 characters from a-z, A-Z, 0-9, +, _, . and -, not starting with a hyphen, and other than `.` and `..`.
+                    maxLength: 127
+                    minLength: 1
                     type: string
                     x-kubernetes-validations:
                     - message: The actualVGNameOnTheNode field is immutable.
                       rule: self == oldSelf
+                    - message: A Volume Group name may contain only the characters
+                        a-z, A-Z, 0-9, +, _, . and -.
+                      rule: self.matches('^[a-zA-Z0-9+_.-]+$')
+                    - message: A Volume Group name must not start with a hyphen.
+                      rule: '!self.startsWith(''-'')'
+                    - message: A Volume Group name must not be '.' or '..'.
+                      rule: self != '.' && self != '..'
                   blockDeviceSelector:
                     description: BlockDevice resources selector used in LVMVolumeGroups
                       configurations.
@@ -208,9 +218,28 @@ spec:
                         name:
                           description: |-
                             Desired thin pool name.
+                            Must be a valid LVM logical volume name: up to 127 characters from a-z, A-Z, 0-9, +, _, . and -, not starting with a hyphen or with snapshot or pvmove, not `.` or `..`, and not containing a suffix LVM reserves for its internal volumes, such as _tdata or _tmeta.
 
                             > This field is immutable.
+                          maxLength: 127
+                          minLength: 1
                           type: string
+                          x-kubernetes-validations:
+                          - message: A logical volume name may contain only the characters
+                              a-z, A-Z, 0-9, +, _, . and -.
+                            rule: self.matches('^[a-zA-Z0-9+_.-]+$')
+                          - message: A logical volume name must not start with a hyphen.
+                            rule: '!self.startsWith(''-'')'
+                          - message: A logical volume name must not be '.' or '..'.
+                            rule: self != '.' && self != '..'
+                          - message: LVM reserves logical volume names that start
+                              with snapshot or pvmove.
+                            rule: '!self.startsWith(''snapshot'') && !self.startsWith(''pvmove'')'
+                          - message: LVM reserves logical volume names that contain
+                              _cdata, _cmeta, _corig, _cpool, _cvol, _wcorig, _mimage,
+                              _mlog, _rimage, _rmeta, _tdata, _tmeta, _vdata, _imeta,
+                              _iorig, _pmspare or _vorigin.
+                            rule: '!self.matches(''_(cdata|cmeta|corig|cpool|cvol|wcorig|mimage|mlog|rimage|rmeta|tdata|tmeta|vdata|imeta|iorig|pmspare|vorigin)'')'
                         size:
                           description: |-
                             Desired thin pool size. Might be specified as a number or percentage of total Volume Group space.
@@ -222,6 +251,7 @@ spec:
                       - name
                       - size
                       type: object
+                    maxItems: 256
                     type: array
                   type:
                     description: |-

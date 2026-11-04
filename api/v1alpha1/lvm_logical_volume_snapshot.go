@@ -68,8 +68,15 @@ type LVMLogicalVolumeSnapshotSpec struct {
 	// Name of the volume snapshot on the node.
 	// Optional: if omitted or empty, the agent uses the LLVS object name
 	// (`metadata.name`). Once set to a non-empty value, the field is immutable.
+	// The name the agent uses, this field or `metadata.name`, must be a valid LVM logical volume name: up to 127 characters from a-z, A-Z, 0-9, +, _, . and -, not starting with a hyphen or with snapshot or pvmove, not `.` or `..`, and not containing a suffix LVM reserves for its internal volumes, such as _tdata or _tmeta.
 	// +optional
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
+	// +kubebuilder:validation:MaxLength=127
+	// +kubebuilder:validation:XValidation:rule="self == '' || (self.matches('^[a-zA-Z0-9+_.-]+$'))",message="A logical volume name may contain only the characters a-z, A-Z, 0-9, +, _, . and -."
+	// +kubebuilder:validation:XValidation:rule="self == '' || (!self.startsWith('-'))",message="A logical volume name must not start with a hyphen."
+	// +kubebuilder:validation:XValidation:rule="self == '' || (self != '.' && self != '..')",message="A logical volume name must not be '.' or '..'."
+	// +kubebuilder:validation:XValidation:rule="self == '' || (!self.startsWith('snapshot') && !self.startsWith('pvmove'))",message="LVM reserves logical volume names that start with snapshot or pvmove."
+	// +kubebuilder:validation:XValidation:rule="self == '' || (!self.matches('_(cdata|cmeta|corig|cpool|cvol|wcorig|mimage|mlog|rimage|rmeta|tdata|tmeta|vdata|imeta|iorig|pmspare|vorigin)'))",message="LVM reserves logical volume names that contain _cdata, _cmeta, _corig, _cpool, _cvol, _wcorig, _mimage, _mlog, _rimage, _rmeta, _tdata, _tmeta, _vdata, _imeta, _iorig, _pmspare or _vorigin."
 	ActualSnapshotNameOnTheNode string `json:"actualSnapshotNameOnTheNode,omitempty"`
 	// Name of the snapshotted LLV resource.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."

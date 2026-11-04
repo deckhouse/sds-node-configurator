@@ -59,13 +59,23 @@ spec:
           spec:
             properties:
               actualLVNameOnTheNode:
-                description: Logical Volume name on the node.
+                description: |-
+                  Logical Volume name on the node.
+                  Besides the pattern, LVM does not accept names longer than 127 characters, starting with snapshot or pvmove, or containing a suffix it reserves for its internal volumes, such as _tdata or _tmeta.
+                maxLength: 127
                 minLength: 1
                 pattern: ^[a-z0-9]([a-z0-9-._]{0,251}[a-z0-9])?$
                 type: string
                 x-kubernetes-validations:
                 - message: Value is immutable.
                   rule: self == oldSelf
+                - message: LVM reserves logical volume names that start with snapshot
+                    or pvmove.
+                  rule: '!self.startsWith(''snapshot'') && !self.startsWith(''pvmove'')'
+                - message: LVM reserves logical volume names that contain _cdata,
+                    _cmeta, _corig, _cpool, _cvol, _wcorig, _mimage, _mlog, _rimage,
+                    _rmeta, _tdata, _tmeta, _vdata, _imeta, _iorig, _pmspare or _vorigin.
+                  rule: '!self.matches(''_(cdata|cmeta|corig|cpool|cvol|wcorig|mimage|mlog|rimage|rmeta|tdata|tmeta|vdata|imeta|iorig|pmspare|vorigin)'')'
               lvmVolumeGroupName:
                 description: Name of a LVMVolumeGroup resource whose Volume Group
                   will be used for Logical Volume creation.

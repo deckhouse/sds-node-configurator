@@ -12,6 +12,7 @@ spec:
                 actualLVNameOnTheNode:
                   description: |
                     Имя Logical Volume на узле.
+                    Кроме шаблона, LVM не принимает имена длиннее 127 символов, начинающиеся с snapshot или pvmove или содержащие суффиксы, которые LVM резервирует для своих служебных томов, например _tdata или _tmeta.
                 type:
                   description: |
                     Тип Logical Volume.

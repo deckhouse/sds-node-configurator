@@ -68,9 +68,15 @@ type LVMVolumeGroup struct {
 // +kubebuilder:validation:XValidation:rule="has(self.blockDeviceSelector) || (has(self.fileDevices) && size(self.fileDevices) > 0)",message="At least one of 'blockDeviceSelector' or 'fileDevices' must be specified."
 type LVMVolumeGroupSpec struct {
 	// Desired name of a Volume Group. Must be unique for the node it is on.
+	// Must be a valid LVM Volume Group name: up to 127 characters from a-z, A-Z, 0-9, +, _, . and -, not starting with a hyphen, and other than `.` and `..`.
 	//
 	// > This field is immutable.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="The actualVGNameOnTheNode field is immutable."
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=127
+	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-zA-Z0-9+_.-]+$')",message="A Volume Group name may contain only the characters a-z, A-Z, 0-9, +, _, . and -."
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('-')",message="A Volume Group name must not start with a hyphen."
+	// +kubebuilder:validation:XValidation:rule="self != '.' && self != '..'",message="A Volume Group name must not be '.' or '..'."
 	ActualVGNameOnTheNode string `json:"actualVGNameOnTheNode"`
 	// Desired block device selector.
 	//
@@ -89,6 +95,7 @@ type LVMVolumeGroupSpec struct {
 	BlockDeviceSelector *metav1.LabelSelector `json:"blockDeviceSelector,omitempty"`
 	// Desired thin pool configuration.
 	// +optional
+	// +kubebuilder:validation:MaxItems=256
 	ThinPools []LVMVolumeGroupThinPoolSpec `json:"thinPools"`
 	// Type of a Volume Group.
 	//
@@ -387,8 +394,16 @@ type LVMVolumeGroupThinPoolStatus struct {
 // +k8s:deepcopy-gen=true
 type LVMVolumeGroupThinPoolSpec struct {
 	// Desired thin pool name.
+	// Must be a valid LVM logical volume name: up to 127 characters from a-z, A-Z, 0-9, +, _, . and -, not starting with a hyphen or with snapshot or pvmove, not `.` or `..`, and not containing a suffix LVM reserves for its internal volumes, such as _tdata or _tmeta.
 	//
 	// > This field is immutable.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=127
+	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-zA-Z0-9+_.-]+$')",message="A logical volume name may contain only the characters a-z, A-Z, 0-9, +, _, . and -."
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('-')",message="A logical volume name must not start with a hyphen."
+	// +kubebuilder:validation:XValidation:rule="self != '.' && self != '..'",message="A logical volume name must not be '.' or '..'."
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('snapshot') && !self.startsWith('pvmove')",message="LVM reserves logical volume names that start with snapshot or pvmove."
+	// +kubebuilder:validation:XValidation:rule="!self.matches('_(cdata|cmeta|corig|cpool|cvol|wcorig|mimage|mlog|rimage|rmeta|tdata|tmeta|vdata|imeta|iorig|pmspare|vorigin)')",message="LVM reserves logical volume names that contain _cdata, _cmeta, _corig, _cpool, _cvol, _wcorig, _mimage, _mlog, _rimage, _rmeta, _tdata, _tmeta, _vdata, _imeta, _iorig, _pmspare or _vorigin."
 	Name string `json:"name"`
 	// Desired thin pool size. Might be specified as number or percent size of total Volume Group space.
 	//

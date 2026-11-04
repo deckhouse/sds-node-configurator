@@ -69,9 +69,13 @@ const (
 // +kubebuilder:validation:XValidation:rule="self.type == \"Thick\" || !has(self.volumeCleanup) || self.volumeCleanup != \"Discard\"",message="'volumeCleanup: Discard' is supported only for 'Thick' volumes"
 type LVMLogicalVolumeSpec struct {
 	// Logical Volume name on the node.
+	// Besides the pattern, LVM does not accept names longer than 127 characters, starting with snapshot or pvmove, or containing a suffix it reserves for its internal volumes, such as _tdata or _tmeta.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=127
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-._]{0,251}[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('snapshot') && !self.startsWith('pvmove')",message="LVM reserves logical volume names that start with snapshot or pvmove."
+	// +kubebuilder:validation:XValidation:rule="!self.matches('_(cdata|cmeta|corig|cpool|cvol|wcorig|mimage|mlog|rimage|rmeta|tdata|tmeta|vdata|imeta|iorig|pmspare|vorigin)')",message="LVM reserves logical volume names that contain _cdata, _cmeta, _corig, _cpool, _cvol, _wcorig, _mimage, _mlog, _rimage, _rmeta, _tdata, _tmeta, _vdata, _imeta, _iorig, _pmspare or _vorigin."
 	ActualLVNameOnTheNode string `json:"actualLVNameOnTheNode"`
 	// Logical Volume type.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."

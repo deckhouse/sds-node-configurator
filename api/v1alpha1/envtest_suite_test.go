@@ -66,6 +66,7 @@ func runEnvtest(m *testing.M) int {
 		"storage.deckhouse.io_lvmlogicalvolumesnapshots.yaml",
 		"storage.deckhouse.io_lvmvolumegroups.yaml",
 		"storage.deckhouse.io_lvmlogicalvolumes.yaml",
+		"storage.deckhouse.io_lvmvolumegroupsets.yaml",
 	} {
 		crdPath, err := filepath.Abs(filepath.Join(filepath.Dir(thisFile), "..", "..", "crds", name))
 		if err != nil {
