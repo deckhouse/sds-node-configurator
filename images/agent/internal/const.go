@@ -134,6 +134,15 @@ const (
 	// not silently reopen that case.
 	LVMScanLVs = `devices/scan_lvs=0`
 
+	// LVMThinTools points lvm at the thin-provisioning-tools the module installs on the node.
+	LVMThinTools = `global/thin_check_executable="` + HostThinCheckCmd + `"` +
+		` global/thin_dump_executable="` + HostThinDumpCmd + `"` +
+		` global/thin_repair_executable="` + HostThinRepairCmd + `"`
+
+	HostThinCheckCmd  = "/var/lib/deckhouse/sds/bin/thin_check"
+	HostThinDumpCmd   = "/var/lib/deckhouse/sds/bin/thin_dump"
+	HostThinRepairCmd = "/var/lib/deckhouse/sds/bin/thin_repair"
+
 	// DefaultCSIVolumeDevicesDirectory is kubelet's CSI volumeDevices tree. Its
 	// `publish/<pvName>/<podUID>` entries are the device nodes kubelet created for
 	// the block volumes it published to pods on this node, and `staging/<pvName>`

@@ -369,7 +369,7 @@ func TestCommands(t *testing.T) {
 // compares with assert.Equal — any future drift in either the prefix
 // or the --config placement fails loudly with a readable diff.
 func TestLvmStaticExtendedArgs(t *testing.T) {
-	configValue := internal.LVMGlobalFilter + " " + internal.LVMScanLVs + " " + internal.LVMArchiveRetention
+	configValue := internal.LVMGlobalFilter + " " + internal.LVMScanLVs + " " + internal.LVMArchiveRetention + " " + internal.LVMThinTools
 	prefix := []string{"-t", "1", "-m", "-u", "-i", "-n", "-p", "--", internal.LVMCmd}
 
 	tests := []struct {
@@ -451,6 +451,14 @@ func TestLvmStaticExtendedArgs(t *testing.T) {
 			"--config must cap /etc/lvm/archive growth via backup/retain_min")
 		assert.Contains(t, actualConfig, "backup/retain_days=",
 			"--config must cap /etc/lvm/archive growth via backup/retain_days")
+		for _, setting := range []string{
+			`global/thin_check_executable="/var/lib/deckhouse/sds/bin/thin_check"`,
+			`global/thin_dump_executable="/var/lib/deckhouse/sds/bin/thin_dump"`,
+			`global/thin_repair_executable="/var/lib/deckhouse/sds/bin/thin_repair"`,
+		} {
+			assert.Contains(t, actualConfig, setting,
+				"--config must point lvm at the thin-provisioning-tools the module installs: without them lvm activates a thin pool without checking its metadata")
+		}
 	})
 }
 

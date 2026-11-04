@@ -153,6 +153,10 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 			return os.MkdirAll(dstPath, info.Mode())
 		}
 
+		if info.Mode()&os.ModeSymlink != 0 {
+			return copySymlink(srcPath, dstPath)
+		}
+
 		if _, err := os.Stat(dstPath); err == nil {
 			srcChecksum, err := getChecksum(srcPath)
 			if err != nil {
@@ -200,4 +204,30 @@ func copyFilesRecursive(srcDir, dstDir string) error {
 	})
 
 	return err
+}
+
+// copySymlink recreates a symlink instead of copying the file it points to.
+func copySymlink(srcPath, dstPath string) error {
+	target, err := os.Readlink(srcPath)
+	if err != nil {
+		return err
+	}
+
+	if current, err := os.Readlink(dstPath); err == nil && current == target {
+		log.Printf("Symlink %s -> %s is unchanged, skipping", dstPath, target)
+		return nil
+	}
+
+	tmpPath := dstPath + ".tmp"
+	if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Symlink(target, tmpPath); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, dstPath); err != nil {
+		return errors.Join(err, os.Remove(tmpPath))
+	}
+	log.Printf("Created symlink %s -> %s", dstPath, target)
+	return nil
 }

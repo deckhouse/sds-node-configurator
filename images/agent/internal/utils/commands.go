@@ -1774,7 +1774,10 @@ func nsentrerExpendedArgs(cmd string, args ...string) []string {
 //     (devices/scan_lvs, see internal.LVMScanLVs);
 //   - caps the size of /etc/lvm/archive on new metadata operations
 //     (backup/retain_min, backup/retain_days; see
-//     internal.LVMArchiveRetention).
+//     internal.LVMArchiveRetention);
+//   - points thin_check, thin_dump and thin_repair at the copies the module
+//     installs on the node (global/thin_*_executable, see
+//     internal.LVMThinTools).
 //
 // The --config flag must come AFTER the subcommand in lvm.static >=
 // 2.03.41; placing it before the subcommand makes lvm refuse to parse
@@ -1787,7 +1790,7 @@ func lvmStaticExtendedArgs(args []string) []string {
 		return nsentrerExpendedArgs(internal.LVMCmd, args...)
 	}
 
-	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMScanLVs + " " + internal.LVMArchiveRetention
+	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMScanLVs + " " + internal.LVMArchiveRetention + " " + internal.LVMThinTools
 	withConfig := make([]string, 0, len(args)+2)
 	withConfig = append(withConfig, args[0], "--config", configValue)
 	withConfig = append(withConfig, args[1:]...)

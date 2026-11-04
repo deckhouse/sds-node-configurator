@@ -1,4 +1,5 @@
 {{ $binaries := "/sds-utils/bin/lvm /sds-utils/bin/dmsetup" }}
+{{ $pdataToolsLibDir := "/var/lib/deckhouse/sds/lib/pdata_tools" }}
 
 # Do not remove. It's used in external tests.
 ---
@@ -30,12 +31,21 @@ git:
 
 shell:
   install:
-    - pm install lvm2-static-bin posix-libc-utils
+    - pm install lvm2-static-bin posix-libc-utils thin-provisioning-tools patchelf
     - mkdir -p /sds-utils/bin/
     - cp /usr/sbin/lvm /sds-utils/bin/lvm
     - cp /usr/sbin/dmsetup /sds-utils/bin/dmsetup
     - chmod +x /binary_replace.sh
     - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
+    - mkdir -p /sds-utils/lib/pdata_tools/
+    - cp /usr/sbin/pdata_tools /sds-utils/bin/pdata_tools
+    - ldd /usr/sbin/pdata_tools | grep -o '/[^ ]*' | sort -u | xargs -I{} cp -L {} /sds-utils/lib/pdata_tools/
+    - patchelf --set-interpreter {{ $pdataToolsLibDir }}/ld-linux-x86-64.so.2 --force-rpath --set-rpath {{ $pdataToolsLibDir }} /sds-utils/bin/pdata_tools
+    - ln -s pdata_tools /sds-utils/bin/thin_check
+    - ln -s pdata_tools /sds-utils/bin/thin_dump
+    - ln -s pdata_tools /sds-utils/bin/thin_repair
+    - cp -a /sds-utils/bin/pdata_tools /sds-utils/bin/thin_check /sds-utils/bin/thin_dump /sds-utils/bin/thin_repair /relocate/sds-utils/bin/
+    - cp -a /sds-utils/lib /relocate/sds-utils/
 
 ---
 image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
