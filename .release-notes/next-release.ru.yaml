@@ -30,6 +30,7 @@ fixes:
 
 docs:
   - "В FAQ описано, как сделать, чтобы хранилище на новом узле поднималось само: записать метку в `/var/lib/node_labels` на узле до его добавления в кластер и выбрать её в `dataNodes.nodeSelector` модуля и в LVMVolumeGroupSet."
+  - "В FAQ описано, как работает `allocationLimit` у thin pool: как считается `status.thinPools[].availableSpace`, что отклоняется при достижении предела и что происходит при изменении предела. Описания `allocationLimit` и `availableSpace` в LVMVolumeGroup и LVMVolumeGroupSet теперь говорят о том же."
 
 # Необязательные разделы — пустые не оставлять, а удалять.
 # new_features: []

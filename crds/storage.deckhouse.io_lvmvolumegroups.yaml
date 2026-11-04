@@ -257,7 +257,10 @@ spec:
                   properties:
                     allocationLimit:
                       default: 150%
-                      description: Thin pool oversize limit.
+                      description: |-
+                        Overprovisioning limit of the thin pool: the total size of the thin volumes and snapshots in the pool may not exceed the pool size multiplied by this value. `100%` disables overprovisioning.
+
+                        The value can be changed at any time. Lowering it below the size already allocated keeps the existing volumes but refuses new volumes, expansions and snapshots in the pool.
                       pattern: ^[1-9][0-9]{2,3}%$
                       type: string
                     name:
@@ -521,14 +524,18 @@ spec:
                       x-kubernetes-int-or-string: true
                     allocationLimit:
                       default: 150%
-                      description: Thin pool oversize limit.
+                      description: Overprovisioning limit applied to the thin pool,
+                        taken from the spec.
                       pattern: ^[1-9][0-9]{2,3}%$
                       type: string
                     availableSpace:
                       anyOf:
                       - type: integer
                       - type: string
-                      description: Thin pool free space available.
+                      description: 'Space left for new thin volumes and snapshots:
+                        the pool size multiplied by allocationLimit, minus allocatedSize.
+                        This is not the physical free space of the pool (see usedSize)
+                        and can be negative.'
                       pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                       x-kubernetes-int-or-string: true
                     message:

@@ -112,6 +112,36 @@ d8 k get lvg %lvg-name% -o jsonpath='{.status.conditions[?(@.type=="VGConfigurat
 
 Перед удалением thin pool уберите его из классов хранения, которые его используют: LocalStorageClass модуля `sds-local-volume` и ReplicatedStoragePool модуля `sds-replicated-volume`.
 
+## Как работает allocationLimit у thin pool и можно ли его изменить?
+
+Поле `allocationLimit` в `spec.thinPools[]` ресурса [LVMVolumeGroup](./cr.html#lvmvolumegroup) ограничивает overprovisioning (выделение томам суммарно большего объёма, чем есть в пуле) для thin pool. Тонкий том занимает место в пуле только по мере записи данных, поэтому суммарный размер томов может превышать размер пула. Агент допускает это до размера пула, умноженного на `allocationLimit`, и показывает оставшийся объём в `status.thinPools[].availableSpace`:
+
+```text
+availableSpace = actualSize × allocationLimit − allocatedSize
+```
+
+`allocatedSize` — суммарный размер всех тонких томов в пуле, включая снапшоты. Поэтому `availableSpace` — не физически свободное место в пуле: сколько места в пуле реально занято данными, показывает `usedSize`.
+
+Значение по умолчанию — `150%`, оно допускает overprovisioning. Значение `100%` отключает его: тома в пуле никогда не смогут записать больше данных, чем помещается в пул. Предел учитывает только место под данные. Метаданные пула могут закончиться независимо от него, поэтому следите за thin pool с помощью метрик `sds_node_configurator_lvm_thin_pool_used_percent` и `sds_node_configurator_lvm_thin_pool_metadata_used_percent`. Если в пуле закончится место, запись в его тома завершится ошибкой и данные могут быть потеряны.
+
+Запрос, который не помещается в `availableSpace`, отклоняется, а не выполняется:
+
+- новый тонкий LVMLogicalVolume или расширение существующего получает фазу `Failed` с `not enough space` в причине, и агент повторяет попытку;
+- LVMLogicalVolumeSnapshot остаётся в `Pending`, пока `availableSpace` меньше размера исходного тома: снапшот учитывается в полном размере исходного тома, хотя и разделяет с ним данные;
+- scheduler extender (расширение планировщика) не размещает новый том на узле, в thin pool которого не хватает места.
+
+Значение можно менять в любой момент — и для нового, и для существующего thin pool. Агент применит его при следующем проходе, а результат будет виден в `status.thinPools[].allocationLimit` и `availableSpace`:
+
+```shell
+d8 k get lvg %lvg-name% -o jsonpath='{range .status.thinPools[*]}{.name}{"\t"}{.allocationLimit}{"\t"}{.allocatedSize}{"\t"}{.availableSpace}{"\n"}{end}'
+```
+
+Уменьшение предела ниже уже выделенного объёма ничего не удаляет: существующие тома и снапшоты остаются как есть и продолжают работать, `availableSpace` становится отрицательным, а новые тома, расширения и снапшоты в этом пуле отклоняются, пока не будут удалены тома или предел снова не увеличат.
+
+Тонкий LVMLogicalVolume, `size` которого задан в процентах, занимает эту долю от размера пула, умноженного на `allocationLimit`. Поэтому при увеличении предела агент расширяет такой том, если позволяет `availableSpace`; при уменьшении предела том не уменьшается.
+
+Предел действует на тома модуля `sds-local-volume`. Модуль `sds-replicated-volume` его не использует: overprovisioning в его LVMThin-пулах ограничивает LINSTOR.
+
 ## Что происходит, если один thin pool в LVMVolumeGroup не удаётся создать?
 
 LVMVolumeGroup остаётся `Ready`, а остальные thin pool продолжают принимать тома. Условие `VGConfigurationApplied` — `False` с причиной `ThinPoolCreationFailed` (группа томов создавалась) или `ThinPoolReconcileFailed` (thin pool существующей группы томов не удалось создать, расширить или удалить), а в сообщении перечислены thin pool, на которых произошла ошибка, и ошибка `lvcreate`. Несозданного thin pool нет в `status.thinPools`, а `status.thinPoolReady` показывает, сколько из заявленных thin pool существует. Тома, которым нужен этот thin pool, на узел не планируются. Агент повторяет попытку при каждом проходе, поэтому thin pool появится, как только причина будет устранена, например когда в группе томов появится достаточно свободного места.

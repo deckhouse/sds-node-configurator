@@ -30,6 +30,7 @@ fixes:
 
 docs:
   - "The FAQ explains how to make storage on a new node come up by itself: put a label into `/var/lib/node_labels` on the node before it joins the cluster, and select it in `dataNodes.nodeSelector` of the module and in an LVMVolumeGroupSet."
+  - "The FAQ explains how `allocationLimit` of a thin pool works: how `status.thinPools[].availableSpace` is calculated, what is refused once the limit is reached, and what happens when the limit is changed. The descriptions of `allocationLimit` and `availableSpace` in LVMVolumeGroup and LVMVolumeGroupSet now say the same."
 
 # Optional sections — delete rather than leave empty.
 # new_features: []

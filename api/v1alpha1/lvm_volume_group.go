@@ -375,10 +375,10 @@ type LVMVolumeGroupThinPoolStatus struct {
 	// Total requested size of logical volumes in the thin pool.
 	// +optional
 	AllocatedSize resource.Quantity `json:"allocatedSize"`
-	// Thin pool free space available.
+	// Space left for new thin volumes and snapshots: the pool size multiplied by allocationLimit, minus allocatedSize. This is not the physical free space of the pool (see usedSize) and can be negative.
 	// +optional
 	AvailableSpace resource.Quantity `json:"availableSpace"`
-	// Thin pool oversize limit.
+	// Overprovisioning limit applied to the thin pool, taken from the spec.
 	// +optional
 	// +kubebuilder:default="150%"
 	// +kubebuilder:validation:Pattern=`^[1-9][0-9]{2,3}%$`
@@ -412,7 +412,9 @@ type LVMVolumeGroupThinPoolSpec struct {
 	// +kubebuilder:validation:Type=""
 	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?(E|P|T|G|M|k|Ei|Pi|Ti|Gi|Mi|Ki)?$|^[1-9][0-9]?%$|100%`
 	Size string `json:"size"`
-	// Thin pool oversize limit.
+	// Overprovisioning limit of the thin pool: the total size of the thin volumes and snapshots in the pool may not exceed the pool size multiplied by this value. `100%` disables overprovisioning.
+	//
+	// The value can be changed at any time. Lowering it below the size already allocated keeps the existing volumes but refuses new volumes, expansions and snapshots in the pool.
 	// +optional
 	// +kubebuilder:default="150%"
 	// +kubebuilder:validation:Pattern=`^[1-9][0-9]{2,3}%$`

@@ -112,6 +112,36 @@ Removing a thin pool from the template of an [LVMVolumeGroupSet](./cr.html#lvmvo
 
 Before removing a thin pool, remove it from the classes of storage that use it: the LocalStorageClass of `sds-local-volume` and the ReplicatedStoragePool of `sds-replicated-volume`.
 
+## How does allocationLimit of a thin pool work, and can I change it?
+
+`allocationLimit` in `spec.thinPools[]` of an [LVMVolumeGroup](./cr.html#lvmvolumegroup) limits overprovisioning of the thin pool. A thin volume takes space in the pool only as data is written to it, so the total size of the volumes may exceed the size of the pool. The agent allows that up to the pool size multiplied by `allocationLimit` and reports what is left in `status.thinPools[].availableSpace`:
+
+```text
+availableSpace = actualSize × allocationLimit − allocatedSize
+```
+
+`allocatedSize` is the total size of all thin volumes in the pool, snapshots included. `availableSpace` is therefore not the physical free space of the pool: how much of the pool is actually taken by data is shown by `usedSize`.
+
+The default is `150%`, which allows overprovisioning. `100%` turns it off: the volumes in the pool can then never hold more data than the pool fits. The limit counts data space only. The pool metadata can run out regardless of it, so monitor the thin pool with the `sds_node_configurator_lvm_thin_pool_used_percent` and `sds_node_configurator_lvm_thin_pool_metadata_used_percent` metrics. If the pool runs out of space, writes to its volumes fail and data may be lost.
+
+A request that does not fit into `availableSpace` is refused rather than carried out:
+
+- a new thin LVMLogicalVolume, or an expansion of an existing one, gets the `Failed` phase with `not enough space` in the reason, and the agent retries it;
+- an LVMLogicalVolumeSnapshot stays `Pending` until `availableSpace` is at least the size of the source volume: a snapshot is counted at the full size of its source, although it shares the data with it;
+- the scheduler extender does not place a new volume on a node whose thin pool lacks the space.
+
+The value can be changed at any time, for both a new and an existing thin pool. The agent applies it on its next pass, and `status.thinPools[].allocationLimit` and `availableSpace` show the result:
+
+```shell
+d8 k get lvg %lvg-name% -o jsonpath='{range .status.thinPools[*]}{.name}{"\t"}{.allocationLimit}{"\t"}{.allocatedSize}{"\t"}{.availableSpace}{"\n"}{end}'
+```
+
+Lowering the limit below what is already allocated deletes nothing: the existing volumes and snapshots stay as they are and keep working, `availableSpace` becomes negative, and new volumes, expansions and snapshots in the pool are refused until volumes are deleted or the limit is raised again.
+
+A thin LVMLogicalVolume whose `size` is set in percent takes that share of the pool size multiplied by `allocationLimit`. Raising the limit therefore makes the agent extend such a volume if `availableSpace` allows it; lowering the limit does not shrink it.
+
+The limit applies to the volumes of `sds-local-volume`. `sds-replicated-volume` does not use it: overprovisioning of its LVMThin pools is limited by LINSTOR.
+
 ## What happens when one thin pool of an LVMVolumeGroup cannot be created?
 
 The LVMVolumeGroup stays `Ready`, and its other thin pools keep receiving volumes. The `VGConfigurationApplied` condition is `False` with the reason `ThinPoolCreationFailed` (the Volume Group was being created) or `ThinPoolReconcileFailed` (a thin pool of an existing Volume Group could not be created, extended or removed), and its message names the thin pools that failed and the `lvcreate` error. A thin pool that was not created is absent from `status.thinPools`, and `status.thinPoolReady` shows how many of the declared thin pools exist. Volumes that ask for that thin pool are not scheduled to the node. The agent retries on every reconcile, so the thin pool appears once its cause is fixed, for example once there is enough free space in the Volume Group.
