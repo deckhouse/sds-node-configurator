@@ -187,6 +187,7 @@ func NewReconciler(
 	metrics *monitoring.Metrics,
 	sdsCache *cache.Cache,
 	commands utils.Commands,
+	recorder conditions.EventRecorder,
 	cfg ReconcilerConfig,
 ) *Reconciler {
 	return &Reconciler{
@@ -198,6 +199,7 @@ func NewReconciler(
 			metrics,
 			cfg.NodeName,
 			ReconcilerName,
+			recorder,
 		),
 		bdCl:                 repository.NewBDClient(cl, metrics),
 		metrics:              metrics,

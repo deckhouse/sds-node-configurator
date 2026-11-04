@@ -1622,6 +1622,7 @@ func setupReconciler() *Reconciler {
 		monitoring.GetMetrics(""),
 		cache.New(),
 		utils.NewCommands(),
+		nil,
 		ReconcilerConfig{NodeName: "test_node", CmdDeadlineDuration: 30 * time.Second})
 }
 
@@ -1909,6 +1910,7 @@ func reconcilerWithMockedCommands(t *testing.T, mc *mock_utils.MockCommands) *Re
 		monitoring.GetMetrics(""),
 		cache.New(),
 		mc,
+		nil,
 		ReconcilerConfig{NodeName: "test_node", CmdDeadlineDuration: 30 * time.Second},
 	)
 }

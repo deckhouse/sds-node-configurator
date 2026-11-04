@@ -222,9 +222,13 @@ func decideLVGReadyAndPhase(lvg *v1alpha1.LVMVolumeGroup) lvgVerdict {
 //
 // On success, lvg.Status and lvg.ResourceVersion are replaced with server-side
 // values, same as updateLVGConditionIfNeeded.
+//
+// A write that moves Ready records an Event on the group through recorder,
+// which may be nil.
 func updateLVGReadyConditionAndPhase(
 	ctx context.Context,
 	cl client.Client,
+	recorder conditions.EventRecorder,
 	lvg *v1alpha1.LVMVolumeGroup,
 ) (lvgVerdict, error) {
 	var (
@@ -241,7 +245,7 @@ func updateLVGReadyConditionAndPhase(
 		// The generation the verdict was computed against, taken from the same
 		// object the stage conditions were read from.
 		fresh.Status.ObservedGeneration = fresh.Generation
-	})
+	}, conditions.WithEvents(recorder, lvgConditions))
 	if err != nil {
 		return lvgVerdict{}, err
 	}

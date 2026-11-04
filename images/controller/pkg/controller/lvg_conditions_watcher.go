@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/controller/config"
@@ -111,6 +112,7 @@ func RunLVGConditionsWatcher(
 ) error {
 	log = log.Named(SdsLVGConditionsWatcherCtrlName)
 	cl := mgr.GetClient()
+	recorder := newEventRecorder(mgr, SdsLVGConditionsWatcherCtrlName)
 
 	c, err := controller.New(SdsLVGConditionsWatcherCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
@@ -130,7 +132,7 @@ func RunLVGConditionsWatcher(
 				return reconcile.Result{}, nil
 			}
 
-			shouldRequeue, err := reconcileLVGConditions(ctx, cl, log, lvg)
+			shouldRequeue, err := reconcileLVGConditions(ctx, cl, recorder, log, lvg)
 			if err != nil {
 				log.Error(fmt.Sprintf("unable to reconcile the LVMVolumeGroup %s", lvg.Name), logger.Err(err))
 			}
@@ -184,7 +186,7 @@ func RunLVGConditionsWatcher(
 	return nil
 }
 
-func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
+func reconcileLVGConditions(ctx context.Context, cl client.Client, recorder conditions.EventRecorder, log logger.Logger, lvg *v1alpha1.LVMVolumeGroup) (bool, error) {
 	log.Debug(fmt.Sprintf("starts the reconciliation for the LVMVolumeGroup %s", lvg.Name))
 
 	if lvg.Status.Conditions == nil {
@@ -192,7 +194,7 @@ func reconcileLVGConditions(ctx context.Context, cl client.Client, log logger.Lo
 		return true, nil
 	}
 
-	verdict, err := updateLVGReadyConditionAndPhase(ctx, cl, lvg)
+	verdict, err := updateLVGReadyConditionAndPhase(ctx, cl, recorder, lvg)
 	if err != nil {
 		log.Error(fmt.Sprintf("unable to update the condition %s and the phase of the LVMVolumeGroup %s", internal.TypeReady, lvg.Name), logger.Err(err))
 		return true, err

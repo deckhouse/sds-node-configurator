@@ -44,7 +44,7 @@ var _ = Describe("LLVClient.SetDeletingIfNeeded", func() {
 	BeforeEach(func() {
 		ctx = context.Background()
 		fakeClient = test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{})
-		llvClient = repository.NewLLVClient(fakeClient, logger.NewNop())
+		llvClient = repository.NewLLVClient(fakeClient, logger.NewNop(), nil)
 
 		llv = &v1alpha1.LVMLogicalVolume{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-llv"},

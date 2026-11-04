@@ -166,12 +166,12 @@ func TestReconcileLVMVolumeGroupSetDropsADeletedNode(t *testing.T) {
 	lvgSet := blockLVGSet("set-a", "vg")
 	require.NoError(t, cl.Create(ctx, lvgSet))
 
-	_, err := reconcileLVMVolumeGroupSet(ctx, cl, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet)
+	_, err := reconcileLVMVolumeGroupSet(ctx, cl, cl, nil, logger.NewNop(), monitoring.GetMetrics(""), lvgSet)
 	require.NoError(t, err)
 	require.Len(t, lvgSet.Status.CreatedLVGs, 2)
 
 	require.NoError(t, cl.Delete(ctx, &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}))
-	_, err = reconcileLVMVolumeGroupSet(ctx, cl, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet)
+	_, err = reconcileLVMVolumeGroupSet(ctx, cl, cl, nil, logger.NewNop(), monitoring.GetMetrics(""), lvgSet)
 	require.NoError(t, err)
 
 	stored := &v1alpha1.LVMVolumeGroupSet{}
@@ -326,7 +326,7 @@ func TestReconcileLVMVolumeGroupSetWritesPendingOnlyForANewSpec(t *testing.T) {
 	lvgSet := blockLVGSet("set-a", "vg")
 	require.NoError(t, cl.Create(ctx, lvgSet))
 
-	_, err := reconcileLVMVolumeGroupSet(ctx, cl, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet)
+	_, err := reconcileLVMVolumeGroupSet(ctx, cl, cl, nil, logger.NewNop(), monitoring.GetMetrics(""), lvgSet)
 	require.NoError(t, err)
 	require.Contains(t, phases, v1alpha1.PhasePending, "a set seen for the first time is Pending until it is acted on")
 	require.Equal(t, phaseCreated, lvgSet.Status.Phase)
@@ -337,7 +337,7 @@ func TestReconcileLVMVolumeGroupSetWritesPendingOnlyForANewSpec(t *testing.T) {
 	require.NoError(t, cl.Update(ctx, ready))
 
 	phases = nil
-	_, err = reconcileLVMVolumeGroupSet(ctx, cl, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet)
+	_, err = reconcileLVMVolumeGroupSet(ctx, cl, cl, nil, logger.NewNop(), monitoring.GetMetrics(""), lvgSet)
 	require.NoError(t, err)
 	assert.NotContains(t, phases, v1alpha1.PhasePending)
 	assert.Equal(t, phaseCreated, lvgSet.Status.Phase)
@@ -365,7 +365,7 @@ func TestReconcileLVMVolumeGroupSetCountsGroupsWithNoNodeSelected(t *testing.T) 
 	require.NoError(t, cl.Create(ctx, &kept))
 	require.NoError(t, cl.Create(ctx, &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}))
 
-	requeue, err := reconcileLVMVolumeGroupSet(ctx, cl, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet)
+	requeue, err := reconcileLVMVolumeGroupSet(ctx, cl, cl, nil, logger.NewNop(), monitoring.GetMetrics(""), lvgSet)
 	require.NoError(t, err)
 	assert.True(t, requeue)
 

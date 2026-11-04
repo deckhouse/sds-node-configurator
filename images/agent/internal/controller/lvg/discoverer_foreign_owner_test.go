@@ -251,7 +251,7 @@ func TestLVMVolumeGroupDiscoverReconcile_StillReImportsAFileBackedVolumeGroupUnd
 	mc.EXPECT().GetFilesystemSpace(gomock.Any(), gomock.Any()).
 		Return("stat -f", internal.FilesystemSpace{AvailableBytes: int64(1) << 40, TotalBytes: int64(1) << 40}, nil).AnyTimes()
 
-	d := NewDiscoverer(cl, UncachedReader{Reader: cl}, logger.NewNop(), monitoring.GetMetrics(node), sdsCache, mc, DiscovererConfig{
+	d := NewDiscoverer(cl, UncachedReader{Reader: cl}, logger.NewNop(), monitoring.GetMetrics(node), sdsCache, mc, nil, DiscovererConfig{
 		NodeName:                node,
 		VolumeGroupScanInterval: time.Second,
 		FileDevicesDirectory:    "/opt/deckhouse/sds/file-devices",

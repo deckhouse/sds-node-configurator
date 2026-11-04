@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
@@ -60,6 +61,7 @@ func NewReconciler(
 	metrics *monitoring.Metrics,
 	sdsCache *cache.Cache,
 	commands utils.Commands,
+	recorder conditions.EventRecorder,
 	cfg ReconcilerConfig,
 ) controller.Reconciler[*v1alpha1.LVMVolumeGroup] {
 	return &Reconciler{
@@ -71,8 +73,9 @@ func NewReconciler(
 			metrics,
 			cfg.NodeName,
 			ReconcilerName,
+			recorder,
 		),
-		llvCl:    repository.NewLLVClient(cl, log),
+		llvCl:    repository.NewLLVClient(cl, log, recorder),
 		metrics:  metrics,
 		sdsCache: sdsCache,
 		cfg:      cfg,

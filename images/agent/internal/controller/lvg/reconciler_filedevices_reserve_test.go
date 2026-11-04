@@ -46,6 +46,7 @@ func reconcilerWithReserve(t *testing.T, mc *mock_utils.MockCommands, percent in
 		monitoring.GetMetrics(""),
 		cache.New(),
 		mc,
+		nil,
 		ReconcilerConfig{
 			NodeName:                       "test_node",
 			CmdDeadlineDuration:            30 * time.Second,

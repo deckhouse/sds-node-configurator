@@ -27,6 +27,7 @@ import (
 	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal/monitoring"
 )
 
@@ -35,6 +36,7 @@ type LVGClient struct {
 	log                             logger.Logger
 	currentNodeName, controllerName string
 	metrics                         *monitoring.Metrics
+	recorder                        conditions.EventRecorder
 }
 
 func NewLVGClient(
@@ -43,6 +45,7 @@ func NewLVGClient(
 	metrics *monitoring.Metrics,
 	currentNodeName string,
 	controllerName string,
+	recorder conditions.EventRecorder,
 ) *LVGClient {
 	return &LVGClient{
 		cl:              cl,
@@ -50,6 +53,7 @@ func NewLVGClient(
 		metrics:         metrics,
 		currentNodeName: currentNodeName,
 		controllerName:  controllerName,
+		recorder:        recorder,
 	}
 }
 
@@ -72,6 +76,9 @@ func (lvgCl *LVGClient) GetLVMVolumeGroup(ctx context.Context, name string) (*v1
 // write when nothing changed and retrying on conflict.
 // On success, lvg.Status and lvg.ResourceVersion are replaced with server-side values.
 // Callers must not hold unsaved in-memory Status modifications before calling this method.
+//
+// A write that moves one of internal.LVGEventConditionTypes records an Event on
+// the group through the client's recorder, which may be nil.
 func (lvgCl *LVGClient) UpdateLVGConditionIfNeeded(
 	ctx context.Context,
 	lvg *v1alpha1.LVMVolumeGroup,
@@ -101,7 +108,7 @@ func (lvgCl *LVGClient) UpdateLVGConditionIfNeeded(
 			Reason:             reason,
 			Message:            message,
 		})
-	})
+	}, conditions.WithEvents(lvgCl.recorder, internal.LVGConditions, internal.LVGEventConditionTypes...))
 	if err != nil {
 		return err
 	}

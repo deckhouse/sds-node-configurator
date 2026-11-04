@@ -30,18 +30,23 @@ import (
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
 )
 
+// LLVClient writes the status of LVMLogicalVolumes. A write that moves Ready
+// records an Event on the volume through recorder, which may be nil.
 type LLVClient struct {
-	cl  client.Client
-	log logger.Logger
+	cl       client.Client
+	log      logger.Logger
+	recorder conditions.EventRecorder
 }
 
 func NewLLVClient(
 	cl client.Client,
 	log logger.Logger,
+	recorder conditions.EventRecorder,
 ) *LLVClient {
 	return &LLVClient{
-		cl:  cl,
-		log: log,
+		cl:       cl,
+		log:      log,
+		recorder: recorder,
 	}
 }
 
@@ -68,7 +73,7 @@ func (llvCl *LLVClient) UpdatePhaseIfNeeded(
 		fresh.Status.Reason = reason
 		fresh.Status.ObservedGeneration = fresh.Generation
 		conditions.Set(&fresh.Status.Conditions, internal.ReadyConditionForPhase(fresh.Generation, phase, reason, "LVMLogicalVolume"))
-	})
+	}, conditions.WithEvents(llvCl.recorder, internal.LLVConditions))
 	if err != nil {
 		return err
 	}
@@ -114,7 +119,7 @@ func (llvCl *LLVClient) UpdatePhaseToCreatedIfNeeded(
 		fresh.Status.ObservedGeneration = fresh.Generation
 		conditions.Set(&fresh.Status.Conditions,
 			internal.ReadyConditionForPhase(fresh.Generation, v1alpha1.PhaseCreated, "", "LVMLogicalVolume"))
-	})
+	}, conditions.WithEvents(llvCl.recorder, internal.LLVConditions))
 	if err != nil {
 		log.Error(fmt.Sprintf("unable to update the LVMLogicalVolume %s", llv.Name), logger.Err(err))
 		return err
@@ -206,7 +211,7 @@ func (llvCl *LLVClient) SetDeletingIfNeeded(
 			Message:            message,
 			ObservedGeneration: fresh.Generation,
 		})
-	})
+	}, conditions.WithEvents(llvCl.recorder, internal.LLVConditions))
 	if err != nil {
 		return false, err
 	}

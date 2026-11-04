@@ -66,6 +66,7 @@ func RunLVMVolumeGroupSetWatcher(
 	log = log.Named(LVMVolumeGroupSetCtrlName)
 	cl := mgr.GetClient()
 	apiReader := mgr.GetAPIReader()
+	recorder := newEventRecorder(mgr, LVMVolumeGroupSetCtrlName)
 
 	c, err := controller.New(LVMVolumeGroupSetCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
@@ -84,7 +85,7 @@ func RunLVMVolumeGroupSetWatcher(
 				return reconcile.Result{}, err
 			}
 
-			shouldRequeue, err := reconcileLVMVolumeGroupSet(ctx, cl, apiReader, log, metrics, lvgSet)
+			shouldRequeue, err := reconcileLVMVolumeGroupSet(ctx, cl, apiReader, recorder, log, metrics, lvgSet)
 			if err != nil {
 				log.Error(fmt.Sprintf("unable to reconcile the LVMVolumeGroupSet %s", lvgSet.Name), logger.Err(err))
 				return reconcile.Result{}, err
@@ -236,13 +237,13 @@ func lvgSetRequestsForLVG(ctx context.Context, cl client.Client, log logger.Logg
 	return requests
 }
 
-func reconcileLVMVolumeGroupSet(ctx context.Context, cl client.Client, lvgReader client.Reader, log logger.Logger, metrics monitoring.Metrics, lvgSet *v1alpha1.LVMVolumeGroupSet) (bool, error) {
+func reconcileLVMVolumeGroupSet(ctx context.Context, cl client.Client, lvgReader client.Reader, recorder conditions.EventRecorder, log logger.Logger, metrics monitoring.Metrics, lvgSet *v1alpha1.LVMVolumeGroupSet) (bool, error) {
 	log.Debug(fmt.Sprintf("starts the reconciliation of the LVMVolumeGroupSet %s", lvgSet.Name))
 	// Pending stands for a spec the controller has not acted on yet. The set is
 	// also reconciled on every change of its LVMVolumeGroups, and those passes
 	// must not take it out of Created and back.
 	if lvgSet.Status.Phase == "" || lvgSet.Status.ObservedGeneration != lvgSet.Generation {
-		err := updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, v1alpha1.PhasePending, reasonWorkInProgress)
+		err := updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, recorder, log, lvgSet, v1alpha1.PhasePending, reasonWorkInProgress)
 		if err != nil {
 			return false, err
 		}
@@ -271,7 +272,7 @@ func reconcileLVMVolumeGroupSet(ctx context.Context, cl client.Client, lvgReader
 			return false, err
 		}
 
-		err = updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, phaseNotCreated, reason)
+		err = updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, recorder, log, lvgSet, phaseNotCreated, reason)
 		if err != nil {
 			return false, err
 		}
@@ -284,7 +285,7 @@ func reconcileLVMVolumeGroupSet(ctx context.Context, cl client.Client, lvgReader
 	err = provideLVMVolumeGroupsBySet(ctx, cl, lvgReader, log, metrics, lvgSet, nodes)
 	if err != nil {
 		log.Error(fmt.Sprintf("unable to provide LVMVolumeGroups by LVMVolumeGroupSet %s", lvgSet.Name), logger.Err(err))
-		updErr := updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, phaseNotCreated, err.Error())
+		updErr := updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, recorder, log, lvgSet, phaseNotCreated, err.Error())
 		if updErr != nil {
 			return false, updErr
 		}
@@ -292,7 +293,7 @@ func reconcileLVMVolumeGroupSet(ctx context.Context, cl client.Client, lvgReader
 	}
 	log.Debug(fmt.Sprintf("successfully provided LVMVolumeGroups by the LVMVolumeGroupSet %s", lvgSet.Name))
 
-	err = updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, log, lvgSet, phaseCreated, "")
+	err = updateLVMVolumeGroupSetPhaseIfNeeded(ctx, cl, recorder, log, lvgSet, phaseCreated, "")
 	if err != nil {
 		return false, err
 	}
@@ -593,7 +594,10 @@ func readyConditionForSetPhase(generation int64, phase, reason string) metav1.Co
 	return cond
 }
 
-func updateLVMVolumeGroupSetPhaseIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvgSet *v1alpha1.LVMVolumeGroupSet, phase, reason string) error {
+// updateLVMVolumeGroupSetPhaseIfNeeded writes the phase of the set together with
+// the Ready condition that goes with it. A write that moves Ready records an
+// Event on the set through recorder, which may be nil.
+func updateLVMVolumeGroupSetPhaseIfNeeded(ctx context.Context, cl client.Client, recorder conditions.EventRecorder, log logger.Logger, lvgSet *v1alpha1.LVMVolumeGroupSet, phase, reason string) error {
 	log.Debug(fmt.Sprintf("tries to update the LVMVolumeGroupSet %s status phase to %s and reason to %s", lvgSet.Name, phase, reason))
 
 	// The state UpdateStatus read and wrote, kept so the server-side values can be
@@ -606,7 +610,7 @@ func updateLVMVolumeGroupSetPhaseIfNeeded(ctx context.Context, cl client.Client,
 		fresh.Status.Reason = reason
 		fresh.Status.ObservedGeneration = fresh.Generation
 		conditions.Set(&fresh.Status.Conditions, readyConditionForSetPhase(fresh.Generation, phase, reason))
-	})
+	}, conditions.WithEvents(recorder, lvgSetConditions))
 	if err != nil {
 		log.Error(fmt.Sprintf("unable to update the LVMVolumeGroupSet %s", lvgSet.Name), logger.Err(err))
 		return err

@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
@@ -198,12 +199,13 @@ func NewDiscoverer(
 	metrics *monitoring.Metrics,
 	sdsCache *cache.Cache,
 	commands utils.Commands,
+	recorder conditions.EventRecorder,
 	cfg DiscovererConfig,
 ) *Discoverer {
 	return &Discoverer{
 		cl:       cl,
 		log:      log.Named(DiscovererName),
-		lvgCl:    repository.NewLVGClient(cl, log, metrics, cfg.NodeName, DiscovererName),
+		lvgCl:    repository.NewLVGClient(cl, log, metrics, cfg.NodeName, DiscovererName, recorder),
 		bdCl:     repository.NewBDClient(cl, metrics),
 		bdAPICl:  repository.NewBDClient(bdAPIReader, metrics),
 		metrics:  metrics,

@@ -135,7 +135,7 @@ func TestReconcileLLVDeleteFuncRequeuesWhenTheWaitCannotBeReported(t *testing.T)
 			return errors.New("the API server is unavailable")
 		},
 	})
-	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), utils.NewCommands(), ReconcilerConfig{})
+	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), utils.NewCommands(), nil, ReconcilerConfig{})
 
 	lvg := &v1alpha1.LVMVolumeGroup{Spec: v1alpha1.LVMVolumeGroupSpec{ActualVGNameOnTheNode: "test-vg"}}
 

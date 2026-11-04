@@ -1035,7 +1035,7 @@ func newClonedVolumeEnv(ctx context.Context, t *testing.T, requestedSize string)
 
 	mockCmds := mock_utils.NewMockCommands(ctrl)
 	cl := test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{})
-	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mockCmds, ReconcilerConfig{})
+	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mockCmds, nil, ReconcilerConfig{})
 
 	lvg := &v1alpha1.LVMVolumeGroup{
 		ObjectMeta: v1.ObjectMeta{Name: "test-lvg"},
@@ -1321,7 +1321,7 @@ func newDeletedVolumeEnv(ctx context.Context, t *testing.T) *deletedVolumeEnv {
 
 	mockCmds := mock_utils.NewMockCommands(ctrl)
 	cl := test_utils.NewFakeClient(&v1alpha1.LVMLogicalVolume{})
-	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mockCmds, ReconcilerConfig{})
+	r := NewReconciler(cl, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mockCmds, nil, ReconcilerConfig{})
 
 	lvg := &v1alpha1.LVMVolumeGroup{
 		ObjectMeta: v1.ObjectMeta{Name: "test-lvg"},
@@ -1443,5 +1443,5 @@ func setupReconciler() *Reconciler {
 	log := logger.NewNop()
 	metrics := monitoring.GetMetrics("")
 
-	return NewReconciler(cl, log, metrics, cache.New(), utils.NewCommands(), ReconcilerConfig{})
+	return NewReconciler(cl, log, metrics, cache.New(), utils.NewCommands(), nil, ReconcilerConfig{})
 }

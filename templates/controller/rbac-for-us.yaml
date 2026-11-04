@@ -25,3 +25,36 @@
   )
 }}
 {{ include "helm_lib_module_controller_rbac" (list . $rbacConfig) }}
+{{- /*
+  The controller records Events on LVMVolumeGroup and LVMVolumeGroupSet through
+  the core/v1 recorder. Both kinds are cluster-scoped, and the Event of a
+  cluster-scoped object is created in the default namespace: client-go creates
+  it there and patches it on a repeat. The "events" rule in roleRules above
+  covers only the module namespace, where leader election records.
+*/}}
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: d8:{{ .Chart.Name }}:controller:events
+  namespace: default
+  {{- include "helm_lib_module_labels" (list . (dict "app" "controller")) | nindent 2 }}
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: d8:{{ .Chart.Name }}:controller:events
+  namespace: default
+  {{- include "helm_lib_module_labels" (list . (dict "app" "controller")) | nindent 2 }}
+subjects:
+  - kind: ServiceAccount
+    name: controller
+    namespace: d8-{{ .Chart.Name }}
+roleRef:
+  kind: Role
+  name: d8:{{ .Chart.Name }}:controller:events
+  apiGroup: rbac.authorization.k8s.io

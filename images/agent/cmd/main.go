@@ -232,6 +232,7 @@ func run() int {
 			metrics,
 			sdsCache,
 			commands,
+			internal.NewEventRecorder(mgr, lvg.DiscovererName),
 			lvg.DiscovererConfig{
 				NodeName:                cfgParams.NodeName,
 				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
@@ -294,6 +295,7 @@ func run() int {
 			metrics,
 			sdsCache,
 			commands,
+			internal.NewEventRecorder(mgr, lvg.ReconcilerName),
 			lvg.ReconcilerConfig{
 				NodeName:                cfgParams.NodeName,
 				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
@@ -333,6 +335,7 @@ func run() int {
 			metrics,
 			sdsCache,
 			commands,
+			internal.NewEventRecorder(mgr, llv.ReconcilerName),
 			llv.ReconcilerConfig{
 				NodeName:                cfgParams.NodeName,
 				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,
@@ -355,6 +358,7 @@ func run() int {
 			metrics,
 			sdsCache,
 			commands,
+			internal.NewEventRecorder(mgr, llv_extender.ReconcilerName),
 			llv_extender.ReconcilerConfig{
 				NodeName:                cfgParams.NodeName,
 				VolumeGroupScanInterval: cfgParams.VolumeGroupScanInterval,

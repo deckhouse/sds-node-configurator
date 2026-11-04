@@ -50,6 +50,7 @@ func discovererWithMockedCommands(t *testing.T, mc *mock_utils.MockCommands) *Di
 		monitoring.GetMetrics(""),
 		cache.New(),
 		mc,
+		nil,
 		DiscovererConfig{NodeName: "test_node"},
 	)
 }
@@ -390,7 +391,7 @@ func TestLVMVolumeGroupDiscoverReconcile_RefusesToRenameAFileBackedImport(t *tes
 	mc.EXPECT().GetFilesystemSpace(gomock.Any(), gomock.Any()).
 		Return("stat -f", internal.FilesystemSpace{AvailableBytes: int64(1) << 40, TotalBytes: int64(1) << 40}, nil).AnyTimes()
 
-	d := NewDiscoverer(cl, UncachedReader{Reader: cl}, log, metrics, sdsCache, mc, DiscovererConfig{
+	d := NewDiscoverer(cl, UncachedReader{Reader: cl}, log, metrics, sdsCache, mc, nil, DiscovererConfig{
 		NodeName:                node,
 		VolumeGroupScanInterval: time.Second,
 	})
@@ -480,7 +481,7 @@ func TestLVMVolumeGroupDiscoverReconcile_KeepsStatusWhenALoopPVCannotBeRead(t *t
 	mc.EXPECT().GetFilesystemSpace(gomock.Any(), gomock.Any()).
 		Return("stat -f", internal.FilesystemSpace{AvailableBytes: 1 << 40, TotalBytes: 1 << 40}, nil).AnyTimes()
 
-	d := NewDiscoverer(cl, UncachedReader{Reader: cl}, logger.NewNop(), monitoring.GetMetrics(node), sdsCache, mc, DiscovererConfig{
+	d := NewDiscoverer(cl, UncachedReader{Reader: cl}, logger.NewNop(), monitoring.GetMetrics(node), sdsCache, mc, nil, DiscovererConfig{
 		NodeName:                node,
 		VolumeGroupScanInterval: time.Second,
 	})

@@ -344,7 +344,7 @@ func TestTheReadyConditionAndThePhaseAreWrittenTogether(t *testing.T) {
 	lvg := lvgWith(falseCond(internal.TypeVGConfigurationApplied, "VGCreationFailed"))
 	cl := newVerdictTestClient(t, &writes, lvg)
 
-	verdict, err := updateLVGReadyConditionAndPhase(context.Background(), cl, lvg)
+	verdict, err := updateLVGReadyConditionAndPhase(context.Background(), cl, nil, lvg)
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, writes, "the condition and the phase must be one status write")
@@ -368,11 +368,11 @@ func TestNothingIsWrittenWhenTheVerdictHasNotChanged(t *testing.T) {
 	cl := newVerdictTestClient(t, &writes, lvg)
 	ctx := context.Background()
 
-	_, err := updateLVGReadyConditionAndPhase(ctx, cl, lvg)
+	_, err := updateLVGReadyConditionAndPhase(ctx, cl, nil, lvg)
 	require.NoError(t, err)
 	require.Equal(t, 1, writes)
 
-	_, err = updateLVGReadyConditionAndPhase(ctx, cl, lvg)
+	_, err = updateLVGReadyConditionAndPhase(ctx, cl, nil, lvg)
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, writes, "the second pass changed nothing and must not write")
@@ -387,7 +387,7 @@ func TestTheWriteMirrorsServerSideValuesOntoTheCallersObject(t *testing.T) {
 
 	before := lvg.ResourceVersion
 
-	_, err := updateLVGReadyConditionAndPhase(context.Background(), cl, lvg)
+	_, err := updateLVGReadyConditionAndPhase(context.Background(), cl, nil, lvg)
 	require.NoError(t, err)
 
 	assert.Equal(t, v1alpha1.PhaseReady, lvg.Status.Phase)
@@ -420,7 +420,7 @@ func TestTheWriteRecordsTheGenerationTheVerdictDescribes(t *testing.T) {
 	lvg.Generation = 9
 	cl := newVerdictTestClient(t, &writes, lvg)
 
-	verdict, err := updateLVGReadyConditionAndPhase(context.Background(), cl, lvg)
+	verdict, err := updateLVGReadyConditionAndPhase(context.Background(), cl, nil, lvg)
 	require.NoError(t, err)
 
 	got := &v1alpha1.LVMVolumeGroup{}

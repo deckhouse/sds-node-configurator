@@ -155,7 +155,7 @@ func bdRaceDiscoverer(t *testing.T, cl client.Client, bdAPIReader UncachedReader
 		Return("losetup -O BACK-FILE", internal.LoopBackingFile{}, nil).AnyTimes()
 
 	return NewDiscoverer(cl, bdAPIReader, logger.NewNop(), monitoring.GetMetrics(bdRaceNode), sdsCache,
-		mc, DiscovererConfig{
+		mc, nil, DiscovererConfig{
 			NodeName:                bdRaceNode,
 			VolumeGroupScanInterval: time.Second,
 		})

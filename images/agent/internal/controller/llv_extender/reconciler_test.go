@@ -177,6 +177,7 @@ func TestLLVExtenderPercentSizeVolumeIsNotExtended(t *testing.T) {
 		monitoring.GetMetrics(""),
 		cache.New(),
 		utils.NewCommands(),
+		nil,
 		ReconcilerConfig{NodeName: testNodeName},
 	).(*Reconciler)
 
@@ -258,6 +259,7 @@ func TestLLVExtenderClearsAStaleFailure(t *testing.T) {
 		monitoring.GetMetrics(""),
 		cache.New(),
 		utils.NewCommands(),
+		nil,
 		ReconcilerConfig{NodeName: testNodeName},
 	).(*Reconciler)
 
@@ -435,6 +437,7 @@ func TestLLVExtenderComparesGrowthWithFreeSpace(t *testing.T) {
 				monitoring.GetMetrics(""),
 				cache.New(),
 				mockCmds,
+				nil,
 				ReconcilerConfig{NodeName: testNodeName},
 			).(*Reconciler)
 
@@ -514,6 +517,7 @@ func setupExtenderReconciler() *Reconciler {
 		monitoring.GetMetrics(""),
 		cache.New(),
 		utils.NewCommands(),
+		nil,
 		ReconcilerConfig{NodeName: testNodeName},
 	)
 	return r.(*Reconciler)

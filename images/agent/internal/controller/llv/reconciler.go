@@ -32,6 +32,7 @@ import (
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/conditions"
 	"github.com/deckhouse/sds-common-lib/logger"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-node-configurator/images/agent/internal"
@@ -84,6 +85,7 @@ func NewReconciler(
 	metrics *monitoring.Metrics,
 	sdsCache *cache.Cache,
 	commands utils.Commands,
+	recorder conditions.EventRecorder,
 	cfg ReconcilerConfig,
 ) *Reconciler {
 	return &Reconciler{
@@ -95,9 +97,10 @@ func NewReconciler(
 			metrics,
 			cfg.NodeName,
 			ReconcilerName,
+			recorder,
 		),
 		llvCl: repository.NewLLVClient(
-			cl, log,
+			cl, log, recorder,
 		),
 		metrics:  metrics,
 		sdsCache: sdsCache,

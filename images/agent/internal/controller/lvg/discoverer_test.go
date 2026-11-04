@@ -1080,7 +1080,7 @@ func setupDiscoverer(opts *DiscovererConfig) *Discoverer {
 		opts = &DiscovererConfig{NodeName: "test_node"}
 	}
 
-	return NewDiscoverer(cl, UncachedReader{Reader: cl}, log, metrics, cache.New(), utils.NewCommands(), *opts)
+	return NewDiscoverer(cl, UncachedReader{Reader: cl}, log, metrics, cache.New(), utils.NewCommands(), nil, *opts)
 }
 
 // hasStatusFileDevicesDiff must match file devices by FilePath, not by slice
