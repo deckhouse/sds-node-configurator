@@ -147,7 +147,62 @@ func RunLVMVolumeGroupSetWatcher(
 		return err
 	}
 
+	err = c.Watch(source.Kind(mgr.GetCache(), &v1.Node{}, handler.TypedFuncs[*v1.Node, reconcile.Request]{
+		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*v1.Node], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			addRequests(q, lvgSetRequestsForNodeLabels(ctx, cl, log, e.Object.Labels))
+		},
+		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*v1.Node], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			if maps.Equal(e.ObjectOld.Labels, e.ObjectNew.Labels) {
+				return
+			}
+			addRequests(q, lvgSetRequestsForNodeLabels(ctx, cl, log, e.ObjectOld.Labels, e.ObjectNew.Labels))
+		},
+		DeleteFunc: func(ctx context.Context, e event.TypedDeleteEvent[*v1.Node], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			addRequests(q, lvgSetRequestsForNodeLabels(ctx, cl, log, e.Object.Labels))
+		},
+	}))
+	if err != nil {
+		log.Error("the controller is unable to watch the Node resources", logger.Err(err))
+		return err
+	}
+
 	return nil
+}
+
+func addRequests(q workqueue.TypedRateLimitingInterface[reconcile.Request], requests []reconcile.Request) {
+	for _, request := range requests {
+		q.Add(request)
+	}
+}
+
+// lvgSetRequestsForNodeLabels returns the sets whose nodeSelector matches any of
+// the given label sets of a node. A set otherwise learns about a node only when
+// the set or one of its LVMVolumeGroups changes, so a node that joined the
+// cluster, or got the label, after the set was created waited for that.
+func lvgSetRequestsForNodeLabels(ctx context.Context, cl client.Client, log logger.Logger, nodeLabels ...map[string]string) []reconcile.Request {
+	lvgSets := &v1alpha1.LVMVolumeGroupSetList{}
+	if err := cl.List(ctx, lvgSets); err != nil {
+		log.Error("unable to list the LVMVolumeGroupSets for a node event", logger.Err(err))
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, lvgSet := range lvgSets.Items {
+		selector, err := metav1.LabelSelectorAsSelector(lvgSet.Spec.NodeSelector)
+		if err != nil {
+			log.Error(fmt.Sprintf("unable to parse the nodeSelector of the LVMVolumeGroupSet %s", lvgSet.Name), logger.Err(err))
+			continue
+		}
+		for _, set := range nodeLabels {
+			// GetNodes reads an empty selector as every node; so does this.
+			if selector == labels.Nothing() || selector.Matches(labels.Set(set)) {
+				requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: lvgSet.Name}})
+				break
+			}
+		}
+	}
+
+	return requests
 }
 
 func shouldLVGSetWatcherReconcileUpdateEvent(oldLVG, newLVG *v1alpha1.LVMVolumeGroupSet) bool {

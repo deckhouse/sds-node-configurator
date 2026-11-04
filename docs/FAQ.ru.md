@@ -267,6 +267,47 @@ spec:
 
 Колонки `CURRENT LVG COUNT`, `DESIRED LVG COUNT` и `READY LVG COUNT` в выводе `d8 k get lvgset` показывают, сколько ресурсов LVMVolumeGroup есть у набора, сколько узлов соответствует селектору и сколько ресурсов находится в фазе `Ready`.
 
+## Как сделать, чтобы хранилище на новом узле поднималось само?
+
+Пометьте узел своей меткой до того, как он войдёт в кластер, и выбирайте узлы по этой метке в настройках модуля и в [LVMVolumeGroupSet](./cr.html#lvmvolumegroupset). Узел с этой меткой получит агент и свой ресурс LVMVolumeGroup без каких-либо действий в кластере.
+
+1. На узле до его добавления в кластер запишите метку в файл в каталоге `/var/lib/node_labels`, по одной строке `key=value`. Deckhouse ставит метки из этих файлов на узел при добавлении узла в кластер (см. раздел «Как автоматически проставить на узел кастомные лейблы» в документации Deckhouse о настройке узлов):
+
+   ```shell
+   mkdir -p /var/lib/node_labels
+   echo "storage.example.com/local-nvme=true" > /var/lib/node_labels/storage
+   ```
+
+   Системные метки, например `kubernetes.io/hostname` или `node.deckhouse.io/group`, так поставить нельзя.
+
+2. Укажите ту же метку в `spec.settings.dataNodes.nodeSelector` модуля `sds-local-volume` или `sds-replicated-volume`, чтобы модуль, а вместе с ним и агент `sds-node-configurator`, работал на этом узле:
+
+   ```shell
+   d8 k patch mc sds-local-volume --type merge -p '{"spec":{"settings":{"dataNodes":{"nodeSelector":{"storage.example.com/local-nvme":"true"}}}}}'
+   ```
+
+3. Создайте LVMVolumeGroupSet, который выбирает ту же метку, как в разделе [Как создать LVMVolumeGroup с помощью ресурса LVMVolumeGroupSet?](#как-создать-lvmvolumegroup-с-помощью-ресурса-lvmvolumegroupset):
+
+   ```yaml
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: LVMVolumeGroupSet
+   metadata:
+     name: local-nvme
+   spec:
+     strategy: PerNode
+     nodeSelector:
+       matchLabels:
+         storage.example.com/local-nvme: "true"
+     lvmVolumeGroupTemplate:
+       type: Local
+       blockDeviceSelector:
+         matchLabels:
+           status.blockdevice.storage.deckhouse.io/model: <модель>
+       actualVGNameOnTheNode: local-nvme
+   ```
+
+Когда такой узел входит в кластер, он получает метку, на нём запускается агент и создаёт ресурсы BlockDevice для его дисков, а контроллер создаёт для узла ресурс LVMVolumeGroup по шаблону, и по нему собирается группа томов на дисках, подходящих под `blockDeviceSelector`. Чтобы добавить хранилище на узел, который уже в кластере, поставьте на него метку командой `d8 k label node`.
+
 ## Как изменить UUID у групп томов при клонировании виртуальных машин?
 
 UUID у групп томов можно изменить только при отсутствии активных логических томов в группе томов.

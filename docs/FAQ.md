@@ -267,6 +267,47 @@ The controller keeps the `thinPools`, `blockDeviceSelector` and `fileDevices` fi
 
 The `CURRENT LVG COUNT`, `DESIRED LVG COUNT` and `READY LVG COUNT` columns of `d8 k get lvgset` show how many LVMVolumeGroup resources the set has, how many nodes match the selector, and how many of the resources are in the `Ready` phase.
 
+## How do I make storage on a new node come up by itself?
+
+Mark the node with a label of your own before it joins the cluster, and select nodes by that label in the module settings and in an [LVMVolumeGroupSet](./cr.html#lvmvolumegroupset). A node with the label then gets the agent and its LVMVolumeGroup without any action in the cluster.
+
+1. On the node, before adding it to the cluster, put the label into a file under `/var/lib/node_labels`, one `key=value` per line. Deckhouse puts labels from these files on the node when the node is added to the cluster (see "How to automatically put custom labels on the node" in the Deckhouse documentation on node customization):
+
+   ```shell
+   mkdir -p /var/lib/node_labels
+   echo "storage.example.com/local-nvme=true" > /var/lib/node_labels/storage
+   ```
+
+   System labels such as `kubernetes.io/hostname` or `node.deckhouse.io/group` cannot be set this way.
+
+2. Select the same label in `spec.settings.dataNodes.nodeSelector` of the `sds-local-volume` or `sds-replicated-volume` module, so that the module, and with it the `sds-node-configurator` agent, runs on the node:
+
+   ```shell
+   d8 k patch mc sds-local-volume --type merge -p '{"spec":{"settings":{"dataNodes":{"nodeSelector":{"storage.example.com/local-nvme":"true"}}}}}'
+   ```
+
+3. Create an LVMVolumeGroupSet that selects the same label, as in [How do I create LVMVolumeGroup using LVMVolumeGroupSet?](#how-do-i-create-lvmvolumegroup-using-lvmvolumegroupset):
+
+   ```yaml
+   apiVersion: storage.deckhouse.io/v1alpha1
+   kind: LVMVolumeGroupSet
+   metadata:
+     name: local-nvme
+   spec:
+     strategy: PerNode
+     nodeSelector:
+       matchLabels:
+         storage.example.com/local-nvme: "true"
+     lvmVolumeGroupTemplate:
+       type: Local
+       blockDeviceSelector:
+         matchLabels:
+           status.blockdevice.storage.deckhouse.io/model: <model>
+       actualVGNameOnTheNode: local-nvme
+   ```
+
+When such a node joins the cluster, it gets the label, the agent starts on it and creates BlockDevice resources for its disks, and the controller creates an LVMVolumeGroup for the node from the template, which builds the Volume Group on the disks matching `blockDeviceSelector`. To add storage to a node that is already in the cluster, put the label on it with `d8 k label node`.
+
 ## How do I change the UUID of Volume Groups when cloning virtual machines?
 
 UUID of Volume Groups can only be changed when there are no active Logical Volumes in the Volume Group.
