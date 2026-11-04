@@ -50,4 +50,7 @@ const (
 	BlockDeviceRotaLabelKey               = blockDeviceLabelPrefix + "/rota"
 	BlockDeviceHotPlugLabelKey            = blockDeviceLabelPrefix + "/hotplug"
 	BlockDeviceMachineIDLabelKey          = blockDeviceLabelPrefix + "/machineid"
+	// BlockDeviceSCSITargetLabelKey names the SCSI target the device is reached
+	// through; the value is built by SCSITargetLabelValue.
+	BlockDeviceSCSITargetLabelKey = blockDeviceLabelPrefix + "/scsitarget"
 )

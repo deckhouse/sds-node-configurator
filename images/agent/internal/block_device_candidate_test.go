@@ -217,7 +217,41 @@ var _ = Describe("Block device candidate", func() {
 					v1alpha1.BlockDeviceRotaLabelKey:               strconv.FormatBool(candidate.Rota),
 					v1alpha1.BlockDeviceHotPlugLabelKey:            strconv.FormatBool(candidate.HotPlug),
 					v1alpha1.BlockDeviceMachineIDLabelKey:          candidate.MachineID,
+					v1alpha1.BlockDeviceSCSITargetLabelKey:         "",
 				}
+			})
+
+			When("it is a LUN of an iSCSI target", func() {
+				BeforeEach(func() {
+					candidate.SCSITarget = "iqn.2000-01.com.example:target"
+					expectedLabels[v1alpha1.BlockDeviceSCSITargetLabelKey] = "iqn.2000-01.com.example_target"
+				})
+				It("names the target in a label", func() {
+					Expect(blockDevice.Labels).To(BeEquivalentTo(expectedLabels))
+				})
+			})
+
+			When("it is a LUN of a Fibre Channel target", func() {
+				BeforeEach(func() {
+					candidate.SCSITarget = "0x500a0981891b8dc5"
+					expectedLabels[v1alpha1.BlockDeviceSCSITargetLabelKey] = "500a0981891b8dc5"
+				})
+				It("names the target port in a label", func() {
+					Expect(blockDevice.Labels).To(BeEquivalentTo(expectedLabels))
+				})
+			})
+
+			When("its target could not be read on this pass", func() {
+				BeforeEach(func() {
+					blockDevice.Labels = map[string]string{
+						v1alpha1.BlockDeviceSCSITargetLabelKey: "iqn.2000-01.com.example_target",
+					}
+					candidate.SCSITargetUnresolved = true
+					expectedLabels[v1alpha1.BlockDeviceSCSITargetLabelKey] = "iqn.2000-01.com.example_target"
+				})
+				It("keeps the target it had", func() {
+					Expect(blockDevice.Labels).To(BeEquivalentTo(expectedLabels))
+				})
 			})
 
 			When("Serial inhereted", func() {

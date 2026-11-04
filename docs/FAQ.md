@@ -688,8 +688,37 @@ When an LVMVolumeGroup with file-backed devices is deleted, the agent detaches t
 - `status.blockdevice.storage.deckhouse.io/rota`: Indicates whether the device is rotational.
 - `status.blockdevice.storage.deckhouse.io/hotplug`: Indicates device hot-plug capability.
 - `status.blockdevice.storage.deckhouse.io/machineid`: Identifier of the server where the block device is installed.
+- `status.blockdevice.storage.deckhouse.io/scsitarget`: The iSCSI or Fibre Channel target the device is a LUN of; empty for any other device. See [How do CSI drivers hide their LUNs from the module?](#how-do-csi-drivers-hide-their-luns-from-the-module) for the value format.
 
 The agent sets these labels from the resource's status, and `spec.blockDeviceSelector` of LVMVolumeGroup and LVMVolumeGroupSet selects devices by them. Changing, removing or adding a label with one of these keys (`kubernetes.io/hostname`, `kubernetes.io/metadata.name` or the `status.blockdevice.storage.deckhouse.io/` prefix) is rejected by the `d8-sds-node-configurator-blockdevice-label-guard` ValidatingAdmissionPolicy for everyone except the agent. Labels with other keys can be set and removed freely.
+
+## How do CSI drivers hide their LUNs from the module?
+
+A LUN that a CSI driver hands out as a volume must never become a [BlockDevice](./cr.html#blockdevice): an [LVMVolumeGroup](./cr.html#lvmvolumegroup) whose `blockDeviceSelector` matches it would run `pvcreate` or `vgextend` on it and overwrite the data of the volume.
+
+A driver hides its LUNs with a [BlockDeviceFilter](./cr.html#blockdevicefilter) resource. Its `blockDeviceSelector` selects the devices to keep, by the [labels of BlockDevice resources](#what-labels-are-added-by-the-controller-to-blockdevice-resources). The agent combines the selectors of all BlockDeviceFilter resources with a logical AND: a device becomes a BlockDevice only when every filter keeps it, and an existing BlockDevice that a filter no longer keeps is deleted. One driver's filter therefore cannot reveal a device another driver hides. A `matchExpressions` entry with `In` or `NotIn` and an empty `values` list is ignored.
+
+The drivers of the Deckhouse storage modules use one of the following rules, or several of them at once:
+
+- By WWN: `status.blockdevice.storage.deckhouse.io/wwn` `NotIn` the WWNs of the LUNs the driver has discovered. Partitions and multipath maps carry the WWN of the disk beneath them, so they are hidden too. A LUN that appeared on the node before the driver discovered it is not covered by this rule.
+- By model: `status.blockdevice.storage.deckhouse.io/model` `NotIn` the model the storage system reports, for drivers that own every LUN of their storage system. The value keeps the letter case and has dots replaced with dashes (`TATLIN.UNIFIED` becomes `TATLIN-UNIFIED`); take it from an existing BlockDevice rather than writing it by hand.
+- By target: `status.blockdevice.storage.deckhouse.io/scsitarget` `NotIn` the targets the driver owns (for example, every target declared in a `SCSITarget` resource of the `csi-scsi-generic` module). Every LUN of such a target is hidden from the moment it appears on the node, before the driver knows its WWN.
+
+The agent reads the target from sysfs: the `targetname` of the iSCSI session (`/sys/class/iscsi_session/session*/targetname`) or the `port_name` of the Fibre Channel remote port (`/sys/class/fc_remote_ports/rport-*/port_name`) the disk came in by. Partitions, multipath maps and other mappings take it from the disks beneath them; when the paths of a map lead to more than one target, the label names the smallest of them. The value is built as follows:
+
+- a WWPN becomes its 16 lower-case hex digits: `0x500A0981891B8DC5` and `50:0a:09:81:89:1b:8d:c5` both become `500a0981891b8dc5`;
+- an iSCSI name is lower-cased and its colons become underscores: `iqn.2000-01.com.example:target` becomes `iqn.2000-01.com.example_target`;
+- an iSCSI name that is still not a valid label value after that (longer than 63 characters, for example) keeps its first 46 characters, followed by a dash and the first 16 hex digits of the SHA-256 of the whole lower-cased name.
+
+A driver written in Go computes the value with `SCSITargetLabelValue` from the module's API package, `github.com/deckhouse/sds-node-configurator/api/v1alpha1`. When the agent cannot read the target of a LUN, it does not create a BlockDevice for it until it can.
+
+A `NotIn` requirement also keeps a device that has no label with that key at all, so a filter with the target rule changes nothing on nodes where an older agent does not set the label yet.
+
+Limitations:
+
+- The rule by target covers LUNs of iSCSI and Fibre Channel targets only; NVMe-oF namespaces carry no such label.
+- When a LUN is reached through several targets, the label names the smallest of them, so a driver has to list every target port (for Fibre Channel, every WWPN of the storage system zoned to the node) to hide such LUNs reliably.
+- The filters decide which BlockDevice resources exist, not what the node itself does: an LVM command run on the node by hand still sees every device.
 
 ## How do I disable the module?
 

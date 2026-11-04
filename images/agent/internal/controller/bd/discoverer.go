@@ -100,6 +100,13 @@ type Discoverer struct {
 	// registered; such a path is still a raw way into a LUN that a map serves.
 	// A field so a test can state the set.
 	multipathPaths func() map[string]struct{}
+
+	// scsiTargetOf answers which iSCSI or Fibre Channel target a device is a LUN
+	// of (utils.SCSITargetOf in production). The answer goes into a label a CSI
+	// driver selects by in its BlockDeviceFilter, to hide every LUN of a target
+	// it owns — one that appeared a moment ago as well, before the driver knew
+	// its WWN. A field so a test can state it.
+	scsiTargetOf func(kName string) (string, error)
 }
 
 type DiscovererConfig struct {
@@ -132,6 +139,7 @@ func NewDiscoverer(
 
 		unreadableMultipathDevices: utils.UnreadableMultipathDevices,
 		multipathPaths:             utils.MultipathPathDevices,
+		scsiTargetOf:               utils.SCSITargetOf,
 	}
 }
 
@@ -190,6 +198,7 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) (bool, error) {
 	}
 
 	blockDevicesToDelete := make([]*v1alpha1.BlockDevice, 0, len(candidates))
+	withheld := false
 
 	// create new API devices
 	runBlockDeviceControllerLog := d.log
@@ -225,13 +234,27 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) (bool, error) {
 				continue
 			}
 
-			if err = d.updateAPIBlockDevice(ctx, blockDevice, candidate); err != nil {
+			// By pointer: the filter below has to judge the labels just
+			// written, or a device whose update is what takes it out of the
+			// filter stays published until the next pass — and the next pass
+			// waits for a udev event.
+			if err = d.updateAPIBlockDevice(ctx, &blockDevice, candidate); err != nil {
 				d.log.Error("unable to update the BlockDevice", logger.Err(err), slog.String("blockDevice", blockDevice.Name))
 				continue
 			}
 
 			log.Info(fmt.Sprintf("updated APIBlockDevice, name: %s", blockDevice.Name))
 			addToDeleteListIfNotMatched(blockDevice)
+			continue
+		}
+
+		// Not offered until its target is known: whether a filter hides the
+		// device may depend on it, and a BlockDevice that a filter would have
+		// hidden can be taken by an LVMVolumeGroup in the meantime. The agent
+		// rescans only on udev events, so the retry has to be asked for.
+		if candidate.SCSITargetUnresolved {
+			log.Warn(fmt.Sprintf("not creating a BlockDevice for %s until the SCSI target it is a LUN of can be read", candidate.Path))
+			withheld = true
 			continue
 		}
 
@@ -270,7 +293,7 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) (bool, error) {
 	d.metrics.ReconcileDuration(DiscovererName).Observe(d.metrics.GetEstimatedTimeInSeconds(reconcileStart))
 	d.metrics.ReconcilesCountTotal(DiscovererName).Inc()
 
-	return false, nil
+	return withheld, nil
 }
 
 func (d *Discoverer) removeDeprecatedAPIDevices(
@@ -414,6 +437,12 @@ func (d *Discoverer) getBlockDeviceCandidates() ([]internal.BlockDeviceCandidate
 	for _, device := range filteredDevices {
 		log.Trace(fmt.Sprintf("process device: %+v", device))
 		candidate := internal.NewBlockDeviceCandidateByDevice(&device, d.cfg.NodeName, d.cfg.MachineID)
+		scsiTarget, err := d.scsiTargetOf(device.KName)
+		if err != nil {
+			log.Warn(fmt.Sprintf("unable to read the SCSI target of device %s (kname %s)", device.Name, device.KName), logger.Err(err))
+			candidate.SCSITargetUnresolved = true
+		}
+		candidate.SCSITarget = scsiTarget
 
 		log.Trace(fmt.Sprintf("get following candidate: %+v", candidate))
 		candidateName := d.createCandidateName(candidate, devices)
@@ -931,13 +960,13 @@ func (d *Discoverer) createCandidateName(candidate internal.BlockDeviceCandidate
 
 func (d *Discoverer) updateAPIBlockDevice(
 	ctx context.Context,
-	blockDevice v1alpha1.BlockDevice,
+	blockDevice *v1alpha1.BlockDevice,
 	candidate internal.BlockDeviceCandidate,
 ) error {
-	candidate.UpdateAPIBlockDevice(&blockDevice)
+	candidate.UpdateAPIBlockDevice(blockDevice)
 
 	start := time.Now()
-	err := d.cl.Update(ctx, &blockDevice)
+	err := d.cl.Update(ctx, blockDevice)
 	d.metrics.APIMethodsDuration(DiscovererName, "update").Observe(d.metrics.GetEstimatedTimeInSeconds(start))
 	d.metrics.APIMethodsExecutionCount(DiscovererName, "update").Inc()
 	if err != nil {

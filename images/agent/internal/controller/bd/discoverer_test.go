@@ -55,7 +55,10 @@ func setupDiscoverer() *Discoverer {
 	log, _ := logger.NewLogger("1")
 	sdsCache := cache.New()
 
-	return NewDiscoverer(cl, log, metrics, sdsCache, opts)
+	d := NewDiscoverer(cl, log, metrics, sdsCache, opts)
+	// The machine running the tests may have LUNs of its own.
+	d.scsiTargetOf = func(string) (string, error) { return "", nil }
+	return d
 }
 
 func TestBlockDeviceCtrl(t *testing.T) {

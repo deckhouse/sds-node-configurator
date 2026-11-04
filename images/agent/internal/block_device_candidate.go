@@ -59,6 +59,14 @@ type BlockDeviceCandidate struct {
 
 	SerialInherited string
 	WWNInherited    string
+
+	// SCSITarget is the identity of the iSCSI or Fibre Channel target the
+	// device is a LUN of (utils.SCSITargetOf), empty for any other device.
+	// SCSITargetUnresolved says it could not be read on this pass: the label it
+	// feeds then keeps whatever value it had, and a device that has no
+	// BlockDevice yet does not get one.
+	SCSITarget           string
+	SCSITargetUnresolved bool
 }
 
 // consumability reports whether the device may back an LVM Physical Volume,
@@ -176,7 +184,7 @@ func (candidate BlockDeviceCandidate) AsAPIBlockDevice() v1alpha1.BlockDevice {
 	}
 
 	candidate.setConsumableCondition(&blockDevice)
-	blockDevice.Labels = newBlockDeviceLabels(&blockDevice)
+	blockDevice.Labels = newBlockDeviceLabels(&blockDevice, &candidate)
 
 	return blockDevice
 }
@@ -206,7 +214,7 @@ func (candidate *BlockDeviceCandidate) UpdateAPIBlockDevice(blockDevice *v1alpha
 	// definition -- the device it described as gone is what we're updating.
 	conditions.Remove(&blockDevice.Status.Conditions, v1alpha1.BlockDeviceConditionMissing)
 
-	blockDevice.Labels = newBlockDeviceLabels(blockDevice)
+	blockDevice.Labels = newBlockDeviceLabels(blockDevice, candidate)
 }
 
 // setConsumableCondition publishes the verdict from consumability.
@@ -256,7 +264,7 @@ func (candidate *BlockDeviceCandidate) HasBlockDeviceDiff(blockDevice v1alpha1.B
 		candidate.MachineID != blockDevice.Status.MachineID ||
 		candidate.consumableConditionDiffers(blockDevice) ||
 		conditions.Get(blockDevice.Status.Conditions, v1alpha1.BlockDeviceConditionMissing) != nil ||
-		!reflect.DeepEqual(newBlockDeviceLabels(&blockDevice), blockDevice.Labels)
+		!reflect.DeepEqual(newBlockDeviceLabels(&blockDevice, candidate), blockDevice.Labels)
 }
 
 func (candidate *BlockDeviceCandidate) GetSerial() string {
@@ -304,7 +312,10 @@ func BlockDeviceLabelValue(statusField string) string {
 }
 
 // Creates new labels as map, keeping unrelated labels device already has
-func newBlockDeviceLabels(blockDevice *v1alpha1.BlockDevice) map[string]string {
+//
+// The SCSI target label comes from the candidate rather than the status:
+// BlockDevice has no status field for it.
+func newBlockDeviceLabels(blockDevice *v1alpha1.BlockDevice, candidate *BlockDeviceCandidate) map[string]string {
 	resultItemCount := 16
 	if blockDevice.Labels != nil {
 		resultItemCount = len(blockDevice.Labels)
@@ -332,6 +343,10 @@ func newBlockDeviceLabels(blockDevice *v1alpha1.BlockDevice) map[string]string {
 		v1alpha1.BlockDeviceHotPlugLabelKey:            strconv.FormatBool(blockDevice.Status.HotPlug),
 		v1alpha1.BlockDeviceMachineIDLabelKey:          slug.Make(blockDevice.Status.MachineID),
 	})
+
+	if !candidate.SCSITargetUnresolved {
+		result[v1alpha1.BlockDeviceSCSITargetLabelKey] = v1alpha1.SCSITargetLabelValue(candidate.SCSITarget)
+	}
 
 	return result
 }
