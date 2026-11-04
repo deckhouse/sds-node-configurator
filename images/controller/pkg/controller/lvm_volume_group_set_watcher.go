@@ -400,13 +400,22 @@ func updateLVMVolumeGroupByConfiguredFromSet(ctx context.Context, cl client.Clie
 // updateLVMVolumeGroupSetLVGsIfNeeded records in the status the LVMVolumeGroups
 // of the set as they are now. lvgs are all the LVMVolumeGroups of the cluster.
 func updateLVMVolumeGroupSetLVGsIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, lvgSet *v1alpha1.LVMVolumeGroupSet, lvgs map[string]v1alpha1.LVMVolumeGroup, nodes map[string]v1.Node) error {
+	clusterNodes := &v1.NodeList{}
+	if err := cl.List(ctx, clusterNodes); err != nil {
+		return fmt.Errorf("listing the nodes: %w", err)
+	}
+	existing := make(map[string]struct{}, len(clusterNodes.Items))
+	for _, n := range clusterNodes.Items {
+		existing[n.Name] = struct{}{}
+	}
+
 	// The state UpdateStatus read and wrote, kept so the server-side values can be
 	// mirrored onto the caller's object below.
 	var written *v1alpha1.LVMVolumeGroupSet
 
 	err := conditions.UpdateStatus(ctx, cl, lvgSet, func(fresh *v1alpha1.LVMVolumeGroupSet) {
 		written = fresh
-		setLVMVolumeGroupSetLVGs(fresh, lvgs, nodes)
+		setLVMVolumeGroupSetLVGs(fresh, lvgs, nodes, existing)
 	})
 	if err != nil {
 		return err
@@ -427,12 +436,19 @@ func updateLVMVolumeGroupSetLVGsIfNeeded(ctx context.Context, cl client.Client, 
 // A group the set finds on its node under another name, left by an earlier pass
 // whose status write was lost or created before the set, is the one the set
 // keeps there and is listed with the rest.
-func setLVMVolumeGroupSetLVGs(lvgSet *v1alpha1.LVMVolumeGroupSet, lvgs map[string]v1alpha1.LVMVolumeGroup, nodes map[string]v1.Node) {
+//
+// A group whose node is no longer in the cluster, existingNodes being every node
+// there is, is dropped from the list but not deleted: its Volume Group outlives
+// the node, and the node may come back under the same name.
+func setLVMVolumeGroupSetLVGs(lvgSet *v1alpha1.LVMVolumeGroupSet, lvgs map[string]v1alpha1.LVMVolumeGroup, nodes map[string]v1.Node, existingNodes map[string]struct{}) {
 	listed := make([]v1alpha1.LVMVolumeGroupSetStatusLVG, 0, len(nodes))
 	for _, entry := range lvgSet.Status.CreatedLVGs {
 		// The node is taken from the group, not from the entry: a name the set
 		// gave back to a new group may now stand for one on another node.
 		if lvg, exists := lvgs[entry.LVMVolumeGroupName]; exists {
+			if _, onNode := existingNodes[lvg.Spec.Local.NodeName]; !onNode {
+				continue
+			}
 			listed = append(listed, v1alpha1.LVMVolumeGroupSetStatusLVG{
 				LVMVolumeGroupName: lvg.Name,
 				NodeName:           lvg.Spec.Local.NodeName,

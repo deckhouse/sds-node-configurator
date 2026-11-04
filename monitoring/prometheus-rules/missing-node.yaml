@@ -1,0 +1,49 @@
+- name: kubernetes.sds_node_configurator.missing_node
+  rules:
+    - alert: D8SdsNodeConfiguratorLVMVolumeGroupNodeMissing
+      expr: time() - max by (lvm_volume_group, node) (sds_node_configurator_lvm_volume_group_node_missing_timestamp_seconds) > 6 * 3600
+      # The node is gone for good long before this: a node being reinstalled or
+      # replaced under the same name is back within hours. What is left firing is a
+      # resource that nobody has decided about.
+      for: 5m
+      labels:
+        severity_level: "6"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_sds_node_configurator_missing_node: "D8SdsNodeConfiguratorMissingNode,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_sds_node_configurator_missing_node: "D8SdsNodeConfiguratorMissingNode,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: LVMVolumeGroup {{ $labels.lvm_volume_group }} belongs to node {{ $labels.node }}, which is not in the cluster
+        description: |
+          Node `{{ $labels.node }}` was deleted from the cluster more than 6 hours ago, and the LVMVolumeGroup `{{ $labels.lvm_volume_group }}` of that node is still there. Its condition `NodeReady` is `False` with reason `MissingNode`, and the `storage.deckhouse.io/node-missing-since` annotation says when the controller first found the node gone.
+
+          The LVMVolumeGroup is not deleted automatically: the Volume Group on the node's disks outlives the node, and a node reinstalled under the same name finds it again. Until it is deleted, its BlockDevices are kept as well, and an LVMVolumeGroupSet does not list it.
+
+          The recommended course of action:
+          1. If the node is coming back under the same name, wait for it; the alert resolves once the node is in the cluster again.
+          2. Otherwise, delete the volumes on it first. List them: `d8 k get lvmlogicalvolume -o json | jq -r '.items[] | select(.spec.lvmVolumeGroupName == "{{ $labels.lvm_volume_group }}") | .metadata.name'`. Delete the PersistentVolumeClaims behind them; an LVMLogicalVolume that no PVC owns can be deleted directly.
+          3. Delete the LVMVolumeGroup: `d8 k delete lvmvolumegroup {{ $labels.lvm_volume_group }}`. Once the node has been gone for `missingNodeGracePeriodMinutes`, the controller removes the agent's finalizer from the resources being deleted, and they go away. Nothing on the node's disks is touched.
+
+    - alert: D8SdsNodeConfiguratorResourcesOfMissingNodeStuck
+      expr: max by (resource, node, reason) (sds_node_configurator_missing_node_resources_held) > 0
+      # The metric counts only what has outlived the grace period already, so
+      # what remains after another half hour is waiting for someone, not for time.
+      for: 30m
+      labels:
+        severity_level: "5"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_sds_node_configurator_missing_node: "D8SdsNodeConfiguratorMissingNode,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_sds_node_configurator_missing_node: "D8SdsNodeConfiguratorMissingNode,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: "{{ $value }} {{ $labels.resource }} resources of the deleted node {{ $labels.node }} are stuck in Terminating"
+        description: |
+          {{ $value }} `{{ $labels.resource }}` resources of node `{{ $labels.node }}`, which is not in the cluster any more, are being deleted and still carry the finalizer `storage.deckhouse.io/sds-node-configurator`. The node has been gone for longer than `missingNodeGracePeriodMinutes`, but the controller does not remove the finalizer for the following reason: `{{ $labels.reason }}`.
+
+          - `ForeignFinalizers`: the resource also carries a finalizer of another controller, usually the CSI driver that uses the volume. The controller removes the agent's finalizer only after that one is gone, as the agent itself would. Find out why its owner keeps it: `d8 k get {{ $labels.resource }} -o json | jq -r '.items[] | select(.metadata.deletionTimestamp != null) | "\(.metadata.name) \(.metadata.finalizers)"'`.
+          - `VolumesLeft`: an LVMVolumeGroup being deleted still has LVMLogicalVolume or LVMLogicalVolumeSnapshot resources on it. Delete those first (through their PersistentVolumeClaims or VolumeSnapshots where they have them); the group follows.
+          - `ReleaseDisabled`: `missingNodeGracePeriodMinutes` is `0`, so the controller removes nothing. Either set it, or remove the finalizer by hand once nothing on the node is needed any more: `d8 k patch {{ $labels.resource }} <name> --type=json -p '[{"op":"remove","path":"/metadata/finalizers/0"}]'` after checking that it is the only finalizer.
+
+          Removing the finalizer does not touch the node's disks: the Volume Group and Logical Volumes there stay as they are.

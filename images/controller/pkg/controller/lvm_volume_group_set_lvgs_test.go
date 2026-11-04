@@ -62,6 +62,14 @@ func nodesByName(names ...string) map[string]v1.Node {
 	return m
 }
 
+func nodeNames(nodes map[string]v1.Node) map[string]struct{} {
+	names := make(map[string]struct{}, len(nodes))
+	for name := range nodes {
+		names[name] = struct{}{}
+	}
+	return names
+}
+
 func blockLVGSet(name, vg string) *v1alpha1.LVMVolumeGroupSet {
 	return &v1alpha1.LVMVolumeGroupSet{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
@@ -105,7 +113,8 @@ func TestSetLVMVolumeGroupSetLVGs(t *testing.T) {
 		lvgOnNode("other-vg", "node-4", "another-vg", v1alpha1.PhaseReady),
 	)
 
-	setLVMVolumeGroupSetLVGs(lvgSet, lvgs, nodesByName("node-1", "node-2", "node-3", "node-4"))
+	nodes := nodesByName("node-1", "node-2", "node-3", "node-4")
+	setLVMVolumeGroupSetLVGs(lvgSet, lvgs, nodes, nodeNames(nodes))
 
 	assert.Equal(t, []v1alpha1.LVMVolumeGroupSetStatusLVG{
 		{LVMVolumeGroupName: "set-a-0", NodeName: "node-2"},
@@ -115,6 +124,62 @@ func TestSetLVMVolumeGroupSetLVGs(t *testing.T) {
 	assert.Equal(t, 3, lvgSet.Status.CurrentLVMVolumeGroupsCount)
 	assert.Equal(t, 4, lvgSet.Status.DesiredLVMVolumeGroupsCount)
 	assert.Equal(t, 2, lvgSet.Status.ReadyLVMVolumeGroupsCount)
+}
+
+// A group whose node was deleted from the cluster drops out of the status but
+// is not deleted, and a node that is still there but no longer selected keeps
+// its group listed.
+func TestSetLVMVolumeGroupSetLVGsDropsDeletedNodes(t *testing.T) {
+	lvgSet := blockLVGSet("set-a", "vg")
+	lvgSet.Status.CreatedLVGs = []v1alpha1.LVMVolumeGroupSetStatusLVG{
+		{LVMVolumeGroupName: "set-a-0", NodeName: "node-0"},
+		{LVMVolumeGroupName: "set-a-1", NodeName: "node-deleted"},
+		{LVMVolumeGroupName: "set-a-2", NodeName: "node-unselected"},
+	}
+	lvgs := lvgsByName(
+		lvgOnNode("set-a-0", "node-0", "vg", v1alpha1.PhaseReady),
+		lvgOnNode("set-a-1", "node-deleted", "vg", v1alpha1.PhaseReady),
+		lvgOnNode("set-a-2", "node-unselected", "vg", v1alpha1.PhaseReady),
+	)
+	selected := nodesByName("node-0")
+
+	setLVMVolumeGroupSetLVGs(lvgSet, lvgs, selected, nodeNames(nodesByName("node-0", "node-unselected")))
+
+	assert.Equal(t, []v1alpha1.LVMVolumeGroupSetStatusLVG{
+		{LVMVolumeGroupName: "set-a-0", NodeName: "node-0"},
+		{LVMVolumeGroupName: "set-a-2", NodeName: "node-unselected"},
+	}, lvgSet.Status.CreatedLVGs)
+	assert.Equal(t, 2, lvgSet.Status.CurrentLVMVolumeGroupsCount)
+	assert.Equal(t, 1, lvgSet.Status.DesiredLVMVolumeGroupsCount)
+	assert.Equal(t, 2, lvgSet.Status.ReadyLVMVolumeGroupsCount)
+}
+
+// The same through a reconcile: the node of one of the set's groups is deleted,
+// the status follows, and the group stays where it is.
+func TestReconcileLVMVolumeGroupSetDropsADeletedNode(t *testing.T) {
+	ctx := context.Background()
+	cl := newFakeClientWithLVGSetStatus()
+
+	for _, name := range []string{"node-0", "node-1"} {
+		require.NoError(t, cl.Create(ctx, &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"set": "set-a"}}}))
+	}
+	lvgSet := blockLVGSet("set-a", "vg")
+	require.NoError(t, cl.Create(ctx, lvgSet))
+
+	_, err := reconcileLVMVolumeGroupSet(ctx, cl, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet)
+	require.NoError(t, err)
+	require.Len(t, lvgSet.Status.CreatedLVGs, 2)
+
+	require.NoError(t, cl.Delete(ctx, &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}))
+	_, err = reconcileLVMVolumeGroupSet(ctx, cl, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet)
+	require.NoError(t, err)
+
+	stored := &v1alpha1.LVMVolumeGroupSet{}
+	require.NoError(t, cl.Get(ctx, client.ObjectKeyFromObject(lvgSet), stored))
+	assert.Equal(t, []v1alpha1.LVMVolumeGroupSetStatusLVG{{LVMVolumeGroupName: "set-a-0", NodeName: "node-0"}}, stored.Status.CreatedLVGs)
+	assert.Equal(t, 1, stored.Status.CurrentLVMVolumeGroupsCount)
+	assert.Equal(t, 1, stored.Status.DesiredLVMVolumeGroupsCount)
+	assert.NoError(t, cl.Get(ctx, client.ObjectKey{Name: "set-a-1"}, &v1alpha1.LVMVolumeGroup{}), "the group of the deleted node is kept")
 }
 
 func TestShouldLVGSetWatcherReconcileLVGUpdateEvent(t *testing.T) {
@@ -298,6 +363,7 @@ func TestReconcileLVMVolumeGroupSetCountsGroupsWithNoNodeSelected(t *testing.T) 
 
 	kept := lvgOnNode("set-a-1", "node-1", "vg", v1alpha1.PhaseReady)
 	require.NoError(t, cl.Create(ctx, &kept))
+	require.NoError(t, cl.Create(ctx, &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}))
 
 	requeue, err := reconcileLVMVolumeGroupSet(ctx, cl, cl, logger.NewNop(), monitoring.GetMetrics(""), lvgSet)
 	require.NoError(t, err)

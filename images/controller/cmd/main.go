@@ -78,6 +78,7 @@ func main() {
 	log.Info(fmt.Sprintf("%s = %s", config.LeaderElectionIDEnvName, cfgParams.LeaderElectionID))
 	log.Info(fmt.Sprintf("%s = %s", config.AgentNamespaceEnvName, cfgParams.AgentNamespace))
 	log.Info(fmt.Sprintf("%s = %s", config.MissingBlockDeviceRetentionHours, cfgParams.MissingBlockDeviceRetention))
+	log.Info(fmt.Sprintf("%s = %s", config.MissingNodeGracePeriodMinutes, cfgParams.MissingNodeGracePeriod))
 
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
@@ -149,6 +150,12 @@ func main() {
 	err = controller.RunBlockDeviceNodeGC(mgr, baseLog, *cfgParams)
 	if err != nil {
 		log.Error("unable to run RunBlockDeviceNodeGC", logger.Err(err))
+		os.Exit(1)
+	}
+
+	err = controller.RunMissingNodeRelease(mgr, baseLog, *cfgParams, metrics)
+	if err != nil {
+		log.Error("unable to run RunMissingNodeRelease", logger.Err(err))
 		os.Exit(1)
 	}
 

@@ -41,6 +41,8 @@ func TestEveryUsedCollectorIsRegistered(t *testing.T) {
 	m.APIMethodsErrors("test-controller", "list").Inc()
 	m.ReconcilesCountTotal("test-controller").Inc()
 	m.NoOperationalResourcesCount("LVMVolumeGroup").Set(0)
+	m.LVGNodeMissingSince("test-lvg", "test-node").Set(0)
+	m.MissingNodeResourcesHeld("LVMVolumeGroup", "test-node", "test-reason").Set(0)
 
 	families, err := metrics.Registry.Gather()
 	require.NoError(t, err)
@@ -57,6 +59,8 @@ func TestEveryUsedCollectorIsRegistered(t *testing.T) {
 		namespace + "_api_methods_errors_count_total",
 		namespace + "_reconciles_count_total",
 		namespace + "_no_operational_resources_count_total",
+		namespace + "_lvm_volume_group_node_missing_timestamp_seconds",
+		namespace + "_missing_node_resources_held",
 	} {
 		assert.Contains(t, exported, name, "incremented in this binary but not exported")
 	}

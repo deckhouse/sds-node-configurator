@@ -58,7 +58,7 @@ An LVMVolumeGroup that has never described its node stays in the `Pending` phase
 
 ## Why did the LVMVolumeGroup resource and Volume Group remain after deletion attempt?
 
-This situation can occur in three cases:
+This situation can occur in four cases:
 
 1. The Volume Group contains Logical Volumes.
 
@@ -84,6 +84,10 @@ This situation can occur in three cases:
 
    Once their owners remove them, the resource and Volume Group will be automatically deleted.
 
+1. The node of the resource was deleted from the cluster.
+
+   Only the agent of a node removes its finalizer `storage.deckhouse.io/sds-node-configurator`, and a deleted node has no agent. The controller removes the finalizer for it once the node has been gone for `missingNodeGracePeriodMinutes` of the module configuration (10 minutes by default) and no LVMLogicalVolume or LVMLogicalVolumeSnapshot is left on the resource. The Volume Group stays on the node's disks. See [A node was deleted from the cluster](#a-node-was-deleted-from-the-cluster-what-happens-to-its-resources-and-how-do-i-clean-them-up).
+
 ## Why is an LVMLogicalVolume not deleted?
 
 The agent removes the Logical Volume only after every other controller has removed its finalizer from the [LVMLogicalVolume](./cr.html#lvmlogicalvolume): a finalizer of another module, such as `storage.deckhouse.io/sds-local-volume-csi` of `sds-local-volume`, means the volume may still be in use. While it waits, the resource reports it in the `Ready` condition: `status: "False"`, `reason: Deleting`, and the finalizers it waits for in the message:
@@ -93,6 +97,62 @@ d8 k get lvmlogicalvolume <name> -o jsonpath='{.status.conditions[?(@.type=="Rea
 ```
 
 The finalizer belongs to the module that put it there and is removed by that module once it has released the volume (for `sds-local-volume`, when the PersistentVolume is deleted). Look for the cause on that side rather than removing the finalizer by hand: doing so lets the agent delete a Logical Volume that may still hold data in use.
+
+## A node was deleted from the cluster. What happens to its resources, and how do I clean them up?
+
+Deleting the Node object of a node does not delete the module's resources of that node, and does not touch its disks:
+
+- **LVMVolumeGroup.** The controller sets its `NodeReady` condition to `False` with the reason `MissingNode`, and records when it first found the node gone in the `storage.deckhouse.io/node-missing-since` annotation. The resource is not deleted automatically: the Volume Group on the disks outlives the node, and a node reinstalled under the same name finds it again. An LVMVolumeGroupSet stops listing it in its status but does not delete it either. After 6 hours the `D8SdsNodeConfiguratorLVMVolumeGroupNodeMissing` alert fires.
+- **LVMLogicalVolume and LVMLogicalVolumeSnapshot.** They stay as they are until they are deleted.
+- **BlockDevice.** The controller marks them `Missing` with the reason `NodeNotFound` and deletes them after `missingBlockDeviceRetentionHours`, except those an LVMVolumeGroup still refers to: they go after the LVMVolumeGroup.
+
+A node counts as gone only when the API server has no Node object with its name. A node that is `NotReady`, or whose agent is not running, is still in the cluster, and nothing described here happens to its resources.
+
+The agent normally removes its finalizer `storage.deckhouse.io/sds-node-configurator` after it has cleaned up on the node. For a resource of a deleted node, the controller removes it instead, once:
+
+- the resource is being deleted;
+- the node has been gone for `missingNodeGracePeriodMinutes` of the module configuration (10 minutes by default; `0` disables the removal), counted from the time in the annotation, so a restart of the controller does not start the period over;
+- the agent's finalizer is the only one left. A finalizer of another controller, such as `storage.deckhouse.io/sds-local-volume-csi`, is never removed: its owner removes it, usually when the PersistentVolume is deleted;
+- for an LVMVolumeGroup, no LVMLogicalVolume or LVMLogicalVolumeSnapshot is left on it.
+
+Every removal is recorded as an Event with the reason `AgentFinalizerReleased`. The Events of cluster-scoped resources are in the `default` namespace:
+
+```shell
+d8 k -n default get events --field-selector reason=AgentFinalizerReleased
+```
+
+To clean up after a node that will not come back:
+
+1. Make sure the node is gone and will not return under the same name:
+
+   ```shell
+   d8 k get node <node-name>
+   ```
+
+1. Find its LVMVolumeGroups and the volumes on them:
+
+   ```shell
+   d8 k get lvg -o json | jq -r '.items[] | select(.spec.local.nodeName == "<node-name>") | .metadata.name'
+   d8 k get lvmlogicalvolume -o json | jq -r '.items[] | select(.spec.lvmVolumeGroupName == "<lvg-name>") | .metadata.name'
+   ```
+
+1. Delete the PersistentVolumeClaims and VolumeSnapshots that use those volumes; an LVMLogicalVolume or LVMLogicalVolumeSnapshot that nothing else owns can be deleted directly.
+1. Delete the LVMVolumeGroups:
+
+   ```shell
+   d8 k delete lvg <lvg-name>
+   ```
+
+   The resources go away once the conditions above hold. Their BlockDevices are deleted after `missingBlockDeviceRetentionHours`.
+
+1. If a resource stays in `Terminating`, the `D8SdsNodeConfiguratorResourcesOfMissingNodeStuck` alert names the reason. If the node is gone for good and nothing should wait any more, remove the agent's finalizer by hand. List the finalizers first and remove the agent's by its index, so that no other controller's finalizer is lost:
+
+   ```shell
+   d8 k get lvmlogicalvolume <name> -o jsonpath='{.metadata.finalizers}'
+   d8 k patch lvmlogicalvolume <name> --type=json -p '[{"op":"remove","path":"/metadata/finalizers/<index>"}]'
+   ```
+
+If the server is later added to a cluster again, its disks still carry the Volume Groups and the data. Wipe them before reusing the disks, or let the agent import the Volume Group as described in [How do I transfer control of an existing LVM Volume Group to the controller?](#how-do-i-transfer-control-of-an-existing-lvm-volume-group-to-the-controller).
 
 ## How do I remove a thin pool?
 

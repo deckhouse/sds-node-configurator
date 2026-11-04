@@ -110,3 +110,33 @@ properties:
       on the node again, it clears the condition from the devices it finds.
 
       `0` disables the deletion: the resources are kept until removed manually.
+  missingNodeGracePeriodMinutes:
+    type: integer
+    default: 10
+    minimum: 0
+    maximum: 10080
+    description: |
+      How long, in minutes, a node has to be gone from the cluster before the
+      controller removes the agent's finalizer from that node's LVMVolumeGroup,
+      LVMLogicalVolume and LVMLogicalVolumeSnapshot resources that are being
+      deleted.
+
+      Only the agent of a node removes its finalizer, after it has cleaned up on
+      the node. Once the Node object is deleted no agent is left there, and those
+      resources would stay in `Terminating` forever. The controller removes the
+      finalizer for it, and only the agent's: a resource that still carries a
+      finalizer of another controller (for example, of the CSI driver that uses
+      the volume) waits until that one is removed, and an LVMVolumeGroup waits
+      until no LVMLogicalVolume or LVMLogicalVolumeSnapshot is left on it. Nothing
+      on the node's disks is touched.
+
+      The period is counted from the moment the controller first found the node
+      gone, recorded in the `storage.deckhouse.io/node-missing-since` annotation of
+      the node's LVMVolumeGroups. A node that is merely `NotReady`, or whose agent
+      is not running, is still in the cluster and does not count as gone.
+
+      An LVMVolumeGroup nobody asked to delete is never deleted automatically: the
+      Volume Group on the disks outlives the node.
+
+      `0` disables the removal: the resources stay until their finalizer is removed
+      manually.

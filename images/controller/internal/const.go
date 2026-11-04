@@ -106,6 +106,12 @@ const (
 	TypeVGReady    = "VGReady"
 	TypeNodeReady  = "NodeReady"
 	TypeAgentReady = "AgentReady"
+
+	// AgentFinalizer mirrors the agent-side SdsNodeConfiguratorFinalizer
+	// (images/agent/internal/const.go): the finalizer the agent of a node puts on
+	// the LVMVolumeGroups, LVMLogicalVolumes and LVMLogicalVolumeSnapshots of that
+	// node and removes once it has cleaned up after them there.
+	AgentFinalizer = "storage.deckhouse.io/sds-node-configurator"
 )
 
 // LVGConditionTypes is every condition type published on an LVMVolumeGroup, by

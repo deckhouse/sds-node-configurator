@@ -49,6 +49,13 @@ const (
 	MissingBlockDeviceRetentionHours        = "MISSING_BLOCK_DEVICE_RETENTION_HOURS"
 	DefaultMissingBlockDeviceRetentionHours = 24
 	MaxMissingBlockDeviceRetentionHours     = 8760
+
+	// MissingNodeGracePeriodMinutes is how long the node of an LVMVolumeGroup has
+	// to be gone from the cluster before the controller removes the agent's
+	// finalizer from that node's resources being deleted. 0 disables the removal.
+	MissingNodeGracePeriodMinutes        = "MISSING_NODE_GRACE_PERIOD_MINUTES"
+	DefaultMissingNodeGracePeriodMinutes = 10
+	MaxMissingNodeGracePeriodMinutes     = 10080
 )
 
 type Options struct {
@@ -63,6 +70,7 @@ type Options struct {
 
 	AgentNamespace              string
 	MissingBlockDeviceRetention time.Duration
+	MissingNodeGracePeriod      time.Duration
 }
 
 // DefaultMetricsBindAddress keeps the endpoint on loopback when the chart says
@@ -129,6 +137,19 @@ func NewConfig() (*Options, error) {
 			return nil, fmt.Errorf("[NewConfig] %s must be between 0 and %d, got %d", MissingBlockDeviceRetentionHours, MaxMissingBlockDeviceRetentionHours, parsed)
 		default:
 			opts.MissingBlockDeviceRetention = time.Duration(parsed) * time.Hour
+		}
+	}
+
+	opts.MissingNodeGracePeriod = DefaultMissingNodeGracePeriodMinutes * time.Minute
+	if raw := os.Getenv(MissingNodeGracePeriodMinutes); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		switch {
+		case err != nil:
+			return nil, fmt.Errorf("[NewConfig] %s must be an integer, got %q: %w", MissingNodeGracePeriodMinutes, raw, err)
+		case parsed < 0 || parsed > MaxMissingNodeGracePeriodMinutes:
+			return nil, fmt.Errorf("[NewConfig] %s must be between 0 and %d, got %d", MissingNodeGracePeriodMinutes, MaxMissingNodeGracePeriodMinutes, parsed)
+		default:
+			opts.MissingNodeGracePeriod = time.Duration(parsed) * time.Minute
 		}
 	}
 

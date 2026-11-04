@@ -16,8 +16,10 @@
   "clusterRoleRules" (list
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "blockdevices") "verbs" (list "get" "list" "watch" "update" "delete"))
     (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmvolumegroupsets" "lvmvolumegroupsets/status") "verbs" (list "get" "list" "watch" "update"))
-    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmvolumegroups" "lvmvolumegroups/status") "verbs" (list "get" "list" "watch" "update" "create"))
-    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmlogicalvolumesnapshots") "verbs" (list "get" "list" "watch"))
+    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmvolumegroups" "lvmvolumegroups/status") "verbs" (list "get" "list" "watch" "update" "create" "patch"))
+    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmlogicalvolumes") "verbs" (list "get" "list" "patch"))
+    (dict "apiGroups" (list "storage.deckhouse.io") "resources" (list "lvmlogicalvolumesnapshots") "verbs" (list "get" "list" "watch" "patch"))
+    (dict "apiGroups" (list "") "resources" (list "events") "verbs" (list "create" "patch"))
     (dict "apiGroups" (list "") "resources" (list "nodes" "pods") "verbs" (list "get" "list" "watch"))
     (dict "apiGroups" (list "coordination.k8s.io") "resources" (list "leases") "verbs" (list "get" "list" "watch" "update" "create" "delete"))
   )

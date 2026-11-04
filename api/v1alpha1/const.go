@@ -28,6 +28,13 @@ const (
 
 	LLVSNameTag = "storage.deckhouse.io/lvmLogicalVolumeSnapshotName"
 
+	// NodeMissingSinceAnnotation is set by the controller on an LVMVolumeGroup
+	// whose node is not in the cluster, to the time (RFC 3339) it first found the
+	// node gone, and removed once the node is back. The release of the agent's
+	// finalizer from the resources of that node counts its grace period from it,
+	// so a restart of the controller does not start the period over.
+	NodeMissingSinceAnnotation = "storage.deckhouse.io/node-missing-since"
+
 	blockDeviceLabelPrefix                = "status.blockdevice.storage.deckhouse.io"
 	BlockDeviceTypeLabelKey               = blockDeviceLabelPrefix + "/type"
 	BlockDeviceFSTypeLabelKey             = blockDeviceLabelPrefix + "/fstype"

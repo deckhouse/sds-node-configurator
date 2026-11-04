@@ -76,4 +76,27 @@ func TestNewConfig(t *testing.T) {
 			assert.Error(t, err, bad)
 		}
 	})
+
+	t.Run("MissingNodeGracePeriod", func(t *testing.T) {
+		defer os.Clearenv()
+		opts, err := NewConfig()
+		if assert.NoError(t, err) {
+			assert.Equal(t, DefaultMissingNodeGracePeriodMinutes*time.Minute, opts.MissingNodeGracePeriod)
+		}
+		t.Setenv(MissingNodeGracePeriodMinutes, "0")
+		opts, err = NewConfig()
+		if assert.NoError(t, err) {
+			assert.Zero(t, opts.MissingNodeGracePeriod)
+		}
+		t.Setenv(MissingNodeGracePeriodMinutes, "90")
+		opts, err = NewConfig()
+		if assert.NoError(t, err) {
+			assert.Equal(t, 90*time.Minute, opts.MissingNodeGracePeriod)
+		}
+		for _, bad := range []string{"-1", "10081", "hour"} {
+			t.Setenv(MissingNodeGracePeriodMinutes, bad)
+			_, err = NewConfig()
+			assert.Error(t, err, bad)
+		}
+	})
 }

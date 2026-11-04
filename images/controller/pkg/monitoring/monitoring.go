@@ -86,6 +86,18 @@ var (
 		Name:      "no_operational_resources_count_total",
 		Help:      "How many LVMVolumeGroup resources are in Nooperational state.",
 	}, []string{"resource"})
+
+	lvgNodeMissingSince = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "lvm_volume_group_node_missing_timestamp_seconds",
+		Help:      "When the node of an LVMVolumeGroup was first found gone from the cluster, as a Unix timestamp. Present only while the node is gone.",
+	}, []string{"lvm_volume_group", "node"})
+
+	missingNodeResourcesHeld = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Name:      "missing_node_resources_held",
+		Help:      "How many resources being deleted, whose node has been gone for longer than the grace period, still carry the agent's finalizer, and why it is not removed.",
+	}, []string{"resource", "node", "reason"})
 )
 
 func init() {
@@ -101,6 +113,8 @@ func init() {
 	metrics.Registry.MustRegister(apiMethodsExecutionCount)
 	metrics.Registry.MustRegister(apiMethodsErrorsCount)
 	metrics.Registry.MustRegister(noOperationalResourcesCount)
+	metrics.Registry.MustRegister(lvgNodeMissingSince)
+	metrics.Registry.MustRegister(missingNodeResourcesHeld)
 }
 
 type Metrics struct {
@@ -153,4 +167,24 @@ func (m Metrics) APIMethodsErrors(controllerName, method string) prometheus.Coun
 
 func (m Metrics) NoOperationalResourcesCount(resourceName string) prometheus.Gauge {
 	return noOperationalResourcesCount.WithLabelValues(strings.ToLower(resourceName))
+}
+
+// LVGNodeMissingSince is the gauge of when the node of lvgName was first found
+// gone.
+func (m Metrics) LVGNodeMissingSince(lvgName, nodeName string) prometheus.Gauge {
+	return lvgNodeMissingSince.WithLabelValues(lvgName, nodeName)
+}
+
+// MissingNodeResourcesHeld is the gauge of the resources of nodeName whose
+// agent finalizer is kept past the grace period for reason.
+func (m Metrics) MissingNodeResourcesHeld(resourceName, nodeName, reason string) prometheus.Gauge {
+	return missingNodeResourcesHeld.WithLabelValues(strings.ToLower(resourceName), nodeName, reason)
+}
+
+// ResetMissingNodeGauges drops every series of both missing-node gauges, so a
+// pass that sets the current ones leaves nothing behind for a node that came
+// back or a resource that is gone.
+func (m Metrics) ResetMissingNodeGauges() {
+	lvgNodeMissingSince.Reset()
+	missingNodeResourcesHeld.Reset()
 }
