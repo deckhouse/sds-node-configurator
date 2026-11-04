@@ -104,11 +104,7 @@ go-test-ee: ## Run go generate
 
 .PHONY: test-env
 test-env: ## Run api CRD envtest suite
-	@assets="$(KUBEBUILDER_ASSETS)"; \
-	if [ -z "$$assets" ]; then \
-		assets=$$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.20 use 1.33.x -p path); \
-	fi; \
-	cd api && KUBEBUILDER_ASSETS="$$assets" go test ./v1alpha1/ -count=1 -v
+	cd api/crdtests && go test ./... -count=1 -v
 
 .PHONY: go-mod-tidy
 go-mod-tidy: ## Run go generate
