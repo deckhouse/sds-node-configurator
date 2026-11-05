@@ -51,6 +51,7 @@ docs:
   - "The FAQ section on changing the UUID of Volume Groups when cloning virtual machines now explains that the clone of a node whose Volume Group was created by the module also carries the `storage.deckhouse.io/lvmVolumeGroupName` tag, so the agent on the clone does not import the Volume Group, and that the tag has to be removed with `vgchange --deltag` after `vgchange -u`."
   - "The FAQ explains what happens to the LVMVolumeGroup, LVMLogicalVolume, LVMLogicalVolumeSnapshot and BlockDevice resources of a node deleted from the cluster and how to clean them up."
   - "The FAQ explains how CSI drivers hide their LUNs from the module with BlockDeviceFilter resources: the rules by WWN, by model and by target, how the `scsitarget` label value is built, and the limitations."
+  - "The requirements for a device to get a BlockDevice resource no longer contradict the description of creating a partition on a block device: a device with partitions or other devices built on it gets no BlockDevice of its own (unless it is an LVM Physical Volume), each of its partitions gets one if it meets the requirements, a partition with a PARTUUID needs no serial number, and a partition table without partitions leaves the disk not consumable with the reason `HasPartitionTable`."
 
 # Optional sections — delete rather than leave empty.
 # new_features: []

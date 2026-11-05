@@ -30,13 +30,15 @@ For the controller to create a [BlockDevice](./cr.html#blockdevice) resource for
 - The device must not be a Logical Volume.
 - The device must not be a block volume that kubelet has published to a workload on this node (a `volumeMode: Block` PersistentVolume attached to a pod, e.g. a virtual machine's disk), nor a partition of one or a device stacked on one: whatever is written inside such a device belongs to the volume's consumer. The agent's LVM commands do not read these devices either.
 - The file system must be absent or of type `LVM2_MEMBER`.
-- The block device must not have partitions.
+- No other device may be built on the device: no partitions and no devices stacked on it (in the `lsblk` output, the device has no children). An LVM Physical Volume is the exception: its Logical Volumes do not count. A disk with partitions therefore gets no [BlockDevice](./cr.html#blockdevice) resource of its own; each of its partitions is checked against these requirements as a separate device (see [Creating a partition on a block device](#creating-a-partition-on-a-block-device)).
 - The block device size must exceed 1 GB.
-- If the device is a virtual disk, it must have a serial number (see the [FAQ](./faq.html#how-to-configure-serial-numbers-for-virtual-disks) for how to set it in different virtualization systems).
+- If the device is a virtual disk, it must have a serial number (see the [FAQ](./faq.html#how-to-configure-serial-numbers-for-virtual-disks) for how to set it in different virtualization systems). A partition does not need a serial number if it has a PARTUUID.
 
 #### Creating a partition on a block device
 
-If a partition is created on a block device, the controller will automatically create a [BlockDevice](./cr.html#blockdevice) resource for this partition.
+For the controller, a partition is a device of its own. After a partition is created on a block device, the controller creates a [BlockDevice](./cr.html#blockdevice) resource for the partition if the partition meets the requirements above, and stops creating one for the disk. If the disk already had a BlockDevice resource in the Consumable status, the controller deletes that resource.
+
+A partition table without any partitions in it does not hide the disk: the disk still gets a BlockDevice resource, but it is not consumable, with the reason `HasPartitionTable` (see the [FAQ](./faq.html#why-is-a-blockdevice-not-consumable-with-the-reason-haspartitiontable)).
 
 Example of creating a partition on a block device:
 
