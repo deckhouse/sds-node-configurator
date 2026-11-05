@@ -34,6 +34,18 @@ For the controller to create a [BlockDevice](./cr.html#blockdevice) resource for
 - The block device size must exceed 1 GB.
 - If the device is a virtual disk, it must have a serial number (see the [FAQ](./faq.html#how-to-configure-serial-numbers-for-virtual-disks) for how to set it in different virtualization systems). A partition does not need a serial number if it has a PARTUUID.
 
+##### The system disk
+
+The controller has no separate rule for the disk the OS is installed on: it is checked against the same requirements as any other device. With a usual layout, therefore, neither the disk nor its partitions get a [BlockDevice](./cr.html#blockdevice) resource:
+
+- The disk has partitions, so it gets no BlockDevice resource of its own.
+- Partitions with a file system or another signature (the root, `/boot`, the EFI partition, the swap partition) fail the file system requirement, and service partitions smaller than 1 GB fail the size requirement.
+- If the root is on LVM, its Logical Volumes are filtered out as Logical Volumes, and the Physical Volume (a partition or the whole disk) because its Volume Group is not managed by the module: the controller creates no BlockDevice resource for a Physical Volume of a Volume Group without the LVM tag `storage.deckhouse.io/enabled=true`.
+
+If the Volume Group with the root is handed over to the module with this tag, its Physical Volumes get BlockDevice resources, but they are not consumable, with the reason `HasFilesystem`: the devices are already taken by the Volume Group. A mounted device whose file system `lsblk` does not see (for example, its signature is missing from the udev database) also gets a BlockDevice resource, but it is not consumable, with the reason `Mounted`.
+
+For how to give the module the free space on the system disk, see the [FAQ](./faq.html#how-do-i-give-the-module-the-free-space-on-the-system-disk).
+
 #### Creating a partition on a block device
 
 For the controller, a partition is a device of its own. After a partition is created on a block device, the controller creates a [BlockDevice](./cr.html#blockdevice) resource for the partition if the partition meets the requirements above, and stops creating one for the disk. If the disk already had a BlockDevice resource in the Consumable status, the controller deletes that resource.

@@ -15,6 +15,8 @@ Module functionality when using other kernels or distributions is possible but n
 
 - For virtual machines, a common cause is a virtual disk without a serial number. See ["How to configure serial numbers for virtual disks?"](#how-to-configure-serial-numbers-for-virtual-disks) for how to check and set it.
 
+- With a usual layout, the disk the OS is installed on and its partitions get no [BlockDevice](./cr.html#blockdevice) resources; see [The system disk](./resources.html#the-system-disk) for why. For how to give the module the free space on it, see ["How do I give the module the free space on the system disk?"](#how-do-i-give-the-module-the-free-space-on-the-system-disk).
+
 - [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources may not be created due to the absence of [BlockDevice](./cr.html#blockdevice) resources in the cluster, as their names are used in the [LVMVolumeGroup](./cr.html#lvmvolumegroup) specification.
 
 - If [BlockDevice](./cr.html#blockdevice) resources exist but [LVMVolumeGroup](./cr.html#lvmvolumegroup) resources are missing, ensure that existing LVM Volume Groups on the node have the LVM tag `storage.deckhouse.io/enabled=true`.
@@ -242,6 +244,14 @@ The command removes the partition table, after which the data in its partitions 
 The device is an LVM Physical Volume that belongs to no Volume Group: `pvs` shows it with an empty `VG` column. It is what an LVMVolumeGroup creation that failed after `pvcreate` leaves behind, or a Physical Volume created by hand and never added to a Volume Group. A Volume Group takes such a device as it is, so the agent offers it like an empty device: a new LVMVolumeGroup can use it, and the retry of the failed one succeeds.
 
 A device that carries a Physical Volume of a Volume Group, any Volume Group, stays not consumable with the reason `HasFilesystem`. If an orphaned Physical Volume should not be used, remove it on the node with `pvremove /dev/<device>`.
+
+## How do I give the module the free space on the system disk?
+
+The disk the OS is installed on and its partitions in use are not available to the module (see [The system disk](./resources.html#the-system-disk) for why). The free space on it can be given to the module in one of the following ways, depending on where the space is:
+
+- **Unpartitioned space on the disk.** Create a new partition in it. The controller creates a [BlockDevice](./cr.html#blockdevice) resource for the partition if the partition meets the [requirements](./resources.html#controller-requirements-for-devices): it has no file system, it is larger than 1 GB, and it has a PARTUUID (see [Creating a partition on a block device](./resources.html#creating-a-partition-on-a-block-device)). If `lsblk` does not show the partition after it is created (the kernel may not re-read the partition table of a disk that is in use), add the partition to the kernel with `partx --add --nr <partition number> /dev/<disk>`.
+- **Free space in the LVM Volume Group that holds the root.** Hand the Volume Group over to the module with the LVM tag `storage.deckhouse.io/enabled=true` (see ["How do I transfer control of an existing LVM Volume Group to the controller?"](#how-do-i-transfer-control-of-an-existing-lvm-volume-group-to-the-controller)). The controller creates an [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource for it, and its Physical Volumes get BlockDevice resources that are not consumable, with the reason `HasFilesystem`. To take the Volume Group back from the module, remove the tag (see ["How do I stop the controller from tracking an LVM Volume Group?"](#how-do-i-stop-the-controller-from-tracking-an-lvm-volume-group)).
+- **Free space in a file system.** Use file-backed devices (`spec.fileDevices`): the agent creates a file in the `fileDevicesDirectory` directory, attaches it as a loop device, and uses it as a Physical Volume (see [Creating an LVMVolumeGroup with file-backed devices](./resources.html#creating-an-lvmvolumegroup-with-file-backed-devices)). The default directory is on the same file system as `/var/lib/kubelet` and `/var/lib/containerd`, so only a small amount of space can be given this way; for the limitations, see ["How do file-backed devices (fileDevices) work?"](#how-do-file-backed-devices-filedevices-work).
 
 ## What happens if I disconnect one of the devices in a Volume Group? Will the corresponding LVMVolumeGroup resource be deleted?
 

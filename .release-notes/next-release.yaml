@@ -52,6 +52,7 @@ docs:
   - "The FAQ explains what happens to the LVMVolumeGroup, LVMLogicalVolume, LVMLogicalVolumeSnapshot and BlockDevice resources of a node deleted from the cluster and how to clean them up."
   - "The FAQ explains how CSI drivers hide their LUNs from the module with BlockDeviceFilter resources: the rules by WWN, by model and by target, how the `scsitarget` label value is built, and the limitations."
   - "The requirements for a device to get a BlockDevice resource no longer contradict the description of creating a partition on a block device: a device with partitions or other devices built on it gets no BlockDevice of its own (unless it is an LVM Physical Volume), each of its partitions gets one if it meets the requirements, a partition with a PARTUUID needs no serial number, and a partition table without partitions leaves the disk not consumable with the reason `HasPartitionTable`."
+  - "The requirements for a device to get a BlockDevice resource now explain why the disk the OS is installed on and its partitions get no BlockDevice resources with a usual layout, including a root on LVM, and the FAQ explains how to give the module the free space on that disk: a new partition, the root Volume Group handed over with the `storage.deckhouse.io/enabled=true` tag, or file-backed devices."
 
 # Optional sections — delete rather than leave empty.
 # new_features: []
