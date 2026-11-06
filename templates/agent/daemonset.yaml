@@ -59,7 +59,7 @@ spec:
       namespace: d8-{{ .Chart.Name }}
       labels:
         app: sds-node-configurator
-        {{- if .Values.global.enabledModules | has "admission-policy-engine-crd" }}
+        {{- if .Values.global.enabledModules | has "admission-policy-engine" }}
         security.deckhouse.io/security-policy-exception: sds-node-configurator
         {{- end }}
     spec:

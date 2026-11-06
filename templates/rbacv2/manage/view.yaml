@@ -1,34 +1,74 @@
 {{- if eq (include "sds-node-configurator.rbacv2_new_scheme" .) "true" }}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  labels:
-    heritage: deckhouse
-    module: sds-node-configurator
-    rbac.deckhouse.io/aggregate-to-storage-as: viewer
-    rbac.deckhouse.io/kind: capability
-    rbac.deckhouse.io/capability: "system-capability.sds-node-configurator.view"
-    rbac.deckhouse.io/scope: system
-    rbac.deckhouse.io/namespace: d8-sds-node-configurator
   name: d8:system-capability:sds-node-configurator:view
+  {{- include "helm_lib_module_labels" (list . (dict "rbac.deckhouse.io/aggregate-to-storage-as" "viewer" "rbac.deckhouse.io/capability" "system-capability.sds-node-configurator.view" "rbac.deckhouse.io/kind" "capability" "rbac.deckhouse.io/namespace" "d8-sds-node-configurator" "rbac.deckhouse.io/scope" "system")) | nindent 2 }}
   annotations:
-    en.meta.deckhouse.io/title: "Module sds-node-configurator: view cluster resources"
-    ru.meta.deckhouse.io/title: "Модуль sds-node-configurator: просмотр кластерных ресурсов"
-    en.meta.deckhouse.io/description: "Read-only access to the cluster-scoped resources of the sds-node-configurator module (BlockDevice, LVMVolumeGroup, LVMVolumeGroupSet, LVMLogicalVolume, LVMLogicalVolumeSnapshot)."
-    ru.meta.deckhouse.io/description: "Доступ только на чтение к кластерным ресурсам модуля sds-node-configurator (BlockDevice, LVMVolumeGroup, LVMVolumeGroupSet, LVMLogicalVolume, LVMLogicalVolumeSnapshot)."
+    en.meta.deckhouse.io/description: "Read-only access to the sds-node-configurator module configuration."
+    en.meta.deckhouse.io/title: "Module sds-node-configurator: view configuration"
+    ru.meta.deckhouse.io/description: "Доступ только на чтение к конфигурации модуля sds-node-configurator."
+    ru.meta.deckhouse.io/title: "Модуль sds-node-configurator: просмотр конфигурации"
 rules:
-  - apiGroups:
-      - storage.deckhouse.io
-    resources:
-      - blockdevices
-      - lvmvolumegroups
-      - lvmvolumegroupsets
-      - lvmlogicalvolumes
-      - lvmlogicalvolumesnapshots
-    verbs:
-      - get
-      - list
-      - watch
+- apiGroups:
+  - deckhouse.io
+  resources:
+  - moduleconfigs
+  resourceNames:
+  - sds-node-configurator
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - blockdevicefilters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - blockdevices
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - lvmlogicalvolumes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - lvmlogicalvolumesnapshots
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - lvmvolumegroups
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - lvmvolumegroupsets
+  verbs:
+  - get
+  - list
+  - watch
 {{- else }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

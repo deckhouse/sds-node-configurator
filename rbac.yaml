@@ -1,0 +1,361 @@
+# The module RBAC declaration, read from the RBAC objects the module renders. Review it: every TODO is a
+# decision "dmt lint" reports; then run "dmt lint --linter rbac --fix" to bring the templates in line with it.
+# Objects rendered only under values other than the defaults are not here: lint with --values-file (or
+# --matrix) before the first --fix of the templates if the module has such templates, and declare them with when.
+#
+# Notes:
+# - ServiceAccount agent mounted its token (automountServiceAccountToken unset or true); kept as true -- set false once its pods mount the token themselves
+# - ServiceAccount sds-common-scheduler-extender mounted its token (automountServiceAccountToken unset or true); kept as true -- set false once its pods mount the token themselves
+#
+# Not described by the declaration (stays hand-written, as it is):
+# - ClusterRole/d8:sds-node-configurator:controller (templates/controller/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRoleBinding/d8:sds-node-configurator:controller (templates/controller/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - ClusterRoleBinding/d8:sds-node-configurator:controller:rbac-proxy (templates/controller/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-node-configurator/Role/controller (templates/controller/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-node-configurator/RoleBinding/controller (templates/controller/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - d8-sds-node-configurator/ServiceAccount/controller (templates/controller/rbac-for-us.yaml): rendered by an include of a named template (helm_lib or another chart), which owns it
+# - default/Role/d8:sds-node-configurator:controller:events (templates/controller/rbac-for-us.yaml): shares templates/controller/rbac-for-us.yaml with objects a helm_lib include renders; --fix writes the whole file, so it stays hand-written
+# - default/RoleBinding/d8:sds-node-configurator:controller:events (templates/controller/rbac-for-us.yaml): shares templates/controller/rbac-for-us.yaml with objects a helm_lib include renders; --fix writes the whole file, so it stays hand-written
+apiVersion: rbac.deckhouse.io/v1alpha1
+resources:
+  - group: storage.deckhouse.io
+    resource: blockdevices
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: lvmlogicalvolumes
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: lvmlogicalvolumesnapshots
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: lvmvolumegroups
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: lvmvolumegroupsets
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+  - group: storage.deckhouse.io
+    resource: blockdevicefilters
+    system:
+      manager:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      viewer:
+        - get
+        - list
+        - watch
+    legacy:
+      ClusterEditor:
+        - create
+        - delete
+        - deletecollection
+        - patch
+        - update
+      User:
+        - get
+        - list
+        - watch
+serviceAccounts:
+  - name: agent
+    path: agent
+    extraClusterRoles:
+      - name: d8:sds-node-configurator:sds-node-configurator
+        rules:
+          - apiGroups:
+              - ""
+            resources:
+              - nodes
+            verbs:
+              - get
+              - list
+              - watch
+          - apiGroups:
+              - ""
+            resources:
+              - events
+            verbs:
+              - create
+              - patch
+          - apiGroups:
+              - storage.deckhouse.io
+            resources:
+              - blockdevices
+              - lvmvolumegroups
+              - lvmvolumegroups/status
+              - lvmlogicalvolumes
+              - lvmlogicalvolumes/status
+              - lvmlogicalvolumesnapshots
+              - lvmlogicalvolumesnapshots/status
+            verbs:
+              - get
+              - list
+              - create
+              - delete
+              - watch
+              - update
+          - apiGroups:
+              - events.k8s.io
+            resources:
+              - events
+            verbs:
+              - create
+              - update
+              - list
+              - delete
+              - patch
+          - apiGroups:
+              - storage.deckhouse.io
+            resources:
+              - blockdevicefilters
+            verbs:
+              - get
+              - list
+              - watch
+          - apiGroups:
+              - apps
+            resources:
+              - daemonsets
+              - daemonsets/prometheus-metrics
+            verbs:
+              - get
+          - apiGroups:
+              - authentication.k8s.io
+            resources:
+              - tokenreviews
+            verbs:
+              - create
+          - apiGroups:
+              - authorization.k8s.io
+            resources:
+              - subjectaccessreviews
+            verbs:
+              - create
+    automountServiceAccountToken: true
+  - name: sds-common-scheduler-extender
+    path: sds-common-scheduler-extender
+    labels:
+      app: sds-common-scheduler-extender
+    clusterRules:
+      - apiGroups:
+          - storage.deckhouse.io
+        resources:
+          - lvmvolumegroups
+        verbs:
+          - list
+          - watch
+          - get
+      - apiGroups:
+          - storage.deckhouse.io
+        resources:
+          - lvmlogicalvolumes
+        verbs:
+          - list
+          - watch
+          - get
+      - apiGroups:
+          - storage.deckhouse.io
+        resources:
+          - replicatedstorageclasses
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - storage.deckhouse.io
+        resources:
+          - replicatedstoragepools
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - storage.deckhouse.io
+        resources:
+          - replicatedvolumes
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - deckhouse.io
+        resources:
+          - moduleconfigs
+        verbs:
+          - get
+          - list
+          - watch
+    namespaceRules:
+      - apiGroups:
+          - coordination.k8s.io
+        resources:
+          - leases
+        verbs:
+          - create
+      - apiGroups:
+          - coordination.k8s.io
+        resources:
+          - leases
+        resourceNames:
+          - sds-common-scheduler-extender
+        verbs:
+          - get
+          - update
+    roleName: sds-common-scheduler-extender-leader-election
+    bindClusterRoles:
+      - name: system:kube-scheduler
+        bindingName: d8:sds-node-configurator:sds-common-scheduler-extender-kube-scheduler
+      - name: system:volume-scheduler
+        bindingName: d8:sds-node-configurator:sds-common-scheduler-extender-volume-scheduler
+    automountServiceAccountToken: true
+prometheusAccess:
+  - path: agent
+    name: prometheus-metrics
+    daemonsets:
+      - sds-node-configurator
+    when: (.Values.global.enabledModules | has "prometheus")
+    labels:
+      app: sds-node-configurator
+  - path: controller
+    name: prometheus-metrics
+    deployments:
+      - controller
+    when: (.Values.global.enabledModules | has "prometheus")
+    labels:
+      app: controller
+  - path: sds-common-scheduler-extender
+    name: prometheus-metrics
+    deployments:
+      - sds-common-scheduler-extender
+    when: (.Values.global.enabledModules | has "prometheus")
+    labels:
+      app: sds-common-scheduler-extender
+access:
+  - name: admin-kubeconfig
+    subjects:
+      - kind: Group
+        name: kubeadm:cluster-admins
+    clusterRules:
+      - apiGroups:
+          - storage.deckhouse.io
+        resources:
+          - blockdevices
+          - lvmlogicalvolumes
+          - lvmlogicalvolumesnapshots
+          - lvmvolumegroups
+          - lvmvolumegroupsets
+        verbs:
+          - get
+          - list
+          - watch
+          - create
+          - delete
+          - deletecollection
+          - patch
+          - update

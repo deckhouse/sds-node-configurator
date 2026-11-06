@@ -2,19 +2,55 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  annotations:
-    user-authz.deckhouse.io/access-level: User
   name: d8:user-authz:sds-node-configurator:user
   {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+  annotations:
+    user-authz.deckhouse.io/access-level: "User"
 rules:
 - apiGroups:
   - storage.deckhouse.io
   resources:
+  - blockdevicefilters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - blockdevices
-  - lvmvolumegroups
-  - lvmvolumegroupsets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - lvmlogicalvolumes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - lvmlogicalvolumesnapshots
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - lvmvolumegroups
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - lvmvolumegroupsets
   verbs:
   - get
   - list
@@ -23,19 +59,65 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  annotations:
-    user-authz.deckhouse.io/access-level: ClusterEditor
   name: d8:user-authz:sds-node-configurator:cluster-editor
   {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+  annotations:
+    user-authz.deckhouse.io/access-level: "ClusterEditor"
 rules:
 - apiGroups:
   - storage.deckhouse.io
   resources:
+  - blockdevicefilters
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - patch
+  - update
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - blockdevices
-  - lvmvolumegroups
-  - lvmvolumegroupsets
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - patch
+  - update
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - lvmlogicalvolumes
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - patch
+  - update
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
   - lvmlogicalvolumesnapshots
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - patch
+  - update
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - lvmvolumegroups
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - patch
+  - update
+- apiGroups:
+  - storage.deckhouse.io
+  resources:
+  - lvmvolumegroupsets
   verbs:
   - create
   - delete

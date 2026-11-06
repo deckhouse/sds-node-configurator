@@ -4,6 +4,10 @@ date: "2026-xx-xx"
 summary: ""
 highlights: []
 
+improvements:
+  - "`BlockDeviceFilter` теперь выдаётся так же, как остальные ресурсы модуля: get, list и watch — наблюдателю подсистемы storage и уровню `User`, create, update, patch, delete и deletecollection — менеджеру и уровню `ClusterEditor`. До этого читать и менять фильтры могли только суперадминистраторы."
+  - "В DKP 1.78 и новее роли `d8:system-capability:sds-node-configurator:view` и `d8:system-capability:sds-node-configurator:edit` дают также доступ на чтение к ModuleConfig `sds-node-configurator`, а `edit` — и на запись, и несут стандартные заголовки и описания платформы, как все capability ролевой модели DKP 1.78. RBAC модуля теперь описан в `rbac.yaml`, и шаблоны RBACv2 пишутся из него; кластеры ниже DKP 1.78 сохраняют прежние роли."
+
 # Необязательные разделы — пустые не оставлять, а удалять.
 # new_features: []
 # improvements: []
