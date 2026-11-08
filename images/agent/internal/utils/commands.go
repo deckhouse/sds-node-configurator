@@ -1791,8 +1791,8 @@ func lvmStaticExtendedArgs(args []string) []string {
 	}
 
 	configValue := LVMGlobalFilterForOwnedLoops() + " " + internal.LVMScanLVs + " " + internal.LVMArchiveRetention + " " + internal.LVMThinTools
-	withConfig := make([]string, 0, len(args)+2)
-	withConfig = append(withConfig, args[0], "--config", configValue)
+	withConfig := make([]string, 0, len(args)+4)
+	withConfig = append(withConfig, args[0], "--config", configValue, "--devicesfile", "")
 	withConfig = append(withConfig, args[1:]...)
 
 	return nsentrerExpendedArgs(internal.LVMCmd, withConfig...)

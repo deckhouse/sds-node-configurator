@@ -283,6 +283,23 @@ vgchange myvg-0 --deltag storage.deckhouse.io/enabled=true
 
 After this, the controller will stop tracking the selected Volume Group and will independently delete the associated [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource.
 
+## Why does `lvs` not show the module's volume groups on a node with an LVM devices file (RHEL 9, Rocky Linux 9, AlmaLinux 9)?
+
+Starting with RHEL 9, the host's LVM uses only the devices listed in its devices file (`/etc/lvm/devices/system.devices`) by default. The agent runs LVM commands with `--devicesfile ""`: it neither reads nor changes this file and selects devices by its own filter. Disks the agent gives to LVMVolumeGroup resources are not added to the host's devices file, so `lvs`, `vgs` and LVM autoactivation at boot do not see them. The agent activates the module's volume groups itself after the node boots.
+
+To see the module's volume groups on the node:
+
+```shell
+vgs --devicesfile ""
+lvs --devicesfile ""
+```
+
+To make the host's LVM see a disk permanently, add it to the devices file:
+
+```shell
+lvmdevices --adddev /dev/sdX
+```
+
 ## Why does the LVM tag `storage.deckhouse.io/enabled=true` appear automatically?
 
 The LVM tag appears in the following cases:

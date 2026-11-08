@@ -381,7 +381,7 @@ func TestLvmStaticExtendedArgs(t *testing.T) {
 			name: "vgs_with_options_gets_config_after_subcommand",
 			args: []string{"vgs", "-o", "+uuid,tags,shared,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json"},
 			want: append(append([]string{}, prefix...),
-				"vgs", "--config", configValue,
+				"vgs", "--config", configValue, "--devicesfile", "",
 				"-o", "+uuid,tags,shared,vg_attr,vg_extent_size", "--units", "B", "--nosuffix", "--reportformat", "json",
 			),
 		},
@@ -389,7 +389,7 @@ func TestLvmStaticExtendedArgs(t *testing.T) {
 			name: "pvscan_cache_gets_config_after_subcommand",
 			args: []string{"pvscan", "--cache"},
 			want: append(append([]string{}, prefix...),
-				"pvscan", "--config", configValue,
+				"pvscan", "--config", configValue, "--devicesfile", "",
 				"--cache",
 			),
 		},
@@ -397,14 +397,14 @@ func TestLvmStaticExtendedArgs(t *testing.T) {
 			name: "single_subcommand_still_gets_config",
 			args: []string{"vgscan"},
 			want: append(append([]string{}, prefix...),
-				"vgscan", "--config", configValue,
+				"vgscan", "--config", configValue, "--devicesfile", "",
 			),
 		},
 		{
 			name: "vgcreate_with_pv_list_preserves_tail_order",
 			args: []string{"vgcreate", "vg-data", "/dev/sda", "/dev/sdb", "--addtag", "storage.deckhouse.io/enabled=true"},
 			want: append(append([]string{}, prefix...),
-				"vgcreate", "--config", configValue,
+				"vgcreate", "--config", configValue, "--devicesfile", "",
 				"vg-data", "/dev/sda", "/dev/sdb", "--addtag", "storage.deckhouse.io/enabled=true",
 			),
 		},
@@ -426,6 +426,12 @@ func TestLvmStaticExtendedArgs(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+
+	t.Run("devicesfile_is_empty_and_follows_config_after_subcommand", func(t *testing.T) {
+		got := lvmStaticExtendedArgs([]string{"lvs", "--noheadings"})
+		start := len(prefix)
+		assert.Equal(t, []string{"lvs", "--config", configValue, "--devicesfile", "", "--noheadings"}, got[start:])
+	})
 
 	t.Run("config_value_contains_all_foreign_prefixes_and_retention", func(t *testing.T) {
 		// Defensive cross-check: --config must reject all foreign
