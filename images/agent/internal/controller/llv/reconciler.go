@@ -699,7 +699,7 @@ func checkIfLVBelongsToLLV(llv *v1alpha1.LVMLogicalVolume, lv *internal.LVData) 
 
 	switch llv.Spec.Type {
 	case internal.Thin:
-		if lv.PoolName != llv.Spec.Thin.PoolName {
+		if llv.Spec.Thin == nil || lv.PoolName != llv.Spec.Thin.PoolName {
 			return false
 		}
 	case internal.Thick:

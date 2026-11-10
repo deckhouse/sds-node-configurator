@@ -10,6 +10,7 @@ improvements:
 
 fixes:
   - "On RHEL 9, Rocky Linux 9 and AlmaLinux 9 nodes the agent no longer renames the host's `/etc/lvm/devices/system.devices` to `system.devices-unused.*`, and its device filter now applies whatever `use_devicesfile` the host sets. The agent runs LVM commands with `--devicesfile \"\"`. A file renamed before the update is not restored automatically: rename it back by hand if the host relies on it. On a host that keeps its devices file, the host's `lvs`, `vgs` and boot-time autoactivation do not see the disks of the module's volume groups unless they are added with `lvmdevices --adddev`; the agent activates the volume groups itself."
+  - "The agent no longer crashes on a `Thin` LVMLogicalVolume without `spec.thin` when an LV with the same name already exists on the node; the LVMLogicalVolume is reported as invalid instead."
 
 # Optional sections — delete rather than leave empty.
 # new_features: []

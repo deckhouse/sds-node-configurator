@@ -83,6 +83,18 @@ func TestLVMLogicalVolumeWatcher(t *testing.T) {
 			assert.False(t, checkIfLVBelongsToLLV(llv, lv))
 		})
 
+		t.Run("llv_thin_without_thin_spec_returns_false", func(t *testing.T) {
+			llv := &v1alpha1.LVMLogicalVolume{
+				ObjectMeta: v1.ObjectMeta{},
+				Spec: v1alpha1.LVMLogicalVolumeSpec{
+					Type: internal.Thin,
+				},
+			}
+			lv := &internal.LVData{LVAttr: "Vwi-a-tz--", PoolName: "test-pool"}
+
+			assert.False(t, checkIfLVBelongsToLLV(llv, lv))
+		})
+
 		t.Run("llv_thick_returns_true", func(t *testing.T) {
 			llv := &v1alpha1.LVMLogicalVolume{
 				ObjectMeta: v1.ObjectMeta{},
