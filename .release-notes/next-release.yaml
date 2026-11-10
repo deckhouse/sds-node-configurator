@@ -4,14 +4,6 @@ date: "2026-xx-xx"
 summary: ""
 highlights: []
 
-improvements:
-  - "`BlockDeviceFilter` is now granted like the other resources of the module: get, list and watch to the viewer of the storage subsystem and to the `User` access level, create, update, patch, delete and deletecollection to the manager and to `ClusterEditor`. Until now only superadmins could read or change the filters."
-  - "On DKP 1.78 and later, the `d8:system-capability:sds-node-configurator:view` and `d8:system-capability:sds-node-configurator:edit` roles also give read access to the `sds-node-configurator` ModuleConfig, and `edit` write access to it, and carry the standard titles and descriptions of the platform, as every capability of the DKP 1.78 role model does. The RBAC of the module is now declared in `rbac.yaml`, and the RBACv2 templates are written from it; clusters below DKP 1.78 keep the roles they had."
-
-fixes:
-  - "On RHEL 9, Rocky Linux 9 and AlmaLinux 9 nodes the agent no longer renames the host's `/etc/lvm/devices/system.devices` to `system.devices-unused.*`, and its device filter now applies whatever `use_devicesfile` the host sets. The agent runs LVM commands with `--devicesfile \"\"`. A file renamed before the update is not restored automatically: rename it back by hand if the host relies on it. On a host that keeps its devices file, the host's `lvs`, `vgs` and boot-time autoactivation do not see the disks of the module's volume groups unless they are added with `lvmdevices --adddev`; the agent activates the volume groups itself."
-  - "The agent no longer crashes on a `Thin` LVMLogicalVolume without `spec.thin` when an LV with the same name already exists on the node; the LVMLogicalVolume is reported as invalid instead."
-
 # Optional sections — delete rather than leave empty.
 # new_features: []
 # improvements: []
