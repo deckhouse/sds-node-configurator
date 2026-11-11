@@ -246,6 +246,14 @@ const (
 	// be reported as the same thing, or the operator waits for a cache that is
 	// not the problem.
 	ReasonVGCheckFailed = "VGCheckFailed"
+	// ReasonVGNameTakenOnNode is set when vgcreate refuses because /dev/<vg>
+	// exists on the node while LVM sees no Volume Group of that name: the
+	// directory is left from a Volume Group that was removed by hand. It does not
+	// clear itself; the operator removes the directory, and the next reconcile
+	// creates the Volume Group. It is deliberately NOT acceptable to the
+	// controller's aggregate verdict, as VGCreationFailed is not: the Volume Group
+	// does not exist.
+	ReasonVGNameTakenOnNode = "VGNameTakenOnNode"
 	// ReasonBlockDeviceNotFound is set when SOME of the node's Volume Group's
 	// Physical Volumes have no BlockDevice resource to name them, while the rest
 	// could be named: the status published in that pass describes the node, and only

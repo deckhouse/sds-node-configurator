@@ -1028,7 +1028,8 @@ func (r *Reconciler) reconcileLVGCreateFunc(
 	err := r.createVGComplex(ctx, lvg, blockDevices)
 	if err != nil {
 		log.Error(fmt.Sprintf("unable to create VG for the LVMVolumeGroup %s", lvg.Name), logger.Err(err))
-		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, "VGCreationFailed", fmt.Sprintf("unable to create VG, err: %s", err.Error()))
+		reason, msg := classifyVGCreateFailure(err, lvg.Spec.ActualVGNameOnTheNode, r.cfg.NodeName)
+		err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, reason, msg)
 		if err != nil {
 			log.Error(fmt.Sprintf("unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name), logger.Err(err))
 		}
@@ -2629,4 +2630,13 @@ func countVGSizeByBlockDevices(blockDevices map[string]v1alpha1.BlockDevice) res
 		totalVGSize += bd.Status.Size.Value()
 	}
 	return *resource.NewQuantity(totalVGSize, resource.BinarySI)
+}
+
+func classifyVGCreateFailure(err error, vgName, nodeName string) (string, string) {
+	if strings.Contains(err.Error(), fmt.Sprintf("/dev/%s: already exists in filesystem", vgName)) {
+		return internal.ReasonVGNameTakenOnNode, fmt.Sprintf(
+			"/dev/%[1]s exists on node %[2]s but LVM sees no volume group %[1]s: it is left from a volume group removed by hand. Check it with \"ls -l /dev/%[1]s\" and \"vgs %[1]s\"; if every entry is a dangling link, remove it with \"rm -r /dev/%[1]s\". The LVMVolumeGroup is created on the next reconcile.",
+			vgName, nodeName)
+	}
+	return "VGCreationFailed", fmt.Sprintf("unable to create VG, err: %s", err.Error())
 }

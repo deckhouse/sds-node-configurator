@@ -4,6 +4,9 @@ date: "2026-xx-xx"
 summary: ""
 highlights: []
 
+fixes:
+  - "When a Volume Group cannot be created because `/dev/<vg>` is left on the node after a Volume Group of that name was removed by hand, the `VGConfigurationApplied` condition of the LVMVolumeGroup now has the reason `VGNameTakenOnNode` and a message that names the node and tells how to check and remove the directory, instead of the raw `vgcreate` error under `VGCreationFailed`. The agent does not remove the directory itself; once it is removed, the LVMVolumeGroup is created on the next reconcile."
+
 # Optional sections — delete rather than leave empty.
 # new_features: []
 # improvements: []

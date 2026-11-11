@@ -220,6 +220,27 @@ Most often the problem is related to incorrectly specified [BlockDevice](./cr.ht
 
 The complete list of expected values is available in the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource description.
 
+## Why is an LVMVolumeGroup not created with `/dev/<vg>: already exists in filesystem`?
+
+The `VGConfigurationApplied` condition of the LVMVolumeGroup is `False` with the reason `VGNameTakenOnNode`. `vgcreate` refuses to create a Volume Group while the path `/dev/<vg>` exists on the node, even if LVM knows no Volume Group of that name. Such a directory is left when a Volume Group is removed by hand, for example with `dmsetup remove` or by wiping the disks, and its entries (links to logical volumes, for example to old LINSTOR snapshots) now point nowhere. The condition message names the node and the path.
+
+The agent does not remove `/dev/<vg>` itself: a Volume Group of that name can exist on devices that the module's filter hides from it.
+
+To check, run on the node:
+
+```shell
+ls -l /dev/<vg>
+vgs <vg>
+```
+
+If `vgs` reports `Volume group "<vg>" not found` and every entry in `/dev/<vg>` is a dangling link, remove the directory:
+
+```shell
+rm -r /dev/<vg>
+```
+
+The agent retries on its own, so the LVMVolumeGroup is created on the next reconcile and no other action is needed.
+
 ## Why is a BlockDevice not consumable with the reason `HasPartitionTable`?
 
 The device carries a partition table, possibly one without any partitions in it. The kernel then shows no partitions, and `lsblk` shows the disk as empty, but LVM refuses to create a Physical Volume on it. Depending on the LVM version, the error is either `Cannot use /dev/<device>: device is partitioned` or `WARNING: gpt signature detected on /dev/<device> …` followed by `Aborted wiping of gpt.`. A disk that was partitioned before and cleaned only partially, or that came with a GPT header from the vendor, often looks like this.
