@@ -468,6 +468,23 @@ func (mr *MockCommandsMockRecorder) GetVG(vgName any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetVG", reflect.TypeOf((*MockCommands)(nil).GetVG), vgName)
 }
 
+// GetVGLVs mocks base method.
+func (m *MockCommands) GetVGLVs(vgName string) ([]internal.LVData, string, bytes.Buffer, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetVGLVs", vgName)
+	ret0, _ := ret[0].([]internal.LVData)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(bytes.Buffer)
+	ret3, _ := ret[3].(error)
+	return ret0, ret1, ret2, ret3
+}
+
+// GetVGLVs indicates an expected call of GetVGLVs.
+func (mr *MockCommandsMockRecorder) GetVGLVs(vgName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetVGLVs", reflect.TypeOf((*MockCommands)(nil).GetVGLVs), vgName)
+}
+
 // LVActivate mocks base method.
 func (m *MockCommands) LVActivate(ctx context.Context, vgName, lvName string) (string, error) {
 	m.ctrl.T.Helper()

@@ -67,6 +67,7 @@ type Reconciler struct {
 	cfg             ReconcilerConfig
 	runningCleanups cleanups
 	commands        utils.Commands
+	thinPools       thinPoolLocks
 }
 
 var errAlreadyRunning = errors.New("reconcile in progress")
@@ -357,14 +358,55 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 		return true, err
 	}
 
-	freeSpace := utils.GetFreeLVGSpaceForLLV(lvg, llv)
-	log.Trace(fmt.Sprintf("the LVMLogicalVolume %s, LV: %s, VG: %s type: %s requested size: %s, aligned size: %s, free space: %s", llv.Name, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Type, llvRequestSize.String(), alignedRequestSize.String(), freeSpace.String()))
+	actualSize, shouldRequeue, err := r.createLV(ctx, llv, lvg, llvRequestSize, alignedRequestSize)
+	if shouldRequeue || err != nil {
+		return shouldRequeue, err
+	}
 
-	if freeSpace.Value() < alignedRequestSize.Value() {
-		err = errors.New("not enough space")
-		log.Error(fmt.Sprintf("the LV %s aligned requested size %s of the LVMLogicalVolume %s is more than the actual free space %s", llv.Spec.ActualLVNameOnTheNode, alignedRequestSize.String(), llv.Name, freeSpace.String()), logger.Err(err))
-
+	if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, llv, lvg, actualSize); err != nil {
 		return true, err
+	}
+
+	log.Info(fmt.Sprintf("successfully ended the reconciliation for the LVMLogicalVolume %s", llv.Name))
+	return false, nil
+}
+
+func (r *Reconciler) createLV(
+	ctx context.Context,
+	llv *v1alpha1.LVMLogicalVolume,
+	lvg *v1alpha1.LVMVolumeGroup,
+	llvRequestSize, alignedRequestSize resource.Quantity,
+) (resource.Quantity, bool, error) {
+	log := r.log
+
+	sourceLVName, shouldRequeue, err := r.thinSourceLVName(ctx, llv, lvg)
+	if err != nil {
+		return resource.Quantity{}, shouldRequeue, err
+	}
+
+	unlock, err := r.lockThinPool(ctx, llv, lvg)
+	if err != nil {
+		log.Error(fmt.Sprintf("unable to start creating the LV %s of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name), logger.Err(err))
+		return resource.Quantity{}, true, err
+	}
+	defer unlock()
+
+	if llv.Spec.Type == internal.Thin {
+		log.Trace(fmt.Sprintf("the LVMLogicalVolume %s, LV: %s, VG: %s, thin pool: %s, requested size: %s, aligned size: %s, source LV: %s", llv.Name, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Thin.PoolName, llvRequestSize.String(), alignedRequestSize.String(), sourceLVName))
+		if err := r.checkThinPoolSpace(lvg, llv.Spec.Thin.PoolName, llv.Spec.ActualLVNameOnTheNode, sourceLVName, alignedRequestSize); err != nil {
+			log.Error(fmt.Sprintf("the LV %s of the LVMLogicalVolume %s cannot be created in the thin pool %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, llv.Spec.Thin.PoolName), logger.Err(err))
+			return resource.Quantity{}, true, err
+		}
+	} else {
+		freeSpace := utils.GetFreeLVGSpaceForLLV(lvg, llv)
+		log.Trace(fmt.Sprintf("the LVMLogicalVolume %s, LV: %s, VG: %s type: %s requested size: %s, aligned size: %s, free space: %s", llv.Name, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Type, llvRequestSize.String(), alignedRequestSize.String(), freeSpace.String()))
+
+		if freeSpace.Value() < alignedRequestSize.Value() {
+			err = errors.New("not enough space")
+			log.Error(fmt.Sprintf("the LV %s aligned requested size %s of the LVMLogicalVolume %s is more than the actual free space %s", llv.Spec.ActualLVNameOnTheNode, alignedRequestSize.String(), llv.Name, freeSpace.String()), logger.Err(err))
+
+			return resource.Quantity{}, true, err
+		}
 	}
 
 	var cmd string
@@ -375,29 +417,13 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 	case llv.Spec.Source == nil:
 		log.Debug(fmt.Sprintf("LV %s of the LVMLogicalVolume %s will be created in Thin-pool %s with size %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, llv.Spec.Thin.PoolName, llvRequestSize.String()))
 		cmd, err = r.commands.CreateThinLogicalVolume(lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Thin.PoolName, llv.Spec.ActualLVNameOnTheNode, llvRequestSize.Value())
-	case llv.Spec.Source.Kind == "LVMLogicalVolume":
-		sourceLLV := &v1alpha1.LVMLogicalVolume{}
-		if err := r.cl.Get(ctx, types.NamespacedName{Name: llv.Spec.Source.Name}, sourceLLV); err != nil {
-			log.Error(fmt.Sprintf("unable to get source LVMLogicalVolume %s for the LVMLogicalVolume %s", llv.Spec.Source.Name, llv.Name), logger.Err(err))
-			return true, err
-		}
-
-		if sourceLLV.Spec.LVMVolumeGroupName != lvg.Name {
-			return false, errors.New("cloned volume should be in the same volume group as the source volume")
-		}
-
-		cmd, err = r.commands.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, sourceLLV.Spec.ActualLVNameOnTheNode)
-	case llv.Spec.Source.Kind == "LVMLogicalVolumeSnapshot":
-		cmdTmp, shouldRequeue, err := r.handleLLVSSource(ctx, llv, lvg)
-		if err != nil {
-			return shouldRequeue, err
-		}
-		cmd = cmdTmp
+	case llv.Spec.Source.Kind == "LVMLogicalVolume", llv.Spec.Source.Kind == "LVMLogicalVolumeSnapshot":
+		cmd, err = r.commands.CreateThinLogicalVolumeFromSource(llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, sourceLVName)
 	}
 	log.Debug(fmt.Sprintf("ran cmd: %s", cmd))
 	if err != nil {
 		log.Error(fmt.Sprintf("unable to create a %s LogicalVolume for the LVMLogicalVolume %s", llv.Spec.Type, llv.Name), logger.Err(err))
-		return true, err
+		return resource.Quantity{}, true, err
 	}
 
 	log.Info(fmt.Sprintf("successfully created LV %s in VG %s for LVMLogicalVolume resource with name: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Name))
@@ -410,12 +436,12 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 	log.Debug(fmt.Sprintf("ran cmd: %s", cmd))
 	if getLVErr != nil {
 		log.Warn(fmt.Sprintf("unable to get LV %s info from LVM: %s, will retry", llv.Spec.ActualLVNameOnTheNode, getLVErr.Error()))
-		return true, nil
+		return resource.Quantity{}, true, nil
 	}
 	actualSize := lvData.LVSize
 	if actualSize.Value() == 0 {
 		log.Warn(fmt.Sprintf("LV %s in VG %s returned zero size from LVM, retry...", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode))
-		return true, nil
+		return resource.Quantity{}, true, nil
 	}
 	log.Debug(fmt.Sprintf("successfully got the LV %s actual size", llv.Spec.ActualLVNameOnTheNode))
 	log.Trace(fmt.Sprintf("the LV %s in VG: %s has actual size: %s", llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, actualSize.String()))
@@ -429,17 +455,37 @@ func (r *Reconciler) reconcileLLVCreateFunc(
 
 		extendedSize, shouldRequeue, extendErr := r.extendLVToSize("reconcileLLVCreateFunc", llv, lvg, alignedRequestSize)
 		if shouldRequeue {
-			return true, extendErr
+			return resource.Quantity{}, true, extendErr
 		}
 		actualSize = extendedSize
 	}
 
-	if err := r.llvCl.UpdatePhaseToCreatedIfNeeded(ctx, llv, lvg, actualSize); err != nil {
-		return true, err
+	return actualSize, false, nil
+}
+
+func (r *Reconciler) thinSourceLVName(ctx context.Context, llv *v1alpha1.LVMLogicalVolume, lvg *v1alpha1.LVMVolumeGroup) (string, bool, error) {
+	if llv.Spec.Type != internal.Thin || llv.Spec.Source == nil {
+		return "", false, nil
 	}
 
-	log.Info(fmt.Sprintf("successfully ended the reconciliation for the LVMLogicalVolume %s", llv.Name))
-	return false, nil
+	switch llv.Spec.Source.Kind {
+	case "LVMLogicalVolume":
+		sourceLLV := &v1alpha1.LVMLogicalVolume{}
+		if err := r.cl.Get(ctx, types.NamespacedName{Name: llv.Spec.Source.Name}, sourceLLV); err != nil {
+			r.log.Error(fmt.Sprintf("unable to get source LVMLogicalVolume %s for the LVMLogicalVolume %s", llv.Spec.Source.Name, llv.Name), logger.Err(err))
+			return "", true, err
+		}
+
+		if sourceLLV.Spec.LVMVolumeGroupName != lvg.Name {
+			return "", false, errors.New("cloned volume should be in the same volume group as the source volume")
+		}
+
+		return sourceLLV.Spec.ActualLVNameOnTheNode, false, nil
+	case "LVMLogicalVolumeSnapshot":
+		return r.snapshotSourceLVName(ctx, llv, lvg)
+	}
+
+	return "", false, nil
 }
 
 func (r *Reconciler) reconcileLLVUpdateFunc(
@@ -512,18 +558,7 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 		}
 	}
 
-	freeSpace := utils.GetFreeLVGSpaceForLLV(lvg, llv)
-	log.Trace(fmt.Sprintf("the LVMLogicalVolume %s, LV: %s, VG: %s, type: %s, extending size: %s, free space: %s", llv.Name, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Type, extendingSize.String(), freeSpace.String()))
-
-	if freeSpace.Value() < extendingSize.Value() {
-		err = errors.New("not enough space")
-		log.Error(fmt.Sprintf("the LV %s aligned requested size %s of the LVMLogicalVolume %s is more than actual free space %s", llv.Spec.ActualLVNameOnTheNode, alignedRequestSize.String(), llv.Name, freeSpace.String()), logger.Err(err))
-
-		return true, err
-	}
-
-	log.Debug(fmt.Sprintf("LV %s of the LVMLogicalVolume %s will be extended to size: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, alignedRequestSize.String()))
-	newActualSize, shouldRequeue, err := r.extendLVToSize("reconcileLLVUpdateFunc", llv, lvg, alignedRequestSize)
+	newActualSize, shouldRequeue, err := r.extendLV(ctx, llv, lvg, extendingSize, alignedRequestSize)
 	if shouldRequeue {
 		return true, err
 	}
@@ -535,6 +570,43 @@ func (r *Reconciler) reconcileLLVUpdateFunc(
 
 	log.Info(fmt.Sprintf("successfully ended reconciliation for the LVMLogicalVolume %s", llv.Name))
 	return false, nil
+}
+
+func (r *Reconciler) extendLV(
+	ctx context.Context,
+	llv *v1alpha1.LVMLogicalVolume,
+	lvg *v1alpha1.LVMVolumeGroup,
+	extendingSize, alignedRequestSize resource.Quantity,
+) (resource.Quantity, bool, error) {
+	log := r.log
+
+	unlock, err := r.lockThinPool(ctx, llv, lvg)
+	if err != nil {
+		log.Error(fmt.Sprintf("unable to start extending the LV %s of the LVMLogicalVolume %s", llv.Spec.ActualLVNameOnTheNode, llv.Name), logger.Err(err))
+		return resource.Quantity{}, true, err
+	}
+	defer unlock()
+
+	if llv.Spec.Type == internal.Thin {
+		log.Trace(fmt.Sprintf("the LVMLogicalVolume %s, LV: %s, VG: %s, thin pool: %s, extending size: %s", llv.Name, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Thin.PoolName, extendingSize.String()))
+		if err := r.checkThinPoolSpace(lvg, llv.Spec.Thin.PoolName, llv.Spec.ActualLVNameOnTheNode, "", alignedRequestSize); err != nil {
+			log.Error(fmt.Sprintf("the LV %s of the LVMLogicalVolume %s cannot be extended to %s in the thin pool %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, alignedRequestSize.String(), llv.Spec.Thin.PoolName), logger.Err(err))
+			return resource.Quantity{}, true, err
+		}
+	} else {
+		freeSpace := utils.GetFreeLVGSpaceForLLV(lvg, llv)
+		log.Trace(fmt.Sprintf("the LVMLogicalVolume %s, LV: %s, VG: %s, type: %s, extending size: %s, free space: %s", llv.Name, llv.Spec.ActualLVNameOnTheNode, lvg.Spec.ActualVGNameOnTheNode, llv.Spec.Type, extendingSize.String(), freeSpace.String()))
+
+		if freeSpace.Value() < extendingSize.Value() {
+			err = errors.New("not enough space")
+			log.Error(fmt.Sprintf("the LV %s aligned requested size %s of the LVMLogicalVolume %s is more than actual free space %s", llv.Spec.ActualLVNameOnTheNode, alignedRequestSize.String(), llv.Name, freeSpace.String()), logger.Err(err))
+
+			return resource.Quantity{}, true, err
+		}
+	}
+
+	log.Debug(fmt.Sprintf("LV %s of the LVMLogicalVolume %s will be extended to size: %s", llv.Spec.ActualLVNameOnTheNode, llv.Name, alignedRequestSize.String()))
+	return r.extendLVToSize("reconcileLLVUpdateFunc", llv, lvg, alignedRequestSize)
 }
 
 // extendLVToSize grows the LV of the given LVMLogicalVolume to alignedSize and

@@ -1104,6 +1104,13 @@ func (e *clonedVolumeEnv) expectClone() *gomock.Call {
 		Times(1)
 }
 
+func (e *clonedVolumeEnv) expectPoolListing() *gomock.Call {
+	return e.mockCmds.EXPECT().
+		GetVGLVs(cloneVGActual).
+		Return(nil, "lvs", bytes.Buffer{}, nil).
+		Times(1)
+}
+
 func (e *clonedVolumeEnv) expectGetLV(size resource.Quantity) *gomock.Call {
 	return e.mockCmds.EXPECT().
 		GetLV(cloneVGActual, cloneLVName).
@@ -1143,6 +1150,7 @@ func TestReconcileLLVCreateFunc_ClonedVolumeExtendedToRequestedSize(t *testing.T
 	env := newClonedVolumeEnv(ctx, t, "52Mi")
 
 	gomock.InOrder(
+		env.expectPoolListing(),
 		env.expectClone(),
 		// right after the clone the LV still reports the origin size
 		env.expectGetLV(originSize),
@@ -1176,6 +1184,7 @@ func TestReconcileLLVCreateFunc_ClonedVolumeNotExtendedWhenAlreadyLargeEnough(t 
 	env := newClonedVolumeEnv(ctx, t, "36Mi")
 
 	gomock.InOrder(
+		env.expectPoolListing(),
 		env.expectClone(),
 		env.expectGetLV(originSize),
 	)
@@ -1206,6 +1215,7 @@ func TestReconcileLLVCreateFunc_ClonedVolumeExtensionNotConfirmed(t *testing.T) 
 	env := newClonedVolumeEnv(ctx, t, "52Mi")
 
 	gomock.InOrder(
+		env.expectPoolListing(),
 		env.expectClone(),
 		env.expectGetLV(originSize),
 		env.mockCmds.EXPECT().
@@ -1247,6 +1257,7 @@ func TestReconcileLLVUpdateFunc_ExtendsToTheAlignedRequestedSize(t *testing.T) {
 	env.seedCachedLV(currentSize)
 
 	gomock.InOrder(
+		env.expectPoolListing(),
 		env.expectExtendLV(alignedSize),
 		env.expectGetLV(alignedSize),
 	)
@@ -1274,6 +1285,7 @@ func TestReconcileLLVUpdateFunc_RequeuesWhenExtensionNotConfirmed(t *testing.T) 
 	env.seedCachedLV(currentSize)
 
 	gomock.InOrder(
+		env.expectPoolListing(),
 		env.expectExtendLV(requestedSize),
 		// LVM still reports the pre-extension size
 		env.expectGetLV(currentSize),

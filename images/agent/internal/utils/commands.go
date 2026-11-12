@@ -44,6 +44,7 @@ type Commands interface {
 	GetVG(vgName string) (vgData internal.VGData, command string, stdErr bytes.Buffer, err error)
 	GetAllLVs(ctx context.Context) (data []internal.LVData, command string, stdErr bytes.Buffer, err error)
 	GetLV(vgName, lvName string) (lvData internal.LVData, command string, stdErr bytes.Buffer, err error)
+	GetVGLVs(vgName string) (data []internal.LVData, command string, stdErr bytes.Buffer, err error)
 	GetAllPVs(ctx context.Context) (data []internal.PVData, command string, stdErr bytes.Buffer, err error)
 	GetPV(pvName string) (pvData internal.PVData, command string, stdErr bytes.Buffer, err error)
 	CreatePV(ctx context.Context, path string) (string, error)
@@ -223,6 +224,28 @@ func (commands) GetLV(vgName, lvName string) (lvData internal.LVData, command st
 	}
 
 	return lvData, cmd.String(), filteredStdErr, nil
+}
+
+func (commands) GetVGLVs(vgName string) (data []internal.LVData, command string, stdErr bytes.Buffer, err error) {
+	var outs bytes.Buffer
+	args := []string{"lvs", "-o", "+vg_uuid,tags", "--units", "B", "--nosuffix", "--all", "--reportformat", "json", vgName}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+	cmd.Stdout = &outs
+	cmd.Stderr = &stdErr
+
+	err = cmd.Run()
+	filteredStdErr := filterStdErr(cmd.String(), stdErr, benignAlwaysStdErr)
+	if err != nil {
+		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, filteredStdErr.String())
+	}
+
+	lvs, err := unmarshalLVs(outs.Bytes())
+	if err != nil {
+		return nil, cmd.String(), filteredStdErr, fmt.Errorf("unable to GetVGLVs %s, err: %w", vgName, err)
+	}
+
+	return lvs, cmd.String(), filteredStdErr, nil
 }
 
 // GetAllPVs lists the node's Physical Volumes.
