@@ -1,3 +1,3 @@
 module github.com/deckhouse/sds-node-configurator/images/sds-utils-installer
 
-go 1.27.3
+go 1.27.4

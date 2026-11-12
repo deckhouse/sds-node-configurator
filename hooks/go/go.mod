@@ -1,7 +1,6 @@
 module github.com/deckhouse/sds-node-configurator/hooks/go
 
-go 1.27.3
-
+go 1.27.4
 require (
 	github.com/deckhouse/sds-common-lib v0.10.0
 	github.com/deckhouse/deckhouse/pkg/log v0.2.0
