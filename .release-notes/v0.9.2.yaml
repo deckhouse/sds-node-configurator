@@ -1,0 +1,24 @@
+date: "2026-11-12"
+
+summary: "Thin LVMLogicalVolumes created, extended, cloned or restored at the same time no longer push a thin pool over its allocationLimit, an LVMVolumeGroup that cannot be created because of a /dev/<vg> left on the node names that as the reason, and the images are rebuilt on base images v4.0.12 with Go 1.27.4."
+
+highlights:
+  - "Thin `LVMLogicalVolume` resources requested at the same time in one thin pool no longer exceed its `allocationLimit`: the agent handles them one at a time per thin pool and checks each against what LVM itself reports."
+  - "An LVMVolumeGroup that cannot be created because `/dev/<vg>` is left on the node now has the reason `VGNameTakenOnNode` with a message that names the node and tells how to check and remove the directory."
+
+fixes:
+  - "When a Volume Group cannot be created because `/dev/<vg>` is left on the node after a Volume Group of that name was removed by hand, the `VGConfigurationApplied` condition of the LVMVolumeGroup now has the reason `VGNameTakenOnNode` and a message that names the node and tells how to check and remove the directory, instead of the raw `vgcreate` error under `VGCreationFailed`. The agent does not remove the directory itself; once it is removed, the LVMVolumeGroup is created on the next reconcile."
+  - "Thin `LVMLogicalVolume` resources that are created, extended, cloned or restored at the same time in one thin pool no longer exceed its `allocationLimit`. The agent checked each request against `status.thinPools[].availableSpace`, which only the periodic Volume Group scan refreshes, so every volume requested between two scans passed the check. The agent now handles these requests one at a time per thin pool and takes the space already allocated, the size of the pool and the size of a volume being extended from LVM itself; a clone or a restore is counted at the size of its source when that is larger than the requested size, because LVM gives the new volume the size of the source. A request that does not fit goes to `Failed` with `not enough space`, the allocated and the allowed size in its reason, and is retried."
+
+docs:
+  - "The FAQ explains why an LVMVolumeGroup is not created with `/dev/<vg>: already exists in filesystem`: where such a directory comes from, how to check on the node that it holds only dangling links, and that removing it is enough for the agent to create the Volume Group on its own."
+
+dependencies:
+  - name: base images
+    from: "v4.0.7"
+    to: "v4.0.12"
+    notes: "Every image of the module is rebuilt on the current base images."
+  - name: Go
+    from: "1.27.3"
+    to: "1.27.4"
+    notes: "The toolchain the Go components of the module are built with."

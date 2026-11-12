@@ -4,10 +4,6 @@ date: "2026-xx-xx"
 summary: ""
 highlights: []
 
-fixes:
-  - "When a Volume Group cannot be created because `/dev/<vg>` is left on the node after a Volume Group of that name was removed by hand, the `VGConfigurationApplied` condition of the LVMVolumeGroup now has the reason `VGNameTakenOnNode` and a message that names the node and tells how to check and remove the directory, instead of the raw `vgcreate` error under `VGCreationFailed`. The agent does not remove the directory itself; once it is removed, the LVMVolumeGroup is created on the next reconcile."
-  - "Thin `LVMLogicalVolume` resources that are created, extended, cloned or restored at the same time in one thin pool no longer exceed its `allocationLimit`. The agent checked each request against `status.thinPools[].availableSpace`, which only the periodic Volume Group scan refreshes, so every volume requested between two scans passed the check. The agent now handles these requests one at a time per thin pool and counts the space already allocated in the pool from LVM itself; a request that does not fit goes to `Failed` with `not enough space`, the allocated and the allowed size in its reason, and is retried."
-
 # Optional sections — delete rather than leave empty.
 # new_features: []
 # improvements: []
