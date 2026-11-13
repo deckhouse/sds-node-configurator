@@ -41,6 +41,7 @@ const (
 	BlockDevicePVUUIDLabelKey             = blockDeviceLabelPrefix + "/pvuuid"
 	BlockDeviceVGUUIDLabelKey             = blockDeviceLabelPrefix + "/vguuid"
 	BlockDevicePartUUIDLabelKey           = blockDeviceLabelPrefix + "/partuuid"
+	BlockDevicePartLabelLabelKey          = blockDeviceLabelPrefix + "/partlabel"
 	BlockDeviceLVMVolumeGroupNameLabelKey = blockDeviceLabelPrefix + "/lvmvolumegroupname"
 	BlockDeviceActualVGNameLabelKey       = blockDeviceLabelPrefix + "/actualvgnameonthenode"
 	BlockDeviceWWNLabelKey                = blockDeviceLabelPrefix + "/wwn"

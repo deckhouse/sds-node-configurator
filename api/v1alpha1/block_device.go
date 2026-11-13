@@ -82,6 +82,11 @@ type BlockDeviceStatus struct {
 	// > **Optional**: exists only if the device is a partition.
 	// +optional
 	PartUUID string `json:"partUUID"`
+	// The GPT name of the partition (PARTLABEL).
+	//
+	// > **Optional**: exists only if the device is a partition of a GPT table and the partition has a name.
+	// +optional
+	PartLabel string `json:"partLabel"`
 	// The LVMVolumeGroup resource name.
 	//
 	// > **Optional**: exists only if the device is used as a Physical Volume, is included in a Volume Group, and is specified in an LVMVolumeGroup resource.

@@ -157,6 +157,12 @@ spec:
               nodeName:
                 description: The name of the Kubernetes node the device is on.
                 type: string
+              partLabel:
+                description: |-
+                  The GPT name of the partition (PARTLABEL).
+
+                  > **Optional**: exists only if the device is a partition of a GPT table and the partition has a name.
+                type: string
               partUUID:
                 description: |-
                   The UUID of the partition.

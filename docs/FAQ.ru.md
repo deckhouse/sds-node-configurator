@@ -727,6 +727,7 @@ sds_node_configurator_file_devices_directory_free_bytes
 - `status.blockdevice.storage.deckhouse.io/pvuuid` — UUID физического тома.
 - `status.blockdevice.storage.deckhouse.io/vguuid` — UUID группы томов.
 - `status.blockdevice.storage.deckhouse.io/partuuid` — UUID раздела.
+- `status.blockdevice.storage.deckhouse.io/partlabel` — имя раздела в таблице GPT (PARTLABEL) в виде значения метки; пусто, если у раздела нет имени. См. [Как выбрать диски по имени раздела GPT?](#как-выбрать-диски-по-имени-раздела-gpt)
 - `status.blockdevice.storage.deckhouse.io/lvmvolumegroupname` — имя ресурса [LVMVolumeGroup](./cr.html#lvmvolumegroup), к которому относится устройство.
 - `status.blockdevice.storage.deckhouse.io/actualvgnameonthenode` — имя группы томов на узле.
 - `status.blockdevice.storage.deckhouse.io/wwn` — идентификатор WWN (World Wide Name) для устройства.
@@ -739,6 +740,40 @@ sds_node_configurator_file_devices_directory_free_bytes
 - `status.blockdevice.storage.deckhouse.io/scsitarget` — цель iSCSI или Fibre Channel, LUN которой является устройство; пустой для любых других устройств. Формат значения описан в разделе [Как CSI-драйверы скрывают свои LUN от модуля?](#как-csi-драйверы-скрывают-свои-lun-от-модуля).
 
 Эти лейблы агент выставляет по статусу ресурса, и по ним выбирает устройства `spec.blockDeviceSelector` в LVMVolumeGroup и LVMVolumeGroupSet. Изменение, удаление или добавление лейбла с одним из этих ключей (`kubernetes.io/hostname`, `kubernetes.io/metadata.name` или с префиксом `status.blockdevice.storage.deckhouse.io/`) отклоняет ValidatingAdmissionPolicy `d8-sds-node-configurator-blockdevice-label-guard` для всех, кроме агента. Лейблы с другими ключами можно ставить и снимать свободно.
+
+## Как выбрать диски по имени раздела GPT?
+
+Агент читает имя раздела GPT (PARTLABEL) в поле `status.partLabel` ресурса [BlockDevice](./cr.html#blockdevice) и в метку `status.blockdevice.storage.deckhouse.io/partlabel`, поэтому `blockDeviceSelector` может выбирать разделы по заданному вами имени.
+
+Имя задаётся при создании раздела или позже:
+
+```shell
+sgdisk -c 1:lvg-data /dev/sdb
+```
+
+Выберите раздел в [LVMVolumeGroup](./cr.html#lvmvolumegroup):
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: LVMVolumeGroup
+metadata:
+  name: vg-data
+spec:
+  type: Local
+  local:
+    nodeName: worker-0
+  actualVGNameOnTheNode: vg-data
+  blockDeviceSelector:
+    matchLabels:
+      status.blockdevice.storage.deckhouse.io/partlabel: lvg-data
+```
+
+Что важно учитывать:
+
+- Имя есть только у разделов таблицы GPT. В MBR имён разделов нет, поэтому у раздела диска с MBR и у целого диска поле `status.partLabel` и значение метки пусты.
+- Значение метки — не само имя, а его slug (преобразование в допустимую для метки строку): пробелы и другие недопустимые в метке символы заменяются на `-`, нелатинские буквы транслитерируются, регистр сохраняется. `My data` превращается в `My-data`, `Данные 1` — в `Dannye-1`. Берите значение у существующего BlockDevice, а не вписывайте вручную. Само имя хранится в `status.partLabel`.
+- Имена разделов не обязаны быть уникальными: два раздела с одним именем получат одно значение метки, и селектор выберет оба.
+- Устройства, обнаруженные до обновления, получат метку при следующем проходе обнаружения агента. Новое имя, заданное командой `sgdisk -c`, агент увидит после того, как ядро перечитает таблицу разделов; для занятого диска (физический том, смонтированный раздел) — после `partprobe` или перезагрузки узла.
 
 ## Как CSI-драйверы скрывают свои LUN от модуля?
 

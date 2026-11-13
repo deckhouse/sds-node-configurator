@@ -780,6 +780,19 @@ func TestBlockDeviceCtrl(t *testing.T) {
 		assert.Equal(t, len(deviceName[4:]), 40, "device name does not contains sha1 sum")
 	})
 
+	t.Run("CreateUniqDeviceNameIgnoresPartLabel", func(t *testing.T) {
+		can := internal.BlockDeviceCandidate{
+			NodeName: "testNode",
+			Wwn:      "ZX128ZX128ZX128",
+			Model:    "HARD-DRIVE",
+			Serial:   "serial",
+			PartUUID: "ec0944f8-90a5-4e74-9453-d4d8d03bd53d",
+		}
+		unnamed := createUniqDeviceName(can)
+		can.PartLabel = "My data"
+		assert.Equal(t, unnamed, createUniqDeviceName(can))
+	})
+
 	t.Run("FindLegacyNonConsumableBlockDevice", func(t *testing.T) {
 		t.Run("matches_only_non_consumable_block_device_on_same_node", func(t *testing.T) {
 			candidate := internal.BlockDeviceCandidate{

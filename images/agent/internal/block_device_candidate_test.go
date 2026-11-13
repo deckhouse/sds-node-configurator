@@ -67,6 +67,30 @@ var _ = Describe("Block device candidate", func() {
 			Expect(candidate.Type).Should(BeEquivalentTo(internalDevice.Type))
 			Expect(candidate.FSType).Should(BeEquivalentTo(internalDevice.FSType))
 			Expect(candidate.PartUUID).Should(BeEquivalentTo(internalDevice.PartUUID))
+			Expect(candidate.PartLabel).Should(BeEquivalentTo(internalDevice.PartLabel))
+		})
+
+		When("device is a GPT partition with a name", func() {
+			BeforeEach(func() {
+				internalDevice.Name = "/dev/sdb1"
+				internalDevice.PartLabel = "\u0414\u0430\u043d\u043d\u044b\u0435 1"
+			})
+
+			It("carries the name into the status and a slug into the label", func() {
+				Expect(candidate.PartLabel).Should(Equal("\u0414\u0430\u043d\u043d\u044b\u0435 1"))
+				blockDevice := candidate.AsAPIBlockDevice()
+				Expect(blockDevice.Status.PartLabel).Should(Equal("\u0414\u0430\u043d\u043d\u044b\u0435 1"))
+				Expect(blockDevice.Labels).To(HaveKeyWithValue(v1alpha1.BlockDevicePartLabelLabelKey, internal.BlockDeviceLabelValue("\u0414\u0430\u043d\u043d\u044b\u0435 1")))
+				Expect(blockDevice.Labels[v1alpha1.BlockDevicePartLabelLabelKey]).Should(Equal("Dannye-1"))
+			})
+		})
+
+		When("device has no partition name", func() {
+			It("leaves the status field and the label value empty", func() {
+				blockDevice := candidate.AsAPIBlockDevice()
+				Expect(blockDevice.Status.PartLabel).Should(BeEmpty())
+				Expect(blockDevice.Labels).To(HaveKeyWithValue(v1alpha1.BlockDevicePartLabelLabelKey, ""))
+			})
 		})
 
 		When("device is good", func() {
@@ -123,6 +147,7 @@ var _ = Describe("Block device candidate", func() {
 			candidate.Size = resource.MustParse("1G")
 			candidate.Model = "Very good model-1241"
 			candidate.MachineID = "testMACHINE"
+			candidate.PartLabel = "My data"
 		})
 
 		hasAllFieldsMatched := func() {
@@ -141,6 +166,7 @@ var _ = Describe("Block device candidate", func() {
 			Expect(blockDevice.Status.Size.Value()).Should(BeEquivalentTo(candidate.Size.Value()))
 			Expect(blockDevice.Status.Model).Should(BeEquivalentTo(candidate.Model))
 			Expect(blockDevice.Status.MachineID).Should(BeEquivalentTo(candidate.MachineID))
+			Expect(blockDevice.Status.PartLabel).Should(BeEquivalentTo(candidate.PartLabel))
 		}
 
 		doesNotHaveBlockDeviceDifference := func() {
@@ -208,6 +234,7 @@ var _ = Describe("Block device candidate", func() {
 					v1alpha1.BlockDevicePVUUIDLabelKey:             candidate.PVUuid,
 					v1alpha1.BlockDeviceVGUUIDLabelKey:             candidate.VGUuid,
 					v1alpha1.BlockDevicePartUUIDLabelKey:           candidate.PartUUID,
+					v1alpha1.BlockDevicePartLabelLabelKey:          "My-data",
 					v1alpha1.BlockDeviceLVMVolumeGroupNameLabelKey: candidate.LVMVolumeGroupName,
 					v1alpha1.BlockDeviceActualVGNameLabelKey:       candidate.ActualVGNameOnTheNode,
 					v1alpha1.BlockDeviceWWNLabelKey:                candidate.Wwn,

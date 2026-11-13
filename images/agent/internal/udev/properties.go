@@ -25,18 +25,19 @@ import (
 // Properties is the parsed, normalized subset of a udev environment that
 // matches lsblk's field-resolution rules for block device metadata.
 type Properties struct {
-	DevName  string
-	DevType  string
-	Major    int
-	Minor    int
-	Serial   string
-	Model    string
-	WWN      string
-	FSType   string
-	PartUUID string
-	DMName   string
-	DMUUID   string
-	MDLevel  string
+	DevName   string
+	DevType   string
+	Major     int
+	Minor     int
+	Serial    string
+	Model     string
+	WWN       string
+	FSType    string
+	PartUUID  string
+	PartLabel string
+	DMName    string
+	DMUUID    string
+	MDLevel   string
 	// PartTableType is the partition table the device itself carries ("gpt",
 	// "dos"), empty when it carries none. udev also sets ID_PART_TABLE_TYPE on
 	// a partition, naming the table of its parent disk, so it is taken from
@@ -59,18 +60,19 @@ func ParseProperties(env map[string]string) (Properties, error) {
 	}
 
 	return Properties{
-		DevName:  ensureDevPrefix(env["DEVNAME"]),
-		DevType:  env["DEVTYPE"],
-		Major:    int(major),
-		Minor:    int(minor),
-		Serial:   serialFromUdevEnv(env),
-		Model:    modelFromUdevEnv(env),
-		WWN:      wwnFromUdevEnv(env),
-		FSType:   env["ID_FS_TYPE"],
-		PartUUID: env["ID_PART_ENTRY_UUID"],
-		DMName:   env["DM_NAME"],
-		DMUUID:   env["DM_UUID"],
-		MDLevel:  env["MD_LEVEL"],
+		DevName:   ensureDevPrefix(env["DEVNAME"]),
+		DevType:   env["DEVTYPE"],
+		Major:     int(major),
+		Minor:     int(minor),
+		Serial:    serialFromUdevEnv(env),
+		Model:     modelFromUdevEnv(env),
+		WWN:       wwnFromUdevEnv(env),
+		FSType:    env["ID_FS_TYPE"],
+		PartUUID:  env["ID_PART_ENTRY_UUID"],
+		PartLabel: unhexmangle(env["ID_PART_ENTRY_NAME"]),
+		DMName:    env["DM_NAME"],
+		DMUUID:    env["DM_UUID"],
+		MDLevel:   env["MD_LEVEL"],
 
 		PartTableType: partTableType(env),
 	}, nil

@@ -4,6 +4,9 @@ date: "2026-xx-xx"
 summary: ""
 highlights: []
 
+new_features:
+  - "Имя раздела GPT (PARTLABEL) теперь отображается в новом поле `status.partLabel` ресурса BlockDevice и в метке `status.blockdevice.storage.deckhouse.io/partlabel`, поэтому `blockDeviceSelector` ресурса LVMVolumeGroup может выбирать диски по имени раздела, заданному командой `sgdisk -c`. Значение метки — slug (строка, приведённая к допустимому для метки виду) имени: `My data` превращается в `My-data`. Существующие BlockDevice получат поле и метку при следующем проходе обнаружения."
+
 # Необязательные разделы — пустые не оставлять, а удалять.
 # new_features: []
 # improvements: []

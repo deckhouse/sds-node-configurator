@@ -130,6 +130,34 @@ func TestParseProperties_ModelFromEnc(t *testing.T) {
 	assert.Equal(t, "Vendor Disk Name", props.Model)
 }
 
+func TestParseProperties_PartLabel(t *testing.T) {
+	base := func(name string) map[string]string {
+		env := map[string]string{"DEVNAME": "/dev/sdb1", "DEVTYPE": "partition", "MAJOR": "8", "MINOR": "17"}
+		if name != "" {
+			env["ID_PART_ENTRY_NAME"] = name
+		}
+		return env
+	}
+
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"plain", `data`, "data"},
+		{"space escaped", `My\x20data`, "My data"},
+		{"cyrillic escaped", `\xd0\x94\xd0\xb0\xd0\xbd\xd0\xbd\xd1\x8b\xd0\xb5\x201`, "\u0414\u0430\u043d\u043d\u044b\u0435 1"},
+		{"absent", ``, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			props, err := ParseProperties(base(tt.raw))
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, props.PartLabel)
+		})
+	}
+}
+
 func TestParseProperties_DevNamePrefixAdded(t *testing.T) {
 	env := map[string]string{
 		"DEVNAME": "sda",

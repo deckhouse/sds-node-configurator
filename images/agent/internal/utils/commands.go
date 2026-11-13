@@ -99,7 +99,7 @@ func NewCommands() Commands {
 
 func (c *commands) GetBlockDevices(ctx context.Context) ([]internal.Device, string, bytes.Buffer, error) {
 	var outs bytes.Buffer
-	args := []string{"-J", "-lpfb", "-no", "name,MAJ:MIN,MOUNTPOINT,PARTUUID,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA,PTTYPE"}
+	args := []string{"-J", "-lpfb", "-no", "name,MAJ:MIN,MOUNTPOINT,PARTUUID,PARTLABEL,HOTPLUG,MODEL,SERIAL,SIZE,FSTYPE,TYPE,WWN,KNAME,PKNAME,ROTA,PTTYPE"}
 	cmd := exec.CommandContext(ctx, internal.LSBLKCmd, args...)
 	cmd.Stdout = &outs
 

@@ -56,6 +56,7 @@ type BlockDeviceCandidate struct {
 	FSType                string
 	MachineID             string
 	PartUUID              string
+	PartLabel             string
 
 	SerialInherited string
 	WWNInherited    string
@@ -149,6 +150,7 @@ func NewBlockDeviceCandidateByDevice(device *Device, nodeName string, machineID 
 		FSType:            device.FSType,
 		MachineID:         machineID,
 		PartUUID:          device.PartUUID,
+		PartLabel:         device.PartLabel,
 		SerialInherited:   device.SerialInherited,
 		WWNInherited:      device.WWNInherited,
 	}
@@ -163,6 +165,7 @@ func (candidate *BlockDeviceCandidate) asAPIBlockDeviceStatus() v1alpha1.BlockDe
 		PVUuid:                candidate.PVUuid,
 		VGUuid:                candidate.VGUuid,
 		PartUUID:              candidate.PartUUID,
+		PartLabel:             candidate.PartLabel,
 		LVMVolumeGroupName:    candidate.LVMVolumeGroupName,
 		ActualVGNameOnTheNode: candidate.ActualVGNameOnTheNode,
 		Wwn:                   candidate.GetWWN(),
@@ -250,6 +253,7 @@ func (candidate *BlockDeviceCandidate) HasBlockDeviceDiff(blockDevice v1alpha1.B
 		candidate.PVUuid != blockDevice.Status.PVUuid ||
 		candidate.VGUuid != blockDevice.Status.VGUuid ||
 		candidate.PartUUID != blockDevice.Status.PartUUID ||
+		candidate.PartLabel != blockDevice.Status.PartLabel ||
 		candidate.LVMVolumeGroupName != blockDevice.Status.LVMVolumeGroupName ||
 		candidate.ActualVGNameOnTheNode != blockDevice.Status.ActualVGNameOnTheNode ||
 		candidate.GetWWN() != blockDevice.Status.Wwn ||
@@ -333,6 +337,7 @@ func newBlockDeviceLabels(blockDevice *v1alpha1.BlockDevice, candidate *BlockDev
 		v1alpha1.BlockDevicePVUUIDLabelKey:             blockDevice.Status.PVUuid,
 		v1alpha1.BlockDeviceVGUUIDLabelKey:             blockDevice.Status.VGUuid,
 		v1alpha1.BlockDevicePartUUIDLabelKey:           blockDevice.Status.PartUUID,
+		v1alpha1.BlockDevicePartLabelLabelKey:          BlockDeviceLabelValue(blockDevice.Status.PartLabel),
 		v1alpha1.BlockDeviceLVMVolumeGroupNameLabelKey: slug.Make(blockDevice.Status.LVMVolumeGroupName),
 		v1alpha1.BlockDeviceActualVGNameLabelKey:       slug.Make(blockDevice.Status.ActualVGNameOnTheNode),
 		v1alpha1.BlockDeviceWWNLabelKey:                slug.Make(blockDevice.Status.Wwn),

@@ -727,6 +727,7 @@ When an LVMVolumeGroup with file-backed devices is deleted, the agent detaches t
 - `status.blockdevice.storage.deckhouse.io/pvuuid`: Physical Volume UUID.
 - `status.blockdevice.storage.deckhouse.io/vguuid`: Volume Group UUID.
 - `status.blockdevice.storage.deckhouse.io/partuuid`: Partition UUID.
+- `status.blockdevice.storage.deckhouse.io/partlabel`: GPT name of the partition (PARTLABEL), as a label value; empty if the partition has no name. See [How do I select disks by the GPT partition name?](#how-do-i-select-disks-by-the-gpt-partition-name)
 - `status.blockdevice.storage.deckhouse.io/lvmvolumegroupname`: Name of the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource to which the device belongs.
 - `status.blockdevice.storage.deckhouse.io/actualvgnameonthenode`: Volume Group name on the node.
 - `status.blockdevice.storage.deckhouse.io/wwn`: WWN (World Wide Name) identifier for the device.
@@ -739,6 +740,40 @@ When an LVMVolumeGroup with file-backed devices is deleted, the agent detaches t
 - `status.blockdevice.storage.deckhouse.io/scsitarget`: The iSCSI or Fibre Channel target the device is a LUN of; empty for any other device. See [How do CSI drivers hide their LUNs from the module?](#how-do-csi-drivers-hide-their-luns-from-the-module) for the value format.
 
 The agent sets these labels from the resource's status, and `spec.blockDeviceSelector` of LVMVolumeGroup and LVMVolumeGroupSet selects devices by them. Changing, removing or adding a label with one of these keys (`kubernetes.io/hostname`, `kubernetes.io/metadata.name` or the `status.blockdevice.storage.deckhouse.io/` prefix) is rejected by the `d8-sds-node-configurator-blockdevice-label-guard` ValidatingAdmissionPolicy for everyone except the agent. Labels with other keys can be set and removed freely.
+
+## How do I select disks by the GPT partition name?
+
+The agent reads the GPT name of a partition (PARTLABEL) into the `status.partLabel` field of the [BlockDevice](./cr.html#blockdevice) resource and into the `status.blockdevice.storage.deckhouse.io/partlabel` label, so a `blockDeviceSelector` can pick partitions by a name you chose.
+
+Set the name when you create the partition, or later:
+
+```shell
+sgdisk -c 1:lvg-data /dev/sdb
+```
+
+Select the partition in an [LVMVolumeGroup](./cr.html#lvmvolumegroup):
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: LVMVolumeGroup
+metadata:
+  name: vg-data
+spec:
+  type: Local
+  local:
+    nodeName: worker-0
+  actualVGNameOnTheNode: vg-data
+  blockDeviceSelector:
+    matchLabels:
+      status.blockdevice.storage.deckhouse.io/partlabel: lvg-data
+```
+
+Keep in mind:
+
+- Only partitions of a GPT table have a name. MBR has no partition names, so a partition of an MBR disk and a whole disk have an empty `status.partLabel` and an empty label value.
+- The label value is not the name itself but its slug: spaces and other characters that a label cannot hold become `-`, and non-Latin letters are transliterated, the letter case is kept. `My data` becomes `My-data`, and a Russian word for "data" is written as `Dannye`. Take the value from an existing BlockDevice rather than writing it by hand. The name itself is stored in `status.partLabel`.
+- Partition names are not unique: two partitions with the same name get the same label value, and a selector matches both.
+- Devices discovered before the update get the label on the next discovery pass of the agent. A name changed with `sgdisk -c` is seen once the kernel rereads the partition table; for a disk in use (a Physical Volume or a mounted partition), after `partprobe` or a node reboot.
 
 ## How do CSI drivers hide their LUNs from the module?
 

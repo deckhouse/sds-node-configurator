@@ -157,6 +157,7 @@ type Device struct {
 	Name       string            `json:"name"`
 	MountPoint string            `json:"mountpoint"`
 	PartUUID   string            `json:"partuuid"`
+	PartLabel  string            `json:"partlabel"`
 	HotPlug    bool              `json:"hotPlug"`
 	Model      string            `json:"model"`
 	Serial     string            `json:"serial"`

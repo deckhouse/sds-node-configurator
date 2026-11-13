@@ -116,6 +116,24 @@ func TestCommands(t *testing.T) {
 			}
 		})
 
+		t.Run("UnmarshalDevices_PartLabel", func(t *testing.T) {
+			js := `{
+   "blockdevices": [
+      {"name": "/dev/sdb", "size": "10G", "type": "disk", "kname": "/dev/sdb", "pkname": null, "partlabel": null},
+      {"name": "/dev/sdb1", "size": "1G", "type": "part", "kname": "/dev/sdb1", "pkname": "/dev/sdb", "partlabel": "My data"},
+      {"name": "/dev/sdb2", "size": "1G", "type": "part", "kname": "/dev/sdb2", "pkname": "/dev/sdb", "partlabel": "\u0414\u0430\u043d\u043d\u044b\u0435 1"},
+      {"name": "/dev/sdc1", "size": "1G", "type": "part", "kname": "/dev/sdc1", "pkname": "/dev/sdc", "partlabel": null}
+   ]
+}`
+			devices, err := NewCommands().UnmarshalDevices([]byte(js))
+			if assert.NoError(t, err) && assert.Len(t, devices, 4) {
+				assert.Empty(t, devices[0].PartLabel)
+				assert.Equal(t, "My data", devices[1].PartLabel)
+				assert.Equal(t, "\u0414\u0430\u043d\u043d\u044b\u0435 1", devices[2].PartLabel)
+				assert.Empty(t, devices[3].PartLabel)
+			}
+		})
+
 		// lsblk names the parent's table on a partition as well; only the disk
 		// carries it.
 		t.Run("UnmarshalDevices_PartTableType", func(t *testing.T) {

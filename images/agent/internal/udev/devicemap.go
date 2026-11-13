@@ -164,6 +164,7 @@ func (dm *DeviceMap) Snapshot(mounts map[string]string) ([]internal.Device, []er
 			Name:       name,
 			MountPoint: mounts[devID],
 			PartUUID:   props.PartUUID,
+			PartLabel:  props.PartLabel,
 			HotPlug:    hotplug,
 			Model:      props.Model,
 			Serial:     props.Serial,
