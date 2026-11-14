@@ -1,0 +1,13 @@
+date: "2026-11-14"
+
+summary: "A BlockDevice now shows the GPT name of its partition, so an LVMVolumeGroup can select disks by it, and the module can be built inside an isolated network."
+
+highlights:
+  - "The new `status.partLabel` field and the `status.blockdevice.storage.deckhouse.io/partlabel` label of a BlockDevice carry the GPT partition name, which `blockDeviceSelector` of an LVMVolumeGroup can select on."
+  - "The build of the module no longer contacts the Go checksum database (`sum.golang.org`) and reuses the Go module cache of the build host, so the module can be built inside an isolated network from prepared caches."
+
+new_features:
+  - "The GPT name of a partition (PARTLABEL) is now shown in the new `status.partLabel` field of a BlockDevice and in the `status.blockdevice.storage.deckhouse.io/partlabel` label, so `blockDeviceSelector` of an LVMVolumeGroup can select disks by the partition name set with `sgdisk -c`. The label value is the slug of the name: `My data` becomes `My-data`. Existing BlockDevices get the field and the label on the next discovery pass."
+
+improvements:
+  - "The release-notes pages of the documentation are rendered by a tool pinned together with its checksums in `.werf/tools/go.mod`, and the Go module cache of the build host (`~/go-pkg-cache`) is kept between builds. Nothing changes in the images or in the cluster."

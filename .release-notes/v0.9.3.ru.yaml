@@ -1,0 +1,13 @@
+date: "2026-11-14"
+
+summary: "BlockDevice теперь показывает имя раздела GPT, и LVMVolumeGroup может выбирать диски по нему, а модуль можно собрать в изолированной сети."
+
+highlights:
+  - "Новые поле `status.partLabel` и метка `status.blockdevice.storage.deckhouse.io/partlabel` ресурса BlockDevice содержат имя раздела GPT, по которому может выбирать `blockDeviceSelector` ресурса LVMVolumeGroup."
+  - "Сборка модуля больше не обращается к базе контрольных сумм Go (`sum.golang.org`) и использует кэш Go-модулей сборочного хоста, поэтому модуль собирается в изолированной сети из подготовленных кэшей."
+
+new_features:
+  - "Имя раздела GPT (PARTLABEL) теперь отображается в новом поле `status.partLabel` ресурса BlockDevice и в метке `status.blockdevice.storage.deckhouse.io/partlabel`, поэтому `blockDeviceSelector` ресурса LVMVolumeGroup может выбирать диски по имени раздела, заданному командой `sgdisk -c`. Значение метки — slug (строка, приведённая к допустимому для метки виду) имени: `My data` превращается в `My-data`. Существующие BlockDevice получат поле и метку при следующем проходе обнаружения."
+
+improvements:
+  - "Страницы release notes в документации рендерятся инструментом, закреплённым вместе с контрольными суммами в `.werf/tools/go.mod`, а кэш Go-модулей сборочного хоста (`~/go-pkg-cache`) сохраняется между сборками. В образах и в кластере ничего не меняется."
