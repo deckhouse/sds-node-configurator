@@ -31,6 +31,7 @@ import (
 // +kubebuilder:metadata:labels={"heritage=deckhouse","module=sds-node-configurator","backup.deckhouse.io/cluster-config=true"}
 // +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.nodeName",description="Node the block device is on."
 // +kubebuilder:printcolumn:name="Consumable",type="boolean",JSONPath=".status.consumable",description="Defines whether the current block device can be used by `sds-node-configurator`."
+// +kubebuilder:printcolumn:name="Missing",type="string",JSONPath=".status.conditions[?(@.type==\"Missing\")].status",description="True when the device has not been seen on the node for longer than the grace period; Unknown during it."
 // +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.conditions[?(@.type==\"Consumable\")].reason",priority=1,description="Why the device is or is not consumable."
 // +kubebuilder:printcolumn:name="Size",type="string",JSONPath=".status.size",description="Size of the included device."
 // +kubebuilder:printcolumn:name="Path",type="string",JSONPath=".status.path",description="Actual device path (name)."

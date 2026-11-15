@@ -1,21 +1,12 @@
-# Заготовка для следующего релиза. Перед тегом переименовать в vX.Y.Z.ru.yaml
-# (имя файла должно совпадать с тегом) и заполнить.
 date: "2026-xx-xx"
-summary: ""
-highlights: []
+summary: "Устаревший дубль BlockDevice устройства, сменившего идентичность, теперь удаляется агентом, а `kubectl get bd` показывает условие Missing."
+highlights:
+  - "BlockDevice с `Missing`, устройство которого живёт под другим BlockDevice, удаляется через `missingBlockDeviceRetentionHours`, а не хранится, пока существует его LVMVolumeGroup."
+  - "В `kubectl get bd` появилась колонка `Missing`."
 
-# Необязательные разделы — пустые не оставлять, а удалять.
-# new_features: []
-# improvements: []
-# fixes: []
-# security: []
-# breaking: []
-# upgrade_notes: []
-# known_issues: []
-# docs: []
-# dependencies:
-#   - name: component
-#     from: "1.0"
-#     to: "1.1"
-#     changelog_url: "https://..."
-#     notes: "..."
+improvements:
+  - "В `kubectl get bd` появилась колонка `Missing`: `Unknown`, пока устройства нет меньше 10 минут, `True` после этого, пусто у присутствующего устройства. Устаревший дубль BlockDevice теперь легко заметить."
+
+fixes:
+  - "BlockDevice неконсумабельного устройства, переиспользованный под старым именем после смены имени устройства, больше не получает `Missing` и не теряет его заново при каждом проходе обнаружения."
+  - "`Missing` BlockDevice, который называет существующий LVMVolumeGroup в `status.lvmVolumeGroupName`, теперь удаляется через `missingBlockDeviceRetentionHours`, если то же устройство (тот же UUID Physical Volume, UUID раздела либо WWN с серийным номером) есть на узле под другим BlockDevice, а ни один LVMVolumeGroup не перечисляет устаревший в `status.nodes`. Раньше такой дубль оставался навсегда. `Missing` BlockDevice без живого двойника остаётся, как и раньше."

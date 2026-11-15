@@ -183,7 +183,7 @@ func TestShouldCollectMissingBlockDevice(t *testing.T) {
 			if tt.retention < 0 {
 				r = 0
 			}
-			assert.Equal(t, tt.want, shouldCollectMissingBlockDevice(bd, candidates, gcNode, refs, now, r))
+			assert.Equal(t, tt.want, shouldCollectMissingBlockDevice(bd, candidates, gcNode, refs, nil, now, r))
 		})
 	}
 }
@@ -251,3 +251,161 @@ func missingGauge(t *testing.T, node, reason string) float64 {
 	t.Fatalf("no block_devices_missing series for node %q reason %q", node, reason)
 	return 0
 }
+
+func TestShouldCollectMissingBlockDevice_LiveTwin(t *testing.T) {
+	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	const retention = 24 * time.Hour
+	old := now.Add(-retention - time.Minute)
+
+	lvgs := []v1alpha1.LVMVolumeGroup{{
+		ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+		Status: v1alpha1.LVMVolumeGroupStatus{
+			Nodes: []v1alpha1.LVMVolumeGroupNode{{
+				Name:    gcNode,
+				Devices: []v1alpha1.LVMVolumeGroupDevice{{BlockDevice: "live"}},
+			}},
+		},
+	}}
+	refs := newLVGReferences(lvgs)
+
+	duplicate := func(mutate func(*v1alpha1.BlockDevice)) v1alpha1.BlockDevice {
+		bd := missingBD("duplicate", metav1.ConditionTrue, v1alpha1.ReasonDeviceNotFound, old)
+		bd.Status.LVMVolumeGroupName = "lvg-1"
+		bd.Status.PVUuid = "pv-1"
+		if mutate != nil {
+			mutate(&bd)
+		}
+		return bd
+	}
+	twin := func(mutate func(*v1alpha1.BlockDevice)) v1alpha1.BlockDevice {
+		bd := v1alpha1.BlockDevice{
+			ObjectMeta: metav1.ObjectMeta{Name: "live"},
+			Status: v1alpha1.BlockDeviceStatus{
+				NodeName:           gcNode,
+				PVUuid:             "pv-1",
+				LVMVolumeGroupName: "lvg-1",
+			},
+		}
+		if mutate != nil {
+			mutate(&bd)
+		}
+		return bd
+	}
+
+	tests := []struct {
+		name      string
+		duplicate v1alpha1.BlockDevice
+		twin      *v1alpha1.BlockDevice
+		seen      bool
+		want      bool
+	}{
+		{
+			name:      "same PV UUID twin: the duplicate is deleted although its LVMVolumeGroup exists",
+			duplicate: duplicate(nil),
+			twin:      ptr(twin(nil)),
+			seen:      true,
+			want:      true,
+		},
+		{
+			name: "same PartUUID twin",
+			duplicate: duplicate(func(b *v1alpha1.BlockDevice) {
+				b.Status.PVUuid = ""
+				b.Status.PartUUID = "part-1"
+			}),
+			twin: ptr(twin(func(b *v1alpha1.BlockDevice) {
+				b.Status.PVUuid = ""
+				b.Status.PartUUID = "part-1"
+			})),
+			seen: true,
+			want: true,
+		},
+		{
+			name: "same WWN and serial twin",
+			duplicate: duplicate(func(b *v1alpha1.BlockDevice) {
+				b.Status.PVUuid = ""
+				b.Status.Wwn = "wwn-1"
+				b.Status.Serial = "serial-1"
+			}),
+			twin: ptr(twin(func(b *v1alpha1.BlockDevice) {
+				b.Status.PVUuid = ""
+				b.Status.Wwn = "wwn-1"
+				b.Status.Serial = "serial-1"
+			})),
+			seen: true,
+			want: true,
+		},
+		{
+			name: "same WWN but another serial is no twin",
+			duplicate: duplicate(func(b *v1alpha1.BlockDevice) {
+				b.Status.PVUuid = ""
+				b.Status.Wwn = "wwn-1"
+				b.Status.Serial = "serial-1"
+			}),
+			twin: ptr(twin(func(b *v1alpha1.BlockDevice) {
+				b.Status.PVUuid = ""
+				b.Status.Wwn = "wwn-1"
+				b.Status.Serial = "serial-2"
+			})),
+			seen: true,
+		},
+		{
+			name:      "a lone lost Physical Volume of a live LVMVolumeGroup is kept",
+			duplicate: duplicate(nil),
+		},
+		{
+			name:      "twin on another node is no twin",
+			duplicate: duplicate(nil),
+			twin:      ptr(twin(func(b *v1alpha1.BlockDevice) { b.Status.NodeName = "other-node" })),
+			seen:      true,
+		},
+		{
+			name:      "twin that is Missing itself is no twin",
+			duplicate: duplicate(nil),
+			twin: ptr(twin(func(b *v1alpha1.BlockDevice) {
+				b.Status.Conditions = missingBD("x", metav1.ConditionUnknown, v1alpha1.ReasonDeviceNotFound, now).Status.Conditions
+			})),
+			seen: true,
+		},
+		{
+			name:      "twin that is not in the current scan is no twin",
+			duplicate: duplicate(nil),
+			twin:      ptr(twin(nil)),
+		},
+		{
+			name: "duplicate still listed in an LVMVolumeGroup's status.nodes is kept",
+			duplicate: duplicate(func(b *v1alpha1.BlockDevice) {
+				b.Name = "live-listed"
+			}),
+			twin: ptr(twin(nil)),
+			seen: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := map[string]v1alpha1.BlockDevice{tt.duplicate.Name: tt.duplicate}
+			candidates := map[string]struct{}{}
+			if tt.twin != nil {
+				api[tt.twin.Name] = *tt.twin
+				if tt.seen {
+					candidates[tt.twin.Name] = struct{}{}
+				}
+			}
+			localRefs := refs
+			if tt.duplicate.Name == "live-listed" {
+				localRefs = newLVGReferences([]v1alpha1.LVMVolumeGroup{{
+					ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+					Status: v1alpha1.LVMVolumeGroupStatus{
+						Nodes: []v1alpha1.LVMVolumeGroupNode{{
+							Name:    gcNode,
+							Devices: []v1alpha1.LVMVolumeGroupDevice{{BlockDevice: "live-listed"}},
+						}},
+					},
+				}})
+			}
+			assert.Equal(t, tt.want, shouldCollectMissingBlockDevice(tt.duplicate, candidates, gcNode, localRefs, api, now, retention))
+		})
+	}
+}
+
+func ptr(bd v1alpha1.BlockDevice) *v1alpha1.BlockDevice { return &bd }

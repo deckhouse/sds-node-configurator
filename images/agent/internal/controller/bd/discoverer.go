@@ -202,7 +202,7 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) (bool, error) {
 
 	// create new API devices
 	runBlockDeviceControllerLog := d.log
-	for _, candidate := range candidates {
+	for i, candidate := range candidates {
 		blockDevice, exist := apiBlockDevices[candidate.Name]
 		if !exist {
 			legacyBlockDevice, found := findLegacyNonConsumableBlockDevice(candidate, apiBlockDevices)
@@ -211,10 +211,8 @@ func (d *Discoverer) blockDeviceReconcile(ctx context.Context) (bool, error) {
 					"found legacy non-consumable BlockDevice, candidate name: \"%s\", legacy name: \"%s\", path: \"%s\"",
 					candidate.Name, legacyBlockDevice.Name, candidate.Path,
 				))
-				// Adopt the legacy name only for this update path. The candidate
-				// slice keeps the new name, and old non-consumable devices are not
-				// removed by removeDeprecatedAPIDevices.
 				candidate.Name = legacyBlockDevice.Name
+				candidates[i].Name = legacyBlockDevice.Name
 				blockDevice = legacyBlockDevice
 				exist = true
 			}

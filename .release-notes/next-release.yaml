@@ -1,21 +1,12 @@
-# Draft scaffold for the next release. Before tagging, rename to vX.Y.Z.yaml
-# (the file name must match the git tag) and fill it in.
 date: "2026-xx-xx"
-summary: ""
-highlights: []
+summary: "A stale duplicate BlockDevice of a device that changed its identity is now deleted by the agent, and `kubectl get bd` shows the Missing condition."
+highlights:
+  - "A Missing BlockDevice whose device lives on under another BlockDevice is deleted after `missingBlockDeviceRetentionHours` instead of being kept for as long as its LVMVolumeGroup exists."
+  - "`kubectl get bd` has a new `Missing` column."
 
-# Optional sections — delete rather than leave empty.
-# new_features: []
-# improvements: []
-# fixes: []
-# security: []
-# breaking: []
-# upgrade_notes: []
-# known_issues: []
-# docs: []
-# dependencies:
-#   - name: component
-#     from: "1.0"
-#     to: "1.1"
-#     changelog_url: "https://..."
-#     notes: "..."
+improvements:
+  - "`kubectl get bd` shows the new `Missing` column: `Unknown` while the device is absent for less than 10 minutes, `True` after that, empty for a device that is present. A stale duplicate of a BlockDevice is now easy to spot."
+
+fixes:
+  - "A BlockDevice of a non-consumable device that was reused under its old name after the device name changed is no longer marked `Missing` and cleared again on every discovery pass."
+  - "A `Missing` BlockDevice that names an existing LVMVolumeGroup in `status.lvmVolumeGroupName` is now deleted after `missingBlockDeviceRetentionHours` when the same device (same Physical Volume UUID, partition UUID, or WWN with serial) is present on the node under another BlockDevice and no LVMVolumeGroup lists the stale one in `status.nodes`. Before, such a duplicate stayed forever. A `Missing` BlockDevice with no live counterpart is kept as before."

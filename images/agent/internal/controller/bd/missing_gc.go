@@ -68,9 +68,18 @@ func newLVGReferences(lvgs []v1alpha1.LVMVolumeGroup) lvgReferences {
 }
 
 // holds reports whether an LVMVolumeGroup references blockDevice.
-func (r lvgReferences) holds(blockDevice v1alpha1.BlockDevice) bool {
+//
+// The name check is skipped for a duplicate: a Missing BlockDevice with a live
+// twin on the node (see hasLiveTwin) that no LVMVolumeGroup lists. Its device
+// is not lost, it is the same Physical Volume under another name, and the
+// twin carries the LVMVolumeGroup now, so the name only keeps the stale record
+// from ever expiring.
+func (r lvgReferences) holds(blockDevice v1alpha1.BlockDevice, hasTwin bool) bool {
 	if _, ok := r.blockDevices[blockDevice.Name]; ok {
 		return true
+	}
+	if hasTwin {
+		return false
 	}
 	if name := blockDevice.Status.LVMVolumeGroupName; name != "" {
 		if _, ok := r.names[name]; ok {
@@ -78,6 +87,38 @@ func (r lvgReferences) holds(blockDevice v1alpha1.BlockDevice) bool {
 		}
 	}
 	return false
+}
+
+// hasLiveTwin reports whether another BlockDevice of the same node describes
+// the same device as blockDevice, is in the current scan and carries no
+// Missing condition. The identity is the one findLegacyNonConsumableBlockDevice
+// reuses a name by: the Physical Volume UUID, the PartUUID, or WWN together
+// with serial.
+func hasLiveTwin(
+	blockDevice v1alpha1.BlockDevice,
+	actualCandidates map[string]struct{},
+	apiBlockDevices map[string]v1alpha1.BlockDevice,
+) bool {
+	for name, other := range apiBlockDevices {
+		if name == blockDevice.Name || other.Name == blockDevice.Name ||
+			other.Status.NodeName != blockDevice.Status.NodeName {
+			continue
+		}
+		if isBlockDeviceDeprecated(other.Name, actualCandidates) ||
+			conditions.Get(other.Status.Conditions, v1alpha1.BlockDeviceConditionMissing) != nil {
+			continue
+		}
+		if sameDevice(blockDevice.Status, other.Status) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameDevice(a, b v1alpha1.BlockDeviceStatus) bool {
+	return (a.PVUuid != "" && a.PVUuid == b.PVUuid) ||
+		(a.PartUUID != "" && a.PartUUID == b.PartUUID) ||
+		(a.Wwn != "" && a.Serial != "" && a.Wwn == b.Wwn && a.Serial == b.Serial)
 }
 
 // missingTrue returns the Missing condition of blockDevice when it is True,
@@ -121,7 +162,7 @@ func isMissingBlockDeviceExpired(
 
 // shouldCollectMissingBlockDevice decides whether the agent deletes a Missing
 // BlockDevice: isMissingBlockDeviceExpired, and no LVMVolumeGroup references
-// it.
+// it (see lvgReferences.holds for the duplicate exception).
 //
 // Every reason of the condition is treated alike. DeviceNotFound is the only
 // one the agent publishes, and it already covers a device withheld from
@@ -134,11 +175,12 @@ func shouldCollectMissingBlockDevice(
 	actualCandidates map[string]struct{},
 	nodeName string,
 	refs lvgReferences,
+	apiBlockDevices map[string]v1alpha1.BlockDevice,
 	now time.Time,
 	retention time.Duration,
 ) bool {
 	return isMissingBlockDeviceExpired(blockDevice, actualCandidates, nodeName, now, retention) &&
-		!refs.holds(blockDevice)
+		!refs.holds(blockDevice, hasLiveTwin(blockDevice, actualCandidates, apiBlockDevices))
 }
 
 // collectMissingBlockDevices deletes the node's BlockDevices that
@@ -177,7 +219,7 @@ func (d *Discoverer) collectMissingBlockDevices(
 		} else {
 			refs := newLVGReferences(lvgs)
 			for _, device := range due {
-				if !shouldCollectMissingBlockDevice(device, actualCandidates, d.cfg.NodeName, refs, now, d.cfg.MissingBlockDeviceRetention) {
+				if !shouldCollectMissingBlockDevice(device, actualCandidates, d.cfg.NodeName, refs, apiBlockDevices, now, d.cfg.MissingBlockDeviceRetention) {
 					log.Debug(fmt.Sprintf("Missing BlockDevice %q is referenced by an LVMVolumeGroup; keeping it", device.Name))
 					continue
 				}

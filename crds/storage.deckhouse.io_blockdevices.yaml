@@ -26,6 +26,11 @@ spec:
       jsonPath: .status.consumable
       name: Consumable
       type: boolean
+    - description: True when the device has not been seen on the node for longer than
+        the grace period; Unknown during it.
+      jsonPath: .status.conditions[?(@.type=="Missing")].status
+      name: Missing
+      type: string
     - description: Why the device is or is not consumable.
       jsonPath: .status.conditions[?(@.type=="Consumable")].reason
       name: Reason

@@ -720,6 +720,18 @@ After a node reboot, the agent automatically re-establishes loop device mappings
 
 When an LVMVolumeGroup with file-backed devices is deleted, the agent detaches the loop devices and removes the backing files.
 
+## Why are there two BlockDevices for one disk, and when does the old one go away?
+
+When the identity of a device changes, for example after a firmware update or a move to another controller, the agent may name its BlockDevice differently. A non-consumable device (one that already carries a Physical Volume, a filesystem or a partition table) is normally recognised and keeps its old resource, but if it is not, the old resource stays next to the new one.
+
+Tell them apart with `kubectl get bd`: the `Missing` column of the old one is `Unknown` for the first 10 minutes without the device, then `True`, while the live one has it empty. Both show the same node and size, and `kubectl get bd -o wide` shows the same `LVMVolumeGroup`. The `Missing` condition of the old one gives the time since which the device is absent:
+
+```shell
+kubectl get bd <name> -o jsonpath='{.status.conditions[?(@.type=="Missing")]}'
+```
+
+The old resource needs no action. The agent deletes it after `missingBlockDeviceRetentionHours` (24 hours by default) from the moment `Missing` became `True`, provided the live BlockDevice of the same device (same Physical Volume UUID, partition UUID, or WWN with serial) exists and no LVMVolumeGroup lists the old one in `status.nodes`. A `Missing` BlockDevice with no such counterpart is kept as long as an LVMVolumeGroup it names exists: it is the trace of a lost Physical Volume.
+
 ## What labels are added by the controller to BlockDevice resources?
 
 - `status.blockdevice.storage.deckhouse.io/type`: LVM type.
