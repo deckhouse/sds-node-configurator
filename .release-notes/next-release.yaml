@@ -1,10 +1,15 @@
 date: "2026-xx-xx"
-summary: "A stale duplicate BlockDevice of a device that changed its identity is now deleted by the agent, and `kubectl get bd` shows the Missing condition."
+summary: "An LVMVolumeGroup can now let the agent release the empty Physical Volume of a device taken out of its selector, a stale duplicate BlockDevice of a device that changed its identity is now deleted by the agent, and `kubectl get bd` shows the Missing condition."
 highlights:
+  - "The new `spec.releaseEmptyBlockDevices` field of LVMVolumeGroup lets the agent remove from the Volume Group the empty Physical Volume of a device that has left `blockDeviceSelector`."
   - "A Missing BlockDevice whose device lives on under another BlockDevice is deleted after `missingBlockDeviceRetentionHours` instead of being kept for as long as its LVMVolumeGroup exists."
   - "`kubectl get bd` has a new `Missing` column."
 
+new_features:
+  - "The new `spec.releaseEmptyBlockDevices` field of LVMVolumeGroup (and of `spec.lvmVolumeGroupTemplate` of LVMVolumeGroupSet) lets the agent take a block device out of a Volume Group with `vgreduce` and `pvremove` after it no longer matches `blockDeviceSelector`. It is off by default. The agent acts only when the BlockDevice exists and has no `Missing` condition, no other BlockDevice on the node carries the same Physical Volume, the Physical Volume is found by its UUID and is empty (`pv_used` is read from LVM right before `vgreduce`), the Volume Group carries the tag of this LVMVolumeGroup, is neither shared nor owned by another host and keeps at least one other Physical Volume, no `pvmove` is running, no thin pool sized as a percentage would outgrow its share of the smaller Volume Group, and all of this held on two reconciliation passes at least a minute apart. A Physical Volume that holds data is never touched. File devices are not affected."
+
 improvements:
+  - "While a device that has left `blockDeviceSelector` is still in the Volume Group, the `VGConfigurationApplied` condition (reason `ValidationFailed`) names the device and what is in the way: the amount of data on its Physical Volume and the `pvmove` to run, or the `spec.releaseEmptyBlockDevices` field when the Physical Volume is empty."
   - "`kubectl get bd` shows the new `Missing` column: `Unknown` while the device is absent for less than 10 minutes, `True` after that, empty for a device that is present. A stale duplicate of a BlockDevice is now easy to spot."
 
 fixes:

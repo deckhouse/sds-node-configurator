@@ -140,7 +140,8 @@ spec:
                   loop device and the Physical Volume in place, without unmounting anything
                   or interrupting the volumes on top. Lowering it is rejected: giving
                   capacity back means shrinking the Volume Group, which the module does
-                  not do for block devices either.
+                  not do for file devices; for block devices it only removes an empty
+                  Physical Volume (see `releaseEmptyBlockDevices`).
 
                   Capacity can therefore be added two ways: raise the size of an existing
                   entry, or add a new entry under a new name when the extra space has to
@@ -251,6 +252,32 @@ spec:
                 required:
                 - nodeName
                 type: object
+              releaseEmptyBlockDevices:
+                description: |-
+                  Lets the agent take a block device out of the Volume Group once it no longer
+                  matches `blockDeviceSelector`, provided its Physical Volume is empty.
+
+                  When `true`, the agent runs `vgreduce` and `pvremove` for such a device,
+                  and only when all of these hold:
+
+                  - the BlockDevice exists, its labels do not match `blockDeviceSelector`, and it has no `Missing` condition;
+                  - no other BlockDevice on the node carries the same Physical Volume;
+                  - the Physical Volume holds no data (`pv_used` is zero when checked right before `vgreduce`);
+                  - the Physical Volume belongs to this Volume Group, which carries the tag of this resource, is neither shared nor owned by another host, and keeps at least one other Physical Volume;
+                  - no `pvmove` is running in the Volume Group;
+                  - no thin pool sized as a percentage would be larger than its share of the Volume Group without this Physical Volume;
+                  - all of the above has held on two reconciliation passes at least a minute apart.
+
+                  A Physical Volume that still holds data is never touched: the condition
+                  `VGConfigurationApplied` names the device and the amount of data on it, and the
+                  data has to be moved off with `pvmove` on the node first. With the default
+                  `false` the agent removes nothing and the same condition tells what to do.
+
+                  Use it with a `blockDeviceSelector` on labels that stay with the device, not on the
+                  `status.blockdevice.storage.deckhouse.io/*` labels, which the agent changes itself.
+
+                  File devices (`fileDevices`) are not affected by this field.
+                type: boolean
               thinPools:
                 description: Desired thin pool configuration.
                 items:

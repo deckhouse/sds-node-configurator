@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -75,4 +76,19 @@ func (bdCl *BDClient) GetAPIBlockDevices(
 	}
 
 	return result, nil
+}
+
+func (bdCl *BDClient) GetAPIBlockDevice(ctx context.Context, controllerName, name string) (*v1alpha1.BlockDevice, error) {
+	obj := &v1alpha1.BlockDevice{}
+	start := time.Now()
+	err := bdCl.reader.Get(ctx, client.ObjectKey{Name: name}, obj)
+	bdCl.metrics.APIMethodsDuration(controllerName, "get").Observe(bdCl.metrics.GetEstimatedTimeInSeconds(start))
+	bdCl.metrics.APIMethodsExecutionCount(controllerName, "get").Inc()
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			bdCl.metrics.APIMethodsErrors(controllerName, "get").Inc()
+		}
+		return nil, err
+	}
+	return obj, nil
 }

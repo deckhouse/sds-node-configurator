@@ -194,6 +194,8 @@ type PVData struct {
 	PVUuid string            `json:"pv_uuid,omitempty"`
 	VGTags string            `json:"vg_tags,omitempty"`
 	VGUuid string            `json:"vg_uuid,omitempty"`
+
+	VGSystemID string `json:"vg_systemid,omitempty"`
 }
 
 type VGReport struct {

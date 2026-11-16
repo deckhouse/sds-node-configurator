@@ -387,13 +387,15 @@ func matchConfiguredLVGWithExistingOne(lvg *v1alpha1.LVMVolumeGroup, lvgs map[st
 func updateLVMVolumeGroupByConfiguredFromSet(ctx context.Context, cl client.Client, existing, configured *v1alpha1.LVMVolumeGroup) (bool, error) {
 	if equality.Semantic.DeepEqual(existing.Spec.ThinPools, configured.Spec.ThinPools) &&
 		equality.Semantic.DeepEqual(existing.Spec.BlockDeviceSelector, configured.Spec.BlockDeviceSelector) &&
-		equality.Semantic.DeepEqual(existing.Spec.FileDevices, configured.Spec.FileDevices) {
+		equality.Semantic.DeepEqual(existing.Spec.FileDevices, configured.Spec.FileDevices) &&
+		existing.Spec.ReleaseEmptyBlockDevices == configured.Spec.ReleaseEmptyBlockDevices {
 		return false, nil
 	}
 
 	existing.Spec.ThinPools = configured.Spec.ThinPools
 	existing.Spec.BlockDeviceSelector = configured.Spec.BlockDeviceSelector
 	existing.Spec.FileDevices = configured.Spec.FileDevices
+	existing.Spec.ReleaseEmptyBlockDevices = configured.Spec.ReleaseEmptyBlockDevices
 
 	return true, cl.Update(ctx, existing)
 }
@@ -495,11 +497,12 @@ func configureLVGBySet(lvgSet *v1alpha1.LVMVolumeGroupSet, node v1.Node) *v1alph
 			Labels: lvgSet.Spec.LVGTemplate.Metadata.Labels,
 		},
 		Spec: v1alpha1.LVMVolumeGroupSpec{
-			ActualVGNameOnTheNode: lvgSet.Spec.LVGTemplate.ActualVGNameOnTheNode,
-			BlockDeviceSelector:   lvgSet.Spec.LVGTemplate.BlockDeviceSelector,
-			ThinPools:             lvgSet.Spec.LVGTemplate.ThinPools,
-			Type:                  lvgSet.Spec.LVGTemplate.Type,
-			FileDevices:           lvgSet.Spec.LVGTemplate.FileDevices,
+			ActualVGNameOnTheNode:    lvgSet.Spec.LVGTemplate.ActualVGNameOnTheNode,
+			BlockDeviceSelector:      lvgSet.Spec.LVGTemplate.BlockDeviceSelector,
+			ThinPools:                lvgSet.Spec.LVGTemplate.ThinPools,
+			Type:                     lvgSet.Spec.LVGTemplate.Type,
+			FileDevices:              lvgSet.Spec.LVGTemplate.FileDevices,
+			ReleaseEmptyBlockDevices: lvgSet.Spec.LVGTemplate.ReleaseEmptyBlockDevices,
 			Local: v1alpha1.LVMVolumeGroupLocalSpec{
 				NodeName: node.Name,
 			},

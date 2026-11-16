@@ -143,7 +143,8 @@ type LVMVolumeGroupTemplate struct {
 	// loop device and the Physical Volume in place on every node the set covers,
 	// without unmounting anything or interrupting the volumes on top. Lowering
 	// it is rejected: giving capacity back means shrinking the Volume Group,
-	// which the module does not do for block devices either.
+	// which the module does not do for file devices; for block devices it only
+	// removes an empty Physical Volume (see `releaseEmptyBlockDevices`).
 	//
 	// Capacity can therefore be added two ways: raise the size of an existing
 	// entry, or add a new entry under a new name when the extra space has to
@@ -161,6 +162,16 @@ type LVMVolumeGroupTemplate struct {
 	// +crd-enricher:raw:items.properties.directory.description="Absolute directory on the node's filesystem where the backing file\nwill be created. The agent creates the directory automatically\n(mkdir -p) if it does not exist; the path must be absolute and\nmust not contain '..' segments."
 	// +crd-enricher:raw:items.properties.size.description="Size of the preallocated backing file. Must be at least 1Gi;\na smaller value is rejected at admission, since `size` cannot be\nlowered afterwards.\n\nOnly binary units are accepted; `1G` (10^9 bytes) is below the\n1Gi (2^30 bytes) minimum and is rejected at admission. The value\nmust be a whole number of the unit it names — `1536Mi`, not\n`1.5Gi`; see the same field on LVMVolumeGroup for why."
 	FileDevices []LVMVolumeGroupFileDeviceSpec `json:"fileDevices,omitempty"`
+	// Lets the agent take a block device out of the Volume Group once it no longer
+	// matches `blockDeviceSelector`, provided its Physical Volume is empty.
+	//
+	// The value is copied to every LVMVolumeGroup created by the set; see the same
+	// field on LVMVolumeGroup for the conditions under which the agent acts.
+	//
+	// > Note that a change of `blockDeviceSelector` in the template reaches all the nodes
+	// > the set covers at once, and on each of them the device is released independently.
+	// +optional
+	ReleaseEmptyBlockDevices bool `json:"releaseEmptyBlockDevices,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true

@@ -104,6 +104,52 @@ func TestUpdateLVMVolumeGroupByConfiguredFromSet_PropagatesFileDevices(t *testin
 	assert.Equal(t, configured.Spec.FileDevices, existing.Spec.FileDevices)
 }
 
+func TestConfigureLVGBySet_CopiesReleaseEmptyBlockDevices(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		lvgSet := &v1alpha1.LVMVolumeGroupSet{
+			ObjectMeta: metav1.ObjectMeta{Name: "set-a"},
+			Spec: v1alpha1.LVMVolumeGroupSetSpec{
+				LVGTemplate: v1alpha1.LVMVolumeGroupTemplate{
+					ActualVGNameOnTheNode:    "vg-data",
+					Type:                     "Local",
+					BlockDeviceSelector:      &metav1.LabelSelector{MatchLabels: map[string]string{"pool": "a"}},
+					ReleaseEmptyBlockDevices: enabled,
+				},
+			},
+		}
+
+		lvg := configureLVGBySet(lvgSet, v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-0"}})
+
+		assert.Equal(t, enabled, lvg.Spec.ReleaseEmptyBlockDevices)
+	}
+}
+
+func TestUpdateLVMVolumeGroupByConfiguredFromSet_PropagatesReleaseEmptyBlockDevices(t *testing.T) {
+	ctx := context.Background()
+	for _, enabled := range []bool{true, false} {
+		configured := &v1alpha1.LVMVolumeGroup{Spec: v1alpha1.LVMVolumeGroupSpec{ReleaseEmptyBlockDevices: enabled}}
+		existing := &v1alpha1.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: "set-a-0"},
+			Spec:       v1alpha1.LVMVolumeGroupSpec{ReleaseEmptyBlockDevices: !enabled},
+		}
+		cl := NewFakeClient()
+		assert.NoError(t, cl.Create(ctx, existing))
+
+		updated, err := updateLVMVolumeGroupByConfiguredFromSet(ctx, cl, existing, configured)
+		assert.NoError(t, err)
+		assert.True(t, updated)
+		assert.Equal(t, enabled, existing.Spec.ReleaseEmptyBlockDevices)
+
+		stored := &v1alpha1.LVMVolumeGroup{}
+		assert.NoError(t, cl.Get(ctx, client.ObjectKeyFromObject(existing), stored))
+		assert.Equal(t, enabled, stored.Spec.ReleaseEmptyBlockDevices)
+
+		updated, err = updateLVMVolumeGroupByConfiguredFromSet(ctx, cl, existing, configured)
+		assert.NoError(t, err)
+		assert.False(t, updated)
+	}
+}
+
 // Existing children are matched by (node, VG name), not by generated name:
 // configureLVGNameFromSet hands out the first free name, which need not be the
 // one the node's group has, so matching by name would mint a duplicate LVG for

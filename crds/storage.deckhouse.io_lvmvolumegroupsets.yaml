@@ -134,7 +134,8 @@ spec:
                       loop device and the Physical Volume in place on every node the set covers,
                       without unmounting anything or interrupting the volumes on top. Lowering
                       it is rejected: giving capacity back means shrinking the Volume Group,
-                      which the module does not do for block devices either.
+                      which the module does not do for file devices; for block devices it only
+                      removes an empty Physical Volume (see `releaseEmptyBlockDevices`).
 
                       Capacity can therefore be added two ways: raise the size of an existing
                       entry, or add a new entry under a new name when the extra space has to
@@ -203,6 +204,17 @@ spec:
                         description: Required labels for LVMVolumeGroup resources.
                         type: object
                     type: object
+                  releaseEmptyBlockDevices:
+                    description: |-
+                      Lets the agent take a block device out of the Volume Group once it no longer
+                      matches `blockDeviceSelector`, provided its Physical Volume is empty.
+
+                      The value is copied to every LVMVolumeGroup created by the set; see the same
+                      field on LVMVolumeGroup for the conditions under which the agent acts.
+
+                      > Note that a change of `blockDeviceSelector` in the template reaches all the nodes
+                      > the set covers at once, and on each of them the device is released independently.
+                    type: boolean
                   thinPools:
                     description: |-
                       Desired thin pool configuration in LVMVolumeGroups.

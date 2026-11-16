@@ -109,6 +109,7 @@ type Reconciler struct {
 	log      logger.Logger
 	lvgCl    *repository.LVGClient
 	bdCl     *repository.BDClient
+	bdAPICl  *repository.BDClient
 	metrics  *monitoring.Metrics
 	sdsCache *cache.Cache
 	cfg      ReconcilerConfig
@@ -159,6 +160,10 @@ type Reconciler struct {
 	// rules. Same locking story as the two maps above.
 	adoptionTriggeredMu sync.Mutex
 	adoptionTriggered   map[string]struct{}
+
+	releaseMu        sync.Mutex
+	releaseSightings map[string]releaseSighting
+	now              func() time.Time
 }
 
 type ReconcilerConfig struct {
@@ -183,6 +188,7 @@ type ReconcilerConfig struct {
 
 func NewReconciler(
 	cl client.Client,
+	bdAPIReader UncachedReader,
 	log logger.Logger,
 	metrics *monitoring.Metrics,
 	sdsCache *cache.Cache,
@@ -202,6 +208,7 @@ func NewReconciler(
 			recorder,
 		),
 		bdCl:                 repository.NewBDClient(cl, metrics),
+		bdAPICl:              repository.NewBDClient(bdAPIReader, metrics),
 		metrics:              metrics,
 		sdsCache:             sdsCache,
 		cfg:                  cfg,
@@ -264,6 +271,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 	// published on the resource, since a deletion that holds silently looks like
 	// one that is stuck for no reason.
 	if lvg.DeletionTimestamp != nil {
+		r.forgetReleaseSightings(lvg.Name, nil)
 		if foreign := foreignFinalizers(lvg); len(foreign) > 0 {
 			message := fmt.Sprintf("waiting for the finalizers %s to be removed by their owners before deleting VG %s", strings.Join(foreign, ", "), lvg.Spec.ActualVGNameOnTheNode)
 			// Every status write on a group being deleted wakes the agent, its own
@@ -392,6 +400,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, request controller.Reconcile
 		log.Debug(fmt.Sprintf("successfully got block device resources for the LVMVolumeGroup %s by the selector %v", lvg.Name, lvg.Spec.BlockDeviceSelector))
 
 		blockDevices = filterBlockDevicesByNodeName(blockDevices, lvg.Spec.Local.NodeName)
+
+		if len(blockDevices) > 0 {
+			if message, requeueAfter := r.releaseLostBlockDevices(ctx, lvg, blockDevices); message != "" {
+				r.log.Warn(fmt.Sprintf("the LVMVolumeGroup %s holds BlockDevices outside the blockDeviceSelector: %s", lvg.Name, message))
+				err = r.lvgCl.UpdateLVGConditionIfNeeded(ctx, lvg, v1.ConditionFalse, internal.TypeVGConfigurationApplied, internal.ReasonValidationFailed, message)
+				if err != nil {
+					log.Error(fmt.Sprintf("unable to add a condition %s to the LVMVolumeGroup %s", internal.TypeVGConfigurationApplied, lvg.Name), logger.Err(err))
+					return controller.Result{}, err
+				}
+				return controller.Result{RequeueAfter: requeueAfter}, nil
+			}
+		}
 
 		valid, reason := validateSpecBlockDevices(lvg, blockDevices)
 		if !valid {

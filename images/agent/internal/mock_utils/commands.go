@@ -575,6 +575,21 @@ func (mr *MockCommandsMockRecorder) ReTag(ctx, log, metrics, ctrlName, cmdTimeou
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReTag", reflect.TypeOf((*MockCommands)(nil).ReTag), ctx, log, metrics, ctrlName, cmdTimeout)
 }
 
+// ReduceVG mocks base method.
+func (m *MockCommands) ReduceVG(ctx context.Context, vgName, pvName string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReduceVG", ctx, vgName, pvName)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReduceVG indicates an expected call of ReduceVG.
+func (mr *MockCommandsMockRecorder) ReduceVG(ctx, vgName, pvName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReduceVG", reflect.TypeOf((*MockCommands)(nil).ReduceVG), ctx, vgName, pvName)
+}
+
 // RemoveEmptyThinPool mocks base method.
 func (m *MockCommands) RemoveEmptyThinPool(ctx context.Context, vgName, poolName string) (bool, string, error) {
 	m.ctrl.T.Helper()

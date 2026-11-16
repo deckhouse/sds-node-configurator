@@ -1616,8 +1616,10 @@ func TestLVMVolumeGroupWatcherCtrl(t *testing.T) {
 }
 
 func setupReconciler() *Reconciler {
+	cl := test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{}, &v1alpha1.LVMLogicalVolume{})
 	return NewReconciler(
-		test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{}, &v1alpha1.LVMLogicalVolume{}),
+		cl,
+		UncachedReader{Reader: cl},
 		logger.NewNop(),
 		monitoring.GetMetrics(""),
 		cache.New(),
@@ -1904,8 +1906,10 @@ func TestValidateFileDevice(t *testing.T) {
 // against deterministic expectations.
 func reconcilerWithMockedCommands(t *testing.T, mc *mock_utils.MockCommands) *Reconciler {
 	t.Helper()
+	cl := test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{}, &v1alpha1.LVMLogicalVolume{})
 	return NewReconciler(
-		test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{}, &v1alpha1.LVMLogicalVolume{}),
+		cl,
+		UncachedReader{Reader: cl},
 		logger.NewNop(),
 		monitoring.GetMetrics(""),
 		cache.New(),

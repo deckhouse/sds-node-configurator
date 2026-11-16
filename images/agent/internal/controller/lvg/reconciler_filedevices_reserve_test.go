@@ -40,8 +40,10 @@ import (
 
 func reconcilerWithReserve(t *testing.T, mc *mock_utils.MockCommands, percent int) *Reconciler {
 	t.Helper()
+	cl := test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{}, &v1alpha1.LVMLogicalVolume{})
 	return NewReconciler(
-		test_utils.NewFakeClient(&v1alpha1.LVMVolumeGroup{}, &v1alpha1.LVMLogicalVolume{}),
+		cl,
+		UncachedReader{Reader: cl},
 		logger.NewNop(),
 		monitoring.GetMetrics(""),
 		cache.New(),

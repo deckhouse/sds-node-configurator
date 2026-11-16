@@ -18,6 +18,9 @@ package utils
 
 import (
 	"fmt"
+	"math"
+	"strconv"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -65,4 +68,23 @@ func AlignRequestedSizeToExtent(specSize string, requested, extentSize resource.
 		return alignSizeToExtentDown(requested, extentSize)
 	}
 	return AlignSizeToExtent(requested, extentSize)
+}
+
+func ParsePVUsedBytes(raw string) (int64, error) {
+	value := strings.TrimSpace(raw)
+	value = strings.TrimSpace(strings.TrimSuffix(value, "B"))
+	if value == "" {
+		return 0, fmt.Errorf("pv_used is empty")
+	}
+	if n, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if n < 0 {
+			return 0, fmt.Errorf("pv_used %q is negative", raw)
+		}
+		return n, nil
+	}
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil || f < 0 || math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, fmt.Errorf("unable to parse pv_used %q", raw)
+	}
+	return int64(math.Ceil(f)), nil
 }

@@ -275,7 +275,7 @@ The straightforward way is to raise the size of an existing entry:
 
 The agent grows the backing file, tells the loop device to re-read it and resizes the Physical Volume. All three steps run online: nothing is unmounted, no logical volume is deactivated, and volumes in use keep working throughout. A thin pool sized as a percentage of the Volume Group follows automatically.
 
-`size` can only be increased. Lowering it is rejected at admission: returning capacity means shrinking the Volume Group (`pvmove` + `vgreduce`), which can be impossible when the remaining Physical Volumes have no room and is destructive when it is not. The module does not shrink a Volume Group for block devices either.
+`size` can only be increased. Lowering it is rejected at admission: returning capacity means shrinking the Volume Group (`pvmove` + `vgreduce`), which can be impossible when the remaining Physical Volumes have no room and is destructive when it is not. For block devices the module only removes a Physical Volume that is already empty, see [Extracting a BlockDevice resource from LVMVolumeGroup](#extracting-a-blockdevice-resource-from-lvmvolumegroup).
 
 When the extra capacity has to come from a different filesystem, add a new entry instead:
 
@@ -355,7 +355,34 @@ If the deleting [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource contains a L
 To extract a [BlockDevice](./cr.html#blockdevice) resource from an [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource, do the following:
 
 1. Modify the `spec.blockDeviceSelector` field of the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource (add other selectors) or modify the corresponding labels on the [BlockDevice](./cr.html#blockdevice) resource so they no longer match the [LVMVolumeGroup](./cr.html#lvmvolumegroup) selectors.
-1. Manually execute the `pvmove`, `vgreduce`, and `pvremove` commands on the node.
+1. If the Physical Volume of the device holds data, move it off with `pvmove <device>` on the node. The module never moves data.
+1. Remove the empty Physical Volume from the Volume Group. Either let the agent do it (see below) or run `vgreduce <vg> <device>` and `pvremove <device>` on the node.
+
+By default, the agent does not remove anything. While a device that has left the selector is still in the Volume Group, the `VGConfigurationApplied` condition is `False` with the reason `ValidationFailed`, and the Volume Group is not extended further. The message of the condition names the device and what is in the way: the amount of data on its Physical Volume and the `pvmove` to run, or, if the Physical Volume is empty, the `spec.releaseEmptyBlockDevices` field. While the field is `false`, the agent runs no LVM command for this message: it is built from the agent's latest scan of the node and refreshed periodically.
+
+#### Releasing empty Physical Volumes automatically
+
+Set `spec.releaseEmptyBlockDevices` to `true` on the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource (or in `spec.lvmVolumeGroupTemplate` of an [LVMVolumeGroupSet](./cr.html#lvmvolumegroupset), from where it is copied to every LVMVolumeGroup of the set) to let the agent run `vgreduce` and `pvremove` for a device that has left `blockDeviceSelector`. The agent acts only when all of the following hold:
+
+- The BlockDevice resource exists, its labels do not match `blockDeviceSelector`, and it has no `Missing` condition. A device that has disappeared from the node is not a device taken out of the selector, and the agent leaves it alone.
+- No other BlockDevice on the same node carries the same Physical Volume. Two BlockDevices with one Physical Volume mean that the device has changed its identity or is seen through another path, for example after its multipath map was removed, and not that it was taken out of the selector.
+- The Physical Volume is found in LVM by the UUID recorded in the status of the resource, never by its path alone, and holds no data: `pv_used` is zero when it is read from LVM right before `vgreduce`.
+- The Physical Volume belongs to the Volume Group of this resource, and the Volume Group carries the `storage.deckhouse.io/lvmVolumeGroupName` tag with the name of this resource, is not shared (lvmlockd), is listed by LVM on this node (a Volume Group whose system ID belongs to another host is not), and keeps at least one other Physical Volume. The last Physical Volume is never removed.
+- No `pvmove` is running in the Volume Group.
+- No thin pool whose `size` is a percentage would be larger than that percentage of the Volume Group without this Physical Volume (see below).
+- All of the above held on two reconciliation passes in a row, at least a minute apart, so that a label changed and changed back does not remove a disk.
+
+A Physical Volume that still holds data is never touched, whatever the value of the field. `vgreduce` is run without `--removemissing` and `--force`, so LVM itself also refuses a Physical Volume that is in use. After `pvmove` ends, the agent notices the empty Physical Volume on its next retry and removes it.
+
+A Physical Volume that is in no Volume Group is not removed automatically, even if its device was in this resource before: the condition names it, and `pvremove` is run by hand. This is also the state left behind when `vgreduce` went through and `pvremove` failed.
+
+{{< alert level="warning" >}}
+Enable the field only with a `blockDeviceSelector` on labels that stay with the device, such as labels you set on the BlockDevice resources yourself. Do not select by the `status.blockdevice.storage.deckhouse.io/*` labels: the agent changes them itself when the state of the device changes, and the device then leaves the selector without anyone asking for it. A device that changes its identity gets a new BlockDevice, which neither the labels set on the old one nor its name select: while the old BlockDevice exists, the agent refuses to act, and after it is deleted, an empty Physical Volume of such a device is released.
+{{< /alert >}}
+
+The field applies to block devices only. A file device is changed through `spec.fileDevices`, see the [FAQ](./faq.html#how-do-file-backed-devices-filedevices-work).
+
+Thin pools are never shrunk. A thin pool whose `size` is a percentage is checked against the Volume Group without the Physical Volume: if the thin pool is already larger than its percentage of the smaller Volume Group, the resource would fail validation after `vgreduce`, so the agent does not remove the Physical Volume and the condition names the thin pool. To release such a device, first set the `size` of the thin pool to an absolute value no smaller than its current size. Otherwise, only the free space of the Volume Group becomes smaller.
 
 ## Protection against data leakage between volumes
 

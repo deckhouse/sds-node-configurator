@@ -1,10 +1,15 @@
 date: "2026-xx-xx"
-summary: "Устаревший дубль BlockDevice устройства, сменившего идентичность, теперь удаляется агентом, а `kubectl get bd` показывает условие Missing."
+summary: "LVMVolumeGroup теперь может поручить агенту вывод пустого Physical Volume устройства, убранного из селектора, устаревший дубль BlockDevice устройства, сменившего идентичность, удаляется агентом, а `kubectl get bd` показывает условие Missing."
 highlights:
+  - "Новое поле `spec.releaseEmptyBlockDevices` ресурса LVMVolumeGroup позволяет агенту вывести из группы томов пустой Physical Volume устройства, вышедшего из `blockDeviceSelector`."
   - "BlockDevice с `Missing`, устройство которого живёт под другим BlockDevice, удаляется через `missingBlockDeviceRetentionHours`, а не хранится, пока существует его LVMVolumeGroup."
   - "В `kubectl get bd` появилась колонка `Missing`."
 
+new_features:
+  - "Новое поле `spec.releaseEmptyBlockDevices` ресурса LVMVolumeGroup (и `spec.lvmVolumeGroupTemplate` ресурса LVMVolumeGroupSet) позволяет агенту вывести блочное устройство из группы томов командами `vgreduce` и `pvremove` после того, как оно перестало подходить под `blockDeviceSelector`. По умолчанию выключено. Агент действует, только если ресурс BlockDevice существует и у него нет условия `Missing`, ни один другой BlockDevice на узле не несёт тот же Physical Volume, Physical Volume найден по UUID и пуст (`pv_used` читается из LVM непосредственно перед `vgreduce`), группа томов несёт тег этого LVMVolumeGroup, не является общей, не принадлежит другому узлу и сохраняет хотя бы один другой Physical Volume, не выполняется `pvmove`, ни один thin pool с размером в процентах не окажется больше своей доли уменьшенной группы томов, и всё это подтверждено на двух проходах reconcile с промежутком не меньше минуты. Physical Volume с данными не затрагивается. Файловые устройства поле не затрагивает."
+
 improvements:
+  - "Пока устройство, вышедшее из `blockDeviceSelector`, остаётся в группе томов, условие `VGConfigurationApplied` (причина `ValidationFailed`) называет устройство и то, что мешает: объём данных на его Physical Volume и `pvmove`, который нужно выполнить, либо поле `spec.releaseEmptyBlockDevices`, если Physical Volume пуст."
   - "В `kubectl get bd` появилась колонка `Missing`: `Unknown`, пока устройства нет меньше 10 минут, `True` после этого, пусто у присутствующего устройства. Устаревший дубль BlockDevice теперь легко заметить."
 
 fixes:

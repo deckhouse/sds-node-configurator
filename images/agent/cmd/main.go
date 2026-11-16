@@ -291,6 +291,7 @@ func run() int {
 		log,
 		lvg.NewReconciler(
 			mgr.GetClient(),
+			lvg.UncachedReader{Reader: mgr.GetAPIReader()},
 			log,
 			metrics,
 			sdsCache,

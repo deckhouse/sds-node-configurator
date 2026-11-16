@@ -280,6 +280,15 @@ The [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource exists as long as the co
 
 After restoring the disconnected device on the node, the LVM Volume Group will restore functionality, and the corresponding [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource will display the current state.
 
+## How do I take a disk out of a Volume Group?
+
+Change `spec.blockDeviceSelector` of the [LVMVolumeGroup](./cr.html#lvmvolumegroup) resource, or the labels of the [BlockDevice](./cr.html#blockdevice), so that the device no longer matches. Then:
+
+- If the Physical Volume of the disk is empty, set `spec.releaseEmptyBlockDevices: true` and the agent runs `vgreduce` and `pvremove` itself, or run them on the node by hand.
+- If the Physical Volume holds data, run `pvmove <device>` on the node first. The agent never moves data. After `pvmove` the Physical Volume is empty and is handled as above.
+
+Until the device is out of the Volume Group, the `VGConfigurationApplied` condition shows `ValidationFailed` with the name of the device, the amount of data on it, and the next step. The conditions under which the agent removes a Physical Volume are in [Extracting a BlockDevice resource from LVMVolumeGroup](./resources.html#extracting-a-blockdevice-resource-from-lvmvolumegroup).
+
 ## How do I transfer control of an existing LVM Volume Group to the controller?
 
 Add the LVM tag `storage.deckhouse.io/enabled=true` to the LVM Volume Group on the node:
@@ -587,7 +596,7 @@ File-backed devices allow you to allocate part of an existing filesystem for LVM
 - **The default shares a filesystem with kubelet and containerd**: On a standard node layout `/var/lib/deckhouse/sds/file-devices` sits on the same filesystem as `/var/lib/kubelet` and `/var/lib/containerd`, whose sizing DKP accounts for in full. Filling it up evicts Pods and breaks image pulls on the node, so for anything beyond a small entry mount a dedicated disk and point `fileDevicesDirectory` at it. The `fileDevicesMinFreeSpacePercent` reserve below is the guard, not a licence to skip this.
 - **Directory auto-created**: The agent creates the backing directory automatically (`mkdir -p`) on the node if it does not exist. The path must be absolute and free of `..` segments — a relative path is rejected at admission, a `..` segment by the agent — and `directory` cannot be changed afterwards. Provisioning then fails only if the path is on a read-only filesystem or a non-directory component is in the way.
 - **Growth**: `size` can be increased on an existing entry — the backing file, the loop device and the Physical Volume grow in place, online, without unmounting anything. `directory` cannot be changed; to take capacity from a different filesystem, add a new entry under a new `name` (at most 32 entries).
-- **No shrink**: `size` cannot be lowered, and the edit is rejected at admission. Returning capacity means shrinking the Volume Group (`pvmove` + `vgreduce`), which can be impossible when the remaining Physical Volumes have no room and is destructive when it is not; the module does not shrink a Volume Group for block devices either. To reclaim space without changing sizes, use discard/TRIM (see below).
+- **No shrink**: `size` cannot be lowered, and the edit is rejected at admission. Returning capacity means shrinking the Volume Group (`pvmove` + `vgreduce`), which can be impossible when the remaining Physical Volumes have no room and is destructive when it is not; for block devices the module only removes a Physical Volume that is already empty (see [Extracting a BlockDevice resource from LVMVolumeGroup](./resources.html#extracting-a-blockdevice-resource-from-lvmvolumegroup)). To reclaim space without changing sizes, use discard/TRIM (see below).
 - **Removing an entry**: An entry that was never provisioned can be removed from the spec. Removing one that backs a live Physical Volume is reported as drift on the `VGConfigurationApplied` condition (reason `FileDeviceDrift`) and never acted upon. The Volume Group keeps working and stays `Ready` — the reason is treated as an acceptable state, so the report does not take the node's storage out of service. To resolve the drift, either restore the entry or remove the Physical Volume by hand: `pvmove` + `vgreduce` + `pvremove`.
 - **Preallocated only**: Files are created with `fallocate`, which preallocates space on the filesystem. The agent refuses to create or grow a backing file that would leave the filesystem with less free space than the `fileDevicesMinFreeSpacePercent` module setting reserves (15% by default), so a too-large entry is reported on the resource instead of pushing the node into `DiskPressure`. Lower the setting only when `fileDevicesDirectory` points at a disk nothing else on the node depends on.
 - **Minimum size**: Each file device must be at least 1Gi.

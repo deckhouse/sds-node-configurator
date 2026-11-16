@@ -61,6 +61,7 @@ type Commands interface {
 	ExtendLVFullVGSpace(vgName, lvName string) (string, error)
 	ResizePV(ctx context.Context, pvName string) (string, error)
 	RemoveVG(vgName string) (string, error)
+	ReduceVG(ctx context.Context, vgName, pvName string) (string, error)
 	RemovePV(pvNames []string) (string, error)
 	RemoveLV(vgName, lvName string) (string, error)
 	VGChangeAddTag(ctx context.Context, vGName, tag string) (string, error)
@@ -257,7 +258,7 @@ func (commands) GetVGLVs(vgName string) (data []internal.LVData, command string,
 // rollbackProvisionedFileDevices and pvView fall back or do nothing. See
 // silentExitPolicy for why silence still counts as a failure here.
 func (commands) GetAllPVs(ctx context.Context) (data []internal.PVData, command string, stdErr bytes.Buffer, err error) {
-	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json"}
+	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid,vg_systemid", "--units", "B", "--nosuffix", "--reportformat", "json"}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 
@@ -278,7 +279,7 @@ func (commands) GetAllPVs(ctx context.Context) (data []internal.PVData, command 
 func (commands) GetPV(pvName string) (pvData internal.PVData, command string, stdErr bytes.Buffer, err error) {
 	var outs bytes.Buffer
 	pvData = internal.PVData{}
-	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid", "--units", "B", "--nosuffix", "--reportformat", "json", pvName}
+	args := []string{"pvs", "-o", "+pv_used,pv_uuid,vg_tags,vg_uuid,vg_systemid", "--units", "B", "--nosuffix", "--reportformat", "json", pvName}
 	extendedArgs := lvmStaticExtendedArgs(args)
 	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
 	cmd.Stdout = &outs
@@ -721,6 +722,19 @@ func (commands) RemoveVG(vgName string) (string, error) {
 
 	if err := cmd.Run(); err != nil {
 		return cmd.String(), fmt.Errorf("unable to run cmd: %s, err: %w, stderr: %s", cmd.String(), err, stderr.String())
+	}
+
+	return cmd.String(), nil
+}
+
+func (commands) ReduceVG(ctx context.Context, vgName, pvName string) (string, error) {
+	args := []string{"vgreduce", vgName, pvName}
+	extendedArgs := lvmStaticExtendedArgs(args)
+	cmd := exec.Command(internal.NSENTERCmd, extendedArgs...)
+
+	_, stderr, runErr := runScanDetached(ctx, "vgreduce", cmd)
+	if err := errIfNotBenign(cmd.String(), runErr, stderr, benignAlwaysStdErr, silentExitIsFailure); err != nil {
+		return cmd.String(), err
 	}
 
 	return cmd.String(), nil

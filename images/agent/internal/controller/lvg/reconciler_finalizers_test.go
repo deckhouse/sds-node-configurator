@@ -118,7 +118,7 @@ func TestReconcileWaitsForForeignFinalizersBeforeDeleting(t *testing.T) {
 			return c.SubResource(subResource).Update(ctx, obj, opts...)
 		},
 	})
-	again := NewReconciler(counted, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mc, nil, ReconcilerConfig{NodeName: "test_node", CmdDeadlineDuration: 30 * time.Second})
+	again := NewReconciler(counted, UncachedReader{Reader: counted}, logger.NewNop(), monitoring.GetMetrics(""), cache.New(), mc, nil, ReconcilerConfig{NodeName: "test_node", CmdDeadlineDuration: 30 * time.Second})
 	_, err = again.Reconcile(ctx, controller.ReconcileRequest[*v1alpha1.LVMVolumeGroup]{Object: got})
 	require.NoError(t, err)
 	assert.Zero(t, calls)
