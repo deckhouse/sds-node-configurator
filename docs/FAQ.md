@@ -824,7 +824,44 @@ Limitations:
 
 - The rule by target covers LUNs of iSCSI and Fibre Channel targets only; NVMe-oF namespaces carry no such label.
 - When a LUN is reached through several targets, the label names the smallest of them, so a driver has to list every target port (for Fibre Channel, every WWPN of the storage system zoned to the node) to hide such LUNs reliably.
-- The filters decide which BlockDevice resources exist, not what the node itself does: an LVM command run on the node by hand still sees every device.
+- The filters decide which BlockDevice resources exist, not what the node itself does: an LVM command run on the node by hand still sees every device. What the node's own LVM activates by itself is described in ["Which Volume Groups does the node activate on its own?"](#which-volume-groups-does-the-node-activate-on-its-own).
+
+## Which Volume Groups does the node activate on its own?
+
+The node's own LVM activates Logical Volumes by itself in two cases: when the devices of a Volume Group appear (udev runs `pvscan` or `vgchange` with `-aay`) and while the node boots (`vgchange -aay`; on Debian, Ubuntu and Astra Linux the initramfs activates the root with `-aay` too). This is autoactivation. A nested cluster keeps its own LVM on its disks, and when such a disk is visible on the node as a block device (an iSCSI or Fibre Channel LUN, a multipath map, an RBD or DRBD device), autoactivation used to activate the guest's Volume Group on the node: the guest's Logical Volumes appeared on the node as device-mapper devices that hold the disk open.
+
+The module limits autoactivation with the `activation/auto_activation_volume_list` setting in `/etc/lvm/lvm.conf` of every node that has the distribution's lvm2 installed. The setting is written by the module's NodeGroupConfiguration `sds-node-configurator-host-lvm-autoactivation.sh` each time bashible applies it, and the list holds:
+
+- `@storage.deckhouse.io/enabled=true`: every Volume Group with the module's tag, that is, every Volume Group of an [LVMVolumeGroup](./cr.html#lvmvolumegroup). The agent activates these Volume Groups itself as well.
+- The Volume Groups the node boots from: those under the root file system, under every other mounted file system except the ones kubelet mounts under `/var/lib/kubelet`, under active swap, under the entries of `/etc/fstab`, under the `root=`, `resume=`, `rd.lvm.vg=` and `rd.lvm.lv=` kernel parameters and under `RESUME` in `/etc/initramfs-tools/conf.d/resume`.
+
+A Volume Group that is in neither is no longer autoactivated. Activation by an explicit command (`vgchange -ay`, `lvchange -ay`) is not affected.
+
+To see the list on a node:
+
+```shell
+lvmconfig activation/auto_activation_volume_list
+```
+
+How the list is kept:
+
+- The module only adds entries. Entries already in the list stay, including those of a list the administrator set before; the module never removes a Volume Group from it.
+- When the module cannot tell which device the root file system is on, it does not change `lvm.conf` and writes the reason to the bashible log of the node (`journalctl -u bashible`, lines starting with `lvm autoactivation:`).
+- The initramfs gets a copy of `lvm.conf` the next time it is regenerated, for example when the kernel is updated; the module does not regenerate it. On Debian, Ubuntu and Astra Linux (initramfs-tools) the initramfs activates the root Logical Volume with `-aay`, which reads the list, and the Volume Group of the root is always in it. The initramfs of RHEL, Rocky Linux and RED OS (dracut) and of ALT Linux (make-initrd) activates the root with `-ay`, to which the list does not apply.
+- A Volume Group is matched by name. A guest Volume Group with the same name as one in the list (for example, that of a guest installed from the same image as the node) matches the list just as the node's own does.
+
+### Volume Groups created on the node by hand
+
+A Volume Group created on the node outside the module, whose Logical Volumes are not mounted and not listed in `/etc/fstab` when bashible applies the configuration, is no longer activated at boot or when its devices appear. Its Logical Volumes stay inactive after a reboot (`lvs` shows no `a` in the fifth attribute character), and a file system on them listed in `/etc/fstab` without `nofail` that was added after bashible last applied the configuration stops the boot: systemd waits for the device, and when the wait times out, the node enters emergency mode.
+
+Do one of the following before rebooting the node:
+
+- Add the Volume Group to the list. Edit `/etc/lvm/lvm.conf` and add the name to `auto_activation_volume_list` in the `activation` section, for example `auto_activation_volume_list=["vg-system","@storage.deckhouse.io/enabled=true","myvg"]`. The module keeps the entry.
+- Hand the Volume Group over to the module with the tag `storage.deckhouse.io/enabled=true` (see ["How do I transfer control of an existing LVM Volume Group to the controller?"](#how-do-i-transfer-control-of-an-existing-lvm-volume-group-to-the-controller)). The tag puts the Volume Group into the list, but the module also creates an [LVMVolumeGroup](./cr.html#lvmvolumegroup) for it, so use it only for a Volume Group the module is meant to manage.
+
+To bring up such a Volume Group now: `vgchange -ay <vg>`.
+
+A guest's Volume Group that the node activated before the module was updated stays active until it is deactivated or the node reboots. To remove its mappings, see ["A nested cluster's Logical Volumes are still active on the hypervisor after the upgrade. What do I do with them?"](#a-nested-clusters-logical-volumes-are-still-active-on-the-hypervisor-after-the-upgrade-what-do-i-do-with-them).
 
 ## How do I disable the module?
 
@@ -867,4 +904,4 @@ What remains after the module is disabled:
 - BlockDevice resources. They are not deleted on disabling. While the module runs, a BlockDevice is deleted only after its device disappears from the node, or after its node is deleted or stops running the agent (see `missingBlockDeviceRetentionHours`); one deleted by hand for a device that is still there is created again.
 - Volume Groups whose LVMVolumeGroup was not deleted before disabling. They keep working as plain LVM Volume Groups. If their LVMVolumeGroup resources are deleted while the module is disabled, the Volume Groups the module created are not imported again after the module is re-enabled, see [Why is a Volume Group with the module's tags not imported, and how do I adopt it?](#why-is-a-volume-group-with-the-modules-tags-not-imported-and-how-do-i-adopt-it).
 - Volume Groups on file-backed devices are not activated after a node reboot: the agent that attached the loop devices is gone.
-- The module's files under `/var/lib/deckhouse/sds` and the loop device filter in `/etc/lvm/lvm.conf` on the nodes.
+- The module's files under `/var/lib/deckhouse/sds`, and the loop device filter and the `activation/auto_activation_volume_list` setting in `/etc/lvm/lvm.conf` on the nodes. The list keeps limiting autoactivation to the Volume Groups in it and to those with the module's tag; remove the setting from `lvm.conf` to have the node autoactivate every Volume Group again (see ["Which Volume Groups does the node activate on its own?"](#which-volume-groups-does-the-node-activate-on-its-own)).
